@@ -1,0 +1,129 @@
+import { randomUUID } from 'crypto';
+import { Inject, Injectable, Logger } from '@nestjs/common';
+import { JwtService } from '../../../auth/jwt.service';
+import { TokenGenerator } from '../../../auth/token-generator';
+import { User } from '../../domain/entities/user';
+import {
+  InvalidTokenError,
+  UnauthorizedError,
+} from '../../domain/errors/errors';
+import { CLOCK } from '../../ports/tokens';
+import type { ClockPort } from '../../ports/clock.port';
+import {
+  REFRESH_TOKEN_REPOSITORY,
+  USER_REPOSITORY,
+} from '../../repositories/tokens';
+import type { RefreshTokenRepository } from '../../repositories/refresh-token.repository';
+import type { UserRepository } from '../../repositories/user.repository';
+
+export interface IssuedSession {
+  accessToken: string;
+  expiresIn: number;
+  refreshToken: string;
+  refreshExpiresAt: Date;
+  /** Row id of the stored token, so a rotation can point at its successor. */
+  refreshTokenId: string;
+}
+
+export interface SessionContext {
+  userAgent: string | null;
+  ip: string | null;
+}
+
+/**
+ * Issues and rotates sessions.
+ *
+ * Refresh tokens rotate on every use and are stored hashed. Presenting a token
+ * that has already been rotated means someone is replaying a stolen copy, so
+ * the entire family is revoked rather than just that token — the legitimate
+ * user gets logged out too, which is the correct trade when a token has leaked
+ * (technical design §3.1).
+ */
+@Injectable()
+export class SessionService {
+  private readonly logger = new Logger(SessionService.name);
+
+  constructor(
+    @Inject(REFRESH_TOKEN_REPOSITORY)
+    private readonly refreshTokens: RefreshTokenRepository,
+    @Inject(USER_REPOSITORY) private readonly users: UserRepository,
+    @Inject(CLOCK) private readonly clock: ClockPort,
+    private readonly jwt: JwtService,
+    private readonly tokens: TokenGenerator,
+  ) {}
+
+  async issue(
+    user: User,
+    context: SessionContext,
+    familyId?: string,
+  ): Promise<IssuedSession> {
+    const { token: accessToken, expiresIn } = this.jwt.signAccessToken({
+      sub: user.id,
+      email: user.email,
+      ver: user.props.tokenVersion,
+    });
+
+    const refreshToken = this.tokens.generate();
+    const refreshExpiresAt = new Date(
+      this.clock.now().getTime() +
+        this.jwt.refreshTtlDays() * 24 * 60 * 60 * 1000,
+    );
+
+    const stored = await this.refreshTokens.issue({
+      userId: user.id,
+      familyId: familyId ?? randomUUID(),
+      tokenHash: this.tokens.hash(refreshToken),
+      expiresAt: refreshExpiresAt,
+      userAgent: context.userAgent,
+      ip: context.ip,
+    });
+
+    return {
+      accessToken,
+      expiresIn,
+      refreshToken,
+      refreshExpiresAt,
+      refreshTokenId: stored.id,
+    };
+  }
+
+  async rotate(
+    presented: string,
+    context: SessionContext,
+  ): Promise<IssuedSession> {
+    const now = this.clock.now();
+    const stored = await this.refreshTokens.findByHash(
+      this.tokens.hash(presented),
+    );
+    if (!stored) throw new InvalidTokenError('That session is no longer valid');
+
+    if (stored.revokedAt) {
+      // Already rotated once — this is a replay. Burn the family.
+      this.logger.warn(
+        `Refresh token reuse detected for user ${stored.userId}; revoking family`,
+      );
+      await this.refreshTokens.revokeFamily(stored.familyId, now);
+      throw new UnauthorizedError(
+        'That session was ended for security reasons',
+      );
+    }
+
+    if (stored.expiresAt < now)
+      throw new InvalidTokenError('That session has expired');
+
+    const user = await this.users.findById(stored.userId);
+    if (!user || !user.canLogin()) throw new UnauthorizedError();
+
+    const next = await this.issue(user, context, stored.familyId);
+    await this.refreshTokens.rotate(stored.id, next.refreshTokenId, now);
+    return next;
+  }
+
+  async revoke(presented: string): Promise<void> {
+    const stored = await this.refreshTokens.findByHash(
+      this.tokens.hash(presented),
+    );
+    if (stored)
+      await this.refreshTokens.revokeFamily(stored.familyId, this.clock.now());
+  }
+}

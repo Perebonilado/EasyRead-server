@@ -6,17 +6,38 @@ import {
   Inject,
   Param,
   Post,
+  Query,
   Res,
 } from '@nestjs/common';
 import type { Response } from 'express';
 import { Type } from 'class-transformer';
-import { IsIn, IsInt, Min } from 'class-validator';
-import type { VoiceSessionResponse } from '../../contracts';
 import {
+  IsIn,
+  IsInt,
+  IsNumber,
+  IsOptional,
+  IsString,
+  Length,
+  Max,
+  Min,
+} from 'class-validator';
+import type {
+  AssessmentKind,
+  DiagramResponse,
+  MasteryResponse,
+  VoiceMode,
+  VoiceSessionResponse,
+} from '../../contracts';
+import {
+  DrawDiagramHandler,
   PageAudioHandler,
   StartVoiceSessionHandler,
   type AudioLevel,
 } from '../../business/handlers/documents/voice.handlers';
+import {
+  GetMasteryHandler,
+  RecordAssessmentHandler,
+} from '../../business/handlers/documents/learning.handlers';
 import { ValidationError } from '../../business/domain/errors/errors';
 import { STORAGE } from '../../business/ports/tokens';
 import type { StoragePort } from '../../business/ports/storage.port';
@@ -29,16 +50,40 @@ class VoiceSessionDto {
   @IsInt()
   @Min(1)
   pageNumber!: number;
+
+  @IsOptional()
+  @IsIn(['chat', 'teach'])
+  mode?: VoiceMode;
+
+  @IsOptional()
+  @IsString()
+  @Length(1, 40)
+  tutorId?: string;
 }
 
-class PageAudioParams {
-  @IsIn(AUDIO_LEVELS)
-  level!: AudioLevel;
+class DiagramDto {
+  @IsString()
+  @Length(3, 300)
+  description!: string;
+}
+
+class AssessmentDto {
+  @IsOptional()
+  @IsString()
+  @Length(1, 64)
+  topicId?: string;
+
+  @IsIn(['mcq', 'flashcard', 'verbal'])
+  kind!: AssessmentKind;
 
   @Type(() => Number)
-  @IsInt()
-  @Min(1)
-  page!: number;
+  @IsNumber()
+  @Min(0)
+  @Max(1)
+  score!: number;
+
+  @IsOptional()
+  payload?: unknown;
 }
 
 @Controller('documents/:id')
@@ -46,6 +91,9 @@ export class VoiceController {
   constructor(
     private readonly pageAudio: PageAudioHandler,
     private readonly startSession: StartVoiceSessionHandler,
+    private readonly drawDiagram: DrawDiagramHandler,
+    private readonly recordAssessment: RecordAssessmentHandler,
+    private readonly getMastery: GetMasteryHandler,
     @Inject(STORAGE) private readonly storage: StoragePort,
   ) {}
 
@@ -58,18 +106,25 @@ export class VoiceController {
   async audio(
     @CurrentUser('id') userId: string,
     @Param('id') documentId: string,
-    @Param() params: PageAudioParams,
+    @Param('level') level: string,
+    @Param('page') page: string,
     @Res() response: Response,
   ): Promise<void> {
-    if (!AUDIO_LEVELS.includes(params.level)) {
+    // Validated by hand: a whole-object @Param() DTO would also receive the
+    // route's :id and be rejected by the global whitelist.
+    if (!AUDIO_LEVELS.includes(level as AudioLevel)) {
       throw new ValidationError('Unknown audio level');
+    }
+    const pageNumber = Number(page);
+    if (!Number.isInteger(pageNumber) || pageNumber < 1) {
+      throw new ValidationError('That page number is not valid');
     }
 
     const { data } = await this.pageAudio.handle({
       userId,
       documentId,
-      level: params.level,
-      pageNumber: params.page,
+      level: level as AudioLevel,
+      pageNumber,
     });
 
     const { stream, size } = await this.storage.stream(data.fileRef);
@@ -93,6 +148,58 @@ export class VoiceController {
       userId,
       documentId,
       pageNumber: body.pageNumber,
+      mode: body.mode ?? 'chat',
+      tutorId: body.tutorId,
+    });
+    return result.data;
+  }
+
+  /** A grounded flowchart for the lesson board (teach mode's pencil). */
+  @Post('diagram')
+  @HttpCode(201)
+  async diagram(
+    @CurrentUser('id') userId: string,
+    @Param('id') documentId: string,
+    @Body() body: DiagramDto,
+  ): Promise<DiagramResponse> {
+    const result = await this.drawDiagram.handle({
+      userId,
+      documentId,
+      description: body.description,
+    });
+    return result.data;
+  }
+
+  /** One answered quiz, flashcard or tutor rating — the loop's raw signal. */
+  @Post('assessments')
+  @HttpCode(201)
+  async assessment(
+    @CurrentUser('id') userId: string,
+    @Param('id') documentId: string,
+    @Body() body: AssessmentDto,
+  ): Promise<{ profileAdjusted: boolean }> {
+    const result = await this.recordAssessment.handle({
+      userId,
+      documentId,
+      topicId: body.topicId ?? null,
+      kind: body.kind,
+      score: body.score,
+      payload: body.payload,
+    });
+    return result.data;
+  }
+
+  /** Per-topic understanding, plus a tutor worth trying for the revisit. */
+  @Get('mastery')
+  async mastery(
+    @CurrentUser('id') userId: string,
+    @Param('id') documentId: string,
+    @Query('tutor') tutor?: string,
+  ): Promise<MasteryResponse> {
+    const result = await this.getMastery.handle({
+      userId,
+      documentId,
+      currentTutorId: tutor,
     });
     return result.data;
   }

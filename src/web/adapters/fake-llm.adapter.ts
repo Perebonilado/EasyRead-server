@@ -1,3 +1,6 @@
+/* eslint-disable @typescript-eslint/require-await --
+ * Every method implements the async LlmGatewayPort with a synchronous body;
+ * that is the whole point of a deterministic offline stand-in. */
 import { createHash } from 'crypto';
 import { Injectable } from '@nestjs/common';
 import type { Block } from '../../contracts';
@@ -200,6 +203,34 @@ export class FakeLlmAdapter implements LlmGatewayPort {
     const started = Date.now();
     const value = `${selection} diagram`;
     return { value, usage: this.usage(started, selection.length / 4, 4) };
+  }
+
+  async drawDiagram({
+    description,
+  }: {
+    description: string;
+    context: string;
+    summary: string | null;
+  }): Promise<LlmResult<{ title: string; mermaid: string }>> {
+    const started = Date.now();
+    // A real chart shape from the description's own words, so the render path
+    // can be exercised offline.
+    const words = description.split(/\s+/).filter(Boolean).slice(0, 6);
+    const nodes = words.length ? words : ['Start', 'Middle', 'End'];
+    const lines = ['flowchart TD'];
+    for (let i = 0; i < nodes.length - 1; i++) {
+      lines.push(`  n${i}["${nodes[i]}"] --> n${i + 1}["${nodes[i + 1]}"]`);
+    }
+    if (nodes.length === 1) lines.push(`  n0["${nodes[0]}"]`);
+    return {
+      value: { title: description.slice(0, 60), mermaid: lines.join('\n') },
+      usage: {
+        model: 'fake',
+        tokensIn: description.length,
+        tokensOut: 0,
+        latencyMs: Date.now() - started,
+      },
+    };
   }
 
   /**

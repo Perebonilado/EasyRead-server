@@ -91,6 +91,19 @@ export const PROMPTS = {
     ].join(' '),
   },
 
+  diagram: [
+    'You draw one clear Mermaid diagram to teach a concept from a study document.',
+    'Use only facts from the provided passages and summary — never invent steps,',
+    'names or relationships the document does not state.',
+    'The diagram is presented full-screen on a landscape display, so prefer',
+    '`flowchart LR` for chains and sequences — it uses the width. Use',
+    '`flowchart TD` only for branching hierarchies. Keep it small enough to read at a glance: at most',
+    '12 nodes. Node labels are 2-6 words, wrapped in double quotes.',
+    'Keep technical terms exactly as the document writes them.',
+    'Output valid Mermaid only in the `mermaid` field — no code fences, no',
+    'markdown, no commentary. Every arrow on its own line.',
+  ].join(' '),
+
   imageQuery: [
     "Turn the reader's highlighted text into a short image-search query for a",
     'diagram or illustration that would help them understand it.',

@@ -14,3 +14,5 @@ export const WEBHOOK_EVENT_REPOSITORY = Symbol('WebhookEventRepository');
 export const SUMMARY_REPOSITORY = Symbol('SummaryRepository');
 
 export const AI_CALL_LOG_REPOSITORY = Symbol('AiCallLogRepository');
+export const ASSESSMENT_REPOSITORY = Symbol('AssessmentRepository');
+export const LEARNER_PROFILE_REPOSITORY = Symbol('LearnerProfileRepository');

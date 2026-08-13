@@ -23,8 +23,14 @@ const id: ModelAttributeColumnOptions = {
   primaryKey: true,
   allowNull: false,
 };
-const createdAt: ModelAttributeColumnOptions = { type: DataTypes.DATE, allowNull: false };
-const updatedAt: ModelAttributeColumnOptions = { type: DataTypes.DATE, allowNull: false };
+const createdAt: ModelAttributeColumnOptions = {
+  type: DataTypes.DATE,
+  allowNull: false,
+};
+const updatedAt: ModelAttributeColumnOptions = {
+  type: DataTypes.DATE,
+  allowNull: false,
+};
 const userFk = (allowNull = false): ModelAttributeColumnOptions => ({
   type: DataTypes.UUID,
   allowNull,
@@ -61,15 +67,23 @@ export const up: Migration = async ({ context: q }) => {
       reset_token_hash: { type: DataTypes.STRING(255), allowNull: true },
       reset_token_expires: { type: DataTypes.DATE, allowNull: true },
       /** Bumped to revoke every outstanding refresh-token family at once. */
-      token_version: { type: DataTypes.INTEGER, allowNull: false, defaultValue: 0 },
+      token_version: {
+        type: DataTypes.INTEGER,
+        allowNull: false,
+        defaultValue: 0,
+      },
       deleted_at: { type: DataTypes.DATE, allowNull: true },
       created_at: createdAt,
       updated_at: updatedAt,
     },
     TABLE_OPTS,
   );
-  await q.addIndex('users', ['verification_token_hash'], { name: 'users_verification_token' });
-  await q.addIndex('users', ['reset_token_hash'], { name: 'users_reset_token' });
+  await q.addIndex('users', ['verification_token_hash'], {
+    name: 'users_verification_token',
+  });
+  await q.addIndex('users', ['reset_token_hash'], {
+    name: 'users_reset_token',
+  });
 
   /**
    * Refresh tokens are persisted so they can be rotated and, crucially, so
@@ -81,7 +95,11 @@ export const up: Migration = async ({ context: q }) => {
     {
       id,
       user_id: userFk(),
-      token_hash: { type: DataTypes.STRING(255), allowNull: false, unique: true },
+      token_hash: {
+        type: DataTypes.STRING(255),
+        allowNull: false,
+        unique: true,
+      },
       family_id: { type: DataTypes.UUID, allowNull: false },
       expires_at: { type: DataTypes.DATE, allowNull: false },
       revoked_at: { type: DataTypes.DATE, allowNull: true },
@@ -93,8 +111,12 @@ export const up: Migration = async ({ context: q }) => {
     },
     TABLE_OPTS,
   );
-  await q.addIndex('refresh_tokens', ['family_id'], { name: 'refresh_tokens_family' });
-  await q.addIndex('refresh_tokens', ['user_id'], { name: 'refresh_tokens_user' });
+  await q.addIndex('refresh_tokens', ['family_id'], {
+    name: 'refresh_tokens_family',
+  });
+  await q.addIndex('refresh_tokens', ['user_id'], {
+    name: 'refresh_tokens_user',
+  });
 
   // ── Billing ────────────────────────────────────────────────────────────────
   await q.createTable(
@@ -102,12 +124,22 @@ export const up: Migration = async ({ context: q }) => {
     {
       id,
       user_id: { ...userFk(), unique: true },
-      provider: { type: DataTypes.ENUM('paystack'), allowNull: false, defaultValue: 'paystack' },
+      provider: {
+        type: DataTypes.ENUM('paystack'),
+        allowNull: false,
+        defaultValue: 'paystack',
+      },
       plan_code: { type: DataTypes.STRING(64), allowNull: false },
       subscription_code: { type: DataTypes.STRING(128), allowNull: true },
       customer_code: { type: DataTypes.STRING(128), allowNull: true },
       status: {
-        type: DataTypes.ENUM('active', 'non_renewing', 'attention', 'cancelled', 'expired'),
+        type: DataTypes.ENUM(
+          'active',
+          'non_renewing',
+          'attention',
+          'cancelled',
+          'expired',
+        ),
         allowNull: false,
       },
       current_period_end: { type: DataTypes.DATE, allowNull: true },
@@ -131,7 +163,11 @@ export const up: Migration = async ({ context: q }) => {
       /** 'YYYY-MM' for monthly metrics, 'YYYY-MM-DD' for daily ones. */
       period: { type: DataTypes.STRING(16), allowNull: false },
       metric: {
-        type: DataTypes.ENUM('documents_uploaded', 'easiest_conversions', 'highlight_actions'),
+        type: DataTypes.ENUM(
+          'documents_uploaded',
+          'easiest_conversions',
+          'highlight_actions',
+        ),
         allowNull: false,
       },
       count: { type: DataTypes.INTEGER, allowNull: false, defaultValue: 0 },
@@ -185,7 +221,11 @@ export const up: Migration = async ({ context: q }) => {
       canonical_pdf_ref: { type: DataTypes.STRING(512), allowNull: true },
       thumbnail_ref: { type: DataTypes.STRING(512), allowNull: true },
       /** Bumped if reprocessing ever changes content; stale jobs exit early. */
-      content_version: { type: DataTypes.INTEGER, allowNull: false, defaultValue: 1 },
+      content_version: {
+        type: DataTypes.INTEGER,
+        allowNull: false,
+        defaultValue: 1,
+      },
       /** Set when >60% of pages extract empty — scanned PDFs, no OCR in v1. */
       simplification_unavailable: {
         type: DataTypes.BOOLEAN,
@@ -211,8 +251,16 @@ export const up: Migration = async ({ context: q }) => {
       document_id: documentFk(),
       page_number: { type: DataTypes.INTEGER, allowNull: false },
       text: { type: DataTypes.TEXT('long'), allowNull: false },
-      char_count: { type: DataTypes.INTEGER, allowNull: false, defaultValue: 0 },
-      is_empty: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: false },
+      char_count: {
+        type: DataTypes.INTEGER,
+        allowNull: false,
+        defaultValue: 0,
+      },
+      is_empty: {
+        type: DataTypes.BOOLEAN,
+        allowNull: false,
+        defaultValue: false,
+      },
       created_at: createdAt,
       updated_at: updatedAt,
     },
@@ -260,10 +308,14 @@ export const up: Migration = async ({ context: q }) => {
     },
     TABLE_OPTS,
   );
-  await q.addIndex('simplified_pages', ['document_id', 'page_number', 'level'], {
-    name: 'simplified_pages_unique',
-    unique: true,
-  });
+  await q.addIndex(
+    'simplified_pages',
+    ['document_id', 'page_number', 'level'],
+    {
+      name: 'simplified_pages_unique',
+      unique: true,
+    },
+  );
   // Progress queries: "how many pages of this level are done?"
   await q.addIndex('simplified_pages', ['document_id', 'level', 'status'], {
     name: 'simplified_pages_progress',
@@ -280,13 +332,18 @@ export const up: Migration = async ({ context: q }) => {
       end_page: { type: DataTypes.INTEGER, allowNull: false },
       order_index: { type: DataTypes.INTEGER, allowNull: false },
       /** Which extractor produced it, for later quality comparison. */
-      source: { type: DataTypes.ENUM('outline_pass', 'page_tagging'), allowNull: false },
+      source: {
+        type: DataTypes.ENUM('outline_pass', 'page_tagging'),
+        allowNull: false,
+      },
       created_at: createdAt,
       updated_at: updatedAt,
     },
     TABLE_OPTS,
   );
-  await q.addIndex('topics', ['document_id', 'order_index'], { name: 'topics_order' });
+  await q.addIndex('topics', ['document_id', 'order_index'], {
+    name: 'topics_order',
+  });
 
   await q.createTable(
     'topic_read_states',
@@ -318,7 +375,11 @@ export const up: Migration = async ({ context: q }) => {
       document_id: documentFk(),
       user_id: userFk(),
       last_page: { type: DataTypes.INTEGER, allowNull: false, defaultValue: 1 },
-      furthest_page: { type: DataTypes.INTEGER, allowNull: false, defaultValue: 1 },
+      furthest_page: {
+        type: DataTypes.INTEGER,
+        allowNull: false,
+        defaultValue: 1,
+      },
       level: {
         type: DataTypes.ENUM('original', 'standard', 'easiest'),
         allowNull: false,
@@ -342,7 +403,11 @@ export const up: Migration = async ({ context: q }) => {
       level: { type: DataTypes.ENUM('standard', 'easiest'), allowNull: false },
       content_version: { type: DataTypes.INTEGER, allowNull: false },
       file_ref: { type: DataTypes.STRING(512), allowNull: true },
-      watermarked: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: false },
+      watermarked: {
+        type: DataTypes.BOOLEAN,
+        allowNull: false,
+        defaultValue: false,
+      },
       status: {
         type: DataTypes.ENUM('processing', 'done', 'failed'),
         allowNull: false,
@@ -378,9 +443,13 @@ export const up: Migration = async ({ context: q }) => {
     },
     TABLE_OPTS,
   );
-  await q.addIndex('highlight_lookups', ['document_id', 'user_id', 'created_at'], {
-    name: 'highlight_lookups_history',
-  });
+  await q.addIndex(
+    'highlight_lookups',
+    ['document_id', 'user_id', 'created_at'],
+    {
+      name: 'highlight_lookups_history',
+    },
+  );
 
   // ── Pipeline bookkeeping ───────────────────────────────────────────────────
   /**
@@ -445,10 +514,14 @@ export const up: Migration = async ({ context: q }) => {
     },
     TABLE_OPTS,
   );
-  await q.addIndex('document_chunks', ['document_id', 'page_number', 'chunk_index'], {
-    name: 'document_chunks_unique',
-    unique: true,
-  });
+  await q.addIndex(
+    'document_chunks',
+    ['document_id', 'page_number', 'chunk_index'],
+    {
+      name: 'document_chunks_unique',
+      unique: true,
+    },
+  );
 
   /** Per-call ledger — the source for cost-per-document (technical design §6.2). */
   await q.createTable(
@@ -470,7 +543,9 @@ export const up: Migration = async ({ context: q }) => {
     },
     TABLE_OPTS,
   );
-  await q.addIndex('ai_call_logs', ['document_id'], { name: 'ai_call_logs_document' });
+  await q.addIndex('ai_call_logs', ['document_id'], {
+    name: 'ai_call_logs_document',
+  });
 };
 
 export const down: Migration = async ({ context: q }) => {

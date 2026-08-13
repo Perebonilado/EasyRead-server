@@ -3,6 +3,7 @@ import { ConfigService } from '@nestjs/config';
 import type {
   RealtimePort,
   RealtimeSession,
+  RealtimeTool,
   SpeechPort,
 } from '../../../business/ports/voice.port';
 
@@ -109,11 +110,16 @@ export class OpenAiRealtimeAdapter implements RealtimePort {
 
   async createSession({
     instructions,
+    tools,
+    voice: voiceOverride,
   }: {
     instructions: string;
+    tools?: RealtimeTool[];
+    voice?: string;
   }): Promise<RealtimeSession> {
     const model = this.config.get<string>('AI_REALTIME_MODEL', 'gpt-realtime');
-    const voice = this.config.get<string>('AI_REALTIME_VOICE', 'marin');
+    const voice =
+      voiceOverride ?? this.config.get<string>('AI_REALTIME_VOICE', 'marin');
 
     const response = await fetch(
       'https://api.openai.com/v1/realtime/client_secrets',
@@ -128,7 +134,25 @@ export class OpenAiRealtimeAdapter implements RealtimePort {
             type: 'realtime',
             model,
             instructions,
-            audio: { output: { voice } },
+            ...(tools?.length
+              ? {
+                  tools: tools.map((tool) => ({
+                    type: 'function',
+                    name: tool.name,
+                    description: tool.description,
+                    parameters: tool.parameters,
+                  })),
+                  tool_choice: 'auto',
+                }
+              : {}),
+            audio: {
+              // Transcribing the student's speech lets the panel show both
+              // sides of the conversation, not just the tutor's.
+              input: {
+                transcription: { model: 'gpt-4o-mini-transcribe' },
+              },
+              output: { voice },
+            },
           },
         }),
       },

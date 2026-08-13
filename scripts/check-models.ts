@@ -24,7 +24,10 @@ const SUMMARY =
   'A human physiology lecture on the posterior pituitary and the thyroid gland, ' +
   'for undergraduate medical students.';
 
-const rule = (title: string) => console.log(`\n\x1b[1m── ${title} ${'─'.repeat(Math.max(0, 60 - title.length))}\x1b[0m`);
+const rule = (title: string) =>
+  console.log(
+    `\n\x1b[1m── ${title} ${'─'.repeat(Math.max(0, 60 - title.length))}\x1b[0m`,
+  );
 
 async function main() {
   const adapter = new AiSdkLlmAdapter(new ConfigService(process.env));
@@ -32,7 +35,15 @@ async function main() {
 
   let spentIn = 0;
   let spentOut = 0;
-  const account = (label: string, usage: { model: string; tokensIn: number; tokensOut: number; latencyMs: number }) => {
+  const account = (
+    label: string,
+    usage: {
+      model: string;
+      tokensIn: number;
+      tokensOut: number;
+      latencyMs: number;
+    },
+  ) => {
     spentIn += usage.tokensIn;
     spentOut += usage.tokensOut;
     console.log(
@@ -41,7 +52,10 @@ async function main() {
   };
 
   rule('summarize');
-  const summary = await adapter.summarize({ title: 'Posterior pituitary and thyroid gland', text: PAGE });
+  const summary = await adapter.summarize({
+    title: 'Posterior pituitary and thyroid gland',
+    text: PAGE,
+  });
   console.log(summary.value);
   account('summarize', summary.usage);
 
@@ -53,7 +67,12 @@ async function main() {
     pageNumber: 12,
   });
   for (const block of simplified.value) {
-    const prefix = block.type === 'bullet' ? '  •' : block.type === 'paragraph' ? '   ' : '  #';
+    const prefix =
+      block.type === 'bullet'
+        ? '  •'
+        : block.type === 'paragraph'
+          ? '   '
+          : '  #';
     console.log(`${prefix} ${block.text}`);
   }
   account('simplify_standard', simplified.usage);
@@ -66,7 +85,12 @@ async function main() {
     pageNumber: 12,
   });
   for (const block of easiest.value) {
-    const prefix = block.type === 'bullet' ? '  •' : block.type === 'paragraph' ? '   ' : '  #';
+    const prefix =
+      block.type === 'bullet'
+        ? '  •'
+        : block.type === 'paragraph'
+          ? '   '
+          : '  #';
     console.log(`${prefix} ${block.text}`);
   }
   account('simplify_easiest', easiest.usage);
@@ -84,8 +108,12 @@ async function main() {
   account('highlight_explain', answer.usage);
 
   rule('embeddings');
-  const embedded = await adapter.embed({ texts: ['iodide trapping', 'thyroid peroxidase'] });
-  console.log(`  ${embedded.value.length} vectors, ${embedded.value[0].length} dimensions`);
+  const embedded = await adapter.embed({
+    texts: ['iodide trapping', 'thyroid peroxidase'],
+  });
+  console.log(
+    `  ${embedded.value.length} vectors, ${embedded.value[0].length} dimensions`,
+  );
   account('embed', embedded.usage);
 
   rule('total');
@@ -94,8 +122,12 @@ async function main() {
   // The two things most worth eyeballing: did it keep the technical terms, and
   // did it invent anything the page never said?
   const text = simplified.value.map((block) => block.text).join(' ');
-  const kept = ['MIT', 'DIT', 'T3', 'T4', 'thyroglobulin'].filter((term) => text.includes(term));
-  console.log(`  technical terms preserved: ${kept.join(', ') || '(none — check the prompt)'}`);
+  const kept = ['MIT', 'DIT', 'T3', 'T4', 'thyroglobulin'].filter((term) =>
+    text.includes(term),
+  );
+  console.log(
+    `  technical terms preserved: ${kept.join(', ') || '(none — check the prompt)'}`,
+  );
 }
 
 main().catch((error: Error) => {

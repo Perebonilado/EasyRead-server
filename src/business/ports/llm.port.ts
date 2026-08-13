@@ -10,6 +10,7 @@ export type LlmTask =
   | 'highlight_simplify'
   | 'highlight_define'
   | 'visualize_query'
+  | 'diagram'
   | 'embed';
 
 export interface LlmUsage {
@@ -64,6 +65,13 @@ export interface LlmGatewayPort {
     selection: string;
     summary: string | null;
   }): Promise<LlmResult<string>>;
+
+  /** A Mermaid diagram of a concept, grounded in passages from the document. */
+  drawDiagram(input: {
+    description: string;
+    context: string;
+    summary: string | null;
+  }): Promise<LlmResult<{ title: string; mermaid: string }>>;
 
   embed(input: { texts: string[] }): Promise<LlmResult<number[][]>>;
 }

@@ -1,6 +1,8 @@
 import type { Provider } from '@nestjs/common';
 import {
   AI_CALL_LOG_REPOSITORY,
+  ASSESSMENT_REPOSITORY,
+  LEARNER_PROFILE_REPOSITORY,
   DOCUMENT_PAGE_REPOSITORY,
   DOCUMENT_REPOSITORY,
   EXPORT_REPOSITORY,
@@ -17,6 +19,10 @@ import {
   WEBHOOK_EVENT_REPOSITORY,
 } from '../../business/repositories/tokens';
 import { SequelizeAiCallLogRepository } from '../repositories/sequelize-ai-call-log.repository';
+import {
+  SequelizeAssessmentRepository,
+  SequelizeLearnerProfileRepository,
+} from '../repositories/sequelize-learning.repositories';
 import {
   SequelizeSubscriptionRepository,
   SequelizeUsageRepository,
@@ -80,4 +86,9 @@ export const repositoryProviders: Provider[] = [
     useClass: SequelizeWebhookEventRepository,
   },
   { provide: AI_CALL_LOG_REPOSITORY, useClass: SequelizeAiCallLogRepository },
+  { provide: ASSESSMENT_REPOSITORY, useClass: SequelizeAssessmentRepository },
+  {
+    provide: LEARNER_PROFILE_REPOSITORY,
+    useClass: SequelizeLearnerProfileRepository,
+  },
 ];

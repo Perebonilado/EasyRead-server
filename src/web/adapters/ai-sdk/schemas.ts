@@ -31,3 +31,9 @@ export const topicsSchema = z.object({
     }),
   ),
 });
+
+export const diagramSchema = z.object({
+  title: z.string().min(1).max(120),
+  /** Mermaid source, no code fences. */
+  mermaid: z.string().min(10),
+});

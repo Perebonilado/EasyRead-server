@@ -1,4 +1,6 @@
 export { AiCallLogModel } from './ai-call-log.model';
+export { AssessmentEventModel } from './assessment-event.model';
+export { LearnerProfileModel } from './learner-profile.model';
 export { DocumentChunkModel } from './document-chunk.model';
 export { DocumentPageModel } from './document-page.model';
 export { DocumentSummaryModel } from './document-summary.model';
@@ -17,6 +19,8 @@ export { UserModel } from './user.model';
 export { WebhookEventModel } from './webhook-event.model';
 
 import { AiCallLogModel } from './ai-call-log.model';
+import { AssessmentEventModel } from './assessment-event.model';
+import { LearnerProfileModel } from './learner-profile.model';
 import { DocumentChunkModel } from './document-chunk.model';
 import { DocumentPageModel } from './document-page.model';
 import { DocumentSummaryModel } from './document-summary.model';
@@ -53,4 +57,6 @@ export const ALL_MODELS = [
   PipelineRunModel,
   DocumentChunkModel,
   AiCallLogModel,
+  AssessmentEventModel,
+  LearnerProfileModel,
 ];

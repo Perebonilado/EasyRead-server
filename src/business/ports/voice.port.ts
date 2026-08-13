@@ -13,6 +13,14 @@ export interface SpeechPort {
   }): Promise<{ audio: Buffer; mimeType: string; model: string }>;
 }
 
+/** A function the model may call during the conversation. */
+export interface RealtimeTool {
+  name: string;
+  description: string;
+  /** JSON Schema for the arguments. */
+  parameters: Record<string, unknown>;
+}
+
 export interface RealtimeSession {
   /** Short-lived secret the browser uses to open its own WebRTC connection. */
   clientSecret: string;
@@ -29,5 +37,10 @@ export interface RealtimeSession {
  * key stays on the server.
  */
 export interface RealtimePort {
-  createSession(input: { instructions: string }): Promise<RealtimeSession>;
+  createSession(input: {
+    instructions: string;
+    tools?: RealtimeTool[];
+    /** Overrides the configured default — this is how tutors sound different. */
+    voice?: string;
+  }): Promise<RealtimeSession>;
 }

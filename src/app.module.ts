@@ -33,9 +33,15 @@ import {
   UploadIntentHandler,
 } from './business/handlers/documents/upload.handlers';
 import {
+  DrawDiagramHandler,
   PageAudioHandler,
   StartVoiceSessionHandler,
 } from './business/handlers/documents/voice.handlers';
+import {
+  GetMasteryHandler,
+  RecordAssessmentHandler,
+  UpdateLearnerProfileHandler,
+} from './business/handlers/documents/learning.handlers';
 import { DocumentDetailQuery } from './query/document-detail.query';
 import { DocumentListQuery } from './query/document-list.query';
 import { MeQuery } from './query/me.query';
@@ -47,6 +53,7 @@ import { EventsController } from './web/controllers/events.controller';
 import { ExportsController } from './web/controllers/exports.controller';
 import { HighlightController } from './web/controllers/highlight.controller';
 import { ReaderController } from './web/controllers/reader.controller';
+import { TutorsController } from './web/controllers/tutors.controller';
 import { VoiceController } from './web/controllers/voice.controller';
 import { DomainExceptionFilter } from './web/filters/domain-exception.filter';
 import { AuthGuard } from './web/security/auth.guard';
@@ -75,6 +82,10 @@ const handlers = [
   GetExportHandler,
   PageAudioHandler,
   StartVoiceSessionHandler,
+  DrawDiagramHandler,
+  RecordAssessmentHandler,
+  GetMasteryHandler,
+  UpdateLearnerProfileHandler,
 ];
 
 const queries = [DocumentListQuery, DocumentDetailQuery, ReaderQuery, MeQuery];
@@ -99,6 +110,7 @@ const queries = [DocumentListQuery, DocumentDetailQuery, ReaderQuery, MeQuery];
     HighlightController,
     ExportsController,
     VoiceController,
+    TutorsController,
     EventsController,
   ],
   providers: [

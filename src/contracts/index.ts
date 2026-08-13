@@ -172,6 +172,67 @@ export type SubscriptionResponse = {
 
 // ── Voice ────────────────────────────────────────────────────────────────────
 
+/** `chat` answers questions; `teach` runs the lesson and drives the reader. */
+export type VoiceMode = 'chat' | 'teach';
+
+/**
+ * The functions a teach-mode session may call. Declared server-side, executed
+ * client-side — every one of them is a UI action, and the browser is where the
+ * UI lives. Names are contract: both sides match on them.
+ */
+export const TEACH_TOOLS = {
+  GO_TO_PAGE: 'go_to_page',
+  SHOW_IMAGES: 'show_images',
+  DRAW_DIAGRAM: 'draw_diagram',
+  FOCUS_BOARD: 'focus_board',
+  MARK_TOPIC_COMPLETE: 'mark_topic_complete',
+  ASK_QUIZ: 'ask_quiz',
+  ASK_FLASHCARD: 'ask_flashcard',
+  REPORT_UNDERSTANDING: 'report_understanding',
+  UPDATE_LEARNER_PROFILE: 'update_learner_profile',
+} as const;
+export type TeachToolName = (typeof TEACH_TOOLS)[keyof typeof TEACH_TOOLS];
+
+export type DiagramResponse = { title: string; mermaid: string };
+
+export type AssessmentKind = 'mcq' | 'flashcard' | 'verbal';
+
+/** Per-topic understanding, computed from assessment events at read time. */
+export type MasteryResponse = {
+  topics: {
+    topicId: string;
+    title: string;
+    /** 0–100, or null when there isn't enough evidence yet. */
+    score: number | null;
+    events: number;
+    needsRevisit: boolean;
+  }[];
+  /** A roster id worth trying for the revisit, or null. */
+  recommendedTutorId: string | null;
+};
+
+/** How this student learns — read into every lesson, rewritten by the loop. */
+export type LearnerProfileDto = {
+  pace: 'slower' | 'steady' | 'faster';
+  depth: 'lighter' | 'standard' | 'deeper';
+  interactivity: 'less' | 'standard' | 'more';
+  styleNotes: string | null;
+};
+
+/** A tutor as the picker sees it — persona prompts stay server-side. */
+export type TutorDto = {
+  id: string;
+  name: string;
+  tagline: string;
+  description: string;
+  color: string;
+  dials: {
+    pace: 'brisk' | 'measured' | 'unhurried';
+    breakdown: 'light' | 'thorough' | 'maximal';
+    interactivity: 'low' | 'medium' | 'high';
+  };
+};
+
 /** What the browser needs to open its own realtime WebRTC connection. */
 export type VoiceSessionResponse = {
   clientSecret: string;

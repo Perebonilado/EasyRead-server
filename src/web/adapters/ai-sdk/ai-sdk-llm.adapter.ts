@@ -11,7 +11,7 @@ import type {
 } from '../../../business/ports/llm.port';
 import { PROMPTS } from '../prompts';
 import { ModelRegistry, type ModelRef } from './models';
-import { blocksSchema, topicsSchema } from './schemas';
+import { blocksSchema, diagramSchema, topicsSchema } from './schemas';
 
 /**
  * The model gateway, on the Vercel AI SDK.
@@ -165,6 +165,41 @@ export class AiSdkLlmAdapter implements LlmGatewayPort, OnModuleInit {
     return {
       value: result.value.replace(/^["']|["']$/g, '').slice(0, 200),
       usage: result.usage,
+    };
+  }
+
+  async drawDiagram(input: {
+    description: string;
+    context: string;
+    summary: string | null;
+  }): Promise<LlmResult<{ title: string; mermaid: string }>> {
+    const started = Date.now();
+    const { generateObject } = await this.registry.modules();
+    const { model, ref } = await this.registry.languageModel('diagram');
+
+    const result = await generateObject({
+      model,
+      schema: diagramSchema,
+      system: PROMPTS.diagram,
+      prompt: [
+        input.summary ? `Document summary:\n${input.summary}` : null,
+        input.context ? `Passages from the document:\n${input.context}` : null,
+        `Draw: ${input.description}`,
+      ]
+        .filter(Boolean)
+        .join('\n\n'),
+      maxRetries: this.maxRetries(),
+    });
+
+    // Models love wrapping Mermaid in fences whatever the prompt says.
+    const mermaid = result.object.mermaid
+      .replace(/^```(?:mermaid)?\s*/i, '')
+      .replace(/```\s*$/, '')
+      .trim();
+
+    return {
+      value: { title: result.object.title, mermaid },
+      usage: this.usage(ref, result.usage, started),
     };
   }
 

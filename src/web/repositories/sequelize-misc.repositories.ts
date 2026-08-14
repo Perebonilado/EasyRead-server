@@ -3,6 +3,7 @@ import { InjectModel } from '@nestjs/sequelize';
 import { Op } from 'sequelize';
 import type { HighlightAction, Level } from '../../contracts';
 import type {
+  PrerequisiteDraft,
   ExportRecord,
   ExportRepository,
   LookupRecord,
@@ -14,6 +15,7 @@ import type {
   TopicRepository,
 } from '../../business/repositories/misc.repository';
 import {
+  TopicPrerequisiteModel,
   DocumentModel,
   DocumentSummaryModel,
   ExportModel,
@@ -59,25 +61,51 @@ export class SequelizeTopicRepository implements TopicRepository {
     @InjectModel(TopicModel) private readonly model: typeof TopicModel,
     @InjectModel(TopicReadStateModel)
     private readonly readStates: typeof TopicReadStateModel,
+    @InjectModel(TopicPrerequisiteModel)
+    private readonly prereqModel: typeof TopicPrerequisiteModel,
   ) {}
 
   async replaceAll(
     documentId: string,
-    topics: Omit<TopicRecord, 'id'>[],
+    topics: (Omit<TopicRecord, 'id'> & {
+      prerequisites?: PrerequisiteDraft[];
+    })[],
     source: 'outline_pass' | 'page_tagging',
   ): Promise<void> {
     await this.model.sequelize!.transaction(async (transaction) => {
+      // Prerequisite rows cascade with their topics.
       await this.model.destroy({ where: { documentId }, transaction });
       if (!topics.length) return;
+
+      // Ids are minted up front so a draft's "covered by chapter 3" can
+      // become a real foreign key in the same write.
+      const ids = topics.map(() => newId());
       await this.model.bulkCreate(
-        topics.map((topic) => ({
-          id: newId(),
+        topics.map(({ prerequisites: _prerequisites, ...topic }, index) => ({
+          id: ids[index],
           documentId,
           source,
           ...topic,
         })) as any,
         { transaction },
       );
+
+      const prereqRows = topics.flatMap(
+        (topic, topicIndex) =>
+          topic.prerequisites?.map((draft, order) => ({
+            id: newId(),
+            topicId: ids[topicIndex],
+            orderIndex: order,
+            concept: draft.concept,
+            why: draft.why,
+            kind: draft.kind,
+            coveredByTopicId:
+              draft.coveredByIndex !== null ? ids[draft.coveredByIndex] : null,
+          })) ?? [],
+      );
+      if (prereqRows.length) {
+        await this.prereqModel.bulkCreate(prereqRows as any, { transaction });
+      }
     });
   }
 

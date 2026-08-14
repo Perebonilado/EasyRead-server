@@ -8,6 +8,7 @@ import {
   DOCUMENT_PAGE_REPOSITORY,
   DOCUMENT_REPOSITORY,
   PIPELINE_RUN_REPOSITORY,
+  SUMMARY_REPOSITORY,
   TOPIC_REPOSITORY,
 } from '../../business/repositories/tokens';
 import type { AiCallLogRepository } from '../../business/repositories/ai-call-log.repository';
@@ -15,6 +16,8 @@ import type { DocumentPageRepository } from '../../business/repositories/documen
 import type { DocumentRepository } from '../../business/repositories/document.repository';
 import type {
   PipelineRunRepository,
+  PrerequisiteDraft,
+  SummaryRepository,
   TopicRepository,
 } from '../../business/repositories/misc.repository';
 import { PipelineOrchestrator } from '../orchestrator.service';
@@ -43,6 +46,7 @@ export class TopicsProcessor extends BasePipelineProcessor<BaseJobData> {
     @Inject(DOCUMENT_PAGE_REPOSITORY)
     private readonly pages: DocumentPageRepository,
     @Inject(TOPIC_REPOSITORY) private readonly topics: TopicRepository,
+    @Inject(SUMMARY_REPOSITORY) private readonly summaries: SummaryRepository,
     @Inject(AI_CALL_LOG_REPOSITORY) private readonly calls: AiCallLogRepository,
     @Inject(LLM_GATEWAY) private readonly llm: LlmGatewayPort,
     @Inject(EVENT_BUS) private readonly events: EventBusPort,
@@ -84,9 +88,15 @@ export class TopicsProcessor extends BasePipelineProcessor<BaseJobData> {
         return;
       }
 
+      const prerequisites = await this.prerequisitesFor(doc.id, topics);
+
       await this.topics.replaceAll(
         doc.id,
-        topics.map((topic, index) => ({ ...topic, orderIndex: index })),
+        topics.map((topic, index) => ({
+          ...topic,
+          orderIndex: index,
+          prerequisites: prerequisites[index],
+        })),
         'outline_pass',
       );
 
@@ -105,6 +115,75 @@ export class TopicsProcessor extends BasePipelineProcessor<BaseJobData> {
         return;
       }
       throw error;
+    }
+  }
+
+  /**
+   * What each chapter assumes the reader knows, aligned to the topics array.
+   *
+   * A second, separate model call rather than part of the outline call: the
+   * outline's job is segmentation and mixing concerns degrades both. Any
+   * failure here returns empty lists — prerequisites are an aid, and losing
+   * them must never cost the document its topics.
+   */
+  private async prerequisitesFor(
+    documentId: string,
+    topics: { title: string; shortDescription: string | null }[],
+  ): Promise<PrerequisiteDraft[][]> {
+    const empty = topics.map(() => [] as PrerequisiteDraft[]);
+    // One chapter assumes nothing before it worth a model call.
+    if (topics.length < 2) return empty;
+
+    try {
+      const summary = await this.summaries.find(documentId);
+      const result = await this.llm.outlinePrerequisites({
+        summary,
+        chapters: topics.map((topic) => ({
+          title: topic.title,
+          description: topic.shortDescription,
+        })),
+      });
+
+      await this.calls.record({
+        documentId,
+        task: 'topics_prereqs',
+        model: result.usage.model,
+        tokensIn: result.usage.tokensIn,
+        tokensOut: result.usage.tokensOut,
+        latencyMs: result.usage.latencyMs,
+        outcome: 'ok',
+      });
+
+      const drafts = empty.map(() => [] as PrerequisiteDraft[]);
+      for (const row of result.value) {
+        const index = row.chapter - 1;
+        if (index < 0 || index >= topics.length) continue;
+        if (drafts[index].length >= 3) continue;
+
+        // "Covered by" must point strictly earlier; anything else the model
+        // claims — itself, a later chapter, out of range — is really an
+        // external assumption wearing the wrong label.
+        const coveredIndex = row.coveredByChapter - 1;
+        const internal = coveredIndex >= 0 && coveredIndex < index;
+
+        // The one instruction models keep ignoring: a chapter's own subject
+        // is not its prerequisite. Enforced lexically — when most of the
+        // concept's words are the chapter title, it is the chapter.
+        if (isOwnSubject(row.concept, topics[index].title)) continue;
+
+        drafts[index].push({
+          concept: row.concept.trim().slice(0, 300),
+          why: row.why.trim().slice(0, 600),
+          kind: internal ? 'internal' : 'external',
+          coveredByIndex: internal ? coveredIndex : null,
+        });
+      }
+      return drafts;
+    } catch (error) {
+      this.logger.warn(
+        `${documentId}: prerequisites unavailable — ${(error as Error).message}`,
+      );
+      return empty;
     }
   }
 
@@ -158,4 +237,59 @@ export class TopicsProcessor extends BasePipelineProcessor<BaseJobData> {
 
     return distinct;
   }
+}
+
+const STOP_WORDS = new Set([
+  'the',
+  'a',
+  'an',
+  'of',
+  'in',
+  'on',
+  'to',
+  'and',
+  'or',
+  'for',
+  'how',
+  'what',
+  'why',
+  'with',
+  'its',
+  'their',
+  'basic',
+  'basics',
+  'role',
+  'concept',
+  'understanding',
+  'introduction',
+  'process',
+]);
+
+const contentWords = (text: string): string[] =>
+  text
+    .toLowerCase()
+    .split(/[^a-z0-9]+/)
+    .filter((word) => word.length > 2 && !STOP_WORDS.has(word));
+
+/**
+ * True when a claimed prerequisite is really the chapter's own subject —
+ * "thyroid hormone synthesis" offered as a prerequisite for "Thyroid Hormone
+ * Biosynthesis". Word overlap with loose stemming (one word containing the
+ * other covers synthesis/biosynthesis, hormone/hormones).
+ */
+export function isOwnSubject(concept: string, chapterTitle: string): boolean {
+  const conceptWords = contentWords(concept);
+  const titleWords = contentWords(chapterTitle);
+  if (!conceptWords.length || !titleWords.length) return false;
+
+  const matches = conceptWords.filter((word) =>
+    titleWords.some(
+      (title) =>
+        title === word ||
+        (word.length > 3 && title.includes(word)) ||
+        (title.length > 3 && word.includes(title)),
+    ),
+  ).length;
+
+  return matches / conceptWords.length >= 0.5;
 }

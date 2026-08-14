@@ -1,5 +1,8 @@
 import type { AssessmentEventRecord } from '../repositories/learning.repository';
-import type { LearnerProfileRecord } from '../repositories/learning.repository';
+import type {
+  DocumentLearningStateRecord,
+  LearnerProfileRecord,
+} from '../repositories/learning.repository';
 
 /**
  * Mastery: how well the student currently understands each topic, 0–100.
@@ -102,26 +105,133 @@ export function recommendTutor(
 }
 
 /**
- * The automatic half of the adaptive loop: pattern-adjust the profile from
- * the last few results, so adaptation doesn't depend on the model remembering
- * to call its tool. Returns the patch to apply, or null for "no change".
+ * A dial the reader set by hand is theirs. Automatic adaptation may not
+ * touch it — an app that keeps overriding what you explicitly told it is
+ * worse than one that never adapted.
  */
-export function autoAdjustProfile(
-  recent: AssessmentEventRecord[],
+export function respectPins(
+  patch: Partial<LearnerProfileRecord>,
   profile: LearnerProfileRecord,
 ): Partial<LearnerProfileRecord> | null {
-  const window = recent.slice(0, 5);
-  if (window.length < 4) return null;
-
-  const struggling = window.filter((event) => event.score < 0.5).length >= 3;
-  const cruising = window.every((event) => event.score >= 0.85);
-
-  if (struggling && (profile.pace !== 'slower' || profile.depth !== 'deeper')) {
-    return { pace: 'slower', depth: 'deeper' };
+  const out: Partial<LearnerProfileRecord> = { ...patch };
+  if (profile.paceSource === 'manual') {
+    delete out.pace;
+    delete out.paceSource;
   }
-  if (cruising && profile.pace === 'slower') {
-    // Recovered: release the training wheels one notch, keep the depth.
-    return { pace: 'steady' };
+  if (profile.depthSource === 'manual') {
+    delete out.depth;
+    delete out.depthSource;
   }
-  return null;
+  if (profile.interactivitySource === 'manual') {
+    delete out.interactivity;
+    delete out.interactivitySource;
+  }
+  const changesDial = out.pace || out.depth || out.interactivity;
+  return changesDial ? out : null;
+}
+
+/**
+ * Two-speed adaptation: the global profile, adjusted for the document in hand.
+ *
+ * A reader who is slow in organic chemistry and quick in history is not two
+ * readers. Rather than a second profile system, one document carries a
+ * *delta* — "one notch slower than usual, here" — which this function
+ * composes onto the global profile at every prompt site.
+ *
+ * A manual pin says "my general pace is X", not "never adapt anywhere", so
+ * the delta still applies to pinned dials. What a pin protects is the stored
+ * profile itself, which nothing here writes.
+ */
+
+const PACE_LADDER = ['slower', 'steady', 'faster'] as const;
+const DEPTH_LADDER = ['deeper', 'standard', 'lighter'] as const;
+
+/** One notch along a ladder, clamped at both ends. */
+function shift<T extends readonly string[]>(
+  ladder: T,
+  current: T[number],
+  direction: -1 | 0 | 1,
+): T[number] {
+  const index = ladder.indexOf(current);
+  if (index < 0 || direction === 0) return current;
+  const next = Math.min(ladder.length - 1, Math.max(0, index + direction));
+  return ladder[next];
+}
+
+export function effectiveProfile(
+  profile: LearnerProfileRecord,
+  state: DocumentLearningStateRecord | null,
+): LearnerProfileRecord {
+  if (!state || (state.paceDelta === 'none' && state.depthDelta === 'none')) {
+    return profile;
+  }
+  const paceDirection: -1 | 0 | 1 =
+    state.paceDelta === 'slower' ? -1 : state.paceDelta === 'faster' ? 1 : 0;
+  const depthDirection: -1 | 0 | 1 =
+    state.depthDelta === 'deeper' ? -1 : state.depthDelta === 'lighter' ? 1 : 0;
+
+  return {
+    ...profile,
+    pace: shift(PACE_LADDER, profile.pace, paceDirection),
+    depth: shift(DEPTH_LADDER, profile.depth, depthDirection),
+  };
+}
+
+/** How many documents must agree before a local pattern becomes global. */
+export const PROMOTION_QUORUM = 2;
+
+export interface Promotion {
+  field: 'pace' | 'depth';
+  value: string;
+  /** The documents whose deltas should be cleared once promoted. */
+  documentIds: string[];
+  reason: string;
+  /**
+   * The global profile is already here — the deltas are redundant and should
+   * be cleared, but nothing changed, so nothing is written or narrated.
+   */
+  alreadyGlobal: boolean;
+}
+
+/**
+ * The slow loop: when the same delta holds in enough documents at once, it
+ * stopped being about the subject and started being about the reader.
+ *
+ * Deliberately not a running tally — it reads the *current* deltas, so a
+ * pattern the reader has since grown out of promotes nothing.
+ */
+export function findPromotions(
+  profile: LearnerProfileRecord,
+  states: DocumentLearningStateRecord[],
+): Promotion[] {
+  const promotions: Promotion[] = [];
+
+  const consider = (field: 'pace' | 'depth') => {
+    const groups = new Map<string, string[]>();
+    for (const state of states) {
+      const delta = field === 'pace' ? state.paceDelta : state.depthDelta;
+      if (delta === 'none') continue;
+      groups.set(delta, [...(groups.get(delta) ?? []), state.documentId]);
+    }
+    for (const [delta, documentIds] of groups) {
+      if (documentIds.length < PROMOTION_QUORUM) continue;
+      const ladder = field === 'pace' ? PACE_LADDER : DEPTH_LADDER;
+      const direction: -1 | 0 | 1 =
+        delta === 'slower' || delta === 'deeper' ? -1 : 1;
+      const value = shift(ladder, profile[field], direction);
+      promotions.push({
+        field,
+        value,
+        documentIds,
+        reason: `the same pattern showed up in ${documentIds.length} documents`,
+        // Clamped at the end of the ladder, or already there: the local
+        // deltas have nowhere left to go, so they are just noise now.
+        alreadyGlobal: value === profile[field],
+      });
+    }
+  };
+
+  consider('pace');
+  consider('depth');
+  return promotions;
 }

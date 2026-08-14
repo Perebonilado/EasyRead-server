@@ -16,8 +16,10 @@ import { UsageMetric } from '../../domain/values';
 import { computeMastery, WEAK_THRESHOLD } from '../../domain/learning';
 import {
   DEFAULT_LEARNER_PROFILE,
+  type DocumentLearningStateRepository,
+  type ProfileChangeRecord,
+  type ProfileChangeRepository,
   type AssessmentRepository,
-  type LearnerProfileRecord,
   type LearnerProfileRepository,
 } from '../../repositories/learning.repository';
 import {
@@ -25,6 +27,9 @@ import {
   tutorById,
   type Tutor,
 } from '../../domain/values/tutors';
+import { profileInstructions } from '../../domain/values/learner-profile';
+import { effectiveProfile } from '../../domain/learning';
+import { describeChange } from '../../domain/values/profile-changes';
 import {
   LLM_GATEWAY,
   REALTIME,
@@ -41,9 +46,11 @@ import type { LlmGatewayPort } from '../../ports/llm.port';
 import type { VectorStorePort } from '../../ports/vector-store.port';
 import type { StoragePort } from '../../ports/storage.port';
 import {
+  PROFILE_CHANGE_REPOSITORY,
   AI_CALL_LOG_REPOSITORY,
   ASSESSMENT_REPOSITORY,
   DOCUMENT_PAGE_REPOSITORY,
+  DOCUMENT_LEARNING_STATE_REPOSITORY,
   LEARNER_PROFILE_REPOSITORY,
   SIMPLIFIED_PAGE_REPOSITORY,
   SUMMARY_REPOSITORY,
@@ -244,6 +251,43 @@ const TEACHING_TOOLS: RealtimeTool[] = [
     parameters: { type: 'object', properties: {} },
   },
   {
+    name: TEACH_TOOLS.CHECK_PREREQUISITES,
+    description:
+      'What this chapter assumes the student already knows, minus anything ' +
+      'already resolved. Call it before starting each topic. Raise what it ' +
+      'returns conversationally — one question in passing, never a checklist ' +
+      '— and let their answer decide whether to bridge it.',
+    parameters: {
+      type: 'object',
+      properties: {
+        topicId: {
+          type: 'string',
+          description: 'The lesson-plan id of the topic about to start',
+        },
+      },
+      required: ['topicId'],
+    },
+  },
+  {
+    name: TEACH_TOOLS.TEACH_PREREQUISITE,
+    description:
+      'Record that you just taught a missing building block. Call it AFTER ' +
+      'the detour, not before — it marks the concept as understood, so it ' +
+      'stops being asked about anywhere. A detour is a short bridge of a ' +
+      'minute or so that returns to the chapter, never a sub-lesson, and at ' +
+      'most two per chapter.',
+    parameters: {
+      type: 'object',
+      properties: {
+        concept: {
+          type: 'string',
+          description: 'The concept exactly as check_prerequisites named it',
+        },
+      },
+      required: ['concept'],
+    },
+  },
+  {
     name: TEACH_TOOLS.SHOW_IMAGES,
     description:
       'Search the web for a diagram or illustration and show it to the ' +
@@ -429,8 +473,12 @@ export class StartVoiceSessionHandler extends AbstractRequestHandlerTemplate<
     @Inject(TOPIC_REPOSITORY) private readonly topics: TopicRepository,
     @Inject(ASSESSMENT_REPOSITORY)
     private readonly assessments: AssessmentRepository,
+    @Inject(DOCUMENT_LEARNING_STATE_REPOSITORY)
+    private readonly docStates: DocumentLearningStateRepository,
     @Inject(LEARNER_PROFILE_REPOSITORY)
     private readonly profiles: LearnerProfileRepository,
+    @Inject(PROFILE_CHANGE_REPOSITORY)
+    private readonly profileChanges: ProfileChangeRepository,
     @Inject(AI_CALL_LOG_REPOSITORY) private readonly calls: AiCallLogRepository,
     private readonly access: DocumentAccessService,
     private readonly entitlements: EntitlementsService,
@@ -462,6 +510,13 @@ export class StartVoiceSessionHandler extends AbstractRequestHandlerTemplate<
             cmd.revisitTopicId,
           )
         : this.chatInstructions(doc.props.title, summary);
+
+    // Told once: the moment a session carrying the narration exists, the
+    // changes are spent. If the model skips the sentence, the settings screen
+    // still shows them — we do not build receipt-confirmation for one line.
+    if (cmd.mode === 'teach') {
+      await this.markNarrated(cmd.userId).catch(() => undefined);
+    }
 
     const session = await this.realtime.createSession({
       instructions: baseInstructions,
@@ -515,10 +570,16 @@ export class StartVoiceSessionHandler extends AbstractRequestHandlerTemplate<
     tutor: Tutor,
     revisitTopicId?: string,
   ): Promise<string> {
-    const [topics, events, profile] = await Promise.all([
+    const [topics, events, profile, unnarrated, docState] = await Promise.all([
       this.topics.listWithReadState(documentId, userId),
       this.assessments.recent(userId, documentId, 200),
       this.profiles.find(userId),
+      // Changes the reader hasn't been told about yet, capped at two — an
+      // opening that recites five adjustments is a lecture about the app.
+      this.profileChanges
+        .unnarrated(userId, 2)
+        .catch((): ProfileChangeRecord[] => []),
+      this.docStates.find(userId, documentId).catch(() => null),
     ]);
 
     const mastery = computeMastery(
@@ -561,6 +622,7 @@ export class StartVoiceSessionHandler extends AbstractRequestHandlerTemplate<
       [
         'How to run the lesson:',
         '- Start with a one-breath overview of where you are in the plan, then teach the first topic not marked "already taught".',
+        `- Before starting a topic, call ${TEACH_TOOLS.CHECK_PREREQUISITES} with its id. If it returns anything, ask about it in passing — "are you comfortable with X, or should I take a minute on it?" — and if they want it (or clearly need it), give a short bridge and then call ${TEACH_TOOLS.TEACH_PREREQUISITE}. Two bridges per chapter at most; the chapter is the destination.`,
         `- When you begin a topic, call ${TEACH_TOOLS.GO_TO_PAGE} with its first page. As you move through its material, keep turning pages with ${TEACH_TOOLS.GO_TO_PAGE} so the student is always looking at what you are explaining.`,
         `- Each page arrives blank on the student's screen. Its points are numbered in the page text below. Just before you explain a point, call ${TEACH_TOOLS.REVEAL_POINT} with that number — the page builds up as you teach, like writing on a board. Reveal one point at a time, and never discuss a point the student cannot see yet.`,
         '- The student should be taking notes, like in a real classroom. After you reveal and explain a point, leave a short pause for them to write it down. When a term is exam-critical or easily confused, say that it belongs in their notes — then give them the moment to jot it.',
@@ -575,13 +637,32 @@ export class StartVoiceSessionHandler extends AbstractRequestHandlerTemplate<
         `- Before ${TEACH_TOOLS.MARK_TOPIC_COMPLETE}, call ${TEACH_TOOLS.REPORT_UNDERSTANDING} with your honest 1-5 read of the student on that topic.`,
         `- When you notice how this student learns — too fast, needs smaller steps, lights up at examples — call ${TEACH_TOOLS.UPDATE_LEARNER_PROFILE}. It changes how every future lesson is taught, including the rest of this one.`,
       ].join('\n'),
-      profileInstructions(profile ?? DEFAULT_LEARNER_PROFILE),
+      // Composed with this document's delta, so a reader who is struggling
+      // here is taught more slowly here — and nowhere else.
+      profileInstructions(
+        effectiveProfile(profile ?? DEFAULT_LEARNER_PROFILE, docState),
+      ),
+      unnarrated.length
+        ? [
+            'Changes to how you teach since last time — mention naturally in',
+            'your opening, once, briefly, then move on:',
+            ...unnarrated.map(
+              (change) =>
+                `- ${describeChange(change.field, change.toValue)}${change.reason ? ` (${change.reason})` : ''}`,
+            ),
+          ].join('\n')
+        : null,
       'Ground everything in this document. Keep technical terms, names and numbers exactly as it writes them — the student is examined on them — and explain each in plain words when it first appears.',
       'This is speech, and the student is learning as they listen: speak at a calm, unhurried rate, in short plain sentences, and give an important sentence a beat of silence to land before the next. Never race through material, and never sound like you are reading. No lists, no headings, no markdown in what you say.',
       `The text of the page currently on screen is appended below and refreshes as pages turn. The numbers on the simplified points are the ones ${TEACH_TOOLS.REVEAL_POINT} takes.`,
     ]
       .filter(Boolean)
       .join('\n\n');
+  }
+
+  private async markNarrated(userId: string): Promise<void> {
+    const pending = await this.profileChanges.unnarrated(userId, 2);
+    await this.profileChanges.markNarrated(pending.map((c) => c.id));
   }
 }
 
@@ -650,42 +731,4 @@ export class DrawDiagramHandler extends AbstractRequestHandlerTemplate<
 
     return CommandResponse.of(result.value);
   }
-}
-
-/**
- * The learner profile, written as standing orders. This block is what the
- * adaptive loop actually changes: the tutor's own tool calls and the
- * auto-adjust reflex both end up here, on the next session and — because the
- * client re-sends instructions on every page turn — within the current one.
- */
-export function profileInstructions(profile: LearnerProfileRecord): string {
-  const pace = {
-    slower:
-      'Go slower than you naturally would: smaller pieces, one at a time, repeat the key point in different words.',
-    steady: 'Keep a steady, natural pace.',
-    faster: 'This student moves quickly — keep it tight and skip the padding.',
-  }[profile.pace];
-
-  const depth = {
-    lighter: 'Stay at main ideas; only unpack when they ask.',
-    standard: 'Unpack concepts normally.',
-    deeper:
-      'Break everything further down than feels necessary; assume gaps in the foundations.',
-  }[profile.depth];
-
-  const interactivity = {
-    less: 'Check in sparingly — this student prefers to listen.',
-    standard: 'Check in regularly.',
-    more: 'Quiz and question constantly — this student learns by doing.',
-  }[profile.interactivity];
-
-  return [
-    'How THIS student learns (apply it, it overrides your default style):',
-    `- ${pace}`,
-    `- ${depth}`,
-    `- ${interactivity}`,
-    profile.styleNotes ? `- Observed: ${profile.styleNotes}` : null,
-  ]
-    .filter(Boolean)
-    .join('\n');
 }

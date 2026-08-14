@@ -72,6 +72,41 @@ export const PROMPTS = {
    * against what was actually said rather than a summary of it.
    */
   /**
+   * Per-chapter prerequisites.
+   *
+   * The output feeds three surfaces — a reading strip, the chat, and the
+   * tutor's pre-chapter check — and every one of them is ruined by vagueness:
+   * "basic biology" cannot be jumped to, explained, or asked about. Hence the
+   * insistence on specific named concepts and honest empty lists.
+   */
+  topicPrereqs: [
+    'You are given the summary and full chapter outline of a study document,',
+    'in reading order. For each chapter, name what it assumes the reader',
+    'already understands.',
+    'A prerequisite is a specific named concept — "the difference between',
+    'osmolality and osmolarity", never a subject area like "basic chemistry".',
+    'For each, say in one line what in that chapter needs it.',
+    'Set coveredByChapter to an EARLIER chapter number ONLY when that chapter',
+    'actually TEACHES the concept — its title or description says so. Being',
+    'introductory, related, or on the same subject is not covering it, and an',
+    'introduction chapter does not teach specific mechanisms. When in any',
+    'doubt, use 0: a wrong "go back to chapter 1" wastes the reader\'s trust,',
+    'while 0 simply has it explained. Never point at the same or a later',
+    'chapter.',
+    'Expect most real prerequisites to be outside knowledge (coveredByChapter',
+    '0) — the things a document quietly assumes are usually the things it',
+    'never teaches.',
+    'At most three per chapter, most important first. Most chapters —',
+    'especially opening ones — assume little or nothing: return nothing for',
+    'them rather than inventing. An empty list is a good answer.',
+    'Only name things a reader could actually not know. Never list what a',
+    'chapter itself teaches as its prerequisite — a chapter on lexical',
+    'analysis does not have tokenization as a prerequisite, it IS how the',
+    'reader will learn tokenization. A prerequisite is what the chapter uses',
+    'without stopping to explain.',
+  ].join(' '),
+
+  /**
    * The pre-writing interview.
    *
    * Questions are written for the topic because generic ones waste the only
@@ -155,6 +190,8 @@ export const PROMPTS = {
     'document does cover nearby.',
     'Write for the screen: short paragraphs, no headings, no preamble, and no',
     'sign-off. Two to four short paragraphs unless the reader asks for more.',
+    'When instructions about how this reader learns follow, shape your FIRST',
+    'answer to them — do not wait to be told an explanation did not land.',
     NO_INVENTION,
   ].join(' '),
 

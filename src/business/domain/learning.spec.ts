@@ -1,4 +1,9 @@
-import { autoAdjustProfile, computeMastery, recommendTutor } from './learning';
+import {
+  computeMastery,
+  effectiveProfile,
+  findPromotions,
+  recommendTutor,
+} from './learning';
 import type {
   AssessmentEventRecord,
   LearnerProfileRecord,
@@ -102,32 +107,90 @@ describe('recommendTutor', () => {
   });
 });
 
-describe('autoAdjustProfile', () => {
-  const base = DEFAULT_LEARNER_PROFILE;
+describe('effectiveProfile', () => {
+  const base = {
+    ...DEFAULT_LEARNER_PROFILE,
+    pace: 'steady' as const,
+    depth: 'standard' as const,
+  };
+  const state = (
+    paceDelta: 'slower' | 'none' | 'faster',
+    depthDelta: 'deeper' | 'none' | 'lighter' = 'none',
+  ) => ({ documentId: 'doc-a', paceDelta, depthDelta, reason: null });
 
-  it('waits for enough signal', () => {
-    expect(autoAdjustProfile([event('t', 0, 1)], base)).toBeNull();
+  it('returns the profile untouched when nothing is local', () => {
+    expect(effectiveProfile(base, null)).toBe(base);
+    expect(effectiveProfile(base, state('none'))).toBe(base);
   });
 
-  it('slows down and deepens after a run of misses', () => {
-    const misses = [0, 0, 0, 1, 0].map((s, i) => event('t', s, i));
-    expect(autoAdjustProfile(misses, base)).toEqual({
-      pace: 'slower',
-      depth: 'deeper',
-    });
+  it('shifts one notch per delta', () => {
+    const result = effectiveProfile(base, state('slower', 'deeper'));
+    expect(result.pace).toBe('slower');
+    expect(result.depth).toBe('deeper');
   });
 
-  it('does not thrash when already adjusted', () => {
-    const misses = [0, 0, 0, 0, 0].map((s, i) => event('t', s, i));
+  it('clamps at the ends of each ladder', () => {
+    const slow = { ...base, pace: 'slower' as const };
+    expect(effectiveProfile(slow, state('slower')).pace).toBe('slower');
+  });
+
+  it('applies to a pinned dial without rewriting the pin', () => {
+    // A pin says "my general pace is faster", not "never adapt anywhere".
+    const pinned = {
+      ...base,
+      pace: 'faster' as const,
+      paceSource: 'manual' as const,
+    };
+    const result = effectiveProfile(pinned, state('slower'));
+    expect(result.pace).toBe('steady');
+    expect(result.paceSource).toBe('manual');
+    expect(pinned.pace).toBe('faster');
+  });
+});
+
+describe('findPromotions', () => {
+  const profile = { ...DEFAULT_LEARNER_PROFILE };
+  const state = (
+    documentId: string,
+    paceDelta: 'slower' | 'none' | 'faster',
+  ) => ({
+    documentId,
+    paceDelta,
+    depthDelta: 'none' as const,
+    reason: null,
+  });
+
+  it('one document alone is a subject, not a reader', () => {
+    expect(findPromotions(profile, [state('a', 'slower')])).toEqual([]);
+  });
+
+  it('promotes when documents agree, and names them', () => {
+    const [promotion] = findPromotions(profile, [
+      state('a', 'slower'),
+      state('b', 'slower'),
+    ]);
+    expect(promotion.field).toBe('pace');
+    expect(promotion.value).toBe('slower');
+    expect(promotion.documentIds.sort()).toEqual(['a', 'b']);
+    expect(promotion.reason).toContain('2 documents');
+    expect(promotion.alreadyGlobal).toBe(false);
+  });
+
+  it('disagreeing deltas cancel rather than average', () => {
     expect(
-      autoAdjustProfile(misses, { ...base, pace: 'slower', depth: 'deeper' }),
-    ).toBeNull();
+      findPromotions(profile, [state('a', 'slower'), state('b', 'faster')]),
+    ).toEqual([]);
   });
 
-  it('releases the brakes one notch when the student is cruising', () => {
-    const wins = [1, 1, 1, 1, 1].map((s, i) => event('t', s, i));
-    expect(autoAdjustProfile(wins, { ...base, pace: 'slower' })).toEqual({
-      pace: 'steady',
-    });
+  it('flags deltas as redundant when the global is already there', () => {
+    // Nothing to promote, but the deltas claim a difference that no longer
+    // exists — the caller clears them instead of writing a change.
+    const slow = { ...profile, pace: 'slower' as const };
+    const [promotion] = findPromotions(slow, [
+      state('a', 'slower'),
+      state('b', 'slower'),
+    ]);
+    expect(promotion.alreadyGlobal).toBe(true);
+    expect(promotion.documentIds.sort()).toEqual(['a', 'b']);
   });
 });

@@ -1,10 +1,10 @@
-import type { ChatRole, HighlightAction } from '../../contracts';
+import type { ChatOrigin, ChatRole } from '../../contracts';
 
 export interface ChatMessageRecord {
   id: string;
   role: ChatRole;
   text: string;
-  highlightAction: Exclude<HighlightAction, 'visualize'> | null;
+  highlightAction: ChatOrigin | null;
   quotedText: string | null;
   pageNumber: number | null;
   sources: { pageNumber: number; text: string }[] | null;
@@ -16,7 +16,7 @@ export interface AppendChatMessageInput {
   userId: string;
   role: ChatRole;
   text: string;
-  highlightAction?: Exclude<HighlightAction, 'visualize'> | null;
+  highlightAction?: ChatOrigin | null;
   quotedText?: string | null;
   pageNumber?: number | null;
   sources?: { pageNumber: number; text: string }[] | null;

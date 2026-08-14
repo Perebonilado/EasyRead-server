@@ -22,6 +22,7 @@ const TASK_VAR: Record<LlmTask, string> = {
   summarize: 'AI_MODEL_SUMMARIZE',
   topics_outline: 'AI_MODEL_TOPICS',
   topics_page_tag: 'AI_MODEL_TOPICS',
+  topics_prereqs: 'AI_MODEL_TOPICS',
   simplify_standard: 'AI_MODEL_SIMPLIFY_STANDARD',
   simplify_easiest: 'AI_MODEL_SIMPLIFY_EASIEST',
   highlight_explain: 'AI_MODEL_HIGHLIGHT',

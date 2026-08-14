@@ -16,6 +16,7 @@ import {
   diagramSchema,
   interviewSchema,
   outlineSchema,
+  prerequisitesSchema,
   topicsSchema,
 } from './schemas';
 
@@ -158,6 +159,7 @@ export class AiSdkLlmAdapter implements LlmGatewayPort, OnModuleInit {
     question: string;
     context: string;
     summary: string | null;
+    profile: string;
     onToken?: (chunk: string) => void;
   }): Promise<LlmResult<string>> {
     // The passages ride with the turn they answer, so a later follow-up can
@@ -178,7 +180,9 @@ export class AiSdkLlmAdapter implements LlmGatewayPort, OnModuleInit {
     const started = Date.now();
     const { streamText, generateText } = await this.registry.modules();
     const { model, ref } = await this.registry.languageModel('chat_document');
-    const system = PROMPTS.chat;
+    // The profile rides in the system turn — standing instruction, not
+    // content — so it shapes the first answer, not just retries.
+    const system = [PROMPTS.chat, input.profile].filter(Boolean).join('\n\n');
 
     if (!input.onToken) {
       const result = await generateText({
@@ -209,6 +213,40 @@ export class AiSdkLlmAdapter implements LlmGatewayPort, OnModuleInit {
     return {
       value: answer.trim(),
       usage: this.usage(ref, await result.usage, started),
+    };
+  }
+
+  async outlinePrerequisites(input: {
+    summary: string | null;
+    chapters: { title: string; description: string | null }[];
+  }) {
+    const started = Date.now();
+    const { generateObject } = await this.registry.modules();
+    const { model, ref } = await this.registry.languageModel('topics_prereqs');
+
+    const outline = input.chapters
+      .map(
+        (chapter, index) =>
+          `${index + 1}. ${chapter.title}${chapter.description ? ` — ${chapter.description}` : ''}`,
+      )
+      .join('\n');
+
+    const result = await generateObject({
+      model,
+      schema: prerequisitesSchema,
+      system: PROMPTS.topicPrereqs,
+      prompt: [
+        input.summary ? `Document summary:\n${input.summary}` : null,
+        `Chapters, in reading order:\n${outline}`,
+      ]
+        .filter(Boolean)
+        .join('\n\n'),
+      maxRetries: this.maxRetries(),
+    });
+
+    return {
+      value: result.object.prerequisites,
+      usage: this.usage(ref, result.usage, started),
     };
   }
 

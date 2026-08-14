@@ -21,10 +21,21 @@ export interface TopicRecord {
   orderIndex: number;
 }
 
+/** A prerequisite as the pipeline drafts it, before topic ids exist. */
+export interface PrerequisiteDraft {
+  concept: string;
+  why: string;
+  kind: 'internal' | 'external';
+  /** Index into the same topics array of the chapter that covers it. */
+  coveredByIndex: number | null;
+}
+
 export interface TopicRepository {
   replaceAll(
     documentId: string,
-    topics: Omit<TopicRecord, 'id'>[],
+    topics: (Omit<TopicRecord, 'id'> & {
+      prerequisites?: PrerequisiteDraft[];
+    })[],
     source: 'outline_pass' | 'page_tagging',
   ): Promise<void>;
   listWithReadState(

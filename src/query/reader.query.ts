@@ -8,11 +8,14 @@ import type {
   TopicDto,
 } from '../contracts';
 import {
+  ConceptKnowledgeModel,
   DocumentPageModel,
   SimplifiedPageModel,
   TopicModel,
+  TopicPrerequisiteModel,
   TopicReadStateModel,
 } from '../web/database/models';
+import { normaliseConcept } from '../business/domain/values/concepts';
 
 export interface PageRange {
   from?: number;
@@ -32,6 +35,10 @@ export class ReaderQuery {
     @InjectModel(TopicModel) private readonly topics: typeof TopicModel,
     @InjectModel(TopicReadStateModel)
     private readonly readStates: typeof TopicReadStateModel,
+    @InjectModel(TopicPrerequisiteModel)
+    private readonly prerequisites: typeof TopicPrerequisiteModel,
+    @InjectModel(ConceptKnowledgeModel)
+    private readonly concepts: typeof ConceptKnowledgeModel,
   ) {}
 
   /**
@@ -101,10 +108,23 @@ export class ReaderQuery {
     });
     if (!topics.length) return [];
 
-    const read = await this.readStates.findAll({
-      where: { userId, topicId: { [Op.in]: topics.map((t) => t.id) } } as never,
-    });
+    const topicIds = topics.map((t) => t.id);
+    const [read, prereqs, taught] = await Promise.all([
+      this.readStates.findAll({
+        where: { userId, topicId: { [Op.in]: topicIds } } as never,
+      }),
+      this.prerequisites.findAll({
+        where: { topicId: { [Op.in]: topicIds } } as never,
+        order: [['orderIndex', 'ASC']] as never,
+      }),
+      this.concepts.findAll({
+        where: { userId, state: 'taught' } as never,
+      }),
+    ]);
     const readIds = new Set(read.map((state) => state.topicId));
+    const taughtConcepts = new Set(
+      taught.map((row) => normaliseConcept(row.concept)),
+    );
 
     return topics.map((topic) => ({
       id: topic.id,
@@ -113,6 +133,32 @@ export class ReaderQuery {
       startPage: topic.startPage,
       endPage: topic.endPage,
       isRead: readIds.has(topic.id),
+      // Resolved against this reader, so the client renders states rather
+      // than re-deriving them:
+      //  - internal + covering chapter read      -> covered (silent, inferred)
+      //  - internal + covering chapter unread    -> available (offer the jump)
+      //  - external + not yet taught             -> unknown (offer to explain)
+      //  - external + taught                     -> dropped: the list is
+      //    supposed to empty as the reader learns, not fill with ticks.
+      prerequisites: prereqs
+        .filter((row) => row.topicId === topic.id)
+        .filter(
+          (row) =>
+            row.kind === 'internal' ||
+            !taughtConcepts.has(normaliseConcept(row.concept)),
+        )
+        .map((row) => ({
+          id: row.id,
+          concept: row.concept,
+          why: row.why,
+          state:
+            row.kind === 'external'
+              ? ('unknown' as const)
+              : row.coveredByTopicId && readIds.has(row.coveredByTopicId)
+                ? ('covered' as const)
+                : ('available' as const),
+          coveredByTopicId: row.coveredByTopicId,
+        })),
     }));
   }
 

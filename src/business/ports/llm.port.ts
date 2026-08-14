@@ -4,6 +4,7 @@ export type LlmTask =
   | 'summarize'
   | 'topics_outline'
   | 'topics_page_tag'
+  | 'topics_prereqs'
   | 'simplify_standard'
   | 'simplify_easiest'
   | 'highlight_explain'
@@ -75,8 +76,33 @@ export interface LlmGatewayPort {
     question: string;
     context: string;
     summary: string | null;
+    /** The learner profile as standing instructions, written register. */
+    profile: string;
     onToken?: (chunk: string) => void;
   }): Promise<LlmResult<string>>;
+
+  /**
+   * What each chapter assumes the reader already knows.
+   *
+   * Takes the whole outline in order — that context is the only way the
+   * model can tell "chapter 7 leans on chapter 3" apart from "chapter 7
+   * leans on knowledge the document never provides".
+   */
+  outlinePrerequisites(input: {
+    summary: string | null;
+    chapters: { title: string; description: string | null }[];
+  }): Promise<
+    LlmResult<
+      {
+        /** 1-based chapter this prerequisite belongs to. */
+        chapter: number;
+        concept: string;
+        why: string;
+        /** 1-based earlier chapter that covers it, or 0 when none does. */
+        coveredByChapter: number;
+      }[]
+    >
+  >;
 
   /** Questions worth asking before writing about this particular topic. */
   interviewForTopic(input: {

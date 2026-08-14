@@ -1,4 +1,5 @@
 import { Column, DataType, ForeignKey, Table } from 'sequelize-typescript';
+import type { DialSource } from '../../../business/repositories/learning.repository';
 import { BaseModel } from './base';
 import { UserModel } from './user.model';
 
@@ -31,4 +32,25 @@ export class LearnerProfileModel extends BaseModel {
 
   @Column({ type: DataType.TEXT, allowNull: true })
   declare styleNotes: string | null;
+
+  @Column({
+    type: DataType.ENUM('default', 'auto', 'manual'),
+    allowNull: false,
+    defaultValue: 'default',
+  })
+  declare paceSource: DialSource;
+
+  @Column({
+    type: DataType.ENUM('default', 'auto', 'manual'),
+    allowNull: false,
+    defaultValue: 'default',
+  })
+  declare depthSource: DialSource;
+
+  @Column({
+    type: DataType.ENUM('default', 'auto', 'manual'),
+    allowNull: false,
+    defaultValue: 'default',
+  })
+  declare interactivitySource: DialSource;
 }

@@ -71,3 +71,21 @@ export const outlineSchema = z.object({
    */
   furtherTopics: z.array(z.string().min(1).max(160)).max(8),
 });
+
+/**
+ * Flat rather than nested per chapter: structured output requires every key
+ * required, and a flat list makes "no prerequisites for chapter 2" the
+ * natural absence of rows instead of an awkward empty object.
+ */
+export const prerequisitesSchema = z.object({
+  prerequisites: z
+    .array(
+      z.object({
+        chapter: z.number().int().min(1),
+        concept: z.string().min(1).max(300),
+        why: z.string().min(1).max(600),
+        coveredByChapter: z.number().int().min(0),
+      }),
+    )
+    .max(60),
+});

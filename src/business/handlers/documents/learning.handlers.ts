@@ -4,18 +4,19 @@ import type {
   LearnerProfileDto,
   MasteryResponse,
 } from '../../../contracts';
-import {
-  autoAdjustProfile,
-  computeMastery,
-  recommendTutor,
-} from '../../domain/learning';
+import { computeMastery, recommendTutor } from '../../domain/learning';
 import { ValidationError } from '../../domain/errors/errors';
 import {
+  DOCUMENT_LEARNING_STATE_REPOSITORY,
+  PROFILE_CHANGE_REPOSITORY,
   ASSESSMENT_REPOSITORY,
   LEARNER_PROFILE_REPOSITORY,
   TOPIC_REPOSITORY,
 } from '../../repositories/tokens';
 import type {
+  DocumentLearningStateRepository,
+  ProfileChangeRepository,
+  LearnerProfileRecord,
   AssessmentRepository,
   LearnerProfileRepository,
 } from '../../repositories/learning.repository';
@@ -24,6 +25,7 @@ import type { TopicRepository } from '../../repositories/misc.repository';
 import AbstractRequestHandlerTemplate from '../AbstractRequestHandlerTemplate';
 import { CommandResponse } from '../response/CommandResponse';
 import { DocumentAccessService } from './document-access.service';
+import { StruggleRecorder } from './struggle-recorder.service';
 
 /** Mastery only ever reads the recent past; older evidence has decayed anyway. */
 const EVENT_WINDOW = 200;
@@ -54,8 +56,13 @@ export class RecordAssessmentHandler extends AbstractRequestHandlerTemplate<
     private readonly assessments: AssessmentRepository,
     @Inject(LEARNER_PROFILE_REPOSITORY)
     private readonly profiles: LearnerProfileRepository,
+    @Inject(PROFILE_CHANGE_REPOSITORY)
+    private readonly changes: ProfileChangeRepository,
     @Inject(TOPIC_REPOSITORY) private readonly topics: TopicRepository,
     private readonly access: DocumentAccessService,
+    private readonly struggles: StruggleRecorder,
+    @Inject(DOCUMENT_LEARNING_STATE_REPOSITORY)
+    private readonly docStates: DocumentLearningStateRepository,
   ) {
     super();
   }
@@ -78,13 +85,31 @@ export class RecordAssessmentHandler extends AbstractRequestHandlerTemplate<
       payload: cmd.payload,
     });
 
-    const recent = await this.assessments.recent(cmd.userId, cmd.documentId, 5);
-    const profile =
-      (await this.profiles.find(cmd.userId)) ?? DEFAULT_LEARNER_PROFILE;
-    const patch = autoAdjustProfile(recent, profile);
-    if (patch) await this.profiles.upsert(cmd.userId, patch);
+    // Mirror into the struggle stream. Clear results only: a middling
+    // flashcard self-grade is neither evidence of effort nor of recovery.
+    if (cmd.score < 0.5 || cmd.score >= 0.85) {
+      await this.struggles.record({
+        userId: cmd.userId,
+        documentId: cmd.documentId,
+        topicId: cmd.topicId,
+        kind: cmd.score < 0.5 ? 'quiz_wrong' : 'quiz_right',
+      });
+    }
 
-    return CommandResponse.of({ profileAdjusted: Boolean(patch) });
+    // Adaptation itself lives in the struggle stream now (see
+    // AdaptationService): quiz scores alone were both too narrow — they miss
+    // the reader who never opens a quiz — and too eager, moving the *global*
+    // profile on one document's evidence. The signal write above feeds the
+    // two-speed loop, which adjusts this document first and only generalises
+    // once several documents agree.
+    const local = await this.docStates
+      .find(cmd.userId, cmd.documentId)
+      .catch(() => null);
+    const adjusted = Boolean(
+      local && (local.paceDelta !== 'none' || local.depthDelta !== 'none'),
+    );
+
+    return CommandResponse.of({ profileAdjusted: adjusted });
   }
 }
 
@@ -144,8 +169,20 @@ export class GetMasteryHandler extends AbstractRequestHandlerTemplate<
   }
 }
 
+export type ProfileUpdateSource = 'manual' | 'tutor';
+
 export interface UpdateProfileRequest {
   userId: string;
+  /**
+   * Who is asking. `manual` (the settings screen) pins each changed dial
+   * against the reflex; `tutor` (the lesson tool) records an observation
+   * that stays overridable.
+   */
+  source: ProfileUpdateSource;
+  /** Release a pinned dial back to automatic adjustment. */
+  release?: ('pace' | 'depth' | 'interactivity')[];
+  /** Erase the accumulated style notes — the reader owns their own record. */
+  clearNotes?: boolean;
   pace?: LearnerProfileDto['pace'];
   depth?: LearnerProfileDto['depth'];
   interactivity?: LearnerProfileDto['interactivity'];
@@ -163,14 +200,17 @@ export class UpdateLearnerProfileHandler extends AbstractRequestHandlerTemplate<
   constructor(
     @Inject(LEARNER_PROFILE_REPOSITORY)
     private readonly profiles: LearnerProfileRepository,
+    @Inject(PROFILE_CHANGE_REPOSITORY)
+    private readonly changes: ProfileChangeRepository,
   ) {
     super();
   }
 
   protected async handleRequest(cmd: UpdateProfileRequest) {
-    const current = await this.profiles.find(cmd.userId);
+    const current = (await this.profiles.find(cmd.userId)) ?? null;
+    const before = current ?? DEFAULT_LEARNER_PROFILE;
 
-    let styleNotes = current?.styleNotes ?? null;
+    let styleNotes = cmd.clearNotes ? null : (current?.styleNotes ?? null);
     if (cmd.note?.trim()) {
       // Newest observations first; the tail falls off rather than the head
       // growing without bound.
@@ -180,12 +220,55 @@ export class UpdateLearnerProfileHandler extends AbstractRequestHandlerTemplate<
       styleNotes = combined.slice(0, MAX_NOTES_CHARS);
     }
 
-    const updated = await this.profiles.upsert(cmd.userId, {
-      ...(cmd.pace ? { pace: cmd.pace } : {}),
-      ...(cmd.depth ? { depth: cmd.depth } : {}),
-      ...(cmd.interactivity ? { interactivity: cmd.interactivity } : {}),
+    // A hand-set dial is pinned; a tutor observation stays overridable.
+    const dialSource = cmd.source === 'manual' ? 'manual' : 'auto';
+    const patch: Partial<LearnerProfileRecord> = {
+      ...(cmd.pace ? { pace: cmd.pace, paceSource: dialSource } : {}),
+      ...(cmd.depth ? { depth: cmd.depth, depthSource: dialSource } : {}),
+      ...(cmd.interactivity
+        ? { interactivity: cmd.interactivity, interactivitySource: dialSource }
+        : {}),
       ...(styleNotes !== (current?.styleNotes ?? null) ? { styleNotes } : {}),
-    });
+    };
+    // Releasing a pin: the value stays, the promise is withdrawn.
+    for (const field of cmd.release ?? []) {
+      patch[`${field}Source`] = 'auto';
+    }
+
+    const updated = await this.profiles.upsert(cmd.userId, patch);
+
+    // History, best-effort: a failed log line must never fail the update.
+    const dialChanges = (['pace', 'depth', 'interactivity'] as const)
+      .filter((field) => cmd[field] && cmd[field] !== before[field])
+      .map((field) =>
+        this.changes.record({
+          userId: cmd.userId,
+          field,
+          fromValue: before[field],
+          toValue: cmd[field] as string,
+          source: cmd.source,
+          reason:
+            cmd.source === 'tutor'
+              ? 'your tutor noticed this while teaching'
+              : null,
+        }),
+      );
+    if (cmd.note?.trim()) {
+      dialChanges.push(
+        this.changes.record({
+          userId: cmd.userId,
+          field: 'style_notes',
+          fromValue: null,
+          toValue: cmd.note.trim().slice(0, 300),
+          source: cmd.source,
+          reason:
+            cmd.source === 'tutor'
+              ? 'your tutor noticed this while teaching'
+              : null,
+        }),
+      );
+    }
+    await Promise.all(dialChanges.map((p) => p.catch(() => undefined)));
 
     return CommandResponse.of(updated);
   }

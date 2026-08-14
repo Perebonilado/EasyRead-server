@@ -1,6 +1,13 @@
 import { Injectable } from '@nestjs/common';
 import { InjectModel } from '@nestjs/sequelize';
+import { Op } from 'sequelize';
 import type {
+  DocumentLearningStateRecord,
+  DocumentLearningStateRepository,
+  ProfileChangeField,
+  ProfileChangeRecord,
+  ProfileChangeRepository,
+  ProfileChangeSource,
   AssessmentEventRecord,
   AssessmentKind,
   AssessmentRepository,
@@ -9,6 +16,8 @@ import type {
 } from '../../business/repositories/learning.repository';
 import { DEFAULT_LEARNER_PROFILE } from '../../business/repositories/learning.repository';
 import { AssessmentEventModel, LearnerProfileModel } from '../database/models';
+import { DocumentLearningStateModel } from '../database/models/document-learning-state.model';
+import { ProfileChangeModel } from '../database/models/profile-change.model';
 import { newId } from '../database/uuid';
 
 @Injectable()
@@ -67,14 +76,7 @@ export class SequelizeLearnerProfileRepository implements LearnerProfileReposito
 
   async find(userId: string): Promise<LearnerProfileRecord | null> {
     const row = await this.model.findOne({ where: { userId } as never });
-    return row
-      ? {
-          pace: row.pace,
-          depth: row.depth,
-          interactivity: row.interactivity,
-          styleNotes: row.styleNotes,
-        }
-      : null;
+    return row ? toProfile(row) : null;
   }
 
   async upsert(
@@ -84,12 +86,7 @@ export class SequelizeLearnerProfileRepository implements LearnerProfileReposito
     const existing = await this.model.findOne({ where: { userId } as never });
     if (existing) {
       await existing.update(patch as never);
-      return {
-        pace: existing.pace,
-        depth: existing.depth,
-        interactivity: existing.interactivity,
-        styleNotes: existing.styleNotes,
-      };
+      return toProfile(existing);
     }
     const created = await this.model.create({
       id: newId(),
@@ -97,11 +94,165 @@ export class SequelizeLearnerProfileRepository implements LearnerProfileReposito
       ...DEFAULT_LEARNER_PROFILE,
       ...patch,
     } as never);
+    return toProfile(created);
+  }
+}
+
+function toProfile(row: LearnerProfileModel): LearnerProfileRecord {
+  return {
+    pace: row.pace,
+    depth: row.depth,
+    interactivity: row.interactivity,
+    styleNotes: row.styleNotes,
+    paceSource: row.paceSource ?? 'default',
+    depthSource: row.depthSource ?? 'default',
+    interactivitySource: row.interactivitySource ?? 'default',
+  };
+}
+
+@Injectable()
+export class SequelizeProfileChangeRepository implements ProfileChangeRepository {
+  constructor(
+    @InjectModel(ProfileChangeModel)
+    private readonly model: typeof ProfileChangeModel,
+  ) {}
+
+  async record(input: {
+    userId: string;
+    field: ProfileChangeField;
+    fromValue: string | null;
+    toValue: string;
+    source: ProfileChangeSource;
+    reason?: string | null;
+  }): Promise<void> {
+    await this.model.create({
+      id: newId(),
+      userId: input.userId,
+      field: input.field,
+      fromValue: input.fromValue,
+      toValue: input.toValue,
+      source: input.source,
+      reason: input.reason ?? null,
+      narratedAt: null,
+    } as never);
+  }
+
+  async list(userId: string, limit: number): Promise<ProfileChangeRecord[]> {
+    const rows = await this.model.findAll({
+      where: { userId } as never,
+      order: [
+        ['createdAt', 'DESC'],
+        ['id', 'DESC'],
+      ] as never,
+      limit,
+    });
+    return rows.map(toChange);
+  }
+
+  async unnarrated(
+    userId: string,
+    limit: number,
+  ): Promise<ProfileChangeRecord[]> {
+    const rows = await this.model.findAll({
+      where: {
+        userId,
+        narratedAt: null,
+        // Manual changes are the reader's own doing; narrating them back
+        // ("you set your pace to faster") would be noise.
+        source: ['auto', 'tutor'],
+      } as never,
+      order: [['createdAt', 'ASC']] as never,
+      limit,
+    });
+    return rows.map(toChange);
+  }
+
+  async markNarrated(ids: string[]): Promise<void> {
+    if (!ids.length) return;
+    await this.model.update(
+      { narratedAt: new Date() },
+      {
+        where: { id: ids } as never,
+      },
+    );
+  }
+}
+
+function toChange(row: ProfileChangeModel): ProfileChangeRecord {
+  return {
+    id: row.id,
+    field: row.field,
+    fromValue: row.fromValue,
+    toValue: row.toValue,
+    source: row.source,
+    reason: row.reason,
+    narratedAt: row.narratedAt,
+    createdAt: row.get('createdAt') as Date,
+  };
+}
+
+@Injectable()
+export class SequelizeDocumentLearningStateRepository implements DocumentLearningStateRepository {
+  constructor(
+    @InjectModel(DocumentLearningStateModel)
+    private readonly model: typeof DocumentLearningStateModel,
+  ) {}
+
+  private toRecord(row: DocumentLearningStateModel) {
     return {
-      pace: created.pace,
-      depth: created.depth,
-      interactivity: created.interactivity,
-      styleNotes: created.styleNotes,
+      documentId: row.documentId,
+      paceDelta: row.paceDelta,
+      depthDelta: row.depthDelta,
+      reason: row.reason,
     };
+  }
+
+  async find(userId: string, documentId: string) {
+    const row = await this.model.findOne({ where: { userId, documentId } });
+    return row ? this.toRecord(row) : null;
+  }
+
+  async active(userId: string) {
+    const rows = await this.model.findAll({
+      where: {
+        userId,
+        [Op.or]: [
+          { paceDelta: { [Op.ne]: 'none' } },
+          { depthDelta: { [Op.ne]: 'none' } },
+        ],
+      } as never,
+    });
+    return rows.map((row) => this.toRecord(row));
+  }
+
+  async upsert(
+    userId: string,
+    documentId: string,
+    patch: Partial<Omit<DocumentLearningStateRecord, 'documentId'>>,
+  ) {
+    const row = await this.model.findOne({ where: { userId, documentId } });
+    if (row) {
+      await row.update(patch as never);
+      return;
+    }
+    await this.model.create({
+      id: newId(),
+      userId,
+      documentId,
+      paceDelta: 'none',
+      depthDelta: 'none',
+      ...patch,
+    } as never);
+  }
+
+  async clearDelta(
+    userId: string,
+    documentIds: string[],
+    field: 'pace' | 'depth',
+  ) {
+    if (!documentIds.length) return;
+    await this.model.update({ [`${field}Delta`]: 'none' } as never, {
+      where: { userId, documentId: { [Op.in]: documentIds } } as never,
+    });
   }
 }

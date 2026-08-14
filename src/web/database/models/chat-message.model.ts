@@ -1,5 +1,5 @@
 import { Column, DataType, ForeignKey, Table } from 'sequelize-typescript';
-import type { ChatRole, HighlightAction } from '../../../contracts';
+import type { ChatOrigin, ChatRole } from '../../../contracts';
 import { BaseModel } from './base';
 import { DocumentModel } from './document.model';
 import { UserModel } from './user.model';
@@ -21,10 +21,10 @@ export class ChatMessageModel extends BaseModel {
   declare text: string;
 
   @Column({
-    type: DataType.ENUM('explain', 'simplify', 'define'),
+    type: DataType.ENUM('explain', 'simplify', 'define', 'prerequisite'),
     allowNull: true,
   })
-  declare highlightAction: Exclude<HighlightAction, 'visualize'> | null;
+  declare highlightAction: ChatOrigin | null;
 
   @Column({ type: DataType.TEXT, allowNull: true })
   declare quotedText: string | null;

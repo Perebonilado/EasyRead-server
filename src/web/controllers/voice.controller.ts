@@ -12,6 +12,8 @@ import {
 import type { Response } from 'express';
 import { Type } from 'class-transformer';
 import {
+  ArrayMaxSize,
+  IsArray,
   IsIn,
   IsInt,
   IsNumber,
@@ -20,6 +22,7 @@ import {
   Length,
   Max,
   Min,
+  ValidateNested,
 } from 'class-validator';
 import type {
   AssessmentKind,
@@ -38,6 +41,7 @@ import {
   GetMasteryHandler,
   RecordAssessmentHandler,
 } from '../../business/handlers/documents/learning.handlers';
+import { RecordDwellHandler } from '../../business/handlers/documents/dwell.handlers';
 import { ValidationError } from '../../business/domain/errors/errors';
 import { STORAGE } from '../../business/ports/tokens';
 import type { StoragePort } from '../../business/ports/storage.port';
@@ -91,6 +95,27 @@ class AssessmentDto {
   payload?: unknown;
 }
 
+class DwellVisitDto {
+  @IsInt()
+  @Min(1)
+  page!: number;
+
+  @IsIn(['original', 'standard', 'easiest'])
+  level!: 'original' | 'standard' | 'easiest';
+
+  @IsInt()
+  @Min(0)
+  ms!: number;
+}
+
+class DwellDto {
+  @IsArray()
+  @ArrayMaxSize(50)
+  @ValidateNested({ each: true })
+  @Type(() => DwellVisitDto)
+  visits!: DwellVisitDto[];
+}
+
 @Controller('documents/:id')
 export class VoiceController {
   constructor(
@@ -98,6 +123,7 @@ export class VoiceController {
     private readonly startSession: StartVoiceSessionHandler,
     private readonly drawDiagram: DrawDiagramHandler,
     private readonly recordAssessment: RecordAssessmentHandler,
+    private readonly recordDwell: RecordDwellHandler,
     private readonly getMastery: GetMasteryHandler,
     @Inject(STORAGE) private readonly storage: StoragePort,
   ) {}
@@ -191,6 +217,26 @@ export class VoiceController {
       kind: body.kind,
       score: body.score,
       payload: body.payload,
+    });
+    return result.data;
+  }
+
+  /**
+   * Reading time, already interpreted. The client sends closed page visits;
+   * the server decides whether any of them meant anything and keeps only
+   * that verdict.
+   */
+  @Post('dwell')
+  @HttpCode(200)
+  async dwell(
+    @CurrentUser('id') userId: string,
+    @Param('id') documentId: string,
+    @Body() body: DwellDto,
+  ): Promise<{ stuckOnPage: number | null }> {
+    const result = await this.recordDwell.handle({
+      userId,
+      documentId,
+      visits: body.visits,
     });
     return result.data;
   }

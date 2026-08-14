@@ -11,7 +11,10 @@ describe('expandHighlight', () => {
   it('asks each highlight action as its own question', () => {
     const explain = expandHighlight('explain', 'the countercurrent mechanism');
     const define = expandHighlight('define', 'the countercurrent mechanism');
-    const simplify = expandHighlight('simplify', 'the countercurrent mechanism');
+    const simplify = expandHighlight(
+      'simplify',
+      'the countercurrent mechanism',
+    );
 
     expect(explain).not.toBe(define);
     expect(define).not.toBe(simplify);

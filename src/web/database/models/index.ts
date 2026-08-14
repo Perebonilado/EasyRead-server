@@ -1,7 +1,12 @@
 export { AiCallLogModel } from './ai-call-log.model';
 export { AssessmentEventModel } from './assessment-event.model';
 export { ChatMessageModel } from './chat-message.model';
+export { ConceptKnowledgeModel } from './concept-knowledge.model';
+export { TopicPrerequisiteModel } from './topic-prerequisite.model';
 export { LearnerProfileModel } from './learner-profile.model';
+export { ProfileChangeModel } from './profile-change.model';
+export { StruggleSignalModel } from './struggle-signal.model';
+export { DocumentLearningStateModel } from './document-learning-state.model';
 export { DocumentChunkModel } from './document-chunk.model';
 export { DocumentPageModel } from './document-page.model';
 export { DocumentSummaryModel } from './document-summary.model';
@@ -22,7 +27,12 @@ export { WebhookEventModel } from './webhook-event.model';
 import { AiCallLogModel } from './ai-call-log.model';
 import { AssessmentEventModel } from './assessment-event.model';
 import { ChatMessageModel } from './chat-message.model';
+import { ConceptKnowledgeModel } from './concept-knowledge.model';
+import { TopicPrerequisiteModel } from './topic-prerequisite.model';
 import { LearnerProfileModel } from './learner-profile.model';
+import { ProfileChangeModel } from './profile-change.model';
+import { StruggleSignalModel } from './struggle-signal.model';
+import { DocumentLearningStateModel } from './document-learning-state.model';
 import { DocumentChunkModel } from './document-chunk.model';
 import { DocumentPageModel } from './document-page.model';
 import { DocumentSummaryModel } from './document-summary.model';
@@ -61,5 +71,10 @@ export const ALL_MODELS = [
   AiCallLogModel,
   AssessmentEventModel,
   LearnerProfileModel,
+  ProfileChangeModel,
+  StruggleSignalModel,
+  DocumentLearningStateModel,
   ChatMessageModel,
+  ConceptKnowledgeModel,
+  TopicPrerequisiteModel,
 ];

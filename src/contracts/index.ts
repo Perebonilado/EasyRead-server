@@ -26,6 +26,8 @@ export type PipelineStep =
 export type PipelineStatus =
   'queued' | 'running' | 'done' | 'failed' | 'skipped';
 export type HighlightAction = 'explain' | 'simplify' | 'define' | 'visualize';
+/** What a chat question was about; `prerequisite` = a concept a chapter assumes. */
+export type ChatOrigin = Exclude<HighlightAction, 'visualize'> | 'prerequisite';
 export type PlanCode = 'free' | 'pro';
 
 // ── Errors ───────────────────────────────────────────────────────────────────
@@ -123,6 +125,25 @@ export type TopicDto = {
   startPage: number;
   endPage: number;
   isRead: boolean;
+  /** What this chapter assumes the reader already knows. */
+  prerequisites: TopicPrerequisiteDto[];
+};
+
+/**
+ * One thing a chapter takes for granted, resolved against this reader:
+ *  - `covered`   — an earlier chapter explains it and they have read it
+ *  - `available` — an earlier chapter explains it; they haven't read it yet
+ *  - `unknown`   — the document never explains it
+ * External concepts the reader has already been taught are filtered out
+ * server-side rather than shown resolved — an emptying list is the point.
+ */
+export type TopicPrerequisiteDto = {
+  id: string;
+  concept: string;
+  why: string;
+  state: 'covered' | 'available' | 'unknown';
+  /** Set for internal prerequisites: the chapter to jump back to. */
+  coveredByTopicId: string | null;
 };
 
 // ── Highlight actions ────────────────────────────────────────────────────────
@@ -161,7 +182,7 @@ export type ChatMessageDto = {
   id: string;
   role: ChatRole;
   text: string;
-  highlightAction: Exclude<HighlightAction, 'visualize'> | null;
+  highlightAction: ChatOrigin | null;
   quotedText: string | null;
   pageNumber: number | null;
   sources: { pageNumber: number; text: string }[] | null;
@@ -299,6 +320,8 @@ export const TEACH_TOOLS = {
   ASK_FLASHCARD: 'ask_flashcard',
   REPORT_UNDERSTANDING: 'report_understanding',
   UPDATE_LEARNER_PROFILE: 'update_learner_profile',
+  CHECK_PREREQUISITES: 'check_prerequisites',
+  TEACH_PREREQUISITE: 'teach_prerequisite',
 } as const;
 export type TeachToolName = (typeof TEACH_TOOLS)[keyof typeof TEACH_TOOLS];
 
@@ -321,11 +344,37 @@ export type MasteryResponse = {
 };
 
 /** How this student learns — read into every lesson, rewritten by the loop. */
+export type DialSource = 'default' | 'auto' | 'manual';
+
 export type LearnerProfileDto = {
   pace: 'slower' | 'steady' | 'faster';
   depth: 'lighter' | 'standard' | 'deeper';
   interactivity: 'less' | 'standard' | 'more';
   styleNotes: string | null;
+  /** Per dial: who set it. `manual` means the reflex may not touch it. */
+  paceSource: DialSource;
+  depthSource: DialSource;
+  interactivitySource: DialSource;
+};
+
+/** One recorded change to how the app teaches this reader, with its reason. */
+/** An adaptation that applies inside one document only. */
+export type LocalAdaptationDto = {
+  documentId: string;
+  documentTitle: string;
+  paceDelta: 'slower' | 'none' | 'faster';
+  depthDelta: 'deeper' | 'none' | 'lighter';
+  reason: string | null;
+};
+
+export type ProfileChangeDto = {
+  id: string;
+  field: 'pace' | 'depth' | 'interactivity' | 'style_notes';
+  fromValue: string | null;
+  toValue: string;
+  source: 'auto' | 'tutor' | 'manual';
+  reason: string | null;
+  createdAt: string;
 };
 
 /** A tutor as the picker sees it — persona prompts stay server-side. */

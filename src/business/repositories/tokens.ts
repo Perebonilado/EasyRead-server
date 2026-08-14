@@ -8,6 +8,7 @@ export const READING_POSITION_REPOSITORY = Symbol('ReadingPositionRepository');
 export const EXPORT_REPOSITORY = Symbol('ExportRepository');
 export const LOOKUP_REPOSITORY = Symbol('LookupRepository');
 export const CHAT_REPOSITORY = Symbol('CHAT_REPOSITORY');
+export const CONCEPT_REPOSITORY = Symbol('CONCEPT_REPOSITORY');
 export const PIPELINE_RUN_REPOSITORY = Symbol('PipelineRunRepository');
 export const SUBSCRIPTION_REPOSITORY = Symbol('SubscriptionRepository');
 export const USAGE_REPOSITORY = Symbol('UsageRepository');
@@ -17,3 +18,8 @@ export const SUMMARY_REPOSITORY = Symbol('SummaryRepository');
 export const AI_CALL_LOG_REPOSITORY = Symbol('AiCallLogRepository');
 export const ASSESSMENT_REPOSITORY = Symbol('AssessmentRepository');
 export const LEARNER_PROFILE_REPOSITORY = Symbol('LearnerProfileRepository');
+export const PROFILE_CHANGE_REPOSITORY = Symbol('PROFILE_CHANGE_REPOSITORY');
+export const DOCUMENT_LEARNING_STATE_REPOSITORY = Symbol(
+  'DOCUMENT_LEARNING_STATE_REPOSITORY',
+);
+export const STRUGGLE_SIGNAL_REPOSITORY = Symbol('STRUGGLE_SIGNAL_REPOSITORY');

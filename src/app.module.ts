@@ -50,6 +50,11 @@ import {
 import { DocumentDetailQuery } from './query/document-detail.query';
 import { DocumentListQuery } from './query/document-list.query';
 import { ContinueStudyingQuery } from './query/continue-studying.query';
+import { AdminController } from './web/controllers/admin.controller';
+import { AdaptationEffectQuery } from './query/adaptation-effect.query';
+import { AdaptationService } from './business/handlers/documents/adaptation.service';
+import { RecordDwellHandler } from './business/handlers/documents/dwell.handlers';
+import { StruggleRecorder } from './business/handlers/documents/struggle-recorder.service';
 import {
   ExpandDocumentHandler,
   GenerateDocumentHandler,
@@ -65,6 +70,7 @@ import { ExportsController } from './web/controllers/exports.controller';
 import { HighlightController } from './web/controllers/highlight.controller';
 import { ChatController } from './web/controllers/chat.controller';
 import { LearnController } from './web/controllers/learn.controller';
+import { ConceptsController } from './web/controllers/concepts.controller';
 import { ReaderController } from './web/controllers/reader.controller';
 import { TutorsController } from './web/controllers/tutors.controller';
 import { VoiceController } from './web/controllers/voice.controller';
@@ -105,6 +111,10 @@ const handlers = [
   InterviewHandler,
   GenerateDocumentHandler,
   ExpandDocumentHandler,
+  StruggleRecorder,
+  AdaptationService,
+  RecordDwellHandler,
+  AdaptationEffectQuery,
 ];
 
 const queries = [
@@ -128,6 +138,7 @@ const queries = [
     CoreModule,
   ],
   controllers: [
+    AdminController,
     AuthController,
     AccountController,
     DocumentsController,
@@ -135,6 +146,7 @@ const queries = [
     HighlightController,
     ChatController,
     LearnController,
+    ConceptsController,
     ExportsController,
     VoiceController,
     TutorsController,

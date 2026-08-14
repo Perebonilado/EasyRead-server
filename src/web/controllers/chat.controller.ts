@@ -10,7 +10,7 @@ import {
   Min,
 } from 'class-validator';
 import { Type } from 'class-transformer';
-import type { ChatHistoryResponse, HighlightAction } from '../../contracts';
+import type { ChatHistoryResponse, ChatOrigin } from '../../contracts';
 import {
   ListChatMessagesHandler,
   SendChatMessageHandler,
@@ -24,8 +24,8 @@ class SendMessageDto {
 
   /** Present when the message came from the highlight popover. */
   @IsOptional()
-  @IsIn(['explain', 'simplify', 'define'])
-  highlightAction?: Exclude<HighlightAction, 'visualize'>;
+  @IsIn(['explain', 'simplify', 'define', 'prerequisite'])
+  highlightAction?: Exclude<ChatOrigin, null>;
 
   @IsOptional()
   @Type(() => Number)

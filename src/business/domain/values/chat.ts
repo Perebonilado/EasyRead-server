@@ -1,4 +1,4 @@
-import type { HighlightAction } from '../../../contracts';
+import type { ChatOrigin } from '../../../contracts';
 
 /**
  * Turns a highlight press into the question the reader would have typed.
@@ -9,7 +9,7 @@ import type { HighlightAction } from '../../../contracts';
  * message keeps the raw passage — this expansion is for the model only.
  */
 export function expandHighlight(
-  action: Exclude<HighlightAction, 'visualize'> | undefined | null,
+  action: ChatOrigin | undefined | null,
   selection: string,
 ): string {
   const passage = selection.trim();
@@ -27,6 +27,12 @@ export function expandHighlight(
     define: [
       'Define this term as my document uses it, then say in one sentence why',
       'it matters here:',
+    ].join(' '),
+    prerequisite: [
+      'A chapter of my document assumes I already understand this, and I',
+      "don't. Teach it to me from scratch, in plain language, assuming no",
+      'background — and connect it to how my document uses it, so I can go',
+      'back to the chapter and follow:',
     ].join(' '),
   }[action];
 

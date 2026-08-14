@@ -1,21 +1,36 @@
 import { Inject, Injectable } from '@nestjs/common';
-import type { ChatHistoryResponse, HighlightAction } from '../../../contracts';
+import type { ChatHistoryResponse, ChatOrigin } from '../../../contracts';
 import { ValidationError } from '../../domain/errors/errors';
 import { UsageMetric } from '../../domain/values';
 import { expandHighlight } from '../../domain/values/chat';
 import { LLM_GATEWAY, VECTOR_STORE } from '../../ports/tokens';
 import type { LlmGatewayPort } from '../../ports/llm.port';
 import type { VectorStorePort } from '../../ports/vector-store.port';
-import { CHAT_REPOSITORY, SUMMARY_REPOSITORY } from '../../repositories/tokens';
+import {
+  DOCUMENT_LEARNING_STATE_REPOSITORY,
+  LEARNER_PROFILE_REPOSITORY,
+  CHAT_REPOSITORY,
+  CONCEPT_REPOSITORY,
+  SUMMARY_REPOSITORY,
+} from '../../repositories/tokens';
 import type {
   ChatMessageRecord,
   ChatRepository,
 } from '../../repositories/chat.repository';
 import type { SummaryRepository } from '../../repositories/misc.repository';
+import type { ConceptKnowledgeRepository } from '../../repositories/concept.repository';
+import {
+  DEFAULT_LEARNER_PROFILE,
+  type LearnerProfileRepository,
+} from '../../repositories/learning.repository';
+import { profileInstructions } from '../../domain/values/learner-profile';
+import { effectiveProfile } from '../../domain/learning';
+import type { DocumentLearningStateRepository } from '../../repositories/learning.repository';
 import AbstractRequestHandlerTemplate from '../AbstractRequestHandlerTemplate';
 import { CommandResponse } from '../response/CommandResponse';
 import { DocumentAccessService } from './document-access.service';
 import { EntitlementsService } from './entitlements.service';
+import { StruggleRecorder } from './struggle-recorder.service';
 
 const MIN_TEXT = 2;
 const MAX_TEXT = 2000;
@@ -29,8 +44,9 @@ export interface SendChatMessageRequest {
   documentId: string;
   /** What the reader typed, or the passage they highlighted. */
   text: string;
-  /** Set when this message came from the highlight popover. */
-  highlightAction?: Exclude<HighlightAction, 'visualize'>;
+  /** Set when this message came from the highlight popover or a
+   * prerequisite chip. */
+  highlightAction?: Exclude<ChatOrigin, null>;
   pageNumber?: number | null;
   /** Streams the reply to the client as it is generated. */
   onToken?: (chunk: string) => void;
@@ -65,8 +81,15 @@ export class SendChatMessageHandler extends AbstractRequestHandlerTemplate<
     @Inject(LLM_GATEWAY) private readonly llm: LlmGatewayPort,
     @Inject(SUMMARY_REPOSITORY) private readonly summaries: SummaryRepository,
     @Inject(CHAT_REPOSITORY) private readonly chat: ChatRepository,
+    @Inject(CONCEPT_REPOSITORY)
+    private readonly concepts: ConceptKnowledgeRepository,
+    @Inject(LEARNER_PROFILE_REPOSITORY)
+    private readonly profiles: LearnerProfileRepository,
     private readonly access: DocumentAccessService,
     private readonly entitlements: EntitlementsService,
+    private readonly struggles: StruggleRecorder,
+    @Inject(DOCUMENT_LEARNING_STATE_REPOSITORY)
+    private readonly docStates: DocumentLearningStateRepository,
   ) {
     super();
   }
@@ -105,11 +128,38 @@ export class SendChatMessageHandler extends AbstractRequestHandlerTemplate<
       pageNumber: cmd.pageNumber ?? null,
     });
 
+    // Every turn is comprehension evidence of some strength: a typed
+    // question, an Explain/Simplify press, or a prerequisite the reader
+    // admitted to not knowing. Define is excluded — looking up a term is
+    // normal reading, not effort.
+    const signalKind =
+      cmd.highlightAction === 'prerequisite'
+        ? ('prereq_requested' as const)
+        : cmd.highlightAction === 'explain' ||
+            cmd.highlightAction === 'simplify'
+          ? ('highlight_explain' as const)
+          : cmd.highlightAction
+            ? null
+            : ('chat_question' as const);
+    if (signalKind) {
+      void this.struggles.record({
+        userId: cmd.userId,
+        documentId: cmd.documentId,
+        kind: signalKind,
+        pageNumber: cmd.pageNumber ?? null,
+      });
+    }
+
     const question = expandHighlight(cmd.highlightAction, text);
 
-    const [summary, embedding] = await Promise.all([
+    // The profile rides in the same parallel block as summary and embedding,
+    // so personalising the answer costs no extra latency. Best-effort: an
+    // unreadable profile must never cost the reader their answer.
+    const [summary, embedding, profile, docState] = await Promise.all([
       this.summaries.find(cmd.documentId),
       this.llm.embed({ texts: [question] }).then((r) => r.value[0]),
+      this.profiles.find(cmd.userId).catch(() => null),
+      this.docStates.find(cmd.userId, cmd.documentId).catch(() => null),
     ]);
 
     const chunks = await this.vectors.query({
@@ -130,6 +180,12 @@ export class SendChatMessageHandler extends AbstractRequestHandlerTemplate<
       question,
       context,
       summary,
+      // Composed, not raw: how this reader learns, adjusted for how this
+      // particular document is going for them.
+      profile: profileInstructions(
+        effectiveProfile(profile ?? DEFAULT_LEARNER_PROFILE, docState),
+        'written',
+      ),
       onToken: cmd.onToken,
     });
 
@@ -140,6 +196,17 @@ export class SendChatMessageHandler extends AbstractRequestHandlerTemplate<
       text: result.value,
       sources,
     });
+
+    // The ledger's whole write path for the chat: asking about a
+    // prerequisite flags it, and the reply that just landed above resolves
+    // it. Both after the fact, so a failed generation leaves the concept
+    // unclear rather than falsely taught.
+    if (cmd.highlightAction === 'prerequisite') {
+      await this.concepts.markUnclear(cmd.userId, text).catch(() => undefined);
+      await this.concepts
+        .markTaught(cmd.userId, text, cmd.documentId)
+        .catch(() => undefined);
+    }
 
     return CommandResponse.of({ userMessage, reply });
   }

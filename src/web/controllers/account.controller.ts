@@ -1,17 +1,46 @@
-import { Body, Controller, Delete, Get, HttpCode, Patch } from '@nestjs/common';
-import { IsIn, IsOptional, IsString, Length } from 'class-validator';
+import {
+  Body,
+  Controller,
+  Delete,
+  Get,
+  HttpCode,
+  Param,
+  Patch,
+  Query,
+} from '@nestjs/common';
+import {
+  IsArray,
+  IsIn,
+  IsInt,
+  IsOptional,
+  IsString,
+  Length,
+  Max,
+  Min,
+} from 'class-validator';
+import { Type } from 'class-transformer';
 import type {
   LearnerProfileDto,
   PlanDto,
+  LocalAdaptationDto,
+  ProfileChangeDto,
   SubscriptionResponse,
 } from '../../contracts';
 import { UpdateLearnerProfileHandler } from '../../business/handlers/documents/learning.handlers';
-import { LEARNER_PROFILE_REPOSITORY } from '../../business/repositories/tokens';
+import {
+  DOCUMENT_LEARNING_STATE_REPOSITORY,
+  DOCUMENT_REPOSITORY,
+  LEARNER_PROFILE_REPOSITORY,
+  PROFILE_CHANGE_REPOSITORY,
+} from '../../business/repositories/tokens';
 import { Inject } from '@nestjs/common';
 import {
   DEFAULT_LEARNER_PROFILE,
+  type DocumentLearningStateRepository,
   type LearnerProfileRepository,
+  type ProfileChangeRepository,
 } from '../../business/repositories/learning.repository';
+import type { DocumentRepository } from '../../business/repositories/document.repository';
 import { DeleteAccountHandler } from '../../business/handlers/identity/delete-account.handler';
 import { MeQuery } from '../../query/me.query';
 import { CurrentUser } from '../security/current-user.decorator';
@@ -34,6 +63,35 @@ class LearnerProfileDtoBody {
   @IsString()
   @Length(1, 200)
   note?: string;
+
+  /**
+   * Who is writing. The settings screen sends `manual`, which pins each
+   * changed dial against automatic adjustment; the lesson tool sends `tutor`.
+   * Defaults to `manual` — this is a human-facing endpoint.
+   */
+  @IsOptional()
+  @IsIn(['manual', 'tutor'])
+  source?: 'manual' | 'tutor';
+
+  /** Dials to release back to automatic adjustment. */
+  @IsOptional()
+  @IsArray()
+  @IsIn(['pace', 'depth', 'interactivity'], { each: true })
+  release?: ('pace' | 'depth' | 'interactivity')[];
+
+  /** Erase the accumulated style notes. */
+  @IsOptional()
+  @IsIn([true, false])
+  clearNotes?: boolean;
+}
+
+class ChangesQueryDto {
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  @Max(20)
+  limit?: number;
 }
 
 @Controller()
@@ -44,6 +102,12 @@ export class AccountController {
     private readonly updateProfile: UpdateLearnerProfileHandler,
     @Inject(LEARNER_PROFILE_REPOSITORY)
     private readonly profiles: LearnerProfileRepository,
+    @Inject(PROFILE_CHANGE_REPOSITORY)
+    private readonly changes: ProfileChangeRepository,
+    @Inject(DOCUMENT_LEARNING_STATE_REPOSITORY)
+    private readonly docStates: DocumentLearningStateRepository,
+    @Inject(DOCUMENT_REPOSITORY)
+    private readonly documents: DocumentRepository,
   ) {}
 
   /** How this user learns — read into every lesson. */
@@ -54,14 +118,77 @@ export class AccountController {
     return (await this.profiles.find(userId)) ?? DEFAULT_LEARNER_PROFILE;
   }
 
-  /** The adaptive loop's write channel — the tutor's tool lands here. */
+  /** The adaptive loop's write channel — settings and the tutor's tool. */
   @Patch('learner-profile')
   async patchLearnerProfile(
     @CurrentUser('id') userId: string,
     @Body() body: LearnerProfileDtoBody,
   ): Promise<LearnerProfileDto> {
-    const result = await this.updateProfile.handle({ userId, ...body });
+    const result = await this.updateProfile.handle({
+      userId,
+      ...body,
+      source: body.source ?? 'manual',
+    });
     return result.data;
+  }
+
+  /**
+   * Adaptations that apply to one document only. Without these the settings
+   * panel would describe a general profile the reader is not actually being
+   * taught with.
+   */
+  @Get('learner-profile/local')
+  async localAdaptations(
+    @CurrentUser('id') userId: string,
+  ): Promise<LocalAdaptationDto[]> {
+    const states = await this.docStates.active(userId);
+    if (!states.length) return [];
+    // Few enough to name individually: a reader holds local adaptations in
+    // the handful of documents they are actively working through.
+    const docs = await Promise.all(
+      states.map((state) =>
+        this.documents.findById(state.documentId).catch(() => null),
+      ),
+    );
+    return states.map((state, index) => ({
+      documentId: state.documentId,
+      documentTitle: docs[index]?.props.title ?? 'a document',
+      paceDelta: state.paceDelta,
+      depthDelta: state.depthDelta,
+      reason: state.reason,
+    }));
+  }
+
+  /** Undo a per-document adaptation the reader disagrees with. */
+  @Delete('learner-profile/local/:documentId')
+  @HttpCode(204)
+  async clearLocalAdaptation(
+    @CurrentUser('id') userId: string,
+    @Param('documentId') documentId: string,
+  ): Promise<void> {
+    await this.docStates.upsert(userId, documentId, {
+      paceDelta: 'none',
+      depthDelta: 'none',
+      reason: null,
+    });
+  }
+
+  /** The recent history of how the app changed its teaching, with reasons. */
+  @Get('learner-profile/changes')
+  async profileChanges(
+    @CurrentUser('id') userId: string,
+    @Query() query: ChangesQueryDto,
+  ): Promise<ProfileChangeDto[]> {
+    const rows = await this.changes.list(userId, query.limit ?? 5);
+    return rows.map((row) => ({
+      id: row.id,
+      field: row.field,
+      fromValue: row.fromValue,
+      toValue: row.toValue,
+      source: row.source,
+      reason: row.reason,
+      createdAt: row.createdAt.toISOString(),
+    }));
   }
 
   @Get('subscription')

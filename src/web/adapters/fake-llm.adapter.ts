@@ -200,6 +200,7 @@ export class FakeLlmAdapter implements LlmGatewayPort {
     question: string;
     context: string;
     summary: string | null;
+    profile: string;
     onToken?: (chunk: string) => void;
   }): Promise<LlmResult<string>> {
     const started = Date.now();
@@ -208,6 +209,39 @@ export class FakeLlmAdapter implements LlmGatewayPort {
     return {
       value: answer,
       usage: this.usage(started, input.question.length, answer.length),
+    };
+  }
+
+  async outlinePrerequisites(input: {
+    summary: string | null;
+    chapters: { title: string; description: string | null }[];
+  }) {
+    const started = Date.now();
+    // Chapter 2 onward assumes the previous chapter's subject (internal), and
+    // every third chapter also assumes one outside concept (external).
+    const value = input.chapters.flatMap((chapter, index) => {
+      if (index === 0) return [];
+      const rows = [
+        {
+          chapter: index + 1,
+          concept: input.chapters[index - 1].title.toLowerCase(),
+          why: `Builds directly on "${input.chapters[index - 1].title}".`,
+          coveredByChapter: index,
+        },
+      ];
+      if ((index + 1) % 3 === 0) {
+        rows.push({
+          chapter: index + 1,
+          concept: `outside concept ${index + 1}`,
+          why: `Fake external assumption for "${chapter.title}".`,
+          coveredByChapter: 0,
+        });
+      }
+      return rows;
+    });
+    return {
+      value,
+      usage: this.usage(started, input.chapters.length * 8, value.length * 12),
     };
   }
 

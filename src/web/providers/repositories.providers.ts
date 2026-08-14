@@ -1,5 +1,8 @@
 import type { Provider } from '@nestjs/common';
 import {
+  DOCUMENT_LEARNING_STATE_REPOSITORY,
+  STRUGGLE_SIGNAL_REPOSITORY,
+  PROFILE_CHANGE_REPOSITORY,
   AI_CALL_LOG_REPOSITORY,
   ASSESSMENT_REPOSITORY,
   LEARNER_PROFILE_REPOSITORY,
@@ -7,6 +10,7 @@ import {
   DOCUMENT_REPOSITORY,
   EXPORT_REPOSITORY,
   CHAT_REPOSITORY,
+  CONCEPT_REPOSITORY,
   LOOKUP_REPOSITORY,
   PIPELINE_RUN_REPOSITORY,
   READING_POSITION_REPOSITORY,
@@ -20,11 +24,15 @@ import {
   WEBHOOK_EVENT_REPOSITORY,
 } from '../../business/repositories/tokens';
 import { SequelizeAiCallLogRepository } from '../repositories/sequelize-ai-call-log.repository';
+import { SequelizeStruggleSignalRepository } from '../repositories/sequelize-struggle.repository';
 import {
+  SequelizeDocumentLearningStateRepository,
+  SequelizeProfileChangeRepository,
   SequelizeAssessmentRepository,
   SequelizeLearnerProfileRepository,
 } from '../repositories/sequelize-learning.repositories';
 import { SequelizeChatRepository } from '../repositories/sequelize-chat.repository';
+import { SequelizeConceptRepository } from '../repositories/sequelize-concept.repository';
 import {
   SequelizeSubscriptionRepository,
   SequelizeUsageRepository,
@@ -75,6 +83,7 @@ export const repositoryProviders: Provider[] = [
   { provide: EXPORT_REPOSITORY, useClass: SequelizeExportRepository },
   { provide: LOOKUP_REPOSITORY, useClass: SequelizeLookupRepository },
   { provide: CHAT_REPOSITORY, useClass: SequelizeChatRepository },
+  { provide: CONCEPT_REPOSITORY, useClass: SequelizeConceptRepository },
   {
     provide: PIPELINE_RUN_REPOSITORY,
     useClass: SequelizePipelineRunRepository,
@@ -90,6 +99,18 @@ export const repositoryProviders: Provider[] = [
   },
   { provide: AI_CALL_LOG_REPOSITORY, useClass: SequelizeAiCallLogRepository },
   { provide: ASSESSMENT_REPOSITORY, useClass: SequelizeAssessmentRepository },
+  {
+    provide: DOCUMENT_LEARNING_STATE_REPOSITORY,
+    useClass: SequelizeDocumentLearningStateRepository,
+  },
+  {
+    provide: STRUGGLE_SIGNAL_REPOSITORY,
+    useClass: SequelizeStruggleSignalRepository,
+  },
+  {
+    provide: PROFILE_CHANGE_REPOSITORY,
+    useClass: SequelizeProfileChangeRepository,
+  },
   {
     provide: LEARNER_PROFILE_REPOSITORY,
     useClass: SequelizeLearnerProfileRepository,

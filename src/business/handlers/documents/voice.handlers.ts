@@ -192,6 +192,8 @@ export interface VoiceSessionRequest {
   mode: VoiceMode;
   /** Which tutor runs the lesson; defaults to the roster's first. */
   tutorId?: string;
+  /** A topic the student asked to go over again; the lesson starts there. */
+  revisitTopicId?: string;
 }
 
 /**
@@ -211,6 +213,35 @@ const TEACHING_TOOLS: RealtimeTool[] = [
       },
       required: ['page'],
     },
+  },
+  {
+    name: TEACH_TOOLS.REVEAL_POINT,
+    description:
+      "Write the next point onto the student's page. Every page starts blank " +
+      'for the student; its numbered points appear as you reveal them, ' +
+      "building up like writing on a board. Call this with a point's number " +
+      'just before you start explaining that point. Cumulative: upTo 3 shows ' +
+      'points 1 through 3. Never explain a point the student cannot see.',
+    parameters: {
+      type: 'object',
+      properties: {
+        upTo: {
+          type: 'integer',
+          minimum: 1,
+          description: "Show the page's points 1 through this number",
+        },
+      },
+      required: ['upTo'],
+    },
+  },
+  {
+    name: TEACH_TOOLS.END_LESSON,
+    description:
+      'End the lesson. Call this only after you have wrapped up out loud — ' +
+      'recapped what was covered and said goodbye — when every topic is ' +
+      'taught, or the session you were asked for is complete, or the ' +
+      'student says they are done. The student sees their session report.',
+    parameters: { type: 'object', properties: {} },
   },
   {
     name: TEACH_TOOLS.SHOW_IMAGES,
@@ -428,6 +459,7 @@ export class StartVoiceSessionHandler extends AbstractRequestHandlerTemplate<
             summary,
             cmd.userId,
             tutor,
+            cmd.revisitTopicId,
           )
         : this.chatInstructions(doc.props.title, summary);
 
@@ -462,7 +494,7 @@ export class StartVoiceSessionHandler extends AbstractRequestHandlerTemplate<
       summary ? `What the document covers:\n${summary}` : null,
       'Ground every answer in this document. If it does not cover something, say so plainly rather than answering from general knowledge.',
       'Keep technical terms, names and numbers exactly as the document uses them — the student is being examined on them — and explain them in plain words alongside.',
-      'This is speech: answer in short, plain sentences, a few at a time. No lists, no headings, no markdown. Pause naturally rather than lecturing.',
+      'This is speech, and the listener is trying to learn: speak at a calm, unhurried rate, in short plain sentences, a few at a time, with natural pauses. Never race. No lists, no headings, no markdown.',
       'The text of the page the student is currently reading is appended below. When they say "this page" or "here", that is what they mean.',
     ]
       .filter(Boolean)
@@ -481,6 +513,7 @@ export class StartVoiceSessionHandler extends AbstractRequestHandlerTemplate<
     summary: string | null,
     userId: string,
     tutor: Tutor,
+    revisitTopicId?: string,
   ): Promise<string> {
     const [topics, events, profile] = await Promise.all([
       this.topics.listWithReadState(documentId, userId),
@@ -515,15 +548,28 @@ export class StartVoiceSessionHandler extends AbstractRequestHandlerTemplate<
       `${tutor.persona}\n\nYour teaching style:\n${dialInstructions(tutor.dials)}`,
       summary ? `What the document covers:\n${summary}` : null,
       `The lesson plan, in order:\n${syllabus}`,
+      (() => {
+        const revisit = topics.find((topic) => topic.id === revisitTopicId);
+        if (!revisit) return null;
+        return (
+          `THIS SESSION IS A REVISIT. The student asked to go over "${revisit.title}" again (pages ${revisit.startPage}-${revisit.endPage}). ` +
+          'Start there regardless of read state, and re-teach it from a genuinely different angle than a first pass — new examples, new framing. ' +
+          `Check it landed with ${TEACH_TOOLS.ASK_QUIZ} and record ${TEACH_TOOLS.REPORT_UNDERSTANDING} before anything else. ` +
+          `When the student is satisfied, offer to continue with the rest of the plan or wrap up with ${TEACH_TOOLS.END_LESSON}.`
+        );
+      })(),
       [
         'How to run the lesson:',
         '- Start with a one-breath overview of where you are in the plan, then teach the first topic not marked "already taught".',
         `- When you begin a topic, call ${TEACH_TOOLS.GO_TO_PAGE} with its first page. As you move through its material, keep turning pages with ${TEACH_TOOLS.GO_TO_PAGE} so the student is always looking at what you are explaining.`,
+        `- Each page arrives blank on the student's screen. Its points are numbered in the page text below. Just before you explain a point, call ${TEACH_TOOLS.REVEAL_POINT} with that number — the page builds up as you teach, like writing on a board. Reveal one point at a time, and never discuss a point the student cannot see yet.`,
+        '- The student should be taking notes, like in a real classroom. After you reveal and explain a point, leave a short pause for them to write it down. When a term is exam-critical or easily confused, say that it belongs in their notes — then give them the moment to jot it.',
         '- Teach in short spoken stretches — under a minute — then ask the student something: to say it back, to guess the next step, whether it makes sense. This is a conversation, not a lecture.',
         `- When a structure or apparatus is easier seen than said, call ${TEACH_TOOLS.SHOW_IMAGES}. When a process, pathway or hierarchy needs laying out, call ${TEACH_TOOLS.DRAW_DIAGRAM} and then talk the student through what is on the board.`,
         `- A newly drawn diagram fills the screen on its own. Teach from it node by node while it is large, then call ${TEACH_TOOLS.FOCUS_BOARD} with action "close" before moving on. Turning the page also puts it away. Bring anything back later with action "expand" and its title.`,
         `- When the student has understood a topic, call ${TEACH_TOOLS.MARK_TOPIC_COMPLETE} with its id, then move to the next.`,
         '- If the student asks to skip, slow down, go back, or dig into something, follow them — the plan serves the student.',
+        `- When the whole plan is taught — or the student says they are done — wrap up like a real teacher: a short spoken recap of what was covered, a word of encouragement, goodbye. Then, and only then, call ${TEACH_TOOLS.END_LESSON} to close the session.`,
         '- After every tool call, keep talking; never leave silence while something appears on screen.',
         `- Check understanding with ${TEACH_TOOLS.ASK_QUIZ} after each concept cluster and ${TEACH_TOOLS.ASK_FLASHCARD} for key terms. The tool result is the authoritative answer. When they get one wrong, re-teach that piece before moving on.`,
         `- Before ${TEACH_TOOLS.MARK_TOPIC_COMPLETE}, call ${TEACH_TOOLS.REPORT_UNDERSTANDING} with your honest 1-5 read of the student on that topic.`,
@@ -531,8 +577,8 @@ export class StartVoiceSessionHandler extends AbstractRequestHandlerTemplate<
       ].join('\n'),
       profileInstructions(profile ?? DEFAULT_LEARNER_PROFILE),
       'Ground everything in this document. Keep technical terms, names and numbers exactly as it writes them — the student is examined on them — and explain each in plain words when it first appears.',
-      'This is speech: short, plain sentences. No lists, no headings, no markdown in what you say.',
-      'The text of the page currently on screen is appended below and refreshes as pages turn.',
+      'This is speech, and the student is learning as they listen: speak at a calm, unhurried rate, in short plain sentences, and give an important sentence a beat of silence to land before the next. Never race through material, and never sound like you are reading. No lists, no headings, no markdown in what you say.',
+      `The text of the page currently on screen is appended below and refreshes as pages turn. The numbers on the simplified points are the ones ${TEACH_TOOLS.REVEAL_POINT} takes.`,
     ]
       .filter(Boolean)
       .join('\n\n');

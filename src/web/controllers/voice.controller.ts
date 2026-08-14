@@ -59,6 +59,11 @@ class VoiceSessionDto {
   @IsString()
   @Length(1, 40)
   tutorId?: string;
+
+  @IsOptional()
+  @IsString()
+  @Length(1, 64)
+  revisitTopicId?: string;
 }
 
 class DiagramDto {
@@ -150,6 +155,7 @@ export class VoiceController {
       pageNumber: body.pageNumber,
       mode: body.mode ?? 'chat',
       tutorId: body.tutorId,
+      revisitTopicId: body.revisitTopicId,
     });
     return result.data;
   }

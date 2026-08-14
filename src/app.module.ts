@@ -42,6 +42,7 @@ import {
   RecordAssessmentHandler,
   UpdateLearnerProfileHandler,
 } from './business/handlers/documents/learning.handlers';
+import { TutorIntroHandler } from './business/handlers/tutors/tutor-intro.handler';
 import { DocumentDetailQuery } from './query/document-detail.query';
 import { DocumentListQuery } from './query/document-list.query';
 import { MeQuery } from './query/me.query';
@@ -86,6 +87,7 @@ const handlers = [
   RecordAssessmentHandler,
   GetMasteryHandler,
   UpdateLearnerProfileHandler,
+  TutorIntroHandler,
 ];
 
 const queries = [DocumentListQuery, DocumentDetailQuery, ReaderQuery, MeQuery];

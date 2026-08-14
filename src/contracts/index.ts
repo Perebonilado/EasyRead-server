@@ -182,6 +182,8 @@ export type VoiceMode = 'chat' | 'teach';
  */
 export const TEACH_TOOLS = {
   GO_TO_PAGE: 'go_to_page',
+  REVEAL_POINT: 'reveal_point',
+  END_LESSON: 'end_lesson',
   SHOW_IMAGES: 'show_images',
   DRAW_DIAGRAM: 'draw_diagram',
   FOCUS_BOARD: 'focus_board',

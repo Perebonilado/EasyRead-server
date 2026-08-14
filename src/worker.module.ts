@@ -4,6 +4,7 @@ import { CoreModule } from './core.module';
 import { ConvertProcessor } from './pipeline/processors/convert.processor';
 import { EmbedProcessor } from './pipeline/processors/embed.processor';
 import { ExportProcessor } from './pipeline/processors/export.processor';
+import { LearnProcessor } from './pipeline/processors/learn.processor';
 import { ExtractProcessor } from './pipeline/processors/extract.processor';
 import { SimplifyPageProcessor } from './pipeline/processors/simplify.processor';
 import { SummarizeProcessor } from './pipeline/processors/summarize.processor';
@@ -26,6 +27,7 @@ import { WorkerRunner } from './pipeline/worker-runner.service';
     EmbedProcessor,
     SimplifyPageProcessor,
     ExportProcessor,
+    LearnProcessor,
     WorkerRunner,
     PurgeService,
   ],

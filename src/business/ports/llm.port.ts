@@ -1,4 +1,4 @@
-import type { Block } from '../../contracts';
+import type { LearnQuestion, Block } from '../../contracts';
 
 export type LlmTask =
   | 'summarize'
@@ -10,6 +10,9 @@ export type LlmTask =
   | 'highlight_simplify'
   | 'highlight_define'
   | 'chat_document'
+  | 'learn_interview'
+  | 'learn_outline'
+  | 'learn_write'
   | 'visualize_query'
   | 'diagram'
   | 'embed';
@@ -74,6 +77,36 @@ export interface LlmGatewayPort {
     summary: string | null;
     onToken?: (chunk: string) => void;
   }): Promise<LlmResult<string>>;
+
+  /** Questions worth asking before writing about this particular topic. */
+  interviewForTopic(input: {
+    topic: string;
+  }): Promise<LlmResult<{ topic: string; questions: LearnQuestion[] }>>;
+
+  /** The chapter plan, sized to a page budget. */
+  outlineTopic(input: {
+    topic: string;
+    brief: string;
+    targetPages: number;
+    /** Topics an expansion must cover, on top of the model's own plan. */
+    mustCover?: string[];
+  }): Promise<
+    LlmResult<{
+      title: string;
+      chapters: { title: string; summary: string; pages: number }[];
+      furtherTopics?: string[];
+    }>
+  >;
+
+  /** One chapter, written to length and in the document's own voice. */
+  writeChapter(input: {
+    topic: string;
+    brief: string;
+    documentTitle: string;
+    chapter: { title: string; summary: string; pages: number };
+    /** Chapter titles either side, so the prose joins up. */
+    outline: string[];
+  }): Promise<LlmResult<{ blocks: Block[] }>>;
 
   rewriteImageQuery(input: {
     selection: string;

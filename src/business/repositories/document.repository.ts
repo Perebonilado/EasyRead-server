@@ -1,3 +1,4 @@
+import type { DocumentBrief, DocumentSource } from '../../contracts';
 import type { Document } from '../domain/entities/document';
 
 export interface CreateDocumentInput {
@@ -6,6 +7,9 @@ export interface CreateDocumentInput {
   fileName: string;
   sourceMimeType: string;
   sizeBytes: number;
+  /** Defaults to `uploaded`; the learn flow creates `generated` ones. */
+  source?: DocumentSource;
+  brief?: DocumentBrief | null;
 }
 
 export interface DocumentRepository {

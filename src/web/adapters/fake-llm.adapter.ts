@@ -211,6 +211,70 @@ export class FakeLlmAdapter implements LlmGatewayPort {
     };
   }
 
+  async interviewForTopic(input: { topic: string }) {
+    const started = Date.now();
+    return {
+      value: {
+        topic: input.topic,
+        questions: [
+          {
+            id: 'level',
+            question: `How much ${input.topic} do you already know?`,
+            options: ['Nothing at all', 'A little', 'Quite a lot'],
+          },
+        ],
+      },
+      usage: this.usage(started, input.topic.length, 40),
+    };
+  }
+
+  async outlineTopic(input: {
+    topic: string;
+    brief: string;
+    targetPages: number;
+    mustCover?: string[];
+  }) {
+    const started = Date.now();
+    const chapters = Array.from(
+      { length: Math.max(1, Math.round(input.targetPages / 3)) },
+      (_, index) => ({
+        title: `${input.topic}: part ${index + 1}`,
+        summary: `Fake chapter ${index + 1} about ${input.topic}.`,
+        pages: 3,
+      }),
+    );
+    return {
+      value: {
+        title: `A study of ${input.topic}`,
+        chapters,
+        furtherTopics: [`Advanced ${input.topic}`],
+      },
+      usage: this.usage(started, input.brief.length, 60),
+    };
+  }
+
+  async writeChapter(input: {
+    topic: string;
+    brief: string;
+    documentTitle: string;
+    chapter: { title: string; summary: string; pages: number };
+    outline: string[];
+  }) {
+    const started = Date.now();
+    return {
+      value: {
+        blocks: [
+          { type: 'headingOne' as const, text: input.chapter.title },
+          {
+            type: 'paragraph' as const,
+            text: `[fake chapter body for "${input.chapter.title}" in ${input.documentTitle}]`,
+          },
+        ],
+      },
+      usage: this.usage(started, input.chapter.summary.length, 80),
+    };
+  }
+
   async rewriteImageQuery({
     selection,
   }: {

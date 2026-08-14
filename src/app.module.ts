@@ -50,6 +50,11 @@ import {
 import { DocumentDetailQuery } from './query/document-detail.query';
 import { DocumentListQuery } from './query/document-list.query';
 import { ContinueStudyingQuery } from './query/continue-studying.query';
+import {
+  ExpandDocumentHandler,
+  GenerateDocumentHandler,
+  InterviewHandler,
+} from './business/handlers/learn/learn.handlers';
 import { MeQuery } from './query/me.query';
 import { ReaderQuery } from './query/reader.query';
 import { AccountController } from './web/controllers/account.controller';
@@ -59,6 +64,7 @@ import { EventsController } from './web/controllers/events.controller';
 import { ExportsController } from './web/controllers/exports.controller';
 import { HighlightController } from './web/controllers/highlight.controller';
 import { ChatController } from './web/controllers/chat.controller';
+import { LearnController } from './web/controllers/learn.controller';
 import { ReaderController } from './web/controllers/reader.controller';
 import { TutorsController } from './web/controllers/tutors.controller';
 import { VoiceController } from './web/controllers/voice.controller';
@@ -96,6 +102,9 @@ const handlers = [
   TutorIntroHandler,
   SendChatMessageHandler,
   ListChatMessagesHandler,
+  InterviewHandler,
+  GenerateDocumentHandler,
+  ExpandDocumentHandler,
 ];
 
 const queries = [
@@ -125,6 +134,7 @@ const queries = [
     ReaderController,
     HighlightController,
     ChatController,
+    LearnController,
     ExportsController,
     VoiceController,
     TutorsController,

@@ -94,6 +94,10 @@ export class SequelizePipelineRunRepository implements PipelineRunRepository {
   }
 
   /** A step counts as satisfied when it's done OR deliberately skipped. */
+  async reset(documentId: string): Promise<void> {
+    await this.model.destroy({ where: { documentId } });
+  }
+
   async allDone(documentId: string, steps: PipelineStep[]): Promise<boolean> {
     const count = await this.model.count({
       where: {

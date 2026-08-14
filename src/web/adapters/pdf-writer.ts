@@ -163,6 +163,17 @@ export class PdfWriter {
     if (this.cursor + height > PAGE_HEIGHT - MARGIN) this.newPage();
   }
 
+  /**
+   * Starts the next block on a fresh page.
+   *
+   * No-op when the current page is still empty, so a caller that breaks
+   * before every section doesn't open the document with a blank sheet.
+   */
+  pageBreak(): void {
+    if (this.current.length === 0) return;
+    this.newPage();
+  }
+
   space(amount: number): void {
     this.cursor = Math.min(this.cursor + amount, PAGE_HEIGHT - MARGIN);
   }

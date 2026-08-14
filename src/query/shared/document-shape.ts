@@ -25,6 +25,7 @@ export function toListItem(
   return {
     id: doc.id,
     title: doc.title,
+    source: doc.source ?? 'uploaded',
     fileName: doc.fileName,
     format: ACCEPTED_MIME_TYPES[doc.sourceMimeType] ?? 'file',
     status: doc.status,

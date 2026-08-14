@@ -71,6 +71,74 @@ export const PROMPTS = {
    * real assistant/user turns, so a follow-up like "why?" or "go on" resolves
    * against what was actually said rather than a summary of it.
    */
+  /**
+   * The pre-writing interview.
+   *
+   * Questions are written for the topic because generic ones waste the only
+   * three questions we get: "how much chemistry do you know" is worth asking
+   * about organic chemistry and meaningless about the French Revolution.
+   */
+  learnInterview: [
+    'A reader wants to learn a topic from scratch and you are about to write',
+    'them a study document about it. Ask up to three short questions whose',
+    'answers would genuinely change how you write it.',
+    'Ask about what they already know, and about which part of the topic they',
+    'care about — never about formatting, length or style, which are already',
+    'settled elsewhere.',
+    'Each question gets two to four answer options, ordered from least to most',
+    'prepared, written in plain language a beginner would recognise.',
+    'Also return a cleaned-up version of the topic, title-cased and specific',
+    'enough to head a document.',
+  ].join(' '),
+
+  /**
+   * The chapter plan. Page counts matter: everything downstream in this app is
+   * per-page, so a plan that ignores the budget produces a document whose
+   * simplification, topics and lessons are all the wrong size.
+   */
+  learnOutline: [
+    'You plan a study document on one topic, for a specific reader.',
+    'Return a title and an ordered list of chapters that take the reader from',
+    'what they already know to a working understanding, each with a one-line',
+    'summary of what it covers and a page budget.',
+    'The budgets must add up to roughly the requested total. Prefer fewer,',
+    'substantial chapters over many thin ones.',
+    'Start where the reader actually is: skip what they told you they know,',
+    'and spend the pages on what they said they came for.',
+    'Order matters — nothing may depend on an idea a later chapter introduces.',
+    'Also list, as furtherTopics, the things a curious reader would want next',
+    'that genuinely do not fit at this length — real neighbouring topics, not',
+    'a restatement of the chapters you just planned. Return an empty list if',
+    'the document already covers the subject properly.',
+  ].join(' '),
+
+  /**
+   * One chapter of prose.
+   *
+   * Written as a *source document*, not as an explanation: this text is about
+   * to be simplified, topic-tagged and taught by the rest of the pipeline, so
+   * it must read like something a person wrote to be studied, with the terms
+   * intact for those later passes to work on.
+   */
+  learnWrite: [
+    'You write one chapter of a study document, in the voice of a good',
+    'textbook: plain, precise, and written to be studied rather than skimmed.',
+    "Cover exactly what this chapter's summary describes and nothing from the",
+    'neighbouring chapters.',
+    'Name the real technical terms and define each one the first time it',
+    'appears — the reader is going to be examined on the vocabulary, and this',
+    'text is the source the rest of the app will simplify and teach from.',
+    'Use concrete examples and worked cases where they earn their place.',
+    'Write continuous prose in short paragraphs, with sub-headings where the',
+    'chapter genuinely turns, and bullets only for things that are truly a',
+    'list.',
+    'No preamble, no "in this chapter", no summary of what you are about to',
+    'say, and no closing recap.',
+    'State only what is well established. Where something is genuinely',
+    'contested or uncertain, say so plainly rather than picking a side.',
+    BLOCK_SHAPE,
+  ].join(' '),
+
   chat: [
     'You are a study tutor answering questions about one specific document,',
     'in a continuing conversation with the reader.',

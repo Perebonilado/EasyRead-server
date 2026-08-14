@@ -1,4 +1,8 @@
-import type { DocumentStatus } from '../../../contracts';
+import type {
+  DocumentSource,
+  DocumentBrief,
+  DocumentStatus,
+} from '../../../contracts';
 import { DocumentNotReadyError } from '../errors/errors';
 import { SCANNED_EMPTY_PAGE_RATIO } from '../values';
 
@@ -11,6 +15,8 @@ export interface DocumentProps {
   pageCount: number | null;
   sourceMimeType: string;
   sizeBytes: number;
+  source: DocumentSource;
+  brief: DocumentBrief | null;
   originalFileRef: string | null;
   canonicalPdfRef: string | null;
   thumbnailRef: string | null;
@@ -91,6 +97,27 @@ export class Document {
   markFailed(reason: string): void {
     this.props.status = 'failed';
     this.props.failureReason = reason;
+  }
+
+  /**
+   * Starts writing this document again, with a new brief.
+   *
+   * The content version moves, which is what makes every job still queued
+   * against the old one exit as stale rather than write into a document that
+   * has moved on beneath it.
+   */
+  startRewrite(brief: DocumentBrief): void {
+    this.props.brief = brief;
+    this.props.contentVersion += 1;
+    this.props.status = 'processing';
+    this.props.failureReason = null;
+    this.props.simplificationUnavailable = false;
+  }
+
+  /** Records what the finished document decided it had no room for. */
+  noteFurtherTopics(topics: string[]): void {
+    if (!this.props.brief) return;
+    this.props.brief = { ...this.props.brief, furtherTopics: topics };
   }
 
   rename(title: string): void {

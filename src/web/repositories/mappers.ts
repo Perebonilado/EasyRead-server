@@ -34,6 +34,8 @@ export function toDocument(row: DocumentModel): Document {
     status: row.status,
     pageCount: row.pageCount,
     sourceMimeType: row.sourceMimeType,
+    source: row.source ?? 'uploaded',
+    brief: row.brief ?? null,
     sizeBytes: Number(row.sizeBytes),
     originalFileRef: row.originalFileRef,
     canonicalPdfRef: row.canonicalPdfRef,

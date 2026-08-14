@@ -70,7 +70,7 @@ export class BullmqQueueAdapter implements JobQueuePort, OnModuleDestroy {
     const name = QUEUE_FOR_STEP[step];
     await this.queue(name).add(step, job, {
       ...this.options(name),
-      jobId: stepJobId(step, job.documentId),
+      jobId: stepJobId(step, job.documentId, job.contentVersion),
     });
   }
 
@@ -88,11 +88,23 @@ export class BullmqQueueAdapter implements JobQueuePort, OnModuleDestroy {
         data: job,
         opts: {
           ...this.options(QUEUE.simplify),
-          jobId: simplifyJobId(job.documentId, job.level, job.pageNumber),
+          jobId: simplifyJobId(
+            job.documentId,
+            job.level,
+            job.pageNumber,
+            job.contentVersion,
+          ),
           priority: Math.min(job.pageNumber, 2_000_000),
         },
       })),
     );
+  }
+
+  async enqueueLearn(job: PipelineJob): Promise<void> {
+    await this.queue(QUEUE.learn).add('learn', job, {
+      ...this.options(QUEUE.learn),
+      jobId: `learn-${job.documentId}-${job.contentVersion}`,
+    });
   }
 
   async enqueueExport(job: ExportJob): Promise<void> {
@@ -109,18 +121,22 @@ export class BullmqQueueAdapter implements JobQueuePort, OnModuleDestroy {
    */
   async prioritise({
     documentId,
+    contentVersion,
     level,
     fromPage,
     toPage,
   }: {
     documentId: string;
+    contentVersion: number;
     level: Level;
     fromPage: number;
     toPage: number;
   }): Promise<void> {
     const queue = this.queue(QUEUE.simplify);
     for (let page = fromPage; page <= toPage; page++) {
-      const job = await queue.getJob(simplifyJobId(documentId, level, page));
+      const job = await queue.getJob(
+        simplifyJobId(documentId, level, page, contentVersion),
+      );
       if (!job) continue;
       try {
         await job.changePriority({ priority: 1 });

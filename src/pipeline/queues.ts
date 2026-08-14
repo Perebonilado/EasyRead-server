@@ -12,6 +12,7 @@ export const QUEUE = {
   embed: 'embed',
   simplify: 'simplify',
   export: 'export',
+  learn: 'learn',
 } as const;
 
 export type QueueName = (typeof QUEUE)[keyof typeof QUEUE];
@@ -28,6 +29,9 @@ export const QUEUE_SETTINGS: Record<
   embed: { concurrency: 4, attempts: 5, backoffMs: 10_000 },
   simplify: { concurrency: 10, attempts: 3, backoffMs: 8_000 },
   export: { concurrency: 2, attempts: 2, backoffMs: 15_000 },
+  // Writing a document is many minutes of model calls; one retry only,
+  // because a second full attempt is expensive and rarely fixes anything.
+  learn: { concurrency: 2, attempts: 2, backoffMs: 20_000 },
 };
 
 export interface BaseJobData {
@@ -41,6 +45,9 @@ export interface SimplifyJobData extends BaseJobData {
   level: Level;
 }
 
+/** Writing a document needs only the document and its version. */
+export type LearnJobData = BaseJobData;
+
 export interface ExportJobData extends BaseJobData {
   exportId: string;
   level: Level;
@@ -53,10 +60,26 @@ export interface ExportJobData extends BaseJobData {
  * Hyphen-separated, not colon-separated — BullMQ reserves `:` for its own key
  * namespacing and rejects custom ids containing it.
  */
-export const simplifyJobId = (documentId: string, level: Level, page: number) =>
-  `simplify-${documentId}-${level}-${page}`;
+export const simplifyJobId = (
+  documentId: string,
+  level: Level,
+  page: number,
+  contentVersion: number,
+) => `simplify-${documentId}-v${contentVersion}-${level}-${page}`;
 
-export const stepJobId = (step: PipelineStep, documentId: string) =>
-  `${step}-${documentId}`;
+/**
+ * The version is part of the identity because the unit of work is a step
+ * *on a version of the document*, not on the document forever.
+ *
+ * Without it, rewriting a document is silently a no-op: BullMQ keeps
+ * completed jobs for an hour and ignores a re-added id, so every step of the
+ * new version is dropped and the document sits in `processing` with nothing
+ * running.
+ */
+export const stepJobId = (
+  step: PipelineStep,
+  documentId: string,
+  contentVersion: number,
+) => `${step}-${documentId}-v${contentVersion}`;
 
 export const exportJobId = (exportId: string) => `export-${exportId}`;

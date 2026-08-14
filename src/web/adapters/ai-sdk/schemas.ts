@@ -37,3 +37,37 @@ export const diagramSchema = z.object({
   /** Mermaid source, no code fences. */
   mermaid: z.string().min(10),
 });
+
+/** Up to three questions, each with a small ordered set of answers. */
+export const interviewSchema = z.object({
+  topic: z.string().min(1).max(200),
+  questions: z
+    .array(
+      z.object({
+        id: z.string().min(1).max(40),
+        question: z.string().min(1).max(300),
+        options: z.array(z.string().min(1).max(120)).min(2).max(4),
+      }),
+    )
+    .max(3),
+});
+
+export const outlineSchema = z.object({
+  title: z.string().min(1).max(200),
+  chapters: z
+    .array(
+      z.object({
+        title: z.string().min(1).max(200),
+        summary: z.string().min(1).max(600),
+        pages: z.number().int().min(1).max(12),
+      }),
+    )
+    .min(1)
+    .max(40),
+  /**
+   * Real topics this document does not cover at this length; empty when it
+   * covers the subject properly. Required rather than optional because
+   * structured output rejects a schema whose keys aren't all required.
+   */
+  furtherTopics: z.array(z.string().min(1).max(160)).max(8),
+});

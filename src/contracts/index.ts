@@ -85,6 +85,8 @@ export type UploadIntentResponse = {
 export type DocumentListItem = {
   id: string;
   title: string;
+  /** `generated` documents were written by the model, not uploaded. */
+  source: DocumentSource;
   fileName: string;
   format: string;
   status: DocumentStatus;
@@ -171,6 +173,55 @@ export type ChatHistoryResponse = {
   messages: ChatMessageDto[];
   /** True when older messages exist before the first one returned. */
   hasMore: boolean;
+};
+
+// ── Learn a topic ────────────────────────────────────────────────────────────
+
+/** Uploaded by the reader, or written by the model on request. */
+export type DocumentSource = 'uploaded' | 'generated';
+
+export type LearnDepth = 'primer' | 'solid' | 'deep' | 'exhaustive';
+
+/**
+ * One question in the pre-generation interview, written for the topic rather
+ * than drawn from a fixed list — "how much chemistry do you already know?"
+ * beats "select your level" when the topic is organic chemistry.
+ */
+export type LearnQuestion = {
+  id: string;
+  question: string;
+  /** Two to four answers, ordered from least to most prepared. */
+  options: string[];
+};
+
+export type LearnInterviewResponse = {
+  /** Cleaned-up version of what the reader typed, used as the title. */
+  topic: string;
+  questions: LearnQuestion[];
+};
+
+export type LearnGenerateRequest = {
+  topic: string;
+  depth: LearnDepth;
+  /** Answers keyed by question id; unanswered questions are simply absent. */
+  answers?: Record<string, string>;
+  /** Why they are learning it — exam, work, curiosity. Free text. */
+  goal?: string;
+};
+
+/** What the reader asked for, kept with the document that came out of it. */
+export type DocumentBrief = {
+  topic: string;
+  depth: LearnDepth;
+  answers: Record<string, string>;
+  goal: string | null;
+  /**
+   * What the writer deliberately left out at this depth, listed at the end of
+   * the document and offered as the next expansion.
+   */
+  furtherTopics?: string[];
+  /** Folded in by an expansion, so the rewrite must cover them. */
+  mustCover?: string[];
 };
 
 // ── Continue studying ────────────────────────────────────────────────────────

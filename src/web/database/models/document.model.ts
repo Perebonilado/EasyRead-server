@@ -6,7 +6,11 @@ import {
   HasMany,
   Table,
 } from 'sequelize-typescript';
-import type { DocumentStatus } from '../../../contracts';
+import type {
+  DocumentSource,
+  DocumentBrief,
+  DocumentStatus,
+} from '../../../contracts';
 import { BaseModel } from './base';
 import { DocumentPageModel } from './document-page.model';
 import { SimplifiedPageModel } from './simplified-page.model';
@@ -39,6 +43,16 @@ export class DocumentModel extends BaseModel {
 
   @Column({ type: DataType.STRING(128), allowNull: false })
   declare sourceMimeType: string;
+
+  @Column({
+    type: DataType.ENUM('uploaded', 'generated'),
+    allowNull: false,
+    defaultValue: 'uploaded',
+  })
+  declare source: DocumentSource;
+
+  @Column({ type: DataType.JSON, allowNull: true })
+  declare brief: DocumentBrief | null;
 
   @Column({ type: DataType.BIGINT, allowNull: false, defaultValue: 0 })
   declare sizeBytes: number;

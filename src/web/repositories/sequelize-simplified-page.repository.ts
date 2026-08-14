@@ -44,6 +44,10 @@ export class SequelizeSimplifiedPageRepository implements SimplifiedPageReposito
     await this.model.bulkCreate(rows as any, { ignoreDuplicates: true });
   }
 
+  async clear(documentId: string): Promise<void> {
+    await this.model.destroy({ where: { documentId } });
+  }
+
   async find(documentId: string, level: Level, pageNumber: number) {
     const row = await this.model.findOne({
       where: { documentId, level, pageNumber },

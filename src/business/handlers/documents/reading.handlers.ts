@@ -56,9 +56,10 @@ export class PrioritisePagesHandler extends AbstractRequestHandlerTemplate<
   }
 
   protected async handleRequest(cmd: PrioritiseRequest) {
-    await this.access.require(cmd.documentId, cmd.userId);
+    const doc = await this.access.require(cmd.documentId, cmd.userId);
     await this.queue.prioritise({
       documentId: cmd.documentId,
+      contentVersion: doc.contentVersion,
       level: cmd.level,
       fromPage: cmd.pageNumber,
       toPage: cmd.pageNumber + 3,

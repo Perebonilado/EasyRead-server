@@ -131,4 +131,10 @@ export interface PipelineRunRepository {
   ): Promise<PipelineStatus | null>;
   list(documentId: string): Promise<PipelineRunRecord[]>;
   allDone(documentId: string, steps: PipelineStep[]): Promise<boolean>;
+  /**
+   * Forgets every step for a document so the pipeline can run again.
+   * Without this a re-run is silently skipped: `claim` refuses a step that
+   * already completed, which is exactly what makes re-running safe normally.
+   */
+  reset(documentId: string): Promise<void>;
 }

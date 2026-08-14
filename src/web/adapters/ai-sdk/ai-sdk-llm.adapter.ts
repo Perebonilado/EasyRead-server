@@ -11,7 +11,13 @@ import type {
 } from '../../../business/ports/llm.port';
 import { PROMPTS } from '../prompts';
 import { ModelRegistry, type ModelRef } from './models';
-import { blocksSchema, diagramSchema, topicsSchema } from './schemas';
+import {
+  blocksSchema,
+  diagramSchema,
+  interviewSchema,
+  outlineSchema,
+  topicsSchema,
+} from './schemas';
 
 /**
  * The model gateway, on the Vercel AI SDK.
@@ -203,6 +209,95 @@ export class AiSdkLlmAdapter implements LlmGatewayPort, OnModuleInit {
     return {
       value: answer.trim(),
       usage: this.usage(ref, await result.usage, started),
+    };
+  }
+
+  async interviewForTopic(input: { topic: string }) {
+    const started = Date.now();
+    const { generateObject } = await this.registry.modules();
+    const { model, ref } = await this.registry.languageModel('learn_interview');
+
+    const result = await generateObject({
+      model,
+      schema: interviewSchema,
+      system: PROMPTS.learnInterview,
+      prompt: `The reader wants to learn: ${input.topic}`,
+      maxRetries: this.maxRetries(),
+    });
+
+    return {
+      value: result.object,
+      usage: this.usage(ref, result.usage, started),
+    };
+  }
+
+  async outlineTopic(input: {
+    topic: string;
+    brief: string;
+    targetPages: number;
+    mustCover?: string[];
+  }) {
+    const started = Date.now();
+    const { generateObject } = await this.registry.modules();
+    const { model, ref } = await this.registry.languageModel('learn_outline');
+
+    const result = await generateObject({
+      model,
+      schema: outlineSchema,
+      system: PROMPTS.learnOutline,
+      prompt: [
+        `Topic: ${input.topic}`,
+        `About this reader:\n${input.brief}`,
+        `Total length: about ${input.targetPages} pages.`,
+        input.mustCover?.length
+          ? `This is an expansion of an earlier, shorter document. It must now also cover, properly rather than in passing:\n${input.mustCover
+              .map((topic) => `- ${topic}`)
+              .join('\n')}`
+          : null,
+      ]
+        .filter(Boolean)
+        .join('\n\n'),
+      maxRetries: this.maxRetries(),
+    });
+
+    return {
+      value: result.object,
+      usage: this.usage(ref, result.usage, started),
+    };
+  }
+
+  async writeChapter(input: {
+    topic: string;
+    brief: string;
+    documentTitle: string;
+    chapter: { title: string; summary: string; pages: number };
+    outline: string[];
+  }) {
+    const started = Date.now();
+    const { generateObject } = await this.registry.modules();
+    const { model, ref } = await this.registry.languageModel('learn_write');
+
+    const result = await generateObject({
+      model,
+      schema: blocksSchema,
+      system: PROMPTS.learnWrite,
+      prompt: [
+        `Document: "${input.documentTitle}" — a study document about ${input.topic}.`,
+        `About this reader:\n${input.brief}`,
+        `The full chapter list, in order:\n${input.outline
+          .map((title, index) => `${index + 1}. ${title}`)
+          .join('\n')}`,
+        `Write this chapter and only this chapter:\n"${input.chapter.title}" — ${input.chapter.summary}`,
+        // Roughly 450 words a page at the reader's type scale; the model is
+        // far better at a word count than at imagining a page.
+        `Length: about ${input.chapter.pages * 450} words.`,
+      ].join('\n\n'),
+      maxRetries: this.maxRetries(),
+    });
+
+    return {
+      value: { blocks: result.object.blocks },
+      usage: this.usage(ref, result.usage, started),
     };
   }
 

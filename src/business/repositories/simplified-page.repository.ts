@@ -17,6 +17,12 @@ export interface LevelProgress {
 export interface SimplifiedPageRepository {
   /** Pre-creates one pending row per page — the fan-out step. */
   seed(documentId: string, level: Level, pageCount: number): Promise<void>;
+  /**
+   * Drops every simplified page for a document. `seed` ignores duplicates, so
+   * a rewritten document would otherwise keep the old text against the new
+   * pages and never be simplified again.
+   */
+  clear(documentId: string): Promise<void>;
   find(
     documentId: string,
     level: Level,

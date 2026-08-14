@@ -26,9 +26,12 @@ export interface JobQueuePort {
   ): Promise<void>;
   enqueueSimplifyPages(jobs: SimplifyJob[]): Promise<void>;
   enqueueExport(job: ExportJob): Promise<void>;
+  /** Writes a document about a topic, then starts the normal pipeline. */
+  enqueueLearn(job: PipelineJob): Promise<void>;
   /** Raises priority for pages N..N+3 so the page being read lands first. */
   prioritise(input: {
     documentId: string;
+    contentVersion: number;
     level: Level;
     fromPage: number;
     toPage: number;

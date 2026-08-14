@@ -144,6 +144,35 @@ export type LookupDto = {
   createdAt: string;
 };
 
+// ── Document chat ────────────────────────────────────────────────────────────
+
+export type ChatRole = 'user' | 'assistant';
+
+/**
+ * One message in a document's chat.
+ *
+ * A message that began as a highlight keeps its origin: which action was
+ * pressed, the passage that was quoted, and the page it came from. Typed
+ * messages leave all three null.
+ */
+export type ChatMessageDto = {
+  id: string;
+  role: ChatRole;
+  text: string;
+  highlightAction: Exclude<HighlightAction, 'visualize'> | null;
+  quotedText: string | null;
+  pageNumber: number | null;
+  sources: { pageNumber: number; text: string }[] | null;
+  createdAt: string;
+};
+
+export type ChatHistoryResponse = {
+  /** Oldest first — the order the panel renders. */
+  messages: ChatMessageDto[];
+  /** True when older messages exist before the first one returned. */
+  hasMore: boolean;
+};
+
 // ── Billing ──────────────────────────────────────────────────────────────────
 
 export type PlanDto = {

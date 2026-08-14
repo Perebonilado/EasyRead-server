@@ -6,6 +6,7 @@ import {
   DOCUMENT_PAGE_REPOSITORY,
   DOCUMENT_REPOSITORY,
   EXPORT_REPOSITORY,
+  CHAT_REPOSITORY,
   LOOKUP_REPOSITORY,
   PIPELINE_RUN_REPOSITORY,
   READING_POSITION_REPOSITORY,
@@ -23,6 +24,7 @@ import {
   SequelizeAssessmentRepository,
   SequelizeLearnerProfileRepository,
 } from '../repositories/sequelize-learning.repositories';
+import { SequelizeChatRepository } from '../repositories/sequelize-chat.repository';
 import {
   SequelizeSubscriptionRepository,
   SequelizeUsageRepository,
@@ -72,6 +74,7 @@ export const repositoryProviders: Provider[] = [
   },
   { provide: EXPORT_REPOSITORY, useClass: SequelizeExportRepository },
   { provide: LOOKUP_REPOSITORY, useClass: SequelizeLookupRepository },
+  { provide: CHAT_REPOSITORY, useClass: SequelizeChatRepository },
   {
     provide: PIPELINE_RUN_REPOSITORY,
     useClass: SequelizePipelineRunRepository,

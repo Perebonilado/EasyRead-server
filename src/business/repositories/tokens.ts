@@ -7,6 +7,7 @@ export const TOPIC_REPOSITORY = Symbol('TopicRepository');
 export const READING_POSITION_REPOSITORY = Symbol('ReadingPositionRepository');
 export const EXPORT_REPOSITORY = Symbol('ExportRepository');
 export const LOOKUP_REPOSITORY = Symbol('LookupRepository');
+export const CHAT_REPOSITORY = Symbol('CHAT_REPOSITORY');
 export const PIPELINE_RUN_REPOSITORY = Symbol('PipelineRunRepository');
 export const SUBSCRIPTION_REPOSITORY = Symbol('SubscriptionRepository');
 export const USAGE_REPOSITORY = Symbol('UsageRepository');

@@ -27,6 +27,7 @@ const TASK_VAR: Record<LlmTask, string> = {
   highlight_explain: 'AI_MODEL_HIGHLIGHT',
   highlight_simplify: 'AI_MODEL_HIGHLIGHT',
   highlight_define: 'AI_MODEL_HIGHLIGHT',
+  chat_document: 'AI_MODEL_CHAT',
   visualize_query: 'AI_MODEL_VISUALIZE_QUERY',
   diagram: 'AI_MODEL_DIAGRAM',
   embed: 'AI_EMBED_MODEL',

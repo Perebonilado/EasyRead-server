@@ -43,6 +43,10 @@ import {
   UpdateLearnerProfileHandler,
 } from './business/handlers/documents/learning.handlers';
 import { TutorIntroHandler } from './business/handlers/tutors/tutor-intro.handler';
+import {
+  ListChatMessagesHandler,
+  SendChatMessageHandler,
+} from './business/handlers/documents/chat.handlers';
 import { DocumentDetailQuery } from './query/document-detail.query';
 import { DocumentListQuery } from './query/document-list.query';
 import { MeQuery } from './query/me.query';
@@ -53,6 +57,7 @@ import { DocumentsController } from './web/controllers/documents.controller';
 import { EventsController } from './web/controllers/events.controller';
 import { ExportsController } from './web/controllers/exports.controller';
 import { HighlightController } from './web/controllers/highlight.controller';
+import { ChatController } from './web/controllers/chat.controller';
 import { ReaderController } from './web/controllers/reader.controller';
 import { TutorsController } from './web/controllers/tutors.controller';
 import { VoiceController } from './web/controllers/voice.controller';
@@ -88,6 +93,8 @@ const handlers = [
   GetMasteryHandler,
   UpdateLearnerProfileHandler,
   TutorIntroHandler,
+  SendChatMessageHandler,
+  ListChatMessagesHandler,
 ];
 
 const queries = [DocumentListQuery, DocumentDetailQuery, ReaderQuery, MeQuery];
@@ -110,6 +117,7 @@ const queries = [DocumentListQuery, DocumentDetailQuery, ReaderQuery, MeQuery];
     DocumentsController,
     ReaderController,
     HighlightController,
+    ChatController,
     ExportsController,
     VoiceController,
     TutorsController,

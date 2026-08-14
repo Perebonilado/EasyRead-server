@@ -9,6 +9,7 @@ export type LlmTask =
   | 'highlight_explain'
   | 'highlight_simplify'
   | 'highlight_define'
+  | 'chat_document'
   | 'visualize_query'
   | 'diagram'
   | 'embed';
@@ -56,6 +57,19 @@ export interface LlmGatewayPort {
   answerHighlight(input: {
     task: 'highlight_explain' | 'highlight_simplify' | 'highlight_define';
     selection: string;
+    context: string;
+    summary: string | null;
+    onToken?: (chunk: string) => void;
+  }): Promise<LlmResult<string>>;
+
+  /**
+   * A turn in the document chat. `history` is the thread so far, oldest
+   * first; `question` is what the reader just asked, already expanded from a
+   * highlight action where there was one.
+   */
+  chatWithDocument(input: {
+    history: { role: 'user' | 'assistant'; content: string }[];
+    question: string;
     context: string;
     summary: string | null;
     onToken?: (chunk: string) => void;

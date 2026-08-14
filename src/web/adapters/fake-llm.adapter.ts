@@ -195,6 +195,22 @@ export class FakeLlmAdapter implements LlmGatewayPort {
     };
   }
 
+  async chatWithDocument(input: {
+    history: { role: 'user' | 'assistant'; content: string }[];
+    question: string;
+    context: string;
+    summary: string | null;
+    onToken?: (chunk: string) => void;
+  }): Promise<LlmResult<string>> {
+    const started = Date.now();
+    const answer = `[fake chat reply to "${input.question.slice(0, 60)}" after ${input.history.length} turns]`;
+    input.onToken?.(answer);
+    return {
+      value: answer,
+      usage: this.usage(started, input.question.length, answer.length),
+    };
+  }
+
   async rewriteImageQuery({
     selection,
   }: {

@@ -147,6 +147,65 @@ export class AiSdkLlmAdapter implements LlmGatewayPort, OnModuleInit {
     };
   }
 
+  async chatWithDocument(input: {
+    history: { role: 'user' | 'assistant'; content: string }[];
+    question: string;
+    context: string;
+    summary: string | null;
+    onToken?: (chunk: string) => void;
+  }): Promise<LlmResult<string>> {
+    // The passages ride with the turn they answer, so a later follow-up can
+    // still see the evidence an earlier answer was built on.
+    const turn = [
+      input.summary ? `Document summary:\n${input.summary}` : null,
+      input.context ? `Passages from the document:\n${input.context}` : null,
+      `Question:\n${input.question}`,
+    ]
+      .filter(Boolean)
+      .join('\n\n');
+
+    const messages = [
+      ...input.history,
+      { role: 'user' as const, content: turn },
+    ];
+
+    const started = Date.now();
+    const { streamText, generateText } = await this.registry.modules();
+    const { model, ref } = await this.registry.languageModel('chat_document');
+    const system = PROMPTS.chat;
+
+    if (!input.onToken) {
+      const result = await generateText({
+        model,
+        system,
+        messages,
+        maxRetries: this.maxRetries(),
+      });
+      return {
+        value: result.text.trim(),
+        usage: this.usage(ref, result.usage, started),
+      };
+    }
+
+    const result = streamText({
+      model,
+      system,
+      messages,
+      maxRetries: this.maxRetries(),
+    });
+
+    let answer = '';
+    for await (const chunk of result.textStream) {
+      answer += chunk;
+      input.onToken(chunk);
+    }
+
+    return {
+      value: answer.trim(),
+      usage: this.usage(ref, await result.usage, started),
+    };
+  }
+
   async rewriteImageQuery(input: {
     selection: string;
     summary: string | null;

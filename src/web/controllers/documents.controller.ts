@@ -14,6 +14,7 @@ import {
 } from '@nestjs/common';
 import type { Request, Response } from 'express';
 import type {
+  StudySnapshot,
   DocumentDetail,
   DocumentListItem,
   UploadIntentResponse,
@@ -35,6 +36,7 @@ import { STORAGE } from '../../business/ports/tokens';
 import type { StoragePort } from '../../business/ports/storage.port';
 import { DocumentDetailQuery } from '../../query/document-detail.query';
 import { DocumentListQuery } from '../../query/document-list.query';
+import { ContinueStudyingQuery } from '../../query/continue-studying.query';
 import type { Pagination } from '../../query/shared/pagination';
 import { CurrentUser } from '../security/current-user.decorator';
 import {
@@ -54,6 +56,7 @@ export class DocumentsController {
     private readonly detail: DocumentDetailQuery,
     private readonly access: DocumentAccessService,
     @Inject(STORAGE) private readonly storage: StoragePort,
+    private readonly continueQuery: ContinueStudyingQuery,
   ) {}
 
   @Get()
@@ -65,6 +68,14 @@ export class DocumentsController {
   }
 
   /** Powers the "Continue reading" rail above the library grid. */
+  /** Where the reader left off — the library's resume card. */
+  @Get('continue')
+  async continueStudying(
+    @CurrentUser('id') userId: string,
+  ): Promise<StudySnapshot | null> {
+    return this.continueQuery.execute(userId);
+  }
+
   @Get('recent')
   async recent(@CurrentUser('id') userId: string): Promise<DocumentListItem[]> {
     return this.list.recentlyRead(userId);

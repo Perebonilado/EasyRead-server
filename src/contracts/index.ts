@@ -173,6 +173,33 @@ export type ChatHistoryResponse = {
   hasMore: boolean;
 };
 
+// ── Continue studying ────────────────────────────────────────────────────────
+
+/**
+ * Where the reader left off, across all three things they were doing: reading
+ * a page, working through a syllabus, and being tested on it.
+ *
+ * `understanding` is null until enough questions have been answered to mean
+ * anything — an untested document must never show a score, invented or zero.
+ */
+export type StudySnapshot = {
+  document: DocumentListItem;
+  lastStudiedAt: string;
+  reading: { lastPage: number; level: 'original' | Level };
+  lesson: {
+    topicsTaught: number;
+    topicsTotal: number;
+    /** The topic the saved page falls inside, if the document has topics. */
+    currentTopic: string | null;
+  };
+  understanding: {
+    /** 0-100 across scored topics, or null when too little evidence. */
+    score: number | null;
+    testedTopics: number;
+    weakTopics: number;
+  };
+};
+
 // ── Billing ──────────────────────────────────────────────────────────────────
 
 export type PlanDto = {

@@ -49,6 +49,7 @@ import {
 } from './business/handlers/documents/chat.handlers';
 import { DocumentDetailQuery } from './query/document-detail.query';
 import { DocumentListQuery } from './query/document-list.query';
+import { ContinueStudyingQuery } from './query/continue-studying.query';
 import { MeQuery } from './query/me.query';
 import { ReaderQuery } from './query/reader.query';
 import { AccountController } from './web/controllers/account.controller';
@@ -97,7 +98,13 @@ const handlers = [
   ListChatMessagesHandler,
 ];
 
-const queries = [DocumentListQuery, DocumentDetailQuery, ReaderQuery, MeQuery];
+const queries = [
+  DocumentListQuery,
+  DocumentDetailQuery,
+  ReaderQuery,
+  MeQuery,
+  ContinueStudyingQuery,
+];
 
 /**
  * The API process. It enqueues work but never consumes it — the worker owns the

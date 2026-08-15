@@ -12,13 +12,10 @@ import { CommandResponse } from '../response/CommandResponse';
 import { EntitlementsService } from '../documents/entitlements.service';
 
 /**
- * More nav pages than any plan's PDF cap: web pages typeset shorter than a
- * page each more often than longer, so the true gate is the typeset check in
- * the processor. This one only stops someone feeding in a whole reference
- * site.
+ * No cap on how many pages an import may select — the only gate is the
+ * plan's typeset page limit, checked in the processor where web pages and
+ * PDF pages actually meet.
  */
-const MAX_SELECTED_PAGES = 300;
-
 export interface StartImportRequest {
   userId: string;
   url: string;
@@ -82,11 +79,6 @@ export class StartImportHandler extends AbstractRequestHandlerTemplate<
 
     if (!pages.length) {
       throw new ValidationError('Pick at least one page to import');
-    }
-    if (pages.length > MAX_SELECTED_PAGES) {
-      throw new ValidationError(
-        `An import can cover up to ${MAX_SELECTED_PAGES} pages`,
-      );
     }
 
     // An imported document takes a monthly slot like any other, booked before

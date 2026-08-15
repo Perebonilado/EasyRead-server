@@ -4,15 +4,34 @@ import { EMPTY_PAGE_CHAR_THRESHOLD } from '../../business/domain/values';
 import type {
   ExtractedFigure,
   ExtractedPage,
+  PageImage,
   PdfToolkitPort,
 } from '../../business/ports/pdf-toolkit.port';
-import { encodePng } from './images/image-codec';
+import { OCR_MAX_IMAGE_WIDTH } from '../../business/domain/values';
+import { downsampleRgba, encodePng } from './images/image-codec';
 
 /** Filters that separate a figure from furniture. */
 const MIN_FIGURE_EDGE = 100;
 const MAX_ASPECT = 8;
 const MAX_FIGURES_PER_PAGE = 3;
 const MAX_FIGURES_PER_DOCUMENT = 40;
+
+/**
+ * Scanner apps stamp a text-layer watermark on otherwise image-only pages —
+ * "Scanned with CamScanner" and friends. To a character count that watermark
+ * looks like content, so a fully scanned page passes as a digital one and
+ * never reaches OCR. These lines are furniture, not text: dropped everywhere.
+ */
+const SCANNER_WATERMARKS = [
+  /^\s*(scanned\s+(with|by|using)\b.{0,60}|.*\bcamscanner\b.*)\s*$/i,
+  /^\s*(created|generated)\s+(with|by)\s+(genius\s*scan|tap\s*scanner|office\s*lens|adobe\s*scan)\b.*$/i,
+];
+
+const stripScannerWatermarks = (text: string): string =>
+  text
+    .split('\n')
+    .filter((line) => !SCANNER_WATERMARKS.some((mark) => mark.test(line)))
+    .join('\n');
 
 /**
  * PDF reading via pdf.js.
@@ -98,10 +117,11 @@ export class PdfjsToolkitAdapter implements PdfToolkitPort {
         .replace(/(\w)-\n(\w)/g, '$1$2');
 
       page.cleanup();
-      const charCount = text.replace(/\s/g, '').length;
+      const cleaned = stripScannerWatermarks(text);
+      const charCount = cleaned.replace(/\s/g, '').length;
       pages.push({
         pageNumber,
-        text,
+        text: cleaned,
         charCount,
         isEmpty: charCount < EMPTY_PAGE_CHAR_THRESHOLD,
       });
@@ -220,6 +240,100 @@ export class PdfjsToolkitAdapter implements PdfToolkitPort {
     }
 
     return figures;
+  }
+
+  /**
+   * The biggest decodable image on each requested page — for a scan that is
+   * the page itself. Same canvas-free XObject route as extractFigures, but
+   * with the opposite selection rule: figures want *several small* images and
+   * fierce filtering, OCR wants the *one largest* and no filtering beyond "is
+   * it plausibly a page". Oversized pixels are box-downsampled so the vision
+   * call carries what a model can read, not what a scanner produced.
+   */
+  async pageImages(pdf: Buffer, pageNumbers: number[]): Promise<PageImage[]> {
+    if (!pageNumbers.length) return [];
+    const pdfjs = await this.lib();
+    const doc = await this.load(pdf);
+    const images: PageImage[] = [];
+    const wanted = new Set(pageNumbers);
+
+    try {
+      for (const pageNumber of pageNumbers) {
+        if (!wanted.has(pageNumber) || pageNumber > doc.numPages) continue;
+
+        try {
+          const page = await doc.getPage(pageNumber);
+          const ops = await page.getOperatorList();
+
+          type Candidate = {
+            width: number;
+            height: number;
+            data: Uint8ClampedArray | Uint8Array;
+            kind?: number;
+          };
+          let best: Candidate | null = null;
+
+          for (let i = 0; i < ops.fnArray.length; i++) {
+            if (ops.fnArray[i] !== pdfjs.OPS.paintImageXObject) continue;
+            const args = ops.argsArray[i] as unknown[];
+            const name = typeof args?.[0] === 'string' ? args[0] : '';
+            if (!name) continue;
+
+            const image = await new Promise<{
+              width: number;
+              height: number;
+              data?: Uint8ClampedArray | Uint8Array;
+              kind?: number;
+            } | null>((resolve) => {
+              try {
+                if (page.objs.has(name)) {
+                  page.objs.get(name, (value: never) => resolve(value));
+                } else {
+                  resolve(null);
+                }
+              } catch {
+                resolve(null);
+              }
+            });
+
+            if (!image?.data || !image.width || !image.height) continue;
+            if (
+              !best ||
+              image.width * image.height > best.width * best.height
+            ) {
+              best = image as Candidate;
+            }
+          }
+
+          page.cleanup();
+          if (!best) continue;
+
+          const rgba = toRgba(best);
+          if (!rgba) continue;
+
+          const scaled = downsampleRgba(
+            rgba,
+            best.width,
+            best.height,
+            OCR_MAX_IMAGE_WIDTH,
+          );
+          images.push({
+            pageNumber,
+            png: encodePng(scaled.rgba, scaled.width, scaled.height),
+            width: scaled.width,
+            height: scaled.height,
+          });
+        } catch (error) {
+          this.logger.warn(
+            `Page image ${pageNumber} skipped: ${(error as Error).message}`,
+          );
+        }
+      }
+    } finally {
+      await doc.destroy();
+    }
+
+    return images;
   }
 }
 

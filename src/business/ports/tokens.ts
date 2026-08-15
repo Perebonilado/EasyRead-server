@@ -8,6 +8,7 @@ export const STORAGE = Symbol('StoragePort');
 export const CONVERTER = Symbol('ConverterPort');
 export const PDF_TOOLKIT = Symbol('PdfToolkitPort');
 export const LLM_GATEWAY = Symbol('LlmGatewayPort');
+export const OCR_ENGINE = Symbol('OcrEnginePort');
 export const VECTOR_STORE = Symbol('VectorStorePort');
 export const EMAIL = Symbol('EmailPort');
 export const PAYMENTS = Symbol('PaymentsPort');

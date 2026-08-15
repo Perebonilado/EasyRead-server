@@ -45,6 +45,27 @@ const CODE_VERBATIM =
   'code in a paragraph before or after it, never by editing it.';
 
 export const PROMPTS = {
+  /**
+   * OCR of a scanned page — printed or handwritten, the model reads both.
+   * Transcription, not interpretation: the reader will study from this text
+   * as if it were the document's own, so accuracy beats fluency and an
+   * honest [illegible] beats a confident guess.
+   */
+  ocrPage: [
+    'You transcribe one scanned page of a study document with extreme',
+    'accuracy. The page may be printed, handwritten, or both. Transcribe',
+    'exactly what is written — never paraphrase, correct, complete or',
+    'summarise. Keep the original wording, spelling of names, numbers and',
+    'units. Where a word is truly unreadable write [illegible] instead of',
+    'guessing. Use headingOne/headingTwo for headings, bullet for list items,',
+    'paragraph for running text. Skip page furniture: page numbers, scanner',
+    'watermarks, stains and stamps are not content. If the page contains no',
+    'readable text at all, return an empty blocks array.',
+    TABLE_SHAPE,
+    CODE_VERBATIM,
+    'Set "handwritten" to true when most of the page is handwriting.',
+  ].join(' '),
+
   summarize: [
     'You summarise study documents so later steps understand the subject.',
     'In 120-200 words, state what the document is about, its subject area, its',

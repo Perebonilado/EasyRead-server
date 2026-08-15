@@ -78,8 +78,11 @@ export const MAX_UPLOAD_BYTES = 50 * 1024 * 1024;
 /** A page with less text than this is treated as figure-only (§4.3). */
 export const EMPTY_PAGE_CHAR_THRESHOLD = 40;
 
-/** Above this share of empty pages the document is a scan; no OCR in v1. */
+/** Above this share of empty pages the document is a scan. */
 export const SCANNED_EMPTY_PAGE_RATIO = 0.6;
+
+/** Page images wider than this are box-downsampled before the vision call. */
+export const OCR_MAX_IMAGE_WIDTH = 1600;
 
 export const UsageMetric = {
   DOCUMENTS_UPLOADED: 'documents_uploaded',

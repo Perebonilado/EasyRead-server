@@ -9,6 +9,7 @@ import {
   IMAGE_SEARCH,
   JOB_QUEUE,
   LLM_GATEWAY,
+  OCR_ENGINE,
   PAYMENTS,
   PDF_TOOLKIT,
   REALTIME,
@@ -26,6 +27,7 @@ import { GoogleDriveClient } from '../adapters/google-drive.client';
 import { GoogleImageSearchAdapter } from '../adapters/google-image-search.adapter';
 import { LocalStorageAdapter } from '../adapters/local-storage.adapter';
 import { LogEmailAdapter } from '../adapters/log-email.adapter';
+import { MistralOcrAdapter } from '../adapters/mistral-ocr.adapter';
 import { MysqlVectorStoreAdapter } from '../adapters/mysql-vector-store.adapter';
 import { NullImageSearchAdapter } from '../adapters/null-image-search.adapter';
 import { AiSdkLlmAdapter } from '../adapters/ai-sdk/ai-sdk-llm.adapter';
@@ -59,6 +61,9 @@ export const portProviders: Provider[] = [
   { provide: EVENT_BUS, useClass: RedisEventBusAdapter },
   { provide: JOB_QUEUE, useClass: BullmqQueueAdapter },
   { provide: EXPORT_RENDERER, useClass: PdfExportRendererAdapter },
+  // Reads whole scanned documents in one hosted call when MISTRAL_API_KEY is
+  // set; the OCR step falls back to per-page vision without it.
+  { provide: OCR_ENGINE, useClass: MistralOcrAdapter },
   { provide: WEB_IMPORT, useClass: WebImportAdapter },
   // Voice rides on the same OpenAI key as the text gateway.
   { provide: SPEECH, useClass: OpenAiSpeechAdapter },

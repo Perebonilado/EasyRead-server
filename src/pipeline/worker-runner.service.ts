@@ -17,6 +17,7 @@ import { ExportProcessor } from './processors/export.processor';
 import { LearnProcessor } from './processors/learn.processor';
 import { ImportProcessor } from './processors/import.processor';
 import { ExtractProcessor } from './processors/extract.processor';
+import { OcrProcessor } from './processors/ocr.processor';
 import { SimplifyPageProcessor } from './processors/simplify.processor';
 import { SummarizeProcessor } from './processors/summarize.processor';
 import { TopicsProcessor } from './processors/topics.processor';
@@ -49,6 +50,7 @@ export class WorkerRunner implements OnModuleInit, OnModuleDestroy {
     private readonly config: ConfigService,
     private readonly convert: ConvertProcessor,
     private readonly extract: ExtractProcessor,
+    private readonly ocr: OcrProcessor,
     private readonly summarize: SummarizeProcessor,
     private readonly topics: TopicsProcessor,
     private readonly embed: EmbedProcessor,
@@ -70,6 +72,7 @@ export class WorkerRunner implements OnModuleInit, OnModuleDestroy {
         this.convert.process(data, ctx),
       [QUEUE.extract]: (data: BaseJobData, ctx) =>
         this.extract.process(data, ctx),
+      [QUEUE.ocr]: (data: BaseJobData, ctx) => this.ocr.process(data, ctx),
       [QUEUE.summarize]: (data: BaseJobData, ctx) =>
         this.summarize.process(data, ctx),
       [QUEUE.topics]: (data: BaseJobData, ctx) =>

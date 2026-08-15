@@ -28,4 +28,11 @@ export class DocumentPageModel extends BaseModel {
 
   @Column({ type: DataType.BOOLEAN, allowNull: false, defaultValue: false })
   declare isEmpty: boolean;
+
+  @Column({
+    type: DataType.ENUM('extracted', 'ocr'),
+    allowNull: false,
+    defaultValue: 'extracted',
+  })
+  declare textSource: 'extracted' | 'ocr';
 }

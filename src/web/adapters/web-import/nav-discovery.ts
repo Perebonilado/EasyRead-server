@@ -30,8 +30,6 @@ export interface DiscoveredNav {
   pages: DiscoveredPage[];
 }
 
-const MAX_PAGES = 500;
-
 /** Framework fingerprints, checked against generator meta and signature DOM. */
 const FRAMEWORKS: { name: string; sidebar: RegExp; fingerprint: RegExp }[] = [
   {
@@ -192,7 +190,6 @@ export function discoverNav(html: string, baseUrl: string): DiscoveredNav {
         title: title.slice(0, 200),
         depth: depthWithin(link, container),
       });
-      if (pages.length >= MAX_PAGES) break;
     }
   }
 
@@ -226,7 +223,6 @@ export function pagesFromSitemap(
         .replace(/\.\w+$/, ''),
       depth: 0,
     });
-    if (pages.length >= MAX_PAGES) break;
   }
 
   return pages.sort((a, b) => a.url.localeCompare(b.url));

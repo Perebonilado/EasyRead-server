@@ -1,6 +1,7 @@
 import { deflateSync } from 'node:zlib';
 import {
   decodeImage,
+  downsampleRgba,
   encodePng,
   sniffImage,
   UnsupportedImageError,
@@ -92,6 +93,53 @@ describe('decodeImage png variants', () => {
     // CRC now mismatches but the decoder reads fields before verifying —
     // it must still refuse on the interlace flag.
     expect(() => decodeImage(broken)).toThrow(UnsupportedImageError);
+  });
+});
+
+describe('downsampleRgba', () => {
+  it('leaves narrow images untouched', () => {
+    const { rgba, width, height } = testCard();
+    const result = downsampleRgba(rgba, width, height, 1600);
+    expect(result.rgba).toBe(rgba);
+    expect(result.width).toBe(width);
+  });
+
+  it('halves a solid image without changing its colour', () => {
+    const width = 8;
+    const height = 4;
+    const rgba = Buffer.alloc(width * height * 4);
+    for (let i = 0; i < width * height; i++) {
+      rgba[i * 4] = 40;
+      rgba[i * 4 + 1] = 120;
+      rgba[i * 4 + 2] = 200;
+      rgba[i * 4 + 3] = 255;
+    }
+
+    const result = downsampleRgba(rgba, width, height, 4);
+    expect(result.width).toBe(4);
+    expect(result.height).toBe(2);
+    for (let i = 0; i < result.width * result.height; i++) {
+      expect(result.rgba[i * 4]).toBe(40);
+      expect(result.rgba[i * 4 + 1]).toBe(120);
+      expect(result.rgba[i * 4 + 2]).toBe(200);
+      expect(result.rgba[i * 4 + 3]).toBe(255);
+    }
+  });
+
+  it('averages, so alternating black and white becomes grey', () => {
+    const width = 4;
+    const height = 2;
+    const rgba = Buffer.alloc(width * height * 4);
+    for (let i = 0; i < width * height; i++) {
+      const value = i % 2 ? 255 : 0;
+      rgba.fill(value, i * 4, i * 4 + 3);
+      rgba[i * 4 + 3] = 255;
+    }
+
+    const result = downsampleRgba(rgba, width, height, 2);
+    // Every 2x1 cell holds one black and one white pixel.
+    expect(result.rgba[0]).toBeGreaterThan(100);
+    expect(result.rgba[0]).toBeLessThan(155);
   });
 });
 

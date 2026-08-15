@@ -1,6 +1,7 @@
 import type { LearnQuestion, Block, RecapBody } from '../../contracts';
 
 export type LlmTask =
+  | 'ocr_page'
   | 'summarize'
   | 'topics_outline'
   | 'topics_page_tag'
@@ -44,6 +45,16 @@ export interface TopicDraft {
  * retries and the cost ledger (§6.2).
  */
 export interface LlmGatewayPort {
+  /**
+   * Reads one scanned page — printed or handwritten — from its image.
+   * Returns the transcription as blocks; empty blocks mean the page holds
+   * nothing readable.
+   */
+  ocrPage(input: {
+    png: Buffer;
+    pageNumber: number;
+  }): Promise<LlmResult<{ blocks: Block[]; handwritten: boolean }>>;
+
   summarize(input: { title: string; text: string }): Promise<LlmResult<string>>;
 
   outlineTopics(input: {

@@ -90,12 +90,25 @@ export class ReaderQuery {
       order: [['pageNumber', 'ASC']] as never,
     });
 
+    // Which of these pages were read by OCR rather than extracted — the
+    // reader is honest about text a model transcribed from a scan.
+    const ocrRows = await this.pages.findAll({
+      attributes: ['pageNumber'],
+      where: {
+        documentId,
+        pageNumber: { [Op.between]: [from, to] },
+        textSource: 'ocr',
+      } as never,
+    });
+    const ocrPages = new Set(ocrRows.map((row) => row.pageNumber));
+
     return {
       level,
       pages: rows.map((row) => ({
         pageNumber: row.pageNumber,
         status: row.status,
         blocks: row.blocks ?? [],
+        ocr: ocrPages.has(row.pageNumber),
       })),
     };
   }

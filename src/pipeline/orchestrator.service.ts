@@ -4,10 +4,12 @@ import { EVENT_BUS, JOB_QUEUE } from '../business/ports/tokens';
 import type { EventBusPort } from '../business/ports/event-bus.port';
 import type { JobQueuePort } from '../business/ports/job-queue.port';
 import {
+  DOCUMENT_PAGE_REPOSITORY,
   DOCUMENT_REPOSITORY,
   PIPELINE_RUN_REPOSITORY,
   SIMPLIFIED_PAGE_REPOSITORY,
 } from '../business/repositories/tokens';
+import type { DocumentPageRepository } from '../business/repositories/document-page.repository';
 import type { DocumentRepository } from '../business/repositories/document.repository';
 import type { PipelineRunRepository } from '../business/repositories/misc.repository';
 import type { SimplifiedPageRepository } from '../business/repositories/simplified-page.repository';
@@ -34,6 +36,8 @@ export class PipelineOrchestrator {
     private readonly runs: PipelineRunRepository,
     @Inject(SIMPLIFIED_PAGE_REPOSITORY)
     private readonly simplified: SimplifiedPageRepository,
+    @Inject(DOCUMENT_PAGE_REPOSITORY)
+    private readonly pages: DocumentPageRepository,
     @Inject(JOB_QUEUE) private readonly queue: JobQueuePort,
     @Inject(EVENT_BUS) private readonly events: EventBusPort,
   ) {}
@@ -55,13 +59,35 @@ export class PipelineOrchestrator {
   }
 
   /**
-   * Extract unblocks three branches. Summarize and embed can both start
-   * immediately; topics waits because it wants the summary as context.
+   * Extract unblocks the rest — unless some pages came back empty, in which
+   * case OCR gets a chance to read them first. Only uploaded documents take
+   * the detour: imports and written documents are born digital, so an empty
+   * page there is genuinely empty.
    */
   async afterExtract(
     documentId: string,
     contentVersion: number,
   ): Promise<void> {
+    const doc = await this.documents.findById(documentId);
+    const empty = await this.pages.countEmpty(documentId);
+
+    if (doc?.props.source === 'uploaded' && empty > 0) {
+      this.logger.log(
+        `${documentId}: ${empty} pages without text — routing through OCR`,
+      );
+      await this.queue.enqueueStep('ocr', { documentId, contentVersion });
+      return;
+    }
+
+    await this.afterOcr(documentId, contentVersion);
+  }
+
+  /**
+   * Summarize and embed can both start immediately; topics waits because it
+   * wants the summary as context. Named after OCR because that's the step
+   * whose completion (or absence) gates it.
+   */
+  async afterOcr(documentId: string, contentVersion: number): Promise<void> {
     await this.queue.enqueueStep('summarize', { documentId, contentVersion });
     await this.queue.enqueueStep('embed', { documentId, contentVersion });
   }

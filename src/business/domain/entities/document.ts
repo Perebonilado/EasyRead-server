@@ -100,6 +100,17 @@ export class Document {
     }
   }
 
+  /**
+   * OCR's verdict supersedes extraction's. Pages the vision model managed to
+   * read are no longer empty, so a scan that OCR'd well becomes a normal,
+   * simplifiable document; one that stayed mostly unreadable keeps the
+   * viewer-only fallback.
+   */
+  refreshAfterOcr(emptyPages: number, totalPages: number): void {
+    this.props.simplificationUnavailable =
+      totalPages > 0 && emptyPages / totalPages > SCANNED_EMPTY_PAGE_RATIO;
+  }
+
   markReady(): void {
     this.props.status = 'ready';
     this.props.failureReason = null;

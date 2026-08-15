@@ -13,6 +13,7 @@ const toRecord = (row: DocumentPageModel): PageText => ({
   text: row.text,
   charCount: row.charCount,
   isEmpty: row.isEmpty,
+  textSource: row.textSource,
 });
 
 @Injectable()
@@ -23,7 +24,10 @@ export class SequelizeDocumentPageRepository implements DocumentPageRepository {
   ) {}
 
   /** One transaction so a partial extraction never becomes visible (§4.3). */
-  async replaceAll(documentId: string, pages: PageText[]): Promise<void> {
+  async replaceAll(
+    documentId: string,
+    pages: Omit<PageText, 'textSource'>[],
+  ): Promise<void> {
     await this.model.sequelize!.transaction(async (transaction) => {
       await this.model.destroy({ where: { documentId }, transaction });
       if (!pages.length) return;
@@ -56,5 +60,18 @@ export class SequelizeDocumentPageRepository implements DocumentPageRepository {
 
   async countEmpty(documentId: string): Promise<number> {
     return this.model.count({ where: { documentId, isEmpty: true } });
+  }
+
+  async writeOcrText(
+    documentId: string,
+    pageNumber: number,
+    text: string,
+    charCount: number,
+    isEmpty: boolean,
+  ): Promise<void> {
+    await this.model.update(
+      { text, charCount, isEmpty, textSource: 'ocr' },
+      { where: { documentId, pageNumber } },
+    );
   }
 }

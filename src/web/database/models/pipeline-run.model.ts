@@ -13,6 +13,7 @@ export class PipelineRunModel extends BaseModel {
     type: DataType.ENUM(
       'convert',
       'extract',
+      'ocr',
       'summarize',
       'topics',
       'embed',

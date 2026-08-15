@@ -34,6 +34,22 @@ export class FakeLlmAdapter implements LlmGatewayPort {
     };
   }
 
+  async ocrPage({ pageNumber }: { png: Buffer; pageNumber: number }) {
+    const started = Date.now();
+    return {
+      value: {
+        blocks: [
+          {
+            type: 'paragraph' as const,
+            text: `Fake OCR of page ${pageNumber}.`,
+          },
+        ],
+        handwritten: false,
+      },
+      usage: this.usage(started, 1000, 50),
+    };
+  }
+
   async summarize({
     title,
     text,

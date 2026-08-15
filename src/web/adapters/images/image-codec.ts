@@ -394,3 +394,55 @@ export function encodePng(rgba: Buffer, width: number, height: number): Buffer {
     chunk('IEND', Buffer.alloc(0)),
   ]);
 }
+
+/**
+ * Box-filter downsample of RGBA pixels to a target width, aspect preserved.
+ *
+ * Averaging every source pixel in each destination cell is the right filter
+ * for scans going to a vision model: it keeps thin strokes readable where
+ * nearest-neighbour would drop them. Returns the input untouched when it is
+ * already narrow enough.
+ */
+export function downsampleRgba(
+  rgba: Buffer,
+  width: number,
+  height: number,
+  maxWidth: number,
+): { rgba: Buffer; width: number; height: number } {
+  if (width <= maxWidth) return { rgba, width, height };
+
+  const scale = maxWidth / width;
+  const outWidth = maxWidth;
+  const outHeight = Math.max(1, Math.round(height * scale));
+  const out = Buffer.alloc(outWidth * outHeight * 4);
+
+  for (let oy = 0; oy < outHeight; oy++) {
+    const y0 = Math.floor(oy / scale);
+    const y1 = Math.min(height, Math.max(y0 + 1, Math.floor((oy + 1) / scale)));
+    for (let ox = 0; ox < outWidth; ox++) {
+      const x0 = Math.floor(ox / scale);
+      const x1 = Math.min(width, Math.max(x0 + 1, Math.floor((ox + 1) / scale)));
+      let r = 0;
+      let g = 0;
+      let b = 0;
+      let a = 0;
+      const count = (y1 - y0) * (x1 - x0);
+      for (let y = y0; y < y1; y++) {
+        for (let x = x0; x < x1; x++) {
+          const at = (y * width + x) * 4;
+          r += rgba[at];
+          g += rgba[at + 1];
+          b += rgba[at + 2];
+          a += rgba[at + 3];
+        }
+      }
+      const to = (oy * outWidth + ox) * 4;
+      out[to] = Math.round(r / count);
+      out[to + 1] = Math.round(g / count);
+      out[to + 2] = Math.round(b / count);
+      out[to + 3] = Math.round(a / count);
+    }
+  }
+
+  return { rgba: out, width: outWidth, height: outHeight };
+}

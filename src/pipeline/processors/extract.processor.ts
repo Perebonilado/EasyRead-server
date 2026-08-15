@@ -66,9 +66,14 @@ export class ExtractProcessor extends BasePipelineProcessor<BaseJobData> {
 
       // Figures ride beside the text. Uploaded documents only: imports
       // recorded theirs while typesetting, and re-extracting the embedded
-      // copies here would double every one of them.
+      // copies here would double every one of them. Scanned pages are
+      // excluded — their one big image IS the page, and showing it as a
+      // "figure" just repeats the original beside the simplified text.
       if (doc.props.source === 'uploaded') {
-        await this.extractFigures(doc.id, doc.contentVersion, bytes);
+        const scannedPages = new Set(
+          extracted.filter((page) => page.isEmpty).map((page) => page.pageNumber),
+        );
+        await this.extractFigures(doc.id, doc.contentVersion, bytes, scannedPages);
       }
 
       const empty = extracted.filter((page) => page.isEmpty).length;
@@ -103,11 +108,14 @@ export class ExtractProcessor extends BasePipelineProcessor<BaseJobData> {
     documentId: string,
     contentVersion: number,
     pdf: Buffer,
+    scannedPages: Set<number>,
   ): Promise<void> {
     try {
       // A rewrite's figures replace the old version's entirely.
       await this.assets.clear(documentId);
-      const figures = await this.pdf.extractFigures(pdf);
+      const figures = (await this.pdf.extractFigures(pdf)).filter(
+        (figure) => !scannedPages.has(figure.pageNumber),
+      );
       const perPageIndex = new Map<number, number>();
 
       for (const figure of figures) {

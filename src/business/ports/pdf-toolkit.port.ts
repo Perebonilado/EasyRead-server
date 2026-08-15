@@ -13,6 +13,14 @@ export interface ExtractedFigure {
   png: Buffer;
 }
 
+/** A scanned page's dominant image, ready for a vision model. */
+export interface PageImage {
+  pageNumber: number;
+  png: Buffer;
+  width: number;
+  height: number;
+}
+
 /** Reading a PDF: page count, per-page text, and a first-page thumbnail. */
 export interface PdfToolkitPort {
   pageCount(pdf: Buffer): Promise<number>;
@@ -24,4 +32,11 @@ export interface PdfToolkitPort {
    * images defeat pdf.js contributes none rather than failing extraction.
    */
   extractFigures(pdf: Buffer): Promise<ExtractedFigure[]>;
+  /**
+   * The dominant image of each requested page, for OCR. A scanned page *is*
+   * one big image XObject, so lifting it out yields the page's pixels without
+   * any rasterisation. Pages with no usable image are simply absent from the
+   * result — vector-only pages have nothing a vision model could read anyway.
+   */
+  pageImages(pdf: Buffer, pageNumbers: number[]): Promise<PageImage[]>;
 }

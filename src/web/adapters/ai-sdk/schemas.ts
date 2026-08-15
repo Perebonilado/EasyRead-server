@@ -33,6 +33,35 @@ export const blocksSchema = z.object({
     .min(1),
 });
 
+/**
+ * OCR of one scanned page. Unlike simplification, an empty result is a valid
+ * answer here — a page can genuinely hold nothing readable — so `blocks` has
+ * no minimum.
+ */
+export const ocrPageSchema = z.object({
+  blocks: z.array(
+    z.object({
+      type: z
+        .enum([
+          'headingOne',
+          'headingTwo',
+          'paragraph',
+          'bullet',
+          'code',
+          'table',
+        ])
+        .describe(
+          'Pipe-separated rows (header first) are "table", not "code"; ' +
+            '"code" is for program source, commands, and config.',
+        ),
+      text: z.string().min(1),
+    }),
+  ),
+  handwritten: z
+    .boolean()
+    .describe('true when most of the page is handwriting'),
+});
+
 export const topicsSchema = z.object({
   topics: z.array(
     z.object({

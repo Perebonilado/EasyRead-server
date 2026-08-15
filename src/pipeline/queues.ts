@@ -7,6 +7,7 @@ import type { Level, PipelineStep } from '../contracts';
 export const QUEUE = {
   convert: 'convert',
   extract: 'extract',
+  ocr: 'ocr',
   summarize: 'summarize',
   topics: 'topics',
   embed: 'embed',
@@ -25,6 +26,9 @@ export const QUEUE_SETTINGS: Record<
 > = {
   convert: { concurrency: 4, attempts: 3, backoffMs: 10_000 },
   extract: { concurrency: 4, attempts: 3, backoffMs: 5_000 },
+  // One document at a time; the processor runs its own bounded per-page
+  // fan-out of vision calls, so queue concurrency would multiply, not help.
+  ocr: { concurrency: 1, attempts: 2, backoffMs: 15_000 },
   summarize: { concurrency: 8, attempts: 3, backoffMs: 5_000 },
   topics: { concurrency: 4, attempts: 2, backoffMs: 10_000 },
   embed: { concurrency: 4, attempts: 5, backoffMs: 10_000 },

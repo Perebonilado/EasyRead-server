@@ -5,6 +5,7 @@ const page = (pageNumber: number, text: string, isEmpty = false) => ({
   text,
   charCount: text.length,
   isEmpty,
+  textSource: 'extracted' as const,
 });
 
 describe('buildDigest', () => {

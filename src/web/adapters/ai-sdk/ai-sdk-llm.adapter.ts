@@ -15,6 +15,7 @@ import {
   blocksSchema,
   diagramSchema,
   interviewSchema,
+  ocrPageSchema,
   outlineSchema,
   prerequisitesSchema,
   recapSchema,
@@ -44,6 +45,43 @@ export class AiSdkLlmAdapter implements LlmGatewayPort, OnModuleInit {
   /** Fail at boot on a missing key, not on the first upload. */
   onModuleInit(): void {
     this.registry.assertConfigured();
+  }
+
+  async ocrPage(input: {
+    png: Buffer;
+    pageNumber: number;
+  }): Promise<LlmResult<{ blocks: Block[]; handwritten: boolean }>> {
+    const started = Date.now();
+    const { generateObject } = await this.registry.modules();
+    const { model, ref } = await this.registry.languageModel('ocr_page');
+
+    const result = await generateObject({
+      model,
+      schema: ocrPageSchema,
+      system: PROMPTS.ocrPage,
+      messages: [
+        {
+          role: 'user' as const,
+          content: [
+            {
+              type: 'image' as const,
+              image: input.png,
+              mediaType: 'image/png',
+            },
+            {
+              type: 'text' as const,
+              text: `Transcribe this scanned page (page ${input.pageNumber}).`,
+            },
+          ],
+        },
+      ],
+      maxRetries: this.maxRetries(),
+    });
+
+    return {
+      value: result.object,
+      usage: this.usage(ref, result.usage, started),
+    };
   }
 
   async summarize(input: {

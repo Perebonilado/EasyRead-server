@@ -23,6 +23,7 @@ import {
 const QUEUE_FOR_STEP: Record<Exclude<PipelineStep, 'export'>, QueueName> = {
   convert: QUEUE.convert,
   extract: QUEUE.extract,
+  ocr: QUEUE.ocr,
   summarize: QUEUE.summarize,
   topics: QUEUE.topics,
   embed: QUEUE.embed,

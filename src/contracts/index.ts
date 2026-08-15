@@ -23,6 +23,7 @@ export type PageStatus = 'pending' | 'processing' | 'done' | 'failed';
 export type PipelineStep =
   | 'convert'
   | 'extract'
+  | 'ocr'
   | 'summarize'
   | 'topics'
   | 'embed'
@@ -121,7 +122,13 @@ export type PageTextResponse = {
 
 export type SimplifiedPagesResponse = {
   level: Level;
-  pages: { pageNumber: number; status: PageStatus; blocks: Block[] }[];
+  pages: {
+    pageNumber: number;
+    status: PageStatus;
+    blocks: Block[];
+    /** True when this page's source text was read from a scan by a model. */
+    ocr: boolean;
+  }[];
 };
 
 export type TopicDto = {

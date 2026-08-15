@@ -64,7 +64,12 @@ function build(overrides: {
     {
       findRange: async () => [
         { pageNumber: 1, text: '', charCount: 0, isEmpty: true },
-        { pageNumber: 2, text: 'digital text here', charCount: 17, isEmpty: false },
+        {
+          pageNumber: 2,
+          text: 'digital text here',
+          charCount: 17,
+          isEmpty: false,
+        },
         { pageNumber: 3, text: '', charCount: 0, isEmpty: true },
       ],
       countEmpty: async () =>
@@ -80,7 +85,7 @@ function build(overrides: {
       },
     } as never,
     // calls
-    { record: async () => undefined } as never,
+    { record: async () => undefined },
     // storage
     { get: async () => Buffer.from('pdf') } as never,
     // pdf toolkit
@@ -101,7 +106,10 @@ function build(overrides: {
         (async ({ pageNumber }: { pageNumber: number }) => ({
           value: {
             blocks: [
-              { type: 'headingOne', text: `Endocrine notes, page ${pageNumber}` },
+              {
+                type: 'headingOne',
+                text: `Endocrine notes, page ${pageNumber}`,
+              },
               { type: 'bullet', text: 'insulin lowers blood glucose' },
               {
                 type: 'paragraph',

@@ -39,6 +39,7 @@ import { PassthroughConverterAdapter } from '../adapters/passthrough-converter.a
 import { PdfExportRendererAdapter } from '../adapters/pdf-export-renderer.adapter';
 import { WebImportAdapter } from '../adapters/web-import/web-import.adapter';
 import { PdfjsToolkitAdapter } from '../adapters/pdfjs-toolkit.adapter';
+import { S3StorageAdapter } from '../adapters/s3-storage.adapter';
 import { RedisEventBusAdapter } from '../adapters/redis-event-bus.adapter';
 import { SystemClock } from '../adapters/system-clock';
 
@@ -77,12 +78,31 @@ export const portProviders: Provider[] = [
     provide: STORAGE,
     inject: [ConfigService, GoogleDriveClient],
     useFactory: (config: ConfigService, drive: GoogleDriveClient) => {
-      if (config.get('STORAGE_DRIVER') === 'drive' && drive.isConfigured()) {
+      const driver = config.get<string>('STORAGE_DRIVER');
+      // Announced at boot: which driver is live is the single most expensive
+      // thing to get wrong here, and the failure is silent until a file is
+      // missing hours later.
+      logger.log(`Storage driver: ${driver ?? 'local (unset)'}`);
+
+      // Object storage: the only driver that works when the API and the
+      // worker are separate containers, since neither can read the other's
+      // disk. Missing credentials throw rather than silently falling back —
+      // a deployment quietly writing to a container's disk loses every file
+      // on the next deploy, which is worse than refusing to boot.
+      if (driver === 's3') return new S3StorageAdapter(config);
+
+      if (driver === 'drive' && drive.isConfigured()) {
         return new DriveStorageAdapter(drive);
       }
-      if (config.get('STORAGE_DRIVER') === 'drive') {
+      if (driver === 'drive') {
         logger.warn(
           'STORAGE_DRIVER=drive but no service account is configured; using local disk',
+        );
+      }
+      if (config.get('NODE_ENV') === 'production') {
+        logger.warn(
+          'STORAGE_DRIVER is not set to s3 or drive in production — files are ' +
+            "on the container's disk and will be lost on the next deploy",
         );
       }
       return new LocalStorageAdapter(config);

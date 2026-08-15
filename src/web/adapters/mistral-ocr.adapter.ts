@@ -118,9 +118,7 @@ export class MistralOcrAdapter implements OcrEnginePort {
         body: JSON.stringify({
           model: this.model(),
           document: { type: 'document_url', document_url: documentUrl },
-          ...(withPages
-            ? { pages: pageNumbers.map((page) => page - 1) }
-            : {}),
+          ...(withPages ? { pages: pageNumbers.map((page) => page - 1) } : {}),
         }),
         signal: AbortSignal.timeout(OCR_TIMEOUT_MS),
       });
@@ -160,7 +158,9 @@ export function cleanMarkdown(markdown: string): string {
   return markdown
     .replace(/!\[[^\]]*\]\([^)]*\)/g, '')
     .split('\n')
-    .filter((line) => !/^\s*.{0,10}(scanned with|camscanner).{0,20}$/i.test(line))
+    .filter(
+      (line) => !/^\s*.{0,10}(scanned with|camscanner).{0,20}$/i.test(line),
+    )
     .join('\n')
     .replace(/\n{3,}/g, '\n\n')
     .trim();

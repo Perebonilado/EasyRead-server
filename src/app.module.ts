@@ -83,6 +83,7 @@ import { AccountController } from './web/controllers/account.controller';
 import { AuthController } from './web/controllers/auth.controller';
 import { DocumentsController } from './web/controllers/documents.controller';
 import { EventsController } from './web/controllers/events.controller';
+import { HealthController } from './web/controllers/health.controller';
 import { ExportsController } from './web/controllers/exports.controller';
 import { HighlightController } from './web/controllers/highlight.controller';
 import { ChatController } from './web/controllers/chat.controller';
@@ -187,6 +188,7 @@ const queries = [
     VoiceController,
     TutorsController,
     EventsController,
+    HealthController,
   ],
   providers: [
     ...handlers,

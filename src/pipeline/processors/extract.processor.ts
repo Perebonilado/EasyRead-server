@@ -71,9 +71,16 @@ export class ExtractProcessor extends BasePipelineProcessor<BaseJobData> {
       // "figure" just repeats the original beside the simplified text.
       if (doc.props.source === 'uploaded') {
         const scannedPages = new Set(
-          extracted.filter((page) => page.isEmpty).map((page) => page.pageNumber),
+          extracted
+            .filter((page) => page.isEmpty)
+            .map((page) => page.pageNumber),
         );
-        await this.extractFigures(doc.id, doc.contentVersion, bytes, scannedPages);
+        await this.extractFigures(
+          doc.id,
+          doc.contentVersion,
+          bytes,
+          scannedPages,
+        );
       }
 
       const empty = extracted.filter((page) => page.isEmpty).length;

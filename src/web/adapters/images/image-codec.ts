@@ -421,7 +421,10 @@ export function downsampleRgba(
     const y1 = Math.min(height, Math.max(y0 + 1, Math.floor((oy + 1) / scale)));
     for (let ox = 0; ox < outWidth; ox++) {
       const x0 = Math.floor(ox / scale);
-      const x1 = Math.min(width, Math.max(x0 + 1, Math.floor((ox + 1) / scale)));
+      const x1 = Math.min(
+        width,
+        Math.max(x0 + 1, Math.floor((ox + 1) / scale)),
+      );
       let r = 0;
       let g = 0;
       let b = 0;

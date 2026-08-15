@@ -26,12 +26,15 @@
     "seed:prod": "node dist/scripts/seed.js",
     "dev": "ts-node --transpile-only -r tsconfig-paths/register src/main.ts",
     "typecheck": "tsc --noEmit",
-    "check:models": "ts-node --transpile-only scripts/check-models.ts"
+    "check:models": "ts-node --transpile-only scripts/check-models.ts",
+    "check:storage": "ts-node --transpile-only scripts/check-storage.ts"
   },
   "dependencies": {
     "@ai-sdk/anthropic": "^4.0.38",
     "@ai-sdk/google": "^4.0.43",
     "@ai-sdk/openai": "^4.0.41",
+    "@aws-sdk/client-s3": "^3.1111.0",
+    "@aws-sdk/s3-request-presigner": "^3.1111.0",
     "@nestjs/axios": "^4.0.1",
     "@nestjs/common": "^11.0.1",
     "@nestjs/config": "^4.0.4",

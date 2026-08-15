@@ -47,6 +47,16 @@ import {
   ListChatMessagesHandler,
   SendChatMessageHandler,
 } from './business/handlers/documents/chat.handlers';
+import {
+  CreateRecapHandler,
+  ListRecapsHandler,
+} from './business/handlers/documents/recap.handlers';
+import {
+  CreateNoteHandler,
+  DeleteNoteHandler,
+  ListNotesHandler,
+  UpdateNoteHandler,
+} from './business/handlers/documents/notes.handlers';
 import { DocumentDetailQuery } from './query/document-detail.query';
 import { DocumentListQuery } from './query/document-list.query';
 import { ContinueStudyingQuery } from './query/continue-studying.query';
@@ -69,6 +79,8 @@ import { EventsController } from './web/controllers/events.controller';
 import { ExportsController } from './web/controllers/exports.controller';
 import { HighlightController } from './web/controllers/highlight.controller';
 import { ChatController } from './web/controllers/chat.controller';
+import { NotesController } from './web/controllers/notes.controller';
+import { RecapsController } from './web/controllers/recaps.controller';
 import { LearnController } from './web/controllers/learn.controller';
 import { ConceptsController } from './web/controllers/concepts.controller';
 import { ReaderController } from './web/controllers/reader.controller';
@@ -108,6 +120,12 @@ const handlers = [
   TutorIntroHandler,
   SendChatMessageHandler,
   ListChatMessagesHandler,
+  CreateNoteHandler,
+  ListNotesHandler,
+  CreateRecapHandler,
+  ListRecapsHandler,
+  UpdateNoteHandler,
+  DeleteNoteHandler,
   InterviewHandler,
   GenerateDocumentHandler,
   ExpandDocumentHandler,
@@ -145,6 +163,8 @@ const queries = [
     ReaderController,
     HighlightController,
     ChatController,
+    NotesController,
+    RecapsController,
     LearnController,
     ConceptsController,
     ExportsController,

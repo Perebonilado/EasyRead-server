@@ -107,10 +107,23 @@ export class BullmqQueueAdapter implements JobQueuePort, OnModuleDestroy {
     });
   }
 
+  /**
+   * An export can legitimately be asked for twice: the document is unchanged
+   * and cached, but the reader has written notes since, and those print in
+   * the appendix. Completed job ids are retained for an hour and BullMQ
+   * silently ignores an `add` that reuses one — so the old job is dropped
+   * first, otherwise the re-render never runs and the reader downloads the
+   * previous PDF believing it is current.
+   */
   async enqueueExport(job: ExportJob): Promise<void> {
-    await this.queue(QUEUE.export).add('export', job, {
+    const queue = this.queue(QUEUE.export);
+    const jobId = exportJobId(job.exportId);
+    // Throws if the job is currently running, which is the one case where
+    // dropping it would be wrong anyway — that render is already underway.
+    await queue.remove(jobId).catch(() => undefined);
+    await queue.add('export', job, {
       ...this.options(QUEUE.export),
-      jobId: exportJobId(job.exportId),
+      jobId,
     });
   }
 

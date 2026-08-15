@@ -1,4 +1,4 @@
-import type { LearnQuestion, Block } from '../../contracts';
+import type { LearnQuestion, Block, RecapBody } from '../../contracts';
 
 export type LlmTask =
   | 'summarize'
@@ -11,6 +11,7 @@ export type LlmTask =
   | 'highlight_simplify'
   | 'highlight_define'
   | 'chat_document'
+  | 'session_recap'
   | 'learn_interview'
   | 'learn_outline'
   | 'learn_write'
@@ -145,6 +146,27 @@ export interface LlmGatewayPort {
     context: string;
     summary: string | null;
   }): Promise<LlmResult<{ title: string; mermaid: string }>>;
+
+  /**
+   * A recap of one sitting, written from what the reader did rather than
+   * from the document as a whole.
+   */
+  writeRecap(input: {
+    documentTitle: string;
+    fromPage: number;
+    toPage: number;
+    /** The simplified text of the pages in the window. */
+    pages: { pageNumber: number; text: string }[];
+    /** Chapters the window overlaps. */
+    topics: { title: string; startPage: number; endPage: number }[];
+    /** What the reader asked, in order. */
+    questions: string[];
+    /** Checks answered in the window, with how they went. */
+    checks: { kind: string; score: number }[];
+    /** Concepts the reader admitted to not knowing this session. */
+    prerequisitesAsked: string[];
+    profile: string;
+  }): Promise<LlmResult<RecapBody>>;
 
   embed(input: { texts: string[] }): Promise<LlmResult<number[][]>>;
 }

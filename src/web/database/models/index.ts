@@ -13,6 +13,8 @@ export { DocumentSummaryModel } from './document-summary.model';
 export { DocumentModel } from './document.model';
 export { ExportModel } from './export.model';
 export { HighlightLookupModel } from './highlight-lookup.model';
+export { NoteModel } from './note.model';
+export { SessionRecapModel } from './session-recap.model';
 export { PipelineRunModel } from './pipeline-run.model';
 export { ReadingPositionModel } from './reading-position.model';
 export { RefreshTokenModel } from './refresh-token.model';
@@ -39,6 +41,8 @@ import { DocumentSummaryModel } from './document-summary.model';
 import { DocumentModel } from './document.model';
 import { ExportModel } from './export.model';
 import { HighlightLookupModel } from './highlight-lookup.model';
+import { NoteModel } from './note.model';
+import { SessionRecapModel } from './session-recap.model';
 import { PipelineRunModel } from './pipeline-run.model';
 import { ReadingPositionModel } from './reading-position.model';
 import { RefreshTokenModel } from './refresh-token.model';
@@ -75,6 +79,8 @@ export const ALL_MODELS = [
   StruggleSignalModel,
   DocumentLearningStateModel,
   ChatMessageModel,
+  NoteModel,
+  SessionRecapModel,
   ConceptKnowledgeModel,
   TopicPrerequisiteModel,
 ];

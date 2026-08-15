@@ -240,6 +240,7 @@ export class SequelizeExportRepository implements ExportRepository {
       status: row.status,
       fileRef: row.fileRef,
       watermarked: row.watermarked,
+      renderedAt: row.get('updatedAt') as Date,
     };
   }
 
@@ -267,6 +268,13 @@ export class SequelizeExportRepository implements ExportRepository {
       status: 'processing',
     } as any);
     return this.toRecord(row);
+  }
+
+  async markProcessing(id: string): Promise<void> {
+    await this.model.update(
+      { status: 'processing', fileRef: null, error: null } as never,
+      { where: { id } },
+    );
   }
 
   async markDone(id: string, fileRef: string): Promise<void> {

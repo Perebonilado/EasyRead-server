@@ -196,6 +196,68 @@ export type ChatHistoryResponse = {
   hasMore: boolean;
 };
 
+// ── Notes ────────────────────────────────────────────────────────────────────
+
+/**
+ * Where a note came from.
+ *
+ * `typed` is the reader writing in the panel; `highlight` a passage they
+ * selected; `chat` an answer they kept; `lesson` something said during a
+ * tutor session; `recap` a wrap-up they saved. The panel and the export both
+ * read this, so a kept answer can be shown as a quote rather than as the
+ * reader's own words.
+ */
+export type NoteSource = 'typed' | 'highlight' | 'chat' | 'lesson' | 'recap';
+
+export type NoteDto = {
+  id: string;
+  body: string;
+  /** The page it was taken on, when there was one. */
+  pageNumber: number | null;
+  topicId: string | null;
+  /** The passage it was written against, for highlight and chat notes. */
+  quotedText: string | null;
+  source: NoteSource;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type NotesResponse = {
+  /** Newest first — the order the panel renders. */
+  notes: NoteDto[];
+  /** True when older notes exist beyond the ones returned. */
+  hasMore: boolean;
+};
+
+// ── Session recap ────────────────────────────────────────────────────────────
+
+/**
+ * What one sitting with a document covered.
+ *
+ * Written from what actually happened — the pages read, the questions asked,
+ * the checks answered — rather than from the document as a whole, which is
+ * what makes it a recap of your session and not a summary of the chapter.
+ */
+export type RecapBody = {
+  /** The through-line, in one or two sentences. */
+  headline: string;
+  covered: { title: string; gist: string; page: number | null }[];
+  /** The terms this stretch of reading turned on. */
+  keyTerms: { term: string; meaning: string }[];
+  /** Where the evidence says it did not land. */
+  shaky: { what: string; why: string; page: number | null }[];
+  /** One thing worth doing next, phrased as an action. */
+  nextStep: string;
+};
+
+export type RecapDto = {
+  id: string;
+  fromPage: number;
+  toPage: number;
+  body: RecapBody;
+  createdAt: string;
+};
+
 // ── Learn a topic ────────────────────────────────────────────────────────────
 
 /** Uploaded by the reader, or written by the model on request. */

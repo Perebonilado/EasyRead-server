@@ -8,8 +8,10 @@ import { JOB_QUEUE } from '../../ports/tokens';
 import type { JobQueuePort } from '../../ports/job-queue.port';
 import {
   EXPORT_REPOSITORY,
+  NOTE_REPOSITORY,
   SIMPLIFIED_PAGE_REPOSITORY,
 } from '../../repositories/tokens';
+import type { NoteRepository } from '../../repositories/note.repository';
 import type { ExportRepository } from '../../repositories/misc.repository';
 import type { SimplifiedPageRepository } from '../../repositories/simplified-page.repository';
 import AbstractRequestHandlerTemplate from '../AbstractRequestHandlerTemplate';
@@ -41,6 +43,7 @@ export class RequestExportHandler extends AbstractRequestHandlerTemplate<
 > {
   constructor(
     @Inject(EXPORT_REPOSITORY) private readonly exports: ExportRepository,
+    @Inject(NOTE_REPOSITORY) private readonly notes: NoteRepository,
     @Inject(SIMPLIFIED_PAGE_REPOSITORY)
     private readonly pages: SimplifiedPageRepository,
     @Inject(JOB_QUEUE) private readonly queue: JobQueuePort,
@@ -68,12 +71,27 @@ export class RequestExportHandler extends AbstractRequestHandlerTemplate<
       cmd.level,
       doc.contentVersion,
     );
-    if (cached && cached.status !== 'failed') {
+
+    // The document is keyed by contentVersion, but the appendix isn't part of
+    // the document — a note written after the last export would otherwise be
+    // missing from a PDF the cache calls up to date.
+    const notesChangedAt = await this.notes
+      .lastChangedAt(cmd.documentId, cmd.userId)
+      .catch(() => null);
+    const appendixStale = Boolean(
+      cached && notesChangedAt && notesChangedAt > cached.renderedAt,
+    );
+
+    if (cached && cached.status !== 'failed' && !appendixStale) {
       return CommandResponse.of({
         exportId: cached.id,
         status: cached.status,
         watermarked: cached.watermarked,
       });
+    }
+
+    if (cached && appendixStale) {
+      await this.exports.markProcessing(cached.id);
     }
 
     const entitlements = await this.entitlements.forUser(cmd.userId);

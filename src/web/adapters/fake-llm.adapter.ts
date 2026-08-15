@@ -3,7 +3,7 @@
  * that is the whole point of a deterministic offline stand-in. */
 import { createHash } from 'crypto';
 import { Injectable } from '@nestjs/common';
-import type { Block } from '../../contracts';
+import type { Block, RecapBody } from '../../contracts';
 import type {
   LlmGatewayPort,
   LlmResult,
@@ -209,6 +209,39 @@ export class FakeLlmAdapter implements LlmGatewayPort {
     return {
       value: answer,
       usage: this.usage(started, input.question.length, answer.length),
+    };
+  }
+
+  async writeRecap(input: {
+    documentTitle: string;
+    fromPage: number;
+    toPage: number;
+    pages: { pageNumber: number; text: string }[];
+    topics: { title: string; startPage: number; endPage: number }[];
+    questions: string[];
+    checks: { kind: string; score: number }[];
+    prerequisitesAsked: string[];
+    profile: string;
+  }): Promise<LlmResult<RecapBody>> {
+    const started = Date.now();
+    const body: RecapBody = {
+      headline: `[fake recap of pages ${input.fromPage}-${input.toPage} of ${input.documentTitle}]`,
+      covered: input.topics.slice(0, 3).map((topic) => ({
+        title: topic.title,
+        gist: `[fake gist of ${topic.title}]`,
+        page: topic.startPage,
+      })),
+      keyTerms: [],
+      shaky: input.prerequisitesAsked.slice(0, 2).map((concept) => ({
+        what: concept,
+        why: '[you asked for this from scratch]',
+        page: 0,
+      })),
+      nextStep: '[fake next step]',
+    };
+    return {
+      value: body,
+      usage: this.usage(started, input.pages.length * 100, 200),
     };
   }
 

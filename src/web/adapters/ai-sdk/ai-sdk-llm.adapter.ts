@@ -1,7 +1,7 @@
 import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import type { LanguageModelUsage } from 'ai';
-import type { Block } from '../../../contracts';
+import type { Block, RecapBody } from '../../../contracts';
 import type {
   LlmGatewayPort,
   LlmResult,
@@ -17,6 +17,7 @@ import {
   interviewSchema,
   outlineSchema,
   prerequisitesSchema,
+  recapSchema,
   topicsSchema,
 } from './schemas';
 
@@ -391,6 +392,66 @@ export class AiSdkLlmAdapter implements LlmGatewayPort, OnModuleInit {
 
     return {
       value: { title: result.object.title, mermaid },
+      usage: this.usage(ref, result.usage, started),
+    };
+  }
+
+  async writeRecap(input: {
+    documentTitle: string;
+    fromPage: number;
+    toPage: number;
+    pages: { pageNumber: number; text: string }[];
+    topics: { title: string; startPage: number; endPage: number }[];
+    questions: string[];
+    checks: { kind: string; score: number }[];
+    prerequisitesAsked: string[];
+    profile: string;
+  }): Promise<LlmResult<RecapBody>> {
+    const started = Date.now();
+    const { generateObject } = await this.registry.modules();
+    const { model, ref } = await this.registry.languageModel('session_recap');
+
+    // Scored out of 10 rather than as raw floats: the model reads "4/10" far
+    // more reliably than "0.38", and the exact value adds nothing here.
+    const checks = input.checks.length
+      ? input.checks
+          .map((check) => `${check.kind}: ${Math.round(check.score * 10)}/10`)
+          .join(', ')
+      : 'none answered';
+
+    const result = await generateObject({
+      model,
+      schema: recapSchema,
+      system: PROMPTS.sessionRecap,
+      prompt: [
+        `Document: ${input.documentTitle}`,
+        `Pages read this session: ${input.fromPage}–${input.toPage}`,
+        input.topics.length
+          ? `Chapters covered:\n${input.topics
+              .map((t) => `- ${t.title} (pages ${t.startPage}-${t.endPage})`)
+              .join('\n')}`
+          : null,
+        `The pages themselves:\n${input.pages
+          .map((page) => `[p.${page.pageNumber}] ${page.text}`)
+          .join('\n\n')}`,
+        input.questions.length
+          ? `What they asked, in order:\n${input.questions
+              .map((q) => `- ${q}`)
+              .join('\n')}`
+          : 'They asked nothing this session.',
+        `Comprehension checks: ${checks}`,
+        input.prerequisitesAsked.length
+          ? `They said they did not know: ${input.prerequisitesAsked.join('; ')}`
+          : null,
+        input.profile ? `How this reader learns:\n${input.profile}` : null,
+      ]
+        .filter(Boolean)
+        .join('\n\n'),
+      maxRetries: this.maxRetries(),
+    });
+
+    return {
+      value: result.object,
       usage: this.usage(ref, result.usage, started),
     };
   }

@@ -10,6 +10,8 @@ import {
   DOCUMENT_REPOSITORY,
   EXPORT_REPOSITORY,
   CHAT_REPOSITORY,
+  NOTE_REPOSITORY,
+  RECAP_REPOSITORY,
   CONCEPT_REPOSITORY,
   LOOKUP_REPOSITORY,
   PIPELINE_RUN_REPOSITORY,
@@ -32,6 +34,8 @@ import {
   SequelizeLearnerProfileRepository,
 } from '../repositories/sequelize-learning.repositories';
 import { SequelizeChatRepository } from '../repositories/sequelize-chat.repository';
+import { SequelizeNoteRepository } from '../repositories/sequelize-note.repository';
+import { SequelizeRecapRepository } from '../repositories/sequelize-recap.repository';
 import { SequelizeConceptRepository } from '../repositories/sequelize-concept.repository';
 import {
   SequelizeSubscriptionRepository,
@@ -83,6 +87,8 @@ export const repositoryProviders: Provider[] = [
   { provide: EXPORT_REPOSITORY, useClass: SequelizeExportRepository },
   { provide: LOOKUP_REPOSITORY, useClass: SequelizeLookupRepository },
   { provide: CHAT_REPOSITORY, useClass: SequelizeChatRepository },
+  { provide: NOTE_REPOSITORY, useClass: SequelizeNoteRepository },
+  { provide: RECAP_REPOSITORY, useClass: SequelizeRecapRepository },
   { provide: CONCEPT_REPOSITORY, useClass: SequelizeConceptRepository },
   {
     provide: PIPELINE_RUN_REPOSITORY,

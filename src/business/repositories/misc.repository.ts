@@ -74,6 +74,12 @@ export interface ExportRecord {
   status: 'processing' | 'done' | 'failed';
   fileRef: string | null;
   watermarked: boolean;
+  /**
+   * When the row last changed — which, for a finished export, is when the
+   * file was written. Used to spot an appendix that has fallen behind the
+   * reader's notes.
+   */
+  renderedAt: Date;
 }
 
 export interface ExportRepository {
@@ -91,6 +97,11 @@ export interface ExportRepository {
   }): Promise<ExportRecord>;
   markDone(id: string, fileRef: string): Promise<void>;
   markFailed(id: string, error: string): Promise<void>;
+  /**
+   * Sends a finished export back to the queue — the document is unchanged,
+   * but something printed alongside it (the reader's notes) is not.
+   */
+  markProcessing(id: string): Promise<void>;
 }
 
 // ── Highlight history ────────────────────────────────────────────────────────

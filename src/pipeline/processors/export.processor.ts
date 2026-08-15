@@ -13,9 +13,11 @@ import type { StoragePort } from '../../business/ports/storage.port';
 import {
   DOCUMENT_REPOSITORY,
   EXPORT_REPOSITORY,
+  NOTE_REPOSITORY,
   SIMPLIFIED_PAGE_REPOSITORY,
   TOPIC_REPOSITORY,
 } from '../../business/repositories/tokens';
+import type { NoteRepository } from '../../business/repositories/note.repository';
 import type { DocumentRepository } from '../../business/repositories/document.repository';
 import type {
   ExportRepository,
@@ -42,6 +44,7 @@ export class ExportProcessor {
     private readonly simplified: SimplifiedPageRepository,
     @Inject(TOPIC_REPOSITORY) private readonly topics: TopicRepository,
     @Inject(EXPORT_REPOSITORY) private readonly exports: ExportRepository,
+    @Inject(NOTE_REPOSITORY) private readonly notes: NoteRepository,
     @Inject(EXPORT_RENDERER) private readonly renderer: ExportRendererPort,
     @Inject(STORAGE) private readonly storage: StoragePort,
     @Inject(EVENT_BUS) private readonly events: EventBusPort,
@@ -74,6 +77,13 @@ export class ExportProcessor {
         doc.userId,
       );
 
+      // Best-effort: an export is still worth having without the appendix,
+      // and a reader waiting on a PDF should not be told it failed because
+      // their notes could not be read.
+      const notes = await this.notes
+        .all(job.documentId, doc.userId)
+        .catch(() => []);
+
       const sections: ExportSection[] = pages
         .filter((page) => page.blocks?.length)
         .sort((a, b) => a.pageNumber - b.pageNumber)
@@ -91,6 +101,12 @@ export class ExportProcessor {
         title: doc.props.title,
         sections,
         watermark: record.watermarked,
+        notes: notes.map((note) => ({
+          body: note.body,
+          pageNumber: note.pageNumber,
+          quotedText: note.quotedText,
+          source: note.source,
+        })),
       });
 
       const stored = await this.storage.put({

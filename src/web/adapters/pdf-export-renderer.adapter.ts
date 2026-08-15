@@ -1,5 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import type {
+  ExportNote,
   ExportRendererPort,
   ExportSection,
 } from '../../business/ports/export-renderer.port';
@@ -16,10 +17,82 @@ const WATERMARK = 'Made with EasyRead — easyread.app';
  */
 @Injectable()
 export class PdfExportRendererAdapter implements ExportRendererPort {
+  /**
+   * The reader's own notes, printed after the document.
+   *
+   * Ordered by page rather than by when they were written, so the appendix
+   * can be read alongside the chapters it belongs to; notes with no page —
+   * taken in a lesson, or about the document as a whole — come last under
+   * their own heading rather than being filed under a page they never had.
+   */
+  private appendNotes(pdf: PdfWriter, notes: ExportNote[]): void {
+    if (!notes.length) return;
+
+    const ordered = [...notes].sort((a, b) => {
+      if (a.pageNumber === b.pageNumber) return 0;
+      if (a.pageNumber === null) return 1;
+      if (b.pageNumber === null) return -1;
+      return a.pageNumber - b.pageNumber;
+    });
+
+    pdf.pageBreak();
+    pdf.text('Your notes', { font: 'bold', size: 22, leading: 28 });
+    pdf.space(4);
+    pdf.text(
+      `${notes.length} ${notes.length === 1 ? 'note' : 'notes'} you wrote while reading`,
+      { font: 'italic', size: 11, grey: 0.45 },
+    );
+    pdf.space(20);
+
+    let headed = false;
+    for (const note of ordered) {
+      if (note.pageNumber === null && !headed) {
+        headed = true;
+        pdf.space(10);
+        pdf.text('About the document', {
+          font: 'bold',
+          size: 13,
+          leading: 18,
+        });
+        pdf.space(6);
+      }
+
+      if (note.pageNumber !== null) {
+        pdf.text(`Page ${note.pageNumber}`, {
+          font: 'regular',
+          size: 9,
+          grey: 0.55,
+        });
+        pdf.space(3);
+      }
+
+      if (note.quotedText) {
+        pdf.text(`“${note.quotedText}”`, {
+          font: 'italic',
+          size: 10,
+          leading: 15,
+          indent: 12,
+          grey: 0.4,
+        });
+        pdf.space(4);
+      }
+
+      // Paragraph breaks the reader typed are kept — a note is quoted, not
+      // reflowed.
+      for (const paragraph of note.body.split(/\n{2,}/)) {
+        pdf.text(paragraph, { size: 11, leading: 17 });
+        pdf.space(4);
+      }
+
+      pdf.space(14);
+    }
+  }
+
   async render(input: {
     title: string;
     sections: ExportSection[];
     watermark: boolean;
+    notes?: ExportNote[];
   }): Promise<Buffer> {
     const pdf = new PdfWriter(input.watermark ? WATERMARK : null);
 
@@ -75,6 +148,8 @@ export class PdfExportRendererAdapter implements ExportRendererPort {
 
       pdf.space(16);
     }
+
+    this.appendNotes(pdf, input.notes ?? []);
 
     return pdf.build();
   }

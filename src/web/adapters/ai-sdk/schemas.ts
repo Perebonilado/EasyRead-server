@@ -89,3 +89,41 @@ export const prerequisitesSchema = z.object({
     )
     .max(60),
 });
+
+/**
+ * A session recap.
+ *
+ * Every key is required — OpenAI's structured output rejects optional ones —
+ * so "nothing looked shaky" is an empty array, and a page the model cannot
+ * place is 0 rather than a missing field.
+ */
+export const recapSchema = z.object({
+  headline: z.string().min(1).max(400),
+  covered: z
+    .array(
+      z.object({
+        title: z.string().min(1).max(160),
+        gist: z.string().min(1).max(400),
+        page: z.number().int().min(0),
+      }),
+    )
+    .max(8),
+  keyTerms: z
+    .array(
+      z.object({
+        term: z.string().min(1).max(120),
+        meaning: z.string().min(1).max(300),
+      }),
+    )
+    .max(8),
+  shaky: z
+    .array(
+      z.object({
+        what: z.string().min(1).max(200),
+        why: z.string().min(1).max(300),
+        page: z.number().int().min(0),
+      }),
+    )
+    .max(5),
+  nextStep: z.string().min(1).max(300),
+});

@@ -79,6 +79,35 @@ export const PROMPTS = {
    * "basic biology" cannot be jumped to, explained, or asked about. Hence the
    * insistence on specific named concepts and honest empty lists.
    */
+  sessionRecap: [
+    'You are writing a recap of ONE study session for the person who just',
+    'read it — not a summary of the document.',
+    'You are given the pages they read this session, the chapters those pages',
+    'fall in, the questions they asked, how their comprehension checks went,',
+    'and any concepts they said they did not know.',
+    'Write in the second person, plainly, as a tutor would at the end of an',
+    'hour: "You worked through X, and the part that gave you trouble was Y."',
+    'covered: the two to five real ideas this stretch was about, in reading',
+    'order, each with one line of substance — not "you read pages 40-52".',
+    'keyTerms: only terms that actually carried this stretch of reading, with',
+    'the meaning as this document uses it. Skip terms they clearly already',
+    'have.',
+    'shaky: ONLY what the evidence supports — a check they got wrong, a thing',
+    'they asked about more than once, a prerequisite they said they lacked.',
+    'Never guess at weakness, and never pad this list to look thorough. An',
+    'empty list is the right answer for a session that went well.',
+    'The absence of evidence is not evidence: a session with no comprehension',
+    'checks answered and no questions asked tells you nothing about what they',
+    'understood, so it goes in shaky as nothing at all. Never write that they',
+    'should have answered checks, asked more, or engaged differently — you are',
+    'recapping the material, not grading their study habits.',
+    'nextStep: one concrete action for next time — a page to re-read, a term',
+    'to nail down, the next chapter. One sentence, no pep talk.',
+    'Use page numbers from the material you were given; use 0 when you cannot',
+    'place something on a page. Never invent content that is not in the pages',
+    'provided.',
+  ].join(' '),
+
   topicPrereqs: [
     'You are given the summary and full chapter outline of a study document,',
     'in reading order. For each chapter, name what it assumes the reader',

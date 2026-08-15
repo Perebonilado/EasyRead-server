@@ -54,6 +54,7 @@ import {
 import {
   CreateNoteHandler,
   DeleteNoteHandler,
+  ListAllNotesHandler,
   ListNotesHandler,
   UpdateNoteHandler,
 } from './business/handlers/documents/notes.handlers';
@@ -80,6 +81,7 @@ import { ExportsController } from './web/controllers/exports.controller';
 import { HighlightController } from './web/controllers/highlight.controller';
 import { ChatController } from './web/controllers/chat.controller';
 import { NotesController } from './web/controllers/notes.controller';
+import { NotebookController } from './web/controllers/notebook.controller';
 import { RecapsController } from './web/controllers/recaps.controller';
 import { LearnController } from './web/controllers/learn.controller';
 import { ConceptsController } from './web/controllers/concepts.controller';
@@ -122,6 +124,7 @@ const handlers = [
   ListChatMessagesHandler,
   CreateNoteHandler,
   ListNotesHandler,
+  ListAllNotesHandler,
   CreateRecapHandler,
   ListRecapsHandler,
   UpdateNoteHandler,
@@ -164,6 +167,7 @@ const queries = [
     HighlightController,
     ChatController,
     NotesController,
+    NotebookController,
     RecapsController,
     LearnController,
     ConceptsController,

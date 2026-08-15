@@ -1,4 +1,10 @@
-import { Column, DataType, ForeignKey, Table } from 'sequelize-typescript';
+import {
+  BelongsTo,
+  Column,
+  DataType,
+  ForeignKey,
+  Table,
+} from 'sequelize-typescript';
 import type { NoteSource } from '../../../contracts';
 import { BaseModel } from './base';
 import { DocumentModel } from './document.model';
@@ -34,4 +40,8 @@ export class NoteModel extends BaseModel {
     defaultValue: 'typed',
   })
   declare source: NoteSource;
+
+  /** Read outside the reader, a note has to be able to name its document. */
+  @BelongsTo(() => DocumentModel)
+  declare document?: DocumentModel;
 }

@@ -23,7 +23,10 @@ import type {
 } from '../../repositories/learning.repository';
 import { DEFAULT_LEARNER_PROFILE } from '../../repositories/learning.repository';
 import type { TopicRepository } from '../../repositories/misc.repository';
-import type { RecapRecord, RecapRepository } from '../../repositories/recap.repository';
+import type {
+  RecapRecord,
+  RecapRepository,
+} from '../../repositories/recap.repository';
 import type { SimplifiedPageRepository } from '../../repositories/simplified-page.repository';
 import AbstractRequestHandlerTemplate from '../AbstractRequestHandlerTemplate';
 import { CommandResponse } from '../response/CommandResponse';

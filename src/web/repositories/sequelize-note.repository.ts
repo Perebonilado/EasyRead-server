@@ -5,7 +5,9 @@ import type {
   CreateNoteInput,
   NoteRecord,
   NoteRepository,
+  NoteWithDocument,
 } from '../../business/repositories/note.repository';
+import { DocumentModel } from '../database/models/document.model';
 import { NoteModel } from '../database/models/note.model';
 import { newId } from '../database/uuid';
 
@@ -100,6 +102,45 @@ export class SequelizeNoteRepository implements NoteRepository {
       order: [['updatedAt', 'DESC']] as never,
     });
     return row ? (row.get('updatedAt') as Date) : null;
+  }
+
+  async pageForUser(
+    userId: string,
+    limit: number,
+    before?: Date,
+  ): Promise<{ notes: NoteWithDocument[]; hasMore: boolean }> {
+    const rows = await this.model.findAll({
+      where: {
+        userId,
+        ...(before ? { createdAt: { [Op.lt]: before } } : {}),
+      } as never,
+      include: [
+        {
+          model: DocumentModel,
+          // `required` makes this an inner join: a note whose document is in
+          // the bin has nowhere to lead, so it is not listed.
+          required: true,
+          attributes: ['id', 'title', 'deletedAt'],
+          where: { deletedAt: null } as never,
+        },
+      ],
+      order: [
+        ['createdAt', 'DESC'],
+        ['id', 'DESC'],
+      ] as never,
+      limit: limit + 1,
+    });
+
+    const hasMore = rows.length > limit;
+    const page = hasMore ? rows.slice(0, limit) : rows;
+    return {
+      notes: page.map((row) => ({
+        ...toRecord(row),
+        documentId: row.documentId,
+        documentTitle: row.document?.title ?? 'Untitled',
+      })),
+      hasMore,
+    };
   }
 
   async all(documentId: string, userId: string): Promise<NoteRecord[]> {

@@ -272,7 +272,7 @@ export class SequelizeExportRepository implements ExportRepository {
 
   async markProcessing(id: string): Promise<void> {
     await this.model.update(
-      { status: 'processing', fileRef: null, error: null } as never,
+      { status: 'processing', fileRef: null, error: null },
       { where: { id } },
     );
   }

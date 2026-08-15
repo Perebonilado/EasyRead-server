@@ -1,5 +1,10 @@
 import { Inject, Injectable } from '@nestjs/common';
-import type { NoteDto, NoteSource, NotesResponse } from '../../../contracts';
+import type {
+  AllNotesResponse,
+  NoteDto,
+  NoteSource,
+  NotesResponse,
+} from '../../../contracts';
 import { NotFoundError, ValidationError } from '../../domain/errors/errors';
 import { noteBody, notePage, noteQuote } from '../../domain/values/notes';
 import { NOTE_REPOSITORY } from '../../repositories/tokens';
@@ -115,6 +120,52 @@ export class ListNotesHandler extends AbstractRequestHandlerTemplate<
     );
 
     return CommandResponse.of({ notes: notes.map(toNoteDto), hasMore });
+  }
+}
+
+export interface ListAllNotesRequest {
+  userId: string;
+  limit?: number;
+  before?: string;
+}
+
+/**
+ * Every note this reader has written, across their documents.
+ *
+ * No document id and so no access check on one: the scope *is* the user, and
+ * the query is keyed by their id. Each note names the document it came from,
+ * because read here it has lost the context that made it make sense.
+ */
+@Injectable()
+export class ListAllNotesHandler extends AbstractRequestHandlerTemplate<
+  ListAllNotesRequest,
+  AllNotesResponse
+> {
+  constructor(@Inject(NOTE_REPOSITORY) private readonly notes: NoteRepository) {
+    super();
+  }
+
+  protected async handleRequest(cmd: ListAllNotesRequest) {
+    const limit = Math.min(Math.max(cmd.limit ?? 50, 1), MAX_PAGE_SIZE);
+    const before = cmd.before ? new Date(cmd.before) : undefined;
+    if (before && Number.isNaN(before.getTime())) {
+      throw new ValidationError('That cursor is not a valid timestamp');
+    }
+
+    const { notes, hasMore } = await this.notes.pageForUser(
+      cmd.userId,
+      limit,
+      before,
+    );
+
+    return CommandResponse.of({
+      notes: notes.map((note) => ({
+        ...toNoteDto(note),
+        documentId: note.documentId,
+        documentTitle: note.documentTitle,
+      })),
+      hasMore,
+    });
   }
 }
 

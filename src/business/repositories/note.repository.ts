@@ -11,6 +11,12 @@ export interface NoteRecord {
   updatedAt: Date;
 }
 
+/** A note read outside its document carries the document with it. */
+export interface NoteWithDocument extends NoteRecord {
+  documentId: string;
+  documentTitle: string;
+}
+
 export interface CreateNoteInput {
   documentId: string;
   userId: string;
@@ -61,4 +67,15 @@ export interface NoteRepository {
    * cached export that its appendix is out of date.
    */
   lastChangedAt(documentId: string, userId: string): Promise<Date | null>;
+
+  /**
+   * Every note this reader has written, across all their documents, newest
+   * first — the notes screen. Notes on a deleted document are left out; the
+   * rows are gone anyway once the delete cascades.
+   */
+  pageForUser(
+    userId: string,
+    limit: number,
+    before?: Date,
+  ): Promise<{ notes: NoteWithDocument[]; hasMore: boolean }>;
 }

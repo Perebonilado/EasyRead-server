@@ -17,7 +17,10 @@ import {
   SIMPLIFIED_PAGE_REPOSITORY,
   TOPIC_REPOSITORY,
 } from '../../business/repositories/tokens';
-import type { NoteRepository } from '../../business/repositories/note.repository';
+import type {
+  NoteRecord,
+  NoteRepository,
+} from '../../business/repositories/note.repository';
 import type { DocumentRepository } from '../../business/repositories/document.repository';
 import type {
   ExportRepository,
@@ -80,7 +83,7 @@ export class ExportProcessor {
       // Best-effort: an export is still worth having without the appendix,
       // and a reader waiting on a PDF should not be told it failed because
       // their notes could not be read.
-      const notes = await this.notes
+      const notes: NoteRecord[] = await this.notes
         .all(job.documentId, doc.userId)
         .catch(() => []);
 

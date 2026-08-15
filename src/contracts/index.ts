@@ -229,6 +229,17 @@ export type NotesResponse = {
   hasMore: boolean;
 };
 
+/** A note read outside its document, where it has to name where it came from. */
+export type NoteWithDocumentDto = NoteDto & {
+  documentId: string;
+  documentTitle: string;
+};
+
+export type AllNotesResponse = {
+  notes: NoteWithDocumentDto[];
+  hasMore: boolean;
+};
+
 // ── Session recap ────────────────────────────────────────────────────────────
 
 /**

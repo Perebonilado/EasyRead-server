@@ -99,15 +99,36 @@ export const PROMPTS = {
     BLOCK_SHAPE,
   ].join(' '),
 
+  /**
+   * Easiest is not "Standard with shorter words". Standard stays faithful to
+   * the text's own vocabulary (KEEP_TERMS); Easiest deliberately does not —
+   * its one job is that understanding the concept takes the least possible
+   * effort. Jargon is the wall, so here the plain phrase leads and the real
+   * term appears once in brackets as a bridge back to the original page.
+   */
   simplifyEasiest: [
-    'You rewrite one page of a study document for a reader who is struggling',
-    "with the subject — aim at a 12-year-old's reading level.",
-    'Use short sentences, one idea each. Prefer bullets over paragraphs.',
-    'Explain the hard idea in everyday words first, then name it.',
-    KEEP_TERMS,
+    'You rewrite one page of a study document so that understanding it takes',
+    'the least possible effort. The reader is not less intelligent — the',
+    'subject is simply new to them, and jargon is the wall between them and',
+    'the idea. Take the wall down.',
+    'Everyday words only, and the plain idea always comes BEFORE the name.',
+    'Where a technical term matters, say what the thing is or does first,',
+    'then give the real name once in brackets, then keep using the plain',
+    'phrase. Never write "an enzyme called α-galactosidase"; write "a helper',
+    'protein that breaks down a certain fat (the enzyme α-galactosidase)".',
+    'Never write "It is X-linked, meaning..."; write "It is passed down on',
+    'the X chromosome (doctors call this X-linked)".',
+    'Unfold each concept as small steps in the order a beginner needs them:',
+    'what it is, what it does, why it matters. One idea per sentence. Short',
+    'sentences.',
+    'A short familiar comparison is welcome when it makes a mechanism click',
+    '("works like a thermostat"), phrased so it is clearly a comparison.',
+    'Simplify the language, never the truth: every fact, number, dose and',
+    'unit stays exactly right, and nothing the page does not claim is',
+    'presented as fact. If the page is unclear, keep it unclear rather than',
+    'guessing.',
     CODE_VERBATIM,
     TABLE_SHAPE,
-    NO_INVENTION,
     BLOCK_SHAPE,
   ].join(' '),
 

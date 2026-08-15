@@ -19,8 +19,30 @@ const KEEP_TERMS =
   'Explain a hard term in plain words alongside it; do not replace it.';
 
 const BLOCK_SHAPE =
-  'Reply with JSON: {"blocks":[{"type":"headingOne"|"headingTwo"|"paragraph"|"bullet","text":"..."}]}. ' +
+  'Reply with JSON: {"blocks":[{"type":"headingOne"|"headingTwo"|"paragraph"|"bullet"|"code"|"table","text":"..."}]}. ' +
   'No markdown, no numbering in the text, no other keys.';
+
+/**
+ * Tables stay tables. Extracted PDF text mangles columns into word soup;
+ * the model is the one place the rows can be put back together, and prose
+ * ("the third column shows...") destroys exactly what a table is for.
+ */
+const TABLE_SHAPE =
+  'When the page presents tabular data — columns of values, a comparison, a ' +
+  'parameter list — reproduce it as a "table" block: one row per line, cells ' +
+  'separated by " | ", first line the header row. Never flatten a table into ' +
+  'prose or bullets, and never invent cells the page does not have.';
+
+/**
+ * Code passes through untouched. One mangled identifier destroys a
+ * developer's trust in every other page, so the rule is absolute: no
+ * rewriting, no summarising, no "explaining inline", no reformatting.
+ */
+const CODE_VERBATIM =
+  'Anything that is code — commands, configuration, program source, terminal ' +
+  'output — is NEVER rewritten, summarised or reworded. Reproduce it ' +
+  'character for character, line breaks intact, as a "code" block. Explain ' +
+  'code in a paragraph before or after it, never by editing it.';
 
 export const PROMPTS = {
   summarize: [
@@ -50,6 +72,8 @@ export const PROMPTS = {
     'active voice and everyday words for ordinary vocabulary.',
     'Use headings where the page has sections, and bullets where it lists things.',
     KEEP_TERMS,
+    CODE_VERBATIM,
+    TABLE_SHAPE,
     NO_INVENTION,
     BLOCK_SHAPE,
   ].join(' '),
@@ -60,6 +84,8 @@ export const PROMPTS = {
     'Use short sentences, one idea each. Prefer bullets over paragraphs.',
     'Explain the hard idea in everyday words first, then name it.',
     KEEP_TERMS,
+    CODE_VERBATIM,
+    TABLE_SHAPE,
     NO_INVENTION,
     BLOCK_SHAPE,
   ].join(' '),
@@ -219,6 +245,10 @@ export const PROMPTS = {
     'document does cover nearby.',
     'Write for the screen: short paragraphs, no headings, no preamble, and no',
     'sign-off. Two to four short paragraphs unless the reader asks for more.',
+    'House formatting, and only this: mark key terms as **term**, put code in',
+    '```fenced blocks``` (inline code in single backticks), use "- " for',
+    'lists, and cite pages as (p.N). No other markdown — no headings, no',
+    'italics, no bold sentences.',
     'When instructions about how this reader learns follow, shape your FIRST',
     'answer to them — do not wait to be told an explanation did not land.',
     NO_INVENTION,

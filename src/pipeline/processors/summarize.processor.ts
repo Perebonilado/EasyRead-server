@@ -50,8 +50,13 @@ export class SummarizeProcessor extends BasePipelineProcessor<BaseJobData> {
   }
 
   async process(job: BaseJobData, context: JobContext): Promise<void> {
-    const doc = await this.begin(job);
-    if (!doc) return;
+    const run = await this.begin(job);
+    if (!run) return;
+    const { doc } = run;
+    if (run.alreadyDone) {
+      await this.pipeline.afterSummarize(doc.id, doc.contentVersion);
+      return;
+    }
 
     try {
       const pages = await this.pages.findRange(doc.id, 1, MAX_PAGES);

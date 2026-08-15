@@ -10,6 +10,7 @@ import type {
   SimplifyJob,
 } from '../../business/ports/job-queue.port';
 import {
+  importJobId,
   QUEUE,
   QUEUE_SETTINGS,
   exportJobId,
@@ -82,6 +83,26 @@ export class BullmqQueueAdapter implements JobQueuePort, OnModuleDestroy {
   async enqueueSimplifyPages(jobs: SimplifyJob[]): Promise<void> {
     if (!jobs.length) return;
     const queue = this.queue(QUEUE.simplify);
+    // Completed job ids linger for an hour and silently swallow a re-add
+    // (same trap as enqueueExport). Without this, retrying a page that
+    // simplified within the hour resets the row to pending and then nothing
+    // ever runs. Done pages that get re-added are fine — the processor's
+    // per-page guard drops them on one DB read. Remove throws only for a
+    // currently-running job, which is exactly when dropping would be wrong.
+    await Promise.all(
+      jobs.map((job) =>
+        queue
+          .remove(
+            simplifyJobId(
+              job.documentId,
+              job.level,
+              job.pageNumber,
+              job.contentVersion,
+            ),
+          )
+          .catch(() => undefined),
+      ),
+    );
     await queue.addBulk(
       jobs.map((job) => ({
         name: 'simplify',
@@ -104,6 +125,13 @@ export class BullmqQueueAdapter implements JobQueuePort, OnModuleDestroy {
     await this.queue(QUEUE.learn).add('learn', job, {
       ...this.options(QUEUE.learn),
       jobId: `learn-${job.documentId}-${job.contentVersion}`,
+    });
+  }
+
+  async enqueueImport(job: PipelineJob): Promise<void> {
+    await this.queue(QUEUE.import).add('import', job, {
+      ...this.options(QUEUE.import),
+      jobId: importJobId(job.documentId, job.contentVersion),
     });
   }
 

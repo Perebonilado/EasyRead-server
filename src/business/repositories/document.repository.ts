@@ -1,4 +1,8 @@
-import type { DocumentBrief, DocumentSource } from '../../contracts';
+import type {
+  DocumentBrief,
+  DocumentSource,
+  ImportManifest,
+} from '../../contracts';
 import type { Document } from '../domain/entities/document';
 
 export interface CreateDocumentInput {
@@ -10,6 +14,8 @@ export interface CreateDocumentInput {
   /** Defaults to `uploaded`; the learn flow creates `generated` ones. */
   source?: DocumentSource;
   brief?: DocumentBrief | null;
+  sourceUrl?: string | null;
+  importManifest?: ImportManifest | null;
 }
 
 export interface DocumentRepository {

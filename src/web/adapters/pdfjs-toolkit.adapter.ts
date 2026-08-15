@@ -1,9 +1,18 @@
+import { createHash } from 'node:crypto';
 import { Injectable, Logger } from '@nestjs/common';
 import { EMPTY_PAGE_CHAR_THRESHOLD } from '../../business/domain/values';
 import type {
+  ExtractedFigure,
   ExtractedPage,
   PdfToolkitPort,
 } from '../../business/ports/pdf-toolkit.port';
+import { encodePng } from './images/image-codec';
+
+/** Filters that separate a figure from furniture. */
+const MIN_FIGURE_EDGE = 100;
+const MAX_ASPECT = 8;
+const MAX_FIGURES_PER_PAGE = 3;
+const MAX_FIGURES_PER_DOCUMENT = 40;
 
 /**
  * PDF reading via pdf.js.
@@ -118,4 +127,145 @@ export class PdfjsToolkitAdapter implements PdfToolkitPort {
   async renderThumbnail(): Promise<Buffer | null> {
     return null;
   }
+
+  /**
+   * Embedded images per page, without rasterising anything.
+   *
+   * `getOperatorList` makes pdf.js decode each image XObject to raw pixels
+   * on the page's object store — pure JS, no canvas, which matters here
+   * because the one native canvas that installs cleanly segfaults (see
+   * renderThumbnail above). The pixels are re-encoded as PNGs.
+   *
+   * Repeats are the enemy of usefulness: the same logo sits on every page of
+   * a lecture deck. A content hash drops anything seen before.
+   */
+  async extractFigures(pdf: Buffer): Promise<ExtractedFigure[]> {
+    const pdfjs = await this.lib();
+    const doc = await this.load(pdf);
+    const figures: ExtractedFigure[] = [];
+    const seen = new Set<string>();
+
+    try {
+      for (let pageNumber = 1; pageNumber <= doc.numPages; pageNumber++) {
+        if (figures.length >= MAX_FIGURES_PER_DOCUMENT) break;
+        let onThisPage = 0;
+
+        try {
+          const page = await doc.getPage(pageNumber);
+          const ops = await page.getOperatorList();
+
+          for (let i = 0; i < ops.fnArray.length; i++) {
+            if (onThisPage >= MAX_FIGURES_PER_PAGE) break;
+            if (ops.fnArray[i] !== pdfjs.OPS.paintImageXObject) continue;
+
+            const args = ops.argsArray[i] as unknown[];
+            const name = typeof args?.[0] === 'string' ? args[0] : '';
+            if (!name) continue;
+            const image = await new Promise<{
+              width: number;
+              height: number;
+              data?: Uint8ClampedArray | Uint8Array;
+              kind?: number;
+            } | null>((resolve) => {
+              try {
+                if (page.objs.has(name)) {
+                  page.objs.get(name, (value: never) => resolve(value));
+                } else {
+                  resolve(null);
+                }
+              } catch {
+                resolve(null);
+              }
+            });
+
+            if (!image?.data || !image.width || !image.height) continue;
+            if (image.width < MIN_FIGURE_EDGE || image.height < MIN_FIGURE_EDGE)
+              continue;
+            const aspect = image.width / image.height;
+            if (aspect > MAX_ASPECT || aspect < 1 / MAX_ASPECT) continue;
+
+            const rgba = toRgba(image);
+            if (!rgba) continue;
+
+            const hash = createHash('sha1')
+              .update(
+                Buffer.from(
+                  image.data.buffer,
+                  image.data.byteOffset,
+                  image.data.byteLength,
+                ),
+              )
+              .digest('hex');
+            if (seen.has(hash)) continue;
+            seen.add(hash);
+
+            figures.push({
+              pageNumber,
+              width: image.width,
+              height: image.height,
+              png: encodePng(rgba, image.width, image.height),
+            });
+            onThisPage += 1;
+          }
+
+          page.cleanup();
+        } catch (error) {
+          this.logger.warn(
+            `Figures on page ${pageNumber} skipped: ${(error as Error).message}`,
+          );
+        }
+      }
+    } finally {
+      await doc.destroy();
+    }
+
+    return figures;
+  }
+}
+
+/**
+ * pdf.js image kinds → RGBA. 1 = packed 1-bit greyscale, 2 = RGB, 3 = RGBA.
+ * Anything else (or an ImageBitmap-only image) is skipped rather than
+ * guessed at.
+ */
+function toRgba(image: {
+  width: number;
+  height: number;
+  data?: Uint8ClampedArray | Uint8Array;
+  kind?: number;
+}): Buffer | null {
+  const { width, height, data, kind } = image;
+  if (!data) return null;
+  const out = Buffer.alloc(width * height * 4);
+
+  if (kind === 3 || data.length === width * height * 4) {
+    Buffer.from(data.buffer, data.byteOffset, data.byteLength).copy(out);
+    return out;
+  }
+  if (kind === 2 || data.length === width * height * 3) {
+    for (let i = 0; i < width * height; i++) {
+      out[i * 4] = data[i * 3];
+      out[i * 4 + 1] = data[i * 3 + 1];
+      out[i * 4 + 2] = data[i * 3 + 2];
+      out[i * 4 + 3] = 255;
+    }
+    return out;
+  }
+  if (kind === 1) {
+    const rowBytes = Math.ceil(width / 8);
+    if (data.length < rowBytes * height) return null;
+    for (let y = 0; y < height; y++) {
+      for (let x = 0; x < width; x++) {
+        const bit = (data[y * rowBytes + (x >> 3)] >> (7 - (x & 7))) & 1;
+        const value = bit ? 255 : 0;
+        const at = (y * width + x) * 4;
+        out[at] = value;
+        out[at + 1] = value;
+        out[at + 2] = value;
+        out[at + 3] = 255;
+      }
+    }
+    return out;
+  }
+  return null;
 }

@@ -53,6 +53,7 @@ export class SequelizeDocumentRepository implements DocumentRepository {
         simplificationUnavailable: p.simplificationUnavailable,
         failureReason: p.failureReason,
         brief: p.brief,
+        importManifest: p.importManifest,
         deletedAt: p.deletedAt,
       },
       { where: { id: p.id } },

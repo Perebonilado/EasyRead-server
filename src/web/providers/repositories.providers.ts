@@ -11,6 +11,7 @@ import {
   EXPORT_REPOSITORY,
   CHAT_REPOSITORY,
   NOTE_REPOSITORY,
+  PAGE_ASSET_REPOSITORY,
   RECAP_REPOSITORY,
   CONCEPT_REPOSITORY,
   LOOKUP_REPOSITORY,
@@ -36,6 +37,7 @@ import {
 import { SequelizeChatRepository } from '../repositories/sequelize-chat.repository';
 import { SequelizeNoteRepository } from '../repositories/sequelize-note.repository';
 import { SequelizeRecapRepository } from '../repositories/sequelize-recap.repository';
+import { SequelizePageAssetRepository } from '../repositories/sequelize-page-asset.repository';
 import { SequelizeConceptRepository } from '../repositories/sequelize-concept.repository';
 import {
   SequelizeSubscriptionRepository,
@@ -89,6 +91,7 @@ export const repositoryProviders: Provider[] = [
   { provide: CHAT_REPOSITORY, useClass: SequelizeChatRepository },
   { provide: NOTE_REPOSITORY, useClass: SequelizeNoteRepository },
   { provide: RECAP_REPOSITORY, useClass: SequelizeRecapRepository },
+  { provide: PAGE_ASSET_REPOSITORY, useClass: SequelizePageAssetRepository },
   { provide: CONCEPT_REPOSITORY, useClass: SequelizeConceptRepository },
   {
     provide: PIPELINE_RUN_REPOSITORY,

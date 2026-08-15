@@ -47,6 +47,12 @@ import {
   ListChatMessagesHandler,
   SendChatMessageHandler,
 } from './business/handlers/documents/chat.handlers';
+import { DiscoverImportHandler } from './business/handlers/import/discover.handler';
+import { StartImportHandler } from './business/handlers/import/start.handler';
+import {
+  GetPageAssetFileHandler,
+  ListPageAssetsHandler,
+} from './business/handlers/documents/assets.handlers';
 import {
   CreateRecapHandler,
   ListRecapsHandler,
@@ -83,6 +89,7 @@ import { ChatController } from './web/controllers/chat.controller';
 import { NotesController } from './web/controllers/notes.controller';
 import { NotebookController } from './web/controllers/notebook.controller';
 import { RecapsController } from './web/controllers/recaps.controller';
+import { ImportController } from './web/controllers/import.controller';
 import { LearnController } from './web/controllers/learn.controller';
 import { ConceptsController } from './web/controllers/concepts.controller';
 import { ReaderController } from './web/controllers/reader.controller';
@@ -127,6 +134,10 @@ const handlers = [
   ListAllNotesHandler,
   CreateRecapHandler,
   ListRecapsHandler,
+  DiscoverImportHandler,
+  StartImportHandler,
+  ListPageAssetsHandler,
+  GetPageAssetFileHandler,
   UpdateNoteHandler,
   DeleteNoteHandler,
   InterviewHandler,
@@ -169,6 +180,7 @@ const queries = [
     NotesController,
     NotebookController,
     RecapsController,
+    ImportController,
     LearnController,
     ConceptsController,
     ExportsController,

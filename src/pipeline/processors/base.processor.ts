@@ -25,8 +25,16 @@ export abstract class BasePipelineProcessor<T extends BaseJobData> {
    * Returns the document when the job should proceed, `null` when it should be
    * dropped. Dropping is deliberately silent — a superseded job is normal
    * operation, not a failure.
+   *
+   * `alreadyDone` is not a reason to drop: it means a previous attempt
+   * committed the step's work but may have died before handing off to the
+   * orchestrator (the ledger write and the hand-off aren't atomic). The
+   * processor must re-run its idempotent after-hook, or a crash in that gap
+   * strands the document in `processing` forever with every queue empty.
    */
-  protected async begin(job: T): Promise<Document | null> {
+  protected async begin(
+    job: T,
+  ): Promise<{ doc: Document; alreadyDone: boolean } | null> {
     const doc = await this.documents.findById(job.documentId);
     if (!doc) {
       this.logger.warn(`${job.documentId}: gone before ${this.step}`);
@@ -42,11 +50,13 @@ export abstract class BasePipelineProcessor<T extends BaseJobData> {
     }
 
     if (!(await this.runs.claim(job.documentId, this.step))) {
-      this.logger.log(`${job.documentId}: ${this.step} already done`);
-      return null;
+      this.logger.log(
+        `${job.documentId}: ${this.step} already done, re-running hand-off`,
+      );
+      return { doc, alreadyDone: true };
     }
 
-    return doc;
+    return { doc, alreadyDone: false };
   }
 
   protected async succeed(job: T): Promise<void> {

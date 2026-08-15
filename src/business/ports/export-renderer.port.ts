@@ -4,6 +4,8 @@ export interface ExportSection {
   pageNumber: number;
   blocks: Block[];
   topicTitle?: string;
+  /** The page's figures, as stored bytes; the renderer embeds what it can. */
+  figures?: { bytes: Buffer; caption: string | null }[];
 }
 
 /** One of the reader's notes, as the appendix prints it. */

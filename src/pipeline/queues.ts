@@ -13,6 +13,7 @@ export const QUEUE = {
   simplify: 'simplify',
   export: 'export',
   learn: 'learn',
+  import: 'import',
 } as const;
 
 export type QueueName = (typeof QUEUE)[keyof typeof QUEUE];
@@ -32,6 +33,8 @@ export const QUEUE_SETTINGS: Record<
   // Writing a document is many minutes of model calls; one retry only,
   // because a second full attempt is expensive and rarely fixes anything.
   learn: { concurrency: 2, attempts: 2, backoffMs: 20_000 },
+  // Fetching someone else's website: gentle concurrency, patient retries.
+  import: { concurrency: 2, attempts: 2, backoffMs: 20_000 },
 };
 
 export interface BaseJobData {
@@ -47,6 +50,9 @@ export interface SimplifyJobData extends BaseJobData {
 
 /** Writing a document needs only the document and its version. */
 export type LearnJobData = BaseJobData;
+
+/** Fetching an imported document needs the same; the manifest rides on the row. */
+export type ImportJobData = BaseJobData;
 
 export interface ExportJobData extends BaseJobData {
   exportId: string;
@@ -83,3 +89,6 @@ export const stepJobId = (
 ) => `${step}-${documentId}-v${contentVersion}`;
 
 export const exportJobId = (exportId: string) => `export-${exportId}`;
+
+export const importJobId = (documentId: string, contentVersion: number) =>
+  `import-${documentId}-v${contentVersion}`;

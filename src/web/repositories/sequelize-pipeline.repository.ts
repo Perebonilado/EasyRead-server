@@ -22,16 +22,29 @@ export class SequelizePipelineRunRepository implements PipelineRunRepository {
   ) {}
 
   async claim(documentId: string, step: PipelineStep): Promise<boolean> {
+    // Ensure the row exists before taking any lock. A locked findOrCreate on
+    // a missing row gap-locks the (document_id, step) index, and parallel
+    // steps of the same document (summarize/embed/topics fan out together)
+    // deadlock on those overlapping gaps. Created unlocked, the insert holds
+    // only an insert-intention lock, which distinct keys never contend on.
+    await this.model.findOrCreate({
+      where: { documentId, step },
+      defaults: { id: newId(), documentId, step, status: 'running' } as any,
+    });
+
     return this.model.sequelize!.transaction(async (transaction) => {
-      const [row] = await this.model.findOrCreate({
+      // Row lock on the now-existing record: two workers racing the same
+      // step, one wins. An equality read on the unique index locks just this
+      // row — no gaps, so concurrent claims for other steps sail past.
+      const row = await this.model.findOne({
         where: { documentId, step },
-        defaults: { id: newId(), documentId, step, status: 'running' } as any,
-        // Row lock: two workers racing the same step, one wins.
         lock: transaction.LOCK.UPDATE,
         transaction,
       });
 
-      if (row.status === 'done') return false;
+      // Gone between the two statements means reset() ran — the document is
+      // being reprocessed and this job is stale.
+      if (!row || row.status === 'done') return false;
 
       await row.update(
         {

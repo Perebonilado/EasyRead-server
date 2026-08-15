@@ -54,8 +54,11 @@ export class EmbedProcessor extends BasePipelineProcessor<BaseJobData> {
   }
 
   async process(job: BaseJobData, context: JobContext): Promise<void> {
-    const doc = await this.begin(job);
-    if (!doc) return;
+    // Nothing downstream waits on embed alone, so `alreadyDone` needs no
+    // hand-off — the committed work is the whole job.
+    const run = await this.begin(job);
+    if (!run || run.alreadyDone) return;
+    const { doc } = run;
 
     try {
       const pieces = this.chunk(

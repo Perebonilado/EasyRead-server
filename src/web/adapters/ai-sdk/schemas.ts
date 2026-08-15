@@ -14,7 +14,19 @@ export const blocksSchema = z.object({
   blocks: z
     .array(
       z.object({
-        type: z.enum(['headingOne', 'headingTwo', 'paragraph', 'bullet']),
+        type: z
+          .enum([
+            'headingOne',
+            'headingTwo',
+            'paragraph',
+            'bullet',
+            'code',
+            'table',
+          ])
+          .describe(
+            'Pipe-separated rows (header first) are "table", not "code"; ' +
+              '"code" is for program source, commands, and config.',
+          ),
         text: z.string().min(1),
       }),
     )

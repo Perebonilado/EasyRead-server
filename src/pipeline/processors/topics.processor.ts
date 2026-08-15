@@ -56,12 +56,42 @@ export class TopicsProcessor extends BasePipelineProcessor<BaseJobData> {
   }
 
   async process(job: BaseJobData, context: JobContext): Promise<void> {
-    const doc = await this.begin(job);
-    if (!doc) return;
+    const run = await this.begin(job);
+    if (!run) return;
+    const { doc } = run;
+    if (run.alreadyDone) {
+      await this.pipeline.markReadyIfComplete(doc.id);
+      return;
+    }
 
     const pageCount = doc.props.pageCount ?? 0;
 
     try {
+      // An imported document arrives knowing its own structure: the docs
+      // site's nav, recorded as chapter page ranges at typesetting time.
+      // Ground truth beats inference, so the outline call is skipped and only
+      // prerequisites still go to the model — against the real chapter list.
+      const seeded = this.seededTopics(doc, pageCount);
+      if (seeded) {
+        const prerequisites = await this.prerequisitesFor(doc.id, seeded);
+        await this.topics.replaceAll(
+          doc.id,
+          seeded.map((topic, index) => ({
+            ...topic,
+            orderIndex: index,
+            prerequisites: prerequisites[index],
+          })),
+          'outline_pass',
+        );
+        await this.succeed(job);
+        await this.events.publish(doc.id, {
+          type: 'document.topics_ready',
+          topicCount: seeded.length,
+        });
+        await this.pipeline.markReadyIfComplete(doc.id);
+        return;
+      }
+
       const digest = buildDigest(
         await this.pages.findRange(doc.id, 1, MAX_PAGES),
       );
@@ -200,6 +230,38 @@ export class TopicsProcessor extends BasePipelineProcessor<BaseJobData> {
    * next one starts, the first starts at page 1, and the last runs to the end.
    * Overlaps resolve the same way, in favour of the later topic's start.
    */
+  /**
+   * The chapter ranges an import recorded while typesetting, as topics —
+   * clamped to the converted page count, since the two were measured by
+   * different tools and pdf.js's answer is the one the reader lives in.
+   */
+  private seededTopics(
+    doc: {
+      props: {
+        source: string;
+        importManifest: {
+          chapters:
+            { title: string; startPage: number; endPage: number }[] | null;
+        } | null;
+      };
+    },
+    pageCount: number,
+  ) {
+    if (doc.props.source !== 'imported') return null;
+    const chapters = doc.props.importManifest?.chapters;
+    if (!chapters?.length || pageCount === 0) return null;
+
+    return chapters.map((chapter) => ({
+      title: chapter.title.slice(0, 500),
+      shortDescription: null,
+      startPage: Math.min(Math.max(1, chapter.startPage), pageCount),
+      endPage: Math.min(
+        Math.max(1, chapter.startPage, chapter.endPage),
+        pageCount,
+      ),
+    }));
+  }
+
   private clamp(drafts: TopicDraft[], pageCount: number) {
     const topics = drafts
       .map((draft) => {

@@ -15,6 +15,7 @@ import {
   SPEECH,
   STORAGE,
   VECTOR_STORE,
+  WEB_IMPORT,
 } from '../../business/ports/tokens';
 import { BullmqQueueAdapter } from '../adapters/bullmq-queue.adapter';
 import { DriveConverterAdapter } from '../adapters/drive-converter.adapter';
@@ -34,6 +35,7 @@ import {
 } from '../adapters/ai-sdk/openai-voice.adapters';
 import { PassthroughConverterAdapter } from '../adapters/passthrough-converter.adapter';
 import { PdfExportRendererAdapter } from '../adapters/pdf-export-renderer.adapter';
+import { WebImportAdapter } from '../adapters/web-import/web-import.adapter';
 import { PdfjsToolkitAdapter } from '../adapters/pdfjs-toolkit.adapter';
 import { RedisEventBusAdapter } from '../adapters/redis-event-bus.adapter';
 import { SystemClock } from '../adapters/system-clock';
@@ -57,6 +59,7 @@ export const portProviders: Provider[] = [
   { provide: EVENT_BUS, useClass: RedisEventBusAdapter },
   { provide: JOB_QUEUE, useClass: BullmqQueueAdapter },
   { provide: EXPORT_RENDERER, useClass: PdfExportRendererAdapter },
+  { provide: WEB_IMPORT, useClass: WebImportAdapter },
   // Voice rides on the same OpenAI key as the text gateway.
   { provide: SPEECH, useClass: OpenAiSpeechAdapter },
   { provide: REALTIME, useClass: OpenAiRealtimeAdapter },

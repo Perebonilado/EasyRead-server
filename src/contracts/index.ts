@@ -9,7 +9,13 @@
 // ── Shared vocabulary ────────────────────────────────────────────────────────
 
 export type Level = 'standard' | 'easiest';
-export type BlockType = 'headingOne' | 'headingTwo' | 'paragraph' | 'bullet';
+/** `code` is verbatim source — never simplified, rendered monospace. */
+/**
+ * `code` is verbatim source, rendered monospace. `table` is tabular data:
+ * one row per line, cells separated by " | ", first line the header row.
+ */
+export type BlockType =
+  'headingOne' | 'headingTwo' | 'paragraph' | 'bullet' | 'code' | 'table';
 export type Block = { type: BlockType; text: string };
 
 export type DocumentStatus = 'uploading' | 'processing' | 'ready' | 'failed';
@@ -240,6 +246,53 @@ export type AllNotesResponse = {
   hasMore: boolean;
 };
 
+// ── Page figures ─────────────────────────────────────────────────────────────
+
+/**
+ * A figure belonging to a page — extracted from an uploaded PDF or carried
+ * over from an imported web page. Figures travel beside the text: the
+ * simplified pane shows a page's figures under its blocks.
+ */
+export type PageAssetDto = {
+  id: string;
+  pageNumber: number;
+  width: number;
+  height: number;
+  caption: string | null;
+};
+
+// ── Import from the web ──────────────────────────────────────────────────────
+
+/** One page of a docs site, as the import wizard's picker shows it. */
+export type ImportPageDto = {
+  url: string;
+  title: string;
+  /** Nesting depth in the site's own nav; the picker indents by it. */
+  depth: number;
+};
+
+export type ImportDiscoverResponse = {
+  /** The entry URL after redirects — what the import will be scoped to. */
+  url: string;
+  /** The site's own title, for the wizard heading and the document title. */
+  title: string;
+  /** Docs framework recognised, or null. Shown as a small badge. */
+  framework: string | null;
+  /** The nav in reading order. Empty means only the entry page was found. */
+  pages: ImportPageDto[];
+};
+
+/**
+ * What an imported document was built from: the pages the reader chose, in
+ * the site's own nav order, and — once typeset — the chapter page ranges the
+ * topics step should use instead of inferring structure.
+ */
+export type ImportManifest = {
+  url: string;
+  pages: ImportPageDto[];
+  chapters: { title: string; startPage: number; endPage: number }[] | null;
+};
+
 // ── Session recap ────────────────────────────────────────────────────────────
 
 /**
@@ -271,8 +324,8 @@ export type RecapDto = {
 
 // ── Learn a topic ────────────────────────────────────────────────────────────
 
-/** Uploaded by the reader, or written by the model on request. */
-export type DocumentSource = 'uploaded' | 'generated';
+/** Uploaded by the reader, written by the model, or imported from the web. */
+export type DocumentSource = 'uploaded' | 'generated' | 'imported';
 
 export type LearnDepth = 'primer' | 'solid' | 'deep' | 'exhaustive';
 
@@ -494,6 +547,8 @@ export type SseEvent =
     }
   | { type: 'document.simplified'; level: Level }
   | { type: 'export.ready'; exportId: string; level: Level }
+  /** An import fetching its pages; fires per batch while status=uploading. */
+  | { type: 'import.progress'; fetched: number; total: number }
   | { type: 'document.failed'; step: PipelineStep; reason: string }
   /** Replayed on connect so a reconnecting client never misses state. */
   | { type: 'snapshot'; document: DocumentDetail };

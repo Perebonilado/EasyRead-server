@@ -14,9 +14,11 @@ import {
   DOCUMENT_REPOSITORY,
   EXPORT_REPOSITORY,
   NOTE_REPOSITORY,
+  PAGE_ASSET_REPOSITORY,
   SIMPLIFIED_PAGE_REPOSITORY,
   TOPIC_REPOSITORY,
 } from '../../business/repositories/tokens';
+import type { PageAssetRepository } from '../../business/repositories/page-asset.repository';
 import type {
   NoteRecord,
   NoteRepository,
@@ -48,6 +50,8 @@ export class ExportProcessor {
     @Inject(TOPIC_REPOSITORY) private readonly topics: TopicRepository,
     @Inject(EXPORT_REPOSITORY) private readonly exports: ExportRepository,
     @Inject(NOTE_REPOSITORY) private readonly notes: NoteRepository,
+    @Inject(PAGE_ASSET_REPOSITORY)
+    private readonly assets: PageAssetRepository,
     @Inject(EXPORT_RENDERER) private readonly renderer: ExportRendererPort,
     @Inject(STORAGE) private readonly storage: StoragePort,
     @Inject(EVENT_BUS) private readonly events: EventBusPort,
@@ -87,6 +91,27 @@ export class ExportProcessor {
         .all(job.documentId, doc.userId)
         .catch(() => []);
 
+      // Figures per page, bytes in hand. Best-effort throughout.
+      const figuresByPage = new Map<
+        number,
+        { bytes: Buffer; caption: string | null }[]
+      >();
+      try {
+        const assets = await this.assets.list(
+          job.documentId,
+          doc.contentVersion,
+        );
+        for (const asset of assets) {
+          const bytes = await this.storage.get(asset.fileRef).catch(() => null);
+          if (!bytes) continue;
+          const list = figuresByPage.get(asset.pageNumber) ?? [];
+          list.push({ bytes, caption: asset.caption });
+          figuresByPage.set(asset.pageNumber, list);
+        }
+      } catch {
+        // The export stands without its pictures.
+      }
+
       const sections: ExportSection[] = pages
         .filter((page) => page.blocks?.length)
         .sort((a, b) => a.pageNumber - b.pageNumber)
@@ -98,6 +123,7 @@ export class ExportProcessor {
               page.pageNumber >= topic.startPage &&
               page.pageNumber <= topic.endPage,
           )?.title,
+          figures: figuresByPage.get(page.pageNumber),
         }));
 
       const pdf = await this.renderer.render({

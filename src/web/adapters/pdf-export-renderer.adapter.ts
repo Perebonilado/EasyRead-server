@@ -4,7 +4,8 @@ import type {
   ExportRendererPort,
   ExportSection,
 } from '../../business/ports/export-renderer.port';
-import { PdfWriter } from './pdf-writer';
+import { PdfWriter, tableRowsOf } from './pdf-writer';
+import { decodeImage } from './images/image-codec';
 
 const WATERMARK = 'Made with EasyRead — easyread.app';
 
@@ -140,9 +141,27 @@ export class PdfExportRendererAdapter implements ExportRendererPort {
             pdf.text(`•  ${block.text}`, { size: 11, leading: 17, indent: 14 });
             pdf.space(2);
             break;
+          case 'code':
+            pdf.space(4);
+            pdf.code(block.text);
+            pdf.space(6);
+            break;
+          case 'table':
+            pdf.space(6);
+            pdf.table(tableRowsOf(block.text));
+            pdf.space(6);
+            break;
           default:
             pdf.text(block.text, { size: 11, leading: 17 });
             pdf.space(6);
+        }
+      }
+
+      for (const figure of section.figures ?? []) {
+        try {
+          pdf.image(decodeImage(figure.bytes), figure.caption);
+        } catch {
+          // An undecodable stored figure is dropped, not fatal.
         }
       }
 

@@ -15,6 +15,7 @@ import { ConvertProcessor } from './processors/convert.processor';
 import { EmbedProcessor } from './processors/embed.processor';
 import { ExportProcessor } from './processors/export.processor';
 import { LearnProcessor } from './processors/learn.processor';
+import { ImportProcessor } from './processors/import.processor';
 import { ExtractProcessor } from './processors/extract.processor';
 import { SimplifyPageProcessor } from './processors/simplify.processor';
 import { SummarizeProcessor } from './processors/summarize.processor';
@@ -25,6 +26,7 @@ import {
   type BaseJobData,
   type ExportJobData,
   type LearnJobData,
+  type ImportJobData,
   type QueueName,
   type SimplifyJobData,
 } from './queues';
@@ -53,6 +55,7 @@ export class WorkerRunner implements OnModuleInit, OnModuleDestroy {
     private readonly simplify: SimplifyPageProcessor,
     private readonly exports: ExportProcessor,
     private readonly learn: LearnProcessor,
+    private readonly importer: ImportProcessor,
   ) {}
 
   onModuleInit(): void {
@@ -77,6 +80,7 @@ export class WorkerRunner implements OnModuleInit, OnModuleDestroy {
       [QUEUE.export]: (data: ExportJobData, ctx) =>
         this.exports.process(data, ctx),
       [QUEUE.learn]: (data: LearnJobData) => this.learn.process(data),
+      [QUEUE.import]: (data: ImportJobData) => this.importer.process(data),
     };
 
     for (const name of Object.values(QUEUE)) {

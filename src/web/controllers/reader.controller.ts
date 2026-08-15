@@ -3,15 +3,25 @@ import {
   Controller,
   Get,
   HttpCode,
+  Inject,
   Param,
   Post,
   Query,
+  Res,
 } from '@nestjs/common';
+import type { Response } from 'express';
 import type {
+  PageAssetDto,
   PageTextResponse,
   SimplifiedPagesResponse,
   TopicDto,
 } from '../../contracts';
+import { STORAGE } from '../../business/ports/tokens';
+import type { StoragePort } from '../../business/ports/storage.port';
+import {
+  GetPageAssetFileHandler,
+  ListPageAssetsHandler,
+} from '../../business/handlers/documents/assets.handlers';
 import { DocumentAccessService } from '../../business/handlers/documents/document-access.service';
 import {
   MarkTopicsHandler,
@@ -41,7 +51,36 @@ export class ReaderController {
     private readonly retryPage: RetryPageHandler,
     private readonly savePosition: SavePositionHandler,
     private readonly markTopics: MarkTopicsHandler,
+    private readonly listAssets: ListPageAssetsHandler,
+    private readonly assetFile: GetPageAssetFileHandler,
+    @Inject(STORAGE) private readonly storage: StoragePort,
   ) {}
+
+  /** The document's figures, page by page — the simplified pane's pictures. */
+  @Get('assets')
+  async assets(
+    @CurrentUser('id') userId: string,
+    @Param('id') documentId: string,
+  ): Promise<PageAssetDto[]> {
+    const result = await this.listAssets.handle({ userId, documentId });
+    return result.data;
+  }
+
+  /** One figure's bytes. Immutable per id, so the browser caches it. */
+  @Get('assets/:assetId/file')
+  async asset(
+    @CurrentUser('id') userId: string,
+    @Param('id') documentId: string,
+    @Param('assetId') assetId: string,
+    @Res() response: Response,
+  ): Promise<void> {
+    const result = await this.assetFile.handle({ userId, documentId, assetId });
+    const { stream, size } = await this.storage.stream(result.data.fileRef);
+    response.setHeader('Content-Type', result.data.mimeType);
+    response.setHeader('Content-Length', size);
+    response.setHeader('Cache-Control', 'private, max-age=86400, immutable');
+    stream.pipe(response);
+  }
 
   @Get('pages')
   async pages(

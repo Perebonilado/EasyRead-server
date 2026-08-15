@@ -11,17 +11,20 @@
  * fonts. If exports ever need those, this is the piece to replace.
  */
 
+import type { DecodedImage } from './images/image-codec';
+
 const PAGE_WIDTH = 595.28; // A4 at 72dpi
 const PAGE_HEIGHT = 841.89;
 const MARGIN = 64;
 const CONTENT_WIDTH = PAGE_WIDTH - MARGIN * 2;
 
-export type FontName = 'regular' | 'bold' | 'italic';
+export type FontName = 'regular' | 'bold' | 'italic' | 'mono';
 
 const FONT_KEY: Record<FontName, string> = {
   regular: 'F1',
   bold: 'F2',
   italic: 'F3',
+  mono: 'F4',
 };
 
 /** Base-14 Helvetica advance widths, in 1/1000 em, for the ASCII range. */
@@ -48,10 +51,20 @@ function buildWidths(...rows: string[]): number[] {
 }
 
 function widthOf(char: string, font: FontName): number {
+  // Courier is fixed-pitch: every glyph advances 600/1000 em.
+  if (font === 'mono') return 600;
   const code = char.charCodeAt(0);
   if (code < 32 || code > 126) return font === 'bold' ? 556 : 500;
   const table = font === 'bold' ? WIDTHS_BOLD : WIDTHS_REGULAR;
   return table[code - 32] ?? 500;
+}
+
+/** `table` block text → rows: lines of " | "-separated cells. */
+export function tableRowsOf(text: string): string[][] {
+  return text
+    .split('\n')
+    .map((line) => line.split('|').map((cell) => cell.trim()))
+    .filter((row) => row.some(Boolean));
 }
 
 export function measure(text: string, font: FontName, size: number): number {
@@ -124,7 +137,7 @@ function toLatin1(text: string): string {
   });
 }
 
-interface Op {
+interface TextOp {
   text: string;
   font: FontName;
   size: number;
@@ -132,6 +145,26 @@ interface Op {
   y: number;
   grey?: number;
 }
+
+/** A thin filled rectangle — the table's hairlines. */
+interface RuleOp {
+  rule: true;
+  x: number;
+  y: number;
+  width: number;
+  grey: number;
+}
+
+/** A placed figure, referencing an entry in the writer's image list. */
+interface ImageOp {
+  image: number;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+type Op = TextOp | RuleOp | ImageOp;
 
 /**
  * Accumulates text into pages, then serialises the whole file.
@@ -141,6 +174,7 @@ interface Op {
  */
 export class PdfWriter {
   private readonly pages: Op[][] = [];
+  private readonly images: DecodedImage[] = [];
   private current: Op[] = [];
   private cursor = MARGIN;
 
@@ -150,6 +184,11 @@ export class PdfWriter {
 
   get contentWidth(): number {
     return CONTENT_WIDTH;
+  }
+
+  /** 1-based number of the page currently being written. */
+  get currentPage(): number {
+    return this.pages.length;
   }
 
   private newPage(): void {
@@ -208,6 +247,158 @@ export class PdfWriter {
     }
   }
 
+  /**
+   * A block of code, verbatim.
+   *
+   * `text()` collapses whitespace when it wraps, which for code is
+   * destruction: indentation is meaning. Each source line is set as its own
+   * line in Courier with leading spaces kept, and a line wider than the
+   * column is broken by character with a gutter marker rather than reflowed.
+   */
+  code(raw: string): void {
+    const size = 9;
+    const leading = 13;
+    const indent = 10;
+
+    for (const sourceLine of raw.replace(/\t/g, '  ').split('\n')) {
+      const line = toLatin1(sourceLine.replace(/\s+$/, ''));
+      const pieces: string[] = [];
+      let piece = '';
+      for (const char of line) {
+        if (measure(piece + char, 'mono', size) > CONTENT_WIDTH - indent) {
+          pieces.push(piece);
+          piece = char;
+        } else {
+          piece += char;
+        }
+      }
+      pieces.push(piece);
+
+      pieces.forEach((text, index) => {
+        this.reserve(leading);
+        this.current.push({
+          // Continuation lines carry a marker so a broken line cannot be
+          // mistaken for a real newline in the source.
+          text: index === 0 ? text : `\u00bb ${text}`,
+          font: 'mono',
+          size,
+          x: MARGIN + indent,
+          y: PAGE_HEIGHT - this.cursor - size,
+          grey: 0.25,
+        });
+        this.cursor += leading;
+      });
+    }
+  }
+
+  /**
+   * A table, typeset as aligned columns with hairlines.
+   *
+   * Column widths are shared out by each column's longest natural line, so a
+   * "Name | Description" table gives the prose the room. Cells wrap inside
+   * their column; a row is kept together and moves to the next page whole.
+   */
+  table(rows: string[][]): void {
+    if (!rows.length) return;
+    const size = 9;
+    const leading = 13;
+    const gutter = 8;
+    const columns = Math.max(...rows.map((row) => row.length));
+    if (columns === 0) return;
+
+    // Natural width of each column, then normalised into the content width.
+    const natural = Array.from({ length: columns }, (_, column) =>
+      Math.max(
+        24,
+        ...rows.map((row) =>
+          measure(toLatin1(row[column] ?? ''), 'regular', size),
+        ),
+      ),
+    );
+    const available = CONTENT_WIDTH - gutter * (columns - 1);
+    const total = natural.reduce((sum, width) => sum + width, 0);
+    const widths = natural.map((width) =>
+      Math.max(30, (width / total) * available),
+    );
+
+    rows.forEach((row, rowIndex) => {
+      const font: FontName = rowIndex === 0 ? 'bold' : 'regular';
+      const cells = Array.from({ length: columns }, (_, column) =>
+        wrap(toLatin1(row[column] ?? ''), font, size, widths[column]),
+      );
+      const height =
+        Math.max(...cells.map((lines) => lines.length), 1) * leading;
+
+      // The whole row moves together; a row split across pages is unreadable.
+      if (height < PAGE_HEIGHT - MARGIN * 2) this.reserve(height + 4);
+
+      let x = MARGIN;
+      cells.forEach((lines, column) => {
+        lines.forEach((line, lineIndex) => {
+          this.current.push({
+            text: line,
+            font,
+            size,
+            x,
+            y: PAGE_HEIGHT - this.cursor - size - lineIndex * leading,
+            grey: rowIndex === 0 ? 0.1 : 0.2,
+          });
+        });
+        x += widths[column] + gutter;
+      });
+      this.cursor += height + 4;
+
+      // Hairline under the header, and a fainter one under each row.
+      this.current.push({
+        rule: true,
+        x: MARGIN,
+        y: PAGE_HEIGHT - this.cursor + 2,
+        width: CONTENT_WIDTH,
+        grey: rowIndex === 0 ? 0.55 : 0.85,
+      });
+      this.cursor += 3;
+    });
+  }
+
+  /**
+   * A figure, scaled into the column and kept whole.
+   *
+   * Images are placed at 72dpi-honest size — a 600px-wide screenshot is not
+   * blown up to fill the page — capped at the content width, and never split
+   * across pages: a figure that doesn't fit here starts the next page.
+   */
+  image(image: DecodedImage, caption?: string | null): void {
+    const natural = image.width * 0.75; // px at 96dpi → pt at 72dpi
+    const width = Math.min(CONTENT_WIDTH, Math.max(90, natural));
+    const height = (image.height / image.width) * width;
+    // Taller than a page: scale to fit rather than truncate.
+    const maxHeight = PAGE_HEIGHT - MARGIN * 2 - 40;
+    const scale = height > maxHeight ? maxHeight / height : 1;
+    const w = width * scale;
+    const h = height * scale;
+
+    this.reserve(h + 6);
+    const index = this.images.push(image) - 1;
+    this.current.push({
+      image: index,
+      x: MARGIN,
+      y: PAGE_HEIGHT - this.cursor - h,
+      width: w,
+      height: h,
+    });
+    this.cursor += h + 6;
+
+    if (caption) {
+      this.text(caption, {
+        font: 'italic',
+        size: 9.5,
+        leading: 13,
+        grey: 0.45,
+      });
+      this.space(4);
+    }
+  }
+
   build(): Buffer {
     const objects: string[] = [];
     const pageObjectIds: number[] = [];
@@ -215,10 +406,45 @@ export class PdfWriter {
     // 1 = catalogue, 2 = page tree, 3..5 = fonts. Pages follow.
     const catalogueId = 1;
     const pagesId = 2;
-    const fontIds = { F1: 3, F2: 4, F3: 5 };
+    const fontIds = { F1: 3, F2: 4, F3: 5, F4: 6 };
 
-    let nextId = 6;
+    let nextId = 7;
     const contents: { id: number; body: string }[] = [];
+    const binaries: { id: number; dict: string; body: Buffer }[] = [];
+
+    // Every image becomes an XObject (alpha channels as attached SMasks).
+    const imageIds: number[] = [];
+    for (const image of this.images) {
+      let smaskId: number | null = null;
+      if (image.kind === 'raw' && image.smask) {
+        smaskId = nextId++;
+        binaries.push({
+          id: smaskId,
+          dict:
+            `<< /Type /XObject /Subtype /Image /Width ${image.width} ` +
+            `/Height ${image.height} /ColorSpace /DeviceGray /BitsPerComponent 8 ` +
+            `/Filter /FlateDecode /Length ${image.smask.length} >>`,
+          body: image.smask,
+        });
+      }
+
+      const id = nextId++;
+      imageIds.push(id);
+      const colourSpace = image.components === 1 ? '/DeviceGray' : '/DeviceRGB';
+      const filter = image.kind === 'jpeg' ? '/DCTDecode' : '/FlateDecode';
+      binaries.push({
+        id,
+        dict:
+          `<< /Type /XObject /Subtype /Image /Width ${image.width} ` +
+          `/Height ${image.height} /ColorSpace ${colourSpace} /BitsPerComponent 8 ` +
+          `/Filter ${filter}${smaskId ? ` /SMask ${smaskId} 0 R` : ''} ` +
+          `/Length ${image.data.length} >>`,
+        body: image.data,
+      });
+    }
+    const xobjects = imageIds.length
+      ? `/XObject << ${imageIds.map((id, i) => `/Im${i} ${id} 0 R`).join(' ')} >> `
+      : '';
 
     for (const page of this.pages) {
       const contentId = nextId++;
@@ -229,7 +455,7 @@ export class PdfWriter {
       objects[pageId] = [
         `<< /Type /Page /Parent ${pagesId} 0 R`,
         `/MediaBox [0 0 ${PAGE_WIDTH.toFixed(2)} ${PAGE_HEIGHT.toFixed(2)}]`,
-        `/Resources << /Font << /F1 ${fontIds.F1} 0 R /F2 ${fontIds.F2} 0 R /F3 ${fontIds.F3} 0 R >> >>`,
+        `/Resources << /Font << /F1 ${fontIds.F1} 0 R /F2 ${fontIds.F2} 0 R /F3 ${fontIds.F3} 0 R /F4 ${fontIds.F4} 0 R >> ${xobjects}>>`,
         `/Contents ${contentId} 0 R >>`,
       ].join(' ');
     }
@@ -250,8 +476,10 @@ export class PdfWriter {
       '<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold /Encoding /WinAnsiEncoding >>';
     objects[fontIds.F3] =
       '<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Oblique /Encoding /WinAnsiEncoding >>';
+    objects[fontIds.F4] =
+      '<< /Type /Font /Subtype /Type1 /BaseFont /Courier /Encoding /WinAnsiEncoding >>';
 
-    return this.serialise(objects, nextId);
+    return this.serialise(objects, binaries, nextId);
   }
 
   private streamFor(page: Op[]): string {
@@ -267,6 +495,20 @@ export class PdfWriter {
     }
 
     for (const op of page) {
+      if ('image' in op) {
+        parts.push(
+          `q ${op.width.toFixed(2)} 0 0 ${op.height.toFixed(2)} ` +
+            `${op.x.toFixed(2)} ${op.y.toFixed(2)} cm /Im${op.image} Do Q`,
+        );
+        continue;
+      }
+      if ('rule' in op) {
+        parts.push(
+          `${op.grey} ${op.grey} ${op.grey} rg ` +
+            `${op.x.toFixed(2)} ${op.y.toFixed(2)} ${op.width.toFixed(2)} 0.6 re f`,
+        );
+        continue;
+      }
       const grey = op.grey ?? 0.1;
       parts.push(
         `BT /${FONT_KEY[op.font]} ${op.size} Tf ${grey} ${grey} ${grey} rg ` +
@@ -278,25 +520,45 @@ export class PdfWriter {
     return parts.join('\n');
   }
 
-  private serialise(objects: string[], nextId: number): Buffer {
-    let output = '%PDF-1.4\n';
+  private serialise(
+    objects: string[],
+    binaries: { id: number; dict: string; body: Buffer }[],
+    nextId: number,
+  ): Buffer {
+    const chunks: Buffer[] = [Buffer.from('%PDF-1.4\n', 'latin1')];
+    let length = chunks[0].length;
     const offsets: number[] = [];
+    const binaryById = new Map(binaries.map((entry) => [entry.id, entry]));
 
     for (let id = 1; id < nextId; id++) {
+      const binary = binaryById.get(id);
+      if (binary) {
+        offsets[id] = length;
+        const head = Buffer.from(
+          `${id} 0 obj\n${binary.dict}\nstream\n`,
+          'latin1',
+        );
+        const tail = Buffer.from('\nendstream\nendobj\n', 'latin1');
+        chunks.push(head, binary.body, tail);
+        length += head.length + binary.body.length + tail.length;
+        continue;
+      }
       const body = objects[id];
       if (!body) continue;
-      offsets[id] = Buffer.byteLength(output, 'latin1');
-      output += `${id} 0 obj\n${body}\nendobj\n`;
+      offsets[id] = length;
+      const chunk = Buffer.from(`${id} 0 obj\n${body}\nendobj\n`, 'latin1');
+      chunks.push(chunk);
+      length += chunk.length;
     }
 
-    const xrefOffset = Buffer.byteLength(output, 'latin1');
-    output += `xref\n0 ${nextId}\n0000000000 65535 f \n`;
+    const xrefOffset = length;
+    let tail = `xref\n0 ${nextId}\n0000000000 65535 f \n`;
     for (let id = 1; id < nextId; id++) {
-      const offset = offsets[id] ?? 0;
-      output += `${offset.toString().padStart(10, '0')} 00000 n \n`;
+      tail += `${(offsets[id] ?? 0).toString().padStart(10, '0')} 00000 n \n`;
     }
-    output += `trailer\n<< /Size ${nextId} /Root 1 0 R >>\nstartxref\n${xrefOffset}\n%%EOF\n`;
+    tail += `trailer\n<< /Size ${nextId} /Root 1 0 R >>\nstartxref\n${xrefOffset}\n%%EOF\n`;
+    chunks.push(Buffer.from(tail, 'latin1'));
 
-    return Buffer.from(output, 'latin1');
+    return Buffer.concat(chunks);
   }
 }

@@ -10,6 +10,7 @@ import type {
   DocumentSource,
   DocumentBrief,
   DocumentStatus,
+  ImportManifest,
 } from '../../../contracts';
 import { BaseModel } from './base';
 import { DocumentPageModel } from './document-page.model';
@@ -45,7 +46,7 @@ export class DocumentModel extends BaseModel {
   declare sourceMimeType: string;
 
   @Column({
-    type: DataType.ENUM('uploaded', 'generated'),
+    type: DataType.ENUM('uploaded', 'generated', 'imported'),
     allowNull: false,
     defaultValue: 'uploaded',
   })
@@ -53,6 +54,12 @@ export class DocumentModel extends BaseModel {
 
   @Column({ type: DataType.JSON, allowNull: true })
   declare brief: DocumentBrief | null;
+
+  @Column({ type: DataType.STRING(2048), allowNull: true })
+  declare sourceUrl: string | null;
+
+  @Column({ type: DataType.JSON, allowNull: true })
+  declare importManifest: ImportManifest | null;
 
   @Column({ type: DataType.BIGINT, allowNull: false, defaultValue: 0 })
   declare sizeBytes: number;

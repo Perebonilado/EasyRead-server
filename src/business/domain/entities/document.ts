@@ -2,6 +2,7 @@ import type {
   DocumentSource,
   DocumentBrief,
   DocumentStatus,
+  ImportManifest,
 } from '../../../contracts';
 import { DocumentNotReadyError } from '../errors/errors';
 import { SCANNED_EMPTY_PAGE_RATIO } from '../values';
@@ -17,6 +18,8 @@ export interface DocumentProps {
   sizeBytes: number;
   source: DocumentSource;
   brief: DocumentBrief | null;
+  sourceUrl: string | null;
+  importManifest: ImportManifest | null;
   originalFileRef: string | null;
   canonicalPdfRef: string | null;
   thumbnailRef: string | null;
@@ -60,6 +63,14 @@ export class Document {
     if (!this.isReadable()) {
       throw new DocumentNotReadyError('This document is still being prepared');
     }
+  }
+
+  /** The typeset chapters, recorded so topics can be seeded from them. */
+  noteImportChapters(
+    chapters: { title: string; startPage: number; endPage: number }[],
+  ): void {
+    if (!this.props.importManifest) return;
+    this.props.importManifest = { ...this.props.importManifest, chapters };
   }
 
   markUploaded(originalFileRef: string): void {

@@ -12,6 +12,7 @@ export type LlmTask =
   | 'highlight_simplify'
   | 'highlight_define'
   | 'chat_document'
+  | 'chat_clarify'
   | 'session_recap'
   | 'learn_interview'
   | 'learn_outline'
@@ -90,6 +91,11 @@ export interface LlmGatewayPort {
     summary: string | null;
     /** The learner profile as standing instructions, written register. */
     profile: string;
+    /**
+     * Set when the reader pressed "Still not clear" on the previous answer:
+     * the same question, explained a different way and one rung simpler.
+     */
+    simpler?: boolean;
     onToken?: (chunk: string) => void;
   }): Promise<LlmResult<string>>;
 

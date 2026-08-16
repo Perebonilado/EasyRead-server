@@ -212,6 +212,142 @@ export class SendChatMessageHandler extends AbstractRequestHandlerTemplate<
   }
 }
 
+export interface ClarifyChatMessageRequest {
+  userId: string;
+  documentId: string;
+  /** The assistant message that failed to land. */
+  messageId: string;
+  onToken?: (chunk: string) => void;
+}
+
+/** What the reader's press says, in the thread, in their voice. */
+const STILL_NOT_CLEAR_TEXT =
+  "I still don't understand — explain it differently.";
+
+/**
+ * "Still not clear" — the explanation ladder (adaptive-learning §3, the
+ * `still_not_clear` signal held at weight 1.0).
+ *
+ * Every other struggle signal is inferred: a question might be curiosity, a
+ * re-read might be interest. This one is the reader saying outright that an
+ * explanation failed, which is why it is the heaviest signal in the stream
+ * and why it does something immediately rather than only feeding adaptation.
+ *
+ * The re-answer deliberately reuses the passages the first answer was built
+ * on. The evidence was never the problem — the explanation was — and
+ * retrieving afresh would risk answering a different question than the one
+ * that failed.
+ */
+@Injectable()
+export class ClarifyChatMessageHandler extends AbstractRequestHandlerTemplate<
+  ClarifyChatMessageRequest,
+  SendChatMessageResult
+> {
+  constructor(
+    @Inject(LLM_GATEWAY) private readonly llm: LlmGatewayPort,
+    @Inject(SUMMARY_REPOSITORY) private readonly summaries: SummaryRepository,
+    @Inject(CHAT_REPOSITORY) private readonly chat: ChatRepository,
+    @Inject(LEARNER_PROFILE_REPOSITORY)
+    private readonly profiles: LearnerProfileRepository,
+    @Inject(DOCUMENT_LEARNING_STATE_REPOSITORY)
+    private readonly docStates: DocumentLearningStateRepository,
+    private readonly access: DocumentAccessService,
+    private readonly entitlements: EntitlementsService,
+    private readonly struggles: StruggleRecorder,
+  ) {
+    super();
+  }
+
+  protected async handleRequest(cmd: ClarifyChatMessageRequest) {
+    await this.access.require(cmd.documentId, cmd.userId);
+
+    const found = await this.chat.findWithQuestion(
+      cmd.documentId,
+      cmd.userId,
+      cmd.messageId,
+    );
+    if (!found || found.answer.role !== 'assistant') {
+      throw new ValidationError('That answer is no longer here');
+    }
+
+    await this.entitlements.consume(
+      cmd.userId,
+      UsageMetric.HIGHLIGHT_ACTIONS,
+      (e) => e.assertCanUseHighlight(),
+    );
+
+    // Recorded before the model call, not after: the reader's admission is
+    // the valuable part, and it must survive a generation that fails.
+    void this.struggles.record({
+      userId: cmd.userId,
+      documentId: cmd.documentId,
+      kind: 'still_not_clear',
+      pageNumber: found.question?.pageNumber ?? null,
+      meta: { messageId: cmd.messageId },
+    });
+
+    const userMessage = await this.chat.append({
+      documentId: cmd.documentId,
+      userId: cmd.userId,
+      role: 'user',
+      text: STILL_NOT_CLEAR_TEXT,
+      pageNumber: found.question?.pageNumber ?? null,
+    });
+
+    const [summary, profile, docState] = await Promise.all([
+      this.summaries.find(cmd.documentId),
+      this.profiles.find(cmd.userId).catch(() => null),
+      this.docStates.find(cmd.userId, cmd.documentId).catch(() => null),
+    ]);
+
+    // The same evidence as last time. An answer with no recorded passages
+    // (an older row) simply re-explains from the thread and the summary.
+    const sources = found.answer.sources ?? [];
+    const context = sources
+      .map((source) => `[p.${source.pageNumber}] ${source.text}`)
+      .join('\n\n');
+
+    const question = [
+      found.question
+        ? `The reader originally asked:\n${found.question.text}`
+        : null,
+      `Your previous answer, which did not land:\n${found.answer.text}`,
+      'Explain the same thing again, a different way, simpler.',
+    ]
+      .filter(Boolean)
+      .join('\n\n');
+
+    const result = await this.llm.chatWithDocument({
+      // Deliberately no history. Replaying the thread and then asking for a
+      // different explanation works against itself: the model has twenty
+      // turns of its own phrasing in front of it and paraphrases them. The
+      // question and the answer that failed are supplied below instead, as
+      // the two things this turn is actually about.
+      history: [],
+      question,
+      context,
+      summary,
+      profile: profileInstructions(
+        effectiveProfile(profile ?? DEFAULT_LEARNER_PROFILE, docState),
+        'written',
+      ),
+      simpler: true,
+      onToken: cmd.onToken,
+    });
+
+    const reply = await this.chat.append({
+      documentId: cmd.documentId,
+      userId: cmd.userId,
+      role: 'assistant',
+      text: result.value,
+      // Carried forward so pressing the button twice still has its evidence.
+      sources: sources.length ? sources : null,
+    });
+
+    return CommandResponse.of({ userMessage, reply });
+  }
+}
+
 /**
  * The thread as model turns.
  *

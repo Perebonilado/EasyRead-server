@@ -48,4 +48,20 @@ export interface ChatRepository {
     userId: string,
     limit: number,
   ): Promise<ChatMessageRecord[]>;
+
+  /**
+   * One answer and the question it was answering.
+   *
+   * Re-explaining needs both: the question is what must be answered again,
+   * and the answer is what must not be repeated. Scoped by user and document
+   * so a message id from another thread resolves to nothing.
+   */
+  findWithQuestion(
+    documentId: string,
+    userId: string,
+    messageId: string,
+  ): Promise<{
+    answer: ChatMessageRecord;
+    question: ChatMessageRecord | null;
+  } | null>;
 }

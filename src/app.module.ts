@@ -44,6 +44,7 @@ import {
 } from './business/handlers/documents/learning.handlers';
 import { TutorIntroHandler } from './business/handlers/tutors/tutor-intro.handler';
 import {
+  ClarifyChatMessageHandler,
   ListChatMessagesHandler,
   SendChatMessageHandler,
 } from './business/handlers/documents/chat.handlers';
@@ -130,6 +131,7 @@ const handlers = [
   TutorIntroHandler,
   SendChatMessageHandler,
   ListChatMessagesHandler,
+  ClarifyChatMessageHandler,
   CreateNoteHandler,
   ListNotesHandler,
   ListAllNotesHandler,

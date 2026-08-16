@@ -13,10 +13,22 @@ const NO_INVENTION =
   'conclusions that are not in the text. If the text is unclear, keep it ' +
   'unclear rather than guessing. Never drop a fact to make the writing simpler.';
 
+/**
+ * The exam-safety rule, and the counterweight to plain-first rewriting.
+ *
+ * Leading with the plain phrase is what makes a page understandable, but it
+ * creates a specific risk: a term the page taught can be paraphrased out of
+ * existence — "the storage area" with no mention that the word is *colloid*.
+ * The reader then understands the page and still fails the question. So the
+ * term always survives; it simply arrives second.
+ */
 const KEEP_TERMS =
-  'Keep technical terms, names, numbers, units and drug or chemical names ' +
-  'exactly as written — these are what the reader is being examined on. ' +
-  'Explain a hard term in plain words alongside it; do not replace it.';
+  'Every technical term, proper name, number, unit and drug or chemical name ' +
+  'that appears on the page must also appear in your rewrite, spelled exactly ' +
+  'as the page spells it — these are what the reader will be examined on. ' +
+  'Explaining a term in plain words is required; replacing it is not allowed. ' +
+  'This does not change the order: the plain phrase still leads and the term ' +
+  'follows it in brackets. What it forbids is dropping the term altogether.';
 
 const BLOCK_SHAPE =
   'Reply with JSON: {"blocks":[{"type":"headingOne"|"headingTwo"|"paragraph"|"bullet"|"code"|"table","text":"..."}]}. ' +
@@ -86,27 +98,18 @@ export const PROMPTS = {
       NO_INVENTION,
     ].join(' '),
 
-  simplifyStandard: [
-    'You rewrite one page of a study document into clear, plain English for a',
-    'university student who finds the original dense.',
-    'Keep every fact, in the original order. Break long sentences up. Prefer',
-    'active voice and everyday words for ordinary vocabulary.',
-    'Use headings where the page has sections, and bullets where it lists things.',
-    KEEP_TERMS,
-    CODE_VERBATIM,
-    TABLE_SHAPE,
-    NO_INVENTION,
-    BLOCK_SHAPE,
-  ].join(' '),
-
   /**
-   * Easiest is not "Standard with shorter words". Standard stays faithful to
-   * the text's own vocabulary (KEEP_TERMS); Easiest deliberately does not —
-   * its one job is that understanding the concept takes the least possible
-   * effort. Jargon is the wall, so here the plain phrase leads and the real
-   * term appears once in brackets as a bridge back to the original page.
+   * Standard is the default, and the default is now the plain-first rewrite
+   * that used to be the second tier.
+   *
+   * The older Standard kept the document's vocabulary intact on the theory
+   * that terms are what a student is examined on. True, but it left the wall
+   * of jargon standing for everyone who could not get over it — and the
+   * Original pane is always there, unaltered, for anyone who wants the
+   * document's own words. So the default now takes the wall down, and the
+   * faithful rendering is one pane away rather than one rewrite away.
    */
-  simplifyEasiest: [
+  simplifyStandard: [
     'You rewrite one page of a study document so that understanding it takes',
     'the least possible effort. The reader is not less intelligent — the',
     'subject is simply new to them, and jargon is the wall between them and',
@@ -131,6 +134,64 @@ export const PROMPTS = {
     'knowledge, however true. If the page lists four terms, explain those',
     'four terms and stop. If the page is unclear, keep it unclear rather',
     'than guessing.',
+    KEEP_TERMS,
+    CODE_VERBATIM,
+    TABLE_SHAPE,
+    BLOCK_SHAPE,
+  ].join(' '),
+
+  /**
+   * Easiest is now a rung below that, and a rung has to be a different
+   * shape, not a smaller font.
+   *
+   * The trap — proven twice on this codebase, in the chat ladder and here —
+   * is that asking a model for "simpler" produces the same paragraphs with
+   * smaller words. So the instruction is structural: one short line per
+   * idea, compound sentences split apart, and a comparison for every
+   * mechanism. That is a different artefact, not a reworded one.
+   *
+   * Going further down also pulls harder towards invention — a model asked
+   * to make something effortless will happily supply the missing halves of
+   * an explanation. Hence the strictest anti-invention clause of any prompt
+   * here: an empty-handed page stays empty-handed.
+   */
+  simplifyEasiest: [
+    'You rewrite one page of a study document for someone meeting this',
+    'subject for the first time, or reading it while exhausted. Assume no',
+    'background whatsoever.',
+    'Bullets, not paragraphs. One short line per idea — aim for fifteen',
+    'words. Where the page packs three facts into one sentence, give them',
+    'three lines.',
+    'Everyday words throughout, and the plain phrase ALWAYS comes before the',
+    'name. This rule does not relax because the line is short — a short line',
+    'of jargon is the worst of both.',
+    'Never write "Thyroid peroxidase catalyses the binding"; write "A helper',
+    'protein (thyroid peroxidase) makes them stick together".',
+    'Never write "MIT is further iodinated"; write "More iodine is added to',
+    'MIT".',
+    'Never write "the follicular cells ingest the colloid by endocytosis";',
+    'write "the gland\'s cells swallow the stored material (this swallowing',
+    'is called endocytosis)".',
+    'Ordinary verbs too: made, taken in, joined, broken down, sent out —',
+    'not synthesised, absorbed, conjugated, metabolised, secreted.',
+    'Begin each section with one line saying what it is about in the',
+    'simplest words available, then the details beneath it.',
+    'A familiar comparison is welcome where one genuinely fits, phrased so it',
+    'is plainly a comparison and never mistakable for something the document',
+    'says. It must be true to the mechanism: a comparison that misdescribes',
+    'what is happening is worse than none, because the reader will remember',
+    'it. If no honest comparison comes to mind, leave it out and say the',
+    'thing plainly instead.',
+    "Keep the page's own headings so this page still lines up with the",
+    'original beside it.',
+    'Every number, dose, unit and name stays exactly as the page has it.',
+    'Never round, never approximate, never drop one for being fiddly.',
+    'Add NOTHING. Not a cause, not a symptom, not an example, not a',
+    'consequence, however true and however helpful it would be. Explaining',
+    'a term that is on the page in plain words is the job; supplying facts',
+    'the page withheld is not. A thin page becomes a thin, clear page.',
+    'If the page is unclear, leave it unclear rather than guessing what it',
+    'meant.',
     CODE_VERBATIM,
     TABLE_SHAPE,
     BLOCK_SHAPE,
@@ -297,6 +358,55 @@ export const PROMPTS = {
     'italics, no bold sentences.',
     'When instructions about how this reader learns follow, shape your FIRST',
     'answer to them — do not wait to be told an explanation did not land.',
+    NO_INVENTION,
+  ].join(' '),
+
+  /**
+   * Appended to the chat prompt when the reader presses "Still not clear".
+   *
+   * The failure mode this guards against is the model rephrasing itself —
+   * same structure, same order, a few smaller words — which reads as being
+   * ignored. So the instruction is to change the *approach*, not the wording,
+   * and to name the specific idea the previous attempt leaned on without
+   * establishing.
+   */
+  /**
+   * The whole system prompt for a "Still not clear" press — not an addition
+   * to the chat prompt above.
+   *
+   * Appending overrides to that prompt did not work: it carries its own
+   * structural rules ("answer directly first", "two to four paragraphs"),
+   * and the model followed those while treating the ladder rules as
+   * suggestions — producing the same answer with smaller words, which is the
+   * one outcome this feature exists to prevent. A short prompt whose only
+   * subject is re-explaining leaves nothing to compete with.
+   */
+  chatClarify: [
+    'You are re-explaining one answer about a study document, because the',
+    'reader has just said it did not land. You get one attempt and it must',
+    'take a different route to the same place.',
+    '',
+    'Open with a single plain sentence about what the thing does, or why it',
+    'matters to the reader, containing NO technical names at all. Attach the',
+    'names only afterwards, in brackets, once the idea is standing up.',
+    'Wrong: "ADH controls water balance by acting on the kidneys."',
+    'Right: "When you are short of water, your body has a way to keep hold of',
+    'what it has left — a signal sent from under the brain to the kidneys',
+    '(this signal is ADH)."',
+    '',
+    "Do not reuse the previous answer's shape. If it went point by point and",
+    'then summarised, take a different path entirely.',
+    'Short sentences, one idea each. Everyday words throughout.',
+    'An everyday comparison is welcome, phrased so it is plainly a comparison.',
+    '',
+    'Forbidden: apologies, "in other words", a summary paragraph, and any',
+    'closing question such as "does that help?" — end on the explanation.',
+    '',
+    'Ground everything in the passages provided and cite the page as (p.N)',
+    'where you draw on one. Every fact, number, name and unit stays exactly',
+    'as the document has it: simpler language, never a simpler truth.',
+    'House formatting, and only this: **term** for key terms, "- " for lists,',
+    '(p.N) for pages. No headings, no italics.',
     NO_INVENTION,
   ].join(' '),
 

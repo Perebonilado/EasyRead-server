@@ -83,4 +83,45 @@ export class SequelizeChatRepository implements ChatRepository {
     });
     return rows.reverse().map(toRecord);
   }
+
+  async findWithQuestion(
+    documentId: string,
+    userId: string,
+    messageId: string,
+  ): Promise<{
+    answer: ChatMessageRecord;
+    question: ChatMessageRecord | null;
+  } | null> {
+    const answer = await this.model.findOne({
+      where: { id: messageId, documentId, userId } as never,
+    });
+    if (!answer) return null;
+
+    // The reader's turn immediately before it. Ordered by the same
+    // (createdAt, id) pair the thread is read with, so a question and answer
+    // written in the same millisecond still resolve in the right order.
+    const question = await this.model.findOne({
+      where: {
+        documentId,
+        userId,
+        role: 'user',
+        [Op.or]: [
+          { createdAt: { [Op.lt]: answer.get('createdAt') as Date } },
+          {
+            createdAt: answer.get('createdAt') as Date,
+            id: { [Op.lt]: answer.id },
+          },
+        ],
+      } as never,
+      order: [
+        ['createdAt', 'DESC'],
+        ['id', 'DESC'],
+      ] as never,
+    });
+
+    return {
+      answer: toRecord(answer),
+      question: question ? toRecord(question) : null,
+    };
+  }
 }

@@ -30,6 +30,11 @@ const TASK_VAR: Record<LlmTask, string> = {
   highlight_simplify: 'AI_MODEL_HIGHLIGHT',
   highlight_define: 'AI_MODEL_HIGHLIGHT',
   chat_document: 'AI_MODEL_CHAT',
+  // Re-explaining is the hardest thing asked of the chat model: it must
+  // change approach rather than vocabulary. Routable on its own so a
+  // deployment can spend a better model here without paying for it on
+  // every ordinary turn.
+  chat_clarify: 'AI_MODEL_CHAT_CLARIFY',
   session_recap: 'AI_MODEL_CHAT',
   learn_interview: 'AI_MODEL_LEARN',
   learn_outline: 'AI_MODEL_LEARN',

@@ -199,6 +199,8 @@ export class AiSdkLlmAdapter implements LlmGatewayPort, OnModuleInit {
     context: string;
     summary: string | null;
     profile: string;
+    /** The reader pressed "Still not clear": climb down a rung. */
+    simpler?: boolean;
     onToken?: (chunk: string) => void;
   }): Promise<LlmResult<string>> {
     // The passages ride with the turn they answer, so a later follow-up can
@@ -218,10 +220,22 @@ export class AiSdkLlmAdapter implements LlmGatewayPort, OnModuleInit {
 
     const started = Date.now();
     const { streamText, generateText } = await this.registry.modules();
-    const { model, ref } = await this.registry.languageModel('chat_document');
+    const { model, ref } = await this.registry.languageModel(
+      input.simpler ? 'chat_clarify' : 'chat_document',
+    );
     // The profile rides in the system turn — standing instruction, not
     // content — so it shapes the first answer, not just retries.
-    const system = [PROMPTS.chat, input.profile].filter(Boolean).join('\n\n');
+    //
+    // A ladder press swaps the prompt wholesale rather than appending to it:
+    // the chat prompt carries its own structural rules, and appending an
+    // instruction to change structure left the model obeying the older,
+    // longer one — the same answer in smaller words.
+    const system = [
+      input.simpler ? PROMPTS.chatClarify : PROMPTS.chat,
+      input.profile,
+    ]
+      .filter(Boolean)
+      .join('\n\n');
 
     if (!input.onToken) {
       const result = await generateText({

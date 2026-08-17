@@ -596,6 +596,7 @@ export class StartVoiceSessionHandler extends AbstractRequestHandlerTemplate<
             summary,
             cmd.userId,
             tutor,
+            cmd.pageNumber,
             cmd.revisitTopicId,
           )
         : this.chatInstructions(doc.props.title, summary);
@@ -682,6 +683,7 @@ export class StartVoiceSessionHandler extends AbstractRequestHandlerTemplate<
     summary: string | null,
     userId: string,
     tutor: Tutor,
+    pageNumber: number,
     revisitTopicId?: string,
   ): Promise<string> {
     const [topics, events, profile, unnarrated, docState] = await Promise.all([
@@ -701,6 +703,15 @@ export class StartVoiceSessionHandler extends AbstractRequestHandlerTemplate<
       topics.map((topic) => topic.id),
     );
     const masteryById = new Map(mastery.map((entry) => [entry.topicId, entry]));
+
+    // The lesson starts where the student opened it, not at the plan's
+    // first untaught chapter — "teach me" pressed on page 94 means page 94.
+    const containing = topics.find(
+      (topic) => pageNumber >= topic.startPage && pageNumber <= topic.endPage,
+    );
+    const startHere = containing
+      ? `- The student opened this lesson from page ${pageNumber}, inside "${containing.title}" [id: ${containing.id}]. Start with a one-breath overview of where that sits in the plan, then pick up at page ${pageNumber} and move forward page by page. Never jump to a different chapter to begin: when this topic's pages are done, continue straight into the next topic in plan order. Pages before ${pageNumber} are behind the student — go back only if they ask, or a prerequisite genuinely demands a short bridge.`
+      : `- The student opened this lesson from page ${pageNumber}. Start there and move forward page by page.`;
 
     const syllabus = topics.length
       ? topics
@@ -735,9 +746,9 @@ export class StartVoiceSessionHandler extends AbstractRequestHandlerTemplate<
       })(),
       [
         'How to run the lesson:',
+        startHere,
         '- The screen is your blackboard and the tools are your chalk — and chalk is silent. NEVER speak about the machinery: no "point", no "reveal", no "tool", no "board", no "lesson plan", no "let me show the next one". You do not announce what the screen is about to do; you teach, and the screen follows your voice. A student should be able to close their eyes and hear only a teacher.',
         "- One idea at a time, landed before the next. This is the whole job: a personal tutor holds the student's hand through material that has already defeated them once. Never pile up material, never sprint to be finished, never move on from an idea the student has not shown they hold.",
-        '- Start with a one-breath overview of where you are in the plan, then teach the first topic not marked "already taught".',
         `- Before starting a topic, call ${TEACH_TOOLS.CHECK_PREREQUISITES} with its id. If it returns anything, ask about it in passing — "are you comfortable with X, or should I take a minute on it?" — and if they want it (or clearly need it), give a short bridge and then call ${TEACH_TOOLS.TEACH_PREREQUISITE}. Two bridges per chapter at most; the chapter is the destination.`,
         `- When you begin a topic, call ${TEACH_TOOLS.GO_TO_PAGE} with its first page. As you move through its material, keep turning pages with ${TEACH_TOOLS.GO_TO_PAGE} so the student is always looking at what you are explaining.`,
         `- Each page arrives blank and builds up as you teach, like a board being written. Just before you explain an idea, call ${TEACH_TOOLS.REVEAL_POINT} with its number. The screen advances ONE point per call no matter what you ask for — take the next point, teach it fully, check it landed, then take the next. Never discuss a point the student cannot see yet.`,

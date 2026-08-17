@@ -3,8 +3,10 @@ import { ConfigService } from '@nestjs/config';
 import {
   TEACH_TOOLS,
   type Block,
+  type ComputeResponse,
   type DiagramResponse,
   type Level,
+  type SketchResponse,
   type VoiceMode,
   type VoiceSessionResponse,
 } from '../../../contracts';
@@ -65,6 +67,8 @@ import type {
 import type { SimplifiedPageRepository } from '../../repositories/simplified-page.repository';
 import AbstractRequestHandlerTemplate from '../AbstractRequestHandlerTemplate';
 import { CommandResponse } from '../response/CommandResponse';
+import { ComputeService } from './compute.service';
+import { ElevenLabsRealtimeAdapter } from '../../../web/adapters/elevenlabs-voice.adapters';
 import { DocumentAccessService } from './document-access.service';
 import { EntitlementsService } from './entitlements.service';
 
@@ -207,7 +211,7 @@ export interface VoiceSessionRequest {
  * The teach-mode toolbox. Parameters are JSON Schema; execution happens in the
  * browser, because every one of these is a UI action.
  */
-const TEACHING_TOOLS: RealtimeTool[] = [
+export const TEACHING_TOOLS: RealtimeTool[] = [
   {
     name: TEACH_TOOLS.GO_TO_PAGE,
     description:
@@ -227,8 +231,10 @@ const TEACHING_TOOLS: RealtimeTool[] = [
       "Write the next point onto the student's page. Every page starts blank " +
       'for the student; its numbered points appear as you reveal them, ' +
       "building up like writing on a board. Call this with a point's number " +
-      'just before you start explaining that point. Cumulative: upTo 3 shows ' +
-      'points 1 through 3. Never explain a point the student cannot see.',
+      'just before you start explaining that point. The screen advances at ' +
+      'most ONE point per call, whatever number you pass — teach each point ' +
+      'fully before calling again. Never explain a point the student cannot ' +
+      'see, and never announce to the student that you are revealing anything.',
     parameters: {
       type: 'object',
       properties: {
@@ -306,18 +312,70 @@ const TEACHING_TOOLS: RealtimeTool[] = [
   {
     name: TEACH_TOOLS.DRAW_DIAGRAM,
     description:
-      "Sketch a flowchart on the student's board to lay out a process, " +
-      'pathway, cycle or hierarchy from the document. One concept per diagram.',
+      "Draw boxes-and-arrows ideas on the student's board: a flowchart for " +
+      'a process, a sequence diagram for interactions between parties, a ' +
+      'state diagram for modes and transitions, a timeline for history, a ' +
+      "pie for proportions, a mindmap for a concept's parts. One concept " +
+      'per diagram. Not for pictures of things — use draw_sketch for those. ' +
+      'Draw on your own initiative whenever an idea has shape — never wait ' +
+      'to be asked, and never announce that you are about to draw.',
     parameters: {
       type: 'object',
       properties: {
         description: {
           type: 'string',
           description:
-            'What to draw, in one sentence, e.g. "thyroid hormone synthesis as a flowchart"',
+            'What to draw and the shape that fits, in one sentence, e.g. ' +
+            '"the request path from browser to database, as a sequence diagram"',
         },
       },
       required: ['description'],
+    },
+  },
+  {
+    name: TEACH_TOOLS.SKETCH,
+    description:
+      "Draw a picture of a thing on the student's board: anatomy, " +
+      'apparatus, spatial layouts, annotated curves, number lines — a ' +
+      'labelled sketch of how something looks or is arranged. Not for ' +
+      'flows, sequences or hierarchies — use draw_diagram for those. Sketch ' +
+      'on your own initiative — never wait to be asked.',
+    parameters: {
+      type: 'object',
+      properties: {
+        description: {
+          type: 'string',
+          description:
+            'What to sketch and which parts to label, in one sentence, e.g. ' +
+            '"the eye in cross-section with the lens and retina labelled"',
+        },
+      },
+      required: ['description'],
+    },
+  },
+  {
+    name: TEACH_TOOLS.COMPUTE,
+    description:
+      'Evaluate a numeric expression exactly. Use for ANY arithmetic you ' +
+      'are about to say aloud — never do arithmetic yourself. Returns the ' +
+      'verified result; then explain it.',
+    parameters: {
+      type: 'object',
+      properties: {
+        expression: {
+          type: 'string',
+          description:
+            'The expression in mathjs syntax, e.g. "86400 * 10e6" or ' +
+            '"150 ug/kg * 70 kg"',
+        },
+        scope: {
+          type: 'object',
+          description:
+            'Optional variable values used by the expression, name to number',
+          additionalProperties: { type: 'number' },
+        },
+      },
+      required: ['expression'],
     },
   },
   {
@@ -330,7 +388,12 @@ const TEACHING_TOOLS: RealtimeTool[] = [
     parameters: {
       type: 'object',
       properties: {
-        action: { type: 'string', enum: ['expand', 'close'] },
+        action: {
+          type: 'string',
+          enum: ['expand', 'close'],
+          description:
+            '"expand" brings an item up large; "close" puts the board away',
+        },
         title: {
           type: 'string',
           description:
@@ -354,15 +417,22 @@ const TEACHING_TOOLS: RealtimeTool[] = [
           type: 'string',
           description: 'The lesson-plan id of the topic this checks',
         },
-        question: { type: 'string' },
+        question: {
+          type: 'string',
+          description: 'The question, as you would say it aloud',
+        },
         options: {
           type: 'array',
-          items: { type: 'string' },
+          items: { type: 'string', description: 'One answer choice' },
           minItems: 2,
           maxItems: 4,
           description: 'Answer choices, one correct',
         },
-        correctIndex: { type: 'integer', minimum: 0 },
+        correctIndex: {
+          type: 'integer',
+          minimum: 0,
+          description: 'Zero-based index of the correct option',
+        },
         explanation: {
           type: 'string',
           description: 'One sentence on why the right answer is right',
@@ -380,7 +450,10 @@ const TEACHING_TOOLS: RealtimeTool[] = [
     parameters: {
       type: 'object',
       properties: {
-        topicId: { type: 'string' },
+        topicId: {
+          type: 'string',
+          description: 'The lesson-plan id of the topic this checks',
+        },
         front: { type: 'string', description: 'The prompt side' },
         back: { type: 'string', description: 'The answer side' },
       },
@@ -396,7 +469,10 @@ const TEACHING_TOOLS: RealtimeTool[] = [
     parameters: {
       type: 'object',
       properties: {
-        topicId: { type: 'string' },
+        topicId: {
+          type: 'string',
+          description: 'The lesson-plan id of the topic being rated',
+        },
         rating: {
           type: 'integer',
           minimum: 1,
@@ -421,9 +497,21 @@ const TEACHING_TOOLS: RealtimeTool[] = [
     parameters: {
       type: 'object',
       properties: {
-        pace: { type: 'string', enum: ['slower', 'steady', 'faster'] },
-        depth: { type: 'string', enum: ['lighter', 'standard', 'deeper'] },
-        interactivity: { type: 'string', enum: ['less', 'standard', 'more'] },
+        pace: {
+          type: 'string',
+          enum: ['slower', 'steady', 'faster'],
+          description: 'How quickly to move through material',
+        },
+        depth: {
+          type: 'string',
+          enum: ['lighter', 'standard', 'deeper'],
+          description: 'How far to decompose ideas',
+        },
+        interactivity: {
+          type: 'string',
+          enum: ['less', 'standard', 'more'],
+          description: 'How often to turn the lesson back on the student',
+        },
         note: {
           type: 'string',
           description:
@@ -469,6 +557,7 @@ export class StartVoiceSessionHandler extends AbstractRequestHandlerTemplate<
 > {
   constructor(
     @Inject(REALTIME) private readonly realtime: RealtimePort,
+    private readonly elevenlabs: ElevenLabsRealtimeAdapter,
     @Inject(SUMMARY_REPOSITORY) private readonly summaries: SummaryRepository,
     @Inject(TOPIC_REPOSITORY) private readonly topics: TopicRepository,
     @Inject(ASSESSMENT_REPOSITORY)
@@ -518,27 +607,52 @@ export class StartVoiceSessionHandler extends AbstractRequestHandlerTemplate<
       await this.markNarrated(cmd.userId).catch(() => undefined);
     }
 
-    const session = await this.realtime.createSession({
-      instructions: baseInstructions,
-      tools: cmd.mode === 'teach' ? TEACHING_TOOLS : undefined,
-      // The tutor's voice; chat mode keeps the configured default.
-      voice: cmd.mode === 'teach' ? tutor.voice : undefined,
-    });
+    // The provider rides on the tutor. A tutor voiced by ElevenLabs runs
+    // the lesson there; without an API key they fall back to their OpenAI
+    // voice so the roster keeps working in dev. Chat mode has no tutor and
+    // stays on the configured OpenAI default.
+    const wantsElevenLabs =
+      cmd.mode === 'teach' && tutor.voice.provider === 'elevenlabs';
+    const useElevenLabs = wantsElevenLabs && this.elevenlabs.isConfigured();
+    if (wantsElevenLabs && !useElevenLabs) {
+      this.logger.warn(
+        `Tutor ${tutor.id} is voiced by ElevenLabs but ELEVENLABS_API_KEY is not set — falling back to OpenAI (${tutor.voice.openaiFallback})`,
+      );
+    }
+
+    const session = useElevenLabs
+      ? await this.elevenlabs.createSession({
+          instructions: baseInstructions,
+          tools: TEACHING_TOOLS,
+          voice: tutor.voice.voiceId,
+        })
+      : await this.realtime.createSession({
+          instructions: baseInstructions,
+          tools: cmd.mode === 'teach' ? TEACHING_TOOLS : undefined,
+          // The tutor's voice; chat mode keeps the configured default.
+          voice:
+            cmd.mode === 'teach'
+              ? tutor.voice.provider === 'openai'
+                ? tutor.voice.voiceId
+                : tutor.voice.openaiFallback
+              : undefined,
+        });
 
     await this.calls.record({
       documentId: doc.id,
       task: cmd.mode === 'teach' ? 'teach_session' : 'voice_session',
-      model: `openai:${session.model}`,
+      model:
+        session.provider === 'openai'
+          ? `openai:${session.model}`
+          : 'elevenlabs:agent',
       tokensIn: null,
       tokensOut: null,
       latencyMs: null,
       outcome: 'ok',
     });
 
-    return CommandResponse.of({
-      clientSecret: session.clientSecret,
-      model: session.model,
-      expiresAt: session.expiresAt,
+    return CommandResponse.of<VoiceSessionResponse>({
+      ...session,
       baseInstructions,
     });
   }
@@ -621,14 +735,17 @@ export class StartVoiceSessionHandler extends AbstractRequestHandlerTemplate<
       })(),
       [
         'How to run the lesson:',
+        '- The screen is your blackboard and the tools are your chalk — and chalk is silent. NEVER speak about the machinery: no "point", no "reveal", no "tool", no "board", no "lesson plan", no "let me show the next one". You do not announce what the screen is about to do; you teach, and the screen follows your voice. A student should be able to close their eyes and hear only a teacher.',
+        "- One idea at a time, landed before the next. This is the whole job: a personal tutor holds the student's hand through material that has already defeated them once. Never pile up material, never sprint to be finished, never move on from an idea the student has not shown they hold.",
         '- Start with a one-breath overview of where you are in the plan, then teach the first topic not marked "already taught".',
         `- Before starting a topic, call ${TEACH_TOOLS.CHECK_PREREQUISITES} with its id. If it returns anything, ask about it in passing — "are you comfortable with X, or should I take a minute on it?" — and if they want it (or clearly need it), give a short bridge and then call ${TEACH_TOOLS.TEACH_PREREQUISITE}. Two bridges per chapter at most; the chapter is the destination.`,
         `- When you begin a topic, call ${TEACH_TOOLS.GO_TO_PAGE} with its first page. As you move through its material, keep turning pages with ${TEACH_TOOLS.GO_TO_PAGE} so the student is always looking at what you are explaining.`,
-        `- Each page arrives blank on the student's screen. Its points are numbered in the page text below. Just before you explain a point, call ${TEACH_TOOLS.REVEAL_POINT} with that number — the page builds up as you teach, like writing on a board. Reveal one point at a time, and never discuss a point the student cannot see yet.`,
-        '- The student should be taking notes, like in a real classroom. After you reveal and explain a point, leave a short pause for them to write it down. When a term is exam-critical or easily confused, say that it belongs in their notes — then give them the moment to jot it.',
+        `- Each page arrives blank and builds up as you teach, like a board being written. Just before you explain an idea, call ${TEACH_TOOLS.REVEAL_POINT} with its number. The screen advances ONE point per call no matter what you ask for — take the next point, teach it fully, check it landed, then take the next. Never discuss a point the student cannot see yet.`,
+        '- Never read a revealed point aloud as written. The screen already holds the exact words; your voice adds what the screen cannot — plainer words, a concrete example, why it matters, how it connects to what came before. If you catch yourself reciting the page, stop and explain instead.',
+        '- The student should be taking notes, like in a real classroom. After you explain an idea, leave a short pause for them to write it down. When a term is exam-critical or easily confused, say that it belongs in their notes — then give them the moment to jot it.',
         '- Teach in short spoken stretches — under a minute — then ask the student something: to say it back, to guess the next step, whether it makes sense. This is a conversation, not a lecture.',
-        `- When a structure or apparatus is easier seen than said, call ${TEACH_TOOLS.SHOW_IMAGES}. When a process, pathway or hierarchy needs laying out, call ${TEACH_TOOLS.DRAW_DIAGRAM} and then talk the student through what is on the board.`,
-        `- A newly drawn diagram fills the screen on its own. Teach from it node by node while it is large, then call ${TEACH_TOOLS.FOCUS_BOARD} with action "close" before moving on. Turning the page also puts it away. Bring anything back later with action "expand" and its title.`,
+        `- Visuals are yours to initiate — a good tutor reaches for the board unprompted, and the student should NEVER have to ask for a drawing. The moment an idea has shape, put it up as you begin explaining it: ${TEACH_TOOLS.DRAW_DIAGRAM} for a process, sequence, hierarchy or comparison; ${TEACH_TOOLS.SKETCH} for the thing itself — anatomy, apparatus, a labelled curve; ${TEACH_TOOLS.SHOW_IMAGES} for real photographs; ${TEACH_TOOLS.COMPUTE} for ANY arithmetic before a number leaves your mouth. Aim for at least one visual per topic whenever the material has any shape to show, and simply start describing what the student now sees — never announce that you are about to draw.`,
+        `- A newly drawn visual fills the screen on its own. Teach from it part by part while it is large, then call ${TEACH_TOOLS.FOCUS_BOARD} with action "close" before moving on. Turning the page also puts it away. Bring anything back later with action "expand" and its title.`,
         `- When the student has understood a topic, call ${TEACH_TOOLS.MARK_TOPIC_COMPLETE} with its id, then move to the next.`,
         '- If the student asks to skip, slow down, go back, or dig into something, follow them — the plan serves the student.',
         `- When the whole plan is taught — or the student says they are done — wrap up like a real teacher: a short spoken recap of what was covered, a word of encouragement, goodbye. Then, and only then, call ${TEACH_TOOLS.END_LESSON} to close the session.`,
@@ -730,5 +847,121 @@ export class DrawDiagramHandler extends AbstractRequestHandlerTemplate<
     });
 
     return CommandResponse.of(result.value);
+  }
+}
+
+export interface DrawSketchRequest {
+  userId: string;
+  documentId: string;
+  description: string;
+}
+
+/**
+ * A grounded free-form sketch for the lesson board — the same split as
+ * DrawDiagramHandler: the voice model says what to draw, a text model draws
+ * it from retrieved passages. The SVG that comes back is untrusted; the
+ * client sanitizes before rendering.
+ */
+@Injectable()
+export class DrawSketchHandler extends AbstractRequestHandlerTemplate<
+  DrawSketchRequest,
+  SketchResponse
+> {
+  constructor(
+    @Inject(LLM_GATEWAY) private readonly llm: LlmGatewayPort,
+    @Inject(VECTOR_STORE) private readonly vectors: VectorStorePort,
+    @Inject(SUMMARY_REPOSITORY) private readonly summaries: SummaryRepository,
+    @Inject(AI_CALL_LOG_REPOSITORY) private readonly calls: AiCallLogRepository,
+    private readonly access: DocumentAccessService,
+  ) {
+    super();
+  }
+
+  protected async handleRequest(cmd: DrawSketchRequest) {
+    await this.access.require(cmd.documentId, cmd.userId);
+
+    const summary = await this.summaries.find(cmd.documentId);
+
+    const [embedding] = (await this.llm.embed({ texts: [cmd.description] }))
+      .value;
+    const chunks = await this.vectors.query({
+      documentId: cmd.documentId,
+      embedding,
+      topK: 6,
+    });
+    const context = chunks
+      .map((chunk) => `[p.${chunk.pageNumber}] ${chunk.text}`)
+      .join('\n\n');
+
+    const result = await this.llm.drawSketch({
+      description: cmd.description,
+      context,
+      summary,
+    });
+
+    await this.calls.record({
+      documentId: cmd.documentId,
+      task: 'sketch',
+      model: result.usage.model,
+      tokensIn: result.usage.tokensIn,
+      tokensOut: result.usage.tokensOut,
+      latencyMs: result.usage.latencyMs,
+      outcome: 'ok',
+    });
+
+    return CommandResponse.of(result.value);
+  }
+}
+
+export interface ComputeRequest {
+  userId: string;
+  documentId: string;
+  expression: string;
+  scope?: Record<string, number>;
+}
+
+/**
+ * Verified arithmetic for the tutor. No model call and no retrieval — the
+ * point is that the number the tutor says aloud came from an evaluator, not
+ * from a language model. Logged to ai_call_logs (tokens 0) so every lesson
+ * capability shows up in one ledger.
+ */
+@Injectable()
+export class ComputeHandler extends AbstractRequestHandlerTemplate<
+  ComputeRequest,
+  ComputeResponse
+> {
+  constructor(
+    @Inject(AI_CALL_LOG_REPOSITORY) private readonly calls: AiCallLogRepository,
+    private readonly compute: ComputeService,
+    private readonly access: DocumentAccessService,
+  ) {
+    super();
+  }
+
+  protected async handleRequest(cmd: ComputeRequest) {
+    await this.access.require(cmd.documentId, cmd.userId);
+
+    const started = Date.now();
+    const outcome = this.compute.evaluate(cmd.expression, cmd.scope);
+
+    await this.calls.record({
+      documentId: cmd.documentId,
+      task: 'compute',
+      model: 'mathjs',
+      tokensIn: 0,
+      tokensOut: 0,
+      latencyMs: Date.now() - started,
+      outcome: outcome.ok ? 'ok' : 'failed',
+    });
+
+    if (!outcome.ok) {
+      return CommandResponse.of<ComputeResponse>(outcome);
+    }
+    return CommandResponse.of<ComputeResponse>({
+      ok: true,
+      result: outcome.result,
+      tex: this.compute.toTex(cmd.expression, outcome.result),
+    });
   }
 }

@@ -32,6 +32,10 @@ import { MysqlVectorStoreAdapter } from '../adapters/mysql-vector-store.adapter'
 import { NullImageSearchAdapter } from '../adapters/null-image-search.adapter';
 import { AiSdkLlmAdapter } from '../adapters/ai-sdk/ai-sdk-llm.adapter';
 import {
+  ElevenLabsRealtimeAdapter,
+  ElevenLabsSpeechAdapter,
+} from '../adapters/elevenlabs-voice.adapters';
+import {
   OpenAiRealtimeAdapter,
   OpenAiSpeechAdapter,
 } from '../adapters/ai-sdk/openai-voice.adapters';
@@ -69,6 +73,10 @@ export const portProviders: Provider[] = [
   // Voice rides on the same OpenAI key as the text gateway.
   { provide: SPEECH, useClass: OpenAiSpeechAdapter },
   { provide: REALTIME, useClass: OpenAiRealtimeAdapter },
+  // Injected by concrete class where a tutor's voice lives on ElevenLabs;
+  // the OpenAI-backed tokens above stay the defaults for everything else.
+  ElevenLabsSpeechAdapter,
+  ElevenLabsRealtimeAdapter,
 
   // Payments are stubbed until billing lands.
   { provide: PAYMENTS, useClass: FakePaymentsAdapter },

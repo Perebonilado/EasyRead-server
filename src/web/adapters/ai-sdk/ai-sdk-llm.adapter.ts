@@ -14,6 +14,7 @@ import { ModelRegistry, type ModelRef } from './models';
 import {
   blocksSchema,
   diagramSchema,
+  sketchSchema,
   interviewSchema,
   ocrPageSchema,
   outlineSchema,
@@ -444,6 +445,42 @@ export class AiSdkLlmAdapter implements LlmGatewayPort, OnModuleInit {
 
     return {
       value: { title: result.object.title, mermaid },
+      usage: this.usage(ref, result.usage, started),
+    };
+  }
+
+  async drawSketch(input: {
+    description: string;
+    context: string;
+    summary: string | null;
+  }): Promise<LlmResult<{ title: string; svg: string }>> {
+    const started = Date.now();
+    const { generateObject } = await this.registry.modules();
+    const { model, ref } = await this.registry.languageModel('sketch');
+
+    const result = await generateObject({
+      model,
+      schema: sketchSchema,
+      system: PROMPTS.sketch,
+      prompt: [
+        input.summary ? `Document summary:\n${input.summary}` : null,
+        input.context ? `Passages from the document:\n${input.context}` : null,
+        `Sketch: ${input.description}`,
+      ]
+        .filter(Boolean)
+        .join('\n\n'),
+      maxRetries: this.maxRetries(),
+    });
+
+    // Same fence-stripping reflex as diagrams — models wrap markup whatever
+    // the prompt says. The client sanitizes; this only tidies.
+    const svg = result.object.svg
+      .replace(/^```(?:svg|xml|html)?\s*/i, '')
+      .replace(/```\s*$/, '')
+      .trim();
+
+    return {
+      value: { title: result.object.title, svg },
       usage: this.usage(ref, result.usage, started),
     };
   }

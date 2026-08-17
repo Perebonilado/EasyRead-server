@@ -22,10 +22,12 @@ export const blocksSchema = z.object({
             'bullet',
             'code',
             'table',
+            'math',
           ])
           .describe(
             'Pipe-separated rows (header first) are "table", not "code"; ' +
-              '"code" is for program source, commands, and config.',
+              '"code" is for program source, commands, and config; "math" is ' +
+              'display-mode LaTeX without $$ delimiters, never prose.',
           ),
         text: z.string().min(1),
       }),
@@ -49,10 +51,12 @@ export const ocrPageSchema = z.object({
           'bullet',
           'code',
           'table',
+          'math',
         ])
         .describe(
           'Pipe-separated rows (header first) are "table", not "code"; ' +
-            '"code" is for program source, commands, and config.',
+            '"code" is for program source, commands, and config; "math" is ' +
+            'display-mode LaTeX without $$ delimiters, never prose.',
         ),
       text: z.string().min(1),
     }),
@@ -77,6 +81,12 @@ export const diagramSchema = z.object({
   title: z.string().min(1).max(120),
   /** Mermaid source, no code fences. */
   mermaid: z.string().min(10),
+});
+
+export const sketchSchema = z.object({
+  title: z.string().min(1).max(120),
+  /** Constrained SVG per PROMPTS.sketch; sanitized again on the client. */
+  svg: z.string().min(10),
 });
 
 /** Up to three questions, each with a small ordered set of answers. */

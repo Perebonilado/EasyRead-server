@@ -30,6 +30,8 @@ export class TutorsController {
       description: tutor.description,
       color: tutor.color,
       dials: tutor.dials,
+      // The picker marks these: a studio-grade voice that costs more to run.
+      premiumVoice: tutor.voice.provider === 'elevenlabs',
     }));
   }
 

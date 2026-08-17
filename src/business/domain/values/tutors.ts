@@ -9,6 +9,22 @@
  * hand-written; the ids are stable and safe to persist against.
  */
 
+/**
+ * Which provider synthesises this tutor's voice.
+ *
+ * The provider rides on the tutor, not on config: picking a tutor IS picking
+ * a provider, and the picker marks the expensive ones. `openaiFallback` keeps
+ * every tutor working (in their old voice) on deployments without an
+ * ElevenLabs key.
+ */
+export interface TutorVoice {
+  provider: 'openai' | 'elevenlabs';
+  /** OpenAI realtime voice name, or an ElevenLabs voice id. */
+  voiceId: string;
+  /** The OpenAI voice used when the provider is not configured. */
+  openaiFallback: string;
+}
+
 export interface TutorDials {
   /** How quickly the tutor moves through material. */
   pace: 'brisk' | 'measured' | 'unhurried';
@@ -24,8 +40,7 @@ export interface Tutor {
   tagline: string;
   /** Two sentences for the picker card, in the student's language. */
   description: string;
-  /** OpenAI realtime voice name. */
-  voice: string;
+  voice: TutorVoice;
   /** Accent colour for the picker card. */
   color: string;
   dials: TutorDials;
@@ -45,7 +60,7 @@ export const TUTORS: Tutor[] = [
     tagline: 'Brisk and to the point',
     description:
       'Headlines first, detail on demand. Best when you know the ground and want a fast, confident pass before an exam.',
-    voice: 'coral',
+    voice: { provider: 'openai', voiceId: 'coral', openaiFallback: 'coral' },
     color: '#7c3aed',
     dials: { pace: 'brisk', breakdown: 'light', interactivity: 'medium' },
     persona:
@@ -59,7 +74,10 @@ export const TUTORS: Tutor[] = [
     tagline: 'Step by step, no step skipped',
     description:
       'Breaks everything into small pieces and makes sure each one landed before the next. Best when the material feels overwhelming.',
-    voice: 'cedar',
+    // Ran on ElevenLabs ("Brian", nPczCjzI2devNBz1zQrb) for a spell — the
+    // voice was better but the agent LLM taught worse than gpt-realtime, so
+    // lessons live on OpenAI until that gap closes.
+    voice: { provider: 'openai', voiceId: 'cedar', openaiFallback: 'cedar' },
     color: '#1e40af',
     dials: { pace: 'unhurried', breakdown: 'maximal', interactivity: 'high' },
     persona:
@@ -73,7 +91,8 @@ export const TUTORS: Tutor[] = [
     tagline: 'Stories and real examples',
     description:
       'Teaches through anecdotes, analogies and real-world cases, then ties them back to the exact terms. Best when facts refuse to stick.',
-    voice: 'ballad',
+    // Ran on ElevenLabs ("George", JBFqnCBsd6RMkjVDRZzb) — same story as Sam.
+    voice: { provider: 'openai', voiceId: 'ballad', openaiFallback: 'ballad' },
     color: '#92400e',
     dials: { pace: 'measured', breakdown: 'thorough', interactivity: 'medium' },
     persona:
@@ -87,7 +106,7 @@ export const TUTORS: Tutor[] = [
     tagline: 'Teaches by asking',
     description:
       'Constant quizzes, quick challenges, and “what do you think happens next?”. Best when listening alone puts you to sleep.',
-    voice: 'verse',
+    voice: { provider: 'openai', voiceId: 'verse', openaiFallback: 'verse' },
     color: '#115e59',
     dials: { pace: 'measured', breakdown: 'thorough', interactivity: 'high' },
     persona:

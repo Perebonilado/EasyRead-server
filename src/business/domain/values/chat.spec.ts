@@ -1,43 +1,72 @@
-import { expandHighlight } from './chat';
+import { isFollowUp } from './chat';
 
-describe('expandHighlight', () => {
-  it('leaves a typed question exactly as the reader wrote it', () => {
-    expect(expandHighlight(null, 'Why does ADH raise blood pressure?')).toBe(
-      'Why does ADH raise blood pressure?',
-    );
-    expect(expandHighlight(undefined, '  trimmed  ')).toBe('trimmed');
-  });
-
-  it('asks each highlight action as its own question', () => {
-    const explain = expandHighlight('explain', 'the countercurrent mechanism');
-    const define = expandHighlight('define', 'the countercurrent mechanism');
-    const simplify = expandHighlight(
-      'simplify',
-      'the countercurrent mechanism',
-    );
-
-    expect(explain).not.toBe(define);
-    expect(define).not.toBe(simplify);
-    // Every one of them carries the passage, quoted.
-    for (const question of [explain, define, simplify]) {
-      expect(question).toContain('"the countercurrent mechanism"');
+/**
+ * The cost of getting this wrong runs both ways: a missed follow-up searches
+ * the document for "yes" and answers from arbitrary pages, while a false
+ * positive drags an unrelated previous question into a fresh search.
+ */
+describe('isFollowUp', () => {
+  it('catches bare acceptances — the turn that used to break the chat', () => {
+    for (const text of [
+      'yes',
+      'Yes.',
+      'yeah',
+      'sure',
+      'ok',
+      'please',
+      'yes!',
+    ]) {
+      expect(isFollowUp(text)).toBe(true);
     }
   });
 
-  it('keeps the answer inside the document rather than the world', () => {
-    // The whole point of Define here is the document's sense of a term, not
-    // the dictionary's — losing that wording loses the feature.
-    expect(expandHighlight('define', 'induction')).toContain(
-      'as my document uses it',
-    );
-    expect(expandHighlight('explain', 'induction')).toContain(
-      'rather than as a standalone idea',
-    );
+  it('catches continuations and bare interrogatives', () => {
+    for (const text of [
+      'go on',
+      'continue',
+      'tell me more',
+      'more',
+      'why?',
+      'how so',
+      'elaborate',
+      'explain more',
+    ]) {
+      expect(isFollowUp(text)).toBe(true);
+    }
   });
 
-  it('tells simplify not to drop the terms the reader is examined on', () => {
-    expect(expandHighlight('simplify', 'osmolality')).toContain(
-      'keeping every fact and every technical term',
-    );
+  it('catches short anaphoric questions', () => {
+    for (const text of [
+      'what about the second one?',
+      'why does it matter?',
+      'how do they differ?',
+      'is that the same as before?',
+    ]) {
+      expect(isFollowUp(text)).toBe(true);
+    }
+  });
+
+  it('leaves questions that can stand on their own alone', () => {
+    for (const text of [
+      'What are the two hormones of the posterior pituitary?',
+      'Explain iodide trapping',
+      'What is ADH',
+      'Summarise chapter three',
+    ]) {
+      expect(isFollowUp(text)).toBe(false);
+    }
+  });
+
+  it('does not treat a long question as a follow-up just for saying "it"', () => {
+    const long =
+      'The document says thyroid peroxidase catalyses the coupling reaction — ' +
+      'can you walk me through how it does that step by step, and what happens ' +
+      'if the enzyme is missing?';
+    expect(isFollowUp(long)).toBe(false);
+  });
+
+  it('ignores empty and whitespace-only input', () => {
+    expect(isFollowUp('')).toBe(false);
+    expect(isFollowUp('   ')).toBe(false);
   });
 });

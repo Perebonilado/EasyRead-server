@@ -21,12 +21,27 @@ export interface RealtimeTool {
   parameters: Record<string, unknown>;
 }
 
-export interface RealtimeSession {
-  /** Short-lived secret the browser uses to open its own WebRTC connection. */
-  clientSecret: string;
-  model: string;
-  expiresAt: string | null;
-}
+/**
+ * Provider-shaped credentials for the browser's own realtime connection.
+ * OpenAI hands out a per-session secret with everything baked in; ElevenLabs
+ * hands out a conversation token for a pre-provisioned agent, with the
+ * per-session pieces (prompt, voice) applied as overrides at connect time.
+ */
+export type RealtimeSession =
+  | {
+      provider: 'openai';
+      /** Short-lived secret the browser uses to open its WebRTC connection. */
+      clientSecret: string;
+      model: string;
+      expiresAt: string | null;
+    }
+  | {
+      provider: 'elevenlabs';
+      conversationToken: string;
+      agentId: string;
+      /** The tutor's ElevenLabs voice, applied as a TTS override. */
+      voiceId: string;
+    };
 
 /**
  * Mints ephemeral credentials for a browser ↔ model voice conversation.

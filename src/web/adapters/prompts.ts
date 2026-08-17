@@ -31,7 +31,7 @@ const KEEP_TERMS =
   'follows it in brackets. What it forbids is dropping the term altogether.';
 
 const BLOCK_SHAPE =
-  'Reply with JSON: {"blocks":[{"type":"headingOne"|"headingTwo"|"paragraph"|"bullet"|"code"|"table","text":"..."}]}. ' +
+  'Reply with JSON: {"blocks":[{"type":"headingOne"|"headingTwo"|"paragraph"|"bullet"|"code"|"table"|"math","text":"..."}]}. ' +
   'No markdown, no numbering in the text, no other keys.';
 
 /**
@@ -46,6 +46,18 @@ const TABLE_SHAPE =
   'prose or bullets, and never invent cells the page does not have.';
 
 /**
+ * Formulas are typeset, not transcribed. Extracted PDF text mangles equations
+ * into symbol soup; the model is the one place they can be reconstructed, and
+ * a "math" block is the only rendering that does them justice.
+ */
+const MATH_SHAPE =
+  'When the page contains a formula, an equation or a derivation, emit it as ' +
+  'a "math" block containing display LaTeX (no $$ delimiters), one equation ' +
+  "per block, with the page's own symbols. Never rewrite an equation as prose " +
+  'and never leave it as mangled plain text. Explain it in a paragraph before ' +
+  'or after the math block.';
+
+/**
  * Code passes through untouched. One mangled identifier destroys a
  * developer's trust in every other page, so the rule is absolute: no
  * rewriting, no summarising, no "explaining inline", no reformatting.
@@ -55,6 +67,21 @@ const CODE_VERBATIM =
   'output — is NEVER rewritten, summarised or reworded. Reproduce it ' +
   'character for character, line breaks intact, as a "code" block. Explain ' +
   'code in a paragraph before or after it, never by editing it.';
+
+/**
+ * Matching the diagram shape to the idea — shared by the tutor's board pencil
+ * and the chat's fences. The old prompt permitted only flowcharts, so a state
+ * machine, a timeline and a protocol all came out as boxes and arrows.
+ */
+const MERMAID_TYPES =
+  'Choose the Mermaid type that fits the idea: a process, pathway or cycle → ' +
+  '`flowchart`; parties exchanging messages (request/response, a protocol, "A ' +
+  'talks to B") → `sequenceDiagram`; modes and transitions → `stateDiagram-v2`; ' +
+  'proportions of a whole → `pie`; events in time or history → `timeline`; a ' +
+  'concept and its parts → `mindmap`; a two-axis comparison → `quadrantChart`; ' +
+  'a numeric series or trend → `xychart-beta`; entities and their ' +
+  'relationships → `erDiagram`. Never force an idea into a flowchart when a ' +
+  'better shape exists.';
 
 export const PROMPTS = {
   /**
@@ -74,6 +101,7 @@ export const PROMPTS = {
     'watermarks, stains and stamps are not content. If the page contains no',
     'readable text at all, return an empty blocks array.',
     TABLE_SHAPE,
+    MATH_SHAPE,
     CODE_VERBATIM,
     'Set "handwritten" to true when most of the page is handwriting.',
   ].join(' '),
@@ -137,6 +165,7 @@ export const PROMPTS = {
     KEEP_TERMS,
     CODE_VERBATIM,
     TABLE_SHAPE,
+    MATH_SHAPE,
     BLOCK_SHAPE,
   ].join(' '),
 
@@ -194,6 +223,7 @@ export const PROMPTS = {
     'meant.',
     CODE_VERBATIM,
     TABLE_SHAPE,
+    MATH_SHAPE,
     BLOCK_SHAPE,
   ].join(' '),
 
@@ -345,6 +375,11 @@ export const PROMPTS = {
     'When a question is a follow-up — "why?", "go on", "what about the second',
     'one?" — read it against your own previous answer and the passages from',
     'earlier turns before asking the reader to repeat themselves.',
+    'If your previous answer offered to go further and the reader accepts —',
+    '"yes", "sure", "please", "ok" — that acceptance IS the question. Do the',
+    'thing you offered, immediately, without asking them to restate it.',
+    'Never answer a short reply by saying the request is unclear: you have',
+    'the thread, so work out what it refers to.',
     'Keep technical terms, names and numbers exactly as the document writes',
     'them, and explain each in plain words the first time it appears.',
     'If the document does not cover something, say so plainly instead of',
@@ -356,6 +391,13 @@ export const PROMPTS = {
     '```fenced blocks``` (inline code in single backticks), use "- " for',
     'lists, and cite pages as (p.N). No other markdown — no headings, no',
     'italics, no bold sentences.',
+    'When a drawing would teach better than prose — a process, a sequence of',
+    'interactions, states, a hierarchy — include ONE ```mermaid fence with a',
+    'small diagram (max 12 nodes), choosing the Mermaid type that fits the',
+    'idea. When an equation is the answer, set it in a ```math fence (display',
+    'LaTeX) or inline as $…$. Everything in a diagram must come from the',
+    'passages or the thread — a drawing is a claim, not a decoration.',
+    MERMAID_TYPES,
     'When instructions about how this reader learns follow, shape your FIRST',
     'answer to them — do not wait to be told an explanation did not land.',
     NO_INVENTION,
@@ -441,11 +483,20 @@ export const PROMPTS = {
     'You draw one clear Mermaid diagram to teach a concept from a study document.',
     'Use only facts from the provided passages and summary — never invent steps,',
     'names or relationships the document does not state.',
-    'The diagram is presented full-screen on a landscape display, so prefer',
-    '`flowchart LR` for chains and sequences — it uses the width. Use',
-    '`flowchart TD` only for branching hierarchies. Keep it small enough to read at a glance: at most',
-    '12 nodes. Node labels are 2-6 words, wrapped in double quotes.',
+    MERMAID_TYPES,
+    'The diagram is presented full-screen on a landscape display, so for',
+    'flowcharts prefer `flowchart LR` — it uses the width; `flowchart TD` only',
+    'for branching hierarchies. Keep it small enough to read at a glance: at',
+    'most 12 nodes. Node labels are 2-6 words, wrapped in double quotes.',
     'Keep technical terms exactly as the document writes them.',
+    'Two examples of matching shape to idea. A request path:',
+    'sequenceDiagram\\n  participant Browser\\n  participant "Load balancer"\\n',
+    '  participant Server\\n  Browser->>"Load balancer": request\\n',
+    '  "Load balancer"->>Server: forward\\n  Server-->>Browser: response',
+    'Modes of a cache entry:',
+    'stateDiagram-v2\\n  [*] --> Empty\\n  Empty --> Filled: write\\n',
+    '  Filled --> Stale: TTL expires\\n  Stale --> Filled: refresh\\n',
+    '  Filled --> Empty: evict',
     'Output valid Mermaid only in the `mermaid` field — no code fences, no',
     'markdown, no commentary. Every arrow on its own line.',
   ].join(' '),
@@ -455,5 +506,47 @@ export const PROMPTS = {
     'diagram or illustration that would help them understand it.',
     'Use the subject area to disambiguate. Reply with the query alone — no',
     'quotes, no explanation, at most 8 words.',
+  ].join(' '),
+
+  /**
+   * Free-form sketches. Every constraint below is what makes model SVG
+   * reliable and safe enough to render; the client sanitizes on top, but the
+   * prompt is the first fence.
+   */
+  sketch: [
+    'You draw one labelled teaching sketch as SVG, for a picture of a thing —',
+    'anatomy, apparatus, a spatial layout, an annotated curve, a number line.',
+    'Use only structures and labels the provided passages support, with the',
+    "document's own terms.",
+    'Hard requirements, all of them:',
+    'viewBox="0 0 800 500" and nothing drawn outside it; no width or height',
+    'attributes on the svg element.',
+    'Allowed elements ONLY: svg g rect circle ellipse line polyline polygon',
+    'path text tspan marker defs title. Nothing else — no script, no',
+    'foreignObject, no image, no use, no a, no style blocks, no event',
+    'attributes, no external hrefs.',
+    'Palette, exactly: strokes #0b0b0c, accents #6d5ef0, secondary #b9b3a9,',
+    'fills #faf8f2. stroke-width 2.',
+    'At most 40 elements. Every text element at least 16px. Labels never sit',
+    'on top of the shape they name — place them outside, connected by a line.',
+    'One example of the register expected, a two-compartment diagram:',
+    '<svg viewBox="0 0 800 500" xmlns="http://www.w3.org/2000/svg">',
+    '<title>Two compartments</title>',
+    '<rect x="80" y="140" width="220" height="200" fill="#faf8f2"',
+    'stroke="#0b0b0c" stroke-width="2"/>',
+    '<rect x="500" y="140" width="220" height="200" fill="#faf8f2"',
+    'stroke="#0b0b0c" stroke-width="2"/>',
+    '<line x1="300" y1="240" x2="500" y2="240" stroke="#6d5ef0"',
+    'stroke-width="2"/>',
+    '<polygon points="500,240 488,233 488,247" fill="#6d5ef0"/>',
+    '<text x="190" y="120" font-size="18" text-anchor="middle"',
+    'fill="#0b0b0c">Inside</text>',
+    '<text x="610" y="120" font-size="18" text-anchor="middle"',
+    'fill="#0b0b0c">Outside</text>',
+    '<text x="400" y="220" font-size="16" text-anchor="middle"',
+    'fill="#6d5ef0">flow</text>',
+    '</svg>',
+    'Output the SVG alone in the `svg` field — no code fences, no markdown,',
+    'no commentary.',
   ].join(' '),
 } as const;

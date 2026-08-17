@@ -2,7 +2,7 @@ import { Inject, Injectable } from '@nestjs/common';
 import type { ChatHistoryResponse, ChatOrigin } from '../../../contracts';
 import { ValidationError } from '../../domain/errors/errors';
 import { UsageMetric } from '../../domain/values';
-import { expandHighlight } from '../../domain/values/chat';
+import { expandHighlight, isFollowUp } from '../../domain/values/chat';
 import { LLM_GATEWAY, VECTOR_STORE } from '../../ports/tokens';
 import type { LlmGatewayPort } from '../../ports/llm.port';
 import type { VectorStorePort } from '../../ports/vector-store.port';
@@ -35,6 +35,10 @@ import { StruggleRecorder } from './struggle-recorder.service';
 const MIN_TEXT = 2;
 const MAX_TEXT = 2000;
 const TOP_K = 6;
+/** Passages carried over from the previous answer when a turn is a follow-up. */
+const CARRIED_SOURCES = 4;
+/** Ceiling on a follow-up's combined evidence, so the prompt stays bounded. */
+const MAX_SOURCES = 8;
 /** Turns replayed into the next prompt — the thread's working memory. */
 const HISTORY_TURNS = 20;
 const MAX_PAGE_SIZE = 50;
@@ -150,14 +154,56 @@ export class SendChatMessageHandler extends AbstractRequestHandlerTemplate<
       });
     }
 
-    const question = expandHighlight(cmd.highlightAction, text);
+    // "yes", "why?", "go on" — a turn that means nothing without the one
+    // before it. Searching the document for those words returns arbitrary
+    // pages, and an answer built on arbitrary pages is why the easiest turn
+    // in a conversation used to be the one that failed. A highlight press is
+    // never a follow-up: it carries its own passage.
+    const followUp = !cmd.highlightAction && isFollowUp(text);
+    const previousQuestion =
+      [...history].reverse().find((message) => message.role === 'user')?.text ??
+      null;
+    const previousAnswer =
+      [...history].reverse().find((message) => message.role === 'assistant')
+        ?.text ?? null;
+    const previousSources =
+      [...history]
+        .reverse()
+        .find(
+          (message) => message.role === 'assistant' && message.sources?.length,
+        )?.sources ?? [];
+
+    /**
+     * The turn as the model receives it.
+     *
+     * A follow-up needs its referent spelled out, not merely present earlier
+     * in the thread. Sent as `Question: yes` the model reads a question that
+     * isn't one and asks what is meant — even with the whole conversation
+     * above it. Naming what the reply answers is what turns "yes" back into
+     * the request the reader believes they just made.
+     */
+    const question =
+      followUp && previousAnswer
+        ? [
+            `The reader replied: "${text}"`,
+            `Your previous answer ended: "${previousAnswer.slice(-400)}"`,
+            'This is a reply to that, not a new question. Work out what it' +
+              ' refers to and answer it directly. If it accepts something you' +
+              ' offered, do that thing now, in full, without asking them to' +
+              ' restate it.',
+          ].join('\n\n')
+        : expandHighlight(cmd.highlightAction, text);
+
+    // Searched for as the question it continues, not as the word it is.
+    const searchText =
+      followUp && previousQuestion ? `${previousQuestion}\n${text}` : question;
 
     // The profile rides in the same parallel block as summary and embedding,
     // so personalising the answer costs no extra latency. Best-effort: an
     // unreadable profile must never cost the reader their answer.
     const [summary, embedding, profile, docState] = await Promise.all([
       this.summaries.find(cmd.documentId),
-      this.llm.embed({ texts: [question] }).then((r) => r.value[0]),
+      this.llm.embed({ texts: [searchText] }).then((r) => r.value[0]),
       this.profiles.find(cmd.userId).catch(() => null),
       this.docStates.find(cmd.userId, cmd.documentId).catch(() => null),
     ]);
@@ -167,10 +213,17 @@ export class SendChatMessageHandler extends AbstractRequestHandlerTemplate<
       embedding,
       topK: TOP_K,
     });
-    const sources = chunks.map((chunk) => ({
+    const retrieved = chunks.map((chunk) => ({
       pageNumber: chunk.pageNumber,
       text: chunk.text,
     }));
+
+    // On a follow-up the evidence the reader is actually following up on is
+    // the evidence behind the last answer, so it leads — with fresh results
+    // behind it in case the follow-up does open a new direction.
+    const sources = followUp
+      ? mergeSources(previousSources.slice(0, CARRIED_SOURCES), retrieved)
+      : retrieved;
     const context = sources
       .map((source) => `[p.${source.pageNumber}] ${source.text}`)
       .join('\n\n');
@@ -346,6 +399,29 @@ export class ClarifyChatMessageHandler extends AbstractRequestHandlerTemplate<
 
     return CommandResponse.of({ userMessage, reply });
   }
+}
+
+/**
+ * Previous evidence first, fresh evidence behind it, nothing twice.
+ *
+ * Deduped on page and opening words rather than the whole passage: the same
+ * chunk retrieved twice is identical, and two genuinely different chunks
+ * from one page never share an opening.
+ */
+function mergeSources(
+  carried: { pageNumber: number; text: string }[],
+  fresh: { pageNumber: number; text: string }[],
+): { pageNumber: number; text: string }[] {
+  const seen = new Set<string>();
+  const out: { pageNumber: number; text: string }[] = [];
+  for (const source of [...carried, ...fresh]) {
+    const key = `${source.pageNumber}:${source.text.slice(0, 80)}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(source);
+    if (out.length >= MAX_SOURCES) break;
+  }
+  return out;
 }
 
 /**

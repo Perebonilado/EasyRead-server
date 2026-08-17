@@ -38,3 +38,36 @@ export function expandHighlight(
 
   return `${ask}\n\n"${passage}"`;
 }
+
+/**
+ * Words that carry no meaning on their own — the vocabulary of following on
+ * rather than of asking. A turn made only of these cannot be searched for.
+ */
+const CONTINUATION =
+  /^(yes|yeah|yep|yup|sure|ok|okay|please|go on|continue|carry on|more|tell me more|more please|and\??|why\??|how\??|how so|how come|really\??|explain|explain more|expand|elaborate|go deeper|say more|what about (it|that|this|them)|that one|the (first|second|third|last) one|both|it|that|this|no|nope)[\s.!?]*$/i;
+
+/**
+ * Does this turn depend on the one before it to mean anything?
+ *
+ * Retrieval embeds the reader's words and searches the document with them.
+ * "yes" embeds to nothing in particular, so the search returns arbitrary
+ * pages — and the model is then handed a wall of passages about the wrong
+ * subject and asked to answer "yes". It sensibly replies that it doesn't
+ * understand, which is how a perfectly good conversation falls over on its
+ * easiest turn.
+ *
+ * Anything that matches here gets the previous turn's question folded into
+ * the search text, and the previous answer's passages carried forward.
+ */
+export function isFollowUp(text: string): boolean {
+  const trimmed = text.trim();
+  if (!trimmed) return false;
+  if (CONTINUATION.test(trimmed)) return true;
+
+  // Short and anaphoric: "what about the second one?", "and the other two?".
+  // Long questions carry their own subject and search perfectly well.
+  if (trimmed.length > 80) return false;
+  return /\b(it|that|this|these|those|them|they|the (other|same|second|third|last|rest))\b/i.test(
+    trimmed,
+  );
+}

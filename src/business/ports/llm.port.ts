@@ -19,6 +19,7 @@ export type LlmTask =
   | 'learn_write'
   | 'visualize_query'
   | 'diagram'
+  | 'sketch'
   | 'embed';
 
 export interface LlmUsage {
@@ -163,6 +164,17 @@ export interface LlmGatewayPort {
     context: string;
     summary: string | null;
   }): Promise<LlmResult<{ title: string; mermaid: string }>>;
+
+  /**
+   * A free-form labelled sketch as constrained SVG — pictures of things
+   * (anatomy, apparatus, spatial layouts) that boxes-and-arrows can't say.
+   * The SVG is model-authored and untrusted: the client sanitizes it.
+   */
+  drawSketch(input: {
+    description: string;
+    context: string;
+    summary: string | null;
+  }): Promise<LlmResult<{ title: string; svg: string }>>;
 
   /**
    * A recap of one sitting, written from what the reader did rather than

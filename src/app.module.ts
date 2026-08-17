@@ -34,6 +34,8 @@ import {
 } from './business/handlers/documents/upload.handlers';
 import {
   DrawDiagramHandler,
+  ComputeHandler,
+  DrawSketchHandler,
   PageAudioHandler,
   StartVoiceSessionHandler,
 } from './business/handlers/documents/voice.handlers';
@@ -125,6 +127,8 @@ const handlers = [
   PageAudioHandler,
   StartVoiceSessionHandler,
   DrawDiagramHandler,
+  ComputeHandler,
+  DrawSketchHandler,
   RecordAssessmentHandler,
   GetMasteryHandler,
   UpdateLearnerProfileHandler,

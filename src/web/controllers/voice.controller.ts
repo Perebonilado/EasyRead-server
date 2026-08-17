@@ -17,6 +17,7 @@ import {
   IsIn,
   IsInt,
   IsNumber,
+  IsObject,
   IsOptional,
   IsString,
   Length,
@@ -26,13 +27,17 @@ import {
 } from 'class-validator';
 import type {
   AssessmentKind,
+  ComputeResponse,
   DiagramResponse,
   MasteryResponse,
+  SketchResponse,
   VoiceMode,
   VoiceSessionResponse,
 } from '../../contracts';
 import {
+  ComputeHandler,
   DrawDiagramHandler,
+  DrawSketchHandler,
   PageAudioHandler,
   StartVoiceSessionHandler,
   type AudioLevel,
@@ -74,6 +79,22 @@ class DiagramDto {
   @IsString()
   @Length(3, 300)
   description!: string;
+}
+
+class SketchDto {
+  @IsString()
+  @Length(3, 300)
+  description!: string;
+}
+
+class ComputeDto {
+  @IsString()
+  @Length(1, 500)
+  expression!: string;
+
+  @IsOptional()
+  @IsObject()
+  scope?: Record<string, number>;
 }
 
 class AssessmentDto {
@@ -122,6 +143,8 @@ export class VoiceController {
     private readonly pageAudio: PageAudioHandler,
     private readonly startSession: StartVoiceSessionHandler,
     private readonly drawDiagram: DrawDiagramHandler,
+    private readonly drawSketch: DrawSketchHandler,
+    private readonly compute: ComputeHandler,
     private readonly recordAssessment: RecordAssessmentHandler,
     private readonly recordDwell: RecordDwellHandler,
     private readonly getMastery: GetMasteryHandler,
@@ -198,6 +221,39 @@ export class VoiceController {
       userId,
       documentId,
       description: body.description,
+    });
+    return result.data;
+  }
+
+  /** A grounded free-form sketch for the lesson board. */
+  @Post('sketch')
+  @HttpCode(201)
+  async sketch(
+    @CurrentUser('id') userId: string,
+    @Param('id') documentId: string,
+    @Body() body: SketchDto,
+  ): Promise<SketchResponse> {
+    const result = await this.drawSketch.handle({
+      userId,
+      documentId,
+      description: body.description,
+    });
+    return result.data;
+  }
+
+  /** Verified arithmetic — the tutor never does its own sums. */
+  @Post('compute')
+  @HttpCode(201)
+  async computeExpression(
+    @CurrentUser('id') userId: string,
+    @Param('id') documentId: string,
+    @Body() body: ComputeDto,
+  ): Promise<ComputeResponse> {
+    const result = await this.compute.handle({
+      userId,
+      documentId,
+      expression: body.expression,
+      scope: body.scope,
     });
     return result.data;
   }

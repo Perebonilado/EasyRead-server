@@ -169,6 +169,12 @@ export class FakeLlmAdapter implements LlmGatewayPort {
       });
     }
 
+    // A page mentioning an equation gets a sample math block, so local dev
+    // exercises the KaTeX path without a real model.
+    if (/\bequation|formula\b/i.test(pageText)) {
+      blocks.push({ type: 'math', text: 'E = mc^2' });
+    }
+
     return {
       value: blocks,
       usage: this.usage(started, pageText.length / 4, blocks.length * 20),
@@ -387,6 +393,36 @@ export class FakeLlmAdapter implements LlmGatewayPort {
     if (nodes.length === 1) lines.push(`  n0["${nodes[0]}"]`);
     return {
       value: { title: description.slice(0, 60), mermaid: lines.join('\n') },
+      usage: {
+        model: 'fake',
+        tokensIn: description.length,
+        tokensOut: 0,
+        latencyMs: Date.now() - started,
+      },
+    };
+  }
+
+  async drawSketch({
+    description,
+  }: {
+    description: string;
+    context: string;
+    summary: string | null;
+  }): Promise<LlmResult<{ title: string; svg: string }>> {
+    const started = Date.now();
+    // A minimal allowlisted sketch so the sanitize-and-render path can be
+    // exercised offline.
+    const label = description.slice(0, 40) || 'sketch';
+    const svg = [
+      '<svg viewBox="0 0 800 500" xmlns="http://www.w3.org/2000/svg">',
+      `<title>${label}</title>`,
+      '<rect x="200" y="150" width="400" height="200" fill="#faf8f2" stroke="#0b0b0c" stroke-width="2"/>',
+      `<text x="400" y="120" font-size="18" text-anchor="middle" fill="#0b0b0c">${label}</text>`,
+      '<line x1="400" y1="130" x2="400" y2="150" stroke="#6d5ef0" stroke-width="2"/>',
+      '</svg>',
+    ].join('');
+    return {
+      value: { title: description.slice(0, 60), svg },
       usage: {
         model: 'fake',
         tokensIn: description.length,

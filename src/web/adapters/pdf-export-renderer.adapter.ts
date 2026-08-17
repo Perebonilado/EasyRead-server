@@ -146,6 +146,13 @@ export class PdfExportRendererAdapter implements ExportRendererPort {
             pdf.code(block.text);
             pdf.space(6);
             break;
+          case 'math':
+            // No LaTeX typesetting in the PDF pipeline — the raw LaTeX in
+            // the monospace well is the honest fallback, same as notes.
+            pdf.space(4);
+            pdf.code(block.text);
+            pdf.space(6);
+            break;
           case 'table':
             pdf.space(6);
             pdf.table(tableRowsOf(block.text));

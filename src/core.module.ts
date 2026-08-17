@@ -3,6 +3,7 @@ import { ConfigModule } from '@nestjs/config';
 import { JwtService } from './auth/jwt.service';
 import { PasswordService } from './auth/password.service';
 import { TokenGenerator } from './auth/token-generator';
+import { ComputeService } from './business/handlers/documents/compute.service';
 import { DocumentAccessService } from './business/handlers/documents/document-access.service';
 import { EntitlementsService } from './business/handlers/documents/entitlements.service';
 import { PipelineOrchestrator } from './pipeline/orchestrator.service';
@@ -16,6 +17,7 @@ const shared = [
   JwtService,
   PasswordService,
   TokenGenerator,
+  ComputeService,
   DocumentAccessService,
   EntitlementsService,
   PipelineOrchestrator,

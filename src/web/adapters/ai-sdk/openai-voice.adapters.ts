@@ -184,6 +184,7 @@ export class OpenAiRealtimeAdapter implements RealtimePort {
 
     const expires = body.expires_at ?? body.client_secret?.expires_at ?? null;
     return {
+      provider: 'openai' as const,
       clientSecret: secret,
       model,
       expiresAt:

@@ -15,7 +15,14 @@ export type Level = 'standard' | 'easiest';
  * one row per line, cells separated by " | ", first line the header row.
  */
 export type BlockType =
-  'headingOne' | 'headingTwo' | 'paragraph' | 'bullet' | 'code' | 'table';
+  | 'headingOne'
+  | 'headingTwo'
+  | 'paragraph'
+  | 'bullet'
+  | 'code'
+  | 'table'
+  /** Display-mode LaTeX, no $$ delimiters. */
+  | 'math';
 export type Block = { type: BlockType; text: string };
 
 export type DocumentStatus = 'uploading' | 'processing' | 'ready' | 'failed';
@@ -447,6 +454,8 @@ export const TEACH_TOOLS = {
   END_LESSON: 'end_lesson',
   SHOW_IMAGES: 'show_images',
   DRAW_DIAGRAM: 'draw_diagram',
+  SKETCH: 'draw_sketch',
+  COMPUTE: 'compute',
   FOCUS_BOARD: 'focus_board',
   MARK_TOPIC_COMPLETE: 'mark_topic_complete',
   ASK_QUIZ: 'ask_quiz',
@@ -459,6 +468,10 @@ export const TEACH_TOOLS = {
 export type TeachToolName = (typeof TEACH_TOOLS)[keyof typeof TEACH_TOOLS];
 
 export type DiagramResponse = { title: string; mermaid: string };
+export type SketchResponse = { title: string; svg: string };
+export type ComputeResponse =
+  | { ok: true; result: string; tex: string | null }
+  | { ok: false; error: string };
 
 export type AssessmentKind = 'mcq' | 'flashcard' | 'verbal';
 
@@ -517,6 +530,8 @@ export type TutorDto = {
   tagline: string;
   description: string;
   color: string;
+  /** A studio-grade voice that costs more to run — marked in the picker. */
+  premiumVoice: boolean;
   dials: {
     pace: 'brisk' | 'measured' | 'unhurried';
     breakdown: 'light' | 'thorough' | 'maximal';
@@ -524,18 +539,31 @@ export type TutorDto = {
   };
 };
 
-/** What the browser needs to open its own realtime WebRTC connection. */
-export type VoiceSessionResponse = {
-  clientSecret: string;
-  model: string;
-  expiresAt: string | null;
-  /**
-   * The tutor's standing instructions. The client appends the current page's
-   * text and sends the combined string in `session.update` as the reader
-   * moves, so it must hold the full base to rebuild from.
-   */
-  baseInstructions: string;
-};
+/**
+ * What the browser needs to open its own realtime connection — shaped by the
+ * provider the chosen tutor's voice lives on.
+ *
+ * `baseInstructions` is common: the tutor's standing instructions, which the
+ * client combines with the current page's text as the reader moves (OpenAI:
+ * `session.update`; ElevenLabs: a prompt override at connect, then
+ * contextual updates).
+ */
+export type VoiceSessionResponse =
+  | {
+      provider: 'openai';
+      clientSecret: string;
+      model: string;
+      expiresAt: string | null;
+      baseInstructions: string;
+    }
+  | {
+      provider: 'elevenlabs';
+      conversationToken: string;
+      agentId: string;
+      /** The tutor's ElevenLabs voice, applied as a TTS override. */
+      voiceId: string;
+      baseInstructions: string;
+    };
 
 // ── SSE ──────────────────────────────────────────────────────────────────────
 

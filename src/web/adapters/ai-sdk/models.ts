@@ -41,6 +41,10 @@ const TASK_VAR: Record<LlmTask, string> = {
   learn_write: 'AI_MODEL_LEARN',
   visualize_query: 'AI_MODEL_VISUALIZE_QUERY',
   diagram: 'AI_MODEL_DIAGRAM',
+  // Drawing quality is the weak point of small models; sketches get their
+  // own knob so a deployment can route them to a stronger model without
+  // paying for it on diagrams.
+  sketch: 'AI_MODEL_SKETCH',
   embed: 'AI_EMBED_MODEL',
 };
 

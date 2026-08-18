@@ -42,6 +42,41 @@ export interface TopicMastery {
   needsRevisit: boolean;
 }
 
+/**
+ * Calibration: does this student's confidence track their competence?
+ *
+ * From events carrying a confidence rating (0..1 in `payload.confidence`,
+ * captured before the outcome is revealed): `bias` = mean confidence − mean
+ * score. Positive = overconfident, negative = underconfident, ~0 = well
+ * calibrated. `n` rides along so consumers can ignore thin evidence — the
+ * tutor acts on nothing under MIN_CALIBRATION_EVENTS.
+ */
+export const MIN_CALIBRATION_EVENTS = 5;
+
+export interface Calibration {
+  /** mean(confidence) − mean(score) over rated events; null when none. */
+  bias: number | null;
+  n: number;
+}
+
+export function computeCalibration(
+  events: AssessmentEventRecord[],
+): Calibration {
+  const rated = events.filter(
+    (event) =>
+      typeof event.payload?.confidence === 'number' &&
+      event.payload.confidence >= 0 &&
+      event.payload.confidence <= 1,
+  );
+  if (!rated.length) return { bias: null, n: 0 };
+
+  const meanConfidence =
+    rated.reduce((sum, e) => sum + (e.payload!.confidence as number), 0) /
+    rated.length;
+  const meanScore = rated.reduce((sum, e) => sum + e.score, 0) / rated.length;
+  return { bias: meanConfidence - meanScore, n: rated.length };
+}
+
 export function computeMastery(
   events: AssessmentEventRecord[],
   topicIds: string[],

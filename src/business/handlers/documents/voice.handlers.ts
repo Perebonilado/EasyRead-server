@@ -4,6 +4,7 @@ import {
   TEACH_TOOLS,
   type Block,
   type ComputeResponse,
+  type DiagramCheckResponse,
   type DiagramResponse,
   type Level,
   type SketchResponse,
@@ -15,7 +16,12 @@ import {
   NotFoundError,
 } from '../../domain/errors/errors';
 import { UsageMetric } from '../../domain/values';
-import { computeMastery, WEAK_THRESHOLD } from '../../domain/learning';
+import {
+  computeCalibration,
+  computeMastery,
+  MIN_CALIBRATION_EVENTS,
+  WEAK_THRESHOLD,
+} from '../../domain/learning';
 import {
   DEFAULT_LEARNER_PROFILE,
   type DocumentLearningStateRepository,
@@ -404,6 +410,71 @@ export const TEACHING_TOOLS: RealtimeTool[] = [
     },
   },
   {
+    name: TEACH_TOOLS.SAVE_QUESTION,
+    description:
+      'File one question the student just posed about the current topic, in ' +
+      'their words. Call once per question, at the moment they ask it. Their ' +
+      'questions are the backbone of the topic: return to each at the end ' +
+      'and have them answer it.',
+    parameters: {
+      type: 'object',
+      properties: {
+        question: {
+          type: 'string',
+          description: "The student's question, in their own words",
+        },
+        topicId: {
+          type: 'string',
+          description: 'The lesson-plan id of the topic it belongs to',
+        },
+      },
+      required: ['question', 'topicId'],
+    },
+  },
+  {
+    name: TEACH_TOOLS.RECALL,
+    description:
+      "Take the page away for a memory check ('start'), or bring it back " +
+      "('end'). While the page is away the student reconstructs the ideas " +
+      'from memory — the strongest form of practice. Never announce the ' +
+      'mechanics; just ask for the ideas back.',
+    parameters: {
+      type: 'object',
+      properties: {
+        action: {
+          type: 'string',
+          enum: ['start', 'end'],
+          description:
+            '"start" takes the page away; "end" brings it back for correction',
+        },
+      },
+      required: ['action'],
+    },
+  },
+  {
+    name: TEACH_TOOLS.ASK_DIAGRAM,
+    description:
+      'A visual check: the board shows the concept as a diagram with one ' +
+      'part missing, and the student names it. Use after teaching something ' +
+      'with shape — a process, pathway or hierarchy. The tool result is the ' +
+      'authoritative answer; when they miss it, re-teach that piece.',
+    parameters: {
+      type: 'object',
+      properties: {
+        topicId: {
+          type: 'string',
+          description: 'The lesson-plan id of the topic this checks',
+        },
+        description: {
+          type: 'string',
+          description:
+            'What to diagram and which part to blank, in one sentence',
+        },
+      },
+      required: ['topicId', 'description'],
+    },
+  },
+  {
     name: TEACH_TOOLS.ASK_QUIZ,
     description:
       'Put a multiple-choice question on the screen and wait for the tap. ' +
@@ -704,6 +775,18 @@ export class StartVoiceSessionHandler extends AbstractRequestHandlerTemplate<
     );
     const masteryById = new Map(mastery.map((entry) => [entry.topicId, entry]));
 
+    // Calibration (P4): the tutor's private read on whether this student's
+    // confidence tracks their competence. Thin evidence stays silent.
+    const calibration = computeCalibration(events);
+    const calibrationLine =
+      calibration.n >= MIN_CALIBRATION_EVENTS && calibration.bias !== null
+        ? calibration.bias > 0.25
+          ? 'This student\'s confidence runs ahead of their scores. Check understanding more often than feels polite, and praise accurate self-assessment — "good call knowing you weren\'t sure" — as warmly as right answers.'
+          : calibration.bias < -0.25
+            ? 'This student underrates themself. When they are right, say so plainly and point at the evidence; hedged right answers deserve to be named as right.'
+            : null
+        : null;
+
     // The lesson starts where the student opened it, not at the plan's
     // first untaught chapter — "teach me" pressed on page 94 means page 94.
     const containing = topics.find(
@@ -750,14 +833,14 @@ export class StartVoiceSessionHandler extends AbstractRequestHandlerTemplate<
         '- The screen is your blackboard and the tools are your chalk — and chalk is silent. NEVER speak about the machinery: no "point", no "reveal", no "tool", no "board", no "lesson plan", no "let me show the next one". You do not announce what the screen is about to do; you teach, and the screen follows your voice. A student should be able to close their eyes and hear only a teacher.',
         "- One idea at a time, landed before the next. This is the whole job: a personal tutor holds the student's hand through material that has already defeated them once. Never pile up material, never sprint to be finished, never move on from an idea the student has not shown they hold.",
         `- Before starting a topic, call ${TEACH_TOOLS.CHECK_PREREQUISITES} with its id. If it returns anything, ask about it in passing — "are you comfortable with X, or should I take a minute on it?" — and if they want it (or clearly need it), give a short bridge and then call ${TEACH_TOOLS.TEACH_PREREQUISITE}. Two bridges per chapter at most; the chapter is the destination.`,
-        `- When you begin a topic, call ${TEACH_TOOLS.GO_TO_PAGE} with its first page. As you move through its material, keep turning pages with ${TEACH_TOOLS.GO_TO_PAGE} so the student is always looking at what you are explaining.`,
+        `- When you begin a topic, call ${TEACH_TOOLS.GO_TO_PAGE} with its first page, then open with a thirty-second spoken map before anything is revealed: the chapter's headings in order, and where it lands — a skim of the terrain, not a lecture. Then ask the student for one or two questions they want this chapter to answer — "what do you want to know about this before I explain?" — and hold each one via ${TEACH_TOOLS.SAVE_QUESTION}. If they have none, offer one good candidate question yourself and move on; never stall. As you move through the material, keep turning pages with ${TEACH_TOOLS.GO_TO_PAGE} so the student is always looking at what you are explaining.`,
         `- Each page arrives blank and builds up as you teach, like a board being written. Just before you explain an idea, call ${TEACH_TOOLS.REVEAL_POINT} with its number. The screen advances ONE point per call no matter what you ask for — take the next point, teach it fully, check it landed, then take the next. Never discuss a point the student cannot see yet.`,
         '- Never read a revealed point aloud as written. The screen already holds the exact words; your voice adds what the screen cannot — plainer words, a concrete example, why it matters, how it connects to what came before. If you catch yourself reciting the page, stop and explain instead.',
         '- The student should be taking notes, like in a real classroom. After you explain an idea, leave a short pause for them to write it down. When a term is exam-critical or easily confused, say that it belongs in their notes — then give them the moment to jot it.',
         '- Teach in short spoken stretches — under a minute — then ask the student something: to say it back, to guess the next step, whether it makes sense. This is a conversation, not a lecture.',
         `- Visuals are yours to initiate — a good tutor reaches for the board unprompted, and the student should NEVER have to ask for a drawing. The moment an idea has shape, put it up as you begin explaining it: ${TEACH_TOOLS.DRAW_DIAGRAM} for a process, sequence, hierarchy or comparison; ${TEACH_TOOLS.SKETCH} for the thing itself — anatomy, apparatus, a labelled curve; ${TEACH_TOOLS.SHOW_IMAGES} for real photographs; ${TEACH_TOOLS.COMPUTE} for ANY arithmetic before a number leaves your mouth. Aim for at least one visual per topic whenever the material has any shape to show, and simply start describing what the student now sees — never announce that you are about to draw.`,
         `- A newly drawn visual fills the screen on its own. Teach from it part by part while it is large, then call ${TEACH_TOOLS.FOCUS_BOARD} with action "close" before moving on. Turning the page also puts it away. Bring anything back later with action "expand" and its title.`,
-        `- When the student has understood a topic, call ${TEACH_TOOLS.MARK_TOPIC_COMPLETE} with its id, then move to the next.`,
+        `- Close every topic the way it opened — with the student doing the work. First, return to their held questions: read each back and have them answer it aloud; a question they can now answer is the victory lap, one they can't gets a short re-teach. Then run one memory check: first ask "before we check — how solid does this topic feel, one to five?", then call ${TEACH_TOOLS.RECALL} with action "start", ask them to say the main ideas back, listen fully without interrupting, call it with "end", and walk anything they missed. Record ${TEACH_TOOLS.REPORT_UNDERSTANDING} — noting their own one-to-five prediction in the note alongside your read — then call ${TEACH_TOOLS.MARK_TOPIC_COMPLETE} with its id and move to the next. When the profile says brisk and their mastery is already strong, shorten these closings — depth belongs where mastery is weak.`,
         '- If the student asks to skip, slow down, go back, or dig into something, follow them — the plan serves the student.',
         `- When the whole plan is taught — or the student says they are done — wrap up like a real teacher: a short spoken recap of what was covered, a word of encouragement, goodbye. Then, and only then, call ${TEACH_TOOLS.END_LESSON} to close the session.`,
         '- After every tool call, keep talking; never leave silence while something appears on screen.',
@@ -770,6 +853,7 @@ export class StartVoiceSessionHandler extends AbstractRequestHandlerTemplate<
       profileInstructions(
         effectiveProfile(profile ?? DEFAULT_LEARNER_PROFILE, docState),
       ),
+      calibrationLine,
       unnarrated.length
         ? [
             'Changes to how you teach since last time — mention naturally in',
@@ -913,6 +997,154 @@ export class DrawSketchHandler extends AbstractRequestHandlerTemplate<
     await this.calls.record({
       documentId: cmd.documentId,
       task: 'sketch',
+      model: result.usage.model,
+      tokensIn: result.usage.tokensIn,
+      tokensOut: result.usage.tokensOut,
+      latencyMs: result.usage.latencyMs,
+      outcome: 'ok',
+    });
+
+    return CommandResponse.of(result.value);
+  }
+}
+
+export interface TopicQuizRequest {
+  userId: string;
+  documentId: string;
+  topicId: string;
+}
+
+export interface TopicQuizResponse {
+  questions: {
+    question: string;
+    options: string[];
+    correctIndex: number;
+    explanation: string;
+  }[];
+}
+
+/**
+ * Self-serve checks for the solo study path (scaffolding plan P7): 2-3
+ * grounded MCQs on one chapter, generated fresh each run so re-testing asks
+ * new questions. Context is the chapter's own simplified text — the same
+ * words the student just read.
+ */
+@Injectable()
+export class GenerateTopicQuizHandler extends AbstractRequestHandlerTemplate<
+  TopicQuizRequest,
+  TopicQuizResponse
+> {
+  constructor(
+    @Inject(LLM_GATEWAY) private readonly llm: LlmGatewayPort,
+    @Inject(TOPIC_REPOSITORY) private readonly topics: TopicRepository,
+    @Inject(SIMPLIFIED_PAGE_REPOSITORY)
+    private readonly simplified: SimplifiedPageRepository,
+    @Inject(SUMMARY_REPOSITORY) private readonly summaries: SummaryRepository,
+    @Inject(AI_CALL_LOG_REPOSITORY) private readonly calls: AiCallLogRepository,
+    private readonly access: DocumentAccessService,
+  ) {
+    super();
+  }
+
+  protected async handleRequest(cmd: TopicQuizRequest) {
+    await this.access.require(cmd.documentId, cmd.userId);
+
+    const topics = await this.topics.listWithReadState(
+      cmd.documentId,
+      cmd.userId,
+    );
+    const topic = topics.find((t) => t.id === cmd.topicId);
+    if (!topic) throw new NotFoundError('Topic');
+
+    const pages = await this.simplified.findRange(
+      cmd.documentId,
+      'standard',
+      topic.startPage,
+      topic.endPage,
+    );
+    const pagesText = pages
+      .filter((page) => page.status === 'done' && page.blocks?.length)
+      .map((page) => blocksToProse(page.blocks ?? []))
+      .join('\n\n')
+      // Quizzes need the chapter, not the whole book at 12 pages a topic.
+      .slice(0, 24_000);
+    if (!pagesText) {
+      throw new DocumentNotReadyError(
+        "This chapter hasn't been simplified yet — try again once it has",
+      );
+    }
+
+    const summary = await this.summaries.find(cmd.documentId);
+    const result = await this.llm.generateTopicQuiz({
+      topicTitle: topic.title,
+      pagesText,
+      summary,
+    });
+
+    await this.calls.record({
+      documentId: cmd.documentId,
+      task: 'topic_quiz',
+      model: result.usage.model,
+      tokensIn: result.usage.tokensIn,
+      tokensOut: result.usage.tokensOut,
+      latencyMs: result.usage.latencyMs,
+      outcome: 'ok',
+    });
+
+    return CommandResponse.of(result.value);
+  }
+}
+
+export interface DiagramCheckRequest {
+  userId: string;
+  documentId: string;
+  description: string;
+}
+
+/**
+ * The visual-scaffold check (scaffolding plan P6): a grounded diagram with
+ * one "?" node plus candidate answers — DrawDiagramHandler's shape with a
+ * deliberate hole in the result.
+ */
+@Injectable()
+export class AskDiagramCheckHandler extends AbstractRequestHandlerTemplate<
+  DiagramCheckRequest,
+  DiagramCheckResponse
+> {
+  constructor(
+    @Inject(LLM_GATEWAY) private readonly llm: LlmGatewayPort,
+    @Inject(VECTOR_STORE) private readonly vectors: VectorStorePort,
+    @Inject(SUMMARY_REPOSITORY) private readonly summaries: SummaryRepository,
+    @Inject(AI_CALL_LOG_REPOSITORY) private readonly calls: AiCallLogRepository,
+    private readonly access: DocumentAccessService,
+  ) {
+    super();
+  }
+
+  protected async handleRequest(cmd: DiagramCheckRequest) {
+    await this.access.require(cmd.documentId, cmd.userId);
+
+    const summary = await this.summaries.find(cmd.documentId);
+    const [embedding] = (await this.llm.embed({ texts: [cmd.description] }))
+      .value;
+    const chunks = await this.vectors.query({
+      documentId: cmd.documentId,
+      embedding,
+      topK: 6,
+    });
+    const context = chunks
+      .map((chunk) => `[p.${chunk.pageNumber}] ${chunk.text}`)
+      .join('\n\n');
+
+    const result = await this.llm.drawDiagramCloze({
+      description: cmd.description,
+      context,
+      summary,
+    });
+
+    await this.calls.record({
+      documentId: cmd.documentId,
+      task: 'diagram_cloze',
       model: result.usage.model,
       tokensIn: result.usage.tokensIn,
       tokensOut: result.usage.tokensOut,

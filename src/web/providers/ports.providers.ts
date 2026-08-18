@@ -14,6 +14,7 @@ import {
   PDF_TOOLKIT,
   REALTIME,
   SPEECH,
+  TRANSCRIPTION,
   STORAGE,
   VECTOR_STORE,
   WEB_IMPORT,
@@ -38,6 +39,7 @@ import {
 import {
   OpenAiRealtimeAdapter,
   OpenAiSpeechAdapter,
+  OpenAiTranscriptionAdapter,
 } from '../adapters/ai-sdk/openai-voice.adapters';
 import { PassthroughConverterAdapter } from '../adapters/passthrough-converter.adapter';
 import { PdfExportRendererAdapter } from '../adapters/pdf-export-renderer.adapter';
@@ -72,6 +74,7 @@ export const portProviders: Provider[] = [
   { provide: WEB_IMPORT, useClass: WebImportAdapter },
   // Voice rides on the same OpenAI key as the text gateway.
   { provide: SPEECH, useClass: OpenAiSpeechAdapter },
+  { provide: TRANSCRIPTION, useClass: OpenAiTranscriptionAdapter },
   { provide: REALTIME, useClass: OpenAiRealtimeAdapter },
   // Injected by concrete class where a tutor's voice lives on ElevenLabs;
   // the OpenAI-backed tokens above stay the defaults for everything else.

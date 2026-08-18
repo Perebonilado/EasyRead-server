@@ -4,7 +4,12 @@ import type {
   LearnerProfileDto,
   MasteryResponse,
 } from '../../../contracts';
-import { computeMastery, recommendTutor } from '../../domain/learning';
+import {
+  computeCalibration,
+  computeMastery,
+  recommendTutor,
+  MIN_CALIBRATION_EVENTS,
+} from '../../domain/learning';
 import { ValidationError } from '../../domain/errors/errors';
 import {
   DOCUMENT_LEARNING_STATE_REPOSITORY,
@@ -151,6 +156,7 @@ export class GetMasteryHandler extends AbstractRequestHandlerTemplate<
     );
     const byId = new Map(mastery.map((entry) => [entry.topicId, entry]));
     const weak = mastery.filter((entry) => entry.needsRevisit).length;
+    const calibration = computeCalibration(events);
 
     return CommandResponse.of({
       topics: topics.map((topic) => ({
@@ -165,6 +171,10 @@ export class GetMasteryHandler extends AbstractRequestHandlerTemplate<
         weak,
         cmd.currentTutorId ?? 'maya',
       ),
+      // Thin evidence reads as "no verdict", never as a bias of zero.
+      calibrationBias:
+        calibration.n >= MIN_CALIBRATION_EVENTS ? calibration.bias : null,
+      calibrationN: calibration.n,
     });
   }
 }

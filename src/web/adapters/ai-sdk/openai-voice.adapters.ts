@@ -5,6 +5,7 @@ import type {
   RealtimeSession,
   RealtimeTool,
   SpeechPort,
+  TranscriptionPort,
 } from '../../../business/ports/voice.port';
 
 /**
@@ -192,5 +193,47 @@ export class OpenAiRealtimeAdapter implements RealtimePort {
           ? new Date(expires * 1000).toISOString()
           : (expires ?? null),
     };
+  }
+}
+
+/**
+ * Speech-to-text through the AI SDK's OpenAI provider — guided reading's
+ * voice input. STT stays on OpenAI regardless of which TTS a tutor uses,
+ * which is why this is its own port rather than a SpeechPort method.
+ * Model is config: `AI_STT_MODEL` (default gpt-4o-mini-transcribe).
+ */
+@Injectable()
+export class OpenAiTranscriptionAdapter implements TranscriptionPort {
+  private readonly logger = new Logger(OpenAiTranscriptionAdapter.name);
+
+  constructor(private readonly config: ConfigService) {}
+
+  async transcribe({
+    audio,
+    mimeType,
+  }: {
+    audio: Buffer;
+    mimeType: string;
+  }): Promise<{ text: string; model: string }> {
+    const { experimental_transcribe } = await import('ai');
+    const { createOpenAI } = await import('@ai-sdk/openai');
+
+    const model = this.config.get<string>(
+      'AI_STT_MODEL',
+      'gpt-4o-mini-transcribe',
+    );
+    const openai = createOpenAI({
+      apiKey: this.config.getOrThrow<string>('OPENAI_API_KEY'),
+    });
+
+    const result = await experimental_transcribe({
+      model: openai.transcription(model),
+      audio,
+    });
+
+    this.logger.log(
+      `Transcribed ${audio.length} bytes (${mimeType}) → ${result.text.length} chars via ${model}`,
+    );
+    return { text: result.text, model };
   }
 }

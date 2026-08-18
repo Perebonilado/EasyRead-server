@@ -227,7 +227,14 @@ export type ChatHistoryResponse = {
  * read this, so a kept answer can be shown as a quote rather than as the
  * reader's own words.
  */
-export type NoteSource = 'typed' | 'highlight' | 'chat' | 'lesson' | 'recap';
+export type NoteSource =
+  | 'typed'
+  | 'highlight'
+  | 'chat'
+  | 'lesson'
+  | 'recap'
+  /** A question the student posed before the material — answered at the topic's end. */
+  | 'question';
 
 export type NoteDto = {
   id: string;
@@ -455,6 +462,9 @@ export const TEACH_TOOLS = {
   SHOW_IMAGES: 'show_images',
   DRAW_DIAGRAM: 'draw_diagram',
   SKETCH: 'draw_sketch',
+  SAVE_QUESTION: 'save_question',
+  RECALL: 'recall_page',
+  ASK_DIAGRAM: 'ask_diagram_check',
   COMPUTE: 'compute',
   FOCUS_BOARD: 'focus_board',
   MARK_TOPIC_COMPLETE: 'mark_topic_complete',
@@ -469,6 +479,65 @@ export type TeachToolName = (typeof TEACH_TOOLS)[keyof typeof TEACH_TOOLS];
 
 export type DiagramResponse = { title: string; mermaid: string };
 export type SketchResponse = { title: string; svg: string };
+export type DiagramCheckResponse = {
+  title: string;
+  /** Mermaid with exactly one node labeled "?". */
+  mermaid: string;
+  options: string[];
+  correctIndex: number;
+  explanation: string;
+};
+// ── Guided reading ───────────────────────────────────────────────────────────
+
+/**
+ * The skim ritual's material (guided reading): a chapter preview written for
+ * comprehension rather than extracted mechanically. One per topic — it
+ * derives from the document alone, so it is generated once and cached.
+ */
+export type TopicPreviewBody = {
+  /** What the chapter is about and why it matters here, in plain sentences. */
+  about: string;
+  /** The argument's movements in order, one short line each. */
+  outline: string[];
+  /** Terms the reader will meet, each with a one-line gloss. */
+  keyTerms: { term: string; gloss: string }[];
+  /** Where the chapter lands — its conclusion stated plainly, no teasing. */
+  howItEnds: string;
+};
+
+export type TopicPreviewResponse = {
+  topicId: string;
+  body: TopicPreviewBody;
+  /** True when served from the cache rather than freshly generated. */
+  cached: boolean;
+};
+
+/**
+ * The system's independent grade of a book-closed recall, judged against the
+ * chapter itself. Feedback names ideas from the text, never the person.
+ */
+export type RecallGradeResponse = {
+  /** 0–1: how much of the chapter's substance the recall carried. */
+  score: number;
+  /** Ideas the recall stated correctly. */
+  nailed: string[];
+  /** Load-bearing ideas the recall did not mention. */
+  missed: string[];
+  /** What a re-read should focus on, phrased as pointers. */
+  focus: string[];
+};
+
+/** Verdict on a reader answering their own pre-reading question. */
+export type QuestionCheckResponse = {
+  verdict: 'correct' | 'partial' | 'incorrect';
+  /** One or two sentences: what's right, what's missing, per the document. */
+  explanation: string;
+  /** Page where the document answers it, or null when unplaceable. */
+  page: number | null;
+};
+
+export type TranscribeResponse = { text: string };
+
 export type ComputeResponse =
   | { ok: true; result: string; tex: string | null }
   | { ok: false; error: string };
@@ -487,6 +556,12 @@ export type MasteryResponse = {
   }[];
   /** A roster id worth trying for the revisit, or null. */
   recommendedTutorId: string | null;
+  /**
+   * Confidence vs competence, from rated checks: positive = overconfident,
+   * negative = underconfident, null = not enough rated evidence (n < 5).
+   */
+  calibrationBias: number | null;
+  calibrationN: number;
 };
 
 /** How this student learns — read into every lesson, rewritten by the loop. */

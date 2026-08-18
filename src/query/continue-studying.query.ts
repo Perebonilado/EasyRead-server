@@ -58,6 +58,7 @@ export class ContinueStudyingQuery {
       events.map((event) => ({
         topicId: event.topicId,
         kind: event.kind,
+        payload: null,
         score: event.score,
         createdAt: event.get('createdAt') as Date,
       })),

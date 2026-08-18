@@ -16,6 +16,7 @@ export { HighlightLookupModel } from './highlight-lookup.model';
 export { NoteModel } from './note.model';
 export { PageAssetModel } from './page-asset.model';
 export { SessionRecapModel } from './session-recap.model';
+export { TopicPreviewModel } from './topic-preview.model';
 export { PipelineRunModel } from './pipeline-run.model';
 export { ReadingPositionModel } from './reading-position.model';
 export { RefreshTokenModel } from './refresh-token.model';
@@ -45,6 +46,7 @@ import { HighlightLookupModel } from './highlight-lookup.model';
 import { NoteModel } from './note.model';
 import { PageAssetModel } from './page-asset.model';
 import { SessionRecapModel } from './session-recap.model';
+import { TopicPreviewModel } from './topic-preview.model';
 import { PipelineRunModel } from './pipeline-run.model';
 import { ReadingPositionModel } from './reading-position.model';
 import { RefreshTokenModel } from './refresh-token.model';
@@ -84,6 +86,7 @@ export const ALL_MODELS = [
   NoteModel,
   PageAssetModel,
   SessionRecapModel,
+  TopicPreviewModel,
   ConceptKnowledgeModel,
   TopicPrerequisiteModel,
 ];

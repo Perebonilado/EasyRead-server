@@ -89,6 +89,84 @@ export const sketchSchema = z.object({
   svg: z.string().min(10),
 });
 
+/**
+ * A diagram with one load-bearing node blanked to "?" — the visual-scaffold
+ * check (scaffolding plan P6). The student names the missing part.
+ */
+export const diagramClozeSchema = z.object({
+  title: z.string().min(1).max(120),
+  /** Mermaid source containing exactly one node labeled "?". */
+  mermaid: z.string().min(10),
+  options: z.array(z.string().min(1).max(120)).min(3).max(4),
+  correctIndex: z.number().int().min(0),
+  explanation: z.string().min(1).max(300),
+});
+
+/**
+ * Solo-study checks (scaffolding plan P7): 2-3 MCQs on one topic, one detail
+ * question and one higher-order question, in the source study's own item
+ * design (§3.2.3).
+ */
+export const topicQuizSchema = z.object({
+  questions: z
+    .array(
+      z.object({
+        question: z.string().min(1).max(300),
+        options: z.array(z.string().min(1).max(160)).min(3).max(4),
+        correctIndex: z.number().int().min(0),
+        explanation: z.string().min(1).max(300),
+      }),
+    )
+    .min(2)
+    .max(3),
+});
+
+/**
+ * A chapter preview written for comprehension (guided reading) — the skim
+ * ritual's material, generated once per topic and cached.
+ */
+export const previewSchema = z.object({
+  about: z.string().min(1).max(600),
+  outline: z.array(z.string().min(1).max(200)).min(2).max(10),
+  keyTerms: z
+    .array(
+      z.object({
+        term: z.string().min(1).max(120),
+        gloss: z.string().min(1).max(200),
+      }),
+    )
+    .max(8),
+  howItEnds: z.string().min(1).max(400),
+});
+
+/**
+ * The system's grade of a book-closed recall (guided reading). Every key
+ * required; an empty array is a valid answer ("nothing missed").
+ */
+export const recallGradeSchema = z.object({
+  score: z
+    .number()
+    .min(0)
+    .max(1)
+    .describe(
+      "Fraction of the chapter's load-bearing ideas the recall carries.",
+    ),
+  nailed: z.array(z.string().min(1).max(240)).max(6),
+  missed: z.array(z.string().min(1).max(240)).max(6),
+  focus: z.array(z.string().min(1).max(240)).max(4),
+});
+
+/** Verdict on a reader answering their own question (guided reading). */
+export const questionCheckSchema = z.object({
+  verdict: z.enum(['correct', 'partial', 'incorrect']),
+  explanation: z.string().min(1).max(500),
+  page: z
+    .number()
+    .int()
+    .min(0)
+    .describe('Page (from the [p.N] markers) answering it; 0 when none does.'),
+});
+
 /** Up to three questions, each with a small ordered set of answers. */
 export const interviewSchema = z.object({
   topic: z.string().min(1).max(200),

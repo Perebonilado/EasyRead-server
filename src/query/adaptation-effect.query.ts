@@ -203,6 +203,7 @@ function toEventRecord(row: AssessmentEventModel): AssessmentEventRecord {
     topicId: row.topicId,
     kind: row.kind,
     score: row.score,
+    payload: (row.payload ?? null) as Record<string, unknown> | null,
     createdAt: row.get('createdAt') as Date,
   };
 }

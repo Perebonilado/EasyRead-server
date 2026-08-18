@@ -45,6 +45,13 @@ const TASK_VAR: Record<LlmTask, string> = {
   // own knob so a deployment can route them to a stronger model without
   // paying for it on diagrams.
   sketch: 'AI_MODEL_SKETCH',
+  topic_quiz: 'AI_MODEL_QUIZ',
+  // Guided reading: the preview is one call per chapter ever (cached), the
+  // graders run once per checkpoint — all three default to the cheap model
+  // but stay routable on their own.
+  preview: 'AI_MODEL_PREVIEW',
+  recall_grade: 'AI_MODEL_RECALL_GRADE',
+  question_check: 'AI_MODEL_QUESTION_CHECK',
   embed: 'AI_EMBED_MODEL',
 };
 

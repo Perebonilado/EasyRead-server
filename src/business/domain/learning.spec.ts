@@ -1,4 +1,5 @@
 import {
+  computeCalibration,
   computeMastery,
   effectiveProfile,
   findPromotions,
@@ -22,6 +23,7 @@ const event = (
   topicId,
   kind,
   score,
+  payload: null,
   createdAt: at(minutesAgo),
 });
 
@@ -192,5 +194,48 @@ describe('findPromotions', () => {
     ]);
     expect(promotion.alreadyGlobal).toBe(true);
     expect(promotion.documentIds.sort()).toEqual(['a', 'b']);
+  });
+});
+
+describe('computeCalibration', () => {
+  const rated = (score: number, confidence: number): AssessmentEventRecord => ({
+    topicId: 't1',
+    kind: 'mcq',
+    score,
+    payload: { confidence },
+    createdAt: new Date(),
+  });
+  const unrated = (score: number): AssessmentEventRecord => ({
+    topicId: 't1',
+    kind: 'mcq',
+    score,
+    payload: null,
+    createdAt: new Date(),
+  });
+
+  it('reports overconfidence as positive bias', () => {
+    const result = computeCalibration([rated(0, 1), rated(0, 0.6)]);
+    expect(result.n).toBe(2);
+    expect(result.bias).toBeCloseTo(0.8, 5);
+  });
+
+  it('reports underconfidence as negative bias', () => {
+    const result = computeCalibration([rated(1, 0.2), rated(1, 0.6)]);
+    expect(result.bias).toBeCloseTo(-0.6, 5);
+  });
+
+  it('mixed ratings can cancel to zero', () => {
+    const result = computeCalibration([rated(1, 1), rated(0, 0)]);
+    expect(result.bias).toBeCloseTo(0, 5);
+  });
+
+  it('ignores events without a rating and reports n honestly', () => {
+    const result = computeCalibration([rated(0, 1), unrated(1), unrated(1)]);
+    expect(result.n).toBe(1);
+    expect(result.bias).toBeCloseTo(1, 5);
+  });
+
+  it('no rated events means no verdict, not zero', () => {
+    expect(computeCalibration([unrated(1)])).toEqual({ bias: null, n: 0 });
   });
 });

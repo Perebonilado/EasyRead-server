@@ -52,7 +52,7 @@ class CreateNoteDto {
   quotedText?: string;
 
   @IsOptional()
-  @IsIn(['typed', 'highlight', 'chat', 'lesson', 'recap'])
+  @IsIn(['typed', 'highlight', 'chat', 'lesson', 'recap', 'question'])
   source?: NoteSource;
 }
 

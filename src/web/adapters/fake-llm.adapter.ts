@@ -3,7 +3,7 @@
  * that is the whole point of a deterministic offline stand-in. */
 import { createHash } from 'crypto';
 import { Injectable } from '@nestjs/common';
-import type { Block, RecapBody } from '../../contracts';
+import type { Block, RecapBody, TopicPreviewBody } from '../../contracts';
 import type {
   LlmGatewayPort,
   LlmResult,
@@ -393,6 +393,151 @@ export class FakeLlmAdapter implements LlmGatewayPort {
     if (nodes.length === 1) lines.push(`  n0["${nodes[0]}"]`);
     return {
       value: { title: description.slice(0, 60), mermaid: lines.join('\n') },
+      usage: {
+        model: 'fake',
+        tokensIn: description.length,
+        tokensOut: 0,
+        latencyMs: Date.now() - started,
+      },
+    };
+  }
+
+  async generateTopicQuiz({
+    topicTitle,
+  }: {
+    topicTitle: string;
+    pagesText: string;
+    summary: string | null;
+  }): Promise<
+    LlmResult<{
+      questions: {
+        question: string;
+        options: string[];
+        correctIndex: number;
+        explanation: string;
+      }[];
+    }>
+  > {
+    const started = Date.now();
+    const q = (n: number) => ({
+      question: `Fake question ${n} about ${topicTitle}?`,
+      options: ['Right answer', 'Wrong one', 'Also wrong'],
+      correctIndex: 0,
+      explanation: 'The first option restates the chapter.',
+    });
+    return {
+      value: { questions: [q(1), q(2)] },
+      usage: {
+        model: 'fake',
+        tokensIn: topicTitle.length,
+        tokensOut: 0,
+        latencyMs: Date.now() - started,
+      },
+    };
+  }
+
+  async generateTopicPreview({
+    topicTitle,
+  }: {
+    topicTitle: string;
+    pagesText: string;
+    summary: string | null;
+  }): Promise<LlmResult<TopicPreviewBody>> {
+    const started = Date.now();
+    return {
+      value: {
+        about: `A fake preview of ${topicTitle}: what it covers and why.`,
+        outline: ['First movement of the argument', 'Second movement'],
+        keyTerms: [{ term: 'Fake term', gloss: 'What the fake term means' }],
+        howItEnds: 'It ends by restating the fake conclusion.',
+      },
+      usage: this.usage(started, topicTitle.length, 40),
+    };
+  }
+
+  async gradeRecall({
+    recall,
+  }: {
+    topicTitle: string;
+    pagesText: string;
+    recall: string;
+  }): Promise<
+    LlmResult<{
+      score: number;
+      nailed: string[];
+      missed: string[];
+      focus: string[];
+    }>
+  > {
+    const started = Date.now();
+    const empty = !recall.trim();
+    return {
+      value: empty
+        ? {
+            score: 0,
+            nailed: [],
+            missed: ["The chapter's main idea"],
+            focus: ['Reread the opening section'],
+          }
+        : {
+            score: 0.5,
+            nailed: ['One idea the recall carried'],
+            missed: ['One idea the recall did not mention'],
+            focus: ['The section the recall skipped'],
+          },
+      usage: this.usage(started, recall.length, 30),
+    };
+  }
+
+  async checkQuestionAnswer({
+    answer,
+  }: {
+    question: string;
+    answer: string;
+    context: string;
+    summary: string | null;
+  }): Promise<
+    LlmResult<{
+      verdict: 'correct' | 'partial' | 'incorrect';
+      explanation: string;
+      page: number;
+    }>
+  > {
+    const started = Date.now();
+    return {
+      value: {
+        verdict: answer.trim() ? 'partial' : 'incorrect',
+        explanation: 'A fake verdict: partly right, per the fake document.',
+        page: 0,
+      },
+      usage: this.usage(started, answer.length, 20),
+    };
+  }
+
+  async drawDiagramCloze({
+    description,
+  }: {
+    description: string;
+    context: string;
+    summary: string | null;
+  }): Promise<
+    LlmResult<{
+      title: string;
+      mermaid: string;
+      options: string[];
+      correctIndex: number;
+      explanation: string;
+    }>
+  > {
+    const started = Date.now();
+    return {
+      value: {
+        title: description.slice(0, 60),
+        mermaid: 'flowchart LR\n  a["Start"] --> b["?"]\n  b --> c["End"]',
+        options: ['Middle', 'Edge', 'Corner'],
+        correctIndex: 0,
+        explanation: 'The middle connects the start to the end.',
+      },
       usage: {
         model: 'fake',
         tokensIn: description.length,

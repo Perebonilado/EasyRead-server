@@ -24,6 +24,13 @@ async function bootstrap() {
     '/api/v1/documents/:id/content',
     raw({ type: '*/*', limit: MAX_UPLOAD_BYTES }),
   );
+  // Voice recordings for guided reading arrive as raw audio bytes too. The
+  // cap is generous for ~3 minutes of webm/opus; anything bigger is not a
+  // recall recording.
+  app.use(
+    '/api/v1/documents/:id/transcribe',
+    raw({ type: '*/*', limit: '16mb' }),
+  );
 
   app.enableCors({
     origin: config

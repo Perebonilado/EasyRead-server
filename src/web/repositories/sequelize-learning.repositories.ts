@@ -61,6 +61,7 @@ export class SequelizeAssessmentRepository implements AssessmentRepository {
       topicId: row.topicId,
       kind: row.kind,
       score: row.score,
+      payload: (row.payload ?? null) as Record<string, unknown> | null,
       // sequelize-typescript types the timestamp columns as `any`.
       createdAt: row.createdAt as Date,
     }));

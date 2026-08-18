@@ -1,7 +1,7 @@
 import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import type { LanguageModelUsage } from 'ai';
-import type { Block, RecapBody } from '../../../contracts';
+import type { Block, RecapBody, TopicPreviewBody } from '../../../contracts';
 import type {
   LlmGatewayPort,
   LlmResult,
@@ -13,8 +13,13 @@ import { PROMPTS } from '../prompts';
 import { ModelRegistry, type ModelRef } from './models';
 import {
   blocksSchema,
+  diagramClozeSchema,
   diagramSchema,
   sketchSchema,
+  topicQuizSchema,
+  previewSchema,
+  recallGradeSchema,
+  questionCheckSchema,
   interviewSchema,
   ocrPageSchema,
   outlineSchema,
@@ -445,6 +450,200 @@ export class AiSdkLlmAdapter implements LlmGatewayPort, OnModuleInit {
 
     return {
       value: { title: result.object.title, mermaid },
+      usage: this.usage(ref, result.usage, started),
+    };
+  }
+
+  async generateTopicQuiz(input: {
+    topicTitle: string;
+    pagesText: string;
+    summary: string | null;
+  }): Promise<
+    LlmResult<{
+      questions: {
+        question: string;
+        options: string[];
+        correctIndex: number;
+        explanation: string;
+      }[];
+    }>
+  > {
+    const started = Date.now();
+    const { generateObject } = await this.registry.modules();
+    const { model, ref } = await this.registry.languageModel('topic_quiz');
+
+    const result = await generateObject({
+      model,
+      schema: topicQuizSchema,
+      system: PROMPTS.topicQuiz,
+      prompt: [
+        input.summary ? `Document summary:\n${input.summary}` : null,
+        `Chapter: ${input.topicTitle}`,
+        `The chapter's text:\n${input.pagesText}`,
+      ]
+        .filter(Boolean)
+        .join('\n\n'),
+      maxRetries: this.maxRetries(),
+    });
+
+    // Clamp schema-legal lies the way the cloze does.
+    const questions = result.object.questions.map((q) => ({
+      ...q,
+      correctIndex: Math.min(q.correctIndex, q.options.length - 1),
+    }));
+
+    return {
+      value: { questions },
+      usage: this.usage(ref, result.usage, started),
+    };
+  }
+
+  async drawDiagramCloze(input: {
+    description: string;
+    context: string;
+    summary: string | null;
+  }): Promise<
+    LlmResult<{
+      title: string;
+      mermaid: string;
+      options: string[];
+      correctIndex: number;
+      explanation: string;
+    }>
+  > {
+    const started = Date.now();
+    const { generateObject } = await this.registry.modules();
+    const { model, ref } = await this.registry.languageModel('diagram');
+
+    const result = await generateObject({
+      model,
+      schema: diagramClozeSchema,
+      system: PROMPTS.diagramCloze,
+      prompt: [
+        input.summary ? `Document summary:\n${input.summary}` : null,
+        input.context ? `Passages from the document:\n${input.context}` : null,
+        `Draw with a blank: ${input.description}`,
+      ]
+        .filter(Boolean)
+        .join('\n\n'),
+      maxRetries: this.maxRetries(),
+    });
+
+    const mermaid = result.object.mermaid
+      .replace(/^```(?:mermaid)?\s*/i, '')
+      .replace(/```\s*$/, '')
+      .trim();
+    // A correctIndex past the options is a schema-legal lie; clamp it.
+    const correctIndex = Math.min(
+      result.object.correctIndex,
+      result.object.options.length - 1,
+    );
+
+    return {
+      value: { ...result.object, mermaid, correctIndex },
+      usage: this.usage(ref, result.usage, started),
+    };
+  }
+
+  async generateTopicPreview(input: {
+    topicTitle: string;
+    pagesText: string;
+    summary: string | null;
+  }): Promise<LlmResult<TopicPreviewBody>> {
+    const started = Date.now();
+    const { generateObject } = await this.registry.modules();
+    const { model, ref } = await this.registry.languageModel('preview');
+
+    const result = await generateObject({
+      model,
+      schema: previewSchema,
+      system: PROMPTS.preview,
+      prompt: [
+        input.summary ? `Document summary:\n${input.summary}` : null,
+        `Chapter: ${input.topicTitle}`,
+        `The chapter's text:\n${input.pagesText}`,
+      ]
+        .filter(Boolean)
+        .join('\n\n'),
+      maxRetries: this.maxRetries(),
+    });
+
+    return {
+      value: result.object,
+      usage: this.usage(ref, result.usage, started),
+    };
+  }
+
+  async gradeRecall(input: {
+    topicTitle: string;
+    pagesText: string;
+    recall: string;
+  }): Promise<
+    LlmResult<{
+      score: number;
+      nailed: string[];
+      missed: string[];
+      focus: string[];
+    }>
+  > {
+    const started = Date.now();
+    const { generateObject } = await this.registry.modules();
+    const { model, ref } = await this.registry.languageModel('recall_grade');
+
+    const result = await generateObject({
+      model,
+      schema: recallGradeSchema,
+      system: PROMPTS.recallGrade,
+      prompt: [
+        `Chapter: ${input.topicTitle}`,
+        `The chapter's text:\n${input.pagesText}`,
+        `The reader's recall, from memory:\n${input.recall}`,
+      ].join('\n\n'),
+      maxRetries: this.maxRetries(),
+    });
+
+    // The schema bounds it, but clamp anyway — this number feeds mastery.
+    const score = Math.min(1, Math.max(0, result.object.score));
+
+    return {
+      value: { ...result.object, score },
+      usage: this.usage(ref, result.usage, started),
+    };
+  }
+
+  async checkQuestionAnswer(input: {
+    question: string;
+    answer: string;
+    context: string;
+    summary: string | null;
+  }): Promise<
+    LlmResult<{
+      verdict: 'correct' | 'partial' | 'incorrect';
+      explanation: string;
+      page: number;
+    }>
+  > {
+    const started = Date.now();
+    const { generateObject } = await this.registry.modules();
+    const { model, ref } = await this.registry.languageModel('question_check');
+
+    const result = await generateObject({
+      model,
+      schema: questionCheckSchema,
+      system: PROMPTS.questionCheck,
+      prompt: [
+        input.summary ? `Document summary:\n${input.summary}` : null,
+        input.context ? `Passages from the document:\n${input.context}` : null,
+        `The reader's question, posed before reading:\n${input.question}`,
+        `The reader's answer, in their own words:\n${input.answer}`,
+      ]
+        .filter(Boolean)
+        .join('\n\n'),
+      maxRetries: this.maxRetries(),
+    });
+
+    return {
+      value: result.object,
       usage: this.usage(ref, result.usage, started),
     };
   }

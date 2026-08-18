@@ -7,6 +7,8 @@ export interface AssessmentEventRecord {
   kind: AssessmentKind;
   /** 0..1 — how well this moment went. */
   score: number;
+  /** Per-event metadata; `confidence` (0..1), when present, feeds calibration. */
+  payload: Record<string, unknown> | null;
   createdAt: Date;
 }
 

@@ -13,6 +13,20 @@ export interface SpeechPort {
   }): Promise<{ audio: Buffer; mimeType: string; model: string }>;
 }
 
+/**
+ * Speech-to-text for guided reading's voice input.
+ *
+ * One finished recording in, one transcript out — never a stream. The reader
+ * reviews and edits the transcript before anything grades it, so latency
+ * matters less than fidelity, and the text is the only thing kept.
+ */
+export interface TranscriptionPort {
+  transcribe(input: {
+    audio: Buffer;
+    mimeType: string;
+  }): Promise<{ text: string; model: string }>;
+}
+
 /** A function the model may call during the conversation. */
 export interface RealtimeTool {
   name: string;

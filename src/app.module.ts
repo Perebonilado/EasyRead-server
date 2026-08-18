@@ -34,7 +34,9 @@ import {
 } from './business/handlers/documents/upload.handlers';
 import {
   DrawDiagramHandler,
+  AskDiagramCheckHandler,
   ComputeHandler,
+  GenerateTopicQuizHandler,
   DrawSketchHandler,
   PageAudioHandler,
   StartVoiceSessionHandler,
@@ -60,6 +62,12 @@ import {
   CreateRecapHandler,
   ListRecapsHandler,
 } from './business/handlers/documents/recap.handlers';
+import {
+  CheckQuestionAnswerHandler,
+  GetTopicPreviewHandler,
+  GradeRecallHandler,
+  TranscribeAudioHandler,
+} from './business/handlers/documents/guided.handlers';
 import {
   CreateNoteHandler,
   DeleteNoteHandler,
@@ -99,6 +107,7 @@ import { ConceptsController } from './web/controllers/concepts.controller';
 import { ReaderController } from './web/controllers/reader.controller';
 import { TutorsController } from './web/controllers/tutors.controller';
 import { VoiceController } from './web/controllers/voice.controller';
+import { GuidedController } from './web/controllers/guided.controller';
 import { DomainExceptionFilter } from './web/filters/domain-exception.filter';
 import { AuthGuard } from './web/security/auth.guard';
 
@@ -127,7 +136,9 @@ const handlers = [
   PageAudioHandler,
   StartVoiceSessionHandler,
   DrawDiagramHandler,
+  AskDiagramCheckHandler,
   ComputeHandler,
+  GenerateTopicQuizHandler,
   DrawSketchHandler,
   RecordAssessmentHandler,
   GetMasteryHandler,
@@ -141,6 +152,10 @@ const handlers = [
   ListAllNotesHandler,
   CreateRecapHandler,
   ListRecapsHandler,
+  GetTopicPreviewHandler,
+  GradeRecallHandler,
+  CheckQuestionAnswerHandler,
+  TranscribeAudioHandler,
   DiscoverImportHandler,
   StartImportHandler,
   ListPageAssetsHandler,
@@ -192,6 +207,7 @@ const queries = [
     ConceptsController,
     ExportsController,
     VoiceController,
+  GuidedController,
     TutorsController,
     EventsController,
     HealthController,

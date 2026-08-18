@@ -1,4 +1,9 @@
-import type { LearnQuestion, Block, RecapBody } from '../../contracts';
+import type {
+  LearnQuestion,
+  Block,
+  RecapBody,
+  TopicPreviewBody,
+} from '../../contracts';
 
 export type LlmTask =
   | 'ocr_page'
@@ -20,6 +25,10 @@ export type LlmTask =
   | 'visualize_query'
   | 'diagram'
   | 'sketch'
+  | 'topic_quiz'
+  | 'preview'
+  | 'recall_grade'
+  | 'question_check'
   | 'embed';
 
 export interface LlmUsage {
@@ -175,6 +184,83 @@ export interface LlmGatewayPort {
     context: string;
     summary: string | null;
   }): Promise<LlmResult<{ title: string; svg: string }>>;
+
+  /** Self-serve checks for solo study: 2-3 grounded MCQs on one topic. */
+  generateTopicQuiz(input: {
+    topicTitle: string;
+    pagesText: string;
+    summary: string | null;
+  }): Promise<
+    LlmResult<{
+      questions: {
+        question: string;
+        options: string[];
+        correctIndex: number;
+        explanation: string;
+      }[];
+    }>
+  >;
+
+  /**
+   * A chapter preview written to aid comprehension (guided reading) — the
+   * skim ritual's material: what it's about, the shape of the argument, the
+   * terms it turns on, and where it lands.
+   */
+  generateTopicPreview(input: {
+    topicTitle: string;
+    pagesText: string;
+    summary: string | null;
+  }): Promise<LlmResult<TopicPreviewBody>>;
+
+  /**
+   * Grades a book-closed recall against the chapter's own text. The reader
+   * predicted first; this is the independent measure their prediction is
+   * compared with, so it must never see the prediction.
+   */
+  gradeRecall(input: {
+    topicTitle: string;
+    pagesText: string;
+    recall: string;
+  }): Promise<
+    LlmResult<{
+      score: number;
+      nailed: string[];
+      missed: string[];
+      focus: string[];
+    }>
+  >;
+
+  /**
+   * Verdict on the reader answering their own pre-reading question, judged
+   * against retrieved passages. `page` is 0 when the answer can't be placed.
+   */
+  checkQuestionAnswer(input: {
+    question: string;
+    answer: string;
+    context: string;
+    summary: string | null;
+  }): Promise<
+    LlmResult<{
+      verdict: 'correct' | 'partial' | 'incorrect';
+      explanation: string;
+      page: number;
+    }>
+  >;
+
+  /** A diagram with one "?" node — the visual check the student completes. */
+  drawDiagramCloze(input: {
+    description: string;
+    context: string;
+    summary: string | null;
+  }): Promise<
+    LlmResult<{
+      title: string;
+      mermaid: string;
+      options: string[];
+      correctIndex: number;
+      explanation: string;
+    }>
+  >;
 
   /**
    * A recap of one sitting, written from what the reader did rather than

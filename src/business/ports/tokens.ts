@@ -17,5 +17,6 @@ export const EVENT_BUS = Symbol('EventBusPort');
 export const JOB_QUEUE = Symbol('JobQueuePort');
 export const EXPORT_RENDERER = Symbol('ExportRendererPort');
 export const SPEECH = Symbol('SpeechPort');
+export const TRANSCRIPTION = Symbol('TranscriptionPort');
 export const REALTIME = Symbol('RealtimePort');
 export const WEB_IMPORT = Symbol('WebImportPort');

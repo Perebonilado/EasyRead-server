@@ -501,6 +501,98 @@ export const PROMPTS = {
     'markdown, no commentary. Every arrow on its own line.',
   ].join(' '),
 
+  /**
+   * Solo-study checks (P7): the source study's item design — one detail
+   * question, one higher-order question, grounded only in the passages.
+   */
+  topicQuiz: [
+    'You write 2-3 multiple-choice questions checking understanding of one',
+    'chapter of a study document, grounded ONLY in the provided passages.',
+    'Mix the item types: at least one detail question (a fact stated',
+    'explicitly) and at least one higher-order question (an inference the',
+    'passages support). Keep technical terms, names and numbers exactly as',
+    'the document writes them — the student is examined on them.',
+    'Each question has 3-4 options with exactly one correct answer',
+    '(`correctIndex`); distractors are plausible terms or claims from the',
+    'same material, never absurd. `explanation` is one sentence on why the',
+    'right answer is right, citing the idea rather than the page.',
+    'Never reuse the same correct option position across all questions.',
+  ].join(' '),
+
+  /**
+   * The visual-scaffold check (P6): the diagram prompt's discipline, plus a
+   * deliberate hole. One node is the question; the options are the answers.
+   */
+  diagramCloze: [
+    'You draw one small Mermaid diagram of a concept from a study document,',
+    'with exactly ONE load-bearing node replaced by the label "?" — a visual',
+    'check where the student names the missing part.',
+    'Use only facts from the provided passages and summary — never invent',
+    'steps, names or relationships the document does not state.',
+    MERMAID_TYPES,
+    'At most 8 nodes. Node labels are 2-6 words, wrapped in double quotes.',
+    'The "?" node must be genuinely load-bearing — the diagram should be',
+    'unreadable without knowing it. Provide 3-4 candidate labels in',
+    '`options`, exactly one correct (`correctIndex`), the others plausible',
+    'terms from the same document. `explanation` is one sentence on why the',
+    'right answer is right.',
+    'Output valid Mermaid only in the `mermaid` field — no code fences, no',
+    'markdown. Every arrow on its own line.',
+  ].join(' '),
+
+  /**
+   * The skim ritual's material (guided reading): a preview built to aid
+   * comprehension — Brann & Sidi's guided skim, written rather than cut.
+   */
+  preview: [
+    'You write a one-minute preview of one chapter of a study document, for',
+    'a reader about to read it for the first time. Ground every line in the',
+    'provided text — never invent content the chapter does not contain.',
+    '`about`: what the chapter is about and why it matters, two or three',
+    "plain sentences. `outline`: the argument's movements in order, one",
+    'short line each — the reader should see the road, not the scenery.',
+    '`keyTerms`: up to eight terms the chapter turns on, each glossed in one',
+    "everyday-words line, keeping the document's own names exactly.",
+    '`howItEnds`: where the chapter lands — state the conclusion plainly,',
+    'no teasing. Write for orientation, not summary: afterwards the reader',
+    'should know what to look for, not feel they have already read it.',
+  ].join(' '),
+
+  /**
+   * The independent grade of a book-closed recall (guided reading).
+   * Tone rule: feedback names ideas from the text, never the person.
+   */
+  recallGrade: [
+    "You grade a reader's from-memory recall of one chapter against the",
+    "chapter's actual text. `score` is 0-1: the fraction of the chapter's",
+    'load-bearing ideas the recall carries, judged on substance — never on',
+    'phrasing, spelling or length. A short recall naming the right ideas',
+    'scores high. The recall may be transcribed speech: ignore fillers and',
+    'transcription artifacts.',
+    "`nailed`: ideas the recall got right, in the document's terms.",
+    '`missed`: load-bearing ideas the recall did not mention. `focus`: up to',
+    'four pointers for a re-read, each naming a specific idea or section.',
+    'Name ideas, never failings: "The role of X didn\'t come up", never',
+    '"You forgot X". If the recall is empty or off-topic, score 0 and let',
+    "`missed` carry the chapter's main ideas.",
+  ].join(' '),
+
+  /** Verdict on the reader's answer to their own pre-reading question. */
+  questionCheck: [
+    'A reader posed a question before reading a study document, and now',
+    'answers it in their own words. Judge the answer against the provided',
+    'passages only. `verdict`: "correct" when the substance matches what the',
+    'document says; "partial" when on the right track but incomplete or',
+    'slightly off; "incorrect" when it contradicts the document or misses',
+    'the point. Judge substance, never phrasing; the answer may be',
+    'transcribed speech. If the document never answers the question, judge',
+    'against the closest ground the passages give and say so.',
+    "`explanation`: one or two sentences — what's right, what's missing —",
+    'in the document\'s terms, spoken to the reader as "you". `page`: the',
+    'page number (from the [p.N] markers) where the document answers it,',
+    'or 0 if none does.',
+  ].join(' '),
+
   imageQuery: [
     "Turn the reader's highlighted text into a short image-search query for a",
     'diagram or illustration that would help them understand it.',

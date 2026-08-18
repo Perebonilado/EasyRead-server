@@ -28,6 +28,7 @@ import {
 import type {
   AssessmentKind,
   ComputeResponse,
+  DiagramCheckResponse,
   DiagramResponse,
   MasteryResponse,
   SketchResponse,
@@ -35,8 +36,11 @@ import type {
   VoiceSessionResponse,
 } from '../../contracts';
 import {
+  AskDiagramCheckHandler,
   ComputeHandler,
   DrawDiagramHandler,
+  GenerateTopicQuizHandler,
+  type TopicQuizResponse,
   DrawSketchHandler,
   PageAudioHandler,
   StartVoiceSessionHandler,
@@ -145,6 +149,8 @@ export class VoiceController {
     private readonly drawDiagram: DrawDiagramHandler,
     private readonly drawSketch: DrawSketchHandler,
     private readonly compute: ComputeHandler,
+    private readonly diagramCheck: AskDiagramCheckHandler,
+    private readonly topicQuiz: GenerateTopicQuizHandler,
     private readonly recordAssessment: RecordAssessmentHandler,
     private readonly recordDwell: RecordDwellHandler,
     private readonly getMastery: GetMasteryHandler,
@@ -234,6 +240,38 @@ export class VoiceController {
     @Body() body: SketchDto,
   ): Promise<SketchResponse> {
     const result = await this.drawSketch.handle({
+      userId,
+      documentId,
+      description: body.description,
+    });
+    return result.data;
+  }
+
+  /** Self-serve checks for solo study: fresh MCQs on one chapter. */
+  @Post('topics/:topicId/quiz')
+  @HttpCode(201)
+  async topicQuizRoute(
+    @CurrentUser('id') userId: string,
+    @Param('id') documentId: string,
+    @Param('topicId') topicId: string,
+  ): Promise<TopicQuizResponse> {
+    const result = await this.topicQuiz.handle({
+      userId,
+      documentId,
+      topicId,
+    });
+    return result.data;
+  }
+
+  /** A diagram with one "?" node — the visual check the student completes. */
+  @Post('diagram-check')
+  @HttpCode(201)
+  async diagramCheckRoute(
+    @CurrentUser('id') userId: string,
+    @Param('id') documentId: string,
+    @Body() body: SketchDto,
+  ): Promise<DiagramCheckResponse> {
+    const result = await this.diagramCheck.handle({
       userId,
       documentId,
       description: body.description,

@@ -100,6 +100,19 @@ import { ExportsController } from './web/controllers/exports.controller';
 import { HighlightController } from './web/controllers/highlight.controller';
 import { ChatController } from './web/controllers/chat.controller';
 import { NotesController } from './web/controllers/notes.controller';
+import { GroupsController } from './web/controllers/groups.controller';
+import { SessionGateway } from './web/gateways/session.gateway';
+import { GroupLessonFactory } from './web/gateways/group-lesson';
+import {
+  CreateGroupHandler,
+  EndSessionHandler,
+  GroupDetailHandler,
+  JoinGroupHandler,
+  ListGroupsHandler,
+  RegenerateCodeHandler,
+  RemoveMemberHandler,
+  StartSessionHandler,
+} from './business/handlers/groups/groups.handlers';
 import { NotebookController } from './web/controllers/notebook.controller';
 import { RecapsController } from './web/controllers/recaps.controller';
 import { ImportController } from './web/controllers/import.controller';
@@ -114,6 +127,16 @@ import { AuthGuard } from './web/security/auth.guard';
 
 const handlers = [
   RegisterHandler,
+  CreateGroupHandler,
+  JoinGroupHandler,
+  ListGroupsHandler,
+  GroupDetailHandler,
+  RegenerateCodeHandler,
+  RemoveMemberHandler,
+  StartSessionHandler,
+  EndSessionHandler,
+  SessionGateway,
+  GroupLessonFactory,
   LoginHandler,
   VerifyEmailHandler,
   ForgotPasswordHandler,
@@ -202,6 +225,7 @@ const queries = [
     HighlightController,
     ChatController,
     NotesController,
+    GroupsController,
     NotebookController,
     RecapsController,
     ImportController,

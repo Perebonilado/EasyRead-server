@@ -3,9 +3,10 @@ import { ConfigService } from '@nestjs/config';
 import { PasswordService } from '../../../auth/password.service';
 import { TokenGenerator } from '../../../auth/token-generator';
 import { EmailInUseError } from '../../domain/errors/errors';
-import { CLOCK, EMAIL } from '../../ports/tokens';
+import { CLOCK, EMAIL, STARTER_LIBRARY } from '../../ports/tokens';
 import type { ClockPort } from '../../ports/clock.port';
 import type { EmailPort } from '../../ports/email.port';
+import type { StarterLibraryPort } from '../../ports/starter-library.port';
 import { USER_REPOSITORY } from '../../repositories/tokens';
 import type { UserRepository } from '../../repositories/user.repository';
 import AbstractRequestHandlerTemplate from '../AbstractRequestHandlerTemplate';
@@ -27,6 +28,7 @@ export class RegisterHandler extends AbstractRequestHandlerTemplate<
   constructor(
     @Inject(USER_REPOSITORY) private readonly users: UserRepository,
     @Inject(EMAIL) private readonly email: EmailPort,
+    @Inject(STARTER_LIBRARY) private readonly starter: StarterLibraryPort,
     @Inject(CLOCK) private readonly clock: ClockPort,
     private readonly passwords: PasswordService,
     private readonly tokens: TokenGenerator,
@@ -55,6 +57,16 @@ export class RegisterHandler extends AbstractRequestHandlerTemplate<
       verificationTokenHash: this.tokens.hash(token),
       verificationTokenExpires: expires,
     });
+
+    // The starter document (onboarding): seeded in the background so the
+    // library is ready by first login, and never allowed to fail a signup.
+    void this.starter
+      .copyToUser(user.id)
+      .catch((error: Error) =>
+        this.logger.error(
+          `Starter seed failed for ${user.id}: ${error.message}`,
+        ),
+      );
 
     // Delivery failure must not lose the account — the user can resend.
     await this.email

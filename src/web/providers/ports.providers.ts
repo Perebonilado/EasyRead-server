@@ -18,6 +18,7 @@ import {
   STORAGE,
   VECTOR_STORE,
   WEB_IMPORT,
+  STARTER_LIBRARY,
 } from '../../business/ports/tokens';
 import { BullmqQueueAdapter } from '../adapters/bullmq-queue.adapter';
 import { DriveConverterAdapter } from '../adapters/drive-converter.adapter';
@@ -45,6 +46,7 @@ import { PassthroughConverterAdapter } from '../adapters/passthrough-converter.a
 import { PdfExportRendererAdapter } from '../adapters/pdf-export-renderer.adapter';
 import { WebImportAdapter } from '../adapters/web-import/web-import.adapter';
 import { PdfjsToolkitAdapter } from '../adapters/pdfjs-toolkit.adapter';
+import { StarterLibraryAdapter } from '../adapters/starter-library.adapter';
 import { S3StorageAdapter } from '../adapters/s3-storage.adapter';
 import { RedisEventBusAdapter } from '../adapters/redis-event-bus.adapter';
 import { SystemClock } from '../adapters/system-clock';
@@ -84,6 +86,7 @@ export const portProviders: Provider[] = [
   // Payments are stubbed until billing lands.
   { provide: PAYMENTS, useClass: FakePaymentsAdapter },
   { provide: EMAIL, useClass: LogEmailAdapter },
+  { provide: STARTER_LIBRARY, useClass: StarterLibraryAdapter },
 
   {
     provide: STORAGE,

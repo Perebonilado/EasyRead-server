@@ -40,8 +40,11 @@
     "@nestjs/config": "^4.0.4",
     "@nestjs/core": "^11.0.1",
     "@nestjs/platform-express": "^11.0.1",
+    "@nestjs/platform-socket.io": "^11.2.1",
     "@nestjs/sequelize": "^11.0.1",
     "@nestjs/throttler": "^6.5.0",
+    "@nestjs/websockets": "^11.2.1",
+    "@types/ws": "^8.18.1",
     "ai": "^7.0.64",
     "axios": "^1.17.0",
     "bcrypt": "^6.0.0",
@@ -68,6 +71,7 @@
     "sequelize-typescript": "^2.1.6",
     "umzug": "^3.8.3",
     "uuid": "^14.0.0",
+    "ws": "^8.21.3",
     "zod": "^3.24.1"
   },
   "devDependencies": {

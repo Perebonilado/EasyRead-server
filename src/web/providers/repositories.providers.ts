@@ -11,6 +11,7 @@ import {
   EXPORT_REPOSITORY,
   CHAT_REPOSITORY,
   NOTE_REPOSITORY,
+  GROUP_REPOSITORY,
   PAGE_ASSET_REPOSITORY,
   RECAP_REPOSITORY,
   TOPIC_PREVIEW_REPOSITORY,
@@ -37,6 +38,7 @@ import {
 } from '../repositories/sequelize-learning.repositories';
 import { SequelizeChatRepository } from '../repositories/sequelize-chat.repository';
 import { SequelizeNoteRepository } from '../repositories/sequelize-note.repository';
+import { SequelizeGroupRepository } from '../repositories/sequelize-group.repository';
 import { SequelizeRecapRepository } from '../repositories/sequelize-recap.repository';
 import { SequelizeTopicPreviewRepository } from '../repositories/sequelize-preview.repository';
 import { SequelizePageAssetRepository } from '../repositories/sequelize-page-asset.repository';
@@ -92,6 +94,7 @@ export const repositoryProviders: Provider[] = [
   { provide: LOOKUP_REPOSITORY, useClass: SequelizeLookupRepository },
   { provide: CHAT_REPOSITORY, useClass: SequelizeChatRepository },
   { provide: NOTE_REPOSITORY, useClass: SequelizeNoteRepository },
+  { provide: GROUP_REPOSITORY, useClass: SequelizeGroupRepository },
   { provide: RECAP_REPOSITORY, useClass: SequelizeRecapRepository },
   {
     provide: TOPIC_PREVIEW_REPOSITORY,

@@ -1,8 +1,9 @@
 import { Inject, Injectable } from '@nestjs/common';
 import { Document } from '../../domain/entities/document';
 import { ForbiddenError, NotFoundError } from '../../domain/errors/errors';
-import { DOCUMENT_REPOSITORY } from '../../repositories/tokens';
+import { DOCUMENT_REPOSITORY, GROUP_REPOSITORY } from '../../repositories/tokens';
 import type { DocumentRepository } from '../../repositories/document.repository';
+import type { GroupRepository } from '../../repositories/group.repository';
 
 /**
  * One place that answers "may this user touch this document?".
@@ -15,6 +16,7 @@ import type { DocumentRepository } from '../../repositories/document.repository'
 export class DocumentAccessService {
   constructor(
     @Inject(DOCUMENT_REPOSITORY) private readonly documents: DocumentRepository,
+    @Inject(GROUP_REPOSITORY) private readonly groups: GroupRepository,
   ) {}
 
   async require(documentId: string, userId: string): Promise<Document> {
@@ -22,7 +24,17 @@ export class DocumentAccessService {
     // A document that exists but belongs to someone else reports as missing,
     // so ids can't be probed for existence.
     if (!doc || doc.props.deletedAt) throw new NotFoundError('Document');
-    if (!doc.isOwnedBy(userId)) throw new NotFoundError('Document');
+    if (!doc.isOwnedBy(userId)) {
+      // Classroom (classroom plan §4): a member of a LIVE group session on
+      // this document reads it for the session's duration. Read-only in
+      // effect: everything the reader writes is keyed to their own user, and
+      // access evaporates when the session ends.
+      const inSession = await this.groups.liveSessionDocumentAccess(
+        userId,
+        documentId,
+      );
+      if (!inSession) throw new NotFoundError('Document');
+    }
     return doc;
   }
 

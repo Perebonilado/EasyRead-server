@@ -9,6 +9,7 @@ export const EXPORT_REPOSITORY = Symbol('ExportRepository');
 export const LOOKUP_REPOSITORY = Symbol('LookupRepository');
 export const CHAT_REPOSITORY = Symbol('CHAT_REPOSITORY');
 export const NOTE_REPOSITORY = Symbol('NOTE_REPOSITORY');
+export const GROUP_REPOSITORY = Symbol('GROUP_REPOSITORY');
 export const RECAP_REPOSITORY = Symbol('RECAP_REPOSITORY');
 export const TOPIC_PREVIEW_REPOSITORY = Symbol('TOPIC_PREVIEW_REPOSITORY');
 export const CONCEPT_REPOSITORY = Symbol('CONCEPT_REPOSITORY');

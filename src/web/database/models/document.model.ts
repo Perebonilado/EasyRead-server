@@ -46,7 +46,7 @@ export class DocumentModel extends BaseModel {
   declare sourceMimeType: string;
 
   @Column({
-    type: DataType.ENUM('uploaded', 'generated', 'imported'),
+    type: DataType.ENUM('uploaded', 'generated', 'imported', 'starter'),
     allowNull: false,
     defaultValue: 'uploaded',
   })

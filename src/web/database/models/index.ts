@@ -26,6 +26,11 @@ export { TopicReadStateModel } from './topic-read-state.model';
 export { TopicModel } from './topic.model';
 export { UsageCounterModel } from './usage-counter.model';
 export { UserModel } from './user.model';
+export {
+  StudyGroupModel,
+  StudyGroupMemberModel,
+  StudySessionModel,
+} from './study-group.model';
 export { WebhookEventModel } from './webhook-event.model';
 
 import { AiCallLogModel } from './ai-call-log.model';
@@ -56,11 +61,19 @@ import { TopicReadStateModel } from './topic-read-state.model';
 import { TopicModel } from './topic.model';
 import { UsageCounterModel } from './usage-counter.model';
 import { UserModel } from './user.model';
+import {
+  StudyGroupModel,
+  StudyGroupMemberModel,
+  StudySessionModel,
+} from './study-group.model';
 import { WebhookEventModel } from './webhook-event.model';
 
 /** Registered with SequelizeModule in both the API and the worker. */
 export const ALL_MODELS = [
   UserModel,
+  StudyGroupModel,
+  StudyGroupMemberModel,
+  StudySessionModel,
   RefreshTokenModel,
   SubscriptionModel,
   UsageCounterModel,

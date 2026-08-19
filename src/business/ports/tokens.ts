@@ -5,6 +5,7 @@
  */
 export const CLOCK = Symbol('ClockPort');
 export const STORAGE = Symbol('StoragePort');
+export const STARTER_LIBRARY = Symbol('StarterLibraryPort');
 export const CONVERTER = Symbol('ConverterPort');
 export const PDF_TOOLKIT = Symbol('PdfToolkitPort');
 export const LLM_GATEWAY = Symbol('LlmGatewayPort');

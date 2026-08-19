@@ -346,7 +346,7 @@ export type RecapDto = {
 // ── Learn a topic ────────────────────────────────────────────────────────────
 
 /** Uploaded by the reader, written by the model, or imported from the web. */
-export type DocumentSource = 'uploaded' | 'generated' | 'imported';
+export type DocumentSource = 'uploaded' | 'generated' | 'imported' | 'starter';
 
 export type LearnDepth = 'primer' | 'solid' | 'deep' | 'exhaustive';
 
@@ -796,3 +796,42 @@ export type SseEvent =
   | { type: 'snapshot'; document: DocumentDetail };
 
 export type SseEventName = SseEvent['type'];
+
+// ── Study groups (classroom plan) ────────────────────────────────────────────
+
+export type GroupMemberDto = {
+  userId: string;
+  name: string;
+  role: 'owner' | 'member';
+};
+
+export type GroupSummaryDto = {
+  id: string;
+  name: string;
+  ownerId: string;
+  isOwner: boolean;
+  /** First names for the card face; full roster lives in the detail. */
+  memberNames: string[];
+  liveSessionId: string | null;
+};
+
+export type StudySessionDto = {
+  id: string;
+  groupId: string;
+  hostId: string;
+  documentId: string;
+  topicId: string | null;
+  tutorId: string;
+  status: 'live' | 'ended';
+  startedAt: string;
+};
+
+export type GroupDetailDto = {
+  id: string;
+  name: string;
+  ownerId: string;
+  isOwner: boolean;
+  inviteCode: string;
+  members: GroupMemberDto[];
+  liveSession: StudySessionDto | null;
+};

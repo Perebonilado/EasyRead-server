@@ -270,3 +270,214 @@ export function findPromotions(
   consider('depth');
   return promotions;
 }
+
+// ── Passes: rereading, as its own chapter of the evidence ────────────────────
+
+/**
+ * How the understanding report reads a topic's history.
+ *
+ * A reread is not more of the same evidence — it is a second attempt, and
+ * blending it with the first tells a lie in both directions: a chapter
+ * bombed cold and nailed after rereading averages to "mediocre", and the
+ * improvement the reread bought is invisible. So events are grouped into
+ * passes, the newest pass carries the score, and the earlier ones become
+ * the trend behind it.
+ *
+ * Passes are reconstructed from time gaps rather than recorded: no
+ * migration, no new writes, and it works retroactively over every event
+ * already in the table. The known cost is that a same-day reread merges
+ * into the current pass; that is the honest trade for zero bookkeeping.
+ */
+
+/** Same 12 hours the return-recall offer uses — one gap rule in the product. */
+export const PASS_GAP_MS = 12 * 60 * 60 * 1000;
+
+/** No evidence for this long and a topic is stale: labeled, never re-scored. */
+export const STALE_AFTER_MS = 14 * 24 * 60 * 60 * 1000;
+
+export interface Pass {
+  /** Oldest first within the pass. */
+  events: AssessmentEventRecord[];
+  startedAt: Date;
+  endedAt: Date;
+  /** 0–100 for this pass alone; null when it holds too little evidence. */
+  score: number | null;
+}
+
+/**
+ * Splits one topic's events into passes on gaps longer than `gapMs`.
+ * Input may be in any order; output is oldest pass first.
+ */
+export function splitIntoPasses(
+  events: AssessmentEventRecord[],
+  gapMs: number = PASS_GAP_MS,
+): Pass[] {
+  const sorted = [...events].sort(
+    (a, b) => a.createdAt.getTime() - b.createdAt.getTime(),
+  );
+  if (!sorted.length) return [];
+
+  const groups: AssessmentEventRecord[][] = [[sorted[0]]];
+  for (let i = 1; i < sorted.length; i++) {
+    const previous = sorted[i - 1].createdAt.getTime();
+    const current = sorted[i].createdAt.getTime();
+    if (current - previous > gapMs) groups.push([sorted[i]]);
+    else groups[groups.length - 1].push(sorted[i]);
+  }
+
+  return groups.map((group) => ({
+    events: group,
+    startedAt: group[0].createdAt,
+    endedAt: group[group.length - 1].createdAt,
+    score: passScore(group),
+  }));
+}
+
+/**
+ * One pass's score, 0–100. Same weighting spirit as `computeMastery` —
+ * quality-weighted, recency-decayed — but scoped to the pass, so the number
+ * answers "how did this attempt go", not "how are things overall".
+ */
+export function passScore(events: AssessmentEventRecord[]): number | null {
+  if (events.length < MIN_EVENTS) return null;
+
+  // Newest first within the pass, so decay favours how it ended.
+  const sorted = [...events].sort(
+    (a, b) => b.createdAt.getTime() - a.createdAt.getTime(),
+  );
+
+  let weighted = 0;
+  let total = 0;
+  sorted.forEach((event, index) => {
+    const weight = KIND_WEIGHT[event.kind] * DECAY ** index;
+    weighted += event.score * weight;
+    total += weight;
+  });
+  return Math.round((weighted / total) * 100);
+}
+
+export interface TopicReport {
+  topicId: string;
+  /** The latest pass that carries a score; null when none does. */
+  score: number | null;
+  /** Every scored pass, oldest first — the trend behind the score. */
+  passScores: number[];
+  /** Latest scored pass minus the one before it, when both exist. */
+  delta: number | null;
+  passes: number;
+  events: number;
+  lastEvidenceAt: Date | null;
+  /** Evidence exists but is older than STALE_AFTER_MS. Label only. */
+  stale: boolean;
+  /** The newest scored pass is weak. Earlier weakness never keeps this true. */
+  needsRevisit: boolean;
+}
+
+/**
+ * A topic's standing, read from its passes.
+ *
+ * Two rules worth stating: the newest scored pass wins outright (so a good
+ * reread clears `needsRevisit` no matter how bad the first attempt was), and
+ * time alone never moves a score — a long-untouched topic is `stale`, which
+ * is a different thing from weak and must render differently.
+ */
+export function topicReport(
+  topicId: string,
+  events: AssessmentEventRecord[],
+  now: Date,
+): TopicReport {
+  const passes = splitIntoPasses(events);
+  const scored = passes.filter((pass) => pass.score !== null);
+  const passScores = scored.map((pass) => pass.score as number);
+  const score = passScores.length ? passScores[passScores.length - 1] : null;
+  const delta =
+    passScores.length >= 2
+      ? passScores[passScores.length - 1] - passScores[passScores.length - 2]
+      : null;
+
+  const lastEvidenceAt = passes.length
+    ? passes[passes.length - 1].endedAt
+    : null;
+
+  return {
+    topicId,
+    score,
+    passScores,
+    delta,
+    passes: passes.length,
+    events: events.length,
+    lastEvidenceAt,
+    stale: lastEvidenceAt
+      ? now.getTime() - lastEvidenceAt.getTime() > STALE_AFTER_MS
+      : false,
+    needsRevisit: score !== null && score < WEAK_THRESHOLD,
+  };
+}
+
+// ── Missed ideas: what never came back, and whether it since did ─────────────
+
+export interface MissedIdea {
+  text: string;
+  firstMissedAt: Date;
+  timesMissed: number;
+  resolvedAt: Date | null;
+}
+
+/**
+ * The ideas a topic's recalls kept failing to produce, folded across passes.
+ *
+ * Written by the recall grader into `payload.missed`; closed by a later
+ * grade listing them in `payload.resolved`. Resolution is judged by the
+ * grader at grade time rather than matched here, because "the wage-price
+ * spiral" and "wages pushing prices up" are the same idea and no string
+ * comparison in application code will ever agree.
+ *
+ * Matching against `resolved` is exact-text by necessity — the grader is
+ * handed the very strings it must echo back, so this stays a lookup rather
+ * than a guess.
+ */
+export function openMissedIdeas(events: AssessmentEventRecord[]): MissedIdea[] {
+  const sorted = [...events].sort(
+    (a, b) => a.createdAt.getTime() - b.createdAt.getTime(),
+  );
+
+  const ideas = new Map<string, MissedIdea>();
+  for (const event of sorted) {
+    const missed = event.payload?.missed;
+    if (Array.isArray(missed)) {
+      for (const raw of missed) {
+        if (typeof raw !== 'string' || !raw.trim()) continue;
+        const text = raw.trim();
+        const existing = ideas.get(text);
+        if (existing) {
+          existing.timesMissed += 1;
+          // Missed again after being resolved: it is open once more.
+          existing.resolvedAt = null;
+        } else {
+          ideas.set(text, {
+            text,
+            firstMissedAt: event.createdAt,
+            timesMissed: 1,
+            resolvedAt: null,
+          });
+        }
+      }
+    }
+
+    const resolved = event.payload?.resolved;
+    if (Array.isArray(resolved)) {
+      for (const raw of resolved) {
+        if (typeof raw !== 'string') continue;
+        const idea = ideas.get(raw.trim());
+        if (idea) idea.resolvedAt = event.createdAt;
+      }
+    }
+  }
+
+  // Most-missed first, then oldest — what to reread, in order.
+  return [...ideas.values()].sort(
+    (a, b) =>
+      b.timesMissed - a.timesMissed ||
+      a.firstMissedAt.getTime() - b.firstMissedAt.getTime(),
+  );
+}

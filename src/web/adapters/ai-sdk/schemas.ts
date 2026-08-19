@@ -137,6 +137,8 @@ export const previewSchema = z.object({
     )
     .max(8),
   howItEnds: z.string().min(1).max(400),
+  /** Shape-only retelling prompts; the recall stage's "Need a nudge?". */
+  recallCues: z.array(z.string().min(1).max(160)).min(3).max(5),
 });
 
 /**
@@ -144,6 +146,16 @@ export const previewSchema = z.object({
  * required; an empty array is a valid answer ("nothing missed").
  */
 export const recallGradeSchema = z.object({
+  /**
+   * Which of the `previouslyMissed` ideas this recall finally covered, by
+   * index. Indices rather than strings so an idea can never be silently
+   * re-worded on the way back, which would break the fold that closes it.
+   */
+  nowCovered: z
+    .array(z.number().int().min(0))
+    .describe(
+      'Indices into the previously-missed list that this recall now covers.',
+    ),
   score: z
     .number()
     .min(0)

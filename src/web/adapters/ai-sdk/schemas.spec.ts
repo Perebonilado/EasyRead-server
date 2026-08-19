@@ -100,13 +100,19 @@ describe('structured-output schemas', () => {
     expect(sketchSchema.safeParse({ title: 'x', svg: '' }).success).toBe(false);
   });
 
-  it('previewSchema pins the four preview parts', () => {
+  it('previewSchema pins the preview parts, recall cues included', () => {
+    const cues = [
+      'How does it open?',
+      'What gets compared?',
+      'Where does it land?',
+    ];
     expect(
       previewSchema.safeParse({
         about: 'What the chapter covers.',
         outline: ['First movement', 'Second movement'],
         keyTerms: [{ term: 'Osmosis', gloss: 'Water crossing a membrane' }],
         howItEnds: 'It lands on the pump model.',
+        recallCues: cues,
       }).success,
     ).toBe(true);
     // One outline line is not a road; the skim needs at least two.
@@ -116,6 +122,17 @@ describe('structured-output schemas', () => {
         outline: ['only one'],
         keyTerms: [],
         howItEnds: 'x',
+        recallCues: cues,
+      }).success,
+    ).toBe(false);
+    // Fewer than three cues is not a scaffold.
+    expect(
+      previewSchema.safeParse({
+        about: 'x',
+        outline: ['a', 'b'],
+        keyTerms: [],
+        howItEnds: 'x',
+        recallCues: ['just one'],
       }).success,
     ).toBe(false);
   });
@@ -127,6 +144,7 @@ describe('structured-output schemas', () => {
         nailed: ['The pump model'],
         missed: [],
         focus: [],
+        nowCovered: [],
       }).success,
     ).toBe(true);
     expect(
@@ -135,7 +153,24 @@ describe('structured-output schemas', () => {
         nailed: [],
         missed: [],
         focus: [],
+        nowCovered: [],
       }).success,
+    ).toBe(false);
+  });
+
+  it('recallGradeSchema requires nowCovered, as whole-number indices', () => {
+    const base = { score: 0.5, nailed: [], missed: [], focus: [] };
+    // Absent entirely: the grader must always answer, even with [].
+    expect(recallGradeSchema.safeParse(base).success).toBe(false);
+    expect(
+      recallGradeSchema.safeParse({ ...base, nowCovered: [0, 2] }).success,
+    ).toBe(true);
+    // Text would defeat the point — indices are what keep wording stable.
+    expect(
+      recallGradeSchema.safeParse({ ...base, nowCovered: ['idea'] }).success,
+    ).toBe(false);
+    expect(
+      recallGradeSchema.safeParse({ ...base, nowCovered: [-1] }).success,
     ).toBe(false);
   });
 

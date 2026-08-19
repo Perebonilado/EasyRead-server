@@ -556,6 +556,14 @@ export const PROMPTS = {
     '`howItEnds`: where the chapter lands — state the conclusion plainly,',
     'no teasing. Write for orientation, not summary: afterwards the reader',
     'should know what to look for, not feel they have already read it.',
+    '`recallCues`: 3-5 short prompts that later guide the reader in',
+    'retelling the chapter from memory. These must point at the SHAPE of',
+    'the chapter — how it opens, what gets compared, what example carries',
+    'a section, where it lands — while giving away NO facts, names,',
+    'numbers or conclusions. "Two approaches get weighed against each',
+    'other. What are they, and which wins?" is right; anything a reader',
+    'could repeat as an answer is wrong. Each cue is a question, second',
+    'person, under twenty words.',
   ].join(' '),
 
   /**
@@ -575,6 +583,13 @@ export const PROMPTS = {
     'Name ideas, never failings: "The role of X didn\'t come up", never',
     '"You forgot X". If the recall is empty or off-topic, score 0 and let',
     "`missed` carry the chapter's main ideas.",
+    'You may also be given a numbered list of ideas this reader has missed',
+    'on earlier attempts at this chapter. Return in `nowCovered` the index',
+    'of each one the recall genuinely covers this time, judging substance',
+    'rather than wording. Be conservative: when an idea is only gestured at,',
+    'leave it out. Return an empty array when the list is empty or nothing',
+    'is covered. An idea you list in `nowCovered` must not also appear in',
+    '`missed`.',
   ].join(' '),
 
   /** Verdict on the reader's answer to their own pre-reading question. */

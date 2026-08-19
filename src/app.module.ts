@@ -68,6 +68,7 @@ import {
   GradeRecallHandler,
   TranscribeAudioHandler,
 } from './business/handlers/documents/guided.handlers';
+import { GetDocumentReportHandler } from './business/handlers/documents/report.handlers';
 import {
   CreateNoteHandler,
   DeleteNoteHandler,
@@ -156,6 +157,7 @@ const handlers = [
   GradeRecallHandler,
   CheckQuestionAnswerHandler,
   TranscribeAudioHandler,
+  GetDocumentReportHandler,
   DiscoverImportHandler,
   StartImportHandler,
   ListPageAssetsHandler,
@@ -207,7 +209,7 @@ const queries = [
     ConceptsController,
     ExportsController,
     VoiceController,
-  GuidedController,
+    GuidedController,
     TutorsController,
     EventsController,
     HealthController,

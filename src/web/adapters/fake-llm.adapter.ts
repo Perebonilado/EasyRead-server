@@ -404,10 +404,12 @@ export class FakeLlmAdapter implements LlmGatewayPort {
 
   async generateTopicQuiz({
     topicTitle,
+    focus,
   }: {
     topicTitle: string;
     pagesText: string;
     summary: string | null;
+    focus?: string[];
   }): Promise<
     LlmResult<{
       questions: {
@@ -420,7 +422,9 @@ export class FakeLlmAdapter implements LlmGatewayPort {
   > {
     const started = Date.now();
     const q = (n: number) => ({
-      question: `Fake question ${n} about ${topicTitle}?`,
+      question: focus?.length
+        ? `Fake focus question ${n} on "${focus[0]}"?`
+        : `Fake question ${n} about ${topicTitle}?`,
       options: ['Right answer', 'Wrong one', 'Also wrong'],
       correctIndex: 0,
       explanation: 'The first option restates the chapter.',
@@ -450,6 +454,11 @@ export class FakeLlmAdapter implements LlmGatewayPort {
         outline: ['First movement of the argument', 'Second movement'],
         keyTerms: [{ term: 'Fake term', gloss: 'What the fake term means' }],
         howItEnds: 'It ends by restating the fake conclusion.',
+        recallCues: [
+          'How does the chapter open?',
+          'What gets compared in the middle?',
+          'Where does it land?',
+        ],
       },
       usage: this.usage(started, topicTitle.length, 40),
     };
@@ -457,16 +466,19 @@ export class FakeLlmAdapter implements LlmGatewayPort {
 
   async gradeRecall({
     recall,
+    previouslyMissed,
   }: {
     topicTitle: string;
     pagesText: string;
     recall: string;
+    previouslyMissed?: string[];
   }): Promise<
     LlmResult<{
       score: number;
       nailed: string[];
       missed: string[];
       focus: string[];
+      nowCovered: number[];
     }>
   > {
     const started = Date.now();
@@ -478,12 +490,16 @@ export class FakeLlmAdapter implements LlmGatewayPort {
             nailed: [],
             missed: ["The chapter's main idea"],
             focus: ['Reread the opening section'],
+            nowCovered: [],
           }
         : {
             score: 0.5,
             nailed: ['One idea the recall carried'],
             missed: ['One idea the recall did not mention'],
             focus: ['The section the recall skipped'],
+            // Deterministically closes the first open idea, so the
+            // resolution path is exercisable offline.
+            nowCovered: previouslyMissed?.length ? [0] : [],
           },
       usage: this.usage(started, recall.length, 30),
     };

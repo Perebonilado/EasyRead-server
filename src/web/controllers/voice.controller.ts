@@ -91,6 +91,15 @@ class SketchDto {
   description!: string;
 }
 
+class TopicQuizDto {
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(5)
+  @IsString({ each: true })
+  @Length(1, 200, { each: true })
+  focus?: string[];
+}
+
 class ComputeDto {
   @IsString()
   @Length(1, 500)
@@ -254,11 +263,13 @@ export class VoiceController {
     @CurrentUser('id') userId: string,
     @Param('id') documentId: string,
     @Param('topicId') topicId: string,
+    @Body() body: TopicQuizDto,
   ): Promise<TopicQuizResponse> {
     const result = await this.topicQuiz.handle({
       userId,
       documentId,
       topicId,
+      focus: body.focus,
     });
     return result.data;
   }

@@ -3,7 +3,11 @@ import {
   computeMastery,
   effectiveProfile,
   findPromotions,
+  openMissedIdeas,
+  passScore,
   recommendTutor,
+  splitIntoPasses,
+  topicReport,
 } from './learning';
 import type {
   AssessmentEventRecord,
@@ -237,5 +241,158 @@ describe('computeCalibration', () => {
 
   it('no rated events means no verdict, not zero', () => {
     expect(computeCalibration([unrated(1)])).toEqual({ bias: null, n: 0 });
+  });
+});
+
+// ── Passes, pass-aware scoring, missed ideas ────────────────────────────────
+
+describe('passes and the understanding report', () => {
+  const HOUR = 60 * 60 * 1000;
+  const DAY = 24 * HOUR;
+  const base = new Date('2026-08-01T09:00:00Z');
+  const at = (offsetMs: number) => new Date(base.getTime() + offsetMs);
+
+  const event = (
+    offsetMs: number,
+    score: number,
+    payload: Record<string, unknown> | null = null,
+    kind: 'mcq' | 'flashcard' | 'verbal' = 'mcq',
+  ): AssessmentEventRecord => ({
+    topicId: 't1',
+    kind,
+    score,
+    payload,
+    createdAt: at(offsetMs),
+  });
+
+  it('groups events into one pass when they sit inside the gap', () => {
+    const passes = splitIntoPasses([
+      event(0, 1),
+      event(2 * HOUR, 0),
+      event(5 * HOUR, 1),
+    ]);
+    expect(passes).toHaveLength(1);
+    expect(passes[0].events).toHaveLength(3);
+  });
+
+  it('starts a new pass after a gap longer than twelve hours', () => {
+    const passes = splitIntoPasses([
+      event(0, 0),
+      event(HOUR, 0),
+      event(2 * DAY, 1),
+      event(2 * DAY + HOUR, 1),
+    ]);
+    expect(passes).toHaveLength(2);
+    expect(passes[0].score).toBe(0);
+    expect(passes[1].score).toBe(100);
+  });
+
+  it('sorts unordered input before splitting', () => {
+    const passes = splitIntoPasses([event(2 * DAY, 1), event(0, 0)]);
+    expect(passes).toHaveLength(2);
+    expect(passes[0].startedAt.getTime()).toBeLessThan(
+      passes[1].startedAt.getTime(),
+    );
+  });
+
+  it('scores a pass only when it holds enough evidence', () => {
+    expect(passScore([event(0, 1)])).toBeNull();
+    expect(passScore([event(0, 1), event(HOUR, 1)])).toBe(100);
+  });
+
+  it('lets a strong reread clear needsRevisit that a weak first pass set', () => {
+    const weakThenStrong = topicReport(
+      't1',
+      [
+        event(0, 0),
+        event(HOUR, 0),
+        event(2 * DAY, 1),
+        event(2 * DAY + HOUR, 1),
+      ],
+      at(2 * DAY + 2 * HOUR),
+    );
+    expect(weakThenStrong.score).toBe(100);
+    expect(weakThenStrong.needsRevisit).toBe(false);
+    expect(weakThenStrong.passScores).toEqual([0, 100]);
+    expect(weakThenStrong.delta).toBe(100);
+    expect(weakThenStrong.passes).toBe(2);
+  });
+
+  it('reports the delta as negative when a later pass goes worse', () => {
+    const report = topicReport(
+      't1',
+      [
+        event(0, 1),
+        event(HOUR, 1),
+        event(2 * DAY, 0),
+        event(2 * DAY + HOUR, 0),
+      ],
+      at(2 * DAY + 2 * HOUR),
+    );
+    expect(report.delta).toBe(-100);
+    expect(report.needsRevisit).toBe(true);
+  });
+
+  it('labels old evidence stale without touching the score', () => {
+    const events = [event(0, 1), event(HOUR, 1)];
+    const fresh = topicReport('t1', events, at(2 * DAY));
+    const old = topicReport('t1', events, at(30 * DAY));
+    expect(fresh.stale).toBe(false);
+    expect(old.stale).toBe(true);
+    // Time alone must never move the number.
+    expect(old.score).toBe(fresh.score);
+    expect(old.needsRevisit).toBe(fresh.needsRevisit);
+  });
+
+  it('has no score, no staleness and no revisit flag without evidence', () => {
+    const empty = topicReport('t1', [], at(0));
+    expect(empty.score).toBeNull();
+    expect(empty.stale).toBe(false);
+    expect(empty.needsRevisit).toBe(false);
+    expect(empty.lastEvidenceAt).toBeNull();
+  });
+
+  it('folds missed ideas across passes, counting repeats', () => {
+    const ideas = openMissedIdeas([
+      event(0, 0, { missed: ['The wage-price spiral', 'Aggregate demand'] }),
+      event(2 * DAY, 0, { missed: ['The wage-price spiral'] }),
+    ]);
+    expect(ideas[0]).toMatchObject({
+      text: 'The wage-price spiral',
+      timesMissed: 2,
+      resolvedAt: null,
+    });
+    expect(ideas[1]).toMatchObject({
+      text: 'Aggregate demand',
+      timesMissed: 1,
+    });
+  });
+
+  it('closes an idea a later grade reports as covered', () => {
+    const ideas = openMissedIdeas([
+      event(0, 0, { missed: ['Aggregate demand'] }),
+      event(2 * DAY, 1, { resolved: ['Aggregate demand'] }),
+    ]);
+    expect(ideas).toHaveLength(1);
+    expect(ideas[0].resolvedAt).not.toBeNull();
+  });
+
+  it('reopens an idea that goes missing again after being resolved', () => {
+    const ideas = openMissedIdeas([
+      event(0, 0, { missed: ['Aggregate demand'] }),
+      event(2 * DAY, 1, { resolved: ['Aggregate demand'] }),
+      event(4 * DAY, 0, { missed: ['Aggregate demand'] }),
+    ]);
+    expect(ideas[0].resolvedAt).toBeNull();
+    expect(ideas[0].timesMissed).toBe(2);
+  });
+
+  it('ignores malformed missed and resolved payloads', () => {
+    const ideas = openMissedIdeas([
+      event(0, 0, { missed: 'not an array' }),
+      event(HOUR, 0, { missed: [42, '', '  '] }),
+      event(2 * HOUR, 0, { resolved: ['never missed'] }),
+    ]);
+    expect(ideas).toEqual([]);
   });
 });

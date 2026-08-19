@@ -458,6 +458,7 @@ export class AiSdkLlmAdapter implements LlmGatewayPort, OnModuleInit {
     topicTitle: string;
     pagesText: string;
     summary: string | null;
+    focus?: string[];
   }): Promise<
     LlmResult<{
       questions: {
@@ -479,6 +480,14 @@ export class AiSdkLlmAdapter implements LlmGatewayPort, OnModuleInit {
       prompt: [
         input.summary ? `Document summary:\n${input.summary}` : null,
         `Chapter: ${input.topicTitle}`,
+        input.focus?.length
+          ? [
+              'The reader is rereading this chapter because these ideas',
+              'have not stuck. Aim most of the questions squarely at them,',
+              'still grounded only in the passages:\n- ' +
+                input.focus.join('\n- '),
+            ].join(' ')
+          : null,
         `The chapter's text:\n${input.pagesText}`,
       ]
         .filter(Boolean)
@@ -578,12 +587,14 @@ export class AiSdkLlmAdapter implements LlmGatewayPort, OnModuleInit {
     topicTitle: string;
     pagesText: string;
     recall: string;
+    previouslyMissed?: string[];
   }): Promise<
     LlmResult<{
       score: number;
       nailed: string[];
       missed: string[];
       focus: string[];
+      nowCovered: number[];
     }>
   > {
     const started = Date.now();
@@ -598,15 +609,28 @@ export class AiSdkLlmAdapter implements LlmGatewayPort, OnModuleInit {
         `Chapter: ${input.topicTitle}`,
         `The chapter's text:\n${input.pagesText}`,
         `The reader's recall, from memory:\n${input.recall}`,
-      ].join('\n\n'),
+        input.previouslyMissed?.length
+          ? `Ideas missed on earlier attempts, numbered from 0:\n${input.previouslyMissed
+              .map((idea, index) => `${index}. ${idea}`)
+              .join('\n')}`
+          : null,
+      ]
+        .filter(Boolean)
+        .join('\n\n'),
       maxRetries: this.maxRetries(),
     });
 
     // The schema bounds it, but clamp anyway — this number feeds mastery.
     const score = Math.min(1, Math.max(0, result.object.score));
+    // Indices past the list are a schema-legal lie; drop them rather than
+    // let them resolve the wrong idea.
+    const asked = input.previouslyMissed?.length ?? 0;
+    const nowCovered = result.object.nowCovered.filter(
+      (index) => index < asked,
+    );
 
     return {
-      value: { ...result.object, score },
+      value: { ...result.object, score, nowCovered },
       usage: this.usage(ref, result.usage, started),
     };
   }

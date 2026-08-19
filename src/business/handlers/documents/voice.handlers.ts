@@ -20,6 +20,7 @@ import {
   computeCalibration,
   computeMastery,
   MIN_CALIBRATION_EVENTS,
+  openMissedIdeas,
   WEAK_THRESHOLD,
 } from '../../domain/learning';
 import {
@@ -172,7 +173,7 @@ export class PageAudioHandler extends AbstractRequestHandlerTemplate<
     if (!page) throw new NotFoundError('Page');
     if (page.status !== 'done') {
       throw new DocumentNotReadyError(
-        "This page hasn't been simplified yet — it can be read aloud once it has",
+        "This page hasn't been simplified yet. It can be read aloud once it has",
       );
     }
     if (!page.blocks?.length) {
@@ -820,9 +821,26 @@ export class StartVoiceSessionHandler extends AbstractRequestHandlerTemplate<
       (() => {
         const revisit = topics.find((topic) => topic.id === revisitTopicId);
         if (!revisit) return null;
+        // What this student's own recalls kept failing to produce. A revisit
+        // that opens on exactly those beats re-teaching the whole chapter,
+        // and the evidence for it is already in `events`.
+        const stillOpen = openMissedIdeas(
+          events.filter((event) => event.topicId === revisit.id),
+        )
+          .filter((idea) => idea.resolvedAt === null)
+          .slice(0, 3)
+          .map((idea) => idea.text);
+
         return (
           `THIS SESSION IS A REVISIT. The student asked to go over "${revisit.title}" again (pages ${revisit.startPage}-${revisit.endPage}). ` +
           'Start there regardless of read state, and re-teach it from a genuinely different angle than a first pass — new examples, new framing. ' +
+          (stillOpen.length
+            ? `These are the ideas that have not come back when they tried to recall this chapter: ${stillOpen
+                .map((idea) => `"${idea}"`)
+                .join(
+                  '; ',
+                )}. Build the revisit around exactly these, and do not imply you are reading a record of their mistakes — you simply know where to start. `
+            : '') +
           `Check it landed with ${TEACH_TOOLS.ASK_QUIZ} and record ${TEACH_TOOLS.REPORT_UNDERSTANDING} before anything else. ` +
           `When the student is satisfied, offer to continue with the rest of the plan or wrap up with ${TEACH_TOOLS.END_LESSON}.`
         );
@@ -1012,6 +1030,8 @@ export interface TopicQuizRequest {
   userId: string;
   documentId: string;
   topicId: string;
+  /** Open missed ideas from a revisit — the quiz aims at these first. */
+  focus?: string[];
 }
 
 export interface TopicQuizResponse {
@@ -1070,7 +1090,7 @@ export class GenerateTopicQuizHandler extends AbstractRequestHandlerTemplate<
       .slice(0, 24_000);
     if (!pagesText) {
       throw new DocumentNotReadyError(
-        "This chapter hasn't been simplified yet — try again once it has",
+        "This chapter hasn't been simplified yet. Try again once it has",
       );
     }
 
@@ -1079,6 +1099,7 @@ export class GenerateTopicQuizHandler extends AbstractRequestHandlerTemplate<
       topicTitle: topic.title,
       pagesText,
       summary,
+      focus: cmd.focus?.slice(0, 5),
     });
 
     await this.calls.record({

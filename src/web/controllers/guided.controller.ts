@@ -1,7 +1,16 @@
-import { Body, Controller, HttpCode, Param, Post, Req } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Get,
+  HttpCode,
+  Param,
+  Post,
+  Req,
+} from '@nestjs/common';
 import type { Request } from 'express';
 import { IsString, Length } from 'class-validator';
 import type {
+  DocumentReportResponse,
   QuestionCheckResponse,
   RecallGradeResponse,
   TopicPreviewResponse,
@@ -13,6 +22,7 @@ import {
   GradeRecallHandler,
   TranscribeAudioHandler,
 } from '../../business/handlers/documents/guided.handlers';
+import { GetDocumentReportHandler } from '../../business/handlers/documents/report.handlers';
 import { ValidationError } from '../../business/domain/errors/errors';
 import { CurrentUser } from '../security/current-user.decorator';
 
@@ -44,7 +54,21 @@ export class GuidedController {
     private readonly gradeRecall: GradeRecallHandler,
     private readonly checkAnswer: CheckQuestionAnswerHandler,
     private readonly transcribeAudio: TranscribeAudioHandler,
+    private readonly report: GetDocumentReportHandler,
   ) {}
+
+  /**
+   * How the reading went: chapter scores, what never came back, the
+   * reader's own questions, what the tutor noticed. Composed at read time.
+   */
+  @Get('report')
+  async documentReport(
+    @CurrentUser('id') userId: string,
+    @Param('id') documentId: string,
+  ): Promise<DocumentReportResponse> {
+    const result = await this.report.handle({ userId, documentId });
+    return result.data;
+  }
 
   /** The chapter preview — cached after the first generation. */
   @Post('topics/:topicId/preview')

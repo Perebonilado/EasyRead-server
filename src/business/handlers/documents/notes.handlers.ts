@@ -67,15 +67,18 @@ export class CreateNoteHandler extends AbstractRequestHandlerTemplate<
   protected async handleRequest(cmd: CreateNoteRequest) {
     const doc = await this.access.require(cmd.documentId, cmd.userId);
 
+    // A highlight is a note with no words yet — the quoted passage carries
+    // it. Without a quote, an empty body is still a mistake worth refusing.
+    const quote = noteQuote(cmd.quotedText);
     const note = await this.notes.create({
       documentId: cmd.documentId,
       userId: cmd.userId,
-      body: noteBody(cmd.body),
+      body: !cmd.body.trim() && quote ? '' : noteBody(cmd.body),
       // Page numbers are checked against the document the note is on, so a
       // stale client can't file a note on page 900 of a 40-page document.
       pageNumber: notePage(cmd.pageNumber, doc.props.pageCount ?? undefined),
       topicId: cmd.topicId ?? null,
-      quotedText: noteQuote(cmd.quotedText),
+      quotedText: quote,
       source: cmd.source ?? 'typed',
     });
 

@@ -31,8 +31,9 @@ import { MAX_NOTE_BODY } from '../../business/domain/values/notes';
 import { CurrentUser } from '../security/current-user.decorator';
 
 class CreateNoteDto {
+  /** Empty is allowed when quotedText carries the note (a pure highlight). */
   @IsString()
-  @Length(1, MAX_NOTE_BODY)
+  @Length(0, MAX_NOTE_BODY)
   body!: string;
 
   /** Optional: a note taken in a lesson has no page. */

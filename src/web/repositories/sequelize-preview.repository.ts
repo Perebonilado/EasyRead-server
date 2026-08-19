@@ -22,12 +22,21 @@ export class SequelizeTopicPreviewRepository implements TopicPreviewRepository {
     topicId: string;
     body: TopicPreviewBody;
   }): Promise<void> {
-    // Two racing first-readers may both generate; the unique index makes the
-    // second write a no-op rather than a duplicate row.
+    // Upsert by topic: a regenerated preview (say, when the schema grew a
+    // field an old row lacks) replaces the stale body instead of dying on
+    // the unique index.
+    const existing = await this.model.findOne({
+      where: { topicId: input.topicId } as never,
+    });
+    if (existing) {
+      existing.body = input.body;
+      await existing.save();
+      return;
+    }
     try {
       await this.model.create({ id: newId(), ...input } as never);
     } catch {
-      // Row already exists — the cache is warm either way.
+      // A racing first-reader beat us to the insert; the cache is warm.
     }
   }
 }

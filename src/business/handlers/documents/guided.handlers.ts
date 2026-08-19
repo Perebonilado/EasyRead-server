@@ -9,17 +9,20 @@ import {
   DocumentNotReadyError,
   NotFoundError,
 } from '../../domain/errors/errors';
+import { openMissedIdeas } from '../../domain/learning';
 import { LLM_GATEWAY, TRANSCRIPTION, VECTOR_STORE } from '../../ports/tokens';
 import type { LlmGatewayPort } from '../../ports/llm.port';
 import type { TranscriptionPort } from '../../ports/voice.port';
 import type { VectorStorePort } from '../../ports/vector-store.port';
 import {
   AI_CALL_LOG_REPOSITORY,
+  ASSESSMENT_REPOSITORY,
   SIMPLIFIED_PAGE_REPOSITORY,
   SUMMARY_REPOSITORY,
   TOPIC_PREVIEW_REPOSITORY,
   TOPIC_REPOSITORY,
 } from '../../repositories/tokens';
+import type { AssessmentRepository } from '../../repositories/learning.repository';
 import type { AiCallLogRepository } from '../../repositories/ai-call-log.repository';
 import type {
   SummaryRepository,
@@ -74,7 +77,7 @@ async function chapterText(
     .slice(0, 24_000);
   if (!text) {
     throw new DocumentNotReadyError(
-      "This chapter hasn't been simplified yet — try again once it has",
+      "This chapter hasn't been simplified yet. Try again once it has",
     );
   }
   return text;
@@ -120,7 +123,13 @@ export class GetTopicPreviewHandler extends AbstractRequestHandlerTemplate<
     );
 
     const cached = await this.previews.find(topic.id);
-    if (cached) {
+    // Rows cached before recallCues existed regenerate once, on touch —
+    // cheaper than a migration and invisible to the reader.
+    if (
+      cached &&
+      Array.isArray(cached.recallCues) &&
+      cached.recallCues.length
+    ) {
       return CommandResponse.of({
         topicId: topic.id,
         body: cached,
@@ -178,6 +187,9 @@ export interface RecallGradeRequest {
  * against the chapter itself. The prediction is deliberately not an input —
  * an independent grade it could anchor on is not independent.
  */
+/** How many open ideas the grader is asked to judge in one call. */
+const MAX_PREVIOUSLY_MISSED = 8;
+
 @Injectable()
 export class GradeRecallHandler extends AbstractRequestHandlerTemplate<
   RecallGradeRequest,
@@ -189,6 +201,8 @@ export class GradeRecallHandler extends AbstractRequestHandlerTemplate<
     @Inject(SIMPLIFIED_PAGE_REPOSITORY)
     private readonly simplified: SimplifiedPageRepository,
     @Inject(AI_CALL_LOG_REPOSITORY) private readonly calls: AiCallLogRepository,
+    @Inject(ASSESSMENT_REPOSITORY)
+    private readonly assessments: AssessmentRepository,
     private readonly access: DocumentAccessService,
   ) {
     super();
@@ -209,10 +223,27 @@ export class GradeRecallHandler extends AbstractRequestHandlerTemplate<
       topic.endPage,
     );
 
+    // What earlier attempts at this chapter never produced. Handing these
+    // to the grader is what lets an idea be closed by the one thing able to
+    // judge it — "wages pushing prices up" and "the wage-price spiral" are
+    // the same idea, and no string comparison here would ever agree.
+    const history = await this.assessments.recent(
+      cmd.userId,
+      cmd.documentId,
+      500,
+    );
+    const previouslyMissed = openMissedIdeas(
+      history.filter((event) => event.topicId === topic.id),
+    )
+      .filter((idea) => idea.resolvedAt === null)
+      .slice(0, MAX_PREVIOUSLY_MISSED)
+      .map((idea) => idea.text);
+
     const result = await this.llm.gradeRecall({
       topicTitle: topic.title,
       pagesText,
       recall: cmd.recall,
+      previouslyMissed,
     });
 
     await this.calls.record({
@@ -225,7 +256,21 @@ export class GradeRecallHandler extends AbstractRequestHandlerTemplate<
       outcome: 'ok',
     });
 
-    return CommandResponse.of(result.value);
+    // Back to the client as text, not indices: the client writes these
+    // straight into the event payload, and the fold that closes them
+    // matches on the exact strings the grader was given.
+    const { nowCovered, ...grade } = result.value;
+    // The prompt forbids calling an idea covered while also listing it as
+    // missed, and graders do it anyway. Missed wins: it is the more
+    // conservative claim, and without this an idea the grader just said is
+    // still absent would close itself in the report.
+    const stillMissing = new Set(grade.missed);
+    const resolved = nowCovered
+      .map((index) => previouslyMissed[index])
+      .filter((text): text is string => Boolean(text))
+      .filter((text) => !stillMissing.has(text));
+
+    return CommandResponse.of({ ...grade, resolved });
   }
 }
 

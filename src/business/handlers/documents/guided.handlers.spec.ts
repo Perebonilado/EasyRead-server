@@ -4,6 +4,7 @@ import type { TopicPreviewRepository } from '../../repositories/preview.reposito
 import {
   CheckQuestionAnswerHandler,
   GetTopicPreviewHandler,
+  GradeRecallHandler,
 } from './guided.handlers';
 import type { DocumentAccessService } from './document-access.service';
 
@@ -121,5 +122,66 @@ describe('CheckQuestionAnswerHandler', () => {
     // The fake always answers page 0 — the unplaceable case.
     expect(result.data.page).toBeNull();
     expect(['correct', 'partial', 'incorrect']).toContain(result.data.verdict);
+  });
+});
+
+describe('GradeRecallHandler', () => {
+  /**
+   * Graders sometimes report an idea as covered *and* still missed in the
+   * same grade, despite the prompt forbidding it. Missed has to win, or an
+   * idea the grader just called absent would close itself in the report.
+   */
+  it('never resolves an idea the same grade still lists as missed', async () => {
+    const llm = {
+      gradeRecall: () =>
+        Promise.resolve({
+          value: {
+            score: 0.5,
+            nailed: [],
+            missed: ['Still absent'],
+            focus: [],
+            nowCovered: [0, 1],
+          },
+          usage: { model: 'fake', tokensIn: 0, tokensOut: 0, latencyMs: 1 },
+        }),
+    };
+    const history = [
+      {
+        topicId: 'topic-1',
+        kind: 'verbal' as const,
+        score: 0,
+        payload: { missed: ['Still absent', 'Genuinely covered'] },
+        createdAt: new Date('2026-08-01T09:00:00Z'),
+      },
+    ];
+
+    const handler = new GradeRecallHandler(
+      llm as never,
+      { listWithReadState: () => Promise.resolve([TOPIC]) } as never,
+      {
+        findRange: () =>
+          Promise.resolve([
+            {
+              pageNumber: 1,
+              status: 'done',
+              blocks: [{ type: 'paragraph', text: 'Text.' }],
+            },
+          ]),
+      } as never,
+      { record: () => Promise.resolve() },
+      { recent: () => Promise.resolve(history) } as never,
+      {
+        require: () => Promise.resolve(undefined),
+      } as unknown as DocumentAccessService,
+    );
+
+    const { data } = await handler.handle({
+      userId: 'u1',
+      documentId: 'd1',
+      topicId: 'topic-1',
+      recall: 'something',
+    });
+
+    expect(data.resolved).toEqual(['Genuinely covered']);
   });
 });

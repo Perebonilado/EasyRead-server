@@ -190,6 +190,8 @@ export interface LlmGatewayPort {
     topicTitle: string;
     pagesText: string;
     summary: string | null;
+    /** Ideas the reader keeps missing; a revisit weights questions here. */
+    focus?: string[];
   }): Promise<
     LlmResult<{
       questions: {
@@ -221,12 +223,20 @@ export interface LlmGatewayPort {
     topicTitle: string;
     pagesText: string;
     recall: string;
+    /**
+     * Ideas earlier attempts at this chapter failed to produce. The grader
+     * answers with the indices it now considers covered, which is what
+     * lets the report close them.
+     */
+    previouslyMissed?: string[];
   }): Promise<
     LlmResult<{
       score: number;
       nailed: string[];
       missed: string[];
       focus: string[];
+      /** Indices into `previouslyMissed` this recall covered. */
+      nowCovered: number[];
     }>
   >;
 

@@ -487,6 +487,127 @@ export type DiagramCheckResponse = {
   correctIndex: number;
   explanation: string;
 };
+// ── Understanding report ─────────────────────────────────────────────────────
+
+/**
+ * One idea a recall failed to produce, and whether it has since come back.
+ * `resolvedAt` is set by a later grade reporting the idea covered.
+ */
+export type MissedIdeaDto = {
+  text: string;
+  timesMissed: number;
+  firstMissedAt: string;
+  resolvedAt: string | null;
+};
+
+/** A question the reader posed before reading, and how answering it went. */
+export type OwnQuestionDto = {
+  question: string;
+  verdict: 'correct' | 'partial' | 'incorrect';
+  explanation: string | null;
+  page: number | null;
+  answeredAt: string;
+};
+
+/** Something the tutor said out loud about how a chapter went. */
+export type TutorNoteDto = {
+  note: string;
+  /** The tutor's 1–5 reading, when it recorded one. */
+  rating: number | null;
+  at: string;
+};
+
+/**
+ * One check, as it happened: the per-chapter drill-in's row.
+ *
+ * The aggregates above answer "how is this chapter going"; these answer
+ * "what actually happened, and what did I say at the time" — which is the
+ * only view that can show confidence against outcome question by question.
+ */
+export type CheckDto = {
+  at: string;
+  kind: AssessmentKind;
+  /** 0..1 as recorded. For an MCQ this is simply right or wrong. */
+  score: number;
+  /** Which pass this belongs to, 1-based. Rereads start a new one. */
+  pass: number;
+  /** The question asked, the flashcard's front, or null when neither. */
+  prompt: string | null;
+  /** How sure the reader said they were, before any answer was revealed. */
+  confidence: number | null;
+  /** Where the check came from, so the row can say so plainly. */
+  source: 'guided' | 'tutor' | 'solo';
+  /** Set on the reader's own pre-reading questions. */
+  verdict: 'correct' | 'partial' | 'incorrect' | null;
+  /** True for the visual (diagram) checks. */
+  diagram: boolean;
+  /** Recall grades only: what the grader said at that moment. */
+  recall: {
+    nailed: string[];
+    missed: string[];
+    focus: string[];
+    resolved: string[];
+  } | null;
+  /** The correction, when it was persisted (checks from Aug 2026 on). */
+  explanation: string | null;
+  correctAnswer: string | null;
+  yourAnswer: string | null;
+};
+
+export type TopicReportDto = {
+  topicId: string;
+  title: string;
+  startPage: number;
+  endPage: number;
+  /** The latest pass's score, 0–100; null when evidence is too thin. */
+  score: number | null;
+  /** Every scored pass, oldest first. Length > 1 means it was reread. */
+  passScores: number[];
+  /** Latest pass minus the one before, when both scored. */
+  delta: number | null;
+  passes: number;
+  events: number;
+  lastEvidenceAt: string | null;
+  /** Evidence exists but has gone cold. A label, never a penalty. */
+  stale: boolean;
+  needsRevisit: boolean;
+  missedIdeas: MissedIdeaDto[];
+  ownQuestions: OwnQuestionDto[];
+  tutorNotes: TutorNoteDto[];
+  /** Every check on this chapter, newest first — the drill-in. */
+  checks: CheckDto[];
+  band: TopicBand | null;
+  /**
+   * What a reread of this chapter should watch for, at most three: open
+   * missed ideas first, then the latest recall's focus pointers, deduped.
+   */
+  nextStepPointers: string[];
+};
+
+/**
+ * The chapter's standing as a word, so the verdict arrives pre-interpreted
+ * and the raw score can stay small. Null when there is nothing to say.
+ */
+export type TopicBand = 'revisit' | 'settling' | 'solid' | 'unverified';
+
+/**
+ * How the reading actually went, per document: composed from assessment
+ * events at read time, never stored. Every number here traces to events.
+ */
+export type DocumentReportResponse = {
+  topics: TopicReportDto[];
+  /** Topic ids worth another pass, weakest and stalest first. */
+  revisitQueue: string[];
+  /** Topic ids that are strong *and* have enough evidence to say so. */
+  strengths: string[];
+  /** Chapters marked read with no checks in their latest pass. */
+  unverified: string[];
+  /** Confidence versus competence; null bias means too little rated evidence. */
+  calibration: { bias: number | null; n: number };
+  /** Totals for the header line. */
+  totals: { checks: number; chaptersWithEvidence: number; reread: number };
+};
+
 // ── Guided reading ───────────────────────────────────────────────────────────
 
 /**
@@ -503,6 +624,12 @@ export type TopicPreviewBody = {
   keyTerms: { term: string; gloss: string }[];
   /** Where the chapter lands — its conclusion stated plainly, no teasing. */
   howItEnds: string;
+  /**
+   * Prompts that guide a from-memory retelling by pointing at the
+   * chapter's shape — openings, comparisons, examples, landings — while
+   * revealing none of its content.
+   */
+  recallCues: string[];
 };
 
 export type TopicPreviewResponse = {
@@ -519,6 +646,11 @@ export type TopicPreviewResponse = {
 export type RecallGradeResponse = {
   /** 0–1: how much of the chapter's substance the recall carried. */
   score: number;
+  /**
+   * Ideas from earlier attempts that this recall finally covered, in the
+   * grader's original wording so the report can close them.
+   */
+  resolved: string[];
   /** Ideas the recall stated correctly. */
   nailed: string[];
   /** Load-bearing ideas the recall did not mention. */

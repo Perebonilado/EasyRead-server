@@ -1,5 +1,6 @@
 import { Transform } from 'class-transformer';
 import {
+  IsOptional,
   IsEmail,
   IsString,
   Length,
@@ -59,4 +60,11 @@ export class VerifyEmailDto {
   @IsString()
   @MinLength(1)
   token!: string;
+}
+
+/** The refresh token, presented in the body where cookies cannot go. */
+export class RefreshDto {
+  @IsOptional()
+  @IsString()
+  refreshToken?: string;
 }

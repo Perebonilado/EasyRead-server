@@ -73,7 +73,17 @@ export type ErrorCode = (typeof ErrorCodes)[keyof typeof ErrorCodes];
 
 export type RegisterRequest = { email: string; password: string; name: string };
 export type LoginRequest = { email: string; password: string };
-export type LoginResponse = { accessToken: string; expiresIn: number };
+export type LoginResponse = {
+  accessToken: string;
+  expiresIn: number;
+  /**
+   * Also handed to the client directly: iPhones block the cross-site
+   * cookie wholesale (railway subdomains are separate sites), so clients
+   * keep this in local storage and present it in the refresh body. The
+   * httpOnly cookie still rides along for browsers that accept it.
+   */
+  refreshToken: string;
+};
 export type MeResponse = {
   id: string;
   email: string;

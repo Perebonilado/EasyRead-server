@@ -26,6 +26,7 @@ import { Public } from '../security/public.decorator';
 import {
   ForgotPasswordDto,
   LoginDto,
+  RefreshDto,
   RegisterDto,
   ResetPasswordDto,
   VerifyEmailDto,
@@ -39,6 +40,12 @@ const REFRESH_COOKIE = 'easyread_rt';
  * the mounted path and the cookie would silently never be sent.
  */
 const REFRESH_COOKIE_PATH = '/api/v1/auth';
+
+/** cookie-parser types its bag as `any`; read it with a real shape. */
+const cookieToken = (request: Request): string | undefined =>
+  (request.cookies as Record<string, string | undefined> | undefined)?.[
+    REFRESH_COOKIE
+  ];
 
 /**
  * Access tokens are returned in the body for the client to hold in memory;
@@ -86,10 +93,13 @@ export class AuthController {
   @Post('refresh')
   @HttpCode(200)
   async refresh(
+    @Body() body: RefreshDto,
     @Req() request: Request,
     @Res({ passthrough: true }) response: Response,
   ): Promise<LoginResponse> {
-    const presented = request.cookies?.[REFRESH_COOKIE];
+    // The body token is the client's own copy and always its newest; the
+    // cookie backs it up on browsers that kept one.
+    const presented = body?.refreshToken ?? cookieToken(request);
     if (!presented) throw new InvalidTokenError('You are not signed in');
 
     const session = await this.sessions.rotate(presented, {
@@ -103,10 +113,11 @@ export class AuthController {
   @Post('logout')
   @HttpCode(204)
   async logout(
+    @Body() body: RefreshDto,
     @Req() request: Request,
     @Res({ passthrough: true }) response: Response,
   ): Promise<void> {
-    const presented = request.cookies?.[REFRESH_COOKIE];
+    const presented = body?.refreshToken ?? cookieToken(request);
     if (presented) await this.sessions.revoke(presented);
     response.clearCookie(REFRESH_COOKIE, this.cookieOptions(0));
   }
@@ -149,7 +160,11 @@ export class AuthController {
       session.refreshToken,
       this.cookieOptions(session.refreshExpiresAt.getTime() - Date.now()),
     );
-    return { accessToken: session.accessToken, expiresIn: session.expiresIn };
+    return {
+      accessToken: session.accessToken,
+      expiresIn: session.expiresIn,
+      refreshToken: session.refreshToken,
+    };
   }
 
   private cookieOptions(maxAge: number): CookieOptions {

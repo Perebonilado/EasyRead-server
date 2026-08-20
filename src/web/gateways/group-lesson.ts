@@ -194,6 +194,15 @@ export class GroupLesson {
    */
   private audioEndAt = 0;
   private drainTimer: ReturnType<typeof setTimeout> | null = null;
+  /**
+   * The current response's chunks, stamped with when the room finishes
+   * hearing each. A member who joins mid-response missed the original
+   * fan-out burst (audio generates far faster than it plays), so without
+   * this tail they would sit in silence until the next response.
+   */
+  private pendingAudio: { chunk: string; endsAt: number }[] = [];
+  /** The caption line currently on screen, for the same late joiners. */
+  private liveCaption = '';
   private seq = 0;
   /** Decoded VOICED audio bytes appended during the current hold. */
   private voicedBytes = 0;
@@ -241,13 +250,19 @@ export class GroupLesson {
           const ms = (chunk.length * 3) / 4 / 48;
           const now = Date.now();
           this.audioEndAt = Math.max(this.audioEndAt, now + AUDIO_LEAD_MS) + ms;
+          this.pendingAudio.push({ chunk, endsAt: this.audioEndAt });
+          while (this.pendingAudio.length && this.pendingAudio[0].endsAt < now)
+            this.pendingAudio.shift();
           this.events.onAudio(chunk);
         },
         onCaption: (delta, done) => {
-          if (!done) {
+          if (done) {
+            this.liveCaption = '';
+          } else {
             this.transcript = (this.transcript + delta).slice(
               -RESUME_TRANSCRIPT_CHARS,
             );
+            this.liveCaption = (this.liveCaption + delta).slice(-280);
           }
           this.events.onCaption(delta, done);
         },
@@ -257,6 +272,7 @@ export class GroupLesson {
             this.tutorSpeaking = true;
             if (this.drainTimer) clearTimeout(this.drainTimer);
             this.drainTimer = null;
+            this.pendingAudio = [];
             this.clearContinue();
             this.events.onSpeaking(true);
             return;
@@ -296,6 +312,8 @@ export class GroupLesson {
     this.tutorSpeaking = false;
     this.generating = false;
     this.audioEndAt = 0;
+    this.pendingAudio = [];
+    this.liveCaption = '';
     this.respondQueued = false;
     if (this.drainTimer) clearTimeout(this.drainTimer);
     this.drainTimer = null;
@@ -431,6 +449,7 @@ export class GroupLesson {
       // Clients cut the tutor's queued audio the moment the floor changes
       // hands, so the room is quiet right now; say so before the grant.
       this.audioEndAt = 0;
+      this.pendingAudio = [];
       if (this.drainTimer) clearTimeout(this.drainTimer);
       this.drainTimer = null;
       this.tutorSpeaking = false;
@@ -447,6 +466,35 @@ export class GroupLesson {
 
   holder(): { userId: string; name: string } | null {
     return this.floorHolder;
+  }
+
+  /**
+   * Everything a late joiner needs to land mid-lecture instead of in
+   * silence: the tutor's state, the caption on screen, and the audio the
+   * room has not finished hearing yet, as one chunk their player can start
+   * on immediately.
+   */
+  catchUp(): { speaking: boolean; caption: string; audio: string | null } {
+    const now = Date.now();
+    while (this.pendingAudio.length && this.pendingAudio[0].endsAt < now)
+      this.pendingAudio.shift();
+    // The provider sends multi-second deltas, so the head chunk is usually
+    // mid-play: slice off what the room already heard, or the joiner lands
+    // seconds behind everyone and hears it twice.
+    const parts: Buffer[] = [];
+    for (const { chunk, endsAt } of this.pendingAudio) {
+      const buf = Buffer.from(chunk, 'base64');
+      const startsAt = endsAt - buf.byteLength / 48;
+      if (startsAt >= now) {
+        parts.push(buf);
+        continue;
+      }
+      let skip = Math.floor((now - startsAt) * 48);
+      skip -= skip % 2; // whole pcm16 samples only
+      if (skip < buf.byteLength) parts.push(buf.subarray(skip));
+    }
+    const audio = parts.length ? Buffer.concat(parts).toString('base64') : null;
+    return { speaking: this.tutorSpeaking, caption: this.liveCaption, audio };
   }
 
   appendAudio(userId: string, base64Pcm16: string) {

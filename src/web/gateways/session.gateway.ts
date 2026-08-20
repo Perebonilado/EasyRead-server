@@ -182,6 +182,9 @@ export class SessionGateway implements OnGatewayInit, OnGatewayDisconnect {
     await socket.join(this.channel(session.id));
     this.socketSessions.set(socket.id, session.id);
 
+    // A joiner mid-lecture lands in the lecture, not in silence: the state
+    // carries the tutor's presence, and the unplayed audio tail follows.
+    const catchUp = room.lesson?.catchUp() ?? null;
     socket.emit('session:state', {
       session: {
         id: session.id,
@@ -194,7 +197,11 @@ export class SessionGateway implements OnGatewayInit, OnGatewayDisconnect {
       roster: this.rosterOf(room),
       board: room.board,
       floor: room.lesson?.holder() ?? null,
+      tutorReady: !!room.lesson,
+      tutorSpeaking: catchUp?.speaking ?? false,
+      caption: catchUp?.caption ?? '',
     });
+    if (catchUp?.audio) socket.emit('tutor:audio', { chunk: catchUp.audio });
     this.broadcastRoster(room);
 
     // The tutor: opened by the first arrival, told about later ones.

@@ -32,6 +32,7 @@ class FakeRefreshTokens implements RefreshTokenRepository {
       tokenHash: input.tokenHash,
       expiresAt: input.expiresAt,
       revokedAt: null,
+      replacedById: null,
     };
     this.rows.push(row);
     return row;
@@ -41,15 +42,24 @@ class FakeRefreshTokens implements RefreshTokenRepository {
     return this.rows.find((r) => r.tokenHash === tokenHash) ?? null;
   }
 
-  async rotate(id: string, _replacedById: string, now: Date) {
+  async rotate(id: string, replacedById: string, now: Date) {
     const row = this.rows.find((r) => r.id === id);
-    if (row) row.revokedAt = now;
+    if (row) {
+      row.revokedAt = now;
+      row.replacedById = replacedById;
+    }
   }
 
   async revokeFamily(familyId: string, now: Date) {
     for (const row of this.rows) {
       if (row.familyId === familyId) row.revokedAt = now;
     }
+  }
+
+  async familyEnded(familyId: string) {
+    return this.rows.some(
+      (r) => r.familyId === familyId && r.revokedAt && !r.replacedById,
+    );
   }
 
   async revokeAllForUser(userId: string, now: Date) {
@@ -140,14 +150,28 @@ describe('SessionService', () => {
     expect(refreshTokens.live()).toHaveLength(2);
   });
 
-  it('still burns the family when a rotated token comes back much later', async () => {
+  it('a thawed phone with a days-old rotated cookie stays signed in', async () => {
+    // iOS freezes pages between the server rotating and the browser saving
+    // the new cookie; days later the old one comes back. That must never
+    // log the reader out of everything.
     const first = await service.issue(new User(userProps()), context);
     await service.rotate(first.refreshToken, context);
-    tick(10 * 60_000);
+    tick(3 * 86_400_000);
 
-    await expect(service.rotate(first.refreshToken, context)).rejects.toThrow(
-      'security',
-    );
+    const thawed = await service.rotate(first.refreshToken, context);
+    expect(thawed.accessToken).toBeTruthy();
+    expect(refreshTokens.live().length).toBeGreaterThan(0);
+  });
+
+  it('logging out ends the whole family, old cookies included', async () => {
+    const first = await service.issue(new User(userProps()), context);
+    const second = await service.rotate(first.refreshToken, context);
+    await service.revoke(second.refreshToken);
+    // Neither the token that logged out nor any rotated ancestor works.
+    await expect(
+      service.rotate(second.refreshToken, context),
+    ).rejects.toThrow();
+    await expect(service.rotate(first.refreshToken, context)).rejects.toThrow();
     expect(refreshTokens.live()).toHaveLength(0);
   });
 

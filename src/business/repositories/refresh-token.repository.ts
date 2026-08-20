@@ -5,6 +5,8 @@ export interface StoredRefreshToken {
   tokenHash: string;
   expiresAt: Date;
   revokedAt: Date | null;
+  /** Set when the token was ROTATED; a logout revokes without a successor. */
+  replacedById: string | null;
 }
 
 export interface RefreshTokenRepository {
@@ -22,8 +24,15 @@ export interface RefreshTokenRepository {
   /** Marks a token used and points it at its successor. */
   rotate(id: string, replacedById: string, now: Date): Promise<void>;
 
-  /** Reuse of a rotated token means theft — kill the whole family (§3.1). */
+  /** A logout ends the whole family at once. */
   revokeFamily(familyId: string, now: Date): Promise<void>;
+
+  /**
+   * True when the family was deliberately ended (some member revoked with
+   * no successor, which only a logout produces). An old rotated cookie
+   * may resurrect a living family, never a logged-out one.
+   */
+  familyEnded(familyId: string): Promise<boolean>;
 
   revokeAllForUser(userId: string, now: Date): Promise<void>;
 }

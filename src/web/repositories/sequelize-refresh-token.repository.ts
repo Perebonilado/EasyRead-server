@@ -15,6 +15,7 @@ const toRecord = (row: RefreshTokenModel): StoredRefreshToken => ({
   tokenHash: row.tokenHash,
   expiresAt: row.expiresAt,
   revokedAt: row.revokedAt,
+  replacedById: row.replacedById ?? null,
 });
 
 @Injectable()
@@ -39,6 +40,17 @@ export class SequelizeRefreshTokenRepository implements RefreshTokenRepository {
   async findByHash(tokenHash: string): Promise<StoredRefreshToken | null> {
     const row = await this.model.findOne({ where: { tokenHash } });
     return row ? toRecord(row) : null;
+  }
+
+  async familyEnded(familyId: string): Promise<boolean> {
+    const ended = await this.model.findOne({
+      where: {
+        familyId,
+        revokedAt: { [Op.ne]: null },
+        replacedById: null,
+      } as never,
+    } as never);
+    return !!ended;
   }
 
   async rotate(id: string, replacedById: string, now: Date): Promise<void> {

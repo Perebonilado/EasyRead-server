@@ -113,6 +113,7 @@ import {
   RemoveMemberHandler,
   StartSessionHandler,
   UpdatePlanHandler,
+  DeleteGroupHandler,
 } from './business/handlers/groups/groups.handlers';
 import { NotebookController } from './web/controllers/notebook.controller';
 import { RecapsController } from './web/controllers/recaps.controller';
@@ -136,6 +137,7 @@ const handlers = [
   RemoveMemberHandler,
   StartSessionHandler,
   UpdatePlanHandler,
+  DeleteGroupHandler,
   EndSessionHandler,
   SessionGateway,
   GroupLessonFactory,

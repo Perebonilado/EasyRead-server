@@ -24,6 +24,7 @@ import type {
 } from '../../contracts';
 import {
   CreateGroupHandler,
+  DeleteGroupHandler,
   EndSessionHandler,
   UpdatePlanHandler,
   GroupDetailHandler,
@@ -100,6 +101,7 @@ export class GroupsController {
     private readonly removeMember: RemoveMemberHandler,
     private readonly startSession: StartSessionHandler,
     private readonly updatePlan: UpdatePlanHandler,
+    private readonly deleteGroup: DeleteGroupHandler,
     private readonly endSession: EndSessionHandler,
     private readonly access: DocumentAccessService,
     private readonly gateway: SessionGateway,
@@ -207,6 +209,20 @@ export class GroupsController {
     const live = await this.groups.liveSession(groupId);
     await this.endSession.handle({ userId, groupId });
     // Only after the handler authorized and flipped the row.
+    if (live) this.gateway.endSession(live.id);
+  }
+
+  @Delete(':id')
+  @HttpCode(204)
+  async remove_(
+    @CurrentUser('id') userId: string,
+    @Param('id') groupId: string,
+  ): Promise<void> {
+    // A room with people still in it goes quiet before it disappears:
+    // the stage tells them the session ended rather than failing under
+    // them mid-sentence.
+    const live = await this.groups.liveSession(groupId);
+    await this.deleteGroup.handle({ userId, groupId });
     if (live) this.gateway.endSession(live.id);
   }
 

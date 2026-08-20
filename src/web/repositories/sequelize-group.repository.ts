@@ -123,6 +123,13 @@ export class SequelizeGroupRepository implements GroupRepository {
     await this.members.destroy({ where: { groupId, userId } as never });
   }
 
+  async deleteGroup(groupId: string): Promise<void> {
+    // Members and sessions carry ON DELETE CASCADE, so the group row is
+    // the only thing to remove. Nobody's assessment history references a
+    // group, so a deleted room never costs anyone their understanding.
+    await this.groups.destroy({ where: { id: groupId } as never });
+  }
+
   async updatePlan(
     groupId: string,
     plan: {

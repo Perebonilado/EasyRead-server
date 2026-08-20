@@ -239,7 +239,7 @@ export class GroupLesson {
     await this.connect();
     const names = this.roster().map((m) => m.name);
     this.realtime?.inject(
-      `(The session is starting. Present now: ${names.join(', ') || 'nobody yet'}. Write the session plan on the board with write_note, greet the group briefly by name, then start teaching the first idea from the top, assuming nobody has read anything.)`,
+      `(The session is starting. Present now: ${names.join(', ') || 'nobody yet'}, and nobody else. Write the session plan on the board with write_note, greet the people present briefly by name, then start teaching the first idea from the top, assuming nobody has read anything.)`,
     );
     this.respondNow();
   }
@@ -436,11 +436,17 @@ export class GroupLesson {
       ) {
         return;
       }
+      // Restated on every nudge: "by name" must always have the live
+      // names beside it, or a long lesson drifts into invented students.
+      const names = this.roster().map((member) => member.name);
+      const present = names.length
+        ? `In the room right now: ${names.join(', ')}, and nobody else.`
+        : 'The room is empty right now.';
       if (this.autoContinues >= MAX_AUTO_CONTINUES) {
         if (this.autoContinues === MAX_AUTO_CONTINUES) {
           this.autoContinues += 1;
           this.realtime?.inject(
-            '(Nobody has responded for a while. Ask once, warmly, whether the group is still with you, say you will wait, and then stay quiet.)',
+            `(Nobody has responded for a while. ${present} Ask once, warmly, whether they are still with you, say you will wait, and then stay quiet.)`,
           );
           this.respondNow();
         }
@@ -448,7 +454,7 @@ export class GroupLesson {
       }
       this.autoContinues += 1;
       this.realtime?.inject(
-        '(Nobody spoke. If your last words asked someone a question, check in warmly by name in one short sentence, or offer to move on. If you were not waiting on anyone, do not comment on the pause at all; simply continue teaching the next idea.)',
+        `(Nobody spoke. ${present} If your last words asked someone a question, check in warmly by name with one of these people, or offer to move on. If you were not waiting on anyone, do not comment on the pause at all; simply continue teaching the next idea.)`,
       );
       this.respondNow();
     }, DEAD_AIR_MS);
@@ -845,7 +851,18 @@ export class GroupLessonFactory {
         '- Lines in parentheses, like (Ada is speaking next) or (Bola',
         '  joined the session), are stage directions from the room. Never',
         '  read them aloud or mention them. When someone speaks, you know',
-        '  exactly who it was: answer them by name.',
+        '  exactly who it was: answer them by name. Ada and Bola are only',
+        '  examples of the form; the real names come from the room.',
+        '- THE ROSTER IS LAW. The only people in this room are the ones',
+        '  the stage directions have announced: present at the start,',
+        '  joined, left, or speaking next. When you address anyone by',
+        '  name, it must be a name from that list and no other. Never',
+        '  invent, guess or borrow a name. People named inside the',
+        '  document are characters in the material, not students in the',
+        '  room; never call on them.',
+        '- When one student is present, this is a private lesson: speak',
+        '  to them by their name or as "you". Do not conjure classmates,',
+        '  and never put a question to someone who is not in the room.',
         '- Spread your attention deliberately. If someone has not spoken in',
         '  a while, invite them in warmly by name with an easy question.',
         '  Never point out that someone has been quiet, and never scold.',

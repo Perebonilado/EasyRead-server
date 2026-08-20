@@ -2,6 +2,8 @@
    implements a Promise-shaped interface with no real awaiting to do. */
 import {
   CreateGroupHandler,
+  DeleteGroupHandler,
+  ListGroupsHandler,
   UpdatePlanHandler,
   GroupDetailHandler,
   JoinGroupHandler,
@@ -62,6 +64,13 @@ class FakeGroups implements GroupRepository {
       name: userId,
       role: 'member',
     });
+  }
+
+  async deleteGroup(groupId: string) {
+    this.groups.delete(groupId);
+    for (const [id, session] of this.sessions) {
+      if (session.groupId === groupId) this.sessions.delete(id);
+    }
   }
 
   async removeMember(groupId: string, userId: string) {
@@ -302,6 +311,44 @@ describe('groups handlers', () => {
         tutorId: null,
       }),
     ).rejects.toThrow('owner');
+  });
+
+  it('lets the owner delete the group, and nobody else', async () => {
+    const g = (
+      await new CreateGroupHandler(repo).handle({ userId: 'ada', name: 'x' })
+    ).data;
+    await new JoinGroupHandler(repo).handle({
+      userId: 'bola',
+      code: g.inviteCode,
+    });
+    const remove = new DeleteGroupHandler(repo);
+
+    await expect(
+      remove.handle({ userId: 'bola', groupId: g.id }),
+    ).rejects.toThrow('owner');
+    await expect(
+      remove.handle({ userId: 'stranger', groupId: g.id }),
+    ).rejects.toThrow('not found');
+
+    await remove.handle({ userId: 'ada', groupId: g.id });
+    expect(await repo.findById(g.id)).toBeNull();
+    const mine = await new ListGroupsHandler(repo).handle({ userId: 'ada' });
+    expect(mine.data).toHaveLength(0);
+  });
+
+  it("takes the group's sessions with it", async () => {
+    const g = (
+      await new CreateGroupHandler(repo).handle({ userId: 'ada', name: 'x' })
+    ).data;
+    await repo.createSession({
+      groupId: g.id,
+      hostId: 'ada',
+      documentId: 'doc-1',
+      topicIds: [],
+      tutorId: 'maya',
+    });
+    await new DeleteGroupHandler(repo).handle({ userId: 'ada', groupId: g.id });
+    expect(await repo.liveSession(g.id)).toBeNull();
   });
 
   it('invite codes avoid ambiguous characters', () => {

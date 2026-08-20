@@ -53,6 +53,8 @@ export interface GroupRepository {
   listForUser(userId: string): Promise<GroupRecord[]>;
 
   addMember(groupId: string, userId: string): Promise<void>;
+  /** Removes the group; members and sessions cascade with it. */
+  deleteGroup(groupId: string): Promise<void>;
   updatePlan(groupId: string, plan: GroupPlanRecord): Promise<void>;
   removeMember(groupId: string, userId: string): Promise<void>;
   setInviteCode(groupId: string, inviteCode: string): Promise<void>;

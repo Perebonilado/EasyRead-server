@@ -141,6 +141,37 @@ export class CreateGroupHandler extends AbstractRequestHandlerTemplate<
   }
 }
 
+// ── Delete (owner only) ──────────────────────────────────────────────────────
+
+export interface DeleteGroupRequest {
+  userId: string;
+  groupId: string;
+}
+
+@Injectable()
+export class DeleteGroupHandler extends AbstractRequestHandlerTemplate<
+  DeleteGroupRequest,
+  { ok: true }
+> {
+  constructor(
+    @Inject(GROUP_REPOSITORY) private readonly groups: GroupRepository,
+  ) {
+    super();
+  }
+
+  protected async handleRequest(cmd: DeleteGroupRequest) {
+    const group = await this.groups.findById(cmd.groupId);
+    if (!group) throw new NotFoundError('Group');
+    requireMembership(group, cmd.userId);
+    if (group.ownerId !== cmd.userId) {
+      // A member leaves a group; only its owner can end it for everyone.
+      throw new ForbiddenError('Only the owner can delete the group');
+    }
+    await this.groups.deleteGroup(cmd.groupId);
+    return CommandResponse.of({ ok: true as const });
+  }
+}
+
 // ── The plan (owner only): what the next session will study ─────────────────
 
 export interface UpdatePlanRequest {

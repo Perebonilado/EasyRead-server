@@ -32,10 +32,35 @@ async function bootstrap() {
     raw({ type: '*/*', limit: '16mb' }),
   );
 
+  const allowedOrigins = config
+    .get<string>('FRONTEND_URL', 'http://localhost:3000')
+    .split(',')
+    .map((origin) => origin.trim())
+    .filter(Boolean);
+  const isProduction = config.get('NODE_ENV') === 'production';
+  /**
+   * A phone testing over wifi loads the app from this machine's LAN address,
+   * not from localhost, so in development any private-network origin is
+   * allowed as well. Production stays on the configured list.
+   */
+  const PRIVATE_HOST =
+    /^(localhost|127\.0\.0\.1|\[::1\]|10\.\d+\.\d+\.\d+|192\.168\.\d+\.\d+|172\.(1[6-9]|2\d|3[01])\.\d+\.\d+)$/;
+  const allowPrivateOrigin = (
+    origin: string | undefined,
+    callback: (error: Error | null, allow?: boolean) => void,
+  ) => {
+    if (!origin || allowedOrigins.includes(origin)) {
+      callback(null, true);
+      return;
+    }
+    try {
+      callback(null, PRIVATE_HOST.test(new URL(origin).hostname));
+    } catch {
+      callback(null, false);
+    }
+  };
   app.enableCors({
-    origin: config
-      .get<string>('FRONTEND_URL', 'http://localhost:3000')
-      .split(','),
+    origin: isProduction ? allowedOrigins : allowPrivateOrigin,
     // Required for the refresh cookie to travel.
     credentials: true,
   });

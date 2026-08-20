@@ -168,6 +168,7 @@ export class ServerRealtime {
       delta?: string;
       error?: { message?: string };
       response?: {
+        status?: string;
         output?: {
           type?: string;
           call_id?: string;
@@ -212,8 +213,10 @@ export class ServerRealtime {
     }
     if (type === 'response.done') {
       // Tool calls ride the finished response — the one place both API
-      // generations agree on.
-      for (const item of event.response?.output ?? []) {
+      // generations agree on. A CANCELLED response's calls stay dead:
+      // acting on them would answer an interruption by talking over it.
+      const cancelled = event.response?.status === 'cancelled';
+      for (const item of cancelled ? [] : (event.response?.output ?? [])) {
         if (item.type === 'function_call' && item.call_id && item.name) {
           this.opts.callbacks.onToolCall({
             callId: item.call_id,

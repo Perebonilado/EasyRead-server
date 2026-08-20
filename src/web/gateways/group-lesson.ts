@@ -195,6 +195,13 @@ export class GroupLesson {
   private audioEndAt = 0;
   private drainTimer: ReturnType<typeof setTimeout> | null = null;
   /**
+   * True from an interruption until the next response begins. The
+   * cancelled response's in-flight deltas keep arriving for a moment;
+   * forwarding them replayed fragments of dead tutor speech over the
+   * interrupter's voice — the "broken record".
+   */
+  private tutorAudioMuted = false;
+  /**
    * The current response's chunks, stamped with when the room finishes
    * hearing each. A member who joins mid-response missed the original
    * fan-out burst (audio generates far faster than it plays), so without
@@ -246,6 +253,9 @@ export class GroupLesson {
       tools: TOOLS,
       callbacks: {
         onAudio: (chunk) => {
+          // Stragglers from a cancelled response, or anything arriving
+          // while a member holds the floor, must not reach the room.
+          if (this.tutorAudioMuted || this.floorHolder) return;
           // Advance the room's playback clock: 24kHz pcm16 is 48 bytes/ms.
           const ms = (chunk.length * 3) / 4 / 48;
           const now = Date.now();
@@ -268,6 +278,16 @@ export class GroupLesson {
         },
         onSpeaking: (speaking) => {
           if (speaking) {
+            if (this.floorHolder && this.realtime) {
+              // The response.create raced the floor grab: cancel it
+              // before anyone hears it, and leave the room's state (a
+              // member speaking, tutor quiet) untouched.
+              this.generating = true;
+              this.tutorAudioMuted = true;
+              this.realtime.cancelResponse();
+              return;
+            }
+            this.tutorAudioMuted = false;
             this.generating = true;
             this.tutorSpeaking = true;
             if (this.drainTimer) clearTimeout(this.drainTimer);
@@ -311,6 +331,7 @@ export class GroupLesson {
     if (this.closedForGood) return;
     this.tutorSpeaking = false;
     this.generating = false;
+    this.tutorAudioMuted = false;
     this.audioEndAt = 0;
     this.pendingAudio = [];
     this.liveCaption = '';
@@ -365,10 +386,11 @@ export class GroupLesson {
    * queued and fired the moment the room actually goes quiet.
    */
   private respondNow() {
-    if (this.tutorSpeaking) {
+    if (this.tutorSpeaking || this.floorHolder) {
       this.respondQueued = true;
       return;
     }
+    this.respondQueued = false;
     this.realtime?.respond();
     // Watchdog: if the provider swallows this ask (it happens), the
     // dead-air engine revives the room; response.created clears it.
@@ -382,11 +404,13 @@ export class GroupLesson {
       this.tutorSpeaking = false;
       this.events.onSpeaking(false);
     }
+    // Somebody is speaking: whatever wants saying waits for the release.
+    if (this.floorHolder) return;
     if (this.respondQueued) {
       this.respondQueued = false;
       this.realtime?.respond();
       this.armContinue();
-    } else if (!this.floorHolder) {
+    } else {
       this.armContinue();
     }
   }
@@ -444,7 +468,10 @@ export class GroupLesson {
     if (this.floorHolder || !this.realtime) return false;
     // An interruption supersedes anything the tutor was about to say.
     this.respondQueued = false;
-    if (this.generating) this.realtime.cancelResponse();
+    if (this.generating) {
+      this.realtime.cancelResponse();
+      this.tutorAudioMuted = true;
+    }
     if (this.tutorSpeaking) {
       // Clients cut the tutor's queued audio the moment the floor changes
       // hands, so the room is quiet right now; say so before the grant.
@@ -523,9 +550,15 @@ export class GroupLesson {
     // accidental spacebar) commits nothing: the tutor never answers silence.
     if (this.voicedBytes < MIN_VOICED_BYTES) {
       this.realtime?.clearInput();
-      // An empty hold asked the tutor nothing: make sure the dead-air
-      // engine is armed so the lesson still moves on its own.
-      if (!this.tutorSpeaking) this.armContinue();
+      if (this.respondQueued) {
+        // Something queued up during the hold (a check closing, say):
+        // the floor is free again, so let it speak.
+        this.respondNow();
+      } else if (!this.tutorSpeaking) {
+        // An empty hold asked the tutor nothing: make sure the dead-air
+        // engine is armed so the lesson still moves on its own.
+        this.armContinue();
+      }
     } else {
       this.realtime?.commitTurn();
       this.respondNow();

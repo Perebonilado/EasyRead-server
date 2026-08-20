@@ -271,9 +271,16 @@ export class SessionGateway implements OnGatewayInit, OnGatewayDisconnect {
     const userId = authOf(socket).userId;
     const name = authOf(socket).name ?? 'Someone';
     if (!room?.lesson || !userId) return;
+    // A re-press by the current holder changes nothing, so it broadcasts
+    // nothing: every redundant floor:state made clients cut the audio
+    // they were playing, chopping the holder's own voice for the room.
+    const before = room.lesson.holder()?.userId ?? null;
     const granted = room.lesson.requestFloor(userId, name);
-    if (granted) this.broadcastFloor(room);
-    else socket.emit('floor:denied', { holder: room.lesson.holder() });
+    if (!granted) {
+      socket.emit('floor:denied', { holder: room.lesson.holder() });
+      return;
+    }
+    if (before !== userId) this.broadcastFloor(room);
   }
 
   @SubscribeMessage('floor:release')
@@ -281,8 +288,12 @@ export class SessionGateway implements OnGatewayInit, OnGatewayDisconnect {
     const room = this.roomOf(socket);
     const userId = authOf(socket).userId;
     if (!room?.lesson || !userId) return;
+    // A stray release from a non-holder is a no-op and broadcasts
+    // nothing; redundant floor:state used to chop everyone's playback.
+    const before = room.lesson.holder()?.userId ?? null;
     room.lesson.releaseFloor(userId);
-    this.broadcastFloor(room);
+    const after = room.lesson.holder()?.userId ?? null;
+    if (before !== after) this.broadcastFloor(room);
   }
 
   @SubscribeMessage('audio:chunk')

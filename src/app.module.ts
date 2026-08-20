@@ -9,6 +9,7 @@ import { LoginHandler } from './business/handlers/identity/login.handler';
 import { RegisterHandler } from './business/handlers/identity/register.handler';
 import { ResetPasswordHandler } from './business/handlers/identity/reset-password.handler';
 import { SessionService } from './business/handlers/identity/session.service';
+import { ResendVerificationHandler } from './business/handlers/identity/resend-verification.handler';
 import { VerifyEmailHandler } from './business/handlers/identity/verify-email.handler';
 import {
   GetExportHandler,
@@ -143,6 +144,7 @@ const handlers = [
   GroupLessonFactory,
   LoginHandler,
   VerifyEmailHandler,
+  ResendVerificationHandler,
   ForgotPasswordHandler,
   ResetPasswordHandler,
   DeleteAccountHandler,

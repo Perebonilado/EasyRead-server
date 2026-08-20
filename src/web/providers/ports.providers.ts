@@ -29,6 +29,7 @@ import { GoogleDriveClient } from '../adapters/google-drive.client';
 import { GoogleImageSearchAdapter } from '../adapters/google-image-search.adapter';
 import { LocalStorageAdapter } from '../adapters/local-storage.adapter';
 import { LogEmailAdapter } from '../adapters/log-email.adapter';
+import { ResendEmailAdapter } from '../adapters/resend-email.adapter';
 import { MistralOcrAdapter } from '../adapters/mistral-ocr.adapter';
 import { MysqlVectorStoreAdapter } from '../adapters/mysql-vector-store.adapter';
 import { NullImageSearchAdapter } from '../adapters/null-image-search.adapter';
@@ -85,7 +86,14 @@ export const portProviders: Provider[] = [
 
   // Payments are stubbed until billing lands.
   { provide: PAYMENTS, useClass: FakePaymentsAdapter },
-  { provide: EMAIL, useClass: LogEmailAdapter },
+  {
+    provide: EMAIL,
+    inject: [ConfigService],
+    useFactory: (config: ConfigService) =>
+      config.get('EMAIL_DRIVER') === 'resend' && config.get('RESEND_API_KEY')
+        ? new ResendEmailAdapter(config)
+        : new LogEmailAdapter(),
+  },
   { provide: STARTER_LIBRARY, useClass: StarterLibraryAdapter },
 
   {

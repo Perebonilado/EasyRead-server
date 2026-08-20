@@ -19,6 +19,7 @@ import {
   SessionService,
   type IssuedSession,
 } from '../../business/handlers/identity/session.service';
+import { ResendVerificationHandler } from '../../business/handlers/identity/resend-verification.handler';
 import { VerifyEmailHandler } from '../../business/handlers/identity/verify-email.handler';
 import { MeQuery } from '../../query/me.query';
 import { CurrentUser } from '../security/current-user.decorator';
@@ -58,6 +59,7 @@ export class AuthController {
     private readonly register: RegisterHandler,
     private readonly login: LoginHandler,
     private readonly verifyEmail: VerifyEmailHandler,
+    private readonly resendVerification_: ResendVerificationHandler,
     private readonly forgotPassword: ForgotPasswordHandler,
     private readonly resetPassword: ResetPasswordHandler,
     private readonly sessions: SessionService,
@@ -144,6 +146,15 @@ export class AuthController {
   async reset(@Body() body: ResetPasswordDto): Promise<{ ok: true }> {
     await this.resetPassword.handle(body);
     return { ok: true };
+  }
+
+  @Post('resend-verification')
+  @HttpCode(202)
+  async resendVerification(
+    @CurrentUser('id') userId: string,
+  ): Promise<{ ok: true }> {
+    const result = await this.resendVerification_.handle({ userId });
+    return result.data;
   }
 
   @Get('me')

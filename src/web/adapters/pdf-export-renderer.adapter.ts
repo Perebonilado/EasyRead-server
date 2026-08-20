@@ -7,7 +7,7 @@ import type {
 import { PdfWriter, tableRowsOf } from './pdf-writer';
 import { decodeImage } from './images/image-codec';
 
-const WATERMARK = 'Made with EasyRead — easyread.app';
+const WATERMARK = 'Made with EasyRead, easiread.com';
 
 /**
  * Typesets simplified text as a PDF (§4.8).

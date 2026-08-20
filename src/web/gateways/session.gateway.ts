@@ -188,7 +188,7 @@ export class SessionGateway implements OnGatewayInit, OnGatewayDisconnect {
         groupId: session.groupId,
         hostId: session.hostId,
         documentId: session.documentId,
-        topicId: session.topicId,
+        topicIds: session.topicIds,
         tutorId: session.tutorId,
       },
       roster: this.rosterOf(room),
@@ -286,7 +286,13 @@ export class SessionGateway implements OnGatewayInit, OnGatewayDisconnect {
     const room = this.roomOf(socket);
     const userId = authOf(socket).userId;
     if (!room?.lesson || !userId || typeof body?.chunk !== 'string') return;
+    if (room.lesson.holder()?.userId !== userId) return;
     room.lesson.appendAudio(userId, body.chunk);
+    // The classroom hears its own people: the floor-holder's voice fans out
+    // to everyone else in the room, not only to the tutor.
+    socket
+      .to(this.channel(room.sessionId))
+      .emit('peer:audio', { userId, chunk: body.chunk });
   }
 
   @SubscribeMessage('check:answer')

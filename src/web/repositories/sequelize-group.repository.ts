@@ -33,7 +33,7 @@ function toSessionRecord(session: StudySessionModel): StudySessionRecord {
     groupId: session.groupId,
     hostId: session.hostId,
     documentId: session.documentId,
-    topicId: session.topicId,
+    topicIds: session.topicIds ?? (session.topicId ? [session.topicId] : []),
     tutorId: session.tutorId,
     status: session.status,
     startedAt: session.startedAt,
@@ -131,12 +131,17 @@ export class SequelizeGroupRepository implements GroupRepository {
     groupId: string;
     hostId: string;
     documentId: string;
-    topicId: string | null;
+    topicIds: string[];
     tutorId: string;
   }): Promise<StudySessionRecord> {
     const session = await this.sessions.create({
       id: newId(),
-      ...input,
+      groupId: input.groupId,
+      hostId: input.hostId,
+      documentId: input.documentId,
+      topicId: null,
+      topicIds: input.topicIds,
+      tutorId: input.tutorId,
       status: 'live',
       startedAt: new Date(),
       endedAt: null,

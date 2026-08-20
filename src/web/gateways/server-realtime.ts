@@ -124,7 +124,11 @@ export class ServerRealtime {
   /** Push-to-talk release: the turn is exactly what was held down. */
   commitTurn() {
     this.send({ type: 'input_audio_buffer.commit' });
-    this.respond();
+  }
+
+  /** A hold that produced no real audio: drop it rather than commit it. */
+  clearInput() {
+    this.send({ type: 'input_audio_buffer.clear' });
   }
 
   toolResult(callId: string, output: string, respond = true) {
@@ -136,7 +140,6 @@ export class ServerRealtime {
   }
 
   respond() {
-    this.opts.callbacks.onSpeaking(true);
     this.send({ type: 'response.create' });
   }
 
@@ -173,6 +176,12 @@ export class ServerRealtime {
     }
     const type = event.type ?? '';
 
+    if (type === 'response.created') {
+      // Speaking state comes from the API, never from optimism: a refused
+      // response.create must not wedge the room into "tutor is speaking".
+      this.opts.callbacks.onSpeaking(true);
+      return;
+    }
     if (
       type === 'response.audio.delta' ||
       type === 'response.output_audio.delta'

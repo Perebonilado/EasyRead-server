@@ -8,7 +8,14 @@ import {
   Param,
   Post,
 } from '@nestjs/common';
-import { IsOptional, IsString, IsUUID, Length } from 'class-validator';
+import {
+  ArrayMaxSize,
+  IsArray,
+  IsOptional,
+  IsString,
+  IsUUID,
+  Length,
+} from 'class-validator';
 import type {
   GroupDetailDto,
   GroupSummaryDto,
@@ -46,9 +53,12 @@ class StartSessionDto {
   @IsUUID()
   documentId!: string;
 
+  /** Chapters to focus on; omitted or empty means the whole document. */
   @IsOptional()
-  @IsUUID()
-  topicId?: string;
+  @IsArray()
+  @ArrayMaxSize(12)
+  @IsUUID(undefined, { each: true })
+  topicIds?: string[];
 
   @IsString()
   @Length(1, 40)
@@ -130,7 +140,7 @@ export class GroupsController {
       userId,
       groupId,
       documentId: body.documentId,
-      topicId: body.topicId ?? null,
+      topicIds: body.topicIds ?? [],
       tutorId: body.tutorId,
     });
     return result.data;

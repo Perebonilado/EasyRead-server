@@ -1,7 +1,10 @@
 import { Inject, Injectable } from '@nestjs/common';
 import { Document } from '../../domain/entities/document';
 import { ForbiddenError, NotFoundError } from '../../domain/errors/errors';
-import { DOCUMENT_REPOSITORY, GROUP_REPOSITORY } from '../../repositories/tokens';
+import {
+  DOCUMENT_REPOSITORY,
+  GROUP_REPOSITORY,
+} from '../../repositories/tokens';
 import type { DocumentRepository } from '../../repositories/document.repository';
 import type { GroupRepository } from '../../repositories/group.repository';
 

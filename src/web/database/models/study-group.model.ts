@@ -77,6 +77,10 @@ export class StudySessionModel extends BaseModel {
   @Column({ type: DataType.UUID, allowNull: true })
   declare topicId: string | null;
 
+  /** Chapter scope: null or empty means the whole document. */
+  @Column({ type: DataType.JSON, allowNull: true })
+  declare topicIds: string[] | null;
+
   @Column({ type: DataType.STRING(40), allowNull: false })
   declare tutorId: string;
 

@@ -75,7 +75,7 @@ class FakeGroups implements GroupRepository {
     groupId: string;
     hostId: string;
     documentId: string;
-    topicId: string | null;
+    topicIds: string[];
     tutorId: string;
   }): Promise<StudySessionRecord> {
     const session: StudySessionRecord = {

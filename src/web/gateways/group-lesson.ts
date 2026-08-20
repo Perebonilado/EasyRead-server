@@ -13,7 +13,10 @@ import type {
 import type { StudySessionRecord } from '../../business/repositories/group.repository';
 import { RecordAssessmentHandler } from '../../business/handlers/documents/learning.handlers';
 import { blocksToProse } from '../../business/handlers/documents/voice.handlers';
-import { tutorById } from '../../business/domain/values/tutors';
+import {
+  dialInstructions,
+  tutorById,
+} from '../../business/domain/values/tutors';
 import { ServerRealtime } from './server-realtime';
 
 /** How long one held turn may run before the floor auto-releases. */
@@ -22,6 +25,26 @@ export const MAX_FLOOR_MS = 45_000;
 const CHECK_WINDOW_MS = 35_000;
 /** The lesson never reads more than this much chapter text. */
 const CONTEXT_CHAR_BUDGET = 18_000;
+/** A committed turn needs real audio; shorter holds are dropped silently. */
+const MIN_TURN_BYTES = 48 * 150; // 150ms of 24kHz pcm16
+/** A dropped tutor connection retries this many times before giving up. */
+const MAX_RECONNECTS = 3;
+/**
+ * Dead air (classroom feel): when the tutor finishes and nobody takes the
+ * floor within this window, it carries on by itself — checking in if it had
+ * asked something, simply teaching the next idea if it had not. Without
+ * this, push-to-talk turns every pause into a stall.
+ */
+const DEAD_AIR_MS = 7_000;
+/**
+ * How many times the tutor may carry on into silence before it stops
+ * driving itself: past this it asks once whether the group is still there,
+ * then waits for a human turn. An open tab in an empty kitchen must not
+ * teach all night.
+ */
+const MAX_AUTO_CONTINUES = 6;
+/** How much recent transcript a reconnected tutor is reminded of. */
+const RESUME_TRANSCRIPT_CHARS = 2_500;
 
 export interface StageBoardItem {
   id: string;
@@ -70,6 +93,23 @@ interface OpenCheck {
 }
 
 const TOOLS = [
+  {
+    name: 'write_note',
+    description:
+      'Write a short note on the shared board: the key point you are about to explain, a term with its meaning, or the plan for the session. This is your blackboard writing; use it constantly, before you explain each new idea.',
+    parameters: {
+      type: 'object',
+      properties: {
+        title: { type: 'string', description: 'Two to five words' },
+        text: {
+          type: 'string',
+          description:
+            'One or two short sentences, the way a teacher writes on a board',
+        },
+      },
+      required: ['title', 'text'],
+    },
+  },
   {
     name: 'draw_diagram',
     description:
@@ -134,6 +174,16 @@ export class GroupLesson {
   private check: OpenCheck | null = null;
   private tutorSpeaking = false;
   private seq = 0;
+  /** Decoded audio bytes appended during the current hold. */
+  private turnBytes = 0;
+  /** Rolling transcript of the tutor's speech, for resuming after a drop. */
+  private transcript = '';
+  private reconnects = 0;
+  private closedForGood = false;
+  private continueTimer: ReturnType<typeof setTimeout> | null = null;
+  private autoContinues = 0;
+  /** A respond asked for while the tutor was mid-response; fired on done. */
+  private respondQueued = false;
 
   constructor(
     private readonly session: StudySessionRecord,
@@ -149,6 +199,15 @@ export class GroupLesson {
   ) {}
 
   async start() {
+    await this.connect();
+    const names = this.roster().map((m) => m.name);
+    this.realtime?.inject(
+      `(The session is starting. Present now: ${names.join(', ') || 'nobody yet'}. Write the session plan on the board with write_note, greet the group briefly by name, then start teaching the first idea from the top, assuming nobody has read anything.)`,
+    );
+    this.respondNow();
+  }
+
+  private async connect() {
     this.realtime = new ServerRealtime({
       apiKey: this.deps.apiKey,
       model: this.deps.model,
@@ -157,30 +216,153 @@ export class GroupLesson {
       tools: TOOLS,
       callbacks: {
         onAudio: (chunk) => this.events.onAudio(chunk),
-        onCaption: (delta, done) => this.events.onCaption(delta, done),
+        onCaption: (delta, done) => {
+          if (!done) {
+            this.transcript = (this.transcript + delta).slice(
+              -RESUME_TRANSCRIPT_CHARS,
+            );
+          }
+          this.events.onCaption(delta, done);
+        },
         onSpeaking: (speaking) => {
           this.tutorSpeaking = speaking;
           this.events.onSpeaking(speaking);
+          if (speaking) {
+            this.clearContinue();
+          } else if (this.respondQueued) {
+            this.respondQueued = false;
+            this.realtime?.respond();
+          } else {
+            this.armContinue();
+          }
         },
         onToolCall: (call) => this.onToolCall(call),
-        onError: (message) => this.events.onError(message),
-        onClose: () => this.events.onError('The tutor lost its connection'),
+        onError: (message) => {
+          // Plumbing noise (an empty commit, a transient event error) is a
+          // log line; the room only hears about a tutor that actually died.
+          this.logger.warn(`Realtime: ${message}`);
+        },
+        onClose: () => void this.onDropped(),
       },
     });
     await this.realtime.connect();
-    const names = this.roster().map((m) => m.name);
-    this.realtime.inject(
-      `(The session is starting. Present now: ${names.join(', ') || 'nobody yet'}. Greet the group briefly, say what today's material covers, and begin.)`,
-      true,
-    );
+  }
+
+  /**
+   * The provider closed the socket under us (a blip, an idle cut, a rotated
+   * connection). The classroom does not end for that: reconnect with a
+   * fresh session, remind the tutor what it had covered, and carry on. The
+   * room hears about it only when every retry fails.
+   */
+  private async onDropped() {
+    if (this.closedForGood) return;
+    this.tutorSpeaking = false;
+    this.events.onSpeaking(false);
+    // A vanished connection cannot hold the floor's commit path hostage.
+    if (this.floorHolder) {
+      if (this.floorTimer) clearTimeout(this.floorTimer);
+      this.floorTimer = null;
+      this.floorHolder = null;
+    }
+
+    while (this.reconnects < MAX_RECONNECTS && !this.closedForGood) {
+      this.reconnects += 1;
+      await new Promise((resolve) =>
+        setTimeout(resolve, 1500 * this.reconnects),
+      );
+      try {
+        await this.connect();
+        const names = this.roster().map((m) => m.name);
+        this.realtime?.inject(
+          `(Your connection dropped and was restored mid-session. Present: ${names.join(', ') || 'nobody'}. The tail of what you had said so far: "...${this.transcript.slice(-RESUME_TRANSCRIPT_CHARS)}". Pick up exactly where you left off in one smooth breath. Do not re-greet, do not restart the lesson, do not mention the drop.)`,
+        );
+        this.tutorSpeaking = false;
+        this.respondQueued = false;
+        this.respondNow();
+        this.logger.log(`Realtime reconnected (attempt ${this.reconnects})`);
+        // A stable stretch earns the budget back, so a long session can
+        // survive more than three drops spread over an hour.
+        setTimeout(() => {
+          this.reconnects = 0;
+        }, 120_000);
+        return;
+      } catch (error) {
+        this.logger.warn(
+          `Realtime reconnect ${this.reconnects} failed: ${(error as Error).message}`,
+        );
+      }
+    }
+    if (!this.closedForGood) {
+      this.events.onError(
+        'The tutor lost its connection. The room still works; the owner can end and restart the session',
+      );
+    }
+  }
+
+  /**
+   * Every "tutor, say something" goes through here: while a response is
+   * active, asking for another is an API error that can stall the room, so
+   * the ask is queued and fired the moment the current response finishes.
+   */
+  private respondNow() {
+    if (this.tutorSpeaking) {
+      this.respondQueued = true;
+      return;
+    }
+    this.realtime?.respond();
+  }
+
+  // ── Dead air: the conversation must not stall on politeness ──────────────
+
+  private clearContinue() {
+    if (this.continueTimer) clearTimeout(this.continueTimer);
+    this.continueTimer = null;
+  }
+
+  private armContinue() {
+    this.clearContinue();
+    if (this.closedForGood) return;
+    this.continueTimer = setTimeout(() => {
+      this.continueTimer = null;
+      if (
+        this.closedForGood ||
+        this.tutorSpeaking ||
+        this.floorHolder ||
+        this.check ||
+        this.roster().length === 0
+      ) {
+        return;
+      }
+      if (this.autoContinues >= MAX_AUTO_CONTINUES) {
+        if (this.autoContinues === MAX_AUTO_CONTINUES) {
+          this.autoContinues += 1;
+          this.realtime?.inject(
+            '(Nobody has responded for a while. Ask once, warmly, whether the group is still with you, say you will wait, and then stay quiet.)',
+          );
+          this.respondNow();
+        }
+        return;
+      }
+      this.autoContinues += 1;
+      this.realtime?.inject(
+        '(Nobody spoke. If your last words asked someone a question, check in warmly by name in one short sentence, or offer to move on. If you were not waiting on anyone, do not comment on the pause at all; simply continue teaching the next idea.)',
+      );
+      this.respondNow();
+    }, DEAD_AIR_MS);
   }
 
   // ── Floor control (plan §7.2) ─────────────────────────────────────────────
 
   /** True if granted. First press wins; the tutor mid-sentence blocks. */
   requestFloor(userId: string, name: string): boolean {
+    // A re-press by the current holder (a quick release-and-hold) keeps the
+    // floor rather than being refused by their own earlier grant.
+    if (this.floorHolder?.userId === userId) return true;
     if (this.floorHolder || this.tutorSpeaking || !this.realtime) return false;
+    this.autoContinues = 0;
     this.floorHolder = { userId, name };
+    this.clearContinue();
+    this.turnBytes = 0;
     this.realtime.inject(`(${name} is speaking next)`);
     this.floorTimer = setTimeout(() => this.releaseFloor(userId), MAX_FLOOR_MS);
     return true;
@@ -192,6 +374,7 @@ export class GroupLesson {
 
   appendAudio(userId: string, base64Pcm16: string) {
     if (this.floorHolder?.userId !== userId) return;
+    this.turnBytes += Math.floor((base64Pcm16.length * 3) / 4);
     this.realtime?.appendAudio(base64Pcm16);
   }
 
@@ -200,7 +383,15 @@ export class GroupLesson {
     if (this.floorTimer) clearTimeout(this.floorTimer);
     this.floorTimer = null;
     this.floorHolder = null;
-    this.realtime?.commitTurn();
+    // A tap too quick to carry words (or a swallowed mic permission) must
+    // not commit: the API refuses sub-100ms buffers with a raw error.
+    if (this.turnBytes < MIN_TURN_BYTES) {
+      this.realtime?.clearInput();
+    } else {
+      this.realtime?.commitTurn();
+      this.respondNow();
+    }
+    this.turnBytes = 0;
   }
 
   /** A member joined or left mid-lesson; the tutor should know. */
@@ -215,6 +406,7 @@ export class GroupLesson {
     if (!check || check.id !== checkId) return;
     if (index < 0 || index >= check.options.length) return;
     if (check.answers.has(userId)) return;
+    this.autoContinues = 0;
     check.answers.set(userId, index);
 
     // The member's own record; the stage never shows names on answers.
@@ -230,7 +422,7 @@ export class GroupLesson {
         payload: {
           group: true,
           sessionId: this.session.id,
-          topicId: this.session.topicId,
+          topicIds: this.session.topicIds,
           quiz: true,
           question: check.question,
           yourAnswer: check.options[index],
@@ -270,7 +462,9 @@ export class GroupLesson {
       `${right} of ${total} chose the right answer (${check.options[check.correctIndex]}). Full spread: ${check.options
         .map((option, i) => `${option}: ${spread[i]}`)
         .join(', ')}. Teach to this without naming anyone.`,
+      false,
     );
+    this.respondNow();
   }
 
   // ── Tool calls ────────────────────────────────────────────────────────────
@@ -289,6 +483,23 @@ export class GroupLesson {
       return;
     }
 
+    if (call.name === 'write_note') {
+      const item: StageBoardItem = {
+        id: `b${++this.seq}`,
+        kind: 'note',
+        title: str(args.title, 'Note'),
+        body: str(args.text, ''),
+      };
+      this.events.onBoard(item);
+      this.realtime?.toolResult(
+        call.callId,
+        'On the board. Keep teaching; never announce that you wrote it.',
+        false,
+      );
+      this.respondNow();
+      return;
+    }
+
     if (call.name === 'draw_diagram') {
       const item: StageBoardItem = {
         id: `b${++this.seq}`,
@@ -300,7 +511,9 @@ export class GroupLesson {
       this.realtime?.toolResult(
         call.callId,
         'Drawn on the shared board. Walk the group through it briefly.',
+        false,
       );
+      this.respondNow();
       return;
     }
 
@@ -331,6 +544,7 @@ export class GroupLesson {
         timer: setTimeout(() => this.closeCheck(), CHECK_WINDOW_MS),
       };
       this.check = check;
+      this.clearContinue();
       this.events.onCheckOpen({
         id: check.id,
         question: check.question,
@@ -345,10 +559,13 @@ export class GroupLesson {
       return;
     }
 
-    this.realtime?.toolResult(call.callId, `Unknown tool ${call.name}.`);
+    this.realtime?.toolResult(call.callId, `Unknown tool ${call.name}.`, false);
+    this.respondNow();
   }
 
   close() {
+    this.closedForGood = true;
+    this.clearContinue();
     if (this.floorTimer) clearTimeout(this.floorTimer);
     if (this.check) clearTimeout(this.check.timer);
     this.realtime?.close();
@@ -380,30 +597,34 @@ export class GroupLessonFactory {
   ): Promise<GroupLesson> {
     const tutor = tutorById(session.tutorId);
 
-    // The material: the scoped chapter when one was picked, otherwise the
+    // The material: the picked chapters in document order, otherwise the
     // document from the top, inside a hard character budget.
-    let from = 1;
-    let to = 8;
-    let chapterTitle: string | null = null;
-    if (session.topicId) {
-      const all = await this.topics.listWithReadState(
-        session.documentId,
-        hostId,
+    const all = await this.topics.listWithReadState(session.documentId, hostId);
+    const picked = session.topicIds.length
+      ? all
+          .filter((topic) => session.topicIds.includes(topic.id))
+          .sort((a, b) => a.startPage - b.startPage)
+      : [];
+    const ranges = picked.length
+      ? picked.map((topic) => ({ from: topic.startPage, to: topic.endPage }))
+      : [{ from: 1, to: 8 }];
+    const chapterTitle = picked.length
+      ? picked.map((topic) => topic.title).join('", then "')
+      : null;
+
+    const pageRows: Awaited<ReturnType<SimplifiedPageRepository['findRange']>> =
+      [];
+    for (const range of ranges) {
+      pageRows.push(
+        ...(await this.pages.findRange(
+          session.documentId,
+          'standard',
+          range.from,
+          range.to,
+        )),
       );
-      const topic = all.find((t) => t.id === session.topicId);
-      if (topic) {
-        from = topic.startPage;
-        to = topic.endPage;
-        chapterTitle = topic.title;
-      }
     }
-    const pages = await this.pages.findRange(
-      session.documentId,
-      'standard',
-      from,
-      to,
-    );
-    const prose = pages
+    const prose = pageRows
       .filter((page) => page.status === 'done' && page.blocks?.length)
       .map(
         (page) =>
@@ -414,35 +635,64 @@ export class GroupLessonFactory {
     const summary = await this.summaries.find(session.documentId);
 
     const instructions = [
-      tutor.persona,
+      `You are giving a live spoken lesson on "${chapterTitle ?? 'this material'}" to a small GROUP of students, together in one room.`,
+      `${tutor.persona}\n\nYour teaching style:\n${dialInstructions(tutor.dials)}`,
+      [
+        'How to run the lesson (this works exactly like your one-to-one',
+        'lessons, with a group in the room instead of one student):',
+        '- ASSUME NOBODY HAS READ THE MATERIAL. You are not reviewing; you',
+        '  are teaching it from the beginning. Walk the group through the',
+        '  pages in order, one idea at a time, landed before the next. Never',
+        '  pile up material, never sprint to be finished.',
+        '- The board is your blackboard and the tools are your chalk, and',
+        '  chalk is silent. Before you explain each new idea, put it up:',
+        "  write_note for the key point in a teacher's short words,",
+        '  draw_diagram the moment an idea has shape (a process, a',
+        '  hierarchy, a comparison). Open the session by writing the plan on',
+        '  the board. Never teach for more than a minute without adding to',
+        '  the board, and never announce that you are writing or drawing;',
+        '  teach, and let the board follow your voice.',
+        '- Never read the board aloud as written. Your voice adds what the',
+        '  board cannot: plainer words, a concrete example, why it matters.',
+        '- Teach in short spoken stretches, under a minute, then hand the',
+        '  room a reason to speak: ask someone by name to say it back, ask',
+        '  the group what they expect comes next, or ask if anyone wants it',
+        '  slower. Questions from students are welcome at any moment; when',
+        '  one is asked, answer it fully before returning to the thread.',
+        '- NEVER leave dead air. End a turn either by asking a specific',
+        '  person a specific question, or by carrying straight on to the',
+        '  next idea yourself. Statements do not need replies; do not stop',
+        '  and wait after one. Only wait when you have explicitly asked',
+        '  someone to answer, and if they stay quiet, check in gently or',
+        '  move on rather than sitting in silence.',
+        '- Lines in parentheses, like (Ada is speaking next) or (Bola',
+        '  joined the session), are stage directions from the room. Never',
+        '  read them aloud or mention them. When someone speaks, you know',
+        '  exactly who it was: answer them by name.',
+        '- Spread your attention deliberately. If someone has not spoken in',
+        '  a while, invite them in warmly by name with an easy question.',
+        '  Never point out that someone has been quiet, and never scold.',
+        '- When one student misses an idea, reteach it to the whole group',
+        '  without dwelling on who missed it. Name ideas, never failings.',
+        '- Every few minutes, take the group pulse with group_check: one',
+        '  multiple-choice question everyone answers privately. You get the',
+        '  anonymous spread back; teach to it. If most missed it, take the',
+        '  idea again from a different angle before moving on.',
+        '- Greet people who join mid-session in one short breath, tell them',
+        '  in one sentence where the lesson is, and carry on.',
+        '- Plain language always. Keep technical terms, names and numbers',
+        '  exactly as the document writes them. Never use em dashes in',
+        '  anything you write on the board.',
+        '- When the material is covered, or the group asks to stop, close',
+        '  like a real teacher: a short spoken recap, a word of',
+        '  encouragement, goodbye. Then call end_lesson.',
+      ].join('\n'),
+      summary ? `What the document covers:\n${summary}` : '',
+      chapterTitle
+        ? `Today's focus, in this order: "${chapterTitle}". Teach these chapters and only these; mention neighbouring material only when a chapter genuinely leans on it.`
+        : '',
       '',
-      'You are leading a LIVE GROUP STUDY SESSION with up to six students',
-      'in the same room. This changes how you teach:',
-      '- Lines in parentheses, like "(Ada is speaking next)" or "(Bola',
-      '  joined the session)", are stage directions from the room. Never',
-      '  read them aloud or mention them; just use them. When someone',
-      '  speaks, you know exactly who it was — answer them by name.',
-      '- Keep every speech to two or three sentences, then hand the floor',
-      '  back. This is a conversation with turns, not a lecture.',
-      '- Spread your attention deliberately. If someone has not spoken in a',
-      '  while, invite them in warmly by name with an easy question. Never',
-      '  point out that someone has been quiet, and never scold.',
-      '- When one student misses an idea, reteach it to the whole group',
-      '  without dwelling on who missed it. Name ideas, never failings.',
-      '- Use draw_diagram when a structure would land better as a picture.',
-      '- Use group_check every few minutes to take the group pulse: one',
-      '  multiple-choice question everyone answers privately. You will get',
-      '  the anonymous spread back; teach to it.',
-      '- Greet people who join mid-session in one short breath and carry on.',
-      '- When the material is covered or the group asks to stop, give a one',
-      '  breath closing summary and call end_lesson.',
-      '- Plain language always. Keep technical terms exact; never use em',
-      '  dashes in anything you display.',
-      '',
-      summary ? `What the document covers: ${summary}` : '',
-      chapterTitle ? `Today's chapter: ${chapterTitle}` : '',
-      '',
-      'The material (the students see these same pages in their reader):',
+      'The material, page by page. Teach it in this order:',
       prose || '(The pages are still being prepared; teach from the summary.)',
     ].join('\n');
 

@@ -24,7 +24,8 @@ export interface StudySessionRecord {
   groupId: string;
   hostId: string;
   documentId: string;
-  topicId: string | null;
+  /** Chapter scope; empty means the whole document. */
+  topicIds: string[];
   tutorId: string;
   status: 'live' | 'ended';
   startedAt: Date;
@@ -50,7 +51,7 @@ export interface GroupRepository {
     groupId: string;
     hostId: string;
     documentId: string;
-    topicId: string | null;
+    topicIds: string[];
     tutorId: string;
   }): Promise<StudySessionRecord>;
   liveSession(groupId: string): Promise<StudySessionRecord | null>;

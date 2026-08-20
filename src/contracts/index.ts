@@ -820,7 +820,8 @@ export type StudySessionDto = {
   groupId: string;
   hostId: string;
   documentId: string;
-  topicId: string | null;
+  /** Chapter scope; empty means the whole document. */
+  topicIds: string[];
   tutorId: string;
   status: 'live' | 'ended';
   startedAt: string;

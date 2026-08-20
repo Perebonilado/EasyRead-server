@@ -52,7 +52,7 @@ export const toSessionDto = (session: {
   groupId: string;
   hostId: string;
   documentId: string;
-  topicId: string | null;
+  topicIds: string[];
   tutorId: string;
   status: 'live' | 'ended';
   startedAt: Date;
@@ -61,7 +61,7 @@ export const toSessionDto = (session: {
   groupId: session.groupId,
   hostId: session.hostId,
   documentId: session.documentId,
-  topicId: session.topicId,
+  topicIds: session.topicIds,
   tutorId: session.tutorId,
   status: session.status,
   startedAt: session.startedAt.toISOString(),
@@ -288,7 +288,8 @@ export interface StartSessionRequest {
   userId: string;
   groupId: string;
   documentId: string;
-  topicId: string | null;
+  /** Chapter scope; empty means the whole document. */
+  topicIds: string[];
   tutorId: string;
 }
 
@@ -323,7 +324,7 @@ export class StartSessionHandler extends AbstractRequestHandlerTemplate<
       groupId: group.id,
       hostId: cmd.userId,
       documentId: cmd.documentId,
-      topicId: cmd.topicId,
+      topicIds: cmd.topicIds,
       tutorId: cmd.tutorId,
     });
     return CommandResponse.of(toSessionDto(session));

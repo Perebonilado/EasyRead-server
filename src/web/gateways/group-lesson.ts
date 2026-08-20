@@ -34,6 +34,8 @@ const MIN_VOICED_BYTES = 48 * 150; // 150ms of 24kHz pcm16
  * perfectly valid zero-filled audio).
  */
 const VOICE_FLOOR = 300;
+/** Client jitter cushion + network: how far behind the room's ears run. */
+const AUDIO_LEAD_MS = 350;
 /** A dropped tutor connection retries this many times before giving up. */
 const MAX_RECONNECTS = 3;
 /**
@@ -180,6 +182,18 @@ export class GroupLesson {
   private floorTimer: ReturnType<typeof setTimeout> | null = null;
   private check: OpenCheck | null = null;
   private tutorSpeaking = false;
+  /** True from response.created to response.done: the model is generating. */
+  private generating = false;
+  /**
+   * When the room finishes HEARING the tutor. Audio generates several times
+   * faster than it plays, so response.done lands while clients still hold
+   * many seconds of queued sound. Every "speak again" trigger (dead air,
+   * tool follow-ups, queued responds) must wait on this clock, not on
+   * response.done — firing early makes every client reset its player, and
+   * the tutor audibly cuts itself off mid-sentence.
+   */
+  private audioEndAt = 0;
+  private drainTimer: ReturnType<typeof setTimeout> | null = null;
   private seq = 0;
   /** Decoded VOICED audio bytes appended during the current hold. */
   private voicedBytes = 0;
@@ -222,7 +236,13 @@ export class GroupLesson {
       instructions: this.deps.instructions,
       tools: TOOLS,
       callbacks: {
-        onAudio: (chunk) => this.events.onAudio(chunk),
+        onAudio: (chunk) => {
+          // Advance the room's playback clock: 24kHz pcm16 is 48 bytes/ms.
+          const ms = (chunk.length * 3) / 4 / 48;
+          const now = Date.now();
+          this.audioEndAt = Math.max(this.audioEndAt, now + AUDIO_LEAD_MS) + ms;
+          this.events.onAudio(chunk);
+        },
         onCaption: (delta, done) => {
           if (!done) {
             this.transcript = (this.transcript + delta).slice(
@@ -232,16 +252,26 @@ export class GroupLesson {
           this.events.onCaption(delta, done);
         },
         onSpeaking: (speaking) => {
-          this.tutorSpeaking = speaking;
-          this.events.onSpeaking(speaking);
           if (speaking) {
+            this.generating = true;
+            this.tutorSpeaking = true;
+            if (this.drainTimer) clearTimeout(this.drainTimer);
+            this.drainTimer = null;
             this.clearContinue();
-          } else if (this.respondQueued) {
-            this.respondQueued = false;
-            this.realtime?.respond();
-          } else {
-            this.armContinue();
+            this.events.onSpeaking(true);
+            return;
           }
+          // response.done means generation finished, not that the room has
+          // heard it. Nothing may speak until the playback clock runs out.
+          this.generating = false;
+          if (this.drainTimer) clearTimeout(this.drainTimer);
+          this.drainTimer = setTimeout(
+            () => {
+              this.drainTimer = null;
+              this.audioDrained();
+            },
+            Math.max(0, this.audioEndAt - Date.now()),
+          );
         },
         onToolCall: (call) => this.onToolCall(call),
         onError: (message) => {
@@ -264,6 +294,11 @@ export class GroupLesson {
   private async onDropped() {
     if (this.closedForGood) return;
     this.tutorSpeaking = false;
+    this.generating = false;
+    this.audioEndAt = 0;
+    this.respondQueued = false;
+    if (this.drainTimer) clearTimeout(this.drainTimer);
+    this.drainTimer = null;
     this.events.onSpeaking(false);
     // A vanished connection cannot hold the floor's commit path hostage.
     if (this.floorHolder) {
@@ -308,8 +343,8 @@ export class GroupLesson {
 
   /**
    * Every "tutor, say something" goes through here: while a response is
-   * active, asking for another is an API error that can stall the room, so
-   * the ask is queued and fired the moment the current response finishes.
+   * generating, or its audio is still playing out in the room, the ask is
+   * queued and fired the moment the room actually goes quiet.
    */
   private respondNow() {
     if (this.tutorSpeaking) {
@@ -317,6 +352,25 @@ export class GroupLesson {
       return;
     }
     this.realtime?.respond();
+    // Watchdog: if the provider swallows this ask (it happens), the
+    // dead-air engine revives the room; response.created clears it.
+    this.armContinue();
+  }
+
+  /** The room has genuinely gone quiet: only now may the tutor speak again. */
+  private audioDrained() {
+    if (this.closedForGood || this.generating) return;
+    if (this.tutorSpeaking) {
+      this.tutorSpeaking = false;
+      this.events.onSpeaking(false);
+    }
+    if (this.respondQueued) {
+      this.respondQueued = false;
+      this.realtime?.respond();
+      this.armContinue();
+    } else if (!this.floorHolder) {
+      this.armContinue();
+    }
   }
 
   // ── Dead air: the conversation must not stall on politeness ──────────────
@@ -370,11 +424,17 @@ export class GroupLesson {
     // floor rather than being refused by their own earlier grant.
     if (this.floorHolder?.userId === userId) return true;
     if (this.floorHolder || !this.realtime) return false;
+    // An interruption supersedes anything the tutor was about to say.
+    this.respondQueued = false;
+    if (this.generating) this.realtime.cancelResponse();
     if (this.tutorSpeaking) {
-      // Cut the tutor off cleanly; the cancelled response's done event
-      // resets the speaking state for everyone.
-      this.respondQueued = false;
-      this.realtime.cancelResponse();
+      // Clients cut the tutor's queued audio the moment the floor changes
+      // hands, so the room is quiet right now; say so before the grant.
+      this.audioEndAt = 0;
+      if (this.drainTimer) clearTimeout(this.drainTimer);
+      this.drainTimer = null;
+      this.tutorSpeaking = false;
+      this.events.onSpeaking(false);
     }
     this.autoContinues = 0;
     this.floorHolder = { userId, name };
@@ -415,6 +475,9 @@ export class GroupLesson {
     // accidental spacebar) commits nothing: the tutor never answers silence.
     if (this.voicedBytes < MIN_VOICED_BYTES) {
       this.realtime?.clearInput();
+      // An empty hold asked the tutor nothing: make sure the dead-air
+      // engine is armed so the lesson still moves on its own.
+      if (!this.tutorSpeaking) this.armContinue();
     } else {
       this.realtime?.commitTurn();
       this.respondNow();
@@ -594,6 +657,8 @@ export class GroupLesson {
   close() {
     this.closedForGood = true;
     this.clearContinue();
+    if (this.drainTimer) clearTimeout(this.drainTimer);
+    this.drainTimer = null;
     if (this.floorTimer) clearTimeout(this.floorTimer);
     if (this.check) clearTimeout(this.check.timer);
     this.realtime?.close();

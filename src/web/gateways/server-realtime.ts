@@ -157,6 +157,8 @@ export class ServerRealtime {
   private send(event: Record<string, unknown>) {
     if (this.socket?.readyState === WebSocket.OPEN) {
       this.socket.send(JSON.stringify(event));
+    } else {
+      this.logger.warn(`send dropped (socket not open): ${String(event.type)}`);
     }
   }
 

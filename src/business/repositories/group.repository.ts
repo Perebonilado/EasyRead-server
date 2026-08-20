@@ -56,7 +56,7 @@ export interface GroupRepository {
   }): Promise<StudySessionRecord>;
   liveSession(groupId: string): Promise<StudySessionRecord | null>;
   /** Live session ids across many groups at once, for the list page. */
-  liveSessionsFor(groupIds: string[]): Promise<Map<string, string>>;
+  liveSessionsFor(groupIds: string[]): Promise<Map<string, StudySessionRecord>>;
   findSession(sessionId: string): Promise<StudySessionRecord | null>;
   endSession(sessionId: string): Promise<void>;
   /** Is the user a member of any live session on this document? */

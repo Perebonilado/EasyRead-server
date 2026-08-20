@@ -9,6 +9,7 @@ import { GROUP_REPOSITORY } from '../../repositories/tokens';
 import type {
   GroupRecord,
   GroupRepository,
+  StudySessionRecord,
 } from '../../repositories/group.repository';
 import type {
   GroupDetailDto,
@@ -37,14 +38,22 @@ export function newInviteCode(): string {
 const toSummary = (
   group: GroupRecord,
   userId: string,
-  liveSessionId: string | null,
+  live: StudySessionRecord | null,
 ): GroupSummaryDto => ({
   id: group.id,
   name: group.name,
   ownerId: group.ownerId,
   isOwner: group.ownerId === userId,
   memberNames: group.members.map((m) => m.name),
-  liveSessionId,
+  inviteCode: group.inviteCode,
+  liveSessionId: live?.id ?? null,
+  liveSession: live
+    ? {
+        id: live.id,
+        tutorId: live.tutorId,
+        startedAt: live.startedAt.toISOString(),
+      }
+    : null,
 });
 
 export const toSessionDto = (session: {

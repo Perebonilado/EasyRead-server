@@ -98,10 +98,10 @@ class FakeGroups implements GroupRepository {
   }
 
   async liveSessionsFor(groupIds: string[]) {
-    const map = new Map<string, string>();
+    const map = new Map<string, StudySessionRecord>();
     for (const id of groupIds) {
       const live = await this.liveSession(id);
-      if (live) map.set(id, live.id);
+      if (live) map.set(id, live);
     }
     return map;
   }

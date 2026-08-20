@@ -157,12 +157,14 @@ export class SequelizeGroupRepository implements GroupRepository {
     return session ? toSessionRecord(session) : null;
   }
 
-  async liveSessionsFor(groupIds: string[]): Promise<Map<string, string>> {
+  async liveSessionsFor(
+    groupIds: string[],
+  ): Promise<Map<string, StudySessionRecord>> {
     if (!groupIds.length) return new Map();
     const sessions = await this.sessions.findAll({
       where: { groupId: groupIds, status: 'live' } as never,
     });
-    return new Map(sessions.map((s) => [s.groupId, s.id]));
+    return new Map(sessions.map((s) => [s.groupId, toSessionRecord(s)]));
   }
 
   async findSession(sessionId: string): Promise<StudySessionRecord | null> {

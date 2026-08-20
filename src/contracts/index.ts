@@ -812,7 +812,15 @@ export type GroupSummaryDto = {
   isOwner: boolean;
   /** First names for the card face; full roster lives in the detail. */
   memberNames: string[];
+  /** Every member may share their own room, so the list carries the code. */
+  inviteCode: string;
   liveSessionId: string | null;
+  /** Enough to say who is teaching and for how long, without a second call. */
+  liveSession: {
+    id: string;
+    tutorId: string;
+    startedAt: string;
+  } | null;
 };
 
 export type StudySessionDto = {

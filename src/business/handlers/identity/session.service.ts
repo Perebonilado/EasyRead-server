@@ -31,13 +31,27 @@ export interface SessionContext {
 }
 
 /**
+ * How long after a rotation the old token still counts as a race rather than
+ * a replay. Two tabs, a reload landing on an in-flight refresh, or a phone
+ * restoring a backgrounded page all present the same cookie at nearly the
+ * same moment; treating that as theft logged real people out of every device
+ * they owned. Genuine replay attacks do not arrive inside a minute of the
+ * legitimate rotation.
+ */
+const REUSE_GRACE_MS = 60_000;
+
+/**
  * Issues and rotates sessions.
  *
  * Refresh tokens rotate on every use and are stored hashed. Presenting a token
- * that has already been rotated means someone is replaying a stolen copy, so
+ * that was rotated a while ago means someone is replaying a stolen copy, so
  * the entire family is revoked rather than just that token — the legitimate
  * user gets logged out too, which is the correct trade when a token has leaked
- * (technical design §3.1).
+ * (technical design §3.1). Inside `REUSE_GRACE_MS` of the rotation it is read
+ * as the race it almost always is, and the session survives.
+ *
+ * Every rotation issues a fresh full-length token, so the 30 day window
+ * slides: someone who keeps using the app is never asked to sign in again.
  */
 @Injectable()
 export class SessionService {
@@ -98,14 +112,23 @@ export class SessionService {
     if (!stored) throw new InvalidTokenError('That session is no longer valid');
 
     if (stored.revokedAt) {
-      // Already rotated once — this is a replay. Burn the family.
-      this.logger.warn(
-        `Refresh token reuse detected for user ${stored.userId}; revoking family`,
-      );
-      await this.refreshTokens.revokeFamily(stored.familyId, now);
-      throw new UnauthorizedError(
-        'That session was ended for security reasons',
-      );
+      const sinceRotation = now.getTime() - stored.revokedAt.getTime();
+      if (sinceRotation > REUSE_GRACE_MS) {
+        // Rotated long ago and presented again: a replay. Burn the family.
+        this.logger.warn(
+          `Refresh token reuse detected for user ${stored.userId}; revoking family`,
+        );
+        await this.refreshTokens.revokeFamily(stored.familyId, now);
+        throw new UnauthorizedError(
+          'That session was ended for security reasons',
+        );
+      }
+
+      // A race between two tabs, not a theft: hand this one its own token
+      // and leave the family standing.
+      const raced = await this.users.findById(stored.userId);
+      if (!raced || !raced.canLogin()) throw new UnauthorizedError();
+      return this.issue(raced, context, stored.familyId);
     }
 
     if (stored.expiresAt < now)

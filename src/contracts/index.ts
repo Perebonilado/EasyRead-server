@@ -835,6 +835,13 @@ export type StudySessionDto = {
   startedAt: string;
 };
 
+export type GroupPlanDto = {
+  /** Null until the owner picks one; nothing is preselected. */
+  documentId: string | null;
+  topicIds: string[];
+  tutorId: string | null;
+};
+
 export type GroupDetailDto = {
   id: string;
   name: string;
@@ -842,5 +849,7 @@ export type GroupDetailDto = {
   isOwner: boolean;
   inviteCode: string;
   members: GroupMemberDto[];
+  /** What the next session will study; it persists between visits. */
+  plan: GroupPlanDto;
   liveSession: StudySessionDto | null;
 };

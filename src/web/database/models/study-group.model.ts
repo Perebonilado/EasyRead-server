@@ -25,6 +25,16 @@ export class StudyGroupModel extends BaseModel {
   @Column({ type: DataType.CHAR(8), allowNull: false, unique: true })
   declare inviteCode: string;
 
+  /** The plan for the next session; null document = not chosen yet. */
+  @Column({ type: DataType.UUID, allowNull: true })
+  declare plannedDocumentId: string | null;
+
+  @Column({ type: DataType.JSON, allowNull: true })
+  declare plannedTopicIds: string[] | null;
+
+  @Column({ type: DataType.STRING(40), allowNull: true })
+  declare plannedTutorId: string | null;
+
   @HasMany(() => StudyGroupMemberModel)
   declare members?: StudyGroupMemberModel[];
 }

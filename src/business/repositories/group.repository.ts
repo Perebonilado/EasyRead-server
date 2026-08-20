@@ -11,12 +11,21 @@ export interface GroupMemberRecord {
   role: 'owner' | 'member';
 }
 
+export interface GroupPlanRecord {
+  /** Null until the owner picks one; nothing is preselected. */
+  documentId: string | null;
+  topicIds: string[];
+  tutorId: string | null;
+}
+
 export interface GroupRecord {
   id: string;
   ownerId: string;
   name: string;
   inviteCode: string;
   members: GroupMemberRecord[];
+  /** What the next session will study; it persists between visits. */
+  plan: GroupPlanRecord;
 }
 
 export interface StudySessionRecord {
@@ -44,6 +53,7 @@ export interface GroupRepository {
   listForUser(userId: string): Promise<GroupRecord[]>;
 
   addMember(groupId: string, userId: string): Promise<void>;
+  updatePlan(groupId: string, plan: GroupPlanRecord): Promise<void>;
   removeMember(groupId: string, userId: string): Promise<void>;
   setInviteCode(groupId: string, inviteCode: string): Promise<void>;
 

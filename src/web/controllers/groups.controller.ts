@@ -6,6 +6,7 @@ import {
   HttpCode,
   Inject,
   Param,
+  Patch,
   Post,
 } from '@nestjs/common';
 import {
@@ -24,6 +25,7 @@ import type {
 import {
   CreateGroupHandler,
   EndSessionHandler,
+  UpdatePlanHandler,
   GroupDetailHandler,
   JoinGroupHandler,
   ListGroupsHandler,
@@ -41,6 +43,28 @@ class CreateGroupDto {
   @IsString()
   @Length(1, 80)
   name!: string;
+
+  /** The document to study, picked while creating; optional. */
+  @IsOptional()
+  @IsUUID()
+  documentId?: string;
+}
+
+class UpdatePlanDto {
+  @IsOptional()
+  @IsUUID()
+  documentId?: string;
+
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(12)
+  @IsUUID(undefined, { each: true })
+  topicIds?: string[];
+
+  @IsOptional()
+  @IsString()
+  @Length(1, 40)
+  tutorId?: string;
 }
 
 class JoinGroupDto {
@@ -75,6 +99,7 @@ export class GroupsController {
     private readonly regenerateCode: RegenerateCodeHandler,
     private readonly removeMember: RemoveMemberHandler,
     private readonly startSession: StartSessionHandler,
+    private readonly updatePlan: UpdatePlanHandler,
     private readonly endSession: EndSessionHandler,
     private readonly access: DocumentAccessService,
     private readonly gateway: SessionGateway,
@@ -87,7 +112,34 @@ export class GroupsController {
     @CurrentUser('id') userId: string,
     @Body() body: CreateGroupDto,
   ): Promise<GroupDetailDto> {
-    const result = await this.createGroup.handle({ userId, name: body.name });
+    if (body.documentId) {
+      await this.access.requireReadable(body.documentId, userId);
+    }
+    const result = await this.createGroup.handle({
+      userId,
+      name: body.name,
+      documentId: body.documentId,
+    });
+    return result.data;
+  }
+
+  @Patch(':id/plan')
+  @HttpCode(200)
+  async plan(
+    @CurrentUser('id') userId: string,
+    @Param('id') groupId: string,
+    @Body() body: UpdatePlanDto,
+  ): Promise<GroupDetailDto> {
+    if (body.documentId) {
+      await this.access.requireReadable(body.documentId, userId);
+    }
+    const result = await this.updatePlan.handle({
+      userId,
+      groupId,
+      documentId: body.documentId ?? null,
+      topicIds: body.topicIds ?? [],
+      tutorId: body.tutorId ?? null,
+    });
     return result.data;
   }
 

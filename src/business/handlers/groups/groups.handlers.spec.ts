@@ -2,6 +2,7 @@
    implements a Promise-shaped interface with no real awaiting to do. */
 import {
   CreateGroupHandler,
+  UpdatePlanHandler,
   GroupDetailHandler,
   JoinGroupHandler,
   MAX_GROUP_MEMBERS,
@@ -33,6 +34,7 @@ class FakeGroups implements GroupRepository {
       name: input.name,
       inviteCode: input.inviteCode,
       members: [{ userId: input.ownerId, name: input.ownerId, role: 'owner' }],
+      plan: { documentId: null, topicIds: [], tutorId: null },
     };
     this.groups.set(id, group);
     return structuredClone(group);
@@ -69,6 +71,17 @@ class FakeGroups implements GroupRepository {
 
   async setInviteCode(groupId: string, inviteCode: string) {
     this.groups.get(groupId)!.inviteCode = inviteCode;
+  }
+
+  async updatePlan(
+    groupId: string,
+    plan: {
+      documentId: string | null;
+      topicIds: string[];
+      tutorId: string | null;
+    },
+  ) {
+    this.groups.get(groupId)!.plan = plan;
   }
 
   async createSession(input: {
@@ -221,6 +234,74 @@ describe('groups handlers', () => {
       remove.handle({ userId: 'ada', groupId: g.id, memberId: 'ada' }),
     ).rejects.toThrow('cannot leave');
     expect((await repo.findById(g.id))!.members).toHaveLength(1);
+  });
+
+  it('remembers the document picked at creation, preselecting nothing otherwise', async () => {
+    const bare = await new CreateGroupHandler(repo).handle({
+      userId: 'ada',
+      name: 'no doc',
+    });
+    expect(bare.data.plan.documentId).toBeNull();
+
+    const withDoc = await new CreateGroupHandler(repo).handle({
+      userId: 'ada',
+      name: 'econ',
+      documentId: 'doc-1',
+    });
+    expect(withDoc.data.plan.documentId).toBe('doc-1');
+  });
+
+  it('persists plan edits, resets chapters on a document change, owner only', async () => {
+    const g = (
+      await new CreateGroupHandler(repo).handle({ userId: 'ada', name: 'x' })
+    ).data;
+    await new JoinGroupHandler(repo).handle({
+      userId: 'bola',
+      code: g.inviteCode,
+    });
+    const update = new UpdatePlanHandler(repo);
+
+    const first = await update.handle({
+      userId: 'ada',
+      groupId: g.id,
+      documentId: 'doc-1',
+      topicIds: [],
+      tutorId: 'maya',
+    });
+    expect(first.data.plan).toEqual({
+      documentId: 'doc-1',
+      topicIds: [],
+      tutorId: 'maya',
+    });
+
+    const chapters = await update.handle({
+      userId: 'ada',
+      groupId: g.id,
+      documentId: 'doc-1',
+      topicIds: ['t1', 't2'],
+      tutorId: 'maya',
+    });
+    expect(chapters.data.plan.topicIds).toEqual(['t1', 't2']);
+
+    // Chapters belong to a document: switching documents drops them.
+    const switched = await update.handle({
+      userId: 'ada',
+      groupId: g.id,
+      documentId: 'doc-2',
+      topicIds: ['t1', 't2'],
+      tutorId: 'maya',
+    });
+    expect(switched.data.plan.topicIds).toEqual([]);
+
+    await expect(
+      update.handle({
+        userId: 'bola',
+        groupId: g.id,
+        documentId: 'doc-3',
+        topicIds: [],
+        tutorId: null,
+      }),
+    ).rejects.toThrow('owner');
   });
 
   it('invite codes avoid ambiguous characters', () => {

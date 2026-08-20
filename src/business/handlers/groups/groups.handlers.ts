@@ -87,6 +87,7 @@ const toDetail = (
   isOwner: group.ownerId === userId,
   inviteCode: group.inviteCode,
   members: group.members,
+  plan: group.plan,
   liveSession: live,
 });
 
@@ -102,6 +103,9 @@ function requireMembership(group: GroupRecord, userId: string) {
 export interface CreateGroupRequest {
   userId: string;
   name: string;
+  /** Picked at creation; the plan starts here rather than guessing. */
+  documentId?: string;
+  tutorId?: string;
 }
 
 @Injectable()
@@ -118,12 +122,64 @@ export class CreateGroupHandler extends AbstractRequestHandlerTemplate<
   protected async handleRequest(cmd: CreateGroupRequest) {
     const name = cmd.name.trim();
     if (!name) throw new ValidationError('A group needs a name');
-    const group = await this.groups.create({
+    let group = await this.groups.create({
       ownerId: cmd.userId,
       name,
       inviteCode: newInviteCode(),
     });
+    // The document picked at creation is the plan's starting point;
+    // without one the plan stays empty rather than guessing.
+    if (cmd.documentId) {
+      await this.groups.updatePlan(group.id, {
+        documentId: cmd.documentId,
+        topicIds: [],
+        tutorId: cmd.tutorId ?? null,
+      });
+      group = (await this.groups.findById(group.id)) ?? group;
+    }
     return CommandResponse.of(toDetail(group, cmd.userId, null));
+  }
+}
+
+// ── The plan (owner only): what the next session will study ─────────────────
+
+export interface UpdatePlanRequest {
+  userId: string;
+  groupId: string;
+  documentId: string | null;
+  topicIds: string[];
+  tutorId: string | null;
+}
+
+@Injectable()
+export class UpdatePlanHandler extends AbstractRequestHandlerTemplate<
+  UpdatePlanRequest,
+  GroupDetailDto
+> {
+  constructor(
+    @Inject(GROUP_REPOSITORY) private readonly groups: GroupRepository,
+  ) {
+    super();
+  }
+
+  protected async handleRequest(cmd: UpdatePlanRequest) {
+    const group = await this.groups.findById(cmd.groupId);
+    if (!group) throw new NotFoundError('Group');
+    requireMembership(group, cmd.userId);
+    if (group.ownerId !== cmd.userId) {
+      throw new ForbiddenError('Only the owner sets the plan');
+    }
+    await this.groups.updatePlan(cmd.groupId, {
+      documentId: cmd.documentId,
+      // Chapters belong to a document; a document change resets them.
+      topicIds: cmd.documentId === group.plan.documentId ? cmd.topicIds : [],
+      tutorId: cmd.tutorId,
+    });
+    const updated = (await this.groups.findById(cmd.groupId))!;
+    const live = await this.groups.liveSession(cmd.groupId);
+    return CommandResponse.of(
+      toDetail(updated, cmd.userId, live ? toSessionDto(live) : null),
+    );
   }
 }
 

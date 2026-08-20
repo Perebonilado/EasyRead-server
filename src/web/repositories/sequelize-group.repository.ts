@@ -24,6 +24,11 @@ function toGroupRecord(group: StudyGroupModel): GroupRecord {
       name: member.user?.name ?? 'Someone',
       role: member.role,
     })),
+    plan: {
+      documentId: group.plannedDocumentId ?? null,
+      topicIds: group.plannedTopicIds ?? [],
+      tutorId: group.plannedTutorId ?? null,
+    },
   };
 }
 
@@ -116,6 +121,24 @@ export class SequelizeGroupRepository implements GroupRepository {
 
   async removeMember(groupId: string, userId: string): Promise<void> {
     await this.members.destroy({ where: { groupId, userId } as never });
+  }
+
+  async updatePlan(
+    groupId: string,
+    plan: {
+      documentId: string | null;
+      topicIds: string[];
+      tutorId: string | null;
+    },
+  ): Promise<void> {
+    await this.groups.update(
+      {
+        plannedDocumentId: plan.documentId,
+        plannedTopicIds: plan.topicIds,
+        plannedTutorId: plan.tutorId,
+      },
+      { where: { id: groupId } as never },
+    );
   }
 
   async setInviteCode(groupId: string, inviteCode: string): Promise<void> {

@@ -25,8 +25,15 @@ export const MAX_FLOOR_MS = 45_000;
 const CHECK_WINDOW_MS = 35_000;
 /** The lesson never reads more than this much chapter text. */
 const CONTEXT_CHAR_BUDGET = 18_000;
-/** A committed turn needs real audio; shorter holds are dropped silently. */
-const MIN_TURN_BYTES = 48 * 150; // 150ms of 24kHz pcm16
+/** A committed turn needs real VOICE; silence and stray taps drop out. */
+const MIN_VOICED_BYTES = 48 * 150; // 150ms of 24kHz pcm16
+/**
+ * Mean absolute sample value above which a chunk counts as voice. A muted
+ * or idle microphone hovers well under this; speech sits far above it. This
+ * is what stops the tutor answering silence (a muted mic still produces
+ * perfectly valid zero-filled audio).
+ */
+const VOICE_FLOOR = 300;
 /** A dropped tutor connection retries this many times before giving up. */
 const MAX_RECONNECTS = 3;
 /**
@@ -174,8 +181,8 @@ export class GroupLesson {
   private check: OpenCheck | null = null;
   private tutorSpeaking = false;
   private seq = 0;
-  /** Decoded audio bytes appended during the current hold. */
-  private turnBytes = 0;
+  /** Decoded VOICED audio bytes appended during the current hold. */
+  private voicedBytes = 0;
   /** Rolling transcript of the tutor's speech, for resuming after a drop. */
   private transcript = '';
   private reconnects = 0;
@@ -353,16 +360,26 @@ export class GroupLesson {
 
   // ── Floor control (plan §7.2) ─────────────────────────────────────────────
 
-  /** True if granted. First press wins; the tutor mid-sentence blocks. */
+  /**
+   * True if granted. First press wins; only ANOTHER member blocks. The tutor
+   * mid-sentence does not: taking the floor interrupts it, the way raising
+   * a voice does in a real room.
+   */
   requestFloor(userId: string, name: string): boolean {
     // A re-press by the current holder (a quick release-and-hold) keeps the
     // floor rather than being refused by their own earlier grant.
     if (this.floorHolder?.userId === userId) return true;
-    if (this.floorHolder || this.tutorSpeaking || !this.realtime) return false;
+    if (this.floorHolder || !this.realtime) return false;
+    if (this.tutorSpeaking) {
+      // Cut the tutor off cleanly; the cancelled response's done event
+      // resets the speaking state for everyone.
+      this.respondQueued = false;
+      this.realtime.cancelResponse();
+    }
     this.autoContinues = 0;
     this.floorHolder = { userId, name };
     this.clearContinue();
-    this.turnBytes = 0;
+    this.voicedBytes = 0;
     this.realtime.inject(`(${name} is speaking next)`);
     this.floorTimer = setTimeout(() => this.releaseFloor(userId), MAX_FLOOR_MS);
     return true;
@@ -374,7 +391,18 @@ export class GroupLesson {
 
   appendAudio(userId: string, base64Pcm16: string) {
     if (this.floorHolder?.userId !== userId) return;
-    this.turnBytes += Math.floor((base64Pcm16.length * 3) / 4);
+    // Only chunks that carry actual voice count toward a committable turn.
+    const pcm = Buffer.from(base64Pcm16, 'base64');
+    const samples = new Int16Array(
+      pcm.buffer,
+      pcm.byteOffset,
+      pcm.byteLength >> 1,
+    );
+    let sum = 0;
+    for (let i = 0; i < samples.length; i++) sum += Math.abs(samples[i]);
+    if (samples.length && sum / samples.length > VOICE_FLOOR) {
+      this.voicedBytes += pcm.byteLength;
+    }
     this.realtime?.appendAudio(base64Pcm16);
   }
 
@@ -383,15 +411,15 @@ export class GroupLesson {
     if (this.floorTimer) clearTimeout(this.floorTimer);
     this.floorTimer = null;
     this.floorHolder = null;
-    // A tap too quick to carry words (or a swallowed mic permission) must
-    // not commit: the API refuses sub-100ms buffers with a raw error.
-    if (this.turnBytes < MIN_TURN_BYTES) {
+    // A hold that carried no real voice (a muted mic, a stray tap, an
+    // accidental spacebar) commits nothing: the tutor never answers silence.
+    if (this.voicedBytes < MIN_VOICED_BYTES) {
       this.realtime?.clearInput();
     } else {
       this.realtime?.commitTurn();
       this.respondNow();
     }
-    this.turnBytes = 0;
+    this.voicedBytes = 0;
   }
 
   /** A member joined or left mid-lesson; the tutor should know. */
@@ -659,6 +687,9 @@ export class GroupLessonFactory {
         '  the group what they expect comes next, or ask if anyone wants it',
         '  slower. Questions from students are welcome at any moment; when',
         '  one is asked, answer it fully before returning to the thread.',
+        '- Students can interrupt you mid-sentence; that is normal here.',
+        '  When your speech gets cut off and someone speaks, answer them',
+        '  first, then pick your thread back up only if it still matters.',
         '- NEVER leave dead air. End a turn either by asking a specific',
         '  person a specific question, or by carrying straight on to the',
         '  next idea yourself. Statements do not need replies; do not stop',

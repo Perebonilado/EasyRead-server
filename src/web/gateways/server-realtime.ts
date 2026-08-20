@@ -131,6 +131,11 @@ export class ServerRealtime {
     this.send({ type: 'input_audio_buffer.clear' });
   }
 
+  /** A student interrupted: stop the response mid-sentence. */
+  cancelResponse() {
+    this.send({ type: 'response.cancel' });
+  }
+
   toolResult(callId: string, output: string, respond = true) {
     this.send({
       type: 'conversation.item.create',

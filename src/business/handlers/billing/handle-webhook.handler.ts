@@ -75,11 +75,13 @@ export class HandleWebhookHandler extends AbstractRequestHandlerTemplate<
     this.logger.log(`Webhook ${event.type} (${event.id}) verified`);
 
     const provider = this.payments.provider;
+    // The payload column refuses null, and transaction events carry no
+    // subscription; the type alone still leaves a usable audit trail.
     const fresh = await this.events.claim(
       provider,
       event.id,
       event.type,
-      event.subscription ?? null,
+      event.subscription ?? { type: event.type },
     );
     // A redelivery of something already applied. Answering ok stops the
     // gateway retrying forever.

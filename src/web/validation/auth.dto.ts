@@ -62,6 +62,13 @@ export class VerifyEmailDto {
   token!: string;
 }
 
+/** Asking for a fresh confirmation link, by address. */
+export class ResendVerificationDto {
+  @Transform(normaliseEmail)
+  @IsEmail()
+  email!: string;
+}
+
 /** The refresh token, presented in the body where cookies cannot go. */
 export class RefreshDto {
   @IsOptional()

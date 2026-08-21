@@ -28,6 +28,7 @@ import {
   ForgotPasswordDto,
   LoginDto,
   RefreshDto,
+  ResendVerificationDto,
   RegisterDto,
   ResetPasswordDto,
   VerifyEmailDto,
@@ -148,12 +149,15 @@ export class AuthController {
     return { ok: true };
   }
 
+  @Public()
   @Post('resend-verification')
   @HttpCode(202)
   async resendVerification(
-    @CurrentUser('id') userId: string,
+    @Body() body: ResendVerificationDto,
   ): Promise<{ ok: true }> {
-    const result = await this.resendVerification_.handle({ userId });
+    const result = await this.resendVerification_.handle({
+      email: body.email,
+    });
     return result.data;
   }
 

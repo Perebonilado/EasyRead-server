@@ -34,6 +34,16 @@ export class UnauthorizedError extends DomainError {
   }
 }
 
+export class EmailUnverifiedError extends DomainError {
+  constructor() {
+    super(
+      ErrorCodes.EMAIL_UNVERIFIED,
+      'Confirm your email first. We sent a link to your inbox when you signed up.',
+      403,
+    );
+  }
+}
+
 export class InvalidCredentialsError extends DomainError {
   constructor() {
     // Deliberately vague: never reveal whether the email exists.

@@ -65,6 +65,7 @@ export const ErrorCodes = {
   TOKEN_EXPIRED: 'TOKEN_EXPIRED',
   EMAIL_IN_USE: 'EMAIL_IN_USE',
   INVALID_CREDENTIALS: 'INVALID_CREDENTIALS',
+  EMAIL_UNVERIFIED: 'EMAIL_UNVERIFIED',
   STORAGE_BUSY: 'STORAGE_BUSY',
 } as const;
 export type ErrorCode = (typeof ErrorCodes)[keyof typeof ErrorCodes];

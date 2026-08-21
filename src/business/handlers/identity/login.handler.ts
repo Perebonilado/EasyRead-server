@@ -1,6 +1,9 @@
 import { Inject, Injectable } from '@nestjs/common';
 import { PasswordService } from '../../../auth/password.service';
-import { InvalidCredentialsError } from '../../domain/errors/errors';
+import {
+  EmailUnverifiedError,
+  InvalidCredentialsError,
+} from '../../domain/errors/errors';
 import { USER_REPOSITORY } from '../../repositories/tokens';
 import type { UserRepository } from '../../repositories/user.repository';
 import AbstractRequestHandlerTemplate from '../AbstractRequestHandlerTemplate';
@@ -45,6 +48,13 @@ export class LoginHandler extends AbstractRequestHandlerTemplate<
       !(await this.passwords.compare(cmd.password, user.props.passwordHash))
     ) {
       throw new InvalidCredentialsError();
+    }
+    // A ghost account never gets in: an email signup must confirm its
+    // address before its first session. Only AFTER the password matched,
+    // so this error never leaks which emails exist. Google accounts come
+    // pre-verified by Google.
+    if (!user.isVerified && !user.props.googleId) {
+      throw new EmailUnverifiedError();
     }
 
     const session = await this.sessions.issue(user, {

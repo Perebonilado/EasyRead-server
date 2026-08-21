@@ -1,7 +1,6 @@
 import { Inject, Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { TokenGenerator } from '../../../auth/token-generator';
-import { NotFoundError } from '../../domain/errors/errors';
 import { CLOCK, EMAIL } from '../../ports/tokens';
 import type { ClockPort } from '../../ports/clock.port';
 import type { EmailPort } from '../../ports/email.port';
@@ -11,14 +10,16 @@ import AbstractRequestHandlerTemplate from '../AbstractRequestHandlerTemplate';
 import { CommandResponse } from '../response/CommandResponse';
 
 export interface ResendVerificationRequest {
-  userId: string;
+  email: string;
 }
 
 const VERIFICATION_TTL_HOURS = 24;
 
 /**
- * A fresh confirmation email for a signed-in, still-unverified account.
- * Idempotent: an already-verified account gets a quiet ok and no email.
+ * A fresh confirmation email, requested by address: with verification
+ * gating login, the locked-out signup has no session to ask with. Always
+ * answers ok, whatever the address, so it enumerates nothing; a mail only
+ * goes out for a real, still-unverified email account.
  */
 @Injectable()
 export class ResendVerificationHandler extends AbstractRequestHandlerTemplate<
@@ -36,9 +37,10 @@ export class ResendVerificationHandler extends AbstractRequestHandlerTemplate<
   }
 
   protected async handleRequest(cmd: ResendVerificationRequest) {
-    const user = await this.users.findById(cmd.userId);
-    if (!user) throw new NotFoundError('Account');
-    if (user.isVerified) return CommandResponse.of({ ok: true as const });
+    const user = await this.users.findByEmail(cmd.email.trim().toLowerCase());
+    if (!user || user.isVerified || user.props.googleId) {
+      return CommandResponse.of({ ok: true as const });
+    }
 
     const token = this.tokens.generate();
     user.setVerificationToken(

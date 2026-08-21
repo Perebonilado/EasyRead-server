@@ -17,12 +17,9 @@ export class RegisterDto {
   @MaxLength(320)
   email!: string;
 
-  /**
-   * Long minimum, no composition rules — length is what actually resists
-   * guessing, and character classes mostly push people toward `Password1!`.
-   */
+  /** No length or composition rules; only empty is refused. */
   @IsString()
-  @Length(10, 200, { message: 'Passwords need at least 10 characters' })
+  @Length(1, 200, { message: 'Create a password' })
   password!: string;
 
   @IsString()
@@ -52,7 +49,7 @@ export class ResetPasswordDto {
   token!: string;
 
   @IsString()
-  @Length(10, 200, { message: 'Passwords need at least 10 characters' })
+  @Length(1, 200, { message: 'Create a new password' })
   password!: string;
 }
 

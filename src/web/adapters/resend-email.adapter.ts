@@ -42,7 +42,7 @@ export class ResendEmailAdapter implements EmailPort {
       'onboarding@resend.dev',
     );
     // A bare address gets the product's name in front of it.
-    return configured.includes('<') ? configured : `EasyRead <${configured}>`;
+    return configured.includes('<') ? configured : `EasiRead <${configured}>`;
   }
 
   private async deliver(to: string, email: RenderedEmail): Promise<void> {

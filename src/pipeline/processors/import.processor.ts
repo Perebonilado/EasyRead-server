@@ -273,7 +273,7 @@ export class ImportProcessor {
 
     pdf.text(title, { font: 'bold', size: 24, leading: 30 });
     pdf.space(6);
-    pdf.text(`Imported from ${host} on ${date} with EasyRead`, {
+    pdf.text(`Imported from ${host} on ${date} with EasiRead`, {
       font: 'italic',
       size: 11,
       grey: 0.45,

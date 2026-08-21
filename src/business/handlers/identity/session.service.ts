@@ -44,7 +44,7 @@ export interface SessionContext {
  * one. Burning the family for that logged real people out of every device
  * they owned (and did, repeatedly, on mobile). So: any unexpired member of
  * a family signs you in, reuse is logged for visibility, and a family dies
- * only by logging out or by thirty days of silence. EasyRead is a reading
+ * only by logging out or by thirty days of silence. EasiRead is a reading
  * app; per the product's own security posture, keeping readers signed in
  * beats punishing a stolen-cookie scenario nobody is likely to run.
  */

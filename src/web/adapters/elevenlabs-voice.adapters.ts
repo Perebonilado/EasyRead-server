@@ -71,7 +71,7 @@ export class ElevenLabsSpeechAdapter implements SpeechPort {
  * Conversation credentials for an ElevenLabs Agents session.
  *
  * ElevenLabs keys a conversation to a pre-provisioned *agent* rather than a
- * per-session config, so this adapter lazily ensures one shared EasyRead
+ * per-session config, so this adapter lazily ensures one shared EasiRead
  * agent exists — carrying the client-tool definitions and permission for
  * per-session overrides — then mints a short-lived conversation token for
  * it. The per-session pieces (instructions, the tutor's voice) travel back
@@ -177,7 +177,7 @@ export class ElevenLabsRealtimeAdapter {
           agent: {
             prompt: {
               // Overridden per session with the real lesson instructions.
-              prompt: 'You are an EasyRead tutor.',
+              prompt: 'You are an EasiRead tutor.',
               llm,
               tools: tools.map((tool) => ({
                 type: 'client',

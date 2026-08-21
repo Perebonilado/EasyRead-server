@@ -132,7 +132,7 @@ function requestOnce(
         headers: {
           Host: url.hostname,
           'User-Agent':
-            'EasyReadImporter/1.0 (+https://easiread.com; imports docs a reader asked for)',
+            'EasiReadImporter/1.0 (+https://easiread.com; imports docs a reader asked for)',
           Accept:
             'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.5',
           'Accept-Language': 'en',

@@ -65,11 +65,11 @@ describe('PdfWriter', () => {
   });
 
   it('stamps the watermark on every page when asked', () => {
-    const writer = new PdfWriter('Made with EasyRead');
+    const writer = new PdfWriter('Made with EasiRead');
     for (let i = 0; i < 200; i++) writer.text(`Line ${i}.`);
 
     const pdf = writer.build().toString('latin1');
-    const stamps = pdf.match(/Made with EasyRead/g)?.length ?? 0;
+    const stamps = pdf.match(/Made with EasiRead/g)?.length ?? 0;
     expect(stamps).toBeGreaterThan(1);
   });
 });

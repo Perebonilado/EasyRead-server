@@ -197,7 +197,7 @@ export class LearnProcessor {
     // authoritative while being model-written is the one genuinely harmful
     // thing this feature could ship.
     pdf.text(
-      'Written by EasyRead using an AI model, from the model’s own ' +
+      'Written by EasiRead using an AI model, from the model’s own ' +
         'knowledge rather than cited sources. It is a study aid, not a ' +
         'reference: check anything that matters against your course material.',
       { font: 'regular', size: 10.5, leading: 15, grey: 0.45 },

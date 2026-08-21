@@ -95,7 +95,7 @@ export class DriveConverterAdapter implements ConverterPort {
         throw new Error('Drive returned no file id for the converted upload');
 
       // Deliberately NOT made public. AI Examiner grants `anyone: reader` here
-      // because it serves the Drive link directly; EasyRead streams bytes
+      // because it serves the Drive link directly; EasiRead streams bytes
       // through its own authenticated endpoint, so a world-readable link would
       // expose every uploaded study document to anyone who guessed the id.
       const exported = await drive.files.export(

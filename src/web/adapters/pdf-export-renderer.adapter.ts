@@ -7,7 +7,7 @@ import type {
 import { PdfWriter, tableRowsOf } from './pdf-writer';
 import { decodeImage } from './images/image-codec';
 
-const WATERMARK = 'Made with EasyRead, easiread.com';
+const WATERMARK = 'Made with EasiRead, easiread.com';
 
 /**
  * Typesets simplified text as a PDF (§4.8).
@@ -99,7 +99,7 @@ export class PdfExportRendererAdapter implements ExportRendererPort {
 
     pdf.text(input.title, { font: 'bold', size: 24, leading: 30 });
     pdf.space(6);
-    pdf.text('Simplified with EasyRead', {
+    pdf.text('Simplified with EasiRead', {
       font: 'italic',
       size: 11,
       grey: 0.45,

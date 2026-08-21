@@ -1,5 +1,5 @@
 /**
- * The two emails EasyRead sends, drawn in the app's own hand.
+ * The two emails EasiRead sends, drawn in the app's own hand.
  *
  * Email HTML is a hostile place: styles must be inline, layout leans on
  * tables, and webfonts rarely load. So the design carries the app through
@@ -43,7 +43,7 @@ function layout(opts: {
   <tr><td align="center" style="padding:40px 16px;">
     <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:520px;">
       <tr><td style="padding:0 8px 18px;font-family:${FONT};font-size:20px;font-weight:800;letter-spacing:-0.02em;color:${INK};">
-        Easy<span style="color:${ACCENT};">Read</span>
+        Easi<span style="color:${ACCENT};">Read</span>
       </td></tr>
       <tr><td style="background:#ffffff;border:1px solid ${LINE};border-radius:16px;padding:36px 32px;font-family:${FONT};">
         ${opts.content}
@@ -99,28 +99,28 @@ export function verificationEmail(input: {
 }): RenderedEmail {
   const name = escapeHtml(firstNameOf(input.name));
   const subject = 'Confirm your email address';
-  const preheader = 'One tap and your EasyRead account is settled.';
+  const preheader = 'One tap and your EasiRead account is settled.';
 
   const content = [
     heading(`Welcome, ${name}.`),
     paragraph(
-      'You are one tap away. Confirm that this address is yours, and your EasyRead account is settled.',
+      'You are one tap away. Confirm that this address is yours, and your EasiRead account is settled.',
     ),
     button(input.url, 'Confirm my email'),
     fallbackLink(input.url),
     quietNote(
-      'This link works for 24 hours. If you did not create an EasyRead account, you can ignore this email and nothing will happen.',
+      'This link works for 24 hours. If you did not create an EasiRead account, you can ignore this email and nothing will happen.',
     ),
   ].join('\n');
 
   const text = [
     `Welcome, ${firstNameOf(input.name)}.`,
     '',
-    'You are one tap away. Confirm that this address is yours, and your EasyRead account is settled:',
+    'You are one tap away. Confirm that this address is yours, and your EasiRead account is settled:',
     '',
     input.url,
     '',
-    'This link works for 24 hours. If you did not create an EasyRead account, you can ignore this email and nothing will happen.',
+    'This link works for 24 hours. If you did not create an EasiRead account, you can ignore this email and nothing will happen.',
   ].join('\n');
 
   return {
@@ -129,7 +129,7 @@ export function verificationEmail(input: {
       preheader,
       content,
       footer:
-        'You are getting this because this address was used to create an EasyRead account.',
+        'You are getting this because this address was used to create an EasiRead account.',
     }),
     text,
   };
@@ -141,12 +141,12 @@ export function passwordResetEmail(input: {
 }): RenderedEmail {
   const name = escapeHtml(firstNameOf(input.name));
   const subject = 'Reset your password';
-  const preheader = 'Choose a new password for your EasyRead account.';
+  const preheader = 'Choose a new password for your EasiRead account.';
 
   const content = [
     heading(`Hi ${name},`),
     paragraph(
-      'Someone asked to reset the password for your EasyRead account. If that was you, choose a new one below.',
+      'Someone asked to reset the password for your EasiRead account. If that was you, choose a new one below.',
     ),
     button(input.url, 'Choose a new password'),
     fallbackLink(input.url),
@@ -158,7 +158,7 @@ export function passwordResetEmail(input: {
   const text = [
     `Hi ${firstNameOf(input.name)},`,
     '',
-    'Someone asked to reset the password for your EasyRead account. If that was you, choose a new one here:',
+    'Someone asked to reset the password for your EasiRead account. If that was you, choose a new one here:',
     '',
     input.url,
     '',
@@ -171,7 +171,7 @@ export function passwordResetEmail(input: {
       preheader,
       content,
       footer:
-        'You are getting this because a password reset was requested for an EasyRead account with this address.',
+        'You are getting this because a password reset was requested for an EasiRead account with this address.',
     }),
     text,
   };

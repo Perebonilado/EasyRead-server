@@ -1,5 +1,5 @@
 /**
- * One docs page → the block contract the rest of EasyRead speaks.
+ * One docs page → the block contract the rest of EasiRead speaks.
  *
  * Not Readability: docs pages mark their content region explicitly (`main`,
  * `article`, the framework's content class), so extraction here is choosing

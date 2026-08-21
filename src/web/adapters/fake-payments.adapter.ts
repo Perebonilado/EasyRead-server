@@ -1,65 +1,69 @@
-import { createHmac, randomUUID } from 'crypto';
+import { randomUUID } from 'crypto';
 import { Injectable, Logger } from '@nestjs/common';
-import { ConfigService } from '@nestjs/config';
+import type { BillingInterval } from '../../contracts';
 import type {
-  CheckoutSession,
+  CheckoutIntent,
   GatewaySubscription,
+  GatewayWebhookEvent,
   PaymentsPort,
 } from '../../business/ports/payments.port';
 
 /**
- * Local billing. Checkout returns a URL back into the frontend's return handler
- * so the post-payment states ("finalising your subscription…", success) can be
- * exercised without Paystack. Signature verification still runs the real HMAC
- * so the webhook path isn't accidentally left unguarded when the real adapter
- * is switched on.
+ * Local billing, bound whenever Paddle is not configured.
+ *
+ * Checkout returns a redirect back into the frontend's own return handler so
+ * the post-payment states can be exercised without a gateway. Webhooks are
+ * refused outright rather than waved through: a fake that accepted unsigned
+ * bodies would be a hole waiting to be promoted to production by accident.
  */
 @Injectable()
 export class FakePaymentsAdapter implements PaymentsPort {
+  readonly provider = 'fake';
   private readonly logger = new Logger('Payments');
 
-  constructor(private readonly config: ConfigService) {}
-
-  async initializeCheckout({
-    email,
-    planCode,
-    callbackUrl,
-  }: {
+  createCheckout(input: {
+    userId: string;
     email: string;
-    planCode: string;
-    callbackUrl: string;
-  }): Promise<CheckoutSession> {
+    interval: BillingInterval;
+  }): Promise<CheckoutIntent> {
     const reference = `fake_${randomUUID()}`;
-    this.logger.log(`[checkout] ${email} -> ${planCode} (${reference})`);
-    return {
-      reference,
-      authorizationUrl: `${callbackUrl}?status=success&reference=${reference}&simulated=1`,
-    };
+    this.logger.log(
+      `[checkout] ${input.email} -> pro/${input.interval} (${reference})`,
+    );
+    return Promise.resolve({
+      kind: 'redirect',
+      url: `/billing?status=simulated&reference=${reference}`,
+    });
   }
 
-  verifyWebhookSignature(
-    rawBody: Buffer,
-    signature: string | undefined,
-  ): boolean {
-    const secret = this.config.get<string>('PAYSTACK_WEBHOOK_SECRET');
-    if (!secret) return true; // unset locally; the real adapter requires it
-    if (!signature) return false;
-    const expected = createHmac('sha512', secret).update(rawBody).digest('hex');
-    return expected === signature;
+  verifyAndParseWebhook(): GatewayWebhookEvent | null {
+    this.logger.warn('Webhook received with no payment gateway configured');
+    return null;
   }
 
-  async fetchSubscription(
-    subscriptionCode: string,
+  fetchSubscription(): Promise<GatewaySubscription | null> {
+    return Promise.resolve(null);
+  }
+
+  cancelSubscription(id: string): Promise<void> {
+    this.logger.log(`[cancel] ${id}`);
+    return Promise.resolve();
+  }
+
+  changeInterval(
+    id: string,
+    interval: BillingInterval,
   ): Promise<GatewaySubscription | null> {
-    return {
-      subscriptionCode,
-      customerCode: 'fake_customer',
-      status: 'active',
-      currentPeriodEnd: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
-    };
+    this.logger.log(`[interval] ${id} -> ${interval}`);
+    return Promise.resolve(null);
   }
 
-  async disableSubscription(subscriptionCode: string): Promise<void> {
-    this.logger.log(`[cancel] ${subscriptionCode}`);
+  resumeSubscription(id: string): Promise<GatewaySubscription | null> {
+    this.logger.log(`[resume] ${id}`);
+    return Promise.resolve(null);
+  }
+
+  createPortalSession(): Promise<string | null> {
+    return Promise.resolve(null);
   }
 }

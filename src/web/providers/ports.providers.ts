@@ -26,6 +26,7 @@ import { DriveConverterAdapter } from '../adapters/drive-converter.adapter';
 import { DriveStorageAdapter } from '../adapters/drive-storage.adapter';
 import { FakeLlmAdapter } from '../adapters/fake-llm.adapter';
 import { FakePaymentsAdapter } from '../adapters/fake-payments.adapter';
+import { PaddlePaymentsAdapter } from '../adapters/paddle-payments.adapter';
 import { GoogleDriveClient } from '../adapters/google-drive.client';
 import { GoogleImageSearchAdapter } from '../adapters/google-image-search.adapter';
 import { LocalStorageAdapter } from '../adapters/local-storage.adapter';
@@ -90,7 +91,24 @@ export const portProviders: Provider[] = [
   ElevenLabsRealtimeAdapter,
 
   // Payments are stubbed until billing lands.
-  { provide: PAYMENTS, useClass: FakePaymentsAdapter },
+  {
+    provide: PAYMENTS,
+    inject: [ConfigService],
+    useFactory: (config: ConfigService) => {
+      // Paddle only when it is actually configured; otherwise the local
+      // driver, so a missing key can never quietly mean "nobody is charged".
+      const live =
+        config.get('PADDLE_API_KEY') && config.get('PADDLE_PRICE_MONTHLY');
+      if (live) {
+        logger.log(
+          `Payments: paddle (${config.get('PADDLE_ENV') ?? 'sandbox'})`,
+        );
+        return new PaddlePaymentsAdapter(config);
+      }
+      logger.warn('Payments: fake driver, no checkout will charge anyone');
+      return new FakePaymentsAdapter();
+    },
+  },
   {
     provide: EMAIL,
     inject: [ConfigService],

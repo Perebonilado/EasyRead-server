@@ -31,6 +31,10 @@ async function bootstrap() {
     '/api/v1/documents/:id/transcribe',
     raw({ type: '*/*', limit: '16mb' }),
   );
+  // The billing webhook's signature is taken over the exact bytes the
+  // gateway sent. Parsing to JSON and re-serialising changes them, so every
+  // webhook would fail verification; this path keeps the raw buffer.
+  app.use('/api/v1/billing/webhook', raw({ type: '*/*', limit: '1mb' }));
 
   const allowedOrigins = config
     .get<string>('FRONTEND_URL', 'http://localhost:3000')

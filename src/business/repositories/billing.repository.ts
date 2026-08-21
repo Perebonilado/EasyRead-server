@@ -1,18 +1,25 @@
-import type { PlanCode } from '../../contracts';
+import type {
+  BillingInterval,
+  PlanCode,
+  SubscriptionStatus,
+} from '../../contracts';
 import type { UsageMetric } from '../domain/values';
 
 export interface SubscriptionRecord {
   userId: string;
+  provider: string;
   planCode: PlanCode;
-  subscriptionCode: string | null;
-  customerCode: string | null;
-  status: 'active' | 'non_renewing' | 'attention' | 'cancelled' | 'expired';
+  interval: BillingInterval | null;
+  providerSubscriptionId: string | null;
+  providerCustomerId: string | null;
+  status: SubscriptionStatus;
   currentPeriodEnd: Date | null;
+  cancelAtPeriodEnd: boolean;
 }
 
 export interface SubscriptionRepository {
   findByUser(userId: string): Promise<SubscriptionRecord | null>;
-  findBySubscriptionCode(code: string): Promise<SubscriptionRecord | null>;
+  findByProviderSubscriptionId(id: string): Promise<SubscriptionRecord | null>;
   upsert(record: SubscriptionRecord & { raw?: unknown }): Promise<void>;
 }
 

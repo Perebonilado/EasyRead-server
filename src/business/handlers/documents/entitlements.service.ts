@@ -67,10 +67,17 @@ export class EntitlementsService implements OnModuleInit {
   async planFor(userId: string): Promise<PlanCode> {
     const subscription = await this.subscriptions.findByUser(userId);
     if (!subscription) return 'free';
-    // Only a live subscription grants Pro; cancelled/expired fall back to Free.
+    /**
+     * Only a live subscription grants Pro. `past_due` counts as live: the
+     * gateway is still retrying the card, and locking someone out of a
+     * document mid-retry over a bank blip is the wrong side to err on.
+     * A cancellation stays `active` until the paid period ends, so
+     * `cancelAtPeriodEnd` does not remove access on its own.
+     */
     const live =
       subscription.status === 'active' ||
-      subscription.status === 'non_renewing';
+      subscription.status === 'trialing' ||
+      subscription.status === 'past_due';
     return live ? subscription.planCode : 'free';
   }
 

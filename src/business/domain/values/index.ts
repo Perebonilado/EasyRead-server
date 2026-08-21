@@ -5,7 +5,8 @@ export const PLAN_LIMITS = {
     easiestPerMonth: 1,
     highlightsPerDay: 20,
     watermarkedExports: true,
-    priceNgn: 0,
+    priceUsdMonthly: 0,
+    priceUsdYearly: 0,
     name: 'Free',
   },
   pro: {
@@ -14,7 +15,8 @@ export const PLAN_LIMITS = {
     easiestPerMonth: null,
     highlightsPerDay: null,
     watermarkedExports: false,
-    priceNgn: 4500,
+    priceUsdMonthly: 20,
+    priceUsdYearly: 150,
     name: 'Pro',
   },
 } as const;
@@ -25,7 +27,9 @@ export interface PlanLimits {
   easiestPerMonth: number | null;
   highlightsPerDay: number | null;
   watermarkedExports: boolean;
-  priceNgn: number;
+  /** Whole US dollars. Paddle bills in USD everywhere; there is no naira tier. */
+  priceUsdMonthly: number;
+  priceUsdYearly: number;
   name: string;
 }
 

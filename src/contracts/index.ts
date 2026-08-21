@@ -432,10 +432,28 @@ export type StudySnapshot = {
 
 // ── Billing ──────────────────────────────────────────────────────────────────
 
+/** Pro is sold monthly or yearly; the yearly price is the discounted one. */
+export type BillingInterval = 'monthly' | 'yearly';
+
+/**
+ * Normalised across gateways. Paddle, Stripe and Paystack each name these
+ * differently; the server maps into this set so nothing downstream has to
+ * know which provider is bound.
+ */
+export type SubscriptionStatus =
+  | 'active'
+  | 'trialing'
+  | 'past_due'
+  | 'paused'
+  | 'cancelled'
+  | 'expired';
+
 export type PlanDto = {
   code: PlanCode;
   name: string;
-  priceNgn: number;
+  /** Whole US dollars. Pricing is USD everywhere, by design. */
+  priceUsdMonthly: number;
+  priceUsdYearly: number;
   limits: {
     documentsPerMonth: number | null;
     maxPages: number;
@@ -447,14 +465,31 @@ export type PlanDto = {
 
 export type SubscriptionResponse = {
   plan: PlanCode;
-  status: string | null;
+  status: SubscriptionStatus | null;
+  interval: BillingInterval | null;
   currentPeriodEnd: string | null;
+  /** True once cancelled: Pro runs to the end of the paid period, then stops. */
+  cancelAtPeriodEnd: boolean;
+  /** Which gateway holds the card, for the "manage payment" affordance. */
+  provider: string | null;
   usage: {
     documentsThisMonth: number;
     easiestThisMonth: number;
     highlightsToday: number;
   };
 };
+
+/**
+ * How the client should open checkout. Paddle hands back a transaction the
+ * in-page overlay opens; Stripe would hand back a URL to redirect to. The
+ * client branches on `kind`, so swapping gateways doesn't change its shape.
+ */
+export type CheckoutResponse =
+  | { kind: 'overlay'; transactionId: string }
+  | { kind: 'redirect'; url: string };
+
+/** The gateway's own billing management page, for cards and invoices. */
+export type PortalResponse = { url: string | null };
 
 // ── Voice ────────────────────────────────────────────────────────────────────
 

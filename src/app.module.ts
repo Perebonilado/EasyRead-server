@@ -5,6 +5,15 @@ import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
 import { CoreModule } from './core.module';
 import { DeleteAccountHandler } from './business/handlers/identity/delete-account.handler';
 import { ForgotPasswordHandler } from './business/handlers/identity/forgot-password.handler';
+import { StartCheckoutHandler } from './business/handlers/billing/start-checkout.handler';
+import { HandleWebhookHandler } from './business/handlers/billing/handle-webhook.handler';
+import {
+  CancelSubscriptionHandler,
+  ChangeIntervalHandler,
+  OpenBillingPortalHandler,
+  ReconcileSubscriptionHandler,
+  ResumeSubscriptionHandler,
+} from './business/handlers/billing/manage-subscription.handlers';
 import { GoogleLoginHandler } from './business/handlers/identity/google-login.handler';
 import { LoginHandler } from './business/handlers/identity/login.handler';
 import { RegisterHandler } from './business/handlers/identity/register.handler';
@@ -94,6 +103,7 @@ import {
 import { MeQuery } from './query/me.query';
 import { ReaderQuery } from './query/reader.query';
 import { AccountController } from './web/controllers/account.controller';
+import { BillingController } from './web/controllers/billing.controller';
 import { AuthController } from './web/controllers/auth.controller';
 import { DocumentsController } from './web/controllers/documents.controller';
 import { EventsController } from './web/controllers/events.controller';
@@ -145,6 +155,13 @@ const handlers = [
   GroupLessonFactory,
   LoginHandler,
   GoogleLoginHandler,
+  StartCheckoutHandler,
+  HandleWebhookHandler,
+  CancelSubscriptionHandler,
+  ChangeIntervalHandler,
+  ResumeSubscriptionHandler,
+  OpenBillingPortalHandler,
+  ReconcileSubscriptionHandler,
   VerifyEmailHandler,
   ResendVerificationHandler,
   ForgotPasswordHandler,
@@ -228,6 +245,7 @@ const queries = [
     AdminController,
     AuthController,
     AccountController,
+    BillingController,
     DocumentsController,
     ReaderController,
     HighlightController,

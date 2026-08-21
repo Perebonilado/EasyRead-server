@@ -26,11 +26,14 @@ export class SequelizeSubscriptionRepository implements SubscriptionRepository {
   private toRecord(row: SubscriptionModel): SubscriptionRecord {
     return {
       userId: row.userId,
+      provider: row.provider,
       planCode: row.planCode as PlanCode,
-      subscriptionCode: row.subscriptionCode,
-      customerCode: row.customerCode,
+      interval: row.interval,
+      providerSubscriptionId: row.providerSubscriptionId,
+      providerCustomerId: row.providerCustomerId,
       status: row.status,
       currentPeriodEnd: row.currentPeriodEnd,
+      cancelAtPeriodEnd: row.cancelAtPeriodEnd,
     };
   }
 
@@ -39,10 +42,12 @@ export class SequelizeSubscriptionRepository implements SubscriptionRepository {
     return row ? this.toRecord(row) : null;
   }
 
-  async findBySubscriptionCode(
-    code: string,
+  async findByProviderSubscriptionId(
+    id: string,
   ): Promise<SubscriptionRecord | null> {
-    const row = await this.model.findOne({ where: { subscriptionCode: code } });
+    const row = await this.model.findOne({
+      where: { providerSubscriptionId: id },
+    });
     return row ? this.toRecord(row) : null;
   }
 
@@ -51,11 +56,14 @@ export class SequelizeSubscriptionRepository implements SubscriptionRepository {
       where: { userId: record.userId },
     });
     const values = {
+      provider: record.provider,
       planCode: record.planCode,
-      subscriptionCode: record.subscriptionCode,
-      customerCode: record.customerCode,
+      interval: record.interval,
+      providerSubscriptionId: record.providerSubscriptionId,
+      providerCustomerId: record.providerCustomerId,
       status: record.status,
       currentPeriodEnd: record.currentPeriodEnd,
+      cancelAtPeriodEnd: record.cancelAtPeriodEnd,
       raw: record.raw ?? null,
     };
     if (existing) await existing.update(values);
@@ -63,9 +71,8 @@ export class SequelizeSubscriptionRepository implements SubscriptionRepository {
       await this.model.create({
         id: newId(),
         userId: record.userId,
-        provider: 'paystack',
         ...values,
-      } as any);
+      });
   }
 }
 
@@ -147,7 +154,8 @@ export class SequelizeWebhookEventRepository implements WebhookEventRepository {
         externalId,
         eventType,
         payload,
-      } as any,
+        processedAt: null,
+      },
     });
     return created;
   }

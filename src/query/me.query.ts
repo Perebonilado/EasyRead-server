@@ -38,7 +38,10 @@ export class MeQuery {
     return {
       plan: entitlements.plan,
       status: record?.status ?? null,
+      interval: record?.interval ?? null,
       currentPeriodEnd: record?.currentPeriodEnd?.toISOString() ?? null,
+      cancelAtPeriodEnd: record?.cancelAtPeriodEnd ?? false,
+      provider: record?.provider ?? null,
       usage: entitlements.usage,
     };
   }
@@ -53,7 +56,8 @@ export class MeQuery {
         return {
           code,
           name: plan.name,
-          priceNgn: plan.priceNgn,
+          priceUsdMonthly: plan.priceUsdMonthly,
+          priceUsdYearly: plan.priceUsdYearly,
           limits: {
             documentsPerMonth: plan.documentsPerMonth,
             maxPages: plan.maxPages,

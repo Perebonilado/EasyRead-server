@@ -210,6 +210,14 @@ export class PaddlePaymentsAdapter implements PaymentsPort {
     });
   }
 
+  async fetchCustomerEmail(customerId: string): Promise<string | null> {
+    const found = await this.call<{ data?: { email?: string } }>(
+      `/customers/${customerId}`,
+      { method: 'GET' },
+    ).catch(() => null);
+    return found?.data?.email?.toLowerCase() ?? null;
+  }
+
   /**
    * Switching between monthly and yearly on a live subscription.
    *

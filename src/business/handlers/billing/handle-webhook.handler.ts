@@ -4,12 +4,14 @@ import type { ClockPort } from '../../ports/clock.port';
 import type { PaymentsPort } from '../../ports/payments.port';
 import {
   SUBSCRIPTION_REPOSITORY,
+  USER_REPOSITORY,
   WEBHOOK_EVENT_REPOSITORY,
 } from '../../repositories/tokens';
 import type {
   SubscriptionRepository,
   WebhookEventRepository,
 } from '../../repositories/billing.repository';
+import type { UserRepository } from '../../repositories/user.repository';
 import AbstractRequestHandlerTemplate from '../AbstractRequestHandlerTemplate';
 import { CommandResponse } from '../response/CommandResponse';
 
@@ -49,6 +51,7 @@ export class HandleWebhookHandler extends AbstractRequestHandlerTemplate<
     private readonly subscriptions: SubscriptionRepository,
     @Inject(WEBHOOK_EVENT_REPOSITORY)
     private readonly events: WebhookEventRepository,
+    @Inject(USER_REPOSITORY) private readonly users: UserRepository,
     @Inject(CLOCK) private readonly clock: ClockPort,
   ) {
     super();
@@ -62,8 +65,14 @@ export class HandleWebhookHandler extends AbstractRequestHandlerTemplate<
       cmd.signature,
     );
     if (!event) {
+      // Loud on purpose: the gateway sees a 200 either way, so this line is
+      // the only trace that a secret mismatch is silently dropping events.
+      this.logger.warn(
+        'Webhook refused: signature did not verify. Check that PADDLE_WEBHOOK_SECRET matches the notification destination for THIS server.',
+      );
       return CommandResponse.of({ accepted: false, reason: 'bad_signature' });
     }
+    this.logger.log(`Webhook ${event.type} (${event.id}) verified`);
 
     const provider = this.payments.provider;
     const fresh = await this.events.claim(
@@ -109,18 +118,38 @@ export class HandleWebhookHandler extends AbstractRequestHandlerTemplate<
   }
 
   /**
-   * The user id travels in the gateway's custom data on checkout, but a
-   * later event (a renewal months on, say) may not carry it. Falling back
-   * to the subscription id keeps those attributable.
+   * Whose subscription is this? Three threads, pulled in order of trust:
+   * the user id we stamped into the gateway's custom data at checkout; the
+   * subscription id, for renewals of a subscription we already know; and
+   * finally the gateway customer's email matched against our accounts, so
+   * a payment can still land even if custom data never propagated.
    */
   private async resolveUserId(
     fromEvent: string | null,
-    subscription: { providerSubscriptionId: string },
+    subscription: {
+      providerSubscriptionId: string;
+      providerCustomerId: string | null;
+    },
   ): Promise<string | null> {
     if (fromEvent) return fromEvent;
+
     const known = await this.subscriptions.findByProviderSubscriptionId(
       subscription.providerSubscriptionId,
     );
-    return known?.userId ?? null;
+    if (known) return known.userId;
+
+    if (subscription.providerCustomerId) {
+      const email = await this.payments.fetchCustomerEmail(
+        subscription.providerCustomerId,
+      );
+      const user = email ? await this.users.findByEmail(email) : null;
+      if (user) {
+        this.logger.log(
+          `Attributed ${subscription.providerSubscriptionId} by customer email`,
+        );
+        return user.id;
+      }
+    }
+    return null;
   }
 }

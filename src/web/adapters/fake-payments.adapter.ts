@@ -45,6 +45,10 @@ export class FakePaymentsAdapter implements PaymentsPort {
     return Promise.resolve(null);
   }
 
+  fetchCustomerEmail(): Promise<string | null> {
+    return Promise.resolve(null);
+  }
+
   cancelSubscription(id: string): Promise<void> {
     this.logger.log(`[cancel] ${id}`);
     return Promise.resolve();

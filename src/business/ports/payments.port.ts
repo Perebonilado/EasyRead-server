@@ -78,6 +78,13 @@ export interface PaymentsPort {
     providerSubscriptionId: string,
   ): Promise<GatewaySubscription | null>;
 
+  /**
+   * The email behind a gateway customer, as an attribution fallback: when a
+   * webhook arrives carrying neither our user id nor a subscription we have
+   * seen before, the customer's email is the one thread left to pull.
+   */
+  fetchCustomerEmail(providerCustomerId: string): Promise<string | null>;
+
   /** Cancels at the end of the paid period, never mid-period. */
   cancelSubscription(providerSubscriptionId: string): Promise<void>;
 

@@ -5,6 +5,7 @@ import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
 import { CoreModule } from './core.module';
 import { DeleteAccountHandler } from './business/handlers/identity/delete-account.handler';
 import { ForgotPasswordHandler } from './business/handlers/identity/forgot-password.handler';
+import { GoogleLoginHandler } from './business/handlers/identity/google-login.handler';
 import { LoginHandler } from './business/handlers/identity/login.handler';
 import { RegisterHandler } from './business/handlers/identity/register.handler';
 import { ResetPasswordHandler } from './business/handlers/identity/reset-password.handler';
@@ -143,6 +144,7 @@ const handlers = [
   SessionGateway,
   GroupLessonFactory,
   LoginHandler,
+  GoogleLoginHandler,
   VerifyEmailHandler,
   ResendVerificationHandler,
   ForgotPasswordHandler,

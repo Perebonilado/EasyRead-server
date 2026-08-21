@@ -12,6 +12,7 @@ import type { CookieOptions, Request, Response } from 'express';
 import type { LoginResponse, MeResponse } from '../../contracts';
 import { InvalidTokenError } from '../../business/domain/errors/errors';
 import { ForgotPasswordHandler } from '../../business/handlers/identity/forgot-password.handler';
+import { GoogleLoginHandler } from '../../business/handlers/identity/google-login.handler';
 import { LoginHandler } from '../../business/handlers/identity/login.handler';
 import { RegisterHandler } from '../../business/handlers/identity/register.handler';
 import { ResetPasswordHandler } from '../../business/handlers/identity/reset-password.handler';
@@ -26,6 +27,7 @@ import { CurrentUser } from '../security/current-user.decorator';
 import { Public } from '../security/public.decorator';
 import {
   ForgotPasswordDto,
+  GoogleAuthDto,
   LoginDto,
   RefreshDto,
   ResendVerificationDto,
@@ -59,6 +61,7 @@ export class AuthController {
   constructor(
     private readonly register: RegisterHandler,
     private readonly login: LoginHandler,
+    private readonly googleLogin: GoogleLoginHandler,
     private readonly verifyEmail: VerifyEmailHandler,
     private readonly resendVerification_: ResendVerificationHandler,
     private readonly forgotPassword: ForgotPasswordHandler,
@@ -85,6 +88,22 @@ export class AuthController {
     @Res({ passthrough: true }) response: Response,
   ): Promise<LoginResponse> {
     const result = await this.login.handle({
+      ...body,
+      userAgent: request.get('user-agent') ?? null,
+      ip: request.ip ?? null,
+    });
+    return this.completeSession(result.data, response);
+  }
+
+  @Public()
+  @Post('google')
+  @HttpCode(200)
+  async loginWithGoogle(
+    @Body() body: GoogleAuthDto,
+    @Req() request: Request,
+    @Res({ passthrough: true }) response: Response,
+  ): Promise<LoginResponse> {
+    const result = await this.googleLogin.handle({
       ...body,
       userAgent: request.get('user-agent') ?? null,
       ip: request.ip ?? null,

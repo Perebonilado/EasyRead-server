@@ -4,6 +4,7 @@ import {
   CLOCK,
   CONVERTER,
   EMAIL,
+  GOOGLE_IDENTITY,
   EVENT_BUS,
   EXPORT_RENDERER,
   IMAGE_SEARCH,
@@ -29,6 +30,10 @@ import { GoogleDriveClient } from '../adapters/google-drive.client';
 import { GoogleImageSearchAdapter } from '../adapters/google-image-search.adapter';
 import { LocalStorageAdapter } from '../adapters/local-storage.adapter';
 import { LogEmailAdapter } from '../adapters/log-email.adapter';
+import {
+  GoogleIdentityAdapter,
+  NullGoogleIdentityAdapter,
+} from '../adapters/google-identity.adapter';
 import { ResendEmailAdapter } from '../adapters/resend-email.adapter';
 import { MistralOcrAdapter } from '../adapters/mistral-ocr.adapter';
 import { MysqlVectorStoreAdapter } from '../adapters/mysql-vector-store.adapter';
@@ -93,6 +98,14 @@ export const portProviders: Provider[] = [
       config.get('EMAIL_DRIVER') === 'resend' && config.get('RESEND_API_KEY')
         ? new ResendEmailAdapter(config)
         : new LogEmailAdapter(),
+  },
+  {
+    provide: GOOGLE_IDENTITY,
+    inject: [ConfigService],
+    useFactory: (config: ConfigService) =>
+      config.get('GOOGLE_CLIENT_ID')
+        ? new GoogleIdentityAdapter(config)
+        : new NullGoogleIdentityAdapter(),
   },
   { provide: STARTER_LIBRARY, useClass: StarterLibraryAdapter },
 

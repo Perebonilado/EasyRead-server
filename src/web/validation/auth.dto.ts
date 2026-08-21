@@ -66,6 +66,13 @@ export class ResendVerificationDto {
   email!: string;
 }
 
+/** The ID token the Sign in with Google button hands the browser. */
+export class GoogleAuthDto {
+  @IsString()
+  @MinLength(1)
+  credential!: string;
+}
+
 /** The refresh token, presented in the body where cookies cannot go. */
 export class RefreshDto {
   @IsOptional()

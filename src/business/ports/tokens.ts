@@ -12,6 +12,7 @@ export const LLM_GATEWAY = Symbol('LlmGatewayPort');
 export const OCR_ENGINE = Symbol('OcrEnginePort');
 export const VECTOR_STORE = Symbol('VectorStorePort');
 export const EMAIL = Symbol('EmailPort');
+export const GOOGLE_IDENTITY = Symbol('GoogleIdentityPort');
 export const PAYMENTS = Symbol('PaymentsPort');
 export const IMAGE_SEARCH = Symbol('ImageSearchPort');
 export const EVENT_BUS = Symbol('EventBusPort');

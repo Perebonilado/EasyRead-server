@@ -441,12 +441,7 @@ export type BillingInterval = 'monthly' | 'yearly';
  * know which provider is bound.
  */
 export type SubscriptionStatus =
-  | 'active'
-  | 'trialing'
-  | 'past_due'
-  | 'paused'
-  | 'cancelled'
-  | 'expired';
+  'active' | 'trialing' | 'past_due' | 'paused' | 'cancelled' | 'expired';
 
 export type PlanDto = {
   code: PlanCode;

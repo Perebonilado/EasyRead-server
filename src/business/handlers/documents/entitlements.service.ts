@@ -91,9 +91,7 @@ export class EntitlementsService implements OnModuleInit {
   /** The user's own calendar day, from the offset their client last sent. */
   dayKey(userId: string, now = this.clock.now()): string {
     const offset = this.tzOffsets.get(userId) ?? 0;
-    return new Date(now.getTime() + offset * 60_000)
-      .toISOString()
-      .slice(0, 10); // YYYY-MM-DD
+    return new Date(now.getTime() + offset * 60_000).toISOString().slice(0, 10); // YYYY-MM-DD
   }
 
   rememberTimezone(userId: string, utcOffsetMinutes: number): void {
@@ -192,7 +190,9 @@ export class EntitlementsService implements OnModuleInit {
 
     const limits = this.effectiveLimits(await this.planFor(userId));
     const limitSeconds =
-      limits.studyMinutesPerDay === null ? null : limits.studyMinutesPerDay * 60;
+      limits.studyMinutesPerDay === null
+        ? null
+        : limits.studyMinutesPerDay * 60;
     return {
       usedSeconds: used,
       limitSeconds,

@@ -28,8 +28,9 @@ function build(
     increment: jest.fn((_user: string, metric: string) =>
       Promise.resolve((counts[metric] ?? 0) + 1),
     ),
-    incrementBy: jest.fn((_user: string, metric: string, _p: string, n: number) =>
-      Promise.resolve((counts[metric] ?? 0) + n),
+    incrementBy: jest.fn(
+      (_user: string, metric: string, _p: string, n: number) =>
+        Promise.resolve((counts[metric] ?? 0) + n),
     ),
     decrement: jest.fn(() => Promise.resolve()),
   } as unknown as UsageRepository;

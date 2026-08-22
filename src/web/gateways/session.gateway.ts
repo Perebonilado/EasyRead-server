@@ -286,7 +286,10 @@ export class SessionGateway implements OnGatewayInit, OnGatewayDisconnect {
       void (async () => {
         await this.entitlements.recordVoiceSeconds(hostId, 60);
         const balance = await this.entitlements.voiceBalance(hostId);
-        if (balance.remainingSeconds !== null && balance.remainingSeconds <= 0) {
+        if (
+          balance.remainingSeconds !== null &&
+          balance.remainingSeconds <= 0
+        ) {
           this.server.to(this.channel(room.sessionId)).emit('tutor:error', {
             message:
               "The host is out of voice minutes, so today's lesson ends here.",

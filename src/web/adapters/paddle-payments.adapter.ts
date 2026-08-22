@@ -2,7 +2,10 @@ import { createHmac, timingSafeEqual } from 'crypto';
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import type { BillingInterval, SubscriptionStatus } from '../../contracts';
-import { CREDIT_BUNDLES, type CreditBundle } from '../../business/domain/values';
+import {
+  CREDIT_BUNDLES,
+  type CreditBundle,
+} from '../../business/domain/values';
 import type {
   CheckoutIntent,
   GatewaySubscription,
@@ -103,8 +106,14 @@ export class PaddlePaymentsAdapter implements PaymentsPort {
 
     if (!response.ok) {
       const detail = await response.text().catch(() => '');
+      // A bare 403 is Paddle's way of saying the API key exists but lacks
+      // the scope for this entity. Say so, or it reads as a mystery.
+      const hint =
+        response.status === 403
+          ? " — the PADDLE_API_KEY lacks permission for this operation; check the key's scopes under Developer tools > Authentication"
+          : '';
       throw new Error(
-        `Paddle refused ${init.method} ${path} (${response.status}): ${detail.slice(0, 300)}`,
+        `Paddle refused ${init.method} ${path} (${response.status}): ${detail.slice(0, 300)}${hint}`,
       );
     }
     return (await response.json()) as T;

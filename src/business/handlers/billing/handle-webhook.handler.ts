@@ -120,8 +120,14 @@ export class HandleWebhookHandler extends AbstractRequestHandlerTemplate<
     }
 
     // A completed credit purchase tops the wallet up. Idempotent for the
-    // same reason everything here is: the event id was claimed above.
-    if (event.creditSeconds && event.userId) {
+    // same reason everything here is: the event id was claimed above. The
+    // existence check keeps another environment's test purchases from
+    // crashing into this database's foreign keys.
+    if (
+      event.creditSeconds &&
+      event.userId &&
+      (await this.users.findById(event.userId))
+    ) {
       await this.credits.add(event.userId, event.creditSeconds);
       this.logger.log(
         `${event.type}: credited ${event.creditSeconds}s of voice to ${event.userId}`,
@@ -138,6 +144,11 @@ export class HandleWebhookHandler extends AbstractRequestHandlerTemplate<
    * subscription id, for renewals of a subscription we already know; and
    * finally the gateway customer's email matched against our accounts, so
    * a payment can still land even if custom data never propagated.
+   *
+   * Every thread ends in an existence check. A sandbox gateway account is
+   * shared between environments, so events made by a dev machine reach the
+   * deployed webhook carrying user ids from a different database; writing
+   * those blind is a foreign-key crash, and they are correctly nobody here.
    */
   private async resolveUserId(
     fromEvent: string | null,
@@ -146,7 +157,7 @@ export class HandleWebhookHandler extends AbstractRequestHandlerTemplate<
       providerCustomerId: string | null;
     },
   ): Promise<string | null> {
-    if (fromEvent) return fromEvent;
+    if (fromEvent && (await this.users.findById(fromEvent))) return fromEvent;
 
     const known = await this.subscriptions.findByProviderSubscriptionId(
       subscription.providerSubscriptionId,

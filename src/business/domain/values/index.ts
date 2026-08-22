@@ -20,8 +20,8 @@ export const PLAN_LIMITS = {
     studyMinutesPerDay: null,
     voiceMinutesPerMonth: 120,
     watermarkedExports: false,
-    priceUsdMonthly: 20,
-    priceUsdYearly: 150,
+    priceUsdMonthly: 14,
+    priceUsdYearly: 100,
     name: 'Pro',
   },
 } as const;

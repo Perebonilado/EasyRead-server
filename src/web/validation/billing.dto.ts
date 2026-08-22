@@ -7,3 +7,10 @@ export class StartCheckoutDto {
   })
   interval!: BillingInterval;
 }
+
+export class BuyCreditsDto {
+  @IsIn(['min30', 'min90', 'min220'], {
+    message: 'Pick one of the minute bundles',
+  })
+  bundle!: 'min30' | 'min90' | 'min220';
+}

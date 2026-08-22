@@ -16,10 +16,13 @@ import {
   ResumeSubscriptionHandler,
 } from '../../business/handlers/billing/manage-subscription.handlers';
 import { HandleWebhookHandler } from '../../business/handlers/billing/handle-webhook.handler';
-import { StartCheckoutHandler } from '../../business/handlers/billing/start-checkout.handler';
+import {
+  StartCheckoutHandler,
+  StartCreditCheckoutHandler,
+} from '../../business/handlers/billing/start-checkout.handler';
 import { CurrentUser } from '../security/current-user.decorator';
 import { Public } from '../security/public.decorator';
-import { StartCheckoutDto } from '../validation/billing.dto';
+import { BuyCreditsDto, StartCheckoutDto } from '../validation/billing.dto';
 
 /**
  * Paying for Pro.
@@ -32,6 +35,7 @@ import { StartCheckoutDto } from '../validation/billing.dto';
 export class BillingController {
   constructor(
     private readonly startCheckout: StartCheckoutHandler,
+    private readonly startCreditCheckout: StartCreditCheckoutHandler,
     private readonly cancel: CancelSubscriptionHandler,
     private readonly changeInterval: ChangeIntervalHandler,
     private readonly resume: ResumeSubscriptionHandler,
@@ -48,6 +52,20 @@ export class BillingController {
     const result = await this.startCheckout.handle({
       userId,
       interval: body.interval,
+    });
+    return result.data;
+  }
+
+  /** A one-time voice-minutes bundle; the webhook credits the wallet. */
+  @Post('credits')
+  @HttpCode(200)
+  async buyCredits(
+    @CurrentUser('id') userId: string,
+    @Body() body: BuyCreditsDto,
+  ): Promise<CheckoutResponse> {
+    const result = await this.startCreditCheckout.handle({
+      userId,
+      bundle: body.bundle,
     });
     return result.data;
   }

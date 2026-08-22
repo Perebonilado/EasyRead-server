@@ -3,6 +3,7 @@ import type {
   PlanCode,
   SubscriptionStatus,
 } from '../../contracts';
+import type { CreditBundle } from '../domain/values';
 
 /**
  * How the client opens checkout.
@@ -42,6 +43,8 @@ export interface GatewayWebhookEvent {
   /** Our user id, round-tripped through the gateway's custom data. */
   userId: string | null;
   subscription: GatewaySubscription | null;
+  /** Set on a completed credit purchase: the seconds to add to the wallet. */
+  creditSeconds: number | null;
 }
 
 /**
@@ -61,6 +64,14 @@ export interface PaymentsPort {
     email: string;
     interval: BillingInterval;
     /** Reuse the gateway's customer when we have already seen this user. */
+    providerCustomerId: string | null;
+  }): Promise<CheckoutIntent>;
+
+  /** A one-time purchase of voice credits, credited by the webhook. */
+  createCreditCheckout(input: {
+    userId: string;
+    email: string;
+    bundle: CreditBundle;
     providerCustomerId: string | null;
   }): Promise<CheckoutIntent>;
 

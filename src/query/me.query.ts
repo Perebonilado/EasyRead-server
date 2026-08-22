@@ -28,12 +28,18 @@ export class MeQuery {
     };
   }
 
-  /** Plan, period and the three counters the usage meters render (§3.4). */
+  /** Plan, period, the study clock and the voice wallet, in one read (§3.4). */
   async subscription(userId: string): Promise<SubscriptionResponse> {
     const [record, entitlements] = await Promise.all([
       this.subscriptions.findOne({ where: { userId } as never }),
       this.entitlements.forUser(userId),
     ]);
+
+    const limits = entitlements.limits;
+    const limitSeconds =
+      limits.studyMinutesPerDay === null
+        ? null
+        : limits.studyMinutesPerDay * 60;
 
     return {
       plan: entitlements.plan,
@@ -42,7 +48,21 @@ export class MeQuery {
       currentPeriodEnd: record?.currentPeriodEnd?.toISOString() ?? null,
       cancelAtPeriodEnd: record?.cancelAtPeriodEnd ?? false,
       provider: record?.provider ?? null,
-      usage: entitlements.usage,
+      usage: { documentsThisMonth: entitlements.usage.documentsThisMonth },
+      studyTime: {
+        usedSeconds: entitlements.usage.studySecondsToday,
+        limitSeconds,
+        remainingSeconds: entitlements.remainingStudySeconds(),
+      },
+      voice: {
+        remainingSeconds: entitlements.remainingVoiceSeconds(),
+        allowanceSeconds:
+          limits.voiceMinutesPerMonth === null
+            ? null
+            : limits.voiceMinutesPerMonth * 60,
+        usedThisMonthSeconds: entitlements.usage.voiceSecondsThisMonth,
+        creditSeconds: entitlements.usage.voiceCreditSeconds,
+      },
     };
   }
 
@@ -60,9 +80,8 @@ export class MeQuery {
           priceUsdYearly: plan.priceUsdYearly,
           limits: {
             documentsPerMonth: plan.documentsPerMonth,
-            maxPages: plan.maxPages,
-            easiestPerMonth: plan.easiestPerMonth,
-            highlightsPerDay: plan.highlightsPerDay,
+            studyMinutesPerDay: plan.studyMinutesPerDay,
+            voiceMinutesPerMonth: plan.voiceMinutesPerMonth,
             watermarkedExports: plan.watermarkedExports,
           },
         };

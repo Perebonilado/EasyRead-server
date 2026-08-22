@@ -1,4 +1,5 @@
 import { Column, DataType, ForeignKey, Table } from 'sequelize-typescript';
+import type { UsageMetric } from '../../../business/domain/values';
 import { BaseModel } from './base';
 import { UserModel } from './user.model';
 
@@ -11,16 +12,10 @@ export class UsageCounterModel extends BaseModel {
   @Column({ type: DataType.STRING(16), allowNull: false })
   declare period: string;
 
-  @Column({
-    type: DataType.ENUM(
-      'documents_uploaded',
-      'easiest_conversions',
-      'highlight_actions',
-    ),
-    allowNull: false,
-  })
-  declare metric:
-    'documents_uploaded' | 'easiest_conversions' | 'highlight_actions';
+  // A plain string, not an enum: validity lives in the UsageMetric union,
+  // and a new metric must not need a schema migration.
+  @Column({ type: DataType.STRING(32), allowNull: false })
+  declare metric: UsageMetric;
 
   @Column({ type: DataType.INTEGER, allowNull: false, defaultValue: 0 })
   declare count: number;

@@ -33,8 +33,23 @@ export interface UsageRepository {
     metric: UsageMetric,
     period: string,
   ): Promise<number>;
+  /** The same, by an arbitrary amount — seconds, not slots. */
+  incrementBy(
+    userId: string,
+    metric: UsageMetric,
+    period: string,
+    amount: number,
+  ): Promise<number>;
   decrement(userId: string, metric: UsageMetric, period: string): Promise<void>;
   get(userId: string, metric: UsageMetric, period: string): Promise<number>;
+}
+
+/** Purchased voice seconds. Never expire, spent only past the allowance. */
+export interface VoiceCreditsRepository {
+  balance(userId: string): Promise<number>;
+  add(userId: string, seconds: number): Promise<void>;
+  /** Floors at zero; the meters upstream keep it from going negative. */
+  deduct(userId: string, seconds: number): Promise<void>;
 }
 
 export interface WebhookEventRepository {

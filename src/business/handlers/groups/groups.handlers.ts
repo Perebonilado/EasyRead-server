@@ -16,6 +16,7 @@ import type {
   GroupSummaryDto,
   StudySessionDto,
 } from '../../../contracts';
+import { EntitlementsService } from '../documents/entitlements.service';
 import AbstractRequestHandlerTemplate from '../AbstractRequestHandlerTemplate';
 import { CommandResponse } from '../response/CommandResponse';
 import { TUTORS } from '../../domain/values/tutors';
@@ -396,6 +397,7 @@ export class StartSessionHandler extends AbstractRequestHandlerTemplate<
 > {
   constructor(
     @Inject(GROUP_REPOSITORY) private readonly groups: GroupRepository,
+    private readonly entitlements: EntitlementsService,
   ) {
     super();
   }
@@ -407,6 +409,9 @@ export class StartSessionHandler extends AbstractRequestHandlerTemplate<
     if (group.ownerId !== cmd.userId) {
       throw new ForbiddenError('Only the group owner starts a session');
     }
+    // The host pays for the room's tutor, so an empty wallet fails here,
+    // before anyone is invited into a session that would end in a minute.
+    (await this.entitlements.forUser(cmd.userId)).assertVoiceAvailable(60);
     if (!TUTORS.some((tutor) => tutor.id === cmd.tutorId)) {
       throw new ValidationError('Pick a tutor from the list');
     }

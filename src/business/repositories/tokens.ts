@@ -17,6 +17,7 @@ export const PIPELINE_RUN_REPOSITORY = Symbol('PipelineRunRepository');
 export const SUBSCRIPTION_REPOSITORY = Symbol('SubscriptionRepository');
 export const USAGE_REPOSITORY = Symbol('UsageRepository');
 export const WEBHOOK_EVENT_REPOSITORY = Symbol('WebhookEventRepository');
+export const VOICE_CREDITS_REPOSITORY = Symbol('VoiceCreditsRepository');
 export const SUMMARY_REPOSITORY = Symbol('SummaryRepository');
 
 export const AI_CALL_LOG_REPOSITORY = Symbol('AiCallLogRepository');

@@ -1,5 +1,6 @@
 import { Inject, Injectable } from '@nestjs/common';
 import type { BillingInterval } from '../../../contracts';
+import type { CreditBundle } from '../../domain/values';
 import { NotFoundError } from '../../domain/errors/errors';
 import { PAYMENTS } from '../../ports/tokens';
 import type { CheckoutIntent, PaymentsPort } from '../../ports/payments.port';
@@ -54,6 +55,43 @@ export class StartCheckoutHandler extends AbstractRequestHandlerTemplate<
       providerCustomerId: existing?.providerCustomerId ?? null,
     });
 
+    return CommandResponse.of(intent);
+  }
+}
+
+export interface BuyCreditsRequest {
+  userId: string;
+  bundle: CreditBundle;
+}
+
+/** Opens checkout for a one-time voice-minutes bundle. */
+@Injectable()
+export class StartCreditCheckoutHandler extends AbstractRequestHandlerTemplate<
+  BuyCreditsRequest,
+  CheckoutIntent
+> {
+  constructor(
+    @Inject(USER_REPOSITORY) private readonly users: UserRepository,
+    @Inject(SUBSCRIPTION_REPOSITORY)
+    private readonly subscriptions: SubscriptionRepository,
+    @Inject(PAYMENTS) private readonly payments: PaymentsPort,
+  ) {
+    super();
+  }
+
+  protected async handleRequest(
+    cmd: BuyCreditsRequest,
+  ): Promise<CommandResponse<CheckoutIntent>> {
+    const user = await this.users.findById(cmd.userId);
+    if (!user) throw new NotFoundError('Account');
+
+    const existing = await this.subscriptions.findByUser(cmd.userId);
+    const intent = await this.payments.createCreditCheckout({
+      userId: user.id,
+      email: user.email,
+      bundle: cmd.bundle,
+      providerCustomerId: existing?.providerCustomerId ?? null,
+    });
     return CommandResponse.of(intent);
   }
 }

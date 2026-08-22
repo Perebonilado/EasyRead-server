@@ -25,6 +25,7 @@ import {
   SUMMARY_REPOSITORY,
   TOPIC_REPOSITORY,
   USAGE_REPOSITORY,
+  VOICE_CREDITS_REPOSITORY,
   USER_REPOSITORY,
   WEBHOOK_EVENT_REPOSITORY,
 } from '../../business/repositories/tokens';
@@ -46,6 +47,7 @@ import { SequelizeConceptRepository } from '../repositories/sequelize-concept.re
 import {
   SequelizeSubscriptionRepository,
   SequelizeUsageRepository,
+  SequelizeVoiceCreditsRepository,
   SequelizeWebhookEventRepository,
 } from '../repositories/sequelize-billing.repositories';
 import { SequelizeDocumentPageRepository } from '../repositories/sequelize-document-page.repository';
@@ -111,6 +113,10 @@ export const repositoryProviders: Provider[] = [
     useClass: SequelizeSubscriptionRepository,
   },
   { provide: USAGE_REPOSITORY, useClass: SequelizeUsageRepository },
+  {
+    provide: VOICE_CREDITS_REPOSITORY,
+    useClass: SequelizeVoiceCreditsRepository,
+  },
   {
     provide: WEBHOOK_EVENT_REPOSITORY,
     useClass: SequelizeWebhookEventRepository,

@@ -118,11 +118,7 @@ export class CreateRecapHandler extends AbstractRequestHandlerTemplate<
     }
 
     // A recap is a model call, so it is metered like the other ones.
-    await this.entitlements.consume(
-      cmd.userId,
-      UsageMetric.HIGHLIGHT_ACTIONS,
-      (e) => e.assertCanUseHighlight(),
-    );
+    await this.entitlements.assertStudyTime(cmd.userId);
 
     // The tail of the window: the last pages are what the reader is carrying
     // into the next session.

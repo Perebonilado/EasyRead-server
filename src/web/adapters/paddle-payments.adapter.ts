@@ -2,6 +2,7 @@ import { createHmac, timingSafeEqual } from 'crypto';
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import type { BillingInterval, SubscriptionStatus } from '../../contracts';
+import { CREDIT_BUNDLES, type CreditBundle } from '../../business/domain/values';
 import type {
   CheckoutIntent,
   GatewaySubscription,
@@ -35,7 +36,9 @@ interface PaddleEnvelope {
   event_id?: string;
   event_type?: string;
   occurred_at?: string;
-  data?: PaddleSubscriptionPayload;
+  data?: PaddleSubscriptionPayload & {
+    custom_data?: { userId?: string; creditSeconds?: number } | null;
+  };
 }
 
 /**
@@ -66,6 +69,15 @@ export class PaddlePaymentsAdapter implements PaymentsPort {
     return this.config.getOrThrow<string>(
       interval === 'yearly' ? 'PADDLE_PRICE_YEARLY' : 'PADDLE_PRICE_MONTHLY',
     );
+  }
+
+  private bundlePriceId(bundle: CreditBundle): string {
+    const key = {
+      min30: 'PADDLE_PRICE_MIN30',
+      min90: 'PADDLE_PRICE_MIN90',
+      min220: 'PADDLE_PRICE_MIN220',
+    }[bundle];
+    return this.config.getOrThrow<string>(key);
   }
 
   private intervalFor(priceId: string | undefined): BillingInterval | null {
@@ -131,6 +143,36 @@ export class PaddlePaymentsAdapter implements PaymentsPort {
   }
 
   /**
+   * A one-time transaction for a minutes bundle. The credited seconds ride
+   * in custom_data next to the user id, so the webhook can top the wallet
+   * up without a catalogue lookup — the transaction says what it bought.
+   */
+  async createCreditCheckout(input: {
+    userId: string;
+    email: string;
+    bundle: CreditBundle;
+    providerCustomerId: string | null;
+  }): Promise<CheckoutIntent> {
+    const body: Record<string, unknown> = {
+      items: [{ price_id: this.bundlePriceId(input.bundle), quantity: 1 }],
+      custom_data: {
+        userId: input.userId,
+        creditSeconds: CREDIT_BUNDLES[input.bundle].minutes * 60,
+      },
+    };
+    if (input.providerCustomerId) body.customer_id = input.providerCustomerId;
+    else body.customer = { email: input.email };
+
+    const created = await this.call<{ data?: { id?: string } }>(
+      '/transactions',
+      { method: 'POST', body },
+    );
+    const transactionId = created.data?.id;
+    if (!transactionId) throw new Error('Paddle returned no transaction id');
+    return { kind: 'overlay', transactionId };
+  }
+
+  /**
    * `Paddle-Signature: ts=<unix>;h1=<hmac>` where the HMAC is taken over
    * `<ts>:<raw body>`. The raw bytes matter: re-serialising the parsed JSON
    * would change the digest and every webhook would be rejected.
@@ -177,6 +219,10 @@ export class PaddlePaymentsAdapter implements PaymentsPort {
     if (!envelope.event_id || !envelope.event_type) return null;
 
     const data = envelope.data;
+    const credited =
+      envelope.event_type === 'transaction.completed'
+        ? (data?.custom_data?.creditSeconds ?? null)
+        : null;
     return {
       id: envelope.event_id,
       type: envelope.event_type,
@@ -187,6 +233,10 @@ export class PaddlePaymentsAdapter implements PaymentsPort {
       subscription:
         envelope.event_type.startsWith('subscription.') && data?.id
           ? this.toSubscription(data)
+          : null,
+      creditSeconds:
+        typeof credited === 'number' && credited > 0
+          ? Math.round(credited)
           : null,
     };
   }

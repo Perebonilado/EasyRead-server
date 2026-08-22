@@ -4,17 +4,23 @@ import { MAX_UPLOAD_BYTES, PLAN_LIMITS, type PlanLimits } from '../values';
 
 export interface UsageSnapshot {
   documentsThisMonth: number;
-  easiestThisMonth: number;
-  highlightsToday: number;
+  /** Active study seconds banked so far today, in the user's own day. */
+  studySecondsToday: number;
+  /** Voice seconds used this month, allowance and credits combined. */
+  voiceSecondsThisMonth: number;
+  /** Purchased voice credit balance, in seconds, on top of the allowance. */
+  voiceCreditSeconds: number;
 }
 
 /**
  * What a user is allowed to do right now.
  *
  * Resolved from our own `subscriptions` row (kept current by webhooks and a
- * daily reconcile) rather than by calling Paystack on every check — the
- * technical design calls that out explicitly as a fix for AI Examiner, where
- * every permission check hit the payment provider (§3.4).
+ * daily reconcile) rather than by calling the gateway on every check.
+ *
+ * The model is metered, not gated: every feature is open on Free, and what
+ * runs out is time. Study time resets daily, the voice allowance monthly,
+ * and purchased credits never expire.
  */
 export class Entitlements {
   constructor(
@@ -34,7 +40,7 @@ export class Entitlements {
   }
 
   /** Throws with the specific limit that was hit, so the UI can name it. */
-  assertCanUpload(sizeBytes: number, estimatedPages?: number): void {
+  assertCanUpload(sizeBytes: number): void {
     if (sizeBytes > MAX_UPLOAD_BYTES)
       throw new FileTooLargeError(MAX_UPLOAD_BYTES);
 
@@ -49,36 +55,53 @@ export class Entitlements {
         },
       );
     }
-
-    if (estimatedPages !== undefined && estimatedPages > this.limits.maxPages) {
-      throw new LimitReachedError(
-        `Documents are limited to ${this.limits.maxPages} pages on your plan`,
-        { limit: 'pages', allowed: this.limits.maxPages },
-      );
-    }
   }
 
-  assertCanConvertToEasiest(): void {
-    const allowed = this.limits.easiestPerMonth;
-    if (allowed !== null && this.usage.easiestThisMonth >= allowed) {
+  /** Seconds of study left today; null when the plan has no ceiling. */
+  remainingStudySeconds(): number | null {
+    const minutes = this.limits.studyMinutesPerDay;
+    if (minutes === null) return null;
+    return Math.max(0, minutes * 60 - this.usage.studySecondsToday);
+  }
+
+  /**
+   * The wall. Guards the study actions that spend money (explanations,
+   * conversions, chat); passive re-reading is walled by the client, which
+   * is honest enough for a meter whose point is conversion, not policing.
+   */
+  assertStudyTimeRemaining(): void {
+    const remaining = this.remainingStudySeconds();
+    if (remaining !== null && remaining <= 0) {
+      const minutes = this.limits.studyMinutesPerDay ?? 0;
       throw new LimitReachedError(
-        "You've used this month's Easiest conversion",
+        `That's ${minutes} minutes of studying today`,
         {
-          limit: 'easiest',
-          used: this.usage.easiestThisMonth,
-          allowed,
+          limit: 'study_time',
+          allowed: minutes * 60,
+          used: this.usage.studySecondsToday,
         },
       );
     }
   }
 
-  assertCanUseHighlight(): void {
-    const allowed = this.limits.highlightsPerDay;
-    if (allowed !== null && this.usage.highlightsToday >= allowed) {
-      throw new LimitReachedError(`That's ${allowed} explanations today`, {
-        limit: 'highlights',
-        used: this.usage.highlightsToday,
-        allowed,
+  /**
+   * Voice seconds still available: whatever is left of the monthly
+   * allowance, plus purchased credits. Never negative.
+   */
+  remainingVoiceSeconds(): number | null {
+    const allowanceMinutes = this.limits.voiceMinutesPerMonth;
+    if (allowanceMinutes === null) return null;
+    const allowance = allowanceMinutes * 60;
+    const left = allowance - this.usage.voiceSecondsThisMonth;
+    return Math.max(0, left) + this.usage.voiceCreditSeconds;
+  }
+
+  assertVoiceAvailable(minimumSeconds = 30): void {
+    const remaining = this.remainingVoiceSeconds();
+    if (remaining !== null && remaining < minimumSeconds) {
+      throw new LimitReachedError('You are out of voice minutes', {
+        limit: 'voice',
+        remainingSeconds: remaining,
       });
     }
   }

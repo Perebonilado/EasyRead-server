@@ -25,6 +25,7 @@ export { SubscriptionModel } from './subscription.model';
 export { TopicReadStateModel } from './topic-read-state.model';
 export { TopicModel } from './topic.model';
 export { UsageCounterModel } from './usage-counter.model';
+export { VoiceCreditModel } from './voice-credit.model';
 export { UserModel } from './user.model';
 export {
   StudyGroupModel,
@@ -60,6 +61,7 @@ import { SubscriptionModel } from './subscription.model';
 import { TopicReadStateModel } from './topic-read-state.model';
 import { TopicModel } from './topic.model';
 import { UsageCounterModel } from './usage-counter.model';
+import { VoiceCreditModel } from './voice-credit.model';
 import { UserModel } from './user.model';
 import {
   StudyGroupModel,
@@ -77,6 +79,7 @@ export const ALL_MODELS = [
   RefreshTokenModel,
   SubscriptionModel,
   UsageCounterModel,
+  VoiceCreditModel,
   WebhookEventModel,
   DocumentModel,
   DocumentPageModel,

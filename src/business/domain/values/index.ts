@@ -1,9 +1,15 @@
+/**
+ * The metered-paywall model: every feature is open on Free, and what is
+ * bounded is time on the core value. Study time is the daily meter, voice
+ * minutes are the monthly wallet allowance, and uploads stay capped only
+ * because each one spends real pipeline money before any reading happens.
+ * Page counts are deliberately unlimited on every plan.
+ */
 export const PLAN_LIMITS = {
   free: {
     documentsPerMonth: 3,
-    maxPages: 50,
-    easiestPerMonth: 1,
-    highlightsPerDay: 20,
+    studyMinutesPerDay: 20,
+    voiceMinutesPerMonth: 15,
     watermarkedExports: true,
     priceUsdMonthly: 0,
     priceUsdYearly: 0,
@@ -11,9 +17,8 @@ export const PLAN_LIMITS = {
   },
   pro: {
     documentsPerMonth: null,
-    maxPages: 300,
-    easiestPerMonth: null,
-    highlightsPerDay: null,
+    studyMinutesPerDay: null,
+    voiceMinutesPerMonth: 120,
     watermarkedExports: false,
     priceUsdMonthly: 20,
     priceUsdYearly: 150,
@@ -23,9 +28,10 @@ export const PLAN_LIMITS = {
 
 export interface PlanLimits {
   documentsPerMonth: number | null;
-  maxPages: number;
-  easiestPerMonth: number | null;
-  highlightsPerDay: number | null;
+  /** Daily active-study allowance; null is unlimited. */
+  studyMinutesPerDay: number | null;
+  /** The monthly voice allowance; purchased credits sit on top of this. */
+  voiceMinutesPerMonth: number | null;
   watermarkedExports: boolean;
   /** Whole US dollars. Paddle bills in USD everywhere; there is no naira tier. */
   priceUsdMonthly: number;
@@ -43,15 +49,13 @@ export interface PlanLimits {
 export const UNLIMITED_LIMITS: Pick<
   PlanLimits,
   | 'documentsPerMonth'
-  | 'maxPages'
-  | 'easiestPerMonth'
-  | 'highlightsPerDay'
+  | 'studyMinutesPerDay'
+  | 'voiceMinutesPerMonth'
   | 'watermarkedExports'
 > = {
   documentsPerMonth: null,
-  maxPages: PLAN_LIMITS.pro.maxPages,
-  easiestPerMonth: null,
-  highlightsPerDay: null,
+  studyMinutesPerDay: null,
+  voiceMinutesPerMonth: null,
   watermarkedExports: false,
 };
 
@@ -88,9 +92,23 @@ export const SCANNED_EMPTY_PAGE_RATIO = 0.6;
 /** Page images wider than this are box-downsampled before the vision call. */
 export const OCR_MAX_IMAGE_WIDTH = 1600;
 
+/**
+ * The purchasable voice bundles. Sold as one-time Paddle transactions; the
+ * webhook credits the wallet. Bigger bundles are cheaper per minute, and
+ * nothing here expires.
+ */
+export const CREDIT_BUNDLES = {
+  min30: { minutes: 30, usd: 5 },
+  min90: { minutes: 90, usd: 12 },
+  min220: { minutes: 220, usd: 25 },
+} as const;
+export type CreditBundle = keyof typeof CREDIT_BUNDLES;
+
 export const UsageMetric = {
   DOCUMENTS_UPLOADED: 'documents_uploaded',
-  EASIEST_CONVERSIONS: 'easiest_conversions',
-  HIGHLIGHT_ACTIONS: 'highlight_actions',
+  /** Active seconds in the reader, banked by the study clock heartbeat. */
+  STUDY_SECONDS: 'study_seconds',
+  /** Seconds of live voice, across the tutor and group sessions. */
+  VOICE_SECONDS: 'voice_seconds',
 } as const;
 export type UsageMetric = (typeof UsageMetric)[keyof typeof UsageMetric];

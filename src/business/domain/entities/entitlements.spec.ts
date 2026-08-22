@@ -4,14 +4,15 @@ import { MAX_UPLOAD_BYTES } from '../values';
 
 const usage = (over: Partial<Entitlements['usage']> = {}) => ({
   documentsThisMonth: 0,
-  easiestThisMonth: 0,
-  highlightsToday: 0,
+  studySecondsToday: 0,
+  voiceSecondsThisMonth: 0,
+  voiceCreditSeconds: 0,
   ...over,
 });
 
 describe('Entitlements', () => {
-  describe('free plan', () => {
-    it('allows the first three documents and refuses the fourth', () => {
+  describe('uploads', () => {
+    it('allows the first three free documents and refuses the fourth', () => {
       expect(() =>
         new Entitlements(
           'free',
@@ -27,94 +28,117 @@ describe('Entitlements', () => {
       ).toThrow(LimitReachedError);
     });
 
-    it('names the limit that was hit so the UI can explain it', () => {
-      try {
+    it('never counts uploads against Pro', () => {
+      expect(() =>
         new Entitlements(
-          'free',
-          usage({ documentsThisMonth: 3 }),
-        ).assertCanUpload(1_000);
-        fail('expected a limit error');
+          'pro',
+          usage({ documentsThisMonth: 500 }),
+        ).assertCanUpload(1_000),
+      ).not.toThrow();
+    });
+
+    it('refuses an oversized file on any plan', () => {
+      expect(() =>
+        new Entitlements('pro', usage()).assertCanUpload(MAX_UPLOAD_BYTES + 1),
+      ).toThrow(FileTooLargeError);
+    });
+  });
+
+  describe('the study clock', () => {
+    it('gives free 20 minutes a day and counts down', () => {
+      const entitlements = new Entitlements(
+        'free',
+        usage({ studySecondsToday: 15 * 60 }),
+      );
+      expect(entitlements.remainingStudySeconds()).toBe(5 * 60);
+      expect(() => entitlements.assertStudyTimeRemaining()).not.toThrow();
+    });
+
+    it('walls the free plan once the day is spent, and names the limit', () => {
+      const spent = new Entitlements(
+        'free',
+        usage({ studySecondsToday: 20 * 60 }),
+      );
+      expect(spent.remainingStudySeconds()).toBe(0);
+      try {
+        spent.assertStudyTimeRemaining();
+        fail('expected the wall');
       } catch (error) {
+        expect(error).toBeInstanceOf(LimitReachedError);
         expect((error as LimitReachedError).details).toMatchObject({
-          limit: 'documents',
-          used: 3,
-          allowed: 3,
+          limit: 'study_time',
         });
       }
     });
 
-    it('caps pages at 50', () => {
-      const free = new Entitlements('free', usage());
-      expect(() => free.assertCanUpload(1_000, 50)).not.toThrow();
-      expect(() => free.assertCanUpload(1_000, 51)).toThrow(LimitReachedError);
-    });
-
-    it('allows one Easiest conversion a month', () => {
-      expect(() =>
-        new Entitlements('free', usage()).assertCanConvertToEasiest(),
-      ).not.toThrow();
-      expect(() =>
-        new Entitlements(
-          'free',
-          usage({ easiestThisMonth: 1 }),
-        ).assertCanConvertToEasiest(),
-      ).toThrow(LimitReachedError);
-    });
-
-    it('allows twenty highlight actions a day', () => {
-      expect(() =>
-        new Entitlements(
-          'free',
-          usage({ highlightsToday: 19 }),
-        ).assertCanUseHighlight(),
-      ).not.toThrow();
-      expect(() =>
-        new Entitlements(
-          'free',
-          usage({ highlightsToday: 20 }),
-        ).assertCanUseHighlight(),
-      ).toThrow(LimitReachedError);
-    });
-
-    it('watermarks exports', () => {
-      expect(new Entitlements('free', usage()).exportsAreWatermarked()).toBe(
-        true,
+    it('never walls Pro', () => {
+      const pro = new Entitlements(
+        'pro',
+        usage({ studySecondsToday: 10 * 60 * 60 }),
       );
+      expect(pro.remainingStudySeconds()).toBeNull();
+      expect(() => pro.assertStudyTimeRemaining()).not.toThrow();
     });
   });
 
-  describe('pro plan', () => {
-    const heavy = usage({
-      documentsThisMonth: 500,
-      easiestThisMonth: 500,
-      highlightsToday: 500,
+  describe('the voice wallet', () => {
+    it('grants the free monthly allowance', () => {
+      const fresh = new Entitlements('free', usage());
+      expect(fresh.remainingVoiceSeconds()).toBe(15 * 60);
     });
 
-    it('has no monthly or daily ceilings', () => {
-      const pro = new Entitlements('pro', heavy);
-      expect(() => pro.assertCanUpload(1_000)).not.toThrow();
-      expect(() => pro.assertCanConvertToEasiest()).not.toThrow();
-      expect(() => pro.assertCanUseHighlight()).not.toThrow();
-    });
-
-    it('still caps pages at 300', () => {
-      const pro = new Entitlements('pro', usage());
-      expect(() => pro.assertCanUpload(1_000, 300)).not.toThrow();
-      expect(() => pro.assertCanUpload(1_000, 301)).toThrow(LimitReachedError);
-    });
-
-    it('exports without a watermark', () => {
-      expect(new Entitlements('pro', usage()).exportsAreWatermarked()).toBe(
-        false,
+    it('stacks purchased credits on top of what is left', () => {
+      const topped = new Entitlements(
+        'free',
+        usage({ voiceSecondsThisMonth: 10 * 60, voiceCreditSeconds: 30 * 60 }),
       );
+      expect(topped.remainingVoiceSeconds()).toBe(5 * 60 + 30 * 60);
+    });
+
+    it('does not let overuse of the allowance eat the credits twice', () => {
+      // 20 of 15 allowance minutes used: the 5 extra already came out of
+      // credits at spend time, so remaining is exactly the credit balance.
+      const over = new Entitlements(
+        'free',
+        usage({ voiceSecondsThisMonth: 20 * 60, voiceCreditSeconds: 25 * 60 }),
+      );
+      expect(over.remainingVoiceSeconds()).toBe(25 * 60);
+    });
+
+    it('refuses to start a session on an empty wallet', () => {
+      const empty = new Entitlements(
+        'free',
+        usage({ voiceSecondsThisMonth: 15 * 60 }),
+      );
+      expect(() => empty.assertVoiceAvailable()).toThrow(LimitReachedError);
+    });
+
+    it('gives Pro its 120 minutes and then its credits', () => {
+      const pro = new Entitlements(
+        'pro',
+        usage({ voiceSecondsThisMonth: 60 * 60, voiceCreditSeconds: 10 * 60 }),
+      );
+      expect(pro.remainingVoiceSeconds()).toBe(60 * 60 + 10 * 60);
     });
   });
 
-  it('rejects oversized files on every plan', () => {
-    for (const plan of ['free', 'pro'] as const) {
-      expect(() =>
-        new Entitlements(plan, usage()).assertCanUpload(MAX_UPLOAD_BYTES + 1),
-      ).toThrow(FileTooLargeError);
-    }
+  it('watermarks free exports and not Pro ones', () => {
+    expect(new Entitlements('free', usage()).exportsAreWatermarked()).toBe(
+      true,
+    );
+    expect(new Entitlements('pro', usage()).exportsAreWatermarked()).toBe(
+      false,
+    );
+  });
+
+  it('the unlimited override lifts the meters without changing the plan', () => {
+    const lifted = new Entitlements(
+      'free',
+      usage({ studySecondsToday: 10 * 60 * 60 }),
+      { studyMinutesPerDay: null, voiceMinutesPerMonth: null },
+    );
+    expect(lifted.plan).toBe('free');
+    expect(lifted.remainingStudySeconds()).toBeNull();
+    expect(lifted.remainingVoiceSeconds()).toBeNull();
   });
 });

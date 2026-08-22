@@ -5,10 +5,12 @@ import type { PaymentsPort } from '../../ports/payments.port';
 import {
   SUBSCRIPTION_REPOSITORY,
   USER_REPOSITORY,
+  VOICE_CREDITS_REPOSITORY,
   WEBHOOK_EVENT_REPOSITORY,
 } from '../../repositories/tokens';
 import type {
   SubscriptionRepository,
+  VoiceCreditsRepository,
   WebhookEventRepository,
 } from '../../repositories/billing.repository';
 import type { UserRepository } from '../../repositories/user.repository';
@@ -52,6 +54,8 @@ export class HandleWebhookHandler extends AbstractRequestHandlerTemplate<
     @Inject(WEBHOOK_EVENT_REPOSITORY)
     private readonly events: WebhookEventRepository,
     @Inject(USER_REPOSITORY) private readonly users: UserRepository,
+    @Inject(VOICE_CREDITS_REPOSITORY)
+    private readonly credits: VoiceCreditsRepository,
     @Inject(CLOCK) private readonly clock: ClockPort,
   ) {
     super();
@@ -112,6 +116,15 @@ export class HandleWebhookHandler extends AbstractRequestHandlerTemplate<
 
       this.logger.log(
         `${event.type}: ${userId} -> ${event.subscription.planCode}/${event.subscription.status}`,
+      );
+    }
+
+    // A completed credit purchase tops the wallet up. Idempotent for the
+    // same reason everything here is: the event id was claimed above.
+    if (event.creditSeconds && event.userId) {
+      await this.credits.add(event.userId, event.creditSeconds);
+      this.logger.log(
+        `${event.type}: credited ${event.creditSeconds}s of voice to ${event.userId}`,
       );
     }
 

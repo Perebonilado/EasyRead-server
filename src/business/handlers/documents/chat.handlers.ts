@@ -108,11 +108,7 @@ export class SendChatMessageHandler extends AbstractRequestHandlerTemplate<
       );
     }
 
-    await this.entitlements.consume(
-      cmd.userId,
-      UsageMetric.HIGHLIGHT_ACTIONS,
-      (e) => e.assertCanUseHighlight(),
-    );
+    await this.entitlements.assertStudyTime(cmd.userId);
 
     // The thread as it stood before this question — the current turn is sent
     // separately, with its own freshly retrieved passages.
@@ -323,11 +319,7 @@ export class ClarifyChatMessageHandler extends AbstractRequestHandlerTemplate<
       throw new ValidationError('That answer is no longer here');
     }
 
-    await this.entitlements.consume(
-      cmd.userId,
-      UsageMetric.HIGHLIGHT_ACTIONS,
-      (e) => e.assertCanUseHighlight(),
-    );
+    await this.entitlements.assertStudyTime(cmd.userId);
 
     // Recorded before the model call, not after: the reader's admission is
     // the valuable part, and it must survive a generation that fails.

@@ -15,6 +15,7 @@ import { UserModel } from '../database/models';
 import { GROUP_REPOSITORY } from '../../business/repositories/tokens';
 import type { GroupRepository } from '../../business/repositories/group.repository';
 import { GroupLesson, GroupLessonFactory } from './group-lesson';
+import { EntitlementsService } from '../../business/handlers/documents/entitlements.service';
 
 /** What auth middleware stamps onto every admitted socket. */
 interface SocketAuth {
@@ -34,6 +35,10 @@ interface RosterEntry {
 interface Room {
   sessionId: string;
   groupId: string;
+  /** Whose voice wallet this room spends: the host pays for the lesson. */
+  hostId: string | null;
+  /** Ticks once a minute while the tutor is live, spending the wallet. */
+  meterTimer: ReturnType<typeof setInterval> | null;
   roster: Map<string, { name: string; sockets: Set<string> }>;
   /** Armed while nobody is connected; an empty room ends its session. */
   idleTimer: ReturnType<typeof setTimeout> | null;
@@ -74,6 +79,7 @@ export class SessionGateway implements OnGatewayInit, OnGatewayDisconnect {
     @InjectModel(UserModel) private readonly users: typeof UserModel,
     @Inject(GROUP_REPOSITORY) private readonly groups: GroupRepository,
     private readonly lessons: GroupLessonFactory,
+    private readonly entitlements: EntitlementsService,
   ) {}
 
   /**
@@ -162,6 +168,8 @@ export class SessionGateway implements OnGatewayInit, OnGatewayDisconnect {
       room = {
         sessionId: session.id,
         groupId: session.groupId,
+        hostId: null,
+        meterTimer: null,
         roster: new Map(),
         idleTimer: null,
         lesson: null,
@@ -261,6 +269,35 @@ export class SessionGateway implements OnGatewayInit, OnGatewayDisconnect {
     await lesson.start();
     room.lesson = lesson;
     room.lessonStarting = false;
+    this.startMeter(room, session.hostId);
+  }
+
+  /**
+   * The wallet, ticking: one live tutor costs the HOST a minute a minute,
+   * however many people are listening — that matches what the room costs
+   * us, and it means joining a friend's session never spends your own
+   * minutes. When the wallet runs dry the session ends gracefully rather
+   * than mid-sentence cutting to silence with no explanation.
+   */
+  private startMeter(room: Room, hostId: string) {
+    room.hostId = hostId;
+    if (room.meterTimer) clearInterval(room.meterTimer);
+    room.meterTimer = setInterval(() => {
+      void (async () => {
+        await this.entitlements.recordVoiceSeconds(hostId, 60);
+        const balance = await this.entitlements.voiceBalance(hostId);
+        if (balance.remainingSeconds !== null && balance.remainingSeconds <= 0) {
+          this.server.to(this.channel(room.sessionId)).emit('tutor:error', {
+            message:
+              "The host is out of voice minutes, so today's lesson ends here.",
+          });
+          await this.groups.endSession(room.sessionId).catch(() => {});
+          this.endSession(room.sessionId);
+        }
+      })().catch((error: Error) =>
+        this.logger.warn(`Voice meter tick failed: ${error.message}`),
+      );
+    }, 60_000);
   }
 
   // ── The floor (P2): held by one person, visible to everyone ───────────────
@@ -347,6 +384,7 @@ export class SessionGateway implements OnGatewayInit, OnGatewayDisconnect {
   endSession(sessionId: string) {
     const room = this.rooms.get(sessionId);
     if (room?.idleTimer) clearTimeout(room.idleTimer);
+    if (room?.meterTimer) clearInterval(room.meterTimer);
     room?.lesson?.close();
     this.server
       .to(this.channel(sessionId))

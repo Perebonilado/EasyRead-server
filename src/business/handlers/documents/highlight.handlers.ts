@@ -1,7 +1,6 @@
 import { Inject, Injectable } from '@nestjs/common';
 import type { HighlightAction, LookupDto } from '../../../contracts';
 import { ValidationError } from '../../domain/errors/errors';
-import { UsageMetric } from '../../domain/values';
 import { IMAGE_SEARCH, LLM_GATEWAY, VECTOR_STORE } from '../../ports/tokens';
 import type { ImageSearchPort } from '../../ports/image-search.port';
 import type { LlmGatewayPort } from '../../ports/llm.port';
@@ -71,11 +70,7 @@ export class HighlightHandler extends AbstractRequestHandlerTemplate<
       throw new ValidationError('Select between 2 and 1000 characters');
     }
 
-    await this.entitlements.consume(
-      cmd.userId,
-      UsageMetric.HIGHLIGHT_ACTIONS,
-      (e) => e.assertCanUseHighlight(),
-    );
+    await this.entitlements.assertStudyTime(cmd.userId);
 
     const summary = await this.summaries.find(cmd.documentId);
 
@@ -146,11 +141,7 @@ export class VisualizeHandler extends AbstractRequestHandlerTemplate<
       throw new ValidationError('Select between 2 and 1000 characters');
     }
 
-    await this.entitlements.consume(
-      cmd.userId,
-      UsageMetric.HIGHLIGHT_ACTIONS,
-      (e) => e.assertCanUseHighlight(),
-    );
+    await this.entitlements.assertStudyTime(cmd.userId);
 
     const summary = await this.summaries.find(cmd.documentId);
     const query = (await this.llm.rewriteImageQuery({ selection, summary }))

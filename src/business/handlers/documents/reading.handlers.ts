@@ -114,21 +114,11 @@ export class StartEasiestHandler extends AbstractRequestHandlerTemplate<
       throw new AlreadyInProgressError('Easiest Read is already being written');
     }
 
-    await this.entitlements.consume(
-      cmd.userId,
-      UsageMetric.EASIEST_CONVERSIONS,
-      (e) => e.assertCanConvertToEasiest(),
-    );
+    // Easiest conversions are no longer counted; the study clock is the
+    // meter now, and this is exactly the kind of study action it guards.
+    await this.entitlements.assertStudyTime(cmd.userId);
 
-    try {
-      await this.pipeline.fanOutSimplify(doc.id, doc.contentVersion, 'easiest');
-    } catch (error) {
-      await this.entitlements.release(
-        cmd.userId,
-        UsageMetric.EASIEST_CONVERSIONS,
-      );
-      throw error;
-    }
+    await this.pipeline.fanOutSimplify(doc.id, doc.contentVersion, 'easiest');
 
     return CommandResponse.empty();
   }

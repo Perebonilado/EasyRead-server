@@ -106,21 +106,7 @@ export class ImportProcessor {
         chapters,
       );
 
-      // The plan's page cap applies to what was actually typeset — web pages
-      // and PDF pages are different units, and this is where they meet.
-      const limits = (await this.entitlements.forUser(doc.userId)).limits;
-      const pageCount = ranges.length
-        ? Math.max(...ranges.map((r) => r.endPage))
-        : 0;
-      if (pageCount > limits.maxPages) {
-        doc.markFailed(
-          `That selection typeset to ${pageCount} pages — your plan allows ` +
-            `${limits.maxPages}. Import a smaller section.`,
-        );
-        await this.documents.save(doc);
-        return;
-      }
-
+      // Page caps are gone on every plan; the study clock is the meter now.
       doc.noteImportChapters(ranges);
       await this.storage.put({
         key: `documents/${doc.id}/original`,

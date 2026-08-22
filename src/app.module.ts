@@ -5,7 +5,10 @@ import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
 import { CoreModule } from './core.module';
 import { DeleteAccountHandler } from './business/handlers/identity/delete-account.handler';
 import { ForgotPasswordHandler } from './business/handlers/identity/forgot-password.handler';
-import { StartCheckoutHandler } from './business/handlers/billing/start-checkout.handler';
+import {
+  StartCheckoutHandler,
+  StartCreditCheckoutHandler,
+} from './business/handlers/billing/start-checkout.handler';
 import { HandleWebhookHandler } from './business/handlers/billing/handle-webhook.handler';
 import {
   CancelSubscriptionHandler,
@@ -156,6 +159,7 @@ const handlers = [
   LoginHandler,
   GoogleLoginHandler,
   StartCheckoutHandler,
+  StartCreditCheckoutHandler,
   HandleWebhookHandler,
   CancelSubscriptionHandler,
   ChangeIntervalHandler,

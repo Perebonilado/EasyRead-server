@@ -456,12 +456,31 @@ export type PlanDto = {
   priceUsdYearly: number;
   limits: {
     documentsPerMonth: number | null;
-    maxPages: number;
-    easiestPerMonth: number | null;
-    highlightsPerDay: number | null;
+    /** Daily active-study allowance in minutes; null is unlimited. */
+    studyMinutesPerDay: number | null;
+    /** Monthly voice allowance in minutes; purchased credits stack on top. */
+    voiceMinutesPerMonth: number | null;
     watermarkedExports: boolean;
   };
 };
+
+/** The study clock, as the heartbeat answers it. */
+export type StudyClockDto = {
+  usedSeconds: number;
+  limitSeconds: number | null;
+  remainingSeconds: number | null;
+};
+
+/** The voice wallet: allowance remainder plus purchased credits. */
+export type VoiceBalanceDto = {
+  remainingSeconds: number | null;
+  allowanceSeconds: number | null;
+  usedThisMonthSeconds: number;
+  creditSeconds: number;
+};
+
+/** The purchasable credit bundles; ids are contract with the client. */
+export type CreditBundleId = 'min30' | 'min90' | 'min220';
 
 export type SubscriptionResponse = {
   plan: PlanCode;
@@ -474,9 +493,9 @@ export type SubscriptionResponse = {
   provider: string | null;
   usage: {
     documentsThisMonth: number;
-    easiestThisMonth: number;
-    highlightsToday: number;
   };
+  studyTime: StudyClockDto;
+  voice: VoiceBalanceDto;
 };
 
 /**

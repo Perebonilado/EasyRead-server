@@ -36,6 +36,18 @@ export class FakePaymentsAdapter implements PaymentsPort {
     });
   }
 
+  createCreditCheckout(input: {
+    userId: string;
+    email: string;
+    bundle: string;
+  }): Promise<CheckoutIntent> {
+    this.logger.log(`[credits] ${input.email} -> ${input.bundle}`);
+    return Promise.resolve({
+      kind: 'redirect',
+      url: `/billing?status=simulated&credits=${input.bundle}`,
+    });
+  }
+
   verifyAndParseWebhook(): GatewayWebhookEvent | null {
     this.logger.warn('Webhook received with no payment gateway configured');
     return null;

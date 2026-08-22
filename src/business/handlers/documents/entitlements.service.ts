@@ -13,11 +13,30 @@ import type { ClockPort } from '../../ports/clock.port';
 import {
   SUBSCRIPTION_REPOSITORY,
   USAGE_REPOSITORY,
+  VOICE_CREDITS_REPOSITORY,
 } from '../../repositories/tokens';
 import type {
   SubscriptionRepository,
   UsageRepository,
+  VoiceCreditsRepository,
 } from '../../repositories/billing.repository';
+
+/** A heartbeat can bank at most this much, however broken the client. */
+const MAX_HEARTBEAT_SECONDS = 120;
+
+export interface StudyClockReading {
+  usedSeconds: number;
+  limitSeconds: number | null;
+  remainingSeconds: number | null;
+}
+
+export interface VoiceBalance {
+  /** Seconds still usable right now: allowance remainder plus credits. */
+  remainingSeconds: number | null;
+  allowanceSeconds: number | null;
+  usedThisMonthSeconds: number;
+  creditSeconds: number;
+}
 
 /**
  * Resolves what a user may do, and books the usage when they do it.
@@ -25,10 +44,17 @@ import type {
  * Plan comes from our own `subscriptions` row rather than a call to the payment
  * provider — the technical design calls that out as the fix for AI Examiner,
  * where every permission check hit the gateway (§3.4). No row means Free.
+ *
+ * Two meters live here. Study time banks in the user's own calendar day, so
+ * the reset lands at their midnight: the client reports its UTC offset with
+ * every heartbeat and the latest one is remembered per user. Losing that
+ * memory on a restart merely means a few UTC-keyed heartbeats until the next
+ * one arrives, on a meter whose job is conversion, not policing.
  */
 @Injectable()
 export class EntitlementsService implements OnModuleInit {
   private readonly logger = new Logger(EntitlementsService.name);
+  private readonly tzOffsets = new Map<string, number>();
 
   /**
    * Testing switch: lifts every plan ceiling while leaving the plan itself
@@ -44,6 +70,8 @@ export class EntitlementsService implements OnModuleInit {
     @Inject(SUBSCRIPTION_REPOSITORY)
     private readonly subscriptions: SubscriptionRepository,
     @Inject(USAGE_REPOSITORY) private readonly usage: UsageRepository,
+    @Inject(VOICE_CREDITS_REPOSITORY)
+    private readonly credits: VoiceCreditsRepository,
     @Inject(CLOCK) private readonly clock: ClockPort,
     private readonly config: ConfigService,
   ) {}
@@ -60,8 +88,21 @@ export class EntitlementsService implements OnModuleInit {
     return now.toISOString().slice(0, 7); // YYYY-MM
   }
 
-  dayKey(now = this.clock.now()): string {
-    return now.toISOString().slice(0, 10); // YYYY-MM-DD
+  /** The user's own calendar day, from the offset their client last sent. */
+  dayKey(userId: string, now = this.clock.now()): string {
+    const offset = this.tzOffsets.get(userId) ?? 0;
+    return new Date(now.getTime() + offset * 60_000)
+      .toISOString()
+      .slice(0, 10); // YYYY-MM-DD
+  }
+
+  rememberTimezone(userId: string, utcOffsetMinutes: number): void {
+    if (
+      Number.isFinite(utcOffsetMinutes) &&
+      Math.abs(utcOffsetMinutes) <= 14 * 60
+    ) {
+      this.tzOffsets.set(userId, Math.round(utcOffsetMinutes));
+    }
   }
 
   async planFor(userId: string): Promise<PlanCode> {
@@ -97,24 +138,122 @@ export class EntitlementsService implements OnModuleInit {
   }
 
   async forUser(userId: string): Promise<Entitlements> {
-    const [plan, documentsThisMonth, easiestThisMonth, highlightsToday] =
-      await Promise.all([
-        this.planFor(userId),
-        this.usage.get(userId, UsageMetric.DOCUMENTS_UPLOADED, this.monthKey()),
-        this.usage.get(
-          userId,
-          UsageMetric.EASIEST_CONVERSIONS,
-          this.monthKey(),
-        ),
-        this.usage.get(userId, UsageMetric.HIGHLIGHT_ACTIONS, this.dayKey()),
-      ]);
+    const [
+      plan,
+      documentsThisMonth,
+      studySecondsToday,
+      voiceSecondsThisMonth,
+      voiceCreditSeconds,
+    ] = await Promise.all([
+      this.planFor(userId),
+      this.usage.get(userId, UsageMetric.DOCUMENTS_UPLOADED, this.monthKey()),
+      this.usage.get(userId, UsageMetric.STUDY_SECONDS, this.dayKey(userId)),
+      this.usage.get(userId, UsageMetric.VOICE_SECONDS, this.monthKey()),
+      this.credits.balance(userId),
+    ]);
 
     return new Entitlements(
       plan,
-      { documentsThisMonth, easiestThisMonth, highlightsToday },
+      {
+        documentsThisMonth,
+        studySecondsToday,
+        voiceSecondsThisMonth,
+        voiceCreditSeconds,
+      },
       this.unlimited ? UNLIMITED_LIMITS : undefined,
     );
   }
+
+  // ── The study clock ────────────────────────────────────────────────────────
+
+  /**
+   * Banks active study seconds and answers with what is left, so the one
+   * heartbeat call also drives the client's quiet warning and its wall.
+   */
+  async recordStudyTime(
+    userId: string,
+    seconds: number,
+    utcOffsetMinutes?: number,
+  ): Promise<StudyClockReading> {
+    if (utcOffsetMinutes !== undefined) {
+      this.rememberTimezone(userId, utcOffsetMinutes);
+    }
+    const banked = Math.max(0, Math.min(MAX_HEARTBEAT_SECONDS, seconds));
+    const day = this.dayKey(userId);
+    const used =
+      banked > 0
+        ? await this.usage.incrementBy(
+            userId,
+            UsageMetric.STUDY_SECONDS,
+            day,
+            Math.round(banked),
+          )
+        : await this.usage.get(userId, UsageMetric.STUDY_SECONDS, day);
+
+    const limits = this.effectiveLimits(await this.planFor(userId));
+    const limitSeconds =
+      limits.studyMinutesPerDay === null ? null : limits.studyMinutesPerDay * 60;
+    return {
+      usedSeconds: used,
+      limitSeconds,
+      remainingSeconds:
+        limitSeconds === null ? null : Math.max(0, limitSeconds - used),
+    };
+  }
+
+  /** The server-side backstop for study actions that spend money. */
+  async assertStudyTime(userId: string): Promise<void> {
+    (await this.forUser(userId)).assertStudyTimeRemaining();
+  }
+
+  // ── The voice wallet ───────────────────────────────────────────────────────
+
+  async voiceBalance(userId: string): Promise<VoiceBalance> {
+    const entitlements = await this.forUser(userId);
+    const allowanceMinutes = entitlements.limits.voiceMinutesPerMonth;
+    return {
+      remainingSeconds: entitlements.remainingVoiceSeconds(),
+      allowanceSeconds:
+        allowanceMinutes === null ? null : allowanceMinutes * 60,
+      usedThisMonthSeconds: entitlements.usage.voiceSecondsThisMonth,
+      creditSeconds: entitlements.usage.voiceCreditSeconds,
+    };
+  }
+
+  /**
+   * Spends voice time: the monthly allowance first, purchased credits for
+   * whatever spills past it. The usage counter records everything either
+   * way, so "used this month" stays one honest number.
+   */
+  async recordVoiceSeconds(userId: string, seconds: number): Promise<void> {
+    const spend = Math.max(0, Math.round(seconds));
+    if (spend === 0) return;
+
+    const entitlements = await this.forUser(userId);
+    const allowanceMinutes = entitlements.limits.voiceMinutesPerMonth;
+
+    const before = entitlements.usage.voiceSecondsThisMonth;
+    await this.usage.incrementBy(
+      userId,
+      UsageMetric.VOICE_SECONDS,
+      this.monthKey(),
+      spend,
+    );
+
+    if (allowanceMinutes !== null) {
+      const allowance = allowanceMinutes * 60;
+      const beyondBefore = Math.max(0, before - allowance);
+      const beyondAfter = Math.max(0, before + spend - allowance);
+      const fromCredits = beyondAfter - beyondBefore;
+      if (fromCredits > 0) await this.credits.deduct(userId, fromCredits);
+    }
+  }
+
+  async addVoiceCredits(userId: string, seconds: number): Promise<void> {
+    if (seconds > 0) await this.credits.add(userId, Math.round(seconds));
+  }
+
+  // ── Counted usage (documents) ──────────────────────────────────────────────
 
   /**
    * Reserve-then-verify. The counter is incremented first and the returned
@@ -127,10 +266,7 @@ export class EntitlementsService implements OnModuleInit {
     metric: UsageMetric,
     check: (entitlements: Entitlements) => void,
   ): Promise<void> {
-    const period =
-      metric === UsageMetric.HIGHLIGHT_ACTIONS
-        ? this.dayKey()
-        : this.monthKey();
+    const period = this.monthKey();
     const plan = await this.planFor(userId);
     const after = await this.usage.increment(userId, metric, period);
 
@@ -139,7 +275,13 @@ export class EntitlementsService implements OnModuleInit {
       check(
         new Entitlements(
           plan,
-          this.snapshotWith(metric, after - 1),
+          {
+            documentsThisMonth:
+              metric === UsageMetric.DOCUMENTS_UPLOADED ? after - 1 : 0,
+            studySecondsToday: 0,
+            voiceSecondsThisMonth: 0,
+            voiceCreditSeconds: 0,
+          },
           this.unlimited ? UNLIMITED_LIMITS : undefined,
         ),
       );
@@ -151,18 +293,6 @@ export class EntitlementsService implements OnModuleInit {
 
   /** Releases a reserved slot when the gated action fails after booking. */
   async release(userId: string, metric: UsageMetric): Promise<void> {
-    const period =
-      metric === UsageMetric.HIGHLIGHT_ACTIONS
-        ? this.dayKey()
-        : this.monthKey();
-    await this.usage.decrement(userId, metric, period);
-  }
-
-  private snapshotWith(metric: UsageMetric, value: number) {
-    return {
-      documentsThisMonth: metric === UsageMetric.DOCUMENTS_UPLOADED ? value : 0,
-      easiestThisMonth: metric === UsageMetric.EASIEST_CONVERSIONS ? value : 0,
-      highlightsToday: metric === UsageMetric.HIGHLIGHT_ACTIONS ? value : 0,
-    };
+    await this.usage.decrement(userId, metric, this.monthKey());
   }
 }

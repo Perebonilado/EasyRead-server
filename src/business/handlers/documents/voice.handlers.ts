@@ -650,13 +650,10 @@ export class StartVoiceSessionHandler extends AbstractRequestHandlerTemplate<
   protected async handleRequest(cmd: VoiceSessionRequest) {
     const doc = await this.access.require(cmd.documentId, cmd.userId);
 
-    // A conversation is a run of highlight-grade model calls, so it draws on
-    // the same daily allowance — one unit per session, not per exchange.
-    await this.entitlements.consume(
-      cmd.userId,
-      UsageMetric.HIGHLIGHT_ACTIONS,
-      (e) => e.assertCanUseHighlight(),
-    );
+    // Live voice spends the wallet, not the study clock: the client banks
+    // the minutes through the voice heartbeat while the call runs.
+    const entitlements = await this.entitlements.forUser(cmd.userId);
+    entitlements.assertVoiceAvailable(60);
 
     const summary = await this.summaries.find(doc.id);
     const tutor = tutorById(cmd.tutorId);

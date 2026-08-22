@@ -6,6 +6,7 @@ import {
   HttpCode,
   Param,
   Patch,
+  Post,
   Query,
 } from '@nestjs/common';
 import {
@@ -24,8 +25,15 @@ import type {
   PlanDto,
   LocalAdaptationDto,
   ProfileChangeDto,
+  StudyClockDto,
   SubscriptionResponse,
+  VoiceBalanceDto,
 } from '../../contracts';
+import { EntitlementsService } from '../../business/handlers/documents/entitlements.service';
+import {
+  StudyHeartbeatDto,
+  VoiceHeartbeatDto,
+} from '../validation/metering.dto';
 import { UpdateLearnerProfileHandler } from '../../business/handlers/documents/learning.handlers';
 import {
   DOCUMENT_LEARNING_STATE_REPOSITORY,
@@ -108,7 +116,37 @@ export class AccountController {
     private readonly docStates: DocumentLearningStateRepository,
     @Inject(DOCUMENT_REPOSITORY)
     private readonly documents: DocumentRepository,
+    private readonly entitlements: EntitlementsService,
   ) {}
+
+  /**
+   * The study clock's pulse. The client banks its active seconds here and
+   * learns what is left, so the same call drives the quiet five-minute
+   * warning and the wall.
+   */
+  @Post('study/heartbeat')
+  @HttpCode(200)
+  async studyHeartbeat(
+    @CurrentUser('id') userId: string,
+    @Body() body: StudyHeartbeatDto,
+  ): Promise<StudyClockDto> {
+    return this.entitlements.recordStudyTime(
+      userId,
+      body.seconds,
+      body.tzOffsetMinutes,
+    );
+  }
+
+  /** The voice wallet's pulse, for 1:1 calls the server cannot observe. */
+  @Post('voice/heartbeat')
+  @HttpCode(200)
+  async voiceHeartbeat(
+    @CurrentUser('id') userId: string,
+    @Body() body: VoiceHeartbeatDto,
+  ): Promise<VoiceBalanceDto> {
+    await this.entitlements.recordVoiceSeconds(userId, body.seconds);
+    return this.entitlements.voiceBalance(userId);
+  }
 
   /** How this user learns — read into every lesson. */
   @Get('learner-profile')

@@ -6,12 +6,14 @@ import type {
   SubscriptionRecord,
   SubscriptionRepository,
   UsageRepository,
+  VoiceCreditsRepository,
   WebhookEventRepository,
 } from '../../business/repositories/billing.repository';
 import type { UsageMetric } from '../../business/domain/values';
 import {
   SubscriptionModel,
   UsageCounterModel,
+  VoiceCreditModel,
   WebhookEventModel,
 } from '../database/models';
 import { newId } from '../database/uuid';
@@ -96,13 +98,22 @@ export class SequelizeUsageRepository implements UsageRepository {
     metric: UsageMetric,
     period: string,
   ): Promise<number> {
+    return this.incrementBy(userId, metric, period, 1);
+  }
+
+  async incrementBy(
+    userId: string,
+    metric: UsageMetric,
+    period: string,
+    amount: number,
+  ): Promise<number> {
     const sequelize = this.model.sequelize!;
     await sequelize.query(
       `INSERT INTO usage_counters (id, user_id, period, metric, count, created_at, updated_at)
-       VALUES (:id, :userId, :period, :metric, 1, NOW(), NOW())
-       ON DUPLICATE KEY UPDATE count = count + 1, updated_at = NOW()`,
+       VALUES (:id, :userId, :period, :metric, :amount, NOW(), NOW())
+       ON DUPLICATE KEY UPDATE count = count + :amount, updated_at = NOW()`,
       {
-        replacements: { id: newId(), userId, period, metric },
+        replacements: { id: newId(), userId, period, metric, amount },
         type: QueryTypes.INSERT,
       },
     );
@@ -168,6 +179,41 @@ export class SequelizeWebhookEventRepository implements WebhookEventRepository {
     await this.model.update(
       { processedAt: now },
       { where: { provider, externalId } },
+    );
+  }
+}
+
+@Injectable()
+export class SequelizeVoiceCreditsRepository implements VoiceCreditsRepository {
+  constructor(
+    @InjectModel(VoiceCreditModel)
+    private readonly model: typeof VoiceCreditModel,
+  ) {}
+
+  async balance(userId: string): Promise<number> {
+    const row = await this.model.findOne({ where: { userId } });
+    return row?.balanceSeconds ?? 0;
+  }
+
+  /** Atomic upsert-and-add, mirroring the usage counter's shape. */
+  async add(userId: string, seconds: number): Promise<void> {
+    await this.model.sequelize!.query(
+      `INSERT INTO voice_credits (id, user_id, balance_seconds, created_at, updated_at)
+       VALUES (:id, :userId, :seconds, NOW(), NOW())
+       ON DUPLICATE KEY UPDATE balance_seconds = balance_seconds + :seconds, updated_at = NOW()`,
+      {
+        replacements: { id: newId(), userId, seconds },
+        type: QueryTypes.INSERT,
+      },
+    );
+  }
+
+  async deduct(userId: string, seconds: number): Promise<void> {
+    await this.model.sequelize!.query(
+      `UPDATE voice_credits
+       SET balance_seconds = GREATEST(balance_seconds - :seconds, 0), updated_at = NOW()
+       WHERE user_id = :userId`,
+      { replacements: { userId, seconds }, type: QueryTypes.UPDATE },
     );
   }
 }

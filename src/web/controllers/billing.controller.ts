@@ -20,6 +20,7 @@ import {
   StartCheckoutHandler,
   StartCreditCheckoutHandler,
 } from '../../business/handlers/billing/start-checkout.handler';
+import { EntitlementsService } from '../../business/handlers/documents/entitlements.service';
 import { CurrentUser } from '../security/current-user.decorator';
 import { Public } from '../security/public.decorator';
 import { BuyCreditsDto, StartCheckoutDto } from '../validation/billing.dto';
@@ -29,7 +30,10 @@ import { BuyCreditsDto, StartCheckoutDto } from '../validation/billing.dto';
  *
  * Reading the current subscription lives on the account controller with the
  * rest of the account's state; this controller is only the things that
- * change money.
+ * change money — which is why every route here except cancelling and the
+ * gateway's own webhook refuses while BILLING_ENABLED is false. Hiding the
+ * buttons is presentation; this is the part that cannot be bypassed by a
+ * stale client or a curl.
  */
 @Controller('billing')
 export class BillingController {
@@ -41,6 +45,7 @@ export class BillingController {
     private readonly resume: ResumeSubscriptionHandler,
     private readonly portal: OpenBillingPortalHandler,
     private readonly webhook: HandleWebhookHandler,
+    private readonly entitlements: EntitlementsService,
   ) {}
 
   @Post('checkout')
@@ -49,6 +54,7 @@ export class BillingController {
     @CurrentUser('id') userId: string,
     @Body() body: StartCheckoutDto,
   ): Promise<CheckoutResponse> {
+    this.entitlements.assertBillingEnabled();
     const result = await this.startCheckout.handle({
       userId,
       interval: body.interval,
@@ -63,6 +69,7 @@ export class BillingController {
     @CurrentUser('id') userId: string,
     @Body() body: BuyCreditsDto,
   ): Promise<CheckoutResponse> {
+    this.entitlements.assertBillingEnabled();
     const result = await this.startCreditCheckout.handle({
       userId,
       bundle: body.bundle,
@@ -77,6 +84,7 @@ export class BillingController {
     @CurrentUser('id') userId: string,
     @Body() body: StartCheckoutDto,
   ): Promise<void> {
+    this.entitlements.assertBillingEnabled();
     await this.changeInterval.handle({ userId, interval: body.interval });
   }
 
@@ -84,12 +92,14 @@ export class BillingController {
   @Post('resume')
   @HttpCode(204)
   async resumeSubscription(@CurrentUser('id') userId: string): Promise<void> {
+    this.entitlements.assertBillingEnabled();
     await this.resume.handle({ userId });
   }
 
   @Post('portal')
   @HttpCode(200)
   async openPortal(@CurrentUser('id') userId: string): Promise<PortalResponse> {
+    this.entitlements.assertBillingEnabled();
     const result = await this.portal.handle({ userId });
     return result.data;
   }

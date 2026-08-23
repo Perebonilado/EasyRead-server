@@ -1,6 +1,9 @@
 import { ConfigService } from '@nestjs/config';
 import { EntitlementsService } from './entitlements.service';
-import { LimitReachedError } from '../../domain/errors/errors';
+import {
+  LimitReachedError,
+  ValidationError,
+} from '../../domain/errors/errors';
 import { UsageMetric } from '../../domain/values';
 import type { ClockPort } from '../../ports/clock.port';
 import type {
@@ -19,6 +22,7 @@ function build(
   unlimited: boolean,
   counts: Record<string, number> = {},
   creditSeconds = 0,
+  billingEnabled = true,
 ) {
   const deducted: number[] = [];
   const usage = {
@@ -51,8 +55,11 @@ function build(
   const clock: ClockPort = { now: () => new Date('2026-08-13T12:00:00Z') };
 
   const config = {
-    get: (key: string) =>
-      key === 'FREE_PLAN_UNLIMITED' ? String(unlimited) : undefined,
+    get: (key: string) => {
+      if (key === 'FREE_PLAN_UNLIMITED') return String(unlimited);
+      if (key === 'BILLING_ENABLED') return String(billingEnabled);
+      return undefined;
+    },
   } as unknown as ConfigService;
 
   const service = new EntitlementsService(
@@ -156,6 +163,56 @@ describe('EntitlementsService', () => {
         watermarkedExports: false,
       });
     });
+  });
+
+  describe('with billing switched off', () => {
+    it('is unlimited without anyone setting the testing switch', async () => {
+      const { service } = build(
+        false,
+        {
+          [UsageMetric.DOCUMENTS_UPLOADED]: 99,
+          [UsageMetric.STUDY_SECONDS]: 10 * 60 * 60,
+          [UsageMetric.VOICE_SECONDS]: 10 * 60 * 60,
+        },
+        0,
+        false,
+      );
+      const entitlements = await service.forUser('u1');
+
+      expect(() => entitlements.assertCanUpload(1_000)).not.toThrow();
+      expect(() => entitlements.assertStudyTimeRemaining()).not.toThrow();
+      expect(() => entitlements.assertVoiceAvailable()).not.toThrow();
+      expect(entitlements.exportsAreWatermarked()).toBe(false);
+    });
+
+    it('refuses anything that would take money', () => {
+      const { service } = build(false, {}, 0, false);
+      expect(service.billingEnabled).toBe(false);
+      expect(() => service.assertBillingEnabled()).toThrow(ValidationError);
+    });
+
+    it('advertises no ceilings, so the UI draws no meter', () => {
+      expect(build(false, {}, 0, false).service.effectiveLimits('free'))
+        .toMatchObject({
+          documentsPerMonth: null,
+          studyMinutesPerDay: null,
+          voiceMinutesPerMonth: null,
+        });
+    });
+  });
+
+  it('sells by default, so revenue never stops by omission', () => {
+    const config = { get: () => undefined } as unknown as ConfigService;
+    const service = new EntitlementsService(
+      { findByUser: () => Promise.resolve(null) } as never,
+      {} as never,
+      {} as never,
+      { now: () => new Date() },
+      config,
+    );
+    expect(service.billingEnabled).toBe(true);
+    expect(() => service.assertBillingEnabled()).not.toThrow();
+    expect(service.effectiveLimits('free').studyMinutesPerDay).toBe(20);
   });
 
   it('keys the study day to the timezone the client last reported', async () => {

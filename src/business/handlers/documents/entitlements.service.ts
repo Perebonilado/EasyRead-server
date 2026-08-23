@@ -2,6 +2,7 @@ import { Inject, Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import type { PlanCode } from '../../../contracts';
 import { Entitlements } from '../../domain/entities/entitlements';
+import { ValidationError } from '../../domain/errors/errors';
 import {
   PLAN_LIMITS,
   UNLIMITED_LIMITS,
@@ -57,13 +58,40 @@ export class EntitlementsService implements OnModuleInit {
   private readonly tzOffsets = new Map<string, number>();
 
   /**
+   * Whether this deployment sells anything at all.
+   *
+   * On unless explicitly switched off, so revenue can never stop by
+   * omission — only by decision. With it off the product is wholly free:
+   * every ceiling is lifted and the endpoints that move money refuse.
+   */
+  get billingEnabled(): boolean {
+    return this.config.get<string>('BILLING_ENABLED') !== 'false';
+  }
+
+  /** Refuses the money-moving endpoints while the product is free. */
+  assertBillingEnabled(): void {
+    if (!this.billingEnabled) {
+      throw new ValidationError(
+        'EasiRead is free right now, so there is nothing to pay for',
+      );
+    }
+  }
+
+  /**
    * Testing switch: lifts every plan ceiling while leaving the plan itself
    * alone, so the app still reports "free" and the billing screens stay
    * honest. Off unless explicitly set, so it can't reach production by
    * omission — only by decision.
+   *
+   * A deployment with billing switched off is unlimited by definition:
+   * there is no upgrade to sell, so there is nothing a ceiling could do
+   * except stop someone using a product we are giving away.
    */
   private get unlimited(): boolean {
-    return this.config.get<string>('FREE_PLAN_UNLIMITED') === 'true';
+    return (
+      !this.billingEnabled ||
+      this.config.get<string>('FREE_PLAN_UNLIMITED') === 'true'
+    );
   }
 
   constructor(
@@ -77,7 +105,11 @@ export class EntitlementsService implements OnModuleInit {
   ) {}
 
   onModuleInit(): void {
-    if (this.unlimited) {
+    if (!this.billingEnabled) {
+      this.logger.warn(
+        'BILLING_ENABLED=false — the product is free: every limit is lifted and checkout is refused.',
+      );
+    } else if (this.unlimited) {
       this.logger.warn(
         'FREE_PLAN_UNLIMITED=true — every plan limit is lifted. Testing only.',
       );

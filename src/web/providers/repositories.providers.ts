@@ -5,6 +5,8 @@ import {
   PROFILE_CHANGE_REPOSITORY,
   AI_CALL_LOG_REPOSITORY,
   ASSESSMENT_REPOSITORY,
+  ITEM_REPOSITORY,
+  ITEM_REVIEW_REPOSITORY,
   LEARNER_PROFILE_REPOSITORY,
   DOCUMENT_PAGE_REPOSITORY,
   DOCUMENT_REPOSITORY,
@@ -37,6 +39,10 @@ import {
   SequelizeAssessmentRepository,
   SequelizeLearnerProfileRepository,
 } from '../repositories/sequelize-learning.repositories';
+import {
+  SequelizeItemRepository,
+  SequelizeItemReviewRepository,
+} from '../repositories/sequelize-item.repositories';
 import { SequelizeChatRepository } from '../repositories/sequelize-chat.repository';
 import { SequelizeNoteRepository } from '../repositories/sequelize-note.repository';
 import { SequelizeGroupRepository } from '../repositories/sequelize-group.repository';
@@ -123,6 +129,8 @@ export const repositoryProviders: Provider[] = [
   },
   { provide: AI_CALL_LOG_REPOSITORY, useClass: SequelizeAiCallLogRepository },
   { provide: ASSESSMENT_REPOSITORY, useClass: SequelizeAssessmentRepository },
+  { provide: ITEM_REPOSITORY, useClass: SequelizeItemRepository },
+  { provide: ITEM_REVIEW_REPOSITORY, useClass: SequelizeItemReviewRepository },
   {
     provide: DOCUMENT_LEARNING_STATE_REPOSITORY,
     useClass: SequelizeDocumentLearningStateRepository,

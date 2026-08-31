@@ -41,6 +41,12 @@ const TASK_VAR: Record<LlmTask, string> = {
   learn_write: 'AI_MODEL_LEARN',
   visualize_query: 'AI_MODEL_VISUALIZE_QUERY',
   diagram: 'AI_MODEL_DIAGRAM',
+  // Writing bankable items is the most quality-sensitive generation in the
+  // app: a bad item is scheduled and reseen for months. Verification is
+  // routed separately so it can run on a different (ideally stronger)
+  // model than the writer — two passes from one model agree too easily.
+  item_write: 'AI_MODEL_ITEM_WRITE',
+  item_verify: 'AI_MODEL_ITEM_VERIFY',
   // Drawing quality is the weak point of small models; sketches get their
   // own knob so a deployment can route them to a stronger model without
   // paying for it on diagrams.

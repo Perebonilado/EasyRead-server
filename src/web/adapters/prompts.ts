@@ -520,6 +520,50 @@ export const PROMPTS = {
   ].join(' '),
 
   /**
+   * Banked items: written to be scheduled and reseen, not shown once.
+   */
+  itemWrite: [
+    'You write exam-quality questions from one passage of a study document,',
+    'grounded ONLY in that passage. Never use outside knowledge, and never',
+    'write a question the passage does not answer.',
+    'Keep technical terms, names and numbers exactly as the document writes',
+    'them. Distractors must be plausible claims from the same material,',
+    'wrong for a reason a careful reader could name — never absurd, never',
+    'obviously padded, and never longer than the correct answer.',
+    'Vary what you test: some questions on stated facts, some on inferences',
+    'the passage supports, some on the relationship between two ideas.',
+    '`explanation` says why the right answer is right in one sentence.',
+    '`hint` points towards the idea without naming the answer, or is null.',
+    '`sourceQuote` is the sentence from the passage the question rests on,',
+    'copied verbatim.',
+    'For a `cloze` item, take a sentence from the passage verbatim, blank',
+    'ONE load-bearing term with "_____", and make that term the answer.',
+    'For a `flashcard`, supply exactly one option: the answer.',
+  ].join(' '),
+
+  /**
+   * The verification pass, and the reason this engine can be trusted.
+   *
+   * Deliberately blind: it is never told which answer the writer intended,
+   * so agreement is evidence rather than assent. Its own answer and a
+   * verbatim quote are what a question needs to survive.
+   */
+  itemVerify: [
+    'You are checking one exam question against the passage it claims to',
+    'come from. You have NOT been told which answer is intended.',
+    'Read the passage. Answer the question yourself using ONLY the passage.',
+    'Set `answerIndex` to the option you believe is correct, or -1 if the',
+    'passage does not answer the question at all.',
+    'Set `quote` to the sentence from the passage that supports your',
+    'answer, copied VERBATIM, or null if there is none.',
+    'Set `supported` true only when the passage genuinely settles the',
+    'question on its own. If answering needs outside knowledge, or the',
+    'passage is ambiguous between two options, set it false.',
+    'Be strict. A question that survives this check will be shown to a',
+    'student as fact.',
+  ].join(' '),
+
+  /**
    * The visual-scaffold check (P6): the diagram prompt's discipline, plus a
    * deliberate hole. One node is the question; the options are the answers.
    */

@@ -912,3 +912,56 @@ export type GroupDetailDto = {
   plan: GroupPlanDto;
   liveSession: StudySessionDto | null;
 };
+
+// ── Testing engine ───────────────────────────────────────────────────────────
+
+export type ItemKindDto =
+  'mcq' | 'flashcard' | 'cloze' | 'true_false' | 'short';
+
+/**
+ * One question as the client sees it — stem and options only.
+ *
+ * The answer key is deliberately absent: it arrives with the response to an
+ * answer, so no amount of reading the page reveals it beforehand.
+ */
+export type QueuedItemDto = {
+  id: string;
+  documentId: string;
+  documentTitle: string;
+  topicId: string | null;
+  kind: ItemKindDto;
+  stem: string;
+  options: string[];
+  hint: string | null;
+  /** True the first time this reader meets the item. */
+  isNew: boolean;
+};
+
+export type ReviewQueueResponse = {
+  items: QueuedItemDto[];
+  due: number;
+  documents: number;
+  /** Across the whole due set, not just the page of items returned. */
+  newCount: number;
+  byDocument: { title: string; count: number }[];
+  nextDueAt: string | null;
+  estimatedMinutes: number;
+};
+
+export type GenerateItemsResponse = {
+  created: number;
+  discarded: number;
+  /** The questions just written, ready to be taken as their own test. */
+  items: QueuedItemDto[];
+};
+
+export type AnswerItemResponse = {
+  correct: boolean;
+  correctIndex: number;
+  explanation: string;
+  /** The sentence the verifier matched, for "where did this come from". */
+  groundingQuote: string | null;
+  sourcePage: number | null;
+  dueAt: string;
+  intervalDays: number;
+};

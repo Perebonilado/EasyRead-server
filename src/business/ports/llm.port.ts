@@ -26,10 +26,31 @@ export type LlmTask =
   | 'diagram'
   | 'sketch'
   | 'topic_quiz'
+  | 'item_write'
+  | 'item_verify'
   | 'preview'
   | 'recall_grade'
   | 'question_check'
   | 'embed';
+
+export interface GeneratedItem {
+  kind: 'mcq' | 'flashcard' | 'cloze' | 'true_false';
+  stem: string;
+  options: string[];
+  correctIndex: number;
+  explanation: string;
+  hint: string | null;
+  topicTitle: string | null;
+  sourceQuote: string | null;
+}
+
+export interface ItemVerdict {
+  /** The verifier's own answer, or -1 for "the passage does not say". */
+  answerIndex: number;
+  /** Verbatim sentence supporting that answer, when there is one. */
+  quote: string | null;
+  supported: boolean;
+}
 
 export interface LlmUsage {
   model: string;
@@ -202,6 +223,46 @@ export interface LlmGatewayPort {
       }[];
     }>
   >;
+
+  /**
+   * Writes bankable items from one passage.
+   *
+   * Unlike `generateTopicQuiz`, these are stored, scheduled and reseen, so
+   * they carry a hint, a topic label and the source sentence they rest on.
+   * Nothing written here is trusted until `verifyItem` has seen it.
+   */
+  generateItems(input: {
+    topicTitle: string;
+    pagesText: string;
+    summary: string | null;
+    kind: 'mcq' | 'flashcard' | 'cloze' | 'true_false' | 'mixed';
+    count: number;
+    /** Questions already banked for this document, so it writes new ones. */
+    avoidStems?: string[];
+    /**
+     * A sentence the reader highlighted. When present the item must be
+     * built from THIS sentence rather than the passage at large — which is
+     * what turns highlighting, otherwise a famously passive habit, into
+     * something that comes back.
+     */
+    fromQuote?: string;
+    /** Ideas the reader keeps missing; weights the batch towards them. */
+    focus?: string[];
+  }): Promise<LlmResult<GeneratedItem[]>>;
+
+  /**
+   * Independently answers one item from its source, having NOT been told
+   * the intended answer.
+   *
+   * The blindness is the point: an item is banked only when this pass
+   * arrives at the same answer and can quote the sentence that settles it.
+   * It is what keeps a hallucinated question away from a student.
+   */
+  verifyItem(input: {
+    stem: string;
+    options: string[];
+    pagesText: string;
+  }): Promise<LlmResult<ItemVerdict>>;
 
   /**
    * A chapter preview written to aid comprehension (guided reading) — the

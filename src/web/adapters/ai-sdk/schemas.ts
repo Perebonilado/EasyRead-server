@@ -125,6 +125,43 @@ export const topicQuizSchema = z.object({
  * A chapter preview written for comprehension (guided reading) — the skim
  * ritual's material, generated once per topic and cached.
  */
+/**
+ * A generated batch. Wider than `topicQuizSchema` because these items are
+ * banked and scheduled rather than shown once: they carry a hint, a topic
+ * label, and the source sentence the writer worked from.
+ */
+export const itemBatchSchema = z.object({
+  items: z
+    .array(
+      z.object({
+        kind: z.enum(['mcq', 'flashcard', 'cloze', 'true_false']),
+        stem: z.string().min(1).max(400),
+        options: z.array(z.string().min(1).max(200)).min(1).max(4),
+        correctIndex: z.number().int().min(0),
+        explanation: z.string().min(1).max(400),
+        hint: z.string().max(200).nullable(),
+        topicTitle: z.string().max(120).nullable(),
+        sourceQuote: z.string().max(400).nullable(),
+      }),
+    )
+    .min(1)
+    .max(12),
+});
+
+/**
+ * The verifier's answer, produced WITHOUT being told the intended one.
+ *
+ * `answerIndex` is the option the verifier believes is correct reading only
+ * the source; `quote` must be copied verbatim from that source. An item is
+ * banked only when this answer matches its author's and a quote came back,
+ * which is what stops a hallucinated question reaching a student.
+ */
+export const itemVerdictSchema = z.object({
+  answerIndex: z.number().int().min(-1),
+  quote: z.string().max(400).nullable(),
+  supported: z.boolean(),
+});
+
 export const previewSchema = z.object({
   about: z.string().min(1).max(600),
   outline: z.array(z.string().min(1).max(200)).min(2).max(10),

@@ -77,6 +77,12 @@ import {
   ListRecapsHandler,
 } from './business/handlers/documents/recap.handlers';
 import {
+  AnswerItemHandler,
+  GenerateItemsHandler,
+  ReviewQueueHandler,
+} from './business/handlers/items/item.handlers';
+import { ItemsController } from './web/controllers/items.controller';
+import {
   CheckQuestionAnswerHandler,
   GetTopicPreviewHandler,
   GradeRecallHandler,
@@ -205,6 +211,9 @@ const handlers = [
   ListAllNotesHandler,
   CreateRecapHandler,
   ListRecapsHandler,
+  GenerateItemsHandler,
+  ReviewQueueHandler,
+  AnswerItemHandler,
   GetTopicPreviewHandler,
   GradeRecallHandler,
   CheckQuestionAnswerHandler,
@@ -242,7 +251,12 @@ const queries = [
     ConfigModule.forRoot({ isGlobal: true }),
     // A blunt per-IP ceiling. The real spend controls are the plan limits;
     // this is only here to blunt credential stuffing and scripted abuse.
-    ThrottlerModule.forRoot([{ ttl: 60_000, limit: 120 }]),
+    // 600/min, not 120: this app is chatty by design (study heartbeats,
+    // review answers, parallel panels), and a per-IP ceiling is shared by
+    // everyone behind one NAT — a classroom on school wifi is one IP. At
+    // 120, heavy legitimate use tripped 429s, and a throttled /auth/refresh
+    // used to read as "session dead" and log the reader out mid-test.
+    ThrottlerModule.forRoot([{ ttl: 60_000, limit: 600 }]),
     CoreModule,
   ],
   controllers: [
@@ -258,6 +272,7 @@ const queries = [
     GroupsController,
     NotebookController,
     RecapsController,
+    ItemsController,
     ImportController,
     LearnController,
     ConceptsController,

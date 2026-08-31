@@ -1,5 +1,7 @@
 export { AiCallLogModel } from './ai-call-log.model';
 export { AssessmentEventModel } from './assessment-event.model';
+export { ItemModel } from './item.model';
+export { ItemReviewModel } from './item-review.model';
 export { ChatMessageModel } from './chat-message.model';
 export { ConceptKnowledgeModel } from './concept-knowledge.model';
 export { TopicPrerequisiteModel } from './topic-prerequisite.model';
@@ -36,6 +38,8 @@ export { WebhookEventModel } from './webhook-event.model';
 
 import { AiCallLogModel } from './ai-call-log.model';
 import { AssessmentEventModel } from './assessment-event.model';
+import { ItemModel } from './item.model';
+import { ItemReviewModel } from './item-review.model';
 import { ChatMessageModel } from './chat-message.model';
 import { ConceptKnowledgeModel } from './concept-knowledge.model';
 import { TopicPrerequisiteModel } from './topic-prerequisite.model';
@@ -94,6 +98,8 @@ export const ALL_MODELS = [
   DocumentChunkModel,
   AiCallLogModel,
   AssessmentEventModel,
+  ItemModel,
+  ItemReviewModel,
   LearnerProfileModel,
   ProfileChangeModel,
   StruggleSignalModel,

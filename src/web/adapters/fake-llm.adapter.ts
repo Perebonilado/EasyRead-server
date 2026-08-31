@@ -5,6 +5,8 @@ import { createHash } from 'crypto';
 import { Injectable } from '@nestjs/common';
 import type { Block, RecapBody, TopicPreviewBody } from '../../contracts';
 import type {
+  GeneratedItem,
+  ItemVerdict,
   LlmGatewayPort,
   LlmResult,
   TopicDraft,
@@ -434,6 +436,80 @@ export class FakeLlmAdapter implements LlmGatewayPort {
       usage: {
         model: 'fake',
         tokensIn: topicTitle.length,
+        tokensOut: 0,
+        latencyMs: Date.now() - started,
+      },
+    };
+  }
+
+  async generateItems({
+    topicTitle,
+    kind,
+    count,
+  }: {
+    topicTitle: string;
+    pagesText: string;
+    summary: string | null;
+    kind: 'mcq' | 'flashcard' | 'cloze' | 'true_false' | 'mixed';
+    count: number;
+    avoidStems?: string[];
+    focus?: string[];
+    fromQuote?: string;
+  }): Promise<LlmResult<GeneratedItem[]>> {
+    const started = Date.now();
+    const resolved = kind === 'mixed' ? 'mcq' : kind;
+    const items: GeneratedItem[] = Array.from(
+      { length: Math.max(1, count) },
+      (_, index) => ({
+        kind: resolved,
+        stem: `Fake item ${index + 1} about ${topicTitle}?`,
+        options:
+          resolved === 'flashcard'
+            ? ['The answer']
+            : ['Right answer', 'Wrong one', 'Also wrong'],
+        correctIndex: 0,
+        explanation: 'The first option restates the chapter.',
+        hint: 'Think about the chapter title.',
+        topicTitle,
+        sourceQuote: 'A sentence from the fake chapter.',
+      }),
+    );
+    return {
+      value: items,
+      usage: {
+        model: 'fake',
+        tokensIn: topicTitle.length,
+        tokensOut: 0,
+        latencyMs: Date.now() - started,
+      },
+    };
+  }
+
+  /**
+   * Agrees with option 0, which is what the fake writer marks correct — so
+   * the local pipeline banks items end to end. A stem containing
+   * "unverifiable" is refused instead, so the discard path is exercisable
+   * without a real model.
+   */
+  async verifyItem({
+    stem,
+    options,
+  }: {
+    stem: string;
+    options: string[];
+    pagesText: string;
+  }): Promise<LlmResult<ItemVerdict>> {
+    const started = Date.now();
+    const refuse = stem.toLowerCase().includes('unverifiable');
+    return {
+      value: {
+        answerIndex: refuse ? -1 : 0,
+        quote: refuse ? null : 'A sentence from the fake chapter.',
+        supported: !refuse && options.length > 0,
+      },
+      usage: {
+        model: 'fake',
+        tokensIn: stem.length,
         tokensOut: 0,
         latencyMs: Date.now() - started,
       },

@@ -3,6 +3,8 @@ import { ConfigService } from '@nestjs/config';
 import type { LanguageModelUsage } from 'ai';
 import type { Block, RecapBody, TopicPreviewBody } from '../../../contracts';
 import type {
+  GeneratedItem,
+  ItemVerdict,
   LlmGatewayPort,
   LlmResult,
   LlmTask,
@@ -16,6 +18,8 @@ import {
   diagramClozeSchema,
   diagramSchema,
   sketchSchema,
+  itemBatchSchema,
+  itemVerdictSchema,
   topicQuizSchema,
   previewSchema,
   recallGradeSchema,
@@ -503,6 +507,104 @@ export class AiSdkLlmAdapter implements LlmGatewayPort, OnModuleInit {
 
     return {
       value: { questions },
+      usage: this.usage(ref, result.usage, started),
+    };
+  }
+
+  async generateItems(input: {
+    topicTitle: string;
+    pagesText: string;
+    summary: string | null;
+    kind: 'mcq' | 'flashcard' | 'cloze' | 'true_false' | 'mixed';
+    count: number;
+    avoidStems?: string[];
+    focus?: string[];
+    fromQuote?: string;
+  }): Promise<LlmResult<GeneratedItem[]>> {
+    const started = Date.now();
+    const { generateObject } = await this.registry.modules();
+    const { model, ref } = await this.registry.languageModel('item_write');
+
+    const result = await generateObject({
+      model,
+      schema: itemBatchSchema,
+      system: PROMPTS.itemWrite,
+      prompt: [
+        input.summary ? `Document summary:\n${input.summary}` : null,
+        `Chapter: ${input.topicTitle}`,
+        `Write ${input.count} items.`,
+        input.kind === 'mixed'
+          ? 'Mix the kinds: mostly mcq, with some cloze and true_false.'
+          : `Every item must be of kind "${input.kind}".`,
+        input.fromQuote
+          ? [
+              'Build every item from THIS sentence, which the reader',
+              'highlighted. Do not range across the rest of the passage:',
+              `\n"${input.fromQuote}"`,
+            ].join(' ')
+          : null,
+        input.focus?.length
+          ? 'Aim most items at these ideas, which the reader keeps missing:\n- ' +
+            input.focus.join('\n- ')
+          : null,
+        // Cheaper and more reliable than asking it to remember: the stems
+        // it must not rewrite are listed outright.
+        input.avoidStems?.length
+          ? 'Do NOT rewrite any of these existing questions:\n- ' +
+            input.avoidStems.slice(0, 40).join('\n- ')
+          : null,
+        `The passage:\n${input.pagesText}`,
+      ]
+        .filter(Boolean)
+        .join('\n\n'),
+      maxRetries: this.maxRetries(),
+    });
+
+    // Clamp schema-legal lies, as the quiz path does.
+    const items = result.object.items.map((item) => ({
+      ...item,
+      correctIndex: Math.min(
+        Math.max(0, item.correctIndex),
+        item.options.length - 1,
+      ),
+    }));
+
+    return { value: items, usage: this.usage(ref, result.usage, started) };
+  }
+
+  async verifyItem(input: {
+    stem: string;
+    options: string[];
+    pagesText: string;
+  }): Promise<LlmResult<ItemVerdict>> {
+    const started = Date.now();
+    const { generateObject } = await this.registry.modules();
+    const { model, ref } = await this.registry.languageModel('item_verify');
+
+    const result = await generateObject({
+      model,
+      schema: itemVerdictSchema,
+      system: PROMPTS.itemVerify,
+      // The intended answer is deliberately absent from this prompt.
+      prompt: [
+        `Passage:\n${input.pagesText}`,
+        `Question: ${input.stem}`,
+        'Options:',
+        input.options.map((option, i) => `${i}. ${option}`).join('\n'),
+      ].join('\n\n'),
+      maxRetries: this.maxRetries(),
+    });
+
+    const verdict = result.object;
+    return {
+      value: {
+        ...verdict,
+        // Out-of-range means "no opinion", never a coincidental match.
+        answerIndex:
+          verdict.answerIndex >= input.options.length
+            ? -1
+            : verdict.answerIndex,
+      },
       usage: this.usage(ref, result.usage, started),
     };
   }

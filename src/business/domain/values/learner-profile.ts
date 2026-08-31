@@ -72,13 +72,14 @@ const INTERACTIVITY: Record<
 };
 
 /**
- * Spoken lessons must not stall. Stated as its own standing order rather
- * than folded into a dial, because it holds at EVERY pace: the complaint it
- * answers was a tutor finishing a thought and waiting, sometimes for
- * minutes, until the student said "go on". Never again.
+ * Check-ins must sound human whatever the dials say. The continuation
+ * order that used to live here ("keep teaching continuously, never stop")
+ * moved into the teach-mode instructions, where the auto-continue engine
+ * exists to honour it — here it reached Q&A calls with no engine, and
+ * worse, it taught the tutor to talk through its own questions.
  */
-const KEEP_TEACHING =
-  'Keep teaching continuously. When you finish an idea, carry straight on to the next one: never stop and wait for the student to prompt you, and never ask permission to continue. Pause only when you have explicitly asked them a question. When you do check in, use your own words and vary them; repeating one stock phrase like "are you still with me" makes you sound like a recording.';
+const NATURAL_CHECKS =
+  'When you check in or ask anything, use your own words and vary them; repeating one stock phrase like "are you still with me" makes you sound like a recording. After you ask, stop speaking and give them real time.';
 
 export function profileInstructions(
   profile: LearnerProfileRecord,
@@ -91,7 +92,7 @@ export function profileInstructions(
     `- ${PACE[register][profile.pace]}`,
     `- ${DEPTH[register][profile.depth]}`,
     `- ${INTERACTIVITY[register][profile.interactivity]}`,
-    register === 'spoken' ? `- ${KEEP_TEACHING}` : null,
+    register === 'spoken' ? `- ${NATURAL_CHECKS}` : null,
     profile.styleNotes
       ? register === 'spoken'
         ? `- Observed: ${profile.styleNotes}`

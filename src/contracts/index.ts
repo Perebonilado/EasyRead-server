@@ -515,8 +515,8 @@ export type VoiceMode = 'chat' | 'teach';
  * UI lives. Names are contract: both sides match on them.
  */
 export const TEACH_TOOLS = {
-  GO_TO_PAGE: 'go_to_page',
   REVEAL_POINT: 'reveal_point',
+  GO_TO_PAGE: 'go_to_page',
   END_LESSON: 'end_lesson',
   SHOW_IMAGES: 'show_images',
   DRAW_DIAGRAM: 'draw_diagram',

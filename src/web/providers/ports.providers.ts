@@ -26,7 +26,7 @@ import { DriveConverterAdapter } from '../adapters/drive-converter.adapter';
 import { DriveStorageAdapter } from '../adapters/drive-storage.adapter';
 import { FakeLlmAdapter } from '../adapters/fake-llm.adapter';
 import { FakePaymentsAdapter } from '../adapters/fake-payments.adapter';
-import { PaddlePaymentsAdapter } from '../adapters/paddle-payments.adapter';
+import { StripePaymentsAdapter } from '../adapters/stripe-payments.adapter';
 import { GoogleDriveClient } from '../adapters/google-drive.client';
 import { GoogleImageSearchAdapter } from '../adapters/google-image-search.adapter';
 import { LocalStorageAdapter } from '../adapters/local-storage.adapter';
@@ -90,20 +90,20 @@ export const portProviders: Provider[] = [
   ElevenLabsSpeechAdapter,
   ElevenLabsRealtimeAdapter,
 
-  // Payments are stubbed until billing lands.
   {
     provide: PAYMENTS,
     inject: [ConfigService],
     useFactory: (config: ConfigService) => {
-      // Paddle only when it is actually configured; otherwise the local
+      // Stripe only when it is actually configured; otherwise the local
       // driver, so a missing key can never quietly mean "nobody is charged".
-      const live =
-        config.get('PADDLE_API_KEY') && config.get('PADDLE_PRICE_MONTHLY');
-      if (live) {
+      // Test and live keys are told apart by their own prefix, so the mode
+      // is never a second variable that can disagree with the key.
+      const key = config.get<string>('STRIPE_SECRET_KEY');
+      if (key && config.get('STRIPE_PRICE_MONTHLY')) {
         logger.log(
-          `Payments: paddle (${config.get('PADDLE_ENV') ?? 'sandbox'})`,
+          `Payments: stripe (${key.startsWith('sk_live') ? 'live' : 'test'})`,
         );
-        return new PaddlePaymentsAdapter(config);
+        return new StripePaymentsAdapter(config);
       }
       logger.warn('Payments: fake driver, no checkout will charge anyone');
       return new FakePaymentsAdapter();

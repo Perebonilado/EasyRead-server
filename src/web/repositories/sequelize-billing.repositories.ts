@@ -53,10 +53,24 @@ export class SequelizeSubscriptionRepository implements SubscriptionRepository {
     return row ? this.toRecord(row) : null;
   }
 
-  async upsert(record: SubscriptionRecord & { raw?: unknown }): Promise<void> {
+  async upsert(
+    record: SubscriptionRecord & { raw?: unknown },
+  ): Promise<boolean> {
     const existing = await this.model.findOne({
       where: { userId: record.userId },
     });
+
+    // An event that happened before the one already applied is stale:
+    // gateways reorder deliveries, and letting a late "incomplete" land on
+    // top of an applied "active" would take Pro from someone who just paid.
+    if (
+      existing?.lastEventAt &&
+      record.lastEventAt &&
+      record.lastEventAt < existing.lastEventAt
+    ) {
+      return false;
+    }
+
     const values = {
       provider: record.provider,
       planCode: record.planCode,
@@ -67,6 +81,7 @@ export class SequelizeSubscriptionRepository implements SubscriptionRepository {
       currentPeriodEnd: record.currentPeriodEnd,
       cancelAtPeriodEnd: record.cancelAtPeriodEnd,
       raw: record.raw ?? null,
+      lastEventAt: record.lastEventAt ?? existing?.lastEventAt ?? null,
     };
     if (existing) await existing.update(values);
     else
@@ -75,6 +90,7 @@ export class SequelizeSubscriptionRepository implements SubscriptionRepository {
         userId: record.userId,
         ...values,
       });
+    return true;
   }
 }
 

@@ -6,15 +6,15 @@ import type {
 import type { CreditBundle } from '../domain/values';
 
 /**
- * How the client opens checkout.
+ * How the client opens checkout: a hosted page to send the customer to.
  *
- * Paddle mints a transaction its in-page overlay opens; Stripe returns a
- * hosted URL to redirect to. Both shapes live here so the gateway can be
- * swapped without the client learning a new contract.
+ * The gateway's own page collects the card, so no payment script and no
+ * card field ever exists in our client — which is most of what keeps this
+ * integration out of PCI scope.
  */
-export type CheckoutIntent =
-  | { kind: 'overlay'; transactionId: string }
-  | { kind: 'redirect'; url: string };
+export interface CheckoutIntent {
+  url: string;
+}
 
 /** A subscription as this codebase understands it, whoever is billing it. */
 export interface GatewaySubscription {
@@ -50,10 +50,10 @@ export interface GatewayWebhookEvent {
 /**
  * Everything the app needs from a payment gateway, in the app's own words.
  *
- * Deliberately free of Paddle vocabulary: EasiRead launches on Paddle
- * because it is a merchant of record and takes sellers outside Stripe's
- * supported countries, and is expected to move to Stripe once a US entity
- * exists. Only the adapter should have to change.
+ * Deliberately free of any gateway's vocabulary. EasiRead has already been
+ * through three of them — Paddle, then Inflow, now Stripe — and each move
+ * cost one adapter and no changes above this line. That is the whole point
+ * of the interface; keep it that way.
  */
 export interface PaymentsPort {
   /** Recorded on the subscription row, so a migration can tell rows apart. */
@@ -76,14 +76,18 @@ export interface PaymentsPort {
   }): Promise<CheckoutIntent>;
 
   /**
-   * Verifies the signature over the RAW body and parses the result. Returns
-   * null when the signature does not check out, so a caller that forgets to
-   * verify cannot exist.
+   * Verifies the signature over the RAW body and parses the result.
+   *
+   * Takes the whole (lowercased) header map because gateways disagree on
+   * where the signature lives. Returns null when the signature does not
+   * check out, so a caller that forgets to verify cannot exist; a verified
+   * body yields an array because some gateways batch several events into
+   * one delivery. Async because attributing an event can take a lookup.
    */
   verifyAndParseWebhook(
     rawBody: Buffer,
-    signature: string | undefined,
-  ): GatewayWebhookEvent | null;
+    headers: Record<string, string | undefined>,
+  ): Promise<GatewayWebhookEvent[] | null>;
 
   fetchSubscription(
     providerSubscriptionId: string,

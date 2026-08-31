@@ -9,7 +9,7 @@ import type {
 } from '../../business/ports/payments.port';
 
 /**
- * Local billing, bound whenever Paddle is not configured.
+ * Local billing, bound whenever no real gateway is configured.
  *
  * Checkout returns a redirect back into the frontend's own return handler so
  * the post-payment states can be exercised without a gateway. Webhooks are
@@ -31,7 +31,6 @@ export class FakePaymentsAdapter implements PaymentsPort {
       `[checkout] ${input.email} -> pro/${input.interval} (${reference})`,
     );
     return Promise.resolve({
-      kind: 'redirect',
       url: `/billing?status=simulated&reference=${reference}`,
     });
   }
@@ -43,14 +42,13 @@ export class FakePaymentsAdapter implements PaymentsPort {
   }): Promise<CheckoutIntent> {
     this.logger.log(`[credits] ${input.email} -> ${input.bundle}`);
     return Promise.resolve({
-      kind: 'redirect',
       url: `/billing?status=simulated&credits=${input.bundle}`,
     });
   }
 
-  verifyAndParseWebhook(): GatewayWebhookEvent | null {
+  verifyAndParseWebhook(): Promise<GatewayWebhookEvent[] | null> {
     this.logger.warn('Webhook received with no payment gateway configured');
-    return null;
+    return Promise.resolve(null);
   }
 
   fetchSubscription(): Promise<GatewaySubscription | null> {

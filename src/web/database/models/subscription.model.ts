@@ -26,9 +26,9 @@ export class SubscriptionModel extends BaseModel {
   declare user?: UserModel;
 
   @Column({
-    type: DataType.ENUM('paddle', 'stripe', 'paystack', 'fake'),
+    type: DataType.STRING(32),
     allowNull: false,
-    defaultValue: 'paddle',
+    defaultValue: 'stripe',
   })
   declare provider: string;
 
@@ -70,4 +70,12 @@ export class SubscriptionModel extends BaseModel {
 
   @Column({ type: DataType.JSON, allowNull: true })
   declare raw: unknown;
+
+  /**
+   * When the gateway event that last wrote this row happened — not when we
+   * wrote it. Gateways do not guarantee delivery order, so this is what
+   * lets a stale event be recognised and dropped.
+   */
+  @Column({ type: DataType.DATE, allowNull: true })
+  declare lastEventAt: Date | null;
 }

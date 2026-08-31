@@ -436,9 +436,9 @@ export type StudySnapshot = {
 export type BillingInterval = 'monthly' | 'yearly';
 
 /**
- * Normalised across gateways. Paddle, Stripe and Paystack each name these
- * differently; the server maps into this set so nothing downstream has to
- * know which provider is bound.
+ * Normalised across gateways. Every provider names these differently; the
+ * server maps into this set so nothing downstream has to know which one is
+ * bound.
  */
 export type SubscriptionStatus =
   'active' | 'trialing' | 'past_due' | 'paused' | 'cancelled' | 'expired';
@@ -494,13 +494,12 @@ export type SubscriptionResponse = {
 };
 
 /**
- * How the client should open checkout. Paddle hands back a transaction the
- * in-page overlay opens; Stripe would hand back a URL to redirect to. The
- * client branches on `kind`, so swapping gateways doesn't change its shape.
+ * Where to send the customer to pay.
+ *
+ * Always a hosted page on the gateway's own domain, so no payment script
+ * and no card field ever loads in our client.
  */
-export type CheckoutResponse =
-  | { kind: 'overlay'; transactionId: string }
-  | { kind: 'redirect'; url: string };
+export type CheckoutResponse = { url: string };
 
 /** The gateway's own billing management page, for cards and invoices. */
 export type PortalResponse = { url: string | null };

@@ -1,7 +1,10 @@
 import { Inject, Injectable } from '@nestjs/common';
 import { CLOCK, PAYMENTS } from '../../ports/tokens';
 import type { ClockPort } from '../../ports/clock.port';
-import type { PaymentsPort } from '../../ports/payments.port';
+import type {
+  GatewayWebhookEvent,
+  PaymentsPort,
+} from '../../ports/payments.port';
 import {
   SUBSCRIPTION_REPOSITORY,
   USER_REPOSITORY,
@@ -19,7 +22,8 @@ import { CommandResponse } from '../response/CommandResponse';
 
 export interface HandleWebhookRequest {
   rawBody: Buffer;
-  signature: string | undefined;
+  /** The delivery's headers, lowercased: gateways sign in different ones. */
+  headers: Record<string, string | undefined>;
 }
 
 /** What the controller turns into a status code. */
@@ -64,22 +68,36 @@ export class HandleWebhookHandler extends AbstractRequestHandlerTemplate<
   protected async handleRequest(
     cmd: HandleWebhookRequest,
   ): Promise<CommandResponse<WebhookOutcome>> {
-    const event = this.payments.verifyAndParseWebhook(
+    const events = await this.payments.verifyAndParseWebhook(
       cmd.rawBody,
-      cmd.signature,
+      cmd.headers,
     );
-    if (!event) {
+    if (!events) {
       // Loud on purpose: the gateway sees a 200 either way, so this line is
       // the only trace that a secret mismatch is silently dropping events.
       this.logger.warn(
-        'Webhook refused: signature did not verify. Check that PADDLE_WEBHOOK_SECRET matches the notification destination for THIS server.',
+        'Webhook refused: signature did not verify. STRIPE_WEBHOOK_SECRET must be the signing secret of the endpoint that sent this request — each endpoint has its own, and the one `stripe listen` prints is different from the one the dashboard shows.',
       );
       return CommandResponse.of({ accepted: false, reason: 'bad_signature' });
     }
+
+    // Some gateways batch several events into one delivery; each is claimed
+    // and applied on its own, so a redelivered batch skips exactly the
+    // events that already landed.
+    for (const event of events) {
+      await this.applyEvent(event);
+    }
+    return CommandResponse.of({
+      accepted: true,
+      reason: events.length === 0 ? 'empty' : undefined,
+    });
+  }
+
+  private async applyEvent(event: GatewayWebhookEvent): Promise<void> {
     this.logger.log(`Webhook ${event.type} (${event.id}) verified`);
 
     const provider = this.payments.provider;
-    // The payload column refuses null, and transaction events carry no
+    // The payload column refuses null, and payment events carry no
     // subscription; the type alone still leaves a usable audit trail.
     const fresh = await this.events.claim(
       provider,
@@ -87,9 +105,9 @@ export class HandleWebhookHandler extends AbstractRequestHandlerTemplate<
       event.type,
       event.subscription ?? { type: event.type },
     );
-    // A redelivery of something already applied. Answering ok stops the
-    // gateway retrying forever.
-    if (!fresh) return CommandResponse.of({ accepted: true, reason: 'replay' });
+    // A redelivery of something already applied. Skipping quietly is what
+    // stops the gateway retrying forever.
+    if (!fresh) return;
 
     if (event.subscription) {
       const userId = await this.resolveUserId(event.userId, event.subscription);
@@ -98,10 +116,10 @@ export class HandleWebhookHandler extends AbstractRequestHandlerTemplate<
           `${provider} event ${event.id} (${event.type}) names no known user`,
         );
         await this.events.markProcessed(provider, event.id, this.clock.now());
-        return CommandResponse.of({ accepted: true, reason: 'no_user' });
+        return;
       }
 
-      await this.subscriptions.upsert({
+      const written = await this.subscriptions.upsert({
         userId,
         provider,
         planCode: event.subscription.planCode,
@@ -112,10 +130,13 @@ export class HandleWebhookHandler extends AbstractRequestHandlerTemplate<
         currentPeriodEnd: event.subscription.currentPeriodEnd,
         cancelAtPeriodEnd: event.subscription.cancelAtPeriodEnd,
         raw: event.subscription,
+        lastEventAt: event.occurredAt,
       });
 
       this.logger.log(
-        `${event.type}: ${userId} -> ${event.subscription.planCode}/${event.subscription.status}`,
+        written
+          ? `${event.type}: ${userId} -> ${event.subscription.planCode}/${event.subscription.status}`
+          : `${event.type}: ignored, older than the state already applied for ${userId}`,
       );
     }
 
@@ -135,7 +156,6 @@ export class HandleWebhookHandler extends AbstractRequestHandlerTemplate<
     }
 
     await this.events.markProcessed(provider, event.id, this.clock.now());
-    return CommandResponse.of({ accepted: true });
   }
 
   /**

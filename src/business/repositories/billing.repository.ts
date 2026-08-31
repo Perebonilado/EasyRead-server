@@ -15,12 +15,19 @@ export interface SubscriptionRecord {
   status: SubscriptionStatus;
   currentPeriodEnd: Date | null;
   cancelAtPeriodEnd: boolean;
+  /** When the gateway event behind this state happened. */
+  lastEventAt?: Date | null;
 }
 
 export interface SubscriptionRepository {
   findByUser(userId: string): Promise<SubscriptionRecord | null>;
   findByProviderSubscriptionId(id: string): Promise<SubscriptionRecord | null>;
-  upsert(record: SubscriptionRecord & { raw?: unknown }): Promise<void>;
+  /**
+   * Writes the row, unless `lastEventAt` shows this state is older than what
+   * is already stored — gateways redeliver and reorder, and an out-of-order
+   * event must never undo a newer one. Returns false when it was skipped.
+   */
+  upsert(record: SubscriptionRecord & { raw?: unknown }): Promise<boolean>;
 }
 
 export interface UsageRepository {

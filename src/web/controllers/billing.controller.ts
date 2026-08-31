@@ -2,8 +2,8 @@ import {
   Body,
   Controller,
   Delete,
-  Headers,
   HttpCode,
+  Logger,
   Post,
   Req,
 } from '@nestjs/common';
@@ -37,6 +37,8 @@ import { BuyCreditsDto, StartCheckoutDto } from '../validation/billing.dto';
  */
 @Controller('billing')
 export class BillingController {
+  private readonly logger = new Logger(BillingController.name);
+
   constructor(
     private readonly startCheckout: StartCheckoutHandler,
     private readonly startCreditCheckout: StartCreditCheckoutHandler,
@@ -124,16 +126,28 @@ export class BillingController {
   @HttpCode(200)
   async receiveWebhook(
     @Req() request: Request,
-    @Headers('paddle-signature') paddleSignature?: string,
   ): Promise<{ received: boolean }> {
-    const raw = Buffer.isBuffer(request.body)
-      ? request.body
-      : Buffer.from(JSON.stringify(request.body ?? {}));
+    // Never re-serialise: a parsed body has already lost the exact bytes the
+    // signature covers, and stringifying it back would verify only by luck.
+    // If this is not a Buffer the raw-body middleware is no longer running
+    // ahead of the JSON parser, which is a deployment fault worth shouting
+    // about rather than papering over.
+    if (!Buffer.isBuffer(request.body)) {
+      this.logger.error(
+        'Webhook body arrived parsed, not raw. The raw-body middleware for /api/v1/billing/webhook must be registered BEFORE express.json() in main.ts, or no signature can ever verify.',
+      );
+      return { received: false };
+    }
+    const raw = request.body;
 
-    const result = await this.webhook.handle({
-      rawBody: raw,
-      signature: paddleSignature,
-    });
+    // The whole header map, lowercased: which header carries the signature
+    // is the gateway adapter's business, not the route's.
+    const headers: Record<string, string | undefined> = {};
+    for (const [name, value] of Object.entries(request.headers)) {
+      headers[name.toLowerCase()] = Array.isArray(value) ? value[0] : value;
+    }
+
+    const result = await this.webhook.handle({ rawBody: raw, headers });
     return { received: result.data.accepted };
   }
 }

@@ -16,6 +16,19 @@ async function bootstrap() {
   app.use(helmet({ crossOriginResourcePolicy: { policy: 'cross-origin' } }));
   app.use(cookieParser());
 
+  /**
+   * Before the JSON parser, and that order is load-bearing.
+   *
+   * A gateway signs the exact bytes it sent, so verification needs those
+   * bytes. This request arrives as application/json, so `json()` would
+   * parse and consume it first and the raw parser below would receive an
+   * already-drained stream — leaving the controller to re-serialise the
+   * parsed object, which usually differs from the original and fails every
+   * signature. The upload and transcribe routes further down escape this
+   * only because their content types make `json()` skip them.
+   */
+  app.use('/api/v1/billing/webhook', raw({ type: '*/*', limit: '1mb' }));
+
   // The upload endpoint reads the raw stream itself; the JSON parser must not
   // consume it first.
   app.use(json({ limit: '2mb' }));
@@ -31,11 +44,6 @@ async function bootstrap() {
     '/api/v1/documents/:id/transcribe',
     raw({ type: '*/*', limit: '16mb' }),
   );
-  // The billing webhook's signature is taken over the exact bytes the
-  // gateway sent. Parsing to JSON and re-serialising changes them, so every
-  // webhook would fail verification; this path keeps the raw buffer.
-  app.use('/api/v1/billing/webhook', raw({ type: '*/*', limit: '1mb' }));
-
   const allowedOrigins = config
     .get<string>('FRONTEND_URL', 'http://localhost:3000')
     .split(',')

@@ -23,6 +23,7 @@ function build(
   counts: Record<string, number> = {},
   creditSeconds = 0,
   billingEnabled = true,
+  bypass: { list?: string; userEmail?: string | null } = {},
 ) {
   const deducted: number[] = [];
   const usage = {
@@ -54,10 +55,21 @@ function build(
 
   const clock: ClockPort = { now: () => new Date('2026-08-13T12:00:00Z') };
 
+  const users = {
+    findById: jest.fn(() =>
+      Promise.resolve(
+        bypass.userEmail === null || bypass.userEmail === undefined
+          ? null
+          : ({ email: bypass.userEmail } as never),
+      ),
+    ),
+  };
+
   const config = {
     get: (key: string) => {
       if (key === 'FREE_PLAN_UNLIMITED') return String(unlimited);
       if (key === 'BILLING_ENABLED') return String(billingEnabled);
+      if (key === 'UNLIMITED_EMAILS') return bypass.list;
       return undefined;
     },
   } as unknown as ConfigService;
@@ -67,9 +79,10 @@ function build(
     usage,
     credits,
     clock,
+    users as never,
     config,
   );
-  return { service, deducted };
+  return { service, deducted, users };
 }
 
 describe('EntitlementsService', () => {
@@ -201,6 +214,97 @@ describe('EntitlementsService', () => {
     });
   });
 
+
+  describe('the email bypass list', () => {
+    const OVER_EVERY_FREE_LIMIT = {
+      [UsageMetric.DOCUMENTS_UPLOADED]: 30,
+      [UsageMetric.STUDY_SECONDS]: 10 * 60 * 60,
+      [UsageMetric.VOICE_SECONDS]: 10 * 60 * 60,
+    };
+
+    it('lifts every ceiling for a listed email, whatever the usage', async () => {
+      const { service } = build(false, OVER_EVERY_FREE_LIMIT, 0, true, {
+        list: 'vip@easiread.com, team@easiread.com',
+        userEmail: 'vip@easiread.com',
+      });
+      const entitlements = await service.forUser('u1');
+      expect(entitlements.plan).toBe('free');
+      expect(entitlements.limits.documentsPerMonth).toBeNull();
+      expect(entitlements.limits.studyMinutesPerDay).toBeNull();
+      expect(entitlements.limits.voiceMinutesPerMonth).toBeNull();
+      expect(entitlements.limits.watermarkedExports).toBe(false);
+      expect(() => entitlements.assertCanUpload(1_000)).not.toThrow();
+      expect(() => entitlements.assertStudyTimeRemaining()).not.toThrow();
+      expect(() => entitlements.assertVoiceAvailable(60)).not.toThrow();
+    });
+
+    it('matches case-insensitively on the trimmed address', async () => {
+      const { service } = build(false, OVER_EVERY_FREE_LIMIT, 0, true, {
+        list: '  VIP@EasiRead.com ',
+        userEmail: 'vip@easiread.com',
+      });
+      const entitlements = await service.forUser('u1');
+      expect(entitlements.limits.documentsPerMonth).toBeNull();
+    });
+
+    it('leaves an unlisted user fully limited', async () => {
+      const { service } = build(false, OVER_EVERY_FREE_LIMIT, 0, true, {
+        list: 'vip@easiread.com',
+        userEmail: 'someone-else@easiread.com',
+      });
+      const entitlements = await service.forUser('u1');
+      expect(entitlements.limits.documentsPerMonth).toBe(3);
+      expect(() => entitlements.assertStudyTimeRemaining()).toThrow(
+        LimitReachedError,
+      );
+    });
+
+    it('ignores a listed address that has no account', async () => {
+      const { service } = build(false, OVER_EVERY_FREE_LIMIT, 0, true, {
+        list: 'vip@easiread.com',
+        userEmail: null,
+      });
+      const entitlements = await service.forUser('u1');
+      expect(entitlements.limits.documentsPerMonth).toBe(3);
+    });
+
+    it('never looks a user up while the list is empty', async () => {
+      const { service, users } = build(false, {}, 0, true, {
+        userEmail: 'vip@easiread.com',
+      });
+      await service.forUser('u1');
+      expect(users.findById).not.toHaveBeenCalled();
+    });
+
+    it('reaches the reserve-then-verify document gate too', async () => {
+      const { service } = build(
+        false,
+        { [UsageMetric.DOCUMENTS_UPLOADED]: 30 },
+        0,
+        true,
+        { list: 'vip@easiread.com', userEmail: 'vip@easiread.com' },
+      );
+      await expect(
+        service.consume('u1', UsageMetric.DOCUMENTS_UPLOADED, (e) =>
+          e.assertCanUpload(1_000),
+        ),
+      ).resolves.toBeUndefined();
+    });
+
+    it('unwalls the study clock heartbeat', async () => {
+      const { service } = build(
+        false,
+        { [UsageMetric.STUDY_SECONDS]: 10 * 60 * 60 },
+        0,
+        true,
+        { list: 'vip@easiread.com', userEmail: 'vip@easiread.com' },
+      );
+      const reading = await service.recordStudyTime('u1', 30);
+      expect(reading.limitSeconds).toBeNull();
+      expect(reading.remainingSeconds).toBeNull();
+    });
+  });
+
   it('sells by default, so revenue never stops by omission', () => {
     const config = { get: () => undefined } as unknown as ConfigService;
     const service = new EntitlementsService(
@@ -208,6 +312,7 @@ describe('EntitlementsService', () => {
       {} as never,
       {} as never,
       { now: () => new Date() },
+      { findById: () => Promise.resolve(null) } as never,
       config,
     );
     expect(service.billingEnabled).toBe(true);

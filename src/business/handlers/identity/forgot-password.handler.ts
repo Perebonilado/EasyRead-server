@@ -1,4 +1,5 @@
 import { Inject, Injectable } from '@nestjs/common';
+import { frontendOrigin } from './frontend-origin';
 import { ConfigService } from '@nestjs/config';
 import { TokenGenerator } from '../../../auth/token-generator';
 import { CLOCK, EMAIL } from '../../ports/tokens';
@@ -50,7 +51,7 @@ export class ForgotPasswordHandler extends AbstractRequestHandlerTemplate<
       .sendPasswordReset({
         to: user.email,
         name: user.name,
-        url: `${this.config.get('FRONTEND_URL')}/reset?state=form&token=${token}`,
+        url: `${frontendOrigin(this.config)}/reset?state=form&token=${token}`,
       })
       .catch((error: Error) =>
         this.logger.error(

@@ -14,8 +14,10 @@ import type { ClockPort } from '../../ports/clock.port';
 import {
   SUBSCRIPTION_REPOSITORY,
   USAGE_REPOSITORY,
+  USER_REPOSITORY,
   VOICE_CREDITS_REPOSITORY,
 } from '../../repositories/tokens';
+import type { UserRepository } from '../../repositories/user.repository';
 import type {
   SubscriptionRepository,
   UsageRepository,
@@ -101,10 +103,53 @@ export class EntitlementsService implements OnModuleInit {
     @Inject(VOICE_CREDITS_REPOSITORY)
     private readonly credits: VoiceCreditsRepository,
     @Inject(CLOCK) private readonly clock: ClockPort,
+    @Inject(USER_REPOSITORY) private readonly users: UserRepository,
     private readonly config: ConfigService,
   ) {}
 
+  /**
+   * Emails that bypass every plan ceiling: the team, testers, friends of
+   * the product. UNLIMITED_EMAILS is comma-delimited like FRONTEND_URL;
+   * matching is case-insensitive on the trimmed address, and an address
+   * with no account simply never matches anything. Parsed once, since env
+   * does not change while the process lives.
+   */
+  private bypassEmails: Set<string> | null = null;
+
+  private get unlimitedEmails(): Set<string> {
+    this.bypassEmails ??= new Set(
+      (this.config.get<string>('UNLIMITED_EMAILS') ?? '')
+        .split(',')
+        .map((email) => email.trim().toLowerCase())
+        .filter(Boolean),
+    );
+    return this.bypassEmails;
+  }
+
+  /**
+   * The ceilings lifted for THIS user, if any: the global testing switch
+   * first (no lookup needed), the email bypass list second. An empty list
+   * costs nothing; a populated one costs a primary-key user read at the
+   * gates that resolve entitlements.
+   */
+  private async overridesFor(
+    userId: string,
+  ): Promise<Partial<PlanLimits> | undefined> {
+    if (this.unlimited) return UNLIMITED_LIMITS;
+    if (!this.unlimitedEmails.size) return undefined;
+    const user = await this.users.findById(userId);
+    const email = user?.email.trim().toLowerCase();
+    return email && this.unlimitedEmails.has(email)
+      ? UNLIMITED_LIMITS
+      : undefined;
+  }
+
   onModuleInit(): void {
+    if (this.unlimitedEmails.size) {
+      this.logger.log(
+        `UNLIMITED_EMAILS grants full access to ${this.unlimitedEmails.size} address(es).`,
+      );
+    }
     if (!this.billingEnabled) {
       this.logger.warn(
         'BILLING_ENABLED=false — the product is free: every limit is lifted and checkout is refused.',
@@ -174,12 +219,14 @@ export class EntitlementsService implements OnModuleInit {
       studySecondsToday,
       voiceSecondsThisMonth,
       voiceCreditSeconds,
+      overrides,
     ] = await Promise.all([
       this.planFor(userId),
       this.usage.get(userId, UsageMetric.DOCUMENTS_UPLOADED, this.monthKey()),
       this.usage.get(userId, UsageMetric.STUDY_SECONDS, this.dayKey(userId)),
       this.usage.get(userId, UsageMetric.VOICE_SECONDS, this.monthKey()),
       this.credits.balance(userId),
+      this.overridesFor(userId),
     ]);
 
     return new Entitlements(
@@ -190,7 +237,7 @@ export class EntitlementsService implements OnModuleInit {
         voiceSecondsThisMonth,
         voiceCreditSeconds,
       },
-      this.unlimited ? UNLIMITED_LIMITS : undefined,
+      overrides,
     );
   }
 
@@ -220,7 +267,10 @@ export class EntitlementsService implements OnModuleInit {
           )
         : await this.usage.get(userId, UsageMetric.STUDY_SECONDS, day);
 
-    const limits = this.effectiveLimits(await this.planFor(userId));
+    const limits = {
+      ...PLAN_LIMITS[await this.planFor(userId)],
+      ...(await this.overridesFor(userId)),
+    };
     const limitSeconds =
       limits.studyMinutesPerDay === null
         ? null
@@ -300,6 +350,7 @@ export class EntitlementsService implements OnModuleInit {
   ): Promise<void> {
     const period = this.monthKey();
     const plan = await this.planFor(userId);
+    const overrides = await this.overridesFor(userId);
     const after = await this.usage.increment(userId, metric, period);
 
     try {
@@ -314,7 +365,7 @@ export class EntitlementsService implements OnModuleInit {
             voiceSecondsThisMonth: 0,
             voiceCreditSeconds: 0,
           },
-          this.unlimited ? UNLIMITED_LIMITS : undefined,
+          overrides,
         ),
       );
     } catch (error) {

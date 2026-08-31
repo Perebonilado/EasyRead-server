@@ -1,4 +1,5 @@
 import { Inject, Injectable } from '@nestjs/common';
+import { frontendOrigin } from './frontend-origin';
 import { ConfigService } from '@nestjs/config';
 import { PasswordService } from '../../../auth/password.service';
 import { TokenGenerator } from '../../../auth/token-generator';
@@ -73,7 +74,7 @@ export class RegisterHandler extends AbstractRequestHandlerTemplate<
       .sendVerification({
         to: user.email,
         name: user.name,
-        url: `${this.config.get('FRONTEND_URL')}/verify?token=${token}`,
+        url: `${frontendOrigin(this.config)}/verify?token=${token}`,
       })
       .catch((error: Error) =>
         this.logger.error(

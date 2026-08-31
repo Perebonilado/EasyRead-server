@@ -55,3 +55,37 @@ describe('profileInstructions', () => {
     );
   });
 });
+
+describe('the tutor never sounds like a recording', () => {
+  const profile = {
+    pace: 'steady' as const,
+    depth: 'standard' as const,
+    interactivity: 'standard' as const,
+    styleNotes: null,
+    paceSource: 'default' as const,
+    depthSource: 'default' as const,
+    interactivitySource: 'default' as const,
+  };
+
+  it('tells a spoken tutor to keep going without waiting to be prompted', () => {
+    const spoken = profileInstructions(profile, 'spoken');
+    expect(spoken).toMatch(/keep teaching continuously/i);
+    expect(spoken).toMatch(/never stop and wait/i);
+  });
+
+  it('forbids the stock check-in phrase users complained about', () => {
+    const spoken = profileInstructions(profile, 'spoken');
+    // The instruction may NAME the phrase in order to ban it, but it must
+    // ask for varied wording — a direction that simply says "ask if they
+    // are still with you" gets read out verbatim, every time.
+    expect(spoken).toMatch(/your own words and vary them/i);
+    expect(spoken).toMatch(/are you still with me/i);
+    expect(spoken).toMatch(/recording/i);
+  });
+
+  it('leaves written answers alone: a chat reply has no silence to fill', () => {
+    expect(profileInstructions(profile, 'written')).not.toMatch(
+      /keep teaching continuously/i,
+    );
+  });
+});

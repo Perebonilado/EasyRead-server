@@ -200,6 +200,12 @@ export function effectiveProfile(
   if (!state || (state.paceDelta === 'none' && state.depthDelta === 'none')) {
     return profile;
   }
+  // A dial the reader set by hand is a decision, and decisions outrank
+  // observations: per-document deltas are the adaptive layer's opinion,
+  // and they apply only to dials the reader has left to the machinery.
+  const paceAdjustable = profile.paceSource !== 'manual';
+  const depthAdjustable = profile.depthSource !== 'manual';
+
   const paceDirection: -1 | 0 | 1 =
     state.paceDelta === 'slower' ? -1 : state.paceDelta === 'faster' ? 1 : 0;
   const depthDirection: -1 | 0 | 1 =
@@ -207,8 +213,12 @@ export function effectiveProfile(
 
   return {
     ...profile,
-    pace: shift(PACE_LADDER, profile.pace, paceDirection),
-    depth: shift(DEPTH_LADDER, profile.depth, depthDirection),
+    pace: paceAdjustable
+      ? shift(PACE_LADDER, profile.pace, paceDirection)
+      : profile.pace,
+    depth: depthAdjustable
+      ? shift(DEPTH_LADDER, profile.depth, depthDirection)
+      : profile.depth,
   };
 }
 
@@ -242,6 +252,9 @@ export function findPromotions(
   const promotions: Promotion[] = [];
 
   const consider = (field: 'pace' | 'depth') => {
+    // A hand-set dial is not up for promotion either: the pattern in the
+    // deltas may be real, but the reader has already decided.
+    if (profile[`${field}Source`] === 'manual') return;
     const groups = new Map<string, string[]>();
     for (const state of states) {
       const delta = field === 'pace' ? state.paceDelta : state.depthDelta;

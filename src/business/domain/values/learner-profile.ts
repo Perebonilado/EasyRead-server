@@ -21,9 +21,11 @@ const PACE: Record<
 > = {
   spoken: {
     slower:
-      'Go slower than you naturally would: smaller pieces, one at a time, repeat the key point in different words.',
-    steady: 'Keep a steady, natural pace.',
-    faster: 'This student moves quickly — keep it tight and skip the padding.',
+      'Go slower than you naturally would: smaller pieces, one at a time, repeat the key point in different words. Slow means smaller steps, never longer pauses — keep the lesson moving through them.',
+    steady:
+      'Keep a steady, natural pace, always moving: land one idea, go to the next.',
+    faster:
+      'This student chose a fast pace — keep it tight, skip the padding and the recaps, and trust them to interrupt if you lose them.',
   },
   written: {
     slower:
@@ -56,9 +58,10 @@ const INTERACTIVITY: Record<
   Record<LearnerProfileRecord['interactivity'], string>
 > = {
   spoken: {
-    less: 'Check in sparingly — this student prefers to listen.',
-    standard: 'Check in regularly.',
-    more: 'Quiz and question constantly — this student learns by doing.',
+    less: 'Check in only when you finish a chapter, and never in the opening minutes of one — this student chose to mostly listen. One check at a chapter boundary, then straight on.',
+    standard:
+      'Check in at most once per topic, AFTER you have finished teaching it — never while the student is still settling into new material.',
+    more: 'Quiz and question often — this student learns by doing. Still let each new idea land before the first question about it.',
   },
   written: {
     // Chat's analogue of quizzing: a single check-question, or none at all.
@@ -67,6 +70,15 @@ const INTERACTIVITY: Record<
     more: 'End with one short check-question that tests the idea just explained.',
   },
 };
+
+/**
+ * Spoken lessons must not stall. Stated as its own standing order rather
+ * than folded into a dial, because it holds at EVERY pace: the complaint it
+ * answers was a tutor finishing a thought and waiting, sometimes for
+ * minutes, until the student said "go on". Never again.
+ */
+const KEEP_TEACHING =
+  'Keep teaching continuously. When you finish an idea, carry straight on to the next one: never stop and wait for the student to prompt you, and never ask permission to continue. Pause only when you have explicitly asked them a question. When you do check in, use your own words and vary them; repeating one stock phrase like "are you still with me" makes you sound like a recording.';
 
 export function profileInstructions(
   profile: LearnerProfileRecord,
@@ -79,6 +91,7 @@ export function profileInstructions(
     `- ${PACE[register][profile.pace]}`,
     `- ${DEPTH[register][profile.depth]}`,
     `- ${INTERACTIVITY[register][profile.interactivity]}`,
+    register === 'spoken' ? `- ${KEEP_TEACHING}` : null,
     profile.styleNotes
       ? register === 'spoken'
         ? `- Observed: ${profile.styleNotes}`

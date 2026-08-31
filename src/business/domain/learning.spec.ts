@@ -11,6 +11,7 @@ import {
 } from './learning';
 import type {
   AssessmentEventRecord,
+  DocumentLearningStateRecord,
   LearnerProfileRecord,
 } from '../repositories/learning.repository';
 import { DEFAULT_LEARNER_PROFILE } from '../repositories/learning.repository';
@@ -140,17 +141,18 @@ describe('effectiveProfile', () => {
     expect(effectiveProfile(slow, state('slower')).pace).toBe('slower');
   });
 
-  it('applies to a pinned dial without rewriting the pin', () => {
-    // A pin says "my general pace is faster", not "never adapt anywhere".
+  it('leaves a pinned dial exactly where the reader put it', () => {
+    // This inverts an earlier design that let deltas adapt around a pin.
+    // User feedback settled it: a chosen pace is a decision, and being
+    // quietly slowed down anyway was the top complaint about the tutor.
     const pinned = {
       ...base,
       pace: 'faster' as const,
       paceSource: 'manual' as const,
     };
     const result = effectiveProfile(pinned, state('slower'));
-    expect(result.pace).toBe('steady');
+    expect(result.pace).toBe('faster');
     expect(result.paceSource).toBe('manual');
-    expect(pinned.pace).toBe('faster');
   });
 });
 
@@ -394,5 +396,56 @@ describe('passes and the understanding report', () => {
       event(2 * HOUR, 0, { resolved: ['never missed'] }),
     ]);
     expect(ideas).toEqual([]);
+  });
+});
+
+describe('manual dials override the adaptive layers', () => {
+  const manualPace: LearnerProfileRecord = {
+    ...DEFAULT_LEARNER_PROFILE,
+    pace: 'faster',
+    paceSource: 'manual',
+  };
+  const state: DocumentLearningStateRecord = {
+    documentId: 'd1',
+    paceDelta: 'slower',
+    depthDelta: 'deeper',
+    reason: null,
+  };
+
+  it('a hand-set pace ignores the document delta pulling against it', () => {
+    const effective = effectiveProfile(manualPace, state);
+    // The reader chose fast; a delta must not quietly slow them down —
+    // that silent tug-of-war was the "overrides all other settings" gap.
+    expect(effective.pace).toBe('faster');
+    // Depth was left to the machinery, so its delta still applies.
+    expect(effective.depth).toBe('deeper');
+  });
+
+  it('auto and default dials keep adapting exactly as before', () => {
+    const effective = effectiveProfile(DEFAULT_LEARNER_PROFILE, state);
+    expect(effective.pace).toBe('slower');
+    expect(effective.depth).toBe('deeper');
+  });
+
+  it('promotion never touches a hand-set dial', () => {
+    const states: DocumentLearningStateRecord[] = [
+      {
+        documentId: 'a',
+        paceDelta: 'slower',
+        depthDelta: 'none',
+        reason: null,
+      },
+      {
+        documentId: 'b',
+        paceDelta: 'slower',
+        depthDelta: 'none',
+        reason: null,
+      },
+    ];
+    expect(findPromotions(manualPace, states)).toHaveLength(0);
+    // The same pattern promotes freely when the dial was never chosen.
+    expect(
+      findPromotions(DEFAULT_LEARNER_PROFILE, states).map((p) => p.field),
+    ).toEqual(['pace']);
   });
 });

@@ -1,11 +1,15 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import {
+  LEARNER_PROFILE_REPOSITORY,
   SIMPLIFIED_PAGE_REPOSITORY,
   SUMMARY_REPOSITORY,
   TOPIC_REPOSITORY,
 } from '../../business/repositories/tokens';
 import type { SimplifiedPageRepository } from '../../business/repositories/simplified-page.repository';
+import type { LearnerProfileRepository } from '../../business/repositories/learning.repository';
+import { DEFAULT_LEARNER_PROFILE } from '../../business/repositories/learning.repository';
+import { profileInstructions } from '../../business/domain/values/learner-profile';
 import type {
   SummaryRepository,
   TopicRepository,
@@ -44,14 +48,48 @@ const MAX_RECONNECTS = 3;
  * asked something, simply teaching the next idea if it had not. Without
  * this, push-to-talk turns every pause into a stall.
  */
-const DEAD_AIR_MS = 7_000;
 /**
- * How many times the tutor may carry on into silence before it stops
- * driving itself: past this it asks once whether the group is still there,
- * then waits for a human turn. An open tab in an empty kitchen must not
- * teach all night.
+ * Silence budget before the tutor carries on by itself, by the host's
+ * chosen pace. Fast learners wanted the lesson to press on almost
+ * immediately; slow is thinking room, not stopping room.
  */
-const MAX_AUTO_CONTINUES = 6;
+const DEAD_AIR_BY_PACE: Record<'slower' | 'steady' | 'faster', number> = {
+  faster: 4_000,
+  steady: 7_000,
+  slower: 10_000,
+};
+/**
+ * How long the room may be silent before the tutor wonders aloud, and
+ * stops driving itself afterwards. An open tab in an empty kitchen must
+ * not teach all night — but a class listening to a lecture says nothing
+ * for minutes at a time, and counting quiet stretches instead of timing
+ * them turned "are you still with me?" into the tutor's catchphrase.
+ */
+const PRESENCE_CHECK_AFTER_MS = 4 * 60_000;
+
+/**
+ * Stage directions as INTENTIONS, never as sentences, and rotated.
+ *
+ * A direction containing the words to say gets read out almost verbatim.
+ * A direction describing what to achieve gets said in the tutor's own
+ * voice, differently each time.
+ */
+const CONTINUE_DIRECTIONS = [
+  'Nobody spoke. Do not remark on the pause. Carry straight on with the next idea.',
+  'Silence. Assume they are following, and continue teaching without acknowledging it.',
+  'Nothing said. Take the next step of the explanation straight away; do not ask permission.',
+  'Quiet room. Keep going with the next point in your own words.',
+];
+
+const PRESENCE_DIRECTIONS = [
+  'The room has been quiet for several minutes. In your own words, offer to slow down or take the last idea again, then wait. Never use a stock check-in phrase, and never say "are you still with me".',
+  'Several minutes of quiet. Ask someone by name what they make of the last point, in your own words, then wait. Never say "are you still with me".',
+  'Long silence. Say warmly that you will pause here, and invite anyone to say when they want to carry on. Your own words only; never say "are you still with me".',
+  'Nobody has spoken in a while. Offer, in your own words, to move to the next part or stop for now, then wait. Never say "are you still with me".',
+];
+
+const nextOf = (pool: readonly string[], index: number): string =>
+  pool[index % pool.length];
 /** How much recent transcript a reconnected tutor is reminded of. */
 const RESUME_TRANSCRIPT_CHARS = 2_500;
 
@@ -218,7 +256,12 @@ export class GroupLesson {
   private reconnects = 0;
   private closedForGood = false;
   private continueTimer: ReturnType<typeof setTimeout> | null = null;
-  private autoContinues = 0;
+  /** When a human last spoke. Silence is timed from here, never counted. */
+  private lastSpeechAt = Date.now();
+  /** One presence check per silence; cleared as soon as anyone speaks. */
+  private presenceAsked = false;
+  /** Rotates the stage directions so no single phrasing sets in. */
+  private directionIndex = 0;
   /** A respond asked for while the tutor was mid-response; fired on done. */
   private respondQueued = false;
 
@@ -231,6 +274,8 @@ export class GroupLesson {
       model: string;
       record: RecordAssessmentHandler;
       instructions: string;
+      /** How long the room may sit silent before the tutor continues. */
+      deadAirMs: number;
       voice: string;
     },
   ) {}
@@ -442,22 +487,23 @@ export class GroupLesson {
       const present = names.length
         ? `In the room right now: ${names.join(', ')}, and nobody else.`
         : 'The room is empty right now.';
-      if (this.autoContinues >= MAX_AUTO_CONTINUES) {
-        if (this.autoContinues === MAX_AUTO_CONTINUES) {
-          this.autoContinues += 1;
-          this.realtime?.inject(
-            `(Nobody has responded for a while. ${present} Ask once, warmly, whether they are still with you, say you will wait, and then stay quiet.)`,
-          );
-          this.respondNow();
-        }
+      const silentFor = Date.now() - this.lastSpeechAt;
+      if (silentFor >= PRESENCE_CHECK_AFTER_MS) {
+        // Genuinely empty-sounding room: one check, then leave it be.
+        if (this.presenceAsked) return;
+        this.presenceAsked = true;
+        this.realtime?.inject(
+          `(${present} ${nextOf(PRESENCE_DIRECTIONS, this.directionIndex++)})`,
+        );
+        this.respondNow();
         return;
       }
-      this.autoContinues += 1;
+
       this.realtime?.inject(
-        `(Nobody spoke. ${present} If your last words asked someone a question, check in warmly by name with one of these people, or offer to move on. If you were not waiting on anyone, do not comment on the pause at all; simply continue teaching the next idea.)`,
+        `(${present} ${nextOf(CONTINUE_DIRECTIONS, this.directionIndex++)})`,
       );
       this.respondNow();
-    }, DEAD_AIR_MS);
+    }, this.deps.deadAirMs);
   }
 
   // ── Floor control (plan §7.2) ─────────────────────────────────────────────
@@ -488,7 +534,8 @@ export class GroupLesson {
       this.tutorSpeaking = false;
       this.events.onSpeaking(false);
     }
-    this.autoContinues = 0;
+    this.lastSpeechAt = Date.now();
+    this.presenceAsked = false;
     this.floorHolder = { userId, name };
     this.clearContinue();
     this.voicedBytes = 0;
@@ -584,7 +631,9 @@ export class GroupLesson {
     if (!check || check.id !== checkId) return;
     if (index < 0 || index >= check.options.length) return;
     if (check.answers.has(userId)) return;
-    this.autoContinues = 0;
+    // Answering a check is participation: the room is plainly still here.
+    this.lastSpeechAt = Date.now();
+    this.presenceAsked = false;
     check.answers.set(userId, index);
 
     // The member's own record; the stage never shows names on answers.
@@ -766,6 +815,8 @@ export class GroupLessonFactory {
     private readonly pages: SimplifiedPageRepository,
     @Inject(SUMMARY_REPOSITORY) private readonly summaries: SummaryRepository,
     @Inject(TOPIC_REPOSITORY) private readonly topics: TopicRepository,
+    @Inject(LEARNER_PROFILE_REPOSITORY)
+    private readonly profiles: LearnerProfileRepository,
     private readonly record: RecordAssessmentHandler,
   ) {}
 
@@ -814,9 +865,16 @@ export class GroupLessonFactory {
       .slice(0, CONTEXT_CHAR_BUDGET);
     const summary = await this.summaries.find(session.documentId);
 
+    // One lesson, one pace: the host's. Their profile sets how fast the
+    // room moves and how often it is checked on — the same dials, chosen
+    // or adapted, that shape their one-to-one lessons.
+    const hostProfile =
+      (await this.profiles.find(hostId)) ?? DEFAULT_LEARNER_PROFILE;
+
     const instructions = [
       `You are giving a live spoken lesson on "${chapterTitle ?? 'this material'}" to a small GROUP of students, together in one room.`,
       `${tutor.persona}\n\nYour teaching style:\n${dialInstructions(tutor.dials)}`,
+      profileInstructions(hostProfile, 'spoken'),
       [
         'How to run the lesson (this works exactly like your one-to-one',
         'lessons, with a group in the room instead of one student):',
@@ -895,6 +953,7 @@ export class GroupLessonFactory {
       model: this.config.get<string>('AI_REALTIME_MODEL', 'gpt-realtime'),
       record: this.record,
       instructions,
+      deadAirMs: DEAD_AIR_BY_PACE[hostProfile.pace],
       voice: tutor.voice.openaiFallback,
     });
   }

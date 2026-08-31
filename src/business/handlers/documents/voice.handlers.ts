@@ -242,10 +242,13 @@ export const TEACHING_TOOLS: RealtimeTool[] = [
       'showing — trust the result, not your intention: it is the truth of ' +
       'what the student can see. Never explain a point the result has not ' +
       'confirmed, and never announce that you are revealing anything. A ' +
-      'call can be REFUSED (an error result) when the student is still ' +
-      'hearing you or the last revealed point has not been taught aloud ' +
-      'yet — then the screen has NOT moved: keep teaching what is already ' +
-      'showing and try again when you truly reach the next point.',
+      'call can be REFUSED (an error result) when the last revealed point ' +
+      'has not been taught aloud yet — then the screen has NOT moved: ' +
+      'keep teaching what is already showing. And a call made while your ' +
+      'voice is still playing returns prefetched: the point is fetched ' +
+      'for you but NOT on the page yet; stay silent until a note tells ' +
+      'you to teach it — it appears on the page just as you introduce it ' +
+      'aloud.',
     parameters: {
       type: 'object',
       properties: {
@@ -868,6 +871,15 @@ export class StartVoiceSessionHandler extends AbstractRequestHandlerTemplate<
           '  your voice cannot drift, because every turn begins at the',
           '  screen. Never read the revealed text aloud as written; your',
           '  voice adds the example, the why, the connection.',
+          '- The silent fetch turn: sometimes, while your voice is still',
+          '  playing, a note asks you to fetch the next point ahead of',
+          '  time. Call the tool and say NOTHING — the result is marked',
+          '  prefetched and the point is NOT on the page yet. When your',
+          '  words finish playing, a note tells you to teach it: do that at',
+          '  once, opening with a short spoken introduction of the idea —',
+          '  the point appears on the page just as you introduce it, the',
+          '  voice a half-breath ahead of the text. Never mention any of',
+          '  this; to the student it is simply seamless.',
           '- A QUESTION ENDS YOUR TURN, MID-AIR. The question mark is the',
           '  last sound of the turn: nothing after it, no "take your time",',
           '  no answering it yourself, no next idea. The silence that',

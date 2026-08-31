@@ -77,6 +77,10 @@ class VoiceSessionDto {
   @IsString()
   @Length(1, 64)
   revisitTopicId?: string;
+
+  @IsOptional()
+  @IsIn(['quick', 'thorough', 'gentle'])
+  intent?: 'quick' | 'thorough' | 'gentle';
 }
 
 class DiagramDto {
@@ -220,6 +224,7 @@ export class VoiceController {
       mode: body.mode ?? 'chat',
       tutorId: body.tutorId,
       revisitTopicId: body.revisitTopicId,
+      intent: body.intent,
     });
     return result.data;
   }

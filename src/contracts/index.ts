@@ -509,6 +509,9 @@ export type PortalResponse = { url: string | null };
 /** `chat` answers questions; `teach` runs the lesson and drives the reader. */
 export type VoiceMode = 'chat' | 'teach';
 
+/** What the student said they want from today's session. */
+export type LessonIntent = 'quick' | 'thorough' | 'gentle';
+
 /**
  * The functions a teach-mode session may call. Declared server-side, executed
  * client-side — every one of them is a UI action, and the browser is where the

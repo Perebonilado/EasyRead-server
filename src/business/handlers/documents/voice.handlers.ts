@@ -3,6 +3,7 @@ import { ConfigService } from '@nestjs/config';
 import {
   TEACH_TOOLS,
   type Block,
+  type LessonIntent,
   type ComputeResponse,
   type DiagramCheckResponse,
   type DiagramResponse,
@@ -211,7 +212,34 @@ export interface VoiceSessionRequest {
   tutorId?: string;
   /** A topic the student asked to go over again; the lesson starts there. */
   revisitTopicId?: string;
+  /** What the student said they want from today's session. */
+  intent?: LessonIntent;
 }
+
+/**
+ * The session intents, spoken back to the tutor in the student's own
+ * words. Chosen on the lesson screen; each also sets the pace and
+ * check-in dials, but the sentence carries the WHY those numbers
+ * cannot.
+ */
+const INTENT_LINES: Record<LessonIntent, string> = {
+  quick:
+    'Today the student told you their intent: "I just want to get through ' +
+    'the material quickly, with as few interruptions as possible." Honor ' +
+    'it above your usual rhythm: the briefest opening, no detours or side ' +
+    'stories, lean topic closings, and keep the thread moving until the ' +
+    'material is covered.',
+  thorough:
+    'Today the student told you their intent: "I want to take my time and ' +
+    'really understand the material." Give each idea the room it needs: ' +
+    'an example where it helps, and check-ins that prove it stuck before ' +
+    'you move on.',
+  gentle:
+    'Today the student told you their intent: "This material is hard for ' +
+    'me. Go gently and break it down until I have it." Small steps, a ' +
+    'warm patient tone, no hurry, and never move past confusion: ' +
+    'reassure, re-explain, and let understanding set the pace.',
+};
 
 /**
  * The teach-mode toolbox. Parameters are JSON Schema; execution happens in the
@@ -674,6 +702,7 @@ export class StartVoiceSessionHandler extends AbstractRequestHandlerTemplate<
             tutor,
             cmd.pageNumber,
             cmd.revisitTopicId,
+            cmd.intent,
           )
         : this.chatInstructions(doc.props.title, summary);
 
@@ -761,6 +790,7 @@ export class StartVoiceSessionHandler extends AbstractRequestHandlerTemplate<
     tutor: Tutor,
     pageNumber: number,
     revisitTopicId?: string,
+    intent?: LessonIntent,
   ): Promise<string> {
     const [topics, events, profile, unnarrated, docState] = await Promise.all([
       this.topics.listWithReadState(documentId, userId),
@@ -916,6 +946,9 @@ export class StartVoiceSessionHandler extends AbstractRequestHandlerTemplate<
       profileInstructions(
         effectiveProfile(profile ?? DEFAULT_LEARNER_PROFILE, docState),
       ),
+      // What the student SAID they want today, in their own words.
+      // The dials above set the mechanics; this sets the attitude.
+      intent ? INTENT_LINES[intent] : null,
       calibrationLine,
       unnarrated.length
         ? [

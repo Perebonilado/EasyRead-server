@@ -507,10 +507,52 @@ export type PortalResponse = { url: string | null };
 // ── Voice ────────────────────────────────────────────────────────────────────
 
 /** `chat` answers questions; `teach` runs the lesson and drives the reader. */
-export type VoiceMode = 'chat' | 'teach';
+export type VoiceMode = 'chat' | 'teach' | 'lecture';
 
 /** What the student said they want from today's session. */
 export type LessonIntent = 'quick' | 'thorough' | 'gentle';
+
+// ── Lectures ────────────────────────────────────────────────────────────────
+
+/** A scripted lecture segment's life: written, voiced, or given up on. */
+export type LectureSegmentStatus =
+  | 'pending'
+  | 'writing'
+  /** The script exists; its audio has not been made yet. */
+  | 'voicing'
+  | 'done'
+  | 'failed';
+
+export interface LectureSegmentDto {
+  pageNumber: number;
+  status: LectureSegmentStatus;
+  /** Playback length, known only once the audio exists. */
+  durationMs: number | null;
+  /** A one-line crossing of a page with nothing to teach. */
+  bridge: boolean;
+}
+
+export interface LectureTopicDto {
+  topicId: string;
+  title: string;
+  segments: LectureSegmentDto[];
+}
+
+/** Where the student stopped listening, so any device can resume there. */
+export interface LecturePosition {
+  pageNumber: number;
+  offsetMs: number;
+}
+
+export interface LectureStatusResponse {
+  /** True once any lecture row exists for the document's current version. */
+  generated: boolean;
+  totalSegments: number;
+  readySegments: number;
+  failedSegments: number;
+  topics: LectureTopicDto[];
+  position: LecturePosition | null;
+}
 
 /**
  * The functions a teach-mode session may call. Declared server-side, executed
@@ -854,6 +896,9 @@ export type SseEvent =
   /** An import fetching its pages; fires per batch while status=uploading. */
   | { type: 'import.progress'; fetched: number; total: number }
   | { type: 'document.failed'; step: PipelineStep; reason: string }
+  /** A lecture page finished its audio and can be played now. */
+  | { type: 'lecture.segment_ready'; pageNumber: number }
+  | { type: 'lecture.segment_failed'; pageNumber: number }
   /** Replayed on connect so a reconnecting client never misses state. */
   | { type: 'snapshot'; document: DocumentDetail };
 

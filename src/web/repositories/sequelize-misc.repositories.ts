@@ -113,6 +113,21 @@ export class SequelizeTopicRepository implements TopicRepository {
    * Read state is joined here rather than deduped on the read path — the write
    * side keeps the data clean, per PRD FR-5.2.
    */
+  async listByDocument(documentId: string) {
+    const rows = await this.model.findAll({
+      where: { documentId },
+      order: [['orderIndex', 'ASC']],
+    });
+    return rows.map((row) => ({
+      id: row.id,
+      title: row.title,
+      shortDescription: row.shortDescription,
+      startPage: row.startPage,
+      endPage: row.endPage,
+      orderIndex: row.orderIndex,
+    }));
+  }
+
   async listWithReadState(documentId: string, userId: string) {
     const rows = await this.model.findAll({
       where: { documentId },

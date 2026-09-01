@@ -58,6 +58,18 @@ import { CurrentUser } from '../security/current-user.decorator';
 
 const AUDIO_LEVELS: AudioLevel[] = ['original', 'standard', 'easiest'];
 
+class LectureContextDto {
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  pageNumber!: number;
+
+  @Type(() => Number)
+  @IsInt()
+  @Min(0)
+  offsetMs!: number;
+}
+
 class VoiceSessionDto {
   @Type(() => Number)
   @IsInt()
@@ -65,7 +77,7 @@ class VoiceSessionDto {
   pageNumber!: number;
 
   @IsOptional()
-  @IsIn(['chat', 'teach'])
+  @IsIn(['chat', 'teach', 'lecture'])
   mode?: VoiceMode;
 
   @IsOptional()
@@ -81,6 +93,12 @@ class VoiceSessionDto {
   @IsOptional()
   @IsIn(['quick', 'thorough', 'gentle'])
   intent?: 'quick' | 'thorough' | 'gentle';
+
+  /** Where the lecture tape was when the student pressed the mic. */
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => LectureContextDto)
+  lectureContext?: LectureContextDto;
 }
 
 class DiagramDto {
@@ -225,6 +243,7 @@ export class VoiceController {
       tutorId: body.tutorId,
       revisitTopicId: body.revisitTopicId,
       intent: body.intent,
+      lectureContext: body.lectureContext,
     });
     return result.data;
   }

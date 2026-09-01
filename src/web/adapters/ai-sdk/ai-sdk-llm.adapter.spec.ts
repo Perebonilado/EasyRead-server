@@ -336,6 +336,88 @@ describe('AiSdkLlmAdapter', () => {
     expect(mock.calls[0].path).toContain('/embeddings');
   });
 
+  it("tells the lecture writer the chapter has already opened, in the planner's words", async () => {
+    mock.reply({ script: 'Because they guess, and they are usually right.' });
+
+    const result = await adapter.lectureSegment({
+      topicTitle: 'Caches',
+      hook: 'Why do caches lie?',
+      arc: 'From a guess to a bet',
+      beat: {
+        goal: 'Teach eviction',
+        callback: null,
+        foreshadow: null,
+        newHere: 'Eviction is a bet about the future',
+        skip: 'What a cache is',
+        weight: 'light',
+      },
+      pageText: 'Caches evict.',
+      prevTail: '',
+      isFirstOfTopic: true,
+      isLastOfTopic: false,
+      bridge: false,
+      payoff: 'You can size a cache.',
+      opening: 'Why do caches lie?',
+      taughtSoFar: ['What a cache is'],
+      comingLater: ['Write-through versus write-back'],
+      list: { items: 5 },
+    });
+
+    expect(result.value).toContain('usually right');
+    const prompt = JSON.stringify(mock.calls[0].body.messages);
+    expect(prompt).toContain('has just opened with these exact words');
+    expect(prompt).toContain('Why do caches lie?');
+    expect(prompt).not.toContain('Deliver this hook');
+    expect(prompt).toContain('New on this page');
+    expect(prompt).toContain('LIGHT page');
+    expect(prompt).toContain('Already taught in this lecture');
+    expect(prompt).toContain('Still to come in this chapter');
+    expect(prompt).toContain('list of 5 items');
+  });
+
+  it('shows the planner the example of its opening shape, what was taught, and why its last plan failed', async () => {
+    mock.reply({
+      hook: 'A cache is not a faster database.',
+      arc: 'From a guess to a bet',
+      payoff: 'You can size a cache.',
+      beats: [
+        {
+          pageNumber: 1,
+          goal: 'g',
+          callback: null,
+          foreshadow: null,
+          newHere: 'n',
+          skip: null,
+          weight: 'full',
+        },
+      ],
+    });
+
+    const result = await adapter.lectureOutline({
+      title: 'Systems',
+      topicTitle: 'Caches',
+      pages: [{ pageNumber: 1, text: 'Caches evict.' }],
+      priorTopics: ['Queues (already lectured)'],
+      priorOpenings: ['What happens to a request after send?'],
+      suggestedShape: {
+        name: 'a definition turned over',
+        direction: 'State the definition, then what it means.',
+        example: 'A lock is not a wall. It is a promise.',
+      },
+      taughtEarlier: ['You can drain a queue.'],
+      correction: 'The hook opens with "Imagine", which is a banned opener',
+    });
+
+    expect(result.value.beats[0].weight).toBe('full');
+    const prompt = JSON.stringify(mock.calls[0].body.messages);
+    expect(prompt).toContain('A lock is not a wall.');
+    expect(prompt).toContain('Match the move, not the words');
+    expect(prompt).toContain('You can drain a queue.');
+    expect(prompt).toContain('Your previous plan was rejected');
+    expect(prompt).toContain('banned opener');
+    expect(prompt).toContain('What happens to a request after send?');
+  });
+
   it('routes a task to its own model when one is configured', async () => {
     adapter = configure({ AI_MODEL_SIMPLIFY_EASIEST: 'openai:gpt-4o' });
     mock.reply({ blocks: [{ type: 'paragraph', text: 'Short and simple.' }] });

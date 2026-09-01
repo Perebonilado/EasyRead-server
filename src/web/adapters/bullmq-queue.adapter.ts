@@ -5,6 +5,8 @@ import Redis from 'ioredis';
 import type { Level, PipelineStep } from '../../contracts';
 import type {
   ExportJob,
+  LectureChapterJob,
+  LectureVoiceJob,
   JobQueuePort,
   PipelineJob,
   SimplifyJob,
@@ -14,6 +16,8 @@ import {
   QUEUE,
   QUEUE_SETTINGS,
   exportJobId,
+  lectureChapterJobId,
+  lectureVoiceJobId,
   simplifyJobId,
   stepJobId,
   type QueueName,
@@ -116,6 +120,88 @@ export class BullmqQueueAdapter implements JobQueuePort, OnModuleDestroy {
             job.pageNumber,
             job.contentVersion,
           ),
+          priority: Math.min(job.pageNumber, 2_000_000),
+        },
+      })),
+    );
+  }
+
+  async enqueueLectureChapters(jobs: LectureChapterJob[]): Promise<void> {
+    if (!jobs.length) return;
+    const queue = this.queue(QUEUE.lectureChapter);
+
+    // A chapter asked for again is run again, and only its unwritten pages
+    // get written: that is how a page that failed gets another chance. A
+    // finished job of the same id would otherwise swallow the request as a
+    // duplicate. A job still running cannot be removed, and the add below
+    // then dedupes against it, which is exactly right.
+    await Promise.all(
+      jobs.map((job) =>
+        queue
+          .remove(
+            lectureChapterJobId(
+              job.documentId,
+              job.topicId,
+              job.contentVersion,
+            ),
+          )
+          .catch(() => undefined),
+      ),
+    );
+
+    await queue.addBulk(
+      jobs.map((job) => ({
+        name: 'lecture-chapter',
+        data: job,
+        opts: {
+          ...this.options(QUEUE.lectureChapter),
+          jobId: lectureChapterJobId(
+            job.documentId,
+            job.topicId,
+            job.contentVersion,
+          ),
+          // Lower is sooner in BullMQ, and zero means "no priority at
+          // all" — hence the offset. Chapter one is written first so the
+          // student can start listening while the rest is still coming.
+          priority: Math.min(job.orderIndex + 1, 2_000_000),
+        },
+      })),
+    );
+  }
+
+  async enqueueLectureVoices(jobs: LectureVoiceJob[]): Promise<void> {
+    if (!jobs.length) return;
+    const queue = this.queue(QUEUE.lectureVoice);
+
+    // Same as the chapters: a page written again must be voiced again, and
+    // the finished job of the same id kept for an hour would otherwise
+    // swallow the request as a duplicate, leaving the page in `voicing`.
+    await Promise.all(
+      jobs.map((job) =>
+        queue
+          .remove(
+            lectureVoiceJobId(
+              job.documentId,
+              job.pageNumber,
+              job.contentVersion,
+            ),
+          )
+          .catch(() => undefined),
+      ),
+    );
+
+    await queue.addBulk(
+      jobs.map((job) => ({
+        name: 'lecture-voice',
+        data: job,
+        opts: {
+          ...this.options(QUEUE.lectureVoice),
+          jobId: lectureVoiceJobId(
+            job.documentId,
+            job.pageNumber,
+            job.contentVersion,
+          ),
+          // The front of the document is voiced first, for the same reason.
           priority: Math.min(job.pageNumber, 2_000_000),
         },
       })),

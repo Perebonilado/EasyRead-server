@@ -22,6 +22,7 @@ import {
   PIPELINE_RUN_REPOSITORY,
   READING_POSITION_REPOSITORY,
   REFRESH_TOKEN_REPOSITORY,
+  LECTURE_REPOSITORY,
   SIMPLIFIED_PAGE_REPOSITORY,
   SUBSCRIPTION_REPOSITORY,
   SUMMARY_REPOSITORY,
@@ -67,6 +68,7 @@ import {
 } from '../repositories/sequelize-misc.repositories';
 import { SequelizePipelineRunRepository } from '../repositories/sequelize-pipeline.repository';
 import { SequelizeRefreshTokenRepository } from '../repositories/sequelize-refresh-token.repository';
+import { SequelizeLectureRepository } from '../repositories/sequelize-lecture.repository';
 import { SequelizeSimplifiedPageRepository } from '../repositories/sequelize-simplified-page.repository';
 import { SequelizeUserRepository } from '../repositories/sequelize-user.repository';
 
@@ -88,6 +90,7 @@ export const repositoryProviders: Provider[] = [
     provide: DOCUMENT_PAGE_REPOSITORY,
     useClass: SequelizeDocumentPageRepository,
   },
+  { provide: LECTURE_REPOSITORY, useClass: SequelizeLectureRepository },
   {
     provide: SIMPLIFIED_PAGE_REPOSITORY,
     useClass: SequelizeSimplifiedPageRepository,

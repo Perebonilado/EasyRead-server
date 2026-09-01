@@ -22,6 +22,11 @@ export { TopicPreviewModel } from './topic-preview.model';
 export { PipelineRunModel } from './pipeline-run.model';
 export { ReadingPositionModel } from './reading-position.model';
 export { RefreshTokenModel } from './refresh-token.model';
+export {
+  LecturePlanModel,
+  LecturePositionModel,
+  LectureSegmentModel,
+} from './lecture.model';
 export { SimplifiedPageModel } from './simplified-page.model';
 export { SubscriptionModel } from './subscription.model';
 export { TopicReadStateModel } from './topic-read-state.model';
@@ -60,6 +65,11 @@ import { TopicPreviewModel } from './topic-preview.model';
 import { PipelineRunModel } from './pipeline-run.model';
 import { ReadingPositionModel } from './reading-position.model';
 import { RefreshTokenModel } from './refresh-token.model';
+import {
+  LecturePlanModel,
+  LecturePositionModel,
+  LectureSegmentModel,
+} from './lecture.model';
 import { SimplifiedPageModel } from './simplified-page.model';
 import { SubscriptionModel } from './subscription.model';
 import { TopicReadStateModel } from './topic-read-state.model';
@@ -88,6 +98,9 @@ export const ALL_MODELS = [
   DocumentModel,
   DocumentPageModel,
   DocumentSummaryModel,
+  LecturePlanModel,
+  LecturePositionModel,
+  LectureSegmentModel,
   SimplifiedPageModel,
   TopicModel,
   TopicReadStateModel,

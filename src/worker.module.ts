@@ -8,6 +8,8 @@ import { LearnProcessor } from './pipeline/processors/learn.processor';
 import { ImportProcessor } from './pipeline/processors/import.processor';
 import { ExtractProcessor } from './pipeline/processors/extract.processor';
 import { OcrProcessor } from './pipeline/processors/ocr.processor';
+import { LectureChapterProcessor } from './pipeline/processors/lecture-chapter.processor';
+import { LectureVoiceProcessor } from './pipeline/processors/lecture-voice.processor';
 import { SimplifyPageProcessor } from './pipeline/processors/simplify.processor';
 import { SummarizeProcessor } from './pipeline/processors/summarize.processor';
 import { TopicsProcessor } from './pipeline/processors/topics.processor';
@@ -29,6 +31,8 @@ import { WorkerRunner } from './pipeline/worker-runner.service';
     TopicsProcessor,
     EmbedProcessor,
     SimplifyPageProcessor,
+    LectureChapterProcessor,
+    LectureVoiceProcessor,
     ExportProcessor,
     LearnProcessor,
     ImportProcessor,

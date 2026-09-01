@@ -7,6 +7,7 @@ import type { Block, RecapBody, TopicPreviewBody } from '../../contracts';
 import type {
   GeneratedItem,
   ItemVerdict,
+  LectureOutlineDraft,
   LlmGatewayPort,
   LlmResult,
   TopicDraft,
@@ -115,6 +116,111 @@ export class FakeLlmAdapter implements LlmGatewayPort {
     return {
       value: topics,
       usage: this.usage(started, digest.length / 4, topics.length * 12),
+    };
+  }
+
+  /**
+   * A plan whose beats cover exactly the pages given, so the validator
+   * passes. Deterministic: specs assert on these strings.
+   */
+  async lectureOutline(input: {
+    title: string;
+    topicTitle: string;
+    pages: { pageNumber: number; text: string }[];
+    priorTopics: string[];
+    priorOpenings: string[];
+    suggestedShape: { name: string; direction: string; example: string };
+    taughtEarlier: string[];
+    correction?: string;
+  }): Promise<LlmResult<LectureOutlineDraft>> {
+    const started = Date.now();
+    return {
+      value: {
+        hook: `Why ${input.topicTitle} matters.`,
+        arc: `From the start of ${input.topicTitle} to its consequence.`,
+        payoff: `You can now explain ${input.topicTitle}.`,
+        beats: input.pages.map((page) => ({
+          pageNumber: page.pageNumber,
+          goal: `Teach page ${page.pageNumber}.`,
+          callback: input.priorTopics[0] ?? null,
+          foreshadow: null,
+          newHere: `New on page ${page.pageNumber}.`,
+          skip: null,
+          weight: 'full' as const,
+        })),
+      },
+      usage: this.usage(started, 500, 120),
+    };
+  }
+
+  /**
+   * Echoes the page so specs can assert the script came from it. A page
+   * containing UNGROUNDED produces a script the fake verifier rejects,
+   * which is how the retry and fail paths are exercised. The opening of
+   * a chapter is NOT written here: the processor speaks the plan's hook
+   * itself and hands the writer the words already spoken.
+   */
+  async lectureSegment(input: {
+    topicTitle: string;
+    hook: string;
+    arc: string;
+    beat: {
+      goal: string;
+      callback: string | null;
+      foreshadow: string | null;
+      newHere: string | null;
+      skip: string | null;
+      weight: 'full' | 'light';
+    };
+    pageText: string;
+    prevTail: string;
+    isFirstOfTopic: boolean;
+    isLastOfTopic: boolean;
+    bridge: boolean;
+    payoff: string | null;
+    opening: string | null;
+    taughtSoFar: string[];
+    comingLater: string[];
+    list: { items: number } | null;
+    correction?: string;
+    styleCorrection?: string;
+    strict?: boolean;
+  }): Promise<LlmResult<string>> {
+    const started = Date.now();
+    // A correction means the writer is being asked to try again; the fake
+    // complies, so a retry succeeds and only a repeat offender fails.
+    const offending =
+      input.pageText.includes('UNGROUNDED') && !input.correction
+        ? ' UNGROUNDED'
+        : '';
+    const lead = input.prevTail ? 'Carrying on. ' : '';
+    const closing = input.isLastOfTopic ? ' And that is the whole idea.' : '';
+    const body = input.bridge
+      ? 'Nothing to linger on here.'
+      : `${input.beat.goal} ${input.pageText.slice(0, 120)}`;
+    return {
+      value: `${lead}${body}${closing}${offending}`.trim(),
+      usage: this.usage(started, input.pageText.length / 4, 60),
+    };
+  }
+
+  async lectureVerify(input: {
+    script: string;
+    pageText: string;
+    context: {
+      plan: string;
+      prevTail: string;
+      neighbours: { pageNumber: number; text: string }[];
+    };
+  }): Promise<LlmResult<{ grounded: boolean; problems: string[] }>> {
+    const started = Date.now();
+    const grounded = !input.script.includes('UNGROUNDED');
+    return {
+      value: {
+        grounded,
+        problems: grounded ? [] : ['Invented a claim the page does not make'],
+      },
+      usage: this.usage(started, 200, 10),
     };
   }
 

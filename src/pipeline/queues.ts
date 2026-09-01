@@ -15,6 +15,8 @@ export const QUEUE = {
   export: 'export',
   learn: 'learn',
   import: 'import',
+  lectureChapter: 'lecture-chapter',
+  lectureVoice: 'lecture-voice',
 } as const;
 
 export type QueueName = (typeof QUEUE)[keyof typeof QUEUE];
@@ -39,6 +41,13 @@ export const QUEUE_SETTINGS: Record<
   learn: { concurrency: 2, attempts: 2, backoffMs: 20_000 },
   // Fetching someone else's website: gentle concurrency, patient retries.
   import: { concurrency: 2, attempts: 2, backoffMs: 20_000 },
+  // One job per chapter: plan it, then write its pages IN ORDER, because
+  // each page is written knowing the tail of the one before it. Chapters
+  // run alongside each other; pages inside one never do.
+  'lecture-chapter': { concurrency: 4, attempts: 2, backoffMs: 15_000 },
+  // Synthesis needs nothing from its neighbours, so it runs wide and off
+  // the writing critical path.
+  'lecture-voice': { concurrency: 8, attempts: 3, backoffMs: 10_000 },
 };
 
 export interface BaseJobData {
@@ -57,6 +66,18 @@ export type LearnJobData = BaseJobData;
 
 /** Fetching an imported document needs the same; the manifest rides on the row. */
 export type ImportJobData = BaseJobData;
+
+/** Planning one chapter's lecture and writing its pages in order. */
+export interface LectureChapterJobData extends BaseJobData {
+  topicId: string;
+  /** The chapter's place in the document, so chapter one is written first. */
+  orderIndex: number;
+}
+
+/** Turning one finished script into audio. */
+export interface LectureVoiceJobData extends BaseJobData {
+  pageNumber: number;
+}
 
 export interface ExportJobData extends BaseJobData {
   exportId: string;
@@ -96,3 +117,16 @@ export const exportJobId = (exportId: string) => `export-${exportId}`;
 
 export const importJobId = (documentId: string, contentVersion: number) =>
   `import-${documentId}-v${contentVersion}`;
+
+/** Stable ids, so re-running the fan-out is a no-op rather than a rewrite. */
+export const lectureChapterJobId = (
+  documentId: string,
+  topicId: string,
+  contentVersion: number,
+) => `lecture-chapter-${documentId}-v${contentVersion}-${topicId}`;
+
+export const lectureVoiceJobId = (
+  documentId: string,
+  page: number,
+  contentVersion: number,
+) => `lecture-voice-${documentId}-v${contentVersion}-${page}`;

@@ -10,6 +10,15 @@ export interface SimplifyJob extends PipelineJob {
   level: Level;
 }
 
+export interface LectureChapterJob extends PipelineJob {
+  topicId: string;
+  orderIndex: number;
+}
+
+export interface LectureVoiceJob extends PipelineJob {
+  pageNumber: number;
+}
+
 export interface ExportJob extends PipelineJob {
   exportId: string;
   level: Level;
@@ -26,6 +35,10 @@ export interface JobQueuePort {
   ): Promise<void>;
   enqueueSimplifyPages(jobs: SimplifyJob[]): Promise<void>;
   enqueueExport(job: ExportJob): Promise<void>;
+  /** One job per chapter: plan its arc, then write its pages in order. */
+  enqueueLectureChapters(jobs: LectureChapterJob[]): Promise<void>;
+  /** One job per finished script: turn it into audio. */
+  enqueueLectureVoices(jobs: LectureVoiceJob[]): Promise<void>;
   /** Writes a document about a topic, then starts the normal pipeline. */
   enqueueLearn(job: PipelineJob): Promise<void>;
   /** Fetches an imported document's pages, then starts the normal pipeline. */

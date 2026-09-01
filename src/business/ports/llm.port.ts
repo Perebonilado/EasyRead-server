@@ -20,6 +20,9 @@ export type LlmTask =
   | 'chat_clarify'
   | 'session_recap'
   | 'learn_interview'
+  | 'lecture_outline'
+  | 'lecture_segment'
+  | 'lecture_verify'
   | 'learn_outline'
   | 'learn_write'
   | 'visualize_query'
@@ -64,6 +67,28 @@ export interface LlmResult<T> {
   usage: LlmUsage;
 }
 
+/** The arc of one topic's lecture, before any of it is written. */
+export interface LectureOutlineDraft {
+  /** The cold open: why this material is worth the next ten minutes. */
+  hook: string;
+  /** The shape of the topic, in one or two sentences. */
+  arc: string;
+  /** What the listener can now do that they could not before; the last page lands on it. */
+  payoff: string;
+  beats: {
+    pageNumber: number;
+    goal: string;
+    callback: string | null;
+    foreshadow: string | null;
+    /** The one thing this page adds that the listener has not been taught. */
+    newHere: string;
+    /** What the page repeats from earlier, to pass in a clause or leave out. */
+    skip: string | null;
+    /** Light pages mostly restate, recap or list; they get the small budget. */
+    weight: 'full' | 'light';
+  }[];
+}
+
 export interface TopicDraft {
   title: string;
   shortDescription: string | null;
@@ -93,6 +118,88 @@ export interface LlmGatewayPort {
     digest: string;
     pageCount: number;
   }): Promise<LlmResult<TopicDraft[]>>;
+
+  /**
+   * Plans one topic's lecture: the hook, the arc, and a beat per page.
+   *
+   * Planned whole and cut into pages afterwards, because a lecture written
+   * page by page has no through-line — that is the difference between a
+   * teacher and an audiobook.
+   */
+  lectureOutline(input: {
+    title: string;
+    topicTitle: string;
+    pages: { pageNumber: number; text: string }[];
+    priorTopics: string[];
+    /** How the chapters before this one began, so this one begins differently. */
+    priorOpenings: string[];
+    /** The opening shape chosen for this chapter, with an example of it; see HOOK_SHAPES. */
+    suggestedShape: { name: string; direction: string; example: string };
+    /** What earlier chapters taught, one line per idea, so it is built on rather than repeated. */
+    taughtEarlier: string[];
+    /** Set when the previous plan was rejected; says exactly why. */
+    correction?: string;
+  }): Promise<LlmResult<LectureOutlineDraft>>;
+
+  /** Writes one page's spoken segment, inside the topic's plan. */
+  lectureSegment(input: {
+    topicTitle: string;
+    hook: string;
+    arc: string;
+    beat: {
+      goal: string;
+      callback: string | null;
+      foreshadow: string | null;
+      newHere: string | null;
+      skip: string | null;
+      weight: 'full' | 'light';
+    };
+    pageText: string;
+    prevTail: string;
+    isFirstOfTopic: boolean;
+    isLastOfTopic: boolean;
+    bridge: boolean;
+    /** What the chapter's last page lands on; null for plans written before it existed. */
+    payoff: string | null;
+    /**
+     * The chapter's opening, already spoken word for word; the writer
+     * continues from it. Null on every page but the first, and on a first
+     * page whose hook was not fit to be spoken.
+     */
+    opening: string | null;
+    /** Ideas already taught, in this chapter or earlier, not to be taught again. */
+    taughtSoFar: string[];
+    /** Ideas later pages of this chapter teach, not to be pre-empted. */
+    comingLater: string[];
+    /** The page is built around a list of this many items. */
+    list: { items: number } | null;
+    /** Set when rewriting after a failed grounding check. */
+    correction?: string;
+    /** Set when rewriting because of how the page read, not what it claimed. */
+    styleCorrection?: string;
+    /** The last attempt after a grounding failure: no flourishes, only what the page says. */
+    strict?: boolean;
+  }): Promise<LlmResult<string>>;
+
+  /**
+   * Checks a segment against the page it claims to teach. Blind to the
+   * writer's intent, like the item verifier: a lecturer who embellishes
+   * confidently is worse for a student than one who is dull.
+   */
+  lectureVerify(input: {
+    script: string;
+    pageText: string;
+    /**
+     * What the writer legitimately knew beyond this page. A fact taken
+     * from the plan or the page before is on one of these far more often
+     * than it is invented.
+     */
+    context: {
+      plan: string;
+      prevTail: string;
+      neighbours: { pageNumber: number; text: string }[];
+    };
+  }): Promise<LlmResult<{ grounded: boolean; problems: string[] }>>;
 
   simplifyPage(input: {
     task: 'simplify_standard' | 'simplify_easiest';

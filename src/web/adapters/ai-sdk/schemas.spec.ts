@@ -2,6 +2,7 @@ import {
   blocksSchema,
   diagramClozeSchema,
   diagramSchema,
+  lectureOutlineSchema,
   ocrPageSchema,
   previewSchema,
   questionCheckSchema,
@@ -189,6 +190,41 @@ describe('structured-output schemas', () => {
         verdict: 'maybe',
         explanation: 'x',
         page: 0,
+      }).success,
+    ).toBe(false);
+  });
+
+  it('lectureOutlineSchema pins the two page weights and wants the new-here line', () => {
+    const beat = {
+      pageNumber: 1,
+      goal: 'g',
+      callback: null,
+      foreshadow: null,
+      newHere: 'The one new thing',
+      skip: null,
+    };
+    const plan = (weight: string) => ({
+      hook: 'h',
+      arc: 'a',
+      payoff: 'p',
+      beats: [{ ...beat, weight }],
+    });
+    expect(lectureOutlineSchema.safeParse(plan('full')).success).toBe(true);
+    expect(lectureOutlineSchema.safeParse(plan('light')).success).toBe(true);
+    expect(lectureOutlineSchema.safeParse(plan('medium')).success).toBe(false);
+    expect(
+      lectureOutlineSchema.safeParse({
+        ...plan('full'),
+        beats: [
+          {
+            pageNumber: 1,
+            goal: 'g',
+            callback: null,
+            foreshadow: null,
+            skip: null,
+            weight: 'full',
+          },
+        ],
       }).success,
     ).toBe(false);
   });

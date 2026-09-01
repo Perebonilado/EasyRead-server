@@ -42,6 +42,8 @@ export interface TopicRepository {
     documentId: string,
     userId: string,
   ): Promise<(TopicRecord & { isRead: boolean })[]>;
+  /** Every topic in reading order, with no reader attached to them. */
+  listByDocument(documentId: string): Promise<TopicRecord[]>;
   count(documentId: string): Promise<number>;
   markRead(topicIds: string[], userId: string, now: Date): Promise<void>;
   markUnread(topicIds: string[], userId: string): Promise<void>;

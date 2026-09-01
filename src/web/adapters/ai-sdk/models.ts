@@ -19,6 +19,9 @@ const API_KEY_VAR: Record<ProviderName, string> = {
  * simplification is 300 calls a document, a highlight is one.
  */
 const TASK_VAR: Record<LlmTask, string> = {
+  lecture_outline: 'AI_MODEL_LECTURE_OUTLINE',
+  lecture_segment: 'AI_MODEL_LECTURE_SEGMENT',
+  lecture_verify: 'AI_MODEL_LECTURE_VERIFY',
   ocr_page: 'AI_MODEL_OCR',
   summarize: 'AI_MODEL_SUMMARIZE',
   topics_outline: 'AI_MODEL_TOPICS',

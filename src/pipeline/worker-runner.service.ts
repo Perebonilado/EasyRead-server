@@ -18,6 +18,8 @@ import { LearnProcessor } from './processors/learn.processor';
 import { ImportProcessor } from './processors/import.processor';
 import { ExtractProcessor } from './processors/extract.processor';
 import { OcrProcessor } from './processors/ocr.processor';
+import { LectureChapterProcessor } from './processors/lecture-chapter.processor';
+import { LectureVoiceProcessor } from './processors/lecture-voice.processor';
 import { SimplifyPageProcessor } from './processors/simplify.processor';
 import { SummarizeProcessor } from './processors/summarize.processor';
 import { TopicsProcessor } from './processors/topics.processor';
@@ -28,6 +30,8 @@ import {
   type ExportJobData,
   type LearnJobData,
   type ImportJobData,
+  type LectureChapterJobData,
+  type LectureVoiceJobData,
   type QueueName,
   type SimplifyJobData,
 } from './queues';
@@ -55,6 +59,8 @@ export class WorkerRunner implements OnModuleInit, OnModuleDestroy {
     private readonly topics: TopicsProcessor,
     private readonly embed: EmbedProcessor,
     private readonly simplify: SimplifyPageProcessor,
+    private readonly lectureChapter: LectureChapterProcessor,
+    private readonly lectureVoice: LectureVoiceProcessor,
     private readonly exports: ExportProcessor,
     private readonly learn: LearnProcessor,
     private readonly importer: ImportProcessor,
@@ -84,6 +90,10 @@ export class WorkerRunner implements OnModuleInit, OnModuleDestroy {
         this.exports.process(data, ctx),
       [QUEUE.learn]: (data: LearnJobData) => this.learn.process(data),
       [QUEUE.import]: (data: ImportJobData) => this.importer.process(data),
+      [QUEUE.lectureChapter]: (data: LectureChapterJobData, ctx) =>
+        this.lectureChapter.process(data, ctx),
+      [QUEUE.lectureVoice]: (data: LectureVoiceJobData, ctx) =>
+        this.lectureVoice.process(data, ctx),
     };
 
     for (const name of Object.values(QUEUE)) {

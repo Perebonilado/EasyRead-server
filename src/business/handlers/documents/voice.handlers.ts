@@ -55,6 +55,7 @@ import type { LlmGatewayPort } from '../../ports/llm.port';
 import type { VectorStorePort } from '../../ports/vector-store.port';
 import type { StoragePort } from '../../ports/storage.port';
 import {
+  LECTURE_REPOSITORY,
   PROFILE_CHANGE_REPOSITORY,
   AI_CALL_LOG_REPOSITORY,
   ASSESSMENT_REPOSITORY,
@@ -66,6 +67,10 @@ import {
   TOPIC_REPOSITORY,
 } from '../../repositories/tokens';
 import type { AiCallLogRepository } from '../../repositories/ai-call-log.repository';
+import type {
+  LectureRepository,
+  LectureSegmentRecord,
+} from '../../repositories/lecture.repository';
 import type { DocumentPageRepository } from '../../repositories/document-page.repository';
 import type {
   SummaryRepository,
@@ -214,6 +219,8 @@ export interface VoiceSessionRequest {
   revisitTopicId?: string;
   /** What the student said they want from today's session. */
   intent?: LessonIntent;
+  /** Where the lecture tape was when the student pressed the mic. */
+  lectureContext?: { pageNumber: number; offsetMs: number };
 }
 
 /**
@@ -666,6 +673,8 @@ export class StartVoiceSessionHandler extends AbstractRequestHandlerTemplate<
     @Inject(REALTIME) private readonly realtime: RealtimePort,
     private readonly elevenlabs: ElevenLabsRealtimeAdapter,
     @Inject(SUMMARY_REPOSITORY) private readonly summaries: SummaryRepository,
+    @Inject(LECTURE_REPOSITORY)
+    private readonly lectures: LectureRepository,
     @Inject(TOPIC_REPOSITORY) private readonly topics: TopicRepository,
     @Inject(ASSESSMENT_REPOSITORY)
     private readonly assessments: AssessmentRepository,
@@ -678,6 +687,7 @@ export class StartVoiceSessionHandler extends AbstractRequestHandlerTemplate<
     @Inject(AI_CALL_LOG_REPOSITORY) private readonly calls: AiCallLogRepository,
     private readonly access: DocumentAccessService,
     private readonly entitlements: EntitlementsService,
+    private readonly config: ConfigService,
   ) {
     super();
   }
@@ -704,7 +714,16 @@ export class StartVoiceSessionHandler extends AbstractRequestHandlerTemplate<
             cmd.revisitTopicId,
             cmd.intent,
           )
-        : this.chatInstructions(doc.props.title, summary);
+        : cmd.mode === 'lecture'
+          ? await this.lectureInstructions(
+              doc.id,
+              doc.props.title,
+              summary,
+              tutor,
+              cmd.pageNumber,
+              doc.contentVersion,
+            )
+          : this.chatInstructions(doc.props.title, summary);
 
     // Told once: the moment a session carrying the narration exists, the
     // changes are spent. If the model skips the sentence, the settings screen
@@ -735,13 +754,18 @@ export class StartVoiceSessionHandler extends AbstractRequestHandlerTemplate<
       : await this.realtime.createSession({
           instructions: baseInstructions,
           tools: cmd.mode === 'teach' ? TEACHING_TOOLS : undefined,
-          // The tutor's voice; chat mode keeps the configured default.
+          // The tutor's voice; chat mode keeps the configured default. A
+          // question asked mid-lecture takes the LECTURE's voice, so the
+          // answer sounds like the same teacher who was just speaking
+          // rather than a stranger taking over the call.
           voice:
             cmd.mode === 'teach'
               ? tutor.voice.provider === 'openai'
                 ? tutor.voice.voiceId
                 : tutor.voice.openaiFallback
-              : undefined,
+              : cmd.mode === 'lecture'
+                ? this.config.get<string>('AI_LECTURE_VOICE', 'alloy')
+                : undefined,
         });
 
     await this.calls.record({
@@ -761,6 +785,59 @@ export class StartVoiceSessionHandler extends AbstractRequestHandlerTemplate<
       ...session,
       baseInstructions,
     });
+  }
+
+  /**
+   * A question asked mid-lecture.
+   *
+   * The tape is paused and the student is holding the mic, so this is the
+   * same teacher, still mid-class, answering an interruption. It carries
+   * what has been said so far and one hard rule: answer, hand back, stop.
+   * The client restarts the tape; continuing to lecture here would run two
+   * lectures at once.
+   */
+  private async lectureInstructions(
+    documentId: string,
+    title: string,
+    summary: string | null,
+    tutor: Tutor,
+    pageNumber: number,
+    contentVersion: number,
+  ): Promise<string> {
+    const segments = await this.lectures
+      .listSegments(documentId, contentVersion)
+      .catch((): LectureSegmentRecord[] => []);
+
+    const current = segments.find(
+      (segment) => segment.pageNumber === pageNumber,
+    );
+    // What the student has actually heard in this chapter, up to and
+    // including the sentence they interrupted.
+    const heard = segments
+      .filter(
+        (segment) =>
+          segment.topicId === current?.topicId &&
+          segment.seq <= (current?.seq ?? 0) &&
+          segment.scriptText,
+      )
+      .map((segment) => segment.scriptText)
+      .join('\n\n')
+      .slice(-4_000);
+
+    return [
+      `You are ${tutor.name}, mid-lecture on the document "${title}". The student has just interrupted you with a question, and your lecture is paused while you answer.`,
+      `${tutor.persona}\n\nYour teaching style:\n${dialInstructions(tutor.dials)}`,
+      summary ? `What the document covers:\n${summary}` : null,
+      heard
+        ? `What you have said in this chapter so far, most recent last:\n${heard}`
+        : null,
+      'Answer THEIR question, briefly and directly, grounded in this document. Two to five sentences is usually right. Keep technical terms, names and numbers exactly as the document uses them.',
+      'If the document does not answer it, say so plainly rather than answering from general knowledge.',
+      'HOW THIS ENDS: answer, then hand back in one short line, the way a lecturer does when a question is done — something like "Good question. Back to it." Then STOP. Do not resume the lecture, do not teach the next idea, do not ask whether they have more questions. The lecture restarts by itself the moment you finish.',
+      'This is speech: short plain sentences, no lists, no headings, no markdown. Never mention scripts, tapes, pages, or that you were paused.',
+    ]
+      .filter(Boolean)
+      .join('\n\n');
   }
 
   private chatInstructions(title: string, summary: string | null): string {

@@ -5,6 +5,7 @@ import type { Block, RecapBody, TopicPreviewBody } from '../../../contracts';
 import type {
   GeneratedItem,
   ItemVerdict,
+  LectureOutlineDraft,
   LlmGatewayPort,
   LlmResult,
   LlmTask,
@@ -19,6 +20,9 @@ import {
   diagramSchema,
   sketchSchema,
   itemBatchSchema,
+  lectureOutlineSchema,
+  lectureSegmentSchema,
+  lectureVerifySchema,
   itemVerdictSchema,
   topicQuizSchema,
   previewSchema,
@@ -123,6 +127,202 @@ export class AiSdkLlmAdapter implements LlmGatewayPort, OnModuleInit {
 
     return {
       value: result.object.topics,
+      usage: this.usage(ref, result.usage, started),
+    };
+  }
+
+  async lectureOutline(input: {
+    title: string;
+    topicTitle: string;
+    pages: { pageNumber: number; text: string }[];
+    priorTopics: string[];
+    priorOpenings: string[];
+    suggestedShape: { name: string; direction: string; example: string };
+    taughtEarlier: string[];
+    correction?: string;
+  }): Promise<LlmResult<LectureOutlineDraft>> {
+    const started = Date.now();
+    const { generateObject } = await this.registry.modules();
+    const { model, ref } = await this.registry.languageModel('lecture_outline');
+
+    const result = await generateObject({
+      model,
+      schema: lectureOutlineSchema,
+      system: PROMPTS.lectureOutline,
+      prompt: [
+        `Document: ${input.title}`,
+        `Chapter: ${input.topicTitle}`,
+        input.priorTopics.length
+          ? `Chapters before this one in the document. The student may have read them, and has heard the ones marked "already lectured":\n- ${input.priorTopics.join('\n- ')}`
+          : 'This is the first chapter of the document, so there is nothing earlier to call back to.',
+        `Open with ${input.suggestedShape.name}: ${input.suggestedShape.direction}`,
+        `An opening of this shape, from an unrelated subject: "${input.suggestedShape.example}". Match the move, not the words.`,
+        input.priorOpenings.length
+          ? `Earlier chapters of this lecture opened like this. This one must open differently: a different shape, a different first word.\n- "${input.priorOpenings.join('"\n- "')}"`
+          : null,
+        input.taughtEarlier.length
+          ? `What earlier chapters of this lecture already taught. Do not plan to teach it again; plan to build on it:\n- ${input.taughtEarlier.join('\n- ')}`
+          : null,
+        input.correction
+          ? `Your previous plan was rejected: ${input.correction}. Fix exactly that and keep the rest.`
+          : null,
+        `Plan a beat for each of these pages: ${input.pages
+          .map((page) => page.pageNumber)
+          .join(', ')}.`,
+        ...input.pages.map(
+          (page) => `\nPage ${page.pageNumber}:\n${page.text}`,
+        ),
+      ]
+        .filter(Boolean)
+        .join('\n'),
+      maxRetries: this.maxRetries(),
+    });
+
+    return {
+      value: result.object,
+      usage: this.usage(ref, result.usage, started),
+    };
+  }
+
+  async lectureSegment(input: {
+    topicTitle: string;
+    hook: string;
+    arc: string;
+    beat: {
+      goal: string;
+      callback: string | null;
+      foreshadow: string | null;
+      newHere: string | null;
+      skip: string | null;
+      weight: 'full' | 'light';
+    };
+    pageText: string;
+    prevTail: string;
+    isFirstOfTopic: boolean;
+    isLastOfTopic: boolean;
+    bridge: boolean;
+    payoff: string | null;
+    opening: string | null;
+    taughtSoFar: string[];
+    comingLater: string[];
+    list: { items: number } | null;
+    correction?: string;
+    styleCorrection?: string;
+    strict?: boolean;
+  }): Promise<LlmResult<string>> {
+    const started = Date.now();
+    const { generateObject } = await this.registry.modules();
+    const { model, ref } = await this.registry.languageModel('lecture_segment');
+
+    const place = input.opening
+      ? `The chapter has just opened with these exact words, which the listener has just heard: "${input.opening}". Do not repeat or rephrase them. Carry straight on into the first idea.`
+      : input.isFirstOfTopic
+        ? `This is the OPENING of the chapter. Open it yourself in one or two sentences that make this hook's point without its words, then get into the first idea. The hook: ${input.hook}`
+        : input.prevTail
+          ? `You are mid-chapter. The last thing you said was:\n"${input.prevTail}"\nCarry straight on from it.`
+          : 'You are mid-chapter. Carry on with the chapter without greeting the student or starting it over.';
+
+    const list = input.list
+      ? input.list.items <= 6
+        ? `The page carries a list of ${input.list.items} items. Name them briefly first, in one breath, so the listener has the map, then explain only the ones that need it.`
+        : `The page carries a list of ${input.list.items} items. Do not read it out. Give the count, the two or three that carry the weight, and where the rest sit.`
+      : null;
+
+    const result = await generateObject({
+      model,
+      schema: lectureSegmentSchema,
+      system: PROMPTS.lectureSegment,
+      prompt: [
+        `Chapter: ${input.topicTitle}`,
+        `The shape of this chapter: ${input.arc}`,
+        place,
+        `What this stretch must accomplish: ${input.beat.goal}`,
+        input.beat.newHere
+          ? `New on this page, and where your words go: ${input.beat.newHere}`
+          : null,
+        input.beat.skip
+          ? `The page also repeats this, which the listener already has: ${input.beat.skip}. A clause at most, or nothing.`
+          : null,
+        input.beat.weight === 'light'
+          ? 'This is a LIGHT page: sixty to a hundred and ten words. Say what is new and move on.'
+          : null,
+        input.taughtSoFar.length
+          ? `Already taught in this lecture. Do not teach it again; if the page repeats it, a clause at most:\n- ${input.taughtSoFar.join('\n- ')}`
+          : null,
+        input.comingLater.length
+          ? `Still to come in this chapter, so leave it for then:\n- ${input.comingLater.join('\n- ')}`
+          : null,
+        list,
+        input.beat.callback
+          ? `Tie back to this earlier idea in passing: ${input.beat.callback}`
+          : null,
+        input.beat.foreshadow
+          ? `Plant this for later, in one line: ${input.beat.foreshadow}`
+          : null,
+        input.bridge
+          ? 'This page carries almost nothing: a figure or a divider. Say ONE short sentence that carries the student across it, and nothing more.'
+          : null,
+        input.isLastOfTopic
+          ? `This is the END of the chapter. Land this payoff in one sentence, in your own words, then stop. No summary, no preview of the next chapter. The payoff: ${input.payoff ?? 'the idea this chapter turned on'}`
+          : null,
+        input.correction
+          ? `Your previous attempt was rejected for going beyond the page: ${input.correction}. Rewrite it using ONLY what the page below supports.`
+          : null,
+        input.styleCorrection
+          ? `Your previous attempt was rejected for how it read: ${input.styleCorrection}. Rewrite it fixing exactly that, and keep every fact.`
+          : null,
+        input.strict
+          ? 'STRICT: this page has been rejected twice for leaving the page. Teach only what is written on the page below, in its own terms. No hook, no callback, no foreshadowing, no claims about why it matters beyond what the page itself says, and no number or name the page does not state.'
+          : null,
+        `\nThe page you are teaching:\n${input.pageText}`,
+      ]
+        .filter(Boolean)
+        .join('\n'),
+      maxRetries: this.maxRetries(),
+    });
+
+    return {
+      value: result.object.script,
+      usage: this.usage(ref, result.usage, started),
+    };
+  }
+
+  async lectureVerify(input: {
+    script: string;
+    pageText: string;
+    context: {
+      plan: string;
+      prevTail: string;
+      neighbours: { pageNumber: number; text: string }[];
+    };
+  }): Promise<LlmResult<{ grounded: boolean; problems: string[] }>> {
+    const started = Date.now();
+    const { generateObject } = await this.registry.modules();
+    const { model, ref } = await this.registry.languageModel('lecture_verify');
+
+    const result = await generateObject({
+      model,
+      schema: lectureVerifySchema,
+      system: PROMPTS.lectureVerify,
+      prompt: [
+        `The lecturer's plan for this chapter, drawn from all of its pages:\n${input.context.plan}`,
+        input.context.prevTail
+          ? `\nSpoken just before this segment:\n"${input.context.prevTail}"`
+          : null,
+        ...input.context.neighbours.map(
+          (page) =>
+            `\nNeighbouring page ${page.pageNumber} of the same chapter, for context:\n${page.text}`,
+        ),
+        `\nThe page this segment teaches:\n${input.pageText}`,
+        `\nScript:\n${input.script}`,
+      ]
+        .filter(Boolean)
+        .join('\n'),
+      maxRetries: this.maxRetries(),
+    });
+
+    return {
+      value: result.object,
       usage: this.usage(ref, result.usage, started),
     };
   }

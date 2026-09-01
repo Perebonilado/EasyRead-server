@@ -305,3 +305,38 @@ export const recapSchema = z.object({
     .max(5),
   nextStep: z.string().min(1).max(300),
 });
+
+/**
+ * A topic's lecture plan. Beats are capped generously: a chapter longer
+ * than this is planned in one pass anyway, and the segment writer falls
+ * back to the arc for any page the plan skipped.
+ */
+export const lectureOutlineSchema = z.object({
+  hook: z.string().min(1).max(900),
+  arc: z.string().min(1).max(600),
+  payoff: z.string().min(1).max(400),
+  beats: z
+    .array(
+      z.object({
+        pageNumber: z.number().int().min(1),
+        goal: z.string().min(1).max(300),
+        callback: z.string().max(300).nullable(),
+        foreshadow: z.string().max(300).nullable(),
+        newHere: z.string().max(200),
+        skip: z.string().max(300).nullable(),
+        weight: z.enum(['full', 'light']),
+      }),
+    )
+    .max(80),
+});
+
+/** One page of spoken lecture. */
+export const lectureSegmentSchema = z.object({
+  script: z.string().min(1).max(4000),
+});
+
+/** The grounding check: is every claim in the script on the page? */
+export const lectureVerifySchema = z.object({
+  grounded: z.boolean(),
+  problems: z.array(z.string().max(300)).max(8),
+});

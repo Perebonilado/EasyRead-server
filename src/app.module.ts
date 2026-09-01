@@ -56,6 +56,12 @@ import {
   StartVoiceSessionHandler,
 } from './business/handlers/documents/voice.handlers';
 import {
+  GenerateLectureHandler,
+  LectureAudioHandler,
+  LectureStatusHandler,
+  SaveLecturePositionHandler,
+} from './business/handlers/documents/lecture.handlers';
+import {
   GetMasteryHandler,
   RecordAssessmentHandler,
   UpdateLearnerProfileHandler,
@@ -143,6 +149,7 @@ import { LearnController } from './web/controllers/learn.controller';
 import { ConceptsController } from './web/controllers/concepts.controller';
 import { ReaderController } from './web/controllers/reader.controller';
 import { TutorsController } from './web/controllers/tutors.controller';
+import { LectureController } from './web/controllers/lecture.controller';
 import { VoiceController } from './web/controllers/voice.controller';
 import { GuidedController } from './web/controllers/guided.controller';
 import { DomainExceptionFilter } from './web/filters/domain-exception.filter';
@@ -194,6 +201,10 @@ const handlers = [
   GetExportHandler,
   PageAudioHandler,
   StartVoiceSessionHandler,
+  GenerateLectureHandler,
+  LectureStatusHandler,
+  LectureAudioHandler,
+  SaveLecturePositionHandler,
   DrawDiagramHandler,
   AskDiagramCheckHandler,
   ComputeHandler,
@@ -278,6 +289,7 @@ const queries = [
     ConceptsController,
     ExportsController,
     VoiceController,
+    LectureController,
     GuidedController,
     TutorsController,
     EventsController,

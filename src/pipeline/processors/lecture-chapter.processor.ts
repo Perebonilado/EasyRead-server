@@ -1,4 +1,5 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
+import type { LectureStyle } from '../../contracts';
 import { EVENT_BUS, JOB_QUEUE, LLM_GATEWAY } from '../../business/ports/tokens';
 import type { EventBusPort } from '../../business/ports/event-bus.port';
 import type { JobQueuePort } from '../../business/ports/job-queue.port';
@@ -20,7 +21,9 @@ import type {
 import type { TopicRepository } from '../../business/repositories/misc.repository';
 import {
   LECTURE_GENERATOR_VERSION,
+  LECTURE_STYLES,
   MAX_SEGMENT_ATTEMPTS,
+  WORD_BUDGET,
   acceptSegment,
   beatFor,
   estimateDurationMs,
@@ -28,9 +31,12 @@ import {
   hookShapeFor,
   joinOpening,
   listShape,
+  moveOffsetsOf,
   openingsBefore,
   outlineCorrection,
   scriptForTts,
+  sectionProblems,
+  sectionsToScript,
   styleProblems,
   tailOf,
   taughtLines,
@@ -63,8 +69,15 @@ interface PageText {
   text: string;
 }
 
+/** A finished page: the words, and where each of its ideas begins. */
+interface WrittenPage {
+  script: string;
+  moveOffsets: number[];
+}
+
 /**
- * One chapter's lecture: planned, then written page by page IN ORDER.
+ * One chapter's lecture, in one style: planned once, then written page by
+ * page IN ORDER.
  *
  * The order is the whole point. Each page is written knowing the tail of
  * the page before it, which is what makes a lecture rather than a stack
@@ -73,10 +86,16 @@ interface PageText {
  * parallelism lives. Synthesis is handed to its own queue so a chapter
  * keeps writing while its earlier pages are being voiced.
  *
+ * The plan (hook, arc, payoff, beats and their moves) is shared by every
+ * style of the lecture; only the words differ. That is what lets a
+ * learner switch style mid-chapter and land on the same idea. A job may
+ * start mid-chapter for exactly that reason: a learner is waiting there.
+ *
  * Two things the prompts could not make the writer do are done here in
  * code: the chapter's opening is the planner's hook spoken word for word
  * (the writer only continues from it), and a page that opens with a tic,
- * runs long, or ends on a recap is sent back with the reason.
+ * runs long, ends on a recap, or ignores its moves is sent back with the
+ * reason.
  */
 @Injectable()
 export class LectureChapterProcessor {
@@ -98,7 +117,9 @@ export class LectureChapterProcessor {
     job: LectureChapterJobData,
     context: JobContext,
   ): Promise<void> {
-    const { documentId, topicId, contentVersion, orderIndex } = job;
+    const { documentId, topicId, contentVersion, orderIndex, startAtPage } =
+      job;
+    const style: LectureStyle = job.style ?? 'steady';
 
     const doc = await this.documents.findById(documentId);
     if (!doc || doc.props.deletedAt) return;
@@ -108,17 +129,22 @@ export class LectureChapterProcessor {
     const topic = topics.find((candidate) => candidate.id === topicId);
     if (!topic) return;
 
-    // The rows were seeded when the lecture was asked for, so the shape of
-    // the whole lecture is visible before any model call is made.
+    // Every row of every style: the rows were seeded when the lecture was
+    // asked for, so the shape of the whole lecture is visible before any
+    // model call is made, and the other styles' pages are the fallback
+    // for continuity when this style starts mid-chapter.
     const all = await this.lectures.listSegments(documentId, contentVersion);
-    const rows = all.filter((row) => row.topicId === topicId);
+    const rows = all.filter(
+      (row) => row.topicId === topicId && row.style === style,
+    );
     if (!rows.length) return;
 
-    // How the chapters before this one began, so this one begins
-    // differently. Chapters are written alongside each other, so early in
-    // a lecture this is often empty and the rotating shape carries the
-    // variety alone.
-    const priorOpenings = openingsBefore(all, rows[0].seq);
+    // How the chapters before this one began, in this style, so this one
+    // begins differently. Chapters are written alongside each other, so
+    // early in a lecture this is often empty and the rotating shape
+    // carries the variety alone.
+    const sameStyle = all.filter((row) => row.style === style);
+    const priorOpenings = openingsBefore(sameStyle, rows[0].seq);
     const lectured = new Set(
       all
         .filter((row) => row.scriptText && row.topicId)
@@ -164,12 +190,22 @@ export class LectureChapterProcessor {
         doc.id,
         rows,
         contentVersion,
+        style,
         'The chapter could not be planned',
       );
       return;
     }
 
-    for (const row of rows) {
+    // A learner who switched style mid-chapter is waiting at startAtPage:
+    // that page and the rest of the chapter go first, the earlier pages
+    // are filled in after.
+    const from = startAtPage
+      ? rows.findIndex((row) => row.pageNumber === startAtPage)
+      : -1;
+    const ordered =
+      from > 0 ? [...rows.slice(from), ...rows.slice(0, from)] : rows;
+
+    for (const row of ordered) {
       // Resume-safe: a chapter retried by the queue picks up where it
       // stopped. The script's existence is the idempotency key, not the
       // status, because a written page legitimately sits in `voicing`.
@@ -180,7 +216,9 @@ export class LectureChapterProcessor {
         plan,
         row,
         rows,
+        all,
         contentVersion,
+        style,
         taughtEarlier,
       });
     }
@@ -368,26 +406,42 @@ export class LectureChapterProcessor {
     topicTitle: string;
     plan: LecturePlan;
     row: LectureSegmentRecord;
+    /** This chapter's rows in this style, in play order. */
     rows: LectureSegmentRecord[];
+    /** Every row of the document, all styles, for continuity fallbacks. */
+    all: LectureSegmentRecord[];
     contentVersion: number;
+    style: LectureStyle;
     taughtEarlier: string[];
   }): Promise<void> {
-    const { doc, plan, row, rows, contentVersion } = input;
+    const { doc, plan, row, rows, contentVersion, style } = input;
     await this.lectures.markSegmentWriting(
       doc.id,
       row.pageNumber,
       contentVersion,
+      style,
     );
 
     try {
       const page = await this.pages.findOne(doc.id, row.pageNumber);
       const pageText = (page?.text ?? '').slice(0, 6_000);
 
-      // The nearest EARLIER page that actually has words: pages the
-      // lecture skipped, and pages that failed, leave gaps.
-      const previous = rows
-        .filter((other) => other.seq < row.seq && other.scriptText)
-        .pop();
+      // The nearest EARLIER page that actually has words, in this style.
+      // Pages the lecture skipped, and pages that failed, leave gaps. When
+      // this style is being written from the middle of the chapter, the
+      // page before it exists only in the style the learner was listening
+      // to, and its tail is exactly the last thing they heard.
+      const previous =
+        rows.filter((other) => other.seq < row.seq && other.scriptText).pop() ??
+        input.all
+          .filter(
+            (other) =>
+              other.topicId === row.topicId &&
+              other.seq < row.seq &&
+              other.scriptText,
+          )
+          .sort((a, b) => a.seq - b.seq)
+          .pop();
 
       // The pages either side of this one in the chapter, for the
       // verifier. A fact the writer took from the plan or the page before
@@ -420,13 +474,16 @@ export class LectureChapterProcessor {
         .map((later) => beatFor(plan, later.pageNumber).goal)
         .slice(0, COMING_LATER_MAX);
 
-      const script = await this.writeChecked({
+      const written = await this.writeChecked({
         documentId: doc.id,
         topicTitle: input.topicTitle,
         plan,
+        style,
         pageNumber: row.pageNumber,
         pageText,
-        prevTail: previous?.scriptText ? tailOf(previous.scriptText) : '',
+        prevTail: previous?.scriptText
+          ? tailOf(previous.scriptText, LECTURE_STYLES[style].tailChars)
+          : '',
         isFirstOfTopic,
         isLastOfTopic: index === rows.length - 1,
         bridge: row.bridge,
@@ -439,28 +496,37 @@ export class LectureChapterProcessor {
 
       // Kept in memory too, so the next page in this loop sees it without
       // a round trip to the database.
-      row.scriptText = script;
+      row.scriptText = written.script;
+      row.moveOffsets = written.moveOffsets;
 
       await this.lectures.markSegmentWritten({
         documentId: doc.id,
         pageNumber: row.pageNumber,
         contentVersion,
-        scriptText: script,
-        durationMs: estimateDurationMs(scriptForTts(script)),
+        style,
+        scriptText: written.script,
+        moveOffsets: written.moveOffsets,
+        durationMs: estimateDurationMs(scriptForTts(written.script)),
       });
 
       await this.queue.enqueueLectureVoices([
-        { documentId: doc.id, contentVersion, pageNumber: row.pageNumber },
+        {
+          documentId: doc.id,
+          contentVersion,
+          pageNumber: row.pageNumber,
+          style,
+        },
       ]);
     } catch (error) {
       const message = (error as Error).message;
       this.logger.warn(
-        `${doc.id} p${row.pageNumber} lecture script failed — ${message}`,
+        `${doc.id} p${row.pageNumber} ${style} lecture script failed — ${message}`,
       );
       await this.lectures.markSegmentFailed({
         documentId: doc.id,
         pageNumber: row.pageNumber,
         contentVersion,
+        style,
         error: message,
       });
       await this.calls.record({
@@ -475,6 +541,7 @@ export class LectureChapterProcessor {
       await this.events.publish(doc.id, {
         type: 'lecture.segment_failed',
         pageNumber: row.pageNumber,
+        style,
       });
     }
   }
@@ -482,15 +549,17 @@ export class LectureChapterProcessor {
   /**
    * Writes the segment and sends it back while it needs to be: for how it
    * reads (a banned opener, a throat-clearing start, too many words, a
-   * recap ending) and for what it claims, while attempts remain. The last
-   * attempt is written strictly from the page when the material was left
-   * before, and is then kept unless it carries a figure the material does
-   * not contain: the verifier's word alone no longer makes a hole.
+   * recap ending, sections that ignore the moves) and for what it claims,
+   * while attempts remain. The last attempt is written strictly from the
+   * page when the material was left before, and is then kept unless it
+   * carries a figure the material does not contain: the verifier's word
+   * alone no longer makes a hole.
    */
   private async writeChecked(input: {
     documentId: string;
     topicTitle: string;
     plan: LecturePlan;
+    style: LectureStyle;
     pageNumber: number;
     pageText: string;
     prevTail: string;
@@ -502,9 +571,19 @@ export class LectureChapterProcessor {
     comingLater: string[];
     list: { items: number } | null;
     neighbours: NeighbourPage[];
-  }): Promise<string> {
+  }): Promise<WrittenPage> {
+    const { style } = input;
     const beat = beatFor(input.plan, input.pageNumber);
     const weight: BeatWeight = beat.weight ?? 'full';
+    // A bridge is one sentence whatever the plan says; a plan from before
+    // moves existed has one move, the page's goal.
+    const moves = input.bridge
+      ? [beat.goal]
+      : beat.moves?.length
+        ? beat.moves
+        : [beat.goal];
+    const spec = LECTURE_STYLES[style];
+    const budget = WORD_BUDGET[style][weight];
     const planText = describePlan(input.plan, beat);
     // Everything a figure in the script may legitimately come from.
     const sources = [
@@ -533,7 +612,11 @@ export class LectureChapterProcessor {
           newHere: beat.newHere ?? null,
           skip: beat.skip ?? null,
           weight,
+          moves,
         },
+        style,
+        styleDirection: spec.direction,
+        budget: { min: budget.min, max: budget.max },
         pageText: input.pageText,
         prevTail: input.prevTail,
         isFirstOfTopic: input.isFirstOfTopic,
@@ -559,14 +642,23 @@ export class LectureChapterProcessor {
         outcome: 'ok',
       });
 
-      // A page that reads badly goes straight back while there are
-      // attempts left: no verifier call is spent on words we will not keep.
-      const style = styleProblems(written.value, {
-        weight,
-        bridge: input.bridge,
-      });
-      if (style.length && attempt < MAX_SEGMENT_ATTEMPTS) {
-        styleCorrection = style.map((problem) => problem.detail).join('; ');
+      const sections = written.value.sections;
+      const continuation = sectionsToScript(sections);
+
+      // A page that reads badly, or that ignored its moves, goes straight
+      // back while there are attempts left: no verifier call is spent on
+      // words we will not keep.
+      const style_ = [
+        ...sectionProblems(sections, moves),
+        ...styleProblems(continuation, {
+          style,
+          weight,
+          bridge: input.bridge,
+          sections,
+        }),
+      ];
+      if (style_.length && attempt < MAX_SEGMENT_ATTEMPTS) {
+        styleCorrection = style_.map((problem) => problem.detail).join('; ');
         correction = undefined;
         continue;
       }
@@ -575,7 +667,7 @@ export class LectureChapterProcessor {
       // check would cost a model call per figure page.
       const verdict = input.bridge
         ? { grounded: true, problems: [] }
-        : await this.verifySegment(input.documentId, written.value, {
+        : await this.verifySegment(input.documentId, continuation, {
             plan: planText,
             prevTail: input.prevTail,
             neighbours: input.neighbours,
@@ -583,24 +675,25 @@ export class LectureChapterProcessor {
           });
       const figures = input.bridge
         ? []
-        : unsupportedFigures(written.value, sources);
+        : unsupportedFigures(continuation, sources);
 
       const decision = acceptSegment(
-        written.value,
+        continuation,
         verdict,
         attempt,
-        style,
+        style_,
         figures,
       );
       if (decision.action === 'accept') {
         if (decision.warning) {
           this.logger.warn(
-            `${input.documentId} p${input.pageNumber}: kept despite style (${decision.warning})`,
+            `${input.documentId} p${input.pageNumber} ${style}: kept despite style (${decision.warning})`,
           );
         }
-        return input.opening
-          ? joinOpening(input.opening, written.value)
-          : written.value;
+        const script = input.opening
+          ? joinOpening(input.opening, continuation)
+          : continuation;
+        return { script, moveOffsets: moveOffsetsOf(script, sections) };
       }
       if (decision.action === 'fail') {
         throw new Error(`Script left the page: ${decision.reason}`);
@@ -674,6 +767,7 @@ export class LectureChapterProcessor {
     documentId: string,
     rows: LectureSegmentRecord[],
     contentVersion: number,
+    style: LectureStyle,
     reason: string,
   ): Promise<void> {
     for (const row of rows) {
@@ -682,11 +776,13 @@ export class LectureChapterProcessor {
         documentId,
         pageNumber: row.pageNumber,
         contentVersion,
+        style,
         error: reason,
       });
       await this.events.publish(documentId, {
         type: 'lecture.segment_failed',
         pageNumber: row.pageNumber,
+        style,
       });
     }
   }
@@ -706,6 +802,7 @@ function describePlan(plan: LecturePlan, beat: LectureBeat): string {
     beat.newHere ? `New here: ${beat.newHere}` : null,
     beat.skip ? `Skip (taught earlier): ${beat.skip}` : null,
     beat.weight ? `Weight: ${beat.weight}` : null,
+    beat.moves?.length ? `Moves: ${beat.moves.join('; ')}` : null,
     beat.callback ? `Callback: ${beat.callback}` : null,
     beat.foreshadow ? `Foreshadow: ${beat.foreshadow}` : null,
   ]

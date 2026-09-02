@@ -6,6 +6,7 @@ import type {
   GeneratedItem,
   ItemVerdict,
   LectureOutlineDraft,
+  LectureSegmentDraft,
   LlmGatewayPort,
   LlmResult,
   LlmTask,
@@ -195,7 +196,11 @@ export class AiSdkLlmAdapter implements LlmGatewayPort, OnModuleInit {
       newHere: string | null;
       skip: string | null;
       weight: 'full' | 'light';
+      moves: string[];
     };
+    style: 'gentle' | 'steady' | 'brisk';
+    styleDirection: string;
+    budget: { min: number; max: number };
     pageText: string;
     prevTail: string;
     isFirstOfTopic: boolean;
@@ -209,7 +214,7 @@ export class AiSdkLlmAdapter implements LlmGatewayPort, OnModuleInit {
     correction?: string;
     styleCorrection?: string;
     strict?: boolean;
-  }): Promise<LlmResult<string>> {
+  }): Promise<LlmResult<LectureSegmentDraft>> {
     const started = Date.now();
     const { generateObject } = await this.registry.modules();
     const { model, ref } = await this.registry.languageModel('lecture_segment');
@@ -228,6 +233,13 @@ export class AiSdkLlmAdapter implements LlmGatewayPort, OnModuleInit {
         : `The page carries a list of ${input.list.items} items. Do not read it out. Give the count, the two or three that carry the weight, and where the rest sit.`
       : null;
 
+    const moves =
+      input.beat.moves.length > 1
+        ? `Write one section per move, in this order, each with its move number:\n${input.beat.moves
+            .map((move, index) => `${index}: ${move}`)
+            .join('\n')}`
+        : `This page has one move: ${input.beat.moves[0] ?? input.beat.goal}. Return one section, move 0.`;
+
     const result = await generateObject({
       model,
       schema: lectureSegmentSchema,
@@ -243,9 +255,11 @@ export class AiSdkLlmAdapter implements LlmGatewayPort, OnModuleInit {
         input.beat.skip
           ? `The page also repeats this, which the listener already has: ${input.beat.skip}. A clause at most, or nothing.`
           : null,
-        input.beat.weight === 'light'
-          ? 'This is a LIGHT page: sixty to a hundred and ten words. Say what is new and move on.'
-          : null,
+        moves,
+        `HOW TO TEACH IT (the ${input.style} style): ${input.styleDirection}`,
+        input.bridge
+          ? 'This page carries almost nothing: a figure or a divider. Say ONE short sentence that carries the student across it, and nothing more.'
+          : `Length: ${input.budget.min} to ${input.budget.max} words across all sections${input.beat.weight === 'light' ? ' (a light page: say what is new and move on)' : ''}.`,
         input.taughtSoFar.length
           ? `Already taught in this lecture. Do not teach it again; if the page repeats it, a clause at most:\n- ${input.taughtSoFar.join('\n- ')}`
           : null,
@@ -258,9 +272,6 @@ export class AiSdkLlmAdapter implements LlmGatewayPort, OnModuleInit {
           : null,
         input.beat.foreshadow
           ? `Plant this for later, in one line: ${input.beat.foreshadow}`
-          : null,
-        input.bridge
-          ? 'This page carries almost nothing: a figure or a divider. Say ONE short sentence that carries the student across it, and nothing more.'
           : null,
         input.isLastOfTopic
           ? `This is the END of the chapter. Land this payoff in one sentence, in your own words, then stop. No summary, no preview of the next chapter. The payoff: ${input.payoff ?? 'the idea this chapter turned on'}`
@@ -282,7 +293,7 @@ export class AiSdkLlmAdapter implements LlmGatewayPort, OnModuleInit {
     });
 
     return {
-      value: result.object.script,
+      value: result.object,
       usage: this.usage(ref, result.usage, started),
     };
   }

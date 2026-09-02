@@ -5,7 +5,7 @@ import {
   ForeignKey,
   Table,
 } from 'sequelize-typescript';
-import type { LectureSegmentStatus } from '../../../contracts';
+import type { LectureSegmentStatus, LectureStyle } from '../../../contracts';
 import { BaseModel } from './base';
 import { DocumentModel } from './document.model';
 import { TopicModel } from './topic.model';
@@ -64,11 +64,23 @@ export class LectureSegmentModel extends BaseModel {
   @Column({ type: DataType.INTEGER, allowNull: false })
   declare seq: number;
 
+  /** Which way of teaching this row is; the plan is shared across styles. */
+  @Column({
+    type: DataType.STRING(16),
+    allowNull: false,
+    defaultValue: 'steady',
+  })
+  declare style: LectureStyle;
+
   @Column({ type: DataType.STRING(16), allowNull: false })
   declare status: LectureSegmentStatus;
 
   @Column({ type: DataType.TEXT, allowNull: true })
   declare scriptText: string | null;
+
+  /** Character offsets where each move of the page begins in the script. */
+  @Column({ type: DataType.JSON, allowNull: true })
+  declare moveOffsets: number[] | null;
 
   @Column({ type: DataType.STRING(512), allowNull: true })
   declare audioKey: string | null;
@@ -105,4 +117,12 @@ export class LecturePositionModel extends BaseModel {
 
   @Column({ type: DataType.INTEGER, allowNull: false, defaultValue: 0 })
   declare offsetMs: number;
+
+  /** The style the student was listening in when they stopped. */
+  @Column({
+    type: DataType.STRING(16),
+    allowNull: false,
+    defaultValue: 'steady',
+  })
+  declare style: LectureStyle;
 }

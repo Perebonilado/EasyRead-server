@@ -13,6 +13,7 @@
  */
 
 import { createHash } from 'node:crypto';
+import type { LectureStyle } from '../../contracts';
 
 /**
  * The generator's identity, stamped on every row it writes and baked into
@@ -32,18 +33,121 @@ export const MIN_PAGE_CHARS = 120;
  */
 export const MAX_SEGMENT_ATTEMPTS = 3;
 
-/**
- * Spoken-word budgets by page weight. `min` and `max` are what the writer
- * is asked for; `hard` is where the code steps in and asks again. The
- * slack between them is deliberate: a writer told to cut from 230 words
- * loses its rhythm, one told to cut from 300 was not listening.
- */
-export const WORD_BUDGET = {
-  full: { min: 120, max: 220, hard: 260 },
-  light: { min: 60, max: 110, hard: 130 },
-} as const;
+export type BeatWeight = 'full' | 'light';
 
-export type BeatWeight = keyof typeof WORD_BUDGET;
+export interface WordBudget {
+  min: number;
+  max: number;
+  /** Where the code steps in and asks for the page again. */
+  hard: number;
+}
+
+/**
+ * Spoken-word budgets by style and page weight. `min` and `max` are what
+ * the writer is asked for; `hard` is where the code steps in and asks
+ * again. The slack between them is deliberate: a writer told to cut from
+ * 230 words loses its rhythm, one told to cut from 300 was not listening.
+ */
+export const WORD_BUDGET: Record<
+  LectureStyle,
+  Record<BeatWeight, WordBudget>
+> = {
+  gentle: {
+    full: { min: 180, max: 300, hard: 340 },
+    light: { min: 90, max: 150, hard: 180 },
+  },
+  steady: {
+    full: { min: 120, max: 220, hard: 260 },
+    light: { min: 60, max: 110, hard: 130 },
+  },
+  brisk: {
+    full: { min: 70, max: 140, hard: 170 },
+    light: { min: 40, max: 80, hard: 100 },
+  },
+};
+
+export const DEFAULT_LECTURE_STYLE: LectureStyle = 'steady';
+
+export interface LectureStyleSpec {
+  key: LectureStyle;
+  name: string;
+  /** One line in the tutor's voice, for the cards and the bar's popover. */
+  subtext: string;
+  /** The paragraph of direction the writer gets for this style. */
+  direction: string;
+  /**
+   * Whether a closing that sums up is sent back. Gentle says the idea a
+   * second way on purpose; the other two do not.
+   */
+  recapCheck: boolean;
+  /** How much of the previous page the writer is shown. */
+  tailChars: number;
+}
+
+/**
+ * The same lecture taught three ways.
+ *
+ * Learners differ in how much hand-holding they need, and one script
+ * written for the middle serves neither end. The plan of a chapter (hook,
+ * arc, payoff, beats and their moves) is shared by every style; only the
+ * words are written per style. The names say how the learner learns,
+ * which is the question they can answer, rather than how the tutor talks.
+ */
+export const LECTURE_STYLES: Record<LectureStyle, LectureStyleSpec> = {
+  gentle: {
+    key: 'gentle',
+    name: 'I learn slowly',
+    subtext: 'One idea at a time, in plain words, nothing assumed.',
+    direction: [
+      'Teach one idea at a time, in the smallest steps it breaks into, in',
+      'the simplest words that still keep every technical term the page',
+      "uses. Put a term's plain meaning right beside it the first time it",
+      'appears. Say why it matters before how it works. Before you leave the',
+      'page, say the one idea a second way, in different words. Use an',
+      'example only where the idea is hard to see without one, and never the',
+      'same kind of example twice in a row: breaking the idea down is the',
+      'method, examples are a tool. Short sentences. Assume nothing was known',
+      'before this page except what the lecture has already taught. Do not',
+      'explain this page the way you explained the last one.',
+    ].join(' '),
+    recapCheck: false,
+    tailChars: 500,
+  },
+  steady: {
+    key: 'steady',
+    name: 'I learn at a normal pace',
+    subtext: 'Clear and concrete, the way most people like to be taught.',
+    direction: [
+      'Concrete beats abstract: when the page gives a number, a case or an',
+      'example, build the explanation on it rather than around it. Say why',
+      'before what: before a mechanism, the problem it solves; before a rule,',
+      'the situation that needs it. Make the turn visible: most pages have a',
+      'moment where the obvious approach breaks or the real idea appears,',
+      'and that is where you slow down, because that is what the listener',
+      'remembers. At most one rhetorical question, and only if you answer it',
+      'yourself.',
+    ].join(' '),
+    recapCheck: true,
+    tailChars: 320,
+  },
+  brisk: {
+    key: 'brisk',
+    name: "I'm a quick learner",
+    subtext: 'The point, the example if there is one, and on to the next page.',
+    direction: [
+      "Say the idea, then the page's own example if it has one, then stop.",
+      'No scene-setting, no rhetorical questions, no callbacks beyond half a',
+      'sentence, no foreshadowing, no closing line. The listener is quick and',
+      'wants the point; when the page is taught, you are done.',
+    ].join(' '),
+    recapCheck: true,
+    tailChars: 320,
+  },
+};
+
+export function isLectureStyle(value: unknown): value is LectureStyle {
+  return value === 'gentle' || value === 'steady' || value === 'brisk';
+}
 
 /** A hook longer than this is a paragraph, not an opening. */
 export const MAX_HOOK_WORDS = 60;
@@ -84,6 +188,12 @@ export interface LectureBeat {
   skip?: string | null;
   /** Light pages mostly restate, recap or list; they get the small budget. */
   weight?: BeatWeight;
+  /**
+   * The two to four steps in which the page's idea is taught, in order.
+   * Shared by every style, which is what lets a learner switch style and
+   * land on the same idea. Plans from before moves existed have none.
+   */
+  moves?: string[];
 }
 
 export interface LecturePlan {
@@ -281,7 +391,13 @@ const RECAP_ENDING =
   /^(?:in (?:summary|short|conclusion)|to (?:sum up|summari[sz]e|recap)|so,? to recap|overall,|understanding .{0,60} is (?:key|crucial|essential))/i;
 
 export interface StyleProblem {
-  kind: 'banned_opener' | 'throat_clearing' | 'too_long' | 'recap_ending';
+  kind:
+    | 'banned_opener'
+    | 'throat_clearing'
+    | 'too_long'
+    | 'recap_ending'
+    | 'moves'
+    | 'repetition';
   detail: string;
 }
 
@@ -338,11 +454,18 @@ export function openerProblems(
 /**
  * Everything wrong with how a written page reads, as opposed to what it
  * claims. Each problem is a reason the writer is handed for another go;
- * none of them ever fails a page on its own.
+ * none of them ever fails a page on its own. The budget and the recap
+ * rule depend on the style being written.
  */
 export function styleProblems(
   text: string,
-  options: { weight: BeatWeight; bridge: boolean },
+  options: {
+    style: LectureStyle;
+    weight: BeatWeight;
+    bridge: boolean;
+    /** The sections as written, for the checks that look between them. */
+    sections?: LectureSection[];
+  },
 ): StyleProblem[] {
   const problems = openerProblems(text, 'script');
   const sentences = sentencesOf(text);
@@ -357,7 +480,7 @@ export function styleProblems(
 
   if (!options.bridge) {
     const words = wordCount(text);
-    const limit = WORD_BUDGET[options.weight];
+    const limit = WORD_BUDGET[options.style][options.weight];
     if (words > limit.hard) {
       problems.push({
         kind: 'too_long',
@@ -366,16 +489,149 @@ export function styleProblems(
     }
   }
 
-  const closing = sentences
-    .slice(-2)
-    .find((sentence) => RECAP_ENDING.test(sentence));
-  if (closing) {
-    problems.push({
-      kind: 'recap_ending',
-      detail: `Ends on a recap ("${firstWords(closing, 4)}"); land the idea instead`,
-    });
+  if (LECTURE_STYLES[options.style].recapCheck) {
+    const closing = sentences
+      .slice(-2)
+      .find((sentence) => RECAP_ENDING.test(sentence));
+    if (closing) {
+      problems.push({
+        kind: 'recap_ending',
+        detail: `Ends on a recap ("${firstWords(closing, 4)}"); land the idea instead`,
+      });
+    }
+  }
+
+  if (options.style === 'gentle' && options.sections) {
+    problems.push(...repeatedDevice(options.sections));
   }
   return problems;
+}
+
+// ── sections: the moves of a page, as written ───────────────────────────────
+
+export interface LectureSection {
+  /** Which of the beat's moves this section teaches, from 0. */
+  move: number;
+  text: string;
+}
+
+/** The spoken script: the sections in order, a paragraph break between them. */
+export function sectionsToScript(sections: LectureSection[]): string {
+  return sections
+    .map((section) => section.text.trim())
+    .filter(Boolean)
+    .join('\n\n');
+}
+
+/**
+ * Where each move begins in the final script, as character offsets. The
+ * opening is part of the first move, so the first offset is always 0. A
+ * section the joiner altered (a repeated hook stripped) falls back to
+ * where the section before it ended.
+ */
+export function moveOffsetsOf(
+  script: string,
+  sections: LectureSection[],
+): number[] {
+  const offsets: number[] = [];
+  let cursor = 0;
+  sections.forEach((section, index) => {
+    const text = section.text.trim();
+    const at = text ? script.indexOf(text, cursor) : -1;
+    offsets.push(index === 0 ? 0 : at >= 0 ? at : cursor);
+    if (at >= 0) cursor = at + text.length;
+  });
+  return offsets;
+}
+
+/**
+ * Which move a position in the audio falls in.
+ *
+ * Speech runs at a steady rate (a measured 15 characters a second, the
+ * same figure the duration estimate uses), so a time offset maps to a
+ * character offset by proportion, and the character offset to a move.
+ */
+export function moveAt(
+  offsetMs: number,
+  durationMs: number,
+  moveOffsets: number[],
+  scriptLength: number,
+): number {
+  if (!moveOffsets.length || durationMs <= 0 || scriptLength <= 0) return 0;
+  const chars = (Math.max(0, offsetMs) / durationMs) * scriptLength;
+  let move = 0;
+  moveOffsets.forEach((offset, index) => {
+    if (chars >= offset) move = index;
+  });
+  return move;
+}
+
+/** Where a move begins, in milliseconds of the page's audio. */
+export function offsetForMove(
+  move: number,
+  durationMs: number,
+  moveOffsets: number[],
+  scriptLength: number,
+): number {
+  if (!moveOffsets.length || durationMs <= 0 || scriptLength <= 0) return 0;
+  const index = Math.min(Math.max(0, move), moveOffsets.length - 1);
+  return Math.max(
+    0,
+    Math.floor((moveOffsets[index] / scriptLength) * durationMs),
+  );
+}
+
+/**
+ * The sections must follow the beat's moves in order, one each: that is
+ * what keeps three styles of the same page aligned. A plan from before
+ * moves existed has one move, and whatever comes back counts as it.
+ */
+export function sectionProblems(
+  sections: LectureSection[],
+  moves: string[],
+): StyleProblem[] {
+  if (!sections.length) {
+    return [{ kind: 'moves', detail: 'The page came back with no sections' }];
+  }
+  if (moves.length <= 1) return [];
+  const order = sections.map((section) => section.move);
+  const inOrder =
+    order.length === moves.length && order.every((move, i) => move === i);
+  if (inOrder) return [];
+  return [
+    {
+      kind: 'moves',
+      detail: `Write exactly one section per move, in this order: ${moves
+        .map((move, i) => `${i}: ${move}`)
+        .join('; ')}. You returned move numbers ${order.join(', ')}`,
+    },
+  ];
+}
+
+/**
+ * The gentle style's one failure mode: a pattern. Hand-holding invites
+ * "term, example, term, example", and a learner hears the shape of it
+ * within a page. Two ideas in a row that both open on an example go back.
+ */
+const EXAMPLE_DEVICE =
+  /^(?:for (?:example|instance)|think of|imagine|it(?:'s| is) (?:a bit )?(?:like|as if)|picture|say you|suppose|let(?:'s| us) say|consider)\b/i;
+
+export function repeatedDevice(sections: LectureSection[]): StyleProblem[] {
+  let previous: string | null = null;
+  for (const section of sections) {
+    const first = sentencesOf(section.text)[0] ?? '';
+    const device = EXAMPLE_DEVICE.exec(first)?.[0]?.toLowerCase() ?? null;
+    if (device && previous) {
+      return [
+        {
+          kind: 'repetition',
+          detail: `Two ideas in a row open on an example ("${previous}", then "${device}"). Break the second idea into its steps instead of illustrating it`,
+        },
+      ];
+    }
+    previous = device;
+  }
+  return [];
 }
 
 /**

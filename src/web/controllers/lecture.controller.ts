@@ -7,6 +7,7 @@ import {
   Param,
   Patch,
   Post,
+  Query,
   Res,
 } from '@nestjs/common';
 import type { Response } from 'express';
@@ -15,13 +16,20 @@ import {
   ArrayMaxSize,
   IsArray,
   IsBoolean,
+  IsIn,
   IsInt,
   IsOptional,
   IsUUID,
   Max,
   Min,
 } from 'class-validator';
-import type { LecturePosition, LectureStatusResponse } from '../../contracts';
+import {
+  LECTURE_STYLE_KEYS,
+  type LecturePosition,
+  type LectureStatusResponse,
+  type LectureStyle,
+} from '../../contracts';
+import { isLectureStyle } from '../../business/domain/lecture';
 import {
   GenerateLectureHandler,
   LectureAudioHandler,
@@ -43,10 +51,22 @@ class GenerateLectureDto {
   @IsUUID(undefined, { each: true })
   topicIds?: string[];
 
-  /** Discard the current lecture and write the whole document again. */
+  /** Discard this style of the lecture and write the whole document again. */
   @IsOptional()
   @IsBoolean()
   rewrite?: boolean;
+
+  /** Which way of teaching to write. Omitted means steady. */
+  @IsOptional()
+  @IsIn(LECTURE_STYLE_KEYS)
+  style?: LectureStyle;
+
+  /** A learner switched style here: this page's chapter is written first. */
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  startAtPage?: number;
 }
 
 class LecturePositionDto {
@@ -61,6 +81,19 @@ class LecturePositionDto {
   @Min(0)
   @Max(86_400_000)
   offsetMs!: number;
+
+  @IsOptional()
+  @IsIn(LECTURE_STYLE_KEYS)
+  style?: LectureStyle;
+}
+
+/** A `?style=` query, or nothing; anything else is a broken client. */
+function styleQuery(value: string | undefined): LectureStyle | undefined {
+  if (value === undefined || value === '') return undefined;
+  if (!isLectureStyle(value)) {
+    throw new ValidationError('That lecture style does not exist');
+  }
+  return value;
 }
 
 /**
@@ -91,6 +124,8 @@ export class LectureController {
       documentId,
       topicIds: body.topicIds,
       rewrite: body.rewrite,
+      style: body.style,
+      startAtPage: body.startAtPage,
     });
     return data;
   }
@@ -99,8 +134,13 @@ export class LectureController {
   async read(
     @CurrentUser('id') userId: string,
     @Param('id') documentId: string,
+    @Query('style') style?: string,
   ): Promise<LectureStatusResponse> {
-    const { data } = await this.status.handle({ userId, documentId });
+    const { data } = await this.status.handle({
+      userId,
+      documentId,
+      style: styleQuery(style),
+    });
     return data;
   }
 
@@ -115,6 +155,7 @@ export class LectureController {
     @Param('id') documentId: string,
     @Param('page') page: string,
     @Res() response: Response,
+    @Query('style') style?: string,
   ): Promise<void> {
     // Validated by hand: a whole-object @Param() DTO would also receive the
     // route's :id and be rejected by the global whitelist.
@@ -127,6 +168,7 @@ export class LectureController {
       userId,
       documentId,
       pageNumber,
+      style: styleQuery(style),
     });
 
     const { stream, size } = await this.storage.stream(data.fileRef);
@@ -148,6 +190,7 @@ export class LectureController {
       documentId,
       pageNumber: body.pageNumber,
       offsetMs: body.offsetMs,
+      style: body.style,
     });
     return data;
   }

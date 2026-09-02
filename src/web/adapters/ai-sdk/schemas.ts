@@ -325,14 +325,23 @@ export const lectureOutlineSchema = z.object({
         newHere: z.string().max(200),
         skip: z.string().max(300).nullable(),
         weight: z.enum(['full', 'light']),
+        moves: z.array(z.string().min(1).max(80)).min(1).max(4),
       }),
     )
     .max(80),
 });
 
-/** One page of spoken lecture. */
+/** One page of spoken lecture, one section per move of the beat. */
 export const lectureSegmentSchema = z.object({
-  script: z.string().min(1).max(4000),
+  sections: z
+    .array(
+      z.object({
+        move: z.number().int().min(0).max(8),
+        text: z.string().min(1).max(4000),
+      }),
+    )
+    .min(1)
+    .max(6),
 });
 
 /** The grounding check: is every claim in the script on the page? */

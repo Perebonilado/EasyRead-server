@@ -20,12 +20,14 @@ const segment = (
   topicId,
   pageNumber,
   seq,
+  style: 'steady',
   status: scriptText ? 'done' : 'pending',
   scriptText,
   audioKey: scriptText ? 'key' : null,
   durationMs: 1_000,
   bridge: false,
   attempts: 0,
+  moveOffsets: null,
 });
 
 /** Mirrors the selection the handler makes over the segment list. */

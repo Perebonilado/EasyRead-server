@@ -8,6 +8,7 @@ import type {
   GeneratedItem,
   ItemVerdict,
   LectureOutlineDraft,
+  LectureSegmentDraft,
   LlmGatewayPort,
   LlmResult,
   TopicDraft,
@@ -147,6 +148,7 @@ export class FakeLlmAdapter implements LlmGatewayPort {
           newHere: `New on page ${page.pageNumber}.`,
           skip: null,
           weight: 'full' as const,
+          moves: [`Teach page ${page.pageNumber}`],
         })),
       },
       usage: this.usage(started, 500, 120),
@@ -171,7 +173,11 @@ export class FakeLlmAdapter implements LlmGatewayPort {
       newHere: string | null;
       skip: string | null;
       weight: 'full' | 'light';
+      moves: string[];
     };
+    style: 'gentle' | 'steady' | 'brisk';
+    styleDirection: string;
+    budget: { min: number; max: number };
     pageText: string;
     prevTail: string;
     isFirstOfTopic: boolean;
@@ -185,7 +191,7 @@ export class FakeLlmAdapter implements LlmGatewayPort {
     correction?: string;
     styleCorrection?: string;
     strict?: boolean;
-  }): Promise<LlmResult<string>> {
+  }): Promise<LlmResult<LectureSegmentDraft>> {
     const started = Date.now();
     // A correction means the writer is being asked to try again; the fake
     // complies, so a retry succeeds and only a repeat offender fails.
@@ -198,8 +204,20 @@ export class FakeLlmAdapter implements LlmGatewayPort {
     const body = input.bridge
       ? 'Nothing to linger on here.'
       : `${input.beat.goal} ${input.pageText.slice(0, 120)}`;
+    // One section per move, so a multi-move plan is honoured the way the
+    // processor expects; the first carries the page, the rest name their
+    // move, and the closing lands on the last.
+    const moves = input.beat.moves.length ? input.beat.moves : ['all'];
+    const sections = moves.map((move, index) => {
+      const last = index === moves.length - 1;
+      const text =
+        index === 0
+          ? `${lead}${body}${last ? closing : ''}${offending}`
+          : `Then ${move.toLowerCase()}.${last ? closing : ''}`;
+      return { move: index, text: text.trim() };
+    });
     return {
-      value: `${lead}${body}${closing}${offending}`.trim(),
+      value: { sections },
       usage: this.usage(started, input.pageText.length / 4, 60),
     };
   }

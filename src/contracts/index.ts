@@ -523,6 +523,17 @@ export type LectureSegmentStatus =
   | 'done'
   | 'failed';
 
+/**
+ * How the lecture teaches: how much hand-holding, how much haste. The same
+ * plan is written three ways; a learner can switch between them mid-idea.
+ */
+export type LectureStyle = 'gentle' | 'steady' | 'brisk';
+export const LECTURE_STYLE_KEYS: readonly LectureStyle[] = [
+  'gentle',
+  'steady',
+  'brisk',
+];
+
 export interface LectureSegmentDto {
   pageNumber: number;
   status: LectureSegmentStatus;
@@ -530,6 +541,14 @@ export interface LectureSegmentDto {
   durationMs: number | null;
   /** A one-line crossing of a page with nothing to teach. */
   bridge: boolean;
+  /**
+   * Character offsets where each idea (move) of the page begins in the
+   * spoken script, so a position can be mapped to an idea and back when
+   * the learner switches style. One entry per move; empty until written.
+   */
+  moveOffsets: number[];
+  /** Length of the spoken script in characters; null until written. */
+  scriptLength: number | null;
 }
 
 export interface LectureTopicDto {
@@ -542,16 +561,27 @@ export interface LectureTopicDto {
 export interface LecturePosition {
   pageNumber: number;
   offsetMs: number;
+  style: LectureStyle;
+}
+
+/** How much of one style of the lecture exists. */
+export interface LectureStyleSummary {
+  total: number;
+  ready: number;
 }
 
 export interface LectureStatusResponse {
   /** True once any lecture row exists for the document's current version. */
   generated: boolean;
+  /** The style the segments below belong to. */
+  style: LectureStyle;
   totalSegments: number;
   readySegments: number;
   failedSegments: number;
   topics: LectureTopicDto[];
   position: LecturePosition | null;
+  /** What exists in every style, so the picker knows what a switch costs. */
+  styles: Record<LectureStyle, LectureStyleSummary>;
 }
 
 /**
@@ -897,8 +927,8 @@ export type SseEvent =
   | { type: 'import.progress'; fetched: number; total: number }
   | { type: 'document.failed'; step: PipelineStep; reason: string }
   /** A lecture page finished its audio and can be played now. */
-  | { type: 'lecture.segment_ready'; pageNumber: number }
-  | { type: 'lecture.segment_failed'; pageNumber: number }
+  | { type: 'lecture.segment_ready'; pageNumber: number; style: LectureStyle }
+  | { type: 'lecture.segment_failed'; pageNumber: number; style: LectureStyle }
   /** Replayed on connect so a reconnecting client never misses state. */
   | { type: 'snapshot'; document: DocumentDetail };
 

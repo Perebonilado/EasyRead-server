@@ -3,6 +3,7 @@ import {
   diagramClozeSchema,
   diagramSchema,
   lectureOutlineSchema,
+  lectureSegmentSchema,
   ocrPageSchema,
   previewSchema,
   questionCheckSchema,
@@ -202,6 +203,7 @@ describe('structured-output schemas', () => {
       foreshadow: null,
       newHere: 'The one new thing',
       skip: null,
+      moves: ['the problem', 'the mechanism'],
     };
     const plan = (weight: string) => ({
       hook: 'h',
@@ -227,5 +229,45 @@ describe('structured-output schemas', () => {
         ],
       }).success,
     ).toBe(false);
+  });
+
+  it('lectureOutlineSchema wants one to four moves per beat', () => {
+    const plan = (moves: string[]) => ({
+      hook: 'h',
+      arc: 'a',
+      payoff: 'p',
+      beats: [
+        {
+          pageNumber: 1,
+          goal: 'g',
+          callback: null,
+          foreshadow: null,
+          newHere: 'n',
+          skip: null,
+          weight: 'full',
+          moves,
+        },
+      ],
+    });
+    expect(lectureOutlineSchema.safeParse(plan(['one'])).success).toBe(true);
+    expect(lectureOutlineSchema.safeParse(plan([])).success).toBe(false);
+    expect(
+      lectureOutlineSchema.safeParse(plan(['a', 'b', 'c', 'd', 'e'])).success,
+    ).toBe(false);
+  });
+
+  it('lectureSegmentSchema wants numbered sections, not one script', () => {
+    expect(
+      lectureSegmentSchema.safeParse({
+        sections: [
+          { move: 0, text: 'The problem.' },
+          { move: 1, text: 'The mechanism.' },
+        ],
+      }).success,
+    ).toBe(true);
+    expect(lectureSegmentSchema.safeParse({ script: 'x' }).success).toBe(false);
+    expect(lectureSegmentSchema.safeParse({ sections: [] }).success).toBe(
+      false,
+    );
   });
 });

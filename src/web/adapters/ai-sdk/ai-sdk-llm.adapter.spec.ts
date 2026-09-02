@@ -337,7 +337,12 @@ describe('AiSdkLlmAdapter', () => {
   });
 
   it("tells the lecture writer the chapter has already opened, in the planner's words", async () => {
-    mock.reply({ script: 'Because they guess, and they are usually right.' });
+    mock.reply({
+      sections: [
+        { move: 0, text: 'Because they guess, and they are usually right.' },
+        { move: 1, text: 'Eviction is the guess made visible.' },
+      ],
+    });
 
     const result = await adapter.lectureSegment({
       topicTitle: 'Caches',
@@ -350,7 +355,11 @@ describe('AiSdkLlmAdapter', () => {
         newHere: 'Eviction is a bet about the future',
         skip: 'What a cache is',
         weight: 'light',
+        moves: ['why caches guess', 'what eviction is'],
       },
+      style: 'brisk',
+      styleDirection: 'Say the idea, then stop.',
+      budget: { min: 40, max: 80 },
       pageText: 'Caches evict.',
       prevTail: '',
       isFirstOfTopic: true,
@@ -363,13 +372,18 @@ describe('AiSdkLlmAdapter', () => {
       list: { items: 5 },
     });
 
-    expect(result.value).toContain('usually right');
+    expect(result.value.sections[0].text).toContain('usually right');
+    expect(result.value.sections).toHaveLength(2);
     const prompt = JSON.stringify(mock.calls[0].body.messages);
     expect(prompt).toContain('has just opened with these exact words');
     expect(prompt).toContain('Why do caches lie?');
     expect(prompt).not.toContain('Deliver this hook');
     expect(prompt).toContain('New on this page');
-    expect(prompt).toContain('LIGHT page');
+    expect(prompt).toContain('light page');
+    expect(prompt).toContain('HOW TO TEACH IT (the brisk style): Say the idea');
+    expect(prompt).toContain('Length: 40 to 80 words');
+    expect(prompt).toContain('0: why caches guess');
+    expect(prompt).toContain('1: what eviction is');
     expect(prompt).toContain('Already taught in this lecture');
     expect(prompt).toContain('Still to come in this chapter');
     expect(prompt).toContain('list of 5 items');
@@ -389,6 +403,7 @@ describe('AiSdkLlmAdapter', () => {
           newHere: 'n',
           skip: null,
           weight: 'full',
+          moves: ['the guess', 'the bet'],
         },
       ],
     });

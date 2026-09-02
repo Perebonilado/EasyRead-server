@@ -1,4 +1,5 @@
 import type { Level, PipelineStep } from '../contracts';
+import type { LectureStyle } from '../contracts';
 
 /**
  * One queue per job type, so each gets its own concurrency and rate limit —
@@ -72,11 +73,19 @@ export interface LectureChapterJobData extends BaseJobData {
   topicId: string;
   /** The chapter's place in the document, so chapter one is written first. */
   orderIndex: number;
+  /** Which way of teaching to write; the plan is shared across styles. */
+  style: LectureStyle;
+  /**
+   * Write from this page to the chapter's end first, then the earlier
+   * pages: a learner who switched style mid-chapter is waiting here.
+   */
+  startAtPage?: number;
 }
 
 /** Turning one finished script into audio. */
 export interface LectureVoiceJobData extends BaseJobData {
   pageNumber: number;
+  style: LectureStyle;
 }
 
 export interface ExportJobData extends BaseJobData {
@@ -123,10 +132,12 @@ export const lectureChapterJobId = (
   documentId: string,
   topicId: string,
   contentVersion: number,
-) => `lecture-chapter-${documentId}-v${contentVersion}-${topicId}`;
+  style: LectureStyle,
+) => `lecture-chapter-${documentId}-v${contentVersion}-${topicId}-${style}`;
 
 export const lectureVoiceJobId = (
   documentId: string,
   page: number,
   contentVersion: number,
-) => `lecture-voice-${documentId}-v${contentVersion}-${page}`;
+  style: LectureStyle,
+) => `lecture-voice-${documentId}-v${contentVersion}-${page}-${style}`;

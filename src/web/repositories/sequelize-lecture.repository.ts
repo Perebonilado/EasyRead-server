@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { InjectModel } from '@nestjs/sequelize';
-import type { LecturePosition } from '../../contracts';
+import type { LecturePosition, LectureStyle } from '../../contracts';
 import type {
   LecturePlanRecord,
   LectureRepository,
@@ -18,12 +18,14 @@ const toSegment = (row: LectureSegmentModel): LectureSegmentRecord => ({
   topicId: row.topicId,
   pageNumber: row.pageNumber,
   seq: row.seq,
+  style: row.style,
   status: row.status,
   scriptText: row.scriptText,
   audioKey: row.audioKey,
   durationMs: row.durationMs,
   bridge: row.bridge,
   attempts: row.attempts,
+  moveOffsets: row.moveOffsets ?? null,
 });
 
 @Injectable()
@@ -117,6 +119,7 @@ export class SequelizeLectureRepository implements LectureRepository {
       topicId: segment.topicId,
       pageNumber: segment.pageNumber,
       seq: segment.seq,
+      style: segment.style,
       bridge: segment.bridge,
       status: 'pending' as const,
     }));
@@ -127,9 +130,10 @@ export class SequelizeLectureRepository implements LectureRepository {
     documentId: string,
     pageNumber: number,
     contentVersion: number,
+    style: LectureStyle,
   ): Promise<LectureSegmentRecord | null> {
     const row = await this.segments.findOne({
-      where: { documentId, pageNumber, contentVersion },
+      where: { documentId, pageNumber, contentVersion, style },
     });
     return row ? toSegment(row) : null;
   }
@@ -137,10 +141,14 @@ export class SequelizeLectureRepository implements LectureRepository {
   async listSegments(
     documentId: string,
     contentVersion: number,
+    style?: LectureStyle,
   ): Promise<LectureSegmentRecord[]> {
     const rows = await this.segments.findAll({
-      where: { documentId, contentVersion },
-      order: [['seq', 'ASC']],
+      where: { documentId, contentVersion, ...(style ? { style } : {}) },
+      order: [
+        ['seq', 'ASC'],
+        ['style', 'ASC'],
+      ],
     });
     return rows.map(toSegment);
   }
@@ -149,10 +157,11 @@ export class SequelizeLectureRepository implements LectureRepository {
     documentId: string,
     pageNumber: number,
     contentVersion: number,
+    style: LectureStyle,
   ): Promise<void> {
     await this.segments.update(
       { status: 'writing' },
-      { where: { documentId, pageNumber, contentVersion } },
+      { where: { documentId, pageNumber, contentVersion, style } },
     );
   }
 
@@ -160,13 +169,16 @@ export class SequelizeLectureRepository implements LectureRepository {
     documentId: string;
     pageNumber: number;
     contentVersion: number;
+    style: LectureStyle;
     scriptText: string;
+    moveOffsets: number[];
     durationMs: number | null;
   }): Promise<void> {
     await this.segments.update(
       {
         status: 'voicing',
         scriptText: input.scriptText,
+        moveOffsets: input.moveOffsets,
         durationMs: input.durationMs,
         error: null,
       },
@@ -175,6 +187,7 @@ export class SequelizeLectureRepository implements LectureRepository {
           documentId: input.documentId,
           pageNumber: input.pageNumber,
           contentVersion: input.contentVersion,
+          style: input.style,
         },
       },
     );
@@ -184,6 +197,7 @@ export class SequelizeLectureRepository implements LectureRepository {
     documentId: string;
     pageNumber: number;
     contentVersion: number;
+    style: LectureStyle;
     audioKey: string;
     durationMs: number | null;
   }): Promise<void> {
@@ -199,6 +213,7 @@ export class SequelizeLectureRepository implements LectureRepository {
           documentId: input.documentId,
           pageNumber: input.pageNumber,
           contentVersion: input.contentVersion,
+          style: input.style,
         },
       },
     );
@@ -208,6 +223,7 @@ export class SequelizeLectureRepository implements LectureRepository {
     documentId: string;
     pageNumber: number;
     contentVersion: number;
+    style: LectureStyle;
     error: string;
   }): Promise<void> {
     const row = await this.segments.findOne({
@@ -215,6 +231,7 @@ export class SequelizeLectureRepository implements LectureRepository {
         documentId: input.documentId,
         pageNumber: input.pageNumber,
         contentVersion: input.contentVersion,
+        style: input.style,
       },
     });
     if (!row) return;
@@ -229,6 +246,7 @@ export class SequelizeLectureRepository implements LectureRepository {
     documentId: string,
     contentVersion: number,
     topicIds: string[],
+    style: LectureStyle,
   ): Promise<void> {
     if (!topicIds.length) return;
     await this.segments.update(
@@ -238,13 +256,19 @@ export class SequelizeLectureRepository implements LectureRepository {
           documentId,
           contentVersion,
           topicId: topicIds,
+          style,
           status: 'failed',
         },
       },
     );
   }
 
-  async clear(documentId: string): Promise<void> {
+  async clear(documentId: string, style?: LectureStyle): Promise<void> {
+    if (style) {
+      // One style goes; the plan is shared by the others and stays.
+      await this.segments.destroy({ where: { documentId, style } });
+      return;
+    }
     await this.segments.destroy({ where: { documentId } });
     await this.plans.destroy({ where: { documentId } });
   }
@@ -254,6 +278,7 @@ export class SequelizeLectureRepository implements LectureRepository {
     documentId: string;
     pageNumber: number;
     offsetMs: number;
+    style: LectureStyle;
   }): Promise<void> {
     const where = { userId: input.userId, documentId: input.documentId };
     const existing = await this.positions.findOne({ where });
@@ -261,6 +286,7 @@ export class SequelizeLectureRepository implements LectureRepository {
       await existing.update({
         pageNumber: input.pageNumber,
         offsetMs: input.offsetMs,
+        style: input.style,
       });
       return;
     }
@@ -269,6 +295,7 @@ export class SequelizeLectureRepository implements LectureRepository {
       ...where,
       pageNumber: input.pageNumber,
       offsetMs: input.offsetMs,
+      style: input.style,
     } as never);
   }
 
@@ -279,6 +306,8 @@ export class SequelizeLectureRepository implements LectureRepository {
     const row = await this.positions.findOne({
       where: { userId, documentId },
     });
-    return row ? { pageNumber: row.pageNumber, offsetMs: row.offsetMs } : null;
+    return row
+      ? { pageNumber: row.pageNumber, offsetMs: row.offsetMs, style: row.style }
+      : null;
   }
 }

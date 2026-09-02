@@ -1,8 +1,11 @@
 import { Inject, Injectable } from '@nestjs/common';
-import type {
-  LecturePosition,
-  LectureStatusResponse,
-  LectureTopicDto,
+import {
+  LECTURE_STYLE_KEYS,
+  type LecturePosition,
+  type LectureStatusResponse,
+  type LectureStyle,
+  type LectureStyleSummary,
+  type LectureTopicDto,
 } from '../../../contracts';
 import { NotFoundError, ValidationError } from '../../domain/errors/errors';
 import { JOB_QUEUE } from '../../ports/tokens';
@@ -14,6 +17,7 @@ import {
 } from '../../repositories/tokens';
 import type { DocumentPageRepository } from '../../repositories/document-page.repository';
 import {
+  DEFAULT_LECTURE_STYLE,
   LECTURE_GENERATOR_VERSION,
   cutPlanIntoJobs,
 } from '../../domain/lecture';
@@ -27,6 +31,11 @@ import { EntitlementsService } from './entitlements.service';
 export interface LectureRequest {
   userId: string;
   documentId: string;
+  /**
+   * Which way of teaching. Omitted means the style the student was last
+   * listening in, or steady before they have chosen.
+   */
+  style?: LectureStyle;
 }
 
 export interface GenerateLectureRequest extends LectureRequest {
@@ -40,10 +49,15 @@ export interface GenerateLectureRequest extends LectureRequest {
    */
   topicIds?: string[];
   /**
-   * Discard the whole lecture and write it again, under the current
-   * generator. The one way an existing lecture picks up new rules.
+   * Discard this style of the lecture and write it again, under the
+   * current generator. The one way an existing lecture picks up new rules.
    */
   rewrite?: boolean;
+  /**
+   * A learner switched style here, mid-chapter: this page and the rest of
+   * its chapter are written first, before anything else.
+   */
+  startAtPage?: number;
 }
 
 const IN_FLIGHT = new Set(['pending', 'writing', 'voicing']);
@@ -65,11 +79,30 @@ export class LectureStatusHandler extends AbstractRequestHandlerTemplate<
   protected async handleRequest(cmd: LectureRequest) {
     const doc = await this.access.require(cmd.documentId, cmd.userId);
 
-    const [topics, segments, position] = await Promise.all([
+    const [topics, everything, position] = await Promise.all([
       this.topics.listByDocument(doc.id),
       this.lectures.listSegments(doc.id, doc.contentVersion),
       this.lectures.findPosition(cmd.userId, doc.id),
     ]);
+
+    // The style asked for, else the one the student was listening in.
+    const style = cmd.style ?? position?.style ?? DEFAULT_LECTURE_STYLE;
+    const segments = everything.filter((segment) => segment.style === style);
+
+    // What exists in every style, so the picker and the bar know whether a
+    // switch is instant or has to be written first.
+    const styles = Object.fromEntries(
+      LECTURE_STYLE_KEYS.map((key) => {
+        const rows = everything.filter((segment) => segment.style === key);
+        return [
+          key,
+          {
+            total: rows.length,
+            ready: rows.filter((row) => row.status === 'done').length,
+          } satisfies LectureStyleSummary,
+        ];
+      }),
+    ) as Record<LectureStyle, LectureStyleSummary>;
 
     const byTopic = new Map<string, LectureTopicDto>();
     for (const topic of topics) {
@@ -87,6 +120,8 @@ export class LectureStatusHandler extends AbstractRequestHandlerTemplate<
         status: segment.status,
         durationMs: segment.durationMs,
         bridge: segment.bridge,
+        moveOffsets: segment.moveOffsets ?? [],
+        scriptLength: segment.scriptText?.length ?? null,
       });
     }
 
@@ -97,12 +132,14 @@ export class LectureStatusHandler extends AbstractRequestHandlerTemplate<
       .filter((entry) => entry.segments.length > 0);
 
     return CommandResponse.of({
-      generated: segments.length > 0,
+      generated: everything.length > 0,
+      style,
       totalSegments: segments.length,
       readySegments: segments.filter((s) => s.status === 'done').length,
       failedSegments: segments.filter((s) => s.status === 'failed').length,
       topics: ordered,
       position,
+      styles,
     } satisfies LectureStatusResponse);
   }
 }
@@ -148,21 +185,25 @@ export class GenerateLectureHandler extends AbstractRequestHandlerTemplate<
       );
     }
 
+    const style = cmd.style ?? DEFAULT_LECTURE_STYLE;
+
     if (cmd.rewrite) {
       // A chapter job still running would write its old script into the
       // fresh rows, and the queue cannot remove a running job, so a rewrite
       // waits for quiet. Positions are kept: the student resumes where
-      // they were, in the new lecture.
+      // they were, in the new lecture. Only this style goes; the plan is
+      // shared with the others and stays.
       const current = await this.lectures.listSegments(
         doc.id,
         doc.contentVersion,
+        style,
       );
       if (current.some((row) => IN_FLIGHT.has(row.status))) {
         throw new ValidationError(
           'The lecture is still being written. Wait for it to finish, then rewrite it',
         );
       }
-      await this.lectures.clear(doc.id);
+      await this.lectures.clear(doc.id, style);
     }
 
     // The whole document is cut in one pass EVERY time, even when only a
@@ -203,7 +244,7 @@ export class GenerateLectureHandler extends AbstractRequestHandlerTemplate<
       documentId: doc.id,
       contentVersion: doc.contentVersion,
       generatorVersion: LECTURE_GENERATOR_VERSION,
-      segments,
+      segments: segments.map((segment) => ({ ...segment, style })),
     });
 
     // Only chapters that actually own pages: one whose range is entirely
@@ -219,6 +260,7 @@ export class GenerateLectureHandler extends AbstractRequestHandlerTemplate<
     const existing = await this.lectures.listSegments(
       doc.id,
       doc.contentVersion,
+      style,
     );
     const retry = [...owning].filter((topicId) => {
       const rows = existing.filter((row) => row.topicId === topicId);
@@ -232,9 +274,16 @@ export class GenerateLectureHandler extends AbstractRequestHandlerTemplate<
         doc.id,
         doc.contentVersion,
         retry,
+        style,
       );
     }
 
+    // The chapter a learner is waiting in goes first, and starts writing at
+    // the page they are on.
+    const waitingIn = cmd.startAtPage
+      ? segments.find((segment) => segment.pageNumber === cmd.startAtPage)
+          ?.topicId
+      : undefined;
     await this.queue.enqueueLectureChapters(
       topics
         .filter((topic) => owning.has(topic.id))
@@ -243,10 +292,12 @@ export class GenerateLectureHandler extends AbstractRequestHandlerTemplate<
           contentVersion: doc.contentVersion,
           topicId: topic.id,
           orderIndex: topic.orderIndex,
+          style,
+          ...(waitingIn === topic.id ? { startAtPage: cmd.startAtPage } : {}),
         })),
     );
 
-    const { data } = await this.status.handle(cmd);
+    const { data } = await this.status.handle({ ...cmd, style });
     return CommandResponse.of(data);
   }
 }
@@ -274,6 +325,7 @@ export class LectureAudioHandler extends AbstractRequestHandlerTemplate<
       doc.id,
       cmd.pageNumber,
       doc.contentVersion,
+      cmd.style ?? DEFAULT_LECTURE_STYLE,
     );
     if (!segment?.audioKey || segment.status !== 'done') {
       throw new NotFoundError('Lecture audio for this page');
@@ -308,6 +360,7 @@ export class SaveLecturePositionHandler extends AbstractRequestHandlerTemplate<
     const position = {
       pageNumber: Math.max(1, Math.round(cmd.pageNumber)),
       offsetMs: Math.max(0, Math.round(cmd.offsetMs)),
+      style: cmd.style ?? DEFAULT_LECTURE_STYLE,
     };
     await this.lectures.savePosition({
       userId: cmd.userId,

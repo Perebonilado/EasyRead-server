@@ -1,6 +1,14 @@
 import {
   acceptSegment,
   contentHash,
+  LECTURE_STYLES,
+  WORD_BUDGET,
+  moveAt,
+  moveOffsetsOf,
+  offsetForMove,
+  repeatedDevice,
+  sectionProblems,
+  sectionsToScript,
   joinOpening,
   listShape,
   openerProblems,
@@ -389,8 +397,16 @@ describe('HOOK_SHAPES', () => {
 describe('styleProblems', () => {
   const words = (n: number) =>
     Array.from({ length: n }, () => 'word').join(' ');
-  const full = { weight: 'full' as const, bridge: false };
-  const light = { weight: 'light' as const, bridge: false };
+  const full = {
+    style: 'steady' as const,
+    weight: 'full' as const,
+    bridge: false,
+  };
+  const light = {
+    style: 'steady' as const,
+    weight: 'light' as const,
+    bridge: false,
+  };
 
   it('passes a clean full page', () => {
     expect(
@@ -416,9 +432,13 @@ describe('styleProblems', () => {
   });
 
   it('never measures a bridge page', () => {
-    expect(styleProblems(words(500), { weight: 'full', bridge: true })).toEqual(
-      [],
-    );
+    expect(
+      styleProblems(words(500), {
+        style: 'steady',
+        weight: 'full',
+        bridge: true,
+      }),
+    ).toEqual([]);
   });
 
   it('catches a page that clears its throat before starting', () => {
@@ -690,5 +710,158 @@ describe('unsupportedFigures', () => {
     expect(unsupportedFigures('1913 came, and 1913 went.', [page])).toEqual([
       '1913',
     ]);
+  });
+});
+
+describe('styles', () => {
+  it('names three ways of teaching, steady being what the lecture was', () => {
+    expect(Object.keys(LECTURE_STYLES)).toEqual(['gentle', 'steady', 'brisk']);
+    expect(LECTURE_STYLES.gentle.name).toBe('I learn slowly');
+    expect(LECTURE_STYLES.brisk.name).toBe("I'm a quick learner");
+  });
+
+  it('gives gentle more room and brisk less, light pages included', () => {
+    expect(WORD_BUDGET.gentle.full.max).toBeGreaterThan(
+      WORD_BUDGET.steady.full.max,
+    );
+    expect(WORD_BUDGET.brisk.full.max).toBeLessThan(
+      WORD_BUDGET.steady.full.max,
+    );
+    expect(WORD_BUDGET.gentle.light.hard).toBeGreaterThan(
+      WORD_BUDGET.brisk.light.hard,
+    );
+    expect(WORD_BUDGET.steady).toEqual({
+      full: { min: 120, max: 220, hard: 260 },
+      light: { min: 60, max: 110, hard: 130 },
+    });
+  });
+
+  it('measures each style against its own budget', () => {
+    const words = (n: number) =>
+      Array.from({ length: n }, () => 'word').join(' ');
+    const at = (style: 'gentle' | 'steady' | 'brisk', n: number) =>
+      styleProblems(words(n), { style, weight: 'full', bridge: false }).map(
+        (p) => p.kind,
+      );
+    expect(at('brisk', 180)).toEqual(['too_long']);
+    expect(at('steady', 180)).toEqual([]);
+    expect(at('gentle', 300)).toEqual([]);
+    expect(at('gentle', 341)).toEqual(['too_long']);
+  });
+
+  it('lets gentle say the idea a second way; the others must land', () => {
+    const recap = 'Prices rise. In summary, easy money lifts prices.';
+    const kinds = (style: 'gentle' | 'steady' | 'brisk') =>
+      styleProblems(recap, { style, weight: 'full', bridge: false }).map(
+        (p) => p.kind,
+      );
+    expect(kinds('gentle')).toEqual([]);
+    expect(kinds('steady')).toEqual(['recap_ending']);
+    expect(kinds('brisk')).toEqual(['recap_ending']);
+  });
+
+  it('keeps every style direction free of the writer tics it forbids', () => {
+    for (const spec of Object.values(LECTURE_STYLES)) {
+      expect(spec.direction).not.toMatch(/\bimagine\b/i);
+      expect(spec.direction.length).toBeGreaterThan(100);
+    }
+  });
+});
+
+describe('sections and moves', () => {
+  const sections = [
+    { move: 0, text: 'The problem: prices rise.' },
+    { move: 1, text: 'The mechanism: more money chases the same goods.' },
+    { move: 2, text: 'So the bank tightens.' },
+  ];
+
+  it('joins the sections into one script with paragraph breaks', () => {
+    expect(sectionsToScript(sections)).toBe(
+      'The problem: prices rise.\n\nThe mechanism: more money chases the same goods.\n\nSo the bank tightens.',
+    );
+  });
+
+  it('finds where each move begins, the first always at the start', () => {
+    const script = `Why prices rise. ${sectionsToScript(sections)}`;
+    const offsets = moveOffsetsOf(script, sections);
+    expect(offsets[0]).toBe(0);
+    expect(script.slice(offsets[1])).toMatch(/^The mechanism/);
+    expect(script.slice(offsets[2])).toMatch(/^So the bank/);
+  });
+
+  it('falls back to the previous end when a section was altered by the joiner', () => {
+    const script =
+      'Only the first two survive.\n\nThe mechanism: more money chases the same goods.';
+    const offsets = moveOffsetsOf(script, sections);
+    expect(offsets).toHaveLength(3);
+    expect(offsets[2]).toBe(script.length);
+  });
+
+  it('maps a position to its move and back by proportion', () => {
+    const scriptLength = 1000;
+    const durationMs = 60_000;
+    const offsets = [0, 400, 700];
+    expect(moveAt(0, durationMs, offsets, scriptLength)).toBe(0);
+    expect(moveAt(23_999, durationMs, offsets, scriptLength)).toBe(0);
+    expect(moveAt(24_000, durationMs, offsets, scriptLength)).toBe(1);
+    expect(moveAt(59_000, durationMs, offsets, scriptLength)).toBe(2);
+    expect(offsetForMove(1, durationMs, offsets, scriptLength)).toBe(24_000);
+    expect(offsetForMove(2, durationMs, offsets, scriptLength)).toBe(42_000);
+    // A shorter version of the same page lands on the same idea.
+    expect(offsetForMove(1, 30_000, [0, 150, 320], 500)).toBe(9_000);
+  });
+
+  it('is safe on a page with no moves or no duration yet', () => {
+    expect(moveAt(5_000, 0, [0, 10], 20)).toBe(0);
+    expect(moveAt(5_000, 10_000, [], 20)).toBe(0);
+    expect(offsetForMove(3, 10_000, [0, 10], 20)).toBe(5_000);
+    expect(offsetForMove(1, 10_000, [], 20)).toBe(0);
+  });
+
+  it('demands one section per move, in order', () => {
+    const moves = ['the problem', 'the mechanism'];
+    expect(sectionProblems(sections.slice(0, 2), moves)).toEqual([]);
+    expect(sectionProblems([sections[0]], moves)[0].detail).toMatch(
+      /one section per move/,
+    );
+    expect(sectionProblems([sections[1], sections[0]], moves)[0].kind).toBe(
+      'moves',
+    );
+    expect(sectionProblems([], moves)[0].detail).toMatch(/no sections/);
+  });
+
+  it('accepts whatever comes back for a page with one move, as older plans have', () => {
+    expect(sectionProblems(sections, ['the page'])).toEqual([]);
+    expect(sectionProblems(sections, [])).toEqual([]);
+  });
+});
+
+describe('repeatedDevice', () => {
+  it('sends back two ideas in a row that both open on an example', () => {
+    const problems = repeatedDevice([
+      { move: 0, text: 'For example, a bakery raises prices.' },
+      { move: 1, text: 'Think of a bank printing notes.' },
+    ]);
+    expect(problems.map((p) => p.kind)).toEqual(['repetition']);
+    expect(problems[0].detail).toContain('"for example", then "think of"');
+  });
+
+  it('allows an example when the next idea is broken down instead', () => {
+    expect(
+      repeatedDevice([
+        { move: 0, text: 'For example, a bakery raises prices.' },
+        { move: 1, text: 'The bank has two levers. The first is the rate.' },
+        { move: 2, text: "It's like a tap on a pipe." },
+      ]),
+    ).toEqual([]);
+  });
+
+  it('only counts an example that opens a section', () => {
+    expect(
+      repeatedDevice([
+        { move: 0, text: 'Prices rise. For example, bread costs more.' },
+        { move: 1, text: 'Wages lag. Think of the last raise you had.' },
+      ]),
+    ).toEqual([]);
   });
 });

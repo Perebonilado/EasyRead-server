@@ -86,7 +86,18 @@ export interface LectureOutlineDraft {
     skip: string | null;
     /** Light pages mostly restate, recap or list; they get the small budget. */
     weight: 'full' | 'light';
+    /**
+     * The two to four steps in which the page's idea is taught, as short
+     * labels in order. Every style of the lecture teaches the same moves,
+     * which is what lets a learner switch style mid-idea.
+     */
+    moves: string[];
   }[];
+}
+
+/** One page's script, in sections that follow the beat's moves in order. */
+export interface LectureSegmentDraft {
+  sections: { move: number; text: string }[];
 }
 
 export interface TopicDraft {
@@ -153,7 +164,14 @@ export interface LlmGatewayPort {
       newHere: string | null;
       skip: string | null;
       weight: 'full' | 'light';
+      /** The moves this page teaches, in order; one section is written per move. */
+      moves: string[];
     };
+    /** The style being written, and the paragraph of direction that defines it. */
+    style: 'gentle' | 'steady' | 'brisk';
+    styleDirection: string;
+    /** The style's spoken-word budget for this page, as the writer is told it. */
+    budget: { min: number; max: number };
     pageText: string;
     prevTail: string;
     isFirstOfTopic: boolean;
@@ -179,7 +197,7 @@ export interface LlmGatewayPort {
     styleCorrection?: string;
     /** The last attempt after a grounding failure: no flourishes, only what the page says. */
     strict?: boolean;
-  }): Promise<LlmResult<string>>;
+  }): Promise<LlmResult<LectureSegmentDraft>>;
 
   /**
    * Checks a segment against the page it claims to teach. Blind to the

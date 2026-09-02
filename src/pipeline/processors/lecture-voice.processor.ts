@@ -46,6 +46,7 @@ export class LectureVoiceProcessor {
 
   async process(job: LectureVoiceJobData, context: JobContext): Promise<void> {
     const { documentId, pageNumber, contentVersion } = job;
+    const style = job.style ?? 'steady';
 
     const doc = await this.documents.findById(documentId);
     if (!doc || doc.props.deletedAt) return;
@@ -55,6 +56,7 @@ export class LectureVoiceProcessor {
       documentId,
       pageNumber,
       contentVersion,
+      style,
     );
     // Nothing to voice yet: the writer has not committed a script. The
     // chapter job enqueues this only after it has, so this is a guard
@@ -71,7 +73,7 @@ export class LectureVoiceProcessor {
       // new audio, and a page written the same way gets the file it has.
       const key =
         `documents/${doc.id}/lecture/v${doc.contentVersion}/` +
-        `${pageNumber}-${voice}-${model}-${LECTURE_GENERATOR_VERSION}-${contentHash(spoken)}.mp3`;
+        `${pageNumber}-${style}-${voice}-${model}-${LECTURE_GENERATOR_VERSION}-${contentHash(spoken)}.mp3`;
 
       const cached = await this.storage.size(key).catch(() => null);
       if (!cached) {
@@ -97,6 +99,7 @@ export class LectureVoiceProcessor {
         documentId,
         pageNumber,
         contentVersion,
+        style,
         audioKey: key,
         durationMs: estimateDurationMs(spoken),
       });
@@ -105,6 +108,7 @@ export class LectureVoiceProcessor {
       await this.events.publish(documentId, {
         type: 'lecture.segment_ready',
         pageNumber,
+        style,
       });
     } catch (error) {
       const message = (error as Error).message;
@@ -118,6 +122,7 @@ export class LectureVoiceProcessor {
         documentId,
         pageNumber,
         contentVersion,
+        style,
         error: message,
       });
       await this.calls.record({
@@ -132,6 +137,7 @@ export class LectureVoiceProcessor {
       await this.events.publish(documentId, {
         type: 'lecture.segment_failed',
         pageNumber,
+        style,
       });
     }
   }

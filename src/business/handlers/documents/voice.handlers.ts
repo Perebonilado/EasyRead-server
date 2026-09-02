@@ -1,6 +1,7 @@
 import { Inject, Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import {
+  type LectureStyle,
   TEACH_TOOLS,
   type Block,
   type LessonIntent,
@@ -83,6 +84,7 @@ import { ComputeService } from './compute.service';
 import { ElevenLabsRealtimeAdapter } from '../../../web/adapters/elevenlabs-voice.adapters';
 import { DocumentAccessService } from './document-access.service';
 import { EntitlementsService } from './entitlements.service';
+import { DEFAULT_LECTURE_STYLE } from '../../domain/lecture';
 
 export type AudioLevel = 'original' | Level;
 
@@ -220,7 +222,12 @@ export interface VoiceSessionRequest {
   /** What the student said they want from today's session. */
   intent?: LessonIntent;
   /** Where the lecture tape was when the student pressed the mic. */
-  lectureContext?: { pageNumber: number; offsetMs: number };
+  lectureContext?: {
+    pageNumber: number;
+    offsetMs: number;
+    /** The style being listened to, so the tutor knows what was said. */
+    style?: LectureStyle;
+  };
 }
 
 /**
@@ -722,6 +729,7 @@ export class StartVoiceSessionHandler extends AbstractRequestHandlerTemplate<
               tutor,
               cmd.pageNumber,
               doc.contentVersion,
+              cmd.lectureContext?.style ?? DEFAULT_LECTURE_STYLE,
             )
           : this.chatInstructions(doc.props.title, summary);
 
@@ -803,9 +811,10 @@ export class StartVoiceSessionHandler extends AbstractRequestHandlerTemplate<
     tutor: Tutor,
     pageNumber: number,
     contentVersion: number,
+    style: LectureStyle,
   ): Promise<string> {
     const segments = await this.lectures
-      .listSegments(documentId, contentVersion)
+      .listSegments(documentId, contentVersion, style)
       .catch((): LectureSegmentRecord[] => []);
 
     const current = segments.find(

@@ -1,4 +1,5 @@
 import type { Level, PipelineStep } from '../../contracts';
+import type { LectureStyle } from '../../contracts';
 
 export interface PipelineJob {
   documentId: string;
@@ -13,10 +14,14 @@ export interface SimplifyJob extends PipelineJob {
 export interface LectureChapterJob extends PipelineJob {
   topicId: string;
   orderIndex: number;
+  style: LectureStyle;
+  /** Write this page and the rest of the chapter first: a learner is waiting there. */
+  startAtPage?: number;
 }
 
 export interface LectureVoiceJob extends PipelineJob {
   pageNumber: number;
+  style: LectureStyle;
 }
 
 export interface ExportJob extends PipelineJob {

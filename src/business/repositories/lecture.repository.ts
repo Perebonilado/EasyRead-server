@@ -1,4 +1,8 @@
-import type { LecturePosition, LectureSegmentStatus } from '../../contracts';
+import type {
+  LecturePosition,
+  LectureSegmentStatus,
+  LectureStyle,
+} from '../../contracts';
 
 export interface LecturePlanRecord {
   topicId: string;
@@ -10,12 +14,15 @@ export interface LectureSegmentRecord {
   topicId: string | null;
   pageNumber: number;
   seq: number;
+  style: LectureStyle;
   status: LectureSegmentStatus;
   scriptText: string | null;
   audioKey: string | null;
   durationMs: number | null;
   bridge: boolean;
   attempts: number;
+  /** Where each move of the page begins in the script; null until written. */
+  moveOffsets: number[] | null;
 }
 
 export interface LectureSegmentSeed {
@@ -23,6 +30,7 @@ export interface LectureSegmentSeed {
   pageNumber: number;
   seq: number;
   bridge: boolean;
+  style: LectureStyle;
 }
 
 /**
@@ -63,15 +71,19 @@ export interface LectureRepository {
     documentId: string,
     pageNumber: number,
     contentVersion: number,
+    style: LectureStyle,
   ): Promise<LectureSegmentRecord | null>;
+  /** Every row of the version, or one style's, in play order. */
   listSegments(
     documentId: string,
     contentVersion: number,
+    style?: LectureStyle,
   ): Promise<LectureSegmentRecord[]>;
   markSegmentWriting(
     documentId: string,
     pageNumber: number,
     contentVersion: number,
+    style: LectureStyle,
   ): Promise<void>;
   /**
    * The script is written but not yet voiced.
@@ -84,7 +96,9 @@ export interface LectureRepository {
     documentId: string;
     pageNumber: number;
     contentVersion: number;
+    style: LectureStyle;
     scriptText: string;
+    moveOffsets: number[];
     durationMs: number | null;
   }): Promise<void>;
   /** The audio exists: the page is playable. */
@@ -92,6 +106,7 @@ export interface LectureRepository {
     documentId: string;
     pageNumber: number;
     contentVersion: number;
+    style: LectureStyle;
     audioKey: string;
     durationMs: number | null;
   }): Promise<void>;
@@ -99,6 +114,7 @@ export interface LectureRepository {
     documentId: string;
     pageNumber: number;
     contentVersion: number;
+    style: LectureStyle;
     error: string;
   }): Promise<void>;
   /**
@@ -109,9 +125,13 @@ export interface LectureRepository {
     documentId: string,
     contentVersion: number,
     topicIds: string[],
+    style: LectureStyle,
   ): Promise<void>;
-  /** Wipes a document's lecture so it can be written again. */
-  clear(documentId: string): Promise<void>;
+  /**
+   * Wipes a document's lecture so it can be written again: one style's
+   * pages, or, with no style, every page and every plan.
+   */
+  clear(documentId: string, style?: LectureStyle): Promise<void>;
 
   // ── position ─────────────────────────────────────────────────────────────
   savePosition(input: {
@@ -119,6 +139,7 @@ export interface LectureRepository {
     documentId: string;
     pageNumber: number;
     offsetMs: number;
+    style: LectureStyle;
   }): Promise<void>;
   findPosition(
     userId: string,

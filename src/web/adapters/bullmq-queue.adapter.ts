@@ -143,6 +143,7 @@ export class BullmqQueueAdapter implements JobQueuePort, OnModuleDestroy {
               job.documentId,
               job.topicId,
               job.contentVersion,
+              job.style,
             ),
           )
           .catch(() => undefined),
@@ -159,11 +160,15 @@ export class BullmqQueueAdapter implements JobQueuePort, OnModuleDestroy {
             job.documentId,
             job.topicId,
             job.contentVersion,
+            job.style,
           ),
           // Lower is sooner in BullMQ, and zero means "no priority at
           // all" — hence the offset. Chapter one is written first so the
-          // student can start listening while the rest is still coming.
-          priority: Math.min(job.orderIndex + 1, 2_000_000),
+          // student can start listening while the rest is still coming;
+          // a chapter a learner is waiting in right now goes before all.
+          priority: job.startAtPage
+            ? 1
+            : Math.min(job.orderIndex + 2, 2_000_000),
         },
       })),
     );
@@ -184,6 +189,7 @@ export class BullmqQueueAdapter implements JobQueuePort, OnModuleDestroy {
               job.documentId,
               job.pageNumber,
               job.contentVersion,
+              job.style,
             ),
           )
           .catch(() => undefined),
@@ -200,6 +206,7 @@ export class BullmqQueueAdapter implements JobQueuePort, OnModuleDestroy {
             job.documentId,
             job.pageNumber,
             job.contentVersion,
+            job.style,
           ),
           // The front of the document is voiced first, for the same reason.
           priority: Math.min(job.pageNumber, 2_000_000),

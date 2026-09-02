@@ -51,7 +51,12 @@ function harness({
   existing = [],
 }: HarnessOptions = {}) {
   const seeded: LectureSegmentSeed[] = [];
-  const chapters: { topicId: string; orderIndex: number }[] = [];
+  const chapters: {
+    topicId: string;
+    orderIndex: number;
+    style?: string;
+    startAtPage?: number;
+  }[] = [];
   const reset: string[][] = [];
   /** What happened to the repository, in order. */
   const events: string[] = [];
@@ -75,8 +80,8 @@ function harness({
         events.push('seed');
         return Promise.resolve();
       },
-      clear: () => {
-        events.push('clear');
+      clear: (_d: string, style?: string) => {
+        events.push(style ? `clear:${style}` : 'clear');
         rows.length = 0;
         return Promise.resolve();
       },
@@ -88,7 +93,12 @@ function harness({
     } as never,
     {
       enqueueLectureChapters: (
-        jobs: { topicId: string; orderIndex: number }[],
+        jobs: {
+          topicId: string;
+          orderIndex: number;
+          style?: string;
+          startAtPage?: number;
+        }[],
       ) => {
         chapters.push(...jobs);
         return Promise.resolve();
@@ -138,12 +148,14 @@ describe('GenerateLectureHandler', () => {
         contentVersion: 2,
         topicId: 'topic-1',
         orderIndex: 0,
+        style: 'steady',
       },
       {
         documentId: 'doc-1',
         contentVersion: 2,
         topicId: 'topic-2',
         orderIndex: 1,
+        style: 'steady',
       },
     ]);
   });
@@ -260,7 +272,7 @@ describe('GenerateLectureHandler', () => {
     // A selection is ignored: a rewrite is always the whole document.
     await handler.handle({ ...request, rewrite: true, topicIds: ['topic-1'] });
 
-    expect(events).toEqual(['clear', 'seed']);
+    expect(events).toEqual(['clear:steady', 'seed']);
     expect(seeded.map((s) => s.pageNumber)).toEqual([1, 2, 3, 4]);
     expect(chapters.map((c) => c.topicId)).toEqual(['topic-1', 'topic-2']);
     // Nothing to reset: the failed row went with the rest.
@@ -278,6 +290,32 @@ describe('GenerateLectureHandler', () => {
       /still being written/,
     );
     expect(events).not.toContain('clear');
+  });
+
+  it('seeds and queues the style asked for, and only that style', async () => {
+    const { handler, seeded, chapters } = harness();
+    await handler.handle({ ...request, style: 'brisk' });
+    expect(seeded.every((s) => s.style === 'brisk')).toBe(true);
+    expect(chapters.map((c) => c.style)).toEqual(['brisk', 'brisk']);
+  });
+
+  it('rewrites one style and leaves the others alone', async () => {
+    const { handler, events } = harness({
+      existing: [{ topicId: 'topic-1', pageNumber: 1, status: 'done' }],
+    });
+    await handler.handle({ ...request, rewrite: true, style: 'gentle' });
+    expect(events[0]).toBe('clear:gentle');
+  });
+
+  it('puts the chapter a learner is waiting in first, starting at their page', async () => {
+    const { handler, chapters } = harness();
+    await handler.handle({ ...request, style: 'brisk', startAtPage: 3 });
+    expect(chapters.find((c) => c.topicId === 'topic-2')).toMatchObject({
+      startAtPage: 3,
+    });
+    expect(chapters.find((c) => c.topicId === 'topic-1')).not.toHaveProperty(
+      'startAtPage',
+    );
   });
 
   it('refuses a document with no chapters', async () => {

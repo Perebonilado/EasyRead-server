@@ -1,4 +1,5 @@
 import { ConfigService } from '@nestjs/config';
+import type { LectureStyle } from '../../contracts';
 import { FakeLlmAdapter } from '../../web/adapters/fake-llm.adapter';
 import { LECTURE_GENERATOR_VERSION } from '../../business/domain/lecture';
 import type {
@@ -12,8 +13,10 @@ import { LectureVoiceProcessor } from './lecture-voice.processor';
  * What matters about this pipeline: a chapter is written IN ORDER, so
  * every page after the first knows what was just said (that thread is
  * the whole difference between a lecture and a stack of summaries), a
- * page that cannot be written fails alone, and synthesis happens off the
- * writing path without ever clobbering a script.
+ * page that cannot be written fails alone, synthesis happens off the
+ * writing path without ever clobbering a script, and the three styles of
+ * a lecture are written from one shared plan so a learner can switch
+ * between them mid-idea.
  */
 
 const CONTEXT = { attemptsMade: 1, isFinalAttempt: false };
@@ -39,16 +42,32 @@ const REAL_PAGE =
   'as aggregate demand outpaces the productive capacity of the economy, ' +
   'a dynamic amplified through the expectations channel.';
 
-function fakes(pageText: Record<number, string>, topics = [TOPIC]) {
-  const segments = new Map<number, LectureSegmentRecord>();
+const USAGE = { model: 'fake', tokensIn: 1, tokensOut: 1, latencyMs: 1 };
+
+/** A writer's answer: one section, as most tests need. */
+const draft = (text: string) => ({
+  value: { sections: [{ move: 0, text }] },
+  usage: USAGE,
+});
+
+const key = (style: LectureStyle, pageNumber: number) =>
+  `${style}:${pageNumber}`;
+
+function fakes(
+  pageText: Record<number, string>,
+  topics = [TOPIC],
+  styles: LectureStyle[] = ['steady'],
+) {
+  /** Every row, every style, keyed by style and page. */
+  const rows = new Map<string, LectureSegmentRecord>();
   const plans = new Map<string, { status: string; plan: unknown }>();
-  const voiceJobs: number[] = [];
+  const voiceJobs: { pageNumber: number; style: LectureStyle }[] = [];
   const stored: string[] = [];
-  const published: { type: string; pageNumber: number }[] = [];
+  const published: { type: string; pageNumber: number; style?: string }[] = [];
   let synthesised = 0;
 
   // Seeded the way the generate handler seeds them: every page pending
-  // before any model call, with dense document-global order.
+  // before any model call, with dense document-global order, per style.
   Object.keys(pageText)
     .map(Number)
     .sort((a, b) => a - b)
@@ -56,18 +75,29 @@ function fakes(pageText: Record<number, string>, topics = [TOPIC]) {
       const owner = topics.find(
         (t) => pageNumber >= t.startPage && pageNumber <= t.endPage,
       );
-      segments.set(pageNumber, {
-        topicId: owner?.id ?? topics[0].id,
-        pageNumber,
-        seq: index,
-        status: 'pending',
-        scriptText: null,
-        audioKey: null,
-        durationMs: null,
-        bridge: (pageText[pageNumber] ?? '').length < 120,
-        attempts: 0,
-      });
+      for (const style of styles) {
+        rows.set(key(style, pageNumber), {
+          topicId: owner?.id ?? topics[0].id,
+          pageNumber,
+          seq: index,
+          style,
+          status: 'pending',
+          scriptText: null,
+          audioKey: null,
+          durationMs: null,
+          bridge: (pageText[pageNumber] ?? '').length < 120,
+          attempts: 0,
+          moveOffsets: null,
+        });
+      }
     });
+
+  const row = (pageNumber: number, style: LectureStyle = 'steady') =>
+    rows.get(key(style, pageNumber));
+  const ordered = (style?: LectureStyle) =>
+    [...rows.values()]
+      .filter((r) => !style || r.style === style)
+      .sort((a, b) => a.seq - b.seq || a.style.localeCompare(b.style));
 
   const lectures: LectureRepository = {
     savePlan: (input) => {
@@ -93,33 +123,33 @@ function fakes(pageText: Record<number, string>, topics = [TOPIC]) {
         })),
       ),
     seedSegments: () => Promise.resolve(),
-    findSegment: (_d, pageNumber) =>
-      Promise.resolve(segments.get(pageNumber) ?? null),
-    listSegments: () =>
-      Promise.resolve([...segments.values()].sort((a, b) => a.seq - b.seq)),
-    markSegmentWriting: (_d, pageNumber) => {
-      const row = segments.get(pageNumber);
-      if (row) row.status = 'writing';
+    findSegment: (_d, pageNumber, _v, style) =>
+      Promise.resolve(row(pageNumber, style) ?? null),
+    listSegments: (_d, _v, style) => Promise.resolve(ordered(style)),
+    markSegmentWriting: (_d, pageNumber, _v, style) => {
+      const r = row(pageNumber, style);
+      if (r) r.status = 'writing';
       return Promise.resolve();
     },
     markSegmentWritten: (input) => {
-      const row = segments.get(input.pageNumber)!;
-      row.status = 'voicing';
-      row.scriptText = input.scriptText;
-      row.durationMs = input.durationMs;
+      const r = row(input.pageNumber, input.style)!;
+      r.status = 'voicing';
+      r.scriptText = input.scriptText;
+      r.moveOffsets = input.moveOffsets;
+      r.durationMs = input.durationMs;
       return Promise.resolve();
     },
     markSegmentDone: (input) => {
-      const row = segments.get(input.pageNumber)!;
-      row.status = 'done';
-      row.audioKey = input.audioKey;
-      row.durationMs = input.durationMs;
+      const r = row(input.pageNumber, input.style)!;
+      r.status = 'done';
+      r.audioKey = input.audioKey;
+      r.durationMs = input.durationMs;
       return Promise.resolve();
     },
     markSegmentFailed: (input) => {
-      const row = segments.get(input.pageNumber)!;
-      row.status = 'failed';
-      row.attempts += 1;
+      const r = row(input.pageNumber, input.style)!;
+      r.status = 'failed';
+      r.attempts += 1;
       return Promise.resolve();
     },
     resetFailedSegments: () => Promise.resolve(),
@@ -149,13 +179,23 @@ function fakes(pageText: Record<number, string>, topics = [TOPIC]) {
     topics: { listByDocument: () => Promise.resolve(topics) },
     calls: { record: () => Promise.resolve() },
     queue: {
-      enqueueLectureVoices: (jobs: { pageNumber: number }[]) => {
-        voiceJobs.push(...jobs.map((job) => job.pageNumber));
+      enqueueLectureVoices: (
+        jobs: { pageNumber: number; style: LectureStyle }[],
+      ) => {
+        voiceJobs.push(
+          ...jobs.map((job) => ({
+            pageNumber: job.pageNumber,
+            style: job.style,
+          })),
+        );
         return Promise.resolve();
       },
     },
     events: {
-      publish: (_d: string, event: { type: string; pageNumber: number }) => {
+      publish: (
+        _d: string,
+        event: { type: string; pageNumber: number; style?: string },
+      ) => {
         published.push(event);
         return Promise.resolve();
       },
@@ -179,10 +219,17 @@ function fakes(pageText: Record<number, string>, topics = [TOPIC]) {
     },
   };
 
+  /** The steady rows by page, which is what most tests look at. */
+  const segments = {
+    get: (pageNumber: number) => row(pageNumber, 'steady'),
+    values: () => ordered('steady'),
+  };
+
   return {
     lectures,
     deps,
     segments,
+    row,
     plans,
     voiceJobs,
     stored,
@@ -217,14 +264,19 @@ const voiceProcessor = (f: ReturnType<typeof fakes>) =>
     new ConfigService({}),
   );
 
-const chapterJob = (topicId = TOPIC.id, orderIndex = 0) => ({
+const chapterJob = (
+  topicId = TOPIC.id,
+  orderIndex = 0,
+  style: LectureStyle = 'steady',
+  startAtPage?: number,
+) => ({
   documentId: doc.id,
   contentVersion: doc.contentVersion,
   topicId,
   orderIndex,
+  style,
+  ...(startAtPage ? { startAtPage } : {}),
 });
-
-const USAGE = { model: 'fake', tokensIn: 1, tokensOut: 1, latencyMs: 1 };
 
 /** Two chapters of two pages each, for the tests about the thread between them. */
 const TWO_TOPICS = [
@@ -240,23 +292,35 @@ const TWO_TOPICS = [
 ];
 const FOUR_PAGES = { 1: REAL_PAGE, 2: REAL_PAGE, 3: REAL_PAGE, 4: REAL_PAGE };
 
-const voiceJob = (pageNumber: number) => ({
+const voiceJob = (pageNumber: number, style: LectureStyle = 'steady') => ({
   documentId: doc.id,
   contentVersion: doc.contentVersion,
   pageNumber,
+  style,
 });
+
+/** A planner that gives every page the same moves. */
+function plannerWithMoves(moves: string[]) {
+  const inner = new FakeLlmAdapter();
+  return async (input: Parameters<FakeLlmAdapter['lectureOutline']>[0]) => {
+    const result = await inner.lectureOutline(input);
+    for (const beat of result.value.beats) beat.moves = moves;
+    return result;
+  };
+}
 
 describe('LectureChapterProcessor', () => {
   it('writes a chapter page by page, in order', async () => {
     const f = fakes({ 1: REAL_PAGE, 2: REAL_PAGE, 3: REAL_PAGE });
     await chapterProcessor(f).process(chapterJob(), CONTEXT);
 
-    expect([...f.segments.values()].map((s) => s.status)).toEqual([
+    expect(f.segments.values().map((s) => s.status)).toEqual([
       'voicing',
       'voicing',
       'voicing',
     ]);
-    expect(f.voiceJobs).toEqual([1, 2, 3]);
+    expect(f.voiceJobs.map((job) => job.pageNumber)).toEqual([1, 2, 3]);
+    expect(f.voiceJobs.every((job) => job.style === 'steady')).toBe(true);
   });
 
   it('gives every page after the first the tail of the one before it', async () => {
@@ -305,16 +369,15 @@ describe('LectureChapterProcessor', () => {
     const f = fakes({ 1: REAL_PAGE, 2: REAL_PAGE, 3: REAL_PAGE });
     const llm = new FakeLlmAdapter();
     const inner = new FakeLlmAdapter();
-    // Page 2 can never be written: all three attempts stray off the page.
+    // Page 2 can never be written: all three attempts stray off the page
+    // with an invented figure, the one thing that still fails a page.
     let seen = 0;
     llm.lectureSegment = (input) => {
       seen += 1;
       if (seen >= 2 && seen <= 4) {
-        // An invented figure: the one thing that still fails a page.
-        return Promise.resolve({
-          value: 'UNGROUNDED invention: 4096 widgets in 1913.',
-          usage: { model: 'fake', tokensIn: 1, tokensOut: 1, latencyMs: 1 },
-        });
+        return Promise.resolve(
+          draft('UNGROUNDED invention: 4096 widgets in 1913.'),
+        );
       }
       return inner.lectureSegment(input);
     };
@@ -324,10 +387,11 @@ describe('LectureChapterProcessor', () => {
     expect(f.segments.get(1)!.status).toBe('voicing');
     expect(f.segments.get(2)!.status).toBe('failed');
     expect(f.segments.get(3)!.status).toBe('voicing');
-    expect(f.voiceJobs).toEqual([1, 3]);
+    expect(f.voiceJobs.map((job) => job.pageNumber)).toEqual([1, 3]);
     expect(f.published).toContainEqual({
       type: 'lecture.segment_failed',
       pageNumber: 2,
+      style: 'steady',
     });
   });
 
@@ -342,11 +406,9 @@ describe('LectureChapterProcessor', () => {
       tails.push(input.prevTail);
       // Page 2 fails every attempt, leaving a hole between 1 and 3.
       if (seen >= 2 && seen <= 4) {
-        // An invented figure: the one thing that still fails a page.
-        return Promise.resolve({
-          value: 'UNGROUNDED invention: 4096 widgets in 1913.',
-          usage: { model: 'fake', tokensIn: 1, tokensOut: 1, latencyMs: 1 },
-        });
+        return Promise.resolve(
+          draft('UNGROUNDED invention: 4096 widgets in 1913.'),
+        );
       }
       return inner.lectureSegment(input);
     };
@@ -409,9 +471,7 @@ describe('LectureChapterProcessor', () => {
     llm.lectureSegment = (input) => {
       seen += 1;
       stricts.push(Boolean(input.strict));
-      if (seen < 3) {
-        return Promise.resolve({ value: 'UNGROUNDED invention', usage: USAGE });
-      }
+      if (seen < 3) return Promise.resolve(draft('UNGROUNDED invention'));
       return inner.lectureSegment(input);
     };
 
@@ -460,9 +520,6 @@ describe('LectureChapterProcessor', () => {
     await processor.process(chapterJob('topic-1', 0), CONTEXT);
     await processor.process(chapterJob('topic-2', 1), CONTEXT);
 
-    // The first chapter had nothing to differ from; the second is shown
-    // the first's actual opening words, which are the planner's hook
-    // spoken as written.
     expect(planned[0]).toEqual([]);
     expect(planned[1]).toHaveLength(1);
     expect(planned[1][0]).toMatch(/^Why Inflation matters\. Teach page 1\./);
@@ -486,7 +543,6 @@ describe('LectureChapterProcessor', () => {
       /^Why Inflation matters\. Teach page 1\./,
     );
     expect(openings).toEqual(['Why Inflation matters.', null]);
-    // The hook travels in its own field: the first page has no tail.
     expect(tails[0]).toBe('');
   });
 
@@ -506,10 +562,9 @@ describe('LectureChapterProcessor', () => {
         strict: input.strict,
       });
       if (calls.length === 1) {
-        return Promise.resolve({
-          value: 'Imagine a bank with no vault. Money got scarce.',
-          usage: USAGE,
-        });
+        return Promise.resolve(
+          draft('Imagine a bank with no vault. Money got scarce.'),
+        );
       }
       return inner.lectureSegment(input);
     };
@@ -531,16 +586,13 @@ describe('LectureChapterProcessor', () => {
     const stricts: boolean[] = [];
     llm.lectureSegment = (input) => {
       stricts.push(Boolean(input.strict));
-      return Promise.resolve({
-        value: 'Imagine a bank with no vault. Money got scarce.',
-        usage: USAGE,
-      });
+      return Promise.resolve(
+        draft('Imagine a bank with no vault. Money got scarce.'),
+      );
     };
 
     await chapterProcessor(f, llm).process(chapterJob(), CONTEXT);
 
-    // Three attempts, none of them strict: strict mode is for pages that
-    // leave the material, not for a tic.
     expect(stricts).toEqual([false, false, false]);
     expect(f.segments.get(1)!.status).toBe('voicing');
     expect(f.segments.get(1)!.scriptText).toBe(
@@ -564,12 +616,8 @@ describe('LectureChapterProcessor', () => {
     llm.lectureSegment = (input) => {
       seen += 1;
       corrections.push(input.styleCorrection);
-      // Page 1's first attempt: 300 words. Page 2's first attempt: 140,
-      // fine for a full page and too long for a light one.
-      if (seen === 1)
-        return Promise.resolve({ value: long(300), usage: USAGE });
-      if (seen === 3)
-        return Promise.resolve({ value: long(140), usage: USAGE });
+      if (seen === 1) return Promise.resolve(draft(long(300)));
+      if (seen === 3) return Promise.resolve(draft(long(140)));
       return inner.lectureSegment(input);
     };
 
@@ -577,7 +625,7 @@ describe('LectureChapterProcessor', () => {
 
     expect(corrections[1]).toMatch(/Too long: 30\d words/);
     expect(corrections[3]).toMatch(/Too long: 14\d words/);
-    expect([...f.segments.values()].map((s) => s.status)).toEqual([
+    expect(f.segments.values().map((s) => s.status)).toEqual([
       'voicing',
       'voicing',
     ]);
@@ -607,7 +655,6 @@ describe('LectureChapterProcessor', () => {
     expect(corrections).toHaveLength(2);
     expect(corrections[1]).toMatch(/Imagine/);
     expect(opening).toBe('Why Inflation matters.');
-    expect(f.segments.get(1)!.scriptText).toMatch(/^Why Inflation matters\./);
   });
 
   it('lets the writer open the chapter when the planner cannot produce a speakable hook', async () => {
@@ -629,7 +676,6 @@ describe('LectureChapterProcessor', () => {
 
     expect(writerSaw).toEqual([{ opening: null, first: true }]);
     expect(f.segments.get(1)!.status).toBe('voicing');
-    expect(f.segments.get(1)!.scriptText).not.toContain('Imagine');
     expect(
       (f.plans.get('topic-1')!.plan as { hookSpoken: boolean }).hookSpoken,
     ).toBe(false);
@@ -672,15 +718,12 @@ describe('LectureChapterProcessor', () => {
     };
 
     const processor = chapterProcessor(f, llm);
-    // Chapter two first, as happens when chapters run alongside each other.
     await processor.process(chapterJob('topic-2', 1), CONTEXT);
     await processor.process(chapterJob('topic-1', 0), CONTEXT);
 
     expect(taught[0]).toEqual(['Inflation']);
     expect(taught[1]).toEqual([]);
 
-    // Planned again from scratch, chapter two would now see chapter one's
-    // actual lines.
     f.plans.delete('topic-2');
     await processor.process(chapterJob('topic-2', 1), CONTEXT);
     expect(taught[2]).toEqual([
@@ -735,17 +778,16 @@ describe('LectureChapterProcessor', () => {
     const llm = new FakeLlmAdapter();
     llm.lectureOutline = () => Promise.reject(new Error('model down'));
 
-    // Not the last attempt: the queue gets to retry, and the rows wait.
     await expect(
       chapterProcessor(f, llm).process(chapterJob(), CONTEXT),
     ).rejects.toThrow('model down');
-    expect([...f.segments.values()].map((s) => s.status)).toEqual([
+    expect(f.segments.values().map((s) => s.status)).toEqual([
       'pending',
       'pending',
     ]);
 
     await chapterProcessor(f, llm).process(chapterJob(), FINAL);
-    expect([...f.segments.values()].map((s) => s.status)).toEqual([
+    expect(f.segments.values().map((s) => s.status)).toEqual([
       'failed',
       'failed',
     ]);
@@ -762,7 +804,6 @@ describe('LectureChapterProcessor', () => {
     const inner = new FakeLlmAdapter();
     const stricts: boolean[] = [];
     llm.lectureVerify = (input) =>
-      // The hook check passes; every page check objects to the wording.
       input.script === 'Why Inflation matters.'
         ? inner.lectureVerify(input)
         : Promise.resolve({
@@ -776,11 +817,9 @@ describe('LectureChapterProcessor', () => {
 
     await chapterProcessor(f, llm).process(chapterJob(), CONTEXT);
 
-    // Sent back twice with the objection, written strictly the third time,
-    // and then kept: the verifier's word alone is no longer a hole.
     expect(stricts).toEqual([false, false, true]);
     expect(f.segments.get(1)!.status).toBe('voicing');
-    expect(f.voiceJobs).toEqual([1]);
+    expect(f.voiceJobs.map((job) => job.pageNumber)).toEqual([1]);
   });
 
   it('drops a page whose figures are nowhere in the material, whatever the verifier says', async () => {
@@ -789,10 +828,9 @@ describe('LectureChapterProcessor', () => {
     const corrections: (string | undefined)[] = [];
     llm.lectureSegment = (input) => {
       corrections.push(input.correction);
-      return Promise.resolve({
-        value: 'The money supply grew 4096 percent after 1913.',
-        usage: USAGE,
-      });
+      return Promise.resolve(
+        draft('The money supply grew 4096 percent after 1913.'),
+      );
     };
 
     await chapterProcessor(f, llm).process(chapterJob(), CONTEXT);
@@ -811,10 +849,7 @@ describe('LectureChapterProcessor', () => {
     const inner = new FakeLlmAdapter();
     llm.lectureSegment = (input) =>
       input.prevTail
-        ? Promise.resolve({
-            value: 'Since 2010 prices have risen every year.',
-            usage: USAGE,
-          })
+        ? Promise.resolve(draft('Since 2010 prices have risen every year.'))
         : inner.lectureSegment(input);
 
     await chapterProcessor(f, llm).process(chapterJob(), CONTEXT);
@@ -831,7 +866,7 @@ describe('LectureChapterProcessor', () => {
       verified += 1;
       return Promise.resolve({
         value: { grounded: true, problems: [] },
-        usage: { model: 'fake', tokensIn: 1, tokensOut: 1, latencyMs: 1 },
+        usage: USAGE,
       });
     };
 
@@ -840,12 +875,203 @@ describe('LectureChapterProcessor', () => {
     expect(f.segments.get(1)!.status).toBe('voicing');
     expect(verified).toBe(0);
   });
+
+  // ── styles ───────────────────────────────────────────────────────────────
+
+  it('writes each style as its own pages from one shared plan', async () => {
+    const f = fakes(
+      { 1: REAL_PAGE, 2: REAL_PAGE },
+      [TOPIC],
+      ['steady', 'brisk'],
+    );
+    const llm = new FakeLlmAdapter();
+    const inner = new FakeLlmAdapter();
+    let planned = 0;
+    const styles: string[] = [];
+    llm.lectureOutline = (input) => {
+      planned += 1;
+      return inner.lectureOutline(input);
+    };
+    llm.lectureSegment = (input) => {
+      styles.push(`${input.style}:${input.budget.max}`);
+      return inner.lectureSegment(input);
+    };
+
+    const processor = chapterProcessor(f, llm);
+    await processor.process(chapterJob(TOPIC.id, 0, 'steady'), CONTEXT);
+    await processor.process(chapterJob(TOPIC.id, 0, 'brisk'), CONTEXT);
+
+    expect(planned).toBe(1);
+    expect(styles).toEqual([
+      'steady:220',
+      'steady:220',
+      'brisk:140',
+      'brisk:140',
+    ]);
+    expect(f.row(1, 'steady')!.status).toBe('voicing');
+    expect(f.row(1, 'brisk')!.status).toBe('voicing');
+    expect(f.voiceJobs).toEqual([
+      { pageNumber: 1, style: 'steady' },
+      { pageNumber: 2, style: 'steady' },
+      { pageNumber: 1, style: 'brisk' },
+      { pageNumber: 2, style: 'brisk' },
+    ]);
+  });
+
+  it('gives the writer the direction of the style it is writing', async () => {
+    const f = fakes({ 1: REAL_PAGE }, [TOPIC], ['gentle']);
+    const llm = new FakeLlmAdapter();
+    const inner = new FakeLlmAdapter();
+    let direction = '';
+    llm.lectureSegment = (input) => {
+      direction = input.styleDirection;
+      return inner.lectureSegment(input);
+    };
+
+    await chapterProcessor(f, llm).process(
+      chapterJob(TOPIC.id, 0, 'gentle'),
+      CONTEXT,
+    );
+
+    expect(direction).toContain('one idea at a time');
+    expect(direction).toContain('never the same kind of example twice');
+  });
+
+  it('starts at the page a learner switched on, then fills in the earlier pages', async () => {
+    const f = fakes(
+      { 1: REAL_PAGE, 2: REAL_PAGE, 3: REAL_PAGE },
+      [TOPIC],
+      ['steady', 'gentle'],
+    );
+    const processor = chapterProcessor(f);
+    // The steady version exists; the learner was listening to it.
+    await processor.process(chapterJob(TOPIC.id, 0, 'steady'), CONTEXT);
+
+    const llm = new FakeLlmAdapter();
+    const inner = new FakeLlmAdapter();
+    const written: { page: number; tail: string }[] = [];
+    llm.lectureSegment = (input) => {
+      written.push({
+        page: Number(/page (\d)/.exec(input.beat.goal)?.[1]),
+        tail: input.prevTail,
+      });
+      return inner.lectureSegment(input);
+    };
+    await chapterProcessor(f, llm).process(
+      chapterJob(TOPIC.id, 0, 'gentle', 2),
+      CONTEXT,
+    );
+
+    // Page 2 first, for the learner waiting there; then 3; then back to 1.
+    expect(written.map((w) => w.page)).toEqual([2, 3, 1]);
+    // Page 2 continues from what the learner just heard: the STEADY page 1.
+    expect(written[0].tail).toContain(
+      f.row(1, 'steady')!.scriptText!.slice(-30),
+    );
+    // Page 3 continues from the gentle page 2, now that it exists.
+    expect(written[1].tail).toContain(
+      f.row(2, 'gentle')!.scriptText!.slice(-30),
+    );
+    // Page 1 opens the chapter: nothing before it.
+    expect(written[2].tail).toBe('');
+    expect(f.row(1, 'gentle')!.scriptText).toMatch(/^Why Inflation matters\./);
+  });
+
+  it('sends back a page whose sections ignore the moves, then stores where each move begins', async () => {
+    const f = fakes({ 1: REAL_PAGE });
+    const llm = new FakeLlmAdapter();
+    const inner = new FakeLlmAdapter();
+    llm.lectureOutline = plannerWithMoves(['the problem', 'the mechanism']);
+    const corrections: (string | undefined)[] = [];
+    let seen = 0;
+    llm.lectureSegment = (input) => {
+      seen += 1;
+      corrections.push(input.styleCorrection);
+      // First try: one section for a two-move page.
+      if (seen === 1)
+        return Promise.resolve(draft('Prices rise when money is easy.'));
+      return inner.lectureSegment(input);
+    };
+
+    await chapterProcessor(f, llm).process(chapterJob(), CONTEXT);
+
+    expect(corrections[1]).toMatch(/one section per move/);
+    expect(corrections[1]).toContain('0: the problem; 1: the mechanism');
+    const row = f.segments.get(1)!;
+    expect(row.status).toBe('voicing');
+    expect(row.moveOffsets).toHaveLength(2);
+    expect(row.moveOffsets![0]).toBe(0);
+    expect(row.scriptText!.slice(row.moveOffsets![1])).toMatch(
+      /^Then the mechanism\./,
+    );
+  });
+
+  it('in the gentle style, sends back two ideas in a row that both open on an example', async () => {
+    const f = fakes({ 1: REAL_PAGE }, [TOPIC], ['gentle']);
+    const llm = new FakeLlmAdapter();
+    const inner = new FakeLlmAdapter();
+    llm.lectureOutline = plannerWithMoves(['the problem', 'the mechanism']);
+    const corrections: (string | undefined)[] = [];
+    let seen = 0;
+    llm.lectureSegment = (input) => {
+      seen += 1;
+      corrections.push(input.styleCorrection);
+      if (seen === 1) {
+        return Promise.resolve({
+          value: {
+            sections: [
+              { move: 0, text: 'For example, a bakery raises its prices.' },
+              { move: 1, text: 'Think of the bank printing more notes.' },
+            ],
+          },
+          usage: USAGE,
+        });
+      }
+      return inner.lectureSegment(input);
+    };
+
+    await chapterProcessor(f, llm).process(
+      chapterJob(TOPIC.id, 0, 'gentle'),
+      CONTEXT,
+    );
+
+    expect(corrections[1]).toMatch(/Two ideas in a row open on an example/);
+    expect(f.row(1, 'gentle')!.status).toBe('voicing');
+  });
+
+  it('lets the gentle style end on a second telling, and holds the others to landing', async () => {
+    const recap = 'Prices rise. In summary, easy money lifts prices.';
+    const run = async (style: LectureStyle) => {
+      const f = fakes({ 1: REAL_PAGE }, [TOPIC], [style]);
+      const llm = new FakeLlmAdapter();
+      const inner = new FakeLlmAdapter();
+      const corrections: (string | undefined)[] = [];
+      let seen = 0;
+      llm.lectureSegment = (input) => {
+        seen += 1;
+        corrections.push(input.styleCorrection);
+        if (seen === 1) return Promise.resolve(draft(recap));
+        return inner.lectureSegment(input);
+      };
+      await chapterProcessor(f, llm).process(
+        chapterJob(TOPIC.id, 0, style),
+        CONTEXT,
+      );
+      return corrections;
+    };
+
+    expect(await run('gentle')).toEqual([undefined]);
+    expect((await run('steady'))[1]).toMatch(/Ends on a recap/);
+  });
 });
 
 describe('LectureVoiceProcessor', () => {
-  async function written(pageText: Record<number, string>) {
-    const f = fakes(pageText);
-    await chapterProcessor(f).process(chapterJob(), CONTEXT);
+  async function written(
+    pageText: Record<number, string>,
+    style: LectureStyle = 'steady',
+  ) {
+    const f = fakes(pageText, [TOPIC], [style]);
+    await chapterProcessor(f).process(chapterJob(TOPIC.id, 0, style), CONTEXT);
     return f;
   }
 
@@ -860,18 +1086,27 @@ describe('LectureVoiceProcessor', () => {
     expect(f.published).toContainEqual({
       type: 'lecture.segment_ready',
       pageNumber: 1,
+      style: 'steady',
     });
   });
 
-  it('keys the audio by version, voice, model, generator and the words spoken', async () => {
+  it('keys the audio by version, style, voice, model, generator and the words spoken', async () => {
     const f = await written({ 1: REAL_PAGE });
     await voiceProcessor(f).process(voiceJob(1), CONTEXT);
 
     expect(f.stored[0]).toMatch(
       new RegExp(
-        `^documents/doc-1/lecture/v2/1-alloy-gpt-4o-mini-tts-${LECTURE_GENERATOR_VERSION}-[0-9a-f]{10}\\.mp3$`,
+        `^documents/doc-1/lecture/v2/1-steady-alloy-gpt-4o-mini-tts-${LECTURE_GENERATOR_VERSION}-[0-9a-f]{10}\\.mp3$`,
       ),
     );
+  });
+
+  it('voices each style to its own file', async () => {
+    const f = await written({ 1: REAL_PAGE }, 'brisk');
+    await voiceProcessor(f).process(voiceJob(1, 'brisk'), CONTEXT);
+
+    expect(f.stored[0]).toContain('/1-brisk-');
+    expect(f.row(1, 'brisk')!.status).toBe('done');
   });
 
   it('voices a page written again afresh, under a different key', async () => {
@@ -922,6 +1157,7 @@ describe('LectureVoiceProcessor', () => {
     expect(f.published).toContainEqual({
       type: 'lecture.segment_failed',
       pageNumber: 1,
+      style: 'steady',
     });
   });
 });

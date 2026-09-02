@@ -25,15 +25,17 @@ import {
   Min,
   ValidateNested,
 } from 'class-validator';
-import type {
-  AssessmentKind,
-  ComputeResponse,
-  DiagramCheckResponse,
-  DiagramResponse,
-  MasteryResponse,
-  SketchResponse,
-  VoiceMode,
-  VoiceSessionResponse,
+import {
+  type AssessmentKind,
+  type ComputeResponse,
+  type DiagramCheckResponse,
+  type DiagramResponse,
+  type MasteryResponse,
+  type SketchResponse,
+  type VoiceMode,
+  type VoiceSessionResponse,
+  LECTURE_STYLE_KEYS,
+  type LectureStyle,
 } from '../../contracts';
 import {
   AskDiagramCheckHandler,
@@ -68,6 +70,11 @@ class LectureContextDto {
   @IsInt()
   @Min(0)
   offsetMs!: number;
+
+  /** The style being listened to, so the tutor knows what was said. */
+  @IsOptional()
+  @IsIn(LECTURE_STYLE_KEYS)
+  style?: LectureStyle;
 }
 
 class VoiceSessionDto {

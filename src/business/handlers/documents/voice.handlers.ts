@@ -12,6 +12,7 @@ import {
   type SketchResponse,
   type VoiceMode,
   type VoiceSessionResponse,
+  LECTURE_TOOLS,
 } from '../../../contracts';
 import {
   DocumentNotReadyError,
@@ -84,7 +85,17 @@ import { ComputeService } from './compute.service';
 import { ElevenLabsRealtimeAdapter } from '../../../web/adapters/elevenlabs-voice.adapters';
 import { DocumentAccessService } from './document-access.service';
 import { EntitlementsService } from './entitlements.service';
-import { DEFAULT_LECTURE_STYLE, KIND_RANK } from '../../domain/lecture';
+import {
+  DEFAULT_LECTURE_STYLE,
+  KIND_RANK,
+  scriptForTts,
+} from '../../domain/lecture';
+import {
+  boardLinesAt,
+  sentenceIndexAtMs,
+  type BoardTimeline,
+  type WordTimes,
+} from '../../domain/board';
 
 export type AudioLevel = 'original' | Level;
 
@@ -229,6 +240,8 @@ export interface VoiceSessionRequest {
     style?: LectureStyle;
     /** Which piece of the page the offset is in; omitted means the page. */
     kind?: 'page' | 'part';
+    /** What the tutor drew on the board in earlier questions, one line each. */
+    ink?: string[];
   };
 }
 
@@ -267,6 +280,76 @@ const INTENT_LINES: Record<LessonIntent, string> = {
  * The teach-mode toolbox. Parameters are JSON Schema; execution happens in the
  * browser, because every one of these is a UI action.
  */
+/** What a tutor answering mid-lecture may do to the board; see LECTURE_TOOLS. */
+export const LECTURE_BOARD_TOOLS: RealtimeTool[] = [
+  {
+    name: LECTURE_TOOLS.HIGHLIGHT,
+    description:
+      'Draw attention to something already on the whiteboard: an underline or circle on the item with this id.',
+    parameters: {
+      type: 'object',
+      properties: {
+        id: {
+          type: 'string',
+          description: 'The id of the item, from the board listing',
+        },
+        shape: { type: 'string', enum: ['underline', 'circle', 'box'] },
+      },
+      required: ['id'],
+    },
+  },
+  {
+    name: LECTURE_TOOLS.WRITE,
+    description:
+      'Write a short label on the whiteboard, at most six words, optionally with its plain meaning in a few words, next to an existing item or on the next free line.',
+    parameters: {
+      type: 'object',
+      properties: {
+        text: { type: 'string', description: 'At most six words' },
+        meaning: {
+          type: 'string',
+          description: 'A plain meaning of a few words, for a slow learner',
+        },
+        nearId: { type: 'string', description: 'Put it beside this item' },
+      },
+      required: ['text'],
+    },
+  },
+  {
+    name: LECTURE_TOOLS.ARROW,
+    description:
+      'Draw an arrow between two items already on the board, with an optional label of at most three words.',
+    parameters: {
+      type: 'object',
+      properties: {
+        fromId: { type: 'string' },
+        toId: { type: 'string' },
+        label: { type: 'string' },
+      },
+      required: ['fromId', 'toId'],
+    },
+  },
+  {
+    name: LECTURE_TOOLS.NOTE,
+    description:
+      'A short remark of at most eight words beside an item on the board.',
+    parameters: {
+      type: 'object',
+      properties: {
+        text: { type: 'string' },
+        targetId: { type: 'string' },
+      },
+      required: ['text', 'targetId'],
+    },
+  },
+  {
+    name: LECTURE_TOOLS.RESUME,
+    description:
+      'The answer is finished: hand back to the lecture. Call this instead of asking whether the student has more questions.',
+    parameters: { type: 'object', properties: {} },
+  },
+];
+
 export const TEACHING_TOOLS: RealtimeTool[] = [
   {
     name: TEACH_TOOLS.GO_TO_PAGE,
@@ -739,6 +822,8 @@ export class StartVoiceSessionHandler extends AbstractRequestHandlerTemplate<
               doc.contentVersion,
               cmd.lectureContext?.style ?? DEFAULT_LECTURE_STYLE,
               cmd.lectureContext?.kind ?? 'page',
+              cmd.lectureContext?.offsetMs ?? 0,
+              cmd.lectureContext?.ink ?? [],
             )
           : this.chatInstructions(doc.props.title, summary);
 
@@ -770,7 +855,12 @@ export class StartVoiceSessionHandler extends AbstractRequestHandlerTemplate<
         })
       : await this.realtime.createSession({
           instructions: baseInstructions,
-          tools: cmd.mode === 'teach' ? TEACHING_TOOLS : undefined,
+          tools:
+            cmd.mode === 'teach'
+              ? TEACHING_TOOLS
+              : cmd.mode === 'lecture'
+                ? LECTURE_BOARD_TOOLS
+                : undefined,
           // The tutor's voice; chat mode keeps the configured default. A
           // question asked mid-lecture takes the LECTURE's voice, so the
           // answer sounds like the same teacher who was just speaking
@@ -822,6 +912,8 @@ export class StartVoiceSessionHandler extends AbstractRequestHandlerTemplate<
     contentVersion: number,
     style: LectureStyle,
     kind: 'page' | 'part' = 'page',
+    offsetMs = 0,
+    ink: string[] = [],
   ): Promise<string> {
     const segments = await this.lectures
       .listSegments(documentId, contentVersion, style)
@@ -849,6 +941,34 @@ export class StartVoiceSessionHandler extends AbstractRequestHandlerTemplate<
       .join('\n\n')
       .slice(-4_000);
 
+    // The exact moment: the sentence being spoken when the mic was
+    // pressed, and the board as the learner sees it, so the answer can
+    // point at what is in front of them.
+    const times = current?.wordTimes as WordTimes | null;
+    const spoken = current?.scriptText ? scriptForTts(current.scriptText) : '';
+    let moment: string | null = null;
+    if (times && times.sentences.length && spoken) {
+      const index = sentenceIndexAtMs(times, offsetMs);
+      const recent = times.sentences
+        .slice(Math.max(0, index - 3), index + 1)
+        .map((sentence) => spoken.slice(sentence[0], sentence[1]));
+      if (recent.length) {
+        moment = `The sentence you were saying when they pressed the mic (marked >>), with the ones before it:\n${recent
+          .map((line, i) => (i === recent.length - 1 ? `>> ${line}` : line))
+          .join('\n')}`;
+      }
+    }
+    const board = current?.board as BoardTimeline | null;
+    const boardLines =
+      board && current?.boardStatus === 'done'
+        ? boardLinesAt(board, offsetMs)
+        : [];
+    const inkLines = ink.slice(0, 12).map((line) => `tutor | ink | ${line}`);
+    const boardText =
+      boardLines.length || inkLines.length
+        ? `On the whiteboard right now, one item per line as "id | kind | text"; refer to items by id in the board tools:\n${[...boardLines, ...inkLines].join('\n')}`
+        : null;
+
     return [
       `You are ${tutor.name}, mid-lecture on the document "${title}". The student has just interrupted you with a question, and your lecture is paused while you answer.`,
       `${tutor.persona}\n\nYour teaching style:\n${dialInstructions(tutor.dials)}`,
@@ -856,6 +976,8 @@ export class StartVoiceSessionHandler extends AbstractRequestHandlerTemplate<
       heard
         ? `What you have said in this chapter so far, most recent last:\n${heard}`
         : null,
+      moment,
+      boardText,
       'Answer THEIR question, briefly and directly, grounded in this document. Two to five sentences is usually right. Keep technical terms, names and numbers exactly as the document uses them.',
       'Answer the step they are stuck on, not the whole idea again. If they were working something out rather than asking for a fact, say what they had right, the one thing that was off and why, and the next step; then leave them one question to think about as the lecture resumes. Never praise the person. An analogy is allowed if you call it one and tie it back to the term at once; no anecdotes.',
       style === 'gentle'
@@ -864,6 +986,8 @@ export class StartVoiceSessionHandler extends AbstractRequestHandlerTemplate<
           ? 'This student is quick: pitch the answer one level further than the lecture, no restating of what the lecture already said, and prefer a hint that lets them finish the thought themselves.'
           : null,
       'If the document does not answer it, say so plainly rather than answering from general knowledge.',
+      `THE BOARD: while you answer you may add to the whiteboard with the board tools: ${LECTURE_TOOLS.HIGHLIGHT} to draw attention to an item by its id, ${LECTURE_TOOLS.WRITE} for a label of at most six words (with a plain meaning of a few words for a slow learner), ${LECTURE_TOOLS.ARROW} between two ids with a label of three words at most, ${LECTURE_TOOLS.NOTE} for a short remark beside an item. Say one short line before you draw, like "let me put that next to the bucket". At most three additions in one answer, never a sentence on the board, nothing the document does not say. When the answer is done, call ${LECTURE_TOOLS.RESUME} rather than asking whether they have more questions.`,
+      'OPENING: the call opens the moment they press the mic, before they have said anything. Your very first words are one short natural invitation to go ahead, at most four words, different each time ("Yes?", "Go ahead.", "What is on your mind?", "Mm-hm?"), and then you stop and listen. Never a greeting, never their name, never a summary of where you were.',
       'HOW THIS ENDS: answer, then hand back in one short line, the way a lecturer does when a question is done — something like "Good question. Back to it." Then STOP. Do not resume the lecture, do not teach the next idea, do not ask whether they have more questions. The lecture restarts by itself the moment you finish.',
       'This is speech: short plain sentences, no lists, no headings, no markdown. Never mention scripts, tapes, pages, or that you were paused.',
     ]

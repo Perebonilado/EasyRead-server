@@ -30,6 +30,9 @@ const segment = (
   bridge: false,
   attempts: 0,
   moveOffsets: null,
+  board: null,
+  wordTimes: null,
+  boardStatus: 'none',
 });
 
 /** Mirrors the selection the handler makes over the segment list. */

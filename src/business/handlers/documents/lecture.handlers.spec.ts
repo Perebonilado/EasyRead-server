@@ -1,4 +1,9 @@
-import { GenerateLectureHandler } from './lecture.handlers';
+import {
+  GenerateLectureHandler,
+  LectureStatusHandler,
+} from './lecture.handlers';
+import { BOARD_GENERATOR_VERSION } from '../../domain/board';
+import { LECTURE_STALE_MS } from '../../domain/lecture';
 import type { LectureSegmentSeed } from '../../repositories/lecture.repository';
 
 /**
@@ -33,6 +38,8 @@ interface ExistingRow {
   topicId: string;
   pageNumber: number;
   status: string;
+  /** When the row last moved; a row in flight too long counts as lost. */
+  updatedAt?: Date;
 }
 
 interface HarnessOptions {
@@ -255,6 +262,50 @@ describe('GenerateLectureHandler', () => {
     expect(chapters.map((c) => c.topicId)).toEqual(['topic-1', 'topic-2']);
   });
 
+  it('treats a chapter lost in flight as failed, so it can be asked for again', async () => {
+    const lost = new Date(Date.now() - LECTURE_STALE_MS * 3);
+    const { handler, reset, chapters } = harness({
+      existing: [
+        { topicId: 'topic-1', pageNumber: 1, status: 'done' },
+        {
+          topicId: 'topic-1',
+          pageNumber: 2,
+          status: 'voicing',
+          updatedAt: lost,
+        },
+        { topicId: 'topic-2', pageNumber: 3, status: 'done' },
+        {
+          topicId: 'topic-2',
+          pageNumber: 4,
+          status: 'voicing',
+          updatedAt: new Date(),
+        },
+      ],
+    });
+    await handler.handle({ ...request, topicIds: ['topic-1', 'topic-2'] });
+
+    // Chapter one's voicing died with its worker: the chapter is finished
+    // with a hole and goes again. Chapter two is genuinely still moving.
+    expect(reset).toEqual([['topic-1']]);
+    expect(chapters.map((c) => c.topicId)).toEqual(['topic-1', 'topic-2']);
+  });
+
+  it('lets a lecture lost in flight be rewritten', async () => {
+    const lost = new Date(Date.now() - LECTURE_STALE_MS * 3);
+    const { handler, events } = harness({
+      existing: [
+        {
+          topicId: 'topic-1',
+          pageNumber: 1,
+          status: 'writing',
+          updatedAt: lost,
+        },
+      ],
+    });
+    await handler.handle({ ...request, rewrite: true });
+    expect(events[0]).toBe('clear:steady');
+  });
+
   it('resets nothing on a first request, or when nothing failed', async () => {
     const fresh = harness();
     await fresh.handler.handle(request);
@@ -370,5 +421,105 @@ describe('GenerateLectureHandler', () => {
         .filter((seed) => seed.kind !== 'page')
         .map((seed) => seed.pageNumber),
     ).toEqual([3, 4]);
+  });
+});
+
+describe('LectureStatusHandler: boards that need writing again', () => {
+  const row = (
+    pageNumber: number,
+    over: Record<string, unknown> = {},
+  ): Record<string, unknown> => ({
+    topicId: 'topic-1',
+    pageNumber,
+    seq: pageNumber,
+    style: 'steady',
+    kind: 'page',
+    status: 'done',
+    scriptText: 'Some words for the page.',
+    audioKey: 'a',
+    durationMs: 10_000,
+    bridge: false,
+    attempts: 1,
+    moveOffsets: [0],
+    board: null,
+    wordTimes: null,
+    boardStatus: 'none',
+    ...over,
+  });
+
+  function harness(
+    rows: Record<string, unknown>[],
+    position: {
+      pageNumber: number;
+      offsetMs: number;
+      style: string;
+    } | null = null,
+  ) {
+    const queued: {
+      pageNumber: number;
+      style?: string;
+      kind?: string;
+      priority?: number;
+    }[] = [];
+    const handler = new LectureStatusHandler(
+      { listByDocument: () => Promise.resolve(TOPICS) } as never,
+      {
+        listSegments: () => Promise.resolve(rows),
+        findPosition: () => Promise.resolve(position),
+      } as never,
+      {
+        enqueueLectureBoards: (
+          jobs: { pageNumber: number; style?: string; kind?: string }[],
+        ) => {
+          queued.push(...jobs);
+          return Promise.resolve();
+        },
+      } as never,
+      {
+        require: () =>
+          Promise.resolve({ id: 'doc-1', contentVersion: 2, props: {} }),
+      } as never,
+    );
+    return { handler, queued };
+  }
+
+  it('queues a board for a finished row with none, and one an older writer wrote', async () => {
+    const { handler, queued } = harness([
+      row(1),
+      row(2, {
+        boardStatus: 'done',
+        board: { version: 1, generator: 'board-1' },
+      }),
+      row(3, {
+        boardStatus: 'done',
+        board: { version: 1, generator: BOARD_GENERATOR_VERSION },
+      }),
+    ]);
+    await handler.handle({ ...request, style: 'steady' });
+    expect(queued.map((job) => job.pageNumber)).toEqual([1, 2]);
+    expect(queued[0]).toMatchObject({ style: 'steady', kind: 'page' });
+  });
+
+  it('queues the page the learner is on first, then outwards', async () => {
+    const { handler, queued } = harness([row(1), row(2), row(3), row(4)], {
+      pageNumber: 3,
+      offsetMs: 0,
+      style: 'steady',
+    });
+    await handler.handle({ ...request, style: 'steady' });
+    expect(queued.map((job) => job.pageNumber)).toEqual([3, 2, 4, 1]);
+    expect(queued.map((job) => job.priority)).toEqual([1, 2, 3, 4]);
+  });
+
+  it('leaves alone rows still being written, failed, skipped, or without words', async () => {
+    const { handler, queued } = harness([
+      row(1, { boardStatus: 'pending' }),
+      row(2, { boardStatus: 'failed' }),
+      row(3, { boardStatus: 'skipped' }),
+      row(4, { status: 'voicing' }),
+      row(5, { scriptText: null }),
+    ]);
+    await handler.handle({ ...request, style: 'steady' });
+    expect(queued).toEqual([]);
   });
 });

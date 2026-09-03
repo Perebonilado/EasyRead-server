@@ -6,6 +6,7 @@ import {
   Table,
 } from 'sequelize-typescript';
 import type {
+  BoardStatus,
   LectureSegmentStatus,
   LectureStyle,
   SegmentKind,
@@ -93,6 +94,22 @@ export class LectureSegmentModel extends BaseModel {
   /** Character offsets where each move of the page begins in the script. */
   @Column({ type: DataType.JSON, allowNull: true })
   declare moveOffsets: number[] | null;
+
+  /** What the lecturer writes and draws while this row plays. */
+  @Column({ type: DataType.JSON, allowNull: true })
+  declare board: unknown;
+
+  /** Where each spoken word is heard in the audio. */
+  @Column({ type: DataType.JSON, allowNull: true })
+  declare wordTimes: unknown;
+
+  /** The board's own life, apart from the page's: a page plays without one. */
+  @Column({
+    type: DataType.STRING(16),
+    allowNull: false,
+    defaultValue: 'none',
+  })
+  declare boardStatus: BoardStatus;
 
   @Column({ type: DataType.STRING(512), allowNull: true })
   declare audioKey: string | null;

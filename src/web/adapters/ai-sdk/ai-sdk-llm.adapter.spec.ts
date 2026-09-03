@@ -413,6 +413,7 @@ describe('AiSdkLlmAdapter', () => {
           moves: ['the guess', 'the bet'],
           pitfall: null,
           turn: true,
+          figure: { kind: 'none', shows: null },
         },
       ],
     });

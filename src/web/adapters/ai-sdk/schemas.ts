@@ -337,9 +337,71 @@ export const lectureOutlineSchema = z.object({
         moves: z.array(z.string().min(1).max(80)).min(1).max(4),
         pitfall: z.string().max(240).nullable(),
         turn: z.boolean(),
+        figure: z.object({
+          kind: z.enum(['process', 'structure', 'comparison', 'none']),
+          shows: z.string().max(200).nullable(),
+        }),
       }),
     )
     .max(80),
+});
+
+/** The board writer's draft: a heading and a few anchored items. */
+export const lectureBoardSchema = z.object({
+  heading: z.string().max(80).nullable(),
+  items: z
+    .array(
+      z.object({
+        kind: z.enum(['term', 'point', 'figure', 'relation', 'cue']),
+        text: z.string().max(80).nullable(),
+        meaning: z.string().max(120).nullable(),
+        from: z.string().max(80).nullable(),
+        to: z.string().max(80).nullable(),
+        label: z.string().max(40).nullable(),
+        target: z.string().max(80).nullable(),
+        shape: z.enum(['underline', 'circle', 'box', 'highlight']).nullable(),
+        level: z.union([z.literal(1), z.literal(2)]).nullable(),
+        important: z.boolean().nullable(),
+        anchor: z.string().min(1).max(160),
+      }),
+    )
+    .max(30),
+});
+
+/** A figure before layout. */
+export const lectureDiagramSchema = z.object({
+  title: z.string().min(1).max(80),
+  nodes: z
+    .array(
+      z.object({
+        id: z.string().min(1).max(24),
+        label: z.string().min(1).max(60),
+        shape: z
+          .enum(['box', 'ellipse', 'diamond', 'cylinder', 'note'])
+          .nullable(),
+        anchor: z.string().min(1).max(160),
+      }),
+    )
+    .min(1)
+    .max(14),
+  edges: z
+    .array(
+      z.object({
+        from: z.string().min(1).max(24),
+        to: z.string().min(1).max(24),
+        label: z.string().max(40).nullable(),
+        anchor: z.string().min(1).max(160),
+      }),
+    )
+    .max(20),
+  groups: z
+    .array(
+      z.object({
+        label: z.string().min(1).max(40),
+        memberIds: z.array(z.string().min(1).max(24)).max(14),
+      }),
+    )
+    .max(4),
 });
 
 /** A short segment around a chapter: its words, its check, or the review. */

@@ -5,9 +5,11 @@ import {
   type LectureStatusResponse,
   type LectureStyle,
   type LectureStyleSummary,
+  type LectureBoardResponse,
   type LectureTopicDto,
   type SegmentKind,
 } from '../../../contracts';
+import { boardIsCurrent, type BoardTimeline } from '../../domain/board';
 import { NotFoundError, ValidationError } from '../../domain/errors/errors';
 import { JOB_QUEUE, LLM_GATEWAY } from '../../ports/tokens';
 import type { JobQueuePort } from '../../ports/job-queue.port';
@@ -32,6 +34,8 @@ import {
   estimateDurationMs,
   extraSeeds,
   scriptForTts,
+  effectiveStatus,
+  IN_FLIGHT_STATUSES,
 } from '../../domain/lecture';
 import type { LectureRepository } from '../../repositories/lecture.repository';
 import type { TopicRepository } from '../../repositories/misc.repository';
@@ -72,7 +76,7 @@ export interface GenerateLectureRequest extends LectureRequest {
   startAtPage?: number;
 }
 
-const IN_FLIGHT = new Set(['pending', 'writing', 'voicing']);
+const IN_FLIGHT = IN_FLIGHT_STATUSES;
 
 /** The shape of the lecture: what is written, what is still coming. */
 @Injectable()
@@ -83,6 +87,7 @@ export class LectureStatusHandler extends AbstractRequestHandlerTemplate<
   constructor(
     @Inject(TOPIC_REPOSITORY) private readonly topics: TopicRepository,
     @Inject(LECTURE_REPOSITORY) private readonly lectures: LectureRepository,
+    @Inject(JOB_QUEUE) private readonly queue: JobQueuePort,
     private readonly access: DocumentAccessService,
   ) {
     super();
@@ -100,6 +105,41 @@ export class LectureStatusHandler extends AbstractRequestHandlerTemplate<
     // The style asked for, else the one the student was listening in.
     const style = cmd.style ?? position?.style ?? DEFAULT_LECTURE_STYLE;
     const segments = everything.filter((segment) => segment.style === style);
+
+    // A board written by an older writer, or never written for a row that
+    // has its words, is written again in the background: the board is
+    // read alongside the words, so a cut-off line is not left on it. The
+    // words and the audio stay; the pane picks the new board up once it is
+    // timed. Rows already being written, or that failed, are left alone.
+    const stale = segments.filter(
+      (row) =>
+        row.scriptText &&
+        row.status === 'done' &&
+        (row.boardStatus === 'none' ||
+          (row.boardStatus === 'done' &&
+            !boardIsCurrent(row.board as BoardTimeline | null))),
+    );
+    if (stale.length) {
+      // Nearest the learner first: the page they are on, then outwards.
+      const here = position?.pageNumber ?? stale[0].pageNumber;
+      const nearestFirst = [...stale].sort(
+        (a, b) =>
+          Math.abs(a.pageNumber - here) - Math.abs(b.pageNumber - here) ||
+          a.seq - b.seq,
+      );
+      await this.queue
+        .enqueueLectureBoards(
+          nearestFirst.map((row, index) => ({
+            documentId: doc.id,
+            contentVersion: doc.contentVersion,
+            pageNumber: row.pageNumber,
+            style,
+            kind: row.kind,
+            priority: index + 1,
+          })),
+        )
+        .catch(() => undefined);
+    }
 
     // What exists in every style, so the picker and the bar know whether a
     // switch is instant or has to be written first.
@@ -130,11 +170,12 @@ export class LectureStatusHandler extends AbstractRequestHandlerTemplate<
       entry?.segments.push({
         pageNumber: segment.pageNumber,
         kind: segment.kind,
-        status: segment.status,
+        status: effectiveStatus(segment),
         durationMs: segment.durationMs,
         bridge: segment.bridge,
         moveOffsets: segment.moveOffsets ?? [],
         scriptLength: segment.scriptText?.length ?? null,
+        boardStatus: segment.boardStatus ?? 'none',
       });
     }
 
@@ -211,7 +252,7 @@ export class GenerateLectureHandler extends AbstractRequestHandlerTemplate<
         doc.contentVersion,
         style,
       );
-      if (current.some((row) => IN_FLIGHT.has(row.status))) {
+      if (current.some((row) => IN_FLIGHT.has(effectiveStatus(row)))) {
         throw new ValidationError(
           'The lecture is still being written. Wait for it to finish, then rewrite it',
         );
@@ -288,9 +329,11 @@ export class GenerateLectureHandler extends AbstractRequestHandlerTemplate<
     );
     const retry = [...owning].filter((topicId) => {
       const rows = existing.filter((row) => row.topicId === topicId);
+      // A row lost in flight (its worker died) counts as failed here, so
+      // the chapter can be asked for again instead of waiting forever.
       return (
-        rows.some((row) => row.status === 'failed') &&
-        !rows.some((row) => IN_FLIGHT.has(row.status))
+        rows.some((row) => effectiveStatus(row) === 'failed') &&
+        !rows.some((row) => IN_FLIGHT.has(effectiveStatus(row)))
       );
     });
     if (retry.length) {
@@ -555,5 +598,95 @@ export class LectureReviewHandler extends AbstractRequestHandlerTemplate<
     }
 
     return finish();
+  }
+}
+
+export interface LectureBoardRequest extends LectureRequest {
+  pageNumber: number;
+  kind?: SegmentKind;
+}
+
+/** One row's board and the word times it was timed on, once it is done. */
+@Injectable()
+export class LectureBoardHandler extends AbstractRequestHandlerTemplate<
+  LectureBoardRequest,
+  LectureBoardResponse
+> {
+  constructor(
+    @Inject(LECTURE_REPOSITORY) private readonly lectures: LectureRepository,
+    private readonly access: DocumentAccessService,
+  ) {
+    super();
+  }
+
+  protected async handleRequest(cmd: LectureBoardRequest) {
+    const doc = await this.access.require(cmd.documentId, cmd.userId);
+    const segment = await this.lectures.findSegment(
+      doc.id,
+      cmd.pageNumber,
+      doc.contentVersion,
+      cmd.style ?? DEFAULT_LECTURE_STYLE,
+      cmd.kind ?? 'page',
+    );
+    if (!segment || segment.boardStatus !== 'done' || !segment.board) {
+      throw new NotFoundError('The board for this page');
+    }
+    return CommandResponse.of({
+      board: segment.board,
+      wordTimes: segment.wordTimes ?? null,
+    } satisfies LectureBoardResponse);
+  }
+}
+
+export interface BackfillBoardsRequest extends LectureRequest {
+  topicIds?: string[];
+}
+
+/**
+ * Boards for a lecture written before boards existed, or whose boards
+ * failed. Scripts and audio are untouched; one job per row goes out and
+ * the status answers as it does for any generation.
+ */
+@Injectable()
+export class BackfillBoardsHandler extends AbstractRequestHandlerTemplate<
+  BackfillBoardsRequest,
+  LectureStatusResponse
+> {
+  constructor(
+    @Inject(LECTURE_REPOSITORY) private readonly lectures: LectureRepository,
+    @Inject(JOB_QUEUE) private readonly queue: JobQueuePort,
+    private readonly access: DocumentAccessService,
+    private readonly status: LectureStatusHandler,
+  ) {
+    super();
+  }
+
+  protected async handleRequest(cmd: BackfillBoardsRequest) {
+    const doc = await this.access.require(cmd.documentId, cmd.userId);
+    const style = cmd.style ?? DEFAULT_LECTURE_STYLE;
+    const rows = await this.lectures.listForBoardBackfill(
+      doc.id,
+      doc.contentVersion,
+      cmd.topicIds?.length ? cmd.topicIds : null,
+    );
+    const wanted = rows.filter(
+      (row) =>
+        row.style === style &&
+        row.scriptText &&
+        (row.boardStatus === 'none' ||
+          row.boardStatus === 'failed' ||
+          !boardIsCurrent(row.board as BoardTimeline | null)),
+    );
+    await this.queue.enqueueLectureBoards(
+      wanted.map((row) => ({
+        documentId: doc.id,
+        contentVersion: doc.contentVersion,
+        pageNumber: row.pageNumber,
+        style,
+        kind: row.kind,
+      })),
+    );
+    const { data } = await this.status.handle({ ...cmd, style });
+    return CommandResponse.of(data);
   }
 }

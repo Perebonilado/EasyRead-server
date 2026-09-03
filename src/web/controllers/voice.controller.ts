@@ -24,6 +24,7 @@ import {
   Max,
   Min,
   ValidateNested,
+  MaxLength,
 } from 'class-validator';
 import {
   type AssessmentKind,
@@ -80,6 +81,14 @@ class LectureContextDto {
   @IsOptional()
   @IsIn(['page', 'part'])
   kind?: 'page' | 'part';
+
+  /** What the tutor drew in earlier questions, one short line each. */
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(12)
+  @IsString({ each: true })
+  @MaxLength(160, { each: true })
+  ink?: string[];
 }
 
 class VoiceSessionDto {

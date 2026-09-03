@@ -12,6 +12,8 @@ import type {
   LlmTask,
   LlmUsage,
   TopicDraft,
+  LectureBoardDraft,
+  LectureDiagramDraft,
 } from '../../../business/ports/llm.port';
 import { PROMPTS } from '../prompts';
 import { ModelRegistry, type ModelRef } from './models';
@@ -21,6 +23,8 @@ import {
   diagramSchema,
   sketchSchema,
   itemBatchSchema,
+  lectureBoardSchema,
+  lectureDiagramSchema,
   lectureExtraSchema,
   lectureOutlineSchema,
   lectureSegmentSchema,
@@ -348,6 +352,126 @@ export class AiSdkLlmAdapter implements LlmGatewayPort, OnModuleInit {
         input.kind === 'review' && input.daysAway !== null
           ? `They last listened ${input.daysAway === 1 ? 'a day' : `${input.daysAway} days`} ago.`
           : null,
+      ]
+        .filter(Boolean)
+        .join('\n'),
+      maxRetries: this.maxRetries(),
+    });
+
+    return {
+      value: result.object,
+      usage: this.usage(ref, result.usage, started),
+    };
+  }
+
+  async lectureBoard(input: {
+    topicTitle: string;
+    spoken: string;
+    pageText: string;
+    moves: string[];
+    goal: string;
+    newHere: string | null;
+    pitfall: string | null;
+    terms: { term: string; meaning: string }[];
+    style: 'gentle' | 'steady' | 'brisk';
+    continues: boolean;
+    budget: { min: number; max: number };
+    correction?: string;
+    repair?: {
+      kind: string;
+      text: string;
+      meaning: string | null;
+      reason: string;
+    }[];
+  }): Promise<LlmResult<LectureBoardDraft>> {
+    const started = Date.now();
+    const { generateObject } = await this.registry.modules();
+    const { model, ref } = await this.registry.languageModel('lecture_board');
+
+    const result = await generateObject({
+      model,
+      schema: lectureBoardSchema,
+      system: PROMPTS.lectureBoard,
+      prompt: [
+        `Chapter: ${input.topicTitle}`,
+        `The page's idea: ${input.goal}`,
+        input.newHere ? `New on this page: ${input.newHere}` : null,
+        input.moves.length > 1
+          ? `The moves the page teaches, in order (write what each establishes, never its name): ${input.moves.join('; ')}`
+          : null,
+        input.pitfall
+          ? `A pitfall the page warns about: ${input.pitfall}`
+          : null,
+        input.terms.length
+          ? `The chapter's terms and their plain meanings: ${input.terms
+              .map((entry) => `${entry.term} (${entry.meaning})`)
+              .join('; ')}`
+          : null,
+        `LEARNER: ${
+          input.style === 'gentle'
+            ? 'a slow learner. A term with its plain meaning for each new word the moves introduce, a point for each step of the idea, a level 2 point for a detail that belongs under a step, and a cue when the speech comes back to something written. Fuller, but every item still earns its place.'
+            : input.style === 'brisk'
+              ? 'a quick learner. Terms and figures, a point only for a step that is not obvious from the term, no meanings. Sparse board.'
+              : 'a normal pace. Terms with a meaning only for the words that are new, a point for each step that carries the page, one relation where two ideas are set against each other, and a cue on the idea being explained.'
+        }`,
+        input.continues
+          ? 'This page CONTINUES a board that already has its heading: return heading null and add only new items.'
+          : "This page opens a fresh board: give it a heading of two to five words, in the page's own terms.",
+        `The page teaches ${input.budget.min} move${input.budget.min === 1 ? '' : 's'}; the pen can manage up to ${input.budget.max} written items (terms, points, figures) on it. Every useful point goes on the board, condensed; nothing is added just to reach a number, and nothing useful is left off to stay short.`,
+        input.repair?.length
+          ? `REPAIR. These lines were refused and nothing replaced them, so the board is missing what they carried. Return ONLY replacements, one per line below, in the same order, as the lecturer's own claim with a verb, anchored in a run of words copied from the spoken words; a line that names a subject becomes what the lecturer says is true of it; a meaning becomes the definition the lecturer gives. Return heading null and no other items.\n${input.repair
+              .map(
+                (line, index) =>
+                  `${index + 1}. ${line.kind} "${line.text}"${line.meaning ? ` : "${line.meaning}"` : ''} (refused: ${line.reason})`,
+              )
+              .join('\n')}`
+          : null,
+        input.correction
+          ? `Your previous draft broke the rules: ${input.correction}. For each item named, keep it on the board and fix only what was flagged: an anchor not found is replaced by a run of words copied from the spoken words; a word the page does not use is replaced by the lecturer's own word for it; a sentence is split into a point and a level-2 detail; a topic label gains the who, how or example that makes it a claim. Do not drop a flagged item, and do not change any item that was not named: return those word for word, in the same order. Your second draft must carry at least as many written items as the first and keep every level-2 item at level 2; a draft that is shorter than the first is discarded.`
+          : null,
+        `\nThe spoken words of the page, which every anchor must be copied from exactly:\n${input.spoken}`,
+        `\nThe page itself, for reference (the chapter's vocabulary):\n${input.pageText.slice(0, 5000)}`,
+      ]
+        .filter(Boolean)
+        .join('\n'),
+      maxRetries: this.maxRetries(),
+    });
+
+    return {
+      value: result.object,
+      usage: this.usage(ref, result.usage, started),
+    };
+  }
+
+  async lectureDiagram(input: {
+    topicTitle: string;
+    figure: { kind: 'process' | 'structure' | 'comparison'; shows: string };
+    spoken: string;
+    pageText: string;
+    context: string;
+    correction?: string;
+  }): Promise<LlmResult<LectureDiagramDraft>> {
+    const started = Date.now();
+    const { generateObject } = await this.registry.modules();
+    const { model, ref } = await this.registry.languageModel('lecture_diagram');
+
+    const result = await generateObject({
+      model,
+      schema: lectureDiagramSchema,
+      system: PROMPTS.lectureDiagram,
+      prompt: [
+        `Chapter: ${input.topicTitle}`,
+        `Draw a ${input.figure.kind}: ${input.figure.shows}`,
+        input.figure.kind === 'process'
+          ? 'A process: the steps as nodes in order, an edge from each to the next, labels on edges only where the page names the transition.'
+          : input.figure.kind === 'structure'
+            ? 'A structure: the parts as nodes, edges for how they connect or contain, at most one group where the page groups parts.'
+            : 'A comparison: the two things as two groups of nodes, their attributes as nodes inside each, edges only where the page relates them.',
+        input.correction
+          ? `Your previous drawing was rejected: ${input.correction}`
+          : null,
+        `\nThe spoken words of the page, which every anchor must be copied from exactly:\n${input.spoken}`,
+        `\nThe page itself, which every label must come from:\n${input.context}`,
       ]
         .filter(Boolean)
         .join('\n'),

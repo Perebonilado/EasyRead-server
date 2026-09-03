@@ -245,7 +245,9 @@ export type NoteSource =
   | 'lesson'
   | 'recap'
   /** A question the student posed before the material — answered at the topic's end. */
-  | 'question';
+  | 'question'
+  /** A board saved from the lecture, with the moment it was saved. */
+  | 'board';
 
 export type NoteDto = {
   id: string;
@@ -552,10 +554,18 @@ export const SEGMENT_KIND_KEYS: readonly SegmentKind[] = [
   'check',
 ];
 
+/**
+ * The board's own life. A page plays whether or not its board exists:
+ * `none` is a row from before boards, `pending` has its words but not its
+ * times yet, `skipped` is a row with nothing to write (a bridge).
+ */
+export type BoardStatus = 'none' | 'pending' | 'done' | 'failed' | 'skipped';
+
 export interface LectureSegmentDto {
   pageNumber: number;
   kind: SegmentKind;
   status: LectureSegmentStatus;
+  boardStatus: BoardStatus;
   /** Playback length, known only once the audio exists. */
   durationMs: number | null;
   /** A one-line crossing of a page with nothing to teach. */
@@ -586,6 +596,12 @@ export interface LecturePosition {
 }
 
 /** How much of one style of the lecture exists. */
+/** What the client fetches for one row's board: the timeline and the word times it was timed on. */
+export interface LectureBoardResponse {
+  board: unknown;
+  wordTimes: unknown | null;
+}
+
 export interface LectureStyleSummary {
   total: number;
   ready: number;
@@ -631,6 +647,21 @@ export const TEACH_TOOLS = {
   TEACH_PREREQUISITE: 'teach_prerequisite',
 } as const;
 export type TeachToolName = (typeof TEACH_TOOLS)[keyof typeof TEACH_TOOLS];
+
+/**
+ * What a tutor answering a question mid-lecture may do to the whiteboard.
+ * Executed client-side, like the teaching tools; the board the learner is
+ * looking at is the one the tutor draws on.
+ */
+export const LECTURE_TOOLS = {
+  HIGHLIGHT: 'board_highlight',
+  WRITE: 'board_write',
+  ARROW: 'board_arrow',
+  NOTE: 'board_note',
+  RESUME: 'lecture_resume',
+} as const;
+export type LectureToolName =
+  (typeof LECTURE_TOOLS)[keyof typeof LECTURE_TOOLS];
 
 export type DiagramResponse = { title: string; mermaid: string };
 export type SketchResponse = { title: string; svg: string };
@@ -957,6 +988,19 @@ export type SseEvent =
     }
   | {
       type: 'lecture.segment_failed';
+      pageNumber: number;
+      style: LectureStyle;
+      kind?: SegmentKind;
+    }
+  /** A row's board is timed and can be fetched. */
+  | {
+      type: 'lecture.board_ready';
+      pageNumber: number;
+      style: LectureStyle;
+      kind?: SegmentKind;
+    }
+  | {
+      type: 'lecture.board_failed';
       pageNumber: number;
       style: LectureStyle;
       kind?: SegmentKind;

@@ -1,4 +1,5 @@
 import type {
+  BoardStatus,
   LecturePosition,
   LectureSegmentStatus,
   LectureStyle,
@@ -21,6 +22,8 @@ export interface LectureSegmentRecord {
   /** A page, or one of the short segments around a chapter. */
   kind: SegmentKind;
   status: LectureSegmentStatus;
+  /** When the row last changed; how long it has sat in flight. */
+  updatedAt?: Date | null;
   scriptText: string | null;
   audioKey: string | null;
   durationMs: number | null;
@@ -28,6 +31,11 @@ export interface LectureSegmentRecord {
   attempts: number;
   /** Where each move of the page begins in the script; null until written. */
   moveOffsets: number[] | null;
+  /** The board timeline, as stored; null until the board writer ran. */
+  board: unknown;
+  /** Word times measured on the audio; null until aligned. */
+  wordTimes: unknown;
+  boardStatus: BoardStatus;
 }
 
 export interface LectureSegmentSeed {
@@ -129,6 +137,17 @@ export interface LectureRepository {
     input: SegmentKey & { audioKey: string; durationMs: number | null },
   ): Promise<void>;
   markSegmentFailed(input: SegmentKey & { error: string }): Promise<void>;
+  /** The row's board and its status; the timeline may be null for failed or skipped. */
+  saveBoard(
+    input: SegmentKey & { board: unknown; boardStatus: BoardStatus },
+  ): Promise<void>;
+  saveWordTimes(input: SegmentKey & { wordTimes: unknown }): Promise<void>;
+  /** Rows with words but no current board: what a backfill writes. */
+  listForBoardBackfill(
+    documentId: string,
+    contentVersion: number,
+    topicIds: string[] | null,
+  ): Promise<LectureSegmentRecord[]>;
   /**
    * Puts a chapter's failed pages back to pending so they can be written
    * again. Pages that were written are left exactly as they are.

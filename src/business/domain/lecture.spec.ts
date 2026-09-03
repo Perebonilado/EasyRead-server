@@ -43,6 +43,8 @@ import {
   type LecturePlan,
   type LectureTopicInput,
   type TaughtChapter,
+  effectiveStatus,
+  LECTURE_STALE_MS,
 } from './lecture';
 
 const page = (
@@ -1063,5 +1065,47 @@ describe('how each style is delivered by the voice', () => {
       LECTURE_STYLES.brisk.speed,
     );
     expect(LECTURE_STYLES.steady.speed).toBe(1);
+  });
+});
+
+describe('effectiveStatus', () => {
+  const now = Date.parse('2026-09-03T12:00:00Z');
+  const at = (msAgo: number) => new Date(now - msAgo);
+
+  it('reads a row still moving as what it says', () => {
+    expect(
+      effectiveStatus({ status: 'voicing', updatedAt: at(60_000) }, now),
+    ).toBe('voicing');
+    expect(effectiveStatus({ status: 'pending', updatedAt: at(0) }, now)).toBe(
+      'pending',
+    );
+  });
+
+  it('reads a row lost in flight as failed', () => {
+    expect(
+      effectiveStatus(
+        { status: 'voicing', updatedAt: at(LECTURE_STALE_MS + 1) },
+        now,
+      ),
+    ).toBe('failed');
+    expect(
+      effectiveStatus(
+        { status: 'writing', updatedAt: at(LECTURE_STALE_MS * 5) },
+        now,
+      ),
+    ).toBe('failed');
+  });
+
+  it('never touches a finished or failed row, and trusts a row with no time', () => {
+    expect(
+      effectiveStatus(
+        { status: 'done', updatedAt: at(LECTURE_STALE_MS * 5) },
+        now,
+      ),
+    ).toBe('done');
+    expect(effectiveStatus({ status: 'failed', updatedAt: null }, now)).toBe(
+      'failed',
+    );
+    expect(effectiveStatus({ status: 'voicing' }, now)).toBe('voicing');
   });
 });

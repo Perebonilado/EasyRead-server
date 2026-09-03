@@ -20,6 +20,7 @@ import {
   VECTOR_STORE,
   WEB_IMPORT,
   STARTER_LIBRARY,
+  ALIGNER,
 } from '../../business/ports/tokens';
 import { BullmqQueueAdapter } from '../adapters/bullmq-queue.adapter';
 import { DriveConverterAdapter } from '../adapters/drive-converter.adapter';
@@ -57,6 +58,7 @@ import { StarterLibraryAdapter } from '../adapters/starter-library.adapter';
 import { S3StorageAdapter } from '../adapters/s3-storage.adapter';
 import { RedisEventBusAdapter } from '../adapters/redis-event-bus.adapter';
 import { SystemClock } from '../adapters/system-clock';
+import { EchogardenAlignerAdapter } from '../adapters/echogarden-aligner.adapter';
 
 const logger = new Logger('Ports');
 
@@ -83,6 +85,8 @@ export const portProviders: Provider[] = [
   { provide: WEB_IMPORT, useClass: WebImportAdapter },
   // Voice rides on the same OpenAI key as the text gateway.
   { provide: SPEECH, useClass: OpenAiSpeechAdapter },
+  // Word timing for the lecture board: the script aligned to its audio.
+  { provide: ALIGNER, useClass: EchogardenAlignerAdapter },
   { provide: TRANSCRIPTION, useClass: OpenAiTranscriptionAdapter },
   { provide: REALTIME, useClass: OpenAiRealtimeAdapter },
   // Injected by concrete class where a tutor's voice lives on ElevenLabs;

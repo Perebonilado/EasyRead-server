@@ -22,6 +22,11 @@ const TASK_VAR: Record<LlmTask, string> = {
   lecture_outline: 'AI_MODEL_LECTURE_OUTLINE',
   lecture_segment: 'AI_MODEL_LECTURE_SEGMENT',
   lecture_verify: 'AI_MODEL_LECTURE_VERIFY',
+  // The board writer is a cheap call per page; the rules are in code. The
+  // diagram is the one place a stronger model pays, and there is at most
+  // one every two pages.
+  lecture_board: 'AI_MODEL_LECTURE_BOARD',
+  lecture_diagram: 'AI_MODEL_LECTURE_DIAGRAM',
   ocr_page: 'AI_MODEL_OCR',
   summarize: 'AI_MODEL_SUMMARIZE',
   topics_outline: 'AI_MODEL_TOPICS',

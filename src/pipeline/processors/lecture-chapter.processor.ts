@@ -56,6 +56,8 @@ import {
 } from '../../business/domain/lecture';
 import type { LectureChapterJobData } from '../queues';
 import type { JobContext } from './base.processor';
+import { LectureBoardService } from './lecture-board.service';
+import { capFigures, nextFreeLine } from '../../business/domain/board';
 
 /** How much of a neighbouring page the verifier is shown. */
 const NEIGHBOUR_CHARS = 2_500;
@@ -115,6 +117,7 @@ export class LectureChapterProcessor {
     @Inject(LLM_GATEWAY) private readonly llm: LlmGatewayPort,
     @Inject(JOB_QUEUE) private readonly queue: JobQueuePort,
     @Inject(EVENT_BUS) private readonly events: EventBusPort,
+    private readonly boards: LectureBoardService,
   ) {}
 
   async process(
@@ -156,15 +159,25 @@ export class LectureChapterProcessor {
         row.scriptText && row.status !== 'done' && row.status !== 'failed',
     );
     if (unvoiced.length) {
-      await this.queue.enqueueLectureVoices(
-        unvoiced.map((row) => ({
-          documentId,
-          contentVersion,
-          pageNumber: row.pageNumber,
-          style,
-          kind: row.kind,
-        })),
-      );
+      const keys = unvoiced.map((row) => ({
+        documentId,
+        contentVersion,
+        pageNumber: row.pageNumber,
+        style,
+        kind: row.kind,
+      }));
+      await this.queue.enqueueLectureVoices(keys);
+      // Their words exist, so their board can be written now; it is timed
+      // on the audio once that arrives.
+      const unboarded = keys.filter((key, index) => {
+        const status = unvoiced[index].boardStatus ?? 'none';
+        return (
+          this.boards.enabled() && (status === 'none' || status === 'failed')
+        );
+      });
+      if (unboarded.length) {
+        await this.queue.enqueueLectureBoards(unboarded);
+      }
     }
 
     // How the chapters before this one began, in this style, so this one
@@ -370,6 +383,19 @@ export class LectureChapterProcessor {
         moveOffsets: [],
         durationMs: estimateDurationMs(scriptForTts(script)),
       });
+      await this.boards.writeForExtra({
+        key: {
+          documentId: doc.id,
+          contentVersion,
+          pageNumber: row.pageNumber,
+          style,
+          kind,
+        },
+        script,
+        topicTitle: input.topic.title,
+        plan,
+        durationMs: estimateDurationMs(scriptForTts(script)),
+      });
       await this.queue.enqueueLectureVoices([
         {
           documentId: doc.id,
@@ -502,7 +528,7 @@ export class LectureChapterProcessor {
       }
       const plan: LecturePlan = {
         ...result.value,
-        beats: singleTurn(result.value.beats),
+        beats: capFigures(singleTurn(result.value.beats)),
         hookSpoken,
       };
 
@@ -704,6 +730,34 @@ export class LectureChapterProcessor {
         durationMs: estimateDurationMs(scriptForTts(written.script)),
       });
 
+      // The board for this page, from the accepted script. It can never
+      // fail the page: the page is written; the board is a bonus.
+      const pageKey = {
+        documentId: doc.id,
+        contentVersion,
+        pageNumber: row.pageNumber,
+        style,
+        kind: 'page' as const,
+      };
+      const pageBoard = await this.boards.writeForPage({
+        key: pageKey,
+        script: written.script,
+        pageText,
+        topicTitle: input.topicTitle,
+        plan,
+        beat: beatFor(plan, row.pageNumber),
+        durationMs: estimateDurationMs(scriptForTts(written.script)),
+        continues: false,
+        bridge: row.bridge,
+        moveOffsets: written.moveOffsets,
+      });
+      if (pageBoard && this.boards.figureFor(plan, row.pageNumber)) {
+        await this.boards.requestDiagram({
+          ...pageKey,
+          topicId: input.topicId,
+        });
+      }
+
       const voices: LectureVoiceJob[] = [
         {
           documentId: doc.id,
@@ -740,6 +794,20 @@ export class LectureChapterProcessor {
           scriptText: written.part.script,
           moveOffsets: written.part.moveOffsets,
           durationMs: estimateDurationMs(scriptForTts(written.part.script)),
+        });
+        // The second piece continues the page's board on the next free line.
+        await this.boards.writeForPage({
+          key: { ...pageKey, kind: 'part' },
+          script: written.part.script,
+          pageText,
+          topicTitle: input.topicTitle,
+          plan,
+          beat: beatFor(plan, row.pageNumber),
+          durationMs: estimateDurationMs(scriptForTts(written.part.script)),
+          continues: true,
+          bridge: false,
+          startLine: pageBoard ? nextFreeLine(pageBoard) : 1,
+          moveOffsets: written.part.moveOffsets,
         });
         // In memory too: the next page continues from this piece.
         input.all.push({

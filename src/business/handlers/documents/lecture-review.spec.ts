@@ -33,6 +33,9 @@ const page = (
   bridge: false,
   attempts: 0,
   moveOffsets: [],
+  board: null,
+  wordTimes: null,
+  boardStatus: 'none',
 });
 
 const plan = (title: string, pages: number[]): LecturePlan => ({

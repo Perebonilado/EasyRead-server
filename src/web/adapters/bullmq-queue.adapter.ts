@@ -5,7 +5,10 @@ import Redis from 'ioredis';
 import type { Level, PipelineStep } from '../../contracts';
 import type {
   ExportJob,
+  LectureAlignJob,
+  LectureBoardJob,
   LectureChapterJob,
+  LectureDiagramJob,
   LectureVoiceJob,
   JobQueuePort,
   PipelineJob,
@@ -16,7 +19,10 @@ import {
   QUEUE,
   QUEUE_SETTINGS,
   exportJobId,
+  lectureAlignJobId,
+  lectureBoardJobId,
   lectureChapterJobId,
+  lectureDiagramJobId,
   lectureVoiceJobId,
   simplifyJobId,
   stepJobId,
@@ -171,6 +177,81 @@ export class BullmqQueueAdapter implements JobQueuePort, OnModuleDestroy {
             : Math.min(job.orderIndex + 2, 2_000_000),
         },
       })),
+    );
+  }
+
+  /**
+   * The board's queues share one shape: the row already has what the job
+   * needs, and asking twice must not do the work twice. A finished job of
+   * the same id is removed first so a row can be aligned or boarded again
+   * after its audio or its words changed; a running one is left alone and
+   * the add dedupes against it.
+   */
+  private async enqueueKeyed<T extends { documentId: string }>(
+    queueName: QueueName,
+    name: string,
+    jobs: T[],
+    idOf: (job: T) => string,
+  ): Promise<void> {
+    if (!jobs.length) return;
+    const queue = this.queue(queueName);
+    await Promise.all(
+      jobs.map((job) => queue.remove(idOf(job)).catch(() => undefined)),
+    );
+    await queue.addBulk(
+      jobs.map((job) => {
+        const priority = (job as { priority?: number }).priority;
+        return {
+          name,
+          data: job,
+          opts: {
+            ...this.options(queueName),
+            jobId: idOf(job),
+            ...(typeof priority === 'number' && priority > 0
+              ? { priority }
+              : {}),
+          },
+        };
+      }),
+    );
+  }
+
+  async enqueueLectureAligns(jobs: LectureAlignJob[]): Promise<void> {
+    await this.enqueueKeyed(QUEUE.lectureAlign, 'lecture-align', jobs, (job) =>
+      lectureAlignJobId(
+        job.documentId,
+        job.pageNumber,
+        job.contentVersion,
+        job.style,
+        job.kind,
+      ),
+    );
+  }
+
+  async enqueueLectureDiagrams(jobs: LectureDiagramJob[]): Promise<void> {
+    await this.enqueueKeyed(
+      QUEUE.lectureDiagram,
+      'lecture-diagram',
+      jobs,
+      (job) =>
+        lectureDiagramJobId(
+          job.documentId,
+          job.pageNumber,
+          job.contentVersion,
+          job.style,
+        ),
+    );
+  }
+
+  async enqueueLectureBoards(jobs: LectureBoardJob[]): Promise<void> {
+    await this.enqueueKeyed(QUEUE.lectureBoard, 'lecture-board', jobs, (job) =>
+      lectureBoardJobId(
+        job.documentId,
+        job.pageNumber,
+        job.contentVersion,
+        job.style,
+        job.kind,
+      ),
     );
   }
 

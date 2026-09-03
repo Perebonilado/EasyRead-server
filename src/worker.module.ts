@@ -10,6 +10,10 @@ import { ExtractProcessor } from './pipeline/processors/extract.processor';
 import { OcrProcessor } from './pipeline/processors/ocr.processor';
 import { LectureChapterProcessor } from './pipeline/processors/lecture-chapter.processor';
 import { LectureVoiceProcessor } from './pipeline/processors/lecture-voice.processor';
+import { LectureAlignProcessor } from './pipeline/processors/lecture-align.processor';
+import { LectureDiagramProcessor } from './pipeline/processors/lecture-diagram.processor';
+import { LectureBoardProcessor } from './pipeline/processors/lecture-board.processor';
+import { LectureBoardService } from './pipeline/processors/lecture-board.service';
 import { SimplifyPageProcessor } from './pipeline/processors/simplify.processor';
 import { SummarizeProcessor } from './pipeline/processors/summarize.processor';
 import { TopicsProcessor } from './pipeline/processors/topics.processor';
@@ -33,6 +37,10 @@ import { WorkerRunner } from './pipeline/worker-runner.service';
     SimplifyPageProcessor,
     LectureChapterProcessor,
     LectureVoiceProcessor,
+    LectureAlignProcessor,
+    LectureDiagramProcessor,
+    LectureBoardProcessor,
+    LectureBoardService,
     ExportProcessor,
     LearnProcessor,
     ImportProcessor,

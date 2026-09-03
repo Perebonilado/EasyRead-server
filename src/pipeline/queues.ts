@@ -18,6 +18,9 @@ export const QUEUE = {
   import: 'import',
   lectureChapter: 'lecture-chapter',
   lectureVoice: 'lecture-voice',
+  lectureAlign: 'lecture-align',
+  lectureDiagram: 'lecture-diagram',
+  lectureBoard: 'lecture-board',
 } as const;
 
 export type QueueName = (typeof QUEUE)[keyof typeof QUEUE];
@@ -49,6 +52,13 @@ export const QUEUE_SETTINGS: Record<
   // Synthesis needs nothing from its neighbours, so it runs wide and off
   // the writing critical path.
   'lecture-voice': { concurrency: 8, attempts: 3, backoffMs: 10_000 },
+  // Forced alignment is CPU work on the worker itself: a couple at a time,
+  // and never on the voicing path.
+  'lecture-align': { concurrency: 2, attempts: 2, backoffMs: 30_000 },
+  // One diagram every two pages at most, from a slower model.
+  'lecture-diagram': { concurrency: 2, attempts: 2, backoffMs: 20_000 },
+  // Boards for lectures written before boards existed.
+  'lecture-board': { concurrency: 4, attempts: 2, backoffMs: 15_000 },
 };
 
 export interface BaseJobData {
@@ -88,6 +98,29 @@ export interface LectureVoiceJobData extends BaseJobData {
   style: LectureStyle;
   /** Omitted means the page itself. */
   kind?: SegmentKind;
+}
+
+/** Measuring where each spoken word falls in one finished audio file. */
+export interface LectureAlignJobData extends BaseJobData {
+  pageNumber: number;
+  style: LectureStyle;
+  kind?: SegmentKind;
+}
+
+/** Drawing the one figure a page's beat asked for. */
+export interface LectureDiagramJobData extends BaseJobData {
+  topicId: string;
+  pageNumber: number;
+  style: LectureStyle;
+}
+
+/** Writing a board for a row that already has its words. */
+export interface LectureBoardJobData extends BaseJobData {
+  pageNumber: number;
+  style: LectureStyle;
+  kind?: SegmentKind;
+  /** Lower goes first; the page the learner is on gets 1. Unset means no priority. */
+  priority?: number;
 }
 
 export interface ExportJobData extends BaseJobData {
@@ -136,6 +169,31 @@ export const lectureChapterJobId = (
   contentVersion: number,
   style: LectureStyle,
 ) => `lecture-chapter-${documentId}-v${contentVersion}-${topicId}-${style}`;
+
+export const lectureAlignJobId = (
+  documentId: string,
+  page: number,
+  contentVersion: number,
+  style: LectureStyle,
+  kind: SegmentKind = 'page',
+) =>
+  `lecture-align-${documentId}-v${contentVersion}-${page}-${style}${kind === 'page' ? '' : `-${kind}`}`;
+
+export const lectureDiagramJobId = (
+  documentId: string,
+  page: number,
+  contentVersion: number,
+  style: LectureStyle,
+) => `lecture-diagram-${documentId}-v${contentVersion}-${page}-${style}`;
+
+export const lectureBoardJobId = (
+  documentId: string,
+  page: number,
+  contentVersion: number,
+  style: LectureStyle,
+  kind: SegmentKind = 'page',
+) =>
+  `lecture-board-${documentId}-v${contentVersion}-${page}-${style}${kind === 'page' ? '' : `-${kind}`}`;
 
 export const lectureVoiceJobId = (
   documentId: string,

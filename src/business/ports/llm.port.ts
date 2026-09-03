@@ -23,6 +23,8 @@ export type LlmTask =
   | 'lecture_outline'
   | 'lecture_segment'
   | 'lecture_verify'
+  | 'lecture_board'
+  | 'lecture_diagram'
   | 'learn_outline'
   | 'learn_write'
   | 'visualize_query'
@@ -88,6 +90,11 @@ export interface LectureOutlineDraft {
     newHere: string;
     /** What the page repeats from earlier, to pass in a clause or leave out. */
     skip: string | null;
+    /** What the page's idea would be drawn as, if anything. */
+    figure: {
+      kind: 'process' | 'structure' | 'comparison' | 'none';
+      shows: string | null;
+    };
     /** Light pages mostly restate, recap or list; they get the small budget. */
     weight: 'full' | 'light';
     /**
@@ -106,6 +113,39 @@ export interface LectureOutlineDraft {
 /** One page's script, in sections that follow the beat's moves in order. */
 export interface LectureSegmentDraft {
   sections: { move: number; text: string }[];
+}
+
+/** The board writer's draft for one row; see domain/board for the rules. */
+export interface LectureBoardDraft {
+  heading: string | null;
+  items: {
+    kind: 'term' | 'point' | 'figure' | 'relation' | 'cue';
+    text: string | null;
+    meaning: string | null;
+    from: string | null;
+    to: string | null;
+    label: string | null;
+    target: string | null;
+    shape: 'underline' | 'circle' | 'box' | 'highlight' | null;
+    /** 2 for a detail under the item before it. */
+    level: 1 | 2 | null;
+    /** The one thing to take away from the page. */
+    important: boolean | null;
+    anchor: string;
+  }[];
+}
+
+/** A figure before layout: nodes, edges, groups, each citing the script. */
+export interface LectureDiagramDraft {
+  title: string;
+  nodes: {
+    id: string;
+    label: string;
+    shape: 'box' | 'ellipse' | 'diamond' | 'cylinder' | 'note' | null;
+    anchor: string;
+  }[];
+  edges: { from: string; to: string; label: string | null; anchor: string }[];
+  groups: { label: string; memberIds: string[] }[];
 }
 
 export interface TopicDraft {
@@ -235,6 +275,54 @@ export interface LlmGatewayPort {
     daysAway: number | null;
     budget: { min: number; max: number };
   }): Promise<LlmResult<{ script: string }>>;
+
+  /**
+   * What the lecturer writes on the board while a page is spoken: a
+   * heading and a few items, each anchored to an exact phrase of the
+   * spoken text. The rules that make it a board and not a transcript are
+   * enforced in code afterwards; the model is asked for a draft.
+   */
+  lectureBoard(input: {
+    topicTitle: string;
+    spoken: string;
+    pageText: string;
+    moves: string[];
+    goal: string;
+    newHere: string | null;
+    pitfall: string | null;
+    terms: { term: string; meaning: string }[];
+    style: 'gentle' | 'steady' | 'brisk';
+    continues: boolean;
+    /** Items per minute the style allows, and the row's minutes. */
+    budget: { min: number; max: number };
+    /**
+     * Lines the rules refused that no draft replaced. When present the
+     * writer returns only their replacements, each a claim in the
+     * lecturer's words with an anchor copied from the speech.
+     */
+    repair?: {
+      kind: string;
+      text: string;
+      meaning: string | null;
+      reason: string;
+    }[];
+    /** Set when the first draft broke the rules; says exactly which. */
+    correction?: string;
+  }): Promise<LlmResult<LectureBoardDraft>>;
+
+  /**
+   * The one drawing a page's beat asked for: what it contains and how the
+   * parts connect, each citing the phrase of the spoken text it belongs
+   * to. Layout is not the model's job.
+   */
+  lectureDiagram(input: {
+    topicTitle: string;
+    figure: { kind: 'process' | 'structure' | 'comparison'; shows: string };
+    spoken: string;
+    pageText: string;
+    context: string;
+    correction?: string;
+  }): Promise<LlmResult<LectureDiagramDraft>>;
 
   /**
    * Checks a segment against the page it claims to teach. Blind to the

@@ -59,6 +59,8 @@ import {
   GenerateLectureHandler,
   LectureAudioHandler,
   LectureReviewHandler,
+  LectureBoardHandler,
+  BackfillBoardsHandler,
   LectureStatusHandler,
   SaveLecturePositionHandler,
 } from './business/handlers/documents/lecture.handlers';
@@ -206,6 +208,8 @@ const handlers = [
   LectureStatusHandler,
   LectureAudioHandler,
   LectureReviewHandler,
+  LectureBoardHandler,
+  BackfillBoardsHandler,
   SaveLecturePositionHandler,
   DrawDiagramHandler,
   AskDiagramCheckHandler,

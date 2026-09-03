@@ -13,6 +13,12 @@ import type {
 } from '../../business/repositories/lecture.repository';
 import { LectureChapterProcessor } from './lecture-chapter.processor';
 import { LectureVoiceProcessor } from './lecture-voice.processor';
+import { LectureBoardService } from './lecture-board.service';
+import { LectureAlignProcessor } from './lecture-align.processor';
+import { LectureDiagramProcessor } from './lecture-diagram.processor';
+import { LectureBoardProcessor } from './lecture-board.processor';
+import { FakeAlignerAdapter } from '../../web/adapters/fake-aligner.adapter';
+import type { BoardTimeline, WordTimes } from '../../business/domain/board';
 
 /**
  * What matters about this pipeline: a chapter is written IN ORDER, so
@@ -80,6 +86,17 @@ function fakes(
   const stored: string[] = [];
   const published: { type: string; pageNumber: number; style?: string }[] = [];
   let synthesised = 0;
+  const alignJobs: {
+    pageNumber: number;
+    style: LectureStyle;
+    kind: SegmentKind;
+  }[] = [];
+  const diagramJobs: { pageNumber: number; style: LectureStyle }[] = [];
+  const boardJobs: {
+    pageNumber: number;
+    style: LectureStyle;
+    kind: SegmentKind;
+  }[] = [];
   /** What the voice was asked to say, and how. */
   const voiced: { text: string; instructions?: string; speed?: number }[] = [];
 
@@ -106,6 +123,9 @@ function fakes(
           bridge: (pageText[pageNumber] ?? '').length < 120,
           attempts: 0,
           moveOffsets: null,
+          board: null,
+          wordTimes: null,
+          boardStatus: 'none',
         });
       }
     });
@@ -135,6 +155,9 @@ function fakes(
         durationMs: null,
         attempts: 0,
         moveOffsets: null,
+        board: null,
+        wordTimes: null,
+        boardStatus: 'none',
       });
     }
   };
@@ -191,6 +214,9 @@ function fakes(
           bridge: seed.bridge,
           attempts: 0,
           moveOffsets: null,
+          board: null,
+          wordTimes: null,
+          boardStatus: 'none',
         });
       }
       return Promise.resolve();
@@ -231,6 +257,27 @@ function fakes(
       return Promise.resolve();
     },
     resetFailedSegments: () => Promise.resolve(),
+    saveBoard: (input) => {
+      const r = row(input.pageNumber, input.style, input.kind);
+      if (r) {
+        r.board = input.board;
+        r.boardStatus = input.boardStatus;
+      }
+      return Promise.resolve();
+    },
+    saveWordTimes: (input) => {
+      const r = row(input.pageNumber, input.style, input.kind);
+      if (r) r.wordTimes = input.wordTimes;
+      return Promise.resolve();
+    },
+    listForBoardBackfill: (_d, _v, topicIds) =>
+      Promise.resolve(
+        [...rows.values()].filter(
+          (r) =>
+            r.scriptText !== null &&
+            (!topicIds || topicIds.includes(r.topicId ?? '')),
+        ),
+      ),
     clear: () => Promise.resolve(),
     savePosition: () => Promise.resolve(),
     findPosition: () => Promise.resolve(null),
@@ -257,6 +304,41 @@ function fakes(
     topics: { listByDocument: () => Promise.resolve(topics) },
     calls: { record: () => Promise.resolve() },
     queue: {
+      enqueueLectureAligns: (
+        jobs: { pageNumber: number; style: LectureStyle; kind?: SegmentKind }[],
+      ) => {
+        alignJobs.push(
+          ...jobs.map((job) => ({
+            pageNumber: job.pageNumber,
+            style: job.style,
+            kind: job.kind ?? 'page',
+          })),
+        );
+        return Promise.resolve();
+      },
+      enqueueLectureDiagrams: (
+        jobs: { pageNumber: number; style: LectureStyle }[],
+      ) => {
+        diagramJobs.push(
+          ...jobs.map((job) => ({
+            pageNumber: job.pageNumber,
+            style: job.style,
+          })),
+        );
+        return Promise.resolve();
+      },
+      enqueueLectureBoards: (
+        jobs: { pageNumber: number; style: LectureStyle; kind?: SegmentKind }[],
+      ) => {
+        boardJobs.push(
+          ...jobs.map((job) => ({
+            pageNumber: job.pageNumber,
+            style: job.style,
+            kind: job.kind ?? 'page',
+          })),
+        );
+        return Promise.resolve();
+      },
       enqueueLectureVoices: (
         jobs: { pageNumber: number; style: LectureStyle; kind?: SegmentKind }[],
       ) => {
@@ -295,6 +377,7 @@ function fakes(
       },
     },
     storage: {
+      get: () => Promise.resolve(Buffer.from('mp3')),
       size: () => Promise.resolve(null),
       put: (input: { key: string }) => {
         stored.push(input.key);
@@ -310,6 +393,9 @@ function fakes(
   };
 
   return {
+    alignJobs,
+    diagramJobs,
+    boardJobs,
     voiced,
     seedExtras,
     lectures,
@@ -324,9 +410,25 @@ function fakes(
   };
 }
 
+/** The board service over the same fakes; boards on unless a test turns them off. */
+const boardService = (
+  f: ReturnType<typeof fakes>,
+  llm: FakeLlmAdapter = new FakeLlmAdapter(),
+  enabled = true,
+) =>
+  new LectureBoardService(
+    f.lectures,
+    llm,
+    f.deps.calls,
+    f.deps.queue as never,
+    f.deps.events as never,
+    new ConfigService({ LECTURE_BOARD_ENABLED: enabled ? 'true' : 'false' }),
+  );
+
 const chapterProcessor = (
   f: ReturnType<typeof fakes>,
   llm: FakeLlmAdapter = new FakeLlmAdapter(),
+  boards: LectureBoardService = boardService(f, llm),
 ) =>
   new LectureChapterProcessor(
     f.deps.documents as never,
@@ -337,9 +439,13 @@ const chapterProcessor = (
     llm,
     f.deps.queue as never,
     f.deps.events as never,
+    boards,
   );
 
-const voiceProcessor = (f: ReturnType<typeof fakes>) =>
+const voiceProcessor = (
+  f: ReturnType<typeof fakes>,
+  boards: LectureBoardService = boardService(f),
+) =>
   new LectureVoiceProcessor(
     f.deps.documents as never,
     f.lectures,
@@ -348,6 +454,7 @@ const voiceProcessor = (f: ReturnType<typeof fakes>) =>
     f.deps.storage as never,
     f.deps.events as never,
     new ConfigService({}),
+    boards,
   );
 
 const chapterJob = (
@@ -1583,5 +1690,347 @@ describe('LectureVoiceProcessor', () => {
       style: 'steady',
       kind: 'page',
     });
+  });
+});
+
+describe('the lecture board around the chapter processor', () => {
+  it('writes a board for each page from its accepted script, ready at once on the estimate, and none for a bridge', async () => {
+    const f = fakes({ 1: REAL_PAGE, 2: 'short', 3: REAL_PAGE });
+    await chapterProcessor(f).process(chapterJob(), CONTEXT);
+    const page = f.row(1)!;
+    expect(page.boardStatus).toBe('done');
+    const timeline = page.board as BoardTimeline;
+    expect(timeline.version).toBe(1);
+    expect(timeline.timing).toBe('estimated');
+    expect(timeline.ops.some((op) => op.kind === 'heading')).toBe(true);
+    expect(timeline.ops.some((op) => op.kind === 'term')).toBe(true);
+    expect(timeline.ops.every((op) => op.t0Ms !== null)).toBe(true);
+    expect(f.row(2)!.boardStatus).toBe('skipped');
+    // Every page shipped regardless.
+    expect(f.row(1)!.status).toBe('voicing');
+    expect(f.row(3)!.status).toBe('voicing');
+  });
+
+  it('never lets a broken board writer touch the page', async () => {
+    const f = fakes({ 1: REAL_PAGE });
+    const llm = new FakeLlmAdapter();
+    llm.lectureBoard = () => Promise.reject(new Error('board model down'));
+    await chapterProcessor(f, llm).process(chapterJob(), CONTEXT);
+    expect(f.row(1)!.status).toBe('voicing');
+    expect(f.row(1)!.boardStatus).toBe('failed');
+    expect(f.published).toContainEqual({
+      type: 'lecture.board_failed',
+      pageNumber: 1,
+      style: 'steady',
+      kind: 'page',
+    });
+  });
+
+  it('writes deterministic boards for the words and the check', async () => {
+    const f = fakes({ 1: REAL_PAGE, 2: REAL_PAGE }, [TOPIC], ['gentle']);
+    f.seedExtras('gentle');
+    await chapterProcessor(f).process(
+      chapterJob(TOPIC.id, 0, 'gentle'),
+      CONTEXT,
+    );
+    const terms = f.row(1, 'gentle', 'terms')!;
+    expect(terms.boardStatus).toBe('done');
+    expect(
+      (terms.board as BoardTimeline).ops.some((op) => op.kind === 'term'),
+    ).toBe(true);
+    const check = f.row(2, 'gentle', 'check')!;
+    expect(check.boardStatus).toBe('done');
+    expect(
+      (check.board as BoardTimeline).ops.filter((op) => op.kind === 'point')
+        .length,
+    ).toBeGreaterThan(0);
+  });
+
+  it('asks for the drawing only where the plan marked a figure', async () => {
+    const f = fakes({ 1: REAL_PAGE, 2: REAL_PAGE });
+    const llm = new FakeLlmAdapter();
+    const inner = new FakeLlmAdapter();
+    llm.lectureOutline = async (input) => {
+      const result = await inner.lectureOutline(input);
+      return {
+        ...result,
+        value: {
+          ...result.value,
+          beats: result.value.beats.map((beat, index) => ({
+            ...beat,
+            figure:
+              index === 0
+                ? {
+                    kind: 'process' as const,
+                    shows: 'money flowing through the banks',
+                  }
+                : { kind: 'none' as const, shows: null },
+          })),
+        },
+      };
+    };
+    await chapterProcessor(f, llm).process(chapterJob(), CONTEXT);
+    expect(f.diagramJobs).toEqual([{ pageNumber: 1, style: 'steady' }]);
+  });
+
+  it('leaves every row without a board when boards are off', async () => {
+    const f = fakes({ 1: REAL_PAGE });
+    const llm = new FakeLlmAdapter();
+    await chapterProcessor(f, llm, boardService(f, llm, false)).process(
+      chapterJob(),
+      CONTEXT,
+    );
+    expect(f.row(1)!.status).toBe('voicing');
+    expect(f.row(1)!.boardStatus).toBe('none');
+    expect(f.row(1)!.board).toBeNull();
+  });
+});
+
+describe('the board after the audio', () => {
+  const alignProcessor = (
+    f: ReturnType<typeof fakes>,
+    aligner = new FakeAlignerAdapter(),
+  ) =>
+    new LectureAlignProcessor(
+      f.deps.documents as never,
+      f.lectures,
+      f.deps.storage as never,
+      aligner,
+      boardService(f),
+    );
+
+  it('asks for alignment once a row is voiced, then times the board and announces it', async () => {
+    const f = fakes({ 1: REAL_PAGE });
+    await chapterProcessor(f).process(chapterJob(), CONTEXT);
+    await voiceProcessor(f).process(voiceJob(1), CONTEXT);
+    expect(f.alignJobs).toEqual([
+      { pageNumber: 1, style: 'steady', kind: 'page' },
+    ]);
+
+    await alignProcessor(f).process({ ...voiceJob(1), kind: 'page' }, CONTEXT);
+    const row = f.row(1)!;
+    expect(row.boardStatus).toBe('done');
+    const times = row.wordTimes as WordTimes;
+    expect(times.source).toBe('echogarden-whisper');
+    expect(times.audioKey).toBe(row.audioKey);
+    const timeline = row.board as BoardTimeline;
+    expect(timeline.timing).toBe('aligned');
+    expect(
+      timeline.ops.every((op) => op.t0Ms !== null && op.durMs !== null),
+    ).toBe(true);
+    expect(f.published).toContainEqual({
+      type: 'lecture.board_ready',
+      pageNumber: 1,
+      style: 'steady',
+      kind: 'page',
+    });
+  });
+
+  it('times on the estimate when the aligner is off or its times fail the checks', async () => {
+    const off = fakes({ 1: REAL_PAGE });
+    await chapterProcessor(off).process(chapterJob(), CONTEXT);
+    await voiceProcessor(off).process(voiceJob(1), CONTEXT);
+    const aligner = new FakeAlignerAdapter();
+    aligner.off = true;
+    await alignProcessor(off, aligner).process(
+      { ...voiceJob(1), kind: 'page' },
+      CONTEXT,
+    );
+    expect((off.row(1)!.wordTimes as WordTimes).source).toBe('estimate');
+    expect((off.row(1)!.board as BoardTimeline).timing).toBe('estimated');
+    expect(off.row(1)!.boardStatus).toBe('done');
+
+    const broken = fakes({ 1: REAL_PAGE });
+    await chapterProcessor(broken).process(chapterJob(), CONTEXT);
+    await voiceProcessor(broken).process(voiceJob(1), CONTEXT);
+    const bad = new FakeAlignerAdapter();
+    bad.broken = true;
+    await alignProcessor(broken, bad).process(
+      { ...voiceJob(1), kind: 'page' },
+      CONTEXT,
+    );
+    expect((broken.row(1)!.wordTimes as WordTimes).source).toBe('estimate');
+    expect(broken.row(1)!.boardStatus).toBe('done');
+  });
+
+  it('keeps sentence times for the rewind even on a row with nothing to write', async () => {
+    const f = fakes({ 1: 'short' });
+    await chapterProcessor(f).process(chapterJob(), CONTEXT);
+    await voiceProcessor(f).process(voiceJob(1), CONTEXT);
+    await alignProcessor(f).process({ ...voiceJob(1), kind: 'page' }, CONTEXT);
+    expect(f.row(1)!.boardStatus).toBe('skipped');
+    expect((f.row(1)!.wordTimes as WordTimes).sentences.length).toBeGreaterThan(
+      0,
+    );
+  });
+});
+
+describe('the diagram on a board', () => {
+  const diagramProcessor = (
+    f: ReturnType<typeof fakes>,
+    llm = new FakeLlmAdapter(),
+  ) =>
+    new LectureDiagramProcessor(
+      f.deps.documents as never,
+      f.deps.pages as never,
+      f.deps.topics as never,
+      f.lectures,
+      f.deps.calls,
+      llm,
+      boardService(f, llm),
+    );
+  const withFigure = (llm: FakeLlmAdapter) => {
+    const inner = new FakeLlmAdapter();
+    llm.lectureOutline = async (input) => {
+      const result = await inner.lectureOutline(input);
+      return {
+        ...result,
+        value: {
+          ...result.value,
+          beats: result.value.beats.map((beat, index) => ({
+            ...beat,
+            figure:
+              index === 0
+                ? { kind: 'process' as const, shows: 'the flow of money' }
+                : { kind: 'none' as const, shows: null },
+          })),
+        },
+      };
+    };
+    return llm;
+  };
+
+  it('draws the figure, lays it out, and attaches it to the board in narration order', async () => {
+    const f = fakes({ 1: REAL_PAGE });
+    const llm = withFigure(new FakeLlmAdapter());
+    await chapterProcessor(f, llm).process(chapterJob(), CONTEXT);
+    await diagramProcessor(f, llm).process(
+      { ...voiceJob(1), topicId: TOPIC.id },
+      CONTEXT,
+    );
+    const timeline = f.row(1)!.board as BoardTimeline;
+    expect(timeline.diagrams).toHaveLength(1);
+    const op = timeline.ops.find((entry) => entry.kind === 'diagram');
+    expect(op).toBeDefined();
+    expect(op!.kind === 'diagram' && op!.elementOrder.length).toBe(
+      timeline.diagrams[0].nodes.length + timeline.diagrams[0].edges.length,
+    );
+    expect(
+      timeline.diagrams[0].nodes.every((node) => node.w > 0 && node.h > 0),
+    ).toBe(true);
+  });
+
+  it("copies a sibling style's drawing rather than drawing twice, and re-times a timed board", async () => {
+    const f = fakes({ 1: REAL_PAGE }, [TOPIC], ['steady', 'gentle']);
+    const llm = withFigure(new FakeLlmAdapter());
+    let drawn = 0;
+    const inner = new FakeLlmAdapter();
+    llm.lectureDiagram = (input) => {
+      drawn += 1;
+      return inner.lectureDiagram(input);
+    };
+    await chapterProcessor(f, llm).process(chapterJob(), CONTEXT);
+    await chapterProcessor(f, llm).process(
+      chapterJob(TOPIC.id, 0, 'gentle'),
+      CONTEXT,
+    );
+    await voiceProcessor(f).process(voiceJob(1, 'gentle'), CONTEXT);
+    await new LectureAlignProcessor(
+      f.deps.documents as never,
+      f.lectures,
+      f.deps.storage as never,
+      new FakeAlignerAdapter(),
+      boardService(f),
+    ).process({ ...voiceJob(1, 'gentle'), kind: 'page' }, CONTEXT);
+    expect(f.row(1, 'gentle')!.boardStatus).toBe('done');
+
+    await diagramProcessor(f, llm).process(
+      { ...voiceJob(1), topicId: TOPIC.id },
+      CONTEXT,
+    );
+    await diagramProcessor(f, llm).process(
+      { ...voiceJob(1, 'gentle'), topicId: TOPIC.id },
+      CONTEXT,
+    );
+    expect(drawn).toBe(1);
+    const gentle = f.row(1, 'gentle')!.board as BoardTimeline;
+    expect(gentle.diagrams).toHaveLength(1);
+    const op = gentle.ops.find((entry) => entry.kind === 'diagram')!;
+    expect(op.t0Ms).not.toBeNull();
+    expect(f.row(1, 'gentle')!.boardStatus).toBe('done');
+  });
+
+  it('leaves the board without a drawing when the plan cannot be drawn', async () => {
+    const f = fakes({ 1: REAL_PAGE });
+    const llm = withFigure(new FakeLlmAdapter());
+    llm.lectureDiagram = () =>
+      Promise.resolve({
+        value: {
+          title: 'Nothing',
+          nodes: [
+            {
+              id: 'a',
+              label: 'zebra giraffe',
+              shape: null,
+              anchor: 'not said anywhere',
+            },
+          ],
+          edges: [],
+          groups: [],
+        },
+        usage: USAGE,
+      });
+    await chapterProcessor(f, llm).process(chapterJob(), CONTEXT);
+    await diagramProcessor(f, llm).process(
+      { ...voiceJob(1), topicId: TOPIC.id },
+      CONTEXT,
+    );
+    const timeline = f.row(1)!.board as BoardTimeline;
+    expect(timeline.diagrams).toHaveLength(0);
+    expect(f.row(1)!.boardStatus).toBe('done');
+  });
+});
+
+describe('boards for a lecture written before boards existed', () => {
+  const backfill = (f: ReturnType<typeof fakes>, llm = new FakeLlmAdapter()) =>
+    new LectureBoardProcessor(
+      f.deps.documents as never,
+      f.deps.pages as never,
+      f.deps.topics as never,
+      f.lectures,
+      boardService(f, llm),
+    );
+
+  it('writes the board from the stored words and asks for alignment, touching neither script nor audio', async () => {
+    const f = fakes({ 1: REAL_PAGE, 2: REAL_PAGE });
+    const llm = new FakeLlmAdapter();
+    // Written and voiced without boards.
+    await chapterProcessor(f, llm, boardService(f, llm, false)).process(
+      chapterJob(),
+      CONTEXT,
+    );
+    await voiceProcessor(f, boardService(f, llm, false)).process(
+      voiceJob(1),
+      CONTEXT,
+    );
+    const script = f.row(1)!.scriptText;
+    const audio = f.row(1)!.audioKey;
+    expect(f.row(1)!.boardStatus).toBe('none');
+
+    await backfill(f, llm).process({ ...voiceJob(1), kind: 'page' }, CONTEXT);
+    // Ready at once, on the estimate; the measurement is asked for.
+    expect(f.row(1)!.boardStatus).toBe('done');
+    expect((f.row(1)!.board as BoardTimeline).timing).toBe('estimated');
+    expect(f.row(1)!.scriptText).toBe(script);
+    expect(f.row(1)!.audioKey).toBe(audio);
+    expect(f.alignJobs).toContainEqual({
+      pageNumber: 1,
+      style: 'steady',
+      kind: 'page',
+    });
+    // A row not yet voiced is timed on the estimate at once.
+    await backfill(f, llm).process({ ...voiceJob(2), kind: 'page' }, CONTEXT);
+    expect(f.row(2)!.boardStatus).toBe('done');
+    expect((f.row(2)!.board as BoardTimeline).timing).toBe('estimated');
   });
 });

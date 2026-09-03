@@ -207,6 +207,7 @@ describe('structured-output schemas', () => {
       moves: ['the problem', 'the mechanism'],
       pitfall: null,
       turn: false,
+      figure: { kind: 'none', shows: null },
     };
     const plan = (weight: string) => ({
       hook: 'h',
@@ -255,6 +256,7 @@ describe('structured-output schemas', () => {
           moves,
           pitfall: null,
           turn: false,
+          figure: { kind: 'none', shows: null },
         },
       ],
     });
@@ -277,6 +279,7 @@ describe('structured-output schemas', () => {
       moves: ['m'],
       pitfall: 'Mixing up the rate and the total',
       turn: true,
+      figure: { kind: 'process', shows: 'the bucket refilling' },
     };
     const plan = {
       hook: 'h',

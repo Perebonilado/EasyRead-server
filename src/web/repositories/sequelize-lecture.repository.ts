@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { InjectModel } from '@nestjs/sequelize';
 import type {
+  BoardStatus,
   LecturePosition,
   LectureStyle,
   SegmentKind,
@@ -35,6 +36,13 @@ const whereKey = (key: SegmentKey) => ({
   kind: key.kind ?? 'page',
 });
 
+const toDate = (value: unknown): Date | null =>
+  value instanceof Date
+    ? value
+    : typeof value === 'string'
+      ? new Date(value)
+      : null;
+
 const toSegment = (row: LectureSegmentModel): LectureSegmentRecord => ({
   topicId: row.topicId,
   pageNumber: row.pageNumber,
@@ -42,12 +50,16 @@ const toSegment = (row: LectureSegmentModel): LectureSegmentRecord => ({
   style: row.style,
   kind: row.kind ?? 'page',
   status: row.status,
+  updatedAt: toDate(row.get('updatedAt')),
   scriptText: row.scriptText,
   audioKey: row.audioKey,
   durationMs: row.durationMs,
   bridge: row.bridge,
   attempts: row.attempts,
   moveOffsets: row.moveOffsets ?? null,
+  board: row.board ?? null,
+  wordTimes: row.wordTimes ?? null,
+  boardStatus: row.boardStatus ?? 'none',
 });
 
 @Injectable()
@@ -239,6 +251,40 @@ export class SequelizeLectureRepository implements LectureRepository {
       },
       { where: whereKey(input) },
     );
+  }
+
+  async saveBoard(
+    input: SegmentKey & { board: unknown; boardStatus: BoardStatus },
+  ): Promise<void> {
+    await this.segments.update(
+      { board: input.board, boardStatus: input.boardStatus },
+      { where: whereKey(input) },
+    );
+  }
+
+  async saveWordTimes(
+    input: SegmentKey & { wordTimes: unknown },
+  ): Promise<void> {
+    await this.segments.update(
+      { wordTimes: input.wordTimes },
+      { where: whereKey(input) },
+    );
+  }
+
+  async listForBoardBackfill(
+    documentId: string,
+    contentVersion: number,
+    topicIds: string[] | null,
+  ): Promise<LectureSegmentRecord[]> {
+    const rows = await this.segments.findAll({
+      where: {
+        documentId,
+        contentVersion,
+        ...(topicIds ? { topicId: topicIds } : {}),
+      },
+      order: [['seq', 'ASC']],
+    });
+    return rows.map(toSegment).filter((row) => row.scriptText !== null);
   }
 
   async markSegmentFailed(

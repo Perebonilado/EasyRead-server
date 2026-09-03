@@ -12,6 +12,7 @@
  * Everything here is pure: no repositories, no model calls, no clock.
  */
 
+import type { LectureSegmentStatus } from '../../contracts';
 import { createHash } from 'node:crypto';
 import type { LectureStyle } from '../../contracts';
 
@@ -398,6 +399,11 @@ export interface LectureBeat {
    * habit; the plan carries at most one.
    */
   turn?: boolean;
+  /** What the page's idea would be drawn as on the board; absent on older plans. */
+  figure?: {
+    kind: 'process' | 'structure' | 'comparison' | 'none';
+    shows: string | null;
+  } | null;
 }
 
 /** A word the chapter turns on, with its plain meaning beside it. */
@@ -1271,4 +1277,34 @@ export function tailOf(script: string, maxChars = 320): string {
  */
 export function estimateDurationMs(spoken: string): number {
   return Math.max(1_000, Math.round((spoken.length / 15) * 1_000));
+}
+
+/** Rows still on their way: seeded, being written, or being voiced. */
+export const IN_FLIGHT_STATUSES: ReadonlySet<string> = new Set([
+  'pending',
+  'writing',
+  'voicing',
+]);
+
+/**
+ * How long a row may sit in flight before it is taken as lost. A page is
+ * written and voiced in a minute or two; a row untouched for this long
+ * belongs to a job that died with its worker, and a lecture must not wait
+ * on it forever.
+ */
+export const LECTURE_STALE_MS = 10 * 60_000;
+
+/**
+ * The status a row should be read as: its own, unless it has been in
+ * flight too long, in which case it is failed. The row itself is left as
+ * it is; asking for the chapter again writes or voices it afresh.
+ */
+export function effectiveStatus(
+  row: { status: LectureSegmentStatus; updatedAt?: Date | null },
+  now = Date.now(),
+): LectureSegmentStatus {
+  if (!IN_FLIGHT_STATUSES.has(row.status) || !row.updatedAt) return row.status;
+  return now - row.updatedAt.getTime() > LECTURE_STALE_MS
+    ? 'failed'
+    : row.status;
 }

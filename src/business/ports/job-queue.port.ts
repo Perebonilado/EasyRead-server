@@ -26,6 +26,24 @@ export interface LectureVoiceJob extends PipelineJob {
   kind?: SegmentKind;
 }
 
+export interface LectureAlignJob extends PipelineJob {
+  pageNumber: number;
+  style: LectureStyle;
+  kind?: SegmentKind;
+}
+
+export interface LectureDiagramJob extends PipelineJob {
+  topicId: string;
+  pageNumber: number;
+  style: LectureStyle;
+}
+
+export interface LectureBoardJob extends PipelineJob {
+  pageNumber: number;
+  style: LectureStyle;
+  kind?: SegmentKind;
+}
+
 export interface ExportJob extends PipelineJob {
   exportId: string;
   level: Level;
@@ -46,6 +64,12 @@ export interface JobQueuePort {
   enqueueLectureChapters(jobs: LectureChapterJob[]): Promise<void>;
   /** One job per finished script: turn it into audio. */
   enqueueLectureVoices(jobs: LectureVoiceJob[]): Promise<void>;
+  /** One job per voiced row: measure where each word is heard. */
+  enqueueLectureAligns(jobs: LectureAlignJob[]): Promise<void>;
+  /** One job per figure the plan asked for. */
+  enqueueLectureDiagrams(jobs: LectureDiagramJob[]): Promise<void>;
+  /** One job per row that has words but no current board. */
+  enqueueLectureBoards(jobs: LectureBoardJob[]): Promise<void>;
   /** Writes a document about a topic, then starts the normal pipeline. */
   enqueueLearn(job: PipelineJob): Promise<void>;
   /** Fetches an imported document's pages, then starts the normal pipeline. */

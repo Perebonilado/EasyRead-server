@@ -21,6 +21,7 @@ import {
 } from '../../business/domain/lecture';
 import type { LectureVoiceJobData } from '../queues';
 import type { JobContext } from './base.processor';
+import { LectureBoardService } from './lecture-board.service';
 
 /**
  * One finished script, turned into audio.
@@ -43,6 +44,7 @@ export class LectureVoiceProcessor {
     @Inject(STORAGE) private readonly storage: StoragePort,
     @Inject(EVENT_BUS) private readonly events: EventBusPort,
     private readonly config: ConfigService,
+    private readonly boards: LectureBoardService,
   ) {}
 
   async process(job: LectureVoiceJobData, context: JobContext): Promise<void> {
@@ -122,6 +124,17 @@ export class LectureVoiceProcessor {
         style,
         kind,
       });
+
+      // The board learns its timing from this audio, off this path.
+      if (this.boards.enabled()) {
+        await this.boards.requestAlignment({
+          documentId,
+          contentVersion,
+          pageNumber,
+          style,
+          kind,
+        });
+      }
     } catch (error) {
       const message = (error as Error).message;
       if (!context.isFinalAttempt) {

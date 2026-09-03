@@ -26,14 +26,17 @@ import {
 import {
   LECTURE_STYLE_KEYS,
   type LecturePosition,
+  type LectureBoardResponse,
   type LectureStatusResponse,
   type LectureStyle,
   type SegmentKind,
 } from '../../contracts';
 import { isLectureStyle, isSegmentKind } from '../../business/domain/lecture';
 import {
+  BackfillBoardsHandler,
   GenerateLectureHandler,
   LectureAudioHandler,
+  LectureBoardHandler,
   LectureReviewHandler,
   LectureStatusHandler,
   SaveLecturePositionHandler,
@@ -69,6 +72,18 @@ class GenerateLectureDto {
   @IsInt()
   @Min(1)
   startAtPage?: number;
+}
+
+class BackfillBoardsDto {
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(200)
+  @IsUUID(undefined, { each: true })
+  topicIds?: string[];
+
+  @IsOptional()
+  @IsIn(LECTURE_STYLE_KEYS)
+  style?: LectureStyle;
 }
 
 class LectureReviewDto {
@@ -127,6 +142,8 @@ export class LectureController {
     private readonly status: LectureStatusHandler,
     private readonly audio: LectureAudioHandler,
     private readonly review: LectureReviewHandler,
+    private readonly board: LectureBoardHandler,
+    private readonly backfill: BackfillBoardsHandler,
     private readonly position: SaveLecturePositionHandler,
     @Inject(STORAGE) private readonly storage: StoragePort,
   ) {}
@@ -164,6 +181,46 @@ export class LectureController {
     const { data } = await this.review.handle({
       userId,
       documentId,
+      style: body.style,
+    });
+    return data;
+  }
+
+  /** One row's board, once it is timed; 404 until then. */
+  @Get('board/:page')
+  async boardOf(
+    @CurrentUser('id') userId: string,
+    @Param('id') documentId: string,
+    @Param('page') page: string,
+    @Query('style') style?: string,
+    @Query('kind') kind?: string,
+  ): Promise<LectureBoardResponse> {
+    const pageNumber = Number(page);
+    if (!Number.isInteger(pageNumber) || pageNumber < 1) {
+      throw new ValidationError('That page number is not valid');
+    }
+    const { data } = await this.board.handle({
+      userId,
+      documentId,
+      pageNumber,
+      style: styleQuery(style),
+      kind: kindQuery(kind),
+    });
+    return data;
+  }
+
+  /** Boards for rows that have words but no board yet. */
+  @Post('board')
+  @HttpCode(202)
+  async writeBoards(
+    @CurrentUser('id') userId: string,
+    @Param('id') documentId: string,
+    @Body() body: BackfillBoardsDto,
+  ): Promise<LectureStatusResponse> {
+    const { data } = await this.backfill.handle({
+      userId,
+      documentId,
+      topicIds: body.topicIds,
       style: body.style,
     });
     return data;

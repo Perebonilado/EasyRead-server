@@ -12,6 +12,8 @@ import type {
   LlmGatewayPort,
   LlmResult,
   TopicDraft,
+  LectureBoardDraft,
+  LectureDiagramDraft,
 } from '../../business/ports/llm.port';
 
 const EMBED_DIMENSIONS = 256;
@@ -157,6 +159,7 @@ export class FakeLlmAdapter implements LlmGatewayPort {
           // The last page: a prediction is only possible once something
           // has been heard, and earlier pages' tails stay plain words.
           turn: index === input.pages.length - 1,
+          figure: { kind: 'none' as const, shows: null },
         })),
       },
       usage: this.usage(started, 500, 120),
@@ -261,13 +264,136 @@ export class FakeLlmAdapter implements LlmGatewayPort {
         : input.kind === 'check'
           ? `That is ${input.topicTitle}. A check of what stuck. ${input.taught
               .slice(0, 3)
-              .map((line) => `What was this: ${line}\n[pause]\n${line}`)
+              .map(
+                (line) =>
+                  `What was this: ${line.replace(/\.$/, '')}?\n[pause]\n${line}`,
+              )
               .join(' ')}`
           : `It has been ${input.daysAway ?? 'some'} days. Where you were in ${input.topicTitle}: ${input.taught
               .slice(0, 2)
               .map((line) => `${line}\n[pause]\n${line}`)
               .join(' ')} The lecture picks up from here.`;
     return { value: { script }, usage: this.usage(started, 200, 80) };
+  }
+
+  /**
+   * A board from the page's own words: one term per move and a cue on the
+   * first, anchored to phrases that are in the fake script by
+   * construction. Test overrides shape the rest.
+   */
+  lectureBoard(input: {
+    topicTitle: string;
+    spoken: string;
+    pageText: string;
+    moves: string[];
+    goal: string;
+    newHere: string | null;
+    pitfall: string | null;
+    terms: { term: string; meaning: string }[];
+    style: 'gentle' | 'steady' | 'brisk';
+    continues: boolean;
+    budget: { min: number; max: number };
+    correction?: string;
+    repair?: {
+      kind: string;
+      text: string;
+      meaning: string | null;
+      reason: string;
+    }[];
+  }): Promise<LlmResult<LectureBoardDraft>> {
+    const started = Date.now();
+    const words = input.spoken.split(/\s+/).filter(Boolean);
+    const anchorAt = (index: number) =>
+      words.slice(index, index + 3).join(' ') || words[0] || 'x';
+    const items: LectureBoardDraft['items'] = [];
+    if (input.repair?.length) {
+      // The fake repairs nothing: it hands the lines back as they were.
+      return Promise.resolve({
+        value: {
+          heading: null,
+          items: input.repair.map((line) => ({
+            kind: line.kind as LectureBoardDraft['items'][number]['kind'],
+            text: line.text,
+            meaning: line.meaning,
+            from: null,
+            to: null,
+            label: null,
+            target: null,
+            shape: null,
+            level: null,
+            important: null,
+            anchor: anchorAt(0),
+          })),
+        },
+        usage: this.usage(started, 100, 40),
+      });
+    }
+    items.push({
+      kind: 'term',
+      text: input.topicTitle.split(/\s+/).slice(0, 2).join(' '),
+      meaning: input.style === 'gentle' ? 'the idea this page turns on' : null,
+      from: null,
+      to: null,
+      label: null,
+      target: null,
+      shape: null,
+      level: null,
+      important: true,
+      anchor: anchorAt(0),
+    });
+    if (words.length > 8) {
+      items.push({
+        kind: 'cue',
+        text: null,
+        meaning: null,
+        from: null,
+        to: null,
+        label: null,
+        target: input.topicTitle.split(/\s+/).slice(0, 2).join(' '),
+        shape: 'underline',
+        level: null,
+        important: null,
+        anchor: anchorAt(4),
+      });
+    }
+    return Promise.resolve({
+      value: {
+        heading: input.continues ? null : `${input.topicTitle} in brief`,
+        items,
+      },
+      usage: this.usage(started, 300, 80),
+    });
+  }
+
+  /** A three-part process drawn from the page's first words. */
+  lectureDiagram(input: {
+    topicTitle: string;
+    figure: { kind: 'process' | 'structure' | 'comparison'; shows: string };
+    spoken: string;
+    pageText: string;
+    context: string;
+    correction?: string;
+  }): Promise<LlmResult<LectureDiagramDraft>> {
+    const started = Date.now();
+    const words = input.spoken.split(/\s+/).filter(Boolean);
+    const at = (index: number) =>
+      words.slice(index, index + 2).join(' ') || 'x';
+    return Promise.resolve({
+      value: {
+        title: input.figure.shows.split(/\s+/).slice(0, 4).join(' '),
+        nodes: [
+          { id: 'a', label: words[0] ?? 'start', shape: 'box', anchor: at(0) },
+          { id: 'b', label: words[2] ?? 'middle', shape: 'box', anchor: at(2) },
+          { id: 'c', label: words[4] ?? 'end', shape: 'box', anchor: at(4) },
+        ],
+        edges: [
+          { from: 'a', to: 'b', label: null, anchor: at(1) },
+          { from: 'b', to: 'c', label: null, anchor: at(3) },
+        ],
+        groups: [],
+      },
+      usage: this.usage(started, 400, 120),
+    });
   }
 
   async lectureVerify(input: {

@@ -2,12 +2,15 @@ import type {
   LecturePosition,
   LectureSegmentStatus,
   LectureStyle,
+  SegmentKind,
 } from '../../contracts';
 
 export interface LecturePlanRecord {
   topicId: string;
   status: LectureSegmentStatus;
   plan: unknown;
+  /** The generator that wrote the plan; absent from stores that do not keep it. */
+  generatorVersion?: string;
 }
 
 export interface LectureSegmentRecord {
@@ -15,6 +18,8 @@ export interface LectureSegmentRecord {
   pageNumber: number;
   seq: number;
   style: LectureStyle;
+  /** A page, or one of the short segments around a chapter. */
+  kind: SegmentKind;
   status: LectureSegmentStatus;
   scriptText: string | null;
   audioKey: string | null;
@@ -31,6 +36,17 @@ export interface LectureSegmentSeed {
   seq: number;
   bridge: boolean;
   style: LectureStyle;
+  /** Omitted means a page. */
+  kind?: SegmentKind;
+}
+
+/** The row a page-and-style-and-kind names; kind omitted means the page. */
+export interface SegmentKey {
+  documentId: string;
+  pageNumber: number;
+  contentVersion: number;
+  style: LectureStyle;
+  kind?: SegmentKind;
 }
 
 /**
@@ -72,6 +88,7 @@ export interface LectureRepository {
     pageNumber: number,
     contentVersion: number,
     style: LectureStyle,
+    kind?: SegmentKind,
   ): Promise<LectureSegmentRecord | null>;
   /** Every row of the version, or one style's, in play order. */
   listSegments(
@@ -79,11 +96,19 @@ export interface LectureRepository {
     contentVersion: number,
     style?: LectureStyle,
   ): Promise<LectureSegmentRecord[]>;
+  /** Drops one kind of extra for a style, so it can be written afresh. */
+  removeSegments(
+    documentId: string,
+    contentVersion: number,
+    style: LectureStyle,
+    kind: SegmentKind,
+  ): Promise<void>;
   markSegmentWriting(
     documentId: string,
     pageNumber: number,
     contentVersion: number,
     style: LectureStyle,
+    kind?: SegmentKind,
   ): Promise<void>;
   /**
    * The script is written but not yet voiced.
@@ -92,31 +117,18 @@ export interface LectureRepository {
    * critical path: a voice retry then cannot clobber the script, because
    * only this call ever writes it.
    */
-  markSegmentWritten(input: {
-    documentId: string;
-    pageNumber: number;
-    contentVersion: number;
-    style: LectureStyle;
-    scriptText: string;
-    moveOffsets: number[];
-    durationMs: number | null;
-  }): Promise<void>;
+  markSegmentWritten(
+    input: SegmentKey & {
+      scriptText: string;
+      moveOffsets: number[];
+      durationMs: number | null;
+    },
+  ): Promise<void>;
   /** The audio exists: the page is playable. */
-  markSegmentDone(input: {
-    documentId: string;
-    pageNumber: number;
-    contentVersion: number;
-    style: LectureStyle;
-    audioKey: string;
-    durationMs: number | null;
-  }): Promise<void>;
-  markSegmentFailed(input: {
-    documentId: string;
-    pageNumber: number;
-    contentVersion: number;
-    style: LectureStyle;
-    error: string;
-  }): Promise<void>;
+  markSegmentDone(
+    input: SegmentKey & { audioKey: string; durationMs: number | null },
+  ): Promise<void>;
+  markSegmentFailed(input: SegmentKey & { error: string }): Promise<void>;
   /**
    * Puts a chapter's failed pages back to pending so they can be written
    * again. Pages that were written are left exactly as they are.

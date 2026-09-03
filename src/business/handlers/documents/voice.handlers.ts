@@ -84,7 +84,7 @@ import { ComputeService } from './compute.service';
 import { ElevenLabsRealtimeAdapter } from '../../../web/adapters/elevenlabs-voice.adapters';
 import { DocumentAccessService } from './document-access.service';
 import { EntitlementsService } from './entitlements.service';
-import { DEFAULT_LECTURE_STYLE } from '../../domain/lecture';
+import { DEFAULT_LECTURE_STYLE, KIND_RANK } from '../../domain/lecture';
 
 export type AudioLevel = 'original' | Level;
 
@@ -227,6 +227,8 @@ export interface VoiceSessionRequest {
     offsetMs: number;
     /** The style being listened to, so the tutor knows what was said. */
     style?: LectureStyle;
+    /** Which piece of the page the offset is in; omitted means the page. */
+    kind?: 'page' | 'part';
   };
 }
 
@@ -238,21 +240,27 @@ export interface VoiceSessionRequest {
  */
 const INTENT_LINES: Record<LessonIntent, string> = {
   quick:
-    'Today the student told you their intent: "I just want to get through ' +
-    'the material quickly, with as few interruptions as possible." Honor ' +
-    'it above your usual rhythm: the briefest opening, no detours or side ' +
-    'stories, lean topic closings, and keep the thread moving until the ' +
-    'material is covered.',
+    'Today the student told you how they learn: "I\'m a quick learner." ' +
+    'Teach accordingly: pose the problem a topic solves before you give ' +
+    'its principle, and give them a beat to attempt it; prompt them to ' +
+    'explain a step themselves rather than explaining it to them; fewer, ' +
+    'harder checks; never define a term the lesson has already used; a ' +
+    'brisk pace, the briefest opening, no detours; and step up the moment ' +
+    'they answer fluently.',
   thorough:
-    'Today the student told you their intent: "I want to take my time and ' +
-    'really understand the material." Give each idea the room it needs: ' +
-    'an example where it helps, and check-ins that prove it stuck before ' +
-    'you move on.',
+    'Today the student told you how they learn: "I learn at a normal ' +
+    'pace." Give each idea the room it needs, open with review, check ' +
+    'after each point, hint before you tell, and end on retrieval.',
   gentle:
-    'Today the student told you their intent: "This material is hard for ' +
-    'me. Go gently and break it down until I have it." Small steps, a ' +
-    'warm patient tone, no hurry, and never move past confusion: ' +
-    'reassure, re-explain, and let understanding set the pace.',
+    'Today the student told you how they learn: "I learn slowly." Teach ' +
+    'the words first, one step at a time, walk one worked example all the ' +
+    'way through, tell them plainly and then have them say it back, say ' +
+    'the key idea a second way, check often with questions they can ' +
+    'answer, correct at once, and never move past confusion. Warm and ' +
+    'patient, but do not praise the person: name what they got right. ' +
+    'SPEAK SLOWLY: noticeably slower than everyday speech, a beat of ' +
+    'silence after every sentence, and never a rush through a term; they ' +
+    'are taking each idea in as you say it.',
 };
 
 /**
@@ -730,6 +738,7 @@ export class StartVoiceSessionHandler extends AbstractRequestHandlerTemplate<
               cmd.pageNumber,
               doc.contentVersion,
               cmd.lectureContext?.style ?? DEFAULT_LECTURE_STYLE,
+              cmd.lectureContext?.kind ?? 'page',
             )
           : this.chatInstructions(doc.props.title, summary);
 
@@ -812,21 +821,28 @@ export class StartVoiceSessionHandler extends AbstractRequestHandlerTemplate<
     pageNumber: number,
     contentVersion: number,
     style: LectureStyle,
+    kind: 'page' | 'part' = 'page',
   ): Promise<string> {
     const segments = await this.lectures
       .listSegments(documentId, contentVersion, style)
       .catch((): LectureSegmentRecord[] => []);
 
     const current = segments.find(
-      (segment) => segment.pageNumber === pageNumber,
+      (segment) => segment.pageNumber === pageNumber && segment.kind === kind,
     );
     // What the student has actually heard in this chapter, up to and
-    // including the sentence they interrupted.
+    // including the sentence they interrupted. Pages and their pieces
+    // only: the check after the chapter has not been heard yet, and the
+    // words before it add nothing the pages do not say. A page cut in two
+    // counts its second piece only once the student is in it.
     const heard = segments
       .filter(
         (segment) =>
+          (segment.kind === 'page' || segment.kind === 'part') &&
           segment.topicId === current?.topicId &&
-          segment.seq <= (current?.seq ?? 0) &&
+          (segment.seq < (current?.seq ?? 0) ||
+            (segment.seq === (current?.seq ?? 0) &&
+              KIND_RANK[segment.kind] <= KIND_RANK[current?.kind ?? 'page'])) &&
           segment.scriptText,
       )
       .map((segment) => segment.scriptText)
@@ -841,6 +857,12 @@ export class StartVoiceSessionHandler extends AbstractRequestHandlerTemplate<
         ? `What you have said in this chapter so far, most recent last:\n${heard}`
         : null,
       'Answer THEIR question, briefly and directly, grounded in this document. Two to five sentences is usually right. Keep technical terms, names and numbers exactly as the document uses them.',
+      'Answer the step they are stuck on, not the whole idea again. If they were working something out rather than asking for a fact, say what they had right, the one thing that was off and why, and the next step; then leave them one question to think about as the lecture resumes. Never praise the person. An analogy is allowed if you call it one and tie it back to the term at once; no anecdotes.',
+      style === 'gentle'
+        ? 'This student learns slowly: pitch the answer one level plainer than the lecture, one idea, the term with its plain meaning beside it.'
+        : style === 'brisk'
+          ? 'This student is quick: pitch the answer one level further than the lecture, no restating of what the lecture already said, and prefer a hint that lets them finish the thought themselves.'
+          : null,
       'If the document does not answer it, say so plainly rather than answering from general knowledge.',
       'HOW THIS ENDS: answer, then hand back in one short line, the way a lecturer does when a question is done — something like "Good question. Back to it." Then STOP. Do not resume the lecture, do not teach the next idea, do not ask whether they have more questions. The lecture restarts by itself the moment you finish.',
       'This is speech: short plain sentences, no lists, no headings, no markdown. Never mention scripts, tapes, pages, or that you were paused.',
@@ -898,6 +920,23 @@ export class StartVoiceSessionHandler extends AbstractRequestHandlerTemplate<
 
     // Calibration (P4): the tutor's private read on whether this student's
     // confidence tracks their competence. Thin evidence stays silent.
+    // Where to pitch the first questions (Rosenshine's success rate: about
+    // eight in ten right is where learning runs fastest). The tutor is told
+    // the recent rate and asked to start a step down or up from it.
+    const recent = events.slice(0, 12);
+    const successRate =
+      recent.length >= 4
+        ? recent.reduce((sum, event) => sum + event.score, 0) / recent.length
+        : null;
+    const successLine =
+      successRate === null
+        ? null
+        : successRate < 0.6
+          ? `Their last ${recent.length} checks in this document came out ${Math.round(successRate * 100)} percent right, below the seven-to-eight-in-ten band where learning runs fastest. Start one step down: smaller steps, a worked example before a question, easier first questions, and step back up only after two fluent answers.`
+          : successRate > 0.9
+            ? `Their last ${recent.length} checks in this document came out ${Math.round(successRate * 100)} percent right, above the band. Start one step up: fewer and harder questions, a hint instead of an answer, less restating.`
+            : `Their last ${recent.length} checks in this document came out ${Math.round(successRate * 100)} percent right, inside the band. Hold this level and adjust as you go.`;
+
     const calibration = computeCalibration(events);
     const calibrationLine =
       calibration.n >= MIN_CALIBRATION_EVENTS && calibration.bias !== null
@@ -1020,6 +1059,48 @@ export class StartVoiceSessionHandler extends AbstractRequestHandlerTemplate<
         `- Visuals are yours to initiate — a good tutor reaches for the board unprompted, and the student should NEVER have to ask for a drawing. The moment an idea has shape, put it up as you begin explaining it: ${TEACH_TOOLS.DRAW_DIAGRAM} for a process, sequence, hierarchy or comparison; ${TEACH_TOOLS.SKETCH} for the thing itself — anatomy, apparatus, a labelled curve; ${TEACH_TOOLS.SHOW_IMAGES} for real photographs; ${TEACH_TOOLS.COMPUTE} for ANY arithmetic before a number leaves your mouth. Aim for at least one visual per topic whenever the material has any shape to show, and simply start describing what the student now sees — never announce that you are about to draw.`,
         `- Drawings take a few seconds. When you call for one, the student sees it being drawn and YOU KEEP TEACHING — never announce it, never wait in silence for it. A note will tell you the moment it is on screen; only from that moment may you refer to it or walk through it. It fills the screen when ready — teach from it part by part while it is large, then call ${TEACH_TOOLS.FOCUS_BOARD} with action "close" before moving on. Bring anything back later with action "expand" and its title.`,
         `- Close every topic with the student doing the work. If they raised questions during the lesson, return to them now: read each back and have them answer it aloud; one they can now answer is the victory lap, one they can't gets a short re-teach. Then run one memory check: first ask "before we check — how solid does this topic feel, one to five?", then call ${TEACH_TOOLS.RECALL} with action "start", ask them to say the main ideas back, listen fully without interrupting, call it with "end", and walk anything they missed. Record ${TEACH_TOOLS.REPORT_UNDERSTANDING} — noting their own one-to-five prediction in the note alongside your read — then call ${TEACH_TOOLS.MARK_TOPIC_COMPLETE} with its id and move to the next. When the profile says brisk and their mastery is already strong, shorten these closings — depth belongs where mastery is weak.`,
+        [
+          '- OPEN WITH REVIEW. Before any new material, one to three',
+          '  minutes on what this student covered last time in this',
+          '  document: three or four quick questions on ideas already',
+          '  taught (the chapters marked already taught above), answered',
+          '  by them and corrected by you. Skip it only when nothing has',
+          '  been taught yet.',
+          '- CHECK AFTER EVERY POINT. After you explain a revealed point,',
+          '  ask one question the student can answer about it before the',
+          '  next point. Never ask "any questions?"; ask a specific question',
+          '  they must answer. Ask process questions too: "how did you get',
+          '  that?", "why does that follow?".',
+          '- AIM FOR ABOUT EIGHT IN TEN RIGHT. If they miss two in a row,',
+          '  step down: a smaller step, a worked example, the plainest',
+          '  words, an easier question. If they answer two easy ones',
+          '  fluently, step up: a harder question, a hint instead of an',
+          '  answer, less restating. Say nothing about the stepping; do it.',
+          '- DIAGNOSE FIRST. When you begin a topic, one question before',
+          '  you teach it tells you where to pitch: if they already hold the',
+          '  idea, skip the explanation and go straight to using it.',
+          '- ANSWER THE STEP. When the student is stuck, respond to the',
+          '  step they are on, not the whole idea again. Hint before you',
+          '  tell for anyone who is not lost ("what else could it be?",',
+          '  "what did the page say happens when the bucket is empty?").',
+          '  For a student who is lost, tell them plainly, then have them',
+          '  say it back.',
+          '- FEEDBACK CARRIES INFORMATION. When they answer, say what was',
+          '  right, the one thing that was off and why, and what to do',
+          '  next. Correct a wrong answer in the same turn, never later.',
+          '  Never praise the person ("great job", "clever"); name what',
+          '  was right instead.',
+          '- EXPLAIN, THEN HAVE THEM USE IT. An explanation is followed in',
+          '  the same exchange by a small application or "say it in your',
+          '  own words". Explain the principle, not the surface.',
+          '- An analogy is allowed if you call it one and tie it back to',
+          '  the term at once. No anecdotes, no colour: whatever the student',
+          '  thinks about is what they remember, so make them think about',
+          '  the idea.',
+          '- END ON RETRIEVAL. When the lesson ends, before the recap: three',
+          '  questions from today, answered by them; then one sentence on',
+          '  where next time starts.',
+        ].join('\n'),
         '- If the student asks to skip, slow down, go back, or dig into something, follow them — the plan serves the student.',
         `- When the whole plan is taught — or the student says they are done — wrap up like a real teacher: a short spoken recap of what was covered, a word of encouragement, goodbye. Then, and only then, call ${TEACH_TOOLS.END_LESSON} to close the session.`,
         '- After every tool call, keep talking; never leave silence while something appears on screen.',
@@ -1035,6 +1116,7 @@ export class StartVoiceSessionHandler extends AbstractRequestHandlerTemplate<
       // What the student SAID they want today, in their own words.
       // The dials above set the mechanics; this sets the attitude.
       intent ? INTENT_LINES[intent] : null,
+      successLine,
       calibrationLine,
       unnarrated.length
         ? [

@@ -6,20 +6,32 @@ import {
   type LectureStyle,
   type LectureStyleSummary,
   type LectureTopicDto,
+  type SegmentKind,
 } from '../../../contracts';
 import { NotFoundError, ValidationError } from '../../domain/errors/errors';
-import { JOB_QUEUE } from '../../ports/tokens';
+import { JOB_QUEUE, LLM_GATEWAY } from '../../ports/tokens';
 import type { JobQueuePort } from '../../ports/job-queue.port';
+import type { LlmGatewayPort } from '../../ports/llm.port';
 import {
+  AI_CALL_LOG_REPOSITORY,
   DOCUMENT_PAGE_REPOSITORY,
   LECTURE_REPOSITORY,
   TOPIC_REPOSITORY,
 } from '../../repositories/tokens';
+import type { AiCallLogRepository } from '../../repositories/ai-call-log.repository';
 import type { DocumentPageRepository } from '../../repositories/document-page.repository';
 import {
   DEFAULT_LECTURE_STYLE,
+  EXTRAS_BY_STYLE,
+  EXTRA_BUDGET,
   LECTURE_GENERATOR_VERSION,
+  LECTURE_STYLES,
+  type LecturePlan,
+  beatFor,
   cutPlanIntoJobs,
+  estimateDurationMs,
+  extraSeeds,
+  scriptForTts,
 } from '../../domain/lecture';
 import type { LectureRepository } from '../../repositories/lecture.repository';
 import type { TopicRepository } from '../../repositories/misc.repository';
@@ -117,6 +129,7 @@ export class LectureStatusHandler extends AbstractRequestHandlerTemplate<
       const entry = segment.topicId ? byTopic.get(segment.topicId) : undefined;
       entry?.segments.push({
         pageNumber: segment.pageNumber,
+        kind: segment.kind,
         status: segment.status,
         durationMs: segment.durationMs,
         bridge: segment.bridge,
@@ -239,12 +252,23 @@ export class GenerateLectureHandler extends AbstractRequestHandlerTemplate<
     }
 
     // Every row exists before any model call, so the player can show the
-    // shape of what is coming while it is still being written.
+    // shape of what is coming while it is still being written. The extras
+    // this style gets around each chapter are seeded with the pages.
     await this.lectures.seedSegments({
       documentId: doc.id,
       contentVersion: doc.contentVersion,
       generatorVersion: LECTURE_GENERATOR_VERSION,
-      segments: segments.map((segment) => ({ ...segment, style })),
+      segments: [
+        ...segments.map((segment) => ({
+          ...segment,
+          style,
+          kind: 'page' as const,
+        })),
+        ...extraSeeds(segments, style).map((segment) => ({
+          ...segment,
+          style,
+        })),
+      ],
     });
 
     // Only chapters that actually own pages: one whose range is entirely
@@ -304,6 +328,8 @@ export class GenerateLectureHandler extends AbstractRequestHandlerTemplate<
 
 export interface LectureAudioRequest extends LectureRequest {
   pageNumber: number;
+  /** Omitted means the page itself. */
+  kind?: SegmentKind;
 }
 
 /** Serves one segment's audio, once it has been voiced. */
@@ -326,6 +352,7 @@ export class LectureAudioHandler extends AbstractRequestHandlerTemplate<
       cmd.pageNumber,
       doc.contentVersion,
       cmd.style ?? DEFAULT_LECTURE_STYLE,
+      cmd.kind ?? 'page',
     );
     if (!segment?.audioKey || segment.status !== 'done') {
       throw new NotFoundError('Lecture audio for this page');
@@ -368,5 +395,165 @@ export class SaveLecturePositionHandler extends AbstractRequestHandlerTemplate<
       ...position,
     });
     return CommandResponse.of(position);
+  }
+}
+
+/** How long the learner must have been away for a review to be worth a minute. */
+export const REVIEW_AFTER_MS = 24 * 60 * 60 * 1000;
+const REVIEW_LINES_MAX = 8;
+
+/**
+ * Writes the "last time" review a returning learner hears before the
+ * lecture carries on.
+ *
+ * Written on demand, in the request, because it is one short model call
+ * and the learner is waiting at the bar: a queue would only add latency.
+ * The audio still goes through the voice queue. It sits on the page the
+ * learner resumes at and plays before it; the review a previous return
+ * wrote is dropped first, since where they were has moved. A quick learner
+ * gets none, and a learner away less than a day gets none.
+ */
+@Injectable()
+export class LectureReviewHandler extends AbstractRequestHandlerTemplate<
+  LectureRequest,
+  LectureStatusResponse
+> {
+  constructor(
+    @Inject(LECTURE_REPOSITORY) private readonly lectures: LectureRepository,
+    @Inject(LLM_GATEWAY) private readonly llm: LlmGatewayPort,
+    @Inject(AI_CALL_LOG_REPOSITORY) private readonly calls: AiCallLogRepository,
+    @Inject(JOB_QUEUE) private readonly queue: JobQueuePort,
+    private readonly access: DocumentAccessService,
+    private readonly status: LectureStatusHandler,
+  ) {
+    super();
+  }
+
+  protected async handleRequest(cmd: LectureRequest) {
+    const doc = await this.access.require(cmd.documentId, cmd.userId);
+    const position = await this.lectures.findPosition(cmd.userId, doc.id);
+    const style = cmd.style ?? position?.style ?? DEFAULT_LECTURE_STYLE;
+    const finish = async () => {
+      const { data } = await this.status.handle({ ...cmd, style });
+      return CommandResponse.of(data);
+    };
+
+    if (!position || !EXTRAS_BY_STYLE[style].includes('review')) {
+      return finish();
+    }
+    const away = position.updatedAt
+      ? Date.now() - new Date(position.updatedAt).getTime()
+      : 0;
+    if (away < REVIEW_AFTER_MS) return finish();
+
+    const rows = await this.lectures.listSegments(
+      doc.id,
+      doc.contentVersion,
+      style,
+    );
+    const pages = rows.filter((row) => row.kind === 'page');
+    const resume = pages.find((row) => row.pageNumber === position.pageNumber);
+    if (!resume?.topicId) return finish();
+
+    // What they heard last time: this chapter up to the page they are on,
+    // or, when they stopped at a chapter's start, the chapter before it.
+    const sameChapter = pages.filter(
+      (row) => row.topicId === resume.topicId && row.seq < resume.seq,
+    );
+    const earlier = sameChapter.length
+      ? sameChapter
+      : pages.filter((row) => row.seq < resume.seq).slice(-REVIEW_LINES_MAX);
+    const topicId = earlier[earlier.length - 1]?.topicId;
+    if (!topicId) return finish();
+    const chapter = earlier.filter((row) => row.topicId === topicId);
+    const record = await this.lectures.findPlan(
+      doc.id,
+      topicId,
+      doc.contentVersion,
+    );
+    const plan = record?.plan as LecturePlan | null | undefined;
+    if (!plan) return finish();
+    const taught = chapter
+      .filter((row) => !row.bridge)
+      .map((row) => {
+        const beat = beatFor(plan, row.pageNumber);
+        return beat.newHere?.trim() || beat.goal;
+      })
+      .slice(-REVIEW_LINES_MAX);
+    if (!taught.length) return finish();
+
+    await this.lectures.removeSegments(
+      doc.id,
+      doc.contentVersion,
+      style,
+      'review',
+    );
+    const key = {
+      documentId: doc.id,
+      pageNumber: resume.pageNumber,
+      contentVersion: doc.contentVersion,
+      style,
+      kind: 'review' as const,
+    };
+    await this.lectures.seedSegments({
+      documentId: doc.id,
+      contentVersion: doc.contentVersion,
+      generatorVersion: LECTURE_GENERATOR_VERSION,
+      segments: [
+        {
+          topicId: resume.topicId,
+          pageNumber: resume.pageNumber,
+          seq: resume.seq,
+          bridge: false,
+          style,
+          kind: 'review',
+        },
+      ],
+    });
+    await this.lectures.markSegmentWriting(
+      doc.id,
+      resume.pageNumber,
+      doc.contentVersion,
+      style,
+      'review',
+    );
+
+    try {
+      const written = await this.llm.lectureExtra({
+        kind: 'review',
+        topicTitle: plan.arc ? `${plan.hook}` : 'the chapter',
+        style,
+        styleDirection: LECTURE_STYLES[style].direction,
+        terms: [],
+        taught,
+        payoff: plan.payoff ?? null,
+        daysAway: Math.max(1, Math.floor(away / REVIEW_AFTER_MS)),
+        budget: EXTRA_BUDGET.review,
+      });
+      await this.calls.record({
+        documentId: doc.id,
+        task: 'lecture_segment',
+        model: written.usage.model,
+        tokensIn: written.usage.tokensIn,
+        tokensOut: written.usage.tokensOut,
+        latencyMs: written.usage.latencyMs,
+        outcome: 'ok',
+      });
+      const script = written.value.script.trim();
+      await this.lectures.markSegmentWritten({
+        ...key,
+        scriptText: script,
+        moveOffsets: [],
+        durationMs: estimateDurationMs(scriptForTts(script)),
+      });
+      await this.queue.enqueueLectureVoices([{ ...key }]);
+    } catch (error) {
+      await this.lectures.markSegmentFailed({
+        ...key,
+        error: (error as Error).message,
+      });
+    }
+
+    return finish();
   }
 }

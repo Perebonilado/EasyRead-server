@@ -1,4 +1,5 @@
 import type { LectureSegmentRecord } from '../../repositories/lecture.repository';
+import { KIND_RANK } from '../../domain/lecture';
 
 /**
  * The interrupt's contract with the model.
@@ -21,6 +22,7 @@ const segment = (
   pageNumber,
   seq,
   style: 'steady',
+  kind: 'page',
   status: scriptText ? 'done' : 'pending',
   scriptText,
   audioKey: scriptText ? 'key' : null,
@@ -34,13 +36,19 @@ const segment = (
 function heardSoFar(
   segments: LectureSegmentRecord[],
   pageNumber: number,
+  kind: 'page' | 'part' = 'page',
 ): string {
-  const current = segments.find((s) => s.pageNumber === pageNumber);
+  const current = segments.find(
+    (s) => s.pageNumber === pageNumber && s.kind === kind,
+  );
   return segments
     .filter(
       (s) =>
+        (s.kind === 'page' || s.kind === 'part') &&
         s.topicId === current?.topicId &&
-        s.seq <= (current?.seq ?? 0) &&
+        (s.seq < (current?.seq ?? 0) ||
+          (s.seq === (current?.seq ?? 0) &&
+            KIND_RANK[s.kind] <= KIND_RANK[current?.kind ?? 'page'])) &&
         s.scriptText,
     )
     .map((s) => s.scriptText)
@@ -71,6 +79,26 @@ describe('what the tutor knows when interrupted', () => {
 
   it('is empty at the very first page, which is honest', () => {
     expect(heardSoFar(segments, 1)).toBe('Money got scarce.');
+  });
+
+  it('counts the second piece of a cut page only once the student is in it', () => {
+    const cut = [
+      segment(0, 1, 'topic-a', 'Money got scarce.'),
+      {
+        ...segment(0, 1, 'topic-a', 'And credit dried up.'),
+        kind: 'part' as const,
+      },
+      { ...segment(0, 1, 'topic-a', 'A check.'), kind: 'check' as const },
+      segment(1, 2, 'topic-a', 'So banks began to fail.'),
+    ];
+    expect(heardSoFar(cut, 1)).toBe('Money got scarce.');
+    expect(heardSoFar(cut, 1, 'part')).toBe(
+      'Money got scarce.\n\nAnd credit dried up.',
+    );
+    expect(heardSoFar(cut, 2)).toBe(
+      'Money got scarce.\n\nAnd credit dried up.\n\nSo banks began to fail.',
+    );
+    expect(heardSoFar(cut, 2)).not.toContain('A check.');
   });
 
   it('skips pages that were never written', () => {

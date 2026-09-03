@@ -356,7 +356,12 @@ describe('AiSdkLlmAdapter', () => {
         skip: 'What a cache is',
         weight: 'light',
         moves: ['why caches guess', 'what eviction is'],
+        pitfall: null,
+        turn: false,
       },
+      problem: null,
+      pageIndex: 0,
+      pageCount: 3,
       style: 'brisk',
       styleDirection: 'Say the idea, then stop.',
       budget: { min: 40, max: 80 },
@@ -394,6 +399,8 @@ describe('AiSdkLlmAdapter', () => {
       hook: 'A cache is not a faster database.',
       arc: 'From a guess to a bet',
       payoff: 'You can size a cache.',
+      terms: [{ term: 'Eviction', meaning: 'throwing a guess away' }],
+      problem: 'Why do caches lie?',
       beats: [
         {
           pageNumber: 1,
@@ -404,6 +411,8 @@ describe('AiSdkLlmAdapter', () => {
           skip: null,
           weight: 'full',
           moves: ['the guess', 'the bet'],
+          pitfall: null,
+          turn: true,
         },
       ],
     });
@@ -464,5 +473,161 @@ describe('AiSdkLlmAdapter', () => {
     } as unknown as ConfigService);
 
     expect(() => adapterWithoutKey.onModuleInit()).toThrow(/ANTHROPIC_API_KEY/);
+  });
+
+  it('writes the segments around a chapter from the plan alone, pitched to the learner', async () => {
+    mock.reply({ script: 'That is caches. A check of what stuck.' });
+
+    const result = await adapter.lectureExtra({
+      kind: 'check',
+      topicTitle: 'Caches',
+      style: 'gentle',
+      styleDirection: 'Small steps.',
+      terms: [],
+      taught: ['A cache is a guess', 'Eviction is the guess made visible'],
+      payoff: 'You can size a cache.',
+      daysAway: null,
+      budget: { min: 60, max: 170 },
+    });
+
+    expect(result.value.script).toContain('check');
+    const prompt = JSON.stringify(mock.calls[0].body.messages);
+    expect(prompt).toContain('CHECK segment');
+    expect(prompt).toContain('slow learner');
+    expect(prompt).toContain('Eviction is the guess made visible');
+    expect(prompt).toContain('What the listener can now do');
+    expect(prompt).toContain('60 to 170 words');
+    expect(prompt).not.toContain('last listened');
+  });
+
+  it('tells the review how long the learner has been away, and the words their meanings', async () => {
+    mock.reply({ script: 'It has been a while.' });
+    await adapter.lectureExtra({
+      kind: 'review',
+      topicTitle: 'Caches',
+      style: 'steady',
+      styleDirection: 'Steady.',
+      terms: [],
+      taught: ['A cache is a guess'],
+      payoff: null,
+      daysAway: 3,
+      budget: { min: 50, max: 160 },
+    });
+    expect(JSON.stringify(mock.calls[0].body.messages)).toContain(
+      'last listened 3 days ago',
+    );
+
+    mock.reply({ script: 'Words you will hear.' });
+    await adapter.lectureExtra({
+      kind: 'terms',
+      topicTitle: 'Caches',
+      style: 'gentle',
+      styleDirection: 'Small steps.',
+      terms: [{ term: 'Eviction', meaning: 'throwing a guess away' }],
+      taught: [],
+      payoff: 'You can size a cache.',
+      daysAway: null,
+      budget: { min: 40, max: 130 },
+    });
+    const prompt = JSON.stringify(mock.calls[1].body.messages);
+    expect(prompt).toContain('TERMS segment');
+    expect(prompt).toContain('Eviction: throwing a guess away');
+    expect(prompt).not.toContain('What the listener can now do');
+    // The opening is a teacher easing in, never an announcement of a list.
+    expect(prompt).toContain('eases a class in');
+    expect(prompt).toContain('a few ideas this chapter leans on');
+    expect(prompt).toContain('never say \\"the following\\"');
+  });
+
+  it('tells the writer about the pitfall, the turn, the problem and where the page sits', async () => {
+    mock.reply({
+      sections: [{ move: 0, text: 'Why do caches lie? Because they guess.' }],
+    });
+
+    await adapter.lectureSegment({
+      topicTitle: 'Caches',
+      hook: 'Why do caches lie?',
+      arc: 'From a guess to a bet',
+      beat: {
+        goal: 'Teach eviction',
+        callback: null,
+        foreshadow: null,
+        newHere: 'Eviction is a bet',
+        skip: null,
+        weight: 'full',
+        moves: ['the guess'],
+        pitfall: 'Thinking eviction means the data was wrong',
+        turn: true,
+      },
+      problem: 'How can a cache be fast and still right?',
+      pageIndex: 0,
+      pageCount: 4,
+      style: 'brisk',
+      styleDirection: 'Say the idea, then stop.',
+      budget: { min: 70, max: 140 },
+      pageText: 'Caches evict.',
+      prevTail: '',
+      isFirstOfTopic: true,
+      isLastOfTopic: false,
+      bridge: false,
+      payoff: null,
+      opening: null,
+      taughtSoFar: [],
+      comingLater: [],
+      list: null,
+    });
+
+    const prompt = JSON.stringify(mock.calls[0].body.messages);
+    expect(prompt).toContain('PITFALL');
+    expect(prompt).toContain('Thinking eviction means the data was wrong');
+    expect(prompt).toContain("chapter's TURN");
+    expect(prompt).toContain('[pause]');
+    expect(prompt).toContain('Open on the problem this chapter answers');
+    expect(prompt).toContain('page 1 of 4 in the chapter');
+    // A brisk page is not told to restate; only a gentle one hears that.
+    expect(prompt).not.toContain('restate the idea fully');
+  });
+
+  it('tells a gentle writer to restate fully early in the chapter and in a clause late', async () => {
+    const base = {
+      topicTitle: 'Caches',
+      hook: 'h',
+      arc: 'a',
+      beat: {
+        goal: 'g',
+        callback: null,
+        foreshadow: null,
+        newHere: null,
+        skip: null,
+        weight: 'full' as const,
+        moves: ['m'],
+        pitfall: null,
+        turn: false,
+      },
+      problem: null,
+      style: 'gentle' as const,
+      styleDirection: 'Small steps.',
+      budget: { min: 180, max: 300 },
+      pageText: 'Caches evict.',
+      prevTail: 'Earlier words.',
+      isFirstOfTopic: false,
+      isLastOfTopic: false,
+      bridge: false,
+      payoff: null,
+      opening: null,
+      taughtSoFar: [],
+      comingLater: [],
+      list: null,
+    };
+    mock.reply({ sections: [{ move: 0, text: 'Early.' }] });
+    await adapter.lectureSegment({ ...base, pageIndex: 1, pageCount: 6 });
+    expect(JSON.stringify(mock.calls[0].body.messages)).toContain(
+      'restate the idea fully',
+    );
+    mock.reply({ sections: [{ move: 0, text: 'Late.' }] });
+    await adapter.lectureSegment({ ...base, pageIndex: 5, pageCount: 6 });
+    expect(JSON.stringify(mock.calls[1].body.messages)).toContain(
+      'restate in a clause at most',
+    );
   });
 });

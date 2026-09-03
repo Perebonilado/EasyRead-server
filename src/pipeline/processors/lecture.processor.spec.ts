@@ -1,7 +1,12 @@
 import { ConfigService } from '@nestjs/config';
-import type { LectureStyle } from '../../contracts';
+import type { LectureStyle, SegmentKind } from '../../contracts';
 import { FakeLlmAdapter } from '../../web/adapters/fake-llm.adapter';
-import { LECTURE_GENERATOR_VERSION } from '../../business/domain/lecture';
+import {
+  LECTURE_GENERATOR_VERSION,
+  extraSeeds,
+  playOrder,
+  scriptForTts,
+} from '../../business/domain/lecture';
 import type {
   LectureRepository,
   LectureSegmentRecord,
@@ -50,8 +55,11 @@ const draft = (text: string) => ({
   usage: USAGE,
 });
 
-const key = (style: LectureStyle, pageNumber: number) =>
-  `${style}:${pageNumber}`;
+const key = (
+  style: LectureStyle,
+  pageNumber: number,
+  kind: SegmentKind = 'page',
+) => `${style}:${pageNumber}:${kind}`;
 
 function fakes(
   pageText: Record<number, string>,
@@ -60,11 +68,20 @@ function fakes(
 ) {
   /** Every row, every style, keyed by style and page. */
   const rows = new Map<string, LectureSegmentRecord>();
-  const plans = new Map<string, { status: string; plan: unknown }>();
-  const voiceJobs: { pageNumber: number; style: LectureStyle }[] = [];
+  const plans = new Map<
+    string,
+    { status: string; plan: unknown; generatorVersion?: string }
+  >();
+  const voiceJobs: {
+    pageNumber: number;
+    style: LectureStyle;
+    kind?: SegmentKind;
+  }[] = [];
   const stored: string[] = [];
   const published: { type: string; pageNumber: number; style?: string }[] = [];
   let synthesised = 0;
+  /** What the voice was asked to say, and how. */
+  const voiced: { text: string; instructions?: string; speed?: number }[] = [];
 
   // Seeded the way the generate handler seeds them: every page pending
   // before any model call, with dense document-global order, per style.
@@ -81,6 +98,7 @@ function fakes(
           pageNumber,
           seq: index,
           style,
+          kind: 'page',
           status: 'pending',
           scriptText: null,
           audioKey: null,
@@ -92,16 +110,48 @@ function fakes(
       }
     });
 
-  const row = (pageNumber: number, style: LectureStyle = 'steady') =>
-    rows.get(key(style, pageNumber));
+  const row = (
+    pageNumber: number,
+    style: LectureStyle = 'steady',
+    kind: SegmentKind = 'page',
+  ) => rows.get(key(style, pageNumber, kind));
+  /** Seeds the extras a style gets, the way the generate handler does. */
+  const seedExtras = (style: LectureStyle) => {
+    const pages = [...rows.values()]
+      .filter((r) => r.style === style && r.kind === 'page')
+      .map((r) => ({
+        topicId: r.topicId ?? topics[0].id,
+        pageNumber: r.pageNumber,
+        seq: r.seq,
+        bridge: r.bridge,
+      }));
+    for (const extra of extraSeeds(pages, style)) {
+      rows.set(key(style, extra.pageNumber, extra.kind), {
+        ...extra,
+        style,
+        status: 'pending',
+        scriptText: null,
+        audioKey: null,
+        durationMs: null,
+        attempts: 0,
+        moveOffsets: null,
+      });
+    }
+  };
   const ordered = (style?: LectureStyle) =>
-    [...rows.values()]
-      .filter((r) => !style || r.style === style)
-      .sort((a, b) => a.seq - b.seq || a.style.localeCompare(b.style));
+    playOrder(
+      [...rows.values()]
+        .filter((r) => !style || r.style === style)
+        .sort((a, b) => a.seq - b.seq || a.style.localeCompare(b.style)),
+    );
 
   const lectures: LectureRepository = {
     savePlan: (input) => {
-      plans.set(input.topicId, { status: input.status, plan: input.plan });
+      plans.set(input.topicId, {
+        status: input.status,
+        plan: input.plan,
+        generatorVersion: input.generatorVersion,
+      });
       return Promise.resolve();
     },
     findPlan: (_d, topicId) =>
@@ -111,6 +161,7 @@ function fakes(
               topicId,
               status: plans.get(topicId)!.status as never,
               plan: plans.get(topicId)!.plan,
+              generatorVersion: plans.get(topicId)!.generatorVersion,
             }
           : null,
       ),
@@ -122,17 +173,44 @@ function fakes(
           plan: entry.plan,
         })),
       ),
-    seedSegments: () => Promise.resolve(),
-    findSegment: (_d, pageNumber, _v, style) =>
-      Promise.resolve(row(pageNumber, style) ?? null),
+    // Like the real one: rows that exist are left alone.
+    seedSegments: (input) => {
+      for (const seed of input.segments) {
+        const kind = seed.kind ?? 'page';
+        if (rows.has(key(seed.style, seed.pageNumber, kind))) continue;
+        rows.set(key(seed.style, seed.pageNumber, kind), {
+          topicId: seed.topicId,
+          pageNumber: seed.pageNumber,
+          seq: seed.seq,
+          style: seed.style,
+          kind,
+          status: 'pending',
+          scriptText: null,
+          audioKey: null,
+          durationMs: null,
+          bridge: seed.bridge,
+          attempts: 0,
+          moveOffsets: null,
+        });
+      }
+      return Promise.resolve();
+    },
+    findSegment: (_d, pageNumber, _v, style, kind) =>
+      Promise.resolve(row(pageNumber, style, kind) ?? null),
     listSegments: (_d, _v, style) => Promise.resolve(ordered(style)),
-    markSegmentWriting: (_d, pageNumber, _v, style) => {
-      const r = row(pageNumber, style);
+    removeSegments: (_d, _v, style, kind) => {
+      for (const [k, r] of rows) {
+        if (r.style === style && r.kind === kind) rows.delete(k);
+      }
+      return Promise.resolve();
+    },
+    markSegmentWriting: (_d, pageNumber, _v, style, kind) => {
+      const r = row(pageNumber, style, kind);
       if (r) r.status = 'writing';
       return Promise.resolve();
     },
     markSegmentWritten: (input) => {
-      const r = row(input.pageNumber, input.style)!;
+      const r = row(input.pageNumber, input.style, input.kind)!;
       r.status = 'voicing';
       r.scriptText = input.scriptText;
       r.moveOffsets = input.moveOffsets;
@@ -140,14 +218,14 @@ function fakes(
       return Promise.resolve();
     },
     markSegmentDone: (input) => {
-      const r = row(input.pageNumber, input.style)!;
+      const r = row(input.pageNumber, input.style, input.kind)!;
       r.status = 'done';
       r.audioKey = input.audioKey;
       r.durationMs = input.durationMs;
       return Promise.resolve();
     },
     markSegmentFailed: (input) => {
-      const r = row(input.pageNumber, input.style)!;
+      const r = row(input.pageNumber, input.style, input.kind)!;
       r.status = 'failed';
       r.attempts += 1;
       return Promise.resolve();
@@ -180,12 +258,13 @@ function fakes(
     calls: { record: () => Promise.resolve() },
     queue: {
       enqueueLectureVoices: (
-        jobs: { pageNumber: number; style: LectureStyle }[],
+        jobs: { pageNumber: number; style: LectureStyle; kind?: SegmentKind }[],
       ) => {
         voiceJobs.push(
           ...jobs.map((job) => ({
             pageNumber: job.pageNumber,
             style: job.style,
+            ...(job.kind && job.kind !== 'page' ? { kind: job.kind } : {}),
           })),
         );
         return Promise.resolve();
@@ -201,8 +280,13 @@ function fakes(
       },
     },
     speech: {
-      synthesize: () => {
+      synthesize: (input: {
+        text: string;
+        instructions?: string;
+        speed?: number;
+      }) => {
         synthesised += 1;
+        voiced.push(input);
         return Promise.resolve({
           audio: Buffer.from('mp3'),
           mimeType: 'audio/mpeg',
@@ -226,6 +310,8 @@ function fakes(
   };
 
   return {
+    voiced,
+    seedExtras,
     lectures,
     deps,
     segments,
@@ -292,11 +378,16 @@ const TWO_TOPICS = [
 ];
 const FOUR_PAGES = { 1: REAL_PAGE, 2: REAL_PAGE, 3: REAL_PAGE, 4: REAL_PAGE };
 
-const voiceJob = (pageNumber: number, style: LectureStyle = 'steady') => ({
+const voiceJob = (
+  pageNumber: number,
+  style: LectureStyle = 'steady',
+  kind?: SegmentKind,
+) => ({
   documentId: doc.id,
   contentVersion: doc.contentVersion,
   pageNumber,
   style,
+  ...(kind ? { kind } : {}),
 });
 
 /** A planner that gives every page the same moves. */
@@ -1065,6 +1156,337 @@ describe('LectureChapterProcessor', () => {
   });
 });
 
+describe('LectureChapterProcessor: the segments around a chapter', () => {
+  it("writes a slow learner the chapter's words first and the check last, and voices them by kind", async () => {
+    const f = fakes({ 1: REAL_PAGE, 2: REAL_PAGE }, [TOPIC], ['gentle']);
+    f.seedExtras('gentle');
+    await chapterProcessor(f).process(
+      chapterJob(TOPIC.id, 0, 'gentle'),
+      CONTEXT,
+    );
+
+    expect(f.row(1, 'gentle', 'terms')!.scriptText).toMatch(
+      /^Words you will hear/,
+    );
+    expect(f.row(1, 'gentle', 'terms')!.status).toBe('voicing');
+    expect(f.row(2, 'gentle', 'check')!.scriptText).toMatch(
+      /check of what stuck/i,
+    );
+    expect(f.row(2, 'gentle', 'check')!.scriptText).toContain('[pause]');
+    // The words go before the first page, the check after the last.
+    expect(f.voiceJobs).toEqual([
+      { pageNumber: 1, style: 'gentle', kind: 'terms' },
+      { pageNumber: 1, style: 'gentle' },
+      { pageNumber: 2, style: 'gentle' },
+      { pageNumber: 2, style: 'gentle', kind: 'check' },
+    ]);
+    // The pages themselves are untouched by the extras.
+    expect(f.row(1, 'gentle')!.scriptText).toMatch(/^Why Inflation matters\./);
+  });
+
+  it('gives a normal pace the check but not the words', async () => {
+    const f = fakes({ 1: REAL_PAGE, 2: REAL_PAGE });
+    f.seedExtras('steady');
+    await chapterProcessor(f).process(chapterJob(), CONTEXT);
+    expect(f.row(1, 'steady', 'terms')).toBeUndefined();
+    expect(f.row(2, 'steady', 'check')!.status).toBe('voicing');
+    expect(f.voiceJobs.at(-1)).toEqual({
+      pageNumber: 2,
+      style: 'steady',
+      kind: 'check',
+    });
+  });
+
+  it('fails the words when the plan names none, and writes the pages regardless', async () => {
+    const f = fakes({ 1: REAL_PAGE, 2: REAL_PAGE }, [TOPIC], ['gentle']);
+    f.seedExtras('gentle');
+    const llm = new FakeLlmAdapter();
+    const inner = new FakeLlmAdapter();
+    llm.lectureOutline = async (input) => {
+      const result = await inner.lectureOutline(input);
+      return { ...result, value: { ...result.value, terms: [] } };
+    };
+    await chapterProcessor(f, llm).process(
+      chapterJob(TOPIC.id, 0, 'gentle'),
+      CONTEXT,
+    );
+    expect(f.row(1, 'gentle', 'terms')!.status).toBe('failed');
+    expect(f.published).toContainEqual({
+      type: 'lecture.segment_failed',
+      pageNumber: 1,
+      style: 'gentle',
+      kind: 'terms',
+    });
+    expect(f.row(1, 'gentle')!.status).toBe('voicing');
+    expect(f.row(2, 'gentle', 'check')!.status).toBe('voicing');
+  });
+
+  it("asks for a prediction at the chapter's turn and nowhere else", async () => {
+    const f = fakes({ 1: REAL_PAGE, 2: REAL_PAGE });
+    await chapterProcessor(f).process(chapterJob(), CONTEXT);
+    expect(f.row(1)!.scriptText).not.toContain('[pause]');
+    expect(f.row(2)!.scriptText).toContain('[pause]');
+    // The voice hears a silence, never the word "pause".
+    expect(scriptForTts(f.row(2)!.scriptText!)).not.toMatch(/\[|pause/);
+  });
+
+  it('fails the extras with the pages when the chapter cannot be planned', async () => {
+    const f = fakes({ 1: REAL_PAGE }, [TOPIC], ['gentle']);
+    f.seedExtras('gentle');
+    const llm = new FakeLlmAdapter();
+    llm.lectureOutline = () => Promise.reject(new Error('planner down'));
+    await chapterProcessor(f, llm).process(
+      chapterJob(TOPIC.id, 0, 'gentle'),
+      FINAL,
+    );
+    expect(f.row(1, 'gentle', 'terms')!.status).toBe('failed');
+    expect(f.row(1, 'gentle', 'check')!.status).toBe('failed');
+    expect(f.row(1, 'gentle')!.status).toBe('failed');
+  });
+});
+
+describe('LectureChapterProcessor: plans from an earlier generator', () => {
+  const oldPlan = {
+    hook: 'Why Inflation matters.',
+    arc: 'Old arc.',
+    beats: [
+      { pageNumber: 1, goal: 'Teach page 1.' },
+      { pageNumber: 2, goal: 'Teach page 2.' },
+    ],
+  };
+
+  it('plans a chapter again when nothing has been spoken from the old plan', async () => {
+    const f = fakes({ 1: REAL_PAGE, 2: REAL_PAGE }, [TOPIC], ['gentle']);
+    f.plans.set(TOPIC.id, {
+      status: 'done',
+      plan: oldPlan,
+      generatorVersion: 'lecture-1',
+    });
+    const llm = new FakeLlmAdapter();
+    let planned = 0;
+    const inner = new FakeLlmAdapter();
+    llm.lectureOutline = (input) => {
+      planned += 1;
+      return inner.lectureOutline(input);
+    };
+    await chapterProcessor(f, llm).process(
+      chapterJob(TOPIC.id, 0, 'gentle'),
+      CONTEXT,
+    );
+    expect(planned).toBe(1);
+    expect(f.plans.get(TOPIC.id)!.generatorVersion).toBe(
+      LECTURE_GENERATOR_VERSION,
+    );
+    expect(
+      (f.plans.get(TOPIC.id)!.plan as { terms: unknown[] }).terms,
+    ).toHaveLength(1);
+  });
+
+  it('keeps the old plan once a style has words cut to it', async () => {
+    const f = fakes(
+      { 1: REAL_PAGE, 2: REAL_PAGE },
+      [TOPIC],
+      ['steady', 'gentle'],
+    );
+    f.plans.set(TOPIC.id, {
+      status: 'done',
+      plan: oldPlan,
+      generatorVersion: 'lecture-1',
+    });
+    // The steady pages were spoken from the old plan.
+    f.row(1, 'steady')!.scriptText = 'Spoken already.';
+    f.row(1, 'steady')!.status = 'done';
+    const llm = new FakeLlmAdapter();
+    let planned = 0;
+    llm.lectureOutline = () => {
+      planned += 1;
+      return Promise.reject(new Error('should not plan'));
+    };
+    await chapterProcessor(f, llm).process(
+      chapterJob(TOPIC.id, 0, 'gentle'),
+      CONTEXT,
+    );
+    expect(planned).toBe(0);
+    expect(f.row(1, 'gentle')!.scriptText).toMatch(/^Why Inflation matters\./);
+  });
+
+  it('reuses a plan whose generator matches, or is unknown', async () => {
+    const f = fakes({ 1: REAL_PAGE });
+    f.plans.set(TOPIC.id, { status: 'done', plan: oldPlan });
+    const llm = new FakeLlmAdapter();
+    llm.lectureOutline = () => Promise.reject(new Error('should not plan'));
+    await chapterProcessor(f, llm).process(chapterJob(), CONTEXT);
+    expect(f.row(1)!.status).toBe('voicing');
+  });
+});
+
+describe('LectureChapterProcessor: a long gentle page voiced as two pieces', () => {
+  const A = 'Prices rise when money is easy to borrow. ';
+  const B = 'Banks lend more when rates are low. ';
+  const C = 'Wages follow prices with a lag. ';
+  /** Three moves, about a hundred and eight words each: past gentle's budget. */
+  const long = () =>
+    Promise.resolve({
+      value: {
+        sections: [A, B, C].map((sentence, move) => ({
+          move,
+          text: sentence.repeat(move === 0 ? 14 : 16).trim(),
+        })),
+      },
+      usage: USAGE,
+    });
+
+  it('cuts the page at the move boundary nearest the middle, and voices both pieces', async () => {
+    const f = fakes({ 1: REAL_PAGE, 2: REAL_PAGE }, [TOPIC], ['gentle']);
+    const llm = new FakeLlmAdapter();
+    const inner = new FakeLlmAdapter();
+    llm.lectureOutline = plannerWithMoves(['the rise', 'the banks', 'the lag']);
+    llm.lectureSegment = (input) =>
+      input.pageText === REAL_PAGE && input.beat.goal.includes('page 1')
+        ? long()
+        : inner.lectureSegment(input);
+    await chapterProcessor(f, llm).process(
+      chapterJob(TOPIC.id, 0, 'gentle'),
+      CONTEXT,
+    );
+
+    const page = f.row(1, 'gentle')!;
+    const part = f.row(1, 'gentle', 'part')!;
+    expect(page.scriptText).toMatch(/^Why Inflation matters\./);
+    expect(page.scriptText).toContain(A.trim());
+    expect(page.scriptText).not.toContain(C.trim());
+    expect(part.scriptText).toContain(B.trim());
+    expect(part.scriptText).toContain(C.trim());
+    expect(part.status).toBe('voicing');
+    expect(part.seq).toBe(page.seq);
+    // Offsets are relative to each piece: both start at zero.
+    expect(page.moveOffsets).toEqual([0]);
+    expect(part.moveOffsets![0]).toBe(0);
+    expect(part.moveOffsets).toHaveLength(2);
+    expect(f.voiceJobs.slice(0, 2)).toEqual([
+      { pageNumber: 1, style: 'gentle' },
+      { pageNumber: 1, style: 'gentle', kind: 'part' },
+    ]);
+  });
+
+  it('continues the next page from the second piece, the last thing heard', async () => {
+    const f = fakes({ 1: REAL_PAGE, 2: REAL_PAGE }, [TOPIC], ['gentle']);
+    const llm = new FakeLlmAdapter();
+    const inner = new FakeLlmAdapter();
+    llm.lectureOutline = plannerWithMoves(['the rise', 'the banks', 'the lag']);
+    const tails: string[] = [];
+    llm.lectureSegment = (input) => {
+      tails.push(input.prevTail);
+      return input.beat.goal.includes('page 1')
+        ? long()
+        : inner.lectureSegment(input);
+    };
+    await chapterProcessor(f, llm).process(
+      chapterJob(TOPIC.id, 0, 'gentle'),
+      CONTEXT,
+    );
+    expect(tails[1]).toContain(C.trim());
+    expect(tails[1]).not.toContain(A.trim());
+  });
+
+  it('leaves a short gentle page, and a long page in any other style, whole', async () => {
+    const short = fakes({ 1: REAL_PAGE }, [TOPIC], ['gentle']);
+    const llm = new FakeLlmAdapter();
+    llm.lectureOutline = plannerWithMoves(['the rise', 'the banks', 'the lag']);
+    await chapterProcessor(short, llm).process(
+      chapterJob(TOPIC.id, 0, 'gentle'),
+      CONTEXT,
+    );
+    expect(short.row(1, 'gentle', 'part')).toBeUndefined();
+
+    const steady = fakes({ 1: REAL_PAGE });
+    const longLlm = new FakeLlmAdapter();
+    longLlm.lectureOutline = plannerWithMoves([
+      'the rise',
+      'the banks',
+      'the lag',
+    ]);
+    longLlm.lectureSegment = () => long();
+    await chapterProcessor(steady, longLlm).process(chapterJob(), CONTEXT);
+    expect(steady.row(1, 'steady', 'part')).toBeUndefined();
+    expect(steady.row(1)!.scriptText).toContain(C.trim());
+  });
+
+  it('asks for the audio again of a row that kept its words but lost its voice', async () => {
+    const f = fakes({ 1: REAL_PAGE, 2: REAL_PAGE });
+    f.seedExtras('steady');
+    const kept = f.row(1)!;
+    kept.scriptText = 'Words already written.';
+    kept.status = 'pending';
+    // A row still marked voicing whose job vanished with a worker restart.
+    const lost = f.row(2, 'steady', 'check')!;
+    lost.scriptText = 'A check whose voice job was lost.';
+    lost.status = 'voicing';
+    const llm = new FakeLlmAdapter();
+    const written: string[] = [];
+    llm.lectureSegment = (input) => {
+      written.push(input.beat.goal);
+      return new FakeLlmAdapter().lectureSegment(input);
+    };
+    await chapterProcessor(f, llm).process(chapterJob(), CONTEXT);
+    expect(f.voiceJobs.slice(0, 2)).toEqual([
+      { pageNumber: 1, style: 'steady' },
+      { pageNumber: 2, style: 'steady', kind: 'check' },
+    ]);
+    expect(kept.scriptText).toBe('Words already written.');
+    expect(lost.scriptText).toBe('A check whose voice job was lost.');
+    expect(written).toEqual(['Teach page 2.']);
+  });
+});
+
+describe('LectureVoiceProcessor: how each style is delivered', () => {
+  it('tells the voice to slow down for a slow learner, and keeps the audio apart per delivery', async () => {
+    const f = fakes({ 1: REAL_PAGE }, [TOPIC], ['gentle', 'brisk']);
+    for (const style of ['gentle', 'brisk'] as const) {
+      const row = f.row(1, style)!;
+      row.scriptText = 'The same words, delivered two ways.';
+      row.status = 'voicing';
+      await voiceProcessor(f).process(voiceJob(1, style), CONTEXT);
+    }
+    const [gentle, brisk] = f.voiced;
+    expect(gentle.instructions).toMatch(/slowly/i);
+    expect(gentle.speed).toBeLessThan(1);
+    expect(brisk.instructions).toMatch(/brisk/i);
+    expect(brisk.speed).toBeGreaterThan(1);
+    // Same words, different delivery: different files.
+    const keys = ['gentle', 'brisk'].map((style) =>
+      f
+        .row(1, style as 'gentle' | 'brisk')!
+        .audioKey!.split('-')
+        .at(-1),
+    );
+    expect(keys[0]).not.toBe(keys[1]);
+  });
+});
+
+describe('LectureVoiceProcessor: the segments around a chapter', () => {
+  it("keeps a check's audio apart from its page's, and says which arrived", async () => {
+    const f = fakes({ 1: REAL_PAGE });
+    f.seedExtras('steady');
+    const check = f.row(1, 'steady', 'check')!;
+    check.scriptText = 'That is inflation. A check of what stuck.';
+    check.status = 'voicing';
+
+    await voiceProcessor(f).process(voiceJob(1, 'steady', 'check'), CONTEXT);
+
+    expect(check.status).toBe('done');
+    expect(check.audioKey).toContain('/1-check-steady-');
+    expect(f.published).toContainEqual({
+      type: 'lecture.segment_ready',
+      pageNumber: 1,
+      style: 'steady',
+      kind: 'check',
+    });
+    // The page shares the number and is not touched.
+    expect(f.row(1)!.status).toBe('pending');
+  });
+});
+
 describe('LectureVoiceProcessor', () => {
   async function written(
     pageText: Record<number, string>,
@@ -1087,6 +1509,7 @@ describe('LectureVoiceProcessor', () => {
       type: 'lecture.segment_ready',
       pageNumber: 1,
       style: 'steady',
+      kind: 'page',
     });
   });
 
@@ -1158,6 +1581,7 @@ describe('LectureVoiceProcessor', () => {
       type: 'lecture.segment_failed',
       pageNumber: 1,
       style: 'steady',
+      kind: 'page',
     });
   });
 });

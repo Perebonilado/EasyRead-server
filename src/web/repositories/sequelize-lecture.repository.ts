@@ -1,12 +1,18 @@
 import { Injectable } from '@nestjs/common';
 import { InjectModel } from '@nestjs/sequelize';
-import type { LecturePosition, LectureStyle } from '../../contracts';
+import type {
+  LecturePosition,
+  LectureStyle,
+  SegmentKind,
+} from '../../contracts';
 import type {
   LecturePlanRecord,
   LectureRepository,
   LectureSegmentRecord,
   LectureSegmentSeed,
+  SegmentKey,
 } from '../../business/repositories/lecture.repository';
+import { playOrder } from '../../business/domain/lecture';
 import {
   LecturePlanModel,
   LecturePositionModel,
@@ -14,11 +20,27 @@ import {
 } from '../database/models';
 import { newId } from '../database/uuid';
 
+/** When a position row was last written, as the client reads it. */
+const savedAt = (row: LecturePositionModel): string | null => {
+  const value: unknown = row.get('updatedAt');
+  return value instanceof Date ? value.toISOString() : null;
+};
+
+/** The row a key names; a key without a kind names the page. */
+const whereKey = (key: SegmentKey) => ({
+  documentId: key.documentId,
+  pageNumber: key.pageNumber,
+  contentVersion: key.contentVersion,
+  style: key.style,
+  kind: key.kind ?? 'page',
+});
+
 const toSegment = (row: LectureSegmentModel): LectureSegmentRecord => ({
   topicId: row.topicId,
   pageNumber: row.pageNumber,
   seq: row.seq,
   style: row.style,
+  kind: row.kind ?? 'page',
   status: row.status,
   scriptText: row.scriptText,
   audioKey: row.audioKey,
@@ -82,7 +104,12 @@ export class SequelizeLectureRepository implements LectureRepository {
       where: { documentId, topicId, contentVersion },
     });
     return row
-      ? { topicId: row.topicId, status: row.status, plan: row.planJson }
+      ? {
+          topicId: row.topicId,
+          status: row.status,
+          plan: row.planJson,
+          generatorVersion: row.generatorVersion,
+        }
       : null;
   }
 
@@ -97,6 +124,7 @@ export class SequelizeLectureRepository implements LectureRepository {
       topicId: row.topicId,
       status: row.status,
       plan: row.planJson,
+      generatorVersion: row.generatorVersion,
     }));
   }
 
@@ -120,6 +148,7 @@ export class SequelizeLectureRepository implements LectureRepository {
       pageNumber: segment.pageNumber,
       seq: segment.seq,
       style: segment.style,
+      kind: segment.kind ?? 'page',
       bridge: segment.bridge,
       status: 'pending' as const,
     }));
@@ -131,11 +160,23 @@ export class SequelizeLectureRepository implements LectureRepository {
     pageNumber: number,
     contentVersion: number,
     style: LectureStyle,
+    kind: SegmentKind = 'page',
   ): Promise<LectureSegmentRecord | null> {
     const row = await this.segments.findOne({
-      where: { documentId, pageNumber, contentVersion, style },
+      where: { documentId, pageNumber, contentVersion, style, kind },
     });
     return row ? toSegment(row) : null;
+  }
+
+  async removeSegments(
+    documentId: string,
+    contentVersion: number,
+    style: LectureStyle,
+    kind: SegmentKind,
+  ): Promise<void> {
+    await this.segments.destroy({
+      where: { documentId, contentVersion, style, kind },
+    });
   }
 
   async listSegments(
@@ -150,7 +191,8 @@ export class SequelizeLectureRepository implements LectureRepository {
         ['style', 'ASC'],
       ],
     });
-    return rows.map(toSegment);
+    // Within one page, the extras play around it: review, terms, page, check.
+    return playOrder(rows.map(toSegment));
   }
 
   async markSegmentWriting(
@@ -158,22 +200,21 @@ export class SequelizeLectureRepository implements LectureRepository {
     pageNumber: number,
     contentVersion: number,
     style: LectureStyle,
+    kind: SegmentKind = 'page',
   ): Promise<void> {
     await this.segments.update(
       { status: 'writing' },
-      { where: { documentId, pageNumber, contentVersion, style } },
+      { where: { documentId, pageNumber, contentVersion, style, kind } },
     );
   }
 
-  async markSegmentWritten(input: {
-    documentId: string;
-    pageNumber: number;
-    contentVersion: number;
-    style: LectureStyle;
-    scriptText: string;
-    moveOffsets: number[];
-    durationMs: number | null;
-  }): Promise<void> {
+  async markSegmentWritten(
+    input: SegmentKey & {
+      scriptText: string;
+      moveOffsets: number[];
+      durationMs: number | null;
+    },
+  ): Promise<void> {
     await this.segments.update(
       {
         status: 'voicing',
@@ -182,25 +223,13 @@ export class SequelizeLectureRepository implements LectureRepository {
         durationMs: input.durationMs,
         error: null,
       },
-      {
-        where: {
-          documentId: input.documentId,
-          pageNumber: input.pageNumber,
-          contentVersion: input.contentVersion,
-          style: input.style,
-        },
-      },
+      { where: whereKey(input) },
     );
   }
 
-  async markSegmentDone(input: {
-    documentId: string;
-    pageNumber: number;
-    contentVersion: number;
-    style: LectureStyle;
-    audioKey: string;
-    durationMs: number | null;
-  }): Promise<void> {
+  async markSegmentDone(
+    input: SegmentKey & { audioKey: string; durationMs: number | null },
+  ): Promise<void> {
     await this.segments.update(
       {
         status: 'done',
@@ -208,32 +237,14 @@ export class SequelizeLectureRepository implements LectureRepository {
         durationMs: input.durationMs,
         error: null,
       },
-      {
-        where: {
-          documentId: input.documentId,
-          pageNumber: input.pageNumber,
-          contentVersion: input.contentVersion,
-          style: input.style,
-        },
-      },
+      { where: whereKey(input) },
     );
   }
 
-  async markSegmentFailed(input: {
-    documentId: string;
-    pageNumber: number;
-    contentVersion: number;
-    style: LectureStyle;
-    error: string;
-  }): Promise<void> {
-    const row = await this.segments.findOne({
-      where: {
-        documentId: input.documentId,
-        pageNumber: input.pageNumber,
-        contentVersion: input.contentVersion,
-        style: input.style,
-      },
-    });
+  async markSegmentFailed(
+    input: SegmentKey & { error: string },
+  ): Promise<void> {
+    const row = await this.segments.findOne({ where: whereKey(input) });
     if (!row) return;
     await row.update({
       status: 'failed',
@@ -307,7 +318,12 @@ export class SequelizeLectureRepository implements LectureRepository {
       where: { userId, documentId },
     });
     return row
-      ? { pageNumber: row.pageNumber, offsetMs: row.offsetMs, style: row.style }
+      ? {
+          pageNumber: row.pageNumber,
+          offsetMs: row.offsetMs,
+          style: row.style,
+          updatedAt: savedAt(row),
+        }
       : null;
   }
 }

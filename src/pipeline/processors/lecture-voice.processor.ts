@@ -14,6 +14,7 @@ import type { DocumentRepository } from '../../business/repositories/document.re
 import type { LectureRepository } from '../../business/repositories/lecture.repository';
 import {
   LECTURE_GENERATOR_VERSION,
+  LECTURE_STYLES,
   contentHash,
   estimateDurationMs,
   scriptForTts,
@@ -47,6 +48,7 @@ export class LectureVoiceProcessor {
   async process(job: LectureVoiceJobData, context: JobContext): Promise<void> {
     const { documentId, pageNumber, contentVersion } = job;
     const style = job.style ?? 'steady';
+    const kind = job.kind ?? 'page';
 
     const doc = await this.documents.findById(documentId);
     if (!doc || doc.props.deletedAt) return;
@@ -57,6 +59,7 @@ export class LectureVoiceProcessor {
       pageNumber,
       contentVersion,
       style,
+      kind,
     );
     // Nothing to voice yet: the writer has not committed a script. The
     // chapter job enqueues this only after it has, so this is a guard
@@ -69,15 +72,22 @@ export class LectureVoiceProcessor {
     try {
       const voice = this.config.get<string>('AI_LECTURE_VOICE', 'alloy');
       const model = this.config.get<string>('AI_TTS_MODEL', 'gpt-4o-mini-tts');
-      // The words themselves are in the key: a page written again gets
-      // new audio, and a page written the same way gets the file it has.
+      // The words and their delivery are both in the key: a page written
+      // again, or a style whose delivery changed, gets new audio; a page
+      // written the same way gets the file it has.
+      const { delivery, speed } = LECTURE_STYLES[style];
       const key =
         `documents/${doc.id}/lecture/v${doc.contentVersion}/` +
-        `${pageNumber}-${style}-${voice}-${model}-${LECTURE_GENERATOR_VERSION}-${contentHash(spoken)}.mp3`;
+        `${pageNumber}${kind === 'page' ? '' : `-${kind}`}-${style}-${voice}-${model}-${LECTURE_GENERATOR_VERSION}-${contentHash(`${delivery}\n${spoken}`)}.mp3`;
 
       const cached = await this.storage.size(key).catch(() => null);
       if (!cached) {
-        const result = await this.speech.synthesize({ text: spoken, voice });
+        const result = await this.speech.synthesize({
+          text: spoken,
+          voice,
+          instructions: delivery,
+          speed,
+        });
         await this.storage.put({
           key,
           body: result.audio,
@@ -100,6 +110,7 @@ export class LectureVoiceProcessor {
         pageNumber,
         contentVersion,
         style,
+        kind,
         audioKey: key,
         durationMs: estimateDurationMs(spoken),
       });
@@ -109,6 +120,7 @@ export class LectureVoiceProcessor {
         type: 'lecture.segment_ready',
         pageNumber,
         style,
+        kind,
       });
     } catch (error) {
       const message = (error as Error).message;
@@ -123,6 +135,7 @@ export class LectureVoiceProcessor {
         pageNumber,
         contentVersion,
         style,
+        kind,
         error: message,
       });
       await this.calls.record({
@@ -138,6 +151,7 @@ export class LectureVoiceProcessor {
         type: 'lecture.segment_failed',
         pageNumber,
         style,
+        kind,
       });
     }
   }

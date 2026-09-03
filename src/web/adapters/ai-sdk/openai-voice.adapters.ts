@@ -26,9 +26,13 @@ export class OpenAiSpeechAdapter implements SpeechPort {
   async synthesize({
     text,
     voice,
+    instructions,
+    speed,
   }: {
     text: string;
     voice?: string;
+    instructions?: string;
+    speed?: number;
   }): Promise<{ audio: Buffer; mimeType: string; model: string }> {
     const { experimental_generateSpeech } = await import('ai');
     const { createOpenAI } = await import('@ai-sdk/openai');
@@ -46,12 +50,21 @@ export class OpenAiSpeechAdapter implements SpeechPort {
     const parts = chunkText(text, OpenAiSpeechAdapter.INPUT_LIMIT);
     const buffers: Buffer[] = [];
 
+    // The instruction-steered models take delivery in words; the older
+    // ones take a rate, and reject instructions. Each gets only its own.
+    const steerable = model.startsWith('gpt-');
+    const delivery = {
+      ...(steerable && instructions ? { instructions } : {}),
+      ...(!steerable && speed && speed !== 1 ? { speed } : {}),
+    };
+
     for (const part of parts) {
       const result = await experimental_generateSpeech({
         model: openai.speech(model),
         text: part,
         voice: chosenVoice,
         outputFormat: 'mp3',
+        ...delivery,
       });
       buffers.push(Buffer.from(result.audio.uint8Array));
     }

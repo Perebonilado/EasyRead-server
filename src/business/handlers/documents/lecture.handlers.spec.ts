@@ -44,6 +44,10 @@ interface HarnessOptions {
   existing?: ExistingRow[];
 }
 
+/** The page rows of a seeding; the extras around chapters are asserted apart. */
+const pagesOf = (seeds: LectureSegmentSeed[]) =>
+  seeds.filter((seed) => (seed.kind ?? 'page') === 'page');
+
 function harness({
   topics = TOPICS,
   pageCount = 4,
@@ -128,13 +132,13 @@ describe('GenerateLectureHandler', () => {
   it('seeds every page before spending a single model call', async () => {
     const { handler, seeded } = harness();
     await handler.handle(request);
-    expect(seeded.map((s) => s.pageNumber)).toEqual([1, 2, 3, 4]);
+    expect(pagesOf(seeded).map((s) => s.pageNumber)).toEqual([1, 2, 3, 4]);
   });
 
   it('numbers play order across the whole document, not per chapter', async () => {
     const { handler, seeded } = harness();
     await handler.handle(request);
-    const seqs = seeded.map((s) => s.seq);
+    const seqs = pagesOf(seeded).map((s) => s.seq);
     expect(seqs).toEqual([0, 1, 2, 3]);
     expect(new Set(seqs).size).toBe(seqs.length);
   });
@@ -176,7 +180,7 @@ describe('GenerateLectureHandler', () => {
     const { handler, seeded, chapters } = harness();
     await handler.handle({ ...request, topicIds: ['topic-2'] });
 
-    expect(seeded.map((s) => s.pageNumber)).toEqual([3, 4]);
+    expect(pagesOf(seeded).map((s) => s.pageNumber)).toEqual([3, 4]);
     expect(chapters.map((c) => c.topicId)).toEqual(['topic-2']);
   });
 
@@ -187,17 +191,23 @@ describe('GenerateLectureHandler', () => {
     const { handler, seeded } = harness();
     await handler.handle({ ...request, topicIds: ['topic-2'] });
 
-    expect(seeded.map((s) => s.seq)).toEqual([2, 3]);
+    expect(pagesOf(seeded).map((s) => s.seq)).toEqual([2, 3]);
   });
 
   it('lets a second request add chapters without renumbering the first', async () => {
     const { handler, seeded } = harness();
     await handler.handle({ ...request, topicIds: ['topic-2'] });
-    const first = seeded.map((s) => ({ page: s.pageNumber, seq: s.seq }));
+    const first = pagesOf(seeded).map((s) => ({
+      page: s.pageNumber,
+      seq: s.seq,
+    }));
     seeded.length = 0;
 
     await handler.handle({ ...request, topicIds: ['topic-1'] });
-    const second = seeded.map((s) => ({ page: s.pageNumber, seq: s.seq }));
+    const second = pagesOf(seeded).map((s) => ({
+      page: s.pageNumber,
+      seq: s.seq,
+    }));
 
     expect(first).toEqual([
       { page: 3, seq: 2 },
@@ -215,7 +225,7 @@ describe('GenerateLectureHandler', () => {
   it('treats an empty selection as the whole document', async () => {
     const { handler, seeded } = harness();
     await handler.handle({ ...request, topicIds: [] });
-    expect(seeded).toHaveLength(4);
+    expect(pagesOf(seeded)).toHaveLength(4);
   });
 
   it('refuses a selection with nothing to lecture on', async () => {
@@ -273,7 +283,7 @@ describe('GenerateLectureHandler', () => {
     await handler.handle({ ...request, rewrite: true, topicIds: ['topic-1'] });
 
     expect(events).toEqual(['clear:steady', 'seed']);
-    expect(seeded.map((s) => s.pageNumber)).toEqual([1, 2, 3, 4]);
+    expect(pagesOf(seeded).map((s) => s.pageNumber)).toEqual([1, 2, 3, 4]);
     expect(chapters.map((c) => c.topicId)).toEqual(['topic-1', 'topic-2']);
     // Nothing to reset: the failed row went with the rest.
     expect(reset).toEqual([]);
@@ -321,5 +331,44 @@ describe('GenerateLectureHandler', () => {
   it('refuses a document with no chapters', async () => {
     const { handler } = harness({ topics: [] });
     await expect(handler.handle(request)).rejects.toThrow(/chapters/i);
+  });
+
+  it('seeds the check after each chapter, and the words before it for a slow learner', async () => {
+    const extrasOf = (seeds: LectureSegmentSeed[]) =>
+      seeds
+        .filter((seed) => seed.kind && seed.kind !== 'page')
+        .map((seed) => `${seed.kind}:${seed.pageNumber}@${seed.seq}`);
+
+    const gentle = harness();
+    await gentle.handler.handle({ ...request, style: 'gentle' });
+    expect(extrasOf(gentle.seeded)).toEqual([
+      'terms:1@0',
+      'check:2@1',
+      'terms:3@2',
+      'check:4@3',
+    ]);
+    expect(gentle.seeded.every((seed) => seed.style === 'gentle')).toBe(true);
+
+    const steady = harness();
+    await steady.handler.handle(request);
+    expect(extrasOf(steady.seeded)).toEqual(['check:2@1', 'check:4@3']);
+
+    const brisk = harness();
+    await brisk.handler.handle({ ...request, style: 'brisk' });
+    expect(extrasOf(brisk.seeded)).toEqual(['check:2@1', 'check:4@3']);
+  });
+
+  it('seeds extras only for the chapters asked for', async () => {
+    const { handler, seeded } = harness();
+    await handler.handle({
+      ...request,
+      topicIds: ['topic-2'],
+      style: 'gentle',
+    });
+    expect(
+      seeded
+        .filter((seed) => seed.kind !== 'page')
+        .map((seed) => seed.pageNumber),
+    ).toEqual([3, 4]);
   });
 });

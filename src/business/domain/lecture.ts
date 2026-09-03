@@ -68,6 +68,163 @@ export const WORD_BUDGET: Record<
 
 export const DEFAULT_LECTURE_STYLE: LectureStyle = 'steady';
 
+/**
+ * What a row of the lecture is. A page is the lecture proper; the others
+ * sit around a chapter: the words a slow learner hears before it, the
+ * check of what stuck after it, and the review a returning learner hears
+ * before carrying on. Play order within one page number follows KIND_RANK.
+ */
+export type LectureExtraKind = 'terms' | 'check' | 'review';
+/** A page, the second piece of a page voiced as two, or an extra. */
+export type SegmentKind = 'page' | 'part' | LectureExtraKind;
+export const SEGMENT_KINDS: SegmentKind[] = [
+  'review',
+  'terms',
+  'page',
+  'part',
+  'check',
+];
+export const KIND_RANK: Record<SegmentKind, number> = {
+  review: 0,
+  terms: 1,
+  page: 2,
+  part: 3,
+  check: 4,
+};
+
+export function isSegmentKind(value: unknown): value is SegmentKind {
+  return (
+    typeof value === 'string' && (SEGMENT_KINDS as string[]).includes(value)
+  );
+}
+
+/** Which extras each style gets. A quick learner is spared the words and the review. */
+export const EXTRAS_BY_STYLE: Record<LectureStyle, LectureExtraKind[]> = {
+  gentle: ['terms', 'check', 'review'],
+  steady: ['check', 'review'],
+  brisk: ['check'],
+};
+
+/** Spoken-word budgets for the extras; short by design. */
+export const EXTRA_BUDGET: Record<LectureExtraKind, WordBudget> = {
+  terms: { min: 40, max: 130, hard: 170 },
+  check: { min: 60, max: 170, hard: 220 },
+  review: { min: 50, max: 160, hard: 210 },
+};
+
+/**
+ * The extra rows a style gets around each chapter of the cut: the words
+ * before its first page, the check after its last. Each sits on its page's
+ * number, so play order and the player's page mapping are untouched. A
+ * chapter with nothing to teach (all bridges) gets neither.
+ */
+export function extraSeeds<
+  T extends {
+    topicId: string;
+    pageNumber: number;
+    seq: number;
+    bridge: boolean;
+  },
+>(segments: T[], style: LectureStyle): (T & { kind: LectureExtraKind })[] {
+  const extras = EXTRAS_BY_STYLE[style];
+  const byTopic = new Map<string, T[]>();
+  for (const segment of segments) {
+    const rows = byTopic.get(segment.topicId) ?? [];
+    rows.push(segment);
+    byTopic.set(segment.topicId, rows);
+  }
+  const out: (T & { kind: LectureExtraKind })[] = [];
+  for (const rows of byTopic.values()) {
+    if (!rows.some((row) => !row.bridge)) continue;
+    const ordered = [...rows].sort((a, b) => a.seq - b.seq);
+    const first = ordered[0];
+    const last = ordered[ordered.length - 1];
+    if (extras.includes('terms')) {
+      out.push({ ...first, bridge: false, kind: 'terms' });
+    }
+    if (extras.includes('check')) {
+      out.push({ ...last, bridge: false, kind: 'check' });
+    }
+  }
+  return out;
+}
+
+/**
+ * A slow learner's page that runs past its budget is voiced as two pieces,
+ * cut at a move boundary, so each piece is one idea and the learner paces
+ * themselves between them (Mayer and Chandler's learner-paced novices). A
+ * page needs this many moves to have a boundary worth cutting at.
+ */
+export const SPLIT_MIN_MOVES = 3;
+
+export function shouldSplit(
+  style: LectureStyle,
+  weight: BeatWeight,
+  sections: LectureSection[],
+): boolean {
+  if (style !== 'gentle' || sections.length < SPLIT_MIN_MOVES) return false;
+  return wordCount(sectionsToScript(sections)) > WORD_BUDGET.gentle[weight].max;
+}
+
+/** The two halves of a page's sections, cut at the move boundary nearest the middle by words. */
+export function splitSections(
+  sections: LectureSection[],
+): [LectureSection[], LectureSection[]] {
+  const words = sections.map((section) => wordCount(section.text));
+  const total = words.reduce((sum, count) => sum + count, 0);
+  let best = 1;
+  let bestGap = Number.POSITIVE_INFINITY;
+  let before = 0;
+  for (let cut = 1; cut < sections.length; cut += 1) {
+    before += words[cut - 1];
+    const gap = Math.abs(before - (total - before));
+    if (gap < bestGap) {
+      bestGap = gap;
+      best = cut;
+    }
+  }
+  return [sections.slice(0, best), sections.slice(best)];
+}
+
+export interface PageScripts {
+  script: string;
+  moveOffsets: number[];
+  /** The second piece of a page voiced as two; null for a page voiced whole. */
+  part: { script: string; moveOffsets: number[] } | null;
+}
+
+/**
+ * A page's final script, and its second piece when it is split. The
+ * opening is joined to the first piece; move offsets are relative to the
+ * piece they belong to, so each piece maps time to ideas on its own.
+ */
+export function pageScripts(
+  opening: string | null,
+  sections: LectureSection[],
+  split: boolean,
+): PageScripts {
+  const [head, tail] = split ? splitSections(sections) : [sections, []];
+  const headText = sectionsToScript(head);
+  const script = opening ? joinOpening(opening, headText) : headText;
+  const partText = sectionsToScript(tail);
+  return {
+    script,
+    moveOffsets: moveOffsetsOf(script, head),
+    part: partText
+      ? { script: partText, moveOffsets: moveOffsetsOf(partText, tail) }
+      : null,
+  };
+}
+
+/** Rows in play order: by position in the document, then by kind. */
+export function playOrder<T extends { seq: number; kind: SegmentKind }>(
+  rows: T[],
+): T[] {
+  return [...rows].sort(
+    (a, b) => a.seq - b.seq || KIND_RANK[a.kind] - KIND_RANK[b.kind],
+  );
+}
+
 export interface LectureStyleSpec {
   key: LectureStyle;
   name: string;
@@ -82,6 +239,14 @@ export interface LectureStyleSpec {
   recapCheck: boolean;
   /** How much of the previous page the writer is shown. */
   tailChars: number;
+  /**
+   * How the voice delivers this style: pace, warmth, where it pauses. A
+   * slow learner takes each idea in as it is said, so the words are not
+   * enough; the delivery has to leave room for that.
+   */
+  delivery: string;
+  /** The rate for voices that take a number instead of words; 1 is natural. */
+  speed: number;
 }
 
 /**
@@ -102,16 +267,31 @@ export const LECTURE_STYLES: Record<LectureStyle, LectureStyleSpec> = {
       'Teach one idea at a time, in the smallest steps it breaks into, in',
       'the simplest words that still keep every technical term the page',
       "uses. Put a term's plain meaning right beside it the first time it",
-      'appears. Say why it matters before how it works. Before you leave the',
-      'page, say the one idea a second way, in different words. Use an',
-      'example only where the idea is hard to see without one, and never the',
-      'same kind of example twice in a row: breaking the idea down is the',
-      'method, examples are a tool. Short sentences. Assume nothing was known',
-      'before this page except what the lecture has already taught. Do not',
-      'explain this page the way you explained the last one.',
+      'appears. Name the parts of an idea and what each does on its own',
+      'before you say how they work together. Say why it matters before how',
+      'it works. Where the page has an example, walk the whole of it, step',
+      'by step, thinking aloud, then say the general rule it shows: one',
+      'example carried through beats two mentioned. Ask one small question',
+      'the listener can answer, then answer it yourself at once. Before you',
+      'leave the page, say the one idea a second way, in a different shape:',
+      "restate fully on the chapter's early pages and only in a clause by",
+      'its last. Use an example only where the idea is hard to see without',
+      'one, and never the same kind of example twice in a row: breaking the',
+      'idea down is the method, examples are a tool. Short sentences. Assume',
+      'nothing was known before this page except what the lecture has',
+      'already taught. Do not explain this page the way you explained the',
+      'last one.',
     ].join(' '),
     recapCheck: false,
     tailChars: 500,
+    delivery: [
+      'Speak slowly and gently, unhurried, as if to someone writing each idea',
+      'down as you say it. Pause clearly at every full stop and longer between',
+      'paragraphs. Never rush a technical term: say it a little more slowly',
+      'than the words around it. Warm, calm and even, never sing-song, and',
+      'never faster towards the end of a sentence.',
+    ].join(' '),
+    speed: 0.9,
   },
   steady: {
     key: 'steady',
@@ -129,6 +309,12 @@ export const LECTURE_STYLES: Record<LectureStyle, LectureStyleSpec> = {
     ].join(' '),
     recapCheck: true,
     tailChars: 320,
+    delivery: [
+      'Speak at a natural teaching pace, clear and warm, with a short pause at',
+      'every full stop and a longer one between paragraphs. Even, unhurried,',
+      'never breathless.',
+    ].join(' '),
+    speed: 1,
   },
   brisk: {
     key: 'brisk',
@@ -137,11 +323,21 @@ export const LECTURE_STYLES: Record<LectureStyle, LectureStyleSpec> = {
     direction: [
       "Say the idea, then the page's own example if it has one, then stop.",
       'No scene-setting, no rhetorical questions, no callbacks beyond half a',
-      'sentence, no foreshadowing, no closing line. The listener is quick and',
-      'wants the point; when the page is taught, you are done.',
+      'sentence, no foreshadowing, no closing line. Anything the lecture has',
+      'already taught is left out entirely, not shortened, and a term the',
+      'lecture has used is used, not defined again. Where the page describes',
+      'a procedure, tell the listener to run it in their head before the',
+      "page's example confirms it. Write for a listener at double speed:",
+      'short sentences, one clause each. The listener is quick and wants the',
+      'point; when the page is taught, you are done.',
     ].join(' '),
     recapCheck: true,
     tailChars: 320,
+    delivery: [
+      'Speak briskly and crisply, like a confident lecturer talking to a quick',
+      'listener: no drawn-out pauses, no lingering, every word still clear.',
+    ].join(' '),
+    speed: 1.1,
   },
 };
 
@@ -194,11 +390,29 @@ export interface LectureBeat {
    * land on the same idea. Plans from before moves existed have none.
    */
   moves?: string[];
+  /** The mistake a student is most likely to make here, where the page shows it. */
+  pitfall?: string | null;
+  /**
+   * The one page of the chapter where the listener is asked to predict
+   * before they are told. Problem-first works when it is one moment, not a
+   * habit; the plan carries at most one.
+   */
+  turn?: boolean;
+}
+
+/** A word the chapter turns on, with its plain meaning beside it. */
+export interface LectureTerm {
+  term: string;
+  meaning: string;
 }
 
 export interface LecturePlan {
   hook: string;
   arc: string;
+  /** The chapter's words, spoken first for a slow learner. Older plans have none. */
+  terms?: LectureTerm[];
+  /** The problem the chapter answers, for a quick learner to hear first. */
+  problem?: string | null;
   /**
    * What the listener can do at the end that they could not before. The
    * chapter's last page lands on it. Plans written before it existed
@@ -399,6 +613,21 @@ export interface StyleProblem {
     | 'moves'
     | 'repetition';
   detail: string;
+}
+
+/**
+ * Keeps at most one turn per chapter: the first the planner marked. A
+ * chapter that asks for a prediction on every page is a quiz, not a
+ * lecture, and the writer is told to mark the pause only at the turn.
+ */
+export function singleTurn<T extends { turn?: boolean }>(beats: T[]): T[] {
+  let seen = false;
+  return beats.map((beat) => {
+    if (!beat.turn) return beat;
+    if (seen) return { ...beat, turn: false };
+    seen = true;
+    return beat;
+  });
 }
 
 /** Words in the spoken form of a script. */
@@ -992,6 +1221,19 @@ export function acceptSegment(
 }
 
 /**
+ * The one stage direction the writer may leave in a script: the silence
+ * after a question the listener is asked to answer before they hear the
+ * answer. It becomes a paragraph break for the voice, which the voices
+ * read as a beat of silence, and the player carries on through it.
+ */
+export const PAUSE_MARKER = /\s*\[pause\]\s*/gi;
+
+/** Whether a script asks for the listener's prediction before telling. */
+export function hasPause(script: string): boolean {
+  return /\[pause\]/i.test(script);
+}
+
+/**
  * Prepares a script for text to speech.
  *
  * Scripts arrive with the writer's stage directions in brackets and the
@@ -1000,6 +1242,7 @@ export function acceptSegment(
  */
 export function scriptForTts(script: string): string {
   return script
+    .replace(PAUSE_MARKER, '\n\n')
     .replace(/\[[^\]]*\]/g, ' ')
     .replace(/\((?:beat|pause|sic)[^)]*\)/gi, ' ')
     .replace(/[*_`#]+/g, '')

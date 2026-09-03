@@ -28,11 +28,13 @@ import {
   type LecturePosition,
   type LectureStatusResponse,
   type LectureStyle,
+  type SegmentKind,
 } from '../../contracts';
-import { isLectureStyle } from '../../business/domain/lecture';
+import { isLectureStyle, isSegmentKind } from '../../business/domain/lecture';
 import {
   GenerateLectureHandler,
   LectureAudioHandler,
+  LectureReviewHandler,
   LectureStatusHandler,
   SaveLecturePositionHandler,
 } from '../../business/handlers/documents/lecture.handlers';
@@ -69,6 +71,13 @@ class GenerateLectureDto {
   startAtPage?: number;
 }
 
+class LectureReviewDto {
+  /** The style the learner is resuming in. Omitted means the one they stopped in. */
+  @IsOptional()
+  @IsIn(LECTURE_STYLE_KEYS)
+  style?: LectureStyle;
+}
+
 class LecturePositionDto {
   @Type(() => Number)
   @IsInt()
@@ -85,6 +94,15 @@ class LecturePositionDto {
   @IsOptional()
   @IsIn(LECTURE_STYLE_KEYS)
   style?: LectureStyle;
+}
+
+/** A `?kind=` query, or nothing (the page); anything else is a broken client. */
+function kindQuery(value: string | undefined): SegmentKind | undefined {
+  if (value === undefined || value === '') return undefined;
+  if (!isSegmentKind(value)) {
+    throw new ValidationError('That lecture segment kind does not exist');
+  }
+  return value;
 }
 
 /** A `?style=` query, or nothing; anything else is a broken client. */
@@ -108,6 +126,7 @@ export class LectureController {
     private readonly generate: GenerateLectureHandler,
     private readonly status: LectureStatusHandler,
     private readonly audio: LectureAudioHandler,
+    private readonly review: LectureReviewHandler,
     private readonly position: SaveLecturePositionHandler,
     @Inject(STORAGE) private readonly storage: StoragePort,
   ) {}
@@ -126,6 +145,26 @@ export class LectureController {
       rewrite: body.rewrite,
       style: body.style,
       startAtPage: body.startAtPage,
+    });
+    return data;
+  }
+
+  /**
+   * The "last time" review for a learner coming back after a day. Answers
+   * with the status once the review's script is written; its audio follows
+   * over the event stream like any other segment.
+   */
+  @Post('review')
+  @HttpCode(202)
+  async writeReview(
+    @CurrentUser('id') userId: string,
+    @Param('id') documentId: string,
+    @Body() body: LectureReviewDto,
+  ): Promise<LectureStatusResponse> {
+    const { data } = await this.review.handle({
+      userId,
+      documentId,
+      style: body.style,
     });
     return data;
   }
@@ -156,6 +195,7 @@ export class LectureController {
     @Param('page') page: string,
     @Res() response: Response,
     @Query('style') style?: string,
+    @Query('kind') kind?: string,
   ): Promise<void> {
     // Validated by hand: a whole-object @Param() DTO would also receive the
     // route's :id and be rejected by the global whitelist.
@@ -169,6 +209,7 @@ export class LectureController {
       documentId,
       pageNumber,
       style: styleQuery(style),
+      kind: kindQuery(kind),
     });
 
     const { stream, size } = await this.storage.stream(data.fileRef);

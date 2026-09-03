@@ -534,8 +534,27 @@ export const LECTURE_STYLE_KEYS: readonly LectureStyle[] = [
   'brisk',
 ];
 
+/**
+ * What a lecture row is. A page is the lecture proper; a part is the
+ * second piece of a page voiced as two (a slow learner's long page, cut at
+ * an idea). The others sit around a chapter: the words a slow learner
+ * hears before it (terms), the check of what stuck after it (check), and
+ * the review a returning learner hears before carrying on (review). All
+ * share their page's number and play in the order review, terms, page,
+ * part, check.
+ */
+export type SegmentKind = 'page' | 'part' | 'terms' | 'check' | 'review';
+export const SEGMENT_KIND_KEYS: readonly SegmentKind[] = [
+  'review',
+  'terms',
+  'page',
+  'part',
+  'check',
+];
+
 export interface LectureSegmentDto {
   pageNumber: number;
+  kind: SegmentKind;
   status: LectureSegmentStatus;
   /** Playback length, known only once the audio exists. */
   durationMs: number | null;
@@ -562,6 +581,8 @@ export interface LecturePosition {
   pageNumber: number;
   offsetMs: number;
   style: LectureStyle;
+  /** When it was last saved; absent on a position just written by the client. */
+  updatedAt?: string | null;
 }
 
 /** How much of one style of the lecture exists. */
@@ -927,8 +948,19 @@ export type SseEvent =
   | { type: 'import.progress'; fetched: number; total: number }
   | { type: 'document.failed'; step: PipelineStep; reason: string }
   /** A lecture page finished its audio and can be played now. */
-  | { type: 'lecture.segment_ready'; pageNumber: number; style: LectureStyle }
-  | { type: 'lecture.segment_failed'; pageNumber: number; style: LectureStyle }
+  | {
+      type: 'lecture.segment_ready';
+      pageNumber: number;
+      style: LectureStyle;
+      /** Omitted means the page itself. */
+      kind?: SegmentKind;
+    }
+  | {
+      type: 'lecture.segment_failed';
+      pageNumber: number;
+      style: LectureStyle;
+      kind?: SegmentKind;
+    }
   /** Replayed on connect so a reconnecting client never misses state. */
   | { type: 'snapshot'; document: DocumentDetail };
 

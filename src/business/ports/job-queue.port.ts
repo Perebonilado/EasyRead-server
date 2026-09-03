@@ -1,5 +1,5 @@
 import type { Level, PipelineStep } from '../../contracts';
-import type { LectureStyle } from '../../contracts';
+import type { LectureStyle, SegmentKind } from '../../contracts';
 
 export interface PipelineJob {
   documentId: string;
@@ -22,6 +22,8 @@ export interface LectureChapterJob extends PipelineJob {
 export interface LectureVoiceJob extends PipelineJob {
   pageNumber: number;
   style: LectureStyle;
+  /** Omitted means the page itself. */
+  kind?: SegmentKind;
 }
 
 export interface ExportJob extends PipelineJob {

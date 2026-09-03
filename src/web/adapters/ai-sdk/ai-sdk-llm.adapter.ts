@@ -21,6 +21,7 @@ import {
   diagramSchema,
   sketchSchema,
   itemBatchSchema,
+  lectureExtraSchema,
   lectureOutlineSchema,
   lectureSegmentSchema,
   lectureVerifySchema,
@@ -197,7 +198,12 @@ export class AiSdkLlmAdapter implements LlmGatewayPort, OnModuleInit {
       skip: string | null;
       weight: 'full' | 'light';
       moves: string[];
+      pitfall: string | null;
+      turn: boolean;
     };
+    problem: string | null;
+    pageIndex: number;
+    pageCount: number;
     style: 'gentle' | 'steady' | 'brisk';
     styleDirection: string;
     budget: { min: number; max: number };
@@ -257,6 +263,18 @@ export class AiSdkLlmAdapter implements LlmGatewayPort, OnModuleInit {
           : null,
         moves,
         `HOW TO TEACH IT (the ${input.style} style): ${input.styleDirection}`,
+        input.pageCount > 1
+          ? `This is page ${input.pageIndex + 1} of ${input.pageCount} in the chapter${input.style === 'gentle' ? ((input.pageIndex + 1) * 2 <= input.pageCount ? ': an early page, so restate the idea fully' : ': a late page, so restate in a clause at most') : ''}.`
+          : null,
+        input.beat.pitfall
+          ? `PITFALL, the mistake a student is most likely to make here: ${input.beat.pitfall}. Say the trap and why the idea avoids it, in a sentence.`
+          : null,
+        input.beat.turn && !input.bridge
+          ? "This page carries the chapter's TURN: at the moment the listener could predict what comes next, ask them to, put [pause] on its own line, then give the answer from the page."
+          : null,
+        input.problem && input.style === 'brisk' && !input.opening
+          ? `Open on the problem this chapter answers, in one line, before the principle: ${input.problem}`
+          : null,
         input.bridge
           ? 'This page carries almost nothing: a figure or a divider. Say ONE short sentence that carries the student across it, and nothing more.'
           : `Length: ${input.budget.min} to ${input.budget.max} words across all sections${input.beat.weight === 'light' ? ' (a light page: say what is new and move on)' : ''}.`,
@@ -286,6 +304,50 @@ export class AiSdkLlmAdapter implements LlmGatewayPort, OnModuleInit {
           ? 'STRICT: this page has been rejected twice for leaving the page. Teach only what is written on the page below, in its own terms. No hook, no callback, no foreshadowing, no claims about why it matters beyond what the page itself says, and no number or name the page does not state.'
           : null,
         `\nThe page you are teaching:\n${input.pageText}`,
+      ]
+        .filter(Boolean)
+        .join('\n'),
+      maxRetries: this.maxRetries(),
+    });
+
+    return {
+      value: result.object,
+      usage: this.usage(ref, result.usage, started),
+    };
+  }
+
+  async lectureExtra(input: {
+    kind: 'terms' | 'check' | 'review';
+    topicTitle: string;
+    style: 'gentle' | 'steady' | 'brisk';
+    styleDirection: string;
+    terms: { term: string; meaning: string }[];
+    taught: string[];
+    payoff: string | null;
+    daysAway: number | null;
+    budget: { min: number; max: number };
+  }): Promise<LlmResult<{ script: string }>> {
+    const started = Date.now();
+    const { generateObject } = await this.registry.modules();
+    const { model, ref } = await this.registry.languageModel('lecture_segment');
+
+    const result = await generateObject({
+      model,
+      schema: lectureExtraSchema,
+      system: PROMPTS.lectureExtra,
+      prompt: [
+        `Write the ${input.kind.toUpperCase()} segment for the chapter "${input.topicTitle}".`,
+        `The listener is a ${input.style === 'gentle' ? 'slow' : input.style === 'brisk' ? 'quick' : 'normal-paced'} learner. HOW TO SPEAK TO THEM: ${input.styleDirection}`,
+        `Length: ${input.budget.min} to ${input.budget.max} words.`,
+        input.kind === 'terms'
+          ? `The words and their plain meanings, in order:\n${input.terms.map((entry) => `- ${entry.term}: ${entry.meaning}`).join('\n')}`
+          : `The ideas the chapter taught, in order:\n- ${input.taught.join('\n- ')}`,
+        input.kind !== 'terms' && input.payoff
+          ? `What the listener can now do: ${input.payoff}`
+          : null,
+        input.kind === 'review' && input.daysAway !== null
+          ? `They last listened ${input.daysAway === 1 ? 'a day' : `${input.daysAway} days`} ago.`
+          : null,
       ]
         .filter(Boolean)
         .join('\n'),

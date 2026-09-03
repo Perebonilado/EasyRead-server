@@ -315,6 +315,15 @@ export const lectureOutlineSchema = z.object({
   hook: z.string().min(1).max(900),
   arc: z.string().min(1).max(600),
   payoff: z.string().min(1).max(400),
+  terms: z
+    .array(
+      z.object({
+        term: z.string().min(1).max(80),
+        meaning: z.string().min(1).max(200),
+      }),
+    )
+    .max(8),
+  problem: z.string().max(300).nullable(),
   beats: z
     .array(
       z.object({
@@ -326,9 +335,16 @@ export const lectureOutlineSchema = z.object({
         skip: z.string().max(300).nullable(),
         weight: z.enum(['full', 'light']),
         moves: z.array(z.string().min(1).max(80)).min(1).max(4),
+        pitfall: z.string().max(240).nullable(),
+        turn: z.boolean(),
       }),
     )
     .max(80),
+});
+
+/** A short segment around a chapter: its words, its check, or the review. */
+export const lectureExtraSchema = z.object({
+  script: z.string().min(1).max(4000),
 });
 
 /** One page of spoken lecture, one section per move of the beat. */

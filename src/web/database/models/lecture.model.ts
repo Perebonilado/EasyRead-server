@@ -5,7 +5,11 @@ import {
   ForeignKey,
   Table,
 } from 'sequelize-typescript';
-import type { LectureSegmentStatus, LectureStyle } from '../../../contracts';
+import type {
+  LectureSegmentStatus,
+  LectureStyle,
+  SegmentKind,
+} from '../../../contracts';
 import { BaseModel } from './base';
 import { DocumentModel } from './document.model';
 import { TopicModel } from './topic.model';
@@ -71,6 +75,14 @@ export class LectureSegmentModel extends BaseModel {
     defaultValue: 'steady',
   })
   declare style: LectureStyle;
+
+  /** A page of the lecture, or one of the short segments around a chapter. */
+  @Column({
+    type: DataType.STRING(16),
+    allowNull: false,
+    defaultValue: 'page',
+  })
+  declare kind: SegmentKind;
 
   @Column({ type: DataType.STRING(16), allowNull: false })
   declare status: LectureSegmentStatus;

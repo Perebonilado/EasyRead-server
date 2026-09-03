@@ -583,6 +583,23 @@ export const PROMPTS = {
       'wording. A page with one small idea has one move.',
     ].join(' '),
     [
+      '`pitfall`: the mistake a student is most likely to make with this',
+      "page's idea, in one line, only where the page itself shows or implies",
+      'it (null otherwise). `turn`: true on exactly ONE beat of the chapter,',
+      'the page where the listener can predict what comes next from what',
+      'they have already heard; the lecture will ask them to, then tell',
+      'them. Pick the page where the prediction is possible and the answer',
+      'is on the page.',
+    ].join(' '),
+    [
+      '`terms`: the four to six technical terms the chapter turns on, each',
+      'with its plain meaning in a few words, in the order they appear;',
+      'these open the chapter for a learner who needs the words first.',
+      '`problem`: the question or problem this chapter answers, in one',
+      'spoken line, as a quick learner would want it posed before the',
+      'principle (null if the chapter is not built around one).',
+    ].join(' '),
+    [
       'You are told what earlier chapters of this lecture already taught. Do',
       'not plan to teach it again: a page that re-teaches it is light and',
       'carries a skip, and its goal builds on what was taught rather than',
@@ -664,9 +681,28 @@ export const PROMPTS = {
       'it".',
     ].join(' '),
     [
-      'Where the plan asks for a callback, tie back to that idea in passing,',
-      'in your own words. Where it asks you to foreshadow, plant it in a',
-      'single line.',
+      'Signal, then teach. Your first sentence after the opening or the tail',
+      "names what this stretch establishes, in the idea's own words, never",
+      '"on this page" or "next we look at". Close the loop on every example:',
+      'say what it stands for and the term it belongs to in the same breath,',
+      'so the listener leaves with the rule and not the story. If the page',
+      'itself carries an aside, say "an aside, not the point" and leave it;',
+      'never add colour of your own.',
+    ].join(' '),
+    [
+      'A callback is a cue, not a summary: name the earlier idea so the',
+      'listener has to bring it back themselves ("you already know what the',
+      'bucket does when it runs dry; the same thing happens here"), and do',
+      'not re-explain it. Where the plan asks you to foreshadow, plant it in',
+      'a single line.',
+    ].join(' '),
+    [
+      'Where you are given a PITFALL, say the trap in one sentence and why',
+      "the page's idea avoids it. Where you are told this page carries the",
+      "chapter's TURN, and only there, pose one question the listener can",
+      'answer from what they have just heard, then put [pause] on its own',
+      'line, then give the answer: the marker becomes a silence in the audio.',
+      'Never use [pause] anywhere else, and no other bracketed direction.',
     ].join(' '),
     [
       'Write the page as SECTIONS, one per move you are given, in the order',
@@ -692,6 +728,57 @@ export const PROMPTS = {
    * the page in a different form, which is why it now says what NOT to
    * flag at such length.
    */
+  /**
+   * The short segments around a chapter. Built from the plan's lines, not a
+   * page, so the grounding rule is "add nothing".
+   */
+  lectureExtra: [
+    [
+      'You write one short spoken segment that sits around a chapter of a',
+      'lecture: the words a learner will hear before it, the check of what',
+      'stuck after it, or the review a returning learner hears first.',
+      'Speech, first person, to "you". No headings, no markdown, nothing',
+      'read out as a list, and no bracketed direction except [pause] where',
+      'the rules below ask for it. Everything comes from the lines you are',
+      'given; add no fact, name, number or example of your own.',
+    ].join(' '),
+    [
+      'Open the way a teacher eases a class in, in one natural spoken line,',
+      'and vary it from one chapter to the next. Never announce what is',
+      'coming as a list, never say "the following", "you will hear" or',
+      '"in this segment", and never name what you are (a check, a review,',
+      'a list of terms).',
+    ].join(' '),
+    [
+      'TERMS: one easing-in line, for example "Before we start, a few ideas',
+      'this chapter leans on.", "Let\'s go over a few concepts we will run',
+      'into here first.", or "We will meet a handful of terms in this',
+      'chapter, so here is what each one means." Then each term with its',
+      'plain meaning in the same breath, in order, one sentence each, joined',
+      'the way speech joins them ("and then there is..."), not read as',
+      'entries. No examples, no closing line.',
+    ].join(' '),
+    [
+      'CHECK: one natural line to turn from teaching to checking, for example',
+      '"That is the chapter. Let\'s see what stuck.", "Before we move on, a',
+      'few quick questions.", or "Time to check what stayed with you." Ask',
+      'questions the listener can answer from the ideas listed, one idea',
+      'each; after each question put [pause] on its own line, then give the',
+      'answer in one or two sentences and name the term it belongs to.',
+      'Three questions for a slow or normal-paced learner, two for a quick',
+      'one. End on the last answer: no encouragement, no summary, no',
+      'preview.',
+    ].join(' '),
+    [
+      'REVIEW: one natural line that it has been a while, for example "It',
+      'has been a while, so here is where we were." or "A quick look back',
+      'before we go on." Ask two or three questions on the ideas listed,',
+      'each followed by [pause] on its own line and its one-sentence answer,',
+      'then say in one line where the lecture picks up. No summary of the',
+      'whole document.',
+    ].join(' '),
+  ].join('\n\n'),
+
   lectureVerify: [
     [
       'You check one segment of a spoken lecture against the page it',

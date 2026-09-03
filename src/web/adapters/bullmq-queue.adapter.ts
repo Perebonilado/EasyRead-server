@@ -190,6 +190,7 @@ export class BullmqQueueAdapter implements JobQueuePort, OnModuleDestroy {
               job.pageNumber,
               job.contentVersion,
               job.style,
+              job.kind,
             ),
           )
           .catch(() => undefined),
@@ -207,6 +208,7 @@ export class BullmqQueueAdapter implements JobQueuePort, OnModuleDestroy {
             job.pageNumber,
             job.contentVersion,
             job.style,
+            job.kind,
           ),
           // The front of the document is voiced first, for the same reason.
           priority: Math.min(job.pageNumber, 2_000_000),

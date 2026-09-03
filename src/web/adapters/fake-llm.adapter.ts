@@ -140,7 +140,11 @@ export class FakeLlmAdapter implements LlmGatewayPort {
         hook: `Why ${input.topicTitle} matters.`,
         arc: `From the start of ${input.topicTitle} to its consequence.`,
         payoff: `You can now explain ${input.topicTitle}.`,
-        beats: input.pages.map((page) => ({
+        terms: [
+          { term: input.topicTitle, meaning: 'the idea this chapter turns on' },
+        ],
+        problem: `What does ${input.topicTitle} solve?`,
+        beats: input.pages.map((page, index) => ({
           pageNumber: page.pageNumber,
           goal: `Teach page ${page.pageNumber}.`,
           callback: input.priorTopics[0] ?? null,
@@ -149,6 +153,10 @@ export class FakeLlmAdapter implements LlmGatewayPort {
           skip: null,
           weight: 'full' as const,
           moves: [`Teach page ${page.pageNumber}`],
+          pitfall: null,
+          // The last page: a prediction is only possible once something
+          // has been heard, and earlier pages' tails stay plain words.
+          turn: index === input.pages.length - 1,
         })),
       },
       usage: this.usage(started, 500, 120),
@@ -174,7 +182,12 @@ export class FakeLlmAdapter implements LlmGatewayPort {
       skip: string | null;
       weight: 'full' | 'light';
       moves: string[];
+      pitfall: string | null;
+      turn: boolean;
     };
+    problem: string | null;
+    pageIndex: number;
+    pageCount: number;
     style: 'gentle' | 'steady' | 'brisk';
     styleDirection: string;
     budget: { min: number; max: number };
@@ -200,7 +213,12 @@ export class FakeLlmAdapter implements LlmGatewayPort {
         ? ' UNGROUNDED'
         : '';
     const lead = input.prevTail ? 'Carrying on. ' : '';
-    const closing = input.isLastOfTopic ? ' And that is the whole idea.' : '';
+    // The chapter's turn: a prediction asked for, a silence, the answer.
+    const turn =
+      input.beat.turn && !input.bridge
+        ? ' What happens next?\n[pause]\nThe page tells you.'
+        : '';
+    const closing = `${turn}${input.isLastOfTopic ? ' And that is the whole idea.' : ''}`;
     const body = input.bridge
       ? 'Nothing to linger on here.'
       : `${input.beat.goal} ${input.pageText.slice(0, 120)}`;
@@ -220,6 +238,36 @@ export class FakeLlmAdapter implements LlmGatewayPort {
       value: { sections },
       usage: this.usage(started, input.pageText.length / 4, 60),
     };
+  }
+
+  /** A deterministic extra: its kind and the lines it was built from. */
+  async lectureExtra(input: {
+    kind: 'terms' | 'check' | 'review';
+    topicTitle: string;
+    style: 'gentle' | 'steady' | 'brisk';
+    styleDirection: string;
+    terms: { term: string; meaning: string }[];
+    taught: string[];
+    payoff: string | null;
+    daysAway: number | null;
+    budget: { min: number; max: number };
+  }): Promise<LlmResult<{ script: string }>> {
+    const started = Date.now();
+    const script =
+      input.kind === 'terms'
+        ? `Words you will hear in ${input.topicTitle}. ${input.terms
+            .map((entry) => `${entry.term}: ${entry.meaning}.`)
+            .join(' ')}`
+        : input.kind === 'check'
+          ? `That is ${input.topicTitle}. A check of what stuck. ${input.taught
+              .slice(0, 3)
+              .map((line) => `What was this: ${line}\n[pause]\n${line}`)
+              .join(' ')}`
+          : `It has been ${input.daysAway ?? 'some'} days. Where you were in ${input.topicTitle}: ${input.taught
+              .slice(0, 2)
+              .map((line) => `${line}\n[pause]\n${line}`)
+              .join(' ')} The lecture picks up from here.`;
+    return { value: { script }, usage: this.usage(started, 200, 80) };
   }
 
   async lectureVerify(input: {

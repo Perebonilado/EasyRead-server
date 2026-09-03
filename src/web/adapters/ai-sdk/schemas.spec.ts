@@ -2,6 +2,7 @@ import {
   blocksSchema,
   diagramClozeSchema,
   diagramSchema,
+  lectureExtraSchema,
   lectureOutlineSchema,
   lectureSegmentSchema,
   ocrPageSchema,
@@ -204,11 +205,15 @@ describe('structured-output schemas', () => {
       newHere: 'The one new thing',
       skip: null,
       moves: ['the problem', 'the mechanism'],
+      pitfall: null,
+      turn: false,
     };
     const plan = (weight: string) => ({
       hook: 'h',
       arc: 'a',
       payoff: 'p',
+      terms: [],
+      problem: null,
       beats: [{ ...beat, weight }],
     });
     expect(lectureOutlineSchema.safeParse(plan('full')).success).toBe(true);
@@ -236,6 +241,8 @@ describe('structured-output schemas', () => {
       hook: 'h',
       arc: 'a',
       payoff: 'p',
+      terms: [],
+      problem: null,
       beats: [
         {
           pageNumber: 1,
@@ -246,6 +253,8 @@ describe('structured-output schemas', () => {
           skip: null,
           weight: 'full',
           moves,
+          pitfall: null,
+          turn: false,
         },
       ],
     });
@@ -254,6 +263,53 @@ describe('structured-output schemas', () => {
     expect(
       lectureOutlineSchema.safeParse(plan(['a', 'b', 'c', 'd', 'e'])).success,
     ).toBe(false);
+  });
+
+  it('lectureOutlineSchema wants the chapter terms, its problem, and a pitfall and turn per beat', () => {
+    const beat = {
+      pageNumber: 1,
+      goal: 'g',
+      callback: null,
+      foreshadow: null,
+      newHere: 'n',
+      skip: null,
+      weight: 'full',
+      moves: ['m'],
+      pitfall: 'Mixing up the rate and the total',
+      turn: true,
+    };
+    const plan = {
+      hook: 'h',
+      arc: 'a',
+      payoff: 'p',
+      terms: [{ term: 'Refill rate', meaning: 'how fast tokens come back' }],
+      problem: 'How do you stop a burst without stopping everyone?',
+      beats: [beat],
+    };
+    expect(lectureOutlineSchema.safeParse(plan).success).toBe(true);
+    expect(
+      lectureOutlineSchema.safeParse({ ...plan, terms: undefined }).success,
+    ).toBe(false);
+    expect(
+      lectureOutlineSchema.safeParse({
+        ...plan,
+        beats: [{ ...beat, turn: 'yes' }],
+      }).success,
+    ).toBe(false);
+    expect(
+      lectureOutlineSchema.safeParse({
+        ...plan,
+        terms: Array.from({ length: 9 }, () => plan.terms[0]),
+      }).success,
+    ).toBe(false);
+  });
+
+  it('lectureExtraSchema is one script, never empty', () => {
+    expect(
+      lectureExtraSchema.safeParse({ script: 'Words you will hear.' }).success,
+    ).toBe(true);
+    expect(lectureExtraSchema.safeParse({ script: '' }).success).toBe(false);
+    expect(lectureExtraSchema.safeParse({ sections: [] }).success).toBe(false);
   });
 
   it('lectureSegmentSchema wants numbered sections, not one script', () => {

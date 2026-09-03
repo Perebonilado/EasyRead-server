@@ -28,6 +28,17 @@ import {
   scriptForTts,
   tailOf,
   validateOutline,
+  EXTRAS_BY_STYLE,
+  EXTRA_BUDGET,
+  KIND_RANK,
+  extraSeeds,
+  hasPause,
+  isSegmentKind,
+  playOrder,
+  singleTurn,
+  pageScripts,
+  shouldSplit,
+  splitSections,
   type LecturePageInput,
   type LecturePlan,
   type LectureTopicInput,
@@ -863,5 +874,194 @@ describe('repeatedDevice', () => {
         { move: 1, text: 'Wages lag. Think of the last raise you had.' },
       ]),
     ).toEqual([]);
+  });
+});
+
+describe('the turn and its pause', () => {
+  it('keeps at most one turn per chapter, the first the planner marked', () => {
+    const beats = singleTurn([{ turn: false }, { turn: true }, { turn: true }]);
+    expect(beats.map((beat) => beat.turn)).toEqual([false, true, false]);
+    expect(singleTurn([{ turn: false }]).map((beat) => beat.turn)).toEqual([
+      false,
+    ]);
+  });
+
+  it('turns [pause] into a silence for the voice and nothing for the ear', () => {
+    const script = 'What happens next? [pause] The bucket empties.';
+    expect(hasPause(script)).toBe(true);
+    expect(scriptForTts(script)).toBe(
+      'What happens next?\n\nThe bucket empties.',
+    );
+    expect(hasPause(scriptForTts(script))).toBe(false);
+    // The pause is not a word, and the count is the spoken words.
+    expect(wordCount(script)).toBe(6);
+  });
+});
+
+describe('the segments around a chapter', () => {
+  const cut = [
+    { topicId: 't1', pageNumber: 1, seq: 0, bridge: false },
+    { topicId: 't1', pageNumber: 2, seq: 1, bridge: true },
+    { topicId: 't2', pageNumber: 3, seq: 2, bridge: true },
+  ];
+
+  it('gives a slow learner the words before a chapter and the check after it', () => {
+    expect(
+      extraSeeds(cut, 'gentle').map((seed) => [
+        seed.kind,
+        seed.pageNumber,
+        seed.seq,
+        seed.bridge,
+      ]),
+    ).toEqual([
+      ['terms', 1, 0, false],
+      ['check', 2, 1, false],
+    ]);
+  });
+
+  it('gives a normal pace and a quick learner the check only', () => {
+    expect(extraSeeds(cut, 'steady').map((seed) => seed.kind)).toEqual([
+      'check',
+    ]);
+    expect(extraSeeds(cut, 'brisk').map((seed) => seed.kind)).toEqual([
+      'check',
+    ]);
+    expect(EXTRAS_BY_STYLE.brisk).not.toContain('review');
+    expect(EXTRAS_BY_STYLE.gentle).toContain('review');
+  });
+
+  it('gives a chapter with nothing to teach no extras at all', () => {
+    expect(
+      extraSeeds(cut, 'gentle').some((seed) => seed.topicId === 't2'),
+    ).toBe(false);
+  });
+
+  it('plays the extras around their page: review, words, page, check', () => {
+    const rows = [
+      { seq: 1, kind: 'check' as const },
+      { seq: 0, kind: 'page' as const },
+      { seq: 0, kind: 'terms' as const },
+      { seq: 0, kind: 'review' as const },
+      { seq: 1, kind: 'page' as const },
+    ];
+    expect(playOrder(rows).map((row) => `${row.seq}:${row.kind}`)).toEqual([
+      '0:review',
+      '0:terms',
+      '0:page',
+      '1:page',
+      '1:check',
+    ]);
+    expect(KIND_RANK.review).toBeLessThan(KIND_RANK.page);
+  });
+
+  it('keeps the extras short', () => {
+    for (const budget of Object.values(EXTRA_BUDGET)) {
+      expect(budget.max).toBeLessThanOrEqual(170);
+      expect(budget.hard).toBeGreaterThan(budget.max);
+    }
+  });
+
+  it('knows a kind from a stray query string', () => {
+    expect(isSegmentKind('check')).toBe(true);
+    expect(isSegmentKind('pages')).toBe(false);
+    expect(isSegmentKind(undefined)).toBe(false);
+  });
+});
+
+describe('a long gentle page voiced as two pieces', () => {
+  const section = (move: number, words: number, word = 'idea') => ({
+    move,
+    text: Array.from({ length: words }, () => `${word}${move}`).join(' ') + '.',
+  });
+
+  it("splits only a slow learner's page, only past its budget, only with a boundary to cut at", () => {
+    const long = [section(0, 110), section(1, 110), section(2, 110)];
+    expect(shouldSplit('gentle', 'full', long)).toBe(true);
+    expect(shouldSplit('steady', 'full', long)).toBe(false);
+    expect(shouldSplit('brisk', 'full', long)).toBe(false);
+    expect(
+      shouldSplit('gentle', 'full', [section(0, 200), section(1, 200)]),
+    ).toBe(false);
+    expect(
+      shouldSplit('gentle', 'full', [
+        section(0, 90),
+        section(1, 90),
+        section(2, 90),
+      ]),
+    ).toBe(false);
+    // A light page has the smaller budget.
+    expect(
+      shouldSplit('gentle', 'light', [
+        section(0, 60),
+        section(1, 60),
+        section(2, 60),
+      ]),
+    ).toBe(true);
+  });
+
+  it('cuts at the move boundary nearest the middle by words', () => {
+    const [head, tail] = splitSections([
+      section(0, 40),
+      section(1, 40),
+      section(2, 40),
+      section(3, 200),
+    ]);
+    expect(head.map((s) => s.move)).toEqual([0, 1, 2]);
+    expect(tail.map((s) => s.move)).toEqual([3]);
+    const [first, rest] = splitSections([
+      section(0, 200),
+      section(1, 40),
+      section(2, 40),
+    ]);
+    expect(first.map((s) => s.move)).toEqual([0]);
+    expect(rest.map((s) => s.move)).toEqual([1, 2]);
+  });
+
+  it('never leaves a piece empty', () => {
+    const [head, tail] = splitSections([
+      section(0, 1),
+      section(1, 1),
+      section(2, 500),
+    ]);
+    expect(head.length).toBeGreaterThan(0);
+    expect(tail.length).toBeGreaterThan(0);
+  });
+
+  it('joins the opening to the first piece and keeps offsets relative to each piece', () => {
+    const sections = [
+      section(0, 5, 'a'),
+      section(1, 5, 'b'),
+      section(2, 5, 'c'),
+    ];
+    const whole = pageScripts('Why it matters', sections, false);
+    expect(whole.part).toBeNull();
+    expect(whole.script.startsWith('Why it matters.')).toBe(true);
+    expect(whole.moveOffsets).toHaveLength(3);
+
+    const split = pageScripts('Why it matters', sections, true);
+    expect(split.script.startsWith('Why it matters.')).toBe(true);
+    expect(split.part).not.toBeNull();
+    expect(split.moveOffsets[0]).toBe(0);
+    expect(split.part!.moveOffsets[0]).toBe(0);
+    expect(split.moveOffsets.length + split.part!.moveOffsets.length).toBe(3);
+    expect(split.part!.script).not.toContain('Why it matters');
+    expect(`${split.script}\n\n${split.part!.script}`).toContain(
+      sections[2].text,
+    );
+  });
+});
+
+describe('how each style is delivered by the voice', () => {
+  it('slows down for a slow learner and quickens for a quick one', () => {
+    expect(LECTURE_STYLES.gentle.delivery).toMatch(/slowly/i);
+    expect(LECTURE_STYLES.gentle.delivery).toMatch(/pause/i);
+    expect(LECTURE_STYLES.brisk.delivery).toMatch(/brisk/i);
+    expect(LECTURE_STYLES.gentle.speed).toBeLessThan(
+      LECTURE_STYLES.steady.speed,
+    );
+    expect(LECTURE_STYLES.steady.speed).toBeLessThan(
+      LECTURE_STYLES.brisk.speed,
+    );
+    expect(LECTURE_STYLES.steady.speed).toBe(1);
   });
 });

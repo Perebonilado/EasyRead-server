@@ -2,7 +2,10 @@ import { Inject, Injectable, Logger } from '@nestjs/common';
 import type { LectureStyle } from '../../contracts';
 import { EVENT_BUS, JOB_QUEUE, LLM_GATEWAY } from '../../business/ports/tokens';
 import type { EventBusPort } from '../../business/ports/event-bus.port';
-import type { JobQueuePort } from '../../business/ports/job-queue.port';
+import type {
+  JobQueuePort,
+  LectureVoiceJob,
+} from '../../business/ports/job-queue.port';
 import type { LlmGatewayPort } from '../../business/ports/llm.port';
 import {
   AI_CALL_LOG_REPOSITORY,
@@ -29,19 +32,23 @@ import {
   estimateDurationMs,
   hookProblems,
   hookShapeFor,
-  joinOpening,
   listShape,
-  moveOffsetsOf,
   openingsBefore,
   outlineCorrection,
   scriptForTts,
   sectionProblems,
   sectionsToScript,
+  singleTurn,
   styleProblems,
   tailOf,
   taughtLines,
   unsupportedFigures,
   validateOutline,
+  EXTRA_BUDGET,
+  pageScripts,
+  shouldSplit,
+  type LectureExtraKind,
+  type PageScripts,
   type BeatWeight,
   type LectureBeat,
   type LecturePlan,
@@ -70,10 +77,7 @@ interface PageText {
 }
 
 /** A finished page: the words, and where each of its ideas begins. */
-interface WrittenPage {
-  script: string;
-  moveOffsets: number[];
-}
+type WrittenPage = PageScripts;
 
 /**
  * One chapter's lecture, in one style: planned once, then written page by
@@ -134,20 +138,46 @@ export class LectureChapterProcessor {
     // model call is made, and the other styles' pages are the fallback
     // for continuity when this style starts mid-chapter.
     const all = await this.lectures.listSegments(documentId, contentVersion);
-    const rows = all.filter(
+    const mine = all.filter(
       (row) => row.topicId === topicId && row.style === style,
     );
+    const rows = mine.filter((row) => row.kind === 'page');
+    // The short segments this style gets around the chapter (the words
+    // before it, the check after it), written from the plan.
+    const extras = mine.filter((row) => row.kind !== 'page');
     if (!rows.length) return;
+
+    // Rows that have their words but not their audio: a voice job that
+    // failed and was put back to pending, or one lost while a worker was
+    // restarted. The words are kept and only the voicing is asked for
+    // again; the queue ignores a duplicate of a job it is still running.
+    const unvoiced = mine.filter(
+      (row) =>
+        row.scriptText && row.status !== 'done' && row.status !== 'failed',
+    );
+    if (unvoiced.length) {
+      await this.queue.enqueueLectureVoices(
+        unvoiced.map((row) => ({
+          documentId,
+          contentVersion,
+          pageNumber: row.pageNumber,
+          style,
+          kind: row.kind,
+        })),
+      );
+    }
 
     // How the chapters before this one began, in this style, so this one
     // begins differently. Chapters are written alongside each other, so
     // early in a lecture this is often empty and the rotating shape
     // carries the variety alone.
-    const sameStyle = all.filter((row) => row.style === style);
+    const sameStyle = all.filter(
+      (row) => row.style === style && row.kind === 'page',
+    );
     const priorOpenings = openingsBefore(sameStyle, rows[0].seq);
     const lectured = new Set(
       all
-        .filter((row) => row.scriptText && row.topicId)
+        .filter((row) => row.scriptText && row.topicId && row.kind === 'page')
         .map((row) => row.topicId as string),
     );
 
@@ -188,13 +218,26 @@ export class LectureChapterProcessor {
       // what lets the player and the chapter list stop waiting.
       await this.failUnwritten(
         doc.id,
-        rows,
+        [...rows, ...extras],
         contentVersion,
         style,
         'The chapter could not be planned',
       );
       return;
     }
+
+    // A slow learner hears the chapter's words before its first page, so
+    // they are written first: one short call, then the page they wait on.
+    await this.writeExtra({
+      doc,
+      topic,
+      plan,
+      rows,
+      extras,
+      style,
+      contentVersion,
+      kind: 'terms',
+    });
 
     // A learner who switched style mid-chapter is waiting at startAtPage:
     // that page and the rest of the chapter go first, the earlier pages
@@ -212,6 +255,7 @@ export class LectureChapterProcessor {
       if (row.scriptText) continue;
       await this.writeOne({
         doc,
+        topicId: topic.id,
         topicTitle: topic.title,
         plan,
         row,
@@ -221,6 +265,124 @@ export class LectureChapterProcessor {
         style,
         taughtEarlier,
       });
+    }
+
+    // The check of what stuck, after the chapter's last page.
+    await this.writeExtra({
+      doc,
+      topic,
+      plan,
+      rows,
+      extras,
+      style,
+      contentVersion,
+      kind: 'check',
+    });
+  }
+
+  /**
+   * One of the short segments around the chapter, written from the plan:
+   * the words a slow learner hears first, or the check of what stuck.
+   * Every line comes from the plan, so there is no page to verify it
+   * against. A chapter with nothing to check, or a plan from before terms
+   * existed, fails the row with the reason; the player skips a failed
+   * extra silently, since nothing of the lecture is missing.
+   */
+  private async writeExtra(input: {
+    doc: { id: string };
+    topic: { title: string };
+    plan: LecturePlan;
+    rows: LectureSegmentRecord[];
+    extras: LectureSegmentRecord[];
+    style: LectureStyle;
+    contentVersion: number;
+    kind: LectureExtraKind;
+  }): Promise<void> {
+    const { doc, plan, style, contentVersion, kind } = input;
+    const row = input.extras.find((extra) => extra.kind === kind);
+    if (!row || row.scriptText) return;
+    const key = {
+      documentId: doc.id,
+      pageNumber: row.pageNumber,
+      contentVersion,
+      style,
+      kind,
+    };
+    const fail = async (error: string) => {
+      await this.lectures.markSegmentFailed({ ...key, error });
+      await this.events.publish(doc.id, {
+        type: 'lecture.segment_failed',
+        pageNumber: row.pageNumber,
+        style,
+        kind,
+      });
+    };
+
+    const terms = plan.terms ?? [];
+    const taught = input.rows
+      .filter((page) => !page.bridge)
+      .map((page) => {
+        const beat = beatFor(plan, page.pageNumber);
+        return beat.newHere?.trim() || beat.goal;
+      });
+    if (kind === 'terms' && !terms.length) {
+      await fail('The chapter plan names no terms');
+      return;
+    }
+    if (kind !== 'terms' && !taught.length) {
+      await fail('The chapter taught nothing to check');
+      return;
+    }
+
+    try {
+      await this.lectures.markSegmentWriting(
+        doc.id,
+        row.pageNumber,
+        contentVersion,
+        style,
+        kind,
+      );
+      const written = await this.llm.lectureExtra({
+        kind,
+        topicTitle: input.topic.title,
+        style,
+        styleDirection: LECTURE_STYLES[style].direction,
+        terms,
+        taught,
+        payoff: plan.payoff ?? null,
+        daysAway: null,
+        budget: EXTRA_BUDGET[kind],
+      });
+      await this.calls.record({
+        documentId: doc.id,
+        task: 'lecture_segment',
+        model: written.usage.model,
+        tokensIn: written.usage.tokensIn,
+        tokensOut: written.usage.tokensOut,
+        latencyMs: written.usage.latencyMs,
+        outcome: 'ok',
+      });
+      const script = written.value.script.trim();
+      row.scriptText = script;
+      await this.lectures.markSegmentWritten({
+        ...key,
+        scriptText: script,
+        moveOffsets: [],
+        durationMs: estimateDurationMs(scriptForTts(script)),
+      });
+      await this.queue.enqueueLectureVoices([
+        {
+          documentId: doc.id,
+          contentVersion,
+          pageNumber: row.pageNumber,
+          style,
+          kind,
+        },
+      ]);
+    } catch (error) {
+      const message = (error as Error).message;
+      this.logger.warn(`${input.topic.title}: ${kind} failed (${message})`);
+      await fail(message);
     }
   }
 
@@ -243,8 +405,22 @@ export class LectureChapterProcessor {
       topic.id,
       contentVersion,
     );
-    if (existing?.status === 'done' && existing.plan) {
+    // A plan from an earlier generator lacks what this one teaches from
+    // (terms, the turn, pitfalls). It is planned again while nothing has
+    // been spoken from it; once a style has words, the plan stays, because
+    // the pages' ideas are cut to it and a switch between styles lands on
+    // those.
+    const stale =
+      existing?.generatorVersion !== undefined &&
+      existing.generatorVersion !== LECTURE_GENERATOR_VERSION &&
+      !input.lectured.has(topic.id);
+    if (existing?.status === 'done' && existing.plan && !stale) {
       return existing.plan as LecturePlan;
+    }
+    if (stale) {
+      this.logger.log(
+        `${topic.title}: plan from ${existing?.generatorVersion} is planned again under ${LECTURE_GENERATOR_VERSION}`,
+      );
     }
 
     const pageNumbers = rows.map((row) => row.pageNumber);
@@ -324,7 +500,11 @@ export class LectureChapterProcessor {
           `${topic.title}: hook not fit to be spoken word for word; the writer opens the chapter`,
         );
       }
-      const plan: LecturePlan = { ...result.value, hookSpoken };
+      const plan: LecturePlan = {
+        ...result.value,
+        beats: singleTurn(result.value.beats),
+        hookSpoken,
+      };
 
       await this.calls.record({
         documentId: doc.id,
@@ -403,6 +583,7 @@ export class LectureChapterProcessor {
    */
   private async writeOne(input: {
     doc: { id: string };
+    topicId: string;
     topicTitle: string;
     plan: LecturePlan;
     row: LectureSegmentRecord;
@@ -436,12 +617,24 @@ export class LectureChapterProcessor {
         input.all
           .filter(
             (other) =>
+              other.kind === 'page' &&
               other.topicId === row.topicId &&
               other.seq < row.seq &&
               other.scriptText,
           )
           .sort((a, b) => a.seq - b.seq)
           .pop();
+      // A page voiced as two pieces: the last thing heard is its second.
+      const previousPart = previous
+        ? input.all.find(
+            (other) =>
+              other.kind === 'part' &&
+              other.pageNumber === previous.pageNumber &&
+              other.style === previous.style &&
+              other.scriptText,
+          )
+        : undefined;
+      const heardLast = previousPart ?? previous;
 
       // The pages either side of this one in the chapter, for the
       // verifier. A fact the writer took from the plan or the page before
@@ -481,11 +674,13 @@ export class LectureChapterProcessor {
         style,
         pageNumber: row.pageNumber,
         pageText,
-        prevTail: previous?.scriptText
-          ? tailOf(previous.scriptText, LECTURE_STYLES[style].tailChars)
+        prevTail: heardLast?.scriptText
+          ? tailOf(heardLast.scriptText, LECTURE_STYLES[style].tailChars)
           : '',
         isFirstOfTopic,
         isLastOfTopic: index === rows.length - 1,
+        pageIndex: index,
+        pageCount: rows.length,
         bridge: row.bridge,
         opening,
         taughtSoFar,
@@ -509,14 +704,60 @@ export class LectureChapterProcessor {
         durationMs: estimateDurationMs(scriptForTts(written.script)),
       });
 
-      await this.queue.enqueueLectureVoices([
+      const voices: LectureVoiceJob[] = [
         {
           documentId: doc.id,
           contentVersion,
           pageNumber: row.pageNumber,
           style,
         },
-      ]);
+      ];
+      if (written.part) {
+        // The second piece: its own row on the same page, its own file.
+        // Seeded here rather than with the pages, because whether a page
+        // runs long is only known once it is written.
+        await this.lectures.seedSegments({
+          documentId: doc.id,
+          contentVersion,
+          generatorVersion: LECTURE_GENERATOR_VERSION,
+          segments: [
+            {
+              topicId: input.topicId,
+              pageNumber: row.pageNumber,
+              seq: row.seq,
+              bridge: false,
+              style,
+              kind: 'part',
+            },
+          ],
+        });
+        await this.lectures.markSegmentWritten({
+          documentId: doc.id,
+          pageNumber: row.pageNumber,
+          contentVersion,
+          style,
+          kind: 'part',
+          scriptText: written.part.script,
+          moveOffsets: written.part.moveOffsets,
+          durationMs: estimateDurationMs(scriptForTts(written.part.script)),
+        });
+        // In memory too: the next page continues from this piece.
+        input.all.push({
+          ...row,
+          kind: 'part',
+          status: 'voicing',
+          scriptText: written.part.script,
+          moveOffsets: written.part.moveOffsets,
+        });
+        voices.push({
+          documentId: doc.id,
+          contentVersion,
+          pageNumber: row.pageNumber,
+          style,
+          kind: 'part',
+        });
+      }
+      await this.queue.enqueueLectureVoices(voices);
     } catch (error) {
       const message = (error as Error).message;
       this.logger.warn(
@@ -565,6 +806,8 @@ export class LectureChapterProcessor {
     prevTail: string;
     isFirstOfTopic: boolean;
     isLastOfTopic: boolean;
+    pageIndex: number;
+    pageCount: number;
     bridge: boolean;
     opening: string | null;
     taughtSoFar: string[];
@@ -613,7 +856,12 @@ export class LectureChapterProcessor {
           skip: beat.skip ?? null,
           weight,
           moves,
+          pitfall: beat.pitfall ?? null,
+          turn: beat.turn === true,
         },
+        problem: input.isFirstOfTopic ? (input.plan.problem ?? null) : null,
+        pageIndex: input.pageIndex,
+        pageCount: input.pageCount,
         style,
         styleDirection: spec.direction,
         budget: { min: budget.min, max: budget.max },
@@ -690,10 +938,13 @@ export class LectureChapterProcessor {
             `${input.documentId} p${input.pageNumber} ${style}: kept despite style (${decision.warning})`,
           );
         }
-        const script = input.opening
-          ? joinOpening(input.opening, continuation)
-          : continuation;
-        return { script, moveOffsets: moveOffsetsOf(script, sections) };
+        // A slow learner's long page is voiced as two pieces, one idea
+        // each, cut at the move boundary nearest the middle.
+        return pageScripts(
+          input.opening,
+          sections,
+          shouldSplit(style, weight, sections),
+        );
       }
       if (decision.action === 'fail') {
         throw new Error(`Script left the page: ${decision.reason}`);
@@ -777,12 +1028,14 @@ export class LectureChapterProcessor {
         pageNumber: row.pageNumber,
         contentVersion,
         style,
+        kind: row.kind,
         error: reason,
       });
       await this.events.publish(documentId, {
         type: 'lecture.segment_failed',
         pageNumber: row.pageNumber,
         style,
+        kind: row.kind,
       });
     }
   }
@@ -798,6 +1051,10 @@ function describePlan(plan: LecturePlan, beat: LectureBeat): string {
     `Hook: ${plan.hook}`,
     `Arc: ${plan.arc}`,
     plan.payoff ? `Payoff: ${plan.payoff}` : null,
+    plan.problem ? `Problem the chapter answers: ${plan.problem}` : null,
+    plan.terms?.length
+      ? `Terms: ${plan.terms.map((entry) => `${entry.term} (${entry.meaning})`).join('; ')}`
+      : null,
     `This page's goal: ${beat.goal}`,
     beat.newHere ? `New here: ${beat.newHere}` : null,
     beat.skip ? `Skip (taught earlier): ${beat.skip}` : null,
@@ -805,6 +1062,8 @@ function describePlan(plan: LecturePlan, beat: LectureBeat): string {
     beat.moves?.length ? `Moves: ${beat.moves.join('; ')}` : null,
     beat.callback ? `Callback: ${beat.callback}` : null,
     beat.foreshadow ? `Foreshadow: ${beat.foreshadow}` : null,
+    beat.pitfall ? `Pitfall: ${beat.pitfall}` : null,
+    beat.turn ? 'Turn: the listener is asked to predict here' : null,
   ]
     .filter(Boolean)
     .join('\n');

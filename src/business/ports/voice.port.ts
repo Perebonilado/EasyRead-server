@@ -10,6 +10,13 @@ export interface SpeechPort {
     text: string;
     /** Provider voice name; the adapter falls back to its configured default. */
     voice?: string;
+    /**
+     * How to deliver it: pace, warmth, where to pause. Honoured by models
+     * that steer on instructions (gpt-4o-mini-tts); ignored by the rest.
+     */
+    instructions?: string;
+    /** Playback rate for models that take a number instead (tts-1); 1 is natural. */
+    speed?: number;
   }): Promise<{ audio: Buffer; mimeType: string; model: string }>;
 }
 

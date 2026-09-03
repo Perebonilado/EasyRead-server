@@ -1,5 +1,5 @@
 import type { Level, PipelineStep } from '../contracts';
-import type { LectureStyle } from '../contracts';
+import type { LectureStyle, SegmentKind } from '../contracts';
 
 /**
  * One queue per job type, so each gets its own concurrency and rate limit —
@@ -86,6 +86,8 @@ export interface LectureChapterJobData extends BaseJobData {
 export interface LectureVoiceJobData extends BaseJobData {
   pageNumber: number;
   style: LectureStyle;
+  /** Omitted means the page itself. */
+  kind?: SegmentKind;
 }
 
 export interface ExportJobData extends BaseJobData {
@@ -140,4 +142,6 @@ export const lectureVoiceJobId = (
   page: number,
   contentVersion: number,
   style: LectureStyle,
-) => `lecture-voice-${documentId}-v${contentVersion}-${page}-${style}`;
+  kind: SegmentKind = 'page',
+) =>
+  `lecture-voice-${documentId}-v${contentVersion}-${page}-${style}${kind === 'page' ? '' : `-${kind}`}`;

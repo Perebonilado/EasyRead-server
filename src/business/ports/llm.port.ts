@@ -75,6 +75,10 @@ export interface LectureOutlineDraft {
   arc: string;
   /** What the listener can now do that they could not before; the last page lands on it. */
   payoff: string;
+  /** The words the chapter turns on, each with its plain meaning; spoken first for a slow learner. */
+  terms: { term: string; meaning: string }[];
+  /** The problem the chapter answers, posed in one line; a quick learner hears it before the principle. */
+  problem: string | null;
   beats: {
     pageNumber: number;
     goal: string;
@@ -92,6 +96,10 @@ export interface LectureOutlineDraft {
      * which is what lets a learner switch style mid-idea.
      */
     moves: string[];
+    /** The mistake a student is most likely to make here, where the page shows it. */
+    pitfall: string | null;
+    /** True on the one page of the chapter where the listener is asked to predict before hearing. */
+    turn: boolean;
   }[];
 }
 
@@ -166,7 +174,15 @@ export interface LlmGatewayPort {
       weight: 'full' | 'light';
       /** The moves this page teaches, in order; one section is written per move. */
       moves: string[];
+      pitfall: string | null;
+      /** The page asks the listener to predict, then tells them; marked with [pause]. */
+      turn: boolean;
     };
+    /** The chapter's problem, for the page that opens it; null elsewhere. */
+    problem: string | null;
+    /** Where this page sits in the chapter, so restating can fade across it. */
+    pageIndex: number;
+    pageCount: number;
     /** The style being written, and the paragraph of direction that defines it. */
     style: 'gentle' | 'steady' | 'brisk';
     styleDirection: string;
@@ -198,6 +214,27 @@ export interface LlmGatewayPort {
     /** The last attempt after a grounding failure: no flourishes, only what the page says. */
     strict?: boolean;
   }): Promise<LlmResult<LectureSegmentDraft>>;
+
+  /**
+   * One of the short segments around a chapter: the words a slow learner
+   * hears before it, the check of what stuck after it, or the review a
+   * returning learner hears first. Built from the plan's own lines, so it
+   * needs no grounding check against a page.
+   */
+  lectureExtra(input: {
+    kind: 'terms' | 'check' | 'review';
+    topicTitle: string;
+    style: 'gentle' | 'steady' | 'brisk';
+    styleDirection: string;
+    /** For terms: the chapter's words with their plain meanings. */
+    terms: { term: string; meaning: string }[];
+    /** For check and review: the ideas taught, one line each, in order. */
+    taught: string[];
+    payoff: string | null;
+    /** For review: whole days since the learner last listened. */
+    daysAway: number | null;
+    budget: { min: number; max: number };
+  }): Promise<LlmResult<{ script: string }>>;
 
   /**
    * Checks a segment against the page it claims to teach. Blind to the

@@ -75,6 +75,11 @@ class LectureContextDto {
   @IsOptional()
   @IsIn(LECTURE_STYLE_KEYS)
   style?: LectureStyle;
+
+  /** Which piece of the page the offset is in; omitted means the page. */
+  @IsOptional()
+  @IsIn(['page', 'part'])
+  kind?: 'page' | 'part';
 }
 
 class VoiceSessionDto {

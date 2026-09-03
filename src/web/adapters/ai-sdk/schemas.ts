@@ -362,7 +362,8 @@ export const lectureBoardSchema = z.object({
         shape: z.enum(['underline', 'circle', 'box', 'highlight']).nullable(),
         level: z.union([z.literal(1), z.literal(2)]).nullable(),
         important: z.boolean().nullable(),
-        anchor: z.string().min(1).max(160),
+        sentence: z.number().int().min(1).max(400),
+        anchor: z.string().max(160).nullable(),
       }),
     )
     .max(30),

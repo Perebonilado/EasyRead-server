@@ -1,3 +1,4 @@
+import { numberedSentences } from '../../../business/domain/board';
 import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import type { LanguageModelUsage } from 'ai';
@@ -419,7 +420,7 @@ export class AiSdkLlmAdapter implements LlmGatewayPort, OnModuleInit {
           : "This page opens a fresh board: give it a heading of two to five words, in the page's own terms.",
         `The page teaches ${input.budget.min} move${input.budget.min === 1 ? '' : 's'}; the pen can manage up to ${input.budget.max} written items (terms, points, figures) on it. Every useful point goes on the board, condensed; nothing is added just to reach a number, and nothing useful is left off to stay short.`,
         input.repair?.length
-          ? `REPAIR. These lines were refused and nothing replaced them, so the board is missing what they carried. Return ONLY replacements, one per line below, in the same order, as the lecturer's own claim with a verb, anchored in a run of words copied from the spoken words; a line that names a subject becomes what the lecturer says is true of it; a meaning becomes the definition the lecturer gives. Return heading null and no other items.\n${input.repair
+          ? `REPAIR. These lines were refused and nothing replaced them, so the board is missing what they carried. Return ONLY replacements, one per line below, in the same order, as the lecturer's own claim with a verb, each naming the number of the sentence it is written during; a line that names a subject becomes what the lecturer says is true of it; a meaning becomes the definition the lecturer gives. Return heading null and no other items.\n${input.repair
               .map(
                 (line, index) =>
                   `${index + 1}. ${line.kind} "${line.text}"${line.meaning ? ` : "${line.meaning}"` : ''} (refused: ${line.reason})`,
@@ -427,9 +428,9 @@ export class AiSdkLlmAdapter implements LlmGatewayPort, OnModuleInit {
               .join('\n')}`
           : null,
         input.correction
-          ? `Your previous draft broke the rules: ${input.correction}. For each item named, keep it on the board and fix only what was flagged: an anchor not found is replaced by a run of words copied from the spoken words; a word the page does not use is replaced by the lecturer's own word for it; a sentence is split into a point and a level-2 detail; a topic label gains the who, how or example that makes it a claim. Do not drop a flagged item, and do not change any item that was not named: return those word for word, in the same order. Your second draft must carry at least as many written items as the first and keep every level-2 item at level 2; a draft that is shorter than the first is discarded.`
+          ? `Your previous draft broke the rules: ${input.correction}. For each item named, keep it on the board and fix only what was flagged: a sentence number that does not exist is replaced by the number of the sentence the item is written during; a word the page does not use is replaced by the lecturer's own word for it; a sentence is split into a point and a level-2 detail; a topic label gains the who, how or example that makes it a claim. Do not drop a flagged item, and do not change any item that was not named: return those word for word, in the same order. Your second draft must carry at least as many written items as the first and keep every level-2 item at level 2; a draft that is shorter than the first is discarded.`
           : null,
-        `\nThe spoken words of the page, which every anchor must be copied from exactly:\n${input.spoken}`,
+        `\nThe SPOKEN WORDS of the page, one numbered sentence a line. Every item names the number of the sentence it is written during:\n${numberedSentences(input.spoken)}`,
         `\nThe page itself, for reference (the chapter's vocabulary):\n${input.pageText.slice(0, 5000)}`,
       ]
         .filter(Boolean)

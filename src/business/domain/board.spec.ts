@@ -52,6 +52,10 @@ import {
   asDrafted,
   meaningSpokenNear,
   repeats,
+  numberedSentences,
+  sentenceAnchor,
+  linesOf,
+  charLimitOf,
 } from './board';
 
 /**
@@ -135,7 +139,9 @@ describe('what reads as a sentence', () => {
     expect(readsAsSentence('The bucket is empty now.')).toBe(true);
     expect(readsAsSentence('one two three four five six seven')).toBe(false);
     expect(
-      readsAsSentence('one two three four five six seven eight nine ten'),
+      readsAsSentence(
+        'one two three four five six seven eight nine ten eleven twelve thirteen fourteen fifteen sixteen seventeen eighteen nineteen twenty',
+      ),
     ).toBe(true);
     // A claim with a verb is a note, not a sentence.
     expect(readsAsSentence('bucket is the size of it')).toBe(false);
@@ -932,7 +938,9 @@ describe('writing a definition the way a teacher does', () => {
     // refused; only what still does not fit after that is a problem.
     const longText =
       'bucket tokens bucket tokens bucket tokens bucket tokens bucket tokens';
-    expect(fittedText('point', longText).length).toBeLessThanOrEqual(48);
+    expect(fittedText('point', longText).length).toBeLessThanOrEqual(
+      charLimitOf('point'),
+    );
     const long = draft([
       { kind: 'point', text: longText, anchor: 'token bucket' },
     ]);
@@ -1054,7 +1062,9 @@ describe('a filter that keeps good notes', () => {
   it('does not call a seven-word point a sentence', () => {
     expect(readsAsSentence('only a few keys need to move')).toBe(false);
     expect(
-      readsAsSentence('one two three four five six seven eight nine ten'),
+      readsAsSentence(
+        'one two three four five six seven eight nine ten eleven twelve thirteen fourteen fifteen sixteen seventeen eighteen nineteen twenty',
+      ),
     ).toBe(true);
     expect(
       readsAsSentence('The bucket is empty so the request is dropped.'),
@@ -1270,15 +1280,23 @@ describe('the retry can only add', () => {
     const meaning = fittedMeaning(
       'A universally unique identifier that is represented as a 128-bit number for every record',
     );
-    expect(meaning.length).toBeLessThanOrEqual(54);
-    expect(meaning.startsWith('universally unique identifier')).toBe(true);
+    expect(meaning.length).toBeLessThanOrEqual(charLimitOf('meaning'));
+    expect(endsMidPhrase(meaning)).toBe(false);
     expect(fittedText('point', 'a few keys move')).toBe('a few keys move');
     const long = fittedText(
       'point',
       'a technique to minimize data movement when servers are added or removed',
     );
-    expect(long.length).toBeLessThanOrEqual(48);
-    expect(long.startsWith('minimize data movement')).toBe(true);
+    // Within the two lines a point may take, it is kept whole and wraps.
+    expect(long).toBe(
+      'a technique to minimize data movement when servers are added or removed',
+    );
+    const beyond = fittedText(
+      'point',
+      'a technique to minimize data movement when servers are added or removed from the ring of servers in the cluster at any time',
+    );
+    expect(beyond.length).toBeLessThanOrEqual(charLimitOf('point'));
+    expect(beyond.startsWith('minimize data movement')).toBe(true);
     const problems = boardProblems(
       draft([
         {
@@ -1744,12 +1762,23 @@ describe('no prefixes, no paraphrased repeats, no unspoken meanings', () => {
     const cut = fittedMeaning(original);
     expect(cut === original || !endsMidPhrase(cut)).toBe(true);
     expect(cut.length).toBeLessThanOrEqual(original.length);
-    const meaning = fittedMeaning(
-      'assistance provided to help individuals stick to their plan before',
+    // Within two lines a meaning comes back whole; the rules then refuse
+    // one that stops mid-phrase, and the writer condenses it.
+    const hanging =
+      'assistance provided to help individuals stick to their plan before';
+    expect(fittedMeaning(hanging)).toBe(hanging);
+    const flagged = boardProblems(
+      draft([
+        {
+          kind: 'term',
+          text: 'adherence support',
+          meaning: hanging,
+          anchor: 'token bucket',
+        },
+      ]),
+      ctx({ durationMs: 30_000 }),
     );
-    expect(meaning.length).toBeLessThanOrEqual(54);
-    expect(endsMidPhrase(meaning)).toBe(false);
-    expect(meaning).not.toMatch(/(?:stick|before)$/);
+    expect(flagged.map((p) => p.kind)).toContain('incomplete');
     // A line that cannot be cut cleanly is handed back over the limit and refused.
     const uncuttable =
       'of to from with by and or into onto via toward against among';
@@ -1910,5 +1939,139 @@ describe('finishing touches from the sixth round', () => {
     expect(marked?.kind === 'point' && marked.text).toBe(
       'empty request dropped',
     );
+  });
+});
+
+describe('notes keyed to numbered sentences, and lines that wrap', () => {
+  it('numbers the spoken sentences the way the writer sees them', () => {
+    const numbered = numberedSentences(SPOKEN).split('\n');
+    expect(numbered[0]).toBe('1. A token bucket holds tokens.');
+    expect(numbered[2]).toBe(
+      '3. When the bucket is empty, the request is dropped.',
+    );
+    expect(numbered).toHaveLength(5);
+  });
+
+  it('places a sentence-keyed item in its sentence, on its own words when they are there', () => {
+    const whole = sentenceAnchor(
+      { kind: 'point', text: 'nothing of note', sentence: 3 },
+      SPOKEN,
+    )!;
+    expect(SPOKEN.slice(whole.charStart, whole.charEnd)).toBe(
+      'When the bucket is empty, the request is dropped.',
+    );
+    const narrowed = sentenceAnchor(
+      { kind: 'point', text: 'request dropped', sentence: 3 },
+      SPOKEN,
+    )!;
+    expect(SPOKEN.slice(narrowed.charStart, narrowed.charEnd)).toBe(
+      'request is dropped',
+    );
+    expect(
+      sentenceAnchor({ kind: 'point', text: 'x', sentence: 9 }, SPOKEN),
+    ).toBeNull();
+    const problems = boardProblems(
+      draft([{ kind: 'point', text: 'empty request dropped', sentence: 9 }]),
+      ctx({ durationMs: 30_000 }),
+    );
+    expect(problems[0]).toMatchObject({ kind: 'anchor_missing', index: 0 });
+    expect(problems[0].detail).toContain('sentence 9');
+    const built = buildBoardOps(
+      draft([
+        {
+          kind: 'term',
+          text: 'token bucket',
+          meaning: 'holds tokens',
+          sentence: 1,
+        },
+        { kind: 'point', text: 'ten tokens per second', sentence: 2 },
+        { kind: 'point', text: 'empty request dropped', sentence: 3 },
+      ]),
+      ctx(),
+      's',
+      's-board',
+    );
+    const starts = built.ops
+      .filter((op) => op.kind !== 'heading')
+      .map((op) => op.anchor.charStart);
+    expect(starts).toEqual([...starts].sort((a, b) => a - b));
+    expect(built.ops.filter((op) => op.kind !== 'heading')).toHaveLength(3);
+  });
+
+  it('lets a point or a meaning wrap onto a second line instead of cutting it, and books the lines', () => {
+    const long =
+      'when the bucket is empty the request is dropped and the refill rate then sets the average';
+    expect(linesOf(long, 'point')).toBe(2);
+    expect(charLimitOf('point')).toBe(96);
+    expect(fittedText('point', long)).toBe(long);
+    const built = buildBoardOps(
+      draft([
+        { kind: 'point', text: long, anchor: 'refill rate sets' },
+        {
+          kind: 'term',
+          text: 'burst capacity',
+          meaning: 'the size of the bucket that smooths a burst of requests',
+          anchor: 'burst capacity is',
+        },
+        {
+          kind: 'point',
+          text: 'ten tokens per second',
+          anchor: 'refill rate is ten',
+        },
+      ]),
+      ctx(),
+      'l',
+      'l-board',
+    );
+    const [point, term, next] = built.ops.filter((op) => op.kind !== 'heading');
+    expect(point.lines).toBe(2);
+    expect(term.slot).toBe(3);
+    expect(term.lines).toBe(3);
+    expect(next.slot).toBe(6);
+    expect(
+      nextFreeLine({
+        ...emptyTimeline(SPOKEN.length),
+        boards: built.boards,
+        ops: built.ops,
+      }),
+    ).toBe(7);
+  });
+});
+
+describe('the words-first board finishes its meanings', () => {
+  it('lets a chapter term take two lines rather than cutting it at one', () => {
+    const drafted = termsDraft('Design consistent hashing', [
+      {
+        term: 'consistent hashing',
+        meaning:
+          'A technique used to distribute data across servers while minimizing rehashing when servers are added or removed',
+      },
+    ]);
+    const meaning = drafted.items[0].meaning ?? '';
+    expect(meaning.length).toBeGreaterThan(54);
+    expect(meaning.length).toBeLessThanOrEqual(charLimitOf('meaning'));
+    expect(endsMidPhrase(meaning)).toBe(false);
+    expect(meaning).toContain('rehashing');
+    expect(linesOf(meaning, 'meaning')).toBe(2);
+  });
+
+  it('knows a clause that never came', () => {
+    expect(
+      endsMidPhrase('distribute data across servers while minimizing'),
+    ).toBe(true);
+    expect(endsMidPhrase('distribute data across servers while')).toBe(true);
+    expect(endsMidPhrase('keys remapped when server count changes')).toBe(
+      false,
+    );
+    expect(endsMidPhrase('remapping keys when server count changes')).toBe(
+      false,
+    );
+    expect(
+      shorten(
+        'distribute data across servers while minimizing rehashing',
+        6,
+        60,
+      ),
+    ).not.toMatch(/minimizing$/);
   });
 });

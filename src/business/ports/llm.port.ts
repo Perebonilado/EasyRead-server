@@ -131,7 +131,10 @@ export interface LectureBoardDraft {
     level: 1 | 2 | null;
     /** The one thing to take away from the page. */
     important: boolean | null;
-    anchor: string;
+    /** The numbered spoken sentence the item is written during. */
+    sentence: number | null;
+    /** An exact spoken phrase (the older way of placing an item). */
+    anchor: string | null;
   }[];
 }
 

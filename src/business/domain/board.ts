@@ -15,7 +15,7 @@
  */
 import type { LectureStyle } from '../../contracts';
 
-export const BOARD_GENERATOR_VERSION = 'board-4';
+export const BOARD_GENERATOR_VERSION = 'board-6';
 
 export type BoardStatus = 'none' | 'pending' | 'done' | 'failed' | 'skipped';
 
@@ -49,6 +49,8 @@ interface OpBase {
   slot: number;
   /** Lower is kept longer when the pen runs out of time. */
   priority: number;
+  /** Lines the item takes on the board, text and meaning together; 1 when absent. */
+  lines?: number;
 }
 
 export type BoardOp =
@@ -277,15 +279,18 @@ export const DIAGRAM_SLOT = 100;
 export const WORD_LIMITS = {
   heading: { min: 2, max: 5 },
   term: { min: 1, max: 4 },
-  meaning: { min: 2, max: 9 },
-  point: { min: 2, max: 7 },
+  meaning: { min: 2, max: 18 },
+  point: { min: 2, max: 18 },
   label: { min: 1, max: 3 },
 } as const;
 
+/** Lines a point or a meaning may wrap onto; a term's name and a heading stay on one. */
+export const MAX_TEXT_LINES = 2;
+
 /**
- * Characters an item may run to. A board line is one line: the pen writes
- * across the column and there is no second line to carry on to, so a
- * meaning is written to fit, in a teacher's abbreviations, complete.
+ * Characters a line of the board holds, by what it is. A point or a
+ * meaning may wrap onto a second line; beyond that it is condensed the
+ * way a teacher condenses, and never cut mid-phrase.
  */
 export const CHAR_LIMITS = {
   heading: 42,
@@ -473,13 +478,59 @@ export function findAnchorLoose(
  * before its word is spoken carries a definition the lecturer has not
  * given yet.
  */
+/** The spoken words as the writer sees them: one numbered sentence a line. */
+export function numberedSentences(spoken: string): string {
+  return sentenceSpans(spoken)
+    .map(
+      (span, index) =>
+        `${index + 1}. ${spoken.slice(span.charStart, span.charEnd).replace(/\s+/g, ' ')}`,
+    )
+    .join('\n');
+}
+
+/**
+ * Where a sentence-keyed item belongs: its sentence, narrowed to the
+ * item's own words within it when they are there, so the pen starts on
+ * the phrase rather than the sentence. Null when the number is not a
+ * sentence of the page.
+ */
+export function sentenceAnchor(
+  item: BoardDraftItem,
+  spoken: string,
+): BoardAnchor | null {
+  if (typeof item.sentence !== 'number' || !Number.isInteger(item.sentence)) {
+    return null;
+  }
+  const spans = sentenceSpans(spoken);
+  const span = spans[item.sentence - 1];
+  if (!span) return null;
+  const sentence = spoken.slice(span.charStart, span.charEnd);
+  const own = [item.text, item.meaning].filter(Boolean).join(' ');
+  const within = own
+    ? (findAnchor(sentence, item.text ?? '') ??
+      findAnchorLoose(sentence, own, 0))
+    : null;
+  if (!within) return span;
+  return {
+    charStart: span.charStart + within.charStart,
+    charEnd: span.charStart + within.charEnd,
+  };
+}
+
+/**
+ * Where a draft item belongs. A sentence number first, the way the writer
+ * now places notes. Failing that, its anchor phrase, then its own words. A
+ * term is placed where the lecturer names it: a term written before its
+ * word is spoken carries a definition the lecturer has not given yet.
+ */
 export function anchorForItem(
   item: BoardDraftItem,
   spoken: string,
   cursor: number,
 ): BoardAnchor | null {
+  if (typeof item.sentence === 'number') return sentenceAnchor(item, spoken);
   const base =
-    anchorFor(spoken, item.anchor, cursor) ??
+    anchorFor(spoken, item.anchor ?? '', cursor) ??
     findAnchorLoose(
       spoken,
       [item.text, item.meaning].filter(Boolean).join(' '),
@@ -651,8 +702,14 @@ export interface BoardDraftItem {
   level?: 1 | 2 | null;
   /** The one thing to take away; at most one per page keeps it. */
   important?: boolean | null;
-  /** An exact phrase of the spoken text the item belongs to. */
-  anchor: string;
+  /**
+   * The spoken sentence the item belongs to, numbered from 1 as the
+   * writer saw it. The way a note is placed now; the anchor phrase is the
+   * older way and the fallback.
+   */
+  sentence?: number | null;
+  /** An exact phrase of the spoken text the item belongs to (the older way). */
+  anchor?: string | null;
 }
 
 export interface BoardDraft {
@@ -884,6 +941,18 @@ const HANGING_VERBS = new Set([
   'prevent',
   'allow',
   'provide',
+  'minimize',
+  'minimise',
+  'maximize',
+  'optimize',
+  'handle',
+  'manage',
+  'distribute',
+  'balance',
+  'assign',
+  'remap',
+  'compute',
+  'generate',
   'affect',
   'represent',
   'focus',
@@ -967,11 +1036,39 @@ function hangs(word: string): boolean {
   return HANGING_VERBS.has(word) || hangingStems.has(stem(word));
 }
 
+/** Words that open a clause: a single word after one is a clause cut short. */
+const CLAUSE_OPENERS = new Set([
+  'while',
+  'when',
+  'if',
+  'because',
+  'although',
+  'whether',
+  'before',
+  'after',
+  'until',
+  'since',
+  'unless',
+  'though',
+  'whereas',
+  'so',
+]);
+
 export function endsMidPhrase(text: string): boolean {
-  const words = wordsOf(asciiText(text));
+  const words = wordsOf(asciiText(text)).map((word) =>
+    word.toLowerCase().replace(/[^\w/+.%-]/g, ''),
+  );
   if (!words.length) return false;
-  const last = words[words.length - 1].toLowerCase().replace(/[^\w/+.%-]/g, '');
-  return DANGLING.has(last) || (words.length >= 3 && hangs(last));
+  const last = words[words.length - 1];
+  const before = words.length > 1 ? words[words.length - 2] : '';
+  if (DANGLING.has(last)) return true;
+  if (words.length >= 3 && hangs(last)) return true;
+  // "servers while minimizing": the clause the opener began never came.
+  // "dropped when empty" is whole: the word after the opener stands alone.
+  if (CLAUSE_OPENERS.has(before) && (/ing$/.test(last) || hangs(last)))
+    return true;
+  if (/ing$/.test(last) && last.length > 5 && DANGLING.has(before)) return true;
+  return false;
 }
 
 /**
@@ -1027,8 +1124,7 @@ export function shorten(
   while (
     words.length > maxWords ||
     words.join(' ').length > maxChars ||
-    (words.length > 2 && DANGLING.has(words[words.length - 1].toLowerCase())) ||
-    (words.length >= 3 && hangs(words[words.length - 1].toLowerCase()))
+    (words.length > 2 && endsMidPhrase(words.join(' ')))
   ) {
     if (words.length <= 2) break;
     words = words.slice(0, -1);
@@ -1126,6 +1222,19 @@ export function figuresOnPage(text: string, ctx: BoardContext): boolean {
   return numbers.every((number) => page.includes(number));
 }
 
+/** Lines a text takes on the board, by its field's line width. */
+export function linesOf(text: string, field: keyof typeof CHAR_LIMITS): number {
+  const wraps = field === 'point' || field === 'meaning';
+  const lines = Math.max(1, Math.ceil(text.trim().length / CHAR_LIMITS[field]));
+  return wraps ? Math.min(MAX_TEXT_LINES, lines) : 1;
+}
+
+/** The most characters a field may run to: two lines for what wraps. */
+export function charLimitOf(field: keyof typeof CHAR_LIMITS): number {
+  const wraps = field === 'point' || field === 'meaning';
+  return CHAR_LIMITS[field] * (wraps ? MAX_TEXT_LINES : 1);
+}
+
 function limitProblem(
   text: string | null | undefined,
   field: keyof typeof WORD_LIMITS,
@@ -1134,10 +1243,10 @@ function limitProblem(
   const written = asciiText(text ?? '').trim();
   const count = wordsOf(written).length;
   const limit = WORD_LIMITS[field];
-  if (written.length > CHAR_LIMITS[field]) {
+  if (written.length > charLimitOf(field)) {
     return {
       kind: 'too_long',
-      detail: `${field} "${written}" is ${written.length} characters; at most ${CHAR_LIMITS[field]}, so abbreviate it`,
+      detail: `${field} "${written}" is ${written.length} characters; at most ${charLimitOf(field)}, so condense it`,
       index,
     };
   }
@@ -1177,14 +1286,14 @@ export function fittedText(kind: DraftItemKind, text: string): string {
   // A term's name is never cut mid-way: whole when it fits the line.
   if (field === 'term' && plain.length <= CHAR_LIMITS.term) return plain;
   if (
-    plain.length <= CHAR_LIMITS[field] &&
+    plain.length <= charLimitOf(field) &&
     wordsOf(plain).length <= WORD_LIMITS[field].max
   ) {
     return plain;
   }
   // A cut that would end mid-phrase is no cut: the whole line is handed
   // back over the limit, refused, and sent to the writer to condense.
-  const short = shorten(plain, WORD_LIMITS[field].max, CHAR_LIMITS[field]);
+  const short = shorten(plain, WORD_LIMITS[field].max, charLimitOf(field));
   // A list cut short is a prefix too: the writer splits it instead.
   const isList = (plain.match(/,/g) ?? []).length >= 2;
   if (isList && short.length < plain.length) return plain;
@@ -1194,12 +1303,12 @@ export function fittedText(kind: DraftItemKind, text: string): string {
 export function fittedMeaning(meaning: string): string {
   const plain = asciiText(meaning.trim()).replace(/\s+/g, ' ');
   if (
-    plain.length <= CHAR_LIMITS.meaning &&
+    plain.length <= charLimitOf('meaning') &&
     wordsOf(plain).length <= WORD_LIMITS.meaning.max
   ) {
     return plain;
   }
-  const short = shorten(plain, WORD_LIMITS.meaning.max, CHAR_LIMITS.meaning);
+  const short = shorten(plain, WORD_LIMITS.meaning.max, charLimitOf('meaning'));
   return endsMidPhrase(short) || wordsOf(short).length < 2 ? plain : short;
 }
 
@@ -1519,7 +1628,10 @@ export function boardProblems(
     if (!anchor) {
       problems.push({
         kind: 'anchor_missing',
-        detail: `"${item.anchor}" is not said on this page`,
+        detail:
+          typeof item.sentence === 'number'
+            ? `sentence ${item.sentence} does not exist; the page has ${sentenceSpans(ctx.spoken).length} sentences`
+            : `"${item.anchor ?? ''}" is not said on this page`,
         index,
       });
     } else {
@@ -1816,7 +1928,13 @@ export function buildBoardOps(
       item.kind === 'point' ||
       item.kind === 'figure'
     ) {
-      const lines = item.kind === 'term' && item.meaning ? 2 : 1;
+      const fitted = fittedText(item.kind, item.text ?? '');
+      const fittedMeaningText =
+        item.kind === 'term' && item.meaning ? fittedMeaning(item.meaning) : '';
+      const lines =
+        item.kind === 'term'
+          ? 1 + (fittedMeaningText ? linesOf(fittedMeaningText, 'meaning') : 0)
+          : linesOf(fitted, 'point');
       // A term keeps its first detail with it: if the two would straddle
       // the bottom of the column, the fresh board opens before the term.
       const following = kept[k + 1];
@@ -1879,7 +1997,7 @@ export function buildBoardOps(
       }
       const slot = line;
       line += lines;
-      const text = fittedText(item.kind, item.text ?? '');
+      const text = fitted;
       idByName.set(normalise(text), id);
       const important = Boolean(item.important);
       if (item.kind === 'term') {
@@ -1887,6 +2005,7 @@ export function buildBoardOps(
           ...base,
           kind: 'term',
           slot,
+          lines,
           priority: 2,
           text,
           meaning:
@@ -1913,6 +2032,7 @@ export function buildBoardOps(
           ...base,
           kind: 'point',
           slot,
+          lines,
           priority: important ? 2 : level === 2 ? 6 : 5,
           text,
           level,
@@ -1923,6 +2043,7 @@ export function buildBoardOps(
           ...base,
           kind: 'figure',
           slot,
+          lines,
           priority: 3,
           text,
           important,
@@ -2066,7 +2187,7 @@ export function termsDraft(
       meaning: shorten(
         entry.meaning,
         WORD_LIMITS.meaning.max,
-        CHAR_LIMITS.meaning,
+        charLimitOf('meaning'),
       ),
       anchor: entry.term,
     })),
@@ -2445,7 +2566,7 @@ export function nextFreeLine(timeline: BoardTimeline): number {
   let line = 1;
   for (const op of timeline.ops) {
     if (op.kind === 'term' || op.kind === 'point' || op.kind === 'figure') {
-      const lines = op.kind === 'term' && op.meaning ? 2 : 1;
+      const lines = op.lines ?? (op.kind === 'term' && op.meaning ? 2 : 1);
       line = Math.max(line, op.slot + lines);
     }
   }

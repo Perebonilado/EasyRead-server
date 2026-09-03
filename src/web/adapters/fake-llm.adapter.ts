@@ -322,6 +322,7 @@ export class FakeLlmAdapter implements LlmGatewayPort {
             shape: null,
             level: null,
             important: null,
+            sentence: null,
             anchor: anchorAt(0),
           })),
         },
@@ -339,6 +340,7 @@ export class FakeLlmAdapter implements LlmGatewayPort {
       shape: null,
       level: null,
       important: true,
+      sentence: null,
       anchor: anchorAt(0),
     });
     if (words.length > 8) {
@@ -353,6 +355,7 @@ export class FakeLlmAdapter implements LlmGatewayPort {
         shape: 'underline',
         level: null,
         important: null,
+        sentence: null,
         anchor: anchorAt(4),
       });
     }

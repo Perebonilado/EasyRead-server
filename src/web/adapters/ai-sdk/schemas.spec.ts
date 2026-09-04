@@ -4,6 +4,7 @@ import {
   diagramSchema,
   lectureExtraSchema,
   lectureOutlineSchema,
+  lectureBoardPlanSchema,
   lectureSegmentSchema,
   ocrPageSchema,
   previewSchema,
@@ -320,7 +321,7 @@ describe('structured-output schemas', () => {
       lectureSegmentSchema.safeParse({
         sections: [
           { move: 0, text: 'The problem.' },
-          { move: 1, text: 'The mechanism.' },
+          { move: 1, text: '[write 1] The mechanism.' },
         ],
       }).success,
     ).toBe(true);
@@ -328,5 +329,40 @@ describe('structured-output schemas', () => {
     expect(lectureSegmentSchema.safeParse({ sections: [] }).success).toBe(
       false,
     );
+  });
+
+  it('lectureBoardPlanSchema wants a heading and lines that name their move', () => {
+    expect(
+      lectureBoardPlanSchema.safeParse({
+        heading: 'Token bucket',
+        lines: [
+          {
+            move: 0,
+            kind: 'term',
+            text: 'token bucket',
+            meaning: 'holds fixed tokens, a request takes one',
+            level: null,
+            important: null,
+          },
+          {
+            move: 1,
+            kind: 'point',
+            text: 'empty bucket: request dropped',
+            meaning: null,
+            level: 2,
+            important: true,
+          },
+        ],
+      }).success,
+    ).toBe(true);
+    expect(
+      lectureBoardPlanSchema.safeParse({ heading: '', lines: [] }).success,
+    ).toBe(false);
+    expect(
+      lectureBoardPlanSchema.safeParse({
+        heading: 'x',
+        lines: [{ move: 0, kind: 'note', text: 'y' }],
+      }).success,
+    ).toBe(false);
   });
 });

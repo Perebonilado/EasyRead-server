@@ -53,11 +53,21 @@ import {
   type LectureBeat,
   type LecturePlan,
   type VerifyResult,
+  withoutBoardMarkers,
+  type PageBoard,
 } from '../../business/domain/lecture';
 import type { LectureChapterJobData } from '../queues';
 import type { JobContext } from './base.processor';
 import { LectureBoardService } from './lecture-board.service';
-import { capFigures, nextFreeLine } from '../../business/domain/board';
+import {
+  capFigures,
+  fittedMeaning,
+  fittedText,
+  mergePlanLines,
+  nextFreeLine,
+  planProblems,
+  type PlanLineDraft,
+} from '../../business/domain/board';
 
 /** How much of a neighbouring page the verifier is shown. */
 const NEIGHBOUR_CHARS = 2_500;
@@ -739,18 +749,33 @@ export class LectureChapterProcessor {
         style,
         kind: 'page' as const,
       };
-      const pageBoard = await this.boards.writeForPage({
-        key: pageKey,
-        script: written.script,
-        pageText,
-        topicTitle: input.topicTitle,
-        plan,
-        beat: beatFor(plan, row.pageNumber),
-        durationMs: estimateDurationMs(scriptForTts(written.script)),
-        continues: false,
-        bridge: row.bridge,
-        moveOffsets: written.moveOffsets,
-      });
+      // A page whose board was planned before the speech needs no second
+      // writer: the board comes from the plan and the marks. A page with
+      // no plan keeps the older way, a board written from the words.
+      const pageBoard = written.board?.lines.length
+        ? await this.boards.writeFromMarkers({
+            key: pageKey,
+            script: written.script,
+            pageText,
+            plan,
+            beat: beatFor(plan, row.pageNumber),
+            durationMs: estimateDurationMs(scriptForTts(written.script)),
+            continues: false,
+            sections: written.sections,
+            board: written.board,
+          })
+        : await this.boards.writeForPage({
+            key: pageKey,
+            script: written.script,
+            pageText,
+            topicTitle: input.topicTitle,
+            plan,
+            beat: beatFor(plan, row.pageNumber),
+            durationMs: estimateDurationMs(scriptForTts(written.script)),
+            continues: false,
+            bridge: row.bridge,
+            moveOffsets: written.moveOffsets,
+          });
       if (pageBoard && this.boards.figureFor(plan, row.pageNumber)) {
         await this.boards.requestDiagram({
           ...pageKey,
@@ -796,19 +821,34 @@ export class LectureChapterProcessor {
           durationMs: estimateDurationMs(scriptForTts(written.part.script)),
         });
         // The second piece continues the page's board on the next free line.
-        await this.boards.writeForPage({
-          key: { ...pageKey, kind: 'part' },
-          script: written.part.script,
-          pageText,
-          topicTitle: input.topicTitle,
-          plan,
-          beat: beatFor(plan, row.pageNumber),
-          durationMs: estimateDurationMs(scriptForTts(written.part.script)),
-          continues: true,
-          bridge: false,
-          startLine: pageBoard ? nextFreeLine(pageBoard) : 1,
-          moveOffsets: written.part.moveOffsets,
-        });
+        if (written.part.board?.lines.length) {
+          await this.boards.writeFromMarkers({
+            key: { ...pageKey, kind: 'part' },
+            script: written.part.script,
+            pageText,
+            plan,
+            beat: beatFor(plan, row.pageNumber),
+            durationMs: estimateDurationMs(scriptForTts(written.part.script)),
+            continues: true,
+            startLine: pageBoard ? nextFreeLine(pageBoard) : 1,
+            sections: written.part.sections,
+            board: written.part.board,
+          });
+        } else {
+          await this.boards.writeForPage({
+            key: { ...pageKey, kind: 'part' },
+            script: written.part.script,
+            pageText,
+            topicTitle: input.topicTitle,
+            plan,
+            beat: beatFor(plan, row.pageNumber),
+            durationMs: estimateDurationMs(scriptForTts(written.part.script)),
+            continues: true,
+            bridge: false,
+            startLine: pageBoard ? nextFreeLine(pageBoard) : 1,
+            moveOffsets: written.part.moveOffsets,
+          });
+        }
         // In memory too: the next page continues from this piece.
         input.all.push({
           ...row,
@@ -907,6 +947,20 @@ export class LectureChapterProcessor {
     let styleCorrection: string | undefined;
     let leftTheMaterial = false;
 
+    // The board first, so the speech can be written around it: the
+    // lecturer knows what goes on the board before saying a word.
+    const board = input.bridge
+      ? null
+      : await this.planBoard({
+          documentId: input.documentId,
+          topicTitle: input.topicTitle,
+          plan: input.plan,
+          beat,
+          moves,
+          style,
+          pageText: input.pageText,
+        });
+
     for (let attempt = 1; ; attempt += 1) {
       // Strict mode flattens a page to what it literally says. That is the
       // right answer to a page that has left the material, and the wrong
@@ -943,6 +997,18 @@ export class LectureChapterProcessor {
         taughtSoFar: input.taughtSoFar,
         comingLater: input.comingLater,
         list: input.list,
+        board: board
+          ? {
+              heading: board.heading ?? '',
+              lines: board.lines.map((line) => ({
+                number: line.number,
+                move: line.move,
+                kind: line.kind,
+                text: line.text,
+                meaning: line.meaning,
+              })),
+            }
+          : null,
         correction,
         styleCorrection,
         strict,
@@ -960,17 +1026,27 @@ export class LectureChapterProcessor {
 
       const sections = written.value.sections;
       const continuation = sectionsToScript(sections);
+      // The board marks are for the board; the style checks and the
+      // verifier read the words as the listener will hear them.
+      const plainContinuation = withoutBoardMarkers(continuation);
 
       // A page that reads badly, or that ignored its moves, goes straight
       // back while there are attempts left: no verifier call is spent on
       // words we will not keep.
       const style_ = [
         ...sectionProblems(sections, moves),
-        ...styleProblems(continuation, {
+        ...styleProblems(plainContinuation, {
           style,
           weight,
           bridge: input.bridge,
-          sections,
+          sections: sections.map((section) => ({
+            ...section,
+            text: withoutBoardMarkers(section.text),
+          })),
+          // The plan's own words are the page's too, for the plain-words gate.
+          pageText: `${input.pageText} ${planText}`,
+          terms: (input.plan.terms ?? []).map((entry) => entry.term),
+          taughtSoFar: input.taughtSoFar,
         }),
       ];
       if (style_.length && attempt < MAX_SEGMENT_ATTEMPTS) {
@@ -983,7 +1059,7 @@ export class LectureChapterProcessor {
       // check would cost a model call per figure page.
       const verdict = input.bridge
         ? { grounded: true, problems: [] }
-        : await this.verifySegment(input.documentId, continuation, {
+        : await this.verifySegment(input.documentId, plainContinuation, {
             plan: planText,
             prevTail: input.prevTail,
             neighbours: input.neighbours,
@@ -991,10 +1067,10 @@ export class LectureChapterProcessor {
           });
       const figures = input.bridge
         ? []
-        : unsupportedFigures(continuation, sources);
+        : unsupportedFigures(plainContinuation, sources);
 
       const decision = acceptSegment(
-        continuation,
+        plainContinuation,
         verdict,
         attempt,
         style_,
@@ -1012,6 +1088,7 @@ export class LectureChapterProcessor {
           input.opening,
           sections,
           shouldSplit(style, weight, sections),
+          board,
         );
       }
       if (decision.action === 'fail') {
@@ -1021,6 +1098,149 @@ export class LectureChapterProcessor {
       styleCorrection = undefined;
       leftTheMaterial = true;
     }
+  }
+
+  /**
+   * The board for a page, planned from the page and its moves before the
+   * speech exists. The rules that do not need the spoken words run on it;
+   * a plan that breaks them is asked for once more, and the lines still
+   * refused are left off. A planner that fails costs the page nothing:
+   * the board is written from the words afterwards, the older way.
+   */
+  private async planBoard(input: {
+    documentId: string;
+    topicTitle: string;
+    plan: LecturePlan;
+    beat: LectureBeat;
+    moves: string[];
+    style: LectureStyle;
+    pageText: string;
+  }): Promise<PageBoard | null> {
+    if (!this.boards.enabled()) return null;
+    const { beat } = input;
+    const request = {
+      topicTitle: input.topicTitle,
+      pageText: input.pageText,
+      goal: beat.goal,
+      newHere: beat.newHere ?? null,
+      pitfall: beat.pitfall ?? null,
+      moves: input.moves,
+      terms: input.plan.terms ?? [],
+      style: input.style,
+      light: beat.weight === 'light',
+    };
+    const ctx = {
+      pageText: input.pageText,
+      planLines: [
+        beat.goal,
+        beat.newHere ?? '',
+        ...(input.plan.terms ?? []).map(
+          (entry) => `${entry.term} ${entry.meaning}`,
+        ),
+      ],
+      moves: input.moves,
+      style: input.style,
+    };
+    try {
+      const planned = await this.llm.lectureBoardPlan(request);
+      await this.recordBoardCall(input.documentId, planned.usage);
+      const problems = planProblems(planned.value, ctx);
+      const badOf = (list: { index?: number }[]) =>
+        new Set(
+          list
+            .filter((problem) => problem.index !== undefined)
+            .map((problem) => problem.index as number),
+        );
+      const keptOf = (
+        draft: { lines: PlanLineDraft[] },
+        bad: Set<number>,
+      ): PlanLineDraft[] => draft.lines.filter((_, index) => !bad.has(index));
+      let kept = keptOf(planned.value, badOf(problems));
+      let heading = planned.value.heading;
+      let refused = planned.value.lines.length - kept.length;
+      if (problems.length) {
+        // Asked once more with the rules it broke; the retry can only add.
+        const correction = problems
+          .map((problem) => problem.detail)
+          .slice(0, 8)
+          .join('; ');
+        const second = await this.llm.lectureBoardPlan({
+          ...request,
+          correction,
+        });
+        await this.recordBoardCall(input.documentId, second.usage);
+        const secondProblems = planProblems(second.value, ctx);
+        const secondKept = keptOf(second.value, badOf(secondProblems));
+        const before = kept.length;
+        kept = mergePlanLines(kept, secondKept);
+        refused =
+          planned.value.lines.length + second.value.lines.length - kept.length;
+        if (
+          problems.some((problem) => problem.index === undefined) &&
+          !secondProblems.some((problem) => problem.index === undefined)
+        ) {
+          heading = second.value.heading;
+        }
+        this.logger.log(
+          `${input.documentId} p${beat.pageNumber} ${input.style}: board plan kept ${before} of ${planned.value.lines.length}, the retry added ${kept.length - before} (${[
+            ...problems,
+            ...secondProblems,
+          ]
+            .filter((problem) => problem.index !== undefined)
+            .map((problem) => problem.kind)
+            .join(', ')})`,
+        );
+      }
+      const lines = kept.map((line, index) => ({
+        number: index + 1,
+        move: line.move,
+        // A "figure" with no number in it is a name the planner mis-kinded:
+        // a point, written as one.
+        kind:
+          line.kind === 'figure' && !/[\d=+*/^%]/.test(line.text)
+            ? ('point' as const)
+            : line.kind,
+        // As the board will write them, so the speech says what is shown.
+        text: fittedText(line.kind, line.text.trim()),
+        meaning: line.meaning?.trim()
+          ? fittedMeaning(line.meaning.trim())
+          : null,
+        level: line.level,
+        important: line.important,
+      }));
+      if (refused && !problems.length) {
+        this.logger.warn(
+          `${input.documentId} p${beat.pageNumber} ${input.style}: board plan left off ${refused} lines`,
+        );
+      }
+      if (!lines.length) return null;
+      return { heading: heading.trim() || null, lines };
+    } catch (error) {
+      this.logger.warn(
+        `${input.documentId} p${beat.pageNumber} ${input.style}: board plan failed (${(error as Error).message}); the board is written from the words instead`,
+      );
+      return null;
+    }
+  }
+
+  private async recordBoardCall(
+    documentId: string,
+    usage: {
+      model: string;
+      tokensIn: number;
+      tokensOut: number;
+      latencyMs: number;
+    },
+  ): Promise<void> {
+    await this.calls.record({
+      documentId,
+      task: 'lecture_board',
+      model: usage.model,
+      tokensIn: usage.tokensIn,
+      tokensOut: usage.tokensOut,
+      latencyMs: usage.latencyMs,
+      outcome: 'ok',
+    });
   }
 
   private async verifySegment(

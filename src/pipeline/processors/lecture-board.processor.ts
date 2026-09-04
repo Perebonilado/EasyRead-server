@@ -9,7 +9,11 @@ import type { DocumentPageRepository } from '../../business/repositories/documen
 import type { DocumentRepository } from '../../business/repositories/document.repository';
 import type { LectureRepository } from '../../business/repositories/lecture.repository';
 import type { TopicRepository } from '../../business/repositories/misc.repository';
-import type { WordTimes } from '../../business/domain/board';
+import {
+  linesOfTimeline,
+  type BoardTimeline,
+  type WordTimes,
+} from '../../business/domain/board';
 import {
   beatFor,
   estimateDurationMs,
@@ -93,18 +97,37 @@ export class LectureBoardProcessor {
     } else if (kind === 'page' || kind === 'part') {
       const page = await this.pages.findOne(documentId, pageNumber);
       const beat = beatFor(plan, pageNumber);
-      const timeline = await this.boards.writeForPage({
-        key,
-        script: row.scriptText,
-        pageText: page?.text ?? '',
-        topicTitle: topic?.title ?? 'this chapter',
-        plan,
-        beat,
-        durationMs,
-        continues: kind === 'part',
-        bridge: row.bridge,
-        moveOffsets: row.moveOffsets ?? undefined,
-      });
+      // A board the planner wrote keeps its lines: they are read back from
+      // the board itself and placed again by the words, with no model call.
+      const stored = row.board as BoardTimeline | null;
+      const planned =
+        stored?.marked === true && Array.isArray(stored.ops)
+          ? linesOfTimeline(stored)
+          : null;
+      const timeline = planned
+        ? await this.boards.writeFromMarkers({
+            key,
+            script: row.scriptText,
+            pageText: page?.text ?? '',
+            plan,
+            beat,
+            durationMs,
+            continues: kind === 'part',
+            sections: [{ move: 0, text: row.scriptText }],
+            board: planned,
+          })
+        : await this.boards.writeForPage({
+            key,
+            script: row.scriptText,
+            pageText: page?.text ?? '',
+            topicTitle: topic?.title ?? 'this chapter',
+            plan,
+            beat,
+            durationMs,
+            continues: kind === 'part',
+            bridge: row.bridge,
+            moveOffsets: row.moveOffsets ?? undefined,
+          });
       if (
         timeline &&
         kind === 'page' &&

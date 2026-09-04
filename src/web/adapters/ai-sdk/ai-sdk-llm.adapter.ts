@@ -14,6 +14,7 @@ import type {
   LlmUsage,
   TopicDraft,
   LectureBoardDraft,
+  LectureBoardPlanDraft,
   LectureDiagramDraft,
 } from '../../../business/ports/llm.port';
 import { PROMPTS } from '../prompts';
@@ -24,6 +25,7 @@ import {
   diagramSchema,
   sketchSchema,
   itemBatchSchema,
+  lectureBoardPlanSchema,
   lectureBoardSchema,
   lectureDiagramSchema,
   lectureExtraSchema,
@@ -222,6 +224,16 @@ export class AiSdkLlmAdapter implements LlmGatewayPort, OnModuleInit {
     taughtSoFar: string[];
     comingLater: string[];
     list: { items: number } | null;
+    board: {
+      heading: string;
+      lines: {
+        number: number;
+        move: number;
+        kind: 'term' | 'point' | 'figure';
+        text: string;
+        meaning: string | null;
+      }[];
+    } | null;
     correction?: string;
     styleCorrection?: string;
     strict?: boolean;
@@ -308,6 +320,14 @@ export class AiSdkLlmAdapter implements LlmGatewayPort, OnModuleInit {
         input.strict
           ? 'STRICT: this page has been rejected twice for leaving the page. Teach only what is written on the page below, in its own terms. No hook, no callback, no foreshadowing, no claims about why it matters beyond what the page itself says, and no number or name the page does not state.'
           : null,
+        input.board?.lines.length
+          ? `THE BOARD for this page, in writing order. You write every one of these lines, exactly once, in the section of its move: [write n], then the line said word for word as its own sentence, then its explanation in everyday words, for example: "[write 2] Refill rate: ten tokens a second. That means every second, ten more tokens arrive, whatever else is happening."\n${input.board.lines
+              .map(
+                (line) =>
+                  `${line.number}. (move ${line.move}) ${line.kind.toUpperCase()} ${line.text}${line.meaning ? ` : ${line.meaning}` : ''}`,
+              )
+              .join('\n')}`
+          : 'This page has no board: no [write] or [point] marks.',
         `\nThe page you are teaching:\n${input.pageText}`,
       ]
         .filter(Boolean)
@@ -347,12 +367,80 @@ export class AiSdkLlmAdapter implements LlmGatewayPort, OnModuleInit {
         input.kind === 'terms'
           ? `The words and their plain meanings, in order:\n${input.terms.map((entry) => `- ${entry.term}: ${entry.meaning}`).join('\n')}`
           : `The ideas the chapter taught, in order:\n- ${input.taught.join('\n- ')}`,
+        input.kind === 'terms' && input.style === 'gentle'
+          ? 'For this slow learner: for each word, say what the thing is or does in everyday words first, then give it its name, in two short sentences at most; one word per sentence, never two; no other technical term inside a meaning.'
+          : null,
         input.kind !== 'terms' && input.payoff
           ? `What the listener can now do: ${input.payoff}`
           : null,
         input.kind === 'review' && input.daysAway !== null
           ? `They last listened ${input.daysAway === 1 ? 'a day' : `${input.daysAway} days`} ago.`
           : null,
+      ]
+        .filter(Boolean)
+        .join('\n'),
+      maxRetries: this.maxRetries(),
+    });
+
+    return {
+      value: result.object,
+      usage: this.usage(ref, result.usage, started),
+    };
+  }
+
+  async lectureBoardPlan(input: {
+    topicTitle: string;
+    pageText: string;
+    goal: string;
+    newHere: string | null;
+    pitfall: string | null;
+    moves: string[];
+    terms: { term: string; meaning: string }[];
+    style: 'gentle' | 'steady' | 'brisk';
+    light: boolean;
+    correction?: string;
+  }): Promise<LlmResult<LectureBoardPlanDraft>> {
+    const started = Date.now();
+    const { generateObject } = await this.registry.modules();
+    const { model, ref } = await this.registry.languageModel('lecture_board');
+
+    const density =
+      input.style === 'gentle'
+        ? 'a slow learner: a term with its meaning for every new word, the meaning in everyday words a friend would use ("a rule that turns any name into a number", not "a function mapping input to a fixed-size digest"), with no other technical term inside it, a short phrase of at most twelve words; a point for every claim and every step, in everyday words too; a figure for every number; a level 2 line for each detail under its parent. Six to twelve lines on a full page.'
+        : input.style === 'brisk'
+          ? 'a quick learner: terms and figures only, no meanings, a point only for a claim the term does not carry. Two to five lines.'
+          : 'a normal pace: a term for each new word with a meaning only where the word is new, the claim each move makes, each figure. Four to eight lines.';
+
+    const result = await generateObject({
+      model,
+      schema: lectureBoardPlanSchema,
+      system: PROMPTS.lectureBoardPlan,
+      prompt: [
+        `Chapter: ${input.topicTitle}`,
+        `The page's idea: ${input.goal}`,
+        input.newHere ? `New on this page: ${input.newHere}` : null,
+        `The moves the page teaches, in order; each line names the number of the move it is written during:\n${input.moves
+          .map((move, index) => `${index}: ${move}`)
+          .join('\n')}`,
+        input.pitfall
+          ? `A pitfall the page warns about: ${input.pitfall}`
+          : null,
+        input.terms.length
+          ? input.style === 'gentle'
+            ? `The chapter's terms, whose names the board keeps: ${input.terms
+                .map((entry) => entry.term)
+                .join(
+                  '; ',
+                )}. Write each meaning yourself, from the page, in everyday words: never a definition copied from anywhere.`
+            : `The chapter's terms and their plain meanings: ${input.terms
+                .map((entry) => `${entry.term} (${entry.meaning})`)
+                .join('; ')}`
+          : null,
+        `LEARNER: ${density}${input.light ? ' This is a light page that mostly restates: only what is new goes on the board, two or three lines.' : ''}`,
+        input.correction
+          ? `Your previous plan broke the rules: ${input.correction}. Keep every other line word for word, in the same order, and fix only what was flagged: a word the page does not use is replaced by the page's own word; a sentence becomes a note; a topic label gains the claim that makes it a note; a line that stops mid-phrase is finished shorter; a line over its length loses whole words, and a word is never cut short.`
+          : null,
+        `\nThe page:\n${input.pageText.slice(0, 6000)}`,
       ]
         .filter(Boolean)
         .join('\n'),

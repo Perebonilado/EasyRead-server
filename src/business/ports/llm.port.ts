@@ -112,7 +112,25 @@ export interface LectureOutlineDraft {
 
 /** One page's script, in sections that follow the beat's moves in order. */
 export interface LectureSegmentDraft {
-  sections: { move: number; text: string }[];
+  sections: {
+    move: number;
+    /** The words, with [write n] before the words spoken while line n of the board is written. */
+    text: string;
+  }[];
+}
+
+/** The board planned for a page before its speech: a heading and the lines in writing order. */
+export interface LectureBoardPlanDraft {
+  heading: string;
+  lines: {
+    /** The move the line is written during, from 0. */
+    move: number;
+    kind: 'term' | 'point' | 'figure';
+    text: string;
+    meaning: string | null;
+    level: 1 | 2 | null;
+    important: boolean | null;
+  }[];
 }
 
 /** The board writer's draft for one row; see domain/board for the rules. */
@@ -250,6 +268,21 @@ export interface LlmGatewayPort {
     comingLater: string[];
     /** The page is built around a list of this many items. */
     list: { items: number } | null;
+    /**
+     * The board planned for this page, numbered in writing order. The
+     * writer writes every line as it teaches, marking where; null for a
+     * page with no board.
+     */
+    board: {
+      heading: string;
+      lines: {
+        number: number;
+        move: number;
+        kind: 'term' | 'point' | 'figure';
+        text: string;
+        meaning: string | null;
+      }[];
+    } | null;
     /** Set when rewriting after a failed grounding check. */
     correction?: string;
     /** Set when rewriting because of how the page read, not what it claimed. */
@@ -278,6 +311,27 @@ export interface LlmGatewayPort {
     daysAway: number | null;
     budget: { min: number; max: number };
   }): Promise<LlmResult<{ script: string }>>;
+
+  /**
+   * The board for a page, planned before its speech is written: the
+   * heading and the lines a good teacher would write while teaching the
+   * page's moves, in writing order. The speech writer is then given the
+   * lines and writes each one as it teaches.
+   */
+  lectureBoardPlan(input: {
+    topicTitle: string;
+    pageText: string;
+    goal: string;
+    newHere: string | null;
+    pitfall: string | null;
+    moves: string[];
+    terms: { term: string; meaning: string }[];
+    style: 'gentle' | 'steady' | 'brisk';
+    /** A light page mostly restates; it gets a short board. */
+    light: boolean;
+    /** Set when the first plan broke the rules; says exactly which. */
+    correction?: string;
+  }): Promise<LlmResult<LectureBoardPlanDraft>>;
 
   /**
    * What the lecturer writes on the board while a page is spoken: a

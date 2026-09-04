@@ -20,6 +20,7 @@ import {
   scriptForTts,
 } from '../../business/domain/lecture';
 import type { LectureVoiceJobData } from '../queues';
+import { mp3DurationMs, speechTooShort } from '../../business/domain/speech';
 import type { JobContext } from './base.processor';
 import { LectureBoardService } from './lecture-board.service';
 
@@ -82,8 +83,16 @@ export class LectureVoiceProcessor {
         `documents/${doc.id}/lecture/v${doc.contentVersion}/` +
         `${pageNumber}${kind === 'page' ? '' : `-${kind}`}-${style}-${voice}-${model}-${LECTURE_GENERATOR_VERSION}-${contentHash(`${delivery}\n${spoken}`)}.mp3`;
 
+      // A file already there is kept only when it is long enough to be
+      // the whole page: a fragment the voice once returned is voiced again.
       const cached = await this.storage.size(key).catch(() => null);
-      if (!cached) {
+      const whole = cached !== null && !speechTooShort(cached, spoken.length);
+      if (!whole) {
+        if (cached !== null) {
+          this.logger.warn(
+            `${documentId} p${pageNumber} ${style}: the audio on file is ${Math.round(mp3DurationMs(cached) / 1000)}s for ${spoken.length} chars; voicing it again`,
+          );
+        }
         const result = await this.speech.synthesize({
           text: spoken,
           voice,

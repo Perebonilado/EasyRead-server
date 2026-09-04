@@ -45,6 +45,10 @@ import {
   type TaughtChapter,
   effectiveStatus,
   LECTURE_STALE_MS,
+  hasBoardMarkers,
+  plainWordsProblems,
+  syllablesOf,
+  withoutBoardMarkers,
 } from './lecture';
 
 const page = (
@@ -750,8 +754,12 @@ describe('styles', () => {
   });
 
   it('measures each style against its own budget', () => {
+    // Short plain sentences, so only the budget is measured.
     const words = (n: number) =>
-      Array.from({ length: n }, () => 'word').join(' ');
+      Array.from(
+        { length: Math.ceil(n / 5) },
+        () => 'The word is a word.',
+      ).join(' ');
     const at = (style: 'gentle' | 'steady' | 'brisk', n: number) =>
       styleProblems(words(n), { style, weight: 'full', bridge: false }).map(
         (p) => p.kind,
@@ -759,7 +767,7 @@ describe('styles', () => {
     expect(at('brisk', 180)).toEqual(['too_long']);
     expect(at('steady', 180)).toEqual([]);
     expect(at('gentle', 300)).toEqual([]);
-    expect(at('gentle', 341)).toEqual(['too_long']);
+    expect(at('gentle', 305)).toEqual(['too_long']);
   });
 
   it('lets gentle say the idea a second way; the others must land', () => {
@@ -986,9 +994,9 @@ describe('a long gentle page voiced as two pieces', () => {
     ).toBe(false);
     expect(
       shouldSplit('gentle', 'full', [
-        section(0, 90),
-        section(1, 90),
-        section(2, 90),
+        section(0, 80),
+        section(1, 80),
+        section(2, 80),
       ]),
     ).toBe(false);
     // A light page has the smaller budget.
@@ -1107,5 +1115,158 @@ describe('effectiveStatus', () => {
       'failed',
     );
     expect(effectiveStatus({ status: 'voicing' }, now)).toBe('voicing');
+  });
+});
+
+describe('the gentle style, measured', () => {
+  const PAGE =
+    'Consistent hashing distributes keys across servers so that few keys move when a server is added or removed. A hash function turns a key into a number.';
+  const options = {
+    pageText: PAGE,
+    terms: ['consistent hashing', 'hash function'],
+    taughtSoFar: [],
+  };
+
+  it('passes plain speech that explains each term in the same breath', () => {
+    const plain =
+      'Picture a few computers holding your files. One computer that answers requests is a server. ' +
+      'A hash function is just a rule that turns any name into a number. ' +
+      'That number says which computer holds the file. ' +
+      'Consistent hashing, which just means arranging those numbers on a circle, moves few files when a computer is added.';
+    expect(plainWordsProblems(plain, options)).toEqual([]);
+  });
+
+  it("sends back textbook register: long sentences, the lecturer's own long words, terms left unexplained", () => {
+    const textbook =
+      'To achieve horizontal scaling, it is important to distribute requests and data efficiently and evenly across servers, ensuring that all servers work together optimally and that the whole system remains robust as demand grows significantly over time. ' +
+      'Consistent hashing addresses the flaws of traditional methods. ' +
+      'The hash function determines placement.';
+    const kinds = plainWordsProblems(textbook, options).map(
+      (problem) => problem.kind,
+    );
+    expect(kinds).toContain('long_sentences');
+    expect(kinds).toContain('hard_words');
+    expect(kinds).toContain('term_unexplained');
+    const detail = plainWordsProblems(textbook, options).find(
+      (problem) => problem.kind === 'hard_words',
+    )?.detail;
+    expect(detail).toContain('"efficiently"');
+    expect(detail).toContain('"optimally"');
+  });
+
+  it('lets a term taught on an earlier page pass unexplained, and refuses two new terms in one sentence', () => {
+    const later =
+      'Consistent hashing helps here. The hash function is a rule that turns a name into a number.';
+    expect(
+      plainWordsProblems(later, {
+        ...options,
+        taughtSoFar: ['Teach what consistent hashing is'],
+      }),
+    ).toEqual([]);
+    const crowded =
+      'Consistent hashing uses a hash function, which is a rule that turns a name into a number. It moves few keys.';
+    const kinds = plainWordsProblems(crowded, options).map(
+      (problem) => problem.kind,
+    );
+    expect(kinds).toContain('two_terms');
+  });
+
+  it('counts syllables roughly and only for words the page does not use', () => {
+    expect(syllablesOf('efficiently')).toBe(4);
+    expect(syllablesOf('server')).toBe(2);
+    expect(syllablesOf('move')).toBe(1);
+    // "redistribution" is long, but the page says it: not the lecturer's word.
+    const said =
+      "Keys move. A server is one computer. Redistribution is the page's own word here.";
+    expect(
+      plainWordsProblems(said, {
+        ...options,
+        pageText: `${PAGE} redistribution`,
+      }).map((problem) => problem.kind),
+    ).not.toContain('hard_words');
+  });
+
+  it('runs only for the gentle style, and not on a bridge', () => {
+    const textbook =
+      'To achieve horizontal scaling, it is important to distribute requests and data efficiently and evenly across servers, ensuring that all servers work together optimally and that the whole system remains robust as demand grows significantly over time.';
+    const gentle = styleProblems(textbook, {
+      style: 'gentle',
+      weight: 'full',
+      bridge: false,
+      pageText: PAGE,
+      terms: options.terms,
+      taughtSoFar: [],
+    }).map((problem) => problem.kind);
+    expect(gentle).toContain('long_sentences');
+    const steady = styleProblems(textbook, {
+      style: 'steady',
+      weight: 'full',
+      bridge: false,
+      pageText: PAGE,
+      terms: options.terms,
+      taughtSoFar: [],
+    }).map((problem) => problem.kind);
+    expect(steady).not.toContain('long_sentences');
+    expect(steady).not.toContain('hard_words');
+  });
+});
+
+describe('board marks in a script', () => {
+  const line = (number: number, move: number, text: string) => ({
+    number,
+    move,
+    kind: 'term' as const,
+    text,
+    meaning: null,
+    level: null,
+    important: null,
+  });
+
+  it('are seen, stripped for readers and the voice, and carried with the pieces', () => {
+    const script =
+      'So, [write 1] the refill rate: ten a second. [point 1] That rate again.';
+    expect(hasBoardMarkers(script)).toBe(true);
+    expect(hasBoardMarkers('No marks here.')).toBe(false);
+    expect(withoutBoardMarkers(script)).toBe(
+      'So, the refill rate: ten a second. That rate again.',
+    );
+    expect(scriptForTts(script)).toBe(
+      'So, the refill rate: ten a second. That rate again.',
+    );
+    const pieces = pageScripts(null, [{ move: 0, text: script }], false, {
+      heading: 'Token bucket',
+      lines: [line(1, 0, 'refill rate')],
+    });
+    expect(pieces.board?.heading).toBe('Token bucket');
+    expect(pieces.board?.lines).toHaveLength(1);
+    expect(pieces.script).toContain('[write 1]');
+    expect(
+      pageScripts(null, [{ move: 0, text: script }], false).board,
+    ).toBeNull();
+  });
+
+  it('gives each piece of a split page the lines of its own moves, the heading with the first', () => {
+    const piece = (move: number, word: string) => ({
+      move,
+      text: `${`${word} `.repeat(30).trim()}.`,
+    });
+    const sections = [piece(0, 'a'), piece(1, 'b'), piece(2, 'c')];
+    const board = {
+      heading: 'Three moves',
+      lines: [line(1, 0, 'first'), line(2, 1, 'second'), line(3, 2, 'third')],
+    };
+    const split = pageScripts(null, sections, true, board);
+    expect(split.board?.heading).toBe('Three moves');
+    expect(split.part?.board?.heading).toBeNull();
+    const headNumbers = split.board!.lines.map((entry) => entry.number);
+    const tailNumbers = split.part!.board!.lines.map((entry) => entry.number);
+    expect([...headNumbers, ...tailNumbers]).toEqual([1, 2, 3]);
+    expect(tailNumbers.length).toBeGreaterThan(0);
+    // A line whose move no section carries still goes with the first piece.
+    const stray = pageScripts(null, sections, true, {
+      heading: 'x',
+      lines: [line(1, 7, 'lost')],
+    });
+    expect(stray.board?.lines.map((entry) => entry.number)).toEqual([1]);
   });
 });

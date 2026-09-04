@@ -423,6 +423,23 @@ export const lectureSegmentSchema = z.object({
     .max(6),
 });
 
+/** The board planned for a page before its speech. */
+export const lectureBoardPlanSchema = z.object({
+  heading: z.string().min(1).max(60),
+  lines: z
+    .array(
+      z.object({
+        move: z.number().int().min(0).max(8),
+        kind: z.enum(['term', 'point', 'figure']),
+        text: z.string().min(1).max(96),
+        meaning: z.string().max(120).nullable(),
+        level: z.union([z.literal(1), z.literal(2)]).nullable(),
+        important: z.boolean().nullable(),
+      }),
+    )
+    .max(24),
+});
+
 /** The grounding check: is every claim in the script on the page? */
 export const lectureVerifySchema = z.object({
   grounded: z.boolean(),

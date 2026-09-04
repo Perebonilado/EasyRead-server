@@ -55,6 +55,16 @@ const REAL_PAGE =
 
 const USAGE = { model: 'fake', tokensIn: 1, tokensOut: 1, latencyMs: 1 };
 
+/**
+ * A writer whose test double returns its own sections has no marks in
+ * them; with no board planned, none are expected of it.
+ */
+const withoutBoard = (llm: FakeLlmAdapter): FakeLlmAdapter => {
+  llm.lectureBoardPlan = () =>
+    Promise.resolve({ value: { heading: 'Notes', lines: [] }, usage: USAGE });
+  return llm;
+};
+
 /** A writer's answer: one section, as most tests need. */
 const draft = (text: string) => ({
   value: { sections: [{ move: 0, text }] },
@@ -662,7 +672,7 @@ describe('LectureChapterProcessor', () => {
 
   it('asks the last attempt to stay strictly on the page rather than leave a hole', async () => {
     const f = fakes({ 1: REAL_PAGE });
-    const llm = new FakeLlmAdapter();
+    const llm = withoutBoard(new FakeLlmAdapter());
     const inner = new FakeLlmAdapter();
     const stricts: boolean[] = [];
     let seen = 0;
@@ -720,7 +730,9 @@ describe('LectureChapterProcessor', () => {
 
     expect(planned[0]).toEqual([]);
     expect(planned[1]).toHaveLength(1);
-    expect(planned[1][0]).toMatch(/^Why Inflation matters\. Teach page 1\./);
+    expect(planned[1][0]).toMatch(
+      /^Why Inflation matters\. (?:\[write 1\] )?Teach page 1\./,
+    );
   });
 
   it('speaks the planned hook word for word and hands the writer the words already spoken', async () => {
@@ -738,7 +750,7 @@ describe('LectureChapterProcessor', () => {
     await chapterProcessor(f, llm).process(chapterJob(), CONTEXT);
 
     expect(f.segments.get(1)!.scriptText).toMatch(
-      /^Why Inflation matters\. Teach page 1\./,
+      /^Why Inflation matters\. (?:\[write 1\] )?Teach page 1\./,
     );
     expect(openings).toEqual(['Why Inflation matters.', null]);
     expect(tails[0]).toBe('');
@@ -1022,7 +1034,7 @@ describe('LectureChapterProcessor', () => {
 
   it('drops a page whose figures are nowhere in the material, whatever the verifier says', async () => {
     const f = fakes({ 1: REAL_PAGE });
-    const llm = new FakeLlmAdapter();
+    const llm = withoutBoard(new FakeLlmAdapter());
     const corrections: (string | undefined)[] = [];
     llm.lectureSegment = (input) => {
       corrections.push(input.correction);
@@ -1131,8 +1143,8 @@ describe('LectureChapterProcessor', () => {
       CONTEXT,
     );
 
-    expect(direction).toContain('one idea at a time');
-    expect(direction).toContain('never the same kind of example twice');
+    expect(direction).toContain('which just means');
+    expect(direction).toContain('one example carried through');
   });
 
   it('starts at the page a learner switched on, then fills in the earlier pages', async () => {
@@ -1161,7 +1173,9 @@ describe('LectureChapterProcessor', () => {
     );
 
     // Page 2 first, for the learner waiting there; then 3; then back to 1.
-    expect(written.map((w) => w.page)).toEqual([2, 3, 1]);
+    // (A slow learner's page is written up to three times while the
+    // plain-words gate sends the fake's textbook words back.)
+    expect([...new Set(written.map((w) => w.page))]).toEqual([2, 3, 1]);
     // Page 2 continues from what the learner just heard: the STEADY page 1.
     expect(written[0].tail).toContain(
       f.row(1, 'steady')!.scriptText!.slice(-30),
@@ -1171,7 +1185,7 @@ describe('LectureChapterProcessor', () => {
       f.row(2, 'gentle')!.scriptText!.slice(-30),
     );
     // Page 1 opens the chapter: nothing before it.
-    expect(written[2].tail).toBe('');
+    expect(written.find((w) => w.page === 1)!.tail).toBe('');
     expect(f.row(1, 'gentle')!.scriptText).toMatch(/^Why Inflation matters\./);
   });
 
@@ -1200,7 +1214,7 @@ describe('LectureChapterProcessor', () => {
     expect(row.moveOffsets).toHaveLength(2);
     expect(row.moveOffsets![0]).toBe(0);
     expect(row.scriptText!.slice(row.moveOffsets![1])).toMatch(
-      /^Then the mechanism\./,
+      /^(?:\[write 1\] )?Then the mechanism\./,
     );
   });
 
@@ -1241,7 +1255,7 @@ describe('LectureChapterProcessor', () => {
     const recap = 'Prices rise. In summary, easy money lifts prices.';
     const run = async (style: LectureStyle) => {
       const f = fakes({ 1: REAL_PAGE }, [TOPIC], [style]);
-      const llm = new FakeLlmAdapter();
+      const llm = withoutBoard(new FakeLlmAdapter());
       const inner = new FakeLlmAdapter();
       const corrections: (string | undefined)[] = [];
       let seen = 0;
@@ -1445,7 +1459,7 @@ describe('LectureChapterProcessor: a long gentle page voiced as two pieces', () 
 
   it('cuts the page at the move boundary nearest the middle, and voices both pieces', async () => {
     const f = fakes({ 1: REAL_PAGE, 2: REAL_PAGE }, [TOPIC], ['gentle']);
-    const llm = new FakeLlmAdapter();
+    const llm = withoutBoard(new FakeLlmAdapter());
     const inner = new FakeLlmAdapter();
     llm.lectureOutline = plannerWithMoves(['the rise', 'the banks', 'the lag']);
     llm.lectureSegment = (input) =>
@@ -1478,7 +1492,7 @@ describe('LectureChapterProcessor: a long gentle page voiced as two pieces', () 
 
   it('continues the next page from the second piece, the last thing heard', async () => {
     const f = fakes({ 1: REAL_PAGE, 2: REAL_PAGE }, [TOPIC], ['gentle']);
-    const llm = new FakeLlmAdapter();
+    const llm = withoutBoard(new FakeLlmAdapter());
     const inner = new FakeLlmAdapter();
     llm.lectureOutline = plannerWithMoves(['the rise', 'the banks', 'the lag']);
     const tails: string[] = [];
@@ -1492,13 +1506,16 @@ describe('LectureChapterProcessor: a long gentle page voiced as two pieces', () 
       chapterJob(TOPIC.id, 0, 'gentle'),
       CONTEXT,
     );
-    expect(tails[1]).toContain(C.trim());
-    expect(tails[1]).not.toContain(A.trim());
+    // Page 2's tail is the last non-empty one: page 1 may be written more
+    // than once, each time from nothing.
+    const pageTwoTail = tails.filter(Boolean).pop() ?? '';
+    expect(pageTwoTail).toContain(C.trim());
+    expect(pageTwoTail).not.toContain(A.trim());
   });
 
   it('leaves a short gentle page, and a long page in any other style, whole', async () => {
     const short = fakes({ 1: REAL_PAGE }, [TOPIC], ['gentle']);
-    const llm = new FakeLlmAdapter();
+    const llm = withoutBoard(new FakeLlmAdapter());
     llm.lectureOutline = plannerWithMoves(['the rise', 'the banks', 'the lag']);
     await chapterProcessor(short, llm).process(
       chapterJob(TOPIC.id, 0, 'gentle'),
@@ -1529,7 +1546,7 @@ describe('LectureChapterProcessor: a long gentle page voiced as two pieces', () 
     const lost = f.row(2, 'steady', 'check')!;
     lost.scriptText = 'A check whose voice job was lost.';
     lost.status = 'voicing';
-    const llm = new FakeLlmAdapter();
+    const llm = withoutBoard(new FakeLlmAdapter());
     const written: string[] = [];
     llm.lectureSegment = (input) => {
       written.push(input.beat.goal);
@@ -1713,7 +1730,11 @@ describe('the lecture board around the chapter processor', () => {
 
   it('never lets a broken board writer touch the page', async () => {
     const f = fakes({ 1: REAL_PAGE });
-    const llm = new FakeLlmAdapter();
+    const llm = withoutBoard(new FakeLlmAdapter());
+    // The planner is down, so the page is written without its board and
+    // the board writer is asked afterwards, the older way; it is down too.
+    llm.lectureBoardPlan = () =>
+      Promise.reject(new Error('board planner down'));
     llm.lectureBoard = () => Promise.reject(new Error('board model down'));
     await chapterProcessor(f, llm).process(chapterJob(), CONTEXT);
     expect(f.row(1)!.status).toBe('voicing');
@@ -1748,7 +1769,7 @@ describe('the lecture board around the chapter processor', () => {
 
   it('asks for the drawing only where the plan marked a figure', async () => {
     const f = fakes({ 1: REAL_PAGE, 2: REAL_PAGE });
-    const llm = new FakeLlmAdapter();
+    const llm = withoutBoard(new FakeLlmAdapter());
     const inner = new FakeLlmAdapter();
     llm.lectureOutline = async (input) => {
       const result = await inner.lectureOutline(input);
@@ -1775,7 +1796,7 @@ describe('the lecture board around the chapter processor', () => {
 
   it('leaves every row without a board when boards are off', async () => {
     const f = fakes({ 1: REAL_PAGE });
-    const llm = new FakeLlmAdapter();
+    const llm = withoutBoard(new FakeLlmAdapter());
     await chapterProcessor(f, llm, boardService(f, llm, false)).process(
       chapterJob(),
       CONTEXT,
@@ -2003,7 +2024,7 @@ describe('boards for a lecture written before boards existed', () => {
 
   it('writes the board from the stored words and asks for alignment, touching neither script nor audio', async () => {
     const f = fakes({ 1: REAL_PAGE, 2: REAL_PAGE });
-    const llm = new FakeLlmAdapter();
+    const llm = withoutBoard(new FakeLlmAdapter());
     // Written and voiced without boards.
     await chapterProcessor(f, llm, boardService(f, llm, false)).process(
       chapterJob(),

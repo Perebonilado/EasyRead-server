@@ -19,6 +19,7 @@ import {
   sentenceSpans,
   termsDraft,
   timeBoard,
+  wordEndAt,
   wordStartAt,
   wordTimesFromAligned,
   writingCostMs,
@@ -56,6 +57,18 @@ import {
   sentenceAnchor,
   linesOf,
   charLimitOf,
+  boardMarks,
+  cutWordAtEnd,
+  linesOfTimeline,
+  markedDraft,
+  mergePlanLines,
+  repairCutWords,
+  withoutCutWord,
+  planProblems,
+  type PlanLineDraft,
+  boardTimeOf,
+  audioTimeOf,
+  OVERRUN_MS,
 } from './board';
 
 /**
@@ -2073,5 +2086,469 @@ describe('the words-first board finishes its meanings', () => {
         60,
       ),
     ).not.toMatch(/minimizing$/);
+  });
+});
+
+describe('a planned board held to the rules before the speech exists', () => {
+  const PAGE =
+    'A token bucket holds a fixed number of tokens, and a request takes one. ' +
+    'When the bucket is empty the request is dropped, which is the whole point. ' +
+    'The refill rate is 10 tokens a second.';
+  const ctx = {
+    pageText: PAGE,
+    planLines: ['Teach the token bucket', 'token bucket a bucket of tokens'],
+    moves: ['introduce the bucket', 'what happens when it is empty'],
+  };
+  const line = (
+    move: number,
+    kind: 'term' | 'point' | 'figure',
+    text: string,
+    meaning: string | null = null,
+  ) => ({ move, kind, text, meaning, level: null, important: null });
+
+  it('passes a board of short grounded notes and refuses the rest, naming why', () => {
+    const good = {
+      heading: 'Token bucket',
+      lines: [
+        line(
+          0,
+          'term',
+          'token bucket',
+          'holds fixed tokens, a request takes one',
+        ),
+        line(0, 'figure', '10 tokens/s'),
+        line(1, 'point', 'empty bucket: request dropped'),
+      ],
+    };
+    expect(planProblems(good, ctx)).toEqual([]);
+    const bad = {
+      heading: 'Notes',
+      lines: [
+        line(0, 'point', 'The bucket holds a fixed number of tokens.'),
+        line(0, 'point', 'importance of the bucket'),
+        line(0, 'term', 'leaky bucket', 'a queue that drains at a fixed rate'),
+        line(3, 'point', 'empty bucket: request dropped'),
+        line(1, 'figure', '99 tokens/s'),
+        line(1, 'point', 'empty bucket: request dropped'),
+      ],
+    };
+    const problems = planProblems(bad, ctx);
+    const kinds = problems.map((problem) => problem.kind);
+    expect(kinds).toContain('too_short');
+    expect(kinds).toContain('sentence');
+    expect(kinds).toContain('topic_label');
+    expect(kinds).toContain('ungrounded');
+    expect(kinds).toContain('anchor_missing');
+    expect(kinds).toContain('duplicate');
+    expect(
+      problems.find((problem) => problem.kind === 'anchor_missing')?.detail,
+    ).toContain('move 3');
+    // The heading problem carries no index; every line problem does.
+    expect(
+      problems.filter((problem) => problem.index === undefined),
+    ).toHaveLength(1);
+  });
+});
+
+describe('a word cut short at the end of a line', () => {
+  const PAGE =
+    'Consistent hashing distributes data across servers so that few keys are remapped when servers are added or removed.';
+  const pool = ctx({ spoken: PAGE, pageText: PAGE });
+
+  it('is seen by the rules, at plan time and at build time', () => {
+    expect(
+      cutWordAtEnd('keys remapped when servers are added/remo', pool),
+    ).toBe('remo');
+    expect(
+      cutWordAtEnd('keys remapped when servers are added', pool),
+    ).toBeNull();
+    // A short tail, a number, or a word of the page is not a cut.
+    expect(cutWordAtEnd('few keys are', pool)).toBeNull();
+    expect(cutWordAtEnd('hash space 2^160', pool)).toBeNull();
+    expect(cutWordAtEnd('data across servers', pool)).toBeNull();
+    const planned = planProblems(
+      {
+        heading: 'Consistent hashing',
+        lines: [
+          {
+            move: 0,
+            kind: 'term',
+            text: 'consistent hashing',
+            meaning: 'few keys remapped when servers are added/remo',
+            level: null,
+            important: null,
+          },
+        ],
+      },
+      { pageText: PAGE, planLines: [], moves: ['what it is'] },
+    );
+    expect(planned.some((problem) => problem.kind === 'incomplete')).toBe(true);
+    expect(
+      planned.find((problem) => problem.kind === 'incomplete')?.detail,
+    ).toContain('cut word "remo"');
+  });
+
+  it('is mended before the board is built: the cut word goes, the phrase stays whole', () => {
+    const draft = {
+      heading: 'Consistent hashing',
+      items: [
+        {
+          kind: 'term' as const,
+          text: 'consistent hashing',
+          meaning: 'few keys remapped when servers are added/remo',
+          at: 0,
+        },
+        {
+          kind: 'point' as const,
+          text: 'keys remapped when servers are remo',
+          at: 40,
+        },
+      ],
+    };
+    const mended = repairCutWords(draft, pool);
+    expect(mended.items[0].meaning).toBe(
+      'few keys remapped when servers are added',
+    );
+    // "servers are" would hang, so the line is left for the rules.
+    expect(mended.items[1].text).toBe('keys remapped when servers are remo');
+    expect(withoutCutWord('added/remo')).toBe('added');
+  });
+});
+
+describe('the lines a stored board carries', () => {
+  it('are read back in order with the heading, and nothing for a board with no writing', () => {
+    const timeline: BoardTimeline = {
+      ...emptyTimeline(100),
+      boards: [
+        { id: 'b-0', heading: 'Token bucket', startsAtMs: 0, continues: false },
+      ],
+      ops: [
+        {
+          id: 'h',
+          kind: 'heading',
+          boardId: 'b-0',
+          slot: 0,
+          text: 'Token bucket',
+          anchor: { charStart: 0, charEnd: 5 },
+          priority: 1,
+          seed: 1,
+          t0Ms: 0,
+          durMs: 1000,
+        },
+        {
+          id: 't',
+          kind: 'term',
+          boardId: 'b-0',
+          slot: 1,
+          text: 'refill rate',
+          meaning: 'ten tokens a second',
+          anchor: { charStart: 10, charEnd: 20 },
+          priority: 1,
+          seed: 2,
+          t0Ms: 1000,
+          durMs: 1000,
+          important: true,
+        },
+        {
+          id: 'p',
+          kind: 'point',
+          boardId: 'b-0',
+          slot: 3,
+          text: 'empty bucket: request dropped',
+          level: 2,
+          anchor: { charStart: 30, charEnd: 40 },
+          priority: 2,
+          seed: 3,
+          t0Ms: 2000,
+          durMs: 1000,
+        },
+      ] as BoardTimeline['ops'],
+      marked: true,
+    };
+    const lines = linesOfTimeline(timeline)!;
+    expect(lines.heading).toBe('Token bucket');
+    expect(
+      lines.lines.map((line) => [line.number, line.kind, line.text]),
+    ).toEqual([
+      [1, 'term', 'refill rate'],
+      [2, 'point', 'empty bucket: request dropped'],
+    ]);
+    expect(lines.lines[0].meaning).toBe('ten tokens a second');
+    expect(lines.lines[0].important).toBe(true);
+    expect(lines.lines[1].level).toBe(2);
+    expect(linesOfTimeline({ ...emptyTimeline(10), marked: true })).toBeNull();
+  });
+});
+
+describe('two plans for a page, merged so the retry can only add', () => {
+  const line = (
+    move: number,
+    text: string,
+    meaning: string | null = null,
+  ): PlanLineDraft => ({
+    move,
+    kind: 'point',
+    text,
+    meaning,
+    level: null,
+    important: null,
+  });
+
+  it('keeps every line of the first, adds what the second says anew, in move order', () => {
+    const first = [
+      line(0, 'token bucket holds fixed tokens'),
+      line(1, 'empty bucket: request dropped'),
+    ];
+    const second = [
+      line(0, 'token bucket holds fixed tokens'),
+      line(0, 'refill rate sets the average'),
+      line(1, 'request dropped when the bucket is empty'),
+      line(1, 'no queue, no waiting'),
+    ];
+    const merged = mergePlanLines(first, second);
+    expect(merged.map((entry) => entry.text)).toEqual([
+      'token bucket holds fixed tokens',
+      'refill rate sets the average',
+      'empty bucket: request dropped',
+      'no queue, no waiting',
+    ]);
+    expect(mergePlanLines(first, [])).toEqual(first);
+  });
+});
+
+describe('a board planned before the speech and placed by it', () => {
+  const SCRIPT =
+    'A token bucket holds tokens. So, [write 1] the refill rate: ten tokens per second. ' +
+    'Every second, ten more tokens. [write 2] When the bucket is empty, the request is dropped. ' +
+    'Look at [point 1] the refill rate again: it sets the average.';
+  const SECTIONS = [{ move: 0, text: SCRIPT }];
+  const BOARD = {
+    heading: 'Token bucket',
+    lines: [
+      {
+        number: 1,
+        move: 0,
+        kind: 'term' as const,
+        text: 'refill rate',
+        meaning: 'ten tokens per second',
+        level: null,
+        important: null,
+      },
+      {
+        number: 2,
+        move: 0,
+        kind: 'point' as const,
+        text: 'empty bucket: request dropped',
+        meaning: null,
+        level: null,
+        important: true,
+      },
+    ],
+  };
+  const spokenOf = (script: string) =>
+    script
+      .replace(/\[[^\]]*\]/g, ' ')
+      .replace(/[ \t]+/g, ' ')
+      .trim();
+
+  it('places each line where its words are said, and a cue where the speech comes back', () => {
+    const spoken = spokenOf(SCRIPT);
+    const marks = boardMarks(SCRIPT, spoken, SECTIONS, BOARD)!;
+    expect(marks.heading).toBe('Token bucket');
+    expect(marks.lines).toHaveLength(2);
+    expect(spoken.slice(marks.lines[0].at).startsWith('refill rate: ten')).toBe(
+      true,
+    );
+    expect(spoken.slice(marks.lines[1].at).startsWith('bucket is empty')).toBe(
+      true,
+    );
+    expect(marks.cues).toHaveLength(1);
+    expect(marks.cues[0].line).toBe(0);
+    expect(spoken.slice(marks.cues[0].at, marks.cues[0].at + 15)).toBe(
+      'the refill rate',
+    );
+    expect(marks.lines.every((line) => line.placed === 'words')).toBe(true);
+    expect(
+      boardMarks(SCRIPT, spoken, SECTIONS, { heading: 'x', lines: [] }),
+    ).toBeNull();
+  });
+
+  it('falls back to the mark, then the move, for a line whose words are not said, and orders the lines as written', () => {
+    const spoken = spokenOf(SCRIPT);
+    const board = {
+      heading: 'Token bucket',
+      lines: [
+        BOARD.lines[1],
+        { ...BOARD.lines[0], number: 1 },
+        {
+          number: 3,
+          move: 0,
+          kind: 'point' as const,
+          text: 'rate sets the average',
+          meaning: null,
+          level: null,
+          important: null,
+        },
+      ],
+    };
+    const marks = boardMarks(SCRIPT, spoken, SECTIONS, board)!;
+    expect(marks.lines.map((line) => line.number)).toEqual([1, 2, 3]);
+    const last = marks.lines[2];
+    expect(last.placed).toBe('words');
+    // Placed where its words are said: the closing "rate again: it sets the average".
+    expect(spoken.slice(last.at).startsWith('rate again')).toBe(true);
+    expect(last.at).toBeGreaterThan(marks.lines[1].at);
+    // Words not said: the writer's mark stands in.
+    const byMark = boardMarks(SCRIPT, spoken, SECTIONS, {
+      heading: 'x',
+      lines: [{ ...BOARD.lines[1], text: 'nothing of this is said' }],
+    })!;
+    expect(byMark.lines[0].placed).toBe('mark');
+    expect(spoken.slice(byMark.lines[0].at).startsWith('When the bucket')).toBe(
+      true,
+    );
+    // Neither said nor marked: the start of its move's section.
+    const lost = boardMarks(SCRIPT, spoken, SECTIONS, {
+      heading: 'x',
+      lines: [
+        { ...board.lines[2], number: 9, text: 'nothing of this is said' },
+      ],
+    })!;
+    expect(lost.lines[0].placed).toBe('move');
+    expect(lost.lines[0].at).toBe(0);
+    // A full stop on a planned line never reaches the pen.
+    const dotted = markedDraft(
+      boardMarks(SCRIPT, spoken, SECTIONS, {
+        heading: 'x',
+        lines: [{ ...BOARD.lines[1], text: 'empty bucket: request dropped.' }],
+      })!,
+    );
+    expect(dotted.items[0].text).toBe('empty bucket: request dropped');
+  });
+
+  it('builds the ops from the marks with exact anchors, the cue on its line', () => {
+    const spoken = spokenOf(SCRIPT);
+    const marks = boardMarks(SCRIPT, spoken, SECTIONS, BOARD)!;
+    const built = buildBoardOps(
+      markedDraft(marks),
+      ctx({ spoken, pageText: spoken, durationMs: 30_000 }),
+      'm',
+      'm-board',
+    );
+    const term = built.ops.find((op) => op.kind === 'term')!;
+    const point = built.ops.find((op) => op.kind === 'point')!;
+    const cue = built.ops.find((op) => op.kind === 'cue');
+    expect(term.anchor.charStart).toBe(marks.lines[0].at);
+    expect(point.anchor.charStart).toBe(marks.lines[1].at);
+    expect(point.kind === 'point' && point.important).toBe(true);
+    expect(cue && cue.kind === 'cue' && cue.targetId).toBe(term.id);
+  });
+
+  it('lets the pen follow the voice: a line said as written starts with its first word, ends with its last, and paces by the words', () => {
+    const spoken = spokenOf(SCRIPT);
+    const marks = boardMarks(SCRIPT, spoken, SECTIONS, BOARD)!;
+    expect(marks.lines[0].until).toBeGreaterThan(marks.lines[0].at);
+    const built = buildBoardOps(
+      markedDraft(marks),
+      ctx({ spoken, pageText: spoken, durationMs: 8_000 }),
+      'm',
+      'm-board',
+    );
+    const term = built.ops.find((op) => op.kind === 'term')!;
+    expect(term.dictated).toBe(true);
+    expect(spoken.slice(term.anchor.charStart, term.anchor.charEnd)).toBe(
+      'refill rate: ten tokens per second',
+    );
+    const timeline = {
+      ...emptyTimeline(spoken.length),
+      boards: built.boards,
+      ops: built.ops,
+      marked: true,
+    };
+    const times = estimateWordTimes(spoken, 8_000, 'k');
+    const timed = timeBoard(timeline, times, 8_000, 'gentle', spoken);
+    expect(timed.marked).toBe(true);
+    // No waiting: the voice is the pace, so nothing holds the audio.
+    expect(timed.holds).toEqual([]);
+    const timedTerm = timed.ops.find((op) => op.kind === 'term')!;
+    // Starts with its first word, or the moment the heading's pen lifts.
+    const first = wordStartAt(times, term.anchor.charStart);
+    expect(timedTerm.t0Ms).toBeGreaterThanOrEqual(first);
+    expect(timedTerm.t0Ms).toBeLessThanOrEqual(first + 300);
+    expect(timedTerm.t0Ms! + timedTerm.durMs!).toBe(
+      wordEndAt(times, term.anchor.charEnd),
+    );
+    // "refill rate" and "ten tokens per second": six words, seven marks.
+    expect(timedTerm.pace).toHaveLength(7);
+    expect(timedTerm.pace![0]).toBe(0);
+    expect(timedTerm.pace![6]).toBe(timedTerm.durMs);
+    for (let i = 1; i < 7; i += 1) {
+      expect(timedTerm.pace![i]).toBeGreaterThanOrEqual(timedTerm.pace![i - 1]);
+    }
+    // Nothing is left half-written when the row ends.
+    for (const op of timed.ops) {
+      if (op.t0Ms === null || op.durMs === null) continue;
+      expect(op.t0Ms + op.durMs).toBeLessThanOrEqual(8_000 + OVERRUN_MS);
+    }
+  });
+
+  it('gives a line it never says as written no span, so the old timing applies to it', () => {
+    const spoken = spokenOf(SCRIPT);
+    const marks = boardMarks(SCRIPT, spoken, SECTIONS, {
+      heading: 'x',
+      lines: [
+        {
+          ...BOARD.lines[1],
+          text: 'nothing of this line is ever said aloud on the page',
+        },
+      ],
+    })!;
+    expect(marks.lines[0].until).toBeUndefined();
+    const built = buildBoardOps(
+      markedDraft(marks),
+      ctx({
+        spoken,
+        pageText: `${spoken} nothing of this line is ever said aloud on the page`,
+        durationMs: 8_000,
+      }),
+      'm',
+      'm-board',
+    );
+    const point = built.ops.find((op) => op.kind === 'point');
+    expect(point?.dictated).toBeUndefined();
+    // A figure is placed only where its numbers are said: "ten tokens per
+    // second" is not "10 tokens/s", so it goes to its move, not to the
+    // sentence that happens to share a word.
+    const figure = boardMarks(SCRIPT, spoken, SECTIONS, {
+      heading: 'x',
+      lines: [
+        {
+          number: 3,
+          move: 0,
+          kind: 'figure',
+          text: '10 tokens/s',
+          meaning: null,
+          level: null,
+          important: null,
+        },
+      ],
+    })!;
+    expect(figure.lines[0].placed).toBe('move');
+  });
+
+  it('converts between audio time and board time across holds', () => {
+    const timeline = {
+      holds: [
+        { atMs: 5_000, forMs: 2_000 },
+        { atMs: 12_000, forMs: 1_000 },
+      ],
+    };
+    expect(boardTimeOf(timeline, 4_000)).toBe(4_000);
+    expect(boardTimeOf(timeline, 6_000)).toBe(8_000);
+    expect(boardTimeOf(timeline, 13_000)).toBe(16_000);
+    expect(audioTimeOf(timeline, 4_000)).toBe(4_000);
+    expect(audioTimeOf(timeline, 6_000)).toBe(5_000);
+    expect(audioTimeOf(timeline, 8_000)).toBe(6_000);
+    expect(audioTimeOf(timeline, 16_000)).toBe(13_000);
   });
 });

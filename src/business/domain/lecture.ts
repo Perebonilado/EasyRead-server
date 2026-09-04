@@ -21,7 +21,7 @@ import type { LectureStyle } from '../../contracts';
  * every audio key. Bumped whenever the prompts change enough that audio
  * made by the previous generator must not be served for a new script.
  */
-export const LECTURE_GENERATOR_VERSION = 'lecture-3';
+export const LECTURE_GENERATOR_VERSION = 'lecture-6';
 
 /** A page with fewer readable characters than this carries no lecture. */
 export const MIN_PAGE_CHARS = 120;
@@ -53,9 +53,10 @@ export const WORD_BUDGET: Record<
   LectureStyle,
   Record<BeatWeight, WordBudget>
 > = {
+  // Gentle is not the longest: it says fewer things, each in more steps.
   gentle: {
-    full: { min: 180, max: 300, hard: 340 },
-    light: { min: 90, max: 150, hard: 180 },
+    full: { min: 160, max: 260, hard: 300 },
+    light: { min: 80, max: 130, hard: 160 },
   },
   steady: {
     full: { min: 120, max: 220, hard: 260 },
@@ -190,29 +191,61 @@ export function splitSections(
 export interface PageScripts {
   script: string;
   moveOffsets: number[];
+  /** The sections this piece is made of. */
+  sections: LectureSection[];
+  /** The board this piece writes: the page's heading and the lines of its moves; null when the page has none. */
+  board: PageBoard | null;
   /** The second piece of a page voiced as two; null for a page voiced whole. */
-  part: { script: string; moveOffsets: number[] } | null;
+  part: {
+    script: string;
+    moveOffsets: number[];
+    sections: LectureSection[];
+    /** The lines of the second piece's moves, on the board the first piece opened. */
+    board: PageBoard | null;
+  } | null;
 }
 
 /**
  * A page's final script, and its second piece when it is split. The
  * opening is joined to the first piece; move offsets are relative to the
- * piece they belong to, so each piece maps time to ideas on its own.
+ * piece they belong to, so each piece maps time to ideas on its own. The
+ * board's lines go with the piece that speaks their move.
  */
 export function pageScripts(
   opening: string | null,
   sections: LectureSection[],
   split: boolean,
+  board: PageBoard | null = null,
 ): PageScripts {
   const [head, tail] = split ? splitSections(sections) : [sections, []];
   const headText = sectionsToScript(head);
   const script = opening ? joinOpening(opening, headText) : headText;
   const partText = sectionsToScript(tail);
+  const headMoves = new Set(head.map((section) => section.move));
+  const tailMoves = new Set(tail.map((section) => section.move));
+  const linesOf = (moves: Set<number>, rest: boolean) =>
+    (board?.lines ?? []).filter(
+      (line) =>
+        moves.has(line.move) ||
+        // A line whose move no section carries goes with the first piece.
+        (rest && !headMoves.has(line.move) && !tailMoves.has(line.move)),
+    );
   return {
     script,
     moveOffsets: moveOffsetsOf(script, head),
+    sections: head,
+    board: board
+      ? { heading: board.heading, lines: linesOf(headMoves, true) }
+      : null,
     part: partText
-      ? { script: partText, moveOffsets: moveOffsetsOf(partText, tail) }
+      ? {
+          script: partText,
+          moveOffsets: moveOffsetsOf(partText, tail),
+          sections: tail,
+          board: board
+            ? { heading: null, lines: linesOf(tailMoves, false) }
+            : null,
+        }
       : null,
   };
 }
@@ -265,20 +298,28 @@ export const LECTURE_STYLES: Record<LectureStyle, LectureStyleSpec> = {
     name: 'I learn slowly',
     subtext: 'One idea at a time, in plain words, nothing assumed.',
     direction: [
-      'Teach one idea at a time, in the smallest steps it breaks into, in',
-      'the simplest words that still keep every technical term the page',
-      "uses. Put a term's plain meaning right beside it the first time it",
-      'appears. Name the parts of an idea and what each does on its own',
-      'before you say how they work together. Say why it matters before how',
-      'it works. Where the page has an example, walk the whole of it, step',
-      'by step, thinking aloud, then say the general rule it shows: one',
-      'example carried through beats two mentioned. Ask one small question',
-      'the listener can answer, then answer it yourself at once. Before you',
-      'leave the page, say the one idea a second way, in a different shape:',
-      "restate fully on the chapter's early pages and only in a clause by",
-      'its last. Use an example only where the idea is hard to see without',
-      'one, and never the same kind of example twice in a row: breaking the',
-      'idea down is the method, examples are a tool. Short sentences. Assume',
+      'You are explaining to a friend who has never met this subject, in',
+      'the words you would use over coffee. Everyday words first: say what',
+      'a thing is or does in plain words, then give it its name, then say',
+      '"which just means" and its meaning in the same breath, for example',
+      '"one computer that answers requests, a server, which just means a',
+      'machine other machines ask for things". Every technical term the',
+      'page uses is kept and said, and each is explained the first time it',
+      'appears, never two new terms in one sentence. Short sentences, about',
+      'ten words, one thing each; never a sentence that stacks clauses.',
+      'Teach the one or two things this page turns on, in the smallest',
+      'steps they break into, and leave the rest: fewer things, each fully,',
+      'never everything quickly. No abstract nouns where a concrete thing',
+      'will do: not "data", but the customer order or the photo the page',
+      'talks about; not "the system", but the computers involved. Never',
+      'say efficiently, optimally, robust, leverage, ensure, significant or',
+      'their kind; say what actually happens instead. Where the page has an',
+      'example, walk the whole of it, step by step, thinking aloud, then',
+      'say the general rule it shows: one example carried through beats',
+      'two mentioned. Ask one small question the listener can answer, then',
+      'answer it yourself at once. Before you leave the page, say the one',
+      'idea a second way, in a different shape: restate fully on the',
+      "chapter's early pages and only in a clause by its last. Assume",
       'nothing was known before this page except what the lecture has',
       'already taught. Do not explain this page the way you explained the',
       'last one.',
@@ -286,11 +327,15 @@ export const LECTURE_STYLES: Record<LectureStyle, LectureStyleSpec> = {
     recapCheck: false,
     tailChars: 500,
     delivery: [
-      'Speak slowly and gently, unhurried, as if to someone writing each idea',
-      'down as you say it. Pause clearly at every full stop and longer between',
-      'paragraphs. Never rush a technical term: say it a little more slowly',
-      'than the words around it. Warm, calm and even, never sing-song, and',
-      'never faster towards the end of a sentence.',
+      'Speak slowly and gently, unhurried, at about a hundred and twenty',
+      'words a minute, as if to someone writing each idea down as you say',
+      'it. Pause clearly at every full stop and longer between paragraphs.',
+      'A short sentence that states a term and its meaning, or a single',
+      'claim, is read slowly and evenly, every word clear, as if you were',
+      'writing it on the board while you say it. Never rush a technical',
+      'term: say it a little more slowly than the words around it. Warm,',
+      'calm and even, never sing-song, and never faster towards the end of',
+      'a sentence.',
     ].join(' '),
     speed: 0.9,
   },
@@ -617,7 +662,11 @@ export interface StyleProblem {
     | 'too_long'
     | 'recap_ending'
     | 'moves'
-    | 'repetition';
+    | 'repetition'
+    | 'long_sentences'
+    | 'hard_words'
+    | 'term_unexplained'
+    | 'two_terms';
   detail: string;
 }
 
@@ -700,6 +749,10 @@ export function styleProblems(
     bridge: boolean;
     /** The sections as written, for the checks that look between them. */
     sections?: LectureSection[];
+    /** For the gentle style's promise of plain words: the page, the chapter's terms, what was taught before. */
+    pageText?: string;
+    terms?: string[];
+    taughtSoFar?: string[];
   },
 ): StyleProblem[] {
   const problems = openerProblems(text, 'script');
@@ -739,15 +792,309 @@ export function styleProblems(
   if (options.style === 'gentle' && options.sections) {
     problems.push(...repeatedDevice(options.sections));
   }
+  if (options.style === 'gentle' && !options.bridge) {
+    problems.push(
+      ...plainWordsProblems(text, {
+        pageText: options.pageText ?? '',
+        terms: options.terms ?? [],
+        taughtSoFar: options.taughtSoFar ?? [],
+      }),
+    );
+  }
+  return problems;
+}
+
+// ── the gentle style's promise, measured ────────────────────────────────────
+
+/** Words that sound like teaching and say nothing; refused unless the page itself uses them. */
+const EMPTY_WORDS = new Set([
+  'efficient',
+  'efficiently',
+  'effective',
+  'effectively',
+  'optimal',
+  'optimally',
+  'optimize',
+  'optimizes',
+  'optimized',
+  'robust',
+  'leverage',
+  'leverages',
+  'leveraging',
+  'facilitate',
+  'facilitates',
+  'utilize',
+  'utilizes',
+  'seamless',
+  'seamlessly',
+  'streamline',
+  'streamlined',
+  'comprehensive',
+  'significant',
+  'significantly',
+  'essential',
+  'essentially',
+  'crucial',
+  'fundamental',
+  'fundamentally',
+  'holistic',
+  'paradigm',
+  'methodology',
+  'ensure',
+  'ensures',
+  'ensuring',
+]);
+
+/** Long words a listener knows anyway. */
+const EVERYDAY_LONG_WORDS = new Set([
+  'everything',
+  'everybody',
+  'everyone',
+  'anything',
+  'anybody',
+  'anyone',
+  'everywhere',
+  'anywhere',
+  'understanding',
+  'information',
+  'usually',
+  'actually',
+  'especially',
+  'ordinary',
+  'another',
+  'remember',
+  'together',
+  'whatever',
+  'whenever',
+  'particular',
+  'situation',
+  'computer',
+  'computers',
+  'television',
+  'telephone',
+  'interesting',
+  'immediately',
+  'automatically',
+  'individual',
+  'individually',
+  'necessarily',
+  'temporarily',
+  'occasionally',
+  'unfortunately',
+  'complicated',
+]);
+
+/** A rough syllable count: vowel groups, less a silent e. */
+export function syllablesOf(word: string): number {
+  const lower = word.toLowerCase().replace(/[^a-z]/g, '');
+  if (!lower) return 0;
+  const groups = lower.match(/[aeiouy]+/g)?.length ?? 0;
+  const silent = /[^aeiouy]e$/.test(lower) && groups > 1 ? 1 : 0;
+  return Math.max(1, groups - silent);
+}
+
+/** The words of a text, lowercased, letters and apostrophes only. */
+function plainWordsOf(text: string): string[] {
+  return text
+    .toLowerCase()
+    .replace(/[\u2018\u2019]/g, "'")
+    .split(/[^a-z']+/)
+    .filter(Boolean);
+}
+
+/**
+ * What says a term is being explained, before or after it in the same
+ * breath: "which just means", "that is,", "is a", "called", and their kin.
+ */
+const MEANING_SIGNALS =
+  /\b(?:which|that|this|it)\s+(?:just\s+|simply\s+)?means?\b|\bin other words\b|\bthat is,|\b(?:which|that|this|these|those|it|there)(?:\s+is|\s+are|'s|'re)\s+(?:just\s+|simply\s+|only\s+)?(?:a|an|the|when|what|how|where|like|one|any|some|about)\b|\b(?:is|are) (?:just|simply|only)\b|\bthink of (?:it|them|this|that) as\b|\b(?:is|are) (?:a|an|the|when|what|how|where|like)\b|,\s*(?:which|or|meaning)\b|[-\u2013\u2014]\s*(?:which|these are|this is|that is|meaning)\b|\bcalled\b|\bwe call\b|\bknown as\b|\bmeaning\b|\bthe name for\b|\bthe word for\b|: /i;
+
+/** A light stem, so "distributing" is the page's "distribute" and "distribution". */
+function plainStem(word: string): string {
+  if (word.length <= 4) return word;
+  return word
+    .replace(
+      /(?:ations?|ation|tions?|ions?|ing|ed|es|s|ly|ness|ment|ments)$/,
+      '',
+    )
+    .replace(/e$/, '')
+    .replace(/([bdgmnprt])\1$/, '$1');
+}
+
+/**
+ * The gentle style's promise, measured, so a page in textbook register
+ * is sent back the way a page with a bad opener is: short sentences,
+ * everyday words, and every term of the chapter explained in the same
+ * breath the first time it is said.
+ */
+export function plainWordsProblems(
+  text: string,
+  options: { pageText: string; terms: string[]; taughtSoFar: string[] },
+): StyleProblem[] {
+  const problems: StyleProblem[] = [];
+  const sentences = sentencesOf(text);
+  if (!sentences.length) return problems;
+
+  // Sentences: about ten words each; one long one is a stacked clause.
+  const lengths = sentences.map((sentence) => wordCount(sentence));
+  const average = lengths.reduce((sum, n) => sum + n, 0) / lengths.length;
+  const longest = Math.max(...lengths);
+  if (average > 14 || longest > 25) {
+    const worst = sentences[lengths.indexOf(longest)];
+    problems.push({
+      kind: 'long_sentences',
+      detail: `Sentences average ${Math.round(average)} words and the longest has ${longest} ("${firstWords(worst, 8)}..."); a slow learner needs short ones, about ten words, one thing each`,
+    });
+  }
+
+  // Words: the lecturer's own long words, and the ones that say nothing,
+  // when the page itself does not use them.
+  const pageWords = new Set(plainWordsOf(options.pageText));
+  const pageStems = new Set([...pageWords].map(plainStem));
+  const termWords = new Set(options.terms.flatMap(plainWordsOf));
+  const known = (word: string) =>
+    pageWords.has(word) ||
+    termWords.has(word) ||
+    EVERYDAY_LONG_WORDS.has(word) ||
+    pageStems.has(plainStem(word));
+  const hard = new Set<string>();
+  const empty = new Set<string>();
+  for (const word of plainWordsOf(scriptForTts(text))) {
+    if (known(word)) continue;
+    if (EMPTY_WORDS.has(word)) empty.add(word);
+    else if (
+      syllablesOf(word) >= 5 ||
+      (syllablesOf(word) >= 4 && word.length >= 11) ||
+      word.length >= 13
+    ) {
+      hard.add(word);
+    }
+  }
+  // One word that says nothing is one too many; long words get some room.
+  if (empty.size || hard.size > 2) {
+    const named = [...empty, ...hard].slice(0, 6);
+    problems.push({
+      kind: 'hard_words',
+      detail: `Words the page does not use and a slow learner may not know: ${named
+        .map((word) => `"${word}"`)
+        .join(', ')}; say what actually happens, in everyday words`,
+    });
+  }
+
+  // Terms: each of the chapter's terms, the first time this page says it,
+  // is explained in the same breath, and never two in one sentence.
+  const lower = scriptForTts(text).toLowerCase();
+  const taught = options.taughtSoFar.map((line) => line.toLowerCase());
+  const firstUses: { term: string; sentence: number }[] = [];
+  for (const term of options.terms) {
+    const needle = term.toLowerCase().trim();
+    if (!needle) continue;
+    const at = lower.indexOf(needle);
+    if (at < 0) continue;
+    if (taught.some((line) => line.includes(needle))) continue;
+    // The sentence the term is first said in, and the one after it.
+    let offset = 0;
+    let index = -1;
+    const lowered = sentences.map((sentence) => sentence.toLowerCase());
+    for (let i = 0; i < lowered.length; i += 1) {
+      const start = lower.indexOf(lowered[i], offset);
+      if (start < 0) continue;
+      offset = start + lowered[i].length;
+      if (at >= start && at < offset) {
+        index = i;
+        break;
+      }
+    }
+    if (index < 0) continue;
+    firstUses.push({ term, sentence: index });
+    // The same breath: the sentence it is said in and the two after it.
+    // A sentence that opens on the term and says what it is counts too
+    // ("Virtual nodes are duplicate points on the ring").
+    const window = sentences.slice(index, index + 3).join(' ');
+    const subjectFirst = new RegExp(
+      `^(?:a |an |the )?${needle.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?:'s|'re|\\s+(?:is|are|means|refers))\\b`,
+      'i',
+    );
+    const explained =
+      MEANING_SIGNALS.test(window) ||
+      sentences
+        .slice(index, index + 3)
+        .some((sentence) => subjectFirst.test(sentence.toLowerCase()));
+    if (!explained) {
+      problems.push({
+        kind: 'term_unexplained',
+        detail: `"${term}" is said without its plain meaning beside it; the first time a term appears, say what it means in everyday words in the same breath`,
+      });
+    }
+  }
+  const bySentence = new Map<number, string[]>();
+  for (const use of firstUses) {
+    bySentence.set(use.sentence, [
+      ...(bySentence.get(use.sentence) ?? []),
+      use.term,
+    ]);
+  }
+  for (const terms of bySentence.values()) {
+    if (terms.length > 1) {
+      problems.push({
+        kind: 'two_terms',
+        detail: `"${terms[0]}" and "${terms[1]}" are introduced in the same sentence; one new term per sentence, each explained before the next`,
+      });
+      break;
+    }
+  }
   return problems;
 }
 
 // ── sections: the moves of a page, as written ───────────────────────────────
 
+/**
+ * One line the board writer planned for a page, before the speech was
+ * written. The speech writer is given the lines numbered and writes each
+ * one as it teaches: "[write n]" before the words spoken while line n is
+ * written, "[point n]" where the speech comes back to it.
+ */
+export interface BoardLine {
+  /** The line's number on the page, from 1, as the speech refers to it. */
+  number: number;
+  /** Which of the beat's moves the line is written during, from 0. */
+  move: number;
+  kind: 'term' | 'point' | 'figure';
+  text: string;
+  meaning: string | null;
+  level: 1 | 2 | null;
+  important: boolean | null;
+}
+
+/** The board planned for a page: its heading and its lines in writing order. */
+export interface PageBoard {
+  heading: string | null;
+  lines: BoardLine[];
+}
+
 export interface LectureSection {
   /** Which of the beat's moves this section teaches, from 0. */
   move: number;
   text: string;
+}
+
+/** The markers a board-aware script carries; the voice never hears them. */
+export const WRITE_MARKER = /\[\s*write\s+(\d+)\s*\]/gi;
+export const POINT_MARKER = /\[\s*point\s+(\d+)\s*\]/gi;
+
+/** Whether a script was written with its board: it carries write markers. */
+export function hasBoardMarkers(script: string): boolean {
+  return new RegExp(WRITE_MARKER.source, 'i').test(script);
+}
+
+/** The script with its board marks removed, for readers that must not see them. */
+export function withoutBoardMarkers(script: string): string {
+  return script
+    .replace(new RegExp(WRITE_MARKER.source, 'gi'), ' ')
+    .replace(new RegExp(POINT_MARKER.source, 'gi'), ' ')
+    .replace(/[ \t]+/g, ' ')
+    .replace(/ ?\n ?/g, '\n')
+    .trim();
 }
 
 /** The spoken script: the sections in order, a paragraph break between them. */

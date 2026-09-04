@@ -21,6 +21,7 @@ import {
   BOARD_GENERATOR_VERSION,
   boardIsCurrent,
   boardProblems,
+  repairCutWords,
   buildBoardOps,
   checkDraft,
   emptyTimeline,
@@ -39,6 +40,8 @@ import {
   mergeDrafts,
   lostItems,
   mergeRepairs,
+  boardMarks,
+  markedDraft,
 } from '../../business/domain/board';
 import { diagramAnchor, elementOrder } from '../../business/domain/diagram';
 import {
@@ -47,6 +50,8 @@ import {
   scriptForTts,
   type LectureBeat,
   type LecturePlan,
+  type LectureSection,
+  type PageBoard,
 } from '../../business/domain/lecture';
 
 /** The row a board belongs to, as every board call names it. */
@@ -91,6 +96,91 @@ export class LectureBoardService {
    * code, once with a correction and then by filtering. Stored as pending
    * with its anchors; the timer gives it its times once the audio exists.
    */
+  /**
+   * The board planned before the speech and placed by it: the plan's
+   * lines, each where the speech marked it. No model call; the rules
+   * still run so a bad line is left off, and the timer lets the voice
+   * wait for the pen.
+   */
+  async writeFromMarkers(input: {
+    key: BoardRowKey;
+    script: string;
+    pageText: string;
+    plan: LecturePlan;
+    beat: LectureBeat;
+    durationMs: number;
+    continues: boolean;
+    startLine?: number;
+    sections: LectureSection[];
+    board: PageBoard;
+  }): Promise<BoardTimeline | null> {
+    if (!this.enabled()) return null;
+    const { key } = input;
+    const spoken = scriptForTts(input.script);
+    try {
+      const marks = boardMarks(input.script, spoken, input.sections, {
+        heading: input.continues ? null : input.board.heading,
+        lines: input.board.lines,
+      });
+      if (!marks || !marks.lines.length) {
+        await this.lectures.saveBoard({
+          ...key,
+          board: { ...emptyTimeline(spoken.length), marked: true },
+          boardStatus: 'skipped',
+        });
+        return null;
+      }
+      const ctx: BoardContext = {
+        spoken,
+        pageText: input.pageText,
+        planLines: [
+          input.beat.goal,
+          input.beat.newHere ?? '',
+          ...(input.plan.terms ?? []).map(
+            (entry) => `${entry.term} ${entry.meaning}`,
+          ),
+        ],
+        style: key.style,
+        durationMs: input.durationMs,
+        continues: input.continues,
+        light: input.beat.weight === 'light',
+        startLine: input.startLine,
+        moves: [...(input.beat.moves ?? []), input.beat.goal],
+        goal: input.beat.goal,
+      };
+      const draft = markedDraft(marks);
+      const refused = boardProblems(draft, ctx).filter(
+        (problem) => problem.index !== undefined,
+      );
+      const unplaced = marks.lines.filter(
+        (line) => line.placed === 'move',
+      ).length;
+      if (refused.length || unplaced) {
+        this.logger.warn(
+          `${rowKey(key)} board: ${marks.lines.length} lines planned, ${unplaced} not said and placed at their move, ${refused.length} refused${refused.length ? `: ${refused.map((problem) => `${problem.kind} ${problem.detail}`).join('; ')}` : ''}`,
+        );
+      }
+      const built = buildBoardOps(
+        repairCutWords(draft, ctx),
+        ctx,
+        rowKey(key),
+        boardPrefix(key),
+      );
+      const timeline: BoardTimeline = {
+        ...emptyTimeline(spoken.length),
+        boards: built.boards,
+        ops: built.ops,
+        marked: true,
+        holds: [],
+      };
+      await this.timeFresh(key, timeline);
+      return timeline;
+    } catch (error) {
+      await this.fail(key, (error as Error).message);
+      return null;
+    }
+  }
+
   async writeForPage(input: {
     key: BoardRowKey;
     script: string;
@@ -187,7 +277,12 @@ export class LectureBoardService {
           draft = mergeRepairs(draft, repaired, ctx);
         }
       }
-      const built = buildBoardOps(draft, ctx, rowKey(key), boardPrefix(key));
+      const built = buildBoardOps(
+        repairCutWords(draft, ctx),
+        ctx,
+        rowKey(key),
+        boardPrefix(key),
+      );
       const timeline: BoardTimeline = {
         ...emptyTimeline(spoken.length),
         boards: built.boards,
@@ -241,7 +336,12 @@ export class LectureBoardService {
         continues: false,
         light: true,
       };
-      const built = buildBoardOps(draft, ctx, rowKey(key), boardPrefix(key));
+      const built = buildBoardOps(
+        repairCutWords(draft, ctx),
+        ctx,
+        rowKey(key),
+        boardPrefix(key),
+      );
       const timeline: BoardTimeline = {
         ...emptyTimeline(spoken.length),
         boards: built.boards,
@@ -370,7 +470,7 @@ export class LectureBoardService {
         wordTimes && wordTimes.audioKey === (row.audioKey ?? wordTimes.audioKey)
           ? wordTimes
           : estimateWordTimes(spoken, durationMs, row.audioKey ?? '');
-      const timed = timeBoard(timeline, times, durationMs, key.style);
+      const timed = timeBoard(timeline, times, durationMs, key.style, spoken);
       await this.lectures.saveBoard({
         ...key,
         board: timed,

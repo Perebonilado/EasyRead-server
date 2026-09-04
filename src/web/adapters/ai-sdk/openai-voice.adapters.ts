@@ -7,6 +7,7 @@ import type {
   SpeechPort,
   TranscriptionPort,
 } from '../../../business/ports/voice.port';
+import { mp3DurationMs, speechTooShort } from '../../../business/domain/speech';
 
 /**
  * Text-to-speech through the AI SDK's OpenAI provider.
@@ -59,14 +60,34 @@ export class OpenAiSpeechAdapter implements SpeechPort {
     };
 
     for (const part of parts) {
-      const result = await experimental_generateSpeech({
-        model: openai.speech(model),
-        text: part,
-        voice: chosenVoice,
-        outputFormat: 'mp3',
-        ...delivery,
-      });
-      buffers.push(Buffer.from(result.audio.uint8Array));
+      // The instruction-steered voice sometimes stops a few sentences in
+      // and returns the fragment as if it were the whole. A chunk far
+      // shorter than its words is asked for again, and given up on with a
+      // clear error rather than saved as a page with six seconds of audio.
+      let audio: Buffer | null = null;
+      for (let attempt = 1; attempt <= SHORT_SPEECH_ATTEMPTS; attempt += 1) {
+        const result = await experimental_generateSpeech({
+          model: openai.speech(model),
+          text: part,
+          voice: chosenVoice,
+          outputFormat: 'mp3',
+          ...delivery,
+        });
+        const bytes = Buffer.from(result.audio.uint8Array);
+        if (!speechTooShort(bytes.length, part.length)) {
+          audio = bytes;
+          break;
+        }
+        this.logger.warn(
+          `Speech came back short: ${Math.round(mp3DurationMs(bytes.length) / 1000)}s for ${part.length} chars (attempt ${attempt} of ${SHORT_SPEECH_ATTEMPTS})`,
+        );
+      }
+      if (!audio) {
+        throw new Error(
+          `The voice stopped early: ${part.length} characters came back as a few seconds of audio, three times`,
+        );
+      }
+      buffers.push(audio);
     }
 
     this.logger.log(
@@ -75,6 +96,9 @@ export class OpenAiSpeechAdapter implements SpeechPort {
     return { audio: Buffer.concat(buffers), mimeType: 'audio/mpeg', model };
   }
 }
+
+/** How many times a chunk that comes back short is asked for. */
+const SHORT_SPEECH_ATTEMPTS = 3;
 
 /** Splits on sentence ends, falling back to hard cuts for run-on text. */
 export function chunkText(text: string, limit: number): string[] {

@@ -13,6 +13,7 @@ import type {
   LlmResult,
   TopicDraft,
   LectureBoardDraft,
+  LectureBoardPlanDraft,
   LectureDiagramDraft,
 } from '../../business/ports/llm.port';
 
@@ -204,6 +205,16 @@ export class FakeLlmAdapter implements LlmGatewayPort {
     taughtSoFar: string[];
     comingLater: string[];
     list: { items: number } | null;
+    board: {
+      heading: string;
+      lines: {
+        number: number;
+        move: number;
+        kind: 'term' | 'point' | 'figure';
+        text: string;
+        meaning: string | null;
+      }[];
+    } | null;
     correction?: string;
     styleCorrection?: string;
     strict?: boolean;
@@ -235,12 +246,54 @@ export class FakeLlmAdapter implements LlmGatewayPort {
         index === 0
           ? `${lead}${body}${last ? closing : ''}${offending}`
           : `Then ${move.toLowerCase()}.${last ? closing : ''}`;
-      return { move: index, text: text.trim() };
+      // The board: every line given for this move is written as the
+      // section opens, marked the way the writer marks it.
+      const marks = (input.board?.lines ?? [])
+        .filter((line) => line.move === index)
+        .map((line) => `[write ${line.number}] `)
+        .join('');
+      return { move: index, text: `${marks}${text.trim()}` };
     });
     return {
       value: { sections },
       usage: this.usage(started, input.pageText.length / 4, 60),
     };
+  }
+
+  /**
+   * A deterministic board plan: the heading from the chapter, one term
+   * per move built from the move's own words, which the fake segment
+   * writer speaks at the head of that move's section.
+   */
+  lectureBoardPlan(input: {
+    topicTitle: string;
+    pageText: string;
+    goal: string;
+    newHere: string | null;
+    pitfall: string | null;
+    moves: string[];
+    terms: { term: string; meaning: string }[];
+    style: 'gentle' | 'steady' | 'brisk';
+    light: boolean;
+    correction?: string;
+  }): Promise<LlmResult<LectureBoardPlanDraft>> {
+    const started = Date.now();
+    const lines = input.moves.map((move, index) => ({
+      move: index,
+      kind: 'term' as const,
+      text: (index === 0 ? input.goal : move)
+        .split(/\s+/)
+        .slice(0, 2)
+        .join(' ')
+        .replace(/[.,;:]+$/, ''),
+      meaning: null,
+      level: null,
+      important: index === 0 ? true : null,
+    }));
+    return Promise.resolve({
+      value: { heading: `${input.topicTitle} in short`, lines },
+      usage: this.usage(started, input.pageText.length / 4, 40),
+    });
   }
 
   /** A deterministic extra: its kind and the lines it was built from. */

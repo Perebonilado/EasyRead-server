@@ -339,7 +339,10 @@ describe('AiSdkLlmAdapter', () => {
   it("tells the lecture writer the chapter has already opened, in the planner's words", async () => {
     mock.reply({
       sections: [
-        { move: 0, text: 'Because they guess, and they are usually right.' },
+        {
+          move: 0,
+          text: 'Because they guess, and they are usually right.',
+        },
         { move: 1, text: 'Eviction is the guess made visible.' },
       ],
     });
@@ -375,6 +378,18 @@ describe('AiSdkLlmAdapter', () => {
       taughtSoFar: ['What a cache is'],
       comingLater: ['Write-through versus write-back'],
       list: { items: 5 },
+      board: {
+        heading: 'Eviction',
+        lines: [
+          {
+            number: 1,
+            move: 0,
+            kind: 'term',
+            text: 'eviction',
+            meaning: 'a guess thrown away',
+          },
+        ],
+      },
     });
 
     expect(result.value.sections[0].text).toContain('usually right');
@@ -389,6 +404,9 @@ describe('AiSdkLlmAdapter', () => {
     expect(prompt).toContain('Length: 40 to 80 words');
     expect(prompt).toContain('0: why caches guess');
     expect(prompt).toContain('1: what eviction is');
+    // The planned board goes to the writer numbered, with its move.
+    expect(prompt).toContain('1. (move 0) TERM eviction : a guess thrown away');
+    expect(prompt).toContain('said word for word as its own sentence');
     expect(prompt).toContain('Already taught in this lecture');
     expect(prompt).toContain('Still to come in this chapter');
     expect(prompt).toContain('list of 5 items');
@@ -576,6 +594,7 @@ describe('AiSdkLlmAdapter', () => {
       taughtSoFar: [],
       comingLater: [],
       list: null,
+      board: null,
     });
 
     const prompt = JSON.stringify(mock.calls[0].body.messages);
@@ -619,13 +638,18 @@ describe('AiSdkLlmAdapter', () => {
       taughtSoFar: [],
       comingLater: [],
       list: null,
+      board: null,
     };
-    mock.reply({ sections: [{ move: 0, text: 'Early.' }] });
+    mock.reply({
+      sections: [{ move: 0, text: 'Early.' }],
+    });
     await adapter.lectureSegment({ ...base, pageIndex: 1, pageCount: 6 });
     expect(JSON.stringify(mock.calls[0].body.messages)).toContain(
       'restate the idea fully',
     );
-    mock.reply({ sections: [{ move: 0, text: 'Late.' }] });
+    mock.reply({
+      sections: [{ move: 0, text: 'Late.' }],
+    });
     await adapter.lectureSegment({ ...base, pageIndex: 5, pageCount: 6 });
     expect(JSON.stringify(mock.calls[1].body.messages)).toContain(
       'restate in a clause at most',

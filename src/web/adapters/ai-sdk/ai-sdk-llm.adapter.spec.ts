@@ -342,8 +342,9 @@ describe('AiSdkLlmAdapter', () => {
         {
           move: 0,
           text: 'Because they guess, and they are usually right.',
+          teaches: [],
         },
-        { move: 1, text: 'Eviction is the guess made visible.' },
+        { move: 1, text: 'Eviction is the guess made visible.', teaches: [] },
       ],
     });
 
@@ -369,6 +370,7 @@ describe('AiSdkLlmAdapter', () => {
       styleDirection: 'Say the idea, then stop.',
       budget: { min: 40, max: 80 },
       pageText: 'Caches evict.',
+      noteAddressed: null,
       prevTail: '',
       isFirstOfTopic: true,
       isLastOfTopic: false,
@@ -562,7 +564,13 @@ describe('AiSdkLlmAdapter', () => {
 
   it('tells the writer about the pitfall, the turn, the problem and where the page sits', async () => {
     mock.reply({
-      sections: [{ move: 0, text: 'Why do caches lie? Because they guess.' }],
+      sections: [
+        {
+          move: 0,
+          text: 'Why do caches lie? Because they guess.',
+          teaches: [],
+        },
+      ],
     });
 
     await adapter.lectureSegment({
@@ -587,6 +595,7 @@ describe('AiSdkLlmAdapter', () => {
       styleDirection: 'Say the idea, then stop.',
       budget: { min: 70, max: 140 },
       pageText: 'Caches evict.',
+      noteAddressed: null,
       prevTail: '',
       isFirstOfTopic: true,
       isLastOfTopic: false,
@@ -632,6 +641,7 @@ describe('AiSdkLlmAdapter', () => {
       styleDirection: 'Small steps.',
       budget: { min: 180, max: 300 },
       pageText: 'Caches evict.',
+      noteAddressed: null,
       prevTail: 'Earlier words.',
       isFirstOfTopic: false,
       isLastOfTopic: false,
@@ -644,14 +654,14 @@ describe('AiSdkLlmAdapter', () => {
       board: null,
     };
     mock.reply({
-      sections: [{ move: 0, text: 'Early.' }],
+      sections: [{ move: 0, text: 'Early.', teaches: [] }],
     });
     await adapter.lectureSegment({ ...base, pageIndex: 1, pageCount: 6 });
     expect(JSON.stringify(mock.calls[0].body.messages)).toContain(
       'restate the idea fully',
     );
     mock.reply({
-      sections: [{ move: 0, text: 'Late.' }],
+      sections: [{ move: 0, text: 'Late.', teaches: [] }],
     });
     await adapter.lectureSegment({ ...base, pageIndex: 5, pageCount: 6 });
     expect(JSON.stringify(mock.calls[1].body.messages)).toContain(

@@ -32,6 +32,8 @@ export interface LectureSegmentRecord {
   attempts: number;
   /** Where each move of the page begins in the script; null until written. */
   moveOffsets: number[] | null;
+  /** The note sentences the writer said each section teaches; null for rows written before it was asked. */
+  sectionTags?: unknown;
   /** The board timeline, as stored; null until the board writer ran. */
   board: unknown;
   /** Word times measured on the audio; null until aligned. */
@@ -134,6 +136,8 @@ export interface LectureRepository {
       scriptText: string;
       moveOffsets: number[];
       durationMs: number | null;
+      /** The writer's tags for the follow-along matcher; left as it is when omitted. */
+      sectionTags?: unknown;
     },
   ): Promise<void>;
   /** The audio exists: the page is playable. */

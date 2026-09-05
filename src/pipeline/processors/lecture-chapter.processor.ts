@@ -26,9 +26,13 @@ import type { TopicRepository } from '../../business/repositories/misc.repositor
 import type { SimplifiedPageRepository } from '../../business/repositories/simplified-page.repository';
 import type { Block } from '../../contracts';
 import {
+  type SectionTag,
+  noteAddressed,
   noteLevelFor,
   noteNumbered,
   noteProse,
+  noteUnits,
+  sectionTags,
 } from '../../business/domain/follow';
 import {
   LECTURE_GENERATOR_VERSION,
@@ -101,7 +105,10 @@ interface PageText {
 }
 
 /** A finished page: the words, and where each of its ideas begins. */
-type WrittenPage = PageScripts;
+type WrittenPage = PageScripts & {
+  /** What the writer said each section teaches, checked against the note; null without a note. */
+  sectionTags: SectionTag[] | null;
+};
 
 /**
  * One chapter's lecture, in one style: planned once, then written page by
@@ -770,12 +777,14 @@ export class LectureChapterProcessor {
         list: listShape(pageText),
         neighbours,
         original: note ? original : undefined,
+        note: note ?? undefined,
       });
 
       // Kept in memory too, so the next page in this loop sees it without
       // a round trip to the database.
       row.scriptText = written.script;
       row.moveOffsets = written.moveOffsets;
+      row.sectionTags = written.sectionTags;
 
       await this.lectures.markSegmentWritten({
         documentId: doc.id,
@@ -785,6 +794,7 @@ export class LectureChapterProcessor {
         scriptText: written.script,
         moveOffsets: written.moveOffsets,
         durationMs: estimateDurationMs(scriptForTts(written.script)),
+        sectionTags: written.sectionTags,
       });
 
       // The board for this page, from the accepted script. It can never
@@ -866,6 +876,8 @@ export class LectureChapterProcessor {
           scriptText: written.part.script,
           moveOffsets: written.part.moveOffsets,
           durationMs: estimateDurationMs(scriptForTts(written.part.script)),
+          // The same tags: the part's sections are found by their heads.
+          sectionTags: written.sectionTags,
         });
         // The second piece continues the page's board on the next free line.
         if (written.part.board?.lines.length) {
@@ -971,6 +983,8 @@ export class LectureChapterProcessor {
     neighbours: NeighbourPage[];
     /** The page's own text when the note stood in for it, for the verifier. */
     original?: string;
+    /** The note the page is taught from, for addressing and for checking the writer's tags. */
+    note?: Block[];
   }): Promise<WrittenPage> {
     const { style } = input;
     const beat = beatFor(input.plan, input.pageNumber);
@@ -1050,6 +1064,7 @@ export class LectureChapterProcessor {
         styleDirection: spec.direction,
         budget: { min: budget.min, max: budget.max },
         pageText: input.pageText,
+        noteAddressed: input.note ? noteAddressed(input.note) : null,
         prevTail: input.prevTail,
         isFirstOfTopic: input.isFirstOfTopic,
         isLastOfTopic: input.isLastOfTopic,
@@ -1162,12 +1177,17 @@ export class LectureChapterProcessor {
         }
         // A slow learner's long page is voiced as two pieces, one idea
         // each, cut at the move boundary nearest the middle.
-        return pageScripts(
-          input.opening,
-          sections,
-          shouldSplit(style, weight, sections),
-          board,
-        );
+        return {
+          ...pageScripts(
+            input.opening,
+            sections,
+            shouldSplit(style, weight, sections),
+            board,
+          ),
+          sectionTags: input.note
+            ? sectionTags(sections, noteUnits(input.note))
+            : null,
+        };
       }
       if (decision.action === 'fail') {
         throw new Error(`Script left the page: ${decision.reason}`);

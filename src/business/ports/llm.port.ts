@@ -118,6 +118,8 @@ export interface LectureSegmentDraft {
     move: number;
     /** The words, with [write n] before the words spoken while line n of the board is written. */
     text: string;
+    /** The note sentences the section explains, as the writer addressed them ("2.1", or "5" for a whole block). */
+    teaches?: string[];
   }[];
 }
 
@@ -252,6 +254,12 @@ export interface LlmGatewayPort {
     /** The style's spoken-word budget for this page, as the writer is told it. */
     budget: { min: number; max: number };
     pageText: string;
+    /**
+     * The note the page is taught from with every block and sentence
+     * addressed, so a section can name what it teaches; null when the
+     * page itself stands in for a note not yet written.
+     */
+    noteAddressed: string | null;
     prevTail: string;
     isFirstOfTopic: boolean;
     isLastOfTopic: boolean;
@@ -663,5 +671,9 @@ export interface LlmGatewayPort {
     profile: string;
   }): Promise<LlmResult<RecapBody>>;
 
-  embed(input: { texts: string[] }): Promise<LlmResult<number[][]>>;
+  /** Vectors for texts; `dimensions` asks the provider for shortened ones where it can, for callers that compare rather than store. */
+  embed(input: {
+    texts: string[];
+    dimensions?: number;
+  }): Promise<LlmResult<number[][]>>;
 }

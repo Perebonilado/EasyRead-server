@@ -15,6 +15,7 @@ import type { DocumentRepository } from '../../business/repositories/document.re
 import type { SummaryRepository } from '../../business/repositories/misc.repository';
 import type { SimplifiedPageRepository } from '../../business/repositories/simplified-page.repository';
 import { PipelineOrchestrator } from '../orchestrator.service';
+import { LectureFollowService } from './lecture-follow.service';
 import type { SimplifyJobData } from '../queues';
 import type { JobContext } from './base.processor';
 import { Logger } from '@nestjs/common';
@@ -42,6 +43,7 @@ export class SimplifyPageProcessor {
     @Inject(LLM_GATEWAY) private readonly llm: LlmGatewayPort,
     @Inject(EVENT_BUS) private readonly events: EventBusPort,
     private readonly pipeline: PipelineOrchestrator,
+    private readonly follows: LectureFollowService,
   ) {}
 
   async process(job: SimplifyJobData, context: JobContext): Promise<void> {
@@ -155,5 +157,17 @@ export class SimplifyPageProcessor {
       level,
     });
     await this.pipeline.afterSimplifyPage(documentId, level);
+    // A lecture already written for this page followed the old note; its
+    // tracks are matched again on the new one. Never on the page's path.
+    const doc = await this.documents.findById(documentId);
+    if (doc) {
+      await this.follows
+        .retrackPage(documentId, doc.contentVersion, pageNumber)
+        .catch((error: Error) =>
+          this.logger.warn(
+            `${documentId} p${pageNumber}: tracks not rebuilt after the note: ${error.message}`,
+          ),
+        );
+    }
   }
 }

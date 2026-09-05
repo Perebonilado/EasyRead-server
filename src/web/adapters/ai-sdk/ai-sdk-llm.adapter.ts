@@ -215,6 +215,7 @@ export class AiSdkLlmAdapter implements LlmGatewayPort, OnModuleInit {
     styleDirection: string;
     budget: { min: number; max: number };
     pageText: string;
+    noteAddressed: string | null;
     prevTail: string;
     isFirstOfTopic: boolean;
     isLastOfTopic: boolean;
@@ -328,7 +329,9 @@ export class AiSdkLlmAdapter implements LlmGatewayPort, OnModuleInit {
               )
               .join('\n')}`
           : 'This page has no board: no [write] or [point] marks.',
-        `\nThe page you are teaching:\n${input.pageText}`,
+        input.noteAddressed
+          ? `For each section, \`teaches\` lists the addresses of the sentences below it explains, in the order you explain them ("2.1"; a whole block as "5"), and is empty for a section that is your own example, a bridge or a callback.\nThe page you are teaching, every block and sentence addressed:\n${input.noteAddressed}`
+          : `\`teaches\` is empty for every section: this page has no addressed note.\nThe page you are teaching:\n${input.pageText}`,
       ]
         .filter(Boolean)
         .join('\n'),
@@ -1356,7 +1359,10 @@ export class AiSdkLlmAdapter implements LlmGatewayPort, OnModuleInit {
     };
   }
 
-  async embed(input: { texts: string[] }): Promise<LlmResult<number[][]>> {
+  async embed(input: {
+    texts: string[];
+    dimensions?: number;
+  }): Promise<LlmResult<number[][]>> {
     const started = Date.now();
     const { embedMany } = await this.registry.modules();
     const { model, ref } = await this.registry.embeddingModel();
@@ -1365,6 +1371,10 @@ export class AiSdkLlmAdapter implements LlmGatewayPort, OnModuleInit {
       model,
       values: input.texts,
       maxRetries: this.maxRetries(),
+      // A shortened vector where the provider offers one; ignored elsewhere.
+      ...(input.dimensions
+        ? { providerOptions: { openai: { dimensions: input.dimensions } } }
+        : {}),
     });
 
     return {

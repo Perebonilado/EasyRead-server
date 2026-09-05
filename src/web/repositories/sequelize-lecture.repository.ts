@@ -58,6 +58,7 @@ const toSegment = (row: LectureSegmentModel): LectureSegmentRecord => ({
   bridge: row.bridge,
   attempts: row.attempts,
   moveOffsets: row.moveOffsets ?? null,
+  sectionTags: row.sectionTags ?? null,
   board: row.board ?? null,
   wordTimes: row.wordTimes ?? null,
   boardStatus: row.boardStatus ?? 'none',
@@ -228,6 +229,7 @@ export class SequelizeLectureRepository implements LectureRepository {
       scriptText: string;
       moveOffsets: number[];
       durationMs: number | null;
+      sectionTags?: unknown;
     },
   ): Promise<void> {
     await this.segments.update(
@@ -236,6 +238,9 @@ export class SequelizeLectureRepository implements LectureRepository {
         scriptText: input.scriptText,
         moveOffsets: input.moveOffsets,
         durationMs: input.durationMs,
+        ...(input.sectionTags !== undefined
+          ? { sectionTags: input.sectionTags }
+          : {}),
         error: null,
       },
       { where: whereKey(input) },

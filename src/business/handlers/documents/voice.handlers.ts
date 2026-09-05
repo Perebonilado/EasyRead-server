@@ -88,14 +88,13 @@ import { EntitlementsService } from './entitlements.service';
 import {
   DEFAULT_LECTURE_STYLE,
   KIND_RANK,
+  beatFor,
   scriptForTts,
+  type LecturePlan,
 } from '../../domain/lecture';
-import {
-  boardLinesAt,
-  sentenceIndexAtMs,
-  type BoardTimeline,
-  type WordTimes,
-} from '../../domain/board';
+import { noteLevelFor, noteUnits } from '../../domain/follow';
+import { ASK_HEARD_CHARS, askInstructions, askSpeed } from '../../domain/ask';
+import { sentenceIndexAtMs, type WordTimes } from '../../domain/board';
 
 export type AudioLevel = 'original' | Level;
 
@@ -240,10 +239,18 @@ export interface VoiceSessionRequest {
     style?: LectureStyle;
     /** Which piece of the page the offset is in; omitted means the page. */
     kind?: 'page' | 'part';
-    /** What the tutor drew on the board in earlier questions, one line each. */
+    /** What the tutor drew on the board in earlier questions, one line each. Ignored now the board is hidden. */
     ink?: string[];
+    /** The note block and sentence the highlight was on when the mic was pressed. */
+    block?: number;
+    sentence?: number | null;
+    /** The note level the learner is reading. */
+    noteLevel?: Level;
   };
 }
+
+/** Mid-lecture, the tutor has one tool: handing back. */
+export const LECTURE_HANDBACK_TOOLS: RealtimeTool[] = [];
 
 /**
  * The session intents, spoken back to the tutor in the student's own
@@ -349,6 +356,10 @@ export const LECTURE_BOARD_TOOLS: RealtimeTool[] = [
     parameters: { type: 'object', properties: {} },
   },
 ];
+
+LECTURE_HANDBACK_TOOLS.push(
+  ...LECTURE_BOARD_TOOLS.filter((tool) => tool.name === LECTURE_TOOLS.RESUME),
+);
 
 export const TEACHING_TOOLS: RealtimeTool[] = [
   {
@@ -783,6 +794,8 @@ export class StartVoiceSessionHandler extends AbstractRequestHandlerTemplate<
     @Inject(PROFILE_CHANGE_REPOSITORY)
     private readonly profileChanges: ProfileChangeRepository,
     @Inject(AI_CALL_LOG_REPOSITORY) private readonly calls: AiCallLogRepository,
+    @Inject(SIMPLIFIED_PAGE_REPOSITORY)
+    private readonly simplified: SimplifiedPageRepository,
     private readonly access: DocumentAccessService,
     private readonly entitlements: EntitlementsService,
     private readonly config: ConfigService,
@@ -813,19 +826,9 @@ export class StartVoiceSessionHandler extends AbstractRequestHandlerTemplate<
             cmd.intent,
           )
         : cmd.mode === 'lecture'
-          ? await this.lectureInstructions(
-              doc.id,
-              doc.props.title,
-              summary,
-              tutor,
-              cmd.pageNumber,
-              doc.contentVersion,
-              cmd.lectureContext?.style ?? DEFAULT_LECTURE_STYLE,
-              cmd.lectureContext?.kind ?? 'page',
-              cmd.lectureContext?.offsetMs ?? 0,
-              cmd.lectureContext?.ink ?? [],
-            )
+          ? await this.lectureInstructions(doc, summary, tutor, cmd)
           : this.chatInstructions(doc.props.title, summary);
+    const lectureStyle = cmd.lectureContext?.style ?? DEFAULT_LECTURE_STYLE;
 
     // Told once: the moment a session carrying the narration exists, the
     // changes are spent. If the model skips the sentence, the settings screen
@@ -859,20 +862,32 @@ export class StartVoiceSessionHandler extends AbstractRequestHandlerTemplate<
             cmd.mode === 'teach'
               ? TEACHING_TOOLS
               : cmd.mode === 'lecture'
-                ? LECTURE_BOARD_TOOLS
+                ? LECTURE_HANDBACK_TOOLS
                 : undefined,
           // The tutor's voice; chat mode keeps the configured default. A
-          // question asked mid-lecture takes the LECTURE's voice, so the
-          // answer sounds like the same teacher who was just speaking
-          // rather than a stranger taking over the call.
+          // question asked mid-lecture takes the answering voice, cedar
+          // unless configured otherwise: the lecture's own engine has no
+          // such voice, so the same teacher is carried by the name on
+          // screen and the persona, not by an exact match.
           voice:
             cmd.mode === 'teach'
               ? tutor.voice.provider === 'openai'
                 ? tutor.voice.voiceId
                 : tutor.voice.openaiFallback
               : cmd.mode === 'lecture'
-                ? this.config.get<string>('AI_LECTURE_VOICE', 'alloy')
+                ? this.config.get<string>('AI_LECTURE_ASK_VOICE', 'cedar')
                 : undefined,
+          // Mid-lecture the learner holds the mic: the client commits every
+          // turn, the room never ends one, and the pace follows the style.
+          ...(cmd.mode === 'lecture'
+            ? {
+                audio: {
+                  turnDetection: 'off' as const,
+                  noiseReduction: 'near_field' as const,
+                  speed: askSpeed(lectureStyle),
+                },
+              }
+            : {}),
         });
 
     await this.calls.record({
@@ -897,102 +912,139 @@ export class StartVoiceSessionHandler extends AbstractRequestHandlerTemplate<
   /**
    * A question asked mid-lecture.
    *
-   * The tape is paused and the student is holding the mic, so this is the
-   * same teacher, still mid-class, answering an interruption. It carries
-   * what has been said so far and one hard rule: answer, hand back, stop.
-   * The client restarts the tape; continuing to lecture here would run two
-   * lectures at once.
+   * The tape is paused and the learner is holding the mic, so this is the
+   * same teacher, still mid-class, answering an interruption. The handler
+   * gathers where they are: the chapter and the page's place in it, what
+   * the chapter is about and what comes next, what has been said so far,
+   * the sentence that was being spoken, the note sentence that was lit,
+   * and a line about the learner. The words themselves are composed in
+   * the ask domain, where a spec can read them.
    */
   private async lectureInstructions(
-    documentId: string,
-    title: string,
+    doc: Awaited<ReturnType<DocumentAccessService['require']>>,
     summary: string | null,
     tutor: Tutor,
-    pageNumber: number,
-    contentVersion: number,
-    style: LectureStyle,
-    kind: 'page' | 'part' = 'page',
-    offsetMs = 0,
-    ink: string[] = [],
+    cmd: VoiceSessionRequest,
   ): Promise<string> {
+    const context = cmd.lectureContext;
+    const pageNumber = context?.pageNumber ?? cmd.pageNumber;
+    const style = context?.style ?? DEFAULT_LECTURE_STYLE;
+    const kind = context?.kind ?? 'page';
+    const offsetMs = context?.offsetMs ?? 0;
     const segments = await this.lectures
-      .listSegments(documentId, contentVersion, style)
+      .listSegments(doc.id, doc.contentVersion, style)
       .catch((): LectureSegmentRecord[] => []);
-
     const current = segments.find(
       (segment) => segment.pageNumber === pageNumber && segment.kind === kind,
     );
+
+    // The chapter: the row's own, else the one whose range holds the page.
+    const topics = await this.topics
+      .listByDocument(doc.id)
+      .catch((): Awaited<ReturnType<TopicRepository['listByDocument']>> => []);
+    const topic =
+      (current?.topicId
+        ? topics.find((candidate) => candidate.id === current.topicId)
+        : undefined) ??
+      topics.find(
+        (candidate) =>
+          pageNumber >= candidate.startPage && pageNumber <= candidate.endPage,
+      ) ??
+      null;
+    const chapterRows = segments.filter(
+      (segment) =>
+        (segment.kind === 'page' || segment.kind === 'part') &&
+        segment.topicId === (current?.topicId ?? topic?.id),
+    );
+    const chapterPages = [
+      ...new Set(chapterRows.map((segment) => segment.pageNumber)),
+    ].sort((a, b) => a - b);
+    const plan = topic
+      ? (((
+          await this.lectures
+            .findPlan(doc.id, topic.id, doc.contentVersion)
+            .catch(() => null)
+        )?.plan as LecturePlan | null | undefined) ?? null)
+      : null;
+    const nextPage = chapterPages.find((page) => page > pageNumber) ?? null;
+    const nextBeat = nextPage !== null && plan ? beatFor(plan, nextPage) : null;
+    const chapter = topic
+      ? {
+          title: topic.title,
+          pageIndex: Math.max(1, chapterPages.indexOf(pageNumber) + 1),
+          pageCount: Math.max(1, chapterPages.length),
+          arc: plan?.arc ?? null,
+          next: nextBeat ? nextBeat.newHere?.trim() || nextBeat.goal : null,
+        }
+      : null;
+
     // What the student has actually heard in this chapter, up to and
-    // including the sentence they interrupted. Pages and their pieces
-    // only: the check after the chapter has not been heard yet, and the
-    // words before it add nothing the pages do not say. A page cut in two
-    // counts its second piece only once the student is in it.
-    const heard = segments
+    // including the sentence they interrupted. A page cut in two counts
+    // its second piece only once the student is in it.
+    const heard = chapterRows
       .filter(
         (segment) =>
-          (segment.kind === 'page' || segment.kind === 'part') &&
-          segment.topicId === current?.topicId &&
           (segment.seq < (current?.seq ?? 0) ||
             (segment.seq === (current?.seq ?? 0) &&
               KIND_RANK[segment.kind] <= KIND_RANK[current?.kind ?? 'page'])) &&
           segment.scriptText,
       )
-      .map((segment) => segment.scriptText)
+      .map((segment) => scriptForTts(segment.scriptText ?? ''))
       .join('\n\n')
-      .slice(-4_000);
+      .slice(-ASK_HEARD_CHARS);
 
-    // The exact moment: the sentence being spoken when the mic was
-    // pressed, and the board as the learner sees it, so the answer can
-    // point at what is in front of them.
+    // The exact moment: the sentence being spoken when the mic was pressed.
     const times = current?.wordTimes as WordTimes | null;
     const spoken = current?.scriptText ? scriptForTts(current.scriptText) : '';
     let moment: string | null = null;
     if (times && times.sentences.length && spoken) {
       const index = sentenceIndexAtMs(times, offsetMs);
       const recent = times.sentences
-        .slice(Math.max(0, index - 3), index + 1)
+        .slice(Math.max(0, index - 2), index + 1)
         .map((sentence) => spoken.slice(sentence[0], sentence[1]));
       if (recent.length) {
-        moment = `The sentence you were saying when they pressed the mic (marked >>), with the ones before it:\n${recent
+        moment = `THE SENTENCE YOU WERE SAYING when they pressed the mic (marked >>), with the ones before it:\n${recent
           .map((line, i) => (i === recent.length - 1 ? `>> ${line}` : line))
           .join('\n')}`;
       }
     }
-    const board = current?.board as BoardTimeline | null;
-    const boardLines =
-      board && current?.boardStatus === 'done'
-        ? boardLinesAt(board, offsetMs)
-        : [];
-    const inkLines = ink.slice(0, 12).map((line) => `tutor | ink | ${line}`);
-    const boardText =
-      boardLines.length || inkLines.length
-        ? `On the whiteboard right now, one item per line as "id | kind | text"; refer to items by id in the board tools:\n${[...boardLines, ...inkLines].join('\n')}`
-        : null;
 
-    return [
-      `You are ${tutor.name}, mid-lecture on the document "${title}". The student has just interrupted you with a question, and your lecture is paused while you answer.`,
-      `${tutor.persona}\n\nYour teaching style:\n${dialInstructions(tutor.dials)}`,
-      summary ? `What the document covers:\n${summary}` : null,
-      heard
-        ? `What you have said in this chapter so far, most recent last:\n${heard}`
-        : null,
+    // The note sentence that was lit on their screen.
+    const noteLevel = context?.noteLevel ?? noteLevelFor(style);
+    let highlighted: string | null = null;
+    if (context?.block !== undefined) {
+      const page = await this.simplified
+        .find(doc.id, noteLevel, pageNumber)
+        .catch(() => null);
+      const unit = (page?.blocks ? noteUnits(page.blocks) : []).find(
+        (candidate) =>
+          candidate.block === context.block &&
+          (context.sentence === undefined ||
+            context.sentence === null ||
+            candidate.sentence === context.sentence),
+      );
+      highlighted = unit?.text ?? null;
+    }
+
+    const profile = await this.profiles.find(cmd.userId).catch(() => null);
+    const profileLine = profile?.styleNotes
+      ? `ABOUT THIS LEARNER, from earlier lessons: ${profile.styleNotes}`
+      : null;
+
+    return askInstructions({
+      tutor: { name: tutor.name, askPersona: tutor.askPersona },
+      title: doc.props.title,
+      summary,
+      style,
+      noteLevel,
+      pageNumber,
+      pageCount: doc.props.pageCount ?? null,
+      chapter,
+      heard,
       moment,
-      boardText,
-      'Answer THEIR question, briefly and directly, grounded in this document. Two to five sentences is usually right. Keep technical terms, names and numbers exactly as the document uses them.',
-      'Answer the step they are stuck on, not the whole idea again. If they were working something out rather than asking for a fact, say what they had right, the one thing that was off and why, and the next step; then leave them one question to think about as the lecture resumes. Never praise the person. An analogy is allowed if you call it one and tie it back to the term at once; no anecdotes.',
-      style === 'gentle'
-        ? 'This student learns slowly: pitch the answer one level plainer than the lecture, one idea, the term with its plain meaning beside it.'
-        : style === 'brisk'
-          ? 'This student is quick: pitch the answer one level further than the lecture, no restating of what the lecture already said, and prefer a hint that lets them finish the thought themselves.'
-          : null,
-      'If the document does not answer it, say so plainly rather than answering from general knowledge.',
-      `THE BOARD: while you answer you may add to the whiteboard with the board tools: ${LECTURE_TOOLS.HIGHLIGHT} to draw attention to an item by its id, ${LECTURE_TOOLS.WRITE} for a label of at most six words (with a plain meaning of a few words for a slow learner), ${LECTURE_TOOLS.ARROW} between two ids with a label of three words at most, ${LECTURE_TOOLS.NOTE} for a short remark beside an item. Say one short line before you draw, like "let me put that next to the bucket". At most three additions in one answer, never a sentence on the board, nothing the document does not say. When the answer is done, call ${LECTURE_TOOLS.RESUME} rather than asking whether they have more questions.`,
-      'OPENING: the call opens the moment they press the mic, before they have said anything. Your very first words are one short natural invitation to go ahead, at most four words, different each time ("Yes?", "Go ahead.", "What is on your mind?", "Mm-hm?"), and then you stop and listen. Never a greeting, never their name, never a summary of where you were.',
-      'HOW THIS ENDS: answer, then hand back in one short line, the way a lecturer does when a question is done — something like "Good question. Back to it." Then STOP. Do not resume the lecture, do not teach the next idea, do not ask whether they have more questions. The lecture restarts by itself the moment you finish.',
-      'This is speech: short plain sentences, no lists, no headings, no markdown. Never mention scripts, tapes, pages, or that you were paused.',
-    ]
-      .filter(Boolean)
-      .join('\n\n');
+      highlighted,
+      profileLine,
+    });
   }
 
   private chatInstructions(title: string, summary: string | null): string {

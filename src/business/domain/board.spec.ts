@@ -2323,6 +2323,9 @@ describe('what the fan-out review taught the rules', () => {
       .trim();
   it('places a figure the voice said in words', () => {
     expect(numbersAsWords('4 cache keys')).toBe('four cache keys');
+    // A decimal is one number, and a unit glued to a number is its own word.
+    expect(numbersAsWords('0.4GB a day')).toBe('zero point four GB a day');
+    expect(numbersAsWords('2.5 units')).toBe('two point five units');
     const spoken = 'We start with four cache keys. Each lands somewhere.';
     const marks = boardMarks(spoken, spoken, [{ move: 0, text: spoken }], {
       heading: 'Keys',

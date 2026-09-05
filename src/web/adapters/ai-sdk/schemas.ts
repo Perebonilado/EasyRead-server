@@ -423,6 +423,8 @@ export const lectureSegmentSchema = z.object({
       z.object({
         move: z.number().int().min(0).max(8),
         text: z.string().min(1).max(4000),
+        /** The note sentences this section explains, as "block.sentence" or "block"; empty for the writer's own words. */
+        teaches: z.array(z.string().min(1).max(12)).max(12),
       }),
     )
     .min(1)

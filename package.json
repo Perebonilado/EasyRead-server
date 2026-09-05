@@ -27,6 +27,8 @@
     "dev": "ts-node --transpile-only -r tsconfig-paths/register src/main.ts",
     "typecheck": "tsc --noEmit",
     "check:models": "ts-node --transpile-only scripts/check-models.ts",
+    "follow:eval": "ts-node --transpile-only -r tsconfig-paths/register scripts/follow-eval.ts",
+    "follow:embed": "ts-node --transpile-only -r tsconfig-paths/register scripts/follow-embed.ts",
     "check:storage": "ts-node --transpile-only scripts/check-storage.ts"
   },
   "dependencies": {

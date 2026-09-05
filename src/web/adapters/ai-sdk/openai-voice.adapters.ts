@@ -1,6 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import type {
+  RealtimeAudioOptions,
   RealtimePort,
   RealtimeSession,
   RealtimeTool,
@@ -150,10 +151,12 @@ export class OpenAiRealtimeAdapter implements RealtimePort {
     instructions,
     tools,
     voice: voiceOverride,
+    audio,
   }: {
     instructions: string;
     tools?: RealtimeTool[];
     voice?: string;
+    audio?: RealtimeAudioOptions;
   }): Promise<RealtimeSession> {
     const model = this.config.get<string>('AI_REALTIME_MODEL', 'gpt-realtime');
     const voice =
@@ -188,8 +191,19 @@ export class OpenAiRealtimeAdapter implements RealtimePort {
               // sides of the conversation, not just the tutor's.
               input: {
                 transcription: { model: 'gpt-4o-mini-transcribe' },
+                // Off means the client commits every turn itself
+                // (hold-to-talk); the provider's own detection otherwise.
+                ...(audio?.turnDetection === 'off'
+                  ? { turn_detection: null }
+                  : {}),
+                ...(audio?.noiseReduction
+                  ? { noise_reduction: { type: audio.noiseReduction } }
+                  : {}),
               },
-              output: { voice },
+              output: {
+                voice,
+                ...(audio?.speed ? { speed: audio.speed } : {}),
+              },
             },
           },
         }),

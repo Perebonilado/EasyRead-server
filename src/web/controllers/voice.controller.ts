@@ -89,6 +89,24 @@ class LectureContextDto {
   @IsString({ each: true })
   @MaxLength(160, { each: true })
   ink?: string[];
+
+  /** The note block and sentence the highlight was on when the mic was pressed. */
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(0)
+  block?: number;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(0)
+  sentence?: number;
+
+  /** The note level the learner is reading. */
+  @IsOptional()
+  @IsIn(['standard', 'easiest'])
+  noteLevel?: 'standard' | 'easiest';
 }
 
 class VoiceSessionDto {

@@ -72,11 +72,23 @@ export type RealtimeSession =
  * expiring key with the session's instructions baked in. The long-lived API
  * key stays on the server.
  */
+/**
+ * How the session hears and speaks. Turn detection off means the model
+ * never decides a turn ended: the client commits turns itself, which is
+ * what hold-to-talk needs. Speed is the output rate; 1 is natural.
+ */
+export interface RealtimeAudioOptions {
+  turnDetection?: 'auto' | 'off';
+  noiseReduction?: 'near_field' | 'far_field';
+  speed?: number;
+}
+
 export interface RealtimePort {
   createSession(input: {
     instructions: string;
     tools?: RealtimeTool[];
     /** Overrides the configured default — this is how tutors sound different. */
     voice?: string;
+    audio?: RealtimeAudioOptions;
   }): Promise<RealtimeSession>;
 }

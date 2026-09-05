@@ -1146,6 +1146,8 @@ export interface LectureSection {
   /** Which of the beat's moves this section teaches, from 0. */
   move: number;
   text: string;
+  /** The note sentences the writer says the section explains, as addressed ("2.1", or "5" for a block). */
+  teaches?: string[];
 }
 
 /**

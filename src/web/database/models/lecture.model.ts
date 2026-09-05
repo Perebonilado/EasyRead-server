@@ -96,6 +96,10 @@ export class LectureSegmentModel extends BaseModel {
   @Column({ type: DataType.JSON, allowNull: true })
   declare moveOffsets: number[] | null;
 
+  /** What the writer said each section teaches in the note, for the follow-along matcher. */
+  @Column({ type: DataType.JSON, allowNull: true })
+  declare sectionTags: unknown;
+
   /** What the lecturer writes and draws while this row plays. */
   @Column({ type: DataType.JSON, allowNull: true })
   declare board: unknown;

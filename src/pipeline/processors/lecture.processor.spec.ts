@@ -252,6 +252,7 @@ function fakes(
       r.scriptText = input.scriptText;
       r.moveOffsets = input.moveOffsets;
       r.durationMs = input.durationMs;
+      if (input.sectionTags !== undefined) r.sectionTags = input.sectionTags;
       return Promise.resolve();
     },
     markSegmentDone: (input) => {
@@ -463,6 +464,8 @@ const followService = (f: ReturnType<typeof fakes>) =>
     f.lectures,
     { find: () => Promise.resolve(null) } as never,
     f.deps.events as never,
+    new FakeLlmAdapter(),
+    f.deps.calls,
   );
 
 const voiceProcessor = (

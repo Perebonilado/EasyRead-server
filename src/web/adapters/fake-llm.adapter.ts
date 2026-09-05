@@ -197,6 +197,7 @@ export class FakeLlmAdapter implements LlmGatewayPort {
     styleDirection: string;
     budget: { min: number; max: number };
     pageText: string;
+    noteAddressed: string | null;
     prevTail: string;
     isFirstOfTopic: boolean;
     isLastOfTopic: boolean;
@@ -253,7 +254,13 @@ export class FakeLlmAdapter implements LlmGatewayPort {
         .filter((line) => line.move === index)
         .map((line) => `[write ${line.number}] `)
         .join('');
-      return { move: index, text: `${marks}${text.trim()}` };
+      // The fake teaches the first sentence of the first block, when the
+      // note is addressed, so the tags path is exercised end to end.
+      return {
+        move: index,
+        text: `${marks}${text.trim()}`,
+        teaches: index === 0 && input.noteAddressed ? ['0.0'] : [],
+      };
     });
     return {
       value: { sections },
@@ -1029,7 +1036,12 @@ export class FakeLlmAdapter implements LlmGatewayPort {
    * comparable — similar text scores higher — which is enough to exercise
    * retrieval and the vector-store contract tests.
    */
-  async embed({ texts }: { texts: string[] }): Promise<LlmResult<number[][]>> {
+  async embed({
+    texts,
+  }: {
+    texts: string[];
+    dimensions?: number;
+  }): Promise<LlmResult<number[][]>> {
     const started = Date.now();
     const value = texts.map((text) => {
       const vector = new Array<number>(EMBED_DIMENSIONS).fill(0);

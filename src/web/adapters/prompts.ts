@@ -757,6 +757,16 @@ export const PROMPTS = {
       'than [write n], [point n] and, at the turn, [pause].',
     ].join(' '),
     [
+      'WHAT EACH SECTION TEACHES. The page is given to you with its blocks',
+      'and sentences addressed, [2.1] being block 2, sentence 1. Each',
+      'section names, in `teaches`, the addresses of the sentences it',
+      'explains, in the order you explain them; a section that summarises a',
+      'whole block names the block ("5"); a section that is your own',
+      'example, a bridge or a callback names nothing. Name only what the',
+      'section actually explains, never every sentence of the block, so a',
+      'reader following along sees the right line lit as you speak.',
+    ].join(' '),
+    [
       'Length is given with the page. Never begin a sentence with "Imagine"',
       'or "Picture". Every sentence must teach, connect or land; cut any that',
       'does none of these. Return the words you speak with the board marks',

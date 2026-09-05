@@ -137,7 +137,9 @@ export class LectureStatusHandler extends AbstractRequestHandlerTemplate<
         row.status === 'done' &&
         (row.kind === 'page' || row.kind === 'part') &&
         (row.followStatus !== 'done' ||
-          !followIsCurrent((row.follow as FollowTrack | null) ?? null)),
+          !followIsCurrent((row.follow as FollowTrack | null) ?? null) ||
+          // Built while the embedding service was away: worth another go.
+          (row.follow as FollowTrack | null)?.meaning === false),
     );
     if (untracked.length) {
       const here = position?.pageNumber ?? untracked[0].pageNumber;

@@ -1,6 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import type {
+  RealtimeAudioOptions,
   RealtimeSession,
   RealtimeTool,
   SpeechPort,
@@ -100,6 +101,8 @@ export class ElevenLabsRealtimeAdapter {
     instructions: string;
     tools?: RealtimeTool[];
     voice?: string;
+    /** Turn detection and speed are the agent's own settings there; not applied per session. */
+    audio?: RealtimeAudioOptions;
   }): Promise<RealtimeSession> {
     if (!voice) throw new Error('An ElevenLabs voice id is required');
     const agentId = await this.ensureAgent(tools ?? []);

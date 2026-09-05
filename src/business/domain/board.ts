@@ -484,9 +484,24 @@ const NUMBER_WORDS: Record<string, string> = {
   '1000': 'a thousand',
 };
 
-/** The text with its small numbers written as the voice says them. */
+/**
+ * The text with its small numbers written as the voice says them. A
+ * decimal is one number, said with its point ("0.4" is "zero point four",
+ * never "zero" and "four"), and a unit stuck to a number is its own word
+ * ("0.4GB" is "zero point four GB").
+ */
 export function numbersAsWords(text: string): string {
-  return text.replace(/\b\d+\b/g, (digits) => NUMBER_WORDS[digits] ?? digits);
+  return text
+    .replace(/(\d)([a-zA-Z])/g, '$1 $2')
+    .replace(
+      /\b(\d+)\.(\d+)\b/g,
+      (_all, whole: string, fraction: string) =>
+        `${NUMBER_WORDS[whole] ?? whole} point ${fraction
+          .split('')
+          .map((digit) => NUMBER_WORDS[digit] ?? digit)
+          .join(' ')}`,
+    )
+    .replace(/\b\d+\b/g, (digits) => NUMBER_WORDS[digits] ?? digits);
 }
 
 /**
@@ -514,15 +529,24 @@ function stem(word: string): string {
 /** Sentence spans of a spoken text, as offsets into it. */
 export function sentenceSpans(spoken: string): BoardAnchor[] {
   const spans: BoardAnchor[] = [];
-  const pattern = /[^.!?]+(?:[.!?]+["')\]]*|$)/g;
-  let match: RegExpExecArray | null;
-  while ((match = pattern.exec(spoken)) !== null) {
-    if (!match[0].trim()) continue;
-    const leading = match[0].length - match[0].trimStart().length;
-    const charStart = match.index + leading;
-    const charEnd = match.index + match[0].trimEnd().length;
+  // A sentence ends at terminal punctuation, and any closer after it, only
+  // when whitespace or the end follows: "0.4 GB" and "api.example.com" are
+  // one sentence, not two.
+  const boundary = /[.!?]+["')\]]*(?=\s|$)/g;
+  let start = 0;
+  const push = (end: number) => {
+    const piece = spoken.slice(start, end);
+    const leading = piece.length - piece.trimStart().length;
+    const charStart = start + leading;
+    const charEnd = start + piece.trimEnd().length;
     if (charEnd > charStart) spans.push({ charStart, charEnd });
+  };
+  for (const match of spoken.matchAll(boundary)) {
+    const end = match.index + match[0].length;
+    push(end);
+    start = end;
   }
+  if (start < spoken.length) push(spoken.length);
   return spans;
 }
 

@@ -246,6 +246,8 @@ export interface VoiceSessionRequest {
     sentence?: number | null;
     /** The note level the learner is reading. */
     noteLevel?: Level;
+    /** The conversation so far, when a dropped session is being resumed: the tutor must still remember. */
+    conversation?: { role: 'learner' | 'tutor'; text: string }[];
   };
 }
 
@@ -882,6 +884,8 @@ export class StartVoiceSessionHandler extends AbstractRequestHandlerTemplate<
           ...(cmd.mode === 'lecture'
             ? {
                 audio: {
+                  // Hold to talk: the learner's release ends a turn and
+                  // nothing else does; the client commits and asks.
                   turnDetection: 'off' as const,
                   noiseReduction: 'near_field' as const,
                   speed: askSpeed(lectureStyle),
@@ -1044,6 +1048,7 @@ export class StartVoiceSessionHandler extends AbstractRequestHandlerTemplate<
       moment,
       highlighted,
       profileLine,
+      conversation: context?.conversation ?? null,
     });
   }
 

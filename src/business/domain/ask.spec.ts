@@ -1,5 +1,12 @@
 import { LECTURE_TOOLS } from '../../contracts';
-import { askDelivery, askInstructions, askSpeed, type AskContext } from './ask';
+import { TUTORS } from './values/tutors';
+import {
+  askDelivery,
+  askInstructions,
+  askSpeed,
+  conversationSoFar,
+  type AskContext,
+} from './ask';
 
 const base: AskContext = {
   tutor: {
@@ -25,6 +32,7 @@ const base: AskContext = {
   highlighted:
     'We use a method called the modular operation, which helps us divide the keys among the remaining servers.',
   profileLine: 'ABOUT THIS LEARNER, from earlier lessons: examples land best.',
+  conversation: null,
 };
 
 describe('a question mid-lecture: what the tutor is told', () => {
@@ -52,13 +60,42 @@ describe('a question mid-lecture: what the tutor is told', () => {
     expect(text).not.toContain('SPEAK SLOWLY');
   });
 
-  it('ends with the protocol, and names the one tool', () => {
+  it('is one conversation that keeps the door open and ends by consent', () => {
+    expect(text).toContain('THIS IS ONE CONVERSATION for the whole lecture');
+    expect(text).toContain('being cut off mid-sentence is normal here');
+    expect(text).toContain('you remember everything said in it');
+    expect(text).toContain('ANSWER THE QUESTION PROPERLY');
+    expect(text).toContain('Stop when it is answered');
+    expect(text.indexOf('THEN A DOOR OPEN')).toBeGreaterThan(
+      text.indexOf('ANSWER THE QUESTION PROPERLY'),
+    );
+    expect(text).toContain('There is no fixed length');
+    expect(text).toContain('Never "does that clear it up"');
+    expect(text).not.toContain('ask one short check');
     const ending = text.indexOf('HOW THIS ENDS');
     expect(ending).toBeGreaterThan(text.indexOf('GROUNDING'));
-    expect(text).toContain('ask one short check');
-    expect(text).toContain(`The hand-back tool is ${LECTURE_TOOLS.RESUME}`);
-    expect(text).toContain('It is the only tool');
-    expect(text).toContain('Call it only after your closing line');
+    expect(text).toContain('by their say-so');
+    expect(text).toContain('Never propose ending on your own');
+    expect(text).toContain(
+      `call ${LECTURE_TOOLS.RESUME}, the hand-back tool, your only tool, after the line and never before`,
+    );
+  });
+
+  it('reminds a resumed session of the conversation so far', () => {
+    const lines = [
+      { role: 'learner' as const, text: 'What is a  virtual node?' },
+      {
+        role: 'tutor' as const,
+        text: 'A server split into pieces on the ring. Want the example?',
+      },
+    ];
+    expect(conversationSoFar(lines, 'Sam')).toBe(
+      'Learner: What is a virtual node?\nSam: A server split into pieces on the ring. Want the example?',
+    );
+    const resumed = askInstructions({ ...base, conversation: lines });
+    expect(resumed).toContain('THE CONVERSATION SO FAR');
+    expect(resumed).toContain('Sam: A server split');
+    expect(text).not.toContain('THE CONVERSATION SO FAR');
   });
 
   it('leaves out what it does not have', () => {
@@ -77,15 +114,38 @@ describe('a question mid-lecture: what the tutor is told', () => {
     expect(bare).not.toContain('ABOUT THIS LEARNER');
   });
 
-  it('answers for the learner it has: slower and plainer, quicker and shorter', () => {
-    expect(askDelivery('gentle')).toContain('One idea per answer');
-    expect(askDelivery('brisk')).toContain('shortest true answer');
-    expect(askDelivery('steady')).toContain('two to four sentences');
-    expect(askSpeed('gentle')).toBeLessThan(1);
-    expect(askSpeed('steady')).toBe(1);
-    expect(askSpeed('brisk')).toBeGreaterThan(1);
+  it('answers for the learner it has: less and plainer, or shorter, never slower', () => {
+    expect(askDelivery('gentle')).toContain('explain fully in small steps');
+    expect(askDelivery('brisk')).toContain('A complete answer');
+    expect(askDelivery('steady')).toContain('A complete explanation');
+    for (const style of ['gentle', 'steady', 'brisk'] as const) {
+      expect(askSpeed(style)).toBe(1);
+      // Pace lives in the content: nothing here names a tempo.
+      expect(askDelivery(style)).not.toMatch(/pause|beat|unhurried|slow down/i);
+    }
     expect(askInstructions({ ...base, style: 'gentle' })).toContain(
       'This learner learns slowly',
     );
+  });
+
+  it("no tutor's interruption persona names a tempo, and each leads with the answer then explains", () => {
+    for (const tutor of TUTORS) {
+      expect(tutor.askPersona).not.toMatch(
+        /unhurried|slow|pause|take your time/i,
+      );
+      expect(tutor.askPersona).toContain('Lead with the answer');
+      expect(tutor.askPersona).toContain('explain it');
+      expect(tutor.askPersona).toContain('No lead-in');
+    }
+  });
+
+  it('nothing asks for a short answer: not the instructions, not a persona, not a style', () => {
+    const clipped =
+      /\bbrief\b|shortest|first sentence|at most (?:one|two|three|four|five|\d)/i;
+    expect(text).not.toMatch(clipped);
+    for (const style of ['gentle', 'steady', 'brisk'] as const) {
+      expect(askDelivery(style)).not.toMatch(clipped);
+    }
+    for (const tutor of TUTORS) expect(tutor.askPersona).not.toMatch(clipped);
   });
 });

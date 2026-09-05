@@ -61,6 +61,15 @@ import { CurrentUser } from '../security/current-user.decorator';
 
 const AUDIO_LEVELS: AudioLevel[] = ['original', 'standard', 'easiest'];
 
+class ConversationLineDto {
+  @IsIn(['learner', 'tutor'])
+  role!: 'learner' | 'tutor';
+
+  @IsString()
+  @MaxLength(600)
+  text!: string;
+}
+
 class LectureContextDto {
   @Type(() => Number)
   @IsInt()
@@ -107,6 +116,14 @@ class LectureContextDto {
   @IsOptional()
   @IsIn(['standard', 'easiest'])
   noteLevel?: 'standard' | 'easiest';
+
+  /** The conversation so far, when a dropped session is being resumed. */
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(24)
+  @ValidateNested({ each: true })
+  @Type(() => ConversationLineDto)
+  conversation?: ConversationLineDto[];
 }
 
 class VoiceSessionDto {

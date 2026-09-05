@@ -195,7 +195,18 @@ export class OpenAiRealtimeAdapter implements RealtimePort {
                 // (hold-to-talk); the provider's own detection otherwise.
                 ...(audio?.turnDetection === 'off'
                   ? { turn_detection: null }
-                  : {}),
+                  : audio?.turnDetection === 'semantic'
+                    ? {
+                        turn_detection: {
+                          type: 'semantic_vad',
+                          eagerness: audio.eagerness ?? 'medium',
+                          create_response: true,
+                          // The room never cuts the tutor off; the learner
+                          // does, by the button.
+                          interrupt_response: false,
+                        },
+                      }
+                    : {}),
                 ...(audio?.noiseReduction
                   ? { noise_reduction: { type: audio.noiseReduction } }
                   : {}),

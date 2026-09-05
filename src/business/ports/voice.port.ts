@@ -78,7 +78,14 @@ export type RealtimeSession =
  * what hold-to-talk needs. Speed is the output rate; 1 is natural.
  */
 export interface RealtimeAudioOptions {
-  turnDetection?: 'auto' | 'off';
+  /**
+   * 'auto' is the provider's default; 'off' means the client commits every
+   * turn; 'semantic' has the model listen for the end of a thought rather
+   * than a fixed silence, and never interrupt itself on its own.
+   */
+  turnDetection?: 'auto' | 'off' | 'semantic';
+  /** How quickly semantic detection decides the learner has finished. */
+  eagerness?: 'low' | 'medium' | 'high';
   noiseReduction?: 'near_field' | 'far_field';
   speed?: number;
 }

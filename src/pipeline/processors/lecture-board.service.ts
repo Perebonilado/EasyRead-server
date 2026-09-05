@@ -50,6 +50,7 @@ import {
   scriptForTts,
   type LectureBeat,
   type LecturePlan,
+  pauseOffsets,
   type LectureSection,
   type PageBoard,
 } from '../../business/domain/lecture';
@@ -87,7 +88,9 @@ export class LectureBoardService {
 
   /** Boards are on unless the deployment turned them off. */
   enabled(): boolean {
-    return this.config.get<string>('LECTURE_BOARD_ENABLED', 'true') !== 'false';
+    // Hidden for now: the simplified note is what the reader follows. Set
+    // LECTURE_BOARD_ENABLED=true to bring the board back.
+    return this.config.get<string>('LECTURE_BOARD_ENABLED', 'false') === 'true';
   }
 
   /**
@@ -118,10 +121,33 @@ export class LectureBoardService {
     const { key } = input;
     const spoken = scriptForTts(input.script);
     try {
-      const marks = boardMarks(input.script, spoken, input.sections, {
+      const placed = boardMarks(input.script, spoken, input.sections, {
         heading: input.continues ? null : input.board.heading,
         lines: input.board.lines,
       });
+      // A line the lecturer never said is not written: the board carries
+      // what was taught aloud, and a line from nowhere would only puzzle.
+      const unsaid =
+        placed?.lines.filter((line) => line.placed === 'move') ?? [];
+      const keptIndex = new Map<number, number>();
+      placed?.lines.forEach((line, index) => {
+        if (line.placed !== 'move') keptIndex.set(index, keptIndex.size);
+      });
+      const marks = placed
+        ? {
+            ...placed,
+            lines: placed.lines.filter((line) => line.placed !== 'move'),
+            // A cue on a line that stays keeps pointing at it.
+            cues: placed.cues
+              .filter((cue) => keptIndex.has(cue.line))
+              .map((cue) => ({ ...cue, line: keptIndex.get(cue.line)! })),
+          }
+        : null;
+      if (unsaid.length) {
+        this.logger.warn(
+          `${rowKey(key)} board: ${unsaid.length} planned line${unsaid.length === 1 ? '' : 's'} never said, left off: ${unsaid.map((line) => `"${line.text}"`).join(', ')}`,
+        );
+      }
       if (!marks || !marks.lines.length) {
         await this.lectures.saveBoard({
           ...key,
@@ -147,17 +173,15 @@ export class LectureBoardService {
         startLine: input.startLine,
         moves: [...(input.beat.moves ?? []), input.beat.goal],
         goal: input.beat.goal,
+        heading: input.board.heading ?? undefined,
       };
       const draft = markedDraft(marks);
       const refused = boardProblems(draft, ctx).filter(
         (problem) => problem.index !== undefined,
       );
-      const unplaced = marks.lines.filter(
-        (line) => line.placed === 'move',
-      ).length;
-      if (refused.length || unplaced) {
+      if (refused.length) {
         this.logger.warn(
-          `${rowKey(key)} board: ${marks.lines.length} lines planned, ${unplaced} not said and placed at their move, ${refused.length} refused${refused.length ? `: ${refused.map((problem) => `${problem.kind} ${problem.detail}`).join('; ')}` : ''}`,
+          `${rowKey(key)} board: ${marks.lines.length} lines said, ${refused.length} refused: ${refused.map((problem) => `${problem.kind} ${problem.detail}`).join('; ')}`,
         );
       }
       const built = buildBoardOps(
@@ -166,6 +190,19 @@ export class LectureBoardService {
         rowKey(key),
         boardPrefix(key),
       );
+      // Every line refused: nothing to write, and nothing to wait for.
+      const anyWritten = built.ops.some(
+        (op) =>
+          op.kind === 'term' || op.kind === 'point' || op.kind === 'figure',
+      );
+      if (!anyWritten) {
+        await this.lectures.saveBoard({
+          ...key,
+          board: { ...emptyTimeline(spoken.length), marked: true },
+          boardStatus: 'skipped',
+        });
+        return null;
+      }
       const timeline: BoardTimeline = {
         ...emptyTimeline(spoken.length),
         boards: built.boards,
@@ -470,7 +507,14 @@ export class LectureBoardService {
         wordTimes && wordTimes.audioKey === (row.audioKey ?? wordTimes.audioKey)
           ? wordTimes
           : estimateWordTimes(spoken, durationMs, row.audioKey ?? '');
-      const timed = timeBoard(timeline, times, durationMs, key.style, spoken);
+      const timed = timeBoard(
+        timeline,
+        times,
+        durationMs,
+        key.style,
+        spoken,
+        pauseOffsets(row.scriptText ?? ''),
+      );
       await this.lectures.saveBoard({
         ...key,
         board: timed,

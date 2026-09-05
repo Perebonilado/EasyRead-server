@@ -60,6 +60,8 @@ interface OpBase {
    * the written ones one for one.
    */
   pace?: number[];
+  /** The line's number on the page as planned, which the script's marks name. */
+  number?: number;
 }
 
 export type BoardOp =
@@ -185,7 +187,7 @@ export function boardTimeOf(
 ): number {
   let extra = 0;
   for (const hold of timeline.holds ?? []) {
-    if (hold.atMs < audioMs) extra += hold.forMs;
+    if (hold.atMs <= audioMs) extra += hold.forMs;
   }
   return audioMs + extra;
 }
@@ -296,6 +298,18 @@ export const LIFT_MS = 250;
 export const MARKED_LEAD_MS = 300;
 /** The longest the voice waits for the pen at one hold; past it the pen hurries. */
 export const MAX_HOLD_MS = 2500;
+/** How many lines of a page may be written in the second pen: the ones it turns on. */
+export const MAX_IMPORTANT = 3;
+/** A dictated line is never written faster than this, however short its words came out. */
+export const DICTATED_MIN_MS = 800;
+export const DICTATED_MIN_SHARE = 0.4;
+
+/** How long the voice waits at a [pause] so the listener can read what was just written or think. */
+export const PAUSE_MS: Record<LectureStyle, number> = {
+  gentle: 3500,
+  steady: 2500,
+  brisk: 1500,
+};
 export const CUE_DURATION_MS = 450;
 export const CUE_TAIL_MS = 400;
 export const BOUNDARY_MS = 400;
@@ -438,6 +452,41 @@ export function normalise(text: string): string {
     .replace(/[^a-z0-9]+/g, ' ')
     .replace(/\s+/g, ' ')
     .trim();
+}
+
+/** "four" for "4": a figure said in words is still said. */
+const NUMBER_WORDS: Record<string, string> = {
+  '0': 'zero',
+  '1': 'one',
+  '2': 'two',
+  '3': 'three',
+  '4': 'four',
+  '5': 'five',
+  '6': 'six',
+  '7': 'seven',
+  '8': 'eight',
+  '9': 'nine',
+  '10': 'ten',
+  '11': 'eleven',
+  '12': 'twelve',
+  '13': 'thirteen',
+  '14': 'fourteen',
+  '15': 'fifteen',
+  '16': 'sixteen',
+  '17': 'seventeen',
+  '18': 'eighteen',
+  '19': 'nineteen',
+  '20': 'twenty',
+  '30': 'thirty',
+  '40': 'forty',
+  '50': 'fifty',
+  '100': 'a hundred',
+  '1000': 'a thousand',
+};
+
+/** The text with its small numbers written as the voice says them. */
+export function numbersAsWords(text: string): string {
+  return text.replace(/\b\d+\b/g, (digits) => NUMBER_WORDS[digits] ?? digits);
 }
 
 /**
@@ -639,6 +688,18 @@ const HEADING_VERBS =
 const LABEL_ENDINGS =
   /\b(?:focus|flexibility|consideration|considerations|response|solution|process|importance|overview|challenges?|significance|aspects?|concerns?|situations?|problems?|issues?|matters|factors?|strategies|approach(?:es)?|methods?|techniques?)$/i;
 
+/**
+ * A line that cheers rather than teaches: the closing move's "keep
+ * exploring", "great job", "you now have a solid foundation". Never a
+ * note, whatever the page says.
+ */
+const ENCOURAGEMENT =
+  /\b(?:keep (?:learning|exploring|going|digging|practi[cs]ing)|great job|well done|congratulations|solid foundation|you(?:'ve| have) (?:learned|come|got)|more to (?:explore|learn|uncover|discover)|dive deeper|continue (?:learning|exploring)|good luck)\b/i;
+
+export function readsAsEncouragement(text: string): boolean {
+  return ENCOURAGEMENT.test(text);
+}
+
 export function readsAsHeading(text: string): boolean {
   const trimmed = text.trim();
   // A number, a list, or a named example is content whatever its shape.
@@ -787,6 +848,8 @@ export interface BoardDraftItem {
    * says them as they are written: the pen then follows the voice.
    */
   until?: number | null;
+  /** The line's number on the page as planned, which the script's marks name. */
+  number?: number | null;
 }
 
 export interface BoardDraft {
@@ -813,6 +876,8 @@ export interface BoardContext {
   moveSpans?: MoveSpan[];
   /** The page's idea, for choosing the red line when the writer's choice fails. */
   goal?: string;
+  /** The page's heading, for a board that overflows on a row continuing another. */
+  heading?: string;
 }
 
 export interface BoardProblem {
@@ -1316,10 +1381,15 @@ function limitProblem(
   text: string | null | undefined,
   field: keyof typeof WORD_LIMITS,
   index: number,
+  /** A list member may be a single name: the minimum for a level 2 point. */
+  minWords?: number,
 ): BoardProblem | null {
   const written = asciiText(text ?? '').trim();
   const count = wordsOf(written).length;
-  const limit = WORD_LIMITS[field];
+  const limit = {
+    ...WORD_LIMITS[field],
+    min: minWords ?? WORD_LIMITS[field].min,
+  };
   if (written.length > charLimitOf(field)) {
     return {
       kind: 'too_long',
@@ -1561,14 +1631,22 @@ export function boardMarks(
     // keeps those), else by the whole of its text. A figure is numbers,
     // which a loose match ignores, so it is placed only where it is said
     // exactly.
+    const whole = [line.text, line.meaning].filter(Boolean).join(' ');
+    const spokenForms = (text: string) =>
+      /\d/.test(text) ? [text, numbersAsWords(text)] : [text];
+    const exactly = (text: string, from: number) =>
+      spokenForms(text).reduce<BoardAnchor | null>(
+        (found, form) => found ?? findAnchor(spoken, form, from),
+        null,
+      );
     const said =
-      line.kind === 'figure'
-        ? findAnchor(spoken, line.text, lastAt)
-        : (findAnchorLoose(
-            spoken,
-            `${line.text} ${line.meaning ?? ''}`,
-            lastAt,
-          ) ??
+      line.kind === 'figure' || contentWords(line.text).length <= 2
+        ? (exactly(whole, lastAt) ??
+          exactly(whole, 0) ??
+          exactly(line.text, lastAt) ??
+          exactly(line.text, 0))
+        : (findAnchorLoose(spoken, whole, lastAt) ??
+          findAnchorLoose(spoken, numbersAsWords(whole), lastAt) ??
           findAnchorLoose(
             spoken,
             wordsOf(line.text).slice(0, 4).join(' '),
@@ -1586,11 +1664,7 @@ export function boardMarks(
     // The lecturer says the line as written: its words in the speech are
     // the span the pen follows. Exact from the placing, else the loose
     // span the words were found in.
-    const exact = findAnchor(
-      spoken,
-      [line.text, line.meaning].filter(Boolean).join(' '),
-      at,
-    );
+    const exact = exactly(whole, at);
     const until =
       exact && exact.charStart - at <= 80
         ? exact.charEnd
@@ -1640,6 +1714,7 @@ export function markedDraft(board: PieceBoard): BoardDraft {
     level: line.level,
     important: line.important,
     at: line.at,
+    number: line.number,
     ...(line.until !== undefined ? { until: line.until } : {}),
   }));
   for (const cue of board.cues) {
@@ -1943,7 +2018,12 @@ export function boardProblems(
       });
     }
     if (kind === 'term' || kind === 'point') {
-      const problem = limitProblem(text, kind, index);
+      const problem = limitProblem(
+        text,
+        kind,
+        index,
+        kind === 'point' && item.level === 2 ? 1 : undefined,
+      );
       if (problem) problems.push(problem);
       for (const value of [text, meaning]) {
         const cut = value ? cutWordAtEnd(value, ctx) : null;
@@ -1959,11 +2039,19 @@ export function boardProblems(
         kind === 'point' &&
         text &&
         (readsAsHeading(text) ||
-          namesTopic(text, [...(ctx.moves ?? []), draft.heading]))
+          (item.level !== 2 &&
+            namesTopic(text, [...(ctx.moves ?? []), draft.heading])))
       ) {
         problems.push({
           kind: 'topic_label',
           detail: `"${text}" is a heading, not a note; write the lecturer's claim about it, with its verb`,
+          index,
+        });
+      }
+      if (text && readsAsEncouragement(`${text} ${meaning ?? ''}`)) {
+        problems.push({
+          kind: 'topic_label',
+          detail: `"${text}" cheers the listener on; the board carries what is true about the subject, nothing else`,
           index,
         });
       }
@@ -2002,7 +2090,14 @@ export function boardProblems(
       if (kind === 'term' && meaning) {
         const problem = limitProblem(meaning, 'meaning', index);
         if (problem) problems.push(problem);
-        if (!grounded(meaning, ctx, true)) {
+        // A meaning the writer anchored to the spoken words after the
+        // fact is held to them strictly. A planned meaning was vetted
+        // before the speech and is said by the lecturer, so it gets the
+        // usual slack; a slow learner's, in everyday words, is not held
+        // to the page's words at all.
+        const planned = typeof item.at === 'number';
+        const checked = !(planned && ctx.style === 'gentle');
+        if (checked && !grounded(meaning, ctx, !planned)) {
           const missing = ungroundedWords(meaning, ctx);
           problems.push({
             kind: 'ungrounded',
@@ -2128,7 +2223,11 @@ export function cutWordAtEnd(text: string, ctx: BoardContext): string | null {
     ...normalise(source).split(' '),
     ...normalise(abbreviated(source)).split(' '),
   ]);
-  if (pool.has(last) || pool.has(stem(last))) return null;
+  // "number" is whole when the page says "numbers"; "remov" is not whole
+  // because the page says "removed".
+  if (pool.has(last) || pool.has(`${last}s`) || pool.has(`${last}es`)) {
+    return null;
+  }
   const longer = [...pool].some(
     (word) => word.length > last.length && word.startsWith(last),
   );
@@ -2258,6 +2357,15 @@ export function planProblems(
           index,
         });
       }
+      // "% 4" is a fragment of a formula, not a figure: a figure starts
+      // with a letter or a digit and says what the number is of.
+      if (/^[^A-Za-z0-9(]/.test(text) || !/[A-Za-z]/.test(text)) {
+        problems.push({
+          kind: 'incomplete',
+          detail: `figure "${text}" is a fragment; write the whole formula or the number with what it counts ("N = 4 servers")`,
+          index,
+        });
+      }
       if (!figuresOnPage(text, pool)) {
         problems.push({
           kind: 'ungrounded',
@@ -2268,7 +2376,12 @@ export function planProblems(
       seen.add(normalise(text));
       return;
     }
-    const problem = limitProblem(text, kind, index);
+    const problem = limitProblem(
+      text,
+      kind,
+      index,
+      kind === 'point' && line.level === 2 ? 1 : undefined,
+    );
     if (problem) problems.push(problem);
     for (const value of [text, meaning]) {
       const cut = value ? cutWordAtEnd(value, pool) : null;
@@ -2283,11 +2396,19 @@ export function planProblems(
     if (
       kind === 'point' &&
       text &&
-      (readsAsHeading(text) || namesTopic(text, [...ctx.moves, plan.heading]))
+      (readsAsHeading(text) ||
+        (line.level !== 2 && namesTopic(text, [...ctx.moves, plan.heading])))
     ) {
       problems.push({
         kind: 'topic_label',
         detail: `"${text}" is a heading, not a note; write the lecturer's claim about it, with its verb`,
+        index,
+      });
+    }
+    if (text && readsAsEncouragement(`${text} ${meaning ?? ''}`)) {
+      problems.push({
+        kind: 'topic_label',
+        detail: `"${text}" cheers the listener on; the board carries what is true about the subject, nothing else`,
         index,
       });
     }
@@ -2362,6 +2483,58 @@ export function planProblems(
  * line already says it (by text, or by the words it carries). Lines are
  * put in move order, each draft's own order within a move.
  */
+/** Words a line begins with that are capitalised only by position, not names. */
+const LINE_STARTERS = new Set([
+  'used',
+  'uses',
+  'using',
+  'applied',
+  'applies',
+  'implemented',
+  'utilized',
+  'employed',
+  'found',
+  'seen',
+  'also',
+  'the',
+  'a',
+  'an',
+  'it',
+  'this',
+  'these',
+  'those',
+  'in',
+  'for',
+  'with',
+  'examples',
+  'example',
+  'each',
+  'every',
+  'one',
+  'two',
+  'three',
+  'four',
+  'five',
+  'six',
+  'when',
+  'if',
+  'no',
+  'not',
+  'only',
+  'more',
+  'most',
+  'less',
+  'fewer',
+  'keys',
+  'data',
+  'servers',
+  'server',
+  'clients',
+  'client',
+  'requests',
+  'request',
+]);
+
 export function mergePlanLines(
   first: PlanLineDraft[],
   second: PlanLineDraft[],
@@ -2369,16 +2542,59 @@ export function mergePlanLines(
   const merged = [...first];
   const seen = new Set(merged.map((line) => normalise(line.text)));
   const said = merged.map(
-    (line) => new Set(contentWords(`${line.text} ${line.meaning ?? ''}`)),
+    (line) =>
+      new Set(
+        contentWords(
+          `${line.text} ${line.meaning ?? ''} ${abbreviated(`${line.text} ${line.meaning ?? ''}`)}`,
+        ),
+      ),
   );
+  // The names a list member carries: capitalised words, the first one only
+  // when it opens a multi-word name ("Apache Cassandra"), and tokens with
+  // letters and digits ("s1_1"), never a bare number.
+  const namesOf = (line: PlanLineDraft) => {
+    if (line.level !== 2) return new Set<string>();
+    const words = wordsOf(line.text);
+    return new Set(
+      words
+        .filter((word) => {
+          const capital = /^[A-Z]/.test(word);
+          const coded = /\d/.test(word) && /[A-Za-z]/.test(word);
+          if (coded) return true;
+          // A member's first word is its name unless it is only the
+          // sentence-shaped opener ("Used in Apache Cassandra").
+          if (!capital) return false;
+          return !LINE_STARTERS.has(word.toLowerCase());
+        })
+        .map((word) => normalise(word)),
+    );
+  };
+  const named = merged.map(namesOf);
   for (const line of second) {
     const key = normalise(line.text);
     if (!key || seen.has(key)) continue;
     const words = contentWords(`${line.text} ${line.meaning ?? ''}`);
-    if (said.some((earlier) => repeats(words, earlier))) continue;
+    const short = contentWords(
+      abbreviated(`${line.text} ${line.meaning ?? ''}`),
+    );
+    if (
+      said.some((earlier) => repeats(words, earlier) || repeats(short, earlier))
+    ) {
+      continue;
+    }
+    // A list member that names the same thing ("used in Apache Cassandra"
+    // beside "Apache Cassandra for data partitioning") is the same member.
+    const names = namesOf(line);
+    if (
+      names.size &&
+      named.some((earlier) => [...names].some((name) => earlier.has(name)))
+    ) {
+      continue;
+    }
     merged.push(line);
     seen.add(key);
     said.push(new Set(words));
+    named.push(names);
   }
   return merged
     .map((line, index) => ({ line, index }))
@@ -2402,7 +2618,7 @@ export function linesOfTimeline(timeline: BoardTimeline): {
         op.kind === 'term' || op.kind === 'point' || op.kind === 'figure',
     )
     .map((op, index) => ({
-      number: index + 1,
+      number: op.number ?? index + 1,
       move: 0,
       kind: op.kind,
       text: op.text,
@@ -2413,6 +2629,85 @@ export function linesOfTimeline(timeline: BoardTimeline): {
   if (!lines.length) return null;
   const heading = timeline.boards.find((board) => !board.continues)?.heading;
   return { heading: heading?.trim() || null, lines };
+}
+
+/** Verbs a move's label may open with, which its name on the board drops. */
+const MOVE_GERUNDS =
+  /^(?:summari[sz]ing|explaining|introducing|describing|discussing|covering|understanding|exploring|defining|listing|presenting|outlining|reviewing|showing|teaching|explain|introduce|describe|discuss|cover|define|list|present|outline|review|show|teach)\s+(?:the\s+|of\s+)?/i;
+
+/** A move's name as a board label: "summarizing benefits" is "Benefits". */
+export function labelForMove(move: string): string {
+  const stripped = move
+    .trim()
+    .replace(MOVE_GERUNDS, '')
+    .split(/[:;]/)[0]
+    .trim();
+  let words = wordsOf(stripped).slice(0, 4);
+  // Never cut mid-phrase: "how to pick a" is no label; "how to pick" is not
+  // much of one either, so back off to something whole or give up.
+  while (words.length && endsMidPhrase(words.join(' ')))
+    words = words.slice(0, -1);
+  if (words.length < 1 || (words.length === 1 && words[0].length < 3))
+    return '';
+  const text = words.join(' ').replace(/[.:;,]+$/, '');
+  return text.charAt(0).toUpperCase() + text.slice(1);
+}
+
+/**
+ * A run of three or more flat points in one move is a list, whatever
+ * the planner called them: its name (the move's, as a label) goes on a
+ * line of its own and the points sit under it, one a line. A run that
+ * already has a parent, or that carries the page's red line, is left as
+ * it is. The planner is asked for this shape; this is what happens when
+ * it does not oblige.
+ */
+export function listsFromRuns<T extends PlanLineDraft>(
+  lines: T[],
+  moves: string[],
+): (T | PlanLineDraft)[] {
+  const out: (T | PlanLineDraft)[] = [];
+  let run: T[] = [];
+  let runMove = -1;
+  const flush = () => {
+    const label = runMove >= 0 ? labelForMove(moves[runMove] ?? '') : '';
+    const listed =
+      run.length >= 3 &&
+      label.length > 0 &&
+      wordsOf(label).length <= 4 &&
+      !run.some((line) => line.important);
+    if (listed) {
+      out.push({
+        move: runMove,
+        kind: 'term',
+        text: label,
+        meaning: null,
+        level: null,
+        important: null,
+      });
+      for (const line of run) out.push({ ...line, level: 2 as const });
+    } else {
+      out.push(...run);
+    }
+    run = [];
+    runMove = -1;
+  };
+  for (const line of lines) {
+    const flat = line.kind === 'point' && line.level !== 2;
+    if (flat && (run.length === 0 || line.move === runMove)) {
+      if (run.length === 0) runMove = line.move;
+      run.push(line);
+      continue;
+    }
+    flush();
+    if (flat) {
+      runMove = line.move;
+      run.push(line);
+    } else {
+      out.push(line);
+    }
+  }
+  flush();
+  return out;
 }
 
 /** A stable seed from a string, for deterministic jitter. */
@@ -2452,21 +2747,22 @@ export function buildBoardOps(
     .map((item, index) => ({ item: asDrafted(item), index }))
     .filter(({ index }) => !bad.has(index));
 
-  // The cap: drop written items from the end. One item keeps its
-  // importance, the first the writer marked; the rest are ordinary. The
+  // The cap: drop written items from the end. The first few items the
+  // writer marked keep their importance, up to MAX_IMPORTANT; the rest
+  // are ordinary, since a board that is all red says nothing is. The
   // draft index rides along so a detail can tell whether its parent
   // survived.
   const maxItems = maxWrittenFor(ctx.style, ctx.durationMs);
   const kept: { item: BoardDraftItem; index: number }[] = [];
   let written = 0;
-  let importantSeen = false;
+  let importantSeen = 0;
   for (const { item, index } of items) {
     if (['term', 'point', 'figure'].includes(item.kind)) {
       if (written >= maxItems) continue;
       written += 1;
     }
-    const important = Boolean(item.important) && !importantSeen;
-    if (important) importantSeen = true;
+    const important = Boolean(item.important) && importantSeen < MAX_IMPORTANT;
+    if (important) importantSeen += 1;
     kept.push({ item: { ...item, important }, index });
   }
 
@@ -2477,7 +2773,9 @@ export function buildBoardOps(
   let line = ctx.continues ? Math.max(1, ctx.startLine ?? 1) : 1;
   let cursor = 0;
   const idByName = new Map<string, string>();
-  const headingText = ctx.continues ? null : (draft.heading?.trim() ?? 'Notes');
+  const headingText = ctx.continues
+    ? null
+    : (draft.heading?.trim() ?? ctx.heading ?? 'Notes');
 
   const openBoard = (heading: string, continues: boolean) => {
     boards.push({ id: boardId, heading, startsAtMs: null, continues });
@@ -2564,7 +2862,10 @@ export function buildBoardOps(
           nextBoardId,
         });
         boardId = nextBoardId;
-        openBoard(boards[boards.length - 1].heading || 'Notes', false);
+        openBoard(
+          boards[boards.length - 1].heading || ctx.heading || 'Notes',
+          false,
+        );
         line = 1;
         base.boardId = boardId;
         // A detail that lands on the fresh board brings its parent's name
@@ -2602,10 +2903,12 @@ export function buildBoardOps(
       idByName.set(normalise(text), id);
       const important = Boolean(item.important);
       // Said as written: the pen will follow the voice through these words.
-      const dictated =
-        typeof item.until === 'number' && item.until > (item.at ?? 0)
+      const dictated = {
+        ...(typeof item.until === 'number' && item.until > (item.at ?? 0)
           ? { dictated: true }
-          : {};
+          : {}),
+        ...(typeof item.number === 'number' ? { number: item.number } : {}),
+      };
       if (item.kind === 'term') {
         ops.push({
           ...base,
@@ -2689,11 +2992,12 @@ export function buildBoardOps(
       });
     }
   }
-  // A page always has its one red line, and it is the claim the page
-  // exists to make: scored by its words against the page's idea, later in
-  // the page over earlier, a point over a term, never the first thing
-  // written. The writer's own mark stands unless it fell on the opening
-  // line while a better claim is on the board.
+  // A page always has a red line, and when the writer marked none it is
+  // the claim the page exists to make: scored by its words against the
+  // page's idea, later in the page over earlier, a point over a term,
+  // never the first thing written. The writer's own marks stand, unless
+  // the only one fell on the opening line while a better claim is on the
+  // board.
   const writtenOps = ops.filter(
     (op): op is Extract<BoardOp, { kind: 'term' | 'point' | 'figure' }> =>
       op.kind === 'term' || op.kind === 'point' || op.kind === 'figure',
@@ -2744,7 +3048,20 @@ export function buildBoardOps(
     const inClose = (op: (typeof writtenOps)[number]) =>
       op.anchor.charStart >= lastSentenceStart ||
       op.anchor.charStart >= ctx.spoken.length * 0.85;
-    const points = writtenOps.filter((op) => op.kind === 'point');
+    // A claim of its own before a list member, and never one in the
+    // closing stretch when there is another.
+    const allPoints = writtenOps.filter((op) => op.kind === 'point');
+    const claims = allPoints.filter((op) => op.level !== 2);
+    const definitions = writtenOps.filter(
+      (op) => op.kind === 'term' && Boolean(op.meaning),
+    );
+    const markedAll = writtenOps.filter((op) => op.important);
+    // A page that is only a list has no red line of its own: a member is
+    // never the one thing to take away.
+    if (!claims.length && !definitions.length && !markedAll.length) {
+      return { boards, ops };
+    }
+    const points = claims.length ? claims : definitions;
     const pool =
       points.filter((op) => !inClose(op)).length > 0
         ? points.filter((op) => !inClose(op))
@@ -2753,12 +3070,13 @@ export function buildBoardOps(
           : writtenOps;
     let best = pool[0];
     for (const op of pool) if (score(op) >= score(best)) best = op;
-    const marked = writtenOps.find((op) => op.important);
+    const marked = markedAll.length === 1 ? markedAll[0] : undefined;
     const veto =
       marked !== undefined &&
       marked === writtenOps[0] &&
       best !== marked &&
       score(best) > score(marked);
+    if (markedAll.length > 1) return { boards, ops };
     if (!marked || veto) {
       if (marked) {
         marked.important = false;
@@ -3051,6 +3369,39 @@ export function wordStartAt(times: WordTimes, charStart: number): number {
   return answer;
 }
 
+/**
+ * Where each list on a board ends, as offsets into the spoken text: a
+ * list is a parent line (a term with no meaning, or a level 1 point)
+ * followed by two or more level 2 points, and it ends where the last of
+ * them was said.
+ */
+export function listEndOffsets(ops: BoardOp[]): number[] {
+  const ends: number[] = [];
+  let members = 0;
+  let last: BoardOp | null = null;
+  const close = () => {
+    if (members >= 2 && last) ends.push(last.anchor.charEnd);
+    members = 0;
+    last = null;
+  };
+  for (const op of ops) {
+    if (op.kind === 'point' && op.level === 2) {
+      members += 1;
+      last = op;
+      continue;
+    }
+    // A cue, an arrow, or a parent echoed onto a fresh board is not a
+    // member and does not end the list.
+    if (op.kind === 'cue' || op.kind === 'relation' || op.kind === 'board') {
+      continue;
+    }
+    if (op.id.includes('-echo-')) continue;
+    close();
+  }
+  close();
+  return ends;
+}
+
 /** When the word ending at or before `charEnd` finishes; the audio start when none does. */
 export function wordEndAt(times: WordTimes, charEnd: number): number {
   let answer = 0;
@@ -3079,10 +3430,14 @@ export function paceOf(
   if (op.kind !== 'term' && op.kind !== 'point' && op.kind !== 'figure') {
     return null;
   }
+  // A token with no letter or digit (a dash, an arrow) is drawn with the
+  // word after it on the client, so it is not a word here either.
   const written = [
     ...wordsOf(op.text),
     ...(op.kind === 'term' && op.meaning ? wordsOf(op.meaning) : []),
-  ].map((word) => normalise(word).replace(/ /g, ''));
+  ]
+    .filter((word) => /[A-Za-z0-9]/.test(word))
+    .map((word) => normalise(word).replace(/ /g, ''));
   const said = times.words
     .filter(
       (word) => word[0] >= op.anchor.charStart && word[0] < op.anchor.charEnd,
@@ -3194,6 +3549,8 @@ export function timeBoard(
   style: LectureStyle,
   /** The spoken text the times are of, so a dictated line can pace by its words. */
   spoken?: string,
+  /** Offsets into the spoken text where the script paused: the voice waits there. */
+  pauses?: number[],
 ): BoardTimeline {
   const timed: BoardOp[] = [];
   let penFreeAt = 0;
@@ -3202,31 +3559,72 @@ export function timeBoard(
   const ordered = [...timeline.ops].sort(
     (a, b) => a.anchor.charStart - b.anchor.charStart || priorityOrder(a, b),
   );
-  // On a marked timeline the voice waits for the pen: times are board
-  // time, audio time plus the holds so far, and a line the pen cannot
-  // finish by the end of its sentence adds a hold there.
+  // On a marked timeline the voice waits: times are board time, audio
+  // time plus the holds before them. A hold comes from a [pause] in the
+  // script (the listener reads the list just written, or thinks), or
+  // from a line the pen cannot finish by the end of its sentence.
   const marked = timeline.marked === true;
   const holds: BoardHold[] = [];
-  let held = 0;
   const holdAt = (audioMs: number, forMs: number) => {
     if (forMs <= 0) return;
-    const last = holds[holds.length - 1];
-    if (last && last.atMs === audioMs) last.forMs += forMs;
+    const same = holds.find((hold) => hold.atMs === audioMs);
+    if (same) same.forMs += forMs;
     else holds.push({ atMs: audioMs, forMs });
-    held += forMs;
+    holds.sort((a, b) => a.atMs - b.atMs);
   };
-  const end = () => durationMs + held + OVERRUN_MS;
+  /** The holds at or before an audio moment, which the board time carries. */
+  const heldBefore = (audioMs: number) =>
+    holds
+      .filter((hold) => hold.atMs <= audioMs)
+      .reduce((sum, hold) => sum + hold.forMs, 0);
+  const heldStrictlyBefore = (audioMs: number) =>
+    holds
+      .filter((hold) => hold.atMs < audioMs)
+      .reduce((sum, hold) => sum + hold.forMs, 0);
+  const heldTotal = () => holds.reduce((sum, hold) => sum + hold.forMs, 0);
+  const end = () => durationMs + heldTotal() + OVERRUN_MS;
+  if (marked) {
+    for (const offset of pauses ?? []) {
+      holdAt(wordEndAt(wordTimes, offset), PAUSE_MS[style]);
+    }
+    // A list on the board is read before it is explained, whether or not
+    // the script paused there: after its last member the voice waits,
+    // unless the script already pauses within a breath of that moment.
+    // The pause comes at the end of the sentence the last member is in,
+    // never in the middle of one ("the Maglev load balancer [wait] adopts
+    // consistent hashing" is no pause at all).
+    const breathAt = (offset: number) => {
+      const sentence = sentenceAt(wordTimes, Math.max(0, offset - 1));
+      return sentence ? sentence[3] : wordEndAt(wordTimes, offset);
+    };
+    for (const offset of listEndOffsets(ordered)) {
+      const at = breathAt(offset);
+      if (holds.some((hold) => Math.abs(hold.atMs - at) < 1500)) continue;
+      holdAt(at, PAUSE_MS[style]);
+    }
+    // A line written in the second pen is the one the page turns on: the
+    // voice gives it a breath before going on, half a list's pause.
+    for (const op of ordered) {
+      const claim =
+        (op.kind === 'point' && op.important) ||
+        (op.kind === 'term' && op.important && Boolean(op.meaning));
+      if (!claim || op.dictated !== true) continue;
+      const at = breathAt(op.anchor.charEnd);
+      if (holds.some((hold) => Math.abs(hold.atMs - at) < 1500)) continue;
+      holdAt(at, Math.round(PAUSE_MS[style] / 2));
+    }
+  }
 
   for (const op of ordered) {
-    const anchorMs = wordStartAt(wordTimes, op.anchor.charStart) + held;
+    const anchorAudio = wordStartAt(wordTimes, op.anchor.charStart);
+    const anchorMs = anchorAudio + heldBefore(anchorAudio);
     if (op.kind === 'cue') {
       const sentence = sentenceAt(wordTimes, op.anchor.charStart);
-      const onMs = Math.max(
-        (sentence ? sentence[2] : anchorMs - held) + held,
-        0,
-      );
+      const onAudio = sentence ? sentence[2] : anchorAudio;
+      const offAudio = sentence ? sentence[3] : anchorAudio + 2000;
+      const onMs = Math.max(onAudio + heldBefore(onAudio), 0);
       const offMs = Math.min(
-        (sentence ? sentence[3] : anchorMs - held + 2000) + held + CUE_TAIL_MS,
+        offAudio + heldBefore(offAudio) + CUE_TAIL_MS,
         end(),
       );
       if (offMs < onMs + 600) {
@@ -3253,40 +3651,45 @@ export function timeBoard(
       // The lecturer says these words as they are written: the pen starts
       // with the first word and finishes with the last, each word as it
       // is said. No lead, no hold, no hurry: the voice is the pace.
-      const first = wordStartAt(wordTimes, op.anchor.charStart) + held;
-      const last = wordEndAt(wordTimes, op.anchor.charEnd) + held;
+      const firstAudio = wordStartAt(wordTimes, op.anchor.charStart);
+      const lastAudio = wordEndAt(wordTimes, op.anchor.charEnd);
+      const first = firstAudio + heldBefore(firstAudio);
+      // A pause at the very end of the words is after them, not inside.
+      const last = lastAudio + heldStrictlyBefore(lastAudio);
       const t0 = Math.max(penFreeAt, first);
-      const dur = Math.max(300, last - t0);
-      const pace = paceOf(op, wordTimes, t0 - held, last - held, spoken);
+      // As long as the words take, and never faster than the eye can
+      // follow: a line whose words were found in a shorter span than
+      // they need overruns it a little rather than flashing on.
+      const dur = Math.max(
+        DICTATED_MIN_MS,
+        Math.round(natural * DICTATED_MIN_SHARE),
+        last - t0,
+      );
+      const spokenPace = paceOf(
+        op,
+        wordTimes,
+        t0 - heldBefore(firstAudio),
+        lastAudio,
+        spoken,
+      );
+      // The pace ends where the words end; a line given more time than
+      // its words took is stretched over all of it.
+      const paceEnd = spokenPace ? spokenPace[spokenPace.length - 1] : 0;
+      const pace =
+        spokenPace && paceEnd > 0 && paceEnd < dur
+          ? spokenPace.map((value) => Math.round((value * dur) / paceEnd))
+          : spokenPace;
       timed.push({ ...op, t0Ms: t0, durMs: dur, ...(pace ? { pace } : {}) });
       penFreeAt = t0 + dur + LIFT_MS;
       if (!startedBoards.has(op.boardId)) startedBoards.set(op.boardId, t0);
       continue;
     }
     if (marked && op.kind !== 'heading') {
-      // The pen starts as the words start and writes at its natural pace;
-      // if it is still writing when the sentence ends, the voice waits.
-      const t0 = Math.max(penFreeAt, anchorMs - MARKED_LEAD_MS);
-      const sentence = sentenceAt(wordTimes, op.anchor.charStart);
-      const sentenceEndAudio = sentence
-        ? sentence[3]
-        : wordStartAt(wordTimes, op.anchor.charStart) + 2000;
-      const sentenceEnd = sentenceEndAudio + held;
+      // A line the lecturer marked but did not say as written: the pen
+      // starts as the words start and writes at its natural pace, hurried
+      // only when the row would end first. The voice never waits for it.
+      const t0 = Math.max(penFreeAt, anchorMs);
       let dur = natural;
-      if (t0 + natural > sentenceEnd) {
-        // The voice waits, but only for a breath: past MAX_HOLD_MS the
-        // pen hurries instead, as a teacher's does, and never below the
-        // pace the eye can still follow.
-        const over = t0 + natural - sentenceEnd;
-        const hold = Math.min(over, MAX_HOLD_MS);
-        dur = Math.max(
-          Math.round(natural * MIN_COMPRESSION),
-          natural - (over - hold),
-        );
-        holdAt(sentenceEndAudio, hold);
-      }
-      // The row ends before the pen would: the line is written fast
-      // rather than left half-written when the tape moves on.
       if (t0 + dur > end()) {
         if (t0 >= end()) {
           dropped += 1;

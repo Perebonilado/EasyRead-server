@@ -27,6 +27,7 @@ import {
   LECTURE_STYLE_KEYS,
   type LecturePosition,
   type LectureBoardResponse,
+  type LectureFollowResponse,
   type LectureStatusResponse,
   type LectureStyle,
   type SegmentKind,
@@ -37,6 +38,7 @@ import {
   GenerateLectureHandler,
   LectureAudioHandler,
   LectureBoardHandler,
+  LectureFollowHandler,
   LectureReviewHandler,
   LectureStatusHandler,
   SaveLecturePositionHandler,
@@ -143,6 +145,7 @@ export class LectureController {
     private readonly audio: LectureAudioHandler,
     private readonly review: LectureReviewHandler,
     private readonly board: LectureBoardHandler,
+    private readonly follow: LectureFollowHandler,
     private readonly backfill: BackfillBoardsHandler,
     private readonly position: SaveLecturePositionHandler,
     @Inject(STORAGE) private readonly storage: StoragePort,
@@ -200,6 +203,29 @@ export class LectureController {
       throw new ValidationError('That page number is not valid');
     }
     const { data } = await this.board.handle({
+      userId,
+      documentId,
+      pageNumber,
+      style: styleQuery(style),
+      kind: kindQuery(kind),
+    });
+    return data;
+  }
+
+  /** One row's follow-along track, once it exists; 404 until then. */
+  @Get('follow/:page')
+  async followOf(
+    @CurrentUser('id') userId: string,
+    @Param('id') documentId: string,
+    @Param('page') page: string,
+    @Query('style') style?: string,
+    @Query('kind') kind?: string,
+  ): Promise<LectureFollowResponse> {
+    const pageNumber = Number(page);
+    if (!Number.isInteger(pageNumber) || pageNumber < 1) {
+      throw new ValidationError('That page number is not valid');
+    }
+    const { data } = await this.follow.handle({
       userId,
       documentId,
       pageNumber,

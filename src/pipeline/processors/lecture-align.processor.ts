@@ -17,6 +17,7 @@ import { scriptForTts } from '../../business/domain/lecture';
 import type { LectureAlignJobData } from '../queues';
 import type { JobContext } from './base.processor';
 import { LectureBoardService } from './lecture-board.service';
+import { LectureFollowService } from './lecture-follow.service';
 
 /**
  * Measures where each spoken word falls in a row's finished audio, then
@@ -37,6 +38,7 @@ export class LectureAlignProcessor {
     @Inject(STORAGE) private readonly storage: StoragePort,
     @Inject(ALIGNER) private readonly aligner: AlignerPort,
     private readonly boards: LectureBoardService,
+    private readonly follows: LectureFollowService,
   ) {}
 
   async process(job: LectureAlignJobData, context: JobContext): Promise<void> {
@@ -106,6 +108,11 @@ export class LectureAlignProcessor {
 
     if (!times) times = estimateWordTimes(spoken, durationMs, row.audioKey);
     await this.lectures.saveWordTimes({ ...key, wordTimes: times });
+    // Measured times give the sentence the tutor is on; the estimate only
+    // ever gives the block, which the row already has.
+    if (times.source !== 'estimate') {
+      await this.follows.trackOnTimes(key, { ...row, wordTimes: times }, times);
+    }
     await this.boards.timeRow({
       key,
       row: { ...row, wordTimes: times },

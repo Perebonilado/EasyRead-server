@@ -21,7 +21,7 @@ import type { LectureStyle } from '../../contracts';
  * every audio key. Bumped whenever the prompts change enough that audio
  * made by the previous generator must not be served for a new script.
  */
-export const LECTURE_GENERATOR_VERSION = 'lecture-6';
+export const LECTURE_GENERATOR_VERSION = 'lecture-7';
 
 /** A page with fewer readable characters than this carries no lecture. */
 export const MIN_PAGE_CHARS = 120;
@@ -242,8 +242,10 @@ export function pageScripts(
           script: partText,
           moveOffsets: moveOffsetsOf(partText, tail),
           sections: tail,
+          // The part keeps the page's heading for a board that overflows; its
+          // first board continues the page's and opens with none.
           board: board
-            ? { heading: null, lines: linesOf(tailMoves, false) }
+            ? { heading: board.heading, lines: linesOf(tailMoves, false) }
             : null,
         }
       : null,
@@ -436,6 +438,13 @@ export interface LectureBeat {
    * land on the same idea. Plans from before moves existed have none.
    */
   moves?: string[];
+  /**
+   * For each move, the blocks of the simplified note it teaches (indices
+   * into the note's blocks), so the reader's eye can follow before the
+   * words are aligned. Absent on plans written before the note was the
+   * source; null for a move that names none.
+   */
+  moveBlocks?: (number[] | null)[] | null;
   /** The mistake a student is most likely to make here, where the page shows it. */
   pitfall?: string | null;
   /**
@@ -666,7 +675,8 @@ export interface StyleProblem {
     | 'long_sentences'
     | 'hard_words'
     | 'term_unexplained'
-    | 'two_terms';
+    | 'two_terms'
+    | 'label';
   detail: string;
 }
 
@@ -741,6 +751,44 @@ export function openerProblems(
  * none of them ever fails a page on its own. The budget and the recap
  * rule depend on the style being written.
  */
+/** Applause for the listener, which no page ends on and no plan schedules. */
+export const CHEERING =
+  /(?:^|[.!?]\s+)(?:great job|good job|great work|good work|nice work|well done|congratulations|keep (?:going|exploring|learning|digging|practi[cs]ing|it up)|see you (?:next time|soon)|happy learning|good luck)\b|\byou(?:'ve| have)(?: (?:now|already|just))? (?:made (?:real |great |significant |good |a lot of )?progress|learned (?:a lot|so much)|come (?:a long way|so far)|done (?:great|well|a great job)|got (?:this|it)|(?:built|got|laid) (?:yourself )?a (?:solid|strong|good|real|firm) foundation)\b|\byou(?:'re| are) (?:doing (?:great|well)|well on your way)\b|\b(?:i am|i'm|we are|we're) proud of you\b/i;
+
+/** A move that is applause rather than teaching: "encouragement to continue learning". */
+export function readsAsApplause(move: string): boolean {
+  const plain = move
+    .toLowerCase()
+    .replace(/[\u2018\u2019]/g, "'")
+    .trim();
+  // Opens on the stem ("encouragement to..."), and what follows is about
+  // the learner, not the subject: "motivating the need for a load
+  // balancer" teaches, "encouragement to continue learning" does not.
+  const opensOnStem =
+    /^(?:encourag\w*|congratulat\w*|motivat\w*|inspir\w*|celebrat\w*)\b(.*)$/.exec(
+      plain,
+    );
+  if (opensOnStem) {
+    const rest = opensOnStem[1].trim();
+    if (
+      !rest ||
+      /\b(?:continue|continued|further|ongoing|learning|exploring|practi[cs]e|progress|success|effort|journey|curiosity|listener|learner|student|reader|you|them|next steps?|keep going)\b/.test(
+        rest,
+      )
+    ) {
+      return true;
+    }
+  }
+  return (
+    /\b(?:wrap(?:ping)?\s*up|sign(?:ing)?\s*off|closing (?:remarks|thoughts|words)|final (?:thoughts|words)|farewell|send-?off|call to action|next steps for the (?:listener|learner|student))\b/.test(
+      plain,
+    ) ||
+    /^(?:keep (?:learning|exploring|going|practi[cs]ing)|great job|well done|good luck|thank(?:s| you))\b/.test(
+      plain,
+    )
+  );
+}
+
 export function styleProblems(
   text: string,
   options: {
@@ -787,6 +835,20 @@ export function styleProblems(
         detail: `Ends on a recap ("${firstWords(closing, 4)}"); land the idea instead`,
       });
     }
+  }
+
+  // A page ends on its idea, never on applause: "great job", "keep
+  // exploring", "you have made real progress" teach nothing.
+  const cheering = sentences
+    .slice(-3)
+    .find((sentence) =>
+      CHEERING.test(sentence.replace(/[\u2018\u2019]/g, "'")),
+    );
+  if (cheering) {
+    problems.push({
+      kind: 'recap_ending',
+      detail: `Ends by cheering the listener on ("${firstWords(cheering, 4)}"); land the idea instead and stop`,
+    });
   }
 
   if (options.style === 'gentle' && options.sections) {
@@ -907,7 +969,7 @@ function plainWordsOf(text: string): string[] {
  * breath: "which just means", "that is,", "is a", "called", and their kin.
  */
 const MEANING_SIGNALS =
-  /\b(?:which|that|this|it)\s+(?:just\s+|simply\s+)?means?\b|\bin other words\b|\bthat is,|\b(?:which|that|this|these|those|it|there)(?:\s+is|\s+are|'s|'re)\s+(?:just\s+|simply\s+|only\s+)?(?:a|an|the|when|what|how|where|like|one|any|some|about)\b|\b(?:is|are) (?:just|simply|only)\b|\bthink of (?:it|them|this|that) as\b|\b(?:is|are) (?:a|an|the|when|what|how|where|like)\b|,\s*(?:which|or|meaning)\b|[-\u2013\u2014]\s*(?:which|these are|this is|that is|meaning)\b|\bcalled\b|\bwe call\b|\bknown as\b|\bmeaning\b|\bthe name for\b|\bthe word for\b|: /i;
+  /\b(?:which|that|this|it)\s+(?:just\s+|simply\s+)?means?\b|\bin other words\b|\bthat is,|\b(?:which|that|this|these|those|it|there)(?:\s+is|\s+are|'s|'re)\s+(?:just\s+|simply\s+|only\s+)?(?:a|an|the|when|what|how|where|like|one|any|some|about)\b|\b(?:is|are) (?:just|simply|only)\b|\bthink of (?:it|them|this|that) as\b|\b(?:is|are) (?:a|an|the|when|what|how|where|like)\b|,\s*(?:which|or|meaning|where)\b|[-\u2013\u2014]\s*(?:which|these are|this is|that is|meaning)\b|\bcalled\b|\bwe call\b|\bknown as\b|\bmeaning\b|\bthe name for\b|\bthe word for\b|: /i;
 
 /** A light stem, so "distributing" is the page's "distribute" and "distribution". */
 function plainStem(word: string): string {
@@ -1011,12 +1073,20 @@ export function plainWordsProblems(
     // A sentence that opens on the term and says what it is counts too
     // ("Virtual nodes are duplicate points on the ring").
     const window = sentences.slice(index, index + 3).join(' ');
+    const escaped = needle.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
     const subjectFirst = new RegExp(
-      `^(?:a |an |the )?${needle.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?:'s|'re|\\s+(?:is|are|means|refers))\\b`,
+      `^(?:a |an |the )?${escaped}(?:'s|'re|\\s+(?:is|are|means|refers))\\b`,
+      'i',
+    );
+    // An appositive right after the term ("a hash ring, a circle where
+    // keys are placed") explains it; a comma elsewhere does not.
+    const appositive = new RegExp(
+      `${escaped},\\s*(?:a|an|the|which|where|or|meaning|that is)\\b`,
       'i',
     );
     const explained =
       MEANING_SIGNALS.test(window) ||
+      appositive.test(window) ||
       sentences
         .slice(index, index + 3)
         .some((sentence) => subjectFirst.test(sentence.toLowerCase()));
@@ -1076,6 +1146,60 @@ export interface LectureSection {
   /** Which of the beat's moves this section teaches, from 0. */
   move: number;
   text: string;
+}
+
+/**
+ * Where the script pauses, as offsets into the spoken text: the end of
+ * the words before each [pause]. The voice waits there for the listener
+ * to read what was just written, or to think.
+ */
+export function pauseOffsets(script: string): number[] {
+  const offsets: number[] = [];
+  const pattern = /\[\s*pause\s*\]/gi;
+  for (const match of script.matchAll(pattern)) {
+    offsets.push(scriptForTts(script.slice(0, match.index)).length);
+  }
+  return offsets;
+}
+
+/**
+ * A writer given the board's lines as "term", "point" or "figure"
+ * sometimes reads the label aloud: "point prevention is key". The label
+ * is never spoken; a section that has it goes back.
+ */
+export function markLabelProblems(
+  sections: LectureSection[],
+  board: { lines: { number: number; text: string }[] } | null = null,
+): StyleProblem[] {
+  const spoken =
+    /\[\s*write\s+(\d+)\s*\]\s*(?:the\s+)?(term|point|figure|heading)\b[\s:,-]*/gi;
+  const key = (text: string) =>
+    text
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, ' ')
+      .trim();
+  for (const section of sections) {
+    for (const match of section.text.matchAll(spoken)) {
+      const line = board?.lines.find(
+        (entry) => entry.number === Number(match[1]),
+      );
+      // "Term frequency" may be the line itself; "point prevention is
+      // key" is the label read out in front of it.
+      const after = section.text.slice(match.index + match[0].length);
+      const own =
+        line !== undefined &&
+        key(`${match[2]} ${after}`).startsWith(key(line.text));
+      if (!own) {
+        return [
+          {
+            kind: 'label',
+            detail: `The word "${match[2]}" is a label for the kind of line, never something you say: after [write n] say the line itself, nothing before it`,
+          },
+        ];
+      }
+    }
+  }
+  return [];
 }
 
 /** The markers a board-aware script carries; the voice never hears them. */
@@ -1598,7 +1722,8 @@ export function scriptForTts(script: string): string {
     .replace(PAUSE_MARKER, '\n\n')
     .replace(/\[[^\]]*\]/g, ' ')
     .replace(/\((?:beat|pause|sic)[^)]*\)/gi, ' ')
-    .replace(/[*_`#]+/g, '')
+    .replace(/[*`#]+/g, '')
+    .replace(/_+/g, ' ')
     .replace(/[ \t]+/g, ' ')
     .replace(/ ?\n ?/g, '\n')
     .replace(/\n{3,}/g, '\n\n')

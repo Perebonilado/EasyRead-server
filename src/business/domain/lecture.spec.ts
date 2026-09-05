@@ -46,7 +46,10 @@ import {
   effectiveStatus,
   LECTURE_STALE_MS,
   hasBoardMarkers,
+  markLabelProblems,
+  pauseOffsets,
   plainWordsProblems,
+  readsAsApplause,
   syllablesOf,
   withoutBoardMarkers,
 } from './lecture';
@@ -1211,6 +1214,130 @@ describe('the gentle style, measured', () => {
   });
 });
 
+describe('a page never ends on applause', () => {
+  it('knows a move that is applause rather than teaching', () => {
+    expect(readsAsApplause('encouragement to continue learning')).toBe(true);
+    expect(readsAsApplause('wrapping up the chapter')).toBe(true);
+    expect(readsAsApplause('the refill rate')).toBe(false);
+    expect(readsAsApplause('why one server cannot hand out IDs')).toBe(false);
+    // Teaching moves that merely contain the stems are teaching.
+    expect(readsAsApplause('the motivation for consistent hashing')).toBe(
+      false,
+    );
+    expect(readsAsApplause('motivating the need for a load balancer')).toBe(
+      false,
+    );
+    expect(readsAsApplause('what inspired the token bucket design')).toBe(
+      false,
+    );
+    expect(readsAsApplause('encouragement to keep going')).toBe(true);
+  });
+
+  it('hears applause in its common forms and not in a claim that shares a word', () => {
+    for (const ending of [
+      'Good job.',
+      'Great work today.',
+      'You have learned a lot today.',
+      'Keep practicing these steps.',
+      'You’ve made real progress.',
+    ]) {
+      expect(
+        styleProblems(`Keys move to the next server. ${ending}`, {
+          style: 'steady',
+          weight: 'full',
+          bridge: false,
+        }).map((problem) => problem.kind),
+      ).toContain('recap_ending');
+    }
+    for (const ending of [
+      'The pendulum will keep going until friction stops it.',
+      'The fascinating part is that the ring never changes.',
+    ]) {
+      expect(
+        styleProblems(`Keys move to the next server. ${ending}`, {
+          style: 'steady',
+          weight: 'full',
+          bridge: false,
+        }).map((problem) => problem.kind),
+      ).not.toContain('recap_ending');
+    }
+  });
+
+  it('sends back a closing that cheers, in every style', () => {
+    const cheer =
+      'Consistent hashing keeps most keys in place. Great job following along! Keep diving deeper into this topic.';
+    for (const style of ['gentle', 'steady', 'brisk'] as const) {
+      const kinds = styleProblems(cheer, {
+        style,
+        weight: 'full',
+        bridge: false,
+      }).map((problem) => problem.kind);
+      expect(kinds).toContain('recap_ending');
+    }
+    const lands =
+      'Consistent hashing keeps most keys in place. That is why a server can join without the whole map changing.';
+    expect(
+      styleProblems(lands, {
+        style: 'steady',
+        weight: 'full',
+        bridge: false,
+      }).map((problem) => problem.kind),
+    ).not.toContain('recap_ending');
+  });
+});
+
+describe('pauses and labels in a board-aware script', () => {
+  it('finds where the script pauses, as offsets into the spoken words', () => {
+    const script =
+      'Three uses. [write 1] Dynamo. [write 2] Cassandra.\n[pause]\nNow, why these two? What happens next?\n[pause]\nThe page tells you.';
+    const spoken = scriptForTts(script);
+    const offsets = pauseOffsets(script);
+    expect(offsets).toHaveLength(2);
+    expect(spoken.slice(0, offsets[0])).toMatch(/Cassandra\.$/);
+    expect(spoken.slice(0, offsets[1])).toMatch(/next\?$/);
+    expect(pauseOffsets('No pause here.')).toEqual([]);
+  });
+
+  it('sends back a section that reads the kind label aloud', () => {
+    expect(
+      markLabelProblems([
+        { move: 0, text: '[write 2] point prevention is key. It matters.' },
+      ]),
+    ).toHaveLength(1);
+    expect(
+      markLabelProblems([
+        { move: 0, text: '[write 2] Term: consistent hashing.' },
+      ])[0]?.kind,
+    ).toBe('label');
+    expect(
+      markLabelProblems([
+        {
+          move: 0,
+          text: '[write 2] Prevention is key. The point is, it matters.',
+        },
+      ]),
+    ).toEqual([]);
+    // A line that happens to begin with the word is the line, not a label.
+    expect(
+      markLabelProblems(
+        [
+          {
+            move: 0,
+            text: '[write 1] Term frequency: how often a word appears.',
+          },
+        ],
+        { lines: [{ number: 1, text: 'term frequency' }] },
+      ),
+    ).toEqual([]);
+    expect(
+      markLabelProblems(
+        [{ move: 0, text: '[write 1] point prevention is key.' }],
+        { lines: [{ number: 1, text: 'prevention is key' }] },
+      ),
+    ).toHaveLength(1);
+  });
+});
+
 describe('board marks in a script', () => {
   const line = (number: number, move: number, text: string) => ({
     number,
@@ -1232,6 +1359,10 @@ describe('board marks in a script', () => {
     );
     expect(scriptForTts(script)).toBe(
       'So, the refill rate: ten a second. That rate again.',
+    );
+    // An underscore in a name is a space for the voice, never deleted.
+    expect(scriptForTts('k0 maps to node s1_1 in auto_increment mode')).toBe(
+      'k0 maps to node s1 1 in auto increment mode',
     );
     const pieces = pageScripts(null, [{ move: 0, text: script }], false, {
       heading: 'Token bucket',
@@ -1257,7 +1388,8 @@ describe('board marks in a script', () => {
     };
     const split = pageScripts(null, sections, true, board);
     expect(split.board?.heading).toBe('Three moves');
-    expect(split.part?.board?.heading).toBeNull();
+    // The part keeps the page's heading for a board that overflows.
+    expect(split.part?.board?.heading).toBe('Three moves');
     const headNumbers = split.board!.lines.map((entry) => entry.number);
     const tailNumbers = split.part!.board!.lines.map((entry) => entry.number);
     expect([...headNumbers, ...tailNumbers]).toEqual([1, 2, 3]);

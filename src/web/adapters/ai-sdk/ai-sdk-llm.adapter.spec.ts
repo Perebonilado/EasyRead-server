@@ -405,7 +405,8 @@ describe('AiSdkLlmAdapter', () => {
     expect(prompt).toContain('0: why caches guess');
     expect(prompt).toContain('1: what eviction is');
     // The planned board goes to the writer numbered, with its move.
-    expect(prompt).toContain('1. (move 0) TERM eviction : a guess thrown away');
+    expect(prompt).toContain('1. (move 0) eviction: a guess thrown away');
+    expect(prompt).not.toContain('TERM eviction');
     expect(prompt).toContain('said word for word as its own sentence');
     expect(prompt).toContain('Already taught in this lecture');
     expect(prompt).toContain('Still to come in this chapter');
@@ -429,6 +430,7 @@ describe('AiSdkLlmAdapter', () => {
           skip: null,
           weight: 'full',
           moves: ['the guess', 'the bet'],
+          moveBlocks: null,
           pitfall: null,
           turn: true,
           figure: { kind: 'none', shows: null },
@@ -621,6 +623,7 @@ describe('AiSdkLlmAdapter', () => {
         skip: null,
         weight: 'full' as const,
         moves: ['m'],
+        moveBlocks: null,
         pitfall: null,
         turn: false,
       },

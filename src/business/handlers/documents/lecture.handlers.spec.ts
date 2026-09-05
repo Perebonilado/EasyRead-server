@@ -1,3 +1,4 @@
+import { ConfigService } from '@nestjs/config';
 import {
   GenerateLectureHandler,
   LectureStatusHandler,
@@ -461,6 +462,7 @@ describe('LectureStatusHandler: boards that need writing again', () => {
       kind?: string;
       priority?: number;
     }[] = [];
+    const aligns: { pageNumber: number; priority?: number }[] = [];
     const handler = new LectureStatusHandler(
       { listByDocument: () => Promise.resolve(TOPICS) } as never,
       {
@@ -468,6 +470,13 @@ describe('LectureStatusHandler: boards that need writing again', () => {
         findPosition: () => Promise.resolve(position),
       } as never,
       {
+        enqueueLectureFollows: () => Promise.resolve(),
+        enqueueLectureAligns: (
+          jobs: { pageNumber: number; priority?: number }[],
+        ) => {
+          aligns.push(...jobs);
+          return Promise.resolve();
+        },
         enqueueLectureBoards: (
           jobs: { pageNumber: number; style?: string; kind?: string }[],
         ) => {
@@ -479,8 +488,10 @@ describe('LectureStatusHandler: boards that need writing again', () => {
         require: () =>
           Promise.resolve({ id: 'doc-1', contentVersion: 2, props: {} }),
       } as never,
+      // These are the board's own tests: the hidden board stays on here.
+      new ConfigService({ LECTURE_BOARD_ENABLED: 'true' }),
     );
-    return { handler, queued };
+    return { handler, queued, aligns };
   }
 
   it('queues a board for a finished row with none, and one an older writer wrote', async () => {
@@ -521,5 +532,23 @@ describe('LectureStatusHandler: boards that need writing again', () => {
     ]);
     await handler.handle({ ...request, style: 'steady' });
     expect(queued).toEqual([]);
+  });
+
+  it('has the words of voiced rows measured on their audio, nearest the learner first', async () => {
+    const measured = { version: 1, source: 'echogarden-dtw', audioKey: 'a' };
+    const { handler, aligns } = harness(
+      [
+        row(1, { wordTimes: measured }),
+        row(2),
+        row(3, { wordTimes: { ...measured, audioKey: 'older' } }),
+        row(4, { wordTimes: { ...measured, source: 'estimate' } }),
+        row(5, { kind: 'check' }),
+        row(6, { status: 'voicing' }),
+      ],
+      { pageNumber: 4, offsetMs: 0, style: 'steady' },
+    );
+    await handler.handle({ ...request, style: 'steady' });
+    expect(aligns.map((job) => job.pageNumber)).toEqual([4, 3, 2]);
+    expect(aligns.map((job) => job.priority)).toEqual([1, 2, 3]);
   });
 });

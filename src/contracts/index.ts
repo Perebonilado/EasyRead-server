@@ -561,11 +561,16 @@ export const SEGMENT_KIND_KEYS: readonly SegmentKind[] = [
  */
 export type BoardStatus = 'none' | 'pending' | 'done' | 'failed' | 'skipped';
 
+/** The follow-along track's own life: none until the row is voiced, done once it points into the note. */
+export type FollowStatus = 'none' | 'pending' | 'done' | 'failed';
+
 export interface LectureSegmentDto {
   pageNumber: number;
   kind: SegmentKind;
   status: LectureSegmentStatus;
   boardStatus: BoardStatus;
+  /** Whether the row's follow-along track exists; absent on older servers. */
+  followStatus?: FollowStatus;
   /** Playback length, known only once the audio exists. */
   durationMs: number | null;
   /** A one-line crossing of a page with nothing to teach. */
@@ -600,6 +605,11 @@ export interface LecturePosition {
 export interface LectureBoardResponse {
   board: unknown;
   wordTimes: unknown | null;
+}
+
+/** What the client fetches for one row's follow-along: the track into the note. */
+export interface LectureFollowResponse {
+  track: unknown;
 }
 
 export interface LectureStyleSummary {
@@ -995,6 +1005,13 @@ export type SseEvent =
   /** A row's board is timed and can be fetched. */
   | {
       type: 'lecture.board_ready';
+      pageNumber: number;
+      style: LectureStyle;
+      kind?: SegmentKind;
+    }
+  /** A row's follow-along track points into the note and can be fetched. */
+  | {
+      type: 'lecture.follow_ready';
       pageNumber: number;
       style: LectureStyle;
       kind?: SegmentKind;

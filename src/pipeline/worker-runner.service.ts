@@ -23,6 +23,7 @@ import { LectureVoiceProcessor } from './processors/lecture-voice.processor';
 import { LectureAlignProcessor } from './processors/lecture-align.processor';
 import { LectureDiagramProcessor } from './processors/lecture-diagram.processor';
 import { LectureBoardProcessor } from './processors/lecture-board.processor';
+import { LectureFollowProcessor } from './processors/lecture-follow.processor';
 import { SimplifyPageProcessor } from './processors/simplify.processor';
 import { SummarizeProcessor } from './processors/summarize.processor';
 import { TopicsProcessor } from './processors/topics.processor';
@@ -40,6 +41,7 @@ import {
   LectureAlignJobData,
   LectureDiagramJobData,
   LectureBoardJobData,
+  LectureFollowJobData,
 } from './queues';
 
 type Handler = (data: never, context: JobContext) => Promise<void>;
@@ -70,6 +72,7 @@ export class WorkerRunner implements OnModuleInit, OnModuleDestroy {
     private readonly lectureAlign: LectureAlignProcessor,
     private readonly lectureDiagram: LectureDiagramProcessor,
     private readonly lectureBoard: LectureBoardProcessor,
+    private readonly lectureFollow: LectureFollowProcessor,
     private readonly exports: ExportProcessor,
     private readonly learn: LearnProcessor,
     private readonly importer: ImportProcessor,
@@ -109,6 +112,8 @@ export class WorkerRunner implements OnModuleInit, OnModuleDestroy {
         this.lectureDiagram.process(data, ctx),
       [QUEUE.lectureBoard]: (data: LectureBoardJobData, ctx) =>
         this.lectureBoard.process(data, ctx),
+      [QUEUE.lectureFollow]: (data: LectureFollowJobData) =>
+        this.lectureFollow.process(data),
     };
 
     for (const name of Object.values(QUEUE)) {

@@ -21,6 +21,7 @@ export const QUEUE = {
   lectureAlign: 'lecture-align',
   lectureDiagram: 'lecture-diagram',
   lectureBoard: 'lecture-board',
+  lectureFollow: 'lecture-follow',
 } as const;
 
 export type QueueName = (typeof QUEUE)[keyof typeof QUEUE];
@@ -59,6 +60,8 @@ export const QUEUE_SETTINGS: Record<
   'lecture-diagram': { concurrency: 2, attempts: 2, backoffMs: 20_000 },
   // Boards for lectures written before boards existed.
   'lecture-board': { concurrency: 4, attempts: 2, backoffMs: 15_000 },
+  // Follow-along tracks for rows that have their words and times.
+  'lecture-follow': { concurrency: 4, attempts: 2, backoffMs: 10_000 },
 };
 
 export interface BaseJobData {
@@ -112,6 +115,14 @@ export interface LectureDiagramJobData extends BaseJobData {
   topicId: string;
   pageNumber: number;
   style: LectureStyle;
+}
+
+/** Building the follow-along track for a row that has its words. */
+export interface LectureFollowJobData extends BaseJobData {
+  pageNumber: number;
+  style: LectureStyle;
+  kind?: SegmentKind;
+  priority?: number;
 }
 
 /** Writing a board for a row that already has its words. */
@@ -185,6 +196,15 @@ export const lectureDiagramJobId = (
   contentVersion: number,
   style: LectureStyle,
 ) => `lecture-diagram-${documentId}-v${contentVersion}-${page}-${style}`;
+
+export const lectureFollowJobId = (
+  documentId: string,
+  page: number,
+  contentVersion: number,
+  style: LectureStyle,
+  kind: SegmentKind = 'page',
+) =>
+  `lecture-follow-${documentId}-v${contentVersion}-${page}-${style}${kind === 'page' ? '' : `-${kind}`}`;
 
 export const lectureBoardJobId = (
   documentId: string,

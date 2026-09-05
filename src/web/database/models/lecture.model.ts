@@ -10,6 +10,7 @@ import type {
   LectureSegmentStatus,
   LectureStyle,
   SegmentKind,
+  FollowStatus,
 } from '../../../contracts';
 import { BaseModel } from './base';
 import { DocumentModel } from './document.model';
@@ -110,6 +111,18 @@ export class LectureSegmentModel extends BaseModel {
     defaultValue: 'none',
   })
   declare boardStatus: BoardStatus;
+
+  /** Where in the simplified note the tutor is, moment by moment. */
+  @Column({ type: DataType.JSON, allowNull: true })
+  declare follow: unknown;
+
+  /** The track's own life, apart from the page's. */
+  @Column({
+    type: DataType.STRING(16),
+    allowNull: false,
+    defaultValue: 'none',
+  })
+  declare followStatus: FollowStatus;
 
   @Column({ type: DataType.STRING(512), allowNull: true })
   declare audioKey: string | null;

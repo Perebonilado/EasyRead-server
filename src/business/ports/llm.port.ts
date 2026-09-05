@@ -103,6 +103,8 @@ export interface LectureOutlineDraft {
      * which is what lets a learner switch style mid-idea.
      */
     moves: string[];
+    /** For each move, the numbered blocks of the note it teaches; null for a move that names none. */
+    moveBlocks?: (number[] | null)[] | null;
     /** The mistake a student is most likely to make here, where the page shows it. */
     pitfall: string | null;
     /** True on the one page of the chapter where the listener is asked to predict before hearing. */

@@ -7,6 +7,7 @@ import type {
   ExportJob,
   LectureAlignJob,
   LectureBoardJob,
+  LectureFollowJob,
   LectureChapterJob,
   LectureDiagramJob,
   LectureVoiceJob,
@@ -21,6 +22,7 @@ import {
   exportJobId,
   lectureAlignJobId,
   lectureBoardJobId,
+  lectureFollowJobId,
   lectureChapterJobId,
   lectureDiagramJobId,
   lectureVoiceJobId,
@@ -239,6 +241,22 @@ export class BullmqQueueAdapter implements JobQueuePort, OnModuleDestroy {
           job.pageNumber,
           job.contentVersion,
           job.style,
+        ),
+    );
+  }
+
+  async enqueueLectureFollows(jobs: LectureFollowJob[]): Promise<void> {
+    await this.enqueueKeyed(
+      QUEUE.lectureFollow,
+      'lecture-follow',
+      jobs,
+      (job) =>
+        lectureFollowJobId(
+          job.documentId,
+          job.pageNumber,
+          job.contentVersion,
+          job.style,
+          job.kind,
         ),
     );
   }

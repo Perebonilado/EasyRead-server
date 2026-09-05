@@ -14,6 +14,7 @@ import type {
 import { LectureChapterProcessor } from './lecture-chapter.processor';
 import { LectureVoiceProcessor } from './lecture-voice.processor';
 import { LectureBoardService } from './lecture-board.service';
+import { LectureFollowService } from './lecture-follow.service';
 import { LectureAlignProcessor } from './lecture-align.processor';
 import { LectureDiagramProcessor } from './lecture-diagram.processor';
 import { LectureBoardProcessor } from './lecture-board.processor';
@@ -267,6 +268,7 @@ function fakes(
       return Promise.resolve();
     },
     resetFailedSegments: () => Promise.resolve(),
+    saveFollow: () => Promise.resolve(),
     saveBoard: (input) => {
       const r = row(input.pageNumber, input.style, input.kind);
       if (r) {
@@ -337,6 +339,7 @@ function fakes(
         );
         return Promise.resolve();
       },
+      enqueueLectureFollows: () => Promise.resolve(),
       enqueueLectureBoards: (
         jobs: { pageNumber: number; style: LectureStyle; kind?: SegmentKind }[],
       ) => {
@@ -450,6 +453,16 @@ const chapterProcessor = (
     f.deps.queue as never,
     f.deps.events as never,
     boards,
+    // No note is written in these fakes: the page's own text stands in.
+    { find: () => Promise.resolve(null) } as never,
+  );
+
+/** The follow-along service over the fakes: no note is written here, so no track is built. */
+const followService = (f: ReturnType<typeof fakes>) =>
+  new LectureFollowService(
+    f.lectures,
+    { find: () => Promise.resolve(null) } as never,
+    f.deps.events as never,
   );
 
 const voiceProcessor = (
@@ -465,6 +478,8 @@ const voiceProcessor = (
     f.deps.events as never,
     new ConfigService({}),
     boards,
+    followService(f),
+    new FakeAlignerAdapter(),
   );
 
 const chapterJob = (
@@ -1818,6 +1833,7 @@ describe('the board after the audio', () => {
       f.deps.storage as never,
       aligner,
       boardService(f),
+      followService(f),
     );
 
   it('asks for alignment once a row is voiced, then times the board and announces it', async () => {
@@ -1962,6 +1978,7 @@ describe('the diagram on a board', () => {
       f.deps.storage as never,
       new FakeAlignerAdapter(),
       boardService(f),
+      followService(f),
     ).process({ ...voiceJob(1, 'gentle'), kind: 'page' }, CONTEXT);
     expect(f.row(1, 'gentle')!.boardStatus).toBe('done');
 

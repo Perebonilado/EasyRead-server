@@ -6,10 +6,17 @@ import {
   type LectureStyle,
   type LectureStyleSummary,
   type LectureBoardResponse,
+  type LectureFollowResponse,
   type LectureTopicDto,
   type SegmentKind,
 } from '../../../contracts';
-import { boardIsCurrent, type BoardTimeline } from '../../domain/board';
+import {
+  boardIsCurrent,
+  type BoardTimeline,
+  type WordTimes,
+} from '../../domain/board';
+import { followIsCurrent, type FollowTrack } from '../../domain/follow';
+import { ConfigService } from '@nestjs/config';
 import { NotFoundError, ValidationError } from '../../domain/errors/errors';
 import { JOB_QUEUE, LLM_GATEWAY } from '../../ports/tokens';
 import type { JobQueuePort } from '../../ports/job-queue.port';
@@ -84,13 +91,24 @@ export class LectureStatusHandler extends AbstractRequestHandlerTemplate<
   LectureRequest,
   LectureStatusResponse
 > {
+  /** Whether the hidden whiteboard is still written in the background. */
+  private readonly boardsOn: boolean;
+  /** Whether a worker measures the spoken words on the audio. */
+  private readonly alignOn: boolean;
+
   constructor(
     @Inject(TOPIC_REPOSITORY) private readonly topics: TopicRepository,
     @Inject(LECTURE_REPOSITORY) private readonly lectures: LectureRepository,
     @Inject(JOB_QUEUE) private readonly queue: JobQueuePort,
     private readonly access: DocumentAccessService,
+    private readonly config: ConfigService,
   ) {
     super();
+    this.boardsOn =
+      this.config.get<string>('LECTURE_BOARD_ENABLED', 'false') === 'true';
+    // The same reading the aligner adapter makes of its engine setting.
+    const engine = this.config.get<string>('LECTURE_ALIGN_ENGINE', 'dtw');
+    this.alignOn = engine === 'dtw' || engine === 'whisper';
   }
 
   protected async handleRequest(cmd: LectureRequest) {
@@ -111,14 +129,86 @@ export class LectureStatusHandler extends AbstractRequestHandlerTemplate<
     // read alongside the words, so a cut-off line is not left on it. The
     // words and the audio stay; the pane picks the new board up once it is
     // timed. Rows already being written, or that failed, are left alone.
-    const stale = segments.filter(
+    // The follow-along track for rows that have their words but no
+    // current track: the reader's eye follows the voice into the note.
+    const untracked = segments.filter(
       (row) =>
         row.scriptText &&
         row.status === 'done' &&
-        (row.boardStatus === 'none' ||
-          (row.boardStatus === 'done' &&
-            !boardIsCurrent(row.board as BoardTimeline | null))),
+        (row.kind === 'page' || row.kind === 'part') &&
+        (row.followStatus !== 'done' ||
+          !followIsCurrent((row.follow as FollowTrack | null) ?? null)),
     );
+    if (untracked.length) {
+      const here = position?.pageNumber ?? untracked[0].pageNumber;
+      const nearestFirst = [...untracked].sort(
+        (a, b) =>
+          Math.abs(a.pageNumber - here) - Math.abs(b.pageNumber - here) ||
+          a.seq - b.seq,
+      );
+      await this.queue
+        .enqueueLectureFollows(
+          nearestFirst.map((row, index) => ({
+            documentId: doc.id,
+            contentVersion: doc.contentVersion,
+            pageNumber: row.pageNumber,
+            style,
+            kind: row.kind,
+            priority: index + 1,
+          })),
+        )
+        .catch(() => undefined);
+    }
+
+    // Rows voiced but never measured: the aligner times their words so
+    // the follow-along track can point at the sentence, not just the
+    // block. Nearest the learner first; a row measured on other audio
+    // (voiced again since) counts as unmeasured.
+    if (this.alignOn) {
+      const unmeasured = segments.filter((row) => {
+        if (!row.scriptText || row.status !== 'done' || !row.audioKey) {
+          return false;
+        }
+        if (row.kind !== 'page' && row.kind !== 'part') return false;
+        const times = (row.wordTimes as WordTimes | null) ?? null;
+        return (
+          !times ||
+          times.audioKey !== row.audioKey ||
+          times.source === 'estimate'
+        );
+      });
+      if (unmeasured.length) {
+        const here = position?.pageNumber ?? unmeasured[0].pageNumber;
+        const nearestFirst = [...unmeasured].sort(
+          (a, b) =>
+            Math.abs(a.pageNumber - here) - Math.abs(b.pageNumber - here) ||
+            a.seq - b.seq,
+        );
+        await this.queue
+          .enqueueLectureAligns(
+            nearestFirst.map((row, index) => ({
+              documentId: doc.id,
+              contentVersion: doc.contentVersion,
+              pageNumber: row.pageNumber,
+              style,
+              kind: row.kind,
+              priority: index + 1,
+            })),
+          )
+          .catch(() => undefined);
+      }
+    }
+
+    const stale = this.boardsOn
+      ? segments.filter(
+          (row) =>
+            row.scriptText &&
+            row.status === 'done' &&
+            (row.boardStatus === 'none' ||
+              (row.boardStatus === 'done' &&
+                !boardIsCurrent(row.board as BoardTimeline | null))),
+        )
+      : [];
     if (stale.length) {
       // Nearest the learner first: the page they are on, then outwards.
       const here = position?.pageNumber ?? stale[0].pageNumber;
@@ -176,6 +266,7 @@ export class LectureStatusHandler extends AbstractRequestHandlerTemplate<
         moveOffsets: segment.moveOffsets ?? [],
         scriptLength: segment.scriptText?.length ?? null,
         boardStatus: segment.boardStatus ?? 'none',
+        followStatus: segment.followStatus ?? 'none',
       });
     }
 
@@ -635,6 +726,42 @@ export class LectureBoardHandler extends AbstractRequestHandlerTemplate<
       board: segment.board,
       wordTimes: segment.wordTimes ?? null,
     } satisfies LectureBoardResponse);
+  }
+}
+
+export interface LectureFollowRequest extends LectureRequest {
+  pageNumber: number;
+  kind?: SegmentKind;
+}
+
+/** One row's follow-along track, once it exists. */
+@Injectable()
+export class LectureFollowHandler extends AbstractRequestHandlerTemplate<
+  LectureFollowRequest,
+  LectureFollowResponse
+> {
+  constructor(
+    @Inject(LECTURE_REPOSITORY) private readonly lectures: LectureRepository,
+    private readonly access: DocumentAccessService,
+  ) {
+    super();
+  }
+
+  protected async handleRequest(cmd: LectureFollowRequest) {
+    const doc = await this.access.require(cmd.documentId, cmd.userId);
+    const segment = await this.lectures.findSegment(
+      doc.id,
+      cmd.pageNumber,
+      doc.contentVersion,
+      cmd.style ?? DEFAULT_LECTURE_STYLE,
+      cmd.kind ?? 'page',
+    );
+    if (!segment || segment.followStatus !== 'done' || !segment.follow) {
+      throw new NotFoundError('The follow-along track for this page');
+    }
+    return CommandResponse.of({
+      track: segment.follow,
+    } satisfies LectureFollowResponse);
   }
 }
 

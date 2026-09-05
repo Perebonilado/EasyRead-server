@@ -5,6 +5,7 @@ import type {
   LecturePosition,
   LectureStyle,
   SegmentKind,
+  FollowStatus,
 } from '../../contracts';
 import type {
   LecturePlanRecord,
@@ -60,6 +61,8 @@ const toSegment = (row: LectureSegmentModel): LectureSegmentRecord => ({
   board: row.board ?? null,
   wordTimes: row.wordTimes ?? null,
   boardStatus: row.boardStatus ?? 'none',
+  follow: row.follow ?? null,
+  followStatus: row.followStatus ?? 'none',
 });
 
 @Injectable()
@@ -258,6 +261,15 @@ export class SequelizeLectureRepository implements LectureRepository {
   ): Promise<void> {
     await this.segments.update(
       { board: input.board, boardStatus: input.boardStatus },
+      { where: whereKey(input) },
+    );
+  }
+
+  async saveFollow(
+    input: SegmentKey & { follow: unknown; followStatus: FollowStatus },
+  ): Promise<void> {
+    await this.segments.update(
+      { follow: input.follow, followStatus: input.followStatus },
       { where: whereKey(input) },
     );
   }

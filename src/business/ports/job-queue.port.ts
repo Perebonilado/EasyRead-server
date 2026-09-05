@@ -44,6 +44,14 @@ export interface LectureBoardJob extends PipelineJob {
   kind?: SegmentKind;
 }
 
+/** The follow-along track for one row. */
+export interface LectureFollowJob extends PipelineJob {
+  pageNumber: number;
+  style: LectureStyle;
+  kind?: SegmentKind;
+  priority?: number;
+}
+
 export interface ExportJob extends PipelineJob {
   exportId: string;
   level: Level;
@@ -70,6 +78,8 @@ export interface JobQueuePort {
   enqueueLectureDiagrams(jobs: LectureDiagramJob[]): Promise<void>;
   /** One job per row that has words but no current board. */
   enqueueLectureBoards(jobs: LectureBoardJob[]): Promise<void>;
+  /** Follow-along tracks, nearest the learner first when a priority is given. */
+  enqueueLectureFollows(jobs: LectureFollowJob[]): Promise<void>;
   /** Writes a document about a topic, then starts the normal pipeline. */
   enqueueLearn(job: PipelineJob): Promise<void>;
   /** Fetches an imported document's pages, then starts the normal pipeline. */

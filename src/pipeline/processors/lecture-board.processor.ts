@@ -11,6 +11,7 @@ import type { LectureRepository } from '../../business/repositories/lecture.repo
 import type { TopicRepository } from '../../business/repositories/misc.repository';
 import {
   linesOfTimeline,
+  nextFreeLine,
   type BoardTimeline,
   type WordTimes,
 } from '../../business/domain/board';
@@ -104,6 +105,22 @@ export class LectureBoardProcessor {
         stored?.marked === true && Array.isArray(stored.ops)
           ? linesOfTimeline(stored)
           : null;
+      // A part continues the page's board: its lines start after them.
+      const pageRow =
+        kind === 'part'
+          ? await this.lectures.findSegment(
+              documentId,
+              pageNumber,
+              contentVersion,
+              style,
+              'page',
+            )
+          : null;
+      const pageBoard = pageRow?.board as BoardTimeline | null | undefined;
+      const startLine =
+        kind === 'part' && pageBoard && Array.isArray(pageBoard.ops)
+          ? nextFreeLine(pageBoard)
+          : undefined;
       const timeline = planned
         ? await this.boards.writeFromMarkers({
             key,
@@ -113,6 +130,7 @@ export class LectureBoardProcessor {
             beat,
             durationMs,
             continues: kind === 'part',
+            startLine,
             sections: [{ move: 0, text: row.scriptText }],
             board: planned,
           })
@@ -125,6 +143,7 @@ export class LectureBoardProcessor {
             beat,
             durationMs,
             continues: kind === 'part',
+            startLine,
             bridge: row.bridge,
             moveOffsets: row.moveOffsets ?? undefined,
           });

@@ -1,6 +1,12 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { EVENT_BUS, SPEECH, STORAGE } from '../../business/ports/tokens';
+import {
+  ALIGNER,
+  EVENT_BUS,
+  SPEECH,
+  STORAGE,
+} from '../../business/ports/tokens';
+import type { AlignerPort } from '../../business/ports/aligner.port';
 import type { EventBusPort } from '../../business/ports/event-bus.port';
 import type { SpeechPort } from '../../business/ports/voice.port';
 import type { StoragePort } from '../../business/ports/storage.port';
@@ -23,6 +29,7 @@ import type { LectureVoiceJobData } from '../queues';
 import { mp3DurationMs, speechTooShort } from '../../business/domain/speech';
 import type { JobContext } from './base.processor';
 import { LectureBoardService } from './lecture-board.service';
+import { LectureFollowService } from './lecture-follow.service';
 
 /**
  * One finished script, turned into audio.
@@ -46,6 +53,8 @@ export class LectureVoiceProcessor {
     @Inject(EVENT_BUS) private readonly events: EventBusPort,
     private readonly config: ConfigService,
     private readonly boards: LectureBoardService,
+    private readonly follows: LectureFollowService,
+    @Inject(ALIGNER) private readonly aligner: AlignerPort,
   ) {}
 
   async process(job: LectureVoiceJobData, context: JobContext): Promise<void> {
@@ -134,8 +143,16 @@ export class LectureVoiceProcessor {
         kind,
       });
 
-      // The board learns its timing from this audio, off this path.
-      if (this.boards.enabled()) {
+      // The reader's eye can follow at once, by block; the sentence comes
+      // with the alignment.
+      await this.follows.trackOnMoves(
+        { documentId, contentVersion, pageNumber, style, kind },
+        { ...row, durationMs: row.durationMs ?? estimateDurationMs(spoken) },
+      );
+
+      // The follow-along track and the board learn their timing from this
+      // audio, off this path: the aligner measures every word of it.
+      if (this.aligner.enabled() || this.boards.enabled()) {
         await this.boards.requestAlignment({
           documentId,
           contentVersion,

@@ -1,5 +1,6 @@
 import type {
   BoardStatus,
+  FollowStatus,
   LecturePosition,
   LectureSegmentStatus,
   LectureStyle,
@@ -36,6 +37,9 @@ export interface LectureSegmentRecord {
   /** Word times measured on the audio; null until aligned. */
   wordTimes: unknown;
   boardStatus: BoardStatus;
+  /** The follow-along track, as stored; null until the row is voiced. */
+  follow?: unknown;
+  followStatus?: FollowStatus;
 }
 
 export interface LectureSegmentSeed {
@@ -142,6 +146,10 @@ export interface LectureRepository {
     input: SegmentKey & { board: unknown; boardStatus: BoardStatus },
   ): Promise<void>;
   saveWordTimes(input: SegmentKey & { wordTimes: unknown }): Promise<void>;
+  /** The row's follow-along track and its status. */
+  saveFollow(
+    input: SegmentKey & { follow: unknown; followStatus: FollowStatus },
+  ): Promise<void>;
   /** Rows with words but no current board: what a backfill writes. */
   listForBoardBackfill(
     documentId: string,

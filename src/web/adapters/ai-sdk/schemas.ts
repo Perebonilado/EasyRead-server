@@ -335,6 +335,12 @@ export const lectureOutlineSchema = z.object({
         skip: z.string().max(300).nullable(),
         weight: z.enum(['full', 'light']),
         moves: z.array(z.string().min(1).max(80)).min(1).max(4),
+        // Every key must be required for the provider's strict schemas; a
+        // plan with no note answers null.
+        moveBlocks: z
+          .array(z.array(z.number().int().min(0).max(200)).nullable())
+          .max(4)
+          .nullable(),
         pitfall: z.string().max(240).nullable(),
         turn: z.boolean(),
         figure: z.object({

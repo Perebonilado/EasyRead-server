@@ -324,7 +324,7 @@ export class AiSdkLlmAdapter implements LlmGatewayPort, OnModuleInit {
           ? `THE BOARD for this page, in writing order. You write every one of these lines, exactly once, in the section of its move: [write n], then the line said word for word as its own sentence, then its explanation in everyday words, for example: "[write 2] Refill rate: ten tokens a second. That means every second, ten more tokens arrive, whatever else is happening."\n${input.board.lines
               .map(
                 (line) =>
-                  `${line.number}. (move ${line.move}) ${line.kind.toUpperCase()} ${line.text}${line.meaning ? ` : ${line.meaning}` : ''}`,
+                  `${line.number}. (move ${line.move}) ${line.text}${line.meaning ? `: ${line.meaning}` : ''}`,
               )
               .join('\n')}`
           : 'This page has no board: no [write] or [point] marks.',

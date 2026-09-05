@@ -12,6 +12,7 @@ import {
   DOCUMENT_PAGE_REPOSITORY,
   DOCUMENT_REPOSITORY,
   LECTURE_REPOSITORY,
+  SIMPLIFIED_PAGE_REPOSITORY,
   TOPIC_REPOSITORY,
 } from '../../business/repositories/tokens';
 import type { AiCallLogRepository } from '../../business/repositories/ai-call-log.repository';
@@ -22,6 +23,13 @@ import type {
   LectureSegmentRecord,
 } from '../../business/repositories/lecture.repository';
 import type { TopicRepository } from '../../business/repositories/misc.repository';
+import type { SimplifiedPageRepository } from '../../business/repositories/simplified-page.repository';
+import type { Block } from '../../contracts';
+import {
+  noteLevelFor,
+  noteNumbered,
+  noteProse,
+} from '../../business/domain/follow';
 import {
   LECTURE_GENERATOR_VERSION,
   LECTURE_STYLES,
@@ -51,9 +59,12 @@ import {
   type PageScripts,
   type BeatWeight,
   type LectureBeat,
+  type LectureSection,
   type LecturePlan,
   type VerifyResult,
   withoutBoardMarkers,
+  markLabelProblems,
+  readsAsApplause,
   type PageBoard,
 } from '../../business/domain/lecture';
 import type { LectureChapterJobData } from '../queues';
@@ -63,6 +74,7 @@ import {
   capFigures,
   fittedMeaning,
   fittedText,
+  listsFromRuns,
   mergePlanLines,
   nextFreeLine,
   planProblems,
@@ -128,7 +140,28 @@ export class LectureChapterProcessor {
     @Inject(JOB_QUEUE) private readonly queue: JobQueuePort,
     @Inject(EVENT_BUS) private readonly events: EventBusPort,
     private readonly boards: LectureBoardService,
+    @Inject(SIMPLIFIED_PAGE_REPOSITORY)
+    private readonly simplified: SimplifiedPageRepository,
   ) {}
+
+  /**
+   * The simplified note a style teaches from (the slow learner's from the
+   * easiest note), or null when it is not written yet, in which case the
+   * page's own text stands in.
+   */
+  private async noteFor(
+    documentId: string,
+    pageNumber: number,
+    style: LectureStyle,
+  ): Promise<Block[] | null> {
+    const wanted = noteLevelFor(style);
+    const other = wanted === 'easiest' ? 'standard' : 'easiest';
+    for (const level of [wanted, other] as const) {
+      const page = await this.simplified.find(documentId, level, pageNumber);
+      if (page?.status === 'done' && page.blocks?.length) return page.blocks;
+    }
+    return null;
+  }
 
   async process(
     job: LectureChapterJobData,
@@ -465,12 +498,20 @@ export class LectureChapterProcessor {
       pageNumbers[0],
       pageNumbers[pageNumbers.length - 1],
     );
-    const pages: PageText[] = pageRows
-      .filter((page) => pageNumbers.includes(page.pageNumber))
-      .map((page) => ({
+    // The planner reads the note when it exists, its blocks numbered so a
+    // move can name the blocks it teaches; the raw page otherwise.
+    const pages: PageText[] = [];
+    for (const page of pageRows) {
+      if (!pageNumbers.includes(page.pageNumber)) continue;
+      // The plan is shared by every style, so it reads the standard note.
+      const note = await this.noteFor(doc.id, page.pageNumber, 'steady');
+      pages.push({
         pageNumber: page.pageNumber,
-        text: page.text.slice(0, 4_000),
-      }));
+        text: note
+          ? `(blocks numbered)\n${noteNumbered(note)}`.slice(0, 4_000)
+          : page.text.slice(0, 4_000),
+      });
+    }
 
     // Everything before this chapter in the document. The student may have
     // read any of it; what they have HEARD is marked, so a callback can
@@ -641,7 +682,12 @@ export class LectureChapterProcessor {
 
     try {
       const page = await this.pages.findOne(doc.id, row.pageNumber);
-      const pageText = (page?.text ?? '').slice(0, 6_000);
+      // The note is what the lecturer teaches from and what the reader
+      // follows; the page itself stands in until the note is written, and
+      // stays beside the verifier so nothing true is flagged.
+      const note = await this.noteFor(doc.id, row.pageNumber, style);
+      const original = (page?.text ?? '').slice(0, 6_000);
+      const pageText = note ? noteProse(note).slice(0, 6_000) : original;
 
       // The nearest EARLIER page that actually has words, in this style.
       // Pages the lecture skipped, and pages that failed, leave gaps. When
@@ -723,6 +769,7 @@ export class LectureChapterProcessor {
         comingLater,
         list: listShape(pageText),
         neighbours,
+        original: note ? original : undefined,
       });
 
       // Kept in memory too, so the next page in this loop sees it without
@@ -922,16 +969,27 @@ export class LectureChapterProcessor {
     comingLater: string[];
     list: { items: number } | null;
     neighbours: NeighbourPage[];
+    /** The page's own text when the note stood in for it, for the verifier. */
+    original?: string;
   }): Promise<WrittenPage> {
     const { style } = input;
     const beat = beatFor(input.plan, input.pageNumber);
     const weight: BeatWeight = beat.weight ?? 'full';
     // A bridge is one sentence whatever the plan says; a plan from before
     // moves existed has one move, the page's goal.
+    // A plan sometimes ends a page on applause ("encouragement to continue
+    // learning"); that is not a move, and the page is written without it.
+    const taught = (beat.moves ?? []).filter((move) => !readsAsApplause(move));
+    const applause = (beat.moves ?? []).filter((move) => readsAsApplause(move));
+    if (applause.length) {
+      this.logger.log(
+        `${input.documentId} p${input.pageNumber} ${style}: left out the plan's applause move${applause.length === 1 ? '' : 's'} ${applause.map((move) => `"${move}"`).join(', ')}`,
+      );
+    }
     const moves = input.bridge
       ? [beat.goal]
-      : beat.moves?.length
-        ? beat.moves
+      : taught.length
+        ? taught
         : [beat.goal];
     const spec = LECTURE_STYLES[style];
     const budget = WORD_BUDGET[style][weight];
@@ -939,6 +997,7 @@ export class LectureChapterProcessor {
     // Everything a figure in the script may legitimately come from.
     const sources = [
       input.pageText,
+      input.original ?? '',
       ...input.neighbours.map((page) => page.text),
       planText,
       input.prevTail,
@@ -961,6 +1020,9 @@ export class LectureChapterProcessor {
           pageText: input.pageText,
         });
 
+    // The attempt with the fewest style faults, kept in case the last one
+    // is worse: the rule loop must never trade a good page for a thin one.
+    let best: { sections: LectureSection[]; faults: number } | null = null;
     for (let attempt = 1; ; attempt += 1) {
       // Strict mode flattens a page to what it literally says. That is the
       // right answer to a page that has left the material, and the wrong
@@ -1024,7 +1086,7 @@ export class LectureChapterProcessor {
         outcome: 'ok',
       });
 
-      const sections = written.value.sections;
+      let sections = written.value.sections;
       const continuation = sectionsToScript(sections);
       // The board marks are for the board; the style checks and the
       // verifier read the words as the listener will hear them.
@@ -1035,6 +1097,7 @@ export class LectureChapterProcessor {
       // words we will not keep.
       const style_ = [
         ...sectionProblems(sections, moves),
+        ...markLabelProblems(sections, board),
         ...styleProblems(plainContinuation, {
           style,
           weight,
@@ -1049,33 +1112,48 @@ export class LectureChapterProcessor {
           taughtSoFar: input.taughtSoFar,
         }),
       ];
+      // A page that ignored its moves cannot stand in for one that kept
+      // them; among the rest, fewer faults is better.
+      const structural = style_.some(
+        (problem) => problem.kind === 'moves' || problem.kind === 'label',
+      );
+      if (!structural && (best === null || style_.length < best.faults)) {
+        best = { sections, faults: style_.length };
+      }
       if (style_.length && attempt < MAX_SEGMENT_ATTEMPTS) {
         styleCorrection = style_.map((problem) => problem.detail).join('; ');
         correction = undefined;
         continue;
       }
+      if (style_.length && best !== null && best.faults < style_.length) {
+        this.logger.log(
+          `${input.documentId} p${input.pageNumber} ${style}: keeping an earlier attempt with ${best.faults} style fault${best.faults === 1 ? '' : 's'} over the last with ${style_.length}`,
+        );
+        sections = best.sections;
+      }
 
+      const chosen = withoutBoardMarkers(sectionsToScript(sections));
       // A one-line bridge has almost nothing to be unfaithful to, and the
       // check would cost a model call per figure page.
       const verdict = input.bridge
         ? { grounded: true, problems: [] }
-        : await this.verifySegment(input.documentId, plainContinuation, {
+        : await this.verifySegment(input.documentId, chosen, {
             plan: planText,
             prevTail: input.prevTail,
-            neighbours: input.neighbours,
+            neighbours: input.original
+              ? [
+                  {
+                    pageNumber: input.pageNumber,
+                    text: input.original.slice(0, NEIGHBOUR_CHARS),
+                  },
+                  ...input.neighbours,
+                ]
+              : input.neighbours,
             pageText: input.pageText,
           });
-      const figures = input.bridge
-        ? []
-        : unsupportedFigures(plainContinuation, sources);
+      const figures = input.bridge ? [] : unsupportedFigures(chosen, sources);
 
-      const decision = acceptSegment(
-        plainContinuation,
-        verdict,
-        attempt,
-        style_,
-        figures,
-      );
+      const decision = acceptSegment(chosen, verdict, attempt, style_, figures);
       if (decision.action === 'accept') {
         if (decision.warning) {
           this.logger.warn(
@@ -1142,8 +1220,29 @@ export class LectureChapterProcessor {
       style: input.style,
     };
     try {
-      const planned = await this.llm.lectureBoardPlan(request);
-      await this.recordBoardCall(input.documentId, planned.usage);
+      const raw = await this.llm.lectureBoardPlan(request);
+      await this.recordBoardCall(input.documentId, raw.usage);
+      // Judged as the board will write them: a "figure" with no number is
+      // a point, a point carries no meaning, a line is fitted to its line.
+      const asWritten = (line: PlanLineDraft): PlanLineDraft => {
+        const kind =
+          line.kind === 'figure' && !/[\d=+*/^%]/.test(line.text)
+            ? 'point'
+            : line.kind;
+        return {
+          ...line,
+          kind,
+          text: fittedText(kind, line.text.trim()),
+          meaning:
+            kind === 'term' && line.meaning?.trim()
+              ? fittedMeaning(line.meaning.trim())
+              : null,
+        };
+      };
+      const planned = {
+        ...raw,
+        value: { ...raw.value, lines: raw.value.lines.map(asWritten) },
+      };
       const problems = planProblems(planned.value, ctx);
       const badOf = (list: { index?: number }[]) =>
         new Set(
@@ -1155,7 +1254,9 @@ export class LectureChapterProcessor {
         draft: { lines: PlanLineDraft[] },
         bad: Set<number>,
       ): PlanLineDraft[] => draft.lines.filter((_, index) => !bad.has(index));
-      let kept = keptOf(planned.value, badOf(problems));
+      // The first draft deduplicated against itself: the planner lists
+      // a member twice in one breath more often than it should.
+      let kept = mergePlanLines([], keptOf(planned.value, badOf(problems)));
       let heading = planned.value.heading;
       let refused = planned.value.lines.length - kept.length;
       if (problems.length) {
@@ -1164,11 +1265,18 @@ export class LectureChapterProcessor {
           .map((problem) => problem.detail)
           .slice(0, 8)
           .join('; ');
-        const second = await this.llm.lectureBoardPlan({
+        const secondRaw = await this.llm.lectureBoardPlan({
           ...request,
           correction,
         });
-        await this.recordBoardCall(input.documentId, second.usage);
+        await this.recordBoardCall(input.documentId, secondRaw.usage);
+        const second = {
+          ...secondRaw,
+          value: {
+            ...secondRaw.value,
+            lines: secondRaw.value.lines.map(asWritten),
+          },
+        };
         const secondProblems = planProblems(second.value, ctx);
         const secondKept = keptOf(second.value, badOf(secondProblems));
         const before = kept.length;
@@ -1191,20 +1299,20 @@ export class LectureChapterProcessor {
             .join(', ')})`,
         );
       }
-      const lines = kept.map((line, index) => ({
+      // In the order the moves are taught, whatever order the planner
+      // returned; then a run of flat points in one move is a list, given
+      // its name and its shape whatever the planner did.
+      const inMoveOrder = kept
+        .map((line, index) => ({ line, index }))
+        .sort((a, b) => a.line.move - b.line.move || a.index - b.index)
+        .map((entry) => entry.line);
+      const shaped = listsFromRuns(inMoveOrder, input.moves);
+      const lines = shaped.map((line, index) => ({
         number: index + 1,
         move: line.move,
-        // A "figure" with no number in it is a name the planner mis-kinded:
-        // a point, written as one.
-        kind:
-          line.kind === 'figure' && !/[\d=+*/^%]/.test(line.text)
-            ? ('point' as const)
-            : line.kind,
-        // As the board will write them, so the speech says what is shown.
-        text: fittedText(line.kind, line.text.trim()),
-        meaning: line.meaning?.trim()
-          ? fittedMeaning(line.meaning.trim())
-          : null,
+        kind: line.kind,
+        text: line.text,
+        meaning: line.meaning,
         level: line.level,
         important: line.important,
       }));

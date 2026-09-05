@@ -59,7 +59,10 @@ import {
   charLimitOf,
   boardMarks,
   cutWordAtEnd,
+  labelForMove,
   linesOfTimeline,
+  listEndOffsets,
+  listsFromRuns,
   markedDraft,
   mergePlanLines,
   repairCutWords,
@@ -68,7 +71,10 @@ import {
   type PlanLineDraft,
   boardTimeOf,
   audioTimeOf,
+  MAX_IMPORTANT,
   OVERRUN_MS,
+  PAUSE_MS,
+  numbersAsWords,
 } from './board';
 
 /**
@@ -840,7 +846,7 @@ describe('quality rules', () => {
     expect(point && 'text' in point ? point.text : '').toBe('empty - dropped');
   });
 
-  it('keeps one important item, the first the writer marked', () => {
+  it('keeps up to three important items, the first three the writer marked', () => {
     const built = buildBoardOps(
       draft([
         { kind: 'term', text: 'token bucket', anchor: 'token bucket' },
@@ -864,7 +870,19 @@ describe('quality rules', () => {
     const flags = built.ops
       .filter((op) => op.kind === 'point')
       .map((op) => ('important' in op ? op.important : null));
-    expect(flags).toEqual([true, false]);
+    expect(flags).toEqual([true, true]);
+    const many = buildBoardOps(
+      draft([
+        { kind: 'term', text: 'token bucket', anchor: 'token bucket' },
+        ...fillerTerms(4).map((term) => ({ ...term, important: true })),
+      ]),
+      ctx(),
+      'q',
+      'q-board',
+    );
+    expect(
+      many.ops.filter((op) => 'important' in op && op.important).length,
+    ).toBe(MAX_IMPORTANT);
     const important = built.ops.find(
       (op) => op.kind === 'point' && op.important,
     );
@@ -2139,6 +2157,16 @@ describe('a planned board held to the rules before the speech exists', () => {
     expect(kinds).toContain('topic_label');
     expect(kinds).toContain('ungrounded');
     expect(kinds).toContain('anchor_missing');
+    // Cheering is not a note.
+    expect(
+      planProblems(
+        {
+          heading: 'Token bucket',
+          lines: [line(0, 'point', 'keep learning about token buckets')],
+        },
+        ctx,
+      ).map((problem) => problem.kind),
+    ).toContain('topic_label');
     expect(kinds).toContain('duplicate');
     expect(
       problems.find((problem) => problem.kind === 'anchor_missing')?.detail,
@@ -2161,6 +2189,13 @@ describe('a word cut short at the end of a line', () => {
     ).toBe('remo');
     expect(
       cutWordAtEnd('keys remapped when servers are added', pool),
+    ).toBeNull();
+    // A word the page has in another form is a word, not a cut.
+    expect(
+      cutWordAtEnd(
+        'a rule that turns any name into a number',
+        ctx({ spoken: 'It turns names into numbers.', pageText: '' }),
+      ),
     ).toBeNull();
     // A short tail, a number, or a word of the page is not a cut.
     expect(cutWordAtEnd('few keys are', pool)).toBeNull();
@@ -2280,6 +2315,223 @@ describe('the lines a stored board carries', () => {
   });
 });
 
+describe('what the fan-out review taught the rules', () => {
+  const spokenOf = (script: string) =>
+    script
+      .replace(/\[[^\]]*\]/g, ' ')
+      .replace(/[ \t]+/g, ' ')
+      .trim();
+  it('places a figure the voice said in words', () => {
+    expect(numbersAsWords('4 cache keys')).toBe('four cache keys');
+    const spoken = 'We start with four cache keys. Each lands somewhere.';
+    const marks = boardMarks(spoken, spoken, [{ move: 0, text: spoken }], {
+      heading: 'Keys',
+      lines: [
+        {
+          number: 1,
+          move: 0,
+          kind: 'figure',
+          text: '4 cache keys',
+          meaning: null,
+          level: null,
+          important: null,
+        },
+      ],
+    })!;
+    expect(marks.lines[0].placed).toBe('words');
+    expect(spoken.slice(marks.lines[0].at).startsWith('four cache keys')).toBe(
+      true,
+    );
+  });
+
+  it('backs a move label off to a whole phrase, or gives up', () => {
+    expect(labelForMove('how to pick a hash function')).toBe('How to pick');
+    expect(labelForMove('real-world uses: Dynamo, Cassandra, Discord')).toBe(
+      'Real-world uses',
+    );
+    expect(labelForMove('a')).toBe('');
+  });
+
+  it('treats a shared name as the same member only among list members', () => {
+    const claim = (text: string, level: 1 | 2 | null = null) => ({
+      move: 0,
+      kind: 'point' as const,
+      text,
+      meaning: null,
+      level,
+      important: null,
+    });
+    expect(
+      mergePlanLines(
+        [claim('Virtual nodes spread the load evenly')],
+        [claim('Virtual nodes are copies of one server on the ring')],
+      ),
+    ).toHaveLength(2);
+    expect(
+      mergePlanLines(
+        [claim('1 server hands out every ID')],
+        [claim('1 in 1000 requests collide')],
+      ),
+    ).toHaveLength(2);
+    expect(
+      mergePlanLines(
+        [claim('Apache Cassandra partitions data', 2)],
+        [claim('used in Apache Cassandra', 2)],
+      ),
+    ).toHaveLength(1);
+    // A draft deduplicated against itself, one line at a time.
+    expect(
+      mergePlanLines(
+        [],
+        [
+          claim('Discord chat app uses consistent hashing', 2),
+          claim('employed in Discord chat application', 2),
+        ],
+      ),
+    ).toHaveLength(1);
+  });
+
+  it('knows a cut word from a plural, and a fragment from a figure', () => {
+    const pool = ctx({
+      spoken: 'Old entries are removed. It turns names into numbers.',
+      pageText: '',
+    });
+    expect(cutWordAtEnd('old entries remov', pool)).toBe('remov');
+    expect(cutWordAtEnd('turns a name into a number', pool)).toBeNull();
+    const problems = planProblems(
+      {
+        heading: 'Modulo hashing',
+        lines: [
+          {
+            move: 0,
+            kind: 'figure',
+            text: '% 4',
+            meaning: null,
+            level: null,
+            important: null,
+          },
+        ],
+      },
+      {
+        pageText: 'hash(key) % 4 picks the server',
+        planLines: [],
+        moves: ['the formula'],
+      },
+    );
+    expect(problems.some((problem) => problem.kind === 'incomplete')).toBe(
+      true,
+    );
+  });
+
+  it('waits at the end of the sentence a list ends in, and gives a red line a breath', () => {
+    const script =
+      'Three uses. [write 1] Real-world uses. [write 2] Dynamo. [write 3] Cassandra. Finally [write 4] Discord routes chat with it too. [write 5] Few keys move when a server joins, which is the whole point. And so on it goes.';
+    const spoken = spokenOf(script);
+    const line = (
+      number: number,
+      text: string,
+      level: 1 | 2 | null,
+      kind: 'term' | 'point',
+      important = false,
+    ) => ({ number, move: 0, kind, text, meaning: null, level, important });
+    const marks = boardMarks(script, spoken, [{ move: 0, text: script }], {
+      heading: 'Uses',
+      lines: [
+        line(1, 'Real-world uses', null, 'term'),
+        line(2, 'Dynamo', 2, 'point'),
+        line(3, 'Cassandra', 2, 'point'),
+        line(4, 'Discord routes chat with it too', 2, 'point'),
+        line(5, 'few keys move when a server joins', null, 'point', true),
+      ],
+    })!;
+    const built = buildBoardOps(
+      markedDraft(marks),
+      ctx({ spoken, pageText: spoken, durationMs: 30_000 }),
+      'm',
+      'm-board',
+    );
+    const times = estimateWordTimes(spoken, 30_000, 'k');
+    const timed = timeBoard(
+      {
+        ...emptyTimeline(spoken.length),
+        boards: built.boards,
+        ops: built.ops,
+        marked: true,
+      },
+      times,
+      30_000,
+      'gentle',
+      spoken,
+    );
+    const listEnd = spoken.indexOf('too.') + 'too.'.length;
+    const redEnd = spoken.indexOf('whole point.') + 'whole point.'.length;
+    expect(timed.holds!.map((hold) => hold.atMs)).toEqual([
+      wordEndAt(times, listEnd),
+      wordEndAt(times, redEnd),
+    ]);
+    expect(timed.holds![0].forMs).toBe(PAUSE_MS.gentle);
+    expect(timed.holds![1].forMs).toBe(Math.round(PAUSE_MS.gentle / 2));
+    // The board break before an echo does not end a list.
+    expect(
+      listEndOffsets([
+        ...built.ops.slice(0, 3),
+        { ...built.ops[0], kind: 'board', nextBoardId: 'x' } as never,
+        ...built.ops.slice(3),
+      ]).length,
+    ).toBe(1);
+  });
+});
+
+describe('a run of flat points is a list', () => {
+  const point = (move: number, text: string, important = false) => ({
+    move,
+    kind: 'point' as const,
+    text,
+    meaning: null,
+    level: null,
+    important,
+  });
+
+  it("puts three or more flat points of one move under the move's name, and leaves shorter runs and red lines alone", () => {
+    const shaped = listsFromRuns(
+      [
+        point(0, 'few keys move when a server joins', true),
+        point(1, 'Amazon Dynamo stores data this way'),
+        point(1, 'Apache Cassandra partitions with it'),
+        point(1, 'Discord routes chat with it'),
+      ],
+      ['summarizing benefits', 'real-world applications'],
+    );
+    expect(
+      shaped.map(
+        (line) => `${line.kind}${line.level === 2 ? '2' : ''}:${line.text}`,
+      ),
+    ).toEqual([
+      'point:few keys move when a server joins',
+      'term:Real-world applications',
+      'point2:Amazon Dynamo stores data this way',
+      'point2:Apache Cassandra partitions with it',
+      'point2:Discord routes chat with it',
+    ]);
+    expect(labelForMove('explaining the rehashing problem')).toBe(
+      'Rehashing problem',
+    );
+    // Two points are not a list; a run with the red line is not regrouped.
+    expect(
+      listsFromRuns(
+        [point(0, 'one claim'), point(0, 'another claim')],
+        ['benefits'],
+      ).map((line) => line.kind),
+    ).toEqual(['point', 'point']);
+    expect(
+      listsFromRuns(
+        [point(0, 'one', true), point(0, 'two'), point(0, 'three')],
+        ['benefits'],
+      ).map((line) => line.kind),
+    ).toEqual(['point', 'point', 'point']);
+  });
+});
+
 describe('two plans for a page, merged so the retry can only add', () => {
   const line = (
     move: number,
@@ -2313,6 +2565,22 @@ describe('two plans for a page, merged so the retry can only add', () => {
       'no queue, no waiting',
     ]);
     expect(mergePlanLines(first, [])).toEqual(first);
+    // A member naming the same thing in other words is the same member.
+    const member = (text: string) => ({ ...line(1, text), level: 2 as const });
+    const uses = [
+      member('Apache Cassandra for data partitioning'),
+      member('Akamai content delivery network uses it'),
+    ];
+    const again = [
+      member('used in Apache Cassandra'),
+      member('utilized by Akamai CDN'),
+      member('Maglev network load balancer implements it'),
+    ];
+    expect(mergePlanLines(uses, again).map((entry) => entry.text)).toEqual([
+      'Apache Cassandra for data partitioning',
+      'Akamai content delivery network uses it',
+      'Maglev network load balancer implements it',
+    ]);
   });
 });
 
@@ -2468,8 +2736,10 @@ describe('a board planned before the speech and placed by it', () => {
     const times = estimateWordTimes(spoken, 8_000, 'k');
     const timed = timeBoard(timeline, times, 8_000, 'gentle', spoken);
     expect(timed.marked).toBe(true);
-    // No waiting: the voice is the pace, so nothing holds the audio.
-    expect(timed.holds).toEqual([]);
+    // No waiting for the pen: the voice is the pace. The one hold is the
+    // breath after the red line's sentence.
+    expect(timed.holds).toHaveLength(1);
+    expect(timed.holds![0].forMs).toBe(Math.round(PAUSE_MS.gentle / 2));
     const timedTerm = timed.ops.find((op) => op.kind === 'term')!;
     // Starts with its first word, or the moment the heading's pen lifts.
     const first = wordStartAt(times, term.anchor.charStart);
@@ -2490,6 +2760,104 @@ describe('a board planned before the speech and placed by it', () => {
       if (op.t0Ms === null || op.durMs === null) continue;
       expect(op.t0Ms + op.durMs).toBeLessThanOrEqual(8_000 + OVERRUN_MS);
     }
+  });
+
+  it("waits at a pause in the script: a hold of the style's length, and every later line moves by it", () => {
+    const spoken = spokenOf(SCRIPT);
+    const marks = boardMarks(SCRIPT, spoken, SECTIONS, BOARD)!;
+    const built = buildBoardOps(
+      markedDraft(marks),
+      ctx({ spoken, pageText: spoken, durationMs: 30_000 }),
+      'm',
+      'm-board',
+    );
+    const timeline = {
+      ...emptyTimeline(spoken.length),
+      boards: built.boards,
+      ops: built.ops,
+      marked: true,
+    };
+    const times = estimateWordTimes(spoken, 30_000, 'k');
+    // A pause after the first line's sentence ("...per second.").
+    const pauseAt = spoken.indexOf('Every second');
+    const timed = timeBoard(timeline, times, 30_000, 'gentle', spoken, [
+      pauseAt,
+    ]);
+    // The script's pause, and the breath after the red point's sentence.
+    expect(timed.holds).toHaveLength(2);
+    expect(timed.holds![0].forMs).toBe(PAUSE_MS.gentle);
+    expect(timed.holds![0].atMs).toBe(wordEndAt(times, pauseAt));
+    const point = timed.ops.find((op) => op.kind === 'point')!;
+    const plain = timeBoard(timeline, times, 30_000, 'gentle', spoken);
+    const plainPoint = plain.ops.find((op) => op.kind === 'point')!;
+    // The point is spoken after the pause, so its board time carries it.
+    expect(point.t0Ms).toBe(plainPoint.t0Ms! + PAUSE_MS.gentle);
+    expect(plain.holds).toHaveLength(1);
+  });
+
+  it('waits after a list on the board even when the script did not pause', () => {
+    const script =
+      'Three real uses. [write 1] Real-world uses. [write 2] Dynamo. [write 3] Cassandra. [write 4] Discord. Each of these spreads its data this way.';
+    const spoken = spokenOf(script);
+    const line = (number: number, text: string, level: 1 | 2 | null) => ({
+      number,
+      move: 0,
+      kind: level === 2 ? ('point' as const) : ('term' as const),
+      text,
+      meaning: null,
+      level,
+      important: null,
+    });
+    const marks = boardMarks(script, spoken, [{ move: 0, text: script }], {
+      heading: 'Uses',
+      lines: [
+        line(1, 'Real-world uses', null),
+        line(2, 'Dynamo', 2),
+        line(3, 'Cassandra', 2),
+        line(4, 'Discord', 2),
+      ],
+    })!;
+    const built = buildBoardOps(
+      markedDraft(marks),
+      ctx({ spoken, pageText: spoken, durationMs: 20_000 }),
+      'm',
+      'm-board',
+    );
+    expect(listEndOffsets(built.ops)).toHaveLength(1);
+    const times = estimateWordTimes(spoken, 20_000, 'k');
+    const timed = timeBoard(
+      {
+        ...emptyTimeline(spoken.length),
+        boards: built.boards,
+        ops: built.ops,
+        marked: true,
+      },
+      times,
+      20_000,
+      'gentle',
+      spoken,
+    );
+    expect(timed.holds).toHaveLength(1);
+    expect(timed.holds![0].forMs).toBe(PAUSE_MS.gentle);
+    // At the end of "Discord", before the explanation.
+    const discord = spoken.indexOf('Discord.') + 'Discord.'.length;
+    expect(timed.holds![0].atMs).toBe(wordEndAt(times, discord));
+    // A script pause at the same moment is not doubled.
+    const both = timeBoard(
+      {
+        ...emptyTimeline(spoken.length),
+        boards: built.boards,
+        ops: built.ops,
+        marked: true,
+      },
+      times,
+      20_000,
+      'gentle',
+      spoken,
+      [discord],
+    );
+    expect(both.holds).toHaveLength(1);
+    expect(both.holds![0].forMs).toBe(PAUSE_MS.gentle);
   });
 
   it('gives a line it never says as written no span, so the old timing applies to it', () => {

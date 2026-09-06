@@ -1,17 +1,19 @@
 /**
- * Always a chapter ahead.
+ * Only what is needed, and a little ahead.
  *
- * What to prepare from where the learner is, so the page after the one
- * they are hearing is always ready. The chapter they are on comes first,
- * from their page; then the chapters ahead; then, on a small book, the
- * rest of it, and on a large one only the chapter behind. Chapters
- * already written or being written are left alone.
+ * What to prepare from where the learner is: the chapter they are on,
+ * from their page to its end, and the next chapter only when the pages
+ * left in this one are within the runway, so the tape never runs dry
+ * between two short chapters and a long chapter is never company for
+ * three more. Nothing behind is prepared unless the learner goes there.
+ * A small book is prepared whole from the first press, ahead in order
+ * first. Chapters already written or being written are left alone.
  */
 
 /** A book this long or shorter is prepared whole from the first press. */
-export const WHOLE_BOOK_MAX_PAGES = 100;
-/** On a large book, how many chapters past the current one are kept ready. */
-export const CHAPTERS_AHEAD = 2;
+export const WHOLE_BOOK_MAX_PAGES = 40;
+/** With this many pages or fewer left in the chapter, the next one is prepared too. */
+export const RUNWAY_PAGES = 10;
 
 export interface AheadTopic {
   id: string;
@@ -51,17 +53,23 @@ export function chaptersAhead(input: {
     index: here,
     startAtPage: inChapter ? input.page : undefined,
   });
-  const aheadCount = wholeBook ? ordered.length : CHAPTERS_AHEAD;
-  for (
-    let step = 1;
-    step <= aheadCount && here + step < ordered.length;
-    step += 1
-  ) {
-    sequence.push({ index: here + step });
-  }
-  const behindCount = wholeBook ? ordered.length : 1;
-  for (let step = 1; step <= behindCount && here - step >= 0; step += 1) {
-    sequence.push({ index: here - step });
+  if (wholeBook) {
+    for (let step = 1; here + step < ordered.length; step += 1) {
+      sequence.push({ index: here + step });
+    }
+    for (let step = 1; here - step >= 0; step += 1) {
+      sequence.push({ index: here - step });
+    }
+  } else {
+    // The pages left in this chapter, from the learner's page; a chapter
+    // not yet entered counts whole.
+    const current = ordered[here];
+    const left = inChapter
+      ? current.endPage - input.page + 1
+      : current.endPage - current.startPage + 1;
+    if (left <= RUNWAY_PAGES && here + 1 < ordered.length) {
+      sequence.push({ index: here + 1 });
+    }
   }
   return sequence
     .filter(({ index }) => !input.written.has(ordered[index].id))
@@ -70,4 +78,15 @@ export function chaptersAhead(input: {
       priority: position + 1,
       ...(startAtPage ? { startAtPage } : {}),
     }));
+}
+
+/**
+ * Whether the tape, on this page, is within the runway of its chapter's
+ * end: the moment the next chapter is worth preparing.
+ */
+export function runwayDue(
+  chapter: { startPage: number; endPage: number },
+  page: number,
+): boolean {
+  return chapter.endPage - page + 1 <= RUNWAY_PAGES;
 }

@@ -390,7 +390,7 @@ export class SetLectureStyleHandler extends AbstractRequestHandlerTemplate<
 }
 
 export interface LectureMapsRequest extends LectureRequest {
-  /** The learner's page; the chapter they are in and those ahead get their maps. Omitted means every chapter. */
+  /** The learner's page; the chapter they are in, and the next when the runway reaches it, get their maps. Omitted means every chapter. */
   aheadOfPage?: number;
 }
 
@@ -398,8 +398,9 @@ export interface LectureMapsRequest extends LectureRequest {
  * Maps for chapters prepared before the map existed. A chapter's map row
  * is seeded at its first page, pending, and the chapter's job is queued
  * again: it finds its pages written and writes only the map. Only for the
- * chapter the learner is in and the chapters ahead, so a learner turning
- * the mode on pays for what they will hear.
+ * chapter the learner is in, and the next when the runway rule would
+ * prepare it, so a learner starting a session pays for what they will
+ * hear.
  */
 @Injectable()
 export class LectureMapsHandler extends AbstractRequestHandlerTemplate<
@@ -427,12 +428,23 @@ export class LectureMapsHandler extends AbstractRequestHandlerTemplate<
     );
     const topics = await this.topics.listByDocument(doc.id);
     const from = cmd.aheadOfPage ?? null;
-    const here =
+    // The same runway the pages follow: this chapter, and the next only
+    // when the pages left in this one are few.
+    const reach =
       from === null
         ? null
-        : (topics.find(
-            (topic) => from >= topic.startPage && from <= topic.endPage,
-          ) ?? null);
+        : new Set(
+            chaptersAhead({
+              topics: topics.map((topic) => ({
+                id: topic.id,
+                startPage: topic.startPage,
+                endPage: topic.endPage,
+              })),
+              pageCount: doc.props.pageCount ?? topics.at(-1)?.endPage ?? 0,
+              page: from,
+              written: new Set(),
+            }).map((row) => row.topicId),
+          );
     const plans = await this.lectures.listPlans(doc.id, doc.contentVersion);
     const outlined = new Set(
       plans
@@ -449,8 +461,7 @@ export class LectureMapsHandler extends AbstractRequestHandlerTemplate<
       );
       // A map written before the outline existed is written again.
       if (hasRow && outlined.has(topic.id)) return false;
-      if (from === null) return true;
-      return topic.endPage >= (here?.startPage ?? from);
+      return reach === null || reach.has(topic.id);
     });
     if (wanted.length) {
       for (const topic of wanted) {

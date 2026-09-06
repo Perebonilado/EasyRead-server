@@ -3,7 +3,7 @@ import type { ConfigService } from '@nestjs/config';
 import type { EmbeddingModel, LanguageModel } from 'ai';
 import type { LlmTask } from '../../../business/ports/llm.port';
 
-export const PROVIDERS = ['openai', 'anthropic', 'google'] as const;
+export const PROVIDERS = ['openai', 'anthropic', 'google', 'deepseek'] as const;
 export type ProviderName = (typeof PROVIDERS)[number];
 
 /** Which env var carries each provider's key. */
@@ -11,6 +11,9 @@ const API_KEY_VAR: Record<ProviderName, string> = {
   openai: 'OPENAI_API_KEY',
   anthropic: 'ANTHROPIC_API_KEY',
   google: 'GOOGLE_GENERATIVE_AI_API_KEY',
+  // Text only: no speech, no embeddings, no vision. Cheap on output and
+  // on a repeated prompt prefix, which every writer here has.
+  deepseek: 'DEEPSEEK_API_KEY',
 };
 
 /**
@@ -262,6 +265,10 @@ export class ModelRegistry {
       case 'google': {
         const { createGoogle } = await import('@ai-sdk/google');
         return createGoogle({ apiKey, baseURL });
+      }
+      case 'deepseek': {
+        const { createDeepSeek } = await import('@ai-sdk/deepseek');
+        return createDeepSeek({ apiKey, baseURL });
       }
     }
   }

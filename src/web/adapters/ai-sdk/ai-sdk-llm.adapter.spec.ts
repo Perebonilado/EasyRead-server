@@ -152,6 +152,10 @@ describe('parseModelRef', () => {
   });
 
   it('rejects a spec with no provider', () => {
+    expect(parseModelRef('deepseek:deepseek-chat')).toEqual({
+      provider: 'deepseek',
+      modelId: 'deepseek-chat',
+    });
     expect(() => parseModelRef('gpt-4o-mini')).toThrow(/missing its provider/);
   });
 

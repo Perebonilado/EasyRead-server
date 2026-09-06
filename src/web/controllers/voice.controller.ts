@@ -14,6 +14,7 @@ import { Type } from 'class-transformer';
 import {
   ArrayMaxSize,
   IsArray,
+  IsBoolean,
   IsIn,
   IsInt,
   IsNumber,
@@ -53,6 +54,7 @@ import {
 } from '../../business/handlers/documents/voice.handlers';
 import { BoardDiagramHandler } from '../../business/handlers/documents/board-diagram.handler';
 import { BookFindHandler } from '../../business/handlers/documents/book-find.handler';
+import { LectureInvitationHandler } from '../../business/handlers/documents/lecture-invitation.handler';
 import {
   GetMasteryHandler,
   RecordAssessmentHandler,
@@ -136,6 +138,11 @@ class LectureContextDto {
   @IsString({ each: true })
   @MaxLength(200, { each: true })
   board?: string[];
+
+  /** The client plays a recorded invitation at the press, so the tutor must not speak first. */
+  @IsOptional()
+  @IsBoolean()
+  invited?: boolean;
 }
 
 class BoardRegionDto {
@@ -293,6 +300,7 @@ export class VoiceController {
     private readonly drawDiagram: DrawDiagramHandler,
     private readonly boardDiagram: BoardDiagramHandler,
     private readonly bookFind: BookFindHandler,
+    private readonly invitation: LectureInvitationHandler,
     private readonly drawSketch: DrawSketchHandler,
     private readonly compute: ComputeHandler,
     private readonly diagramCheck: AskDiagramCheckHandler,
@@ -396,6 +404,30 @@ export class VoiceController {
       recent: body.recent ?? null,
     });
     return result.data;
+  }
+
+  /** One of the tutor's recorded invitations, as audio; the client plays it the moment the mic is pressed. */
+  @Get('lecture/invitation/:index')
+  async invitationAudio(
+    @CurrentUser('id') userId: string,
+    @Param('id') documentId: string,
+    @Param('index') index: string,
+    @Res() response: Response,
+  ): Promise<void> {
+    const which = Number(index);
+    if (!Number.isInteger(which) || which < 0) {
+      throw new ValidationError('That invitation number is not valid');
+    }
+    const { data } = await this.invitation.handle({
+      userId,
+      documentId,
+      index: which,
+    });
+    const { stream, size } = await this.storage.stream(data.fileRef);
+    response.setHeader('Content-Type', data.mimeType);
+    response.setHeader('Content-Length', size);
+    response.setHeader('Cache-Control', 'private, max-age=86400, immutable');
+    stream.pipe(response);
   }
 
   /** The tutor's lookup mid-lecture: passages of the book with their page numbers. */

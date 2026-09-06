@@ -6,6 +6,7 @@ import {
   askSpeed,
   conversationSoFar,
   figureKindFor,
+  INVITATION_LINES,
   pageFigures,
   type AskContext,
 } from './ask';
@@ -237,6 +238,23 @@ describe('a question mid-lecture: the board', () => {
       'THIS PAGE NAMES A PICTURE: Figure 5-3',
     );
     expect(askInstructions(base)).not.toContain('THIS PAGE NAMES A PICTURE');
+  });
+
+  it('opens by inviting them, unless a recorded line already has', () => {
+    expect(askInstructions(base)).toContain(
+      'Say one short, warm, brisk invitation to go ahead',
+    );
+    const invited = askInstructions({ ...base, invited: true });
+    expect(invited).toContain(
+      'a recorded line of yours has already invited them',
+    );
+    expect(invited).toContain('Say nothing until they have spoken');
+    expect(invited).not.toContain('Say one short, warm, brisk invitation');
+    expect(INVITATION_LINES).toHaveLength(6);
+    for (const line of INVITATION_LINES) {
+      expect(line.split(/\s+/).length).toBeLessThanOrEqual(4);
+      expect(line).toMatch(/[.?!]$/);
+    }
   });
 
   it('reads the shape of a drawing from the ask', () => {

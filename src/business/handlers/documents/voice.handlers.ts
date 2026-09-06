@@ -255,6 +255,8 @@ export interface VoiceSessionRequest {
     conversation?: { role: 'learner' | 'tutor'; text: string }[];
     /** What is on the tutor's board for this page, one line per item, when a session is made again or woken. */
     board?: string[];
+    /** The client plays a recorded invitation at the press, so the tutor must not speak first. */
+    invited?: boolean;
   };
 }
 
@@ -1107,6 +1109,7 @@ export class StartVoiceSessionHandler extends AbstractRequestHandlerTemplate<
       conversation: context?.conversation ?? null,
       board: context?.board ?? null,
       figures,
+      invited: context?.invited === true,
     });
   }
 

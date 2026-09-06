@@ -53,6 +53,8 @@ export interface AskContext {
   board?: string[] | null;
   /** Figures and tables the page names, as one line ("Figure 5-3; a table"); null when it names none. */
   figures?: string | null;
+  /** A recorded line of the tutor's has already invited the learner, so the tutor says nothing until they speak. */
+  invited?: boolean;
 }
 
 /** Which shape a drawing takes, read from what the tutor asked to draw. */
@@ -144,6 +146,25 @@ export function pageFigures(
   return names.size ? [...names].slice(0, 6).join('; ') : null;
 }
 
+/**
+ * The recorded invitations: what the tutor says the moment the mic is
+ * pressed, four words at most, one of these each time. Synthesised once
+ * in the tutor's voice and played by the client before the call is even
+ * awake, so the press is answered at once.
+ */
+export const INVITATION_LINES: readonly string[] = [
+  'Go ahead.',
+  "I'm listening.",
+  'Yes, go on.',
+  'What is it?',
+  'Ask away.',
+  'Go for it.',
+];
+
+/** How the recorded invitations are delivered: a teacher mid-class, turning to a student. */
+export const INVITATION_DELIVERY =
+  'Warm and brisk, a teacher mid-class turning to a student who has raised a hand. Natural, unhurried but short; no drama.';
+
 /** The instructions the session is minted with. The ending protocol comes last, so it is what the model read most recently. */
 export function askInstructions(ctx: AskContext): string {
   // Plan text arrives with its own full stop; the sentence around it adds one.
@@ -171,7 +192,9 @@ export function askInstructions(ctx: AskContext): string {
     'THEY HOLD THE MIC TO SPEAK, and may press it while you are talking: being cut off mid-sentence is normal here, not rude. When it happens, drop the old thought and answer what they just said.',
     'THIS IS ONE CONVERSATION for the whole lecture, not a series of questions. It pauses while the lecture plays and picks up when they press the mic again; you remember everything said in it and may refer back to it ("like the marbles from before"). Each time they come back, you are told where the lecture has got to.',
     'GROUNDING: answer from this book, in its own terms, names and numbers. If the book does not answer it, after looking it up, say so plainly rather than answering from general knowledge. Answer the step they are stuck on, not the whole idea again. If they were working something out, say what they had right, the one thing that was off and why, and the next step. Never praise the person. An analogy is allowed if you call it one and tie it back to the term at once; no anecdotes.',
-    'OPENING: the call opens the moment they press the mic, before they have said anything, and your first words come right after a chime. Say one short, warm, brisk invitation to go ahead, four words at most and different each time, then stop and listen. Never a greeting, never their name, never a summary of where you were.',
+    ctx.invited
+      ? 'OPENING: the call opens the moment they press the mic, and a recorded line of yours has already invited them to go ahead. Say nothing until they have spoken; your first words are your answer. Never a greeting, never their name, never a summary of where you were.'
+      : 'OPENING: the call opens the moment they press the mic, before they have said anything, and your first words come right after a chime. Say one short, warm, brisk invitation to go ahead, four words at most and different each time, then stop and listen. Never a greeting, never their name, never a summary of where you were.',
     "ANSWER THE QUESTION PROPERLY: what it is, why it is so, and how it works in this book's terms, with the book's example where it has one. Say as much as the question needs and no more: a definition takes a few sentences, a why or a how takes an explanation. Stop when it is answered. There is no fixed length.",
     'THEN A DOOR OPEN: once the question is answered, end with one thing they can answer, a real follow-up on what they said, an offer ("want to see it with the second server?"), or a choice ("the hash, or the ring?"). Never "does that clear it up" or "does that make sense".',
     ctx.board?.length

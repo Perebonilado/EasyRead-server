@@ -29,6 +29,7 @@ import {
   tailOf,
   validateOutline,
   EXTRAS_BY_STYLE,
+  chosenLectureInteractive,
   chosenLectureStyle,
   EXTRA_BUDGET,
   KIND_RANK,
@@ -921,12 +922,46 @@ describe('the segments around a chapter', () => {
 
   it('seeds no words before a chapter and no check after it, for any learner', () => {
     for (const style of ['gentle', 'steady', 'brisk'] as const) {
-      expect(extraSeeds(cut, style)).toEqual([]);
+      expect(extraSeeds(cut, style).map((seed) => seed.kind)).toEqual(['map']);
       expect(EXTRAS_BY_STYLE[style]).not.toContain('terms');
       expect(EXTRAS_BY_STYLE[style]).not.toContain('check');
     }
     expect(EXTRAS_BY_STYLE.brisk).not.toContain('review');
     expect(EXTRAS_BY_STYLE.gentle).toContain('review');
+  });
+
+  it("seeds the map for every style, at the chapter's first page", () => {
+    for (const style of ['gentle', 'steady', 'brisk'] as const) {
+      const [map] = extraSeeds(cut, style);
+      expect(map).toMatchObject({
+        kind: 'map',
+        topicId: 't1',
+        pageNumber: 1,
+        seq: 0,
+        bridge: false,
+      });
+    }
+    expect(KIND_RANK.map).toBeGreaterThan(KIND_RANK.review);
+    expect(KIND_RANK.map).toBeLessThan(KIND_RANK.page);
+  });
+
+  it('resolves whether the lecture is interactive: document, else account, else off', () => {
+    expect(chosenLectureInteractive(true, null)).toEqual({
+      interactive: true,
+      source: 'document',
+    });
+    expect(chosenLectureInteractive(false, true)).toEqual({
+      interactive: false,
+      source: 'document',
+    });
+    expect(chosenLectureInteractive(null, true)).toEqual({
+      interactive: true,
+      source: 'account',
+    });
+    expect(chosenLectureInteractive(undefined, undefined)).toEqual({
+      interactive: false,
+      source: 'none',
+    });
   });
 
   it('gives a chapter with nothing to teach no extras at all', () => {

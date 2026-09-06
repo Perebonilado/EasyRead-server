@@ -46,9 +46,13 @@ import {
   effectiveStatus,
   IN_FLIGHT_STATUSES,
   chosenLectureStyle,
+  chosenLectureInteractive,
 } from '../../domain/lecture';
 import { chaptersAhead } from '../../domain/lecture-ahead';
-import type { LectureRepository } from '../../repositories/lecture.repository';
+import type {
+  LecturePlanRecord,
+  LectureRepository,
+} from '../../repositories/lecture.repository';
 import type {
   DocumentLearningStateRepository,
   LearnerProfileRepository,
@@ -132,15 +136,17 @@ export class LectureStatusHandler extends AbstractRequestHandlerTemplate<
   protected async handleRequest(cmd: LectureRequest) {
     const doc = await this.access.require(cmd.documentId, cmd.userId);
 
-    const [topics, everything, position, docState, profile] = await Promise.all(
-      [
+    const [topics, everything, position, docState, profile, plans] =
+      await Promise.all([
         this.topics.listByDocument(doc.id),
         this.lectures.listSegments(doc.id, doc.contentVersion),
         this.lectures.findPosition(cmd.userId, doc.id),
         this.docStates.find(cmd.userId, doc.id).catch(() => null),
         this.profiles.find(cmd.userId).catch(() => null),
-      ],
-    );
+        this.lectures
+          .listPlans(doc.id, doc.contentVersion)
+          .catch((): LecturePlanRecord[] => []),
+      ]);
 
     // The style asked for, else the one chosen for this document or for
     // every document, else the one the student was listening in.
@@ -150,6 +156,10 @@ export class LectureStatusHandler extends AbstractRequestHandlerTemplate<
     );
     const style =
       cmd.style ?? chosen.style ?? position?.style ?? DEFAULT_LECTURE_STYLE;
+    const interactive = chosenLectureInteractive(
+      docState?.lectureInteractive,
+      profile?.lectureInteractive,
+    );
     const segments = everything.filter((segment) => segment.style === style);
 
     // A board written by an older writer, or never written for a row that
@@ -278,10 +288,14 @@ export class LectureStatusHandler extends AbstractRequestHandlerTemplate<
 
     const byTopic = new Map<string, LectureTopicDto>();
     for (const topic of topics) {
+      const plan = plans.find(
+        (record) => record.topicId === topic.id && record.status === 'done',
+      )?.plan as LecturePlan | null | undefined;
       byTopic.set(topic.id, {
         topicId: topic.id,
         title: topic.title,
         segments: [],
+        ...(plan?.map ? { map: plan.map } : {}),
       });
     }
 
@@ -317,24 +331,30 @@ export class LectureStatusHandler extends AbstractRequestHandlerTemplate<
       styles,
       chosenStyle: chosen.style,
       styleSource: chosen.source,
+      interactive: interactive.interactive,
+      interactiveSource: interactive.source,
     } satisfies LectureStatusResponse);
   }
 }
 
 export interface SetLectureStyleRequest extends LectureRequest {
-  style: LectureStyle;
+  /** How the learner learns; omitted leaves the style as it is. */
+  style?: LectureStyle;
+  /** Whether the lecture runs its beats around each chapter; omitted leaves it as it is. */
+  interactive?: boolean;
   /** Use it for every document on the account, not only this one. */
   all: boolean;
 }
 
 /**
- * How the learner learns, chosen once per document from the lecture bar,
- * and for every document when they ask for that.
+ * The lecture's settings: how the learner learns, and whether the lecture
+ * is interactive. Chosen per document from the lecture bar, and for every
+ * document when they ask for that.
  */
 @Injectable()
 export class SetLectureStyleHandler extends AbstractRequestHandlerTemplate<
   SetLectureStyleRequest,
-  { style: LectureStyle; all: boolean }
+  { style: LectureStyle | null; interactive: boolean | null; all: boolean }
 > {
   constructor(
     @Inject(DOCUMENT_LEARNING_STATE_REPOSITORY)
@@ -348,13 +368,135 @@ export class SetLectureStyleHandler extends AbstractRequestHandlerTemplate<
 
   protected async handleRequest(cmd: SetLectureStyleRequest) {
     const doc = await this.access.require(cmd.documentId, cmd.userId);
-    await this.docStates.upsert(cmd.userId, doc.id, {
-      lectureStyle: cmd.style,
-    });
-    if (cmd.all) {
-      await this.profiles.upsert(cmd.userId, { lectureStyle: cmd.style });
+    const patch = {
+      ...(cmd.style ? { lectureStyle: cmd.style } : {}),
+      ...(cmd.interactive !== undefined
+        ? { lectureInteractive: cmd.interactive }
+        : {}),
+    };
+    if (!Object.keys(patch).length) {
+      throw new ValidationError('Nothing to change');
     }
-    return CommandResponse.of({ style: cmd.style, all: cmd.all });
+    await this.docStates.upsert(cmd.userId, doc.id, patch);
+    if (cmd.all) {
+      await this.profiles.upsert(cmd.userId, patch);
+    }
+    return CommandResponse.of({
+      style: cmd.style ?? null,
+      interactive: cmd.interactive ?? null,
+      all: cmd.all,
+    });
+  }
+}
+
+export interface LectureMapsRequest extends LectureRequest {
+  /** The learner's page; the chapter they are in and those ahead get their maps. Omitted means every chapter. */
+  aheadOfPage?: number;
+}
+
+/**
+ * Maps for chapters prepared before the map existed. A chapter's map row
+ * is seeded at its first page, pending, and the chapter's job is queued
+ * again: it finds its pages written and writes only the map. Only for the
+ * chapter the learner is in and the chapters ahead, so a learner turning
+ * the mode on pays for what they will hear.
+ */
+@Injectable()
+export class LectureMapsHandler extends AbstractRequestHandlerTemplate<
+  LectureMapsRequest,
+  LectureStatusResponse
+> {
+  constructor(
+    @Inject(TOPIC_REPOSITORY) private readonly topics: TopicRepository,
+    @Inject(LECTURE_REPOSITORY) private readonly lectures: LectureRepository,
+    @Inject(JOB_QUEUE) private readonly queue: JobQueuePort,
+    private readonly access: DocumentAccessService,
+    private readonly status: LectureStatusHandler,
+  ) {
+    super();
+  }
+
+  protected async handleRequest(cmd: LectureMapsRequest) {
+    const doc = await this.access.require(cmd.documentId, cmd.userId);
+    const position = await this.lectures.findPosition(cmd.userId, doc.id);
+    const style = cmd.style ?? position?.style ?? DEFAULT_LECTURE_STYLE;
+    const rows = await this.lectures.listSegments(
+      doc.id,
+      doc.contentVersion,
+      style,
+    );
+    const topics = await this.topics.listByDocument(doc.id);
+    const from = cmd.aheadOfPage ?? null;
+    const here =
+      from === null
+        ? null
+        : (topics.find(
+            (topic) => from >= topic.startPage && from <= topic.endPage,
+          ) ?? null);
+    const plans = await this.lectures.listPlans(doc.id, doc.contentVersion);
+    const outlined = new Set(
+      plans
+        .filter((record) => (record.plan as LecturePlan | null)?.map)
+        .map((record) => record.topicId),
+    );
+    const wanted = topics.filter((topic) => {
+      const pages = rows.filter(
+        (row) => row.topicId === topic.id && row.kind === 'page',
+      );
+      if (!pages.length || pages.every((row) => row.bridge)) return false;
+      const hasRow = rows.some(
+        (row) => row.topicId === topic.id && row.kind === 'map',
+      );
+      // A map written before the outline existed is written again.
+      if (hasRow && outlined.has(topic.id)) return false;
+      if (from === null) return true;
+      return topic.endPage >= (here?.startPage ?? from);
+    });
+    if (wanted.length) {
+      for (const topic of wanted) {
+        if (
+          rows.some((row) => row.topicId === topic.id && row.kind === 'map')
+        ) {
+          await this.lectures.removeSegments(
+            doc.id,
+            doc.contentVersion,
+            style,
+            'map',
+            topic.id,
+          );
+        }
+      }
+      await this.lectures.seedSegments({
+        documentId: doc.id,
+        contentVersion: doc.contentVersion,
+        generatorVersion: LECTURE_GENERATOR_VERSION,
+        segments: wanted.map((topic) => {
+          const first = rows
+            .filter((row) => row.topicId === topic.id && row.kind === 'page')
+            .sort((a, b) => a.seq - b.seq)[0];
+          return {
+            topicId: topic.id,
+            pageNumber: first.pageNumber,
+            seq: first.seq,
+            bridge: false,
+            style,
+            kind: 'map' as const,
+          };
+        }),
+      });
+      await this.queue.enqueueLectureChapters(
+        wanted.map((topic, index) => ({
+          documentId: doc.id,
+          contentVersion: doc.contentVersion,
+          topicId: topic.id,
+          orderIndex: topic.orderIndex,
+          style,
+          priority: index + 1,
+        })),
+      );
+    }
+    const { data } = await this.status.handle({ ...cmd, style });
+    return CommandResponse.of(data);
   }
 }
 

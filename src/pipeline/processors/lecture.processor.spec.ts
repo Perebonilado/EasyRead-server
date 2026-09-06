@@ -176,7 +176,7 @@ function fakes(
   const seedExtra = (
     style: LectureStyle,
     pageNumber: number,
-    kind: 'terms' | 'check' | 'review',
+    kind: 'map' | 'terms' | 'check' | 'review',
   ) => {
     const page = [...rows.values()].find(
       (r) =>
@@ -1324,7 +1324,7 @@ describe('LectureChapterProcessor', () => {
 });
 
 describe('LectureChapterProcessor: the segments around a chapter', () => {
-  it('writes the pages alone: no words before the chapter, no check after it, voiced in order', async () => {
+  it('writes the map first, then the pages: no words before the chapter, no check after it, voiced in order', async () => {
     const f = fakes({ 1: REAL_PAGE, 2: REAL_PAGE }, [TOPIC], ['gentle']);
     f.seedExtras('gentle');
     await chapterProcessor(f).process(
@@ -1332,13 +1332,25 @@ describe('LectureChapterProcessor: the segments around a chapter', () => {
       CONTEXT,
     );
 
-    // A lecture begins on its first page and ends on its last.
+    // A lecture begins on its first page and ends on its last; the map,
+    // the shape of the chapter, is ready before the first page is.
     expect(f.row(1, 'gentle', 'terms')).toBeUndefined();
     expect(f.row(2, 'gentle', 'check')).toBeUndefined();
     expect(f.voiceJobs).toEqual([
+      { pageNumber: 1, style: 'gentle', kind: 'map' },
       { pageNumber: 1, style: 'gentle' },
       { pageNumber: 2, style: 'gentle' },
     ]);
+    const map = f.row(1, 'gentle', 'map')!;
+    expect(map.scriptText).toMatch(/^Here is the shape of/);
+    expect(map.status).toBe('voicing');
+    // The outline the learner reads is kept on the plan.
+    const plan = (await f.lectures.findPlan('doc-1', TOPIC.id, 1))!.plan as {
+      map?: { about: string; stops: unknown[]; landing: string };
+    };
+    expect(plan.map?.stops.length).toBeGreaterThan(0);
+    expect(plan.map?.about).toBeTruthy();
+    expect(plan.map?.landing).toBeTruthy();
     expect(f.row(1, 'gentle')!.scriptText).toMatch(/^Why Inflation matters\./);
   });
 

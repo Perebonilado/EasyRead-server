@@ -40,6 +40,7 @@ import {
   LectureBoardHandler,
   LectureFollowHandler,
   LectureReviewHandler,
+  LectureMapsHandler,
   LectureStatusHandler,
   SaveLecturePositionHandler,
   SetLectureStyleHandler,
@@ -113,6 +114,35 @@ class LectureStyleDto {
   all?: boolean;
 }
 
+class LectureSettingsDto {
+  @IsOptional()
+  @IsIn(LECTURE_STYLE_KEYS)
+  style?: LectureStyle;
+
+  /** Whether the lecture runs its beats around each chapter. */
+  @IsOptional()
+  @IsBoolean()
+  interactive?: boolean;
+
+  /** Use it for every document on the account. */
+  @IsOptional()
+  @IsBoolean()
+  all?: boolean;
+}
+
+class LectureMapsDto {
+  /** The learner's page: the chapter they are in and those ahead get their maps. */
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  aheadOfPage?: number;
+
+  @IsOptional()
+  @IsIn(LECTURE_STYLE_KEYS)
+  style?: LectureStyle;
+}
+
 class LecturePositionDto {
   @Type(() => Number)
   @IsInt()
@@ -167,6 +197,7 @@ export class LectureController {
     private readonly backfill: BackfillBoardsHandler,
     private readonly position: SaveLecturePositionHandler,
     private readonly styleChoice: SetLectureStyleHandler,
+    private readonly maps: LectureMapsHandler,
     @Inject(STORAGE) private readonly storage: StoragePort,
   ) {}
 
@@ -323,18 +354,56 @@ export class LectureController {
     stream.pipe(response);
   }
 
-  /** How the learner learns, for this document or for all of them. */
+  /** How the learner learns, for this document or for all of them. Kept for a release; `settings` is the route. */
   @Patch('style')
   async setStyle(
     @CurrentUser('id') userId: string,
     @Param('id') documentId: string,
     @Body() body: LectureStyleDto,
-  ): Promise<{ style: LectureStyle; all: boolean }> {
+  ): Promise<{ style: LectureStyle | null; all: boolean }> {
     const { data } = await this.styleChoice.handle({
       userId,
       documentId,
       style: body.style,
       all: body.all === true,
+    });
+    return data;
+  }
+
+  /** The lecture's settings: the style, whether it is interactive; for this document or for all of them. */
+  @Patch('settings')
+  async setSettings(
+    @CurrentUser('id') userId: string,
+    @Param('id') documentId: string,
+    @Body() body: LectureSettingsDto,
+  ): Promise<{
+    style: LectureStyle | null;
+    interactive: boolean | null;
+    all: boolean;
+  }> {
+    const { data } = await this.styleChoice.handle({
+      userId,
+      documentId,
+      style: body.style,
+      interactive: body.interactive,
+      all: body.all === true,
+    });
+    return data;
+  }
+
+  /** Maps for chapters prepared before the map existed: the chapter the learner is in and those ahead. */
+  @Post('maps')
+  @HttpCode(202)
+  async writeMaps(
+    @CurrentUser('id') userId: string,
+    @Param('id') documentId: string,
+    @Body() body: LectureMapsDto,
+  ): Promise<LectureStatusResponse> {
+    const { data } = await this.maps.handle({
+      userId,
+      documentId,
+      aheadOfPage: body.aheadOfPage,
+      style: body.style,
     });
     return data;
   }

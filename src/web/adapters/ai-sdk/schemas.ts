@@ -125,6 +125,24 @@ export const topicQuizSchema = z.object({
  * A chapter preview written for comprehension (guided reading) — the skim
  * ritual's material, generated once per topic and cached.
  */
+/** A check answered aloud: a flashcard with one answer said back, or true or false. */
+export const spokenQuizSchema = z.object({
+  questions: z
+    .array(
+      z.object({
+        kind: z.enum(['flashcard', 'true_false', 'mcq']),
+        question: z.string().min(1).max(300),
+        /** The answer in a sentence for a flashcard; "True" or "False"; for mcq, the right option word for word. */
+        answer: z.string().min(1).max(300),
+        /** For mcq only: three or four options, the answer among them. */
+        options: z.array(z.string().min(1).max(160)).max(4).optional(),
+        explanation: z.string().min(1).max(300),
+      }),
+    )
+    .min(2)
+    .max(3),
+});
+
 /**
  * A generated batch. Wider than `topicQuizSchema` because these items are
  * banked and scheduled rather than shown once: they carry a hint, a topic
@@ -488,6 +506,22 @@ export const sketchJudgeSchema = z.object({
 
 /** A short segment around a chapter: its words, its check, or the review. */
 export const lectureExtraSchema = z.object({
+  script: z.string().min(1).max(4000),
+});
+
+/** The map: the outline the learner reads, and the script that speaks it. */
+export const lectureMapSchema = z.object({
+  about: z.string().min(1).max(240),
+  stops: z
+    .array(
+      z.object({
+        name: z.string().min(1).max(60),
+        line: z.string().min(1).max(220),
+      }),
+    )
+    .min(2)
+    .max(6),
+  landing: z.string().min(1).max(240),
   script: z.string().min(1).max(4000),
 });
 

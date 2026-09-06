@@ -37,6 +37,10 @@ export class LearnerProfileModel extends BaseModel {
   @Column({ type: DataType.STRING(16), allowNull: true })
   declare lectureStyle: string | null;
 
+  /** Whether the lecture runs its beats for every document; null until they say "use for all". */
+  @Column({ type: DataType.BOOLEAN, allowNull: true })
+  declare lectureInteractive: boolean | null;
+
   @Column({
     type: DataType.ENUM('default', 'auto', 'manual'),
     allowNull: false,

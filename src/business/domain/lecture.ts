@@ -76,11 +76,12 @@ export const DEFAULT_LECTURE_STYLE: LectureStyle = 'steady';
  * check of what stuck after it, and the review a returning learner hears
  * before carrying on. Play order within one page number follows KIND_RANK.
  */
-export type LectureExtraKind = 'terms' | 'check' | 'review';
+export type LectureExtraKind = 'map' | 'terms' | 'check' | 'review';
 /** A page, the second piece of a page voiced as two, or an extra. */
 export type SegmentKind = 'page' | 'part' | LectureExtraKind;
 export const SEGMENT_KINDS: SegmentKind[] = [
   'review',
+  'map',
   'terms',
   'page',
   'part',
@@ -88,10 +89,11 @@ export const SEGMENT_KINDS: SegmentKind[] = [
 ];
 export const KIND_RANK: Record<SegmentKind, number> = {
   review: 0,
-  terms: 1,
-  page: 2,
-  part: 3,
-  check: 4,
+  map: 1,
+  terms: 2,
+  page: 3,
+  part: 4,
+  check: 5,
 };
 
 export function isSegmentKind(value: unknown): value is SegmentKind {
@@ -105,12 +107,34 @@ export function isSegmentKind(value: unknown): value is SegmentKind {
  * the check any more: a lecture begins on its first page and ends on its
  * last. The kinds stay known so lectures written before this still read,
  * and the player skips them. The review, for a learner coming back, stays.
+ * The map, the shape of the chapter in a minute, is written for every
+ * style and played only when the lecture is interactive.
  */
 export const EXTRAS_BY_STYLE: Record<LectureStyle, LectureExtraKind[]> = {
-  gentle: ['review'],
-  steady: ['review'],
-  brisk: [],
+  gentle: ['review', 'map'],
+  steady: ['review', 'map'],
+  brisk: ['map'],
 };
+
+/** Where a document's interactive choice came from, or that it was never made. */
+export type LectureInteractiveSource = 'document' | 'account' | 'none';
+
+/**
+ * Whether the lecture runs its beats around each chapter: chosen for the
+ * document, else for every document, else off.
+ */
+export function chosenLectureInteractive(
+  documentChoice: boolean | null | undefined,
+  accountChoice: boolean | null | undefined,
+): { interactive: boolean; source: LectureInteractiveSource } {
+  if (documentChoice !== null && documentChoice !== undefined) {
+    return { interactive: documentChoice, source: 'document' };
+  }
+  if (accountChoice !== null && accountChoice !== undefined) {
+    return { interactive: accountChoice, source: 'account' };
+  }
+  return { interactive: false, source: 'none' };
+}
 
 /** Where a document's style came from: chosen for it, chosen for every document, or not yet. */
 export type LectureStyleSource = 'document' | 'account' | 'none';
@@ -130,6 +154,7 @@ export function chosenLectureStyle(
 
 /** Spoken-word budgets for the extras; short by design. */
 export const EXTRA_BUDGET: Record<LectureExtraKind, WordBudget> = {
+  map: { min: 60, max: 150, hard: 190 },
   terms: { min: 40, max: 130, hard: 170 },
   check: { min: 60, max: 170, hard: 220 },
   review: { min: 50, max: 160, hard: 210 },
@@ -162,6 +187,9 @@ export function extraSeeds<
     const ordered = [...rows].sort((a, b) => a.seq - b.seq);
     const first = ordered[0];
     const last = ordered[ordered.length - 1];
+    if (extras.includes('map')) {
+      out.push({ ...first, bridge: false, kind: 'map' });
+    }
     if (extras.includes('terms')) {
       out.push({ ...first, bridge: false, kind: 'terms' });
     }
@@ -487,9 +515,22 @@ export interface LectureTerm {
   meaning: string;
 }
 
+/**
+ * The map of a chapter as the learner reads it while the map plays: what
+ * the chapter is for, its stops (parts a listener would recognise, not
+ * pages), and where it lands. Written with the map's script, in one call.
+ */
+export interface MapOutline {
+  about: string;
+  stops: { name: string; line: string }[];
+  landing: string;
+}
+
 export interface LecturePlan {
   hook: string;
   arc: string;
+  /** The chapter's map, once its map segment has been written; absent before. */
+  map?: MapOutline | null;
   /** The chapter's words, spoken first for a slow learner. Older plans have none. */
   terms?: LectureTerm[];
   /** The problem the chapter answers, for a quick learner to hear first. */

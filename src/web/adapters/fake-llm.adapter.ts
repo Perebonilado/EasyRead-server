@@ -308,17 +308,47 @@ export class FakeLlmAdapter implements LlmGatewayPort {
 
   /** A deterministic extra: its kind and the lines it was built from. */
   async lectureExtra(input: {
-    kind: 'terms' | 'check' | 'review';
+    kind: 'map' | 'terms' | 'check' | 'review';
     topicTitle: string;
     style: 'gentle' | 'steady' | 'brisk';
     styleDirection: string;
     terms: { term: string; meaning: string }[];
     taught: string[];
     payoff: string | null;
+    arc?: string | null;
     daysAway: number | null;
     budget: { min: number; max: number };
-  }): Promise<LlmResult<{ script: string }>> {
+  }): Promise<
+    LlmResult<{
+      script: string;
+      map?: {
+        about: string;
+        stops: { name: string; line: string }[];
+        landing: string;
+      };
+    }>
+  > {
     const started = Date.now();
+    if (input.kind === 'map') {
+      const stops = input.taught.slice(0, 4).map((line, index) => ({
+        name: `Stop ${index + 1}`,
+        line: line.replace(/\.$/, ''),
+      }));
+      const script = `Here is the shape of ${input.topicTitle}. ${input.arc ?? ''} ${stops
+        .map((stop) => `${stop.name}: ${stop.line}.`)
+        .join(' ')}${input.payoff ? ` By the end, ${input.payoff}` : ''}`;
+      return {
+        value: {
+          script,
+          map: {
+            about: input.arc ?? `What ${input.topicTitle} is for.`,
+            stops,
+            landing: input.payoff ?? 'You will know the shape of it.',
+          },
+        },
+        usage: this.usage(started, 200, 120),
+      };
+    }
     const script =
       input.kind === 'terms'
         ? `Words you will hear in ${input.topicTitle}. ${input.terms
@@ -834,14 +864,17 @@ export class FakeLlmAdapter implements LlmGatewayPort {
   async generateTopicQuiz({
     topicTitle,
     focus,
+    kinds,
   }: {
     topicTitle: string;
     pagesText: string;
     summary: string | null;
     focus?: string[];
+    kinds?: ('flashcard' | 'true_false' | 'mcq')[];
   }): Promise<
     LlmResult<{
       questions: {
+        kind?: 'mcq' | 'flashcard' | 'true_false';
         question: string;
         options: string[];
         correctIndex: number;
@@ -850,6 +883,42 @@ export class FakeLlmAdapter implements LlmGatewayPort {
     }>
   > {
     const started = Date.now();
+    if (kinds?.length) {
+      const items = kinds.map((kind, index) =>
+        kind === 'true_false'
+          ? {
+              kind,
+              question: `True or false: fake claim ${index + 1} about ${topicTitle}.`,
+              options: ['True', 'False'],
+              correctIndex: 0,
+              explanation: 'The chapter says so.',
+            }
+          : kind === 'mcq'
+            ? {
+                kind,
+                question: `Which of these is true of ${topicTitle}?`,
+                options: ['The right one', 'A wrong one', 'Another wrong one'],
+                correctIndex: 0,
+                explanation: 'The chapter says so.',
+              }
+            : {
+                kind,
+                question: `Fake spoken question ${index + 1} about ${topicTitle}?`,
+                options: ['The fake answer'],
+                correctIndex: 0,
+                explanation: 'The chapter says so.',
+              },
+      );
+      return {
+        value: { questions: items },
+        usage: {
+          model: 'fake',
+          tokensIn: topicTitle.length,
+          tokensOut: 0,
+          latencyMs: Date.now() - started,
+        },
+      };
+    }
     const q = (n: number) => ({
       question: focus?.length
         ? `Fake focus question ${n} on "${focus[0]}"?`

@@ -11,7 +11,7 @@
  * clock.
  */
 import type { LectureStyle, Level } from '../../contracts';
-import { LECTURE_TOOLS } from '../../contracts';
+import { LECTURE_TOOLS, TEACH_TOOLS } from '../../contracts';
 
 export interface AskTutor {
   name: string;
@@ -57,7 +57,23 @@ export interface AskContext {
   figures?: string | null;
   /** A recorded line of the tutor's has already invited the learner, so the tutor says nothing until they speak. */
   invited?: boolean;
+  /** The lecture is interactive: the client runs the chapter's beats through the tutor by direction. */
+  interactive?: boolean;
 }
+
+/**
+ * The beats of an interactive chapter, as the tutor is told about them
+ * once. Which beat is running arrives as a direction from the client.
+ */
+export const BEATS_SECTION = [
+  'THE BEATS. This lecture is interactive: around each chapter the learner does a few things out loud with you, and you are told which one is running by a direction in brackets. Read the direction and do exactly what it says, in your own words, in one or two short lines; the learner holds the mic to answer. Never run a beat on your own, and never announce a beat by name.',
+  `YOU JUDGE. You heard the chapter's words and you have them above: judge what they say against what the chapter taught, not against what you know from elsewhere. Say the judgement in the same breath you would to a student in the room, name what was right and the one thing missing, never the person; then file it with ${LECTURE_TOOLS.VERDICT}, once per answer, the moment you have said it; then move on. Never wait for anyone else's verdict, and never announce that you are filing anything.`,
+  `Your questions: a recorded map of the chapter has just played. Ask what they want to know by the end of the chapter, two things, then listen. When they answer, restate each question as one clear question and file it with ${TEACH_TOOLS.SAVE_QUESTION}, one call per question, then say the chapter starts now. Fewer than two is fine.`,
+  'From memory: the chapter has just ended and their notes are covered. Ask them to tell you what the chapter said, in their own words, then listen without helping, prompting or finishing their sentences. When they are done, name what they had, the one or two ideas from the chapter that did not come up and where in the chapter they were; a note may say how much they think they got, and if it is far from what you heard, one line on that; file the verdict; then say their own questions come next.',
+  `Your answers: ask them one of their own questions, word for word, then listen. Judge from the chapter; if unsure of the page, ${LECTURE_TOOLS.FIND}. Say whether they had it, what was missing, and the page, in two lines at most; file; then the next question.`,
+  `The check: a note hands you the items with their answers and kinds. One at a time, in any order, in the format that fits: a "which of these" goes on the sheet with ${LECTURE_TOOLS.CHOICES} and you say nothing until their choice comes back; a why or a what-happens is asked aloud, word for word; a term or a number may go as a sentence with a gap through ${LECTURE_TOOLS.BLANK}. Never read options aloud. After their answer, wait for the note with how sure they were, or a few seconds, then judge against the item's answer: one line on the answer, one on what to notice if they were sure and wrong or unsure and right; file. After the last item, one line on what stuck and what did not, then "That is the chapter", and nothing more: the next chapter starts by itself.`,
+  'During all of this the hand-back tool is not for you to call; the beats end on their own. A learner who says skip, or goes quiet, is skipped by the client.',
+].join('\n');
 
 /** Which shape a drawing takes, read from what the tutor asked to draw. */
 export function figureKindFor(
@@ -206,6 +222,7 @@ export function askInstructions(ctx: AskContext): string {
     ctx.invited
       ? 'OPENING: the call opens the moment they press the mic, and a recorded line of yours has already invited them to go ahead. Say nothing until they have spoken; your first words are your answer. Never a greeting, never their name, never a summary of where you were.'
       : 'OPENING: the call opens the moment they press the mic, before they have said anything, and your first words come right after a chime. Say one short, warm, brisk invitation to go ahead, four words at most and different each time, then stop and listen. Never a greeting, never their name, never a summary of where you were.',
+    ctx.interactive ? BEATS_SECTION : null,
     "ANSWER THE QUESTION PROPERLY: what it is, why it is so, and how it works in this book's terms, with the book's example where it has one. Say as much as the question needs and no more: a definition takes a few sentences, a why or a how takes an explanation. Stop when it is answered. There is no fixed length.",
     'THEN A DOOR OPEN: once the question is answered, end with one thing they can answer, a real follow-up on what they said, an offer ("want to see it with the second server?"), or a choice ("the hash, or the ring?"). Never "does that clear it up" or "does that make sense".',
     ctx.board?.length

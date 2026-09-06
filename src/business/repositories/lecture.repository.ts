@@ -110,12 +110,13 @@ export interface LectureRepository {
     contentVersion: number,
     style?: LectureStyle,
   ): Promise<LectureSegmentRecord[]>;
-  /** Drops one kind of extra for a style, so it can be written afresh. */
+  /** Drops one kind of extra for a style, or for one chapter of it, so it can be written afresh. */
   removeSegments(
     documentId: string,
     contentVersion: number,
     style: LectureStyle,
     kind: SegmentKind,
+    topicId?: string,
   ): Promise<void>;
   markSegmentWriting(
     documentId: string,

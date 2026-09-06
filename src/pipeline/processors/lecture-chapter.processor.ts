@@ -289,6 +289,21 @@ export class LectureChapterProcessor {
       return;
     }
 
+    // The map, the shape of the chapter in a minute, goes first: it is the
+    // chapter's opening when the lecture is interactive, so it is ready
+    // before the first page is. Written from the plan alone.
+    await this.writeExtra({
+      doc,
+      topic,
+      topicId: topic.id,
+      plan,
+      rows,
+      extras,
+      style,
+      contentVersion,
+      kind: 'map',
+    });
+
     // A learner who switched style mid-chapter is waiting at startAtPage:
     // that page and the rest of the chapter go first, the earlier pages
     // are filled in after.
@@ -320,8 +335,8 @@ export class LectureChapterProcessor {
 
   /**
    * One of the short segments around the chapter, written from the plan.
-   * Only the review is seeded now; the words and the check are kept here
-   * for lectures that still carry them.
+   * The map is seeded for every style; the words and the check are kept
+   * here for lectures that still carry them.
    * Every line comes from the plan, so there is no page to verify it
    * against. A chapter with nothing to check, or a plan from before terms
    * existed, fails the row with the reason; the player skips a failed
@@ -330,6 +345,7 @@ export class LectureChapterProcessor {
   private async writeExtra(input: {
     doc: { id: string };
     topic: { title: string };
+    topicId: string;
     plan: LecturePlan;
     rows: LectureSegmentRecord[];
     extras: LectureSegmentRecord[];
@@ -358,11 +374,13 @@ export class LectureChapterProcessor {
     };
 
     const terms = plan.terms ?? [];
+    // The map names the chapter's stops, one per page: the beat's goal.
+    // The check and the review name what each page added.
     const taught = input.rows
       .filter((page) => !page.bridge)
       .map((page) => {
         const beat = beatFor(plan, page.pageNumber);
-        return beat.newHere?.trim() || beat.goal;
+        return kind === 'map' ? beat.goal : beat.newHere?.trim() || beat.goal;
       });
     if (kind === 'terms' && !terms.length) {
       await fail('The chapter plan names no terms');
@@ -389,6 +407,7 @@ export class LectureChapterProcessor {
         terms,
         taught,
         payoff: plan.payoff ?? null,
+        arc: kind === 'map' ? (plan.arc ?? null) : null,
         daysAway: null,
         budget: EXTRA_BUDGET[kind],
       });
@@ -409,6 +428,19 @@ export class LectureChapterProcessor {
         moveOffsets: [],
         durationMs: estimateDurationMs(scriptForTts(script)),
       });
+      // The map's outline lives on the plan, beside the beats it was
+      // grouped from, so the status can hand it to the screen.
+      if (kind === 'map' && written.value.map) {
+        plan.map = written.value.map;
+        await this.lectures.savePlan({
+          documentId: doc.id,
+          topicId: input.topicId,
+          contentVersion,
+          status: 'done',
+          plan,
+          generatorVersion: LECTURE_GENERATOR_VERSION,
+        });
+      }
       await this.boards.writeForExtra({
         key: {
           documentId: doc.id,

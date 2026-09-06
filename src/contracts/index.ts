@@ -545,7 +545,8 @@ export const LECTURE_STYLE_KEYS: readonly LectureStyle[] = [
  * share their page's number and play in the order review, terms, page,
  * part, check.
  */
-export type SegmentKind = 'page' | 'part' | 'terms' | 'check' | 'review';
+export type SegmentKind =
+  'page' | 'part' | 'map' | 'terms' | 'check' | 'review';
 export const SEGMENT_KIND_KEYS: readonly SegmentKind[] = [
   'review',
   'terms',
@@ -589,6 +590,12 @@ export interface LectureTopicDto {
   topicId: string;
   title: string;
   segments: LectureSegmentDto[];
+  /** The chapter's map as the learner reads it while the map plays; absent until the map is written. */
+  map?: {
+    about: string;
+    stops: { name: string; line: string }[];
+    landing: string;
+  };
 }
 
 /** Where the student stopped listening, so any device can resume there. */
@@ -632,6 +639,9 @@ export interface LectureStatusResponse {
   /** The style the learner chose for this document or for every document; null when the bar should ask. */
   chosenStyle: LectureStyle | null;
   styleSource: 'document' | 'account' | 'none';
+  /** Whether the lecture runs its beats around each chapter: chosen for this document, for every document, or off. */
+  interactive: boolean;
+  interactiveSource: 'document' | 'account' | 'none';
 }
 
 /**
@@ -676,6 +686,10 @@ export const LECTURE_TOOLS = {
   REST: 'board_rest',
   FIND: 'book_find',
   RESUME: 'lecture_resume',
+  /** The interactive session: the tutor files each verdict, and can put an item on the sheet. */
+  VERDICT: 'lecture_verdict',
+  CHOICES: 'lecture_show_choices',
+  BLANK: 'lecture_show_blank',
 } as const;
 export type LectureToolName =
   (typeof LECTURE_TOOLS)[keyof typeof LECTURE_TOOLS];

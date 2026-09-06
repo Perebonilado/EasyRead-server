@@ -240,6 +240,32 @@ describe('a question mid-lecture: the board', () => {
     expect(askInstructions(base)).not.toContain('THIS PAGE NAMES A PICTURE');
   });
 
+  it('tells an interactive lecture about its beats, and only then', () => {
+    const plain = askInstructions(base);
+    expect(plain).not.toMatch(/THE BEATS/);
+    const interactive = askInstructions({ ...base, interactive: true });
+    expect(interactive).toMatch(/THE BEATS/);
+    for (const beat of [
+      'Your questions',
+      'From memory',
+      'Your answers',
+      'The check',
+    ]) {
+      expect(interactive).toContain(beat);
+    }
+    // The beats are the client's to run; the tutor waits for a direction.
+    expect(interactive).toMatch(/Never run a beat on your own/);
+    expect(interactive).toMatch(/That is the chapter/);
+    // The tutor judges and files; nothing waits on a grader.
+    expect(interactive).toMatch(/YOU JUDGE/);
+    expect(interactive).toContain('lecture_verdict');
+    expect(interactive).not.toMatch(/grade arrives/);
+    // The formats a check may take.
+    expect(interactive).toContain('lecture_show_choices');
+    expect(interactive).toContain('lecture_show_blank');
+    expect(interactive).toMatch(/Never read options aloud/);
+  });
+
   it('opens by inviting them, unless a recorded line already has', () => {
     expect(askInstructions(base)).toContain(
       'Say one short, warm, brisk invitation to go ahead',

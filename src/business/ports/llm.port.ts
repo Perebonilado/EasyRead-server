@@ -1,3 +1,4 @@
+import type { MapOutline } from '../domain/lecture';
 import type {
   LearnQuestion,
   Block,
@@ -313,19 +314,27 @@ export interface LlmGatewayPort {
    * needs no grounding check against a page.
    */
   lectureExtra(input: {
-    kind: 'terms' | 'check' | 'review';
+    kind: 'map' | 'terms' | 'check' | 'review';
     topicTitle: string;
     style: 'gentle' | 'steady' | 'brisk';
     styleDirection: string;
     /** For terms: the chapter's words with their plain meanings. */
     terms: { term: string; meaning: string }[];
-    /** For check and review: the ideas taught, one line each, in order. */
+    /** For check and review: the ideas taught, one line each, in order. For the map: the chapter's headings, one per page, in order. */
     taught: string[];
     payoff: string | null;
+    /** For the map: what the chapter is about, from its plan. */
+    arc?: string | null;
     /** For review: whole days since the learner last listened. */
     daysAway: number | null;
     budget: { min: number; max: number };
-  }): Promise<LlmResult<{ script: string }>>;
+  }): Promise<
+    LlmResult<{
+      script: string;
+      /** For the map: the outline the script speaks, for the screen. */
+      map?: MapOutline;
+    }>
+  >;
 
   /**
    * The board for a page, planned before its speech is written: the
@@ -561,9 +570,12 @@ export interface LlmGatewayPort {
     summary: string | null;
     /** Ideas the reader keeps missing; a revisit weights questions here. */
     focus?: string[];
+    /** Spoken-friendly kinds for a check answered aloud; omitted means multiple choice. */
+    kinds?: ('flashcard' | 'true_false' | 'mcq')[];
   }): Promise<
     LlmResult<{
       questions: {
+        kind?: 'mcq' | 'flashcard' | 'true_false';
         question: string;
         options: string[];
         correctIndex: number;

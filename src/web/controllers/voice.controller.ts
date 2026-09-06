@@ -143,6 +143,11 @@ class LectureContextDto {
   @IsOptional()
   @IsBoolean()
   invited?: boolean;
+
+  /** The lecture is interactive: the tutor is told its beats and may file the learner's questions. */
+  @IsOptional()
+  @IsBoolean()
+  interactive?: boolean;
 }
 
 class BoardRegionDto {
@@ -247,6 +252,13 @@ class TopicQuizDto {
   @IsString({ each: true })
   @Length(1, 200, { each: true })
   focus?: string[];
+
+  /** Spoken-friendly kinds, for a check answered aloud. */
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(2)
+  @IsIn(['flashcard', 'true_false', 'mcq'], { each: true })
+  kinds?: ('flashcard' | 'true_false' | 'mcq')[];
 }
 
 class ComputeDto {
@@ -484,6 +496,7 @@ export class VoiceController {
       documentId,
       topicId,
       focus: body.focus,
+      kinds: body.kinds,
     });
     return result.data;
   }

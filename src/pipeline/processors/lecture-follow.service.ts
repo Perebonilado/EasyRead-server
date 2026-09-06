@@ -36,7 +36,7 @@ import {
 } from '../../business/domain/lecture';
 
 type FollowKey = SegmentKey & {
-  kind: 'page' | 'part' | 'terms' | 'check' | 'review';
+  kind: 'page' | 'part' | 'map' | 'terms' | 'check' | 'review';
 };
 
 /**

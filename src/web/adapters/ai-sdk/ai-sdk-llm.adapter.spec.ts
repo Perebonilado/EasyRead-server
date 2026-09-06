@@ -523,6 +523,83 @@ describe('AiSdkLlmAdapter', () => {
     expect(prompt).not.toContain('last listened');
   });
 
+  it('asks the map for an outline the learner reads and the script that speaks it', async () => {
+    mock.reply({
+      about: 'How keys find servers.',
+      stops: [
+        { name: 'The ring', line: 'Keys and servers on one circle.' },
+        { name: 'Virtual nodes', line: 'Each server takes many spots.' },
+      ],
+      landing: 'You can place a key.',
+      script: 'Before we go in, here is the shape of this chapter.',
+    });
+    const result = await adapter.lectureExtra({
+      kind: 'map',
+      topicTitle: 'Consistent hashing',
+      style: 'steady',
+      styleDirection: 'Steady.',
+      terms: [],
+      taught: ['The ring', 'Virtual nodes'],
+      payoff: 'You can place a key.',
+      arc: 'How keys find servers.',
+      daysAway: null,
+      budget: { min: 60, max: 150 },
+    });
+    expect(result.value.map?.stops).toHaveLength(2);
+    expect(result.value.script).toMatch(/shape of this chapter/);
+    const prompt = JSON.stringify(mock.calls[0].body.messages);
+    expect(prompt).toContain('MAP for the chapter');
+    expect(prompt).toContain('group these into the stops');
+    expect(prompt).toContain('Where the chapter ends');
+  });
+
+  it('writes a mixed check when asked for spoken kinds and choices, and shapes each for the sheet', async () => {
+    mock.reply({
+      questions: [
+        {
+          kind: 'flashcard',
+          question: 'Why does a plain hash move most keys when a server goes?',
+          answer: 'Because every key is placed by modulo of the server count.',
+          explanation: 'The modulo changes with the count.',
+        },
+        {
+          kind: 'true_false',
+          question: 'True or false: virtual nodes make the ring less even.',
+          answer: 'False',
+          explanation: 'They make it more even.',
+        },
+        {
+          kind: 'mcq',
+          question: 'Which of these is a virtual node?',
+          answer: 'A server placed at many points on the ring',
+          options: [
+            'A spare server kept off',
+            'A server placed at many points on the ring',
+            'A key with no server',
+          ],
+          explanation: 'Each server takes many spots.',
+        },
+      ],
+    });
+    const result = await adapter.generateTopicQuiz({
+      topicTitle: 'Consistent hashing',
+      pagesText: 'The ring.',
+      summary: null,
+      kinds: ['flashcard', 'true_false', 'mcq'],
+    });
+    const [spoken, tf, mcq] = result.value.questions;
+    expect(spoken.options).toEqual([
+      'Because every key is placed by modulo of the server count.',
+    ]);
+    expect(tf.options).toEqual(['True', 'False']);
+    expect(tf.correctIndex).toBe(1);
+    expect(mcq.kind).toBe('mcq');
+    expect(mcq.options).toHaveLength(3);
+    expect(mcq.correctIndex).toBe(1);
+    const prompt = JSON.stringify(mock.calls[0].body.messages);
+    expect(prompt).toContain('Kinds allowed: flashcard, true_false, mcq');
+  });
+
   it('tells the review how long the learner has been away, and the words their meanings', async () => {
     mock.reply({ script: 'It has been a while.' });
     await adapter.lectureExtra({

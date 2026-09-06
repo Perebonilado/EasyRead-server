@@ -519,6 +519,26 @@ export const PROMPTS = {
     'Never reuse the same correct option position across all questions.',
   ].join(' '),
 
+  spokenQuiz: [
+    'You write 2-3 questions checking understanding of one chapter of a',
+    'study document, to be asked ALOUD by a tutor and answered aloud by',
+    'the learner, grounded ONLY in the provided passages. Only the kinds',
+    'allowed: a flashcard is a question with one short answer the learner',
+    'can say back in a sentence (a what, a why, a how many, a what happens',
+    'when); true_false is a claim from the passages, sometimes twisted so',
+    'it is false, asked as "True or false: ...". At least one item should',
+    'be higher-order (an inference the passages support). Keep technical',
+    'terms, names and numbers exactly as the document writes them. `answer`',
+    'is the answer in one sentence for a flashcard, and exactly "True" or',
+    '"False" for true_false. An mcq, when allowed, is a "which of these"',
+    'with three or four `options`, one of them the `answer` word for word,',
+    'the rest plausible terms or claims from the same material; it is the',
+    'one kind shown on a screen, so its options may be longer than a',
+    'spoken answer. `explanation` is one sentence on why, citing the idea',
+    'rather than the page. Spoken kinds must be answerable without seeing',
+    'anything: no "which of these" in them, no options.',
+  ].join(' '),
+
   /**
    * Banked items: written to be scheduled and reseen, not shown once.
    */
@@ -793,8 +813,9 @@ export const PROMPTS = {
   lectureExtra: [
     [
       'You write one short spoken segment that sits around a chapter of a',
-      'lecture: the words a learner will hear before it, the check of what',
-      'stuck after it, or the review a returning learner hears first.',
+      'lecture: the map of the chapter before it, the words a learner will',
+      'hear before it, the check of what stuck after it, or the review a',
+      'returning learner hears first.',
       'Speech, first person, to "you". No headings, no markdown, nothing',
       'read out as a list, and no bracketed direction except [pause] where',
       'the rules below ask for it. Everything comes from the lines you are',
@@ -806,6 +827,28 @@ export const PROMPTS = {
       'coming as a list, never say "the following", "you will hear" or',
       '"in this segment", and never name what you are (a check, a review,',
       'a list of terms).',
+    ].join(' '),
+    [
+      'MAP: the shape of the chapter in about a minute, before a word of it',
+      'is taught, for a listener who is also reading it on screen. Write the',
+      'outline first, then the script that speaks it. `about`: what the',
+      'chapter is for, one sentence in plain words. `stops`: three to six',
+      'parts a listener would recognise, grouped from what the pages teach,',
+      'never one per page; each has a `name` of a few words a learner could',
+      'point at ("The problem with plain hashing", "The ring", "Virtual',
+      'nodes") and a `line`, one sentence in plain words on what that part',
+      'says or shows, so the learner has an idea of it before hearing it:',
+      'the claim, the example, the number, not "this section covers".',
+      '`landing`: what the listener will be able to do by the end, one',
+      'sentence. `script`: the outline spoken. One natural line that a map is',
+      'coming, for example "Before we go in, here is the shape of this',
+      'chapter." Then the about, then each stop in order in its own words,',
+      'joined the way speech joins them ("we start with... from there... and',
+      'last..."), never numbered, never read as a list, never naming the',
+      'stops as a list of titles; then the landing. The script says what the',
+      'outline says and nothing else. No teaching beyond the line for each',
+      'stop, no definitions, no questions, no "you will hear", no closing',
+      'line after the landing.',
     ].join(' '),
     [
       'TERMS: one easing-in line, for example "Before we start, a few ideas',

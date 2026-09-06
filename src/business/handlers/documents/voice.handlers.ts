@@ -257,6 +257,8 @@ export interface VoiceSessionRequest {
     board?: string[];
     /** The client plays a recorded invitation at the press, so the tutor must not speak first. */
     invited?: boolean;
+    /** The lecture is interactive: the tutor runs the chapter's beats when told to, and may file the learner's questions. */
+    interactive?: boolean;
   };
 }
 
@@ -295,6 +297,125 @@ const INTENT_LINES: Record<LessonIntent, string> = {
  * The teach-mode toolbox. Parameters are JSON Schema; execution happens in the
  * browser, because every one of these is a UI action.
  */
+/**
+ * The interactive session's own tools: every verdict the tutor gives is
+ * filed here so the ledger is written; and a check item can be put on
+ * the sheet as choices to tap or a sentence with a gap.
+ */
+export const FILE_VERDICT_TOOL: RealtimeTool = {
+  name: LECTURE_TOOLS.VERDICT,
+  description:
+    'File the verdict you just gave on what the learner said, the moment ' +
+    'you give it: once per answer, during the beats only. The client ' +
+    'records it; nothing else does.',
+  parameters: {
+    type: 'object',
+    properties: {
+      beat: {
+        type: 'string',
+        enum: ['recall', 'answers', 'check'],
+        description: 'Which beat the answer belongs to',
+      },
+      question: {
+        type: 'string',
+        description:
+          'The question asked, word for word; "recall" for the chapter from memory',
+      },
+      answer: {
+        type: 'string',
+        description:
+          'What the learner said, as you heard it, a sentence or two',
+      },
+      verdict: {
+        type: 'string',
+        enum: ['had it', 'partly', 'missed'],
+      },
+      missing: {
+        type: 'string',
+        description:
+          'What was left out or wrong, in one line; empty when nothing',
+      },
+      page: {
+        type: 'integer',
+        description: 'Where the chapter has it, when you know',
+      },
+    },
+    required: ['beat', 'question', 'answer', 'verdict'],
+  },
+};
+
+export const SHOW_CHOICES_TOOL: RealtimeTool = {
+  name: LECTURE_TOOLS.CHOICES,
+  description:
+    'Put a check item on the sheet as choices to tap: the question and two ' +
+    'to four options. Do not read the options aloud; say nothing until ' +
+    'their choice comes back as their turn. During the check only.',
+  parameters: {
+    type: 'object',
+    properties: {
+      question: { type: 'string' },
+      options: {
+        type: 'array',
+        items: { type: 'string' },
+        minItems: 2,
+        maxItems: 4,
+        description: 'Each at most twelve words',
+      },
+    },
+    required: ['question', 'options'],
+  },
+};
+
+export const SHOW_BLANK_TOOL: RealtimeTool = {
+  name: LECTURE_TOOLS.BLANK,
+  description:
+    'Put a sentence from the chapter on the sheet with one part missing, ' +
+    'marked ___; the learner says the missing part aloud and you judge what ' +
+    'you hear. During the check only.',
+  parameters: {
+    type: 'object',
+    properties: {
+      sentence: {
+        type: 'string',
+        description: 'The sentence with exactly one ___ where the gap is',
+      },
+      answer: { type: 'string', description: 'What fills the gap' },
+    },
+    required: ['sentence', 'answer'],
+  },
+};
+
+/** The interactive session's tools, beside the board's. */
+export const INTERACTIVE_TOOLS: RealtimeTool[] = [
+  FILE_VERDICT_TOOL,
+  SHOW_CHOICES_TOOL,
+  SHOW_BLANK_TOOL,
+];
+
+/** The question-filing tool, on its own, for the interactive lecture's beats. */
+export const SAVE_QUESTION_TOOL: RealtimeTool = {
+  name: TEACH_TOOLS.SAVE_QUESTION,
+  description:
+    'File one question the learner wants the chapter to answer, in their ' +
+    'words, restated as one clear question. Call once per question, the ' +
+    'moment they have said it. Only during the beat that asks for their ' +
+    'questions.',
+  parameters: {
+    type: 'object',
+    properties: {
+      question: {
+        type: 'string',
+        description: "The learner's question, in their own words",
+      },
+      topicId: {
+        type: 'string',
+        description: 'The chapter id you were given for this beat',
+      },
+    },
+    required: ['question', 'topicId'],
+  },
+};
+
 /** What a tutor answering mid-lecture may do to the board; see LECTURE_TOOLS. */
 export const LECTURE_BOARD_TOOLS: RealtimeTool[] = [
   {
@@ -920,7 +1041,13 @@ export class StartVoiceSessionHandler extends AbstractRequestHandlerTemplate<
             cmd.mode === 'teach'
               ? TEACHING_TOOLS
               : cmd.mode === 'lecture'
-                ? LECTURE_BOARD_TOOLS
+                ? cmd.lectureContext?.interactive
+                  ? [
+                      ...LECTURE_BOARD_TOOLS,
+                      SAVE_QUESTION_TOOL,
+                      ...INTERACTIVE_TOOLS,
+                    ]
+                  : LECTURE_BOARD_TOOLS
                 : undefined,
           // The tutor's voice; chat mode keeps the configured default. A
           // question asked mid-lecture takes the answering voice, cedar
@@ -1115,6 +1242,7 @@ export class StartVoiceSessionHandler extends AbstractRequestHandlerTemplate<
       board: context?.board ?? null,
       figures,
       invited: context?.invited === true,
+      interactive: context?.interactive === true,
     });
   }
 
@@ -1525,10 +1653,18 @@ export interface TopicQuizRequest {
   topicId: string;
   /** Open missed ideas from a revisit — the quiz aims at these first. */
   focus?: string[];
+  /**
+   * Spoken-friendly kinds, for a check the learner answers aloud: a
+   * flashcard (one answer, said back) or true or false. Omitted means
+   * multiple choice, for a check on screen.
+   */
+  kinds?: ('flashcard' | 'true_false' | 'mcq')[];
 }
 
 export interface TopicQuizResponse {
   questions: {
+    /** Omitted means multiple choice. */
+    kind?: 'mcq' | 'flashcard' | 'true_false';
     question: string;
     options: string[];
     correctIndex: number;
@@ -1593,6 +1729,7 @@ export class GenerateTopicQuizHandler extends AbstractRequestHandlerTemplate<
       pagesText,
       summary,
       focus: cmd.focus?.slice(0, 5),
+      kinds: cmd.kinds?.length ? cmd.kinds : undefined,
     });
 
     await this.calls.record({

@@ -46,6 +46,8 @@ export interface LearnerProfileRecord {
   styleNotes: string | null;
   /** How the learner asked to be taught every document; null until they say so. */
   lectureStyle?: LectureStyle | null;
+  /** Whether the lecture runs its beats for every document; null until they say so. */
+  lectureInteractive?: boolean | null;
   paceSource: DialSource;
   depthSource: DialSource;
   interactivitySource: DialSource;
@@ -65,6 +67,8 @@ export interface DocumentLearningStateRecord {
   reason: string | null;
   /** How the learner asked to be taught this document; null until chosen. */
   lectureStyle?: LectureStyle | null;
+  /** Whether the lecture runs its beats around each chapter of this document; null until chosen. */
+  lectureInteractive?: boolean | null;
 }
 
 export interface DocumentLearningStateRepository {
@@ -93,6 +97,7 @@ export const DEFAULT_LEARNER_PROFILE: LearnerProfileRecord = {
   interactivity: 'standard',
   styleNotes: null,
   lectureStyle: null,
+  lectureInteractive: null,
   paceSource: 'default',
   depthSource: 'default',
   interactivitySource: 'default',

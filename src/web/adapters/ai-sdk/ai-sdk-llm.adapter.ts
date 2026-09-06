@@ -33,6 +33,8 @@ import {
   lectureSketchSchema,
   sketchJudgeSchema,
   lectureExtraSchema,
+  lectureMapSchema,
+  spokenQuizSchema,
   lectureOutlineSchema,
   lectureSegmentSchema,
   lectureVerifySchema,
@@ -349,19 +351,59 @@ export class AiSdkLlmAdapter implements LlmGatewayPort, OnModuleInit {
   }
 
   async lectureExtra(input: {
-    kind: 'terms' | 'check' | 'review';
+    kind: 'map' | 'terms' | 'check' | 'review';
     topicTitle: string;
     style: 'gentle' | 'steady' | 'brisk';
     styleDirection: string;
     terms: { term: string; meaning: string }[];
     taught: string[];
     payoff: string | null;
+    arc?: string | null;
     daysAway: number | null;
     budget: { min: number; max: number };
-  }): Promise<LlmResult<{ script: string }>> {
+  }): Promise<
+    LlmResult<{
+      script: string;
+      map?: {
+        about: string;
+        stops: { name: string; line: string }[];
+        landing: string;
+      };
+    }>
+  > {
     const started = Date.now();
     const { generateObject } = await this.registry.modules();
     const { model, ref } = await this.registry.languageModel('lecture_segment');
+
+    // The map returns the outline the learner reads with the words that
+    // speak it; the other kinds return words alone.
+    if (input.kind === 'map') {
+      const outline = await generateObject({
+        model,
+        schema: lectureMapSchema,
+        system: PROMPTS.lectureExtra,
+        prompt: [
+          `Write the MAP for the chapter "${input.topicTitle}": the outline first, then the script that speaks it.`,
+          `The listener is a ${input.style === 'gentle' ? 'slow' : input.style === 'brisk' ? 'quick' : 'normal-paced'} learner. HOW TO SPEAK TO THEM: ${input.styleDirection}`,
+          `Script length: ${input.budget.min} to ${input.budget.max} words.`,
+          input.arc
+            ? `What the chapter is about, from its plan: ${input.arc}`
+            : null,
+          `What each page teaches, in order (group these into the stops; do not list them one by one):\n- ${input.taught.join('\n- ')}`,
+          input.payoff
+            ? `Where the chapter ends, what the listener will be able to do: ${input.payoff}`
+            : null,
+        ]
+          .filter(Boolean)
+          .join('\n'),
+        maxRetries: this.maxRetries(),
+      });
+      const { script, ...map } = outline.object;
+      return {
+        value: { script, map },
+        usage: this.usage(ref, outline.usage, started),
+      };
+    }
 
     const result = await generateObject({
       model,
@@ -1035,9 +1077,11 @@ export class AiSdkLlmAdapter implements LlmGatewayPort, OnModuleInit {
     pagesText: string;
     summary: string | null;
     focus?: string[];
+    kinds?: ('flashcard' | 'true_false' | 'mcq')[];
   }): Promise<
     LlmResult<{
       questions: {
+        kind?: 'mcq' | 'flashcard' | 'true_false';
         question: string;
         options: string[];
         correctIndex: number;
@@ -1048,6 +1092,58 @@ export class AiSdkLlmAdapter implements LlmGatewayPort, OnModuleInit {
     const started = Date.now();
     const { generateObject } = await this.registry.modules();
     const { model, ref } = await this.registry.languageModel('topic_quiz');
+
+    if (input.kinds?.length) {
+      const spoken = await generateObject({
+        model,
+        schema: spokenQuizSchema,
+        system: PROMPTS.spokenQuiz,
+        prompt: [
+          input.summary ? `Document summary:\n${input.summary}` : null,
+          `Chapter: ${input.topicTitle}`,
+          `Kinds allowed: ${input.kinds.join(', ')}.`,
+          input.focus?.length
+            ? `Aim most of the items at these ideas, still grounded only in the passages:\n- ${input.focus.join('\n- ')}`
+            : null,
+          `The chapter's text:\n${input.pagesText}`,
+        ]
+          .filter(Boolean)
+          .join('\n\n'),
+        maxRetries: this.maxRetries(),
+      });
+      const questions = spoken.object.questions
+        .filter((q) => input.kinds!.includes(q.kind))
+        .map(({ answer, options, ...q }) => {
+          if (q.kind === 'true_false') {
+            return {
+              ...q,
+              options: ['True', 'False'],
+              correctIndex: answer.trim().toLowerCase() === 'false' ? 1 : 0,
+            };
+          }
+          if (q.kind === 'mcq' && options && options.length >= 2) {
+            const right = options.findIndex(
+              (option) =>
+                option.trim().toLowerCase() === answer.trim().toLowerCase(),
+            );
+            return {
+              ...q,
+              options: right >= 0 ? options : [answer, ...options.slice(0, 3)],
+              correctIndex: Math.max(0, right),
+            };
+          }
+          return {
+            ...q,
+            kind: 'flashcard' as const,
+            options: [answer],
+            correctIndex: 0,
+          };
+        });
+      return {
+        value: { questions },
+        usage: this.usage(ref, spoken.usage, started),
+      };
+    }
 
     const result = await generateObject({
       model,

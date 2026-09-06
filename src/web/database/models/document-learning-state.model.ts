@@ -41,4 +41,8 @@ export class DocumentLearningStateModel extends BaseModel {
   /** How the learner asked to be taught this document; null until they choose. */
   @Column({ type: DataType.STRING(16), allowNull: true })
   declare lectureStyle: string | null;
+
+  /** Whether the lecture runs its beats around each chapter for this document; null until chosen. */
+  @Column({ type: DataType.BOOLEAN, allowNull: true })
+  declare lectureInteractive: boolean | null;
 }

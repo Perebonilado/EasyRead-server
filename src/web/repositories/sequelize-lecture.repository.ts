@@ -189,9 +189,16 @@ export class SequelizeLectureRepository implements LectureRepository {
     contentVersion: number,
     style: LectureStyle,
     kind: SegmentKind,
+    topicId?: string,
   ): Promise<void> {
     await this.segments.destroy({
-      where: { documentId, contentVersion, style, kind },
+      where: {
+        documentId,
+        contentVersion,
+        style,
+        kind,
+        ...(topicId ? { topicId } : {}),
+      },
     });
   }
 

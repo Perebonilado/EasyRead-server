@@ -114,6 +114,7 @@ function toProfile(row: LearnerProfileModel): LearnerProfileRecord {
     interactivity: row.interactivity,
     styleNotes: row.styleNotes,
     lectureStyle: asStyle(row.lectureStyle),
+    lectureInteractive: row.lectureInteractive ?? null,
     paceSource: row.paceSource ?? 'default',
     depthSource: row.depthSource ?? 'default',
     interactivitySource: row.interactivitySource ?? 'default',
@@ -215,6 +216,7 @@ export class SequelizeDocumentLearningStateRepository implements DocumentLearnin
       depthDelta: row.depthDelta,
       reason: row.reason,
       lectureStyle: asStyle(row.lectureStyle),
+      lectureInteractive: row.lectureInteractive ?? null,
     };
   }
 

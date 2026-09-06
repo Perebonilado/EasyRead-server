@@ -387,7 +387,7 @@ describe('GenerateLectureHandler', () => {
     await expect(handler.handle(request)).rejects.toThrow(/chapters/i);
   });
 
-  it('seeds neither the words before a chapter nor the check after it, for any style', async () => {
+  it("seeds neither the words before a chapter nor the check after it, for any style; only each chapter's map", async () => {
     const extrasOf = (seeds: LectureSegmentSeed[]) =>
       seeds
         .filter((seed) => seed.kind && seed.kind !== 'page')
@@ -395,16 +395,16 @@ describe('GenerateLectureHandler', () => {
 
     const gentle = harness();
     await gentle.handler.handle({ ...request, style: 'gentle' });
-    expect(extrasOf(gentle.seeded)).toEqual([]);
+    expect(extrasOf(gentle.seeded)).toEqual(['map:1@0', 'map:3@2']);
     expect(gentle.seeded.every((seed) => seed.style === 'gentle')).toBe(true);
 
     const steady = harness();
     await steady.handler.handle(request);
-    expect(extrasOf(steady.seeded)).toEqual([]);
+    expect(extrasOf(steady.seeded)).toEqual(['map:1@0', 'map:3@2']);
 
     const brisk = harness();
     await brisk.handler.handle({ ...request, style: 'brisk' });
-    expect(extrasOf(brisk.seeded)).toEqual([]);
+    expect(extrasOf(brisk.seeded)).toEqual(['map:1@0', 'map:3@2']);
   });
 
   it('prepares ahead of a page: the chapter there first from that page, then the rest by distance, leaving out what exists', async () => {
@@ -447,7 +447,7 @@ describe('GenerateLectureHandler', () => {
     expect(done.seeded).toEqual([]);
   });
 
-  it('seeds only the chapters asked for, pages and nothing around them', async () => {
+  it('seeds only the chapters asked for: their pages and their map', async () => {
     const { handler, seeded } = harness();
     await handler.handle({
       ...request,
@@ -456,7 +456,7 @@ describe('GenerateLectureHandler', () => {
     });
     expect(
       seeded.map((seed) => `${seed.kind ?? 'page'}:${seed.pageNumber}`),
-    ).toEqual(['page:3', 'page:4']);
+    ).toEqual(['page:3', 'page:4', 'map:3']);
   });
 });
 
@@ -503,6 +503,7 @@ describe('LectureStatusHandler: boards that need writing again', () => {
       {
         listSegments: () => Promise.resolve(rows),
         findPosition: () => Promise.resolve(position),
+        listPlans: () => Promise.resolve([]),
       } as never,
       {
         enqueueLectureFollows: () => Promise.resolve(),
@@ -629,5 +630,26 @@ describe('SetLectureStyleHandler', () => {
     await all.handler.handle({ ...request, style: 'gentle', all: true });
     expect(all.docWrites[0].patch).toEqual({ lectureStyle: 'gentle' });
     expect(all.profileWrites).toEqual([{ lectureStyle: 'gentle' }]);
+  });
+
+  it('writes the interactive switch on its own, without touching the style', async () => {
+    const one = harness();
+    await one.handler.handle({ ...request, interactive: true, all: false });
+    expect(one.docWrites).toEqual([
+      { documentId: 'doc-1', patch: { lectureInteractive: true } },
+    ]);
+    expect(one.profileWrites).toEqual([]);
+
+    const all = harness();
+    await all.handler.handle({ ...request, interactive: false, all: true });
+    expect(all.docWrites[0].patch).toEqual({ lectureInteractive: false });
+    expect(all.profileWrites).toEqual([{ lectureInteractive: false }]);
+  });
+
+  it('refuses an empty change', async () => {
+    const one = harness();
+    await expect(
+      one.handler.handle({ ...request, all: false }),
+    ).rejects.toThrow(/Nothing to change/);
   });
 });

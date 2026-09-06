@@ -280,10 +280,13 @@ export class SequelizeLectureRepository implements LectureRepository {
   }
 
   async saveWordTimes(
-    input: SegmentKey & { wordTimes: unknown },
+    input: SegmentKey & { wordTimes: unknown; durationMs?: number },
   ): Promise<void> {
     await this.segments.update(
-      { wordTimes: input.wordTimes },
+      {
+        wordTimes: input.wordTimes,
+        ...(input.durationMs ? { durationMs: input.durationMs } : {}),
+      },
       { where: whereKey(input) },
     );
   }

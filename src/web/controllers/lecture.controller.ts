@@ -42,6 +42,7 @@ import {
   LectureReviewHandler,
   LectureStatusHandler,
   SaveLecturePositionHandler,
+  SetLectureStyleHandler,
 } from '../../business/handlers/documents/lecture.handlers';
 import { ValidationError } from '../../business/domain/errors/errors';
 import { STORAGE } from '../../business/ports/tokens';
@@ -74,6 +75,13 @@ class GenerateLectureDto {
   @IsInt()
   @Min(1)
   startAtPage?: number;
+
+  /** Teach me from this page: the chapters around it are chosen by the always-a-chapter-ahead rule. */
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  aheadOfPage?: number;
 }
 
 class BackfillBoardsDto {
@@ -93,6 +101,16 @@ class LectureReviewDto {
   @IsOptional()
   @IsIn(LECTURE_STYLE_KEYS)
   style?: LectureStyle;
+}
+
+class LectureStyleDto {
+  @IsIn(LECTURE_STYLE_KEYS)
+  style!: LectureStyle;
+
+  /** Use it for every document on the account. */
+  @IsOptional()
+  @IsBoolean()
+  all?: boolean;
 }
 
 class LecturePositionDto {
@@ -148,6 +166,7 @@ export class LectureController {
     private readonly follow: LectureFollowHandler,
     private readonly backfill: BackfillBoardsHandler,
     private readonly position: SaveLecturePositionHandler,
+    private readonly styleChoice: SetLectureStyleHandler,
     @Inject(STORAGE) private readonly storage: StoragePort,
   ) {}
 
@@ -162,6 +181,7 @@ export class LectureController {
       userId,
       documentId,
       topicIds: body.topicIds,
+      aheadOfPage: body.aheadOfPage,
       rewrite: body.rewrite,
       style: body.style,
       startAtPage: body.startAtPage,
@@ -301,6 +321,22 @@ export class LectureController {
     // Immutable for its key: the key changes whenever the audio would.
     response.setHeader('Cache-Control', 'private, max-age=86400, immutable');
     stream.pipe(response);
+  }
+
+  /** How the learner learns, for this document or for all of them. */
+  @Patch('style')
+  async setStyle(
+    @CurrentUser('id') userId: string,
+    @Param('id') documentId: string,
+    @Body() body: LectureStyleDto,
+  ): Promise<{ style: LectureStyle; all: boolean }> {
+    const { data } = await this.styleChoice.handle({
+      userId,
+      documentId,
+      style: body.style,
+      all: body.all === true,
+    });
+    return data;
   }
 
   @Patch('position')

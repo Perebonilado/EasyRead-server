@@ -66,6 +66,7 @@ import {
   BackfillBoardsHandler,
   LectureStatusHandler,
   SaveLecturePositionHandler,
+  SetLectureStyleHandler,
 } from './business/handlers/documents/lecture.handlers';
 import {
   GetMasteryHandler,
@@ -215,6 +216,7 @@ const handlers = [
   LectureFollowHandler,
   BackfillBoardsHandler,
   SaveLecturePositionHandler,
+  SetLectureStyleHandler,
   DrawDiagramHandler,
   BoardDiagramHandler,
   BookFindHandler,

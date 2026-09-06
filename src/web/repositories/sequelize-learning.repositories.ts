@@ -1,3 +1,4 @@
+import type { LectureStyle } from '../../contracts';
 import { Injectable } from '@nestjs/common';
 import { InjectModel } from '@nestjs/sequelize';
 import { Op } from 'sequelize';
@@ -99,12 +100,20 @@ export class SequelizeLearnerProfileRepository implements LearnerProfileReposito
   }
 }
 
+/** A stored style, or null for anything else a column might hold. */
+function asStyle(value: string | null | undefined): LectureStyle | null {
+  return value === 'gentle' || value === 'steady' || value === 'brisk'
+    ? value
+    : null;
+}
+
 function toProfile(row: LearnerProfileModel): LearnerProfileRecord {
   return {
     pace: row.pace,
     depth: row.depth,
     interactivity: row.interactivity,
     styleNotes: row.styleNotes,
+    lectureStyle: asStyle(row.lectureStyle),
     paceSource: row.paceSource ?? 'default',
     depthSource: row.depthSource ?? 'default',
     interactivitySource: row.interactivitySource ?? 'default',
@@ -205,6 +214,7 @@ export class SequelizeDocumentLearningStateRepository implements DocumentLearnin
       paceDelta: row.paceDelta,
       depthDelta: row.depthDelta,
       reason: row.reason,
+      lectureStyle: asStyle(row.lectureStyle),
     };
   }
 

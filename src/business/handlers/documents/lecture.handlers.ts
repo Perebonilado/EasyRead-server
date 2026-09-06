@@ -26,6 +26,8 @@ import {
   DOCUMENT_PAGE_REPOSITORY,
   LECTURE_REPOSITORY,
   TOPIC_REPOSITORY,
+  DOCUMENT_LEARNING_STATE_REPOSITORY,
+  LEARNER_PROFILE_REPOSITORY,
 } from '../../repositories/tokens';
 import type { AiCallLogRepository } from '../../repositories/ai-call-log.repository';
 import type { DocumentPageRepository } from '../../repositories/document-page.repository';
@@ -43,8 +45,14 @@ import {
   scriptForTts,
   effectiveStatus,
   IN_FLIGHT_STATUSES,
+  chosenLectureStyle,
 } from '../../domain/lecture';
+import { chaptersAhead } from '../../domain/lecture-ahead';
 import type { LectureRepository } from '../../repositories/lecture.repository';
+import type {
+  DocumentLearningStateRepository,
+  LearnerProfileRepository,
+} from '../../repositories/learning.repository';
 import type { TopicRepository } from '../../repositories/misc.repository';
 import AbstractRequestHandlerTemplate from '../AbstractRequestHandlerTemplate';
 import { CommandResponse } from '../response/CommandResponse';
@@ -81,6 +89,12 @@ export interface GenerateLectureRequest extends LectureRequest {
    * its chapter are written first, before anything else.
    */
   startAtPage?: number;
+  /**
+   * Teach me from this page: the chapters to prepare are chosen by the
+   * always-a-chapter-ahead rule around it, in place of `topicIds`, and the
+   * chapter the page is in starts writing there.
+   */
+  aheadOfPage?: number;
 }
 
 const IN_FLIGHT = IN_FLIGHT_STATUSES;
@@ -102,6 +116,10 @@ export class LectureStatusHandler extends AbstractRequestHandlerTemplate<
     @Inject(JOB_QUEUE) private readonly queue: JobQueuePort,
     private readonly access: DocumentAccessService,
     private readonly config: ConfigService,
+    @Inject(DOCUMENT_LEARNING_STATE_REPOSITORY)
+    private readonly docStates: DocumentLearningStateRepository,
+    @Inject(LEARNER_PROFILE_REPOSITORY)
+    private readonly profiles: LearnerProfileRepository,
   ) {
     super();
     this.boardsOn =
@@ -114,14 +132,24 @@ export class LectureStatusHandler extends AbstractRequestHandlerTemplate<
   protected async handleRequest(cmd: LectureRequest) {
     const doc = await this.access.require(cmd.documentId, cmd.userId);
 
-    const [topics, everything, position] = await Promise.all([
-      this.topics.listByDocument(doc.id),
-      this.lectures.listSegments(doc.id, doc.contentVersion),
-      this.lectures.findPosition(cmd.userId, doc.id),
-    ]);
+    const [topics, everything, position, docState, profile] = await Promise.all(
+      [
+        this.topics.listByDocument(doc.id),
+        this.lectures.listSegments(doc.id, doc.contentVersion),
+        this.lectures.findPosition(cmd.userId, doc.id),
+        this.docStates.find(cmd.userId, doc.id).catch(() => null),
+        this.profiles.find(cmd.userId).catch(() => null),
+      ],
+    );
 
-    // The style asked for, else the one the student was listening in.
-    const style = cmd.style ?? position?.style ?? DEFAULT_LECTURE_STYLE;
+    // The style asked for, else the one chosen for this document or for
+    // every document, else the one the student was listening in.
+    const chosen = chosenLectureStyle(
+      docState?.lectureStyle,
+      profile?.lectureStyle,
+    );
+    const style =
+      cmd.style ?? chosen.style ?? position?.style ?? DEFAULT_LECTURE_STYLE;
     const segments = everything.filter((segment) => segment.style === style);
 
     // A board written by an older writer, or never written for a row that
@@ -287,7 +315,46 @@ export class LectureStatusHandler extends AbstractRequestHandlerTemplate<
       topics: ordered,
       position,
       styles,
+      chosenStyle: chosen.style,
+      styleSource: chosen.source,
     } satisfies LectureStatusResponse);
+  }
+}
+
+export interface SetLectureStyleRequest extends LectureRequest {
+  style: LectureStyle;
+  /** Use it for every document on the account, not only this one. */
+  all: boolean;
+}
+
+/**
+ * How the learner learns, chosen once per document from the lecture bar,
+ * and for every document when they ask for that.
+ */
+@Injectable()
+export class SetLectureStyleHandler extends AbstractRequestHandlerTemplate<
+  SetLectureStyleRequest,
+  { style: LectureStyle; all: boolean }
+> {
+  constructor(
+    @Inject(DOCUMENT_LEARNING_STATE_REPOSITORY)
+    private readonly docStates: DocumentLearningStateRepository,
+    @Inject(LEARNER_PROFILE_REPOSITORY)
+    private readonly profiles: LearnerProfileRepository,
+    private readonly access: DocumentAccessService,
+  ) {
+    super();
+  }
+
+  protected async handleRequest(cmd: SetLectureStyleRequest) {
+    const doc = await this.access.require(cmd.documentId, cmd.userId);
+    await this.docStates.upsert(cmd.userId, doc.id, {
+      lectureStyle: cmd.style,
+    });
+    if (cmd.all) {
+      await this.profiles.upsert(cmd.userId, { lectureStyle: cmd.style });
+    }
+    return CommandResponse.of({ style: cmd.style, all: cmd.all });
   }
 }
 
@@ -373,9 +440,46 @@ export class GenerateLectureHandler extends AbstractRequestHandlerTemplate<
       })),
     );
 
+    // Teach me from a page: the rule around it picks the chapters, leaving
+    // out those with a lecture already, written or on its way.
+    const ahead =
+      !cmd.rewrite && cmd.aheadOfPage
+        ? chaptersAhead({
+            topics: topics.map((topic) => ({
+              id: topic.id,
+              startPage: topic.startPage,
+              endPage: topic.endPage,
+            })),
+            pageCount,
+            page: cmd.aheadOfPage,
+            written: new Set(
+              (
+                await this.lectures.listSegments(
+                  doc.id,
+                  doc.contentVersion,
+                  style,
+                )
+              )
+                .filter((row) => effectiveStatus(row) !== 'failed')
+                .map((row) => row.topicId)
+                .filter((topicId): topicId is string => Boolean(topicId)),
+            ),
+          })
+        : null;
+    if (ahead && !ahead.length) {
+      // Everything around the page is there or coming: nothing to queue.
+      const { data } = await this.status.handle({ ...cmd, style });
+      return CommandResponse.of(data);
+    }
+    const aheadStart = ahead?.find((row) => row.startAtPage)?.startAtPage;
+    const startAtPage = cmd.startAtPage ?? aheadStart;
+
     // A rewrite is always the whole document.
-    const wanted =
-      !cmd.rewrite && cmd.topicIds?.length ? new Set(cmd.topicIds) : null;
+    const wanted = ahead
+      ? new Set(ahead.map((row) => row.topicId))
+      : !cmd.rewrite && cmd.topicIds?.length
+        ? new Set(cmd.topicIds)
+        : null;
     const segments = wanted
       ? allSegments.filter((segment) => wanted.has(segment.topicId))
       : allSegments;
@@ -439,11 +543,13 @@ export class GenerateLectureHandler extends AbstractRequestHandlerTemplate<
     }
 
     // The chapter a learner is waiting in goes first, and starts writing at
-    // the page they are on.
-    const waitingIn = cmd.startAtPage
-      ? segments.find((segment) => segment.pageNumber === cmd.startAtPage)
-          ?.topicId
+    // the page they are on. Prepared ahead, the rest queue by distance.
+    const waitingIn = startAtPage
+      ? segments.find((segment) => segment.pageNumber === startAtPage)?.topicId
       : undefined;
+    const priorityOf = new Map(
+      (ahead ?? []).map((row) => [row.topicId, row.priority]),
+    );
     await this.queue.enqueueLectureChapters(
       topics
         .filter((topic) => owning.has(topic.id))
@@ -453,7 +559,10 @@ export class GenerateLectureHandler extends AbstractRequestHandlerTemplate<
           topicId: topic.id,
           orderIndex: topic.orderIndex,
           style,
-          ...(waitingIn === topic.id ? { startAtPage: cmd.startAtPage } : {}),
+          ...(waitingIn === topic.id ? { startAtPage } : {}),
+          ...(priorityOf.has(topic.id)
+            ? { priority: priorityOf.get(topic.id) }
+            : {}),
         })),
     );
 

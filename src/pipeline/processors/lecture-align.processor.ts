@@ -10,6 +10,7 @@ import type { DocumentRepository } from '../../business/repositories/document.re
 import type { LectureRepository } from '../../business/repositories/lecture.repository';
 import {
   estimateWordTimes,
+  measuredDurationMs,
   wordTimesFromAligned,
   type WordTimes,
 } from '../../business/domain/board';
@@ -107,7 +108,15 @@ export class LectureAlignProcessor {
     }
 
     if (!times) times = estimateWordTimes(spoken, durationMs, row.audioKey);
-    await this.lectures.saveWordTimes({ ...key, wordTimes: times });
+    // Measured times know the audio's true length, where the stored one
+    // was a guess from the character count; the player's track reads it.
+    const measured =
+      times.source !== 'estimate' ? measuredDurationMs(times) : null;
+    await this.lectures.saveWordTimes({
+      ...key,
+      wordTimes: times,
+      ...(measured ? { durationMs: measured } : {}),
+    });
     // Measured times give the sentence the tutor is on; the estimate only
     // ever gives the block, which the row already has.
     if (times.source !== 'estimate') {

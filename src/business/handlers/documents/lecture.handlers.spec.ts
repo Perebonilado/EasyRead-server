@@ -2,6 +2,7 @@ import { ConfigService } from '@nestjs/config';
 import {
   GenerateLectureHandler,
   LectureStatusHandler,
+  SetLectureStyleHandler,
 } from './lecture.handlers';
 import { BOARD_GENERATOR_VERSION } from '../../domain/board';
 import { LECTURE_STALE_MS } from '../../domain/lecture';
@@ -68,6 +69,7 @@ function harness({
     orderIndex: number;
     style?: string;
     startAtPage?: number;
+    priority?: number;
   }[] = [];
   const reset: string[][] = [];
   /** What happened to the repository, in order. */
@@ -385,7 +387,7 @@ describe('GenerateLectureHandler', () => {
     await expect(handler.handle(request)).rejects.toThrow(/chapters/i);
   });
 
-  it('seeds the check after each chapter, and the words before it for a slow learner', async () => {
+  it('seeds neither the words before a chapter nor the check after it, for any style', async () => {
     const extrasOf = (seeds: LectureSegmentSeed[]) =>
       seeds
         .filter((seed) => seed.kind && seed.kind !== 'page')
@@ -393,24 +395,59 @@ describe('GenerateLectureHandler', () => {
 
     const gentle = harness();
     await gentle.handler.handle({ ...request, style: 'gentle' });
-    expect(extrasOf(gentle.seeded)).toEqual([
-      'terms:1@0',
-      'check:2@1',
-      'terms:3@2',
-      'check:4@3',
-    ]);
+    expect(extrasOf(gentle.seeded)).toEqual([]);
     expect(gentle.seeded.every((seed) => seed.style === 'gentle')).toBe(true);
 
     const steady = harness();
     await steady.handler.handle(request);
-    expect(extrasOf(steady.seeded)).toEqual(['check:2@1', 'check:4@3']);
+    expect(extrasOf(steady.seeded)).toEqual([]);
 
     const brisk = harness();
     await brisk.handler.handle({ ...request, style: 'brisk' });
-    expect(extrasOf(brisk.seeded)).toEqual(['check:2@1', 'check:4@3']);
+    expect(extrasOf(brisk.seeded)).toEqual([]);
   });
 
-  it('seeds extras only for the chapters asked for', async () => {
+  it('prepares ahead of a page: the chapter there first from that page, then the rest by distance, leaving out what exists', async () => {
+    // A four-page book is a small book: the whole of it, current chapter first.
+    const fresh = harness();
+    await fresh.handler.handle({ ...request, aheadOfPage: 3 });
+    expect(pagesOf(fresh.seeded).map((s) => s.pageNumber)).toEqual([
+      1, 2, 3, 4,
+    ]);
+    expect(
+      fresh.chapters.map((c) => [c.topicId, c.priority, c.startAtPage]),
+    ).toEqual([
+      ['topic-1', 2, undefined],
+      ['topic-2', 1, 3],
+    ]);
+
+    // Chapter two is already there: only chapter one is queued, and first.
+    const partly = harness({
+      existing: [
+        { topicId: 'topic-2', pageNumber: 3, status: 'done' },
+        { topicId: 'topic-2', pageNumber: 4, status: 'writing' },
+      ],
+    });
+    await partly.handler.handle({ ...request, aheadOfPage: 3 });
+    expect(partly.chapters.map((c) => [c.topicId, c.priority])).toEqual([
+      ['topic-1', 1],
+    ]);
+
+    // Everything there or coming: nothing is queued and nothing seeded.
+    const done = harness({
+      existing: [
+        { topicId: 'topic-1', pageNumber: 1, status: 'done' },
+        { topicId: 'topic-1', pageNumber: 2, status: 'done' },
+        { topicId: 'topic-2', pageNumber: 3, status: 'done' },
+        { topicId: 'topic-2', pageNumber: 4, status: 'pending' },
+      ],
+    });
+    await done.handler.handle({ ...request, aheadOfPage: 1 });
+    expect(done.chapters).toEqual([]);
+    expect(done.seeded).toEqual([]);
+  });
+
+  it('seeds only the chapters asked for, pages and nothing around them', async () => {
     const { handler, seeded } = harness();
     await handler.handle({
       ...request,
@@ -418,10 +455,8 @@ describe('GenerateLectureHandler', () => {
       style: 'gentle',
     });
     expect(
-      seeded
-        .filter((seed) => seed.kind !== 'page')
-        .map((seed) => seed.pageNumber),
-    ).toEqual([3, 4]);
+      seeded.map((seed) => `${seed.kind ?? 'page'}:${seed.pageNumber}`),
+    ).toEqual(['page:3', 'page:4']);
   });
 });
 
@@ -490,6 +525,8 @@ describe('LectureStatusHandler: boards that need writing again', () => {
       } as never,
       // These are the board's own tests: the hidden board stays on here.
       new ConfigService({ LECTURE_BOARD_ENABLED: 'true' }),
+      { find: () => Promise.resolve(null) } as never,
+      { find: () => Promise.resolve(null) } as never,
     );
     return { handler, queued, aligns };
   }
@@ -550,5 +587,47 @@ describe('LectureStatusHandler: boards that need writing again', () => {
     await handler.handle({ ...request, style: 'steady' });
     expect(aligns.map((job) => job.pageNumber)).toEqual([4, 3, 2]);
     expect(aligns.map((job) => job.priority)).toEqual([1, 2, 3]);
+  });
+});
+
+describe('SetLectureStyleHandler', () => {
+  function harness() {
+    const docWrites: { documentId: string; patch: Record<string, unknown> }[] =
+      [];
+    const profileWrites: Record<string, unknown>[] = [];
+    const handler = new SetLectureStyleHandler(
+      {
+        upsert: (
+          _user: string,
+          documentId: string,
+          patch: Record<string, unknown>,
+        ) => {
+          docWrites.push({ documentId, patch });
+          return Promise.resolve();
+        },
+      } as never,
+      {
+        upsert: (_user: string, patch: Record<string, unknown>) => {
+          profileWrites.push(patch);
+          return Promise.resolve(patch);
+        },
+      } as never,
+      { require: () => Promise.resolve({ id: 'doc-1' }) } as never,
+    );
+    return { handler, docWrites, profileWrites };
+  }
+
+  it("writes the document's style, and the account's only when asked for all", async () => {
+    const one = harness();
+    await one.handler.handle({ ...request, style: 'brisk', all: false });
+    expect(one.docWrites).toEqual([
+      { documentId: 'doc-1', patch: { lectureStyle: 'brisk' } },
+    ]);
+    expect(one.profileWrites).toEqual([]);
+
+    const all = harness();
+    await all.handler.handle({ ...request, style: 'gentle', all: true });
+    expect(all.docWrites[0].patch).toEqual({ lectureStyle: 'gentle' });
+    expect(all.profileWrites).toEqual([{ lectureStyle: 'gentle' }]);
   });
 });

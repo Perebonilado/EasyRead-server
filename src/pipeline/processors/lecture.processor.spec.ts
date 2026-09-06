@@ -172,6 +172,30 @@ function fakes(
       });
     }
   };
+  /** One extra row of a kind no style seeds any more, as a lecture written before still carries. */
+  const seedExtra = (
+    style: LectureStyle,
+    pageNumber: number,
+    kind: 'terms' | 'check' | 'review',
+  ) => {
+    const page = [...rows.values()].find(
+      (r) =>
+        r.style === style && r.kind === 'page' && r.pageNumber === pageNumber,
+    )!;
+    rows.set(key(style, pageNumber, kind), {
+      ...page,
+      kind,
+      status: 'pending',
+      scriptText: null,
+      audioKey: null,
+      durationMs: null,
+      attempts: 0,
+      moveOffsets: null,
+      board: null,
+      wordTimes: null,
+      boardStatus: 'none',
+    });
+  };
   const ordered = (style?: LectureStyle) =>
     playOrder(
       [...rows.values()]
@@ -280,7 +304,10 @@ function fakes(
     },
     saveWordTimes: (input) => {
       const r = row(input.pageNumber, input.style, input.kind);
-      if (r) r.wordTimes = input.wordTimes;
+      if (r) {
+        r.wordTimes = input.wordTimes;
+        if (input.durationMs) r.durationMs = input.durationMs;
+      }
       return Promise.resolve();
     },
     listForBoardBackfill: (_d, _v, topicIds) =>
@@ -412,6 +439,7 @@ function fakes(
     boardJobs,
     voiced,
     seedExtras,
+    seedExtra,
     lectures,
     deps,
     segments,
@@ -1296,7 +1324,7 @@ describe('LectureChapterProcessor', () => {
 });
 
 describe('LectureChapterProcessor: the segments around a chapter', () => {
-  it("writes a slow learner the chapter's words first and the check last, and voices them by kind", async () => {
+  it('writes the pages alone: no words before the chapter, no check after it, voiced in order', async () => {
     const f = fakes({ 1: REAL_PAGE, 2: REAL_PAGE }, [TOPIC], ['gentle']);
     f.seedExtras('gentle');
     await chapterProcessor(f).process(
@@ -1304,39 +1332,26 @@ describe('LectureChapterProcessor: the segments around a chapter', () => {
       CONTEXT,
     );
 
-    expect(f.row(1, 'gentle', 'terms')!.scriptText).toMatch(
-      /^Words you will hear/,
-    );
-    expect(f.row(1, 'gentle', 'terms')!.status).toBe('voicing');
-    expect(f.row(2, 'gentle', 'check')!.scriptText).toMatch(
-      /check of what stuck/i,
-    );
-    expect(f.row(2, 'gentle', 'check')!.scriptText).toContain('[pause]');
-    // The words go before the first page, the check after the last.
+    // A lecture begins on its first page and ends on its last.
+    expect(f.row(1, 'gentle', 'terms')).toBeUndefined();
+    expect(f.row(2, 'gentle', 'check')).toBeUndefined();
     expect(f.voiceJobs).toEqual([
-      { pageNumber: 1, style: 'gentle', kind: 'terms' },
       { pageNumber: 1, style: 'gentle' },
       { pageNumber: 2, style: 'gentle' },
-      { pageNumber: 2, style: 'gentle', kind: 'check' },
     ]);
-    // The pages themselves are untouched by the extras.
     expect(f.row(1, 'gentle')!.scriptText).toMatch(/^Why Inflation matters\./);
   });
 
-  it('gives a normal pace the check but not the words', async () => {
+  it('gives a normal pace no words and no check either', async () => {
     const f = fakes({ 1: REAL_PAGE, 2: REAL_PAGE });
     f.seedExtras('steady');
     await chapterProcessor(f).process(chapterJob(), CONTEXT);
     expect(f.row(1, 'steady', 'terms')).toBeUndefined();
-    expect(f.row(2, 'steady', 'check')!.status).toBe('voicing');
-    expect(f.voiceJobs.at(-1)).toEqual({
-      pageNumber: 2,
-      style: 'steady',
-      kind: 'check',
-    });
+    expect(f.row(2, 'steady', 'check')).toBeUndefined();
+    expect(f.voiceJobs.at(-1)).toEqual({ pageNumber: 2, style: 'steady' });
   });
 
-  it('fails the words when the plan names none, and writes the pages regardless', async () => {
+  it('writes the pages when the plan names no terms, with nothing to fail', async () => {
     const f = fakes({ 1: REAL_PAGE, 2: REAL_PAGE }, [TOPIC], ['gentle']);
     f.seedExtras('gentle');
     const llm = new FakeLlmAdapter();
@@ -1349,15 +1364,15 @@ describe('LectureChapterProcessor: the segments around a chapter', () => {
       chapterJob(TOPIC.id, 0, 'gentle'),
       CONTEXT,
     );
-    expect(f.row(1, 'gentle', 'terms')!.status).toBe('failed');
-    expect(f.published).toContainEqual({
-      type: 'lecture.segment_failed',
-      pageNumber: 1,
-      style: 'gentle',
-      kind: 'terms',
-    });
+    expect(
+      f.published.some(
+        (event) =>
+          event.type === 'lecture.segment_failed' &&
+          (event as { kind?: string }).kind !== undefined,
+      ),
+    ).toBe(false);
     expect(f.row(1, 'gentle')!.status).toBe('voicing');
-    expect(f.row(2, 'gentle', 'check')!.status).toBe('voicing');
+    expect(f.row(2, 'gentle')!.status).toBe('voicing');
   });
 
   it("asks for a prediction at the chapter's turn and nowhere else", async () => {
@@ -1369,7 +1384,7 @@ describe('LectureChapterProcessor: the segments around a chapter', () => {
     expect(scriptForTts(f.row(2)!.scriptText!)).not.toMatch(/\[|pause/);
   });
 
-  it('fails the extras with the pages when the chapter cannot be planned', async () => {
+  it('fails the pages when the chapter cannot be planned', async () => {
     const f = fakes({ 1: REAL_PAGE }, [TOPIC], ['gentle']);
     f.seedExtras('gentle');
     const llm = new FakeLlmAdapter();
@@ -1378,8 +1393,8 @@ describe('LectureChapterProcessor: the segments around a chapter', () => {
       chapterJob(TOPIC.id, 0, 'gentle'),
       FINAL,
     );
-    expect(f.row(1, 'gentle', 'terms')!.status).toBe('failed');
-    expect(f.row(1, 'gentle', 'check')!.status).toBe('failed');
+    expect(f.row(1, 'gentle', 'terms')).toBeUndefined();
+    expect(f.row(1, 'gentle', 'check')).toBeUndefined();
     expect(f.row(1, 'gentle')!.status).toBe('failed');
   });
 });
@@ -1556,7 +1571,7 @@ describe('LectureChapterProcessor: a long gentle page voiced as two pieces', () 
 
   it('asks for the audio again of a row that kept its words but lost its voice', async () => {
     const f = fakes({ 1: REAL_PAGE, 2: REAL_PAGE });
-    f.seedExtras('steady');
+    f.seedExtra('steady', 2, 'check');
     const kept = f.row(1)!;
     kept.scriptText = 'Words already written.';
     kept.status = 'pending';
@@ -1609,7 +1624,7 @@ describe('LectureVoiceProcessor: how each style is delivered', () => {
 describe('LectureVoiceProcessor: the segments around a chapter', () => {
   it("keeps a check's audio apart from its page's, and says which arrived", async () => {
     const f = fakes({ 1: REAL_PAGE });
-    f.seedExtras('steady');
+    f.seedExtra('steady', 1, 'check');
     const check = f.row(1, 'steady', 'check')!;
     check.scriptText = 'That is inflation. A check of what stuck.';
     check.status = 'voicing';
@@ -1765,26 +1780,6 @@ describe('the lecture board around the chapter processor', () => {
     });
   });
 
-  it('writes deterministic boards for the words and the check', async () => {
-    const f = fakes({ 1: REAL_PAGE, 2: REAL_PAGE }, [TOPIC], ['gentle']);
-    f.seedExtras('gentle');
-    await chapterProcessor(f).process(
-      chapterJob(TOPIC.id, 0, 'gentle'),
-      CONTEXT,
-    );
-    const terms = f.row(1, 'gentle', 'terms')!;
-    expect(terms.boardStatus).toBe('done');
-    expect(
-      (terms.board as BoardTimeline).ops.some((op) => op.kind === 'term'),
-    ).toBe(true);
-    const check = f.row(2, 'gentle', 'check')!;
-    expect(check.boardStatus).toBe('done');
-    expect(
-      (check.board as BoardTimeline).ops.filter((op) => op.kind === 'point')
-        .length,
-    ).toBeGreaterThan(0);
-  });
-
   it('asks for the drawing only where the plan marked a figure', async () => {
     const f = fakes({ 1: REAL_PAGE, 2: REAL_PAGE });
     const llm = withoutBoard(new FakeLlmAdapter());
@@ -1853,6 +1848,9 @@ describe('the board after the audio', () => {
     const times = row.wordTimes as WordTimes;
     expect(times.source).toBe('echogarden-whisper');
     expect(times.audioKey).toBe(row.audioKey);
+    // The row's length is now the audio's own: the end of its last word.
+    const lastEnd = Math.max(...times.words.map((word) => word[3]));
+    expect(row.durationMs).toBe(Math.round(lastEnd));
     const timeline = row.board as BoardTimeline;
     expect(timeline.timing).toBe('aligned');
     expect(

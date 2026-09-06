@@ -33,6 +33,10 @@ export class LearnerProfileModel extends BaseModel {
   @Column({ type: DataType.TEXT, allowNull: true })
   declare styleNotes: string | null;
 
+  /** How the learner asked to be taught every document; null until they say "use for all". */
+  @Column({ type: DataType.STRING(16), allowNull: true })
+  declare lectureStyle: string | null;
+
   @Column({
     type: DataType.ENUM('default', 'auto', 'manual'),
     allowNull: false,

@@ -629,6 +629,9 @@ export interface LectureStatusResponse {
   position: LecturePosition | null;
   /** What exists in every style, so the picker knows what a switch costs. */
   styles: Record<LectureStyle, LectureStyleSummary>;
+  /** The style the learner chose for this document or for every document; null when the bar should ask. */
+  chosenStyle: LectureStyle | null;
+  styleSource: 'document' | 'account' | 'none';
 }
 
 /**

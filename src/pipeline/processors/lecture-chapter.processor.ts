@@ -289,19 +289,6 @@ export class LectureChapterProcessor {
       return;
     }
 
-    // A slow learner hears the chapter's words before its first page, so
-    // they are written first: one short call, then the page they wait on.
-    await this.writeExtra({
-      doc,
-      topic,
-      plan,
-      rows,
-      extras,
-      style,
-      contentVersion,
-      kind: 'terms',
-    });
-
     // A learner who switched style mid-chapter is waiting at startAtPage:
     // that page and the rest of the chapter go first, the earlier pages
     // are filled in after.
@@ -329,23 +316,12 @@ export class LectureChapterProcessor {
         taughtEarlier,
       });
     }
-
-    // The check of what stuck, after the chapter's last page.
-    await this.writeExtra({
-      doc,
-      topic,
-      plan,
-      rows,
-      extras,
-      style,
-      contentVersion,
-      kind: 'check',
-    });
   }
 
   /**
-   * One of the short segments around the chapter, written from the plan:
-   * the words a slow learner hears first, or the check of what stuck.
+   * One of the short segments around the chapter, written from the plan.
+   * Only the review is seeded now; the words and the check are kept here
+   * for lectures that still carry them.
    * Every line comes from the plan, so there is no page to verify it
    * against. A chapter with nothing to check, or a plan from before terms
    * existed, fails the row with the reason; the player skips a failed

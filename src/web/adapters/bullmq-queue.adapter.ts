@@ -174,9 +174,9 @@ export class BullmqQueueAdapter implements JobQueuePort, OnModuleDestroy {
           // all" — hence the offset. Chapter one is written first so the
           // student can start listening while the rest is still coming;
           // a chapter a learner is waiting in right now goes before all.
-          priority: job.startAtPage
-            ? 1
-            : Math.min(job.orderIndex + 2, 2_000_000),
+          priority:
+            job.priority ??
+            (job.startAtPage ? 1 : Math.min(job.orderIndex + 2, 2_000_000)),
         },
       })),
     );

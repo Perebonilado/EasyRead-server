@@ -3347,6 +3347,13 @@ export interface AlignedWord {
  * word may drag on for seconds. Words the aligner skipped take the time
  * between their neighbours.
  */
+/** How long the audio is, by its own words: the end of the last one. Null for times with no words. */
+export function measuredDurationMs(times: WordTimes): number | null {
+  let end = 0;
+  for (const word of times.words) end = Math.max(end, word[3] ?? 0);
+  return end > 0 ? Math.round(end) : null;
+}
+
 export function wordTimesFromAligned(
   aligned: AlignedWord[],
   spoken: string,

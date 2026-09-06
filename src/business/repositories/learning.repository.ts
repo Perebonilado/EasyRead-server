@@ -1,5 +1,7 @@
 /** The learning loop's persistence: assessment events and learner profiles. */
 
+import type { LectureStyle } from '../../contracts';
+
 export type AssessmentKind = 'mcq' | 'flashcard' | 'verbal';
 
 export interface AssessmentEventRecord {
@@ -42,6 +44,8 @@ export interface LearnerProfileRecord {
   depth: 'lighter' | 'standard' | 'deeper';
   interactivity: 'less' | 'standard' | 'more';
   styleNotes: string | null;
+  /** How the learner asked to be taught every document; null until they say so. */
+  lectureStyle?: LectureStyle | null;
   paceSource: DialSource;
   depthSource: DialSource;
   interactivitySource: DialSource;
@@ -59,6 +63,8 @@ export interface DocumentLearningStateRecord {
   paceDelta: PaceDelta;
   depthDelta: DepthDelta;
   reason: string | null;
+  /** How the learner asked to be taught this document; null until chosen. */
+  lectureStyle?: LectureStyle | null;
 }
 
 export interface DocumentLearningStateRepository {
@@ -86,6 +92,7 @@ export const DEFAULT_LEARNER_PROFILE: LearnerProfileRecord = {
   depth: 'standard',
   interactivity: 'standard',
   styleNotes: null,
+  lectureStyle: null,
   paceSource: 'default',
   depthSource: 'default',
   interactivitySource: 'default',

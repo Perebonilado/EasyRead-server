@@ -17,6 +17,8 @@ export interface LectureChapterJob extends PipelineJob {
   style: LectureStyle;
   /** Write this page and the rest of the chapter first: a learner is waiting there. */
   startAtPage?: number;
+  /** Where this chapter stands in the queue, lower sooner; set when preparing ahead of a learner. */
+  priority?: number;
 }
 
 export interface LectureVoiceJob extends PipelineJob {

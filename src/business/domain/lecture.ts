@@ -100,12 +100,33 @@ export function isSegmentKind(value: unknown): value is SegmentKind {
   );
 }
 
-/** Which extras each style gets. A quick learner is spared the words and the review. */
+/**
+ * Which extras each style gets. No style opens with the words or ends with
+ * the check any more: a lecture begins on its first page and ends on its
+ * last. The kinds stay known so lectures written before this still read,
+ * and the player skips them. The review, for a learner coming back, stays.
+ */
 export const EXTRAS_BY_STYLE: Record<LectureStyle, LectureExtraKind[]> = {
-  gentle: ['terms', 'check', 'review'],
-  steady: ['check', 'review'],
-  brisk: ['check'],
+  gentle: ['review'],
+  steady: ['review'],
+  brisk: [],
 };
+
+/** Where a document's style came from: chosen for it, chosen for every document, or not yet. */
+export type LectureStyleSource = 'document' | 'account' | 'none';
+
+/**
+ * How a document is taught: the style chosen for it, else the one chosen
+ * for every document, else nothing chosen yet, when the bar asks.
+ */
+export function chosenLectureStyle(
+  documentStyle: LectureStyle | null | undefined,
+  accountStyle: LectureStyle | null | undefined,
+): { style: LectureStyle | null; source: LectureStyleSource } {
+  if (documentStyle) return { style: documentStyle, source: 'document' };
+  if (accountStyle) return { style: accountStyle, source: 'account' };
+  return { style: null, source: 'none' };
+}
 
 /** Spoken-word budgets for the extras; short by design. */
 export const EXTRA_BUDGET: Record<LectureExtraKind, WordBudget> = {

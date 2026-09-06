@@ -29,6 +29,7 @@ import {
   tailOf,
   validateOutline,
   EXTRAS_BY_STYLE,
+  chosenLectureStyle,
   EXTRA_BUDGET,
   KIND_RANK,
   extraSeeds,
@@ -918,27 +919,12 @@ describe('the segments around a chapter', () => {
     { topicId: 't2', pageNumber: 3, seq: 2, bridge: true },
   ];
 
-  it('gives a slow learner the words before a chapter and the check after it', () => {
-    expect(
-      extraSeeds(cut, 'gentle').map((seed) => [
-        seed.kind,
-        seed.pageNumber,
-        seed.seq,
-        seed.bridge,
-      ]),
-    ).toEqual([
-      ['terms', 1, 0, false],
-      ['check', 2, 1, false],
-    ]);
-  });
-
-  it('gives a normal pace and a quick learner the check only', () => {
-    expect(extraSeeds(cut, 'steady').map((seed) => seed.kind)).toEqual([
-      'check',
-    ]);
-    expect(extraSeeds(cut, 'brisk').map((seed) => seed.kind)).toEqual([
-      'check',
-    ]);
+  it('seeds no words before a chapter and no check after it, for any learner', () => {
+    for (const style of ['gentle', 'steady', 'brisk'] as const) {
+      expect(extraSeeds(cut, style)).toEqual([]);
+      expect(EXTRAS_BY_STYLE[style]).not.toContain('terms');
+      expect(EXTRAS_BY_STYLE[style]).not.toContain('check');
+    }
     expect(EXTRAS_BY_STYLE.brisk).not.toContain('review');
     expect(EXTRAS_BY_STYLE.gentle).toContain('review');
   });
@@ -1400,5 +1386,22 @@ describe('board marks in a script', () => {
       lines: [line(1, 7, 'lost')],
     });
     expect(stray.board?.lines.map((entry) => entry.number)).toEqual([1]);
+  });
+});
+
+describe('how a document is taught', () => {
+  it("is the document's choice, else the account's, else not chosen yet", () => {
+    expect(chosenLectureStyle('brisk', 'gentle')).toEqual({
+      style: 'brisk',
+      source: 'document',
+    });
+    expect(chosenLectureStyle(null, 'gentle')).toEqual({
+      style: 'gentle',
+      source: 'account',
+    });
+    expect(chosenLectureStyle(undefined, null)).toEqual({
+      style: null,
+      source: 'none',
+    });
   });
 });

@@ -37,4 +37,8 @@ export class DocumentLearningStateModel extends BaseModel {
 
   @Column({ type: DataType.STRING(300), allowNull: true })
   declare reason: string | null;
+
+  /** How the learner asked to be taught this document; null until they choose. */
+  @Column({ type: DataType.STRING(16), allowNull: true })
+  declare lectureStyle: string | null;
 }

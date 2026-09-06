@@ -149,7 +149,10 @@ export interface LectureRepository {
   saveBoard(
     input: SegmentKey & { board: unknown; boardStatus: BoardStatus },
   ): Promise<void>;
-  saveWordTimes(input: SegmentKey & { wordTimes: unknown }): Promise<void>;
+  /** The row's word timings and, when they were measured on the audio, the audio's true length. */
+  saveWordTimes(
+    input: SegmentKey & { wordTimes: unknown; durationMs?: number },
+  ): Promise<void>;
   /** The row's follow-along track and its status. */
   saveFollow(
     input: SegmentKey & { follow: unknown; followStatus: FollowStatus },

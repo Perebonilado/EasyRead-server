@@ -188,6 +188,13 @@ class BookFindDto {
   @IsString()
   @Length(2, 300)
   query!: string;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  @Max(6)
+  limit?: number;
 }
 
 class VoiceSessionDto {
@@ -442,6 +449,7 @@ export class VoiceController {
       userId,
       documentId,
       query: body.query,
+      limit: body.limit ?? null,
     });
     return result.data;
   }

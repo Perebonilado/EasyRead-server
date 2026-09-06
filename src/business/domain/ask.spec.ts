@@ -257,6 +257,44 @@ describe('a question mid-lecture: the board', () => {
     }
   });
 
+  it('helps a learner who reaches ahead: confirm, name the answer and the page, offer to go there', () => {
+    const text = askInstructions(base);
+    expect(text).toContain('REACHING AHEAD');
+    expect(text).toContain('First say plainly whether they are right');
+    expect(text).toContain('offer to go there now or carry on in order');
+    expect(text).toContain(
+      'Never answer a question about what is wrong with the page by explaining the page again',
+    );
+    expect(text).toContain('PASSAGES THE BOOK HAS');
+    expect(text).not.toContain('say it is coming in a moment');
+    expect(text).not.toContain('Answer the step they are stuck on');
+    expect(text).toContain('wherever in the book its answer is');
+    expect(text.indexOf('REACHING AHEAD')).toBeLessThan(
+      text.indexOf('GROUNDING'),
+    );
+  });
+
+  it('shows the chapter page by page, behind, here and still to come', () => {
+    const text = askInstructions({
+      ...base,
+      chapter: {
+        ...base.chapter!,
+        beats: [
+          { pageNumber: 72, goal: 'The rehashing problem.' },
+          { pageNumber: 73, goal: 'The ring.' },
+          { pageNumber: 81, goal: 'Virtual nodes even out the ring.' },
+        ],
+      },
+    });
+    expect(text).toContain('THE CHAPTER, PAGE BY PAGE');
+    expect(text).toContain('page 72 (behind): The rehashing problem');
+    expect(text).toContain('page 73 (you are here): The ring');
+    expect(text).toContain(
+      'page 81 (still to come): Virtual nodes even out the ring',
+    );
+    expect(askInstructions(base)).not.toContain('THE CHAPTER, PAGE BY PAGE');
+  });
+
   it('reads the shape of a drawing from the ask', () => {
     expect(figureKindFor('the steps a request goes through')).toBe('process');
     expect(figureKindFor('consistent hashing versus modular hashing')).toBe(

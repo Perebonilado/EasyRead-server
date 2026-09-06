@@ -1,0 +1,16 @@
+{
+  "plain": {
+    "helped": 0.75,
+    "confirms": 1,
+    "namesAnswer": 0.75,
+    "namesPage": 0.75,
+    "count": 4
+  },
+  "with-passages": {
+    "helped": 0.75,
+    "confirms": 1,
+    "namesAnswer": 0.75,
+    "namesPage": 0.75,
+    "count": 4
+  }
+}

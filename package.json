@@ -30,6 +30,7 @@
     "follow:eval": "ts-node --transpile-only -r tsconfig-paths/register scripts/follow-eval.ts",
     "follow:embed": "ts-node --transpile-only -r tsconfig-paths/register scripts/follow-embed.ts",
     "sketch:eval": "ts-node --transpile-only -r tsconfig-paths/register scripts/sketch-eval.ts",
+    "ask:eval": "ts-node --transpile-only -r tsconfig-paths/register scripts/ask-eval.ts",
     "check:storage": "ts-node --transpile-only scripts/check-storage.ts"
   },
   "dependencies": {

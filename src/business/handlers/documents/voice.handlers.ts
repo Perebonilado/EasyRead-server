@@ -1035,6 +1035,11 @@ export class StartVoiceSessionHandler extends AbstractRequestHandlerTemplate<
           pageCount: Math.max(1, chapterPages.length),
           arc: plan?.arc ?? null,
           next: nextBeat ? nextBeat.newHere?.trim() || nextBeat.goal : null,
+          beats:
+            plan?.beats?.map((beat) => ({
+              pageNumber: beat.pageNumber,
+              goal: beat.newHere?.trim() || beat.goal,
+            })) ?? null,
         }
       : null;
 

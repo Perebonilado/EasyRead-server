@@ -12,6 +12,8 @@ export interface BookFindRequest {
   documentId: string;
   /** What the tutor wants to find in the book, in its own words. */
   query: string;
+  /** How many passages at most; the tutor's own lookups take the default. */
+  limit?: number | null;
 }
 
 const PASSAGES = 6;
@@ -42,7 +44,7 @@ export class BookFindHandler extends AbstractRequestHandlerTemplate<
     const chunks = await this.vectors.query({
       documentId: doc.id,
       embedding,
-      topK: PASSAGES,
+      topK: Math.max(1, Math.min(PASSAGES, cmd.limit ?? PASSAGES)),
     });
     return CommandResponse.of<LectureBookFindResponse>({
       passages: chunks

@@ -1,0 +1,91 @@
+{
+ "name": "servers-removed-keys",
+ "pageNumber": 75,
+ "pageCount": 269,
+ "question": "What happens to the keys when a server is removed from the ring? Do they all get shuffled again?",
+ "answerPages": [
+  77,
+  78
+ ],
+ "expect": "Says only the keys of the removed server move, to the next server clockwise; names the page where the book shows a server removed.",
+ "chapter": {
+  "title": "Design Consistent Hashing",
+  "startPage": 71,
+  "endPage": 86,
+  "arc": "From the rehashing problem to a ring that barely moves, and the virtual nodes that even it out.",
+  "beats": [
+   {
+    "pageNumber": 71,
+    "goal": "CHAPTER 5: DESIGN CONSISTENT HASHING To scale systems horizontally, we need to share requests and data well across multiple servers."
+   },
+   {
+    "pageNumber": 72,
+    "goal": "The Rehashing Problem When using multiple cache servers, we need a way to share the load evenly."
+   },
+   {
+    "pageNumber": 73,
+    "goal": "Challenges with Fixed Server Pools This method works well when the server pool size is fixed and data is evenly distributed."
+   },
+   {
+    "pageNumber": 74,
+    "goal": "Key Redistribution During Server Offline Events Most keys get redistributed, not just those stored in the offline server (server 1)."
+   },
+   {
+    "pageNumber": 75,
+    "goal": "Consistent Hashing Consistent hashing is a special type of hashing."
+   },
+   {
+    "pageNumber": 76,
+    "goal": "Hash Keys There is an important point about the hash function."
+   },
+   {
+    "pageNumber": 77,
+    "goal": "Finding the Server for a Key To find out which server holds a specific key, we move clockwise from the key's position on the ring until we find a server."
+   },
+   {
+    "pageNumber": 78,
+    "goal": "Remove a Server When you remove a server, only a small number of keys need to be moved around using consistent hashing."
+   },
+   {
+    "pageNumber": 79,
+    "goal": "Two Issues in the Basic Approach The consistent hashing algorithm was developed by Karger et al."
+   },
+   {
+    "pageNumber": 80,
+    "goal": "Non-Uniform Key Distribution It's possible for key distribution on the ring to be uneven."
+   },
+   {
+    "pageNumber": 81,
+    "goal": "Understanding Virtual Nodes in Distributed Systems In real-world systems, we often use more virtual nodes than just a few."
+   },
+   {
+    "pageNumber": 82,
+    "goal": "Virtual Nodes and Key Distribution As the number of virtual nodes increases, the keys are spread out more evenly."
+   },
+   {
+    "pageNumber": 83,
+    "goal": "Removing a Server from the Ring When a server (s1) is taken out, this is shown in Figure 5-15."
+   },
+   {
+    "pageNumber": 85,
+    "goal": "Wrap Up In this chapter, we talked about consistent hashing."
+   },
+   {
+    "pageNumber": 86,
+    "goal": "Reference materials [1] Consistent hashing: https://en.wikipedia.org/wiki/Consistent_hashing [2] Consistent Hashing: https://tom-e-white.com/2007/11/consistent-"
+   }
+  ]
+ },
+ "pageText": "Consistent Hashing Consistent hashing is a special type of hashing. When we change the size of a hash table using consistent hashing, only a small number of keys need to be relocated. This is an improvement over traditional hashing, where most keys would need to be moved if the number of slots changed. Hash Space and Hash Ring Now that we know what consistent hashing is, let's see how it actually works. We will use SHA-1 as our hash function, which gives output values from x0 to xn. In cryptography, the hash space for SHA-1 ranges from 0 to 2^160 - 1. This means that x0 represents 0, xn represents 2^160 - 1, and the other hash values are somewhere in between. A visual of this hash space is shown in Figure 5-3. When we connect the two ends of the range, we create a hash ring. This is illustrated in Figure 5-4. Hash Servers Using the same hash function, we can map servers onto the hash ring by using their IP addresses or names. Figure 5-5 shows how four servers are placed on the hash ring.",
+ "heard": "CHAPTER 5: DESIGN CONSISTENT HASHING To scale systems horizontally, we need to share requests and data well across multiple servers. This helps manage more users and data effectively. Consistent hashing is one technique that is widely used to distribute these requests and data evenly. Next, we will closely examine the problem of how to do this.\n\nThe Rehashing Problem When using multiple cache servers, we need a way to share the load evenly. One popular method is to use a hash function. The formula is: serverIndex = hash(key) % N. Here, N represents the total number of servers. Let's look at an example. We have 4 servers and 8 string keys. Each string key has its own hash value. To find which server holds a specific key, we apply the formula: f(key) % 4. For example, if hash(key0) % 4 equals 1, this means the client needs to reach out to server 1 for the cached data. The distribution of the keys across the servers is shown in Figure 5-1, based on the information in Table 5-1.\n\nChallenges with Fixed Server Pools This method works well when the server pool size is fixed and data is evenly distributed. But issues come up when servers are added or removed. For example, if server 1 goes offline, the server pool size drops to 3. If we use the same hash function, it still gives us the same hash value for a key. However, if we use a modular operation (like a remainder), the server indexes change because we have one less server. Table 5-2 shows these results when we apply hash % 3. Figure 5-2 displays the new distribution of keys based on the information in Table 5-2.\n\nKey Redistribution During Server Offline Events Most keys get redistributed, not just those stored in the offline server (server 1). This means that when server 1 goes offline, many cache clients will try to connect to the wrong servers to get data. When this happens, it leads to a lot of cache misses. A cache miss occurs when requested data is not found in the cache. Consistent hashing is a useful technique to reduce this issue.",
+ "passages": [
+  {
+   "pageNumber": 77,
+   "text": "Finding the Server for a Key To find out which server holds a specific key, we move clockwise from the key's position on the ring until we find a server. In this process, key0 is on server 0, key1 is on server 1, key2 is on server 2, and key3 is on server 3. Adding a Server When we add a new server, we only need to move a few keys to different servers. After adding server 4, only key0 needs to be moved. Keys k1, k2, and k3 stay on the same servers. Let's break this down further. Before server 4 was added, key0 was on server 0. Now, after adding server 4, key0 moves to server 4. This happens because server 4 is the first one found when going clockwise from key0's spot on the ring. The other keys do not change servers because of how the consistent hashing algorithm works."
+  },
+  {
+   "pageNumber": 78,
+   "text": "Remove a Server When you remove a server, only a small number of keys need to be moved around using consistent hashing. For example, in Figure 5-9, if server 1 is removed, only key1 has to be moved to server 2. The other keys remain unchanged."
+  }
+ ]
+}

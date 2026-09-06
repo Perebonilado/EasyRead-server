@@ -1,0 +1,96 @@
+{
+ "name": "what-if-hotspot",
+ "pageNumber": 76,
+ "pageCount": 269,
+ "question": "What if one server is much more popular than the others? Does the ring do anything about that?",
+ "answerPages": [
+  80,
+  81,
+  82
+ ],
+ "expect": "Confirms the concern, says the ring alone does not fix it, and points to virtual nodes and the number of virtual nodes as the book's lever, with a page.",
+ "chapter": {
+  "title": "Design Consistent Hashing",
+  "startPage": 71,
+  "endPage": 86,
+  "arc": "From the rehashing problem to a ring that barely moves, and the virtual nodes that even it out.",
+  "beats": [
+   {
+    "pageNumber": 71,
+    "goal": "CHAPTER 5: DESIGN CONSISTENT HASHING To scale systems horizontally, we need to share requests and data well across multiple servers."
+   },
+   {
+    "pageNumber": 72,
+    "goal": "The Rehashing Problem When using multiple cache servers, we need a way to share the load evenly."
+   },
+   {
+    "pageNumber": 73,
+    "goal": "Challenges with Fixed Server Pools This method works well when the server pool size is fixed and data is evenly distributed."
+   },
+   {
+    "pageNumber": 74,
+    "goal": "Key Redistribution During Server Offline Events Most keys get redistributed, not just those stored in the offline server (server 1)."
+   },
+   {
+    "pageNumber": 75,
+    "goal": "Consistent Hashing Consistent hashing is a special type of hashing."
+   },
+   {
+    "pageNumber": 76,
+    "goal": "Hash Keys There is an important point about the hash function."
+   },
+   {
+    "pageNumber": 77,
+    "goal": "Finding the Server for a Key To find out which server holds a specific key, we move clockwise from the key's position on the ring until we find a server."
+   },
+   {
+    "pageNumber": 78,
+    "goal": "Remove a Server When you remove a server, only a small number of keys need to be moved around using consistent hashing."
+   },
+   {
+    "pageNumber": 79,
+    "goal": "Two Issues in the Basic Approach The consistent hashing algorithm was developed by Karger et al."
+   },
+   {
+    "pageNumber": 80,
+    "goal": "Non-Uniform Key Distribution It's possible for key distribution on the ring to be uneven."
+   },
+   {
+    "pageNumber": 81,
+    "goal": "Understanding Virtual Nodes in Distributed Systems In real-world systems, we often use more virtual nodes than just a few."
+   },
+   {
+    "pageNumber": 82,
+    "goal": "Virtual Nodes and Key Distribution As the number of virtual nodes increases, the keys are spread out more evenly."
+   },
+   {
+    "pageNumber": 83,
+    "goal": "Removing a Server from the Ring When a server (s1) is taken out, this is shown in Figure 5-15."
+   },
+   {
+    "pageNumber": 85,
+    "goal": "Wrap Up In this chapter, we talked about consistent hashing."
+   },
+   {
+    "pageNumber": 86,
+    "goal": "Reference materials [1] Consistent hashing: https://en.wikipedia.org/wiki/Consistent_hashing [2] Consistent Hashing: https://tom-e-white.com/2007/11/consistent-"
+   }
+  ]
+ },
+ "pageText": "Hash Keys There is an important point about the hash function. The hash function used here is not the same as the one used in the \"rehashing problem.\" Also, it does not involve a modular operation. In Figure 5-6, there are four cache keys. They are key0, key1, key2, and key3. These keys are placed onto the hash ring. Server Lookup",
+ "heard": "sh(key) % N. Here, N represents the total number of servers. Let's look at an example. We have 4 servers and 8 string keys. Each string key has its own hash value. To find which server holds a specific key, we apply the formula: f(key) % 4. For example, if hash(key0) % 4 equals 1, this means the client needs to reach out to server 1 for the cached data. The distribution of the keys across the servers is shown in Figure 5-1, based on the information in Table 5-1.\n\nChallenges with Fixed Server Pools This method works well when the server pool size is fixed and data is evenly distributed. But issues come up when servers are added or removed. For example, if server 1 goes offline, the server pool size drops to 3. If we use the same hash function, it still gives us the same hash value for a key. However, if we use a modular operation (like a remainder), the server indexes change because we have one less server. Table 5-2 shows these results when we apply hash % 3. Figure 5-2 displays the new distribution of keys based on the information in Table 5-2.\n\nKey Redistribution During Server Offline Events Most keys get redistributed, not just those stored in the offline server (server 1). This means that when server 1 goes offline, many cache clients will try to connect to the wrong servers to get data. When this happens, it leads to a lot of cache misses. A cache miss occurs when requested data is not found in the cache. Consistent hashing is a useful technique to reduce this issue.\n\nConsistent Hashing Consistent hashing is a special type of hashing. When we change the size of a hash table using consistent hashing, only a small number of keys need to be relocated. This is an improvement over traditional hashing, where most keys would need to be moved if the number of slots changed. Hash Space and Hash Ring Now that we know what consistent hashing is, let's see how it actually works. We will use SHA-1 as our hash function, which gives output values from x0 to xn. In cryptography, the hash space for SHA-1 ranges from 0 to 2^160 - 1. This means that x0 represents 0, xn represents 2^160 - 1, and the other hash values are somewhere in between. A visual of this hash space is shown in Figure 5-3. When we connect the two ends of the range, we create a hash ring. This is illustrated in Figure 5-4. Hash Servers Using the same hash function, we can map servers onto the hash ring by using their IP addresses or names. Figure 5-5 shows how four servers are placed on the hash ring.",
+ "passages": [
+  {
+   "pageNumber": 80,
+   "text": "Non-Uniform Key Distribution It's possible for key distribution on the ring to be uneven. For example, if servers are placed as shown in Figure 5-11, most keys end up on server 2. Meanwhile, server 1 and server 3 don't store any data. Virtual Nodes To fix issues with uneven distribution, we use a technique called virtual nodes or replicas. A virtual node represents a real server. Each server has several virtual nodes on the ring. In Figure 5-12, both server 0 and server 1 have 3 virtual nodes each. The number 3 refers to how many virtual nodes each server has."
+  },
+  {
+   "pageNumber": 81,
+   "text": "Understanding Virtual Nodes in Distributed Systems In real-world systems, we often use more virtual nodes than just a few. Instead of just using a label like s0 for server 0, we use s0_0, s0_1, and s0_2. These represent server 0 on the ring. Similarly, s1_0, s1_1, and s1_2 represent server 1. With these virtual nodes, each server handles multiple partitions. Partitions are sections of data. For example, partitions marked with s0 are managed by server 0, while those marked with s1 are managed by server 1. To find out which server holds a particular key, we start at the key's location and move clockwise around the ring. We look for the first virtual node we see. For example, in Figure 5-13, to find out where the key k0 is stored, we go clockwise from k0's location. We encounter the virtual node s1_1, which points to server 1."
+  },
+  {
+   "pageNumber": 82,
+   "text": "Virtual Nodes and Key Distribution As the number of virtual nodes increases, the keys are spread out more evenly. This happens because the standard deviation gets smaller with more virtual nodes. Standard deviation shows how much data varies or spreads out. Research from an online study shows that with one or two hundred virtual nodes, the standard deviation falls between 5% (for 200 virtual nodes) and 10% (for 100 virtual nodes) of the average. When we add more virtual nodes, the standard deviation becomes smaller. However, we need more storage space to keep data about virtual nodes. This is a tradeoff. We can adjust the number of virtual nodes to meet our system's needs. Finding Affected Keys When a server is added or removed, some data must be moved around. How can we find out which keys need to be moved? In Figure 5-14, when server 4 is added to the ring, we start checking from s4 (the new node). We go anticlockwise around the ring until we reach a server (s3). The keys between s3 and s4 are the ones that need to be moved to s4."
+  }
+ ]
+}

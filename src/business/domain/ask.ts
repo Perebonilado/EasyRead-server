@@ -36,6 +36,8 @@ export interface AskContext {
     pageCount: number;
     /** What the chapter is about, from its plan; null for a plan without one. */
     arc: string | null;
+    /** The chapter page by page, from its plan: behind, here and still to come. Null without a plan. */
+    beats?: { pageNumber: number; goal: string }[] | null;
     /** What the chapter's next page teaches, so the tutor can defer to it; null at the chapter's end. */
     next: string | null;
   } | null;
@@ -177,7 +179,15 @@ export function askInstructions(ctx: AskContext): string {
     ctx.tutor.askPersona,
     `HOW TO ANSWER FOR THIS LEARNER: ${askDelivery(ctx.style)}`,
     ctx.profileLine,
-    `WHERE THEY ARE: ${where}${ctx.chapter?.arc ? ` The chapter is about: ${unstopped(ctx.chapter.arc)}.` : ''}${ctx.chapter?.next ? ` Coming next in the chapter: ${unstopped(ctx.chapter.next)}. If the question is about that, say it is coming in a moment rather than teaching it now.` : ''}`,
+    `WHERE THEY ARE: ${where}${ctx.chapter?.arc ? ` The chapter is about: ${unstopped(ctx.chapter.arc)}.` : ''}${ctx.chapter?.next ? ` Coming next in the chapter: ${unstopped(ctx.chapter.next)}. If the question is about that, say so: confirm what they have seen, give the idea in a sentence, name the page, and offer to go there now or carry on in order; never only "that is coming".` : ''}`,
+    ctx.chapter?.beats?.length
+      ? `THE CHAPTER, PAGE BY PAGE, so you know what is behind them and what is still to come:\n${ctx.chapter.beats
+          .map(
+            (beat) =>
+              `page ${beat.pageNumber} (${beat.pageNumber < ctx.pageNumber ? 'behind' : beat.pageNumber === ctx.pageNumber ? 'you are here' : 'still to come'}): ${unstopped(beat.goal)}`,
+          )
+          .join('\n')}`
+      : null,
     ctx.summary ? `WHAT THE BOOK COVERS: ${ctx.summary}` : null,
     ctx.heard
       ? `WHAT YOU HAVE SAID IN THIS CHAPTER SO FAR, most recent last:\n${ctx.heard}`
@@ -191,7 +201,8 @@ export function askInstructions(ctx: AskContext): string {
       : null,
     'THEY HOLD THE MIC TO SPEAK, and may press it while you are talking: being cut off mid-sentence is normal here, not rude. When it happens, drop the old thought and answer what they just said.',
     'THIS IS ONE CONVERSATION for the whole lecture, not a series of questions. It pauses while the lecture plays and picks up when they press the mic again; you remember everything said in it and may refer back to it ("like the marbles from before"). Each time they come back, you are told where the lecture has got to.',
-    'GROUNDING: answer from this book, in its own terms, names and numbers. If the book does not answer it, after looking it up, say so plainly rather than answering from general knowledge. Answer the step they are stuck on, not the whole idea again. If they were working something out, say what they had right, the one thing that was off and why, and the next step. Never praise the person. An analogy is allowed if you call it one and tie it back to the term at once; no anecdotes.',
+    'REACHING AHEAD: when they name a problem, a weakness, a gap, or ask "what if" or "doesn\'t that mean", assume they have seen something real. First say plainly whether they are right. Then, if the book answers it later, name the book\'s answer and where it is ("the book fixes this with virtual nodes, on page 81"), give the idea in one or two sentences, and offer to go there now or carry on in order. If the book does not answer it, say so and answer from what the book does say. Never answer a question about what is wrong with the page by explaining the page again. If a note lists PASSAGES THE BOOK HAS on what they said, answer from them and say the page when you use one.',
+    'GROUNDING: answer from this book, in its own terms, names and numbers. If the book does not answer it, after looking it up, say so plainly rather than answering from general knowledge. Answer the question they asked, wherever in the book its answer is, not the whole idea again. If they were working something out, say what they had right, the one thing that was off and why, and the next step. Never praise the person. An analogy is allowed if you call it one and tie it back to the term at once; no anecdotes.',
     ctx.invited
       ? 'OPENING: the call opens the moment they press the mic, and a recorded line of yours has already invited them to go ahead. Say nothing until they have spoken; your first words are your answer. Never a greeting, never their name, never a summary of where you were.'
       : 'OPENING: the call opens the moment they press the mic, before they have said anything, and your first words come right after a chime. Say one short, warm, brisk invitation to go ahead, four words at most and different each time, then stop and listen. Never a greeting, never their name, never a summary of where you were.',

@@ -1,3 +1,5 @@
+import { BoardDiagramHandler } from './business/handlers/documents/board-diagram.handler';
+import { BookFindHandler } from './business/handlers/documents/book-find.handler';
 import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { APP_FILTER, APP_GUARD } from '@nestjs/core';
@@ -214,6 +216,8 @@ const handlers = [
   BackfillBoardsHandler,
   SaveLecturePositionHandler,
   DrawDiagramHandler,
+  BoardDiagramHandler,
+  BookFindHandler,
   AskDiagramCheckHandler,
   ComputeHandler,
   GenerateTopicQuizHandler,

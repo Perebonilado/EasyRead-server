@@ -15,6 +15,8 @@ import type {
   LectureBoardDraft,
   LectureBoardPlanDraft,
   LectureDiagramDraft,
+  SketchDraft,
+  SketchTemplate,
 } from '../../business/ports/llm.port';
 
 const EMBED_DIMENSIONS = 256;
@@ -456,6 +458,69 @@ export class FakeLlmAdapter implements LlmGatewayPort {
         ],
         groups: [],
       },
+      usage: this.usage(started, 400, 120),
+    });
+  }
+
+  judgeSketch(input: {
+    png: Buffer;
+    description: string;
+    see: string;
+  }): Promise<LlmResult<{ shows: boolean; wrong: string | null }>> {
+    const started = Date.now();
+    return Promise.resolve({
+      value: { shows: input.png.length > 0, wrong: null },
+      usage: this.usage(started, 50, 10),
+    });
+  }
+
+  lectureSketch(input: {
+    topicTitle: string;
+    shows: string;
+    hint: SketchTemplate | null;
+    material: string;
+    pageText: string;
+    correction?: string;
+  }): Promise<LlmResult<SketchDraft>> {
+    const started = Date.now();
+    const words = input.material.split(/\s+/).filter(Boolean);
+    const title = input.shows.split(/\s+/).slice(0, 4).join(' ');
+    const draft: SketchDraft =
+      input.hint === 'ring'
+        ? {
+            template: 'ring',
+            title,
+            points: [0, 1, 2, 3].map((i) => ({ label: `s${i}`, at: null })),
+            markers: [0, 1, 2].map((i) => ({ label: `k${i}`, at: null })),
+            arrowsClockwise: true,
+            join: null,
+          }
+        : {
+            template: 'graph',
+            title,
+            nodes: [
+              {
+                id: 'a',
+                label: words[0] ?? 'start',
+                shape: 'box',
+                anchor: null,
+              },
+              {
+                id: 'b',
+                label: words[2] ?? 'middle',
+                shape: 'box',
+                anchor: null,
+              },
+              { id: 'c', label: words[4] ?? 'end', shape: 'box', anchor: null },
+            ],
+            edges: [
+              { from: 'a', to: 'b', label: null, anchor: null },
+              { from: 'b', to: 'c', label: null, anchor: null },
+            ],
+            groups: [],
+          };
+    return Promise.resolve({
+      value: draft,
       usage: this.usage(started, 400, 120),
     });
   }

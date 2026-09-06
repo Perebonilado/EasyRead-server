@@ -94,12 +94,27 @@ export interface DiagramProblem {
  * Everything wrong with a plan before it is worth laying out. The
  * processor sends the reasons back once with fewer nodes asked for.
  */
+/**
+ * How strictly a draft is checked. The lecture's drawings are timed to
+ * the spoken words, so every part needs an anchor phrase said aloud; the
+ * tutor's live sketch has no audio to time to, so anchors are hints and
+ * only the grounding of labels in the material is held, with fewer parts.
+ */
+export interface DraftChecks {
+  live?: boolean;
+  maxNodes?: number;
+  maxEdges?: number;
+}
+
 export function diagramProblems(
   plan: DiagramPlan,
   spoken: string,
   pageText: string,
+  checks: DraftChecks = {},
 ): DiagramProblem[] {
   const problems: DiagramProblem[] = [];
+  const maxNodes = checks.maxNodes ?? DIAGRAM_LIMITS.maxNodes;
+  const maxEdges = checks.maxEdges ?? DIAGRAM_LIMITS.maxEdges;
   const ids = new Set<string>();
   for (const node of plan.nodes) {
     if (ids.has(node.id)) {
@@ -113,16 +128,16 @@ export function diagramProblems(
       detail: `${plan.nodes.length} nodes; at least ${DIAGRAM_LIMITS.minNodes}`,
     });
   }
-  if (plan.nodes.length > DIAGRAM_LIMITS.maxNodes) {
+  if (plan.nodes.length > maxNodes) {
     problems.push({
       kind: 'too_many_nodes',
-      detail: `${plan.nodes.length} nodes; at most ${DIAGRAM_LIMITS.maxNodes}`,
+      detail: `${plan.nodes.length} nodes; at most ${maxNodes}`,
     });
   }
-  if (plan.edges.length > DIAGRAM_LIMITS.maxEdges) {
+  if (plan.edges.length > maxEdges) {
     problems.push({
       kind: 'too_many_edges',
-      detail: `${plan.edges.length} edges; at most ${DIAGRAM_LIMITS.maxEdges}`,
+      detail: `${plan.edges.length} edges; at most ${maxEdges}`,
     });
   }
   const pool = new Set(contentWords(`${pageText} ${spoken}`));
@@ -137,7 +152,7 @@ export function diagramProblems(
       }
       touched.add(end);
     }
-    if (!findAnchor(spoken, edge.anchor)) {
+    if (!checks.live && !findAnchor(spoken, edge.anchor)) {
       problems.push({
         kind: 'anchor_missing',
         detail: `edge ${edge.from} to ${edge.to}: "${edge.anchor}"`,
@@ -151,7 +166,7 @@ export function diagramProblems(
     if (!contentWords(node.label).every((word) => pool.has(word))) {
       problems.push({ kind: 'ungrounded', detail: node.label });
     }
-    if (!findAnchor(spoken, node.anchor)) {
+    if (!checks.live && !findAnchor(spoken, node.anchor)) {
       problems.push({
         kind: 'anchor_missing',
         detail: `node ${node.label}: "${node.anchor}"`,
@@ -202,19 +217,100 @@ function shapeFor(
  * top down, and a comparison sits its two groups side by side with the
  * edges between them.
  */
+/** How a live diagram is laid out: for the region it will be drawn in, portrait or landscape. */
+export interface LayoutOptions {
+  /** The region's size in board units; the geometry's space becomes this, so the client's fit is close to one. */
+  space?: { w: number; h: number };
+  /** Overrides the kind's own direction, chosen from the region's aspect. */
+  rankdir?: 'LR' | 'TB';
+  /** How far a small drawing may be scaled up to fill the space; 1 (the default) never enlarges. */
+  grow?: number;
+}
+
+/** A tutor's sketch is smaller than a lecture's figure: it is taken in at a glance. */
+export const LIVE_DIAGRAM_LIMITS = { maxNodes: 8, maxEdges: 10, grow: 1.8 };
+
+/**
+ * How a live diagram is laid out for the region the client will draw it
+ * in: the geometry's space is the region itself, so the client's fit is
+ * close to one, and the rank direction follows the region's aspect, left
+ * to right when it is wider than tall, top to bottom when taller. A
+ * comparison is columns side by side whatever the region.
+ */
+export function regionLayout(
+  region: { w: number; h: number } | null | undefined,
+  kind: Exclude<FigureKind, 'none'>,
+): LayoutOptions {
+  if (!region || !(region.w > 0) || !(region.h > 0)) {
+    return { grow: LIVE_DIAGRAM_LIMITS.grow };
+  }
+  const landscape = region.w >= region.h;
+  return {
+    space: { w: Math.round(region.w), h: Math.round(region.h) },
+    rankdir: kind === 'comparison' || landscape ? 'LR' : 'TB',
+    grow: LIVE_DIAGRAM_LIMITS.grow,
+  };
+}
+
+/** What a live diagram may be drawn from, and how much of it. */
+export const LIVE_MATERIAL_CHARS = 14_000;
+
+/**
+ * The material a live diagram is drawn from: the page, its neighbours in
+ * the chapter, passages found for the ask and for what the tutor just
+ * said, and the tutor's own recent words. Labels are checked against all
+ * of it, so a drawing the book supports on another page is not refused.
+ */
+export function liveMaterial(input: {
+  pageNumber: number;
+  pageText: string;
+  neighbours: { pageNumber: number; text: string }[];
+  passages: { pageNumber: number; text: string }[];
+  recent: { role: 'learner' | 'tutor'; text: string }[];
+}): string {
+  const seen = new Set<string>();
+  const parts: string[] = [];
+  const add = (label: string, text: string) => {
+    const clean = text.replace(/\s+/g, ' ').trim();
+    if (!clean) return;
+    const key = clean.slice(0, 120).toLowerCase();
+    if (seen.has(key)) return;
+    seen.add(key);
+    parts.push(`${label} ${clean}`);
+  };
+  add(`[p.${input.pageNumber}, the page they are on]`, input.pageText);
+  for (const page of input.neighbours) {
+    if (page.pageNumber === input.pageNumber) continue;
+    add(`[p.${page.pageNumber}]`, page.text.slice(0, 2_500));
+  }
+  for (const passage of input.passages) {
+    add(`[p.${passage.pageNumber}]`, passage.text);
+  }
+  const said = input.recent
+    .filter((line) => line.role === 'tutor')
+    .map((line) => line.text.replace(/\s+/g, ' ').trim())
+    .filter(Boolean);
+  if (said.length) add('[what you just said]', said.join(' '));
+  return parts.join('\n\n').slice(0, LIVE_MATERIAL_CHARS);
+}
+
 export function layoutDiagram(
   plan: DiagramPlan,
   kind: Exclude<FigureKind, 'none'>,
   spoken: string,
   id: string,
   rankSeparation = 60,
+  options: LayoutOptions = {},
 ): DiagramGeometry {
+  const space = options.space ?? BOARD_SPACE;
   const graph = new dagre.graphlib.Graph({
     compound: plan.groups.length > 0,
     multigraph: true,
   });
   graph.setGraph({
-    rankdir: kind === 'process' ? 'LR' : kind === 'structure' ? 'TB' : 'LR',
+    rankdir:
+      options.rankdir ??
+      (kind === 'process' ? 'LR' : kind === 'structure' ? 'TB' : 'LR'),
     nodesep: 32,
     ranksep: rankSeparation,
     marginx: 0,
@@ -294,10 +390,10 @@ export function layoutDiagram(
   const width = Math.max(...xs, 1) - minX;
   const height = Math.max(...ys, 1) - minY;
   const inner = {
-    w: BOARD_SPACE.w - 2 * MARGIN,
-    h: BOARD_SPACE.h - 2 * MARGIN,
+    w: space.w - 2 * MARGIN,
+    h: space.h - 2 * MARGIN,
   };
-  const scale = Math.min(1, inner.w / width, inner.h / height);
+  const scale = Math.min(options.grow ?? 1, inner.w / width, inner.h / height);
   const offsetX = MARGIN + (inner.w - width * scale) / 2;
   const offsetY = MARGIN + (inner.h - height * scale) / 2;
   const fx = (x: number) => Math.round((x - minX) * scale + offsetX);
@@ -337,7 +433,7 @@ export function layoutDiagram(
     id,
     title: plan.title,
     kind,
-    space: { ...BOARD_SPACE },
+    space: { ...space },
     nodes,
     edges,
     groups,

@@ -1,0 +1,12 @@
+{
+  "graph-only": {
+    "shows": 0,
+    "template": 0.3333333333333333,
+    "count": 6
+  },
+  "sketch": {
+    "shows": 0.5,
+    "template": 0.8333333333333334,
+    "count": 6
+  }
+}

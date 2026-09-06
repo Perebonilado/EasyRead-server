@@ -25,6 +25,8 @@ export type LlmTask =
   | 'lecture_verify'
   | 'lecture_board'
   | 'lecture_diagram'
+  | 'lecture_sketch'
+  | 'sketch_judge'
   | 'learn_outline'
   | 'learn_write'
   | 'visualize_query'
@@ -161,6 +163,9 @@ export interface LectureBoardDraft {
 }
 
 /** A figure before layout: nodes, edges, groups, each citing the script. */
+import type { SketchDraft, SketchTemplate } from '../domain/sketch';
+export type { SketchDraft, SketchTemplate } from '../domain/sketch';
+
 export interface LectureDiagramDraft {
   title: string;
   nodes: {
@@ -390,6 +395,32 @@ export interface LlmGatewayPort {
     context: string;
     correction?: string;
   }): Promise<LlmResult<LectureDiagramDraft>>;
+
+  /**
+   * The tutor's live sketch mid-conversation: a picture with a shape. The
+   * writer picks a template (a graph, a ring, a line, layers, a grid) and
+   * fills it from the material; labels must be built from the material,
+   * anchors are not needed. Layout is not the model's job.
+   */
+  /**
+   * Whether a rendered sketch shows what was asked: the offline judge the
+   * sketch eval runs, never the live board. Says what is wrong when not.
+   */
+  judgeSketch(input: {
+    png: Buffer;
+    description: string;
+    see: string;
+  }): Promise<LlmResult<{ shows: boolean; wrong: string | null }>>;
+
+  lectureSketch(input: {
+    topicTitle: string;
+    shows: string;
+    /** The template the ask's words suggest, if any. */
+    hint: SketchTemplate | null;
+    material: string;
+    pageText: string;
+    correction?: string;
+  }): Promise<LlmResult<SketchDraft>>;
 
   /**
    * Checks a segment against the page it claims to teach. Blind to the

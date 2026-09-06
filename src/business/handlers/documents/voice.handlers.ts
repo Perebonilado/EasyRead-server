@@ -93,7 +93,12 @@ import {
   type LecturePlan,
 } from '../../domain/lecture';
 import { noteLevelFor, noteUnits } from '../../domain/follow';
-import { ASK_HEARD_CHARS, askInstructions, askSpeed } from '../../domain/ask';
+import {
+  ASK_HEARD_CHARS,
+  askInstructions,
+  askSpeed,
+  pageFigures,
+} from '../../domain/ask';
 import { sentenceIndexAtMs, type WordTimes } from '../../domain/board';
 
 export type AudioLevel = 'original' | Level;
@@ -248,11 +253,10 @@ export interface VoiceSessionRequest {
     noteLevel?: Level;
     /** The conversation so far, when a dropped session is being resumed: the tutor must still remember. */
     conversation?: { role: 'learner' | 'tutor'; text: string }[];
+    /** What is on the tutor's board for this page, one line per item, when a session is made again or woken. */
+    board?: string[];
   };
 }
-
-/** Mid-lecture, the tutor has one tool: handing back. */
-export const LECTURE_HANDBACK_TOOLS: RealtimeTool[] = [];
 
 /**
  * The session intents, spoken back to the tutor in the student's own
@@ -292,76 +296,126 @@ const INTENT_LINES: Record<LessonIntent, string> = {
 /** What a tutor answering mid-lecture may do to the board; see LECTURE_TOOLS. */
 export const LECTURE_BOARD_TOOLS: RealtimeTool[] = [
   {
-    name: LECTURE_TOOLS.HIGHLIGHT,
+    name: LECTURE_TOOLS.SHOW,
     description:
-      'Draw attention to something already on the whiteboard: an underline or circle on the item with this id.',
-    parameters: {
-      type: 'object',
-      properties: {
-        id: {
-          type: 'string',
-          description: 'The id of the item, from the board listing',
-        },
-        shape: { type: 'string', enum: ['underline', 'circle', 'box'] },
-      },
-      required: ['id'],
-    },
+      "Bring the whiteboard up on the learner's screen. Call it before the first thing you write; writing brings it up too.",
+    parameters: { type: 'object', properties: {} },
   },
   {
     name: LECTURE_TOOLS.WRITE,
     description:
-      'Write a short label on the whiteboard, at most six words, optionally with its plain meaning in a few words, next to an existing item or on the next free line.',
+      'Write one item on the board. Returns once the pen has finished, with the board as it now stands and the ids of its items.',
     parameters: {
       type: 'object',
       properties: {
-        text: { type: 'string', description: 'At most six words' },
+        kind: {
+          type: 'string',
+          enum: ['heading', 'term', 'point', 'figure'],
+          description:
+            'heading: four words at the top. term: a technical term, with meaning. point: a short line, six words. figure: a formula or number, twelve words.',
+        },
+        text: { type: 'string', description: 'What is written' },
         meaning: {
           type: 'string',
-          description: 'A plain meaning of a few words, for a slow learner',
+          description: 'For a term: its plain meaning in a few words',
         },
-        nearId: { type: 'string', description: 'Put it beside this item' },
+        under: {
+          type: 'string',
+          description:
+            'For a point: the id of the item it belongs under, written indented',
+        },
       },
-      required: ['text'],
+      required: ['kind', 'text'],
     },
   },
   {
     name: LECTURE_TOOLS.ARROW,
     description:
-      'Draw an arrow between two items already on the board, with an optional label of at most three words.',
+      'Join two items on the board with an arrow, optionally labelled. Returns once drawn.',
     parameters: {
       type: 'object',
       properties: {
-        fromId: { type: 'string' },
-        toId: { type: 'string' },
-        label: { type: 'string' },
+        from: {
+          type: 'string',
+          description: 'The id of the item it starts at',
+        },
+        to: { type: 'string', description: 'The id of the item it points to' },
+        label: { type: 'string', description: 'Three words at most' },
       },
-      required: ['fromId', 'toId'],
+      required: ['from', 'to'],
     },
   },
   {
-    name: LECTURE_TOOLS.NOTE,
+    name: LECTURE_TOOLS.CUE,
     description:
-      'A short remark of at most eight words beside an item on the board.',
+      'Mark an item the learner should look at, outside a walk-through: an underline, circle, box or highlight. While you explain a board, do not call this; the marking follows your words.',
     parameters: {
       type: 'object',
       properties: {
-        text: { type: 'string' },
-        targetId: { type: 'string' },
+        id: { type: 'string', description: 'The id of the item' },
+        shape: {
+          type: 'string',
+          enum: ['underline', 'circle', 'box', 'highlight'],
+        },
       },
-      required: ['text', 'targetId'],
+      required: ['id', 'shape'],
+    },
+  },
+  {
+    name: LECTURE_TOOLS.NEW,
+    description:
+      'Start a fresh board with a heading, when the thought changes or the board is full. The old board is kept off to the side.',
+    parameters: {
+      type: 'object',
+      properties: {
+        heading: { type: 'string', description: 'Four words at most' },
+      },
+      required: ['heading'],
+    },
+  },
+  {
+    name: LECTURE_TOOLS.DIAGRAM,
+    description:
+      'Draw a diagram from the book: a process, a structure or a comparison, eight parts at most. Returns at once with what to say while it builds; you are told when it is on the board, or that it could not be drawn.',
+    parameters: {
+      type: 'object',
+      properties: {
+        description: {
+          type: 'string',
+          description: 'What the diagram should show, twelve words at most',
+        },
+      },
+      required: ['description'],
+    },
+  },
+  {
+    name: LECTURE_TOOLS.REST,
+    description:
+      'Put the board away, once they have said it is clear and want to keep talking without it. The board is kept and comes back if you draw again.',
+    parameters: { type: 'object', properties: {} },
+  },
+  {
+    name: LECTURE_TOOLS.FIND,
+    description:
+      'Search the whole book. Returns up to six passages with their page numbers, for you to read, not to recite. Use it when the question reaches beyond this page, and always before saying the book does not cover something.',
+    parameters: {
+      type: 'object',
+      properties: {
+        query: {
+          type: 'string',
+          description: 'What to look for, in a few words',
+        },
+      },
+      required: ['query'],
     },
   },
   {
     name: LECTURE_TOOLS.RESUME,
     description:
-      'The answer is finished: hand back to the lecture. Call this instead of asking whether the student has more questions.',
+      'The conversation is over by their say-so: hand back to the lecture. Call it only after your closing line.',
     parameters: { type: 'object', properties: {} },
   },
 ];
-
-LECTURE_HANDBACK_TOOLS.push(
-  ...LECTURE_BOARD_TOOLS.filter((tool) => tool.name === LECTURE_TOOLS.RESUME),
-);
 
 export const TEACHING_TOOLS: RealtimeTool[] = [
   {
@@ -864,7 +918,7 @@ export class StartVoiceSessionHandler extends AbstractRequestHandlerTemplate<
             cmd.mode === 'teach'
               ? TEACHING_TOOLS
               : cmd.mode === 'lecture'
-                ? LECTURE_HANDBACK_TOOLS
+                ? LECTURE_BOARD_TOOLS
                 : undefined,
           // The tutor's voice; chat mode keeps the configured default. A
           // question asked mid-lecture takes the answering voice, cedar
@@ -1013,13 +1067,15 @@ export class StartVoiceSessionHandler extends AbstractRequestHandlerTemplate<
       }
     }
 
-    // The note sentence that was lit on their screen.
+    // The note sentence that was lit on their screen, and any figure or
+    // table the page names, which the tutor may offer to draw.
     const noteLevel = context?.noteLevel ?? noteLevelFor(style);
+    const page = await this.simplified
+      .find(doc.id, noteLevel, pageNumber)
+      .catch(() => null);
+    const figures = page?.blocks ? pageFigures(page.blocks) : null;
     let highlighted: string | null = null;
     if (context?.block !== undefined) {
-      const page = await this.simplified
-        .find(doc.id, noteLevel, pageNumber)
-        .catch(() => null);
       const unit = (page?.blocks ? noteUnits(page.blocks) : []).find(
         (candidate) =>
           candidate.block === context.block &&
@@ -1049,6 +1105,8 @@ export class StartVoiceSessionHandler extends AbstractRequestHandlerTemplate<
       highlighted,
       profileLine,
       conversation: context?.conversation ?? null,
+      board: context?.board ?? null,
+      figures,
     });
   }
 

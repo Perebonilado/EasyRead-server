@@ -411,6 +411,81 @@ export const lectureDiagramSchema = z.object({
     .max(4),
 });
 
+const sketchLabel = z.string().min(1).max(40);
+const fraction = z.number().min(0).max(1);
+
+/** The tutor's live sketch: one template, and the fields that template reads; the rest null. */
+export const lectureSketchSchema = z.object({
+  template: z.enum(['graph', 'ring', 'line', 'layers', 'grid']),
+  title: z.string().min(1).max(80),
+  nodes: z
+    .array(
+      z.object({
+        id: z.string().min(1).max(24),
+        label: sketchLabel,
+        shape: z
+          .enum(['box', 'ellipse', 'diamond', 'cylinder', 'note'])
+          .nullable(),
+        anchor: z.string().max(160).nullable(),
+      }),
+    )
+    .max(10)
+    .nullable(),
+  edges: z
+    .array(
+      z.object({
+        from: z.string().min(1).max(24),
+        to: z.string().min(1).max(24),
+        label: z.string().max(40).nullable(),
+        anchor: z.string().max(160).nullable(),
+      }),
+    )
+    .max(12)
+    .nullable(),
+  groups: z
+    .array(
+      z.object({
+        label: sketchLabel,
+        memberIds: z.array(z.string().min(1).max(24)).max(10),
+      }),
+    )
+    .max(2)
+    .nullable(),
+  points: z
+    .array(z.object({ label: sketchLabel, at: fraction.nullable() }))
+    .max(8)
+    .nullable(),
+  markers: z
+    .array(z.object({ label: sketchLabel, at: fraction.nullable() }))
+    .max(6)
+    .nullable(),
+  arrowsClockwise: z.boolean().nullable(),
+  join: z.object({ left: sketchLabel, right: sketchLabel }).nullable(),
+  cells: z.number().int().min(0).max(40).nullable(),
+  ends: z.object({ left: sketchLabel, right: sketchLabel }).nullable(),
+  ticks: z
+    .array(z.object({ label: sketchLabel, at: fraction }))
+    .max(6)
+    .nullable(),
+  brackets: z
+    .array(z.object({ label: sketchLabel, from: fraction, to: fraction }))
+    .max(2)
+    .nullable(),
+  layers: z.array(sketchLabel).max(6).nullable(),
+  layerArrows: z.boolean().nullable(),
+  rowLabels: z.array(sketchLabel).max(6).nullable(),
+  colLabels: z.array(sketchLabel).max(6).nullable(),
+  cellText: z
+    .array(z.array(z.string().max(20)).max(6))
+    .max(6)
+    .nullable(),
+});
+
+export const sketchJudgeSchema = z.object({
+  shows: z.boolean(),
+  wrong: z.string().max(300).nullable(),
+});
+
 /** A short segment around a chapter: its words, its check, or the review. */
 export const lectureExtraSchema = z.object({
   script: z.string().min(1).max(4000),

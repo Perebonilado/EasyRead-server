@@ -140,6 +140,36 @@ export interface DiagramGroup {
   h: number;
 }
 
+/**
+ * A mark of a figure that is not a box or an arrow: the circle of a ring,
+ * a point on it, an arc with an arrowhead, a bar cut into cells, a line, a
+ * piece of text. Angles are degrees, 0 at the top, clockwise. A mark's
+ * label sits at (lx, ly), its top left, in the type size given.
+ */
+export interface DiagramMark {
+  id: string;
+  kind: 'circle' | 'dot' | 'arc' | 'line' | 'bar' | 'text';
+  cx?: number;
+  cy?: number;
+  r?: number;
+  from?: number;
+  to?: number;
+  x1?: number;
+  y1?: number;
+  x2?: number;
+  y2?: number;
+  x?: number;
+  y?: number;
+  w?: number;
+  h?: number;
+  cells?: number;
+  arrow?: boolean;
+  label: string | null;
+  lx?: number;
+  ly?: number;
+  size?: number;
+}
+
 /** A drawn diagram, laid out offline in a fixed space. */
 export interface DiagramGeometry {
   id: string;
@@ -149,6 +179,10 @@ export interface DiagramGeometry {
   nodes: DiagramNode[];
   edges: DiagramEdge[];
   groups: DiagramGroup[];
+  /** The marks of a figure with a shape; absent or empty for a graph. */
+  marks?: DiagramMark[];
+  /** What a reader sees, in one sentence, for the tutor and the listing. */
+  caption?: string | null;
 }
 
 export type BoardTiming = 'none' | 'estimated' | 'aligned';

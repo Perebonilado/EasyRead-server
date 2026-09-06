@@ -27,6 +27,10 @@ const TASK_VAR: Record<LlmTask, string> = {
   // one every two pages.
   lecture_board: 'AI_MODEL_LECTURE_BOARD',
   lecture_diagram: 'AI_MODEL_LECTURE_DIAGRAM',
+  // The tutor's live sketch fills a template; the small default model
+  // cannot, so a deployment points this at a stronger one.
+  lecture_sketch: 'AI_MODEL_LECTURE_SKETCH',
+  sketch_judge: 'AI_MODEL_SKETCH_JUDGE',
   ocr_page: 'AI_MODEL_OCR',
   summarize: 'AI_MODEL_SUMMARIZE',
   topics_outline: 'AI_MODEL_TOPICS',

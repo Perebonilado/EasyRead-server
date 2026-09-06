@@ -5,6 +5,8 @@ import {
   askInstructions,
   askSpeed,
   conversationSoFar,
+  figureKindFor,
+  pageFigures,
   type AskContext,
 } from './ask';
 
@@ -54,9 +56,11 @@ describe('a question mid-lecture: what the tutor is told', () => {
     expect(text).toContain('examples land best');
   });
 
-  it('uses the interruption persona and never the whiteboard', () => {
+  it('uses the interruption persona and never the lecture board listing or the old tools', () => {
     expect(text).toContain('stopped mid-lecture by a question');
-    expect(text).not.toMatch(/whiteboard|board_/i);
+    expect(text).not.toMatch(
+      /On the whiteboard right now|board_highlight|board_note/,
+    );
     expect(text).not.toContain('SPEAK SLOWLY');
   });
 
@@ -77,7 +81,7 @@ describe('a question mid-lecture: what the tutor is told', () => {
     expect(text).toContain('by their say-so');
     expect(text).toContain('Never propose ending on your own');
     expect(text).toContain(
-      `call ${LECTURE_TOOLS.RESUME}, the hand-back tool, your only tool, after the line and never before`,
+      `call ${LECTURE_TOOLS.RESUME}, the hand-back tool, after the line and never before`,
     );
   });
 
@@ -147,5 +151,99 @@ describe('a question mid-lecture: what the tutor is told', () => {
       expect(askDelivery(style)).not.toMatch(clipped);
     }
     for (const tutor of TUTORS) expect(tutor.askPersona).not.toMatch(clipped);
+  });
+});
+
+describe('a question mid-lecture: the board', () => {
+  it('tells the tutor when and how to draw, and names every tool', () => {
+    const text = askInstructions(base);
+    expect(text).toContain('THE BOARD.');
+    expect(text).toContain('without being asked when the idea has a shape');
+    expect(text).toContain('One drawing per question');
+    expect(text).not.toContain('Not on every question');
+    for (const tool of [
+      LECTURE_TOOLS.SHOW,
+      LECTURE_TOOLS.WRITE,
+      LECTURE_TOOLS.ARROW,
+      LECTURE_TOOLS.CUE,
+      LECTURE_TOOLS.NEW,
+      LECTURE_TOOLS.DIAGRAM,
+      LECTURE_TOOLS.REST,
+      LECTURE_TOOLS.FIND,
+    ]) {
+      expect(text).toContain(tool);
+    }
+    expect(text).toContain('IN THREE BEATS');
+    expect(text).toContain('say nothing while an item is being written');
+    expect(text).toContain('setting the picture up in their words');
+    expect(text).toContain('that is when you explain');
+    expect(text).toContain('in the order it was drawn');
+    expect(text).toContain('explain it in one go');
+    expect(text).toContain('the board marks each item for you as you name it');
+    expect(text).toContain(
+      `do not call ${LECTURE_TOOLS.CUE} during the walk-through`,
+    );
+    expect(text).toContain('Your turn is not over until you have asked it');
+    expect(text).not.toContain('keep explaining meanwhile');
+    expect(text).toContain('never their ids');
+    expect(text.indexOf('THE BOARD.')).toBeLessThan(
+      text.indexOf('HOW THIS ENDS'),
+    );
+    expect(text).not.toContain('YOUR BOARD ON THIS PAGE');
+  });
+
+  it('reminds a returning tutor what is already on the board', () => {
+    const text = askInstructions({
+      ...base,
+      board: [
+        'L1 | heading | Consistent hashing',
+        'L2 | term | Ring: servers on a circle',
+      ],
+    });
+    expect(text).toContain('YOUR BOARD ON THIS PAGE already has');
+    expect(text).toContain('L2 | term | Ring');
+    expect(text).toContain('do not write what is already there again');
+  });
+
+  it('ends the board by consent, and looks things up before saying the book lacks them', () => {
+    const text = askInstructions(base);
+    expect(text).toContain('WHEN THE BOARD IS DONE');
+    expect(text).toContain('ask whether it is clear');
+    expect(text.indexOf('WHEN THE BOARD IS DONE')).toBeLessThan(
+      text.indexOf('HOW THIS ENDS'),
+    );
+    expect(text).toContain('LOOKING THINGS UP');
+    expect(text).toContain(
+      'always before saying the book does not cover something',
+    );
+    expect(text).toContain('after looking it up, say so plainly');
+  });
+
+  it('names the pictures a page mentions, so the tutor can offer them', () => {
+    expect(
+      pageFigures([
+        {
+          type: 'paragraph',
+          text: 'As Figure 5-3 shows, the ring has four servers.',
+        },
+        { type: 'table', text: 'server | keys\ns0 | 3' },
+        { type: 'paragraph', text: 'See figure 5-3 again, and Table 2.' },
+      ]),
+    ).toBe('Figure 5-3; a table; Table 2');
+    expect(
+      pageFigures([{ type: 'paragraph', text: 'No pictures.' }]),
+    ).toBeNull();
+    expect(askInstructions({ ...base, figures: 'Figure 5-3' })).toContain(
+      'THIS PAGE NAMES A PICTURE: Figure 5-3',
+    );
+    expect(askInstructions(base)).not.toContain('THIS PAGE NAMES A PICTURE');
+  });
+
+  it('reads the shape of a drawing from the ask', () => {
+    expect(figureKindFor('the steps a request goes through')).toBe('process');
+    expect(figureKindFor('consistent hashing versus modular hashing')).toBe(
+      'comparison',
+    );
+    expect(figureKindFor('the hash ring with four servers')).toBe('structure');
   });
 });

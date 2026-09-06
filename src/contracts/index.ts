@@ -604,7 +604,7 @@ export interface LecturePosition {
 /** What the client fetches for one row's board: the timeline and the word times it was timed on. */
 export interface LectureBoardResponse {
   board: unknown;
-  wordTimes: unknown | null;
+  wordTimes: unknown;
 }
 
 /** What the client fetches for one row's follow-along: the track into the note. */
@@ -664,14 +664,90 @@ export type TeachToolName = (typeof TEACH_TOOLS)[keyof typeof TEACH_TOOLS];
  * looking at is the one the tutor draws on.
  */
 export const LECTURE_TOOLS = {
-  HIGHLIGHT: 'board_highlight',
+  SHOW: 'board_show',
   WRITE: 'board_write',
   ARROW: 'board_arrow',
-  NOTE: 'board_note',
+  CUE: 'board_cue',
+  NEW: 'board_new',
+  DIAGRAM: 'board_diagram',
+  REST: 'board_rest',
+  FIND: 'book_find',
   RESUME: 'lecture_resume',
 } as const;
 export type LectureToolName =
   (typeof LECTURE_TOOLS)[keyof typeof LECTURE_TOOLS];
+
+/** Passages of the book found for the tutor mid-conversation, with the page each is on. */
+export interface LectureBookFindResponse {
+  passages: { pageNumber: number; text: string }[];
+}
+
+/** A pen-drawn diagram for the live board: geometry in the space the client asked for (the region it will draw into, in board units), and the order to draw it in. */
+export interface LectureBoardDiagramResponse {
+  geometry: {
+    id: string;
+    title: string;
+    kind: 'process' | 'structure' | 'comparison';
+    space: { w: number; h: number };
+    nodes: {
+      id: string;
+      label: string;
+      shape: 'box' | 'ellipse' | 'diamond' | 'cylinder' | 'note';
+      x: number;
+      y: number;
+      w: number;
+      h: number;
+      anchor: { charStart: number; charEnd: number };
+    }[];
+    edges: {
+      id: string;
+      from: string;
+      to: string;
+      label: string | null;
+      points: [number, number][];
+      arrow: 'end' | 'both' | 'none';
+      anchor: { charStart: number; charEnd: number };
+    }[];
+    groups: {
+      id: string;
+      label: string;
+      memberIds: string[];
+      x: number;
+      y: number;
+      w: number;
+      h: number;
+    }[];
+    /** The marks of a figure with a shape (a ring, a line, a grid); empty for a graph. Angles in degrees, 0 at the top, clockwise. */
+    marks?: {
+      id: string;
+      kind: 'circle' | 'dot' | 'arc' | 'line' | 'bar' | 'text';
+      cx?: number;
+      cy?: number;
+      r?: number;
+      from?: number;
+      to?: number;
+      x1?: number;
+      y1?: number;
+      x2?: number;
+      y2?: number;
+      x?: number;
+      y?: number;
+      w?: number;
+      h?: number;
+      cells?: number;
+      arrow?: boolean;
+      label: string | null;
+      lx?: number;
+      ly?: number;
+      size?: number;
+    }[];
+    /** What a reader sees, in one sentence. */
+    caption?: string | null;
+  };
+  elementOrder: string[];
+  /** The same sentence, for the tutor's landing line. */
+  caption: string;
+}
 
 export type DiagramResponse = { title: string; mermaid: string };
 export type SketchResponse = { title: string; svg: string };

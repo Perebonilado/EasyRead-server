@@ -35,6 +35,8 @@ import {
   type SketchResponse,
   type VoiceMode,
   type VoiceSessionResponse,
+  type LectureBoardDiagramResponse,
+  LectureBookFindResponse,
   LECTURE_STYLE_KEYS,
   type LectureStyle,
 } from '../../contracts';
@@ -49,6 +51,8 @@ import {
   StartVoiceSessionHandler,
   type AudioLevel,
 } from '../../business/handlers/documents/voice.handlers';
+import { BoardDiagramHandler } from '../../business/handlers/documents/board-diagram.handler';
+import { BookFindHandler } from '../../business/handlers/documents/book-find.handler';
 import {
   GetMasteryHandler,
   RecordAssessmentHandler,
@@ -124,6 +128,59 @@ class LectureContextDto {
   @ValidateNested({ each: true })
   @Type(() => ConversationLineDto)
   conversation?: ConversationLineDto[];
+
+  /** What is on the tutor's board for this page, one line per item. */
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(40)
+  @IsString({ each: true })
+  @MaxLength(200, { each: true })
+  board?: string[];
+}
+
+class BoardRegionDto {
+  @Type(() => Number)
+  @IsNumber()
+  @Min(1)
+  @Max(1000)
+  w!: number;
+
+  @Type(() => Number)
+  @IsNumber()
+  @Min(1)
+  @Max(760)
+  h!: number;
+}
+
+class BoardDiagramDto {
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  pageNumber!: number;
+
+  @IsString()
+  @Length(3, 300)
+  description!: string;
+
+  /** The region the board will draw into, in board units. */
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => BoardRegionDto)
+  region?: BoardRegionDto;
+
+  /** The last few turns, so the tutor's own words count as material. */
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(8)
+  @ValidateNested({ each: true })
+  @Type(() => ConversationLineDto)
+  recent?: ConversationLineDto[];
+}
+
+class BookFindDto {
+  @IsString()
+  @Length(2, 300)
+  query!: string;
 }
 
 class VoiceSessionDto {
@@ -234,6 +291,8 @@ export class VoiceController {
     private readonly pageAudio: PageAudioHandler,
     private readonly startSession: StartVoiceSessionHandler,
     private readonly drawDiagram: DrawDiagramHandler,
+    private readonly boardDiagram: BoardDiagramHandler,
+    private readonly bookFind: BookFindHandler,
     private readonly drawSketch: DrawSketchHandler,
     private readonly compute: ComputeHandler,
     private readonly diagramCheck: AskDiagramCheckHandler,
@@ -316,6 +375,41 @@ export class VoiceController {
       userId,
       documentId,
       description: body.description,
+    });
+    return result.data;
+  }
+
+  /** A pen-drawn diagram for the tutor's live board, mid-lecture. */
+  @Post('lecture/board-diagram')
+  @HttpCode(201)
+  async liveBoardDiagram(
+    @CurrentUser('id') userId: string,
+    @Param('id') documentId: string,
+    @Body() body: BoardDiagramDto,
+  ): Promise<LectureBoardDiagramResponse> {
+    const result = await this.boardDiagram.handle({
+      userId,
+      documentId,
+      pageNumber: body.pageNumber,
+      description: body.description,
+      region: body.region ?? null,
+      recent: body.recent ?? null,
+    });
+    return result.data;
+  }
+
+  /** The tutor's lookup mid-lecture: passages of the book with their page numbers. */
+  @Post('lecture/book-find')
+  @HttpCode(201)
+  async bookFindPassages(
+    @CurrentUser('id') userId: string,
+    @Param('id') documentId: string,
+    @Body() body: BookFindDto,
+  ): Promise<LectureBookFindResponse> {
+    const result = await this.bookFind.handle({
+      userId,
+      documentId,
+      query: body.query,
     });
     return result.data;
   }

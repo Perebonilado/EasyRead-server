@@ -49,6 +49,30 @@ export interface AskContext {
   profileLine: string | null;
   /** The conversation so far, when a dropped session is being resumed; null for a fresh one. */
   conversation: { role: 'learner' | 'tutor'; text: string }[] | null;
+  /** What is on the tutor's board for this page already, one line per item as "id | kind | text"; null or empty for a clean board. */
+  board?: string[] | null;
+  /** Figures and tables the page names, as one line ("Figure 5-3; a table"); null when it names none. */
+  figures?: string | null;
+}
+
+/** Which shape a drawing takes, read from what the tutor asked to draw. */
+export function figureKindFor(
+  description: string,
+): 'process' | 'structure' | 'comparison' {
+  const text = description.toLowerCase();
+  if (
+    /\b(compar|versus|vs\.?|differ|contrast|side by side|against)\b/.test(text)
+  ) {
+    return 'comparison';
+  }
+  if (
+    /\b(step|steps|flow|then|sequence|order|process|pipeline|first|next|cycle|loop)\b/.test(
+      text,
+    )
+  ) {
+    return 'process';
+  }
+  return 'structure';
 }
 
 /** How many exchanges a resumed session is reminded of. */
@@ -97,6 +121,29 @@ export function askDelivery(style: LectureStyle): string {
   return 'This learner learns at an ordinary pace. A complete explanation: the point, the reasoning behind it, and the example, the way you would to a good student who stopped you in class. Short sentences, one idea per breath.';
 }
 
+/**
+ * The pictures a page names, for the tutor to offer: "Figure 5-3" and the
+ * like from the text, and a table when the note has one. One line, or
+ * null when the page names none.
+ */
+export function pageFigures(
+  blocks: { type: string; text: string }[],
+): string | null {
+  const names = new Set<string>();
+  for (const block of blocks) {
+    if (block.type === 'table') names.add('a table');
+    for (const match of block.text.matchAll(
+      /\b(Figure|Fig\.|Table|Diagram)\s+(\d+(?:[-.]\d+)*)/gi,
+    )) {
+      const word = match[1].toLowerCase().startsWith('fig')
+        ? 'Figure'
+        : match[1][0].toUpperCase() + match[1].slice(1).toLowerCase();
+      names.add(`${word} ${match[2]}`);
+    }
+  }
+  return names.size ? [...names].slice(0, 6).join('; ') : null;
+}
+
 /** The instructions the session is minted with. The ending protocol comes last, so it is what the model read most recently. */
 export function askInstructions(ctx: AskContext): string {
   // Plan text arrives with its own full stop; the sentence around it adds one.
@@ -123,11 +170,21 @@ export function askInstructions(ctx: AskContext): string {
       : null,
     'THEY HOLD THE MIC TO SPEAK, and may press it while you are talking: being cut off mid-sentence is normal here, not rude. When it happens, drop the old thought and answer what they just said.',
     'THIS IS ONE CONVERSATION for the whole lecture, not a series of questions. It pauses while the lecture plays and picks up when they press the mic again; you remember everything said in it and may refer back to it ("like the marbles from before"). Each time they come back, you are told where the lecture has got to.',
-    'GROUNDING: answer from this book, in its own terms, names and numbers. If the book does not answer it, say so plainly rather than answering from general knowledge. Answer the step they are stuck on, not the whole idea again. If they were working something out, say what they had right, the one thing that was off and why, and the next step. Never praise the person. An analogy is allowed if you call it one and tie it back to the term at once; no anecdotes.',
+    'GROUNDING: answer from this book, in its own terms, names and numbers. If the book does not answer it, after looking it up, say so plainly rather than answering from general knowledge. Answer the step they are stuck on, not the whole idea again. If they were working something out, say what they had right, the one thing that was off and why, and the next step. Never praise the person. An analogy is allowed if you call it one and tie it back to the term at once; no anecdotes.',
     'OPENING: the call opens the moment they press the mic, before they have said anything, and your first words come right after a chime. Say one short, warm, brisk invitation to go ahead, four words at most and different each time, then stop and listen. Never a greeting, never their name, never a summary of where you were.',
     "ANSWER THE QUESTION PROPERLY: what it is, why it is so, and how it works in this book's terms, with the book's example where it has one. Say as much as the question needs and no more: a definition takes a few sentences, a why or a how takes an explanation. Stop when it is answered. There is no fixed length.",
     'THEN A DOOR OPEN: once the question is answered, end with one thing they can answer, a real follow-up on what they said, an offer ("want to see it with the second server?"), or a choice ("the hash, or the ring?"). Never "does that clear it up" or "does that make sense".',
-    `HOW THIS ENDS, by their say-so: when they tell you they are good, that it makes sense now, or that they want to carry on with the lecture, say one short natural line handing back and then call ${LECTURE_TOOLS.RESUME}, the hand-back tool, your only tool, after the line and never before. Never propose ending on your own; if they have gone quiet you will be told what to do. The lecture restarts by itself once you have called the tool; do not resume it yourself.`,
+    ctx.board?.length
+      ? `YOUR BOARD ON THIS PAGE already has, one item per line as "id | kind | text":\n${ctx.board.join('\n')}\nBuild on it or start a fresh board with ${LECTURE_TOOLS.NEW}; do not write what is already there again.`
+      : null,
+    ctx.figures
+      ? `THIS PAGE NAMES A PICTURE: ${ctx.figures}. If the question touches it, offer to draw it, and draw it when they say yes.`
+      : null,
+    `THE BOARD. You have a whiteboard the learner can see, and you reach for it without being asked when the idea has a shape: parts, an order, a structure, a comparison, a formula; or when they ask how something flows, what it looks like, or where something goes. Keep it in words for a definition, a yes or no, or a single number. One drawing per question unless they ask for more. ${LECTURE_TOOLS.SHOW} brings it up. ${LECTURE_TOOLS.WRITE} writes one item: a heading (four words), a term with a plain meaning beside it, a point (six words, optionally under another item), or a figure such as a formula (twelve words). ${LECTURE_TOOLS.ARROW} joins two items with a label of three words. ${LECTURE_TOOLS.CUE} underlines, circles, boxes or highlights an item the learner should look at, outside a walk-through; while you explain a board the marking follows your words. ${LECTURE_TOOLS.NEW} starts a fresh board with a heading when the thought changes. ${LECTURE_TOOLS.DIAGRAM} draws a diagram from the book, eight parts at most: say in twelve words what it should show. ${LECTURE_TOOLS.REST} puts the board away when they are done with it but want to keep talking.`,
+    `HOW TO DRAW, IN THREE BEATS. Announce: one short line saying what is about to go up, in their words ("let me draw the ring so you can see where the keys land"), then the tool call and nothing else. Draw: say nothing while an item is being written; the pause is you writing, and the result tells you exactly what is on the board and its ids. A diagram takes a few seconds to build and a few more to draw: its result tells you what to say meanwhile, first setting the picture up in their words, then naming each part as it appears; you are told when the pen has stopped, and that is when you explain. Explain: when the result names what is on the board, explain it in one go, in the order it was drawn, item by item, naming each item's words as you reach it; the board marks each item for you as you name it, so do not call ${LECTURE_TOOLS.CUE} during the walk-through. Finish with one question. Your turn is not over until you have asked it; if you stop before, you will be told to carry on. Out loud, name items by their words, never their ids; ids are for tool calls only. If you are told a drawing was interrupted, what is listed as drawn is there and the rest is not; finish it or drop it as the question needs. If a board fills, the next item starts a fresh board and you are told.`,
+    `WHEN THE BOARD IS DONE: after explaining what is on it, ask whether it is clear or whether they want another part drawn. When they say it is clear, say so in a few words and carry on in words; if they want the lecture, hand back as below; if they want to keep talking without the board, call ${LECTURE_TOOLS.REST}.`,
+    `LOOKING THINGS UP: ${LECTURE_TOOLS.FIND} searches the whole book and returns passages with their page numbers. Use it when the question reaches beyond this page, and always before saying the book does not cover something. Say where it is ("that is on page 81"). Its result is for you to read, not to recite.`,
+    `HOW THIS ENDS, by their say-so: when they tell you they are good, that it makes sense now, or that they want to carry on with the lecture, say one short natural line handing back and then call ${LECTURE_TOOLS.RESUME}, the hand-back tool, after the line and never before. Never propose ending on your own; if they have gone quiet you will be told what to do. The lecture restarts by itself once you have called the tool; do not resume it yourself.`,
     'This is speech at a natural, lively rate: short plain sentences, contractions, no lists, no headings, no markdown. React to what they actually said in your first few words, then the answer; no lead-in, no restating the question. Never mention scripts, tapes, pages, notes, or that you were paused.',
   ]
     .filter(Boolean)

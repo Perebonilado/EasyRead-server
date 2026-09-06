@@ -16,6 +16,8 @@ import type {
   LectureBoardDraft,
   LectureBoardPlanDraft,
   LectureDiagramDraft,
+  SketchDraft,
+  SketchTemplate,
 } from '../../../business/ports/llm.port';
 import { PROMPTS } from '../prompts';
 import { ModelRegistry, type ModelRef } from './models';
@@ -28,6 +30,8 @@ import {
   lectureBoardPlanSchema,
   lectureBoardSchema,
   lectureDiagramSchema,
+  lectureSketchSchema,
+  sketchJudgeSchema,
   lectureExtraSchema,
   lectureOutlineSchema,
   lectureSegmentSchema,
@@ -564,6 +568,85 @@ export class AiSdkLlmAdapter implements LlmGatewayPort, OnModuleInit {
           : null,
         `\nThe spoken words of the page, which every anchor must be copied from exactly:\n${input.spoken}`,
         `\nThe page itself, which every label must come from:\n${input.context}`,
+      ]
+        .filter(Boolean)
+        .join('\n'),
+      maxRetries: this.maxRetries(),
+    });
+
+    return {
+      value: result.object,
+      usage: this.usage(ref, result.usage, started),
+    };
+  }
+
+  async judgeSketch(input: {
+    png: Buffer;
+    description: string;
+    see: string;
+  }): Promise<LlmResult<{ shows: boolean; wrong: string | null }>> {
+    const started = Date.now();
+    const { generateObject } = await this.registry.modules();
+    const { model, ref } = await this.registry.languageModel('sketch_judge');
+    const result = await generateObject({
+      model,
+      schema: sketchJudgeSchema,
+      system: PROMPTS.sketchJudge,
+      messages: [
+        {
+          role: 'user' as const,
+          content: [
+            {
+              type: 'image' as const,
+              image: input.png,
+              mediaType: 'image/png',
+            },
+            {
+              type: 'text' as const,
+              text: `The tutor asked for: ${input.description}\nA reader should see: ${input.see}`,
+            },
+          ],
+        },
+      ],
+      maxRetries: this.maxRetries(),
+    });
+    return {
+      value: result.object,
+      usage: this.usage(ref, result.usage, started),
+    };
+  }
+
+  async lectureSketch(input: {
+    topicTitle: string;
+    shows: string;
+    hint: SketchTemplate | null;
+    material: string;
+    pageText: string;
+    correction?: string;
+  }): Promise<LlmResult<SketchDraft>> {
+    const started = Date.now();
+    const { generateObject } = await this.registry.modules();
+    const { model, ref } = await this.registry.languageModel('lecture_sketch');
+
+    const result = await generateObject({
+      model,
+      schema: lectureSketchSchema,
+      system: PROMPTS.lectureSketch,
+      prompt: [
+        `Chapter: ${input.topicTitle}`,
+        `Sketch: ${input.shows}`,
+        input.hint === 'graph'
+          ? 'The ask is a process or a comparison: use the graph shape, steps in order or two groups side by side.'
+          : input.hint === 'ring'
+            ? 'The ask is a ring: the servers, nodes or virtual nodes are its points; the keys, or whatever lands between them, are its markers.'
+            : input.hint
+              ? `The words of the ask suggest the shape "${input.hint}"; use it unless the material shows the picture is another shape.`
+              : null,
+        input.correction
+          ? `Your previous sketch was rejected: ${input.correction}`
+          : null,
+        `\nThe material, which every label must be built from (the page, its neighbours, passages from the book, and what the tutor just said):\n${input.material}`,
+        `\nThe page the learner is on:\n${input.pageText}`,
       ]
         .filter(Boolean)
         .join('\n'),

@@ -198,6 +198,15 @@ export interface LectureRepository {
     topicIds: string[],
     style: LectureStyle,
   ): Promise<void>;
+  /** Every chapter and style, in any document, with a written page that left paragraphs untaught: what a worker picks up when it starts. */
+  listShortSegments(): Promise<
+    {
+      documentId: string;
+      contentVersion: number;
+      topicId: string;
+      style: LectureStyle;
+    }[]
+  >;
   resetAudio(documentId: string, contentVersion: number): Promise<number>;
   /**
    * Wipes a document's lecture so it can be written again: one style's

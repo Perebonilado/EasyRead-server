@@ -311,6 +311,7 @@ function fakes(
       r.attempts += 1;
       return Promise.resolve();
     },
+    listShortSegments: () => Promise.resolve([]),
     // A page that left paragraphs untaught goes back to be written again,
     // its count kept so the next write knows what was missing.
     resetUntaughtSegments: (
@@ -2287,6 +2288,33 @@ describe('LectureChapterProcessor: a page that left paragraphs untaught', () => 
     expect(f.row(1)!.scriptText).toContain('Central banks');
     expect(f.row(1)!.untaught).toEqual([]);
     expect(f.chapterJobs.filter((job) => job.coveragePass === 2)).toEqual([]);
+  });
+
+  it('patches a page that fell short with the missing paragraphs, as a continuation, before any pass', async () => {
+    const f = fakes({ 1: FULL_PAGE });
+    const llm = withoutBoard(new FakeLlmAdapter());
+    const asked: string[] = [];
+    llm.lectureSegment = (input) => {
+      asked.push(input.beat.moves[0]);
+      // The whole page never teaches the second paragraph; the patch,
+      // asked for it by name, does.
+      return Promise.resolve(
+        draft(
+          input.beat.moves[0] === 'what the page also says' ? second : first,
+        ),
+      );
+    };
+    const processor = chapterProcessor(f, llm, boardService(f, llm), {
+      1: note,
+    });
+    await processor.process(chapterJob(), CONTEXT);
+    expect(
+      asked.filter((move) => move === 'what the page also says'),
+    ).toHaveLength(1);
+    expect(f.row(1)!.scriptText).toContain('Sustained');
+    expect(f.row(1)!.scriptText).toContain('Central banks');
+    expect(f.row(1)!.untaught).toEqual([]);
+    expect(f.chapterJobs).toEqual([]);
   });
 
   it('stops after its passes, leaving the count for the card', async () => {

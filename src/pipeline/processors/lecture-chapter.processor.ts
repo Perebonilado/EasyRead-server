@@ -523,6 +523,157 @@ export class LectureChapterProcessor {
   }
 
   /**
+   * The paragraphs a page left untaught, written on their own as a
+   * continuation of the page and joined to it: before the landing line on
+   * a chapter's last page, at the end otherwise. A whole page rewritten
+   * may miss again; two sentences asked for by name seldom do.
+   */
+  private async patchCoverage(args: {
+    sections: LectureSection[];
+    note: Block[];
+    frontMatter: boolean;
+    missing: number[];
+    input: Parameters<LectureChapterProcessor['writeChecked']>[0];
+    weight: BeatWeight;
+  }): Promise<LectureSection[]> {
+    const { input, sections } = args;
+    const missed = contentBlocks(args.note, {
+      frontMatter: args.frontMatter,
+    }).filter((block) => args.missing.includes(block.index));
+    if (!missed.length) return sections;
+    const spec = LECTURE_STYLES[input.style];
+    const perParagraph = { gentle: 45, steady: 35, brisk: 22 }[input.style];
+    const script = sectionsToScript(sections);
+    try {
+      const written = await this.llm.lectureSegment({
+        topicTitle: input.topicTitle,
+        hook: input.plan.hook,
+        arc: input.plan.arc,
+        beat: {
+          goal: `Say what the page also says: paragraph${missed.length === 1 ? '' : 's'} ${missed.map((block) => block.index).join(', ')}`,
+          callback: null,
+          foreshadow: null,
+          newHere: null,
+          skip: null,
+          weight: args.weight,
+          moves: ['what the page also says'],
+          moveBlocks: [missed.map((block) => block.index)],
+          pitfall: null,
+          turn: false,
+          ask: null,
+        },
+        previousPayoff: null,
+        problem: null,
+        pageIndex: input.pageIndex,
+        pageCount: input.pageCount,
+        style: input.style,
+        styleDirection: spec.direction,
+        budget: {
+          min: Math.round(perParagraph * missed.length * 0.5),
+          max: perParagraph * missed.length,
+        },
+        pageText: missed.map((block) => block.text).join('\n\n'),
+        noteAddressed: noteAddressed(args.note),
+        prevTail: tailOf(script, spec.tailChars),
+        isFirstOfTopic: false,
+        isLastOfTopic: false,
+        bridge: false,
+        payoff: null,
+        opening: null,
+        taughtSoFar: input.taughtSoFar,
+        comingLater: input.comingLater,
+        list: null,
+        board: null,
+        styleCorrection: `${coverageDetail(missed)}. Write only these, each in at least a sentence, carrying on from what was just said`,
+      });
+      await this.calls.record({
+        documentId: input.documentId,
+        task: 'lecture_segment',
+        model: written.usage.model,
+        tokensIn: written.usage.tokensIn,
+        tokensOut: written.usage.tokensOut,
+        latencyMs: written.usage.latencyMs,
+        outcome: 'ok',
+      });
+      const addendum = written.value.sections
+        .map((section) => withoutBoardMarkers(section.text).trim())
+        .filter(Boolean)
+        .join('\n\n');
+      if (!addendum) return sections;
+      const patched = sections.map((section) => ({ ...section }));
+      // Before the landing line on a chapter's last page; after the last
+      // section otherwise.
+      const at = input.isLastOfTopic
+        ? Math.max(0, patched.length - 2)
+        : patched.length - 1;
+      patched[at] = {
+        ...patched[at],
+        text: `${patched[at].text.trim()}\n\n${addendum}`,
+        teaches: [
+          ...(patched[at].teaches ?? []),
+          ...written.value.sections.flatMap((section) => section.teaches ?? []),
+        ],
+      };
+      this.logger.log(
+        `${input.documentId} p${input.pageNumber} ${input.style}: patched paragraph${missed.length === 1 ? '' : 's'} ${missed.map((block) => block.index).join(', ')} onto the page`,
+      );
+      return patched;
+    } catch (error) {
+      this.logger.warn(
+        `${input.documentId} p${input.pageNumber} ${input.style}: the patch for untaught paragraphs failed (${(error as Error).message}); the page keeps its count`,
+      );
+      return sections;
+    }
+  }
+
+  /**
+   * Pages left short when a worker last ran get their pass on its own when
+   * the worker starts: the chapters that own them are queued again, told
+   * it is a pass, so nobody has to press anything.
+   */
+  async resumeShortPages(): Promise<number> {
+    const short = await this.lectures.listShortSegments();
+    if (!short.length) return 0;
+    const byDocument = new Map<string, typeof short>();
+    for (const row of short) {
+      const list = byDocument.get(row.documentId) ?? [];
+      list.push(row);
+      byDocument.set(row.documentId, list);
+    }
+    let queued = 0;
+    for (const [documentId, rows] of byDocument) {
+      const topics = await this.topics.listByDocument(documentId);
+      const orderOf = new Map(
+        topics.map((topic) => [topic.id, topic.orderIndex]),
+      );
+      for (const row of rows) {
+        await this.lectures.resetUntaughtSegments(
+          row.documentId,
+          row.contentVersion,
+          [row.topicId],
+          row.style,
+        );
+        await this.queue.enqueueLectureChapters([
+          {
+            documentId: row.documentId,
+            contentVersion: row.contentVersion,
+            topicId: row.topicId,
+            orderIndex: orderOf.get(row.topicId) ?? 0,
+            style: row.style,
+            coveragePass: 1,
+            delayMs: COVERAGE_PASS_MS,
+          },
+        ]);
+        queued += 1;
+      }
+    }
+    this.logger.log(
+      `${queued} chapter${queued === 1 ? '' : 's'} with pages left short picked up on start`,
+    );
+    return queued;
+  }
+
+  /**
    * A chapter that ends with a failed page gets one more go on its own, a
    * few minutes on, before anyone is shown a failure: most of what fails a
    * page is a checker's objection the next draft can answer, or a fault
@@ -1558,6 +1709,19 @@ export class LectureChapterProcessor {
           this.logger.warn(
             `${input.documentId} p${input.pageNumber} ${style}: kept despite style (${decision.warning})`,
           );
+        }
+        // A page still short after its attempts is patched rather than
+        // hoped for: the writer is asked for the missing paragraphs alone,
+        // as a continuation, and they are joined to the page.
+        if (untaughtIn(sections).length && input.note && !input.bridge) {
+          sections = await this.patchCoverage({
+            sections,
+            note: input.note,
+            frontMatter,
+            missing: untaughtIn(sections),
+            input,
+            weight,
+          });
         }
         // A slow learner's long page is voiced as two pieces, one idea
         // each, cut at the move boundary nearest the middle.

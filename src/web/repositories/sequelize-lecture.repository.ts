@@ -384,6 +384,57 @@ export class SequelizeLectureRepository implements LectureRepository {
     );
   }
 
+  async listShortSegments(): Promise<
+    {
+      documentId: string;
+      contentVersion: number;
+      topicId: string;
+      style: LectureStyle;
+    }[]
+  > {
+    const rows = await this.segments.findAll({
+      attributes: [
+        'documentId',
+        'contentVersion',
+        'topicId',
+        'style',
+        'untaught',
+      ],
+      where: {
+        kind: 'page',
+        untaught: { [Op.ne]: null },
+        scriptText: { [Op.ne]: null },
+      } as never,
+      raw: true,
+    });
+    const seen = new Set<string>();
+    const out: {
+      documentId: string;
+      contentVersion: number;
+      topicId: string;
+      style: LectureStyle;
+    }[] = [];
+    for (const row of rows) {
+      if (
+        !row.topicId ||
+        !Array.isArray(row.untaught) ||
+        !row.untaught.length
+      ) {
+        continue;
+      }
+      const key = `${row.documentId}:${row.contentVersion}:${row.topicId}:${row.style}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      out.push({
+        documentId: row.documentId,
+        contentVersion: row.contentVersion,
+        topicId: row.topicId,
+        style: row.style,
+      });
+    }
+    return out;
+  }
+
   async resetAudio(
     documentId: string,
     contentVersion: number,

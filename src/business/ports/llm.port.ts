@@ -271,6 +271,8 @@ export interface LlmGatewayPort {
       weight: 'full' | 'light';
       /** The moves this page teaches, in order; one section is written per move. */
       moves: string[];
+      /** For each move, the numbered paragraphs of the note it must teach; null when the page came without numbers. */
+      moveBlocks?: (number[] | null)[] | null;
       pitfall: string | null;
       /** The page asks the listener to predict, then tells them; marked with [pause]. */
       turn: boolean;

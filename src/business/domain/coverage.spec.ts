@@ -88,6 +88,40 @@ describe('what a script leaves untaught', () => {
   });
 });
 
+describe('a list item taught in other endings', () => {
+  const list: Block[] = [
+    { type: 'headingOne', text: 'Major functions' },
+    {
+      type: 'bullet',
+      text: 'Regulation of water and electrolyte balance, with aldosterone.',
+    },
+    {
+      type: 'bullet',
+      text: 'Excretion of metabolic waste products (urea, creatinine, uric acid).',
+    },
+    {
+      type: 'bullet',
+      text: 'Production of erythropoietin for red blood cell formation.',
+    },
+  ];
+  it('is taught when its first words are said, whatever their endings', () => {
+    const script =
+      'Its functions include regulating water and electrolyte balance with aldosterone, excreting metabolic waste, and producing erythropoietin.';
+    expect(
+      uncoveredBlocks({ blocks: list, script, taught: new Set() }),
+    ).toEqual([]);
+  });
+  it('is untaught when only its subject is named', () => {
+    const script =
+      'Water matters, and so does the blood, but that is another page.';
+    expect(
+      uncoveredBlocks({ blocks: list, script, taught: new Set() }).map(
+        (b) => b.index,
+      ),
+    ).toEqual([1, 2, 3]);
+  });
+});
+
 describe('a skip claimed as a repeat', () => {
   const all = contentBlocks(page);
   it('is verified when what came earlier said it, and refused when nothing did', () => {

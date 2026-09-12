@@ -235,6 +235,7 @@ export class AiSdkLlmAdapter implements LlmGatewayPort, OnModuleInit {
       skip: string | null;
       weight: 'full' | 'light';
       moves: string[];
+      moveBlocks?: (number[] | null)[] | null;
       pitfall: string | null;
       turn: boolean;
       ask: string | null;
@@ -289,12 +290,19 @@ export class AiSdkLlmAdapter implements LlmGatewayPort, OnModuleInit {
         : `The page carries a list of ${input.list.items} items. Do not read it out. Give the count, the two or three that carry the weight, and where the rest sit.`
       : null;
 
+    // The paragraphs each move must say, when the plan numbered them: a
+    // list of nine functions is nine things to say, not one.
+    const paragraphsOf = (index: number): string => {
+      const blocks = input.beat.moveBlocks?.[index];
+      if (!blocks?.length) return '';
+      return ` (says paragraphs ${blocks.join(', ')}, each in at least a sentence)`;
+    };
     const moves =
       input.beat.moves.length > 1
         ? `Write one section per move, in this order, each with its move number:\n${input.beat.moves
-            .map((move, index) => `${index}: ${move}`)
+            .map((move, index) => `${index}: ${move}${paragraphsOf(index)}`)
             .join('\n')}`
-        : `This page has one move: ${input.beat.moves[0] ?? input.beat.goal}. Return one section, move 0.`;
+        : `This page has one move: ${input.beat.moves[0] ?? input.beat.goal}${paragraphsOf(0)}. Return one section, move 0.`;
 
     const result = await generateObject({
       model,
@@ -359,7 +367,7 @@ export class AiSdkLlmAdapter implements LlmGatewayPort, OnModuleInit {
           ? `Your previous attempt was rejected for going beyond the page: ${input.correction}. Rewrite it using ONLY what the page below supports.`
           : null,
         input.styleCorrection
-          ? `Your previous attempt was rejected for how it read: ${input.styleCorrection}. Rewrite it fixing exactly that, and keep every fact.`
+          ? `Your previous attempt was sent back: ${input.styleCorrection}. Rewrite it fixing exactly that: add what it says is missing, keep every fact that was right, and change nothing else.`
           : null,
         input.strict
           ? 'STRICT: this page has been rejected twice for leaving the page. Teach only what is written on the page below, in its own terms. No hook, no callback, no foreshadowing, no claims about why it matters beyond what the page itself says, and no number or name the page does not state. A number is said only if it appears on the page exactly as written, digit for digit; otherwise leave it out.'

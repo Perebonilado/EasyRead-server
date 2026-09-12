@@ -18,10 +18,37 @@ const STOP = new Set(
   ),
 );
 
-/** The words that carry a text: four letters or more, lower-cased, common words dropped. */
+/**
+ * A word cut to its stem, so "excretion" and "excreting", "regulation"
+ * and "regulating", "removal" and "removing" count as the same word: a
+ * common ending taken off, then the first six letters.
+ */
+export function stem(word: string): string {
+  const bare = word
+    .replace(/'s$/, '')
+    .replace(/(?:ing|ion|ed|es|al|ly|s)$/, '');
+  return bare.length > 6 ? bare.slice(0, 6) : bare;
+}
+
+/** The words that carry a text: four letters or more, lower-cased, common words dropped, cut to their stems. */
 export function contentWordsOf(text: string): Set<string> {
   const words = text.toLowerCase().match(/[a-z][a-z'-]{3,}/g) ?? [];
-  return new Set(words.filter((word) => !STOP.has(word)));
+  return new Set(
+    words
+      .filter((word) => !STOP.has(word))
+      .map(stem)
+      .filter(Boolean),
+  );
+}
+
+/** The first carrying words of a text, in order, as stems: what a list item is named by. */
+export function headWordsOf(text: string, count = 2): string[] {
+  const words = text.toLowerCase().match(/[a-z][a-z'-]{3,}/g) ?? [];
+  return words
+    .filter((word) => !STOP.has(word))
+    .map(stem)
+    .filter(Boolean)
+    .slice(0, count);
 }
 
 const plain = (text: string): string =>
@@ -90,12 +117,18 @@ const TAUGHT_SHARE = 0.5;
 /** For a paragraph with no words of its own, this share of all its words. */
 const TAUGHT_SHARE_PLAIN = 0.6;
 
-/** Whether a paragraph is taught by a script, by its own words. */
+/**
+ * Whether a paragraph is taught by a script, by its own words: half of
+ * the words only it uses on the page, or, for a list item named by its
+ * first words, those first words said.
+ */
 export function saidEnough(
   block: ContentBlock,
   all: ContentBlock[],
   said: Set<string>,
 ): boolean {
+  const head = headWordsOf(block.text);
+  if (head.length === 2 && head.every((word) => said.has(word))) return true;
   const own = distinctiveWords(block, all);
   if (own.size) return share(said, own) >= TAUGHT_SHARE;
   return share(said, block.words) >= TAUGHT_SHARE_PLAIN;

@@ -1326,6 +1326,10 @@ export class LectureChapterProcessor {
           skip: beat.skip ?? null,
           weight,
           moves,
+          // Which paragraphs each move must say, when the plan numbered
+          // them and the writer reads the same note the plan did.
+          moveBlocks:
+            input.note && style !== 'gentle' ? (beat.moveBlocks ?? null) : null,
           pitfall: beat.pitfall ?? null,
           turn: beat.turn === true,
           ask: input.ask,
@@ -1419,7 +1423,7 @@ export class LectureChapterProcessor {
               ),
               exempt,
             }),
-          )}. Teach every paragraph of the page; the styles differ in how much is said of each, never in which are said`,
+          )}. Say each of these in at least a sentence of its own, in order, inside the section of the move that teaches it, and name it in that section's teaches; the styles differ in how much is said of each paragraph, never in which are said`,
         });
       }
       // A page that ignored its moves cannot stand in for one that kept

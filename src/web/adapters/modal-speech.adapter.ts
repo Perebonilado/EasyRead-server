@@ -2,12 +2,17 @@ import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import type { SpeechPort } from '../../business/ports/voice.port';
 
+/** Which voice runs behind the URL; each takes a different request. */
+export type ModalEngine = 'qwen' | 'kokoro';
+
 /**
- * A school's catalogue voiced on our own rented GPU, through the Modal
- * service in `modal/tts_service.py`: one container running vLLM-Omni's
- * speech server, many pages at once, billed by the second and asleep
+ * A school's catalogue voiced on our own rented GPU, through one of two
+ * Modal services: `modal/tts_service.py`, vLLM-Omni's speech server
+ * running Qwen3-TTS, or `modal/kokoro_service.py`, Kokoro behind the same
+ * request shape. Many pages at once, billed by the second and asleep
  * between runs. One request per page; the mp3 comes back on the same
- * connection.
+ * connection. MODAL_TTS_ENGINE names which one is behind MODAL_TTS_URL:
+ * Qwen is handed the style's delivery note, Kokoro its speed.
  *
  * This is never a fallback for anything and nothing falls back from it. A
  * page it cannot voice fails, with the reason on the row, and is tried
@@ -32,10 +37,23 @@ export class ModalSpeechAdapter implements SpeechPort {
 
   constructor(private readonly config: ConfigService) {}
 
+  engine(): ModalEngine {
+    return this.config.get<string>('MODAL_TTS_ENGINE', 'qwen') === 'kokoro'
+      ? 'kokoro'
+      : 'qwen';
+  }
+
   label(): { model: string; voice: string } {
+    const kokoro = this.engine() === 'kokoro';
     return {
-      model: this.config.get<string>('MODAL_TTS_MODEL', 'qwen3-tts-0.6b'),
-      voice: this.config.get<string>('MODAL_TTS_VOICE', 'ryan'),
+      model: this.config.get<string>(
+        'MODAL_TTS_MODEL',
+        kokoro ? 'kokoro-82m' : 'qwen3-tts-0.6b',
+      ),
+      voice: this.config.get<string>(
+        'MODAL_TTS_VOICE',
+        kokoro ? 'am_michael' : 'ryan',
+      ),
     };
   }
 
@@ -43,6 +61,7 @@ export class ModalSpeechAdapter implements SpeechPort {
     text,
     voice,
     instructions,
+    speed,
   }: {
     text: string;
     voice?: string;
@@ -54,17 +73,29 @@ export class ModalSpeechAdapter implements SpeechPort {
       .replace(/\/+$/, '');
     const token = this.config.getOrThrow<string>('MODAL_TTS_TOKEN');
     const speaker = (voice ?? this.label().voice).toLowerCase();
+    const engine = this.engine();
 
     const buffers: Buffer[] = [];
     for (const part of chunk(text, ModalSpeechAdapter.INPUT_LIMIT)) {
       buffers.push(
-        await this.once(`${base}/v1/audio/speech`, token, {
-          input: part,
-          voice: speaker,
-          instructions,
-          language: 'English',
-          response_format: 'mp3',
-        }),
+        await this.once(
+          `${base}/v1/audio/speech`,
+          token,
+          engine === 'kokoro'
+            ? {
+                input: part,
+                voice: speaker,
+                speed: speed ?? 1,
+                response_format: 'mp3',
+              }
+            : {
+                input: part,
+                voice: speaker,
+                instructions,
+                language: 'English',
+                response_format: 'mp3',
+              },
+        ),
       );
     }
     return {

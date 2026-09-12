@@ -84,9 +84,15 @@ export interface LectureOutlineDraft {
   terms: { term: string; meaning: string }[];
   /** The problem the chapter answers, posed in one line; a quick learner hears it before the principle. */
   problem: string | null;
+  /** The three or four things the chapter settles, one sentence each. */
+  points: string[];
   beats: {
     pageNumber: number;
     goal: string;
+    /** Which point this page serves, by index into points. */
+    point: number;
+    /** A question the listener can answer from what they have heard, or null. */
+    ask: string | null;
     callback: string | null;
     foreshadow: string | null;
     /** The one thing this page adds that the listener has not been taught. */
@@ -227,6 +233,8 @@ export interface LlmGatewayPort {
     suggestedShape: { name: string; direction: string; example: string };
     /** What earlier chapters taught, one line per idea, so it is built on rather than repeated. */
     taughtEarlier: string[];
+    /** The course the students are on, for one line in the hook of where the idea meets their work; null for a learner's own upload. */
+    course: { department: string; level: string | null } | null;
     /** Set when the previous plan was rejected; says exactly why. */
     correction?: string;
   }): Promise<LlmResult<LectureOutlineDraft>>;
@@ -258,7 +266,11 @@ export interface LlmGatewayPort {
       pitfall: string | null;
       /** The page asks the listener to predict, then tells them; marked with [pause]. */
       turn: boolean;
+      /** A question to put to the listener before the page answers it; null for none in this style. */
+      ask: string | null;
     };
+    /** Where the previous chapter landed, for the one line that joins this chapter to it; null for the first. */
+    previousPayoff: string | null;
     /** The chapter's problem, for the page that opens it; null elsewhere. */
     problem: string | null;
     /** Where this page sits in the chapter, so restating can fade across it. */
@@ -580,6 +592,8 @@ export interface LlmGatewayPort {
     summary: string | null;
     /** Ideas the reader keeps missing; a revisit weights questions here. */
     focus?: string[];
+    /** The chapter's points from its lecture plan; every question is about one of them. */
+    points?: string[];
     /** Spoken-friendly kinds for a check answered aloud; omitted means multiple choice. */
     kinds?: ('flashcard' | 'true_false' | 'mcq')[];
   }): Promise<

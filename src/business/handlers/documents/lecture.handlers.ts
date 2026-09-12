@@ -300,15 +300,25 @@ export class LectureStatusHandler extends AbstractRequestHandlerTemplate<
         title: topic.title,
         segments: [],
         ...(plan?.map ? { map: plan.map } : {}),
+        ...(plan?.points?.length ? { points: plan.points } : {}),
       });
     }
 
     for (const segment of segments) {
       const entry = segment.topicId ? byTopic.get(segment.topicId) : undefined;
+      const point = segment.topicId
+        ? (
+            plans.find(
+              (record) =>
+                record.topicId === segment.topicId && record.status === 'done',
+            )?.plan as LecturePlan | null | undefined
+          )?.beats.find((beat) => beat.pageNumber === segment.pageNumber)?.point
+        : undefined;
       entry?.segments.push({
         pageNumber: segment.pageNumber,
         kind: segment.kind,
         status: effectiveStatus(segment),
+        ...(point !== undefined ? { point } : {}),
         durationMs: segment.durationMs,
         bridge: segment.bridge,
         moveOffsets: segment.moveOffsets ?? [],

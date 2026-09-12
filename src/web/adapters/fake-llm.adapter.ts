@@ -163,7 +163,12 @@ export class FakeLlmAdapter implements LlmGatewayPort {
           { term: input.topicTitle, meaning: 'the idea this chapter turns on' },
         ],
         problem: `What does ${input.topicTitle} solve?`,
+        points: input.pages
+          .slice(0, 3)
+          .map((page) => `Point of page ${page.pageNumber}`),
         beats: input.pages.map((page, index) => ({
+          point: Math.min(index, 2),
+          ask: null,
           pageNumber: page.pageNumber,
           goal: `Teach page ${page.pageNumber}.`,
           callback: input.priorTopics[0] ?? null,
@@ -244,7 +249,8 @@ export class FakeLlmAdapter implements LlmGatewayPort {
       input.pageText.includes('UNGROUNDED') && !input.correction
         ? ' UNGROUNDED'
         : '';
-    const lead = input.prevTail ? 'Carrying on. ' : '';
+    // Mid-chapter, a page joins itself to the last one, as the rule asks.
+    const lead = input.isFirstOfTopic ? '' : 'Because of that, ';
     // The chapter's turn: a prediction asked for, a silence, the answer.
     const turn =
       input.beat.turn && !input.bridge

@@ -175,6 +175,7 @@ export class AiSdkLlmAdapter implements LlmGatewayPort, OnModuleInit {
     priorOpenings: string[];
     suggestedShape: { name: string; direction: string; example: string };
     taughtEarlier: string[];
+    course: { department: string; level: string | null } | null;
     correction?: string;
   }): Promise<LlmResult<LectureOutlineDraft>> {
     const started = Date.now();
@@ -193,6 +194,9 @@ export class AiSdkLlmAdapter implements LlmGatewayPort, OnModuleInit {
           : 'This is the first chapter of the document, so there is nothing earlier to call back to.',
         `Open with ${input.suggestedShape.name}: ${input.suggestedShape.direction}`,
         `An opening of this shape, from an unrelated subject: "${input.suggestedShape.example}". Match the move, not the words.`,
+        input.course
+          ? `The students are on ${input.course.department}${input.course.level ? `, ${input.course.level}` : ''}. The hook carries one line of where this chapter's idea meets their work: a use, never a story.`
+          : null,
         input.priorOpenings.length
           ? `Earlier chapters of this lecture opened like this. This one must open differently: a different shape, a different first word.\n- "${input.priorOpenings.join('"\n- "')}"`
           : null,
@@ -234,7 +238,9 @@ export class AiSdkLlmAdapter implements LlmGatewayPort, OnModuleInit {
       moves: string[];
       pitfall: string | null;
       turn: boolean;
+      ask: string | null;
     };
+    previousPayoff: string | null;
     problem: string | null;
     pageIndex: number;
     pageCount: number;
@@ -313,6 +319,17 @@ export class AiSdkLlmAdapter implements LlmGatewayPort, OnModuleInit {
           : null,
         input.beat.pitfall
           ? `PITFALL, the mistake a student is most likely to make here: ${input.beat.pitfall}. Say the trap and why the idea avoids it, in a sentence.`
+          : null,
+        input.beat.ask && !input.bridge
+          ? `ASK: before the page answers it, put this question to the listener, then [pause] on its own line, then answer it from the page: ${input.beat.ask}`
+          : null,
+        !input.isFirstOfTopic && !input.bridge
+          ? input.style === 'brisk'
+            ? 'JOIN: your first words hang on the last thing said, in a few words, as its consequence, its contrast or the next step. No summary of it.'
+            : 'JOIN: your first sentence hangs on the last thing said, as its consequence, its contrast or the next step: one clause, never a summary of it.'
+          : null,
+        input.isFirstOfTopic && input.previousPayoff && !input.bridge
+          ? `After the opening, one line that joins this chapter to where the last one landed: "${input.previousPayoff}". One line, then on.`
           : null,
         input.beat.turn && !input.bridge
           ? "This page carries the chapter's TURN: at the moment the listener could predict what comes next, ask them to, put [pause] on its own line, then give the answer from the page."
@@ -1098,6 +1115,7 @@ export class AiSdkLlmAdapter implements LlmGatewayPort, OnModuleInit {
     pagesText: string;
     summary: string | null;
     focus?: string[];
+    points?: string[];
     kinds?: ('flashcard' | 'true_false' | 'mcq')[];
   }): Promise<
     LlmResult<{
@@ -1123,6 +1141,9 @@ export class AiSdkLlmAdapter implements LlmGatewayPort, OnModuleInit {
           input.summary ? `Document summary:\n${input.summary}` : null,
           `Chapter: ${input.topicTitle}`,
           `Kinds allowed: ${input.kinds.join(', ')}.`,
+          input.points?.length
+            ? `The chapter settles these points; every question is about one of them, still grounded only in the passages:\n- ${input.points.join('\n- ')}`
+            : null,
           input.focus?.length
             ? `Aim most of the items at these ideas, still grounded only in the passages:\n- ${input.focus.join('\n- ')}`
             : null,

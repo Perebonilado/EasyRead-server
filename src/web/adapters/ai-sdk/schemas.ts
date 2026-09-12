@@ -332,6 +332,7 @@ export const recapSchema = z.object({
 export const lectureOutlineSchema = z.object({
   hook: z.string().min(1).max(900),
   arc: z.string().min(1).max(600),
+  points: z.array(z.string().min(1).max(200)).min(1).max(4),
   payoff: z.string().min(1).max(400),
   terms: z
     .array(
@@ -347,6 +348,8 @@ export const lectureOutlineSchema = z.object({
       z.object({
         pageNumber: z.number().int().min(1),
         goal: z.string().min(1).max(300),
+        point: z.number().int().min(0).max(3),
+        ask: z.string().max(240).nullable(),
         callback: z.string().max(300).nullable(),
         foreshadow: z.string().max(300).nullable(),
         newHere: z.string().max(200),

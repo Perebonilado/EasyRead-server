@@ -177,6 +177,9 @@ export const EXTRA_BUDGET: Record<LectureExtraKind, WordBudget> = {
   review: { min: 50, max: 160, hard: 210 },
 };
 
+/** The quick learner's map: the points in one breath, not a minute. */
+export const BRISK_MAP_BUDGET: WordBudget = { min: 20, max: 50, hard: 70 };
+
 /**
  * The extra rows a style gets around each chapter of the cut: the words
  * before its first page, the check after its last. Each sits on its page's
@@ -404,6 +407,8 @@ export const LECTURE_STYLES: Record<LectureStyle, LectureStyleSpec> = {
       'term: say it a little more slowly than the words around it. Warm,',
       'calm and even, never sing-song, and never faster towards the end of',
       'a sentence.',
+      'Lift your voice a little on a question, and take extra care with a',
+      'technical term the first time it comes.',
     ].join(' '),
     speed: 0.9,
   },
@@ -426,7 +431,8 @@ export const LECTURE_STYLES: Record<LectureStyle, LectureStyleSpec> = {
     delivery: [
       'Speak at a natural teaching pace, clear and warm, with a short pause at',
       'every full stop and a longer one between paragraphs. Even, unhurried,',
-      'never breathless.',
+      'never breathless. Lift your voice a little on a question, and take',
+      'extra care with a technical term the first time it comes.',
     ].join(' '),
     speed: 1,
   },
@@ -449,7 +455,8 @@ export const LECTURE_STYLES: Record<LectureStyle, LectureStyleSpec> = {
     tailChars: 320,
     delivery: [
       'Speak briskly and crisply, like a confident lecturer talking to a quick',
-      'listener: no drawn-out pauses, no lingering, every word still clear.',
+      'listener: no drawn-out pauses, no lingering, every word still clear,',
+      'and a technical term said with care the first time it comes.',
     ].join(' '),
     speed: 1.1,
   },
@@ -490,6 +497,13 @@ export interface SegmentJob {
 export interface LectureBeat {
   pageNumber: number;
   goal: string;
+  /** Which of the plan's points this page serves, by index; absent on older plans. */
+  point?: number;
+  /**
+   * A question the listener can answer from what they have heard, asked
+   * before the page answers it. Null, or absent on older plans, means none.
+   */
+  ask?: string | null;
   callback?: string | null;
   foreshadow?: string | null;
   /** The one thing this page adds that the listener has not been taught. */
@@ -546,6 +560,8 @@ export interface MapOutline {
 export interface LecturePlan {
   hook: string;
   arc: string;
+  /** The three or four things the chapter settles, one sentence each; absent on older plans. */
+  points?: string[];
   /** The chapter's map, once its map segment has been written; absent before. */
   map?: MapOutline | null;
   /** The chapter's words, spoken first for a slow learner. Older plans have none. */
@@ -732,6 +748,14 @@ const BANNED_ANYWHERE: readonly RegExp[] = [
   /^picture\s+(?:this|that|a|an|the|yourself|you)\b/i,
 ];
 
+/**
+ * The words that join a page to the one before it: a consequence, a
+ * contrast, a next step, or a hand back to what was just said. One of
+ * them in the first sentence is enough; their absence is a cold open.
+ */
+const JOIN_CUES =
+  /\b(so|because|since|which|that|this|these|those|it|they|but|yet|now|then|next|once|when|after|before|having|with|without|from|there|here|if|and|still|instead|meanwhile|hence|thus|therefore|otherwise|likewise|again|same|both|either|neither|another|other|such|however|though|although|while|whereas|until|unless)\b/i;
+
 /** How a page must not begin: audibly clearing its throat. */
 const THROAT_CLEARERS: readonly RegExp[] = [
   /^(?:now|so|right),\s/i,
@@ -747,6 +771,7 @@ export interface StyleProblem {
   kind:
     | 'banned_opener'
     | 'throat_clearing'
+    | 'cold_open'
     | 'too_long'
     | 'recap_ending'
     | 'moves'
@@ -880,6 +905,8 @@ export function styleProblems(
     pageText?: string;
     terms?: string[];
     taughtSoFar?: string[];
+    /** A page after the chapter's first: it must open by joining itself to what was just said. */
+    midChapter?: boolean;
   },
 ): StyleProblem[] {
   const problems = openerProblems(text, 'script');
@@ -942,6 +969,19 @@ export function styleProblems(
       }),
     );
   }
+  // A page after the first opens on what was just said, as its consequence,
+  // its contrast or its next step. A page that starts cold, on a new
+  // subject with no join, makes the chapter a list of pages.
+  if (options.midChapter && !options.bridge) {
+    const first = sentencesOf(text)[0] ?? '';
+    if (first && !JOIN_CUES.test(first)) {
+      problems.push({
+        kind: 'cold_open',
+        detail: `Starts cold ("${firstWords(first, 4)}"); open on what was just said, as its consequence, contrast or next step`,
+      });
+    }
+  }
+
   return problems;
 }
 

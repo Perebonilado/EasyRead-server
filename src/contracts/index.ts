@@ -813,6 +813,8 @@ export interface LectureSegmentDto {
   moveOffsets: number[];
   /** Length of the spoken script in characters; null until written. */
   scriptLength: number | null;
+  /** Which of the chapter's points this page serves, by index; absent on older plans. */
+  point?: number;
 }
 
 export interface LectureTopicDto {
@@ -825,6 +827,8 @@ export interface LectureTopicDto {
     stops: { name: string; line: string }[];
     landing: string;
   };
+  /** The three or four things the chapter settles, from its plan; absent on older plans. */
+  points?: string[];
 }
 
 /** Where the student stopped listening, so any device can resume there. */

@@ -209,10 +209,13 @@ describe('structured-output schemas', () => {
       moveBlocks: null,
       pitfall: null,
       turn: false,
+      point: 0,
+      ask: null,
       figure: { kind: 'none', shows: null },
     };
     const plan = (weight: string) => ({
       hook: 'h',
+      points: ['the one point'],
       arc: 'a',
       payoff: 'p',
       terms: [],
@@ -242,6 +245,7 @@ describe('structured-output schemas', () => {
   it('lectureOutlineSchema wants one to four moves per beat', () => {
     const plan = (moves: string[]) => ({
       hook: 'h',
+      points: ['the one point'],
       arc: 'a',
       payoff: 'p',
       terms: [],
@@ -259,6 +263,8 @@ describe('structured-output schemas', () => {
           moveBlocks: null,
           pitfall: null,
           turn: false,
+          point: 0,
+          ask: null,
           figure: { kind: 'none', shows: null },
         },
       ],
@@ -283,10 +289,13 @@ describe('structured-output schemas', () => {
       moveBlocks: null,
       pitfall: 'Mixing up the rate and the total',
       turn: true,
+      point: 0,
+      ask: null,
       figure: { kind: 'process', shows: 'the bucket refilling' },
     };
     const plan = {
       hook: 'h',
+      points: ['the one point'],
       arc: 'a',
       payoff: 'p',
       terms: [{ term: 'Refill rate', meaning: 'how fast tokens come back' }],

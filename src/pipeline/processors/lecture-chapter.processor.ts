@@ -15,10 +15,12 @@ import {
   LECTURE_REPOSITORY,
   SIMPLIFIED_PAGE_REPOSITORY,
   TOPIC_REPOSITORY,
+  INSTITUTION_REPOSITORY,
 } from '../../business/repositories/tokens';
 import type { AiCallLogRepository } from '../../business/repositories/ai-call-log.repository';
 import type { DocumentPageRepository } from '../../business/repositories/document-page.repository';
 import type { DocumentRepository } from '../../business/repositories/document.repository';
+import type { InstitutionRepository } from '../../business/repositories/institution.repository';
 import type {
   LectureRepository,
   LectureSegmentRecord,
@@ -59,6 +61,7 @@ import {
   taughtLines,
   unsupportedFigures,
   validateOutline,
+  BRISK_MAP_BUDGET,
   EXTRA_BUDGET,
   pageScripts,
   shouldSplit,
@@ -141,6 +144,35 @@ const SECOND_PASS_MS = 3 * 60_000;
 const PERMANENT_FAILURE =
   /no text|nothing to teach|nothing to check|could not be planned|names no terms|no readable/i;
 
+/**
+ * Whether a page puts its planned question to the listener, by style. The
+ * quick learner is never asked beyond the chapter's turn; the steady
+ * learner is not asked two pages running; the slow learner is asked
+ * wherever the plan found something to ask. A page with the turn, or a
+ * light page, asks nothing more.
+ */
+function askFor(
+  style: LectureStyle,
+  plan: LecturePlan,
+  pageNumber: number,
+  rows: LectureSegmentRecord[],
+): string | null {
+  const beat = beatFor(plan, pageNumber);
+  const ask = beat.ask?.trim();
+  if (!ask || style === 'brisk' || beat.turn || beat.weight === 'light') {
+    return null;
+  }
+  if (style === 'gentle') return ask;
+  const pages = rows
+    .filter((row) => row.kind === 'page')
+    .map((row) => row.pageNumber)
+    .sort((a, b) => a - b);
+  const before = pages.filter((page) => page < pageNumber).pop();
+  const previousAsked =
+    before !== undefined && Boolean(beatFor(plan, before).ask?.trim());
+  return previousAsked ? null : ask;
+}
+
 @Injectable()
 export class LectureChapterProcessor {
   private readonly logger = new Logger(LectureChapterProcessor.name);
@@ -159,6 +191,11 @@ export class LectureChapterProcessor {
     @Inject(SIMPLIFIED_PAGE_REPOSITORY)
     private readonly simplified: SimplifiedPageRepository,
     private readonly config: ConfigService,
+    @Inject(INSTITUTION_REPOSITORY)
+    private readonly institutions: Pick<
+      InstitutionRepository,
+      'listDepartments' | 'listLevels'
+    >,
   ) {}
 
   /**
@@ -186,6 +223,36 @@ export class LectureChapterProcessor {
    * easiest note), or null when it is not written yet, in which case the
    * page's own text stands in.
    */
+  /**
+   * The course a school document belongs to, for the hook's one line of
+   * where the idea meets the students' work. A learner's own upload has
+   * none, and the planner is told nothing.
+   */
+  private async courseOf(doc: {
+    props: {
+      institutionId?: string | null;
+      departmentId?: string | null;
+      levelId?: string | null;
+    };
+  }): Promise<{ department: string; level: string | null } | null> {
+    const institutionId = doc.props.institutionId;
+    if (!institutionId || !doc.props.departmentId) return null;
+    try {
+      const [departments, levels] = await Promise.all([
+        this.institutions.listDepartments(institutionId),
+        this.institutions.listLevels(institutionId),
+      ]);
+      const department = departments.find(
+        (d) => d.id === doc.props.departmentId,
+      );
+      if (!department) return null;
+      const level = levels.find((l) => l.id === doc.props.levelId);
+      return { department: department.name, level: level?.name ?? null };
+    } catch {
+      return null;
+    }
+  }
+
   private async noteFor(
     documentId: string,
     pageNumber: number,
@@ -301,6 +368,14 @@ export class LectureChapterProcessor {
         planOf.set(record.topicId, record.plan as LecturePlan);
       }
     }
+    // Where the chapter before this one landed, for the line that joins
+    // the two; the nearest earlier chapter with a plan.
+    const previousPayoff =
+      topics
+        .filter((candidate) => candidate.startPage < topic.startPage)
+        .sort((a, b) => b.startPage - a.startPage)
+        .map((candidate) => planOf.get(candidate.id)?.payoff ?? null)
+        .find((payoff) => payoff) ?? null;
     const taughtEarlier = taughtLines(
       topics
         .filter((candidate) => candidate.startPage < topic.startPage)
@@ -378,6 +453,7 @@ export class LectureChapterProcessor {
         contentVersion,
         style,
         taughtEarlier,
+        previousPayoff,
       });
     }
 
@@ -468,14 +544,20 @@ export class LectureChapterProcessor {
     };
 
     const terms = plan.terms ?? [];
-    // The map names the chapter's stops, one per page: the beat's goal.
-    // The check and the review name what each page added.
-    const taught = input.rows
-      .filter((page) => !page.bridge)
-      .map((page) => {
-        const beat = beatFor(plan, page.pageNumber);
-        return kind === 'map' ? beat.goal : beat.newHere?.trim() || beat.goal;
-      });
+    // The map and the check name the chapter's points when the plan has
+    // them; else the map names the beats' goals and the check what each
+    // page added, as before. The review always names what each page added.
+    const taught =
+      (kind === 'map' || kind === 'check') && plan.points?.length
+        ? plan.points
+        : input.rows
+            .filter((page) => !page.bridge)
+            .map((page) => {
+              const beat = beatFor(plan, page.pageNumber);
+              return kind === 'map'
+                ? beat.goal
+                : beat.newHere?.trim() || beat.goal;
+            });
     if (kind === 'terms' && !terms.length) {
       await fail('The chapter plan names no terms');
       return;
@@ -503,7 +585,11 @@ export class LectureChapterProcessor {
         payoff: plan.payoff ?? null,
         arc: kind === 'map' ? (plan.arc ?? null) : null,
         daysAway: null,
-        budget: EXTRA_BUDGET[kind],
+        // A quick learner's map is the points in one breath.
+        budget:
+          kind === 'map' && style === 'brisk'
+            ? BRISK_MAP_BUDGET
+            : EXTRA_BUDGET[kind],
       });
       await this.calls.record({
         documentId: doc.id,
@@ -569,7 +655,15 @@ export class LectureChapterProcessor {
 
   /** Writes the chapter's plan once, or reuses the one already stored. */
   private async ensurePlan(input: {
-    doc: { id: string; props: { title: string } };
+    doc: {
+      id: string;
+      props: {
+        title: string;
+        institutionId?: string | null;
+        departmentId?: string | null;
+        levelId?: string | null;
+      };
+    };
     topic: { id: string; title: string; startPage: number };
     rows: LectureSegmentRecord[];
     contentVersion: number;
@@ -645,6 +739,7 @@ export class LectureChapterProcessor {
       priorOpenings: input.priorOpenings,
       suggestedShape: hookShapeFor(input.orderIndex, priorTopics.length > 0),
       taughtEarlier: input.taughtEarlier,
+      course: await this.courseOf(doc),
     };
     // A chapter of figures and dividers has nothing to check a hook against.
     const checkable = rows.some((row) => !row.bridge);
@@ -785,6 +880,8 @@ export class LectureChapterProcessor {
     contentVersion: number;
     style: LectureStyle;
     taughtEarlier: string[];
+    /** Where the previous chapter landed; null for the first chapter. */
+    previousPayoff: string | null;
   }): Promise<void> {
     const { doc, plan, row, rows, contentVersion, style } = input;
     await this.lectures.markSegmentWriting(
@@ -873,6 +970,12 @@ export class LectureChapterProcessor {
         prevTail: heardLast?.scriptText
           ? tailOf(heardLast.scriptText, LECTURE_STYLES[style].tailChars)
           : '',
+        // A question before the answer, where the plan marked one and the
+        // style takes questions: gentle on most such pages, steady on some,
+        // never two pages running, brisk only at its turn. Never with the
+        // turn on the same page, so a page pauses once at most.
+        ask: askFor(style, plan, row.pageNumber, rows),
+        previousPayoff: input.previousPayoff,
         isFirstOfTopic,
         isLastOfTopic: index === rows.length - 1,
         pageIndex: index,
@@ -1075,6 +1178,10 @@ export class LectureChapterProcessor {
    * alone no longer makes a hole.
    */
   private async writeChecked(input: {
+    /** The question put to the listener before the page answers it; null for none. */
+    ask: string | null;
+    /** Where the previous chapter landed; null for the first chapter or a page that is not the first. */
+    previousPayoff: string | null;
     documentId: string;
     topicTitle: string;
     plan: LecturePlan;
@@ -1172,7 +1279,9 @@ export class LectureChapterProcessor {
           moves,
           pitfall: beat.pitfall ?? null,
           turn: beat.turn === true,
+          ask: input.ask,
         },
+        previousPayoff: input.isFirstOfTopic ? input.previousPayoff : null,
         problem: input.isFirstOfTopic ? (input.plan.problem ?? null) : null,
         pageIndex: input.pageIndex,
         pageCount: input.pageCount,
@@ -1241,6 +1350,7 @@ export class LectureChapterProcessor {
           pageText: `${input.pageText} ${planText}`,
           terms: (input.plan.terms ?? []).map((entry) => entry.term),
           taughtSoFar: input.taughtSoFar,
+          midChapter: !input.isFirstOfTopic,
         }),
       ];
       // A page that ignored its moves cannot stand in for one that kept

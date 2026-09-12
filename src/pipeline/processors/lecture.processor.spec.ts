@@ -524,6 +524,11 @@ const chapterProcessor = (
     // No note is written in these fakes: the page's own text stands in.
     { find: () => Promise.resolve(null) } as never,
     new ConfigService({}),
+    // No school in these fakes: the planner is told no course.
+    {
+      listDepartments: () => Promise.resolve([]),
+      listLevels: () => Promise.resolve([]),
+    },
   );
 
 /** The follow-along service over the fakes: no note is written here, so no track is built. */
@@ -2193,6 +2198,10 @@ describe('LectureChapterProcessor: a school voices its own catalogue', () => {
       boardService(f, new FakeLlmAdapter(), false),
       { find: () => Promise.resolve(null) } as never,
       new ConfigService({ LECTURE_VOICE_EXTERNAL: 'true' }),
+      {
+        listDepartments: () => Promise.resolve([]),
+        listLevels: () => Promise.resolve([]),
+      },
     );
     await processor.process(chapterJob(), CONTEXT);
 

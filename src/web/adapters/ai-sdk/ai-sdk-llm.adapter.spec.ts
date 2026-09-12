@@ -346,9 +346,15 @@ describe('AiSdkLlmAdapter', () => {
         {
           move: 0,
           text: 'Because they guess, and they are usually right.',
+          catch: null,
           teaches: [],
         },
-        { move: 1, text: 'Eviction is the guess made visible.', teaches: [] },
+        {
+          move: 1,
+          text: 'Eviction is the guess made visible.',
+          catch: null,
+          teaches: [],
+        },
       ],
     });
 
@@ -625,6 +631,7 @@ describe('AiSdkLlmAdapter', () => {
         {
           move: 0,
           text: 'Why do caches lie? Because they guess.',
+          catch: null,
           teaches: [],
         },
       ],
@@ -715,14 +722,14 @@ describe('AiSdkLlmAdapter', () => {
       board: null,
     };
     mock.reply({
-      sections: [{ move: 0, text: 'Early.', teaches: [] }],
+      sections: [{ move: 0, text: 'Early.', catch: null, teaches: [] }],
     });
     await adapter.lectureSegment({ ...base, pageIndex: 1, pageCount: 6 });
     expect(JSON.stringify(mock.calls[0].body.messages)).toContain(
       'restate the idea fully',
     );
     mock.reply({
-      sections: [{ move: 0, text: 'Late.', teaches: [] }],
+      sections: [{ move: 0, text: 'Late.', catch: null, teaches: [] }],
     });
     await adapter.lectureSegment({ ...base, pageIndex: 5, pageCount: 6 });
     expect(JSON.stringify(mock.calls[1].body.messages)).toContain(

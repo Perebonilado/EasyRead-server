@@ -729,6 +729,15 @@ export const PROMPTS = {
       'or three that carry the weight, and say where the rest sit.',
     ].join(' '),
     [
+      'The voice reads its shape from your punctuation, so give it one: a',
+      'question ends in a question mark; a landing line ends in a full stop,',
+      'never an exclamation; a dash or an ellipsis only where the voice',
+      'should hang, and at most twice on a page. In `catch`, name the words',
+      'a listener should hear land in that section, up to five, copied',
+      "exactly from the section's own text; null when nothing in it needs",
+      'the weight. Most sections need none; never more than one phrase.',
+    ].join(' '),
+    [
       'How to teach the page is given with the page, under HOW TO TEACH IT.',
       'The same lecture is written in three styles, from hand-holding to',
       'brisk, and the direction you are given is the style you are writing:',

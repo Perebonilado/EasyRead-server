@@ -128,6 +128,8 @@ export interface LectureSegmentDraft {
     text: string;
     /** The note sentences the section explains, as the writer addressed them ("2.1", or "5" for a whole block). */
     teaches?: string[];
+    /** The words a listener should hear land in this section, copied from its text; null for most sections. */
+    catch?: string | null;
   }[];
 }
 

@@ -282,6 +282,7 @@ export class FakeLlmAdapter implements LlmGatewayPort {
         move: index,
         text: `${marks}${text.trim()}`,
         teaches: index === 0 && input.noteAddressed ? ['0.0'] : [],
+        catch: null,
       };
     });
     return {

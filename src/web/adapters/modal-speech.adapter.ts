@@ -62,11 +62,13 @@ export class ModalSpeechAdapter implements SpeechPort {
     voice,
     instructions,
     speed,
+    pieces,
   }: {
     text: string;
     voice?: string;
     instructions?: string;
     speed?: number;
+    pieces?: { text: string; speed: number; pauseAfter: number }[];
   }): Promise<{ audio: Buffer; mimeType: string; model: string }> {
     const base = this.config
       .getOrThrow<string>('MODAL_TTS_URL')
@@ -74,6 +76,25 @@ export class ModalSpeechAdapter implements SpeechPort {
     const token = this.config.getOrThrow<string>('MODAL_TTS_TOKEN');
     const speaker = (voice ?? this.label().voice).toLowerCase();
     const engine = this.engine();
+
+    // Kokoro takes the page as pieces, each at its pace with its silence
+    // after; one request, the service joins them.
+    if (engine === 'kokoro' && pieces?.length) {
+      const audio = await this.once(`${base}/v1/audio/speech`, token, {
+        voice: speaker,
+        pieces: pieces.map((piece) => ({
+          text: piece.text,
+          speed: piece.speed,
+          pause_after: piece.pauseAfter,
+        })),
+        response_format: 'mp3',
+      });
+      return {
+        audio,
+        mimeType: 'audio/mpeg',
+        model: `modal:${this.label().model}`,
+      };
+    }
 
     const buffers: Buffer[] = [];
     for (const part of chunk(text, ModalSpeechAdapter.INPUT_LIMIT)) {

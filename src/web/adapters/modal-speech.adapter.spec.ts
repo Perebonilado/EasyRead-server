@@ -74,6 +74,28 @@ describe('ModalSpeechAdapter', () => {
     });
   });
 
+  it('hands Kokoro the page as pieces when it has them, with the silence after each', async () => {
+    const adapter = new ModalSpeechAdapter(
+      config({ ...base, MODAL_TTS_ENGINE: 'kokoro' }),
+    );
+    await adapter.synthesize({
+      text: 'A page. With a figure.',
+      speed: 1,
+      pieces: [
+        { text: 'A page.', speed: 1, pauseAfter: 0.75 },
+        { text: 'With a [figure](+1).', speed: 0.93, pauseAfter: 0 },
+      ],
+    });
+    expect(calls[0].body).toEqual({
+      voice: 'am_michael',
+      pieces: [
+        { text: 'A page.', speed: 1, pause_after: 0.75 },
+        { text: 'With a [figure](+1).', speed: 0.93, pause_after: 0 },
+      ],
+      response_format: 'mp3',
+    });
+  });
+
   it('lets the settings name the voice and the model for either engine', () => {
     const adapter = new ModalSpeechAdapter(
       config({

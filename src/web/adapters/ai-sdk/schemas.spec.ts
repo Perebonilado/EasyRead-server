@@ -332,8 +332,13 @@ describe('structured-output schemas', () => {
     expect(
       lectureSegmentSchema.safeParse({
         sections: [
-          { move: 0, text: 'The problem.', teaches: ['1.0'] },
-          { move: 1, text: '[write 1] The mechanism.', teaches: [] },
+          { move: 0, text: 'The problem.', catch: null, teaches: ['1.0'] },
+          {
+            move: 1,
+            text: '[write 1] The mechanism.',
+            catch: null,
+            teaches: [],
+          },
         ],
       }).success,
     ).toBe(true);

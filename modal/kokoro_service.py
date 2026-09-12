@@ -4,9 +4,11 @@ dictionary in front of it, on a rented GPU billed by the second.
 
 One container loads the model once and takes pages a few at a time; the
 card's work is done one page at a time under a lock, since a page is under
-a second. The worker posts one page and gets the mp3 back on the same
-connection, the same request shape the Qwen service takes. Modal scales
-the container to zero between runs.
+a second. The worker posts one page, as one text or as pieces each at its
+own pace with a silence after it, and gets the mp3 back on the same
+connection. Every page is mastered before it is encoded: a touch of
+presence, gentle compression, loudness at the podcast standard. Modal
+scales the container to zero between runs.
 
     modal deploy modal/kokoro_service.py                  # put it behind a URL
     modal run modal/kokoro_service.py --path scripts.txt  # bench: audio seconds per wall second, and the price
@@ -19,8 +21,8 @@ bearer token and never prints it.
 """
 
 import asyncio
-import io
 import os
+import re
 import socket
 import struct
 import subprocess
@@ -31,14 +33,21 @@ import modal
 
 REPO = "hexgrad/Kokoro-82M"
 GPU = os.environ.get("TTS_GPU", "L4")
-VOICE = os.environ.get("TTS_VOICE", "am_michael")
+VOICE = os.environ.get("TTS_VOICE", "am_puck")
 SAMPLE_RATE = 24_000
 # Pages one container takes at once; the card sees them one at a time.
 INTAKE = 8
-# The longest page the service will take, in characters.
-INPUT_LIMIT = 5_000
-# A breath between paragraphs, in seconds.
+# The longest page the service will take, in characters, pieces together.
+INPUT_LIMIT = 8_000
+# The most pieces a page may come as.
+PIECES_LIMIT = 60
+# A breath between paragraphs inside one piece, in seconds.
 BREATH = 0.25
+# The longest silence a piece may ask for after itself, in seconds.
+PAUSE_LIMIT = 3.0
+# The master: presence above 3.5 kHz, a gentle squeeze, loudness at -16 LUFS.
+MASTER = "highpass=f=70,treble=g=3:f=3500:w=0.6,acompressor=threshold=-18dB:ratio=2.5:attack=8:release=120:makeup=2"
+LOUDNESS = "I=-16:TP=-1.5:LRA=9"
 # What Modal bills a card for, per hour, for the bench's arithmetic.
 USD_PER_GPU_HOUR = {"T4": 0.59, "L4": 0.80, "A10": 1.10, "L40S": 1.95, "A100": 2.10, "H100": 3.95}
 OPENAI_USD_PER_AUDIO_HOUR = 0.90
@@ -94,26 +103,47 @@ class Speech:
         device = "cuda" if torch.cuda.is_available() else "cpu"
         self.pipeline = KPipeline(lang_code="a", repo_id=REPO, device=device)
         self.lock = threading.Lock()
-        self.render("The lecture voice is warming up before the chapter begins.", VOICE, 1.0)
+        self.render([("The lecture voice is warming up before the chapter begins.", 1.0, 0.0)], VOICE)
         print(f"kokoro ready on {device} ({GPU}) in {time.time() - started:.1f}s, voice {VOICE}")
 
-    def render(self, text: str, voice: str, speed: float):
-        """The page as samples at 24 kHz, and its length in seconds."""
+    def render(self, pieces: list, voice: str):
+        """The page as samples at 24 kHz, and its length in seconds; pieces are (text, speed, silence after)."""
         import numpy as np
 
-        pieces = []
+        out = []
         breath = np.zeros(int(SAMPLE_RATE * BREATH), dtype=np.float32)
         with self.lock:
-            for result in self.pipeline(text, voice=voice, speed=speed, split_pattern=r"\n+"):
-                if result.audio is None:
+            for text, speed, pause_after in pieces:
+                said = []
+                for result in self.pipeline(text, voice=voice, speed=speed, split_pattern=r"\n+"):
+                    if result.audio is None:
+                        continue
+                    if said:
+                        said.append(breath)
+                    said.append(result.audio.detach().cpu().numpy().astype(np.float32))
+                if not said:
                     continue
-                if pieces:
-                    pieces.append(breath)
-                pieces.append(result.audio.detach().cpu().numpy().astype(np.float32))
-        if not pieces:
+                out.extend(said)
+                if pause_after > 0:
+                    out.append(np.zeros(int(SAMPLE_RATE * pause_after), dtype=np.float32))
+        if not out:
             raise ValueError("nothing to say")
-        audio = np.concatenate(pieces)
+        audio = np.concatenate(out)
         return audio, len(audio) / SAMPLE_RATE
+
+    def check_voice(self, voice: str) -> None:
+        """A voice is one name, or names joined by commas for an even blend; anything else is refused."""
+        from huggingface_hub import hf_hub_download
+
+        if ":" in voice:
+            raise ValueError("a weighted blend is not supported; join names with commas for an even one")
+        for name in voice.split(","):
+            if not re.fullmatch(r"[abefhijpz][fm]_[a-z]+", name):
+                raise ValueError(f"no voice named {name}")
+            try:
+                hf_hub_download(REPO, f"voices/{name}.pt", local_files_only=True)
+            except Exception:
+                raise ValueError(f"no voice named {name}")
 
     @modal.asgi_app()
     def serve(self):
@@ -125,35 +155,29 @@ class Speech:
 
         @api.get("/health")
         def health():
-            return {"status": "ok", "model": "kokoro-82m", "voice": VOICE, "gpu": GPU}
+            return {"status": "ok", "model": "kokoro-82m", "voice": VOICE, "gpu": GPU, "version": 2}
 
         @api.post("/v1/audio/speech")
         async def speech(request: Request, authorization: str = Header(default="")):
             if authorization != expected:
                 raise HTTPException(status_code=401, detail="the key was refused")
             body = await request.json()
-            text = str(body.get("input") or "").strip()
-            if not text:
-                raise HTTPException(status_code=400, detail="input is empty")
-            if len(text) > INPUT_LIMIT:
-                raise HTTPException(status_code=400, detail=f"input is over {INPUT_LIMIT} characters")
             voice = str(body.get("voice") or VOICE)
             try:
-                speed = min(2.0, max(0.5, float(body.get("speed") or 1.0)))
-            except (TypeError, ValueError):
-                raise HTTPException(status_code=400, detail="speed must be a number")
+                self.check_voice(voice)
+                pieces = read_pieces(body)
+            except ValueError as error:
+                raise HTTPException(status_code=400, detail=str(error))
             fmt = str(body.get("response_format") or "mp3").lower()
             if fmt not in ("mp3", "wav"):
                 raise HTTPException(status_code=400, detail="response_format must be mp3 or wav")
             # The delivery note and the language, if sent, are read by no one here.
             started = time.time()
             try:
-                audio, seconds = await asyncio.to_thread(self.render, text, voice, speed)
+                audio, seconds = await asyncio.to_thread(self.render, pieces, voice)
             except ValueError as error:
                 raise HTTPException(status_code=400, detail=str(error))
-            except FileNotFoundError:
-                raise HTTPException(status_code=400, detail=f"no voice named {voice}")
-            data = to_mp3(audio) if fmt == "mp3" else to_wav(audio)
+            data = await asyncio.to_thread(to_mp3 if fmt == "mp3" else to_wav, audio)
             return Response(
                 content=data,
                 media_type="audio/mpeg" if fmt == "mp3" else "audio/wav",
@@ -166,29 +190,83 @@ class Speech:
         return api
 
 
-def to_mp3(audio) -> bytes:
+def read_pieces(body: dict) -> list:
+    """The page as (text, speed, silence after) triples, from `pieces` or from a plain `input`."""
+    raw = body.get("pieces")
+    if raw is None:
+        text = str(body.get("input") or "").strip()
+        if not text:
+            raise ValueError("input is empty")
+        raw = [{"text": text, "speed": body.get("speed"), "pause_after": 0}]
+    if not isinstance(raw, list) or not raw:
+        raise ValueError("pieces must be a list with at least one piece")
+    if len(raw) > PIECES_LIMIT:
+        raise ValueError(f"a page may come as at most {PIECES_LIMIT} pieces")
+    pieces = []
+    total = 0
+    for item in raw:
+        if not isinstance(item, dict):
+            raise ValueError("each piece is an object with text, speed and pause_after")
+        text = str(item.get("text") or "").strip()
+        if not text:
+            continue
+        total += len(text)
+        try:
+            speed = min(2.0, max(0.5, float(item.get("speed") or 1.0)))
+            pause_after = min(PAUSE_LIMIT, max(0.0, float(item.get("pause_after") or 0.0)))
+        except (TypeError, ValueError):
+            raise ValueError("speed and pause_after must be numbers")
+        pieces.append((text, speed, pause_after))
+    if not pieces:
+        raise ValueError("input is empty")
+    if total > INPUT_LIMIT:
+        raise ValueError(f"input is over {INPUT_LIMIT} characters")
+    return pieces
+
+
+def _pcm(audio) -> bytes:
     import numpy as np
 
-    pcm = (np.clip(audio, -1.0, 1.0) * 32767).astype("<i2").tobytes()
-    done = subprocess.run(
-        [
-            "ffmpeg", "-loglevel", "error",
-            "-f", "s16le", "-ar", str(SAMPLE_RATE), "-ac", "1", "-i", "pipe:0",
-            "-codec:a", "libmp3lame", "-b:a", "64k", "-f", "mp3", "pipe:1",
-        ],
+    return (np.clip(audio, -1.0, 1.0) * 32767).astype("<i2").tobytes()
+
+
+def _ffmpeg(args: list, pcm: bytes) -> subprocess.CompletedProcess:
+    return subprocess.run(
+        ["ffmpeg", "-loglevel", "error", "-f", "s16le", "-ar", str(SAMPLE_RATE), "-ac", "1", "-i", "pipe:0", *args],
         input=pcm,
         capture_output=True,
         check=True,
     )
+
+
+def master_filter(pcm: bytes) -> str:
+    """The master with loudness measured first, so it is applied as a plain gain and never pumps."""
+    import json
+
+    measured = _ffmpeg(["-af", f"{MASTER},loudnorm={LOUDNESS}:print_format=json", "-f", "null", "-"], pcm)
+    text = measured.stderr.decode(errors="ignore")
+    start = text.rfind("{")
+    if start < 0:
+        return f"{MASTER},loudnorm={LOUDNESS}"
+    stats = json.loads(text[start:])
+    return (
+        f"{MASTER},loudnorm={LOUDNESS}"
+        f":measured_I={stats['input_i']}:measured_TP={stats['input_tp']}"
+        f":measured_LRA={stats['input_lra']}:measured_thresh={stats['input_thresh']}"
+        f":offset={stats['target_offset']}:linear=true"
+    )
+
+
+def to_mp3(audio) -> bytes:
+    pcm = _pcm(audio)
+    done = _ffmpeg(["-af", master_filter(pcm), "-codec:a", "libmp3lame", "-q:a", "2", "-f", "mp3", "pipe:1"], pcm)
     return done.stdout
 
 
 def to_wav(audio) -> bytes:
-    import soundfile
-
-    buffer = io.BytesIO()
-    soundfile.write(buffer, audio, SAMPLE_RATE, format="WAV", subtype="PCM_16")
-    return buffer.getvalue()
+    pcm = _pcm(audio)
+    done = _ffmpeg(["-af", master_filter(pcm), "-codec:a", "pcm_s16le", "-f", "wav", "pipe:1"], pcm)
+    return done.stdout
 
 
 def wav_seconds(data: bytes) -> float:

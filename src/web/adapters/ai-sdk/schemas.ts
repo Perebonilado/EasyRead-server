@@ -521,6 +521,8 @@ export const lectureSegmentSchema = z.object({
         text: z.string().min(1).max(4000),
         /** The note sentences this section explains, as "block.sentence" or "block"; empty for the writer's own words. */
         teaches: z.array(z.string().min(1).max(12)).max(12),
+        /** The words a listener should hear land, up to five, copied exactly from this section's text; null for most sections. */
+        catch: z.string().max(60).nullable(),
       }),
     )
     .min(1)

@@ -93,6 +93,21 @@ import {
 /** How much of a neighbouring page the verifier is shown. */
 const NEIGHBOUR_CHARS = 2_500;
 
+/**
+ * The writer's phrases a listener should catch, kept only where the
+ * section's own words carry them, and never longer than a few words.
+ */
+function catchPhrases(sections: LectureSection[]): string[] {
+  const out: string[] = [];
+  for (const section of sections) {
+    const phrase = section.catch?.trim();
+    if (!phrase || phrase.split(/\s+/).length > 6) continue;
+    if (!section.text.toLowerCase().includes(phrase.toLowerCase())) continue;
+    out.push(phrase);
+  }
+  return out;
+}
+
 /** How many earlier chapters' lines the writer is reminded of. */
 const TAUGHT_EARLIER_FOR_WRITER = 12;
 const TAUGHT_SO_FAR_MAX = 20;
@@ -113,6 +128,8 @@ interface PageText {
 type WrittenPage = PageScripts & {
   /** What the writer said each section teaches, checked against the note; null without a note. */
   sectionTags: SectionTag[] | null;
+  /** The phrases the writer said a listener should catch, one per section at most. */
+  emphasis: string[];
 };
 
 /**
@@ -957,6 +974,7 @@ export class LectureChapterProcessor {
       row.scriptText = written.script;
       row.moveOffsets = written.moveOffsets;
       row.sectionTags = written.sectionTags;
+      row.emphasis = written.emphasis;
 
       await this.lectures.markSegmentWritten({
         documentId: doc.id,
@@ -967,6 +985,7 @@ export class LectureChapterProcessor {
         moveOffsets: written.moveOffsets,
         durationMs: estimateDurationMs(scriptForTts(written.script)),
         sectionTags: written.sectionTags,
+        emphasis: written.emphasis,
         status: input.voice ? 'voicing' : 'scripted',
       });
 
@@ -1052,6 +1071,7 @@ export class LectureChapterProcessor {
           status: input.voice ? 'voicing' : 'scripted',
           // The same tags: the part's sections are found by their heads.
           sectionTags: written.sectionTags,
+          emphasis: written.emphasis,
         });
         // The second piece continues the page's board on the next free line.
         if (written.part.board?.lines.length) {
@@ -1375,6 +1395,7 @@ export class LectureChapterProcessor {
           sectionTags: input.note
             ? sectionTags(sections, noteUnits(input.note))
             : null,
+          emphasis: catchPhrases(sections),
         };
       }
       if (decision.action === 'fail') {

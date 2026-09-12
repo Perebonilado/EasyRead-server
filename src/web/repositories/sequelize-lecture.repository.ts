@@ -16,6 +16,7 @@ import type {
 } from '../../business/repositories/lecture.repository';
 import { playOrder } from '../../business/domain/lecture';
 import {
+  LectureListenModel,
   LecturePlanModel,
   LecturePositionModel,
   LectureSegmentModel,
@@ -60,6 +61,7 @@ const toSegment = (row: LectureSegmentModel): LectureSegmentRecord => ({
   attempts: row.attempts,
   moveOffsets: row.moveOffsets ?? null,
   sectionTags: row.sectionTags ?? null,
+  emphasis: row.emphasis ?? null,
   board: row.board ?? null,
   wordTimes: row.wordTimes ?? null,
   boardStatus: row.boardStatus ?? 'none',
@@ -76,6 +78,8 @@ export class SequelizeLectureRepository implements LectureRepository {
     private readonly segments: typeof LectureSegmentModel,
     @InjectModel(LecturePositionModel)
     private readonly positions: typeof LecturePositionModel,
+    @InjectModel(LectureListenModel)
+    private readonly listens: typeof LectureListenModel,
   ) {}
 
   async savePlan(input: {
@@ -238,6 +242,7 @@ export class SequelizeLectureRepository implements LectureRepository {
       moveOffsets: number[];
       durationMs: number | null;
       sectionTags?: unknown;
+      emphasis?: string[] | null;
       status?: 'voicing' | 'scripted';
     },
   ): Promise<void> {
@@ -250,6 +255,7 @@ export class SequelizeLectureRepository implements LectureRepository {
         ...(input.sectionTags !== undefined
           ? { sectionTags: input.sectionTags }
           : {}),
+        ...(input.emphasis !== undefined ? { emphasis: input.emphasis } : {}),
         error: null,
       },
       { where: whereKey(input) },
@@ -379,6 +385,18 @@ export class SequelizeLectureRepository implements LectureRepository {
   }): Promise<void> {
     const where = { userId: input.userId, documentId: input.documentId };
     const existing = await this.positions.findOne({ where });
+    // How far a learner gets, kept as they go: one row each time their
+    // place moves to another page, so the share of chapters played to the
+    // end can be read later.
+    if (!existing || existing.pageNumber !== input.pageNumber) {
+      await this.listens.create({
+        id: newId(),
+        userId: input.userId,
+        documentId: input.documentId,
+        pageNumber: input.pageNumber,
+        style: input.style,
+      });
+    }
     if (existing) {
       await existing.update({
         pageNumber: input.pageNumber,

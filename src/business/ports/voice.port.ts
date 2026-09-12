@@ -17,6 +17,12 @@ export interface SpeechPort {
     instructions?: string;
     /** Playback rate for models that take a number instead (tts-1); 1 is natural. */
     speed?: number;
+    /**
+     * The same words as pieces, each at its own pace with a silence after
+     * it, for a voice that answers to pace and silence and not to a note
+     * (Kokoro). Ignored by the rest, which say `text`.
+     */
+    pieces?: { text: string; speed: number; pauseAfter: number }[];
   }): Promise<{
     audio: Buffer;
     mimeType: string;

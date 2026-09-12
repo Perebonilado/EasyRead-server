@@ -34,6 +34,7 @@ export {
   LecturePlanModel,
   LecturePositionModel,
   LectureSegmentModel,
+  LectureListenModel,
 } from './lecture.model';
 export { SimplifiedPageModel } from './simplified-page.model';
 export { SubscriptionModel } from './subscription.model';
@@ -85,6 +86,7 @@ import {
   LecturePlanModel,
   LecturePositionModel,
   LectureSegmentModel,
+  LectureListenModel,
 } from './lecture.model';
 import { SimplifiedPageModel } from './simplified-page.model';
 import { SubscriptionModel } from './subscription.model';
@@ -117,6 +119,7 @@ export const ALL_MODELS = [
   LecturePlanModel,
   LecturePositionModel,
   LectureSegmentModel,
+  LectureListenModel,
   SimplifiedPageModel,
   TopicModel,
   TopicReadStateModel,

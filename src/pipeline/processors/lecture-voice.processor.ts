@@ -24,13 +24,20 @@ import type { LectureRepository } from '../../business/repositories/lecture.repo
 import {
   LECTURE_GENERATOR_VERSION,
   LECTURE_STYLES,
+  PAUSE_MARKER,
   contentHash,
   estimateDurationMs,
   scriptForTts,
+  type SegmentKind,
 } from '../../business/domain/lecture';
+import type { LectureStyle } from '../../contracts';
 import type { LectureVoiceJobData } from '../queues';
 import { catalogueSpeechCost } from '../../business/domain/cost';
 import { spokenForm } from '../../business/domain/spoken';
+import {
+  DELIVERY_VERSION,
+  deliveryPieces,
+} from '../../business/domain/delivery';
 import { mp3DurationMs, speechTooShort } from '../../business/domain/speech';
 import { isPermanentFailure, type JobContext } from './base.processor';
 import { LectureBoardService } from './lecture-board.service';
@@ -89,13 +96,32 @@ export class LectureVoiceProcessor {
 
     // What the reader sees is not what the voice is handed: the school's
     // pronunciations, abbreviations as letters, numbers and units as words.
-    const written = scriptForTts(row.scriptText);
-    const spoken = spokenForm(
-      written,
-      doc.props.institutionId
-        ? await this.pronunciations.kept(doc.props.institutionId)
-        : undefined,
-    ).text;
+    const kept = doc.props.institutionId
+      ? await this.pronunciations.kept(doc.props.institutionId)
+      : undefined;
+    const spoken = spokenForm(scriptForTts(row.scriptText), kept).text;
+    // The page cut at each [pause] the writer placed, each stretch in its
+    // spoken form, for a voice that answers to pace and silence: a held
+    // silence at the pause, a slower sentence for a figure and for the
+    // chapter's landing, a quicker opening join, weight where the writer
+    // asked for it.
+    const stretches = row.scriptText
+      .split(PAUSE_MARKER)
+      .map((stretch) => spokenForm(scriptForTts(stretch), kept).text)
+      .filter(Boolean);
+    const place = await this.placeInChapter(
+      documentId,
+      contentVersion,
+      style,
+      row,
+    );
+    const pieces = deliveryPieces({
+      stretches,
+      style,
+      midChapter: kind === 'page' && place.midChapter,
+      landing: place.landing,
+      emphasis: row.emphasis ?? null,
+    });
 
     try {
       // A school's document is voiced on the rented GPU, and only there;
@@ -112,7 +138,7 @@ export class LectureVoiceProcessor {
       const { delivery, speed } = LECTURE_STYLES[style];
       const key =
         `documents/${doc.id}/lecture/v${doc.contentVersion}/` +
-        `${pageNumber}${kind === 'page' ? '' : `-${kind}`}-${style}-${voice}-${model}-${LECTURE_GENERATOR_VERSION}-${contentHash(`${delivery}\n${spoken}`)}.mp3`;
+        `${pageNumber}${kind === 'page' ? '' : `-${kind}`}-${style}-${voice}-${model}-${LECTURE_GENERATOR_VERSION}-${contentHash(`${delivery}\n${DELIVERY_VERSION}\n${JSON.stringify(pieces)}`)}.mp3`;
 
       // A file already there is kept only when it is long enough to be
       // the whole page: a fragment the voice once returned is voiced again.
@@ -129,6 +155,7 @@ export class LectureVoiceProcessor {
           voice,
           instructions: delivery,
           speed,
+          pieces,
         });
         await this.storage.put({
           key,
@@ -228,5 +255,37 @@ export class LectureVoiceProcessor {
         kind,
       });
     }
+  }
+
+  /**
+   * Where a row sits in its chapter: after the first page, so its opening
+   * joins what was just said, and on the last, so it lands. A row around
+   * a chapter, or one with no chapter, is neither.
+   */
+  private async placeInChapter(
+    documentId: string,
+    contentVersion: number,
+    style: LectureStyle,
+    row: { topicId: string | null; pageNumber: number; kind: SegmentKind },
+  ): Promise<{ midChapter: boolean; landing: boolean }> {
+    const none = { midChapter: false, landing: false };
+    if (!row.topicId || (row.kind !== 'page' && row.kind !== 'part')) {
+      return none;
+    }
+    const pages = (
+      await this.lectures.listSegments(documentId, contentVersion, style)
+    )
+      .filter(
+        (other) =>
+          other.topicId === row.topicId &&
+          other.kind === 'page' &&
+          !other.bridge,
+      )
+      .sort((a, b) => a.seq - b.seq);
+    if (!pages.length) return none;
+    return {
+      midChapter: row.pageNumber !== pages[0].pageNumber,
+      landing: row.pageNumber === pages[pages.length - 1].pageNumber,
+    };
   }
 }

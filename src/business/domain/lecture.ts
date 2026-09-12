@@ -763,7 +763,8 @@ export interface StyleProblem {
     | 'hard_words'
     | 'term_unexplained'
     | 'two_terms'
-    | 'label';
+    | 'label'
+    | 'hanging_marks';
   detail: string;
 }
 
@@ -964,9 +965,22 @@ export function styleProblems(
       });
     }
   }
+  // The voice hangs on a dash or an ellipsis. Twice on a page is a shape;
+  // more is a tic the ear learns to skip.
+  const hanging = (text.match(HANGING_MARK) ?? []).length;
+  if (hanging > HANGING_MARKS_MAX) {
+    problems.push({
+      kind: 'hanging_marks',
+      detail: `Hangs on a dash or an ellipsis ${hanging} times; at most ${HANGING_MARKS_MAX} on a page`,
+    });
+  }
 
   return problems;
 }
+
+/** A dash or an ellipsis, where the voice hangs. */
+const HANGING_MARK = /[—–…]|\.\.\./g;
+const HANGING_MARKS_MAX = 2;
 
 // ── the gentle style's promise, measured ────────────────────────────────────
 
@@ -1250,6 +1264,8 @@ export interface LectureSection {
   text: string;
   /** The note sentences the writer says the section explains, as addressed ("2.1", or "5" for a block). */
   teaches?: string[];
+  /** The words a listener should hear land in this section, copied from its text; null for most sections. */
+  catch?: string | null;
 }
 
 /**

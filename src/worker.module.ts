@@ -21,10 +21,6 @@ import { SummarizeProcessor } from './pipeline/processors/summarize.processor';
 import { TopicsProcessor } from './pipeline/processors/topics.processor';
 import { PurgeService } from './pipeline/purge.service';
 import { WorkerRunner } from './pipeline/worker-runner.service';
-import {
-  GenerateLectureHandler,
-  LectureStatusHandler,
-} from './business/handlers/documents/lecture.handlers';
 
 /**
  * The worker process: queue consumers and scheduled maintenance, no HTTP
@@ -54,10 +50,6 @@ import {
     ImportProcessor,
     WorkerRunner,
     PurgeService,
-    // The orchestrator writes a school document's lecture at upload; the
-    // handler that does it lives with the API's and is reused here.
-    GenerateLectureHandler,
-    LectureStatusHandler,
   ],
 })
 export class WorkerModule {}

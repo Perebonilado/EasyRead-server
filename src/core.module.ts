@@ -6,6 +6,10 @@ import { TokenGenerator } from './auth/token-generator';
 import { ComputeService } from './business/handlers/documents/compute.service';
 import { DocumentAccessService } from './business/handlers/documents/document-access.service';
 import { EntitlementsService } from './business/handlers/documents/entitlements.service';
+import {
+  GenerateLectureHandler,
+  LectureStatusHandler,
+} from './business/handlers/documents/lecture.handlers';
 import { PipelineOrchestrator } from './pipeline/orchestrator.service';
 import { DatabaseModule } from './web/database/database.module';
 import { portProviders } from './web/providers/ports.providers';
@@ -20,6 +24,10 @@ const shared = [
   ComputeService,
   DocumentAccessService,
   EntitlementsService,
+  // The orchestrator writes a school document's lecture at upload, in both
+  // processes, so the handler that does it lives here with it.
+  LectureStatusHandler,
+  GenerateLectureHandler,
   PipelineOrchestrator,
 ];
 

@@ -40,12 +40,24 @@ export interface ContentBlock {
 /** The fewest carrying words a block needs to count as a paragraph to teach. */
 const CONTENT_WORDS_MIN = 4;
 
-/** The paragraphs of a note that carry content: not headings, not a line of a word or two. */
+/** A line that is about the page rather than of it: a copyright, a source, a figure's label, a link. */
+const REFERENCE_LINE =
+  /^\s*(?:©|copyright\b|source[s]?\s*[:-]|references?\b|adapted from\b|retrieved\b|https?:\/\/|doi\b|isbn\b|fig(?:ure)?\.?\s*\d|table\s*\d|slide\s*\d|page\s*\d+\s*(?:of\s*\d+)?$)/i;
+
+/** Whether a block is a reference line rather than a paragraph to teach. */
+export function looksLikeReference(text: string): boolean {
+  if (REFERENCE_LINE.test(text)) return true;
+  // A journal or a publisher's mark: a short line with a divider in it.
+  return text.includes(' | ') && text.split(/\s+/).length <= 8;
+}
+
+/** The paragraphs of a note that carry content: not headings, not a line of a word or two, not a reference line. */
 export function contentBlocks(blocks: Block[]): ContentBlock[] {
   const out: ContentBlock[] = [];
   blocks.forEach((block, index) => {
     if (String(block.type).toLowerCase().startsWith('heading')) return;
     const text = plain(block.text ?? '');
+    if (looksLikeReference(text)) return;
     const words = contentWordsOf(text);
     if (words.size < CONTENT_WORDS_MIN) return;
     out.push({ index, text, words });

@@ -26,10 +26,12 @@ const page: Block[] = [
     text: 'Mechanical, sexual, and transplacental transmission are also possible.',
   },
   { type: 'paragraph', text: 'Fig. 3' },
+  { type: 'paragraph', text: 'Copyright © 2006 Nature Publishing Group' },
+  { type: 'paragraph', text: 'Nature Reviews | Microbiology' },
 ];
 
 describe('the paragraphs of a page', () => {
-  it('counts the paragraphs that carry content and leaves the heading and a caption out', () => {
+  it('counts the paragraphs that carry content and leaves the heading, a caption, a copyright and a journal mark out', () => {
     expect(contentBlocks(page).map((block) => block.index)).toEqual([
       1, 2, 3, 4,
     ]);

@@ -697,11 +697,18 @@ export class LectureChapterProcessor {
     const pages: PageText[] = [];
     // Each page's paragraphs, for the check that the plan covers them.
     const blocksByPage = new Map<number, Block[]>();
+    const bridges = new Set(
+      rows.filter((row) => row.bridge).map((row) => row.pageNumber),
+    );
     for (const page of pageRows) {
       if (!pageNumbers.includes(page.pageNumber)) continue;
       // The plan is shared by every style, so it reads the standard note.
       const note = await this.noteFor(doc.id, page.pageNumber, 'steady');
-      if (note) blocksByPage.set(page.pageNumber, note);
+      // A bridge page's note is the simplifier's gloss on a figure or a
+      // divider, not paragraphs the plan must cover.
+      if (note && !bridges.has(page.pageNumber)) {
+        blocksByPage.set(page.pageNumber, note);
+      }
       pages.push({
         pageNumber: page.pageNumber,
         text: note
@@ -1237,8 +1244,10 @@ export class LectureChapterProcessor {
         ? (beat.skipBlocks ?? []).map((skip) => skip.block)
         : [],
     );
+    // A bridge page (a figure, a divider, a copyright line) has nothing on
+    // it to cover; its note, when there is one, is the simplifier's gloss.
     const untaughtIn = (sections: LectureSection[]): number[] =>
-      input.note
+      input.note && !input.bridge
         ? uncoveredBlocks({
             blocks: input.note,
             script: sectionsToScript(sections),

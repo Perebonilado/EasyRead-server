@@ -48,7 +48,16 @@ app = modal.App("easiread-tts")
 # The engine's own release image, pinned. HF_HOME on the volume so a cold
 # start reads the weights from disk rather than from Hugging Face.
 image = modal.Image.from_registry("vllm/vllm-omni:v0.28.0").env(
-    {"HF_HOME": "/weights", "VLLM_LOGGING_LEVEL": "INFO"}
+    {
+        "HF_HOME": "/weights",
+        # The engine compiles the model and captures its graphs on every
+        # start and would throw the result away with the container. Kept on
+        # the volume, the next start reads them instead of making them.
+        "VLLM_CACHE_ROOT": "/weights/vllm-cache",
+        "TORCHINDUCTOR_CACHE_DIR": "/weights/inductor-cache",
+        "TRITON_CACHE_DIR": "/weights/triton-cache",
+        "VLLM_LOGGING_LEVEL": "INFO",
+    }
 )
 
 weights = modal.Volume.from_name("easiread-tts-weights", create_if_missing=True)
@@ -59,12 +68,14 @@ weights = modal.Volume.from_name("easiread-tts-weights", create_if_missing=True)
     gpu=GPU,
     volumes={"/weights": weights},
     secrets=[modal.Secret.from_name("easiread-tts")],
-    # A run's pages arrive within a couple of minutes of each other; two
-    # minutes of warmth after the last one, then sleep.
-    scaledown_window=120,
+    # Ten minutes of warmth after the last page: a run that pauses, because
+    # the writer is behind or the connection blinked, finds the card still
+    # there. Ten idle minutes cost about one cold start and save nine.
+    scaledown_window=600,
     # One request's ceiling. A page is seconds on a warm card.
     timeout=600,
-    max_containers=2,
+    # The worker keeps two containers busy; a large run may add a third.
+    max_containers=3,
 )
 @modal.concurrent(max_inputs=INTAKE)
 class Speech:

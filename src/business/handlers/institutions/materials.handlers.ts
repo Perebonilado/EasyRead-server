@@ -211,6 +211,8 @@ interface PrepareTodo {
   /** Not through its own upload pipeline yet: nothing can be added on top. */
   needsPipeline: boolean;
   hasEasiest: boolean;
+  /** Styles whose every page has its words, voiced or not. */
+  scripted: string[];
   /** Styles with lecture rows already, written or on their way. */
   styles: string[];
 }
@@ -252,6 +254,7 @@ export class PrepareMaterialsHandler extends AbstractRequestHandlerTemplate<
         needsPipeline: todo.needsPipeline,
         hasEasiest: todo.hasEasiest,
         styles: todo.styles as never,
+        scripted: todo.scripted as never,
       })),
       easiest: cmd.easiest,
       styles,
@@ -347,12 +350,20 @@ export class PrepareMaterialsHandler extends AbstractRequestHandlerTemplate<
       // failed or unvoiced page means Prepare asks for it again, and the
       // lecture handler retries just what is missing.
       const byStyle = new Map<string, boolean>();
+      const wordsByStyle = new Map<string, boolean>();
       for (const row of rows) {
         if (row.kind !== 'page') continue;
         const done = effectiveStatus(row) === 'done';
         byStyle.set(row.style, (byStyle.get(row.style) ?? true) && done);
+        wordsByStyle.set(
+          row.style,
+          (wordsByStyle.get(row.style) ?? true) && Boolean(row.scriptText),
+        );
       }
       const styles = Array.from(byStyle.entries())
+        .filter(([, whole]) => whole)
+        .map(([style]) => style);
+      const scripted = Array.from(wordsByStyle.entries())
         .filter(([, whole]) => whole)
         .map(([style]) => style);
       out.push({
@@ -361,6 +372,7 @@ export class PrepareMaterialsHandler extends AbstractRequestHandlerTemplate<
         needsPipeline: !through,
         hasEasiest: easiest.total > 0,
         styles,
+        scripted,
       });
     }
     return out;

@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { InjectModel } from '@nestjs/sequelize';
-import { Op, col, fn } from 'sequelize';
+import { Op, col, fn, literal } from 'sequelize';
 import type {
   LectureSegmentStatus,
   LectureStyle,
@@ -127,7 +127,13 @@ export class MaterialsQuery {
     ids: string[],
   ): Promise<Map<string, MaterialDto['lecture']>> {
     const rows = await this.segments.findAll({
-      attributes: ['documentId', 'style', 'status', 'updatedAt'],
+      attributes: [
+        'documentId',
+        'style',
+        'status',
+        'updatedAt',
+        [literal('script_text IS NOT NULL'), 'scripted'],
+      ],
       where: { documentId: { [Op.in]: ids }, kind: 'page' } as never,
     });
     const out = new Map<string, MaterialDto['lecture']>();
@@ -139,6 +145,7 @@ export class MaterialsQuery {
         updatedAt: row.get('updatedAt') as Date,
       });
       bucket.total += 1;
+      if (Number(row.get('scripted'))) bucket.scripted += 1;
       if (status === 'done') bucket.ready += 1;
       if (status === 'failed') bucket.failed += 1;
       out.set(row.documentId, lecture);
@@ -171,6 +178,9 @@ const emptyLecture = (): MaterialDto['lecture'] =>
   Object.fromEntries(
     LECTURE_STYLE_KEYS.map((style) => [
       style,
-      { total: 0, ready: 0, failed: 0 },
+      { total: 0, scripted: 0, ready: 0, failed: 0 },
     ]),
-  ) as Record<LectureStyle, { total: number; ready: number; failed: number }>;
+  ) as Record<
+    LectureStyle,
+    { total: number; scripted: number; ready: number; failed: number }
+  >;

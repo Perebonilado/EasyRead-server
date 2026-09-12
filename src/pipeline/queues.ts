@@ -48,13 +48,18 @@ export const QUEUE_SETTINGS: Record<
   import: { concurrency: 2, attempts: 2, backoffMs: 20_000 },
   // One job per chapter: plan it, then write its pages IN ORDER, because
   // each page is written knowing the tail of the one before it. Chapters
-  // run alongside each other; pages inside one never do.
-  'lecture-chapter': { concurrency: 4, attempts: 2, backoffMs: 15_000 },
+  // run alongside each other; pages inside one never do. Eight at once is
+  // the writer's throughput knob; the ceiling is the model's rate limit.
+  'lecture-chapter': { concurrency: 8, attempts: 2, backoffMs: 15_000 },
   // Synthesis needs nothing from its neighbours, so it runs wide and off
   // the writing critical path.
-  // Thirty-two at once, the catalogue voice's intake, so a whole deck is in
-  // flight and the engine's batch is full; OpenAI takes it too.
-  'lecture-voice': { concurrency: 32, attempts: 3, backoffMs: 10_000 },
+  // Sixty-four at once: two of the catalogue voice's containers kept busy,
+  // so a run is never held to one card by arithmetic. OpenAI takes it too.
+  // Six attempts half a minute apart and doubling reach a quarter of an
+  // hour, long enough for a dropped connection, a preempted container and
+  // the cold start after it. A page fails only when the voice is really
+  // gone, or when it refused the page outright.
+  'lecture-voice': { concurrency: 64, attempts: 6, backoffMs: 30_000 },
   // Forced alignment is CPU work on the worker itself: a couple at a time,
   // and never on the voicing path.
   'lecture-align': { concurrency: 2, attempts: 2, backoffMs: 30_000 },

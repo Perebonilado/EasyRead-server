@@ -18,14 +18,17 @@ export class ModalSpeechAdapter implements SpeechPort {
   private readonly logger = new Logger(ModalSpeechAdapter.name);
   /** A lecture page is well under it; anything longer is split first. */
   private static readonly INPUT_LIMIT = 5_000;
-  private static readonly ATTEMPTS = 3;
+  /** One quick retry for a dropped connection; anything longer is the queue's job. */
+  private static readonly ATTEMPTS = 2;
   /**
-   * One request's ceiling. The first page of a run may be waiting on a
-   * container that is still loading the engine; a page on a warm card is
-   * seconds. Modal answers a request past two and a half minutes with a
-   * redirect that fetch follows, so a slow page is not cut off.
+   * One request's ceiling, longer than a cold start: the first page of a
+   * run may be waiting on a container that is still loading the engine,
+   * and a page abandoned mid-start is rendered for nobody and sent again.
+   * A page on a warm card is seconds. Modal answers a request past two and
+   * a half minutes with a redirect that fetch follows, so a slow page is
+   * not cut off.
    */
-  private static readonly REQUEST_MS = 3 * 60_000;
+  private static readonly REQUEST_MS = 12 * 60_000;
 
   constructor(private readonly config: ConfigService) {}
 
@@ -121,7 +124,7 @@ export class ModalSpeechAdapter implements SpeechPort {
         if (!audio.length) throw new Error('The speech service sent no audio');
         return audio;
       } catch (error) {
-        lastError = error as Error;
+        lastError = named(error);
         if (isRefusal(lastError)) throw lastError;
         this.logger.warn(
           `attempt ${attempt} of ${ModalSpeechAdapter.ATTEMPTS} failed: ${lastError.message}`,
@@ -155,6 +158,31 @@ export class NoCatalogueSpeech implements SpeechPort {
       ),
     );
   }
+}
+
+/**
+ * A connection failure with its cause spelled out. Node's fetch says only
+ * "fetch failed" and keeps the reason underneath: a refused connection, a
+ * reset, a name lookup, a timeout. The reason is what tells a dropped home
+ * connection from a service that is down, so it goes in the message the
+ * worker logs and the row keeps.
+ */
+function named(error: unknown): Error {
+  const raised = error as Error & {
+    cause?: { code?: string; message?: string };
+  };
+  if (raised?.name === 'AbortError') {
+    return new Error(
+      `The speech service did not answer within ${ModalSpeechAdapter['REQUEST_MS'] / 60_000} minutes`,
+    );
+  }
+  const cause = raised?.cause;
+  if (raised?.message === 'fetch failed' && cause) {
+    return new Error(
+      `Could not reach the speech service: ${cause.code ?? cause.message ?? 'unknown cause'}`,
+    );
+  }
+  return raised instanceof Error ? raised : new Error(String(error));
 }
 
 /** An error the worker will not retry: it carries the 4xx status the engine answered with. */

@@ -209,10 +209,10 @@ export interface MaterialDto {
   contentHash: string | null;
   steps: { step: PipelineStep; status: PipelineStatus; error: string | null }[];
   simplified: Record<Level, { done: number; failed: number; total: number }>;
-  /** Lecture pages per style: how many exist, how many have audio, how many failed. */
+  /** Lecture pages per style: how many exist, have their words, have audio, failed. */
   lecture: Record<
     LectureStyle,
-    { total: number; ready: number; failed: number }
+    { total: number; scripted: number; ready: number; failed: number }
   >;
   /** What the model calls on this document have cost so far, summed from the ledger. */
   costUsd: number;

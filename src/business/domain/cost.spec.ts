@@ -67,15 +67,23 @@ describe('the estimate before the button', () => {
           hasEasiest: true,
           styles: ['steady'],
         },
+        // Words written at upload, no audio yet: audio alone.
+        {
+          pages: 10,
+          needsPipeline: false,
+          hasEasiest: true,
+          styles: [],
+          scripted: ['steady'],
+        },
       ],
       easiest: true,
       styles: ['steady'],
     });
-    expect(estimate.documents).toBe(2);
-    expect(estimate.pages).toBe(54);
-    // First deck: easiest notes plus steady text. Second: nothing.
+    expect(estimate.documents).toBe(3);
+    expect(estimate.pages).toBe(64);
+    // First deck: easiest notes plus steady text. Second: nothing. Third: no text.
     expect(estimate.textUsd).toBeCloseTo(27 * 0.0007 + 27 * 0.003, 4);
-    expect(estimate.audioUsd).toBeCloseTo(27 * 0.02, 4);
+    expect(estimate.audioUsd).toBeCloseTo(27 * 0.02 + 10 * 0.02, 4);
     expect(estimate.totalUsd).toBeCloseTo(
       estimate.textUsd + estimate.audioUsd,
       4,

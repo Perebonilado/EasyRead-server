@@ -94,14 +94,19 @@ export interface PrepareEstimate {
 
 /**
  * The estimate for preparing documents: the text steps still to run, the
- * levels asked for, and audio for the styles asked for.
+ * levels asked for, and audio for the styles asked for. A school's
+ * scripts are written at upload, so a style whose words are already there
+ * is priced for its audio alone.
  */
 export function estimatePrepare(input: {
   documents: {
     pages: number;
     needsPipeline: boolean;
     hasEasiest: boolean;
+    /** Styles voiced in full: nothing left to charge. */
     styles: LectureStyle[];
+    /** Styles whose words are all written: audio only. Omitted means none. */
+    scripted?: LectureStyle[];
   }[];
   easiest: boolean;
   styles: LectureStyle[];
@@ -123,7 +128,9 @@ export function estimatePrepare(input: {
     }
     for (const style of input.styles) {
       if (doc.styles.includes(style)) continue;
-      text += doc.pages * PER_PAGE.lectureText;
+      if (!(doc.scripted ?? []).includes(style)) {
+        text += doc.pages * PER_PAGE.lectureText;
+      }
       audio += doc.pages * PER_PAGE.audio;
     }
   }

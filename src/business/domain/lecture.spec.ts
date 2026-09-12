@@ -2,6 +2,7 @@ import {
   acceptSegment,
   contentHash,
   LECTURE_STYLES,
+  liftedSentences,
   WORD_BUDGET,
   moveAt,
   moveOffsetsOf,
@@ -489,6 +490,12 @@ describe('styleProblems', () => {
         full,
       ).map((p) => p.kind),
     ).toEqual(['recap_ending']);
+    expect(
+      styleProblems(
+        'Caches lie. Understanding these hurdles is imperative for good design.',
+        full,
+      ).map((p) => p.kind),
+    ).toEqual(['recap_ending']);
   });
 
   it('reports every problem at once, so one rewrite can fix them all', () => {
@@ -814,6 +821,73 @@ describe('styles', () => {
       expect(spec.direction).not.toMatch(/\bimagine\b/i);
       expect(spec.direction.length).toBeGreaterThan(100);
     }
+  });
+});
+
+describe('the quick learner', () => {
+  const page = { weight: 'full' as const, bridge: false };
+  const kinds = (
+    text: string,
+    options: Partial<Parameters<typeof styleProblems>[1]> & {
+      style: 'gentle' | 'steady' | 'brisk';
+    },
+  ) => styleProblems(text, { ...page, ...options }).map((p) => p.kind);
+
+  it('may open a page on the idea itself; the others must join', () => {
+    const cold =
+      'Interest compounds on the whole balance. The debt grows faster each year.';
+    expect(kinds(cold, { style: 'brisk', midChapter: true })).toEqual([]);
+    expect(kinds(cold, { style: 'steady', midChapter: true })).toEqual([
+      'cold_open',
+    ]);
+  });
+
+  it('is sent back when a chapter ends by landing the payoff', () => {
+    const payoff =
+      'You can tell a fixed rate from a floating one by what happens when the base rate moves.';
+    const landing =
+      'The bank sets the rate each month. So you can now tell a fixed rate from a floating one by what happens when the base rate moves.';
+    expect(
+      kinds(landing, { style: 'brisk', payoff, lastOfChapter: true }),
+    ).toEqual(['recap_ending']);
+    expect(
+      kinds(landing, { style: 'steady', payoff, lastOfChapter: true }),
+    ).toEqual([]);
+    expect(
+      kinds(landing, { style: 'brisk', payoff, lastOfChapter: false }),
+    ).toEqual([]);
+    expect(
+      kinds('The bank sets the rate each month. Borrowers pay it.', {
+        style: 'brisk',
+        payoff,
+        lastOfChapter: true,
+      }),
+    ).toEqual([]);
+  });
+
+  it('is sent back for reading the page aloud, at a lower bar than the others', () => {
+    const note =
+      'A fixed rate stays the same for the whole term of the loan, whatever the market does. A floating rate moves with the base rate, so the payment can rise or fall from month to month. Most mortgages start fixed and then float.';
+    const lifted =
+      'A fixed rate stays the same for the whole term of the loan, whatever the market does. A floating rate moves with the base rate, so the payment can rise or fall. Most mortgages start fixed.';
+    const own =
+      'Fixed means the rate is locked for the whole term. Floating means it follows the base rate, so the payment changes. Most mortgages begin fixed and switch later.';
+    expect(liftedSentences(lifted, note)).toHaveLength(2);
+    expect(liftedSentences(own, note)).toEqual([]);
+    expect(kinds(lifted, { style: 'brisk', noteText: note })).toEqual([
+      'read_aloud',
+    ]);
+    expect(kinds(lifted, { style: 'steady', noteText: note })).toEqual([]);
+    expect(kinds(own, { style: 'brisk', noteText: note })).toEqual([]);
+  });
+
+  it('lets a figure or a term through as the page has it, and one lifted sentence', () => {
+    const note =
+      'The base rate is five point two five percent from the first of March. The fee is paid once, at the start, and never again.';
+    const script =
+      'Everything hangs on one number: five point two five percent, from March onward. The fee is paid once, at the start, and never again.';
+    expect(liftedSentences(script, note)).toHaveLength(1);
+    expect(kinds(script, { style: 'brisk', noteText: note })).toEqual([]);
   });
 });
 

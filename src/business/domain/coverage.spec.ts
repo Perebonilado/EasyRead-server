@@ -53,7 +53,7 @@ describe('what a script leaves untaught', () => {
     });
     expect(uncovered.map((block) => block.index)).toEqual([4]);
     expect(coverageDetail(uncovered)).toBe(
-      'Paragraph 4 is not taught: "Mechanical, sexual, and transplacental transmission are also possible."',
+      'Paragraph 4 is not taught, the one beginning "Mechanical, sexual, and transplacental transmission are..."',
     );
   });
 

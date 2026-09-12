@@ -94,7 +94,11 @@ function build(doc: Document) {
     },
   } as unknown as InstitutionRepository;
   const handler = new MoveMaterialHandler(documents, institutions);
-  const move = (body: Parameters<MoveMaterialHandler['handle']>[0]) =>
+  type Body = Omit<
+    Parameters<MoveMaterialHandler['handle']>[0],
+    'userId' | 'institutionId'
+  >;
+  const move = (body: Body) =>
     handler.handle({ userId: 'admin', institutionId: SCHOOL, ...body });
   return { move, saved };
 }

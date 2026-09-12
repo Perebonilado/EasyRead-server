@@ -202,6 +202,18 @@ function askFor(
   return previousAsked ? null : ask;
 }
 
+/**
+ * What the reading-aloud check compares a page against: the note's
+ * paragraphs. A list is named item by item as the page has it, and a
+ * heading is a phrase, so neither counts as the page said back.
+ */
+function readAloudSource(blocks: Block[]): string {
+  return blocks
+    .filter((block) => !/heading|list|bullet/i.test(String(block.type)))
+    .map((block) => block.text)
+    .join('\n\n');
+}
+
 @Injectable()
 export class LectureChapterProcessor {
   private readonly logger = new Logger(LectureChapterProcessor.name);
@@ -584,7 +596,7 @@ export class LectureChapterProcessor {
         comingLater: input.comingLater,
         list: null,
         board: null,
-        styleCorrection: `${coverageDetail(missed)}. Write only these, each in at least a sentence, carrying on from what was just said`,
+        styleCorrection: `${coverageDetail(missed)}. Write only these, each in your own words, a sentence or two each, carrying on from what was just said`,
       });
       await this.calls.record({
         documentId: input.documentId,
@@ -601,11 +613,12 @@ export class LectureChapterProcessor {
         .join('\n\n');
       if (!addendum) return sections;
       const patched = sections.map((section) => ({ ...section }));
-      // Before the landing line on a chapter's last page; after the last
-      // section otherwise.
-      const at = input.isLastOfTopic
-        ? Math.max(0, patched.length - 2)
-        : patched.length - 1;
+      // Before the landing line on a chapter's last page, which the quick
+      // learner's chapter has none of; after the last section otherwise.
+      const at =
+        input.isLastOfTopic && input.style !== 'brisk'
+          ? Math.max(0, patched.length - 2)
+          : patched.length - 1;
       patched[at] = {
         ...patched[at],
         text: `${patched[at].text.trim()}\n\n${addendum}`,
@@ -1160,9 +1173,13 @@ export class LectureChapterProcessor {
       const isFirstOfTopic = index === 0;
       // The opening is spoken word for word from the plan; the writer
       // continues from it. Unless the planner could not produce one fit to
-      // be spoken, in which case the writer opens the chapter itself.
+      // be spoken, in which case the writer opens the chapter itself. The
+      // quick learner's chapter begins on its first idea: the hook stays
+      // in the plan and is never spoken.
       const opening =
-        isFirstOfTopic && plan.hookSpoken !== false ? plan.hook.trim() : null;
+        isFirstOfTopic && style !== 'brisk' && plan.hookSpoken !== false
+          ? plan.hook.trim()
+          : null;
 
       // What the lecture has taught (this chapter first, then earlier
       // ones) and what this chapter still has coming, so the page spends
@@ -1509,7 +1526,7 @@ export class LectureChapterProcessor {
         (block) => input.previouslyUntaught!.includes(block.index),
       );
       if (missed.length) {
-        styleCorrection = `${coverageDetail(missed)}. Say each of these in at least a sentence of its own, in order, inside the section of the move that teaches it, and name it in that section's teaches`;
+        styleCorrection = `${coverageDetail(missed)}. Teach each of these in your own words, a sentence or two each, in order, inside the section of the move that teaches it, and name it in that section's teaches`;
       }
     }
 
@@ -1630,6 +1647,9 @@ export class LectureChapterProcessor {
           taughtSoFar: input.taughtSoFar,
           midChapter: !input.isFirstOfTopic,
           budget,
+          noteText: input.note ? readAloudSource(input.note) : input.pageText,
+          payoff: input.plan.payoff ?? null,
+          lastOfChapter: input.isLastOfTopic,
         }),
       ];
       // A paragraph of the page the draft never reaches goes back to the
@@ -1649,7 +1669,7 @@ export class LectureChapterProcessor {
               exempt,
               frontMatter,
             }),
-          )}. Say each of these in at least a sentence of its own, in order, inside the section of the move that teaches it, and name it in that section's teaches; the styles differ in how much is said of each paragraph, never in which are said`,
+          )}. Teach each of these in your own words, a sentence or two each, in order, inside the section of the move that teaches it, and name it in that section's teaches; the styles differ in how much is said of each paragraph, never in which are said`,
         });
       }
       // A page that ignored its moves cannot stand in for one that kept

@@ -119,7 +119,9 @@ export class LectureVoiceProcessor {
       stretches,
       style,
       midChapter: kind === 'page' && place.midChapter,
-      landing: place.landing,
+      // The quick learner's chapter ends on its last idea, with no landing
+      // line to slow or hold the door for.
+      landing: place.landing && style !== 'brisk',
       emphasis: row.emphasis ?? null,
     });
 

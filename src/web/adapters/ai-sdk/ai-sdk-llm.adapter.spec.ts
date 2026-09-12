@@ -680,7 +680,12 @@ describe('AiSdkLlmAdapter', () => {
     expect(prompt).toContain('Thinking eviction means the data was wrong');
     expect(prompt).toContain("chapter's TURN");
     expect(prompt).toContain('[pause]');
-    expect(prompt).toContain('Open on the problem this chapter answers');
+    // The quick learner's chapter begins on its first idea: no problem
+    // line, no hook, no join to the last chapter.
+    expect(prompt).toContain(
+      "Begin on the page's first idea in your first sentence",
+    );
+    expect(prompt).not.toContain('Open on the problem');
     expect(prompt).toContain('page 1 of 4 in the chapter');
     // A brisk page is not told to restate; only a gentle one hears that.
     expect(prompt).not.toContain('restate the idea fully');

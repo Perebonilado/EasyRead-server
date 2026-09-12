@@ -15,14 +15,19 @@
 import type { LectureSegmentStatus } from '../../contracts';
 import { createHash } from 'node:crypto';
 import type { Block, LectureStyle } from '../../contracts';
-import { contentBlocks, isFrontMatterPage, repeatVerified } from './coverage';
+import {
+  contentBlocks,
+  contentWordsOf,
+  isFrontMatterPage,
+  repeatVerified,
+} from './coverage';
 
 /**
  * The generator's identity, stamped on every row it writes and baked into
  * every audio key. Bumped whenever the prompts change enough that audio
  * made by the previous generator must not be served for a new script.
  */
-export const LECTURE_GENERATOR_VERSION = 'lecture-8';
+export const LECTURE_GENERATOR_VERSION = 'lecture-9';
 
 /** A page with fewer readable characters than this carries no lecture. */
 export const MIN_PAGE_CHARS = 120;
@@ -465,16 +470,19 @@ export const LECTURE_STYLES: Record<LectureStyle, LectureStyleSpec> = {
     direction: [
       "Say the idea, then the page's own example if it has one, then stop.",
       'No scene-setting, no rhetorical questions, no callbacks beyond half a',
-      'sentence, no foreshadowing, no closing line. Every paragraph on the',
-      "page gets its point, in a sentence, and the page's example if it has",
-      'one; nothing on the page is passed over in silence. A paragraph the',
+      'sentence, no foreshadowing, no opening line, no closing line: the',
+      'chapter begins on its first idea and ends on its last. Every',
+      'paragraph on the page is taught, in your own words: what it means',
+      'and why it matters, in one or two short sentences, never the',
+      "paragraph's own sentence said back. A term, a name or a figure is",
+      'said as the page has it; everything else is yours. A paragraph the',
       'lecture has already taught is passed in a clause that says so, never',
-      'dropped as if it were not there, and a term the',
-      'lecture has used is used, not defined again. Where the page describes',
-      'a procedure, tell the listener to run it in their head before the',
-      "page's example confirms it. Write for a listener at double speed:",
-      'short sentences, one clause each. The listener is quick and wants the',
-      'point; when the page is taught, you are done.',
+      'dropped as if it were not there, and a term the lecture has used is',
+      'used, not defined again. Where the page describes a procedure, tell',
+      "the listener to run it in their head before the page's example",
+      'confirms it. Write for a listener at double speed: short sentences,',
+      'one clause each. The listener is quick and wants the point; when the',
+      'page is taught, you are done.',
     ].join(' '),
     recapCheck: true,
     tailChars: 320,
@@ -784,9 +792,65 @@ const THROAT_CLEARERS: readonly RegExp[] = [
   /^let'?s\b/i,
 ];
 
+/** A run this long, word for word from the page, is reading, not teaching. */
+const LIFTED_RUN = 8;
+
+/** Lifted sentences a page may carry before it is sent back, by style. */
+const LIFTED_MAX: Record<LectureStyle, number> = {
+  gentle: 3,
+  steady: 3,
+  brisk: 1,
+};
+
+/** The share of the payoff's carrying words a closing sentence may say before it is the landing line. */
+const LANDING_SHARE = 0.6;
+
+const plainWords = (text: string): string[] =>
+  text
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}\s'-]/gu, ' ')
+    .split(/\s+/)
+    .filter(Boolean);
+
+/**
+ * The sentences of a script that carry a run of `run` consecutive words
+ * found in the same order in the source: the page said back rather than
+ * taught. A term, a name, a figure or a short list item is shorter than a
+ * run and passes.
+ */
+export function liftedSentences(
+  text: string,
+  source: string,
+  run = LIFTED_RUN,
+): string[] {
+  const words = plainWords(source);
+  if (words.length < run) return [];
+  const runs = new Set<string>();
+  for (let i = 0; i + run <= words.length; i += 1) {
+    runs.add(words.slice(i, i + run).join(' '));
+  }
+  return sentencesOf(text).filter((sentence) => {
+    const own = plainWords(sentence);
+    for (let i = 0; i + run <= own.length; i += 1) {
+      if (runs.has(own.slice(i, i + run).join(' '))) return true;
+    }
+    return false;
+  });
+}
+
+/** Whether a sentence is the payoff by another name: most of its carrying words said. */
+function landsOn(sentence: string, payoff: string): boolean {
+  const aim = contentWordsOf(payoff);
+  if (aim.size < 3) return false;
+  const said = contentWordsOf(sentence);
+  let hit = 0;
+  for (const word of aim) if (said.has(word)) hit += 1;
+  return hit / aim.size >= LANDING_SHARE;
+}
+
 /** A closing sentence that sums up instead of landing. */
 const RECAP_ENDING =
-  /^(?:in (?:summary|short|conclusion)|to (?:sum up|summari[sz]e|recap)|so,? to recap|overall,|understanding .{0,60} is (?:key|crucial|essential))/i;
+  /^(?:in (?:summary|short|conclusion)|to (?:sum up|summari[sz]e|recap)|so,? to recap|overall,|(?:understanding|knowing|grasping|recogni[sz]ing) .{0,60} is (?:key|crucial|essential|vital|imperative|important|critical|necessary))/i;
 
 export interface StyleProblem {
   kind:
@@ -803,7 +867,8 @@ export interface StyleProblem {
     | 'two_terms'
     | 'label'
     | 'hanging_marks'
-    | 'uncovered';
+    | 'uncovered'
+    | 'read_aloud';
   detail: string;
 }
 
@@ -932,6 +997,11 @@ export function styleProblems(
     midChapter?: boolean;
     /** The page's budget, grown for its paragraphs; the style's plain one when absent. */
     budget?: WordBudget;
+    /** The note the page is taught from, as prose, for the reading-aloud check. */
+    noteText?: string;
+    /** The chapter's payoff and whether this is its last page, for the quick learner's ending. */
+    payoff?: string | null;
+    lastOfChapter?: boolean;
   },
 ): StyleProblem[] {
   const problems = openerProblems(text, 'script');
@@ -968,6 +1038,37 @@ export function styleProblems(
     }
   }
 
+  // The quick learner's chapter ends on its last idea. A final sentence
+  // made of the payoff's own words is the landing line by another name.
+  if (
+    options.style === 'brisk' &&
+    options.lastOfChapter &&
+    options.payoff &&
+    sentences.length
+  ) {
+    const last = sentences[sentences.length - 1];
+    if (landsOn(last, options.payoff)) {
+      problems.push({
+        kind: 'recap_ending',
+        detail: `Ends by landing the payoff ("${firstWords(last, 4)}"); stop on the page's last idea instead`,
+      });
+    }
+  }
+
+  // The page explained, never said back: a sentence lifted from the note
+  // is what a listener with the book in front of them hears as reading.
+  // The quick learner is allowed one such sentence on a page, the others
+  // three, since a figure's sentence is often the page's own.
+  if (options.noteText && !options.bridge) {
+    const lifted = liftedSentences(text, options.noteText);
+    if (lifted.length > LIFTED_MAX[options.style]) {
+      problems.push({
+        kind: 'read_aloud',
+        detail: `Reads the page aloud: ${lifted.length} sentences lifted from it, such as "${firstWords(lifted[0], 6)}..."; say each in your own words, keeping terms and figures as the page has them`,
+      });
+    }
+  }
+
   // A page ends on its idea, never on applause: "great job", "keep
   // exploring", "you have made real progress" teach nothing.
   const cheering = sentences
@@ -996,8 +1097,9 @@ export function styleProblems(
   }
   // A page after the first opens on what was just said, as its consequence,
   // its contrast or its next step. A page that starts cold, on a new
-  // subject with no join, makes the chapter a list of pages.
-  if (options.midChapter && !options.bridge) {
+  // subject with no join, makes the chapter a list of pages. The quick
+  // learner's page may begin on the idea itself.
+  if (options.midChapter && !options.bridge && options.style !== 'brisk') {
     const first = sentencesOf(text)[0] ?? '';
     if (first && !JOIN_CUES.test(first)) {
       problems.push({

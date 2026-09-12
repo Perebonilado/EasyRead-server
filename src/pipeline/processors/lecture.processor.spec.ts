@@ -2284,7 +2284,9 @@ describe('LectureChapterProcessor: a page that left paragraphs untaught', () => 
     cooperative = true;
     told.length = 0;
     await processor.process({ ...chapterJob(), coveragePass: 1 }, CONTEXT);
-    expect(told[0]).toMatch(/Paragraph 2 is not taught: "Central banks/);
+    expect(told[0]).toMatch(
+      /Paragraph 2 is not taught, the one beginning "Central banks/,
+    );
     expect(f.row(1)!.scriptText).toContain('Central banks');
     expect(f.row(1)!.untaught).toEqual([]);
     expect(f.chapterJobs.filter((job) => job.coveragePass === 2)).toEqual([]);

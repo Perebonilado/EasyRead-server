@@ -235,11 +235,20 @@ export function uncoveredBlocks(input: {
 }
 
 /** The untaught paragraphs as the writer is told them, each quoted. */
+/** The first words of a paragraph, enough to find it by and not enough to copy. */
+const beginning = (text: string, count = 6): string => {
+  const words = text.trim().split(/\s+/);
+  return words.length > count
+    ? `${words.slice(0, count).join(' ')}...`
+    : words.join(' ');
+};
+
+/** Names each paragraph left untaught by its number and its first words: a pointer, never a quote to say back. */
 export function coverageDetail(uncovered: UncoveredBlock[]): string {
   return uncovered
     .map(
       (block) =>
-        `Paragraph ${block.index} is not taught: "${block.text.length > 140 ? `${block.text.slice(0, 140)}...` : block.text}"`,
+        `Paragraph ${block.index} is not taught, the one beginning "${beginning(block.text)}"`,
     )
     .join('; ');
 }

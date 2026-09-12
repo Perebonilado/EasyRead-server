@@ -279,7 +279,9 @@ export class AiSdkLlmAdapter implements LlmGatewayPort, OnModuleInit {
     const place = input.opening
       ? `The chapter has just opened with these exact words, which the listener has just heard: "${input.opening}". Do not repeat or rephrase them. Carry straight on into the first idea.`
       : input.isFirstOfTopic
-        ? `This is the OPENING of the chapter. Open it yourself in one or two sentences that make this hook's point without its words, then get into the first idea. The hook: ${input.hook}`
+        ? input.style === 'brisk'
+          ? "This is the first page of the chapter. Begin on the page's first idea in your first sentence: no opening, no scene, no promise of what is coming, no line about the last chapter."
+          : `This is the OPENING of the chapter. Open it yourself in one or two sentences that make this hook's point without its words, then get into the first idea. The hook: ${input.hook}`
         : input.prevTail
           ? `You are mid-chapter. The last thing you said was:\n"${input.prevTail}"\nCarry straight on from it.`
           : 'You are mid-chapter. Carry on with the chapter without greeting the student or starting it over.';
@@ -295,7 +297,7 @@ export class AiSdkLlmAdapter implements LlmGatewayPort, OnModuleInit {
     const paragraphsOf = (index: number): string => {
       const blocks = input.beat.moveBlocks?.[index];
       if (!blocks?.length) return '';
-      return ` (says paragraphs ${blocks.join(', ')}, each in at least a sentence)`;
+      return ` (teaches paragraphs ${blocks.join(', ')}, each in your own words, a sentence or two each)`;
     };
     const moves =
       input.beat.moves.length > 1
@@ -332,17 +334,17 @@ export class AiSdkLlmAdapter implements LlmGatewayPort, OnModuleInit {
           : null,
         !input.isFirstOfTopic && !input.bridge
           ? input.style === 'brisk'
-            ? 'JOIN: your first words hang on the last thing said, in a few words, as its consequence, its contrast or the next step. No summary of it.'
+            ? 'JOIN: if the last thing said leads here, hang your first words on it, a few at most, as its consequence, its contrast or the next step; otherwise begin on the idea. No summary of it.'
             : 'JOIN: your first sentence hangs on the last thing said, as its consequence, its contrast or the next step: one clause, never a summary of it.'
           : null,
-        input.isFirstOfTopic && input.previousPayoff && !input.bridge
+        input.isFirstOfTopic &&
+        input.previousPayoff &&
+        !input.bridge &&
+        input.style !== 'brisk'
           ? `After the opening, one line that joins this chapter to where the last one landed: "${input.previousPayoff}". One line, then on.`
           : null,
         input.beat.turn && !input.bridge
           ? "This page carries the chapter's TURN: at the moment the listener could predict what comes next, ask them to, put [pause] on its own line, then give the answer from the page."
-          : null,
-        input.problem && input.style === 'brisk' && !input.opening
-          ? `Open on the problem this chapter answers, in one line, before the principle: ${input.problem}`
           : null,
         input.bridge
           ? 'This page carries almost nothing: a figure or a divider. Say ONE short sentence that carries the student across it, and nothing more.'
@@ -361,7 +363,9 @@ export class AiSdkLlmAdapter implements LlmGatewayPort, OnModuleInit {
           ? `Plant this for later, in one line: ${input.beat.foreshadow}`
           : null,
         input.isLastOfTopic
-          ? `This is the END of the chapter. Land this payoff in one sentence, in your own words, then stop. No summary, no preview of the next chapter. The payoff: ${input.payoff ?? 'the idea this chapter turned on'}`
+          ? input.style === 'brisk'
+            ? 'This is the last page of the chapter. Teach it and stop on its last idea: no landing line, no summary, no sign-off, no preview of the next chapter.'
+            : `This is the END of the chapter. Land this payoff in one sentence, in your own words, then stop. No summary, no preview of the next chapter. The payoff: ${input.payoff ?? 'the idea this chapter turned on'}`
           : null,
         input.correction
           ? `Your previous attempt was rejected for going beyond the page: ${input.correction}. Rewrite it using ONLY what the page below supports.`
@@ -370,7 +374,7 @@ export class AiSdkLlmAdapter implements LlmGatewayPort, OnModuleInit {
           ? `Your previous attempt was sent back: ${input.styleCorrection}. Rewrite it fixing exactly that: add what it says is missing, keep every fact that was right, and change nothing else.`
           : null,
         input.strict
-          ? 'STRICT: this page has been rejected twice for leaving the page. Teach only what is written on the page below, in its own terms. No hook, no callback, no foreshadowing, no claims about why it matters beyond what the page itself says, and no number or name the page does not state. A number is said only if it appears on the page exactly as written, digit for digit; otherwise leave it out.'
+          ? 'STRICT: this page has been rejected twice for leaving the page. Teach only what is written on the page below, in your own words, adding nothing the page does not say. No hook, no callback, no foreshadowing, no claims about why it matters beyond what the page itself says, and no number or name the page does not state. A number is said only if it appears on the page exactly as written, digit for digit; otherwise leave it out.'
           : null,
         input.board?.lines.length
           ? `THE BOARD for this page, in writing order. You write every one of these lines, exactly once, in the section of its move: [write n], then the line said word for word as its own sentence, then its explanation in everyday words, for example: "[write 2] Refill rate: ten tokens a second. That means every second, ten more tokens arrive, whatever else is happening."\n${input.board.lines

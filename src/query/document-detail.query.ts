@@ -9,6 +9,8 @@ import {
   SimplifiedPageModel,
   TopicModel,
   InstitutionMemberModel,
+  InstitutionModel,
+  CourseModel,
 } from '../web/database/models';
 import { toListItem } from './shared/document-shape';
 
@@ -33,6 +35,10 @@ export class DocumentDetailQuery {
     private readonly positions: typeof ReadingPositionModel,
     @InjectModel(InstitutionMemberModel)
     private readonly members: typeof InstitutionMemberModel,
+    @InjectModel(InstitutionModel)
+    private readonly institutions: typeof InstitutionModel,
+    @InjectModel(CourseModel)
+    private readonly courses: typeof CourseModel,
   ) {}
 
   async execute(documentId: string, userId: string): Promise<DocumentDetail> {
@@ -45,11 +51,12 @@ export class DocumentDetailQuery {
       throw new NotFoundException('Document not found');
     }
 
-    const [tallies, steps, topicCount, position] = await Promise.all([
+    const [tallies, steps, topicCount, position, school] = await Promise.all([
       this.tallyByLevel(documentId),
       this.runs.findAll({ where: { documentId } as never }),
       this.topics.count({ where: { documentId } as never }),
       this.positions.findOne({ where: { documentId, userId } as never }),
+      this.schoolOf(doc),
     ]);
 
     const standard = tallies.standard;
@@ -73,6 +80,23 @@ export class DocumentDetailQuery {
             level: position.level,
           }
         : null,
+      school,
+    };
+  }
+
+  /** The school's name and the file's course there, so the reader can say where it sits. */
+  private async schoolOf(
+    doc: DocumentModel,
+  ): Promise<DocumentDetail['school']> {
+    if (!doc.institutionId) return null;
+    const [institution, course] = await Promise.all([
+      this.institutions.findByPk(doc.institutionId),
+      doc.courseId ? this.courses.findByPk(doc.courseId) : null,
+    ]);
+    if (!institution) return null;
+    return {
+      name: institution.name,
+      course: course ? { name: course.name, code: course.code ?? null } : null,
     };
   }
 

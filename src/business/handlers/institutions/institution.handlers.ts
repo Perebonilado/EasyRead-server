@@ -354,6 +354,18 @@ export class SaveCourseHandler extends AbstractRequestHandlerTemplate<
         throw new NotFoundError('Level');
       }
     }
+    // One name per place, so the chips stay unambiguous: a course for the
+    // whole department shares the row with every year's.
+    const twin = (await this.institutions.listCourses(cmd.institutionId)).find(
+      (course) =>
+        course.id !== cmd.courseId &&
+        course.departmentId === cmd.departmentId &&
+        (!course.levelId || !cmd.levelId || course.levelId === cmd.levelId) &&
+        course.name.trim().toLowerCase() === name.toLowerCase(),
+    );
+    if (twin) {
+      throw new ValidationError('A course with that name is already here');
+    }
     if (cmd.courseId) {
       const existing = await this.institutions.findCourse(cmd.courseId);
       if (!existing || existing.institutionId !== cmd.institutionId) {

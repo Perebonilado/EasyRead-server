@@ -363,6 +363,11 @@ export type DocumentDetail = DocumentListItem & {
   topicsReady: boolean;
   easiestState: 'locked' | 'generating' | 'ready';
   position: { lastPage: number; furthestPage: number; level: string } | null;
+  /** The school this file belongs to and its course there, for the reader's header. */
+  school: {
+    name: string;
+    course: { name: string; code: string | null } | null;
+  } | null;
 };
 
 export type PageTextResponse = {

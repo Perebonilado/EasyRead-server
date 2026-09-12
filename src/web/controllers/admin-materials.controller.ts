@@ -12,6 +12,7 @@ import {
 import { Type } from 'class-transformer';
 import {
   ArrayMaxSize,
+  ArrayMinSize,
   IsArray,
   IsBoolean,
   IsIn,
@@ -114,6 +115,19 @@ class PrepareDto {
   revoice?: boolean;
 }
 
+/** Many files into one course, or out of any, in one request. */
+class MoveManyDto {
+  @IsArray()
+  @ArrayMinSize(1)
+  @ArrayMaxSize(500)
+  @IsUUID('all', { each: true })
+  documentIds!: string[];
+
+  @ValidateIf((_, value) => value !== null)
+  @IsUUID('all')
+  courseId!: string | null;
+}
+
 class MoveMaterialDto {
   @IsOptional()
   @IsUUID('all')
@@ -208,6 +222,26 @@ export class AdminMaterialsController {
       ...body,
     });
     return data;
+  }
+
+  /** The selected files into a course, or out of any: one request, one answer. */
+  @Post('materials/move')
+  async moveMany(
+    @CurrentUser('id') userId: string,
+    @Param('id') institutionId: string,
+    @Body() body: MoveManyDto,
+  ): Promise<{ ok: true; moved: number }> {
+    let moved = 0;
+    for (const documentId of body.documentIds) {
+      await this.move.handle({
+        userId,
+        institutionId,
+        documentId,
+        courseId: body.courseId,
+      });
+      moved += 1;
+    }
+    return { ok: true, moved };
   }
 
   /** The number before the button. */

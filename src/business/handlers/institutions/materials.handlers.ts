@@ -71,11 +71,18 @@ export class AdminUploadIntentHandler extends AbstractRequestHandlerTemplate<
         throw new NotFoundError('Level');
       }
     }
+    // A course belongs to its department and, when it has one, its year: a
+    // file dropped into a course lands where the course is.
+    let levelId = cmd.levelId ?? null;
     if (cmd.courseId) {
       const course = await this.institutions.findCourse(cmd.courseId);
       if (!course || course.institutionId !== cmd.institutionId) {
         throw new NotFoundError('Course');
       }
+      if (course.departmentId !== department.id) {
+        throw new ValidationError('That course is in another department');
+      }
+      if (course.levelId) levelId = course.levelId;
     }
     const extension = ACCEPTED_MIME_TYPES[cmd.mimeType];
     if (!extension) {
@@ -107,7 +114,7 @@ export class AdminUploadIntentHandler extends AbstractRequestHandlerTemplate<
     const siblings = await this.documents.listByPlacement({
       institutionId: cmd.institutionId,
       departmentId: department.id,
-      levelId: cmd.levelId ?? null,
+      levelId,
     });
     const document = await this.documents.create({
       userId: cmd.userId,
@@ -117,7 +124,7 @@ export class AdminUploadIntentHandler extends AbstractRequestHandlerTemplate<
       sizeBytes: cmd.sizeBytes,
       institutionId: cmd.institutionId,
       departmentId: department.id,
-      levelId: cmd.levelId ?? null,
+      levelId,
       courseId: cmd.courseId ?? null,
       contentHash,
       orderIndex: cmd.orderIndex ?? siblings.length,
@@ -179,14 +186,31 @@ export class MoveMaterialHandler extends AbstractRequestHandlerTemplate<
       }
       doc.props.levelId = cmd.levelId;
     }
-    if (cmd.courseId !== undefined) {
-      if (cmd.courseId) {
-        const course = await this.institutions.findCourse(cmd.courseId);
-        if (!course || course.institutionId !== cmd.institutionId) {
-          throw new NotFoundError('Course');
-        }
+    // A course belongs to its department and, when it has one, its year. A
+    // file put in a course goes where the course is; a file moved to another
+    // place leaves a course that is not there.
+    if (cmd.courseId) {
+      const course = await this.institutions.findCourse(cmd.courseId);
+      if (!course || course.institutionId !== cmd.institutionId) {
+        throw new NotFoundError('Course');
       }
-      doc.props.courseId = cmd.courseId;
+      if (course.departmentId !== doc.props.departmentId) {
+        throw new ValidationError('That course is in another department');
+      }
+      if (course.levelId) doc.props.levelId = course.levelId;
+      doc.props.courseId = course.id;
+    } else if (cmd.courseId === null) {
+      doc.props.courseId = null;
+    } else if (
+      doc.props.courseId &&
+      (cmd.departmentId !== undefined || cmd.levelId !== undefined)
+    ) {
+      const course = await this.institutions.findCourse(doc.props.courseId);
+      const stays =
+        course &&
+        course.departmentId === doc.props.departmentId &&
+        (!course.levelId || course.levelId === doc.props.levelId);
+      if (!stays) doc.props.courseId = null;
     }
     if (cmd.orderIndex !== undefined) doc.props.orderIndex = cmd.orderIndex;
     if (cmd.title !== undefined) {

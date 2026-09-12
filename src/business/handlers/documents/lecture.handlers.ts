@@ -90,6 +90,8 @@ export interface GenerateLectureRequest extends LectureRequest {
   rewrite?: boolean;
   /** The platform admin preparing a school's document: no plan gate applies. */
   asAdmin?: boolean;
+  /** False: the words only, no audio asked for. Prepare asks for the audio later. */
+  voice?: boolean;
   /**
    * A learner switched style here, mid-chapter: this page and the rest of
    * its chapter are written first, before anything else.
@@ -719,6 +721,7 @@ export class GenerateLectureHandler extends AbstractRequestHandlerTemplate<
           ...(priorityOf.has(topic.id)
             ? { priority: priorityOf.get(topic.id) }
             : {}),
+          ...(cmd.voice === false ? { voice: false } : {}),
         })),
     );
 

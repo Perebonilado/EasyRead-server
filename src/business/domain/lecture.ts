@@ -1845,7 +1845,7 @@ export const IN_FLIGHT_STATUSES: ReadonlySet<string> = new Set([
  * belongs to a job that died with its worker, and a lecture must not wait
  * on it forever.
  */
-export const LECTURE_STALE_MS = 10 * 60_000;
+export const LECTURE_STALE_MS = 30 * 60_000;
 
 /**
  * The status a row should be read as: its own, unless it has been in
@@ -1856,6 +1856,10 @@ export function effectiveStatus(
   row: { status: LectureSegmentStatus; updatedAt?: Date | null },
   now = Date.now(),
 ): LectureSegmentStatus {
+  // A pending row is queued, not lost: a large run keeps pages waiting
+  // for an hour and they are all still coming. Only a row a worker had
+  // in hand, writing or voicing, can be abandoned.
+  if (row.status === 'pending') return row.status;
   if (!IN_FLIGHT_STATUSES.has(row.status) || !row.updatedAt) return row.status;
   return now - row.updatedAt.getTime() > LECTURE_STALE_MS
     ? 'failed'

@@ -1113,13 +1113,19 @@ describe('effectiveStatus', () => {
     );
   });
 
-  it('reads a row lost in flight as failed', () => {
+  it('reads a row lost in flight as failed, and a queued row as still coming', () => {
     expect(
       effectiveStatus(
         { status: 'voicing', updatedAt: at(LECTURE_STALE_MS + 1) },
         now,
       ),
     ).toBe('failed');
+    expect(
+      effectiveStatus(
+        { status: 'pending', updatedAt: at(LECTURE_STALE_MS * 5) },
+        now,
+      ),
+    ).toBe('pending');
     expect(
       effectiveStatus(
         { status: 'writing', updatedAt: at(LECTURE_STALE_MS * 5) },

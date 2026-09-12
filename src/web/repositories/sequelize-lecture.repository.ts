@@ -237,11 +237,12 @@ export class SequelizeLectureRepository implements LectureRepository {
       moveOffsets: number[];
       durationMs: number | null;
       sectionTags?: unknown;
+      status?: 'voicing' | 'scripted';
     },
   ): Promise<void> {
     await this.segments.update(
       {
-        status: 'voicing',
+        status: input.status ?? 'voicing',
         scriptText: input.scriptText,
         moveOffsets: input.moveOffsets,
         durationMs: input.durationMs,

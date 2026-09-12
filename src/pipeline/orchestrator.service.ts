@@ -227,6 +227,7 @@ export class PipelineOrchestrator {
           documentId: doc.id,
           style,
           asAdmin: true,
+          voice: false,
         });
       } catch (error) {
         this.logger.warn(

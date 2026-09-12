@@ -201,6 +201,9 @@ export class LectureChapterProcessor {
     const { documentId, topicId, contentVersion, orderIndex, startAtPage } =
       job;
     const style: LectureStyle = job.style ?? 'steady';
+    // Words only, or words and their audio. A school's document written at
+    // upload has its audio asked for on Prepare.
+    const voice = job.voice !== false;
 
     const doc = await this.documents.findById(documentId);
     if (!doc || doc.props.deletedAt) return;
@@ -240,7 +243,9 @@ export class LectureChapterProcessor {
         style,
         kind: row.kind,
       }));
-      if (this.voicesHere(doc)) await this.queue.enqueueLectureVoices(keys);
+      if (voice && this.voicesHere(doc)) {
+        await this.queue.enqueueLectureVoices(keys);
+      }
       // Their words exist, so their board can be written now; it is timed
       // on the audio once that arrives.
       const unboarded = keys.filter((key, index) => {
@@ -317,6 +322,7 @@ export class LectureChapterProcessor {
     // chapter's opening when the lecture is interactive, so it is ready
     // before the first page is. Written from the plan alone.
     await this.writeExtra({
+      voice,
       doc,
       topic,
       topicId: topic.id,
@@ -343,6 +349,7 @@ export class LectureChapterProcessor {
       // status, because a written page legitimately sits in `voicing`.
       if (row.scriptText) continue;
       await this.writeOne({
+        voice,
         doc,
         topicId: topic.id,
         topicTitle: topic.title,
@@ -367,6 +374,8 @@ export class LectureChapterProcessor {
    * extra silently, since nothing of the lecture is missing.
    */
   private async writeExtra(input: {
+    /** False: the words only, no voice job. */
+    voice: boolean;
     doc: { id: string; props: { institutionId: string | null } };
     topic: { title: string };
     topicId: string;
@@ -451,6 +460,7 @@ export class LectureChapterProcessor {
         scriptText: script,
         moveOffsets: [],
         durationMs: estimateDurationMs(scriptForTts(script)),
+        status: input.voice ? 'voicing' : 'scripted',
       });
       // The map's outline lives on the plan, beside the beats it was
       // grouped from, so the status can hand it to the screen.
@@ -478,7 +488,7 @@ export class LectureChapterProcessor {
         plan,
         durationMs: estimateDurationMs(scriptForTts(script)),
       });
-      if (this.voicesHere(doc)) {
+      if (input.voice && this.voicesHere(doc)) {
         await this.queue.enqueueLectureVoices([
           {
             documentId: doc.id,
@@ -700,6 +710,8 @@ export class LectureChapterProcessor {
    * — the rest of the chapter still gets a lecture.
    */
   private async writeOne(input: {
+    /** False: the words only, no voice job. */
+    voice: boolean;
     doc: { id: string; props: { institutionId: string | null } };
     topicId: string;
     topicTitle: string;
@@ -829,6 +841,7 @@ export class LectureChapterProcessor {
         moveOffsets: written.moveOffsets,
         durationMs: estimateDurationMs(scriptForTts(written.script)),
         sectionTags: written.sectionTags,
+        status: input.voice ? 'voicing' : 'scripted',
       });
 
       // The board for this page, from the accepted script. It can never
@@ -910,6 +923,7 @@ export class LectureChapterProcessor {
           scriptText: written.part.script,
           moveOffsets: written.part.moveOffsets,
           durationMs: estimateDurationMs(scriptForTts(written.part.script)),
+          status: input.voice ? 'voicing' : 'scripted',
           // The same tags: the part's sections are found by their heads.
           sectionTags: written.sectionTags,
         });
@@ -946,7 +960,7 @@ export class LectureChapterProcessor {
         input.all.push({
           ...row,
           kind: 'part',
-          status: 'voicing',
+          status: input.voice ? 'voicing' : 'scripted',
           scriptText: written.part.script,
           moveOffsets: written.part.moveOffsets,
         });
@@ -958,7 +972,9 @@ export class LectureChapterProcessor {
           kind: 'part',
         });
       }
-      if (this.voicesHere(doc)) await this.queue.enqueueLectureVoices(voices);
+      if (input.voice && this.voicesHere(doc)) {
+        await this.queue.enqueueLectureVoices(voices);
+      }
     } catch (error) {
       const message = (error as Error).message;
       this.logger.warn(

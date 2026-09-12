@@ -139,6 +139,8 @@ export interface LectureRepository {
       durationMs: number | null;
       /** The writer's tags for the follow-along matcher; left as it is when omitted. */
       sectionTags?: unknown;
+      /** Voicing when its audio is asked for at once; scripted when it waits for Prepare. */
+      status?: 'voicing' | 'scripted';
     },
   ): Promise<void>;
   /** The audio exists: the page is playable. */

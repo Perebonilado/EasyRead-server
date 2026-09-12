@@ -715,6 +715,8 @@ export type LectureSegmentStatus =
   | 'writing'
   /** The script exists; its audio has not been made yet. */
   | 'voicing'
+  /** The script exists and nobody has asked for its audio: a school's document written at upload, voiced on Prepare. */
+  | 'scripted'
   | 'done'
   | 'failed';
 

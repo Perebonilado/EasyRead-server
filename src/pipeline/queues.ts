@@ -100,6 +100,8 @@ export interface LectureChapterJobData extends BaseJobData {
    * pages: a learner who switched style mid-chapter is waiting here.
    */
   startAtPage?: number;
+  /** False: write the words and ask for no audio. A school's document at upload. */
+  voice?: boolean;
 }
 
 /** Turning one finished script into audio. */

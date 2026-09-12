@@ -6,6 +6,9 @@ import type {
   LectureStyle,
   Level,
   MaterialDto,
+  MaterialPageDto,
+  MaterialProgress,
+  MaterialState,
 } from '../contracts';
 import { LECTURE_STYLE_KEYS } from '../contracts';
 import { effectiveStatus } from '../business/domain/lecture';
@@ -61,10 +64,11 @@ export class MaterialsQuery {
     if (!rows.length) return [];
     const ids = rows.map((row) => row.id);
 
-    const [runs, tallies, lectures, costs] = await Promise.all([
+    const [runs, tallies, lectures, costs, failedRows] = await Promise.all([
       this.runs.findAll({ where: { documentId: { [Op.in]: ids } } as never }),
       this.tallies(ids),
       this.lectures(ids),
+      this.failedRows(ids),
       this.costs(ids),
     ]);
 
@@ -86,6 +90,11 @@ export class MaterialsQuery {
           })),
         simplified: tally,
         lecture: lectures.get(row.id) ?? emptyLecture(),
+        progress: progressOf(
+          row,
+          lectures.get(row.id) ?? emptyLecture(),
+          failedRows.get(row.id) ?? 0,
+        ),
         costUsd: costs.get(row.id) ?? 0,
       };
     });
@@ -153,6 +162,58 @@ export class MaterialsQuery {
     return out;
   }
 
+  /** Failed rows of every kind, the number the card shows in red. */
+  private async failedRows(ids: string[]): Promise<Map<string, number>> {
+    const rows = (await this.segments.findAll({
+      attributes: ['documentId', [fn('COUNT', col('id')), 'n']],
+      where: { documentId: { [Op.in]: ids }, status: 'failed' } as never,
+      group: ['documentId'],
+      raw: true,
+    })) as unknown as { documentId: string; n: number | string }[];
+    return new Map(rows.map((row) => [row.documentId, Number(row.n)]));
+  }
+
+  /** One document's lecture rows, every style and kind, with their reasons. */
+  async pages(
+    institutionId: string,
+    documentId: string,
+  ): Promise<MaterialPageDto[]> {
+    const doc = await this.documents.findOne({
+      where: { id: documentId, institutionId, deletedAt: null } as never,
+      attributes: ['id', 'contentVersion'],
+    });
+    if (!doc) return [];
+    const rows = await this.segments.findAll({
+      attributes: [
+        'pageNumber',
+        'kind',
+        'style',
+        'status',
+        'error',
+        'updatedAt',
+      ],
+      where: {
+        documentId,
+        contentVersion: doc.get('contentVersion'),
+      } as never,
+      order: [
+        ['pageNumber', 'ASC'],
+        ['style', 'ASC'],
+        ['kind', 'ASC'],
+      ],
+    });
+    return rows.map((row) => ({
+      pageNumber: row.pageNumber,
+      kind: row.kind,
+      style: row.style,
+      status: effectiveStatus({
+        status: row.status,
+        updatedAt: row.get('updatedAt') as Date,
+      }),
+      error: row.error ?? null,
+    }));
+  }
+
   private async costs(ids: string[]): Promise<Map<string, number>> {
     const rows = (await this.calls.findAll({
       attributes: ['documentId', [fn('SUM', col('cost_estimate')), 'usd']],
@@ -167,6 +228,48 @@ export class MaterialsQuery {
       ]),
     );
   }
+}
+
+/**
+ * The three bars and the word under them. The text bar is the pipeline's
+ * own progress; the other two are pages with words and pages with audio
+ * over the pages seeded, all styles together. The word is what is
+ * happening now, or what needs a person: failed pages with nothing still
+ * moving is attention; failed pages with work still going on is the work.
+ */
+function progressOf(
+  row: { status: string; progress?: number | null },
+  lecture: MaterialDto['lecture'],
+  failed: number,
+): MaterialProgress {
+  const tallies = Object.values(lecture);
+  const total = tallies.reduce((sum, t) => sum + t.total, 0);
+  const scripted = tallies.reduce((sum, t) => sum + t.scripted, 0);
+  const ready = tallies.reduce((sum, t) => sum + t.ready, 0);
+  const percent = (part: number) =>
+    total === 0 ? 0 : Math.round((part / total) * 100);
+  const text =
+    row.status === 'ready'
+      ? 100
+      : Math.round(Math.max(0, Math.min(1, row.progress ?? 0)) * 100);
+
+  let state: MaterialState;
+  if (row.status === 'failed') state = 'failed';
+  else if (row.status === 'uploading') state = 'uploading';
+  else if (row.status !== 'ready') state = 'preparing';
+  else if (total === 0) state = 'ready';
+  else if (scripted + failed < total) state = 'writing';
+  else if (ready + failed < total) state = 'voicing';
+  else if (failed > 0) state = 'attention';
+  else state = 'ready';
+
+  return {
+    text,
+    scripts: percent(scripted),
+    audio: percent(ready),
+    failed,
+    state,
+  };
 }
 
 const emptyTally = (): MaterialDto['simplified'] => ({

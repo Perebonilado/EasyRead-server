@@ -216,6 +216,38 @@ export interface MaterialDto {
   >;
   /** What the model calls on this document have cost so far, summed from the ledger. */
   costUsd: number;
+  /** Where the document stands, as the card draws it: three bars and one word. */
+  progress: MaterialProgress;
+}
+
+export type MaterialState =
+  | 'uploading'
+  | 'preparing'
+  | 'writing'
+  | 'voicing'
+  | 'ready'
+  | 'attention'
+  | 'failed';
+
+export interface MaterialProgress {
+  /** Percent of the text pipeline done. */
+  text: number;
+  /** Percent of lecture pages, all styles, with their words. */
+  scripts: number;
+  /** Percent of lecture pages, all styles, with their audio. */
+  audio: number;
+  /** Pages failed, all styles, kinds included. */
+  failed: number;
+  state: MaterialState;
+}
+
+/** One lecture row of a document, for the admin's detail panel. */
+export interface MaterialPageDto {
+  pageNumber: number;
+  kind: SegmentKind;
+  style: LectureStyle;
+  status: LectureSegmentStatus;
+  error: string | null;
 }
 
 export interface PrepareRequest {

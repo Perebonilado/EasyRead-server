@@ -202,12 +202,12 @@ export class PipelineOrchestrator {
   }
 
   /**
-   * A school's document has its lecture written the moment its text is
-   * ready and its chapters are cut, in every style, without a button: the
-   * words are cheap and needed whatever happens next, and Prepare then has
-   * only the audio to do. Reached from both the last text page and the
-   * chapters step, whichever lands second. Once the rows exist it is done;
-   * anything missing after that is Prepare's to ask for.
+   * A school's document has its lecture written and voiced the moment its
+   * text is ready and its chapters are cut, in every style, without a
+   * button: an upload comes out the other end ready to play. Reached from
+   * both the last text page and the chapters step, whichever lands second.
+   * Once the rows exist it is done; anything missing after that is
+   * Prepare's to ask for.
    */
   private async catalogueScripts(doc: {
     id: string;
@@ -227,7 +227,6 @@ export class PipelineOrchestrator {
           documentId: doc.id,
           style,
           asAdmin: true,
-          voice: false,
         });
       } catch (error) {
         this.logger.warn(

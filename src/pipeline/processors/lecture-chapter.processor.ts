@@ -135,6 +135,12 @@ type WrittenPage = PageScripts & {
  * runs long, ends on a recap, or ignores its moves is sent back with the
  * reason.
  */
+/** How long a chapter waits before its second pass over failed pages. */
+const SECOND_PASS_MS = 3 * 60_000;
+/** A failure the writer cannot cure by trying again: nothing on the page to teach. */
+const PERMANENT_FAILURE =
+  /no text|nothing to teach|nothing to check|could not be planned|names no terms|no readable/i;
+
 @Injectable()
 export class LectureChapterProcessor {
   private readonly logger = new Logger(LectureChapterProcessor.name);
@@ -212,6 +218,18 @@ export class LectureChapterProcessor {
     const topics = await this.topics.listByDocument(documentId);
     const topic = topics.find((candidate) => candidate.id === topicId);
     if (!topic) return;
+
+    // The chapter's own second pass: the pages that failed its first run
+    // go back to pending and are written again below, with the checker's
+    // objection from the first run answered in the prompt.
+    if (job.secondPass) {
+      await this.lectures.resetFailedSegments(
+        documentId,
+        contentVersion,
+        [topicId],
+        style,
+      );
+    }
 
     // Every row of every style: the rows were seeded when the lecture was
     // asked for, so the shape of the whole lecture is visible before any
@@ -362,6 +380,49 @@ export class LectureChapterProcessor {
         taughtEarlier,
       });
     }
+
+    await this.queueSecondPass(job, style);
+  }
+
+  /**
+   * A chapter that ends with a failed page gets one more go on its own, a
+   * few minutes on, before anyone is shown a failure: most of what fails a
+   * page is a checker's objection the next draft can answer, or a fault
+   * that has passed by then. Once only; a page whose source has nothing to
+   * teach is not asked for again.
+   */
+  private async queueSecondPass(
+    job: LectureChapterJobData,
+    style: LectureStyle,
+  ): Promise<void> {
+    if (job.secondPass) return;
+    const rows = await this.lectures.listSegments(
+      job.documentId,
+      job.contentVersion,
+      style,
+    );
+    const retriable = rows.filter(
+      (row) =>
+        row.topicId === job.topicId &&
+        row.status === 'failed' &&
+        !PERMANENT_FAILURE.test(row.error ?? ''),
+    );
+    if (!retriable.length) return;
+    this.logger.log(
+      `${job.documentId} ${style}: ${retriable.length} page${retriable.length === 1 ? '' : 's'} failed; a second pass in ${SECOND_PASS_MS / 60_000} minutes`,
+    );
+    await this.queue.enqueueLectureChapters([
+      {
+        documentId: job.documentId,
+        contentVersion: job.contentVersion,
+        topicId: job.topicId,
+        orderIndex: job.orderIndex,
+        style,
+        ...(job.voice === false ? { voice: false } : {}),
+        secondPass: true,
+        delayMs: SECOND_PASS_MS,
+      },
+    ]);
   }
 
   /**
@@ -1247,7 +1308,13 @@ export class LectureChapterProcessor {
       if (decision.action === 'fail') {
         throw new Error(`Script left the page: ${decision.reason}`);
       }
-      correction = decision.reason;
+      // The objection goes back with the rule that answers it. A figure
+      // the page does not state is the commonest way a page is left, and
+      // the fix is never a better guess: it is the page's own digits, or
+      // no digits at all.
+      correction = figures.length
+        ? `${decision.reason}. Every number you say must appear on the page exactly as it is written there, digit for digit. If the page's figure is unclear, leave the number out and say the point in words.`
+        : decision.reason;
       styleCorrection = undefined;
       leftTheMaterial = true;
     }

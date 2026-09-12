@@ -23,6 +23,8 @@ export interface LectureSegmentRecord {
   /** A page, or one of the short segments around a chapter. */
   kind: SegmentKind;
   status: LectureSegmentStatus;
+  /** Why it failed, when it did. */
+  error?: string | null;
   /** When the row last changed; how long it has sat in flight. */
   updatedAt?: Date | null;
   scriptText: string | null;

@@ -102,6 +102,13 @@ export interface LectureChapterJobData extends BaseJobData {
   startAtPage?: number;
   /** False: write the words and ask for no audio. A school's document at upload. */
   voice?: boolean;
+  /**
+   * The chapter's own retry of the pages that failed its first run, queued
+   * by that run a few minutes later. Resets them and writes them again,
+   * once; a page that fails this too stays failed with its reason.
+   */
+  secondPass?: boolean;
+  delayMs?: number;
 }
 
 /** Turning one finished script into audio. */

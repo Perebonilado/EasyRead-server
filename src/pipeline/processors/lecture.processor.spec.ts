@@ -106,6 +106,14 @@ function fakes(
     kind: SegmentKind;
   }[] = [];
   const diagramJobs: { pageNumber: number; style: LectureStyle }[] = [];
+  /** Chapter jobs the processor queues itself: a chapter's second pass over its failed pages. */
+  const chapterJobs: {
+    topicId: string;
+    style: LectureStyle;
+    secondPass?: boolean;
+    delayMs?: number;
+    voice?: boolean;
+  }[] = [];
   const boardJobs: {
     pageNumber: number;
     style: LectureStyle;
@@ -383,6 +391,26 @@ function fakes(
         );
         return Promise.resolve();
       },
+      enqueueLectureChapters: (
+        jobs: {
+          topicId: string;
+          style: LectureStyle;
+          secondPass?: boolean;
+          delayMs?: number;
+          voice?: boolean;
+        }[],
+      ) => {
+        chapterJobs.push(
+          ...jobs.map((job) => ({
+            topicId: job.topicId,
+            style: job.style,
+            secondPass: job.secondPass,
+            delayMs: job.delayMs,
+            voice: job.voice,
+          })),
+        );
+        return Promise.resolve();
+      },
       enqueueLectureVoices: (
         jobs: { pageNumber: number; style: LectureStyle; kind?: SegmentKind }[],
       ) => {
@@ -438,6 +466,7 @@ function fakes(
   };
 
   return {
+    chapterJobs,
     alignJobs,
     diagramJobs,
     boardJobs,
@@ -654,6 +683,47 @@ describe('LectureChapterProcessor', () => {
       pageNumber: 2,
       style: 'steady',
     });
+    // The chapter asks for its own second pass, a few minutes on, once.
+    expect(f.chapterJobs).toEqual([
+      {
+        topicId: TOPIC.id,
+        style: 'steady',
+        secondPass: true,
+        delayMs: 180_000,
+        voice: undefined,
+      },
+    ]);
+  });
+
+  it('writes the failed pages again on its second pass, and asks for no third', async () => {
+    const f = fakes({ 1: REAL_PAGE, 2: REAL_PAGE, 3: REAL_PAGE });
+    const llm = new FakeLlmAdapter();
+    const inner = new FakeLlmAdapter();
+    let seen = 0;
+    llm.lectureSegment = (input) => {
+      seen += 1;
+      // The first run: page 2 strays every time. The second pass: it lands.
+      if (seen >= 2 && seen <= 4) {
+        return Promise.resolve(
+          draft('UNGROUNDED invention: 4096 widgets in 1913.'),
+        );
+      }
+      return inner.lectureSegment(input);
+    };
+    const processor = chapterProcessor(f, llm);
+    await processor.process(chapterJob(), CONTEXT);
+    expect(f.segments.get(2)!.status).toBe('failed');
+
+    await processor.process(
+      { ...chapterJob(), secondPass: true, delayMs: 180_000 },
+      CONTEXT,
+    );
+
+    expect(f.segments.get(2)!.status).toBe('voicing');
+    // Page 2 is voiced now; the pass also re-asks for the pages already
+    // voiced, which the queue drops as duplicates in production.
+    expect(f.voiceJobs.slice(2).map((job) => job.pageNumber)).toContain(2);
+    expect(f.chapterJobs).toHaveLength(1);
   });
 
   it('takes the tail from the nearest page that actually has words', async () => {

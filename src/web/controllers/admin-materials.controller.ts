@@ -30,6 +30,7 @@ import {
   type LectureStyle,
   type MaterialDto,
   type PrepareResponse,
+  MaterialPageDto,
 } from '../../contracts';
 import { MAX_UPLOAD_BYTES } from '../../business/domain/values';
 import {
@@ -160,6 +161,15 @@ export class AdminMaterialsController {
       courseId: courseId || undefined,
     });
     return { materials };
+  }
+
+  /** One document's lecture rows with their reasons, for the card's detail panel. */
+  @Get('materials/:documentId/pages')
+  async pages(
+    @Param('id') institutionId: string,
+    @Param('documentId') documentId: string,
+  ): Promise<{ pages: MaterialPageDto[] }> {
+    return { pages: await this.materials.pages(institutionId, documentId) };
   }
 
   /** The hash first: a duplicate is answered without its bytes. Then the usual content route. */

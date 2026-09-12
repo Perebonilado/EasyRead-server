@@ -14,6 +14,7 @@ container to zero between runs.
     TTS_GPU=L40S modal deploy ...                      # try another card
     TTS_MODEL=Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice ... # or the bigger voice
     TTS_EAGER=true ...                                 # no CUDA graphs, for comparison
+    TTS_APP_NAME=easiread-tts-17b ...                  # deploy beside the catalogue's service
 
 The secret `easiread-tts` holds TTS_TOKEN; the engine takes it as its API key
 and the server sends it as a bearer token.
@@ -43,12 +44,19 @@ INSTRUCTIONS_LIMIT = 2_000
 USD_PER_GPU_HOUR = {"L4": 0.80, "A10": 1.10, "L40S": 1.95, "A100": 2.10, "H100": 3.95}
 OPENAI_USD_PER_AUDIO_HOUR = 0.90
 
-app = modal.App("easiread-tts")
+# A second deployment under another name, TTS_APP_NAME=easiread-tts-17b, lets
+# a bigger checkpoint be measured beside the catalogue's service.
+app = modal.App(os.environ.get("TTS_APP_NAME", "easiread-tts"))
 
 # The engine's own release image, pinned. HF_HOME on the volume so a cold
 # start reads the weights from disk rather than from Hugging Face.
 image = modal.Image.from_registry("vllm/vllm-omni:v0.28.0").env(
     {
+        # The checkpoint and the eager flag are chosen at deploy time on this
+        # machine; the container reads them from its own environment, so
+        # they are baked into the image rather than looked up there.
+        "TTS_MODEL": MODEL,
+        "TTS_EAGER": "true" if EAGER else "false",
         "HF_HOME": "/weights",
         # The engine compiles the model and captures its graphs on every
         # start and would throw the result away with the container. Kept on

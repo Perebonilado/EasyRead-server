@@ -19,6 +19,12 @@ export interface LectureChapterJob extends PipelineJob {
   startAtPage?: number;
   /** Where this chapter stands in the queue, lower sooner; set when preparing ahead of a learner. */
   priority?: number;
+  /** False: write the words and ask for no audio. */
+  voice?: boolean;
+  /** The chapter's own retry of its failed pages, queued by the first run; never queues another. */
+  secondPass?: boolean;
+  /** How long to wait before running, for a second pass. */
+  delayMs?: number;
 }
 
 export interface LectureVoiceJob extends PipelineJob {

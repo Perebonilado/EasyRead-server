@@ -325,7 +325,7 @@ export class AiSdkLlmAdapter implements LlmGatewayPort, OnModuleInit {
           ? `Your previous attempt was rejected for how it read: ${input.styleCorrection}. Rewrite it fixing exactly that, and keep every fact.`
           : null,
         input.strict
-          ? 'STRICT: this page has been rejected twice for leaving the page. Teach only what is written on the page below, in its own terms. No hook, no callback, no foreshadowing, no claims about why it matters beyond what the page itself says, and no number or name the page does not state.'
+          ? 'STRICT: this page has been rejected twice for leaving the page. Teach only what is written on the page below, in its own terms. No hook, no callback, no foreshadowing, no claims about why it matters beyond what the page itself says, and no number or name the page does not state. A number is said only if it appears on the page exactly as written, digit for digit; otherwise leave it out.'
           : null,
         input.board?.lines.length
           ? `THE BOARD for this page, in writing order. You write every one of these lines, exactly once, in the section of its move: [write n], then the line said word for word as its own sentence, then its explanation in everyday words, for example: "[write 2] Refill rate: ten tokens a second. That means every second, ten more tokens arrive, whatever else is happening."\n${input.board.lines

@@ -164,12 +164,16 @@ export class BullmqQueueAdapter implements JobQueuePort, OnModuleDestroy {
         data: job,
         opts: {
           ...this.options(QUEUE.lectureChapter),
-          jobId: lectureChapterJobId(
-            job.documentId,
-            job.topicId,
-            job.contentVersion,
-            job.style,
-          ),
+          // A second pass has its own id: the first run's finished job
+          // would swallow it otherwise. It waits its delay in the queue.
+          jobId:
+            lectureChapterJobId(
+              job.documentId,
+              job.topicId,
+              job.contentVersion,
+              job.style,
+            ) + (job.secondPass ? '-again' : ''),
+          ...(job.delayMs ? { delay: job.delayMs } : {}),
           // Lower is sooner in BullMQ, and zero means "no priority at
           // all" — hence the offset. Chapter one is written first so the
           // student can start listening while the rest is still coming;

@@ -51,6 +51,7 @@ const toSegment = (row: LectureSegmentModel): LectureSegmentRecord => ({
   style: row.style,
   kind: row.kind ?? 'page',
   status: row.status,
+  error: row.error ?? null,
   updatedAt: toDate(row.get('updatedAt')),
   scriptText: row.scriptText,
   audioKey: row.audioKey,

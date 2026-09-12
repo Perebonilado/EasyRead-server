@@ -209,7 +209,7 @@ export interface MaterialDto {
   contentHash: string | null;
   steps: { step: PipelineStep; status: PipelineStatus; error: string | null }[];
   simplified: Record<Level, { done: number; failed: number; total: number }>;
-  /** Lecture pages per style: how many exist, have their words, have audio, failed. */
+  /** Lecture rows per style, the segments around a chapter included: how many exist, have their words, have audio, failed. */
   lecture: Record<
     LectureStyle,
     { total: number; scripted: number; ready: number; failed: number }

@@ -64,7 +64,7 @@ export class MaterialsQuery {
     if (!rows.length) return [];
     const ids = rows.map((row) => row.id);
 
-    const [runs, tallies, lectures, costs, failedRows] = await Promise.all([
+    const [runs, tallies, lectures, failedRows, costs] = await Promise.all([
       this.runs.findAll({ where: { documentId: { [Op.in]: ids } } as never }),
       this.tallies(ids),
       this.lectures(ids),
@@ -143,7 +143,10 @@ export class MaterialsQuery {
         'updatedAt',
         [literal('script_text IS NOT NULL'), 'scripted'],
       ],
-      where: { documentId: { [Op.in]: ids }, kind: 'page' } as never,
+      // Every row, the short segments around a chapter included, so that
+      // an audio bar at 100 means the whole lecture and the failed count
+      // never contradicts it.
+      where: { documentId: { [Op.in]: ids } } as never,
     });
     const out = new Map<string, MaterialDto['lecture']>();
     for (const row of rows) {

@@ -1530,11 +1530,31 @@ export function unsupportedFigures(
 ): string[] {
   const plain = (text: string) => text.replace(/(\d),(?=\d)/g, '$1');
   const haystack = plain(sources.join('\n'));
+  const spoken = plain(scriptForTts(script));
+  // A range of years on the page supports both years it spans, written
+  // out: "1998–99" says 1999 as plainly as it says 1998.
+  const spanned = new Set<string>();
+  for (const range of haystack.matchAll(
+    /\b(\d{4})\s*[-–—]\s*(\d{2}|\d{4})\b/g,
+  )) {
+    const [, from, to] = range;
+    spanned.add(from);
+    spanned.add(to.length === 4 ? to : from.slice(0, 2) + to);
+  }
+  // A decade said as "the 1990s" is supported by any year of it on the page.
+  const decades = new Set(
+    [...spoken.matchAll(/\b(\d{3})0s\b/g)]
+      .map((match) => match[1])
+      .filter((prefix) => new RegExp(`\\b${prefix}\\d\\b`).test(haystack))
+      .map((prefix) => `${prefix}0`),
+  );
   const missing = new Set<string>();
-  for (const match of plain(scriptForTts(script)).matchAll(/\d+(?:\.\d+)?/g)) {
+  for (const match of spoken.matchAll(/\d+(?:\.\d+)?/g)) {
     const figure = match[0];
     if (figure.replace(/\D/g, '').length < 3) continue;
-    if (!haystack.includes(figure)) missing.add(figure);
+    if (haystack.includes(figure)) continue;
+    if (spanned.has(figure) || decades.has(figure)) continue;
+    missing.add(figure);
   }
   return [...missing];
 }

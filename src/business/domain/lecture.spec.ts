@@ -733,6 +733,29 @@ describe('unsupportedFigures', () => {
       '1913',
     ]);
   });
+
+  it('reads a range of years as both years, and a decade as its years', () => {
+    const slide =
+      'In 1998–99, some 45,000 new cases were reported each year; epidemics in Uganda in 1978, 1980, and 1988.';
+    // "1998 to 1999" is what the slide says; "the late 1990s" is too.
+    expect(
+      unsupportedFigures('From 1998 to 1999, 45000 cases a year.', [slide]),
+    ).toEqual([]);
+    expect(
+      unsupportedFigures('In the late 1990s, cases rose tenfold.', [slide]),
+    ).toEqual([]);
+    expect(
+      unsupportedFigures('Epidemics through the 1970s and 1980s.', [slide]),
+    ).toEqual([]);
+    // A decade the page has no year of, and a year outside the range, are still invention.
+    expect(
+      unsupportedFigures('Back in the 1950s, and in 2001.', [slide]),
+    ).toEqual(['1950', '2001']);
+    // A range written with full years and a plain hyphen.
+    expect(
+      unsupportedFigures('By 1980.', ['a rise from 1978-1980 in Uganda']),
+    ).toEqual([]);
+  });
 });
 
 describe('styles', () => {

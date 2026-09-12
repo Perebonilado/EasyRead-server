@@ -25,6 +25,8 @@ export interface LectureChapterJob extends PipelineJob {
   secondPass?: boolean;
   /** How long to wait before running, for a second pass. */
   delayMs?: number;
+  /** Which pass over pages that left paragraphs untaught this is; absent on the first write. */
+  coveragePass?: number;
 }
 
 export interface LectureVoiceJob extends PipelineJob {

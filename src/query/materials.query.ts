@@ -175,6 +175,7 @@ export class MaterialsQuery {
       where: {
         documentId: { [Op.in]: ids },
         untaught: { [Op.ne]: null },
+        scriptText: { [Op.ne]: null },
       } as never,
       raw: true,
     })) as unknown as { documentId: string; untaught: number[] | null }[];
@@ -216,6 +217,7 @@ export class MaterialsQuery {
         'status',
         'error',
         'untaught',
+        'scriptText',
         'updatedAt',
       ],
       where: {
@@ -237,7 +239,10 @@ export class MaterialsQuery {
         updatedAt: row.get('updatedAt') as Date,
       }),
       error: row.error ?? null,
-      untaught: Array.isArray(row.untaught) ? row.untaught.length : null,
+      untaught:
+        row.scriptText && Array.isArray(row.untaught)
+          ? row.untaught.length
+          : null,
     }));
   }
 

@@ -370,7 +370,6 @@ export class SequelizeLectureRepository implements LectureRepository {
       {
         status: 'pending',
         scriptText: null,
-        untaught: null,
         error: null,
       },
       {

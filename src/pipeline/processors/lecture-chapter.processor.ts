@@ -166,6 +166,9 @@ type WrittenPage = PageScripts & {
  */
 /** How long a chapter waits before its second pass over failed pages. */
 const SECOND_PASS_MS = 3 * 60_000;
+/** How many times a chapter writes again the pages that left paragraphs untaught, on its own. */
+const MAX_COVERAGE_PASSES = 2;
+const COVERAGE_PASS_MS = 30_000;
 /** A failure the writer cannot cure by trying again: nothing on the page to teach. */
 const PERMANENT_FAILURE =
   /no text|nothing to teach|nothing to check|could not be planned|names no terms|no readable/i;
@@ -468,6 +471,55 @@ export class LectureChapterProcessor {
     }
 
     await this.queueSecondPass(job, style);
+    await this.queueCoveragePass(job, style);
+  }
+
+  /**
+   * A chapter that ends with a page that left paragraphs untaught, after
+   * the writer's attempts, writes that page again on its own, told what
+   * was missing, up to twice more. Only then is anyone shown the count;
+   * a student never has to press anything for a page to be whole.
+   */
+  private async queueCoveragePass(
+    job: LectureChapterJobData,
+    style: LectureStyle,
+  ): Promise<void> {
+    const pass = job.coveragePass ?? 0;
+    if (pass >= MAX_COVERAGE_PASSES) return;
+    const rows = await this.lectures.listSegments(
+      job.documentId,
+      job.contentVersion,
+      style,
+    );
+    const short = rows.filter(
+      (row) =>
+        row.topicId === job.topicId &&
+        row.kind === 'page' &&
+        Boolean(row.scriptText) &&
+        (row.untaught?.length ?? 0) > 0,
+    );
+    if (!short.length) return;
+    this.logger.log(
+      `${job.documentId} ${style}: ${short.length} page${short.length === 1 ? '' : 's'} left paragraphs untaught; pass ${pass + 1} of ${MAX_COVERAGE_PASSES} in ${COVERAGE_PASS_MS / 1000}s`,
+    );
+    await this.lectures.resetUntaughtSegments(
+      job.documentId,
+      job.contentVersion,
+      [job.topicId],
+      style,
+    );
+    await this.queue.enqueueLectureChapters([
+      {
+        documentId: job.documentId,
+        contentVersion: job.contentVersion,
+        topicId: job.topicId,
+        orderIndex: job.orderIndex,
+        style,
+        ...(job.voice === false ? { voice: false } : {}),
+        coveragePass: pass + 1,
+        delayMs: COVERAGE_PASS_MS,
+      },
+    ]);
   }
 
   /**
@@ -1004,6 +1056,9 @@ export class LectureChapterProcessor {
         neighbours,
         original: note ? original : undefined,
         note: note ?? undefined,
+        // A page written again after leaving paragraphs untaught is told
+        // which, before its first attempt.
+        previouslyUntaught: row.untaught ?? undefined,
       });
 
       // Kept in memory too, so the next page in this loop sees it without
@@ -1225,6 +1280,8 @@ export class LectureChapterProcessor {
     original?: string;
     /** The note the page is taught from, for addressing and for checking the writer's tags. */
     note?: Block[];
+    /** The paragraphs an earlier write of this page left untaught, by number. */
+    previouslyUntaught?: number[];
   }): Promise<WrittenPage> {
     const { style } = input;
     const beat = beatFor(input.plan, input.pageNumber);
@@ -1294,6 +1351,16 @@ export class LectureChapterProcessor {
     let correction: string | undefined;
     let styleCorrection: string | undefined;
     let leftTheMaterial = false;
+    // The paragraphs an earlier write left out, quoted before the first
+    // attempt, so the pass starts where the last one fell short.
+    if (input.previouslyUntaught?.length && input.note) {
+      const missed = contentBlocks(input.note, { frontMatter }).filter(
+        (block) => input.previouslyUntaught!.includes(block.index),
+      );
+      if (missed.length) {
+        styleCorrection = `${coverageDetail(missed)}. Say each of these in at least a sentence of its own, in order, inside the section of the move that teaches it, and name it in that section's teaches`;
+      }
+    }
 
     // The board first, so the speech can be written around it: the
     // lecturer knows what goes on the board before saying a word.

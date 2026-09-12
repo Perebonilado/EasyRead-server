@@ -172,7 +172,9 @@ export class BullmqQueueAdapter implements JobQueuePort, OnModuleDestroy {
               job.topicId,
               job.contentVersion,
               job.style,
-            ) + (job.secondPass ? '-again' : ''),
+            ) +
+            (job.secondPass ? '-again' : '') +
+            (job.coveragePass ? `-cover${job.coveragePass}` : ''),
           ...(job.delayMs ? { delay: job.delayMs } : {}),
           // Lower is sooner in BullMQ, and zero means "no priority at
           // all" — hence the offset. Chapter one is written first so the

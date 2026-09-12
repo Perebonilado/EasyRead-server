@@ -191,7 +191,7 @@ export interface LectureRepository {
    * asked for again: a page whose spoken form has not changed is found in
    * storage and marked done at once; one whose form changed is made anew.
    */
-  /** Pages of these chapters that left paragraphs untaught go back to pending with no words, to be written again. */
+  /** Pages of these chapters that left paragraphs untaught go back to pending with no words, to be written again; the count stays so the next write knows what was missing. */
   resetUntaughtSegments(
     documentId: string,
     contentVersion: number,

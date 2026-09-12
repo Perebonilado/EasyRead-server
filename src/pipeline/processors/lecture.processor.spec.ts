@@ -1,3 +1,4 @@
+import type { Block } from '../../contracts';
 import { ConfigService } from '@nestjs/config';
 import type { LectureStyle, SegmentKind } from '../../contracts';
 import { FakeLlmAdapter } from '../../web/adapters/fake-llm.adapter';
@@ -118,6 +119,7 @@ function fakes(
     secondPass?: boolean;
     delayMs?: number;
     voice?: boolean;
+    coveragePass?: number;
   }[] = [];
   const boardJobs: {
     pageNumber: number;
@@ -293,6 +295,7 @@ function fakes(
       r.moveOffsets = input.moveOffsets;
       r.durationMs = input.durationMs;
       if (input.sectionTags !== undefined) r.sectionTags = input.sectionTags;
+      if (input.untaught !== undefined) r.untaught = input.untaught;
       return Promise.resolve();
     },
     markSegmentDone: (input) => {
@@ -308,7 +311,26 @@ function fakes(
       r.attempts += 1;
       return Promise.resolve();
     },
-    resetUntaughtSegments: () => Promise.resolve(),
+    // A page that left paragraphs untaught goes back to be written again,
+    // its count kept so the next write knows what was missing.
+    resetUntaughtSegments: (
+      _d: string,
+      _v: number,
+      topicIds: string[],
+      style: LectureStyle,
+    ) => {
+      for (const r of rows.values()) {
+        if (
+          r.style === style &&
+          topicIds.includes(r.topicId ?? topics[0].id) &&
+          (r.untaught?.length ?? 0) > 0
+        ) {
+          r.status = 'pending';
+          r.scriptText = null;
+        }
+      }
+      return Promise.resolve();
+    },
     resetFailedSegments: () => Promise.resolve(),
     resetAudio: () => Promise.resolve(0),
     saveFollow: () => Promise.resolve(),
@@ -405,6 +427,7 @@ function fakes(
           secondPass?: boolean;
           delayMs?: number;
           voice?: boolean;
+          coveragePass?: number;
         }[],
       ) => {
         chapterJobs.push(
@@ -414,6 +437,7 @@ function fakes(
             secondPass: job.secondPass,
             delayMs: job.delayMs,
             voice: job.voice,
+            coveragePass: job.coveragePass,
           })),
         );
         return Promise.resolve();
@@ -511,6 +535,7 @@ const chapterProcessor = (
   f: ReturnType<typeof fakes>,
   llm: FakeLlmAdapter = new FakeLlmAdapter(),
   boards: LectureBoardService = boardService(f, llm),
+  notes: Record<number, Block[]> = {},
 ) =>
   new LectureChapterProcessor(
     f.deps.documents as never,
@@ -522,8 +547,14 @@ const chapterProcessor = (
     f.deps.queue as never,
     f.deps.events as never,
     boards,
-    // No note is written in these fakes: the page's own text stands in.
-    { find: () => Promise.resolve(null) } as never,
+    // No note is written in these fakes unless a test hands one in; the
+    // page's own text stands in otherwise.
+    {
+      find: (_d: string, _level: string, page: number) =>
+        Promise.resolve(
+          notes[page] ? { status: 'done', blocks: notes[page] } : null,
+        ),
+    } as never,
     new ConfigService({}),
     // No school in these fakes: the planner is told no course.
     {
@@ -2201,5 +2232,73 @@ describe('LectureChapterProcessor: a school voices its own catalogue', () => {
     // The words are there for the local voicer to pick up.
     expect(f.row(1, 'steady')!.scriptText).toBeTruthy();
     expect(f.voiceJobs).toEqual([]);
+  });
+});
+
+describe('LectureChapterProcessor: a page that left paragraphs untaught', () => {
+  const first =
+    'Sustained monetary expansion engenders inflationary pressure insofar as aggregate demand outpaces the productive capacity of the economy.';
+  const second =
+    'Central banks respond by raising the policy rate, which cools borrowing and steadies prices over the following quarters.';
+  const note: Block[] = [
+    { type: 'headingOne', text: 'Inflation' },
+    { type: 'paragraph', text: first },
+    { type: 'paragraph', text: second },
+  ];
+
+  it('writes the page again on its own, told what was missing, and shows the count only once it has given up', async () => {
+    const f = fakes({ 1: FULL_PAGE });
+    const llm = withoutBoard(new FakeLlmAdapter());
+    const told: (string | undefined)[] = [];
+    let cooperative = false;
+    llm.lectureSegment = (input) => {
+      told.push(input.styleCorrection);
+      return Promise.resolve(draft(cooperative ? `${first} ${second}` : first));
+    };
+    const processor = chapterProcessor(f, llm, boardService(f, llm), {
+      1: note,
+    });
+
+    // The first write: three attempts, each told what is missing, none
+    // teaching it. The page is kept, its count recorded, and the chapter
+    // queues itself again with the page back to pending.
+    await processor.process(chapterJob(), CONTEXT);
+    expect(
+      told.slice(1).every((t) => /Paragraph 2 is not taught/.test(t ?? '')),
+    ).toBe(true);
+    expect(f.chapterJobs).toEqual([
+      expect.objectContaining({
+        topicId: TOPIC.id,
+        style: 'steady',
+        coveragePass: 1,
+        delayMs: 30_000,
+      }),
+    ]);
+    expect(f.row(1)!.scriptText).toBeNull();
+    expect(f.row(1)!.status).toBe('pending');
+    expect(f.row(1)!.untaught).toEqual([2]);
+
+    // The pass: the writer is told before its first attempt, teaches the
+    // paragraph, and no further pass is queued.
+    cooperative = true;
+    told.length = 0;
+    await processor.process({ ...chapterJob(), coveragePass: 1 }, CONTEXT);
+    expect(told[0]).toMatch(/Paragraph 2 is not taught: "Central banks/);
+    expect(f.row(1)!.scriptText).toContain('Central banks');
+    expect(f.row(1)!.untaught).toEqual([]);
+    expect(f.chapterJobs.filter((job) => job.coveragePass === 2)).toEqual([]);
+  });
+
+  it('stops after its passes, leaving the count for the card', async () => {
+    const f = fakes({ 1: FULL_PAGE });
+    const llm = withoutBoard(new FakeLlmAdapter());
+    llm.lectureSegment = () => Promise.resolve(draft(first));
+    const processor = chapterProcessor(f, llm, boardService(f, llm), {
+      1: note,
+    });
+    await processor.process({ ...chapterJob(), coveragePass: 2 }, CONTEXT);
+    expect(f.row(1)!.untaught).toEqual([2]);
+    expect(f.row(1)!.scriptText).toContain('Sustained');
+    expect(f.chapterJobs).toEqual([]);
   });
 });

@@ -49,6 +49,7 @@ import {
   prerequisitesSchema,
   recapSchema,
   topicsSchema,
+  pronunciationsSchema,
 } from './schemas';
 
 /**
@@ -142,6 +143,26 @@ export class AiSdkLlmAdapter implements LlmGatewayPort, OnModuleInit {
 
     return {
       value: result.object.topics,
+      usage: this.usage(ref, result.usage, started),
+    };
+  }
+
+  async pronunciations(input: {
+    subject: string;
+    terms: string[];
+  }): Promise<LlmResult<{ term: string; spoken: string }[]>> {
+    const started = Date.now();
+    const { generateObject } = await this.registry.modules();
+    const { model, ref } = await this.registry.languageModel('topics_outline');
+    const result = await generateObject({
+      model,
+      schema: pronunciationsSchema,
+      system: PROMPTS.pronunciations(input.subject),
+      prompt: input.terms.join('\n'),
+      maxRetries: this.maxRetries(),
+    });
+    return {
+      value: result.object.entries,
       usage: this.usage(ref, result.usage, started),
     };
   }

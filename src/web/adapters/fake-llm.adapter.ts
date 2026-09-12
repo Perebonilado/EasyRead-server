@@ -79,6 +79,20 @@ export class FakeLlmAdapter implements LlmGatewayPort {
     };
   }
 
+  async pronunciations(input: {
+    subject: string;
+    terms: string[];
+  }): Promise<LlmResult<{ term: string; spoken: string }[]>> {
+    const started = Date.now();
+    return {
+      value: input.terms.map((term) => ({
+        term,
+        spoken: term.toLowerCase().split('').join('-'),
+      })),
+      usage: this.usage(started, input.terms.join(' ').length, 20),
+    };
+  }
+
   async outlineTopics({
     digest,
     pageCount,

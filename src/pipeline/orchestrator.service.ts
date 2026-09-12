@@ -3,6 +3,7 @@ import type { Level, PipelineStep } from '../contracts';
 import { LECTURE_STYLE_KEYS } from '../contracts';
 import { EVENT_BUS, JOB_QUEUE } from '../business/ports/tokens';
 import { GenerateLectureHandler } from '../business/handlers/documents/lecture.handlers';
+import { PronunciationSeeder } from '../business/handlers/institutions/pronunciation.handlers';
 import type { LectureRepository } from '../business/repositories/lecture.repository';
 import type { EventBusPort } from '../business/ports/event-bus.port';
 import type { JobQueuePort } from '../business/ports/job-queue.port';
@@ -46,6 +47,7 @@ export class PipelineOrchestrator {
     @Inject(EVENT_BUS) private readonly events: EventBusPort,
     @Inject(LECTURE_REPOSITORY) private readonly lectures: LectureRepository,
     private readonly generate: GenerateLectureHandler,
+    private readonly pronunciations: PronunciationSeeder,
   ) {}
 
   /** Entry point: called the moment the client confirms the bytes landed. */
@@ -213,12 +215,20 @@ export class PipelineOrchestrator {
     id: string;
     contentVersion: number;
     userId: string;
-    props: { institutionId: string | null; status: string };
+    props: {
+      institutionId: string | null;
+      departmentId?: string | null;
+      status: string;
+    };
   }): Promise<void> {
     if (!doc.props.institutionId || doc.props.status !== 'ready') return;
     if ((await this.runs.status(doc.id, 'topics')) !== 'done') return;
     const rows = await this.lectures.listSegments(doc.id, doc.contentVersion);
     if (rows.length) return;
+
+    // The words the voice may get wrong, proposed for the admin to hear
+    // before the audio is made; never blocks the lecture.
+    await this.pronunciations.seed(doc);
 
     for (const style of LECTURE_STYLE_KEYS) {
       try {

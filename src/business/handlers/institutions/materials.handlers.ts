@@ -271,6 +271,14 @@ export class PrepareMaterialsHandler extends AbstractRequestHandlerTemplate<
         continue;
       }
       let did = false;
+      // Voice again: every done row back to scripted, words kept. A page
+      // whose spoken form is unchanged is found in storage and marked done
+      // at once; only pages whose words the voice now says differently
+      // are made anew. The style guard below is passed, since nothing is
+      // fully voiced after the reset.
+      const revoiced = cmd.revoice
+        ? await this.lectures.resetAudio(todo.doc.id, todo.doc.contentVersion)
+        : 0;
       if (cmd.easiest && !todo.hasEasiest) {
         await this.pipeline.fanOutSimplify(
           todo.doc.id,
@@ -280,7 +288,7 @@ export class PrepareMaterialsHandler extends AbstractRequestHandlerTemplate<
         did = true;
       }
       for (const style of styles) {
-        if (todo.styles.includes(style)) continue;
+        if (todo.styles.includes(style) && !revoiced) continue;
         try {
           await this.generate.handle({
             userId: cmd.userId,

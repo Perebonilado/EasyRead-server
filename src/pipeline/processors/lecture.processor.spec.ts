@@ -31,6 +31,11 @@ import type { BoardTimeline, WordTimes } from '../../business/domain/board';
  * between them mid-idea.
  */
 
+/** No school list: the spoken form is the written words plus the rules. */
+const noPronunciations = {
+  kept: () => Promise.resolve(new Map<string, string>()),
+} as never;
+
 const CONTEXT = { attemptsMade: 1, isFinalAttempt: false };
 const FINAL = { attemptsMade: 3, isFinalAttempt: true };
 
@@ -304,6 +309,7 @@ function fakes(
       return Promise.resolve();
     },
     resetFailedSegments: () => Promise.resolve(),
+    resetAudio: () => Promise.resolve(0),
     saveFollow: () => Promise.resolve(),
     saveBoard: (input) => {
       const r = row(input.pageNumber, input.style, input.kind);
@@ -538,6 +544,7 @@ const voiceProcessor = (
     f.deps.documents as never,
     f.lectures,
     f.deps.calls,
+    noPronunciations,
     f.deps.speech,
     // The catalogue voice: in these fakes, the same voice.
     f.deps.speech,
@@ -1921,6 +1928,7 @@ describe('the board after the audio', () => {
       aligner,
       boardService(f),
       followService(f),
+      noPronunciations,
     );
 
   it('asks for alignment once a row is voiced, then times the board and announces it', async () => {
@@ -2069,6 +2077,7 @@ describe('the diagram on a board', () => {
       new FakeAlignerAdapter(),
       boardService(f),
       followService(f),
+      noPronunciations,
     ).process({ ...voiceJob(1, 'gentle'), kind: 'page' }, CONTEXT);
     expect(f.row(1, 'gentle')!.boardStatus).toBe('done');
 

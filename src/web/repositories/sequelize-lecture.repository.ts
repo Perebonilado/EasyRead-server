@@ -349,6 +349,17 @@ export class SequelizeLectureRepository implements LectureRepository {
     );
   }
 
+  async resetAudio(
+    documentId: string,
+    contentVersion: number,
+  ): Promise<number> {
+    const [count] = await this.segments.update(
+      { status: 'scripted' },
+      { where: { documentId, contentVersion, status: 'done' } },
+    );
+    return count;
+  }
+
   async clear(documentId: string, style?: LectureStyle): Promise<void> {
     if (style) {
       // One style goes; the plan is shared by the others and stays.

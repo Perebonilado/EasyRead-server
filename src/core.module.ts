@@ -10,6 +10,7 @@ import {
   GenerateLectureHandler,
   LectureStatusHandler,
 } from './business/handlers/documents/lecture.handlers';
+import { PronunciationSeeder } from './business/handlers/institutions/pronunciation.handlers';
 import { PipelineOrchestrator } from './pipeline/orchestrator.service';
 import { DatabaseModule } from './web/database/database.module';
 import { portProviders } from './web/providers/ports.providers';
@@ -28,6 +29,7 @@ const shared = [
   // processes, so the handler that does it lives here with it.
   LectureStatusHandler,
   GenerateLectureHandler,
+  PronunciationSeeder,
   PipelineOrchestrator,
 ];
 

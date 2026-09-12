@@ -15,7 +15,9 @@ import {
   AI_CALL_LOG_REPOSITORY,
   DOCUMENT_REPOSITORY,
   LECTURE_REPOSITORY,
+  PRONUNCIATION_REPOSITORY,
 } from '../../business/repositories/tokens';
+import type { PronunciationRepository } from '../../business/repositories/pronunciation.repository';
 import type { AiCallLogRepository } from '../../business/repositories/ai-call-log.repository';
 import type { DocumentRepository } from '../../business/repositories/document.repository';
 import type { LectureRepository } from '../../business/repositories/lecture.repository';
@@ -28,6 +30,7 @@ import {
 } from '../../business/domain/lecture';
 import type { LectureVoiceJobData } from '../queues';
 import { catalogueSpeechCost } from '../../business/domain/cost';
+import { spokenForm } from '../../business/domain/spoken';
 import { mp3DurationMs, speechTooShort } from '../../business/domain/speech';
 import { isPermanentFailure, type JobContext } from './base.processor';
 import { LectureBoardService } from './lecture-board.service';
@@ -50,6 +53,8 @@ export class LectureVoiceProcessor {
     @Inject(DOCUMENT_REPOSITORY) private readonly documents: DocumentRepository,
     @Inject(LECTURE_REPOSITORY) private readonly lectures: LectureRepository,
     @Inject(AI_CALL_LOG_REPOSITORY) private readonly calls: AiCallLogRepository,
+    @Inject(PRONUNCIATION_REPOSITORY)
+    private readonly pronunciations: PronunciationRepository,
     @Inject(SPEECH) private readonly speech: SpeechPort,
     @Inject(CATALOGUE_SPEECH) private readonly catalogueSpeech: SpeechPort,
     @Inject(STORAGE) private readonly storage: StoragePort,
@@ -82,7 +87,15 @@ export class LectureVoiceProcessor {
     if (!row?.scriptText) return;
     if (row.status === 'done' && row.audioKey) return;
 
-    const spoken = scriptForTts(row.scriptText);
+    // What the reader sees is not what the voice is handed: the school's
+    // pronunciations, abbreviations as letters, numbers and units as words.
+    const written = scriptForTts(row.scriptText);
+    const spoken = spokenForm(
+      written,
+      doc.props.institutionId
+        ? await this.pronunciations.kept(doc.props.institutionId)
+        : undefined,
+    ).text;
 
     try {
       // A school's document is voiced on the rented GPU, and only there;

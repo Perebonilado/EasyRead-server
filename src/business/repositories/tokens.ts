@@ -33,3 +33,4 @@ export const PAGE_ASSET_REPOSITORY = Symbol('PAGE_ASSET_REPOSITORY');
 export const ITEM_REPOSITORY = Symbol('ItemRepository');
 export const LECTURE_REPOSITORY = Symbol('LectureRepository');
 export const ITEM_REVIEW_REPOSITORY = Symbol('ItemReviewRepository');
+export const PRONUNCIATION_REPOSITORY = Symbol('PronunciationRepository');

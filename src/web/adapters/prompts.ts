@@ -114,6 +114,21 @@ export const PROMPTS = {
     NO_INVENTION,
   ].join(' '),
 
+  pronunciations: (subject: string) =>
+    [
+      'You prepare a pronunciation guide for a text-to-speech voice that',
+      `reads lectures in ${subject}. You are given terms the voice is likely`,
+      'to say wrongly: species names, drug names, anatomical and technical',
+      'words, eponyms. For each, write how it is said in English by a',
+      'lecturer in the field, as a respelling a voice actor could read aloud:',
+      'lower-case syllables joined by hyphens, the stressed syllable in',
+      'capitals, for example "trip-an-oh-SO-ma" or "gam-bee-EN-see". Use',
+      'plain English syllables only, no IPA, no special characters. A term',
+      'of two words gets two respellings separated by a space, one per',
+      'word, never more or fewer words than the term has. Leave a term out',
+      'if an English speaker would already say it right. Return the entries',
+      'in the order given.',
+    ].join(' '),
   topics: (pageCount: number) =>
     [
       'You split a study document into the topics a reader would navigate by.',

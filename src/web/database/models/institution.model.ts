@@ -123,3 +123,33 @@ export class InstitutionMemberModel extends BaseModel {
   @BelongsTo(() => InstitutionModel)
   declare institution?: InstitutionModel;
 }
+
+@Table({ tableName: 'pronunciations', underscored: true, timestamps: true })
+export class PronunciationModel extends BaseModel {
+  @ForeignKey(() => InstitutionModel)
+  @Column({ type: DataType.UUID, allowNull: false })
+  declare institutionId: string;
+
+  @Column({ type: DataType.UUID, allowNull: true })
+  declare documentId: string | null;
+
+  @Column({ type: DataType.STRING(120), allowNull: false })
+  declare term: string;
+
+  @Column({ type: DataType.STRING(200), allowNull: false })
+  declare spoken: string;
+
+  @Column({
+    type: DataType.ENUM('proposed', 'kept', 'dropped'),
+    allowNull: false,
+    defaultValue: 'proposed',
+  })
+  declare status: 'proposed' | 'kept' | 'dropped';
+
+  @Column({
+    type: DataType.ENUM('seeded', 'admin'),
+    allowNull: false,
+    defaultValue: 'seeded',
+  })
+  declare source: 'seeded' | 'admin';
+}

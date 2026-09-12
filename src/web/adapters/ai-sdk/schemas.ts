@@ -562,3 +562,15 @@ export const lectureVerifySchema = z.object({
   grounded: z.boolean(),
   problems: z.array(z.string().max(300)).max(8),
 });
+
+/** A respelling per term, in the order asked. */
+export const pronunciationsSchema = z.object({
+  entries: z
+    .array(
+      z.object({
+        term: z.string().min(1).max(120),
+        spoken: z.string().min(1).max(200),
+      }),
+    )
+    .max(80),
+});

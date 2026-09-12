@@ -5,7 +5,9 @@ import type { StoragePort } from '../../business/ports/storage.port';
 import {
   DOCUMENT_REPOSITORY,
   LECTURE_REPOSITORY,
+  PRONUNCIATION_REPOSITORY,
 } from '../../business/repositories/tokens';
+import type { PronunciationRepository } from '../../business/repositories/pronunciation.repository';
 import type { DocumentRepository } from '../../business/repositories/document.repository';
 import type { LectureRepository } from '../../business/repositories/lecture.repository';
 import {
@@ -15,6 +17,7 @@ import {
   type WordTimes,
 } from '../../business/domain/board';
 import { scriptForTts } from '../../business/domain/lecture';
+import { remapAligned, spokenForm } from '../../business/domain/spoken';
 import type { LectureAlignJobData } from '../queues';
 import type { JobContext } from './base.processor';
 import { LectureBoardService } from './lecture-board.service';
@@ -40,6 +43,8 @@ export class LectureAlignProcessor {
     @Inject(ALIGNER) private readonly aligner: AlignerPort,
     private readonly boards: LectureBoardService,
     private readonly follows: LectureFollowService,
+    @Inject(PRONUNCIATION_REPOSITORY)
+    private readonly pronunciations: PronunciationRepository,
   ) {}
 
   async process(job: LectureAlignJobData, context: JobContext): Promise<void> {
@@ -78,14 +83,22 @@ export class LectureAlignProcessor {
     if (!times && this.aligner.enabled()) {
       try {
         const audio = await this.storage.get(row.audioKey);
+        // The audio says the spoken form, so that is what is aligned; the
+        // times are then given to the written words the reader follows.
+        const said = spokenForm(
+          spoken,
+          doc.props.institutionId
+            ? await this.pronunciations.kept(doc.props.institutionId)
+            : undefined,
+        );
         const aligned = await this.aligner.align({
           audio,
           mimeType: 'audio/mpeg',
-          text: spoken,
+          text: said.text,
         });
         if (aligned) {
           times = wordTimesFromAligned(
-            aligned.words,
+            remapAligned(aligned.words, said, spoken),
             spoken,
             durationMs,
             row.audioKey,

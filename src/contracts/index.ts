@@ -260,6 +260,8 @@ export interface PrepareRequest {
   easiest: boolean;
   /** Which lecture styles to write and voice ahead. */
   styles: LectureStyle[];
+  /** Voice every page again, keeping the words: after a pronunciation was added or fixed. */
+  revoice?: boolean;
 }
 
 export interface PrepareEstimateDto {

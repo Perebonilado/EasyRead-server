@@ -231,6 +231,16 @@ export interface LlmGatewayPort {
     correction?: string;
   }): Promise<LlmResult<LectureOutlineDraft>>;
 
+  /**
+   * How the voice should say a document's hard terms: for each, a
+   * respelling a voice actor would read aloud correctly. Proposals only;
+   * an admin hears each one before it is used.
+   */
+  pronunciations(input: {
+    subject: string;
+    terms: string[];
+  }): Promise<LlmResult<{ term: string; spoken: string }[]>>;
+
   /** Writes one page's spoken segment, inside the topic's plan. */
   lectureSegment(input: {
     topicTitle: string;

@@ -164,6 +164,8 @@ import { GuidedController } from './web/controllers/guided.controller';
 import { InstitutionsController } from './web/controllers/institutions.controller';
 import { AdminInstitutionsController } from './web/controllers/admin-institutions.controller';
 import { AdminMaterialsController } from './web/controllers/admin-materials.controller';
+import { AdminPronunciationsController } from './web/controllers/admin-pronunciations.controller';
+import { PronunciationHandlers } from './business/handlers/institutions/pronunciation.handlers';
 import {
   AdminUploadIntentHandler,
   MoveMaterialHandler,
@@ -206,6 +208,7 @@ const handlers = [
   UpdateInstitutionHandler,
   AdminUploadIntentHandler,
   MoveMaterialHandler,
+  PronunciationHandlers,
   PrepareMaterialsHandler,
   CreateGroupHandler,
   JoinGroupHandler,
@@ -355,6 +358,7 @@ const queries = [
     InstitutionsController,
     AdminInstitutionsController,
     AdminMaterialsController,
+    AdminPronunciationsController,
     TutorsController,
     EventsController,
     HealthController,

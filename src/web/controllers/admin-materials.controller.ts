@@ -107,6 +107,11 @@ class PrepareDto {
   @ArrayMaxSize(3)
   @IsIn(LECTURE_STYLE_KEYS, { each: true })
   styles!: LectureStyle[];
+
+  /** Voice every page again, keeping the words: after a pronunciation was added. */
+  @IsOptional()
+  @IsBoolean()
+  revoice?: boolean;
 }
 
 class MoveMaterialDto {

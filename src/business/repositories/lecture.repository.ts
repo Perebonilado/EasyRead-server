@@ -179,6 +179,12 @@ export interface LectureRepository {
     style: LectureStyle,
   ): Promise<void>;
   /**
+   * Every voiced row back to scripted, its words kept, so the voice is
+   * asked for again: a page whose spoken form has not changed is found in
+   * storage and marked done at once; one whose form changed is made anew.
+   */
+  resetAudio(documentId: string, contentVersion: number): Promise<number>;
+  /**
    * Wipes a document's lecture so it can be written again: one style's
    * pages, or, with no style, every page and every plan.
    */

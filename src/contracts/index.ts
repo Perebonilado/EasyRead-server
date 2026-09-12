@@ -821,12 +821,6 @@ export interface LectureTopicDto {
   topicId: string;
   title: string;
   segments: LectureSegmentDto[];
-  /** The chapter's map as the learner reads it while the map plays; absent until the map is written. */
-  map?: {
-    about: string;
-    stops: { name: string; line: string }[];
-    landing: string;
-  };
   /** The three or four things the chapter settles, from its plan; absent on older plans. */
   points?: string[];
 }

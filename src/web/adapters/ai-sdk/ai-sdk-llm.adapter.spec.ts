@@ -533,36 +533,6 @@ describe('AiSdkLlmAdapter', () => {
     expect(prompt).not.toContain('last listened');
   });
 
-  it('asks the map for an outline the learner reads and the script that speaks it', async () => {
-    mock.reply({
-      about: 'How keys find servers.',
-      stops: [
-        { name: 'The ring', line: 'Keys and servers on one circle.' },
-        { name: 'Virtual nodes', line: 'Each server takes many spots.' },
-      ],
-      landing: 'You can place a key.',
-      script: 'Before we go in, here is the shape of this chapter.',
-    });
-    const result = await adapter.lectureExtra({
-      kind: 'map',
-      topicTitle: 'Consistent hashing',
-      style: 'steady',
-      styleDirection: 'Steady.',
-      terms: [],
-      taught: ['The ring', 'Virtual nodes'],
-      payoff: 'You can place a key.',
-      arc: 'How keys find servers.',
-      daysAway: null,
-      budget: { min: 60, max: 150 },
-    });
-    expect(result.value.map?.stops).toHaveLength(2);
-    expect(result.value.script).toMatch(/shape of this chapter/);
-    const prompt = JSON.stringify(mock.calls[0].body.messages);
-    expect(prompt).toContain('MAP for the chapter');
-    expect(prompt).toContain('group these into the stops');
-    expect(prompt).toContain('Where the chapter ends');
-  });
-
   it('writes a mixed check when asked for spoken kinds and choices, and shapes each for the sheet', async () => {
     mock.reply({
       questions: [

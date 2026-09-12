@@ -93,9 +93,13 @@ export function weightForPage(
  * check of what stuck after it, and the review a returning learner hears
  * before carrying on. Play order within one page number follows KIND_RANK.
  */
-export type LectureExtraKind = 'map' | 'terms' | 'check' | 'review';
-/** A page, the second piece of a page voiced as two, or an extra. */
-export type SegmentKind = 'page' | 'part' | LectureExtraKind;
+export type LectureExtraKind = 'terms' | 'check' | 'review';
+/**
+ * A page, the second piece of a page voiced as two, or an extra. The map,
+ * a chapter's shape spoken before it, is no longer written or played; the
+ * kind stays known so rows from before still read.
+ */
+export type SegmentKind = 'page' | 'part' | 'map' | LectureExtraKind;
 export const SEGMENT_KINDS: SegmentKind[] = [
   'review',
   'map',
@@ -122,15 +126,14 @@ export function isSegmentKind(value: unknown): value is SegmentKind {
 /**
  * Which extras each style gets. No style opens with the words or ends with
  * the check any more: a lecture begins on its first page and ends on its
- * last. The kinds stay known so lectures written before this still read,
- * and the player skips them. The review, for a learner coming back, stays.
- * The map, the shape of the chapter in a minute, is written for every
- * style and played only when the lecture is interactive.
+ * last, and no chapter opens with its map. The kinds stay known so
+ * lectures written before this still read, and the player skips them. The
+ * review, for a learner coming back, stays.
  */
 export const EXTRAS_BY_STYLE: Record<LectureStyle, LectureExtraKind[]> = {
-  gentle: ['review', 'map'],
-  steady: ['review', 'map'],
-  brisk: ['map'],
+  gentle: ['review'],
+  steady: ['review'],
+  brisk: [],
 };
 
 /** Where a document's interactive choice came from, or that it was never made. */
@@ -171,14 +174,10 @@ export function chosenLectureStyle(
 
 /** Spoken-word budgets for the extras; short by design. */
 export const EXTRA_BUDGET: Record<LectureExtraKind, WordBudget> = {
-  map: { min: 60, max: 150, hard: 190 },
   terms: { min: 40, max: 130, hard: 170 },
   check: { min: 60, max: 170, hard: 220 },
   review: { min: 50, max: 160, hard: 210 },
 };
-
-/** The quick learner's map: the points in one breath, not a minute. */
-export const BRISK_MAP_BUDGET: WordBudget = { min: 20, max: 50, hard: 70 };
 
 /**
  * The extra rows a style gets around each chapter of the cut: the words
@@ -207,9 +206,6 @@ export function extraSeeds<
     const ordered = [...rows].sort((a, b) => a.seq - b.seq);
     const first = ordered[0];
     const last = ordered[ordered.length - 1];
-    if (extras.includes('map')) {
-      out.push({ ...first, bridge: false, kind: 'map' });
-    }
     if (extras.includes('terms')) {
       out.push({ ...first, bridge: false, kind: 'terms' });
     }
@@ -546,24 +542,11 @@ export interface LectureTerm {
   meaning: string;
 }
 
-/**
- * The map of a chapter as the learner reads it while the map plays: what
- * the chapter is for, its stops (parts a listener would recognise, not
- * pages), and where it lands. Written with the map's script, in one call.
- */
-export interface MapOutline {
-  about: string;
-  stops: { name: string; line: string }[];
-  landing: string;
-}
-
 export interface LecturePlan {
   hook: string;
   arc: string;
   /** The three or four things the chapter settles, one sentence each; absent on older plans. */
   points?: string[];
-  /** The chapter's map, once its map segment has been written; absent before. */
-  map?: MapOutline | null;
   /** The chapter's words, spoken first for a slow learner. Older plans have none. */
   terms?: LectureTerm[];
   /** The problem the chapter answers, for a quick learner to hear first. */

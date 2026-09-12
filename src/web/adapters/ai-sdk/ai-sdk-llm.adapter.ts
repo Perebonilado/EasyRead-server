@@ -33,7 +33,6 @@ import {
   lectureSketchSchema,
   sketchJudgeSchema,
   lectureExtraSchema,
-  lectureMapSchema,
   spokenQuizSchema,
   lectureOutlineSchema,
   lectureSegmentSchema,
@@ -389,59 +388,19 @@ export class AiSdkLlmAdapter implements LlmGatewayPort, OnModuleInit {
   }
 
   async lectureExtra(input: {
-    kind: 'map' | 'terms' | 'check' | 'review';
+    kind: 'terms' | 'check' | 'review';
     topicTitle: string;
     style: 'gentle' | 'steady' | 'brisk';
     styleDirection: string;
     terms: { term: string; meaning: string }[];
     taught: string[];
     payoff: string | null;
-    arc?: string | null;
     daysAway: number | null;
     budget: { min: number; max: number };
-  }): Promise<
-    LlmResult<{
-      script: string;
-      map?: {
-        about: string;
-        stops: { name: string; line: string }[];
-        landing: string;
-      };
-    }>
-  > {
+  }): Promise<LlmResult<{ script: string }>> {
     const started = Date.now();
     const { generateObject } = await this.registry.modules();
     const { model, ref } = await this.registry.languageModel('lecture_segment');
-
-    // The map returns the outline the learner reads with the words that
-    // speak it; the other kinds return words alone.
-    if (input.kind === 'map') {
-      const outline = await generateObject({
-        model,
-        schema: lectureMapSchema,
-        system: PROMPTS.lectureExtra,
-        prompt: [
-          `Write the MAP for the chapter "${input.topicTitle}": the outline first, then the script that speaks it.`,
-          `The listener is a ${input.style === 'gentle' ? 'slow' : input.style === 'brisk' ? 'quick' : 'normal-paced'} learner. HOW TO SPEAK TO THEM: ${input.styleDirection}`,
-          `Script length: ${input.budget.min} to ${input.budget.max} words.`,
-          input.arc
-            ? `What the chapter is about, from its plan: ${input.arc}`
-            : null,
-          `What each page teaches, in order (group these into the stops; do not list them one by one):\n- ${input.taught.join('\n- ')}`,
-          input.payoff
-            ? `Where the chapter ends, what the listener will be able to do: ${input.payoff}`
-            : null,
-        ]
-          .filter(Boolean)
-          .join('\n'),
-        maxRetries: this.maxRetries(),
-      });
-      const { script, ...map } = outline.object;
-      return {
-        value: { script, map },
-        usage: this.usage(ref, outline.usage, started),
-      };
-    }
 
     const result = await generateObject({
       model,

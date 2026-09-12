@@ -512,22 +512,6 @@ export const lectureExtraSchema = z.object({
   script: z.string().min(1).max(4000),
 });
 
-/** The map: the outline the learner reads, and the script that speaks it. */
-export const lectureMapSchema = z.object({
-  about: z.string().min(1).max(240),
-  stops: z
-    .array(
-      z.object({
-        name: z.string().min(1).max(60),
-        line: z.string().min(1).max(220),
-      }),
-    )
-    .min(2)
-    .max(6),
-  landing: z.string().min(1).max(240),
-  script: z.string().min(1).max(4000),
-});
-
 /** One page of spoken lecture, one section per move of the beat. */
 export const lectureSegmentSchema = z.object({
   sections: z

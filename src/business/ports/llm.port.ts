@@ -1,4 +1,3 @@
-import type { MapOutline } from '../domain/lecture';
 import type {
   LearnQuestion,
   Block,
@@ -336,27 +335,19 @@ export interface LlmGatewayPort {
    * needs no grounding check against a page.
    */
   lectureExtra(input: {
-    kind: 'map' | 'terms' | 'check' | 'review';
+    kind: 'terms' | 'check' | 'review';
     topicTitle: string;
     style: 'gentle' | 'steady' | 'brisk';
     styleDirection: string;
     /** For terms: the chapter's words with their plain meanings. */
     terms: { term: string; meaning: string }[];
-    /** For check and review: the ideas taught, one line each, in order. For the map: the chapter's headings, one per page, in order. */
+    /** For check and review: the ideas taught, one line each, in order; the chapter's points when the plan has them. */
     taught: string[];
     payoff: string | null;
-    /** For the map: what the chapter is about, from its plan. */
-    arc?: string | null;
     /** For review: whole days since the learner last listened. */
     daysAway: number | null;
     budget: { min: number; max: number };
-  }): Promise<
-    LlmResult<{
-      script: string;
-      /** For the map: the outline the script speaks, for the screen. */
-      map?: MapOutline;
-    }>
-  >;
+  }): Promise<LlmResult<{ script: string }>>;
 
   /**
    * The board for a page, planned before its speech is written: the

@@ -328,47 +328,17 @@ export class FakeLlmAdapter implements LlmGatewayPort {
 
   /** A deterministic extra: its kind and the lines it was built from. */
   async lectureExtra(input: {
-    kind: 'map' | 'terms' | 'check' | 'review';
+    kind: 'terms' | 'check' | 'review';
     topicTitle: string;
     style: 'gentle' | 'steady' | 'brisk';
     styleDirection: string;
     terms: { term: string; meaning: string }[];
     taught: string[];
     payoff: string | null;
-    arc?: string | null;
     daysAway: number | null;
     budget: { min: number; max: number };
-  }): Promise<
-    LlmResult<{
-      script: string;
-      map?: {
-        about: string;
-        stops: { name: string; line: string }[];
-        landing: string;
-      };
-    }>
-  > {
+  }): Promise<LlmResult<{ script: string }>> {
     const started = Date.now();
-    if (input.kind === 'map') {
-      const stops = input.taught.slice(0, 4).map((line, index) => ({
-        name: `Stop ${index + 1}`,
-        line: line.replace(/\.$/, ''),
-      }));
-      const script = `Here is the shape of ${input.topicTitle}. ${input.arc ?? ''} ${stops
-        .map((stop) => `${stop.name}: ${stop.line}.`)
-        .join(' ')}${input.payoff ? ` By the end, ${input.payoff}` : ''}`;
-      return {
-        value: {
-          script,
-          map: {
-            about: input.arc ?? `What ${input.topicTitle} is for.`,
-            stops,
-            landing: input.payoff ?? 'You will know the shape of it.',
-          },
-        },
-        usage: this.usage(started, 200, 120),
-      };
-    }
     const script =
       input.kind === 'terms'
         ? `Words you will hear in ${input.topicTitle}. ${input.terms

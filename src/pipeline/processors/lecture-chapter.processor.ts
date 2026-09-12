@@ -61,7 +61,6 @@ import {
   taughtLines,
   unsupportedFigures,
   validateOutline,
-  BRISK_MAP_BUDGET,
   EXTRA_BUDGET,
   pageScripts,
   shouldSplit,
@@ -411,22 +410,6 @@ export class LectureChapterProcessor {
       return;
     }
 
-    // The map, the shape of the chapter in a minute, goes first: it is the
-    // chapter's opening when the lecture is interactive, so it is ready
-    // before the first page is. Written from the plan alone.
-    await this.writeExtra({
-      voice,
-      doc,
-      topic,
-      topicId: topic.id,
-      plan,
-      rows,
-      extras,
-      style,
-      contentVersion,
-      kind: 'map',
-    });
-
     // A learner who switched style mid-chapter is waiting at startAtPage:
     // that page and the rest of the chapter go first, the earlier pages
     // are filled in after.
@@ -544,19 +527,16 @@ export class LectureChapterProcessor {
     };
 
     const terms = plan.terms ?? [];
-    // The map and the check name the chapter's points when the plan has
-    // them; else the map names the beats' goals and the check what each
-    // page added, as before. The review always names what each page added.
+    // The check names the chapter's points when the plan has them; else,
+    // like the review, what each page added.
     const taught =
-      (kind === 'map' || kind === 'check') && plan.points?.length
+      kind === 'check' && plan.points?.length
         ? plan.points
         : input.rows
             .filter((page) => !page.bridge)
             .map((page) => {
               const beat = beatFor(plan, page.pageNumber);
-              return kind === 'map'
-                ? beat.goal
-                : beat.newHere?.trim() || beat.goal;
+              return beat.newHere?.trim() || beat.goal;
             });
     if (kind === 'terms' && !terms.length) {
       await fail('The chapter plan names no terms');
@@ -583,13 +563,8 @@ export class LectureChapterProcessor {
         terms,
         taught,
         payoff: plan.payoff ?? null,
-        arc: kind === 'map' ? (plan.arc ?? null) : null,
         daysAway: null,
-        // A quick learner's map is the points in one breath.
-        budget:
-          kind === 'map' && style === 'brisk'
-            ? BRISK_MAP_BUDGET
-            : EXTRA_BUDGET[kind],
+        budget: EXTRA_BUDGET[kind],
       });
       await this.calls.record({
         documentId: doc.id,
@@ -609,19 +584,6 @@ export class LectureChapterProcessor {
         durationMs: estimateDurationMs(scriptForTts(script)),
         status: input.voice ? 'voicing' : 'scripted',
       });
-      // The map's outline lives on the plan, beside the beats it was
-      // grouped from, so the status can hand it to the screen.
-      if (kind === 'map' && written.value.map) {
-        plan.map = written.value.map;
-        await this.lectures.savePlan({
-          documentId: doc.id,
-          topicId: input.topicId,
-          contentVersion,
-          status: 'done',
-          plan,
-          generatorVersion: LECTURE_GENERATOR_VERSION,
-        });
-      }
       await this.boards.writeForExtra({
         key: {
           documentId: doc.id,

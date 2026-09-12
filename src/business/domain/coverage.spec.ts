@@ -2,6 +2,7 @@ import type { Block } from '../../contracts';
 import {
   contentBlocks,
   coverageDetail,
+  isFrontMatterPage,
   repeatVerified,
   taughtBlocksOf,
   uncoveredBlocks,
@@ -119,6 +120,56 @@ describe('a list item taught in other endings', () => {
         (b) => b.index,
       ),
     ).toEqual([1, 2, 3]);
+  });
+});
+
+describe('front matter', () => {
+  const title: Block[] = [
+    { type: 'headingOne', text: 'ADOLESCENT HEALTH MEDICINE' },
+    {
+      type: 'paragraph',
+      text: 'This document is written by Dr. Marcus Sorgwe. It focuses on the health of young people.',
+    },
+    {
+      type: 'paragraph',
+      text: 'Adolescents are people aged 10 to 19. Their health needs are unique.',
+    },
+    {
+      type: 'paragraph',
+      text: 'The document is for students and health workers who deal with families and young people.',
+    },
+    {
+      type: 'bullet',
+      text: 'It describes the different stages of development that adolescents go through.',
+    },
+    { type: 'paragraph', text: 'The document was published in June 2025.' },
+    {
+      type: 'paragraph',
+      text: 'Dr. Marcus Sorgwe is a consultant family physician at the Department of Family Medicine, NDUTH Okolobiri.',
+    },
+  ];
+  const outline: Block[] = [
+    { type: 'headingTwo', text: 'OUTLINE' },
+    { type: 'bullet', text: 'BASIC CONCEPTS IN ADOLESCENT HEALTH' },
+    { type: 'bullet', text: 'LAWS AND POLICIES IN ADOLESCENT HEALTH' },
+    {
+      type: 'paragraph',
+      text: 'Adolescents are people aged 10 to 19. Their health needs are unique.',
+    },
+  ];
+
+  it('holds a title slide only to what it teaches, not to its byline or what it says about the document', () => {
+    expect(
+      contentBlocks(title, { frontMatter: true }).map((block) => block.index),
+    ).toEqual([2]);
+    expect(isFrontMatterPage(1, title)).toBe(true);
+    expect(isFrontMatterPage(7, outline)).toBe(true);
+    expect(isFrontMatterPage(7, title)).toBe(false);
+  });
+
+  it('never asks for an outline item or a byline, on any page', () => {
+    expect(contentBlocks(outline).map((block) => block.index)).toEqual([3]);
+    expect(contentBlocks(title).map((block) => block.index)).toEqual([2, 3, 4]);
   });
 });
 

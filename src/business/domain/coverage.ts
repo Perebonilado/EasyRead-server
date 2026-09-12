@@ -78,13 +78,71 @@ export function looksLikeReference(text: string): boolean {
   return text.includes(' | ') && text.split(/\s+/).length <= 8;
 }
 
-/** The paragraphs of a note that carry content: not headings, not a line of a word or two, not a reference line. */
-export function contentBlocks(blocks: Block[]): ContentBlock[] {
+/** An outline item or a heading written as a bullet: capitals, a few words, nothing said. */
+export function looksLikeOutlineItem(text: string): boolean {
+  const letters = text.replace(/[^A-Za-z]/g, '');
+  if (!letters) return false;
+  const upper = letters.replace(/[^A-Z]/g, '').length / letters.length;
+  return upper >= 0.9 && text.split(/\s+/).length <= 8;
+}
+
+/** A person and their post: the author's line on a title slide. */
+const BYLINE =
+  /\b(?:dr|prof|professor|mr|mrs|ms|mbbs|fmcp|fwacp|phd|md)\b[\s\S]*\b(?:department|dept|university|hospital|college|faculty|school|institute|consultant|lecturer|senior registrar|registrar)\b|\b(?:presented|prepared|written|compiled|delivered)\s+by\b|\bpublished\s+(?:in|on)\b/i;
+
+export function looksLikeByline(text: string): boolean {
+  return BYLINE.test(text);
+}
+
+/**
+ * A line about the document rather than of it, the way a simplifier
+ * glosses a title slide: "This document covers", "It is for students",
+ * "It describes the stages". Only a front matter page carries these.
+ */
+const ABOUT_THE_DOCUMENT =
+  /^\s*(?:(?:additionally|also|finally|then|next|lastly|furthermore|moreover|in\s+addition|overall|first|second|third),?\s+)?(?:(?:this|the)\s+(?:document|presentation|lecture|slide\s*deck|deck|talk|chapter|module|session|handout|material|paper|course|text)\b|it\s+(?:covers|discusses|describes|outlines|mentions|highlights|looks\s+at|is\s+(?:for|written|meant|intended|aimed)|talks\s+about|offers|defines|focuses|explains\s+what|aims\s+to|was\s+(?:written|published|prepared))\b|the\s+(?:author|authors|speaker)\b)/i;
+
+export function looksLikeAboutTheDocument(text: string): boolean {
+  return ABOUT_THE_DOCUMENT.test(text);
+}
+
+const FRONT_MATTER_HEADING =
+  /^\s*(?:outline|contents?|table of contents|(?:learning\s+)?objectives?|aims?(?:\s+and\s+objectives)?|references?|bibliography|acknowledg|thank\s+you|questions?|further\s+reading|about\s+(?:the\s+)?(?:author|speaker))\b/i;
+
+/**
+ * Whether a page is front matter: the first two pages of a document, or a
+ * page headed as an outline, objectives, references or thanks. The
+ * lecture is not held to teaching what such a page says about the
+ * document.
+ */
+export function isFrontMatterPage(
+  pageNumber: number,
+  blocks: Block[],
+): boolean {
+  if (pageNumber <= 2) return true;
+  const heading = blocks.find((block) =>
+    String(block.type).toLowerCase().startsWith('heading'),
+  );
+  return heading ? FRONT_MATTER_HEADING.test(plain(heading.text ?? '')) : false;
+}
+
+/**
+ * The paragraphs of a note that carry content: not headings, not a line
+ * of a word or two, not a reference line, not an outline item or a
+ * byline, and on a front matter page not a line about the document.
+ */
+export function contentBlocks(
+  blocks: Block[],
+  options: { frontMatter?: boolean } = {},
+): ContentBlock[] {
   const out: ContentBlock[] = [];
   blocks.forEach((block, index) => {
     if (String(block.type).toLowerCase().startsWith('heading')) return;
     const text = plain(block.text ?? '');
     if (looksLikeReference(text)) return;
+    if (looksLikeOutlineItem(text)) return;
+    if (looksLikeByline(text)) return;
+    if (options.frontMatter && looksLikeAboutTheDocument(text)) return;
     const words = contentWordsOf(text);
     if (words.size < CONTENT_WORDS_MIN) return;
     out.push({ index, text, words });
@@ -161,8 +219,10 @@ export function uncoveredBlocks(input: {
   script: string;
   taught: Set<number>;
   exempt?: Set<number>;
+  /** A title, outline or references page: its lines about the document are not content. */
+  frontMatter?: boolean;
 }): UncoveredBlock[] {
-  const all = contentBlocks(input.blocks);
+  const all = contentBlocks(input.blocks, { frontMatter: input.frontMatter });
   const said = contentWordsOf(input.script.replace(/\[[^\]]*\]/g, ' '));
   const out: UncoveredBlock[] = [];
   for (const block of all) {

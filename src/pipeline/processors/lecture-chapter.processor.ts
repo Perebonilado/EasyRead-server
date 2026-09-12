@@ -83,6 +83,7 @@ import { LectureBoardService } from './lecture-board.service';
 import {
   contentBlocks,
   coverageDetail,
+  isFrontMatterPage,
   taughtBlocksOf,
   uncoveredBlocks,
 } from '../../business/domain/coverage';
@@ -1238,7 +1239,12 @@ export class LectureChapterProcessor {
     // check exempts. The plan numbers the standard note; the slow learner
     // is taught from the easiest one, whose numbers differ, so nothing is
     // exempt there.
-    const paragraphs = input.note ? contentBlocks(input.note).length : 0;
+    const frontMatter = input.note
+      ? isFrontMatterPage(input.pageNumber, input.note)
+      : false;
+    const paragraphs = input.note
+      ? contentBlocks(input.note, { frontMatter }).length
+      : 0;
     const exempt = new Set<number>(
       input.note && style !== 'gentle'
         ? (beat.skipBlocks ?? []).map((skip) => skip.block)
@@ -1255,6 +1261,7 @@ export class LectureChapterProcessor {
               sectionTags(sections, noteUnits(input.note)),
             ),
             exempt,
+            frontMatter,
           }).map((block) => block.index)
         : [];
     // A bridge is one sentence whatever the plan says; a plan from before
@@ -1422,6 +1429,7 @@ export class LectureChapterProcessor {
                 sectionTags(sections, noteUnits(input.note ?? [])),
               ),
               exempt,
+              frontMatter,
             }),
           )}. Say each of these in at least a sentence of its own, in order, inside the section of the move that teaches it, and name it in that section's teaches; the styles differ in how much is said of each paragraph, never in which are said`,
         });

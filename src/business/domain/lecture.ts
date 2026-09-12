@@ -15,7 +15,7 @@
 import type { LectureSegmentStatus } from '../../contracts';
 import { createHash } from 'node:crypto';
 import type { Block, LectureStyle } from '../../contracts';
-import { contentBlocks, repeatVerified } from './coverage';
+import { contentBlocks, isFrontMatterPage, repeatVerified } from './coverage';
 
 /**
  * The generator's identity, stamped on every row it writes and baked into
@@ -1848,7 +1848,9 @@ export function coverageProblems(
   for (const beat of plan.beats ?? []) {
     const blocks = coverage.blocksByPage.get(beat.pageNumber);
     if (!blocks) continue;
-    const content = contentBlocks(blocks);
+    const content = contentBlocks(blocks, {
+      frontMatter: isFrontMatterPage(beat.pageNumber, blocks),
+    });
     if (!content.length) continue;
     const known = new Set(content.map((block) => block.index));
     const assigned = new Set<number>();

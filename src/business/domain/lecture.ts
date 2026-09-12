@@ -71,6 +71,23 @@ export const WORD_BUDGET: Record<
 export const DEFAULT_LECTURE_STYLE: LectureStyle = 'steady';
 
 /**
+ * A page with fewer words than this on it is narrated on the light budget
+ * whatever the plan says: a slide with a heading and three bullets does
+ * not carry two minutes of speech, and padding it costs money and sounds
+ * like padding.
+ */
+export const LIGHT_BELOW_WORDS = 120;
+
+/** The budget a page gets: the plan's, unless the page's own words are too few for it. */
+export function weightForPage(
+  planned: BeatWeight | undefined,
+  sourceWords: number,
+): BeatWeight {
+  if (sourceWords > 0 && sourceWords < LIGHT_BELOW_WORDS) return 'light';
+  return planned ?? 'full';
+}
+
+/**
  * What a row of the lecture is. A page is the lecture proper; the others
  * sit around a chapter: the words a slow learner hears before it, the
  * check of what stuck after it, and the review a returning learner hears

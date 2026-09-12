@@ -8,6 +8,7 @@ import {
   ReadingPositionModel,
   SimplifiedPageModel,
   TopicModel,
+  InstitutionMemberModel,
 } from '../web/database/models';
 import { toListItem } from './shared/document-shape';
 
@@ -30,14 +31,19 @@ export class DocumentDetailQuery {
     @InjectModel(TopicModel) private readonly topics: typeof TopicModel,
     @InjectModel(ReadingPositionModel)
     private readonly positions: typeof ReadingPositionModel,
+    @InjectModel(InstitutionMemberModel)
+    private readonly members: typeof InstitutionMemberModel,
   ) {}
 
   async execute(documentId: string, userId: string): Promise<DocumentDetail> {
     const doc = await this.documents.findOne({
-      where: { id: documentId, userId, deletedAt: null } as never,
+      where: { id: documentId, deletedAt: null } as never,
     });
-    // Someone else's document reads as missing so ids can't be probed.
-    if (!doc) throw new NotFoundException('Document not found');
+    // Someone else's document reads as missing so ids can't be probed. A
+    // school's document is every member's.
+    if (!doc || !(await this.mayRead(doc, userId))) {
+      throw new NotFoundException('Document not found');
+    }
 
     const [tallies, steps, topicCount, position] = await Promise.all([
       this.tallyByLevel(documentId),
@@ -68,6 +74,15 @@ export class DocumentDetailQuery {
           }
         : null,
     };
+  }
+
+  private async mayRead(doc: DocumentModel, userId: string): Promise<boolean> {
+    if (doc.userId === userId) return true;
+    if (!doc.institutionId) return false;
+    const member = await this.members.count({
+      where: { userId, institutionId: doc.institutionId } as never,
+    });
+    return member > 0;
   }
 
   /**

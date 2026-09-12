@@ -18,6 +18,30 @@ const toRecord = (row: SimplifiedPageModel): SimplifiedPageRecord => ({
   attempts: row.attempts,
 });
 
+/**
+ * MySQL resolves a deadlock by killing one side; the loser is meant to try
+ * again. Ten pages simplify at once and all write this table, so a status
+ * write that lost the race is repeated a few times before it counts as a
+ * failure. Without this a page stays pending forever and the document
+ * never reaches ready.
+ */
+async function withDeadlockRetry<T>(write: () => Promise<T>): Promise<T> {
+  let lastError: unknown;
+  for (let attempt = 1; attempt <= 4; attempt += 1) {
+    try {
+      return await write();
+    } catch (error) {
+      lastError = error;
+      const message = (error as Error).message ?? '';
+      if (!/deadlock|lock wait timeout/i.test(message)) throw error;
+      await new Promise((resolve) =>
+        setTimeout(resolve, 50 * attempt + Math.random() * 100),
+      );
+    }
+  }
+  throw lastError;
+}
+
 @Injectable()
 export class SequelizeSimplifiedPageRepository implements SimplifiedPageRepository {
   constructor(
@@ -91,22 +115,24 @@ export class SequelizeSimplifiedPageRepository implements SimplifiedPageReposito
     tokensIn: number | null;
     tokensOut: number | null;
   }): Promise<void> {
-    await this.model.update(
-      {
-        status: 'done',
-        blocks: input.blocks,
-        model: input.model,
-        tokensIn: input.tokensIn,
-        tokensOut: input.tokensOut,
-        error: null,
-      },
-      {
-        where: {
-          documentId: input.documentId,
-          level: input.level,
-          pageNumber: input.pageNumber,
+    await withDeadlockRetry(() =>
+      this.model.update(
+        {
+          status: 'done',
+          blocks: input.blocks,
+          model: input.model,
+          tokensIn: input.tokensIn,
+          tokensOut: input.tokensOut,
+          error: null,
         },
-      },
+        {
+          where: {
+            documentId: input.documentId,
+            level: input.level,
+            pageNumber: input.pageNumber,
+          },
+        },
+      ),
     );
   }
 
@@ -117,9 +143,11 @@ export class SequelizeSimplifiedPageRepository implements SimplifiedPageReposito
     pageNumber: number,
     error: string,
   ): Promise<number> {
-    await this.model.update(
-      { status: 'failed', error, attempts: literal('attempts + 1') as any },
-      { where: { documentId, level, pageNumber } },
+    await withDeadlockRetry(() =>
+      this.model.update(
+        { status: 'failed', error, attempts: literal('attempts + 1') },
+        { where: { documentId, level, pageNumber } },
+      ),
     );
     const row = await this.model.findOne({
       where: { documentId, level, pageNumber },

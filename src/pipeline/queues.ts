@@ -52,7 +52,9 @@ export const QUEUE_SETTINGS: Record<
   'lecture-chapter': { concurrency: 4, attempts: 2, backoffMs: 15_000 },
   // Synthesis needs nothing from its neighbours, so it runs wide and off
   // the writing critical path.
-  'lecture-voice': { concurrency: 8, attempts: 3, backoffMs: 10_000 },
+  // Thirty-two at once, the catalogue voice's intake, so a whole deck is in
+  // flight and the engine's batch is full; OpenAI takes it too.
+  'lecture-voice': { concurrency: 32, attempts: 3, backoffMs: 10_000 },
   // Forced alignment is CPU work on the worker itself: a couple at a time,
   // and never on the voicing path.
   'lecture-align': { concurrency: 2, attempts: 2, backoffMs: 30_000 },

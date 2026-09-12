@@ -1,4 +1,11 @@
 export { AiCallLogModel } from './ai-call-log.model';
+export {
+  InstitutionModel,
+  DepartmentModel,
+  LevelModel,
+  CourseModel,
+  InstitutionMemberModel,
+} from './institution.model';
 export { AssessmentEventModel } from './assessment-event.model';
 export { ItemModel } from './item.model';
 export { ItemReviewModel } from './item-review.model';
@@ -42,6 +49,13 @@ export {
 export { WebhookEventModel } from './webhook-event.model';
 
 import { AiCallLogModel } from './ai-call-log.model';
+import {
+  InstitutionModel,
+  DepartmentModel,
+  LevelModel,
+  CourseModel,
+  InstitutionMemberModel,
+} from './institution.model';
 import { AssessmentEventModel } from './assessment-event.model';
 import { ItemModel } from './item.model';
 import { ItemReviewModel } from './item-review.model';
@@ -110,6 +124,11 @@ export const ALL_MODELS = [
   PipelineRunModel,
   DocumentChunkModel,
   AiCallLogModel,
+  InstitutionModel,
+  DepartmentModel,
+  LevelModel,
+  CourseModel,
+  InstitutionMemberModel,
   AssessmentEventModel,
   ItemModel,
   ItemReviewModel,

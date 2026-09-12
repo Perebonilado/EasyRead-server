@@ -4,9 +4,11 @@ import { ForbiddenError, NotFoundError } from '../../domain/errors/errors';
 import {
   DOCUMENT_REPOSITORY,
   GROUP_REPOSITORY,
+  INSTITUTION_REPOSITORY,
 } from '../../repositories/tokens';
 import type { DocumentRepository } from '../../repositories/document.repository';
 import type { GroupRepository } from '../../repositories/group.repository';
+import type { InstitutionRepository } from '../../repositories/institution.repository';
 
 /**
  * One place that answers "may this user touch this document?".
@@ -20,6 +22,8 @@ export class DocumentAccessService {
   constructor(
     @Inject(DOCUMENT_REPOSITORY) private readonly documents: DocumentRepository,
     @Inject(GROUP_REPOSITORY) private readonly groups: GroupRepository,
+    @Inject(INSTITUTION_REPOSITORY)
+    private readonly institutions: InstitutionRepository,
   ) {}
 
   async require(documentId: string, userId: string): Promise<Document> {
@@ -28,6 +32,16 @@ export class DocumentAccessService {
     // so ids can't be probed for existence.
     if (!doc || doc.props.deletedAt) throw new NotFoundError('Document');
     if (!doc.isOwnedBy(userId)) {
+      // A school's document is read by every member of the school. What the
+      // reader writes is keyed to their own user, so members never touch each
+      // other's positions, notes or answers; the admin who uploaded it is
+      // the owner, and owner-only actions stay with them.
+      if (
+        doc.isInstitutional() &&
+        (await this.institutions.isMember(userId, doc.props.institutionId!))
+      ) {
+        return doc;
+      }
       // Classroom (classroom plan §4): a member of a LIVE group session on
       // this document reads it for the session's duration. Read-only in
       // effect: everything the reader writes is keyed to their own user, and

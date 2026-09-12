@@ -4,6 +4,7 @@ import { Op, fn, col } from 'sequelize';
 import type { DocumentListItem, DocumentStatus } from '../contracts';
 import {
   DocumentModel,
+  InstitutionMemberModel,
   ReadingPositionModel,
   SimplifiedPageModel,
 } from '../web/database/models';
@@ -37,6 +38,8 @@ export class DocumentListQuery {
     private readonly simplified: typeof SimplifiedPageModel,
     @InjectModel(ReadingPositionModel)
     private readonly positions: typeof ReadingPositionModel,
+    @InjectModel(InstitutionMemberModel)
+    private readonly members: typeof InstitutionMemberModel,
   ) {}
 
   async execute(
@@ -115,10 +118,16 @@ export class DocumentListQuery {
     if (!positions.length) return [];
 
     const ids = positions.map((position) => position.documentId);
+    // Their own, and their school's: a member picks a shared document back
+    // up the way they would one they uploaded.
+    const member = await this.members.findOne({ where: { userId } as never });
     const rows = await this.documents.findAll({
       where: {
         id: { [Op.in]: ids },
-        userId,
+        [Op.or]: [
+          { userId },
+          ...(member ? [{ institutionId: member.institutionId }] : []),
+        ],
         deletedAt: null,
         status: 'ready',
       } as never,

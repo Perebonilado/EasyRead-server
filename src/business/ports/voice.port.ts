@@ -17,7 +17,16 @@ export interface SpeechPort {
     instructions?: string;
     /** Playback rate for models that take a number instead (tts-1); 1 is natural. */
     speed?: number;
-  }): Promise<{ audio: Buffer; mimeType: string; model: string }>;
+  }): Promise<{
+    audio: Buffer;
+    mimeType: string;
+    /** Provider and model, as the ledger names them: `openai:gpt-4o-mini-tts`, `modal:qwen3-tts-0.6b`. */
+    model: string;
+    /** Seconds of GPU the call took, for providers billed by the second; absent otherwise. */
+    gpuSeconds?: number;
+  }>;
+  /** What goes into a file's name so audio from one voice never overwrites another's. */
+  label(): { model: string; voice: string };
 }
 
 /**

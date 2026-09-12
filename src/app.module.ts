@@ -161,11 +161,52 @@ import { TutorsController } from './web/controllers/tutors.controller';
 import { LectureController } from './web/controllers/lecture.controller';
 import { VoiceController } from './web/controllers/voice.controller';
 import { GuidedController } from './web/controllers/guided.controller';
+import { InstitutionsController } from './web/controllers/institutions.controller';
+import { AdminInstitutionsController } from './web/controllers/admin-institutions.controller';
+import { AdminMaterialsController } from './web/controllers/admin-materials.controller';
+import {
+  AdminUploadIntentHandler,
+  MoveMaterialHandler,
+  PrepareMaterialsHandler,
+} from './business/handlers/institutions/materials.handlers';
+import { MaterialsQuery } from './query/materials.query';
+import { CatalogueQuery } from './query/catalogue.query';
+import {
+  CreateInstitutionHandler,
+  DeleteCourseHandler,
+  DeleteDepartmentHandler,
+  DeleteLevelHandler,
+  InstitutionDetailHandler,
+  InstitutionPublicHandler,
+  JoinInstitutionHandler,
+  ListInstitutionsHandler,
+  SaveCourseHandler,
+  SaveDepartmentHandler,
+  SaveLevelHandler,
+  SetMembershipHandler,
+  UpdateInstitutionHandler,
+} from './business/handlers/institutions/institution.handlers';
 import { DomainExceptionFilter } from './web/filters/domain-exception.filter';
 import { AuthGuard } from './web/security/auth.guard';
 
 const handlers = [
   RegisterHandler,
+  CreateInstitutionHandler,
+  DeleteCourseHandler,
+  DeleteDepartmentHandler,
+  DeleteLevelHandler,
+  InstitutionDetailHandler,
+  InstitutionPublicHandler,
+  JoinInstitutionHandler,
+  ListInstitutionsHandler,
+  SaveCourseHandler,
+  SaveDepartmentHandler,
+  SaveLevelHandler,
+  SetMembershipHandler,
+  UpdateInstitutionHandler,
+  AdminUploadIntentHandler,
+  MoveMaterialHandler,
+  PrepareMaterialsHandler,
   CreateGroupHandler,
   JoinGroupHandler,
   ListGroupsHandler,
@@ -264,6 +305,8 @@ const handlers = [
 ];
 
 const queries = [
+  MaterialsQuery,
+  CatalogueQuery,
   DocumentListQuery,
   DocumentDetailQuery,
   ReaderQuery,
@@ -309,6 +352,9 @@ const queries = [
     VoiceController,
     LectureController,
     GuidedController,
+    InstitutionsController,
+    AdminInstitutionsController,
+    AdminMaterialsController,
     TutorsController,
     EventsController,
     HealthController,

@@ -85,6 +85,8 @@ export type LoginResponse = {
    */
   refreshToken: string;
 };
+export type UserRole = 'learner' | 'admin';
+
 export type MeResponse = {
   id: string;
   email: string;
@@ -92,7 +94,198 @@ export type MeResponse = {
   emailVerified: boolean;
   defaultLevel: Level;
   plan: PlanCode;
+  /** The platform role; `admin` runs the schools. */
+  role: UserRole;
+  /** The school this person belongs to, or null. */
+  membership: MembershipDto | null;
 };
+
+// ── Institutions ─────────────────────────────────────────────────────────────
+
+/** A school as a member or a visitor sees it. */
+export interface InstitutionDto {
+  id: string;
+  name: string;
+  /** The school's address: easiread.com/<slug>. */
+  slug: string;
+  country: string | null;
+  /** What the school calls a level: "Year", "Level", "Semester". */
+  levelWord: string;
+  /** Whether joining needs the school's code; an email on one of its domains also admits. */
+  needsInviteCode: boolean;
+  emailDomains: string[];
+}
+
+/** A school as the admin sees it: the code included. */
+export interface InstitutionAdminDto extends InstitutionDto {
+  inviteCode: string | null;
+  memberCount: number;
+  documentCount: number;
+}
+
+export interface DepartmentDto {
+  id: string;
+  name: string;
+  slug: string;
+  orderIndex: number;
+}
+
+export interface LevelDto {
+  id: string;
+  name: string;
+  orderIndex: number;
+}
+
+export interface CourseDto {
+  id: string;
+  departmentId: string;
+  levelId: string | null;
+  name: string;
+  code: string | null;
+  orderIndex: number;
+}
+
+/** A person's place in their school. */
+export interface MembershipDto {
+  institution: InstitutionDto;
+  departmentId: string | null;
+  levelId: string | null;
+  role: 'student' | 'staff' | 'admin';
+}
+
+/** The school's front door: enough to sign up into it and to choose a department and level. */
+export interface InstitutionPublicDto {
+  institution: InstitutionDto;
+  departments: DepartmentDto[];
+  levels: LevelDto[];
+}
+
+/** The admin's view of one school: everything in it. */
+export interface InstitutionDetailDto {
+  institution: InstitutionAdminDto;
+  departments: DepartmentDto[];
+  levels: LevelDto[];
+  courses: CourseDto[];
+}
+
+export interface CatalogueDocumentDto extends DocumentListItem {
+  departmentId: string | null;
+  levelId: string | null;
+  courseId: string | null;
+  /** How far this member has read, 0 to 1; 0 when never opened. */
+  read: number;
+  /** Whether any lecture audio exists yet, in any style. */
+  audio: boolean;
+}
+
+/** The school's catalogue for a member: every file with where it sits, the member's own place first. */
+export interface CatalogueDto {
+  institution: InstitutionDto;
+  departments: DepartmentDto[];
+  levels: LevelDto[];
+  courses: CourseDto[];
+  documents: CatalogueDocumentDto[];
+  membership: { departmentId: string | null; levelId: string | null };
+}
+
+export interface JoinInstitutionRequest {
+  inviteCode?: string;
+  departmentId?: string;
+  levelId?: string;
+}
+
+export interface SetMembershipRequest {
+  departmentId: string | null;
+  levelId: string | null;
+}
+
+/** A school's document as the admin sees it: where it sits and how far its processing has got. */
+export interface MaterialDto {
+  document: DocumentListItem;
+  departmentId: string | null;
+  levelId: string | null;
+  courseId: string | null;
+  orderIndex: number;
+  contentHash: string | null;
+  steps: { step: PipelineStep; status: PipelineStatus; error: string | null }[];
+  simplified: Record<Level, { done: number; failed: number; total: number }>;
+  /** Lecture pages per style: how many exist, how many have audio, how many failed. */
+  lecture: Record<
+    LectureStyle,
+    { total: number; ready: number; failed: number }
+  >;
+  /** What the model calls on this document have cost so far, summed from the ledger. */
+  costUsd: number;
+}
+
+export interface PrepareRequest {
+  /** Named documents, or a department at a level, or a course, or the whole school when none is given. */
+  documentIds?: string[];
+  departmentId?: string;
+  levelId?: string;
+  courseId?: string;
+  /** Write the easiest notes too. */
+  easiest: boolean;
+  /** Which lecture styles to write and voice ahead. */
+  styles: LectureStyle[];
+}
+
+export interface PrepareEstimateDto {
+  documents: number;
+  pages: number;
+  textUsd: number;
+  audioUsd: number;
+  totalUsd: number;
+}
+
+export interface PrepareResponse extends PrepareEstimateDto {
+  /** Documents given work. */
+  queued: number;
+  /** Documents with nothing left to do, or not yet through their upload. */
+  skipped: number;
+}
+
+/** The admin's upload into a department at a level: the hash first, so a duplicate never sends its bytes. */
+export interface AdminUploadIntentRequest extends UploadIntentRequest {
+  contentHash: string;
+  departmentId: string;
+  levelId: string | null;
+  /** An optional label within the placement. */
+  courseId?: string | null;
+  orderIndex?: number;
+}
+
+export type AdminUploadIntentResponse =
+  UploadIntentResponse | { duplicateOf: string; title: string };
+
+export interface MoveMaterialRequest {
+  departmentId?: string;
+  levelId?: string | null;
+  courseId?: string | null;
+  orderIndex?: number;
+  title?: string;
+}
+
+export interface CreateInstitutionRequest {
+  name: string;
+  /** Omitted means made from the name. */
+  slug?: string;
+  country?: string | null;
+  levelWord?: string;
+  emailDomains?: string[];
+  /** True to mint a code; false for none. */
+  inviteCode?: boolean;
+}
+
+export interface UpdateInstitutionRequest {
+  name?: string;
+  slug?: string;
+  country?: string | null;
+  levelWord?: string;
+  emailDomains?: string[];
+  /** 'rotate' mints a fresh code, 'none' removes it. */
+  inviteCode?: 'rotate' | 'none';
+}
 
 // ── Documents ────────────────────────────────────────────────────────────────
 

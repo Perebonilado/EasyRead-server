@@ -21,6 +21,7 @@ export const VOICE_CREDITS_REPOSITORY = Symbol('VoiceCreditsRepository');
 export const SUMMARY_REPOSITORY = Symbol('SummaryRepository');
 
 export const AI_CALL_LOG_REPOSITORY = Symbol('AiCallLogRepository');
+export const INSTITUTION_REPOSITORY = Symbol('InstitutionRepository');
 export const ASSESSMENT_REPOSITORY = Symbol('AssessmentRepository');
 export const LEARNER_PROFILE_REPOSITORY = Symbol('LearnerProfileRepository');
 export const PROFILE_CHANGE_REPOSITORY = Symbol('PROFILE_CHANGE_REPOSITORY');

@@ -25,6 +25,22 @@ export class RegisterDto {
   @IsString()
   @Length(1, 255, { message: 'Tell us what to call you' })
   name!: string;
+
+  /** Signing up through a school's own door. */
+  @IsOptional()
+  @IsString()
+  @MaxLength(80)
+  institutionSlug?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(64)
+  departmentId?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(64)
+  levelId?: string;
 }
 
 export class LoginDto {

@@ -8,8 +8,13 @@ import { CLOCK, EMAIL, STARTER_LIBRARY } from '../../ports/tokens';
 import type { ClockPort } from '../../ports/clock.port';
 import type { EmailPort } from '../../ports/email.port';
 import type { StarterLibraryPort } from '../../ports/starter-library.port';
-import { USER_REPOSITORY } from '../../repositories/tokens';
+import {
+  INSTITUTION_REPOSITORY,
+  USER_REPOSITORY,
+} from '../../repositories/tokens';
+import type { InstitutionRepository } from '../../repositories/institution.repository';
 import type { UserRepository } from '../../repositories/user.repository';
+import { admits } from '../../domain/institutions';
 import AbstractRequestHandlerTemplate from '../AbstractRequestHandlerTemplate';
 import { CommandResponse } from '../response/CommandResponse';
 
@@ -17,6 +22,10 @@ export interface RegisterRequest {
   email: string;
   password: string;
   name: string;
+  /** Signed up through a school's own door: they belong to it from the start. */
+  institutionSlug?: string;
+  departmentId?: string;
+  levelId?: string;
 }
 
 const VERIFICATION_TTL_HOURS = 24;
@@ -28,6 +37,8 @@ export class RegisterHandler extends AbstractRequestHandlerTemplate<
 > {
   constructor(
     @Inject(USER_REPOSITORY) private readonly users: UserRepository,
+    @Inject(INSTITUTION_REPOSITORY)
+    private readonly institutions: InstitutionRepository,
     @Inject(EMAIL) private readonly email: EmailPort,
     @Inject(STARTER_LIBRARY) private readonly starter: StarterLibraryPort,
     @Inject(CLOCK) private readonly clock: ClockPort,
@@ -58,6 +69,38 @@ export class RegisterHandler extends AbstractRequestHandlerTemplate<
       verificationTokenHash: this.tokens.hash(token),
       verificationTokenExpires: expires,
     });
+
+    // Through a school's door: a member from the first moment, placed in
+    // the department and level they chose. A school that admits by email
+    // domain refuses the rest; nothing else stands in the way.
+    if (cmd.institutionSlug) {
+      const school = await this.institutions.findBySlug(
+        cmd.institutionSlug.toLowerCase(),
+      );
+      if (
+        school &&
+        admits(
+          { inviteCode: null, emailDomains: school.emailDomains },
+          { email, code: null },
+        )
+      ) {
+        const department = cmd.departmentId
+          ? await this.institutions.findDepartment(cmd.departmentId)
+          : null;
+        const level = cmd.levelId
+          ? await this.institutions.findLevel(cmd.levelId)
+          : null;
+        await this.institutions.join({
+          userId: user.id,
+          institutionId: school.id,
+          departmentId:
+            department && department.institutionId === school.id
+              ? department.id
+              : null,
+          levelId: level && level.institutionId === school.id ? level.id : null,
+        });
+      }
+    }
 
     // The starter document (onboarding): seeded in the background so the
     // library is ready by first login, and never allowed to fail a signup.

@@ -1,4 +1,5 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import type { LectureStyle } from '../../contracts';
 import { EVENT_BUS, JOB_QUEUE, LLM_GATEWAY } from '../../business/ports/tokens';
 import type { EventBusPort } from '../../business/ports/event-bus.port';
@@ -37,6 +38,8 @@ import {
 import {
   LECTURE_GENERATOR_VERSION,
   LECTURE_STYLES,
+  weightForPage,
+  wordCount,
   MAX_SEGMENT_ATTEMPTS,
   WORD_BUDGET,
   acceptSegment,
@@ -149,7 +152,28 @@ export class LectureChapterProcessor {
     private readonly boards: LectureBoardService,
     @Inject(SIMPLIFIED_PAGE_REPOSITORY)
     private readonly simplified: SimplifiedPageRepository,
+    private readonly config: ConfigService,
   ) {}
+
+  /**
+   * Whether this document's audio is made here at all.
+   *
+   * A school's catalogue is voiced in bulk on our own hardware, so the
+   * scripts are written and the rows are left waiting for it. Anything a
+   * learner uploaded is voiced as it always was, because somebody is
+   * sitting there waiting for it.
+   */
+  private voicesHere(doc: {
+    props: { institutionId: string | null };
+  }): boolean {
+    if (!doc.props.institutionId) return true;
+    // A school's document goes to the rented GPU, and only when that
+    // service is set; never to the per-character voice.
+    const externally =
+      this.config.get<string>('LECTURE_VOICE_EXTERNAL', 'false') === 'true';
+    const service = Boolean(this.config.get<string>('MODAL_TTS_URL'));
+    return service && !externally;
+  }
 
   /**
    * The simplified note a style teaches from (the slow learner's from the
@@ -216,7 +240,7 @@ export class LectureChapterProcessor {
         style,
         kind: row.kind,
       }));
-      await this.queue.enqueueLectureVoices(keys);
+      if (this.voicesHere(doc)) await this.queue.enqueueLectureVoices(keys);
       // Their words exist, so their board can be written now; it is timed
       // on the audio once that arrives.
       const unboarded = keys.filter((key, index) => {
@@ -343,7 +367,7 @@ export class LectureChapterProcessor {
    * extra silently, since nothing of the lecture is missing.
    */
   private async writeExtra(input: {
-    doc: { id: string };
+    doc: { id: string; props: { institutionId: string | null } };
     topic: { title: string };
     topicId: string;
     plan: LecturePlan;
@@ -454,15 +478,17 @@ export class LectureChapterProcessor {
         plan,
         durationMs: estimateDurationMs(scriptForTts(script)),
       });
-      await this.queue.enqueueLectureVoices([
-        {
-          documentId: doc.id,
-          contentVersion,
-          pageNumber: row.pageNumber,
-          style,
-          kind,
-        },
-      ]);
+      if (this.voicesHere(doc)) {
+        await this.queue.enqueueLectureVoices([
+          {
+            documentId: doc.id,
+            contentVersion,
+            pageNumber: row.pageNumber,
+            style,
+            kind,
+          },
+        ]);
+      }
     } catch (error) {
       const message = (error as Error).message;
       this.logger.warn(`${input.topic.title}: ${kind} failed (${message})`);
@@ -674,7 +700,7 @@ export class LectureChapterProcessor {
    * — the rest of the chapter still gets a lecture.
    */
   private async writeOne(input: {
-    doc: { id: string };
+    doc: { id: string; props: { institutionId: string | null } };
     topicId: string;
     topicTitle: string;
     plan: LecturePlan;
@@ -932,7 +958,7 @@ export class LectureChapterProcessor {
           kind: 'part',
         });
       }
-      await this.queue.enqueueLectureVoices(voices);
+      if (this.voicesHere(doc)) await this.queue.enqueueLectureVoices(voices);
     } catch (error) {
       const message = (error as Error).message;
       this.logger.warn(
@@ -996,7 +1022,12 @@ export class LectureChapterProcessor {
   }): Promise<WrittenPage> {
     const { style } = input;
     const beat = beatFor(input.plan, input.pageNumber);
-    const weight: BeatWeight = beat.weight ?? 'full';
+    // A sparse page (a slide, a figure with a caption) is narrated short,
+    // whatever the plan thought: the page's own words decide.
+    const weight: BeatWeight = weightForPage(
+      beat.weight,
+      wordCount(input.original ?? input.pageText),
+    );
     // A bridge is one sentence whatever the plan says; a plan from before
     // moves existed has one move, the page's goal.
     // A plan sometimes ends a page on applause ("encouragement to continue

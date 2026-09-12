@@ -88,6 +88,8 @@ export interface GenerateLectureRequest extends LectureRequest {
    * current generator. The one way an existing lecture picks up new rules.
    */
   rewrite?: boolean;
+  /** The platform admin preparing a school's document: no plan gate applies. */
+  asAdmin?: boolean;
   /**
    * A learner switched style here, mid-chapter: this page and the rest of
    * its chapter are written first, before anything else.
@@ -541,8 +543,9 @@ export class GenerateLectureHandler extends AbstractRequestHandlerTemplate<
     const doc = await this.access.require(cmd.documentId, cmd.userId);
 
     // Writing a lecture is a page's worth of model calls per page, so it
-    // sits behind the same daily study gate as generating a test.
-    await this.entitlements.assertStudyTime(cmd.userId);
+    // sits behind the same daily study gate as generating a test. The
+    // admin preparing a school's catalogue is the platform, not a learner.
+    if (!cmd.asAdmin) await this.entitlements.assertStudyTime(cmd.userId);
 
     const topics = await this.topics.listByDocument(doc.id);
     const pageCount = doc.props.pageCount;

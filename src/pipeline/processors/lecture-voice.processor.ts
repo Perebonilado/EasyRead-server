@@ -2,6 +2,7 @@ import { Inject, Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import {
   ALIGNER,
+  CATALOGUE_SPEECH,
   EVENT_BUS,
   SPEECH,
   STORAGE,
@@ -26,8 +27,9 @@ import {
   scriptForTts,
 } from '../../business/domain/lecture';
 import type { LectureVoiceJobData } from '../queues';
+import { catalogueSpeechCost } from '../../business/domain/cost';
 import { mp3DurationMs, speechTooShort } from '../../business/domain/speech';
-import type { JobContext } from './base.processor';
+import { isPermanentFailure, type JobContext } from './base.processor';
 import { LectureBoardService } from './lecture-board.service';
 import { LectureFollowService } from './lecture-follow.service';
 
@@ -49,6 +51,7 @@ export class LectureVoiceProcessor {
     @Inject(LECTURE_REPOSITORY) private readonly lectures: LectureRepository,
     @Inject(AI_CALL_LOG_REPOSITORY) private readonly calls: AiCallLogRepository,
     @Inject(SPEECH) private readonly speech: SpeechPort,
+    @Inject(CATALOGUE_SPEECH) private readonly catalogueSpeech: SpeechPort,
     @Inject(STORAGE) private readonly storage: StoragePort,
     @Inject(EVENT_BUS) private readonly events: EventBusPort,
     private readonly config: ConfigService,
@@ -82,8 +85,14 @@ export class LectureVoiceProcessor {
     const spoken = scriptForTts(row.scriptText);
 
     try {
-      const voice = this.config.get<string>('AI_LECTURE_VOICE', 'alloy');
-      const model = this.config.get<string>('AI_TTS_MODEL', 'gpt-4o-mini-tts');
+      // A school's document is voiced on the rented GPU, and only there;
+      // a learner's own upload by the per-character voice, as always.
+      const catalogue = Boolean(doc.props.institutionId);
+      const speech = catalogue ? this.catalogueSpeech : this.speech;
+      const { model, voice: named } = speech.label();
+      const voice = catalogue
+        ? named
+        : this.config.get<string>('AI_LECTURE_VOICE', named);
       // The words and their delivery are both in the key: a page written
       // again, or a style whose delivery changed, gets new audio; a page
       // written the same way gets the file it has.
@@ -102,7 +111,7 @@ export class LectureVoiceProcessor {
             `${documentId} p${pageNumber} ${style}: the audio on file is ${Math.round(mp3DurationMs(cached) / 1000)}s for ${spoken.length} chars; voicing it again`,
           );
         }
-        const result = await this.speech.synthesize({
+        const result = await speech.synthesize({
           text: spoken,
           voice,
           instructions: delivery,
@@ -113,15 +122,26 @@ export class LectureVoiceProcessor {
           body: result.audio,
           mimeType: result.mimeType,
         });
+        // The rented GPU is priced by the audio it made at the bench's
+        // measured rate; the per-character voice is priced from the text.
+        const rented = result.model.startsWith('modal:');
+        const rate = Number(
+          this.config.get<string>('MODAL_USD_PER_AUDIO_HOUR', '0'),
+        );
         await this.calls.record({
           documentId: doc.id,
           task: 'tts_lecture',
-          model: `openai:${result.model}`,
+          model: result.model.includes(':')
+            ? result.model
+            : `openai:${result.model}`,
           // Speech is priced per character, so the text length is the input.
           tokensIn: spoken.length,
           tokensOut: null,
           latencyMs: null,
           outcome: 'ok',
+          costUsd: rented
+            ? catalogueSpeechCost(mp3DurationMs(result.audio.length), rate)
+            : null,
         });
       }
 
@@ -163,7 +183,9 @@ export class LectureVoiceProcessor {
       }
     } catch (error) {
       const message = (error as Error).message;
-      if (!context.isFinalAttempt) {
+      // A refused request (a 4xx from the voice) cannot succeed by being
+      // sent again; it ends the page now rather than after the retries.
+      if (!context.isFinalAttempt && !isPermanentFailure(error)) {
         this.logger.warn(
           `${documentId} p${pageNumber} voicing failed, retrying — ${message}`,
         );

@@ -10,6 +10,8 @@ import { IS_PUBLIC } from './public.decorator';
 export interface AuthenticatedUser {
   id: string;
   email: string;
+  /** The platform role, for the admin gate. */
+  role: 'learner' | 'admin';
 }
 
 export interface AuthenticatedRequest extends Request {
@@ -49,7 +51,11 @@ export class AuthGuard implements CanActivate {
       throw new UnauthorizedError('Your session has expired');
     }
 
-    request.user = { id: user.id, email: user.email };
+    request.user = {
+      id: user.id,
+      email: user.email,
+      role: user.role ?? 'learner',
+    };
     return true;
   }
 

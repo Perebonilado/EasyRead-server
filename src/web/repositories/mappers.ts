@@ -22,6 +22,7 @@ export function toUser(row: UserModel): User {
     tokenVersion: row.tokenVersion,
     deletedAt: row.deletedAt,
     createdAt: row.get('createdAt') as Date,
+    role: row.role ?? 'learner',
   });
 }
 
@@ -47,5 +48,11 @@ export function toDocument(row: DocumentModel): Document {
     failureReason: row.failureReason,
     deletedAt: row.deletedAt,
     createdAt: row.get('createdAt') as Date,
+    institutionId: row.institutionId ?? null,
+    departmentId: row.departmentId ?? null,
+    levelId: row.levelId ?? null,
+    courseId: row.courseId ?? null,
+    contentHash: row.contentHash ?? null,
+    orderIndex: row.orderIndex ?? 0,
   });
 }

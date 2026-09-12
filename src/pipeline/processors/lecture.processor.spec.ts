@@ -54,6 +54,9 @@ const REAL_PAGE =
   'as aggregate demand outpaces the productive capacity of the economy, ' +
   'a dynamic amplified through the expectations channel.';
 
+/** A page with enough of its own words to earn the full budget: the sparse rule narrates shorter pages light. */
+const FULL_PAGE = Array.from({ length: 6 }, () => REAL_PAGE).join(' ');
+
 const USAGE = { model: 'fake', tokensIn: 1, tokensOut: 1, latencyMs: 1 };
 
 /**
@@ -403,6 +406,7 @@ function fakes(
       },
     },
     speech: {
+      label: () => ({ model: 'gpt-4o-mini-tts', voice: 'alloy' }),
       synthesize: (input: {
         text: string;
         instructions?: string;
@@ -484,6 +488,7 @@ const chapterProcessor = (
     boards,
     // No note is written in these fakes: the page's own text stands in.
     { find: () => Promise.resolve(null) } as never,
+    new ConfigService({}),
   );
 
 /** The follow-along service over the fakes: no note is written here, so no track is built. */
@@ -504,6 +509,8 @@ const voiceProcessor = (
     f.deps.documents as never,
     f.lectures,
     f.deps.calls,
+    f.deps.speech,
+    // The catalogue voice: in these fakes, the same voice.
     f.deps.speech,
     f.deps.storage as never,
     f.deps.events as never,
@@ -1136,7 +1143,7 @@ describe('LectureChapterProcessor', () => {
 
   it('writes each style as its own pages from one shared plan', async () => {
     const f = fakes(
-      { 1: REAL_PAGE, 2: REAL_PAGE },
+      { 1: FULL_PAGE, 2: FULL_PAGE },
       [TOPIC],
       ['steady', 'brisk'],
     );
@@ -2083,5 +2090,35 @@ describe('boards for a lecture written before boards existed', () => {
     await backfill(f, llm).process({ ...voiceJob(2), kind: 'page' }, CONTEXT);
     expect(f.row(2)!.boardStatus).toBe('done');
     expect((f.row(2)!.board as BoardTimeline).timing).toBe('estimated');
+  });
+});
+
+describe('LectureChapterProcessor: a school voices its own catalogue', () => {
+  it('writes the scripts and queues no audio when the document belongs to a school', async () => {
+    const f = fakes({ 1: REAL_PAGE, 2: REAL_PAGE });
+    f.seedExtras('steady');
+    // The document is a school's, and this deployment voices those itself.
+    const schoolDoc = {
+      ...doc,
+      props: { ...doc.props, institutionId: 'ur' },
+    };
+    const processor = new LectureChapterProcessor(
+      { findById: () => Promise.resolve(schoolDoc) } as never,
+      f.deps.pages as never,
+      f.deps.topics as never,
+      f.lectures,
+      f.deps.calls,
+      new FakeLlmAdapter(),
+      f.deps.queue as never,
+      f.deps.events as never,
+      boardService(f, new FakeLlmAdapter(), false),
+      { find: () => Promise.resolve(null) } as never,
+      new ConfigService({ LECTURE_VOICE_EXTERNAL: 'true' }),
+    );
+    await processor.process(chapterJob(), CONTEXT);
+
+    // The words are there for the local voicer to pick up.
+    expect(f.row(1, 'steady')!.scriptText).toBeTruthy();
+    expect(f.voiceJobs).toEqual([]);
   });
 });

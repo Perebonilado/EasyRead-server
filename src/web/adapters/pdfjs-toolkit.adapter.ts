@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
 import { Injectable, Logger } from '@nestjs/common';
+import type { PDFPageProxy } from 'pdfjs-dist';
 import { EMPTY_PAGE_CHAR_THRESHOLD } from '../../business/domain/values';
 import type {
   ExtractedFigure,
@@ -78,8 +79,8 @@ export class PdfjsToolkitAdapter implements PdfToolkitPort {
       // A page the library cannot hand over, a broken page tree, a count
       // that overstates the pages, is an empty page, not a failed book:
       // the reader still opens it and the rest is read as normal.
-      let page: Awaited<ReturnType<typeof doc.getPage>>;
-      let content: Awaited<ReturnType<typeof page.getTextContent>>;
+      let page: PDFPageProxy;
+      let content: Awaited<ReturnType<PDFPageProxy['getTextContent']>>;
       try {
         page = await doc.getPage(pageNumber);
         content = await page.getTextContent();

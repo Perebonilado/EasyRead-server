@@ -64,13 +64,15 @@ export class MaterialsQuery {
     if (!rows.length) return [];
     const ids = rows.map((row) => row.id);
 
-    const [runs, tallies, lectures, failedRows, costs] = await Promise.all([
-      this.runs.findAll({ where: { documentId: { [Op.in]: ids } } as never }),
-      this.tallies(ids),
-      this.lectures(ids),
-      this.failedRows(ids),
-      this.costs(ids),
-    ]);
+    const [runs, tallies, lectures, failedRows, costs, untaughtRows] =
+      await Promise.all([
+        this.runs.findAll({ where: { documentId: { [Op.in]: ids } } as never }),
+        this.tallies(ids),
+        this.lectures(ids),
+        this.failedRows(ids),
+        this.costs(ids),
+        this.untaughtRows(ids),
+      ]);
 
     return rows.map((row) => {
       const tally = tallies.get(row.id) ?? emptyTally();
@@ -94,6 +96,7 @@ export class MaterialsQuery {
           row,
           lectures.get(row.id) ?? emptyLecture(),
           failedRows.get(row.id) ?? 0,
+          untaughtRows.get(row.id) ?? 0,
         ),
         costUsd: costs.get(row.id) ?? 0,
       };
@@ -165,6 +168,25 @@ export class MaterialsQuery {
     return out;
   }
 
+  /** Paragraphs left untaught across a document's written pages, the number the card shows beside failures. */
+  private async untaughtRows(ids: string[]): Promise<Map<string, number>> {
+    const rows = (await this.segments.findAll({
+      attributes: ['documentId', 'untaught'],
+      where: {
+        documentId: { [Op.in]: ids },
+        untaught: { [Op.ne]: null },
+      } as never,
+      raw: true,
+    })) as unknown as { documentId: string; untaught: number[] | null }[];
+    const out = new Map<string, number>();
+    for (const row of rows) {
+      const count = Array.isArray(row.untaught) ? row.untaught.length : 0;
+      if (count)
+        out.set(row.documentId, (out.get(row.documentId) ?? 0) + count);
+    }
+    return out;
+  }
+
   /** Failed rows of every kind, the number the card shows in red. */
   private async failedRows(ids: string[]): Promise<Map<string, number>> {
     const rows = (await this.segments.findAll({
@@ -193,6 +215,7 @@ export class MaterialsQuery {
         'style',
         'status',
         'error',
+        'untaught',
         'updatedAt',
       ],
       where: {
@@ -214,6 +237,7 @@ export class MaterialsQuery {
         updatedAt: row.get('updatedAt') as Date,
       }),
       error: row.error ?? null,
+      untaught: Array.isArray(row.untaught) ? row.untaught.length : null,
     }));
   }
 
@@ -244,6 +268,7 @@ function progressOf(
   row: { status: string; progress?: number | null },
   lecture: MaterialDto['lecture'],
   failed: number,
+  untaught = 0,
 ): MaterialProgress {
   const tallies = Object.values(lecture);
   const total = tallies.reduce((sum, t) => sum + t.total, 0);
@@ -263,7 +288,7 @@ function progressOf(
   else if (total === 0) state = 'ready';
   else if (scripted + failed < total) state = 'writing';
   else if (ready + failed < total) state = 'voicing';
-  else if (failed > 0) state = 'attention';
+  else if (failed > 0 || untaught > 0) state = 'attention';
   else state = 'ready';
 
   return {
@@ -271,6 +296,7 @@ function progressOf(
     scripts: percent(scripted),
     audio: percent(ready),
     failed,
+    untaught,
     state,
   };
 }

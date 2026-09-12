@@ -104,6 +104,10 @@ export class LectureSegmentModel extends BaseModel {
   @Column({ type: DataType.JSON, allowNull: true })
   declare emphasis: string[] | null;
 
+  /** The paragraphs of the page the writer left untaught after its attempts, by number. */
+  @Column({ type: DataType.JSON, allowNull: true })
+  declare untaught: number[] | null;
+
   /** What the lecturer writes and draws while this row plays. */
   @Column({ type: DataType.JSON, allowNull: true })
   declare board: unknown;

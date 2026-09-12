@@ -362,6 +362,16 @@ export const lectureOutlineSchema = z.object({
           .array(z.array(z.number().int().min(0).max(200)).nullable())
           .max(4)
           .nullable(),
+        /** The paragraphs no move teaches, each with why; null when the page came without numbers. */
+        skipBlocks: z
+          .array(
+            z.object({
+              block: z.number().int().min(0).max(200),
+              reason: z.enum(['repeat', 'caption', 'reference', 'decoration']),
+            }),
+          )
+          .max(40)
+          .nullable(),
         pitfall: z.string().max(240).nullable(),
         turn: z.boolean(),
         figure: z.object({

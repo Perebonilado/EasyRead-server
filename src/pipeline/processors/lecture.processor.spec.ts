@@ -308,6 +308,7 @@ function fakes(
       r.attempts += 1;
       return Promise.resolve();
     },
+    resetUntaughtSegments: () => Promise.resolve(),
     resetFailedSegments: () => Promise.resolve(),
     resetAudio: () => Promise.resolve(0),
     saveFollow: () => Promise.resolve(),
@@ -1636,7 +1637,7 @@ describe('LectureChapterProcessor: a long gentle page voiced as two pieces', () 
     expect(pageTwoTail).not.toContain(A.trim());
   });
 
-  it('leaves a short gentle page, and a long page in any other style, whole', async () => {
+  it('leaves a short gentle page whole, and cuts a long page in any style', async () => {
     const short = fakes({ 1: REAL_PAGE }, [TOPIC], ['gentle']);
     const llm = withoutBoard(new FakeLlmAdapter());
     llm.lectureOutline = plannerWithMoves(['the rise', 'the banks', 'the lag']);
@@ -1655,8 +1656,11 @@ describe('LectureChapterProcessor: a long gentle page voiced as two pieces', () 
     ]);
     longLlm.lectureSegment = () => long();
     await chapterProcessor(steady, longLlm).process(chapterJob(), CONTEXT);
-    expect(steady.row(1, 'steady', 'part')).toBeUndefined();
-    expect(steady.row(1)!.scriptText).toContain(C.trim());
+    // A long steady page is two pieces too now: every paragraph is taught,
+    // so a dense page runs long in every style, and the cut is the answer.
+    expect(steady.row(1, 'steady', 'part')).toBeDefined();
+    expect(steady.row(1, 'steady', 'part')!.scriptText).toContain(C.trim());
+    expect(steady.row(1)!.scriptText).not.toContain(C.trim());
   });
 
   it('asks for the audio again of a row that kept its words but lost its voice', async () => {

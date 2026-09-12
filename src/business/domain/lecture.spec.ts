@@ -1016,11 +1016,19 @@ describe('a long gentle page voiced as two pieces', () => {
     text: Array.from({ length: words }, () => `${word}${move}`).join(' ') + '.',
   });
 
-  it("splits only a slow learner's page, only past its budget, only with a boundary to cut at", () => {
+  it("splits any style's page past its budget, only with a boundary to cut at", () => {
     const long = [section(0, 110), section(1, 110), section(2, 110)];
     expect(shouldSplit('gentle', 'full', long)).toBe(true);
-    expect(shouldSplit('steady', 'full', long)).toBe(false);
-    expect(shouldSplit('brisk', 'full', long)).toBe(false);
+    expect(shouldSplit('steady', 'full', long)).toBe(true);
+    expect(shouldSplit('brisk', 'full', long)).toBe(true);
+    // Under its own budget, a steady page stays whole.
+    expect(
+      shouldSplit('steady', 'full', [
+        section(0, 60),
+        section(1, 60),
+        section(2, 60),
+      ]),
+    ).toBe(false);
     expect(
       shouldSplit('gentle', 'full', [section(0, 200), section(1, 200)]),
     ).toBe(false);

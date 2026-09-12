@@ -113,6 +113,13 @@ export interface LectureOutlineDraft {
     moves: string[];
     /** For each move, the numbered blocks of the note it teaches; null for a move that names none. */
     moveBlocks?: (number[] | null)[] | null;
+    /** The paragraphs no move teaches, each with why; every paragraph is in a move or here. */
+    skipBlocks?:
+      | {
+          block: number;
+          reason: 'repeat' | 'caption' | 'reference' | 'decoration';
+        }[]
+      | null;
     /** The mistake a student is most likely to make here, where the page shows it. */
     pitfall: string | null;
     /** True on the one page of the chapter where the listener is asked to predict before hearing. */

@@ -178,6 +178,7 @@ export class FakeLlmAdapter implements LlmGatewayPort {
           weight: 'full' as const,
           moves: [`Teach page ${page.pageNumber}`],
           moveBlocks: [[0]],
+          skipBlocks: null,
           pitfall: null,
           // The last page: a prediction is only possible once something
           // has been heard, and earlier pages' tails stay plain words.

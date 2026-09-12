@@ -1,4 +1,5 @@
 import { Injectable } from '@nestjs/common';
+import { Op } from 'sequelize';
 import { InjectModel } from '@nestjs/sequelize';
 import type {
   BoardStatus,
@@ -62,6 +63,7 @@ const toSegment = (row: LectureSegmentModel): LectureSegmentRecord => ({
   moveOffsets: row.moveOffsets ?? null,
   sectionTags: row.sectionTags ?? null,
   emphasis: row.emphasis ?? null,
+  untaught: row.untaught ?? null,
   board: row.board ?? null,
   wordTimes: row.wordTimes ?? null,
   boardStatus: row.boardStatus ?? 'none',
@@ -243,6 +245,7 @@ export class SequelizeLectureRepository implements LectureRepository {
       durationMs: number | null;
       sectionTags?: unknown;
       emphasis?: string[] | null;
+      untaught?: number[] | null;
       status?: 'voicing' | 'scripted';
     },
   ): Promise<void> {
@@ -256,6 +259,7 @@ export class SequelizeLectureRepository implements LectureRepository {
           ? { sectionTags: input.sectionTags }
           : {}),
         ...(input.emphasis !== undefined ? { emphasis: input.emphasis } : {}),
+        ...(input.untaught !== undefined ? { untaught: input.untaught } : {}),
         error: null,
       },
       { where: whereKey(input) },
@@ -351,6 +355,32 @@ export class SequelizeLectureRepository implements LectureRepository {
           style,
           status: 'failed',
         },
+      },
+    );
+  }
+
+  async resetUntaughtSegments(
+    documentId: string,
+    contentVersion: number,
+    topicIds: string[],
+    style: LectureStyle,
+  ): Promise<void> {
+    if (!topicIds.length) return;
+    await this.segments.update(
+      {
+        status: 'pending',
+        scriptText: null,
+        untaught: null,
+        error: null,
+      },
+      {
+        where: {
+          documentId,
+          contentVersion,
+          topicId: topicIds,
+          style,
+          untaught: { [Op.ne]: null },
+        } as never,
       },
     );
   }

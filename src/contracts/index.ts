@@ -238,6 +238,8 @@ export interface MaterialProgress {
   audio: number;
   /** Pages failed, all styles, kinds included. */
   failed: number;
+  /** Paragraphs the written pages left untaught, all styles, as counted when they were written. */
+  untaught: number;
   state: MaterialState;
 }
 
@@ -248,6 +250,8 @@ export interface MaterialPageDto {
   style: LectureStyle;
   status: LectureSegmentStatus;
   error: string | null;
+  /** Paragraphs of the page this row left untaught; null on rows written before it was counted. */
+  untaught: number | null;
 }
 
 export interface PrepareRequest {

@@ -38,6 +38,8 @@ export interface LectureSegmentRecord {
   sectionTags?: unknown;
   /** The phrases the writer said a listener should catch, for the voice to stress; null before it was asked. */
   emphasis?: string[] | null;
+  /** The paragraphs of the page the writer left untaught after its attempts, by number; null before it was counted. */
+  untaught?: number[] | null;
   /** The board timeline, as stored; null until the board writer ran. */
   board: unknown;
   /** Word times measured on the audio; null until aligned. */
@@ -145,6 +147,8 @@ export interface LectureRepository {
       sectionTags?: unknown;
       /** The phrases the writer said a listener should catch; left as it is when omitted. */
       emphasis?: string[] | null;
+      /** The paragraphs left untaught, by number; left as it is when omitted. */
+      untaught?: number[] | null;
       /** Voicing when its audio is asked for at once; scripted when it waits for Prepare. */
       status?: 'voicing' | 'scripted';
     },
@@ -187,6 +191,13 @@ export interface LectureRepository {
    * asked for again: a page whose spoken form has not changed is found in
    * storage and marked done at once; one whose form changed is made anew.
    */
+  /** Pages of these chapters that left paragraphs untaught go back to pending with no words, to be written again. */
+  resetUntaughtSegments(
+    documentId: string,
+    contentVersion: number,
+    topicIds: string[],
+    style: LectureStyle,
+  ): Promise<void>;
   resetAudio(documentId: string, contentVersion: number): Promise<number>;
   /**
    * Wipes a document's lecture so it can be written again: one style's

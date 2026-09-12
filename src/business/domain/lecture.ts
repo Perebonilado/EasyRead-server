@@ -14,14 +14,15 @@
 
 import type { LectureSegmentStatus } from '../../contracts';
 import { createHash } from 'node:crypto';
-import type { LectureStyle } from '../../contracts';
+import type { Block, LectureStyle } from '../../contracts';
+import { contentBlocks, repeatVerified } from './coverage';
 
 /**
  * The generator's identity, stamped on every row it writes and baked into
  * every audio key. Bumped whenever the prompts change enough that audio
  * made by the previous generator must not be served for a new script.
  */
-export const LECTURE_GENERATOR_VERSION = 'lecture-7';
+export const LECTURE_GENERATOR_VERSION = 'lecture-8';
 
 /** A page with fewer readable characters than this carries no lecture. */
 export const MIN_PAGE_CHARS = 120;
@@ -172,6 +173,28 @@ export function chosenLectureStyle(
   return { style: null, source: 'none' };
 }
 
+/** How much a page's ceiling grows for every paragraph past the third, by style. */
+export const WORDS_PER_BLOCK: Record<LectureStyle, number> = {
+  gentle: 35,
+  steady: 25,
+  brisk: 15,
+};
+
+/**
+ * The budget a page gets, grown for the paragraphs it carries: a page of
+ * twelve paragraphs cannot give each one a sentence inside the budget of
+ * a page of three. The minimum stays; the ceiling grows.
+ */
+export function pageBudget(
+  style: LectureStyle,
+  weight: BeatWeight,
+  blocks: number,
+): WordBudget {
+  const base = WORD_BUDGET[style][weight];
+  const extra = Math.max(0, blocks - 3) * WORDS_PER_BLOCK[style];
+  return { min: base.min, max: base.max + extra, hard: base.hard + extra };
+}
+
 /** Spoken-word budgets for the extras; short by design. */
 export const EXTRA_BUDGET: Record<LectureExtraKind, WordBudget> = {
   terms: { min: 40, max: 130, hard: 170 },
@@ -229,8 +252,8 @@ export function shouldSplit(
   weight: BeatWeight,
   sections: LectureSection[],
 ): boolean {
-  if (style !== 'gentle' || sections.length < SPLIT_MIN_MOVES) return false;
-  return wordCount(sectionsToScript(sections)) > WORD_BUDGET.gentle[weight].max;
+  if (sections.length < SPLIT_MIN_MOVES) return false;
+  return wordCount(sectionsToScript(sections)) > WORD_BUDGET[style][weight].max;
 }
 
 /** The two halves of a page's sections, cut at the move boundary nearest the middle by words. */
@@ -374,9 +397,11 @@ export const LECTURE_STYLES: Record<LectureStyle, LectureStyleSpec> = {
       'page uses is kept and said, and each is explained the first time it',
       'appears, never two new terms in one sentence. Short sentences, about',
       'ten words, one thing each; never a sentence that stacks clauses.',
-      'Teach the one or two things this page turns on, in the smallest',
-      'steps they break into, and leave the rest: fewer things, each fully,',
-      'never everything quickly. No abstract nouns where a concrete thing',
+      'Every paragraph on the page is taught, each in the smallest steps',
+      'it breaks into and the plainest words; the slow learner is given',
+      'more of each thing, never fewer things, and a page with too much',
+      'for one sitting is said in two pieces, not cut. No abstract nouns',
+      'where a concrete thing',
       'will do: not "data", but the customer order or the photo the page',
       'talks about; not "the system", but the computers involved. Never',
       'say efficiently, optimally, robust, leverage, ensure, significant or',
@@ -420,7 +445,8 @@ export const LECTURE_STYLES: Record<LectureStyle, LectureStyleSpec> = {
       'moment where the obvious approach breaks or the real idea appears,',
       'and that is where you slow down, because that is what the listener',
       'remembers. At most one rhetorical question, and only if you answer it',
-      'yourself.',
+      'yourself. Every paragraph on the page is taught; the styles differ in',
+      'how much is said of each, never in which are said.',
     ].join(' '),
     recapCheck: true,
     tailChars: 320,
@@ -439,8 +465,11 @@ export const LECTURE_STYLES: Record<LectureStyle, LectureStyleSpec> = {
     direction: [
       "Say the idea, then the page's own example if it has one, then stop.",
       'No scene-setting, no rhetorical questions, no callbacks beyond half a',
-      'sentence, no foreshadowing, no closing line. Anything the lecture has',
-      'already taught is left out entirely, not shortened, and a term the',
+      'sentence, no foreshadowing, no closing line. Every paragraph on the',
+      "page gets its point, in a sentence, and the page's example if it has",
+      'one; nothing on the page is passed over in silence. A paragraph the',
+      'lecture has already taught is passed in a clause that says so, never',
+      'dropped as if it were not there, and a term the',
       'lecture has used is used, not defined again. Where the page describes',
       'a procedure, tell the listener to run it in their head before the',
       "page's example confirms it. Write for a listener at double speed:",
@@ -490,6 +519,9 @@ export interface SegmentJob {
   bridge: boolean;
 }
 
+/** Why a paragraph of the page is not taught by any move. */
+export type SkipReason = 'repeat' | 'caption' | 'reference' | 'decoration';
+
 export interface LectureBeat {
   pageNumber: number;
   goal: string;
@@ -521,6 +553,12 @@ export interface LectureBeat {
    * source; null for a move that names none.
    */
   moveBlocks?: (number[] | null)[] | null;
+  /**
+   * The paragraphs of the note no move teaches, each with why: a repeat of
+   * an earlier page, a caption, a reference, a decoration. Every paragraph
+   * is in a move or here; absent on older plans.
+   */
+  skipBlocks?: { block: number; reason: SkipReason }[] | null;
   /** The mistake a student is most likely to make here, where the page shows it. */
   pitfall?: string | null;
   /**
@@ -764,7 +802,8 @@ export interface StyleProblem {
     | 'term_unexplained'
     | 'two_terms'
     | 'label'
-    | 'hanging_marks';
+    | 'hanging_marks'
+    | 'uncovered';
   detail: string;
 }
 
@@ -891,6 +930,8 @@ export function styleProblems(
     taughtSoFar?: string[];
     /** A page after the chapter's first: it must open by joining itself to what was just said. */
     midChapter?: boolean;
+    /** The page's budget, grown for its paragraphs; the style's plain one when absent. */
+    budget?: WordBudget;
   },
 ): StyleProblem[] {
   const problems = openerProblems(text, 'script');
@@ -906,7 +947,7 @@ export function styleProblems(
 
   if (!options.bridge) {
     const words = wordCount(text);
-    const limit = WORD_BUDGET[options.style][options.weight];
+    const limit = options.budget ?? WORD_BUDGET[options.style][options.weight];
     if (words > limit.hard) {
       problems.push({
         kind: 'too_long',
@@ -1678,8 +1719,18 @@ export interface OutlineProblem {
     | 'missing_page'
     | 'duplicate_page'
     | 'banned_opener'
-    | 'hook_too_long';
+    | 'hook_too_long'
+    | 'uncovered'
+    | 'unverified_skip';
   detail: string;
+}
+
+/** What the plan is checked against for coverage: each page's paragraphs, and what came before. */
+export interface OutlineCoverage {
+  /** The note's blocks for each page that has one, by page number. */
+  blocksByPage: Map<number, Block[]>;
+  /** Lines the lecture taught in earlier chapters. */
+  taughtEarlier: string[];
 }
 
 /**
@@ -1694,6 +1745,7 @@ export interface OutlineProblem {
 export function validateOutline(
   plan: LecturePlan,
   pageNumbers: number[],
+  coverage?: OutlineCoverage,
 ): OutlineProblem[] {
   const problems: OutlineProblem[] = [];
   if (!plan.hook?.trim()) {
@@ -1742,6 +1794,108 @@ export function validateOutline(
         kind: 'missing_page',
         detail: `No beat for page ${pageNumber}`,
       });
+    }
+  }
+  if (coverage) problems.push(...coverageProblems(plan, coverage));
+  return problems;
+}
+
+/**
+ * The plan with every unverified repeat skip removed, so the writer's
+ * coverage check exempts only what an earlier page really said. A plan
+ * that still names such skips after its correction is not refused; its
+ * paragraphs are simply taught.
+ */
+export function pruneUnverifiedSkips(
+  plan: LecturePlan,
+  coverage: OutlineCoverage,
+): LecturePlan {
+  const unverified = new Set(
+    coverageProblems(plan, coverage)
+      .filter((problem) => problem.kind === 'unverified_skip')
+      .map((problem) => problem.detail),
+  );
+  if (!unverified.size) return plan;
+  return {
+    ...plan,
+    beats: (plan.beats ?? []).map((beat) => ({
+      ...beat,
+      skipBlocks: (beat.skipBlocks ?? []).filter(
+        (skip) =>
+          skip.reason !== 'repeat' ||
+          ![...unverified].some((detail) =>
+            detail.startsWith(
+              `Page ${beat.pageNumber}: paragraph ${skip.block} is skipped as a repeat`,
+            ),
+          ),
+      ),
+    })),
+  };
+}
+
+/**
+ * Every paragraph of a page belongs to a move or is skipped with a reason;
+ * a skip that claims a repeat must be one. A plan that leaves a paragraph
+ * in neither would produce a lecture that never says it, and the student
+ * reading the page would never know.
+ */
+export function coverageProblems(
+  plan: LecturePlan,
+  coverage: OutlineCoverage,
+): OutlineProblem[] {
+  const problems: OutlineProblem[] = [];
+  const pages = [...coverage.blocksByPage.keys()].sort((a, b) => a - b);
+  for (const beat of plan.beats ?? []) {
+    const blocks = coverage.blocksByPage.get(beat.pageNumber);
+    if (!blocks) continue;
+    const content = contentBlocks(blocks);
+    if (!content.length) continue;
+    const known = new Set(content.map((block) => block.index));
+    const assigned = new Set<number>();
+    for (const move of beat.moveBlocks ?? []) {
+      for (const index of move ?? []) assigned.add(index);
+    }
+    const skipped = new Map<number, SkipReason>();
+    for (const skip of beat.skipBlocks ?? [])
+      skipped.set(skip.block, skip.reason);
+    const strange = [...assigned, ...skipped.keys()].filter(
+      (index) => !known.has(index) && index >= blocks.length,
+    );
+    if (strange.length) {
+      problems.push({
+        kind: 'uncovered',
+        detail: `Page ${beat.pageNumber} names paragraph ${strange.join(', ')}, which the page does not have`,
+      });
+    }
+    const missing = content
+      .map((block) => block.index)
+      .filter((index) => !assigned.has(index) && !skipped.has(index));
+    if (missing.length) {
+      problems.push({
+        kind: 'uncovered',
+        detail: `Page ${beat.pageNumber}: paragraph${missing.length === 1 ? '' : 's'} ${missing.join(', ')} ${missing.length === 1 ? 'belongs' : 'belong'} to no move and ${missing.length === 1 ? 'is' : 'are'} not skipped; put every paragraph in a move, or in skipBlocks with its reason`,
+      });
+    }
+    const earlier = [
+      ...pages
+        .filter((page) => page < beat.pageNumber)
+        .flatMap((page) =>
+          contentBlocks(coverage.blocksByPage.get(page) ?? []).map(
+            (block) => block.text,
+          ),
+        ),
+      ...coverage.taughtEarlier,
+    ];
+    for (const [index, reason] of skipped) {
+      if (reason !== 'repeat') continue;
+      const block = content.find((candidate) => candidate.index === index);
+      if (!block) continue;
+      if (!repeatVerified(block, content, earlier)) {
+        problems.push({
+          kind: 'unverified_skip',
+          detail: `Page ${beat.pageNumber}: paragraph ${index} is skipped as a repeat, but nothing earlier says it; teach it in a move`,
+        });
+      }
     }
   }
   return problems;

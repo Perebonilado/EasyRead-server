@@ -43,7 +43,7 @@ import {
   weightForPage,
   wordCount,
   MAX_SEGMENT_ATTEMPTS,
-  WORD_BUDGET,
+  pageBudget,
   acceptSegment,
   beatFor,
   estimateDurationMs,
@@ -52,6 +52,7 @@ import {
   listShape,
   openingsBefore,
   outlineCorrection,
+  pruneUnverifiedSkips,
   scriptForTts,
   sectionProblems,
   sectionsToScript,
@@ -79,6 +80,12 @@ import {
 import type { LectureChapterJobData } from '../queues';
 import type { JobContext } from './base.processor';
 import { LectureBoardService } from './lecture-board.service';
+import {
+  contentBlocks,
+  coverageDetail,
+  taughtBlocksOf,
+  uncoveredBlocks,
+} from '../../business/domain/coverage';
 import {
   capFigures,
   fittedMeaning,
@@ -130,6 +137,8 @@ type WrittenPage = PageScripts & {
   sectionTags: SectionTag[] | null;
   /** The phrases the writer said a listener should catch, one per section at most. */
   emphasis: string[];
+  /** The paragraphs of the note the page left untaught after its attempts, by number. */
+  untaught: number[];
 };
 
 /**
@@ -686,10 +695,13 @@ export class LectureChapterProcessor {
     // The planner reads the note when it exists, its blocks numbered so a
     // move can name the blocks it teaches; the raw page otherwise.
     const pages: PageText[] = [];
+    // Each page's paragraphs, for the check that the plan covers them.
+    const blocksByPage = new Map<number, Block[]>();
     for (const page of pageRows) {
       if (!pageNumbers.includes(page.pageNumber)) continue;
       // The plan is shared by every style, so it reads the standard note.
       const note = await this.noteFor(doc.id, page.pageNumber, 'steady');
+      if (note) blocksByPage.set(page.pageNumber, note);
       pages.push({
         pageNumber: page.pageNumber,
         text: note
@@ -724,8 +736,21 @@ export class LectureChapterProcessor {
     const checkable = rows.some((row) => !row.bridge);
 
     try {
+      // A paragraph skipped as a repeat must have been said before: on an
+      // earlier page of the document, or in what earlier chapters taught.
+      const before =
+        topic.startPage > 1
+          ? await this.pages.findRange(doc.id, 1, topic.startPage - 1)
+          : [];
+      const coverage = {
+        blocksByPage,
+        taughtEarlier: [
+          ...input.taughtEarlier,
+          ...before.map((page) => page.text.slice(0, 6_000)),
+        ],
+      };
       let result = await this.llm.lectureOutline(outlineInput);
-      let problems = validateOutline(result.value, pageNumbers);
+      let problems = validateOutline(result.value, pageNumbers, coverage);
       // The hook is spoken word for word, so it is checked against the
       // material like any other line, once the plan holds together.
       let hookVerdict =
@@ -747,7 +772,7 @@ export class LectureChapterProcessor {
           .join('; ');
         this.logger.warn(`${topic.title}: plan rejected (${correction})`);
         result = await this.llm.lectureOutline({ ...outlineInput, correction });
-        problems = validateOutline(result.value, pageNumbers);
+        problems = validateOutline(result.value, pageNumbers, coverage);
         hookVerdict = checkable
           ? await this.verifyHook(doc.id, result.value, pages)
           : null;
@@ -763,9 +788,13 @@ export class LectureChapterProcessor {
           `${topic.title}: hook not fit to be spoken word for word; the writer opens the chapter`,
         );
       }
+      // A skip the planner still claims as a repeat after its correction,
+      // which nothing earlier says, is dropped: the writer teaches the
+      // paragraph instead.
+      const pruned = pruneUnverifiedSkips(result.value, coverage);
       const plan: LecturePlan = {
-        ...result.value,
-        beats: capFigures(singleTurn(result.value.beats)),
+        ...pruned,
+        beats: capFigures(singleTurn(pruned.beats)),
         hookSpoken,
       };
 
@@ -975,6 +1004,7 @@ export class LectureChapterProcessor {
       row.moveOffsets = written.moveOffsets;
       row.sectionTags = written.sectionTags;
       row.emphasis = written.emphasis;
+      row.untaught = written.untaught;
 
       await this.lectures.markSegmentWritten({
         documentId: doc.id,
@@ -986,6 +1016,7 @@ export class LectureChapterProcessor {
         durationMs: estimateDurationMs(scriptForTts(written.script)),
         sectionTags: written.sectionTags,
         emphasis: written.emphasis,
+        untaught: written.untaught,
         status: input.voice ? 'voicing' : 'scripted',
       });
 
@@ -1072,6 +1103,7 @@ export class LectureChapterProcessor {
           // The same tags: the part's sections are found by their heads.
           sectionTags: written.sectionTags,
           emphasis: written.emphasis,
+          untaught: [],
         });
         // The second piece continues the page's board on the next free line.
         if (written.part.board?.lines.length) {
@@ -1192,8 +1224,30 @@ export class LectureChapterProcessor {
     // whatever the plan thought: the page's own words decide.
     const weight: BeatWeight = weightForPage(
       beat.weight,
-      wordCount(input.original ?? input.pageText),
+      wordCount(input.pageText),
     );
+    // The paragraphs the page carries, and the budget grown for them; the
+    // paragraphs the plan skipped for a checked reason, which the coverage
+    // check exempts. The plan numbers the standard note; the slow learner
+    // is taught from the easiest one, whose numbers differ, so nothing is
+    // exempt there.
+    const paragraphs = input.note ? contentBlocks(input.note).length : 0;
+    const exempt = new Set<number>(
+      input.note && style !== 'gentle'
+        ? (beat.skipBlocks ?? []).map((skip) => skip.block)
+        : [],
+    );
+    const untaughtIn = (sections: LectureSection[]): number[] =>
+      input.note
+        ? uncoveredBlocks({
+            blocks: input.note,
+            script: sectionsToScript(sections),
+            taught: taughtBlocksOf(
+              sectionTags(sections, noteUnits(input.note)),
+            ),
+            exempt,
+          }).map((block) => block.index)
+        : [];
     // A bridge is one sentence whatever the plan says; a plan from before
     // moves existed has one move, the page's goal.
     // A plan sometimes ends a page on applause ("encouragement to continue
@@ -1211,7 +1265,7 @@ export class LectureChapterProcessor {
         ? taught
         : [beat.goal];
     const spec = LECTURE_STYLES[style];
-    const budget = WORD_BUDGET[style][weight];
+    const budget = pageBudget(style, weight, paragraphs);
     const planText = describePlan(input.plan, beat);
     // Everything a figure in the script may legitimately come from.
     const sources = [
@@ -1241,7 +1295,11 @@ export class LectureChapterProcessor {
 
     // The attempt with the fewest style faults, kept in case the last one
     // is worse: the rule loop must never trade a good page for a thin one.
-    let best: { sections: LectureSection[]; faults: number } | null = null;
+    let best: {
+      sections: LectureSection[];
+      faults: number;
+      untaught: number;
+    } | null = null;
     for (let attempt = 1; ; attempt += 1) {
       // Strict mode flattens a page to what it literally says. That is the
       // right answer to a page that has left the material, and the wrong
@@ -1333,24 +1391,54 @@ export class LectureChapterProcessor {
           terms: (input.plan.terms ?? []).map((entry) => entry.term),
           taughtSoFar: input.taughtSoFar,
           midChapter: !input.isFirstOfTopic,
+          budget,
         }),
       ];
+      // A paragraph of the page the draft never reaches goes back to the
+      // writer quoted, like any other fault; a page still short after its
+      // attempts is kept, and what it left out is recorded with it.
+      const untaught = untaughtIn(sections);
+      if (untaught.length) {
+        style_.push({
+          kind: 'uncovered',
+          detail: `${coverageDetail(
+            uncoveredBlocks({
+              blocks: input.note ?? [],
+              script: sectionsToScript(sections),
+              taught: taughtBlocksOf(
+                sectionTags(sections, noteUnits(input.note ?? [])),
+              ),
+              exempt,
+            }),
+          )}. Teach every paragraph of the page; the styles differ in how much is said of each, never in which are said`,
+        });
+      }
       // A page that ignored its moves cannot stand in for one that kept
-      // them; among the rest, fewer faults is better.
+      // them; among the rest, fewer paragraphs left untaught is better,
+      // then fewer faults: a page with a hole never beats one without.
       const structural = style_.some(
         (problem) => problem.kind === 'moves' || problem.kind === 'label',
       );
-      if (!structural && (best === null || style_.length < best.faults)) {
-        best = { sections, faults: style_.length };
+      const better =
+        best === null ||
+        untaught.length < best.untaught ||
+        (untaught.length === best.untaught && style_.length < best.faults);
+      if (!structural && better) {
+        best = { sections, faults: style_.length, untaught: untaught.length };
       }
       if (style_.length && attempt < MAX_SEGMENT_ATTEMPTS) {
         styleCorrection = style_.map((problem) => problem.detail).join('; ');
         correction = undefined;
         continue;
       }
-      if (style_.length && best !== null && best.faults < style_.length) {
+      if (
+        style_.length &&
+        best !== null &&
+        (best.untaught < untaught.length ||
+          (best.untaught === untaught.length && best.faults < style_.length))
+      ) {
         this.logger.log(
-          `${input.documentId} p${input.pageNumber} ${style}: keeping an earlier attempt with ${best.faults} style fault${best.faults === 1 ? '' : 's'} over the last with ${style_.length}`,
+          `${input.documentId} p${input.pageNumber} ${style}: keeping an earlier attempt with ${best.faults} style fault${best.faults === 1 ? '' : 's'} and ${best.untaught} untaught over the last with ${style_.length} and ${untaught.length}`,
         );
         sections = best.sections;
       }
@@ -1396,6 +1484,7 @@ export class LectureChapterProcessor {
             ? sectionTags(sections, noteUnits(input.note))
             : null,
           emphasis: catchPhrases(sections),
+          untaught: untaughtIn(sections),
         };
       }
       if (decision.action === 'fail') {

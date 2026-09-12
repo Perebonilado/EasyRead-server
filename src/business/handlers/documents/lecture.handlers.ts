@@ -569,17 +569,28 @@ export class GenerateLectureHandler extends AbstractRequestHandlerTemplate<
       doc.contentVersion,
       style,
     );
+    // A page that left paragraphs untaught after its attempts is written
+    // again too: its words go, its row goes back to pending, and the
+    // chapter job finds it unwritten.
+    const short = (row: { untaught?: number[] | null }) =>
+      (row.untaught?.length ?? 0) > 0;
     const retry = [...owning].filter((topicId) => {
       const rows = existing.filter((row) => row.topicId === topicId);
       // A row lost in flight (its worker died) counts as failed here, so
       // the chapter can be asked for again instead of waiting forever.
       return (
-        rows.some((row) => effectiveStatus(row) === 'failed') &&
+        rows.some((row) => effectiveStatus(row) === 'failed' || short(row)) &&
         !rows.some((row) => IN_FLIGHT.has(effectiveStatus(row)))
       );
     });
     if (retry.length) {
       await this.lectures.resetFailedSegments(
+        doc.id,
+        doc.contentVersion,
+        retry,
+        style,
+      );
+      await this.lectures.resetUntaughtSegments(
         doc.id,
         doc.contentVersion,
         retry,

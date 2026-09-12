@@ -23,7 +23,12 @@ describe('ModalSpeechAdapter', () => {
         url,
         body: JSON.parse(init.body as string) as Record<string, unknown>,
       });
-      return Promise.resolve(new Response(Buffer.from('mp3'), { status: 200 }));
+      return Promise.resolve(
+        new Response(Buffer.from('mp3'), {
+          status: 200,
+          headers: { 'x-audio-seconds': '12.5' },
+        }),
+      );
     };
   });
 
@@ -66,6 +71,7 @@ describe('ModalSpeechAdapter', () => {
       speed: 0.9,
     });
     expect(result.model).toBe('modal:kokoro-82m');
+    expect(result.durationMs).toBe(12500);
     expect(calls[0].body).toEqual({
       input: 'A page.',
       voice: 'am_michael',

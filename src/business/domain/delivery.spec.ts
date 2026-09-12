@@ -1,5 +1,4 @@
 import {
-  DELIVERY,
   deliveryPieces,
   figureRuns,
   hasFigure,
@@ -94,53 +93,72 @@ describe('stress on a sentence', () => {
 });
 
 describe('the pieces a page becomes', () => {
-  it('says a plain page as one piece at the style pace', () => {
-    expect(
-      deliveryPieces({
-        stretches: ['The kidney filters the blood. It does so all day.'],
-        style: 'steady',
-        midChapter: false,
-        landing: false,
-      }),
-    ).toEqual([
+  it('says a page sentence by sentence, a beat after each, longer after a long one', () => {
+    const pieces = deliveryPieces({
+      stretches: [
+        'The kidney filters the blood. It does so all day, every day, whether the body is resting or working hard, without a pause.',
+      ],
+      style: 'steady',
+      midChapter: false,
+      landing: false,
+    });
+    expect(pieces).toEqual([
+      { text: 'The kidney filters the blood.', speed: 0.9, pauseAfter: 0.6 },
       {
-        text: 'The kidney filters the blood. It does so all day.',
-        speed: 1,
+        text: 'It does so all day, every day, whether the body is resting or working hard, without a pause.',
+        speed: 0.9,
         pauseAfter: 0,
       },
     ]);
+    const longer = deliveryPieces({
+      stretches: [
+        'It does so all day, every day, whether the body is resting or working hard, without a pause. Then it rests.',
+      ],
+      style: 'steady',
+      midChapter: false,
+      landing: false,
+    });
+    expect(longer[0].pauseAfter).toBe(0.7);
   });
 
-  it('holds at a pause for as long as the style takes, and breathes at a paragraph', () => {
-    const pieces = deliveryPieces({
+  it('breathes after an idea, thinks after a question, and scales both by style', () => {
+    const steady = deliveryPieces({
       stretches: [
         'What would happen without it?',
-        'It would fail.\n\nAnd so would we.',
+        'It would fail.\n\nAnd so would we. Every time.',
+      ],
+      style: 'steady',
+      midChapter: false,
+      landing: false,
+    });
+    expect(steady.map((piece) => piece.pauseAfter)).toEqual([1.8, 1.2, 0.6, 0]);
+    const gentle = deliveryPieces({
+      stretches: [
+        'What would happen without it?',
+        'It would fail.\n\nAnd so would we. Every time.',
       ],
       style: 'gentle',
       midChapter: false,
       landing: false,
     });
-    expect(pieces).toEqual([
-      {
-        text: 'What would happen without it?',
-        speed: 0.9,
-        pauseAfter: DELIVERY.gentle.hold,
-      },
-      { text: 'It would fail.', speed: 0.9, pauseAfter: 0.25 },
-      { text: 'And so would we.', speed: 0.9, pauseAfter: 0 },
+    expect(gentle.map((piece) => piece.pauseAfter)).toEqual([
+      2.39, 1.6, 0.8, 0,
     ]);
+    expect(gentle[0].speed).toBe(0.84);
     const brisk = deliveryPieces({
-      stretches: ['What would happen without it?', 'It would fail.'],
+      stretches: [
+        'What would happen without it?',
+        'It would fail.\n\nAnd so would we. Every time.',
+      ],
       style: 'brisk',
       midChapter: false,
       landing: false,
     });
-    expect(brisk[0].pauseAfter).toBe(DELIVERY.brisk.hold);
-    expect(brisk[0].speed).toBe(1.1);
+    expect(brisk.map((piece) => piece.pauseAfter)).toEqual([1.21, 0.8, 0.5, 0]);
+    expect(brisk[0].speed).toBe(0.9);
   });
 
-  it('slows the sentence with the figure and stresses the figure, and not two sentences running', () => {
+  it('lets a count land: the sentence a touch slower, stressed, with time after it, and never two running', () => {
     const pieces = deliveryPieces({
       stretches: [
         'Cases were declining. Then forty-five thousand were reported. Ten times more than before. That is the trend.',
@@ -149,37 +167,51 @@ describe('the pieces a page becomes', () => {
       midChapter: false,
       landing: false,
     });
-    expect(pieces.map((piece) => piece.speed)).toEqual([1, 0.93, 1]);
+    expect(pieces.map((piece) => piece.speed)).toEqual([0.9, 0.87, 0.9, 0.9]);
+    expect(pieces.map((piece) => piece.pauseAfter)).toEqual([0.6, 1, 1, 0]);
     expect(pieces[1].text).toBe(
       'Then [forty-five thousand](+1) were reported.',
     );
-    expect(pieces[2].text).toBe(
-      '[Ten times](+1) more than before. That is the trend.',
-    );
+    expect(pieces[2].text).toBe('[Ten times](+1) more than before.');
   });
 
-  it("quickens a page's opening join mid-chapter, and lands a chapter's last sentence slower", () => {
+  it("holds the door before a chapter's landing line and slows the line itself", () => {
     const pieces = deliveryPieces({
       stretches: [
-        'Because of that, the fly matters. The fly bites by day. So the day is the danger.',
+        'The fly bites by day. So the day is the danger. That is the whole of it.',
       ],
       style: 'steady',
       midChapter: true,
       landing: true,
     });
-    expect(pieces.map((piece) => piece.speed)).toEqual([1.04, 1, 0.93]);
-    expect(pieces[2].text).toBe('So the day is the danger.');
+    expect(pieces.map((piece) => piece.pauseAfter)).toEqual([0.6, 0.8, 0]);
+    expect(pieces.map((piece) => piece.speed)).toEqual([0.9, 0.9, 0.87]);
   });
 
-  it('breathes rather than holds past the second pause on a page', () => {
+  it('thinks after the first two questions on a page and breathes after the rest', () => {
     const pieces = deliveryPieces({
       stretches: ['One?', 'Two?', 'Three?', 'Done.'],
       style: 'steady',
       midChapter: false,
       landing: false,
     });
-    expect(pieces.map((piece) => piece.pauseAfter)).toEqual([
-      0.75, 0.75, 0.3, 0,
-    ]);
+    expect(pieces.map((piece) => piece.pauseAfter)).toEqual([1.8, 1.8, 1.2, 0]);
+  });
+
+  it('never leaves a gap shorter than half a second or longer than two and a half', () => {
+    const brisk = deliveryPieces({
+      stretches: ['Short.', 'Also short.'],
+      style: 'brisk',
+      midChapter: false,
+      landing: false,
+    });
+    expect(brisk[0].pauseAfter).toBeGreaterThanOrEqual(0.5);
+    const gentle = deliveryPieces({
+      stretches: ['A question?', 'An answer.'],
+      style: 'gentle',
+      midChapter: false,
+      landing: false,
+    });
+    expect(gentle[0].pauseAfter).toBeLessThanOrEqual(2.5);
   });
 });

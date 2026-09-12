@@ -40,30 +40,43 @@ export interface DeliveryInput {
   emphasis?: string[] | null;
 }
 
-/** The delivery a style gets: how long it holds, how far it slows, how much it quickens. */
+/**
+ * The silence a teacher leaves after a sentence, by what the sentence
+ * was, in seconds, for the steady style; the other styles scale it. A
+ * sentence gets a beat, a longer one a little more; the last sentence of
+ * an idea gets a breath; a question the listener is meant to answer gets
+ * time to think; a count gets time to land; the sentence before a
+ * chapter's landing line holds the door.
+ */
+export const GAP = {
+  sentence: 0.6,
+  perTenWords: 0.1,
+  sentenceMax: 0.9,
+  idea: 1.2,
+  question: 1.8,
+  count: 1.0,
+  beforeLanding: 0.8,
+  min: 0.5,
+  max: 2.5,
+};
+
+/** How each style scales the gaps, and how far a count's sentence slows. */
 export interface DeliveryTuning {
-  /** A [pause] as a held silence, in seconds. */
-  hold: number;
-  /** A held silence beyond the second on a page, so a page never stalls. */
-  breath: number;
-  /** The pace of a figure's sentence and a landing sentence, against the style's. */
+  /** The gaps, against the steady style's. */
+  scale: number;
+  /** The pace of a count's sentence, against the style's. */
   slow: number;
-  /** The pace of an opening join, against the style's. */
-  quick: number;
 }
 
 export const DELIVERY: Record<LectureStyle, DeliveryTuning> = {
-  gentle: { hold: 1.0, breath: 0.35, slow: 0.93, quick: 1.03 },
-  steady: { hold: 0.75, breath: 0.3, slow: 0.93, quick: 1.04 },
-  brisk: { hold: 0.5, breath: 0.25, slow: 0.95, quick: 1.04 },
+  gentle: { scale: 1.33, slow: 0.97 },
+  steady: { scale: 1, slow: 0.97 },
+  brisk: { scale: 0.67, slow: 0.97 },
 };
 
-/** Silence between paragraphs inside a stretch, the breath the voice took on its own before. */
-export const PARAGRAPH_BREATH = 0.25;
-/** Held silences a page may carry at its full length: the turn and one ask. */
+/** Held silences a page may carry at their full length: the turn and one ask. */
 const HOLDS_PER_PAGE = 2;
-/** What goes into an audio file's name, so a change here voices every page again. */
-export const DELIVERY_VERSION = 'delivery-1';
+export const DELIVERY_VERSION = 'delivery-2';
 
 const NUMBER_WORDS = new Set([
   'zero',
@@ -383,11 +396,10 @@ const sentencesIn = (paragraph: string): string[] =>
     .filter(Boolean);
 
 /**
- * The page as pieces, in order, for the voice to say and join.
- *
- * Sentences that share a pace and have no silence between them are one
- * piece, so the voice keeps its line through them. Two slowed sentences
- * never run together: the second is said at pace.
+ * The page as pieces, in order, for the voice to say and join: one
+ * sentence each, so every silence between them is placed here and none
+ * is left to the voice. Two slowed sentences never run together: the
+ * second is said at pace.
  */
 export function deliveryPieces(input: DeliveryInput): DeliveryPiece[] {
   const tuning = DELIVERY[input.style];
@@ -397,73 +409,77 @@ export function deliveryPieces(input: DeliveryInput): DeliveryPiece[] {
     .filter(Boolean);
   const pieces: DeliveryPiece[] = [];
   let holds = 0;
-  let firstSentence = true;
   let lastSlowed = false;
 
   const stretches = input.stretches
     .map((stretch) => stretch.trim())
     .filter(Boolean);
+  const paragraphsOf = (stretch: string) =>
+    stretch
+      .split(/\n{2,}/)
+      .map((paragraph) => paragraph.trim())
+      .filter(Boolean);
   const sentenceCount = stretches.reduce(
     (count, stretch) =>
       count +
-      stretch
-        .split(/\n{2,}/)
-        .reduce((n, paragraph) => n + sentencesIn(paragraph).length, 0),
+      paragraphsOf(stretch).reduce(
+        (n, paragraph) => n + sentencesIn(paragraph).length,
+        0,
+      ),
     0,
   );
   let seen = 0;
 
-  const push = (text: string, speed: number, pauseAfter: number) => {
-    const last = pieces[pieces.length - 1];
-    if (last && last.speed === speed && last.pauseAfter === 0) {
-      last.text = `${last.text} ${text}`;
-      last.pauseAfter = pauseAfter;
-      return;
-    }
-    pieces.push({ text, speed, pauseAfter });
-  };
+  const gapFor = (seconds: number) =>
+    round(Math.min(GAP.max, Math.max(GAP.min, seconds * tuning.scale)));
 
   stretches.forEach((stretch, stretchIndex) => {
-    const paragraphs = stretch
-      .split(/\n{2,}/)
-      .map((p) => p.trim())
-      .filter(Boolean);
+    const paragraphs = paragraphsOf(stretch);
     paragraphs.forEach((paragraph, paragraphIndex) => {
       const sentences = sentencesIn(paragraph);
       sentences.forEach((sentence, sentenceIndex) => {
         seen += 1;
         const isLast = seen === sentenceCount;
+        const beforeLast = seen === sentenceCount - 1;
         const figure = hasFigure(sentence);
         const landing = input.landing && isLast;
-        const join = firstSentence && input.midChapter;
-        firstSentence = false;
 
-        let factor = 1;
-        if ((figure || landing) && !lastSlowed) factor = tuning.slow;
-        else if (join && !figure) factor = tuning.quick;
-        lastSlowed = factor === tuning.slow;
+        const factor = (figure || landing) && !lastSlowed ? tuning.slow : 1;
+        lastSlowed = factor !== 1;
 
         const text =
           figure || emphasis.length
             ? stressSentence(sentence, emphasis)
             : sentence;
+        const words = tokenize(sentence).length;
         const endOfParagraph = sentenceIndex === sentences.length - 1;
         const endOfStretch =
           endOfParagraph && paragraphIndex === paragraphs.length - 1;
-        let pauseAfter = 0;
-        if (endOfStretch) {
-          if (stretchIndex < stretches.length - 1) {
-            holds += 1;
-            pauseAfter = holds <= HOLDS_PER_PAGE ? tuning.hold : tuning.breath;
-          }
-        } else if (endOfParagraph) {
-          pauseAfter = PARAGRAPH_BREATH;
-        }
-        push(
-          text,
-          round(Math.min(2, Math.max(0.5, base * factor))),
-          pauseAfter,
+
+        let seconds = Math.min(
+          GAP.sentenceMax,
+          GAP.sentence + GAP.perTenWords * Math.floor(words / 10),
         );
+        if (figure) seconds = Math.max(seconds, GAP.count);
+        if (endOfParagraph) seconds = Math.max(seconds, GAP.idea);
+        if (endOfStretch && stretchIndex < stretches.length - 1) {
+          holds += 1;
+          seconds = Math.max(
+            seconds,
+            holds <= HOLDS_PER_PAGE ? GAP.question : GAP.idea,
+          );
+        }
+        if (input.landing && beforeLast) {
+          seconds = Math.max(seconds, GAP.beforeLanding);
+        }
+        // The page ends with its last word; the player brings the next.
+        const pauseAfter = isLast ? 0 : gapFor(seconds);
+
+        pieces.push({
+          text,
+          speed: round(Math.min(2, Math.max(0.5, base * factor))),
+          pauseAfter,
+        });
       });
     });
   });
@@ -472,7 +488,7 @@ export function deliveryPieces(input: DeliveryInput): DeliveryPiece[] {
 
 /** The style's own pace, the number the voice is handed for a plain sentence. */
 export const STYLE_SPEED: Record<LectureStyle, number> = {
-  gentle: 0.9,
-  steady: 1,
-  brisk: 1.1,
+  gentle: 0.84,
+  steady: 0.9,
+  brisk: 0.9,
 };

@@ -30,6 +30,8 @@ export interface SpeechPort {
     model: string;
     /** Seconds of GPU the call took, for providers billed by the second; absent otherwise. */
     gpuSeconds?: number;
+    /** The audio's true length as the service measured it; absent when it did not say. */
+    durationMs?: number;
   }>;
   /** What goes into a file's name so audio from one voice never overwrites another's. */
   label(): { model: string; voice: string };

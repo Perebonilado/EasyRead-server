@@ -144,6 +144,7 @@ export class LectureVoiceProcessor {
       // the whole page: a fragment the voice once returned is voiced again.
       const cached = await this.storage.size(key).catch(() => null);
       const whole = cached !== null && !speechTooShort(cached, spoken.length);
+      let durationMs = estimateDurationMs(spoken);
       if (!whole) {
         if (cached !== null) {
           this.logger.warn(
@@ -180,9 +181,15 @@ export class LectureVoiceProcessor {
           latencyMs: null,
           outcome: 'ok',
           costUsd: rented
-            ? catalogueSpeechCost(mp3DurationMs(result.audio.length), rate)
+            ? catalogueSpeechCost(
+                result.durationMs ?? mp3DurationMs(result.audio.length),
+                rate,
+              )
             : null,
         });
+        // The length the service measured, silences and all; the estimate
+        // from the text knows nothing of the silence the pace model adds.
+        if (result.durationMs) durationMs = result.durationMs;
       }
 
       await this.lectures.markSegmentDone({
@@ -192,7 +199,7 @@ export class LectureVoiceProcessor {
         style,
         kind,
         audioKey: key,
-        durationMs: estimateDurationMs(spoken),
+        durationMs,
       });
 
       // The student may be listening right now, waiting on this page.

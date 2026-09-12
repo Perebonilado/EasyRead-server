@@ -69,7 +69,12 @@ export class ModalSpeechAdapter implements SpeechPort {
     instructions?: string;
     speed?: number;
     pieces?: { text: string; speed: number; pauseAfter: number }[];
-  }): Promise<{ audio: Buffer; mimeType: string; model: string }> {
+  }): Promise<{
+    audio: Buffer;
+    mimeType: string;
+    model: string;
+    durationMs?: number;
+  }> {
     const base = this.config
       .getOrThrow<string>('MODAL_TTS_URL')
       .replace(/\/+$/, '');
@@ -80,49 +85,56 @@ export class ModalSpeechAdapter implements SpeechPort {
     // Kokoro takes the page as pieces, each at its pace with its silence
     // after; one request, the service joins them.
     if (engine === 'kokoro' && pieces?.length) {
-      const audio = await this.once(`${base}/v1/audio/speech`, token, {
-        voice: speaker,
-        pieces: pieces.map((piece) => ({
-          text: piece.text,
-          speed: piece.speed,
-          pause_after: piece.pauseAfter,
-        })),
-        response_format: 'mp3',
-      });
+      const { audio, durationMs } = await this.once(
+        `${base}/v1/audio/speech`,
+        token,
+        {
+          voice: speaker,
+          pieces: pieces.map((piece) => ({
+            text: piece.text,
+            speed: piece.speed,
+            pause_after: piece.pauseAfter,
+          })),
+          response_format: 'mp3',
+        },
+      );
       return {
         audio,
         mimeType: 'audio/mpeg',
         model: `modal:${this.label().model}`,
+        ...(durationMs !== undefined ? { durationMs } : {}),
       };
     }
 
     const buffers: Buffer[] = [];
+    let total: number | undefined;
     for (const part of chunk(text, ModalSpeechAdapter.INPUT_LIMIT)) {
-      buffers.push(
-        await this.once(
-          `${base}/v1/audio/speech`,
-          token,
-          engine === 'kokoro'
-            ? {
-                input: part,
-                voice: speaker,
-                speed: speed ?? 1,
-                response_format: 'mp3',
-              }
-            : {
-                input: part,
-                voice: speaker,
-                instructions,
-                language: 'English',
-                response_format: 'mp3',
-              },
-        ),
+      const { audio, durationMs } = await this.once(
+        `${base}/v1/audio/speech`,
+        token,
+        engine === 'kokoro'
+          ? {
+              input: part,
+              voice: speaker,
+              speed: speed ?? 1,
+              response_format: 'mp3',
+            }
+          : {
+              input: part,
+              voice: speaker,
+              instructions,
+              language: 'English',
+              response_format: 'mp3',
+            },
       );
+      buffers.push(audio);
+      if (durationMs !== undefined) total = (total ?? 0) + durationMs;
     }
     return {
       audio: Buffer.concat(buffers),
       mimeType: 'audio/mpeg',
       model: `modal:${this.label().model}`,
+      ...(total !== undefined ? { durationMs: total } : {}),
     };
   }
 
@@ -136,7 +148,7 @@ export class ModalSpeechAdapter implements SpeechPort {
     url: string,
     token: string,
     body: Record<string, unknown>,
-  ): Promise<Buffer> {
+  ): Promise<{ audio: Buffer; durationMs?: number }> {
     let lastError: Error | null = null;
     for (
       let attempt = 1;
@@ -174,7 +186,11 @@ export class ModalSpeechAdapter implements SpeechPort {
         }
         const audio = Buffer.from(await response.arrayBuffer());
         if (!audio.length) throw new Error('The speech service sent no audio');
-        return audio;
+        // The true length, when the service measured it (Kokoro does).
+        const seconds = Number(response.headers.get('x-audio-seconds'));
+        return Number.isFinite(seconds) && seconds > 0
+          ? { audio, durationMs: Math.round(seconds * 1000) }
+          : { audio };
       } catch (error) {
         lastError = named(error);
         if (isRefusal(lastError)) throw lastError;

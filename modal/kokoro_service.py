@@ -26,6 +26,7 @@ import re
 import socket
 import struct
 import subprocess
+import tempfile
 import threading
 import time
 
@@ -39,12 +40,24 @@ SAMPLE_RATE = 24_000
 INTAKE = 8
 # The longest page the service will take, in characters, pieces together.
 INPUT_LIMIT = 8_000
-# The most pieces a page may come as.
-PIECES_LIMIT = 60
+# The most pieces a page may come as: a sentence each, on a long page.
+PIECES_LIMIT = 120
 # A breath between paragraphs inside one piece, in seconds.
 BREATH = 0.25
 # The longest silence a piece may ask for after itself, in seconds.
 PAUSE_LIMIT = 3.0
+# The voice pads every piece with dead air, about a quarter second before
+# and two thirds after. It is trimmed to a short natural margin so the
+# only silence on a page is the silence the pace model placed.
+TRIM_DB = -45.0
+HEAD_KEEP = 0.05
+TAIL_KEEP = 0.08
+FADE_IN = 0.008
+FADE_OUT = 0.04
+# A whisper of room tone under every gap, so a pause is a person waiting
+# and not a cut. The master lifts it by about thirteen decibels, so it is
+# set well below hearing here; set to 0 to switch it off.
+ROOM_TONE_DB = -78.0
 # The master: presence above 3.5 kHz, a gentle squeeze, loudness at -16 LUFS.
 MASTER = "highpass=f=70,treble=g=3:f=3500:w=0.6,acompressor=threshold=-18dB:ratio=2.5:attack=8:release=120:makeup=2"
 LOUDNESS = "I=-16:TP=-1.5:LRA=9"
@@ -111,7 +124,6 @@ class Speech:
         import numpy as np
 
         out = []
-        breath = np.zeros(int(SAMPLE_RATE * BREATH), dtype=np.float32)
         with self.lock:
             for text, speed, pause_after in pieces:
                 said = []
@@ -119,13 +131,13 @@ class Speech:
                     if result.audio is None:
                         continue
                     if said:
-                        said.append(breath)
-                    said.append(result.audio.detach().cpu().numpy().astype(np.float32))
+                        said.append(gap(BREATH))
+                    said.append(trimmed(result.audio.detach().cpu().numpy().astype(np.float32)))
                 if not said:
                     continue
                 out.extend(said)
                 if pause_after > 0:
-                    out.append(np.zeros(int(SAMPLE_RATE * pause_after), dtype=np.float32))
+                    out.append(gap(pause_after))
         if not out:
             raise ValueError("nothing to say")
         audio = np.concatenate(out)
@@ -155,7 +167,7 @@ class Speech:
 
         @api.get("/health")
         def health():
-            return {"status": "ok", "model": "kokoro-82m", "voice": VOICE, "gpu": GPU, "version": 2}
+            return {"status": "ok", "model": "kokoro-82m", "voice": VOICE, "gpu": GPU, "version": 3}
 
         @api.post("/v1/audio/speech")
         async def speech(request: Request, authorization: str = Header(default="")):
@@ -188,6 +200,39 @@ class Speech:
             )
 
         return api
+
+
+def trimmed(audio):
+    """The voice's dead air cut from both ends, a short margin kept, and the edges faded so nothing clicks."""
+    import numpy as np
+
+    floor = 10 ** (TRIM_DB / 20)
+    loud = np.flatnonzero(np.abs(audio) > floor)
+    if not len(loud):
+        return audio[: int(SAMPLE_RATE * HEAD_KEEP)]
+    start = max(0, int(loud[0]) - int(SAMPLE_RATE * HEAD_KEEP))
+    stop = min(len(audio), int(loud[-1]) + int(SAMPLE_RATE * TAIL_KEEP))
+    piece = audio[start:stop].copy()
+    fade_in = min(len(piece), int(SAMPLE_RATE * FADE_IN))
+    fade_out = min(len(piece), int(SAMPLE_RATE * FADE_OUT))
+    if fade_in:
+        piece[:fade_in] *= np.linspace(0.0, 1.0, fade_in, dtype=np.float32)
+    if fade_out:
+        piece[-fade_out:] *= np.linspace(1.0, 0.0, fade_out, dtype=np.float32)
+    return piece
+
+
+def gap(seconds: float):
+    """Silence with a whisper of room tone under it, or plain silence when the tone is off."""
+    import numpy as np
+
+    count = int(SAMPLE_RATE * seconds)
+    if count <= 0:
+        return np.zeros(0, dtype=np.float32)
+    if ROOM_TONE_DB >= 0:
+        return np.zeros(count, dtype=np.float32)
+    level = 10 ** (ROOM_TONE_DB / 20)
+    return (np.random.default_rng(count).standard_normal(count) * level).astype(np.float32)
 
 
 def read_pieces(body: dict) -> list:
@@ -258,9 +303,12 @@ def master_filter(pcm: bytes) -> str:
 
 
 def to_mp3(audio) -> bytes:
+    """Written to a file, not a pipe, so the header carries the true length and a player seeks right."""
     pcm = _pcm(audio)
-    done = _ffmpeg(["-af", master_filter(pcm), "-codec:a", "libmp3lame", "-q:a", "2", "-f", "mp3", "pipe:1"], pcm)
-    return done.stdout
+    with tempfile.NamedTemporaryFile(suffix=".mp3") as out:
+        _ffmpeg(["-af", master_filter(pcm), "-codec:a", "libmp3lame", "-q:a", "2", "-y", out.name], pcm)
+        out.seek(0)
+        return out.read()
 
 
 def to_wav(audio) -> bytes:

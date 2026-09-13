@@ -77,6 +77,8 @@ export interface LectureOutlineDraft {
   hook: string;
   /** The shape of the topic, in one or two sentences. */
   arc: string;
+  /** The one case or question the chapter follows, page by page. */
+  thread: string;
   /** What the listener can now do that they could not before; the last page lands on it. */
   payoff: string;
   /** The words the chapter turns on, each with its plain meaning; spoken first for a slow learner. */
@@ -124,6 +126,8 @@ export interface LectureOutlineDraft {
     pitfall: string | null;
     /** True on the one page of the chapter where the listener is asked to predict before hearing. */
     turn: boolean;
+    /** The question this page leaves open for the next page's first sentence; null on the last. */
+    handoff: string | null;
   }[];
 }
 
@@ -281,6 +285,12 @@ export interface LlmGatewayPort {
     };
     /** Where the previous chapter landed, for the one line that joins this chapter to it; null for the first. */
     previousPayoff: string | null;
+    /** The case the chapter follows, to return to where the page turns; absent on plans from before it existed. */
+    thread?: string | null;
+    /** The question the last page left open, which this page's first sentence answers; null on a chapter's first page. */
+    answers?: string | null;
+    /** The question this page leaves open for the next page to answer; null on the last. */
+    leaves?: string | null;
     /** The chapter's problem, for the page that opens it; null elsewhere. */
     problem: string | null;
     /** Where this page sits in the chapter, so restating can fade across it. */

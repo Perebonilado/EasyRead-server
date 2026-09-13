@@ -14,6 +14,7 @@
  * the marked moments land.
  */
 import type { LectureStyle } from '../../contracts';
+import { contentWordsOf } from './coverage';
 
 export interface DeliveryPiece {
   /** The words, with Kokoro's stress mark around a phrase that carries weight. */
@@ -52,13 +53,35 @@ export const GAP = {
   sentence: 0.6,
   perTenWords: 0.1,
   sentenceMax: 0.9,
+  /** Before a sentence that continues the thought: the voice runs on. */
+  run: 0.35,
   idea: 1.2,
   question: 1.8,
   count: 1.0,
   beforeLanding: 0.8,
   min: 0.5,
+  /** The floor for a run's gap, which sits under the ordinary floor on purpose. */
+  runMin: 0.25,
   max: 2.5,
 };
+
+/** Sentences that may run together before the voice breathes whatever comes next. */
+export const RUN_MAX = 3;
+
+/**
+ * A sentence that continues the thought: it opens on a connective or a
+ * word that hands back to the sentence before, or it carries one of that
+ * sentence's own words.
+ */
+const CONTINUES =
+  /^(?:so|because|since|which|that|this|these|those|it|its|they|their|and|but|yet|then|if|when|once|here|there|still|instead|otherwise|meaning|or|nor|for|which)\b/i;
+
+export function continuesThought(previous: string, next: string): boolean {
+  if (CONTINUES.test(next.trim())) return true;
+  const own = contentWordsOf(previous);
+  for (const word of contentWordsOf(next)) if (own.has(word)) return true;
+  return false;
+}
 
 /** How each style scales the gaps, and how far a count's sentence slows. */
 export interface DeliveryTuning {
@@ -76,7 +99,7 @@ export const DELIVERY: Record<LectureStyle, DeliveryTuning> = {
 
 /** Held silences a page may carry at their full length: the turn and one ask. */
 const HOLDS_PER_PAGE = 2;
-export const DELIVERY_VERSION = 'delivery-2';
+export const DELIVERY_VERSION = 'delivery-3';
 
 const NUMBER_WORDS = new Set([
   'zero',
@@ -430,8 +453,9 @@ export function deliveryPieces(input: DeliveryInput): DeliveryPiece[] {
   );
   let seen = 0;
 
-  const gapFor = (seconds: number) =>
-    round(Math.min(GAP.max, Math.max(GAP.min, seconds * tuning.scale)));
+  const gapFor = (seconds: number, floor = GAP.min) =>
+    round(Math.min(GAP.max, Math.max(floor, seconds * tuning.scale)));
+  let run = 0;
 
   stretches.forEach((stretch, stretchIndex) => {
     const paragraphs = paragraphsOf(stretch);
@@ -460,6 +484,23 @@ export function deliveryPieces(input: DeliveryInput): DeliveryPiece[] {
           GAP.sentenceMax,
           GAP.sentence + GAP.perTenWords * Math.floor(words / 10),
         );
+        // The thought runs on: a sentence that continues this one comes
+        // after a short gap, up to three in a row, then the voice breathes.
+        const next = sentences[sentenceIndex + 1];
+        const runsOn =
+          !figure &&
+          !endOfParagraph &&
+          next !== undefined &&
+          run < RUN_MAX - 1 &&
+          continuesThought(sentence, next);
+        let floor = GAP.min;
+        if (runsOn) {
+          seconds = GAP.run;
+          floor = GAP.runMin;
+          run += 1;
+        } else {
+          run = 0;
+        }
         if (figure) seconds = Math.max(seconds, GAP.count);
         if (endOfParagraph) seconds = Math.max(seconds, GAP.idea);
         if (endOfStretch && stretchIndex < stretches.length - 1) {
@@ -473,7 +514,7 @@ export function deliveryPieces(input: DeliveryInput): DeliveryPiece[] {
           seconds = Math.max(seconds, GAP.beforeLanding);
         }
         // The page ends with its last word; the player brings the next.
-        const pauseAfter = isLast ? 0 : gapFor(seconds);
+        const pauseAfter = isLast ? 0 : gapFor(seconds, floor);
 
         pieces.push({
           text,

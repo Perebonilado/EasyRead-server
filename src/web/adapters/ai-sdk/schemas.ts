@@ -332,6 +332,8 @@ export const recapSchema = z.object({
 export const lectureOutlineSchema = z.object({
   hook: z.string().min(1).max(900),
   arc: z.string().min(1).max(600),
+  /** The one case or question the chapter follows, page by page. */
+  thread: z.string().min(1).max(300),
   points: z.array(z.string().min(1).max(200)).min(1).max(4),
   payoff: z.string().min(1).max(400),
   terms: z
@@ -341,7 +343,7 @@ export const lectureOutlineSchema = z.object({
         meaning: z.string().min(1).max(200),
       }),
     )
-    .max(8),
+    .max(12),
   problem: z.string().max(300).nullable(),
   beats: z
     .array(
@@ -374,6 +376,8 @@ export const lectureOutlineSchema = z.object({
           .nullable(),
         pitfall: z.string().max(240).nullable(),
         turn: z.boolean(),
+        /** The question this page leaves open, which the next page's first sentence answers; null on the last. */
+        handoff: z.string().max(240).nullable(),
         figure: z.object({
           kind: z.enum(['process', 'structure', 'comparison', 'none']),
           shows: z.string().max(200).nullable(),

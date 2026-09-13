@@ -575,6 +575,9 @@ export class LectureChapterProcessor {
           ask: null,
         },
         previousPayoff: null,
+        thread: null,
+        answers: null,
+        leaves: null,
         problem: null,
         pageIndex: input.pageIndex,
         pageCount: input.pageCount,
@@ -1212,6 +1215,21 @@ export class LectureChapterProcessor {
         // turn on the same page, so a page pauses once at most.
         ask: askFor(style, plan, row.pageNumber, rows),
         previousPayoff: input.previousPayoff,
+        // The conversation between pages: the question the last page left
+        // open, which this one answers first, and the one this page leaves.
+        thread: plan.thread ?? null,
+        answers:
+          index > 0
+            ? (beatFor(plan, rows[index - 1].pageNumber).handoff ?? null)
+            : null,
+        leaves:
+          index < rows.length - 1
+            ? (beatFor(plan, row.pageNumber).handoff ?? null)
+            : null,
+        saidBefore: rows
+          .slice(0, index)
+          .map((earlier) => earlier.scriptText ?? '')
+          .filter(Boolean),
         isFirstOfTopic,
         isLastOfTopic: index === rows.length - 1,
         pageIndex: index,
@@ -1427,6 +1445,14 @@ export class LectureChapterProcessor {
     ask: string | null;
     /** Where the previous chapter landed; null for the first chapter or a page that is not the first. */
     previousPayoff: string | null;
+    /** The case the chapter follows; null on plans from before it existed. */
+    thread: string | null;
+    /** The question the last page left open, which this page's first sentence answers. */
+    answers: string | null;
+    /** The question this page leaves open for the next. */
+    leaves: string | null;
+    /** The scripts of this chapter's earlier pages in this style, for the term check. */
+    saidBefore: string[];
     documentId: string;
     topicTitle: string;
     plan: LecturePlan;
@@ -1577,6 +1603,9 @@ export class LectureChapterProcessor {
           ask: input.ask,
         },
         previousPayoff: input.isFirstOfTopic ? input.previousPayoff : null,
+        thread: input.thread,
+        answers: input.answers,
+        leaves: input.leaves,
         problem: input.isFirstOfTopic ? (input.plan.problem ?? null) : null,
         pageIndex: input.pageIndex,
         pageCount: input.pageCount,
@@ -1646,8 +1675,12 @@ export class LectureChapterProcessor {
           terms: (input.plan.terms ?? []).map((entry) => entry.term),
           taughtSoFar: input.taughtSoFar,
           midChapter: !input.isFirstOfTopic,
+          prevTail: input.prevTail,
+          answers: input.answers,
+          saidBefore: input.saidBefore,
           budget,
           noteText: input.note ? readAloudSource(input.note) : input.pageText,
+          carries: input.note ? readAloudSource(input.note) : input.pageText,
           payoff: input.plan.payoff ?? null,
           lastOfChapter: input.isLastOfTopic,
         }),

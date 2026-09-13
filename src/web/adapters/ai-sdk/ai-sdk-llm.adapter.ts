@@ -241,6 +241,9 @@ export class AiSdkLlmAdapter implements LlmGatewayPort, OnModuleInit {
       ask: string | null;
     };
     previousPayoff: string | null;
+    thread?: string | null;
+    answers?: string | null;
+    leaves?: string | null;
     problem: string | null;
     pageIndex: number;
     pageCount: number;
@@ -323,6 +326,9 @@ export class AiSdkLlmAdapter implements LlmGatewayPort, OnModuleInit {
           : null,
         moves,
         `HOW TO TEACH IT (the ${input.style} style): ${input.styleDirection}`,
+        input.thread
+          ? `The chapter follows one case: ${input.thread}. Return to it where this page turns or gives its example, not in every sentence.`
+          : null,
         input.pageCount > 1
           ? `This is page ${input.pageIndex + 1} of ${input.pageCount} in the chapter${input.style === 'gentle' ? ((input.pageIndex + 1) * 2 <= input.pageCount ? ': an early page, so restate the idea fully' : ': a late page, so restate in a clause at most') : ''}.`
           : null,
@@ -332,10 +338,16 @@ export class AiSdkLlmAdapter implements LlmGatewayPort, OnModuleInit {
         input.beat.ask && !input.bridge
           ? `ASK: before the page answers it, put this question to the listener, then [pause] on its own line, then answer it from the page: ${input.beat.ask}`
           : null,
-        !input.isFirstOfTopic && !input.bridge
+        !input.isFirstOfTopic && !input.bridge && input.answers
+          ? `ANSWER: the last page left this open: "${input.answers}". Your first sentence answers it${input.style === 'brisk' ? ', in a clause' : ''}, carrying a word from it; no summary of the last page.`
+          : null,
+        !input.isFirstOfTopic && !input.bridge && !input.answers
           ? input.style === 'brisk'
             ? 'JOIN: if the last thing said leads here, hang your first words on it, a few at most, as its consequence, its contrast or the next step; otherwise begin on the idea. No summary of it.'
             : 'JOIN: your first sentence hangs on the last thing said, as its consequence, its contrast or the next step: one clause, never a summary of it.'
+          : null,
+        input.leaves && !input.bridge
+          ? `LEAVE OPEN: end on the question the next page answers, in the listener's words${input.style === 'brisk' ? ', a few words' : ''}: "${input.leaves}". A question, never a preview.`
           : null,
         input.isFirstOfTopic &&
         input.previousPayoff &&
@@ -377,7 +389,7 @@ export class AiSdkLlmAdapter implements LlmGatewayPort, OnModuleInit {
           ? 'STRICT: this page has been rejected twice for leaving the page. Teach only what is written on the page below, in your own words, adding nothing the page does not say. No hook, no callback, no foreshadowing, no claims about why it matters beyond what the page itself says, and no number or name the page does not state. A number is said only if it appears on the page exactly as written, digit for digit; otherwise leave it out.'
           : null,
         input.board?.lines.length
-          ? `THE BOARD for this page, in writing order. You write every one of these lines, exactly once, in the section of its move: [write n], then the line said word for word as its own sentence, then its explanation in everyday words, for example: "[write 2] Refill rate: ten tokens a second. That means every second, ten more tokens arrive, whatever else is happening."\n${input.board.lines
+          ? `THE BOARD for this page, in writing order. You write every one of these lines, exactly once, in the section of its move: [write n], then the line's words in order as the first words of the sentence that explains it, for example: "[write 2] Refill rate, ten tokens a second, means every second ten more tokens arrive, whatever else is happening."\n${input.board.lines
               .map(
                 (line) =>
                   `${line.number}. (move ${line.move}) ${line.text}${line.meaning ? `: ${line.meaning}` : ''}`,

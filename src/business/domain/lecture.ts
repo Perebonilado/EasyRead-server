@@ -20,14 +20,16 @@ import {
   contentWordsOf,
   isFrontMatterPage,
   repeatVerified,
+  stem,
 } from './coverage';
+import { EVERYDAY_WORDS } from './everyday-words';
 
 /**
  * The generator's identity, stamped on every row it writes and baked into
  * every audio key. Bumped whenever the prompts change enough that audio
  * made by the previous generator must not be served for a new script.
  */
-export const LECTURE_GENERATOR_VERSION = 'lecture-9';
+export const LECTURE_GENERATOR_VERSION = 'lecture-10';
 
 /** A page with fewer readable characters than this carries no lecture. */
 export const MIN_PAGE_CHARS = 120;
@@ -575,6 +577,12 @@ export interface LectureBeat {
    * habit; the plan carries at most one.
    */
   turn?: boolean;
+  /**
+   * The question this page leaves open, in the listener's words, which
+   * the next page's first sentence answers. Null on the chapter's last
+   * page; absent on plans written before hand-offs existed.
+   */
+  handoff?: string | null;
   /** What the page's idea would be drawn as on the board; absent on older plans. */
   figure?: {
     kind: 'process' | 'structure' | 'comparison' | 'none';
@@ -591,6 +599,11 @@ export interface LectureTerm {
 export interface LecturePlan {
   hook: string;
   arc: string;
+  /**
+   * The one case or question the chapter follows, in the listener's
+   * words; every page is its next step. Absent on older plans.
+   */
+  thread?: string | null;
   /** The three or four things the chapter settles, one sentence each; absent on older plans. */
   points?: string[];
   /** The chapter's words, spoken first for a slow learner. Older plans have none. */
@@ -777,14 +790,6 @@ const BANNED_ANYWHERE: readonly RegExp[] = [
   /^picture\s+(?:this|that|a|an|the|yourself|you)\b/i,
 ];
 
-/**
- * The words that join a page to the one before it: a consequence, a
- * contrast, a next step, or a hand back to what was just said. One of
- * them in the first sentence is enough; their absence is a cold open.
- */
-const JOIN_CUES =
-  /\b(so|because|since|which|that|this|these|those|it|they|but|yet|now|then|next|once|when|after|before|having|with|without|from|there|here|if|and|still|instead|meanwhile|hence|thus|therefore|otherwise|likewise|again|same|both|either|neither|another|other|such|however|though|although|while|whereas|until|unless)\b/i;
-
 /** How a page must not begin: audibly clearing its throat. */
 const THROAT_CLEARERS: readonly RegExp[] = [
   /^(?:now|so|right),\s/i,
@@ -868,7 +873,9 @@ export interface StyleProblem {
     | 'label'
     | 'hanging_marks'
     | 'uncovered'
-    | 'read_aloud';
+    | 'read_aloud'
+    | 'stiff_verbs'
+    | 'term_missing';
   detail: string;
 }
 
@@ -995,6 +1002,14 @@ export function styleProblems(
     taughtSoFar?: string[];
     /** A page after the chapter's first: it must open by joining itself to what was just said. */
     midChapter?: boolean;
+    /** The tail of the page before, for the seam a mid-chapter page opens on. */
+    prevTail?: string;
+    /** The question the last page left open, which this page's first sentence answers. */
+    answers?: string | null;
+    /** The scripts of this chapter's earlier pages, so a term explained there is used bare here. */
+    saidBefore?: string[];
+    /** The page's own paragraphs, for which terms it carries. */
+    carries?: string;
     /** The page's budget, grown for its paragraphs; the style's plain one when absent. */
     budget?: WordBudget;
     /** The note the page is taught from, as prose, for the reading-aloud check. */
@@ -1083,30 +1098,35 @@ export function styleProblems(
     });
   }
 
-  if (options.style === 'gentle' && options.sections) {
-    problems.push(...repeatedDevice(options.sections));
+  if (options.sections) {
+    problems.push(...repeatedDevice(options.sections, options.prevTail));
   }
-  if (options.style === 'gentle' && !options.bridge) {
+  // Every style's promise of plain words, measured, when the page is
+  // given to measure against.
+  if (!options.bridge && options.pageText !== undefined) {
     problems.push(
       ...plainWordsProblems(text, {
-        pageText: options.pageText ?? '',
+        pageText: options.pageText,
         terms: options.terms ?? [],
         taughtSoFar: options.taughtSoFar ?? [],
+        style: options.style,
+        saidBefore: options.saidBefore,
+        carries: options.carries,
       }),
     );
   }
-  // A page after the first opens on what was just said, as its consequence,
-  // its contrast or its next step. A page that starts cold, on a new
-  // subject with no join, makes the chapter a list of pages. The quick
-  // learner's page may begin on the idea itself.
-  if (options.midChapter && !options.bridge && options.style !== 'brisk') {
-    const first = sentencesOf(text)[0] ?? '';
-    if (first && !JOIN_CUES.test(first)) {
-      problems.push({
-        kind: 'cold_open',
-        detail: `Starts cold ("${firstWords(first, 4)}"); open on what was just said, as its consequence, contrast or next step`,
-      });
-    }
+  // Given, then new: a section opens on a word from the sentence before
+  // it, and a page after the first on the tail it was given or the
+  // question it answers. Shared content, never a connective alone; a
+  // page that starts cold makes the chapter a list of pages.
+  if (!options.bridge) {
+    problems.push(
+      ...seamProblems(options.sections ?? [{ move: 0, text }], {
+        midChapter: options.midChapter,
+        prevTail: options.prevTail,
+        answers: options.answers,
+      }),
+    );
   }
   // The voice hangs on a dash or an ellipsis. Twice on a page is a shape;
   // more is a tic the ear learns to skip.
@@ -1242,70 +1262,165 @@ function plainStem(word: string): string {
     .replace(/([bdgmnprt])\1$/, '$1');
 }
 
+/** Where each style's bar sits: sentence length with the terms taken out, hard words and stiff words a page may carry. */
+const PLAIN_BARS: Record<
+  LectureStyle,
+  { average: number; longest: number; hard: number; stiff: number }
+> = {
+  gentle: { average: 14, longest: 22, hard: 0, stiff: 0 },
+  steady: { average: 17, longest: 26, hard: 3, stiff: 2 },
+  brisk: { average: 13, longest: 20, hard: 3, stiff: 2 },
+};
+
+/** A word that names an action as a thing: "filtration occurs" where "it filters" would do. */
+const STIFF_ENDING = /(?:tion|sion|ment|ance|ence)s?$/;
+
+let everydayStems: Set<string> | null = null;
+/** The everyday words by their stems, built once, so "computers" and "computing" are the list's "computer". */
+function everydayStemsOf(): Set<string> {
+  everydayStems ??= new Set([...EVERYDAY_WORDS].map(plainStem));
+  return everydayStems;
+}
+
+const escapeRe = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
 /**
- * The gentle style's promise, measured, so a page in textbook register
- * is sent back the way a page with a bad opener is: short sentences,
- * everyday words, and every term of the chapter explained in the same
- * breath the first time it is said.
+ * Every style's promise, measured, so a page in textbook register is sent
+ * back the way a page with a bad opener is: short sentences with the
+ * chapter's terms not counted against them, everyday words, every term
+ * the page carries said as the book has it and explained in the same
+ * breath the first time, and no action turned into a noun where a verb
+ * would do. The bar sits by style; gentle's is the strictest.
  */
 export function plainWordsProblems(
   text: string,
-  options: { pageText: string; terms: string[]; taughtSoFar: string[] },
+  options: {
+    pageText: string;
+    terms: string[];
+    taughtSoFar: string[];
+    style?: LectureStyle;
+    /** The scripts of this chapter's earlier pages: a term explained there is used bare here. */
+    saidBefore?: string[];
+    /** The page's own paragraphs, for which terms it carries; the page text when absent. */
+    carries?: string;
+  },
 ): StyleProblem[] {
   const problems: StyleProblem[] = [];
   const sentences = sentencesOf(text);
   if (!sentences.length) return problems;
+  const style = options.style ?? 'gentle';
+  const bar = PLAIN_BARS[style];
+  const terms = options.terms.map((term) => term.trim()).filter(Boolean);
 
-  // Sentences: about ten words each; one long one is a stacked clause.
-  const lengths = sentences.map((sentence) => wordCount(sentence));
+  // Sentences, measured with the terms taken out: a keyword counts as one
+  // word however long it is, so a short sentence carrying one is short.
+  const withoutTerms = (sentence: string) =>
+    terms.reduce(
+      (text, term) => text.replace(new RegExp(escapeRe(term), 'gi'), 'term'),
+      sentence,
+    );
+  const lengths = sentences.map((sentence) =>
+    wordCount(withoutTerms(sentence)),
+  );
   const average = lengths.reduce((sum, n) => sum + n, 0) / lengths.length;
   const longest = Math.max(...lengths);
-  if (average > 14 || longest > 25) {
+  if (average > bar.average || longest > bar.longest) {
     const worst = sentences[lengths.indexOf(longest)];
     problems.push({
       kind: 'long_sentences',
-      detail: `Sentences average ${Math.round(average)} words and the longest has ${longest} ("${firstWords(worst, 8)}..."); a slow learner needs short ones, about ten words, one thing each`,
+      detail: `Sentences average ${Math.round(average)} words and the longest has ${longest} ("${firstWords(worst, 8)}..."); ${style === 'gentle' ? 'a slow learner needs short ones, about ten words, one thing each' : `short ones, one thing each: ${bar.average} words on average, none over ${bar.longest}`}`,
     });
   }
 
-  // Words: the lecturer's own long words, and the ones that say nothing,
-  // when the page itself does not use them.
+  // Words: the lecturer's own hard words, and the ones that say nothing,
+  // when neither the page nor everyday speech uses them.
   const pageWords = new Set(plainWordsOf(options.pageText));
   const pageStems = new Set([...pageWords].map(plainStem));
-  const termWords = new Set(options.terms.flatMap(plainWordsOf));
+  const termWords = new Set(terms.flatMap(plainWordsOf));
+  const everyday = everydayStemsOf();
   const known = (word: string) =>
     pageWords.has(word) ||
     termWords.has(word) ||
+    EVERYDAY_WORDS.has(word) ||
     EVERYDAY_LONG_WORDS.has(word) ||
-    pageStems.has(plainStem(word));
+    pageStems.has(plainStem(word)) ||
+    everyday.has(plainStem(word));
   const hard = new Set<string>();
   const empty = new Set<string>();
-  for (const word of plainWordsOf(scriptForTts(text))) {
-    if (known(word)) continue;
-    if (EMPTY_WORDS.has(word)) empty.add(word);
-    else if (
-      syllablesOf(word) >= 5 ||
-      (syllablesOf(word) >= 4 && word.length >= 11) ||
-      word.length >= 13
-    ) {
-      hard.add(word);
+  const stiff = new Set<string>();
+  for (const spoken of plainWordsOf(scriptForTts(text))) {
+    // "The nephron's job" is the term's word, possessive.
+    const word = spoken.replace(/'s$/, '');
+    if (EMPTY_WORDS.has(word) && !pageWords.has(word)) {
+      empty.add(word);
+      continue;
     }
+    if (known(word)) continue;
+    if (syllablesOf(word) >= 3 || word.length >= 9) hard.add(word);
+    if (word.length >= 8 && STIFF_ENDING.test(word)) stiff.add(word);
   }
-  // One word that says nothing is one too many; long words get some room.
-  if (empty.size || hard.size > 2) {
+  // For a slow learner one word that says nothing is one too many; the
+  // other styles get the bar's room for empty and hard words together.
+  const over =
+    style === 'gentle'
+      ? empty.size > 0 || hard.size > bar.hard
+      : empty.size + hard.size > bar.hard;
+  if (over) {
     const named = [...empty, ...hard].slice(0, 6);
     problems.push({
       kind: 'hard_words',
-      detail: `Words the page does not use and a slow learner may not know: ${named
+      detail: `Leave these words out, the page does not use them and a listener may not know them: ${named
         .map((word) => `"${word}"`)
-        .join(', ')}; say what actually happens, in everyday words`,
+        .join(', ')}; say what happens instead, in everyday words`,
+    });
+  }
+  if (stiff.size > bar.stiff) {
+    problems.push({
+      kind: 'stiff_verbs',
+      detail: `Actions turned into nouns: ${[...stiff]
+        .slice(0, 4)
+        .map((word) => `"${word}"`)
+        .join(', ')}; say what happens, with a verb`,
+    });
+  }
+
+  // Every term the page carries is said as the book has it: a paraphrase
+  // that loses the keyword loses what the student is examined on. A
+  // term given as "Content Delivery Network (CDN)" is said either way,
+  // and "replicas" says "replica"; the stems decide.
+  const scriptStems = plainWordsOf(scriptForTts(text)).map(plainStem);
+  const pageStemList = plainWordsOf(options.carries ?? options.pageText).map(
+    plainStem,
+  );
+  const saysStems = (haystack: string[], needle: string[]) => {
+    if (!needle.length) return true;
+    for (let i = 0; i + needle.length <= haystack.length; i += 1) {
+      if (needle.every((stem, j) => haystack[i + j] === stem)) return true;
+    }
+    return false;
+  };
+  const spellings = (term: string): string[][] =>
+    [term.replace(/\s*\([^)]*\)/g, ''), ...(term.match(/\(([^)]+)\)/g) ?? [])]
+      .map((form) => plainWordsOf(form).map(plainStem))
+      .filter((stems) => stems.length);
+  for (const term of terms) {
+    const forms = spellings(term);
+    const onPage = forms.some((stems) => saysStems(pageStemList, stems));
+    const said = forms.some((stems) => saysStems(scriptStems, stems));
+    if (!onPage || said) continue;
+    problems.push({
+      kind: 'term_missing',
+      detail: `The page carries "${term}" and the script never says it; say the term as the book has it, then what it means`,
     });
   }
 
   // Terms: each of the chapter's terms, the first time this page says it,
   // is explained in the same breath, and never two in one sentence.
   const lower = scriptForTts(text).toLowerCase();
-  const taught = options.taughtSoFar.map((line) => line.toLowerCase());
+  const taught = [
+    ...options.taughtSoFar,
+    ...(options.saidBefore ?? []).map((script) => scriptForTts(script)),
+  ].map((line) => line.toLowerCase());
   const firstUses: { term: string; sentence: number }[] = [];
   for (const term of options.terms) {
     const needle = term.toLowerCase().trim();
@@ -1356,8 +1471,10 @@ export function plainWordsProblems(
       });
     }
   }
+  // Two new terms in one sentence: a slow learner is given one at a time;
+  // the other styles may name two the page names together, each explained.
   const bySentence = new Map<number, string[]>();
-  for (const use of firstUses) {
+  for (const use of style === 'gentle' ? firstUses : []) {
     bySentence.set(use.sentence, [
       ...(bySentence.get(use.sentence) ?? []),
       use.term,
@@ -1585,10 +1702,20 @@ export function sectionProblems(
 const EXAMPLE_DEVICE =
   /^(?:for (?:example|instance)|think of|imagine|it(?:'s| is) (?:a bit )?(?:like|as if)|picture|say you|suppose|let(?:'s| us) say|consider)\b/i;
 
-export function repeatedDevice(sections: LectureSection[]): StyleProblem[] {
+/** A phrase in a person's voice at a turn: allowed once on a page, never the same one on two pages. */
+const PIVOT_DEVICE =
+  /^(?:(?:and|but|now|so|okay|right),?\s+)?(?:here(?:'s| is) (?:the (?:part|thing|catch|point|twist|key)|what matters|where it (?:gets|turns))|that(?:'s| is) the (?:catch|twist|point|part that matters)|the (?:catch|twist|key|thing) (?:is|here is))\b/i;
+
+export function repeatedDevice(
+  sections: LectureSection[],
+  /** The tail of the page before, so a pivot is not the same one twice running. */
+  prevTail = '',
+): StyleProblem[] {
   let previous: string | null = null;
+  const pivots: string[] = [];
   for (const section of sections) {
-    const first = sentencesOf(section.text)[0] ?? '';
+    const sentences = sentencesOf(section.text);
+    const first = sentences[0] ?? '';
     const device = EXAMPLE_DEVICE.exec(first)?.[0]?.toLowerCase() ?? null;
     if (device && previous) {
       return [
@@ -1599,8 +1726,96 @@ export function repeatedDevice(sections: LectureSection[]): StyleProblem[] {
       ];
     }
     previous = device;
+    for (const sentence of sentences) {
+      const pivot = PIVOT_DEVICE.exec(sentence)?.[0]?.toLowerCase();
+      if (pivot)
+        pivots.push(pivot.replace(/^(?:and|but|now|so|okay|right),?\s+/, ''));
+    }
+  }
+  if (pivots.length > 1) {
+    return [
+      {
+        kind: 'repetition',
+        detail: `Turns on a pivot phrase ${pivots.length} times ("${pivots[0]}", "${pivots[1]}"); one such phrase on a page at most`,
+      },
+    ];
+  }
+  const before = sentencesOf(prevTail)
+    .map((sentence) => PIVOT_DEVICE.exec(sentence)?.[0]?.toLowerCase())
+    .filter((pivot): pivot is string => Boolean(pivot))
+    .map((pivot) => pivot.replace(/^(?:and|but|now|so|okay|right),?\s+/, ''));
+  if (pivots.length && before.includes(pivots[0])) {
+    return [
+      {
+        kind: 'repetition',
+        detail: `Turns on "${pivots[0]}" the way the last page did; a pivot phrase is never the same one on two pages`,
+      },
+    ];
   }
   return [];
+}
+
+/** The words of a sentence a next sentence could carry, as said, for the writer to pick from. */
+function carryingWords(sentence: string): string {
+  const stems = contentWordsOf(sentence);
+  const words = sentence
+    .replace(/[^\p{L}\p{N}'\s-]/gu, ' ')
+    .split(/\s+/)
+    .filter((word) => word.length >= 4 && stems.has(stem(word.toLowerCase())));
+  return [...new Set(words)]
+    .slice(0, 4)
+    .map((word) => `"${word}"`)
+    .join(', ');
+}
+
+/** Whether two sentences share a carrying word, by stem: the seam that makes the second follow from the first. */
+function sharesWord(a: string, b: string): boolean {
+  const own = contentWordsOf(a);
+  for (const word of contentWordsOf(b)) if (own.has(word)) return true;
+  return false;
+}
+
+/**
+ * Given, then new, measured. Each section's first sentence carries a word
+ * from the last sentence before it; a mid-chapter page's first sentence
+ * carries one from the tail it was given, or from the question it was
+ * told to answer. A connective alone is not a seam.
+ */
+export function seamProblems(
+  sections: { text: string }[],
+  options: { midChapter?: boolean; prevTail?: string; answers?: string | null },
+): StyleProblem[] {
+  const problems: StyleProblem[] = [];
+  let before: string | null = null;
+  if (options.midChapter) {
+    const tail = sentencesOf(options.prevTail ?? '');
+    before = tail[tail.length - 1] ?? null;
+  }
+  sections.forEach((section, index) => {
+    const sentences = sentencesOf(section.text);
+    if (!sentences.length) return;
+    const first = sentences[0];
+    if (index === 0) {
+      if (options.midChapter && (before || options.answers)) {
+        const joined =
+          (before !== null && sharesWord(first, before)) ||
+          (!!options.answers && sharesWord(first, options.answers));
+        if (!joined) {
+          problems.push({
+            kind: 'cold_open',
+            detail: `Starts cold ("${firstWords(first, 5)}"); open on a word from what was just said${options.answers ? `, or answer what was left open: "${options.answers}"` : ''}`,
+          });
+        }
+      }
+    } else if (before !== null && !sharesWord(first, before)) {
+      problems.push({
+        kind: 'cold_open',
+        detail: `Opens a new idea cold ("${firstWords(first, 5)}") after "${firstWords(before, 6)}..."; start it from one of that sentence's own words (${carryingWords(before)}) and go on to the new thing`,
+      });
+    }
+    before = sentences[sentences.length - 1];
+  });
+  return problems;
 }
 
 /**
@@ -1823,9 +2038,19 @@ export interface OutlineProblem {
     | 'banned_opener'
     | 'hook_too_long'
     | 'uncovered'
-    | 'unverified_skip';
+    | 'unverified_skip'
+    | 'no_thread'
+    | 'no_handoff'
+    | 'term_meaning';
   detail: string;
 }
+
+/** A hand-off that previews the next page instead of asking what it answers. */
+const PREVIEW_SHAPE =
+  /\b(?:next(?:,| we| page| up)|we(?:'ll| will| are going to)|let'?s (?:look|turn|move|see)|coming up|in the next|we now turn)\b/i;
+/** A hand-off must be a question: it ends with one, or opens on a question word. */
+const QUESTION_SHAPE =
+  /\?\s*$|^(?:what|why|how|where|when|which|who|does|do|is|are|can|could|would|should|will)\b/i;
 
 /** What the plan is checked against for coverage: each page's paragraphs, and what came before. */
 export interface OutlineCoverage {
@@ -1869,6 +2094,50 @@ export function validateOutline(
   }
   if (!plan.arc?.trim()) {
     problems.push({ kind: 'no_arc', detail: 'The plan has no arc' });
+  }
+  // The thread and the hand-offs, on plans that carry them: a chapter is
+  // a conversation only if every page is the next step of one case and
+  // leaves the question the next page answers.
+  if (plan.thread !== undefined && !plan.thread?.trim()) {
+    problems.push({
+      kind: 'no_thread',
+      detail:
+        'The plan has no thread: name the one case or question the chapter follows',
+    });
+  }
+  const ordered = [...(plan.beats ?? [])].sort(
+    (a, b) => a.pageNumber - b.pageNumber,
+  );
+  ordered.forEach((beat, index) => {
+    if (beat.handoff === undefined || index === ordered.length - 1) return;
+    const handoff = beat.handoff?.trim() ?? '';
+    if (!handoff) {
+      problems.push({
+        kind: 'no_handoff',
+        detail: `Page ${beat.pageNumber} leaves no question for the next page; every page but the last has a handoff`,
+      });
+    } else if (PREVIEW_SHAPE.test(handoff) || !QUESTION_SHAPE.test(handoff)) {
+      problems.push({
+        kind: 'no_handoff',
+        detail: `Page ${beat.pageNumber}'s handoff ("${firstWords(handoff, 6)}") is a preview, not a question the next page answers; ask it in the listener's words`,
+      });
+    }
+  });
+  // A meaning with another term inside it explains nothing to a listener
+  // who has neither.
+  for (const entry of plan.terms ?? []) {
+    const inside = (plan.terms ?? []).find(
+      (other) =>
+        other.term !== entry.term &&
+        other.term.trim() &&
+        entry.meaning.toLowerCase().includes(other.term.trim().toLowerCase()),
+    );
+    if (inside) {
+      problems.push({
+        kind: 'term_meaning',
+        detail: `The meaning of "${entry.term}" has "${inside.term}" inside it; a meaning uses no other term`,
+      });
+    }
   }
 
   const expected = new Set(pageNumbers);

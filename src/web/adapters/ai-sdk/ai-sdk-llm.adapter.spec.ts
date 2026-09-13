@@ -421,7 +421,9 @@ describe('AiSdkLlmAdapter', () => {
     // The planned board goes to the writer numbered, with its move.
     expect(prompt).toContain('1. (move 0) eviction: a guess thrown away');
     expect(prompt).not.toContain('TERM eviction');
-    expect(prompt).toContain('said word for word as its own sentence');
+    expect(prompt).toContain(
+      'as the first words of the sentence that explains it',
+    );
     expect(prompt).toContain('Already taught in this lecture');
     expect(prompt).toContain('Still to come in this chapter');
     expect(prompt).toContain('list of 5 items');
@@ -431,6 +433,7 @@ describe('AiSdkLlmAdapter', () => {
     mock.reply({
       hook: 'A cache is not a faster database.',
       arc: 'From a guess to a bet',
+      thread: 'A request that misses the cache.',
       payoff: 'You can size a cache.',
       terms: [{ term: 'Eviction', meaning: 'throwing a guess away' }],
       problem: 'Why do caches lie?',
@@ -449,6 +452,7 @@ describe('AiSdkLlmAdapter', () => {
           skipBlocks: null,
           pitfall: null,
           turn: true,
+          handoff: null,
           point: 0,
           ask: null,
           figure: { kind: 'none', shows: null },

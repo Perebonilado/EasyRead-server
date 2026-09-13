@@ -158,6 +158,7 @@ export class FakeLlmAdapter implements LlmGatewayPort {
       value: {
         hook: `Why ${input.topicTitle} matters.`,
         arc: `From the start of ${input.topicTitle} to its consequence.`,
+        thread: `A student meeting ${input.topicTitle} for the first time.`,
         payoff: `You can now explain ${input.topicTitle}.`,
         terms: [
           { term: input.topicTitle, meaning: 'the idea this chapter turns on' },
@@ -183,6 +184,10 @@ export class FakeLlmAdapter implements LlmGatewayPort {
           // The last page: a prediction is only possible once something
           // has been heard, and earlier pages' tails stay plain words.
           turn: index === input.pages.length - 1,
+          handoff:
+            index < input.pages.length - 1
+              ? `What follows from page ${page.pageNumber}?`
+              : null,
           figure: { kind: 'none' as const, shows: null },
         })),
       },
@@ -258,9 +263,12 @@ export class FakeLlmAdapter implements LlmGatewayPort {
         ? ' What happens next?\n[pause]\nThe page tells you.'
         : '';
     const closing = `${turn}${input.isLastOfTopic ? ' And that is the whole idea.' : ''}`;
+    // The page's goal first, then the chapter's term with its meaning in
+    // the same breath, the page's own words, and a last sentence the next
+    // section can open on: what the real writer is held to.
     const body = input.bridge
       ? 'Nothing to linger on here.'
-      : `${input.beat.goal} ${input.pageText.slice(0, 120)}`;
+      : `${input.beat.goal} ${input.topicTitle} is the idea this chapter turns on. ${input.pageText.slice(0, 120)} That is this page.`;
     // One section per move, so a multi-move plan is honoured the way the
     // processor expects; the first carries the page, the rest name their
     // move, and the closing lands on the last.
@@ -270,7 +278,7 @@ export class FakeLlmAdapter implements LlmGatewayPort {
       const text =
         index === 0
           ? `${lead}${body}${last ? closing : ''}${offending}`
-          : `Then ${move.toLowerCase()}.${last ? closing : ''}`;
+          : `Then ${move.toLowerCase()} on this page.${last ? closing : ''}`;
       // The board: every line given for this move is written as the
       // section opens, marked the way the writer marks it.
       const marks = (input.board?.lines ?? [])

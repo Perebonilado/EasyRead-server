@@ -93,7 +93,7 @@ describe('stress on a sentence', () => {
 });
 
 describe('the pieces a page becomes', () => {
-  it('says a page sentence by sentence, a beat after each, longer after a long one', () => {
+  it('says a page sentence by sentence, a short gap where the thought runs on, a beat where it does not', () => {
     const pieces = deliveryPieces({
       stretches: [
         'The kidney filters the blood. It does so all day, every day, whether the body is resting or working hard, without a pause.',
@@ -103,7 +103,7 @@ describe('the pieces a page becomes', () => {
       landing: false,
     });
     expect(pieces).toEqual([
-      { text: 'The kidney filters the blood.', speed: 0.9, pauseAfter: 0.6 },
+      { text: 'The kidney filters the blood.', speed: 0.9, pauseAfter: 0.35 },
       {
         text: 'It does so all day, every day, whether the body is resting or working hard, without a pause.',
         speed: 0.9,
@@ -118,7 +118,31 @@ describe('the pieces a page becomes', () => {
       midChapter: false,
       landing: false,
     });
-    expect(longer[0].pauseAfter).toBe(0.7);
+    // "Then it rests" continues the thought: the voice runs on to it.
+    expect(longer[0].pauseAfter).toBe(0.35);
+    const apart = deliveryPieces({
+      stretches: [
+        'It does so all day, every day, whether the body is resting or working hard, without a pause. Prices rise elsewhere.',
+      ],
+      style: 'steady',
+      midChapter: false,
+      landing: false,
+    });
+    expect(apart[0].pauseAfter).toBe(0.7);
+  });
+
+  it('runs at most three sentences together, then breathes, and never under a quarter second', () => {
+    const pieces = deliveryPieces({
+      stretches: [
+        'One thing. And another. And a third. And a fourth. And a fifth.',
+      ],
+      style: 'brisk',
+      midChapter: false,
+      landing: false,
+    });
+    expect(pieces.map((piece) => piece.pauseAfter)).toEqual([
+      0.25, 0.25, 0.5, 0.25, 0,
+    ]);
   });
 
   it('breathes after an idea, thinks after a question, and scales both by style', () => {
@@ -168,7 +192,7 @@ describe('the pieces a page becomes', () => {
       landing: false,
     });
     expect(pieces.map((piece) => piece.speed)).toEqual([0.9, 0.87, 0.9, 0.9]);
-    expect(pieces.map((piece) => piece.pauseAfter)).toEqual([0.6, 1, 1, 0]);
+    expect(pieces.map((piece) => piece.pauseAfter)).toEqual([0.35, 1, 1, 0]);
     expect(pieces[1].text).toBe(
       'Then [forty-five thousand](+1) were reported.',
     );
@@ -184,7 +208,7 @@ describe('the pieces a page becomes', () => {
       midChapter: true,
       landing: true,
     });
-    expect(pieces.map((piece) => piece.pauseAfter)).toEqual([0.6, 0.8, 0]);
+    expect(pieces.map((piece) => piece.pauseAfter)).toEqual([0.35, 0.8, 0]);
     expect(pieces.map((piece) => piece.speed)).toEqual([0.9, 0.9, 0.87]);
   });
 

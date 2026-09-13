@@ -847,7 +847,12 @@ describe('LectureChapterProcessor', () => {
     llm.lectureSegment = (input) => {
       seen += 1;
       stricts.push(Boolean(input.strict));
-      if (seen < 3) return Promise.resolve(draft('UNGROUNDED invention'));
+      if (seen < 3)
+        return Promise.resolve(
+          draft(
+            'Inflation is the idea this chapter turns on. UNGROUNDED invention.',
+          ),
+        );
       return inner.lectureSegment(input);
     };
 
@@ -1207,7 +1212,9 @@ describe('LectureChapterProcessor', () => {
     llm.lectureSegment = (input) => {
       corrections.push(input.correction);
       return Promise.resolve(
-        draft('The money supply grew 4096 percent after 1913.'),
+        draft(
+          'Inflation is the idea this chapter turns on. The money supply grew 4096 percent after 1913.',
+        ),
       );
     };
 
@@ -1382,7 +1389,7 @@ describe('LectureChapterProcessor', () => {
     expect(row.moveOffsets).toHaveLength(2);
     expect(row.moveOffsets![0]).toBe(0);
     expect(row.scriptText!.slice(row.moveOffsets![1])).toMatch(
-      /^(?:\[write 1\] )?Then the mechanism\./,
+      /^(?:\[write 1\] )?Then the mechanism on this page\./,
     );
   });
 
@@ -1420,7 +1427,9 @@ describe('LectureChapterProcessor', () => {
   });
 
   it('lets the gentle style end on a second telling, and holds the others to landing', async () => {
-    const recap = 'Prices rise. In summary, easy money lifts prices.';
+    // The chapter's term said with its meaning, so only the ending is judged.
+    const recap =
+      'Inflation is the idea this chapter turns on. Prices rise. In summary, easy money lifts prices.';
     const run = async (style: LectureStyle) => {
       const f = fakes({ 1: REAL_PAGE }, [TOPIC], [style]);
       const llm = withoutBoard(new FakeLlmAdapter());

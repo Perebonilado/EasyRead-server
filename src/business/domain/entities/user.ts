@@ -15,6 +15,8 @@ export interface UserProps {
   tokenVersion: number;
   deletedAt: Date | null;
   createdAt: Date;
+  /** The platform role; `admin` runs the schools. */
+  role: 'learner' | 'admin';
 }
 
 /**
@@ -38,6 +40,9 @@ export class User {
   }
   get isVerified() {
     return this.props.emailVerifiedAt !== null;
+  }
+  get isAdmin() {
+    return this.props.role === 'admin';
   }
 
   /**

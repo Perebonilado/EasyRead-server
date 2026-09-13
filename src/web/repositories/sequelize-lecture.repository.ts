@@ -1,4 +1,5 @@
 import { Injectable } from '@nestjs/common';
+import { Op } from 'sequelize';
 import { InjectModel } from '@nestjs/sequelize';
 import type {
   BoardStatus,
@@ -16,6 +17,7 @@ import type {
 } from '../../business/repositories/lecture.repository';
 import { playOrder } from '../../business/domain/lecture';
 import {
+  LectureListenModel,
   LecturePlanModel,
   LecturePositionModel,
   LectureSegmentModel,
@@ -51,6 +53,7 @@ const toSegment = (row: LectureSegmentModel): LectureSegmentRecord => ({
   style: row.style,
   kind: row.kind ?? 'page',
   status: row.status,
+  error: row.error ?? null,
   updatedAt: toDate(row.get('updatedAt')),
   scriptText: row.scriptText,
   audioKey: row.audioKey,
@@ -59,6 +62,8 @@ const toSegment = (row: LectureSegmentModel): LectureSegmentRecord => ({
   attempts: row.attempts,
   moveOffsets: row.moveOffsets ?? null,
   sectionTags: row.sectionTags ?? null,
+  emphasis: row.emphasis ?? null,
+  untaught: row.untaught ?? null,
   board: row.board ?? null,
   wordTimes: row.wordTimes ?? null,
   boardStatus: row.boardStatus ?? 'none',
@@ -75,6 +80,8 @@ export class SequelizeLectureRepository implements LectureRepository {
     private readonly segments: typeof LectureSegmentModel,
     @InjectModel(LecturePositionModel)
     private readonly positions: typeof LecturePositionModel,
+    @InjectModel(LectureListenModel)
+    private readonly listens: typeof LectureListenModel,
   ) {}
 
   async savePlan(input: {
@@ -237,17 +244,22 @@ export class SequelizeLectureRepository implements LectureRepository {
       moveOffsets: number[];
       durationMs: number | null;
       sectionTags?: unknown;
+      emphasis?: string[] | null;
+      untaught?: number[] | null;
+      status?: 'voicing' | 'scripted';
     },
   ): Promise<void> {
     await this.segments.update(
       {
-        status: 'voicing',
+        status: input.status ?? 'voicing',
         scriptText: input.scriptText,
         moveOffsets: input.moveOffsets,
         durationMs: input.durationMs,
         ...(input.sectionTags !== undefined
           ? { sectionTags: input.sectionTags }
           : {}),
+        ...(input.emphasis !== undefined ? { emphasis: input.emphasis } : {}),
+        ...(input.untaught !== undefined ? { untaught: input.untaught } : {}),
         error: null,
       },
       { where: whereKey(input) },
@@ -347,6 +359,93 @@ export class SequelizeLectureRepository implements LectureRepository {
     );
   }
 
+  async resetUntaughtSegments(
+    documentId: string,
+    contentVersion: number,
+    topicIds: string[],
+    style: LectureStyle,
+  ): Promise<void> {
+    if (!topicIds.length) return;
+    await this.segments.update(
+      {
+        status: 'pending',
+        scriptText: null,
+        error: null,
+      },
+      {
+        where: {
+          documentId,
+          contentVersion,
+          topicId: topicIds,
+          style,
+          untaught: { [Op.ne]: null },
+        } as never,
+      },
+    );
+  }
+
+  async listShortSegments(): Promise<
+    {
+      documentId: string;
+      contentVersion: number;
+      topicId: string;
+      style: LectureStyle;
+    }[]
+  > {
+    const rows = await this.segments.findAll({
+      attributes: [
+        'documentId',
+        'contentVersion',
+        'topicId',
+        'style',
+        'untaught',
+      ],
+      where: {
+        kind: 'page',
+        untaught: { [Op.ne]: null },
+        scriptText: { [Op.ne]: null },
+      } as never,
+      raw: true,
+    });
+    const seen = new Set<string>();
+    const out: {
+      documentId: string;
+      contentVersion: number;
+      topicId: string;
+      style: LectureStyle;
+    }[] = [];
+    for (const row of rows) {
+      if (
+        !row.topicId ||
+        !Array.isArray(row.untaught) ||
+        !row.untaught.length
+      ) {
+        continue;
+      }
+      const key = `${row.documentId}:${row.contentVersion}:${row.topicId}:${row.style}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      out.push({
+        documentId: row.documentId,
+        contentVersion: row.contentVersion,
+        topicId: row.topicId,
+        style: row.style,
+      });
+    }
+    return out;
+  }
+
+  async resetAudio(
+    documentId: string,
+    contentVersion: number,
+  ): Promise<number> {
+    const [count] = await this.segments.update(
+      { status: 'scripted' },
+      { where: { documentId, contentVersion, status: 'done' } },
+    );
+    return count;
+  }
+
   async clear(documentId: string, style?: LectureStyle): Promise<void> {
     if (style) {
       // One style goes; the plan is shared by the others and stays.
@@ -366,6 +465,18 @@ export class SequelizeLectureRepository implements LectureRepository {
   }): Promise<void> {
     const where = { userId: input.userId, documentId: input.documentId };
     const existing = await this.positions.findOne({ where });
+    // How far a learner gets, kept as they go: one row each time their
+    // place moves to another page, so the share of chapters played to the
+    // end can be read later.
+    if (!existing || existing.pageNumber !== input.pageNumber) {
+      await this.listens.create({
+        id: newId(),
+        userId: input.userId,
+        documentId: input.documentId,
+        pageNumber: input.pageNumber,
+        style: input.style,
+      });
+    }
     if (existing) {
       await existing.update({
         pageNumber: input.pageNumber,

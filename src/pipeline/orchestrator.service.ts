@@ -1,6 +1,10 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import type { Level, PipelineStep } from '../contracts';
+import { LECTURE_STYLE_KEYS } from '../contracts';
 import { EVENT_BUS, JOB_QUEUE } from '../business/ports/tokens';
+import { GenerateLectureHandler } from '../business/handlers/documents/lecture.handlers';
+import { PronunciationSeeder } from '../business/handlers/institutions/pronunciation.handlers';
+import type { LectureRepository } from '../business/repositories/lecture.repository';
 import type { EventBusPort } from '../business/ports/event-bus.port';
 import type { JobQueuePort } from '../business/ports/job-queue.port';
 import {
@@ -8,6 +12,7 @@ import {
   DOCUMENT_REPOSITORY,
   PIPELINE_RUN_REPOSITORY,
   SIMPLIFIED_PAGE_REPOSITORY,
+  LECTURE_REPOSITORY,
 } from '../business/repositories/tokens';
 import type { DocumentPageRepository } from '../business/repositories/document-page.repository';
 import type { DocumentRepository } from '../business/repositories/document.repository';
@@ -40,6 +45,9 @@ export class PipelineOrchestrator {
     private readonly pages: DocumentPageRepository,
     @Inject(JOB_QUEUE) private readonly queue: JobQueuePort,
     @Inject(EVENT_BUS) private readonly events: EventBusPort,
+    @Inject(LECTURE_REPOSITORY) private readonly lectures: LectureRepository,
+    private readonly generate: GenerateLectureHandler,
+    private readonly pronunciations: PronunciationSeeder,
   ) {}
 
   /** Entry point: called the moment the client confirms the bytes landed. */
@@ -173,22 +181,69 @@ export class PipelineOrchestrator {
    */
   async markReadyIfComplete(documentId: string): Promise<void> {
     const doc = await this.documents.findById(documentId);
-    if (!doc || doc.props.status === 'ready') return;
+    if (!doc) return;
 
-    const required: PipelineStep[] = [
-      'convert',
-      'extract',
-      'summarize',
-      'simplify_standard',
-    ];
-    if (!(await this.runs.allDone(documentId, required))) return;
+    if (doc.props.status !== 'ready') {
+      const required: PipelineStep[] = [
+        'convert',
+        'extract',
+        'summarize',
+        'simplify_standard',
+      ];
+      if (!(await this.runs.allDone(documentId, required))) return;
 
-    doc.markReady();
-    await this.documents.save(doc);
-    await this.events.publish(documentId, {
-      type: 'document.status',
-      status: 'ready',
-    });
+      doc.markReady();
+      await this.documents.save(doc);
+      await this.events.publish(documentId, {
+        type: 'document.status',
+        status: 'ready',
+      });
+    }
+
+    await this.catalogueScripts(doc);
+  }
+
+  /**
+   * A school's document has its lecture written and voiced the moment its
+   * text is ready and its chapters are cut, in every style, without a
+   * button: an upload comes out the other end ready to play. Reached from
+   * both the last text page and the chapters step, whichever lands second.
+   * Once the rows exist it is done; anything missing after that is
+   * Prepare's to ask for.
+   */
+  private async catalogueScripts(doc: {
+    id: string;
+    contentVersion: number;
+    userId: string;
+    props: {
+      institutionId: string | null;
+      departmentId?: string | null;
+      status: string;
+    };
+  }): Promise<void> {
+    if (!doc.props.institutionId || doc.props.status !== 'ready') return;
+    if ((await this.runs.status(doc.id, 'topics')) !== 'done') return;
+    const rows = await this.lectures.listSegments(doc.id, doc.contentVersion);
+    if (rows.length) return;
+
+    // The words the voice may get wrong, proposed for the admin to hear
+    // before the audio is made; never blocks the lecture.
+    await this.pronunciations.seed(doc);
+
+    for (const style of LECTURE_STYLE_KEYS) {
+      try {
+        await this.generate.handle({
+          userId: doc.userId,
+          documentId: doc.id,
+          style,
+          asAdmin: true,
+        });
+      } catch (error) {
+        this.logger.warn(
+          `${doc.id} ${style}: scripts not queued at upload: ${(error as Error).message}`,
+        );
+      }
+    }
   }
 
   /** A failed step fails the document, with the step named for the UI. */

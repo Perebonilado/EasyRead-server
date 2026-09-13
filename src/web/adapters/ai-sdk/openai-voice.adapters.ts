@@ -25,6 +25,13 @@ export class OpenAiSpeechAdapter implements SpeechPort {
 
   constructor(private readonly config: ConfigService) {}
 
+  label(): { model: string; voice: string } {
+    return {
+      model: this.config.get<string>('AI_TTS_MODEL', 'gpt-4o-mini-tts'),
+      voice: this.config.get<string>('AI_TTS_VOICE', 'alloy'),
+    };
+  }
+
   async synthesize({
     text,
     voice,

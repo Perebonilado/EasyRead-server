@@ -2,7 +2,10 @@ import { Inject, Injectable } from '@nestjs/common';
 import type { PipelineStep } from '../../contracts';
 import { EVENT_BUS, PDF_TOOLKIT, STORAGE } from '../../business/ports/tokens';
 import type { EventBusPort } from '../../business/ports/event-bus.port';
-import type { PdfToolkitPort } from '../../business/ports/pdf-toolkit.port';
+import type {
+  ExtractedPage,
+  PdfToolkitPort,
+} from '../../business/ports/pdf-toolkit.port';
 import type { StoragePort } from '../../business/ports/storage.port';
 import {
   DOCUMENT_PAGE_REPOSITORY,
@@ -15,9 +18,14 @@ import { newId } from '../../web/database/uuid';
 import type { DocumentPageRepository } from '../../business/repositories/document-page.repository';
 import type { DocumentRepository } from '../../business/repositories/document.repository';
 import type { PipelineRunRepository } from '../../business/repositories/misc.repository';
+import { cleanExtractedText } from '../../business/domain/text';
 import { PipelineOrchestrator } from '../orchestrator.service';
 import type { BaseJobData } from '../queues';
+import { readSlideTexts } from '../slides';
 import { BasePipelineProcessor, type JobContext } from './base.processor';
+
+const SLIDE_DECK =
+  'application/vnd.openxmlformats-officedocument.presentationml.presentation';
 
 /**
  * Pulls per-page text out of the canonical PDF (§4.3).
@@ -61,7 +69,10 @@ export class ExtractProcessor extends BasePipelineProcessor<BaseJobData> {
       if (!ref) throw new Error('No canonical PDF to extract from');
 
       const bytes = await this.storage.get(ref);
-      const extracted = await this.pdf.extractPages(bytes);
+      const extracted = await this.withCleanText(
+        doc,
+        await this.pdf.extractPages(bytes),
+      );
       await this.pages.replaceAll(doc.id, extracted);
 
       // Figures ride beside the text. Uploaded documents only: imports
@@ -105,6 +116,47 @@ export class ExtractProcessor extends BasePipelineProcessor<BaseJobData> {
       }
       throw error;
     }
+  }
+
+  /**
+   * The page text as the writer should see it. A slide deck is read from
+   * the deck itself, one slide to one page, wherever the slide has words;
+   * the PDF's text stands in for a slide without them, and for everything
+   * that is not a deck. Symbol-font bullets and lost dashes are tidied on
+   * every page. A deck whose slide count does not match the PDF's pages is
+   * left to the PDF entirely rather than risk every page being off by one.
+   */
+  private async withCleanText(
+    doc: {
+      id: string;
+      props: { sourceMimeType: string; originalFileRef: string | null };
+    },
+    extracted: ExtractedPage[],
+  ): Promise<ExtractedPage[]> {
+    let slides: string[] | null = null;
+    if (doc.props.sourceMimeType === SLIDE_DECK && doc.props.originalFileRef) {
+      try {
+        slides = readSlideTexts(
+          await this.storage.get(doc.props.originalFileRef),
+        );
+      } catch (error) {
+        this.logger.warn(
+          `${doc.id}: could not read the slide deck, keeping the PDF's text: ${(error as Error).message}`,
+        );
+      }
+      if (slides && slides.length !== extracted.length) {
+        this.logger.warn(
+          `${doc.id}: the deck has ${slides.length} slides and the PDF ${extracted.length} pages; keeping the PDF's text`,
+        );
+        slides = null;
+      }
+    }
+    return extracted.map((page, index) => {
+      const fromSlide = slides?.[index]?.trim();
+      const text = cleanExtractedText(fromSlide || page.text);
+      const charCount = text.replace(/\s/g, '').length;
+      return { ...page, text, charCount, isEmpty: page.isEmpty && !fromSlide };
+    });
   }
 
   /**

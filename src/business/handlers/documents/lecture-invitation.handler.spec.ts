@@ -8,6 +8,7 @@ describe('LectureInvitationHandler', () => {
     const spoken: string[] = [];
     const handler = new LectureInvitationHandler(
       {
+        label: () => ({ model: 'fake-tts', voice: 'alloy' }),
         synthesize: (input: { text: string; voice?: string }) => {
           spoken.push(`${input.voice}:${input.text}`);
           return Promise.resolve({

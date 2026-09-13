@@ -29,6 +29,58 @@ export class SequelizeDocumentRepository implements DocumentRepository {
     return rows.map(toDocument);
   }
 
+  async findByHash(
+    institutionId: string,
+    contentHash: string,
+  ): Promise<Document | null> {
+    const row = await this.model.findOne({
+      where: { institutionId, contentHash, deletedAt: { [Op.is]: null } },
+    });
+    return row ? toDocument(row) : null;
+  }
+
+  async listByCourse(courseId: string): Promise<Document[]> {
+    const rows = await this.model.findAll({
+      where: { courseId, deletedAt: { [Op.is]: null } },
+      order: [
+        ['orderIndex', 'ASC'],
+        ['createdAt', 'ASC'],
+      ],
+    });
+    return rows.map(toDocument);
+  }
+
+  async listByPlacement(input: {
+    institutionId: string;
+    departmentId?: string | null;
+    levelId?: string | null;
+  }): Promise<Document[]> {
+    const rows = await this.model.findAll({
+      where: {
+        institutionId: input.institutionId,
+        deletedAt: { [Op.is]: null },
+        ...(input.departmentId ? { departmentId: input.departmentId } : {}),
+        ...(input.levelId ? { levelId: input.levelId } : {}),
+      },
+      order: [
+        ['orderIndex', 'ASC'],
+        ['createdAt', 'ASC'],
+      ],
+    });
+    return rows.map(toDocument);
+  }
+
+  async listByInstitution(institutionId: string): Promise<Document[]> {
+    const rows = await this.model.findAll({
+      where: { institutionId, deletedAt: { [Op.is]: null } },
+      order: [
+        ['orderIndex', 'ASC'],
+        ['createdAt', 'ASC'],
+      ],
+    });
+    return rows.map(toDocument);
+  }
+
   async create(input: CreateDocumentInput): Promise<Document> {
     const row = await this.model.create({
       id: newId(),
@@ -55,6 +107,12 @@ export class SequelizeDocumentRepository implements DocumentRepository {
         brief: p.brief,
         importManifest: p.importManifest,
         deletedAt: p.deletedAt,
+        institutionId: p.institutionId,
+        departmentId: p.departmentId,
+        levelId: p.levelId,
+        courseId: p.courseId,
+        contentHash: p.contentHash,
+        orderIndex: p.orderIndex,
       },
       { where: { id: p.id } },
     );

@@ -1,4 +1,8 @@
-import { passwordResetEmail, verificationEmail } from './email-templates';
+import {
+  passwordResetEmail,
+  schoolCodeEmail,
+  verificationEmail,
+} from './email-templates';
 
 const URL = 'https://easyread.app/verify?token=abc123';
 
@@ -48,5 +52,18 @@ describe('email templates', () => {
     expect(verificationEmail({ name: '  ', url: URL }).html).toContain(
       'Welcome, there.',
     );
+  });
+
+  it('the school code email carries the code, the school and the ten minute window, with nothing to click', () => {
+    const email = schoolCodeEmail({
+      name: 'Aline Uwase',
+      school: 'university of rwanda',
+      code: '004242',
+    });
+    expect(email.subject).toBe('Your code for university of rwanda');
+    expect(email.html).toContain('004242');
+    expect(email.text).toContain('004242');
+    expect(email.text).toContain('ten minutes');
+    expect(email.html).not.toContain('href=');
   });
 });

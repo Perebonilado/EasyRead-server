@@ -88,6 +88,10 @@ export interface GenerateLectureRequest extends LectureRequest {
    * current generator. The one way an existing lecture picks up new rules.
    */
   rewrite?: boolean;
+  /** The platform admin preparing a school's document: no plan gate applies. */
+  asAdmin?: boolean;
+  /** False: the words only, no audio asked for. Prepare asks for the audio later. */
+  voice?: boolean;
   /**
    * A learner switched style here, mid-chapter: this page and the rest of
    * its chapter are written first, before anything else.
@@ -295,16 +299,25 @@ export class LectureStatusHandler extends AbstractRequestHandlerTemplate<
         topicId: topic.id,
         title: topic.title,
         segments: [],
-        ...(plan?.map ? { map: plan.map } : {}),
+        ...(plan?.points?.length ? { points: plan.points } : {}),
       });
     }
 
     for (const segment of segments) {
       const entry = segment.topicId ? byTopic.get(segment.topicId) : undefined;
+      const point = segment.topicId
+        ? (
+            plans.find(
+              (record) =>
+                record.topicId === segment.topicId && record.status === 'done',
+            )?.plan as LecturePlan | null | undefined
+          )?.beats.find((beat) => beat.pageNumber === segment.pageNumber)?.point
+        : undefined;
       entry?.segments.push({
         pageNumber: segment.pageNumber,
         kind: segment.kind,
         status: effectiveStatus(segment),
+        ...(point !== undefined ? { point } : {}),
         durationMs: segment.durationMs,
         bridge: segment.bridge,
         moveOffsets: segment.moveOffsets ?? [],
@@ -389,128 +402,6 @@ export class SetLectureStyleHandler extends AbstractRequestHandlerTemplate<
   }
 }
 
-export interface LectureMapsRequest extends LectureRequest {
-  /** The learner's page; the chapter they are in, and the next when the runway reaches it, get their maps. Omitted means every chapter. */
-  aheadOfPage?: number;
-}
-
-/**
- * Maps for chapters prepared before the map existed. A chapter's map row
- * is seeded at its first page, pending, and the chapter's job is queued
- * again: it finds its pages written and writes only the map. Only for the
- * chapter the learner is in, and the next when the runway rule would
- * prepare it, so a learner starting a session pays for what they will
- * hear.
- */
-@Injectable()
-export class LectureMapsHandler extends AbstractRequestHandlerTemplate<
-  LectureMapsRequest,
-  LectureStatusResponse
-> {
-  constructor(
-    @Inject(TOPIC_REPOSITORY) private readonly topics: TopicRepository,
-    @Inject(LECTURE_REPOSITORY) private readonly lectures: LectureRepository,
-    @Inject(JOB_QUEUE) private readonly queue: JobQueuePort,
-    private readonly access: DocumentAccessService,
-    private readonly status: LectureStatusHandler,
-  ) {
-    super();
-  }
-
-  protected async handleRequest(cmd: LectureMapsRequest) {
-    const doc = await this.access.require(cmd.documentId, cmd.userId);
-    const position = await this.lectures.findPosition(cmd.userId, doc.id);
-    const style = cmd.style ?? position?.style ?? DEFAULT_LECTURE_STYLE;
-    const rows = await this.lectures.listSegments(
-      doc.id,
-      doc.contentVersion,
-      style,
-    );
-    const topics = await this.topics.listByDocument(doc.id);
-    const from = cmd.aheadOfPage ?? null;
-    // The same runway the pages follow: this chapter, and the next only
-    // when the pages left in this one are few.
-    const reach =
-      from === null
-        ? null
-        : new Set(
-            chaptersAhead({
-              topics: topics.map((topic) => ({
-                id: topic.id,
-                startPage: topic.startPage,
-                endPage: topic.endPage,
-              })),
-              pageCount: doc.props.pageCount ?? topics.at(-1)?.endPage ?? 0,
-              page: from,
-              written: new Set(),
-            }).map((row) => row.topicId),
-          );
-    const plans = await this.lectures.listPlans(doc.id, doc.contentVersion);
-    const outlined = new Set(
-      plans
-        .filter((record) => (record.plan as LecturePlan | null)?.map)
-        .map((record) => record.topicId),
-    );
-    const wanted = topics.filter((topic) => {
-      const pages = rows.filter(
-        (row) => row.topicId === topic.id && row.kind === 'page',
-      );
-      if (!pages.length || pages.every((row) => row.bridge)) return false;
-      const hasRow = rows.some(
-        (row) => row.topicId === topic.id && row.kind === 'map',
-      );
-      // A map written before the outline existed is written again.
-      if (hasRow && outlined.has(topic.id)) return false;
-      return reach === null || reach.has(topic.id);
-    });
-    if (wanted.length) {
-      for (const topic of wanted) {
-        if (
-          rows.some((row) => row.topicId === topic.id && row.kind === 'map')
-        ) {
-          await this.lectures.removeSegments(
-            doc.id,
-            doc.contentVersion,
-            style,
-            'map',
-            topic.id,
-          );
-        }
-      }
-      await this.lectures.seedSegments({
-        documentId: doc.id,
-        contentVersion: doc.contentVersion,
-        generatorVersion: LECTURE_GENERATOR_VERSION,
-        segments: wanted.map((topic) => {
-          const first = rows
-            .filter((row) => row.topicId === topic.id && row.kind === 'page')
-            .sort((a, b) => a.seq - b.seq)[0];
-          return {
-            topicId: topic.id,
-            pageNumber: first.pageNumber,
-            seq: first.seq,
-            bridge: false,
-            style,
-            kind: 'map' as const,
-          };
-        }),
-      });
-      await this.queue.enqueueLectureChapters(
-        wanted.map((topic, index) => ({
-          documentId: doc.id,
-          contentVersion: doc.contentVersion,
-          topicId: topic.id,
-          orderIndex: topic.orderIndex,
-          style,
-          priority: index + 1,
-        })),
-      );
-    }
-    const { data } = await this.status.handle({ ...cmd, style });
-    return CommandResponse.of(data);
-  }
-}
-
 /**
  * Starts writing a document's lecture.
  *
@@ -541,8 +432,9 @@ export class GenerateLectureHandler extends AbstractRequestHandlerTemplate<
     const doc = await this.access.require(cmd.documentId, cmd.userId);
 
     // Writing a lecture is a page's worth of model calls per page, so it
-    // sits behind the same daily study gate as generating a test.
-    await this.entitlements.assertStudyTime(cmd.userId);
+    // sits behind the same daily study gate as generating a test. The
+    // admin preparing a school's catalogue is the platform, not a learner.
+    if (!cmd.asAdmin) await this.entitlements.assertStudyTime(cmd.userId);
 
     const topics = await this.topics.listByDocument(doc.id);
     const pageCount = doc.props.pageCount;
@@ -677,17 +569,28 @@ export class GenerateLectureHandler extends AbstractRequestHandlerTemplate<
       doc.contentVersion,
       style,
     );
+    // A page that left paragraphs untaught after its attempts is written
+    // again too: its words go, its row goes back to pending, and the
+    // chapter job finds it unwritten.
+    const short = (row: { untaught?: number[] | null }) =>
+      (row.untaught?.length ?? 0) > 0;
     const retry = [...owning].filter((topicId) => {
       const rows = existing.filter((row) => row.topicId === topicId);
       // A row lost in flight (its worker died) counts as failed here, so
       // the chapter can be asked for again instead of waiting forever.
       return (
-        rows.some((row) => effectiveStatus(row) === 'failed') &&
+        rows.some((row) => effectiveStatus(row) === 'failed' || short(row)) &&
         !rows.some((row) => IN_FLIGHT.has(effectiveStatus(row)))
       );
     });
     if (retry.length) {
       await this.lectures.resetFailedSegments(
+        doc.id,
+        doc.contentVersion,
+        retry,
+        style,
+      );
+      await this.lectures.resetUntaughtSegments(
         doc.id,
         doc.contentVersion,
         retry,
@@ -716,6 +619,7 @@ export class GenerateLectureHandler extends AbstractRequestHandlerTemplate<
           ...(priorityOf.has(topic.id)
             ? { priority: priorityOf.get(topic.id) }
             : {}),
+          ...(cmd.voice === false ? { voice: false } : {}),
         })),
     );
 

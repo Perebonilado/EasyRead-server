@@ -207,13 +207,19 @@ describe('structured-output schemas', () => {
       skip: null,
       moves: ['the problem', 'the mechanism'],
       moveBlocks: null,
+      skipBlocks: null,
       pitfall: null,
       turn: false,
+      handoff: null,
+      point: 0,
+      ask: null,
       figure: { kind: 'none', shows: null },
     };
     const plan = (weight: string) => ({
       hook: 'h',
+      points: ['the one point'],
       arc: 'a',
+      thread: 'a request that arrives when the bucket is empty',
       payoff: 'p',
       terms: [],
       problem: null,
@@ -242,7 +248,9 @@ describe('structured-output schemas', () => {
   it('lectureOutlineSchema wants one to four moves per beat', () => {
     const plan = (moves: string[]) => ({
       hook: 'h',
+      points: ['the one point'],
       arc: 'a',
+      thread: 'a request that arrives when the bucket is empty',
       payoff: 'p',
       terms: [],
       problem: null,
@@ -257,8 +265,12 @@ describe('structured-output schemas', () => {
           weight: 'full',
           moves,
           moveBlocks: null,
+          skipBlocks: null,
           pitfall: null,
           turn: false,
+          handoff: null,
+          point: 0,
+          ask: null,
           figure: { kind: 'none', shows: null },
         },
       ],
@@ -281,13 +293,19 @@ describe('structured-output schemas', () => {
       weight: 'full',
       moves: ['m'],
       moveBlocks: null,
+      skipBlocks: null,
       pitfall: 'Mixing up the rate and the total',
       turn: true,
+      handoff: null,
+      point: 0,
+      ask: null,
       figure: { kind: 'process', shows: 'the bucket refilling' },
     };
     const plan = {
       hook: 'h',
+      points: ['the one point'],
       arc: 'a',
+      thread: 'a request that arrives when the bucket is empty',
       payoff: 'p',
       terms: [{ term: 'Refill rate', meaning: 'how fast tokens come back' }],
       problem: 'How do you stop a burst without stopping everyone?',
@@ -303,12 +321,29 @@ describe('structured-output schemas', () => {
         beats: [{ ...beat, turn: 'yes' }],
       }).success,
     ).toBe(false);
+    // Up to twelve terms, every one the pages carry; thirteen is too many.
     expect(
       lectureOutlineSchema.safeParse({
         ...plan,
-        terms: Array.from({ length: 9 }, () => plan.terms[0]),
+        terms: Array.from({ length: 12 }, () => plan.terms[0]),
+      }).success,
+    ).toBe(true);
+    expect(
+      lectureOutlineSchema.safeParse({
+        ...plan,
+        terms: Array.from({ length: 13 }, () => plan.terms[0]),
       }).success,
     ).toBe(false);
+    // The thread and a hand-off shape are part of the plan now.
+    expect(
+      lectureOutlineSchema.safeParse({ ...plan, thread: undefined }).success,
+    ).toBe(false);
+    expect(
+      lectureOutlineSchema.safeParse({
+        ...plan,
+        beats: [{ ...beat, handoff: 'So what empties the bucket?' }],
+      }).success,
+    ).toBe(true);
   });
 
   it('lectureExtraSchema is one script, never empty', () => {
@@ -323,8 +358,13 @@ describe('structured-output schemas', () => {
     expect(
       lectureSegmentSchema.safeParse({
         sections: [
-          { move: 0, text: 'The problem.', teaches: ['1.0'] },
-          { move: 1, text: '[write 1] The mechanism.', teaches: [] },
+          { move: 0, text: 'The problem.', catch: null, teaches: ['1.0'] },
+          {
+            move: 1,
+            text: '[write 1] The mechanism.',
+            catch: null,
+            teaches: [],
+          },
         ],
       }).success,
     ).toBe(true);

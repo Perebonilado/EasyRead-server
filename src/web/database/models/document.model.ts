@@ -85,6 +85,25 @@ export class DocumentModel extends BaseModel {
   @Column({ type: DataType.DATE, allowNull: true })
   declare deletedAt: Date | null;
 
+  /** Set on a document a school shares with its members; null on a personal one. */
+  @Column({ type: DataType.UUID, allowNull: true })
+  declare institutionId: string | null;
+
+  @Column({ type: DataType.UUID, allowNull: true })
+  declare courseId: string | null;
+
+  @Column({ type: DataType.UUID, allowNull: true })
+  declare departmentId: string | null;
+
+  @Column({ type: DataType.UUID, allowNull: true })
+  declare levelId: string | null;
+
+  @Column({ type: DataType.CHAR(64), allowNull: true })
+  declare contentHash: string | null;
+
+  @Column({ type: DataType.INTEGER, allowNull: false, defaultValue: 0 })
+  declare orderIndex: number;
+
   @HasMany(() => DocumentPageModel)
   declare pages?: DocumentPageModel[];
 

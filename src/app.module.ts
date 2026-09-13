@@ -14,6 +14,12 @@ import {
 } from './business/handlers/billing/start-checkout.handler';
 import { HandleWebhookHandler } from './business/handlers/billing/handle-webhook.handler';
 import {
+  CancelSchoolPassHandler,
+  ResumeSchoolPassHandler,
+  StartSchoolPassCheckoutHandler,
+} from './business/handlers/billing/school-pass.handlers';
+import { SetSchoolFreeUntilHandler } from './business/handlers/institutions/school-free-until.handler';
+import {
   CancelSubscriptionHandler,
   ChangeIntervalHandler,
   OpenBillingPortalHandler,
@@ -68,7 +74,6 @@ import {
   LectureStatusHandler,
   SaveLecturePositionHandler,
   SetLectureStyleHandler,
-  LectureMapsHandler,
 } from './business/handlers/documents/lecture.handlers';
 import {
   GetMasteryHandler,
@@ -161,11 +166,67 @@ import { TutorsController } from './web/controllers/tutors.controller';
 import { LectureController } from './web/controllers/lecture.controller';
 import { VoiceController } from './web/controllers/voice.controller';
 import { GuidedController } from './web/controllers/guided.controller';
+import { InstitutionsController } from './web/controllers/institutions.controller';
+import { AdminInstitutionsController } from './web/controllers/admin-institutions.controller';
+import { AdminMaterialsController } from './web/controllers/admin-materials.controller';
+import { AdminPronunciationsController } from './web/controllers/admin-pronunciations.controller';
+import { PronunciationHandlers } from './business/handlers/institutions/pronunciation.handlers';
+import {
+  AdminUploadIntentHandler,
+  MoveMaterialHandler,
+  RemoveMaterialHandler,
+  PrepareMaterialsHandler,
+} from './business/handlers/institutions/materials.handlers';
+import { MaterialsQuery } from './query/materials.query';
+import { CatalogueQuery } from './query/catalogue.query';
+import {
+  CreateInstitutionHandler,
+  DeleteCourseHandler,
+  DeleteDepartmentHandler,
+  DeleteLevelHandler,
+  InstitutionDetailHandler,
+  InstitutionPublicHandler,
+  JoinInstitutionHandler,
+  LeaveInstitutionHandler,
+  ListPublicInstitutionsHandler,
+  StartSchoolVerificationHandler,
+  ListInstitutionsHandler,
+  SaveCourseHandler,
+  SaveDepartmentHandler,
+  SaveLevelHandler,
+  SetMembershipHandler,
+  UpdateInstitutionHandler,
+} from './business/handlers/institutions/institution.handlers';
 import { DomainExceptionFilter } from './web/filters/domain-exception.filter';
 import { AuthGuard } from './web/security/auth.guard';
 
 const handlers = [
   RegisterHandler,
+  CreateInstitutionHandler,
+  DeleteCourseHandler,
+  DeleteDepartmentHandler,
+  DeleteLevelHandler,
+  InstitutionDetailHandler,
+  InstitutionPublicHandler,
+  JoinInstitutionHandler,
+  LeaveInstitutionHandler,
+  ListPublicInstitutionsHandler,
+  StartSchoolVerificationHandler,
+  ListInstitutionsHandler,
+  SaveCourseHandler,
+  SaveDepartmentHandler,
+  SaveLevelHandler,
+  SetMembershipHandler,
+  UpdateInstitutionHandler,
+  AdminUploadIntentHandler,
+  MoveMaterialHandler,
+  RemoveMaterialHandler,
+  SetSchoolFreeUntilHandler,
+  StartSchoolPassCheckoutHandler,
+  CancelSchoolPassHandler,
+  ResumeSchoolPassHandler,
+  PronunciationHandlers,
+  PrepareMaterialsHandler,
   CreateGroupHandler,
   JoinGroupHandler,
   ListGroupsHandler,
@@ -219,7 +280,6 @@ const handlers = [
   BackfillBoardsHandler,
   SaveLecturePositionHandler,
   SetLectureStyleHandler,
-  LectureMapsHandler,
   DrawDiagramHandler,
   BoardDiagramHandler,
   BookFindHandler,
@@ -264,6 +324,8 @@ const handlers = [
 ];
 
 const queries = [
+  MaterialsQuery,
+  CatalogueQuery,
   DocumentListQuery,
   DocumentDetailQuery,
   ReaderQuery,
@@ -309,6 +371,10 @@ const queries = [
     VoiceController,
     LectureController,
     GuidedController,
+    InstitutionsController,
+    AdminInstitutionsController,
+    AdminMaterialsController,
+    AdminPronunciationsController,
     TutorsController,
     EventsController,
     HealthController,

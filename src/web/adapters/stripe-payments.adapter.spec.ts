@@ -16,6 +16,7 @@ const VALUES: Record<string, string> = {
   STRIPE_WEBHOOK_SECRET: SECRET,
   STRIPE_PRICE_MONTHLY: 'price_monthly',
   STRIPE_PRICE_YEARLY: 'price_yearly',
+  STRIPE_PRICE_SCHOOL_YEARLY: 'price_school',
   STRIPE_PRICE_MIN30: 'price_min30',
   STRIPE_PRICE_MIN90: 'price_min90',
   STRIPE_PRICE_MIN220: 'price_min220',
@@ -103,6 +104,28 @@ describe('StripePaymentsAdapter.verifyAndParseWebhook', () => {
       (await adapter.verifyAndParseWebhook(Buffer.from(body), sign(body))) ??
       [];
     expect(event?.subscription?.interval).toBe('yearly');
+  });
+
+  it('reads the school price as a school pass, yearly, with its school', async () => {
+    const body = subscriptionEvent({
+      metadata: { userId: 'user-123', product: 'school', institutionId: 'ur' },
+      items: { data: [{ id: 'si_01', price: { id: 'price_school' } }] },
+    });
+    const [event] =
+      (await adapter.verifyAndParseWebhook(Buffer.from(body), sign(body))) ??
+      [];
+    expect(event?.subscription?.product).toBe('school');
+    expect(event?.subscription?.institutionId).toBe('ur');
+    expect(event?.subscription?.interval).toBe('yearly');
+  });
+
+  it('reads a Pro price as Pro, with no school', async () => {
+    const body = subscriptionEvent();
+    const [event] =
+      (await adapter.verifyAndParseWebhook(Buffer.from(body), sign(body))) ??
+      [];
+    expect(event?.subscription?.product).toBe('pro');
+    expect(event?.subscription?.institutionId).toBeNull();
   });
 
   it('treats a scheduled cancellation as cancelling, not cancelled', async () => {

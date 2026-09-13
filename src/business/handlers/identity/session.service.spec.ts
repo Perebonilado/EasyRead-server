@@ -75,6 +75,7 @@ class FakeRefreshTokens implements RefreshTokenRepository {
 
 const userProps = (): UserProps => ({
   id: 'u1',
+  role: 'learner',
   email: 'reader@easyread.test',
   passwordHash: 'hashed',
   googleId: null,

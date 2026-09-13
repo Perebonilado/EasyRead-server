@@ -3,6 +3,9 @@ import { InjectModel } from '@nestjs/sequelize';
 import { QueryTypes } from 'sequelize';
 import type { PlanCode } from '../../contracts';
 import type {
+  SchoolPassRecord,
+  SchoolPassRepository,
+  SchoolPassSubscription,
   SubscriptionRecord,
   SubscriptionRepository,
   UsageRepository,
@@ -11,6 +14,7 @@ import type {
 } from '../../business/repositories/billing.repository';
 import type { UsageMetric } from '../../business/domain/values';
 import {
+  SchoolPassModel,
   SubscriptionModel,
   UsageCounterModel,
   VoiceCreditModel,
@@ -88,6 +92,88 @@ export class SequelizeSubscriptionRepository implements SubscriptionRepository {
       await this.model.create({
         id: newId(),
         userId: record.userId,
+        ...values,
+      });
+    return true;
+  }
+}
+
+@Injectable()
+export class SequelizeSchoolPassRepository implements SchoolPassRepository {
+  constructor(
+    @InjectModel(SchoolPassModel)
+    private readonly model: typeof SchoolPassModel,
+  ) {}
+
+  private toRecord(row: SchoolPassModel): SchoolPassRecord {
+    return {
+      userId: row.userId,
+      institutionId: row.institutionId,
+      provider: row.provider,
+      providerSubscriptionId: row.providerSubscriptionId,
+      providerCustomerId: row.providerCustomerId,
+      status: row.status,
+      currentPeriodEnd: row.currentPeriodEnd,
+      cancelAtPeriodEnd: row.cancelAtPeriodEnd,
+      lastEventAt: row.lastEventAt,
+    };
+  }
+
+  async findByUser(
+    userId: string,
+    institutionId: string,
+  ): Promise<SchoolPassRecord | null> {
+    const row = await this.model.findOne({ where: { userId, institutionId } });
+    return row ? this.toRecord(row) : null;
+  }
+
+  async findAnyByUser(userId: string): Promise<SchoolPassRecord | null> {
+    const row = await this.model.findOne({
+      where: { userId },
+      order: [['updatedAt', 'DESC']],
+    });
+    return row ? this.toRecord(row) : null;
+  }
+
+  async findByProviderSubscriptionId(
+    id: string,
+  ): Promise<SchoolPassRecord | null> {
+    const row = await this.model.findOne({
+      where: { providerSubscriptionId: id },
+    });
+    return row ? this.toRecord(row) : null;
+  }
+
+  async upsert(
+    record: SchoolPassSubscription & { raw?: unknown },
+  ): Promise<boolean> {
+    const existing = await this.model.findOne({
+      where: { userId: record.userId, institutionId: record.institutionId },
+    });
+    // The same rule as a subscription: a late event never undoes a newer one.
+    if (
+      existing?.lastEventAt &&
+      record.lastEventAt &&
+      record.lastEventAt < existing.lastEventAt
+    ) {
+      return false;
+    }
+    const values = {
+      provider: record.provider,
+      providerSubscriptionId: record.providerSubscriptionId,
+      providerCustomerId: record.providerCustomerId,
+      status: record.status,
+      currentPeriodEnd: record.currentPeriodEnd,
+      cancelAtPeriodEnd: record.cancelAtPeriodEnd,
+      raw: record.raw ?? existing?.raw ?? null,
+      lastEventAt: record.lastEventAt ?? existing?.lastEventAt ?? null,
+    };
+    if (existing) await existing.update(values);
+    else
+      await this.model.create({
+        id: newId(),
+        userId: record.userId,
+        institutionId: record.institutionId,
         ...values,
       });
     return true;

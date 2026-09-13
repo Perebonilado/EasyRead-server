@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
 import { Injectable, Logger } from '@nestjs/common';
+import type { PDFPageProxy } from 'pdfjs-dist';
 import { EMPTY_PAGE_CHAR_THRESHOLD } from '../../business/domain/values';
 import type {
   ExtractedFigure,
@@ -73,9 +74,24 @@ export class PdfjsToolkitAdapter implements PdfToolkitPort {
     const doc = await this.load(pdf);
     const pages: ExtractedPage[] = [];
 
+    let unreadable = 0;
     for (let pageNumber = 1; pageNumber <= doc.numPages; pageNumber++) {
-      const page = await doc.getPage(pageNumber);
-      const content = await page.getTextContent();
+      // A page the library cannot hand over, a broken page tree, a count
+      // that overstates the pages, is an empty page, not a failed book:
+      // the reader still opens it and the rest is read as normal.
+      let page: PDFPageProxy;
+      let content: Awaited<ReturnType<PDFPageProxy['getTextContent']>>;
+      try {
+        page = await doc.getPage(pageNumber);
+        content = await page.getTextContent();
+      } catch (error) {
+        unreadable += 1;
+        this.logger.warn(
+          `page ${pageNumber} of ${doc.numPages} could not be read: ${(error as Error).message}`,
+        );
+        pages.push({ pageNumber, text: '', charCount: 0, isEmpty: true });
+        continue;
+      }
 
       // Group runs onto lines by baseline, and restore the spaces pdf.js drops
       // between runs by looking at the horizontal gap.
@@ -128,6 +144,9 @@ export class PdfjsToolkitAdapter implements PdfToolkitPort {
     }
 
     await doc.destroy();
+    if (unreadable && unreadable === pages.length) {
+      throw new Error('None of the pages could be read');
+    }
     return pages;
   }
 

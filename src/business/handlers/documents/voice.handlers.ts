@@ -1690,13 +1690,14 @@ export class GenerateTopicQuizHandler extends AbstractRequestHandlerTemplate<
     private readonly simplified: SimplifiedPageRepository,
     @Inject(SUMMARY_REPOSITORY) private readonly summaries: SummaryRepository,
     @Inject(AI_CALL_LOG_REPOSITORY) private readonly calls: AiCallLogRepository,
+    @Inject(LECTURE_REPOSITORY) private readonly lectures: LectureRepository,
     private readonly access: DocumentAccessService,
   ) {
     super();
   }
 
   protected async handleRequest(cmd: TopicQuizRequest) {
-    await this.access.require(cmd.documentId, cmd.userId);
+    const doc = await this.access.require(cmd.documentId, cmd.userId);
 
     const topics = await this.topics.listWithReadState(
       cmd.documentId,
@@ -1724,7 +1725,15 @@ export class GenerateTopicQuizHandler extends AbstractRequestHandlerTemplate<
     }
 
     const summary = await this.summaries.find(cmd.documentId);
+    // The chapter's points from its lecture plan, when written: the check
+    // asks about those and nothing else.
+    const plan = (
+      await this.lectures.listPlans(doc.id, doc.contentVersion)
+    ).find((record) => record.topicId === topic.id && record.status === 'done')
+      ?.plan as { points?: string[] } | null | undefined;
+    const points = plan?.points?.length ? plan.points : undefined;
     const result = await this.llm.generateTopicQuiz({
+      ...(points ? { points } : {}),
       topicTitle: topic.title,
       pagesText,
       summary,

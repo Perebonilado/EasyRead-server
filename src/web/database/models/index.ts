@@ -1,4 +1,13 @@
 export { AiCallLogModel } from './ai-call-log.model';
+export {
+  InstitutionModel,
+  DepartmentModel,
+  LevelModel,
+  CourseModel,
+  InstitutionMemberModel,
+  InstitutionJoinCodeModel,
+  PronunciationModel,
+} from './institution.model';
 export { AssessmentEventModel } from './assessment-event.model';
 export { ItemModel } from './item.model';
 export { ItemReviewModel } from './item-review.model';
@@ -26,9 +35,11 @@ export {
   LecturePlanModel,
   LecturePositionModel,
   LectureSegmentModel,
+  LectureListenModel,
 } from './lecture.model';
 export { SimplifiedPageModel } from './simplified-page.model';
 export { SubscriptionModel } from './subscription.model';
+export { SchoolPassModel } from './school-pass.model';
 export { TopicReadStateModel } from './topic-read-state.model';
 export { TopicModel } from './topic.model';
 export { UsageCounterModel } from './usage-counter.model';
@@ -42,6 +53,15 @@ export {
 export { WebhookEventModel } from './webhook-event.model';
 
 import { AiCallLogModel } from './ai-call-log.model';
+import {
+  InstitutionModel,
+  DepartmentModel,
+  LevelModel,
+  CourseModel,
+  InstitutionMemberModel,
+  InstitutionJoinCodeModel,
+  PronunciationModel,
+} from './institution.model';
 import { AssessmentEventModel } from './assessment-event.model';
 import { ItemModel } from './item.model';
 import { ItemReviewModel } from './item-review.model';
@@ -69,9 +89,11 @@ import {
   LecturePlanModel,
   LecturePositionModel,
   LectureSegmentModel,
+  LectureListenModel,
 } from './lecture.model';
 import { SimplifiedPageModel } from './simplified-page.model';
 import { SubscriptionModel } from './subscription.model';
+import { SchoolPassModel } from './school-pass.model';
 import { TopicReadStateModel } from './topic-read-state.model';
 import { TopicModel } from './topic.model';
 import { UsageCounterModel } from './usage-counter.model';
@@ -92,6 +114,7 @@ export const ALL_MODELS = [
   StudySessionModel,
   RefreshTokenModel,
   SubscriptionModel,
+  SchoolPassModel,
   UsageCounterModel,
   VoiceCreditModel,
   WebhookEventModel,
@@ -101,6 +124,7 @@ export const ALL_MODELS = [
   LecturePlanModel,
   LecturePositionModel,
   LectureSegmentModel,
+  LectureListenModel,
   SimplifiedPageModel,
   TopicModel,
   TopicReadStateModel,
@@ -110,6 +134,13 @@ export const ALL_MODELS = [
   PipelineRunModel,
   DocumentChunkModel,
   AiCallLogModel,
+  InstitutionModel,
+  DepartmentModel,
+  LevelModel,
+  CourseModel,
+  InstitutionMemberModel,
+  InstitutionJoinCodeModel,
+  PronunciationModel,
   AssessmentEventModel,
   ItemModel,
   ItemReviewModel,

@@ -346,9 +346,15 @@ describe('AiSdkLlmAdapter', () => {
         {
           move: 0,
           text: 'Because they guess, and they are usually right.',
+          catch: null,
           teaches: [],
         },
-        { move: 1, text: 'Eviction is the guess made visible.', teaches: [] },
+        {
+          move: 1,
+          text: 'Eviction is the guess made visible.',
+          catch: null,
+          teaches: [],
+        },
       ],
     });
 
@@ -366,8 +372,10 @@ describe('AiSdkLlmAdapter', () => {
         moves: ['why caches guess', 'what eviction is'],
         pitfall: null,
         turn: false,
+        ask: null,
       },
       problem: null,
+      previousPayoff: null,
       pageIndex: 0,
       pageCount: 3,
       style: 'brisk',
@@ -413,7 +421,9 @@ describe('AiSdkLlmAdapter', () => {
     // The planned board goes to the writer numbered, with its move.
     expect(prompt).toContain('1. (move 0) eviction: a guess thrown away');
     expect(prompt).not.toContain('TERM eviction');
-    expect(prompt).toContain('said word for word as its own sentence');
+    expect(prompt).toContain(
+      'as the first words of the sentence that explains it',
+    );
     expect(prompt).toContain('Already taught in this lecture');
     expect(prompt).toContain('Still to come in this chapter');
     expect(prompt).toContain('list of 5 items');
@@ -423,9 +433,11 @@ describe('AiSdkLlmAdapter', () => {
     mock.reply({
       hook: 'A cache is not a faster database.',
       arc: 'From a guess to a bet',
+      thread: 'A request that misses the cache.',
       payoff: 'You can size a cache.',
       terms: [{ term: 'Eviction', meaning: 'throwing a guess away' }],
       problem: 'Why do caches lie?',
+      points: ['You can size a cache.'],
       beats: [
         {
           pageNumber: 1,
@@ -437,8 +449,12 @@ describe('AiSdkLlmAdapter', () => {
           weight: 'full',
           moves: ['the guess', 'the bet'],
           moveBlocks: null,
+          skipBlocks: null,
           pitfall: null,
           turn: true,
+          handoff: null,
+          point: 0,
+          ask: null,
           figure: { kind: 'none', shows: null },
         },
       ],
@@ -456,6 +472,7 @@ describe('AiSdkLlmAdapter', () => {
         example: 'A lock is not a wall. It is a promise.',
       },
       taughtEarlier: ['You can drain a queue.'],
+      course: null,
       correction: 'The hook opens with "Imagine", which is a banned opener',
     });
 
@@ -525,36 +542,6 @@ describe('AiSdkLlmAdapter', () => {
     expect(prompt).toContain('What the listener can now do');
     expect(prompt).toContain('60 to 170 words');
     expect(prompt).not.toContain('last listened');
-  });
-
-  it('asks the map for an outline the learner reads and the script that speaks it', async () => {
-    mock.reply({
-      about: 'How keys find servers.',
-      stops: [
-        { name: 'The ring', line: 'Keys and servers on one circle.' },
-        { name: 'Virtual nodes', line: 'Each server takes many spots.' },
-      ],
-      landing: 'You can place a key.',
-      script: 'Before we go in, here is the shape of this chapter.',
-    });
-    const result = await adapter.lectureExtra({
-      kind: 'map',
-      topicTitle: 'Consistent hashing',
-      style: 'steady',
-      styleDirection: 'Steady.',
-      terms: [],
-      taught: ['The ring', 'Virtual nodes'],
-      payoff: 'You can place a key.',
-      arc: 'How keys find servers.',
-      daysAway: null,
-      budget: { min: 60, max: 150 },
-    });
-    expect(result.value.map?.stops).toHaveLength(2);
-    expect(result.value.script).toMatch(/shape of this chapter/);
-    const prompt = JSON.stringify(mock.calls[0].body.messages);
-    expect(prompt).toContain('MAP for the chapter');
-    expect(prompt).toContain('group these into the stops');
-    expect(prompt).toContain('Where the chapter ends');
   });
 
   it('writes a mixed check when asked for spoken kinds and choices, and shapes each for the sheet', async () => {
@@ -649,6 +636,7 @@ describe('AiSdkLlmAdapter', () => {
         {
           move: 0,
           text: 'Why do caches lie? Because they guess.',
+          catch: null,
           teaches: [],
         },
       ],
@@ -668,8 +656,10 @@ describe('AiSdkLlmAdapter', () => {
         moves: ['the guess'],
         pitfall: 'Thinking eviction means the data was wrong',
         turn: true,
+        ask: null,
       },
       problem: 'How can a cache be fast and still right?',
+      previousPayoff: null,
       pageIndex: 0,
       pageCount: 4,
       style: 'brisk',
@@ -694,7 +684,12 @@ describe('AiSdkLlmAdapter', () => {
     expect(prompt).toContain('Thinking eviction means the data was wrong');
     expect(prompt).toContain("chapter's TURN");
     expect(prompt).toContain('[pause]');
-    expect(prompt).toContain('Open on the problem this chapter answers');
+    // The quick learner's chapter begins on its first idea: no problem
+    // line, no hook, no join to the last chapter.
+    expect(prompt).toContain(
+      "Begin on the page's first idea in your first sentence",
+    );
+    expect(prompt).not.toContain('Open on the problem');
     expect(prompt).toContain('page 1 of 4 in the chapter');
     // A brisk page is not told to restate; only a gentle one hears that.
     expect(prompt).not.toContain('restate the idea fully');
@@ -714,10 +709,13 @@ describe('AiSdkLlmAdapter', () => {
         weight: 'full' as const,
         moves: ['m'],
         moveBlocks: null,
+        skipBlocks: null,
         pitfall: null,
         turn: false,
+        ask: null,
       },
       problem: null,
+      previousPayoff: null,
       style: 'gentle' as const,
       styleDirection: 'Small steps.',
       budget: { min: 180, max: 300 },
@@ -735,14 +733,14 @@ describe('AiSdkLlmAdapter', () => {
       board: null,
     };
     mock.reply({
-      sections: [{ move: 0, text: 'Early.', teaches: [] }],
+      sections: [{ move: 0, text: 'Early.', catch: null, teaches: [] }],
     });
     await adapter.lectureSegment({ ...base, pageIndex: 1, pageCount: 6 });
     expect(JSON.stringify(mock.calls[0].body.messages)).toContain(
       'restate the idea fully',
     );
     mock.reply({
-      sections: [{ move: 0, text: 'Late.', teaches: [] }],
+      sections: [{ move: 0, text: 'Late.', catch: null, teaches: [] }],
     });
     await adapter.lectureSegment({ ...base, pageIndex: 5, pageCount: 6 });
     expect(JSON.stringify(mock.calls[1].body.messages)).toContain(

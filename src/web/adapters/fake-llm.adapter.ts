@@ -79,6 +79,20 @@ export class FakeLlmAdapter implements LlmGatewayPort {
     };
   }
 
+  async pronunciations(input: {
+    subject: string;
+    terms: string[];
+  }): Promise<LlmResult<{ term: string; spoken: string }[]>> {
+    const started = Date.now();
+    return {
+      value: input.terms.map((term) => ({
+        term,
+        spoken: term.toLowerCase().split('').join('-'),
+      })),
+      usage: this.usage(started, input.terms.join(' ').length, 20),
+    };
+  }
+
   async outlineTopics({
     digest,
     pageCount,
@@ -144,12 +158,18 @@ export class FakeLlmAdapter implements LlmGatewayPort {
       value: {
         hook: `Why ${input.topicTitle} matters.`,
         arc: `From the start of ${input.topicTitle} to its consequence.`,
+        thread: `A student meeting ${input.topicTitle} for the first time.`,
         payoff: `You can now explain ${input.topicTitle}.`,
         terms: [
           { term: input.topicTitle, meaning: 'the idea this chapter turns on' },
         ],
         problem: `What does ${input.topicTitle} solve?`,
+        points: input.pages
+          .slice(0, 3)
+          .map((page) => `Point of page ${page.pageNumber}`),
         beats: input.pages.map((page, index) => ({
+          point: Math.min(index, 2),
+          ask: null,
           pageNumber: page.pageNumber,
           goal: `Teach page ${page.pageNumber}.`,
           callback: input.priorTopics[0] ?? null,
@@ -159,10 +179,15 @@ export class FakeLlmAdapter implements LlmGatewayPort {
           weight: 'full' as const,
           moves: [`Teach page ${page.pageNumber}`],
           moveBlocks: [[0]],
+          skipBlocks: null,
           pitfall: null,
           // The last page: a prediction is only possible once something
           // has been heard, and earlier pages' tails stay plain words.
           turn: index === input.pages.length - 1,
+          handoff:
+            index < input.pages.length - 1
+              ? `What follows from page ${page.pageNumber}?`
+              : null,
           figure: { kind: 'none' as const, shows: null },
         })),
       },
@@ -230,16 +255,20 @@ export class FakeLlmAdapter implements LlmGatewayPort {
       input.pageText.includes('UNGROUNDED') && !input.correction
         ? ' UNGROUNDED'
         : '';
-    const lead = input.prevTail ? 'Carrying on. ' : '';
+    // Mid-chapter, a page joins itself to the last one, as the rule asks.
+    const lead = input.isFirstOfTopic ? '' : 'Because of that, ';
     // The chapter's turn: a prediction asked for, a silence, the answer.
     const turn =
       input.beat.turn && !input.bridge
         ? ' What happens next?\n[pause]\nThe page tells you.'
         : '';
     const closing = `${turn}${input.isLastOfTopic ? ' And that is the whole idea.' : ''}`;
+    // The page's goal first, then the chapter's term with its meaning in
+    // the same breath, the page's own words, and a last sentence the next
+    // section can open on: what the real writer is held to.
     const body = input.bridge
       ? 'Nothing to linger on here.'
-      : `${input.beat.goal} ${input.pageText.slice(0, 120)}`;
+      : `${input.beat.goal} ${input.topicTitle} is the idea this chapter turns on. ${input.pageText.slice(0, 120)} That is this page.`;
     // One section per move, so a multi-move plan is honoured the way the
     // processor expects; the first carries the page, the rest name their
     // move, and the closing lands on the last.
@@ -249,7 +278,7 @@ export class FakeLlmAdapter implements LlmGatewayPort {
       const text =
         index === 0
           ? `${lead}${body}${last ? closing : ''}${offending}`
-          : `Then ${move.toLowerCase()}.${last ? closing : ''}`;
+          : `Then ${move.toLowerCase()} on this page.${last ? closing : ''}`;
       // The board: every line given for this move is written as the
       // section opens, marked the way the writer marks it.
       const marks = (input.board?.lines ?? [])
@@ -262,6 +291,7 @@ export class FakeLlmAdapter implements LlmGatewayPort {
         move: index,
         text: `${marks}${text.trim()}`,
         teaches: index === 0 && input.noteAddressed ? ['0.0'] : [],
+        catch: null,
       };
     });
     return {
@@ -308,47 +338,17 @@ export class FakeLlmAdapter implements LlmGatewayPort {
 
   /** A deterministic extra: its kind and the lines it was built from. */
   async lectureExtra(input: {
-    kind: 'map' | 'terms' | 'check' | 'review';
+    kind: 'terms' | 'check' | 'review';
     topicTitle: string;
     style: 'gentle' | 'steady' | 'brisk';
     styleDirection: string;
     terms: { term: string; meaning: string }[];
     taught: string[];
     payoff: string | null;
-    arc?: string | null;
     daysAway: number | null;
     budget: { min: number; max: number };
-  }): Promise<
-    LlmResult<{
-      script: string;
-      map?: {
-        about: string;
-        stops: { name: string; line: string }[];
-        landing: string;
-      };
-    }>
-  > {
+  }): Promise<LlmResult<{ script: string }>> {
     const started = Date.now();
-    if (input.kind === 'map') {
-      const stops = input.taught.slice(0, 4).map((line, index) => ({
-        name: `Stop ${index + 1}`,
-        line: line.replace(/\.$/, ''),
-      }));
-      const script = `Here is the shape of ${input.topicTitle}. ${input.arc ?? ''} ${stops
-        .map((stop) => `${stop.name}: ${stop.line}.`)
-        .join(' ')}${input.payoff ? ` By the end, ${input.payoff}` : ''}`;
-      return {
-        value: {
-          script,
-          map: {
-            about: input.arc ?? `What ${input.topicTitle} is for.`,
-            stops,
-            landing: input.payoff ?? 'You will know the shape of it.',
-          },
-        },
-        usage: this.usage(started, 200, 120),
-      };
-    }
     const script =
       input.kind === 'terms'
         ? `Words you will hear in ${input.topicTitle}. ${input.terms

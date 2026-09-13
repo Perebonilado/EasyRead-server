@@ -33,7 +33,6 @@ import {
   lectureSketchSchema,
   sketchJudgeSchema,
   lectureExtraSchema,
-  lectureMapSchema,
   spokenQuizSchema,
   lectureOutlineSchema,
   lectureSegmentSchema,
@@ -49,6 +48,7 @@ import {
   prerequisitesSchema,
   recapSchema,
   topicsSchema,
+  pronunciationsSchema,
 } from './schemas';
 
 /**
@@ -146,6 +146,26 @@ export class AiSdkLlmAdapter implements LlmGatewayPort, OnModuleInit {
     };
   }
 
+  async pronunciations(input: {
+    subject: string;
+    terms: string[];
+  }): Promise<LlmResult<{ term: string; spoken: string }[]>> {
+    const started = Date.now();
+    const { generateObject } = await this.registry.modules();
+    const { model, ref } = await this.registry.languageModel('topics_outline');
+    const result = await generateObject({
+      model,
+      schema: pronunciationsSchema,
+      system: PROMPTS.pronunciations(input.subject),
+      prompt: input.terms.join('\n'),
+      maxRetries: this.maxRetries(),
+    });
+    return {
+      value: result.object.entries,
+      usage: this.usage(ref, result.usage, started),
+    };
+  }
+
   async lectureOutline(input: {
     title: string;
     topicTitle: string;
@@ -154,6 +174,7 @@ export class AiSdkLlmAdapter implements LlmGatewayPort, OnModuleInit {
     priorOpenings: string[];
     suggestedShape: { name: string; direction: string; example: string };
     taughtEarlier: string[];
+    course: { department: string; level: string | null } | null;
     correction?: string;
   }): Promise<LlmResult<LectureOutlineDraft>> {
     const started = Date.now();
@@ -172,6 +193,9 @@ export class AiSdkLlmAdapter implements LlmGatewayPort, OnModuleInit {
           : 'This is the first chapter of the document, so there is nothing earlier to call back to.',
         `Open with ${input.suggestedShape.name}: ${input.suggestedShape.direction}`,
         `An opening of this shape, from an unrelated subject: "${input.suggestedShape.example}". Match the move, not the words.`,
+        input.course
+          ? `The students are on ${input.course.department}${input.course.level ? `, ${input.course.level}` : ''}. The hook carries one line of where this chapter's idea meets their work: a use, never a story.`
+          : null,
         input.priorOpenings.length
           ? `Earlier chapters of this lecture opened like this. This one must open differently: a different shape, a different first word.\n- "${input.priorOpenings.join('"\n- "')}"`
           : null,
@@ -211,9 +235,15 @@ export class AiSdkLlmAdapter implements LlmGatewayPort, OnModuleInit {
       skip: string | null;
       weight: 'full' | 'light';
       moves: string[];
+      moveBlocks?: (number[] | null)[] | null;
       pitfall: string | null;
       turn: boolean;
+      ask: string | null;
     };
+    previousPayoff: string | null;
+    thread?: string | null;
+    answers?: string | null;
+    leaves?: string | null;
     problem: string | null;
     pageIndex: number;
     pageCount: number;
@@ -252,7 +282,9 @@ export class AiSdkLlmAdapter implements LlmGatewayPort, OnModuleInit {
     const place = input.opening
       ? `The chapter has just opened with these exact words, which the listener has just heard: "${input.opening}". Do not repeat or rephrase them. Carry straight on into the first idea.`
       : input.isFirstOfTopic
-        ? `This is the OPENING of the chapter. Open it yourself in one or two sentences that make this hook's point without its words, then get into the first idea. The hook: ${input.hook}`
+        ? input.style === 'brisk'
+          ? "This is the first page of the chapter. Begin on the page's first idea in your first sentence: no opening, no scene, no promise of what is coming, no line about the last chapter."
+          : `This is the OPENING of the chapter. Open it yourself in one or two sentences that make this hook's point without its words, then get into the first idea. The hook: ${input.hook}`
         : input.prevTail
           ? `You are mid-chapter. The last thing you said was:\n"${input.prevTail}"\nCarry straight on from it.`
           : 'You are mid-chapter. Carry on with the chapter without greeting the student or starting it over.';
@@ -263,12 +295,19 @@ export class AiSdkLlmAdapter implements LlmGatewayPort, OnModuleInit {
         : `The page carries a list of ${input.list.items} items. Do not read it out. Give the count, the two or three that carry the weight, and where the rest sit.`
       : null;
 
+    // The paragraphs each move must say, when the plan numbered them: a
+    // list of nine functions is nine things to say, not one.
+    const paragraphsOf = (index: number): string => {
+      const blocks = input.beat.moveBlocks?.[index];
+      if (!blocks?.length) return '';
+      return ` (teaches paragraphs ${blocks.join(', ')}, each in your own words, a sentence or two each)`;
+    };
     const moves =
       input.beat.moves.length > 1
         ? `Write one section per move, in this order, each with its move number:\n${input.beat.moves
-            .map((move, index) => `${index}: ${move}`)
+            .map((move, index) => `${index}: ${move}${paragraphsOf(index)}`)
             .join('\n')}`
-        : `This page has one move: ${input.beat.moves[0] ?? input.beat.goal}. Return one section, move 0.`;
+        : `This page has one move: ${input.beat.moves[0] ?? input.beat.goal}${paragraphsOf(0)}. Return one section, move 0.`;
 
     const result = await generateObject({
       model,
@@ -287,17 +326,38 @@ export class AiSdkLlmAdapter implements LlmGatewayPort, OnModuleInit {
           : null,
         moves,
         `HOW TO TEACH IT (the ${input.style} style): ${input.styleDirection}`,
+        input.thread
+          ? `The chapter follows one case: ${input.thread}. Return to it where this page turns or gives its example, not in every sentence.`
+          : null,
+        'Talk with them, not at them: point at what the page gives ("look at", "notice"), say once what they are probably thinking, one small reaction, "we" only as the two of you, and never "note that", "it is important" or "this highlights".',
         input.pageCount > 1
           ? `This is page ${input.pageIndex + 1} of ${input.pageCount} in the chapter${input.style === 'gentle' ? ((input.pageIndex + 1) * 2 <= input.pageCount ? ': an early page, so restate the idea fully' : ': a late page, so restate in a clause at most') : ''}.`
           : null,
         input.beat.pitfall
           ? `PITFALL, the mistake a student is most likely to make here: ${input.beat.pitfall}. Say the trap and why the idea avoids it, in a sentence.`
           : null,
+        input.beat.ask && !input.bridge
+          ? `ASK: before the page answers it, put this question to the listener, then [pause] on its own line, then answer it from the page: ${input.beat.ask}`
+          : null,
+        !input.isFirstOfTopic && !input.bridge && input.answers
+          ? `ANSWER: the last page left this open: "${input.answers}". Your first sentence answers it${input.style === 'brisk' ? ', in a clause' : ''}, carrying a word from it; no summary of the last page.`
+          : null,
+        !input.isFirstOfTopic && !input.bridge && !input.answers
+          ? input.style === 'brisk'
+            ? 'JOIN: if the last thing said leads here, hang your first words on it, a few at most, as its consequence, its contrast or the next step; otherwise begin on the idea. No summary of it.'
+            : 'JOIN: your first sentence hangs on the last thing said, as its consequence, its contrast or the next step: one clause, never a summary of it.'
+          : null,
+        input.leaves && !input.bridge
+          ? `LEAVE OPEN: end on the question the next page answers, in the listener's words${input.style === 'brisk' ? ', a few words' : ''}: "${input.leaves}". A question, never a preview.`
+          : null,
+        input.isFirstOfTopic &&
+        input.previousPayoff &&
+        !input.bridge &&
+        input.style !== 'brisk'
+          ? `After the opening, one line that joins this chapter to where the last one landed: "${input.previousPayoff}". One line, then on.`
+          : null,
         input.beat.turn && !input.bridge
           ? "This page carries the chapter's TURN: at the moment the listener could predict what comes next, ask them to, put [pause] on its own line, then give the answer from the page."
-          : null,
-        input.problem && input.style === 'brisk' && !input.opening
-          ? `Open on the problem this chapter answers, in one line, before the principle: ${input.problem}`
           : null,
         input.bridge
           ? 'This page carries almost nothing: a figure or a divider. Say ONE short sentence that carries the student across it, and nothing more.'
@@ -316,19 +376,21 @@ export class AiSdkLlmAdapter implements LlmGatewayPort, OnModuleInit {
           ? `Plant this for later, in one line: ${input.beat.foreshadow}`
           : null,
         input.isLastOfTopic
-          ? `This is the END of the chapter. Land this payoff in one sentence, in your own words, then stop. No summary, no preview of the next chapter. The payoff: ${input.payoff ?? 'the idea this chapter turned on'}`
+          ? input.style === 'brisk'
+            ? 'This is the last page of the chapter. Teach it and stop on its last idea: no landing line, no summary, no sign-off, no preview of the next chapter.'
+            : `This is the END of the chapter. Land this payoff in one sentence, in your own words, then stop. No summary, no preview of the next chapter. The payoff: ${input.payoff ?? 'the idea this chapter turned on'}`
           : null,
         input.correction
           ? `Your previous attempt was rejected for going beyond the page: ${input.correction}. Rewrite it using ONLY what the page below supports.`
           : null,
         input.styleCorrection
-          ? `Your previous attempt was rejected for how it read: ${input.styleCorrection}. Rewrite it fixing exactly that, and keep every fact.`
+          ? `Your previous attempt was sent back: ${input.styleCorrection}. Rewrite it fixing exactly that: add what it says is missing, keep every fact that was right, and change nothing else.`
           : null,
         input.strict
-          ? 'STRICT: this page has been rejected twice for leaving the page. Teach only what is written on the page below, in its own terms. No hook, no callback, no foreshadowing, no claims about why it matters beyond what the page itself says, and no number or name the page does not state.'
+          ? 'STRICT: this page has been rejected twice for leaving the page. Teach only what is written on the page below, in your own words, adding nothing the page does not say. No hook, no callback, no foreshadowing, no claims about why it matters beyond what the page itself says, and no number or name the page does not state. A number is said only if it appears on the page exactly as written, digit for digit; otherwise leave it out.'
           : null,
         input.board?.lines.length
-          ? `THE BOARD for this page, in writing order. You write every one of these lines, exactly once, in the section of its move: [write n], then the line said word for word as its own sentence, then its explanation in everyday words, for example: "[write 2] Refill rate: ten tokens a second. That means every second, ten more tokens arrive, whatever else is happening."\n${input.board.lines
+          ? `THE BOARD for this page, in writing order. You write every one of these lines, exactly once, in the section of its move: [write n], then the line's words in order as the first words of the sentence that explains it, for example: "[write 2] Refill rate, ten tokens a second, means every second ten more tokens arrive, whatever else is happening."\n${input.board.lines
               .map(
                 (line) =>
                   `${line.number}. (move ${line.move}) ${line.text}${line.meaning ? `: ${line.meaning}` : ''}`,
@@ -351,59 +413,19 @@ export class AiSdkLlmAdapter implements LlmGatewayPort, OnModuleInit {
   }
 
   async lectureExtra(input: {
-    kind: 'map' | 'terms' | 'check' | 'review';
+    kind: 'terms' | 'check' | 'review';
     topicTitle: string;
     style: 'gentle' | 'steady' | 'brisk';
     styleDirection: string;
     terms: { term: string; meaning: string }[];
     taught: string[];
     payoff: string | null;
-    arc?: string | null;
     daysAway: number | null;
     budget: { min: number; max: number };
-  }): Promise<
-    LlmResult<{
-      script: string;
-      map?: {
-        about: string;
-        stops: { name: string; line: string }[];
-        landing: string;
-      };
-    }>
-  > {
+  }): Promise<LlmResult<{ script: string }>> {
     const started = Date.now();
     const { generateObject } = await this.registry.modules();
     const { model, ref } = await this.registry.languageModel('lecture_segment');
-
-    // The map returns the outline the learner reads with the words that
-    // speak it; the other kinds return words alone.
-    if (input.kind === 'map') {
-      const outline = await generateObject({
-        model,
-        schema: lectureMapSchema,
-        system: PROMPTS.lectureExtra,
-        prompt: [
-          `Write the MAP for the chapter "${input.topicTitle}": the outline first, then the script that speaks it.`,
-          `The listener is a ${input.style === 'gentle' ? 'slow' : input.style === 'brisk' ? 'quick' : 'normal-paced'} learner. HOW TO SPEAK TO THEM: ${input.styleDirection}`,
-          `Script length: ${input.budget.min} to ${input.budget.max} words.`,
-          input.arc
-            ? `What the chapter is about, from its plan: ${input.arc}`
-            : null,
-          `What each page teaches, in order (group these into the stops; do not list them one by one):\n- ${input.taught.join('\n- ')}`,
-          input.payoff
-            ? `Where the chapter ends, what the listener will be able to do: ${input.payoff}`
-            : null,
-        ]
-          .filter(Boolean)
-          .join('\n'),
-        maxRetries: this.maxRetries(),
-      });
-      const { script, ...map } = outline.object;
-      return {
-        value: { script, map },
-        usage: this.usage(ref, outline.usage, started),
-      };
-    }
 
     const result = await generateObject({
       model,
@@ -1077,6 +1099,7 @@ export class AiSdkLlmAdapter implements LlmGatewayPort, OnModuleInit {
     pagesText: string;
     summary: string | null;
     focus?: string[];
+    points?: string[];
     kinds?: ('flashcard' | 'true_false' | 'mcq')[];
   }): Promise<
     LlmResult<{
@@ -1102,6 +1125,9 @@ export class AiSdkLlmAdapter implements LlmGatewayPort, OnModuleInit {
           input.summary ? `Document summary:\n${input.summary}` : null,
           `Chapter: ${input.topicTitle}`,
           `Kinds allowed: ${input.kinds.join(', ')}.`,
+          input.points?.length
+            ? `The chapter settles these points; every question is about one of them, still grounded only in the passages:\n- ${input.points.join('\n- ')}`
+            : null,
           input.focus?.length
             ? `Aim most of the items at these ideas, still grounded only in the passages:\n- ${input.focus.join('\n- ')}`
             : null,

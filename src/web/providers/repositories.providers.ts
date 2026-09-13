@@ -4,6 +4,8 @@ import {
   STRUGGLE_SIGNAL_REPOSITORY,
   PROFILE_CHANGE_REPOSITORY,
   AI_CALL_LOG_REPOSITORY,
+  INSTITUTION_REPOSITORY,
+  PRONUNCIATION_REPOSITORY,
   ASSESSMENT_REPOSITORY,
   ITEM_REPOSITORY,
   ITEM_REVIEW_REPOSITORY,
@@ -25,6 +27,7 @@ import {
   LECTURE_REPOSITORY,
   SIMPLIFIED_PAGE_REPOSITORY,
   SUBSCRIPTION_REPOSITORY,
+  SCHOOL_PASS_REPOSITORY,
   SUMMARY_REPOSITORY,
   TOPIC_REPOSITORY,
   USAGE_REPOSITORY,
@@ -33,6 +36,8 @@ import {
   WEBHOOK_EVENT_REPOSITORY,
 } from '../../business/repositories/tokens';
 import { SequelizeAiCallLogRepository } from '../repositories/sequelize-ai-call-log.repository';
+import { SequelizeInstitutionRepository } from '../repositories/sequelize-institution.repository';
+import { SequelizePronunciationRepository } from '../repositories/sequelize-pronunciation.repository';
 import { SequelizeStruggleSignalRepository } from '../repositories/sequelize-struggle.repository';
 import {
   SequelizeDocumentLearningStateRepository,
@@ -52,6 +57,7 @@ import { SequelizeTopicPreviewRepository } from '../repositories/sequelize-previ
 import { SequelizePageAssetRepository } from '../repositories/sequelize-page-asset.repository';
 import { SequelizeConceptRepository } from '../repositories/sequelize-concept.repository';
 import {
+  SequelizeSchoolPassRepository,
   SequelizeSubscriptionRepository,
   SequelizeUsageRepository,
   SequelizeVoiceCreditsRepository,
@@ -121,6 +127,7 @@ export const repositoryProviders: Provider[] = [
     provide: SUBSCRIPTION_REPOSITORY,
     useClass: SequelizeSubscriptionRepository,
   },
+  { provide: SCHOOL_PASS_REPOSITORY, useClass: SequelizeSchoolPassRepository },
   { provide: USAGE_REPOSITORY, useClass: SequelizeUsageRepository },
   {
     provide: VOICE_CREDITS_REPOSITORY,
@@ -131,6 +138,14 @@ export const repositoryProviders: Provider[] = [
     useClass: SequelizeWebhookEventRepository,
   },
   { provide: AI_CALL_LOG_REPOSITORY, useClass: SequelizeAiCallLogRepository },
+  {
+    provide: INSTITUTION_REPOSITORY,
+    useClass: SequelizeInstitutionRepository,
+  },
+  {
+    provide: PRONUNCIATION_REPOSITORY,
+    useClass: SequelizePronunciationRepository,
+  },
   { provide: ASSESSMENT_REPOSITORY, useClass: SequelizeAssessmentRepository },
   { provide: ITEM_REPOSITORY, useClass: SequelizeItemRepository },
   { provide: ITEM_REVIEW_REPOSITORY, useClass: SequelizeItemReviewRepository },

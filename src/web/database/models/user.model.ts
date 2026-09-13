@@ -42,6 +42,14 @@ export class UserModel extends BaseModel {
   @Column({ type: DataType.INTEGER, allowNull: false, defaultValue: 0 })
   declare tokenVersion: number;
 
+  /** The platform role: an admin runs the schools and their catalogues. */
+  @Column({
+    type: DataType.ENUM('learner', 'admin'),
+    allowNull: false,
+    defaultValue: 'learner',
+  })
+  declare role: 'learner' | 'admin';
+
   @Column({ type: DataType.DATE, allowNull: true })
   declare deletedAt: Date | null;
 

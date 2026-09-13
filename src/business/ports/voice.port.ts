@@ -17,7 +17,24 @@ export interface SpeechPort {
     instructions?: string;
     /** Playback rate for models that take a number instead (tts-1); 1 is natural. */
     speed?: number;
-  }): Promise<{ audio: Buffer; mimeType: string; model: string }>;
+    /**
+     * The same words as pieces, each at its own pace with a silence after
+     * it, for a voice that answers to pace and silence and not to a note
+     * (Kokoro). Ignored by the rest, which say `text`.
+     */
+    pieces?: { text: string; speed: number; pauseAfter: number }[];
+  }): Promise<{
+    audio: Buffer;
+    mimeType: string;
+    /** Provider and model, as the ledger names them: `openai:gpt-4o-mini-tts`, `modal:qwen3-tts-0.6b`. */
+    model: string;
+    /** Seconds of GPU the call took, for providers billed by the second; absent otherwise. */
+    gpuSeconds?: number;
+    /** The audio's true length as the service measured it; absent when it did not say. */
+    durationMs?: number;
+  }>;
+  /** What goes into a file's name so audio from one voice never overwrites another's. */
+  label(): { model: string; voice: string };
 }
 
 /**

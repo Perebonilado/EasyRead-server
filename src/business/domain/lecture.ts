@@ -14,14 +14,22 @@
 
 import type { LectureSegmentStatus } from '../../contracts';
 import { createHash } from 'node:crypto';
-import type { LectureStyle } from '../../contracts';
+import type { Block, LectureStyle } from '../../contracts';
+import {
+  contentBlocks,
+  contentWordsOf,
+  isFrontMatterPage,
+  repeatVerified,
+  stem,
+} from './coverage';
+import { EVERYDAY_WORDS } from './everyday-words';
 
 /**
  * The generator's identity, stamped on every row it writes and baked into
  * every audio key. Bumped whenever the prompts change enough that audio
  * made by the previous generator must not be served for a new script.
  */
-export const LECTURE_GENERATOR_VERSION = 'lecture-7';
+export const LECTURE_GENERATOR_VERSION = 'lecture-11';
 
 /** A page with fewer readable characters than this carries no lecture. */
 export const MIN_PAGE_CHARS = 120;
@@ -71,14 +79,35 @@ export const WORD_BUDGET: Record<
 export const DEFAULT_LECTURE_STYLE: LectureStyle = 'steady';
 
 /**
+ * A page with fewer words than this on it is narrated on the light budget
+ * whatever the plan says: a slide with a heading and three bullets does
+ * not carry two minutes of speech, and padding it costs money and sounds
+ * like padding.
+ */
+export const LIGHT_BELOW_WORDS = 120;
+
+/** The budget a page gets: the plan's, unless the page's own words are too few for it. */
+export function weightForPage(
+  planned: BeatWeight | undefined,
+  sourceWords: number,
+): BeatWeight {
+  if (sourceWords > 0 && sourceWords < LIGHT_BELOW_WORDS) return 'light';
+  return planned ?? 'full';
+}
+
+/**
  * What a row of the lecture is. A page is the lecture proper; the others
  * sit around a chapter: the words a slow learner hears before it, the
  * check of what stuck after it, and the review a returning learner hears
  * before carrying on. Play order within one page number follows KIND_RANK.
  */
-export type LectureExtraKind = 'map' | 'terms' | 'check' | 'review';
-/** A page, the second piece of a page voiced as two, or an extra. */
-export type SegmentKind = 'page' | 'part' | LectureExtraKind;
+export type LectureExtraKind = 'terms' | 'check' | 'review';
+/**
+ * A page, the second piece of a page voiced as two, or an extra. The map,
+ * a chapter's shape spoken before it, is no longer written or played; the
+ * kind stays known so rows from before still read.
+ */
+export type SegmentKind = 'page' | 'part' | 'map' | LectureExtraKind;
 export const SEGMENT_KINDS: SegmentKind[] = [
   'review',
   'map',
@@ -105,15 +134,14 @@ export function isSegmentKind(value: unknown): value is SegmentKind {
 /**
  * Which extras each style gets. No style opens with the words or ends with
  * the check any more: a lecture begins on its first page and ends on its
- * last. The kinds stay known so lectures written before this still read,
- * and the player skips them. The review, for a learner coming back, stays.
- * The map, the shape of the chapter in a minute, is written for every
- * style and played only when the lecture is interactive.
+ * last, and no chapter opens with its map. The kinds stay known so
+ * lectures written before this still read, and the player skips them. The
+ * review, for a learner coming back, stays.
  */
 export const EXTRAS_BY_STYLE: Record<LectureStyle, LectureExtraKind[]> = {
-  gentle: ['review', 'map'],
-  steady: ['review', 'map'],
-  brisk: ['map'],
+  gentle: ['review'],
+  steady: ['review'],
+  brisk: [],
 };
 
 /** Where a document's interactive choice came from, or that it was never made. */
@@ -152,9 +180,30 @@ export function chosenLectureStyle(
   return { style: null, source: 'none' };
 }
 
+/** How much a page's ceiling grows for every paragraph past the third, by style. */
+export const WORDS_PER_BLOCK: Record<LectureStyle, number> = {
+  gentle: 35,
+  steady: 25,
+  brisk: 15,
+};
+
+/**
+ * The budget a page gets, grown for the paragraphs it carries: a page of
+ * twelve paragraphs cannot give each one a sentence inside the budget of
+ * a page of three. The minimum stays; the ceiling grows.
+ */
+export function pageBudget(
+  style: LectureStyle,
+  weight: BeatWeight,
+  blocks: number,
+): WordBudget {
+  const base = WORD_BUDGET[style][weight];
+  const extra = Math.max(0, blocks - 3) * WORDS_PER_BLOCK[style];
+  return { min: base.min, max: base.max + extra, hard: base.hard + extra };
+}
+
 /** Spoken-word budgets for the extras; short by design. */
 export const EXTRA_BUDGET: Record<LectureExtraKind, WordBudget> = {
-  map: { min: 60, max: 150, hard: 190 },
   terms: { min: 40, max: 130, hard: 170 },
   check: { min: 60, max: 170, hard: 220 },
   review: { min: 50, max: 160, hard: 210 },
@@ -187,9 +236,6 @@ export function extraSeeds<
     const ordered = [...rows].sort((a, b) => a.seq - b.seq);
     const first = ordered[0];
     const last = ordered[ordered.length - 1];
-    if (extras.includes('map')) {
-      out.push({ ...first, bridge: false, kind: 'map' });
-    }
     if (extras.includes('terms')) {
       out.push({ ...first, bridge: false, kind: 'terms' });
     }
@@ -213,8 +259,8 @@ export function shouldSplit(
   weight: BeatWeight,
   sections: LectureSection[],
 ): boolean {
-  if (style !== 'gentle' || sections.length < SPLIT_MIN_MOVES) return false;
-  return wordCount(sectionsToScript(sections)) > WORD_BUDGET.gentle[weight].max;
+  if (sections.length < SPLIT_MIN_MOVES) return false;
+  return wordCount(sectionsToScript(sections)) > WORD_BUDGET[style][weight].max;
 }
 
 /** The two halves of a page's sections, cut at the move boundary nearest the middle by words. */
@@ -358,18 +404,24 @@ export const LECTURE_STYLES: Record<LectureStyle, LectureStyleSpec> = {
       'page uses is kept and said, and each is explained the first time it',
       'appears, never two new terms in one sentence. Short sentences, about',
       'ten words, one thing each; never a sentence that stacks clauses.',
-      'Teach the one or two things this page turns on, in the smallest',
-      'steps they break into, and leave the rest: fewer things, each fully,',
-      'never everything quickly. No abstract nouns where a concrete thing',
+      'Every paragraph on the page is taught, each in the smallest steps',
+      'it breaks into and the plainest words; the slow learner is given',
+      'more of each thing, never fewer things, and a page with too much',
+      'for one sitting is said in two pieces, not cut. No abstract nouns',
+      'where a concrete thing',
       'will do: not "data", but the customer order or the photo the page',
       'talks about; not "the system", but the computers involved. Never',
       'say efficiently, optimally, robust, leverage, ensure, significant or',
       'their kind; say what actually happens instead. Where the page has an',
       'example, walk the whole of it, step by step, thinking aloud, then',
       'say the general rule it shows: one example carried through beats',
-      'two mentioned. Ask one small question the listener can answer, then',
-      'answer it yourself at once. Before you leave the page, say the one',
-      'idea a second way, in a different shape: restate fully on the',
+      'two mentioned, and walk it as the two of you thinking aloud ("so',
+      "we've got the bucket full. Now one request comes in. What does it",
+      'cost? One token. So nine left."). Patience without praise: "no',
+      'rush", "that\'s the whole trick of it", never "well done". Ask one',
+      'small question the listener can answer, then answer it yourself at',
+      'once. Before you leave the page, say the one idea a second way, as',
+      '"another way to see it", never as a summary: restate fully on the',
       "chapter's early pages and only in a clause by its last. Assume",
       'nothing was known before this page except what the lecture has',
       'already taught. Do not explain this page the way you explained the',
@@ -387,6 +439,8 @@ export const LECTURE_STYLES: Record<LectureStyle, LectureStyleSpec> = {
       'term: say it a little more slowly than the words around it. Warm,',
       'calm and even, never sing-song, and never faster towards the end of',
       'a sentence.',
+      'Lift your voice a little on a question, and take extra care with a',
+      'technical term the first time it comes.',
     ].join(' '),
     speed: 0.9,
   },
@@ -395,21 +449,28 @@ export const LECTURE_STYLES: Record<LectureStyle, LectureStyleSpec> = {
     name: 'I learn at a normal pace',
     subtext: 'Clear and concrete, the way most people like to be taught.',
     direction: [
-      'Concrete beats abstract: when the page gives a number, a case or an',
-      'example, build the explanation on it rather than around it. Say why',
-      'before what: before a mechanism, the problem it solves; before a rule,',
-      'the situation that needs it. Make the turn visible: most pages have a',
-      'moment where the obvious approach breaks or the real idea appears,',
-      'and that is where you slow down, because that is what the listener',
-      'remembers. At most one rhetorical question, and only if you answer it',
-      'yourself.',
+      'You are a friend who knows this subject and enjoys it, talking at a',
+      'normal pace, pointing at what the page gives and saying what it',
+      'shows. Concrete beats abstract: when the page gives a number, a case',
+      'or an example, build the explanation on it rather than around it,',
+      'and put the listener in the example. Say why before what: before a',
+      'mechanism, the problem it solves; before a rule, the situation that',
+      'needs it. Make the turn visible: most pages have a moment where the',
+      'obvious approach breaks or the real idea appears, and that is where',
+      'you slow down and say so, because that is the interesting part and',
+      'what the listener remembers. One small reaction a page, one thing',
+      'they are probably thinking, answered. At most one rhetorical',
+      'question, and only if you answer it yourself. Every paragraph on the',
+      'page is taught; the styles differ in how much is said of each, never',
+      'in which are said.',
     ].join(' '),
     recapCheck: true,
     tailChars: 320,
     delivery: [
       'Speak at a natural teaching pace, clear and warm, with a short pause at',
       'every full stop and a longer one between paragraphs. Even, unhurried,',
-      'never breathless.',
+      'never breathless. Lift your voice a little on a question, and take',
+      'extra care with a technical term the first time it comes.',
     ].join(' '),
     speed: 1,
   },
@@ -420,19 +481,28 @@ export const LECTURE_STYLES: Record<LectureStyle, LectureStyleSpec> = {
     direction: [
       "Say the idea, then the page's own example if it has one, then stop.",
       'No scene-setting, no rhetorical questions, no callbacks beyond half a',
-      'sentence, no foreshadowing, no closing line. Anything the lecture has',
-      'already taught is left out entirely, not shortened, and a term the',
-      'lecture has used is used, not defined again. Where the page describes',
-      'a procedure, tell the listener to run it in their head before the',
-      "page's example confirms it. Write for a listener at double speed:",
-      'short sentences, one clause each. The listener is quick and wants the',
-      'point; when the page is taught, you are done.',
+      'sentence, no foreshadowing, no opening line, no closing line: the',
+      'chapter begins on its first idea and ends on its last. Every',
+      'paragraph on the page is taught, in your own words: what it means',
+      'and why it matters, in one or two short sentences, never the',
+      "paragraph's own sentence said back. A term, a name or a figure is",
+      'said as the page has it; everything else is yours. A paragraph the',
+      'lecture has already taught is passed in a clause that says so, never',
+      'dropped as if it were not there, and a term the lecture has used is',
+      'used, not defined again. Where the page describes a procedure, tell',
+      "the listener to run it in their head before the page's example",
+      'confirms it. Write for a listener at double speed: short sentences,',
+      'one clause each. A quick friend, not a summary: "the short version:"',
+      'once a page at most, a reaction in three words, what they are',
+      'probably thinking in half a sentence. The listener is quick and wants',
+      'the point; when the page is taught, you are done.',
     ].join(' '),
     recapCheck: true,
     tailChars: 320,
     delivery: [
       'Speak briskly and crisply, like a confident lecturer talking to a quick',
-      'listener: no drawn-out pauses, no lingering, every word still clear.',
+      'listener: no drawn-out pauses, no lingering, every word still clear,',
+      'and a technical term said with care the first time it comes.',
     ].join(' '),
     speed: 1.1,
   },
@@ -470,9 +540,19 @@ export interface SegmentJob {
   bridge: boolean;
 }
 
+/** Why a paragraph of the page is not taught by any move. */
+export type SkipReason = 'repeat' | 'caption' | 'reference' | 'decoration';
+
 export interface LectureBeat {
   pageNumber: number;
   goal: string;
+  /** Which of the plan's points this page serves, by index; absent on older plans. */
+  point?: number;
+  /**
+   * A question the listener can answer from what they have heard, asked
+   * before the page answers it. Null, or absent on older plans, means none.
+   */
+  ask?: string | null;
   callback?: string | null;
   foreshadow?: string | null;
   /** The one thing this page adds that the listener has not been taught. */
@@ -494,6 +574,12 @@ export interface LectureBeat {
    * source; null for a move that names none.
    */
   moveBlocks?: (number[] | null)[] | null;
+  /**
+   * The paragraphs of the note no move teaches, each with why: a repeat of
+   * an earlier page, a caption, a reference, a decoration. Every paragraph
+   * is in a move or here; absent on older plans.
+   */
+  skipBlocks?: { block: number; reason: SkipReason }[] | null;
   /** The mistake a student is most likely to make here, where the page shows it. */
   pitfall?: string | null;
   /**
@@ -502,6 +588,12 @@ export interface LectureBeat {
    * habit; the plan carries at most one.
    */
   turn?: boolean;
+  /**
+   * The question this page leaves open, in the listener's words, which
+   * the next page's first sentence answers. Null on the chapter's last
+   * page; absent on plans written before hand-offs existed.
+   */
+  handoff?: string | null;
   /** What the page's idea would be drawn as on the board; absent on older plans. */
   figure?: {
     kind: 'process' | 'structure' | 'comparison' | 'none';
@@ -515,22 +607,16 @@ export interface LectureTerm {
   meaning: string;
 }
 
-/**
- * The map of a chapter as the learner reads it while the map plays: what
- * the chapter is for, its stops (parts a listener would recognise, not
- * pages), and where it lands. Written with the map's script, in one call.
- */
-export interface MapOutline {
-  about: string;
-  stops: { name: string; line: string }[];
-  landing: string;
-}
-
 export interface LecturePlan {
   hook: string;
   arc: string;
-  /** The chapter's map, once its map segment has been written; absent before. */
-  map?: MapOutline | null;
+  /**
+   * The one case or question the chapter follows, in the listener's
+   * words; every page is its next step. Absent on older plans.
+   */
+  thread?: string | null;
+  /** The three or four things the chapter settles, one sentence each; absent on older plans. */
+  points?: string[];
   /** The chapter's words, spoken first for a slow learner. Older plans have none. */
   terms?: LectureTerm[];
   /** The problem the chapter answers, for a quick learner to hear first. */
@@ -715,6 +801,13 @@ const BANNED_ANYWHERE: readonly RegExp[] = [
   /^picture\s+(?:this|that|a|an|the|yourself|you)\b/i,
 ];
 
+/**
+ * The phrases a book uses to tell, anywhere in a sentence. A friend says
+ * the thing, or "the bit that matters is".
+ */
+const TELLING_PHRASES =
+  /\b(?:note that|a point to note|keep in mind|bear in mind|remember that|it should be noted|it is worth noting|it'?s worth noting|(?:it'?s|it is) noteworthy|the key point is|the key takeaway|(?:is|are) key to|it'?s key|it is (?:important|essential|crucial) to (?:note|understand|remember|recogni[sz]e)|one must|as (?:mentioned|discussed|noted|we saw|we have seen|stated)(?: earlier| above| before)?|this (?:highlights|underscores|emphasi[sz]es|underlines) (?:the|how|that))\b/i;
+
 /** How a page must not begin: audibly clearing its throat. */
 const THROAT_CLEARERS: readonly RegExp[] = [
   /^(?:now|so|right),\s/i,
@@ -722,14 +815,71 @@ const THROAT_CLEARERS: readonly RegExp[] = [
   /^let'?s\b/i,
 ];
 
+/** A run this long, word for word from the page, is reading, not teaching. */
+const LIFTED_RUN = 8;
+
+/** Lifted sentences a page may carry before it is sent back, by style. */
+const LIFTED_MAX: Record<LectureStyle, number> = {
+  gentle: 3,
+  steady: 3,
+  brisk: 1,
+};
+
+/** The share of the payoff's carrying words a closing sentence may say before it is the landing line. */
+const LANDING_SHARE = 0.6;
+
+const plainWords = (text: string): string[] =>
+  text
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}\s'-]/gu, ' ')
+    .split(/\s+/)
+    .filter(Boolean);
+
+/**
+ * The sentences of a script that carry a run of `run` consecutive words
+ * found in the same order in the source: the page said back rather than
+ * taught. A term, a name, a figure or a short list item is shorter than a
+ * run and passes.
+ */
+export function liftedSentences(
+  text: string,
+  source: string,
+  run = LIFTED_RUN,
+): string[] {
+  const words = plainWords(source);
+  if (words.length < run) return [];
+  const runs = new Set<string>();
+  for (let i = 0; i + run <= words.length; i += 1) {
+    runs.add(words.slice(i, i + run).join(' '));
+  }
+  return sentencesOf(text).filter((sentence) => {
+    const own = plainWords(sentence);
+    for (let i = 0; i + run <= own.length; i += 1) {
+      if (runs.has(own.slice(i, i + run).join(' '))) return true;
+    }
+    return false;
+  });
+}
+
+/** Whether a sentence is the payoff by another name: most of its carrying words said. */
+function landsOn(sentence: string, payoff: string): boolean {
+  const aim = contentWordsOf(payoff);
+  if (aim.size < 3) return false;
+  const said = contentWordsOf(sentence);
+  let hit = 0;
+  for (const word of aim) if (said.has(word)) hit += 1;
+  return hit / aim.size >= LANDING_SHARE;
+}
+
 /** A closing sentence that sums up instead of landing. */
 const RECAP_ENDING =
-  /^(?:in (?:summary|short|conclusion)|to (?:sum up|summari[sz]e|recap)|so,? to recap|overall,|understanding .{0,60} is (?:key|crucial|essential))/i;
+  /^(?:in (?:summary|short|conclusion)|to (?:sum up|summari[sz]e|recap)|so,? to recap|overall,|(?:understanding|knowing|grasping|recogni[sz]ing) .{0,60} is (?:key|crucial|essential|vital|imperative|important|critical|necessary))/i;
 
 export interface StyleProblem {
   kind:
     | 'banned_opener'
     | 'throat_clearing'
+    | 'cold_open'
     | 'too_long'
     | 'recap_ending'
     | 'moves'
@@ -738,7 +888,12 @@ export interface StyleProblem {
     | 'hard_words'
     | 'term_unexplained'
     | 'two_terms'
-    | 'label';
+    | 'label'
+    | 'hanging_marks'
+    | 'uncovered'
+    | 'read_aloud'
+    | 'stiff_verbs'
+    | 'term_missing';
   detail: string;
 }
 
@@ -803,6 +958,15 @@ export function openerProblems(
         detail: `A sentence starts with "${firstWords(offender, 3)}"; never start a sentence that way`,
       });
     }
+    const telling = sentences
+      .map((sentence) => TELLING_PHRASES.exec(sentence)?.[0])
+      .find((phrase): phrase is string => Boolean(phrase));
+    if (telling) {
+      problems.push({
+        kind: 'banned_opener',
+        detail: `"${telling}" is how a book tells; say the thing, or "the bit that matters is"`,
+      });
+    }
   }
   return problems;
 }
@@ -863,6 +1027,23 @@ export function styleProblems(
     pageText?: string;
     terms?: string[];
     taughtSoFar?: string[];
+    /** A page after the chapter's first: it must open by joining itself to what was just said. */
+    midChapter?: boolean;
+    /** The tail of the page before, for the seam a mid-chapter page opens on. */
+    prevTail?: string;
+    /** The question the last page left open, which this page's first sentence answers. */
+    answers?: string | null;
+    /** The scripts of this chapter's earlier pages, so a term explained there is used bare here. */
+    saidBefore?: string[];
+    /** The page's own paragraphs, for which terms it carries. */
+    carries?: string;
+    /** The page's budget, grown for its paragraphs; the style's plain one when absent. */
+    budget?: WordBudget;
+    /** The note the page is taught from, as prose, for the reading-aloud check. */
+    noteText?: string;
+    /** The chapter's payoff and whether this is its last page, for the quick learner's ending. */
+    payoff?: string | null;
+    lastOfChapter?: boolean;
   },
 ): StyleProblem[] {
   const problems = openerProblems(text, 'script');
@@ -878,7 +1059,7 @@ export function styleProblems(
 
   if (!options.bridge) {
     const words = wordCount(text);
-    const limit = WORD_BUDGET[options.style][options.weight];
+    const limit = options.budget ?? WORD_BUDGET[options.style][options.weight];
     if (words > limit.hard) {
       problems.push({
         kind: 'too_long',
@@ -899,6 +1080,37 @@ export function styleProblems(
     }
   }
 
+  // The quick learner's chapter ends on its last idea. A final sentence
+  // made of the payoff's own words is the landing line by another name.
+  if (
+    options.style === 'brisk' &&
+    options.lastOfChapter &&
+    options.payoff &&
+    sentences.length
+  ) {
+    const last = sentences[sentences.length - 1];
+    if (landsOn(last, options.payoff)) {
+      problems.push({
+        kind: 'recap_ending',
+        detail: `Ends by landing the payoff ("${firstWords(last, 4)}"); stop on the page's last idea instead`,
+      });
+    }
+  }
+
+  // The page explained, never said back: a sentence lifted from the note
+  // is what a listener with the book in front of them hears as reading.
+  // The quick learner is allowed one such sentence on a page, the others
+  // three, since a figure's sentence is often the page's own.
+  if (options.noteText && !options.bridge) {
+    const lifted = liftedSentences(text, options.noteText);
+    if (lifted.length > LIFTED_MAX[options.style]) {
+      problems.push({
+        kind: 'read_aloud',
+        detail: `Reads the page aloud: ${lifted.length} sentences lifted from it, such as "${firstWords(lifted[0], 6)}..."; say each in your own words, keeping terms and figures as the page has them`,
+      });
+    }
+  }
+
   // A page ends on its idea, never on applause: "great job", "keep
   // exploring", "you have made real progress" teach nothing.
   const cheering = sentences
@@ -913,20 +1125,52 @@ export function styleProblems(
     });
   }
 
-  if (options.style === 'gentle' && options.sections) {
-    problems.push(...repeatedDevice(options.sections));
+  if (options.sections) {
+    problems.push(...repeatedDevice(options.sections, options.prevTail));
   }
-  if (options.style === 'gentle' && !options.bridge) {
+  // Every style's promise of plain words, measured, when the page is
+  // given to measure against.
+  if (!options.bridge && options.pageText !== undefined) {
     problems.push(
       ...plainWordsProblems(text, {
-        pageText: options.pageText ?? '',
+        pageText: options.pageText,
         terms: options.terms ?? [],
         taughtSoFar: options.taughtSoFar ?? [],
+        style: options.style,
+        saidBefore: options.saidBefore,
+        carries: options.carries,
       }),
     );
   }
+  // Given, then new: a section opens on a word from the sentence before
+  // it, and a page after the first on the tail it was given or the
+  // question it answers. Shared content, never a connective alone; a
+  // page that starts cold makes the chapter a list of pages.
+  if (!options.bridge) {
+    problems.push(
+      ...seamProblems(options.sections ?? [{ move: 0, text }], {
+        midChapter: options.midChapter,
+        prevTail: options.prevTail,
+        answers: options.answers,
+      }),
+    );
+  }
+  // The voice hangs on a dash or an ellipsis. Twice on a page is a shape;
+  // more is a tic the ear learns to skip.
+  const hanging = (text.match(HANGING_MARK) ?? []).length;
+  if (hanging > HANGING_MARKS_MAX) {
+    problems.push({
+      kind: 'hanging_marks',
+      detail: `Hangs on a dash or an ellipsis ${hanging} times; at most ${HANGING_MARKS_MAX} on a page`,
+    });
+  }
+
   return problems;
 }
+
+/** A dash or an ellipsis, where the voice hangs. */
+const HANGING_MARK = /[—–…]|\.\.\./g;
+const HANGING_MARKS_MAX = 2;
 
 // ── the gentle style's promise, measured ────────────────────────────────────
 
@@ -1045,70 +1289,165 @@ function plainStem(word: string): string {
     .replace(/([bdgmnprt])\1$/, '$1');
 }
 
+/** Where each style's bar sits: sentence length with the terms taken out, hard words and stiff words a page may carry. */
+const PLAIN_BARS: Record<
+  LectureStyle,
+  { average: number; longest: number; hard: number; stiff: number }
+> = {
+  gentle: { average: 14, longest: 22, hard: 0, stiff: 0 },
+  steady: { average: 17, longest: 26, hard: 3, stiff: 2 },
+  brisk: { average: 13, longest: 20, hard: 3, stiff: 2 },
+};
+
+/** A word that names an action as a thing: "filtration occurs" where "it filters" would do. */
+const STIFF_ENDING = /(?:tion|sion|ment|ance|ence)s?$/;
+
+let everydayStems: Set<string> | null = null;
+/** The everyday words by their stems, built once, so "computers" and "computing" are the list's "computer". */
+function everydayStemsOf(): Set<string> {
+  everydayStems ??= new Set([...EVERYDAY_WORDS].map(plainStem));
+  return everydayStems;
+}
+
+const escapeRe = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
 /**
- * The gentle style's promise, measured, so a page in textbook register
- * is sent back the way a page with a bad opener is: short sentences,
- * everyday words, and every term of the chapter explained in the same
- * breath the first time it is said.
+ * Every style's promise, measured, so a page in textbook register is sent
+ * back the way a page with a bad opener is: short sentences with the
+ * chapter's terms not counted against them, everyday words, every term
+ * the page carries said as the book has it and explained in the same
+ * breath the first time, and no action turned into a noun where a verb
+ * would do. The bar sits by style; gentle's is the strictest.
  */
 export function plainWordsProblems(
   text: string,
-  options: { pageText: string; terms: string[]; taughtSoFar: string[] },
+  options: {
+    pageText: string;
+    terms: string[];
+    taughtSoFar: string[];
+    style?: LectureStyle;
+    /** The scripts of this chapter's earlier pages: a term explained there is used bare here. */
+    saidBefore?: string[];
+    /** The page's own paragraphs, for which terms it carries; the page text when absent. */
+    carries?: string;
+  },
 ): StyleProblem[] {
   const problems: StyleProblem[] = [];
   const sentences = sentencesOf(text);
   if (!sentences.length) return problems;
+  const style = options.style ?? 'gentle';
+  const bar = PLAIN_BARS[style];
+  const terms = options.terms.map((term) => term.trim()).filter(Boolean);
 
-  // Sentences: about ten words each; one long one is a stacked clause.
-  const lengths = sentences.map((sentence) => wordCount(sentence));
+  // Sentences, measured with the terms taken out: a keyword counts as one
+  // word however long it is, so a short sentence carrying one is short.
+  const withoutTerms = (sentence: string) =>
+    terms.reduce(
+      (text, term) => text.replace(new RegExp(escapeRe(term), 'gi'), 'term'),
+      sentence,
+    );
+  const lengths = sentences.map((sentence) =>
+    wordCount(withoutTerms(sentence)),
+  );
   const average = lengths.reduce((sum, n) => sum + n, 0) / lengths.length;
   const longest = Math.max(...lengths);
-  if (average > 14 || longest > 25) {
+  if (average > bar.average || longest > bar.longest) {
     const worst = sentences[lengths.indexOf(longest)];
     problems.push({
       kind: 'long_sentences',
-      detail: `Sentences average ${Math.round(average)} words and the longest has ${longest} ("${firstWords(worst, 8)}..."); a slow learner needs short ones, about ten words, one thing each`,
+      detail: `Sentences average ${Math.round(average)} words and the longest has ${longest} ("${firstWords(worst, 8)}..."); ${style === 'gentle' ? 'a slow learner needs short ones, about ten words, one thing each' : `short ones, one thing each: ${bar.average} words on average, none over ${bar.longest}`}`,
     });
   }
 
-  // Words: the lecturer's own long words, and the ones that say nothing,
-  // when the page itself does not use them.
+  // Words: the lecturer's own hard words, and the ones that say nothing,
+  // when neither the page nor everyday speech uses them.
   const pageWords = new Set(plainWordsOf(options.pageText));
   const pageStems = new Set([...pageWords].map(plainStem));
-  const termWords = new Set(options.terms.flatMap(plainWordsOf));
+  const termWords = new Set(terms.flatMap(plainWordsOf));
+  const everyday = everydayStemsOf();
   const known = (word: string) =>
     pageWords.has(word) ||
     termWords.has(word) ||
+    EVERYDAY_WORDS.has(word) ||
     EVERYDAY_LONG_WORDS.has(word) ||
-    pageStems.has(plainStem(word));
+    pageStems.has(plainStem(word)) ||
+    everyday.has(plainStem(word));
   const hard = new Set<string>();
   const empty = new Set<string>();
-  for (const word of plainWordsOf(scriptForTts(text))) {
-    if (known(word)) continue;
-    if (EMPTY_WORDS.has(word)) empty.add(word);
-    else if (
-      syllablesOf(word) >= 5 ||
-      (syllablesOf(word) >= 4 && word.length >= 11) ||
-      word.length >= 13
-    ) {
-      hard.add(word);
+  const stiff = new Set<string>();
+  for (const spoken of plainWordsOf(scriptForTts(text))) {
+    // "The nephron's job" is the term's word, possessive.
+    const word = spoken.replace(/'s$/, '');
+    if (EMPTY_WORDS.has(word) && !pageWords.has(word)) {
+      empty.add(word);
+      continue;
     }
+    if (known(word)) continue;
+    if (syllablesOf(word) >= 3 || word.length >= 9) hard.add(word);
+    if (word.length >= 8 && STIFF_ENDING.test(word)) stiff.add(word);
   }
-  // One word that says nothing is one too many; long words get some room.
-  if (empty.size || hard.size > 2) {
+  // For a slow learner one word that says nothing is one too many; the
+  // other styles get the bar's room for empty and hard words together.
+  const over =
+    style === 'gentle'
+      ? empty.size > 0 || hard.size > bar.hard
+      : empty.size + hard.size > bar.hard;
+  if (over) {
     const named = [...empty, ...hard].slice(0, 6);
     problems.push({
       kind: 'hard_words',
-      detail: `Words the page does not use and a slow learner may not know: ${named
+      detail: `Leave these words out, the page does not use them and a listener may not know them: ${named
         .map((word) => `"${word}"`)
-        .join(', ')}; say what actually happens, in everyday words`,
+        .join(', ')}; say what happens instead, in everyday words`,
+    });
+  }
+  if (stiff.size > bar.stiff) {
+    problems.push({
+      kind: 'stiff_verbs',
+      detail: `Actions turned into nouns: ${[...stiff]
+        .slice(0, 4)
+        .map((word) => `"${word}"`)
+        .join(', ')}; say what happens, with a verb`,
+    });
+  }
+
+  // Every term the page carries is said as the book has it: a paraphrase
+  // that loses the keyword loses what the student is examined on. A
+  // term given as "Content Delivery Network (CDN)" is said either way,
+  // and "replicas" says "replica"; the stems decide.
+  const scriptStems = plainWordsOf(scriptForTts(text)).map(plainStem);
+  const pageStemList = plainWordsOf(options.carries ?? options.pageText).map(
+    plainStem,
+  );
+  const saysStems = (haystack: string[], needle: string[]) => {
+    if (!needle.length) return true;
+    for (let i = 0; i + needle.length <= haystack.length; i += 1) {
+      if (needle.every((stem, j) => haystack[i + j] === stem)) return true;
+    }
+    return false;
+  };
+  const spellings = (term: string): string[][] =>
+    [term.replace(/\s*\([^)]*\)/g, ''), ...(term.match(/\(([^)]+)\)/g) ?? [])]
+      .map((form) => plainWordsOf(form).map(plainStem))
+      .filter((stems) => stems.length);
+  for (const term of terms) {
+    const forms = spellings(term);
+    const onPage = forms.some((stems) => saysStems(pageStemList, stems));
+    const said = forms.some((stems) => saysStems(scriptStems, stems));
+    if (!onPage || said) continue;
+    problems.push({
+      kind: 'term_missing',
+      detail: `The page carries "${term}" and the script never says it; say the term as the book has it, then what it means`,
     });
   }
 
   // Terms: each of the chapter's terms, the first time this page says it,
   // is explained in the same breath, and never two in one sentence.
   const lower = scriptForTts(text).toLowerCase();
-  const taught = options.taughtSoFar.map((line) => line.toLowerCase());
+  const taught = [
+    ...options.taughtSoFar,
+    ...(options.saidBefore ?? []).map((script) => scriptForTts(script)),
+  ].map((line) => line.toLowerCase());
   const firstUses: { term: string; sentence: number }[] = [];
   for (const term of options.terms) {
     const needle = term.toLowerCase().trim();
@@ -1159,8 +1498,10 @@ export function plainWordsProblems(
       });
     }
   }
+  // Two new terms in one sentence: a slow learner is given one at a time;
+  // the other styles may name two the page names together, each explained.
   const bySentence = new Map<number, string[]>();
-  for (const use of firstUses) {
+  for (const use of style === 'gentle' ? firstUses : []) {
     bySentence.set(use.sentence, [
       ...(bySentence.get(use.sentence) ?? []),
       use.term,
@@ -1210,6 +1551,8 @@ export interface LectureSection {
   text: string;
   /** The note sentences the writer says the section explains, as addressed ("2.1", or "5" for a block). */
   teaches?: string[];
+  /** The words a listener should hear land in this section, copied from its text; null for most sections. */
+  catch?: string | null;
 }
 
 /**
@@ -1386,10 +1729,20 @@ export function sectionProblems(
 const EXAMPLE_DEVICE =
   /^(?:for (?:example|instance)|think of|imagine|it(?:'s| is) (?:a bit )?(?:like|as if)|picture|say you|suppose|let(?:'s| us) say|consider)\b/i;
 
-export function repeatedDevice(sections: LectureSection[]): StyleProblem[] {
+/** A phrase in a person's voice at a turn: allowed once on a page, never the same one on two pages. */
+const PIVOT_DEVICE =
+  /^(?:(?:and|but|now|so|okay|right),?\s+)?(?:here(?:'s| is) (?:the (?:part|thing|catch|point|twist|key)|what matters|where it (?:gets|turns))|that(?:'s| is) the (?:catch|twist|point|part that matters)|the (?:catch|twist|key|thing) (?:is|here is))\b/i;
+
+export function repeatedDevice(
+  sections: LectureSection[],
+  /** The tail of the page before, so a pivot is not the same one twice running. */
+  prevTail = '',
+): StyleProblem[] {
   let previous: string | null = null;
+  const pivots: string[] = [];
   for (const section of sections) {
-    const first = sentencesOf(section.text)[0] ?? '';
+    const sentences = sentencesOf(section.text);
+    const first = sentences[0] ?? '';
     const device = EXAMPLE_DEVICE.exec(first)?.[0]?.toLowerCase() ?? null;
     if (device && previous) {
       return [
@@ -1400,8 +1753,96 @@ export function repeatedDevice(sections: LectureSection[]): StyleProblem[] {
       ];
     }
     previous = device;
+    for (const sentence of sentences) {
+      const pivot = PIVOT_DEVICE.exec(sentence)?.[0]?.toLowerCase();
+      if (pivot)
+        pivots.push(pivot.replace(/^(?:and|but|now|so|okay|right),?\s+/, ''));
+    }
+  }
+  if (pivots.length > 1) {
+    return [
+      {
+        kind: 'repetition',
+        detail: `Turns on a pivot phrase ${pivots.length} times ("${pivots[0]}", "${pivots[1]}"); one such phrase on a page at most`,
+      },
+    ];
+  }
+  const before = sentencesOf(prevTail)
+    .map((sentence) => PIVOT_DEVICE.exec(sentence)?.[0]?.toLowerCase())
+    .filter((pivot): pivot is string => Boolean(pivot))
+    .map((pivot) => pivot.replace(/^(?:and|but|now|so|okay|right),?\s+/, ''));
+  if (pivots.length && before.includes(pivots[0])) {
+    return [
+      {
+        kind: 'repetition',
+        detail: `Turns on "${pivots[0]}" the way the last page did; a pivot phrase is never the same one on two pages`,
+      },
+    ];
   }
   return [];
+}
+
+/** The words of a sentence a next sentence could carry, as said, for the writer to pick from. */
+function carryingWords(sentence: string): string {
+  const stems = contentWordsOf(sentence);
+  const words = sentence
+    .replace(/[^\p{L}\p{N}'\s-]/gu, ' ')
+    .split(/\s+/)
+    .filter((word) => word.length >= 4 && stems.has(stem(word.toLowerCase())));
+  return [...new Set(words)]
+    .slice(0, 4)
+    .map((word) => `"${word}"`)
+    .join(', ');
+}
+
+/** Whether two sentences share a carrying word, by stem: the seam that makes the second follow from the first. */
+function sharesWord(a: string, b: string): boolean {
+  const own = contentWordsOf(a);
+  for (const word of contentWordsOf(b)) if (own.has(word)) return true;
+  return false;
+}
+
+/**
+ * Given, then new, measured. Each section's first sentence carries a word
+ * from the last sentence before it; a mid-chapter page's first sentence
+ * carries one from the tail it was given, or from the question it was
+ * told to answer. A connective alone is not a seam.
+ */
+export function seamProblems(
+  sections: { text: string }[],
+  options: { midChapter?: boolean; prevTail?: string; answers?: string | null },
+): StyleProblem[] {
+  const problems: StyleProblem[] = [];
+  let before: string | null = null;
+  if (options.midChapter) {
+    const tail = sentencesOf(options.prevTail ?? '');
+    before = tail[tail.length - 1] ?? null;
+  }
+  sections.forEach((section, index) => {
+    const sentences = sentencesOf(section.text);
+    if (!sentences.length) return;
+    const first = sentences[0];
+    if (index === 0) {
+      if (options.midChapter && (before || options.answers)) {
+        const joined =
+          (before !== null && sharesWord(first, before)) ||
+          (!!options.answers && sharesWord(first, options.answers));
+        if (!joined) {
+          problems.push({
+            kind: 'cold_open',
+            detail: `Starts cold ("${firstWords(first, 5)}"); open on a word from what was just said${options.answers ? `, or answer what was left open: "${options.answers}"` : ''}`,
+          });
+        }
+      }
+    } else if (before !== null && !sharesWord(first, before)) {
+      problems.push({
+        kind: 'cold_open',
+        detail: `Opens a new idea cold ("${firstWords(first, 5)}") after "${firstWords(before, 6)}..."; start it from one of that sentence's own words (${carryingWords(before)}) and go on to the new thing`,
+      });
+    }
+    before = sentences[sentences.length - 1];
+  });
+  return problems;
 }
 
 /**
@@ -1513,11 +1954,31 @@ export function unsupportedFigures(
 ): string[] {
   const plain = (text: string) => text.replace(/(\d),(?=\d)/g, '$1');
   const haystack = plain(sources.join('\n'));
+  const spoken = plain(scriptForTts(script));
+  // A range of years on the page supports both years it spans, written
+  // out: "1998–99" says 1999 as plainly as it says 1998.
+  const spanned = new Set<string>();
+  for (const range of haystack.matchAll(
+    /\b(\d{4})\s*[-–—]\s*(\d{2}|\d{4})\b/g,
+  )) {
+    const [, from, to] = range;
+    spanned.add(from);
+    spanned.add(to.length === 4 ? to : from.slice(0, 2) + to);
+  }
+  // A decade said as "the 1990s" is supported by any year of it on the page.
+  const decades = new Set(
+    [...spoken.matchAll(/\b(\d{3})0s\b/g)]
+      .map((match) => match[1])
+      .filter((prefix) => new RegExp(`\\b${prefix}\\d\\b`).test(haystack))
+      .map((prefix) => `${prefix}0`),
+  );
   const missing = new Set<string>();
-  for (const match of plain(scriptForTts(script)).matchAll(/\d+(?:\.\d+)?/g)) {
+  for (const match of spoken.matchAll(/\d+(?:\.\d+)?/g)) {
     const figure = match[0];
     if (figure.replace(/\D/g, '').length < 3) continue;
-    if (!haystack.includes(figure)) missing.add(figure);
+    if (haystack.includes(figure)) continue;
+    if (spanned.has(figure) || decades.has(figure)) continue;
+    missing.add(figure);
   }
   return [...missing];
 }
@@ -1602,8 +2063,28 @@ export interface OutlineProblem {
     | 'missing_page'
     | 'duplicate_page'
     | 'banned_opener'
-    | 'hook_too_long';
+    | 'hook_too_long'
+    | 'uncovered'
+    | 'unverified_skip'
+    | 'no_thread'
+    | 'no_handoff'
+    | 'term_meaning';
   detail: string;
+}
+
+/** A hand-off that previews the next page instead of asking what it answers. */
+const PREVIEW_SHAPE =
+  /\b(?:next(?:,| we| page| up)|we(?:'ll| will| are going to)|let'?s (?:look|turn|move|see)|coming up|in the next|we now turn)\b/i;
+/** A hand-off must be a question: it ends with one, or opens on a question word. */
+const QUESTION_SHAPE =
+  /\?\s*$|^(?:what|why|how|where|when|which|who|does|do|is|are|can|could|would|should|will)\b/i;
+
+/** What the plan is checked against for coverage: each page's paragraphs, and what came before. */
+export interface OutlineCoverage {
+  /** The note's blocks for each page that has one, by page number. */
+  blocksByPage: Map<number, Block[]>;
+  /** Lines the lecture taught in earlier chapters. */
+  taughtEarlier: string[];
 }
 
 /**
@@ -1618,6 +2099,7 @@ export interface OutlineProblem {
 export function validateOutline(
   plan: LecturePlan,
   pageNumbers: number[],
+  coverage?: OutlineCoverage,
 ): OutlineProblem[] {
   const problems: OutlineProblem[] = [];
   if (!plan.hook?.trim()) {
@@ -1640,10 +2122,63 @@ export function validateOutline(
   if (!plan.arc?.trim()) {
     problems.push({ kind: 'no_arc', detail: 'The plan has no arc' });
   }
+  // The thread and the hand-offs, on plans that carry them: a chapter is
+  // a conversation only if every page is the next step of one case and
+  // leaves the question the next page answers.
+  if (plan.thread !== undefined && !plan.thread?.trim()) {
+    problems.push({
+      kind: 'no_thread',
+      detail:
+        'The plan has no thread: name the one case or question the chapter follows',
+    });
+  }
+  const ordered = [...(plan.beats ?? [])].sort(
+    (a, b) => a.pageNumber - b.pageNumber,
+  );
+  ordered.forEach((beat, index) => {
+    if (beat.handoff === undefined || index === ordered.length - 1) return;
+    const handoff = beat.handoff?.trim() ?? '';
+    if (!handoff) {
+      problems.push({
+        kind: 'no_handoff',
+        detail: `Page ${beat.pageNumber} leaves no question for the next page; every page but the last has a handoff`,
+      });
+    } else if (PREVIEW_SHAPE.test(handoff) || !QUESTION_SHAPE.test(handoff)) {
+      problems.push({
+        kind: 'no_handoff',
+        detail: `Page ${beat.pageNumber}'s handoff ("${firstWords(handoff, 6)}") is a preview, not a question the next page answers; ask it in the listener's words`,
+      });
+    }
+  });
+  // A meaning with another term inside it explains nothing to a listener
+  // who has neither.
+  for (const entry of plan.terms ?? []) {
+    const inside = (plan.terms ?? []).find(
+      (other) =>
+        other.term !== entry.term &&
+        other.term.trim() &&
+        entry.meaning.toLowerCase().includes(other.term.trim().toLowerCase()),
+    );
+    if (inside) {
+      problems.push({
+        kind: 'term_meaning',
+        detail: `The meaning of "${entry.term}" has "${inside.term}" inside it; a meaning uses no other term`,
+      });
+    }
+  }
 
   const expected = new Set(pageNumbers);
   const seen = new Set<number>();
   for (const beat of plan.beats ?? []) {
+    // A group of paragraphs for a move that does not exist is a group
+    // nobody writes.
+    const groups = beat.moveBlocks?.length ?? 0;
+    if (beat.moves && groups > beat.moves.length) {
+      problems.push({
+        kind: 'uncovered',
+        detail: `Page ${beat.pageNumber} names ${groups} groups of paragraphs for ${beat.moves.length} moves; one group per move, in the same order`,
+      });
+    }
     if (!expected.has(beat.pageNumber)) {
       problems.push({
         kind: 'unknown_page',
@@ -1666,6 +2201,110 @@ export function validateOutline(
         kind: 'missing_page',
         detail: `No beat for page ${pageNumber}`,
       });
+    }
+  }
+  if (coverage) problems.push(...coverageProblems(plan, coverage));
+  return problems;
+}
+
+/**
+ * The plan with every unverified repeat skip removed, so the writer's
+ * coverage check exempts only what an earlier page really said. A plan
+ * that still names such skips after its correction is not refused; its
+ * paragraphs are simply taught.
+ */
+export function pruneUnverifiedSkips(
+  plan: LecturePlan,
+  coverage: OutlineCoverage,
+): LecturePlan {
+  const unverified = new Set(
+    coverageProblems(plan, coverage)
+      .filter((problem) => problem.kind === 'unverified_skip')
+      .map((problem) => problem.detail),
+  );
+  if (!unverified.size) return plan;
+  return {
+    ...plan,
+    beats: (plan.beats ?? []).map((beat) => ({
+      ...beat,
+      skipBlocks: (beat.skipBlocks ?? []).filter(
+        (skip) =>
+          skip.reason !== 'repeat' ||
+          ![...unverified].some((detail) =>
+            detail.startsWith(
+              `Page ${beat.pageNumber}: paragraph ${skip.block} is skipped as a repeat`,
+            ),
+          ),
+      ),
+    })),
+  };
+}
+
+/**
+ * Every paragraph of a page belongs to a move or is skipped with a reason;
+ * a skip that claims a repeat must be one. A plan that leaves a paragraph
+ * in neither would produce a lecture that never says it, and the student
+ * reading the page would never know.
+ */
+export function coverageProblems(
+  plan: LecturePlan,
+  coverage: OutlineCoverage,
+): OutlineProblem[] {
+  const problems: OutlineProblem[] = [];
+  const pages = [...coverage.blocksByPage.keys()].sort((a, b) => a - b);
+  for (const beat of plan.beats ?? []) {
+    const blocks = coverage.blocksByPage.get(beat.pageNumber);
+    if (!blocks) continue;
+    const content = contentBlocks(blocks, {
+      frontMatter: isFrontMatterPage(beat.pageNumber, blocks),
+    });
+    if (!content.length) continue;
+    const known = new Set(content.map((block) => block.index));
+    const assigned = new Set<number>();
+    for (const move of beat.moveBlocks ?? []) {
+      for (const index of move ?? []) assigned.add(index);
+    }
+    const skipped = new Map<number, SkipReason>();
+    for (const skip of beat.skipBlocks ?? [])
+      skipped.set(skip.block, skip.reason);
+    const strange = [...assigned, ...skipped.keys()].filter(
+      (index) => !known.has(index) && index >= blocks.length,
+    );
+    if (strange.length) {
+      problems.push({
+        kind: 'uncovered',
+        detail: `Page ${beat.pageNumber} names paragraph ${strange.join(', ')}, which the page does not have`,
+      });
+    }
+    const missing = content
+      .map((block) => block.index)
+      .filter((index) => !assigned.has(index) && !skipped.has(index));
+    if (missing.length) {
+      problems.push({
+        kind: 'uncovered',
+        detail: `Page ${beat.pageNumber}: paragraph${missing.length === 1 ? '' : 's'} ${missing.join(', ')} ${missing.length === 1 ? 'belongs' : 'belong'} to no move and ${missing.length === 1 ? 'is' : 'are'} not skipped; put every paragraph in a move, or in skipBlocks with its reason`,
+      });
+    }
+    const earlier = [
+      ...pages
+        .filter((page) => page < beat.pageNumber)
+        .flatMap((page) =>
+          contentBlocks(coverage.blocksByPage.get(page) ?? []).map(
+            (block) => block.text,
+          ),
+        ),
+      ...coverage.taughtEarlier,
+    ];
+    for (const [index, reason] of skipped) {
+      if (reason !== 'repeat') continue;
+      const block = content.find((candidate) => candidate.index === index);
+      if (!block) continue;
+      if (!repeatVerified(block, content, earlier)) {
+        problems.push({
+          kind: 'unverified_skip',
+          detail: `Page ${beat.pageNumber}: paragraph ${index} is skipped as a repeat, but nothing earlier says it; teach it in a move`,
+        });
+      }
     }
   }
   return problems;
@@ -1828,7 +2467,7 @@ export const IN_FLIGHT_STATUSES: ReadonlySet<string> = new Set([
  * belongs to a job that died with its worker, and a lecture must not wait
  * on it forever.
  */
-export const LECTURE_STALE_MS = 10 * 60_000;
+export const LECTURE_STALE_MS = 30 * 60_000;
 
 /**
  * The status a row should be read as: its own, unless it has been in
@@ -1839,6 +2478,10 @@ export function effectiveStatus(
   row: { status: LectureSegmentStatus; updatedAt?: Date | null },
   now = Date.now(),
 ): LectureSegmentStatus {
+  // A pending row is queued, not lost: a large run keeps pages waiting
+  // for an hour and they are all still coming. Only a row a worker had
+  // in hand, writing or voicing, can be abandoned.
+  if (row.status === 'pending') return row.status;
   if (!IN_FLIGHT_STATUSES.has(row.status) || !row.updatedAt) return row.status;
   return now - row.updatedAt.getTime() > LECTURE_STALE_MS
     ? 'failed'

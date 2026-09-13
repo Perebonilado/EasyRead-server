@@ -1,7 +1,6 @@
 import { ConfigService } from '@nestjs/config';
 import {
   GenerateLectureHandler,
-  LectureMapsHandler,
   LectureStatusHandler,
   SetLectureStyleHandler,
 } from './lecture.handlers';
@@ -101,6 +100,7 @@ function harness({
         return Promise.resolve();
       },
       listSegments: () => Promise.resolve(rows),
+      resetUntaughtSegments: () => Promise.resolve(),
       resetFailedSegments: (_d: string, _v: number, topicIds: string[]) => {
         reset.push(topicIds);
         return Promise.resolve();
@@ -388,7 +388,7 @@ describe('GenerateLectureHandler', () => {
     await expect(handler.handle(request)).rejects.toThrow(/chapters/i);
   });
 
-  it("seeds neither the words before a chapter nor the check after it, for any style; only each chapter's map", async () => {
+  it('seeds neither the words before a chapter, nor the check after it, nor a map, for any style', async () => {
     const extrasOf = (seeds: LectureSegmentSeed[]) =>
       seeds
         .filter((seed) => seed.kind && seed.kind !== 'page')
@@ -396,16 +396,16 @@ describe('GenerateLectureHandler', () => {
 
     const gentle = harness();
     await gentle.handler.handle({ ...request, style: 'gentle' });
-    expect(extrasOf(gentle.seeded)).toEqual(['map:1@0', 'map:3@2']);
+    expect(extrasOf(gentle.seeded)).toEqual([]);
     expect(gentle.seeded.every((seed) => seed.style === 'gentle')).toBe(true);
 
     const steady = harness();
     await steady.handler.handle(request);
-    expect(extrasOf(steady.seeded)).toEqual(['map:1@0', 'map:3@2']);
+    expect(extrasOf(steady.seeded)).toEqual([]);
 
     const brisk = harness();
     await brisk.handler.handle({ ...request, style: 'brisk' });
-    expect(extrasOf(brisk.seeded)).toEqual(['map:1@0', 'map:3@2']);
+    expect(extrasOf(brisk.seeded)).toEqual([]);
   });
 
   it('prepares ahead of a page: the chapter there first from that page, then the rest by distance, leaving out what exists', async () => {
@@ -448,7 +448,7 @@ describe('GenerateLectureHandler', () => {
     expect(done.seeded).toEqual([]);
   });
 
-  it('seeds only the chapters asked for: their pages and their map', async () => {
+  it('seeds only the chapters asked for: their pages', async () => {
     const { handler, seeded } = harness();
     await handler.handle({
       ...request,
@@ -457,7 +457,7 @@ describe('GenerateLectureHandler', () => {
     });
     expect(
       seeded.map((seed) => `${seed.kind ?? 'page'}:${seed.pageNumber}`),
-    ).toEqual(['page:3', 'page:4', 'map:3']);
+    ).toEqual(['page:3', 'page:4']);
   });
 });
 
@@ -652,90 +652,5 @@ describe('SetLectureStyleHandler', () => {
     await expect(
       one.handler.handle({ ...request, all: false }),
     ).rejects.toThrow(/Nothing to change/);
-  });
-});
-
-describe('LectureMapsHandler: the runway decides whose map is written', () => {
-  const chapters = [
-    {
-      id: 'c5',
-      title: 'Rate limiter',
-      startPage: 51,
-      endPage: 70,
-      orderIndex: 4,
-    },
-    { id: 'c6', title: 'Hashing', startPage: 71, endPage: 86, orderIndex: 5 },
-    {
-      id: 'c7',
-      title: 'Key-value',
-      startPage: 87,
-      endPage: 109,
-      orderIndex: 6,
-    },
-  ];
-  function harness() {
-    const seeded: { topicId: string; kind?: string }[] = [];
-    const queued: string[] = [];
-    const rows = chapters.flatMap((chapter) =>
-      Array.from(
-        { length: chapter.endPage - chapter.startPage + 1 },
-        (_, i) => ({
-          topicId: chapter.id,
-          pageNumber: chapter.startPage + i,
-          seq: chapter.startPage + i,
-          kind: 'page',
-          style: 'steady',
-          status: 'done',
-          bridge: false,
-          scriptText: 'words',
-        }),
-      ),
-    );
-    const handler = new LectureMapsHandler(
-      { listByDocument: () => Promise.resolve(chapters) } as never,
-      {
-        findPosition: () => Promise.resolve(null),
-        listSegments: () => Promise.resolve(rows),
-        listPlans: () => Promise.resolve([]),
-        seedSegments: (input: {
-          segments: { topicId: string; kind?: string }[];
-        }) => {
-          seeded.push(...input.segments);
-          return Promise.resolve();
-        },
-        removeSegments: () => Promise.resolve(),
-      } as never,
-      {
-        enqueueLectureChapters: (jobs: { topicId: string }[]) => {
-          queued.push(...jobs.map((job) => job.topicId));
-          return Promise.resolve();
-        },
-      } as never,
-      {
-        require: () =>
-          Promise.resolve({
-            id: 'doc-1',
-            contentVersion: 1,
-            props: { pageCount: 269 },
-          }),
-      } as never,
-      { handle: () => Promise.resolve({ data: {} }) } as never,
-    );
-    return { handler, seeded, queued };
-  }
-
-  it('deep in a long chapter, only that chapter gets its map', async () => {
-    const { handler, seeded, queued } = harness();
-    await handler.handle({ ...request, aheadOfPage: 55, style: 'steady' });
-    expect(seeded.map((seed) => `${seed.kind}:${seed.topicId}`)).toEqual([
-      'map:c5',
-    ]);
-    expect(queued).toEqual(['c5']);
-  });
-
-  it('within the runway of its end, the next chapter gets its map too, and only the next', async () => {
-    const { handler, seeded } = harness();
-    await handler.handle({ ...request, aheadOfPage: 65, style: 'steady' });
-    expect(seeded.map((seed) => seed.topicId)).toEqual(['c5', 'c6']);
   });
 });

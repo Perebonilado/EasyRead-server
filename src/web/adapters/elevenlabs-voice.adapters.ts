@@ -23,6 +23,13 @@ export class ElevenLabsSpeechAdapter implements SpeechPort {
 
   constructor(private readonly config: ConfigService) {}
 
+  label(): { model: string; voice: string } {
+    return {
+      model: this.config.get<string>('ELEVENLABS_MODEL', 'eleven'),
+      voice: this.config.get<string>('ELEVENLABS_VOICE', 'default'),
+    };
+  }
+
   isConfigured(): boolean {
     return Boolean(this.config.get<string>('ELEVENLABS_API_KEY'));
   }

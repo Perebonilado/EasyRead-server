@@ -40,7 +40,6 @@ import {
   LectureBoardHandler,
   LectureFollowHandler,
   LectureReviewHandler,
-  LectureMapsHandler,
   LectureStatusHandler,
   SaveLecturePositionHandler,
   SetLectureStyleHandler,
@@ -130,19 +129,6 @@ class LectureSettingsDto {
   all?: boolean;
 }
 
-class LectureMapsDto {
-  /** The learner's page: the chapter they are in and those ahead get their maps. */
-  @IsOptional()
-  @Type(() => Number)
-  @IsInt()
-  @Min(1)
-  aheadOfPage?: number;
-
-  @IsOptional()
-  @IsIn(LECTURE_STYLE_KEYS)
-  style?: LectureStyle;
-}
-
 class LecturePositionDto {
   @Type(() => Number)
   @IsInt()
@@ -197,7 +183,6 @@ export class LectureController {
     private readonly backfill: BackfillBoardsHandler,
     private readonly position: SaveLecturePositionHandler,
     private readonly styleChoice: SetLectureStyleHandler,
-    private readonly maps: LectureMapsHandler,
     @Inject(STORAGE) private readonly storage: StoragePort,
   ) {}
 
@@ -387,23 +372,6 @@ export class LectureController {
       style: body.style,
       interactive: body.interactive,
       all: body.all === true,
-    });
-    return data;
-  }
-
-  /** Maps for chapters prepared before the map existed: the chapter the learner is in and those ahead. */
-  @Post('maps')
-  @HttpCode(202)
-  async writeMaps(
-    @CurrentUser('id') userId: string,
-    @Param('id') documentId: string,
-    @Body() body: LectureMapsDto,
-  ): Promise<LectureStatusResponse> {
-    const { data } = await this.maps.handle({
-      userId,
-      documentId,
-      aheadOfPage: body.aheadOfPage,
-      style: body.style,
     });
     return data;
   }

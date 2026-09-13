@@ -2,6 +2,7 @@ import {
   acceptSegment,
   contentHash,
   LECTURE_STYLES,
+  liftedSentences,
   WORD_BUDGET,
   moveAt,
   moveOffsetsOf,
@@ -483,9 +484,16 @@ describe('styleProblems', () => {
         (p) => p.kind,
       ),
     ).toEqual(['recap_ending']);
+    // "is key to" is also how a book tells, so both come back.
     expect(
       styleProblems(
         'Caches lie. Understanding how caches work is key to design.',
+        full,
+      ).map((p) => p.kind),
+    ).toContain('recap_ending');
+    expect(
+      styleProblems(
+        'Caches lie. Understanding these hurdles is imperative for good design.',
         full,
       ).map((p) => p.kind),
     ).toEqual(['recap_ending']);
@@ -733,6 +741,29 @@ describe('unsupportedFigures', () => {
       '1913',
     ]);
   });
+
+  it('reads a range of years as both years, and a decade as its years', () => {
+    const slide =
+      'In 1998–99, some 45,000 new cases were reported each year; epidemics in Uganda in 1978, 1980, and 1988.';
+    // "1998 to 1999" is what the slide says; "the late 1990s" is too.
+    expect(
+      unsupportedFigures('From 1998 to 1999, 45000 cases a year.', [slide]),
+    ).toEqual([]);
+    expect(
+      unsupportedFigures('In the late 1990s, cases rose tenfold.', [slide]),
+    ).toEqual([]);
+    expect(
+      unsupportedFigures('Epidemics through the 1970s and 1980s.', [slide]),
+    ).toEqual([]);
+    // A decade the page has no year of, and a year outside the range, are still invention.
+    expect(
+      unsupportedFigures('Back in the 1950s, and in 2001.', [slide]),
+    ).toEqual(['1950', '2001']);
+    // A range written with full years and a plain hyphen.
+    expect(
+      unsupportedFigures('By 1980.', ['a rise from 1978-1980 in Uganda']),
+    ).toEqual([]);
+  });
 });
 
 describe('styles', () => {
@@ -791,6 +822,239 @@ describe('styles', () => {
       expect(spec.direction).not.toMatch(/\bimagine\b/i);
       expect(spec.direction.length).toBeGreaterThan(100);
     }
+  });
+});
+
+describe('the chapter as a conversation', () => {
+  const base = (): LecturePlan => ({
+    hook: 'Ten requests arrive at once, and the bucket empties.',
+    arc: 'From a full bucket to a refused request.',
+    thread: 'A request arriving at a server that is already busy.',
+    payoff: 'You can size a limiter from two numbers.',
+    terms: [
+      { term: 'token bucket', meaning: 'a bucket of permits that refills' },
+      { term: 'refill rate', meaning: 'how fast the permits come back' },
+    ],
+    beats: [
+      {
+        pageNumber: 1,
+        goal: 'The bucket.',
+        handoff: 'So what happens when the bucket is empty?',
+      },
+      { pageNumber: 2, goal: 'The refill.', handoff: null },
+    ],
+  });
+
+  it('accepts a plan with a thread and a hand-off on every page but the last', () => {
+    expect(validateOutline(base(), [1, 2])).toEqual([]);
+  });
+
+  it('refuses a plan without a thread, a page without a hand-off, and a hand-off that previews', () => {
+    const noThread = { ...base(), thread: ' ' };
+    expect(validateOutline(noThread, [1, 2]).map((p) => p.kind)).toEqual([
+      'no_thread',
+    ]);
+    const none = base();
+    none.beats[0].handoff = null;
+    expect(validateOutline(none, [1, 2]).map((p) => p.kind)).toEqual([
+      'no_handoff',
+    ]);
+    const preview = base();
+    preview.beats[0].handoff = 'Next we look at the refill rate.';
+    expect(validateOutline(preview, [1, 2]).map((p) => p.kind)).toEqual([
+      'no_handoff',
+    ]);
+  });
+
+  it('refuses a page whose paragraph groups outnumber its moves', () => {
+    const plan = base();
+    plan.beats[0].moves = ['the bucket', 'the cost'];
+    plan.beats[0].moveBlocks = [[1], [2], [3]];
+    expect(validateOutline(plan, [1, 2]).map((p) => p.kind)).toEqual([
+      'uncovered',
+    ]);
+    plan.beats[0].moveBlocks = [[1], [2, 3]];
+    expect(validateOutline(plan, [1, 2])).toEqual([]);
+  });
+
+  it('refuses a meaning with another term inside it', () => {
+    const nested = base();
+    nested.terms![1].meaning = 'how fast the token bucket comes back';
+    expect(validateOutline(nested, [1, 2]).map((p) => p.kind)).toEqual([
+      'term_meaning',
+    ]);
+  });
+});
+
+describe('a friend, not a book', () => {
+  const page = {
+    style: 'steady' as const,
+    weight: 'full' as const,
+    bridge: false,
+  };
+  it('sends back the phrases a book uses to tell, anywhere on the page', () => {
+    expect(
+      styleProblems(
+        'The bucket holds ten tokens. Keep in mind that each request costs one.',
+        page,
+      ).map((p) => p.kind),
+    ).toEqual(['banned_opener']);
+    expect(
+      styleProblems(
+        'The bucket holds ten tokens. As we saw, each request costs one.',
+        page,
+      ).map((p) => p.detail)[0],
+    ).toContain('"As we saw"');
+    expect(
+      styleProblems(
+        'The bucket holds ten tokens. The bit that matters is that each request costs one.',
+        page,
+      ),
+    ).toEqual([]);
+    expect(
+      styleProblems(
+        'The bucket holds ten tokens. This highlights the cost of a request.',
+        page,
+      ).map((p) => p.kind),
+    ).toEqual(['banned_opener']);
+  });
+});
+
+describe('the quick learner', () => {
+  const page = { weight: 'full' as const, bridge: false };
+  const kinds = (
+    text: string,
+    options: Partial<Parameters<typeof styleProblems>[1]> & {
+      style: 'gentle' | 'steady' | 'brisk';
+    },
+  ) => styleProblems(text, { ...page, ...options }).map((p) => p.kind);
+
+  it('opens a page on a word from what was just said, in every style', () => {
+    const prevTail = 'The bank adds interest to the balance every month.';
+    const warm =
+      'Interest compounds on the whole balance. The debt grows faster each year.';
+    const cold = 'The debt grows faster each year. Nothing else changes.';
+    for (const style of ['brisk', 'steady', 'gentle'] as const) {
+      expect(kinds(warm, { style, midChapter: true, prevTail })).toEqual([]);
+      expect(kinds(cold, { style, midChapter: true, prevTail })).toEqual([
+        'cold_open',
+      ]);
+    }
+    // A page whose first sentence answers the question left open is joined too.
+    expect(
+      kinds(cold, {
+        style: 'steady',
+        midChapter: true,
+        prevTail,
+        answers: 'So what happens to the debt over the years?',
+      }),
+    ).toEqual([]);
+    // "So" alone is not a seam.
+    expect(
+      kinds('So nothing else changes. Prices rise.', {
+        style: 'steady',
+        midChapter: true,
+        prevTail,
+      }),
+    ).toEqual(['cold_open']);
+  });
+
+  it('asks each section to open on a word from the sentence before it', () => {
+    const joined = [
+      { move: 0, text: 'The bucket holds ten tokens. A request costs one.' },
+      {
+        move: 1,
+        text: 'When a request arrives and the bucket is empty, it is refused.',
+      },
+    ];
+    const apart = [
+      { move: 0, text: 'The bucket holds ten tokens. A request costs one.' },
+      { move: 1, text: 'Servers fail in many ways. Most are boring.' },
+    ];
+    const text = (sections: { text: string }[]) =>
+      sections.map((section) => section.text).join('\n\n');
+    expect(kinds(text(joined), { style: 'steady', sections: joined })).toEqual(
+      [],
+    );
+    expect(kinds(text(apart), { style: 'steady', sections: apart })).toEqual([
+      'cold_open',
+    ]);
+  });
+
+  it("allows one pivot phrase on a page, never two, and never the last page's again", () => {
+    const once = [
+      { move: 0, text: 'The bucket holds ten tokens. A request costs one.' },
+      {
+        move: 1,
+        text: "Here's the part that matters: the bucket refills. A request that waits a second gets through.",
+      },
+    ];
+    const twice = [
+      {
+        move: 0,
+        text: "Here's the part that matters: the bucket holds ten tokens.",
+      },
+      {
+        move: 1,
+        text: "And here's the catch: the bucket refills, so the tokens come back.",
+      },
+    ];
+    expect(repeatedDevice(once)).toEqual([]);
+    expect(repeatedDevice(twice).map((p) => p.kind)).toEqual(['repetition']);
+    expect(
+      repeatedDevice(
+        once,
+        "Here's the part that matters: a request costs one.",
+      ).map((p) => p.kind),
+    ).toEqual(['repetition']);
+  });
+
+  it('is sent back when a chapter ends by landing the payoff', () => {
+    const payoff =
+      'You can tell a fixed rate from a floating one by what happens when the base rate moves.';
+    const landing =
+      'The bank sets the rate each month. So you can now tell a fixed rate from a floating one by what happens when the base rate moves.';
+    expect(
+      kinds(landing, { style: 'brisk', payoff, lastOfChapter: true }),
+    ).toEqual(['recap_ending']);
+    expect(
+      kinds(landing, { style: 'steady', payoff, lastOfChapter: true }),
+    ).toEqual([]);
+    expect(
+      kinds(landing, { style: 'brisk', payoff, lastOfChapter: false }),
+    ).toEqual([]);
+    expect(
+      kinds('The bank sets the rate each month. Borrowers pay it.', {
+        style: 'brisk',
+        payoff,
+        lastOfChapter: true,
+      }),
+    ).toEqual([]);
+  });
+
+  it('is sent back for reading the page aloud, at a lower bar than the others', () => {
+    const note =
+      'A fixed rate stays the same for the whole term of the loan, whatever the market does. A floating rate moves with the base rate, so the payment can rise or fall from month to month. Most mortgages start fixed and then float.';
+    const lifted =
+      'A fixed rate stays the same for the whole term of the loan, whatever the market does. A floating rate moves with the base rate, so the payment can rise or fall. Most mortgages start fixed.';
+    const own =
+      'Fixed means the rate is locked for the whole term. Floating means it follows the base rate, so the payment changes. Most mortgages begin fixed and switch later.';
+    expect(liftedSentences(lifted, note)).toHaveLength(2);
+    expect(liftedSentences(own, note)).toEqual([]);
+    expect(kinds(lifted, { style: 'brisk', noteText: note })).toEqual([
+      'read_aloud',
+    ]);
+    expect(kinds(lifted, { style: 'steady', noteText: note })).toEqual([]);
+    expect(kinds(own, { style: 'brisk', noteText: note })).toEqual([]);
+  });
+
+  it('lets a figure or a term through as the page has it, and one lifted sentence', () => {
+    const note =
+      'The base rate is five point two five percent from the first of March. The fee is paid once, at the start, and never again.';
+    const script =
+      'Everything hangs on one number: five point two five percent, from March onward. The fee is paid once, at the start, and never again.';
+    expect(liftedSentences(script, note)).toHaveLength(1);
+    expect(kinds(script, { style: 'brisk', noteText: note })).toEqual([]);
   });
 });
 
@@ -922,27 +1186,12 @@ describe('the segments around a chapter', () => {
 
   it('seeds no words before a chapter and no check after it, for any learner', () => {
     for (const style of ['gentle', 'steady', 'brisk'] as const) {
-      expect(extraSeeds(cut, style).map((seed) => seed.kind)).toEqual(['map']);
+      expect(extraSeeds(cut, style)).toEqual([]);
       expect(EXTRAS_BY_STYLE[style]).not.toContain('terms');
       expect(EXTRAS_BY_STYLE[style]).not.toContain('check');
     }
     expect(EXTRAS_BY_STYLE.brisk).not.toContain('review');
     expect(EXTRAS_BY_STYLE.gentle).toContain('review');
-  });
-
-  it("seeds the map for every style, at the chapter's first page", () => {
-    for (const style of ['gentle', 'steady', 'brisk'] as const) {
-      const [map] = extraSeeds(cut, style);
-      expect(map).toMatchObject({
-        kind: 'map',
-        topicId: 't1',
-        pageNumber: 1,
-        seq: 0,
-        bridge: false,
-      });
-    }
-    expect(KIND_RANK.map).toBeGreaterThan(KIND_RANK.review);
-    expect(KIND_RANK.map).toBeLessThan(KIND_RANK.page);
   });
 
   it('resolves whether the lecture is interactive: document, else account, else off', () => {
@@ -1008,11 +1257,19 @@ describe('a long gentle page voiced as two pieces', () => {
     text: Array.from({ length: words }, () => `${word}${move}`).join(' ') + '.',
   });
 
-  it("splits only a slow learner's page, only past its budget, only with a boundary to cut at", () => {
+  it("splits any style's page past its budget, only with a boundary to cut at", () => {
     const long = [section(0, 110), section(1, 110), section(2, 110)];
     expect(shouldSplit('gentle', 'full', long)).toBe(true);
-    expect(shouldSplit('steady', 'full', long)).toBe(false);
-    expect(shouldSplit('brisk', 'full', long)).toBe(false);
+    expect(shouldSplit('steady', 'full', long)).toBe(true);
+    expect(shouldSplit('brisk', 'full', long)).toBe(true);
+    // Under its own budget, a steady page stays whole.
+    expect(
+      shouldSplit('steady', 'full', [
+        section(0, 60),
+        section(1, 60),
+        section(2, 60),
+      ]),
+    ).toBe(false);
     expect(
       shouldSplit('gentle', 'full', [section(0, 200), section(1, 200)]),
     ).toBe(false);
@@ -1113,13 +1370,19 @@ describe('effectiveStatus', () => {
     );
   });
 
-  it('reads a row lost in flight as failed', () => {
+  it('reads a row lost in flight as failed, and a queued row as still coming', () => {
     expect(
       effectiveStatus(
         { status: 'voicing', updatedAt: at(LECTURE_STALE_MS + 1) },
         now,
       ),
     ).toBe('failed');
+    expect(
+      effectiveStatus(
+        { status: 'pending', updatedAt: at(LECTURE_STALE_MS * 5) },
+        now,
+      ),
+    ).toBe('pending');
     expect(
       effectiveStatus(
         { status: 'writing', updatedAt: at(LECTURE_STALE_MS * 5) },
@@ -1210,28 +1473,68 @@ describe('the gentle style, measured', () => {
     ).not.toContain('hard_words');
   });
 
-  it('runs only for the gentle style, and not on a bridge', () => {
+  it('runs for every style at its own bar, and not on a bridge', () => {
     const textbook =
       'To achieve horizontal scaling, it is important to distribute requests and data efficiently and evenly across servers, ensuring that all servers work together optimally and that the whole system remains robust as demand grows significantly over time.';
-    const gentle = styleProblems(textbook, {
-      style: 'gentle',
-      weight: 'full',
-      bridge: false,
-      pageText: PAGE,
-      terms: options.terms,
-      taughtSoFar: [],
-    }).map((problem) => problem.kind);
-    expect(gentle).toContain('long_sentences');
-    const steady = styleProblems(textbook, {
-      style: 'steady',
-      weight: 'full',
-      bridge: false,
-      pageText: PAGE,
-      terms: options.terms,
-      taughtSoFar: [],
-    }).map((problem) => problem.kind);
-    expect(steady).not.toContain('long_sentences');
-    expect(steady).not.toContain('hard_words');
+    const at = (
+      style: 'gentle' | 'steady' | 'brisk',
+      text: string,
+      bridge = false,
+    ) =>
+      styleProblems(text, {
+        style,
+        weight: 'full',
+        bridge,
+        pageText: PAGE,
+        terms: options.terms,
+        taughtSoFar: [],
+      }).map((problem) => problem.kind);
+    expect(at('gentle', textbook)).toContain('long_sentences');
+    expect(at('steady', textbook)).toContain('long_sentences');
+    expect(at('steady', textbook, true)).toEqual([]);
+    // Twenty-four words: over gentle's longest, inside steady's.
+    const middling =
+      'Keys move. A server is one computer, and when it is added the keys that move are the few that sat beside it on the ring.';
+    expect(at('gentle', middling)).toContain('long_sentences');
+    expect(at('steady', middling)).not.toContain('long_sentences');
+  });
+
+  it('measures a sentence with its terms taken out, so a keyword never makes it long', () => {
+    const sentence =
+      'Consistent hashing moves few keys, and the hash function picks the server for each one.';
+    const kinds = plainWordsProblems(sentence, options).map((p) => p.kind);
+    expect(kinds).not.toContain('long_sentences');
+  });
+
+  it('refuses a paraphrase that loses a keyword the page carries', () => {
+    const lost =
+      'Spreading keys over a ring moves few of them when a server is added. A rule turns each name into a number.';
+    const kinds = plainWordsProblems(lost, options).map((p) => p.kind);
+    expect(kinds).toContain('term_missing');
+    const kept =
+      'Consistent hashing, which just means spreading keys over a ring, moves few of them. A hash function is the rule that turns each name into a number.';
+    expect(plainWordsProblems(kept, options)).toEqual([]);
+  });
+
+  it("sends back actions turned into nouns, at the style's bar", () => {
+    const stiff =
+      'Consistent hashing, which just means spreading keys over a ring, moves few keys. Redistribution of the keys, the reallocation of load and the recomputation of every place follow. The hash function is the rule that turns a name into a number.';
+    const at = (style: 'gentle' | 'steady' | 'brisk') =>
+      plainWordsProblems(stiff, { ...options, style }).map((p) => p.kind);
+    expect(at('gentle')).toContain('stiff_verbs');
+    expect(at('steady')).toContain('stiff_verbs');
+    const two =
+      'Consistent hashing, which just means spreading keys over a ring, moves few keys. Redistribution and reallocation follow. The hash function is the rule that turns a name into a number.';
+    expect(
+      plainWordsProblems(two, { ...options, style: 'steady' }).map(
+        (p) => p.kind,
+      ),
+    ).not.toContain('stiff_verbs');
+    expect(
+      plainWordsProblems(two, { ...options, style: 'gentle' }).map(
+        (p) => p.kind,
+      ),
+    ).toContain('stiff_verbs');
   });
 });
 

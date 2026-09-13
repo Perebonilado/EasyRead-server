@@ -28,6 +28,17 @@ export interface DocumentProps {
   failureReason: string | null;
   deletedAt: Date | null;
   createdAt: Date;
+  /** The school that shares this document with its members; null on a personal one. */
+  institutionId: string | null;
+  /** Where in the school it sits: the department and level students find it under. */
+  departmentId: string | null;
+  levelId: string | null;
+  /** An optional label within that placement. */
+  courseId: string | null;
+  /** SHA-256 of the uploaded bytes, kept for a school's catalogue so a file is processed once. */
+  contentHash: string | null;
+  /** Where it sits in its course. */
+  orderIndex: number;
 }
 
 export class Document {
@@ -45,6 +56,11 @@ export class Document {
 
   isOwnedBy(userId: string): boolean {
     return this.props.userId === userId && this.props.deletedAt === null;
+  }
+
+  /** A document a school shares: read by its members, owned by the admin who uploaded it. */
+  isInstitutional(): boolean {
+    return this.props.institutionId !== null && this.props.deletedAt === null;
   }
 
   /** A PDF is already canonical, so it skips conversion entirely (§4.2). */

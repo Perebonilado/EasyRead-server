@@ -35,6 +35,17 @@ export class FakePaymentsAdapter implements PaymentsPort {
     });
   }
 
+  createSchoolPassCheckout(input: {
+    userId: string;
+    email: string;
+    institutionId: string;
+  }): Promise<CheckoutIntent> {
+    this.logger.log(
+      `[checkout] ${input.email} -> school pass/${input.institutionId}`,
+    );
+    return Promise.resolve({ url: `/school?checkout=simulated` });
+  }
+
   createCreditCheckout(input: {
     userId: string;
     email: string;

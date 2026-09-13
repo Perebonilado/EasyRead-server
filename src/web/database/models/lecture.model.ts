@@ -100,6 +100,14 @@ export class LectureSegmentModel extends BaseModel {
   @Column({ type: DataType.JSON, allowNull: true })
   declare sectionTags: unknown;
 
+  /** The phrases the writer said a listener should catch, for the voice to stress. */
+  @Column({ type: DataType.JSON, allowNull: true })
+  declare emphasis: string[] | null;
+
+  /** The paragraphs of the page the writer left untaught after its attempts, by number. */
+  @Column({ type: DataType.JSON, allowNull: true })
+  declare untaught: number[] | null;
+
   /** What the lecturer writes and draws while this row plays. */
   @Column({ type: DataType.JSON, allowNull: true })
   declare board: unknown;
@@ -165,6 +173,32 @@ export class LecturePositionModel extends BaseModel {
   declare offsetMs: number;
 
   /** The style the student was listening in when they stopped. */
+  @Column({
+    type: DataType.STRING(16),
+    allowNull: false,
+    defaultValue: 'steady',
+  })
+  declare style: LectureStyle;
+}
+
+/**
+ * One row each time a learner's saved place moves to another page: how
+ * far they got in a document, and when, so the share of chapters played
+ * to the end can be read for any stretch of weeks.
+ */
+@Table({ tableName: 'lecture_listens', underscored: true, timestamps: true })
+export class LectureListenModel extends BaseModel {
+  @ForeignKey(() => UserModel)
+  @Column({ type: DataType.UUID, allowNull: false })
+  declare userId: string;
+
+  @ForeignKey(() => DocumentModel)
+  @Column({ type: DataType.UUID, allowNull: false })
+  declare documentId: string;
+
+  @Column({ type: DataType.INTEGER, allowNull: false })
+  declare pageNumber: number;
+
   @Column({
     type: DataType.STRING(16),
     allowNull: false,

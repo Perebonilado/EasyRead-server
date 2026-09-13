@@ -686,6 +686,10 @@ export function noteProse(blocks: Block[]): string {
  */
 export function noteNumbered(blocks: Block[]): string {
   return blocks
-    .map((block, index) => `[${index}] ${blockProse(block)}`)
+    .map((block, index) =>
+      String(block.type).toLowerCase().startsWith('heading')
+        ? `[${index} heading] ${blockProse(block)}`
+        : `[${index}] ${blockProse(block)}`,
+    )
     .join('\n');
 }

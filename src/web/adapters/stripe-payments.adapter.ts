@@ -43,7 +43,11 @@ interface StripeSubscription {
   status?: string;
   cancel_at_period_end?: boolean;
   current_period_end?: number;
-  metadata?: { userId?: string } | null;
+  metadata?: {
+    userId?: string;
+    product?: string;
+    institutionId?: string;
+  } | null;
   items?: {
     data?: {
       id?: string;
@@ -115,14 +119,22 @@ export class StripePaymentsAdapter implements PaymentsPort {
    * Where the hosted checkout sends the customer afterwards. FRONTEND_URL
    * may list several origins for CORS; the first one is the canonical app.
    */
-  private returnUrl(outcome: 'success' | 'cancelled'): string {
+  private returnUrl(
+    outcome: 'success' | 'cancelled',
+    path = '/billing',
+  ): string {
     const origin = (
       this.config.get<string>('FRONTEND_URL') ?? 'http://localhost:3000'
     )
       .split(',')[0]
       .trim()
       .replace(/\/$/, '');
-    return `${origin}/billing?checkout=${outcome}`;
+    return `${origin}${path}?checkout=${outcome}`;
+  }
+
+  /** The school's price, when the deployment sells the pass. */
+  private schoolPriceId(): string | undefined {
+    return this.config.get<string>('STRIPE_PRICE_SCHOOL_YEARLY') || undefined;
   }
 
   /**
@@ -239,6 +251,55 @@ export class StripePaymentsAdapter implements PaymentsPort {
    * session metadata, so the completion event can top the wallet up without
    * a catalogue lookup — the session says what it bought.
    */
+  /**
+   * The school pass: the same hosted checkout at the school's yearly price.
+   * The product and the school ride in the subscription's metadata, so the
+   * events that follow can tell a pass from Pro and name its school. The
+   * customer returns to the school dashboard, not the billing page.
+   */
+  async createSchoolPassCheckout(input: {
+    userId: string;
+    email: string;
+    institutionId: string;
+    providerCustomerId: string | null;
+  }): Promise<CheckoutIntent> {
+    const price = this.schoolPriceId();
+    if (!price) {
+      throw new Error(
+        'STRIPE_PRICE_SCHOOL_YEARLY is not set: the school pass has no price',
+      );
+    }
+    const metadata = {
+      userId: input.userId,
+      product: 'school',
+      institutionId: input.institutionId,
+    };
+    const body: Record<string, unknown> = {
+      mode: 'subscription',
+      line_items: [{ price, quantity: 1 }],
+      client_reference_id: input.userId,
+      metadata,
+      subscription_data: { metadata },
+      success_url: this.returnUrl('success', '/school'),
+      cancel_url: this.returnUrl('cancelled', '/school'),
+      automatic_tax: { enabled: true },
+      billing_address_collection: 'auto',
+      allow_promotion_codes: true,
+    };
+    if (input.providerCustomerId) {
+      body.customer = input.providerCustomerId;
+      body.customer_update = { address: 'auto', name: 'auto' };
+    } else {
+      body.customer_email = input.email;
+    }
+    const session = await this.call<{ url?: string }>('/v1/checkout/sessions', {
+      method: 'POST',
+      body,
+    });
+    if (!session.url) throw new Error('Stripe returned no checkout url');
+    return { url: session.url };
+  }
+
   async createCreditCheckout(input: {
     userId: string;
     email: string;
@@ -469,12 +530,17 @@ export class StripePaymentsAdapter implements PaymentsPort {
     // the API version pinned above may still carry it at the top level.
     const periodEnd =
       data.items?.data?.[0]?.current_period_end ?? data.current_period_end;
+    const priceId = data.items?.data?.[0]?.price?.id;
+    // The school's price makes a pass; every other price is Pro, the one
+    // paid plan. The pass is yearly by construction.
+    const school = priceId !== undefined && priceId === this.schoolPriceId();
     return {
       providerSubscriptionId: data.id ?? '',
       providerCustomerId: data.customer ?? null,
-      // Only one paid plan exists; a live Stripe subscription means Pro.
       planCode: 'pro',
-      interval: this.intervalFor(data.items?.data?.[0]?.price?.id),
+      product: school ? 'school' : 'pro',
+      institutionId: data.metadata?.institutionId ?? null,
+      interval: school ? 'yearly' : this.intervalFor(priceId),
       status: STATUS[data.status ?? ''] ?? 'expired',
       currentPeriodEnd: periodEnd ? new Date(periodEnd * 1000) : null,
       cancelAtPeriodEnd: data.cancel_at_period_end === true,

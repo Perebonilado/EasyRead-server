@@ -4,9 +4,12 @@ import { ForbiddenError, NotFoundError } from '../../domain/errors/errors';
 import {
   DOCUMENT_REPOSITORY,
   GROUP_REPOSITORY,
+  INSTITUTION_REPOSITORY,
 } from '../../repositories/tokens';
 import type { DocumentRepository } from '../../repositories/document.repository';
 import type { GroupRepository } from '../../repositories/group.repository';
+import type { InstitutionRepository } from '../../repositories/institution.repository';
+import { SchoolAccessService } from '../institutions/school-access.service';
 
 /**
  * One place that answers "may this user touch this document?".
@@ -20,6 +23,9 @@ export class DocumentAccessService {
   constructor(
     @Inject(DOCUMENT_REPOSITORY) private readonly documents: DocumentRepository,
     @Inject(GROUP_REPOSITORY) private readonly groups: GroupRepository,
+    @Inject(INSTITUTION_REPOSITORY)
+    private readonly institutions: InstitutionRepository,
+    private readonly schoolAccess: SchoolAccessService,
   ) {}
 
   async require(documentId: string, userId: string): Promise<Document> {
@@ -28,6 +34,19 @@ export class DocumentAccessService {
     // so ids can't be probed for existence.
     if (!doc || doc.props.deletedAt) throw new NotFoundError('Document');
     if (!doc.isOwnedBy(userId)) {
+      // A school's document is read by every member of the school. What the
+      // reader writes is keyed to their own user, so members never touch each
+      // other's positions, notes or answers; the admin who uploaded it is
+      // the owner, and owner-only actions stay with them.
+      if (
+        doc.isInstitutional() &&
+        (await this.institutions.isMember(userId, doc.props.institutionId!))
+      ) {
+        // A member reads on Pro, while the school is free, or with a pass;
+        // otherwise 402 and the pass is offered.
+        await this.schoolAccess.assertMayRead(userId, doc.props.institutionId!);
+        return doc;
+      }
       // Classroom (classroom plan §4): a member of a LIVE group session on
       // this document reads it for the session's duration. Read-only in
       // effect: everything the reader writes is keyed to their own user, and
@@ -44,6 +63,23 @@ export class DocumentAccessService {
   async requireReadable(documentId: string, userId: string): Promise<Document> {
     const doc = await this.require(documentId, userId);
     doc.requireReadable();
+    return doc;
+  }
+
+  /**
+   * The owner's own document, for the actions that change or remove it. A
+   * school's document is nobody's own here: it is added and removed from the
+   * school's admin page, and a member reading along, or a classmate in a
+   * live session, has no say over it.
+   */
+  async requireOwned(documentId: string, userId: string): Promise<Document> {
+    const doc = await this.require(documentId, userId);
+    if (doc.isInstitutional()) {
+      throw new ForbiddenError(
+        "A school's document is managed from the school's admin page",
+      );
+    }
+    this.assertOwner(doc, userId);
     return doc;
   }
 

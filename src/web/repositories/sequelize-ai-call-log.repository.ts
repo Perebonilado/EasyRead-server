@@ -4,6 +4,7 @@ import type {
   AiCallLogInput,
   AiCallLogRepository,
 } from '../../business/repositories/ai-call-log.repository';
+import { costOf } from '../../business/domain/cost';
 import { AiCallLogModel } from '../database/models';
 import { newId } from '../database/uuid';
 
@@ -14,6 +15,13 @@ export class SequelizeAiCallLogRepository implements AiCallLogRepository {
   ) {}
 
   async record(input: AiCallLogInput): Promise<void> {
-    await this.logs.create({ id: newId(), ...input } as never);
+    // Priced as it lands, so spend per document is a sum and not a guess.
+    const { costUsd, ...row } = input;
+    const costEstimate = costUsd ?? costOf(row);
+    await this.logs.create({
+      id: newId(),
+      ...row,
+      costEstimate: costEstimate === null ? null : costEstimate.toFixed(6),
+    } as never);
   }
 }

@@ -6,16 +6,19 @@ import type {
   PaymentsPort,
 } from '../../ports/payments.port';
 import {
+  SCHOOL_PASS_REPOSITORY,
   SUBSCRIPTION_REPOSITORY,
   USER_REPOSITORY,
   VOICE_CREDITS_REPOSITORY,
   WEBHOOK_EVENT_REPOSITORY,
 } from '../../repositories/tokens';
 import type {
+  SchoolPassRepository,
   SubscriptionRepository,
   VoiceCreditsRepository,
   WebhookEventRepository,
 } from '../../repositories/billing.repository';
+import { passIsLive } from '../../domain/institutions';
 import type { UserRepository } from '../../repositories/user.repository';
 import AbstractRequestHandlerTemplate from '../AbstractRequestHandlerTemplate';
 import { CommandResponse } from '../response/CommandResponse';
@@ -61,6 +64,8 @@ export class HandleWebhookHandler extends AbstractRequestHandlerTemplate<
     @Inject(VOICE_CREDITS_REPOSITORY)
     private readonly credits: VoiceCreditsRepository,
     @Inject(CLOCK) private readonly clock: ClockPort,
+    @Inject(SCHOOL_PASS_REPOSITORY)
+    private readonly passes: SchoolPassRepository,
   ) {
     super();
   }
@@ -109,6 +114,13 @@ export class HandleWebhookHandler extends AbstractRequestHandlerTemplate<
     // stops the gateway retrying forever.
     if (!fresh) return;
 
+    // A school pass is its own row, never the Pro subscription.
+    if (event.subscription?.product === 'school') {
+      await this.applySchoolPass(event, event.subscription);
+      await this.events.markProcessed(provider, event.id, this.clock.now());
+      return;
+    }
+
     if (event.subscription) {
       const userId = await this.resolveUserId(event.userId, event.subscription);
       if (!userId) {
@@ -138,6 +150,15 @@ export class HandleWebhookHandler extends AbstractRequestHandlerTemplate<
           ? `${event.type}: ${userId} -> ${event.subscription.planCode}/${event.subscription.status}`
           : `${event.type}: ignored, older than the state already applied for ${userId}`,
       );
+      // Pro includes the school: a pass that still renews stops at its
+      // period end, so nobody is charged for both.
+      if (
+        written &&
+        (event.subscription.status === 'active' ||
+          event.subscription.status === 'trialing')
+      ) {
+        await this.stopPassRenewing(userId);
+      }
     }
 
     // A completed credit purchase tops the wallet up. Idempotent for the
@@ -170,6 +191,62 @@ export class HandleWebhookHandler extends AbstractRequestHandlerTemplate<
    * deployed webhook carrying user ids from a different database; writing
    * those blind is a foreign-key crash, and they are correctly nobody here.
    */
+  private async applySchoolPass(
+    event: GatewayWebhookEvent,
+    subscription: NonNullable<GatewayWebhookEvent['subscription']>,
+  ): Promise<void> {
+    const userId = await this.resolveUserId(event.userId, subscription);
+    const known = await this.passes.findByProviderSubscriptionId(
+      subscription.providerSubscriptionId,
+    );
+    const institutionId = subscription.institutionId ?? known?.institutionId;
+    if (!userId || !institutionId) {
+      this.logger.warn(
+        `${this.payments.provider} event ${event.id} (${event.type}) is a school pass for no known member`,
+      );
+      return;
+    }
+    const written = await this.passes.upsert({
+      userId,
+      institutionId,
+      provider: this.payments.provider,
+      providerSubscriptionId: subscription.providerSubscriptionId,
+      providerCustomerId: subscription.providerCustomerId,
+      status: subscription.status,
+      currentPeriodEnd: subscription.currentPeriodEnd,
+      cancelAtPeriodEnd: subscription.cancelAtPeriodEnd,
+      raw: subscription,
+      lastEventAt: event.occurredAt,
+    });
+    this.logger.log(
+      written
+        ? `${event.type}: ${userId} -> school pass/${subscription.status}`
+        : `${event.type}: ignored, older than the pass state already applied for ${userId}`,
+    );
+  }
+
+  private async stopPassRenewing(userId: string): Promise<void> {
+    const pass = await this.passes.findAnyByUser(userId);
+    if (
+      !pass?.providerSubscriptionId ||
+      pass.cancelAtPeriodEnd ||
+      !passIsLive(pass, this.clock.now())
+    ) {
+      return;
+    }
+    try {
+      await this.payments.cancelSubscription(pass.providerSubscriptionId);
+      await this.passes.upsert({ ...pass, cancelAtPeriodEnd: true });
+      this.logger.log(
+        `Pro is live for ${userId}: the school pass stops renewing at its period end`,
+      );
+    } catch (cause) {
+      this.logger.warn(
+        `Could not stop the school pass renewing for ${userId}: ${String(cause)}`,
+      );
+    }
+  }
+
   private async resolveUserId(
     fromEvent: string | null,
     subscription: {
@@ -183,6 +260,10 @@ export class HandleWebhookHandler extends AbstractRequestHandlerTemplate<
       subscription.providerSubscriptionId,
     );
     if (known) return known.userId;
+    const knownPass = await this.passes.findByProviderSubscriptionId(
+      subscription.providerSubscriptionId,
+    );
+    if (knownPass) return knownPass.userId;
 
     if (subscription.providerCustomerId) {
       const email = await this.payments.fetchCustomerEmail(

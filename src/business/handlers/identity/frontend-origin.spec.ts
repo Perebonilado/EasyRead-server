@@ -32,8 +32,6 @@ describe('frontendOrigin', () => {
   });
 
   it('falls back to localhost when unset', () => {
-    expect(frontendOrigin(configWith(undefined))).toBe(
-      'http://localhost:3000',
-    );
+    expect(frontendOrigin(configWith(undefined))).toBe('http://localhost:3000');
   });
 });

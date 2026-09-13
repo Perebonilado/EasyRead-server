@@ -3,8 +3,9 @@ import { ConfigService } from '@nestjs/config';
 import type { EmailPort } from '../../business/ports/email.port';
 import {
   passwordResetEmail,
-  verificationEmail,
+  schoolCodeEmail,
   type RenderedEmail,
+  verificationEmail,
 } from './email-templates';
 
 /**
@@ -34,6 +35,15 @@ export class ResendEmailAdapter implements EmailPort {
     url: string;
   }): Promise<void> {
     await this.deliver(input.to, passwordResetEmail(input));
+  }
+
+  async sendSchoolCode(input: {
+    to: string;
+    name: string;
+    school: string;
+    code: string;
+  }): Promise<void> {
+    await this.deliver(input.to, schoolCodeEmail(input));
   }
 
   private from(): string {

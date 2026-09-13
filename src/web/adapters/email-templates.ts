@@ -176,3 +176,47 @@ export function passwordResetEmail(input: {
     text,
   };
 }
+
+/** The six digits that let a person join their school, large, with nothing to click. */
+export function schoolCodeEmail(input: {
+  name: string;
+  school: string;
+  code: string;
+}): RenderedEmail {
+  const name = escapeHtml(firstNameOf(input.name));
+  const school = escapeHtml(input.school);
+  const code = escapeHtml(input.code);
+  const subject = `Your code for ${input.school}`;
+  const preheader = `${input.code} is your code to join ${input.school} on EasiRead.`;
+
+  const content = [
+    heading(`Hello, ${name}.`),
+    paragraph(
+      `Enter this code on EasiRead to join ${school}. It works for ten minutes.`,
+    ),
+    `<p style="margin:24px 0;font-size:34px;font-weight:700;letter-spacing:0.18em;text-align:center;font-family:Helvetica,Arial,sans-serif">${code}</p>`,
+    quietNote(
+      'If you did not ask to join a school on EasiRead, you can ignore this email and nothing will happen.',
+    ),
+  ].join('\n');
+
+  const text = [
+    `Hello, ${firstNameOf(input.name)}.`,
+    '',
+    `Enter this code on EasiRead to join ${input.school}. It works for ten minutes.`,
+    '',
+    input.code,
+    '',
+    'If you did not ask to join a school on EasiRead, you can ignore this email and nothing will happen.',
+  ].join('\n');
+
+  return {
+    subject,
+    html: layout({
+      preheader,
+      content,
+      footer: `You are getting this because this address was entered to join ${escapeHtml(input.school)} on EasiRead.`,
+    }),
+    text,
+  };
+}

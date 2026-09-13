@@ -67,6 +67,8 @@ export const ErrorCodes = {
   INVALID_CREDENTIALS: 'INVALID_CREDENTIALS',
   EMAIL_UNVERIFIED: 'EMAIL_UNVERIFIED',
   STORAGE_BUSY: 'STORAGE_BUSY',
+  /** A school's document opened by a member without a pass; the client offers one. */
+  SCHOOL_PASS_REQUIRED: 'SCHOOL_PASS_REQUIRED',
 } as const;
 export type ErrorCode = (typeof ErrorCodes)[keyof typeof ErrorCodes];
 
@@ -85,6 +87,8 @@ export type LoginResponse = {
    */
   refreshToken: string;
 };
+export type UserRole = 'learner' | 'admin';
+
 export type MeResponse = {
   id: string;
   email: string;
@@ -92,7 +96,274 @@ export type MeResponse = {
   emailVerified: boolean;
   defaultLevel: Level;
   plan: PlanCode;
+  /** The platform role; `admin` runs the schools. */
+  role: UserRole;
+  /** The school this person belongs to, or null. */
+  membership: MembershipDto | null;
 };
+
+// ── Institutions ─────────────────────────────────────────────────────────────
+
+/** A school as a member or a visitor sees it. */
+export interface InstitutionDto {
+  id: string;
+  name: string;
+  /** The school's address: easiread.com/<slug>. */
+  slug: string;
+  country: string | null;
+  /** What the school calls a level: "Year", "Level", "Semester". */
+  levelWord: string;
+  /** Whether joining needs the school's code; an email on one of its domains also admits. */
+  needsInviteCode: boolean;
+  emailDomains: string[];
+  /** Whether joining asks for a school email and the code sent to it. */
+  verifyStudents: boolean;
+  /** Free for students until this date while the school onboards; null otherwise. */
+  passFreeUntil?: string | null;
+}
+
+/** A school on the list a person picks from. */
+export interface InstitutionListItemDto {
+  id: string;
+  name: string;
+  slug: string;
+  country: string | null;
+  verifyStudents: boolean;
+}
+
+/** A school as the admin sees it: the code included. */
+export interface InstitutionAdminDto extends InstitutionDto {
+  inviteCode: string | null;
+  memberCount: number;
+  documentCount: number;
+}
+
+export interface DepartmentDto {
+  id: string;
+  name: string;
+  slug: string;
+  orderIndex: number;
+}
+
+export interface LevelDto {
+  id: string;
+  name: string;
+  orderIndex: number;
+}
+
+export interface CourseDto {
+  id: string;
+  departmentId: string;
+  levelId: string | null;
+  name: string;
+  code: string | null;
+  orderIndex: number;
+}
+
+/** A person's place in their school. */
+export interface MembershipDto {
+  institution: InstitutionDto;
+  departmentId: string | null;
+  levelId: string | null;
+  role: 'student' | 'staff' | 'admin';
+  /** The school email the member proved; null when the school did not ask. */
+  schoolEmail: string | null;
+  /** Why the member may read the school's documents; on the account's own shape only. */
+  access?: SchoolAccess;
+  /** The school pass, once one was ever bought. */
+  pass?: SchoolPassDto | null;
+}
+
+/**
+ * Why a member may read the school's documents: the first that applies.
+ * `locked` means the pass, or Pro, is needed before any file opens.
+ */
+export type SchoolAccess = 'pro' | 'school_free' | 'pass' | 'locked';
+
+export interface SchoolPassDto {
+  status: SubscriptionStatus;
+  /** When it renews, or ends if it is cancelling. */
+  currentPeriodEnd: string | null;
+  cancelAtPeriodEnd: boolean;
+}
+
+/** The school's front door: enough to sign up into it and to choose a department and level. */
+export interface InstitutionPublicDto {
+  institution: InstitutionDto;
+  departments: DepartmentDto[];
+  levels: LevelDto[];
+}
+
+/** The admin's view of one school: everything in it. */
+export interface InstitutionDetailDto {
+  institution: InstitutionAdminDto;
+  departments: DepartmentDto[];
+  levels: LevelDto[];
+  courses: CourseDto[];
+}
+
+export interface CatalogueDocumentDto extends DocumentListItem {
+  departmentId: string | null;
+  levelId: string | null;
+  courseId: string | null;
+  /** How far this member has read, 0 to 1; 0 when never opened. */
+  read: number;
+  /** When this member last read it, and the page they were on; null when never opened. */
+  lastReadAt: string | null;
+  lastPage: number | null;
+  /** Whether any lecture audio exists yet, in any style. */
+  audio: boolean;
+}
+
+/** The school's catalogue for a member: every file with where it sits, the member's own place first. */
+export interface CatalogueDto {
+  institution: InstitutionDto;
+  departments: DepartmentDto[];
+  levels: LevelDto[];
+  courses: CourseDto[];
+  documents: CatalogueDocumentDto[];
+  membership: { departmentId: string | null; levelId: string | null };
+}
+
+export interface JoinInstitutionRequest {
+  /** The school email and the code sent to it, when the school asks for them. */
+  email?: string;
+  code?: string;
+  departmentId?: string;
+  levelId?: string;
+}
+
+export interface SetMembershipRequest {
+  departmentId: string | null;
+  levelId: string | null;
+}
+
+/** A school's document as the admin sees it: where it sits and how far its processing has got. */
+export interface MaterialDto {
+  document: DocumentListItem;
+  departmentId: string | null;
+  levelId: string | null;
+  courseId: string | null;
+  orderIndex: number;
+  contentHash: string | null;
+  steps: { step: PipelineStep; status: PipelineStatus; error: string | null }[];
+  simplified: Record<Level, { done: number; failed: number; total: number }>;
+  /** Lecture rows per style, the segments around a chapter included: how many exist, have their words, have audio, failed. */
+  lecture: Record<
+    LectureStyle,
+    { total: number; scripted: number; ready: number; failed: number }
+  >;
+  /** What the model calls on this document have cost so far, summed from the ledger. */
+  costUsd: number;
+  /** Where the document stands, as the card draws it: three bars and one word. */
+  progress: MaterialProgress;
+}
+
+export type MaterialState =
+  | 'uploading'
+  | 'preparing'
+  | 'writing'
+  | 'voicing'
+  | 'ready'
+  | 'attention'
+  | 'failed';
+
+export interface MaterialProgress {
+  /** Percent of the text pipeline done. */
+  text: number;
+  /** Percent of lecture pages, all styles, with their words. */
+  scripts: number;
+  /** Percent of lecture pages, all styles, with their audio. */
+  audio: number;
+  /** Pages failed, all styles, kinds included. */
+  failed: number;
+  /** Paragraphs the written pages left untaught, all styles, as counted when they were written. */
+  untaught: number;
+  state: MaterialState;
+}
+
+/** One lecture row of a document, for the admin's detail panel. */
+export interface MaterialPageDto {
+  pageNumber: number;
+  kind: SegmentKind;
+  style: LectureStyle;
+  status: LectureSegmentStatus;
+  error: string | null;
+  /** Paragraphs of the page this row left untaught; null on rows written before it was counted. */
+  untaught: number | null;
+}
+
+export interface PrepareRequest {
+  /** Named documents, or a department at a level, or a course, or the whole school when none is given. */
+  documentIds?: string[];
+  departmentId?: string;
+  levelId?: string;
+  courseId?: string;
+  /** Write the easiest notes too. */
+  easiest: boolean;
+  /** Which lecture styles to write and voice ahead. */
+  styles: LectureStyle[];
+  /** Voice every page again, keeping the words: after a pronunciation was added or fixed. */
+  revoice?: boolean;
+}
+
+export interface PrepareEstimateDto {
+  documents: number;
+  pages: number;
+  textUsd: number;
+  audioUsd: number;
+  totalUsd: number;
+}
+
+export interface PrepareResponse extends PrepareEstimateDto {
+  /** Documents given work. */
+  queued: number;
+  /** Documents with nothing left to do, or not yet through their upload. */
+  skipped: number;
+}
+
+/** The admin's upload into a department at a level: the hash first, so a duplicate never sends its bytes. */
+export interface AdminUploadIntentRequest extends UploadIntentRequest {
+  contentHash: string;
+  departmentId: string;
+  levelId: string | null;
+  /** An optional label within the placement. */
+  courseId?: string | null;
+  orderIndex?: number;
+}
+
+export type AdminUploadIntentResponse =
+  UploadIntentResponse | { duplicateOf: string; title: string };
+
+export interface MoveMaterialRequest {
+  departmentId?: string;
+  levelId?: string | null;
+  courseId?: string | null;
+  orderIndex?: number;
+  title?: string;
+}
+
+export interface CreateInstitutionRequest {
+  name: string;
+  /** Omitted means made from the name. */
+  slug?: string;
+  country?: string | null;
+  levelWord?: string;
+  emailDomains?: string[];
+  /** True to mint a code; false for none. */
+  inviteCode?: boolean;
+}
+
+export interface UpdateInstitutionRequest {
+  name?: string;
+  slug?: string;
+  country?: string | null;
+  levelWord?: string;
+  emailDomains?: string[];
+  /** 'rotate' mints a fresh code, 'none' removes it. */
+  inviteCode?: 'rotate' | 'none';
+  verifyStudents?: boolean;
+}
 
 // ── Documents ────────────────────────────────────────────────────────────────
 
@@ -132,6 +403,11 @@ export type DocumentDetail = DocumentListItem & {
   topicsReady: boolean;
   easiestState: 'locked' | 'generating' | 'ready';
   position: { lastPage: number; furthestPage: number; level: string } | null;
+  /** The school this file belongs to and its course there, for the reader's header. */
+  school: {
+    name: string;
+    course: { id: string; name: string; code: string | null } | null;
+  } | null;
 };
 
 export type PageTextResponse = {
@@ -522,6 +798,8 @@ export type LectureSegmentStatus =
   | 'writing'
   /** The script exists; its audio has not been made yet. */
   | 'voicing'
+  /** The script exists and nobody has asked for its audio: a school's document written at upload, voiced on Prepare. */
+  | 'scripted'
   | 'done'
   | 'failed';
 
@@ -584,18 +862,16 @@ export interface LectureSegmentDto {
   moveOffsets: number[];
   /** Length of the spoken script in characters; null until written. */
   scriptLength: number | null;
+  /** Which of the chapter's points this page serves, by index; absent on older plans. */
+  point?: number;
 }
 
 export interface LectureTopicDto {
   topicId: string;
   title: string;
   segments: LectureSegmentDto[];
-  /** The chapter's map as the learner reads it while the map plays; absent until the map is written. */
-  map?: {
-    about: string;
-    stops: { name: string; line: string }[];
-    landing: string;
-  };
+  /** The three or four things the chapter settles, from its plan; absent on older plans. */
+  points?: string[];
 }
 
 /** Where the student stopped listening, so any device can resume there. */

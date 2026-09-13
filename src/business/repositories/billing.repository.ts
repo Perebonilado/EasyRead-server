@@ -30,6 +30,34 @@ export interface SubscriptionRepository {
   upsert(record: SubscriptionRecord & { raw?: unknown }): Promise<boolean>;
 }
 
+/** A person's pass with one school's library, held the way `subscriptions` holds Pro. */
+export interface SchoolPassSubscription {
+  userId: string;
+  institutionId: string;
+  provider: string | null;
+  providerSubscriptionId: string | null;
+  providerCustomerId: string | null;
+  /** Null until a pass was ever bought. */
+  status: SubscriptionStatus | null;
+  currentPeriodEnd: Date | null;
+  cancelAtPeriodEnd: boolean;
+  lastEventAt?: Date | null;
+}
+
+export type SchoolPassRecord = SchoolPassSubscription;
+
+export interface SchoolPassRepository {
+  findByUser(
+    userId: string,
+    institutionId: string,
+  ): Promise<SchoolPassRecord | null>;
+  /** The person's pass with any school, for cancelling and for reusing the gateway customer. */
+  findAnyByUser(userId: string): Promise<SchoolPassRecord | null>;
+  findByProviderSubscriptionId(id: string): Promise<SchoolPassRecord | null>;
+  /** Writes the pass with the same last-event rule as a subscription. False when skipped. */
+  upsert(record: SchoolPassSubscription & { raw?: unknown }): Promise<boolean>;
+}
+
 export interface UsageRepository {
   /**
    * Atomic check-and-increment. Returns the count AFTER incrementing, so the

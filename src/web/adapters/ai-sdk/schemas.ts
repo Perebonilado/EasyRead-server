@@ -332,6 +332,9 @@ export const recapSchema = z.object({
 export const lectureOutlineSchema = z.object({
   hook: z.string().min(1).max(900),
   arc: z.string().min(1).max(600),
+  /** The one case or question the chapter follows, page by page. */
+  thread: z.string().min(1).max(300),
+  points: z.array(z.string().min(1).max(200)).min(1).max(4),
   payoff: z.string().min(1).max(400),
   terms: z
     .array(
@@ -340,13 +343,15 @@ export const lectureOutlineSchema = z.object({
         meaning: z.string().min(1).max(200),
       }),
     )
-    .max(8),
+    .max(12),
   problem: z.string().max(300).nullable(),
   beats: z
     .array(
       z.object({
         pageNumber: z.number().int().min(1),
         goal: z.string().min(1).max(300),
+        point: z.number().int().min(0).max(3),
+        ask: z.string().max(240).nullable(),
         callback: z.string().max(300).nullable(),
         foreshadow: z.string().max(300).nullable(),
         newHere: z.string().max(200),
@@ -359,8 +364,20 @@ export const lectureOutlineSchema = z.object({
           .array(z.array(z.number().int().min(0).max(200)).nullable())
           .max(4)
           .nullable(),
+        /** The paragraphs no move teaches, each with why; null when the page came without numbers. */
+        skipBlocks: z
+          .array(
+            z.object({
+              block: z.number().int().min(0).max(200),
+              reason: z.enum(['repeat', 'caption', 'reference', 'decoration']),
+            }),
+          )
+          .max(40)
+          .nullable(),
         pitfall: z.string().max(240).nullable(),
         turn: z.boolean(),
+        /** The question this page leaves open, which the next page's first sentence answers; null on the last. */
+        handoff: z.string().max(240).nullable(),
         figure: z.object({
           kind: z.enum(['process', 'structure', 'comparison', 'none']),
           shows: z.string().max(200).nullable(),
@@ -509,22 +526,6 @@ export const lectureExtraSchema = z.object({
   script: z.string().min(1).max(4000),
 });
 
-/** The map: the outline the learner reads, and the script that speaks it. */
-export const lectureMapSchema = z.object({
-  about: z.string().min(1).max(240),
-  stops: z
-    .array(
-      z.object({
-        name: z.string().min(1).max(60),
-        line: z.string().min(1).max(220),
-      }),
-    )
-    .min(2)
-    .max(6),
-  landing: z.string().min(1).max(240),
-  script: z.string().min(1).max(4000),
-});
-
 /** One page of spoken lecture, one section per move of the beat. */
 export const lectureSegmentSchema = z.object({
   sections: z
@@ -534,6 +535,8 @@ export const lectureSegmentSchema = z.object({
         text: z.string().min(1).max(4000),
         /** The note sentences this section explains, as "block.sentence" or "block"; empty for the writer's own words. */
         teaches: z.array(z.string().min(1).max(12)).max(12),
+        /** The words a listener should hear land, up to five, copied exactly from this section's text; null for most sections. */
+        catch: z.string().max(60).nullable(),
       }),
     )
     .min(1)
@@ -561,4 +564,16 @@ export const lectureBoardPlanSchema = z.object({
 export const lectureVerifySchema = z.object({
   grounded: z.boolean(),
   problems: z.array(z.string().max(300)).max(8),
+});
+
+/** A respelling per term, in the order asked. */
+export const pronunciationsSchema = z.object({
+  entries: z
+    .array(
+      z.object({
+        term: z.string().min(1).max(120),
+        spoken: z.string().min(1).max(200),
+      }),
+    )
+    .max(80),
 });

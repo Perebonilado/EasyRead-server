@@ -22,6 +22,13 @@ export interface DocumentListFilters {
   sort?: 'recent' | 'title' | 'progress';
 }
 
+/** Whose documents "recently read" ranges over: a person's own, or a school's. */
+export type RecentScope =
+  { kind: 'own' } | { kind: 'school'; institutionId: string };
+
+/** How far back the reading positions are looked at before the scope is applied. */
+const RECENT_POSITIONS = 50;
+
 /**
  * The library grid (PRD FR-2.1).
  *
@@ -45,7 +52,13 @@ export class DocumentListQuery {
   ): Promise<{ items: DocumentListItem[]; pagination: Pagination }> {
     const { page, limit, offset } = clampPagination(filters);
 
-    const where: Record<string | symbol, unknown> = { userId, deletedAt: null };
+    // A school's documents are the school's, whoever uploaded them: they
+    // show on the school dashboard, never among a person's own.
+    const where: Record<string | symbol, unknown> = {
+      userId,
+      institutionId: null,
+      deletedAt: null,
+    };
     if (filters.status) where.status = filters.status;
     if (filters.search) {
       const term = `%${filters.search}%`;
@@ -96,7 +109,7 @@ export class DocumentListQuery {
   /** Empty-state check: has this user ever uploaded anything? (PRD FR-2.4) */
   async hasAny(userId: string): Promise<boolean> {
     const row = await this.documents.findOne({
-      where: { userId, deletedAt: null } as never,
+      where: { userId, institutionId: null, deletedAt: null } as never,
       attributes: ['id'],
     });
     return row !== null;
@@ -106,11 +119,18 @@ export class DocumentListQuery {
    * "Continue reading" rail — driven by the reading positions rather than the
    * documents, because "recent" means recently *read*, not recently uploaded.
    */
-  async recentlyRead(userId: string, take = 3): Promise<DocumentListItem[]> {
+  async recentlyRead(
+    userId: string,
+    take = 3,
+    scope: RecentScope = { kind: 'own' },
+  ): Promise<DocumentListItem[]> {
+    // The last places read, then the ones in scope: a person whose latest
+    // reads were their school's still has a document of their own to pick
+    // up, and the school dashboard never offers one of their own.
     const positions = await this.positions.findAll({
       where: { userId } as never,
       order: [['updatedAt', 'DESC']] as never,
-      limit: take,
+      limit: RECENT_POSITIONS,
     });
     if (!positions.length) return [];
 
@@ -118,19 +138,21 @@ export class DocumentListQuery {
     const rows = await this.documents.findAll({
       where: {
         id: { [Op.in]: ids },
-        userId,
+        ...(scope.kind === 'school'
+          ? { institutionId: scope.institutionId }
+          : { userId, institutionId: null }),
         deletedAt: null,
         status: 'ready',
       } as never,
     });
-
-    const counts = await this.countSimplified(rows.map((row) => row.id));
     const byId = new Map(rows.map((row) => [row.id, row]));
 
     // Preserve the position ordering; documents deleted since are dropped.
-    return ids
+    const ordered = ids
       .map((id) => byId.get(id))
       .filter((row): row is DocumentModel => Boolean(row))
-      .map((row) => toListItem(row, counts.get(row.id) ?? 0));
+      .slice(0, take);
+    const counts = await this.countSimplified(ordered.map((row) => row.id));
+    return ordered.map((row) => toListItem(row, counts.get(row.id) ?? 0));
   }
 }

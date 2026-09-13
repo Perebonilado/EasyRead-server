@@ -1,3 +1,4 @@
+import type { Block } from '../../contracts';
 import { ConfigService } from '@nestjs/config';
 import type { LectureStyle, SegmentKind } from '../../contracts';
 import { FakeLlmAdapter } from '../../web/adapters/fake-llm.adapter';
@@ -31,6 +32,11 @@ import type { BoardTimeline, WordTimes } from '../../business/domain/board';
  * between them mid-idea.
  */
 
+/** No school list: the spoken form is the written words plus the rules. */
+const noPronunciations = {
+  kept: () => Promise.resolve(new Map<string, string>()),
+} as never;
+
 const CONTEXT = { attemptsMade: 1, isFinalAttempt: false };
 const FINAL = { attemptsMade: 3, isFinalAttempt: true };
 
@@ -53,6 +59,9 @@ const REAL_PAGE =
   'Sustained monetary expansion engenders inflationary pressure insofar ' +
   'as aggregate demand outpaces the productive capacity of the economy, ' +
   'a dynamic amplified through the expectations channel.';
+
+/** A page with enough of its own words to earn the full budget: the sparse rule narrates shorter pages light. */
+const FULL_PAGE = Array.from({ length: 6 }, () => REAL_PAGE).join(' ');
 
 const USAGE = { model: 'fake', tokensIn: 1, tokensOut: 1, latencyMs: 1 };
 
@@ -103,6 +112,15 @@ function fakes(
     kind: SegmentKind;
   }[] = [];
   const diagramJobs: { pageNumber: number; style: LectureStyle }[] = [];
+  /** Chapter jobs the processor queues itself: a chapter's second pass over its failed pages. */
+  const chapterJobs: {
+    topicId: string;
+    style: LectureStyle;
+    secondPass?: boolean;
+    delayMs?: number;
+    voice?: boolean;
+    coveragePass?: number;
+  }[] = [];
   const boardJobs: {
     pageNumber: number;
     style: LectureStyle;
@@ -277,6 +295,7 @@ function fakes(
       r.moveOffsets = input.moveOffsets;
       r.durationMs = input.durationMs;
       if (input.sectionTags !== undefined) r.sectionTags = input.sectionTags;
+      if (input.untaught !== undefined) r.untaught = input.untaught;
       return Promise.resolve();
     },
     markSegmentDone: (input) => {
@@ -292,7 +311,29 @@ function fakes(
       r.attempts += 1;
       return Promise.resolve();
     },
+    listShortSegments: () => Promise.resolve([]),
+    // A page that left paragraphs untaught goes back to be written again,
+    // its count kept so the next write knows what was missing.
+    resetUntaughtSegments: (
+      _d: string,
+      _v: number,
+      topicIds: string[],
+      style: LectureStyle,
+    ) => {
+      for (const r of rows.values()) {
+        if (
+          r.style === style &&
+          topicIds.includes(r.topicId ?? topics[0].id) &&
+          (r.untaught?.length ?? 0) > 0
+        ) {
+          r.status = 'pending';
+          r.scriptText = null;
+        }
+      }
+      return Promise.resolve();
+    },
     resetFailedSegments: () => Promise.resolve(),
+    resetAudio: () => Promise.resolve(0),
     saveFollow: () => Promise.resolve(),
     saveBoard: (input) => {
       const r = row(input.pageNumber, input.style, input.kind);
@@ -380,6 +421,28 @@ function fakes(
         );
         return Promise.resolve();
       },
+      enqueueLectureChapters: (
+        jobs: {
+          topicId: string;
+          style: LectureStyle;
+          secondPass?: boolean;
+          delayMs?: number;
+          voice?: boolean;
+          coveragePass?: number;
+        }[],
+      ) => {
+        chapterJobs.push(
+          ...jobs.map((job) => ({
+            topicId: job.topicId,
+            style: job.style,
+            secondPass: job.secondPass,
+            delayMs: job.delayMs,
+            voice: job.voice,
+            coveragePass: job.coveragePass,
+          })),
+        );
+        return Promise.resolve();
+      },
       enqueueLectureVoices: (
         jobs: { pageNumber: number; style: LectureStyle; kind?: SegmentKind }[],
       ) => {
@@ -403,6 +466,7 @@ function fakes(
       },
     },
     speech: {
+      label: () => ({ model: 'gpt-4o-mini-tts', voice: 'alloy' }),
       synthesize: (input: {
         text: string;
         instructions?: string;
@@ -434,6 +498,7 @@ function fakes(
   };
 
   return {
+    chapterJobs,
     alignJobs,
     diagramJobs,
     boardJobs,
@@ -471,6 +536,7 @@ const chapterProcessor = (
   f: ReturnType<typeof fakes>,
   llm: FakeLlmAdapter = new FakeLlmAdapter(),
   boards: LectureBoardService = boardService(f, llm),
+  notes: Record<number, Block[]> = {},
 ) =>
   new LectureChapterProcessor(
     f.deps.documents as never,
@@ -482,8 +548,20 @@ const chapterProcessor = (
     f.deps.queue as never,
     f.deps.events as never,
     boards,
-    // No note is written in these fakes: the page's own text stands in.
-    { find: () => Promise.resolve(null) } as never,
+    // No note is written in these fakes unless a test hands one in; the
+    // page's own text stands in otherwise.
+    {
+      find: (_d: string, _level: string, page: number) =>
+        Promise.resolve(
+          notes[page] ? { status: 'done', blocks: notes[page] } : null,
+        ),
+    } as never,
+    new ConfigService({}),
+    // No school in these fakes: the planner is told no course.
+    {
+      listDepartments: () => Promise.resolve([]),
+      listLevels: () => Promise.resolve([]),
+    },
   );
 
 /** The follow-along service over the fakes: no note is written here, so no track is built. */
@@ -504,6 +582,9 @@ const voiceProcessor = (
     f.deps.documents as never,
     f.lectures,
     f.deps.calls,
+    noPronunciations,
+    f.deps.speech,
+    // The catalogue voice: in these fakes, the same voice.
     f.deps.speech,
     f.deps.storage as never,
     f.deps.events as never,
@@ -647,6 +728,47 @@ describe('LectureChapterProcessor', () => {
       pageNumber: 2,
       style: 'steady',
     });
+    // The chapter asks for its own second pass, a few minutes on, once.
+    expect(f.chapterJobs).toEqual([
+      {
+        topicId: TOPIC.id,
+        style: 'steady',
+        secondPass: true,
+        delayMs: 180_000,
+        voice: undefined,
+      },
+    ]);
+  });
+
+  it('writes the failed pages again on its second pass, and asks for no third', async () => {
+    const f = fakes({ 1: REAL_PAGE, 2: REAL_PAGE, 3: REAL_PAGE });
+    const llm = new FakeLlmAdapter();
+    const inner = new FakeLlmAdapter();
+    let seen = 0;
+    llm.lectureSegment = (input) => {
+      seen += 1;
+      // The first run: page 2 strays every time. The second pass: it lands.
+      if (seen >= 2 && seen <= 4) {
+        return Promise.resolve(
+          draft('UNGROUNDED invention: 4096 widgets in 1913.'),
+        );
+      }
+      return inner.lectureSegment(input);
+    };
+    const processor = chapterProcessor(f, llm);
+    await processor.process(chapterJob(), CONTEXT);
+    expect(f.segments.get(2)!.status).toBe('failed');
+
+    await processor.process(
+      { ...chapterJob(), secondPass: true, delayMs: 180_000 },
+      CONTEXT,
+    );
+
+    expect(f.segments.get(2)!.status).toBe('voicing');
+    // Page 2 is voiced now; the pass also re-asks for the pages already
+    // voiced, which the queue drops as duplicates in production.
+    expect(f.voiceJobs.slice(2).map((job) => job.pageNumber)).toContain(2);
+    expect(f.chapterJobs).toHaveLength(1);
   });
 
   it('takes the tail from the nearest page that actually has words', async () => {
@@ -725,7 +847,12 @@ describe('LectureChapterProcessor', () => {
     llm.lectureSegment = (input) => {
       seen += 1;
       stricts.push(Boolean(input.strict));
-      if (seen < 3) return Promise.resolve(draft('UNGROUNDED invention'));
+      if (seen < 3)
+        return Promise.resolve(
+          draft(
+            'Inflation is the idea this chapter turns on. UNGROUNDED invention.',
+          ),
+        );
       return inner.lectureSegment(input);
     };
 
@@ -1085,7 +1212,9 @@ describe('LectureChapterProcessor', () => {
     llm.lectureSegment = (input) => {
       corrections.push(input.correction);
       return Promise.resolve(
-        draft('The money supply grew 4096 percent after 1913.'),
+        draft(
+          'Inflation is the idea this chapter turns on. The money supply grew 4096 percent after 1913.',
+        ),
       );
     };
 
@@ -1136,7 +1265,7 @@ describe('LectureChapterProcessor', () => {
 
   it('writes each style as its own pages from one shared plan', async () => {
     const f = fakes(
-      { 1: REAL_PAGE, 2: REAL_PAGE },
+      { 1: FULL_PAGE, 2: FULL_PAGE },
       [TOPIC],
       ['steady', 'brisk'],
     );
@@ -1260,7 +1389,7 @@ describe('LectureChapterProcessor', () => {
     expect(row.moveOffsets).toHaveLength(2);
     expect(row.moveOffsets![0]).toBe(0);
     expect(row.scriptText!.slice(row.moveOffsets![1])).toMatch(
-      /^(?:\[write 1\] )?Then the mechanism\./,
+      /^(?:\[write 1\] )?Then the mechanism on this page\./,
     );
   });
 
@@ -1298,7 +1427,9 @@ describe('LectureChapterProcessor', () => {
   });
 
   it('lets the gentle style end on a second telling, and holds the others to landing', async () => {
-    const recap = 'Prices rise. In summary, easy money lifts prices.';
+    // The chapter's term said with its meaning, so only the ending is judged.
+    const recap =
+      'Inflation is the idea this chapter turns on. Prices rise. In summary, easy money lifts prices.';
     const run = async (style: LectureStyle) => {
       const f = fakes({ 1: REAL_PAGE }, [TOPIC], [style]);
       const llm = withoutBoard(new FakeLlmAdapter());
@@ -1324,7 +1455,7 @@ describe('LectureChapterProcessor', () => {
 });
 
 describe('LectureChapterProcessor: the segments around a chapter', () => {
-  it('writes the map first, then the pages: no words before the chapter, no check after it, voiced in order', async () => {
+  it('writes the pages and nothing around them: no map before the chapter, no words, no check, voiced in order', async () => {
     const f = fakes({ 1: REAL_PAGE, 2: REAL_PAGE }, [TOPIC], ['gentle']);
     f.seedExtras('gentle');
     await chapterProcessor(f).process(
@@ -1332,25 +1463,14 @@ describe('LectureChapterProcessor: the segments around a chapter', () => {
       CONTEXT,
     );
 
-    // A lecture begins on its first page and ends on its last; the map,
-    // the shape of the chapter, is ready before the first page is.
+    // A lecture begins on its first page and ends on its last.
+    expect(f.row(1, 'gentle', 'map')).toBeUndefined();
     expect(f.row(1, 'gentle', 'terms')).toBeUndefined();
     expect(f.row(2, 'gentle', 'check')).toBeUndefined();
     expect(f.voiceJobs).toEqual([
-      { pageNumber: 1, style: 'gentle', kind: 'map' },
       { pageNumber: 1, style: 'gentle' },
       { pageNumber: 2, style: 'gentle' },
     ]);
-    const map = f.row(1, 'gentle', 'map')!;
-    expect(map.scriptText).toMatch(/^Here is the shape of/);
-    expect(map.status).toBe('voicing');
-    // The outline the learner reads is kept on the plan.
-    const plan = (await f.lectures.findPlan('doc-1', TOPIC.id, 1))!.plan as {
-      map?: { about: string; stops: unknown[]; landing: string };
-    };
-    expect(plan.map?.stops.length).toBeGreaterThan(0);
-    expect(plan.map?.about).toBeTruthy();
-    expect(plan.map?.landing).toBeTruthy();
     expect(f.row(1, 'gentle')!.scriptText).toMatch(/^Why Inflation matters\./);
   });
 
@@ -1558,7 +1678,7 @@ describe('LectureChapterProcessor: a long gentle page voiced as two pieces', () 
     expect(pageTwoTail).not.toContain(A.trim());
   });
 
-  it('leaves a short gentle page, and a long page in any other style, whole', async () => {
+  it('leaves a short gentle page whole, and cuts a long page in any style', async () => {
     const short = fakes({ 1: REAL_PAGE }, [TOPIC], ['gentle']);
     const llm = withoutBoard(new FakeLlmAdapter());
     llm.lectureOutline = plannerWithMoves(['the rise', 'the banks', 'the lag']);
@@ -1577,8 +1697,11 @@ describe('LectureChapterProcessor: a long gentle page voiced as two pieces', () 
     ]);
     longLlm.lectureSegment = () => long();
     await chapterProcessor(steady, longLlm).process(chapterJob(), CONTEXT);
-    expect(steady.row(1, 'steady', 'part')).toBeUndefined();
-    expect(steady.row(1)!.scriptText).toContain(C.trim());
+    // A long steady page is two pieces too now: every paragraph is taught,
+    // so a dense page runs long in every style, and the cut is the answer.
+    expect(steady.row(1, 'steady', 'part')).toBeDefined();
+    expect(steady.row(1, 'steady', 'part')!.scriptText).toContain(C.trim());
+    expect(steady.row(1)!.scriptText).not.toContain(C.trim());
   });
 
   it('asks for the audio again of a row that kept its words but lost its voice', async () => {
@@ -1844,6 +1967,7 @@ describe('the board after the audio', () => {
       aligner,
       boardService(f),
       followService(f),
+      noPronunciations,
     );
 
   it('asks for alignment once a row is voiced, then times the board and announces it', async () => {
@@ -1992,6 +2116,7 @@ describe('the diagram on a board', () => {
       new FakeAlignerAdapter(),
       boardService(f),
       followService(f),
+      noPronunciations,
     ).process({ ...voiceJob(1, 'gentle'), kind: 'page' }, CONTEXT);
     expect(f.row(1, 'gentle')!.boardStatus).toBe('done');
 
@@ -2083,5 +2208,136 @@ describe('boards for a lecture written before boards existed', () => {
     await backfill(f, llm).process({ ...voiceJob(2), kind: 'page' }, CONTEXT);
     expect(f.row(2)!.boardStatus).toBe('done');
     expect((f.row(2)!.board as BoardTimeline).timing).toBe('estimated');
+  });
+});
+
+describe('LectureChapterProcessor: a school voices its own catalogue', () => {
+  it('writes the scripts and queues no audio when the document belongs to a school', async () => {
+    const f = fakes({ 1: REAL_PAGE, 2: REAL_PAGE });
+    f.seedExtras('steady');
+    // The document is a school's, and this deployment voices those itself.
+    const schoolDoc = {
+      ...doc,
+      props: { ...doc.props, institutionId: 'ur' },
+    };
+    const processor = new LectureChapterProcessor(
+      { findById: () => Promise.resolve(schoolDoc) } as never,
+      f.deps.pages as never,
+      f.deps.topics as never,
+      f.lectures,
+      f.deps.calls,
+      new FakeLlmAdapter(),
+      f.deps.queue as never,
+      f.deps.events as never,
+      boardService(f, new FakeLlmAdapter(), false),
+      { find: () => Promise.resolve(null) } as never,
+      new ConfigService({ LECTURE_VOICE_EXTERNAL: 'true' }),
+      {
+        listDepartments: () => Promise.resolve([]),
+        listLevels: () => Promise.resolve([]),
+      },
+    );
+    await processor.process(chapterJob(), CONTEXT);
+
+    // The words are there for the local voicer to pick up.
+    expect(f.row(1, 'steady')!.scriptText).toBeTruthy();
+    expect(f.voiceJobs).toEqual([]);
+  });
+});
+
+describe('LectureChapterProcessor: a page that left paragraphs untaught', () => {
+  const first =
+    'Sustained monetary expansion engenders inflationary pressure insofar as aggregate demand outpaces the productive capacity of the economy.';
+  const second =
+    'Central banks respond by raising the policy rate, which cools borrowing and steadies prices over the following quarters.';
+  const note: Block[] = [
+    { type: 'headingOne', text: 'Inflation' },
+    { type: 'paragraph', text: first },
+    { type: 'paragraph', text: second },
+  ];
+
+  it('writes the page again on its own, told what was missing, and shows the count only once it has given up', async () => {
+    const f = fakes({ 1: FULL_PAGE });
+    const llm = withoutBoard(new FakeLlmAdapter());
+    const told: (string | undefined)[] = [];
+    let cooperative = false;
+    llm.lectureSegment = (input) => {
+      told.push(input.styleCorrection);
+      return Promise.resolve(draft(cooperative ? `${first} ${second}` : first));
+    };
+    const processor = chapterProcessor(f, llm, boardService(f, llm), {
+      1: note,
+    });
+
+    // The first write: three attempts, each told what is missing, none
+    // teaching it. The page is kept, its count recorded, and the chapter
+    // queues itself again with the page back to pending.
+    await processor.process(chapterJob(), CONTEXT);
+    expect(
+      told.slice(1).every((t) => /Paragraph 2 is not taught/.test(t ?? '')),
+    ).toBe(true);
+    expect(f.chapterJobs).toEqual([
+      expect.objectContaining({
+        topicId: TOPIC.id,
+        style: 'steady',
+        coveragePass: 1,
+        delayMs: 30_000,
+      }),
+    ]);
+    expect(f.row(1)!.scriptText).toBeNull();
+    expect(f.row(1)!.status).toBe('pending');
+    expect(f.row(1)!.untaught).toEqual([2]);
+
+    // The pass: the writer is told before its first attempt, teaches the
+    // paragraph, and no further pass is queued.
+    cooperative = true;
+    told.length = 0;
+    await processor.process({ ...chapterJob(), coveragePass: 1 }, CONTEXT);
+    expect(told[0]).toMatch(
+      /Paragraph 2 is not taught, the one beginning "Central banks/,
+    );
+    expect(f.row(1)!.scriptText).toContain('Central banks');
+    expect(f.row(1)!.untaught).toEqual([]);
+    expect(f.chapterJobs.filter((job) => job.coveragePass === 2)).toEqual([]);
+  });
+
+  it('patches a page that fell short with the missing paragraphs, as a continuation, before any pass', async () => {
+    const f = fakes({ 1: FULL_PAGE });
+    const llm = withoutBoard(new FakeLlmAdapter());
+    const asked: string[] = [];
+    llm.lectureSegment = (input) => {
+      asked.push(input.beat.moves[0]);
+      // The whole page never teaches the second paragraph; the patch,
+      // asked for it by name, does.
+      return Promise.resolve(
+        draft(
+          input.beat.moves[0] === 'what the page also says' ? second : first,
+        ),
+      );
+    };
+    const processor = chapterProcessor(f, llm, boardService(f, llm), {
+      1: note,
+    });
+    await processor.process(chapterJob(), CONTEXT);
+    expect(
+      asked.filter((move) => move === 'what the page also says'),
+    ).toHaveLength(1);
+    expect(f.row(1)!.scriptText).toContain('Sustained');
+    expect(f.row(1)!.scriptText).toContain('Central banks');
+    expect(f.row(1)!.untaught).toEqual([]);
+    expect(f.chapterJobs).toEqual([]);
+  });
+
+  it('stops after its passes, leaving the count for the card', async () => {
+    const f = fakes({ 1: FULL_PAGE });
+    const llm = withoutBoard(new FakeLlmAdapter());
+    llm.lectureSegment = () => Promise.resolve(draft(first));
+    const processor = chapterProcessor(f, llm, boardService(f, llm), {
+      1: note,
+    });
+    await processor.process({ ...chapterJob(), coveragePass: 2 }, CONTEXT);
+    expect(f.row(1)!.untaught).toEqual([2]);
+    expect(f.row(1)!.scriptText).toContain('Sustained');
+    expect(f.chapterJobs).toEqual([]);
   });
 });

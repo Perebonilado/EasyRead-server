@@ -1,4 +1,3 @@
-import type { MapOutline } from '../domain/lecture';
 import type {
   LearnQuestion,
   Block,
@@ -78,15 +77,23 @@ export interface LectureOutlineDraft {
   hook: string;
   /** The shape of the topic, in one or two sentences. */
   arc: string;
+  /** The one case or question the chapter follows, page by page. */
+  thread: string;
   /** What the listener can now do that they could not before; the last page lands on it. */
   payoff: string;
   /** The words the chapter turns on, each with its plain meaning; spoken first for a slow learner. */
   terms: { term: string; meaning: string }[];
   /** The problem the chapter answers, posed in one line; a quick learner hears it before the principle. */
   problem: string | null;
+  /** The three or four things the chapter settles, one sentence each. */
+  points: string[];
   beats: {
     pageNumber: number;
     goal: string;
+    /** Which point this page serves, by index into points. */
+    point: number;
+    /** A question the listener can answer from what they have heard, or null. */
+    ask: string | null;
     callback: string | null;
     foreshadow: string | null;
     /** The one thing this page adds that the listener has not been taught. */
@@ -108,10 +115,19 @@ export interface LectureOutlineDraft {
     moves: string[];
     /** For each move, the numbered blocks of the note it teaches; null for a move that names none. */
     moveBlocks?: (number[] | null)[] | null;
+    /** The paragraphs no move teaches, each with why; every paragraph is in a move or here. */
+    skipBlocks?:
+      | {
+          block: number;
+          reason: 'repeat' | 'caption' | 'reference' | 'decoration';
+        }[]
+      | null;
     /** The mistake a student is most likely to make here, where the page shows it. */
     pitfall: string | null;
     /** True on the one page of the chapter where the listener is asked to predict before hearing. */
     turn: boolean;
+    /** The question this page leaves open for the next page's first sentence; null on the last. */
+    handoff: string | null;
   }[];
 }
 
@@ -123,6 +139,8 @@ export interface LectureSegmentDraft {
     text: string;
     /** The note sentences the section explains, as the writer addressed them ("2.1", or "5" for a whole block). */
     teaches?: string[];
+    /** The words a listener should hear land in this section, copied from its text; null for most sections. */
+    catch?: string | null;
   }[];
 }
 
@@ -227,9 +245,21 @@ export interface LlmGatewayPort {
     suggestedShape: { name: string; direction: string; example: string };
     /** What earlier chapters taught, one line per idea, so it is built on rather than repeated. */
     taughtEarlier: string[];
+    /** The course the students are on, for one line in the hook of where the idea meets their work; null for a learner's own upload. */
+    course: { department: string; level: string | null } | null;
     /** Set when the previous plan was rejected; says exactly why. */
     correction?: string;
   }): Promise<LlmResult<LectureOutlineDraft>>;
+
+  /**
+   * How the voice should say a document's hard terms: for each, a
+   * respelling a voice actor would read aloud correctly. Proposals only;
+   * an admin hears each one before it is used.
+   */
+  pronunciations(input: {
+    subject: string;
+    terms: string[];
+  }): Promise<LlmResult<{ term: string; spoken: string }[]>>;
 
   /** Writes one page's spoken segment, inside the topic's plan. */
   lectureSegment(input: {
@@ -245,10 +275,22 @@ export interface LlmGatewayPort {
       weight: 'full' | 'light';
       /** The moves this page teaches, in order; one section is written per move. */
       moves: string[];
+      /** For each move, the numbered paragraphs of the note it must teach; null when the page came without numbers. */
+      moveBlocks?: (number[] | null)[] | null;
       pitfall: string | null;
       /** The page asks the listener to predict, then tells them; marked with [pause]. */
       turn: boolean;
+      /** A question to put to the listener before the page answers it; null for none in this style. */
+      ask: string | null;
     };
+    /** Where the previous chapter landed, for the one line that joins this chapter to it; null for the first. */
+    previousPayoff: string | null;
+    /** The case the chapter follows, to return to where the page turns; absent on plans from before it existed. */
+    thread?: string | null;
+    /** The question the last page left open, which this page's first sentence answers; null on a chapter's first page. */
+    answers?: string | null;
+    /** The question this page leaves open for the next page to answer; null on the last. */
+    leaves?: string | null;
     /** The chapter's problem, for the page that opens it; null elsewhere. */
     problem: string | null;
     /** Where this page sits in the chapter, so restating can fade across it. */
@@ -314,27 +356,19 @@ export interface LlmGatewayPort {
    * needs no grounding check against a page.
    */
   lectureExtra(input: {
-    kind: 'map' | 'terms' | 'check' | 'review';
+    kind: 'terms' | 'check' | 'review';
     topicTitle: string;
     style: 'gentle' | 'steady' | 'brisk';
     styleDirection: string;
     /** For terms: the chapter's words with their plain meanings. */
     terms: { term: string; meaning: string }[];
-    /** For check and review: the ideas taught, one line each, in order. For the map: the chapter's headings, one per page, in order. */
+    /** For check and review: the ideas taught, one line each, in order; the chapter's points when the plan has them. */
     taught: string[];
     payoff: string | null;
-    /** For the map: what the chapter is about, from its plan. */
-    arc?: string | null;
     /** For review: whole days since the learner last listened. */
     daysAway: number | null;
     budget: { min: number; max: number };
-  }): Promise<
-    LlmResult<{
-      script: string;
-      /** For the map: the outline the script speaks, for the screen. */
-      map?: MapOutline;
-    }>
-  >;
+  }): Promise<LlmResult<{ script: string }>>;
 
   /**
    * The board for a page, planned before its speech is written: the
@@ -570,6 +604,8 @@ export interface LlmGatewayPort {
     summary: string | null;
     /** Ideas the reader keeps missing; a revisit weights questions here. */
     focus?: string[];
+    /** The chapter's points from its lecture plan; every question is about one of them. */
+    points?: string[];
     /** Spoken-friendly kinds for a check answered aloud; omitted means multiple choice. */
     kinds?: ('flashcard' | 'true_false' | 'mcq')[];
   }): Promise<

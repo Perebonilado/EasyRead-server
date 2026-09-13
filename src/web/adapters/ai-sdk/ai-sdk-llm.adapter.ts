@@ -329,6 +329,7 @@ export class AiSdkLlmAdapter implements LlmGatewayPort, OnModuleInit {
         input.thread
           ? `The chapter follows one case: ${input.thread}. Return to it where this page turns or gives its example, not in every sentence.`
           : null,
+        'Talk with them, not at them: point at what the page gives ("look at", "notice"), say once what they are probably thinking, one small reaction, "we" only as the two of you, and never "note that", "it is important" or "this highlights".',
         input.pageCount > 1
           ? `This is page ${input.pageIndex + 1} of ${input.pageCount} in the chapter${input.style === 'gentle' ? ((input.pageIndex + 1) * 2 <= input.pageCount ? ': an early page, so restate the idea fully' : ': a late page, so restate in a clause at most') : ''}.`
           : null,

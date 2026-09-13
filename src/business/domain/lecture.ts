@@ -29,7 +29,7 @@ import { EVERYDAY_WORDS } from './everyday-words';
  * every audio key. Bumped whenever the prompts change enough that audio
  * made by the previous generator must not be served for a new script.
  */
-export const LECTURE_GENERATOR_VERSION = 'lecture-10';
+export const LECTURE_GENERATOR_VERSION = 'lecture-11';
 
 /** A page with fewer readable characters than this carries no lecture. */
 export const MIN_PAGE_CHARS = 120;
@@ -415,9 +415,13 @@ export const LECTURE_STYLES: Record<LectureStyle, LectureStyleSpec> = {
       'their kind; say what actually happens instead. Where the page has an',
       'example, walk the whole of it, step by step, thinking aloud, then',
       'say the general rule it shows: one example carried through beats',
-      'two mentioned. Ask one small question the listener can answer, then',
-      'answer it yourself at once. Before you leave the page, say the one',
-      'idea a second way, in a different shape: restate fully on the',
+      'two mentioned, and walk it as the two of you thinking aloud ("so',
+      "we've got the bucket full. Now one request comes in. What does it",
+      'cost? One token. So nine left."). Patience without praise: "no',
+      'rush", "that\'s the whole trick of it", never "well done". Ask one',
+      'small question the listener can answer, then answer it yourself at',
+      'once. Before you leave the page, say the one idea a second way, as',
+      '"another way to see it", never as a summary: restate fully on the',
       "chapter's early pages and only in a clause by its last. Assume",
       'nothing was known before this page except what the lecture has',
       'already taught. Do not explain this page the way you explained the',
@@ -445,15 +449,20 @@ export const LECTURE_STYLES: Record<LectureStyle, LectureStyleSpec> = {
     name: 'I learn at a normal pace',
     subtext: 'Clear and concrete, the way most people like to be taught.',
     direction: [
-      'Concrete beats abstract: when the page gives a number, a case or an',
-      'example, build the explanation on it rather than around it. Say why',
-      'before what: before a mechanism, the problem it solves; before a rule,',
-      'the situation that needs it. Make the turn visible: most pages have a',
-      'moment where the obvious approach breaks or the real idea appears,',
-      'and that is where you slow down, because that is what the listener',
-      'remembers. At most one rhetorical question, and only if you answer it',
-      'yourself. Every paragraph on the page is taught; the styles differ in',
-      'how much is said of each, never in which are said.',
+      'You are a friend who knows this subject and enjoys it, talking at a',
+      'normal pace, pointing at what the page gives and saying what it',
+      'shows. Concrete beats abstract: when the page gives a number, a case',
+      'or an example, build the explanation on it rather than around it,',
+      'and put the listener in the example. Say why before what: before a',
+      'mechanism, the problem it solves; before a rule, the situation that',
+      'needs it. Make the turn visible: most pages have a moment where the',
+      'obvious approach breaks or the real idea appears, and that is where',
+      'you slow down and say so, because that is the interesting part and',
+      'what the listener remembers. One small reaction a page, one thing',
+      'they are probably thinking, answered. At most one rhetorical',
+      'question, and only if you answer it yourself. Every paragraph on the',
+      'page is taught; the styles differ in how much is said of each, never',
+      'in which are said.',
     ].join(' '),
     recapCheck: true,
     tailChars: 320,
@@ -483,8 +492,10 @@ export const LECTURE_STYLES: Record<LectureStyle, LectureStyleSpec> = {
       'used, not defined again. Where the page describes a procedure, tell',
       "the listener to run it in their head before the page's example",
       'confirms it. Write for a listener at double speed: short sentences,',
-      'one clause each. The listener is quick and wants the point; when the',
-      'page is taught, you are done.',
+      'one clause each. A quick friend, not a summary: "the short version:"',
+      'once a page at most, a reaction in three words, what they are',
+      'probably thinking in half a sentence. The listener is quick and wants',
+      'the point; when the page is taught, you are done.',
     ].join(' '),
     recapCheck: true,
     tailChars: 320,
@@ -790,6 +801,13 @@ const BANNED_ANYWHERE: readonly RegExp[] = [
   /^picture\s+(?:this|that|a|an|the|yourself|you)\b/i,
 ];
 
+/**
+ * The phrases a book uses to tell, anywhere in a sentence. A friend says
+ * the thing, or "the bit that matters is".
+ */
+const TELLING_PHRASES =
+  /\b(?:note that|a point to note|keep in mind|bear in mind|remember that|it should be noted|it is worth noting|it'?s worth noting|(?:it'?s|it is) noteworthy|the key point is|the key takeaway|(?:is|are) key to|it'?s key|it is (?:important|essential|crucial) to (?:note|understand|remember|recogni[sz]e)|one must|as (?:mentioned|discussed|noted|we saw|we have seen|stated)(?: earlier| above| before)?|this (?:highlights|underscores|emphasi[sz]es|underlines) (?:the|how|that))\b/i;
+
 /** How a page must not begin: audibly clearing its throat. */
 const THROAT_CLEARERS: readonly RegExp[] = [
   /^(?:now|so|right),\s/i,
@@ -938,6 +956,15 @@ export function openerProblems(
       problems.push({
         kind: 'banned_opener',
         detail: `A sentence starts with "${firstWords(offender, 3)}"; never start a sentence that way`,
+      });
+    }
+    const telling = sentences
+      .map((sentence) => TELLING_PHRASES.exec(sentence)?.[0])
+      .find((phrase): phrase is string => Boolean(phrase));
+    if (telling) {
+      problems.push({
+        kind: 'banned_opener',
+        detail: `"${telling}" is how a book tells; say the thing, or "the bit that matters is"`,
       });
     }
   }
@@ -2143,6 +2170,15 @@ export function validateOutline(
   const expected = new Set(pageNumbers);
   const seen = new Set<number>();
   for (const beat of plan.beats ?? []) {
+    // A group of paragraphs for a move that does not exist is a group
+    // nobody writes.
+    const groups = beat.moveBlocks?.length ?? 0;
+    if (beat.moves && groups > beat.moves.length) {
+      problems.push({
+        kind: 'uncovered',
+        detail: `Page ${beat.pageNumber} names ${groups} groups of paragraphs for ${beat.moves.length} moves; one group per move, in the same order`,
+      });
+    }
     if (!expected.has(beat.pageNumber)) {
       problems.push({
         kind: 'unknown_page',

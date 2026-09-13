@@ -484,12 +484,13 @@ describe('styleProblems', () => {
         (p) => p.kind,
       ),
     ).toEqual(['recap_ending']);
+    // "is key to" is also how a book tells, so both come back.
     expect(
       styleProblems(
         'Caches lie. Understanding how caches work is key to design.',
         full,
       ).map((p) => p.kind),
-    ).toEqual(['recap_ending']);
+    ).toContain('recap_ending');
     expect(
       styleProblems(
         'Caches lie. Understanding these hurdles is imperative for good design.',
@@ -865,12 +866,57 @@ describe('the chapter as a conversation', () => {
     ]);
   });
 
+  it('refuses a page whose paragraph groups outnumber its moves', () => {
+    const plan = base();
+    plan.beats[0].moves = ['the bucket', 'the cost'];
+    plan.beats[0].moveBlocks = [[1], [2], [3]];
+    expect(validateOutline(plan, [1, 2]).map((p) => p.kind)).toEqual([
+      'uncovered',
+    ]);
+    plan.beats[0].moveBlocks = [[1], [2, 3]];
+    expect(validateOutline(plan, [1, 2])).toEqual([]);
+  });
+
   it('refuses a meaning with another term inside it', () => {
     const nested = base();
     nested.terms![1].meaning = 'how fast the token bucket comes back';
     expect(validateOutline(nested, [1, 2]).map((p) => p.kind)).toEqual([
       'term_meaning',
     ]);
+  });
+});
+
+describe('a friend, not a book', () => {
+  const page = {
+    style: 'steady' as const,
+    weight: 'full' as const,
+    bridge: false,
+  };
+  it('sends back the phrases a book uses to tell, anywhere on the page', () => {
+    expect(
+      styleProblems(
+        'The bucket holds ten tokens. Keep in mind that each request costs one.',
+        page,
+      ).map((p) => p.kind),
+    ).toEqual(['banned_opener']);
+    expect(
+      styleProblems(
+        'The bucket holds ten tokens. As we saw, each request costs one.',
+        page,
+      ).map((p) => p.detail)[0],
+    ).toContain('"As we saw"');
+    expect(
+      styleProblems(
+        'The bucket holds ten tokens. The bit that matters is that each request costs one.',
+        page,
+      ),
+    ).toEqual([]);
+    expect(
+      styleProblems(
+        'The bucket holds ten tokens. This highlights the cost of a request.',
+        page,
+      ).map((p) => p.kind),
+    ).toEqual(['banned_opener']);
   });
 });
 

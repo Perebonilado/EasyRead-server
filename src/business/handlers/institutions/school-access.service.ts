@@ -15,19 +15,18 @@ import type {
 import type { InstitutionRepository } from '../../repositories/institution.repository';
 import { EntitlementsService } from '../documents/entitlements.service';
 
-/** A member's standing with the school's library, for the band and Settings. */
+/** A member's standing with the school's library, for the banner and Settings. */
 export interface SchoolStanding {
   access: SchoolAccess;
   pass: SchoolPassRecord | null;
 }
 
 /**
- * One question, answered in one place: may this member read this school
- * document? Pro includes the school; a school may be free until a date
- * while it onboards; a live pass reads; the first document ever opened is
- * free and remembered; anything else is locked, and the route answers 402
- * so the client can offer the pass. The order matters: the money is only
- * looked at after Pro and the school's own free period.
+ * One question, answered in one place: may this member read the school's
+ * documents? Pro includes the school; a school may be free until a date
+ * while it onboards; a live pass reads; anything else is locked, and the
+ * route answers 402 so the client can offer the pass. The order matters:
+ * the money is only looked at after Pro and the school's own free period.
  */
 @Injectable()
 export class SchoolAccessService {
@@ -45,41 +44,13 @@ export class SchoolAccessService {
     institutionId: string,
   ): Promise<SchoolStanding> {
     const pass = await this.passes.findByUser(userId, institutionId);
-    const access = await this.decide(userId, institutionId, pass, null);
+    const access = await this.decide(userId, institutionId, pass);
     return { access, pass };
   }
 
-  /**
-   * Whether this member may read this document of the school. Opening a
-   * document (`claim`) is where the one free document is remembered; the
-   * other reads of it only look.
-   */
-  async verdict(
-    userId: string,
-    institutionId: string,
-    documentId: string,
-    claim: boolean,
-  ): Promise<SchoolAccess> {
-    const pass = await this.passes.findByUser(userId, institutionId);
-    const access = await this.decide(userId, institutionId, pass, documentId);
-    if (access === 'first_document' && claim && !pass?.freeDocumentId) {
-      await this.passes.claimFreeDocument(
-        userId,
-        institutionId,
-        documentId,
-        this.clock.now(),
-      );
-    }
-    return access;
-  }
-
-  async assertMayRead(
-    userId: string,
-    institutionId: string,
-    documentId: string,
-    claim: boolean,
-  ): Promise<void> {
-    const access = await this.verdict(userId, institutionId, documentId, claim);
+  /** A locked member is refused with 402, whatever the document. */
+  async assertMayRead(userId: string, institutionId: string): Promise<void> {
+    const { access } = await this.standing(userId, institutionId);
     if (access === 'locked') throw new SchoolPassRequiredError();
   }
 
@@ -87,7 +58,6 @@ export class SchoolAccessService {
     userId: string,
     institutionId: string,
     pass: SchoolPassRecord | null,
-    documentId: string | null,
   ): Promise<SchoolAccess> {
     if ((await this.entitlements.planFor(userId)) === 'pro') return 'pro';
     const now = this.clock.now();
@@ -96,11 +66,6 @@ export class SchoolAccessService {
       return 'school_free';
     }
     if (passIsLive(pass, now)) return 'pass';
-    // Nothing paid: the one free document, if this is it or none is taken.
-    if (!pass?.freeDocumentId) return 'first_document';
-    if (documentId !== null && pass.freeDocumentId === documentId) {
-      return 'first_document';
-    }
     return 'locked';
   }
 }

@@ -13,8 +13,6 @@ const NOW = new Date('2026-09-13T12:00:00Z');
 const pass = (overrides: Partial<SchoolPassRecord> = {}): SchoolPassRecord => ({
   userId: 'student',
   institutionId: 'ur',
-  freeDocumentId: 'd1',
-  freeDocumentAt: NOW,
   provider: 'stripe',
   providerSubscriptionId: 'sub_pass',
   providerCustomerId: null,

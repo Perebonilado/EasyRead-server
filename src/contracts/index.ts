@@ -176,11 +176,9 @@ export interface MembershipDto {
 
 /**
  * Why a member may read the school's documents: the first that applies.
- * `first_document` means the one free document, taken or still to take;
- * `locked` means the pass is needed.
+ * `locked` means the pass, or Pro, is needed before any file opens.
  */
-export type SchoolAccess =
-  'pro' | 'school_free' | 'pass' | 'first_document' | 'locked';
+export type SchoolAccess = 'pro' | 'school_free' | 'pass' | 'locked';
 
 export interface SchoolPassDto {
   status: SubscriptionStatus;

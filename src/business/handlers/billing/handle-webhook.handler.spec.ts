@@ -121,8 +121,6 @@ describe('Pro arriving while a pass renews', () => {
   const renewing: SchoolPassRecord = {
     userId: 'student',
     institutionId: 'ur',
-    freeDocumentId: 'd1',
-    freeDocumentAt: NOW,
     provider: 'stripe',
     providerSubscriptionId: 'sub_pass',
     providerCustomerId: 'cus_1',

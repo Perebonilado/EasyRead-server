@@ -109,8 +109,6 @@ export class SequelizeSchoolPassRepository implements SchoolPassRepository {
     return {
       userId: row.userId,
       institutionId: row.institutionId,
-      freeDocumentId: row.freeDocumentId,
-      freeDocumentAt: row.freeDocumentAt,
       provider: row.provider,
       providerSubscriptionId: row.providerSubscriptionId,
       providerCustomerId: row.providerCustomerId,
@@ -176,46 +174,9 @@ export class SequelizeSchoolPassRepository implements SchoolPassRepository {
         id: newId(),
         userId: record.userId,
         institutionId: record.institutionId,
-        freeDocumentId: null,
-        freeDocumentAt: null,
         ...values,
       });
     return true;
-  }
-
-  async claimFreeDocument(
-    userId: string,
-    institutionId: string,
-    documentId: string,
-    now: Date,
-  ): Promise<string> {
-    const existing = await this.model.findOne({
-      where: { userId, institutionId },
-    });
-    if (existing?.freeDocumentId) return existing.freeDocumentId;
-    if (existing) {
-      await existing.update({
-        freeDocumentId: documentId,
-        freeDocumentAt: now,
-      });
-      return documentId;
-    }
-    await this.model.create({
-      id: newId(),
-      userId,
-      institutionId,
-      freeDocumentId: documentId,
-      freeDocumentAt: now,
-      provider: null,
-      providerSubscriptionId: null,
-      providerCustomerId: null,
-      status: null,
-      currentPeriodEnd: null,
-      cancelAtPeriodEnd: false,
-      raw: null,
-      lastEventAt: null,
-    });
-    return documentId;
   }
 }
 

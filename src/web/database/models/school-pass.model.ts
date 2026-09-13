@@ -11,10 +11,8 @@ import { InstitutionModel } from './institution.model';
 import { UserModel } from './user.model';
 
 /**
- * A person's standing with one school's library: the one document they
- * opened free, and the yearly pass once bought, held the way
- * `subscriptions` holds Pro. One row per person and school, whether or
- * not they ever paid.
+ * A person's yearly pass with one school's library, held the way
+ * `subscriptions` holds Pro. One row per person and school.
  */
 @Table({ tableName: 'school_passes', underscored: true, timestamps: true })
 export class SchoolPassModel extends BaseModel {
@@ -31,13 +29,6 @@ export class SchoolPassModel extends BaseModel {
 
   @BelongsTo(() => InstitutionModel)
   declare institution?: InstitutionModel;
-
-  /** The one school document opened free, ever. */
-  @Column({ type: DataType.UUID, allowNull: true })
-  declare freeDocumentId: string | null;
-
-  @Column({ type: DataType.DATE, allowNull: true })
-  declare freeDocumentAt: Date | null;
 
   @Column({ type: DataType.STRING(32), allowNull: true })
   declare provider: string | null;

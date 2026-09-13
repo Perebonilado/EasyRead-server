@@ -111,14 +111,8 @@ export class DocumentDetailQuery {
       where: { userId, institutionId: doc.institutionId } as never,
     });
     if (member === 0) return false;
-    // Opening a school document is where the one free document is claimed;
-    // a locked one answers 402, not 404, so the client can offer the pass.
-    await this.schoolAccess.assertMayRead(
-      userId,
-      doc.institutionId,
-      doc.id,
-      true,
-    );
+    // A locked member answers 402, not 404, so the client can offer the pass.
+    await this.schoolAccess.assertMayRead(userId, doc.institutionId);
     return true;
   }
 

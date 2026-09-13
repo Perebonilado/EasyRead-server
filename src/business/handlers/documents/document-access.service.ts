@@ -42,14 +42,9 @@ export class DocumentAccessService {
         doc.isInstitutional() &&
         (await this.institutions.isMember(userId, doc.props.institutionId!))
       ) {
-        // A member reads on Pro, while the school is free, with a pass, or
-        // for their one free document; otherwise 402 and the pass is offered.
-        await this.schoolAccess.assertMayRead(
-          userId,
-          doc.props.institutionId!,
-          doc.props.id,
-          false,
-        );
+        // A member reads on Pro, while the school is free, or with a pass;
+        // otherwise 402 and the pass is offered.
+        await this.schoolAccess.assertMayRead(userId, doc.props.institutionId!);
         return doc;
       }
       // Classroom (classroom plan §4): a member of a LIVE group session on

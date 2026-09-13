@@ -30,7 +30,7 @@ export interface SubscriptionRepository {
   upsert(record: SubscriptionRecord & { raw?: unknown }): Promise<boolean>;
 }
 
-/** The subscription half of a person's standing with a school's library. */
+/** A person's pass with one school's library, held the way `subscriptions` holds Pro. */
 export interface SchoolPassSubscription {
   userId: string;
   institutionId: string;
@@ -44,11 +44,7 @@ export interface SchoolPassSubscription {
   lastEventAt?: Date | null;
 }
 
-/** A person's standing with one school's library: the free document, and the pass once bought. */
-export interface SchoolPassRecord extends SchoolPassSubscription {
-  freeDocumentId: string | null;
-  freeDocumentAt: Date | null;
-}
+export type SchoolPassRecord = SchoolPassSubscription;
 
 export interface SchoolPassRepository {
   findByUser(
@@ -58,18 +54,8 @@ export interface SchoolPassRepository {
   /** The person's pass with any school, for cancelling and for reusing the gateway customer. */
   findAnyByUser(userId: string): Promise<SchoolPassRecord | null>;
   findByProviderSubscriptionId(id: string): Promise<SchoolPassRecord | null>;
-  /**
-   * Writes the subscription half with the same last-event rule as a
-   * subscription, keeping the free document as it is. False when skipped.
-   */
+  /** Writes the pass with the same last-event rule as a subscription. False when skipped. */
   upsert(record: SchoolPassSubscription & { raw?: unknown }): Promise<boolean>;
-  /** Records the one free document, once; answers the id that stands. */
-  claimFreeDocument(
-    userId: string,
-    institutionId: string,
-    documentId: string,
-    now: Date,
-  ): Promise<string>;
 }
 
 export interface UsageRepository {

@@ -18,7 +18,6 @@ import {
   ResumeSchoolPassHandler,
   StartSchoolPassCheckoutHandler,
 } from './business/handlers/billing/school-pass.handlers';
-import { SchoolAccessService } from './business/handlers/institutions/school-access.service';
 import { SetSchoolFreeUntilHandler } from './business/handlers/institutions/school-free-until.handler';
 import {
   CancelSubscriptionHandler,
@@ -222,7 +221,6 @@ const handlers = [
   AdminUploadIntentHandler,
   MoveMaterialHandler,
   RemoveMaterialHandler,
-  SchoolAccessService,
   SetSchoolFreeUntilHandler,
   StartSchoolPassCheckoutHandler,
   CancelSchoolPassHandler,

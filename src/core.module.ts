@@ -6,6 +6,7 @@ import { TokenGenerator } from './auth/token-generator';
 import { ComputeService } from './business/handlers/documents/compute.service';
 import { DocumentAccessService } from './business/handlers/documents/document-access.service';
 import { EntitlementsService } from './business/handlers/documents/entitlements.service';
+import { SchoolAccessService } from './business/handlers/institutions/school-access.service';
 import {
   GenerateLectureHandler,
   LectureStatusHandler,
@@ -25,6 +26,7 @@ const shared = [
   ComputeService,
   DocumentAccessService,
   EntitlementsService,
+  SchoolAccessService,
   // The orchestrator writes a school document's lecture at upload, in both
   // processes, so the handler that does it lives here with it.
   LectureStatusHandler,

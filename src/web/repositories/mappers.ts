@@ -20,7 +20,9 @@ export function toUser(row: UserModel): User {
     resetTokenHash: row.resetTokenHash,
     resetTokenExpires: row.resetTokenExpires,
     tokenVersion: row.tokenVersion,
-    deletedAt: row.deletedAt,
+    // A row just created never had this set, and comes back undefined; the
+    // entity's deleted check is a strict null test, so normalise it here.
+    deletedAt: row.deletedAt ?? null,
     createdAt: row.get('createdAt') as Date,
     role: row.role ?? 'learner',
   });
@@ -46,7 +48,9 @@ export function toDocument(row: DocumentModel): Document {
     contentVersion: row.contentVersion,
     simplificationUnavailable: row.simplificationUnavailable,
     failureReason: row.failureReason,
-    deletedAt: row.deletedAt,
+    // A row just created never had this set, and comes back undefined; the
+    // entity's deleted check is a strict null test, so normalise it here.
+    deletedAt: row.deletedAt ?? null,
     createdAt: row.get('createdAt') as Date,
     institutionId: row.institutionId ?? null,
     departmentId: row.departmentId ?? null,

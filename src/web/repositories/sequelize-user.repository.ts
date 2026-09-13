@@ -47,7 +47,12 @@ export class SequelizeUserRepository implements UserRepository {
   }
 
   async create(input: CreateUserInput): Promise<User> {
-    const row = await this.model.create({ id: newId(), ...input } as any);
+    // Explicit null, so the row we hand straight back reads as not deleted.
+    const row = await this.model.create({
+      id: newId(),
+      deletedAt: null,
+      ...input,
+    } as any);
     return toUser(row);
   }
 

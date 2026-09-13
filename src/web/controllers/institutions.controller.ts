@@ -23,8 +23,10 @@ import type {
   InstitutionListItemDto,
   InstitutionPublicDto,
   MembershipDto,
+  StudySnapshot,
 } from '../../contracts';
 import { CatalogueQuery } from '../../query/catalogue.query';
+import { ContinueStudyingQuery } from '../../query/continue-studying.query';
 import {
   InstitutionPublicHandler,
   JoinInstitutionHandler,
@@ -94,10 +96,20 @@ export class InstitutionsController {
     private readonly join: JoinInstitutionHandler,
     private readonly place: SetMembershipHandler,
     private readonly catalogue: CatalogueQuery,
+    private readonly continueQuery: ContinueStudyingQuery,
     private readonly list: ListPublicInstitutionsHandler,
     private readonly verify: StartSchoolVerificationHandler,
     private readonly leave: LeaveInstitutionHandler,
   ) {}
+
+  /** The school file this member was last reading: the school dashboard's resume card. */
+  @Get(':slug/continue')
+  async continueOf(
+    @CurrentUser('id') userId: string,
+    @Param('slug') slug: string,
+  ): Promise<StudySnapshot | null> {
+    return this.continueQuery.forSchool(slug, userId);
+  }
 
   /** The school's catalogue, for a member: every course, with their own progress. */
   @Get(':slug/catalogue')

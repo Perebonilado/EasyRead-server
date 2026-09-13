@@ -4,7 +4,6 @@ import { Op, fn, col } from 'sequelize';
 import type { DocumentListItem, DocumentStatus } from '../contracts';
 import {
   DocumentModel,
-  InstitutionMemberModel,
   ReadingPositionModel,
   SimplifiedPageModel,
 } from '../web/database/models';
@@ -23,6 +22,13 @@ export interface DocumentListFilters {
   sort?: 'recent' | 'title' | 'progress';
 }
 
+/** Whose documents "recently read" ranges over: a person's own, or a school's. */
+export type RecentScope =
+  { kind: 'own' } | { kind: 'school'; institutionId: string };
+
+/** How far back the reading positions are looked at before the scope is applied. */
+const RECENT_POSITIONS = 50;
+
 /**
  * The library grid (PRD FR-2.1).
  *
@@ -38,8 +44,6 @@ export class DocumentListQuery {
     private readonly simplified: typeof SimplifiedPageModel,
     @InjectModel(ReadingPositionModel)
     private readonly positions: typeof ReadingPositionModel,
-    @InjectModel(InstitutionMemberModel)
-    private readonly members: typeof InstitutionMemberModel,
   ) {}
 
   async execute(
@@ -115,37 +119,40 @@ export class DocumentListQuery {
    * "Continue reading" rail — driven by the reading positions rather than the
    * documents, because "recent" means recently *read*, not recently uploaded.
    */
-  async recentlyRead(userId: string, take = 3): Promise<DocumentListItem[]> {
+  async recentlyRead(
+    userId: string,
+    take = 3,
+    scope: RecentScope = { kind: 'own' },
+  ): Promise<DocumentListItem[]> {
+    // The last places read, then the ones in scope: a person whose latest
+    // reads were their school's still has a document of their own to pick
+    // up, and the school dashboard never offers one of their own.
     const positions = await this.positions.findAll({
       where: { userId } as never,
       order: [['updatedAt', 'DESC']] as never,
-      limit: take,
+      limit: RECENT_POSITIONS,
     });
     if (!positions.length) return [];
 
     const ids = positions.map((position) => position.documentId);
-    // Their own, and their school's: a member picks a shared document back
-    // up the way they would one they uploaded.
-    const member = await this.members.findOne({ where: { userId } as never });
     const rows = await this.documents.findAll({
       where: {
         id: { [Op.in]: ids },
-        [Op.or]: [
-          { userId },
-          ...(member ? [{ institutionId: member.institutionId }] : []),
-        ],
+        ...(scope.kind === 'school'
+          ? { institutionId: scope.institutionId }
+          : { userId, institutionId: null }),
         deletedAt: null,
         status: 'ready',
       } as never,
     });
-
-    const counts = await this.countSimplified(rows.map((row) => row.id));
     const byId = new Map(rows.map((row) => [row.id, row]));
 
     // Preserve the position ordering; documents deleted since are dropped.
-    return ids
+    const ordered = ids
       .map((id) => byId.get(id))
       .filter((row): row is DocumentModel => Boolean(row))
-      .map((row) => toListItem(row, counts.get(row.id) ?? 0));
+      .slice(0, take);
+    const counts = await this.countSimplified(ordered.map((row) => row.id));
+    return ordered.map((row) => toListItem(row, counts.get(row.id) ?? 0));
   }
 }

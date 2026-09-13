@@ -1,12 +1,14 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, NotFoundException } from '@nestjs/common';
 import { InjectModel } from '@nestjs/sequelize';
 import type { StudySnapshot } from '../contracts';
 import { computeMastery } from '../business/domain/learning';
 import {
   AssessmentEventModel,
+  InstitutionMemberModel,
+  InstitutionModel,
   ReadingPositionModel,
 } from '../web/database/models';
-import { DocumentListQuery } from './document-list.query';
+import { DocumentListQuery, type RecentScope } from './document-list.query';
 import { ReaderQuery } from './reader.query';
 
 /** Mastery reads the recent past; older evidence has decayed anyway. */
@@ -31,13 +33,35 @@ export class ContinueStudyingQuery {
     private readonly positions: typeof ReadingPositionModel,
     @InjectModel(AssessmentEventModel)
     private readonly assessments: typeof AssessmentEventModel,
+    @InjectModel(InstitutionModel)
+    private readonly institutions: typeof InstitutionModel,
+    @InjectModel(InstitutionMemberModel)
+    private readonly members: typeof InstitutionMemberModel,
     private readonly documents: DocumentListQuery,
     private readonly reader: ReaderQuery,
   ) {}
 
-  async execute(userId: string): Promise<StudySnapshot | null> {
+  /** The school file this member was last reading, for the school dashboard. */
+  async forSchool(slug: string, userId: string): Promise<StudySnapshot | null> {
+    const school = await this.institutions.findOne({
+      where: { slug: slug.toLowerCase() } as never,
+    });
+    if (!school) throw new NotFoundException('School not found');
+    const member = await this.members.findOne({
+      where: { userId, institutionId: school.id } as never,
+    });
+    // A non-member sees the same missing school a visitor would.
+    if (!member) throw new NotFoundException('School not found');
+    return this.execute(userId, { kind: 'school', institutionId: school.id });
+  }
+
+  /** A person's own documents by default; a school's for its dashboard. */
+  async execute(
+    userId: string,
+    scope: RecentScope = { kind: 'own' },
+  ): Promise<StudySnapshot | null> {
     // Already filtered to documents that still exist and are readable.
-    const [recent] = await this.documents.recentlyRead(userId, 1);
+    const [recent] = await this.documents.recentlyRead(userId, 1, scope);
     if (!recent) return null;
 
     const [position, topics, events] = await Promise.all([

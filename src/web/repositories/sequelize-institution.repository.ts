@@ -79,6 +79,7 @@ export class SequelizeInstitutionRepository implements InstitutionRepository {
       needsInviteCode: row.inviteCode !== null,
       emailDomains: row.emailDomains ?? [],
       verifyStudents: row.verifyStudents === true,
+      passFreeUntil: row.passFreeUntil?.toISOString() ?? null,
       inviteCode: row.inviteCode ?? null,
       memberCount,
       documentCount,
@@ -136,6 +137,7 @@ export class SequelizeInstitutionRepository implements InstitutionRepository {
       emailDomains: string[];
       inviteCode: string | null;
       verifyStudents: boolean;
+      passFreeUntil: Date | null;
     }>,
   ): Promise<void> {
     await this.institutions.update(patch, { where: { id } });

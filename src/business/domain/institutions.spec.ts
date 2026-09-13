@@ -8,6 +8,8 @@ import {
   mintInviteCode,
   mintJoinCode,
   slugify,
+  passIsLive,
+  PASS_GRACE_MS,
 } from './institutions';
 
 describe('a school address', () => {
@@ -133,5 +135,32 @@ describe("a member's catalogue", () => {
         { departmentId: 'medicine' },
       ),
     ).toEqual({ departmentId: 'medicine', levelId: null });
+  });
+});
+
+describe('a pass that still reads', () => {
+  const now = new Date('2026-09-13T12:00:00Z');
+  const pass = (status: string, endsAgoMs: number) => ({
+    status: status as never,
+    currentPeriodEnd: new Date(now.getTime() - endsAgoMs),
+  });
+
+  it('reads while paid up', () => {
+    expect(passIsLive(pass('active', -1000), now)).toBe(true);
+    expect(passIsLive(pass('trialing', -1000), now)).toBe(true);
+  });
+
+  it('keeps reading through the grace after a failed renewal, then stops', () => {
+    expect(passIsLive(pass('past_due', PASS_GRACE_MS / 2), now)).toBe(true);
+    expect(passIsLive(pass('past_due', PASS_GRACE_MS + 1), now)).toBe(false);
+  });
+
+  it('does not read once cancelled, expired, or never bought', () => {
+    expect(passIsLive(pass('cancelled', -1000), now)).toBe(false);
+    expect(passIsLive(pass('expired', 0), now)).toBe(false);
+    expect(passIsLive({ status: null, currentPeriodEnd: null }, now)).toBe(
+      false,
+    );
+    expect(passIsLive(null, now)).toBe(false);
   });
 });

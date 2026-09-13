@@ -79,6 +79,17 @@ export class LimitReachedError extends DomainError {
   }
 }
 
+/** A school's document asked for by a member without a pass: 402, and the client offers one. */
+export class SchoolPassRequiredError extends DomainError {
+  constructor() {
+    super(
+      ErrorCodes.SCHOOL_PASS_REQUIRED,
+      'This document needs a school pass',
+      402,
+    );
+  }
+}
+
 export class UnsupportedFormatError extends DomainError {
   constructor(extension: string) {
     super(

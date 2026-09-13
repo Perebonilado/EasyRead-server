@@ -26,6 +26,10 @@ export interface GatewaySubscription {
   currentPeriodEnd: Date | null;
   /** Cancelled but still inside the period already paid for. */
   cancelAtPeriodEnd: boolean;
+  /** What was bought: Pro, or a school pass. Absent means Pro. */
+  product?: 'pro' | 'school';
+  /** The school a pass is for, from the metadata stamped at checkout. */
+  institutionId?: string | null;
 }
 
 /**
@@ -64,6 +68,14 @@ export interface PaymentsPort {
     email: string;
     interval: BillingInterval;
     /** Reuse the gateway's customer when we have already seen this user. */
+    providerCustomerId: string | null;
+  }): Promise<CheckoutIntent>;
+
+  /** The school pass: a member's own school, yearly. */
+  createSchoolPassCheckout(input: {
+    userId: string;
+    email: string;
+    institutionId: string;
     providerCustomerId: string | null;
   }): Promise<CheckoutIntent>;
 

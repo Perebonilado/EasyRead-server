@@ -17,6 +17,11 @@ import {
 } from '../../business/handlers/billing/manage-subscription.handlers';
 import { HandleWebhookHandler } from '../../business/handlers/billing/handle-webhook.handler';
 import {
+  CancelSchoolPassHandler,
+  ResumeSchoolPassHandler,
+  StartSchoolPassCheckoutHandler,
+} from '../../business/handlers/billing/school-pass.handlers';
+import {
   StartCheckoutHandler,
   StartCreditCheckoutHandler,
 } from '../../business/handlers/billing/start-checkout.handler';
@@ -48,6 +53,9 @@ export class BillingController {
     private readonly portal: OpenBillingPortalHandler,
     private readonly webhook: HandleWebhookHandler,
     private readonly entitlements: EntitlementsService,
+    private readonly startSchoolPass: StartSchoolPassCheckoutHandler,
+    private readonly cancelSchoolPass: CancelSchoolPassHandler,
+    private readonly resumeSchoolPass: ResumeSchoolPassHandler,
   ) {}
 
   @Post('checkout')
@@ -110,6 +118,32 @@ export class BillingController {
   @HttpCode(204)
   async cancelSubscription(@CurrentUser('id') userId: string): Promise<void> {
     await this.cancel.handle({ userId });
+  }
+
+  /** The school pass: checkout for the member's own school, yearly. */
+  @Post('school-pass/checkout')
+  @HttpCode(200)
+  async schoolPassCheckout(
+    @CurrentUser('id') userId: string,
+  ): Promise<CheckoutResponse> {
+    this.entitlements.assertBillingEnabled();
+    const result = await this.startSchoolPass.handle({ userId });
+    return result.data;
+  }
+
+  /** Stops the pass renewing at the end of the paid year. */
+  @Delete('school-pass')
+  @HttpCode(204)
+  async cancelPass(@CurrentUser('id') userId: string): Promise<void> {
+    await this.cancelSchoolPass.handle({ userId });
+  }
+
+  /** Takes back a pass cancellation that has not taken effect yet. */
+  @Post('school-pass/resume')
+  @HttpCode(204)
+  async resumePass(@CurrentUser('id') userId: string): Promise<void> {
+    this.entitlements.assertBillingEnabled();
+    await this.resumeSchoolPass.handle({ userId });
   }
 
   /**

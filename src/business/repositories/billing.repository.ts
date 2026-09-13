@@ -30,6 +30,48 @@ export interface SubscriptionRepository {
   upsert(record: SubscriptionRecord & { raw?: unknown }): Promise<boolean>;
 }
 
+/** The subscription half of a person's standing with a school's library. */
+export interface SchoolPassSubscription {
+  userId: string;
+  institutionId: string;
+  provider: string | null;
+  providerSubscriptionId: string | null;
+  providerCustomerId: string | null;
+  /** Null until a pass was ever bought. */
+  status: SubscriptionStatus | null;
+  currentPeriodEnd: Date | null;
+  cancelAtPeriodEnd: boolean;
+  lastEventAt?: Date | null;
+}
+
+/** A person's standing with one school's library: the free document, and the pass once bought. */
+export interface SchoolPassRecord extends SchoolPassSubscription {
+  freeDocumentId: string | null;
+  freeDocumentAt: Date | null;
+}
+
+export interface SchoolPassRepository {
+  findByUser(
+    userId: string,
+    institutionId: string,
+  ): Promise<SchoolPassRecord | null>;
+  /** The person's pass with any school, for cancelling and for reusing the gateway customer. */
+  findAnyByUser(userId: string): Promise<SchoolPassRecord | null>;
+  findByProviderSubscriptionId(id: string): Promise<SchoolPassRecord | null>;
+  /**
+   * Writes the subscription half with the same last-event rule as a
+   * subscription, keeping the free document as it is. False when skipped.
+   */
+  upsert(record: SchoolPassSubscription & { raw?: unknown }): Promise<boolean>;
+  /** Records the one free document, once; answers the id that stands. */
+  claimFreeDocument(
+    userId: string,
+    institutionId: string,
+    documentId: string,
+    now: Date,
+  ): Promise<string>;
+}
+
 export interface UsageRepository {
   /**
    * Atomic check-and-increment. Returns the count AFTER incrementing, so the

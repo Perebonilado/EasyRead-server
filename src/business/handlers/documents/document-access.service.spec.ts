@@ -1,5 +1,9 @@
 import { Document } from '../../domain/entities/document';
-import { NotFoundError, ForbiddenError } from '../../domain/errors/errors';
+import {
+  NotFoundError,
+  ForbiddenError,
+  SchoolPassRequiredError,
+} from '../../domain/errors/errors';
 import { DocumentAccessService } from './document-access.service';
 
 const doc = (institutionId: string | null) =>
@@ -32,13 +36,19 @@ const doc = (institutionId: string | null) =>
     orderIndex: 0,
   });
 
-const service = (shared: Document, members: string[]) =>
+const service = (shared: Document, members: string[], locked = false) =>
   new DocumentAccessService(
     { findById: () => Promise.resolve(shared) } as never,
     { liveSessionDocumentAccess: () => Promise.resolve(false) } as never,
     {
       isMember: (userId: string, institutionId: string) =>
         Promise.resolve(institutionId === 'ur' && members.includes(userId)),
+    } as never,
+    {
+      assertMayRead: () =>
+        locked
+          ? Promise.reject(new SchoolPassRequiredError())
+          : Promise.resolve(),
     } as never,
   );
 
@@ -53,6 +63,16 @@ describe('who may touch a document', () => {
     );
     await expect(access.require('d1', 'stranger')).rejects.toBeInstanceOf(
       NotFoundError,
+    );
+  });
+
+  it('asks a member for the pass when the school says so, and never the owner', async () => {
+    const access = service(doc('ur'), ['student'], true);
+    await expect(access.require('d1', 'student')).rejects.toBeInstanceOf(
+      SchoolPassRequiredError,
+    );
+    await expect(access.require('d1', 'admin')).resolves.toBeInstanceOf(
+      Document,
     );
   });
 
@@ -87,6 +107,7 @@ describe('who may touch a document', () => {
           Promise.resolve(userId === 'classmate'),
       } as never,
       { isMember: () => Promise.resolve(false) } as never,
+      { assertMayRead: () => Promise.resolve() } as never,
     );
     await expect(access.require('d1', 'classmate')).resolves.toBeInstanceOf(
       Document,

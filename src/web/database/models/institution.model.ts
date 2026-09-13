@@ -33,6 +33,10 @@ export class InstitutionModel extends BaseModel {
   @Column({ type: DataType.BOOLEAN, allowNull: false, defaultValue: false })
   declare verifyStudents: boolean;
 
+  /** Free for students until this date while the school onboards. */
+  @Column({ type: DataType.DATE, allowNull: true })
+  declare passFreeUntil: Date | null;
+
   @HasMany(() => DepartmentModel)
   declare departments?: DepartmentModel[];
 

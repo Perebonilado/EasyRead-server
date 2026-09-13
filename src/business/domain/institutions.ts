@@ -1,4 +1,5 @@
 import { createHash } from 'crypto';
+import type { SubscriptionStatus } from '../../contracts';
 /**
  * The rules of a school's front door, kept pure so they can be tested
  * without a database: what a slug may be, who a school admits, and the
@@ -152,4 +153,26 @@ export function catalogueScope(
     return { departmentId: member.departmentId, levelId: member.levelId };
   }
   return null;
+}
+
+/** How long a pass keeps reading after a renewal fails, while the gateway retries the card. */
+export const PASS_GRACE_MS = 7 * 24 * 60 * 60 * 1000;
+
+/** A pass that still reads: paid up, or a failed renewal inside its grace. */
+export function passIsLive(
+  pass: {
+    status: SubscriptionStatus | null;
+    currentPeriodEnd: Date | null;
+  } | null,
+  now: Date,
+): boolean {
+  if (!pass?.status) return false;
+  if (pass.status === 'active' || pass.status === 'trialing') return true;
+  if (pass.status === 'past_due') {
+    return (
+      !pass.currentPeriodEnd ||
+      now.getTime() < pass.currentPeriodEnd.getTime() + PASS_GRACE_MS
+    );
+  }
+  return false;
 }

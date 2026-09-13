@@ -14,6 +14,7 @@ import {
   ArrayMaxSize,
   IsArray,
   IsBoolean,
+  IsDateString,
   IsIn,
   IsInt,
   IsOptional,
@@ -43,6 +44,7 @@ import {
   UpdateInstitutionHandler,
 } from '../../business/handlers/institutions/institution.handlers';
 import { AdminGuard } from '../security/admin.guard';
+import { SetSchoolFreeUntilHandler } from '../../business/handlers/institutions/school-free-until.handler';
 import { CurrentUser } from '../security/current-user.decorator';
 
 class CreateInstitutionDto {
@@ -143,6 +145,13 @@ class CourseBodyDto extends NamedDto {
 }
 
 /** The platform admin's view of the schools. Every route is behind the admin gate. */
+/** Free for students until a date, while the school onboards; null lifts it. */
+class SchoolFreeUntilDto {
+  @ValidateIf((_, value) => value !== null)
+  @IsDateString()
+  freeUntil!: string | null;
+}
+
 @Controller('admin/institutions')
 @UseGuards(AdminGuard)
 export class AdminInstitutionsController {
@@ -157,6 +166,7 @@ export class AdminInstitutionsController {
     private readonly dropLevel: DeleteLevelHandler,
     private readonly saveCourse: SaveCourseHandler,
     private readonly dropCourse: DeleteCourseHandler,
+    private readonly setFreeUntil: SetSchoolFreeUntilHandler,
   ) {}
 
   @Get()
@@ -183,6 +193,19 @@ export class AdminInstitutionsController {
     @Param('id') institutionId: string,
   ): Promise<InstitutionDetailDto> {
     const { data } = await this.detail.handle({ userId, institutionId });
+    return data;
+  }
+
+  /** Free for students until a date, while the school onboards; null lifts it. */
+  @Patch(':id/pass')
+  async setPass(
+    @Param('id') institutionId: string,
+    @Body() body: SchoolFreeUntilDto,
+  ): Promise<InstitutionAdminDto> {
+    const { data } = await this.setFreeUntil.handle({
+      institutionId,
+      freeUntil: body.freeUntil,
+    });
     return data;
   }
 

@@ -67,6 +67,8 @@ export const ErrorCodes = {
   INVALID_CREDENTIALS: 'INVALID_CREDENTIALS',
   EMAIL_UNVERIFIED: 'EMAIL_UNVERIFIED',
   STORAGE_BUSY: 'STORAGE_BUSY',
+  /** A school's document opened by a member without a pass; the client offers one. */
+  SCHOOL_PASS_REQUIRED: 'SCHOOL_PASS_REQUIRED',
 } as const;
 export type ErrorCode = (typeof ErrorCodes)[keyof typeof ErrorCodes];
 
@@ -116,6 +118,8 @@ export interface InstitutionDto {
   emailDomains: string[];
   /** Whether joining asks for a school email and the code sent to it. */
   verifyStudents: boolean;
+  /** Free for students until this date while the school onboards; null otherwise. */
+  passFreeUntil?: string | null;
 }
 
 /** A school on the list a person picks from. */
@@ -164,6 +168,25 @@ export interface MembershipDto {
   role: 'student' | 'staff' | 'admin';
   /** The school email the member proved; null when the school did not ask. */
   schoolEmail: string | null;
+  /** Why the member may read the school's documents; on the account's own shape only. */
+  access?: SchoolAccess;
+  /** The school pass, once one was ever bought. */
+  pass?: SchoolPassDto | null;
+}
+
+/**
+ * Why a member may read the school's documents: the first that applies.
+ * `first_document` means the one free document, taken or still to take;
+ * `locked` means the pass is needed.
+ */
+export type SchoolAccess =
+  'pro' | 'school_free' | 'pass' | 'first_document' | 'locked';
+
+export interface SchoolPassDto {
+  status: SubscriptionStatus;
+  /** When it renews, or ends if it is cancelling. */
+  currentPeriodEnd: string | null;
+  cancelAtPeriodEnd: boolean;
 }
 
 /** The school's front door: enough to sign up into it and to choose a department and level. */

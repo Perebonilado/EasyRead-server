@@ -59,6 +59,7 @@ export interface InstitutionRepository {
       emailDomains: string[];
       inviteCode: string | null;
       verifyStudents: boolean;
+      passFreeUntil: Date | null;
     }>,
   ): Promise<void>;
 

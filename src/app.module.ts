@@ -14,6 +14,13 @@ import {
 } from './business/handlers/billing/start-checkout.handler';
 import { HandleWebhookHandler } from './business/handlers/billing/handle-webhook.handler';
 import {
+  CancelSchoolPassHandler,
+  ResumeSchoolPassHandler,
+  StartSchoolPassCheckoutHandler,
+} from './business/handlers/billing/school-pass.handlers';
+import { SchoolAccessService } from './business/handlers/institutions/school-access.service';
+import { SetSchoolFreeUntilHandler } from './business/handlers/institutions/school-free-until.handler';
+import {
   CancelSubscriptionHandler,
   ChangeIntervalHandler,
   OpenBillingPortalHandler,
@@ -215,6 +222,11 @@ const handlers = [
   AdminUploadIntentHandler,
   MoveMaterialHandler,
   RemoveMaterialHandler,
+  SchoolAccessService,
+  SetSchoolFreeUntilHandler,
+  StartSchoolPassCheckoutHandler,
+  CancelSchoolPassHandler,
+  ResumeSchoolPassHandler,
   PronunciationHandlers,
   PrepareMaterialsHandler,
   CreateGroupHandler,

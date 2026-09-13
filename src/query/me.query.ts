@@ -10,6 +10,7 @@ import {
   UserModel,
 } from '../web/database/models';
 import { publicShape } from '../business/handlers/institutions/institution.handlers';
+import { SchoolAccessService } from '../business/handlers/institutions/school-access.service';
 
 @Injectable()
 export class MeQuery {
@@ -20,6 +21,7 @@ export class MeQuery {
     @InjectModel(InstitutionMemberModel)
     private readonly members: typeof InstitutionMemberModel,
     private readonly entitlements: EntitlementsService,
+    private readonly schoolAccess: SchoolAccessService,
   ) {}
 
   async execute(userId: string): Promise<MeResponse> {
@@ -33,26 +35,44 @@ export class MeQuery {
       include: [InstitutionModel],
     });
     const school = member?.institution;
+    // Where they stand with the school's library: the band and Settings
+    // read it from here, so nothing on the client fetches on its own.
+    const standing =
+      member && school
+        ? await this.schoolAccess.standing(userId, school.id)
+        : null;
     const membership: MeResponse['membership'] =
       member && school
         ? {
-            institution: publicShape({
-              id: school.id,
-              name: school.name,
-              slug: school.slug,
-              country: school.country ?? null,
-              levelWord: school.levelWord,
-              needsInviteCode: school.inviteCode !== null,
-              emailDomains: school.emailDomains ?? [],
-              verifyStudents: school.verifyStudents === true,
-              inviteCode: school.inviteCode ?? null,
-              memberCount: 0,
-              documentCount: 0,
-            }),
+            institution: {
+              ...publicShape({
+                id: school.id,
+                name: school.name,
+                slug: school.slug,
+                country: school.country ?? null,
+                levelWord: school.levelWord,
+                needsInviteCode: school.inviteCode !== null,
+                emailDomains: school.emailDomains ?? [],
+                verifyStudents: school.verifyStudents === true,
+                inviteCode: school.inviteCode ?? null,
+                memberCount: 0,
+                documentCount: 0,
+              }),
+              passFreeUntil: school.passFreeUntil?.toISOString() ?? null,
+            },
             departmentId: member.departmentId ?? null,
             levelId: member.levelId ?? null,
             role: member.role,
             schoolEmail: member.schoolEmail ?? null,
+            access: standing?.access,
+            pass: standing?.pass?.status
+              ? {
+                  status: standing.pass.status,
+                  currentPeriodEnd:
+                    standing.pass.currentPeriodEnd?.toISOString() ?? null,
+                  cancelAtPeriodEnd: standing.pass.cancelAtPeriodEnd,
+                }
+              : null,
           }
         : null;
 

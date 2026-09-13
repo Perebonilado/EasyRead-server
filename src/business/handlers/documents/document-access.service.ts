@@ -9,6 +9,7 @@ import {
 import type { DocumentRepository } from '../../repositories/document.repository';
 import type { GroupRepository } from '../../repositories/group.repository';
 import type { InstitutionRepository } from '../../repositories/institution.repository';
+import { SchoolAccessService } from '../institutions/school-access.service';
 
 /**
  * One place that answers "may this user touch this document?".
@@ -24,6 +25,7 @@ export class DocumentAccessService {
     @Inject(GROUP_REPOSITORY) private readonly groups: GroupRepository,
     @Inject(INSTITUTION_REPOSITORY)
     private readonly institutions: InstitutionRepository,
+    private readonly schoolAccess: SchoolAccessService,
   ) {}
 
   async require(documentId: string, userId: string): Promise<Document> {
@@ -40,6 +42,14 @@ export class DocumentAccessService {
         doc.isInstitutional() &&
         (await this.institutions.isMember(userId, doc.props.institutionId!))
       ) {
+        // A member reads on Pro, while the school is free, with a pass, or
+        // for their one free document; otherwise 402 and the pass is offered.
+        await this.schoolAccess.assertMayRead(
+          userId,
+          doc.props.institutionId!,
+          doc.props.id,
+          false,
+        );
         return doc;
       }
       // Classroom (classroom plan §4): a member of a LIVE group session on

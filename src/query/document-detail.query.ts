@@ -13,6 +13,7 @@ import {
   CourseModel,
 } from '../web/database/models';
 import { toListItem } from './shared/document-shape';
+import { SchoolAccessService } from '../business/handlers/institutions/school-access.service';
 
 type LevelTally = { done: number; failed: number; total: number };
 
@@ -39,6 +40,7 @@ export class DocumentDetailQuery {
     private readonly institutions: typeof InstitutionModel,
     @InjectModel(CourseModel)
     private readonly courses: typeof CourseModel,
+    private readonly schoolAccess: SchoolAccessService,
   ) {}
 
   async execute(documentId: string, userId: string): Promise<DocumentDetail> {
@@ -108,7 +110,16 @@ export class DocumentDetailQuery {
     const member = await this.members.count({
       where: { userId, institutionId: doc.institutionId } as never,
     });
-    return member > 0;
+    if (member === 0) return false;
+    // Opening a school document is where the one free document is claimed;
+    // a locked one answers 402, not 404, so the client can offer the pass.
+    await this.schoolAccess.assertMayRead(
+      userId,
+      doc.institutionId,
+      doc.id,
+      true,
+    );
+    return true;
   }
 
   /**

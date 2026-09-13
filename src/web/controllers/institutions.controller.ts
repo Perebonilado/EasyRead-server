@@ -1,6 +1,7 @@
 import {
   Body,
   Controller,
+  Delete,
   Get,
   HttpCode,
   Param,
@@ -8,15 +9,18 @@ import {
   Post,
   Query,
 } from '@nestjs/common';
+import { Throttle } from '@nestjs/throttler';
 import {
+  IsEmail,
   IsOptional,
   IsString,
   IsUUID,
-  Length,
+  Matches,
   ValidateIf,
 } from 'class-validator';
 import type {
   CatalogueDto,
+  InstitutionListItemDto,
   InstitutionPublicDto,
   MembershipDto,
 } from '../../contracts';
@@ -24,16 +28,24 @@ import { CatalogueQuery } from '../../query/catalogue.query';
 import {
   InstitutionPublicHandler,
   JoinInstitutionHandler,
+  LeaveInstitutionHandler,
+  ListPublicInstitutionsHandler,
   SetMembershipHandler,
+  StartSchoolVerificationHandler,
 } from '../../business/handlers/institutions/institution.handlers';
 import { CurrentUser } from '../security/current-user.decorator';
 import { Public } from '../security/public.decorator';
 
 class JoinInstitutionDto {
+  /** The school email and the code sent to it, when the school asks for them. */
+  @IsOptional()
+  @IsEmail()
+  email?: string;
+
   @IsOptional()
   @IsString()
-  @Length(1, 16)
-  inviteCode?: string;
+  @Matches(/^\s*\d{6}\s*$/)
+  code?: string;
 
   @IsOptional()
   @IsUUID('all')
@@ -53,6 +65,11 @@ class CatalogueQueryDto {
   @IsOptional()
   @IsUUID('all')
   levelId?: string;
+}
+
+class VerifySchoolEmailDto {
+  @IsEmail()
+  email!: string;
 }
 
 class SetMembershipDto {
@@ -77,6 +94,9 @@ export class InstitutionsController {
     private readonly join: JoinInstitutionHandler,
     private readonly place: SetMembershipHandler,
     private readonly catalogue: CatalogueQuery,
+    private readonly list: ListPublicInstitutionsHandler,
+    private readonly verify: StartSchoolVerificationHandler,
+    private readonly leave: LeaveInstitutionHandler,
   ) {}
 
   /** The school's catalogue, for a member: every course, with their own progress. */
@@ -102,6 +122,38 @@ export class InstitutionsController {
       userId,
       departmentId: body.departmentId ?? null,
       levelId: body.levelId ?? null,
+    });
+    return data;
+  }
+
+  /** Every school, for the list a person picks from. */
+  @Public()
+  @Get()
+  async all(): Promise<{ institutions: InstitutionListItemDto[] }> {
+    const { data } = await this.list.handle({});
+    return data;
+  }
+
+  /** The member leaves their school. */
+  @Delete('membership')
+  async leaveSchool(@CurrentUser('id') userId: string): Promise<{ ok: true }> {
+    const { data } = await this.leave.handle({ userId });
+    return data;
+  }
+
+  /** A code to the school email named, for a school that asks for one. Few a minute, on purpose. */
+  @Post(':slug/verify')
+  @Throttle({ default: { limit: 5, ttl: 60_000 } })
+  @HttpCode(200)
+  async verifySchoolEmail(
+    @CurrentUser('id') userId: string,
+    @Param('slug') slug: string,
+    @Body() body: VerifySchoolEmailDto,
+  ): Promise<{ ok: true; resendAfterMs: number }> {
+    const { data } = await this.verify.handle({
+      userId,
+      slug,
+      email: body.email,
     });
     return data;
   }

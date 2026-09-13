@@ -44,6 +44,7 @@ export class MeQuery {
               levelWord: school.levelWord,
               needsInviteCode: school.inviteCode !== null,
               emailDomains: school.emailDomains ?? [],
+              verifyStudents: school.verifyStudents === true,
               inviteCode: school.inviteCode ?? null,
               memberCount: 0,
               documentCount: 0,
@@ -51,6 +52,7 @@ export class MeQuery {
             departmentId: member.departmentId ?? null,
             levelId: member.levelId ?? null,
             role: member.role,
+            schoolEmail: member.schoolEmail ?? null,
           }
         : null;
 

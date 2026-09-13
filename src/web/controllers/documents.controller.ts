@@ -11,7 +11,6 @@ import {
   Query,
   Req,
   Res,
-  UseGuards,
 } from '@nestjs/common';
 import type { Request, Response } from 'express';
 import type {
@@ -39,7 +38,6 @@ import { DocumentDetailQuery } from '../../query/document-detail.query';
 import { DocumentListQuery } from '../../query/document-list.query';
 import { ContinueStudyingQuery } from '../../query/continue-studying.query';
 import type { Pagination } from '../../query/shared/pagination';
-import { OwnFilesGuard } from '../security/own-files.guard';
 import { CurrentUser } from '../security/current-user.decorator';
 import {
   DocumentListQueryDto,
@@ -83,9 +81,7 @@ export class DocumentsController {
     return this.list.recentlyRead(userId);
   }
 
-  /** A file of one's own begins here; a student's files come from their school. */
   @Post('upload-intent')
-  @UseGuards(OwnFilesGuard)
   @HttpCode(201)
   async intent(
     @CurrentUser('id') userId: string,

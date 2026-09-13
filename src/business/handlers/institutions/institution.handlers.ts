@@ -6,6 +6,7 @@ import type {
   InstitutionAdminDto,
   InstitutionDetailDto,
   InstitutionDto,
+  InstitutionListItemDto,
   InstitutionPublicDto,
   JoinInstitutionRequest,
   LevelDto,
@@ -19,11 +20,18 @@ import {
   ValidationError,
 } from '../../domain/errors/errors';
 import {
-  admits,
+  JOIN_CODE,
+  emailOnDomains,
+  hashJoinCode,
   isValidSlug,
+  joinCodeVerdict,
   mintInviteCode,
+  mintJoinCode,
   slugify,
 } from '../../domain/institutions';
+import { CLOCK, EMAIL } from '../../ports/tokens';
+import type { ClockPort } from '../../ports/clock.port';
+import type { EmailPort } from '../../ports/email.port';
 import {
   INSTITUTION_REPOSITORY,
   USER_REPOSITORY,
@@ -43,6 +51,7 @@ export function publicShape(school: InstitutionAdminDto): InstitutionDto {
     levelWord: school.levelWord,
     needsInviteCode: school.needsInviteCode,
     emailDomains: school.emailDomains,
+    verifyStudents: school.verifyStudents,
   };
 }
 
@@ -130,6 +139,9 @@ export class UpdateInstitutionHandler extends AbstractRequestHandlerTemplate<
     }
     if (cmd.levelWord !== undefined)
       patch.levelWord = cmd.levelWord.trim() || 'Year';
+    if (cmd.verifyStudents !== undefined) {
+      patch.verifyStudents = cmd.verifyStudents;
+    }
     if (cmd.emailDomains !== undefined) {
       patch.emailDomains = cleanDomains(cmd.emailDomains);
     }
@@ -447,7 +459,100 @@ export class InstitutionPublicHandler extends AbstractRequestHandlerTemplate<
   }
 }
 
-/** A signed-in person joins the school at an address, by its code or their email's domain. */
+/** Every school, for the list a person picks from. */
+@Injectable()
+export class ListPublicInstitutionsHandler extends AbstractRequestHandlerTemplate<
+  Record<string, never>,
+  { institutions: InstitutionListItemDto[] }
+> {
+  constructor(
+    @Inject(INSTITUTION_REPOSITORY)
+    private readonly institutions: InstitutionRepository,
+  ) {
+    super();
+  }
+  protected async handleRequest() {
+    return CommandResponse.of({
+      institutions: await this.institutions.listPublic(),
+    });
+  }
+}
+
+/**
+ * A school that asks for a school email: the person names theirs, a code
+ * goes to it, and the code lets them join. The address must be on the
+ * school's domains when it has any; a new code replaces the last, and a
+ * minute must pass between sends.
+ */
+@Injectable()
+export class StartSchoolVerificationHandler extends AbstractRequestHandlerTemplate<
+  { userId: string; slug: string; email: string },
+  { ok: true; resendAfterMs: number }
+> {
+  constructor(
+    @Inject(INSTITUTION_REPOSITORY)
+    private readonly institutions: InstitutionRepository,
+    @Inject(USER_REPOSITORY) private readonly users: UserRepository,
+    @Inject(EMAIL) private readonly email: EmailPort,
+    @Inject(CLOCK) private readonly clock: ClockPort,
+  ) {
+    super();
+  }
+  protected async handleRequest(cmd: {
+    userId: string;
+    slug: string;
+    email: string;
+  }) {
+    const school = await this.institutions.findBySlug(cmd.slug.toLowerCase());
+    if (!school) throw new NotFoundError('School');
+    if (!school.verifyStudents) {
+      throw new ValidationError('This school does not ask for a school email');
+    }
+    const user = await this.users.findById(cmd.userId);
+    if (!user) throw new NotFoundError('User');
+    const email = cmd.email.trim().toLowerCase();
+    if (!emailOnDomains(school, email)) {
+      throw new ValidationError(
+        `That is not a ${school.name} address; use your school email`,
+      );
+    }
+    const now = this.clock.now();
+    const last = await this.institutions.findJoinCode(cmd.userId, school.id);
+    if (
+      last &&
+      !last.consumedAt &&
+      now.getTime() - last.createdAt.getTime() < JOIN_CODE.resendMs
+    ) {
+      throw new ValidationError(
+        'A code was sent a moment ago; give it a minute before asking again',
+      );
+    }
+    const code = mintJoinCode();
+    await this.institutions.saveJoinCode({
+      userId: cmd.userId,
+      institutionId: school.id,
+      email,
+      codeHash: hashJoinCode(cmd.userId, code),
+      expiresAt: new Date(now.getTime() + JOIN_CODE.ttlMs),
+    });
+    await this.email.sendSchoolCode({
+      to: email,
+      name: user.name,
+      school: school.name,
+      code,
+    });
+    return CommandResponse.of({
+      ok: true as const,
+      resendAfterMs: JOIN_CODE.resendMs,
+    });
+  }
+}
+
+/**
+ * A signed-in person joins a school. A school that does not ask for a
+ * school email takes anyone who picks it; one that does takes the email
+ * and the code sent to it, and keeps the email on the membership.
+ */
 @Injectable()
 export class JoinInstitutionHandler extends AbstractRequestHandlerTemplate<
   JoinInstitutionRequest & { userId: string; slug: string },
@@ -457,6 +562,7 @@ export class JoinInstitutionHandler extends AbstractRequestHandlerTemplate<
     @Inject(INSTITUTION_REPOSITORY)
     private readonly institutions: InstitutionRepository,
     @Inject(USER_REPOSITORY) private readonly users: UserRepository,
+    @Inject(CLOCK) private readonly clock: ClockPort,
   ) {
     super();
   }
@@ -467,28 +573,47 @@ export class JoinInstitutionHandler extends AbstractRequestHandlerTemplate<
     if (!school) throw new NotFoundError('School');
     const user = await this.users.findById(cmd.userId);
     if (!user) throw new NotFoundError('User');
-    if (
-      !admits(
-        { inviteCode: school.inviteCode, emailDomains: school.emailDomains },
-        { email: user.email, code: cmd.inviteCode ?? null },
-      )
-    ) {
-      throw new ForbiddenError(
-        school.needsInviteCode
-          ? 'That code is not right for this school'
-          : "Your email is not on this school's domains",
+
+    let schoolEmail: string | null = null;
+    let verifiedAt: Date | null = null;
+    if (school.verifyStudents) {
+      const email = cmd.email?.trim().toLowerCase() ?? '';
+      const code = cmd.code?.trim() ?? '';
+      if (!email || !code) {
+        throw new ValidationError(
+          'This school asks for your school email and the code sent to it',
+        );
+      }
+      const now = this.clock.now();
+      const stored = await this.institutions.findJoinCode(
+        cmd.userId,
+        school.id,
       );
+      const verdict = joinCodeVerdict(stored, code, now);
+      if (verdict === 'wrong' && stored) {
+        await this.institutions.countJoinAttempt(stored.id);
+      }
+      if (verdict !== 'ok' || !stored || stored.email !== email) {
+        throw new ForbiddenError(JOIN_CODE_MESSAGES[verdict]);
+      }
+      await this.institutions.consumeJoinCode(stored.id, now);
+      schoolEmail = email;
+      verifiedAt = now;
     }
+
     const placement = await this.checkedPlacement(school.id, cmd);
     await this.institutions.join({
       userId: cmd.userId,
       institutionId: school.id,
       ...placement,
+      schoolEmail,
+      verifiedAt,
     });
     return CommandResponse.of({
       institution: publicShape(school),
       ...placement,
       role: 'student' as const,
+      schoolEmail,
     });
   }
 
@@ -515,6 +640,36 @@ export class JoinInstitutionHandler extends AbstractRequestHandlerTemplate<
       levelId = level.id;
     }
     return { departmentId, levelId };
+  }
+}
+
+/** What a person is told when their code does not let them in. */
+const JOIN_CODE_MESSAGES: Record<
+  'ok' | 'missing' | 'expired' | 'exhausted' | 'wrong',
+  string
+> = {
+  ok: 'That code is not right for this email',
+  missing: 'Ask for a code first',
+  expired: 'That code has expired; ask for a new one',
+  exhausted: 'Too many tries; ask for a new code',
+  wrong: 'That code is not right',
+};
+
+/** A member leaves their school; their own documents are untouched. */
+@Injectable()
+export class LeaveInstitutionHandler extends AbstractRequestHandlerTemplate<
+  { userId: string },
+  { ok: true }
+> {
+  constructor(
+    @Inject(INSTITUTION_REPOSITORY)
+    private readonly institutions: InstitutionRepository,
+  ) {
+    super();
+  }
+  protected async handleRequest(cmd: { userId: string }) {
+    await this.institutions.leave(cmd.userId);
+    return CommandResponse.of({ ok: true as const });
   }
 }
 
@@ -562,6 +717,7 @@ export class SetMembershipHandler extends AbstractRequestHandlerTemplate<
       departmentId: cmd.departmentId,
       levelId: cmd.levelId,
       role: membership.role,
+      schoolEmail: membership.schoolEmail,
     });
   }
 }

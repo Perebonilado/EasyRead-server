@@ -6,10 +6,12 @@ import type {
   DepartmentDto,
   InstitutionAdminDto,
   LevelDto,
+  InstitutionListItemDto,
 } from '../../contracts';
 import type {
   InstitutionRepository,
   MembershipRecord,
+  JoinCodeRecord,
 } from '../../business/repositories/institution.repository';
 import {
   CourseModel,
@@ -18,6 +20,7 @@ import {
   InstitutionMemberModel,
   InstitutionModel,
   LevelModel,
+  InstitutionJoinCodeModel,
 } from '../database/models';
 import { newId } from '../database/uuid';
 
@@ -54,6 +57,8 @@ export class SequelizeInstitutionRepository implements InstitutionRepository {
     @InjectModel(CourseModel) private readonly courses: typeof CourseModel,
     @InjectModel(InstitutionMemberModel)
     private readonly members: typeof InstitutionMemberModel,
+    @InjectModel(InstitutionJoinCodeModel)
+    private readonly joinCodes: typeof InstitutionJoinCodeModel,
     @InjectModel(DocumentModel)
     private readonly documents: typeof DocumentModel,
   ) {}
@@ -73,10 +78,22 @@ export class SequelizeInstitutionRepository implements InstitutionRepository {
       levelWord: row.levelWord,
       needsInviteCode: row.inviteCode !== null,
       emailDomains: row.emailDomains ?? [],
+      verifyStudents: row.verifyStudents === true,
       inviteCode: row.inviteCode ?? null,
       memberCount,
       documentCount,
     };
+  }
+
+  async listPublic(): Promise<InstitutionListItemDto[]> {
+    const rows = await this.institutions.findAll({ order: [['name', 'ASC']] });
+    return rows.map((row) => ({
+      id: row.id,
+      name: row.name,
+      slug: row.slug,
+      country: row.country ?? null,
+      verifyStudents: row.verifyStudents === true,
+    }));
   }
 
   async findById(id: string): Promise<InstitutionAdminDto | null> {
@@ -118,6 +135,7 @@ export class SequelizeInstitutionRepository implements InstitutionRepository {
       levelWord: string;
       emailDomains: string[];
       inviteCode: string | null;
+      verifyStudents: boolean;
     }>,
   ): Promise<void> {
     await this.institutions.update(patch, { where: { id } });
@@ -263,6 +281,8 @@ export class SequelizeInstitutionRepository implements InstitutionRepository {
       departmentId: row.departmentId ?? null,
       levelId: row.levelId ?? null,
       role: row.role,
+      schoolEmail: row.schoolEmail ?? null,
+      verifiedAt: row.verifiedAt ?? null,
     };
   }
 
@@ -278,6 +298,8 @@ export class SequelizeInstitutionRepository implements InstitutionRepository {
     institutionId: string;
     departmentId: string | null;
     levelId: string | null;
+    schoolEmail: string | null;
+    verifiedAt: Date | null;
   }): Promise<void> {
     // One institution per user: joining another replaces the membership.
     await this.members.destroy({ where: { userId: input.userId } });
@@ -293,5 +315,56 @@ export class SequelizeInstitutionRepository implements InstitutionRepository {
     patch: { departmentId: string | null; levelId: string | null },
   ): Promise<void> {
     await this.members.update(patch, { where: { userId } });
+  }
+
+  async leave(userId: string): Promise<void> {
+    await this.members.destroy({ where: { userId } });
+  }
+
+  async findJoinCode(
+    userId: string,
+    institutionId: string,
+  ): Promise<JoinCodeRecord | null> {
+    const row = await this.joinCodes.findOne({
+      where: { userId, institutionId },
+      order: [['createdAt', 'DESC']],
+    });
+    if (!row) return null;
+    return {
+      id: row.id,
+      userId: row.userId,
+      institutionId: row.institutionId,
+      email: row.email,
+      codeHash: row.codeHash,
+      expiresAt: row.expiresAt,
+      attempts: row.attempts,
+      consumedAt: row.consumedAt ?? null,
+      createdAt: row.get('createdAt') as Date,
+    };
+  }
+
+  async saveJoinCode(input: {
+    userId: string;
+    institutionId: string;
+    email: string;
+    codeHash: string;
+    expiresAt: Date;
+  }): Promise<void> {
+    await this.joinCodes.destroy({
+      where: { userId: input.userId, institutionId: input.institutionId },
+    });
+    await this.joinCodes.create({
+      id: newId(),
+      ...input,
+      attempts: 0,
+    } as never);
+  }
+
+  async countJoinAttempt(id: string): Promise<void> {
+    await this.joinCodes.increment('attempts', { where: { id } });
+  }
+
+  async consumeJoinCode(id: string, now: Date): Promise<void> {
+    await this.joinCodes.update({ consumedAt: now }, { where: { id } });
   }
 }

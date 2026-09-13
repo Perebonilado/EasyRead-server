@@ -161,7 +161,6 @@ import { LectureController } from './web/controllers/lecture.controller';
 import { VoiceController } from './web/controllers/voice.controller';
 import { GuidedController } from './web/controllers/guided.controller';
 import { InstitutionsController } from './web/controllers/institutions.controller';
-import { OwnFilesGuard } from './web/security/own-files.guard';
 import { AdminInstitutionsController } from './web/controllers/admin-institutions.controller';
 import { AdminMaterialsController } from './web/controllers/admin-materials.controller';
 import { AdminPronunciationsController } from './web/controllers/admin-pronunciations.controller';
@@ -181,6 +180,9 @@ import {
   InstitutionDetailHandler,
   InstitutionPublicHandler,
   JoinInstitutionHandler,
+  LeaveInstitutionHandler,
+  ListPublicInstitutionsHandler,
+  StartSchoolVerificationHandler,
   ListInstitutionsHandler,
   SaveCourseHandler,
   SaveDepartmentHandler,
@@ -200,6 +202,9 @@ const handlers = [
   InstitutionDetailHandler,
   InstitutionPublicHandler,
   JoinInstitutionHandler,
+  LeaveInstitutionHandler,
+  ListPublicInstitutionsHandler,
+  StartSchoolVerificationHandler,
   ListInstitutionsHandler,
   SaveCourseHandler,
   SaveDepartmentHandler,
@@ -365,7 +370,6 @@ const queries = [
   providers: [
     ...handlers,
     ...queries,
-    OwnFilesGuard,
     { provide: APP_GUARD, useClass: ThrottlerGuard },
     { provide: APP_GUARD, useClass: AuthGuard },
     { provide: APP_FILTER, useClass: DomainExceptionFilter },

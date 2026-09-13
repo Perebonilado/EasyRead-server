@@ -1,5 +1,4 @@
-import { Body, Controller, Post, UseGuards } from '@nestjs/common';
-import { OwnFilesGuard } from '../security/own-files.guard';
+import { Body, Controller, Post } from '@nestjs/common';
 import { Type } from 'class-transformer';
 import {
   ArrayMaxSize,
@@ -56,7 +55,6 @@ class StartImportDto {
 
 /** Importing documentation from the web. */
 @Controller('import')
-@UseGuards(OwnFilesGuard)
 export class ImportController {
   constructor(
     private readonly discover: DiscoverImportHandler,

@@ -9,7 +9,7 @@ import type { EmailPort } from '../../business/ports/email.port';
 export class LogEmailAdapter implements EmailPort {
   private readonly logger = new Logger('Email');
 
-  async sendVerification({
+  sendVerification({
     to,
     url,
   }: {
@@ -18,9 +18,10 @@ export class LogEmailAdapter implements EmailPort {
     url: string;
   }): Promise<void> {
     this.logger.log(`[verify] ${to} -> ${url}`);
+    return Promise.resolve();
   }
 
-  async sendPasswordReset({
+  sendPasswordReset({
     to,
     url,
   }: {
@@ -29,5 +30,20 @@ export class LogEmailAdapter implements EmailPort {
     url: string;
   }): Promise<void> {
     this.logger.log(`[reset] ${to} -> ${url}`);
+    return Promise.resolve();
+  }
+
+  sendSchoolCode({
+    to,
+    school,
+    code,
+  }: {
+    to: string;
+    name: string;
+    school: string;
+    code: string;
+  }): Promise<void> {
+    this.logger.log(`[school code] ${to} -> ${code} for ${school}`);
+    return Promise.resolve();
   }
 }

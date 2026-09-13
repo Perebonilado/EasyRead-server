@@ -1,3 +1,4 @@
+import { createHash } from 'crypto';
 /**
  * The rules of a school's front door, kept pure so they can be tested
  * without a database: what a slug may be, who a school admits, and the
@@ -65,36 +66,59 @@ export function emailDomainOf(email: string): string {
   return email.slice(email.lastIndexOf('@') + 1).toLowerCase();
 }
 
-/**
- * Whether a school lets this person in: by its code, by their email's
- * domain, or freely when it asks for neither.
- */
-export function admits(
-  school: { inviteCode: string | null; emailDomains: string[] },
-  who: { email: string; code: string | null },
+/** Whether an email is on one of the school's domains; a school with no domains takes any address. */
+export function emailOnDomains(
+  school: { emailDomains: string[] },
+  email: string,
 ): boolean {
-  if (school.emailDomains.length) {
-    const domain = emailDomainOf(who.email);
-    if (
-      school.emailDomains.some((allowed) => allowed.toLowerCase() === domain)
-    ) {
-      return true;
-    }
-  }
-  if (school.inviteCode) {
-    return (
-      who.code !== null &&
-      who.code.trim().toUpperCase() === school.inviteCode.toUpperCase()
-    );
-  }
-  return school.emailDomains.length === 0;
+  if (!school.emailDomains.length) return true;
+  const domain = emailDomainOf(email);
+  return school.emailDomains.some(
+    (allowed) => allowed.toLowerCase() === domain,
+  );
 }
 
-/** A member who joined as a student: the school adds their files, and their catalogue is their selection. */
-export function isStudent(
-  membership: { role: 'student' | 'staff' | 'admin' } | null | undefined,
-): boolean {
-  return membership?.role === 'student';
+/** The rules a join code lives by: six digits, ten minutes, five tries, a minute between sends. */
+export const JOIN_CODE = {
+  length: 6,
+  ttlMs: 10 * 60_000,
+  attempts: 5,
+  resendMs: 60_000,
+};
+
+/** A six-digit code, zero-padded, from the random source given. */
+export function mintJoinCode(random: () => number = Math.random): string {
+  const limit = 10 ** JOIN_CODE.length;
+  const value = Math.min(limit - 1, Math.floor(random() * limit));
+  return String(value).padStart(JOIN_CODE.length, '0');
+}
+
+/** The code as stored: never the digits, and tied to the person it was sent for. */
+export function hashJoinCode(userId: string, code: string): string {
+  return createHash('sha256').update(`${userId}:${code.trim()}`).digest('hex');
+}
+
+export type JoinCodeVerdict =
+  'ok' | 'missing' | 'expired' | 'exhausted' | 'wrong';
+
+/** What a code entered against the stored one comes to, by the rules above. */
+export function joinCodeVerdict(
+  stored: {
+    userId: string;
+    codeHash: string;
+    expiresAt: Date;
+    attempts: number;
+    consumedAt: Date | null;
+  } | null,
+  entered: string,
+  now: Date,
+): JoinCodeVerdict {
+  if (!stored || stored.consumedAt) return 'missing';
+  if (now.getTime() > stored.expiresAt.getTime()) return 'expired';
+  if (stored.attempts >= JOIN_CODE.attempts) return 'exhausted';
+  return hashJoinCode(stored.userId, entered) === stored.codeHash
+    ? 'ok'
+    : 'wrong';
 }
 
 /** A department and, when set, a level: what a member's catalogue is filtered to. */
@@ -105,8 +129,8 @@ export interface CatalogueScope {
 
 /**
  * What a member's catalogue is filtered to. A request names a department
- * and maybe a level; a student with nothing requested gets their own
- * department and level; anyone else with nothing requested gets the whole
+ * and maybe a level; a member with nothing requested gets their own
+ * department and level; a member with no department yet gets the whole
  * school, which is null here. A file with no level belongs to every level,
  * which the query honours.
  */
@@ -124,7 +148,7 @@ export function catalogueScope(
       levelId: requested.levelId ?? null,
     };
   }
-  if (isStudent(member) && member.departmentId) {
+  if (member.departmentId) {
     return { departmentId: member.departmentId, levelId: member.levelId };
   }
   return null;

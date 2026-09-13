@@ -114,6 +114,17 @@ export interface InstitutionDto {
   /** Whether joining needs the school's code; an email on one of its domains also admits. */
   needsInviteCode: boolean;
   emailDomains: string[];
+  /** Whether joining asks for a school email and the code sent to it. */
+  verifyStudents: boolean;
+}
+
+/** A school on the list a person picks from. */
+export interface InstitutionListItemDto {
+  id: string;
+  name: string;
+  slug: string;
+  country: string | null;
+  verifyStudents: boolean;
 }
 
 /** A school as the admin sees it: the code included. */
@@ -151,6 +162,8 @@ export interface MembershipDto {
   departmentId: string | null;
   levelId: string | null;
   role: 'student' | 'staff' | 'admin';
+  /** The school email the member proved; null when the school did not ask. */
+  schoolEmail: string | null;
 }
 
 /** The school's front door: enough to sign up into it and to choose a department and level. */
@@ -192,7 +205,9 @@ export interface CatalogueDto {
 }
 
 export interface JoinInstitutionRequest {
-  inviteCode?: string;
+  /** The school email and the code sent to it, when the school asks for them. */
+  email?: string;
+  code?: string;
   departmentId?: string;
   levelId?: string;
 }
@@ -326,6 +341,7 @@ export interface UpdateInstitutionRequest {
   emailDomains?: string[];
   /** 'rotate' mints a fresh code, 'none' removes it. */
   inviteCode?: 'rotate' | 'none';
+  verifyStudents?: boolean;
 }
 
 // ── Documents ────────────────────────────────────────────────────────────────

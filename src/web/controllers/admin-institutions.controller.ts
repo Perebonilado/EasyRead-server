@@ -108,6 +108,10 @@ class UpdateInstitutionDto {
   @IsOptional()
   @IsIn(['rotate', 'none'])
   inviteCode?: 'rotate' | 'none';
+
+  @IsOptional()
+  @IsBoolean()
+  verifyStudents?: boolean;
 }
 
 class NamedDto {

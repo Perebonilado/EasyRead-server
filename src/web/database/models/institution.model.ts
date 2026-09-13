@@ -29,6 +29,10 @@ export class InstitutionModel extends BaseModel {
   @Column({ type: DataType.STRING(40), allowNull: false })
   declare levelWord: string;
 
+  /** Whether joining asks for a school email and the code sent to it. */
+  @Column({ type: DataType.BOOLEAN, allowNull: false, defaultValue: false })
+  declare verifyStudents: boolean;
+
   @HasMany(() => DepartmentModel)
   declare departments?: DepartmentModel[];
 
@@ -120,6 +124,13 @@ export class InstitutionMemberModel extends BaseModel {
   })
   declare role: 'student' | 'staff' | 'admin';
 
+  /** The school email the member proved, when the school asked for one. */
+  @Column({ type: DataType.STRING(320), allowNull: true })
+  declare schoolEmail: string | null;
+
+  @Column({ type: DataType.DATE, allowNull: true })
+  declare verifiedAt: Date | null;
+
   @BelongsTo(() => InstitutionModel)
   declare institution?: InstitutionModel;
 }
@@ -152,4 +163,39 @@ export class PronunciationModel extends BaseModel {
     defaultValue: 'seeded',
   })
   declare source: 'seeded' | 'admin';
+}
+
+/**
+ * A code sent to a school email so a person can join the school that asks
+ * for one: hashed, short-lived, counted. One live code per person and
+ * school; a new one replaces the last.
+ */
+@Table({
+  tableName: 'institution_join_codes',
+  underscored: true,
+  timestamps: true,
+})
+export class InstitutionJoinCodeModel extends BaseModel {
+  @ForeignKey(() => UserModel)
+  @Column({ type: DataType.UUID, allowNull: false })
+  declare userId: string;
+
+  @ForeignKey(() => InstitutionModel)
+  @Column({ type: DataType.UUID, allowNull: false })
+  declare institutionId: string;
+
+  @Column({ type: DataType.STRING(320), allowNull: false })
+  declare email: string;
+
+  @Column({ type: DataType.STRING(64), allowNull: false })
+  declare codeHash: string;
+
+  @Column({ type: DataType.DATE, allowNull: false })
+  declare expiresAt: Date;
+
+  @Column({ type: DataType.INTEGER, allowNull: false, defaultValue: 0 })
+  declare attempts: number;
+
+  @Column({ type: DataType.DATE, allowNull: true })
+  declare consumedAt: Date | null;
 }

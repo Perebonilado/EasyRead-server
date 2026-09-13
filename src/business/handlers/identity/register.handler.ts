@@ -14,7 +14,7 @@ import {
 } from '../../repositories/tokens';
 import type { InstitutionRepository } from '../../repositories/institution.repository';
 import type { UserRepository } from '../../repositories/user.repository';
-import { admits } from '../../domain/institutions';
+import { emailOnDomains } from '../../domain/institutions';
 import AbstractRequestHandlerTemplate from '../AbstractRequestHandlerTemplate';
 import { CommandResponse } from '../response/CommandResponse';
 
@@ -71,19 +71,14 @@ export class RegisterHandler extends AbstractRequestHandlerTemplate<
     });
 
     // Through a school's door: a member from the first moment, placed in
-    // the department and level they chose. A school that admits by email
-    // domain refuses the rest; nothing else stands in the way.
+    // the department and level they chose, when the school takes anyone
+    // whose email is on its domains. A school that asks for a school
+    // email and a code takes them through that step after signing up.
     if (cmd.institutionSlug) {
       const school = await this.institutions.findBySlug(
         cmd.institutionSlug.toLowerCase(),
       );
-      if (
-        school &&
-        admits(
-          { inviteCode: null, emailDomains: school.emailDomains },
-          { email, code: null },
-        )
-      ) {
+      if (school && !school.verifyStudents && emailOnDomains(school, email)) {
         const department = cmd.departmentId
           ? await this.institutions.findDepartment(cmd.departmentId)
           : null;
@@ -98,6 +93,8 @@ export class RegisterHandler extends AbstractRequestHandlerTemplate<
               ? department.id
               : null,
           levelId: level && level.institutionId === school.id ? level.id : null,
+          schoolEmail: null,
+          verifiedAt: null,
         });
       }
     }

@@ -5,6 +5,7 @@ export {
   LevelModel,
   CourseModel,
   InstitutionMemberModel,
+  InstitutionJoinCodeModel,
   PronunciationModel,
 } from './institution.model';
 export { AssessmentEventModel } from './assessment-event.model';
@@ -57,6 +58,7 @@ import {
   LevelModel,
   CourseModel,
   InstitutionMemberModel,
+  InstitutionJoinCodeModel,
   PronunciationModel,
 } from './institution.model';
 import { AssessmentEventModel } from './assessment-event.model';
@@ -134,6 +136,7 @@ export const ALL_MODELS = [
   LevelModel,
   CourseModel,
   InstitutionMemberModel,
+  InstitutionJoinCodeModel,
   PronunciationModel,
   AssessmentEventModel,
   ItemModel,

@@ -2,6 +2,7 @@ import type {
   CourseDto,
   DepartmentDto,
   InstitutionAdminDto,
+  InstitutionListItemDto,
   LevelDto,
   MembershipDto,
 } from '../../contracts';
@@ -12,6 +13,21 @@ export interface MembershipRecord {
   departmentId: string | null;
   levelId: string | null;
   role: MembershipDto['role'];
+  schoolEmail: string | null;
+  verifiedAt: Date | null;
+}
+
+/** A code sent to a school email, as stored: hashed, dated, counted. */
+export interface JoinCodeRecord {
+  id: string;
+  userId: string;
+  institutionId: string;
+  email: string;
+  codeHash: string;
+  expiresAt: Date;
+  attempts: number;
+  consumedAt: Date | null;
+  createdAt: Date;
 }
 
 /**
@@ -23,6 +39,8 @@ export interface InstitutionRepository {
   findById(id: string): Promise<InstitutionAdminDto | null>;
   findBySlug(slug: string): Promise<InstitutionAdminDto | null>;
   list(): Promise<InstitutionAdminDto[]>;
+  /** Every school, as the list a person picks from. */
+  listPublic(): Promise<InstitutionListItemDto[]>;
   create(input: {
     name: string;
     slug: string;
@@ -40,6 +58,7 @@ export interface InstitutionRepository {
       levelWord: string;
       emailDomains: string[];
       inviteCode: string | null;
+      verifyStudents: boolean;
     }>,
   ): Promise<void>;
 
@@ -102,9 +121,29 @@ export interface InstitutionRepository {
     institutionId: string;
     departmentId: string | null;
     levelId: string | null;
+    schoolEmail: string | null;
+    verifiedAt: Date | null;
   }): Promise<void>;
   setMembership(
     userId: string,
     patch: { departmentId: string | null; levelId: string | null },
   ): Promise<void>;
+  /** The person leaves their school; nothing else of theirs changes. */
+  leave(userId: string): Promise<void>;
+
+  /** The newest code for a person and a school, consumed or not. */
+  findJoinCode(
+    userId: string,
+    institutionId: string,
+  ): Promise<JoinCodeRecord | null>;
+  /** A new code replaces any earlier one for the person and the school. */
+  saveJoinCode(input: {
+    userId: string;
+    institutionId: string;
+    email: string;
+    codeHash: string;
+    expiresAt: Date;
+  }): Promise<void>;
+  countJoinAttempt(id: string): Promise<void>;
+  consumeJoinCode(id: string, now: Date): Promise<void>;
 }

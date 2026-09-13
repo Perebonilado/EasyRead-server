@@ -127,6 +127,7 @@ export class CatalogueQuery {
         levelWord: school.levelWord,
         needsInviteCode: school.inviteCode !== null,
         emailDomains: school.emailDomains ?? [],
+        verifyStudents: school.verifyStudents === true,
         inviteCode: school.inviteCode ?? null,
         memberCount: 0,
         documentCount: 0,

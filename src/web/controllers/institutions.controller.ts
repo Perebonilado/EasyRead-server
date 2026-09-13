@@ -6,6 +6,7 @@ import {
   Param,
   Patch,
   Post,
+  Query,
 } from '@nestjs/common';
 import {
   IsOptional,
@@ -34,6 +35,17 @@ class JoinInstitutionDto {
   @Length(1, 16)
   inviteCode?: string;
 
+  @IsOptional()
+  @IsUUID('all')
+  departmentId?: string;
+
+  @IsOptional()
+  @IsUUID('all')
+  levelId?: string;
+}
+
+/** A department and level to look at; a student sees their own when neither is given. */
+class CatalogueQueryDto {
   @IsOptional()
   @IsUUID('all')
   departmentId?: string;
@@ -72,8 +84,12 @@ export class InstitutionsController {
   async catalogueOf(
     @CurrentUser('id') userId: string,
     @Param('slug') slug: string,
+    @Query() query: CatalogueQueryDto,
   ): Promise<CatalogueDto> {
-    return this.catalogue.execute(slug, userId);
+    return this.catalogue.execute(slug, userId, {
+      departmentId: query.departmentId ?? null,
+      levelId: query.levelId ?? null,
+    });
   }
 
   /** The member's own department and level, set at onboarding or changed later. */

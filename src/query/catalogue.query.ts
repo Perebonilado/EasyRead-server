@@ -3,6 +3,7 @@ import { InjectModel } from '@nestjs/sequelize';
 import { Op, col, fn } from 'sequelize';
 import type { CatalogueDto } from '../contracts';
 import { publicShape } from '../business/handlers/institutions/institution.handlers';
+import { catalogueScope } from '../business/domain/institutions';
 import {
   CourseModel,
   DepartmentModel,
@@ -43,7 +44,12 @@ export class CatalogueQuery {
     private readonly segments: typeof LectureSegmentModel,
   ) {}
 
-  async execute(slug: string, userId: string): Promise<CatalogueDto> {
+  async execute(
+    slug: string,
+    userId: string,
+    /** A department and level to look at; a student's own when nothing is asked. */
+    requested: { departmentId?: string | null; levelId?: string | null } = {},
+  ): Promise<CatalogueDto> {
     const school = await this.institutions.findOne({
       where: { slug: slug.toLowerCase() } as never,
     });
@@ -53,6 +59,24 @@ export class CatalogueQuery {
     });
     // A non-member sees the same missing school a visitor would.
     if (!member) throw new NotFoundException('School not found');
+    // A student's catalogue is their selection; a file with no level
+    // belongs to every level of its department.
+    const scope = catalogueScope(
+      {
+        departmentId: member.departmentId ?? null,
+        levelId: member.levelId ?? null,
+        role: member.role,
+      },
+      requested,
+    );
+    const placed = scope
+      ? {
+          departmentId: scope.departmentId,
+          ...(scope.levelId
+            ? { [Op.or]: [{ levelId: scope.levelId }, { levelId: null }] }
+            : {}),
+        }
+      : {};
 
     const [departments, levels, courses, docs] = await Promise.all([
       this.departments.findAll({
@@ -75,7 +99,11 @@ export class CatalogueQuery {
         order: [['orderIndex', 'ASC']] as never,
       }),
       this.documents.findAll({
-        where: { institutionId: school.id, deletedAt: null } as never,
+        where: {
+          institutionId: school.id,
+          deletedAt: null,
+          ...placed,
+        } as never,
         order: [
           ['orderIndex', 'ASC'],
           ['createdAt', 'ASC'],
@@ -127,7 +155,9 @@ export class CatalogueQuery {
         departmentId: doc.departmentId ?? null,
         levelId: doc.levelId ?? null,
         courseId: doc.courseId ?? null,
-        read: read.get(doc.id) ?? 0,
+        read: read.get(doc.id)?.read ?? 0,
+        lastReadAt: read.get(doc.id)?.lastReadAt ?? null,
+        lastPage: read.get(doc.id)?.lastPage ?? null,
         audio: audio.has(doc.id),
       })),
       membership: {
@@ -152,11 +182,16 @@ export class CatalogueQuery {
     return new Map(rows.map((row) => [row.documentId, Number(row.total)]));
   }
 
-  /** How far the member has read each document, from their furthest page. */
+  /** How far the member has read each document, from their furthest page, and when they last read it. */
   private async readBy(
     ids: string[],
     userId: string,
-  ): Promise<Map<string, number>> {
+  ): Promise<
+    Map<
+      string,
+      { read: number; lastReadAt: string | null; lastPage: number | null }
+    >
+  > {
     if (!ids.length) return new Map();
     const rows = await this.positions.findAll({
       where: { userId, documentId: { [Op.in]: ids } } as never,
@@ -173,7 +208,15 @@ export class CatalogueQuery {
       rows.map((row) => {
         const total = pages.get(row.documentId) ?? 0;
         const furthest = row.furthestPage ?? row.lastPage ?? 0;
-        return [row.documentId, total > 0 ? Math.min(1, furthest / total) : 0];
+        const at = (row as unknown as { updatedAt?: Date }).updatedAt;
+        return [
+          row.documentId,
+          {
+            read: total > 0 ? Math.min(1, furthest / total) : 0,
+            lastReadAt: at ? at.toISOString() : null,
+            lastPage: row.lastPage ?? null,
+          },
+        ];
       }),
     );
   }

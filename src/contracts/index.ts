@@ -174,6 +174,9 @@ export interface CatalogueDocumentDto extends DocumentListItem {
   courseId: string | null;
   /** How far this member has read, 0 to 1; 0 when never opened. */
   read: number;
+  /** When this member last read it, and the page they were on; null when never opened. */
+  lastReadAt: string | null;
+  lastPage: number | null;
   /** Whether any lecture audio exists yet, in any style. */
   audio: boolean;
 }

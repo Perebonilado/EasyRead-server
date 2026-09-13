@@ -1,4 +1,12 @@
-import { Body, Controller, HttpCode, Param, Post } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  HttpCode,
+  Param,
+  Post,
+  UseGuards,
+} from '@nestjs/common';
+import { OwnFilesGuard } from '../security/own-files.guard';
 import { IsIn, IsObject, IsOptional, IsString, Length } from 'class-validator';
 import type { LearnDepth, LearnInterviewResponse } from '../../contracts';
 import {
@@ -35,6 +43,7 @@ class GenerateDto {
 
 /** Learn a topic the reader doesn't have a document for (§8). */
 @Controller('learn')
+@UseGuards(OwnFilesGuard)
 export class LearnController {
   constructor(
     private readonly interview: InterviewHandler,

@@ -89,3 +89,43 @@ export function admits(
   }
   return school.emailDomains.length === 0;
 }
+
+/** A member who joined as a student: the school adds their files, and their catalogue is their selection. */
+export function isStudent(
+  membership: { role: 'student' | 'staff' | 'admin' } | null | undefined,
+): boolean {
+  return membership?.role === 'student';
+}
+
+/** A department and, when set, a level: what a member's catalogue is filtered to. */
+export interface CatalogueScope {
+  departmentId: string;
+  levelId: string | null;
+}
+
+/**
+ * What a member's catalogue is filtered to. A request names a department
+ * and maybe a level; a student with nothing requested gets their own
+ * department and level; anyone else with nothing requested gets the whole
+ * school, which is null here. A file with no level belongs to every level,
+ * which the query honours.
+ */
+export function catalogueScope(
+  member: {
+    departmentId: string | null;
+    levelId: string | null;
+    role: 'student' | 'staff' | 'admin';
+  },
+  requested: { departmentId?: string | null; levelId?: string | null } = {},
+): CatalogueScope | null {
+  if (requested.departmentId) {
+    return {
+      departmentId: requested.departmentId,
+      levelId: requested.levelId ?? null,
+    };
+  }
+  if (isStudent(member) && member.departmentId) {
+    return { departmentId: member.departmentId, levelId: member.levelId };
+  }
+  return null;
+}

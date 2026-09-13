@@ -1,4 +1,11 @@
-import { admits, isValidSlug, mintInviteCode, slugify } from './institutions';
+import {
+  admits,
+  catalogueScope,
+  isStudent,
+  isValidSlug,
+  mintInviteCode,
+  slugify,
+} from './institutions';
 
 describe('a school address', () => {
   it('is lower case letters, digits and hyphens, and never one of our own routes', () => {
@@ -43,5 +50,55 @@ describe('who a school admits', () => {
     const code = mintInviteCode(() => 0.999);
     expect(code).toHaveLength(8);
     expect(code).not.toMatch(/[01IOL]/);
+  });
+});
+
+describe("a student's catalogue", () => {
+  const student = {
+    departmentId: 'medicine',
+    levelId: 'year-3',
+    role: 'student' as const,
+  };
+
+  it('is their own department and level when nothing is asked for', () => {
+    expect(catalogueScope(student)).toEqual({
+      departmentId: 'medicine',
+      levelId: 'year-3',
+    });
+    expect(catalogueScope({ ...student, levelId: null })).toEqual({
+      departmentId: 'medicine',
+      levelId: null,
+    });
+  });
+
+  it('is what they ask for when they look elsewhere', () => {
+    expect(
+      catalogueScope(student, {
+        departmentId: 'agriculture',
+        levelId: 'year-4',
+      }),
+    ).toEqual({ departmentId: 'agriculture', levelId: 'year-4' });
+    expect(catalogueScope(student, { departmentId: 'agriculture' })).toEqual({
+      departmentId: 'agriculture',
+      levelId: null,
+    });
+  });
+
+  it('is the whole school for a student with no department yet, and for staff and admins unless they ask', () => {
+    expect(catalogueScope({ ...student, departmentId: null })).toBeNull();
+    expect(catalogueScope({ ...student, role: 'staff' })).toBeNull();
+    expect(catalogueScope({ ...student, role: 'admin' })).toBeNull();
+    expect(
+      catalogueScope(
+        { ...student, role: 'staff' },
+        { departmentId: 'medicine' },
+      ),
+    ).toEqual({ departmentId: 'medicine', levelId: null });
+  });
+
+  it('knows a student from the membership role alone', () => {
+    expect(isStudent(student)).toBe(true);
+    expect(isStudent({ role: 'staff' })).toBe(false);
+    expect(isStudent(null)).toBe(false);
   });
 });

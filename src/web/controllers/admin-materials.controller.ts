@@ -1,6 +1,7 @@
 import {
   Body,
   Controller,
+  Delete,
   Get,
   HttpCode,
   Param,
@@ -38,6 +39,7 @@ import {
   AdminUploadIntentHandler,
   MoveMaterialHandler,
   PrepareMaterialsHandler,
+  RemoveMaterialHandler,
 } from '../../business/handlers/institutions/materials.handlers';
 import { MaterialsQuery } from '../../query/materials.query';
 import { AdminGuard } from '../security/admin.guard';
@@ -163,6 +165,7 @@ export class AdminMaterialsController {
     private readonly materials: MaterialsQuery,
     private readonly intent: AdminUploadIntentHandler,
     private readonly move: MoveMaterialHandler,
+    private readonly removeMaterial: RemoveMaterialHandler,
     private readonly prepare: PrepareMaterialsHandler,
   ) {}
 
@@ -220,6 +223,19 @@ export class AdminMaterialsController {
       institutionId,
       documentId,
       ...body,
+    });
+    return data;
+  }
+
+  /** A file removed from the school: the one door to deleting a school's document. */
+  @Delete('materials/:documentId')
+  async removeOne(
+    @Param('id') institutionId: string,
+    @Param('documentId') documentId: string,
+  ): Promise<{ ok: true }> {
+    const { data } = await this.removeMaterial.handle({
+      institutionId,
+      documentId,
     });
     return data;
   }

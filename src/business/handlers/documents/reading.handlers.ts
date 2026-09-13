@@ -6,7 +6,6 @@ import {
   NotFoundError,
   ValidationError,
 } from '../../domain/errors/errors';
-import { UsageMetric } from '../../domain/values';
 import { CLOCK, JOB_QUEUE } from '../../ports/tokens';
 import type { ClockPort } from '../../ports/clock.port';
 import type { JobQueuePort } from '../../ports/job-queue.port';
@@ -271,7 +270,7 @@ export class RenameDocumentHandler extends AbstractRequestHandlerTemplate<
   }
 
   protected async handleRequest(cmd: RenameDocumentRequest) {
-    const doc = await this.access.require(cmd.documentId, cmd.userId);
+    const doc = await this.access.requireOwned(cmd.documentId, cmd.userId);
     const title = cmd.title.trim();
     if (!title) throw new ValidationError('A document needs a name');
 
@@ -300,7 +299,7 @@ export class DeleteDocumentHandler extends AbstractRequestHandlerTemplate<
   }
 
   protected async handleRequest(cmd: DeleteDocumentRequest) {
-    const doc = await this.access.require(cmd.documentId, cmd.userId);
+    const doc = await this.access.requireOwned(cmd.documentId, cmd.userId);
     // Soft delete now; the purge job removes files and rows after the
     // recovery window (§10).
     doc.softDelete(this.clock.now());

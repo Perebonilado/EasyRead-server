@@ -168,6 +168,7 @@ import { PronunciationHandlers } from './business/handlers/institutions/pronunci
 import {
   AdminUploadIntentHandler,
   MoveMaterialHandler,
+  RemoveMaterialHandler,
   PrepareMaterialsHandler,
 } from './business/handlers/institutions/materials.handlers';
 import { MaterialsQuery } from './query/materials.query';
@@ -213,6 +214,7 @@ const handlers = [
   UpdateInstitutionHandler,
   AdminUploadIntentHandler,
   MoveMaterialHandler,
+  RemoveMaterialHandler,
   PronunciationHandlers,
   PrepareMaterialsHandler,
   CreateGroupHandler,

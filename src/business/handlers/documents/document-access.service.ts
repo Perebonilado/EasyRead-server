@@ -61,6 +61,23 @@ export class DocumentAccessService {
     return doc;
   }
 
+  /**
+   * The owner's own document, for the actions that change or remove it. A
+   * school's document is nobody's own here: it is added and removed from the
+   * school's admin page, and a member reading along, or a classmate in a
+   * live session, has no say over it.
+   */
+  async requireOwned(documentId: string, userId: string): Promise<Document> {
+    const doc = await this.require(documentId, userId);
+    if (doc.isInstitutional()) {
+      throw new ForbiddenError(
+        "A school's document is managed from the school's admin page",
+      );
+    }
+    this.assertOwner(doc, userId);
+    return doc;
+  }
+
   /** Used by the file endpoints, where a missing owner is a hard 403. */
   assertOwner(doc: Document, userId: string): void {
     if (!doc.isOwnedBy(userId)) throw new ForbiddenError();

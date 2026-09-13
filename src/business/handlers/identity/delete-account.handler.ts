@@ -53,8 +53,10 @@ export class DeleteAccountHandler extends AbstractRequestHandlerTemplate<
 
     const now = this.clock.now();
 
+    // A school's documents stay with the school when the admin who
+    // uploaded them goes.
     for (const doc of await this.documents.listForUser(cmd.userId)) {
-      if (doc.props.deletedAt) continue;
+      if (doc.props.deletedAt || doc.isInstitutional()) continue;
       doc.softDelete(now);
       await this.documents.save(doc);
     }

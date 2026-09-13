@@ -18,7 +18,8 @@ import {
 import { LECTURE_STYLE_KEYS } from '../../../contracts';
 import { effectiveStatus } from '../../domain/lecture';
 import { ACCEPTED_MIME_TYPES, MAX_UPLOAD_BYTES } from '../../domain/values';
-import { STORAGE } from '../../ports/tokens';
+import { CLOCK, STORAGE } from '../../ports/tokens';
+import type { ClockPort } from '../../ports/clock.port';
 import type { StoragePort } from '../../ports/storage.port';
 import {
   DOCUMENT_REPOSITORY,
@@ -218,6 +219,43 @@ export class MoveMaterialHandler extends AbstractRequestHandlerTemplate<
       if (!title) throw new ValidationError('A title is needed');
       doc.props.title = title;
     }
+    await this.documents.save(doc);
+    return CommandResponse.of({ ok: true as const });
+  }
+}
+
+export interface RemoveMaterialRequest {
+  institutionId: string;
+  documentId: string;
+}
+
+/**
+ * A file removed from the school: the one door to deleting a school's
+ * document. The same soft delete as a personal document, so the purge
+ * job's recovery window applies.
+ */
+@Injectable()
+export class RemoveMaterialHandler extends AbstractRequestHandlerTemplate<
+  RemoveMaterialRequest,
+  { ok: true }
+> {
+  constructor(
+    @Inject(DOCUMENT_REPOSITORY) private readonly documents: DocumentRepository,
+    @Inject(CLOCK) private readonly clock: ClockPort,
+  ) {
+    super();
+  }
+
+  protected async handleRequest(cmd: RemoveMaterialRequest) {
+    const doc = await this.documents.findById(cmd.documentId);
+    if (
+      !doc ||
+      doc.props.deletedAt ||
+      doc.props.institutionId !== cmd.institutionId
+    ) {
+      throw new NotFoundError('Document');
+    }
+    doc.softDelete(this.clock.now());
     await this.documents.save(doc);
     return CommandResponse.of({ ok: true as const });
   }

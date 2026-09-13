@@ -1,6 +1,10 @@
 /* eslint-disable @typescript-eslint/require-await -- in-memory fakes stand in
    for repositories whose interface is Promise-shaped. */
-import { MoveMaterialHandler } from './materials.handlers';
+import {
+  MoveMaterialHandler,
+  RemoveMaterialHandler,
+} from './materials.handlers';
+import { NotFoundError } from '../../domain/errors/errors';
 import { Document, type DocumentProps } from '../../domain/entities/document';
 import type { DocumentRepository } from '../../repositories/document.repository';
 import type { InstitutionRepository } from '../../repositories/institution.repository';
@@ -162,5 +166,52 @@ describe('a file and its course', () => {
     await build(kept).move({ documentId: 'doc-1', title: 'Renal, week 2' });
     expect(kept.props.courseId).toBe('pharmacology');
     expect(kept.props.title).toBe('Renal, week 2');
+  });
+});
+
+describe('a file removed from the school', () => {
+  const NOW = new Date('2026-09-13T13:00:00Z');
+  const build = (doc: Document) => {
+    const saved: Document[] = [];
+    const documents = {
+      async findById(id: string) {
+        return doc.props.id === id ? doc : null;
+      },
+      async save(document: Document) {
+        saved.push(document);
+      },
+    } as unknown as DocumentRepository;
+    const handler = new RemoveMaterialHandler(documents, { now: () => NOW });
+    return { handler, saved };
+  };
+
+  it('is soft deleted, like a personal document, and saved', async () => {
+    const doc = makeDoc();
+    const { handler, saved } = build(doc);
+    const result = await handler.handle({
+      institutionId: SCHOOL,
+      documentId: 'doc-1',
+    });
+    expect(result.data).toEqual({ ok: true });
+    expect(doc.props.deletedAt).toEqual(NOW);
+    expect(saved).toHaveLength(1);
+  });
+
+  it("is not found from another school's page", async () => {
+    const doc = makeDoc();
+    const { handler, saved } = build(doc);
+    await expect(
+      handler.handle({ institutionId: 'school-2', documentId: 'doc-1' }),
+    ).rejects.toBeInstanceOf(NotFoundError);
+    expect(doc.props.deletedAt).toBeNull();
+    expect(saved).toHaveLength(0);
+  });
+
+  it('is not found once removed', async () => {
+    const doc = makeDoc({ deletedAt: new Date('2026-09-12') });
+    const { handler } = build(doc);
+    await expect(
+      handler.handle({ institutionId: SCHOOL, documentId: 'doc-1' }),
+    ).rejects.toBeInstanceOf(NotFoundError);
   });
 });

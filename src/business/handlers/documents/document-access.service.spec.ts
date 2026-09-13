@@ -66,6 +66,39 @@ describe('who may touch a document', () => {
     );
   });
 
+  it("refuses to change or remove a school's document for anyone, even the admin who uploaded it", async () => {
+    const access = service(doc('ur'), ['student']);
+    await expect(access.requireOwned('d1', 'admin')).rejects.toBeInstanceOf(
+      ForbiddenError,
+    );
+    await expect(access.requireOwned('d1', 'student')).rejects.toBeInstanceOf(
+      ForbiddenError,
+    );
+    await expect(access.requireOwned('d1', 'stranger')).rejects.toBeInstanceOf(
+      NotFoundError,
+    );
+  });
+
+  it('lets only the owner change or remove a personal document, not a classmate reading along', async () => {
+    const access = new DocumentAccessService(
+      { findById: () => Promise.resolve(doc(null)) } as never,
+      {
+        liveSessionDocumentAccess: (userId: string) =>
+          Promise.resolve(userId === 'classmate'),
+      } as never,
+      { isMember: () => Promise.resolve(false) } as never,
+    );
+    await expect(access.require('d1', 'classmate')).resolves.toBeInstanceOf(
+      Document,
+    );
+    await expect(access.requireOwned('d1', 'classmate')).rejects.toBeInstanceOf(
+      ForbiddenError,
+    );
+    await expect(access.requireOwned('d1', 'admin')).resolves.toBeInstanceOf(
+      Document,
+    );
+  });
+
   it('keeps owner-only actions with the admin who uploaded', () => {
     const access = service(doc('ur'), ['student']);
     expect(() => access.assertOwner(doc('ur'), 'student')).toThrow(

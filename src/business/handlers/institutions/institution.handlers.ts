@@ -574,6 +574,22 @@ export class JoinInstitutionHandler extends AbstractRequestHandlerTemplate<
     const user = await this.users.findById(cmd.userId);
     if (!user) throw new NotFoundError('User');
 
+    // Joining the school you are already in keeps your row as it is, place
+    // and school email included: a second press, or a change-school sheet
+    // that picked the same school, never empties a place. A join to
+    // another school writes a student's membership with no place, and the
+    // old school's email verification goes with the old row.
+    const existing = await this.institutions.findMembership(cmd.userId);
+    if (existing && existing.institutionId === school.id) {
+      return CommandResponse.of({
+        institution: publicShape(school),
+        departmentId: existing.departmentId,
+        levelId: existing.levelId,
+        role: existing.role,
+        schoolEmail: existing.schoolEmail,
+      });
+    }
+
     let schoolEmail: string | null = null;
     let verifiedAt: Date | null = null;
     if (school.verifyStudents) {

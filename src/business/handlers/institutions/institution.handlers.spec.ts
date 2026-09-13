@@ -84,6 +84,10 @@ function fakes(
     async consumeJoinCode(_id: string, now: Date) {
       state.consumed = now;
     },
+    // Nobody in these tests belongs to a school yet.
+    async findMembership() {
+      return null;
+    },
     async join(input: unknown) {
       joined.push(input);
     },

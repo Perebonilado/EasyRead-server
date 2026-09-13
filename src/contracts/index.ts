@@ -385,7 +385,7 @@ export type DocumentDetail = DocumentListItem & {
   /** The school this file belongs to and its course there, for the reader's header. */
   school: {
     name: string;
-    course: { name: string; code: string | null } | null;
+    course: { id: string; name: string; code: string | null } | null;
   } | null;
 };
 

@@ -96,7 +96,9 @@ export class DocumentDetailQuery {
     if (!institution) return null;
     return {
       name: institution.name,
-      course: course ? { name: course.name, code: course.code ?? null } : null,
+      course: course
+        ? { id: course.id, name: course.name, code: course.code ?? null }
+        : null,
     };
   }
 

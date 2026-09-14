@@ -59,6 +59,9 @@ export class EchogardenAlignerAdapter implements AlignerPort {
     const started = Date.now();
     try {
       const echogarden = await import('echogarden');
+      // Its progress chatter goes to stderr and lands in the production log
+      // at error level, hundreds of lines a page. Only its real errors now.
+      echogarden.setGlobalOption('logLevel', 'error');
       const result = await echogarden.align(input.audio, input.text, {
         engine,
         language: 'en',
@@ -77,7 +80,7 @@ export class EchogardenAlignerAdapter implements AlignerPort {
         ...(packagesDir ? { packageBaseDir: packagesDir } : {}),
         ...(ffmpegPath ? { ffmpegPath } : {}),
       } as never);
-      const words = flatten(result.wordTimeline as TimelineEntry[]);
+      const words = flatten(result.wordTimeline);
       this.logger.log(
         `Aligned ${words.length} words in ${Date.now() - started}ms via ${engine}`,
       );

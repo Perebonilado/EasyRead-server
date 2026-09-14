@@ -15,6 +15,7 @@ import { effectiveStatus } from '../business/domain/lecture';
 import {
   AiCallLogModel,
   DocumentModel,
+  LecturePlanModel,
   LectureSegmentModel,
   PipelineRunModel,
   SimplifiedPageModel,
@@ -39,6 +40,8 @@ export class MaterialsQuery {
     private readonly segments: typeof LectureSegmentModel,
     @InjectModel(AiCallLogModel)
     private readonly calls: typeof AiCallLogModel,
+    @InjectModel(LecturePlanModel)
+    private readonly plans: typeof LecturePlanModel,
   ) {}
 
   async execute(input: {
@@ -64,12 +67,16 @@ export class MaterialsQuery {
     if (!rows.length) return [];
     const ids = rows.map((row) => row.id);
 
+    // A chapter whose plan failed leaves its pages pending with nothing
+    // coming: they are counted as failed, so the card says so and offers
+    // Retry, instead of reading "writing" for ever.
+    const failedPlans = await this.failedPlans(ids);
     const [runs, tallies, lectures, failedRows, costs, untaughtRows] =
       await Promise.all([
         this.runs.findAll({ where: { documentId: { [Op.in]: ids } } as never }),
         this.tallies(ids),
-        this.lectures(ids),
-        this.failedRows(ids),
+        this.lectures(ids, failedPlans),
+        this.failedRows(ids, failedPlans),
         this.costs(ids),
         this.untaughtRows(ids),
       ]);
@@ -137,10 +144,13 @@ export class MaterialsQuery {
 
   private async lectures(
     ids: string[],
+    failedPlans: FailedPlans,
   ): Promise<Map<string, MaterialDto['lecture']>> {
     const rows = await this.segments.findAll({
       attributes: [
         'documentId',
+        'topicId',
+        'contentVersion',
         'style',
         'status',
         'updatedAt',
@@ -155,10 +165,12 @@ export class MaterialsQuery {
     for (const row of rows) {
       const lecture = out.get(row.documentId) ?? emptyLecture();
       const bucket = lecture[row.style];
-      const status: LectureSegmentStatus = effectiveStatus({
-        status: row.status,
-        updatedAt: row.get('updatedAt') as Date,
-      });
+      const status: LectureSegmentStatus = planFailedFor(failedPlans, row)
+        ? 'failed'
+        : effectiveStatus({
+            status: row.status,
+            updatedAt: row.get('updatedAt') as Date,
+          });
       bucket.total += 1;
       if (Number(row.get('scripted'))) bucket.scripted += 1;
       if (status === 'done') bucket.ready += 1;
@@ -189,14 +201,63 @@ export class MaterialsQuery {
   }
 
   /** Failed rows of every kind, the number the card shows in red. */
-  private async failedRows(ids: string[]): Promise<Map<string, number>> {
+  private async failedRows(
+    ids: string[],
+    failedPlans: FailedPlans,
+  ): Promise<Map<string, number>> {
     const rows = (await this.segments.findAll({
       attributes: ['documentId', [fn('COUNT', col('id')), 'n']],
       where: { documentId: { [Op.in]: ids }, status: 'failed' } as never,
       group: ['documentId'],
       raw: true,
     })) as unknown as { documentId: string; n: number | string }[];
-    return new Map(rows.map((row) => [row.documentId, Number(row.n)]));
+    const out = new Map(rows.map((row) => [row.documentId, Number(row.n)]));
+    // The pages of a chapter that could not be planned: pending rows that
+    // nothing will write until the chapter is asked for again.
+    const stuck = failedPlans.size
+      ? ((await this.segments.findAll({
+          attributes: ['documentId', 'topicId', 'contentVersion', 'status'],
+          where: {
+            documentId: { [Op.in]: [...failedPlans.keys()] },
+            status: 'pending',
+          } as never,
+          raw: true,
+        })) as unknown as {
+          documentId: string;
+          topicId: string | null;
+          contentVersion: number;
+          status: string;
+        }[])
+      : [];
+    for (const row of stuck) {
+      if (!planFailedFor(failedPlans, row)) continue;
+      out.set(row.documentId, (out.get(row.documentId) ?? 0) + 1);
+    }
+    return out;
+  }
+
+  /** Chapters whose plan failed on its last attempt, by document, with the reason. */
+  private async failedPlans(ids: string[]): Promise<FailedPlans> {
+    const rows = (await this.plans.findAll({
+      attributes: ['documentId', 'topicId', 'contentVersion', 'error'],
+      where: { documentId: { [Op.in]: ids }, status: 'failed' } as never,
+      raw: true,
+    })) as unknown as {
+      documentId: string;
+      topicId: string;
+      contentVersion: number;
+      error: string | null;
+    }[];
+    const out: FailedPlans = new Map();
+    for (const row of rows) {
+      const chapters = out.get(row.documentId) ?? new Map<string, string>();
+      chapters.set(
+        planKey(row.topicId, row.contentVersion),
+        row.error ?? 'The chapter could not be planned',
+      );
+      out.set(row.documentId, chapters);
+    }
+    return out;
   }
 
   /** One document's lecture rows, every style and kind, with their reasons. */
@@ -209,8 +270,12 @@ export class MaterialsQuery {
       attributes: ['id', 'contentVersion'],
     });
     if (!doc) return [];
+    const failedPlans = await this.failedPlans([documentId]);
     const rows = await this.segments.findAll({
       attributes: [
+        'documentId',
+        'topicId',
+        'contentVersion',
         'pageNumber',
         'kind',
         'style',
@@ -234,11 +299,15 @@ export class MaterialsQuery {
       pageNumber: row.pageNumber,
       kind: row.kind,
       style: row.style,
-      status: effectiveStatus({
-        status: row.status,
-        updatedAt: row.get('updatedAt') as Date,
-      }),
-      error: row.error ?? null,
+      status: planFailedFor(failedPlans, row)
+        ? 'failed'
+        : effectiveStatus({
+            status: row.status,
+            updatedAt: row.get('updatedAt') as Date,
+          }),
+      error: planFailedFor(failedPlans, row)
+        ? `Chapter not planned: ${planFailedFor(failedPlans, row)}`
+        : (row.error ?? null),
       untaught:
         row.scriptText && Array.isArray(row.untaught)
           ? row.untaught.length
@@ -260,6 +329,34 @@ export class MaterialsQuery {
       ]),
     );
   }
+}
+
+/** Document → chapter key → why its plan failed. */
+type FailedPlans = Map<string, Map<string, string>>;
+
+const planKey = (topicId: string, contentVersion: number) =>
+  `${topicId}:${contentVersion}`;
+
+/**
+ * The reason a pending row will never be written on its own: its chapter's
+ * plan failed. Null for any row that is not pending, or whose chapter
+ * planned fine.
+ */
+export function planFailedFor(
+  failedPlans: FailedPlans,
+  row: {
+    documentId: string;
+    topicId: string | null;
+    contentVersion: number;
+    status: string;
+  },
+): string | null {
+  if (row.status !== 'pending' || !row.topicId) return null;
+  return (
+    failedPlans
+      .get(row.documentId)
+      ?.get(planKey(row.topicId, row.contentVersion)) ?? null
+  );
 }
 
 /**

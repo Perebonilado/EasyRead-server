@@ -311,6 +311,7 @@ function fakes(
       r.attempts += 1;
       return Promise.resolve();
     },
+    markPendingFailed: () => Promise.resolve(0),
     listShortSegments: () => Promise.resolve([]),
     // A page that left paragraphs untaught goes back to be written again,
     // its count kept so the next write knows what was missing.

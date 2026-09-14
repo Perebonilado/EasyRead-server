@@ -240,6 +240,27 @@ export class LectureChapterProcessor {
   ) {}
 
   /**
+   * The queue gave up on this chapter's job, twice interrupted or out of
+   * attempts: the pages it still owed will not be written on their own.
+   * They are marked failed with the reason, so the card counts them and
+   * Retry queues the chapter again.
+   */
+  async onDropped(data: LectureChapterJobData, reason: string): Promise<void> {
+    const marked = await this.lectures.markPendingFailed({
+      documentId: data.documentId,
+      contentVersion: data.contentVersion,
+      topicId: data.topicId,
+      style: data.style,
+      error: `Interrupted: ${reason}`,
+    });
+    if (marked) {
+      this.logger.warn(
+        `${data.documentId} ${data.style}: chapter job dropped (${reason}); ${marked} pages marked failed`,
+      );
+    }
+  }
+
+  /**
    * Whether this document's audio is made here at all.
    *
    * A school's catalogue is voiced in bulk on our own hardware, so the

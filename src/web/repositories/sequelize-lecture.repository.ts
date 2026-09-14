@@ -338,6 +338,28 @@ export class SequelizeLectureRepository implements LectureRepository {
     });
   }
 
+  async markPendingFailed(input: {
+    documentId: string;
+    contentVersion: number;
+    topicId: string;
+    style: LectureStyle;
+    error: string;
+  }): Promise<number> {
+    const [count] = await this.segments.update(
+      { status: 'failed', error: input.error },
+      {
+        where: {
+          documentId: input.documentId,
+          contentVersion: input.contentVersion,
+          topicId: input.topicId,
+          style: input.style,
+          status: 'pending',
+        },
+      },
+    );
+    return count;
+  }
+
   async resetFailedSegments(
     documentId: string,
     contentVersion: number,

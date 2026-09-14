@@ -158,6 +158,18 @@ export interface LectureRepository {
     input: SegmentKey & { audioKey: string; durationMs: number | null },
   ): Promise<void>;
   markSegmentFailed(input: SegmentKey & { error: string }): Promise<void>;
+  /**
+   * A chapter's pages still pending when the queue gave up on their job:
+   * marked failed with the reason, so the card counts them and offers
+   * Retry rather than reading "writing" for ever. Answers how many.
+   */
+  markPendingFailed(input: {
+    documentId: string;
+    contentVersion: number;
+    topicId: string;
+    style: LectureStyle;
+    error: string;
+  }): Promise<number>;
   /** The row's board and its status; the timeline may be null for failed or skipped. */
   saveBoard(
     input: SegmentKey & { board: unknown; boardStatus: BoardStatus },

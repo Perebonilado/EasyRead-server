@@ -169,6 +169,9 @@ import { GuidedController } from './web/controllers/guided.controller';
 import { InstitutionsController } from './web/controllers/institutions.controller';
 import { AdminInstitutionsController } from './web/controllers/admin-institutions.controller';
 import { AdminMaterialsController } from './web/controllers/admin-materials.controller';
+import { AdminProcessingController } from './web/controllers/admin-processing.controller';
+import { SetProcessingChannelsHandler } from './business/handlers/documents/set-processing-channels.handler';
+import { ProcessingStatusQuery } from './query/processing-status.query';
 import { AdminPronunciationsController } from './web/controllers/admin-pronunciations.controller';
 import { PronunciationHandlers } from './business/handlers/institutions/pronunciation.handlers';
 import {
@@ -325,6 +328,8 @@ const handlers = [
 
 const queries = [
   MaterialsQuery,
+  ProcessingStatusQuery,
+  SetProcessingChannelsHandler,
   CatalogueQuery,
   DocumentListQuery,
   DocumentDetailQuery,
@@ -374,6 +379,7 @@ const queries = [
     InstitutionsController,
     AdminInstitutionsController,
     AdminMaterialsController,
+    AdminProcessingController,
     AdminPronunciationsController,
     TutorsController,
     EventsController,

@@ -16,6 +16,9 @@ export const CONCEPT_REPOSITORY = Symbol('CONCEPT_REPOSITORY');
 export const PIPELINE_RUN_REPOSITORY = Symbol('PipelineRunRepository');
 export const SUBSCRIPTION_REPOSITORY = Symbol('SubscriptionRepository');
 export const SCHOOL_PASS_REPOSITORY = Symbol('SchoolPassRepository');
+export const PROCESSING_SETTINGS_REPOSITORY = Symbol(
+  'ProcessingSettingsRepository',
+);
 export const USAGE_REPOSITORY = Symbol('UsageRepository');
 export const WEBHOOK_EVENT_REPOSITORY = Symbol('WebhookEventRepository');
 export const VOICE_CREDITS_REPOSITORY = Symbol('VoiceCreditsRepository');

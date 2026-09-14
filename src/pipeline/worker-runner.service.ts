@@ -1,4 +1,5 @@
 import {
+  Inject,
   Injectable,
   Logger,
   OnModuleDestroy,
@@ -7,6 +8,11 @@ import {
 import { ConfigService } from '@nestjs/config';
 import { Job, UnrecoverableError, Worker } from 'bullmq';
 import Redis from 'ioredis';
+import { channelsForJob } from '../business/domain/processing';
+import { runWithChannels } from '../business/ports/processing-context';
+import { DOCUMENT_REPOSITORY } from '../business/repositories/tokens';
+import type { DocumentRepository } from '../business/repositories/document.repository';
+import { ProcessingSettingsService } from '../business/handlers/documents/processing-settings.service';
 import {
   isPermanentFailure,
   type JobContext,
@@ -81,6 +87,8 @@ export class WorkerRunner implements OnModuleInit, OnModuleDestroy {
 
   constructor(
     private readonly config: ConfigService,
+    @Inject(DOCUMENT_REPOSITORY) private readonly documents: DocumentRepository,
+    private readonly settings: ProcessingSettingsService,
     private readonly convert: ConvertProcessor,
     private readonly extract: ExtractProcessor,
     private readonly ocr: OcrProcessor,
@@ -165,7 +173,13 @@ export class WorkerRunner implements OnModuleInit, OnModuleDestroy {
           isFinalAttempt: job.attemptsMade + 1 >= attempts,
         };
         try {
-          await handle(job.data as never, context);
+          // The job's channels are read here, once, and carried down the
+          // stack: a school's document takes the run's own choice or the
+          // admin's setting; a learner's own never leaves OpenAI.
+          const frame = await this.channelsFor(job.data as BaseJobData);
+          await runWithChannels(frame.channels, frame.override, () =>
+            handle(job.data as never, context),
+          );
         } catch (error) {
           // The processors stay queue-agnostic; translating "this can never
           // succeed" into BullMQ's vocabulary is the runner's job.
@@ -202,6 +216,25 @@ export class WorkerRunner implements OnModuleInit, OnModuleDestroy {
     );
 
     return worker;
+  }
+
+  private async channelsFor(data: Partial<BaseJobData>): Promise<{
+    channels: ReturnType<typeof channelsForJob>;
+    override: Partial<ReturnType<typeof channelsForJob>> | null;
+  }> {
+    const override = data.channels ?? null;
+    const doc = data.documentId
+      ? await this.documents.findById(data.documentId)
+      : null;
+    const setting = await this.settings.current();
+    return {
+      channels: channelsForJob({
+        school: Boolean(doc?.props.institutionId),
+        override,
+        setting,
+      }),
+      override,
+    };
   }
 
   async onModuleDestroy(): Promise<void> {

@@ -1,4 +1,4 @@
-import type { Level, PipelineStep } from '../contracts';
+import type { Level, PipelineStep, ProcessingChannels } from '../contracts';
 import type { LectureStyle, SegmentKind } from '../contracts';
 
 /**
@@ -75,6 +75,8 @@ export interface BaseJobData {
   documentId: string;
   /** A job whose version no longer matches the document exits as skipped. */
   contentVersion: number;
+  /** The run's own channels, stamped by the queue so a retry on one channel stays on it. */
+  channels?: Partial<ProcessingChannels>;
 }
 
 export interface SimplifyJobData extends BaseJobData {

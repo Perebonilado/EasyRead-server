@@ -1,7 +1,9 @@
 import { Inject, Injectable } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import type {
   AdminUploadIntentRequest,
   AdminUploadIntentResponse,
+  LectureStyle,
   MoveMaterialRequest,
   PrepareEstimateDto,
   PrepareRequest,
@@ -9,6 +11,9 @@ import type {
 } from '../../../contracts';
 import { PipelineOrchestrator } from '../../../pipeline/orchestrator.service';
 import { estimatePrepare } from '../../domain/cost';
+import { resolveChannels } from '../../domain/processing';
+import { runWithChannels } from '../../ports/processing-context';
+import { ProcessingSettingsService } from '../documents/processing-settings.service';
 import type { Document } from '../../domain/entities/document';
 import {
   NotFoundError,
@@ -301,6 +306,8 @@ export class PrepareMaterialsHandler extends AbstractRequestHandlerTemplate<
     @Inject(LECTURE_REPOSITORY) private readonly lectures: LectureRepository,
     private readonly pipeline: PipelineOrchestrator,
     private readonly generate: GenerateLectureHandler,
+    private readonly settings: ProcessingSettingsService,
+    private readonly config: ConfigService,
   ) {
     super();
   }
@@ -310,6 +317,12 @@ export class PrepareMaterialsHandler extends AbstractRequestHandlerTemplate<
       (LECTURE_STYLE_KEYS as readonly string[]).includes(style),
     );
     const todos = await this.todos(cmd);
+    // The run's own channels over the admin's setting: priced on them, and
+    // stamped onto every job the run fans out.
+    const channels = resolveChannels(
+      await this.settings.current(),
+      cmd.channels,
+    );
     const estimate: PrepareEstimateDto = estimatePrepare({
       documents: todos.map((todo) => ({
         pages: todo.pages,
@@ -320,11 +333,33 @@ export class PrepareMaterialsHandler extends AbstractRequestHandlerTemplate<
       })),
       easiest: cmd.easiest,
       styles,
+      channels,
+      rates: {
+        modalUsdPerMillionTokens: Number(
+          this.config.get<string>('MODAL_USD_PER_MILLION_TOKENS', '0'),
+        ),
+        modalUsdPerAudioHour: Number(
+          this.config.get<string>('MODAL_USD_PER_AUDIO_HOUR', '0'),
+        ),
+      },
     });
     if (cmd.dryRun) {
       return CommandResponse.of({ ...estimate, queued: 0, skipped: 0 });
     }
 
+    const { queued, skipped } = await runWithChannels(
+      channels,
+      cmd.channels ?? null,
+      () => this.queueAll(cmd, todos, styles),
+    );
+    return CommandResponse.of({ ...estimate, queued, skipped });
+  }
+
+  private async queueAll(
+    cmd: PrepareCommand,
+    todos: PrepareTodo[],
+    styles: LectureStyle[],
+  ): Promise<{ queued: number; skipped: number }> {
     let queued = 0;
     let skipped = 0;
     for (const todo of todos) {
@@ -370,7 +405,7 @@ export class PrepareMaterialsHandler extends AbstractRequestHandlerTemplate<
       if (did) queued += 1;
       else skipped += 1;
     }
-    return CommandResponse.of({ ...estimate, queued, skipped });
+    return { queued, skipped };
   }
 
   private async todos(cmd: PrepareCommand): Promise<PrepareTodo[]> {

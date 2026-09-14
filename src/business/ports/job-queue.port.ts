@@ -1,9 +1,15 @@
 import type { Level, PipelineStep } from '../../contracts';
-import type { LectureStyle, SegmentKind } from '../../contracts';
+import type {
+  LectureStyle,
+  ProcessingChannels,
+  SegmentKind,
+} from '../../contracts';
 
 export interface PipelineJob {
   documentId: string;
   contentVersion: number;
+  /** The run's own channels; the queue stamps them from the job in hand. */
+  channels?: Partial<ProcessingChannels>;
 }
 
 export interface SimplifyJob extends PipelineJob {

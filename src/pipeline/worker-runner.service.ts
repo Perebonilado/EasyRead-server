@@ -45,6 +45,27 @@ import {
 } from './queues';
 
 type Handler = (data: never, context: JobContext) => Promise<void>;
+/** What a processor does when the queue has given up on one of its jobs. */
+type Dropped = (data: never, reason: string) => Promise<void>;
+
+/** Interruptions a job survives before the queue gives up on it: a deploy or two. */
+const MAX_STALLED = 3;
+
+/**
+ * Whether this failure is the job's last: no attempts left, an error the
+ * runner declared unrecoverable, or the queue's own verdict that the job
+ * stalled once too often. Anything else is retried and needs no cleanup.
+ */
+export function isDropped(
+  job: { attemptsMade: number } | undefined,
+  error: { name?: string; message: string },
+  attempts: number,
+): boolean {
+  if (!job) return true;
+  if (error.name === 'UnrecoverableError') return true;
+  if (/stalled/i.test(error.message)) return true;
+  return job.attemptsMade >= attempts;
+}
 
 /**
  * Binds each queue to its processor and owns the BullMQ workers.
@@ -115,15 +136,25 @@ export class WorkerRunner implements OnModuleInit, OnModuleDestroy {
       [QUEUE.lectureFollow]: (data: LectureFollowJobData) =>
         this.lectureFollow.process(data),
     };
+    // A chapter job the queue gives up on leaves pages pending for ever
+    // unless someone says so; the other queues' rows go stale on their own.
+    const dropped: Partial<Record<QueueName, Dropped>> = {
+      [QUEUE.lectureChapter]: (data: LectureChapterJobData, reason) =>
+        this.lectureChapter.onDropped(data, reason),
+    };
 
     for (const name of Object.values(QUEUE)) {
-      this.workers.push(this.startWorker(name, handlers[name]));
+      this.workers.push(this.startWorker(name, handlers[name], dropped[name]));
     }
 
     this.logger.log(`Consuming ${this.workers.length} queues`);
   }
 
-  private startWorker(name: QueueName, handle: Handler): Worker {
+  private startWorker(
+    name: QueueName,
+    handle: Handler,
+    onDropped?: Dropped,
+  ): Worker {
     const worker = new Worker(
       name,
       async (job: Job) => {
@@ -147,6 +178,9 @@ export class WorkerRunner implements OnModuleInit, OnModuleDestroy {
       {
         connection: this.connection,
         concurrency: QUEUE_SETTINGS[name].concurrency,
+        // A job whose worker was replaced under it, by a deploy, is taken
+        // up again; only after this many such interruptions is it dropped.
+        maxStalledCount: MAX_STALLED,
       },
     );
 
@@ -154,6 +188,14 @@ export class WorkerRunner implements OnModuleInit, OnModuleDestroy {
       this.logger.warn(
         `${name} job ${job?.id ?? '?'} failed: ${error.message}`,
       );
+      const attempts = job?.opts.attempts ?? QUEUE_SETTINGS[name].attempts;
+      if (onDropped && job && isDropped(job, error, attempts)) {
+        onDropped(job.data as never, error.message).catch((cause: unknown) =>
+          this.logger.error(
+            `${name} job ${job.id ?? '?'}: could not record the drop: ${String(cause)}`,
+          ),
+        );
+      }
     });
     worker.on('error', (error) =>
       this.logger.error(`${name} worker error: ${error.message}`),

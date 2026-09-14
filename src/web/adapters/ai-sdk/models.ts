@@ -1,9 +1,17 @@
+import { followsTextChannel } from '../../../business/domain/processing';
+import { currentChannels } from '../../../business/ports/processing-context';
 import { Logger } from '@nestjs/common';
 import type { ConfigService } from '@nestjs/config';
 import type { EmbeddingModel, LanguageModel } from 'ai';
 import type { LlmTask } from '../../../business/ports/llm.port';
 
-export const PROVIDERS = ['openai', 'anthropic', 'google', 'deepseek'] as const;
+export const PROVIDERS = [
+  'openai',
+  'anthropic',
+  'google',
+  'deepseek',
+  'modal',
+] as const;
 export type ProviderName = (typeof PROVIDERS)[number];
 
 /** Which env var carries each provider's key. */
@@ -14,6 +22,9 @@ const API_KEY_VAR: Record<ProviderName, string> = {
   // Text only: no speech, no embeddings, no vision. Cheap on output and
   // on a repeated prompt prefix, which every writer here has.
   deepseek: 'DEEPSEEK_API_KEY',
+  // Our own open model on Modal, behind vLLM's OpenAI-compatible server:
+  // the token is the server's API key, the URL is MODAL_LLM_URL.
+  modal: 'MODAL_LLM_TOKEN',
 };
 
 /**
@@ -162,15 +173,21 @@ export class ModelRegistry {
   async languageModel(
     task: LlmTask,
   ): Promise<{ model: LanguageModel; ref: ModelRef }> {
-    const ref = this.refFor(task);
+    // A school's job on the Modal text channel writes with our own model;
+    // every other call keeps the model named for its task.
+    const onModal =
+      followsTextChannel(task) && currentChannels()?.text === 'modal';
+    const ref = onModal ? this.modalRef() : this.refFor(task);
     const provider = await this.client(ref.provider);
 
     // OpenAI's own default is the Responses API, but most OpenAI-compatible
     // gateways (OpenRouter, Groq, a local server) only speak chat completions.
-    // `OPENAI_API_MODE=chat` targets those without changing anything else.
+    // `OPENAI_API_MODE=chat` targets those without changing anything else;
+    // vLLM on Modal speaks only chat completions.
     const useChat =
-      ref.provider === 'openai' &&
-      this.config.get<string>('OPENAI_API_MODE') === 'chat';
+      ref.provider === 'modal' ||
+      (ref.provider === 'openai' &&
+        this.config.get<string>('OPENAI_API_MODE') === 'chat');
 
     const model =
       useChat && provider.chat
@@ -229,6 +246,17 @@ export class ModelRegistry {
     return this.config.get<string>('AI_MODEL_DEFAULT') || DEFAULT_MODEL;
   }
 
+  /** The checkpoint vLLM serves on Modal, named by MODAL_LLM_MODEL. */
+  private modalRef(): ModelRef {
+    const modelId = this.config.get<string>('MODAL_LLM_MODEL');
+    if (!modelId) {
+      throw new Error(
+        'The text channel is Modal, but MODAL_LLM_MODEL names no model',
+      );
+    }
+    return { provider: 'modal', modelId };
+  }
+
   private defaultEmbedSpec(): string {
     return this.config.get<string>('AI_EMBED_MODEL') || DEFAULT_EMBED_MODEL;
   }
@@ -245,11 +273,25 @@ export class ModelRegistry {
     if (!apiKey) throw new Error(`${API_KEY_VAR[name]} is not set`);
 
     const baseURL =
-      this.config.get<string>(`${name.toUpperCase()}_BASE_URL`) || undefined;
+      name === 'modal'
+        ? this.modalBaseUrl()
+        : this.config.get<string>(`${name.toUpperCase()}_BASE_URL`) ||
+          undefined;
     const created = await this.create(name, apiKey, baseURL);
 
     this.clients.set(name, created);
     return created;
+  }
+
+  /** The service's base URL with the OpenAI-compatible prefix vLLM serves under. */
+  private modalBaseUrl(): string {
+    const url = this.config.get<string>('MODAL_LLM_URL')?.trim();
+    if (!url) {
+      throw new Error(
+        'The text channel is Modal, but MODAL_LLM_URL is not set',
+      );
+    }
+    return `${url.replace(/\/$/, '')}/v1`;
   }
 
   private async create(name: ProviderName, apiKey: string, baseURL?: string) {
@@ -257,6 +299,12 @@ export class ModelRegistry {
       case 'openai': {
         const { createOpenAI } = await import('@ai-sdk/openai');
         return createOpenAI({ apiKey, baseURL });
+      }
+      case 'modal': {
+        // vLLM's server is OpenAI-shaped; the OpenAI client with another
+        // base URL is the whole integration.
+        const { createOpenAI } = await import('@ai-sdk/openai');
+        return createOpenAI({ apiKey, baseURL, name: 'modal' });
       }
       case 'anthropic': {
         const { createAnthropic } = await import('@ai-sdk/anthropic');

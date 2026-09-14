@@ -1,3 +1,4 @@
+import { currentChannels } from '../../business/ports/processing-context';
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import {
@@ -126,12 +127,15 @@ export class LectureVoiceProcessor {
     });
 
     try {
-      // A school's document is voiced on the rented GPU, and only there;
-      // a learner's own upload by the per-character voice, as always.
+      // A school's document is voiced on the channel the job runs on: the
+      // rented GPU, or OpenAI when the admin chose it; a learner's own
+      // upload by the per-character voice, as always.
       const catalogue = Boolean(doc.props.institutionId);
-      const speech = catalogue ? this.catalogueSpeech : this.speech;
+      const rentedVoice =
+        catalogue && (currentChannels()?.audio ?? 'modal') === 'modal';
+      const speech = rentedVoice ? this.catalogueSpeech : this.speech;
       const { model, voice: named } = speech.label();
-      const voice = catalogue
+      const voice = rentedVoice
         ? named
         : this.config.get<string>('AI_LECTURE_VOICE', named);
       // The words and their delivery are both in the key: a page written

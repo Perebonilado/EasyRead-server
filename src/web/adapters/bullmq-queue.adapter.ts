@@ -1,3 +1,5 @@
+import type { ProcessingChannels } from '../../contracts';
+import { currentOverride } from '../../business/ports/processing-context';
 import { Injectable, Logger, OnModuleDestroy } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { Queue } from 'bullmq';
@@ -67,6 +69,19 @@ export class BullmqQueueAdapter implements JobQueuePort, OnModuleDestroy {
     return queue;
   }
 
+  /**
+   * A job fanned out inside a run carries the run's own channels, so a
+   * retry on OpenAI stays on OpenAI through its chapters, voices and
+   * boards. The admin's setting itself is not stamped: the worker reads
+   * that per job, so a switch reaches every page still to come.
+   */
+  private stamped<T extends object>(job: T): T {
+    const carried = job as T & { channels?: Partial<ProcessingChannels> };
+    if (carried.channels) return job;
+    const override = currentOverride();
+    return override ? { ...job, channels: override } : job;
+  }
+
   private options(name: QueueName) {
     const settings = QUEUE_SETTINGS[name];
     return {
@@ -82,7 +97,7 @@ export class BullmqQueueAdapter implements JobQueuePort, OnModuleDestroy {
     job: PipelineJob,
   ): Promise<void> {
     const name = QUEUE_FOR_STEP[step];
-    await this.queue(name).add(step, job, {
+    await this.queue(name).add(step, this.stamped(job), {
       ...this.options(name),
       jobId: stepJobId(step, job.documentId, job.contentVersion),
     });
@@ -119,7 +134,7 @@ export class BullmqQueueAdapter implements JobQueuePort, OnModuleDestroy {
     await queue.addBulk(
       jobs.map((job) => ({
         name: 'simplify',
-        data: job,
+        data: this.stamped(job),
         opts: {
           ...this.options(QUEUE.simplify),
           jobId: simplifyJobId(
@@ -161,7 +176,7 @@ export class BullmqQueueAdapter implements JobQueuePort, OnModuleDestroy {
     await queue.addBulk(
       jobs.map((job) => ({
         name: 'lecture-chapter',
-        data: job,
+        data: this.stamped(job),
         opts: {
           ...this.options(QUEUE.lectureChapter),
           // A second pass has its own id: the first run's finished job
@@ -211,7 +226,7 @@ export class BullmqQueueAdapter implements JobQueuePort, OnModuleDestroy {
         const priority = (job as { priority?: number }).priority;
         return {
           name,
-          data: job,
+          data: this.stamped(job),
           opts: {
             ...this.options(queueName),
             jobId: idOf(job),
@@ -305,7 +320,7 @@ export class BullmqQueueAdapter implements JobQueuePort, OnModuleDestroy {
     await queue.addBulk(
       jobs.map((job) => ({
         name: 'lecture-voice',
-        data: job,
+        data: this.stamped(job),
         opts: {
           ...this.options(QUEUE.lectureVoice),
           jobId: lectureVoiceJobId(
@@ -323,14 +338,14 @@ export class BullmqQueueAdapter implements JobQueuePort, OnModuleDestroy {
   }
 
   async enqueueLearn(job: PipelineJob): Promise<void> {
-    await this.queue(QUEUE.learn).add('learn', job, {
+    await this.queue(QUEUE.learn).add('learn', this.stamped(job), {
       ...this.options(QUEUE.learn),
       jobId: `learn-${job.documentId}-${job.contentVersion}`,
     });
   }
 
   async enqueueImport(job: PipelineJob): Promise<void> {
-    await this.queue(QUEUE.import).add('import', job, {
+    await this.queue(QUEUE.import).add('import', this.stamped(job), {
       ...this.options(QUEUE.import),
       jobId: importJobId(job.documentId, job.contentVersion),
     });
@@ -350,7 +365,7 @@ export class BullmqQueueAdapter implements JobQueuePort, OnModuleDestroy {
     // Throws if the job is currently running, which is the one case where
     // dropping it would be wrong anyway — that render is already underway.
     await queue.remove(jobId).catch(() => undefined);
-    await queue.add('export', job, {
+    await queue.add('export', this.stamped(job), {
       ...this.options(QUEUE.export),
       jobId,
     });

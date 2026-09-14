@@ -293,6 +293,35 @@ export interface MaterialPageDto {
   untaught: number | null;
 }
 
+// ── Processing channels ─────────────────────────────────────────────────────
+
+/** Where a school's processing runs: OpenAI, or our own open models on Modal. */
+export type ProcessingChannel = 'openai' | 'modal';
+
+/** Chosen separately: the text work, and the voice. */
+export interface ProcessingChannels {
+  text: ProcessingChannel;
+  audio: ProcessingChannel;
+}
+
+/** One channel's standing, as far as it can be known without waking it. */
+export interface ChannelHealthDto {
+  configured: boolean;
+  model?: string | null;
+  lastCallAt?: string | null;
+  lastOutcome?: string | null;
+}
+
+export interface ProcessingStatusDto {
+  channels: ProcessingChannels;
+  changedAt: string | null;
+  health: {
+    openai: ChannelHealthDto;
+    modalText: ChannelHealthDto;
+    modalAudio: ChannelHealthDto;
+  };
+}
+
 export interface PrepareRequest {
   /** Named documents, or a department at a level, or a course, or the whole school when none is given. */
   documentIds?: string[];
@@ -305,6 +334,8 @@ export interface PrepareRequest {
   styles: LectureStyle[];
   /** Voice every page again, keeping the words: after a pronunciation was added or fixed. */
   revoice?: boolean;
+  /** This run's own channels, over the admin's setting; either may be left out. */
+  channels?: Partial<ProcessingChannels>;
 }
 
 export interface PrepareEstimateDto {
@@ -313,6 +344,13 @@ export interface PrepareEstimateDto {
   textUsd: number;
   audioUsd: number;
   totalUsd: number;
+  /** The channels this estimate is priced on. */
+  channels: ProcessingChannels;
+  /** The same work priced on each channel, so the choice is made with both numbers in view. */
+  byChannel: {
+    text: Record<ProcessingChannel, number>;
+    audio: Record<ProcessingChannel, number>;
+  };
 }
 
 export interface PrepareResponse extends PrepareEstimateDto {

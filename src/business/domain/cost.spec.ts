@@ -1,4 +1,9 @@
-import { catalogueSpeechCost, costOf, estimatePrepare } from './cost';
+import {
+  catalogueSpeechCost,
+  costOf,
+  estimatePrepare,
+  perPageByChannel,
+} from './cost';
 
 describe('the cost of a call', () => {
   it('prices text by tokens and speech by characters, and leaves the unknown null', () => {
@@ -88,5 +93,71 @@ describe('the estimate before the button', () => {
       estimate.textUsd + estimate.audioUsd,
       4,
     );
+  });
+});
+
+describe('the rented text model', () => {
+  it('is priced per million tokens at the measured rate, and unknown until measured', () => {
+    const call = {
+      task: 'lecture_segment',
+      model: 'modal:Kimi-K3',
+      tokensIn: 600_000,
+      tokensOut: 400_000,
+    };
+    expect(costOf(call, { modalUsdPerMillionTokens: 0.5 })).toBe(0.5);
+    expect(costOf(call)).toBeNull();
+    expect(
+      costOf(
+        { ...call, tokensIn: 0, tokensOut: 0 },
+        { modalUsdPerMillionTokens: 0.5 },
+      ),
+    ).toBeNull();
+  });
+});
+
+describe('the estimate on each channel', () => {
+  const documents = [
+    {
+      pages: 100,
+      needsPipeline: false,
+      hasEasiest: true,
+      styles: [] as never[],
+    },
+  ];
+
+  it('prices the chosen channels and shows the other pair beside them', () => {
+    const estimate = estimatePrepare({
+      documents,
+      easiest: false,
+      styles: ['steady'],
+      channels: { text: 'modal', audio: 'modal' },
+      rates: { modalUsdPerMillionTokens: 0.075, modalUsdPerAudioHour: 0.09 },
+    });
+    // Text at a fifth of gpt-4o-mini's blended price; audio at 0.09 an hour
+    // against OpenAI's 0.90.
+    expect(estimate.byChannel.text.openai).toBe(0.3);
+    expect(estimate.byChannel.text.modal).toBe(0.06);
+    expect(estimate.byChannel.audio.openai).toBe(2);
+    expect(estimate.byChannel.audio.modal).toBe(0.2);
+    expect(estimate.textUsd).toBe(0.06);
+    expect(estimate.audioUsd).toBe(0.2);
+    expect(estimate.totalUsd).toBe(0.26);
+    expect(estimate.channels).toEqual({ text: 'modal', audio: 'modal' });
+  });
+
+  it('prices an unmeasured Modal as OpenAI rather than as free, and OpenAI when no channel is given', () => {
+    const per = perPageByChannel({
+      modalUsdPerMillionTokens: 0,
+      modalUsdPerAudioHour: 0,
+    });
+    expect(per.text.modal).toBe(1);
+    expect(per.audio.modal).toBe(per.audio.openai);
+    const estimate = estimatePrepare({
+      documents,
+      easiest: false,
+      styles: ['steady'],
+    });
+    expect(estimate.channels).toEqual({ text: 'openai', audio: 'openai' });
+    expect(estimate.totalUsd).toBe(2.3);
   });
 });

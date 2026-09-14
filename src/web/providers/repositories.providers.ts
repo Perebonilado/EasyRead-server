@@ -28,6 +28,7 @@ import {
   SIMPLIFIED_PAGE_REPOSITORY,
   SUBSCRIPTION_REPOSITORY,
   SCHOOL_PASS_REPOSITORY,
+  PROCESSING_SETTINGS_REPOSITORY,
   SUMMARY_REPOSITORY,
   TOPIC_REPOSITORY,
   USAGE_REPOSITORY,
@@ -56,6 +57,7 @@ import { SequelizeRecapRepository } from '../repositories/sequelize-recap.reposi
 import { SequelizeTopicPreviewRepository } from '../repositories/sequelize-preview.repository';
 import { SequelizePageAssetRepository } from '../repositories/sequelize-page-asset.repository';
 import { SequelizeConceptRepository } from '../repositories/sequelize-concept.repository';
+import { SequelizeProcessingSettingsRepository } from '../repositories/sequelize-settings.repository';
 import {
   SequelizeSchoolPassRepository,
   SequelizeSubscriptionRepository,
@@ -128,6 +130,10 @@ export const repositoryProviders: Provider[] = [
     useClass: SequelizeSubscriptionRepository,
   },
   { provide: SCHOOL_PASS_REPOSITORY, useClass: SequelizeSchoolPassRepository },
+  {
+    provide: PROCESSING_SETTINGS_REPOSITORY,
+    useClass: SequelizeProcessingSettingsRepository,
+  },
   { provide: USAGE_REPOSITORY, useClass: SequelizeUsageRepository },
   {
     provide: VOICE_CREDITS_REPOSITORY,

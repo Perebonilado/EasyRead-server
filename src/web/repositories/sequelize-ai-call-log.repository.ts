@@ -1,4 +1,5 @@
 import { Injectable } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { InjectModel } from '@nestjs/sequelize';
 import type {
   AiCallLogInput,
@@ -12,12 +13,19 @@ import { newId } from '../database/uuid';
 export class SequelizeAiCallLogRepository implements AiCallLogRepository {
   constructor(
     @InjectModel(AiCallLogModel) private readonly logs: typeof AiCallLogModel,
+    private readonly config: ConfigService,
   ) {}
 
   async record(input: AiCallLogInput): Promise<void> {
     // Priced as it lands, so spend per document is a sum and not a guess.
     const { costUsd, ...row } = input;
-    const costEstimate = costUsd ?? costOf(row);
+    const costEstimate =
+      costUsd ??
+      costOf(row, {
+        modalUsdPerMillionTokens: Number(
+          this.config.get<string>('MODAL_USD_PER_MILLION_TOKENS', '0'),
+        ),
+      });
     await this.logs.create({
       id: newId(),
       ...row,

@@ -3,7 +3,12 @@
  * the button is pressed. List prices, in US dollars, kept in one place so the
  * ledger and the estimate cannot disagree.
  */
-import type { LectureStyle, Level } from '../../contracts';
+import type {
+  LectureStyle,
+  Level,
+  ProcessingChannel,
+  ProcessingChannels,
+} from '../../contracts';
 
 /** Dollars per million tokens, in and out, by model id as the registry names it. */
 const PER_MILLION: Record<string, { in: number; out: number }> = {
@@ -46,12 +51,15 @@ export function catalogueSpeechCost(
  * The cost of one logged call, or null when the log does not carry what is
  * needed to price it (a realtime session, a page-priced OCR call).
  */
-export function costOf(input: {
-  task: string;
-  model: string;
-  tokensIn: number | null;
-  tokensOut: number | null;
-}): number | null {
+export function costOf(
+  input: {
+    task: string;
+    model: string;
+    tokensIn: number | null;
+    tokensOut: number | null;
+  },
+  rates: { modalUsdPerMillionTokens?: number } = {},
+): number | null {
   const id = input.model.includes(':')
     ? input.model.slice(input.model.indexOf(':') + 1)
     : input.model;
@@ -59,6 +67,14 @@ export function costOf(input: {
     return input.tokensIn === null
       ? null
       : round(input.tokensIn * SPEECH_PER_CHAR);
+  }
+  // Our own model on the rented card is priced by the bench's measured
+  // average per million tokens, in and out alike; unmeasured is unknown.
+  if (input.model.startsWith('modal:')) {
+    const rate = rates.modalUsdPerMillionTokens ?? 0;
+    const tokens = (input.tokensIn ?? 0) + (input.tokensOut ?? 0);
+    if (!(rate > 0) || !tokens) return null;
+    return round((tokens * rate) / 1_000_000);
   }
   const price = PER_MILLION[id];
   if (!price) return null;
@@ -90,6 +106,47 @@ export interface PrepareEstimate {
   textUsd: number;
   audioUsd: number;
   totalUsd: number;
+  channels: ProcessingChannels;
+  byChannel: {
+    text: Record<ProcessingChannel, number>;
+    audio: Record<ProcessingChannel, number>;
+  };
+}
+
+/** What the rented cards cost, as the benches measured them; zero when unmeasured. */
+export interface ChannelRates {
+  modalUsdPerMillionTokens: number;
+  modalUsdPerAudioHour: number;
+}
+
+/** gpt-4o-mini, in and out averaged: what PER_PAGE's text prices were measured on. */
+const OPENAI_TEXT_PER_MILLION =
+  (PER_MILLION['gpt-4o-mini'].in + PER_MILLION['gpt-4o-mini'].out) / 2;
+/** The list price of a minute of OpenAI speech, so a page's audio can be told in minutes. */
+const OPENAI_USD_PER_AUDIO_MINUTE = 0.015;
+
+/**
+ * What one page's text and audio cost on each channel. OpenAI is the
+ * measured PER_PAGE; Modal scales it by the bench's rate against OpenAI's,
+ * and an unmeasured rate is priced as OpenAI's rather than as free.
+ */
+export function perPageByChannel(rates: ChannelRates): {
+  text: Record<ProcessingChannel, number>;
+  audio: Record<ProcessingChannel, number>;
+} {
+  const textFactor =
+    rates.modalUsdPerMillionTokens > 0
+      ? rates.modalUsdPerMillionTokens / OPENAI_TEXT_PER_MILLION
+      : 1;
+  const minutesPerPage = PER_PAGE.audio / OPENAI_USD_PER_AUDIO_MINUTE;
+  const modalAudio =
+    rates.modalUsdPerAudioHour > 0
+      ? (minutesPerPage / 60) * rates.modalUsdPerAudioHour
+      : PER_PAGE.audio;
+  return {
+    text: { openai: 1, modal: textFactor },
+    audio: { openai: PER_PAGE.audio, modal: modalAudio },
+  };
 }
 
 /**
@@ -110,13 +167,23 @@ export function estimatePrepare(input: {
   }[];
   easiest: boolean;
   styles: LectureStyle[];
+  /** The channels to price on; OpenAI for both when not given. */
+  channels?: ProcessingChannels;
+  rates?: ChannelRates;
 }): PrepareEstimate {
+  const channels = input.channels ?? { text: 'openai', audio: 'openai' };
+  const per = perPageByChannel(
+    input.rates ?? { modalUsdPerMillionTokens: 0, modalUsdPerAudioHour: 0 },
+  );
   let pages = 0;
+  // Text in OpenAI dollars, scaled per channel at the end; audio in pages.
   let text = 0;
-  let audio = 0;
+  let audioPages = 0;
   for (const doc of input.documents) {
     pages += doc.pages;
     if (doc.needsPipeline) {
+      // Reading the page stays on Mistral whatever the channel; the rest
+      // of the pipeline's text follows it.
       text +=
         doc.pages *
         (PER_PAGE.ocr +
@@ -131,15 +198,29 @@ export function estimatePrepare(input: {
       if (!(doc.scripted ?? []).includes(style)) {
         text += doc.pages * PER_PAGE.lectureText;
       }
-      audio += doc.pages * PER_PAGE.audio;
+      audioPages += doc.pages;
     }
   }
+  const byChannel = {
+    text: {
+      openai: round(text * per.text.openai),
+      modal: round(text * per.text.modal),
+    },
+    audio: {
+      openai: round(audioPages * per.audio.openai),
+      modal: round(audioPages * per.audio.modal),
+    },
+  };
+  const textUsd = byChannel.text[channels.text];
+  const audioUsd = byChannel.audio[channels.audio];
   return {
     documents: input.documents.length,
     pages,
-    textUsd: round(text),
-    audioUsd: round(audio),
-    totalUsd: round(text + audio),
+    textUsd,
+    audioUsd,
+    totalUsd: round(textUsd + audioUsd),
+    channels,
+    byChannel,
   };
 }
 

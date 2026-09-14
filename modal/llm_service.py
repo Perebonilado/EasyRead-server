@@ -39,7 +39,11 @@ USD_PER_GPU_HOUR = {"L4": 0.80, "A10": 1.10, "L40S": 1.95, "A100": 2.10, "H100":
 
 app = modal.App(os.environ.get("LLM_APP_NAME", "easiread-llm"))
 
-image = modal.Image.from_registry("vllm/vllm-openai:latest").env(
+# Modal needs a Python of its own inside the image for its runtime; the
+# engine keeps using the image's own, which is what `vllm serve` runs on.
+# The image's own entrypoint is `vllm`, which would swallow Modal's runner
+# command; cleared, the engine is started by hand below.
+image = modal.Image.from_registry("vllm/vllm-openai:latest", add_python="3.12").entrypoint([]).env(
     {
         "LLM_MODEL": MODEL,
         "LLM_MAX_MODEL_LEN": str(MAX_MODEL_LEN),

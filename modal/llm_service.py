@@ -34,6 +34,10 @@ MAX_MODEL_LEN = int(os.environ.get("LLM_MAX_MODEL_LEN", "16384"))
 PORT = 8000
 # Requests one container takes at once; the engine batches them itself.
 INTAKE = int(os.environ.get("LLM_INTAKE", "16"))
+# The writer wants the answer, not a think-aloud before it: a model with a
+# reasoning switch in its chat template (Qwen3 has one) spends the whole
+# context reasoning otherwise. Templates without the switch ignore it.
+CHAT_TEMPLATE_KWARGS = os.environ.get("LLM_CHAT_TEMPLATE_KWARGS", '{"enable_thinking": false}')
 # What Modal bills a card for, per hour, for the bench's arithmetic.
 USD_PER_GPU_HOUR = {"L4": 0.80, "A10": 1.10, "L40S": 1.95, "A100": 2.10, "H100": 3.95, "H200": 4.54, "B200": 6.25}
 
@@ -47,6 +51,7 @@ image = modal.Image.from_registry("vllm/vllm-openai:latest", add_python="3.12").
     {
         "LLM_MODEL": MODEL,
         "LLM_MAX_MODEL_LEN": str(MAX_MODEL_LEN),
+        "LLM_CHAT_TEMPLATE_KWARGS": CHAT_TEMPLATE_KWARGS,
         "LLM_TENSOR_PARALLEL": str(TENSOR_PARALLEL),
         "HF_HOME": "/weights/hf",
         "VLLM_LOGGING_LEVEL": "INFO",
@@ -83,6 +88,10 @@ class Text:
             "--max-model-len", os.environ["LLM_MAX_MODEL_LEN"],
             "--tensor-parallel-size", os.environ["LLM_TENSOR_PARALLEL"],
             "--served-model-name", os.environ["LLM_MODEL"],
+            "--default-chat-template-kwargs", os.environ["LLM_CHAT_TEMPLATE_KWARGS"],
+            # A JSON answer is held to its schema by a grammar; without this
+            # the grammar lets the model emit whitespace forever after "{".
+            "--structured-outputs-config", '{"backend": "xgrammar", "disable_any_whitespace": true}',
         ]
         # The key goes in by environment, not on the command line: the
         # engine prints its non-default arguments to the log at start.

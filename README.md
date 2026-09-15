@@ -120,14 +120,16 @@ between it and the original, never between levels of it.
 
 ### The lecture voice
 
-Every lecture, a learner's own upload and a school's catalogue alike, is
-narrated by Kokoro on a rented GPU (`modal/kokoro_service.py`), billed by the
-second and asleep between runs, never by OpenAI's per-character voice. The
-worker reaches it through `MODAL_TTS_URL` and `MODAL_TTS_TOKEN`; with no URL
-set, the words are written and the rows stay scripted until one is. A page is
-priced in the ledger by the audio it made at `MODAL_USD_PER_AUDIO_HOUR`, the
-rate the service's bench measured. The "listen to this page" read-aloud and the
-live voice conversation stay on OpenAI.
+A school's catalogue is narrated by Kokoro on a rented GPU
+(`modal/kokoro_service.py`), billed by the second and asleep between runs,
+never by OpenAI's per-character voice. The worker reaches it through
+`MODAL_TTS_URL` and `MODAL_TTS_TOKEN`; with no URL set, a school's words are
+written and the rows stay scripted until one is. A page is priced in the
+ledger by the audio it made at `MODAL_USD_PER_AUDIO_HOUR`, the rate the
+service's bench measured. A learner's own upload is narrated by OpenAI's voice
+(`AI_LECTURE_VOICE`), as always: somebody is waiting on it, and it must never
+wait on a sleeping or disabled container. The "listen to this page" read-aloud
+and the live voice conversation stay on OpenAI too.
 
 `OPENAI_API_MODE=chat` switches from OpenAI's Responses API to chat completions,
 which is what OpenAI-compatible gateways (OpenRouter, Groq, a local server)

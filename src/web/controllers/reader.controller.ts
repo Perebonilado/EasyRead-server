@@ -28,7 +28,6 @@ import {
   PrioritisePagesHandler,
   RetryPageHandler,
   SavePositionHandler,
-  StartEasiestHandler,
 } from '../../business/handlers/documents/reading.handlers';
 import { ReaderQuery } from '../../query/reader.query';
 import { CurrentUser } from '../security/current-user.decorator';
@@ -47,7 +46,6 @@ export class ReaderController {
     private readonly reader: ReaderQuery,
     private readonly access: DocumentAccessService,
     private readonly prioritise: PrioritisePagesHandler,
-    private readonly startEasiest: StartEasiestHandler,
     private readonly retryPage: RetryPageHandler,
     private readonly savePosition: SavePositionHandler,
     private readonly markTopics: MarkTopicsHandler,
@@ -99,11 +97,7 @@ export class ReaderController {
     @Query() query: SimplifiedPagesQueryDto,
   ): Promise<SimplifiedPagesResponse> {
     await this.access.require(documentId, userId);
-    return this.reader.simplifiedPages(
-      documentId,
-      query.level ?? 'standard',
-      query,
-    );
+    return this.reader.simplifiedPages(documentId, query);
   }
 
   @Get('topics')
@@ -124,15 +118,6 @@ export class ReaderController {
     @Body() body: PrioritiseDto,
   ): Promise<void> {
     await this.prioritise.handle({ userId, documentId, ...body });
-  }
-
-  @Post('easiest')
-  @HttpCode(202)
-  async easiest(
-    @CurrentUser('id') userId: string,
-    @Param('id') documentId: string,
-  ): Promise<void> {
-    await this.startEasiest.handle({ userId, documentId });
   }
 
   @Post('retry-page')

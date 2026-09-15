@@ -12,7 +12,6 @@ export type LlmTask =
   | 'topics_page_tag'
   | 'topics_prereqs'
   | 'simplify_standard'
-  | 'simplify_easiest'
   | 'highlight_explain'
   | 'highlight_simplify'
   | 'highlight_define'
@@ -486,7 +485,6 @@ export interface LlmGatewayPort {
   }): Promise<LlmResult<{ grounded: boolean; problems: string[] }>>;
 
   simplifyPage(input: {
-    task: 'simplify_standard' | 'simplify_easiest';
     pageText: string;
     summary: string | null;
     pageNumber: number;

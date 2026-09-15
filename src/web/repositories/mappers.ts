@@ -14,7 +14,6 @@ export function toUser(row: UserModel): User {
     googleId: row.googleId,
     name: row.name,
     emailVerifiedAt: row.emailVerifiedAt,
-    defaultLevel: row.defaultLevel,
     verificationTokenHash: row.verificationTokenHash,
     verificationTokenExpires: row.verificationTokenExpires,
     resetTokenHash: row.resetTokenHash,

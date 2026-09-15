@@ -81,7 +81,6 @@ const userProps = (): UserProps => ({
   googleId: null,
   name: 'Ada',
   emailVerifiedAt: null,
-  defaultLevel: 'standard',
   verificationTokenHash: null,
   verificationTokenExpires: null,
   resetTokenHash: null,

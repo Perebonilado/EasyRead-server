@@ -1,33 +1,23 @@
 import { Inject, Injectable } from '@nestjs/common';
-import type { Level } from '../../../contracts';
-import {
-  AlreadyInProgressError,
-  DocumentNotReadyError,
-  NotFoundError,
-  ValidationError,
-} from '../../domain/errors/errors';
+import { NotFoundError, ValidationError } from '../../domain/errors/errors';
 import { CLOCK, JOB_QUEUE } from '../../ports/tokens';
 import type { ClockPort } from '../../ports/clock.port';
 import type { JobQueuePort } from '../../ports/job-queue.port';
 import {
   DOCUMENT_REPOSITORY,
-  PIPELINE_RUN_REPOSITORY,
   READING_POSITION_REPOSITORY,
   SIMPLIFIED_PAGE_REPOSITORY,
   TOPIC_REPOSITORY,
 } from '../../repositories/tokens';
 import type { DocumentRepository } from '../../repositories/document.repository';
 import type {
-  PipelineRunRepository,
   ReadingPositionRepository,
   TopicRepository,
 } from '../../repositories/misc.repository';
 import type { SimplifiedPageRepository } from '../../repositories/simplified-page.repository';
-import { PipelineOrchestrator } from '../../../pipeline/orchestrator.service';
 import AbstractRequestHandlerTemplate from '../AbstractRequestHandlerTemplate';
 import { CommandResponse } from '../response/CommandResponse';
 import { DocumentAccessService } from './document-access.service';
-import { EntitlementsService } from './entitlements.service';
 
 // ── Priority boost ───────────────────────────────────────────────────────────
 
@@ -35,7 +25,6 @@ export interface PrioritiseRequest {
   userId: string;
   documentId: string;
   pageNumber: number;
-  level: Level;
 }
 
 /**
@@ -59,66 +48,9 @@ export class PrioritisePagesHandler extends AbstractRequestHandlerTemplate<
     await this.queue.prioritise({
       documentId: cmd.documentId,
       contentVersion: doc.contentVersion,
-      level: cmd.level,
       fromPage: cmd.pageNumber,
       toPage: cmd.pageNumber + 3,
     });
-    return CommandResponse.empty();
-  }
-}
-
-// ── Easiest Read ─────────────────────────────────────────────────────────────
-
-export interface StartEasiestRequest {
-  userId: string;
-  documentId: string;
-}
-
-/**
- * Spends one Easiest conversion and fans out a second full pass over the
- * document at the easier level. Idempotent: asking twice while it's running is
- * a 409 rather than a second charge (§3.2).
- */
-@Injectable()
-export class StartEasiestHandler extends AbstractRequestHandlerTemplate<
-  StartEasiestRequest,
-  void
-> {
-  constructor(
-    @Inject(PIPELINE_RUN_REPOSITORY)
-    private readonly runs: PipelineRunRepository,
-    private readonly access: DocumentAccessService,
-    private readonly entitlements: EntitlementsService,
-    private readonly pipeline: PipelineOrchestrator,
-  ) {
-    super();
-  }
-
-  protected async handleRequest(cmd: StartEasiestRequest) {
-    const doc = await this.access.require(cmd.documentId, cmd.userId);
-
-    if (doc.props.simplificationUnavailable) {
-      throw new DocumentNotReadyError(
-        "This document's text can't be simplified",
-      );
-    }
-    if (!doc.props.pageCount) {
-      throw new DocumentNotReadyError('This document is still being prepared');
-    }
-
-    const status = await this.runs.status(cmd.documentId, 'simplify_easiest');
-    if (status === 'done')
-      throw new AlreadyInProgressError('Easiest Read is already available');
-    if (status === 'running' || status === 'queued') {
-      throw new AlreadyInProgressError('Easiest Read is already being written');
-    }
-
-    // Easiest conversions are no longer counted; the study clock is the
-    // meter now, and this is exactly the kind of study action it guards.
-    await this.entitlements.assertStudyTime(cmd.userId);
-
-    await this.pipeline.fanOutSimplify(doc.id, doc.contentVersion, 'easiest');
-
     return CommandResponse.empty();
   }
 }
@@ -129,7 +61,6 @@ export interface RetryPageRequest {
   userId: string;
   documentId: string;
   pageNumber: number;
-  level: Level;
 }
 
 /**
@@ -153,19 +84,14 @@ export class RetryPageHandler extends AbstractRequestHandlerTemplate<
   protected async handleRequest(cmd: RetryPageRequest) {
     const doc = await this.access.require(cmd.documentId, cmd.userId);
 
-    const page = await this.pages.find(
-      cmd.documentId,
-      cmd.level,
-      cmd.pageNumber,
-    );
+    const page = await this.pages.find(cmd.documentId, cmd.pageNumber);
     if (!page) throw new NotFoundError('Page');
 
-    await this.pages.reset(cmd.documentId, cmd.level, cmd.pageNumber);
+    await this.pages.reset(cmd.documentId, cmd.pageNumber);
     await this.queue.enqueueSimplifyPages([
       {
         documentId: cmd.documentId,
         contentVersion: doc.contentVersion,
-        level: cmd.level,
         pageNumber: cmd.pageNumber,
       },
     ]);
@@ -180,7 +106,7 @@ export interface SavePositionRequest {
   userId: string;
   documentId: string;
   lastPage: number;
-  level: 'original' | 'standard' | 'easiest';
+  level: 'original' | 'standard';
 }
 
 @Injectable()

@@ -1,5 +1,4 @@
 import { Inject, Injectable } from '@nestjs/common';
-import type { Level } from '../../../contracts';
 import { judgeVisit } from '../../domain/dwell';
 import {
   DOCUMENT_PAGE_REPOSITORY,
@@ -17,7 +16,7 @@ import { StruggleRecorder } from './struggle-recorder.service';
 export interface DwellVisitInput {
   page: number;
   /** The original text counts too — dwell is about what was on screen. */
-  level: Level | 'original';
+  level: 'standard' | 'original';
   ms: number;
 }
 
@@ -117,11 +116,7 @@ export class RecordDwellHandler extends AbstractRequestHandlerTemplate<
       const page = await this.pages.findOne(documentId, visit.page);
       return page ? countWords(page.text) : null;
     }
-    const page = await this.simplified.find(
-      documentId,
-      visit.level,
-      visit.page,
-    );
+    const page = await this.simplified.find(documentId, visit.page);
     if (!page?.blocks) return null;
     return countWords(page.blocks.map((block) => block.text).join(' '));
   }

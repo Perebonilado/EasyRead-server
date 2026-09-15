@@ -5,7 +5,7 @@ import {
   ForeignKey,
   Table,
 } from 'sequelize-typescript';
-import type { Block, Level, PageStatus } from '../../../contracts';
+import type { Block, PageStatus } from '../../../contracts';
 import { BaseModel } from './base';
 import { DocumentModel } from './document.model';
 
@@ -21,8 +21,9 @@ export class SimplifiedPageModel extends BaseModel {
   @Column({ type: DataType.INTEGER, allowNull: false })
   declare pageNumber: number;
 
-  @Column({ type: DataType.ENUM('standard', 'easiest'), allowNull: false })
-  declare level: Level;
+  /** The one note a page has now; the column and its value stay for the unique index. */
+  @Column({ type: DataType.ENUM('standard'), allowNull: false })
+  declare level: 'standard';
 
   @Column({ type: DataType.JSON, allowNull: true })
   declare blocks: Block[] | null;

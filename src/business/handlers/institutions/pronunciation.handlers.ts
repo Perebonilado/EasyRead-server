@@ -1,6 +1,6 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import { spokenForm } from '../../domain/spoken';
-import { CATALOGUE_SPEECH, LLM_GATEWAY } from '../../ports/tokens';
+import { LECTURE_SPEECH, LLM_GATEWAY } from '../../ports/tokens';
 import type { LlmGatewayPort } from '../../ports/llm.port';
 import type { SpeechPort } from '../../ports/voice.port';
 import {
@@ -206,7 +206,7 @@ export class PronunciationHandlers {
   constructor(
     @Inject(PRONUNCIATION_REPOSITORY)
     private readonly pronunciations: PronunciationRepository,
-    @Inject(CATALOGUE_SPEECH) private readonly speech: SpeechPort,
+    @Inject(LECTURE_SPEECH) private readonly speech: SpeechPort,
   ) {}
 
   list(institutionId: string): Promise<PronunciationRecord[]> {

@@ -1,7 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { InjectModel } from '@nestjs/sequelize';
 import { Op, fn, col, literal } from 'sequelize';
-import type { Block, Level } from '../../contracts';
+import type { Block } from '../../contracts';
 import type {
   LevelProgress,
   SimplifiedPageRecord,
@@ -12,7 +12,6 @@ import { newId } from '../database/uuid';
 
 const toRecord = (row: SimplifiedPageModel): SimplifiedPageRecord => ({
   pageNumber: row.pageNumber,
-  level: row.level,
   status: row.status,
   blocks: row.blocks,
   attempts: row.attempts,
@@ -25,6 +24,9 @@ const toRecord = (row: SimplifiedPageModel): SimplifiedPageRecord => ({
  * failure. Without this a page stays pending forever and the document
  * never reaches ready.
  */
+/** The one simplified note a page has; the column keeps its old name. */
+const LEVEL = 'standard' as const;
+
 async function withDeadlockRetry<T>(write: () => Promise<T>): Promise<T> {
   let lastError: unknown;
   for (let attempt = 1; attempt <= 4; attempt += 1) {
@@ -53,15 +55,11 @@ export class SequelizeSimplifiedPageRepository implements SimplifiedPageReposito
    * Pre-creates a pending row per page. `ignoreDuplicates` makes re-running the
    * fan-out harmless — pages already written keep their state.
    */
-  async seed(
-    documentId: string,
-    level: Level,
-    pageCount: number,
-  ): Promise<void> {
+  async seed(documentId: string, pageCount: number): Promise<void> {
     const rows = Array.from({ length: pageCount }, (_, index) => ({
       id: newId(),
       documentId,
-      level,
+      level: LEVEL,
       pageNumber: index + 1,
       status: 'pending' as const,
     }));
@@ -72,43 +70,42 @@ export class SequelizeSimplifiedPageRepository implements SimplifiedPageReposito
     await this.model.destroy({ where: { documentId } });
   }
 
-  async find(documentId: string, level: Level, pageNumber: number) {
+  async find(documentId: string, pageNumber: number) {
     const row = await this.model.findOne({
-      where: { documentId, level, pageNumber },
+      where: { documentId, level: LEVEL, pageNumber },
     });
     return row ? toRecord(row) : null;
   }
 
-  async findRange(documentId: string, level: Level, from: number, to: number) {
+  async findRange(documentId: string, from: number, to: number) {
     const rows = await this.model.findAll({
-      where: { documentId, level, pageNumber: { [Op.between]: [from, to] } },
+      where: {
+        documentId,
+        level: LEVEL,
+        pageNumber: { [Op.between]: [from, to] },
+      },
       order: [['pageNumber', 'ASC']],
     });
     return rows.map(toRecord);
   }
 
-  async findAllDone(documentId: string, level: Level) {
+  async findAllDone(documentId: string) {
     const rows = await this.model.findAll({
-      where: { documentId, level, status: 'done' },
+      where: { documentId, level: LEVEL, status: 'done' },
       order: [['pageNumber', 'ASC']],
     });
     return rows.map(toRecord);
   }
 
-  async markProcessing(
-    documentId: string,
-    level: Level,
-    pageNumber: number,
-  ): Promise<void> {
+  async markProcessing(documentId: string, pageNumber: number): Promise<void> {
     await this.model.update(
       { status: 'processing' },
-      { where: { documentId, level, pageNumber, status: 'pending' } },
+      { where: { documentId, level: LEVEL, pageNumber, status: 'pending' } },
     );
   }
 
   async markDone(input: {
     documentId: string;
-    level: Level;
     pageNumber: number;
     blocks: Block[];
     model: string | null;
@@ -128,7 +125,7 @@ export class SequelizeSimplifiedPageRepository implements SimplifiedPageReposito
         {
           where: {
             documentId: input.documentId,
-            level: input.level,
+            level: LEVEL,
             pageNumber: input.pageNumber,
           },
         },
@@ -139,25 +136,24 @@ export class SequelizeSimplifiedPageRepository implements SimplifiedPageReposito
   /** Returns the attempt count so the caller can decide to stop retrying. */
   async markFailed(
     documentId: string,
-    level: Level,
     pageNumber: number,
     error: string,
   ): Promise<number> {
     await withDeadlockRetry(() =>
       this.model.update(
         { status: 'failed', error, attempts: literal('attempts + 1') },
-        { where: { documentId, level, pageNumber } },
+        { where: { documentId, level: LEVEL, pageNumber } },
       ),
     );
     const row = await this.model.findOne({
-      where: { documentId, level, pageNumber },
+      where: { documentId, level: LEVEL, pageNumber },
     });
     return row?.attempts ?? 0;
   }
 
-  async progress(documentId: string, level: Level): Promise<LevelProgress> {
+  async progress(documentId: string): Promise<LevelProgress> {
     const rows = (await this.model.findAll({
-      where: { documentId, level },
+      where: { documentId, level: LEVEL },
       attributes: ['status', [fn('COUNT', col('id')), 'count']],
       group: ['status'],
       raw: true,
@@ -175,14 +171,10 @@ export class SequelizeSimplifiedPageRepository implements SimplifiedPageReposito
     return { done, failed, total };
   }
 
-  async reset(
-    documentId: string,
-    level: Level,
-    pageNumber: number,
-  ): Promise<void> {
+  async reset(documentId: string, pageNumber: number): Promise<void> {
     await this.model.update(
       { status: 'pending', error: null },
-      { where: { documentId, level, pageNumber } },
+      { where: { documentId, level: LEVEL, pageNumber } },
     );
   }
 }

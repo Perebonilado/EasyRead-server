@@ -8,7 +8,6 @@ import {
   type ComputeResponse,
   type DiagramCheckResponse,
   type DiagramResponse,
-  type Level,
   type SketchResponse,
   type VoiceMode,
   type VoiceSessionResponse,
@@ -92,7 +91,7 @@ import {
   scriptForTts,
   type LecturePlan,
 } from '../../domain/lecture';
-import { noteLevelFor, noteUnits } from '../../domain/follow';
+import { noteUnits } from '../../domain/follow';
 import {
   ASK_HEARD_CHARS,
   askInstructions,
@@ -101,7 +100,7 @@ import {
 } from '../../domain/ask';
 import { sentenceIndexAtMs, type WordTimes } from '../../domain/board';
 
-export type AudioLevel = 'original' | Level;
+export type AudioLevel = 'original' | 'standard';
 
 export interface PageAudioRequest {
   userId: string;
@@ -187,11 +186,7 @@ export class PageAudioHandler extends AbstractRequestHandlerTemplate<
       return page.text;
     }
 
-    const page = await this.simplified.find(
-      cmd.documentId,
-      cmd.level,
-      cmd.pageNumber,
-    );
+    const page = await this.simplified.find(cmd.documentId, cmd.pageNumber);
     if (!page) throw new NotFoundError('Page');
     if (page.status !== 'done') {
       throw new DocumentNotReadyError(
@@ -249,8 +244,6 @@ export interface VoiceSessionRequest {
     /** The note block and sentence the highlight was on when the mic was pressed. */
     block?: number;
     sentence?: number | null;
-    /** The note level the learner is reading. */
-    noteLevel?: Level;
     /** The conversation so far, when a dropped session is being resumed: the tutor must still remember. */
     conversation?: { role: 'learner' | 'tutor'; text: string }[];
     /** What is on the tutor's board for this page, one line per item, when a session is made again or woken. */
@@ -1203,9 +1196,8 @@ export class StartVoiceSessionHandler extends AbstractRequestHandlerTemplate<
 
     // The note sentence that was lit on their screen, and any figure or
     // table the page names, which the tutor may offer to draw.
-    const noteLevel = context?.noteLevel ?? noteLevelFor(style);
     const page = await this.simplified
-      .find(doc.id, noteLevel, pageNumber)
+      .find(doc.id, pageNumber)
       .catch(() => null);
     const figures = page?.blocks ? pageFigures(page.blocks) : null;
     let highlighted: string | null = null;
@@ -1230,7 +1222,6 @@ export class StartVoiceSessionHandler extends AbstractRequestHandlerTemplate<
       title: doc.props.title,
       summary,
       style,
-      noteLevel,
       pageNumber,
       pageCount: doc.props.pageCount ?? null,
       chapter,
@@ -1708,7 +1699,6 @@ export class GenerateTopicQuizHandler extends AbstractRequestHandlerTemplate<
 
     const pages = await this.simplified.findRange(
       cmd.documentId,
-      'standard',
       topic.startPage,
       topic.endPage,
     );

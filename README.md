@@ -109,13 +109,25 @@ OpenAI never needs an Anthropic key. A provider that is named but has no key
 
 Overrides are per task because the tasks are not the same size: simplification
 is one call per page, so a 300-page document is 300 calls, while a highlight is
-one. Moving only `AI_MODEL_SIMPLIFY_*` to a cheaper model is usually the whole
+one. Moving only `AI_MODEL_SIMPLIFY_STANDARD` to a cheaper model is usually the whole
 cost conversation. Spend is queryable from `ai_call_logs`, which records the
 provider-qualified model and token counts for every call.
 
 Page simplification and topic outlining use the SDK's structured output with a
 zod schema, so a malformed response raises instead of quietly degrading into a
-blank page.
+blank page. A document has one simplified note per page; the reader chooses
+between it and the original, never between levels of it.
+
+### The lecture voice
+
+Every lecture, a learner's own upload and a school's catalogue alike, is
+narrated by Kokoro on a rented GPU (`modal/kokoro_service.py`), billed by the
+second and asleep between runs, never by OpenAI's per-character voice. The
+worker reaches it through `MODAL_TTS_URL` and `MODAL_TTS_TOKEN`; with no URL
+set, the words are written and the rows stay scripted until one is. A page is
+priced in the ledger by the audio it made at `MODAL_USD_PER_AUDIO_HOUR`, the
+rate the service's bench measured. The "listen to this page" read-aloud and the
+live voice conversation stay on OpenAI.
 
 `OPENAI_API_MODE=chat` switches from OpenAI's Responses API to chat completions,
 which is what OpenAI-compatible gateways (OpenRouter, Groq, a local server)

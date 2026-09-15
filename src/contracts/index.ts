@@ -8,7 +8,6 @@
 
 // ── Shared vocabulary ────────────────────────────────────────────────────────
 
-export type Level = 'standard' | 'easiest';
 /** `code` is verbatim source — never simplified, rendered monospace. */
 /**
  * `code` is verbatim source, rendered monospace. `table` is tabular data:
@@ -35,7 +34,6 @@ export type PipelineStep =
   | 'topics'
   | 'embed'
   | 'simplify_standard'
-  | 'simplify_easiest'
   | 'export';
 export type PipelineStatus =
   'queued' | 'running' | 'done' | 'failed' | 'skipped';
@@ -94,7 +92,6 @@ export type MeResponse = {
   email: string;
   name: string;
   emailVerified: boolean;
-  defaultLevel: Level;
   plan: PlanCode;
   /** The platform role; `admin` runs the schools. */
   role: UserRole;
@@ -247,7 +244,8 @@ export interface MaterialDto {
   orderIndex: number;
   contentHash: string | null;
   steps: { step: PipelineStep; status: PipelineStatus; error: string | null }[];
-  simplified: Record<Level, { done: number; failed: number; total: number }>;
+  /** The simplified note, page by page: how many are written, failed, and there are. */
+  simplified: { done: number; failed: number; total: number };
   /** Lecture rows per style, the segments around a chapter included: how many exist, have their words, have audio, failed. */
   lecture: Record<
     LectureStyle,
@@ -293,49 +291,16 @@ export interface MaterialPageDto {
   untaught: number | null;
 }
 
-// ── Processing channels ─────────────────────────────────────────────────────
-
-/** Where a school's processing runs: OpenAI, or our own open models on Modal. */
-export type ProcessingChannel = 'openai' | 'modal';
-
-/** Chosen separately: the text work, and the voice. */
-export interface ProcessingChannels {
-  text: ProcessingChannel;
-  audio: ProcessingChannel;
-}
-
-/** One channel's standing, as far as it can be known without waking it. */
-export interface ChannelHealthDto {
-  configured: boolean;
-  model?: string | null;
-  lastCallAt?: string | null;
-  lastOutcome?: string | null;
-}
-
-export interface ProcessingStatusDto {
-  channels: ProcessingChannels;
-  changedAt: string | null;
-  health: {
-    openai: ChannelHealthDto;
-    modalText: ChannelHealthDto;
-    modalAudio: ChannelHealthDto;
-  };
-}
-
 export interface PrepareRequest {
   /** Named documents, or a department at a level, or a course, or the whole school when none is given. */
   documentIds?: string[];
   departmentId?: string;
   levelId?: string;
   courseId?: string;
-  /** Write the easiest notes too. */
-  easiest: boolean;
   /** Which lecture styles to write and voice ahead. */
   styles: LectureStyle[];
   /** Voice every page again, keeping the words: after a pronunciation was added or fixed. */
   revoice?: boolean;
-  /** This run's own channels, over the admin's setting; either may be left out. */
-  channels?: Partial<ProcessingChannels>;
 }
 
 export interface PrepareEstimateDto {
@@ -344,13 +309,6 @@ export interface PrepareEstimateDto {
   textUsd: number;
   audioUsd: number;
   totalUsd: number;
-  /** The channels this estimate is priced on. */
-  channels: ProcessingChannels;
-  /** The same work priced on each channel, so the choice is made with both numbers in view. */
-  byChannel: {
-    text: Record<ProcessingChannel, number>;
-    audio: Record<ProcessingChannel, number>;
-  };
 }
 
 export interface PrepareResponse extends PrepareEstimateDto {
@@ -437,10 +395,13 @@ export type DocumentListItem = {
 export type DocumentDetail = DocumentListItem & {
   contentVersion: number;
   steps: { step: PipelineStep; status: PipelineStatus; error: string | null }[];
-  simplified: Record<Level, { done: number; failed: number; total: number }>;
+  simplified: { done: number; failed: number; total: number };
   topicsReady: boolean;
-  easiestState: 'locked' | 'generating' | 'ready';
-  position: { lastPage: number; furthestPage: number; level: string } | null;
+  position: {
+    lastPage: number;
+    furthestPage: number;
+    level: 'original' | 'standard';
+  } | null;
   /** The school this file belongs to and its course there, for the reader's header. */
   school: {
     name: string;
@@ -453,7 +414,6 @@ export type PageTextResponse = {
 };
 
 export type SimplifiedPagesResponse = {
-  level: Level;
   pages: {
     pageNumber: number;
     status: PageStatus;
@@ -731,7 +691,7 @@ export type DocumentBrief = {
 export type StudySnapshot = {
   document: DocumentListItem;
   lastStudiedAt: string;
-  reading: { lastPage: number; level: 'original' | Level };
+  reading: { lastPage: number; level: 'original' | 'standard' };
   lesson: {
     topicsTaught: number;
     topicsTotal: number;
@@ -1383,15 +1343,10 @@ export type SseEvent =
   | { type: 'document.converted'; pageCount: number }
   | { type: 'document.extracted'; pageCount: number }
   | { type: 'document.topics_ready'; topicCount: number }
-  | { type: 'page.simplified'; pageNumber: number; level: Level }
-  | {
-      type: 'page.simplify_failed';
-      pageNumber: number;
-      level: Level;
-      attempts: number;
-    }
-  | { type: 'document.simplified'; level: Level }
-  | { type: 'export.ready'; exportId: string; level: Level }
+  | { type: 'page.simplified'; pageNumber: number }
+  | { type: 'page.simplify_failed'; pageNumber: number; attempts: number }
+  | { type: 'document.simplified' }
+  | { type: 'export.ready'; exportId: string }
   /** An import fetching its pages; fires per batch while status=uploading. */
   | { type: 'import.progress'; fetched: number; total: number }
   | { type: 'document.failed'; step: PipelineStep; reason: string }

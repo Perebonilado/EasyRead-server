@@ -1,5 +1,4 @@
 import { Column, DataType, ForeignKey, Table } from 'sequelize-typescript';
-import type { Level } from '../../../contracts';
 import { BaseModel } from './base';
 import { DocumentModel } from './document.model';
 
@@ -9,8 +8,9 @@ export class ExportModel extends BaseModel {
   @Column({ type: DataType.UUID, allowNull: false })
   declare documentId: string;
 
-  @Column({ type: DataType.ENUM('standard', 'easiest'), allowNull: false })
-  declare level: Level;
+  /** The one note a document has now; the column stays as part of the cache key. */
+  @Column({ type: DataType.ENUM('standard'), allowNull: false })
+  declare level: 'standard';
 
   @Column({ type: DataType.INTEGER, allowNull: false })
   declare contentVersion: number;

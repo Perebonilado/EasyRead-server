@@ -37,7 +37,6 @@ function contextOf(fixture: AskFixture): AskContext {
     title: 'System Design Interview',
     summary: 'How large systems are designed, one problem per chapter.',
     style: 'steady',
-    noteLevel: 'standard',
     pageNumber: fixture.pageNumber,
     pageCount: fixture.pageCount,
     chapter: {

@@ -103,9 +103,7 @@ export class BoardDiagramHandler extends AbstractRequestHandlerTemplate<
       [...recent].reverse().find((line) => line.role === 'tutor')?.text ?? '';
 
     const [note, page, topics] = await Promise.all([
-      this.simplified
-        .find(doc.id, 'standard', cmd.pageNumber)
-        .catch(() => null),
+      this.simplified.find(doc.id, cmd.pageNumber).catch(() => null),
       this.pages.findOne(doc.id, cmd.pageNumber).catch(() => null),
       this.topics.listByDocument(doc.id).catch((): TopicRecord[] => []),
     ]);
@@ -131,7 +129,7 @@ export class BoardDiagramHandler extends AbstractRequestHandlerTemplate<
     const queries = [cmd.description, lastSaid].filter(Boolean);
     const [neighbourNotes, embeddings] = await Promise.all([
       this.simplified
-        .findRange(doc.id, 'standard', from, to)
+        .findRange(doc.id, from, to)
         .catch((): SimplifiedPageRecord[] => []),
       this.llm
         .embed({ texts: queries })

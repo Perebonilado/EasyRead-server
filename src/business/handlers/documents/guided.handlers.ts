@@ -64,12 +64,7 @@ async function chapterText(
   startPage: number,
   endPage: number,
 ): Promise<string> {
-  const pages = await simplified.findRange(
-    documentId,
-    'standard',
-    startPage,
-    endPage,
-  );
+  const pages = await simplified.findRange(documentId, startPage, endPage);
   const text = pages
     .filter((page) => page.status === 'done' && page.blocks?.length)
     .map((page) => blocksToProse(page.blocks ?? []))

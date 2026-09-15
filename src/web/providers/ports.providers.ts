@@ -15,7 +15,7 @@ import {
   PDF_TOOLKIT,
   REALTIME,
   SPEECH,
-  CATALOGUE_SPEECH,
+  LECTURE_SPEECH,
   TRANSCRIPTION,
   STORAGE,
   VECTOR_STORE,
@@ -53,7 +53,7 @@ import {
 } from '../adapters/ai-sdk/openai-voice.adapters';
 import {
   ModalSpeechAdapter,
-  NoCatalogueSpeech,
+  NoLectureSpeech,
 } from '../adapters/modal-speech.adapter';
 import { PassthroughConverterAdapter } from '../adapters/passthrough-converter.adapter';
 import { PdfExportRendererAdapter } from '../adapters/pdf-export-renderer.adapter';
@@ -90,15 +90,15 @@ export const portProviders: Provider[] = [
   { provide: WEB_IMPORT, useClass: WebImportAdapter },
   // Voice rides on the same OpenAI key as the text gateway.
   { provide: SPEECH, useClass: OpenAiSpeechAdapter },
-  // A school's catalogue is voiced on the rented GPU, and only there. With
-  // no service URL it is not voiced at all: never at OpenAI's price.
+  // Every lecture is voiced on the rented GPU, and only there. With no
+  // service URL no lecture is voiced at all: never at OpenAI's price.
   {
-    provide: CATALOGUE_SPEECH,
+    provide: LECTURE_SPEECH,
     inject: [ConfigService],
     useFactory: (config: ConfigService) =>
       config.get<string>('MODAL_TTS_URL')
         ? new ModalSpeechAdapter(config)
-        : new NoCatalogueSpeech(),
+        : new NoLectureSpeech(),
   },
   // Word timing for the lecture board: the script aligned to its audio.
   { provide: ALIGNER, useClass: EchogardenAlignerAdapter },

@@ -81,7 +81,6 @@ export class MeQuery {
       email: user.email,
       name: user.name,
       emailVerified: Boolean(user.emailVerifiedAt),
-      defaultLevel: user.defaultLevel,
       plan: await this.entitlements.planFor(userId),
       role: user.role ?? 'learner',
       membership,

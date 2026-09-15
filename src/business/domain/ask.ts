@@ -10,7 +10,7 @@
  * text and numbers; the handler gathers the context, the client runs the
  * clock.
  */
-import type { LectureStyle, Level } from '../../contracts';
+import type { LectureStyle } from '../../contracts';
 import { LECTURE_TOOLS, TEACH_TOOLS } from '../../contracts';
 
 export interface AskTutor {
@@ -25,8 +25,6 @@ export interface AskContext {
   /** What the book covers, from its summary; null when none was written. */
   summary: string | null;
   style: LectureStyle;
-  /** The note level the learner is reading, and so the level the answer pitches at. */
-  noteLevel: Level;
   pageNumber: number;
   pageCount: number | null;
   chapter: {
@@ -210,7 +208,7 @@ export function askInstructions(ctx: AskContext): string {
       : null,
     ctx.moment,
     ctx.highlighted
-      ? `THE LINE ON THEIR SCREEN: the sentence of the ${ctx.noteLevel === 'easiest' ? 'simplest' : 'simplified'} note that was highlighted when they pressed the mic, which is most likely what the question is about:\n${ctx.highlighted}`
+      ? `THE LINE ON THEIR SCREEN: the sentence of the simplified note that was highlighted when they pressed the mic, which is most likely what the question is about:\n${ctx.highlighted}`
       : null,
     ctx.conversation?.length
       ? `THE CONVERSATION SO FAR, which the connection dropped in the middle of; carry on from it as if nothing happened:\n${conversationSoFar(ctx.conversation, ctx.tutor.name)}`

@@ -18,7 +18,6 @@ export class PipelineRunModel extends BaseModel {
       'topics',
       'embed',
       'simplify_standard',
-      'simplify_easiest',
       'export',
     ),
     allowNull: false,

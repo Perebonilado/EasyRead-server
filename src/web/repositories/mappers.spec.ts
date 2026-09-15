@@ -14,7 +14,6 @@ const row = (overrides: Record<string, unknown> = {}) =>
     googleId: 'google-1',
     name: 'Amina',
     emailVerifiedAt: new Date('2026-09-13T10:00:00Z'),
-    defaultLevel: 'standard',
     verificationTokenHash: null,
     verificationTokenExpires: null,
     resetTokenHash: null,

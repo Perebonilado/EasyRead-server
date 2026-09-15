@@ -1,4 +1,4 @@
-import type { Level, PipelineStep, ProcessingChannels } from '../contracts';
+import type { PipelineStep } from '../contracts';
 import type { LectureStyle, SegmentKind } from '../contracts';
 
 /**
@@ -75,13 +75,10 @@ export interface BaseJobData {
   documentId: string;
   /** A job whose version no longer matches the document exits as skipped. */
   contentVersion: number;
-  /** The run's own channels, stamped by the queue so a retry on one channel stays on it. */
-  channels?: Partial<ProcessingChannels>;
 }
 
 export interface SimplifyJobData extends BaseJobData {
   pageNumber: number;
-  level: Level;
 }
 
 /** Writing a document needs only the document and its version. */
@@ -156,7 +153,6 @@ export interface LectureBoardJobData extends BaseJobData {
 
 export interface ExportJobData extends BaseJobData {
   exportId: string;
-  level: Level;
 }
 
 /**
@@ -168,10 +164,9 @@ export interface ExportJobData extends BaseJobData {
  */
 export const simplifyJobId = (
   documentId: string,
-  level: Level,
   page: number,
   contentVersion: number,
-) => `simplify-${documentId}-v${contentVersion}-${level}-${page}`;
+) => `simplify-${documentId}-v${contentVersion}-${page}`;
 
 /**
  * The version is part of the identity because the unit of work is a step

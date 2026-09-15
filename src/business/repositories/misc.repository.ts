@@ -1,6 +1,5 @@
 import type {
   HighlightAction,
-  Level,
   PipelineStatus,
   PipelineStep,
 } from '../../contracts';
@@ -55,7 +54,7 @@ export interface TopicRepository {
 export interface PositionRecord {
   lastPage: number;
   furthestPage: number;
-  level: 'original' | 'standard' | 'easiest';
+  level: 'original' | 'standard';
 }
 
 export interface ReadingPositionRepository {
@@ -71,7 +70,6 @@ export interface ReadingPositionRepository {
 export interface ExportRecord {
   id: string;
   documentId: string;
-  level: Level;
   contentVersion: number;
   status: 'processing' | 'done' | 'failed';
   fileRef: string | null;
@@ -87,13 +85,11 @@ export interface ExportRecord {
 export interface ExportRepository {
   findCached(
     documentId: string,
-    level: Level,
     contentVersion: number,
   ): Promise<ExportRecord | null>;
   findById(id: string): Promise<ExportRecord | null>;
   create(input: {
     documentId: string;
-    level: Level;
     contentVersion: number;
     watermarked: boolean;
   }): Promise<ExportRecord>;

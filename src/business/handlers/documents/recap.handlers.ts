@@ -126,7 +126,7 @@ export class CreateRecapHandler extends AbstractRequestHandlerTemplate<
 
     const [pages, topics, history, checks, profile, docState] =
       await Promise.all([
-        this.pages.findRange(cmd.documentId, 'standard', windowFrom, to),
+        this.pages.findRange(cmd.documentId, windowFrom, to),
         this.topics.listWithReadState(cmd.documentId, cmd.userId),
         this.chat.recent(cmd.documentId, cmd.userId, HISTORY_LOOKBACK),
         this.assessments.recent(cmd.userId, cmd.documentId, 20),

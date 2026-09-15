@@ -764,14 +764,14 @@ export class AiSdkLlmAdapter implements LlmGatewayPort, OnModuleInit {
   }
 
   async simplifyPage(input: {
-    task: 'simplify_standard' | 'simplify_easiest';
     pageText: string;
     summary: string | null;
     pageNumber: number;
   }): Promise<LlmResult<Block[]>> {
     const started = Date.now();
     const { generateObject } = await this.registry.modules();
-    const { model, ref } = await this.registry.languageModel(input.task);
+    const { model, ref } =
+      await this.registry.languageModel('simplify_standard');
 
     const context = input.summary
       ? `Document summary:\n${input.summary}\n\n`
@@ -780,10 +780,7 @@ export class AiSdkLlmAdapter implements LlmGatewayPort, OnModuleInit {
     const result = await generateObject({
       model,
       schema: blocksSchema,
-      system:
-        input.task === 'simplify_easiest'
-          ? PROMPTS.simplifyEasiest
-          : PROMPTS.simplifyStandard,
+      system: PROMPTS.simplifyStandard,
       prompt: `${context}Page ${input.pageNumber}:\n${input.pageText}`,
       maxRetries: this.maxRetries(),
     });

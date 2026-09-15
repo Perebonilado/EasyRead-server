@@ -61,7 +61,6 @@ async function main() {
 
   rule('simplify one page (structured output)');
   const simplified = await adapter.simplifyPage({
-    task: 'simplify_standard',
     pageText: PAGE,
     summary: SUMMARY,
     pageNumber: 12,
@@ -76,24 +75,6 @@ async function main() {
     console.log(`${prefix} ${block.text}`);
   }
   account('simplify_standard', simplified.usage);
-
-  rule('easiest read (same page, easier level)');
-  const easiest = await adapter.simplifyPage({
-    task: 'simplify_easiest',
-    pageText: PAGE,
-    summary: SUMMARY,
-    pageNumber: 12,
-  });
-  for (const block of easiest.value) {
-    const prefix =
-      block.type === 'bullet'
-        ? '  •'
-        : block.type === 'paragraph'
-          ? '   '
-          : '  #';
-    console.log(`${prefix} ${block.text}`);
-  }
-  account('simplify_easiest', easiest.usage);
 
   rule('highlight: explain (streamed)');
   process.stdout.write('  ');

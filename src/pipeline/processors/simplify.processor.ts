@@ -47,7 +47,10 @@ export class SimplifyPageProcessor {
   ) {}
 
   async process(job: SimplifyJobData, context: JobContext): Promise<void> {
-    const { documentId, level, pageNumber } = job;
+    // A job queued before the easiest note was removed (migration 0046)
+    // has nothing to write; this guard goes after the next release.
+    if ((job as { level?: string }).level === 'easiest') return;
+    const { documentId, pageNumber } = job;
 
     const doc = await this.documents.findById(documentId);
     if (!doc || doc.props.deletedAt) return;
@@ -55,10 +58,10 @@ export class SimplifyPageProcessor {
 
     // Per-page idempotency: a page already written is never rewritten, which
     // is what makes the whole fan-out safe to replay.
-    const existing = await this.simplified.find(documentId, level, pageNumber);
+    const existing = await this.simplified.find(documentId, pageNumber);
     if (existing?.status === 'done') return;
 
-    await this.simplified.markProcessing(documentId, level, pageNumber);
+    await this.simplified.markProcessing(documentId, pageNumber);
 
     try {
       const page = await this.pages.findOne(documentId, pageNumber);
@@ -69,20 +72,18 @@ export class SimplifyPageProcessor {
       if (!page || page.isEmpty) {
         await this.simplified.markDone({
           documentId,
-          level,
           pageNumber,
           blocks: [],
           model: null,
           tokensIn: null,
           tokensOut: null,
         });
-        await this.announce(documentId, pageNumber, level);
+        await this.announce(documentId, pageNumber);
         return;
       }
 
       const summary = await this.summaries.find(documentId);
       const result = await this.llm.simplifyPage({
-        task: level === 'easiest' ? 'simplify_easiest' : 'simplify_standard',
         pageText: page.text,
         summary,
         pageNumber,
@@ -90,7 +91,6 @@ export class SimplifyPageProcessor {
 
       await this.simplified.markDone({
         documentId,
-        level,
         pageNumber,
         blocks: result.value,
         model: result.usage.model,
@@ -100,7 +100,7 @@ export class SimplifyPageProcessor {
 
       await this.calls.record({
         documentId,
-        task: `simplify_${level}`,
+        task: 'simplify_standard',
         model: result.usage.model,
         tokensIn: result.usage.tokensIn,
         tokensOut: result.usage.tokensOut,
@@ -108,13 +108,13 @@ export class SimplifyPageProcessor {
         outcome: 'ok',
       });
 
-      await this.announce(documentId, pageNumber, level);
+      await this.announce(documentId, pageNumber);
     } catch (error) {
       const message = (error as Error).message;
 
       if (!context.isFinalAttempt) {
         this.logger.warn(
-          `${documentId} p${pageNumber} (${level}) failed, retrying — ${message}`,
+          `${documentId} p${pageNumber} failed, retrying — ${message}`,
         );
         throw error;
       }
@@ -123,13 +123,12 @@ export class SimplifyPageProcessor {
       // document finish. The reader offers a per-page retry (FR-1.5).
       const attempts = await this.simplified.markFailed(
         documentId,
-        level,
         pageNumber,
         message,
       );
       await this.calls.record({
         documentId,
-        task: `simplify_${level}`,
+        task: 'simplify_standard',
         model: 'unknown',
         tokensIn: null,
         tokensOut: null,
@@ -139,24 +138,18 @@ export class SimplifyPageProcessor {
       await this.events.publish(documentId, {
         type: 'page.simplify_failed',
         pageNumber,
-        level,
         attempts,
       });
-      await this.pipeline.afterSimplifyPage(documentId, level);
+      await this.pipeline.afterSimplifyPage(documentId);
     }
   }
 
-  private async announce(
-    documentId: string,
-    pageNumber: number,
-    level: SimplifyJobData['level'],
-  ) {
+  private async announce(documentId: string, pageNumber: number) {
     await this.events.publish(documentId, {
       type: 'page.simplified',
       pageNumber,
-      level,
     });
-    await this.pipeline.afterSimplifyPage(documentId, level);
+    await this.pipeline.afterSimplifyPage(documentId);
     // A lecture already written for this page followed the old note; its
     // tracks are matched again on the new one. Never on the page's path.
     const doc = await this.documents.findById(documentId);

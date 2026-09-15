@@ -14,8 +14,6 @@ import {
 } from 'class-validator';
 import { MAX_UPLOAD_BYTES } from '../../business/domain/values';
 
-const LEVELS = ['standard', 'easiest'] as const;
-
 export class UploadIntentDto {
   @IsString()
   @Length(1, 512)
@@ -75,11 +73,7 @@ export class PageRangeDto {
   to?: number;
 }
 
-export class SimplifiedPagesQueryDto extends PageRangeDto {
-  @IsOptional()
-  @IsIn(LEVELS)
-  level?: (typeof LEVELS)[number];
-}
+export class SimplifiedPagesQueryDto extends PageRangeDto {}
 
 export class RenameDocumentDto {
   @Transform(({ value }: { value: unknown }) =>
@@ -95,9 +89,6 @@ export class PrioritiseDto {
   @IsInt()
   @Min(1)
   pageNumber!: number;
-
-  @IsIn(LEVELS)
-  level!: (typeof LEVELS)[number];
 }
 
 export class RetryPageDto extends PrioritiseDto {}
@@ -108,8 +99,8 @@ export class SavePositionDto {
   @Min(1)
   lastPage!: number;
 
-  @IsIn(['original', 'standard', 'easiest'])
-  level!: 'original' | 'standard' | 'easiest';
+  @IsIn(['original', 'standard'])
+  level!: 'original' | 'standard';
 }
 
 export class MarkTopicsDto {
@@ -121,9 +112,4 @@ export class MarkTopicsDto {
 
   @IsBoolean()
   read!: boolean;
-}
-
-export class ExportDto {
-  @IsIn(LEVELS)
-  level!: (typeof LEVELS)[number];
 }

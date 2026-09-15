@@ -576,11 +576,9 @@ export class FakeLlmAdapter implements LlmGatewayPort {
   }
 
   async simplifyPage({
-    task,
     pageText,
     pageNumber,
   }: {
-    task: 'simplify_standard' | 'simplify_easiest';
     pageText: string;
     summary: string | null;
     pageNumber: number;
@@ -609,12 +607,7 @@ export class FakeLlmAdapter implements LlmGatewayPort {
         .trim();
       if (!bare) continue;
 
-      if (task === 'simplify_easiest') {
-        // The Easiest level's defining trait is short sentences, so split.
-        for (const sentence of this.sentences(bare)) {
-          blocks.push({ type: 'bullet', text: sentence });
-        }
-      } else if (line !== bare || bare.length < 90) {
+      if (line !== bare || bare.length < 90) {
         blocks.push({ type: 'bullet', text: bare });
       } else {
         blocks.push({ type: 'paragraph', text: bare });

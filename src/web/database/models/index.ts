@@ -40,7 +40,6 @@ export {
 export { SimplifiedPageModel } from './simplified-page.model';
 export { SubscriptionModel } from './subscription.model';
 export { SchoolPassModel } from './school-pass.model';
-export { PlatformSettingsModel } from './platform-settings.model';
 export { TopicReadStateModel } from './topic-read-state.model';
 export { TopicModel } from './topic.model';
 export { UsageCounterModel } from './usage-counter.model';
@@ -95,7 +94,6 @@ import {
 import { SimplifiedPageModel } from './simplified-page.model';
 import { SubscriptionModel } from './subscription.model';
 import { SchoolPassModel } from './school-pass.model';
-import { PlatformSettingsModel } from './platform-settings.model';
 import { TopicReadStateModel } from './topic-read-state.model';
 import { TopicModel } from './topic.model';
 import { UsageCounterModel } from './usage-counter.model';
@@ -117,7 +115,6 @@ export const ALL_MODELS = [
   RefreshTokenModel,
   SubscriptionModel,
   SchoolPassModel,
-  PlatformSettingsModel,
   UsageCounterModel,
   VoiceCreditModel,
   WebhookEventModel,

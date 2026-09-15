@@ -1,5 +1,5 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
-import type { Block, Level } from '../../contracts';
+import type { Block } from '../../contracts';
 import { EVENT_BUS, LLM_GATEWAY } from '../../business/ports/tokens';
 import type { EventBusPort } from '../../business/ports/event-bus.port';
 import type { LlmGatewayPort } from '../../business/ports/llm.port';
@@ -20,7 +20,6 @@ import {
   MEANING_DIMENSIONS,
   meaningScores,
   meaningTexts,
-  noteLevelFor,
   noteUnits,
   trackFromAlignment,
   trackFromEstimate,
@@ -113,21 +112,15 @@ export class LectureFollowService {
     return meaningScores(texts.spoken.map(vector), texts.units.map(vector));
   }
 
-  /** The note a style teaches from, falling back to the other level when that one is not written. */
+  /** The simplified note the page is taught from, once it is written. */
   async noteFor(
     documentId: string,
-    style: SegmentKey['style'],
     pageNumber: number,
-  ): Promise<{ level: Level; blocks: Block[] } | null> {
-    const wanted = noteLevelFor(style);
-    const other: Level = wanted === 'easiest' ? 'standard' : 'easiest';
-    for (const level of [wanted, other]) {
-      const page = await this.simplified.find(documentId, level, pageNumber);
-      if (page?.status === 'done' && page.blocks) {
-        return { level, blocks: page.blocks };
-      }
-    }
-    return null;
+  ): Promise<{ blocks: Block[] } | null> {
+    const page = await this.simplified.find(documentId, pageNumber);
+    return page?.status === 'done' && page.blocks
+      ? { blocks: page.blocks }
+      : null;
   }
 
   /** The block-level track, from the words at a steady pace, the moment the row is voiced. */
@@ -138,11 +131,7 @@ export class LectureFollowService {
     if (key.kind !== 'page' && key.kind !== 'part') return null;
     if (!row.scriptText) return null;
     try {
-      const note = await this.noteFor(
-        key.documentId,
-        key.style,
-        key.pageNumber,
-      );
+      const note = await this.noteFor(key.documentId, key.pageNumber);
       if (!note) {
         await this.lectures.saveFollow({
           ...key,
@@ -161,7 +150,6 @@ export class LectureFollowService {
         spoken,
         durationMs,
         note.blocks,
-        note.level,
         (row.sectionTags as SectionTag[] | null) ?? null,
         await this.meaningFor(
           key.documentId,
@@ -189,7 +177,6 @@ export class LectureFollowService {
         row.scriptText.length,
         durationMs,
         beat?.moveBlocks ?? null,
-        note.level,
       );
       await this.save(key, track);
       return track;
@@ -210,11 +197,7 @@ export class LectureFollowService {
     if (key.kind !== 'page' && key.kind !== 'part') return null;
     if (!row.scriptText) return null;
     try {
-      const note = await this.noteFor(
-        key.documentId,
-        key.style,
-        key.pageNumber,
-      );
+      const note = await this.noteFor(key.documentId, key.pageNumber);
       if (!note) {
         await this.lectures.saveFollow({
           ...key,
@@ -228,7 +211,6 @@ export class LectureFollowService {
         spoken,
         wordTimes.sentences,
         note.blocks,
-        note.level,
         (row.sectionTags as SectionTag[] | null) ?? null,
         await this.meaningFor(
           key.documentId,

@@ -1,5 +1,5 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
-import type { Level, PipelineStep } from '../contracts';
+import type { PipelineStep } from '../contracts';
 import { LECTURE_STYLE_KEYS } from '../contracts';
 import { EVENT_BUS, JOB_QUEUE } from '../business/ports/tokens';
 import { GenerateLectureHandler } from '../business/handlers/documents/lecture.handlers';
@@ -107,7 +107,7 @@ export class PipelineOrchestrator {
     if (await this.runs.allDone(documentId, ['extract'])) {
       await this.queue.enqueueStep('topics', { documentId, contentVersion });
     }
-    await this.fanOutSimplify(documentId, contentVersion, 'standard');
+    await this.fanOutSimplify(documentId, contentVersion);
   }
 
   /**
@@ -118,60 +118,53 @@ export class PipelineOrchestrator {
   async fanOutSimplify(
     documentId: string,
     contentVersion: number,
-    level: Level,
   ): Promise<void> {
     const doc = await this.documents.findById(documentId);
     if (!doc?.props.pageCount) return;
 
     // A scan has no text to simplify; the reader still opens as a viewer.
     if (doc.props.simplificationUnavailable) {
-      await this.runs.skip(documentId, this.stepFor(level));
-      this.logger.log(
-        `${documentId}: simplification unavailable, skipping ${level}`,
-      );
+      await this.runs.skip(documentId, 'simplify_standard');
+      this.logger.log(`${documentId}: simplification unavailable, skipping`);
       return;
     }
 
     const pageCount = doc.props.pageCount;
-    await this.simplified.seed(documentId, level, pageCount);
+    await this.simplified.seed(documentId, pageCount);
 
     // Open the ledger row for the aggregate step. Unlike the single-job steps,
     // nothing else claims it — the work is spread across per-page jobs — so
     // without this there would be no row for `afterSimplifyPage` to complete.
-    await this.runs.claim(documentId, this.stepFor(level));
+    await this.runs.claim(documentId, 'simplify_standard');
 
     await this.queue.enqueueSimplifyPages(
       Array.from({ length: pageCount }, (_, index) => ({
         documentId,
         contentVersion,
-        level,
         pageNumber: index + 1,
       })),
     );
   }
 
   /**
-   * Called after every page job. When the level is fully accounted for, mark
+   * Called after every page job. When every page is accounted for, mark
    * the aggregate step done and announce it.
    */
-  async afterSimplifyPage(documentId: string, level: Level): Promise<void> {
-    const progress = await this.simplified.progress(documentId, level);
+  async afterSimplifyPage(documentId: string): Promise<void> {
+    const progress = await this.simplified.progress(documentId);
     if (
       progress.total === 0 ||
       progress.done + progress.failed < progress.total
     )
       return;
 
-    const step = this.stepFor(level);
+    const step = 'simplify_standard';
     if ((await this.runs.status(documentId, step)) === 'done') return;
 
     await this.runs.complete(documentId, step);
-    await this.events.publish(documentId, {
-      type: 'document.simplified',
-      level,
-    });
+    await this.events.publish(documentId, { type: 'document.simplified' });
 
-    if (level === 'standard') await this.markReadyIfComplete(documentId);
+    await this.markReadyIfComplete(documentId);
   }
 
   /**
@@ -263,9 +256,5 @@ export class PipelineOrchestrator {
       step,
       reason,
     });
-  }
-
-  private stepFor(level: Level): PipelineStep {
-    return level === 'easiest' ? 'simplify_easiest' : 'simplify_standard';
   }
 }

@@ -363,7 +363,6 @@ export class GenerateItemsHandler extends AbstractRequestHandlerTemplate<
   ): Promise<{ pageNumber: number; prose: string }[]> {
     const simplified = await this.simplified.findRange(
       documentId,
-      'standard',
       topic.startPage,
       topic.endPage,
     );

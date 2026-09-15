@@ -4,7 +4,6 @@ import { Op, col, fn, literal } from 'sequelize';
 import type {
   LectureSegmentStatus,
   LectureStyle,
-  Level,
   MaterialDto,
   MaterialPageDto,
   MaterialProgress,
@@ -84,7 +83,7 @@ export class MaterialsQuery {
     return rows.map((row) => {
       const tally = tallies.get(row.id) ?? emptyTally();
       return {
-        document: toListItem(row, tally.standard.done),
+        document: toListItem(row, tally.done),
         departmentId: row.departmentId ?? null,
         levelId: row.levelId ?? null,
         courseId: row.courseId ?? null,
@@ -114,29 +113,22 @@ export class MaterialsQuery {
     ids: string[],
   ): Promise<Map<string, MaterialDto['simplified']>> {
     const rows = (await this.simplified.findAll({
-      attributes: [
-        'documentId',
-        'level',
-        'status',
-        [fn('COUNT', col('id')), 'n'],
-      ],
+      attributes: ['documentId', 'status', [fn('COUNT', col('id')), 'n']],
       where: { documentId: { [Op.in]: ids } } as never,
-      group: ['documentId', 'level', 'status'],
+      group: ['documentId', 'status'],
       raw: true,
     })) as unknown as {
       documentId: string;
-      level: Level;
       status: string;
       n: number | string;
     }[];
     const out = new Map<string, MaterialDto['simplified']>();
     for (const row of rows) {
       const tally = out.get(row.documentId) ?? emptyTally();
-      const bucket = tally[row.level];
       const n = Number(row.n);
-      bucket.total += n;
-      if (row.status === 'done') bucket.done += n;
-      if (row.status === 'failed') bucket.failed += n;
+      tally.total += n;
+      if (row.status === 'done') tally.done += n;
+      if (row.status === 'failed') tally.failed += n;
       out.set(row.documentId, tally);
     }
     return out;
@@ -404,8 +396,9 @@ function progressOf(
 }
 
 const emptyTally = (): MaterialDto['simplified'] => ({
-  standard: { done: 0, failed: 0, total: 0 },
-  easiest: { done: 0, failed: 0, total: 0 },
+  done: 0,
+  failed: 0,
+  total: 0,
 });
 
 const emptyLecture = (): MaterialDto['lecture'] =>

@@ -31,7 +31,6 @@ import type { Block } from '../../contracts';
 import {
   type SectionTag,
   noteAddressed,
-  noteLevelFor,
   noteNumbered,
   noteProse,
   noteUnits,
@@ -261,30 +260,15 @@ export class LectureChapterProcessor {
   }
 
   /**
-   * Whether this document's audio is made here at all.
-   *
-   * A school's catalogue is voiced in bulk on our own hardware, so the
-   * scripts are written and the rows are left waiting for it. Anything a
-   * learner uploaded is voiced as it always was, because somebody is
-   * sitting there waiting for it.
+   * Whether this document's audio is made at all: every lecture, a
+   * learner's own upload and a school's catalogue alike, is voiced on the
+   * rented GPU, and only when that service is set. Without it the words
+   * are written and the rows are left scripted.
    */
-  private voicesHere(doc: {
-    props: { institutionId: string | null };
-  }): boolean {
-    if (!doc.props.institutionId) return true;
-    // A school's document goes to the rented GPU, and only when that
-    // service is set; never to the per-character voice.
-    const externally =
-      this.config.get<string>('LECTURE_VOICE_EXTERNAL', 'false') === 'true';
-    const service = Boolean(this.config.get<string>('MODAL_TTS_URL'));
-    return service && !externally;
+  private voicesHere(): boolean {
+    return Boolean(this.config.get<string>('MODAL_TTS_URL'));
   }
 
-  /**
-   * The simplified note a style teaches from (the slow learner's from the
-   * easiest note), or null when it is not written yet, in which case the
-   * page's own text stands in.
-   */
   /**
    * The course a school document belongs to, for the hook's one line of
    * where the idea meets the students' work. A learner's own upload has
@@ -315,18 +299,16 @@ export class LectureChapterProcessor {
     }
   }
 
+  /**
+   * The simplified note a page is taught from, or null when it is not
+   * written yet, in which case the page's own text stands in.
+   */
   private async noteFor(
     documentId: string,
     pageNumber: number,
-    style: LectureStyle,
   ): Promise<Block[] | null> {
-    const wanted = noteLevelFor(style);
-    const other = wanted === 'easiest' ? 'standard' : 'easiest';
-    for (const level of [wanted, other] as const) {
-      const page = await this.simplified.find(documentId, level, pageNumber);
-      if (page?.status === 'done' && page.blocks?.length) return page.blocks;
-    }
-    return null;
+    const page = await this.simplified.find(documentId, pageNumber);
+    return page?.status === 'done' && page.blocks?.length ? page.blocks : null;
   }
 
   async process(
@@ -390,7 +372,7 @@ export class LectureChapterProcessor {
         style,
         kind: row.kind,
       }));
-      if (voice && this.voicesHere(doc)) {
+      if (voice && this.voicesHere()) {
         await this.queue.enqueueLectureVoices(keys);
       }
       // Their words exist, so their board can be written now; it is timed
@@ -864,7 +846,7 @@ export class LectureChapterProcessor {
         plan,
         durationMs: estimateDurationMs(scriptForTts(script)),
       });
-      if (input.voice && this.voicesHere(doc)) {
+      if (input.voice && this.voicesHere()) {
         await this.queue.enqueueLectureVoices([
           {
             documentId: doc.id,
@@ -944,7 +926,7 @@ export class LectureChapterProcessor {
     for (const page of pageRows) {
       if (!pageNumbers.includes(page.pageNumber)) continue;
       // The plan is shared by every style, so it reads the standard note.
-      const note = await this.noteFor(doc.id, page.pageNumber, 'steady');
+      const note = await this.noteFor(doc.id, page.pageNumber);
       // A bridge page's note is the simplifier's gloss on a figure or a
       // divider, not paragraphs the plan must cover.
       if (note && !bridges.has(page.pageNumber)) {
@@ -1152,7 +1134,7 @@ export class LectureChapterProcessor {
       // The note is what the lecturer teaches from and what the reader
       // follows; the page itself stands in until the note is written, and
       // stays beside the verifier so nothing true is flagged.
-      const note = await this.noteFor(doc.id, row.pageNumber, style);
+      const note = await this.noteFor(doc.id, row.pageNumber);
       const original = (page?.text ?? '').slice(0, 6_000);
       const pageText = note ? noteProse(note).slice(0, 6_000) : original;
 
@@ -1420,7 +1402,7 @@ export class LectureChapterProcessor {
           kind: 'part',
         });
       }
-      if (input.voice && this.voicesHere(doc)) {
+      if (input.voice && this.voicesHere()) {
         await this.queue.enqueueLectureVoices(voices);
       }
     } catch (error) {
@@ -1508,9 +1490,7 @@ export class LectureChapterProcessor {
     );
     // The paragraphs the page carries, and the budget grown for them; the
     // paragraphs the plan skipped for a checked reason, which the coverage
-    // check exempts. The plan numbers the standard note; the slow learner
-    // is taught from the easiest one, whose numbers differ, so nothing is
-    // exempt there.
+    // check exempts. Every style reads the note the plan numbered.
     const frontMatter = input.note
       ? isFrontMatterPage(input.pageNumber, input.note)
       : false;
@@ -1518,9 +1498,7 @@ export class LectureChapterProcessor {
       ? contentBlocks(input.note, { frontMatter }).length
       : 0;
     const exempt = new Set<number>(
-      input.note && style !== 'gentle'
-        ? (beat.skipBlocks ?? []).map((skip) => skip.block)
-        : [],
+      input.note ? (beat.skipBlocks ?? []).map((skip) => skip.block) : [],
     );
     // A bridge page (a figure, a divider, a copyright line) has nothing on
     // it to cover; its note, when there is one, is the simplifier's gloss.
@@ -1617,8 +1595,7 @@ export class LectureChapterProcessor {
           moves,
           // Which paragraphs each move must say, when the plan numbered
           // them and the writer reads the same note the plan did.
-          moveBlocks:
-            input.note && style !== 'gentle' ? (beat.moveBlocks ?? null) : null,
+          moveBlocks: input.note ? (beat.moveBlocks ?? null) : null,
           pitfall: beat.pitfall ?? null,
           turn: beat.turn === true,
           ask: input.ask,

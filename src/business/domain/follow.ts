@@ -7,7 +7,7 @@
  * the spoken words' measured times and the note's own sentences, and the
  * client only ever reads it against the audio clock. Nothing waits on a pen.
  */
-import type { Block, LectureStyle, Level } from '../../contracts';
+import type { Block } from '../../contracts';
 import { contentWords, estimateWordTimes, numbersAsWords } from './board';
 import { scriptForTts as scriptForTtsLocal } from './lecture';
 
@@ -25,8 +25,6 @@ export interface FollowSpan {
 export interface FollowTrack {
   version: 1;
   generator: string;
-  /** The note level the track points into. */
-  level: Level;
   /**
    * How the spans were timed: 'estimate' before alignment (the words'
    * content against the note, at a steady reading pace, by block),
@@ -44,11 +42,6 @@ export interface FollowTrack {
    * a block the track only ever names whole: a table, code, an equation.
    */
   cuts: [number, number][][];
-}
-
-/** The note level a style teaches from: the slow learner reads the easiest note. */
-export function noteLevelFor(style: LectureStyle): Level {
-  return style === 'gentle' ? 'easiest' : 'standard';
 }
 
 /** A sentence of the note, with the block it sits in. */
@@ -532,7 +525,6 @@ export function trackFromAlignment(
   spoken: string,
   sentences: number[][],
   blocks: Block[],
-  level: Level,
   tags: SectionTag[] | null = null,
   meaning: number[][] | null = null,
 ): FollowTrack {
@@ -572,7 +564,6 @@ export function trackFromAlignment(
   return {
     version: 1,
     generator: FOLLOW_GENERATOR_VERSION,
-    level,
     timing: 'aligned',
     spans: settled,
     meaning: meaning !== null,
@@ -591,7 +582,6 @@ export function trackFromEstimate(
   spoken: string,
   durationMs: number,
   blocks: Block[],
-  level: Level,
   tags: SectionTag[] | null = null,
   meaning: number[][] | null = null,
 ): FollowTrack | null {
@@ -601,7 +591,6 @@ export function trackFromEstimate(
     spoken,
     times.sentences,
     blocks,
-    level,
     tags,
     meaning,
   );
@@ -627,7 +616,6 @@ export function trackFromMoves(
   scriptLength: number,
   durationMs: number,
   moveBlocks: (number[] | null)[] | null,
-  level: Level,
 ): FollowTrack {
   const offsets = moveOffsets.length ? moveOffsets : [0];
   const spans: FollowSpan[] = offsets.map((offset, index) => {
@@ -643,7 +631,6 @@ export function trackFromMoves(
   return {
     version: 1,
     generator: FOLLOW_GENERATOR_VERSION,
-    level,
     timing: 'moves',
     spans,
     meaning: false,

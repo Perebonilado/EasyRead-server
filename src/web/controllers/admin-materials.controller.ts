@@ -103,9 +103,6 @@ class PrepareDto {
   @IsUUID('all', { each: true })
   documentIds?: string[];
 
-  @IsBoolean()
-  easiest!: boolean;
-
   @IsArray()
   @ArrayMaxSize(3)
   @IsIn(LECTURE_STYLE_KEYS, { each: true })

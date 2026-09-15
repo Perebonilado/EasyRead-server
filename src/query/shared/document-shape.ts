@@ -6,9 +6,8 @@ import type { DocumentModel } from '../../web/database/models';
  * The library card's shape, shared by the list and the detail query so the two
  * can't drift apart.
  *
- * `progress` is the number the UI animates, and it deliberately reports
- * *standard* simplification only — Easiest is an opt-in second pass and would
- * otherwise drag a finished document's bar back down.
+ * `progress` is the number the UI animates: how many pages of the
+ * simplified note are written.
  */
 export function toListItem(
   doc: DocumentModel,

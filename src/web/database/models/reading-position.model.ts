@@ -20,9 +20,9 @@ export class ReadingPositionModel extends BaseModel {
   declare furthestPage: number;
 
   @Column({
-    type: DataType.ENUM('original', 'standard', 'easiest'),
+    type: DataType.ENUM('original', 'standard'),
     allowNull: false,
     defaultValue: 'standard',
   })
-  declare level: 'original' | 'standard' | 'easiest';
+  declare level: 'original' | 'standard';
 }

@@ -6,17 +6,18 @@ import type { SpeechPort } from '../../business/ports/voice.port';
 export type ModalEngine = 'qwen' | 'kokoro';
 
 /**
- * A school's catalogue voiced on our own rented GPU, through one of two
- * Modal services: `modal/tts_service.py`, vLLM-Omni's speech server
- * running Qwen3-TTS, or `modal/kokoro_service.py`, Kokoro behind the same
- * request shape. Many pages at once, billed by the second and asleep
- * between runs. One request per page; the mp3 comes back on the same
- * connection. MODAL_TTS_ENGINE names which one is behind MODAL_TTS_URL:
- * Qwen is handed the style's delivery note, Kokoro its speed.
+ * Every lecture voiced on our own rented GPU, a learner's own upload and a
+ * school's catalogue alike, through one of two Modal services:
+ * `modal/tts_service.py`, vLLM-Omni's speech server running Qwen3-TTS, or
+ * `modal/kokoro_service.py`, Kokoro behind the same request shape. Many
+ * pages at once, billed by the second and asleep between runs. One request
+ * per page; the mp3 comes back on the same connection. MODAL_TTS_ENGINE
+ * names which one is behind MODAL_TTS_URL: Qwen is handed the style's
+ * delivery note, Kokoro its speed.
  *
  * This is never a fallback for anything and nothing falls back from it. A
  * page it cannot voice fails, with the reason on the row, and is tried
- * again when the admin presses Prepare. It must never cost OpenAI's price.
+ * again by the queue or on the next Prepare. It must never cost OpenAI's price.
  */
 @Injectable()
 export class ModalSpeechAdapter implements SpeechPort {
@@ -210,11 +211,12 @@ export class ModalSpeechAdapter implements SpeechPort {
 
 /**
  * Bound in place of the Modal adapter when no service URL is set: a
- * school's document then fails to voice, loudly, rather than being voiced
- * at OpenAI's price by accident.
+ * lecture then fails to voice, loudly, rather than being voiced at
+ * OpenAI's price by accident. The chapter writer checks the URL first and
+ * leaves rows scripted, so this is reached only by a stale job.
  */
 @Injectable()
-export class NoCatalogueSpeech implements SpeechPort {
+export class NoLectureSpeech implements SpeechPort {
   label(): { model: string; voice: string } {
     return { model: 'none', voice: 'none' };
   }
@@ -222,7 +224,7 @@ export class NoCatalogueSpeech implements SpeechPort {
   synthesize(): Promise<never> {
     return Promise.reject(
       new Error(
-        'No catalogue speech service is set (MODAL_TTS_URL); a school document is not voiced without one',
+        'No lecture speech service is set (MODAL_TTS_URL); no lecture is voiced without one',
       ),
     );
   }

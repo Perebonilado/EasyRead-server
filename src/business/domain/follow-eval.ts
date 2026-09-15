@@ -16,7 +16,7 @@
  */
 import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import type { Block, LectureStyle, Level } from '../../contracts';
+import type { Block, LectureStyle } from '../../contracts';
 import { normalise } from './board';
 import {
   alignSentences,
@@ -45,7 +45,6 @@ export interface FollowFixture {
   title: string;
   page: number;
   style: LectureStyle;
-  level: Level;
   labels: string[];
   baseline: FollowScore | null;
   blocks: Block[];

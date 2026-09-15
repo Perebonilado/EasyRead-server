@@ -552,12 +552,13 @@ const chapterProcessor = (
     // No note is written in these fakes unless a test hands one in; the
     // page's own text stands in otherwise.
     {
-      find: (_d: string, _level: string, page: number) =>
+      find: (_d: string, page: number) =>
         Promise.resolve(
           notes[page] ? { status: 'done', blocks: notes[page] } : null,
         ),
     } as never,
-    new ConfigService({}),
+    // The rented voice is set: every lecture is voiced in these fakes.
+    new ConfigService({ MODAL_TTS_URL: 'https://voice.test' }),
     // No school in these fakes: the planner is told no course.
     {
       listDepartments: () => Promise.resolve([]),
@@ -584,8 +585,6 @@ const voiceProcessor = (
     f.lectures,
     f.deps.calls,
     noPronunciations,
-    f.deps.speech,
-    // The catalogue voice: in these fakes, the same voice.
     f.deps.speech,
     f.deps.storage as never,
     f.deps.events as never,
@@ -2212,17 +2211,12 @@ describe('boards for a lecture written before boards existed', () => {
   });
 });
 
-describe('LectureChapterProcessor: a school voices its own catalogue', () => {
-  it('writes the scripts and queues no audio when the document belongs to a school', async () => {
+describe('LectureChapterProcessor: no voice service set', () => {
+  it('writes the scripts and queues no audio when there is no rented voice to send them to', async () => {
     const f = fakes({ 1: REAL_PAGE, 2: REAL_PAGE });
     f.seedExtras('steady');
-    // The document is a school's, and this deployment voices those itself.
-    const schoolDoc = {
-      ...doc,
-      props: { ...doc.props, institutionId: 'ur' },
-    };
     const processor = new LectureChapterProcessor(
-      { findById: () => Promise.resolve(schoolDoc) } as never,
+      { findById: () => Promise.resolve(doc) } as never,
       f.deps.pages as never,
       f.deps.topics as never,
       f.lectures,
@@ -2232,7 +2226,7 @@ describe('LectureChapterProcessor: a school voices its own catalogue', () => {
       f.deps.events as never,
       boardService(f, new FakeLlmAdapter(), false),
       { find: () => Promise.resolve(null) } as never,
-      new ConfigService({ LECTURE_VOICE_EXTERNAL: 'true' }),
+      new ConfigService({}),
       {
         listDepartments: () => Promise.resolve([]),
         listLevels: () => Promise.resolve([]),
@@ -2240,7 +2234,7 @@ describe('LectureChapterProcessor: a school voices its own catalogue', () => {
     );
     await processor.process(chapterJob(), CONTEXT);
 
-    // The words are there for the local voicer to pick up.
+    // The words are there for the voice to pick up once it is set.
     expect(f.row(1, 'steady')!.scriptText).toBeTruthy();
     expect(f.voiceJobs).toEqual([]);
   });

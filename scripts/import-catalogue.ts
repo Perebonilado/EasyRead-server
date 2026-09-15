@@ -250,7 +250,6 @@ async function main() {
       documents: number;
       pages: number;
     }>('POST', `/admin/institutions/${found.id}/estimate`, {
-      easiest: true,
       styles,
     });
     console.log(

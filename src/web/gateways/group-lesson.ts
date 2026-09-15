@@ -849,7 +849,6 @@ export class GroupLessonFactory {
       pageRows.push(
         ...(await this.pages.findRange(
           session.documentId,
-          'standard',
           range.from,
           range.to,
         )),

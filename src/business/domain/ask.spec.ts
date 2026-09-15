@@ -19,7 +19,6 @@ const base: AskContext = {
   title: 'System Design Interview',
   summary: 'How large systems are designed, one problem per chapter.',
   style: 'steady',
-  noteLevel: 'standard',
   pageNumber: 73,
   pageCount: 312,
   chapter: {

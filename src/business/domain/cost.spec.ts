@@ -1,9 +1,4 @@
-import {
-  catalogueSpeechCost,
-  costOf,
-  estimatePrepare,
-  perPageByChannel,
-} from './cost';
+import { catalogueSpeechCost, costOf, estimatePrepare } from './cost';
 
 describe('the cost of a call', () => {
   it('prices text by tokens and speech by characters, and leaves the unknown null', () => {
@@ -26,7 +21,7 @@ describe('the cost of a call', () => {
     // Fifteen characters a second: a minute is nine hundred characters, and costs the listed cent and a half.
     expect(
       costOf({
-        task: 'tts_lecture',
+        task: 'tts_standard',
         model: 'openai:gpt-4o-mini-tts',
         tokensIn: 900,
         tokensOut: null,
@@ -48,6 +43,15 @@ describe('the cost of a call', () => {
         tokensOut: 0,
       }),
     ).toBeNull();
+    // A page of lecture audio is priced by the voice job itself, not here.
+    expect(
+      costOf({
+        task: 'tts_lecture',
+        model: 'modal:kokoro-82m',
+        tokensIn: 900,
+        tokensOut: null,
+      }),
+    ).toBeNull();
   });
 });
 
@@ -65,99 +69,34 @@ describe('the estimate before the button', () => {
   it('charges text for what is still to run and audio per style asked for and not yet there', () => {
     const estimate = estimatePrepare({
       documents: [
-        { pages: 27, needsPipeline: false, hasEasiest: false, styles: [] },
-        {
-          pages: 27,
-          needsPipeline: false,
-          hasEasiest: true,
-          styles: ['steady'],
-        },
+        { pages: 27, needsPipeline: false, styles: [] },
+        { pages: 27, needsPipeline: false, styles: ['steady'] },
         // Words written at upload, no audio yet: audio alone.
-        {
-          pages: 10,
-          needsPipeline: false,
-          hasEasiest: true,
-          styles: [],
-          scripted: ['steady'],
-        },
+        { pages: 10, needsPipeline: false, styles: [], scripted: ['steady'] },
       ],
-      easiest: true,
       styles: ['steady'],
+      usdPerAudioHour: 0.03,
     });
     expect(estimate.documents).toBe(3);
     expect(estimate.pages).toBe(64);
-    // First deck: easiest notes plus steady text. Second: nothing. Third: no text.
-    expect(estimate.textUsd).toBeCloseTo(27 * 0.0007 + 27 * 0.003, 4);
-    expect(estimate.audioUsd).toBeCloseTo(27 * 0.02 + 10 * 0.02, 4);
+    // First deck: steady text. Second: nothing. Third: no text.
+    expect(estimate.textUsd).toBeCloseTo(27 * 0.003, 4);
+    // Thirty-seven pages of narration at a minute and a third each, three cents an hour.
+    expect(estimate.audioUsd).toBeCloseTo((37 * 1.33 * 0.03) / 60, 4);
     expect(estimate.totalUsd).toBeCloseTo(
       estimate.textUsd + estimate.audioUsd,
       4,
     );
   });
-});
 
-describe('the rented text model', () => {
-  it('is priced per million tokens at the measured rate, and unknown until measured', () => {
-    const call = {
-      task: 'lecture_segment',
-      model: 'modal:Kimi-K3',
-      tokensIn: 600_000,
-      tokensOut: 400_000,
-    };
-    expect(costOf(call, { modalUsdPerMillionTokens: 0.5 })).toBe(0.5);
-    expect(costOf(call)).toBeNull();
-    expect(
-      costOf(
-        { ...call, tokensIn: 0, tokensOut: 0 },
-        { modalUsdPerMillionTokens: 0.5 },
-      ),
-    ).toBeNull();
-  });
-});
-
-describe('the estimate on each channel', () => {
-  const documents = [
-    {
-      pages: 100,
-      needsPipeline: false,
-      hasEasiest: true,
-      styles: [] as never[],
-    },
-  ];
-
-  it('prices the chosen channels and shows the other pair beside them', () => {
+  it('charges the pipeline for a document not yet read, and prices audio as free until the voice is measured', () => {
     const estimate = estimatePrepare({
-      documents,
-      easiest: false,
-      styles: ['steady'],
-      channels: { text: 'modal', audio: 'modal' },
-      rates: { modalUsdPerMillionTokens: 0.075, modalUsdPerAudioHour: 0.09 },
+      documents: [{ pages: 100, needsPipeline: true, styles: [] }],
+      styles: ['steady', 'brisk'],
+      usdPerAudioHour: 0,
     });
-    // Text at a fifth of gpt-4o-mini's blended price; audio at 0.09 an hour
-    // against OpenAI's 0.90.
-    expect(estimate.byChannel.text.openai).toBe(0.3);
-    expect(estimate.byChannel.text.modal).toBe(0.06);
-    expect(estimate.byChannel.audio.openai).toBe(2);
-    expect(estimate.byChannel.audio.modal).toBe(0.2);
-    expect(estimate.textUsd).toBe(0.06);
-    expect(estimate.audioUsd).toBe(0.2);
-    expect(estimate.totalUsd).toBe(0.26);
-    expect(estimate.channels).toEqual({ text: 'modal', audio: 'modal' });
-  });
-
-  it('prices an unmeasured Modal as OpenAI rather than as free, and OpenAI when no channel is given', () => {
-    const per = perPageByChannel({
-      modalUsdPerMillionTokens: 0,
-      modalUsdPerAudioHour: 0,
-    });
-    expect(per.text.modal).toBe(1);
-    expect(per.audio.modal).toBe(per.audio.openai);
-    const estimate = estimatePrepare({
-      documents,
-      easiest: false,
-      styles: ['steady'],
-    });
-    expect(estimate.channels).toEqual({ text: 'openai', audio: 'openai' });
-    expect(estimate.totalUsd).toBe(2.3);
+    expect(estimate.textUsd).toBeCloseTo(100 * 0.002 + 200 * 0.003, 4);
+    expect(estimate.audioUsd).toBe(0);
+    expect(estimate.totalUsd).toBe(estimate.textUsd);
   });
 });

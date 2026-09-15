@@ -2,7 +2,6 @@ import { Injectable } from '@nestjs/common';
 import { InjectModel } from '@nestjs/sequelize';
 import { Op } from 'sequelize';
 import type {
-  Level,
   PageTextResponse,
   SimplifiedPagesResponse,
   TopicDto,
@@ -76,7 +75,6 @@ export class ReaderQuery {
    */
   async simplifiedPages(
     documentId: string,
-    level: Level,
     range: PageRange,
   ): Promise<SimplifiedPagesResponse> {
     const { from, to } = this.window(range);
@@ -84,7 +82,7 @@ export class ReaderQuery {
     const rows = await this.simplified.findAll({
       where: {
         documentId,
-        level,
+        level: 'standard',
         pageNumber: { [Op.between]: [from, to] },
       } as never,
       order: [['pageNumber', 'ASC']] as never,
@@ -103,7 +101,6 @@ export class ReaderQuery {
     const ocrPages = new Set(ocrRows.map((row) => row.pageNumber));
 
     return {
-      level,
       pages: rows.map((row) => ({
         pageNumber: row.pageNumber,
         status: row.status,

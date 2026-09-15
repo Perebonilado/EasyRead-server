@@ -1,5 +1,4 @@
 import { Inject, Injectable } from '@nestjs/common';
-import type { Level } from '../../../contracts';
 import {
   DocumentNotReadyError,
   NotFoundError,
@@ -22,7 +21,6 @@ import { EntitlementsService } from './entitlements.service';
 export interface RequestExportRequest {
   userId: string;
   documentId: string;
-  level: Level;
 }
 
 export interface ExportStatus {
@@ -56,19 +54,16 @@ export class RequestExportHandler extends AbstractRequestHandlerTemplate<
   protected async handleRequest(cmd: RequestExportRequest) {
     const doc = await this.access.require(cmd.documentId, cmd.userId);
 
-    // Nothing to typeset until that level has actually been written.
-    const progress = await this.pages.progress(cmd.documentId, cmd.level);
+    // Nothing to typeset until the note has actually been written.
+    const progress = await this.pages.progress(cmd.documentId);
     if (progress.total === 0 || progress.done === 0) {
       throw new DocumentNotReadyError(
-        cmd.level === 'easiest'
-          ? 'Easiest Read has not been generated for this document'
-          : 'This document has not been simplified yet',
+        'This document has not been simplified yet',
       );
     }
 
     const cached = await this.exports.findCached(
       cmd.documentId,
-      cmd.level,
       doc.contentVersion,
     );
 
@@ -101,7 +96,6 @@ export class RequestExportHandler extends AbstractRequestHandlerTemplate<
       cached ??
       (await this.exports.create({
         documentId: cmd.documentId,
-        level: cmd.level,
         contentVersion: doc.contentVersion,
         watermarked,
       }));
@@ -110,7 +104,6 @@ export class RequestExportHandler extends AbstractRequestHandlerTemplate<
       documentId: cmd.documentId,
       contentVersion: doc.contentVersion,
       exportId: record.id,
-      level: cmd.level,
     });
 
     return CommandResponse.of({
@@ -150,10 +143,9 @@ export class GetExportHandler extends AbstractRequestHandlerTemplate<
       throw new DocumentNotReadyError('That export is still being prepared');
     }
 
-    const suffix = record.level === 'easiest' ? 'Easiest' : 'Standard';
     return CommandResponse.of({
       fileRef: record.fileRef,
-      fileName: `${doc.props.title} — ${suffix}.pdf`,
+      fileName: `${doc.props.title} — Simplified.pdf`,
     });
   }
 }

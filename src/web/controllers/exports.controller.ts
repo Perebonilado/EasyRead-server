@@ -17,7 +17,6 @@ import {
 import { STORAGE } from '../../business/ports/tokens';
 import type { StoragePort } from '../../business/ports/storage.port';
 import { CurrentUser } from '../security/current-user.decorator';
-import { ExportDto } from '../validation/document.dto';
 
 @Controller()
 export class ExportsController {
@@ -37,13 +36,8 @@ export class ExportsController {
   async create(
     @CurrentUser('id') userId: string,
     @Param('id') documentId: string,
-    @Body() body: ExportDto,
   ): Promise<ExportStatus> {
-    const result = await this.request.handle({
-      userId,
-      documentId,
-      level: body.level,
-    });
+    const result = await this.request.handle({ userId, documentId });
     return result.data;
   }
 

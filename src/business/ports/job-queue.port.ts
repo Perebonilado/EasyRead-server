@@ -1,20 +1,13 @@
-import type { Level, PipelineStep } from '../../contracts';
-import type {
-  LectureStyle,
-  ProcessingChannels,
-  SegmentKind,
-} from '../../contracts';
+import type { PipelineStep } from '../../contracts';
+import type { LectureStyle, SegmentKind } from '../../contracts';
 
 export interface PipelineJob {
   documentId: string;
   contentVersion: number;
-  /** The run's own channels; the queue stamps them from the job in hand. */
-  channels?: Partial<ProcessingChannels>;
 }
 
 export interface SimplifyJob extends PipelineJob {
   pageNumber: number;
-  level: Level;
 }
 
 export interface LectureChapterJob extends PipelineJob {
@@ -70,7 +63,6 @@ export interface LectureFollowJob extends PipelineJob {
 
 export interface ExportJob extends PipelineJob {
   exportId: string;
-  level: Level;
 }
 
 /**
@@ -104,7 +96,6 @@ export interface JobQueuePort {
   prioritise(input: {
     documentId: string;
     contentVersion: number;
-    level: Level;
     fromPage: number;
     toPage: number;
   }): Promise<void>;

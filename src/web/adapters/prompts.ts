@@ -185,64 +185,6 @@ export const PROMPTS = {
   ].join(' '),
 
   /**
-   * Easiest is now a rung below that, and a rung has to be a different
-   * shape, not a smaller font.
-   *
-   * The trap — proven twice on this codebase, in the chat ladder and here —
-   * is that asking a model for "simpler" produces the same paragraphs with
-   * smaller words. So the instruction is structural: one short line per
-   * idea, compound sentences split apart, and a comparison for every
-   * mechanism. That is a different artefact, not a reworded one.
-   *
-   * Going further down also pulls harder towards invention — a model asked
-   * to make something effortless will happily supply the missing halves of
-   * an explanation. Hence the strictest anti-invention clause of any prompt
-   * here: an empty-handed page stays empty-handed.
-   */
-  simplifyEasiest: [
-    'You rewrite one page of a study document for someone meeting this',
-    'subject for the first time, or reading it while exhausted. Assume no',
-    'background whatsoever.',
-    'Bullets, not paragraphs. One short line per idea — aim for fifteen',
-    'words. Where the page packs three facts into one sentence, give them',
-    'three lines.',
-    'Everyday words throughout, and the plain phrase ALWAYS comes before the',
-    'name. This rule does not relax because the line is short — a short line',
-    'of jargon is the worst of both.',
-    'Never write "Thyroid peroxidase catalyses the binding"; write "A helper',
-    'protein (thyroid peroxidase) makes them stick together".',
-    'Never write "MIT is further iodinated"; write "More iodine is added to',
-    'MIT".',
-    'Never write "the follicular cells ingest the colloid by endocytosis";',
-    'write "the gland\'s cells swallow the stored material (this swallowing',
-    'is called endocytosis)".',
-    'Ordinary verbs too: made, taken in, joined, broken down, sent out —',
-    'not synthesised, absorbed, conjugated, metabolised, secreted.',
-    'Begin each section with one line saying what it is about in the',
-    'simplest words available, then the details beneath it.',
-    'A familiar comparison is welcome where one genuinely fits, phrased so it',
-    'is plainly a comparison and never mistakable for something the document',
-    'says. It must be true to the mechanism: a comparison that misdescribes',
-    'what is happening is worse than none, because the reader will remember',
-    'it. If no honest comparison comes to mind, leave it out and say the',
-    'thing plainly instead.',
-    "Keep the page's own headings so this page still lines up with the",
-    'original beside it.',
-    'Every number, dose, unit and name stays exactly as the page has it.',
-    'Never round, never approximate, never drop one for being fiddly.',
-    'Add NOTHING. Not a cause, not a symptom, not an example, not a',
-    'consequence, however true and however helpful it would be. Explaining',
-    'a term that is on the page in plain words is the job; supplying facts',
-    'the page withheld is not. A thin page becomes a thin, clear page.',
-    'If the page is unclear, leave it unclear rather than guessing what it',
-    'meant.',
-    CODE_VERBATIM,
-    TABLE_SHAPE,
-    MATH_SHAPE,
-    BLOCK_SHAPE,
-  ].join(' '),
-
-  /**
    * The document chat: a continuing conversation about one document.
    *
    * The system turn holds the standing rules; the thread so far arrives as

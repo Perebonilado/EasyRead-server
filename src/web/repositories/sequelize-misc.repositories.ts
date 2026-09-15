@@ -1,7 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { InjectModel } from '@nestjs/sequelize';
 import { Op } from 'sequelize';
-import type { HighlightAction, Level } from '../../contracts';
+import type { HighlightAction } from '../../contracts';
 import type {
   PrerequisiteDraft,
   ExportRecord,
@@ -250,7 +250,6 @@ export class SequelizeExportRepository implements ExportRepository {
     return {
       id: row.id,
       documentId: row.documentId,
-      level: row.level,
       contentVersion: row.contentVersion,
       status: row.status,
       fileRef: row.fileRef,
@@ -259,9 +258,9 @@ export class SequelizeExportRepository implements ExportRepository {
     };
   }
 
-  async findCached(documentId: string, level: Level, contentVersion: number) {
+  async findCached(documentId: string, contentVersion: number) {
     const row = await this.model.findOne({
-      where: { documentId, level, contentVersion },
+      where: { documentId, level: 'standard', contentVersion },
     });
     return row ? this.toRecord(row) : null;
   }
@@ -273,13 +272,13 @@ export class SequelizeExportRepository implements ExportRepository {
 
   async create(input: {
     documentId: string;
-    level: Level;
     contentVersion: number;
     watermarked: boolean;
   }) {
     const row = await this.model.create({
       id: newId(),
       ...input,
+      level: 'standard',
       status: 'processing',
     } as any);
     return this.toRecord(row);

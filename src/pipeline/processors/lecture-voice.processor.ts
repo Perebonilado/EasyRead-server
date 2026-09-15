@@ -1,11 +1,9 @@
-import { currentChannels } from '../../business/ports/processing-context';
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import {
   ALIGNER,
-  CATALOGUE_SPEECH,
   EVENT_BUS,
-  SPEECH,
+  LECTURE_SPEECH,
   STORAGE,
 } from '../../business/ports/tokens';
 import type { AlignerPort } from '../../business/ports/aligner.port';
@@ -63,8 +61,7 @@ export class LectureVoiceProcessor {
     @Inject(AI_CALL_LOG_REPOSITORY) private readonly calls: AiCallLogRepository,
     @Inject(PRONUNCIATION_REPOSITORY)
     private readonly pronunciations: PronunciationRepository,
-    @Inject(SPEECH) private readonly speech: SpeechPort,
-    @Inject(CATALOGUE_SPEECH) private readonly catalogueSpeech: SpeechPort,
+    @Inject(LECTURE_SPEECH) private readonly speech: SpeechPort,
     @Inject(STORAGE) private readonly storage: StoragePort,
     @Inject(EVENT_BUS) private readonly events: EventBusPort,
     private readonly config: ConfigService,
@@ -127,17 +124,10 @@ export class LectureVoiceProcessor {
     });
 
     try {
-      // A school's document is voiced on the channel the job runs on: the
-      // rented GPU, or OpenAI when the admin chose it; a learner's own
-      // upload by the per-character voice, as always.
-      const catalogue = Boolean(doc.props.institutionId);
-      const rentedVoice =
-        catalogue && (currentChannels()?.audio ?? 'modal') === 'modal';
-      const speech = rentedVoice ? this.catalogueSpeech : this.speech;
-      const { model, voice: named } = speech.label();
-      const voice = rentedVoice
-        ? named
-        : this.config.get<string>('AI_LECTURE_VOICE', named);
+      // Every lecture is voiced on the rented GPU, a learner's own upload
+      // and a school's catalogue alike.
+      const speech = this.speech;
+      const { model, voice } = speech.label();
       // The words and their delivery are both in the key: a page written
       // again, or a style whose delivery changed, gets new audio; a page
       // written the same way gets the file it has.
@@ -170,28 +160,23 @@ export class LectureVoiceProcessor {
           mimeType: result.mimeType,
         });
         // The rented GPU is priced by the audio it made at the bench's
-        // measured rate; the per-character voice is priced from the text.
-        const rented = result.model.startsWith('modal:');
+        // measured rate.
         const rate = Number(
           this.config.get<string>('MODAL_USD_PER_AUDIO_HOUR', '0'),
         );
         await this.calls.record({
           documentId: doc.id,
           task: 'tts_lecture',
-          model: result.model.includes(':')
-            ? result.model
-            : `openai:${result.model}`,
-          // Speech is priced per character, so the text length is the input.
+          model: result.model,
+          // The text length is the input, for the ledger's sake.
           tokensIn: spoken.length,
           tokensOut: null,
           latencyMs: null,
           outcome: 'ok',
-          costUsd: rented
-            ? catalogueSpeechCost(
-                result.durationMs ?? mp3DurationMs(result.audio.length),
-                rate,
-              )
-            : null,
+          costUsd: catalogueSpeechCost(
+            result.durationMs ?? mp3DurationMs(result.audio.length),
+            rate,
+          ),
         });
         // The length the service measured, silences and all; the estimate
         // from the text knows nothing of the silence the pace model adds.

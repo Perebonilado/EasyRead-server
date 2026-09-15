@@ -72,10 +72,7 @@ export class ExportProcessor {
     }
 
     try {
-      const pages = await this.simplified.findAllDone(
-        job.documentId,
-        job.level,
-      );
+      const pages = await this.simplified.findAllDone(job.documentId);
       if (!pages.length)
         throw new Error('There is nothing simplified to export yet');
 
@@ -148,7 +145,6 @@ export class ExportProcessor {
       await this.events.publish(doc.id, {
         type: 'export.ready',
         exportId: job.exportId,
-        level: job.level,
       });
     } catch (error) {
       const message = (error as Error).message;

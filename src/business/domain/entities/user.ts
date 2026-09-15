@@ -1,5 +1,3 @@
-import type { Level } from '../../../contracts';
-
 export interface UserProps {
   id: string;
   email: string;
@@ -7,7 +5,6 @@ export interface UserProps {
   googleId: string | null;
   name: string;
   emailVerifiedAt: Date | null;
-  defaultLevel: Level;
   verificationTokenHash: string | null;
   verificationTokenExpires: Date | null;
   resetTokenHash: string | null;
@@ -105,10 +102,6 @@ export class User {
 
   rename(name: string): void {
     this.props.name = name;
-  }
-
-  setDefaultLevel(level: Level): void {
-    this.props.defaultLevel = level;
   }
 
   /**

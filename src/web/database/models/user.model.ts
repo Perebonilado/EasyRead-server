@@ -20,13 +20,6 @@ export class UserModel extends BaseModel {
   @Column({ type: DataType.DATE, allowNull: true })
   declare emailVerifiedAt: Date | null;
 
-  @Column({
-    type: DataType.ENUM('standard', 'easiest'),
-    allowNull: false,
-    defaultValue: 'standard',
-  })
-  declare defaultLevel: 'standard' | 'easiest';
-
   @Column({ type: DataType.STRING(255), allowNull: true })
   declare verificationTokenHash: string | null;
 

@@ -11,9 +11,6 @@ import type {
 } from '../../../contracts';
 import { PipelineOrchestrator } from '../../../pipeline/orchestrator.service';
 import { estimatePrepare } from '../../domain/cost';
-import { resolveChannels } from '../../domain/processing';
-import { runWithChannels } from '../../ports/processing-context';
-import { ProcessingSettingsService } from '../documents/processing-settings.service';
 import type { Document } from '../../domain/entities/document';
 import {
   NotFoundError,
@@ -277,7 +274,6 @@ interface PrepareTodo {
   pages: number;
   /** Not through its own upload pipeline yet: nothing can be added on top. */
   needsPipeline: boolean;
-  hasEasiest: boolean;
   /** Styles whose every page has its words, voiced or not. */
   scripted: string[];
   /** Styles with lecture rows already, written or on their way. */
@@ -285,8 +281,8 @@ interface PrepareTodo {
 }
 
 /**
- * Preparing a school's documents ahead of any student: the easiest notes
- * and the lecture in the styles asked for, on top of the pipeline every
+ * Preparing a school's documents ahead of any student: the lecture in
+ * the styles asked for, written and voiced, on top of the pipeline every
  * upload runs. The estimate is the same arithmetic as the run, so the
  * number shown before the button is the number the ledger will confirm.
  */
@@ -306,7 +302,6 @@ export class PrepareMaterialsHandler extends AbstractRequestHandlerTemplate<
     @Inject(LECTURE_REPOSITORY) private readonly lectures: LectureRepository,
     private readonly pipeline: PipelineOrchestrator,
     private readonly generate: GenerateLectureHandler,
-    private readonly settings: ProcessingSettingsService,
     private readonly config: ConfigService,
   ) {
     super();
@@ -317,41 +312,23 @@ export class PrepareMaterialsHandler extends AbstractRequestHandlerTemplate<
       (LECTURE_STYLE_KEYS as readonly string[]).includes(style),
     );
     const todos = await this.todos(cmd);
-    // The run's own channels over the admin's setting: priced on them, and
-    // stamped onto every job the run fans out.
-    const channels = resolveChannels(
-      await this.settings.current(),
-      cmd.channels,
-    );
     const estimate: PrepareEstimateDto = estimatePrepare({
       documents: todos.map((todo) => ({
         pages: todo.pages,
         needsPipeline: todo.needsPipeline,
-        hasEasiest: todo.hasEasiest,
         styles: todo.styles as never,
         scripted: todo.scripted as never,
       })),
-      easiest: cmd.easiest,
       styles,
-      channels,
-      rates: {
-        modalUsdPerMillionTokens: Number(
-          this.config.get<string>('MODAL_USD_PER_MILLION_TOKENS', '0'),
-        ),
-        modalUsdPerAudioHour: Number(
-          this.config.get<string>('MODAL_USD_PER_AUDIO_HOUR', '0'),
-        ),
-      },
+      usdPerAudioHour: Number(
+        this.config.get<string>('MODAL_USD_PER_AUDIO_HOUR', '0'),
+      ),
     });
     if (cmd.dryRun) {
       return CommandResponse.of({ ...estimate, queued: 0, skipped: 0 });
     }
 
-    const { queued, skipped } = await runWithChannels(
-      channels,
-      cmd.channels ?? null,
-      () => this.queueAll(cmd, todos, styles),
-    );
+    const { queued, skipped } = await this.queueAll(cmd, todos, styles);
     return CommandResponse.of({ ...estimate, queued, skipped });
   }
 
@@ -376,14 +353,6 @@ export class PrepareMaterialsHandler extends AbstractRequestHandlerTemplate<
       const revoiced = cmd.revoice
         ? await this.lectures.resetAudio(todo.doc.id, todo.doc.contentVersion)
         : 0;
-      if (cmd.easiest && !todo.hasEasiest) {
-        await this.pipeline.fanOutSimplify(
-          todo.doc.id,
-          todo.doc.contentVersion,
-          'easiest',
-        );
-        did = true;
-      }
       for (const style of styles) {
         if (todo.styles.includes(style) && !revoiced) continue;
         try {
@@ -445,9 +414,6 @@ export class PrepareMaterialsHandler extends AbstractRequestHandlerTemplate<
           'topics',
           'simplify_standard',
         ]));
-      const easiest = through
-        ? await this.simplified.progress(doc.id, 'easiest')
-        : { total: 0, done: 0, failed: 0 };
       const rows = through
         ? await this.lectures.listSegments(doc.id, doc.contentVersion)
         : [];
@@ -475,7 +441,6 @@ export class PrepareMaterialsHandler extends AbstractRequestHandlerTemplate<
         doc,
         pages,
         needsPipeline: !through,
-        hasEasiest: easiest.total > 0,
         styles,
         scripted,
       });

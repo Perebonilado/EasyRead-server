@@ -228,7 +228,6 @@ describe('AiSdkLlmAdapter', () => {
     });
 
     const result = await adapter.simplifyPage({
-      task: 'simplify_standard',
       pageText: 'The thyroid gland is a butterfly-shaped organ.',
       summary: 'A physiology lecture.',
       pageNumber: 4,
@@ -251,7 +250,6 @@ describe('AiSdkLlmAdapter', () => {
 
     await expect(
       adapter.simplifyPage({
-        task: 'simplify_standard',
         pageText: 'Some text',
         summary: null,
         pageNumber: 1,
@@ -487,11 +485,10 @@ describe('AiSdkLlmAdapter', () => {
   });
 
   it('routes a task to its own model when one is configured', async () => {
-    adapter = configure({ AI_MODEL_SIMPLIFY_EASIEST: 'openai:gpt-4o' });
+    adapter = configure({ AI_MODEL_SIMPLIFY_STANDARD: 'openai:gpt-4o' });
     mock.reply({ blocks: [{ type: 'paragraph', text: 'Short and simple.' }] });
 
     const result = await adapter.simplifyPage({
-      task: 'simplify_easiest',
       pageText: 'Dense prose',
       summary: null,
       pageNumber: 1,
@@ -502,7 +499,7 @@ describe('AiSdkLlmAdapter', () => {
   });
 
   it('falls back to the default model for tasks with no override', async () => {
-    adapter = configure({ AI_MODEL_SIMPLIFY_EASIEST: 'openai:gpt-4o' });
+    adapter = configure({ AI_MODEL_SIMPLIFY_STANDARD: 'openai:gpt-4o' });
     mock.reply('A summary.');
 
     await adapter.summarize({ title: 'T', text: 'Text' });

@@ -65,7 +65,6 @@ export class SequelizeUserRepository implements UserRepository {
         googleId: p.googleId,
         name: p.name,
         emailVerifiedAt: p.emailVerifiedAt,
-        defaultLevel: p.defaultLevel,
         verificationTokenHash: p.verificationTokenHash,
         verificationTokenExpires: p.verificationTokenExpires,
         resetTokenHash: p.resetTokenHash,

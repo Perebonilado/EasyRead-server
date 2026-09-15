@@ -5,7 +5,6 @@ import {
   meaningScores,
   noteAddressed,
   noteCuts,
-  noteLevelFor,
   noteUnits,
   sectionTags,
   sentenceCuts,
@@ -86,12 +85,6 @@ describe('follow-along: the note as units', () => {
     expect(cuts[0]).toHaveLength(1);
     expect(cuts[3]).toEqual([]);
   });
-
-  it('teaches the slow learner from the easiest note', () => {
-    expect(noteLevelFor('gentle')).toBe('easiest');
-    expect(noteLevelFor('steady')).toBe('standard');
-    expect(noteLevelFor('brisk')).toBe('standard');
-  });
 });
 
 describe('follow-along: the alignment', () => {
@@ -136,7 +129,7 @@ describe('follow-along: the alignment', () => {
   });
 
   it('makes a track of merged spans, from the start, with flickers absorbed', () => {
-    const track = trackFromAlignment(spoken, sentences, NOTE, 'standard');
+    const track = trackFromAlignment(spoken, sentences, NOTE);
     expect(track.timing).toBe('aligned');
     expect(track.spans[0].fromMs).toBe(0);
     expect(
@@ -176,42 +169,35 @@ describe('follow-along: the alignment', () => {
         text: 'Figure 5-2 then shows how the keys are spread out.',
       },
     ] as never;
-    const track = trackFromEstimate(script, 20_000, blocks, 'standard');
+    const track = trackFromEstimate(script, 20_000, blocks);
     expect(track?.timing).toBe('estimate');
     expect(track?.spans.every((span) => span.sentence === null)).toBe(true);
     expect(track?.spans.map((span) => span.block)).toEqual([1, 2, 3]);
     expect(track?.spans[0].fromMs).toBe(0);
     expect(track?.spans[track.spans.length - 1].toMs).toBe(20_000);
     // A note that is only a table is matched as its one block, never a sentence.
-    const table = trackFromEstimate(
-      script,
-      20_000,
-      [{ type: 'table', text: 'Server | Keys\n1 | A' }] as never,
-      'standard',
-    );
+    const table = trackFromEstimate(script, 20_000, [
+      { type: 'table', text: 'Server | Keys\n1 | A' },
+    ] as never);
     expect(
       table?.spans.map((span) => `${span.block}.${span.sentence}`),
     ).toEqual(['0.null']);
     expect(table?.cuts).toEqual([[]]);
     // Nothing to match against at all: the caller falls back to the plan's blocks.
-    expect(trackFromEstimate(script, 20_000, [], 'standard')).toBeNull();
+    expect(trackFromEstimate(script, 20_000, [])).toBeNull();
   });
 
   it('gives a page a block-level track from its moves before alignment', () => {
-    const track = trackFromMoves(
-      [0, 300, 600],
-      900,
-      90_000,
-      [[0, 1], [2], null],
-      'easiest',
-    );
+    const track = trackFromMoves([0, 300, 600], 900, 90_000, [
+      [0, 1],
+      [2],
+      null,
+    ]);
     expect(track.timing).toBe('moves');
     expect(
       track.spans.map((span) => `${span.block}:${span.fromMs}-${span.toMs}`),
     ).toEqual(['0:0-30000', '2:30000-60000', 'null:60000-90000']);
-    expect(
-      trackFromMoves([], 100, 10_000, null, 'standard').spans,
-    ).toHaveLength(1);
+    expect(trackFromMoves([], 100, 10_000, null).spans).toHaveLength(1);
   });
 });
 

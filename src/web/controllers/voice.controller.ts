@@ -65,7 +65,7 @@ import { STORAGE } from '../../business/ports/tokens';
 import type { StoragePort } from '../../business/ports/storage.port';
 import { CurrentUser } from '../security/current-user.decorator';
 
-const AUDIO_LEVELS: AudioLevel[] = ['original', 'standard', 'easiest'];
+const AUDIO_LEVELS: AudioLevel[] = ['original', 'standard'];
 
 class ConversationLineDto {
   @IsIn(['learner', 'tutor'])
@@ -117,11 +117,6 @@ class LectureContextDto {
   @IsInt()
   @Min(0)
   sentence?: number;
-
-  /** The note level the learner is reading. */
-  @IsOptional()
-  @IsIn(['standard', 'easiest'])
-  noteLevel?: 'standard' | 'easiest';
 
   /** The conversation so far, when a dropped session is being resumed. */
   @IsOptional()
@@ -295,8 +290,8 @@ class DwellVisitDto {
   @Min(1)
   page!: number;
 
-  @IsIn(['original', 'standard', 'easiest'])
-  level!: 'original' | 'standard' | 'easiest';
+  @IsIn(['original', 'standard'])
+  level!: 'original' | 'standard';
 
   @IsInt()
   @Min(0)

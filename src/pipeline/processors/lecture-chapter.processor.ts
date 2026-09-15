@@ -260,12 +260,18 @@ export class LectureChapterProcessor {
   }
 
   /**
-   * Whether this document's audio is made at all: every lecture, a
-   * learner's own upload and a school's catalogue alike, is voiced on the
-   * rented GPU, and only when that service is set. Without it the words
-   * are written and the rows are left scripted.
+   * Whether this document's audio is made here at all.
+   *
+   * A school's catalogue is voiced in bulk on our own rented GPU, and only
+   * when that service is set; without it the words are written and the
+   * rows are left scripted. Anything a learner uploaded is voiced as it
+   * always was, at OpenAI, because somebody is sitting there waiting for
+   * it and must never wait on a sleeping or disabled container.
    */
-  private voicesHere(): boolean {
+  private voicesHere(doc: {
+    props: { institutionId: string | null };
+  }): boolean {
+    if (!doc.props.institutionId) return true;
     return Boolean(this.config.get<string>('MODAL_TTS_URL'));
   }
 
@@ -372,7 +378,7 @@ export class LectureChapterProcessor {
         style,
         kind: row.kind,
       }));
-      if (voice && this.voicesHere()) {
+      if (voice && this.voicesHere(doc)) {
         await this.queue.enqueueLectureVoices(keys);
       }
       // Their words exist, so their board can be written now; it is timed
@@ -846,7 +852,7 @@ export class LectureChapterProcessor {
         plan,
         durationMs: estimateDurationMs(scriptForTts(script)),
       });
-      if (input.voice && this.voicesHere()) {
+      if (input.voice && this.voicesHere(doc)) {
         await this.queue.enqueueLectureVoices([
           {
             documentId: doc.id,
@@ -1402,7 +1408,7 @@ export class LectureChapterProcessor {
           kind: 'part',
         });
       }
-      if (input.voice && this.voicesHere()) {
+      if (input.voice && this.voicesHere(doc)) {
         await this.queue.enqueueLectureVoices(voices);
       }
     } catch (error) {

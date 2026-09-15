@@ -586,6 +586,7 @@ const voiceProcessor = (
     f.deps.calls,
     noPronunciations,
     f.deps.speech,
+    f.deps.speech,
     f.deps.storage as never,
     f.deps.events as never,
     new ConfigService({}),
@@ -2212,11 +2213,13 @@ describe('boards for a lecture written before boards existed', () => {
 });
 
 describe('LectureChapterProcessor: no voice service set', () => {
-  it('writes the scripts and queues no audio when there is no rented voice to send them to', async () => {
-    const f = fakes({ 1: REAL_PAGE, 2: REAL_PAGE });
-    f.seedExtras('steady');
-    const processor = new LectureChapterProcessor(
-      { findById: () => Promise.resolve(doc) } as never,
+  const schoolDoc = {
+    ...doc,
+    props: { ...doc.props, institutionId: 'school-1' },
+  };
+  const processorFor = (f: ReturnType<typeof fakes>, found: unknown) =>
+    new LectureChapterProcessor(
+      { findById: () => Promise.resolve(found) } as never,
       f.deps.pages as never,
       f.deps.topics as never,
       f.lectures,
@@ -2232,7 +2235,20 @@ describe('LectureChapterProcessor: no voice service set', () => {
         listLevels: () => Promise.resolve([]),
       },
     );
-    await processor.process(chapterJob(), CONTEXT);
+
+  it("a learner's own upload is voiced as always: the audio is queued without the rented voice", async () => {
+    const f = fakes({ 1: REAL_PAGE, 2: REAL_PAGE });
+    f.seedExtras('steady');
+    await processorFor(f, doc).process(chapterJob(), CONTEXT);
+
+    expect(f.row(1, 'steady')!.scriptText).toBeTruthy();
+    expect(f.voiceJobs.length).toBeGreaterThan(0);
+  });
+
+  it("a school's document writes the scripts and queues no audio when there is no rented voice to send them to", async () => {
+    const f = fakes({ 1: REAL_PAGE, 2: REAL_PAGE });
+    f.seedExtras('steady');
+    await processorFor(f, schoolDoc).process(chapterJob(), CONTEXT);
 
     // The words are there for the voice to pick up once it is set.
     expect(f.row(1, 'steady')!.scriptText).toBeTruthy();

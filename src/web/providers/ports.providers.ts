@@ -90,8 +90,9 @@ export const portProviders: Provider[] = [
   { provide: WEB_IMPORT, useClass: WebImportAdapter },
   // Voice rides on the same OpenAI key as the text gateway.
   { provide: SPEECH, useClass: OpenAiSpeechAdapter },
-  // Every lecture is voiced on the rented GPU, and only there. With no
-  // service URL no lecture is voiced at all: never at OpenAI's price.
+  // A school's catalogue is voiced on the rented GPU, and only there. With
+  // no service URL it is not voiced at all: never at OpenAI's price. A
+  // learner's own upload is voiced by SPEECH above, as always.
   {
     provide: LECTURE_SPEECH,
     inject: [ConfigService],

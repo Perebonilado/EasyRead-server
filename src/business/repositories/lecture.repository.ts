@@ -124,6 +124,8 @@ export interface LectureRepository {
     kind: SegmentKind,
     topicId?: string,
   ): Promise<void>;
+  /** One row gone: a page's second piece that no longer exists. */
+  removeSegment(key: SegmentKey): Promise<void>;
   markSegmentWriting(
     documentId: string,
     pageNumber: number,

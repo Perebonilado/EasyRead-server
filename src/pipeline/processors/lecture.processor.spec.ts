@@ -283,6 +283,18 @@ function fakes(
       }
       return Promise.resolve();
     },
+    removeSegment: (key) => {
+      for (const [k, r] of rows) {
+        if (
+          r.pageNumber === key.pageNumber &&
+          r.style === key.style &&
+          r.kind === (key.kind ?? 'page')
+        ) {
+          rows.delete(k);
+        }
+      }
+      return Promise.resolve();
+    },
     markSegmentWriting: (_d, pageNumber, _v, style, kind) => {
       const r = row(pageNumber, style, kind);
       if (r) r.status = 'writing';
@@ -2210,6 +2222,48 @@ describe('boards for a lecture written before boards existed', () => {
     await backfill(f, llm).process({ ...voiceJob(2), kind: 'page' }, CONTEXT);
     expect(f.row(2)!.boardStatus).toBe('done');
     expect((f.row(2)!.board as BoardTimeline).timing).toBe('estimated');
+  });
+});
+
+describe("LectureChapterProcessor: a page's second piece with no words", () => {
+  it('drops a part row left pending without words, so the chapter completes', async () => {
+    const f = fakes({ 1: REAL_PAGE, 2: REAL_PAGE });
+    await f.lectures.seedSegments({
+      documentId: doc.id,
+      contentVersion: doc.contentVersion,
+      generatorVersion: 'test',
+      segments: [
+        {
+          topicId: TOPIC.id,
+          pageNumber: 1,
+          seq: 1,
+          bridge: false,
+          style: 'steady',
+          kind: 'part',
+        },
+      ],
+    });
+    expect(f.row(1, 'steady', 'part')).toBeTruthy();
+    const processor = new LectureChapterProcessor(
+      { findById: () => Promise.resolve(doc) } as never,
+      f.deps.pages as never,
+      f.deps.topics as never,
+      f.lectures,
+      f.deps.calls,
+      new FakeLlmAdapter(),
+      f.deps.queue as never,
+      f.deps.events as never,
+      boardService(f, new FakeLlmAdapter(), false),
+      { find: () => Promise.resolve(null) } as never,
+      new ConfigService({}),
+      {
+        listDepartments: () => Promise.resolve([]),
+        listLevels: () => Promise.resolve([]),
+      },
+    );
+    await processor.process(chapterJob(), CONTEXT);
+    expect(f.row(1, 'steady', 'part')).toBeUndefined();
+    expect(f.row(1, 'steady')!.scriptText).toBeTruthy();
   });
 });
 

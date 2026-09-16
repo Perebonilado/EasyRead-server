@@ -444,7 +444,9 @@ export class PrepareMaterialsHandler extends AbstractRequestHandlerTemplate<
       const wordsByStyle = new Map<string, boolean>();
       const failedByStyle = new Set<string>();
       for (const row of rows) {
-        if (row.kind !== 'page') continue;
+        // Pages and their second pieces: a part without words holds the
+        // style as surely as a page without them.
+        if (row.kind !== 'page' && row.kind !== 'part') continue;
         const status = effectiveStatus(row);
         const done = status === 'done';
         byStyle.set(row.style, (byStyle.get(row.style) ?? true) && done);

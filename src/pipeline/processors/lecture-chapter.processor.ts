@@ -353,8 +353,29 @@ export class LectureChapterProcessor {
     // model call is made, and the other styles' pages are the fallback
     // for continuity when this style starts mid-chapter.
     const all = await this.lectures.listSegments(documentId, contentVersion);
+    // A part exists only with its words: it is seeded once its page is
+    // written and runs long. A part row without words is one whose page
+    // was put back and written again shorter; nothing ever comes back for
+    // it, so it goes here rather than hold the lecture at 99 for ever.
+    const stale = all.filter(
+      (row) =>
+        row.topicId === topicId &&
+        row.style === style &&
+        row.kind === 'part' &&
+        !row.scriptText,
+    );
+    for (const row of stale) {
+      await this.lectures.removeSegment({
+        documentId,
+        contentVersion,
+        pageNumber: row.pageNumber,
+        style,
+        kind: 'part',
+      });
+    }
     const mine = all.filter(
-      (row) => row.topicId === topicId && row.style === style,
+      (row) =>
+        row.topicId === topicId && row.style === style && !stale.includes(row),
     );
     const rows = mine.filter((row) => row.kind === 'page');
     // The short segments this style gets around the chapter (the words

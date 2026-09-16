@@ -8,20 +8,27 @@ import type {
   PrepareEstimateDto,
   PrepareRequest,
   PrepareResponse,
+  PublishRequest,
+  VoiceRequest,
+  VoiceResponse,
 } from '../../../contracts';
 import { PipelineOrchestrator } from '../../../pipeline/orchestrator.service';
 import { estimatePrepare } from '../../domain/cost';
 import type { Document } from '../../domain/entities/document';
 import {
+  AlreadyInProgressError,
   NotFoundError,
   UnsupportedFormatError,
   ValidationError,
+  VoiceUnavailableError,
 } from '../../domain/errors/errors';
 import { LECTURE_STYLE_KEYS } from '../../../contracts';
 import { effectiveStatus } from '../../domain/lecture';
 import { ACCEPTED_MIME_TYPES, MAX_UPLOAD_BYTES } from '../../domain/values';
-import { CLOCK, STORAGE } from '../../ports/tokens';
+import { CLOCK, JOB_QUEUE, LECTURE_SPEECH, STORAGE } from '../../ports/tokens';
 import type { ClockPort } from '../../ports/clock.port';
+import type { JobQueuePort } from '../../ports/job-queue.port';
+import type { SpeechPort } from '../../ports/voice.port';
 import type { StoragePort } from '../../ports/storage.port';
 import {
   DOCUMENT_REPOSITORY,
@@ -32,7 +39,10 @@ import {
 } from '../../repositories/tokens';
 import type { DocumentRepository } from '../../repositories/document.repository';
 import type { InstitutionRepository } from '../../repositories/institution.repository';
-import type { LectureRepository } from '../../repositories/lecture.repository';
+import type {
+  LectureRepository,
+  SegmentKey,
+} from '../../repositories/lecture.repository';
 import type { PipelineRunRepository } from '../../repositories/misc.repository';
 import type { SimplifiedPageRepository } from '../../repositories/simplified-page.repository';
 import AbstractRequestHandlerTemplate from '../AbstractRequestHandlerTemplate';
@@ -131,6 +141,7 @@ export class AdminUploadIntentHandler extends AbstractRequestHandlerTemplate<
       courseId: cmd.courseId ?? null,
       contentHash,
       orderIndex: cmd.orderIndex ?? siblings.length,
+      uploadBatchId: cmd.batchId ?? null,
     });
     const target = await this.storage.createUploadTarget({
       documentId: document.id,
@@ -160,6 +171,7 @@ export class MoveMaterialHandler extends AbstractRequestHandlerTemplate<
     @Inject(DOCUMENT_REPOSITORY) private readonly documents: DocumentRepository,
     @Inject(INSTITUTION_REPOSITORY)
     private readonly institutions: InstitutionRepository,
+    @Inject(CLOCK) private readonly clock: ClockPort,
   ) {
     super();
   }
@@ -221,6 +233,8 @@ export class MoveMaterialHandler extends AbstractRequestHandlerTemplate<
       if (!title) throw new ValidationError('A title is needed');
       doc.props.title = title;
     }
+    if (cmd.published === true) doc.publish(this.clock.now());
+    if (cmd.published === false) doc.hide();
     await this.documents.save(doc);
     return CommandResponse.of({ ok: true as const });
   }
@@ -278,12 +292,15 @@ interface PrepareTodo {
   scripted: string[];
   /** Styles with lecture rows already, written or on their way. */
   styles: string[];
+  /** Styles with a page that failed before it had words: the chapter's retry rewrites it. */
+  failed: string[];
 }
 
 /**
  * Preparing a school's documents ahead of any student: the lecture in
- * the styles asked for, written and voiced, on top of the pipeline every
- * upload runs. The estimate is the same arithmetic as the run, so the
+ * the styles asked for, its words only, on top of the pipeline every
+ * upload runs. The audio is asked for separately, by the batch, through
+ * VoiceMaterialsHandler. The estimate is the same arithmetic as the run, so the
  * number shown before the button is the number the ledger will confirm.
  */
 @Injectable()
@@ -324,12 +341,18 @@ export class PrepareMaterialsHandler extends AbstractRequestHandlerTemplate<
         this.config.get<string>('MODAL_USD_PER_AUDIO_HOUR', '0'),
       ),
     });
+    // Words only: no audio is made here, so none is priced here.
+    const written: PrepareEstimateDto = {
+      ...estimate,
+      audioUsd: 0,
+      totalUsd: estimate.textUsd,
+    };
     if (cmd.dryRun) {
-      return CommandResponse.of({ ...estimate, queued: 0, skipped: 0 });
+      return CommandResponse.of({ ...written, queued: 0, skipped: 0 });
     }
 
     const { queued, skipped } = await this.queueAll(cmd, todos, styles);
-    return CommandResponse.of({ ...estimate, queued, skipped });
+    return CommandResponse.of({ ...written, queued, skipped });
   }
 
   private async queueAll(
@@ -345,22 +368,19 @@ export class PrepareMaterialsHandler extends AbstractRequestHandlerTemplate<
         continue;
       }
       let did = false;
-      // Voice again: every done row back to scripted, words kept. A page
-      // whose spoken form is unchanged is found in storage and marked done
-      // at once; only pages whose words the voice now says differently
-      // are made anew. The style guard below is passed, since nothing is
-      // fully voiced after the reset.
-      const revoiced = cmd.revoice
-        ? await this.lectures.resetAudio(todo.doc.id, todo.doc.contentVersion)
-        : 0;
       for (const style of styles) {
-        if (todo.styles.includes(style) && !revoiced) continue;
+        // A style with every page written, voiced or waiting to be, needs
+        // no words; a failed page is rewritten by the chapter's retry.
+        if (todo.scripted.includes(style) && !todo.failed.includes(style)) {
+          continue;
+        }
         try {
           await this.generate.handle({
             userId: cmd.userId,
             documentId: todo.doc.id,
             style,
             asAdmin: true,
+            voice: false,
           });
           did = true;
         } catch (error) {
@@ -422,14 +442,19 @@ export class PrepareMaterialsHandler extends AbstractRequestHandlerTemplate<
       // lecture handler retries just what is missing.
       const byStyle = new Map<string, boolean>();
       const wordsByStyle = new Map<string, boolean>();
+      const failedByStyle = new Set<string>();
       for (const row of rows) {
         if (row.kind !== 'page') continue;
-        const done = effectiveStatus(row) === 'done';
+        const status = effectiveStatus(row);
+        const done = status === 'done';
         byStyle.set(row.style, (byStyle.get(row.style) ?? true) && done);
         wordsByStyle.set(
           row.style,
           (wordsByStyle.get(row.style) ?? true) && Boolean(row.scriptText),
         );
+        if (status === 'failed' && !row.scriptText) {
+          failedByStyle.add(row.style);
+        }
       }
       const styles = Array.from(byStyle.entries())
         .filter(([, whole]) => whole)
@@ -443,9 +468,184 @@ export class PrepareMaterialsHandler extends AbstractRequestHandlerTemplate<
         needsPipeline: !through,
         styles,
         scripted,
+        failed: Array.from(failedByStyle),
       });
     }
     return out;
+  }
+}
+
+/** The files a batch, a selection, or one document names, all of this school. */
+async function namedDocuments(
+  documents: DocumentRepository,
+  institutionId: string,
+  input: { batchId?: string; documentIds?: string[] },
+): Promise<Document[]> {
+  if (input.documentIds?.length) {
+    const found = await Promise.all(
+      input.documentIds.map((id) => documents.findById(id)),
+    );
+    return found.filter(
+      (doc): doc is Document =>
+        doc !== null &&
+        doc.props.institutionId === institutionId &&
+        doc.props.deletedAt === null,
+    );
+  }
+  if (input.batchId) {
+    const all = await documents.listByInstitution(institutionId);
+    return all.filter((doc) => doc.props.uploadBatchId === input.batchId);
+  }
+  throw new ValidationError('Name a batch or the files');
+}
+
+export interface VoiceCommand extends VoiceRequest {
+  userId: string;
+  institutionId: string;
+}
+
+/**
+ * The admin sending a batch to the voice: every row with its words and no
+ * audio, in the styles asked, queued in one go. Refused while any file
+ * named is still being written, so a batch is voiced whole; refused when
+ * the rented voice does not answer, so a sleeping or disabled service
+ * never turns a batch into failed pages. Asking wakes a sleeping one.
+ */
+@Injectable()
+export class VoiceMaterialsHandler extends AbstractRequestHandlerTemplate<
+  VoiceCommand,
+  VoiceResponse
+> {
+  constructor(
+    @Inject(DOCUMENT_REPOSITORY) private readonly documents: DocumentRepository,
+    @Inject(LECTURE_REPOSITORY) private readonly lectures: LectureRepository,
+    @Inject(JOB_QUEUE) private readonly queue: JobQueuePort,
+    @Inject(LECTURE_SPEECH) private readonly speech: SpeechPort,
+    private readonly config: ConfigService,
+  ) {
+    super();
+  }
+
+  protected async handleRequest(cmd: VoiceCommand) {
+    const asked: readonly LectureStyle[] = cmd.styles?.length
+      ? cmd.styles
+      : LECTURE_STYLE_KEYS;
+    const styles = asked.filter((style) =>
+      (LECTURE_STYLE_KEYS as readonly string[]).includes(style),
+    );
+    const docs = await namedDocuments(this.documents, cmd.institutionId, cmd);
+    if (!docs.length) throw new NotFoundError('Document');
+
+    // Whole or not at all: a file still in its text pipeline or still
+    // writing holds the batch, and the answer names it.
+    const keysByDoc = new Map<string, SegmentKey[]>();
+    const waiting: string[] = [];
+    for (const doc of docs) {
+      if (doc.props.status !== 'ready') {
+        waiting.push(doc.props.title);
+        continue;
+      }
+      const rows = await this.lectures.listSegments(doc.id, doc.contentVersion);
+      const mine = rows.filter((row) => styles.includes(row.style));
+      const stillWriting = mine.some((row) => {
+        const status = effectiveStatus(row);
+        return status === 'pending' || status === 'writing';
+      });
+      if (!mine.length || stillWriting) {
+        waiting.push(doc.props.title);
+        continue;
+      }
+      if (cmd.revoice) {
+        await this.lectures.resetAudio(doc.id, doc.contentVersion);
+      }
+      keysByDoc.set(
+        doc.id,
+        mine
+          .filter((row) => {
+            const status = effectiveStatus(row);
+            return (
+              Boolean(row.scriptText) &&
+              status !== 'voicing' &&
+              (cmd.revoice || status !== 'done')
+            );
+          })
+          .map((row) => ({
+            documentId: doc.id,
+            contentVersion: doc.contentVersion,
+            pageNumber: row.pageNumber,
+            style: row.style,
+            kind: row.kind,
+          })),
+      );
+    }
+    if (waiting.length) {
+      const named = waiting.slice(0, 3).join(', ');
+      throw new AlreadyInProgressError(
+        `${waiting.length === 1 ? 'One file is' : `${waiting.length} files are`} still being written: ${named}${waiting.length > 3 ? '…' : ''}. Nothing was queued.`,
+      );
+    }
+    const keys = Array.from(keysByDoc.values()).flat();
+    if (keys.length && this.speech.ready && !(await this.speech.ready())) {
+      throw new VoiceUnavailableError();
+    }
+    if (keys.length) {
+      await this.lectures.markSegmentsVoicing(keys);
+      await this.queue.enqueueLectureVoices(keys);
+    }
+    // Priced as the rows queued, each a page of audio at the measured rate.
+    const audioUsd = estimatePrepare({
+      documents: [
+        {
+          pages: keys.length,
+          needsPipeline: false,
+          styles: [],
+          scripted: ['gentle'],
+        },
+      ],
+      styles: ['gentle'],
+      usdPerAudioHour: Number(
+        this.config.get<string>('MODAL_USD_PER_AUDIO_HOUR', '0'),
+      ),
+    }).audioUsd;
+    return CommandResponse.of({
+      documents: docs.length,
+      queued: keys.length,
+      audioUsd,
+    });
+  }
+}
+
+export interface PublishCommand extends PublishRequest {
+  institutionId: string;
+}
+
+/** Publish a batch, a selection, or one file to the school's students, or hide it again. Nothing is processed or deleted. */
+@Injectable()
+export class PublishMaterialsHandler extends AbstractRequestHandlerTemplate<
+  PublishCommand,
+  { ok: true; changed: number }
+> {
+  constructor(
+    @Inject(DOCUMENT_REPOSITORY) private readonly documents: DocumentRepository,
+    @Inject(CLOCK) private readonly clock: ClockPort,
+  ) {
+    super();
+  }
+
+  protected async handleRequest(cmd: PublishCommand) {
+    const docs = await namedDocuments(this.documents, cmd.institutionId, cmd);
+    let changed = 0;
+    const now = this.clock.now();
+    for (const doc of docs) {
+      const was = doc.isPublished();
+      if (cmd.published) doc.publish(now);
+      else doc.hide();
+      if (doc.isPublished() !== was) {
+        await this.documents.save(doc);
+        changed += 1;
+      }
+    }
+    return CommandResponse.of({ ok: true as const, changed });
   }
 }
 

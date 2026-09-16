@@ -122,6 +122,15 @@ export class AlreadyInProgressError extends DomainError {
   }
 }
 
+/** The rented voice did not answer its health check: nothing was queued, try again in a minute. */
+export class VoiceUnavailableError extends DomainError {
+  constructor(
+    message = 'The voice service is asleep or down; nothing was queued. Try again in a minute.',
+  ) {
+    super(ErrorCodes.VOICE_UNAVAILABLE, message, 503);
+  }
+}
+
 export class ValidationError extends DomainError {
   constructor(message: string, details?: unknown) {
     super(ErrorCodes.VALIDATION_FAILED, message, 400, details);

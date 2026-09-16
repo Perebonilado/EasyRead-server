@@ -221,6 +221,13 @@ export interface LectureRepository {
   >;
   resetAudio(documentId: string, contentVersion: number): Promise<number>;
   /**
+   * The rows named, which have their words, marked voicing before their
+   * jobs are queued, so the cards move the moment the admin presses Voice.
+   * Returns how many changed; a row without words or already done is
+   * left alone.
+   */
+  markSegmentsVoicing(keys: SegmentKey[]): Promise<number>;
+  /**
    * Wipes a document's lecture so it can be written again: one style's
    * pages, or, with no style, every page and every plan.
    */

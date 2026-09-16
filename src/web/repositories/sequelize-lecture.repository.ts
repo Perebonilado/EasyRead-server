@@ -468,6 +468,28 @@ export class SequelizeLectureRepository implements LectureRepository {
     return count;
   }
 
+  async markSegmentsVoicing(keys: SegmentKey[]): Promise<number> {
+    let changed = 0;
+    for (const key of keys) {
+      const [count] = await this.segments.update(
+        { status: 'voicing', error: null },
+        {
+          where: {
+            documentId: key.documentId,
+            contentVersion: key.contentVersion,
+            pageNumber: key.pageNumber,
+            style: key.style,
+            kind: key.kind ?? 'page',
+            scriptText: { [Op.ne]: null },
+            status: { [Op.notIn]: ['done', 'voicing'] },
+          },
+        },
+      );
+      changed += count;
+    }
+    return changed;
+  }
+
   async clear(documentId: string, style?: LectureStyle): Promise<void> {
     if (style) {
       // One style goes; the plan is shared by the others and stays.

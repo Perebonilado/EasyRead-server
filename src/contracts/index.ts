@@ -59,6 +59,8 @@ export const ErrorCodes = {
   FILE_TOO_LARGE: 'FILE_TOO_LARGE',
   DOC_NOT_READY: 'DOC_NOT_READY',
   ALREADY_IN_PROGRESS: 'ALREADY_IN_PROGRESS',
+  /** The rented voice is asleep or down: nothing was queued. */
+  VOICE_UNAVAILABLE: 'VOICE_UNAVAILABLE',
   INVALID_TOKEN: 'INVALID_TOKEN',
   TOKEN_EXPIRED: 'TOKEN_EXPIRED',
   EMAIL_IN_USE: 'EMAIL_IN_USE',
@@ -246,25 +248,86 @@ export interface MaterialDto {
   steps: { step: PipelineStep; status: PipelineStatus; error: string | null }[];
   /** The simplified note, page by page: how many are written, failed, and there are. */
   simplified: { done: number; failed: number; total: number };
-  /** Lecture rows per style, the segments around a chapter included: how many exist, have their words, have audio, failed. */
-  lecture: Record<
-    LectureStyle,
-    { total: number; scripted: number; ready: number; failed: number }
-  >;
+  /** Lecture rows per style, the segments around a chapter included: how many exist, have their words, are being voiced, have audio, failed. */
+  lecture: Record<LectureStyle, LectureTally>;
   /** What the model calls on this document have cost so far, summed from the ledger. */
   costUsd: number;
   /** Where the document stands, as the card draws it: three bars and one word. */
   progress: MaterialProgress;
+  /** The admin's drop this file arrived in; null for files uploaded before batches existed. */
+  batchId: string | null;
+  /** When the admin published it to the school's students; null is hidden. */
+  publishedAt: string | null;
+}
+
+export interface LectureTally {
+  total: number;
+  scripted: number;
+  /** Rows whose audio is being made right now. */
+  voicing: number;
+  ready: number;
+  failed: number;
 }
 
 export type MaterialState =
   | 'uploading'
   | 'preparing'
   | 'writing'
+  /** Every page has its words and no audio has been asked for: the admin's Voice is next. */
+  | 'written'
   | 'voicing'
   | 'ready'
   | 'attention'
   | 'failed';
+
+/** One drop of files onto the admin page, seen as a whole. */
+export interface BatchDto {
+  id: string;
+  /** When the first file of the drop arrived. */
+  createdAt: string;
+  files: number;
+  /** Files the admin has published. */
+  published: number;
+  /** Files whose text pipeline is through. */
+  text: { done: number; total: number };
+  /** Lecture rows with their words, all styles, over the rows seeded. */
+  scripts: { done: number; total: number };
+  /** Lecture rows with their audio, all styles. */
+  audio: { done: number; total: number };
+  failed: number;
+  untaught: number;
+  costUsd: number;
+  state: BatchState;
+  /** The files, for the strip to filter the list by. */
+  documentIds: string[];
+}
+
+export type BatchState =
+  'preparing' | 'writing' | 'written' | 'voicing' | 'voiced' | 'attention';
+
+/** The admin sending a batch, a selection, or one file to the voice. */
+export interface VoiceRequest {
+  batchId?: string;
+  documentIds?: string[];
+  /** Omitted means every style. */
+  styles?: LectureStyle[];
+  /** Voice every page again, keeping the words: after a pronunciation was added or fixed. */
+  revoice?: boolean;
+}
+
+export interface VoiceResponse {
+  documents: number;
+  /** Rows sent to the voice. */
+  queued: number;
+  audioUsd: number;
+}
+
+/** Publish or hide a batch, a selection, or one file. */
+export interface PublishRequest {
+  batchId?: string;
+  documentIds?: string[];
+  published: boolean;
+}
 
 export interface MaterialProgress {
   /** Percent of the text pipeline done. */
@@ -297,10 +360,14 @@ export interface PrepareRequest {
   departmentId?: string;
   levelId?: string;
   courseId?: string;
-  /** Which lecture styles to write and voice ahead. */
+  /** Which lecture styles to write ahead. */
   styles: LectureStyle[];
-  /** Voice every page again, keeping the words: after a pronunciation was added or fixed. */
-  revoice?: boolean;
+  /**
+   * Write: the words only, which is what Prepare does now; the audio is
+   * asked for through the voice route once a batch has its words. The
+   * field is kept so a client can say it and the other value is refused.
+   */
+  stage?: 'write';
 }
 
 export interface PrepareEstimateDto {
@@ -326,6 +393,8 @@ export interface AdminUploadIntentRequest extends UploadIntentRequest {
   /** An optional label within the placement. */
   courseId?: string | null;
   orderIndex?: number;
+  /** The drop this file is part of: one id per drop, made by the client, so the batch can be voiced and published whole. */
+  batchId?: string;
 }
 
 export type AdminUploadIntentResponse =
@@ -337,6 +406,8 @@ export interface MoveMaterialRequest {
   courseId?: string | null;
   orderIndex?: number;
   title?: string;
+  /** Publish to the school's students, or hide from them. */
+  published?: boolean;
 }
 
 export interface CreateInstitutionRequest {

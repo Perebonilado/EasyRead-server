@@ -335,6 +335,7 @@ function fakes(
     },
     resetFailedSegments: () => Promise.resolve(),
     resetAudio: () => Promise.resolve(0),
+    markSegmentsVoicing: () => Promise.resolve(0),
     saveFollow: () => Promise.resolve(),
     saveBoard: (input) => {
       const r = row(input.pageNumber, input.style, input.kind);

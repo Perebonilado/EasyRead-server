@@ -38,8 +38,10 @@ export class DocumentAccessService {
       // reader writes is keyed to their own user, so members never touch each
       // other's positions, notes or answers; the admin who uploaded it is
       // the owner, and owner-only actions stay with them.
+      // Only once the admin has published it: a hidden file reports as
+      // missing to every student, by link as much as by list.
       if (
-        doc.isInstitutional() &&
+        doc.isPublished() &&
         (await this.institutions.isMember(userId, doc.props.institutionId!))
       ) {
         // A member reads on Pro, while the school is free, or with a pass;

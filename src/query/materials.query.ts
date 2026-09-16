@@ -3,7 +3,6 @@ import { InjectModel } from '@nestjs/sequelize';
 import { Op, col, fn, literal } from 'sequelize';
 import type {
   LectureSegmentStatus,
-  LectureStyle,
   MaterialDto,
   MaterialPageDto,
   MaterialProgress,
@@ -105,6 +104,8 @@ export class MaterialsQuery {
           untaughtRows.get(row.id) ?? 0,
         ),
         costUsd: costs.get(row.id) ?? 0,
+        batchId: row.uploadBatchId ?? null,
+        publishedAt: row.publishedAt ? row.publishedAt.toISOString() : null,
       };
     });
   }
@@ -165,6 +166,7 @@ export class MaterialsQuery {
           });
       bucket.total += 1;
       if (Number(row.get('scripted'))) bucket.scripted += 1;
+      if (status === 'voicing') bucket.voicing += 1;
       if (status === 'done') bucket.ready += 1;
       if (status === 'failed') bucket.failed += 1;
       out.set(row.documentId, lecture);
@@ -367,6 +369,7 @@ function progressOf(
   const tallies = Object.values(lecture);
   const total = tallies.reduce((sum, t) => sum + t.total, 0);
   const scripted = tallies.reduce((sum, t) => sum + t.scripted, 0);
+  const voicing = tallies.reduce((sum, t) => sum + t.voicing, 0);
   const ready = tallies.reduce((sum, t) => sum + t.ready, 0);
   const percent = (part: number) =>
     total === 0 ? 0 : Math.round((part / total) * 100);
@@ -381,7 +384,11 @@ function progressOf(
   else if (row.status !== 'ready') state = 'preparing';
   else if (total === 0) state = 'ready';
   else if (scripted + failed < total) state = 'writing';
-  else if (ready + failed < total) state = 'voicing';
+  // Every page has its words. Audio being made is voicing; a failure with
+  // nothing moving needs a person; otherwise the words are waiting for the
+  // admin's Voice.
+  else if (ready + failed < total)
+    state = voicing > 0 ? 'voicing' : failed > 0 ? 'attention' : 'written';
   else if (failed > 0 || untaught > 0) state = 'attention';
   else state = 'ready';
 
@@ -405,9 +412,6 @@ const emptyLecture = (): MaterialDto['lecture'] =>
   Object.fromEntries(
     LECTURE_STYLE_KEYS.map((style) => [
       style,
-      { total: 0, scripted: 0, ready: 0, failed: 0 },
+      { total: 0, scripted: 0, voicing: 0, ready: 0, failed: 0 },
     ]),
-  ) as Record<
-    LectureStyle,
-    { total: number; scripted: number; ready: number; failed: number }
-  >;
+  ) as MaterialDto['lecture'];

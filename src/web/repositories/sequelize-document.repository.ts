@@ -113,6 +113,8 @@ export class SequelizeDocumentRepository implements DocumentRepository {
         courseId: p.courseId,
         contentHash: p.contentHash,
         orderIndex: p.orderIndex,
+        uploadBatchId: p.uploadBatchId,
+        publishedAt: p.publishedAt,
       },
       { where: { id: p.id } },
     );

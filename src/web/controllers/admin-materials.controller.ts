@@ -29,9 +29,11 @@ import {
 import {
   LECTURE_STYLE_KEYS,
   type AdminUploadIntentResponse,
+  type BatchDto,
   type LectureStyle,
   type MaterialDto,
   type PrepareResponse,
+  type VoiceResponse,
   MaterialPageDto,
 } from '../../contracts';
 import { MAX_UPLOAD_BYTES } from '../../business/domain/values';
@@ -39,8 +41,11 @@ import {
   AdminUploadIntentHandler,
   MoveMaterialHandler,
   PrepareMaterialsHandler,
+  PublishMaterialsHandler,
   RemoveMaterialHandler,
+  VoiceMaterialsHandler,
 } from '../../business/handlers/institutions/materials.handlers';
+import { BatchesQuery } from '../../query/batches.query';
 import { MaterialsQuery } from '../../query/materials.query';
 import { AdminGuard } from '../security/admin.guard';
 import { CurrentUser } from '../security/current-user.decorator';
@@ -82,6 +87,11 @@ class AdminUploadIntentDto {
   @IsInt()
   @Min(0)
   orderIndex?: number;
+
+  /** The drop this file is part of, one id per drop, made by the client. */
+  @IsOptional()
+  @IsUUID('all')
+  batchId?: string;
 }
 
 class PrepareDto {
@@ -108,10 +118,50 @@ class PrepareDto {
   @IsIn(LECTURE_STYLE_KEYS, { each: true })
   styles!: LectureStyle[];
 
+  /** Prepare writes the words; the audio has its own route. */
+  @IsOptional()
+  @IsIn(['write'])
+  stage?: 'write';
+}
+
+/** A batch, a selection, or one file to the voice. */
+class VoiceDto {
+  @IsOptional()
+  @IsUUID('all')
+  batchId?: string;
+
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(500)
+  @IsUUID('all', { each: true })
+  documentIds?: string[];
+
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(3)
+  @IsIn(LECTURE_STYLE_KEYS, { each: true })
+  styles?: LectureStyle[];
+
   /** Voice every page again, keeping the words: after a pronunciation was added. */
   @IsOptional()
   @IsBoolean()
   revoice?: boolean;
+}
+
+/** A batch, a selection, or one file published to the school's students, or hidden. */
+class PublishDto {
+  @IsOptional()
+  @IsUUID('all')
+  batchId?: string;
+
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(500)
+  @IsUUID('all', { each: true })
+  documentIds?: string[];
+
+  @IsBoolean()
+  published!: boolean;
 }
 
 /** Many files into one course, or out of any, in one request. */
@@ -152,6 +202,11 @@ class MoveMaterialDto {
   @IsString()
   @Length(1, 500)
   title?: string;
+
+  /** Publish to the school's students, or hide from them. */
+  @IsOptional()
+  @IsBoolean()
+  published?: boolean;
 }
 
 /** A school's documents, as the admin uploads, arranges and prepares them. */
@@ -164,7 +219,44 @@ export class AdminMaterialsController {
     private readonly move: MoveMaterialHandler,
     private readonly removeMaterial: RemoveMaterialHandler,
     private readonly prepare: PrepareMaterialsHandler,
+    private readonly voice: VoiceMaterialsHandler,
+    private readonly publish: PublishMaterialsHandler,
+    private readonly batches: BatchesQuery,
   ) {}
+
+  /** The admin's drops, newest first, each with its files' tallies and one state. */
+  @Get('batches')
+  async listBatches(
+    @Param('id') institutionId: string,
+  ): Promise<{ batches: BatchDto[] }> {
+    return { batches: await this.batches.execute(institutionId) };
+  }
+
+  /** A batch, a selection, or one file to the voice, whole or not at all. */
+  @Post('voice')
+  @HttpCode(202)
+  async voiceMany(
+    @CurrentUser('id') userId: string,
+    @Param('id') institutionId: string,
+    @Body() body: VoiceDto,
+  ): Promise<VoiceResponse> {
+    const { data } = await this.voice.handle({
+      userId,
+      institutionId,
+      ...body,
+    });
+    return data;
+  }
+
+  /** Published to the school's students, or hidden from them. */
+  @Post('materials/publish')
+  async publishMany(
+    @Param('id') institutionId: string,
+    @Body() body: PublishDto,
+  ): Promise<{ ok: true; changed: number }> {
+    const { data } = await this.publish.handle({ institutionId, ...body });
+    return data;
+  }
 
   @Get('materials')
   async list(

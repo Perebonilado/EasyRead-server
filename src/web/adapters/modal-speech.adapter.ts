@@ -2,6 +2,9 @@ import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import type { SpeechPort } from '../../business/ports/voice.port';
 
+/** How long the health check waits for a container that may be waking. */
+const HEALTH_WAIT_MS = 20_000;
+
 /** Which voice runs behind the URL; each takes a different request. */
 export type ModalEngine = 'qwen' | 'kokoro';
 
@@ -56,6 +59,27 @@ export class ModalSpeechAdapter implements SpeechPort {
         kokoro ? 'am_michael' : 'ryan',
       ),
     };
+  }
+
+  /**
+   * The service's health route, with a short wait. A container asleep
+   * between runs answers slowly or not at all the first time and wakes
+   * on being asked; a disabled workspace answers 404 every time.
+   */
+  async ready(): Promise<boolean> {
+    const base = this.config
+      .getOrThrow<string>('MODAL_TTS_URL')
+      .replace(/\/+$/, '');
+    const token = this.config.get<string>('MODAL_TTS_TOKEN') ?? '';
+    try {
+      const response = await fetch(`${base}/health`, {
+        headers: token ? { authorization: `Bearer ${token}` } : {},
+        signal: AbortSignal.timeout(HEALTH_WAIT_MS),
+      });
+      return response.ok;
+    } catch {
+      return false;
+    }
   }
 
   async synthesize({
@@ -219,6 +243,10 @@ export class ModalSpeechAdapter implements SpeechPort {
 export class NoLectureSpeech implements SpeechPort {
   label(): { model: string; voice: string } {
     return { model: 'none', voice: 'none' };
+  }
+
+  ready(): Promise<boolean> {
+    return Promise.resolve(false);
   }
 
   synthesize(): Promise<never> {

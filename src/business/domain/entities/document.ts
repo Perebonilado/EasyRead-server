@@ -39,6 +39,10 @@ export interface DocumentProps {
   contentHash: string | null;
   /** Where it sits in its course. */
   orderIndex: number;
+  /** The admin's drop this file arrived in, so the batch can be voiced and published whole; null on a personal upload. */
+  uploadBatchId: string | null;
+  /** When the admin made a school's document visible to its students; null is hidden. A personal upload never carries one. */
+  publishedAt: Date | null;
 }
 
 export class Document {
@@ -61,6 +65,22 @@ export class Document {
   /** A document a school shares: read by its members, owned by the admin who uploaded it. */
   isInstitutional(): boolean {
     return this.props.institutionId !== null && this.props.deletedAt === null;
+  }
+
+  /**
+   * Whether a school's students may see it: the admin published it. A
+   * personal upload is its owner's the moment it exists and is never asked.
+   */
+  isPublished(): boolean {
+    return this.isInstitutional() && this.props.publishedAt !== null;
+  }
+
+  publish(now: Date): void {
+    if (this.props.publishedAt === null) this.props.publishedAt = now;
+  }
+
+  hide(): void {
+    this.props.publishedAt = null;
   }
 
   /** A PDF is already canonical, so it skips conversion entirely (§4.2). */

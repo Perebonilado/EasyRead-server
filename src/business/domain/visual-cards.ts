@@ -111,6 +111,7 @@ export const TUTORIAL_LIMITS = {
   maxWords: 720,
   maxItems: 5,
   maxSide: 4,
+  maxChipChars: 26,
   maxHeadingChars: 40,
   maxEyebrowChars: 30,
   maxStatementWords: 14,
@@ -708,7 +709,7 @@ export function tutorialProblems(
             `${who} has ${items.length} items; between ${least} and ${L.maxItems}.`,
           );
         items.forEach((item, k) => {
-          const max = m.card === 'list' ? L.maxListItemChars : 22;
+          const max = m.card === 'list' ? L.maxListItemChars : L.maxChipChars;
           short(`item ${k + 1}`, item.text, max);
           grounded(`item ${k + 1}`, item.text);
           pictureKnown(`item ${k + 1}`, item.picture);
@@ -737,7 +738,7 @@ export function tutorialProblems(
             problems.push(`${who} has no ${name} side.`);
             continue;
           }
-          short(`the ${name} label`, side.label, 22);
+          short(`the ${name} label`, side.label, L.maxChipChars);
           grounded(`the ${name} label`, side.label);
           pictureKnown(`the ${name} side`, side.picture);
           if (!side.picture && !(side.items ?? []).length)
@@ -747,20 +748,20 @@ export function tutorialProblems(
           if ((side.items ?? []).length > L.maxSide)
             problems.push(`${who}: at most ${L.maxSide} items on the ${name}.`);
           for (const text of side.items ?? []) {
-            short(`the ${name} item "${text}"`, text, 22);
+            short(`the ${name} item "${text}"`, text, L.maxChipChars);
             grounded(`the ${name} item`, text);
           }
         }
         break;
       case 'hub': {
         if (!m.centre) problems.push(`${who} has no centre.`);
-        short('the centre', m.centre?.text, 22);
+        short('the centre', m.centre?.text, L.maxChipChars);
         grounded('the centre', m.centre?.text);
         pictureKnown('the centre', m.centre?.picture);
         const inputs = m.inputs ?? [];
         const outputs = m.outputs ?? [];
-        if (inputs.length + outputs.length < 2)
-          problems.push(`${who} needs at least two things around the centre.`);
+        if (inputs.length + outputs.length < 1)
+          problems.push(`${who} needs at least one thing around the centre.`);
         if (inputs.length > L.maxSide)
           problems.push(
             `${who} has ${inputs.length} inputs; at most ${L.maxSide}.`,
@@ -770,7 +771,7 @@ export function tutorialProblems(
             `${who} has ${outputs.length} outputs; at most ${L.maxSide}.`,
           );
         for (const item of [...inputs, ...outputs]) {
-          short(`"${item.text}"`, item.text, 22);
+          short(`"${item.text}"`, item.text, L.maxChipChars);
           grounded(`"${item.text}"`, item.text);
           pictureKnown(`"${item.text}"`, item.picture);
         }

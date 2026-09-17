@@ -489,7 +489,7 @@ export const visualScriptSchema = z.object({
           id: visualId,
           x: z.number(),
           y: z.number(),
-          text: z.string().min(1).max(16),
+          text: z.string().min(1).max(22),
           color: visualColor,
         }),
         z.object({

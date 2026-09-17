@@ -469,76 +469,88 @@ const visualColor = z
   .enum(['green', 'amber', 'blue', 'violet', 'orange', 'red', 'ink', 'muted'])
   .nullable();
 /** Short enough that the name label the layout adds under a picture still fits the id rule. */
-const visualId = z.string().min(1).max(24);
 
-/** The scene as structure: what is in the picture and how it is related, the sentences, and the cues. The app places it. */
-export const visualStructureSchema = z.object({
+/** A card's named thing: its words, and a picture from the library or null. */
+const cardItem = z.object({
+  text: z.string().min(1).max(40),
+  picture: z.string().max(32).nullable(),
+});
+/** One side of a compare card. */
+const cardSide = z.object({
+  label: z.string().min(1).max(22),
+  picture: z.string().max(32).nullable(),
+  items: z.array(z.string().min(1).max(22)).max(4).nullable(),
+});
+
+/** The tutorial: the narration, and the moments that cut it, each one card with its fields. Fields a card does not use are null. */
+export const visualTutorialSchema = z.object({
   title: z.string().min(1).max(60),
-  template: z.enum(['hub', 'flow', 'cycle', 'compare', 'layers']),
-  items: z
+  sentences: z.array(z.string().min(1).max(300)).min(8).max(48),
+  moments: z
     .array(
       z.object({
-        id: visualId,
-        role: z.enum([
-          'centre',
-          'input',
-          'output',
-          'step',
-          'left',
-          'right',
-          'layer',
-          'note',
+        from: z.number().int().min(0),
+        to: z.number().int().min(0),
+        card: z.enum([
           'title',
+          'statement',
+          'number',
+          'chips',
+          'list',
+          'picture',
+          'term',
+          'compare',
+          'flow',
+          'hub',
         ]),
-        kind: z.enum(['chip', 'picture', 'label', 'dots']),
-        text: z.string().max(40),
-        /** For a picture: a preset's name from the catalogue; else null. */
+        color: visualColor,
+        eyebrow: z.string().max(30).nullable(),
+        heading: z.string().max(40).nullable(),
+        text: z.string().max(120).nullable(),
+        emphasis: z.array(z.string().min(1).max(24)).max(3).nullable(),
+        figure: z.string().max(12).nullable(),
+        caption: z.string().max(40).nullable(),
+        bar: z
+          .object({
+            value: z.number().min(0).max(1),
+            left: z.string().max(30).nullable(),
+            right: z.string().max(30).nullable(),
+            markers: z
+              .array(
+                z.object({
+                  at: z.number().min(0).max(1),
+                  text: z.string().min(1).max(14),
+                }),
+              )
+              .max(4)
+              .nullable(),
+          })
+          .nullable(),
+        items: z.array(cardItem).max(5).nullable(),
         picture: z.string().max(32).nullable(),
-        color: visualColor,
-        /** For dots: how many; else null. */
-        count: z.number().int().min(1).max(12).nullable(),
-      }),
-    )
-    .min(1)
-    .max(10),
-  arrows: z
-    .array(
-      z.object({
-        id: visualId,
-        from: visualId,
-        to: visualId,
-        color: visualColor,
-        double: z.boolean().nullable(),
-      }),
-    )
-    .max(8),
-  segments: z
-    .array(
-      z.object({
-        text: z.string().min(1).max(300),
-        cues: z
+        name: z.string().max(24).nullable(),
+        bubble: z.string().max(36).nullable(),
+        term: z.string().max(24).nullable(),
+        meaning: z.string().max(96).nullable(),
+        left: cardSide.nullable(),
+        right: cardSide.nullable(),
+        centre: cardItem.nullable(),
+        inputs: z.array(cardItem).max(4).nullable(),
+        outputs: z.array(cardItem).max(4).nullable(),
+        reveals: z
           .array(
             z.object({
-              at: z.number().int().min(0),
-              do: z.enum([
-                'draw',
-                'fade',
-                'hide',
-                'dim',
-                'undim',
-                'pulse',
-                'flow',
-                'highlight',
-                'clear',
-              ]),
-              target: z.string().min(1).max(40),
+              part: z.number().int().min(0),
+              sentence: z.number().int().min(0),
+              word: z.number().int().min(0),
             }),
           )
-          .max(8),
+          .max(8)
+          .nullable(),
       }),
     )
     .min(3)
-    .max(14),
+    .max(40),
 });
 
 /** The tutor's live sketch: one template, and the fields that template reads; the rest null. */

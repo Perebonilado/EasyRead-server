@@ -16,15 +16,13 @@ import {
   timeVisual,
   visualProblems,
   visualWarnings,
-  type VisualPlan,
   type VisualScript,
 } from '../../business/domain/visual';
 import {
-  layoutScene,
-  structureProblems,
-  type VisualStructure,
-} from '../../business/domain/visual-layout';
-import { PRESET_INFO } from '../../business/domain/visual-presets';
+  layoutTutorial,
+  tutorialProblems,
+  type VisualTutorial,
+} from '../../business/domain/visual-cards';
 import type { AlignerPort } from '../../business/ports/aligner.port';
 import type { LlmGatewayPort } from '../../business/ports/llm.port';
 import type { StoragePort } from '../../business/ports/storage.port';
@@ -155,7 +153,7 @@ export class VisualSceneProcessor {
       // model only for what they cannot solve.
       await this.visuals.update(record.id, { step: 'drawing', fit: plan.fit });
       this.logger.log(
-        `${documentId} ${topicId}: centre "${plan.centre.what}" as ${plan.centre.how}; ${plan.diagramConcept}`,
+        `${documentId} ${topicId}: heart "${plan.centre.what}"; ${plan.beats.length} beats`,
       );
       const pool = materialPool(material);
       const written = await this.llm.visualScript({
@@ -164,13 +162,13 @@ export class VisualSceneProcessor {
         material,
       });
       await this.record(documentId, 'visual_script', written.usage);
-      // The model gave the structure; the app places it, then mends what
-      // placing alone cannot settle.
-      let structure: VisualStructure = written.value;
-      let script: VisualScript = repairVisual(layoutScene(structure));
+      // The model gave the tutorial; the app lays every card out, then
+      // mends what laying out alone cannot settle.
+      let tutorial: VisualTutorial = written.value;
+      let script: VisualScript = repairVisual(layoutTutorial(tutorial));
       let problems = [
-        ...structureProblems(structure),
-        ...this.problemsOf(script, pool, plan.centre),
+        ...tutorialProblems(tutorial, pool),
+        ...this.problemsOf(script),
       ];
       for (
         let round = 0;
@@ -181,16 +179,16 @@ export class VisualSceneProcessor {
           plan,
           topicTitle: topic.title,
           material,
-          previous: structure,
+          previous: tutorial,
           // The warnings ride along as advice; only the problems must go.
           problems: [...problems, ...visualWarnings(script)],
         });
         await this.record(documentId, 'visual_repair', mended.usage);
-        structure = mended.value;
-        script = repairVisual(layoutScene(structure));
+        tutorial = mended.value;
+        script = repairVisual(layoutTutorial(tutorial));
         problems = [
-          ...structureProblems(structure),
-          ...this.problemsOf(script, pool, plan.centre),
+          ...tutorialProblems(tutorial, pool),
+          ...this.problemsOf(script),
         ];
       }
       if (problems.length) {
@@ -303,32 +301,11 @@ export class VisualSceneProcessor {
     }
   }
 
-  private problemsOf(
-    script: VisualScript,
-    pool: Set<string>,
-    centre?: VisualPlan['centre'],
-  ): string[] {
+  /** What is wrong with the laid-out scene; the words were checked on the tutorial itself. */
+  private problemsOf(script: VisualScript): string[] {
     const warnings = visualWarnings(script);
     if (warnings.length) this.logger.log(warnings.join(' '));
-    // The plan asked for a picture at the centre: a scene that boxed it
-    // instead is sent back to use the library.
-    const drawn = script.elements.some(
-      (e) => e.type === 'shape' && e.kind !== 'roundRect' && e.kind !== 'rect',
-    );
-    const wanted =
-      centre?.how === 'picture' &&
-      centre.picture &&
-      PRESET_INFO[centre.picture] &&
-      !drawn
-        ? [
-            `The plan puts "${centre.what}" at the centre as the picture "${centre.picture}" from the library, but the centre item is not a picture. Make the centre item kind "picture" with picture "${centre.picture}".`,
-          ]
-        : [];
-    return [
-      ...wanted,
-      ...visualProblems(script, pool),
-      ...layoutProblems(script),
-    ];
+    return [...visualProblems(script, null), ...layoutProblems(script)];
   }
 
   /** The chapter's pages, each its simplified note when written, else its own text. */

@@ -185,7 +185,7 @@ export interface LectureBoardDraft {
 
 /** A figure before layout: nodes, edges, groups, each citing the script. */
 import type { VisualPlan } from '../domain/visual';
-import type { VisualStructure } from '../domain/visual-layout';
+import type { VisualTutorial } from '../domain/visual-cards';
 import type { SketchDraft, SketchTemplate } from '../domain/sketch';
 export type { SketchDraft, SketchTemplate } from '../domain/sketch';
 
@@ -480,9 +480,9 @@ export interface LlmGatewayPort {
     plan: VisualPlan;
     topicTitle: string;
     material: string;
-    previous?: VisualStructure;
+    previous?: VisualTutorial;
     problems?: string[];
-  }): Promise<LlmResult<VisualStructure>>;
+  }): Promise<LlmResult<VisualTutorial>>;
 
   lectureSketch(input: {
     topicTitle: string;

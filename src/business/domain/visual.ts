@@ -20,7 +20,7 @@ import type { SpokenForm } from './spoken';
 import { measureText } from './visual-font';
 import { PRESET_SHAPES, type PresetShape } from './visual-presets';
 
-export const VISUAL_GENERATOR_VERSION = 'visual-1';
+export const VISUAL_GENERATOR_VERSION = 'visual-2';
 
 export const VISUAL_SPACE = { w: 360, h: 270 } as const;
 /** Nothing sits closer than this to an edge. */
@@ -29,15 +29,16 @@ export const VISUAL_MARGIN = 12;
 export const VISUAL_GAP = 10;
 export const VISUAL_LIMITS = {
   minElements: 1,
-  maxElements: 24,
+  /** A tutorial is many moments, each a few parts. */
+  maxElements: 200,
   minSegments: 3,
-  maxSegments: 14,
-  maxCuesPerSegment: 8,
+  maxSegments: 48,
+  maxCuesPerSegment: 12,
   minWordsPerSegment: 4,
-  maxWordsPerSegment: 30,
+  maxWordsPerSegment: 36,
   minWords: 60,
-  maxWords: 330,
-  maxLabelChars: 40,
+  maxWords: 720,
+  maxLabelChars: 64,
   maxChipChars: 22,
   maxVisible: 12,
   maxDots: 40,
@@ -159,9 +160,15 @@ export type VisualElement =
       x: number;
       y: number;
       text: string;
-      size?: 'sm' | 'md' | 'lg' | 'xl';
+      /** eyebrow: small caps with a dot each side; huge: one big figure. */
+      size?: 'sm' | 'md' | 'lg' | 'xl' | 'eyebrow' | 'huge';
       color?: VisualColor;
       anchor?: 'start' | 'middle' | 'end';
+      /** Words of the text drawn in the accent colour. */
+      emphasis?: string[];
+      accent?: VisualColor;
+      /** A tick before the text, for an item in a list. */
+      tick?: boolean;
     }
   | {
       id: string;
@@ -170,6 +177,33 @@ export type VisualElement =
       y: number;
       text: string;
       color?: VisualColor;
+      /** A small picture from the library at the chip's left. */
+      icon?: string;
+    }
+  | {
+      id: string;
+      type: 'bar';
+      x: number;
+      y: number;
+      w: number;
+      /** How much of the bar is filled, zero to one. */
+      value: number;
+      color?: VisualColor;
+      /** Small text above the bar, left and right. */
+      left?: string;
+      right?: string;
+      /** Ticks below the bar, at a fraction of its width. */
+      markers?: { at: number; text: string }[];
+    }
+  | {
+      id: string;
+      type: 'bubble';
+      x: number;
+      y: number;
+      text: string;
+      color?: VisualColor;
+      /** Which way the tail points. */
+      tail?: 'left' | 'right';
     }
   | {
       id: string;
@@ -634,7 +668,29 @@ export interface Box {
 }
 
 /** Type sizes in design units, matching the client's. */
-export const LABEL_SIZE = { sm: 10, md: 12, lg: 15, xl: 19 } as const;
+export const LABEL_SIZE = {
+  sm: 10,
+  md: 12,
+  lg: 15,
+  xl: 19,
+  eyebrow: 8.5,
+  huge: 34,
+} as const;
+/** An eyebrow is set in capitals with letter spacing, and a dot each side. */
+export const EYEBROW_SPREAD = 1.32;
+export const EYEBROW_DOTS = 26;
+/** The tick before a list item, and the room it takes. */
+export const TICK_ROOM = 16;
+/** The bar: its own height, and the markers below it. */
+export const BAR_HEIGHT = 16;
+export const BAR_MARKER_ROOM = 24;
+export const BAR_CAPTION_ROOM = 14;
+/** A speech bubble's text size, padding and tail. */
+export const BUBBLE_TEXT_SIZE = 11.5;
+export const BUBBLE_PAD = 22;
+export const BUBBLE_HEIGHT = 26;
+export const BUBBLE_TAIL = 9;
+export const CHIP_ICON_ROOM = 20;
 export const CHIP_HEIGHT = 26;
 export const CHIP_TEXT_SIZE = 12.5;
 export const CHIP_PAD = 24;
@@ -648,16 +704,36 @@ export function textWidth(text: string, size: number, bold = false): number {
   return Math.round(measureText(text, size, bold ? 700 : 600));
 }
 
+/** A label's width as drawn: capitals spread out for an eyebrow, a tick's room for an item. */
+export function labelWidth(
+  element: Extract<VisualElement, { type: 'label' }>,
+): number {
+  const kind = element.size ?? 'md';
+  const size = LABEL_SIZE[kind];
+  if (kind === 'eyebrow')
+    return (
+      Math.round(
+        textWidth(element.text.toUpperCase(), size, true) * EYEBROW_SPREAD,
+      ) + EYEBROW_DOTS
+    );
+  const heavy = kind === 'lg' || kind === 'xl' || kind === 'huge';
+  return textWidth(element.text, size, heavy) + (element.tick ? TICK_ROOM : 0);
+}
+
+/** A chip's width: its text with padding, and room for an icon. */
+export function chipWidthOf(text: string, icon = false): number {
+  return (
+    Math.max(CHIP_MIN_WIDTH, textWidth(text, CHIP_TEXT_SIZE, true) + CHIP_PAD) +
+    (icon ? CHIP_ICON_ROOM : 0)
+  );
+}
+
 /** The bounding box of an element, or null for a line or an arrow, which are not boxes. */
 export function boxOf(element: VisualElement): Box | null {
   switch (element.type) {
     case 'label': {
       const size = LABEL_SIZE[element.size ?? 'md'];
-      const w = textWidth(
-        element.text,
-        size,
-        element.size === 'lg' || element.size === 'xl',
-      );
+      const w = labelWidth(element);
       const left =
         element.anchor === 'start'
           ? element.x
@@ -667,15 +743,31 @@ export function boxOf(element: VisualElement): Box | null {
       return { x: left, y: element.y - size * 0.7, w, h: size * 1.4 };
     }
     case 'chip': {
-      const w = Math.max(
-        CHIP_MIN_WIDTH,
-        textWidth(element.text, CHIP_TEXT_SIZE, true) + CHIP_PAD,
-      );
+      const w = chipWidthOf(element.text, Boolean(element.icon));
       return {
         x: element.x - w / 2,
         y: element.y - CHIP_HEIGHT / 2,
         w,
         h: CHIP_HEIGHT,
+      };
+    }
+    case 'bar': {
+      const above = element.left || element.right ? BAR_CAPTION_ROOM : 0;
+      const below = element.markers?.length ? BAR_MARKER_ROOM : 0;
+      return {
+        x: element.x - element.w / 2,
+        y: element.y - BAR_HEIGHT / 2 - above,
+        w: element.w,
+        h: BAR_HEIGHT + above + below,
+      };
+    }
+    case 'bubble': {
+      const w = textWidth(element.text, BUBBLE_TEXT_SIZE, true) + BUBBLE_PAD;
+      return {
+        x: element.x - w / 2,
+        y: element.y - BUBBLE_HEIGHT / 2,
+        w,
+        h: BUBBLE_HEIGHT + BUBBLE_TAIL,
       };
     }
     case 'shape':

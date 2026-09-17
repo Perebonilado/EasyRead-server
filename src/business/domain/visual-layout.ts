@@ -93,7 +93,7 @@ export function pictureBox(
   return { w, h: Math.round(w / aspect) };
 }
 
-function chipWidth(text: string): number {
+export function chipWidth(text: string): number {
   return Math.max(
     CHIP_MIN_WIDTH,
     textWidth(text, CHIP_TEXT_SIZE, true) + CHIP_PAD,
@@ -119,14 +119,14 @@ const SMALL_PICTURE = 46;
 /** The suffix on the id of the small name label under a picture. */
 export const NAME = '_name';
 /** Room between steps in a row, enough for an arrow to be seen. */
-const STEP_GAP = 30;
+const STEP_GAP = 26;
 
 /**
  * Places one item at a centre point as the elements it becomes: a chip,
  * a label, a picture (with its name in a small label under it when it has
  * one), or dots scattered in the centre's box.
  */
-function place(
+export function place(
   item: StructureItem,
   cx: number,
   cy: number,
@@ -442,7 +442,7 @@ export function structureProblems(structure: VisualStructure): string[] {
 }
 
 /** Evenly spaced centres for `n` things along a span from `from` to `to`. */
-function spread(n: number, from: number, to: number): number[] {
+export function spread(n: number, from: number, to: number): number[] {
   if (n <= 1) return [Math.round((from + to) / 2)];
   const step = (to - from) / (n - 1);
   return Array.from({ length: n }, (_, i) => Math.round(from + i * step));
@@ -750,9 +750,14 @@ function layoutCompare(structure: VisualStructure): VisualElement[] {
   const spare = Math.max(0, W - 2 * M - lw - rw);
   const lx = Math.round(M + spare / 3 + lw / 2);
   const rx = Math.round(W - M - spare / 3 - rw / 2);
+  // A side's label heads its column; the rest stack below it.
   const column = (list: StructureItem[], x: number) => {
-    const ys = stackYs(list, SMALL_PICTURE, top, bottom);
-    list.forEach((item, i) =>
+    const head = list.find((i) => i.kind === 'label');
+    const rest = list.filter((i) => i !== head);
+    if (head) out.push(...place(head, x, top + 14, 0));
+    const from = head ? top + 36 : top;
+    const ys = stackYs(rest, SMALL_PICTURE, from, bottom);
+    rest.forEach((item, i) =>
       out.push(...place(item, x, ys[i], SMALL_PICTURE)),
     );
   };

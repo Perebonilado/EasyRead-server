@@ -20,7 +20,7 @@ import type {
   SketchTemplate,
 } from '../../../business/ports/llm.port';
 import type { VisualPlan } from '../../../business/domain/visual';
-import type { VisualStructure } from '../../../business/domain/visual-layout';
+import type { VisualTutorial } from '../../../business/domain/visual-cards';
 import { presetCatalogue } from '../../../business/domain/visual-presets';
 import { PROMPTS } from '../prompts';
 import { ModelRegistry, type ModelRef } from './models';
@@ -35,7 +35,7 @@ import {
   lectureDiagramSchema,
   lectureSketchSchema,
   visualPlanSchema,
-  visualStructureSchema,
+  visualTutorialSchema,
   sketchJudgeSchema,
   lectureExtraSchema,
   spokenQuizSchema,
@@ -714,9 +714,9 @@ export class AiSdkLlmAdapter implements LlmGatewayPort, OnModuleInit {
     plan: VisualPlan;
     topicTitle: string;
     material: string;
-    previous?: VisualStructure;
+    previous?: VisualTutorial;
     problems?: string[];
-  }): Promise<LlmResult<VisualStructure>> {
+  }): Promise<LlmResult<VisualTutorial>> {
     const started = Date.now();
     const { generateObject } = await this.registry.modules();
     const mending = Boolean(input.previous && input.problems?.length);
@@ -725,28 +725,28 @@ export class AiSdkLlmAdapter implements LlmGatewayPort, OnModuleInit {
     );
     const result = await generateObject({
       model,
-      schema: visualStructureSchema,
+      schema: visualTutorialSchema,
       system: `${PROMPTS.visualScript}\n\nThe library of drawn things, name and the words a chapter uses for it:\n${presetCatalogue()}`,
-      // A whole scene is a long object; the default ceiling cut one short.
-      maxOutputTokens: 8_000,
+      // A whole tutorial is a long object; the default ceiling cut one short.
+      maxOutputTokens: 16_000,
       prompt: [
         `Chapter: ${input.topicTitle}`,
-        `The plan. Goal: ${input.plan.learningGoal}. Key terms: ${input.plan.keyTerms.join(', ')}. The diagram: ${input.plan.diagramConcept}. The centre of the picture: ${input.plan.centre.what}, ${
+        `The plan. Goal: ${input.plan.learningGoal}. Key terms: ${input.plan.keyTerms.join(', ')}. ${
           input.plan.centre.how === 'picture' && input.plan.centre.picture
-            ? `the picture "${input.plan.centre.picture}" from the library`
-            : 'a plain shape with its name, since the chapter is about an idea'
-        }. Beats, in order:\n- ${input.plan.beats.join('\n- ')}`,
+            ? `The thing at the heart of it: ${input.plan.centre.what}, the picture "${input.plan.centre.picture}" from the library.`
+            : `The thing at the heart of it: ${input.plan.centre.what}.`
+        } Beats, in order, each a section of the tutorial:\n- ${input.plan.beats.join('\n- ')}`,
         mending
-          ? `\nMend this script. Problems:\n- ${input.problems!.join('\n- ')}\n\nThe script:\n${JSON.stringify(input.previous)}`
+          ? `\nMend this tutorial. Problems:\n- ${input.problems!.join('\n- ')}\n\nThe tutorial:\n${JSON.stringify(input.previous)}`
           : null,
-        `\nThe chapter, which every label, chip, shape text and sentence must be built from:\n${input.material}`,
+        `\nThe chapter, which the narration and every card's words must be built from:\n${input.material}`,
       ]
         .filter(Boolean)
         .join('\n'),
       maxRetries: this.maxRetries(),
     });
     return {
-      value: withoutNulls(result.object) as VisualStructure,
+      value: withoutNulls(result.object) as VisualTutorial,
       usage: this.usage(ref, result.usage, started),
     };
   }

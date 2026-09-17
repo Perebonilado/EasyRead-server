@@ -19,7 +19,7 @@ import type {
   SketchTemplate,
 } from '../../business/ports/llm.port';
 import type { VisualPlan } from '../../business/domain/visual';
-import type { VisualStructure } from '../../business/domain/visual-layout';
+import type { VisualTutorial } from '../../business/domain/visual-cards';
 
 const EMBED_DIMENSIONS = 256;
 
@@ -552,9 +552,9 @@ export class FakeLlmAdapter implements LlmGatewayPort {
     plan: VisualPlan;
     topicTitle: string;
     material: string;
-    previous?: VisualStructure;
+    previous?: VisualTutorial;
     problems?: string[];
-  }): Promise<LlmResult<VisualStructure>> {
+  }): Promise<LlmResult<VisualTutorial>> {
     const started = Date.now();
     if (input.previous) {
       return Promise.resolve({
@@ -564,69 +564,53 @@ export class FakeLlmAdapter implements LlmGatewayPort {
     }
     const terms = input.plan.keyTerms.slice(0, 3);
     const chip = (i: number) => (terms[i] ?? `part ${i + 1}`).slice(0, 22);
-    const structure: VisualStructure = {
+    const tutorial: VisualTutorial = {
       title: input.topicTitle.slice(0, 60),
-      template: 'hub',
-      items: [
-        {
-          id: 'centre',
-          role: 'centre',
-          kind: 'picture',
-          text: chip(0),
-          picture: 'document',
-          color: 'blue',
-        },
-        {
-          id: 'left',
-          role: 'input',
-          kind: 'chip',
-          text: chip(1),
-          color: 'green',
-        },
-        {
-          id: 'right',
-          role: 'output',
-          kind: 'chip',
-          text: chip(2),
-          color: 'amber',
-        },
+      sentences: [
+        'Here is the idea at the heart of this chapter, and why it is worth a few minutes of your time.',
+        'We will take it one piece at a time, so that each part makes sense before the next one comes.',
+        'The first thing to know is what feeds into it, and the second is what comes out the other side.',
+        'Keep those two ends in mind, because everything in between exists to turn one into the other.',
+        'In the middle sits the part the chapter keeps coming back to, the one that does the work.',
+        'Once you see how the middle connects the two ends, the rest of the chapter reads itself.',
+        'That is the shape of it, from what goes in to what comes out, with one thing in between.',
+        'So in one line, the chapter is about how one thing turns into another through the part in the middle.',
       ],
-      arrows: [
-        { id: 'in', from: 'left', to: 'centre', color: 'green' },
-        { id: 'out', from: 'centre', to: 'right', color: 'amber' },
-      ],
-      segments: [
+      moments: [
         {
-          text: 'Here is the idea at the centre of this chapter, drawn as one picture.',
-          cues: [{ at: 4, do: 'draw', target: 'centre' }],
+          from: 0,
+          to: 1,
+          card: 'title',
+          eyebrow: 'the idea',
+          heading: input.topicTitle.slice(0, 40),
         },
         {
-          text: 'On the left is what feeds into it, and an arrow carries it across.',
-          cues: [
-            { at: 1, do: 'fade', target: 'left' },
-            { at: 8, do: 'draw', target: 'in' },
-            { at: 10, do: 'flow', target: 'in' },
-          ],
+          from: 2,
+          to: 3,
+          card: 'chips',
+          heading: 'The two ends',
+          items: [{ text: chip(1) }, { text: chip(2) }],
+          reveals: [{ part: 1, sentence: 2, word: 15 }],
         },
         {
-          text: 'On the right is what comes out of it, which the second arrow shows.',
-          cues: [
-            { at: 1, do: 'fade', target: 'right' },
-            { at: 9, do: 'draw', target: 'out' },
-          ],
+          from: 4,
+          to: 5,
+          card: 'hub',
+          centre: { text: chip(0), picture: 'document' },
+          inputs: [{ text: chip(1) }],
+          outputs: [{ text: chip(2) }],
         },
         {
-          text: 'The centre is the part to remember, so it pulses once more here.',
-          cues: [{ at: 1, do: 'pulse', target: 'centre' }],
-        },
-        {
-          text: 'That is the shape of the chapter in one picture, from left to right.',
-          cues: [{ at: 8, do: 'highlight', target: 'centre' }],
+          from: 6,
+          to: 7,
+          card: 'statement',
+          text: 'One thing turns into another.',
+          emphasis: ['another'],
         },
       ],
     };
     return Promise.resolve({
-      value: structure,
+      value: tutorial,
       usage: this.usage(started, 800, 600),
     });
   }

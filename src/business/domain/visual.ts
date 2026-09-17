@@ -1077,13 +1077,21 @@ function unblocked(script: VisualScript): VisualElement[] {
           .map((other) => boxOf(byId.get(other)!))
           .filter((b): b is Box => Boolean(b));
         const original = { x: word.x, y: word.y ?? 0 };
+        const up = box.h + VISUAL_GAP;
+        const side = box.w / 2 + VISUAL_GAP;
         const steps = [
-          [0, -(box.h + VISUAL_GAP)],
-          [0, box.h + VISUAL_GAP],
-          [0, -2 * (box.h + VISUAL_GAP)],
-          [0, 2 * (box.h + VISUAL_GAP)],
-          [-(box.w / 2 + VISUAL_GAP), 0],
-          [box.w / 2 + VISUAL_GAP, 0],
+          [0, -up],
+          [0, up],
+          [-side, 0],
+          [side, 0],
+          [-side, -up],
+          [side, -up],
+          [-side, up],
+          [side, up],
+          [0, -2 * up],
+          [0, 2 * up],
+          [-2 * side, 0],
+          [2 * side, 0],
         ];
         for (const [dx, dy] of steps) {
           word.x = round(original.x + dx);
@@ -1111,8 +1119,8 @@ function unblocked(script: VisualScript): VisualElement[] {
   return elements;
 }
 
-/** The bends tried, in order, for an arrow that runs through a word. */
-const BENDS = [16, -16, 30, -30, 40, -40];
+/** The bends tried, in order, for an arrow that runs through a word; the mender may bend further than the model. */
+const BENDS = [16, -16, 30, -30, 40, -40, 55, -55];
 
 /**
  * An arrow through a label or chip is bent until it clears them, the

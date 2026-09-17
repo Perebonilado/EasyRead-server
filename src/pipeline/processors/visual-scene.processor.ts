@@ -16,6 +16,7 @@ import {
   timeVisual,
   visualProblems,
   visualWarnings,
+  type VisualPlan,
   type VisualScript,
 } from '../../business/domain/visual';
 import type { AlignerPort } from '../../business/ports/aligner.port';
@@ -147,6 +148,9 @@ export class VisualSceneProcessor {
       // Script, mended until sound: the deterministic fixes first, the
       // model only for what they cannot solve.
       await this.visuals.update(record.id, { step: 'drawing', fit: plan.fit });
+      this.logger.log(
+        `${documentId} ${topicId}: centre "${plan.centre.what}" as ${plan.centre.how}; ${plan.diagramConcept}`,
+      );
       const pool = materialPool(material);
       const written = await this.llm.visualScript({
         plan,
@@ -155,7 +159,7 @@ export class VisualSceneProcessor {
       });
       await this.record(documentId, 'visual_script', written.usage);
       let script: VisualScript = repairVisual(written.value);
-      let problems = this.problemsOf(script, pool);
+      let problems = this.problemsOf(script, pool, plan.centre);
       for (
         let round = 0;
         problems.length && round < REPAIR_ROUNDS;
@@ -171,7 +175,7 @@ export class VisualSceneProcessor {
         });
         await this.record(documentId, 'visual_repair', mended.usage);
         script = repairVisual(mended.value);
-        problems = this.problemsOf(script, pool);
+        problems = this.problemsOf(script, pool, plan.centre);
       }
       if (problems.length) {
         this.logger.warn(
@@ -283,10 +287,29 @@ export class VisualSceneProcessor {
     }
   }
 
-  private problemsOf(script: VisualScript, pool: Set<string>): string[] {
+  private problemsOf(
+    script: VisualScript,
+    pool: Set<string>,
+    centre?: VisualPlan['centre'],
+  ): string[] {
     const warnings = visualWarnings(script);
     if (warnings.length) this.logger.log(warnings.join(' '));
-    return [...visualProblems(script, pool), ...layoutProblems(script)];
+    // The plan asked for the thing itself: a script that boxed it instead
+    // is sent back to draw it.
+    const drawn = script.elements.some(
+      (e) => e.type === 'shape' && e.kind === 'path' && e.d,
+    );
+    const wanted =
+      centre?.how === 'path' && !drawn
+        ? [
+            `The plan puts "${centre.what}" at the centre, drawn as a path of its own, but no shape of kind path is in the script. Draw it: a recognisable outline on the unit square in d, no text inside it, its name in a small label beside it.`,
+          ]
+        : [];
+    return [
+      ...wanted,
+      ...visualProblems(script, pool),
+      ...layoutProblems(script),
+    ];
   }
 
   /** The chapter's pages, each its simplified note when written, else its own text. */

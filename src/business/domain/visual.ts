@@ -426,9 +426,10 @@ export function visualProblems(
         `Sentence ${n} has ${words.length} words; four to thirty are allowed.`,
       );
     }
-    if (/[<>{}[\]*_#`]/.test(segment.text)) {
+    const symbol = /[<>{}[\]*_#`]/.exec(segment.text);
+    if (symbol) {
       problems.push(
-        `Sentence ${n} carries markup or symbols; it is spoken, so plain words only.`,
+        `Sentence ${n} carries the symbol "${symbol[0]}" ("${segment.text.slice(0, 60)}"); it is spoken, so plain words only.`,
       );
     }
     if (segment.cues.length > VISUAL_LIMITS.maxCuesPerSegment) {
@@ -691,7 +692,79 @@ export function layoutProblems(script: VisualScript): string[] {
  * axis of least overlap. Returns a new script; the model's is untouched.
  */
 export function repairVisual(script: VisualScript): VisualScript {
-  const elements = script.elements.map((element) => {
+  const elements = clampAll(script.elements);
+  // Nudge pairs that overlap in any sentence, a few rounds, later one moves.
+  const draft: VisualScript = { ...script, elements };
+  for (let pass = 0; pass < 8; pass += 1) {
+    const map = new Map(draft.elements.map((e) => [e.id, e] as const));
+    let moved = false;
+    for (const visible of visibleAfterEach(draft)) {
+      const ids = [...visible].filter(
+        (id) => map.has(id) && collides(map.get(id)!) && boxOf(map.get(id)!),
+      );
+      for (let i = 0; i < ids.length; i += 1) {
+        for (let j = i + 1; j < ids.length; j += 1) {
+          const a = boxOf(map.get(ids[i])!)!;
+          const b = boxOf(map.get(ids[j])!)!;
+          const o = overlap(a, b);
+          if (o.x <= 4 || o.y <= 4 || contained(a, b)) continue;
+          const mover = map.get(ids[j]) as VisualElement & {
+            x?: number;
+            y?: number;
+          };
+          if (mover.type === 'dots' || mover.x === undefined) continue;
+          // Along the axis of least overlap, away from the other box; and
+          // when that way runs into the edge, the other way, so the clamp
+          // at the end never undoes the nudge.
+          if (o.x < o.y) {
+            const step = o.x + VISUAL_GAP;
+            let dir = b.x + b.w / 2 >= a.x + a.w / 2 ? 1 : -1;
+            if (
+              b.x + dir * step < VISUAL_MARGIN ||
+              b.x + b.w + dir * step > VISUAL_SPACE.w - VISUAL_MARGIN
+            ) {
+              dir = -dir;
+            }
+            mover.x = round(mover.x + dir * step);
+          } else {
+            const step = o.y + VISUAL_GAP;
+            let dir = b.y + b.h / 2 >= a.y + a.h / 2 ? 1 : -1;
+            if (
+              b.y + dir * step < VISUAL_MARGIN ||
+              b.y + b.h + dir * step > VISUAL_SPACE.h - VISUAL_MARGIN
+            ) {
+              dir = -dir;
+            }
+            mover.y = round((mover.y ?? 0) + dir * step);
+          }
+          moved = true;
+        }
+      }
+    }
+    if (!moved) break;
+  }
+  // Cues in word order, and a cue past the sentence's last word lands on
+  // it: the element is still shown, just late, which beats a lost cue.
+  const segments = draft.segments.map((segment) => {
+    const last = Math.max(wordsOf(segment.text).length - 1, 0);
+    return {
+      ...segment,
+      cues: [...segment.cues]
+        .map((cue) => ({
+          ...cue,
+          at: Math.min(Math.max(Math.round(cue.at), 0), last),
+        }))
+        .sort((a, b) => a.at - b.at),
+    };
+  });
+  // A nudge can push a box over the edge; the edge wins, and a box that
+  // then overlaps again is the model's to mend.
+  return { ...draft, elements: clampAll(draft.elements), segments };
+}
+
+/** Every box inside the margin, a unit to spare so rounding cannot put it back over. */
+function clampAll(elements: VisualElement[]): VisualElement[] {
+  return elements.map((element) => {
     const copy = { ...element };
     const box = boxOf(copy);
     if (!box || copy.type === 'dots') return copy;
@@ -714,44 +787,6 @@ export function repairVisual(script: VisualScript): VisualScript {
     }
     return copy;
   });
-  // Nudge pairs that overlap in any sentence, a few rounds, later one moves.
-  const draft: VisualScript = { ...script, elements };
-  for (let pass = 0; pass < 4; pass += 1) {
-    const map = new Map(draft.elements.map((e) => [e.id, e] as const));
-    let moved = false;
-    for (const visible of visibleAfterEach(draft)) {
-      const ids = [...visible].filter(
-        (id) => map.has(id) && collides(map.get(id)!) && boxOf(map.get(id)!),
-      );
-      for (let i = 0; i < ids.length; i += 1) {
-        for (let j = i + 1; j < ids.length; j += 1) {
-          const a = boxOf(map.get(ids[i])!)!;
-          const b = boxOf(map.get(ids[j])!)!;
-          const o = overlap(a, b);
-          if (o.x <= 4 || o.y <= 4 || contained(a, b)) continue;
-          const mover = map.get(ids[j]) as VisualElement & {
-            x?: number;
-            y?: number;
-          };
-          if (mover.type === 'dots' || mover.x === undefined) continue;
-          if (o.x < o.y) {
-            const dir = b.x + b.w / 2 >= a.x + a.w / 2 ? 1 : -1;
-            mover.x = round(mover.x + dir * (o.x + VISUAL_GAP));
-          } else {
-            const dir = b.y + b.h / 2 >= a.y + a.h / 2 ? 1 : -1;
-            mover.y = round((mover.y ?? 0) + dir * (o.y + VISUAL_GAP));
-          }
-          moved = true;
-        }
-      }
-    }
-    if (!moved) break;
-  }
-  const segments = draft.segments.map((segment) => ({
-    ...segment,
-    cues: [...segment.cues].sort((a, b) => a.at - b.at),
-  }));
-  return { ...draft, segments };
 }
 
 // ── Timing ────────────────────────────────────────────────────────────────

@@ -463,7 +463,8 @@ const visualColor = z
   .enum(['green', 'amber', 'blue', 'violet', 'orange', 'red', 'ink', 'muted'])
   .nullable();
 const visualId = z.string().min(1).max(32);
-const visualPoint = z.tuple([z.number(), z.number()]);
+/** A point as an object: strict schema mode takes no tuples; the adapter turns it into the domain's pair. */
+const visualPoint = z.object({ x: z.number(), y: z.number() });
 /** A point, or the id of the element to attach to. */
 const visualEnd = z.union([visualPoint, visualId]);
 

@@ -1193,7 +1193,7 @@ export const PROMPTS = {
       'characters (x, y, text, colour); shape: rect, roundRect, circle,',
       'ellipse, triangle or diamond (x, y, w, h, kind, an optional short',
       'text inside, colour, fill solid outline tint); line and arrow: from',
-      'and to are a point [x, y] or the id of an element to attach to, an',
+      'and to are a point {x, y} or the id of an element to attach to, an',
       'arrow may bend minus forty to forty and may be double; icon: one of',
       'person, people, clock, book, money, heart, building, globe, gear,',
       'bulb, warning, check, question, scale, arrows, star (name, x, y,',

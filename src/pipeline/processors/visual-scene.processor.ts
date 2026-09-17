@@ -172,6 +172,9 @@ export class VisualSceneProcessor {
         problems = this.problemsOf(script, pool);
       }
       if (problems.length) {
+        this.logger.warn(
+          `${documentId} ${topicId}: ${problems.length} problems left after ${REPAIR_ROUNDS} repairs:\n- ${problems.join('\n- ')}`,
+        );
         throw new Error(
           `The scene could not be made sound: ${problems.slice(0, 3).join(' ')}`,
         );

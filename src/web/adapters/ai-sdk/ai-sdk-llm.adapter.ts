@@ -738,7 +738,7 @@ export class AiSdkLlmAdapter implements LlmGatewayPort, OnModuleInit {
       maxRetries: this.maxRetries(),
     });
     return {
-      value: withoutNulls(result.object) as VisualScript,
+      value: withPairs(withoutNulls(result.object)) as VisualScript,
       usage: this.usage(ref, result.usage, started),
     };
   }
@@ -1705,6 +1705,29 @@ export class AiSdkLlmAdapter implements LlmGatewayPort, OnModuleInit {
       .filter(Boolean)
       .map((paragraph) => ({ type: 'paragraph' as const, text: paragraph }));
   }
+}
+
+/**
+ * The scene's points come back as {x, y} objects, since strict schema mode
+ * takes no tuples; the domain wants [x, y] pairs. Ends and dots alike.
+ */
+function withPairs(script: unknown): unknown {
+  const pair = (value: unknown): unknown =>
+    value && typeof value === 'object' && 'x' in value && 'y' in value
+      ? [(value as { x: number }).x, (value as { y: number }).y]
+      : value;
+  const scene = script as { elements?: Record<string, unknown>[] };
+  return {
+    ...scene,
+    elements: (scene.elements ?? []).map((element) => ({
+      ...element,
+      ...('from' in element ? { from: pair(element.from) } : {}),
+      ...('to' in element ? { to: pair(element.to) } : {}),
+      ...(Array.isArray(element.points)
+        ? { points: element.points.map(pair) }
+        : {}),
+    })),
+  };
 }
 
 /**

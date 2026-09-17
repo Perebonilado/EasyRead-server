@@ -710,8 +710,10 @@ export function arrowSamples(
   const dx = to[0] - from[0];
   const dy = to[1] - from[1];
   const len = Math.hypot(dx, dy) || 1;
-  const cx = mx + (-dy / len) * bend * 2;
-  const cy = my + (dx / len) * bend * 2;
+  // The bow is capped by the arrow's length, so a short arrow never curls.
+  const bow = Math.sign(bend) * Math.min(Math.abs(bend) * 2, len * 0.6);
+  const cx = mx + (-dy / len) * bow;
+  const cy = my + (dx / len) * bow;
   // The middle of the arrow only: a chip beside the thing an arrow points
   // at sits near the arrow's end by design, and is not in its way.
   const points: VisualPoint[] = [];

@@ -453,9 +453,14 @@ export function visualProblems(
         `Sentence ${n} carries the symbol "${symbol[0]}" ("${segment.text.slice(0, 60)}"); it is spoken, so plain words only.`,
       );
     }
-    if (segment.cues.length > VISUAL_LIMITS.maxCuesPerSegment) {
+    // Dims and undims are housekeeping, some of them added by the mender;
+    // the cap is on what a sentence makes happen.
+    const busy = segment.cues.filter(
+      (cue) => cue.do !== 'dim' && cue.do !== 'undim',
+    ).length;
+    if (busy > VISUAL_LIMITS.maxCuesPerSegment) {
       problems.push(
-        `Sentence ${n} has ${segment.cues.length} cues; at most ${VISUAL_LIMITS.maxCuesPerSegment}.`,
+        `Sentence ${n} has ${busy} cues; at most ${VISUAL_LIMITS.maxCuesPerSegment}.`,
       );
     }
     let lastAt = -1;
@@ -707,8 +712,10 @@ export function arrowSamples(
   const len = Math.hypot(dx, dy) || 1;
   const cx = mx + (-dy / len) * bend * 2;
   const cy = my + (dx / len) * bend * 2;
+  // The middle of the arrow only: a chip beside the thing an arrow points
+  // at sits near the arrow's end by design, and is not in its way.
   const points: VisualPoint[] = [];
-  for (let i = 1; i < 12; i += 1) {
+  for (let i = 2; i < 11; i += 1) {
     const t = i / 12;
     const a = (1 - t) * (1 - t);
     const b = 2 * (1 - t) * t;
@@ -942,11 +949,88 @@ export function repairVisual(script: VisualScript): VisualScript {
   // A nudge can push a box over the edge; the edge wins, and a box that
   // then overlaps again is the model's to mend.
   const placed = clampAll(draft.elements);
+  const withBends = bent({ ...draft, elements: placed, segments });
   return {
     ...draft,
-    elements: bent({ ...draft, elements: placed, segments }),
+    elements: unblocked({ ...draft, elements: withBends, segments }),
     segments,
   };
+}
+
+/** Whether an arrow's middle passes through a box, with a little room. */
+function through(samples: VisualPoint[], box: Box): boolean {
+  return samples.some(
+    ([x, y]) =>
+      x > box.x - 2 &&
+      x < box.x + box.w + 2 &&
+      y > box.y - 2 &&
+      y < box.y + box.h + 2,
+  );
+}
+
+/**
+ * A word an arrow still runs through after the bends is moved out of its
+ * way: up or down, then sideways, by a step or two, to the first spot
+ * inside the margin, clear of that arrow and on no other lit box. A word
+ * with no such spot is left for the model.
+ */
+function unblocked(script: VisualScript): VisualElement[] {
+  const elements = script.elements.map((e) => ({ ...e }));
+  const byId = new Map(elements.map((e) => [e.id, e] as const));
+  const visible = visibleAfterEach(script);
+  for (const arrow of elements) {
+    if (arrow.type !== 'line' && arrow.type !== 'arrow') continue;
+    const owns = new Set(
+      [arrow.from, arrow.to].filter((e) => typeof e === 'string'),
+    );
+    for (const ids of visible) {
+      if (!ids.has(arrow.id)) continue;
+      for (const id of ids) {
+        const word = byId.get(id) as VisualElement & {
+          x?: number;
+          y?: number;
+        };
+        if (!word || owns.has(id) || word.x === undefined) continue;
+        if (word.type !== 'label' && word.type !== 'chip') continue;
+        const box = boxOf(word);
+        if (!box || !through(arrowSamples(arrow, byId), box)) continue;
+        const others = [...ids]
+          .filter((other) => other !== id && collides(byId.get(other)!))
+          .map((other) => boxOf(byId.get(other)!))
+          .filter((b): b is Box => Boolean(b));
+        const original = { x: word.x, y: word.y ?? 0 };
+        const steps = [
+          [0, -(box.h + VISUAL_GAP)],
+          [0, box.h + VISUAL_GAP],
+          [0, -2 * (box.h + VISUAL_GAP)],
+          [0, 2 * (box.h + VISUAL_GAP)],
+          [-(box.w / 2 + VISUAL_GAP), 0],
+          [box.w / 2 + VISUAL_GAP, 0],
+        ];
+        for (const [dx, dy] of steps) {
+          word.x = round(original.x + dx);
+          word.y = round(original.y + dy);
+          const moved = boxOf(word)!;
+          const inside =
+            moved.x >= VISUAL_MARGIN &&
+            moved.y >= VISUAL_MARGIN &&
+            moved.x + moved.w <= VISUAL_SPACE.w - VISUAL_MARGIN &&
+            moved.y + moved.h <= VISUAL_SPACE.h - VISUAL_MARGIN;
+          const clear =
+            inside &&
+            !through(arrowSamples(arrow, byId), moved) &&
+            others.every((o) => {
+              const ov = overlap(moved, o);
+              return ov.x <= 4 || ov.y <= 4 || contained(moved, o);
+            });
+          if (clear) break;
+          word.x = original.x;
+          word.y = original.y;
+        }
+      }
+    }
+  }
+  return elements;
 }
 
 /** The bends tried, in order, for an arrow that runs through a word. */

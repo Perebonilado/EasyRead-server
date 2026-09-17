@@ -544,12 +544,10 @@ export class LectureChapterProcessor {
     this.logger.log(
       `${job.documentId} ${style}: ${short.length} page${short.length === 1 ? '' : 's'} left paragraphs untaught; pass ${pass + 1} of ${MAX_COVERAGE_PASSES} in ${COVERAGE_PASS_MS / 1000}s`,
     );
-    await this.lectures.resetUntaughtSegments(
-      job.documentId,
-      job.contentVersion,
-      [job.topicId],
-      style,
-    );
+    // The job first, the reset second: a worker stopped between the two
+    // then leaves a page with its words and its count, which the next
+    // Prepare picks up, and never a page put back to pending with nothing
+    // coming for it. The pass waits its delay, so the reset lands first.
     await this.queue.enqueueLectureChapters([
       {
         documentId: job.documentId,
@@ -562,6 +560,12 @@ export class LectureChapterProcessor {
         delayMs: COVERAGE_PASS_MS,
       },
     ]);
+    await this.lectures.resetUntaughtSegments(
+      job.documentId,
+      job.contentVersion,
+      [job.topicId],
+      style,
+    );
   }
 
   /**

@@ -353,8 +353,29 @@ export class LectureChapterProcessor {
     // model call is made, and the other styles' pages are the fallback
     // for continuity when this style starts mid-chapter.
     const all = await this.lectures.listSegments(documentId, contentVersion);
+    // A part exists only with its words: it is seeded once its page is
+    // written and runs long. A part row without words is one whose page
+    // was put back and written again shorter; nothing ever comes back for
+    // it, so it goes here rather than hold the lecture at 99 for ever.
+    const stale = all.filter(
+      (row) =>
+        row.topicId === topicId &&
+        row.style === style &&
+        row.kind === 'part' &&
+        !row.scriptText,
+    );
+    for (const row of stale) {
+      await this.lectures.removeSegment({
+        documentId,
+        contentVersion,
+        pageNumber: row.pageNumber,
+        style,
+        kind: 'part',
+      });
+    }
     const mine = all.filter(
-      (row) => row.topicId === topicId && row.style === style,
+      (row) =>
+        row.topicId === topicId && row.style === style && !stale.includes(row),
     );
     const rows = mine.filter((row) => row.kind === 'page');
     // The short segments this style gets around the chapter (the words
@@ -523,12 +544,10 @@ export class LectureChapterProcessor {
     this.logger.log(
       `${job.documentId} ${style}: ${short.length} page${short.length === 1 ? '' : 's'} left paragraphs untaught; pass ${pass + 1} of ${MAX_COVERAGE_PASSES} in ${COVERAGE_PASS_MS / 1000}s`,
     );
-    await this.lectures.resetUntaughtSegments(
-      job.documentId,
-      job.contentVersion,
-      [job.topicId],
-      style,
-    );
+    // The job first, the reset second: a worker stopped between the two
+    // then leaves a page with its words and its count, which the next
+    // Prepare picks up, and never a page put back to pending with nothing
+    // coming for it. The pass waits its delay, so the reset lands first.
     await this.queue.enqueueLectureChapters([
       {
         documentId: job.documentId,
@@ -541,6 +560,12 @@ export class LectureChapterProcessor {
         delayMs: COVERAGE_PASS_MS,
       },
     ]);
+    await this.lectures.resetUntaughtSegments(
+      job.documentId,
+      job.contentVersion,
+      [job.topicId],
+      style,
+    );
   }
 
   /**

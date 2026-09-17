@@ -104,6 +104,14 @@ export class DocumentModel extends BaseModel {
   @Column({ type: DataType.INTEGER, allowNull: false, defaultValue: 0 })
   declare orderIndex: number;
 
+  /** The admin's drop this file arrived in; null on a personal upload. */
+  @Column({ type: DataType.UUID, allowNull: true })
+  declare uploadBatchId: string | null;
+
+  /** When the admin made it visible to the school's students; null is hidden. Personal uploads never set it. */
+  @Column({ type: DataType.DATE, allowNull: true })
+  declare publishedAt: Date | null;
+
   @HasMany(() => DocumentPageModel)
   declare pages?: DocumentPageModel[];
 

@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import { Op } from 'sequelize';
+import { Op, literal } from 'sequelize';
 import { InjectModel } from '@nestjs/sequelize';
 import type {
   BoardStatus,
@@ -395,15 +395,32 @@ export class SequelizeLectureRepository implements LectureRepository {
         error: null,
       },
       {
+        // Pages that left something untaught. A part carries an empty
+        // list, which is not null: matching on null alone once put a
+        // page's second piece back to pending with no words, and nothing
+        // ever comes back for a part.
         where: {
           documentId,
           contentVersion,
           topicId: topicIds,
           style,
-          untaught: { [Op.ne]: null },
+          kind: 'page',
+          [Op.and]: [literal('JSON_LENGTH(untaught) > 0')],
         } as never,
       },
     );
+  }
+
+  async removeSegment(key: SegmentKey): Promise<void> {
+    await this.segments.destroy({
+      where: {
+        documentId: key.documentId,
+        contentVersion: key.contentVersion,
+        pageNumber: key.pageNumber,
+        style: key.style,
+        kind: key.kind ?? 'page',
+      },
+    });
   }
 
   async listShortSegments(): Promise<
@@ -466,6 +483,28 @@ export class SequelizeLectureRepository implements LectureRepository {
       { where: { documentId, contentVersion, status: 'done' } },
     );
     return count;
+  }
+
+  async markSegmentsVoicing(keys: SegmentKey[]): Promise<number> {
+    let changed = 0;
+    for (const key of keys) {
+      const [count] = await this.segments.update(
+        { status: 'voicing', error: null },
+        {
+          where: {
+            documentId: key.documentId,
+            contentVersion: key.contentVersion,
+            pageNumber: key.pageNumber,
+            style: key.style,
+            kind: key.kind ?? 'page',
+            scriptText: { [Op.ne]: null },
+            status: { [Op.notIn]: ['done', 'voicing'] },
+          },
+        },
+      );
+      changed += count;
+    }
+    return changed;
   }
 
   async clear(documentId: string, style?: LectureStyle): Promise<void> {

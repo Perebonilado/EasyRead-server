@@ -33,6 +33,8 @@ const makeDoc = (overrides: Partial<DocumentProps> = {}) =>
     failureReason: null,
     deletedAt: null,
     createdAt: new Date('2026-09-01'),
+    uploadBatchId: null,
+    publishedAt: null,
     institutionId: SCHOOL,
     departmentId: 'medicine',
     levelId: 'year-4',
@@ -97,7 +99,9 @@ function build(doc: Document) {
       return COURSES[id as keyof typeof COURSES] ?? null;
     },
   } as unknown as InstitutionRepository;
-  const handler = new MoveMaterialHandler(documents, institutions);
+  const handler = new MoveMaterialHandler(documents, institutions, {
+    now: () => new Date('2026-09-16T12:00:00Z'),
+  });
   type Body = Omit<
     Parameters<MoveMaterialHandler['handle']>[0],
     'userId' | 'institutionId'

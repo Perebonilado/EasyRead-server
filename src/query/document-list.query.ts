@@ -139,7 +139,10 @@ export class DocumentListQuery {
       where: {
         id: { [Op.in]: ids },
         ...(scope.kind === 'school'
-          ? { institutionId: scope.institutionId }
+          ? {
+              institutionId: scope.institutionId,
+              publishedAt: { [Op.ne]: null },
+            }
           : { userId, institutionId: null }),
         deletedAt: null,
         status: 'ready',

@@ -22,6 +22,8 @@ export interface CreateDocumentInput {
   levelId?: string | null;
   courseId?: string | null;
   contentHash?: string | null;
+  /** The admin's drop this file arrived in. */
+  uploadBatchId?: string | null;
   orderIndex?: number;
 }
 

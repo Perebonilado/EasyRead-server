@@ -57,5 +57,7 @@ export function toDocument(row: DocumentModel): Document {
     courseId: row.courseId ?? null,
     contentHash: row.contentHash ?? null,
     orderIndex: row.orderIndex ?? 0,
+    uploadBatchId: row.uploadBatchId ?? null,
+    publishedAt: row.publishedAt ?? null,
   });
 }

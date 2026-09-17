@@ -35,6 +35,12 @@ export interface SpeechPort {
   }>;
   /** What goes into a file's name so audio from one voice never overwrites another's. */
   label(): { model: string; voice: string };
+  /**
+   * Whether the voice would answer right now. A rented service that sleeps
+   * between runs says no while it is asleep or down; asking wakes it. A
+   * voice that is always on need not answer at all.
+   */
+  ready?(): Promise<boolean>;
 }
 
 /**

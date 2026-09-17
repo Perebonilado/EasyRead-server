@@ -99,9 +99,11 @@ export class CatalogueQuery {
         order: [['orderIndex', 'ASC']] as never,
       }),
       this.documents.findAll({
+        // Published only: what the admin has not released is not here.
         where: {
           institutionId: school.id,
           deletedAt: null,
+          publishedAt: { [Op.ne]: null },
           ...placed,
         } as never,
         order: [

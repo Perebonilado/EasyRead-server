@@ -6,7 +6,7 @@ import {
 } from '../../domain/errors/errors';
 import { DocumentAccessService } from './document-access.service';
 
-const doc = (institutionId: string | null) =>
+const doc = (institutionId: string | null, published = true) =>
   new Document({
     id: 'd1',
     userId: 'admin',
@@ -28,6 +28,9 @@ const doc = (institutionId: string | null) =>
     failureReason: null,
     deletedAt: null,
     createdAt: new Date(),
+    uploadBatchId: null,
+    // A school's document is published in these tests unless one says not.
+    publishedAt: institutionId && published ? new Date() : null,
     institutionId,
     departmentId: null,
     levelId: null,
@@ -62,6 +65,16 @@ describe('who may touch a document', () => {
       Document,
     );
     await expect(access.require('d1', 'stranger')).rejects.toBeInstanceOf(
+      NotFoundError,
+    );
+  });
+
+  it("hides a school's document from every member until the admin publishes it, never from the admin", async () => {
+    const access = service(doc('ur', false), ['student']);
+    await expect(access.require('d1', 'admin')).resolves.toBeInstanceOf(
+      Document,
+    );
+    await expect(access.require('d1', 'student')).rejects.toBeInstanceOf(
       NotFoundError,
     );
   });

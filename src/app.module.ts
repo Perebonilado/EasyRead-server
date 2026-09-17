@@ -175,8 +175,11 @@ import {
   MoveMaterialHandler,
   RemoveMaterialHandler,
   PrepareMaterialsHandler,
+  PublishMaterialsHandler,
+  VoiceMaterialsHandler,
 } from './business/handlers/institutions/materials.handlers';
 import { MaterialsQuery } from './query/materials.query';
+import { BatchesQuery } from './query/batches.query';
 import { CatalogueQuery } from './query/catalogue.query';
 import {
   CreateInstitutionHandler,
@@ -226,6 +229,8 @@ const handlers = [
   ResumeSchoolPassHandler,
   PronunciationHandlers,
   PrepareMaterialsHandler,
+  PublishMaterialsHandler,
+  VoiceMaterialsHandler,
   CreateGroupHandler,
   JoinGroupHandler,
   ListGroupsHandler,
@@ -323,6 +328,7 @@ const handlers = [
 
 const queries = [
   MaterialsQuery,
+  BatchesQuery,
   CatalogueQuery,
   DocumentListQuery,
   DocumentDetailQuery,

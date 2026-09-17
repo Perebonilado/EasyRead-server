@@ -104,7 +104,8 @@ export class DocumentDetailQuery {
 
   private async mayRead(doc: DocumentModel, userId: string): Promise<boolean> {
     if (doc.userId === userId) return true;
-    if (!doc.institutionId) return false;
+    // A school's document, and only once the admin has published it.
+    if (!doc.institutionId || !doc.publishedAt) return false;
     const member = await this.members.count({
       where: { userId, institutionId: doc.institutionId } as never,
     });

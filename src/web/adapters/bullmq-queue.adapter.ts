@@ -131,24 +131,27 @@ export class BullmqQueueAdapter implements JobQueuePort, OnModuleDestroy {
     if (!jobs.length) return;
     const queue = this.queue(QUEUE.lectureChapter);
 
+    // A second pass and a coverage pass have ids of their own: the first
+    // run's finished job would swallow them otherwise. Each waits its
+    // delay in the queue.
+    const idOf = (job: LectureChapterJob) =>
+      lectureChapterJobId(
+        job.documentId,
+        job.topicId,
+        job.contentVersion,
+        job.style,
+      ) +
+      (job.secondPass ? '-again' : '') +
+      (job.coveragePass ? `-cover${job.coveragePass}` : '');
+
     // A chapter asked for again is run again, and only its unwritten pages
     // get written: that is how a page that failed gets another chance. A
-    // finished job of the same id would otherwise swallow the request as a
-    // duplicate. A job still running cannot be removed, and the add below
-    // then dedupes against it, which is exactly right.
+    // finished job of the same id, a pass's as much as a first run's,
+    // would otherwise swallow the request as a duplicate. A job still
+    // running cannot be removed, and the add below then dedupes against
+    // it, which is exactly right.
     await Promise.all(
-      jobs.map((job) =>
-        queue
-          .remove(
-            lectureChapterJobId(
-              job.documentId,
-              job.topicId,
-              job.contentVersion,
-              job.style,
-            ),
-          )
-          .catch(() => undefined),
-      ),
+      jobs.map((job) => queue.remove(idOf(job)).catch(() => undefined)),
     );
 
     await queue.addBulk(
@@ -157,17 +160,7 @@ export class BullmqQueueAdapter implements JobQueuePort, OnModuleDestroy {
         data: job,
         opts: {
           ...this.options(QUEUE.lectureChapter),
-          // A second pass has its own id: the first run's finished job
-          // would swallow it otherwise. It waits its delay in the queue.
-          jobId:
-            lectureChapterJobId(
-              job.documentId,
-              job.topicId,
-              job.contentVersion,
-              job.style,
-            ) +
-            (job.secondPass ? '-again' : '') +
-            (job.coveragePass ? `-cover${job.coveragePass}` : ''),
+          jobId: idOf(job),
           ...(job.delayMs ? { delay: job.delayMs } : {}),
           // Lower is sooner in BullMQ, and zero means "no priority at
           // all" — hence the offset. Chapter one is written first so the

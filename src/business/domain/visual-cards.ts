@@ -660,8 +660,9 @@ export function tutorialProblems(
           `${who}: ${what} names the picture "${picture}", which is not in the library; use a name from the catalogue or none.`,
         );
     };
+    // A heading is a phrase of the model's, like the narration; only the
+    // short names on a card must be the chapter's own words.
     short('the heading', m.heading, L.maxHeadingChars);
-    grounded('the heading', m.heading);
     short('the eyebrow', m.eyebrow, L.maxEyebrowChars);
     const items = m.items ?? [];
     switch (m.card) {

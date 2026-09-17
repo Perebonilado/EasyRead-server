@@ -19,6 +19,7 @@ import type {
   SketchDraft,
   SketchTemplate,
 } from '../../../business/ports/llm.port';
+import type { VisualPlan, VisualScript } from '../../../business/domain/visual';
 import { PROMPTS } from '../prompts';
 import { ModelRegistry, type ModelRef } from './models';
 import {
@@ -31,6 +32,8 @@ import {
   lectureBoardSchema,
   lectureDiagramSchema,
   lectureSketchSchema,
+  visualPlanSchema,
+  visualScriptSchema,
   sketchJudgeSchema,
   lectureExtraSchema,
   spokenQuizSchema,
@@ -676,6 +679,66 @@ export class AiSdkLlmAdapter implements LlmGatewayPort, OnModuleInit {
     });
     return {
       value: result.object,
+      usage: this.usage(ref, result.usage, started),
+    };
+  }
+
+  async visualPlan(input: {
+    title: string;
+    topicTitle: string;
+    material: string;
+  }): Promise<LlmResult<VisualPlan>> {
+    const started = Date.now();
+    const { generateObject } = await this.registry.modules();
+    const { model, ref } = await this.registry.languageModel('visual_plan');
+    const result = await generateObject({
+      model,
+      schema: visualPlanSchema,
+      system: PROMPTS.visualPlan,
+      prompt: [
+        `Document: ${input.title}`,
+        `Chapter: ${input.topicTitle}`,
+        `\nThe chapter, from which every beat and term must come:\n${input.material}`,
+      ].join('\n'),
+      maxRetries: this.maxRetries(),
+    });
+    return {
+      value: result.object,
+      usage: this.usage(ref, result.usage, started),
+    };
+  }
+
+  async visualScript(input: {
+    plan: VisualPlan;
+    topicTitle: string;
+    material: string;
+    previous?: VisualScript;
+    problems?: string[];
+  }): Promise<LlmResult<VisualScript>> {
+    const started = Date.now();
+    const { generateObject } = await this.registry.modules();
+    const mending = Boolean(input.previous && input.problems?.length);
+    const { model, ref } = await this.registry.languageModel(
+      mending ? 'visual_repair' : 'visual_script',
+    );
+    const result = await generateObject({
+      model,
+      schema: visualScriptSchema,
+      system: PROMPTS.visualScript,
+      prompt: [
+        `Chapter: ${input.topicTitle}`,
+        `The plan. Goal: ${input.plan.learningGoal}. Key terms: ${input.plan.keyTerms.join(', ')}. The diagram: ${input.plan.diagramConcept}. Beats, in order:\n- ${input.plan.beats.join('\n- ')}`,
+        mending
+          ? `\nMend this script. Problems:\n- ${input.problems!.join('\n- ')}\n\nThe script:\n${JSON.stringify(input.previous)}`
+          : null,
+        `\nThe chapter, which every label, chip, shape text and sentence must be built from:\n${input.material}`,
+      ]
+        .filter(Boolean)
+        .join('\n'),
+      maxRetries: this.maxRetries(),
+    });
+    return {
+      value: withoutNulls(result.object) as VisualScript,
       usage: this.usage(ref, result.usage, started),
     };
   }
@@ -1642,4 +1705,21 @@ export class AiSdkLlmAdapter implements LlmGatewayPort, OnModuleInit {
       .filter(Boolean)
       .map((paragraph) => ({ type: 'paragraph' as const, text: paragraph }));
   }
+}
+
+/**
+ * A schema in strict mode has every optional field present as null; the
+ * domain wants them absent. Nulls go, at every depth, arrays kept.
+ */
+function withoutNulls(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(withoutNulls);
+  if (value && typeof value === 'object') {
+    const out: Record<string, unknown> = {};
+    for (const [key, inner] of Object.entries(value)) {
+      if (inner === null) continue;
+      out[key] = withoutNulls(inner);
+    }
+    return out;
+  }
+  return value;
 }

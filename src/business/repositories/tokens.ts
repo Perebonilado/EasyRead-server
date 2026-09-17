@@ -33,5 +33,6 @@ export const STRUGGLE_SIGNAL_REPOSITORY = Symbol('STRUGGLE_SIGNAL_REPOSITORY');
 export const PAGE_ASSET_REPOSITORY = Symbol('PAGE_ASSET_REPOSITORY');
 export const ITEM_REPOSITORY = Symbol('ItemRepository');
 export const LECTURE_REPOSITORY = Symbol('LectureRepository');
+export const VISUAL_SCENE_REPOSITORY = Symbol('VisualSceneRepository');
 export const ITEM_REVIEW_REPOSITORY = Symbol('ItemReviewRepository');
 export const PRONUNCIATION_REPOSITORY = Symbol('PronunciationRepository');

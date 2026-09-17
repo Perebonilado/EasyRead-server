@@ -163,6 +163,12 @@ import { ConceptsController } from './web/controllers/concepts.controller';
 import { ReaderController } from './web/controllers/reader.controller';
 import { TutorsController } from './web/controllers/tutors.controller';
 import { LectureController } from './web/controllers/lecture.controller';
+import { VisualsController } from './web/controllers/visuals.controller';
+import {
+  RequestVisualsHandler,
+  VisualSceneHandler,
+  VisualSetHandler,
+} from './business/handlers/documents/visual.handlers';
 import { VoiceController } from './web/controllers/voice.controller';
 import { GuidedController } from './web/controllers/guided.controller';
 import { InstitutionsController } from './web/controllers/institutions.controller';
@@ -280,6 +286,9 @@ const handlers = [
   LectureReviewHandler,
   LectureBoardHandler,
   LectureFollowHandler,
+  VisualSetHandler,
+  RequestVisualsHandler,
+  VisualSceneHandler,
   BackfillBoardsHandler,
   SaveLecturePositionHandler,
   SetLectureStyleHandler,
@@ -374,6 +383,7 @@ const queries = [
     ExportsController,
     VoiceController,
     LectureController,
+    VisualsController,
     GuidedController,
     InstitutionsController,
     AdminInstitutionsController,

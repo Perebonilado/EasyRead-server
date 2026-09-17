@@ -8,6 +8,7 @@ import type {
   LectureAlignJob,
   LectureBoardJob,
   LectureFollowJob,
+  VisualSceneJob,
   LectureChapterJob,
   LectureDiagramJob,
   LectureVoiceJob,
@@ -23,6 +24,7 @@ import {
   lectureAlignJobId,
   lectureBoardJobId,
   lectureFollowJobId,
+  visualSceneJobId,
   lectureChapterJobId,
   lectureDiagramJobId,
   lectureVoiceJobId,
@@ -234,6 +236,12 @@ export class BullmqQueueAdapter implements JobQueuePort, OnModuleDestroy {
           job.contentVersion,
           job.style,
         ),
+    );
+  }
+
+  async enqueueVisualScenes(jobs: VisualSceneJob[]): Promise<void> {
+    await this.enqueueKeyed(QUEUE.visualScene, 'visual-scene', jobs, (job) =>
+      visualSceneJobId(job.documentId, job.topicId, job.contentVersion),
     );
   }
 

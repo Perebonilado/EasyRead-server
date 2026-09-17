@@ -25,6 +25,7 @@ import {
   READING_POSITION_REPOSITORY,
   REFRESH_TOKEN_REPOSITORY,
   LECTURE_REPOSITORY,
+  VISUAL_SCENE_REPOSITORY,
   SIMPLIFIED_PAGE_REPOSITORY,
   SUBSCRIPTION_REPOSITORY,
   SCHOOL_PASS_REPOSITORY,
@@ -75,6 +76,7 @@ import {
 import { SequelizePipelineRunRepository } from '../repositories/sequelize-pipeline.repository';
 import { SequelizeRefreshTokenRepository } from '../repositories/sequelize-refresh-token.repository';
 import { SequelizeLectureRepository } from '../repositories/sequelize-lecture.repository';
+import { SequelizeVisualSceneRepository } from '../repositories/sequelize-visual.repository';
 import { SequelizeSimplifiedPageRepository } from '../repositories/sequelize-simplified-page.repository';
 import { SequelizeUserRepository } from '../repositories/sequelize-user.repository';
 
@@ -97,6 +99,10 @@ export const repositoryProviders: Provider[] = [
     useClass: SequelizeDocumentPageRepository,
   },
   { provide: LECTURE_REPOSITORY, useClass: SequelizeLectureRepository },
+  {
+    provide: VISUAL_SCENE_REPOSITORY,
+    useClass: SequelizeVisualSceneRepository,
+  },
   {
     provide: SIMPLIFIED_PAGE_REPOSITORY,
     useClass: SequelizeSimplifiedPageRepository,

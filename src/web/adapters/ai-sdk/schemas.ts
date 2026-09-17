@@ -449,6 +449,150 @@ export const lectureDiagramSchema = z.object({
 const sketchLabel = z.string().min(1).max(40);
 const fraction = z.number().min(0).max(1);
 
+/** The plan for a visual: what one chapter's scene teaches and whether the chapter suits a picture. */
+export const visualPlanSchema = z.object({
+  learningGoal: z.string().min(1).max(200),
+  keyTerms: z.array(z.string().min(1).max(40)).max(8),
+  diagramConcept: z.string().min(1).max(240),
+  beats: z.array(z.string().min(1).max(160)).min(3).max(10),
+  fit: z.enum(['good', 'partial', 'poor']),
+  fitReason: z.string().max(200).nullable(),
+});
+
+const visualColor = z
+  .enum(['green', 'amber', 'blue', 'violet', 'orange', 'red', 'ink', 'muted'])
+  .nullable();
+const visualId = z.string().min(1).max(32);
+const visualPoint = z.tuple([z.number(), z.number()]);
+/** A point, or the id of the element to attach to. */
+const visualEnd = z.union([visualPoint, visualId]);
+
+/** The scene: what is on the canvas, the spoken sentences, and the cues. Optional fields are null, never absent. */
+export const visualScriptSchema = z.object({
+  title: z.string().min(1).max(60),
+  elements: z
+    .array(
+      z.discriminatedUnion('type', [
+        z.object({
+          type: z.literal('label'),
+          id: visualId,
+          x: z.number(),
+          y: z.number(),
+          text: z.string().min(1).max(40),
+          size: z.enum(['sm', 'md', 'lg', 'xl']).nullable(),
+          color: visualColor,
+          anchor: z.enum(['start', 'middle', 'end']).nullable(),
+        }),
+        z.object({
+          type: z.literal('chip'),
+          id: visualId,
+          x: z.number(),
+          y: z.number(),
+          text: z.string().min(1).max(16),
+          color: visualColor,
+        }),
+        z.object({
+          type: z.literal('shape'),
+          id: visualId,
+          x: z.number(),
+          y: z.number(),
+          w: z.number(),
+          h: z.number(),
+          kind: z.enum([
+            'rect',
+            'roundRect',
+            'circle',
+            'ellipse',
+            'triangle',
+            'diamond',
+          ]),
+          text: z.string().max(16).nullable(),
+          color: visualColor,
+          fill: z.enum(['solid', 'outline', 'tint']).nullable(),
+        }),
+        z.object({
+          type: z.literal('line'),
+          id: visualId,
+          from: visualEnd,
+          to: visualEnd,
+          color: visualColor,
+          dashed: z.boolean().nullable(),
+        }),
+        z.object({
+          type: z.literal('arrow'),
+          id: visualId,
+          from: visualEnd,
+          to: visualEnd,
+          bend: z.number().nullable(),
+          color: visualColor,
+          double: z.boolean().nullable(),
+        }),
+        z.object({
+          type: z.literal('icon'),
+          id: visualId,
+          name: z.enum([
+            'person',
+            'people',
+            'clock',
+            'book',
+            'money',
+            'heart',
+            'building',
+            'globe',
+            'gear',
+            'bulb',
+            'warning',
+            'check',
+            'question',
+            'scale',
+            'arrows',
+            'star',
+          ]),
+          x: z.number(),
+          y: z.number(),
+          size: z.number(),
+          color: visualColor,
+        }),
+        z.object({
+          type: z.literal('dots'),
+          id: visualId,
+          points: z.array(visualPoint).min(1).max(40),
+          r: z.number().nullable(),
+          color: visualColor,
+        }),
+      ]),
+    )
+    .min(1)
+    .max(24),
+  segments: z
+    .array(
+      z.object({
+        text: z.string().min(1).max(300),
+        cues: z
+          .array(
+            z.object({
+              at: z.number().int().min(0),
+              do: z.enum([
+                'draw',
+                'fade',
+                'hide',
+                'dim',
+                'undim',
+                'pulse',
+                'flow',
+                'highlight',
+                'clear',
+              ]),
+              target: z.string().min(1).max(32),
+            }),
+          )
+          .max(8),
+      }),
+    )
+    .min(3)
+    .max(14),
+});
+
 /** The tutor's live sketch: one template, and the fields that template reads; the rest null. */
 export const lectureSketchSchema = z.object({
   template: z.enum(['graph', 'ring', 'line', 'layers', 'grid']),

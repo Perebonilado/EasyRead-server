@@ -1,0 +1,102 @@
+import { Injectable } from '@nestjs/common';
+import { InjectModel } from '@nestjs/sequelize';
+import type { VisualTimeline } from '../../business/domain/visual';
+import type {
+  VisualSceneRecord,
+  VisualSceneRepository,
+} from '../../business/repositories/visual.repository';
+import { VisualSceneModel } from '../database/models';
+import { newId } from '../database/uuid';
+
+function toRecord(row: VisualSceneModel): VisualSceneRecord {
+  return {
+    id: row.id,
+    documentId: row.documentId,
+    topicId: row.topicId,
+    contentVersion: row.contentVersion,
+    generatorVersion: row.generatorVersion,
+    status: row.status,
+    step: row.step ?? null,
+    fit: row.fit ?? null,
+    fitReason: row.fitReason ?? null,
+    error: row.error ?? null,
+    attempts: row.attempts ?? 0,
+    title: row.title ?? null,
+    timeline: (row.timeline as VisualTimeline | null) ?? null,
+    audioKey: row.audioKey ?? null,
+    durationMs: row.durationMs ?? null,
+    requestedBy: row.requestedBy ?? null,
+    updatedAt: (row.get('updatedAt') as Date | undefined) ?? null,
+  };
+}
+
+@Injectable()
+export class SequelizeVisualSceneRepository implements VisualSceneRepository {
+  constructor(
+    @InjectModel(VisualSceneModel)
+    private readonly model: typeof VisualSceneModel,
+  ) {}
+
+  async find(
+    documentId: string,
+    contentVersion: number,
+    topicId: string,
+    generatorVersion: string,
+  ): Promise<VisualSceneRecord | null> {
+    const row = await this.model.findOne({
+      where: { documentId, contentVersion, topicId, generatorVersion },
+    });
+    return row ? toRecord(row) : null;
+  }
+
+  async listByDocument(
+    documentId: string,
+    contentVersion: number,
+    generatorVersion: string,
+  ): Promise<VisualSceneRecord[]> {
+    const rows = await this.model.findAll({
+      where: { documentId, contentVersion, generatorVersion },
+    });
+    return rows.map(toRecord);
+  }
+
+  async ensure(input: {
+    documentId: string;
+    contentVersion: number;
+    topicId: string;
+    generatorVersion: string;
+    requestedBy: string;
+  }): Promise<{ record: VisualSceneRecord; created: boolean }> {
+    const existing = await this.find(
+      input.documentId,
+      input.contentVersion,
+      input.topicId,
+      input.generatorVersion,
+    );
+    if (existing) return { record: existing, created: false };
+    const row = await this.model.create({
+      id: newId(),
+      ...input,
+      status: 'pending',
+      attempts: 0,
+    } as never);
+    return { record: toRecord(row), created: true };
+  }
+
+  async resetForRetry(id: string): Promise<void> {
+    await this.model.update(
+      {
+        status: 'pending',
+        step: null,
+        error: null,
+        fit: null,
+        fitReason: null,
+      },
+      { where: { id } },
+    );
+  }
+
+  async update(id: string, patch: Partial<VisualSceneRecord>): Promise<void> {
+    await this.model.update(patch, { where: { id } });
+  }
+}

@@ -862,6 +862,68 @@ export type LessonIntent = 'quick' | 'thorough' | 'gentle';
 // ── Lectures ────────────────────────────────────────────────────────────────
 
 /** A scripted lecture segment's life: written, voiced, or given up on. */
+export type VisualSceneStatus =
+  'pending' | 'making' | 'done' | 'failed' | 'not_suitable';
+
+/** One chapter of a document's visuals, as the picker and the pane read it. */
+export interface VisualChapterDto {
+  topicId: string;
+  title: string;
+  orderIndex: number;
+  startPage: number;
+  endPage: number;
+  status: VisualSceneStatus | 'none';
+  /** Where a scene being made is: planning, drawing, recording, timing. */
+  step: string | null;
+  /** Why the chapter does not suit a picture, when it does not. */
+  reason: string | null;
+  durationMs: number | null;
+  /** Set when the scene is done: fetched by the pane when it plays. */
+  hasScene: boolean;
+}
+
+/** The document's visuals: every chapter, in document order. */
+export interface VisualSetDto {
+  documentId: string;
+  chapters: VisualChapterDto[];
+}
+
+/** The scene as the pane plays it: the elements, and every sentence and cue on the audio. */
+export interface VisualTimelineDto {
+  version: 1;
+  generator: string;
+  title: string;
+  space: { w: number; h: number };
+  elements: (Record<string, unknown> & { id: string; type: string })[];
+  segments: {
+    text: string;
+    startMs: number;
+    endMs: number;
+    /** [charStart, charEnd, startMs, endMs] per spoken word, chars into the scene's spoken text. */
+    words: number[][];
+    cues: { atMs: number; do: string; target: string }[];
+  }[];
+  durationMs: number;
+  timing: 'aligned' | 'estimated';
+}
+
+export interface VisualSceneDto {
+  topicId: string;
+  title: string;
+  durationMs: number;
+  timeline: VisualTimelineDto;
+}
+
+export interface RequestVisualsRequest {
+  topicIds: string[];
+}
+
+export interface RequestVisualsResponse extends VisualSetDto {
+  queued: number;
+  /** Chapters that were already made or being made. */
+  existing: number;
+}
+
 export type LectureSegmentStatus =
   | 'pending'
   | 'writing'

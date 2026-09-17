@@ -22,6 +22,7 @@ export const QUEUE = {
   lectureDiagram: 'lecture-diagram',
   lectureBoard: 'lecture-board',
   lectureFollow: 'lecture-follow',
+  visualScene: 'visual-scene',
 } as const;
 
 export type QueueName = (typeof QUEUE)[keyof typeof QUEUE];
@@ -69,6 +70,9 @@ export const QUEUE_SETTINGS: Record<
   'lecture-board': { concurrency: 4, attempts: 2, backoffMs: 15_000 },
   // Follow-along tracks for rows that have their words and times.
   'lecture-follow': { concurrency: 4, attempts: 2, backoffMs: 10_000 },
+  // One chapter's scene: two model calls, a voice call and an alignment.
+  // A few at once; the alignment is the worker's own CPU.
+  'visual-scene': { concurrency: 3, attempts: 2, backoffMs: 20_000 },
 };
 
 export interface BaseJobData {
@@ -141,6 +145,18 @@ export interface LectureFollowJobData extends BaseJobData {
   kind?: SegmentKind;
   priority?: number;
 }
+
+/** One chapter of a document as a short timed scene. */
+export interface VisualSceneJobData extends BaseJobData {
+  topicId: string;
+  requestedBy: string;
+}
+
+export const visualSceneJobId = (
+  documentId: string,
+  topicId: string,
+  contentVersion: number,
+) => `visual-scene-${documentId}-v${contentVersion}-${topicId}`;
 
 /** Writing a board for a row that already has its words. */
 export interface LectureBoardJobData extends BaseJobData {

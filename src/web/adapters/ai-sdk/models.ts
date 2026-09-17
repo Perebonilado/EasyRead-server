@@ -33,6 +33,9 @@ const TASK_VAR: Record<LlmTask, string> = {
   // The tutor's live sketch fills a template; the small default model
   // cannot, so a deployment points this at a stronger one.
   lecture_sketch: 'AI_MODEL_LECTURE_SKETCH',
+  visual_plan: 'AI_MODEL_VISUAL_PLAN',
+  visual_script: 'AI_MODEL_VISUAL_SCRIPT',
+  visual_repair: 'AI_MODEL_VISUAL_REPAIR',
   sketch_judge: 'AI_MODEL_SKETCH_JUDGE',
   ocr_page: 'AI_MODEL_OCR',
   summarize: 'AI_MODEL_SUMMARIZE',

@@ -18,6 +18,7 @@ import type {
   SketchDraft,
   SketchTemplate,
 } from '../../business/ports/llm.port';
+import type { VisualPlan, VisualScript } from '../../business/domain/visual';
 
 const EMBED_DIMENSIONS = 256;
 
@@ -501,6 +502,140 @@ export class FakeLlmAdapter implements LlmGatewayPort {
     return Promise.resolve({
       value: { shows: input.png.length > 0, wrong: null },
       usage: this.usage(started, 50, 10),
+    });
+  }
+
+  visualPlan(input: {
+    title: string;
+    topicTitle: string;
+    material: string;
+  }): Promise<LlmResult<VisualPlan>> {
+    const started = Date.now();
+    const sentences = input.material
+      .split(/(?<=[.!?])\s+/)
+      .map((s) => s.trim())
+      .filter((s) => s.split(/\s+/).length >= 4)
+      .slice(0, 5);
+    const terms = Array.from(
+      new Set(
+        (input.material.match(/[A-Za-z][a-z]{4,}/g) ?? []).map((w: string) =>
+          w.toLowerCase(),
+        ),
+      ),
+    ).slice(0, 4);
+    return Promise.resolve({
+      value: {
+        learningGoal: `What ${input.topicTitle} means`,
+        keyTerms: terms,
+        diagramConcept:
+          'A centre with what feeds it on the left and what comes out on the right',
+        beats:
+          sentences.length >= 3
+            ? sentences
+            : [
+                ...sentences,
+                'One more beat here.',
+                'And another beat here.',
+                'The last beat here.',
+              ].slice(0, 4),
+        fit: sentences.length >= 3 ? 'good' : 'poor',
+        fitReason:
+          sentences.length >= 3 ? null : 'The chapter has too little to draw.',
+      },
+      usage: this.usage(started, 200, 80),
+    });
+  }
+
+  visualScript(input: {
+    plan: VisualPlan;
+    topicTitle: string;
+    material: string;
+    previous?: VisualScript;
+    problems?: string[];
+  }): Promise<LlmResult<VisualScript>> {
+    const started = Date.now();
+    // Mending returns the previous script untouched: the deterministic
+    // fixes are what a test exercises, not the model's judgement.
+    if (input.previous) {
+      return Promise.resolve({
+        value: input.previous,
+        usage: this.usage(started, 300, 300),
+      });
+    }
+    const terms = input.plan.keyTerms.slice(0, 3);
+    const chip = (i: number) => terms[i] ?? `part ${i + 1}`;
+    const script: VisualScript = {
+      title: input.topicTitle.slice(0, 60),
+      elements: [
+        {
+          id: 'centre',
+          type: 'shape',
+          x: 180,
+          y: 140,
+          w: 110,
+          h: 60,
+          kind: 'roundRect',
+          text: chip(0).slice(0, 16),
+          color: 'blue',
+        },
+        {
+          id: 'left',
+          type: 'chip',
+          x: 60,
+          y: 140,
+          text: chip(1).slice(0, 16),
+          color: 'green',
+        },
+        {
+          id: 'right',
+          type: 'chip',
+          x: 300,
+          y: 140,
+          text: chip(2).slice(0, 16),
+          color: 'amber',
+        },
+        { id: 'in', type: 'arrow', from: 'left', to: 'centre', color: 'green' },
+        {
+          id: 'out',
+          type: 'arrow',
+          from: 'centre',
+          to: 'right',
+          color: 'amber',
+        },
+      ],
+      segments: [
+        {
+          text: 'Here is the idea at the centre of this chapter, drawn as one picture.',
+          cues: [{ at: 4, do: 'draw', target: 'centre' }],
+        },
+        {
+          text: 'On the left is what feeds into it, and an arrow carries it across.',
+          cues: [
+            { at: 1, do: 'fade', target: 'left' },
+            { at: 8, do: 'draw', target: 'in' },
+            { at: 10, do: 'flow', target: 'in' },
+          ],
+        },
+        {
+          text: 'On the right is what comes out of it, which the second arrow shows.',
+          cues: [
+            { at: 1, do: 'fade', target: 'right' },
+            { at: 9, do: 'draw', target: 'out' },
+          ],
+        },
+        {
+          text: 'The centre is the part to remember, so it pulses once more here.',
+          cues: [{ at: 1, do: 'pulse', target: 'centre' }],
+        },
+        {
+          text: 'That is the shape of the chapter in one picture, from left to right.',
+          cues: [{ at: 8, do: 'highlight', target: 'centre' }],
+        },
+      ],
+    };
+    return Promise.resolve({
+      value: script,
+      usage: this.usage(started, 800, 600),
     });
   }
 

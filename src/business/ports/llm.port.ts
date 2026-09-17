@@ -25,6 +25,9 @@ export type LlmTask =
   | 'lecture_board'
   | 'lecture_diagram'
   | 'lecture_sketch'
+  | 'visual_plan'
+  | 'visual_script'
+  | 'visual_repair'
   | 'sketch_judge'
   | 'learn_outline'
   | 'learn_write'
@@ -181,6 +184,7 @@ export interface LectureBoardDraft {
 }
 
 /** A figure before layout: nodes, edges, groups, each citing the script. */
+import type { VisualPlan, VisualScript } from '../domain/visual';
 import type { SketchDraft, SketchTemplate } from '../domain/sketch';
 export type { SketchDraft, SketchTemplate } from '../domain/sketch';
 
@@ -453,6 +457,31 @@ export interface LlmGatewayPort {
     description: string;
     see: string;
   }): Promise<LlmResult<{ shows: boolean; wrong: string | null }>>;
+
+  /**
+   * Plans a visual: one chapter as a short timed scene. Says what the
+   * scene teaches, the one picture it draws, its beats, and how well the
+   * chapter suits a picture at all.
+   */
+  visualPlan(input: {
+    title: string;
+    topicTitle: string;
+    material: string;
+  }): Promise<LlmResult<VisualPlan>>;
+
+  /**
+   * Writes the scene from the plan: the elements on the canvas, the
+   * spoken sentences, and the cues that fire an action on an element at a
+   * word. With `previous` and `problems`, mends that script and changes
+   * only what the problems name.
+   */
+  visualScript(input: {
+    plan: VisualPlan;
+    topicTitle: string;
+    material: string;
+    previous?: VisualScript;
+    problems?: string[];
+  }): Promise<LlmResult<VisualScript>>;
 
   lectureSketch(input: {
     topicTitle: string;

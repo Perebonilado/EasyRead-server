@@ -294,6 +294,54 @@ describe('a visual script', () => {
     expect(mended.segments[3].cues.some((c) => c.do === 'dim')).toBe(false);
   });
 
+  it('moves a chip up or down when a row is too wide to nudge sideways', () => {
+    const row: VisualScript = {
+      title: 'A row',
+      elements: [
+        {
+          id: 'left',
+          type: 'chip',
+          x: 90,
+          y: 240,
+          text: 'participation',
+          color: 'blue',
+        },
+        {
+          id: 'mid',
+          type: 'chip',
+          x: 180,
+          y: 240,
+          text: 'health actions',
+          color: 'blue',
+        },
+        {
+          id: 'right',
+          type: 'chip',
+          x: 280,
+          y: 240,
+          text: 'universal access',
+          color: 'blue',
+        },
+      ],
+      segments: [
+        {
+          text: 'Three wide chips come in along the bottom edge.',
+          cues: [
+            { at: 0, do: 'fade', target: 'left' },
+            { at: 2, do: 'fade', target: 'mid' },
+            { at: 4, do: 'fade', target: 'right' },
+          ],
+        },
+        { text: 'And they stay there for the rest of the scene.', cues: [] },
+        { text: 'Nothing else moves on the canvas at all now.', cues: [] },
+        { text: 'That is the whole of this little scene, then.', cues: [] },
+      ],
+    };
+    expect(layoutProblems(row).some((p) => p.includes('overlap'))).toBe(true);
+    const mended = repairVisual(row);
+    expect(layoutProblems(mended)).toEqual([]);
+  });
+
   it('knows what is on screen after each sentence, clear included', () => {
     const script: VisualScript = {
       ...sound,

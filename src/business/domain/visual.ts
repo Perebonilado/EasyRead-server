@@ -876,30 +876,47 @@ export function repairVisual(script: VisualScript): VisualScript {
             y?: number;
           };
           if (mover.type === 'dots' || mover.x === undefined) continue;
-          // Along the axis of least overlap, away from the other box; and
-          // when that way runs into the edge, the other way, so the clamp
-          // at the end never undoes the nudge.
-          if (o.x < o.y) {
-            const step = o.x + VISUAL_GAP;
-            let dir = b.x + b.w / 2 >= a.x + a.w / 2 ? 1 : -1;
-            if (
-              b.x + dir * step < VISUAL_MARGIN ||
-              b.x + b.w + dir * step > VISUAL_SPACE.w - VISUAL_MARGIN
-            ) {
-              dir = -dir;
-            }
-            mover.x = round(mover.x + dir * step);
-          } else {
-            const step = o.y + VISUAL_GAP;
-            let dir = b.y + b.h / 2 >= a.y + a.h / 2 ? 1 : -1;
-            if (
-              b.y + dir * step < VISUAL_MARGIN ||
-              b.y + b.h + dir * step > VISUAL_SPACE.h - VISUAL_MARGIN
-            ) {
-              dir = -dir;
-            }
-            mover.y = round((mover.y ?? 0) + dir * step);
-          }
+          // Four ways out, tried in order: along the axis of least overlap
+          // away from the other box, then back the other way, then along
+          // the other axis both ways. The first that lands inside the
+          // margin and on no other lit box wins; a nudge that only lands on
+          // a neighbour would ping between them for ever.
+          const others = ids
+            .filter((id) => id !== ids[i] && id !== ids[j])
+            .map((id) => boxOf(map.get(id)!)!);
+          const fits = (candidate: Box) =>
+            candidate.x >= VISUAL_MARGIN &&
+            candidate.y >= VISUAL_MARGIN &&
+            candidate.x + candidate.w <= VISUAL_SPACE.w - VISUAL_MARGIN &&
+            candidate.y + candidate.h <= VISUAL_SPACE.h - VISUAL_MARGIN &&
+            others.every((o) => {
+              const ov = overlap(candidate, o);
+              return ov.x <= 4 || ov.y <= 4 || contained(candidate, o);
+            });
+          const stepX = o.x + VISUAL_GAP;
+          const stepY = o.y + VISUAL_GAP;
+          const dirX = b.x + b.w / 2 >= a.x + a.w / 2 ? 1 : -1;
+          const dirY = b.y + b.h / 2 >= a.y + a.h / 2 ? 1 : -1;
+          const moves: [number, number][] =
+            o.x < o.y
+              ? [
+                  [dirX * stepX, 0],
+                  [-dirX * stepX, 0],
+                  [0, dirY * stepY],
+                  [0, -dirY * stepY],
+                ]
+              : [
+                  [0, dirY * stepY],
+                  [0, -dirY * stepY],
+                  [dirX * stepX, 0],
+                  [-dirX * stepX, 0],
+                ];
+          const chosen =
+            moves.find(([dx, dy]) =>
+              fits({ x: b.x + dx, y: b.y + dy, w: b.w, h: b.h }),
+            ) ?? moves[0];
+          mover.x = round(mover.x + chosen[0]);
+          mover.y = round((mover.y ?? 0) + chosen[1]);
           moved = true;
         }
       }

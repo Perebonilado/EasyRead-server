@@ -5,12 +5,14 @@ import {
   HttpCode,
   Inject,
   Param,
+  ParseIntPipe,
   Post,
   Res,
 } from '@nestjs/common';
-import { ArrayMaxSize, ArrayMinSize, IsArray, IsUUID } from 'class-validator';
+import { ArrayMaxSize, IsArray, IsInt, IsOptional, Min } from 'class-validator';
 import type { Response } from 'express';
 import type {
+  RequestVisualsRequest,
   RequestVisualsResponse,
   VisualSceneDto,
   VisualSetDto,
@@ -24,15 +26,21 @@ import { STORAGE } from '../../business/ports/tokens';
 import type { StoragePort } from '../../business/ports/storage.port';
 import { CurrentUser } from '../security/current-user.decorator';
 
-class RequestVisualsDto {
+class RequestVisualsDto implements RequestVisualsRequest {
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  fromPage?: number;
+
+  @IsOptional()
   @IsArray()
-  @ArrayMinSize(1)
-  @ArrayMaxSize(60)
-  @IsUUID('all', { each: true })
-  topicIds!: string[];
+  @ArrayMaxSize(200)
+  @IsInt({ each: true })
+  @Min(1, { each: true })
+  pages?: number[];
 }
 
-/** A document's visuals: chapters as short timed scenes, asked for from the reader. */
+/** A document's visuals: pages as short tutorials, asked for from the reader. */
 @Controller('documents/:id/visuals')
 export class VisualsController {
   constructor(
@@ -42,7 +50,7 @@ export class VisualsController {
     @Inject(STORAGE) private readonly storage: StoragePort,
   ) {}
 
-  /** Every chapter and where its scene stands. */
+  /** Every page and where its tutorial stands. */
   @Get()
   async list(
     @CurrentUser('id') userId: string,
@@ -52,7 +60,7 @@ export class VisualsController {
     return data;
   }
 
-  /** The chapters picked: made once, joined if being made, asked again if failed. */
+  /** Ahead of a page, or pages by number: made once, joined if being made, asked again if failed. */
   @Post()
   @HttpCode(202)
   async ask(
@@ -63,21 +71,22 @@ export class VisualsController {
     const { data } = await this.request.handle({
       userId,
       documentId,
-      topicIds: body.topicIds,
+      fromPage: body.fromPage,
+      pages: body.pages,
     });
     return data;
   }
 
-  /** One chapter's scene, once made. */
-  @Get(':topicId')
+  /** One page's tutorial, once made. */
+  @Get(':page')
   async one(
     @CurrentUser('id') userId: string,
     @Param('id') documentId: string,
-    @Param('topicId') topicId: string,
+    @Param('page', ParseIntPipe) page: number,
   ): Promise<VisualSceneDto> {
-    const { data } = await this.scene.handle({ userId, documentId, topicId });
+    const { data } = await this.scene.handle({ userId, documentId, page });
     return {
-      topicId: data.topicId,
+      page: data.pageNumber,
       title: data.title ?? '',
       durationMs: data.durationMs ?? 0,
       timeline: data.timeline as VisualSceneDto['timeline'],
@@ -85,17 +94,17 @@ export class VisualsController {
   }
 
   /**
-   * The scene's audio. The client fetches it with the session token and
-   * plays a blob URL, as it does for the lecture.
+   * The tutorial's audio. The client fetches it with the session token
+   * and plays a blob URL, as it does for the lecture.
    */
-  @Get(':topicId/audio')
+  @Get(':page/audio')
   async audio(
     @CurrentUser('id') userId: string,
     @Param('id') documentId: string,
-    @Param('topicId') topicId: string,
+    @Param('page', ParseIntPipe) page: number,
     @Res() response: Response,
   ): Promise<void> {
-    const { data } = await this.scene.handle({ userId, documentId, topicId });
+    const { data } = await this.scene.handle({ userId, documentId, page });
     const { stream, size } = await this.storage.stream(data.audioKey!);
     response.setHeader('Content-Type', 'audio/mpeg');
     response.setHeader('Content-Length', size);

@@ -10,7 +10,7 @@ import { BaseModel } from './base';
 import { DocumentModel } from './document.model';
 import { TopicModel } from './topic.model';
 
-/** One chapter of a document as a short timed scene, made once per document version. */
+/** One page of a document as a short tutorial, made once per document version. */
 @Table({ tableName: 'visual_scenes', underscored: true, timestamps: true })
 export class VisualSceneModel extends BaseModel {
   @ForeignKey(() => DocumentModel)
@@ -23,6 +23,9 @@ export class VisualSceneModel extends BaseModel {
   @ForeignKey(() => TopicModel)
   @Column({ type: DataType.UUID, allowNull: false })
   declare topicId: string;
+
+  @Column({ type: DataType.INTEGER, allowNull: false })
+  declare pageNumber: number;
 
   @Column({ type: DataType.INTEGER, allowNull: false })
   declare contentVersion: number;

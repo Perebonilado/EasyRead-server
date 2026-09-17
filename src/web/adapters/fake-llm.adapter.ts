@@ -566,6 +566,7 @@ export class FakeLlmAdapter implements LlmGatewayPort {
     const chip = (i: number) => (terms[i] ?? `part ${i + 1}`).slice(0, 22);
     const tutorial: VisualTutorial = {
       title: input.topicTitle.slice(0, 60),
+      fit: 'good',
       sentences: [
         'Here is the idea at the heart of this chapter, and why it is worth a few minutes of your time.',
         'We will take it one piece at a time, so that each part makes sense before the next one comes.',

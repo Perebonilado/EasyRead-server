@@ -480,6 +480,8 @@ export interface LlmGatewayPort {
     plan: VisualPlan;
     topicTitle: string;
     material: string;
+    /** Where the page sits in its chapter and what earlier pages taught. */
+    context?: string;
     previous?: VisualTutorial;
     problems?: string[];
   }): Promise<LlmResult<VisualTutorial>>;

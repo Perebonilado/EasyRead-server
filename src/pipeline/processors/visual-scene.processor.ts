@@ -20,6 +20,7 @@ import {
 } from '../../business/domain/visual';
 import {
   layoutTutorial,
+  pausesFor,
   tidyTutorial,
   tutorialProblems,
   type VisualTutorial,
@@ -61,8 +62,8 @@ import type { JobContext } from './base.processor';
 const MATERIAL_CHARS = 14_000;
 /** How many times the model is asked to mend a script that still has problems. */
 const REPAIR_ROUNDS = 2;
-/** Silence between sentences when the voice takes pieces, in seconds. */
-const SENTENCE_PAUSE_S = 0.35;
+/** A page with fewer words than this has too little to teach. */
+const THIN_PAGE_WORDS = 40;
 
 /**
  * Makes one chapter's scene: plans it, has the script written and mended
@@ -96,27 +97,32 @@ export class VisualSceneProcessor {
   ) {}
 
   async process(job: VisualSceneJobData, context: JobContext): Promise<void> {
-    const { documentId, topicId, contentVersion } = job;
+    const { documentId, pageNumber, contentVersion } = job;
     const doc = await this.documents.findById(documentId);
     if (!doc || doc.props.deletedAt) return;
     if (doc.contentVersion !== contentVersion) return;
     const record = await this.visuals.find(
       documentId,
       contentVersion,
-      topicId,
+      pageNumber,
       VISUAL_GENERATOR_VERSION,
     );
     if (!record || record.status === 'done') return;
-    const topic = (await this.topics.listByDocument(documentId)).find(
-      (candidate) => candidate.id === topicId,
-    );
+    const topics = await this.topics.listByDocument(documentId);
+    const topic =
+      topics.find((candidate) => candidate.id === record.topicId) ??
+      topics.find(
+        (candidate) =>
+          pageNumber >= candidate.startPage && pageNumber <= candidate.endPage,
+      );
     if (!topic) {
       await this.visuals.update(record.id, {
         status: 'failed',
-        error: 'The chapter no longer exists',
+        error: 'The page is outside every chapter',
       });
       return;
     }
+    const who = `${documentId} p${pageNumber}`;
 
     try {
       await this.visuals.update(record.id, {
@@ -125,47 +131,90 @@ export class VisualSceneProcessor {
         error: null,
         attempts: record.attempts + 1,
       });
-      const material = await this.material(
-        documentId,
-        topic.startPage,
-        topic.endPage,
-      );
-
-      // Plan, and the fit: a chapter with nothing to draw says so.
-      const planned = await this.llm.visualPlan({
-        title: doc.props.title,
-        topicTitle: topic.title,
-        material,
-      });
-      await this.record(documentId, 'visual_plan', planned.usage);
-      const plan = planned.value;
-      if (plan.fit === 'poor') {
+      const material = await this.material(documentId, pageNumber, pageNumber);
+      if (material.split(/\s+/).filter(Boolean).length < THIN_PAGE_WORDS) {
         await this.visuals.update(record.id, {
           status: 'not_suitable',
           step: null,
-          fit: plan.fit,
-          fitReason:
-            plan.fitReason ?? 'This chapter has no shape a picture can show.',
+          fit: 'poor',
+          fitReason: 'Too little on this page to teach.',
         });
         return;
       }
 
-      // Script, mended until sound: the deterministic fixes first, the
-      // model only for what they cannot solve.
-      await this.visuals.update(record.id, { step: 'drawing', fit: plan.fit });
-      this.logger.log(
-        `${documentId} ${topicId}: heart "${plan.centre.what}"; ${plan.beats.length} beats`,
+      // The chapter's plan, made once for all of its pages.
+      let plan = await this.visuals.findPlan(
+        documentId,
+        contentVersion,
+        topic.id,
+        VISUAL_GENERATOR_VERSION,
       );
+      if (!plan) {
+        const planned = await this.llm.visualPlan({
+          title: doc.props.title,
+          topicTitle: topic.title,
+          material: await this.material(
+            documentId,
+            topic.startPage,
+            topic.endPage,
+          ),
+        });
+        await this.record(documentId, 'visual_plan', planned.usage);
+        plan = planned.value;
+        await this.visuals.savePlan({
+          documentId,
+          contentVersion,
+          topicId: topic.id,
+          generatorVersion: VISUAL_GENERATOR_VERSION,
+          plan,
+        });
+      }
+      // Where the page sits, and what the pages before it already taught.
+      const earlier = (
+        await this.visuals.listByDocument(
+          documentId,
+          contentVersion,
+          VISUAL_GENERATOR_VERSION,
+        )
+      )
+        .filter(
+          (row) =>
+            row.topicId === topic.id &&
+            row.pageNumber < pageNumber &&
+            row.status === 'done' &&
+            row.title,
+        )
+        .map((row) => `page ${row.pageNumber}: ${row.title}`);
+      const where = [
+        `page ${pageNumber} of the chapter "${topic.title}", which runs from page ${topic.startPage} to ${topic.endPage}.`,
+        earlier.length
+          ? `The pages before it already taught: ${earlier.join('; ')}.`
+          : 'It is the first page of the chapter to be taught.',
+      ].join(' ');
+
+      // The tutorial, mended until sound: the deterministic fixes first,
+      // the model only for what they cannot solve.
+      await this.visuals.update(record.id, { step: 'drawing' });
       const pool = materialPool(material);
       const written = await this.llm.visualScript({
         plan,
         topicTitle: topic.title,
         material,
+        context: where,
       });
       await this.record(documentId, 'visual_script', written.usage);
       // The model gave the tutorial; the app lays every card out, then
       // mends what laying out alone cannot settle.
       let tutorial: VisualTutorial = tidyTutorial(written.value);
+      if (tutorial.fit === 'poor') {
+        await this.visuals.update(record.id, {
+          status: 'not_suitable',
+          step: null,
+          fit: 'poor',
+          fitReason: tutorial.fitReason ?? 'This page has too little to teach.',
+        });
+        return;
+      }
       let script: VisualScript = repairVisual(layoutTutorial(tutorial));
       let problems = [
         ...tutorialProblems(tutorial, pool),
@@ -180,6 +229,7 @@ export class VisualSceneProcessor {
           plan,
           topicTitle: topic.title,
           material,
+          context: where,
           previous: tutorial,
           // The warnings ride along as advice; only the problems must go.
           problems: [...problems, ...visualWarnings(script)],
@@ -194,7 +244,7 @@ export class VisualSceneProcessor {
       }
       if (problems.length) {
         this.logger.warn(
-          `${documentId} ${topicId}: ${problems.length} problems left after ${REPAIR_ROUNDS} repairs:\n- ${problems.join('\n- ')}`,
+          `${who}: ${problems.length} problems left after ${REPAIR_ROUNDS} repairs:\n- ${problems.join('\n- ')}`,
         );
         throw new Error(
           `The scene could not be made sound: ${problems.slice(0, 3).join(' ')}`,
@@ -211,6 +261,8 @@ export class VisualSceneProcessor {
         spokenForm(segment.text, kept),
       );
       const spoken = sceneSpoken(forms);
+      // The voice breathes between sentences and waits where a card comes in.
+      const pauses = pausesFor(tutorial);
       const speech = doc.props.institutionId
         ? this.catalogueSpeech
         : this.speech;
@@ -222,10 +274,10 @@ export class VisualSceneProcessor {
         pieces: forms.map((form, index) => ({
           text: form.text,
           speed: 1,
-          pauseAfter: index === forms.length - 1 ? 0 : SENTENCE_PAUSE_S,
+          pauseAfter: pauses[index],
         })),
       });
-      const audioKey = `documents/${doc.id}/visuals/v${contentVersion}/${topicId}-${VISUAL_GENERATOR_VERSION}-${voice}-${model}.mp3`;
+      const audioKey = `documents/${doc.id}/visuals/v${contentVersion}/p${pageNumber}-${VISUAL_GENERATOR_VERSION}-${voice}-${model}.mp3`;
       await this.storage.put({
         key: audioKey,
         body: result.audio,
@@ -267,7 +319,7 @@ export class VisualSceneProcessor {
           }
         } catch (error) {
           this.logger.warn(
-            `${documentId} ${topicId}: alignment failed, timing on the estimate: ${(error as Error).message}`,
+            `${who}: alignment failed, timing on the estimate: ${(error as Error).message}`,
           );
         }
       }
@@ -285,11 +337,11 @@ export class VisualSceneProcessor {
         error: null,
       });
       this.logger.log(
-        `${documentId} ${topicId}: scene made, ${script.elements.length} elements, ${script.segments.length} sentences, ${Math.round(durationMs / 1000)}s, ${timing}`,
+        `${who}: scene made, ${script.elements.length} elements, ${script.segments.length} sentences, ${Math.round(durationMs / 1000)}s, ${timing}`,
       );
     } catch (error) {
       const message = (error as Error).message;
-      this.logger.warn(`${documentId} ${topicId}: scene failed: ${message}`);
+      this.logger.warn(`${who}: scene failed: ${message}`);
       if (!context.isFinalAttempt) {
         await this.visuals.update(record.id, { step: null });
         throw error;

@@ -39,6 +39,7 @@ export {
 } from './lecture.model';
 export { SimplifiedPageModel } from './simplified-page.model';
 export { VisualSceneModel } from './visual-scene.model';
+export { VisualPlanModel } from './visual-plan.model';
 export { SubscriptionModel } from './subscription.model';
 export { SchoolPassModel } from './school-pass.model';
 export { TopicReadStateModel } from './topic-read-state.model';
@@ -94,6 +95,7 @@ import {
 } from './lecture.model';
 import { SimplifiedPageModel } from './simplified-page.model';
 import { VisualSceneModel } from './visual-scene.model';
+import { VisualPlanModel } from './visual-plan.model';
 import { SubscriptionModel } from './subscription.model';
 import { SchoolPassModel } from './school-pass.model';
 import { TopicReadStateModel } from './topic-read-state.model';
@@ -128,6 +130,7 @@ export const ALL_MODELS = [
   LectureSegmentModel,
   LectureListenModel,
   VisualSceneModel,
+  VisualPlanModel,
   SimplifiedPageModel,
   TopicModel,
   TopicReadStateModel,

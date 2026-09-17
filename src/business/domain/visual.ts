@@ -20,7 +20,7 @@ import type { SpokenForm } from './spoken';
 import { measureText } from './visual-font';
 import { PRESET_SHAPES, type PresetShape } from './visual-presets';
 
-export const VISUAL_GENERATOR_VERSION = 'visual-2';
+export const VISUAL_GENERATOR_VERSION = 'visual-3';
 
 export const VISUAL_SPACE = { w: 360, h: 270 } as const;
 /** Nothing sits closer than this to an edge. */

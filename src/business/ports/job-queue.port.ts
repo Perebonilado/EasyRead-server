@@ -55,8 +55,12 @@ export interface LectureBoardJob extends PipelineJob {
 
 /** The follow-along track for one row. */
 export interface VisualSceneJob extends PipelineJob {
+  pageNumber: number;
+  /** The chapter the page is in. */
   topicId: string;
   requestedBy: string;
+  /** Lower goes first; the page the learner is on gets 1. */
+  priority?: number;
 }
 
 export interface LectureFollowJob extends PipelineJob {

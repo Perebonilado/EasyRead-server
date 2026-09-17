@@ -1,11 +1,11 @@
 import { Injectable } from '@nestjs/common';
 import { InjectModel } from '@nestjs/sequelize';
-import type { VisualTimeline } from '../../business/domain/visual';
+import type { VisualPlan, VisualTimeline } from '../../business/domain/visual';
 import type {
   VisualSceneRecord,
   VisualSceneRepository,
 } from '../../business/repositories/visual.repository';
-import { VisualSceneModel } from '../database/models';
+import { VisualPlanModel, VisualSceneModel } from '../database/models';
 import { newId } from '../database/uuid';
 
 function toRecord(row: VisualSceneModel): VisualSceneRecord {
@@ -13,6 +13,7 @@ function toRecord(row: VisualSceneModel): VisualSceneRecord {
     id: row.id,
     documentId: row.documentId,
     topicId: row.topicId,
+    pageNumber: row.pageNumber,
     contentVersion: row.contentVersion,
     generatorVersion: row.generatorVersion,
     status: row.status,
@@ -35,16 +36,18 @@ export class SequelizeVisualSceneRepository implements VisualSceneRepository {
   constructor(
     @InjectModel(VisualSceneModel)
     private readonly model: typeof VisualSceneModel,
+    @InjectModel(VisualPlanModel)
+    private readonly plans: typeof VisualPlanModel,
   ) {}
 
   async find(
     documentId: string,
     contentVersion: number,
-    topicId: string,
+    pageNumber: number,
     generatorVersion: string,
   ): Promise<VisualSceneRecord | null> {
     const row = await this.model.findOne({
-      where: { documentId, contentVersion, topicId, generatorVersion },
+      where: { documentId, contentVersion, pageNumber, generatorVersion },
     });
     return row ? toRecord(row) : null;
   }
@@ -56,6 +59,7 @@ export class SequelizeVisualSceneRepository implements VisualSceneRepository {
   ): Promise<VisualSceneRecord[]> {
     const rows = await this.model.findAll({
       where: { documentId, contentVersion, generatorVersion },
+      order: [['pageNumber', 'ASC']],
     });
     return rows.map(toRecord);
   }
@@ -63,6 +67,7 @@ export class SequelizeVisualSceneRepository implements VisualSceneRepository {
   async ensure(input: {
     documentId: string;
     contentVersion: number;
+    pageNumber: number;
     topicId: string;
     generatorVersion: string;
     requestedBy: string;
@@ -70,7 +75,7 @@ export class SequelizeVisualSceneRepository implements VisualSceneRepository {
     const existing = await this.find(
       input.documentId,
       input.contentVersion,
-      input.topicId,
+      input.pageNumber,
       input.generatorVersion,
     );
     if (existing) return { record: existing, created: false };
@@ -98,5 +103,33 @@ export class SequelizeVisualSceneRepository implements VisualSceneRepository {
 
   async update(id: string, patch: Partial<VisualSceneRecord>): Promise<void> {
     await this.model.update(patch, { where: { id } });
+  }
+
+  async findPlan(
+    documentId: string,
+    contentVersion: number,
+    topicId: string,
+    generatorVersion: string,
+  ): Promise<VisualPlan | null> {
+    const row = await this.plans.findOne({
+      where: { documentId, contentVersion, topicId, generatorVersion },
+    });
+    return row ? (row.plan as VisualPlan) : null;
+  }
+
+  async savePlan(input: {
+    documentId: string;
+    contentVersion: number;
+    topicId: string;
+    generatorVersion: string;
+    plan: VisualPlan;
+  }): Promise<void> {
+    const { plan, ...key } = input;
+    const row = await this.plans.findOne({ where: key });
+    if (row) {
+      await row.update({ plan });
+      return;
+    }
+    await this.plans.create({ id: newId(), ...key, plan } as never);
   }
 }

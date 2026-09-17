@@ -714,6 +714,7 @@ export class AiSdkLlmAdapter implements LlmGatewayPort, OnModuleInit {
     plan: VisualPlan;
     topicTitle: string;
     material: string;
+    context?: string;
     previous?: VisualTutorial;
     problems?: string[];
   }): Promise<LlmResult<VisualTutorial>> {
@@ -735,11 +736,12 @@ export class AiSdkLlmAdapter implements LlmGatewayPort, OnModuleInit {
           input.plan.centre.how === 'picture' && input.plan.centre.picture
             ? `The thing at the heart of it: ${input.plan.centre.what}, the picture "${input.plan.centre.picture}" from the library.`
             : `The thing at the heart of it: ${input.plan.centre.what}.`
-        } Beats, in order, each a section of the tutorial:\n- ${input.plan.beats.join('\n- ')}`,
+        } The chapter's beats, in order:\n- ${input.plan.beats.join('\n- ')}`,
+        input.context ? `\nThis page: ${input.context}` : null,
         mending
           ? `\nMend this tutorial. Problems:\n- ${input.problems!.join('\n- ')}\n\nThe tutorial:\n${JSON.stringify(input.previous)}`
           : null,
-        `\nThe chapter, which the narration and every card's words must be built from:\n${input.material}`,
+        `\nThe page, which the narration and every card's words must be built from:\n${input.material}`,
       ]
         .filter(Boolean)
         .join('\n'),

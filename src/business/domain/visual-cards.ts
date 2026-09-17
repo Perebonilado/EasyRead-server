@@ -99,6 +99,43 @@ export interface VisualTutorial {
   /** The narration, one sentence each. */
   sentences: string[];
   moments: Moment[];
+  /** Poor when the page has too little to teach; the reason is shown to the student. */
+  fit?: 'good' | 'poor';
+  fitReason?: string;
+}
+
+/** Silence after a sentence, in seconds: a breath, more at a card change, a beat at a title, a hold at the end. */
+export const PAUSE_S = {
+  sentence: 0.35,
+  card: 0.55,
+  title: 0.9,
+  afterStatement: 0.6,
+  tail: 1.0,
+} as const;
+
+/**
+ * The pause after each sentence, from the moments: the voice breathes
+ * between sentences, waits a little longer where a new card comes in,
+ * a beat where a title does, holds after a statement, and holds the
+ * last card at the end.
+ */
+export function pausesFor(tutorial: VisualTutorial): number[] {
+  const n = tutorial.sentences.length;
+  const starts = new Map<number, Moment>();
+  const ends = new Map<number, Moment>();
+  for (const m of tutorial.moments) {
+    starts.set(m.from, m);
+    ends.set(m.to, m);
+  }
+  return tutorial.sentences.map((_, i) => {
+    if (i === n - 1) return PAUSE_S.tail;
+    const next = starts.get(i + 1);
+    let pause: number = PAUSE_S.sentence;
+    if (next) pause = next.card === 'title' ? PAUSE_S.title : PAUSE_S.card;
+    if (ends.get(i)?.card === 'statement')
+      pause = Math.max(pause, PAUSE_S.afterStatement);
+    return pause;
+  });
 }
 
 export const TUTORIAL_LIMITS = {

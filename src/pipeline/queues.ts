@@ -146,17 +146,19 @@ export interface LectureFollowJobData extends BaseJobData {
   priority?: number;
 }
 
-/** One chapter of a document as a short timed scene. */
+/** One page of a document as a short tutorial. */
 export interface VisualSceneJobData extends BaseJobData {
+  pageNumber: number;
   topicId: string;
   requestedBy: string;
+  priority?: number;
 }
 
 export const visualSceneJobId = (
   documentId: string,
-  topicId: string,
+  pageNumber: number,
   contentVersion: number,
-) => `visual-scene-${documentId}-v${contentVersion}-${topicId}`;
+) => `visual-scene-${documentId}-v${contentVersion}-p${pageNumber}`;
 
 /** Writing a board for a row that already has its words. */
 export interface LectureBoardJobData extends BaseJobData {

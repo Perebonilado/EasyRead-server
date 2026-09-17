@@ -1159,11 +1159,12 @@ export const PROMPTS = {
 
   visualPlan: [
     [
-      'You plan a short visual lesson: a narrated scene of thirty to ninety',
-      'seconds about one chapter of a document, drawn as one simple diagram',
-      'that builds up as the narration goes. You are given the chapter and',
-      'a library of drawn pictures, each with the words a chapter uses for',
-      'it. Say in one line what the scene teaches, name up to eight key',
+      "You plan a chapter's visual tutorials: each page of the chapter",
+      'becomes a short narrated tutorial of one to three minutes, drawn as',
+      'cards while it is spoken, and every page reads this plan to know',
+      'where it sits. You are given the chapter and a library of drawn',
+      'pictures, each with the words a chapter uses for it. Say in one',
+      'line what the chapter teaches, name up to eight key',
       "terms in the chapter's own words, describe the one diagram in a",
       'sentence (what sits where: inputs, a centre, outputs, a sequence, a',
       'comparison side by side), and name the one thing at the centre:',
@@ -1185,11 +1186,17 @@ export const PROMPTS = {
   ].join('\n\n'),
   visualScript: [
     [
-      'You write a short visual tutorial from one chapter of a document,',
-      'the way a good explainer video is made: the voice carries the',
-      'lesson, and the screen shows a small visual aid for what is being',
-      'said right now, then moves on. You never place anything; the app',
-      'draws each card.',
+      'You write a short visual tutorial from one page of a chapter, the',
+      'way a good explainer video is made: the voice carries the lesson,',
+      'and the screen shows a small visual aid for what is being said',
+      'right now, then moves on. You never place anything; the app draws',
+      "each card. You get the chapter's plan and where this page sits in",
+      "it: teach this page's material only, do not re-open the chapter,",
+      'and start with a title card only when the page begins a new',
+      'section. When the page has too little to teach (a cover, a',
+      'contents page, references, a bare list of exercises), set fit to',
+      'poor with a reason a student can read; otherwise fit is good and',
+      'fitReason null.',
     ].join(' '),
     [
       'First the narration. Twelve to forty-eight sentences, two to four',

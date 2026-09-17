@@ -241,7 +241,7 @@ export class BullmqQueueAdapter implements JobQueuePort, OnModuleDestroy {
 
   async enqueueVisualScenes(jobs: VisualSceneJob[]): Promise<void> {
     await this.enqueueKeyed(QUEUE.visualScene, 'visual-scene', jobs, (job) =>
-      visualSceneJobId(job.documentId, job.topicId, job.contentVersion),
+      visualSceneJobId(job.documentId, job.pageNumber, job.contentVersion),
     );
   }
 

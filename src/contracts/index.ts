@@ -866,26 +866,28 @@ export type VisualSceneStatus =
   'pending' | 'making' | 'done' | 'failed' | 'not_suitable';
 
 /** One chapter of a document's visuals, as the picker and the pane read it. */
-export interface VisualChapterDto {
-  topicId: string;
-  title: string;
-  orderIndex: number;
-  startPage: number;
-  endPage: number;
+export interface VisualPageDto {
+  page: number;
+  /** The chapter the page is in, for grouping; null for a page outside every chapter. */
+  topicId: string | null;
+  chapterTitle: string | null;
+  /** The tutorial's own title, once made. */
+  title: string | null;
   status: VisualSceneStatus | 'none';
   /** Where a scene being made is: planning, drawing, recording, timing. */
   step: string | null;
-  /** Why the chapter does not suit a picture, when it does not. */
+  /** Why the page does not suit a tutorial, or why it failed. */
   reason: string | null;
   durationMs: number | null;
   /** Set when the scene is done: fetched by the pane when it plays. */
   hasScene: boolean;
 }
 
-/** The document's visuals: every chapter, in document order. */
+/** The document's visuals: every page, in order, with its chapter. */
 export interface VisualSetDto {
   documentId: string;
-  chapters: VisualChapterDto[];
+  pageCount: number;
+  pages: VisualPageDto[];
 }
 
 /** The scene as the pane plays it: the elements, and every sentence and cue on the audio. */
@@ -908,14 +910,16 @@ export interface VisualTimelineDto {
 }
 
 export interface VisualSceneDto {
-  topicId: string;
+  page: number;
   title: string;
   durationMs: number;
   timeline: VisualTimelineDto;
 }
 
+/** Ahead of a page, the way the lecture prepares, or pages by number. */
 export interface RequestVisualsRequest {
-  topicIds: string[];
+  fromPage?: number;
+  pages?: number[];
 }
 
 export interface RequestVisualsResponse extends VisualSetDto {

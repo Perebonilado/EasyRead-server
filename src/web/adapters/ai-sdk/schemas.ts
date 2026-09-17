@@ -485,6 +485,9 @@ const cardSide = z.object({
 /** The tutorial: the narration, and the moments that cut it, each one card with its fields. Fields a card does not use are null. */
 export const visualTutorialSchema = z.object({
   title: z.string().min(1).max(60),
+  /** Poor when the page has too little to teach; then the reason, for the student. */
+  fit: z.enum(['good', 'poor']),
+  fitReason: z.string().max(160).nullable(),
   sentences: z.array(z.string().min(1).max(300)).min(8).max(48),
   moments: z
     .array(

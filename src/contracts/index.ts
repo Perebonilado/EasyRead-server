@@ -881,6 +881,8 @@ export interface VisualPageDto {
   durationMs: number | null;
   /** Set when the scene is done: fetched by the pane when it plays. */
   hasScene: boolean;
+  /** How the words were timed once made: measured on the voice, or estimated. */
+  timing: 'aligned' | 'estimated' | null;
 }
 
 /** The document's visuals: every page, in order, with its chapter. */

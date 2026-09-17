@@ -545,7 +545,8 @@ export const visualTutorialSchema = z.object({
             z.object({
               part: z.number().int().min(0),
               sentence: z.number().int().min(0),
-              word: z.number().int().min(0),
+              /** The app finds the word the part is named by; this is only a hint. */
+              word: z.number().int().min(0).nullable(),
             }),
           )
           .max(8)

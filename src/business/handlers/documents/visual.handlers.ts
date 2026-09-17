@@ -74,6 +74,7 @@ async function setOf(
             : null,
       durationMs: row?.status === 'done' ? row.durationMs : null,
       hasScene: row?.status === 'done' && Boolean(row.timeline),
+      timing: row?.status === 'done' ? (row.timeline?.timing ?? null) : null,
     });
   }
   return { documentId, pageCount, pages };

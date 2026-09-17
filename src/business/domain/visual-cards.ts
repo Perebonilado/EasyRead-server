@@ -91,7 +91,7 @@ export interface Moment {
   inputs?: CardItem[];
   outputs?: CardItem[];
   /** Parts that appear on a word rather than with the card. */
-  reveals?: { part: number; sentence: number; word: number }[];
+  reveals?: { part: number; sentence: number; word?: number }[];
 }
 
 export interface VisualTutorial {
@@ -144,6 +144,7 @@ export const TUTORIAL_LIMITS = {
   minMoments: 3,
   maxMoments: 40,
   maxSentencesPerMoment: 4,
+  minWordsPerMoment: 10,
   minWords: 150,
   maxWords: 720,
   maxItems: 5,
@@ -168,11 +169,53 @@ const M = VISUAL_MARGIN;
 const CX = W / 2;
 const CY = H / 2;
 
-/** What one card became: its elements, its parts in order, and the arrows that go with a part. */
+/** What one card became: its elements, its parts in order, the arrows that go with a part, and the words each named thing is called by. */
 interface Laid {
   elements: VisualElement[];
   parts: string[];
   arrowsOf: Map<string, string[]>;
+  /** Element id → the words the narration would use for it, for finding its word. */
+  named: Map<string, string>;
+}
+
+const STOP = new Set(
+  'a an the of and or for to in on at with by from some any this that it its their his her is are was were be as into over under than then so if not no'.split(
+    ' ',
+  ),
+);
+const plain = (word: string) => word.toLowerCase().replace(/[^a-z0-9]/g, '');
+/** A word's plain forms, so "servers" is found by "server" and "moved" by "move". */
+function forms(word: string): string[] {
+  const out = new Set([word]);
+  for (const suffix of ['s', 'es', 'ed', 'ing', 'd']) {
+    if (word.endsWith(suffix) && word.length - suffix.length >= 3)
+      out.add(word.slice(0, -suffix.length));
+    out.add(`${word}${suffix}`);
+  }
+  if (word.endsWith('ies')) out.add(`${word.slice(0, -3)}y`);
+  if (word.endsWith('y')) out.add(`${word.slice(0, -1)}ies`);
+  return [...out];
+}
+
+/**
+ * The word of a sentence where a thing is named: the first sentence
+ * word that is one of the thing's own content words, in any plain form.
+ * Null when the sentence never names it.
+ */
+export function findWord(sentence: string, name: string): number | null {
+  const wanted = new Set(
+    name
+      .split(/\s+/)
+      .map(plain)
+      .filter((w) => w.length > 2 && !STOP.has(w))
+      .flatMap(forms),
+  );
+  if (!wanted.size) return null;
+  const words = sentence.split(/\s+/).filter(Boolean);
+  for (let i = 0; i < words.length; i += 1) {
+    if (wanted.has(plain(words[i]))) return i;
+  }
+  return null;
 }
 
 /** Words into lines no wider than the width, greedy. */
@@ -233,7 +276,7 @@ function layoutTitle(m: Moment, id: string): Laid {
       ),
     ),
   );
-  return { elements: out, parts: [], arrowsOf: new Map() };
+  return { elements: out, parts: [], arrowsOf: new Map(), named: new Map() };
 }
 
 function layoutStatement(m: Moment, id: string): Laid {
@@ -246,7 +289,7 @@ function layoutStatement(m: Moment, id: string): Laid {
       accent: m.color ?? 'amber',
     }),
   );
-  return { elements, parts: [], arrowsOf: new Map() };
+  return { elements, parts: [], arrowsOf: new Map(), named: new Map() };
 }
 
 function layoutNumber(m: Moment, id: string): Laid {
@@ -271,7 +314,9 @@ function layoutNumber(m: Moment, id: string): Laid {
       ...(bar.right ? { right: bar.right } : {}),
       ...(bar.markers?.length ? { markers: bar.markers.slice(0, 4) } : {}),
     });
-  return { elements: out, parts: [], arrowsOf: new Map() };
+  const named = new Map<string, string>();
+  if (m.figure) named.set(`${id}_f`, m.figure);
+  return { elements: out, parts: [], arrowsOf: new Map(), named };
 }
 
 function layoutChips(m: Moment, id: string): Laid {
@@ -301,6 +346,7 @@ function layoutChips(m: Moment, id: string): Laid {
   const rowYs =
     rows.length === 1 ? [mid] : rows.map((_, r) => mid - 20 + r * 40);
   const parts: string[] = [];
+  const named = new Map<string, string>();
   const colors: VisualColor[] = ['blue', 'violet', 'green', 'amber', 'orange'];
   rows.forEach((indexes, r) => {
     const total =
@@ -320,10 +366,11 @@ function layoutChips(m: Moment, id: string): Laid {
         ...(icon ? { icon } : {}),
       });
       parts[i] = partId;
+      named.set(partId, items[i].text);
       x += widths[i] + gap;
     }
   });
-  return { elements: out, parts, arrowsOf: new Map() };
+  return { elements: out, parts, arrowsOf: new Map(), named };
 }
 
 function layoutList(m: Moment, id: string): Laid {
@@ -340,6 +387,7 @@ function layoutList(m: Moment, id: string): Laid {
   if (heading)
     out.push(label(`${id}_h`, CX, mid - total / 2 - 36, heading, 'md', 'ink'));
   const parts: string[] = [];
+  const named = new Map<string, string>();
   items.forEach((item, i) => {
     const partId = `${id}_p${i}`;
     out.push(
@@ -358,8 +406,9 @@ function layoutList(m: Moment, id: string): Laid {
       ),
     );
     parts.push(partId);
+    named.set(partId, item.text);
   });
-  return { elements: out, parts, arrowsOf: new Map() };
+  return { elements: out, parts, arrowsOf: new Map(), named };
 }
 
 function layoutPicture(m: Moment, id: string): Laid {
@@ -405,7 +454,9 @@ function layoutPicture(m: Moment, id: string): Laid {
       tail: 'left',
     });
   }
-  return { elements: out, parts: [], arrowsOf: new Map() };
+  const named = new Map<string, string>();
+  if (m.name) named.set(`${id}_c`, m.name);
+  return { elements: out, parts: [], arrowsOf: new Map(), named };
 }
 
 function layoutTerm(m: Moment, id: string): Laid {
@@ -418,7 +469,9 @@ function layoutTerm(m: Moment, id: string): Laid {
       label(`${id}_m${i}`, CX, termY + 38 + i * 20, line, 'md', 'muted'),
     ),
   );
-  return { elements: out, parts: [], arrowsOf: new Map() };
+  const named = new Map<string, string>();
+  if (m.term) named.set(`${id}_t`, m.term);
+  return { elements: out, parts: [], arrowsOf: new Map(), named };
 }
 
 /** Compare, flow and hub reuse the picture engine: the card becomes a structure it already lays out. */
@@ -428,6 +481,7 @@ function layoutStructured(m: Moment, id: string): Laid {
   const arrows: VisualStructure['arrows'] = [];
   const parts: string[] = [];
   const arrowsOf = new Map<string, string[]>();
+  const named = new Map<string, string>();
   if (heading)
     items.push({ id: `${id}_h`, role: 'title', kind: 'label', text: heading });
   const asItem = (
@@ -460,6 +514,7 @@ function layoutStructured(m: Moment, id: string): Laid {
       const partId = `${id}_p${i}`;
       items.push(asItem(step, partId, 'step'));
       parts.push(partId);
+      named.set(partId, step.text);
       if (i > 0) {
         const arrowId = `${id}_a${i}`;
         arrows.push({ id: arrowId, from: `${id}_p${i - 1}`, to: partId });
@@ -496,6 +551,7 @@ function layoutStructured(m: Moment, id: string): Laid {
         const partId = `${id}_p${offset + i}`;
         items.push({ id: partId, role, kind: 'chip', text, color: m.color });
         parts.push(partId);
+        named.set(partId, text);
       });
       return list.length;
     };
@@ -505,12 +561,14 @@ function layoutStructured(m: Moment, id: string): Laid {
     template = 'hub';
     const centre = m.centre ?? { text: '' };
     items.push(asItem(centre, `${id}_c`, 'centre'));
+    named.set(`${id}_c`, centre.text);
     const inputs = (m.inputs ?? []).slice(0, TUTORIAL_LIMITS.maxSide);
     const outputs = (m.outputs ?? []).slice(0, TUTORIAL_LIMITS.maxSide);
     inputs.forEach((input, i) => {
       const partId = `${id}_p${i}`;
       items.push(asItem(input, partId, 'input'));
       parts.push(partId);
+      named.set(partId, input.text);
       const arrowId = `${id}_a${i}`;
       arrows.push({ id: arrowId, from: partId, to: `${id}_c` });
       arrowsOf.set(partId, [arrowId]);
@@ -520,6 +578,7 @@ function layoutStructured(m: Moment, id: string): Laid {
       const partId = `${id}_p${i}`;
       items.push(asItem(output, partId, 'output'));
       parts.push(partId);
+      named.set(partId, output.text);
       const arrowId = `${id}_a${i}`;
       arrows.push({ id: arrowId, from: `${id}_c`, to: partId });
       arrowsOf.set(partId, [arrowId]);
@@ -532,7 +591,7 @@ function layoutStructured(m: Moment, id: string): Laid {
     arrows,
     segments: [],
   });
-  return { elements: scene.elements, parts, arrowsOf };
+  return { elements: scene.elements, parts, arrowsOf, named };
 }
 
 /** One moment as elements, with its parts and arrows named for the cues. */
@@ -601,7 +660,16 @@ export function layoutTutorial(tutorial: VisualTutorial): VisualScript {
       const partId = laid.parts[reveal.part];
       if (!partId) continue;
       const sentence = Math.max(from, Math.min(to, reveal.sentence));
-      revealed.set(partId, { sentence, word: Math.max(0, reveal.word) });
+      // The app finds the word the part is named by; the model's count is
+      // the fallback, since it is often a word or two off.
+      const found = findWord(
+        tutorial.sentences[sentence],
+        laid.named.get(partId) ?? '',
+      );
+      revealed.set(partId, {
+        sentence,
+        word: found ?? Math.max(0, reveal.word ?? 0),
+      });
     }
     if (index > 0)
       cuesBySentence[from].push({ at: 0, do: 'clear', target: '*' });
@@ -620,6 +688,20 @@ export function layoutTutorial(tutorial: VisualTutorial): VisualScript {
       for (const arrowId of laid.arrowsOf.get(partId) ?? []) {
         const arrow = byId.get(arrowId);
         if (arrow) at(when.sentence, when.word, arrow);
+      }
+    }
+    // A thing that is on screen pulses on the word that names it.
+    for (const [elementId, name] of laid.named) {
+      if (revealed.has(elementId) || !byId.has(elementId)) continue;
+      for (let sentence = from; sentence <= to; sentence += 1) {
+        const word = findWord(tutorial.sentences[sentence], name);
+        if (word === null || (sentence === from && word === 0)) continue;
+        cuesBySentence[sentence].push({
+          at: word,
+          do: 'pulse',
+          target: elementId,
+        });
+        break;
       }
     }
   });
@@ -656,6 +738,13 @@ export function tidyTutorial(tutorial: VisualTutorial): VisualTutorial {
     const to = Math.max(from, m.to);
     end = to;
     ranged.push({ ...m, from, to });
+  }
+  // Two statements in a row are one: the first holds through both.
+  for (let i = ranged.length - 1; i > 0; i -= 1) {
+    if (ranged[i].card === 'statement' && ranged[i - 1].card === 'statement') {
+      ranged[i - 1].to = ranged[i].to;
+      ranged.splice(i, 1);
+    }
   }
   // The closing sentences belong to the last card when the model left them bare.
   const tail = ranged[ranged.length - 1];
@@ -888,6 +977,13 @@ export function tutorialWarnings(tutorial: VisualTutorial): string[] {
   const out: string[] = [];
   tutorial.moments.forEach((m, i) => {
     const who = `Moment ${i + 1} (${m.card})`;
+    const spoken = tutorial.sentences
+      .slice(m.from, m.to + 1)
+      .reduce((sum, s) => sum + words(s).length, 0);
+    if (spoken < TUTORIAL_LIMITS.minWordsPerMoment)
+      out.push(
+        `${who} is spoken over ${spoken} words; a card needs at least ${TUTORIAL_LIMITS.minWordsPerMoment} to hold on screen. Give it more of the narration or fold it into a neighbour.`,
+      );
     const names = [
       m.picture,
       ...(m.items ?? []).map((item) => item.picture),

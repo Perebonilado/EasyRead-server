@@ -1249,12 +1249,12 @@ export const PROMPTS = {
     ].join(' '),
     [
       'Reveals: a chip, a list item, a step, a compare item or a hub input',
-      'or output may appear on a word rather than with the card. Give its',
-      "part index, zero-based in the card's order (chips, list and flow",
-      'items in order; compare left items then right; hub inputs then',
-      'outputs), the sentence index, and the word index counting from',
-      'zero after splitting the sentence on spaces. Use reveals for lists',
-      'and steps the narration walks through, on the word that names each.',
+      'or output may appear when the narration names it rather than with',
+      "the card. Give its part index, zero-based in the card's order",
+      '(chips, list and flow items in order; compare left items then',
+      'right; hub inputs then outputs) and the index of the sentence that',
+      'names it; the app finds the word, so word may be null. Use reveals',
+      'for lists and steps the narration walks through.',
     ].join(' '),
     [
       'Vary the cards: a picture or a chips row for things, a number for',

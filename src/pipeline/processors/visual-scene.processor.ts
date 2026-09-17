@@ -1,6 +1,5 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import {
-  estimateWordTimes,
   wordTimesFromAligned,
   type WordTimes,
 } from '../../business/domain/board';
@@ -11,6 +10,7 @@ import {
   VISUAL_GENERATOR_VERSION,
   layoutProblems,
   materialPool,
+  estimateVisualWordTimes,
   repairVisual,
   sceneSpoken,
   timeVisual,
@@ -329,7 +329,13 @@ export class VisualSceneProcessor {
         }
       }
       const timing = times ? 'aligned' : 'estimated';
-      if (!times) times = estimateWordTimes(spoken.text, durationMs, audioKey);
+      if (!times)
+        times = estimateVisualWordTimes({
+          forms,
+          pausesS: pauses,
+          durationMs,
+          audioKey,
+        });
       const timeline = timeVisual({ script, forms, times, durationMs, timing });
 
       await this.visuals.update(record.id, {

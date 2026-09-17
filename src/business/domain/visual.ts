@@ -14,7 +14,7 @@
  * milliseconds through the spoken form and the measured words, so no
  * voice's tokenizing can move a cue.
  */
-import { contentWords, type WordTimes } from './board';
+import { contentWords, type WordTimes, estimateWordTimes } from './board';
 import { grounded } from './sketch';
 import type { SpokenForm } from './spoken';
 import { measureText } from './visual-font';
@@ -37,7 +37,8 @@ export const VISUAL_LIMITS = {
   maxElements: 200,
   minSegments: 3,
   maxSegments: 48,
-  maxCuesPerSegment: 12,
+  /** The app writes a card's cues itself; a hub with its arrows and names takes many at once. */
+  maxCuesPerSegment: 24,
   minWordsPerSegment: 4,
   maxWordsPerSegment: 36,
   minWords: 60,
@@ -1484,8 +1485,12 @@ function clampAll(elements: VisualElement[]): VisualElement[] {
 
 /** Visuals that begin a breath before the word feel in sync; on the word feels late. */
 export const ANTICIPATION_MS = 120;
+/** A card comes in this long before its first word, inside the pause before the sentence. */
+export const CARD_LEAD_MS = 450;
+/** The least silence kept after the sentence before, so a card never lands on its last word. */
+export const CARD_CLEAR_MS = 40;
 /** Two effects on different targets closer than this are staggered so each reads. */
-export const CROWDING_MS = 150;
+export const CROWDING_MS = 100;
 /** Silence the voice leaves between sentences, for the estimate. */
 export const SENTENCE_GAP_MS = 350;
 
@@ -1509,6 +1514,48 @@ export function sceneSpoken(forms: SpokenForm[]): {
 }
 
 /**
+ * Word times guessed for a voice that was never measured, pinned to the
+ * sentences: the silences the voice was asked for are taken out first,
+ * each sentence gets a share of what is left by its length, and its
+ * words are spread inside it. The guess never crosses a sentence.
+ */
+export function estimateVisualWordTimes(input: {
+  forms: SpokenForm[];
+  /** Silence after each sentence, in seconds, as the voice was asked. */
+  pausesS: number[];
+  durationMs: number;
+  audioKey: string;
+}): WordTimes {
+  const { forms, pausesS, durationMs, audioKey } = input;
+  const { text, starts } = sceneSpoken(forms);
+  const whole = estimateWordTimes(text, durationMs, audioKey);
+  const silence = pausesS.reduce((sum, s) => sum + s, 0) * 1000;
+  const speech = Math.max(durationMs * 0.4, durationMs - silence);
+  const chars = forms.reduce((sum, form) => sum + form.text.length, 0) || 1;
+  const perChar = speech / chars;
+  const words: number[][] = [];
+  let cursor = 0;
+  forms.forEach((form, index) => {
+    const start = starts[index];
+    const span = form.text.length * perChar;
+    const pattern = /\S+/g;
+    let match: RegExpExecArray | null;
+    while ((match = pattern.exec(form.text)) !== null) {
+      const from = match.index;
+      const to = from + match[0].length;
+      words.push([
+        start + from,
+        start + to,
+        Math.round(cursor + (from / form.text.length) * span),
+        Math.round(cursor + (to / form.text.length) * span),
+      ]);
+    }
+    cursor += span + (pausesS[index] ?? 0) * 1000;
+  });
+  return { ...whole, words };
+}
+
+/**
  * Every cue on the audio. A cue names a word of its written sentence; the
  * spoken form says which spoken words that became; the measured words say
  * when the first of those is heard. Draws and fades land a breath early;
@@ -1524,6 +1571,7 @@ export function timeVisual(input: {
 }): VisualTimeline {
   const { script, forms, times } = input;
   const { starts } = sceneSpoken(forms);
+  let previousEnd = 0;
   const segments: TimedSegment[] = script.segments.map((segment, index) => {
     const form = forms[index];
     const start = starts[index];
@@ -1532,14 +1580,22 @@ export function timeVisual(input: {
     const words = times.words.filter((w) => w[0] >= start && w[1] <= end);
     const startMs = words.length ? words[0][2] : 0;
     const endMs = words.length ? words[words.length - 1][3] : startMs;
+    // What comes in on the sentence's first word lands before the voice,
+    // in the pause the reader hears before it: the card is there when
+    // the words begin. Inside the sentence, a breath early.
+    const lead = Math.max(previousEnd + CARD_CLEAR_MS, startMs - CARD_LEAD_MS);
     const cues: TimedCue[] = segment.cues.map((cue) => {
       const span = form.spans[cue.at];
       const spokenIndex = span ? span[0] : cue.at;
       const word = words[Math.min(spokenIndex, Math.max(words.length - 1, 0))];
       let atMs = word ? word[2] : startMs;
-      if (SHOWS.has(cue.do)) atMs = Math.max(startMs, atMs - ANTICIPATION_MS);
+      if (cue.at === 0 && (SHOWS.has(cue.do) || cue.do === 'clear'))
+        atMs = Math.min(startMs, lead);
+      else if (SHOWS.has(cue.do))
+        atMs = Math.max(startMs, atMs - ANTICIPATION_MS);
       return { atMs, do: cue.do, target: cue.target };
     });
+    previousEnd = endMs;
     return { text: segment.text, startMs, endMs, words, cues };
   });
   // Crowding, across the whole scene in time order.

@@ -164,7 +164,12 @@ describe('a visual tutorial', () => {
       moments: [
         { from: 0, to: 3, card: 'title', heading: 'One' },
         { from: 3, to: 6, card: 'statement', text: 'Two things.' },
-        { from: 7, to: 9, card: 'statement', text: 'Three things.' },
+        {
+          from: 7,
+          to: 9,
+          card: 'list',
+          items: [{ text: 'three' }, { text: 'things' }],
+        },
       ],
     };
     const tidy = tidyTutorial(slipped);

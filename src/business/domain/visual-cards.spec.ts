@@ -170,5 +170,14 @@ describe('a visual tutorial', () => {
       [4, 6],
       [7, 8],
     ]);
+    // A moment past the last sentence has nothing to cover, and goes.
+    const past = tidyTutorial({
+      ...tutorial,
+      moments: [
+        { from: 0, to: 8, card: 'title', heading: 'One' },
+        { from: 9, to: 9, card: 'statement', text: 'Two things.' },
+      ],
+    });
+    expect(past.moments).toHaveLength(1);
   });
 });

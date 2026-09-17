@@ -611,12 +611,15 @@ export function tidyTutorial(tutorial: VisualTutorial): VisualTutorial {
     .map((m) => ({ ...m, from: clamp(m.from), to: clamp(m.to) }))
     .sort((a, b) => a.from - b.from);
   let end = -1;
-  const tidy = moments.map((m) => {
-    const from = m.from <= end ? Math.min(last, end + 1) : m.from;
+  const tidy: Moment[] = [];
+  for (const m of moments) {
+    // A moment with no sentence left past the one before is a slip too, and goes.
+    if (m.from <= end && end >= last) continue;
+    const from = m.from <= end ? end + 1 : m.from;
     const to = Math.max(from, m.to);
     end = to;
-    return { ...m, from, to };
-  });
+    tidy.push({ ...m, from, to });
+  }
   return { ...tutorial, moments: tidy };
 }
 

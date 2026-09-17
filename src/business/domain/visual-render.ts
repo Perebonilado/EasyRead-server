@@ -254,25 +254,46 @@ function anchorOf(
   byId: Map<string, VisualElement>,
   of: string,
   part: string,
+  ms = 0,
+  shown: Map<string, number> = new Map(),
 ): VisualPoint | null {
   const target = byId.get(of);
   if (!target) return null;
   if (target.type === 'figure') {
-    const { anchors } = buildFigure(target, 0, true);
+    const { anchors } = buildFigure(target, ms, ms === 0);
     return anchors[part] ?? anchors.centre ?? [target.x, target.y];
   }
   if (target.type === 'mechanism') {
-    const { anchors } = buildMechanism(target, 0, 3000, false);
+    const { anchors } = buildMechanism(
+      target,
+      stageShown(target, shown),
+      Math.max(ms, 3000),
+      false,
+    );
     return anchors[part] ?? anchors.centre ?? [target.x, target.y];
   }
   const box = boxOf(target);
   return box ? [box.x + box.w / 2, box.y + box.h / 2] : null;
 }
 
+/** Which stage a mechanism is in at a frame: the last of its phase chips shown. */
+function stageShown(
+  element: Extract<VisualElement, { type: 'mechanism' }>,
+  shown: Map<string, number>,
+): number {
+  let stage = 0;
+  element.phaseIds.forEach((id, index) => {
+    if (shown.has(id)) stage = index;
+  });
+  return stage;
+}
+
 function elementSvg(
   element: VisualElement,
   byId: Map<string, VisualElement>,
   alpha: number,
+  ms = 0,
+  shown: Map<string, number> = new Map(),
 ): string {
   const paint = paintOf(element.color);
   const wrap = (inner: string) =>
@@ -521,16 +542,26 @@ function elementSvg(
     case 'chart':
       return wrap(chart(element, paint));
     case 'figure':
-      return wrap(opsSvg(buildFigure(element, 0, true), paint));
+      return wrap(opsSvg(buildFigure(element, ms, ms === 0), paint));
     case 'mechanism':
-      // A few seconds into its first stage, so the still shows it at work.
-      return wrap(opsSvg(buildMechanism(element, 0, 3000, false), paint));
+      // A few seconds into its stage, so the still shows it at work.
+      return wrap(
+        opsSvg(
+          buildMechanism(
+            element,
+            stageShown(element, shown),
+            Math.max(ms, 3000),
+            false,
+          ),
+          paint,
+        ),
+      );
     case 'callout': {
       const size = LABEL_SIZE.sm;
       const w = labelWidth({ ...element, type: 'label', size: 'sm' });
       const start = element.anchor !== 'end';
       const left = start ? element.x : element.x - w;
-      const at = anchorOf(byId, element.of, element.part);
+      const at = anchorOf(byId, element.of, element.part, ms, shown);
       const from: VisualPoint = [start ? left - 4 : left + w + 4, element.y];
       const leader = at
         ? `<line x1="${n(from[0])}" y1="${n(from[1])}" x2="${n(at[0])}" y2="${n(at[1])}" stroke="${paint.text}" stroke-width="1.2" stroke-opacity="0.8"/><circle cx="${n(at[0])}" cy="${n(at[1])}" r="2.4" fill="${paint.text}"/>`
@@ -576,6 +607,7 @@ export function renderStill(
   shown: Map<string, number>,
   space: { w: number; h: number },
   standalone = true,
+  ms = 0,
 ): string {
   const byId = new Map(elements.map((e) => [e.id, e] as const));
   const inner =
@@ -583,7 +615,7 @@ export function renderStill(
     `<path d="${Array.from({ length: Math.ceil(space.w / 24) }, (_, i) => `M ${i * 24} 0 V ${space.h}`).join(' ')} ${Array.from({ length: Math.ceil(space.h / 24) }, (_, i) => `M 0 ${i * 24} H ${space.w}`).join(' ')}" stroke="${GRID}" stroke-width="0.6" fill="none"/>` +
     elements
       .filter((e) => shown.has(e.id))
-      .map((e) => elementSvg(e, byId, shown.get(e.id) ?? 1))
+      .map((e) => elementSvg(e, byId, shown.get(e.id) ?? 1, ms, shown))
       .join('');
   return standalone
     ? `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${space.w} ${space.h}" width="${space.w}" height="${space.h}">${inner}</svg>`
@@ -639,4 +671,54 @@ export async function rasterise(svg: string, width: number): Promise<Buffer> {
   })
     .render()
     .asPng();
+}
+
+/** The moments of a filmstrip: three frames across each, so motion and the order parts arrive in can be judged. */
+const FRAME_MS = [400, 2200, 4800];
+
+/**
+ * A filmstrip of the page: one row per moment (or per moment asked for,
+ * by position), three frames left to right across its sentences, living
+ * things a little further into their motion in each. Rows carry the
+ * moment's number as the judge is told it.
+ */
+export function renderFilm(
+  script: VisualScript,
+  moments: { from: number; to: number }[],
+  space: { w: number; h: number },
+  positions?: number[],
+): string {
+  const after = shownAfterEach(script);
+  const rows = (positions ?? moments.map((_, i) => i)).filter(
+    (k) => moments[k],
+  );
+  const gap = 10;
+  const labelRoom = 18;
+  const frameW = space.w + gap;
+  const rowH = space.h + labelRoom + gap;
+  const width = 3 * frameW + gap + 8;
+  const height = rows.length * rowH + gap;
+  const tiles = rows
+    .map((k, r) => {
+      const m = moments[k];
+      const y = gap + r * rowH;
+      const frames = [0, 1, 2]
+        .map((f) => {
+          const sentence = m.from + Math.floor(((m.to - m.from) * f) / 2);
+          const shown =
+            after[Math.max(0, Math.min(after.length - 1, sentence))] ??
+            new Map<string, number>();
+          const x = gap + 8 + f * frameW;
+          const clip = `film-${k}-${f}`;
+          return (
+            `<clipPath id="${clip}"><rect x="${x}" y="${labelRoom}" width="${space.w}" height="${space.h}"/></clipPath>` +
+            `<g clip-path="url(#${clip})"><g transform="translate(${x} ${labelRoom})">${renderStill(script.elements, shown, space, false, FRAME_MS[f])}</g></g>` +
+            `<rect x="${x}" y="${labelRoom}" width="${space.w}" height="${space.h}" fill="none" stroke="#3B4560" stroke-width="1"/>`
+          );
+        })
+        .join('');
+      return `<g transform="translate(0 ${y})">${textAt(gap + 8, 12, `${k + 1}`, 12, '#ffffff', 700, 'start')}${frames}</g>`;
+    })
+    .join('');
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${width} ${height}" width="${width}" height="${height}"><rect width="${width}" height="${height}" fill="#0F1520"/>${tiles}</svg>`;
 }

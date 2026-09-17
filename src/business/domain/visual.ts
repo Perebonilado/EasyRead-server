@@ -230,6 +230,7 @@ export type VisualElement =
       color?: VisualColor;
       /** A small picture from the library at the chip's left. */
       icon?: string;
+      carry?: string;
     }
   | {
       id: string;
@@ -260,6 +261,7 @@ export type VisualElement =
       manner: FigureManner;
       seed: number;
       color?: VisualColor;
+      carry?: string;
     }
   | {
       id: string;
@@ -305,6 +307,8 @@ export type VisualElement =
       fill?: 'solid' | 'outline' | 'tint';
       /** How a drawn picture moves once shown. */
       motion?: VisualMotion;
+      /** What the thing is, so the player can carry it from one card to the next. */
+      carry?: string;
     }
   | {
       id: string;
@@ -455,6 +459,10 @@ export interface VisualJudgement {
     drawings: { name: string; looksRight: boolean; wrong: string | null }[];
     textTrouble: string | null;
     crowded: boolean;
+    /** Whether the moment shows what the director said a learner should see. */
+    showsBrief: boolean;
+    verdict: 'go' | 'redo';
+    note: string | null;
   }[];
 }
 
@@ -468,6 +476,8 @@ export interface VisualTimeline {
   durationMs: number;
   /** How the words were measured: the aligner, or an estimate from the length. */
   timing: 'aligned' | 'estimated';
+  /** Moments that shipped plain, as words, after the judge said redo twice; by position. */
+  plain?: number[];
   /** The same script placed for each staging; `elements` and `space` are the box's. */
   stagings: Record<
     StagingName,
@@ -1852,6 +1862,7 @@ export function timeVisual(input: {
   durationMs: number;
   timing: 'aligned' | 'estimated';
   generator?: string;
+  plain?: number[];
 }): VisualTimeline {
   const { script, forms, times } = input;
   const { starts } = sceneSpoken(forms);
@@ -1903,6 +1914,7 @@ export function timeVisual(input: {
     segments,
     durationMs: input.durationMs,
     timing: input.timing,
+    ...(input.plain?.length ? { plain: input.plain } : {}),
     stagings: {
       box: { space: { w: box.w, h: box.h }, elements: script.elements },
       wide: {

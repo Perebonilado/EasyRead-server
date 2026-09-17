@@ -177,7 +177,7 @@ export function figureWidth(outline: FigureOutline): number {
 }
 
 /** The parts each outline knows how to draw; the rest are dropped. */
-const OUTLINE_PARTS: Record<FigureOutline, FigurePart[]> = {
+export const OUTLINE_PARTS: Record<FigureOutline, FigurePart[]> = {
   blob: [
     'membrane',
     'hairs',

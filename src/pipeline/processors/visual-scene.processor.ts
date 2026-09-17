@@ -23,15 +23,21 @@ import {
   type VisualScript,
 } from '../../business/domain/visual';
 import {
+  assembleTutorial,
   layoutTutorial,
+  mergeDecisions,
+  momentsNamed,
   pausesFor,
+  tidyNarration,
   tidyTutorial,
   tutorialProblems,
   tutorialWarnings,
   type Moment,
+  type VisualDecision,
   type VisualTutorial,
 } from '../../business/domain/visual-cards';
-import { rasterise, renderSheet } from '../../business/domain/visual-render';
+import { buildMenu } from '../../business/domain/visual-menu';
+import { rasterise, renderFilm } from '../../business/domain/visual-render';
 import type { AlignerPort } from '../../business/ports/aligner.port';
 import type { LlmGatewayPort } from '../../business/ports/llm.port';
 import type { StoragePort } from '../../business/ports/storage.port';
@@ -69,8 +75,19 @@ import type { JobContext } from './base.processor';
 const MATERIAL_CHARS = 14_000;
 /** How many times the model is asked to mend a script that still has problems. */
 const REPAIR_ROUNDS = 2;
+/** How many times the judge may send a moment back before it ships plain. */
+const JUDGE_ROUNDS = 2;
 /** The judge's sheet, in pixels across: three stills a row, each readable. */
 const SHEET_WIDTH = 1500;
+
+/** A decision's card and fields, without its reasoning, to tell whether a redo changed anything. */
+function decisionKey(d: VisualDecision): string {
+  const { reasoning, shouldSee, confidence, ...card } = d;
+  void reasoning;
+  void shouldSee;
+  void confidence;
+  return JSON.stringify(card);
+}
 
 /** What a card claims to draw, for the judge: the things named for pictures, figures and mechanisms. */
 function drawingsOf(m: Moment): string[] {
@@ -220,99 +237,99 @@ export class VisualSceneProcessor {
           : 'It is the first page of the chapter to be taught.',
       ].join(' ');
 
-      // The tutorial, mended until sound: the deterministic fixes first,
-      // the model only for what they cannot solve.
-      await this.visuals.update(record.id, { step: 'drawing' });
       const pool = materialPool(material);
-      const written = await this.llm.visualScript({
+      // Narrate first: the words, cut into moments with an intent each.
+      const narrated = await this.llm.visualNarration({
         plan,
         topicTitle: topic.title,
         material,
         context: where,
       });
-      await this.record(documentId, 'visual_script', written.usage);
-      // The model gave the tutorial; the app lays every card out, then
-      // mends what laying out alone cannot settle.
-      let tutorial: VisualTutorial = tidyTutorial(written.value);
-      if (tutorial.fit === 'poor') {
+      await this.record(documentId, 'visual_narration', narrated.usage);
+      const narration = tidyNarration(narrated.value);
+      if (narration.fit === 'poor') {
         await this.visuals.update(record.id, {
           status: 'not_suitable',
           step: null,
           fit: 'poor',
-          fitReason: tutorial.fitReason ?? 'This page has too little to teach.',
+          fitReason:
+            narration.fitReason ?? 'This page has too little to teach.',
         });
         return;
       }
-      let scripts = this.staged(tutorial);
-      let problems = [
+      // Then the director decides how each moment is shown, from the menu
+      // of what will draw for this page, reasoning first.
+      const menu = buildMenu(material, narration.sentences);
+      const directed = await this.llm.visualDirector({
+        narration,
+        menu: menu.text,
+        plan,
+        topicTitle: topic.title,
+        material,
+        context: where,
+      });
+      await this.record(documentId, 'visual_director', directed.usage);
+      let decisions = directed.value;
+      const build = () => {
+        const built = tidyTutorial(assembleTutorial(narration, decisions));
+        return { tutorial: built, scripts: this.staged(built) };
+      };
+      let { tutorial, scripts } = build();
+      const problemsNow = () => [
         ...tutorialProblems(tutorial, pool, materialWords, material),
         ...this.problemsOf(scripts),
       ];
+      /** The narration's index of each tutorial moment named by position. */
+      const originOf = (positions: number[]) =>
+        positions
+          .map((k) => tutorial.moments[k]?.index)
+          .filter((i): i is number => i !== undefined);
+      const everyMoment = narration.moments.map((_, i) => i);
+      const redoWith = async (only: number[], notes: string[]) => {
+        const redo = await this.llm.visualDirector({
+          narration,
+          menu: menu.text,
+          plan,
+          topicTitle: topic.title,
+          material,
+          context: where,
+          previous: decisions,
+          only,
+          notes,
+        });
+        await this.record(documentId, 'visual_director', redo.usage);
+        decisions = mergeDecisions(decisions, redo.value, only);
+        ({ tutorial, scripts } = build());
+      };
+      /** Moments that cannot be made sound ship plain: their intent in big type. */
+      const shipPlain = (indexes: number[]) => {
+        decisions = {
+          moments: decisions.moments.filter((d) => !indexes.includes(d.index)),
+        };
+        ({ tutorial, scripts } = build());
+      };
+      let problems = problemsNow();
       for (
         let round = 0;
         problems.length && round < REPAIR_ROUNDS;
         round += 1
       ) {
-        const mended = await this.llm.visualScript({
-          plan,
-          topicTitle: topic.title,
-          material,
-          context: where,
-          previous: tutorial,
-          // The warnings ride along as advice; only the problems must go.
-          problems: [
-            ...problems,
-            ...tutorialWarnings(tutorial),
-            ...visualWarnings(scripts.box),
-          ],
-        });
-        await this.record(documentId, 'visual_repair', mended.usage);
-        tutorial = tidyTutorial(mended.value);
-        scripts = this.staged(tutorial);
-        problems = [
-          ...tutorialProblems(tutorial, pool, materialWords, material),
-          ...this.problemsOf(scripts),
-        ];
+        const named = originOf(momentsNamed(problems));
+        await redoWith(named.length ? named : everyMoment, [
+          ...problems,
+          ...tutorialWarnings(tutorial),
+          ...visualWarnings(scripts.box),
+        ]);
+        problems = problemsNow();
       }
-      // The judge looks at a sheet of the moments as a learner would see
-      // them: a drawing that does not look like its name, text in
-      // trouble, a crowded card. What it finds goes to one more mend.
-      let sheet: Buffer | null = null;
-      if (!problems.length) {
-        const judged = await this.judge(documentId, tutorial, scripts.box, who);
-        sheet = judged.sheet;
-        if (judged.problems.length) {
-          this.logger.log(
-            `${who}: the judge found ${judged.problems.length} faults:\n- ${judged.problems.join('\n- ')}`,
+      if (problems.length) {
+        const named = originOf(momentsNamed(problems));
+        if (named.length) {
+          this.logger.warn(
+            `${who}: moments ${named.join(', ')} ship plain after ${REPAIR_ROUNDS} redos: ${problems.slice(0, 3).join(' ')}`,
           );
-          const mended = await this.llm.visualScript({
-            plan,
-            topicTitle: topic.title,
-            material,
-            context: where,
-            previous: tutorial,
-            problems: [
-              ...judged.problems,
-              ...tutorialWarnings(tutorial),
-              ...visualWarnings(scripts.box),
-            ],
-          });
-          await this.record(documentId, 'visual_repair', mended.usage);
-          const again = tidyTutorial(mended.value);
-          const staged = this.staged(again);
-          const left = [
-            ...tutorialProblems(again, pool, materialWords, material),
-            ...this.problemsOf(staged),
-          ];
-          // The mend is kept only when it is sound; a worse answer is not.
-          if (!left.length) {
-            tutorial = again;
-            scripts = staged;
-            sheet = await this.sheetOf(tutorial, scripts.box);
-          } else
-            this.logger.warn(
-              `${who}: the mend after the judge left ${left.length} problems; the judged version is kept.`,
-            );
+          shipPlain(named);
+          problems = problemsNow();
         }
       }
       if (problems.length) {
@@ -323,6 +340,73 @@ export class VisualSceneProcessor {
           `The scene could not be made sound: ${problems.slice(0, 3).join(' ')}`,
         );
       }
+
+      // The judge looks at a filmstrip of every moment against the
+      // director's brief. A moment it sends back goes to the director
+      // alone, twice at most; then it ships plain.
+      let judged = await this.judge(documentId, tutorial, scripts.box, who);
+      for (
+        let round = 0;
+        judged.redo.length && round < JUDGE_ROUNDS;
+        round += 1
+      ) {
+        const only = judged.redo.map((r) => r.index);
+        this.logger.log(
+          `${who}: the judge sent back ${only.length} moment(s):\n- ${judged.redo.map((r) => `${r.index + 1}: ${r.note}`).join('\n- ')}`,
+        );
+        const before = new Map(
+          decisions.moments.map((d) => [d.index, decisionKey(d)] as const),
+        );
+        await redoWith(
+          only,
+          judged.redo.map((r) => `Moment ${r.index + 1}: ${r.note}`),
+        );
+        // A moment the director stands by, unchanged, is not asked about
+        // again: the judge has had its say and the director its reasons.
+        const stood = decisions.moments
+          .filter(
+            (d) =>
+              only.includes(d.index) && before.get(d.index) === decisionKey(d),
+          )
+          .map((d) => d.index);
+        if (stood.length)
+          this.logger.log(
+            `${who}: the director stood by moment(s) ${stood.map((i) => i + 1).join(', ')}.`,
+          );
+        problems = problemsNow();
+        if (problems.length) {
+          const named = originOf(momentsNamed(problems));
+          shipPlain(named.length ? named : only);
+          problems = problemsNow();
+          if (problems.length)
+            throw new Error(
+              `The scene could not be made sound after the judge: ${problems.slice(0, 3).join(' ')}`,
+            );
+        }
+        const again = only.filter((i) => !stood.includes(i));
+        judged = again.length
+          ? await this.judge(documentId, tutorial, scripts.box, who, again)
+          : { sheet: judged.sheet, redo: [] };
+      }
+      if (judged.redo.length) {
+        this.logger.warn(
+          `${who}: moments ${judged.redo.map((r) => r.index + 1).join(', ')} ship plain after the judge said redo ${JUDGE_ROUNDS} times.`,
+        );
+        shipPlain(judged.redo.map((r) => r.index));
+        problems = problemsNow();
+        if (problems.length)
+          throw new Error(
+            `The scene could not be made sound: ${problems.slice(0, 3).join(' ')}`,
+          );
+      }
+      const sheet = await this.filmOf(tutorial, scripts.box);
+      const plainPositions = tutorial.moments
+        .map((m, k) => (m.plain ? k : -1))
+        .filter((k) => k >= 0);
+      if (plainPositions.length)
+        this.logger.warn(
+          `${who}: ${plainPositions.length} moment(s) shown as words: ${plainPositions.map((k) => k + 1).join(', ')}`,
+        );
 
       // Voice: the lecture's voice for this document, the sentences as
       // pieces with a breath between them, one file.
@@ -357,12 +441,11 @@ export class VisualSceneProcessor {
         body: result.audio,
         mimeType: result.mimeType,
       });
-      if (sheet)
-        await this.storage.put({
-          key: `documents/${doc.id}/visuals/v${contentVersion}/p${pageNumber}-${VISUAL_GENERATOR_VERSION}-sheet.png`,
-          body: sheet,
-          mimeType: 'image/png',
-        });
+      await this.storage.put({
+        key: `documents/${doc.id}/visuals/v${contentVersion}/p${pageNumber}-${VISUAL_GENERATOR_VERSION}-sheet.png`,
+        body: sheet,
+        mimeType: 'image/png',
+      });
       const durationMs =
         result.durationMs ?? mp3DurationMs(result.audio.length);
       await this.calls.record({
@@ -425,6 +508,7 @@ export class VisualSceneProcessor {
           times: words,
           durationMs,
           timing: how,
+          plain: plainPositions,
         });
       let timeline = time(times, timing);
       let faults = timingProblems(timeline);
@@ -475,36 +559,48 @@ export class VisualSceneProcessor {
   }
 
   /** What is wrong with the laid-out scene; the words were checked on the tutorial itself. */
-  /** The sheet of every moment's still, the box staging, as the judge and the admin see it. */
-  private async sheetOf(
+  /** The filmstrip of every moment, the box staging, as the judge and the admin see it. */
+  private async filmOf(
     tutorial: VisualTutorial,
     script: VisualScript,
+    positions?: number[],
   ): Promise<Buffer> {
-    const svg = renderSheet(script, tutorial.moments, {
-      w: STAGES.box.W,
-      h: STAGES.box.H,
-    });
+    const svg = renderFilm(
+      script,
+      tutorial.moments,
+      { w: STAGES.box.W, h: STAGES.box.H },
+      positions,
+    );
     return rasterise(svg, SHEET_WIDTH);
   }
 
   /**
-   * The judge's look at the page: every drawing named on a card, by
-   * moment, against the still of that moment. A drawing that does not
-   * look like its name, text in trouble or a crowded card come back as
-   * problems in the model's own terms.
+   * The judge's look at the page, or at the moments named by the
+   * narration's index: a filmstrip of each against the director's brief.
+   * Back come the moments to redo, each with the judge's note; a
+   * drawing that does not look like its name, text in trouble or a
+   * crowded card make the note when the judge gave none.
    */
   private async judge(
     documentId: string,
     tutorial: VisualTutorial,
     script: VisualScript,
     who: string,
-  ): Promise<{ sheet: Buffer; problems: string[] }> {
-    const sheet = await this.sheetOf(tutorial, script);
-    const moments = tutorial.moments.map((m, i) => ({
-      moment: i + 1,
-      card: m.card,
-      drawings: drawingsOf(m),
-    }));
+    only?: number[],
+  ): Promise<{ sheet: Buffer; redo: { index: number; note: string }[] }> {
+    const positions = tutorial.moments
+      .map((m, k) => k)
+      .filter((k) => !only || only.includes(tutorial.moments[k].index ?? -1));
+    const sheet = await this.filmOf(tutorial, script, positions);
+    const moments = positions.map((k) => {
+      const m = tutorial.moments[k];
+      return {
+        moment: k + 1,
+        card: m.card,
+        drawings: drawingsOf(m),
+        shouldSee: m.shouldSee ?? m.intent ?? 'what the sentences say',
+      };
+    });
     try {
       const judged = await this.llm.visualJudge({
         png: sheet,
@@ -512,31 +608,50 @@ export class VisualSceneProcessor {
         moments,
       });
       await this.record(documentId, 'visual_judge', judged.usage);
-      const problems: string[] = [];
+      const redo: { index: number; note: string }[] = [];
       for (const verdict of judged.value.moments) {
         const m = tutorial.moments[verdict.moment - 1];
-        if (!m) continue;
-        const label = `Moment ${verdict.moment} (${m.card})`;
-        for (const d of verdict.drawings)
-          if (!d.looksRight)
-            problems.push(
-              `${label}: the drawing named "${d.name}" does not look like it${d.wrong ? ` (${d.wrong})` : ''}. Name the thing another way, give the card a shape, or use another card.`,
-            );
-        if (verdict.textTrouble)
-          problems.push(
-            `${label}: ${verdict.textTrouble} Cut words or split the card.`,
-          );
-        if (verdict.crowded)
-          problems.push(
-            `${label} is crowded; a learner cannot take it in at a glance. Cut items or split it into two moments.`,
-          );
+        if (
+          !m ||
+          m.index === undefined ||
+          !positions.includes(verdict.moment - 1)
+        )
+          continue;
+        // Only drawings the card claims count; the judge sometimes names one that is not there.
+        const claimed = drawingsOf(m).map((d) => d.toLowerCase());
+        const wrong = verdict.drawings.filter(
+          (d) =>
+            !d.looksRight &&
+            claimed.some(
+              (c) =>
+                c.includes(d.name.toLowerCase()) ||
+                d.name.toLowerCase().includes(c),
+            ),
+        );
+        const faults = [
+          ...wrong.map(
+            (d) =>
+              `the drawing named "${d.name}" does not look like it${d.wrong ? ` (${d.wrong})` : ''}`,
+          ),
+          ...(verdict.textTrouble ? [verdict.textTrouble] : []),
+          ...(verdict.crowded ? ['the card is crowded'] : []),
+          ...(!verdict.showsBrief
+            ? ['the picture does not show what a learner should see']
+            : []),
+        ];
+        if (verdict.verdict === 'redo' || faults.length)
+          redo.push({
+            index: m.index,
+            note:
+              [verdict.note, ...faults].filter(Boolean).join('; ') || 'redo',
+          });
       }
-      return { sheet, problems };
+      return { sheet, redo };
     } catch (error) {
       this.logger.warn(
         `${who}: the judge could not look: ${(error as Error).message}`,
       );
-      return { sheet, problems: [] };
+      return { sheet, redo: [] };
     }
   }
 
@@ -585,7 +700,8 @@ export class VisualSceneProcessor {
 
   private async record(
     documentId: string,
-    task: 'visual_plan' | 'visual_script' | 'visual_repair' | 'visual_judge',
+    task:
+      'visual_plan' | 'visual_narration' | 'visual_director' | 'visual_judge',
     usage: {
       model: string;
       tokensIn: number;

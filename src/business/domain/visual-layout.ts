@@ -145,7 +145,15 @@ export function place(
   switch (item.kind) {
     case 'chip':
       return [
-        { id: item.id, type: 'chip', x: cx, y: cy, text: item.text, color },
+        {
+          id: item.id,
+          type: 'chip',
+          x: cx,
+          y: cy,
+          text: item.text,
+          color,
+          carry: item.text.toLowerCase(),
+        },
       ];
     case 'label':
       return [
@@ -184,6 +192,7 @@ export function place(
             manner: item.figure.manner,
             seed: item.figure.seed,
             color,
+            carry: item.figure.of.toLowerCase(),
           },
         ];
         if (item.text)
@@ -217,6 +226,7 @@ export function place(
           kind: name,
           color,
           fill: 'tint',
+          carry: name,
         },
       ];
       if (item.text) {

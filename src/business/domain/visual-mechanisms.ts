@@ -347,15 +347,13 @@ export function mechanismProblems(
     ];
   }
   const spec = MECHANISMS[ask.kind];
+  // Every kind's numbers share one form, so a number meant for another
+  // kind is simply not read; only a value that is not a number is a fault.
   for (const [name, value] of Object.entries(ask.params ?? {})) {
-    const param = spec.params.find((p) => p.name === name);
-    if (!param) {
-      problems.push(
-        `${who}: a ${ask.kind} has no number called "${name}"; its numbers are ${spec.params.map((p) => p.name).join(', ')}.`,
-      );
-    } else if (typeof value !== 'number' || !Number.isFinite(value)) {
+    if (value === null || value === undefined) continue;
+    if (!spec.params.some((p) => p.name === name)) continue;
+    if (typeof value !== 'number' || !Number.isFinite(value))
       problems.push(`${who}: "${name}" is not a number.`);
-    }
   }
   const phases = ask.phases ?? [];
   if (phases.length > 4) problems.push(`${who}: at most four phases.`);

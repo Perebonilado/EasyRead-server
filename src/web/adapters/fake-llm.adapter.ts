@@ -19,7 +19,11 @@ import type {
   SketchTemplate,
 } from '../../business/ports/llm.port';
 import type { VisualJudgement, VisualPlan } from '../../business/domain/visual';
-import type { VisualTutorial } from '../../business/domain/visual-cards';
+import type {
+  VisualDecisions,
+  VisualNarration,
+  VisualTutorial,
+} from '../../business/domain/visual-cards';
 
 const EMBED_DIMENSIONS = 256;
 
@@ -548,10 +552,76 @@ export class FakeLlmAdapter implements LlmGatewayPort {
     });
   }
 
+  visualNarration(input: {
+    plan: VisualPlan;
+    topicTitle: string;
+    material: string;
+  }): Promise<LlmResult<VisualNarration>> {
+    const started = Date.now();
+    const sentences = [
+      'Here is the idea at the heart of this page, and why it is worth a few minutes of your time.',
+      'We will take it one piece at a time, so that each part makes sense before the next one comes.',
+      'The first thing to know is what feeds into it, and the second is what comes out the other side.',
+      'Keep those two ends in mind, because everything in between exists to turn one into the other.',
+      'In the middle sits the part the page keeps coming back to, the one that does the work.',
+      'Once you see how the middle connects the two ends, the rest of the page reads itself.',
+      'That is the shape of it, from what goes in to what comes out, with one thing in between.',
+      'So in one line, the page is about how one thing turns into another through the part in the middle.',
+    ];
+    return Promise.resolve({
+      value: {
+        title: input.topicTitle.slice(0, 60),
+        fit: 'good',
+        fitReason: null,
+        sentences,
+        moments: [
+          { from: 0, to: 1, intent: 'why this matters' },
+          {
+            from: 2,
+            to: 4,
+            intent: 'what goes in, what comes out, the part between',
+          },
+          { from: 5, to: 7, intent: 'the line to remember' },
+        ],
+      },
+      usage: this.usage(started, 400, 300),
+    });
+  }
+
+  visualDirector(input: {
+    narration: VisualNarration;
+    previous?: VisualDecisions;
+    only?: number[];
+  }): Promise<LlmResult<VisualDecisions>> {
+    const started = Date.now();
+    const moments = input.narration.moments.map((m, index) => ({
+      index,
+      reasoning: 'A plain card for the test.',
+      shouldSee: m.intent,
+      confidence: 'high' as const,
+      card: (index === 0 ? 'title' : 'statement') as 'title' | 'statement',
+      heading: index === 0 ? input.narration.title : undefined,
+      text: index === 0 ? undefined : m.intent,
+    }));
+    return Promise.resolve({
+      value: {
+        moments: input.only?.length
+          ? moments.filter((m) => input.only!.includes(m.index))
+          : moments,
+      },
+      usage: this.usage(started, 400, 300),
+    });
+  }
+
   visualJudge(input: {
     png: Buffer;
     title: string;
-    moments: { moment: number; card: string; drawings: string[] }[];
+    moments: {
+      moment: number;
+      card: string;
+      drawings: string[];
+      shouldSee: string;
+    }[];
   }): Promise<LlmResult<VisualJudgement>> {
     const started = Date.now();
     return Promise.resolve({
@@ -565,77 +635,12 @@ export class FakeLlmAdapter implements LlmGatewayPort {
           })),
           textTrouble: null,
           crowded: false,
+          showsBrief: true,
+          verdict: 'go' as const,
+          note: null,
         })),
       },
       usage: this.usage(started, 200, 100),
-    });
-  }
-
-  visualScript(input: {
-    plan: VisualPlan;
-    topicTitle: string;
-    material: string;
-    previous?: VisualTutorial;
-    problems?: string[];
-  }): Promise<LlmResult<VisualTutorial>> {
-    const started = Date.now();
-    if (input.previous) {
-      return Promise.resolve({
-        value: input.previous,
-        usage: this.usage(started, 300, 300),
-      });
-    }
-    const terms = input.plan.keyTerms.slice(0, 3);
-    const chip = (i: number) => (terms[i] ?? `part ${i + 1}`).slice(0, 22);
-    const tutorial: VisualTutorial = {
-      title: input.topicTitle.slice(0, 60),
-      fit: 'good',
-      sentences: [
-        'Here is the idea at the heart of this chapter, and why it is worth a few minutes of your time.',
-        'We will take it one piece at a time, so that each part makes sense before the next one comes.',
-        'The first thing to know is what feeds into it, and the second is what comes out the other side.',
-        'Keep those two ends in mind, because everything in between exists to turn one into the other.',
-        'In the middle sits the part the chapter keeps coming back to, the one that does the work.',
-        'Once you see how the middle connects the two ends, the rest of the chapter reads itself.',
-        'That is the shape of it, from what goes in to what comes out, with one thing in between.',
-        'So in one line, the chapter is about how one thing turns into another through the part in the middle.',
-      ],
-      moments: [
-        {
-          from: 0,
-          to: 1,
-          card: 'title',
-          eyebrow: 'the idea',
-          heading: input.topicTitle.slice(0, 40),
-        },
-        {
-          from: 2,
-          to: 3,
-          card: 'chips',
-          heading: 'The two ends',
-          items: [{ text: chip(1) }, { text: chip(2) }],
-          reveals: [{ part: 1, sentence: 2, word: 15 }],
-        },
-        {
-          from: 4,
-          to: 5,
-          card: 'hub',
-          centre: { text: chip(0), picture: 'document' },
-          inputs: [{ text: chip(1) }],
-          outputs: [{ text: chip(2) }],
-        },
-        {
-          from: 6,
-          to: 7,
-          card: 'statement',
-          text: 'One thing turns into another.',
-          emphasis: ['another'],
-        },
-      ],
-    };
-    return Promise.resolve({
-      value: tutorial,
-      usage: this.usage(started, 800, 600),
     });
   }
 

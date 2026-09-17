@@ -489,6 +489,172 @@ const cardSide = z.object({
   items: z.array(z.string().min(1).max(22)).max(4).nullable(),
 });
 
+/** A card's fields: which card, and what it carries; fields a card does not use are null. */
+const momentFields = {
+  card: z.enum([
+    'title',
+    'statement',
+    'number',
+    'chips',
+    'list',
+    'picture',
+    'term',
+    'compare',
+    'flow',
+    'hub',
+    'chart',
+    'scene',
+    'timeline',
+    'table',
+    'rings',
+    'overlap',
+    'count',
+    'mechanism',
+  ]),
+  color: visualColor,
+  eyebrow: z.string().max(30).nullable(),
+  heading: z.string().max(40).nullable(),
+  text: z.string().max(120).nullable(),
+  emphasis: z.array(z.string().min(1).max(24)).max(3).nullable(),
+  figure: z.string().max(12).nullable(),
+  caption: z.string().max(40).nullable(),
+  bar: z
+    .object({
+      value: z.number().min(0).max(1),
+      left: z.string().max(30).nullable(),
+      right: z.string().max(30).nullable(),
+      markers: z
+        .array(
+          z.object({
+            at: z.number().min(0).max(1),
+            text: z.string().min(1).max(14),
+          }),
+        )
+        .max(4)
+        .nullable(),
+    })
+    .nullable(),
+  items: z.array(cardItem).max(5).nullable(),
+  picture: z.string().max(32).nullable(),
+  /** For a picture card: the shape the thing takes, when no drawing of it exists. */
+  shape: z
+    .object({
+      outline: z.enum(FIGURE_OUTLINES),
+      parts: z.array(z.enum(FIGURE_PARTS)).max(5),
+      manner: z.enum(FIGURE_MANNERS),
+    })
+    .nullable(),
+  /** For a picture card: how the drawn thing moves once shown. */
+  motion: z.enum(VISUAL_MOTIONS).nullable(),
+  /** For a picture or mechanism card: short lines that point at a part and follow it. */
+  callouts: z
+    .array(
+      z.object({
+        part: z.string().min(1).max(16),
+        text: z.string().min(1).max(30),
+      }),
+    )
+    .max(3)
+    .nullable(),
+  /** For a mechanism card: the machine, the page's numbers, and the stages to show in order. */
+  mechanism: z
+    .object({
+      kind: z.enum(MECHANISM_KINDS),
+      params: z
+        .object({
+          capacity: z.number().nullable(),
+          rate: z.number().nullable(),
+          requests: z.number().nullable(),
+          perRequest: z.number().nullable(),
+          arrivals: z.number().nullable(),
+          servers: z.number().nullable(),
+          service: z.number().nullable(),
+          stages: z.number().nullable(),
+          slow: z.number().nullable(),
+          stations: z.number().nullable(),
+          speed: z.number().nullable(),
+          left: z.number().nullable(),
+          right: z.number().nullable(),
+          size: z.number().nullable(),
+          contacts: z.number().nullable(),
+          beats: z.number().nullable(),
+        })
+        .nullable(),
+      phases: z
+        .array(
+          z.object({
+            stage: z.string().min(1).max(12),
+            text: z.string().min(1).max(24),
+          }),
+        )
+        .max(4)
+        .nullable(),
+    })
+    .nullable(),
+  name: z.string().max(24).nullable(),
+  bubble: z.string().max(36).nullable(),
+  term: z.string().max(24).nullable(),
+  meaning: z.string().max(96).nullable(),
+  left: cardSide.nullable(),
+  right: cardSide.nullable(),
+  centre: cardItem.nullable(),
+  inputs: z.array(cardItem).max(4).nullable(),
+  outputs: z.array(cardItem).max(4).nullable(),
+  chart: z
+    .object({
+      kind: z.enum(['bars', 'line', 'shares', 'pair']),
+      series: z
+        .array(
+          z.object({
+            label: z.string().min(1).max(18),
+            value: z.number(),
+          }),
+        )
+        .min(1)
+        .max(6),
+      unit: z.string().max(10).nullable(),
+    })
+    .nullable(),
+  pictures: z
+    .array(
+      z.object({
+        picture: z.string().min(1).max(32),
+        name: z.string().min(1).max(24),
+        size: z.enum(['big', 'small']).nullable(),
+        motion: z.enum(VISUAL_MOTIONS).nullable(),
+      }),
+    )
+    .max(4)
+    .nullable(),
+  points: z
+    .array(
+      z.object({
+        label: z.string().min(1).max(14),
+        text: z.string().min(1).max(40),
+      }),
+    )
+    .max(6)
+    .nullable(),
+  columns: z.array(z.string().min(1).max(16)).max(3).nullable(),
+  rows: z
+    .array(z.array(z.string().min(1).max(16)).max(3))
+    .max(4)
+    .nullable(),
+  layers: z.array(z.string().min(1).max(18)).max(5).nullable(),
+  shared: z.array(z.string().min(1).max(18)).max(3).nullable(),
+  reveals: z
+    .array(
+      z.object({
+        part: z.number().int().min(0),
+        sentence: z.number().int().min(0),
+        /** The app finds the word the part is named by; this is only a hint. */
+        word: z.number().int().min(0).nullable(),
+      }),
+    )
+    .max(8)
+    .nullable(),
+};
+
 /** The tutorial: the narration, and the moments that cut it, each one card with its fields. Fields a card does not use are null. */
 export const visualTutorialSchema = z.object({
   title: z.string().min(1).max(60),
@@ -501,168 +667,7 @@ export const visualTutorialSchema = z.object({
       z.object({
         from: z.number().int().min(0),
         to: z.number().int().min(0),
-        card: z.enum([
-          'title',
-          'statement',
-          'number',
-          'chips',
-          'list',
-          'picture',
-          'term',
-          'compare',
-          'flow',
-          'hub',
-          'chart',
-          'scene',
-          'timeline',
-          'table',
-          'rings',
-          'overlap',
-          'count',
-          'mechanism',
-        ]),
-        color: visualColor,
-        eyebrow: z.string().max(30).nullable(),
-        heading: z.string().max(40).nullable(),
-        text: z.string().max(120).nullable(),
-        emphasis: z.array(z.string().min(1).max(24)).max(3).nullable(),
-        figure: z.string().max(12).nullable(),
-        caption: z.string().max(40).nullable(),
-        bar: z
-          .object({
-            value: z.number().min(0).max(1),
-            left: z.string().max(30).nullable(),
-            right: z.string().max(30).nullable(),
-            markers: z
-              .array(
-                z.object({
-                  at: z.number().min(0).max(1),
-                  text: z.string().min(1).max(14),
-                }),
-              )
-              .max(4)
-              .nullable(),
-          })
-          .nullable(),
-        items: z.array(cardItem).max(5).nullable(),
-        picture: z.string().max(32).nullable(),
-        /** For a picture card: the shape the thing takes, when no drawing of it exists. */
-        shape: z
-          .object({
-            outline: z.enum(FIGURE_OUTLINES),
-            parts: z.array(z.enum(FIGURE_PARTS)).max(5),
-            manner: z.enum(FIGURE_MANNERS),
-          })
-          .nullable(),
-        /** For a picture card: how the drawn thing moves once shown. */
-        motion: z.enum(VISUAL_MOTIONS).nullable(),
-        /** For a picture or mechanism card: short lines that point at a part and follow it. */
-        callouts: z
-          .array(
-            z.object({
-              part: z.string().min(1).max(16),
-              text: z.string().min(1).max(30),
-            }),
-          )
-          .max(3)
-          .nullable(),
-        /** For a mechanism card: the machine, the page's numbers, and the stages to show in order. */
-        mechanism: z
-          .object({
-            kind: z.enum(MECHANISM_KINDS),
-            params: z
-              .object({
-                capacity: z.number().nullable(),
-                rate: z.number().nullable(),
-                requests: z.number().nullable(),
-                perRequest: z.number().nullable(),
-                arrivals: z.number().nullable(),
-                servers: z.number().nullable(),
-                service: z.number().nullable(),
-                stages: z.number().nullable(),
-                slow: z.number().nullable(),
-                stations: z.number().nullable(),
-                speed: z.number().nullable(),
-                left: z.number().nullable(),
-                right: z.number().nullable(),
-                size: z.number().nullable(),
-                contacts: z.number().nullable(),
-                beats: z.number().nullable(),
-              })
-              .nullable(),
-            phases: z
-              .array(
-                z.object({
-                  stage: z.string().min(1).max(12),
-                  text: z.string().min(1).max(24),
-                }),
-              )
-              .max(4)
-              .nullable(),
-          })
-          .nullable(),
-        name: z.string().max(24).nullable(),
-        bubble: z.string().max(36).nullable(),
-        term: z.string().max(24).nullable(),
-        meaning: z.string().max(96).nullable(),
-        left: cardSide.nullable(),
-        right: cardSide.nullable(),
-        centre: cardItem.nullable(),
-        inputs: z.array(cardItem).max(4).nullable(),
-        outputs: z.array(cardItem).max(4).nullable(),
-        chart: z
-          .object({
-            kind: z.enum(['bars', 'line', 'shares', 'pair']),
-            series: z
-              .array(
-                z.object({
-                  label: z.string().min(1).max(18),
-                  value: z.number(),
-                }),
-              )
-              .min(1)
-              .max(6),
-            unit: z.string().max(10).nullable(),
-          })
-          .nullable(),
-        pictures: z
-          .array(
-            z.object({
-              picture: z.string().min(1).max(32),
-              name: z.string().min(1).max(24),
-              size: z.enum(['big', 'small']).nullable(),
-              motion: z.enum(VISUAL_MOTIONS).nullable(),
-            }),
-          )
-          .max(4)
-          .nullable(),
-        points: z
-          .array(
-            z.object({
-              label: z.string().min(1).max(14),
-              text: z.string().min(1).max(40),
-            }),
-          )
-          .max(6)
-          .nullable(),
-        columns: z.array(z.string().min(1).max(16)).max(3).nullable(),
-        rows: z
-          .array(z.array(z.string().min(1).max(16)).max(3))
-          .max(4)
-          .nullable(),
-        layers: z.array(z.string().min(1).max(18)).max(5).nullable(),
-        shared: z.array(z.string().min(1).max(18)).max(3).nullable(),
-        reveals: z
-          .array(
-            z.object({
-              part: z.number().int().min(0),
-              sentence: z.number().int().min(0),
-              /** The app finds the word the part is named by; this is only a hint. */
-              word: z.number().int().min(0).nullable(),
-            }),
-          )
-          .max(8)
-          .nullable(),
+        ...momentFields,
       }),
     )
     .min(3)
@@ -758,6 +763,9 @@ export const visualJudgeSchema = z.object({
           .max(8),
         textTrouble: z.string().max(160).nullable(),
         crowded: z.boolean(),
+        showsBrief: z.boolean(),
+        verdict: z.enum(['go', 'redo']),
+        note: z.string().max(200).nullable(),
       }),
     )
     .max(40),
@@ -818,4 +826,38 @@ export const pronunciationsSchema = z.object({
       }),
     )
     .max(80),
+});
+
+/** The narration alone: the sentences, cut into moments, each with its intent. */
+export const visualNarrationSchema = z.object({
+  title: z.string().min(1).max(60),
+  fit: z.enum(['good', 'poor']),
+  fitReason: z.string().max(160).nullable(),
+  sentences: z.array(z.string().min(1).max(300)).min(8).max(48),
+  moments: z
+    .array(
+      z.object({
+        from: z.number().int().min(0),
+        to: z.number().int().min(0),
+        intent: z.string().min(1).max(120),
+      }),
+    )
+    .min(3)
+    .max(40),
+});
+
+/** The director's decisions: one entry per moment, the reasoning written before the card. */
+export const visualDecisionsSchema = z.object({
+  moments: z
+    .array(
+      z.object({
+        index: z.number().int().min(0),
+        reasoning: z.string().min(1).max(600),
+        shouldSee: z.string().min(1).max(160),
+        confidence: z.enum(['high', 'low']),
+        ...momentFields,
+      }),
+    )
+    .min(1)
+    .max(40),
 });

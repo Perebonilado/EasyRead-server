@@ -23,7 +23,11 @@ import type {
   VisualJudgement,
   VisualPlan,
 } from '../../../business/domain/visual';
-import type { VisualTutorial } from '../../../business/domain/visual-cards';
+import type {
+  VisualDecisions,
+  VisualNarration,
+  VisualTutorial,
+} from '../../../business/domain/visual-cards';
 import { PROMPTS } from '../prompts';
 import { ModelRegistry, type ModelRef } from './models';
 import {
@@ -37,8 +41,9 @@ import {
   lectureDiagramSchema,
   lectureSketchSchema,
   visualPlanSchema,
-  visualTutorialSchema,
   visualJudgeSchema,
+  visualNarrationSchema,
+  visualDecisionsSchema,
   sketchJudgeSchema,
   lectureExtraSchema,
   spokenQuizSchema,
@@ -691,7 +696,12 @@ export class AiSdkLlmAdapter implements LlmGatewayPort, OnModuleInit {
   async visualJudge(input: {
     png: Buffer;
     title: string;
-    moments: { moment: number; card: string; drawings: string[] }[];
+    moments: {
+      moment: number;
+      card: string;
+      drawings: string[];
+      shouldSee: string;
+    }[];
   }): Promise<LlmResult<VisualJudgement>> {
     const started = Date.now();
     const { generateObject } = await this.registry.modules();
@@ -699,7 +709,7 @@ export class AiSdkLlmAdapter implements LlmGatewayPort, OnModuleInit {
     const listed = input.moments
       .map(
         (m) =>
-          `${m.moment}. ${m.card} card${m.drawings.length ? `, drawing: ${m.drawings.join('; ')}` : ', no drawing'}`,
+          `${m.moment}. ${m.card} card${m.drawings.length ? `, drawing: ${m.drawings.join('; ')}` : ', no drawing'}. Should see: ${m.shouldSee}`,
       )
       .join('\n');
     const result = await generateObject({
@@ -730,6 +740,86 @@ export class AiSdkLlmAdapter implements LlmGatewayPort, OnModuleInit {
     };
   }
 
+  async visualNarration(input: {
+    plan: VisualPlan;
+    topicTitle: string;
+    material: string;
+    context?: string;
+  }): Promise<LlmResult<VisualNarration>> {
+    const started = Date.now();
+    const { generateObject } = await this.registry.modules();
+    const { model, ref } =
+      await this.registry.languageModel('visual_narration');
+    const result = await generateObject({
+      model,
+      schema: visualNarrationSchema,
+      system: PROMPTS.visualNarration,
+      prompt: [
+        `Chapter: ${input.topicTitle}`,
+        input.context ? `This page: ${input.context}` : '',
+        `The chapter's plan: ${JSON.stringify(input.plan)}`,
+        `The page:\n${input.material}`,
+      ]
+        .filter(Boolean)
+        .join('\n\n'),
+      maxRetries: this.maxRetries(),
+    });
+    return {
+      value: result.object,
+      usage: this.usage(ref, result.usage, started),
+    };
+  }
+
+  async visualDirector(input: {
+    narration: VisualNarration;
+    menu: string;
+    plan: VisualPlan;
+    topicTitle: string;
+    material: string;
+    context?: string;
+    previous?: VisualDecisions;
+    only?: number[];
+    notes?: string[];
+  }): Promise<LlmResult<VisualDecisions>> {
+    const started = Date.now();
+    const { generateObject } = await this.registry.modules();
+    const { model, ref } = await this.registry.languageModel('visual_director');
+    const moments = input.narration.moments
+      .map(
+        (m, i) =>
+          `${i}. sentences ${m.from} to ${m.to}: "${input.narration.sentences.slice(m.from, m.to + 1).join(' ')}" Intent: ${m.intent}`,
+      )
+      .join('\n');
+    const redo =
+      input.only?.length && input.previous
+        ? [
+            `Redo moments ${input.only.join(', ')} only. What was wrong:\n- ${(input.notes ?? []).join('\n- ')}`,
+            `Your earlier decisions for them: ${JSON.stringify(input.previous.moments.filter((d) => input.only!.includes(d.index)))}`,
+          ]
+        : [];
+    const result = await generateObject({
+      model,
+      schema: visualDecisionsSchema,
+      system: `${PROMPTS.visualDirector}\n\n${PROMPTS.visualCardGuide}`,
+      prompt: [
+        `Chapter: ${input.topicTitle}`,
+        input.context ? `This page: ${input.context}` : '',
+        `The chapter's plan: ${JSON.stringify(input.plan)}`,
+        `The page:\n${input.material}`,
+        `The narration, by moment:\n${moments}`,
+        `The menu of what can be drawn for this page:\n${input.menu}`,
+        ...redo,
+      ]
+        .filter(Boolean)
+        .join('\n\n'),
+      maxRetries: this.maxRetries(),
+    });
+    return {
+      value: result.object as VisualDecisions,
+      usage: this.usage(ref, result.usage, started),
+    };
+  }
+
   async visualPlan(input: {
     title: string;
     topicTitle: string;
@@ -751,49 +841,6 @@ export class AiSdkLlmAdapter implements LlmGatewayPort, OnModuleInit {
     });
     return {
       value: result.object,
-      usage: this.usage(ref, result.usage, started),
-    };
-  }
-
-  async visualScript(input: {
-    plan: VisualPlan;
-    topicTitle: string;
-    material: string;
-    context?: string;
-    previous?: VisualTutorial;
-    problems?: string[];
-  }): Promise<LlmResult<VisualTutorial>> {
-    const started = Date.now();
-    const { generateObject } = await this.registry.modules();
-    const mending = Boolean(input.previous && input.problems?.length);
-    const { model, ref } = await this.registry.languageModel(
-      mending ? 'visual_repair' : 'visual_script',
-    );
-    const result = await generateObject({
-      model,
-      schema: visualTutorialSchema,
-      system: PROMPTS.visualScript,
-      // A whole tutorial is a long object; the default ceiling cut one short.
-      maxOutputTokens: 16_000,
-      prompt: [
-        `Chapter: ${input.topicTitle}`,
-        `The plan. Goal: ${input.plan.learningGoal}. Key terms: ${input.plan.keyTerms.join(', ')}. ${
-          input.plan.centre.how === 'picture' && input.plan.centre.picture
-            ? `The thing at the heart of it: ${input.plan.centre.what}, the picture "${input.plan.centre.picture}" from the library.`
-            : `The thing at the heart of it: ${input.plan.centre.what}.`
-        } The chapter's beats, in order:\n- ${input.plan.beats.join('\n- ')}`,
-        input.context ? `\nThis page: ${input.context}` : null,
-        mending
-          ? `\nMend this tutorial. Problems:\n- ${input.problems!.join('\n- ')}\n\nThe tutorial:\n${JSON.stringify(input.previous)}`
-          : null,
-        `\nThe page, which the narration and every card's words must be built from:\n${input.material}`,
-      ]
-        .filter(Boolean)
-        .join('\n'),
-      maxRetries: this.maxRetries(),
-    });
-    return {
-      value: withoutNulls(result.object) as VisualTutorial,
       usage: this.usage(ref, result.usage, started),
     };
   }

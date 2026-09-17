@@ -156,6 +156,16 @@ export interface Moment {
   shared?: string[];
   /** Parts that appear on a word rather than with the card. */
   reveals?: { part: number; sentence: number; word?: number }[];
+  /** The narration's moment this came from, kept through tidying. */
+  index?: number;
+  /** What the moment must get across, from the narrator. */
+  intent?: string;
+  /** The director's reasoning and brief, kept with the page. */
+  reasoning?: string;
+  shouldSee?: string;
+  confidence?: 'high' | 'low';
+  /** Shipped as words after the judge said redo twice. */
+  plain?: boolean;
 }
 
 export interface VisualTutorial {
@@ -501,6 +511,7 @@ function drawThing(input: {
         manner: drawing.figure.manner,
         seed: drawing.figure.seed,
         color,
+        carry: drawing.figure.of.toLowerCase(),
       },
     ];
     if (name)
@@ -556,25 +567,49 @@ function layoutCallouts(
     .filter((c) => c.text?.trim() && (!allowed || allowed(c.part)))
     .slice(0, TUTORIAL_LIMITS.maxCallouts);
   if (!callouts.length) return [];
-  const step = Math.min(34, Math.max(22, height / 3));
-  const top = y - ((callouts.length - 1) * step) / 2;
+  const gap = 18;
+  const size = LABEL_SIZE.sm;
+  const widths = callouts.map((c) => textWidth(c.text, size, true) + 10);
+  // Beside the thing when the widest line fits there; else in two
+  // columns under it, the leaders running up to their parts.
+  const beside =
+    x + width / 2 + gap + Math.max(...widths) <= W - M &&
+    x - width / 2 - gap - Math.max(...widths) >= M;
+  if (beside) {
+    const step = Math.min(34, Math.max(22, height / 3));
+    const top = y - ((callouts.length - 1) * step) / 2;
+    return callouts.map((c, i) => {
+      const right = i % 2 === 0;
+      return {
+        id: `${id}_k${i}`,
+        type: 'callout',
+        x: Math.round(right ? x + width / 2 + gap : x - width / 2 - gap),
+        y: Math.round(top + i * step),
+        text: c.text.trim(),
+        of,
+        part: c.part,
+        anchor: right ? 'start' : 'end',
+        color: m.color ?? 'green',
+      };
+    });
+  }
+  const below = y + height / 2 + 24;
   return callouts.map((c, i) => {
-    const right = i % 2 === 0;
-    const gap = 18;
-    const size = LABEL_SIZE.sm;
-    const w = textWidth(c.text, size, true) + 10;
-    const cx = right
-      ? Math.min(W - M - w, x + width / 2 + gap)
-      : Math.max(M + w, x - width / 2 - gap);
+    const right = i % 2 === 1;
+    const row = Math.floor(i / 2);
     return {
       id: `${id}_k${i}`,
       type: 'callout',
-      x: Math.round(cx),
-      y: Math.round(top + i * step),
+      x: Math.round(
+        right
+          ? Math.min(W - M, x + 8 + widths[i])
+          : Math.max(M, x - 8 - widths[i]),
+      ),
+      y: Math.round(below + row * 16),
       text: c.text.trim(),
       of,
       part: c.part,
-      anchor: right ? 'start' : 'end',
+      anchor: right ? 'end' : 'start',
       color: m.color ?? 'green',
     };
   });
@@ -724,6 +759,7 @@ function layoutChips(m: Moment, id: string, stage: Stage): Laid {
         text: items[i].text,
         color: m.color ?? colors[i % colors.length],
         ...(icon ? { icon } : {}),
+        carry: items[i].text.toLowerCase(),
       });
       parts[i] = partId;
       named.set(partId, items[i].text);
@@ -1466,7 +1502,14 @@ export function layoutTutorial(
       if (part) at(when.sentence, when.word, part);
       for (const arrowId of laid.arrowsOf.get(partId) ?? []) {
         const arrow = byId.get(arrowId);
-        if (arrow) at(when.sentence, when.word, arrow);
+        if (!arrow) continue;
+        at(when.sentence, when.word, arrow);
+        // Its beads run from the word its step is named on.
+        cuesBySentence[when.sentence].push({
+          at: when.word,
+          do: 'flow',
+          target: arrowId,
+        });
       }
     }
     // A thing that is on screen pulses on the word that names it.
@@ -1480,6 +1523,13 @@ export function layoutTutorial(
           do: 'pulse',
           target: elementId,
         });
+        // The arrows into a named step run their beads while it is named.
+        for (const arrowId of laid.arrowsOf.get(elementId) ?? [])
+          cuesBySentence[sentence].push({
+            at: word,
+            do: 'flow',
+            target: arrowId,
+          });
         break;
       }
     }
@@ -1506,7 +1556,7 @@ export function tidyTutorial(tutorial: VisualTutorial): VisualTutorial {
   const last = Math.max(0, tutorial.sentences.length - 1);
   const clamp = (v: number) => Math.max(0, Math.min(last, Math.round(v)));
   const moments = [...tutorial.moments]
-    .map((m) => ({ ...m, from: clamp(m.from), to: clamp(m.to) }))
+    .map((m) => tidyStrings({ ...m, from: clamp(m.from), to: clamp(m.to) }))
     .sort((a, b) => a.from - b.from);
   let end = -1;
   const ranged: Moment[] = [];
@@ -1533,10 +1583,18 @@ export function tidyTutorial(tutorial: VisualTutorial): VisualTutorial {
       m.reveals = undefined;
     }
   }
-  // Two statements in a row are one: the first holds through both.
+  // Two statements in a row are one: the first holds through both, when
+  // the two fit one moment and neither is a moment shipped as words.
   for (let i = ranged.length - 1; i > 0; i -= 1) {
-    if (ranged[i].card === 'statement' && ranged[i - 1].card === 'statement') {
-      ranged[i - 1].to = ranged[i].to;
+    const a = ranged[i - 1];
+    const b = ranged[i];
+    if (
+      a.card === 'statement' &&
+      b.card === 'statement' &&
+      Boolean(a.plain) === Boolean(b.plain) &&
+      b.to - a.from + 1 <= TUTORIAL_LIMITS.maxSentencesPerMoment
+    ) {
+      a.to = b.to;
       ranged.splice(i, 1);
     }
   }
@@ -1626,10 +1684,76 @@ export function cutShort(text: string, pool: Set<string>): boolean {
   const last = words(text).pop();
   if (!last) return false;
   const stem = plain(last);
-  if (stem.length < 3 || pool.has(stem)) return false;
+  if (stem.length < 4 || STOP.has(stem) || pool.has(stem)) return false;
+  // A word the page uses in another form is a whole word, not a cut one.
+  if (forms(stem).some((form) => form !== stem && pool.has(form))) return false;
   for (const word of pool)
     if (word.length > stem.length && word.startsWith(stem)) return true;
   return false;
+}
+
+/** Every string in a card with its whitespace collapsed: a line break the model put in draws as nothing and measures as everything. */
+function tidyStrings<T>(value: T): T {
+  if (typeof value === 'string')
+    return value.replace(/\s+/g, ' ').trim() as unknown as T;
+  if (Array.isArray(value)) return value.map(tidyStrings) as unknown as T;
+  if (value && typeof value === 'object')
+    return Object.fromEntries(
+      Object.entries(value as Record<string, unknown>).map(([k, v]) => [
+        k,
+        tidyStrings(v),
+      ]),
+    ) as T;
+  return value;
+}
+
+/**
+ * The narration with no sentence over the limit: an over-long sentence
+ * is cut at its last comma, semicolon or "and" before the limit, else
+ * at the limit, and the moments that follow move along with it.
+ */
+export function tidyNarration(narration: VisualNarration): VisualNarration {
+  const most = 30;
+  const sentences: string[] = [];
+  const grew: number[] = [];
+  narration.sentences.forEach((sentence, index) => {
+    let rest = sentence.trim();
+    let pieces = 0;
+    while (words(rest).length > most) {
+      const ws = words(rest);
+      const head = ws.slice(0, most);
+      let cut = -1;
+      for (let i = head.length - 1; i >= 8; i -= 1) {
+        if (/[,;]$/.test(head[i])) {
+          cut = i + 1;
+          break;
+        }
+        if (head[i] === 'and' || head[i] === 'but' || head[i] === 'so') {
+          cut = i;
+          break;
+        }
+      }
+      if (cut < 0) cut = 24;
+      const first = ws.slice(0, cut).join(' ').replace(/[,;]$/, '');
+      sentences.push(/[.!?]$/.test(first) ? first : `${first}.`);
+      rest = ws.slice(cut).join(' ');
+      rest = rest.charAt(0).toUpperCase() + rest.slice(1);
+      pieces += 1;
+    }
+    sentences.push(rest);
+    grew[index] = pieces;
+  });
+  if (!grew.some((n) => n > 0)) return narration;
+  const shift = (i: number) => grew.slice(0, i).reduce((sum, n) => sum + n, 0);
+  return {
+    ...narration,
+    sentences,
+    moments: narration.moments.map((m) => ({
+      ...m,
+      from: m.from + shift(m.from),
+      to: m.to + shift(m.to) + (grew[m.to] ?? 0),
+    })),
+  };
 }
 
 export function tutorialProblems(
@@ -1992,13 +2116,31 @@ export function tutorialProblems(
   });
   moments.forEach((m, i) => {
     const before = moments[i - 1];
-    if (before && before.card === 'statement' && m.card === 'statement')
+    if (
+      before &&
+      before.card === 'statement' &&
+      m.card === 'statement' &&
+      !before.plain &&
+      !m.plain
+    )
       problems.push(
         `Moments ${i} and ${i + 1} are both statements; never two in a row. Make one of them another card, or fold them into one.`,
       );
     if (before && before.card === 'title' && m.card === 'title')
       problems.push(
         `Moments ${i} and ${i + 1} are both titles; a title only where a section starts.`,
+      );
+    const thing = (x: Moment) =>
+      (x.picture ?? x.name ?? '').trim().toLowerCase();
+    if (
+      before &&
+      before.card === 'picture' &&
+      m.card === 'picture' &&
+      thing(m) &&
+      thing(m) === thing(before)
+    )
+      problems.push(
+        `Moments ${i} and ${i + 1} both draw "${thing(m)}" as a picture; fold them into one moment, or show the second in another way.`,
       );
   });
   if (moments.length && expect !== n)
@@ -2059,4 +2201,122 @@ export function tutorialWarnings(tutorial: VisualTutorial): string[] {
 /** The stage's boxes of a laid card, for the gallery and tests. */
 export function cardBoxes(laid: Laid): Box[] {
   return laid.elements.map((e) => boxOf(e)).filter((b): b is Box => Boolean(b));
+}
+
+/** What the narrator writes: the sentences, cut into moments with an intent each. */
+export interface VisualNarration {
+  title: string;
+  fit?: 'good' | 'poor';
+  fitReason?: string | null;
+  sentences: string[];
+  moments: { from: number; to: number; intent: string }[];
+}
+
+/** One of the director's decisions: the card for a moment, with the reasoning written first. */
+export type VisualDecision = Omit<
+  Moment,
+  'from' | 'to' | 'index' | 'intent' | 'plain'
+> & {
+  index: number;
+  reasoning: string;
+  shouldSee: string;
+  confidence: 'high' | 'low';
+};
+
+export interface VisualDecisions {
+  moments: VisualDecision[];
+}
+
+/**
+ * A moment shipped as words: the shortest of its own sentences that
+ * fits a statement, else its intent, in big type.
+ */
+export function plainMoment(
+  from: number,
+  to: number,
+  intent: string,
+  index: number,
+  sentences: string[] = [],
+): Moment {
+  const own = sentences
+    .slice(from, to + 1)
+    .filter(
+      (s) =>
+        words(s).length <= TUTORIAL_LIMITS.maxStatementWords &&
+        s.length <= TUTORIAL_LIMITS.maxStatementChars,
+    )
+    .sort((a, b) => a.length - b.length)[0];
+  const text =
+    own ??
+    words(intent)
+      .slice(0, TUTORIAL_LIMITS.maxStatementWords)
+      .join(' ')
+      .slice(0, TUTORIAL_LIMITS.maxStatementChars);
+  return { from, to, card: 'statement', text, index, intent, plain: true };
+}
+
+/**
+ * The narration and the director's decisions as one tutorial: each
+ * narration moment takes its decision by index; one with no decision
+ * ships plain. Nulls the model wrote for unused fields are dropped.
+ */
+export function assembleTutorial(
+  narration: VisualNarration,
+  decisions: VisualDecisions,
+): VisualTutorial {
+  const byIndex = new Map(decisions.moments.map((d) => [d.index, d] as const));
+  const moments = narration.moments.map((m, index) => {
+    const decision = byIndex.get(index);
+    if (!decision)
+      return plainMoment(m.from, m.to, m.intent, index, narration.sentences);
+    const fields: Record<string, unknown> = {};
+    for (const [key, value] of Object.entries(decision))
+      if (value !== null && value !== undefined) fields[key] = value;
+    return {
+      ...(fields as Omit<VisualDecision, 'index'>),
+      from: m.from,
+      to: m.to,
+      index,
+      intent: m.intent,
+    } as Moment;
+  });
+  return {
+    title: narration.title,
+    fit: narration.fit,
+    fitReason: narration.fitReason ?? undefined,
+    sentences: narration.sentences,
+    moments,
+  };
+}
+
+/** The decisions with some moments replaced by the director's redo, or by a plain card. */
+export function mergeDecisions(
+  decisions: VisualDecisions,
+  redo: VisualDecisions,
+  only: number[],
+): VisualDecisions {
+  const fresh = new Map(redo.moments.map((d) => [d.index, d] as const));
+  const kept = decisions.moments.filter(
+    (d) => !only.includes(d.index) || !fresh.has(d.index),
+  );
+  const changed = only
+    .map((i) => fresh.get(i))
+    .filter((d): d is VisualDecision => Boolean(d));
+  return { moments: [...kept, ...changed].sort((a, b) => a.index - b.index) };
+}
+
+/**
+ * Which tutorial moments the problems name, by position: "Moment 3" in a
+ * card problem, "m2_p1" in a layout problem. Empty when a problem is the
+ * whole page's, such as the narration's length.
+ */
+export function momentsNamed(problems: string[]): number[] {
+  const out = new Set<number>();
+  for (const problem of problems) {
+    const card = /Moment (\d+)/.exec(problem);
+    if (card) out.add(Number(card[1]) - 1);
+    for (const match of problem.matchAll(/"m(\d+)(?:_[a-z0-9_]*)?"/g))
+      out.add(Number(match[1]));
+  }
+  return [...out].sort((a, b) => a - b);
 }

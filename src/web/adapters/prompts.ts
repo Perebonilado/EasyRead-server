@@ -1193,7 +1193,9 @@ export const PROMPTS = {
     [
       'The template is the shape of the whole picture. hub: one thing at',
       'the centre, what feeds it on the left, what comes out on the right.',
-      'flow: steps in order, left to right. cycle: steps that come round',
+      'flow: steps in order, left to right, every step the same kind of',
+      'thing (the stages of one process, named alike; a theme or an',
+      'example is not a step). cycle: steps that come round',
       'again. compare: two sides, each with its own entries. layers: bands',
       'stacked from the bottom up. Pick the one the chapter is.',
     ].join(' '),

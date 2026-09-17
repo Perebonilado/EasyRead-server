@@ -25,6 +25,9 @@ import {
   type VisualIcon,
   type VisualScript,
   type VisualSegment,
+  type Box,
+  boxOf,
+  type VisualPoint,
 } from './visual';
 import { PRESET_INFO } from './visual-presets';
 
@@ -111,16 +114,12 @@ const ROLE_COLOR: Record<Role, VisualColor> = {
 };
 
 /** The picture size for a centre, and for a step or column entry. */
-const CENTRE_WIDTH = 132;
+const CENTRE_WIDTH = 150;
 const SMALL_PICTURE = 46;
-/** The least clear space between a side item and the centre. */
-const SIDE_GAP = 18;
 /** The suffix on the id of the small name label under a picture. */
 export const NAME = '_name';
 /** Room between steps in a row, enough for an arrow to be seen. */
 const STEP_GAP = 30;
-/** How many inputs or outputs stack down one side before the rest go in a row. */
-const STACK = 5;
 
 /**
  * Places one item at a centre point as the elements it becomes: a chip,
@@ -134,7 +133,11 @@ function place(
   size: number,
   centreBox?: { x: number; y: number; w: number; h: number },
 ): VisualElement[] {
-  const color = item.color ?? ROLE_COLOR[item.role];
+  // A chip in ink would be a plain box among coloured ones; it takes its role's colour.
+  const color =
+    item.kind === 'chip' && item.color === 'ink'
+      ? ROLE_COLOR[item.role]
+      : (item.color ?? ROLE_COLOR[item.role]);
   switch (item.kind) {
     case 'chip':
       return [
@@ -197,7 +200,7 @@ function place(
           Math.round(box.y + box.h * (0.25 + (0.5 * (r + 0.5)) / rows)),
         ]);
       }
-      return [{ id: item.id, type: 'dots', points, r: 4, color }];
+      return [{ id: item.id, type: 'dots', points, r: 5, color }];
     }
     default:
       return [];
@@ -282,35 +285,6 @@ function stackRows(heights: number[], top: number, bottom: number): number[] {
     y += h + gap;
     return centre;
   });
-}
-
-/** How many of the items, in order, stand in a band of the height with room between. */
-function stacks(items: StructureItem[], size: number, band: number): number {
-  let used = 0;
-  let n = 0;
-  for (const item of items) {
-    const h = itemHeight(item, size) + (n ? 6 : 0);
-    if (used + h > band - 8) break;
-    used += h;
-    n += 1;
-    if (n >= STACK) break;
-  }
-  return n;
-}
-
-/**
- * The picture size at which the whole side stands in the band, trying
- * smaller pictures before giving up, and how many stand at that size.
- */
-function fitStack(
-  items: StructureItem[],
-  band: number,
-): { n: number; size: number } {
-  for (const size of [SMALL_PICTURE, 38, 30, 26]) {
-    const n = stacks(items, size, band);
-    if (n >= items.length) return { n, size };
-  }
-  return { n: stacks(items, 26, band), size: 26 };
 }
 
 /** How tall an item stands, its name label included. */
@@ -453,28 +427,12 @@ export function structureProblems(structure: VisualStructure): string[] {
         problems.push(
           `Arrow "${arrow.id}" joins "${arrow.from}" to "${arrow.to}"; in a hub every arrow starts or ends at the centre, "${centre.id}".`,
         );
-    const size = SMALL_PICTURE;
-    const inputs = structure.items.filter((i) => i.role === 'input');
-    const outputs = structure.items.filter((i) => i.role === 'output');
-    const band = H - 2 * M - 58 - 32;
-    const fitIn = fitStack(inputs, band).n;
-    const fitOut = fitStack(outputs, band).n;
-    if (fitIn < inputs.length)
-      problems.push(
-        `Only ${fitIn} inputs fit down the left; there are ${inputs.length}. Keep the ${fitIn} that matter most.`,
-      );
-    if (fitOut < outputs.length)
-      problems.push(
-        `Only ${fitOut} outputs fit down the right; there are ${outputs.length}. Keep the ${fitOut} that matter most.`,
-      );
-    const widest = (side: StructureItem[]) =>
-      Math.max(0, ...side.map((i) => itemWidth(i, size)));
-    const room = W - 2 * M - widest(inputs) - widest(outputs) - 2 * SIDE_GAP;
-    if (room < 64) {
-      const wide = [...inputs, ...outputs]
-        .sort((a, b) => itemWidth(b, size) - itemWidth(a, size))
+    const plan = hubPlan(structure);
+    if (!plan.centre.fits) {
+      const wide = [...plan.spots]
+        .sort((a, b) => b.box.w - a.box.w)
         .slice(0, 2)
-        .map((i) => `"${i.id}" ("${i.text}")`);
+        .map((spot) => `"${spot.item.id}" ("${spot.item.text}")`);
       problems.push(
         `The sides leave no room for the centre: shorten ${wide.join(' and ')} to one word each.`,
       );
@@ -490,128 +448,235 @@ function spread(n: number, from: number, to: number): number[] {
   return Array.from({ length: n }, (_, i) => Math.round(from + i * step));
 }
 
+/** One side item and where it stands: which side, how far down the band, its picture size. */
+interface SidePlace {
+  item: StructureItem;
+  side: 'left' | 'right';
+  /** 0 at the top of the band, 1 at the bottom, 0.5 in the middle. */
+  f: number;
+  size: number;
+}
+
+/** A side item once it has a box: where it is drawn and the room it takes. */
+interface SideSpot extends SidePlace {
+  x: number;
+  y: number;
+  box: Box;
+}
+
+/** The hub once planned: the band, every side item boxed, the centre sized to what is left. */
+interface HubPlan {
+  top: number;
+  bottom: number;
+  spots: SideSpot[];
+  centre: {
+    w: number;
+    /** The picture's box height, or the pill's, without its name. */
+    h: number;
+    /** The y the centre element is drawn at. */
+    y: number;
+    fits: boolean;
+  };
+}
+
+/** Least room between a side item and the centre, either way. */
+const CENTRE_GAP = 12;
+
 /**
- * The hub: the centre in the middle, inputs down the left (the first
- * one or two above when there are many), outputs down the right, notes
- * along the bottom, the title along the top.
+ * Which place each side item takes. Corners first, since a corner leaves
+ * the middle free for a big centre; one thing on a side sits at its
+ * middle; a third input borrows the top right corner when the outputs
+ * leave it free, the way a sun, air and water sit around a leaf.
  */
-function layoutHub(structure: VisualStructure): VisualElement[] {
+function sidePlaces(
+  inputs: StructureItem[],
+  outputs: StructureItem[],
+  band: number,
+): SidePlace[] {
+  const fractions = (n: number) =>
+    n <= 1 ? [0.5] : Array.from({ length: n }, (_, i) => i / (n - 1));
+  const spill = inputs.length === 3 && outputs.length <= 2;
+  const left = spill ? inputs.slice(0, 2) : inputs;
+  const right = spill ? [inputs[2], ...outputs] : outputs;
+  const rightF = spill
+    ? [0, ...[1, 0.5].slice(0, outputs.length)]
+    : fractions(right.length);
+  const leftF = fractions(left.length);
+  const leftSize = sideSize(left, band);
+  const rightSize = sideSize(right, band);
+  return [
+    ...left.map((item, i) => ({
+      item,
+      side: 'left' as const,
+      f: leftF[i],
+      size: leftSize,
+    })),
+    ...right.map((item, i) => ({
+      item,
+      side: 'right' as const,
+      f: rightF[i],
+      size: rightSize,
+    })),
+  ];
+}
+
+/** The picture size for one side: big when there are few, smaller until the side stands in the band. */
+function sideSize(items: StructureItem[], band: number): number {
+  for (const size of [56, SMALL_PICTURE, 38, 30, 26]) {
+    const tall = items.reduce(
+      (sum, item) => sum + itemHeight(item, size),
+      6 * Math.max(0, items.length - 1),
+    );
+    if (tall <= band - 4) return size;
+  }
+  return 26;
+}
+
+/** The box an item takes, centred on x, its top edge at `top`. */
+function itemBoxAt(
+  item: StructureItem,
+  x: number,
+  top: number,
+  size: number,
+): { box: Box; y: number } {
+  const w = itemWidth(item, size);
+  const h = itemHeight(item, size);
+  const box = { x: x - w / 2, y: top, w, h };
+  // The element's own y: a chip's or label's middle, a picture's middle
+  // (its name hangs below it).
+  const y =
+    item.kind === 'picture'
+      ? top + pictureBox(item.picture ?? 'document', size).h / 2
+      : top + h / 2;
+  return { box, y: Math.round(y) };
+}
+
+function overlaps(a: Box, b: Box, gap: number): boolean {
+  return (
+    a.x < b.x + b.w + gap &&
+    a.x + a.w + gap > b.x &&
+    a.y < b.y + b.h + gap &&
+    a.y + a.h + gap > b.y
+  );
+}
+
+/**
+ * The hub laid out: the title along the top, notes along the bottom,
+ * the side items at their places flush to the edges, and the centre as
+ * big as the space between them allows, down to a floor.
+ */
+function hubPlan(structure: VisualStructure): HubPlan {
   const items = structure.items;
   const title = items.find((i) => i.role === 'title');
-  const centre = items.find((i) => i.role === 'centre');
+  const centre = items.find((i) => i.role === 'centre' && i.kind !== 'dots');
   const inputs = items.filter((i) => i.role === 'input');
   const outputs = items.filter((i) => i.role === 'output');
   const notes = items.filter((i) => i.role === 'note');
-  const dots = items.filter((i) => i.kind === 'dots' && i !== centre);
-  const out: VisualElement[] = [];
-  const size = SMALL_PICTURE;
-  // Half the width a side item takes, label and all.
-  const half = (item: StructureItem, sz = size) => itemWidth(item, sz) / 2;
-  // The bands, top to bottom: the title, the middle (stacks either side
-  // of the centre), the notes.
-  let top = M + 8;
-  let bottom = H - M - 8;
-  if (title) {
-    out.push(...place(title, W / 2, 32, 0));
-    top = 58;
-  }
-  if (notes.length) {
-    const xs = spread(notes.length, M + 80, W - M - 80);
-    notes.forEach((item, i) => out.push(...place(item, xs[i], bottom - 8, 0)));
-    bottom -= 26;
-  }
-  // Each side stacks what stands in the band; more than that is sent back
-  // to the model by the structure checks, so nothing is placed twice.
-  const fitIn = fitStack(inputs, bottom - top);
-  const fitOut = fitStack(outputs, bottom - top);
-  // Everything is placed, even a side too full to fit; the structure
-  // checks send that back to the model rather than leave cues pointing
-  // at nothing.
-  const stackedIn = inputs;
-  const stackedOut = outputs;
-  const cy = Math.round((top + bottom) / 2);
-  // The sides claim their own width first; the centre takes what is left,
-  // so a long chip on the left never runs under the picture.
-  const widest = (side: StructureItem[], sz: number) =>
-    Math.max(0, ...side.map((i) => half(i, sz) * 2));
-  const leftW = widest(stackedIn, fitIn.size);
-  const rightW = widest(stackedOut, fitOut.size);
-  // The centre sits midway between the two stacks, not the canvas.
-  const cx = Math.round((M + leftW + (W - M - rightW)) / 2);
-  const room = W - 2 * M - leftW - rightW - 2 * SIDE_GAP;
-  const tall = bottom - top - 2 * 12 - 18;
+  const top = title ? 58 : M + 8;
+  const bottom = notes.length ? H - 40 : H - M - 8;
+  const band = bottom - top;
+  const spots: SideSpot[] = sidePlaces(inputs, outputs, band).map((place) => {
+    const w = itemWidth(place.item, place.size);
+    const h = itemHeight(place.item, place.size);
+    const x = place.side === 'left' ? M + 2 + w / 2 : W - M - 2 - w / 2;
+    const boxTop = Math.round(top + 2 + place.f * (band - 4 - h));
+    const at = itemBoxAt(place.item, Math.round(x), boxTop, place.size);
+    return { ...place, x: Math.round(x), y: at.y, box: at.box };
+  });
+  // The centre: the widest that keeps clear of every side item, tried
+  // from the most a picture may take down to the least it can be.
+  const mid = (top + bottom) / 2;
   const aspect =
     centre?.kind === 'picture'
       ? (PRESET_INFO[centre.picture ?? '']?.aspect ?? 1)
       : 1;
-  const centreWidth = Math.max(
-    64,
-    Math.min(CENTRE_WIDTH, room, Math.round(tall * aspect)),
-  );
-  let centreBox = {
-    x: cx - centreWidth / 2,
-    y: cy - 40,
-    w: centreWidth,
-    h: 80,
-  };
-  if (centre) {
-    const placed = place(
-      centre,
-      cx,
-      cy,
-      centre.kind === 'picture' ? centreWidth : 0,
-    );
-    const shape = placed[0];
-    if (shape?.type === 'shape')
-      centreBox = {
-        x: shape.x - shape.w / 2,
-        y: shape.y - shape.h / 2,
-        w: shape.w,
-        h: shape.h,
+  const isPicture = centre?.kind === 'picture';
+  const least = isPicture
+    ? 64
+    : Math.max(64, chipWidth((centre?.text ?? '').slice(0, 22)));
+  const most = isPicture
+    ? Math.min(CENTRE_WIDTH, Math.round((band - 16 - 8) * aspect))
+    : Math.max(least, 120);
+  const footprint = (w: number): { box: Box; h: number; y: number } => {
+    if (isPicture) {
+      const h = Math.round(w / aspect);
+      const total = h + 16;
+      const y0 = Math.round(mid - total / 2);
+      return {
+        box: { x: W / 2 - w / 2, y: y0, w, h: total },
+        h,
+        y: y0 + h / 2,
       };
-    if (shape?.type === 'chip') {
-      // A chip at the centre is drawn as a rounded box the size of a picture.
-      const w = Math.max(
-        chipWidth(centre.text.slice(0, 22)),
-        Math.min(120, centreWidth),
-      );
-      out.push({
-        id: centre.id,
-        type: 'shape',
-        x: cx,
-        y: cy,
-        w,
-        h: 70,
-        kind: 'roundRect',
-        text: centre.text.slice(0, 22),
-        color: centre.color ?? ROLE_COLOR.centre,
-        fill: 'tint',
-      });
-      centreBox = { x: cx - w / 2, y: cy - 35, w, h: 70 };
-    } else {
-      out.push(...placed);
+    }
+    const h = 70;
+    return { box: { x: W / 2 - w / 2, y: mid - h / 2, w, h }, h, y: mid };
+  };
+  let chosen = footprint(least);
+  let fits = false;
+  for (let w = most; w >= least; w -= 2) {
+    const candidate = footprint(w);
+    if (!spots.some((spot) => overlaps(spot.box, candidate.box, CENTRE_GAP))) {
+      chosen = candidate;
+      fits = true;
+      break;
     }
   }
-  for (const d of dots) out.push(...place(d, cx, cy, 0, centreBox));
-  // Stacks share the edge that faces the centre, so every arrow leaves
-  // from the same line and never crosses the item below it.
-  const inYs = stackYs(stackedIn, fitIn.size, top, bottom);
-  stackedIn.forEach((item, i) =>
-    out.push(
-      ...place(item, M + leftW - half(item, fitIn.size), inYs[i], fitIn.size),
-    ),
-  );
-  const outYs = stackYs(stackedOut, fitOut.size, top, bottom);
-  stackedOut.forEach((item, i) =>
-    out.push(
-      ...place(
-        item,
-        W - M - rightW + half(item, fitOut.size),
-        outYs[i],
-        fitOut.size,
-      ),
-    ),
-  );
+  return {
+    top,
+    bottom,
+    spots,
+    centre: {
+      w: chosen.box.w,
+      h: chosen.h,
+      y: Math.round(chosen.y),
+      fits,
+    },
+  };
+}
+
+function layoutHub(structure: VisualStructure): VisualElement[] {
+  const items = structure.items;
+  const title = items.find((i) => i.role === 'title');
+  const centre = items.find((i) => i.role === 'centre' && i.kind !== 'dots');
+  const notes = items.filter((i) => i.role === 'note');
+  const dots = items.filter((i) => i.kind === 'dots');
+  const plan = hubPlan(structure);
+  const out: VisualElement[] = [];
+  if (title) out.push(...place(title, W / 2, 32, 0));
+  if (notes.length) {
+    const xs = spread(notes.length, M + 80, W - M - 80);
+    notes.forEach((item, i) => out.push(...place(item, xs[i], H - 22, 0)));
+  }
+  for (const spot of plan.spots)
+    out.push(...place(spot.item, spot.x, spot.y, spot.size));
+  let centreBox: Box = {
+    x: W / 2 - plan.centre.w / 2,
+    y: plan.centre.y - plan.centre.h / 2,
+    w: plan.centre.w,
+    h: plan.centre.h,
+  };
+  if (centre?.kind === 'picture') {
+    out.push(...place(centre, W / 2, plan.centre.y, plan.centre.w));
+  } else if (centre) {
+    // A chip or a label at the centre is drawn as a rounded box the size
+    // of a picture, so the middle still reads as the one thing.
+    out.push({
+      id: centre.id,
+      type: 'shape',
+      x: W / 2,
+      y: plan.centre.y,
+      w: plan.centre.w,
+      h: plan.centre.h,
+      kind: 'roundRect',
+      text: centre.text.slice(0, 22),
+      color: centre.color ?? ROLE_COLOR.centre,
+      fill: 'tint',
+    });
+  } else {
+    centreBox = { x: W / 2 - 40, y: plan.centre.y - 25, w: 80, h: 50 };
+  }
+  for (const d of dots)
+    out.push(...place(d, W / 2, plan.centre.y, 0, centreBox));
   return out;
 }
 
@@ -748,6 +813,26 @@ export function layoutScene(structure: VisualStructure): VisualScript {
             ? layoutLayers(structure)
             : layoutHub(structure);
   const ids = new Set(placed.map((e) => e.id));
+  const byId = new Map(placed.map((e) => [e.id, e] as const));
+  const middle = (id: string): VisualPoint | null => {
+    const element = byId.get(id);
+    const box = element ? boxOf(element) : null;
+    return box ? [box.x + box.w / 2, box.y + box.h / 2] : null;
+  };
+  // A ring bends so it reads as one; a hub's arrows bow gently outward,
+  // away from the middle, the way lines are drawn by hand; the rest run
+  // straight.
+  const bendOf = (from: string, to: string): number => {
+    if (structure.template === 'cycle') return -14;
+    if (structure.template !== 'hub') return 0;
+    const a = middle(from);
+    const b = middle(to);
+    if (!a || !b) return 0;
+    const dy = b[1] - a[1];
+    if (Math.abs(dy) < 12) return 0;
+    const mx = (a[0] + b[0]) / 2;
+    return 7 * (mx < W / 2 ? Math.sign(dy) : -Math.sign(dy));
+  };
   const arrows: VisualElement[] = structure.arrows
     .filter((a) => ids.has(a.from) && ids.has(a.to) && a.from !== a.to)
     .map((a) => ({
@@ -755,8 +840,7 @@ export function layoutScene(structure: VisualStructure): VisualScript {
       type: 'arrow',
       from: a.from,
       to: a.to,
-      // Straight lines fan out cleanly; a ring needs the bend to read as one.
-      bend: structure.template === 'cycle' ? -14 : 0,
+      bend: bendOf(a.from, a.to),
       color: a.color ?? placed.find((e) => e.id === a.from)?.color ?? 'muted',
       ...(a.double ? { double: true } : {}),
     }));

@@ -772,9 +772,10 @@ export function attachPoint(
   const element = byId.get(end);
   const own = element ? boxOf(element) : null;
   if (!own) return null;
-  // A picture and the name under it are one thing to a line.
+  // A picture and the name under it are one thing to a line: the name
+  // makes the box taller, never wider, so a line still meets the picture.
   const name = byId.get(`${end}_name`);
-  const box = name ? union(own, boxOf(name)) : own;
+  const box = name ? below(own, boxOf(name)) : own;
   // A drawn picture is met on its body, not the corner of its box.
   const deep =
     element?.type === 'shape' &&
@@ -783,17 +784,11 @@ export function attachPoint(
   return leave(box, other, 6, deep);
 }
 
-/** The smallest box holding both. */
-function union(a: Box, b: Box | null): Box {
+/** The first box stretched down to take in the second, its sides as they were. */
+function below(a: Box, b: Box | null): Box {
   if (!b) return a;
-  const x = Math.min(a.x, b.x);
   const y = Math.min(a.y, b.y);
-  return {
-    x,
-    y,
-    w: Math.max(a.x + a.w, b.x + b.w) - x,
-    h: Math.max(a.y + a.h, b.y + b.h) - y,
-  };
+  return { x: a.x, y, w: a.w, h: Math.max(a.y + a.h, b.y + b.h) - y };
 }
 
 /**
@@ -818,14 +813,22 @@ export function leave(
   const dx = deep ? box.w * 0.3 : 8;
   const dy = deep ? box.h * 0.3 : 8;
   const [ox, oy] = other;
-  if (ox >= box.x + box.w)
-    return [box.x + box.w + gap, inset(oy, box.y + dy, box.y + box.h - dy)];
-  if (ox <= box.x)
-    return [box.x - gap, inset(oy, box.y + dy, box.y + box.h - dy)];
-  if (oy >= box.y + box.h)
-    return [inset(ox, box.x + dx, box.x + box.w - dx), box.y + box.h + gap];
-  if (oy <= box.y)
-    return [inset(ox, box.x + dx, box.x + box.w - dx), box.y - gap];
+  // How far the other end lies beyond the box on each axis; the line
+  // leaves by the side it is further past, so a thing just below and a
+  // little to the left is met from below, not from the side.
+  const outX =
+    ox > box.x + box.w ? ox - box.x - box.w : ox < box.x ? box.x - ox : 0;
+  const outY =
+    oy > box.y + box.h ? oy - box.y - box.h : oy < box.y ? box.y - oy : 0;
+  if (outX || outY) {
+    if (outY > outX)
+      return oy > box.y
+        ? [inset(ox, box.x + dx, box.x + box.w - dx), box.y + box.h + gap]
+        : [inset(ox, box.x + dx, box.x + box.w - dx), box.y - gap];
+    return ox > box.x
+      ? [box.x + box.w + gap, inset(oy, box.y + dy, box.y + box.h - dy)]
+      : [box.x - gap, inset(oy, box.y + dy, box.y + box.h - dy)];
+  }
   const rx = ox - cx;
   const ry = oy - cy;
   if (!rx && !ry) return [cx, cy];
@@ -1049,10 +1052,16 @@ export function repairVisual(script: VisualScript): VisualScript {
           const b = boxOf(map.get(ids[j])!)!;
           const o = overlap(a, b);
           if (o.x <= 4 || o.y <= 4 || contained(a, b)) continue;
-          const mover = map.get(ids[j]) as VisualElement & {
+          // A picture and the name under it move as one: a name that is
+          // in the way moves its picture, and a picture takes its name.
+          const owner = ids[j].endsWith('_name')
+            ? ids[j].slice(0, -'_name'.length)
+            : ids[j];
+          const mover = (map.get(owner) ?? map.get(ids[j])) as VisualElement & {
             x?: number;
             y?: number;
           };
+          const tag = map.get(`${owner}_name`);
           if (mover.type === 'dots' || mover.x === undefined) continue;
           // Four ways out, tried in order: along the axis of least overlap
           // away from the other box, then back the other way, then along
@@ -1095,6 +1104,10 @@ export function repairVisual(script: VisualScript): VisualScript {
             ) ?? moves[0];
           mover.x = round(mover.x + chosen[0]);
           mover.y = round((mover.y ?? 0) + chosen[1]);
+          if (tag && tag !== mover && tag.type === 'label') {
+            tag.x = round(tag.x + chosen[0]);
+            tag.y = round(tag.y + chosen[1]);
+          }
           moved = true;
         }
       }

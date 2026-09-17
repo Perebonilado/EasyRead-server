@@ -611,23 +611,30 @@ export function tidyTutorial(tutorial: VisualTutorial): VisualTutorial {
     .map((m) => ({ ...m, from: clamp(m.from), to: clamp(m.to) }))
     .sort((a, b) => a.from - b.from);
   let end = -1;
-  const tidy: Moment[] = [];
+  const ranged: Moment[] = [];
   for (const m of moments) {
     // A moment with no sentence left past the one before is a slip too, and goes.
     if (m.from <= end && end >= last) continue;
     const from = m.from <= end ? end + 1 : m.from;
     const to = Math.max(from, m.to);
     end = to;
-    // A reveal named outside its moment lands on the nearest edge of it.
-    const reveals = m.reveals?.map((r) => ({
-      ...r,
-      sentence: Math.max(from, Math.min(to, r.sentence)),
-    }));
-    tidy.push({ ...m, from, to, ...(reveals ? { reveals } : {}) });
+    ranged.push({ ...m, from, to });
   }
   // The closing sentences belong to the last card when the model left them bare.
-  const tail = tidy[tidy.length - 1];
+  const tail = ranged[ranged.length - 1];
   if (tail && tail.to < last) tail.to = last;
+  // A reveal named outside its moment lands on the nearest edge of it.
+  const tidy = ranged.map((m) =>
+    m.reveals
+      ? {
+          ...m,
+          reveals: m.reveals.map((r) => ({
+            ...r,
+            sentence: Math.max(m.from, Math.min(m.to, r.sentence)),
+          })),
+        }
+      : m,
+  );
   return { ...tutorial, moments: tidy };
 }
 

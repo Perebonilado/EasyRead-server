@@ -88,6 +88,8 @@ export const SHAPE_KINDS = [
   'ellipse',
   'triangle',
   'diamond',
+  /** Two circles overlapping by half, one element so the checks know they belong together. */
+  'overlap',
 ] as const;
 export type ShapeKind = (typeof SHAPE_KINDS)[number];
 /** Every kind a shape may be: the plain kinds, the presets drawn by hand, and a path of its own. */

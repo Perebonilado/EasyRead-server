@@ -862,29 +862,20 @@ function layoutOverlap(m: Moment, id: string): Laid {
   const heading = m.heading?.trim();
   if (heading) out.push(label(`${id}_h`, CX, 32, heading, 'md', 'ink'));
   const cy = heading ? 152 : 142;
-  const r = 66;
-  const lx = CX - 44;
-  const rx = CX + 44;
+  // The circles overlap by half, so the lens holds a short line of text.
+  const r = 68;
+  const lx = CX - 32;
+  const rx = CX + 32;
+  // One element for both circles: the stage draws them overlapping by design.
   out.push({
-    id: `${id}_l`,
+    id: `${id}_o`,
     type: 'shape',
-    x: lx,
+    x: CX,
     y: cy,
-    w: r * 2,
+    w: rx - lx + r * 2,
     h: r * 2,
-    kind: 'circle',
+    kind: 'overlap',
     color: 'blue',
-    fill: 'tint',
-  });
-  out.push({
-    id: `${id}_r`,
-    type: 'shape',
-    x: rx,
-    y: cy,
-    w: r * 2,
-    h: r * 2,
-    kind: 'circle',
-    color: 'violet',
     fill: 'tint',
   });
   out.push(
@@ -922,14 +913,14 @@ function layoutOverlap(m: Moment, id: string): Laid {
     .slice(0, 3)
     .forEach((text, i) =>
       out.push(
-        label(`${id}_li${i}`, lx - 30, cy - 12 + i * 16, text, 'sm', 'blue'),
+        label(`${id}_li${i}`, lx - 34, cy - 12 + i * 16, text, 'sm', 'ink'),
       ),
     );
   (m.right?.items ?? [])
     .slice(0, 3)
     .forEach((text, i) =>
       out.push(
-        label(`${id}_ri${i}`, rx + 30, cy - 12 + i * 16, text, 'sm', 'violet'),
+        label(`${id}_ri${i}`, rx + 34, cy - 12 + i * 16, text, 'sm', 'ink'),
       ),
     );
   return { elements: out, parts, arrowsOf: new Map(), named };

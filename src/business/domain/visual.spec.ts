@@ -211,7 +211,7 @@ describe('a visual script', () => {
         e.id === 'bucket'
           ? { ...e, w: 40, text: 'Token bucket' }
           : e.id === 'rate'
-            ? { ...e, x: 180, y: 90 }
+            ? { ...e, x: 150, y: 70 }
             : e,
       ),
     };
@@ -226,6 +226,14 @@ describe('a visual script', () => {
     };
     expect(bucket.w).toBeGreaterThan(40);
     expect(layoutProblems(mended).some((p) => p.includes('wide'))).toBe(false);
+    // The arrow through the chip is bent until it clears it.
+    const refill = mended.elements.find((e) => e.id === 'refill') as {
+      bend?: number;
+    };
+    expect(refill.bend).not.toBeUndefined();
+    expect(layoutProblems(mended).some((p) => p.includes('runs through'))).toBe(
+      false,
+    );
   });
 
   it('tidies text the model broke across lines and dims the oldest chips when the canvas is crowded', () => {

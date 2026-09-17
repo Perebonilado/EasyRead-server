@@ -725,6 +725,8 @@ export class AiSdkLlmAdapter implements LlmGatewayPort, OnModuleInit {
       model,
       schema: visualScriptSchema,
       system: PROMPTS.visualScript,
+      // A whole scene is a long object; the default ceiling cut one short.
+      maxOutputTokens: 8_000,
       prompt: [
         `Chapter: ${input.topicTitle}`,
         `The plan. Goal: ${input.plan.learningGoal}. Key terms: ${input.plan.keyTerms.join(', ')}. The diagram: ${input.plan.diagramConcept}. Beats, in order:\n- ${input.plan.beats.join('\n- ')}`,

@@ -257,6 +257,20 @@ export function wordsOf(text: string): string[] {
   return text.trim().split(/\s+/).filter(Boolean);
 }
 
+/**
+ * A label is grounded when every content word is the chapter's, as the
+ * sketch demands of its own; a label of two or more content words may
+ * carry one word of its own, since "better health" for a chapter about
+ * improving health is a fair name and not an invention.
+ */
+export function labelGrounded(text: string, pool: Set<string>): boolean {
+  if (grounded(text, pool)) return true;
+  const words = contentWords(text);
+  if (words.length < 2) return false;
+  const stray = words.filter((word) => !grounded(word, pool));
+  return stray.length <= 1;
+}
+
 /** The material's content words, for grounding labels the way the sketch grounds its own; built once per scene. */
 export function materialPool(material: string): Set<string> {
   return new Set(contentWords(material));
@@ -401,7 +415,7 @@ export function visualProblems(
           : element.type === 'shape'
             ? (element.text ?? '')
             : '';
-      if (text && !grounded(text, pool)) {
+      if (text && !labelGrounded(text, pool)) {
         problems.push(
           `"${element.id}" says "${text}", which is not built from the chapter's words.`,
         );
@@ -910,7 +924,67 @@ export function repairVisual(script: VisualScript): VisualScript {
   const segments = calmed({ ...draft, segments: ordered });
   // A nudge can push a box over the edge; the edge wins, and a box that
   // then overlaps again is the model's to mend.
-  return { ...draft, elements: clampAll(draft.elements), segments };
+  const placed = clampAll(draft.elements);
+  return {
+    ...draft,
+    elements: bent({ ...draft, elements: placed, segments }),
+    segments,
+  };
+}
+
+/** The bends tried, in order, for an arrow that runs through a word. */
+const BENDS = [16, -16, 30, -30, 40, -40];
+
+/**
+ * An arrow through a label or chip is bent until it clears them, the
+ * gentlest bend first, either way. One that clears nothing is left for
+ * the model, which can move the word instead.
+ */
+function bent(script: VisualScript): VisualElement[] {
+  const elements = script.elements.map((e) => ({ ...e }));
+  const byId = new Map(elements.map((e) => [e.id, e] as const));
+  const visible = visibleAfterEach(script);
+  const crossesAny = (
+    arrow: Extract<VisualElement, { type: 'line' | 'arrow' }>,
+  ): boolean => {
+    const owns = new Set(
+      [arrow.from, arrow.to].filter((e) => typeof e === 'string'),
+    );
+    return visible.some((ids) => {
+      if (!ids.has(arrow.id)) return false;
+      const samples = arrowSamples(arrow, byId);
+      for (const id of ids) {
+        const other = byId.get(id);
+        if (!other || owns.has(id)) continue;
+        if (other.type !== 'label' && other.type !== 'chip') continue;
+        const box = boxOf(other);
+        if (!box) continue;
+        if (
+          samples.some(
+            ([x, y]) =>
+              x > box.x - 2 &&
+              x < box.x + box.w + 2 &&
+              y > box.y - 2 &&
+              y < box.y + box.h + 2,
+          )
+        ) {
+          return true;
+        }
+      }
+      return false;
+    });
+  };
+  for (const element of elements) {
+    if (element.type !== 'arrow') continue;
+    if (!crossesAny(element)) continue;
+    const original = element.bend ?? 0;
+    for (const bend of BENDS) {
+      element.bend = bend;
+      if (!crossesAny(element)) break;
+      element.bend = original;
+    }
+  }
+  return elements;
 }
 
 /** How many elements a student takes in at once; beyond it, older ones are dimmed. */

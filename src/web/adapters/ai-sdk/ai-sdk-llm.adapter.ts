@@ -21,7 +21,6 @@ import type {
 } from '../../../business/ports/llm.port';
 import type { VisualPlan } from '../../../business/domain/visual';
 import type { VisualTutorial } from '../../../business/domain/visual-cards';
-import { presetCatalogue } from '../../../business/domain/visual-presets';
 import { PROMPTS } from '../prompts';
 import { ModelRegistry, type ModelRef } from './models';
 import {
@@ -696,7 +695,7 @@ export class AiSdkLlmAdapter implements LlmGatewayPort, OnModuleInit {
     const result = await generateObject({
       model,
       schema: visualPlanSchema,
-      system: `${PROMPTS.visualPlan}\n\nThe library of drawn pictures, name and the words a chapter uses for it:\n${presetCatalogue()}`,
+      system: PROMPTS.visualPlan,
       prompt: [
         `Document: ${input.title}`,
         `Chapter: ${input.topicTitle}`,
@@ -727,7 +726,7 @@ export class AiSdkLlmAdapter implements LlmGatewayPort, OnModuleInit {
     const result = await generateObject({
       model,
       schema: visualTutorialSchema,
-      system: `${PROMPTS.visualScript}\n\nThe library of drawn things, name and the words a chapter uses for it:\n${presetCatalogue()}`,
+      system: PROMPTS.visualScript,
       // A whole tutorial is a long object; the default ceiling cut one short.
       maxOutputTokens: 16_000,
       prompt: [

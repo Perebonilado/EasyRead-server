@@ -25,7 +25,7 @@ import {
   place,
   type VisualStructure,
 } from './visual-layout';
-import { PRESET_INFO } from './visual-presets';
+import { pictureAspect, resolvePicture } from './visual-presets';
 
 export const CARD_KINDS = [
   'title',
@@ -206,8 +206,8 @@ const label = (
   extra: Partial<Extract<VisualElement, { type: 'label' }>> = {},
 ): VisualElement => ({ id, type: 'label', x, y, text, size, color, ...extra });
 
-const known = (picture?: string): string | undefined =>
-  picture && PRESET_INFO[picture] ? picture : undefined;
+/** The drawing for the word the model used, when the library has one. */
+const known = (picture?: string): string | undefined => resolvePicture(picture);
 
 function layoutTitle(m: Moment, id: string): Laid {
   const out: VisualElement[] = [];
@@ -367,7 +367,7 @@ function layoutPicture(m: Moment, id: string): Laid {
   const heading = m.heading?.trim();
   if (heading) out.push(label(`${id}_h`, CX, 36, heading, 'md', 'muted'));
   const picture = known(m.picture) ?? 'document';
-  const aspect = PRESET_INFO[picture]?.aspect ?? 1;
+  const aspect = pictureAspect(picture);
   const bubble = m.bubble?.trim();
   const y = heading ? 150 : 142;
   // The bubble sits above the picture's top; a tall picture shrinks to leave it room.
@@ -731,12 +731,6 @@ export function tutorialProblems(
           `${who}: ${what} is ${text.length} characters; at most ${max}.`,
         );
     };
-    const pictureKnown = (what: string, picture: string | undefined) => {
-      if (picture && !PRESET_INFO[picture])
-        problems.push(
-          `${who}: ${what} names the picture "${picture}", which is not in the library; use a name from the catalogue or none.`,
-        );
-    };
     // A heading is a phrase of the model's, like the narration; only the
     // short names on a card must be the chapter's own words.
     short('the heading', m.heading, L.maxHeadingChars);
@@ -790,13 +784,11 @@ export function tutorialProblems(
           const max = m.card === 'list' ? L.maxListItemChars : L.maxChipChars;
           short(`item ${k + 1}`, item.text, max);
           grounded(`item ${k + 1}`, item.text);
-          pictureKnown(`item ${k + 1}`, item.picture);
         });
         break;
       }
       case 'picture':
         if (!m.picture) problems.push(`${who} names no picture.`);
-        pictureKnown('the picture', m.picture);
         short('the name', m.name, L.maxNameChars);
         grounded('the name', m.name);
         short('the bubble', m.bubble, L.maxBubbleChars);
@@ -818,7 +810,6 @@ export function tutorialProblems(
           }
           short(`the ${name} label`, side.label, L.maxChipChars);
           grounded(`the ${name} label`, side.label);
-          pictureKnown(`the ${name} side`, side.picture);
           if (!side.picture && !(side.items ?? []).length)
             problems.push(
               `${who}: the ${name} side has nothing under its label; give it a picture or one to four items.`,
@@ -835,7 +826,6 @@ export function tutorialProblems(
         if (!m.centre) problems.push(`${who} has no centre.`);
         short('the centre', m.centre?.text, L.maxChipChars);
         grounded('the centre', m.centre?.text);
-        pictureKnown('the centre', m.centre?.picture);
         const inputs = m.inputs ?? [];
         const outputs = m.outputs ?? [];
         if (inputs.length + outputs.length < 1)
@@ -851,7 +841,6 @@ export function tutorialProblems(
         for (const item of [...inputs, ...outputs]) {
           short(`"${item.text}"`, item.text, L.maxChipChars);
           grounded(`"${item.text}"`, item.text);
-          pictureKnown(`"${item.text}"`, item.picture);
         }
         break;
       }
@@ -889,6 +878,32 @@ export function tutorialProblems(
       `The last moment has to ${expect - 1}; the narration has ${n} sentences, indexes 0 to ${n - 1}, so the last moment's to is ${n - 1}.`,
     );
   return problems;
+}
+
+/**
+ * Advice for the mend rounds, not faults: a thing the library has no
+ * drawing for is drawn as a chip, and the model may name it another way.
+ */
+export function tutorialWarnings(tutorial: VisualTutorial): string[] {
+  const out: string[] = [];
+  tutorial.moments.forEach((m, i) => {
+    const who = `Moment ${i + 1} (${m.card})`;
+    const names = [
+      m.picture,
+      ...(m.items ?? []).map((item) => item.picture),
+      m.left?.picture,
+      m.right?.picture,
+      m.centre?.picture,
+      ...(m.inputs ?? []).map((item) => item.picture),
+      ...(m.outputs ?? []).map((item) => item.picture),
+    ].filter((name): name is string => Boolean(name));
+    for (const name of names)
+      if (!resolvePicture(name))
+        out.push(
+          `${who}: no drawing was found for "${name}"; it is drawn as words. Name the thing another way, or a thing near it (a building, a person, a tool).`,
+        );
+  });
+  return out;
 }
 
 /** The stage's boxes of a laid card, for the gallery and tests. */

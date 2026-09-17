@@ -18,7 +18,11 @@ import { contentWords, type WordTimes } from './board';
 import { grounded } from './sketch';
 import type { SpokenForm } from './spoken';
 import { measureText } from './visual-font';
-import { PRESET_SHAPES, type PresetShape } from './visual-presets';
+import {
+  knownPicture,
+  PRESET_SHAPES,
+  type PresetShape,
+} from './visual-presets';
 
 export const VISUAL_GENERATOR_VERSION = 'visual-3';
 
@@ -465,7 +469,10 @@ export function visualProblems(
             );
           }
         }
-        if (!ALL_SHAPE_KINDS.includes(element.kind)) {
+        if (
+          !ALL_SHAPE_KINDS.includes(element.kind) &&
+          !knownPicture(element.kind)
+        ) {
           problems.push(
             `Shape "${element.id}" has kind "${element.kind}", which is not in the catalogue.`,
           );

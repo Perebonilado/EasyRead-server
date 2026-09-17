@@ -23,6 +23,7 @@ import {
   pausesFor,
   tidyTutorial,
   tutorialProblems,
+  tutorialWarnings,
   type VisualTutorial,
 } from '../../business/domain/visual-cards';
 import type { AlignerPort } from '../../business/ports/aligner.port';
@@ -232,7 +233,11 @@ export class VisualSceneProcessor {
           context: where,
           previous: tutorial,
           // The warnings ride along as advice; only the problems must go.
-          problems: [...problems, ...visualWarnings(script)],
+          problems: [
+            ...problems,
+            ...tutorialWarnings(tutorial),
+            ...visualWarnings(script),
+          ],
         });
         await this.record(documentId, 'visual_repair', mended.usage);
         tutorial = tidyTutorial(mended.value);

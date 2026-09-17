@@ -29,7 +29,7 @@ import {
   boxOf,
   type VisualPoint,
 } from './visual';
-import { PRESET_INFO } from './visual-presets';
+import { knownPicture, pictureAspect } from './visual-presets';
 
 export const TEMPLATES = ['hub', 'flow', 'cycle', 'compare', 'layers'] as const;
 export type Template = (typeof TEMPLATES)[number];
@@ -88,7 +88,7 @@ export function pictureBox(
   name: string,
   width: number,
 ): { w: number; h: number } {
-  const aspect = PRESET_INFO[name]?.aspect ?? 1;
+  const aspect = pictureAspect(name);
   const w = Math.round(width);
   return { w, h: Math.round(w / aspect) };
 }
@@ -165,7 +165,7 @@ export function place(
       ];
     case 'picture': {
       const name =
-        item.picture && PRESET_INFO[item.picture] ? item.picture : 'document';
+        item.picture && knownPicture(item.picture) ? item.picture : 'document';
       const box = pictureBox(name, size);
       const elements: VisualElement[] = [
         {
@@ -362,7 +362,7 @@ export function structureProblems(structure: VisualStructure): string[] {
         `Chip "${item.id}" says "${item.text}", ${item.text.length} characters; at most twenty-two, one or two words.`,
       );
     if (item.kind === 'picture') {
-      if (!item.picture || !PRESET_INFO[item.picture])
+      if (!knownPicture(item.picture))
         problems.push(
           `Picture "${item.id}" names "${item.picture ?? ''}", which is not in the library; use a name from the catalogue or make it a chip.`,
         );
@@ -594,9 +594,7 @@ function hubPlan(structure: VisualStructure): HubPlan {
   // from the most a picture may take down to the least it can be.
   const mid = (top + bottom) / 2;
   const aspect =
-    centre?.kind === 'picture'
-      ? (PRESET_INFO[centre.picture ?? '']?.aspect ?? 1)
-      : 1;
+    centre?.kind === 'picture' ? pictureAspect(centre.picture ?? '') : 1;
   const isPicture = centre?.kind === 'picture';
   const least = isPicture
     ? 64

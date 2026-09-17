@@ -3,6 +3,7 @@ import {
   layoutTutorial,
   tidyTutorial,
   tutorialProblems,
+  tutorialWarnings,
   type VisualTutorial,
 } from './visual-cards';
 
@@ -144,12 +145,14 @@ describe('a visual tutorial', () => {
       ],
     };
     const problems = tutorialProblems(broken, null);
+    expect(tutorialWarnings(broken)).toEqual([
+      expect.stringContaining('no drawing was found for "unicorn"'),
+    ]);
     expect(problems).toEqual(
       expect.arrayContaining([
         expect.stringContaining('the heading is'),
         expect.stringContaining('has from 4'),
         expect.stringContaining('between 2 and 5'),
-        expect.stringContaining('not in the library'),
         expect.stringContaining('the statement is'),
       ]),
     );

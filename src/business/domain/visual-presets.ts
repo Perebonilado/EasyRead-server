@@ -97,6 +97,8 @@ export const PRESET_INFO: Record<string, PresetInfo> = {
   },
 };
 
+import { ICON_TAGS } from './visual-icons.generated';
+
 export const PRESET_SHAPES = Object.keys(PRESET_INFO) as readonly string[];
 export type PresetShape = keyof typeof PRESET_INFO;
 
@@ -105,4 +107,81 @@ export function presetCatalogue(): string {
   return Object.entries(PRESET_INFO)
     .map(([name, info]) => `${name}: ${info.tags}`)
     .join('\n');
+}
+
+/** Whether the stage can draw this name: a hand-made preset or an icon. */
+export function knownPicture(name: string | undefined): boolean {
+  return Boolean(name && (PRESET_INFO[name] || ICON_TAGS[name]));
+}
+
+/** Width over height of a drawn thing's box; icons sit on a square. */
+export function pictureAspect(name: string): number {
+  return PRESET_INFO[name]?.aspect ?? 1;
+}
+
+/** Words that name a group in the catalogue, not a thing: no picture is found on them alone. */
+const GROUP_WORDS = new Set(
+  'objects nature maps travel system media communications communication finances finance games health wellness commerce office people security time weather new'.split(
+    ' ',
+  ),
+);
+const STOP_WORDS = new Set(
+  'a an the of and or for to in on at with by from some any this that it its their his her'.split(
+    ' ',
+  ),
+);
+
+/** A word's plain forms, so "buildings" finds "building" and "kitties" "kitty". */
+function forms(word: string): string[] {
+  const out = new Set([word]);
+  if (word.endsWith('ies') && word.length > 4) out.add(`${word.slice(0, -3)}y`);
+  if (word.endsWith('es') && word.length > 4) out.add(word.slice(0, -2));
+  if (word.endsWith('s') && word.length > 3) out.add(word.slice(0, -1));
+  out.add(`${word}s`);
+  return [...out];
+}
+
+/**
+ * The drawing for the word a model uses for a thing: the hand-made
+ * preset of that name first, then an icon of that name, then the icon
+ * whose name or tags say it best. Nothing when no word of it is known.
+ */
+export function resolvePicture(text: string | undefined): string | undefined {
+  if (!text) return undefined;
+  const words = text
+    .toLowerCase()
+    .replace(/[^a-z0-9\s-]/g, ' ')
+    .split(/[\s-]+/)
+    .filter((w) => w.length > 1 && !STOP_WORDS.has(w));
+  if (!words.length) return undefined;
+  const joined = words.join('-');
+  const exact = [joined, ...words.flatMap(forms)];
+  for (const name of exact) {
+    if (PRESET_INFO[name]) return name;
+  }
+  for (const name of exact) {
+    if (ICON_TAGS[name]) return name;
+  }
+  const wanted = new Set(words.flatMap(forms));
+  let best: { name: string; score: number } | null = null;
+  const consider = (name: string, tags: string, weight: number) => {
+    let score = 0;
+    for (const part of name.split('-')) if (wanted.has(part)) score += 3;
+    for (const tag of tags.toLowerCase().split(/[\s&]+/)) {
+      if (GROUP_WORDS.has(tag)) continue;
+      if (wanted.has(tag)) score += 1;
+    }
+    if (!score) return;
+    score *= weight;
+    if (
+      !best ||
+      score > best.score ||
+      (score === best.score && name.length < best.name.length)
+    )
+      best = { name, score };
+  };
+  for (const [name, info] of Object.entries(PRESET_INFO))
+    consider(name, info.tags, 1.2);
+  for (const [name, tags] of Object.entries(ICON_TAGS)) consider(name, tags, 1);
+  return best ? (best as { name: string }).name : undefined;
 }

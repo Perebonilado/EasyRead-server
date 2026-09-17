@@ -18,6 +18,7 @@ import { contentWords, type WordTimes, estimateWordTimes } from './board';
 import { grounded } from './sketch';
 import type { SpokenForm } from './spoken';
 import type { FigureManner, FigureOutline, FigurePart } from './visual-figures';
+import type { MechanismKind } from './visual-mechanisms';
 import { measureText } from './visual-font';
 import {
   knownPicture,
@@ -25,9 +26,39 @@ import {
   type PresetShape,
 } from './visual-presets';
 
-export const VISUAL_GENERATOR_VERSION = 'visual-3';
+export const VISUAL_GENERATOR_VERSION = 'visual-4';
 
 export const VISUAL_SPACE = { w: 360, h: 270 } as const;
+
+/**
+ * The two stagings every script is laid out in: the box, 4:3, for the
+ * pane beside the page, and the wide, 16:9, for the full screen. One
+ * tutorial, one set of cues; only where things sit differs.
+ */
+export const VISUAL_STAGINGS = {
+  box: { w: 360, h: 270, margin: 12 },
+  wide: { w: 480, h: 270, margin: 18 },
+} as const;
+export type StagingName = keyof typeof VISUAL_STAGINGS;
+
+/** A staging as the layouts read it: its size, margin and middle. */
+export interface Stage {
+  name: StagingName;
+  W: number;
+  H: number;
+  M: number;
+  CX: number;
+  CY: number;
+}
+
+const stageOf = (name: StagingName): Stage => {
+  const { w, h, margin } = VISUAL_STAGINGS[name];
+  return { name, W: w, H: h, M: margin, CX: w / 2, CY: h / 2 };
+};
+export const STAGES: Record<StagingName, Stage> = {
+  box: stageOf('box'),
+  wide: stageOf('wide'),
+};
 /** Nothing sits closer than this to an edge. */
 export const VISUAL_MARGIN = 12;
 /** The least gap between two visible boxes. */
@@ -157,6 +188,16 @@ export function pathProblem(d: string): string | null {
   return check();
 }
 
+/** How a drawn thing moves once it is on screen; every motion is a function of the clock. */
+export const VISUAL_MOTIONS = [
+  'travel',
+  'bounce',
+  'spin',
+  'shake',
+  'hover',
+] as const;
+export type VisualMotion = (typeof VISUAL_MOTIONS)[number];
+
 export type VisualPoint = [number, number];
 /** An end of a line or arrow: a point, or the id of an element to attach to. */
 export type VisualEnd = VisualPoint | string;
@@ -262,6 +303,36 @@ export type VisualElement =
       text?: string;
       color?: VisualColor;
       fill?: 'solid' | 'outline' | 'tint';
+      /** How a drawn picture moves once shown. */
+      motion?: VisualMotion;
+    }
+  | {
+      id: string;
+      type: 'callout';
+      x: number;
+      y: number;
+      text: string;
+      /** The figure or mechanism the leader line runs to, and the part it points at. */
+      of: string;
+      part: string;
+      anchor?: 'start' | 'end';
+      color?: VisualColor;
+    }
+  | {
+      id: string;
+      type: 'mechanism';
+      x: number;
+      y: number;
+      w: number;
+      h: number;
+      kind: MechanismKind;
+      params: Record<string, number>;
+      /** The stages shown, in order; each runs from the word its phase chip comes in on. */
+      stages: string[];
+      /** The phase chips, one per stage, in order. */
+      phaseIds: string[];
+      seed: number;
+      color?: VisualColor;
     }
   | {
       id: string;
@@ -322,7 +393,7 @@ const NEEDS_SHOWN = new Set<VisualAction>([
   'highlight',
 ]);
 /** The actions that bring an element on screen. */
-const SHOWS = new Set<VisualAction>(['draw', 'fade']);
+export const SHOWS = new Set<VisualAction>(['draw', 'fade']);
 
 export interface VisualCue {
   /** The word of the sentence the cue lands on, zero-based, after a whitespace split. */
@@ -377,8 +448,18 @@ export interface TimedSegment {
 }
 
 /** The scene as stored and played: the script with every cue on the audio. */
+/** What the judge said of a page's stills. */
+export interface VisualJudgement {
+  moments: {
+    moment: number;
+    drawings: { name: string; looksRight: boolean; wrong: string | null }[];
+    textTrouble: string | null;
+    crowded: boolean;
+  }[];
+}
+
 export interface VisualTimeline {
-  version: 1;
+  version: 2;
   generator: string;
   title: string;
   space: { w: number; h: number };
@@ -387,6 +468,11 @@ export interface VisualTimeline {
   durationMs: number;
   /** How the words were measured: the aligner, or an estimate from the length. */
   timing: 'aligned' | 'estimated';
+  /** The same script placed for each staging; `elements` and `space` are the box's. */
+  stagings: Record<
+    StagingName,
+    { space: { w: number; h: number }; elements: VisualElement[] }
+  >;
 }
 
 // ── Words ─────────────────────────────────────────────────────────────────
@@ -576,7 +662,9 @@ export function visualProblems(
   if (pool) {
     for (const element of script.elements) {
       const text =
-        element.type === 'label' || element.type === 'chip'
+        element.type === 'label' ||
+        element.type === 'chip' ||
+        element.type === 'callout'
           ? element.text
           : element.type === 'shape'
             ? (element.text ?? '')
@@ -733,6 +821,8 @@ export const BUBBLE_HEIGHT = 26;
 export const BUBBLE_TAIL = 9;
 export const CHIP_ICON_ROOM = 20;
 export const CHIP_HEIGHT = 26;
+/** A callout's text has a dot before it; the room that takes. */
+export const CALLOUT_PAD = 10;
 export const CHIP_TEXT_SIZE = 12.5;
 export const CHIP_PAD = 24;
 export const CHIP_MIN_WIDTH = 44;
@@ -804,12 +894,19 @@ export function boxOf(element: VisualElement): Box | null {
     }
     case 'figure':
     case 'chart':
+    case 'mechanism':
       return {
         x: element.x - element.w / 2,
         y: element.y - element.h / 2,
         w: element.w,
         h: element.h,
       };
+    case 'callout': {
+      const size = LABEL_SIZE.sm;
+      const w = textWidth(element.text, size, true) + CALLOUT_PAD;
+      const left = element.anchor === 'end' ? element.x - w : element.x;
+      return { x: left, y: element.y - size * 0.7, w, h: size * 1.4 };
+    }
     case 'bubble': {
       const w = textWidth(element.text, BUBBLE_TEXT_SIZE, true) + BUBBLE_PAD;
       return {
@@ -1042,8 +1139,12 @@ export function visualWarnings(script: VisualScript): string[] {
  * narrow for its text, or an arrow running through a label or chip.
  * Reported with the numbers a repair needs.
  */
-export function layoutProblems(script: VisualScript): string[] {
+export function layoutProblems(
+  script: VisualScript,
+  stage: Stage = STAGES.box,
+): string[] {
   const problems: string[] = [];
+  const { W, H, M } = stage;
   const byId = new Map(script.elements.map((e) => [e.id, e] as const));
   const boxes = new Map<string, Box>();
   for (const element of script.elements) {
@@ -1060,14 +1161,9 @@ export function layoutProblems(script: VisualScript): string[] {
     boxes.set(element.id, box);
     const right = box.x + box.w;
     const bottom = box.y + box.h;
-    if (
-      box.x < VISUAL_MARGIN ||
-      box.y < VISUAL_MARGIN ||
-      right > VISUAL_SPACE.w - VISUAL_MARGIN ||
-      bottom > VISUAL_SPACE.h - VISUAL_MARGIN
-    ) {
+    if (box.x < M || box.y < M || right > W - M || bottom > H - M) {
       problems.push(
-        `"${element.id}" runs outside the canvas margin: it spans ${round(box.x)} to ${round(right)} across and ${round(box.y)} to ${round(bottom)} down; keep everything ${VISUAL_MARGIN} units inside 0 to ${VISUAL_SPACE.w} by 0 to ${VISUAL_SPACE.h}.`,
+        `"${element.id}" runs outside the canvas margin: it spans ${round(box.x)} to ${round(right)} across and ${round(box.y)} to ${round(bottom)} down; keep everything ${M} units inside 0 to ${W} by 0 to ${H}.`,
       );
     }
   }
@@ -1157,7 +1253,10 @@ function withoutEarlyCues(script: VisualScript): VisualScript {
   };
 }
 
-export function repairVisual(script: VisualScript): VisualScript {
+export function repairVisual(
+  script: VisualScript,
+  stage: Stage = STAGES.box,
+): VisualScript {
   // Text is one line: a newline the model put in to make a chip "short"
   // would draw as nothing and measure as everything.
   const tidy = (text: string) => text.replace(/\s+/g, ' ').trim();
@@ -1177,6 +1276,7 @@ export function repairVisual(script: VisualScript): VisualScript {
         ? { ...element, w: round(shapeTextWidth(element.text) + 4) }
         : element,
     ),
+    stage,
   );
   // Nudge pairs that overlap in any sentence, a few rounds, later one moves.
   const draft: VisualScript = { ...withoutEarlyCues(script), elements };
@@ -1213,10 +1313,10 @@ export function repairVisual(script: VisualScript): VisualScript {
             .filter((id) => id !== ids[i] && id !== ids[j])
             .map((id) => boxOf(map.get(id)!)!);
           const fits = (candidate: Box) =>
-            candidate.x >= VISUAL_MARGIN &&
-            candidate.y >= VISUAL_MARGIN &&
-            candidate.x + candidate.w <= VISUAL_SPACE.w - VISUAL_MARGIN &&
-            candidate.y + candidate.h <= VISUAL_SPACE.h - VISUAL_MARGIN &&
+            candidate.x >= stage.M &&
+            candidate.y >= stage.M &&
+            candidate.x + candidate.w <= stage.W - stage.M &&
+            candidate.y + candidate.h <= stage.H - stage.M &&
             others.every((o) => {
               const ov = overlap(candidate, o);
               return ov.x <= 4 || ov.y <= 4 || contained(candidate, o);
@@ -1273,11 +1373,11 @@ export function repairVisual(script: VisualScript): VisualScript {
   const segments = calmed({ ...draft, segments: ordered });
   // A nudge can push a box over the edge; the edge wins, and a box that
   // then overlaps again is the model's to mend.
-  const placed = clampAll(draft.elements);
+  const placed = clampAll(draft.elements, stage);
   const withBends = bent({ ...draft, elements: placed, segments });
   return {
     ...draft,
-    elements: unblocked({ ...draft, elements: withBends, segments }),
+    elements: unblocked({ ...draft, elements: withBends, segments }, stage),
     segments,
   };
 }
@@ -1299,7 +1399,7 @@ function through(samples: VisualPoint[], box: Box): boolean {
  * inside the margin, clear of that arrow and on no other lit box. A word
  * with no such spot is left for the model.
  */
-function unblocked(script: VisualScript): VisualElement[] {
+function unblocked(script: VisualScript, stage: Stage): VisualElement[] {
   const elements = script.elements.map((e) => ({ ...e }));
   const byId = new Map(elements.map((e) => [e.id, e] as const));
   const visible = visibleAfterEach(script);
@@ -1348,10 +1448,10 @@ function unblocked(script: VisualScript): VisualElement[] {
           word.y = round(original.y + dy);
           const moved = boxOf(word)!;
           const inside =
-            moved.x >= VISUAL_MARGIN &&
-            moved.y >= VISUAL_MARGIN &&
-            moved.x + moved.w <= VISUAL_SPACE.w - VISUAL_MARGIN &&
-            moved.y + moved.h <= VISUAL_SPACE.h - VISUAL_MARGIN;
+            moved.x >= stage.M &&
+            moved.y >= stage.M &&
+            moved.x + moved.w <= stage.W - stage.M &&
+            moved.y + moved.h <= stage.H - stage.M;
           const clear =
             inside &&
             !through(arrowSamples(arrow, byId), moved) &&
@@ -1496,7 +1596,7 @@ function calmed(script: VisualScript): VisualSegment[] {
 }
 
 /** Every box inside the margin, a unit to spare so rounding cannot put it back over. */
-function clampAll(elements: VisualElement[]): VisualElement[] {
+function clampAll(elements: VisualElement[], stage: Stage): VisualElement[] {
   return elements.map((element) => {
     const copy = { ...element };
     const box = boxOf(copy);
@@ -1504,12 +1604,12 @@ function clampAll(elements: VisualElement[]): VisualElement[] {
     // A unit inside the margin, so rounding the centre cannot put the box
     // back over it.
     const clampedX = Math.min(
-      Math.max(box.x, VISUAL_MARGIN + 1),
-      VISUAL_SPACE.w - VISUAL_MARGIN - 1 - box.w,
+      Math.max(box.x, stage.M + 1),
+      stage.W - stage.M - 1 - box.w,
     );
     const clampedY = Math.min(
-      Math.max(box.y, VISUAL_MARGIN + 1),
-      VISUAL_SPACE.h - VISUAL_MARGIN - 1 - box.h,
+      Math.max(box.y, stage.M + 1),
+      stage.H - stage.M - 1 - box.h,
     );
     const dx = clampedX - box.x;
     const dy = clampedY - box.y;
@@ -1566,10 +1666,18 @@ export function estimateVisualWordTimes(input: {
   pausesS: number[];
   durationMs: number;
   audioKey: string;
+  /** Where each sentence starts, when the voice measured its pieces; the guess is pinned to them. */
+  pieceStartsMs?: number[];
 }): WordTimes {
   const { forms, pausesS, durationMs, audioKey } = input;
   const { text, starts } = sceneSpoken(forms);
   const whole = estimateWordTimes(text, durationMs, audioKey);
+  const windows = sentenceWindows(
+    forms.length,
+    pausesS,
+    durationMs,
+    input.pieceStartsMs,
+  );
   const silence = pausesS.reduce((sum, s) => sum + s, 0) * 1000;
   const speech = Math.max(durationMs * 0.4, durationMs - silence);
   const chars = forms.reduce((sum, form) => sum + form.text.length, 0) || 1;
@@ -1578,7 +1686,11 @@ export function estimateVisualWordTimes(input: {
   let cursor = 0;
   forms.forEach((form, index) => {
     const start = starts[index];
-    const span = form.text.length * perChar;
+    const window = windows?.[index];
+    const from0 = window ? window[0] : cursor;
+    const span = window
+      ? Math.max(200, window[1] - window[0])
+      : form.text.length * perChar;
     const pattern = /\S+/g;
     let match: RegExpExecArray | null;
     while ((match = pattern.exec(form.text)) !== null) {
@@ -1587,13 +1699,142 @@ export function estimateVisualWordTimes(input: {
       words.push([
         start + from,
         start + to,
-        Math.round(cursor + (from / form.text.length) * span),
-        Math.round(cursor + (to / form.text.length) * span),
+        Math.round(from0 + (from / form.text.length) * span),
+        Math.round(from0 + (to / form.text.length) * span),
       ]);
     }
-    cursor += span + (pausesS[index] ?? 0) * 1000;
+    cursor = window
+      ? window[1] + (pausesS[index] ?? 0) * 1000
+      : cursor + span + (pausesS[index] ?? 0) * 1000;
   });
   return { ...whole, words };
+}
+
+/**
+ * The span each sentence is spoken in, from where the voice said its
+ * pieces start: a sentence runs from its start to the next start less
+ * the pause after it; the last to the end less its pause. Null when the
+ * voice measured nothing or the count does not match.
+ */
+export function sentenceWindows(
+  count: number,
+  pausesS: number[],
+  durationMs: number,
+  pieceStartsMs?: number[],
+): [number, number][] | null {
+  if (!pieceStartsMs || pieceStartsMs.length !== count || count === 0)
+    return null;
+  for (let i = 1; i < count; i += 1)
+    if (pieceStartsMs[i] < pieceStartsMs[i - 1]) return null;
+  return pieceStartsMs.map((start, i) => {
+    const next = i + 1 < count ? pieceStartsMs[i + 1] : durationMs;
+    const end = Math.max(start + 200, next - (pausesS[i] ?? 0) * 1000);
+    return [start, end];
+  });
+}
+
+/**
+ * Measured words pinned to the sentences the voice said it spoke: a
+ * sentence whose words the aligner put outside its own span, by more
+ * than a hearing's worth, is remapped into that span, so the aligner
+ * only ever decides where a word falls inside its sentence.
+ */
+export function pinWordTimes(
+  times: WordTimes,
+  forms: SpokenForm[],
+  pausesS: number[],
+  durationMs: number,
+  pieceStartsMs?: number[],
+): WordTimes {
+  const windows = sentenceWindows(
+    forms.length,
+    pausesS,
+    durationMs,
+    pieceStartsMs,
+  );
+  if (!windows) return times;
+  const { starts } = sceneSpoken(forms);
+  const words = times.words.map((w) => [...w]);
+  forms.forEach((form, index) => {
+    const start = starts[index];
+    const end = start + form.text.length;
+    const own = words.filter((w) => w[0] >= start && w[1] <= end && w[2] >= 0);
+    if (!own.length) return;
+    const [ws, we] = windows[index];
+    const first = Math.min(...own.map((w) => w[2]));
+    const last = Math.max(...own.map((w) => w[3]));
+    if (first >= ws - PIN_SLACK_MS && last <= we + PIN_SLACK_MS) return;
+    const scale = last > first ? (we - ws) / (last - first) : 1;
+    for (const w of own) {
+      w[2] = Math.round(ws + (w[2] - first) * scale);
+      w[3] = Math.round(ws + (w[3] - first) * scale);
+    }
+  });
+  return { ...times, words };
+}
+
+/** How far outside its sentence's span a measured word may fall before the sentence is pinned. */
+export const PIN_SLACK_MS = 150;
+
+/** No card shorter than this, so a learner can take it in. */
+export const SHORTEST_CARD_MS = 3000;
+
+/**
+ * What is wrong with a timeline's beats: a cue outside its sentence, a
+ * card's parts out of order, a card gone before it can be read, two
+ * cards on one beat. Deterministic, so a page that fails is remade on
+ * the estimate rather than saved wrong.
+ */
+export function timingProblems(timeline: VisualTimeline): string[] {
+  const problems: string[] = [];
+  timeline.segments.forEach((segment, index) => {
+    const low = segment.startMs - CARD_LEAD_MS - 250;
+    const high = segment.endMs + 400;
+    for (const cue of segment.cues) {
+      if (cue.atMs < low || cue.atMs > high)
+        problems.push(
+          `Sentence ${index + 1}: "${cue.do}" on "${cue.target}" lands at ${cue.atMs} ms, outside its sentence (${segment.startMs} to ${segment.endMs}).`,
+        );
+    }
+  });
+  // A card's parts in the card's order: m3_p0 before m3_p1, and so on.
+  const shows = new Map<string, number>();
+  for (const segment of timeline.segments)
+    for (const cue of segment.cues)
+      if ((cue.do === 'draw' || cue.do === 'fade') && !shows.has(cue.target))
+        shows.set(cue.target, cue.atMs);
+  const parts = new Map<string, { k: number; at: number }[]>();
+  for (const [target, at] of shows) {
+    const match = /^(m\d+)_p(\d+)$/.exec(target);
+    if (!match) continue;
+    const list = parts.get(match[1]) ?? [];
+    list.push({ k: Number(match[2]), at });
+    parts.set(match[1], list);
+  }
+  for (const [moment, list] of parts) {
+    list.sort((a, b) => a.k - b.k);
+    for (let i = 1; i < list.length; i += 1)
+      if (list[i].at < list[i - 1].at)
+        problems.push(
+          `${moment}: part ${list[i].k + 1} shows at ${list[i].at} ms, before part ${list[i - 1].k} at ${list[i - 1].at} ms.`,
+        );
+  }
+  const clears = timeline.segments
+    .flatMap((s) => s.cues.filter((c) => c.do === 'clear').map((c) => c.atMs))
+    .sort((a, b) => a - b);
+  const stops = [0, ...clears, timeline.durationMs];
+  for (let i = 1; i < stops.length; i += 1) {
+    const span = stops[i] - stops[i - 1];
+    if (span < CROWDING_MS)
+      problems.push(
+        `Two cards change within ${span} ms of each other at ${stops[i]} ms.`,
+      );
+    else if (span < SHORTEST_CARD_MS && i < stops.length - 1)
+      problems.push(
+        `The card from ${stops[i - 1]} ms to ${stops[i]} ms is on screen ${span} ms; a card holds at least ${SHORTEST_CARD_MS}.`,
+      );
+  }
+  return problems;
 }
 
 /**
@@ -1604,6 +1845,8 @@ export function estimateVisualWordTimes(input: {
  */
 export function timeVisual(input: {
   script: VisualScript;
+  /** The wide staging's elements, laid out from the same tutorial; the script's are the box's. */
+  wide?: VisualElement[];
   forms: SpokenForm[];
   times: WordTimes;
   durationMs: number;
@@ -1649,14 +1892,23 @@ export function timeVisual(input: {
     }
   }
   for (const segment of segments) segment.cues.sort((a, b) => a.atMs - b.atMs);
+  const box = VISUAL_STAGINGS.box;
+  const wide = VISUAL_STAGINGS.wide;
   return {
-    version: 1,
+    version: 2,
     generator: input.generator ?? VISUAL_GENERATOR_VERSION,
     title: script.title,
-    space: { ...VISUAL_SPACE },
+    space: { w: box.w, h: box.h },
     elements: script.elements,
     segments,
     durationMs: input.durationMs,
     timing: input.timing,
+    stagings: {
+      box: { space: { w: box.w, h: box.h }, elements: script.elements },
+      wide: {
+        space: { w: wide.w, h: wide.h },
+        elements: input.wide ?? script.elements,
+      },
+    },
   };
 }

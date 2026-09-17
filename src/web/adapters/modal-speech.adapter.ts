@@ -99,6 +99,7 @@ export class ModalSpeechAdapter implements SpeechPort {
     mimeType: string;
     model: string;
     durationMs?: number;
+    pieceStartsMs?: number[];
   }> {
     const base = this.config
       .getOrThrow<string>('MODAL_TTS_URL')
@@ -110,7 +111,7 @@ export class ModalSpeechAdapter implements SpeechPort {
     // Kokoro takes the page as pieces, each at its pace with its silence
     // after; one request, the service joins them.
     if (engine === 'kokoro' && pieces?.length) {
-      const { audio, durationMs } = await this.once(
+      const { audio, durationMs, pieceStartsMs } = await this.once(
         `${base}/v1/audio/speech`,
         token,
         {
@@ -128,6 +129,7 @@ export class ModalSpeechAdapter implements SpeechPort {
         mimeType: 'audio/mpeg',
         model: `modal:${this.label().model}`,
         ...(durationMs !== undefined ? { durationMs } : {}),
+        ...(pieceStartsMs?.length === pieces.length ? { pieceStartsMs } : {}),
       };
     }
 
@@ -173,7 +175,7 @@ export class ModalSpeechAdapter implements SpeechPort {
     url: string,
     token: string,
     body: Record<string, unknown>,
-  ): Promise<{ audio: Buffer; durationMs?: number }> {
+  ): Promise<{ audio: Buffer; durationMs?: number; pieceStartsMs?: number[] }> {
     let lastError: Error | null = null;
     for (
       let attempt = 1;
@@ -211,11 +213,22 @@ export class ModalSpeechAdapter implements SpeechPort {
         }
         const audio = Buffer.from(await response.arrayBuffer());
         if (!audio.length) throw new Error('The speech service sent no audio');
-        // The true length, when the service measured it (Kokoro does).
+        // The true length, when the service measured it (Kokoro does), and
+        // where each piece starts, when it spoke pieces.
         const seconds = Number(response.headers.get('x-audio-seconds'));
-        return Number.isFinite(seconds) && seconds > 0
-          ? { audio, durationMs: Math.round(seconds * 1000) }
-          : { audio };
+        const starts = (response.headers.get('x-piece-starts') ?? '')
+          .split(',')
+          .map((s) => Number(s))
+          .filter((n) => Number.isFinite(n));
+        return {
+          audio,
+          ...(Number.isFinite(seconds) && seconds > 0
+            ? { durationMs: Math.round(seconds * 1000) }
+            : {}),
+          ...(starts.length
+            ? { pieceStartsMs: starts.map((s) => Math.round(s * 1000)) }
+            : {}),
+        };
       } catch (error) {
         lastError = named(error);
         if (isRefusal(lastError)) throw lastError;

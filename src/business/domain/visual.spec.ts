@@ -10,6 +10,10 @@ import {
   visualProblems,
   type VisualElement,
   type VisualScript,
+  estimateVisualWordTimes,
+  pinWordTimes,
+  timingProblems,
+  type VisualTimeline,
 } from './visual';
 
 const MATERIAL =
@@ -434,5 +438,105 @@ describe('a visual script', () => {
     const second = timeline.segments[1];
     expect(second.cues.map((c) => c.do)).toEqual(['draw', 'flow', 'fade']);
     expect(timeline.durationMs).toBe(ms);
+  });
+});
+
+describe('beats pinned to the voice', () => {
+  const texts = [
+    'The first sentence has a few words in it.',
+    'The second one follows after a pause.',
+    'And the third closes the page.',
+  ];
+  const forms = texts.map((t) => spokenForm(t));
+  const pauses = [0.35, 0.55, 1];
+  const starts = [0, 3000, 6000];
+
+  it('spreads a guess inside the spans the voice said it spoke', () => {
+    const times = estimateVisualWordTimes({
+      forms,
+      pausesS: pauses,
+      durationMs: 9000,
+      audioKey: 'k',
+      pieceStartsMs: starts,
+    });
+    const second = times.words.filter(
+      (w) =>
+        w[0] >= texts[0].length + 1 &&
+        w[0] < texts[0].length + 1 + texts[1].length,
+    );
+    expect(second[0][2]).toBe(3000);
+    expect(second[second.length - 1][3]).toBeLessThanOrEqual(6000 - 550);
+    const first = times.words.filter((w) => w[0] < texts[0].length);
+    expect(first[first.length - 1][3]).toBeLessThanOrEqual(3000 - 350);
+  });
+
+  it('pins a measured sentence that drifted out of its span, and leaves one that did not', () => {
+    const guess = estimateVisualWordTimes({
+      forms,
+      pausesS: pauses,
+      durationMs: 9000,
+      audioKey: 'k',
+      pieceStartsMs: starts,
+    });
+    // The aligner put the whole second sentence a second late.
+    const drifted: WordTimes = {
+      ...guess,
+      words: guess.words.map((w) =>
+        w[0] >= texts[0].length + 1 &&
+        w[0] < texts[0].length + 1 + texts[1].length
+          ? [w[0], w[1], w[2] + 1000, w[3] + 1000]
+          : [...w],
+      ),
+    };
+    const pinned = pinWordTimes(drifted, forms, pauses, 9000, starts);
+    const second = pinned.words.filter(
+      (w) =>
+        w[0] >= texts[0].length + 1 &&
+        w[0] < texts[0].length + 1 + texts[1].length,
+    );
+    expect(second[0][2]).toBe(3000);
+    const first = pinned.words.filter((w) => w[0] < texts[0].length);
+    expect(first).toEqual(guess.words.filter((w) => w[0] < texts[0].length));
+  });
+
+  it('names a part out of order and a card too short', () => {
+    const timeline: VisualTimeline = {
+      version: 2,
+      generator: 'test',
+      title: 't',
+      space: { w: 360, h: 270 },
+      elements: [],
+      segments: [
+        {
+          text: texts[0],
+          startMs: 0,
+          endMs: 2500,
+          words: [],
+          cues: [
+            { atMs: 0, do: 'fade', target: 'm0_p1' },
+            { atMs: 800, do: 'fade', target: 'm0_p0' },
+          ],
+        },
+        {
+          text: texts[1],
+          startMs: 3000,
+          endMs: 5000,
+          words: [],
+          cues: [
+            { atMs: 2600, do: 'clear', target: '*' },
+            { atMs: 4000, do: 'clear', target: '*' },
+          ],
+        },
+      ],
+      durationMs: 9000,
+      timing: 'estimated',
+      stagings: {
+        box: { space: { w: 360, h: 270 }, elements: [] },
+        wide: { space: { w: 480, h: 270 }, elements: [] },
+      },
+    };
+    const faults = timingProblems(timeline);
+    expect(faults.some((f) => f.includes('part 2 shows'))).toBe(true);
+    expect(faults.some((f) => f.includes('holds at least'))).toBe(true);
   });
 });

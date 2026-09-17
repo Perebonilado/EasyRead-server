@@ -93,6 +93,31 @@ export class VisualsController {
     };
   }
 
+  /** The sheet of stills the judge looked at, one per moment; absent on a page made before there was one. */
+  @Get(':page/sheet')
+  async sheet(
+    @CurrentUser('id') userId: string,
+    @Param('id') documentId: string,
+    @Param('page', ParseIntPipe) page: number,
+    @Res() response: Response,
+  ): Promise<void> {
+    const { data } = await this.scene.handle({ userId, documentId, page });
+    const key = data.audioKey?.replace(/-[^/]*\.mp3$/, '-sheet.png');
+    if (!key) {
+      response.status(404).end();
+      return;
+    }
+    try {
+      const { stream, size } = await this.storage.stream(key);
+      response.setHeader('Content-Type', 'image/png');
+      response.setHeader('Content-Length', size);
+      response.setHeader('Cache-Control', 'private, max-age=86400');
+      stream.pipe(response);
+    } catch {
+      response.status(404).end();
+    }
+  }
+
   /**
    * The tutorial's audio. The client fetches it with the session token
    * and plays a blob URL, as it does for the lecture.

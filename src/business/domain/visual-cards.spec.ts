@@ -205,3 +205,116 @@ describe('a visual tutorial', () => {
     expect(bare.moments[1].reveals?.[0].sentence).toBe(8);
   });
 });
+
+describe('the order parts come in', () => {
+  const lines = [
+    'The network has three layers, and each one hands its work to the next.',
+    'The input layer feeds the hidden layer, which feeds the output layer.',
+    'Keep the order in mind, because the answer comes out at the end.',
+    'That is the whole shape of it, and the rest of the page fills it in.',
+    'One more line here, so that the narration is long enough to hold.',
+  ];
+  const cuesFor = (t: VisualTutorial) =>
+    layoutTutorial(t)
+      .segments.flatMap((s, i) =>
+        s.cues.map((c) => ({ sentence: i, at: c.at, target: c.target })),
+      )
+      .filter((c) => c.target.startsWith('m0_p'));
+  const base: VisualTutorial = {
+    title: 'Layers',
+    sentences: lines,
+    moments: [
+      {
+        from: 0,
+        to: 4,
+        card: 'list',
+        heading: 'Three layers',
+        items: [
+          { text: 'Input layer' },
+          { text: 'Hidden layer' },
+          { text: 'Output layer' },
+        ],
+        reveals: [
+          { part: 0, sentence: 1 },
+          { part: 1, sentence: 1 },
+          { part: 2, sentence: 1 },
+        ],
+      },
+    ],
+  };
+
+  it('finds each part on the word that is its own, not the word they share', () => {
+    const cues = cuesFor(base);
+    expect(cues.find((c) => c.target === 'm0_p0')?.at).toBe(1);
+    expect(cues.find((c) => c.target === 'm0_p1')?.at).toBe(5);
+    expect(cues.find((c) => c.target === 'm0_p2')?.at).toBe(10);
+  });
+
+  it('never shows a later part before an earlier one, whatever the model said', () => {
+    const cues = cuesFor({
+      ...base,
+      moments: [
+        {
+          ...base.moments[0],
+          reveals: [
+            { part: 0, sentence: 2 },
+            { part: 1, sentence: 1 },
+            { part: 2, sentence: 1 },
+          ],
+        },
+      ],
+    });
+    const beat = (id: string) => {
+      const c = cues.find((cue) => cue.target === id)!;
+      return c.sentence * 1000 + c.at;
+    };
+    expect(beat('m0_p0')).toBeLessThan(beat('m0_p1'));
+    expect(beat('m0_p1')).toBeLessThan(beat('m0_p2'));
+    expect(tutorialWarnings(base).join(' ')).not.toContain('order');
+    expect(
+      tutorialWarnings({
+        ...base,
+        moments: [
+          {
+            ...base.moments[0],
+            reveals: [
+              { part: 0, sentence: 2 },
+              { part: 1, sentence: 1 },
+            ],
+          },
+        ],
+      }).join(' '),
+    ).toContain('order');
+  });
+
+  it('fills in the parts the model left out, after the ones it revealed', () => {
+    const cues = cuesFor({
+      ...base,
+      moments: [
+        {
+          ...base.moments[0],
+          items: [
+            { text: 'Input layer' },
+            { text: 'Hidden layer' },
+            { text: 'Output layer' },
+            { text: 'Loss' },
+          ],
+          reveals: [{ part: 0, sentence: 1 }],
+        },
+      ],
+    });
+    const beat = (id: string) => {
+      const c = cues.find((cue) => cue.target === id)!;
+      return c.sentence * 1000 + c.at;
+    };
+    // The revealed part on its word; the rest on their own words after it, and the unnamed one later still.
+    expect(cues.find((c) => c.target === 'm0_p0')).toEqual({
+      sentence: 1,
+      at: 1,
+      target: 'm0_p0',
+    });
+    expect(beat('m0_p1')).toBe(1005);
+    expect(beat('m0_p2')).toBe(1010);
+    expect(beat('m0_p3')).toBeGreaterThan(1010);
+  });
+});

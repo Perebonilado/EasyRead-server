@@ -29,6 +29,7 @@ export type LlmTask =
   | 'visual_script'
   | 'visual_repair'
   | 'sketch_judge'
+  | 'visual_judge'
   | 'learn_outline'
   | 'learn_write'
   | 'visualize_query'
@@ -184,7 +185,7 @@ export interface LectureBoardDraft {
 }
 
 /** A figure before layout: nodes, edges, groups, each citing the script. */
-import type { VisualPlan } from '../domain/visual';
+import type { VisualJudgement, VisualPlan } from '../domain/visual';
 import type { VisualTutorial } from '../domain/visual-cards';
 import type { SketchDraft, SketchTemplate } from '../domain/sketch';
 export type { SketchDraft, SketchTemplate } from '../domain/sketch';
@@ -485,6 +486,18 @@ export interface LlmGatewayPort {
     previous?: VisualTutorial;
     problems?: string[];
   }): Promise<LlmResult<VisualTutorial>>;
+
+  /**
+   * Looks at a sheet of stills, one per moment, and says whether each
+   * drawing looks like what it is named for, and whether text or
+   * crowding gets in the way.
+   */
+  visualJudge(input: {
+    png: Buffer;
+    title: string;
+    /** Each moment by number: its card and the things it claims to draw. */
+    moments: { moment: number; card: string; drawings: string[] }[];
+  }): Promise<LlmResult<VisualJudgement>>;
 
   lectureSketch(input: {
     topicTitle: string;

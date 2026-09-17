@@ -7,15 +7,19 @@ import { noteProse } from '../../business/domain/follow';
 import { mp3DurationMs } from '../../business/domain/speech';
 import { spokenForm, type Pronunciations } from '../../business/domain/spoken';
 import {
+  STAGES,
   VISUAL_GENERATOR_VERSION,
   layoutProblems,
   materialPool,
   estimateVisualWordTimes,
+  pinWordTimes,
   repairVisual,
   sceneSpoken,
   timeVisual,
   visualProblems,
   visualWarnings,
+  timingProblems,
+  type StagingName,
   type VisualScript,
 } from '../../business/domain/visual';
 import {
@@ -24,8 +28,10 @@ import {
   tidyTutorial,
   tutorialProblems,
   tutorialWarnings,
+  type Moment,
   type VisualTutorial,
 } from '../../business/domain/visual-cards';
+import { rasterise, renderSheet } from '../../business/domain/visual-render';
 import type { AlignerPort } from '../../business/ports/aligner.port';
 import type { LlmGatewayPort } from '../../business/ports/llm.port';
 import type { StoragePort } from '../../business/ports/storage.port';
@@ -63,6 +69,26 @@ import type { JobContext } from './base.processor';
 const MATERIAL_CHARS = 14_000;
 /** How many times the model is asked to mend a script that still has problems. */
 const REPAIR_ROUNDS = 2;
+/** The judge's sheet, in pixels across: three stills a row, each readable. */
+const SHEET_WIDTH = 1500;
+
+/** What a card claims to draw, for the judge: the things named for pictures, figures and mechanisms. */
+function drawingsOf(m: Moment): string[] {
+  const names = [
+    m.card === 'picture' ? (m.picture ?? m.name) : undefined,
+    m.card === 'mechanism'
+      ? `a ${m.mechanism?.kind ?? 'bucket'} mechanism`
+      : undefined,
+    ...(m.pictures ?? []).map((p) => p.picture),
+    ...(m.items ?? []).map((i) => i.picture),
+    m.left?.picture,
+    m.right?.picture,
+    m.centre?.picture,
+    ...(m.inputs ?? []).map((i) => i.picture),
+    ...(m.outputs ?? []).map((i) => i.picture),
+  ];
+  return [...new Set(names.filter((n): n is string => Boolean(n)))];
+}
 /** A page with fewer words than this has too little to teach. */
 const THIN_PAGE_WORDS = 40;
 
@@ -217,10 +243,10 @@ export class VisualSceneProcessor {
         });
         return;
       }
-      let script: VisualScript = repairVisual(layoutTutorial(tutorial));
+      let scripts = this.staged(tutorial);
       let problems = [
         ...tutorialProblems(tutorial, pool, materialWords, material),
-        ...this.problemsOf(script),
+        ...this.problemsOf(scripts),
       ];
       for (
         let round = 0;
@@ -237,16 +263,57 @@ export class VisualSceneProcessor {
           problems: [
             ...problems,
             ...tutorialWarnings(tutorial),
-            ...visualWarnings(script),
+            ...visualWarnings(scripts.box),
           ],
         });
         await this.record(documentId, 'visual_repair', mended.usage);
         tutorial = tidyTutorial(mended.value);
-        script = repairVisual(layoutTutorial(tutorial));
+        scripts = this.staged(tutorial);
         problems = [
           ...tutorialProblems(tutorial, pool, materialWords, material),
-          ...this.problemsOf(script),
+          ...this.problemsOf(scripts),
         ];
+      }
+      // The judge looks at a sheet of the moments as a learner would see
+      // them: a drawing that does not look like its name, text in
+      // trouble, a crowded card. What it finds goes to one more mend.
+      let sheet: Buffer | null = null;
+      if (!problems.length) {
+        const judged = await this.judge(documentId, tutorial, scripts.box, who);
+        sheet = judged.sheet;
+        if (judged.problems.length) {
+          this.logger.log(
+            `${who}: the judge found ${judged.problems.length} faults:\n- ${judged.problems.join('\n- ')}`,
+          );
+          const mended = await this.llm.visualScript({
+            plan,
+            topicTitle: topic.title,
+            material,
+            context: where,
+            previous: tutorial,
+            problems: [
+              ...judged.problems,
+              ...tutorialWarnings(tutorial),
+              ...visualWarnings(scripts.box),
+            ],
+          });
+          await this.record(documentId, 'visual_repair', mended.usage);
+          const again = tidyTutorial(mended.value);
+          const staged = this.staged(again);
+          const left = [
+            ...tutorialProblems(again, pool, materialWords, material),
+            ...this.problemsOf(staged),
+          ];
+          // The mend is kept only when it is sound; a worse answer is not.
+          if (!left.length) {
+            tutorial = again;
+            scripts = staged;
+            sheet = await this.sheetOf(tutorial, scripts.box);
+          } else
+            this.logger.warn(
+              `${who}: the mend after the judge left ${left.length} problems; the judged version is kept.`,
+            );
+        }
       }
       if (problems.length) {
         this.logger.warn(
@@ -263,6 +330,7 @@ export class VisualSceneProcessor {
       const kept: Pronunciations = doc.props.institutionId
         ? await this.pronunciations.kept(doc.props.institutionId)
         : new Map();
+      const script = scripts.box;
       const forms = script.segments.map((segment) =>
         spokenForm(segment.text, kept),
       );
@@ -289,6 +357,12 @@ export class VisualSceneProcessor {
         body: result.audio,
         mimeType: result.mimeType,
       });
+      if (sheet)
+        await this.storage.put({
+          key: `documents/${doc.id}/visuals/v${contentVersion}/p${pageNumber}-${VISUAL_GENERATOR_VERSION}-sheet.png`,
+          body: sheet,
+          mimeType: 'image/png',
+        });
       const durationMs =
         result.durationMs ?? mp3DurationMs(result.audio.length);
       await this.calls.record({
@@ -329,15 +403,49 @@ export class VisualSceneProcessor {
           );
         }
       }
-      const timing = times ? 'aligned' : 'estimated';
-      if (!times)
-        times = estimateVisualWordTimes({
+      // The voice said where each sentence starts when it spoke pieces: the
+      // measure is pinned to that, and the guess is built on it.
+      const starts = result.pieceStartsMs;
+      const estimate = () =>
+        estimateVisualWordTimes({
           forms,
           pausesS: pauses,
           durationMs,
           audioKey,
+          pieceStartsMs: starts,
         });
-      const timeline = timeVisual({ script, forms, times, durationMs, timing });
+      let timing: 'aligned' | 'estimated' = times ? 'aligned' : 'estimated';
+      if (times) times = pinWordTimes(times, forms, pauses, durationMs, starts);
+      else times = estimate();
+      const time = (words: WordTimes, how: 'aligned' | 'estimated') =>
+        timeVisual({
+          script,
+          wide: scripts.wide.elements,
+          forms,
+          times: words,
+          durationMs,
+          timing: how,
+        });
+      let timeline = time(times, timing);
+      let faults = timingProblems(timeline);
+      if (faults.length && timing === 'aligned') {
+        // The measure put a beat where it cannot be; the guess pinned to
+        // the sentences is used when it does better.
+        const guessed = time(estimate(), 'estimated');
+        const again = timingProblems(guessed);
+        if (again.length < faults.length) {
+          this.logger.warn(
+            `${who}: ${faults.length} timing faults on the measure, ${again.length} on the estimate; the estimate is kept.`,
+          );
+          timeline = guessed;
+          timing = 'estimated';
+          faults = again;
+        }
+      }
+      if (faults.length)
+        this.logger.warn(
+          `${who}: ${faults.length} timing faults left:\n- ${faults.slice(0, 6).join('\n- ')}`,
+        );
 
       await this.visuals.update(record.id, {
         status: 'done',
@@ -367,10 +475,92 @@ export class VisualSceneProcessor {
   }
 
   /** What is wrong with the laid-out scene; the words were checked on the tutorial itself. */
-  private problemsOf(script: VisualScript): string[] {
-    const warnings = visualWarnings(script);
+  /** The sheet of every moment's still, the box staging, as the judge and the admin see it. */
+  private async sheetOf(
+    tutorial: VisualTutorial,
+    script: VisualScript,
+  ): Promise<Buffer> {
+    const svg = renderSheet(script, tutorial.moments, {
+      w: STAGES.box.W,
+      h: STAGES.box.H,
+    });
+    return rasterise(svg, SHEET_WIDTH);
+  }
+
+  /**
+   * The judge's look at the page: every drawing named on a card, by
+   * moment, against the still of that moment. A drawing that does not
+   * look like its name, text in trouble or a crowded card come back as
+   * problems in the model's own terms.
+   */
+  private async judge(
+    documentId: string,
+    tutorial: VisualTutorial,
+    script: VisualScript,
+    who: string,
+  ): Promise<{ sheet: Buffer; problems: string[] }> {
+    const sheet = await this.sheetOf(tutorial, script);
+    const moments = tutorial.moments.map((m, i) => ({
+      moment: i + 1,
+      card: m.card,
+      drawings: drawingsOf(m),
+    }));
+    try {
+      const judged = await this.llm.visualJudge({
+        png: sheet,
+        title: tutorial.title,
+        moments,
+      });
+      await this.record(documentId, 'visual_judge', judged.usage);
+      const problems: string[] = [];
+      for (const verdict of judged.value.moments) {
+        const m = tutorial.moments[verdict.moment - 1];
+        if (!m) continue;
+        const label = `Moment ${verdict.moment} (${m.card})`;
+        for (const d of verdict.drawings)
+          if (!d.looksRight)
+            problems.push(
+              `${label}: the drawing named "${d.name}" does not look like it${d.wrong ? ` (${d.wrong})` : ''}. Name the thing another way, give the card a shape, or use another card.`,
+            );
+        if (verdict.textTrouble)
+          problems.push(
+            `${label}: ${verdict.textTrouble} Cut words or split the card.`,
+          );
+        if (verdict.crowded)
+          problems.push(
+            `${label} is crowded; a learner cannot take it in at a glance. Cut items or split it into two moments.`,
+          );
+      }
+      return { sheet, problems };
+    } catch (error) {
+      this.logger.warn(
+        `${who}: the judge could not look: ${(error as Error).message}`,
+      );
+      return { sheet, problems: [] };
+    }
+  }
+
+  /** The tutorial laid out and mended for both stagings: the pane's box and the full screen's wide. */
+  private staged(tutorial: VisualTutorial): Record<StagingName, VisualScript> {
+    return {
+      box: repairVisual(layoutTutorial(tutorial, STAGES.box), STAGES.box),
+      wide: repairVisual(layoutTutorial(tutorial, STAGES.wide), STAGES.wide),
+    };
+  }
+
+  /** What is wrong in either staging, each fault once. */
+  private problemsOf(scripts: Record<StagingName, VisualScript>): string[] {
+    const warnings = visualWarnings(scripts.box);
     if (warnings.length) this.logger.log(warnings.join(' '));
-    return [...visualProblems(script, null), ...layoutProblems(script)];
+    return [
+      ...new Set([
+        ...visualProblems(scripts.box, null),
+        ...layoutProblems(scripts.box, STAGES.box),
+        ...layoutProblems(scripts.wide, STAGES.wide).map(
+          (problem) => `In the wide staging: ${problem}`,
+        ),
+      ]),
+    ];
   }
 
   /** The chapter's pages, each its simplified note when written, else its own text. */
@@ -395,7 +585,7 @@ export class VisualSceneProcessor {
 
   private async record(
     documentId: string,
-    task: 'visual_plan' | 'visual_script' | 'visual_repair',
+    task: 'visual_plan' | 'visual_script' | 'visual_repair' | 'visual_judge',
     usage: {
       model: string;
       tokensIn: number;

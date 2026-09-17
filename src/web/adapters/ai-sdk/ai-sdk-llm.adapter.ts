@@ -19,7 +19,10 @@ import type {
   SketchDraft,
   SketchTemplate,
 } from '../../../business/ports/llm.port';
-import type { VisualPlan } from '../../../business/domain/visual';
+import type {
+  VisualJudgement,
+  VisualPlan,
+} from '../../../business/domain/visual';
 import type { VisualTutorial } from '../../../business/domain/visual-cards';
 import { PROMPTS } from '../prompts';
 import { ModelRegistry, type ModelRef } from './models';
@@ -35,6 +38,7 @@ import {
   lectureSketchSchema,
   visualPlanSchema,
   visualTutorialSchema,
+  visualJudgeSchema,
   sketchJudgeSchema,
   lectureExtraSchema,
   spokenQuizSchema,
@@ -672,6 +676,48 @@ export class AiSdkLlmAdapter implements LlmGatewayPort, OnModuleInit {
             {
               type: 'text' as const,
               text: `The tutor asked for: ${input.description}\nA reader should see: ${input.see}`,
+            },
+          ],
+        },
+      ],
+      maxRetries: this.maxRetries(),
+    });
+    return {
+      value: result.object,
+      usage: this.usage(ref, result.usage, started),
+    };
+  }
+
+  async visualJudge(input: {
+    png: Buffer;
+    title: string;
+    moments: { moment: number; card: string; drawings: string[] }[];
+  }): Promise<LlmResult<VisualJudgement>> {
+    const started = Date.now();
+    const { generateObject } = await this.registry.modules();
+    const { model, ref } = await this.registry.languageModel('visual_judge');
+    const listed = input.moments
+      .map(
+        (m) =>
+          `${m.moment}. ${m.card} card${m.drawings.length ? `, drawing: ${m.drawings.join('; ')}` : ', no drawing'}`,
+      )
+      .join('\n');
+    const result = await generateObject({
+      model,
+      schema: visualJudgeSchema,
+      system: PROMPTS.visualJudge,
+      messages: [
+        {
+          role: 'user' as const,
+          content: [
+            {
+              type: 'image' as const,
+              image: input.png,
+              mediaType: 'image/png',
+            },
+            {
+              type: 'text' as const,
+              text: `The lesson is "${input.title}". The moments, by number:\n${listed}`,
             },
           ],
         },

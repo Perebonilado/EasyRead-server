@@ -894,11 +894,19 @@ export interface VisualSetDto {
 
 /** The scene as the pane plays it: the elements, and every sentence and cue on the audio. */
 export interface VisualTimelineDto {
-  version: 1;
+  version: 2;
   generator: string;
   title: string;
   space: { w: number; h: number };
   elements: (Record<string, unknown> & { id: string; type: string })[];
+  /** The same script placed for the pane's box and the full screen's wide stage. */
+  stagings: Record<
+    'box' | 'wide',
+    {
+      space: { w: number; h: number };
+      elements: (Record<string, unknown> & { id: string; type: string })[];
+    }
+  >;
   segments: {
     text: string;
     startMs: number;

@@ -18,7 +18,7 @@ import type {
   SketchDraft,
   SketchTemplate,
 } from '../../business/ports/llm.port';
-import type { VisualPlan } from '../../business/domain/visual';
+import type { VisualJudgement, VisualPlan } from '../../business/domain/visual';
 import type { VisualTutorial } from '../../business/domain/visual-cards';
 
 const EMBED_DIMENSIONS = 256;
@@ -545,6 +545,29 @@ export class FakeLlmAdapter implements LlmGatewayPort {
           sentences.length >= 3 ? null : 'The chapter has too little to draw.',
       },
       usage: this.usage(started, 200, 80),
+    });
+  }
+
+  visualJudge(input: {
+    png: Buffer;
+    title: string;
+    moments: { moment: number; card: string; drawings: string[] }[];
+  }): Promise<LlmResult<VisualJudgement>> {
+    const started = Date.now();
+    return Promise.resolve({
+      value: {
+        moments: input.moments.map((m) => ({
+          moment: m.moment,
+          drawings: m.drawings.map((name) => ({
+            name,
+            looksRight: true,
+            wrong: null,
+          })),
+          textTrouble: null,
+          crowded: false,
+        })),
+      },
+      usage: this.usage(started, 200, 100),
     });
   }
 

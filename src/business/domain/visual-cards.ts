@@ -8,8 +8,8 @@
 import {
   CHIP_HEIGHT,
   LABEL_SIZE,
-  VISUAL_MARGIN,
-  VISUAL_SPACE,
+  STAGES,
+  type Stage,
   boxOf,
   chipWidthOf,
   labelGrounded,
@@ -18,6 +18,7 @@ import {
   type VisualColor,
   type VisualCue,
   type VisualElement,
+  type VisualMotion,
   type VisualScript,
 } from './visual';
 import {
@@ -28,6 +29,7 @@ import {
   type VisualStructure,
 } from './visual-layout';
 import {
+  FIGURE_ANCHORS,
   FIGURE_OUTLINES,
   figureAspect,
   figureWidth,
@@ -36,8 +38,16 @@ import {
   type FigureOutline,
   type FigurePart,
   type VisualFigure,
+  chipIcon,
+  figureHasAnchor,
+  seedOf,
 } from './visual-figures';
-import { resolvePicture } from './visual-presets';
+import {
+  MECHANISMS,
+  mechanismProblems,
+  tidyMechanism,
+  type MechanismAsk,
+} from './visual-mechanisms';
 
 export const CARD_KINDS = [
   'title',
@@ -57,6 +67,7 @@ export const CARD_KINDS = [
   'rings',
   'overlap',
   'count',
+  'mechanism',
 ] as const;
 export type CardKind = (typeof CARD_KINDS)[number];
 
@@ -122,7 +133,18 @@ export interface Moment {
     unit?: string;
   };
   /** Scene: two to four pictures composed on a ground line, each named. */
-  pictures?: { picture: string; name: string; size?: 'big' | 'small' }[];
+  pictures?: {
+    picture: string;
+    name: string;
+    size?: 'big' | 'small';
+    motion?: VisualMotion;
+  }[];
+  /** Picture: how the drawn thing moves once shown. */
+  motion?: VisualMotion;
+  /** Picture and mechanism: short lines that point at a part and follow it. */
+  callouts?: { part: string; text: string }[];
+  /** Mechanism: the machine, its numbers from the page, and the stages to show. */
+  mechanism?: MechanismAsk;
   /** Timeline: points along a line, each a short label and a line of text. */
   points?: { label: string; text: string }[];
   /** Table: column headings and rows of short cells. */
@@ -210,13 +232,11 @@ export const TUTORIAL_LIMITS = {
   maxMeaningChars: 96,
   maxBubbleChars: 36,
   maxNameChars: 24,
+  maxCalloutChars: 30,
+  maxCallouts: 3,
+  /** Characters of text one card carries before it reads as a wall. */
+  maxInkChars: 190,
 } as const;
-
-const W = VISUAL_SPACE.w;
-const H = VISUAL_SPACE.h;
-const M = VISUAL_MARGIN;
-const CX = W / 2;
-const CY = H / 2;
 
 /** What one card became: its elements, its parts in order, the arrows that go with a part, and the words each named thing is called by. */
 interface Laid {
@@ -252,19 +272,162 @@ function forms(word: string): string[] {
  * Null when the sentence never names it.
  */
 export function findWord(sentence: string, name: string): number | null {
-  const wanted = new Set(
-    name
-      .split(/\s+/)
-      .map(plain)
-      .filter((w) => w.length > 2 && !STOP.has(w))
-      .flatMap(forms),
-  );
+  const wanted = contentForms(name);
   if (!wanted.size) return null;
   const words = sentence.split(/\s+/).filter(Boolean);
   for (let i = 0; i < words.length; i += 1) {
     if (wanted.has(plain(words[i]))) return i;
   }
   return null;
+}
+
+/** The content words of a name, in every plain form. */
+function contentForms(name: string): Set<string> {
+  return new Set(
+    name
+      .split(/\s+/)
+      .map(plain)
+      .filter((w) => w.length > 2 && !STOP.has(w))
+      .flatMap(forms),
+  );
+}
+
+/**
+ * The word of a sentence where one of several named things is named,
+ * from a word on: a word that belongs to this thing alone comes first,
+ * so "hidden layer" is found on "hidden" and not on the "layer" the
+ * input layer shares with it; any of its content words is the fallback.
+ */
+export function findWordAmong(
+  sentence: string,
+  names: string[],
+  index: number,
+  from = 0,
+): number | null {
+  const own = contentForms(names[index] ?? '');
+  if (!own.size) return null;
+  const others = new Set<string>();
+  names.forEach((name, i) => {
+    if (i === index) return;
+    for (const w of contentForms(name)) others.add(w);
+  });
+  const unique = new Set([...own].filter((w) => !others.has(w)));
+  const words = sentence.split(/\s+/).filter(Boolean);
+  for (const wanted of [unique, own]) {
+    if (!wanted.size) continue;
+    for (let i = Math.max(0, from); i < words.length; i += 1) {
+      if (wanted.has(plain(words[i]))) return i;
+    }
+  }
+  return null;
+}
+
+interface Beat {
+  sentence: number;
+  word: number;
+}
+
+/**
+ * When each part of a card comes in. The model reveals some parts on
+ * the sentences that name them; the app finds the word, fills in the
+ * parts the model left out, and keeps the card's order, so a later part
+ * never shows before an earlier one. Parts before the first revealed
+ * one come with the card, as the model meant; a part after it that the
+ * narration names waits for its word, and one it never names takes its
+ * share of the words that are left.
+ */
+export function partBeats(
+  m: Moment,
+  laid: Laid,
+  sentences: string[],
+  from: number,
+  to: number,
+): Map<string, Beat> {
+  const beats = new Map<string, Beat>();
+  const asked = new Map<number, { sentence: number; word?: number }>();
+  for (const r of m.reveals ?? []) if (laid.parts[r.part]) asked.set(r.part, r);
+  if (!asked.size) return beats;
+  const first = Math.min(...asked.keys());
+  const names = laid.parts.map((id) => (id ? (laid.named.get(id) ?? '') : ''));
+  // Every word of the moment in order, so beats can be compared and spread.
+  const flat: Beat[] = [];
+  for (let s = from; s <= to; s += 1) {
+    const n = words(sentences[s] ?? '').length;
+    for (let w = 0; w < n; w += 1) flat.push({ sentence: s, word: w });
+  }
+  if (!flat.length) return beats;
+  const indexOf = (b: Beat) =>
+    flat.findIndex((f) => f.sentence === b.sentence && f.word === b.word);
+  const sentenceStart = (sentence: number) =>
+    flat.findIndex((f) => f.sentence === sentence);
+  // A thing's own word from a flat index on, sentence by sentence.
+  const search = (fromIndex: number, part: number, only?: number) => {
+    let f = Math.max(0, fromIndex);
+    while (f < flat.length) {
+      const b = flat[f];
+      if (only !== undefined && b.sentence !== only) return null;
+      const found = findWordAmong(sentences[b.sentence], names, part, b.word);
+      if (found !== null) return indexOf({ sentence: b.sentence, word: found });
+      const next = flat.findIndex((g, j) => j > f && g.sentence > b.sentence);
+      if (next < 0) return null;
+      f = next;
+    }
+    return null;
+  };
+  const placed: (number | null)[] = laid.parts.map(() => null);
+  let floor = -1;
+  laid.parts.forEach((partId, i) => {
+    if (!partId || i < first) return;
+    const r = asked.get(i);
+    let index: number | null = null;
+    if (r) {
+      const sentence = Math.max(from, Math.min(to, r.sentence));
+      const start = sentenceStart(sentence);
+      const found = search(Math.max(start, floor + 1), i, sentence);
+      if (found !== null) index = found;
+      else if (r.word !== undefined && r.word !== null) {
+        const last = Math.max(0, words(sentences[sentence]).length - 1);
+        index = indexOf({ sentence, word: Math.min(r.word, last) });
+      } else index = start;
+      // Never before the part before it.
+      index = Math.max(index, floor + 1);
+    } else index = search(floor + 1, i);
+    if (index === null) return;
+    index = Math.min(index, flat.length - 1);
+    placed[i] = index;
+    floor = index;
+  });
+  // The parts the narration never names take their share of the words
+  // between the parts around them, in order.
+  let i = first;
+  while (i < laid.parts.length) {
+    if (!laid.parts[i] || placed[i] !== null) {
+      i += 1;
+      continue;
+    }
+    let j = i;
+    while (j < laid.parts.length && laid.parts[j] && placed[j] === null) j += 1;
+    const before = i > first ? (placed[i - 1] ?? -1) : -1;
+    const after =
+      j < laid.parts.length && placed[j] !== null ? placed[j]! : flat.length;
+    const run = j - i;
+    for (let k = 0; k < run; k += 1) {
+      const share = Math.round(
+        before + ((after - before) * (k + 1)) / (run + 1),
+      );
+      placed[i + k] = Math.max(
+        before + 1 + k,
+        Math.min(after - (run - k), share),
+      );
+    }
+    i = j;
+  }
+  laid.parts.forEach((partId, k) => {
+    const index = placed[k];
+    if (!partId || index === null) return;
+    beats.set(partId, flat[Math.max(0, Math.min(flat.length - 1, index))]);
+  });
+  return beats;
 }
 
 /** Words into lines no wider than the width, greedy. */
@@ -298,9 +461,6 @@ const label = (
   extra: Partial<Extract<VisualElement, { type: 'label' }>> = {},
 ): VisualElement => ({ id, type: 'label', x, y, text, size, color, ...extra });
 
-/** The drawing for the word the model used, when the library has one. */
-const known = (picture?: string): string | undefined => resolvePicture(picture);
-
 /**
  * One thing drawn at a point: the preset or icon of its name, else the
  * figure its words say it is, else the words themselves in a chip. The
@@ -315,6 +475,7 @@ function drawThing(input: {
   width: number;
   color: VisualColor;
   shape?: Partial<VisualFigure> | null;
+  motion?: VisualMotion;
 }): { elements: VisualElement[]; height: number } {
   const { id, of, name, x, y, width, color } = input;
   const drawing = resolveDrawing(of, input.shape);
@@ -366,8 +527,57 @@ function drawThing(input: {
     x,
     y,
     width,
+  ).map((element) =>
+    element.type === 'shape' && input.motion
+      ? { ...element, motion: input.motion }
+      : element,
   );
   return { elements, height: pictureBox(drawing.name, width).h };
+}
+
+/**
+ * Short lines beside a drawn thing, each pointing at a part of it; a
+ * label follows the part as the thing moves. Right of the thing first,
+ * then left, then right again, spread down its height.
+ */
+function layoutCallouts(
+  m: Moment,
+  id: string,
+  of: string,
+  x: number,
+  y: number,
+  width: number,
+  height: number,
+  allowed: ((part: string) => boolean) | null,
+  stage: Stage,
+): VisualElement[] {
+  const { W, M } = stage;
+  const callouts = (m.callouts ?? [])
+    .filter((c) => c.text?.trim() && (!allowed || allowed(c.part)))
+    .slice(0, TUTORIAL_LIMITS.maxCallouts);
+  if (!callouts.length) return [];
+  const step = Math.min(34, Math.max(22, height / 3));
+  const top = y - ((callouts.length - 1) * step) / 2;
+  return callouts.map((c, i) => {
+    const right = i % 2 === 0;
+    const gap = 18;
+    const size = LABEL_SIZE.sm;
+    const w = textWidth(c.text, size, true) + 10;
+    const cx = right
+      ? Math.min(W - M - w, x + width / 2 + gap)
+      : Math.max(M + w, x - width / 2 - gap);
+    return {
+      id: `${id}_k${i}`,
+      type: 'callout',
+      x: Math.round(cx),
+      y: Math.round(top + i * step),
+      text: c.text.trim(),
+      of,
+      part: c.part,
+      anchor: right ? 'start' : 'end',
+      color: m.color ?? 'green',
+    };
+  });
 }
 
 /** How tall a thing stands at a width, before it is drawn. */
@@ -383,7 +593,8 @@ function thingHeight(
     : pictureBox(drawing.name, width).h;
 }
 
-function layoutTitle(m: Moment, id: string): Laid {
+function layoutTitle(m: Moment, id: string, stage: Stage): Laid {
+  const { CX, CY } = stage;
   const out: VisualElement[] = [];
   const lines = wrap(m.heading ?? '', LABEL_SIZE.xl, true, 300).slice(0, 2);
   const eyebrow = m.eyebrow?.trim();
@@ -410,7 +621,8 @@ function layoutTitle(m: Moment, id: string): Laid {
   return { elements: out, parts: [], arrowsOf: new Map(), named: new Map() };
 }
 
-function layoutStatement(m: Moment, id: string): Laid {
+function layoutStatement(m: Moment, id: string, stage: Stage): Laid {
+  const { CX, CY } = stage;
   const lines = wrap(m.text ?? '', LABEL_SIZE.lg, true, 296).slice(0, 3);
   const step = 26;
   const top = CY - ((lines.length - 1) * step) / 2;
@@ -423,7 +635,13 @@ function layoutStatement(m: Moment, id: string): Laid {
   return { elements, parts: [], arrowsOf: new Map(), named: new Map() };
 }
 
-function layoutNumber(m: Moment, id: string, count = false): Laid {
+function layoutNumber(
+  m: Moment,
+  id: string,
+  stage: Stage,
+  count = false,
+): Laid {
+  const { CX, CY } = stage;
   const out: VisualElement[] = [];
   const color = m.color ?? 'violet';
   const bar = m.bar;
@@ -460,14 +678,15 @@ function layoutNumber(m: Moment, id: string, count = false): Laid {
   return { elements: out, parts: [], arrowsOf: new Map(), named };
 }
 
-function layoutChips(m: Moment, id: string): Laid {
+function layoutChips(m: Moment, id: string, stage: Stage): Laid {
+  const { W, M, CX, CY } = stage;
   const out: VisualElement[] = [];
   const heading = m.heading?.trim();
   if (heading) out.push(label(`${id}_h`, CX, 84, heading, 'md', 'ink'));
   const items = (m.items ?? []).slice(0, TUTORIAL_LIMITS.maxItems);
   const gap = 12;
   const widths = items.map((item) =>
-    chipWidthOf(item.text, Boolean(known(item.picture))),
+    chipWidthOf(item.text, Boolean(chipIcon(item.picture))),
   );
   // Rows that fit the width, as few as they take.
   const rows: number[][] = [];
@@ -496,7 +715,7 @@ function layoutChips(m: Moment, id: string): Laid {
     let x = CX - total / 2;
     for (const i of indexes) {
       const partId = `${id}_p${i}`;
-      const icon = known(items[i].picture);
+      const icon = chipIcon(items[i].picture);
       out.push({
         id: partId,
         type: 'chip',
@@ -514,7 +733,8 @@ function layoutChips(m: Moment, id: string): Laid {
   return { elements: out, parts, arrowsOf: new Map(), named };
 }
 
-function layoutList(m: Moment, id: string): Laid {
+function layoutList(m: Moment, id: string, stage: Stage): Laid {
+  const { M, CX, CY } = stage;
   const out: VisualElement[] = [];
   const heading = m.heading?.trim();
   const items = (m.items ?? []).slice(0, TUTORIAL_LIMITS.maxItems);
@@ -552,7 +772,8 @@ function layoutList(m: Moment, id: string): Laid {
   return { elements: out, parts, arrowsOf: new Map(), named };
 }
 
-function layoutPicture(m: Moment, id: string): Laid {
+function layoutPicture(m: Moment, id: string, stage: Stage): Laid {
+  const { W, M, CX } = stage;
   const out: VisualElement[] = [];
   const heading = m.heading?.trim();
   if (heading) out.push(label(`${id}_h`, CX, 36, heading, 'md', 'muted'));
@@ -569,6 +790,8 @@ function layoutPicture(m: Moment, id: string): Laid {
     const room = 2 * (y - 26 - bubbleFloor);
     if (tall > room) width = Math.round(width * (room / tall));
   }
+  // Callouts take the sides, so the thing stands narrower to leave them room.
+  if (m.callouts?.length && width > 120) width = Math.round(width * 0.8);
   const thing = drawThing({
     id: `${id}_c`,
     of,
@@ -578,8 +801,25 @@ function layoutPicture(m: Moment, id: string): Laid {
     width,
     color: m.color ?? 'green',
     shape: m.shape,
+    motion: m.motion,
   });
   out.push(...thing.elements);
+  const figure = thing.elements.find((e) => e.type === 'figure');
+  out.push(
+    ...layoutCallouts(
+      m,
+      id,
+      `${id}_c`,
+      CX,
+      y,
+      width,
+      thing.height,
+      figure && figure.type === 'figure'
+        ? (part) => figureHasAnchor(figure, part)
+        : null,
+      stage,
+    ),
+  );
   if (bubble) {
     const w = textWidth(bubble, 11.5, true) + 22;
     const top = y - thing.height / 2;
@@ -598,7 +838,8 @@ function layoutPicture(m: Moment, id: string): Laid {
   return { elements: out, parts: [], arrowsOf: new Map(), named };
 }
 
-function layoutTerm(m: Moment, id: string): Laid {
+function layoutTerm(m: Moment, id: string, stage: Stage): Laid {
+  const { CX } = stage;
   const out: VisualElement[] = [];
   const lines = wrap(m.meaning ?? '', LABEL_SIZE.md, false, 300).slice(0, 3);
   const termY = lines.length > 2 ? 98 : 108;
@@ -614,7 +855,7 @@ function layoutTerm(m: Moment, id: string): Laid {
 }
 
 /** Compare, flow and hub reuse the picture engine: the card becomes a structure it already lays out. */
-function layoutStructured(m: Moment, id: string): Laid {
+function layoutStructured(m: Moment, id: string, stage: Stage): Laid {
   const heading = m.heading?.trim();
   const items: VisualStructure['items'] = [];
   const arrows: VisualStructure['arrows'] = [];
@@ -623,19 +864,31 @@ function layoutStructured(m: Moment, id: string): Laid {
   const named = new Map<string, string>();
   if (heading)
     items.push({ id: `${id}_h`, role: 'title', kind: 'label', text: heading });
+  // A thing named for an item is drawn as the picture engine draws it:
+  // a living thing as a figure, a thing the library has as its picture,
+  // anything else as its words.
   const asItem = (
     item: CardItem,
     itemId: string,
     role: VisualStructure['items'][number]['role'],
   ) => {
-    const picture = known(item.picture);
-    return picture
+    const drawing = resolveDrawing(item.picture);
+    if (drawing?.kind === 'figure')
+      return {
+        id: itemId,
+        role,
+        kind: 'picture' as const,
+        text: item.text,
+        figure: drawing.figure,
+        color: m.color,
+      };
+    return drawing
       ? {
           id: itemId,
           role,
           kind: 'picture' as const,
           text: item.text,
-          picture,
+          picture: drawing.name,
           color: m.color,
         }
       : {
@@ -668,7 +921,7 @@ function layoutStructured(m: Moment, id: string): Laid {
       offset: number,
     ) => {
       if (!s) return 0;
-      const picture = known(s.picture);
+      const drawing = resolveDrawing(s.picture);
       items.push({
         id: `${id}_${role}`,
         role,
@@ -676,13 +929,15 @@ function layoutStructured(m: Moment, id: string): Laid {
         text: s.label,
         color: m.color ?? 'ink',
       });
-      if (picture)
+      if (drawing)
         items.push({
           id: `${id}_${role}p`,
           role,
           kind: 'picture',
           text: '',
-          picture,
+          ...(drawing.kind === 'figure'
+            ? { figure: drawing.figure }
+            : { picture: drawing.name }),
           color: m.color,
         });
       const list = (s.items ?? []).slice(0, TUTORIAL_LIMITS.maxSide);
@@ -723,17 +978,15 @@ function layoutStructured(m: Moment, id: string): Laid {
       arrowsOf.set(partId, [arrowId]);
     });
   }
-  const scene = layoutScene({
-    title: m.heading ?? '',
-    template,
-    items,
-    arrows,
-    segments: [],
-  });
+  const scene = layoutScene(
+    { title: m.heading ?? '', template, items, arrows, segments: [] },
+    stage,
+  );
   return { elements: scene.elements, parts, arrowsOf, named };
 }
 
-function layoutChart(m: Moment, id: string): Laid {
+function layoutChart(m: Moment, id: string, stage: Stage): Laid {
+  const { H, CX } = stage;
   const out: VisualElement[] = [];
   const heading = m.heading?.trim();
   const caption = m.caption?.trim();
@@ -760,7 +1013,8 @@ function layoutChart(m: Moment, id: string): Laid {
   return { elements: out, parts: [], arrowsOf: new Map(), named: new Map() };
 }
 
-function layoutSceneCard(m: Moment, id: string): Laid {
+function layoutSceneCard(m: Moment, id: string, stage: Stage): Laid {
+  const { W, H, M, CX } = stage;
   const out: VisualElement[] = [];
   const heading = m.heading?.trim();
   if (heading) out.push(label(`${id}_h`, CX, 36, heading, 'md', 'muted'));
@@ -774,9 +1028,14 @@ function layoutSceneCard(m: Moment, id: string): Laid {
     to: [W - M - 20, ground],
     color: 'muted',
   });
-  const widths = pictures.map((p) =>
-    p.size === 'small' ? 56 : pictures.length > 3 ? 64 : 88,
-  );
+  // A tall figure (a person, a plant) is held to the height the ground leaves.
+  const widths = pictures.map((p) => {
+    const wanted = p.size === 'small' ? 56 : pictures.length > 3 ? 64 : 88;
+    const drawn = resolveDrawing(p.picture);
+    const aspect =
+      drawn?.kind === 'figure' ? figureAspect(drawn.figure.outline) : 1;
+    return Math.min(wanted, Math.round(96 * aspect));
+  });
   const gap = 18;
   const total =
     widths.reduce((sum, w) => sum + w, 0) +
@@ -798,6 +1057,7 @@ function layoutSceneCard(m: Moment, id: string): Laid {
         y: ground - 24 - Math.round(h / 2),
         width: w,
         color: m.color ?? colors[i % colors.length],
+        motion: p.motion,
       }).elements,
     );
     parts.push(partId);
@@ -807,7 +1067,8 @@ function layoutSceneCard(m: Moment, id: string): Laid {
   return { elements: out, parts, arrowsOf: new Map(), named };
 }
 
-function layoutTimeline(m: Moment, id: string): Laid {
+function layoutTimeline(m: Moment, id: string, stage: Stage): Laid {
+  const { W, M, CX } = stage;
   const out: VisualElement[] = [];
   const heading = m.heading?.trim();
   if (heading) out.push(label(`${id}_h`, CX, 40, heading, 'md', 'ink'));
@@ -859,7 +1120,8 @@ function layoutTimeline(m: Moment, id: string): Laid {
   return { elements: out, parts, arrowsOf: new Map(), named };
 }
 
-function layoutTable(m: Moment, id: string): Laid {
+function layoutTable(m: Moment, id: string, stage: Stage): Laid {
+  const { W, H, M, CX } = stage;
   const out: VisualElement[] = [];
   const heading = m.heading?.trim();
   if (heading) out.push(label(`${id}_h`, CX, 36, heading, 'md', 'ink'));
@@ -904,7 +1166,8 @@ function layoutTable(m: Moment, id: string): Laid {
   return { elements: out, parts, arrowsOf: new Map(), named };
 }
 
-function layoutRings(m: Moment, id: string): Laid {
+function layoutRings(m: Moment, id: string, stage: Stage): Laid {
+  const { CX } = stage;
   const out: VisualElement[] = [];
   const heading = m.heading?.trim();
   if (heading) out.push(label(`${id}_h`, CX, 32, heading, 'md', 'ink'));
@@ -950,7 +1213,8 @@ function layoutRings(m: Moment, id: string): Laid {
   return { elements: out, parts, arrowsOf: new Map(), named };
 }
 
-function layoutOverlap(m: Moment, id: string): Laid {
+function layoutOverlap(m: Moment, id: string, stage: Stage): Laid {
+  const { CX } = stage;
   const out: VisualElement[] = [];
   const heading = m.heading?.trim();
   if (heading) out.push(label(`${id}_h`, CX, 32, heading, 'md', 'ink'));
@@ -1019,39 +1283,127 @@ function layoutOverlap(m: Moment, id: string): Laid {
   return { elements: out, parts, arrowsOf: new Map(), named };
 }
 
+/**
+ * A mechanism: the machine in a box the canvas runs, its phases as chips
+ * under it that are its parts, so each phase starts on the word that
+ * names it, and callouts pointing at its named places.
+ */
+function layoutMechanism(m: Moment, id: string, stage: Stage): Laid {
+  const { H, M, CX } = stage;
+  const out: VisualElement[] = [];
+  const heading = m.heading?.trim();
+  const ask: MechanismAsk = m.mechanism ?? { kind: 'bucket' };
+  const mech = tidyMechanism(ask, null);
+  const spec = MECHANISMS[mech.kind];
+  const note = mech.assumed.length === spec.params.length;
+  if (heading) out.push(label(`${id}_h`, CX, 36, heading, 'md', 'ink'));
+  if (note)
+    out.push(
+      label(`${id}_n`, M + 2, M + 8, 'example numbers', 'sm', 'muted', {
+        anchor: 'start',
+      }),
+    );
+  const top = heading ? 56 : 34;
+  const chipsY = H - 30;
+  const bottom = chipsY - 24;
+  const most = stage.name === 'wide' ? 320 : 250;
+  let h = Math.min(most / spec.aspect, bottom - top);
+  let w = Math.round(h * spec.aspect);
+  if (m.callouts?.length) {
+    w = Math.round(w * 0.82);
+    h = w / spec.aspect;
+  }
+  const y = Math.round(top + (bottom - top) / 2);
+  const parts: string[] = [];
+  const named = new Map<string, string>();
+  const phaseIds = mech.stages.map((_, i) => `${id}_p${i}`);
+  out.push({
+    id: `${id}_m`,
+    type: 'mechanism',
+    x: CX,
+    y,
+    w,
+    h: Math.round(h),
+    kind: mech.kind,
+    params: mech.params,
+    stages: mech.stages,
+    phaseIds,
+    seed: seedOf(`${mech.kind} ${mech.texts.join(' ')}`),
+    color: m.color ?? 'blue',
+  });
+  const gap = 12;
+  const widths = mech.texts.map((text) => chipWidthOf(text));
+  const total =
+    widths.reduce((sum, v) => sum + v, 0) + gap * (widths.length - 1);
+  let x = CX - total / 2;
+  mech.texts.forEach((text, i) => {
+    out.push({
+      id: phaseIds[i],
+      type: 'chip',
+      x: Math.round(x + widths[i] / 2),
+      y: chipsY,
+      text,
+      color: m.color ?? 'blue',
+    });
+    parts.push(phaseIds[i]);
+    named.set(phaseIds[i], text);
+    x += widths[i] + gap;
+  });
+  out.push(
+    ...layoutCallouts(
+      m,
+      id,
+      `${id}_m`,
+      CX,
+      y,
+      w,
+      h,
+      (part) => spec.anchors.includes(part),
+      stage,
+    ),
+  );
+  return { elements: out, parts, arrowsOf: new Map(), named };
+}
+
 /** One moment as elements, with its parts and arrows named for the cues. */
-export function layoutMoment(m: Moment, id: string): Laid {
+export function layoutMoment(
+  m: Moment,
+  id: string,
+  stage: Stage = STAGES.box,
+): Laid {
   switch (m.card) {
     case 'chart':
-      return layoutChart(m, id);
+      return layoutChart(m, id, stage);
     case 'scene':
-      return layoutSceneCard(m, id);
+      return layoutSceneCard(m, id, stage);
     case 'timeline':
-      return layoutTimeline(m, id);
+      return layoutTimeline(m, id, stage);
     case 'table':
-      return layoutTable(m, id);
+      return layoutTable(m, id, stage);
     case 'rings':
-      return layoutRings(m, id);
+      return layoutRings(m, id, stage);
     case 'overlap':
-      return layoutOverlap(m, id);
+      return layoutOverlap(m, id, stage);
     case 'count':
-      return layoutNumber({ ...m, card: 'number' }, id, true);
+      return layoutNumber({ ...m, card: 'number' }, id, stage, true);
+    case 'mechanism':
+      return layoutMechanism(m, id, stage);
     case 'title':
-      return layoutTitle(m, id);
+      return layoutTitle(m, id, stage);
     case 'statement':
-      return layoutStatement(m, id);
+      return layoutStatement(m, id, stage);
     case 'number':
-      return layoutNumber(m, id);
+      return layoutNumber(m, id, stage);
     case 'chips':
-      return layoutChips(m, id);
+      return layoutChips(m, id, stage);
     case 'list':
-      return layoutList(m, id);
+      return layoutList(m, id, stage);
     case 'picture':
-      return layoutPicture(m, id);
+      return layoutPicture(m, id, stage);
     case 'term':
-      return layoutTerm(m, id);
+      return layoutTerm(m, id, stage);
     default:
-      return layoutStructured(m, id);
+      return layoutStructured(m, id, stage);
   }
 }
 
@@ -1068,7 +1420,10 @@ const entrance = (element: VisualElement): 'draw' | 'fade' =>
  * come in on its first word, or on the word a reveal names; the next
  * moment clears the stage on its own first word.
  */
-export function layoutTutorial(tutorial: VisualTutorial): VisualScript {
+export function layoutTutorial(
+  tutorial: VisualTutorial,
+  stage: Stage = STAGES.box,
+): VisualScript {
   const elements: VisualElement[] = [];
   const cuesBySentence: VisualCue[][] = tutorial.sentences.map(() => []);
   const lastSentence = tutorial.sentences.length - 1;
@@ -1076,7 +1431,7 @@ export function layoutTutorial(tutorial: VisualTutorial): VisualScript {
     const id = `m${index}`;
     const from = Math.max(0, Math.min(lastSentence, m.from));
     const to = Math.max(from, Math.min(lastSentence, m.to));
-    const laid = layoutMoment(m, id);
+    const laid = layoutMoment(m, id, stage);
     elements.push(...laid.elements);
     const ids = new Set(laid.elements.map((e) => e.id));
     const at = (sentence: number, word: number, element: VisualElement) => {
@@ -1094,22 +1449,7 @@ export function layoutTutorial(tutorial: VisualTutorial): VisualScript {
         });
     };
     const byId = new Map(laid.elements.map((e) => [e.id, e] as const));
-    const revealed = new Map<string, { sentence: number; word: number }>();
-    for (const reveal of m.reveals ?? []) {
-      const partId = laid.parts[reveal.part];
-      if (!partId) continue;
-      const sentence = Math.max(from, Math.min(to, reveal.sentence));
-      // The app finds the word the part is named by; the model's count is
-      // the fallback, since it is often a word or two off.
-      const found = findWord(
-        tutorial.sentences[sentence],
-        laid.named.get(partId) ?? '',
-      );
-      revealed.set(partId, {
-        sentence,
-        word: found ?? Math.max(0, reveal.word ?? 0),
-      });
-    }
+    const revealed = partBeats(m, laid, tutorial.sentences, from, to);
     if (index > 0)
       cuesBySentence[from].push({ at: 0, do: 'clear', target: '*' });
     const later = new Set<string>();
@@ -1229,6 +1569,67 @@ function numberInMaterial(value: number, material: string): boolean {
   const plain = String(value);
   const grouped = value.toLocaleString('en-US');
   return material.includes(plain) || material.includes(grouped);
+}
+
+/** Every text a card puts on the stage, each with what it is. */
+export function cardTexts(m: Moment): { what: string; text: string }[] {
+  const named = (what: string, text: string | undefined) =>
+    text?.trim() ? [{ what, text: text.trim() }] : [];
+  return [
+    ...named('the heading', m.heading),
+    ...named('the eyebrow', m.eyebrow),
+    ...named('the statement', m.text),
+    ...named('the figure', m.figure),
+    ...named('the caption', m.caption),
+    ...named('the name', m.name),
+    ...named('the bubble', m.bubble),
+    ...named('the term', m.term),
+    ...named('the meaning', m.meaning),
+    ...(m.items ?? []).flatMap((i, k) => named(`item ${k + 1}`, i.text)),
+    ...named('the left label', m.left?.label),
+    ...(m.left?.items ?? []).flatMap((t) => named('the left item', t)),
+    ...named('the right label', m.right?.label),
+    ...(m.right?.items ?? []).flatMap((t) => named('the right item', t)),
+    ...named('the centre', m.centre?.text),
+    ...(m.inputs ?? []).flatMap((i) => named('the input', i.text)),
+    ...(m.outputs ?? []).flatMap((i) => named('the output', i.text)),
+    ...(m.chart?.series ?? []).flatMap((p) =>
+      named('the chart label', p.label),
+    ),
+    ...(m.pictures ?? []).flatMap((p) => named('the picture name', p.name)),
+    ...(m.points ?? []).flatMap((p) => [
+      ...named('the point label', p.label),
+      ...named('the point text', p.text),
+    ]),
+    ...(m.columns ?? []).flatMap((c) => named('the column', c)),
+    ...(m.rows ?? []).flat().flatMap((c) => named('the cell', c)),
+    ...(m.layers ?? []).flatMap((l) => named('the layer', l)),
+    ...(m.shared ?? []).flatMap((t) => named('the shared item', t)),
+    ...(m.callouts ?? []).flatMap((c) => named('the callout', c.text)),
+    ...(m.mechanism?.phases ?? []).flatMap((p) => named('the phase', p.text)),
+    ...(m.bar?.markers ?? []).flatMap((k) => named('the marker', k.text)),
+    ...named('the bar', m.bar?.left),
+    ...named('the bar', m.bar?.right),
+  ];
+}
+
+/** The characters of text a card puts on the stage, every field counted. */
+export function inkOf(m: Moment): number {
+  return cardTexts(m).reduce((sum, t) => sum + t.text.length, 0);
+}
+
+/**
+ * Whether a text ends in a word cut short to fit: its last word is no
+ * word of the page, but the start of one ("Livest" of "Livestock").
+ */
+export function cutShort(text: string, pool: Set<string>): boolean {
+  const last = words(text).pop();
+  if (!last) return false;
+  const stem = plain(last);
+  if (stem.length < 3 || pool.has(stem)) return false;
+  for (const word of pool)
+    if (word.length > stem.length && word.startsWith(stem)) return true;
+  return false;
 }
 
 export function tutorialProblems(
@@ -1510,6 +1911,56 @@ export function tutorialProblems(
         break;
       }
     }
+    if (m.card === 'mechanism') {
+      problems.push(...mechanismProblems(m.mechanism, who));
+      for (const [name, value] of Object.entries(m.mechanism?.params ?? {})) {
+        if (typeof value !== 'number') continue;
+        if (pool && !numberInMaterial(value, materialText))
+          problems.push(
+            `${who}: the number ${value} for "${name}" is not on the page; every number in a mechanism comes from the page, or is left null for the kind's own.`,
+          );
+      }
+    }
+    const callouts = m.callouts ?? [];
+    if (callouts.length) {
+      if (m.card !== 'picture' && m.card !== 'mechanism')
+        problems.push(
+          `${who} has callouts; they belong on a picture or a mechanism card.`,
+        );
+      if (callouts.length > L.maxCallouts)
+        problems.push(`${who}: at most ${L.maxCallouts} callouts.`);
+      const drawn =
+        m.card === 'picture'
+          ? resolveDrawing(m.picture ?? m.name ?? '', m.shape)
+          : null;
+      for (const c of callouts) {
+        short(`the callout "${c.text}"`, c.text, L.maxCalloutChars);
+        if (drawn?.kind === 'figure' && !figureHasAnchor(drawn.figure, c.part))
+          problems.push(
+            `${who}: a callout points at "${c.part}", which the ${drawn.figure.outline} has no place for; point at one of ${[...drawn.figure.parts, ...FIGURE_ANCHORS[drawn.figure.outline]].join(', ')}.`,
+          );
+        if (
+          m.card === 'mechanism' &&
+          m.mechanism &&
+          MECHANISMS[m.mechanism.kind] &&
+          !MECHANISMS[m.mechanism.kind].anchors.includes(c.part)
+        )
+          problems.push(
+            `${who}: a callout points at "${c.part}", which a ${m.mechanism.kind} has no place for; point at one of ${MECHANISMS[m.mechanism.kind].anchors.join(', ')}.`,
+          );
+      }
+    }
+    if (pool)
+      for (const { what, text } of cardTexts(m))
+        if (cutShort(text, pool))
+          problems.push(
+            `${who}: ${what} "${text}" ends in a word cut short. Use whole words, fewer of them.`,
+          );
+    const ink = inkOf(m);
+    if (ink > L.maxInkChars)
+      problems.push(
+        `${who} carries ${ink} characters of text; a card reads at up to ${L.maxInkChars}. Cut words, or split it into two moments.`,
+      );
     const partCount =
       m.card === 'compare'
         ? (m.left?.items?.length ?? 0) + (m.right?.items?.length ?? 0)
@@ -1525,7 +1976,9 @@ export function tutorialProblems(
                   ? (m.layers?.length ?? 0)
                   : m.card === 'overlap'
                     ? (m.shared?.length ?? 0)
-                    : items.length;
+                    : m.card === 'mechanism'
+                      ? (m.mechanism?.phases?.length ?? 0)
+                      : items.length;
     for (const reveal of m.reveals ?? []) {
       if (reveal.part < 0 || reveal.part >= partCount)
         problems.push(
@@ -1585,6 +2038,20 @@ export function tutorialWarnings(tutorial: VisualTutorial): string[] {
         out.push(
           `${who}: no drawing was found for "${name}"; it is set as words instead. Name a thing near it that can be drawn, or move it to a picture card and give that card a shape.`,
         );
+    const reveals = [...(m.reveals ?? [])].sort((a, b) => a.part - b.part);
+    for (let k = 1; k < reveals.length; k += 1) {
+      const a = reveals[k - 1];
+      const b = reveals[k];
+      if (
+        b.sentence < a.sentence ||
+        (b.sentence === a.sentence && (b.word ?? 0) < (a.word ?? 0))
+      ) {
+        out.push(
+          `${who}: the reveals run against the card's order (part ${b.part + 1} before part ${a.part + 1}); the app showed the parts in order. Reveal every part, in order, or none.`,
+        );
+        break;
+      }
+    }
   });
   return out;
 }

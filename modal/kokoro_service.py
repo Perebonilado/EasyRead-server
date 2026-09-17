@@ -120,10 +120,11 @@ class Speech:
         print(f"kokoro ready on {device} ({GPU}) in {time.time() - started:.1f}s, voice {VOICE}")
 
     def render(self, pieces: list, voice: str):
-        """The page as samples at 24 kHz, and its length in seconds; pieces are (text, speed, silence after)."""
+        """The page as samples at 24 kHz, its length in seconds, and where each piece starts; pieces are (text, speed, silence after)."""
         import numpy as np
 
         out = []
+        starts = []
         with self.lock:
             for text, speed, pause_after in pieces:
                 said = []
@@ -135,13 +136,14 @@ class Speech:
                     said.append(trimmed(result.audio.detach().cpu().numpy().astype(np.float32)))
                 if not said:
                     continue
+                starts.append(sum(len(piece) for piece in out) / SAMPLE_RATE)
                 out.extend(said)
                 if pause_after > 0:
                     out.append(gap(pause_after))
         if not out:
             raise ValueError("nothing to say")
         audio = np.concatenate(out)
-        return audio, len(audio) / SAMPLE_RATE
+        return audio, len(audio) / SAMPLE_RATE, starts
 
     def check_voice(self, voice: str) -> None:
         """A voice is one name, or names joined by commas for an even blend; anything else is refused."""
@@ -186,7 +188,7 @@ class Speech:
             # The delivery note and the language, if sent, are read by no one here.
             started = time.time()
             try:
-                audio, seconds = await asyncio.to_thread(self.render, pieces, voice)
+                audio, seconds, starts = await asyncio.to_thread(self.render, pieces, voice)
             except ValueError as error:
                 raise HTTPException(status_code=400, detail=str(error))
             data = await asyncio.to_thread(to_mp3 if fmt == "mp3" else to_wav, audio)
@@ -196,6 +198,8 @@ class Speech:
                 headers={
                     "x-audio-seconds": f"{seconds:.2f}",
                     "x-render-seconds": f"{time.time() - started:.2f}",
+                    # Where each piece starts, so a card can land in the pause before its sentence.
+                    "x-piece-starts": ",".join(f"{start:.3f}" for start in starts),
                 },
             )
 

@@ -17,8 +17,8 @@ import {
   CHIP_PAD,
   CHIP_TEXT_SIZE,
   LABEL_SIZE,
-  VISUAL_MARGIN,
-  VISUAL_SPACE,
+  STAGES,
+  type Stage,
   textWidth,
   type VisualColor,
   type VisualElement,
@@ -29,6 +29,7 @@ import {
   boxOf,
   type VisualPoint,
 } from './visual';
+import { figureAspect, type VisualFigure } from './visual-figures';
 import { knownPicture, pictureAspect } from './visual-presets';
 
 export const TEMPLATES = ['hub', 'flow', 'cycle', 'compare', 'layers'] as const;
@@ -55,6 +56,8 @@ export interface StructureItem {
   text: string;
   /** For a picture: the preset's name. */
   picture?: string;
+  /** For a picture of a living thing: the figure the app draws instead, moving. */
+  figure?: VisualFigure;
   color?: VisualColor;
   /** For dots: how many. */
   count?: number;
@@ -78,10 +81,6 @@ export interface VisualStructure {
   arrows: StructureArrow[];
   segments: VisualSegment[];
 }
-
-const W = VISUAL_SPACE.w;
-const H = VISUAL_SPACE.h;
-const M = VISUAL_MARGIN;
 
 /** A picture's box for a wanted width, keeping its proportions; falls back to a square. */
 export function pictureBox(
@@ -118,8 +117,10 @@ const CENTRE_WIDTH = 150;
 const SMALL_PICTURE = 46;
 /** The suffix on the id of the small name label under a picture. */
 export const NAME = '_name';
-/** Room between steps in a row, enough for an arrow to be seen. */
-const STEP_GAP = 26;
+/** Room between steps in a row: an arrow with a shaft, not a head on its own. */
+const STEP_GAP = 48;
+/** Steps in one row before the flow snakes into another. */
+const STEPS_PER_ROW = 4;
 
 /**
  * Places one item at a centre point as the elements it becomes: a chip,
@@ -132,7 +133,10 @@ export function place(
   cy: number,
   size: number,
   centreBox?: { x: number; y: number; w: number; h: number },
+  stage: Stage = STAGES.box,
 ): VisualElement[] {
+  const { W, M } = stage;
+
   // A chip in ink would be a plain box among coloured ones; it takes its role's colour.
   const color =
     item.kind === 'chip' && item.color === 'ink'
@@ -164,6 +168,36 @@ export function place(
         },
       ];
     case 'picture': {
+      if (item.figure) {
+        const box = figureBox(item.figure, size);
+        const elements: VisualElement[] = [
+          {
+            id: item.id,
+            type: 'figure',
+            x: cx,
+            y: cy,
+            w: box.w,
+            h: box.h,
+            of: item.figure.of,
+            outline: item.figure.outline,
+            parts: item.figure.parts,
+            manner: item.figure.manner,
+            seed: item.figure.seed,
+            color,
+          },
+        ];
+        if (item.text)
+          elements.push({
+            id: `${item.id}${NAME}`,
+            type: 'label',
+            x: cx,
+            y: cy + box.h / 2 + 10,
+            text: item.text,
+            size: 'sm',
+            color: 'muted',
+          });
+        return elements;
+      }
       // A drawing the app does not have is set as words: a wrong picture
       // teaches the wrong thing.
       if (!item.picture || !knownPicture(item.picture))
@@ -220,11 +254,31 @@ export function place(
 }
 
 /** How wide an item stands, its name label included. */
+/** A figure's box at a wanted width: a tall outline is held to a little over that width in height. */
+export function figureBox(
+  figure: VisualFigure,
+  size: number,
+): { w: number; h: number } {
+  const aspect = figureAspect(figure.outline);
+  const h = Math.min(size * 1.15, size / aspect);
+  return { w: Math.round(h * aspect), h: Math.round(h) };
+}
+
+/** A picture item's box: its figure's, or its preset's. */
+function itemPictureBox(
+  item: StructureItem,
+  size: number,
+): { w: number; h: number } {
+  return item.figure
+    ? figureBox(item.figure, size)
+    : pictureBox(item.picture ?? 'document', size);
+}
+
 function itemWidth(item: StructureItem, size: number): number {
   if (item.kind === 'chip') return chipWidth(item.text.slice(0, 22));
   if (item.kind === 'picture')
     return Math.max(
-      pictureBox(item.picture ?? 'document', size).w,
+      itemPictureBox(item, size).w,
       textWidth(item.text, 12, false),
     );
   return textWidth(item.text, 14, true);
@@ -237,10 +291,11 @@ function itemWidth(item: StructureItem, size: number): number {
 function fitFlow(
   steps: StructureItem[],
   band: number,
+  stage: Stage,
 ): { rows: StructureItem[][]; size: number; fits: boolean } {
   let last = { rows: [] as StructureItem[][], size: 30, fits: false };
   for (const size of [SMALL_PICTURE + 10, SMALL_PICTURE, 38, 30]) {
-    const rows = packRows(steps, size, STEP_GAP);
+    const rows = packRows(steps, size, STEP_GAP, stage);
     const tall = rows.reduce(
       (sum, row) => sum + Math.max(...row.map((i) => itemHeight(i, size))),
       10 * (rows.length - 1),
@@ -256,13 +311,19 @@ function packRows(
   items: StructureItem[],
   size: number,
   gap: number,
+  stage: Stage,
 ): StructureItem[][] {
+  const { W, M } = stage;
+
   const rows: StructureItem[][] = [];
   let row: StructureItem[] = [];
   let used = 0;
   for (const item of items) {
     const w = itemWidth(item, size);
-    if (row.length && used + gap + w > W - 2 * M) {
+    if (
+      row.length &&
+      (used + gap + w > W - 2 * M || row.length >= STEPS_PER_ROW)
+    ) {
       rows.push(row);
       row = [];
       used = 0;
@@ -275,7 +336,14 @@ function packRows(
 }
 
 /** Centres for one row's items, side by side with a gap, the row centred. */
-function rowXs(row: StructureItem[], size: number, gap: number): number[] {
+function rowXs(
+  row: StructureItem[],
+  size: number,
+  gap: number,
+  stage: Stage,
+): number[] {
+  const { W } = stage;
+
   const widths = row.map((i) => itemWidth(i, size));
   const total = widths.reduce((a, b) => a + b, 0) + gap * (row.length - 1);
   let x = (W - total) / 2;
@@ -301,8 +369,7 @@ function stackRows(heights: number[], top: number, bottom: number): number[] {
 
 /** How tall an item stands, its name label included. */
 function itemHeight(item: StructureItem, size: number): number {
-  if (item.kind === 'picture')
-    return pictureBox(item.picture ?? 'document', size).h + 16;
+  if (item.kind === 'picture') return itemPictureBox(item, size).h + 16;
   if (item.kind === 'chip') return 26;
   return 18;
 }
@@ -339,7 +406,12 @@ function stackYs(
  * placing: text too long for its kind, a picture the library does not
  * have, an arrow to nothing, a role the template has no place for.
  */
-export function structureProblems(structure: VisualStructure): string[] {
+export function structureProblems(
+  structure: VisualStructure,
+  stage: Stage = STAGES.box,
+): string[] {
+  const { H } = stage;
+
   const problems: string[] = [];
   const ids = new Set(structure.items.map((i) => i.id));
   const allowed: Record<VisualStructure['template'], Role[]> = {
@@ -367,7 +439,7 @@ export function structureProblems(structure: VisualStructure): string[] {
         `Chip "${item.id}" says "${item.text}", ${item.text.length} characters; at most twenty-two, one or two words.`,
       );
     if (item.kind === 'picture') {
-      if (!knownPicture(item.picture))
+      if (!item.figure && !knownPicture(item.picture))
         problems.push(
           `Picture "${item.id}" names "${item.picture ?? ''}", which is not in the library; use a name from the catalogue or make it a chip.`,
         );
@@ -419,7 +491,7 @@ export function structureProblems(structure: VisualStructure): string[] {
           `Arrow "${arrow.id}" goes from step ${from + 1} to step ${to + 1}; in a flow each arrow goes to the next step. A loop back is a cycle template.`,
         );
     }
-    const { rows, fits } = fitFlow(stepItems, H - 40 - 58);
+    const { rows, fits } = fitFlow(stepItems, H - 40 - 58, stage);
     if (!fits)
       problems.push(
         `The flow's steps take ${rows.length} rows, more than fit; use fewer or shorter steps.`,
@@ -439,7 +511,7 @@ export function structureProblems(structure: VisualStructure): string[] {
         problems.push(
           `Arrow "${arrow.id}" joins "${arrow.from}" to "${arrow.to}"; in a hub every arrow starts or ends at the centre, "${centre.id}".`,
         );
-    const plan = hubPlan(structure);
+    const plan = hubPlan(structure, stage);
     if (!plan.centre.fits) {
       const wide = [...plan.spots]
         .sort((a, b) => b.box.w - a.box.w)
@@ -491,8 +563,8 @@ interface HubPlan {
   };
 }
 
-/** Least room between a side item and the centre, either way. */
-const CENTRE_GAP = 12;
+/** Least room between a side item and the centre, either way: an arrow's length. */
+const CENTRE_GAP = 40;
 
 /**
  * Which place each side item takes. Corners first, since a corner leaves
@@ -558,7 +630,7 @@ function itemBoxAt(
   // (its name hangs below it).
   const y =
     item.kind === 'picture'
-      ? top + pictureBox(item.picture ?? 'document', size).h / 2
+      ? top + itemPictureBox(item, size).h / 2
       : top + h / 2;
   return { box, y: Math.round(y) };
 }
@@ -577,7 +649,9 @@ function overlaps(a: Box, b: Box, gap: number): boolean {
  * the side items at their places flush to the edges, and the centre as
  * big as the space between them allows, down to a floor.
  */
-function hubPlan(structure: VisualStructure): HubPlan {
+function hubPlan(structure: VisualStructure, stage: Stage): HubPlan {
+  const { W, H, M } = stage;
+
   const items = structure.items;
   const title = items.find((i) => i.role === 'title');
   const centre = items.find((i) => i.role === 'centre' && i.kind !== 'dots');
@@ -598,8 +672,11 @@ function hubPlan(structure: VisualStructure): HubPlan {
   // The centre: the widest that keeps clear of every side item, tried
   // from the most a picture may take down to the least it can be.
   const mid = (top + bottom) / 2;
-  const aspect =
-    centre?.kind === 'picture' ? pictureAspect(centre.picture ?? '') : 1;
+  const aspect = centre?.figure
+    ? figureAspect(centre.figure.outline)
+    : centre?.kind === 'picture'
+      ? pictureAspect(centre.picture ?? '')
+      : 1;
   const isPicture = centre?.kind === 'picture';
   const least = isPicture
     ? 64
@@ -644,15 +721,17 @@ function hubPlan(structure: VisualStructure): HubPlan {
   };
 }
 
-function layoutHub(structure: VisualStructure): VisualElement[] {
+function layoutHub(structure: VisualStructure, stage: Stage): VisualElement[] {
+  const { W, H, M } = stage;
+
   const items = structure.items;
   const title = items.find((i) => i.role === 'title');
   const centre = items.find((i) => i.role === 'centre' && i.kind !== 'dots');
   const notes = items.filter((i) => i.role === 'note');
   const dots = items.filter((i) => i.kind === 'dots');
-  const plan = hubPlan(structure);
+  const plan = hubPlan(structure, stage);
   const out: VisualElement[] = [];
-  if (title) out.push(...place(title, W / 2, 32, 0));
+  if (title) out.push(...place(title, W / 2, 32, 0, undefined, stage));
   if (notes.length) {
     const xs = spread(notes.length, M + 80, W - M - 80);
     notes.forEach((item, i) => out.push(...place(item, xs[i], H - 22, 0)));
@@ -691,7 +770,9 @@ function layoutHub(structure: VisualStructure): VisualElement[] {
 }
 
 /** Steps in a row left to right, or two rows snaking when there are more than four. */
-function layoutFlow(structure: VisualStructure): VisualElement[] {
+function layoutFlow(structure: VisualStructure, stage: Stage): VisualElement[] {
+  const { W, H, M } = stage;
+
   const items = structure.items;
   const title = items.find((i) => i.role === 'title');
   const steps = items.filter((i) => i.role === 'step');
@@ -699,16 +780,32 @@ function layoutFlow(structure: VisualStructure): VisualElement[] {
   const out: VisualElement[] = [];
   const top = title ? 58 : M + 8;
   const bottom = notes.length ? H - 40 : H - M - 8;
-  if (title) out.push(...place(title, W / 2, 32, 0));
-  const { rows, size } = fitFlow(steps, bottom - top);
+  if (title) out.push(...place(title, W / 2, 32, 0, undefined, stage));
+  const { rows, size } = fitFlow(steps, bottom - top, stage);
   const tallest = (row: StructureItem[]) =>
     Math.max(...row.map((i) => itemHeight(i, size)));
   const ys = stackRows(rows.map(tallest), top, bottom);
+  let lastX: number | null = null;
   rows.forEach((row, r) => {
-    // Every other row runs back the other way, so the turn is one short drop.
+    // Every other row runs back the other way, and starts under the step
+    // above it, so the turn is one short drop.
     const ordered = r % 2 === 0 ? row : [...row].reverse();
-    const xs = rowXs(ordered, size, STEP_GAP);
+    let xs = rowXs(ordered, size, STEP_GAP, stage);
+    if (r > 0 && lastX !== null) {
+      const shift = lastX - xs[0];
+      const widths = ordered.map((i) => itemWidth(i, size));
+      const leftmost = Math.min(...xs.map((x, i) => x + shift - widths[i] / 2));
+      const rightmost = Math.max(
+        ...xs.map((x, i) => x + shift + widths[i] / 2),
+      );
+      const fixed = Math.min(
+        Math.max(shift, M - leftmost + shift),
+        W - M - rightmost + shift,
+      );
+      xs = xs.map((x) => Math.round(x + fixed));
+    }
     ordered.forEach((item, i) => out.push(...place(item, xs[i], ys[r], size)));
+    lastX = xs[xs.length - 1];
   });
   const noteXs = spread(notes.length, M + 80, W - M - 80);
   notes.forEach((item, i) => out.push(...place(item, noteXs[i], H - 22, 0)));
@@ -716,16 +813,22 @@ function layoutFlow(structure: VisualStructure): VisualElement[] {
 }
 
 /** Steps around a ring, clockwise from the top, with the centre in the middle when there is one. */
-function layoutCycle(structure: VisualStructure): VisualElement[] {
+function layoutCycle(
+  structure: VisualStructure,
+  stage: Stage,
+): VisualElement[] {
+  const { W } = stage;
+
   const items = structure.items;
   const title = items.find((i) => i.role === 'title');
   const centre = items.find((i) => i.role === 'centre');
   const steps = items.filter((i) => i.role === 'step');
   const out: VisualElement[] = [];
-  if (title) out.push(...place(title, W / 2, 32, 0));
+  if (title) out.push(...place(title, W / 2, 32, 0, undefined, stage));
   const cx = W / 2;
   const cy = title ? 152 : 138;
-  const r = 84;
+  // A wider stage spreads the ring, so the arrows between steps have a shaft.
+  const r = stage.name === 'wide' ? 100 : 84;
   if (centre) out.push(...place(centre, cx, cy, 70));
   steps.forEach((item, i) => {
     const a = (i / steps.length) * Math.PI * 2 - Math.PI / 2;
@@ -742,14 +845,19 @@ function layoutCycle(structure: VisualStructure): VisualElement[] {
 }
 
 /** Two columns side by side, each headed by its picture or name. */
-function layoutCompare(structure: VisualStructure): VisualElement[] {
+function layoutCompare(
+  structure: VisualStructure,
+  stage: Stage,
+): VisualElement[] {
+  const { W, H, M } = stage;
+
   const items = structure.items;
   const title = items.find((i) => i.role === 'title');
   const left = items.filter((i) => i.role === 'left');
   const right = items.filter((i) => i.role === 'right');
   const notes = items.filter((i) => i.role === 'note');
   const out: VisualElement[] = [];
-  if (title) out.push(...place(title, W / 2, 32, 0));
+  if (title) out.push(...place(title, W / 2, 32, 0, undefined, stage));
   const top = title ? 58 : M + 8;
   const bottom = notes.length ? H - 40 : H - M - 8;
   // Each column is as wide as its widest entry; the two share the width.
@@ -779,12 +887,17 @@ function layoutCompare(structure: VisualStructure): VisualElement[] {
 }
 
 /** Bands stacked top to bottom, each a wide rounded box with its words. */
-function layoutLayers(structure: VisualStructure): VisualElement[] {
+function layoutLayers(
+  structure: VisualStructure,
+  stage: Stage,
+): VisualElement[] {
+  const { W, H, M } = stage;
+
   const items = structure.items;
   const title = items.find((i) => i.role === 'title');
   const layers = items.filter((i) => i.role === 'layer');
   const out: VisualElement[] = [];
-  if (title) out.push(...place(title, W / 2, 32, 0));
+  if (title) out.push(...place(title, W / 2, 32, 0, undefined, stage));
   const top = title ? 56 : M + 6;
   const gap = 8;
   const h = Math.min(
@@ -816,17 +929,22 @@ function layoutLayers(structure: VisualStructure): VisualElement[] {
  * read: every item placed by its template, every arrow attached by id,
  * and the narration as it was.
  */
-export function layoutScene(structure: VisualStructure): VisualScript {
+export function layoutScene(
+  structure: VisualStructure,
+  stage: Stage = STAGES.box,
+): VisualScript {
+  const { W } = stage;
+
   const placed: VisualElement[] =
     structure.template === 'flow'
-      ? layoutFlow(structure)
+      ? layoutFlow(structure, stage)
       : structure.template === 'cycle'
-        ? layoutCycle(structure)
+        ? layoutCycle(structure, stage)
         : structure.template === 'compare'
-          ? layoutCompare(structure)
+          ? layoutCompare(structure, stage)
           : structure.template === 'layers'
-            ? layoutLayers(structure)
-            : layoutHub(structure);
+            ? layoutLayers(structure, stage)
+            : layoutHub(structure, stage);
   const ids = new Set(placed.map((e) => e.id));
   const byId = new Map(placed.map((e) => [e.id, e] as const));
   const middle = (id: string): VisualPoint | null => {

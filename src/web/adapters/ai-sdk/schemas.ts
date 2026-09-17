@@ -1,4 +1,11 @@
 import { z } from 'zod';
+import { VISUAL_MOTIONS } from '../../../business/domain/visual';
+import {
+  FIGURE_MANNERS,
+  FIGURE_OUTLINES,
+  FIGURE_PARTS,
+} from '../../../business/domain/visual-figures';
+import { MECHANISM_KINDS } from '../../../business/domain/visual-mechanisms';
 
 /**
  * Structured output contracts.
@@ -512,6 +519,7 @@ export const visualTutorialSchema = z.object({
           'rings',
           'overlap',
           'count',
+          'mechanism',
         ]),
         color: visualColor,
         eyebrow: z.string().max(30).nullable(),
@@ -541,43 +549,56 @@ export const visualTutorialSchema = z.object({
         /** For a picture card: the shape the thing takes, when no drawing of it exists. */
         shape: z
           .object({
-            outline: z.enum([
-              'blob',
-              'body',
-              'branch',
-              'layers',
-              'lattice',
-              'vessel',
-              'terrain',
-              'field',
-            ]),
-            parts: z
+            outline: z.enum(FIGURE_OUTLINES),
+            parts: z.array(z.enum(FIGURE_PARTS)).max(5),
+            manner: z.enum(FIGURE_MANNERS),
+          })
+          .nullable(),
+        /** For a picture card: how the drawn thing moves once shown. */
+        motion: z.enum(VISUAL_MOTIONS).nullable(),
+        /** For a picture or mechanism card: short lines that point at a part and follow it. */
+        callouts: z
+          .array(
+            z.object({
+              part: z.string().min(1).max(16),
+              text: z.string().min(1).max(30),
+            }),
+          )
+          .max(3)
+          .nullable(),
+        /** For a mechanism card: the machine, the page's numbers, and the stages to show in order. */
+        mechanism: z
+          .object({
+            kind: z.enum(MECHANISM_KINDS),
+            params: z
+              .object({
+                capacity: z.number().nullable(),
+                rate: z.number().nullable(),
+                requests: z.number().nullable(),
+                perRequest: z.number().nullable(),
+                arrivals: z.number().nullable(),
+                servers: z.number().nullable(),
+                service: z.number().nullable(),
+                stages: z.number().nullable(),
+                slow: z.number().nullable(),
+                stations: z.number().nullable(),
+                speed: z.number().nullable(),
+                left: z.number().nullable(),
+                right: z.number().nullable(),
+                size: z.number().nullable(),
+                contacts: z.number().nullable(),
+                beats: z.number().nullable(),
+              })
+              .nullable(),
+            phases: z
               .array(
-                z.enum([
-                  'membrane',
-                  'hairs',
-                  'whip',
-                  'core',
-                  'pockets',
-                  'grains',
-                  'mouth',
-                  'roots',
-                  'joints',
-                  'level',
-                  'cracks',
-                  'bulge',
-                ]),
+                z.object({
+                  stage: z.string().min(1).max(12),
+                  text: z.string().min(1).max(24),
+                }),
               )
-              .max(5),
-            manner: z.enum([
-              'still',
-              'drift',
-              'swim',
-              'beat',
-              'stream',
-              'grow',
-              'pulse',
-            ]),
+              .max(4)
+              .nullable(),
           })
           .nullable(),
         name: z.string().max(24).nullable(),
@@ -610,6 +631,7 @@ export const visualTutorialSchema = z.object({
               picture: z.string().min(1).max(32),
               name: z.string().min(1).max(24),
               size: z.enum(['big', 'small']).nullable(),
+              motion: z.enum(VISUAL_MOTIONS).nullable(),
             }),
           )
           .max(4)
@@ -717,6 +739,28 @@ export const lectureSketchSchema = z.object({
 export const sketchJudgeSchema = z.object({
   shows: z.boolean(),
   wrong: z.string().max(300).nullable(),
+});
+
+/** The judge's word on a page's stills: each drawing by name, and each moment as a whole. */
+export const visualJudgeSchema = z.object({
+  moments: z
+    .array(
+      z.object({
+        moment: z.number().int().min(1),
+        drawings: z
+          .array(
+            z.object({
+              name: z.string().min(1).max(40),
+              looksRight: z.boolean(),
+              wrong: z.string().max(160).nullable(),
+            }),
+          )
+          .max(8),
+        textTrouble: z.string().max(160).nullable(),
+        crowded: z.boolean(),
+      }),
+    )
+    .max(40),
 });
 
 /** A short segment around a chapter: its words, its check, or the review. */

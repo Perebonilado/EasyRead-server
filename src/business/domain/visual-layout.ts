@@ -151,8 +151,15 @@ export function place(
           x: cx,
           y: cy,
           text: item.text,
+          // A title takes the big size when it fits the width, else the next one down.
           size:
-            item.role === 'title' ? 'xl' : item.role === 'note' ? 'sm' : 'md',
+            item.role === 'title'
+              ? textWidth(item.text, LABEL_SIZE.xl, true) <= W - 2 * M - 16
+                ? 'xl'
+                : 'lg'
+              : item.role === 'note'
+                ? 'sm'
+                : 'md',
           color: item.role === 'title' ? 'ink' : color,
         },
       ];

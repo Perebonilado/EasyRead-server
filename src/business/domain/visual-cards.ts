@@ -330,8 +330,15 @@ function layoutPicture(m: Moment, id: string): Laid {
   if (heading) out.push(label(`${id}_h`, CX, 36, heading, 'md', 'muted'));
   const picture = known(m.picture) ?? 'document';
   const aspect = PRESET_INFO[picture]?.aspect ?? 1;
-  const width = Math.min(130, Math.round(150 * aspect));
+  const bubble = m.bubble?.trim();
   const y = heading ? 150 : 142;
+  // The bubble sits above the picture's top; a tall picture shrinks to leave it room.
+  const bubbleFloor = heading ? 54 : M + 22;
+  let width = Math.min(130, Math.round(150 * aspect));
+  if (bubble) {
+    const tallest = 2 * (y - 26 - bubbleFloor);
+    width = Math.min(width, Math.round(tallest * aspect));
+  }
   out.push(
     ...place(
       {
@@ -347,7 +354,6 @@ function layoutPicture(m: Moment, id: string): Laid {
       width,
     ),
   );
-  const bubble = m.bubble?.trim();
   if (bubble) {
     const w = textWidth(bubble, 11.5, true) + 22;
     const top = y - Math.round(width / aspect) / 2;
@@ -355,7 +361,7 @@ function layoutPicture(m: Moment, id: string): Laid {
       id: `${id}_s`,
       type: 'bubble',
       x: Math.min(W - M - w / 2, Math.max(M + w / 2, CX + 58)),
-      y: Math.max(M + 20, top - 16),
+      y: Math.max(bubbleFloor, top - 26),
       text: bubble,
       color: m.color ?? 'green',
       tail: 'left',
@@ -622,9 +628,14 @@ export function tutorialProblems(
     const who = `Moment ${i + 1} (${m.card})`;
     if (m.from !== expect)
       problems.push(
-        `${who} starts at sentence ${m.from + 1}; the moments cover the narration in order without a gap, so it starts at sentence ${expect + 1}.`,
+        `${who} has from ${m.from}; the moments cover the sentences in order without a gap, so its from is ${expect} (sentence indexes count from zero).`,
       );
-    if (m.to < m.from) problems.push(`${who} ends before it starts.`);
+    if (m.to < m.from)
+      problems.push(`${who} has to ${m.to}, before its from ${m.from}.`);
+    if (m.to > n - 1)
+      problems.push(
+        `${who} has to ${m.to}, but the last sentence index is ${n - 1} (sentence indexes count from zero).`,
+      );
     if (m.to - m.from + 1 > L.maxSentencesPerMoment)
       problems.push(
         `${who} covers ${m.to - m.from + 1} sentences; at most ${L.maxSentencesPerMoment}.`,
@@ -779,7 +790,7 @@ export function tutorialProblems(
         );
       if (reveal.sentence < m.from || reveal.sentence > m.to)
         problems.push(
-          `${who}: a reveal is on sentence ${reveal.sentence + 1}, outside the moment's sentences ${m.from + 1} to ${m.to + 1}.`,
+          `${who}: a reveal names sentence ${reveal.sentence}, outside the moment's from ${m.from} to ${m.to}.`,
         );
     }
   });
@@ -796,7 +807,7 @@ export function tutorialProblems(
   });
   if (moments.length && expect !== n)
     problems.push(
-      `The moments end at sentence ${expect}; the narration has ${n}, so the last moment ends at sentence ${n}.`,
+      `The last moment has to ${expect - 1}; the narration has ${n} sentences, indexes 0 to ${n - 1}, so the last moment's to is ${n - 1}.`,
     );
   return problems;
 }

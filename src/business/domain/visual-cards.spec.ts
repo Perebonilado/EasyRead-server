@@ -146,7 +146,7 @@ describe('a visual tutorial', () => {
     expect(problems).toEqual(
       expect.arrayContaining([
         expect.stringContaining('the heading is'),
-        expect.stringContaining('starts at sentence 5'),
+        expect.stringContaining('has from 4'),
         expect.stringContaining('between 2 and 5'),
         expect.stringContaining('not in the library'),
         expect.stringContaining('the statement is'),

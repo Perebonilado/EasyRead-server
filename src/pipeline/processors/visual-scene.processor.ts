@@ -133,7 +133,8 @@ export class VisualSceneProcessor {
         attempts: record.attempts + 1,
       });
       const material = await this.material(documentId, pageNumber, pageNumber);
-      if (material.split(/\s+/).filter(Boolean).length < THIN_PAGE_WORDS) {
+      const materialWords = material.split(/\s+/).filter(Boolean).length;
+      if (materialWords < THIN_PAGE_WORDS) {
         await this.visuals.update(record.id, {
           status: 'not_suitable',
           step: null,
@@ -218,7 +219,7 @@ export class VisualSceneProcessor {
       }
       let script: VisualScript = repairVisual(layoutTutorial(tutorial));
       let problems = [
-        ...tutorialProblems(tutorial, pool),
+        ...tutorialProblems(tutorial, pool, materialWords, material),
         ...this.problemsOf(script),
       ];
       for (
@@ -243,7 +244,7 @@ export class VisualSceneProcessor {
         tutorial = tidyTutorial(mended.value);
         script = repairVisual(layoutTutorial(tutorial));
         problems = [
-          ...tutorialProblems(tutorial, pool),
+          ...tutorialProblems(tutorial, pool, materialWords, material),
           ...this.problemsOf(script),
         ];
       }

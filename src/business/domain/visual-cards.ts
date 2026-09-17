@@ -38,6 +38,13 @@ export const CARD_KINDS = [
   'compare',
   'flow',
   'hub',
+  'chart',
+  'scene',
+  'timeline',
+  'table',
+  'rings',
+  'overlap',
+  'count',
 ] as const;
 export type CardKind = (typeof CARD_KINDS)[number];
 
@@ -90,6 +97,23 @@ export interface Moment {
   centre?: CardItem;
   inputs?: CardItem[];
   outputs?: CardItem[];
+  /** Chart: numbers from the page, drawn by the app. */
+  chart?: {
+    kind: 'bars' | 'line' | 'shares' | 'pair';
+    series: { label: string; value: number }[];
+    unit?: string;
+  };
+  /** Scene: two to four pictures composed on a ground line, each named. */
+  pictures?: { picture: string; name: string; size?: 'big' | 'small' }[];
+  /** Timeline: points along a line, each a short label and a line of text. */
+  points?: { label: string; text: string }[];
+  /** Table: column headings and rows of short cells. */
+  columns?: string[];
+  rows?: string[][];
+  /** Rings: layers from the innermost out. */
+  layers?: string[];
+  /** Overlap: what the two sides share. */
+  shared?: string[];
   /** Parts that appear on a word rather than with the card. */
   reveals?: { part: number; sentence: number; word?: number }[];
 }
@@ -149,6 +173,13 @@ export const TUTORIAL_LIMITS = {
   maxWords: 720,
   maxItems: 5,
   maxSide: 4,
+  maxSeries: 6,
+  maxPictures: 4,
+  maxPoints: 6,
+  maxColumns: 3,
+  maxRows: 4,
+  maxLayers: 5,
+  maxShared: 3,
   maxChipChars: 30,
   maxHeadingChars: 40,
   maxEyebrowChars: 30,
@@ -292,13 +323,23 @@ function layoutStatement(m: Moment, id: string): Laid {
   return { elements, parts: [], arrowsOf: new Map(), named: new Map() };
 }
 
-function layoutNumber(m: Moment, id: string): Laid {
+function layoutNumber(m: Moment, id: string, count = false): Laid {
   const out: VisualElement[] = [];
   const color = m.color ?? 'violet';
   const bar = m.bar;
   const caption = m.caption?.trim();
   const figureY = bar ? 92 : caption ? 120 : CY;
-  out.push(label(`${id}_f`, CX, figureY, m.figure ?? '', 'huge', color));
+  out.push(
+    label(
+      `${id}_f`,
+      CX,
+      figureY,
+      m.figure ?? '',
+      'huge',
+      color,
+      count ? { count: true } : {},
+    ),
+  );
   if (caption)
     out.push(label(`${id}_c`, CX, figureY + 30, caption, 'md', 'muted'));
   if (bar)
@@ -594,9 +635,323 @@ function layoutStructured(m: Moment, id: string): Laid {
   return { elements: scene.elements, parts, arrowsOf, named };
 }
 
+function layoutChart(m: Moment, id: string): Laid {
+  const out: VisualElement[] = [];
+  const heading = m.heading?.trim();
+  const caption = m.caption?.trim();
+  if (heading) out.push(label(`${id}_h`, CX, 40, heading, 'md', 'ink'));
+  const chart = m.chart ?? { kind: 'bars' as const, series: [] };
+  const series = chart.series.slice(0, TUTORIAL_LIMITS.maxSeries);
+  const top = heading ? 62 : 32;
+  const bottom = caption ? H - 46 : H - 30;
+  const h = bottom - top;
+  const y = Math.round(top + h / 2);
+  out.push({
+    id: `${id}_c`,
+    type: 'chart',
+    x: CX,
+    y,
+    w: 300,
+    h,
+    kind: chart.kind,
+    series,
+    ...(chart.unit ? { unit: chart.unit } : {}),
+    color: m.color ?? 'blue',
+  });
+  if (caption) out.push(label(`${id}_k`, CX, H - 26, caption, 'sm', 'muted'));
+  return { elements: out, parts: [], arrowsOf: new Map(), named: new Map() };
+}
+
+function layoutSceneCard(m: Moment, id: string): Laid {
+  const out: VisualElement[] = [];
+  const heading = m.heading?.trim();
+  if (heading) out.push(label(`${id}_h`, CX, 36, heading, 'md', 'muted'));
+  const pictures = (m.pictures ?? []).slice(0, TUTORIAL_LIMITS.maxPictures);
+  // The ground line runs under the pictures' names.
+  const ground = H - 40;
+  out.push({
+    id: `${id}_g`,
+    type: 'line',
+    from: [M + 20, ground],
+    to: [W - M - 20, ground],
+    color: 'muted',
+  });
+  const widths = pictures.map((p) =>
+    p.size === 'small' ? 56 : pictures.length > 3 ? 64 : 88,
+  );
+  const gap = 18;
+  const total =
+    widths.reduce((sum, w) => sum + w, 0) +
+    gap * Math.max(0, pictures.length - 1);
+  let x = CX - total / 2;
+  const parts: string[] = [];
+  const named = new Map<string, string>();
+  const colors: VisualColor[] = ['green', 'blue', 'amber', 'violet'];
+  pictures.forEach((p, i) => {
+    const partId = `${id}_p${i}`;
+    const picture = known(p.picture) ?? 'document';
+    const w = widths[i];
+    const h = Math.round(w / pictureAspect(picture));
+    out.push(
+      ...place(
+        {
+          id: partId,
+          role: 'centre',
+          kind: 'picture',
+          text: p.name,
+          picture,
+          color: m.color ?? colors[i % colors.length],
+        },
+        Math.round(x + w / 2),
+        ground - 24 - Math.round(h / 2),
+        w,
+      ),
+    );
+    parts.push(partId);
+    named.set(partId, p.name);
+    x += w + gap;
+  });
+  return { elements: out, parts, arrowsOf: new Map(), named };
+}
+
+function layoutTimeline(m: Moment, id: string): Laid {
+  const out: VisualElement[] = [];
+  const heading = m.heading?.trim();
+  if (heading) out.push(label(`${id}_h`, CX, 40, heading, 'md', 'ink'));
+  const points = (m.points ?? []).slice(0, TUTORIAL_LIMITS.maxPoints);
+  const y = heading ? 142 : 132;
+  out.push({
+    id: `${id}_l`,
+    type: 'line',
+    from: [M + 16, y],
+    to: [W - M - 16, y],
+    color: m.color ?? 'blue',
+  });
+  const xs =
+    points.length === 1
+      ? [CX]
+      : points.map((_, i) =>
+          Math.round(M + 34 + (i * (W - 2 * M - 68)) / (points.length - 1)),
+        );
+  const parts: string[] = [];
+  const named = new Map<string, string>();
+  points.forEach((p, i) => {
+    const partId = `${id}_p${i}`;
+    out.push({
+      id: partId,
+      type: 'shape',
+      x: xs[i],
+      y,
+      w: 14,
+      h: 14,
+      kind: 'circle',
+      color: m.color ?? 'blue',
+      fill: 'solid',
+    });
+    out.push(label(`${partId}_a`, xs[i], y - 22, p.label, 'sm', 'ink'));
+    const lines = wrap(
+      p.text,
+      LABEL_SIZE.sm,
+      false,
+      Math.min(96, (W - 2 * M) / points.length - 6),
+    ).slice(0, 2);
+    lines.forEach((line, k) =>
+      out.push(
+        label(`${partId}_b${k}`, xs[i], y + 24 + k * 14, line, 'sm', 'muted'),
+      ),
+    );
+    parts.push(partId);
+    named.set(partId, `${p.label} ${p.text}`);
+  });
+  return { elements: out, parts, arrowsOf: new Map(), named };
+}
+
+function layoutTable(m: Moment, id: string): Laid {
+  const out: VisualElement[] = [];
+  const heading = m.heading?.trim();
+  if (heading) out.push(label(`${id}_h`, CX, 36, heading, 'md', 'ink'));
+  const columns = (m.columns ?? []).slice(0, TUTORIAL_LIMITS.maxColumns);
+  const rows = (m.rows ?? []).slice(0, TUTORIAL_LIMITS.maxRows);
+  const n = Math.max(1, columns.length);
+  const xs = columns.map((_, i) =>
+    Math.round(M + 20 + ((i + 0.5) * (W - 2 * M - 40)) / n),
+  );
+  const top = heading ? 70 : 52;
+  columns.forEach((c, i) =>
+    out.push(label(`${id}_c${i}`, xs[i], top, c, 'md', m.color ?? 'blue')),
+  );
+  out.push({
+    id: `${id}_r`,
+    type: 'line',
+    from: [M + 16, top + 16],
+    to: [W - M - 16, top + 16],
+    color: 'muted',
+  });
+  const parts: string[] = [];
+  const named = new Map<string, string>();
+  const step = Math.min(
+    38,
+    Math.floor((H - top - 40) / Math.max(1, rows.length)),
+  );
+  rows.forEach((row, r) => {
+    const partId = `${id}_p${r}`;
+    row.slice(0, n).forEach((cell, c) => {
+      out.push({
+        id: c === 0 ? partId : `${partId}_c${c}`,
+        type: 'chip',
+        x: xs[c],
+        y: top + 40 + r * step,
+        text: cell,
+        color: c === 0 ? (m.color ?? 'blue') : 'muted',
+      });
+    });
+    parts.push(partId);
+    named.set(partId, row.join(' '));
+  });
+  return { elements: out, parts, arrowsOf: new Map(), named };
+}
+
+function layoutRings(m: Moment, id: string): Laid {
+  const out: VisualElement[] = [];
+  const heading = m.heading?.trim();
+  if (heading) out.push(label(`${id}_h`, CX, 32, heading, 'md', 'ink'));
+  const layers = (m.layers ?? []).slice(0, TUTORIAL_LIMITS.maxLayers);
+  const cy = heading ? 152 : 140;
+  const most = heading ? 108 : 118;
+  const parts: string[] = [];
+  const named = new Map<string, string>();
+  const colors: VisualColor[] = ['amber', 'green', 'blue', 'violet', 'orange'];
+  // Drawn from the outside in, so the inner rings sit on top.
+  for (let i = layers.length - 1; i >= 0; i -= 1) {
+    const r = Math.round(
+      28 + ((most - 28) * i) / Math.max(1, layers.length - 1),
+    );
+    const partId = `${id}_p${i}`;
+    out.push({
+      id: partId,
+      type: 'shape',
+      x: CX,
+      y: cy,
+      w: r * 2,
+      h: r * 2,
+      kind: 'circle',
+      color: m.color ?? colors[i % colors.length],
+      fill: 'tint',
+    });
+    parts[i] = partId;
+    named.set(partId, layers[i]);
+  }
+  layers.forEach((text, i) => {
+    const r = Math.round(
+      28 + ((most - 28) * i) / Math.max(1, layers.length - 1),
+    );
+    const inner =
+      i === 0
+        ? 0
+        : Math.round(
+            28 + ((most - 28) * (i - 1)) / Math.max(1, layers.length - 1),
+          );
+    const y = i === 0 ? cy : cy - Math.round((r + inner) / 2);
+    out.push(label(`${id}_p${i}_t`, CX, y, text, 'sm', 'ink'));
+  });
+  return { elements: out, parts, arrowsOf: new Map(), named };
+}
+
+function layoutOverlap(m: Moment, id: string): Laid {
+  const out: VisualElement[] = [];
+  const heading = m.heading?.trim();
+  if (heading) out.push(label(`${id}_h`, CX, 32, heading, 'md', 'ink'));
+  const cy = heading ? 152 : 142;
+  const r = 66;
+  const lx = CX - 44;
+  const rx = CX + 44;
+  out.push({
+    id: `${id}_l`,
+    type: 'shape',
+    x: lx,
+    y: cy,
+    w: r * 2,
+    h: r * 2,
+    kind: 'circle',
+    color: 'blue',
+    fill: 'tint',
+  });
+  out.push({
+    id: `${id}_r`,
+    type: 'shape',
+    x: rx,
+    y: cy,
+    w: r * 2,
+    h: r * 2,
+    kind: 'circle',
+    color: 'violet',
+    fill: 'tint',
+  });
+  out.push(
+    label(`${id}_lt`, lx - 20, cy - r - 12, m.left?.label ?? '', 'md', 'blue'),
+  );
+  out.push(
+    label(
+      `${id}_rt`,
+      rx + 20,
+      cy - r - 12,
+      m.right?.label ?? '',
+      'md',
+      'violet',
+    ),
+  );
+  const parts: string[] = [];
+  const named = new Map<string, string>();
+  const shared = (m.shared ?? []).slice(0, TUTORIAL_LIMITS.maxShared);
+  shared.forEach((text, i) => {
+    const partId = `${id}_p${i}`;
+    out.push(
+      label(
+        partId,
+        CX,
+        cy - ((shared.length - 1) * 16) / 2 + i * 16,
+        text,
+        'sm',
+        'ink',
+      ),
+    );
+    parts.push(partId);
+    named.set(partId, text);
+  });
+  (m.left?.items ?? [])
+    .slice(0, 3)
+    .forEach((text, i) =>
+      out.push(
+        label(`${id}_li${i}`, lx - 30, cy - 12 + i * 16, text, 'sm', 'blue'),
+      ),
+    );
+  (m.right?.items ?? [])
+    .slice(0, 3)
+    .forEach((text, i) =>
+      out.push(
+        label(`${id}_ri${i}`, rx + 30, cy - 12 + i * 16, text, 'sm', 'violet'),
+      ),
+    );
+  return { elements: out, parts, arrowsOf: new Map(), named };
+}
+
 /** One moment as elements, with its parts and arrows named for the cues. */
 export function layoutMoment(m: Moment, id: string): Laid {
   switch (m.card) {
+    case 'chart':
+      return layoutChart(m, id);
+    case 'scene':
+      return layoutSceneCard(m, id);
+    case 'timeline':
+      return layoutTimeline(m, id);
+    case 'table':
+      return layoutTable(m, id);
+    case 'rings':
+      return layoutRings(m, id);
+    case 'overlap':
+      return layoutOverlap(m, id);
+    case 'count':
+      return layoutNumber({ ...m, card: 'number' }, id, true);
     case 'title':
       return layoutTitle(m, id);
     case 'statement':
@@ -739,6 +1094,21 @@ export function tidyTutorial(tutorial: VisualTutorial): VisualTutorial {
     end = to;
     ranged.push({ ...m, from, to });
   }
+  // One item is no list: it becomes the line to remember.
+  for (const m of ranged) {
+    if (
+      (m.card === 'list' || m.card === 'chips') &&
+      (m.items?.length ?? 0) === 1
+    ) {
+      const only = m.items![0];
+      m.card = 'statement';
+      m.text = m.heading ? `${m.heading}: ${only.text}` : only.text;
+      m.emphasis = [only.text.split(/\s+/)[0]];
+      m.items = undefined;
+      m.heading = undefined;
+      m.reveals = undefined;
+    }
+  }
   // Two statements in a row are one: the first holds through both.
   for (let i = ranged.length - 1; i > 0; i -= 1) {
     if (ranged[i].card === 'statement' && ranged[i - 1].card === 'statement') {
@@ -769,21 +1139,38 @@ export function tidyTutorial(tutorial: VisualTutorial): VisualTutorial {
  * placing: the narration's length and cut, the moments' cover of it,
  * and each card's fields.
  */
+/** Whether a chart's value is written on the page, as digits with or without commas. */
+function numberInMaterial(value: number, material: string): boolean {
+  if (!material) return true;
+  const plain = String(value);
+  const grouped = value.toLocaleString('en-US');
+  return material.includes(plain) || material.includes(grouped);
+}
+
 export function tutorialProblems(
   tutorial: VisualTutorial,
   pool: Set<string> | null,
+  /** The page's own length in words: a thin page is not asked for a long narration. */
+  materialWords?: number,
+  /** The page's text, for the numbers a chart shows. */
+  materialText = '',
 ): string[] {
   const problems: string[] = [];
   const L = TUTORIAL_LIMITS;
   const n = tutorial.sentences.length;
-  if (n < L.minSentences || n > L.maxSentences)
+  const least =
+    materialWords === undefined
+      ? L.minWords
+      : Math.max(60, Math.min(L.minWords, Math.round(materialWords * 0.6)));
+  const fewest = least < L.minWords ? 5 : L.minSentences;
+  if (n < fewest || n > L.maxSentences)
     problems.push(
-      `The narration is ${n} sentences; between ${L.minSentences} and ${L.maxSentences}.`,
+      `The narration is ${n} sentences; between ${fewest} and ${L.maxSentences}.`,
     );
   const total = tutorial.sentences.reduce((sum, s) => sum + words(s).length, 0);
-  if (total < L.minWords || total > L.maxWords)
+  if (total < least || total > L.maxWords)
     problems.push(
-      `The narration is ${total} words; between ${L.minWords} and ${L.maxWords}.`,
+      `The narration is ${total} words; between ${least} and ${L.maxWords}.`,
     );
   const moments = tutorial.moments;
   if (moments.length < L.minMoments || moments.length > L.maxMoments)
@@ -808,8 +1195,12 @@ export function tutorialProblems(
         `${who} covers ${m.to - m.from + 1} sentences; at most ${L.maxSentencesPerMoment}.`,
       );
     expect = Math.max(expect, m.to + 1);
+    // A name of one or two words must be the chapter's own; a phrase is
+    // the model's, like the narration.
     const grounded = (what: string, text: string | undefined) => {
-      if (text && pool && !labelGrounded(text, pool))
+      if (!text || !pool) return;
+      if (words(text).length > 2) return;
+      if (!labelGrounded(text, pool))
         problems.push(
           `${who}: ${what} says "${text}", which is not built from the chapter's words.`,
         );
@@ -911,6 +1302,97 @@ export function tutorialProblems(
           }
         }
         break;
+      case 'chart': {
+        const chart = m.chart;
+        if (!chart) {
+          problems.push(`${who} has no chart.`);
+          break;
+        }
+        const n = chart.series.length;
+        if (chart.kind === 'pair' ? n !== 2 : n < 2 || n > L.maxSeries)
+          problems.push(
+            `${who} has ${n} values; a pair has two, the rest two to ${L.maxSeries}.`,
+          );
+        for (const point of chart.series) {
+          short(`the label "${point.label}"`, point.label, 18);
+          if (!(point.value >= 0))
+            problems.push(`${who}: "${point.label}" has no value.`);
+          if (pool && !numberInMaterial(point.value, materialText))
+            problems.push(
+              `${who}: the value ${point.value} for "${point.label}" is not on the page; every number in a chart comes from the page.`,
+            );
+        }
+        break;
+      }
+      case 'scene': {
+        const pictures = m.pictures ?? [];
+        if (pictures.length < 2 || pictures.length > L.maxPictures)
+          problems.push(
+            `${who} has ${pictures.length} pictures; between 2 and ${L.maxPictures}.`,
+          );
+        for (const p of pictures) {
+          short(`the name "${p.name}"`, p.name, L.maxNameChars);
+          grounded(`the name "${p.name}"`, p.name);
+        }
+        break;
+      }
+      case 'timeline': {
+        const points = m.points ?? [];
+        if (points.length < 2 || points.length > L.maxPoints)
+          problems.push(
+            `${who} has ${points.length} points; between 2 and ${L.maxPoints}.`,
+          );
+        for (const p of points) {
+          short(`the point "${p.label}"`, p.label, 14);
+          short(`the text under "${p.label}"`, p.text, 40);
+        }
+        break;
+      }
+      case 'table': {
+        const columns = m.columns ?? [];
+        const rows = m.rows ?? [];
+        if (columns.length < 2 || columns.length > L.maxColumns)
+          problems.push(`${who} has ${columns.length} columns; two or three.`);
+        if (rows.length < 1 || rows.length > L.maxRows)
+          problems.push(`${who} has ${rows.length} rows; one to ${L.maxRows}.`);
+        for (const c of columns) short(`the column "${c}"`, c, 16);
+        for (const row of rows)
+          for (const cell of row) short(`the cell "${cell}"`, cell, 16);
+        break;
+      }
+      case 'rings': {
+        const layers = m.layers ?? [];
+        if (layers.length < 2 || layers.length > L.maxLayers)
+          problems.push(
+            `${who} has ${layers.length} layers; between 2 and ${L.maxLayers}.`,
+          );
+        for (const layer of layers) {
+          short(`the layer "${layer}"`, layer, 18);
+          grounded(`the layer "${layer}"`, layer);
+        }
+        break;
+      }
+      case 'overlap': {
+        if (!m.left?.label || !m.right?.label)
+          problems.push(`${who} needs a label on each side.`);
+        short('the left label', m.left?.label, 16);
+        short('the right label', m.right?.label, 16);
+        if ((m.shared ?? []).length > L.maxShared)
+          problems.push(`${who}: at most ${L.maxShared} shared items.`);
+        for (const text of [
+          ...(m.shared ?? []),
+          ...(m.left?.items ?? []),
+          ...(m.right?.items ?? []),
+        ])
+          short(`"${text}"`, text, 18);
+        break;
+      }
+      case 'count':
+        if (!m.figure) problems.push(`${who} has no figure.`);
+        if (m.figure && !/\d/.test(m.figure))
+          problems.push(`${who}: a count needs digits in its figure.`);
+        short('the caption', m.caption, L.maxCaptionChars);
+        break;
       case 'hub': {
         if (!m.centre) problems.push(`${who} has no centre.`);
         short('the centre', m.centre?.text, L.maxChipChars);
@@ -939,7 +1421,17 @@ export function tutorialProblems(
         ? (m.left?.items?.length ?? 0) + (m.right?.items?.length ?? 0)
         : m.card === 'hub'
           ? (m.inputs?.length ?? 0) + (m.outputs?.length ?? 0)
-          : items.length;
+          : m.card === 'scene'
+            ? (m.pictures?.length ?? 0)
+            : m.card === 'timeline'
+              ? (m.points?.length ?? 0)
+              : m.card === 'table'
+                ? (m.rows?.length ?? 0)
+                : m.card === 'rings'
+                  ? (m.layers?.length ?? 0)
+                  : m.card === 'overlap'
+                    ? (m.shared?.length ?? 0)
+                    : items.length;
     for (const reveal of m.reveals ?? []) {
       if (reveal.part < 0 || reveal.part >= partCount)
         problems.push(
@@ -992,6 +1484,7 @@ export function tutorialWarnings(tutorial: VisualTutorial): string[] {
       m.centre?.picture,
       ...(m.inputs ?? []).map((item) => item.picture),
       ...(m.outputs ?? []).map((item) => item.picture),
+      ...(m.pictures ?? []).map((item) => item.picture),
     ].filter((name): name is string => Boolean(name));
     for (const name of names)
       if (!resolvePicture(name))

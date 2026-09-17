@@ -174,6 +174,8 @@ export type VisualElement =
       accent?: VisualColor;
       /** A tick before the text, for an item in a list. */
       tick?: boolean;
+      /** A figure that counts up to itself when it appears. */
+      count?: boolean;
     }
   | {
       id: string;
@@ -199,6 +201,19 @@ export type VisualElement =
       right?: string;
       /** Ticks below the bar, at a fraction of its width. */
       markers?: { at: number; text: string }[];
+    }
+  | {
+      id: string;
+      type: 'chart';
+      x: number;
+      y: number;
+      w: number;
+      h: number;
+      /** bars side by side; a line over the series; shares of a whole as one bar; a pair of magnitudes. */
+      kind: 'bars' | 'line' | 'shares' | 'pair';
+      series: { label: string; value: number }[];
+      unit?: string;
+      color?: VisualColor;
     }
   | {
       id: string;
@@ -769,6 +784,13 @@ export function boxOf(element: VisualElement): Box | null {
         h: BAR_HEIGHT + above + below,
       };
     }
+    case 'chart':
+      return {
+        x: element.x - element.w / 2,
+        y: element.y - element.h / 2,
+        w: element.w,
+        h: element.h,
+      };
     case 'bubble': {
       const w = textWidth(element.text, BUBBLE_TEXT_SIZE, true) + BUBBLE_PAD;
       return {

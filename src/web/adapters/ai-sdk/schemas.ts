@@ -505,6 +505,13 @@ export const visualTutorialSchema = z.object({
           'compare',
           'flow',
           'hub',
+          'chart',
+          'scene',
+          'timeline',
+          'table',
+          'rings',
+          'overlap',
+          'count',
         ]),
         color: visualColor,
         eyebrow: z.string().max(30).nullable(),
@@ -540,6 +547,47 @@ export const visualTutorialSchema = z.object({
         centre: cardItem.nullable(),
         inputs: z.array(cardItem).max(4).nullable(),
         outputs: z.array(cardItem).max(4).nullable(),
+        chart: z
+          .object({
+            kind: z.enum(['bars', 'line', 'shares', 'pair']),
+            series: z
+              .array(
+                z.object({
+                  label: z.string().min(1).max(18),
+                  value: z.number(),
+                }),
+              )
+              .min(1)
+              .max(6),
+            unit: z.string().max(10).nullable(),
+          })
+          .nullable(),
+        pictures: z
+          .array(
+            z.object({
+              picture: z.string().min(1).max(32),
+              name: z.string().min(1).max(24),
+              size: z.enum(['big', 'small']).nullable(),
+            }),
+          )
+          .max(4)
+          .nullable(),
+        points: z
+          .array(
+            z.object({
+              label: z.string().min(1).max(14),
+              text: z.string().min(1).max(40),
+            }),
+          )
+          .max(6)
+          .nullable(),
+        columns: z.array(z.string().min(1).max(16)).max(3).nullable(),
+        rows: z
+          .array(z.array(z.string().min(1).max(16)).max(3))
+          .max(4)
+          .nullable(),
+        layers: z.array(z.string().min(1).max(18)).max(5).nullable(),
+        shared: z.array(z.string().min(1).max(18)).max(3).nullable(),
         reveals: z
           .array(
             z.object({

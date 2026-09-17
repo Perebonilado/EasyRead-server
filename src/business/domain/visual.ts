@@ -17,6 +17,8 @@
 import { contentWords, type WordTimes } from './board';
 import { grounded } from './sketch';
 import type { SpokenForm } from './spoken';
+import { measureText } from './visual-font';
+import { PRESET_SHAPES, type PresetShape } from './visual-presets';
 
 export const VISUAL_GENERATOR_VERSION = 'visual-1';
 
@@ -82,6 +84,11 @@ export const SHAPE_KINDS = [
   'diamond',
 ] as const;
 export type ShapeKind = (typeof SHAPE_KINDS)[number];
+/** Every kind a shape may be: the plain kinds and the presets drawn by hand. */
+export const ALL_SHAPE_KINDS: readonly string[] = [
+  ...SHAPE_KINDS,
+  ...PRESET_SHAPES,
+];
 
 export type VisualPoint = [number, number];
 /** An end of a line or arrow: a point, or the id of an element to attach to. */
@@ -113,7 +120,7 @@ export type VisualElement =
       y: number;
       w: number;
       h: number;
-      kind: ShapeKind;
+      kind: ShapeKind | PresetShape;
       /** A short word inside the shape, when it needs one. */
       text?: string;
       color?: VisualColor;
@@ -319,7 +326,7 @@ export function visualProblems(
         }
         break;
       case 'shape':
-        if (!(SHAPE_KINDS as readonly string[]).includes(element.kind)) {
+        if (!ALL_SHAPE_KINDS.includes(element.kind)) {
           problems.push(
             `Shape "${element.id}" has kind "${element.kind}", which is not in the catalogue.`,
           );
@@ -516,14 +523,17 @@ export interface Box {
 
 /** Type sizes in design units, matching the client's. */
 export const LABEL_SIZE = { sm: 10, md: 12, lg: 15, xl: 19 } as const;
-/** A glyph's width as a share of the type size, for the reading font at its average. */
-const GLYPH = 0.56;
 export const CHIP_HEIGHT = 26;
+export const CHIP_TEXT_SIZE = 12.5;
 export const CHIP_PAD = 24;
 export const CHIP_MIN_WIDTH = 44;
+/** The text inside a shape: its size, and the room it needs each side. */
+export const SHAPE_TEXT_SIZE = 11.5;
+const SHAPE_TEXT_PAD = 10;
 
-export function textWidth(text: string, size: number): number {
-  return Math.round(text.length * size * GLYPH);
+/** The width of a run of text at a type size, measured in the reading font. */
+export function textWidth(text: string, size: number, bold = false): number {
+  return Math.round(measureText(text, size, bold ? 700 : 600));
 }
 
 /** The bounding box of an element, or null for a line or an arrow, which are not boxes. */
@@ -531,7 +541,11 @@ export function boxOf(element: VisualElement): Box | null {
   switch (element.type) {
     case 'label': {
       const size = LABEL_SIZE[element.size ?? 'md'];
-      const w = textWidth(element.text, size);
+      const w = textWidth(
+        element.text,
+        size,
+        element.size === 'lg' || element.size === 'xl',
+      );
       const left =
         element.anchor === 'start'
           ? element.x
@@ -543,7 +557,7 @@ export function boxOf(element: VisualElement): Box | null {
     case 'chip': {
       const w = Math.max(
         CHIP_MIN_WIDTH,
-        textWidth(element.text, 11) + CHIP_PAD,
+        textWidth(element.text, CHIP_TEXT_SIZE, true) + CHIP_PAD,
       );
       return {
         x: element.x - w / 2,
@@ -631,16 +645,104 @@ function overlap(a: Box, b: Box): { x: number; y: number } {
 
 const round = (n: number) => Math.round(n);
 
+/** The room a shape's text needs across, with its padding. */
+export function shapeTextWidth(text: string): number {
+  return textWidth(text, SHAPE_TEXT_SIZE, true) + 2 * SHAPE_TEXT_PAD;
+}
+
+/** Where a line or arrow attaches: the edge of the named box nearest the other end, a gap short of it; a point as given. */
+export function attachPoint(
+  end: VisualEnd,
+  other: VisualPoint,
+  byId: Map<string, VisualElement>,
+): VisualPoint | null {
+  if (typeof end !== 'string') return end;
+  const element = byId.get(end);
+  const box = element ? boxOf(element) : null;
+  if (!box) return null;
+  const cx = box.x + box.w / 2;
+  const cy = box.y + box.h / 2;
+  const dx = other[0] - cx;
+  const dy = other[1] - cy;
+  if (!dx && !dy) return [cx, cy];
+  const hx = box.w / 2 + 6;
+  const hy = box.h / 2 + 6;
+  const t = Math.min(
+    dx ? hx / Math.abs(dx) : Infinity,
+    dy ? hy / Math.abs(dy) : Infinity,
+  );
+  return [cx + dx * t, cy + dy * t];
+}
+
+/** Eleven points along a line or arrow, bend and all, for the crossing check. */
+export function arrowSamples(
+  element: Extract<VisualElement, { type: 'line' | 'arrow' }>,
+  byId: Map<string, VisualElement>,
+): VisualPoint[] {
+  const roughFrom = endPoint(element.from, byId);
+  const roughTo = endPoint(element.to, byId);
+  if (!roughFrom || !roughTo) return [];
+  const from = attachPoint(element.from, roughTo, byId);
+  const to = attachPoint(element.to, roughFrom, byId);
+  if (!from || !to) return [];
+  const bend = element.type === 'arrow' ? (element.bend ?? 0) : 0;
+  const mx = (from[0] + to[0]) / 2;
+  const my = (from[1] + to[1]) / 2;
+  const dx = to[0] - from[0];
+  const dy = to[1] - from[1];
+  const len = Math.hypot(dx, dy) || 1;
+  const cx = mx + (-dy / len) * bend * 2;
+  const cy = my + (dx / len) * bend * 2;
+  const points: VisualPoint[] = [];
+  for (let i = 1; i < 12; i += 1) {
+    const t = i / 12;
+    const a = (1 - t) * (1 - t);
+    const b = 2 * (1 - t) * t;
+    const c = t * t;
+    points.push([
+      a * from[0] + b * cx + c * to[0],
+      a * from[1] + b * cy + c * to[1],
+    ]);
+  }
+  return points;
+}
+
 /**
- * What is wrong with where things sit: a box over an edge, or two visible
- * boxes over each other by more than four units both ways. Lines and
- * arrows are not boxes. Reported with the numbers a repair needs.
+ * What the model should know but need not fix: more on screen than a
+ * student takes in at once. Logged, shown to the model on a repair, never
+ * a failure on its own.
+ */
+export function visualWarnings(script: VisualScript): string[] {
+  const warnings: string[] = [];
+  visibleAfterEach(script).forEach((visible, index) => {
+    if (visible.size > VISUAL_LIMITS.maxVisible) {
+      warnings.push(
+        `After sentence ${index + 1}, ${visible.size} elements are on screen; keep it to ${VISUAL_LIMITS.maxVisible} by dimming or hiding what is no longer discussed.`,
+      );
+    }
+  });
+  return warnings;
+}
+
+/**
+ * What is wrong with where things sit: a box over an edge, two visible
+ * boxes over each other by more than four units both ways, a shape too
+ * narrow for its text, or an arrow running through a label or chip.
+ * Reported with the numbers a repair needs.
  */
 export function layoutProblems(script: VisualScript): string[] {
   const problems: string[] = [];
   const byId = new Map(script.elements.map((e) => [e.id, e] as const));
   const boxes = new Map<string, Box>();
   for (const element of script.elements) {
+    if (element.type === 'shape' && element.text) {
+      const need = shapeTextWidth(element.text);
+      if (need > element.w) {
+        problems.push(
+          `"${element.id}" is ${round(element.w)} wide but its text "${element.text}" needs ${round(need)}; widen it or shorten the text.`,
+        );
+      }
+    }
     const box = boxOf(element);
     if (!box) continue;
     boxes.set(element.id, box);
@@ -662,10 +764,38 @@ export function layoutProblems(script: VisualScript): string[] {
     const ids = [...visible].filter(
       (id) => boxes.has(id) && collides(byId.get(id)!),
     );
-    if (visible.size > VISUAL_LIMITS.maxVisible) {
-      problems.push(
-        `After sentence ${index + 1}, ${visible.size} elements are on screen; keep it to ${VISUAL_LIMITS.maxVisible} by dimming or hiding what is no longer discussed.`,
+    // An arrow through a word: any visible line or arrow whose path
+    // passes through a visible label or chip it does not attach to.
+    for (const id of visible) {
+      const element = byId.get(id);
+      if (!element || (element.type !== 'line' && element.type !== 'arrow')) {
+        continue;
+      }
+      const owns = new Set(
+        [element.from, element.to].filter((e) => typeof e === 'string'),
       );
+      for (const target of visible) {
+        const other = byId.get(target);
+        if (!other || owns.has(target)) continue;
+        if (other.type !== 'label' && other.type !== 'chip') continue;
+        const box = boxes.get(target);
+        if (!box) continue;
+        const pair = `${id}>${target}`;
+        if (seen.has(pair)) continue;
+        const crosses = arrowSamples(element, byId).some(
+          ([x, y]) =>
+            x > box.x - 2 &&
+            x < box.x + box.w + 2 &&
+            y > box.y - 2 &&
+            y < box.y + box.h + 2,
+        );
+        if (crosses) {
+          seen.add(pair);
+          problems.push(
+            `"${id}" runs through "${target}" (${round(box.x)} to ${round(box.x + box.w)}, ${round(box.y)} to ${round(box.y + box.h)}) after sentence ${index + 1}; move "${target}" off the arrow's path or bend the arrow the other way.`,
+          );
+        }
+      }
     }
     for (let i = 0; i < ids.length; i += 1) {
       for (let j = i + 1; j < ids.length; j += 1) {
@@ -692,7 +822,26 @@ export function layoutProblems(script: VisualScript): string[] {
  * axis of least overlap. Returns a new script; the model's is untouched.
  */
 export function repairVisual(script: VisualScript): VisualScript {
-  const elements = clampAll(script.elements);
+  // Text is one line: a newline the model put in to make a chip "short"
+  // would draw as nothing and measure as everything.
+  const tidy = (text: string) => text.replace(/\s+/g, ' ').trim();
+  const tidied = script.elements.map((element) =>
+    element.type === 'label' || element.type === 'chip'
+      ? { ...element, text: tidy(element.text) }
+      : element.type === 'shape' && element.text
+        ? { ...element, text: tidy(element.text) }
+        : element,
+  );
+  // A shape narrower than its text grows to fit it, centred where it was.
+  const elements = clampAll(
+    tidied.map((element) =>
+      element.type === 'shape' &&
+      element.text &&
+      shapeTextWidth(element.text) > element.w
+        ? { ...element, w: round(shapeTextWidth(element.text) + 4) }
+        : element,
+    ),
+  );
   // Nudge pairs that overlap in any sentence, a few rounds, later one moves.
   const draft: VisualScript = { ...script, elements };
   for (let pass = 0; pass < 8; pass += 1) {
@@ -745,10 +894,11 @@ export function repairVisual(script: VisualScript): VisualScript {
   }
   // Cues in word order, and a cue past the sentence's last word lands on
   // it: the element is still shown, just late, which beats a lost cue.
-  const segments = draft.segments.map((segment) => {
+  const ordered = draft.segments.map((segment) => {
     const last = Math.max(wordsOf(segment.text).length - 1, 0);
     return {
       ...segment,
+      text: tidy(segment.text),
       cues: [...segment.cues]
         .map((cue) => ({
           ...cue,
@@ -757,9 +907,81 @@ export function repairVisual(script: VisualScript): VisualScript {
         .sort((a, b) => a.at - b.at),
     };
   });
+  const segments = calmed({ ...draft, segments: ordered });
   // A nudge can push a box over the edge; the edge wins, and a box that
   // then overlaps again is the model's to mend.
   return { ...draft, elements: clampAll(draft.elements), segments };
+}
+
+/** How many elements a student takes in at once; beyond it, older ones are dimmed. */
+export const CALM_VISIBLE = 8;
+
+/**
+ * Crowd control the model did not do: after any sentence that leaves more
+ * than CALM_VISIBLE elements lit, the ones shown longest ago that this
+ * sentence does not touch are dimmed, oldest first, with the arrows that
+ * hang off them. The centre of the picture, its shapes, stays lit.
+ */
+function calmed(script: VisualScript): VisualSegment[] {
+  const byId = new Map(script.elements.map((e) => [e.id, e] as const));
+  const lit = new Map<string, number>(); // element -> sentence it was shown in
+  const dimmed = new Set<string>();
+  return script.segments.map((segment, index) => {
+    const touched = new Set(segment.cues.map((cue) => cue.target));
+    for (const cue of segment.cues) {
+      if (cue.do === 'clear') {
+        lit.clear();
+        dimmed.clear();
+      } else if (SHOWS.has(cue.do)) {
+        lit.set(cue.target, index);
+        dimmed.delete(cue.target);
+      } else if (cue.do === 'hide') {
+        lit.delete(cue.target);
+        dimmed.delete(cue.target);
+      } else if (cue.do === 'dim') dimmed.add(cue.target);
+      else if (cue.do === 'undim') dimmed.delete(cue.target);
+    }
+    const bright = [...lit.keys()].filter((id) => !dimmed.has(id));
+    if (bright.length <= CALM_VISIBLE) return segment;
+    const extra: VisualCue[] = [];
+    const candidates = bright
+      .filter((id) => {
+        const element = byId.get(id);
+        return (
+          element &&
+          element.type !== 'shape' &&
+          element.type !== 'line' &&
+          element.type !== 'arrow' &&
+          !touched.has(id) &&
+          (lit.get(id) ?? index) < index
+        );
+      })
+      .sort((a, b) => (lit.get(a) ?? 0) - (lit.get(b) ?? 0));
+    let count = bright.length;
+    const last = Math.max(wordsOf(segment.text).length - 1, 0);
+    for (const id of candidates) {
+      if (count <= CALM_VISIBLE) break;
+      extra.push({ at: last, do: 'dim', target: id });
+      dimmed.add(id);
+      count -= 1;
+      // An arrow attached to a dimmed thing dims with it.
+      for (const element of script.elements) {
+        if (
+          (element.type === 'arrow' || element.type === 'line') &&
+          lit.has(element.id) &&
+          !dimmed.has(element.id) &&
+          (element.from === id || element.to === id)
+        ) {
+          extra.push({ at: last, do: 'dim', target: element.id });
+          dimmed.add(element.id);
+          count -= 1;
+        }
+      }
+    }
+    return extra.length
+      ? { ...segment, cues: [...segment.cues, ...extra] }
+      : segment;
+  });
 }
 
 /** Every box inside the margin, a unit to spare so rounding cannot put it back over. */

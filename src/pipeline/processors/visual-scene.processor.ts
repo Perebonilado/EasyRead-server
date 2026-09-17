@@ -15,6 +15,7 @@ import {
   sceneSpoken,
   timeVisual,
   visualProblems,
+  visualWarnings,
   type VisualScript,
 } from '../../business/domain/visual';
 import type { AlignerPort } from '../../business/ports/aligner.port';
@@ -165,7 +166,8 @@ export class VisualSceneProcessor {
           topicTitle: topic.title,
           material,
           previous: script,
-          problems,
+          // The warnings ride along as advice; only the problems must go.
+          problems: [...problems, ...visualWarnings(script)],
         });
         await this.record(documentId, 'visual_repair', mended.usage);
         script = repairVisual(mended.value);
@@ -282,6 +284,8 @@ export class VisualSceneProcessor {
   }
 
   private problemsOf(script: VisualScript, pool: Set<string>): string[] {
+    const warnings = visualWarnings(script);
+    if (warnings.length) this.logger.log(warnings.join(' '));
     return [...visualProblems(script, pool), ...layoutProblems(script)];
   }
 

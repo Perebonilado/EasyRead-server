@@ -204,6 +204,88 @@ describe('a visual script', () => {
     expect(visualProblems(mended, materialPool(MATERIAL))).toEqual([]);
   });
 
+  it('refuses a shape too narrow for its text and an arrow through a chip, and widens the shape itself', () => {
+    const tight: VisualScript = {
+      ...sound,
+      elements: sound.elements.map((e) =>
+        e.id === 'bucket'
+          ? { ...e, w: 40, text: 'Token bucket' }
+          : e.id === 'rate'
+            ? { ...e, x: 180, y: 90 }
+            : e,
+      ),
+    };
+    const problems = layoutProblems(tight);
+    expect(problems.some((p) => p.includes('"bucket" is 40 wide'))).toBe(true);
+    expect(
+      problems.some((p) => p.includes('"refill" runs through "rate"')),
+    ).toBe(true);
+    const mended = repairVisual(tight);
+    const bucket = mended.elements.find((e) => e.id === 'bucket') as {
+      w: number;
+    };
+    expect(bucket.w).toBeGreaterThan(40);
+    expect(layoutProblems(mended).some((p) => p.includes('wide'))).toBe(false);
+  });
+
+  it('tidies text the model broke across lines and dims the oldest chips when the canvas is crowded', () => {
+    const chips = Array.from({ length: 10 }, (_, i) => ({
+      id: `c${i}`,
+      type: 'chip' as const,
+      x: 40 + i * 30,
+      y: 40 + (i % 2) * 60,
+      text: i === 0 ? 'one\n  ' : `c${i}`,
+      color: 'blue' as const,
+    }));
+    const crowded: VisualScript = {
+      title: 'Crowded',
+      elements: [
+        {
+          id: 'hub',
+          type: 'shape',
+          x: 180,
+          y: 180,
+          w: 120,
+          h: 60,
+          kind: 'roundRect',
+          text: 'Hub',
+          color: 'blue',
+        },
+        ...chips,
+      ],
+      segments: [
+        {
+          text: 'The hub sits at the centre of everything here.',
+          cues: [{ at: 1, do: 'draw', target: 'hub' }],
+        },
+        {
+          text: 'Now the first five chips come in one by one.',
+          cues: chips
+            .slice(0, 5)
+            .map((c, i) => ({ at: i, do: 'fade' as const, target: c.id })),
+        },
+        {
+          text: 'And then the last five chips come in as well.',
+          cues: chips
+            .slice(5)
+            .map((c, i) => ({ at: i, do: 'fade' as const, target: c.id })),
+        },
+        {
+          text: 'That is everything on the board at once now.',
+          cues: [{ at: 1, do: 'pulse', target: 'hub' }],
+        },
+      ],
+    };
+    const mended = repairVisual(crowded);
+    expect((mended.elements[1] as { text: string }).text).toBe('one');
+    const third = mended.segments[2].cues;
+    const dims = third.filter((c) => c.do === 'dim').map((c) => c.target);
+    // Eleven lit after sentence three: the three oldest chips are dimmed, the hub never.
+    expect(dims).toEqual(['c0', 'c1', 'c2']);
+    expect(dims).not.toContain('hub');
+    expect(mended.segments[3].cues.some((c) => c.do === 'dim')).toBe(false);
+  });
+
   it('knows what is on screen after each sentence, clear included', () => {
     const script: VisualScript = {
       ...sound,

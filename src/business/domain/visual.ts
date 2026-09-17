@@ -17,6 +17,7 @@
 import { contentWords, type WordTimes, estimateWordTimes } from './board';
 import { grounded } from './sketch';
 import type { SpokenForm } from './spoken';
+import type { FigureManner, FigureOutline, FigurePart } from './visual-figures';
 import { measureText } from './visual-font';
 import {
   knownPicture,
@@ -203,6 +204,21 @@ export type VisualElement =
       right?: string;
       /** Ticks below the bar, at a fraction of its width. */
       markers?: { at: number; text: string }[];
+    }
+  | {
+      id: string;
+      type: 'figure';
+      x: number;
+      y: number;
+      w: number;
+      h: number;
+      /** What the thing is, in the page's own words. */
+      of: string;
+      outline: FigureOutline;
+      parts: FigurePart[];
+      manner: FigureManner;
+      seed: number;
+      color?: VisualColor;
     }
   | {
       id: string;
@@ -786,6 +802,7 @@ export function boxOf(element: VisualElement): Box | null {
         h: BAR_HEIGHT + above + below,
       };
     }
+    case 'figure':
     case 'chart':
       return {
         x: element.x - element.w / 2,

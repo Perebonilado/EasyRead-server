@@ -6,6 +6,7 @@
  * tutorial into the script the checks, the voice and the player take.
  */
 import {
+  CHIP_HEIGHT,
   LABEL_SIZE,
   VISUAL_MARGIN,
   VISUAL_SPACE,
@@ -22,10 +23,21 @@ import {
 import {
   NAME,
   layoutScene,
+  pictureBox,
   place,
   type VisualStructure,
 } from './visual-layout';
-import { pictureAspect, resolvePicture } from './visual-presets';
+import {
+  FIGURE_OUTLINES,
+  figureAspect,
+  figureWidth,
+  resolveDrawing,
+  type FigureManner,
+  type FigureOutline,
+  type FigurePart,
+  type VisualFigure,
+} from './visual-figures';
+import { resolvePicture } from './visual-presets';
 
 export const CARD_KINDS = [
   'title',
@@ -85,6 +97,12 @@ export interface Moment {
   items?: CardItem[];
   /** Picture: the thing, its name, a line it says. */
   picture?: string;
+  /** The shape the thing takes, when the library has no drawing of it. */
+  shape?: {
+    outline?: FigureOutline;
+    parts?: FigurePart[];
+    manner?: FigureManner;
+  };
   name?: string;
   bubble?: string;
   /** Term: the word and what it means. */
@@ -283,6 +301,88 @@ const label = (
 /** The drawing for the word the model used, when the library has one. */
 const known = (picture?: string): string | undefined => resolvePicture(picture);
 
+/**
+ * One thing drawn at a point: the preset or icon of its name, else the
+ * figure its words say it is, else the words themselves in a chip. The
+ * name goes under it, as a picture's does. Returns how tall it stands.
+ */
+function drawThing(input: {
+  id: string;
+  of: string;
+  name: string;
+  x: number;
+  y: number;
+  width: number;
+  color: VisualColor;
+  shape?: Partial<VisualFigure> | null;
+}): { elements: VisualElement[]; height: number } {
+  const { id, of, name, x, y, width, color } = input;
+  const drawing = resolveDrawing(of, input.shape);
+  if (!drawing) {
+    return {
+      elements: [{ id, type: 'chip', x, y, text: name || of, color }],
+      height: CHIP_HEIGHT,
+    };
+  }
+  if (drawing.kind === 'figure') {
+    const height = Math.round(width / figureAspect(drawing.figure.outline));
+    const elements: VisualElement[] = [
+      {
+        id,
+        type: 'figure',
+        x,
+        y,
+        w: width,
+        h: height,
+        of: drawing.figure.of,
+        outline: drawing.figure.outline,
+        parts: drawing.figure.parts,
+        manner: drawing.figure.manner,
+        seed: drawing.figure.seed,
+        color,
+      },
+    ];
+    if (name)
+      elements.push({
+        id: `${id}${NAME}`,
+        type: 'label',
+        x,
+        y: y + height / 2 + 10,
+        text: name,
+        size: 'sm',
+        color: 'muted',
+      });
+    return { elements, height };
+  }
+  const elements = place(
+    {
+      id,
+      role: 'centre',
+      kind: 'picture',
+      text: name,
+      picture: drawing.name,
+      color,
+    },
+    x,
+    y,
+    width,
+  );
+  return { elements, height: pictureBox(drawing.name, width).h };
+}
+
+/** How tall a thing stands at a width, before it is drawn. */
+function thingHeight(
+  of: string,
+  width: number,
+  shape?: Partial<VisualFigure> | null,
+): number {
+  const drawing = resolveDrawing(of, shape);
+  if (!drawing) return CHIP_HEIGHT;
+  return drawing.kind === 'figure'
+    ? Math.round(width / figureAspect(drawing.figure.outline))
+    : pictureBox(drawing.name, width).h;
+}
+
 function layoutTitle(m: Moment, id: string): Laid {
   const out: VisualElement[] = [];
   const lines = wrap(m.heading ?? '', LABEL_SIZE.xl, true, 300).slice(0, 2);
@@ -456,35 +556,33 @@ function layoutPicture(m: Moment, id: string): Laid {
   const out: VisualElement[] = [];
   const heading = m.heading?.trim();
   if (heading) out.push(label(`${id}_h`, CX, 36, heading, 'md', 'muted'));
-  const picture = known(m.picture) ?? 'document';
-  const aspect = pictureAspect(picture);
+  const of = m.picture ?? m.name ?? '';
   const bubble = m.bubble?.trim();
   const y = heading ? 150 : 142;
-  // The bubble sits above the picture's top; a tall picture shrinks to leave it room.
+  // The bubble sits above the thing's top; a tall thing shrinks to leave it room.
   const bubbleFloor = heading ? 54 : M + 22;
-  let width = Math.min(130, Math.round(150 * aspect));
+  const drawn = resolveDrawing(of, m.shape);
+  let width =
+    drawn?.kind === 'figure' ? figureWidth(drawn.figure.outline) : 130;
   if (bubble) {
-    const tallest = 2 * (y - 26 - bubbleFloor);
-    width = Math.min(width, Math.round(tallest * aspect));
+    const tall = thingHeight(of, width, m.shape);
+    const room = 2 * (y - 26 - bubbleFloor);
+    if (tall > room) width = Math.round(width * (room / tall));
   }
-  out.push(
-    ...place(
-      {
-        id: `${id}_c`,
-        role: 'centre',
-        kind: 'picture',
-        text: m.name ?? '',
-        picture,
-        color: m.color ?? 'green',
-      },
-      CX,
-      y,
-      width,
-    ),
-  );
+  const thing = drawThing({
+    id: `${id}_c`,
+    of,
+    name: m.name ?? '',
+    x: CX,
+    y,
+    width,
+    color: m.color ?? 'green',
+    shape: m.shape,
+  });
+  out.push(...thing.elements);
   if (bubble) {
     const w = textWidth(bubble, 11.5, true) + 22;
-    const top = y - Math.round(width / aspect) / 2;
+    const top = y - thing.height / 2;
     out.push({
       id: `${id}_s`,
       type: 'bubble',
@@ -689,23 +787,18 @@ function layoutSceneCard(m: Moment, id: string): Laid {
   const colors: VisualColor[] = ['green', 'blue', 'amber', 'violet'];
   pictures.forEach((p, i) => {
     const partId = `${id}_p${i}`;
-    const picture = known(p.picture) ?? 'document';
     const w = widths[i];
-    const h = Math.round(w / pictureAspect(picture));
+    const h = thingHeight(p.picture, w);
     out.push(
-      ...place(
-        {
-          id: partId,
-          role: 'centre',
-          kind: 'picture',
-          text: p.name,
-          picture,
-          color: m.color ?? colors[i % colors.length],
-        },
-        Math.round(x + w / 2),
-        ground - 24 - Math.round(h / 2),
-        w,
-      ),
+      ...drawThing({
+        id: partId,
+        of: p.picture,
+        name: p.name,
+        x: Math.round(x + w / 2),
+        y: ground - 24 - Math.round(h / 2),
+        width: w,
+        color: m.color ?? colors[i % colors.length],
+      }).elements,
     );
     parts.push(partId);
     named.set(partId, p.name);
@@ -1258,12 +1351,18 @@ export function tutorialProblems(
         });
         break;
       }
-      case 'picture':
-        if (!m.picture) problems.push(`${who} names no picture.`);
+      case 'picture': {
+        const of = m.picture ?? m.name ?? '';
+        if (!of) problems.push(`${who} names no thing to draw.`);
+        if (of && !resolveDrawing(of, m.shape))
+          problems.push(
+            `${who}: nothing in the library draws "${of}", and its words do not say what shape it takes. Give the card a shape (outline ${FIGURE_OUTLINES.slice(0, 4).join(', ')} and so on, with its parts), or name a thing that can be drawn, or use another card.`,
+          );
         short('the name', m.name, L.maxNameChars);
         grounded('the name', m.name);
         short('the bubble', m.bubble, L.maxBubbleChars);
         break;
+      }
       case 'term':
         if (!m.term) problems.push(`${who} has no term.`);
         short('the term', m.term, L.maxTermChars);
@@ -1324,6 +1423,10 @@ export function tutorialProblems(
         for (const p of pictures) {
           short(`the name "${p.name}"`, p.name, L.maxNameChars);
           grounded(`the name "${p.name}"`, p.name);
+          if (!resolveDrawing(p.picture))
+            problems.push(
+              `${who}: nothing in the library draws "${p.picture}". Name a thing that can be drawn, or drop it from the scene.`,
+            );
         }
         break;
       }
@@ -1478,9 +1581,9 @@ export function tutorialWarnings(tutorial: VisualTutorial): string[] {
       ...(m.pictures ?? []).map((item) => item.picture),
     ].filter((name): name is string => Boolean(name));
     for (const name of names)
-      if (!resolvePicture(name))
+      if (!resolveDrawing(name))
         out.push(
-          `${who}: no drawing was found for "${name}"; it is drawn as words. Name the thing another way, or a thing near it (a building, a person, a tool).`,
+          `${who}: no drawing was found for "${name}"; it is set as words instead. Name a thing near it that can be drawn, or move it to a picture card and give that card a shape.`,
         );
   });
   return out;

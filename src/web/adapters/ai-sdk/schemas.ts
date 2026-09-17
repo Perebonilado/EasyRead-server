@@ -538,6 +538,48 @@ export const visualTutorialSchema = z.object({
           .nullable(),
         items: z.array(cardItem).max(5).nullable(),
         picture: z.string().max(32).nullable(),
+        /** For a picture card: the shape the thing takes, when no drawing of it exists. */
+        shape: z
+          .object({
+            outline: z.enum([
+              'blob',
+              'body',
+              'branch',
+              'layers',
+              'lattice',
+              'vessel',
+              'terrain',
+              'field',
+            ]),
+            parts: z
+              .array(
+                z.enum([
+                  'membrane',
+                  'hairs',
+                  'whip',
+                  'core',
+                  'pockets',
+                  'grains',
+                  'mouth',
+                  'roots',
+                  'joints',
+                  'level',
+                  'cracks',
+                  'bulge',
+                ]),
+              )
+              .max(5),
+            manner: z.enum([
+              'still',
+              'drift',
+              'swim',
+              'beat',
+              'stream',
+              'grow',
+              'pulse',
+            ]),
+          })
+          .nullable(),
         name: z.string().max(24).nullable(),
         bubble: z.string().max(36).nullable(),
         term: z.string().max(24).nullable(),

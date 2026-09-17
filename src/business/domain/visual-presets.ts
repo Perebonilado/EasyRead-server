@@ -146,6 +146,31 @@ function forms(word: string): string[] {
  * preset of that name first, then an icon of that name, then the icon
  * whose name or tags say it best. Nothing when no word of it is known.
  */
+/**
+ * How many drawings carry a word in their tags. A word on a dozen
+ * drawings is a category, not a thing: "field" is on a farm and a form,
+ * so it names neither. Counted once, from the catalogue itself.
+ */
+const TAG_SPREAD = (() => {
+  const count = new Map<string, number>();
+  const add = (tags: string) => {
+    for (const tag of new Set(tags.toLowerCase().split(/[\s&]+/))) {
+      if (tag.length > 1) count.set(tag, (count.get(tag) ?? 0) + 1);
+    }
+  };
+  for (const info of Object.values(PRESET_INFO)) add(info.tags);
+  for (const tags of Object.values(ICON_TAGS)) add(tags);
+  return count;
+})();
+/** A tag on more drawings than this says nothing about which one is meant. */
+const TAG_TOO_COMMON = 14;
+/**
+ * The least a drawing must score to be used. A weak match is worse than
+ * none: half of "cell tower" is the word "cell", and drawing a phone mast
+ * for a page about cells teaches the wrong thing.
+ */
+const MATCH_FLOOR = 1;
+
 export function resolvePicture(text: string | undefined): string | undefined {
   if (!text) return undefined;
   const words = text
@@ -165,14 +190,33 @@ export function resolvePicture(text: string | undefined): string | undefined {
   const wanted = new Set(words.flatMap(forms));
   let best: { name: string; score: number } | null = null;
   const consider = (name: string, tags: string, weight: number) => {
-    let score = 0;
-    for (const part of name.split('-')) if (wanted.has(part)) score += 3;
-    for (const tag of tags.toLowerCase().split(/[\s&]+/)) {
+    // A drawing's name ends in the thing it is: a chalkboard teacher is a
+    // teacher, a cell tower is a tower. Only the last word carries it.
+    const parts = name.split('-');
+    const head = wanted.has(parts[parts.length - 1]);
+    const rest = parts.slice(0, -1).filter((part) => wanted.has(part)).length;
+    let score = (head ? 3 : 0) + rest * 0.8;
+    let told = 0;
+    for (const tag of new Set(tags.toLowerCase().split(/[\s&]+/))) {
       if (GROUP_WORDS.has(tag)) continue;
-      if (wanted.has(tag)) score += 1;
+      if ((TAG_SPREAD.get(tag) ?? 0) > TAG_TOO_COMMON) continue;
+      if (wanted.has(tag)) told += 1;
     }
+    score += Math.min(told, 3);
     if (!score) return;
-    score *= weight;
+    // How much of what was asked for this drawing answers: half of
+    // "magnetic field" is "field", which is a farm and a form and neither.
+    const answered = words.filter(
+      (word) =>
+        forms(word).some((form) => parts.includes(form)) ||
+        forms(word).some((form) =>
+          tags
+            .toLowerCase()
+            .split(/[\s&]+/)
+            .includes(form),
+        ),
+    ).length;
+    score *= (answered / words.length) * weight;
     if (
       !best ||
       score > best.score ||
@@ -183,5 +227,6 @@ export function resolvePicture(text: string | undefined): string | undefined {
   for (const [name, info] of Object.entries(PRESET_INFO))
     consider(name, info.tags, 1.2);
   for (const [name, tags] of Object.entries(ICON_TAGS)) consider(name, tags, 1);
-  return best ? (best as { name: string }).name : undefined;
+  const found = best as { name: string; score: number } | null;
+  return found && found.score >= MATCH_FLOOR ? found.name : undefined;
 }

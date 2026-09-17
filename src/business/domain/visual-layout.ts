@@ -164,8 +164,13 @@ export function place(
         },
       ];
     case 'picture': {
-      const name =
-        item.picture && knownPicture(item.picture) ? item.picture : 'document';
+      // A drawing the app does not have is set as words: a wrong picture
+      // teaches the wrong thing.
+      if (!item.picture || !knownPicture(item.picture))
+        return [
+          { id: item.id, type: 'chip', x: cx, y: cy, text: item.text, color },
+        ];
+      const name = item.picture;
       const box = pictureBox(name, size);
       const elements: VisualElement[] = [
         {

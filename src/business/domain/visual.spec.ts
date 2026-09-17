@@ -156,10 +156,10 @@ describe('a visual script', () => {
       ],
     };
     const problems = visualProblems(broken, materialPool(MATERIAL));
-    // The mendings that need no model: the cue past the end lands on the
-    // last word, and the cues come back in order.
+    // The mendings that need no model: a pulse or flow on something not
+    // yet on screen is dropped rather than sent back.
     const mended = repairVisual(broken).segments[0].cues;
-    expect(mended.map((c) => c.at)).toEqual([1, 1]);
+    expect(mended).toEqual([]);
     expect(problems).toEqual(
       expect.arrayContaining([
         expect.stringContaining('"ghost" is never drawn'),

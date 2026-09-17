@@ -21,8 +21,10 @@ import {
 } from '../../business/domain/visual';
 import {
   layoutScene,
+  structureProblems,
   type VisualStructure,
 } from '../../business/domain/visual-layout';
+import { PRESET_INFO } from '../../business/domain/visual-presets';
 import type { AlignerPort } from '../../business/ports/aligner.port';
 import type { LlmGatewayPort } from '../../business/ports/llm.port';
 import type { StoragePort } from '../../business/ports/storage.port';
@@ -166,7 +168,10 @@ export class VisualSceneProcessor {
       // placing alone cannot settle.
       let structure: VisualStructure = written.value;
       let script: VisualScript = repairVisual(layoutScene(structure));
-      let problems = this.problemsOf(script, pool, plan.centre);
+      let problems = [
+        ...structureProblems(structure),
+        ...this.problemsOf(script, pool, plan.centre),
+      ];
       for (
         let round = 0;
         problems.length && round < REPAIR_ROUNDS;
@@ -183,7 +188,10 @@ export class VisualSceneProcessor {
         await this.record(documentId, 'visual_repair', mended.usage);
         structure = mended.value;
         script = repairVisual(layoutScene(structure));
-        problems = this.problemsOf(script, pool, plan.centre);
+        problems = [
+          ...structureProblems(structure),
+          ...this.problemsOf(script, pool, plan.centre),
+        ];
       }
       if (problems.length) {
         this.logger.warn(
@@ -308,7 +316,10 @@ export class VisualSceneProcessor {
       (e) => e.type === 'shape' && e.kind !== 'roundRect' && e.kind !== 'rect',
     );
     const wanted =
-      centre?.how === 'picture' && centre.picture && !drawn
+      centre?.how === 'picture' &&
+      centre.picture &&
+      PRESET_INFO[centre.picture] &&
+      !drawn
         ? [
             `The plan puts "${centre.what}" at the centre as the picture "${centre.picture}" from the library, but the centre item is not a picture. Make the centre item kind "picture" with picture "${centre.picture}".`,
           ]

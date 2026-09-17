@@ -111,7 +111,7 @@ describe('laying out a structure', () => {
     const clinic = scene.elements.find((e) => e.id === 'clinic');
     expect(clinic?.type).toBe('shape');
     expect((clinic as { kind: string }).kind).toBe('clinic');
-    expect(scene.elements.some((e) => e.id === 'clinicLabel')).toBe(true);
+    expect(scene.elements.some((e) => e.id === 'clinic_name')).toBe(true);
   });
 
   it('lays six steps out as two rows, a cycle as a ring, two sides as columns, and bands as layers', () => {

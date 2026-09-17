@@ -468,7 +468,8 @@ export const visualPlanSchema = z.object({
 const visualColor = z
   .enum(['green', 'amber', 'blue', 'violet', 'orange', 'red', 'ink', 'muted'])
   .nullable();
-const visualId = z.string().min(1).max(32);
+/** Short enough that the name label the layout adds under a picture still fits the id rule. */
+const visualId = z.string().min(1).max(24);
 
 /** The scene as structure: what is in the picture and how it is related, the sentences, and the cues. The app places it. */
 export const visualStructureSchema = z.object({
@@ -499,7 +500,7 @@ export const visualStructureSchema = z.object({
       }),
     )
     .min(1)
-    .max(16),
+    .max(10),
   arrows: z
     .array(
       z.object({
@@ -510,7 +511,7 @@ export const visualStructureSchema = z.object({
         double: z.boolean().nullable(),
       }),
     )
-    .max(14),
+    .max(8),
   segments: z
     .array(
       z.object({

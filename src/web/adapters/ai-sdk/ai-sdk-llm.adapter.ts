@@ -696,7 +696,7 @@ export class AiSdkLlmAdapter implements LlmGatewayPort, OnModuleInit {
     const result = await generateObject({
       model,
       schema: visualPlanSchema,
-      system: PROMPTS.visualPlan,
+      system: `${PROMPTS.visualPlan}\n\nThe library of drawn pictures, name and the words a chapter uses for it:\n${presetCatalogue()}`,
       prompt: [
         `Document: ${input.title}`,
         `Chapter: ${input.topicTitle}`,
@@ -1724,7 +1724,8 @@ function withoutNulls(value: unknown): unknown {
   if (value && typeof value === 'object') {
     const out: Record<string, unknown> = {};
     for (const [key, inner] of Object.entries(value)) {
-      if (inner === null) continue;
+      // A model now and then writes the word null instead of the value.
+      if (inner === null || inner === 'null' || inner === '') continue;
       out[key] = withoutNulls(inner);
     }
     return out;

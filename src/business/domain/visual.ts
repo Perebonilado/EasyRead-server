@@ -358,14 +358,14 @@ export function visualProblems(
   const shapeIds = new Set(
     script.elements.filter((e) => e.type === 'shape').map((e) => e.id),
   );
-  /** Name labels the layout put under a picture, id `${picture}Label`. */
+  /** Name labels the layout put under a picture, id `${picture}_name`. */
   const companions = new Set(
     script.elements
       .filter(
         (e) =>
           e.type === 'label' &&
-          e.id.endsWith('Label') &&
-          shapeIds.has(e.id.slice(0, -'Label'.length)),
+          e.id.endsWith('_name') &&
+          shapeIds.has(e.id.slice(0, -'_name'.length)),
       )
       .map((e) => e.id),
   );
@@ -770,20 +770,72 @@ export function attachPoint(
 ): VisualPoint | null {
   if (typeof end !== 'string') return end;
   const element = byId.get(end);
-  const box = element ? boxOf(element) : null;
-  if (!box) return null;
+  const own = element ? boxOf(element) : null;
+  if (!own) return null;
+  // A picture and the name under it are one thing to a line.
+  const name = byId.get(`${end}_name`);
+  const box = name ? union(own, boxOf(name)) : own;
+  // A drawn picture is met on its body, not the corner of its box.
+  const deep =
+    element?.type === 'shape' &&
+    element.kind !== 'rect' &&
+    element.kind !== 'roundRect';
+  return leave(box, other, 6, deep);
+}
+
+/** The smallest box holding both. */
+function union(a: Box, b: Box | null): Box {
+  if (!b) return a;
+  const x = Math.min(a.x, b.x);
+  const y = Math.min(a.y, b.y);
+  return {
+    x,
+    y,
+    w: Math.max(a.x + a.w, b.x + b.w) - x,
+    h: Math.max(a.y + a.h, b.y + b.h) - y,
+  };
+}
+
+/**
+ * Where a line to `other` leaves a box: from the side that faces it when
+ * the other end is wholly beside, above or below the box, at the height
+ * (or width) nearest the other end, so a stack of boxes on one edge all
+ * send their lines outward and never through each other; else where the
+ * ray from the centre leaves. The player draws with the same rule.
+ */
+export function leave(
+  box: Box,
+  other: VisualPoint,
+  gap: number,
+  deep = false,
+): VisualPoint {
   const cx = box.x + box.w / 2;
   const cy = box.y + box.h / 2;
-  const dx = other[0] - cx;
-  const dy = other[1] - cy;
-  if (!dx && !dy) return [cx, cy];
-  const hx = box.w / 2 + 6;
-  const hy = box.h / 2 + 6;
+  const inset = (v: number, lo: number, hi: number) =>
+    Math.max(Math.min(lo, hi), Math.min(Math.max(lo, hi), v));
+  // How far in from a corner a line may meet the side: a drawn thing is
+  // thin at its corners, so lines meet it nearer the middle.
+  const dx = deep ? box.w * 0.3 : 8;
+  const dy = deep ? box.h * 0.3 : 8;
+  const [ox, oy] = other;
+  if (ox >= box.x + box.w)
+    return [box.x + box.w + gap, inset(oy, box.y + dy, box.y + box.h - dy)];
+  if (ox <= box.x)
+    return [box.x - gap, inset(oy, box.y + dy, box.y + box.h - dy)];
+  if (oy >= box.y + box.h)
+    return [inset(ox, box.x + dx, box.x + box.w - dx), box.y + box.h + gap];
+  if (oy <= box.y)
+    return [inset(ox, box.x + dx, box.x + box.w - dx), box.y - gap];
+  const rx = ox - cx;
+  const ry = oy - cy;
+  if (!rx && !ry) return [cx, cy];
+  const hx = box.w / 2 + gap;
+  const hy = box.h / 2 + gap;
   const t = Math.min(
-    dx ? hx / Math.abs(dx) : Infinity,
-    dy ? hy / Math.abs(dy) : Infinity,
+    rx ? hx / Math.abs(rx) : Infinity,
+    ry ? hy / Math.abs(ry) : Infinity,
   );
-  return [cx + dx * t, cy + dy * t];
+  return [cx + rx * t, cy + ry * t];
 }
 
 /** Eleven points along a line or arrow, bend and all, for the crossing check. */
@@ -937,6 +989,30 @@ export function layoutProblems(script: VisualScript): string[] {
  * the margin, cues sorted, and overlapping boxes nudged apart along the
  * axis of least overlap. Returns a new script; the model's is untouched.
  */
+/**
+ * A pulse, dim, flow or highlight on something not yet on screen does
+ * nothing but fail the checks; it is dropped, and the model is not asked.
+ */
+function withoutEarlyCues(script: VisualScript): VisualScript {
+  const shown = new Set<string>();
+  return {
+    ...script,
+    segments: script.segments.map((segment) => ({
+      ...segment,
+      cues: segment.cues.filter((cue) => {
+        if (cue.do === 'clear') {
+          shown.clear();
+          return true;
+        }
+        if (NEEDS_SHOWN.has(cue.do) && !shown.has(cue.target)) return false;
+        if (SHOWS.has(cue.do)) shown.add(cue.target);
+        if (cue.do === 'hide') shown.delete(cue.target);
+        return true;
+      }),
+    })),
+  };
+}
+
 export function repairVisual(script: VisualScript): VisualScript {
   // Text is one line: a newline the model put in to make a chip "short"
   // would draw as nothing and measure as everything.
@@ -959,7 +1035,7 @@ export function repairVisual(script: VisualScript): VisualScript {
     ),
   );
   // Nudge pairs that overlap in any sentence, a few rounds, later one moves.
-  const draft: VisualScript = { ...script, elements };
+  const draft: VisualScript = { ...withoutEarlyCues(script), elements };
   for (let pass = 0; pass < 8; pass += 1) {
     const map = new Map(draft.elements.map((e) => [e.id, e] as const));
     let moved = false;
@@ -1087,10 +1163,13 @@ function unblocked(script: VisualScript): VisualElement[] {
         };
         if (!word || owns.has(id) || word.x === undefined) continue;
         if (word.type !== 'label' && word.type !== 'chip') continue;
+        // A picture's name stays under its picture.
+        if (word.id.endsWith('_name')) continue;
         const box = boxOf(word);
         if (!box || !through(arrowSamples(arrow, byId), box)) continue;
         const others = [...ids]
-          .filter((other) => other !== id && collides(byId.get(other)!))
+          .filter((other) => other !== id && byId.has(other))
+          .filter((other) => collides(byId.get(other)!))
           .map((other) => boxOf(byId.get(other)!))
           .filter((b): b is Box => Boolean(b));
         const original = { x: word.x, y: word.y ?? 0 };

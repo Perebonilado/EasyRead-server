@@ -18,7 +18,8 @@ import type {
   SketchDraft,
   SketchTemplate,
 } from '../../business/ports/llm.port';
-import type { VisualPlan, VisualScript } from '../../business/domain/visual';
+import type { VisualPlan } from '../../business/domain/visual';
+import type { VisualStructure } from '../../business/domain/visual-layout';
 
 const EMBED_DIMENSIONS = 256;
 
@@ -529,7 +530,7 @@ export class FakeLlmAdapter implements LlmGatewayPort {
         keyTerms: terms,
         diagramConcept:
           'A centre with what feeds it on the left and what comes out on the right',
-        centre: { what: input.topicTitle, how: 'shape' },
+        centre: { what: input.topicTitle, how: 'shape', picture: null },
         beats:
           sentences.length >= 3
             ? sentences
@@ -551,12 +552,10 @@ export class FakeLlmAdapter implements LlmGatewayPort {
     plan: VisualPlan;
     topicTitle: string;
     material: string;
-    previous?: VisualScript;
+    previous?: VisualStructure;
     problems?: string[];
-  }): Promise<LlmResult<VisualScript>> {
+  }): Promise<LlmResult<VisualStructure>> {
     const started = Date.now();
-    // Mending returns the previous script untouched: the deterministic
-    // fixes are what a test exercises, not the model's judgement.
     if (input.previous) {
       return Promise.resolve({
         value: input.previous,
@@ -564,45 +563,37 @@ export class FakeLlmAdapter implements LlmGatewayPort {
       });
     }
     const terms = input.plan.keyTerms.slice(0, 3);
-    const chip = (i: number) => terms[i] ?? `part ${i + 1}`;
-    const script: VisualScript = {
+    const chip = (i: number) => (terms[i] ?? `part ${i + 1}`).slice(0, 22);
+    const structure: VisualStructure = {
       title: input.topicTitle.slice(0, 60),
-      elements: [
+      template: 'hub',
+      items: [
         {
           id: 'centre',
-          type: 'shape',
-          x: 180,
-          y: 140,
-          w: 110,
-          h: 60,
-          kind: 'roundRect',
-          text: chip(0).slice(0, 16),
+          role: 'centre',
+          kind: 'picture',
+          text: chip(0),
+          picture: 'document',
           color: 'blue',
         },
         {
           id: 'left',
-          type: 'chip',
-          x: 60,
-          y: 140,
-          text: chip(1).slice(0, 16),
+          role: 'input',
+          kind: 'chip',
+          text: chip(1),
           color: 'green',
         },
         {
           id: 'right',
-          type: 'chip',
-          x: 300,
-          y: 140,
-          text: chip(2).slice(0, 16),
+          role: 'output',
+          kind: 'chip',
+          text: chip(2),
           color: 'amber',
         },
-        { id: 'in', type: 'arrow', from: 'left', to: 'centre', color: 'green' },
-        {
-          id: 'out',
-          type: 'arrow',
-          from: 'centre',
-          to: 'right',
-          color: 'amber',
-        },
+      ],
+      arrows: [
+        { id: 'in', from: 'left', to: 'centre', color: 'green' },
+        { id: 'out', from: 'centre', to: 'right', color: 'amber' },
       ],
       segments: [
         {
@@ -635,7 +626,7 @@ export class FakeLlmAdapter implements LlmGatewayPort {
       ],
     };
     return Promise.resolve({
-      value: script,
+      value: structure,
       usage: this.usage(started, 800, 600),
     });
   }

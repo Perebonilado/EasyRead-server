@@ -19,7 +19,9 @@ import type {
   SketchDraft,
   SketchTemplate,
 } from '../../../business/ports/llm.port';
-import type { VisualPlan, VisualScript } from '../../../business/domain/visual';
+import type { VisualPlan } from '../../../business/domain/visual';
+import type { VisualStructure } from '../../../business/domain/visual-layout';
+import { presetCatalogue } from '../../../business/domain/visual-presets';
 import { PROMPTS } from '../prompts';
 import { ModelRegistry, type ModelRef } from './models';
 import {
@@ -33,7 +35,7 @@ import {
   lectureDiagramSchema,
   lectureSketchSchema,
   visualPlanSchema,
-  visualScriptSchema,
+  visualStructureSchema,
   sketchJudgeSchema,
   lectureExtraSchema,
   spokenQuizSchema,
@@ -712,9 +714,9 @@ export class AiSdkLlmAdapter implements LlmGatewayPort, OnModuleInit {
     plan: VisualPlan;
     topicTitle: string;
     material: string;
-    previous?: VisualScript;
+    previous?: VisualStructure;
     problems?: string[];
-  }): Promise<LlmResult<VisualScript>> {
+  }): Promise<LlmResult<VisualStructure>> {
     const started = Date.now();
     const { generateObject } = await this.registry.modules();
     const mending = Boolean(input.previous && input.problems?.length);
@@ -723,18 +725,16 @@ export class AiSdkLlmAdapter implements LlmGatewayPort, OnModuleInit {
     );
     const result = await generateObject({
       model,
-      schema: visualScriptSchema,
-      system: PROMPTS.visualScript,
+      schema: visualStructureSchema,
+      system: `${PROMPTS.visualScript}\n\nThe library of drawn things, name and the words a chapter uses for it:\n${presetCatalogue()}`,
       // A whole scene is a long object; the default ceiling cut one short.
       maxOutputTokens: 8_000,
       prompt: [
         `Chapter: ${input.topicTitle}`,
         `The plan. Goal: ${input.plan.learningGoal}. Key terms: ${input.plan.keyTerms.join(', ')}. The diagram: ${input.plan.diagramConcept}. The centre of the picture: ${input.plan.centre.what}, ${
-          input.plan.centre.how === 'path'
-            ? 'drawn as a path of its own, a recognisable outline, no text inside it'
-            : input.plan.centre.how === 'preset'
-              ? 'as the preset that is that thing'
-              : 'as a plain shape, since the chapter is about an idea'
+          input.plan.centre.how === 'picture' && input.plan.centre.picture
+            ? `the picture "${input.plan.centre.picture}" from the library`
+            : 'a plain shape with its name, since the chapter is about an idea'
         }. Beats, in order:\n- ${input.plan.beats.join('\n- ')}`,
         mending
           ? `\nMend this script. Problems:\n- ${input.problems!.join('\n- ')}\n\nThe script:\n${JSON.stringify(input.previous)}`
@@ -746,7 +746,7 @@ export class AiSdkLlmAdapter implements LlmGatewayPort, OnModuleInit {
       maxRetries: this.maxRetries(),
     });
     return {
-      value: withPairs(withoutNulls(result.object)) as VisualScript,
+      value: withoutNulls(result.object) as VisualStructure,
       usage: this.usage(ref, result.usage, started),
     };
   }
@@ -1713,29 +1713,6 @@ export class AiSdkLlmAdapter implements LlmGatewayPort, OnModuleInit {
       .filter(Boolean)
       .map((paragraph) => ({ type: 'paragraph' as const, text: paragraph }));
   }
-}
-
-/**
- * The scene's points come back as {x, y} objects, since strict schema mode
- * takes no tuples; the domain wants [x, y] pairs. Ends and dots alike.
- */
-function withPairs(script: unknown): unknown {
-  const pair = (value: unknown): unknown =>
-    value && typeof value === 'object' && 'x' in value && 'y' in value
-      ? [(value as { x: number }).x, (value as { y: number }).y]
-      : value;
-  const scene = script as { elements?: Record<string, unknown>[] };
-  return {
-    ...scene,
-    elements: (scene.elements ?? []).map((element) => ({
-      ...element,
-      ...('from' in element ? { from: pair(element.from) } : {}),
-      ...('to' in element ? { to: pair(element.to) } : {}),
-      ...(Array.isArray(element.points)
-        ? { points: element.points.map(pair) }
-        : {}),
-    })),
-  };
 }
 
 /**

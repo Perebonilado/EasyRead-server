@@ -19,6 +19,10 @@ import {
   type VisualPlan,
   type VisualScript,
 } from '../../business/domain/visual';
+import {
+  layoutScene,
+  type VisualStructure,
+} from '../../business/domain/visual-layout';
 import type { AlignerPort } from '../../business/ports/aligner.port';
 import type { LlmGatewayPort } from '../../business/ports/llm.port';
 import type { StoragePort } from '../../business/ports/storage.port';
@@ -158,7 +162,10 @@ export class VisualSceneProcessor {
         material,
       });
       await this.record(documentId, 'visual_script', written.usage);
-      let script: VisualScript = repairVisual(written.value);
+      // The model gave the structure; the app places it, then mends what
+      // placing alone cannot settle.
+      let structure: VisualStructure = written.value;
+      let script: VisualScript = repairVisual(layoutScene(structure));
       let problems = this.problemsOf(script, pool, plan.centre);
       for (
         let round = 0;
@@ -169,12 +176,13 @@ export class VisualSceneProcessor {
           plan,
           topicTitle: topic.title,
           material,
-          previous: script,
+          previous: structure,
           // The warnings ride along as advice; only the problems must go.
           problems: [...problems, ...visualWarnings(script)],
         });
         await this.record(documentId, 'visual_repair', mended.usage);
-        script = repairVisual(mended.value);
+        structure = mended.value;
+        script = repairVisual(layoutScene(structure));
         problems = this.problemsOf(script, pool, plan.centre);
       }
       if (problems.length) {
@@ -294,15 +302,15 @@ export class VisualSceneProcessor {
   ): string[] {
     const warnings = visualWarnings(script);
     if (warnings.length) this.logger.log(warnings.join(' '));
-    // The plan asked for the thing itself: a script that boxed it instead
-    // is sent back to draw it.
+    // The plan asked for a picture at the centre: a scene that boxed it
+    // instead is sent back to use the library.
     const drawn = script.elements.some(
-      (e) => e.type === 'shape' && e.kind === 'path' && e.d,
+      (e) => e.type === 'shape' && e.kind !== 'roundRect' && e.kind !== 'rect',
     );
     const wanted =
-      centre?.how === 'path' && !drawn
+      centre?.how === 'picture' && centre.picture && !drawn
         ? [
-            `The plan puts "${centre.what}" at the centre, drawn as a path of its own, but no shape of kind path is in the script. Draw it: a recognisable outline on the unit square in d, no text inside it, its name in a small label beside it.`,
+            `The plan puts "${centre.what}" at the centre as the picture "${centre.picture}" from the library, but the centre item is not a picture. Make the centre item kind "picture" with picture "${centre.picture}".`,
           ]
         : [];
     return [

@@ -178,7 +178,8 @@ export type VisualElement =
       y: number;
       w: number;
       h: number;
-      kind: ShapeKind | PresetShape | 'path';
+      /** A plain kind, a preset's name from the library, or `path`. */
+      kind: ShapeKind | (PresetShape & Record<never, never>) | 'path';
       /**
        * The shape's own outline when the kind is `path`: on a unit square,
        * move, line, curve and close commands only, scaled into the box.
@@ -279,8 +280,8 @@ export interface VisualPlan {
   learningGoal: string;
   keyTerms: string[];
   diagramConcept: string;
-  /** The one thing at the centre of the picture, named, and how it is drawn: its own outline, a preset, or a plain shape when the chapter is about an idea. */
-  centre: { what: string; how: 'path' | 'preset' | 'shape' };
+  /** The one thing at the centre of the picture: a preset from the library by name, or a plain shape when the chapter is about an idea. */
+  centre: { what: string; how: 'picture' | 'shape'; picture: string | null };
   beats: string[];
   fit: VisualFit;
   /** Why the fit is what it is, one sentence; shown to the student when poor. */
@@ -354,6 +355,20 @@ export function visualProblems(
   script: VisualScript,
   pool: Set<string> | null = null,
 ): string[] {
+  const shapeIds = new Set(
+    script.elements.filter((e) => e.type === 'shape').map((e) => e.id),
+  );
+  /** Name labels the layout put under a picture, id `${picture}Label`. */
+  const companions = new Set(
+    script.elements
+      .filter(
+        (e) =>
+          e.type === 'label' &&
+          e.id.endsWith('Label') &&
+          shapeIds.has(e.id.slice(0, -'Label'.length)),
+      )
+      .map((e) => e.id),
+  );
   const problems: string[] = [];
   const ids = new Set<string>();
   const byId = new Map<string, VisualElement>();
@@ -529,10 +544,12 @@ export function visualProblems(
         `Sentence ${n} carries the symbol "${symbol[0]}" ("${segment.text.slice(0, 60)}"); it is spoken, so plain words only.`,
       );
     }
-    // Dims and undims are housekeeping, some of them added by the mender;
-    // the cap is on what a sentence makes happen.
+    // Dims and undims are housekeeping, some of them added by the mender,
+    // and a picture's name label rides along with its picture; the cap is
+    // on what a sentence makes happen.
     const busy = segment.cues.filter(
-      (cue) => cue.do !== 'dim' && cue.do !== 'undim',
+      (cue) =>
+        cue.do !== 'dim' && cue.do !== 'undim' && !companions.has(cue.target),
     ).length;
     if (busy > VISUAL_LIMITS.maxCuesPerSegment) {
       problems.push(

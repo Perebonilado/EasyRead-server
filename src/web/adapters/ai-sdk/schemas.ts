@@ -456,7 +456,9 @@ export const visualPlanSchema = z.object({
   diagramConcept: z.string().min(1).max(240),
   centre: z.object({
     what: z.string().min(1).max(80),
-    how: z.enum(['path', 'preset', 'shape']),
+    how: z.enum(['picture', 'shape']),
+    /** The preset's name from the catalogue when how is picture; else null. */
+    picture: z.string().max(32).nullable(),
   }),
   beats: z.array(z.string().min(1).max(160)).min(3).max(10),
   fit: z.enum(['good', 'partial', 'poor']),
@@ -467,118 +469,48 @@ const visualColor = z
   .enum(['green', 'amber', 'blue', 'violet', 'orange', 'red', 'ink', 'muted'])
   .nullable();
 const visualId = z.string().min(1).max(32);
-/** A point as an object: strict schema mode takes no tuples; the adapter turns it into the domain's pair. */
-const visualPoint = z.object({ x: z.number(), y: z.number() });
-/** A point, or the id of the element to attach to. */
-const visualEnd = z.union([visualPoint, visualId]);
 
-/** The scene: what is on the canvas, the spoken sentences, and the cues. Optional fields are null, never absent. */
-export const visualScriptSchema = z.object({
+/** The scene as structure: what is in the picture and how it is related, the sentences, and the cues. The app places it. */
+export const visualStructureSchema = z.object({
   title: z.string().min(1).max(60),
-  elements: z
+  template: z.enum(['hub', 'flow', 'cycle', 'compare', 'layers']),
+  items: z
     .array(
-      z.discriminatedUnion('type', [
-        z.object({
-          type: z.literal('label'),
-          id: visualId,
-          x: z.number(),
-          y: z.number(),
-          text: z.string().min(1).max(40),
-          size: z.enum(['sm', 'md', 'lg', 'xl']).nullable(),
-          color: visualColor,
-          anchor: z.enum(['start', 'middle', 'end']).nullable(),
-        }),
-        z.object({
-          type: z.literal('chip'),
-          id: visualId,
-          x: z.number(),
-          y: z.number(),
-          text: z.string().min(1).max(22),
-          color: visualColor,
-        }),
-        z.object({
-          type: z.literal('shape'),
-          id: visualId,
-          x: z.number(),
-          y: z.number(),
-          w: z.number(),
-          h: z.number(),
-          kind: z.enum([
-            'rect',
-            'roundRect',
-            'circle',
-            'ellipse',
-            'triangle',
-            'diamond',
-            'leaf',
-            'cloud',
-            'drop',
-            'document',
-            'database',
-            'capsule',
-            'sun',
-            'shield',
-            'path',
-          ]),
-          d: z.string().max(700).nullable(),
-          text: z.string().max(16).nullable(),
-          color: visualColor,
-          fill: z.enum(['solid', 'outline', 'tint']).nullable(),
-        }),
-        z.object({
-          type: z.literal('line'),
-          id: visualId,
-          from: visualEnd,
-          to: visualEnd,
-          color: visualColor,
-          dashed: z.boolean().nullable(),
-        }),
-        z.object({
-          type: z.literal('arrow'),
-          id: visualId,
-          from: visualEnd,
-          to: visualEnd,
-          bend: z.number().nullable(),
-          color: visualColor,
-          double: z.boolean().nullable(),
-        }),
-        z.object({
-          type: z.literal('icon'),
-          id: visualId,
-          name: z.enum([
-            'person',
-            'people',
-            'clock',
-            'book',
-            'money',
-            'heart',
-            'building',
-            'globe',
-            'gear',
-            'bulb',
-            'warning',
-            'check',
-            'question',
-            'scale',
-            'arrows',
-            'star',
-          ]),
-          x: z.number(),
-          y: z.number(),
-          size: z.number(),
-          color: visualColor,
-        }),
-        z.object({
-          type: z.literal('dots'),
-          id: visualId,
-          points: z.array(visualPoint).min(1).max(40),
-          r: z.number().nullable(),
-          color: visualColor,
-        }),
-      ]),
+      z.object({
+        id: visualId,
+        role: z.enum([
+          'centre',
+          'input',
+          'output',
+          'step',
+          'left',
+          'right',
+          'layer',
+          'note',
+          'title',
+        ]),
+        kind: z.enum(['chip', 'picture', 'label', 'dots']),
+        text: z.string().max(40),
+        /** For a picture: a preset's name from the catalogue; else null. */
+        picture: z.string().max(32).nullable(),
+        color: visualColor,
+        /** For dots: how many; else null. */
+        count: z.number().int().min(1).max(12).nullable(),
+      }),
     )
     .min(1)
-    .max(24),
+    .max(16),
+  arrows: z
+    .array(
+      z.object({
+        id: visualId,
+        from: visualId,
+        to: visualId,
+        color: visualColor,
+        double: z.boolean().nullable(),
+      }),
+    )
+    .max(14),
   segments: z
     .array(
       z.object({
@@ -598,7 +530,7 @@ export const visualScriptSchema = z.object({
                 'highlight',
                 'clear',
               ]),
-              target: z.string().min(1).max(32),
+              target: z.string().min(1).max(40),
             }),
           )
           .max(8),

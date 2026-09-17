@@ -84,11 +84,69 @@ export const SHAPE_KINDS = [
   'diamond',
 ] as const;
 export type ShapeKind = (typeof SHAPE_KINDS)[number];
-/** Every kind a shape may be: the plain kinds and the presets drawn by hand. */
+/** Every kind a shape may be: the plain kinds, the presets drawn by hand, and a path of its own. */
 export const ALL_SHAPE_KINDS: readonly string[] = [
   ...SHAPE_KINDS,
   ...PRESET_SHAPES,
+  'path',
 ];
+
+/** The most commands a drawn outline may carry. */
+const PATH_MAX_COMMANDS = 40;
+const PATH_MAX_CHARS = 700;
+
+/**
+ * What is wrong with a drawn outline, or null when it is sound: only
+ * move, line, cubic and quadratic curves and close; every coordinate on
+ * the unit square, with a little room past its edges for a curve's
+ * control point; not too long to read or to trace.
+ */
+export function pathProblem(d: string): string | null {
+  if (d.length > PATH_MAX_CHARS)
+    return `the outline is ${d.length} characters; keep it under ${PATH_MAX_CHARS}`;
+  const tokens = d.trim().match(/[A-Za-z]|-?\d*\.?\d+(?:e-?\d+)?/g) ?? [];
+  if (!tokens.length) return 'the outline is empty';
+  const arity: Record<string, number> = { M: 2, L: 2, C: 6, Q: 4, Z: 0 };
+  let command: string | null = null;
+  let commands = 0;
+  let numbers: number[] = [];
+  const check = () => {
+    if (!command) return 'the outline must start with M';
+    const need = arity[command];
+    if (numbers.length === 0 && need > 0)
+      return `the ${command} command has no numbers`;
+    if (need > 0 && numbers.length % need !== 0) {
+      return `the ${command} command needs numbers in groups of ${need}`;
+    }
+    for (const n of numbers) {
+      if (!Number.isFinite(n) || n < -0.15 || n > 1.15) {
+        return `the coordinate ${n} is off the unit square`;
+      }
+    }
+    return null;
+  };
+  for (const token of tokens) {
+    if (/^[A-Za-z]$/.test(token)) {
+      const upper = token.toUpperCase();
+      if (!(upper in arity))
+        return `the command ${token} is not allowed; use M, L, C, Q and Z only`;
+      if (token !== upper)
+        return `the command ${token} is relative; use absolute ${upper}`;
+      if (command) {
+        const bad = check();
+        if (bad) return bad;
+      }
+      command = upper;
+      numbers = [];
+      commands += 1;
+      if (commands > PATH_MAX_COMMANDS)
+        return `the outline has more than ${PATH_MAX_COMMANDS} commands`;
+    } else {
+      numbers.push(Number(token));
+    }
+  }
+  return check();
+}
 
 export type VisualPoint = [number, number];
 /** An end of a line or arrow: a point, or the id of an element to attach to. */
@@ -120,7 +178,13 @@ export type VisualElement =
       y: number;
       w: number;
       h: number;
-      kind: ShapeKind | PresetShape;
+      kind: ShapeKind | PresetShape | 'path';
+      /**
+       * The shape's own outline when the kind is `path`: on a unit square,
+       * move, line, curve and close commands only, scaled into the box.
+       * The one door through which the model draws the thing itself.
+       */
+      d?: string;
       /** A short word inside the shape, when it needs one. */
       text?: string;
       color?: VisualColor;
@@ -340,6 +404,16 @@ export function visualProblems(
         }
         break;
       case 'shape':
+        if (element.kind === 'path') {
+          const bad = element.d
+            ? pathProblem(element.d)
+            : 'no outline was given';
+          if (bad) {
+            problems.push(
+              `Shape "${element.id}" draws its own outline but ${bad}.`,
+            );
+          }
+        }
         if (!ALL_SHAPE_KINDS.includes(element.kind)) {
           problems.push(
             `Shape "${element.id}" has kind "${element.kind}", which is not in the catalogue.`,

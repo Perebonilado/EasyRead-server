@@ -8,6 +8,7 @@ import {
   timeVisual,
   visibleAfterEach,
   visualProblems,
+  type VisualElement,
   type VisualScript,
 } from './visual';
 
@@ -340,6 +341,34 @@ describe('a visual script', () => {
     expect(layoutProblems(row).some((p) => p.includes('overlap'))).toBe(true);
     const mended = repairVisual(row);
     expect(layoutProblems(mended)).toEqual([]);
+  });
+
+  it('lets a shape draw its own outline on the unit square, and refuses one that is not', () => {
+    const leaf =
+      'M0 0.7 C0.11 0.13 0.73 0 1 0.33 C0.88 0.85 0.29 1 0 0.7 Z M0.04 0.67 C0.32 0.54 0.67 0.4 0.96 0.34';
+    const drawn: VisualScript = {
+      ...sound,
+      elements: sound.elements.map((e): VisualElement =>
+        e.id === 'bucket' && e.type === 'shape'
+          ? { ...e, kind: 'path', d: leaf, text: undefined }
+          : e,
+      ),
+    };
+    expect(visualProblems(drawn, materialPool(MATERIAL))).toEqual([]);
+    const bad = (d: string) =>
+      visualProblems(
+        {
+          ...drawn,
+          elements: drawn.elements.map((e) =>
+            e.id === 'bucket' ? { ...e, d } : e,
+          ),
+        },
+        materialPool(MATERIAL),
+      ).find((p) => p.includes('"bucket" draws its own outline'));
+    expect(bad('M0 0 L2 2 Z')).toContain('off the unit square');
+    expect(bad('M0 0 A0.5 0.5 0 0 1 1 1')).toContain('not allowed');
+    expect(bad('m0 0 l1 1')).toContain('relative');
+    expect(bad('M0 0 L0.5')).toContain('groups of 2');
   });
 
   it('knows what is on screen after each sentence, clear included', () => {

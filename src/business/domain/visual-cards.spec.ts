@@ -1,6 +1,7 @@
 import { layoutProblems, repairVisual, visualProblems } from './visual';
 import {
   layoutTutorial,
+  tidyTutorial,
   tutorialProblems,
   type VisualTutorial,
 } from './visual-cards';
@@ -152,5 +153,22 @@ describe('a visual tutorial', () => {
         expect.stringContaining('the statement is'),
       ]),
     );
+  });
+
+  it('puts a range that runs one past the end, or into the moment before, right before checking', () => {
+    const slipped: VisualTutorial = {
+      ...tutorial,
+      moments: [
+        { from: 0, to: 3, card: 'title', heading: 'One' },
+        { from: 3, to: 6, card: 'statement', text: 'Two things.' },
+        { from: 7, to: 9, card: 'statement', text: 'Three things.' },
+      ],
+    };
+    const tidy = tidyTutorial(slipped);
+    expect(tidy.moments.map((m) => [m.from, m.to])).toEqual([
+      [0, 3],
+      [4, 6],
+      [7, 8],
+    ]);
   });
 });

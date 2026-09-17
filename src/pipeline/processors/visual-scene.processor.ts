@@ -20,6 +20,7 @@ import {
 } from '../../business/domain/visual';
 import {
   layoutTutorial,
+  tidyTutorial,
   tutorialProblems,
   type VisualTutorial,
 } from '../../business/domain/visual-cards';
@@ -164,7 +165,7 @@ export class VisualSceneProcessor {
       await this.record(documentId, 'visual_script', written.usage);
       // The model gave the tutorial; the app lays every card out, then
       // mends what laying out alone cannot settle.
-      let tutorial: VisualTutorial = written.value;
+      let tutorial: VisualTutorial = tidyTutorial(written.value);
       let script: VisualScript = repairVisual(layoutTutorial(tutorial));
       let problems = [
         ...tutorialProblems(tutorial, pool),
@@ -184,7 +185,7 @@ export class VisualSceneProcessor {
           problems: [...problems, ...visualWarnings(script)],
         });
         await this.record(documentId, 'visual_repair', mended.usage);
-        tutorial = mended.value;
+        tutorial = tidyTutorial(mended.value);
         script = repairVisual(layoutTutorial(tutorial));
         problems = [
           ...tutorialProblems(tutorial, pool),

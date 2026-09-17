@@ -599,6 +599,28 @@ export function layoutTutorial(tutorial: VisualTutorial): VisualScript {
 const words = (text: string) => text.split(/\s+/).filter(Boolean);
 
 /**
+ * The small slips a model makes with indexes, put right before anything
+ * is checked: a range past the last sentence is clamped, a moment that
+ * starts inside the one before starts after it, and moments come in
+ * order. Real faults are left for the checks.
+ */
+export function tidyTutorial(tutorial: VisualTutorial): VisualTutorial {
+  const last = Math.max(0, tutorial.sentences.length - 1);
+  const clamp = (v: number) => Math.max(0, Math.min(last, Math.round(v)));
+  const moments = [...tutorial.moments]
+    .map((m) => ({ ...m, from: clamp(m.from), to: clamp(m.to) }))
+    .sort((a, b) => a.from - b.from);
+  let end = -1;
+  const tidy = moments.map((m) => {
+    const from = m.from <= end ? Math.min(last, end + 1) : m.from;
+    const to = Math.max(from, m.to);
+    end = to;
+    return { ...m, from, to };
+  });
+  return { ...tutorial, moments: tidy };
+}
+
+/**
  * What is wrong with a tutorial in the model's own terms, before any
  * placing: the narration's length and cut, the moments' cover of it,
  * and each card's fields.

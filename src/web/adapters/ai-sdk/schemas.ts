@@ -454,6 +454,10 @@ export const visualPlanSchema = z.object({
   learningGoal: z.string().min(1).max(200),
   keyTerms: z.array(z.string().min(1).max(40)).max(8),
   diagramConcept: z.string().min(1).max(240),
+  centre: z.object({
+    what: z.string().min(1).max(80),
+    how: z.enum(['path', 'preset', 'shape']),
+  }),
   beats: z.array(z.string().min(1).max(160)).min(3).max(10),
   fit: z.enum(['good', 'partial', 'poor']),
   fitReason: z.string().max(200).nullable(),

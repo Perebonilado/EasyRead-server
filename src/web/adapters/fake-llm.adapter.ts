@@ -529,6 +529,7 @@ export class FakeLlmAdapter implements LlmGatewayPort {
         keyTerms: terms,
         diagramConcept:
           'A centre with what feeds it on the left and what comes out on the right',
+        centre: { what: input.topicTitle, how: 'shape' },
         beats:
           sentences.length >= 3
             ? sentences

@@ -729,7 +729,13 @@ export class AiSdkLlmAdapter implements LlmGatewayPort, OnModuleInit {
       maxOutputTokens: 8_000,
       prompt: [
         `Chapter: ${input.topicTitle}`,
-        `The plan. Goal: ${input.plan.learningGoal}. Key terms: ${input.plan.keyTerms.join(', ')}. The diagram: ${input.plan.diagramConcept}. Beats, in order:\n- ${input.plan.beats.join('\n- ')}`,
+        `The plan. Goal: ${input.plan.learningGoal}. Key terms: ${input.plan.keyTerms.join(', ')}. The diagram: ${input.plan.diagramConcept}. The centre of the picture: ${input.plan.centre.what}, ${
+          input.plan.centre.how === 'path'
+            ? 'drawn as a path of its own, a recognisable outline, no text inside it'
+            : input.plan.centre.how === 'preset'
+              ? 'as the preset that is that thing'
+              : 'as a plain shape, since the chapter is about an idea'
+        }. Beats, in order:\n- ${input.plan.beats.join('\n- ')}`,
         mending
           ? `\nMend this script. Problems:\n- ${input.problems!.join('\n- ')}\n\nThe script:\n${JSON.stringify(input.previous)}`
           : null,

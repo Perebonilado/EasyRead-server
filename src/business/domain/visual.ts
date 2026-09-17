@@ -279,6 +279,8 @@ export interface VisualPlan {
   learningGoal: string;
   keyTerms: string[];
   diagramConcept: string;
+  /** The one thing at the centre of the picture, named, and how it is drawn: its own outline, a preset, or a plain shape when the chapter is about an idea. */
+  centre: { what: string; how: 'path' | 'preset' | 'shape' };
   beats: string[];
   fit: VisualFit;
   /** Why the fit is what it is, one sentence; shown to the student when poor. */

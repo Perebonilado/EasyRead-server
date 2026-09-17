@@ -111,7 +111,7 @@ export const TUTORIAL_LIMITS = {
   maxWords: 720,
   maxItems: 5,
   maxSide: 4,
-  maxChipChars: 26,
+  maxChipChars: 30,
   maxHeadingChars: 40,
   maxEyebrowChars: 30,
   maxStatementWords: 14,
@@ -618,8 +618,16 @@ export function tidyTutorial(tutorial: VisualTutorial): VisualTutorial {
     const from = m.from <= end ? end + 1 : m.from;
     const to = Math.max(from, m.to);
     end = to;
-    tidy.push({ ...m, from, to });
+    // A reveal named outside its moment lands on the nearest edge of it.
+    const reveals = m.reveals?.map((r) => ({
+      ...r,
+      sentence: Math.max(from, Math.min(to, r.sentence)),
+    }));
+    tidy.push({ ...m, from, to, ...(reveals ? { reveals } : {}) });
   }
+  // The closing sentences belong to the last card when the model left them bare.
+  const tail = tidy[tidy.length - 1];
+  if (tail && tail.to < last) tail.to = last;
   return { ...tutorial, moments: tidy };
 }
 

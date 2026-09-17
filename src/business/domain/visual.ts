@@ -39,7 +39,7 @@ export const VISUAL_LIMITS = {
   minWords: 60,
   maxWords: 720,
   maxLabelChars: 64,
-  maxChipChars: 26,
+  maxChipChars: 30,
   maxVisible: 12,
   maxDots: 40,
 } as const;

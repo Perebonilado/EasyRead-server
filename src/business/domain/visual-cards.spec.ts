@@ -179,5 +179,21 @@ describe('a visual tutorial', () => {
       ],
     });
     expect(past.moments).toHaveLength(1);
+    // A bare closing sentence goes to the last card; a reveal outside its moment lands on its edge.
+    const bare = tidyTutorial({
+      ...tutorial,
+      moments: [
+        { from: 0, to: 3, card: 'title', heading: 'One' },
+        {
+          from: 4,
+          to: 6,
+          card: 'list',
+          items: [{ text: 'a' }, { text: 'b' }],
+          reveals: [{ part: 1, sentence: 8, word: 2 }],
+        },
+      ],
+    });
+    expect(bare.moments[1].to).toBe(8);
+    expect(bare.moments[1].reveals?.[0].sentence).toBe(8);
   });
 });

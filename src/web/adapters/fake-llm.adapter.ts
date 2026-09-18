@@ -613,10 +613,6 @@ export class FakeLlmAdapter implements LlmGatewayPort {
     });
   }
 
-  visualPicture(): Promise<{ png: Buffer; model: string } | null> {
-    return Promise.resolve(null);
-  }
-
   visualJudge(input: {
     png: Buffer;
     title: string;

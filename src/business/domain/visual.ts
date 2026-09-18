@@ -364,18 +364,6 @@ export type VisualElement =
     }
   | {
       id: string;
-      /** A picture drawn anew: a PNG on a transparent ground, sized into its box. */
-      type: 'image';
-      x: number;
-      y: number;
-      w: number;
-      h: number;
-      data: string;
-      color?: VisualColor;
-      carry?: string;
-    }
-  | {
-      id: string;
       type: 'dots';
       points: VisualPoint[];
       r?: number;
@@ -938,7 +926,6 @@ export function boxOf(element: VisualElement): Box | null {
       };
     }
     case 'shape':
-    case 'image':
       return {
         x: element.x - element.w / 2,
         y: element.y - element.h / 2,

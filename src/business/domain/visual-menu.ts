@@ -171,7 +171,6 @@ export function buildMenu(
       ? pictureLines.map((l) => `- ${l}`).join('\n')
       : '- none found',
     'Anything else named becomes words in a chip or a label; never a wrong picture. A chip needs no picture; a chip with a wrong one is a fault.',
-    'NEW PICTURE, for a picture card when neither a library drawing nor a composition is the thing: draw: the thing\'s plain name, two to five words, a thing and not an idea ("a hand signing a deed", "a land certificate"). It is drawn in the library\'s style and kept for every page after. At most two a page.',
     "COMPOSED PICTURE, for a picture card when no single drawing is the thing: two library drawings as one, compose {base, add, place}, place one of over (add centred on base), inside (small, centred), beside (side by side), badge (small, at the base's lower right). A signed deed: base file-text, add signature, place badge. A locked deed: base file-text, add lock, place badge.",
     `OUTLINES a shape may be given, when the words do not say it: ${outlines}.`,
     `MANNERS a figure moves in: ${FIGURE_MANNERS.map((m) => `${m} (${MANNER_MEANINGS[m]})`).join('; ')}.`,

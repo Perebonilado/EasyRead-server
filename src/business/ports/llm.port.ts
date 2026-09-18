@@ -32,7 +32,6 @@ export type LlmTask =
   | 'visual_judge'
   | 'visual_narration'
   | 'visual_director'
-  | 'visual_picture'
   | 'learn_outline'
   | 'learn_write'
   | 'visualize_query'
@@ -477,15 +476,6 @@ export interface LlmGatewayPort {
     topicTitle: string;
     material: string;
   }): Promise<LlmResult<VisualPlan>>;
-
-  /**
-   * Draws a thing the library has no drawing of, in the stage's style: a
-   * flat pictogram on a transparent ground. Null when no image came.
-   */
-  visualPicture(input: {
-    thing: string;
-    field?: string;
-  }): Promise<{ png: Buffer; model: string } | null>;
 
   /**
    * Looks at a sheet of stills, one per moment, and says whether each

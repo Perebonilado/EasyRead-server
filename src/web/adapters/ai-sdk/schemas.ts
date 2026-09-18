@@ -544,8 +544,6 @@ const momentFields = {
       place: z.enum(['over', 'beside', 'inside', 'badge']),
     })
     .nullable(),
-  /** For a picture card: a thing to draw anew, its plain name, when no library drawing and no composition is it. */
-  draw: z.string().max(40).nullable(),
   /** For a picture card: the shape the thing takes, when no drawing of it exists. */
   shape: z
     .object({

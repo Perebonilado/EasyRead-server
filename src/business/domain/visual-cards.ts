@@ -94,12 +94,6 @@ export interface VisualCompose {
   add: string;
   place: ComposePlace;
 }
-/** A picture drawn anew: a PNG as a data URI, and its size in pixels. */
-export interface VisualImage {
-  data: string;
-  w: number;
-  h: number;
-}
 
 /** One moment: a card, its fields, and the sentences it covers. */
 export interface Moment {
@@ -128,10 +122,6 @@ export interface Moment {
   picture?: string;
   /** A picture made of two library drawings: the base and what is added to it, and where. */
   compose?: VisualCompose;
-  /** A thing to draw anew when the library has none of it: its plain name. */
-  draw?: string;
-  /** The drawing made for `draw`, once made. */
-  image?: VisualImage;
   /** The shape the thing takes, when the library has no drawing of it. */
   shape?: {
     outline?: FigureOutline;
@@ -557,36 +547,8 @@ function drawThing(input: {
   motionTo?: { x: number; y: number };
   /** Two library drawings as one picture. */
   compose?: VisualCompose | null;
-  /** A picture drawn anew, which outranks the library. */
-  image?: VisualImage | null;
 }): { elements: VisualElement[]; height: number } {
   const { id, of, name, x, y, width, color } = input;
-  if (input.image) {
-    const h = Math.round((width * input.image.h) / Math.max(1, input.image.w));
-    const elements: VisualElement[] = [
-      {
-        id,
-        type: 'image',
-        x,
-        y,
-        w: Math.round(width),
-        h,
-        data: input.image.data,
-        carry: (name || of).toLowerCase(),
-      },
-    ];
-    if (name)
-      elements.push({
-        id: `${id}${NAME}`,
-        type: 'label',
-        x,
-        y: y + h / 2 + 10,
-        text: name,
-        size: 'sm',
-        color: 'muted',
-      });
-    return { elements, height: h };
-  }
   const composed = input.compose && composeBoxes(input.compose, x, y, width);
   if (composed) {
     const elements = place(
@@ -950,7 +912,7 @@ function layoutPicture(m: Moment, id: string, stage: Stage): Laid {
   const out: VisualElement[] = [];
   const heading = m.heading?.trim();
   if (heading) out.push(label(`${id}_h`, CX, 36, heading, 'md', 'muted'));
-  const of = m.compose?.base ?? m.picture ?? m.name ?? m.draw ?? '';
+  const of = m.compose?.base ?? m.picture ?? m.name ?? '';
   const bubble = m.bubble?.trim();
   const y = heading ? 150 : 142;
   // The bubble sits above the thing's top; a tall thing shrinks to leave it room.
@@ -959,9 +921,7 @@ function layoutPicture(m: Moment, id: string, stage: Stage): Laid {
   let width =
     drawn?.kind === 'figure' ? figureWidth(drawn.figure.outline) : 130;
   if (bubble) {
-    const tall = m.image
-      ? Math.round((width * m.image.h) / Math.max(1, m.image.w))
-      : thingHeight(of, width, m.shape);
+    const tall = thingHeight(of, width, m.shape);
     const room = 2 * (y - 26 - bubbleFloor);
     if (tall > room) width = Math.round(width * (room / tall));
   }
@@ -978,7 +938,6 @@ function layoutPicture(m: Moment, id: string, stage: Stage): Laid {
     shape: m.shape,
     motion: m.motion,
     compose: m.compose,
-    image: m.image,
   });
   out.push(...thing.elements);
   const figure = thing.elements.find((e) => e.type === 'figure');
@@ -2116,15 +2075,10 @@ export function tutorialProblems(
         break;
       }
       case 'picture': {
-        const of = m.compose?.base ?? m.picture ?? m.name ?? m.draw ?? '';
+        const of = m.compose?.base ?? m.picture ?? m.name ?? '';
         if (!of) problems.push(`${who} names no thing to draw.`);
-        if (m.image) {
-          // Drawn anew: nothing to resolve.
-        } else if (m.draw) {
-          problems.push(
-            `${who}: no new drawing could be made for "${m.draw}"; name a library drawing, compose two, or use another card.`,
-          );
-        } else if (m.compose) {
+
+        if (m.compose) {
           for (const part of [m.compose.base, m.compose.add])
             if (!pickPicture(part))
               problems.push(

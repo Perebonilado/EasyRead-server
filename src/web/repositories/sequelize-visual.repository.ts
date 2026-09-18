@@ -5,13 +5,11 @@ import type {
   VisualPositionRecord,
   VisualSceneRecord,
   VisualSceneRepository,
-  VisualPictureRecord,
 } from '../../business/repositories/visual.repository';
 import {
   VisualPlanModel,
   VisualPositionModel,
   VisualSceneModel,
-  VisualPictureModel,
 } from '../database/models';
 import { newId } from '../database/uuid';
 
@@ -47,43 +45,7 @@ export class SequelizeVisualSceneRepository implements VisualSceneRepository {
     private readonly plans: typeof VisualPlanModel,
     @InjectModel(VisualPositionModel)
     private readonly positions: typeof VisualPositionModel,
-    @InjectModel(VisualPictureModel)
-    private readonly pictures: typeof VisualPictureModel,
   ) {}
-
-  async findPicture(nameKey: string): Promise<VisualPictureRecord | null> {
-    const row = await this.pictures.findOne({ where: { nameKey } });
-    return row
-      ? {
-          nameKey: row.nameKey,
-          name: row.name,
-          storageKey: row.storageKey,
-          width: row.width,
-          height: row.height,
-          judged: row.judged,
-          model: row.model,
-        }
-      : null;
-  }
-
-  async savePicture(input: Omit<VisualPictureRecord, 'judged'>): Promise<void> {
-    const have = await this.pictures.findOne({
-      where: { nameKey: input.nameKey },
-    });
-    if (have) {
-      await have.update({ ...input, judged: false } as never);
-      return;
-    }
-    await this.pictures.create({
-      id: newId(),
-      ...input,
-      judged: false,
-    } as never);
-  }
-
-  async markPictureJudged(nameKey: string): Promise<void> {
-    await this.pictures.update({ judged: true }, { where: { nameKey } });
-  }
 
   async findPosition(
     documentId: string,

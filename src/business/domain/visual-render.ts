@@ -547,12 +547,6 @@ function elementSvg(
       );
       return picture ? wrap(picture) : '';
     }
-    case 'image': {
-      const { x, y, w, h } = element;
-      return wrap(
-        `<image href="${element.data}" x="${n(x - w / 2)}" y="${n(y - h / 2)}" width="${n(w)}" height="${n(h)}" preserveAspectRatio="xMidYMid meet"/>`,
-      );
-    }
     case 'dots':
       return wrap(
         element.points
@@ -746,21 +740,6 @@ export async function thumbFromFilm(
     `<image href="data:image/png;base64,${png.toString('base64')}" x="0" y="0" width="${pngW}" height="${pngH}"/>` +
     `</svg>`;
   return rasterise(svg, width);
-}
-
-/** A picture drawn anew, brought down to the stage's size: the PNG as it came, drawn into a box this wide. */
-export async function shrinkPicture(
-  png: Buffer,
-  width = 320,
-): Promise<{ png: Buffer; w: number; h: number }> {
-  const pngW = png.readUInt32BE(16);
-  const pngH = png.readUInt32BE(20);
-  const h = Math.max(1, Math.round((width * pngH) / Math.max(1, pngW)));
-  const svg =
-    `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${pngW} ${pngH}" width="${pngW}" height="${pngH}">` +
-    `<image href="data:image/png;base64,${png.toString('base64')}" x="0" y="0" width="${pngW}" height="${pngH}"/>` +
-    `</svg>`;
-  return { png: await rasterise(svg, width), w: width, h };
 }
 
 /** The moments of a filmstrip: three frames across a still moment, five across one that moves, so motion and the order parts arrive in can be judged. */

@@ -693,31 +693,6 @@ export class AiSdkLlmAdapter implements LlmGatewayPort, OnModuleInit {
     };
   }
 
-  async visualPicture(input: {
-    thing: string;
-    field?: string;
-  }): Promise<{ png: Buffer; model: string } | null> {
-    const { generateImage } = await this.registry.modules();
-    const { model, ref } = await this.registry.imageModel('visual_picture');
-    const prompt = [
-      `A flat pictogram of ${input.thing}${input.field ? `, as found in ${input.field}` : ''}, in the style of a duotone icon set:`,
-      'one colour, a soft blue (#8DB4F3), with a darker blue outline; simple bold shapes,',
-      'minimal detail, centred, filling the frame; no text, no letters, no numbers,',
-      'no shadow, no background, transparent behind the drawing.',
-    ].join(' ');
-    const result = await generateImage({
-      model,
-      prompt,
-      size: '1024x1024',
-      providerOptions: {
-        openai: { quality: 'low', background: 'transparent' },
-      },
-    });
-    const image = result.image;
-    if (!image) return null;
-    return { png: Buffer.from(image.uint8Array), model: ref.modelId };
-  }
-
   async visualJudge(input: {
     png: Buffer;
     title: string;

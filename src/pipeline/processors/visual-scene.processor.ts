@@ -36,7 +36,6 @@ import {
   type Moment,
   type VisualDecision,
   type VisualTutorial,
-  type VisualImage,
 } from '../../business/domain/visual-cards';
 import { buildMenu } from '../../business/domain/visual-menu';
 import {
@@ -46,8 +45,6 @@ import {
 } from '../../business/domain/visual-figures';
 import { MOTION_MEANINGS } from '../../business/domain/living.generated/motion';
 import { pickPicture } from '../../business/domain/visual-presets';
-import { shrinkPicture } from '../../business/domain/visual-render';
-import { ConfigService } from '@nestjs/config';
 import {
   THUMB_WIDTH,
   rasterise,
@@ -105,21 +102,6 @@ function decisionKey(d: VisualDecision): string {
   return JSON.stringify(card);
 }
 
-/** How many pictures a page may have drawn anew. */
-const MAX_NEW_PICTURES = 2;
-/** The width a picture drawn anew is kept at, in pixels. */
-const PICTURE_WIDTH = 320;
-
-/** A thing's plain name as the library's key: lower case, one dash between words. */
-export function nameKeyOf(thing: string): string {
-  return thing
-    .toLowerCase()
-    .replace(/^(a|an|the)\s+/, '')
-    .replace(/[^a-z0-9]+/g, '-')
-    .replace(/^-|-$/g, '')
-    .slice(0, 80);
-}
-
 /** What should change from frame to frame in a moment, for the judge; nothing when nothing moves. */
 function motionLine(m: Moment): string | undefined {
   const lines: string[] = [];
@@ -162,13 +144,8 @@ function drawingsOf(m: Moment): string[] {
     m.card === 'picture' && m.compose
       ? `${m.picture ?? m.name ?? m.compose.base} (a ${pickPicture(m.compose.base) ?? m.compose.base} with a ${pickPicture(m.compose.add) ?? m.compose.add} ${m.compose.place === 'badge' ? 'at its corner' : m.compose.place})`
       : undefined;
-  const anew =
-    m.card === 'picture' && m.image
-      ? `${m.draw ?? m.name ?? 'the thing'} (drawn anew)`
-      : undefined;
   const names = [
-    anew ??
-      composed ??
+    composed ??
       (m.card === 'picture'
         ? drawnAs(m.picture ?? m.name, m.shape)
         : undefined),
@@ -211,7 +188,6 @@ export class VisualSceneProcessor {
     private readonly simplified: SimplifiedPageRepository,
     @Inject(VISUAL_SCENE_REPOSITORY)
     private readonly visuals: VisualSceneRepository,
-    private readonly config: ConfigService,
     @Inject(PRONUNCIATION_REPOSITORY)
     private readonly pronunciations: PronunciationRepository,
     @Inject(AI_CALL_LOG_REPOSITORY) private readonly calls: AiCallLogRepository,
@@ -356,33 +332,7 @@ export class VisualSceneProcessor {
       });
       await this.record(documentId, 'visual_director', directed.usage);
       let decisions = directed.value;
-      // Pictures drawn anew for the things the director asked for, once
-      // each: from the shared library when it has one, else from the
-      // image model, and kept there for every page after.
-      const drawn = new Map<string, VisualImage | null>();
-      const field = `${doc.props.title}, the chapter "${topic.title}"`;
-      const drawingOn = this.config.get<string>('VISUAL_DRAW_NEW') !== 'off';
-      const withPictures = async () => {
-        if (!drawingOn) return;
-        let made = 0;
-        for (const d of decisions.moments) {
-          if (d.card !== 'picture' || !d.draw || d.image) continue;
-          const key = nameKeyOf(d.draw);
-          let image = drawn.get(key);
-          if (image === undefined) {
-            const kept = await this.visuals.findPicture(key);
-            image =
-              kept || made < MAX_NEW_PICTURES
-                ? await this.pictureFor(d.draw, key, field, who)
-                : null;
-            if (!kept && image) made += 1;
-            drawn.set(key, image);
-          }
-          if (image) d.image = image;
-        }
-      };
       const build = async () => {
-        await withPictures();
         const built = tidyTutorial(assembleTutorial(narration, decisions));
         return { tutorial: built, scripts: this.staged(built) };
       };
@@ -500,12 +450,6 @@ export class VisualSceneProcessor {
           ? await this.judge(documentId, tutorial, scripts.box, who, again)
           : { sheet: judged.sheet, redo: [] };
       }
-      // A picture drawn anew that a judge let through is kept as judged.
-      for (const m of tutorial.moments)
-        if (m.draw && m.image && !judged.redo.some((r) => r.index === m.index))
-          await this.visuals
-            .markPictureJudged(nameKeyOf(m.draw))
-            .catch(() => undefined);
       if (judged.redo.length) {
         this.logger.warn(
           `${who}: moments ${judged.redo.map((r) => r.index + 1).join(', ')} ship plain after the judge said redo ${JUDGE_ROUNDS} times.`,
@@ -828,64 +772,6 @@ export class VisualSceneProcessor {
       if (own?.text) parts.push(own.text);
     }
     return parts.join('\n\n').slice(0, MATERIAL_CHARS);
-  }
-
-  /**
-   * A picture for a thing the library has none of: the shared library's,
-   * or one drawn now by the image model, brought to the stage's size and
-   * kept in the library. Null when drawing is off or nothing came.
-   */
-  private async pictureFor(
-    thing: string,
-    key: string,
-    field: string,
-    who: string,
-  ): Promise<VisualImage | null> {
-    const kept = await this.visuals.findPicture(key);
-    if (kept) {
-      try {
-        const png = await this.storage.get(kept.storageKey);
-        return {
-          data: `data:image/png;base64,${png.toString('base64')}`,
-          w: kept.width,
-          h: kept.height,
-        };
-      } catch {
-        // The file is gone: drawn again below.
-      }
-    }
-    try {
-      const made = await this.llm.visualPicture({ thing, field });
-      if (!made) return null;
-      const shrunk = await shrinkPicture(made.png, PICTURE_WIDTH);
-      const storageKey = `visuals/pictures/${key}.png`;
-      await this.storage.put({
-        key: storageKey,
-        body: shrunk.png,
-        mimeType: 'image/png',
-      });
-      await this.visuals.savePicture({
-        nameKey: key,
-        name: thing,
-        storageKey,
-        width: shrunk.w,
-        height: shrunk.h,
-        model: made.model,
-      });
-      this.logger.log(
-        `${who}: drew "${thing}" anew (${made.model}), kept as ${key}`,
-      );
-      return {
-        data: `data:image/png;base64,${shrunk.png.toString('base64')}`,
-        w: shrunk.w,
-        h: shrunk.h,
-      };
-    } catch (error) {
-      this.logger.warn(
-        `${who}: "${thing}" could not be drawn anew (${(error as Error).message}); it is words`,
-      );
-      return null;
-    }
   }
 
   private async record(

@@ -19,6 +19,7 @@ import { grounded } from './sketch';
 import type { SpokenForm } from './spoken';
 import type { FigureManner, FigureOutline, FigurePart } from './visual-figures';
 import type { MechanismKind } from './visual-mechanisms';
+import { MOTIONS } from './living.generated/motion';
 import { measureText } from './visual-font';
 import {
   knownPicture,
@@ -188,14 +189,8 @@ export function pathProblem(d: string): string | null {
   return check();
 }
 
-/** How a drawn thing moves once it is on screen; every motion is a function of the clock. */
-export const VISUAL_MOTIONS = [
-  'travel',
-  'bounce',
-  'spin',
-  'shake',
-  'hover',
-] as const;
+/** How a drawn thing moves once it is on screen; every motion is a function of the clock, shared with the player. */
+export const VISUAL_MOTIONS = MOTIONS;
 export type VisualMotion = (typeof VISUAL_MOTIONS)[number];
 
 export type VisualPoint = [number, number];
@@ -307,6 +302,8 @@ export type VisualElement =
       fill?: 'solid' | 'outline' | 'tint';
       /** How a drawn picture moves once shown. */
       motion?: VisualMotion;
+      /** Where an `along` thing goes: the centre of the thing after it. */
+      motionTo?: { x: number; y: number };
       /** What the thing is, so the player can carry it from one card to the next. */
       carry?: string;
     }
@@ -367,6 +364,18 @@ export type VisualElement =
     }
   | {
       id: string;
+      /** A picture drawn anew: a PNG on a transparent ground, sized into its box. */
+      type: 'image';
+      x: number;
+      y: number;
+      w: number;
+      h: number;
+      data: string;
+      color?: VisualColor;
+      carry?: string;
+    }
+  | {
+      id: string;
       type: 'dots';
       points: VisualPoint[];
       r?: number;
@@ -384,6 +393,7 @@ export const VISUAL_ACTIONS = [
   'pulse',
   'flow',
   'highlight',
+  'settle',
   'clear',
 ] as const;
 export type VisualAction = (typeof VISUAL_ACTIONS)[number];
@@ -395,6 +405,7 @@ const NEEDS_SHOWN = new Set<VisualAction>([
   'dim',
   'undim',
   'highlight',
+  'settle',
 ]);
 /** The actions that bring an element on screen. */
 export const SHOWS = new Set<VisualAction>(['draw', 'fade']);
@@ -927,6 +938,7 @@ export function boxOf(element: VisualElement): Box | null {
       };
     }
     case 'shape':
+    case 'image':
       return {
         x: element.x - element.w / 2,
         y: element.y - element.h / 2,

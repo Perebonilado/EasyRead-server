@@ -142,10 +142,90 @@ function forms(word: string): string[] {
 }
 
 /**
- * The drawing for the word a model uses for a thing: the hand-made
- * preset of that name first, then an icon of that name, then the icon
- * whose name or tags say it best. Nothing when no word of it is known.
+ * The library's sense of a word the catalogue gets wrong by spelling: a
+ * lexical match makes "sign" a signpost and "party" a celebration, where
+ * a page of law means a signature and the people to an agreement. Each
+ * line names a drawing the library has. Grown from the judge's redo
+ * notes, one line at a time.
  */
+export const SENSES: Record<string, string> = {
+  sign: 'signature',
+  signs: 'signature',
+  signing: 'signature',
+  signed: 'signature',
+  execute: 'signature',
+  executed: 'signature',
+  execution: 'signature',
+  party: 'users',
+  parties: 'users',
+  consideration: 'coins',
+  fee: 'coins',
+  fees: 'coins',
+  payment: 'coins',
+  payments: 'coins',
+  title: 'certificate',
+  deed: 'file-text',
+  deeds: 'file-text',
+  contract: 'file-text',
+  contracts: 'file-text',
+  agreement: 'handshake',
+  agreements: 'handshake',
+  court: 'gavel',
+  judge: 'gavel',
+  judgment: 'gavel',
+  judgement: 'gavel',
+  justice: 'scales',
+  fairness: 'scales',
+  lien: 'lock',
+  mortgage: 'bank',
+  mortgages: 'bank',
+  solicitor: 'briefcase',
+  solicitors: 'briefcase',
+  lawyer: 'briefcase',
+  lawyers: 'briefcase',
+  client: 'user',
+  clients: 'user',
+  tenant: 'user',
+  tenants: 'user',
+  lessee: 'user',
+  landlord: 'house',
+  landlords: 'house',
+  lessor: 'house',
+  land: 'map-trifold',
+  record: 'file-text',
+  records: 'file-text',
+  doctor: 'stethoscope',
+  doctors: 'stethoscope',
+  physician: 'stethoscope',
+};
+
+/** A drawing that may be the thing a phrase names, with the words that made it a candidate. */
+export interface PictureCandidate {
+  name: string;
+  score: number;
+  tags: string[];
+}
+
+/** A drawing's own words, a few, for the director to tell candidates apart. */
+export function tagsOf(name: string): string[] {
+  const raw = PRESET_INFO[name]?.tags ?? ICON_TAGS[name] ?? '';
+  const parts = name.split('-');
+  return [
+    ...new Set(
+      raw
+        .toLowerCase()
+        .split(/[\s&]+/)
+        .filter(
+          (tag) =>
+            tag.length > 1 &&
+            !tag.startsWith('*') &&
+            !GROUP_WORDS.has(tag) &&
+            !parts.includes(tag),
+        ),
+    ),
+  ].slice(0, 3);
+}
+
 /**
  * How many drawings carry a word in their tags. A word on a dozen
  * drawings is a category, not a thing: "field" is on a farm and a form,
@@ -171,24 +251,79 @@ const TAG_TOO_COMMON = 14;
  */
 const MATCH_FLOOR = 1;
 
-export function resolvePicture(text: string | undefined): string | undefined {
-  if (!text) return undefined;
-  const words = text
+/** The content words of a phrase, in order. */
+function wordsOf(text: string): string[] {
+  return text
     .toLowerCase()
     .replace(/[^a-z0-9\s-]/g, ' ')
     .split(/[\s-]+/)
     .filter((w) => w.length > 1 && !STOP_WORDS.has(w));
-  if (!words.length) return undefined;
+}
+
+/**
+ * The drawings that may be the thing a phrase names, best first: the
+ * sense of a word where the library has one, then a drawing of that very
+ * name, then the drawings whose names or tags say it, scored. The menu
+ * shows these to the director, which reads the sentence and picks; the
+ * app never picks among them itself.
+ */
+export function pictureCandidates(
+  text: string | undefined,
+  limit = 4,
+): PictureCandidate[] {
+  if (!text) return [];
+  const words = wordsOf(text);
+  if (!words.length) return [];
+  const out: PictureCandidate[] = [];
+  const seen = new Set<string>();
+  const push = (name: string, score: number) => {
+    if (seen.has(name) || !knownPicture(name)) return;
+    seen.add(name);
+    out.push({ name, score, tags: tagsOf(name) });
+  };
+  for (const word of words) {
+    const sense = SENSES[word];
+    if (sense) push(sense, 200);
+  }
   const joined = words.join('-');
   const exact = [joined, ...words.flatMap(forms)];
-  for (const name of exact) {
-    if (PRESET_INFO[name]) return name;
+  for (const name of exact) if (PRESET_INFO[name]) push(name, 100);
+  for (const name of exact) if (ICON_TAGS[name]) push(name, 100);
+  for (const found of scoredPictures(words)) push(found.name, found.score);
+  return out.slice(0, limit);
+}
+
+/** The one drawing a phrase most likely means, by spelling: the menu's guess, never the drawn one. */
+export function resolvePicture(text: string | undefined): string | undefined {
+  return pictureCandidates(text, 1)[0]?.name;
+}
+
+/**
+ * The drawing a name is, strictly: a library name, the sense of a word,
+ * or the one drawing the words could mean. A name several drawings could
+ * be is nothing, and the thing is set as words: the director was shown
+ * the candidates and had to pick one by name.
+ */
+export function pickPicture(text: string | undefined): string | undefined {
+  if (!text) return undefined;
+  const words = wordsOf(text);
+  if (!words.length) return undefined;
+  for (const word of words) {
+    const sense = SENSES[word];
+    if (sense && knownPicture(sense)) return sense;
   }
-  for (const name of exact) {
-    if (ICON_TAGS[name]) return name;
+  const joined = words.join('-');
+  for (const name of [joined, ...words.flatMap(forms)]) {
+    if (PRESET_INFO[name] || ICON_TAGS[name]) return name;
   }
+  const scored = scoredPictures(words);
+  return scored.length === 1 ? scored[0].name : undefined;
+}
+
+/** Every drawing whose name or tags answer the words, scored, best first; none below the floor. */
+function scoredPictures(words: string[]): { name: string; score: number }[] {
   const wanted = new Set(words.flatMap(forms));
-  let best: { name: string; score: number } | null = null;
+  const found: { name: string; score: number }[] = [];
   const consider = (name: string, tags: string, weight: number) => {
     // A drawing's name ends in the thing it is: a chalkboard teacher is a
     // teacher, a cell tower is a tower. Only the last word carries it.
@@ -217,16 +352,12 @@ export function resolvePicture(text: string | undefined): string | undefined {
         ),
     ).length;
     score *= (answered / words.length) * weight;
-    if (
-      !best ||
-      score > best.score ||
-      (score === best.score && name.length < best.name.length)
-    )
-      best = { name, score };
+    if (score >= MATCH_FLOOR) found.push({ name, score });
   };
   for (const [name, info] of Object.entries(PRESET_INFO))
     consider(name, info.tags, 1.2);
   for (const [name, tags] of Object.entries(ICON_TAGS)) consider(name, tags, 1);
-  const found = best as { name: string; score: number } | null;
-  return found && found.score >= MATCH_FLOOR ? found.name : undefined;
+  return found.sort(
+    (a, b) => b.score - a.score || a.name.length - b.name.length,
+  );
 }

@@ -8,7 +8,8 @@
  * is, this file says what shape it takes and what sits on it, and the
  * app draws it. The model gives no geometry and no numbers.
  */
-import { resolvePicture } from './visual-presets';
+import { pickPicture } from './visual-presets';
+import { buildFigure } from './living.generated/figures';
 
 /** The shape a figure takes. Eight of these cover what a whole icon set cannot. */
 export const FIGURE_OUTLINES = [
@@ -131,6 +132,73 @@ export const FIGURE_MANNERS = [
   'hover',
 ] as const;
 export type FigureManner = (typeof FIGURE_MANNERS)[number];
+
+/**
+ * The manners that move each outline, found once from the recipes: a
+ * recipe answers to the manners written for it and holds still for the
+ * rest, so a fish told to flutter would not move. What the menu offers
+ * an outline, and what a check holds a figure to.
+ */
+const movingManners = new Map<FigureOutline, FigureManner[]>();
+/** Every number a recipe drew, in order: the coordinates of its paths and dots. */
+function drawnNumbers(ops: ReturnType<typeof buildFigure>['ops']): number[] {
+  const out: number[] = [];
+  for (const op of ops) {
+    const source =
+      op.kind === 'path' ? op.d : op.points.map((p) => p.join(' ')).join(' ');
+    for (const m of source.matchAll(/-?\d+(?:\.\d+)?/g)) out.push(Number(m[0]));
+  }
+  return out;
+}
+/** A figure this many units off its first pose has moved; less is a tremor no one sees. */
+const MOVED_UNITS = 2;
+export function mannersThatMove(outline: FigureOutline): FigureManner[] {
+  const have = movingManners.get(outline);
+  if (have) return have;
+  const at = (manner: FigureManner, ms: number) =>
+    drawnNumbers(
+      buildFigure(
+        {
+          x: 100,
+          y: 75,
+          w: 120,
+          h: 84,
+          outline,
+          parts: [...OUTLINE_PARTS[outline]],
+          manner,
+          seed: 3,
+        },
+        ms,
+        false,
+      ).ops,
+    );
+  const moved = (manner: FigureManner) => {
+    const a = at(manner, 0);
+    const b = at(manner, 900);
+    if (a.length !== b.length) return true;
+    return a.some((v, i) => Math.abs(v - b[i]) >= MOVED_UNITS);
+  };
+  const found = FIGURE_MANNERS.filter((m) => m !== 'still' && moved(m));
+  movingManners.set(outline, found);
+  return found;
+}
+
+/** What each manner looks like, as the director and the judge read it. */
+export const MANNER_MEANINGS: Record<FigureManner, string> = {
+  still: 'is held still',
+  drift: 'drifts slowly, as if afloat',
+  swim: 'swims, its tail sweeping',
+  beat: 'beats, like a heart or wings',
+  stream: 'streams along, its parts flowing',
+  grow: 'grows out from its base',
+  pulse: 'pulses, swelling and easing',
+  flutter: 'flutters, wings beating fast, held in the air',
+  walk: 'walks, legs moving, the body rocking a little',
+  fly: 'flies, wings beating slow and wide, rising and dipping',
+  crawl: 'crawls, its segments rippling',
+  sway: 'sways gently side to side',
+  hover: 'hovers in one place, bobbing',
+};
 
 export interface VisualFigure {
   /** What the thing is, in the page's own words. Drawn under it and read aloud by a screen reader. */
@@ -468,7 +536,7 @@ export function resolveDrawing(
     return { kind: 'figure', figure: tidyFigure({ ...asked, of }) };
   const guessed = guessFigure(of);
   if (guessed?.alive) return { kind: 'figure', figure: strip(guessed) };
-  const named = resolvePicture(of);
+  const named = pickPicture(of);
   // An exact drawing beats a guessed shape; a loose one does not.
   if (named && (!guessed || isExact(of, named)))
     return { kind: 'picture', name: named };
@@ -492,7 +560,7 @@ const strip = (guess: VisualFigure & { alive: boolean }): VisualFigure => ({
  */
 export function chipIcon(name: string | undefined): string | undefined {
   if (!name) return undefined;
-  const named = resolvePicture(name);
+  const named = pickPicture(name);
   if (!named) return undefined;
   const guess = guessFigure(name);
   if (guess?.alive && !isExact(name, named)) return undefined;

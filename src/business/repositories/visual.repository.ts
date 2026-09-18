@@ -33,7 +33,22 @@ export interface VisualPositionRecord {
   updatedAt: Date | null;
 }
 
+/** A picture drawn anew for a thing the library had none of, shared by every document. */
+export interface VisualPictureRecord {
+  nameKey: string;
+  name: string;
+  storageKey: string;
+  width: number;
+  height: number;
+  /** Whether a judge has passed a moment that showed it. */
+  judged: boolean;
+  model: string | null;
+}
+
 export interface VisualSceneRepository {
+  findPicture(nameKey: string): Promise<VisualPictureRecord | null>;
+  savePicture(input: Omit<VisualPictureRecord, 'judged'>): Promise<void>;
+  markPictureJudged(nameKey: string): Promise<void>;
   /** The learner's last position in the document's visuals, if any. */
   findPosition(
     documentId: string,

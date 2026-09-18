@@ -1,6 +1,6 @@
 import { Logger } from '@nestjs/common';
 import type { ConfigService } from '@nestjs/config';
-import type { EmbeddingModel, LanguageModel } from 'ai';
+import type { EmbeddingModel, ImageModel, LanguageModel } from 'ai';
 import type { LlmTask } from '../../../business/ports/llm.port';
 
 export const PROVIDERS = ['openai', 'anthropic', 'google', 'deepseek'] as const;
@@ -48,6 +48,7 @@ const TASK_VAR: Record<LlmTask, string> = {
   visual_judge: 'AI_MODEL_VISUAL_JUDGE',
   visual_narration: 'AI_MODEL_VISUAL_NARRATION',
   visual_director: 'AI_MODEL_VISUAL_DIRECTOR',
+  visual_picture: 'AI_MODEL_VISUAL_PICTURE',
   ocr_page: 'AI_MODEL_OCR',
   summarize: 'AI_MODEL_SUMMARIZE',
   topics_outline: 'AI_MODEL_TOPICS',
@@ -90,6 +91,8 @@ const TASK_VAR: Record<LlmTask, string> = {
 };
 
 const DEFAULT_MODEL = 'openai:gpt-4o-mini';
+/** The image model for pictures drawn anew, unless a deployment names another. */
+const DEFAULT_IMAGE_MODEL = 'openai:gpt-image-1';
 const DEFAULT_EMBED_MODEL = 'openai:text-embedding-3-small';
 
 export interface ModelRef {
@@ -168,7 +171,11 @@ export class ModelRegistry {
 
   refFor(task: LlmTask): ModelRef {
     const fallback =
-      task === 'embed' ? this.defaultEmbedSpec() : this.defaultSpec();
+      task === 'embed'
+        ? this.defaultEmbedSpec()
+        : task === 'visual_picture'
+          ? DEFAULT_IMAGE_MODEL
+          : this.defaultSpec();
     // The visual writers share one setting unless given their own: the
     // narrator, the director and the judge are the script writer's job
     // split three ways, and a deployment that set the one should not
@@ -199,6 +206,20 @@ export class ModelRegistry {
         ? provider.chat(ref.modelId)
         : provider.languageModel(ref.modelId);
     return { model: model as LanguageModel, ref };
+  }
+
+  /** The image model a task draws with; only OpenAI's are known to work here. */
+  async imageModel(
+    task: LlmTask,
+  ): Promise<{ model: ImageModel; ref: ModelRef }> {
+    const ref = this.refFor(task);
+    const provider = (await this.client(ref.provider)) as {
+      imageModel?: (id: string) => unknown;
+      image?: (id: string) => unknown;
+    };
+    const make = provider.imageModel ?? provider.image;
+    if (!make) throw new Error(`${ref.provider} does not provide image models`);
+    return { model: make.call(provider, ref.modelId) as ImageModel, ref };
   }
 
   async embeddingModel(): Promise<{ model: EmbeddingModel; ref: ModelRef }> {

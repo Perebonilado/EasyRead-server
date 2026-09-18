@@ -1,3 +1,5 @@
+import { mannersThatMove } from './visual-figures';
+import { frameTimes } from './visual-render';
 import {
   assembleTutorial,
   cutShort,
@@ -145,22 +147,115 @@ describe('the director’s decisions as a tutorial', () => {
     expect(menu.figures.some((line) => line.includes('quadruped'))).toBe(true);
     expect(menu.text).toContain('MECHANISMS');
     expect(menu.text).toContain('bucket');
-    expect(menu.text.length).toBeLessThan(9000);
+    expect(menu.text.length).toBeLessThan(12000);
   });
 
-  it('renders a filmstrip with three frames per moment, for all moments or a few', () => {
+  it('renders a filmstrip: three frames for a still moment, five for one that moves', () => {
     const tutorial = tidyTutorial(assembleTutorial(narration, decisions));
     const script = repairVisual(
       layoutTutorial(tutorial, STAGES.box),
       STAGES.box,
     );
     const all = renderFilm(script, tutorial.moments, { w: 360, h: 270 });
-    expect((all.match(/stroke="#3B4560"/g) ?? []).length).toBe(
-      tutorial.moments.length * 3,
+    const expected = tutorial.moments.reduce(
+      (sum, m) => sum + frameTimes(script, m).length,
+      0,
     );
+    expect((all.match(/stroke="#3B4560"/g) ?? []).length).toBe(expected);
+    expect(
+      tutorial.moments.some((m) => frameTimes(script, m).length === 5),
+    ).toBe(true);
     const some = renderFilm(script, tutorial.moments, { w: 360, h: 270 }, [2]);
-    expect((some.match(/stroke="#3B4560"/g) ?? []).length).toBe(3);
+    expect((some.match(/stroke="#3B4560"/g) ?? []).length).toBe(
+      frameTimes(script, tutorial.moments[2]).length,
+    );
     expect(some).toContain('>3<');
+  });
+
+  it('composes two library drawings into one picture, and names both to the check', () => {
+    const tutorial = tidyTutorial(
+      assembleTutorial(narration, {
+        moments: [
+          {
+            ...decisions.moments[0],
+            index: 0,
+            card: 'picture',
+            picture: null as never,
+            name: 'a signed deed',
+            compose: { base: 'file-text', add: 'signature', place: 'badge' },
+          },
+        ],
+      }),
+    );
+    const script = layoutTutorial(tutorial, STAGES.box);
+    const kinds = script.elements
+      .filter((e) => e.type === 'shape')
+      .map((e) => (e.type === 'shape' ? e.kind : ''));
+    expect(kinds).toEqual(expect.arrayContaining(['file-text', 'signature']));
+    expect(tutorialProblems(tutorial, null)).toEqual(
+      expect.not.arrayContaining([expect.stringMatching(/composed picture/)]),
+    );
+    const wrong = tidyTutorial(
+      assembleTutorial(narration, {
+        moments: [
+          {
+            ...decisions.moments[0],
+            index: 0,
+            card: 'picture',
+            picture: null as never,
+            name: 'a signed deed',
+            compose: { base: 'deedy', add: 'signature', place: 'badge' },
+          },
+        ],
+      }),
+    );
+    expect(
+      tutorialProblems(wrong, null).some((p) => /composed picture/.test(p)),
+    ).toBe(true);
+  });
+
+  it('knows which manners move each outline, and what a motion may be given to', () => {
+    expect(mannersThatMove('insect')).toContain('flutter');
+    expect(mannersThatMove('insect')).not.toContain('swim');
+    expect(mannersThatMove('fish')).toContain('swim');
+    const spun = tutorialProblems(
+      tidyTutorial(
+        assembleTutorial(narration, {
+          moments: [
+            {
+              ...decisions.moments[0],
+              index: 0,
+              card: 'picture',
+              picture: 'document',
+              name: 'the deed',
+              motion: 'spin',
+            },
+          ],
+        }),
+      ),
+      null,
+    );
+    expect(spun.some((p) => /spin turns a round thing only/.test(p))).toBe(
+      true,
+    );
+    const shaken = tutorialProblems(
+      tidyTutorial(
+        assembleTutorial(narration, {
+          moments: [
+            {
+              ...decisions.moments[0],
+              index: 0,
+              card: 'picture',
+              picture: 'document',
+              name: 'the deed',
+              motion: 'shake',
+            },
+          ],
+        }),
+      ),
+      null,
+    );
+    expect(shaken.some((p) => /shake is for alarm/.test(p))).toBe(true);
   });
 });
 
@@ -185,6 +280,24 @@ describe('tidying what the models wrote', () => {
       { from: 1, to: 2, intent: 'b' },
       { from: 3, to: 3, intent: 'c' },
     ]);
+  });
+
+  it('cuts a moment that covers more sentences than a card may, the intent kept on each piece', () => {
+    const six = ['One.', 'Two.', 'Three.', 'Four.', 'Five.', 'Six.'];
+    const tidy = tidyNarration({
+      ...narration,
+      sentences: six,
+      moments: [
+        { from: 0, to: 4, intent: 'the five steps' },
+        { from: 5, to: 5, intent: 'the close' },
+      ],
+    });
+    expect(tidy.moments.map((m) => [m.from, m.to])).toEqual([
+      [0, 3],
+      [4, 4],
+      [5, 5],
+    ]);
+    expect(tidy.moments[1].intent).toBe('the five steps');
   });
 
   it('collapses line breaks in card text before checking it', () => {

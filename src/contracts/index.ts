@@ -250,6 +250,8 @@ export interface MaterialDto {
   simplified: { done: number; failed: number; total: number };
   /** Lecture rows per style, the segments around a chapter included: how many exist, have their words, are being voiced, have audio, failed. */
   lecture: Record<LectureStyle, LectureTally>;
+  /** Pages with a visual tutorial, or a reason there is none, over the pages. */
+  visuals: { done: number; total: number };
   /** What the model calls on this document have cost so far, summed from the ledger. */
   costUsd: number;
   /** Where the document stands, as the card draws it: three bars and one word. */
@@ -294,6 +296,8 @@ export interface BatchDto {
   scripts: { done: number; total: number };
   /** Lecture rows with their audio, all styles. */
   audio: { done: number; total: number };
+  /** Pages with a visual tutorial, or a reason there is none, over the pages. */
+  visuals: { done: number; total: number };
   failed: number;
   untaught: number;
   costUsd: number;
@@ -862,6 +866,109 @@ export type LessonIntent = 'quick' | 'thorough' | 'gentle';
 // ── Lectures ────────────────────────────────────────────────────────────────
 
 /** A scripted lecture segment's life: written, voiced, or given up on. */
+export type VisualSceneStatus =
+  'pending' | 'making' | 'done' | 'failed' | 'not_suitable';
+
+/** One chapter of a document's visuals, as the picker and the pane read it. */
+export interface VisualPageDto {
+  page: number;
+  /** The chapter the page is in, for grouping; null for a page outside every chapter. */
+  topicId: string | null;
+  chapterTitle: string | null;
+  /** The tutorial's own title, once made. */
+  title: string | null;
+  status: VisualSceneStatus | 'none';
+  /** Where a scene being made is: planning, drawing, recording, timing. */
+  step: string | null;
+  /** Why the page does not suit a tutorial, or why it failed. */
+  reason: string | null;
+  durationMs: number | null;
+  /** Set when the scene is done: fetched by the pane when it plays. */
+  hasScene: boolean;
+  /** How the words were timed once made: measured on the voice, or estimated. */
+  timing: 'aligned' | 'estimated' | null;
+}
+
+/** The document's visuals: every page, in order, with its chapter. */
+export interface VisualSetDto {
+  documentId: string;
+  pageCount: number;
+  pages: VisualPageDto[];
+}
+
+/** The scene as the pane plays it: the elements, and every sentence and cue on the audio. */
+export interface VisualTimelineDto {
+  version: 2;
+  generator: string;
+  title: string;
+  space: { w: number; h: number };
+  elements: (Record<string, unknown> & { id: string; type: string })[];
+  /** The same script placed for the pane's box and the full screen's wide stage. */
+  stagings: Record<
+    'box' | 'wide',
+    {
+      space: { w: number; h: number };
+      elements: (Record<string, unknown> & { id: string; type: string })[];
+    }
+  >;
+  segments: {
+    text: string;
+    startMs: number;
+    endMs: number;
+    /** [charStart, charEnd, startMs, endMs] per spoken word, chars into the scene's spoken text. */
+    words: number[][];
+    cues: { atMs: number; do: string; target: string }[];
+  }[];
+  durationMs: number;
+  timing: 'aligned' | 'estimated';
+}
+
+export interface VisualSceneDto {
+  page: number;
+  title: string;
+  durationMs: number;
+  timeline: VisualTimelineDto;
+}
+
+/** Ahead of a page, the way the lecture prepares, or pages by number. */
+export interface RequestVisualsRequest {
+  fromPage?: number;
+  pages?: number[];
+  /**
+   * page: the one press, this chapter from the page and the next when
+   * the runway is short; ahead: the runway topping itself up, the next
+   * chapter only; whole: every page. Omitted means page.
+   */
+  mode?: 'page' | 'ahead' | 'whole';
+}
+
+/** Where a learner stopped in a document's visuals. */
+export interface VisualPositionDto {
+  page: number;
+  offsetMs: number;
+  updatedAt: string | null;
+}
+
+/** The admin sending a batch, a selection, or one file to be drawn whole. */
+export interface VisualsRequest {
+  batchId?: string;
+  documentIds?: string[];
+}
+
+export interface VisualsResponse {
+  documents: number;
+  /** Pages sent to be drawn. */
+  queued: number;
+  /** Pages that had a tutorial, or one on its way, already. */
+  existing: number;
+}
+
+export interface RequestVisualsResponse extends VisualSetDto {
+  queued: number;
+  /** Chapters that were already made or being made. */
+  existing: number;
+}
+
 export type LectureSegmentStatus =
   | 'pending'
   | 'writing'

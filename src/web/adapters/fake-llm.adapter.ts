@@ -18,6 +18,12 @@ import type {
   SketchDraft,
   SketchTemplate,
 } from '../../business/ports/llm.port';
+import type { VisualJudgement, VisualPlan } from '../../business/domain/visual';
+import type {
+  VisualDecisions,
+  VisualNarration,
+  VisualTutorial,
+} from '../../business/domain/visual-cards';
 
 const EMBED_DIMENSIONS = 256;
 
@@ -501,6 +507,140 @@ export class FakeLlmAdapter implements LlmGatewayPort {
     return Promise.resolve({
       value: { shows: input.png.length > 0, wrong: null },
       usage: this.usage(started, 50, 10),
+    });
+  }
+
+  visualPlan(input: {
+    title: string;
+    topicTitle: string;
+    material: string;
+  }): Promise<LlmResult<VisualPlan>> {
+    const started = Date.now();
+    const sentences = input.material
+      .split(/(?<=[.!?])\s+/)
+      .map((s) => s.trim())
+      .filter((s) => s.split(/\s+/).length >= 4)
+      .slice(0, 5);
+    const terms = Array.from(
+      new Set(
+        (input.material.match(/[A-Za-z][a-z]{4,}/g) ?? []).map((w: string) =>
+          w.toLowerCase(),
+        ),
+      ),
+    ).slice(0, 4);
+    return Promise.resolve({
+      value: {
+        learningGoal: `What ${input.topicTitle} means`,
+        keyTerms: terms,
+        diagramConcept:
+          'A centre with what feeds it on the left and what comes out on the right',
+        centre: { what: input.topicTitle, how: 'shape', picture: null },
+        beats:
+          sentences.length >= 3
+            ? sentences
+            : [
+                ...sentences,
+                'One more beat here.',
+                'And another beat here.',
+                'The last beat here.',
+              ].slice(0, 4),
+        fit: sentences.length >= 3 ? 'good' : 'poor',
+        fitReason:
+          sentences.length >= 3 ? null : 'The chapter has too little to draw.',
+      },
+      usage: this.usage(started, 200, 80),
+    });
+  }
+
+  visualNarration(input: {
+    plan: VisualPlan;
+    topicTitle: string;
+    material: string;
+  }): Promise<LlmResult<VisualNarration>> {
+    const started = Date.now();
+    const sentences = [
+      'Here is the idea at the heart of this page, and why it is worth a few minutes of your time.',
+      'We will take it one piece at a time, so that each part makes sense before the next one comes.',
+      'The first thing to know is what feeds into it, and the second is what comes out the other side.',
+      'Keep those two ends in mind, because everything in between exists to turn one into the other.',
+      'In the middle sits the part the page keeps coming back to, the one that does the work.',
+      'Once you see how the middle connects the two ends, the rest of the page reads itself.',
+      'That is the shape of it, from what goes in to what comes out, with one thing in between.',
+      'So in one line, the page is about how one thing turns into another through the part in the middle.',
+    ];
+    return Promise.resolve({
+      value: {
+        title: input.topicTitle.slice(0, 60),
+        fit: 'good',
+        fitReason: null,
+        sentences,
+        moments: [
+          { from: 0, to: 1, intent: 'why this matters' },
+          {
+            from: 2,
+            to: 4,
+            intent: 'what goes in, what comes out, the part between',
+          },
+          { from: 5, to: 7, intent: 'the line to remember' },
+        ],
+      },
+      usage: this.usage(started, 400, 300),
+    });
+  }
+
+  visualDirector(input: {
+    narration: VisualNarration;
+    previous?: VisualDecisions;
+    only?: number[];
+  }): Promise<LlmResult<VisualDecisions>> {
+    const started = Date.now();
+    const moments = input.narration.moments.map((m, index) => ({
+      index,
+      reasoning: 'A plain card for the test.',
+      shouldSee: m.intent,
+      confidence: 'high' as const,
+      card: (index === 0 ? 'title' : 'statement') as 'title' | 'statement',
+      heading: index === 0 ? input.narration.title : undefined,
+      text: index === 0 ? undefined : m.intent,
+    }));
+    return Promise.resolve({
+      value: {
+        moments: input.only?.length
+          ? moments.filter((m) => input.only!.includes(m.index))
+          : moments,
+      },
+      usage: this.usage(started, 400, 300),
+    });
+  }
+
+  visualJudge(input: {
+    png: Buffer;
+    title: string;
+    moments: {
+      moment: number;
+      card: string;
+      drawings: string[];
+      shouldSee: string;
+    }[];
+  }): Promise<LlmResult<VisualJudgement>> {
+    const started = Date.now();
+    return Promise.resolve({
+      value: {
+        moments: input.moments.map((m) => ({
+          moment: m.moment,
+          drawings: m.drawings.map((name) => ({
+            name,
+            looksRight: true,
+            wrong: null,
+          })),
+          textTrouble: null,
+          crowded: false,
+          showsBrief: true,
+          verdict: 'go' as const,
+          note: null,
+        })),
+      },
+      usage: this.usage(started, 200, 100),
     });
   }
 

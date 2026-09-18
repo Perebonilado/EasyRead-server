@@ -25,7 +25,13 @@ export type LlmTask =
   | 'lecture_board'
   | 'lecture_diagram'
   | 'lecture_sketch'
+  | 'visual_plan'
+  | 'visual_script'
+  | 'visual_repair'
   | 'sketch_judge'
+  | 'visual_judge'
+  | 'visual_narration'
+  | 'visual_director'
   | 'learn_outline'
   | 'learn_write'
   | 'visualize_query'
@@ -181,6 +187,12 @@ export interface LectureBoardDraft {
 }
 
 /** A figure before layout: nodes, edges, groups, each citing the script. */
+import type { VisualJudgement, VisualPlan } from '../domain/visual';
+import type {
+  VisualDecisions,
+  VisualNarration,
+  VisualTutorial,
+} from '../domain/visual-cards';
 import type { SketchDraft, SketchTemplate } from '../domain/sketch';
 export type { SketchDraft, SketchTemplate } from '../domain/sketch';
 
@@ -453,6 +465,59 @@ export interface LlmGatewayPort {
     description: string;
     see: string;
   }): Promise<LlmResult<{ shows: boolean; wrong: string | null }>>;
+
+  /**
+   * Plans a visual: one chapter as a short timed scene. Says what the
+   * scene teaches, the one picture it draws, its beats, and how well the
+   * chapter suits a picture at all.
+   */
+  visualPlan(input: {
+    title: string;
+    topicTitle: string;
+    material: string;
+  }): Promise<LlmResult<VisualPlan>>;
+
+  /**
+   * Looks at a sheet of stills, one per moment, and says whether each
+   * drawing looks like what it is named for, and whether text or
+   * crowding gets in the way.
+   */
+  visualJudge(input: {
+    png: Buffer;
+    title: string;
+    /** Each moment by number: its card, the things it claims to draw, and what a learner should see. */
+    moments: {
+      moment: number;
+      card: string;
+      drawings: string[];
+      shouldSee: string;
+    }[];
+  }): Promise<LlmResult<VisualJudgement>>;
+
+  /** Narrates one page: the sentences, cut into moments with an intent each. No cards. */
+  visualNarration(input: {
+    plan: VisualPlan;
+    topicTitle: string;
+    material: string;
+    context?: string;
+  }): Promise<LlmResult<VisualNarration>>;
+
+  /**
+   * Decides how each moment is shown, reasoning first, from the menu of
+   * what the app can draw for the page. With `only` and `notes`, redoes
+   * those moments alone.
+   */
+  visualDirector(input: {
+    narration: VisualNarration;
+    menu: string;
+    plan: VisualPlan;
+    topicTitle: string;
+    material: string;
+    context?: string;
+    previous?: VisualDecisions;
+    only?: number[];
+    notes?: string[];
+  }): Promise<LlmResult<VisualDecisions>>;
 
   lectureSketch(input: {
     topicTitle: string;

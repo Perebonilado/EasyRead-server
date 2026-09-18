@@ -8,7 +8,11 @@ import type {
   SpeechPort,
   TranscriptionPort,
 } from '../../../business/ports/voice.port';
-import { mp3DurationMs, speechTooShort } from '../../../business/domain/speech';
+import {
+  joinMp3Pieces,
+  mp3DurationMs,
+  speechTooShort,
+} from '../../../business/domain/speech';
 
 /**
  * Text-to-speech through the AI SDK's OpenAI provider.
@@ -37,12 +41,20 @@ export class OpenAiSpeechAdapter implements SpeechPort {
     voice,
     instructions,
     speed,
+    pieces,
   }: {
     text: string;
     voice?: string;
     instructions?: string;
     speed?: number;
-  }): Promise<{ audio: Buffer; mimeType: string; model: string }> {
+    pieces?: { text: string; speed: number; pauseAfter: number }[];
+  }): Promise<{
+    audio: Buffer;
+    mimeType: string;
+    model: string;
+    durationMs?: number;
+    pieceStartsMs?: number[];
+  }> {
     const { experimental_generateSpeech } = await import('ai');
     const { createOpenAI } = await import('@ai-sdk/openai');
 
@@ -53,12 +65,6 @@ export class OpenAiSpeechAdapter implements SpeechPort {
       apiKey: this.config.getOrThrow<string>('OPENAI_API_KEY'),
     });
 
-    // A dense page can exceed the provider's input cap, so long text is read
-    // in sentence-aligned chunks. Bare MP3 frames are self-contained, which is
-    // what makes concatenating the chunks yield one playable stream.
-    const parts = chunkText(text, OpenAiSpeechAdapter.INPUT_LIMIT);
-    const buffers: Buffer[] = [];
-
     // The instruction-steered models take delivery in words; the older
     // ones take a rate, and reject instructions. Each gets only its own.
     const steerable = model.startsWith('gpt-');
@@ -67,12 +73,12 @@ export class OpenAiSpeechAdapter implements SpeechPort {
       ...(!steerable && speed && speed !== 1 ? { speed } : {}),
     };
 
-    for (const part of parts) {
-      // The instruction-steered voice sometimes stops a few sentences in
-      // and returns the fragment as if it were the whole. A chunk far
-      // shorter than its words is asked for again, and given up on with a
-      // clear error rather than saved as a page with six seconds of audio.
-      let audio: Buffer | null = null;
+    // One part spoken. The instruction-steered voice sometimes stops a
+    // few sentences in and returns the fragment as if it were the whole.
+    // A part far shorter than its words is asked for again, and given up
+    // on with a clear error rather than saved as a page with six seconds
+    // of audio.
+    const speak = async (part: string): Promise<Buffer> => {
       for (let attempt = 1; attempt <= SHORT_SPEECH_ATTEMPTS; attempt += 1) {
         const result = await experimental_generateSpeech({
           model: openai.speech(model),
@@ -82,21 +88,56 @@ export class OpenAiSpeechAdapter implements SpeechPort {
           ...delivery,
         });
         const bytes = Buffer.from(result.audio.uint8Array);
-        if (!speechTooShort(bytes.length, part.length)) {
-          audio = bytes;
-          break;
-        }
+        if (!speechTooShort(bytes.length, part.length)) return bytes;
         this.logger.warn(
           `Speech came back short: ${Math.round(mp3DurationMs(bytes.length) / 1000)}s for ${part.length} chars (attempt ${attempt} of ${SHORT_SPEECH_ATTEMPTS})`,
         );
       }
-      if (!audio) {
-        throw new Error(
-          `The voice stopped early: ${part.length} characters came back as a few seconds of audio, three times`,
-        );
-      }
-      buffers.push(audio);
+      throw new Error(
+        `The voice stopped early: ${part.length} characters came back as a few seconds of audio, three times`,
+      );
+    };
+
+    // Pieces are spoken one by one, a few at a time, and joined with real
+    // silence between them, so the pauses a scene asks for exist and the
+    // start of every piece is known to the frame.
+    if (pieces?.length) {
+      const spoken: Buffer[] = new Array(pieces.length);
+      let next = 0;
+      const worker = async () => {
+        while (next < pieces.length) {
+          const index = next;
+          next += 1;
+          spoken[index] = await speak(pieces[index].text);
+        }
+      };
+      await Promise.all(
+        Array.from({ length: Math.min(PIECES_AT_ONCE, pieces.length) }, worker),
+      );
+      const joined = joinMp3Pieces(
+        pieces.map((piece, index) => ({
+          audio: spoken[index],
+          pauseAfterS: piece.pauseAfter,
+        })),
+      );
+      this.logger.log(
+        `Synthesised ${pieces.length} pieces, ${Math.round(joined.durationMs / 1000)}s, via ${model}/${chosenVoice}`,
+      );
+      return {
+        audio: joined.audio,
+        mimeType: 'audio/mpeg',
+        model,
+        durationMs: joined.durationMs,
+        pieceStartsMs: joined.startsMs,
+      };
     }
+
+    // A dense page can exceed the provider's input cap, so long text is read
+    // in sentence-aligned chunks. Bare MP3 frames are self-contained, which is
+    // what makes concatenating the chunks yield one playable stream.
+    const parts = chunkText(text, OpenAiSpeechAdapter.INPUT_LIMIT);
+    const buffers: Buffer[] = [];
+    for (const part of parts) buffers.push(await speak(part));
 
     this.logger.log(
       `Synthesised ${text.length} chars in ${parts.length} chunk(s) via ${model}/${chosenVoice}`,
@@ -104,6 +145,9 @@ export class OpenAiSpeechAdapter implements SpeechPort {
     return { audio: Buffer.concat(buffers), mimeType: 'audio/mpeg', model };
   }
 }
+
+/** How many pieces of a page are spoken at once. */
+const PIECES_AT_ONCE = 3;
 
 /** How many times a chunk that comes back short is asked for. */
 const SHORT_SPEECH_ATTEMPTS = 3;

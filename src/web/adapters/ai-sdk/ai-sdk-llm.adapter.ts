@@ -19,6 +19,15 @@ import type {
   SketchDraft,
   SketchTemplate,
 } from '../../../business/ports/llm.port';
+import type {
+  VisualJudgement,
+  VisualPlan,
+} from '../../../business/domain/visual';
+import type {
+  VisualDecisions,
+  VisualNarration,
+  VisualTutorial,
+} from '../../../business/domain/visual-cards';
 import { PROMPTS } from '../prompts';
 import { ModelRegistry, type ModelRef } from './models';
 import {
@@ -31,6 +40,10 @@ import {
   lectureBoardSchema,
   lectureDiagramSchema,
   lectureSketchSchema,
+  visualPlanSchema,
+  visualJudgeSchema,
+  visualNarrationSchema,
+  visualDecisionsSchema,
   sketchJudgeSchema,
   lectureExtraSchema,
   spokenQuizSchema,
@@ -672,6 +685,158 @@ export class AiSdkLlmAdapter implements LlmGatewayPort, OnModuleInit {
           ],
         },
       ],
+      maxRetries: this.maxRetries(),
+    });
+    return {
+      value: result.object,
+      usage: this.usage(ref, result.usage, started),
+    };
+  }
+
+  async visualJudge(input: {
+    png: Buffer;
+    title: string;
+    moments: {
+      moment: number;
+      card: string;
+      drawings: string[];
+      shouldSee: string;
+    }[];
+  }): Promise<LlmResult<VisualJudgement>> {
+    const started = Date.now();
+    const { generateObject } = await this.registry.modules();
+    const { model, ref } = await this.registry.languageModel('visual_judge');
+    const listed = input.moments
+      .map(
+        (m) =>
+          `${m.moment}. ${m.card} card${m.drawings.length ? `, drawing: ${m.drawings.join('; ')}` : ', no drawing'}. Should see: ${m.shouldSee}`,
+      )
+      .join('\n');
+    const result = await generateObject({
+      model,
+      schema: visualJudgeSchema,
+      system: PROMPTS.visualJudge,
+      messages: [
+        {
+          role: 'user' as const,
+          content: [
+            {
+              type: 'image' as const,
+              image: input.png,
+              mediaType: 'image/png',
+            },
+            {
+              type: 'text' as const,
+              text: `The lesson is "${input.title}". The moments, by number:\n${listed}`,
+            },
+          ],
+        },
+      ],
+      maxRetries: this.maxRetries(),
+    });
+    return {
+      value: result.object,
+      usage: this.usage(ref, result.usage, started),
+    };
+  }
+
+  async visualNarration(input: {
+    plan: VisualPlan;
+    topicTitle: string;
+    material: string;
+    context?: string;
+  }): Promise<LlmResult<VisualNarration>> {
+    const started = Date.now();
+    const { generateObject } = await this.registry.modules();
+    const { model, ref } =
+      await this.registry.languageModel('visual_narration');
+    const result = await generateObject({
+      model,
+      schema: visualNarrationSchema,
+      system: PROMPTS.visualNarration,
+      prompt: [
+        `Chapter: ${input.topicTitle}`,
+        input.context ? `This page: ${input.context}` : '',
+        `The chapter's plan: ${JSON.stringify(input.plan)}`,
+        `The page:\n${input.material}`,
+      ]
+        .filter(Boolean)
+        .join('\n\n'),
+      maxRetries: this.maxRetries(),
+    });
+    return {
+      value: result.object,
+      usage: this.usage(ref, result.usage, started),
+    };
+  }
+
+  async visualDirector(input: {
+    narration: VisualNarration;
+    menu: string;
+    plan: VisualPlan;
+    topicTitle: string;
+    material: string;
+    context?: string;
+    previous?: VisualDecisions;
+    only?: number[];
+    notes?: string[];
+  }): Promise<LlmResult<VisualDecisions>> {
+    const started = Date.now();
+    const { generateObject } = await this.registry.modules();
+    const { model, ref } = await this.registry.languageModel('visual_director');
+    const moments = input.narration.moments
+      .map(
+        (m, i) =>
+          `${i}. sentences ${m.from} to ${m.to}: "${input.narration.sentences.slice(m.from, m.to + 1).join(' ')}" Intent: ${m.intent}`,
+      )
+      .join('\n');
+    const redo =
+      input.only?.length && input.previous
+        ? [
+            `Redo moments ${input.only.join(', ')} only. What was wrong:\n- ${(input.notes ?? []).join('\n- ')}`,
+            `Your earlier decisions for them: ${JSON.stringify(input.previous.moments.filter((d) => input.only!.includes(d.index)))}`,
+          ]
+        : [];
+    const result = await generateObject({
+      model,
+      schema: visualDecisionsSchema,
+      system: `${PROMPTS.visualDirector}\n\n${PROMPTS.visualCardGuide}`,
+      prompt: [
+        `Chapter: ${input.topicTitle}`,
+        input.context ? `This page: ${input.context}` : '',
+        `The chapter's plan: ${JSON.stringify(input.plan)}`,
+        `The page:\n${input.material}`,
+        `The narration, by moment:\n${moments}`,
+        `The menu of what can be drawn for this page:\n${input.menu}`,
+        ...redo,
+      ]
+        .filter(Boolean)
+        .join('\n\n'),
+      maxRetries: this.maxRetries(),
+    });
+    return {
+      value: result.object as VisualDecisions,
+      usage: this.usage(ref, result.usage, started),
+    };
+  }
+
+  async visualPlan(input: {
+    title: string;
+    topicTitle: string;
+    material: string;
+  }): Promise<LlmResult<VisualPlan>> {
+    const started = Date.now();
+    const { generateObject } = await this.registry.modules();
+    const { model, ref } = await this.registry.languageModel('visual_plan');
+    const result = await generateObject({
+      model,
+      schema: visualPlanSchema,
+      system: PROMPTS.visualPlan,
+      prompt: [
+        `Document: ${input.title}`,
+        `Chapter: ${input.topicTitle}`,
+        `\nThe chapter, from which every beat and term must come:\n${input.material}`,
+      ].join('\n'),
       maxRetries: this.maxRetries(),
     });
     return {
@@ -1642,4 +1807,22 @@ export class AiSdkLlmAdapter implements LlmGatewayPort, OnModuleInit {
       .filter(Boolean)
       .map((paragraph) => ({ type: 'paragraph' as const, text: paragraph }));
   }
+}
+
+/**
+ * A schema in strict mode has every optional field present as null; the
+ * domain wants them absent. Nulls go, at every depth, arrays kept.
+ */
+function withoutNulls(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(withoutNulls);
+  if (value && typeof value === 'object') {
+    const out: Record<string, unknown> = {};
+    for (const [key, inner] of Object.entries(value)) {
+      // A model now and then writes the word null instead of the value.
+      if (inner === null || inner === 'null' || inner === '') continue;
+      out[key] = withoutNulls(inner);
+    }
+    return out;
+  }
+  return value;
 }

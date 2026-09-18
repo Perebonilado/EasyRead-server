@@ -34,6 +34,7 @@ function build(planRows: unknown[], segmentRows: unknown[]) {
     { findAll: async () => segmentRows } as never,
     { findAll: async () => [] } as never,
     { findAll: async () => planRows } as never,
+    { findAll: async () => [] } as never,
   );
 }
 

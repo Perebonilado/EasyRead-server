@@ -21,6 +21,14 @@ const API_KEY_VAR: Record<ProviderName, string> = {
  * can start with one model everywhere and later move only the expensive tasks —
  * simplification is 300 calls a document, a highlight is one.
  */
+/** The setting a task falls back to before the default, when it has none of its own. */
+const TASK_SHARED: Partial<Record<LlmTask, string>> = {
+  visual_narration: 'AI_MODEL_VISUAL_SCRIPT',
+  visual_director: 'AI_MODEL_VISUAL_SCRIPT',
+  visual_judge: 'AI_MODEL_VISUAL_SCRIPT',
+  visual_plan: 'AI_MODEL_VISUAL_SCRIPT',
+};
+
 const TASK_VAR: Record<LlmTask, string> = {
   lecture_outline: 'AI_MODEL_LECTURE_OUTLINE',
   lecture_segment: 'AI_MODEL_LECTURE_SEGMENT',
@@ -33,7 +41,13 @@ const TASK_VAR: Record<LlmTask, string> = {
   // The tutor's live sketch fills a template; the small default model
   // cannot, so a deployment points this at a stronger one.
   lecture_sketch: 'AI_MODEL_LECTURE_SKETCH',
+  visual_plan: 'AI_MODEL_VISUAL_PLAN',
+  visual_script: 'AI_MODEL_VISUAL_SCRIPT',
+  visual_repair: 'AI_MODEL_VISUAL_REPAIR',
   sketch_judge: 'AI_MODEL_SKETCH_JUDGE',
+  visual_judge: 'AI_MODEL_VISUAL_JUDGE',
+  visual_narration: 'AI_MODEL_VISUAL_NARRATION',
+  visual_director: 'AI_MODEL_VISUAL_DIRECTOR',
   ocr_page: 'AI_MODEL_OCR',
   summarize: 'AI_MODEL_SUMMARIZE',
   topics_outline: 'AI_MODEL_TOPICS',
@@ -155,7 +169,16 @@ export class ModelRegistry {
   refFor(task: LlmTask): ModelRef {
     const fallback =
       task === 'embed' ? this.defaultEmbedSpec() : this.defaultSpec();
-    return parseModelRef(this.config.get<string>(TASK_VAR[task]) || fallback);
+    // The visual writers share one setting unless given their own: the
+    // narrator, the director and the judge are the script writer's job
+    // split three ways, and a deployment that set the one should not
+    // fall to the small default on the others.
+    const shared = TASK_SHARED[task];
+    return parseModelRef(
+      this.config.get<string>(TASK_VAR[task]) ||
+        (shared ? this.config.get<string>(shared) : undefined) ||
+        fallback,
+    );
   }
 
   async languageModel(

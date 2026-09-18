@@ -54,6 +54,15 @@ export interface LectureBoardJob extends PipelineJob {
 }
 
 /** The follow-along track for one row. */
+export interface VisualSceneJob extends PipelineJob {
+  pageNumber: number;
+  /** The chapter the page is in. */
+  topicId: string;
+  requestedBy: string;
+  /** Lower goes first; the page the learner is on gets 1. */
+  priority?: number;
+}
+
 export interface LectureFollowJob extends PipelineJob {
   pageNumber: number;
   style: LectureStyle;
@@ -88,6 +97,8 @@ export interface JobQueuePort {
   enqueueLectureBoards(jobs: LectureBoardJob[]): Promise<void>;
   /** Follow-along tracks, nearest the learner first when a priority is given. */
   enqueueLectureFollows(jobs: LectureFollowJob[]): Promise<void>;
+  /** A chapter's scene; asking again for one being made changes nothing. */
+  enqueueVisualScenes(jobs: VisualSceneJob[]): Promise<void>;
   /** Writes a document about a topic, then starts the normal pipeline. */
   enqueueLearn(job: PipelineJob): Promise<void>;
   /** Fetches an imported document's pages, then starts the normal pipeline. */

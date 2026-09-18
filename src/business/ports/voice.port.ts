@@ -32,6 +32,8 @@ export interface SpeechPort {
     gpuSeconds?: number;
     /** The audio's true length as the service measured it; absent when it did not say. */
     durationMs?: number;
+    /** Where each piece starts in the audio, in order, when the voice spoke pieces and measured them. */
+    pieceStartsMs?: number[];
   }>;
   /** What goes into a file's name so audio from one voice never overwrites another's. */
   label(): { model: string; voice: string };

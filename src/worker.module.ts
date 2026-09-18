@@ -14,6 +14,7 @@ import { LectureAlignProcessor } from './pipeline/processors/lecture-align.proce
 import { LectureDiagramProcessor } from './pipeline/processors/lecture-diagram.processor';
 import { LectureBoardProcessor } from './pipeline/processors/lecture-board.processor';
 import { LectureFollowProcessor } from './pipeline/processors/lecture-follow.processor';
+import { VisualSceneProcessor } from './pipeline/processors/visual-scene.processor';
 import { LectureFollowService } from './pipeline/processors/lecture-follow.service';
 import { LectureBoardService } from './pipeline/processors/lecture-board.service';
 import { SimplifyPageProcessor } from './pipeline/processors/simplify.processor';
@@ -43,6 +44,7 @@ import { WorkerRunner } from './pipeline/worker-runner.service';
     LectureDiagramProcessor,
     LectureBoardProcessor,
     LectureFollowProcessor,
+    VisualSceneProcessor,
     LectureFollowService,
     LectureBoardService,
     ExportProcessor,

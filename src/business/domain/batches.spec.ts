@@ -22,6 +22,7 @@ const material = (
     },
     progress: { state, failed: 0, untaught: 0 },
     costUsd: 0.5,
+    visuals: { done: 0, total: 0 },
     ...extra,
   }) as unknown as MaterialDto;
 

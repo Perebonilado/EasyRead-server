@@ -166,6 +166,8 @@ import { LectureController } from './web/controllers/lecture.controller';
 import { VisualsController } from './web/controllers/visuals.controller';
 import {
   RequestVisualsHandler,
+  SaveVisualPositionHandler,
+  VisualPositionHandler,
   VisualSceneHandler,
   VisualSetHandler,
 } from './business/handlers/documents/visual.handlers';
@@ -182,6 +184,7 @@ import {
   RemoveMaterialHandler,
   PrepareMaterialsHandler,
   PublishMaterialsHandler,
+  VisualsMaterialsHandler,
   VoiceMaterialsHandler,
 } from './business/handlers/institutions/materials.handlers';
 import { MaterialsQuery } from './query/materials.query';
@@ -237,6 +240,7 @@ const handlers = [
   PrepareMaterialsHandler,
   PublishMaterialsHandler,
   VoiceMaterialsHandler,
+  VisualsMaterialsHandler,
   CreateGroupHandler,
   JoinGroupHandler,
   ListGroupsHandler,
@@ -289,6 +293,8 @@ const handlers = [
   VisualSetHandler,
   RequestVisualsHandler,
   VisualSceneHandler,
+  VisualPositionHandler,
+  SaveVisualPositionHandler,
   BackfillBoardsHandler,
   SaveLecturePositionHandler,
   SetLectureStyleHandler,

@@ -24,7 +24,27 @@ export interface VisualSceneRecord {
   updatedAt: Date | null;
 }
 
+/** Where a learner stopped in a document's visuals. */
+export interface VisualPositionRecord {
+  documentId: string;
+  userId: string;
+  pageNumber: number;
+  offsetMs: number;
+  updatedAt: Date | null;
+}
+
 export interface VisualSceneRepository {
+  /** The learner's last position in the document's visuals, if any. */
+  findPosition(
+    documentId: string,
+    userId: string,
+  ): Promise<VisualPositionRecord | null>;
+  savePosition(input: {
+    documentId: string;
+    userId: string;
+    pageNumber: number;
+    offsetMs: number;
+  }): Promise<void>;
   find(
     documentId: string,
     contentVersion: number,

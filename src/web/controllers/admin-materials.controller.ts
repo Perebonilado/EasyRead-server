@@ -33,6 +33,7 @@ import {
   type LectureStyle,
   type MaterialDto,
   type PrepareResponse,
+  type VisualsResponse,
   type VoiceResponse,
   MaterialPageDto,
 } from '../../contracts';
@@ -43,6 +44,7 @@ import {
   PrepareMaterialsHandler,
   PublishMaterialsHandler,
   RemoveMaterialHandler,
+  VisualsMaterialsHandler,
   VoiceMaterialsHandler,
 } from '../../business/handlers/institutions/materials.handlers';
 import { BatchesQuery } from '../../query/batches.query';
@@ -148,6 +150,19 @@ class VoiceDto {
   revoice?: boolean;
 }
 
+/** A batch, a selection, or one file to be drawn whole. */
+class VisualsDto {
+  @IsOptional()
+  @IsUUID('all')
+  batchId?: string;
+
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(500)
+  @IsUUID('all', { each: true })
+  documentIds?: string[];
+}
+
 /** A batch, a selection, or one file published to the school's students, or hidden. */
 class PublishDto {
   @IsOptional()
@@ -220,9 +235,26 @@ export class AdminMaterialsController {
     private readonly removeMaterial: RemoveMaterialHandler,
     private readonly prepare: PrepareMaterialsHandler,
     private readonly voice: VoiceMaterialsHandler,
+    private readonly visuals: VisualsMaterialsHandler,
     private readonly publish: PublishMaterialsHandler,
     private readonly batches: BatchesQuery,
   ) {}
+
+  /** A batch, a selection, or one file drawn whole: every page's visual tutorial. */
+  @Post('visuals')
+  @HttpCode(202)
+  async drawMany(
+    @CurrentUser('id') userId: string,
+    @Param('id') institutionId: string,
+    @Body() body: VisualsDto,
+  ): Promise<VisualsResponse> {
+    const { data } = await this.visuals.handle({
+      userId,
+      institutionId,
+      ...body,
+    });
+    return data;
+  }
 
   /** The admin's drops, newest first, each with its files' tallies and one state. */
   @Get('batches')

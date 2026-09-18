@@ -33,6 +33,7 @@ function batchOf(id: string, files: MaterialDto[]): BatchDto {
   const text = { done: 0, total: files.length };
   const scripts = { done: 0, total: 0 };
   const audio = { done: 0, total: 0 };
+  const visuals = { done: 0, total: 0 };
   let failed = 0;
   let untaught = 0;
   let costUsd = 0;
@@ -46,6 +47,8 @@ function batchOf(id: string, files: MaterialDto[]): BatchDto {
       audio.total += tally.total;
       audio.done += tally.ready;
     }
+    visuals.done += file.visuals.done;
+    visuals.total += file.visuals.total;
     failed += file.progress.failed;
     untaught += file.progress.untaught;
     costUsd += file.costUsd;
@@ -61,6 +64,7 @@ function batchOf(id: string, files: MaterialDto[]): BatchDto {
     text,
     scripts,
     audio,
+    visuals,
     failed,
     untaught,
     costUsd: Math.round(costUsd * 100) / 100,

@@ -3,9 +3,11 @@ import type {
   RequestVisualsResponse,
   VisualPageDto,
   VisualSetDto,
+  VisualPositionDto,
 } from '../../../contracts';
-import { chaptersAhead } from '../../domain/lecture-ahead';
+import type { Document } from '../../domain/entities/document';
 import { VISUAL_GENERATOR_VERSION } from '../../domain/visual';
+import { pagesWanted, type VisualsMode } from '../../domain/visual-ahead';
 import { NotFoundError, ValidationError } from '../../domain/errors/errors';
 import { JOB_QUEUE } from '../../ports/tokens';
 import type { JobQueuePort, VisualSceneJob } from '../../ports/job-queue.port';
@@ -112,6 +114,8 @@ export class VisualSetHandler extends AbstractRequestHandlerTemplate<
 export interface RequestVisualsCommand extends VisualSetRequest {
   /** Ahead of this page, the way the lecture prepares: the chapter from here, the next when the runway is short, a small book whole. */
   fromPage?: number;
+  /** How much to make: the one press, the runway's top-up, or the whole book. */
+  mode?: VisualsMode;
   /** Or these pages by number. */
   pages?: number[];
 }
@@ -142,89 +146,193 @@ export class RequestVisualsHandler extends AbstractRequestHandlerTemplate<
 
   protected async handleRequest(cmd: RequestVisualsCommand) {
     const doc = await this.access.require(cmd.documentId, cmd.userId);
-    if (doc.props.status !== 'ready') {
-      throw new ValidationError('The document is still being prepared');
-    }
-    const pageCount = doc.props.pageCount ?? 0;
-    const topics = await this.topics.listByDocument(doc.id);
-    if (!topics.length || !pageCount) {
-      throw new ValidationError('This document has no chapters to draw from');
-    }
-    const byNumber = Boolean(cmd.pages?.length);
-    const wanted: { page: number; priority: number }[] = [];
-    if (byNumber) {
-      Array.from(new Set(cmd.pages))
-        .filter((page) => page >= 1 && page <= pageCount)
-        .sort((a, b) => a - b)
-        .forEach((page, i) => wanted.push({ page, priority: i + 1 }));
-    } else {
-      const from = Math.max(1, Math.min(pageCount, cmd.fromPage ?? 1));
-      const ahead = chaptersAhead({
-        topics: topics.map((topic) => ({
-          id: topic.id,
-          startPage: topic.startPage,
-          endPage: topic.endPage,
-        })),
-        pageCount,
-        page: from,
-        written: new Set(),
-      });
-      for (const chapter of ahead) {
-        const topic = topics.find((t) => t.id === chapter.topicId);
-        if (!topic) continue;
-        const start = chapter.startAtPage ?? topic.startPage;
-        for (let page = start; page <= topic.endPage; page += 1) {
-          wanted.push({ page, priority: wanted.length + 1 });
-        }
-      }
-    }
-    if (!wanted.length) throw new NotFoundError('Page');
-    const texts = await this.pages.findRange(doc.id, 1, pageCount);
-    const empty = new Set(
-      texts.filter((row) => row.isEmpty).map((row) => row.pageNumber),
+    const result = await queueVisuals(
+      {
+        topics: this.topics,
+        pages: this.pages,
+        visuals: this.visuals,
+        queue: this.queue,
+      },
+      {
+        doc,
+        userId: cmd.userId,
+        mode: cmd.mode ?? 'page',
+        fromPage: cmd.fromPage ?? 1,
+        pages: cmd.pages,
+      },
     );
-    let queued = 0;
-    let existing = 0;
-    const jobs: VisualSceneJob[] = [];
-    for (const { page, priority } of wanted) {
-      const chapter = chapterOf(topics, page);
-      if (!chapter || empty.has(page)) continue;
-      const { record, created } = await this.visuals.ensure({
-        documentId: doc.id,
-        contentVersion: doc.contentVersion,
-        pageNumber: page,
-        topicId: chapter.id,
-        generatorVersion: VISUAL_GENERATOR_VERSION,
-        requestedBy: cmd.userId,
-      });
-      const again =
-        !created &&
-        (record.status === 'failed' ||
-          (byNumber && record.status === 'not_suitable'));
-      if (again) await this.visuals.resetForRetry(record.id);
-      if (created || again) {
-        queued += 1;
-        jobs.push({
-          documentId: doc.id,
-          contentVersion: doc.contentVersion,
-          pageNumber: page,
-          topicId: chapter.id,
-          requestedBy: cmd.userId,
-          priority,
-        });
-      } else {
-        existing += 1;
-      }
-    }
-    if (jobs.length) await this.queue.enqueueVisualScenes(jobs);
     const set = await setOf(
       this.topics,
       this.visuals,
       doc.id,
       doc.contentVersion,
-      pageCount,
+      doc.props.pageCount ?? 0,
     );
-    return CommandResponse.of({ ...set, queued, existing });
+    return CommandResponse.of({ ...set, ...result });
+  }
+}
+
+/** What queuing visuals needs of the world. */
+export interface VisualsQueueDeps {
+  topics: TopicRepository;
+  pages: DocumentPageRepository;
+  visuals: VisualSceneRepository;
+  queue: JobQueuePort;
+}
+
+/**
+ * The pages a request wants, queued: rows made where none exist, failed
+ * ones asked for again, named ones asked again even when not suited.
+ * Empty pages and pages outside every chapter are skipped. Shared by the
+ * reader's request and the admin's batch.
+ */
+export async function queueVisuals(
+  deps: VisualsQueueDeps,
+  input: {
+    doc: Document;
+    userId: string;
+    mode: VisualsMode;
+    fromPage: number;
+    pages?: number[];
+  },
+): Promise<{ queued: number; existing: number }> {
+  const { doc } = input;
+  if (doc.props.status !== 'ready') {
+    throw new ValidationError('The document is still being prepared');
+  }
+  const pageCount = doc.props.pageCount ?? 0;
+  const topics = await deps.topics.listByDocument(doc.id);
+  if (!topics.length || !pageCount) {
+    throw new ValidationError('This document has no chapters to draw from');
+  }
+  const byNumber = Boolean(input.pages?.length);
+  const rows = await deps.visuals.listByDocument(
+    doc.id,
+    doc.contentVersion,
+    VISUAL_GENERATOR_VERSION,
+  );
+  // A page with a row on its way or made is had; a failed one is not,
+  // and a named page is asked again whatever its row says.
+  const have = new Set(
+    rows
+      .filter((row) => (byNumber ? false : row.status !== 'failed'))
+      .map((row) => row.pageNumber),
+  );
+  const wanted = pagesWanted({
+    mode: input.mode,
+    fromPage: input.fromPage,
+    pages: input.pages,
+    topics: topics.map((topic) => ({
+      id: topic.id,
+      startPage: topic.startPage,
+      endPage: topic.endPage,
+    })),
+    pageCount,
+    have,
+  });
+  if (!wanted.length && byNumber) throw new NotFoundError('Page');
+  const texts = await deps.pages.findRange(doc.id, 1, pageCount);
+  const empty = new Set(
+    texts.filter((row) => row.isEmpty).map((row) => row.pageNumber),
+  );
+  let queued = 0;
+  let existing = 0;
+  const jobs: VisualSceneJob[] = [];
+  for (const { page, priority } of wanted) {
+    const chapter = chapterOf(topics, page);
+    if (!chapter || empty.has(page)) continue;
+    const { record, created } = await deps.visuals.ensure({
+      documentId: doc.id,
+      contentVersion: doc.contentVersion,
+      pageNumber: page,
+      topicId: chapter.id,
+      generatorVersion: VISUAL_GENERATOR_VERSION,
+      requestedBy: input.userId,
+    });
+    const again =
+      !created &&
+      (record.status === 'failed' ||
+        (byNumber && record.status === 'not_suitable'));
+    if (again) await deps.visuals.resetForRetry(record.id);
+    if (created || again) {
+      queued += 1;
+      jobs.push({
+        documentId: doc.id,
+        contentVersion: doc.contentVersion,
+        pageNumber: page,
+        topicId: chapter.id,
+        requestedBy: input.userId,
+        priority,
+      });
+    } else {
+      existing += 1;
+    }
+  }
+  if (jobs.length) await deps.queue.enqueueVisualScenes(jobs);
+  return { queued, existing };
+}
+
+export interface VisualPositionRequest extends VisualSetRequest {}
+
+/** Where the learner stopped in this document's visuals, if anywhere. */
+@Injectable()
+export class VisualPositionHandler extends AbstractRequestHandlerTemplate<
+  VisualPositionRequest,
+  VisualPositionDto | null
+> {
+  constructor(
+    @Inject(VISUAL_SCENE_REPOSITORY)
+    private readonly visuals: VisualSceneRepository,
+    private readonly access: DocumentAccessService,
+  ) {
+    super();
+  }
+
+  protected async handleRequest(cmd: VisualPositionRequest) {
+    const doc = await this.access.require(cmd.documentId, cmd.userId);
+    const found = await this.visuals.findPosition(doc.id, cmd.userId);
+    return CommandResponse.of(
+      found
+        ? {
+            page: found.pageNumber,
+            offsetMs: found.offsetMs,
+            updatedAt: found.updatedAt ? found.updatedAt.toISOString() : null,
+          }
+        : null,
+    );
+  }
+}
+
+export interface SaveVisualPositionRequest extends VisualSetRequest {
+  page: number;
+  offsetMs: number;
+}
+
+/** The learner's place in the visuals, saved as they play. */
+@Injectable()
+export class SaveVisualPositionHandler extends AbstractRequestHandlerTemplate<
+  SaveVisualPositionRequest,
+  VisualPositionDto
+> {
+  constructor(
+    @Inject(VISUAL_SCENE_REPOSITORY)
+    private readonly visuals: VisualSceneRepository,
+    private readonly access: DocumentAccessService,
+  ) {
+    super();
+  }
+
+  protected async handleRequest(cmd: SaveVisualPositionRequest) {
+    const doc = await this.access.require(cmd.documentId, cmd.userId);
+    const page = Math.max(1, Math.round(cmd.page));
+    const offsetMs = Math.max(0, Math.round(cmd.offsetMs));
+    await this.visuals.savePosition({
+      documentId: doc.id,
+      userId: cmd.userId,
+      pageNumber: page,
+      offsetMs,
+    });
+    return CommandResponse.of({ page, offsetMs, updatedAt: null });
   }
 }
 

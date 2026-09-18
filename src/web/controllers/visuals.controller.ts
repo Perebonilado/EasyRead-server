@@ -6,19 +6,30 @@ import {
   Inject,
   Param,
   ParseIntPipe,
+  Patch,
   Post,
   Res,
 } from '@nestjs/common';
-import { ArrayMaxSize, IsArray, IsInt, IsOptional, Min } from 'class-validator';
+import {
+  ArrayMaxSize,
+  IsArray,
+  IsIn,
+  IsInt,
+  IsOptional,
+  Min,
+} from 'class-validator';
 import type { Response } from 'express';
 import type {
   RequestVisualsRequest,
   RequestVisualsResponse,
+  VisualPositionDto,
   VisualSceneDto,
   VisualSetDto,
 } from '../../contracts';
 import {
   RequestVisualsHandler,
+  SaveVisualPositionHandler,
+  VisualPositionHandler,
   VisualSceneHandler,
   VisualSetHandler,
 } from '../../business/handlers/documents/visual.handlers';
@@ -38,6 +49,21 @@ class RequestVisualsDto implements RequestVisualsRequest {
   @IsInt({ each: true })
   @Min(1, { each: true })
   pages?: number[];
+
+  @IsOptional()
+  @IsIn(['page', 'ahead', 'whole'])
+  mode?: 'page' | 'ahead' | 'whole';
+}
+
+/** Where the learner is: the page and the time into it. */
+class VisualPositionBody {
+  @IsInt()
+  @Min(1)
+  page!: number;
+
+  @IsInt()
+  @Min(0)
+  offsetMs!: number;
 }
 
 /** A document's visuals: pages as short tutorials, asked for from the reader. */
@@ -47,8 +73,35 @@ export class VisualsController {
     private readonly set: VisualSetHandler,
     private readonly request: RequestVisualsHandler,
     private readonly scene: VisualSceneHandler,
+    private readonly position: VisualPositionHandler,
+    private readonly savePosition: SaveVisualPositionHandler,
     @Inject(STORAGE) private readonly storage: StoragePort,
   ) {}
+
+  /** Where the learner stopped last time, or null. Before the page routes, so "position" is never read as a page. */
+  @Get('position')
+  async where(
+    @CurrentUser('id') userId: string,
+    @Param('id') documentId: string,
+  ): Promise<{ position: VisualPositionDto | null }> {
+    const { data } = await this.position.handle({ userId, documentId });
+    return { position: data };
+  }
+
+  @Patch('position')
+  async remember(
+    @CurrentUser('id') userId: string,
+    @Param('id') documentId: string,
+    @Body() body: VisualPositionBody,
+  ): Promise<VisualPositionDto> {
+    const { data } = await this.savePosition.handle({
+      userId,
+      documentId,
+      page: body.page,
+      offsetMs: body.offsetMs,
+    });
+    return data;
+  }
 
   /** Every page and where its tutorial stands. */
   @Get()

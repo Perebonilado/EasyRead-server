@@ -11,6 +11,8 @@ import type {
   PublishRequest,
   VoiceRequest,
   VoiceResponse,
+  VisualsRequest,
+  VisualsResponse,
 } from '../../../contracts';
 import { PipelineOrchestrator } from '../../../pipeline/orchestrator.service';
 import { estimatePrepare } from '../../domain/cost';
@@ -36,6 +38,9 @@ import {
   LECTURE_REPOSITORY,
   PIPELINE_RUN_REPOSITORY,
   SIMPLIFIED_PAGE_REPOSITORY,
+  TOPIC_REPOSITORY,
+  DOCUMENT_PAGE_REPOSITORY,
+  VISUAL_SCENE_REPOSITORY,
 } from '../../repositories/tokens';
 import type { DocumentRepository } from '../../repositories/document.repository';
 import type { InstitutionRepository } from '../../repositories/institution.repository';
@@ -48,6 +53,10 @@ import type { SimplifiedPageRepository } from '../../repositories/simplified-pag
 import AbstractRequestHandlerTemplate from '../AbstractRequestHandlerTemplate';
 import { CommandResponse } from '../response/CommandResponse';
 import { GenerateLectureHandler } from '../documents/lecture.handlers';
+import { queueVisuals } from '../documents/visual.handlers';
+import type { TopicRepository } from '../../repositories/misc.repository';
+import type { DocumentPageRepository } from '../../repositories/document-page.repository';
+import type { VisualSceneRepository } from '../../repositories/visual.repository';
 
 const HASH = /^[a-f0-9]{64}$/;
 
@@ -614,6 +623,59 @@ export class VoiceMaterialsHandler extends AbstractRequestHandlerTemplate<
       queued: keys.length,
       audioUsd,
     });
+  }
+}
+
+export interface VisualsCommand extends VisualsRequest {
+  userId: string;
+  institutionId: string;
+}
+
+/**
+ * The admin sending a batch, a selection, or one file to be drawn whole:
+ * every page of every file named gets its tutorial, so a published
+ * document has them before a student opens it. A file still in its
+ * text pipeline is skipped and counted in the answer.
+ */
+@Injectable()
+export class VisualsMaterialsHandler extends AbstractRequestHandlerTemplate<
+  VisualsCommand,
+  VisualsResponse
+> {
+  constructor(
+    @Inject(DOCUMENT_REPOSITORY) private readonly documents: DocumentRepository,
+    @Inject(TOPIC_REPOSITORY) private readonly topics: TopicRepository,
+    @Inject(DOCUMENT_PAGE_REPOSITORY)
+    private readonly pages: DocumentPageRepository,
+    @Inject(VISUAL_SCENE_REPOSITORY)
+    private readonly visuals: VisualSceneRepository,
+    @Inject(JOB_QUEUE) private readonly queue: JobQueuePort,
+  ) {
+    super();
+  }
+
+  protected async handleRequest(cmd: VisualsCommand) {
+    const docs = await namedDocuments(this.documents, cmd.institutionId, cmd);
+    if (!docs.length) throw new NotFoundError('Document');
+    let queued = 0;
+    let existing = 0;
+    let documents = 0;
+    for (const doc of docs) {
+      if (doc.props.status !== 'ready') continue;
+      documents += 1;
+      const result = await queueVisuals(
+        {
+          topics: this.topics,
+          pages: this.pages,
+          visuals: this.visuals,
+          queue: this.queue,
+        },
+        { doc, userId: cmd.userId, mode: 'whole', fromPage: 1 },
+      );
+      queued += result.queued;
+      existing += result.existing;
+    }
+    return CommandResponse.of({ documents, queued, existing });
   }
 }
 

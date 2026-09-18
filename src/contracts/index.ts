@@ -250,6 +250,8 @@ export interface MaterialDto {
   simplified: { done: number; failed: number; total: number };
   /** Lecture rows per style, the segments around a chapter included: how many exist, have their words, are being voiced, have audio, failed. */
   lecture: Record<LectureStyle, LectureTally>;
+  /** Pages with a visual tutorial, or a reason there is none, over the pages. */
+  visuals: { done: number; total: number };
   /** What the model calls on this document have cost so far, summed from the ledger. */
   costUsd: number;
   /** Where the document stands, as the card draws it: three bars and one word. */
@@ -294,6 +296,8 @@ export interface BatchDto {
   scripts: { done: number; total: number };
   /** Lecture rows with their audio, all styles. */
   audio: { done: number; total: number };
+  /** Pages with a visual tutorial, or a reason there is none, over the pages. */
+  visuals: { done: number; total: number };
   failed: number;
   untaught: number;
   costUsd: number;
@@ -930,6 +934,33 @@ export interface VisualSceneDto {
 export interface RequestVisualsRequest {
   fromPage?: number;
   pages?: number[];
+  /**
+   * page: the one press, this chapter from the page and the next when
+   * the runway is short; ahead: the runway topping itself up, the next
+   * chapter only; whole: every page. Omitted means page.
+   */
+  mode?: 'page' | 'ahead' | 'whole';
+}
+
+/** Where a learner stopped in a document's visuals. */
+export interface VisualPositionDto {
+  page: number;
+  offsetMs: number;
+  updatedAt: string | null;
+}
+
+/** The admin sending a batch, a selection, or one file to be drawn whole. */
+export interface VisualsRequest {
+  batchId?: string;
+  documentIds?: string[];
+}
+
+export interface VisualsResponse {
+  documents: number;
+  /** Pages sent to be drawn. */
+  queued: number;
+  /** Pages that had a tutorial, or one on its way, already. */
+  existing: number;
 }
 
 export interface RequestVisualsResponse extends VisualSetDto {

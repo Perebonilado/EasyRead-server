@@ -2,10 +2,15 @@ import { Injectable } from '@nestjs/common';
 import { InjectModel } from '@nestjs/sequelize';
 import type { VisualPlan, VisualTimeline } from '../../business/domain/visual';
 import type {
+  VisualPositionRecord,
   VisualSceneRecord,
   VisualSceneRepository,
 } from '../../business/repositories/visual.repository';
-import { VisualPlanModel, VisualSceneModel } from '../database/models';
+import {
+  VisualPlanModel,
+  VisualPositionModel,
+  VisualSceneModel,
+} from '../database/models';
 import { newId } from '../database/uuid';
 
 function toRecord(row: VisualSceneModel): VisualSceneRecord {
@@ -38,7 +43,44 @@ export class SequelizeVisualSceneRepository implements VisualSceneRepository {
     private readonly model: typeof VisualSceneModel,
     @InjectModel(VisualPlanModel)
     private readonly plans: typeof VisualPlanModel,
+    @InjectModel(VisualPositionModel)
+    private readonly positions: typeof VisualPositionModel,
   ) {}
+
+  async findPosition(
+    documentId: string,
+    userId: string,
+  ): Promise<VisualPositionRecord | null> {
+    const row = await this.positions.findOne({ where: { documentId, userId } });
+    return row
+      ? {
+          documentId: row.documentId,
+          userId: row.userId,
+          pageNumber: row.pageNumber,
+          offsetMs: row.offsetMs,
+          updatedAt: (row.get('updatedAt') as Date | undefined) ?? null,
+        }
+      : null;
+  }
+
+  async savePosition(input: {
+    documentId: string;
+    userId: string;
+    pageNumber: number;
+    offsetMs: number;
+  }): Promise<void> {
+    const existing = await this.positions.findOne({
+      where: { documentId: input.documentId, userId: input.userId },
+    });
+    if (existing) {
+      await existing.update({
+        pageNumber: input.pageNumber,
+        offsetMs: input.offsetMs,
+      });
+      return;
+    }
+    await this.positions.create({ id: newId(), ...input } as never);
+  }
 
   async find(
     documentId: string,

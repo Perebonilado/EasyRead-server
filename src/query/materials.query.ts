@@ -17,7 +17,9 @@ import {
   LectureSegmentModel,
   PipelineRunModel,
   SimplifiedPageModel,
+  VisualSceneModel,
 } from '../web/database/models';
+import { VISUAL_GENERATOR_VERSION } from '../business/domain/visual';
 import { toListItem } from './shared/document-shape';
 
 /**
@@ -40,6 +42,8 @@ export class MaterialsQuery {
     private readonly calls: typeof AiCallLogModel,
     @InjectModel(LecturePlanModel)
     private readonly plans: typeof LecturePlanModel,
+    @InjectModel(VisualSceneModel)
+    private readonly visuals: typeof VisualSceneModel,
   ) {}
 
   async execute(input: {
@@ -69,7 +73,7 @@ export class MaterialsQuery {
     // coming: they are counted as failed, so the card says so and offers
     // Retry, instead of reading "writing" for ever.
     const failedPlans = await this.failedPlans(ids);
-    const [runs, tallies, lectures, failedRows, costs, untaughtRows] =
+    const [runs, tallies, lectures, failedRows, costs, untaughtRows, drawn] =
       await Promise.all([
         this.runs.findAll({ where: { documentId: { [Op.in]: ids } } as never }),
         this.tallies(ids),
@@ -77,6 +81,7 @@ export class MaterialsQuery {
         this.failedRows(ids, failedPlans),
         this.costs(ids),
         this.untaughtRows(ids),
+        this.drawnPages(ids),
       ]);
 
     return rows.map((row) => {
@@ -97,6 +102,10 @@ export class MaterialsQuery {
           })),
         simplified: tally,
         lecture: lectures.get(row.id) ?? emptyLecture(),
+        visuals: {
+          done: drawn.get(row.id) ?? 0,
+          total: row.pageCount ?? 0,
+        },
         progress: progressOf(
           row,
           lectures.get(row.id) ?? emptyLecture(),
@@ -108,6 +117,21 @@ export class MaterialsQuery {
         publishedAt: row.publishedAt ? row.publishedAt.toISOString() : null,
       };
     });
+  }
+
+  /** Pages with a visual tutorial made, or marked not suited, under the current generator. */
+  private async drawnPages(ids: string[]): Promise<Map<string, number>> {
+    const rows = (await this.visuals.findAll({
+      attributes: ['documentId', [fn('COUNT', col('id')), 'n']],
+      where: {
+        documentId: { [Op.in]: ids },
+        generatorVersion: VISUAL_GENERATOR_VERSION,
+        status: { [Op.in]: ['done', 'not_suitable'] },
+      } as never,
+      group: ['documentId'],
+      raw: true,
+    })) as unknown as { documentId: string; n: number | string }[];
+    return new Map(rows.map((row) => [row.documentId, Number(row.n)]));
   }
 
   private async tallies(

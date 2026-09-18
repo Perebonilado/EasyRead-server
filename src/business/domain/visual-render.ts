@@ -673,6 +673,58 @@ export async function rasterise(svg: string, width: number): Promise<Buffer> {
     .asPng();
 }
 
+/** The width of a card's picture, in pixels across. */
+export const THUMB_WIDTH = 480;
+
+/**
+ * One still of the page for a card: the end of the moment that shows the
+ * most, so the picture is the page at its fullest.
+ */
+export function renderThumb(
+  script: VisualScript,
+  moments: { from: number; to: number }[],
+  space: { w: number; h: number },
+): string {
+  const after = shownAfterEach(script);
+  const at = (m: { to: number }) =>
+    after[Math.max(0, Math.min(after.length - 1, m.to))] ??
+    new Map<string, number>();
+  const richest = moments.reduce(
+    (best, m) => (at(m).size > at(best).size ? m : best),
+    moments[0] ?? { from: 0, to: 0 },
+  );
+  return renderStill(script.elements, at(richest), space, true, 4800);
+}
+
+/**
+ * A card's picture cut from a judge's filmstrip, for a page made before
+ * cards had one: the third frame of the first row, that moment at its
+ * fullest. The strip's geometry is renderFilm's, at whatever width it was
+ * rasterised.
+ */
+export async function thumbFromFilm(
+  png: Buffer,
+  space: { w: number; h: number },
+  width = THUMB_WIDTH,
+): Promise<Buffer> {
+  const pngW = png.readUInt32BE(16);
+  const pngH = png.readUInt32BE(20);
+  const gap = 10;
+  const labelRoom = 18;
+  const frameW = space.w + gap;
+  const scale = pngW / (3 * frameW + gap + 8);
+  // Two units in from the frame's top and left: the row's label and the frame's rim stay out.
+  const x = (gap + 8 + 2 * frameW + 2) * scale;
+  const y = (labelRoom + 2) * scale;
+  const w = (space.w - 3) * scale;
+  const h = (space.h - 3) * scale;
+  const svg =
+    `<svg xmlns="http://www.w3.org/2000/svg" viewBox="${x} ${y} ${w} ${h}" width="${w}" height="${h}">` +
+    `<image href="data:image/png;base64,${png.toString('base64')}" x="0" y="0" width="${pngW}" height="${pngH}"/>` +
+    `</svg>`;
+  return rasterise(svg, width);
+}
+
 /** The moments of a filmstrip: three frames across each, so motion and the order parts arrive in can be judged. */
 const FRAME_MS = [400, 2200, 4800];
 

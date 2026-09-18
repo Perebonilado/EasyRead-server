@@ -8,7 +8,12 @@ import {
 } from './visual-cards';
 import { FIGURE_OUTLINES } from './visual-figures';
 import { MECHANISMS, MECHANISM_KINDS } from './visual-mechanisms';
-import { renderSheet, renderStill, shownAfterEach } from './visual-render';
+import {
+  renderSheet,
+  renderStill,
+  renderThumb,
+  shownAfterEach,
+} from './visual-render';
 
 const tutorial: VisualTutorial = {
   title: 'A fly and a bucket',
@@ -70,6 +75,14 @@ describe('a still of the stage', () => {
       expect(
         (sheet.match(/<g transform="translate\(/g) ?? []).length,
       ).toBeGreaterThanOrEqual(3);
+      // The card's picture is the moment that shows the most: the mechanism with its callout, not the closing statement.
+      const thumb = renderThumb(script, tidy.moments, {
+        w: stage.W,
+        h: stage.H,
+      });
+      expect(thumb).toContain('<svg');
+      expect(thumb).toContain('tokens in');
+      expect(thumb).not.toContain('One alive, one a machine.');
     }
   });
 

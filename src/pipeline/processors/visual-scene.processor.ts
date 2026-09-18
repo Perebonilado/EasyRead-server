@@ -37,7 +37,12 @@ import {
   type VisualTutorial,
 } from '../../business/domain/visual-cards';
 import { buildMenu } from '../../business/domain/visual-menu';
-import { rasterise, renderFilm } from '../../business/domain/visual-render';
+import {
+  THUMB_WIDTH,
+  rasterise,
+  renderFilm,
+  renderThumb,
+} from '../../business/domain/visual-render';
 import type { AlignerPort } from '../../business/ports/aligner.port';
 import type { LlmGatewayPort } from '../../business/ports/llm.port';
 import type { StoragePort } from '../../business/ports/storage.port';
@@ -444,6 +449,17 @@ export class VisualSceneProcessor {
       await this.storage.put({
         key: `documents/${doc.id}/visuals/v${contentVersion}/p${pageNumber}-${VISUAL_GENERATOR_VERSION}-sheet.png`,
         body: sheet,
+        mimeType: 'image/png',
+      });
+      await this.storage.put({
+        key: `documents/${doc.id}/visuals/v${contentVersion}/p${pageNumber}-${VISUAL_GENERATOR_VERSION}-thumb.png`,
+        body: await rasterise(
+          renderThumb(scripts.box, tutorial.moments, {
+            w: STAGES.box.W,
+            h: STAGES.box.H,
+          }),
+          THUMB_WIDTH,
+        ),
         mimeType: 'image/png',
       });
       const durationMs =

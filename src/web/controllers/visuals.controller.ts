@@ -34,6 +34,16 @@ import {
   VisualSetHandler,
 } from '../../business/handlers/documents/visual.handlers';
 import { STORAGE } from '../../business/ports/tokens';
+import { thumbFromFilm } from '../../business/domain/visual-render';
+import { STAGES, VISUAL_GENERATOR_VERSION } from '../../business/domain/visual';
+
+/** The key the page's stills share with its audio: up to the generator's name. */
+const stillsBase = (audioKey: string): string | null => {
+  const at = audioKey.indexOf(`-${VISUAL_GENERATOR_VERSION}-`);
+  return at < 0
+    ? null
+    : audioKey.slice(0, at + 1 + VISUAL_GENERATOR_VERSION.length);
+};
 import type { StoragePort } from '../../business/ports/storage.port';
 import { CurrentUser } from '../security/current-user.decorator';
 
@@ -155,13 +165,13 @@ export class VisualsController {
     @Res() response: Response,
   ): Promise<void> {
     const { data } = await this.scene.handle({ userId, documentId, page });
-    const key = data.audioKey?.replace(/-[^/]*\.mp3$/, '-sheet.png');
-    if (!key) {
+    const base = data.audioKey && stillsBase(data.audioKey);
+    if (!base) {
       response.status(404).end();
       return;
     }
     try {
-      const { stream, size } = await this.storage.stream(key);
+      const { stream, size } = await this.storage.stream(`${base}-sheet.png`);
       response.setHeader('Content-Type', 'image/png');
       response.setHeader('Content-Length', size);
       response.setHeader('Cache-Control', 'private, max-age=86400');
@@ -169,6 +179,45 @@ export class VisualsController {
     } catch {
       response.status(404).end();
     }
+  }
+
+  /**
+   * One picture of the page's tutorial, for a card: made with the page,
+   * or cut from the judge's sheet for a page made before cards had one.
+   */
+  @Get(':page/thumb')
+  async thumb(
+    @CurrentUser('id') userId: string,
+    @Param('id') documentId: string,
+    @Param('page', ParseIntPipe) page: number,
+    @Res() response: Response,
+  ): Promise<void> {
+    const { data } = await this.scene.handle({ userId, documentId, page });
+    const base = data.audioKey && stillsBase(data.audioKey);
+    if (!base) {
+      response.status(404).end();
+      return;
+    }
+    const key = `${base}-thumb.png`;
+    let png: Buffer;
+    try {
+      png = await this.storage.get(key);
+    } catch {
+      try {
+        png = await thumbFromFilm(await this.storage.get(`${base}-sheet.png`), {
+          w: STAGES.box.W,
+          h: STAGES.box.H,
+        });
+        await this.storage.put({ key, body: png, mimeType: 'image/png' });
+      } catch {
+        response.status(404).end();
+        return;
+      }
+    }
+    response.setHeader('Content-Type', 'image/png');
+    response.setHeader('Content-Length', png.length);
+    response.setHeader('Cache-Control', 'private, max-age=86400');
+    response.end(png);
   }
 
   /**

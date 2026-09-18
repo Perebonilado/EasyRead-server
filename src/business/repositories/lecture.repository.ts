@@ -211,6 +211,8 @@ export interface LectureRepository {
     contentVersion: number,
     topicIds: string[],
     style: LectureStyle,
+    /** Pages left as they are: someone is listening to them. */
+    exceptPages?: number[],
   ): Promise<void>;
   /** Every chapter and style, in any document, with a written page that left paragraphs untaught: what a worker picks up when it starts. */
   listShortSegments(): Promise<
@@ -247,4 +249,10 @@ export interface LectureRepository {
     userId: string,
     documentId: string,
   ): Promise<LecturePosition | null>;
+  /** The pages of this document and style anyone has had a position saved on since the moment given: what is being listened to. */
+  pagesHeardSince(
+    documentId: string,
+    style: LectureStyle,
+    since: Date,
+  ): Promise<number[]>;
 }

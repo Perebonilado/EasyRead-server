@@ -26,6 +26,8 @@ export interface LectureChapterJob extends PipelineJob {
   delayMs?: number;
   /** Which pass over pages that left paragraphs untaught this is; absent on the first write. */
   coveragePass?: number;
+  /** How many times this pass has waited for a listener to leave a page it would write again. */
+  listeningRetries?: number;
 }
 
 export interface LectureVoiceJob extends PipelineJob {

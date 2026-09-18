@@ -113,6 +113,7 @@ function fakes(
   }[] = [];
   const diagramJobs: { pageNumber: number; style: LectureStyle }[] = [];
   /** Chapter jobs the processor queues itself: a chapter's second pass over its failed pages. */
+  const heard: number[] = [];
   const chapterJobs: {
     topicId: string;
     style: LectureStyle;
@@ -120,6 +121,7 @@ function fakes(
     delayMs?: number;
     voice?: boolean;
     coveragePass?: number;
+    listeningRetries?: number;
   }[] = [];
   const boardJobs: {
     pageNumber: number;
@@ -325,6 +327,8 @@ function fakes(
     },
     markPendingFailed: () => Promise.resolve(0),
     listShortSegments: () => Promise.resolve([]),
+    /** The pages someone has been listening to lately: a pass leaves them alone. */
+    pagesHeardSince: () => Promise.resolve([...heard]),
     // A page that left paragraphs untaught goes back to be written again,
     // its count kept so the next write knows what was missing.
     resetUntaughtSegments: (
@@ -332,12 +336,14 @@ function fakes(
       _v: number,
       topicIds: string[],
       style: LectureStyle,
+      exceptPages: number[] = [],
     ) => {
       for (const r of rows.values()) {
         if (
           r.style === style &&
           topicIds.includes(r.topicId ?? topics[0].id) &&
-          (r.untaught?.length ?? 0) > 0
+          (r.untaught?.length ?? 0) > 0 &&
+          !exceptPages.includes(r.pageNumber)
         ) {
           r.status = 'pending';
           r.scriptText = null;
@@ -443,6 +449,7 @@ function fakes(
           delayMs?: number;
           voice?: boolean;
           coveragePass?: number;
+          listeningRetries?: number;
         }[],
       ) => {
         chapterJobs.push(
@@ -453,6 +460,7 @@ function fakes(
             delayMs: job.delayMs,
             voice: job.voice,
             coveragePass: job.coveragePass,
+            listeningRetries: job.listeningRetries,
           })),
         );
         return Promise.resolve();
@@ -513,6 +521,7 @@ function fakes(
 
   return {
     chapterJobs,
+    heard,
     alignJobs,
     diagramJobs,
     boardJobs,
@@ -2365,6 +2374,48 @@ describe('LectureChapterProcessor: a page that left paragraphs untaught', () => 
     expect(f.row(1)!.scriptText).toContain('Central banks');
     expect(f.row(1)!.untaught).toEqual([]);
     expect(f.chapterJobs.filter((job) => job.coveragePass === 2)).toEqual([]);
+  });
+
+  it('leaves a page someone is listening to as it is, and comes back for it once they have moved on', async () => {
+    const f = fakes({ 1: FULL_PAGE });
+    const llm = withoutBoard(new FakeLlmAdapter());
+    llm.lectureSegment = () => Promise.resolve(draft(first));
+    const processor = chapterProcessor(f, llm, boardService(f, llm), {
+      1: note,
+    });
+
+    // Someone has page 1 playing: the write ends with its count, but the
+    // page keeps its words, and the pass waits rather than queue itself.
+    f.heard.push(1);
+    await processor.process(chapterJob(), CONTEXT);
+    expect(f.row(1)!.untaught).toEqual([2]);
+    expect(f.row(1)!.scriptText).toContain('Sustained monetary');
+    expect(f.row(1)!.status).not.toBe('pending');
+    expect(f.chapterJobs).toEqual([
+      expect.objectContaining({
+        topicId: TOPIC.id,
+        coveragePass: 0,
+        listeningRetries: 1,
+        delayMs: 180_000,
+      }),
+    ]);
+
+    // The listener has moved on when the pass looks again: the page goes
+    // back to be written, and the pass proper is queued.
+    f.heard.length = 0;
+    f.chapterJobs.length = 0;
+    await processor.process(
+      { ...chapterJob(), coveragePass: 0, listeningRetries: 1 },
+      CONTEXT,
+    );
+    expect(f.row(1)!.status).toBe('pending');
+    expect(f.chapterJobs).toEqual([
+      expect.objectContaining({
+        coveragePass: 1,
+        listeningRetries: 1,
+        delayMs: 30_000,
+      }),
+    ]);
   });
 
   it('patches a page that fell short with the missing paragraphs, as a continuation, before any pass', async () => {

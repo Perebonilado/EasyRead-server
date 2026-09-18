@@ -370,8 +370,12 @@ export function partBeats(
   const beats = new Map<string, Beat>();
   const asked = new Map<number, { sentence: number; word?: number }>();
   for (const r of m.reveals ?? []) if (laid.parts[r.part]) asked.set(r.part, r);
-  if (!asked.size) return beats;
-  const first = Math.min(...asked.keys());
+  // No reveals given: every part waits for the word that names it, and
+  // one never named takes its share of the moment's words, so the card
+  // follows the speech instead of arriving in one burst and sitting still.
+  const auto = !asked.size;
+  if (auto && laid.parts.filter(Boolean).length < 2) return beats;
+  const first = auto ? 0 : Math.min(...asked.keys());
   const names = laid.parts.map((id) => (id ? (laid.named.get(id) ?? '') : ''));
   // Every word of the moment in order, so beats can be compared and spread.
   const flat: Beat[] = [];
@@ -971,7 +975,16 @@ function layoutPicture(m: Moment, id: string, stage: Stage): Laid {
   }
   const named = new Map<string, string>();
   if (m.name) named.set(`${id}_c`, m.name);
-  return { elements: out, parts: [], arrowsOf: new Map(), named };
+  // The callouts are the card's parts: each waits for the word that names
+  // its part, or takes its share of the moment, rather than all arriving
+  // with the picture.
+  const parts: string[] = [];
+  for (const element of out)
+    if (element.type === 'callout') {
+      parts.push(element.id);
+      named.set(element.id, element.part);
+    }
+  return { elements: out, parts, arrowsOf: new Map(), named };
 }
 
 function layoutTerm(m: Moment, id: string, stage: Stage): Laid {
@@ -1897,10 +1910,68 @@ export function tidyNarration(narration: VisualNarration): VisualNarration {
     }
     moments.push({ ...m, from });
   }
+  // A sentence too short to be a beat of its own (a "Yes." or a "Section
+  // 16.") is folded into the sentence beside it: the one before, unless
+  // it opens a moment, then the one after. The narrator cannot be asked
+  // again for it, and a page must not fail on it.
+  const folded = foldShortSentences(sentences, moments);
   const same =
-    moments.length === narration.moments.length && !grew.some((n) => n > 0);
+    moments.length === narration.moments.length &&
+    !grew.some((n) => n > 0) &&
+    !folded.count;
   if (same) return narration;
-  return { ...narration, sentences, moments };
+  return { ...narration, sentences: folded.sentences, moments: folded.moments };
+}
+
+/** Fewer words than this and a sentence is not a beat of its own. */
+const FEWEST_SENTENCE_WORDS = 4;
+
+/** Short sentences folded into a neighbour, the moments moved along; how many were folded. */
+function foldShortSentences(
+  given: string[],
+  givenMoments: VisualNarration['moments'],
+): {
+  sentences: string[];
+  moments: VisualNarration['moments'];
+  count: number;
+} {
+  const sentences = [...given];
+  let moments = givenMoments.map((m) => ({ ...m }));
+  let count = 0;
+  let i = 0;
+  while (i < sentences.length) {
+    if (
+      words(sentences[i]).length >= FEWEST_SENTENCE_WORDS ||
+      sentences.length < 2
+    ) {
+      i += 1;
+      continue;
+    }
+    const opens = moments.some((m) => m.from === i);
+    const intoPrevious = i > 0 && !opens;
+    if (!intoPrevious && i >= sentences.length - 1) {
+      i += 1;
+      continue;
+    }
+    const at = i;
+    if (intoPrevious) {
+      sentences[i - 1] = `${sentences[i - 1].trim()} ${sentences[i].trim()}`;
+    } else {
+      sentences[i + 1] = `${sentences[i].trim()} ${sentences[i + 1].trim()}`;
+    }
+    sentences.splice(at, 1);
+    // A moment past the fold moves up one; one that held the sentence is one shorter; one left with nothing goes.
+    moments = moments
+      .map((m) => ({
+        ...m,
+        from: m.from > at ? m.from - 1 : m.from,
+        to: m.to >= at ? m.to - 1 : m.to,
+      }))
+      .filter((m) => m.from <= m.to);
+    count += 1;
+    // The folded sentence may still be short: look at it again.
+  }
+  return { sentences, moments, count };
 }
 
 /** Drawings that are round enough to turn: a spin on anything else looks wrong. */

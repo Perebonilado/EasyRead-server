@@ -1634,13 +1634,13 @@ function clampAll(elements: VisualElement[], stage: Stage): VisualElement[] {
 // ── Timing ────────────────────────────────────────────────────────────────
 
 /** Visuals that begin a breath before the word feel in sync; on the word feels late. */
-export const ANTICIPATION_MS = 120;
+export const ANTICIPATION_MS = 200;
 /** A card comes in this long before its first word, inside the pause before the sentence. */
 export const CARD_LEAD_MS = 450;
 /** The least silence kept after the sentence before, so a card never lands on its last word. */
 export const CARD_CLEAR_MS = 40;
 /** Two effects on different targets closer than this are staggered so each reads. */
-export const CROWDING_MS = 100;
+export const CROWDING_MS = 160;
 /** Silence the voice leaves between sentences, for the estimate. */
 export const SENTENCE_GAP_MS = 350;
 

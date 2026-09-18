@@ -429,8 +429,8 @@ describe('a visual script', () => {
     expect(timeline.segments).toHaveLength(8);
     const first = timeline.segments[0];
     expect(first.startMs).toBe(0);
-    // "bucket" is word 2: 600 ms, drawn 120 ms early.
-    expect(first.cues[0]).toEqual({ atMs: 480, do: 'draw', target: 'bucket' });
+    // "bucket" is word 2: 600 ms, drawn 200 ms early.
+    expect(first.cues[0]).toEqual({ atMs: 400, do: 'draw', target: 'bucket' });
     // A cue on the first word cannot land before the sentence starts.
     const seventh = timeline.segments[6];
     expect(seventh.cues[0].atMs).toBe(seventh.startMs);

@@ -8,6 +8,7 @@ import { buildFigure } from './living.generated/figures';
 import { ICONS, ICON_UNIT } from './living.generated/icons';
 import { buildMechanism } from './living.generated/mechanisms';
 import { PRESETS } from './living.generated/presets';
+import { AT_REST, atRest, motionPose } from './living.generated/motion';
 import {
   BAR_HEIGHT,
   BUBBLE_HEIGHT,
@@ -54,6 +55,7 @@ const FONT = 'Helvetica, Arial, sans-serif';
 
 const esc = (text: string) =>
   text
+    .replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g, '')
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;')
@@ -442,7 +444,22 @@ function elementSvg(
         element.kind === 'path'
           ? drawn('', x, y, w, h, paint, mode, element.d)
           : drawn(element.kind, x, y, w, h, paint, mode);
-      if (picture) return wrap(picture + text);
+      // A moving thing is drawn where its motion has it at this time, as the player would.
+      const pose = element.motion
+        ? motionPose(
+            element.motion,
+            ms / 1000,
+            null,
+            element.motionTo
+              ? { dx: element.motionTo.x - x, dy: element.motionTo.y - y }
+              : null,
+          )
+        : AT_REST;
+      const posed = (svg: string) =>
+        atRest(pose)
+          ? svg
+          : `<g transform="translate(${n(pose.dx)} ${n(pose.dy)}) rotate(${n(pose.rotate)} ${n(x)} ${n(y)}) translate(${n(x)} ${n(y)}) scale(${pose.scale.toFixed(3)}) translate(${n(-x)} ${n(-y)})">${svg}</g>`;
+      if (picture) return wrap(posed(picture + text));
       const common = `fill="${mode === 'outline' ? 'none' : paint.fill}" stroke="${mode === 'outline' ? paint.text : paint.rim}" stroke-width="2.4" stroke-linejoin="round"`;
       switch (element.kind) {
         case 'overlap': {
@@ -725,8 +742,35 @@ export async function thumbFromFilm(
   return rasterise(svg, width);
 }
 
-/** The moments of a filmstrip: three frames across each, so motion and the order parts arrive in can be judged. */
+/** The moments of a filmstrip: three frames across a still moment, five across one that moves, so motion and the order parts arrive in can be judged. */
 const FRAME_MS = [400, 2200, 4800];
+const MOVING_FRAME_MS = [400, 1400, 2500, 3600, 4800];
+
+/** Whether anything shown by the end of a moment moves: a figure not held still, a picture with a motion, a machine. */
+export function momentMoves(
+  script: VisualScript,
+  moment: { from: number; to: number },
+): boolean {
+  const after = shownAfterEach(script);
+  const shown =
+    after[Math.max(0, Math.min(after.length - 1, moment.to))] ??
+    new Map<string, number>();
+  return script.elements.some(
+    (e) =>
+      shown.has(e.id) &&
+      ((e.type === 'figure' && e.manner !== 'still') ||
+        (e.type === 'shape' && Boolean(e.motion)) ||
+        e.type === 'mechanism'),
+  );
+}
+
+/** The times of a moment's frames: five when it moves, else three. */
+export function frameTimes(
+  script: VisualScript,
+  moment: { from: number; to: number },
+): number[] {
+  return momentMoves(script, moment) ? MOVING_FRAME_MS : FRAME_MS;
+}
 
 /**
  * A filmstrip of the page: one row per moment (or per moment asked for,
@@ -748,15 +792,19 @@ export function renderFilm(
   const labelRoom = 18;
   const frameW = space.w + gap;
   const rowH = space.h + labelRoom + gap;
-  const width = 3 * frameW + gap + 8;
+  const times = rows.map((k) => frameTimes(script, moments[k]));
+  const across = Math.max(3, ...times.map((t) => t.length));
+  const width = across * frameW + gap + 8;
   const height = rows.length * rowH + gap;
   const tiles = rows
     .map((k, r) => {
       const m = moments[k];
       const y = gap + r * rowH;
-      const frames = [0, 1, 2]
-        .map((f) => {
-          const sentence = m.from + Math.floor(((m.to - m.from) * f) / 2);
+      const own = times[r];
+      const frames = own
+        .map((ms, f) => {
+          const sentence =
+            m.from + Math.floor(((m.to - m.from) * f) / (own.length - 1));
           const shown =
             after[Math.max(0, Math.min(after.length - 1, sentence))] ??
             new Map<string, number>();
@@ -764,7 +812,7 @@ export function renderFilm(
           const clip = `film-${k}-${f}`;
           return (
             `<clipPath id="${clip}"><rect x="${x}" y="${labelRoom}" width="${space.w}" height="${space.h}"/></clipPath>` +
-            `<g clip-path="url(#${clip})"><g transform="translate(${x} ${labelRoom})">${renderStill(script.elements, shown, space, false, FRAME_MS[f])}</g></g>` +
+            `<g clip-path="url(#${clip})"><g transform="translate(${x} ${labelRoom})">${renderStill(script.elements, shown, space, false, ms)}</g></g>` +
             `<rect x="${x}" y="${labelRoom}" width="${space.w}" height="${space.h}" fill="none" stroke="#3B4560" stroke-width="1"/>`
           );
         })

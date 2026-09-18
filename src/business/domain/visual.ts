@@ -19,6 +19,7 @@ import { grounded } from './sketch';
 import type { SpokenForm } from './spoken';
 import type { FigureManner, FigureOutline, FigurePart } from './visual-figures';
 import type { MechanismKind } from './visual-mechanisms';
+import { MOTIONS } from './living.generated/motion';
 import { measureText } from './visual-font';
 import {
   knownPicture,
@@ -188,14 +189,8 @@ export function pathProblem(d: string): string | null {
   return check();
 }
 
-/** How a drawn thing moves once it is on screen; every motion is a function of the clock. */
-export const VISUAL_MOTIONS = [
-  'travel',
-  'bounce',
-  'spin',
-  'shake',
-  'hover',
-] as const;
+/** How a drawn thing moves once it is on screen; every motion is a function of the clock, shared with the player. */
+export const VISUAL_MOTIONS = MOTIONS;
 export type VisualMotion = (typeof VISUAL_MOTIONS)[number];
 
 export type VisualPoint = [number, number];
@@ -307,6 +302,8 @@ export type VisualElement =
       fill?: 'solid' | 'outline' | 'tint';
       /** How a drawn picture moves once shown. */
       motion?: VisualMotion;
+      /** Where an `along` thing goes: the centre of the thing after it. */
+      motionTo?: { x: number; y: number };
       /** What the thing is, so the player can carry it from one card to the next. */
       carry?: string;
     }
@@ -384,6 +381,7 @@ export const VISUAL_ACTIONS = [
   'pulse',
   'flow',
   'highlight',
+  'settle',
   'clear',
 ] as const;
 export type VisualAction = (typeof VISUAL_ACTIONS)[number];
@@ -395,6 +393,7 @@ const NEEDS_SHOWN = new Set<VisualAction>([
   'dim',
   'undim',
   'highlight',
+  'settle',
 ]);
 /** The actions that bring an element on screen. */
 export const SHOWS = new Set<VisualAction>(['draw', 'fade']);
@@ -1635,13 +1634,13 @@ function clampAll(elements: VisualElement[], stage: Stage): VisualElement[] {
 // ── Timing ────────────────────────────────────────────────────────────────
 
 /** Visuals that begin a breath before the word feel in sync; on the word feels late. */
-export const ANTICIPATION_MS = 120;
+export const ANTICIPATION_MS = 200;
 /** A card comes in this long before its first word, inside the pause before the sentence. */
 export const CARD_LEAD_MS = 450;
 /** The least silence kept after the sentence before, so a card never lands on its last word. */
 export const CARD_CLEAR_MS = 40;
 /** Two effects on different targets closer than this are staggered so each reads. */
-export const CROWDING_MS = 100;
+export const CROWDING_MS = 160;
 /** Silence the voice leaves between sentences, for the estimate. */
 export const SENTENCE_GAP_MS = 350;
 

@@ -114,6 +114,8 @@ export interface LectureChapterJobData extends BaseJobData {
   delayMs?: number;
   /** Which pass over pages that left paragraphs untaught this is; absent on the first write. */
   coveragePass?: number;
+  /** How many times this pass has waited for a listener to leave a page it would write again. */
+  listeningRetries?: number;
 }
 
 /** Turning one finished script into audio. */

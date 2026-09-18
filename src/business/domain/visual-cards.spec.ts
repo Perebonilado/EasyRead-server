@@ -114,10 +114,14 @@ describe('a visual tutorial', () => {
       expect.arrayContaining(['m1_c', 'm1_c_name', 'm1_s']),
     );
     expect(script.segments[0].cues.some((c) => c.do === 'clear')).toBe(false);
-    // A hub's arrows come with the card.
-    expect(
-      script.segments[6].cues.filter((c) => c.target.startsWith('m5_a')),
-    ).toHaveLength(5);
+    // A hub's arrows draw with their inputs and outputs, each on the word
+    // that names it, and run their beads from there.
+    const arrows = script.segments[6].cues.filter((c) =>
+      c.target.startsWith('m5_a'),
+    );
+    expect(arrows.filter((c) => c.do === 'draw')).toHaveLength(5);
+    expect(arrows.filter((c) => c.do === 'flow')).toHaveLength(5);
+    expect(arrows.some((c) => c.at > 0)).toBe(true);
   });
 
   it('names what is wrong with a tutorial in the model’s own terms', () => {

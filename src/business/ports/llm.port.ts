@@ -491,6 +491,8 @@ export interface LlmGatewayPort {
       card: string;
       drawings: string[];
       shouldSee: string;
+      /** What should change from frame to frame, when something moves. */
+      motion?: string;
     }[];
   }): Promise<LlmResult<VisualJudgement>>;
 

@@ -27,7 +27,10 @@ describe('what a thing is drawn as', () => {
 
   it('keeps a still picture for a thing the library draws well, and a role for a person', () => {
     expect(resolveDrawing('bus')).toMatchObject({ kind: 'picture' });
-    expect(resolveDrawing('doctor')).toMatchObject({ kind: 'picture' });
+    expect(resolveDrawing('doctor')).toMatchObject({
+      kind: 'picture',
+      name: 'stethoscope',
+    });
     expect(resolveDrawing('farmer')).toMatchObject({
       kind: 'figure',
       figure: { outline: 'person' },

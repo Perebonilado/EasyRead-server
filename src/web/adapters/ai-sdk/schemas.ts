@@ -536,6 +536,14 @@ const momentFields = {
     .nullable(),
   items: z.array(cardItem).max(5).nullable(),
   picture: z.string().max(32).nullable(),
+  /** For a picture card: two library drawings as one picture, when no single drawing is the thing. */
+  compose: z
+    .object({
+      base: z.string().min(1).max(32),
+      add: z.string().min(1).max(32),
+      place: z.enum(['over', 'beside', 'inside', 'badge']),
+    })
+    .nullable(),
   /** For a picture card: the shape the thing takes, when no drawing of it exists. */
   shape: z
     .object({

@@ -168,6 +168,11 @@ const SECOND_PASS_MS = 3 * 60_000;
 /** How many times a chapter writes again the pages that left paragraphs untaught, on its own. */
 const MAX_COVERAGE_PASSES = 2;
 const COVERAGE_PASS_MS = 30_000;
+/** A page with a position saved this recently is being listened to: a pass leaves it as it is. */
+const LISTENING_MS = 2 * 60_000;
+/** How long a pass waits before looking again at a page someone was listening to, and how many times. */
+const LISTENING_RETRY_MS = 3 * 60_000;
+const MAX_LISTENING_RETRIES = 3;
 /** A failure the writer cannot cure by trying again: nothing on the page to teach. */
 const PERMANENT_FAILURE =
   /no text|nothing to teach|nothing to check|could not be planned|names no terms|no readable/i;
@@ -541,31 +546,66 @@ export class LectureChapterProcessor {
         (row.untaught?.length ?? 0) > 0,
     );
     if (!short.length) return;
-    this.logger.log(
-      `${job.documentId} ${style}: ${short.length} page${short.length === 1 ? '' : 's'} left paragraphs untaught; pass ${pass + 1} of ${MAX_COVERAGE_PASSES} in ${COVERAGE_PASS_MS / 1000}s`,
-    );
-    // The job first, the reset second: a worker stopped between the two
-    // then leaves a page with its words and its count, which the next
-    // Prepare picks up, and never a page put back to pending with nothing
-    // coming for it. The pass waits its delay, so the reset lands first.
-    await this.queue.enqueueLectureChapters([
-      {
-        documentId: job.documentId,
-        contentVersion: job.contentVersion,
-        topicId: job.topicId,
-        orderIndex: job.orderIndex,
-        style,
-        ...(job.voice === false ? { voice: false } : {}),
-        coveragePass: pass + 1,
-        delayMs: COVERAGE_PASS_MS,
-      },
-    ]);
-    await this.lectures.resetUntaughtSegments(
+    // A page someone is listening to is not pulled out from under them:
+    // its words and audio stay as they are, and the pass comes back for
+    // it once the listener has moved on.
+    const heard = await this.lectures.pagesHeardSince(
       job.documentId,
-      job.contentVersion,
-      [job.topicId],
       style,
+      new Date(Date.now() - LISTENING_MS),
     );
+    const free = short.filter((row) => !heard.includes(row.pageNumber));
+    const held = short.filter((row) => heard.includes(row.pageNumber));
+    const base = {
+      documentId: job.documentId,
+      contentVersion: job.contentVersion,
+      topicId: job.topicId,
+      orderIndex: job.orderIndex,
+      style,
+      ...(job.voice === false ? { voice: false } : {}),
+      ...(job.listeningRetries
+        ? { listeningRetries: job.listeningRetries }
+        : {}),
+    };
+    if (free.length) {
+      this.logger.log(
+        `${job.documentId} ${style}: ${free.length} page${free.length === 1 ? '' : 's'} left paragraphs untaught; pass ${pass + 1} of ${MAX_COVERAGE_PASSES} in ${COVERAGE_PASS_MS / 1000}s`,
+      );
+      // The job first, the reset second: a worker stopped between the two
+      // then leaves a page with its words and its count, which the next
+      // Prepare picks up, and never a page put back to pending with nothing
+      // coming for it. The pass waits its delay, so the reset lands first.
+      await this.queue.enqueueLectureChapters([
+        { ...base, coveragePass: pass + 1, delayMs: COVERAGE_PASS_MS },
+      ]);
+      await this.lectures.resetUntaughtSegments(
+        job.documentId,
+        job.contentVersion,
+        [job.topicId],
+        style,
+        heard,
+      );
+    }
+    if (held.length) {
+      const retries = job.listeningRetries ?? 0;
+      if (retries >= MAX_LISTENING_RETRIES) {
+        this.logger.log(
+          `${job.documentId} ${style}: page${held.length === 1 ? '' : 's'} ${held.map((row) => row.pageNumber).join(', ')} kept as heard after ${retries} waits`,
+        );
+        return;
+      }
+      this.logger.log(
+        `${job.documentId} ${style}: page${held.length === 1 ? '' : 's'} ${held.map((row) => row.pageNumber).join(', ')} being listened to; the pass comes back in ${LISTENING_RETRY_MS / 60_000} min`,
+      );
+      await this.queue.enqueueLectureChapters([
+        {
+          ...base,
+          coveragePass: pass,
+          listeningRetries: retries + 1,
+          delayMs: LISTENING_RETRY_MS,
+        },
+      ]);
+    }
   }
 
   /**
@@ -702,6 +742,11 @@ export class LectureChapterProcessor {
           row.contentVersion,
           [row.topicId],
           row.style,
+          await this.lectures.pagesHeardSince(
+            row.documentId,
+            row.style,
+            new Date(Date.now() - LISTENING_MS),
+          ),
         );
         await this.queue.enqueueLectureChapters([
           {

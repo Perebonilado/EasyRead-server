@@ -101,6 +101,7 @@ function harness({
       },
       listSegments: () => Promise.resolve(rows),
       resetUntaughtSegments: () => Promise.resolve(),
+      pagesHeardSince: () => Promise.resolve([]),
       resetFailedSegments: (_d: string, _v: number, topicIds: string[]) => {
         reset.push(topicIds);
         return Promise.resolve();

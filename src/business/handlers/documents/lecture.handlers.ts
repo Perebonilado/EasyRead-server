@@ -595,6 +595,11 @@ export class GenerateLectureHandler extends AbstractRequestHandlerTemplate<
         doc.contentVersion,
         retry,
         style,
+        await this.lectures.pagesHeardSince(
+          doc.id,
+          style,
+          new Date(Date.now() - 2 * 60_000),
+        ),
       );
     }
 

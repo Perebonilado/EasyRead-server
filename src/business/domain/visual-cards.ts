@@ -41,6 +41,7 @@ import {
   chipIcon,
   figureHasAnchor,
   seedOf,
+  mannersThatMove,
 } from './visual-figures';
 import {
   MECHANISMS,
@@ -48,6 +49,8 @@ import {
   tidyMechanism,
   type MechanismAsk,
 } from './visual-mechanisms';
+import { LASTING } from './living.generated/motion';
+import { pickPicture } from './visual-presets';
 
 export const CARD_KINDS = [
   'title',
@@ -83,6 +86,15 @@ export interface CardSide {
   items?: string[];
 }
 
+/** Where the second drawing of a composed picture sits on the first. */
+export const COMPOSE_PLACES = ['over', 'beside', 'inside', 'badge'] as const;
+export type ComposePlace = (typeof COMPOSE_PLACES)[number];
+export interface VisualCompose {
+  base: string;
+  add: string;
+  place: ComposePlace;
+}
+
 /** One moment: a card, its fields, and the sentences it covers. */
 export interface Moment {
   /** First and last sentence, inclusive, zero-based. */
@@ -108,6 +120,8 @@ export interface Moment {
   items?: CardItem[];
   /** Picture: the thing, its name, a line it says. */
   picture?: string;
+  /** A picture made of two library drawings: the base and what is added to it, and where. */
+  compose?: VisualCompose;
   /** The shape the thing takes, when the library has no drawing of it. */
   shape?: {
     outline?: FigureOutline;
@@ -356,8 +370,12 @@ export function partBeats(
   const beats = new Map<string, Beat>();
   const asked = new Map<number, { sentence: number; word?: number }>();
   for (const r of m.reveals ?? []) if (laid.parts[r.part]) asked.set(r.part, r);
-  if (!asked.size) return beats;
-  const first = Math.min(...asked.keys());
+  // No reveals given: every part waits for the word that names it, and
+  // one never named takes its share of the moment's words, so the card
+  // follows the speech instead of arriving in one burst and sitting still.
+  const auto = !asked.size;
+  if (auto && laid.parts.filter(Boolean).length < 2) return beats;
+  const first = auto ? 0 : Math.min(...asked.keys());
   const names = laid.parts.map((id) => (id ? (laid.named.get(id) ?? '') : ''));
   // Every word of the moment in order, so beats can be compared and spread.
   const flat: Beat[] = [];
@@ -476,6 +494,49 @@ const label = (
  * figure its words say it is, else the words themselves in a chip. The
  * name goes under it, as a picture's does. Returns how tall it stands.
  */
+/**
+ * The boxes of a composed picture: the base at the width, the added
+ * drawing over it, inside it, beside it or as a badge at its corner.
+ * Nothing when either name is not a library drawing.
+ */
+function composeBoxes(
+  compose: VisualCompose,
+  x: number,
+  y: number,
+  width: number,
+): {
+  base: { name: string; x: number; w: number };
+  add: { name: string; x: number; y: number; w: number; h: number };
+  height: number;
+} | null {
+  const base = pickPicture(compose.base);
+  const add = pickPicture(compose.add);
+  if (!base || !add) return null;
+  const at = (name: string, w: number) => pictureBox(name, w);
+  if (compose.place === 'beside') {
+    const bw = Math.round(width * 0.58);
+    const aw = Math.round(width * 0.42);
+    const b = at(base, bw);
+    const a = at(add, aw);
+    return {
+      base: { name: base, x: x - Math.round(width * 0.22), w: bw },
+      add: { name: add, x: x + Math.round(width * 0.3), y, w: a.w, h: a.h },
+      height: Math.max(b.h, a.h),
+    };
+  }
+  const b = at(base, width);
+  const share =
+    compose.place === 'over' ? 0.5 : compose.place === 'inside' ? 0.38 : 0.45;
+  const a = at(add, Math.round(width * share));
+  const dx = compose.place === 'badge' ? Math.round(b.w * 0.3) : 0;
+  const dy = compose.place === 'badge' ? Math.round(b.h * 0.3) : 0;
+  return {
+    base: { name: base, x, w: width },
+    add: { name: add, x: x + dx, y: y + dy, w: a.w, h: a.h },
+    height: b.h,
+  };
+}
+
 function drawThing(input: {
   id: string;
   of: string;
@@ -486,8 +547,44 @@ function drawThing(input: {
   color: VisualColor;
   shape?: Partial<VisualFigure> | null;
   motion?: VisualMotion;
+  /** Where an `along` thing goes. */
+  motionTo?: { x: number; y: number };
+  /** Two library drawings as one picture. */
+  compose?: VisualCompose | null;
 }): { elements: VisualElement[]; height: number } {
   const { id, of, name, x, y, width, color } = input;
+  const composed = input.compose && composeBoxes(input.compose, x, y, width);
+  if (composed) {
+    const elements = place(
+      {
+        id,
+        role: 'centre',
+        kind: 'picture',
+        text: name,
+        picture: composed.base.name,
+        color,
+      },
+      composed.base.x,
+      y,
+      composed.base.w,
+    ).map((element) =>
+      element.type === 'shape' && input.motion
+        ? { ...element, motion: input.motion }
+        : element,
+    );
+    elements.push({
+      id: `${id}_add`,
+      type: 'shape',
+      x: composed.add.x,
+      y: composed.add.y,
+      w: composed.add.w,
+      h: composed.add.h,
+      kind: composed.add.name,
+      color: color === 'violet' ? 'amber' : 'violet',
+      fill: 'solid',
+    });
+    return { elements, height: composed.height };
+  }
   const drawing = resolveDrawing(of, input.shape);
   if (!drawing) {
     return {
@@ -540,7 +637,13 @@ function drawThing(input: {
     width,
   ).map((element) =>
     element.type === 'shape' && input.motion
-      ? { ...element, motion: input.motion }
+      ? {
+          ...element,
+          motion: input.motion,
+          ...(input.motion === 'along' && input.motionTo
+            ? { motionTo: input.motionTo }
+            : {}),
+        }
       : element,
   );
   return { elements, height: pictureBox(drawing.name, width).h };
@@ -813,7 +916,7 @@ function layoutPicture(m: Moment, id: string, stage: Stage): Laid {
   const out: VisualElement[] = [];
   const heading = m.heading?.trim();
   if (heading) out.push(label(`${id}_h`, CX, 36, heading, 'md', 'muted'));
-  const of = m.picture ?? m.name ?? '';
+  const of = m.compose?.base ?? m.picture ?? m.name ?? '';
   const bubble = m.bubble?.trim();
   const y = heading ? 150 : 142;
   // The bubble sits above the thing's top; a tall thing shrinks to leave it room.
@@ -838,6 +941,7 @@ function layoutPicture(m: Moment, id: string, stage: Stage): Laid {
     color: m.color ?? 'green',
     shape: m.shape,
     motion: m.motion,
+    compose: m.compose,
   });
   out.push(...thing.elements);
   const figure = thing.elements.find((e) => e.type === 'figure');
@@ -871,7 +975,16 @@ function layoutPicture(m: Moment, id: string, stage: Stage): Laid {
   }
   const named = new Map<string, string>();
   if (m.name) named.set(`${id}_c`, m.name);
-  return { elements: out, parts: [], arrowsOf: new Map(), named };
+  // The callouts are the card's parts: each waits for the word that names
+  // its part, or takes its share of the moment, rather than all arriving
+  // with the picture.
+  const parts: string[] = [];
+  for (const element of out)
+    if (element.type === 'callout') {
+      parts.push(element.id);
+      named.set(element.id, element.part);
+    }
+  return { elements: out, parts, arrowsOf: new Map(), named };
 }
 
 function layoutTerm(m: Moment, id: string, stage: Stage): Laid {
@@ -1080,6 +1193,17 @@ function layoutSceneCard(m: Moment, id: string, stage: Stage): Laid {
   const parts: string[] = [];
   const named = new Map<string, string>();
   const colors: VisualColor[] = ['green', 'blue', 'amber', 'violet'];
+  // Each picture's centre, so a thing that goes along knows where the next one stands.
+  const centres = pictures.map((p, i) => {
+    const left = pictures
+      .slice(0, i)
+      .reduce((sum, _, k) => sum + widths[k] + gap, 0);
+    const h = thingHeight(p.picture, widths[i]);
+    return {
+      x: Math.round(x + left + widths[i] / 2),
+      y: ground - 24 - Math.round(h / 2),
+    };
+  });
   pictures.forEach((p, i) => {
     const partId = `${id}_p${i}`;
     const w = widths[i];
@@ -1094,6 +1218,7 @@ function layoutSceneCard(m: Moment, id: string, stage: Stage): Laid {
         width: w,
         color: m.color ?? colors[i % colors.length],
         motion: p.motion,
+        motionTo: centres[i + 1],
       }).elements,
     );
     parts.push(partId);
@@ -1470,7 +1595,13 @@ export function layoutTutorial(
     const laid = layoutMoment(m, id, stage);
     elements.push(...laid.elements);
     const ids = new Set(laid.elements.map((e) => e.id));
-    const at = (sentence: number, word: number, element: VisualElement) => {
+    const at = (
+      sentence: number,
+      word: number,
+      element: VisualElement,
+      /** The sentence at whose end a lasting motion rests: its own, or the moment's last for the card's own thing. */
+      restAfter = sentence,
+    ) => {
       cuesBySentence[sentence].push({
         at: word,
         do: entrance(element),
@@ -1482,6 +1613,17 @@ export function layoutTutorial(
           at: word,
           do: 'fade',
           target: `${element.id}${NAME}`,
+        });
+      // A motion runs for its sentence, then the thing rests.
+      if (
+        element.type === 'shape' &&
+        element.motion &&
+        LASTING.has(element.motion)
+      )
+        cuesBySentence[restAfter].push({
+          at: Math.max(0, words(tutorial.sentences[restAfter]).length - 1),
+          do: 'settle',
+          target: element.id,
         });
     };
     const byId = new Map(laid.elements.map((e) => [e.id, e] as const));
@@ -1495,7 +1637,7 @@ export function layoutTutorial(
     }
     for (const element of laid.elements) {
       if (element.id.endsWith(NAME) || later.has(element.id)) continue;
-      at(from, 0, element);
+      at(from, 0, element, to);
     }
     for (const [partId, when] of revealed) {
       const part = byId.get(partId);
@@ -1695,7 +1837,11 @@ export function cutShort(text: string, pool: Set<string>): boolean {
 /** Every string in a card with its whitespace collapsed: a line break the model put in draws as nothing and measures as everything. */
 function tidyStrings<T>(value: T): T {
   if (typeof value === 'string')
-    return value.replace(/\s+/g, ' ').trim() as unknown as T;
+    // A model's string can carry control characters; a NUL once broke the judge's sheet.
+    return value
+      .replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g, '')
+      .replace(/\s+/g, ' ')
+      .trim() as unknown as T;
   if (Array.isArray(value)) return value.map(tidyStrings) as unknown as T;
   if (value && typeof value === 'object')
     return Object.fromEntries(
@@ -1743,17 +1889,134 @@ export function tidyNarration(narration: VisualNarration): VisualNarration {
     sentences.push(rest);
     grew[index] = pieces;
   });
-  if (!grew.some((n) => n > 0)) return narration;
   const shift = (i: number) => grew.slice(0, i).reduce((sum, n) => sum + n, 0);
-  return {
-    ...narration,
-    sentences,
-    moments: narration.moments.map((m) => ({
-      ...m,
-      from: m.from + shift(m.from),
-      to: m.to + shift(m.to) + (grew[m.to] ?? 0),
-    })),
-  };
+  const moved = grew.some((n) => n > 0)
+    ? narration.moments.map((m) => ({
+        ...m,
+        from: m.from + shift(m.from),
+        to: m.to + shift(m.to) + (grew[m.to] ?? 0),
+      }))
+    : narration.moments;
+  // A moment that covers more sentences than a card may is cut into
+  // moments that fit, the same intent on each: the director cannot mend
+  // a span, and a page must not fail on one.
+  const most_sentences = TUTORIAL_LIMITS.maxSentencesPerMoment;
+  const moments: VisualNarration['moments'] = [];
+  for (const m of moved) {
+    let from = m.from;
+    while (m.to - from + 1 > most_sentences) {
+      moments.push({ ...m, from, to: from + most_sentences - 1 });
+      from += most_sentences;
+    }
+    moments.push({ ...m, from });
+  }
+  // A sentence too short to be a beat of its own (a "Yes." or a "Section
+  // 16.") is folded into the sentence beside it: the one before, unless
+  // it opens a moment, then the one after. The narrator cannot be asked
+  // again for it, and a page must not fail on it.
+  const folded = foldShortSentences(sentences, moments);
+  const same =
+    moments.length === narration.moments.length &&
+    !grew.some((n) => n > 0) &&
+    !folded.count;
+  if (same) return narration;
+  return { ...narration, sentences: folded.sentences, moments: folded.moments };
+}
+
+/** Fewer words than this and a sentence is not a beat of its own. */
+const FEWEST_SENTENCE_WORDS = 4;
+
+/** Short sentences folded into a neighbour, the moments moved along; how many were folded. */
+function foldShortSentences(
+  given: string[],
+  givenMoments: VisualNarration['moments'],
+): {
+  sentences: string[];
+  moments: VisualNarration['moments'];
+  count: number;
+} {
+  const sentences = [...given];
+  let moments = givenMoments.map((m) => ({ ...m }));
+  let count = 0;
+  let i = 0;
+  while (i < sentences.length) {
+    if (
+      words(sentences[i]).length >= FEWEST_SENTENCE_WORDS ||
+      sentences.length < 2
+    ) {
+      i += 1;
+      continue;
+    }
+    const opens = moments.some((m) => m.from === i);
+    const intoPrevious = i > 0 && !opens;
+    if (!intoPrevious && i >= sentences.length - 1) {
+      i += 1;
+      continue;
+    }
+    const at = i;
+    if (intoPrevious) {
+      sentences[i - 1] = `${sentences[i - 1].trim()} ${sentences[i].trim()}`;
+    } else {
+      sentences[i + 1] = `${sentences[i].trim()} ${sentences[i + 1].trim()}`;
+    }
+    sentences.splice(at, 1);
+    // A moment past the fold moves up one; one that held the sentence is one shorter; one left with nothing goes.
+    moments = moments
+      .map((m) => ({
+        ...m,
+        from: m.from > at ? m.from - 1 : m.from,
+        to: m.to >= at ? m.to - 1 : m.to,
+      }))
+      .filter((m) => m.from <= m.to);
+    count += 1;
+    // The folded sentence may still be short: look at it again.
+  }
+  return { sentences, moments, count };
+}
+
+/** Drawings that are round enough to turn: a spin on anything else looks wrong. */
+const ROUND =
+  /(^|-)(gear|globe|clock|sun|star|wheel|planet|ball|compass|disc|record|orbit|target|cycle|circle|donut|cd|dvd|vinyl|cookie|pizza|clover|flower|fan|radio-button|spinner|aperture|lifebuoy|watch|timer|smiley)(-|$)/;
+/** Words that say something is wrong or urgent, which a shake answers. */
+const ALARM =
+  /\b(danger|risk|fail|fails|failed|failure|wrong|stop|alarm|warning|warn|error|lost|loss|breach|crash|broken|attack|threat|overload|late|penalty|fine|void|invalid)\b/i;
+
+/** What is wrong with a motion given to a thing: a spin on a thing that is not round, a shake with nothing to shake at. */
+function motionProblems(
+  who: string,
+  of: string | null | undefined,
+  motion: VisualMotion | null | undefined,
+  color: VisualColor | null | undefined,
+  words: (string | null | undefined)[],
+  shape?: Moment['shape'],
+): string[] {
+  const out: string[] = [];
+  const drawn = resolveDrawing(of ?? '', shape ?? undefined);
+  if (
+    drawn?.kind === 'figure' &&
+    drawn.figure.manner !== 'still' &&
+    !mannersThatMove(drawn.figure.outline).includes(drawn.figure.manner)
+  )
+    out.push(
+      `${who}: a ${drawn.figure.outline} does not move as "${drawn.figure.manner}"; give it ${mannersThatMove(drawn.figure.outline).join(', ') || 'still'}.`,
+    );
+  if (!motion || !of) return out;
+  if (motion === 'spin') {
+    const name = drawn?.kind === 'picture' ? drawn.name : '';
+    if (!name || !ROUND.test(name))
+      out.push(
+        `${who}: spin turns a round thing only (a gear, a globe, a clock, a coin, a wheel); "${of}" is not one. Give it hover, bounce, travel or grow.`,
+      );
+  }
+  if (motion === 'shake') {
+    const warm = color === 'red' || color === 'orange';
+    const said = [of, ...words].some((w) => w && ALARM.test(w));
+    if (!warm && !said)
+      out.push(
+        `${who}: shake is for alarm or failure; nothing here says one. Give "${of}" hover, bounce, travel or grow, or colour it red or orange and say what is wrong.`,
+      );
+  }
+  return out;
 }
 
 export function tutorialProblems(
@@ -1873,16 +2136,39 @@ export function tutorialProblems(
           const max = m.card === 'list' ? L.maxListItemChars : L.maxChipChars;
           short(`item ${k + 1}`, item.text, max);
           grounded(`item ${k + 1}`, item.text);
+          if (
+            /[,(]$|\b(e\.g\.|i\.e\.|or|and|a|the|of)$/i.test(item.text.trim())
+          )
+            problems.push(
+              `${who}: item ${k + 1} "${item.text}" is a sentence cut into pieces; each item is a whole phrase of its own.`,
+            );
         });
         break;
       }
       case 'picture': {
-        const of = m.picture ?? m.name ?? '';
+        const of = m.compose?.base ?? m.picture ?? m.name ?? '';
         if (!of) problems.push(`${who} names no thing to draw.`);
-        if (of && !resolveDrawing(of, m.shape))
+
+        if (m.compose) {
+          for (const part of [m.compose.base, m.compose.add])
+            if (!pickPicture(part))
+              problems.push(
+                `${who}: a composed picture names its two drawings by the library's names; "${part}" is not one.`,
+              );
+        } else if (of && !resolveDrawing(of, m.shape))
           problems.push(
             `${who}: nothing in the library draws "${of}", and its words do not say what shape it takes. Give the card a shape (outline ${FIGURE_OUTLINES.slice(0, 4).join(', ')} and so on, with its parts), or name a thing that can be drawn, or use another card.`,
           );
+        problems.push(
+          ...motionProblems(
+            who,
+            of,
+            m.motion,
+            m.color,
+            [m.name, m.bubble, ...(m.callouts ?? []).map((c) => c.text)],
+            m.shape,
+          ),
+        );
         short('the name', m.name, L.maxNameChars);
         grounded('the name', m.name);
         short('the bubble', m.bubble, L.maxBubbleChars);
@@ -1941,6 +2227,20 @@ export function tutorialProblems(
       }
       case 'scene': {
         const pictures = m.pictures ?? [];
+        pictures.forEach((p, k) =>
+          problems.push(
+            ...motionProblems(who, p.picture, p.motion, m.color, [p.name]),
+          ),
+        );
+        if (pictures[0]?.motion === 'travel')
+          problems.push(
+            `${who}: the first picture of a scene has no room to travel in from the left; give it hover, bounce or grow.`,
+          );
+        const motions = pictures.map((p) => p.motion).filter(Boolean);
+        if (new Set(motions).size < motions.length)
+          problems.push(
+            `${who}: two pictures move the same way; give each its own motion, or one of them none.`,
+          );
         if (pictures.length < 2 || pictures.length > L.maxPictures)
           problems.push(
             `${who} has ${pictures.length} pictures; between 2 and ${L.maxPictures}.`,

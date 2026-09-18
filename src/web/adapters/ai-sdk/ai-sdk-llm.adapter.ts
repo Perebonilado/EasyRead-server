@@ -701,6 +701,7 @@ export class AiSdkLlmAdapter implements LlmGatewayPort, OnModuleInit {
       card: string;
       drawings: string[];
       shouldSee: string;
+      motion?: string;
     }[];
   }): Promise<LlmResult<VisualJudgement>> {
     const started = Date.now();
@@ -709,7 +710,7 @@ export class AiSdkLlmAdapter implements LlmGatewayPort, OnModuleInit {
     const listed = input.moments
       .map(
         (m) =>
-          `${m.moment}. ${m.card} card${m.drawings.length ? `, drawing: ${m.drawings.join('; ')}` : ', no drawing'}. Should see: ${m.shouldSee}`,
+          `${m.moment}. ${m.card} card${m.drawings.length ? `, drawing: ${m.drawings.join('; ')}` : ', no drawing'}. Should see: ${m.shouldSee}${m.motion ? ` Moves: ${m.motion}.` : ''}`,
       )
       .join('\n');
     const result = await generateObject({

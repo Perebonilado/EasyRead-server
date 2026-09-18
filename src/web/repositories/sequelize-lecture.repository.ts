@@ -386,6 +386,7 @@ export class SequelizeLectureRepository implements LectureRepository {
     contentVersion: number,
     topicIds: string[],
     style: LectureStyle,
+    exceptPages: number[] = [],
   ): Promise<void> {
     if (!topicIds.length) return;
     await this.segments.update(
@@ -405,6 +406,9 @@ export class SequelizeLectureRepository implements LectureRepository {
           topicId: topicIds,
           style,
           kind: 'page',
+          ...(exceptPages.length
+            ? { pageNumber: { [Op.notIn]: exceptPages } }
+            : {}),
           [Op.and]: [literal('JSON_LENGTH(untaught) > 0')],
         } as never,
       },
@@ -553,6 +557,18 @@ export class SequelizeLectureRepository implements LectureRepository {
       offsetMs: input.offsetMs,
       style: input.style,
     } as never);
+  }
+
+  async pagesHeardSince(
+    documentId: string,
+    style: LectureStyle,
+    since: Date,
+  ): Promise<number[]> {
+    const rows = await this.positions.findAll({
+      attributes: ['pageNumber'],
+      where: { documentId, style, updatedAt: { [Op.gte]: since } } as never,
+    });
+    return [...new Set(rows.map((row) => row.pageNumber))];
   }
 
   async findPosition(

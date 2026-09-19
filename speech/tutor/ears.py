@@ -45,7 +45,7 @@ class Ears(stt.STT):
         super().__init__(capabilities=stt.STTCapabilities(streaming=False, interim_results=False))
         from faster_whisper import WhisperModel
 
-        self.model = WhisperModel(MODEL, device="cpu", compute_type="int8", cpu_threads=threads())
+        self.whisper = WhisperModel(MODEL, device="cpu", compute_type="int8", cpu_threads=threads())
         self.lock = asyncio.Lock()
 
     async def _recognize_impl(
@@ -69,7 +69,7 @@ class Ears(stt.STT):
             pcm = np.interp(np.linspace(0, len(pcm), count, endpoint=False), np.arange(len(pcm)), pcm).astype(np.float32)
 
         def hear() -> str:
-            segments, _info = self.model.transcribe(pcm, language="en", beam_size=1, vad_filter=False, condition_on_previous_text=False)
+            segments, _info = self.whisper.transcribe(pcm, language="en", beam_size=1, vad_filter=False, condition_on_previous_text=False)
             return " ".join(segment.text.strip() for segment in segments).strip()
 
         async with self.lock:

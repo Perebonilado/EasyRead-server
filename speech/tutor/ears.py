@@ -12,6 +12,7 @@ most of the tutor's delay and the price of owning the ears.
 
 import asyncio
 import os
+import re
 
 from livekit import rtc
 from livekit.agents import APIConnectOptions, stt
@@ -47,6 +48,23 @@ class Ears(stt.STT):
 
         self.whisper = WhisperModel(MODEL, device="cpu", compute_type="int8", cpu_threads=threads())
         self.lock = asyncio.Lock()
+        # The page's own terms, so a name or an abbreviation is heard as
+        # the page spells it and not as the nearest everyday words.
+        self.hint = ""
+
+    def listen_for(self, page: str) -> None:
+        """Terms from the page the learner is on: capitalised words, abbreviations and long words, a couple of hundred characters of them."""
+        seen = []
+        for word in re.findall(r"[A-Za-z][A-Za-z-]{2,}", page):
+            # An abbreviation, a name (not a sentence's first short word), or a long word.
+            if (
+                (word.isupper() or (word[:1].isupper() and len(word) >= 4) or len(word) >= 9)
+                and word.lower() not in (w.lower() for w in seen)
+            ):
+                seen.append(word)
+            if sum(len(w) + 2 for w in seen) > 220:
+                break
+        self.hint = ", ".join(seen)
 
     async def _recognize_impl(
         self,
@@ -69,7 +87,9 @@ class Ears(stt.STT):
             pcm = np.interp(np.linspace(0, len(pcm), count, endpoint=False), np.arange(len(pcm)), pcm).astype(np.float32)
 
         def hear() -> str:
-            segments, _info = self.whisper.transcribe(pcm, language="en", beam_size=1, vad_filter=False, condition_on_previous_text=False)
+            segments, _info = self.whisper.transcribe(
+                pcm, language="en", beam_size=1, vad_filter=False, condition_on_previous_text=False, initial_prompt=self.hint or None
+            )
             return " ".join(segment.text.strip() for segment in segments).strip()
 
         async with self.lock:

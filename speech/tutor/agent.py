@@ -176,10 +176,14 @@ class Tutor(Agent):
     def __init__(self, brief: dict, learner: str, room: rtc.Room) -> None:
         super().__init__(instructions=brief["instructions"], tools=browser_tools(brief.get("tools") or [], learner, room))
         self.base = brief["instructions"]
+        self.ears: Ears | None = None
 
     async def read_page(self, page: str) -> None:
-        """The page the learner is on, folded under the brief, as the OpenAI line did with session.update."""
+        """The page the learner is on, folded under the brief, as the OpenAI line did with session.update; the ears take its terms as hints."""
         await self.update_instructions(self.base + page)
+        ears = self.ears
+        if ears is not None:
+            ears.listen_for(page)
 
 
 @server.rtc_session(agent_name=AGENT_NAME)
@@ -202,8 +206,10 @@ async def tutor(ctx: JobContext) -> None:
     # and end. The conversation lets the tutor hear when a turn ends.
     manual = brief.get("turnDetection") == "off"
     agent = Tutor(brief, learner, ctx.room)
+    ears = Ears()
+    agent.ears = ears
     session = AgentSession(
-        stt=Ears(),
+        stt=ears,
         llm=openai.LLM(model=os.environ.get("TUTOR_LLM_MODEL", "gpt-4.1-mini")),
         tts=Voice(brief.get("voice") or "am_puck", float(brief.get("speed") or 1.0)),
         vad=silero.VAD.load(),

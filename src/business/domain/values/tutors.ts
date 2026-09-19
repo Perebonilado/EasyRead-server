@@ -18,7 +18,7 @@
  * ElevenLabs key.
  */
 export interface TutorVoice {
-  provider: 'openai' | 'elevenlabs';
+  provider: 'openai' | 'elevenlabs' | 'livekit';
   /** OpenAI realtime voice name, or an ElevenLabs voice id. */
   voiceId: string;
   /** The OpenAI voice used when the provider is not configured. */
@@ -117,7 +117,8 @@ export const TUTORS: Tutor[] = [
     tagline: 'Teaches by asking',
     description:
       'Constant quizzes, quick challenges, and “what do you think happens next?”. Best when listening alone puts you to sleep.',
-    voice: { provider: 'openai', voiceId: 'verse', openaiFallback: 'verse' },
+    // The test tutor for our own line: Kokoro's voice, OpenAI's if the line is down.
+    voice: { provider: 'livekit', voiceId: 'am_puck', openaiFallback: 'verse' },
     color: '#115e59',
     dials: { pace: 'measured', breakdown: 'thorough', interactivity: 'high' },
     persona:

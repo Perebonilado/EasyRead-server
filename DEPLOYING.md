@@ -6,8 +6,8 @@ and an S3 bucket will do.
 
 ## The shape of it
 
-Six services. Two of them are this same repository, deployed twice; one is
-a folder of it, built from its own Dockerfile.
+Nine services. Two of them are this same repository, deployed twice; four
+are folders of it, each built from its own Dockerfile.
 
 | Service | What it is | Start command |
 | --- | --- | --- |
@@ -17,6 +17,9 @@ a folder of it, built from its own Dockerfile.
 | **API** | this repo, HTTP | `npm run start:prod` |
 | **Worker** | this repo, no HTTP | `npm run worker:prod` |
 | **Voice** | `speech/kokoro/`, Kokoro on CPU | the Dockerfile's |
+| **Tutor Voice** | the same folder, `TTS_MODE=tutor` | the Dockerfile's |
+| **LiveKit** | `speech/livekit/`, the room for live tutoring | the Dockerfile's |
+| **Tutor** | `speech/tutor/`, the agent that joins the room | the Dockerfile's |
 
 The API answers requests and enqueues work; it never processes a document.
 The worker consumes the queues and does everything slow — conversion, text
@@ -105,6 +108,29 @@ outside Railway (a laptop); the token guards it either way. With
 `KOKORO_TTS_URL` empty, a learner's upload is narrated by OpenAI's voice
 instead. That is configuration, not a fallback: a page the Voice service
 cannot narrate fails and is retried there, never sent to OpenAI.
+
+## The live tutor
+
+A tutor marked `livekit` in `tutors.ts` talks on our own line: a LiveKit
+room, open ears and voice, an OpenAI text brain. Three services, each from
+its folder with the root directory set:
+
+- **LiveKit** (`speech/livekit`): `LIVEKIT_API_KEY`, `LIVEKIT_API_SECRET`
+  (a fresh pair), `REDIS_URL` (the project's Redis), `PORT=7880`, a public
+  domain, and a **TCP proxy on application port 7881**. Railway has no UDP;
+  the start script advertises the proxy's address so browsers reach the
+  media port over TCP. Redeploy once after adding the proxy.
+- **Tutor Voice** (`speech/kokoro`): as the Voice service, plus
+  `TTS_MODE=tutor`. Replies stream sentence by sentence, unmastered.
+- **Tutor** (`speech/tutor`): `LIVEKIT_URL=ws://<livekit>.railway.internal:7880`,
+  the same key pair, `OPENAI_API_KEY`, `TUTOR_LLM_MODEL`,
+  `TUTOR_VOICE_URL=http://<tutor voice>.railway.internal:8880`,
+  `TUTOR_VOICE_TOKEN`, `WHISPER_MODEL=small.en`. No domain; it dials out.
+
+Then on the API: `LIVEKIT_URL=wss://<livekit public domain>`,
+`LIVEKIT_API_KEY`, `LIVEKIT_API_SECRET`. Without them a `livekit` tutor is
+voiced by OpenAI like the rest, which is how it stays off until the line
+is proven.
 
 ## Migrations
 

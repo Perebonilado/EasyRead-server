@@ -53,6 +53,10 @@ ROOM_TONE_DB = -78.0
 MASTER = "highpass=f=70,treble=g=3:f=3500:w=0.6,acompressor=threshold=-18dB:ratio=2.5:attack=8:release=120:makeup=2"
 LOUDNESS = "I=-16:TP=-1.5:LRA=9"
 WARM_UP = "The lecture voice is warming up before the chapter begins."
+# The tutor mode: a reply is spoken sentence by sentence as raw audio, the
+# first sentence leaving before the last is rendered, with no mastering,
+# since a learner mid-conversation is waiting on every word.
+TUTOR_GAP = 0.3
 
 
 def bake_model(voice: str) -> None:
@@ -157,16 +161,45 @@ def threads() -> int:
     return os.cpu_count() or 1
 
 
-def mount(api, renderer: Renderer, token: str, where: str):
-    """The two routes both homes answer, on a FastAPI app: health, and a page as mp3 or wav."""
+def mount(api, renderer: Renderer, token: str, where: str, mode: str = "lecture"):
+    """The routes both homes answer, on a FastAPI app: health, a page as mp3 or wav, and in tutor mode a reply as streamed raw audio."""
     from fastapi import Header, HTTPException, Request
-    from fastapi.responses import Response
+    from fastapi.responses import Response, StreamingResponse
 
     expected = f"Bearer {token}"
 
     @api.get("/health")
     def health():
-        return {"status": "ok", "model": "kokoro-82m", "voice": renderer.voice, "gpu": where, "version": 3}
+        return {"status": "ok", "model": "kokoro-82m", "voice": renderer.voice, "gpu": where, "mode": mode, "version": 4}
+
+    @api.post("/v1/audio/stream")
+    async def stream(request: Request, authorization: str = Header(default="")):
+        """A reply as raw 24 kHz 16-bit mono, one sentence at a time, the first out as soon as it is said."""
+        if authorization != expected:
+            raise HTTPException(status_code=401, detail="the key was refused")
+        body = await request.json()
+        voice = str(body.get("voice") or renderer.voice)
+        text = str(body.get("input") or "").strip()
+        if not text:
+            raise HTTPException(status_code=400, detail="input is empty")
+        if len(text) > INPUT_LIMIT:
+            raise HTTPException(status_code=400, detail=f"input is over {INPUT_LIMIT} characters")
+        try:
+            renderer.check_voice(voice)
+            speed = min(2.0, max(0.5, float(body.get("speed") or 1.0)))
+        except ValueError as error:
+            raise HTTPException(status_code=400, detail=str(error))
+
+        async def pieces():
+            first = True
+            for sentence in sentences(text):
+                audio, _seconds, _starts = await asyncio.to_thread(renderer.render, [(sentence, speed, 0.0)], voice)
+                if not first:
+                    yield _pcm(gap(TUTOR_GAP))
+                first = False
+                yield _pcm(audio)
+
+        return StreamingResponse(pieces(), media_type="audio/pcm", headers={"x-sample-rate": str(SAMPLE_RATE)})
 
     @api.post("/v1/audio/speech")
     async def speech(request: Request, authorization: str = Header(default="")):
@@ -201,6 +234,11 @@ def mount(api, renderer: Renderer, token: str, where: str):
         )
 
     return api
+
+
+def sentences(text: str) -> list:
+    """A reply cut at sentence ends, each said on its own so the first is heard before the rest exist."""
+    return [part for part in re.split(r"(?<=[.!?])\s+", text.strip()) if part]
 
 
 def runs(text: str) -> list:

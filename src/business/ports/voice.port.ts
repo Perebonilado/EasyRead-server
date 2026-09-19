@@ -87,6 +87,13 @@ export type RealtimeSession =
       agentId: string;
       /** The tutor's ElevenLabs voice, applied as a TTS override. */
       voiceId: string;
+    }
+  | {
+      /** Our own line: a LiveKit room the tutor agent is dispatched into. */
+      provider: 'livekit';
+      url: string;
+      token: string;
+      room: string;
     };
 
 /**

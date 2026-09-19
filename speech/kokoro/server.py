@@ -4,6 +4,7 @@ same request and answer as the Modal service. Learner uploads come here.
 
     TTS_TOKEN   the bearer token the worker sends; never printed
     TTS_VOICE   the default voice (am_puck)
+    TTS_MODE    lecture (pages, mastered) or tutor (replies, streamed raw)
     TTS_THREADS cores for the model; the container's count when unset
     PORT        where to listen (8880); Railway sets it
 
@@ -19,11 +20,12 @@ from fastapi import FastAPI
 import voice as lecture_voice
 
 VOICE = os.environ.get("TTS_VOICE", "am_puck")
+MODE = os.environ.get("TTS_MODE", "lecture")
 PORT = int(os.environ.get("PORT", "8880"))
 
 renderer = lecture_voice.Renderer(VOICE)
 api = FastAPI()
-lecture_voice.mount(api, renderer, os.environ["TTS_TOKEN"], "cpu")
+lecture_voice.mount(api, renderer, os.environ["TTS_TOKEN"], "cpu", MODE)
 
 
 @api.on_event("startup")

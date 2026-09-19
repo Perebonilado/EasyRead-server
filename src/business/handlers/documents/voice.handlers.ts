@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import { Inject, Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import {
@@ -82,6 +83,7 @@ import AbstractRequestHandlerTemplate from '../AbstractRequestHandlerTemplate';
 import { CommandResponse } from '../response/CommandResponse';
 import { ComputeService } from './compute.service';
 import { ElevenLabsRealtimeAdapter } from '../../../web/adapters/elevenlabs-voice.adapters';
+import { LiveKitRealtimeAdapter } from '../../../web/adapters/livekit-realtime.adapter';
 import { DocumentAccessService } from './document-access.service';
 import { EntitlementsService } from './entitlements.service';
 import {
@@ -953,6 +955,7 @@ export class StartVoiceSessionHandler extends AbstractRequestHandlerTemplate<
   constructor(
     @Inject(REALTIME) private readonly realtime: RealtimePort,
     private readonly elevenlabs: ElevenLabsRealtimeAdapter,
+    private readonly livekit: LiveKitRealtimeAdapter,
     @Inject(SUMMARY_REPOSITORY) private readonly summaries: SummaryRepository,
     @Inject(LECTURE_REPOSITORY)
     private readonly lectures: LectureRepository,
@@ -1022,53 +1025,73 @@ export class StartVoiceSessionHandler extends AbstractRequestHandlerTemplate<
       );
     }
 
-    const session = useElevenLabs
-      ? await this.elevenlabs.createSession({
+    // Our own line: a LiveKit room on Railway, open ears and voice, an
+    // OpenAI text brain. One tutor is marked for it; without the room's
+    // address set, that tutor is voiced by OpenAI like the rest.
+    const wantsLiveKit =
+      cmd.mode === 'teach' && tutor.voice.provider === 'livekit';
+    const useLiveKit = wantsLiveKit && this.livekit.isConfigured();
+    if (wantsLiveKit && !useLiveKit) {
+      this.logger.warn(
+        `Tutor ${tutor.id} speaks on our own line but LIVEKIT_URL is not set — falling back to OpenAI (${tutor.voice.openaiFallback})`,
+      );
+    }
+
+    const session = useLiveKit
+      ? await this.livekit.createSession({
           instructions: baseInstructions,
           tools: TEACHING_TOOLS,
           voice: tutor.voice.voiceId,
+          identity: `learner-${cmd.userId}`,
+          room: `tutor-${doc.id}-${randomUUID().slice(0, 8)}`,
         })
-      : await this.realtime.createSession({
-          instructions: baseInstructions,
-          tools:
-            cmd.mode === 'teach'
-              ? TEACHING_TOOLS
-              : cmd.mode === 'lecture'
-                ? cmd.lectureContext?.interactive
-                  ? [
-                      ...LECTURE_BOARD_TOOLS,
-                      SAVE_QUESTION_TOOL,
-                      ...INTERACTIVE_TOOLS,
-                    ]
-                  : LECTURE_BOARD_TOOLS
-                : undefined,
-          // The tutor's voice; chat mode keeps the configured default. A
-          // question asked mid-lecture takes the answering voice, cedar
-          // unless configured otherwise: the lecture's own engine has no
-          // such voice, so the same teacher is carried by the name on
-          // screen and the persona, not by an exact match.
-          voice:
-            cmd.mode === 'teach'
-              ? tutor.voice.provider === 'openai'
-                ? tutor.voice.voiceId
-                : tutor.voice.openaiFallback
-              : cmd.mode === 'lecture'
-                ? this.config.get<string>('AI_LECTURE_ASK_VOICE', 'cedar')
-                : undefined,
-          // Mid-lecture the learner holds the mic: the client commits every
-          // turn, the room never ends one, and the pace follows the style.
-          ...(cmd.mode === 'lecture'
-            ? {
-                audio: {
-                  // Hold to talk: the learner's release ends a turn and
-                  // nothing else does; the client commits and asks.
-                  turnDetection: 'off' as const,
-                  noiseReduction: 'near_field' as const,
-                  speed: askSpeed(lectureStyle),
-                },
-              }
-            : {}),
-        });
+      : useElevenLabs
+        ? await this.elevenlabs.createSession({
+            instructions: baseInstructions,
+            tools: TEACHING_TOOLS,
+            voice: tutor.voice.voiceId,
+          })
+        : await this.realtime.createSession({
+            instructions: baseInstructions,
+            tools:
+              cmd.mode === 'teach'
+                ? TEACHING_TOOLS
+                : cmd.mode === 'lecture'
+                  ? cmd.lectureContext?.interactive
+                    ? [
+                        ...LECTURE_BOARD_TOOLS,
+                        SAVE_QUESTION_TOOL,
+                        ...INTERACTIVE_TOOLS,
+                      ]
+                    : LECTURE_BOARD_TOOLS
+                  : undefined,
+            // The tutor's voice; chat mode keeps the configured default. A
+            // question asked mid-lecture takes the answering voice, cedar
+            // unless configured otherwise: the lecture's own engine has no
+            // such voice, so the same teacher is carried by the name on
+            // screen and the persona, not by an exact match.
+            voice:
+              cmd.mode === 'teach'
+                ? tutor.voice.provider === 'openai'
+                  ? tutor.voice.voiceId
+                  : tutor.voice.openaiFallback
+                : cmd.mode === 'lecture'
+                  ? this.config.get<string>('AI_LECTURE_ASK_VOICE', 'cedar')
+                  : undefined,
+            // Mid-lecture the learner holds the mic: the client commits every
+            // turn, the room never ends one, and the pace follows the style.
+            ...(cmd.mode === 'lecture'
+              ? {
+                  audio: {
+                    // Hold to talk: the learner's release ends a turn and
+                    // nothing else does; the client commits and asks.
+                    turnDetection: 'off' as const,
+                    noiseReduction: 'near_field' as const,
+                    speed: askSpeed(lectureStyle),
+                  },
+                }
+              : {}),
+          });
 
     await this.calls.record({
       documentId: doc.id,
@@ -1076,7 +1099,9 @@ export class StartVoiceSessionHandler extends AbstractRequestHandlerTemplate<
       model:
         session.provider === 'openai'
           ? `openai:${session.model}`
-          : 'elevenlabs:agent',
+          : session.provider === 'livekit'
+            ? 'livekit:tutor'
+            : 'elevenlabs:agent',
       tokensIn: null,
       tokensOut: null,
       latencyMs: null,

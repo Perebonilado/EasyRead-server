@@ -47,6 +47,7 @@ import {
   ElevenLabsRealtimeAdapter,
   ElevenLabsSpeechAdapter,
 } from '../adapters/elevenlabs-voice.adapters';
+import { LiveKitRealtimeAdapter } from '../adapters/livekit-realtime.adapter';
 import {
   OpenAiRealtimeAdapter,
   OpenAiSpeechAdapter,
@@ -124,6 +125,9 @@ export const portProviders: Provider[] = [
   // the OpenAI-backed tokens above stay the defaults for everything else.
   ElevenLabsSpeechAdapter,
   ElevenLabsRealtimeAdapter,
+  // Our own line for a tutor marked `livekit`: a room on Railway and the
+  // agent dispatched with its brief. Without LIVEKIT_URL it is OpenAI.
+  LiveKitRealtimeAdapter,
 
   {
     provide: PAYMENTS,

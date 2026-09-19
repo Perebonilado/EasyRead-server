@@ -3,7 +3,7 @@
 # socat carries the proxied port onto the one LiveKit advertises.
 FROM livekit/livekit-server:latest
 USER root
-RUN apk add --no-cache socat
+RUN apk add --no-cache socat coturn
 COPY start.sh /start.sh
 RUN chmod +x /start.sh
 ENTRYPOINT ["/start.sh"]

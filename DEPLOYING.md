@@ -117,9 +117,14 @@ its folder with the root directory set:
 
 - **LiveKit** (`speech/livekit`): `LIVEKIT_API_KEY`, `LIVEKIT_API_SECRET`
   (a fresh pair), `REDIS_URL` (the project's Redis), `PORT=7880`, a public
-  domain, and a **TCP proxy on application port 7881**. Railway has no UDP;
-  the start script advertises the proxy's address so browsers reach the
-  media port over TCP. Redeploy once after adding the proxy.
+  domain, and the service's **one TCP proxy on application port 7881**.
+  Railway has no UDP and browsers offer no TCP candidate, so a browser
+  reaches the room only through TURN. LiveKit's own TURN insists on port
+  443, which Railway cannot give, so the container runs coturn on the
+  proxied port and LiveKit advertises it: `TURN_DOMAIN`
+  (`turn.easiread.com`, an A record at Cloudflare, DNS only, pointing at
+  the proxy's IP) and `TURN_SECRET` (a shared secret). ICE over TCP moves
+  to a private port the agent uses. Redeploy once after adding the proxy.
 - **Tutor Voice** (`speech/kokoro`): as the Voice service, plus
   `TTS_MODE=tutor`. Replies stream sentence by sentence, unmastered.
 - **Tutor** (`speech/tutor`): `LIVEKIT_URL=ws://<livekit>.railway.internal:7880`,

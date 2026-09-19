@@ -127,6 +127,8 @@ its folder with the root directory set:
   to a private port the agent uses. Redeploy once after adding the proxy.
 - **Tutor Voice** (`speech/kokoro`): as the Voice service, plus
   `TTS_MODE=tutor`. Replies stream sentence by sentence, unmastered.
+  The Voice service sleeps between uploads (Railway app sleeping, set on
+  the service); the Tutor Voice stays awake so an answer is never 15 s late.
 - **Tutor** (`speech/tutor`): `LIVEKIT_URL=ws://<livekit>.railway.internal:7880`,
   the same key pair, `OPENAI_API_KEY`, `TUTOR_LLM_MODEL`,
   `TUTOR_VOICE_URL=http://<tutor voice>.railway.internal:8880`,

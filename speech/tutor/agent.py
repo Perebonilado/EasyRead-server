@@ -106,10 +106,15 @@ class Moves:
         return "ok"
 
     async def turn_end(self) -> str:
-        """The hold ended: the ears close and what was heard becomes the turn. The answer is asked for separately, since the browser may first add what the book says about it."""
+        """The hold ended: the ears close and what was heard becomes the turn. The answer is asked for separately, since the browser may first add what the book says about it. Not done until the words are in: the browser's next move waits on this one, and a reply asked for before the transcript landed would answer the turn before."""
         self.session.input.set_audio_enabled(False)
-        self.session.commit_user_turn(skip_reply=True)
-        return "ok"
+        try:
+            heard = await self.session.commit_user_turn(skip_reply=True, transcript_timeout=6.0)
+        except Exception as error:
+            log.warning("the turn's words did not arrive: %s", error)
+            return "silent"
+        log.info("heard: %s", (heard or "")[:160])
+        return "ok" if heard else "silent"
 
     async def turn_cancel(self) -> str:
         """A tap: nothing was said, nothing is sent."""
@@ -147,10 +152,15 @@ def register_moves(room: rtc.Room, moves: Moves) -> None:
                 body = json.loads(data.payload) if data.payload else {}
             except ValueError:
                 body = {}
+            log.info("move %s %s", method, json.dumps(body)[:120])
             try:
                 return await handler(**body)
             except TypeError as error:
+                log.warning("move %s refused: %s", method, error)
                 raise rtc.RpcError(1400, f"bad arguments for {method}: {error}")
+            except Exception as error:
+                log.exception("move %s failed: %s", method, error)
+                raise rtc.RpcError(1500, f"{method} failed: {error}")
 
         room.local_participant.register_rpc_method(method, handle)
 
@@ -201,6 +211,20 @@ async def tutor(ctx: JobContext) -> None:
     )
     moves = Moves(session, agent)
     register_moves(ctx.room, moves)
+
+    # What was said, by whom, and anything that went wrong, in the log.
+    @session.on("conversation_item_added")
+    def on_item(event) -> None:
+        item = event.item
+        log.info("%s: %s", getattr(item, "role", "?"), (getattr(item, "text_content", None) or "")[:160])
+
+    @session.on("error")
+    def on_error(event) -> None:
+        log.error("session error: %s", getattr(event, "error", event))
+
+    @session.on("agent_state_changed")
+    def on_state(event) -> None:
+        log.info("state %s -> %s", event.old_state, event.new_state)
 
     # Page turns arrive as data on their topic.
     @ctx.room.on("data_received")

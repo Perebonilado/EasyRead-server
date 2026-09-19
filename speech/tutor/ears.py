@@ -94,6 +94,13 @@ class Ears(stt.STT):
 
         async with self.lock:
             text = await asyncio.to_thread(hear)
+        # What the allocator kept from hearing, handed back; the model stays.
+        try:
+            import ctypes
+
+            ctypes.CDLL("libc.so.6").malloc_trim(0)
+        except Exception:
+            pass
         return stt.SpeechEvent(
             type=stt.SpeechEventType.FINAL_TRANSCRIPT,
             alternatives=[stt.SpeechData(language="en", text=text)],

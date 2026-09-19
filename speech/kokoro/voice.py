@@ -59,6 +59,16 @@ WARM_UP = "The lecture voice is warming up before the chapter begins."
 TUTOR_GAP = 0.3
 
 
+def release_memory() -> None:
+    """What the allocator kept after a render, handed back to the box; the model stays where it is."""
+    try:
+        import ctypes
+
+        ctypes.CDLL("libc.so.6").malloc_trim(0)
+    except Exception:
+        pass
+
+
 def bake_model(voice: str) -> None:
     """Weights, every voice and the English front-end's data, fetched once into the image."""
     from huggingface_hub import snapshot_download
@@ -198,6 +208,7 @@ def mount(api, renderer: Renderer, token: str, where: str, mode: str = "lecture"
                     yield _pcm(gap(TUTOR_GAP))
                 first = False
                 yield _pcm(audio)
+            release_memory()
 
         return StreamingResponse(pieces(), media_type="audio/pcm", headers={"x-sample-rate": str(SAMPLE_RATE)})
 
@@ -222,6 +233,7 @@ def mount(api, renderer: Renderer, token: str, where: str, mode: str = "lecture"
         except ValueError as error:
             raise HTTPException(status_code=400, detail=str(error))
         data = await asyncio.to_thread(to_mp3 if fmt == "mp3" else to_wav, audio)
+        release_memory()
         return Response(
             content=data,
             media_type="audio/mpeg" if fmt == "mp3" else "audio/wav",

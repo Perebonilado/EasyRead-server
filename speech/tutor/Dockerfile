@@ -11,7 +11,8 @@ RUN apt-get update \
 ENV HF_HOME=/models \
     PIP_NO_CACHE_DIR=1 \
     PYTHONUNBUFFERED=1 \
-    WHISPER_MODEL=small.en
+    WHISPER_MODEL=small.en \
+    MALLOC_ARENA_MAX=2
 
 WORKDIR /app
 COPY requirements.txt .

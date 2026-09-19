@@ -16,6 +16,7 @@ import {
   REALTIME,
   SPEECH,
   LECTURE_SPEECH,
+  UPLOAD_SPEECH,
   TRANSCRIPTION,
   STORAGE,
   VECTOR_STORE,
@@ -52,9 +53,12 @@ import {
   OpenAiTranscriptionAdapter,
 } from '../adapters/ai-sdk/openai-voice.adapters';
 import {
+  KOKORO_HOME,
+  MODAL_HOME,
   ModalSpeechAdapter,
   NoLectureSpeech,
 } from '../adapters/modal-speech.adapter';
+import type { SpeechPort } from '../../business/ports/voice.port';
 import { PassthroughConverterAdapter } from '../adapters/passthrough-converter.adapter';
 import { PdfExportRendererAdapter } from '../adapters/pdf-export-renderer.adapter';
 import { WebImportAdapter } from '../adapters/web-import/web-import.adapter';
@@ -91,15 +95,26 @@ export const portProviders: Provider[] = [
   // Voice rides on the same OpenAI key as the text gateway.
   { provide: SPEECH, useClass: OpenAiSpeechAdapter },
   // A school's catalogue is voiced on the rented GPU, and only there. With
-  // no service URL it is not voiced at all: never at OpenAI's price. A
-  // learner's own upload is voiced by SPEECH above, as always.
+  // no service URL it is not voiced at all: never at OpenAI's price.
   {
     provide: LECTURE_SPEECH,
     inject: [ConfigService],
     useFactory: (config: ConfigService) =>
       config.get<string>('MODAL_TTS_URL')
-        ? new ModalSpeechAdapter(config)
+        ? new ModalSpeechAdapter(config, MODAL_HOME)
         : new NoLectureSpeech(),
+  },
+  // A learner's own upload is voiced by the same Kokoro on Railway's CPUs,
+  // always warm, when KOKORO_TTS_URL is set; without it, by SPEECH above.
+  // That is configuration, not a fallback: a page Railway cannot voice
+  // fails and is retried there, never sent to OpenAI.
+  {
+    provide: UPLOAD_SPEECH,
+    inject: [ConfigService, SPEECH],
+    useFactory: (config: ConfigService, openai: SpeechPort) =>
+      config.get<string>('KOKORO_TTS_URL')
+        ? new ModalSpeechAdapter(config, KOKORO_HOME)
+        : openai,
   },
   // Word timing for the lecture board: the script aligned to its audio.
   { provide: ALIGNER, useClass: EchogardenAlignerAdapter },

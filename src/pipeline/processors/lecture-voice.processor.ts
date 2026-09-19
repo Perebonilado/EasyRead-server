@@ -5,6 +5,7 @@ import {
   EVENT_BUS,
   LECTURE_SPEECH,
   SPEECH,
+  UPLOAD_SPEECH,
   STORAGE,
 } from '../../business/ports/tokens';
 import type { AlignerPort } from '../../business/ports/aligner.port';
@@ -63,6 +64,7 @@ export class LectureVoiceProcessor {
     @Inject(PRONUNCIATION_REPOSITORY)
     private readonly pronunciations: PronunciationRepository,
     @Inject(LECTURE_SPEECH) private readonly catalogueSpeech: SpeechPort,
+    @Inject(UPLOAD_SPEECH) private readonly uploadSpeech: SpeechPort,
     @Inject(SPEECH) private readonly speech: SpeechPort,
     @Inject(STORAGE) private readonly storage: StoragePort,
     @Inject(EVENT_BUS) private readonly events: EventBusPort,
@@ -127,14 +129,17 @@ export class LectureVoiceProcessor {
 
     try {
       // A school's catalogue is voiced on the rented GPU; a learner's own
-      // upload by the per-character voice, as always, so somebody waiting
-      // on their own document never waits on a sleeping container.
+      // upload on the warm CPU service, so somebody waiting on their own
+      // document never waits on a sleeping container. With no CPU service
+      // set up the upload voice is OpenAI's, and only then does the OpenAI
+      // lecture voice name apply.
       const rentedVoice = Boolean(doc.props.institutionId);
-      const speech = rentedVoice ? this.catalogueSpeech : this.speech;
+      const speech = rentedVoice ? this.catalogueSpeech : this.uploadSpeech;
       const { model, voice: named } = speech.label();
-      const voice = rentedVoice
-        ? named
-        : this.config.get<string>('AI_LECTURE_VOICE', named);
+      const voice =
+        speech === this.speech
+          ? this.config.get<string>('AI_LECTURE_VOICE', named)
+          : named;
       // The words and their delivery are both in the key: a page written
       // again, or a style whose delivery changed, gets new audio; a page
       // written the same way gets the file it has.
@@ -166,11 +171,19 @@ export class LectureVoiceProcessor {
           body: result.audio,
           mimeType: result.mimeType,
         });
-        // The rented GPU is priced by the audio it made at the bench's
-        // measured rate; the per-character voice is priced from the text.
-        const rented = result.model.startsWith('modal:');
+        // A service of our own is priced by the audio it made at the
+        // bench's measured rate for that home; the per-character voice is
+        // priced from the text.
+        const rented =
+          result.model.startsWith('modal:') ||
+          result.model.startsWith('kokoro:');
         const rate = Number(
-          this.config.get<string>('MODAL_USD_PER_AUDIO_HOUR', '0'),
+          this.config.get<string>(
+            result.model.startsWith('kokoro:')
+              ? 'KOKORO_USD_PER_AUDIO_HOUR'
+              : 'MODAL_USD_PER_AUDIO_HOUR',
+            '0',
+          ),
         );
         await this.calls.record({
           documentId: doc.id,

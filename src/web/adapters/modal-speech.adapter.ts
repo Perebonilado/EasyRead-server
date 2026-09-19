@@ -9,18 +9,51 @@ const HEALTH_WAIT_MS = 20_000;
 export type ModalEngine = 'qwen' | 'kokoro';
 
 /**
- * A school's catalogue voiced on our own rented GPU, through one of two
- * Modal services: `modal/tts_service.py`, vLLM-Omni's speech server running
- * Qwen3-TTS, or `modal/kokoro_service.py`, Kokoro behind the same request
- * shape. Many pages at once, billed by the second and asleep between runs.
- * One request per page; the mp3 comes back on the same connection.
- * MODAL_TTS_ENGINE names which one is behind MODAL_TTS_URL: Qwen is handed
- * the style's delivery note, Kokoro its speed. A learner's own upload never
- * comes here: it is voiced by OpenAI's voice, as always.
+ * Where a speech service lives: the env keys it is read from, what the
+ * ledger calls it, and how many pages it is sent at once. The Modal home
+ * scales out and takes as many as the queue sends; the Railway home is
+ * one machine that renders pages one at a time, so it is handed two and
+ * the rest wait here rather than inside it.
+ */
+export interface SpeechHome {
+  /** Env keys are `${keys}_URL`, `_TOKEN`, `_VOICE`, `_MODEL`, and `_ENGINE` when the engine is not fixed. */
+  keys: string;
+  /** Fixed engine, or undefined to read it from `${keys}_ENGINE`. */
+  engine?: ModalEngine;
+  /** The ledger's prefix: `modal:kokoro-82m`, `kokoro:kokoro-82m`. */
+  name: string;
+  /** Pages in flight at once; undefined for no limit. */
+  inFlight?: number;
+  /** The voice when `${keys}_VOICE` is not set; by engine when undefined. */
+  defaultVoice?: string;
+}
+
+/** Kokoro or Qwen on a Modal GPU: a school's catalogue. */
+export const MODAL_HOME: SpeechHome = { keys: 'MODAL_TTS', name: 'modal' };
+
+/** Kokoro on Railway's CPUs, always warm: a learner's own upload. */
+export const KOKORO_HOME: SpeechHome = {
+  keys: 'KOKORO_TTS',
+  engine: 'kokoro',
+  name: 'kokoro',
+  inFlight: 2,
+  defaultVoice: 'am_puck',
+};
+
+/**
+ * A lecture voiced on a service of our own, through one request per page;
+ * the mp3 comes back on the same connection. Two homes speak this request:
+ * Modal (`modal/tts_service.py`, vLLM-Omni running Qwen3-TTS, or
+ * `modal/kokoro_service.py`, Kokoro on a GPU, many pages at once, billed by
+ * the second and asleep between runs) for a school's catalogue, and Railway
+ * (`speech/kokoro/server.py`, the same Kokoro on CPU, always warm, one page
+ * at a time) for a learner's own upload. MODAL_TTS_ENGINE names which
+ * engine is behind the Modal URL: Qwen is handed the style's delivery
+ * note, Kokoro its speed.
  *
  * This is never a fallback for anything and nothing falls back from it. A
  * page it cannot voice fails, with the reason on the row, and is tried
- * again by the queue or on the next Prepare. It must never cost OpenAI's price.
+ * again by the queue. It must never cost OpenAI's price.
  */
 @Injectable()
 export class ModalSpeechAdapter implements SpeechPort {
@@ -39,10 +72,21 @@ export class ModalSpeechAdapter implements SpeechPort {
    */
   private static readonly REQUEST_MS = 12 * 60_000;
 
-  constructor(private readonly config: ConfigService) {}
+  /** Free slots at this home, and the pages waiting for one. */
+  private slots: number;
+  private readonly waiting: (() => void)[] = [];
+
+  constructor(
+    private readonly config: ConfigService,
+    private readonly home: SpeechHome = MODAL_HOME,
+  ) {
+    this.slots = home.inFlight ?? Number.POSITIVE_INFINITY;
+  }
 
   engine(): ModalEngine {
-    return this.config.get<string>('MODAL_TTS_ENGINE', 'qwen') === 'kokoro'
+    if (this.home.engine) return this.home.engine;
+    return this.config.get<string>(`${this.home.keys}_ENGINE`, 'qwen') ===
+      'kokoro'
       ? 'kokoro'
       : 'qwen';
   }
@@ -51,14 +95,20 @@ export class ModalSpeechAdapter implements SpeechPort {
     const kokoro = this.engine() === 'kokoro';
     return {
       model: this.config.get<string>(
-        'MODAL_TTS_MODEL',
+        `${this.home.keys}_MODEL`,
         kokoro ? 'kokoro-82m' : 'qwen3-tts-0.6b',
       ),
       voice: this.config.get<string>(
-        'MODAL_TTS_VOICE',
-        kokoro ? 'am_michael' : 'ryan',
+        `${this.home.keys}_VOICE`,
+        this.home.defaultVoice ?? (kokoro ? 'am_michael' : 'ryan'),
       ),
     };
+  }
+
+  private base(): string {
+    return this.config
+      .getOrThrow<string>(`${this.home.keys}_URL`)
+      .replace(/\/+$/, '');
   }
 
   /**
@@ -67,10 +117,8 @@ export class ModalSpeechAdapter implements SpeechPort {
    * on being asked; a disabled workspace answers 404 every time.
    */
   async ready(): Promise<boolean> {
-    const base = this.config
-      .getOrThrow<string>('MODAL_TTS_URL')
-      .replace(/\/+$/, '');
-    const token = this.config.get<string>('MODAL_TTS_TOKEN') ?? '';
+    const base = this.base();
+    const token = this.config.get<string>(`${this.home.keys}_TOKEN`) ?? '';
     try {
       const response = await fetch(`${base}/health`, {
         headers: token ? { authorization: `Bearer ${token}` } : {},
@@ -101,10 +149,8 @@ export class ModalSpeechAdapter implements SpeechPort {
     durationMs?: number;
     pieceStartsMs?: number[];
   }> {
-    const base = this.config
-      .getOrThrow<string>('MODAL_TTS_URL')
-      .replace(/\/+$/, '');
-    const token = this.config.getOrThrow<string>('MODAL_TTS_TOKEN');
+    const base = this.base();
+    const token = this.config.getOrThrow<string>(`${this.home.keys}_TOKEN`);
     const speaker = (voice ?? this.label().voice).toLowerCase();
     const engine = this.engine();
 
@@ -127,7 +173,7 @@ export class ModalSpeechAdapter implements SpeechPort {
       return {
         audio,
         mimeType: 'audio/mpeg',
-        model: `modal:${this.label().model}`,
+        model: `${this.home.name}:${this.label().model}`,
         ...(durationMs !== undefined ? { durationMs } : {}),
         ...(pieceStartsMs?.length === pieces.length ? { pieceStartsMs } : {}),
       };
@@ -160,7 +206,7 @@ export class ModalSpeechAdapter implements SpeechPort {
     return {
       audio: Buffer.concat(buffers),
       mimeType: 'audio/mpeg',
-      model: `modal:${this.label().model}`,
+      model: `${this.home.name}:${this.label().model}`,
       ...(total !== undefined ? { durationMs: total } : {}),
     };
   }
@@ -172,6 +218,34 @@ export class ModalSpeechAdapter implements SpeechPort {
    * permanent: the page fails once, with the engine's reason on the row.
    */
   private async once(
+    url: string,
+    token: string,
+    body: Record<string, unknown>,
+  ): Promise<{ audio: Buffer; durationMs?: number; pieceStartsMs?: number[] }> {
+    await this.enter();
+    try {
+      return await this.attempts(url, token, body);
+    } finally {
+      this.leave();
+    }
+  }
+
+  /** A slot at this home, waited for when every one is taken. */
+  private enter(): Promise<void> {
+    if (this.slots > 0) {
+      this.slots -= 1;
+      return Promise.resolve();
+    }
+    return new Promise((resolve) => this.waiting.push(resolve));
+  }
+
+  private leave(): void {
+    const next = this.waiting.shift();
+    if (next) next();
+    else this.slots += 1;
+  }
+
+  private async attempts(
     url: string,
     token: string,
     body: Record<string, unknown>,

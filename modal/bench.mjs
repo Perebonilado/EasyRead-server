@@ -12,7 +12,8 @@ import { readFileSync } from "node:fs";
 const [url, path, widthsArg = "1,8,16", voice = "am_michael", rateArg = "0.8"] = process.argv.slice(2);
 const widths = widthsArg.split(",").map(Number);
 const rate = Number(rateArg);
-const token = readFileSync("/tmp/easiread-tts/.token", "utf8").trim();
+// TTS_TOKEN_FILE points at another home's token (the Railway voice keeps its own).
+const token = readFileSync(process.env.TTS_TOKEN_FILE ?? "/tmp/easiread-tts/.token", "utf8").trim();
 const pages = readFileSync(path, "utf8").split("\n\n").map((p) => p.trim()).filter((p) => p.length > 40);
 function wavSeconds(buf) {
   const view = Buffer.from(buf);
@@ -35,7 +36,11 @@ async function speak(text) {
     body: JSON.stringify({ input: text, voice, language: "English", response_format: "wav" }),
   });
   if (!r.ok) throw new Error(`${r.status} ${await r.text()}`);
-  const audio = wavSeconds(await r.arrayBuffer());
+  // The length the service measured when it says; the wav header when it
+  // does not (a wav written to a pipe carries no true length).
+  const measured = Number(r.headers.get("x-audio-seconds"));
+  const body = await r.arrayBuffer();
+  const audio = Number.isFinite(measured) && measured > 0 ? measured : wavSeconds(body);
   return { audio, wall: (performance.now() - t) / 1000 };
 }
 const t0 = performance.now();

@@ -19,8 +19,10 @@ export const EVENT_BUS = Symbol('EventBusPort');
 export const JOB_QUEUE = Symbol('JobQueuePort');
 export const EXPORT_RENDERER = Symbol('ExportRendererPort');
 export const SPEECH = Symbol('SpeechPort');
-/** The voice every lecture is narrated with: Kokoro on a rented GPU, never the per-character one. */
+/** A school's catalogue's voice: Kokoro on a rented GPU, never the per-character one. */
 export const LECTURE_SPEECH = Symbol('LectureSpeechPort');
+/** A learner's own upload's voice: Kokoro on Railway when it is set up, else SPEECH. */
+export const UPLOAD_SPEECH = Symbol('UploadSpeechPort');
 export const TRANSCRIPTION = Symbol('TranscriptionPort');
 export const REALTIME = Symbol('RealtimePort');
 export const WEB_IMPORT = Symbol('WebImportPort');

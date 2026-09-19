@@ -609,6 +609,7 @@ const voiceProcessor = (
     noPronunciations,
     f.deps.speech,
     f.deps.speech,
+    f.deps.speech,
     f.deps.storage as never,
     f.deps.events as never,
     new ConfigService({}),

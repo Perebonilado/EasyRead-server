@@ -6,7 +6,8 @@ and an S3 bucket will do.
 
 ## The shape of it
 
-Five services. Two of them are this same repository, deployed twice.
+Six services. Two of them are this same repository, deployed twice; one is
+a folder of it, built from its own Dockerfile.
 
 | Service | What it is | Start command |
 | --- | --- | --- |
@@ -15,6 +16,7 @@ Five services. Two of them are this same repository, deployed twice.
 | **Bucket** | S3-compatible object storage | — |
 | **API** | this repo, HTTP | `npm run start:prod` |
 | **Worker** | this repo, no HTTP | `npm run worker:prod` |
+| **Voice** | `speech/kokoro/`, Kokoro on CPU | the Dockerfile's |
 
 The API answers requests and enqueues work; it never processes a document.
 The worker consumes the queues and does everything slow — conversion, text
@@ -72,6 +74,37 @@ FREE_PLAN_UNLIMITED=false  # true is a local testing switch — never ship it
 
 Prefer each service's **private** URL for MySQL and Redis: internal traffic is
 faster and isn't billed as egress.
+
+## The voice
+
+A learner's own upload is narrated by Kokoro running on CPU in the **Voice**
+service: always warm, one page at a time, a few cents an audio hour. A
+school's catalogue is narrated by the same Kokoro on a Modal GPU
+(`MODAL_TTS_*`), which is fast on a batch and asleep between runs.
+
+Deploy the Voice service from the `speech/kokoro` folder, with the CLI from
+inside that folder (`railway up --service voice`) or with the service's root
+directory set to it. Give it 8 vCPU and 4 GB, a health check at `/health`,
+and two variables:
+
+```
+TTS_TOKEN=<fresh random>     # the worker sends it as a bearer token
+TTS_VOICE=am_puck
+```
+
+Then on the worker, its private address and the same token:
+
+```
+KOKORO_TTS_URL=http://easy-read-voice-server.railway.internal:8880
+KOKORO_TTS_TOKEN=<the same>
+KOKORO_USD_PER_AUDIO_HOUR=0.10   # what the bench measured; prices the ledger
+```
+
+A public domain on the Voice service is only needed for a worker running
+outside Railway (a laptop); the token guards it either way. With
+`KOKORO_TTS_URL` empty, a learner's upload is narrated by OpenAI's voice
+instead. That is configuration, not a fallback: a page the Voice service
+cannot narrate fails and is retried there, never sent to OpenAI.
 
 ## Migrations
 

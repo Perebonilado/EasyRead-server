@@ -1,5 +1,5 @@
 import { ConfigService } from '@nestjs/config';
-import { ModalSpeechAdapter } from './modal-speech.adapter';
+import { KOKORO_HOME, ModalSpeechAdapter } from './modal-speech.adapter';
 
 /** A config from a plain object, the way the adapter reads .env. */
 function config(values: Record<string, string>): ConfigService {
@@ -130,5 +130,54 @@ describe('ModalSpeechAdapter', () => {
     await expect(adapter.synthesize({ text: 'A page.' })).rejects.toMatchObject(
       { status: 400 },
     );
+  });
+
+  it('reads the Railway home from its own keys and names it in the ledger', async () => {
+    const adapter = new ModalSpeechAdapter(
+      config({ KOKORO_TTS_URL: 'https://warm.test', KOKORO_TTS_TOKEN: 'k' }),
+      KOKORO_HOME,
+    );
+    expect(adapter.engine()).toBe('kokoro');
+    expect(adapter.label()).toEqual({ model: 'kokoro-82m', voice: 'am_puck' });
+    const result = await adapter.synthesize({
+      text: 'A page.',
+      pieces: [{ text: 'A page.', speed: 0.9, pauseAfter: 0.6 }],
+    });
+    expect(result.model).toBe('kokoro:kokoro-82m');
+    expect(calls[0].url).toBe('https://warm.test/v1/audio/speech');
+    expect(calls[0].body).toEqual({
+      voice: 'am_puck',
+      pieces: [{ text: 'A page.', speed: 0.9, pause_after: 0.6 }],
+      response_format: 'mp3',
+    });
+  });
+
+  it('sends the one-machine home two pages at a time and holds the rest', async () => {
+    const answers: (() => void)[] = [];
+    global.fetch = () =>
+      new Promise<Response>((resolve) => {
+        answers.push(() =>
+          resolve(
+            new Response(Buffer.from('mp3'), {
+              status: 200,
+              headers: { 'x-audio-seconds': '1' },
+            }),
+          ),
+        );
+      });
+    const adapter = new ModalSpeechAdapter(
+      config({ KOKORO_TTS_URL: 'https://warm.test', KOKORO_TTS_TOKEN: 'k' }),
+      KOKORO_HOME,
+    );
+    const pages = [1, 2, 3].map(() => adapter.synthesize({ text: 'A page.' }));
+    await new Promise((resolve) => setImmediate(resolve));
+    expect(answers).toHaveLength(2);
+    answers[0]();
+    await pages[0];
+    await new Promise((resolve) => setImmediate(resolve));
+    expect(answers).toHaveLength(3);
+    answers[1]();
+    answers[2]();
+    await Promise.all(pages);
   });
 });

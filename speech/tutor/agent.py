@@ -18,6 +18,7 @@ import asyncio
 import json
 import logging
 import os
+import re
 
 from livekit import rtc
 from livekit.agents import (
@@ -29,6 +30,8 @@ from livekit.agents import (
     TurnHandlingOptions,
     cli,
     function_tool,
+    llm,
+    utils,
 )
 from livekit.plugins import openai, silero
 from livekit.plugins.turn_detector.english import EnglishModel
@@ -45,6 +48,12 @@ CONTEXT_RPC = "tutor.context"
 CONTEXT_TOPIC = "tutor.context"
 # A tool's answer must come back inside this, page turns included.
 TOOL_TIMEOUT = 20.0
+# A tool the model wrote as words instead of calling, which this model
+# does now and then after a sentence: "functions.lecture_resume()".
+TEXT_CALL = re.compile(r"\s*functions\.(\w+)\(([^)]*)\)[.!]?\s*")
+MARKER = "functions."
+# What the brief gets on top, so the model calls its tools rather than naming them.
+TOOL_RULE = "\n\nUse your tools by calling them, never by writing their names as words."
 # The moves the lecture's ask makes, each one RPC from the browser.
 TURN_START = "turn.start"
 TURN_END = "turn.end"
@@ -172,11 +181,67 @@ def register_moves(room: rtc.Room, moves: Moves) -> None:
     rpc(SAY_STOP, moves.say_stop)
 
 
+def split_text_calls(text: str, names: set, final: bool) -> tuple:
+    """Text to say now, text held back in case a tool's name is forming, and the tools the model wrote as words."""
+    calls = []
+    while True:
+        found = TEXT_CALL.search(text)
+        if not found:
+            break
+        if found.group(1) in names:
+            calls.append(found.group(1))
+        text = text[: found.start()] + (" " if found.start() and found.end() < len(text) else "") + text[found.end() :]
+    if final:
+        return text, "", calls
+    start = text.rfind(MARKER)
+    if start != -1 and ")" not in text[start:]:
+        return text[:start], text[start:], calls
+    for k in range(min(len(MARKER), len(text)), 0, -1):
+        if text.endswith(MARKER[:k]):
+            return text[:-k], text[-k:], calls
+    return text, "", calls
+
+
 class Tutor(Agent):
     def __init__(self, brief: dict, learner: str, room: rtc.Room) -> None:
-        super().__init__(instructions=brief["instructions"], tools=browser_tools(brief.get("tools") or [], learner, room))
-        self.base = brief["instructions"]
+        tools = browser_tools(brief.get("tools") or [], learner, room)
+        super().__init__(instructions=brief["instructions"] + (TOOL_RULE if tools else ""), tools=tools)
+        self.base = brief["instructions"] + (TOOL_RULE if tools else "")
         self.ears: Ears | None = None
+
+    async def llm_node(self, chat_ctx, tools, model_settings):
+        """The model's stream, with a tool it wrote as words taken out of the speech and made the call it meant."""
+        names = {getattr(getattr(t, "info", None), "name", None) for t in tools} - {None}
+        held = ""
+        async for chunk in Agent.default.llm_node(self, chat_ctx, tools, model_settings):
+            content = getattr(getattr(chunk, "delta", None), "content", None) if isinstance(chunk, llm.ChatChunk) else None
+            if content is None:
+                yield chunk
+                continue
+            say, held, calls = split_text_calls(held + content, names, final=False)
+            if say:
+                yield llm.ChatChunk(id=chunk.id, delta=llm.ChoiceDelta(role="assistant", content=say))
+            for name in calls:
+                log.info("tool %s written as words; calling it", name)
+                yield llm.ChatChunk(
+                    id=chunk.id,
+                    delta=llm.ChoiceDelta(
+                        role="assistant",
+                        tool_calls=[llm.FunctionToolCall(name=name, arguments="{}", call_id=utils.shortuuid("call_"))],
+                    ),
+                )
+        say, _rest, calls = split_text_calls(held, names, final=True)
+        if say:
+            yield llm.ChatChunk(id=utils.shortuuid("chunk_"), delta=llm.ChoiceDelta(role="assistant", content=say))
+        for name in calls:
+            log.info("tool %s written as words; calling it", name)
+            yield llm.ChatChunk(
+                id=utils.shortuuid("chunk_"),
+                delta=llm.ChoiceDelta(
+                    role="assistant",
+                    tool_calls=[llm.FunctionToolCall(name=name, arguments="{}", call_id=utils.shortuuid("call_"))],
+                ),
+            )
 
     async def read_page(self, page: str) -> None:
         """The page the learner is on, folded under the brief, as the OpenAI line did with session.update; the ears take its terms as hints."""
@@ -222,7 +287,15 @@ async def tutor(ctx: JobContext) -> None:
     @session.on("conversation_item_added")
     def on_item(event) -> None:
         item = event.item
-        log.info("%s: %s", getattr(item, "role", "?"), (getattr(item, "text_content", None) or "")[:160])
+        kind = getattr(item, "type", "?")
+        if kind == "message":
+            log.info("%s: %s", getattr(item, "role", "?"), (getattr(item, "text_content", None) or "")[:160])
+        else:
+            log.info("%s %s %s", kind, getattr(item, "name", ""), str(getattr(item, "arguments", getattr(item, "output", "")))[:120])
+
+    @session.on("function_tools_executed")
+    def on_tools(event) -> None:
+        log.info("tools executed: %s", [c.name for c in getattr(event, "function_calls", [])])
 
     @session.on("error")
     def on_error(event) -> None:

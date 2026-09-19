@@ -26,6 +26,8 @@ export interface TutorBrief {
   tools: RealtimeTool[];
   voice: string;
   speed?: number;
+  /** 'off' for the lecture's ask: the browser starts and ends every turn. */
+  turnDetection?: 'off';
 }
 
 /**
@@ -75,6 +77,9 @@ export class LiveKitRealtimeAdapter {
       tools: tools ?? [],
       voice: voice ?? this.config.get<string>('LIVEKIT_TUTOR_VOICE', 'am_puck'),
       ...(audio?.speed ? { speed: audio.speed } : {}),
+      ...(audio?.turnDetection === 'off'
+        ? { turnDetection: 'off' as const }
+        : {}),
     };
     const token = new AccessToken(
       this.config.getOrThrow<string>('LIVEKIT_API_KEY'),

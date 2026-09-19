@@ -1028,10 +1028,14 @@ export class StartVoiceSessionHandler extends AbstractRequestHandlerTemplate<
     // Our own line: a LiveKit room on Railway, open ears and voice, an
     // OpenAI text brain. One tutor is marked for it; without the room's
     // address set, that tutor is voiced by OpenAI like the rest.
+    // The lecture's ask goes there whenever the line is set up, whatever
+    // the tutor, in the lecture's own voice so the answer sounds like the
+    // lecture; the browser holds the mic, so turns are its to start and end.
     const wantsLiveKit =
-      cmd.mode === 'teach' && tutor.voice.provider === 'livekit';
+      (cmd.mode === 'teach' && tutor.voice.provider === 'livekit') ||
+      cmd.mode === 'lecture';
     const useLiveKit = wantsLiveKit && this.livekit.isConfigured();
-    if (wantsLiveKit && !useLiveKit) {
+    if (wantsLiveKit && !useLiveKit && cmd.mode === 'teach') {
       this.logger.warn(
         `Tutor ${tutor.id} speaks on our own line but LIVEKIT_URL is not set — falling back to OpenAI (${tutor.voice.openaiFallback})`,
       );
@@ -1040,8 +1044,28 @@ export class StartVoiceSessionHandler extends AbstractRequestHandlerTemplate<
     const session = useLiveKit
       ? await this.livekit.createSession({
           instructions: baseInstructions,
-          tools: TEACHING_TOOLS,
-          voice: tutor.voice.voiceId,
+          tools:
+            cmd.mode === 'lecture'
+              ? cmd.lectureContext?.interactive
+                ? [
+                    ...LECTURE_BOARD_TOOLS,
+                    SAVE_QUESTION_TOOL,
+                    ...INTERACTIVE_TOOLS,
+                  ]
+                : LECTURE_BOARD_TOOLS
+              : TEACHING_TOOLS,
+          voice:
+            cmd.mode === 'lecture'
+              ? this.config.get<string>('KOKORO_TTS_VOICE', 'am_puck')
+              : tutor.voice.voiceId,
+          ...(cmd.mode === 'lecture'
+            ? {
+                audio: {
+                  turnDetection: 'off' as const,
+                  speed: askSpeed(lectureStyle),
+                },
+              }
+            : {}),
           identity: `learner-${cmd.userId}`,
           room: `tutor-${doc.id}-${randomUUID().slice(0, 8)}`,
         })

@@ -72,4 +72,26 @@ describe('LiveKitRealtimeAdapter', () => {
     expect(brief.tools.map((t) => t.name)).toEqual(['point']);
     expect(brief.voice).toBe('am_puck');
   });
+
+  it('tells the agent when the browser holds the mic and how fast to speak', async () => {
+    const session = await new LiveKitRealtimeAdapter(live).createSession({
+      instructions: 'Answer the question.',
+      voice: 'am_puck',
+      audio: { turnDetection: 'off', speed: 0.9 },
+      identity: 'learner-2',
+      room: 'tutor-doc-def',
+    });
+    if (session.provider !== 'livekit') return;
+    const roomConfig = claims(session.token).roomConfig as {
+      agents: { metadata: string }[];
+    };
+    const brief = JSON.parse(roomConfig.agents[0].metadata) as {
+      turnDetection?: string;
+      speed?: number;
+      tools: unknown[];
+    };
+    expect(brief.turnDetection).toBe('off');
+    expect(brief.speed).toBe(0.9);
+    expect(brief.tools).toEqual([]);
+  });
 });

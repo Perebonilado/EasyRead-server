@@ -33,7 +33,34 @@ export interface VisualPositionRecord {
   updatedAt: Date | null;
 }
 
+/** What a page asked to be drawn, and what was found for it. */
+export interface VisualTermRecord {
+  term: string;
+  drawing: string | null;
+  foundBy: 'spelling' | 'meaning' | 'hand';
+  times: number;
+}
+
 export interface VisualSceneRepository {
+  /**
+   * What a page asked for, written down: the answer kept so the same
+   * word looks the same everywhere, and the misses counted so the list
+   * of what the library is short of is ranked by real demand. A term
+   * someone has set by hand is never written over.
+   */
+  noteTerms(input: {
+    documentId: string;
+    pageNumber: number;
+    terms: {
+      term: string;
+      drawing: string | null;
+      foundBy: 'spelling' | 'meaning';
+    }[];
+  }): Promise<void>;
+  /** The terms someone has set by hand, which win over anything the app finds. */
+  handPicked(): Promise<Map<string, string>>;
+  /** The things nothing draws, the most asked for first. */
+  missingTerms(limit: number): Promise<VisualTermRecord[]>;
   /** The learner's last position in the document's visuals, if any. */
   findPosition(
     documentId: string,

@@ -8,7 +8,12 @@
  * is, this file says what shape it takes and what sits on it, and the
  * app draws it. The model gives no geometry and no numbers.
  */
-import { pickPicture } from './visual-presets';
+import {
+  fieldClaims,
+  fieldOf,
+  fieldPartOwner,
+  pickPicture,
+} from './visual-presets';
 import { buildFigure } from './living.generated/figures';
 
 /** The shape a figure takes. Eight of these cover what a whole icon set cannot. */
@@ -607,8 +612,28 @@ export type Drawing =
 export function resolveDrawing(
   of: string | undefined,
   asked?: Partial<VisualFigure> | null,
+  /**
+   * The field the document is in. A term that belongs to a field's own
+   * vocabulary is answered from that field's pack or by words; it never
+   * falls through to the general library, because a drawing that does
+   * the same job is not a drawing of the thing.
+   */
+  field?: string,
 ): Drawing | null {
   if (!of) return null;
+  const want = of.trim().toLowerCase();
+  if (field) {
+    // The field's own drawing of its own term.
+    if (fieldOf(want) === field) return { kind: 'picture', name: want };
+    // A term drawn as a part of one of the field's things: the whole,
+    // so a line can point at the part.
+    const owner = fieldPartOwner(want, field);
+    if (owner) return { kind: 'picture', name: owner.name };
+    // A term the field claims but has not drawn yet is words, never a
+    // stand-in from somewhere else: a glomerulus filters, and is not a
+    // funnel.
+    if (fieldClaims(want, field)) return null;
+  }
   // A figure the model asked for by name outranks everything: it knows
   // the page, and the vocabulary is small enough to be meant.
   if (asked?.outline && FIGURE_OUTLINES.includes(asked.outline))

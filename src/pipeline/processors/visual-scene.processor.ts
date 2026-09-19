@@ -27,6 +27,7 @@ import {
 import {
   assembleTutorial,
   momentStarts,
+  namedDrawings,
   layoutTutorial,
   mergeDecisions,
   momentsNamed,
@@ -39,7 +40,17 @@ import {
   type VisualDecision,
   type VisualTutorial,
 } from '../../business/domain/visual-cards';
-import { buildMenu } from '../../business/domain/visual-menu';
+import { buildMenu, phrasesToSearch } from '../../business/domain/visual-menu';
+import {
+  DRAWING_DIMS,
+  nearestDrawings,
+  vectorsModel,
+  vectorsReady,
+  type Near,
+} from '../../business/domain/visual-vectors';
+
+/** What the model registry falls back to when the environment names no embedding model. */
+const DEFAULT_EMBED_MODEL = 'openai:text-embedding-3-small';
 import {
   MANNER_MEANINGS,
   OUTLINE_LOOKS,
@@ -147,6 +158,9 @@ function drawingsOf(m: Moment): string[] {
     m.card === 'picture' && m.compose
       ? `${m.picture ?? m.name ?? m.compose.base} (a ${pickPicture(m.compose.base) ?? m.compose.base} with a ${pickPicture(m.compose.add) ?? m.compose.add} ${m.compose.place === 'badge' ? 'at its corner' : m.compose.place})`
       : undefined;
+  const stands = m.standsFor
+    ? ` standing for ${m.standsFor}, a comparison the narration makes`
+    : '';
   const names = [
     composed ??
       (m.card === 'picture'
@@ -165,7 +179,10 @@ function drawingsOf(m: Moment): string[] {
     ...(m.inputs ?? []).map((i) => drawnAs(i.picture)),
     ...(m.outputs ?? []).map((i) => drawnAs(i.picture)),
   ];
-  return [...new Set(names.filter((n): n is string => Boolean(n)))];
+  const out = [...new Set(names.filter((n): n is string => Boolean(n)))];
+  // A drawing that stands for an idea is judged as a comparison, not as
+  // a likeness, so the judge is told which one it is.
+  return stands && out.length ? [`${out[0]}${stands}`, ...out.slice(1)] : out;
 }
 /** A page with fewer words than this has too little to teach. */
 const THIN_PAGE_WORDS = 40;
@@ -320,11 +337,23 @@ export class VisualSceneProcessor {
       }
       // Then the director decides how each moment is shown, from the menu
       // of what will draw for this page, reasoning first.
+      const nearby = await this.nearDrawings(
+        documentId,
+        material,
+        narration.sentences,
+        who,
+      );
       const menu = buildMenu(
         material,
         narration.sentences,
         `${doc.props.title}, the chapter "${topic.title}"`,
+        nearby,
+        await this.handPicked(who),
       );
+      if (menu.missing.length)
+        this.logger.log(
+          `${who}: nothing draws ${menu.missing.length} of the things this page names: ${menu.missing.slice(0, 12).join(', ')}`,
+        );
       const directed = await this.llm.visualDirector({
         narration,
         menu: menu.text,
@@ -335,11 +364,11 @@ export class VisualSceneProcessor {
       });
       await this.record(documentId, 'visual_director', directed.usage);
       let decisions = directed.value;
-      const build = async () => {
+      const build = () => {
         const built = tidyTutorial(assembleTutorial(narration, decisions));
         return { tutorial: built, scripts: this.staged(built) };
       };
-      let { tutorial, scripts } = await build();
+      let { tutorial, scripts } = build();
       const problemsNow = () => [
         ...tutorialProblems(tutorial, pool, materialWords, material),
         ...this.problemsOf(scripts),
@@ -364,14 +393,14 @@ export class VisualSceneProcessor {
         });
         await this.record(documentId, 'visual_director', redo.usage);
         decisions = mergeDecisions(decisions, redo.value, only);
-        ({ tutorial, scripts } = await build());
+        ({ tutorial, scripts } = build());
       };
       /** Moments that cannot be made sound ship plain: their intent in big type. */
-      const shipPlain = async (indexes: number[]) => {
+      const shipPlain = (indexes: number[]) => {
         decisions = {
           moments: decisions.moments.filter((d) => !indexes.includes(d.index)),
         };
-        ({ tutorial, scripts } = await build());
+        ({ tutorial, scripts } = build());
       };
       let problems = problemsNow();
       for (
@@ -393,7 +422,7 @@ export class VisualSceneProcessor {
           this.logger.warn(
             `${who}: moments ${named.join(', ')} ship plain after ${REPAIR_ROUNDS} redos: ${problems.slice(0, 3).join(' ')}`,
           );
-          await shipPlain(named);
+          shipPlain(named);
           problems = problemsNow();
         }
       }
@@ -441,7 +470,7 @@ export class VisualSceneProcessor {
         problems = problemsNow();
         if (problems.length) {
           const named = originOf(momentsNamed(problems));
-          await shipPlain(named.length ? named : only);
+          shipPlain(named.length ? named : only);
           problems = problemsNow();
           if (problems.length)
             throw new Error(
@@ -457,12 +486,32 @@ export class VisualSceneProcessor {
         this.logger.warn(
           `${who}: moments ${judged.redo.map((r) => r.index + 1).join(', ')} ship plain after the judge said redo ${JUDGE_ROUNDS} times.`,
         );
-        await shipPlain(judged.redo.map((r) => r.index));
+        shipPlain(judged.redo.map((r) => r.index));
         problems = problemsNow();
         if (problems.length)
           throw new Error(
             `The scene could not be made sound: ${problems.slice(0, 3).join(' ')}`,
           );
+      }
+      // Written down: what this lesson reached for and what was found
+      // for it. The answers are kept so a word looks the same everywhere
+      // and a bad match has one place to be put right; the misses,
+      // counted, are the order in which to draw the library out.
+      try {
+        await this.visuals.noteTerms({
+          documentId,
+          pageNumber,
+          terms: namedDrawings(tutorial).map((one) => ({
+            ...one,
+            foundBy: nearby.has(one.term)
+              ? ('meaning' as const)
+              : ('spelling' as const),
+          })),
+        });
+      } catch (error) {
+        this.logger.warn(
+          `${who}: the terms were not written down (${error instanceof Error ? error.message : String(error)}); run the visual_terms migration.`,
+        );
       }
       const sheet = await this.filmOf(tutorial, scripts.box);
       const plainPositions = tutorial.moments
@@ -785,10 +834,74 @@ export class VisualSceneProcessor {
     return parts.join('\n\n').slice(0, MATERIAL_CHARS);
   }
 
+  /** The terms someone has corrected by hand, which win over anything the app finds. */
+  private async handPicked(who: string): Promise<Map<string, string>> {
+    try {
+      return await this.visuals.handPicked();
+    } catch {
+      this.logger.log(
+        `${who}: no table of terms yet, so nothing is set by hand; run the visual_terms migration.`,
+      );
+      return new Map();
+    }
+  }
+
+  /**
+   * The drawings a page's words are near in meaning, for the ones
+   * spelling could not place. One call for the whole page, and only for
+   * the phrases that found nothing, so the cost is a fraction of a penny
+   * and the answer is only ever added under what spelling already found.
+   */
+  private async nearDrawings(
+    documentId: string,
+    material: string,
+    sentences: string[],
+    who: string,
+  ): Promise<Map<string, Near[]>> {
+    const out = new Map<string, Near[]>();
+    const model = process.env.AI_EMBED_MODEL ?? DEFAULT_EMBED_MODEL;
+    if (!vectorsReady(model)) {
+      const had = vectorsModel();
+      this.logger.log(
+        had
+          ? `${who}: the drawings were measured by ${had} and the page would be measured by ${model || 'another model'}; searching by spelling only. Run scripts/visual-embed.ts to rebuild them.`
+          : `${who}: the drawings have no vectors yet; searching by spelling only. Run scripts/visual-embed.ts to build them.`,
+      );
+      return out;
+    }
+    const phrases = phrasesToSearch(material, sentences);
+    if (!phrases.length) return out;
+    try {
+      const embedded = await this.llm.embed({
+        texts: phrases,
+        dimensions: DRAWING_DIMS,
+      });
+      await this.record(documentId, 'embed', embedded.usage);
+      embedded.value.forEach((vector, i) => {
+        const found = nearestDrawings(vector, 3);
+        if (found.length) out.set(phrases[i], found);
+      });
+      this.logger.log(
+        `${who}: ${phrases.length} things spelling could not place, ${out.size} of them found by meaning.`,
+      );
+    } catch (error) {
+      // A search by meaning is an improvement, never a requirement: the
+      // page is made by spelling alone if the call fails.
+      this.logger.warn(
+        `${who}: the search by meaning failed (${error instanceof Error ? error.message : String(error)}); searching by spelling only.`,
+      );
+    }
+    return out;
+  }
+
   private async record(
     documentId: string,
     task:
-      'visual_plan' | 'visual_narration' | 'visual_director' | 'visual_judge',
+      | 'visual_plan'
+      | 'visual_narration'
+      | 'visual_director'
+      | 'visual_judge'
+      | 'embed',
     usage: {
       model: string;
       tokensIn: number;

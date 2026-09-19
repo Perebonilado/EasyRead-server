@@ -8,6 +8,7 @@ import { buildFigure } from './living.generated/figures';
 import { ICONS, ICON_UNIT } from './living.generated/icons';
 import { buildMechanism } from './living.generated/mechanisms';
 import { PRESETS } from './living.generated/presets';
+import { presetAnchor } from './visual-presets';
 import { AT_REST, atRest, motionPose } from './living.generated/motion';
 import {
   ALL,
@@ -57,6 +58,7 @@ const FONT = 'Helvetica, Arial, sans-serif';
 
 const esc = (text: string) =>
   text
+    // eslint-disable-next-line no-control-regex
     .replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g, '')
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
@@ -275,6 +277,17 @@ function anchorOf(
       false,
     );
     return anchors[part] ?? anchors.centre ?? [target.x, target.y];
+  }
+  // A drawing from a field's pack carries its own named parts, so a
+  // callout can point at the cortex of a kidney and not at the middle
+  // of its box. An organ without them is no use to a page about it.
+  if (target.type === 'shape') {
+    const at = presetAnchor(target.kind, part);
+    if (at)
+      return [
+        target.x - target.w / 2 + at[0] * target.w,
+        target.y - target.h / 2 + at[1] * target.h,
+      ];
   }
   const box = boxOf(target);
   return box ? [box.x + box.w / 2, box.y + box.h / 2] : null;

@@ -5,6 +5,168 @@
  * planner picks by name from the words, and the layout sizes the box by
  * the aspect.
  */
+import type { Near } from './visual-vectors';
+import {
+  FIELD_OF,
+  PRESETS as PACK_PRESETS,
+  type Field,
+  type PresetPart,
+} from './living.generated/presets';
+
+/**
+ * A field's own vocabulary is answered from that field's pack or by
+ * words, and never by a drawing from the general library that merely
+ * does the same job. The glomerulus filters, so the search offered a
+ * funnel; a funnel is not a glomerulus, and a learner shown one has
+ * been told something false. This is the wall.
+ */
+export function fieldOf(name: string): Field | undefined {
+  return FIELD_OF[name];
+}
+
+/**
+ * Everyday words that happen to be the name of a part. A field claims
+ * its technical terms, not the language around them: the body of the
+ * stomach must not make "body" a word only medicine may draw.
+ */
+const EVERYDAY = new Set([
+  'body',
+  'wall',
+  'valve',
+  'level',
+  'core',
+  'mouth',
+  'head',
+  'neck',
+  'back',
+  'side',
+  'top',
+  'bottom',
+  'centre',
+  'edge',
+  'lobe',
+  'fat',
+  'hair',
+  'seed',
+  'root',
+  'stem',
+  'leaf',
+  'flower',
+  'fruit',
+  'tail',
+  'wing',
+  'legs',
+  'skin',
+  'bone',
+  'blood',
+]);
+
+/**
+ * The words each field claims as its own: the names of its drawings and
+ * of their parts, which are its technical vocabulary. A word a field
+ * claims is answered from that field's pack or by words. Short and
+ * everyday words are left out, since a field owns its terms and not the
+ * language they are written in.
+ */
+const FIELD_TERMS: Map<Field, Set<string>> = (() => {
+  const out = new Map<Field, Set<string>>();
+  for (const [name, preset] of Object.entries(PACK_PRESETS)) {
+    const field = preset.field;
+    if (!field) continue;
+    const set = out.get(field) ?? new Set<string>();
+    const claim = (word: string) => {
+      const term = word.trim().toLowerCase();
+      if (term.length >= 6 && !EVERYDAY.has(term)) set.add(term);
+    };
+    claim(name);
+    for (const part of Object.keys(preset.parts ?? {})) {
+      claim(part);
+      // "loop of henle" is claimed whole and by its own word.
+      for (const word of part.split(/\s+/)) claim(word);
+    }
+    out.set(field, set);
+  }
+  return out;
+})();
+
+/**
+ * Which field a page is in, read from its own words: the field whose
+ * vocabulary it uses most. A page has to be placed before its terms can
+ * be walled, and nothing else in the app knows, so the words say.
+ * Below the floor the page belongs to no field and everything is
+ * answered from the general library as before.
+ */
+export function fieldFor(text: string): Field | undefined {
+  const words = new Set(
+    text
+      .toLowerCase()
+      .replace(/[^a-z\s-]/g, ' ')
+      .split(/[\s-]+/)
+      .filter((w) => w.length >= 6),
+  );
+  let best: { field: Field; hits: number } | null = null;
+  for (const [field, terms] of FIELD_TERMS) {
+    let hits = 0;
+    for (const term of terms) if (words.has(term)) hits += 1;
+    if (!best || hits > best.hits) best = { field, hits };
+  }
+  return best && best.hits >= FIELD_FLOOR ? best.field : undefined;
+}
+
+/** How many of a field's own terms a page must use before it counts as that field's. */
+const FIELD_FLOOR = 3;
+
+/**
+ * The field's drawing that has this term as one of its named parts. A
+ * glomerulus is drawn, inside the nephron, so a page that names it gets
+ * the nephron with a line pointing at the glomerulus rather than the
+ * word. This is what the named parts are for.
+ */
+export function fieldPartOwner(
+  word: string,
+  field: string,
+): { name: string; part: string } | undefined {
+  const want = word.trim().toLowerCase();
+  for (const [name, preset] of Object.entries(PACK_PRESETS)) {
+    if (preset.field !== field) continue;
+    for (const part of Object.keys(preset.parts ?? {}))
+      if (part === want) return { name, part };
+  }
+  return undefined;
+}
+
+/** Whether a word belongs to a field's own vocabulary. */
+export function fieldClaims(word: string, field: string): boolean {
+  const terms = FIELD_TERMS.get(field as Field);
+  if (!terms) return false;
+  const want = word.trim().toLowerCase();
+  if (terms.has(want)) return true;
+  return want.split(/\s+/).some((part) => terms.has(part));
+}
+
+/** The parts of a drawing a callout may point at, with where on its box each sits. */
+export function presetParts(
+  name: string | undefined,
+): Record<string, PresetPart> | undefined {
+  return name ? PACK_PRESETS[name]?.parts : undefined;
+}
+
+/** Where a named part of a drawing sits inside its box, or nothing when it has none. */
+export function presetAnchor(
+  name: string | undefined,
+  part: string,
+): [number, number] | null {
+  const parts = presetParts(name);
+  if (!parts) return null;
+  const want = part.trim().toLowerCase();
+  const found =
+    parts[want] ??
+    Object.entries(parts).find(
+      ([key]) => key.includes(want) || want.includes(key),
+    )?.[1];
+  return found ? found.at : null;
+}
+
 export interface PresetInfo {
   aspect: number;
   /** The words a chapter would use for this thing, for the planner's pick. */
@@ -98,6 +260,14 @@ export const PRESET_INFO: Record<string, PresetInfo> = {
 };
 
 import { ICON_TAGS } from './visual-icons.generated';
+
+// Every drawing in a field's pack is a preset too: the pack carries its
+// own proportions and the words it is filed under, so it needs saying
+// only once, in the one place it is drawn.
+for (const [name, preset] of Object.entries(PACK_PRESETS)) {
+  if (PRESET_INFO[name]) continue;
+  PRESET_INFO[name] = { aspect: preset.aspect, tags: preset.tags ?? name };
+}
 
 export const PRESET_SHAPES = Object.keys(PRESET_INFO) as readonly string[];
 export type PresetShape = keyof typeof PRESET_INFO;
@@ -270,11 +440,35 @@ function wordsOf(text: string): string[] {
 export function pictureCandidates(
   text: string | undefined,
   limit = 4,
+  /**
+   * What a search by meaning found for this phrase, when one was run.
+   * Spelling is tried first and keeps its order, because a drawing whose
+   * name is the word is better evidence than any distance; meaning is
+   * added under it, which is how a phrase no drawing is filed under
+   * finds anything at all.
+   */
+  near: readonly Near[] = [],
+  /** The field the page is in; its own terms are answered from its own pack or by words. */
+  field?: string,
 ): PictureCandidate[] {
   if (!text) return [];
   const words = wordsOf(text);
   if (!words.length) return [];
   const out: PictureCandidate[] = [];
+  if (field) {
+    const want = text.trim().toLowerCase();
+    // The field's own drawing of its own term, and nothing else offered.
+    if (fieldOf(want) === field && knownPicture(want))
+      return [{ name: want, score: 300, tags: tagsOf(want) }];
+    // A term the field has drawn as a part of something: the whole
+    // thing, so a line can point at the part.
+    const owner = fieldPartOwner(want, field);
+    if (owner && knownPicture(owner.name))
+      return [{ name: owner.name, score: 280, tags: tagsOf(owner.name) }];
+    // A term the field claims but has not drawn is words, never a
+    // stand-in from the general library that does the same job.
+    if (fieldClaims(want, field)) return [];
+  }
   const seen = new Set<string>();
   const push = (name: string, score: number) => {
     if (seen.has(name) || !knownPicture(name)) return;
@@ -290,6 +484,10 @@ export function pictureCandidates(
   for (const name of exact) if (PRESET_INFO[name]) push(name, 100);
   for (const name of exact) if (ICON_TAGS[name]) push(name, 100);
   for (const found of scoredPictures(words)) push(found.name, found.score);
+  // A drawing the words alone would not have found. Its score is kept
+  // under the spelling matches so the order the director reads is still
+  // sureness first.
+  for (const found of near) push(found.name, MATCH_FLOOR + found.score - 1);
   return out.slice(0, limit);
 }
 

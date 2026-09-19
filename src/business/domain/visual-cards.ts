@@ -139,6 +139,15 @@ export interface Moment {
    * page does not bear out.
    */
   looksLike?: string;
+  /**
+   * The idea this drawing stands for, when it is a figure of speech and
+   * not a picture of a thing: a balloon for inflation, a scale for
+   * justice. The safety of it is that the voice says so, so the check
+   * asks the narration to name both the idea and the thing it is
+   * pictured as. A balloon labelled inflation with nothing said is the
+   * same fault as a beaker labelled kidney.
+   */
+  standsFor?: string;
   name?: string;
   bubble?: string;
   /** Term: the word and what it means. */
@@ -2021,6 +2030,43 @@ export function layoutTutorial(
   };
 }
 
+/**
+ * Every thing the director asked to be drawn on a page, and what was
+ * found for it. This is the honest record: not every word the page
+ * happens to contain, but the things a lesson actually reached for. The
+ * ones that found nothing are the list of what the library is short of.
+ */
+export function namedDrawings(
+  tutorial: VisualTutorial,
+): { term: string; drawing: string | null }[] {
+  const out = new Map<string, string | null>();
+  const ask = (term: string | undefined, shape?: Moment['shape']) => {
+    const word = term?.trim().toLowerCase();
+    if (!word || word.length < 2) return;
+    const drawn = resolveDrawing(word, shape);
+    const name =
+      drawn?.kind === 'picture'
+        ? drawn.name
+        : drawn?.kind === 'figure'
+          ? drawn.figure.outline
+          : null;
+    // A thing found once is found: a later moment that fails to place
+    // the same word does not unsay it.
+    if (!out.has(word) || (name && !out.get(word))) out.set(word, name);
+  };
+  for (const m of tutorial.moments) {
+    if (m.card === 'picture') ask(m.picture ?? m.name, m.shape);
+    for (const item of m.pictures ?? []) ask(item.picture);
+    for (const item of m.items ?? []) ask(item.picture ?? undefined);
+    ask(m.left?.picture);
+    ask(m.right?.picture);
+    ask(m.centre?.picture);
+    for (const item of m.inputs ?? []) ask(item.picture ?? undefined);
+    for (const item of m.outputs ?? []) ask(item.picture ?? undefined);
+  }
+  return [...out].map(([term, drawing]) => ({ term, drawing }));
+}
+
 /** The sentence each moment's card takes the stage on, for the player's stepping. */
 export function momentStarts(tutorial: VisualTutorial): number[] {
   const last = Math.max(0, tutorial.sentences.length - 1);
@@ -2198,10 +2244,13 @@ export function cutShort(text: string, pool: Set<string>): boolean {
 function tidyStrings<T>(value: T): T {
   if (typeof value === 'string')
     // A model's string can carry control characters; a NUL once broke the judge's sheet.
-    return value
-      .replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g, '')
-      .replace(/\s+/g, ' ')
-      .trim() as unknown as T;
+    return (
+      value
+        // eslint-disable-next-line no-control-regex
+        .replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g, '')
+        .replace(/\s+/g, ' ')
+        .trim() as unknown as T
+    );
   if (Array.isArray(value)) return value.map(tidyStrings) as unknown as T;
   if (value && typeof value === 'object')
     return Object.fromEntries(
@@ -2526,6 +2575,30 @@ export function tutorialProblems(
           problems.push(
             `${who}: nothing in the library draws "${of}", and its words do not say what shape it takes. Name a thing the library can draw, or show this with another card: a hub, a flow, chips, a compare, or the words themselves. Do not reach for an outline that only matches what the thing does.`,
           );
+        // A drawing that stands for an idea is a comparison, not a
+        // likeness, and it is safe only because the voice says so. The
+        // narration must name both the idea and the thing it is
+        // pictured as, in this moment's own sentences, so the learner
+        // is told they are being shown a comparison.
+        if (m.standsFor) {
+          const said = tutorial.sentences
+            .slice(m.from, m.to + 1)
+            .join(' ')
+            .toLowerCase();
+          const heard = (text: string) =>
+            words(text).some(
+              (word) => word.length > 2 && said.includes(word.toLowerCase()),
+            );
+          const drawing = m.picture ?? m.name ?? of;
+          if (!heard(m.standsFor))
+            problems.push(
+              `${who}: the picture stands for "${m.standsFor}", but these sentences never say it. A comparison works only when the voice makes it: say the idea and the thing it is pictured as in this moment's own words, or drop the picture and use the words.`,
+            );
+          else if (drawing && !heard(drawing))
+            problems.push(
+              `${who}: the picture stands for "${m.standsFor}" but the sentences never mention "${drawing}". Say what it is pictured as ("think of ${m.standsFor} as a ${drawing}"), so the learner knows it is a comparison and not the thing itself.`,
+            );
+        }
         // A shape is a claim about what the thing looks like, so the
         // claim is made first and the outline has to follow from it. The
         // test runs against that line and never against the thing's
@@ -2610,7 +2683,7 @@ export function tutorialProblems(
       }
       case 'scene': {
         const pictures = m.pictures ?? [];
-        pictures.forEach((p, k) =>
+        pictures.forEach((p) =>
           problems.push(
             ...motionProblems(who, p.picture, p.motion, m.color, [p.name]),
           ),
@@ -2961,7 +3034,7 @@ export function assembleTutorial(
     for (const [key, value] of Object.entries(decision))
       if (value !== null && value !== undefined) fields[key] = value;
     return {
-      ...(fields as Omit<VisualDecision, 'index'>),
+      ...fields,
       from: m.from,
       to: m.to,
       index,

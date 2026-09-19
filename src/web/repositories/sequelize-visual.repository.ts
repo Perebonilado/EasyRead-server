@@ -5,11 +5,13 @@ import type {
   VisualPositionRecord,
   VisualSceneRecord,
   VisualSceneRepository,
+  VisualTermRecord,
 } from '../../business/repositories/visual.repository';
 import {
   VisualPlanModel,
   VisualPositionModel,
   VisualSceneModel,
+  VisualTermModel,
 } from '../database/models';
 import { newId } from '../database/uuid';
 
@@ -45,7 +47,70 @@ export class SequelizeVisualSceneRepository implements VisualSceneRepository {
     private readonly plans: typeof VisualPlanModel,
     @InjectModel(VisualPositionModel)
     private readonly positions: typeof VisualPositionModel,
+    @InjectModel(VisualTermModel)
+    private readonly terms: typeof VisualTermModel,
   ) {}
+
+  async noteTerms(input: {
+    documentId: string;
+    pageNumber: number;
+    terms: {
+      term: string;
+      drawing: string | null;
+      foundBy: 'spelling' | 'meaning';
+    }[];
+  }): Promise<void> {
+    for (const one of input.terms) {
+      const term = one.term.trim().toLowerCase().slice(0, 120);
+      if (!term) continue;
+      const existing = await this.terms.findOne({ where: { term } });
+      if (!existing) {
+        await this.terms.create({
+          id: newId(),
+          term,
+          drawing: one.drawing,
+          foundBy: one.foundBy,
+          times: 1,
+          documentId: input.documentId,
+          pageNumber: input.pageNumber,
+        } as never);
+        continue;
+      }
+      // What someone set by hand stands; the app only counts the asking.
+      await existing.update(
+        existing.foundBy === 'hand'
+          ? { times: existing.times + 1 }
+          : {
+              drawing: one.drawing,
+              foundBy: one.foundBy,
+              times: existing.times + 1,
+              documentId: input.documentId,
+              pageNumber: input.pageNumber,
+            },
+      );
+    }
+  }
+
+  async handPicked(): Promise<Map<string, string>> {
+    const rows = await this.terms.findAll({ where: { foundBy: 'hand' } });
+    const out = new Map<string, string>();
+    for (const row of rows) if (row.drawing) out.set(row.term, row.drawing);
+    return out;
+  }
+
+  async missingTerms(limit: number): Promise<VisualTermRecord[]> {
+    const rows = await this.terms.findAll({
+      where: { drawing: null },
+      order: [['times', 'DESC']],
+      limit,
+    });
+    return rows.map((row) => ({
+      term: row.term,
+      drawing: row.drawing,
+      foundBy: row.foundBy,
+      times: row.times,
+    }));
+  }
 
   async findPosition(
     documentId: string,

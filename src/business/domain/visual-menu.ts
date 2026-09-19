@@ -19,7 +19,8 @@ import {
   resolveDrawing,
 } from './visual-figures';
 import { MECHANISMS, MECHANISM_KINDS } from './visual-mechanisms';
-import { pictureCandidates } from './visual-presets';
+import { fieldFor, pictureCandidates } from './visual-presets';
+import type { Near } from './visual-vectors';
 
 /** How many phrases with still pictures the menu lists, the surest first. */
 const MAX_PICTURE_LINES = 60;
@@ -60,17 +61,30 @@ const CARD_MOTION: Record<(typeof CARD_KINDS)[number], string> = {
     'a machine that runs, phase by phase, each phase starting on its sentence',
 };
 
-/** The phrases of a text worth trying: single words and pairs, content only. */
+/**
+ * The phrases of a text worth trying: single words, and pairs of words
+ * that stood side by side in the text itself. Pairing content words
+ * across whatever was dropped between them invents things nobody wrote:
+ * "budgets. The kidneys sit" became "budgets kidneys", which is not a
+ * thing and cannot be drawn.
+ */
 function phrasesOf(text: string): string[] {
-  const words = text
-    .toLowerCase()
-    .replace(/[^a-z0-9\s'-]/g, ' ')
-    .split(/\s+/)
-    .filter((w) => w.length > 2 && !STOP.has(w));
   const out = new Set<string>();
-  for (let i = 0; i < words.length; i += 1) {
-    out.add(words[i]);
-    if (i + 1 < words.length) out.add(`${words[i]} ${words[i + 1]}`);
+  // Sentence by sentence, so a pair never spans a full stop.
+  for (const clause of text.toLowerCase().split(/[.!?;:\n]+/)) {
+    const tokens = clause
+      .replace(/[^a-z0-9\s'-]/g, ' ')
+      .split(/\s+/)
+      .filter(Boolean);
+    let previous: string | null = null;
+    for (const token of tokens) {
+      const worth = token.length > 2 && !STOP.has(token);
+      if (worth) {
+        out.add(token);
+        if (previous) out.add(`${previous} ${token}`);
+      }
+      previous = worth ? token : null;
+    }
   }
   return [...out];
 }
@@ -82,6 +96,34 @@ export interface VisualMenu {
   pictures: string[];
   /** The menu as the director reads it. */
   text: string;
+  /**
+   * Things the page names that nothing in the library draws. Kept so a
+   * page's misses can be counted: the list of what the library is short
+   * of is exactly the order in which to draw more.
+   */
+  missing: string[];
+}
+
+/** The things a page names that are worth asking a search by meaning about: the ones spelling found nothing for. */
+export function phrasesToSearch(
+  material: string,
+  sentences: string[],
+  limit = 80,
+): string[] {
+  const phrases = phrasesOf(`${material}\n${sentences.join(' ')}`).slice(
+    0,
+    900,
+  );
+  const unmatched = phrases.filter(
+    (phrase) =>
+      !guessFigure(phrase)?.alive && !pictureCandidates(phrase, 1).length,
+  );
+  // Two words before one: "blood pressure" is a thing, "blood" on its own is a word.
+  return unmatched
+    .sort(
+      (a, b) => b.split(' ').length - a.split(' ').length || a.localeCompare(b),
+    )
+    .slice(0, limit);
 }
 
 /**
@@ -94,12 +136,20 @@ export function buildMenu(
   material: string,
   sentences: string[],
   field?: string,
+  /** What a search by meaning found for the phrases spelling could not place, by phrase. */
+  near: ReadonlyMap<string, readonly Near[]> = new Map(),
+  /** Terms someone has set by hand, which win over anything the app finds. */
+  handPicked: ReadonlyMap<string, string> = new Map(),
 ): VisualMenu {
+  // The field this page is in, read from its own words. A field's own
+  // term is answered from that field's pack or by words.
+  const subject = fieldFor(`${material} ${sentences.join(' ')}`);
   const phrases = phrasesOf(`${material}\n${sentences.join(' ')}`).slice(
     0,
     900,
   );
   const figures = new Map<string, string>();
+  const missing = new Set<string>();
   const pictures = new Map<
     string,
     { line: string; score: number; names: string }
@@ -107,7 +157,7 @@ export function buildMenu(
   for (const phrase of phrases) {
     const alive = guessFigure(phrase)?.alive;
     if (alive) {
-      const drawn = resolveDrawing(phrase);
+      const drawn = resolveDrawing(phrase, null, subject);
       if (drawn?.kind !== 'figure') continue;
       const key = `${drawn.figure.outline}:${drawn.figure.parts.join(',')}`;
       // One phrase per figure, the fullest, so "tsetse fly" stands rather than "tsetse".
@@ -115,8 +165,15 @@ export function buildMenu(
       if (!have || phrase.length > have.length) figures.set(key, phrase);
       continue;
     }
-    const candidates = pictureCandidates(phrase, CANDIDATES);
-    if (!candidates.length) continue;
+    const hand = handPicked.get(phrase);
+    const candidates = hand
+      ? [{ name: hand, score: 300, tags: [] as string[] }]
+      : pictureCandidates(phrase, CANDIDATES, near.get(phrase) ?? [], subject);
+    if (!candidates.length) {
+      missing.add(phrase);
+      continue;
+    }
+
     const names = candidates.map((c) => c.name).join('|');
     // One phrase per set of candidates, the shortest: "sign" stands for "sign the".
     const have = pictures.get(names);
@@ -135,7 +192,7 @@ export function buildMenu(
     });
   }
   const figureLines = [...figures.entries()].map(([key, phrase]) => {
-    const drawn = resolveDrawing(phrase);
+    const drawn = resolveDrawing(phrase, null, subject);
     if (!drawn || drawn.kind !== 'figure') return '';
     const { outline, parts, manner } = drawn.figure;
     const more = OUTLINE_PARTS[outline].filter((p) => !parts.includes(p));
@@ -196,5 +253,15 @@ export function buildMenu(
     cards,
     `LIMITS: chips ${L.maxChipChars} characters, list items ${L.maxListItemChars}, headings ${L.maxHeadingChars}, statements ${L.maxStatementWords} words, names ${L.maxNameChars}, bubbles ${L.maxBubbleChars}, callouts ${L.maxCalloutChars} (${L.maxCallouts} a card), items ${L.maxItems} a card, ${L.maxInkChars} characters of text on a card in all, every number on the page.`,
   ].join('\n');
-  return { figures: figureLines, pictures: pictureLines, text };
+  // Only what reads as a thing is worth counting as missing: a lone
+  // short word is noise, a pair is usually something the page names.
+  const missed = [...missing]
+    .filter((phrase) => phrase.includes(' ') || phrase.length > 5)
+    .sort();
+  return {
+    figures: figureLines,
+    pictures: pictureLines,
+    text,
+    missing: missed,
+  };
 }

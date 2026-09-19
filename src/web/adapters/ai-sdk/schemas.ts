@@ -554,6 +554,8 @@ const momentFields = {
     .nullable(),
   /** What the thing looks like, in one line, said before a shape is named; null when no shape is. */
   looksLike: z.string().max(140).nullable(),
+  /** The idea a drawing stands for, when it is a comparison and not a picture of a thing; null otherwise. */
+  standsFor: z.string().max(40).nullable(),
   /** For a picture card: how the drawn thing moves once shown. */
   motion: z.enum(VISUAL_MOTIONS).nullable(),
   /** For a picture or mechanism card: short lines that point at a part and follow it. */

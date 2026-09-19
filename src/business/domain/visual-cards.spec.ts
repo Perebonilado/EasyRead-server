@@ -532,3 +532,79 @@ describe('a shape a card claims', () => {
     expect(byForm).toEqual([]);
   });
 });
+
+describe('a picture that stands for an idea', () => {
+  const lesson = (
+    said: string,
+    standsFor: string,
+    picture: string,
+  ): VisualTutorial => ({
+    title: 'Prices',
+    sentences: [
+      'Prices do not stay still, and this chapter is about why they rise.',
+      'When money loses value over time, we call that inflation.',
+      said,
+      'Wages that do not keep up leave people poorer than they were.',
+      'Central banks raise rates to slow it down again.',
+      'That is inflation, and now you know what makes it happen.',
+    ],
+    moments: [
+      { from: 0, to: 1, card: 'title', heading: 'Prices' },
+      {
+        from: 2,
+        to: 3,
+        card: 'picture',
+        picture,
+        name: 'inflation',
+        standsFor,
+      },
+      { from: 4, to: 5, card: 'statement', text: 'Rates slow it down.' },
+    ],
+  });
+  const said = (t: VisualTutorial) =>
+    tutorialProblems(t, null).filter((p) => p.includes('stands for'));
+
+  it('takes a comparison the voice makes', () => {
+    expect(
+      said(
+        lesson(
+          'Think of inflation as a balloon that keeps filling with air.',
+          'inflation',
+          'balloon',
+        ),
+      ),
+    ).toEqual([]);
+  });
+
+  it('refuses a comparison the voice never makes', () => {
+    expect(
+      said(
+        lesson(
+          'Inflation means money buys less each year than it did before.',
+          'inflation',
+          'balloon',
+        ),
+      ),
+    ).toEqual(
+      expect.arrayContaining([
+        expect.stringContaining('never mention "balloon"'),
+      ]),
+    );
+  });
+
+  it('refuses one whose idea the sentences never name', () => {
+    expect(
+      said(
+        lesson(
+          'Think of it as a balloon that keeps filling with air.',
+          'quantitative easing',
+          'balloon',
+        ),
+      ),
+    ).toEqual(
+      expect.arrayContaining([
+        expect.stringContaining('these sentences never say it'),
+      ]),
+    );
+  });
+});

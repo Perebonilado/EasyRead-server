@@ -6,9 +6,67 @@ export interface Preset {
   detail?: string;
   /** Width over height, so the box keeps the drawing's proportions. */
   aspect: number;
+  /** The words a chapter would use for this thing, so the server can find it. */
+  tags?: string;
+  /**
+   * The field whose own vocabulary this belongs to. A field's term is
+   * answered from its own pack or by words, never by a drawing from the
+   * general library that merely does the same job: a glomerulus is not
+   * a funnel.
+   */
+  field?: Field;
+  /**
+   * The parts a callout can point at, each with where on the unit
+   * square its leader line meets, and the ink that belongs to it alone.
+   * A drawing of an organ is no use to a page about that organ unless
+   * its parts can be named one at a time.
+   */
+  parts?: Record<string, PresetPart>;
 }
 
-export const PRESETS: Record<string, Preset> = {
+/** The fields whose own terms are answered from their own pack. */
+export type Field =
+  | 'medicine'
+  | 'agriculture'
+  | 'law'
+  | 'engineering'
+  | 'finance'
+  | 'computing'
+  | 'science';
+
+/** One named part of a drawing. */
+export interface PresetPart {
+  /** Where a leader line meets this part, on the unit square. */
+  at: [number, number];
+  /** Ink that is this part and no other: drawn with the body, lit on its own when named. */
+  fill?: string;
+  /** Lines that are this part: drawn with the detail, lit on its own when named. */
+  stroke?: string;
+}
+
+import { AGRICULTURE } from './packs/agriculture';
+import { MEDICINE } from './packs/medicine';
+
+/** The field packs, each a field's own vocabulary drawn for it. */
+export const PACKS: Record<string, Record<string, Preset>> = {
+  medicine: MEDICINE,
+  agriculture: AGRICULTURE,
+};
+
+/**
+ * Which field a drawing belongs to. A field's own term is answered from
+ * that field's pack or by words, and never by a drawing from the general
+ * library that merely does the same job: a glomerulus is not a funnel.
+ */
+export const FIELD_OF: Record<string, Field> = Object.fromEntries(
+  Object.values(PACKS).flatMap((pack) =>
+    Object.entries(pack)
+      .filter(([, preset]) => preset.field)
+      .map(([name, preset]) => [name, preset.field as Field]),
+  ),
+);
+
+const HAND: Record<string, Preset> = {
   // ── nature and general ──
   leaf: {
     body: 'M0 0.7 C0.11 0.13 0.73 0 1 0.33 C0.88 0.85 0.29 1 0 0.7 Z',
@@ -297,4 +355,26 @@ export const PRESETS: Record<string, Preset> = {
   },
 };
 
+/** Every drawing the stage can show: the first hand-made ones, and each field's pack. */
+export const PRESETS: Record<string, Preset> = {
+  ...HAND,
+  ...Object.assign({}, ...Object.values(PACKS)),
+};
+
 export const PRESET_NAMES = Object.keys(PRESETS);
+
+/** Where a named part of a drawing sits inside its box, or nothing when it has none. */
+export function presetAnchor(
+  name: string | undefined,
+  part: string,
+): [number, number] | null {
+  const parts = name ? PRESETS[name]?.parts : undefined;
+  if (!parts) return null;
+  const want = part.trim().toLowerCase();
+  const found =
+    parts[want] ??
+    Object.entries(parts).find(
+      ([key]) => key.includes(want) || want.includes(key),
+    )?.[1];
+  return found ? found.at : null;
+}

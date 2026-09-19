@@ -9,6 +9,7 @@ import { MOTIONS, MOTION_MEANINGS } from './living.generated/motion';
 import { CARD_KINDS, TUTORIAL_LIMITS } from './visual-cards';
 import {
   FIGURE_ANCHORS,
+  OUTLINE_LOOKS,
   FIGURE_MANNERS,
   FIGURE_OUTLINES,
   MANNER_MEANINGS,
@@ -151,9 +152,12 @@ export function buildMenu(
     const spec = MECHANISMS[kind];
     return `${kind}: ${spec.what}; numbers ${spec.params.map((p) => p.name).join(', ')}; stages ${spec.stages.map((s) => s.name).join(', ')}; callout places ${spec.anchors.filter((a) => !/\d$/.test(a)).join(', ')}`;
   }).join('\n');
+  // Each outline as a shape seen on the page, never as a kind of thing:
+  // an outline named by what it is for pulls in anything that shares
+  // that purpose, which is how a kidney came to be drawn as a beaker.
   const outlines = FIGURE_OUTLINES.map(
     (o) =>
-      `${o} (parts ${OUTLINE_PARTS[o].join(', ') || 'none'}; callout places ${FIGURE_ANCHORS[o].join(', ')}; moves as ${mannersThatMove(o).join(', ') || 'still only'})`,
+      `${o}, ${OUTLINE_LOOKS[o]} (parts ${OUTLINE_PARTS[o].join(', ') || 'none'}; callout places ${FIGURE_ANCHORS[o].join(', ')}; moves as ${mannersThatMove(o).join(', ') || 'still only'})`,
   ).join('; ');
   const L = TUTORIAL_LIMITS;
   const text = [
@@ -165,14 +169,25 @@ export function buildMenu(
     'MOVING FIGURES this page names (drawn alive, on the canvas, with these parts and manner; a callout can point at any part or place):',
     figureLines.length
       ? figureLines.map((l) => `- ${l}`).join('\n')
-      : '- none found; a shape may still be given by outline',
+      : '- none found',
     "STILL PICTURES the page names, each with the library drawings that could be it and each drawing's own words. Name a picture by the drawing's name, never by the page's word when several drawings are listed; when none of them is the thing, name none:",
     pictureLines.length
       ? pictureLines.map((l) => `- ${l}`).join('\n')
       : '- none found',
     'Anything else named becomes words in a chip or a label; never a wrong picture. A chip needs no picture; a chip with a wrong one is a fault.',
     "COMPOSED PICTURE, for a picture card when no single drawing is the thing: two library drawings as one, compose {base, add, place}, place one of over (add centred on base), inside (small, centred), beside (side by side), badge (small, at the base's lower right). A signed deed: base file-text, add signature, place badge. A locked deed: base file-text, add lock, place badge.",
-    `OUTLINES a shape may be given, when the words do not say it: ${outlines}.`,
+    [
+      'OUTLINES. An outline is a claim about what a thing looks like, not',
+      'about what it does: a thing that holds or filters fluid is not',
+      'thereby shaped like a tank. So before naming one, say in looksLike',
+      "what the thing looks like in the page's own terms, its form in one",
+      'line (a bean-shaped organ with a notch on one edge; a long looping',
+      'tube; bands of rock lying on each other), and then name the',
+      'outline that line bears out. When none of them is what the thing',
+      'looks like, that is the normal answer: show it with a hub, a flow,',
+      'chips, a compare, or the words themselves. The outlines:',
+      `${outlines}.`,
+    ].join(' '),
     `MANNERS a figure moves in: ${FIGURE_MANNERS.map((m) => `${m} (${MANNER_MEANINGS[m]})`).join('; ')}.`,
     'MECHANISMS (a machine that runs on the canvas):',
     mechanisms,

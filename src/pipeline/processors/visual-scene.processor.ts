@@ -15,6 +15,7 @@ import {
   pinWordTimes,
   repairVisual,
   sceneSpoken,
+  cadenceWarnings,
   timeVisual,
   visualProblems,
   visualWarnings,
@@ -25,6 +26,7 @@ import {
 } from '../../business/domain/visual';
 import {
   assembleTutorial,
+  momentStarts,
   layoutTutorial,
   mergeDecisions,
   momentsNamed,
@@ -40,6 +42,7 @@ import {
 import { buildMenu } from '../../business/domain/visual-menu';
 import {
   MANNER_MEANINGS,
+  OUTLINE_LOOKS,
   chipIcon,
   resolveDrawing,
 } from '../../business/domain/visual-figures';
@@ -133,7 +136,7 @@ function drawingsOf(m: Moment): string[] {
     const drawn = resolveDrawing(of, shape ?? undefined);
     if (!drawn) return undefined;
     if (drawn.kind === 'figure')
-      return `${of} (a ${drawn.figure.outline} figure)`;
+      return `${of} (drawn as a ${drawn.figure.outline} figure, which is ${OUTLINE_LOOKS[drawn.figure.outline]})`;
     return drawn.name === of ? of : `${of} (drawn as ${drawn.name})`;
   };
   const chip = (item: { text: string; picture?: string | null }) => {
@@ -582,6 +585,7 @@ export class VisualSceneProcessor {
           durationMs,
           timing: how,
           plain: plainPositions,
+          momentStarts: momentStarts(tutorial),
         });
       let timeline = time(times, timing);
       let faults = timingProblems(timeline);
@@ -603,6 +607,12 @@ export class VisualSceneProcessor {
         this.logger.warn(
           `${who}: ${faults.length} timing faults left:\n- ${faults.slice(0, 6).join('\n- ')}`,
         );
+      // How the finished page paces: spoken speed, silence, and the
+      // longest the stage stands still.
+      const pace = cadenceWarnings(timeline);
+      if (pace.length)
+        this.logger.warn(`${who}: pace:\n- ${pace.join('\n- ')}`);
+      else this.logger.log(`${who}: the pace is within the guide.`);
 
       await this.visuals.update(record.id, {
         status: 'done',
@@ -675,6 +685,7 @@ export class VisualSceneProcessor {
         drawings: drawingsOf(m),
         shouldSee: m.shouldSee ?? m.intent ?? 'what the sentences say',
         motion: motionLine(m),
+        continues: m.continues,
       };
     });
     try {

@@ -702,6 +702,8 @@ export class AiSdkLlmAdapter implements LlmGatewayPort, OnModuleInit {
       drawings: string[];
       shouldSee: string;
       motion?: string;
+      /** This moment carries on the card the moment before laid, rather than a new one. */
+      continues?: boolean;
     }[];
   }): Promise<LlmResult<VisualJudgement>> {
     const started = Date.now();
@@ -710,7 +712,7 @@ export class AiSdkLlmAdapter implements LlmGatewayPort, OnModuleInit {
     const listed = input.moments
       .map(
         (m) =>
-          `${m.moment}. ${m.card} card${m.drawings.length ? `, drawing: ${m.drawings.join('; ')}` : ', no drawing'}. Should see: ${m.shouldSee}${m.motion ? ` Moves: ${m.motion}.` : ''}`,
+          `${m.moment}. ${m.card} card${m.continues ? ', carrying on the one before' : ''}${m.drawings.length ? `, drawing: ${m.drawings.join('; ')}` : ', no drawing'}. Should see: ${m.shouldSee}${m.motion ? ` Moves: ${m.motion}.` : ''}`,
       )
       .join('\n');
     const result = await generateObject({
@@ -801,7 +803,7 @@ export class AiSdkLlmAdapter implements LlmGatewayPort, OnModuleInit {
     const result = await generateObject({
       model,
       schema: visualDecisionsSchema,
-      system: `${PROMPTS.visualDirector}\n\n${PROMPTS.visualCardGuide}`,
+      system: `${PROMPTS.visualDirector}\n\n${PROMPTS.visualCardGuide}\n\n${PROMPTS.visualWordBudget}`,
       prompt: [
         `Chapter: ${input.topicTitle}`,
         input.context ? `This page: ${input.context}` : '',

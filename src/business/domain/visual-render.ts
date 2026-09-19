@@ -10,6 +10,7 @@ import { buildMechanism } from './living.generated/mechanisms';
 import { PRESETS } from './living.generated/presets';
 import { AT_REST, atRest, motionPose } from './living.generated/motion';
 import {
+  ALL,
   BAR_HEIGHT,
   BUBBLE_HEIGHT,
   BUBBLE_PAD,
@@ -18,6 +19,7 @@ import {
   CHIP_HEIGHT,
   CHIP_ICON_ROOM,
   CHIP_TEXT_SIZE,
+  DIM_ALPHA,
   LABEL_SIZE,
   SHAPE_TEXT_SIZE,
   SHOWS,
@@ -462,6 +464,10 @@ function elementSvg(
       if (picture) return wrap(posed(picture + text));
       const common = `fill="${mode === 'outline' ? 'none' : paint.fill}" stroke="${mode === 'outline' ? paint.text : paint.rim}" stroke-width="2.4" stroke-linejoin="round"`;
       switch (element.kind) {
+        case 'scrim':
+          return wrap(
+            `<rect x="${n(x - w / 2)}" y="${n(y - h / 2)}" width="${n(w)}" height="${n(h)}" rx="16" fill="${STAGE}" fill-opacity="0.9"/>`,
+          );
         case 'overlap': {
           const r = h / 2;
           const other = paintOf('violet');
@@ -610,9 +616,12 @@ export function shownAfterEach(script: VisualScript): Map<string, number>[] {
       else if (SHOWS.has(cue.do)) alpha.set(cue.target, 1);
       else if (cue.do === 'hide') alpha.delete(cue.target);
       else if (cue.do === 'dim' && alpha.has(cue.target))
-        alpha.set(cue.target, 0.35);
-      else if (cue.do === 'undim' && alpha.has(cue.target))
-        alpha.set(cue.target, 1);
+        alpha.set(cue.target, DIM_ALPHA);
+      else if (cue.do === 'undim') {
+        // The closing frame lights the whole stage at once.
+        if (cue.target === ALL) for (const id of alpha.keys()) alpha.set(id, 1);
+        else if (alpha.has(cue.target)) alpha.set(cue.target, 1);
+      }
     }
     return new Map(alpha);
   });

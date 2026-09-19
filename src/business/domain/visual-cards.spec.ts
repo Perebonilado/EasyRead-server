@@ -322,3 +322,213 @@ describe('the order parts come in', () => {
     expect(beat('m0_p3')).toBeGreaterThan(1010);
   });
 });
+
+describe('a card that holds the stage', () => {
+  /** The leaf drawn once, named across three moments, with the line to remember over it. */
+  const held: VisualTutorial = {
+    ...tutorial,
+    moments: [
+      {
+        from: 0,
+        to: 1,
+        card: 'picture',
+        picture: 'leaf',
+        name: 'leaf',
+        callouts: [
+          { part: 'sunlight', text: 'comes in' },
+          { part: 'water', text: 'rises' },
+        ],
+      },
+      {
+        from: 2,
+        to: 3,
+        card: 'picture',
+        continues: true,
+        picture: 'leaf',
+        name: 'leaf',
+        callouts: [
+          { part: 'sunlight', text: 'comes in' },
+          { part: 'water', text: 'rises' },
+        ],
+      },
+      {
+        from: 4,
+        to: 5,
+        card: 'statement',
+        continues: true,
+        text: 'The leaf feeds the whole plant.',
+        emphasis: ['whole'],
+      },
+      {
+        from: 6,
+        to: 8,
+        card: 'picture',
+        continues: true,
+        picture: 'leaf',
+        name: 'leaf',
+        callouts: [
+          { part: 'sunlight', text: 'comes in' },
+          { part: 'water', text: 'rises' },
+        ],
+      },
+    ],
+  };
+
+  it('lays it once, clears nothing after the first moment, and keeps its ids', () => {
+    const script = layoutTutorial(held);
+    const clears = script.segments.flatMap((s) =>
+      s.cues.filter((c) => c.do === 'clear'),
+    );
+    expect(clears).toHaveLength(0);
+    // Every part belongs to the moment that laid the card, not the ones after it.
+    const drawn = new Set(script.elements.map((e) => e.id.replace(/_.*$/, '')));
+    expect([...drawn].sort()).toEqual(['m0', 'm2']);
+  });
+
+  it('dims the held card under the card laid over it and lights it again after', () => {
+    const script = layoutTutorial(held);
+    const dims = script.segments[4].cues.filter((c) => c.do === 'dim');
+    expect(dims.length).toBeGreaterThan(0);
+    expect(dims.every((c) => c.target.startsWith('m0'))).toBe(true);
+    // The statement takes the stage over it.
+    expect(
+      script.segments[4].cues.some(
+        (c) =>
+          c.target.startsWith('m2') && (c.do === 'fade' || c.do === 'draw'),
+      ),
+    ).toBe(true);
+    // The picture comes back when the run carries on, and the statement goes.
+    const back = script.segments[6].cues;
+    expect(
+      back.some((c) => c.do === 'undim' && c.target.startsWith('m0')),
+    ).toBe(true);
+    expect(back.some((c) => c.do === 'hide' && c.target.startsWith('m2'))).toBe(
+      true,
+    );
+  });
+
+  it('closes on a frame that lights the whole stage', () => {
+    const script = layoutTutorial(held);
+    const last = script.segments[script.segments.length - 1].cues;
+    expect(last.some((c) => c.do === 'undim' && c.target === '*')).toBe(true);
+  });
+
+  it('stays sound, and the held card is not weighed against what sits over it', () => {
+    const script = repairVisual(layoutTutorial(held));
+    expect(tutorialProblems(held, null)).toEqual([]);
+    expect(visualProblems(script, null)).toEqual([]);
+    expect(layoutProblems(script)).toEqual([]);
+  });
+
+  it('settles what keeps the stage: the first moment, a title and a plain card start afresh', () => {
+    const tidy = tidyTutorial({
+      ...held,
+      moments: [
+        { ...held.moments[0], continues: true },
+        held.moments[1],
+        { ...held.moments[2], plain: true },
+        { ...held.moments[3], card: 'title', heading: 'Next' },
+      ],
+    });
+    expect(tidy.moments.map((m) => Boolean(m.continues))).toEqual([
+      false,
+      true,
+      false,
+      false,
+    ]);
+  });
+});
+
+describe('a shape a card claims', () => {
+  const card = (
+    name: string,
+    outline: 'vessel' | 'blob' | 'layers',
+    looksLike?: string,
+  ): VisualTutorial => ({
+    ...tutorial,
+    moments: [
+      { from: 0, to: 2, card: 'title', heading: 'One' },
+      { from: 3, to: 5, card: 'statement', text: 'A line to remember.' },
+      {
+        from: 6,
+        to: 8,
+        card: 'picture',
+        picture: name,
+        name,
+        shape: { outline, parts: [], manner: 'still' },
+        ...(looksLike ? { looksLike } : {}),
+      },
+    ],
+  });
+  /** Only what the check says about the shape, not the rest of the fixture. */
+  const shapeProblems = (t: VisualTutorial) =>
+    tutorialProblems(t, null).filter(
+      (p) => p.includes('looks like') || p.includes('which is not a'),
+    );
+
+  it('refuses a shape with nothing said about what the thing looks like', () => {
+    expect(shapeProblems(card('kidney', 'vessel'))).toEqual(
+      expect.arrayContaining([
+        expect.stringContaining('does not say what "kidney" looks like'),
+      ]),
+    );
+  });
+
+  it('refuses a shape the thing’s own description does not bear out', () => {
+    const problems = shapeProblems(
+      card(
+        'kidney',
+        'vessel',
+        'a bean-shaped organ with a notch on the inner edge',
+      ),
+    );
+    expect(problems).toEqual(
+      expect.arrayContaining([
+        expect.stringContaining('which is not a vessel'),
+      ]),
+    );
+    // The reason names the shape, so the director can choose again.
+    expect(problems.join(' ')).toContain('a tall open box seen from the side');
+  });
+
+  it('takes the shape the description does bear out', () => {
+    expect(
+      shapeProblems(
+        card(
+          'kidney',
+          'blob',
+          'a bean-shaped organ with a smooth rounded edge',
+        ),
+      ),
+    ).toEqual([]);
+    expect(
+      shapeProblems(
+        card('shale', 'layers', 'bands of rock lying one on another'),
+      ),
+    ).toEqual([]);
+  });
+
+  it('is not fooled by what the thing does', () => {
+    // The job words are the trap: a kidney filters, a tank holds.
+    const byJob = shapeProblems(
+      card(
+        'kidney',
+        'vessel',
+        'an organ that filters the blood and holds fluid',
+      ),
+    );
+    expect(byJob).toEqual(
+      expect.arrayContaining([
+        expect.stringContaining('which is not a vessel'),
+      ]),
+    );
+    const byForm = shapeProblems(
+      card(
+        'water tank',
+        'vessel',
+        'a tall open box with a level line across it',
+      ),
+    );
+    expect(byForm).toEqual([]);
+  });
+});

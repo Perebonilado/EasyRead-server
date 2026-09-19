@@ -486,6 +486,85 @@ const GUESSES: {
   },
 ];
 
+/**
+ * What each outline looks like on the page, said as a shape and not as a
+ * kind of thing. An outline described by what it is for ("a container
+ * holding something to a level") pulls in anything that shares that
+ * purpose, which is how a kidney came to be drawn as a beaker. Described
+ * as a silhouette, it pulls in only what has that silhouette.
+ */
+export const OUTLINE_LOOKS: Record<FigureOutline, string> = {
+  blob: 'one soft closed shape with a rounded, uneven edge',
+  body: 'one smooth spindle, pointed at both ends',
+  branch: 'a stem that splits in two again and again, spreading out',
+  layers: 'flat bands lying one on top of another',
+  lattice: 'small nodes in a repeating mesh, joined by short lines',
+  vessel:
+    'a tall open box seen from the side, with a flat line across it where the filling stops',
+  terrain: 'a ground line seen from the side, rising and falling',
+  field: 'long curved lines running across an open space, all the same way',
+  insect: 'three joined body parts on thin legs, with wings',
+  fish: 'a tapered body with fins and a tail fin',
+  bird: 'a rounded body with two wings, a beak and a tail',
+  quadruped:
+    'a body on four legs, with a head at one end and a tail at the other',
+  segmented: 'a long chain of repeated segments, bending along its length',
+  person: 'a head, a body, two arms and two legs',
+  plant: 'an upright stem with leaves, and roots below the line',
+  tree: 'a thick trunk under a broad crown',
+};
+
+/**
+ * The words in a thing's stated appearance that bear out each outline.
+ * The test runs against the description of the form, never against the
+ * name of the thing: asking whether "kidney" sounds like a container
+ * gets the wrong answer, asking whether "a bean-shaped organ with a
+ * notch on one edge" does gets the right one. Words for what a thing
+ * does are deliberately absent: a thing that holds, stores or filters is
+ * not thereby shaped like a tank.
+ */
+const OUTLINE_FORM_WORDS: Record<FigureOutline, RegExp> = {
+  blob: /\b(blob|bean|kidney.?shaped|round\w*|oval|ovoid|lobe\w*|soft|irregular|droplet|globul\w*|sac|pouch|bulb\w*|amoeb\w*|cell|clump|mass|smooth closed|curved outline)\b/,
+  body: /\b(spindle|spindle.?shaped|streamlin\w*|taper\w*|torpedo|cigar|elongat\w*|slipper.?shaped|oval body|smooth body|seed.?shaped|egg.?shaped)\b/,
+  branch:
+    /\b(branch\w*|divid\w*|dividing|fork\w*|split\w*|tributar\w*|dendrit\w*|tree.?like|spread\w* out|arbor\w*|bifurcat\w*|root\w* system)\b/,
+  layers:
+    /\b(layer\w*|band\w*|strat\w*|stack\w*|sheet\w*|lamina\w*|coat\w*|tier\w*|seam\w*|one on top of|one above|horizon\w*)\b/,
+  lattice:
+    /\b(lattice|mesh|grid|network of|node\w*|repeating|array|honeycomb|matrix|framework|scaffold|joined at|cross.?linked)\b/,
+  vessel:
+    /\b(tank|beaker|jar|cup|vat|barrel|silo|cistern|basin|tub|bucket|drum|flask|cylinder|open box|walls and a|brim|filled to|level line|upright box)\b/,
+  terrain:
+    /\b(ground|land|slope\w*|hill\w*|valley|coast\w*|cliff|ridge|plateau|dune|terrain|landscape|seen from the side|profile of the ground|cross.?section of ground)\b/,
+  field:
+    /\b(lines of|streamline\w*|flow lines|field lines|current\w*|wind\w*|swirl\w*|eddy|eddies|arrows across|running across)\b/,
+  insect:
+    /\b(insect|fly|flies|bee|ant|beetle|mosquito|wasp|wing\w*|thorax|abdomen|antenna\w*|proboscis|six legs)\b/,
+  fish: /\b(fish|fin\w*|gill\w*|tail fin|scales|swim\w* body)\b/,
+  bird: /\b(bird|beak|bill|feather\w*|wing\w*|perch\w*|two wings)\b/,
+  quadruped:
+    /\b(four legs|quadruped|hoof|hooves|snout|muzzle|mammal|cattle|cow|dog|horse|goat|four.?legged)\b/,
+  segmented:
+    /\b(segment\w*|worm|snake|serpent\w*|caterpillar|larva\w*|ring\w* along|repeated sections|sinuous|undulat\w*)\b/,
+  person:
+    /\b(person|man|woman|child|human|figure of a|arms|legs|head and body|standing|walking)\b/,
+  plant:
+    /\b(plant|stem|leaf|leaves|flower\w*|crop|shoot|root\w* below|seedling|herb)\b/,
+  tree: /\b(tree|trunk|crown|canopy|bough\w*|branches above)\b/,
+};
+
+/**
+ * Whether a stated appearance bears out an outline. The appearance is
+ * the director's own sentence on what the thing looks like; the outline
+ * is its claim about that shape.
+ */
+export function formSupports(
+  outline: FigureOutline,
+  looksLike: string,
+): boolean {
+  return OUTLINE_FORM_WORDS[outline].test(looksLike.toLowerCase());
+}
+
 /** The shape a thing takes, when its words say one plainly. */
 export function guessFigure(
   of: string | undefined,

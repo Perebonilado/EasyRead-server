@@ -6,9 +6,11 @@
  * tutorial into the script the checks, the voice and the player take.
  */
 import {
+  ALL,
   CHIP_HEIGHT,
   LABEL_SIZE,
   STAGES,
+  type VisualEnd,
   type Stage,
   boxOf,
   chipWidthOf,
@@ -30,7 +32,8 @@ import {
 } from './visual-layout';
 import {
   FIGURE_ANCHORS,
-  FIGURE_OUTLINES,
+  OUTLINE_LOOKS,
+  formSupports,
   figureAspect,
   figureWidth,
   resolveDrawing,
@@ -128,6 +131,14 @@ export interface Moment {
     parts?: FigurePart[];
     manner?: FigureManner;
   };
+  /**
+   * What the thing looks like, in one line, said before a shape may be
+   * named: a bean-shaped organ with a notch on the inner edge; a long
+   * looping tube. Not what it is called and not what it does. The shape
+   * has to follow from this, so a picture never claims a likeness the
+   * page does not bear out.
+   */
+  looksLike?: string;
   name?: string;
   bubble?: string;
   /** Term: the word and what it means. */
@@ -170,6 +181,14 @@ export interface Moment {
   shared?: string[];
   /** Parts that appear on a word rather than with the card. */
   reveals?: { part: number; sentence: number; word?: number }[];
+  /**
+   * This moment keeps what the moment before put on the stage instead of
+   * wiping it: the same card carries on, its parts arriving on the words
+   * that name them, or a short card is laid over it while it waits
+   * behind, dimmed. A learner who has to hold a vanished picture in mind
+   * has less left for the idea.
+   */
+  continues?: boolean;
   /** The narration's moment this came from, kept through tidying. */
   index?: number;
   /** What the moment must get across, from the narrator. */
@@ -192,13 +211,19 @@ export interface VisualTutorial {
   fitReason?: string;
 }
 
-/** Silence after a sentence, in seconds: a breath, more at a card change, a beat at a title, a hold at the end. */
+/**
+ * Silence after a sentence, in seconds: a breath, more at a card change,
+ * a beat at a title, a hold at the end. Silence is where a learner puts
+ * what they just heard together with what they are looking at; wall to
+ * wall talking leaves nowhere for that, and a tenth of the running time
+ * is the least that works.
+ */
 export const PAUSE_S = {
-  sentence: 0.35,
-  card: 0.55,
-  title: 0.9,
-  afterStatement: 0.6,
-  tail: 1.0,
+  sentence: 0.45,
+  card: 0.7,
+  title: 1.2,
+  afterStatement: 0.8,
+  tail: 1.2,
 } as const;
 
 /**
@@ -258,6 +283,13 @@ export const TUTORIAL_LIMITS = {
   maxNameChars: 24,
   maxCalloutChars: 30,
   maxCallouts: 3,
+  /**
+   * Words a label on the stage may carry. A label is read, and reading
+   * competes with the voice for the same channel; a few words beside the
+   * thing they name survive that, a fragment of the script does not.
+   */
+  maxItemWords: 5,
+  maxCalloutWords: 6,
   /** Characters of text one card carries before it reads as a wall. */
   maxInkChars: 190,
 } as const;
@@ -366,6 +398,10 @@ export function partBeats(
   sentences: string[],
   from: number,
   to: number,
+  /** Sentences the card does not hold the stage for: a short card is laid over it there, so no part arrives. */
+  skip: ReadonlySet<number> = new Set(),
+  /** Whether the card is read in the order its parts are laid. */
+  ordered = true,
 ): Map<string, Beat> {
   const beats = new Map<string, Beat>();
   const asked = new Map<number, { sentence: number; word?: number }>();
@@ -380,14 +416,20 @@ export function partBeats(
   // Every word of the moment in order, so beats can be compared and spread.
   const flat: Beat[] = [];
   for (let s = from; s <= to; s += 1) {
+    if (skip.has(s)) continue;
     const n = words(sentences[s] ?? '').length;
     for (let w = 0; w < n; w += 1) flat.push({ sentence: s, word: w });
   }
   if (!flat.length) return beats;
   const indexOf = (b: Beat) =>
     flat.findIndex((f) => f.sentence === b.sentence && f.word === b.word);
-  const sentenceStart = (sentence: number) =>
-    flat.findIndex((f) => f.sentence === sentence);
+  const sentenceStart = (sentence: number) => {
+    const exact = flat.findIndex((f) => f.sentence === sentence);
+    if (exact >= 0) return exact;
+    // The sentence is one the card does not hold: the next word it does.
+    const after = flat.findIndex((f) => f.sentence > sentence);
+    return after >= 0 ? after : Math.max(0, flat.length - 1);
+  };
   // A thing's own word from a flat index on, sentence by sentence.
   const search = (fromIndex: number, part: number, only?: number) => {
     let f = Math.max(0, fromIndex);
@@ -417,13 +459,13 @@ export function partBeats(
         const last = Math.max(0, words(sentences[sentence]).length - 1);
         index = indexOf({ sentence, word: Math.min(r.word, last) });
       } else index = start;
-      // Never before the part before it.
-      index = Math.max(index, floor + 1);
-    } else index = search(floor + 1, i);
+      // Never before the part before it, where the card is read in order.
+      if (ordered) index = Math.max(index, floor + 1);
+    } else index = search(ordered ? floor + 1 : 0, i);
     if (index === null) return;
     index = Math.min(index, flat.length - 1);
     placed[i] = index;
-    floor = index;
+    floor = ordered ? index : Math.max(floor, index);
   });
   // The parts the narration never names take their share of the words
   // between the parts around them, in order.
@@ -1575,11 +1617,117 @@ const entrance = (element: VisualElement): 'draw' | 'fade' =>
     ? 'draw'
     : 'fade';
 
+/** Cards small and centred enough to be laid over a picture that stays on the stage behind them. */
+export const INSERT_CARDS = new Set<CardKind>(['statement', 'number', 'term']);
+
+/**
+ * Moments one card holds the stage for before the lesson moves on. A
+ * scene that never changes goes unwatched; one that changes every
+ * sentence is never built. Six moments is roughly a minute.
+ */
+export const RUN_MOMENTS = 6;
+
+/**
+ * Named things a card may show before its parts have to be named on
+ * their own, with nothing joining them, before any relationship is
+ * drawn. Building a model of the parts and a model of the system at the
+ * same time is what overloads a learner; naming the parts first is one
+ * of the largest gains there is.
+ */
+export const PRETRAIN_PARTS = 4;
+
+/** Room around a card laid over another, between its words and the picture behind them. */
+export const SCRIM_PAD = 14;
+
+/** How much of the stage a card laid over another takes: a band along the foot of it. */
+export const INSERT_BAND = 0.44;
+
+/** A laid card moved down the stage by so many units, its ends and anchors with it. */
+function shifted(laid: Laid, dy: number): Laid {
+  if (!dy) return laid;
+  const end = (e: VisualEnd): VisualEnd =>
+    typeof e === 'string' ? e : [e[0], e[1] + dy];
+  const move = (element: VisualElement): VisualElement => {
+    const next: VisualElement = { ...element };
+    if ('y' in next) next.y = next.y + dy;
+    if (next.type === 'line' || next.type === 'arrow') {
+      next.from = end(next.from);
+      next.to = end(next.to);
+    }
+    if ('motionTo' in next && next.motionTo)
+      next.motionTo = { ...next.motionTo, y: next.motionTo.y + dy };
+    return next;
+  };
+  return { ...laid, elements: laid.elements.map(move) };
+}
+
+/**
+ * Cards whose parts are read in the order they are laid: a list runs
+ * down, a flow and a timeline run along, rings run outward. On these a
+ * later part never arrives before an earlier one, whatever the narration
+ * names first. Everywhere else the parts sit around a picture with no
+ * reading order, so each waits for its own word.
+ */
+export const ORDERED_CARDS = new Set<CardKind>([
+  'list',
+  'chips',
+  'flow',
+  'timeline',
+  'rings',
+  'table',
+  'count',
+]);
+
+/**
+ * One stretch of the lesson on one card: the moment whose card holds the
+ * stage, the moments that carry that same card on, and the short cards
+ * laid over it while it waits behind, dimmed.
+ */
+export interface MomentRun {
+  /** Position of the moment whose card is laid. */
+  head: number;
+  /** Positions carrying the head's card on, the head first. */
+  same: number[];
+  /** Positions laid over the held card. */
+  inserts: number[];
+}
+
+/**
+ * The moments grouped into runs. A moment that asks to continue keeps
+ * what is on the stage: the same card carries on, or a short card is
+ * laid over it. Anything else is a new run, and only a new run clears
+ * the stage. Removing a picture a learner has just built costs them the
+ * memory of it; keeping it is free.
+ */
+export function momentRuns(moments: Moment[]): MomentRun[] {
+  const runs: MomentRun[] = [];
+  moments.forEach((m, index) => {
+    const run = runs[runs.length - 1];
+    const head = run ? moments[run.head] : null;
+    const start = () => runs.push({ head: index, same: [index], inserts: [] });
+    const full =
+      run !== undefined && run.same.length + run.inserts.length >= RUN_MOMENTS;
+    if (!run || !head || !m.continues || m.card === 'title' || full) {
+      start();
+      return;
+    }
+    // A moment that names the same card carries it on; a short card is
+    // laid over it; anything else is a scene change of its own.
+    if (m.card === head.card) run.same.push(index);
+    else if (INSERT_CARDS.has(m.card)) run.inserts.push(index);
+    else start();
+  });
+  return runs;
+}
+
 /**
  * A tutorial as the script the rest of the pipeline takes: every
  * moment's elements, and the sentences with their cues. A moment's parts
- * come in on its first word, or on the word a reveal names; the next
- * moment clears the stage on its own first word.
+ * come in on its first word, or on the word a reveal names. A run of
+ * moments on one card is laid once and holds the stage across them, its
+ * parts arriving as the narration names them; only the head of a run
+ * clears what went before, and the last moment of the page lights
+ * everything from its run again as a closing frame.
  */
 export function layoutTutorial(
   tutorial: VisualTutorial,
@@ -1588,11 +1736,36 @@ export function layoutTutorial(
   const elements: VisualElement[] = [];
   const cuesBySentence: VisualCue[][] = tutorial.sentences.map(() => []);
   const lastSentence = tutorial.sentences.length - 1;
-  tutorial.moments.forEach((m, index) => {
+  const clampSentence = (v: number) => Math.max(0, Math.min(lastSentence, v));
+  const spanOf = (k: number) => {
+    const m = tutorial.moments[k];
+    const from = clampSentence(m.from);
+    return { from, to: Math.max(from, clampSentence(m.to)) };
+  };
+  const lastWordOf = (sentence: number) =>
+    Math.max(0, words(tutorial.sentences[sentence] ?? '').length - 1);
+  const runs = momentRuns(tutorial.moments);
+  runs.forEach((run, runIndex) => {
+    const m = tutorial.moments[run.head];
+    const index = run.head;
     const id = `m${index}`;
-    const from = Math.max(0, Math.min(lastSentence, m.from));
-    const to = Math.max(from, Math.min(lastSentence, m.to));
-    const laid = layoutMoment(m, id, stage);
+    const { from } = spanOf(run.head);
+    // The card holds the stage to the end of the last moment that carries it on.
+    const to = run.same.reduce((end, k) => Math.max(end, spanOf(k).to), from);
+    // The sentences a short card is laid over: the held card rests there.
+    const over = new Set<number>();
+    for (const k of run.inserts) {
+      const span = spanOf(k);
+      for (let sentence = span.from; sentence <= span.to; sentence += 1)
+        over.add(sentence);
+    }
+    // The reveals of every moment on this card, all against its parts.
+    const reveals = run.same.flatMap((k) => tutorial.moments[k].reveals ?? []);
+    const laid = layoutMoment(
+      reveals.length ? { ...m, reveals } : m,
+      id,
+      stage,
+    );
     elements.push(...laid.elements);
     const ids = new Set(laid.elements.map((e) => e.id));
     const at = (
@@ -1627,37 +1800,81 @@ export function layoutTutorial(
         });
     };
     const byId = new Map(laid.elements.map((e) => [e.id, e] as const));
-    const revealed = partBeats(m, laid, tutorial.sentences, from, to);
-    if (index > 0)
+    const revealed = partBeats(
+      reveals.length ? { ...m, reveals } : m,
+      laid,
+      tutorial.sentences,
+      from,
+      to,
+      over,
+      ORDERED_CARDS.has(m.card),
+    );
+    if (runIndex > 0)
       cuesBySentence[from].push({ at: 0, do: 'clear', target: '*' });
     const later = new Set<string>();
     for (const [partId] of revealed) {
       later.add(partId);
       for (const arrowId of laid.arrowsOf.get(partId) ?? []) later.add(arrowId);
     }
+    /** When each of the card's elements comes on screen. */
+    const shownIn = new Map<string, Beat>();
+    const before = (a: Beat, b: Beat) =>
+      a.sentence < b.sentence ||
+      (a.sentence === b.sentence && a.word <= b.word);
     for (const element of laid.elements) {
       if (element.id.endsWith(NAME) || later.has(element.id)) continue;
       at(from, 0, element, to);
+      shownIn.set(element.id, { sentence: from, word: 0 });
     }
+    // A card of many parts names them all before anything joins them:
+    // the parts first, with no relationships drawn, then the arrows.
+    const pretrain =
+      laid.parts.filter(Boolean).length > PRETRAIN_PARTS &&
+      [...revealed.keys()].some((partId) =>
+        (laid.arrowsOf.get(partId) ?? []).some((a) => byId.has(a)),
+      );
+    const named = [...revealed.values()];
+    const lastNamed = named.reduce(
+      (latest, beat) =>
+        beat.sentence > latest.sentence ||
+        (beat.sentence === latest.sentence && beat.word > latest.word)
+          ? beat
+          : latest,
+      named[0] ?? { sentence: from, word: 0 },
+    );
     for (const [partId, when] of revealed) {
       const part = byId.get(partId);
-      if (part) at(when.sentence, when.word, part);
+      if (part) {
+        at(when.sentence, when.word, part);
+        shownIn.set(partId, when);
+      }
+      const joins = pretrain ? lastNamed : when;
       for (const arrowId of laid.arrowsOf.get(partId) ?? []) {
         const arrow = byId.get(arrowId);
         if (!arrow) continue;
-        at(when.sentence, when.word, arrow);
+        at(joins.sentence, joins.word, arrow);
+        shownIn.set(arrowId, joins);
         // Its beads run from the word its step is named on.
-        cuesBySentence[when.sentence].push({
-          at: when.word,
+        cuesBySentence[joins.sentence].push({
+          at: joins.word,
           do: 'flow',
           target: arrowId,
         });
       }
     }
-    // A thing that is on screen pulses on the word that names it.
+    // A thing that is on screen pulses on the word that names it, on any
+    // sentence the card holds, and everything else on the card steps
+    // back while it is spoken of. In a scene that is already moving, a
+    // pulse among things at full brightness is the weakest signal there
+    // is; dropping the rest is the strongest.
+    const siblings = new Set(
+      laid.parts.filter((partId): partId is string => Boolean(partId)),
+    );
+    const focus: { sentence: number; word: number; target: string }[] = [];
     for (const [elementId, name] of laid.named) {
       if (revealed.has(elementId) || !byId.has(elementId)) continue;
       for (let sentence = from; sentence <= to; sentence += 1) {
+        if (over.has(sentence)) continue;
         const word = findWord(tutorial.sentences[sentence], name);
         if (word === null || (sentence === from && word === 0)) continue;
         cuesBySentence[sentence].push({
@@ -1665,6 +1882,8 @@ export function layoutTutorial(
           do: 'pulse',
           target: elementId,
         });
+        if (siblings.has(elementId))
+          focus.push({ sentence, word, target: elementId });
         // The arrows into a named step run their beads while it is named.
         for (const arrowId of laid.arrowsOf.get(elementId) ?? [])
           cuesBySentence[sentence].push({
@@ -1675,6 +1894,122 @@ export function layoutTutorial(
         break;
       }
     }
+    if (siblings.size > 2)
+      for (const spoken of focus) {
+        cuesBySentence[spoken.sentence].push({
+          at: spoken.word,
+          do: 'undim',
+          target: spoken.target,
+        });
+        for (const partId of siblings) {
+          if (partId === spoken.target) continue;
+          const shown = shownIn.get(partId);
+          if (!shown || !before(shown, spoken)) continue;
+          cuesBySentence[spoken.sentence].push({
+            at: spoken.word,
+            do: 'dim',
+            target: partId,
+          });
+        }
+      }
+    // A short card laid over the held one: it takes the stage, the card
+    // behind it waits dimmed, and it is lit again when the card returns.
+    for (const k of run.inserts) {
+      const insert = tutorial.moments[k];
+      const span = spanOf(k);
+      // Laid into the lower band of the stage, not over the middle of it,
+      // so the picture it is held over is still read around it.
+      const band: Stage = { ...stage, H: Math.round(stage.H * INSERT_BAND) };
+      const drop = stage.H - band.H;
+      const laidOver = shifted(layoutMoment(insert, `m${k}`, band), drop);
+      // A panel the colour of the stage under it, so its words read
+      // while the picture it is laid over stays visible around them.
+      const boxes = laidOver.elements
+        .map((e) => boxOf(e))
+        .filter((b): b is Box => Boolean(b));
+      const scrim: VisualElement[] = boxes.length
+        ? [
+            {
+              id: `m${k}_scrim`,
+              type: 'shape',
+              kind: 'scrim',
+              x:
+                (Math.min(...boxes.map((b) => b.x)) +
+                  Math.max(...boxes.map((b) => b.x + b.w))) /
+                2,
+              y:
+                (Math.min(...boxes.map((b) => b.y)) +
+                  Math.max(...boxes.map((b) => b.y + b.h))) /
+                2,
+              w:
+                Math.max(...boxes.map((b) => b.x + b.w)) -
+                Math.min(...boxes.map((b) => b.x)) +
+                2 * SCRIM_PAD,
+              h:
+                Math.max(...boxes.map((b) => b.y + b.h)) -
+                Math.min(...boxes.map((b) => b.y)) +
+                2 * SCRIM_PAD,
+            },
+          ]
+        : [];
+      const over1 = {
+        ...laidOver,
+        elements: [...scrim, ...laidOver.elements],
+      };
+      elements.push(...over1.elements);
+      const heldNow = [...shownIn]
+        .filter(([, beat]) => beat.sentence <= span.from)
+        .map(([elementId]) => elementId);
+      for (const elementId of heldNow)
+        cuesBySentence[span.from].push({
+          at: 0,
+          do: 'dim',
+          target: elementId,
+        });
+      for (const element of over1.elements) {
+        if (element.id.endsWith(NAME)) continue;
+        cuesBySentence[span.from].push({
+          at: 0,
+          do: entrance(element),
+          target: element.id,
+        });
+        if (over1.elements.some((e) => e.id === `${element.id}${NAME}`))
+          cuesBySentence[span.from].push({
+            at: 0,
+            do: 'fade',
+            target: `${element.id}${NAME}`,
+          });
+      }
+      // The card comes back when the held one carries on after it.
+      const back = run.same.find((j) => spanOf(j).from > span.to);
+      if (back !== undefined) {
+        const returns = spanOf(back).from;
+        for (const element of over1.elements)
+          cuesBySentence[returns].push({
+            at: 0,
+            do: 'hide',
+            target: element.id,
+          });
+        for (const elementId of heldNow)
+          cuesBySentence[returns].push({
+            at: 0,
+            do: 'undim',
+            target: elementId,
+          });
+      }
+    }
+    // The closing frame: the last run ends with everything it built lit
+    // again, nothing new, so the learner sees the whole picture once
+    // they have made it themselves.
+    if (runIndex === runs.length - 1) {
+      const end = run.inserts.reduce((e, k) => Math.max(e, spanOf(k).to), to);
+      const closing = Math.min(lastSentence, Math.max(from, end));
+      cuesBySentence[closing].push({
+        at: lastWordOf(closing),
+        do: 'undim',
+        target: ALL,
+      });
+    }
   });
   return {
     title: tutorial.title,
@@ -1684,6 +2019,12 @@ export function layoutTutorial(
       cues: cuesBySentence[i],
     })),
   };
+}
+
+/** The sentence each moment's card takes the stage on, for the player's stepping. */
+export function momentStarts(tutorial: VisualTutorial): number[] {
+  const last = Math.max(0, tutorial.sentences.length - 1);
+  return tutorial.moments.map((m) => Math.max(0, Math.min(last, m.from)));
 }
 
 const words = (text: string) => text.split(/\s+/).filter(Boolean);
@@ -1755,7 +2096,26 @@ export function tidyTutorial(tutorial: VisualTutorial): VisualTutorial {
         }
       : m,
   );
-  return { ...tutorial, moments: tidy };
+  // What keeps the stage and what clears it, settled here so the moments
+  // say what the layout will do: the first moment of a page has nothing
+  // to keep, a title opens a section, a moment shown as words starts
+  // fresh, and a card that cannot carry the held one on or sit over it
+  // is a scene of its own.
+  const runs = momentRuns(tidy);
+  const carried = new Set<number>();
+  for (const run of runs) {
+    for (const k of run.same) if (k !== run.head) carried.add(k);
+    for (const k of run.inserts) carried.add(k);
+  }
+  const settled = tidy.map((m, index) => {
+    const keeps = carried.has(index) && !m.plain;
+    if (keeps === Boolean(m.continues)) return m;
+    const next = { ...m };
+    if (keeps) next.continues = true;
+    else delete next.continues;
+    return next;
+  });
+  return { ...tutorial, moments: settled };
 }
 
 /**
@@ -2077,6 +2437,12 @@ export function tutorialProblems(
           `${who}: ${what} says "${text}", which is not built from the chapter's words.`,
         );
     };
+    const brief = (what: string, text: string | undefined, max: number) => {
+      if (text && words(text).length > max)
+        problems.push(
+          `${who}: ${what} says "${text}", which is ${words(text).length} words; at most ${max}. A label is a few words beside the thing it names, never a line of the script.`,
+        );
+    };
     const short = (what: string, text: string | undefined, max: number) => {
       if (text && text.length > max)
         problems.push(
@@ -2135,6 +2501,7 @@ export function tutorialProblems(
         items.forEach((item, k) => {
           const max = m.card === 'list' ? L.maxListItemChars : L.maxChipChars;
           short(`item ${k + 1}`, item.text, max);
+          brief(`item ${k + 1}`, item.text, L.maxItemWords);
           grounded(`item ${k + 1}`, item.text);
           if (
             /[,(]$|\b(e\.g\.|i\.e\.|or|and|a|the|of)$/i.test(item.text.trim())
@@ -2157,8 +2524,24 @@ export function tutorialProblems(
               );
         } else if (of && !resolveDrawing(of, m.shape))
           problems.push(
-            `${who}: nothing in the library draws "${of}", and its words do not say what shape it takes. Give the card a shape (outline ${FIGURE_OUTLINES.slice(0, 4).join(', ')} and so on, with its parts), or name a thing that can be drawn, or use another card.`,
+            `${who}: nothing in the library draws "${of}", and its words do not say what shape it takes. Name a thing the library can draw, or show this with another card: a hub, a flow, chips, a compare, or the words themselves. Do not reach for an outline that only matches what the thing does.`,
           );
+        // A shape is a claim about what the thing looks like, so the
+        // claim is made first and the outline has to follow from it. The
+        // test runs against that line and never against the thing's
+        // name, which is how a signpost was once drawn for signing.
+        if (m.shape?.outline) {
+          const outline = m.shape.outline;
+          const looks = (m.looksLike ?? '').trim();
+          if (!looks)
+            problems.push(
+              `${who}: the card gives "${of}" the ${outline} outline but does not say what "${of}" looks like. Say it in one line, its form and not its job (a bean-shaped organ with a notch on one edge; bands of rock lying on each other), then give the outline that line bears out. A ${outline} is ${OUTLINE_LOOKS[outline]}.`,
+            );
+          else if (!formSupports(outline, looks))
+            problems.push(
+              `${who}: "${of}" is described as "${looks}", which is not a ${outline}: a ${outline} is ${OUTLINE_LOOKS[outline]}. Give the outline that description bears out, or, when none of them is what the thing looks like, show it with a hub, a flow, chips, a compare, or the words.`,
+            );
+        }
         problems.push(
           ...motionProblems(
             who,
@@ -2359,6 +2742,7 @@ export function tutorialProblems(
           : null;
       for (const c of callouts) {
         short(`the callout "${c.text}"`, c.text, L.maxCalloutChars);
+        brief(`the callout "${c.text}"`, c.text, L.maxCalloutWords);
         if (drawn?.kind === 'figure' && !figureHasAnchor(drawn.figure, c.part))
           problems.push(
             `${who}: a callout points at "${c.part}", which the ${drawn.figure.outline} has no place for; point at one of ${[...drawn.figure.parts, ...FIGURE_ANCHORS[drawn.figure.outline]].join(', ')}.`,
@@ -2432,10 +2816,14 @@ export function tutorialProblems(
       );
     const thing = (x: Moment) =>
       (x.picture ?? x.name ?? '').trim().toLowerCase();
+    // Drawing the same thing twice is repetition; carrying one drawing
+    // on across the moments that speak of it is the opposite, and is
+    // what the layout does with a moment that keeps the stage.
     if (
       before &&
       before.card === 'picture' &&
       m.card === 'picture' &&
+      !m.continues &&
       thing(m) &&
       thing(m) === thing(before)
     )

@@ -123,6 +123,12 @@ export const SHAPE_KINDS = [
   'diamond',
   /** Two circles overlapping by half, one element so the checks know they belong together. */
   'overlap',
+  /**
+   * A panel the colour of the stage, no rim: what a card laid over a
+   * held one sits on, so its words read while the picture stays
+   * visible around them. The app lays these; the model never asks.
+   */
+  'scrim',
 ] as const;
 export type ShapeKind = (typeof SHAPE_KINDS)[number];
 /** Every kind a shape may be: the plain kinds, the presets drawn by hand, and a path of its own. */
@@ -398,6 +404,17 @@ const NEEDS_SHOWN = new Set<VisualAction>([
 /** The actions that bring an element on screen. */
 export const SHOWS = new Set<VisualAction>(['draw', 'fade']);
 
+/** The whole stage: what a clear wipes, and what the closing frame lights again. */
+export const ALL = '*';
+
+/**
+ * How bright a thing held on the stage behind the current one is. The
+ * guide's window is thirty-five to fifty percent: dark enough that the
+ * eye goes to what is lit, bright enough that the structure the learner
+ * built is still there to read instead of being held in memory.
+ */
+export const DIM_ALPHA = 0.4;
+
 export interface VisualCue {
   /** The word of the sentence the cue lands on, zero-based, after a whitespace split. */
   at: number;
@@ -477,6 +494,12 @@ export interface VisualTimeline {
   timing: 'aligned' | 'estimated';
   /** Moments that shipped plain, as words, after the judge said redo twice; by position. */
   plain?: number[];
+  /**
+   * Where each moment starts, in milliseconds. A card now holds the
+   * stage across the moments that speak of it, so the stage is rarely
+   * cleared and the player steps by this instead.
+   */
+  moments?: number[];
   /** The same script placed for each staging; `elements` and `space` are the box's. */
   stagings: Record<
     StagingName,
@@ -752,6 +775,8 @@ export function visualProblems(
         shown.clear();
         continue;
       }
+      // Everything on the stage lit again: the closing frame.
+      if (cue.do === 'undim' && cue.target === ALL) continue;
       const target = byId.get(cue.target);
       if (!target) {
         problems.push(
@@ -981,6 +1006,25 @@ export function visibleAfterEach(script: VisualScript): Set<string>[] {
   });
 }
 
+/**
+ * Which elements are held back at the end of each sentence: the card a
+ * later one is laid over stays on the stage behind it, dimmed. A dimmed
+ * thing is background, so it is not weighed against what is lit.
+ */
+export function dimmedAfterEach(script: VisualScript): Set<string>[] {
+  const dim = new Set<string>();
+  return script.segments.map((segment) => {
+    for (const cue of segment.cues) {
+      if (cue.do === 'clear') dim.clear();
+      else if (cue.do === 'undim' && cue.target === ALL) dim.clear();
+      else if (cue.do === 'dim') dim.add(cue.target);
+      else if (cue.do === 'undim' || SHOWS.has(cue.do)) dim.delete(cue.target);
+      else if (cue.do === 'hide') dim.delete(cue.target);
+    }
+    return new Set(dim);
+  });
+}
+
 /** Whether one box sits wholly inside the other: a chip inside a shape is a composition, not a collision. */
 function contained(a: Box, b: Box): boolean {
   const inside = (inner: Box, outer: Box) =>
@@ -995,6 +1039,37 @@ function contained(a: Box, b: Box): boolean {
 function collides(element: VisualElement): boolean {
   return element.type !== 'dots';
 }
+
+/** The words an element puts on the stage for the learner to read. */
+export function wordsShown(element: VisualElement): number {
+  const count = (text?: string) => (text ? wordsOf(text).length : 0);
+  switch (element.type) {
+    case 'label':
+      return count(element.text);
+    case 'chip':
+      return count(element.text);
+    case 'shape':
+      return count(element.text);
+    case 'bubble':
+      return count(element.text);
+    case 'bar':
+      return (
+        count(element.left) +
+        count(element.right) +
+        (element.markers ?? []).reduce((n, m) => n + count(m.text), 0)
+      );
+    default:
+      return 0;
+  }
+}
+
+/**
+ * Words a learner can be asked to read at once while listening. Reading
+ * and listening are the same channel, so text on the stage competes with
+ * the voice; short labels beside their referent are what survives that,
+ * and sentences are not. The guide's ceiling, counting every label.
+ */
+export const STAGE_WORDS = 25;
 
 function overlap(a: Box, b: Box): { x: number; y: number } {
   const x = Math.min(a.x + a.w, b.x + b.w) - Math.max(a.x, b.x);
@@ -1177,10 +1252,28 @@ export function layoutProblems(
     }
   }
   const seen = new Set<string>();
+  const held = dimmedAfterEach(script);
   visibleAfterEach(script).forEach((visible, index) => {
+    // A card held on the stage behind a later one is dimmed background:
+    // the thing in front is meant to sit over it, so the two are not
+    // weighed against each other.
+    const behind = held[index] ?? new Set<string>();
     const ids = [...visible].filter(
-      (id) => boxes.has(id) && collides(byId.get(id)!),
+      (id) => boxes.has(id) && !behind.has(id) && collides(byId.get(id)!),
     );
+    // Words to read while the voice is talking: what is lit counts in
+    // full, what is held behind counts half, since it is read once and
+    // then recognised.
+    const reading = [...visible].reduce((n, id) => {
+      const element = byId.get(id);
+      if (!element) return n;
+      const own = wordsShown(element);
+      return n + (behind.has(id) ? own / 2 : own);
+    }, 0);
+    if (Math.round(reading) > STAGE_WORDS)
+      problems.push(
+        `After sentence ${index + 1} the stage carries ${Math.round(reading)} words to read; at most ${STAGE_WORDS}. Cut the labels to a few words each, or move a card to its own moment.`,
+      );
     // An arrow through a word: any visible line or arrow whose path
     // passes through a visible label or chip it does not attach to.
     for (const id of visible) {
@@ -1188,12 +1281,13 @@ export function layoutProblems(
       if (!element || (element.type !== 'line' && element.type !== 'arrow')) {
         continue;
       }
+      if (behind.has(id)) continue;
       const owns = new Set(
         [element.from, element.to].filter((e) => typeof e === 'string'),
       );
       for (const target of visible) {
         const other = byId.get(target);
-        if (!other || owns.has(target)) continue;
+        if (!other || owns.has(target) || behind.has(target)) continue;
         if (other.type !== 'label' && other.type !== 'chip') continue;
         const box = boxes.get(target);
         if (!box) continue;
@@ -1253,6 +1347,7 @@ function withoutEarlyCues(script: VisualScript): VisualScript {
           shown.clear();
           return true;
         }
+        if (cue.do === 'undim' && cue.target === ALL) return true;
         if (NEEDS_SHOWN.has(cue.do) && !shown.has(cue.target)) return false;
         if (SHOWS.has(cue.do)) shown.add(cue.target);
         if (cue.do === 'hide') shown.delete(cue.target);
@@ -1559,10 +1654,18 @@ function calmed(script: VisualScript): VisualSegment[] {
         lit.delete(cue.target);
         dimmed.delete(cue.target);
       } else if (cue.do === 'dim') dimmed.add(cue.target);
-      else if (cue.do === 'undim') dimmed.delete(cue.target);
+      else if (cue.do === 'undim') {
+        if (cue.target === ALL) dimmed.clear();
+        else dimmed.delete(cue.target);
+      }
     }
+    // The closing frame is the one place everything is lit at once: the
+    // learner built it, and the frame is a check, not an introduction.
+    const closing = segment.cues.some(
+      (cue) => cue.do === 'undim' && cue.target === ALL,
+    );
     const bright = [...lit.keys()].filter((id) => !dimmed.has(id));
-    if (bright.length <= CALM_VISIBLE) return segment;
+    if (closing || bright.length <= CALM_VISIBLE) return segment;
     const extra: VisualCue[] = [];
     const candidates = bright
       .filter((id) => {
@@ -1639,8 +1742,15 @@ export const ANTICIPATION_MS = 200;
 export const CARD_LEAD_MS = 450;
 /** The least silence kept after the sentence before, so a card never lands on its last word. */
 export const CARD_CLEAR_MS = 40;
-/** Two effects on different targets closer than this are staggered so each reads. */
-export const CROWDING_MS = 160;
+/**
+ * Two effects on different targets closer than this are staggered so
+ * each reads. Two things animating at once split attention and both are
+ * half processed; a third of a second apart, each is its own event.
+ */
+export const CROWDING_MS = 300;
+
+/** Housekeeping: it changes how bright a thing is, not what is happening, so it is never staggered. */
+const QUIET = new Set<VisualAction>(['dim', 'undim', 'settle', 'hide']);
 /** Silence the voice leaves between sentences, for the estimate. */
 export const SENTENCE_GAP_MS = 350;
 
@@ -1794,6 +1904,67 @@ export const SHORTEST_CARD_MS = 3000;
  * cards on one beat. Deterministic, so a page that fails is remade on
  * the estimate rather than saved wrong.
  */
+/** What the guide asks of a lesson's pace, measured from the voice once it is aligned. */
+export const CADENCE = {
+  /** Words a minute: slower than this is ponderous and watched less, faster loses a learner in a hard passage. */
+  minWpm: 125,
+  maxWpm: 165,
+  /** Silence as a share of the running time. */
+  minSilence: 0.08,
+  /** Seconds the stage may go without anything changing before a learner starts doing something else. */
+  maxStill: 20,
+} as const;
+
+/**
+ * The pace of a finished page, measured rather than guessed: how fast it
+ * is spoken, how much of it is silence, and the longest the stage stands
+ * still. None of these can be mended without narrating again, so they
+ * are said out loud and watched, not thrown.
+ */
+export function cadenceWarnings(timeline: VisualTimeline): string[] {
+  const warnings: string[] = [];
+  const minutes = timeline.durationMs / 60000;
+  if (minutes <= 0) return warnings;
+  const spoken = timeline.segments.reduce(
+    (n, segment) => n + wordsOf(segment.text).length,
+    0,
+  );
+  const wpm = Math.round(spoken / minutes);
+  if (wpm < CADENCE.minWpm || wpm > CADENCE.maxWpm)
+    warnings.push(
+      `The page is spoken at ${wpm} words a minute; between ${CADENCE.minWpm} and ${CADENCE.maxWpm} holds a learner.`,
+    );
+  const talking = timeline.segments.reduce(
+    (ms, segment) => ms + Math.max(0, segment.endMs - segment.startMs),
+    0,
+  );
+  const silence = (timeline.durationMs - talking) / timeline.durationMs;
+  if (silence < CADENCE.minSilence)
+    warnings.push(
+      `Only ${Math.round(silence * 100)}% of the page is silence; a learner needs a beat after each thing appears, so at least ${Math.round(CADENCE.minSilence * 100)}%.`,
+    );
+  // The longest the stage stands still: between one thing happening and the next.
+  const moments = [
+    0,
+    ...timeline.segments.flatMap((s) => s.cues.map((c) => c.atMs)),
+    timeline.durationMs,
+  ].sort((a, b) => a - b);
+  let still = 0;
+  let at = 0;
+  for (let i = 1; i < moments.length; i += 1) {
+    const gap = moments[i] - moments[i - 1];
+    if (gap > still) {
+      still = gap;
+      at = moments[i - 1];
+    }
+  }
+  if (still > CADENCE.maxStill * 1000)
+    warnings.push(
+      `Nothing changes on the stage for ${Math.round(still / 1000)} seconds from ${Math.round(at / 1000)} seconds in; ${CADENCE.maxStill} is as long as a learner watches a still screen.`,
+    );
+  return warnings;
+}
+
 export function timingProblems(timeline: VisualTimeline): string[] {
   const problems: string[] = [];
   timeline.segments.forEach((segment, index) => {
@@ -1862,6 +2033,8 @@ export function timeVisual(input: {
   timing: 'aligned' | 'estimated';
   generator?: string;
   plain?: number[];
+  /** The sentence each moment's card takes the stage on, so the player can step by idea. */
+  momentStarts?: number[];
 }): VisualTimeline {
   const { script, forms, times } = input;
   const { starts } = sceneSpoken(forms);
@@ -1892,8 +2065,14 @@ export function timeVisual(input: {
     previousEnd = endMs;
     return { text: segment.text, startMs, endMs, words, cues };
   });
-  // Crowding, across the whole scene in time order.
-  const all = segments.flatMap((s) => s.cues).sort((a, b) => a.atMs - b.atMs);
+  // Crowding, across the whole scene in time order. Two things arriving
+  // at once split the eye and both are half seen, so arrivals are spread;
+  // a dim is not an arrival, and everything stepping back for the thing
+  // being named is one event, not many.
+  const all = segments
+    .flatMap((s) => s.cues)
+    .filter((cue) => !QUIET.has(cue.do))
+    .sort((a, b) => a.atMs - b.atMs);
   for (let i = 1; i < all.length; i += 1) {
     const prev = all[i - 1];
     const cue = all[i];
@@ -1914,6 +2093,15 @@ export function timeVisual(input: {
     durationMs: input.durationMs,
     timing: input.timing,
     ...(input.plain?.length ? { plain: input.plain } : {}),
+    ...(input.momentStarts?.length
+      ? {
+          moments: input.momentStarts.map((sentence) =>
+            Math.round(
+              segments[Math.min(sentence, segments.length - 1)]?.startMs ?? 0,
+            ),
+          ),
+        }
+      : {}),
     stagings: {
       box: { space: { w: box.w, h: box.h }, elements: script.elements },
       wide: {

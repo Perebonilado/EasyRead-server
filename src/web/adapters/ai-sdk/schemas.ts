@@ -552,6 +552,8 @@ const momentFields = {
       manner: z.enum(FIGURE_MANNERS),
     })
     .nullable(),
+  /** What the thing looks like, in one line, said before a shape is named; null when no shape is. */
+  looksLike: z.string().max(140).nullable(),
   /** For a picture card: how the drawn thing moves once shown. */
   motion: z.enum(VISUAL_MOTIONS).nullable(),
   /** For a picture or mechanism card: short lines that point at a part and follow it. */
@@ -661,6 +663,8 @@ const momentFields = {
     )
     .max(8)
     .nullable(),
+  /** True to keep what the moment before put on the stage instead of wiping it. */
+  continues: z.boolean(),
 };
 
 /** The tutorial: the narration, and the moments that cut it, each one card with its fields. Fields a card does not use are null. */

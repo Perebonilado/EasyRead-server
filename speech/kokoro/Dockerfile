@@ -7,13 +7,13 @@ RUN apt-get update \
     && apt-get install -y --no-install-recommends espeak-ng ffmpeg \
     && rm -rf /var/lib/apt/lists/*
 
-# Two allocator arenas, not one per thread: eight threads otherwise keep
-# eight pools of freed memory that never shrink.
+# One allocator arena per rendering thread, and no more: the default
+# grows to dozens, each keeping freed memory; two made the threads queue.
 ENV HF_HOME=/models \
     TTS_VOICE=am_puck \
     PIP_NO_CACHE_DIR=1 \
     PYTHONUNBUFFERED=1 \
-    MALLOC_ARENA_MAX=2
+    MALLOC_ARENA_MAX=8
 
 WORKDIR /app
 COPY requirements.txt .

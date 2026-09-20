@@ -28,6 +28,13 @@ export interface TutorBrief {
   speed?: number;
   /** 'off' for the lecture's ask: the browser starts and ends every turn. */
   turnDetection?: 'off';
+  /** How a reply is delivered: the lecture's pace and gaps, a beat before the first word, the document's pronunciations. */
+  delivery?: {
+    speed: number;
+    gaps: Record<string, number>;
+    lead: number;
+    pronunciations: [string, string][];
+  };
 }
 
 /**
@@ -62,11 +69,13 @@ export class LiveKitRealtimeAdapter {
     audio,
     identity,
     room,
+    delivery,
   }: {
     instructions: string;
     tools?: RealtimeTool[];
     voice?: string;
     audio?: RealtimeAudioOptions;
+    delivery?: TutorBrief['delivery'];
     /** Who is joining, as the room will know them. */
     identity: string;
     /** The room's name; one per session. */
@@ -80,6 +89,7 @@ export class LiveKitRealtimeAdapter {
       ...(audio?.turnDetection === 'off'
         ? { turnDetection: 'off' as const }
         : {}),
+      ...(delivery ? { delivery } : {}),
     };
     const token = new AccessToken(
       this.config.getOrThrow<string>('LIVEKIT_API_KEY'),

@@ -80,6 +80,12 @@ describe('LiveKitRealtimeAdapter', () => {
       audio: { turnDetection: 'off', speed: 0.9 },
       identity: 'learner-2',
       room: 'tutor-doc-def',
+      delivery: {
+        speed: 0.9,
+        gaps: { sentence: 0.6, idea: 1.2, question: 1.8 },
+        lead: 0.5,
+        pronunciations: [['RAAS', 'rass']],
+      },
     });
     if (session.provider !== 'livekit') return;
     const roomConfig = claims(session.token).roomConfig as {
@@ -93,5 +99,9 @@ describe('LiveKitRealtimeAdapter', () => {
     expect(brief.turnDetection).toBe('off');
     expect(brief.speed).toBe(0.9);
     expect(brief.tools).toEqual([]);
+    expect(
+      (brief as { delivery?: { lead: number; pronunciations: unknown[] } })
+        .delivery,
+    ).toMatchObject({ lead: 0.5, pronunciations: [['RAAS', 'rass']] });
   });
 });

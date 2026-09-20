@@ -276,7 +276,7 @@ async def tutor(ctx: JobContext) -> None:
     session = AgentSession(
         stt=ears,
         llm=openai.LLM(model=os.environ.get("TUTOR_LLM_MODEL", "gpt-4.1-mini")),
-        tts=Voice(brief.get("voice") or "am_puck", float(brief.get("speed") or 1.0)),
+        tts=Voice(brief.get("voice") or "am_puck", brief.get("delivery")),
         vad=silero.VAD.load(),
         turn_handling=TurnHandlingOptions(turn_detection="manual" if manual else EnglishModel()),
     )

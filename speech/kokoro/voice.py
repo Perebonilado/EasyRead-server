@@ -189,25 +189,34 @@ def mount(api, renderer: Renderer, token: str, where: str, mode: str = "lecture"
             raise HTTPException(status_code=401, detail="the key was refused")
         body = await request.json()
         voice = str(body.get("voice") or renderer.voice)
-        text = str(body.get("input") or "").strip()
-        if not text:
-            raise HTTPException(status_code=400, detail="input is empty")
-        if len(text) > INPUT_LIMIT:
-            raise HTTPException(status_code=400, detail=f"input is over {INPUT_LIMIT} characters")
         try:
             renderer.check_voice(voice)
-            speed = min(2.0, max(0.5, float(body.get("speed") or 1.0)))
+            # As pieces, each at its pace with its silence after, the way a
+            # page comes; or as one text, cut at sentences, at one speed.
+            if body.get("pieces") is not None:
+                parts = read_pieces(body)
+            else:
+                speed = min(2.0, max(0.5, float(body.get("speed") or 1.0)))
+                text = str(body.get("input") or "").strip()
+                if not text:
+                    raise ValueError("input is empty")
+                if len(text) > INPUT_LIMIT:
+                    raise ValueError(f"input is over {INPUT_LIMIT} characters")
+                said = sentences(text)
+                parts = [(sentence, speed, 0.0 if i == len(said) - 1 else TUTOR_GAP) for i, sentence in enumerate(said)]
+            # A beat of quiet before the first word: a person turning to you.
+            lead = min(PAUSE_LIMIT, max(0.0, float(body.get("lead") or 0.0)))
         except ValueError as error:
             raise HTTPException(status_code=400, detail=str(error))
 
         async def pieces():
-            first = True
-            for sentence in sentences(text):
-                audio, _seconds, _starts = await asyncio.to_thread(renderer.render, [(sentence, speed, 0.0)], voice)
-                if not first:
-                    yield _pcm(gap(TUTOR_GAP))
-                first = False
+            if lead > 0:
+                yield _pcm(gap(lead))
+            for text, speed, pause_after in parts:
+                audio, _seconds, _starts = await asyncio.to_thread(renderer.render, [(text, speed, 0.0)], voice)
                 yield _pcm(audio)
+                if pause_after > 0:
+                    yield _pcm(gap(pause_after))
             release_memory()
 
         return StreamingResponse(pieces(), media_type="audio/pcm", headers={"x-sample-rate": str(SAMPLE_RATE)})

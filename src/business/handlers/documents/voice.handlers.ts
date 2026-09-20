@@ -83,7 +83,20 @@ import AbstractRequestHandlerTemplate from '../AbstractRequestHandlerTemplate';
 import { CommandResponse } from '../response/CommandResponse';
 import { ComputeService } from './compute.service';
 import { ElevenLabsRealtimeAdapter } from '../../../web/adapters/elevenlabs-voice.adapters';
+import { GAP, STYLE_SPEED } from '../../domain/delivery';
 import { LiveKitRealtimeAdapter } from '../../../web/adapters/livekit-realtime.adapter';
+
+/**
+ * How a mid-lecture answer is shaped on our own line, where the brain is
+ * a text model rather than the realtime one the ask persona was tuned
+ * for: it answers in a block unless told the length outright.
+ */
+const ASK_ON_OUR_LINE = [
+  'ON THIS LINE, LENGTH IS FIXED: a mid-lecture answer is two or three short sentences, then the door open. Longer only when they ask for more, and then one idea at a time.',
+  'YOUR FIRST WORDS react to what they said, in two or three words ("Right, the glomerulus." / "Good catch."), then the answer. Never a summary, never "great question".',
+  'THE INVITATION, when you open before they have spoken, fits where the lecture was: mid-explanation, "Go on, what\'s the question?"; after a point has landed, "What would you like to know?"; a second press within a minute, just "Yes?".',
+  'WHEN THEY SAY YES to carrying on, or say nothing after your door open, hand back in a few words and call the hand-back tool at once.',
+].join('\n');
 import { DocumentAccessService } from './document-access.service';
 import { EntitlementsService } from './entitlements.service';
 import {
@@ -1043,7 +1056,10 @@ export class StartVoiceSessionHandler extends AbstractRequestHandlerTemplate<
 
     const session = useLiveKit
       ? await this.livekit.createSession({
-          instructions: baseInstructions,
+          instructions:
+            cmd.mode === 'lecture'
+              ? `${baseInstructions}\n\n${ASK_ON_OUR_LINE}`
+              : baseInstructions,
           tools:
             cmd.mode === 'lecture'
               ? cmd.lectureContext?.interactive
@@ -1068,6 +1084,24 @@ export class StartVoiceSessionHandler extends AbstractRequestHandlerTemplate<
             : {}),
           identity: `learner-${cmd.userId}`,
           room: `tutor-${doc.id}-${randomUUID().slice(0, 8)}`,
+          // A reply is delivered the way a page is: the style's pace, the
+          // lecture's gaps, and a beat of quiet before the first word.
+          ...(cmd.mode === 'lecture'
+            ? {
+                delivery: {
+                  speed: STYLE_SPEED[lectureStyle],
+                  gaps: {
+                    sentence: GAP.sentence,
+                    perTenWords: GAP.perTenWords,
+                    sentenceMax: GAP.sentenceMax,
+                    idea: GAP.idea,
+                    question: GAP.question,
+                  },
+                  lead: 0.5,
+                  pronunciations: [],
+                },
+              }
+            : {}),
         })
       : useElevenLabs
         ? await this.elevenlabs.createSession({

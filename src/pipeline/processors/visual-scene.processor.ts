@@ -40,8 +40,10 @@ import {
   type Moment,
   type VisualDecision,
   type VisualTutorial,
+  type VisualDecisions,
 } from '../../business/domain/visual-cards';
 import { buildMenu, phrasesToSearch } from '../../business/domain/visual-menu';
+import { directByRules, stepDown } from '../../business/domain/visual-direct';
 import {
   DRAWING_DIMS,
   nearestDrawings,
@@ -59,7 +61,7 @@ import {
   resolveDrawing,
 } from '../../business/domain/visual-figures';
 import { MOTION_MEANINGS } from '../../business/domain/living.generated/motion';
-import { pickPicture } from '../../business/domain/visual-presets';
+import { fieldFor, pickPicture } from '../../business/domain/visual-presets';
 import {
   THUMB_WIDTH,
   rasterise,
@@ -355,16 +357,34 @@ export class VisualSceneProcessor {
         this.logger.log(
           `${who}: nothing draws ${menu.missing.length} of the things this page names: ${menu.missing.slice(0, 12).join(', ')}`,
         );
-      const directed = await this.llm.visualDirector({
-        narration,
-        menu: menu.text,
-        plan,
-        topicTitle: topic.title,
-        material,
-        context: where,
-      });
-      await this.record(documentId, 'visual_director', directed.usage);
-      let decisions = directed.value;
+      // The cards: by rule from the narrator's own marks, or by the model
+      // director with its redo rounds, kept for a comparison and a way back.
+      const byRules =
+        this.config.get<string>('VISUAL_DIRECTOR', 'rules') !== 'model';
+      const rulesContext = {
+        field: fieldFor(`${material} ${narration.sentences.join(' ')}`),
+        near: nearby,
+        handPicked: await this.handPicked(who),
+      };
+      let decisions: VisualDecisions;
+      if (byRules) {
+        decisions = directByRules(narration, rulesContext);
+        const marked = narration.moments.filter((m) => m.show).length;
+        this.logger.log(
+          `${who}: ${decisions.moments.length} cards by rule from ${marked} of ${narration.moments.length} marked moments`,
+        );
+      } else {
+        const directed = await this.llm.visualDirector({
+          narration,
+          menu: menu.text,
+          plan,
+          topicTitle: topic.title,
+          material,
+          context: where,
+        });
+        await this.record(documentId, 'visual_director', directed.usage);
+        decisions = directed.value;
+      }
       const build = () => {
         const built = tidyTutorial(assembleTutorial(narration, decisions));
         return { tutorial: built, scripts: this.staged(built) };
@@ -381,6 +401,12 @@ export class VisualSceneProcessor {
           .filter((i): i is number => i !== undefined);
       const everyMoment = narration.moments.map((_, i) => i);
       const redoWith = async (only: number[], notes: string[]) => {
+        if (byRules) {
+          // No round trip: the card steps down to its own words.
+          decisions = stepDown(decisions, only, narration, notes);
+          ({ tutorial, scripts } = build());
+          return;
+        }
         const redo = await this.llm.visualDirector({
           narration,
           menu: menu.text,

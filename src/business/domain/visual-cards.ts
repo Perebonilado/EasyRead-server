@@ -2964,13 +2964,57 @@ export function cardBoxes(laid: Laid): Box[] {
   return laid.elements.map((e) => boxOf(e)).filter((b): b is Box => Boolean(b));
 }
 
-/** What the narrator writes: the sentences, cut into moments with an intent each. */
+/** What a moment shows, in the narrator's own mark: the kind of thing on the screen. */
+export const MARK_KINDS = [
+  'thing',
+  'things',
+  'figure',
+  'steps',
+  'compare',
+  'term',
+  'line',
+  'place',
+  'layers',
+  'timeline',
+  'none',
+] as const;
+export type MarkKind = (typeof MARK_KINDS)[number];
+
+/**
+ * The narrator's mark on a moment: what the screen shows and the few
+ * words it needs, in the page's own words. The rules turn it into a card;
+ * no director reads it.
+ */
+export interface VisualMark {
+  kind: MarkKind;
+  /** The things named: the one thing, the set, the steps, the places, the layers innermost out, the timeline's labels. */
+  names?: string[] | null;
+  /** A thing's named parts, for callouts. */
+  parts?: string[] | null;
+  /** A figure as printed on the page, with a short caption. */
+  figure?: string | null;
+  caption?: string | null;
+  /** The line to remember, a term's meaning, or a timeline's texts joined by ' | '. */
+  text?: string | null;
+  term?: string | null;
+  /** A comparison's two sides. */
+  sides?: { label: string; items?: string[] | null }[] | null;
+  /** A heading, where a section opens. */
+  heading?: string | null;
+}
+
+/** What the narrator writes: the sentences, cut into moments with an intent each, and a mark on what each shows. */
 export interface VisualNarration {
   title: string;
   fit?: 'good' | 'poor';
   fitReason?: string | null;
   sentences: string[];
-  moments: { from: number; to: number; intent: string }[];
+  moments: {
+    from: number;
+    to: number;
+    intent: string;
+    show?: VisualMark | null;
+  }[];
 }
 
 /** One of the director's decisions: the card for a moment, with the reasoning written first. */

@@ -854,6 +854,39 @@ export const visualNarrationSchema = z.object({
         from: z.number().int().min(0),
         to: z.number().int().min(0),
         intent: z.string().min(1).max(120),
+        show: z
+          .object({
+            kind: z.enum([
+              'thing',
+              'things',
+              'figure',
+              'steps',
+              'compare',
+              'term',
+              'line',
+              'place',
+              'layers',
+              'timeline',
+              'none',
+            ]),
+            names: z.array(z.string().min(1).max(30)).max(6).nullable(),
+            parts: z.array(z.string().min(1).max(24)).max(3).nullable(),
+            figure: z.string().max(12).nullable(),
+            caption: z.string().max(40).nullable(),
+            text: z.string().max(240).nullable(),
+            term: z.string().max(24).nullable(),
+            sides: z
+              .array(
+                z.object({
+                  label: z.string().min(1).max(30),
+                  items: z.array(z.string().min(1).max(30)).max(4).nullable(),
+                }),
+              )
+              .max(2)
+              .nullable(),
+            heading: z.string().max(40).nullable(),
+          })
+          .nullable(),
       }),
     )
     .min(3)

@@ -49,6 +49,9 @@ CONTEXT_RPC = "tutor.context"
 CONTEXT_TOPIC = "tutor.context"
 # A tool's answer must come back inside this, page turns included.
 TOOL_TIMEOUT = 20.0
+# Tools that hand the floor back: the browser acts on them the moment
+# they arrive, so they wait for the tutor's own words to finish playing.
+AFTER_SPEECH = {"lecture_resume"}
 # A tool the model wrote as words instead of calling, which this model
 # does now and then after a sentence: "functions.lecture_resume()".
 TEXT_CALL = re.compile(r"\s*functions\.(\w+)\(([^)]*)\)[.!]?\s*")
@@ -74,6 +77,14 @@ def browser_tools(tools: list, learner: str, room: rtc.Room) -> list:
 
         async def run(raw_arguments: dict, context: RunContext, _name: str = name) -> str:
             payload = json.dumps({"name": _name, "args": json.dumps(raw_arguments or {})})
+            if _name in AFTER_SPEECH:
+                # The hand-back line lands whole, and the lecture starts after it.
+                speech = context.session.current_speech
+                if speech is not None:
+                    try:
+                        await speech.wait_for_playout()
+                    except Exception:
+                        pass
             try:
                 answer = await room.local_participant.perform_rpc(
                     destination_identity=learner, method=TOOL_RPC, payload=payload, response_timeout=TOOL_TIMEOUT

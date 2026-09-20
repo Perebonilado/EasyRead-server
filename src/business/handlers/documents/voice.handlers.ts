@@ -95,7 +95,7 @@ const ASK_ON_OUR_LINE = [
   'ON THIS LINE, LENGTH IS FIXED: a mid-lecture answer is two or three short sentences, then the door open. Longer only when they ask for more, and then one idea at a time.',
   'YOUR FIRST WORDS react to what they said, in two or three words ("Right, the glomerulus." / "Good catch."), then the answer. Never a summary, never "great question".',
   'THE INVITATION, when you open before they have spoken, fits where the lecture was: mid-explanation, "Go on, what\'s the question?"; after a point has landed, "What would you like to know?"; a second press within a minute, just "Yes?".',
-  'WHEN THEY SAY YES to carrying on, or say nothing after your door open, hand back in a few words and call the hand-back tool at once.',
+  'WHEN THEY ARE DONE (a yes, "that helped", "carry on"): one hand-back line of four words at most, such as "Back to the lecture.", then the hand-back tool. No offer, no question, nothing after the line.',
 ].join('\n');
 import { DocumentAccessService } from './document-access.service';
 import { EntitlementsService } from './entitlements.service';

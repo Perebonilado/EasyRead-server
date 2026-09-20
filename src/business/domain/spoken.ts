@@ -65,41 +65,12 @@ const SHORT_FORMS: Record<string, string> = {
   '±': 'plus or minus',
   '≥': 'at least',
   '≤': 'at most',
-  'Fig.': 'figure',
-  'fig.': 'figure',
-  'Figs.': 'figures',
-  'Tbl.': 'table',
-  'Ch.': 'chapter',
-  'ch.': 'chapter',
-  'Sec.': 'section',
-  'sec.': 'section',
-  'Eq.': 'equation',
-  'eq.': 'equation',
-  'No.': 'number',
-  'no.': 'number',
-  'p.': 'page',
-  'pp.': 'pages',
   '°C': 'degrees Celsius',
   '°F': 'degrees Fahrenheit',
   '%': 'percent',
 };
 
 /** Units that follow a number, said in full. */
-/**
- * Units that are only ever said under a slash. On their own, "s" is a
- * plural and "m" is a metre or a minute depending on the page, so a
- * glued "1970s" must not become a count of seconds.
- */
-const PER_UNITS: Record<string, [string, string]> = {
-  s: ['second', 'seconds'],
-  m: ['minute', 'minutes'],
-  y: ['year', 'years'],
-  yr: ['year', 'years'],
-  d: ['day', 'days'],
-  wk: ['week', 'weeks'],
-  mo: ['month', 'months'],
-};
-
 const UNITS: Record<string, [string, string]> = {
   mg: ['milligram', 'milligrams'],
   g: ['gram', 'grams'],
@@ -299,10 +270,6 @@ function sayWord(word: string, next: string | undefined): string | null {
   return `${lead}${said}${trail}`;
 }
 
-/** A unit as it is said under a slash, from either table. */
-const denom = (unit: string): [string, string] | undefined =>
-  UNITS[unit] ?? PER_UNITS[unit];
-
 function sayCore(core: string, next: string | undefined): string | null {
   const nextCore = next?.replace(/[)"'”’\].,;:!?]+$/, '') ?? '';
 
@@ -352,57 +319,6 @@ function sayCore(core: string, next: string | undefined): string | null {
     return hyphenated[2] === 'fold'
       ? `${said}fold`
       : `${said}-${hyphenated[2]}`;
-  }
-
-  // A range that carries its unit: 5-10%, 5-10mg.
-  const spanUnit = core.match(
-    /^(\d+(?:\.\d+)?)[-–—](\d+(?:\.\d+)?)(%|°C|°F|[a-zA-Zµ]+)$/,
-  );
-  if (spanUnit && (UNITS[spanUnit[3]] || SHORT_FORMS[spanUnit[3]])) {
-    const unit = UNITS[spanUnit[3]];
-    const said = unit ? unit[1] : SHORT_FORMS[spanUnit[3]];
-    return `${numberWords(spanUnit[1])} to ${numberWords(spanUnit[2])} ${said}`;
-  }
-
-  // One number over another: a blood pressure, a ratio written as a
-  // fraction. "120/80" is read the way a clinician says it.
-  const over = core.match(/^(\d+(?:\.\d+)?)\/(\d+(?:\.\d+)?)$/);
-  if (over) return `${numberWords(over[1])} over ${numberWords(over[2])}`;
-
-  // A ratio with a colon, only in the plain forms where it cannot be a
-  // clock time: 3:1, 1:4.
-  const ratio = core.match(/^(\d{1,3}):(\d{1,3})$/);
-  if (ratio && (ratio[1] === '1' || ratio[2] === '1'))
-    return `${numberWords(ratio[1])} to ${numberWords(ratio[2])}`;
-
-  // A compound unit: mg/dL, mL/min, km/h. Said as one per the other.
-  const per = core.match(/^([a-zA-Zµ]+)\/([a-zA-Zµ]+)$/);
-  if (per && UNITS[per[1]] && denom(per[2])) {
-    return `${UNITS[per[1]][1]} per ${denom(per[2])![0]}`;
-  }
-
-  // A number glued to a compound unit: 5mg/dL.
-  const gluedPer = core.match(/^(\d+(?:[.,]\d+)*)([a-zA-Zµ]+)\/([a-zA-Zµ]+)$/);
-  if (gluedPer && UNITS[gluedPer[2]] && denom(gluedPer[3])) {
-    const value = Number(gluedPer[1].replace(/,/g, ''));
-    const top = value === 1 ? UNITS[gluedPer[2]][0] : UNITS[gluedPer[2]][1];
-    return `${numberWords(gluedPer[1])} ${top} per ${denom(gluedPer[3])![0]}`;
-  }
-
-  // A chemical formula: letters as letters, the counts as numbers, so
-  // H2O is "H two O" and CO2 is "C O two". Never a word nobody says.
-  if (
-    /^(?:[A-Z][a-z]?\d*){2,6}$/.test(core) &&
-    /\d/.test(core) &&
-    core.length <= 9
-  ) {
-    const said = [...core.matchAll(/([A-Z][a-z]?)(\d*)/g)]
-      .flatMap(([, element, count]) => [
-        element.length === 2 ? element : element,
-        count ? cardinal(Number(count)) : '',
-      ])
-      .filter(Boolean);
-    return said.join(' ');
   }
 
   // A number glued to its unit or sign: 5mg, 37.5°C, 10%.

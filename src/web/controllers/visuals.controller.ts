@@ -152,7 +152,7 @@ export class VisualsController {
       page: data.pageNumber,
       title: data.title ?? '',
       durationMs: data.durationMs ?? 0,
-      timeline: data.timeline as unknown as VisualSceneDto['timeline'],
+      timeline: data.timeline as VisualSceneDto['timeline'],
     };
   }
 

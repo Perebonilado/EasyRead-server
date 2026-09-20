@@ -1017,12 +1017,8 @@ export function layoutScene(
   };
 }
 
-/**
- * For the prompt: the icon names still accepted, mapped onto presets.
- * The marks a stage lays on a thing (a cross, a tick) are not here: they
- * are drawn from the icon library itself and no prompt offers them.
- */
-export const ICON_TO_PRESET: Partial<Record<VisualIcon, string>> = {
+/** For the prompt: the icon names still accepted, mapped onto presets. */
+export const ICON_TO_PRESET: Record<VisualIcon, string> = {
   person: 'person',
   people: 'people',
   clock: 'clock',

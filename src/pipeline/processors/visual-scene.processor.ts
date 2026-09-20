@@ -9,7 +9,6 @@ import { mp3DurationMs } from '../../business/domain/speech';
 import { spokenForm, type Pronunciations } from '../../business/domain/spoken';
 import { stressSentence } from '../../business/domain/delivery';
 import {
-  ALL_SHAPE_KINDS,
   STAGES,
   VISUAL_GENERATOR_VERSION,
   layoutProblems,
@@ -45,19 +44,7 @@ import {
   type VisualDecisions,
 } from '../../business/domain/visual-cards';
 import { buildMenu, phrasesToSearch } from '../../business/domain/visual-menu';
-import {
-  directByRules,
-  directStage,
-  stepDown,
-} from '../../business/domain/visual-direct';
-import {
-  layoutStage,
-  stageDelivery,
-  stageProblems,
-  stillProblems,
-  wordsOnStage,
-  type StageScene,
-} from '../../business/domain/visual-stage';
+import { directByRules, stepDown } from '../../business/domain/visual-direct';
 import {
   DRAWING_DIMS,
   nearestDrawings,
@@ -333,292 +320,207 @@ export class VisualSceneProcessor {
       ].join(' ');
 
       const pool = materialPool(material);
-      // Two ways to make a page. The stage is the new one: a cast of a
-      // few things that the narrator's own verbs move, with no director
-      // after it. The cards are the old one, kept until the numbers say
-      // the stage is better, and for a way back.
-      const asStage =
-        this.config.get<string>('VISUAL_STAGE', 'cards') === 'events';
-      let tutorial!: VisualTutorial;
-      let scripts!: Record<StagingName, VisualScript>;
-      let stageScene: StageScene | null = null;
-      let nearby: ReadonlyMap<string, readonly Near[]> = new Map();
-      if (asStage) {
-        const narrated = await this.llm.stageNarration({
-          plan,
-          topicTitle: topic.title,
-          material,
-          context: where,
+      // Narrate first: the words, cut into moments with an intent each.
+      const narrated = await this.llm.visualNarration({
+        plan,
+        topicTitle: topic.title,
+        material,
+        context: where,
+      });
+      await this.record(documentId, 'visual_narration', narrated.usage);
+      const narration = tidyNarration(narrated.value);
+      if (narration.fit === 'poor') {
+        await this.visuals.update(record.id, {
+          status: 'not_suitable',
+          step: null,
+          fit: 'poor',
+          fitReason:
+            narration.fitReason ?? 'This page has too little to teach.',
         });
-        await this.record(documentId, 'visual_narration', narrated.usage);
-        const written = narrated.value;
-        if (written.fit === 'poor') {
-          await this.visuals.update(record.id, {
-            status: 'not_suitable',
-            step: null,
-            fit: 'poor',
-            fitReason:
-              written.fitReason ?? 'This page has too little to teach.',
-          });
-          return;
-        }
-        nearby = await this.nearDrawings(
-          documentId,
-          material,
-          written.sentences,
-          who,
-        );
-        stageScene = directStage(written, {
-          field: fieldFor(`${material} ${written.sentences.join(' ')}`),
-          near: nearby,
-          handPicked: await this.handPicked(who),
-        });
-        const drawable = (name: string) => ALL_SHAPE_KINDS.includes(name);
-        scripts = {
-          box: layoutStage(stageScene, { stage: STAGES.box, known: drawable }),
-          wide: layoutStage(stageScene, {
-            stage: STAGES.wide,
-            known: drawable,
-          }),
-        };
-        // The stage's own checks. Nothing here can be redone by a model,
-        // so a fault is logged and the page ships: the rules answer for
-        // it, and the measure below says how alive it came out.
-        const faults = [
-          ...stageProblems(stageScene),
-          ...stillProblems(scripts.box),
-          ...wordsOnStage(scripts.box),
-          ...this.problemsOf(scripts),
-        ];
-        if (faults.length)
-          this.logger.warn(
-            `${who}: ${faults.length} fault(s) on the stage:\n- ${faults.slice(0, 8).join('\n- ')}`,
-          );
-        const cast = stageScene.sections.flatMap((section) => section.cast);
+        return;
+      }
+      // Then the director decides how each moment is shown, from the menu
+      // of what will draw for this page, reasoning first.
+      const nearby = await this.nearDrawings(
+        documentId,
+        material,
+        narration.sentences,
+        who,
+      );
+      const menu = buildMenu(
+        material,
+        narration.sentences,
+        `${doc.props.title}, the chapter "${topic.title}"`,
+        nearby,
+        await this.handPicked(who),
+      );
+      if (menu.missing.length)
         this.logger.log(
-          `${who}: ${stageScene.sections.length} sections, ${cast.length} things, ${scripts.box.segments.reduce((n, seg) => n + seg.cues.length, 0)} cues`,
+          `${who}: nothing draws ${menu.missing.length} of the things this page names: ${menu.missing.slice(0, 12).join(', ')}`,
         );
-        tutorial = {
-          title: stageScene.title,
-          sentences: stageScene.sentences,
-          moments: stageScene.sections.map((section) => {
-            const own = section.beats.map((b) => b.sentence);
-            return {
-              from: Math.min(...own),
-              to: Math.max(...own),
-              card: 'title' as const,
-              heading: section.title ?? stageScene!.title,
-            };
-          }),
-          fit: 'good',
-        };
+      // The cards: by rule from the narrator's own marks, or by the model
+      // director with its redo rounds, kept for a comparison and a way back.
+      const byRules =
+        this.config.get<string>('VISUAL_DIRECTOR', 'rules') !== 'model';
+      const rulesContext = {
+        field: fieldFor(`${material} ${narration.sentences.join(' ')}`),
+        near: nearby,
+        handPicked: await this.handPicked(who),
+      };
+      let decisions: VisualDecisions;
+      if (byRules) {
+        decisions = directByRules(narration, rulesContext);
+        const marked = narration.moments.filter((m) => m.show).length;
+        this.logger.log(
+          `${who}: ${decisions.moments.length} cards by rule from ${marked} of ${narration.moments.length} marked moments`,
+        );
       } else {
-        // Narrate first: the words, cut into moments with an intent each.
-        const narrated = await this.llm.visualNarration({
+        const directed = await this.llm.visualDirector({
+          narration,
+          menu: menu.text,
           plan,
           topicTitle: topic.title,
           material,
           context: where,
         });
-        await this.record(documentId, 'visual_narration', narrated.usage);
-        const narration = tidyNarration(narrated.value);
-        if (narration.fit === 'poor') {
-          await this.visuals.update(record.id, {
-            status: 'not_suitable',
-            step: null,
-            fit: 'poor',
-            fitReason:
-              narration.fitReason ?? 'This page has too little to teach.',
-          });
+        await this.record(documentId, 'visual_director', directed.usage);
+        decisions = directed.value;
+      }
+      const build = () => {
+        const built = tidyTutorial(assembleTutorial(narration, decisions));
+        return { tutorial: built, scripts: this.staged(built) };
+      };
+      let { tutorial, scripts } = build();
+      const problemsNow = () => [
+        ...tutorialProblems(tutorial, pool, materialWords, material),
+        ...this.problemsOf(scripts),
+      ];
+      /** The narration's index of each tutorial moment named by position. */
+      const originOf = (positions: number[]) =>
+        positions
+          .map((k) => tutorial.moments[k]?.index)
+          .filter((i): i is number => i !== undefined);
+      const everyMoment = narration.moments.map((_, i) => i);
+      const redoWith = async (only: number[], notes: string[]) => {
+        if (byRules) {
+          // No round trip: the card steps down to its own words.
+          decisions = stepDown(decisions, only, narration, notes);
+          ({ tutorial, scripts } = build());
           return;
         }
-        // Then the director decides how each moment is shown, from the menu
-        // of what will draw for this page, reasoning first.
-        nearby = await this.nearDrawings(
-          documentId,
+        const redo = await this.llm.visualDirector({
+          narration,
+          menu: menu.text,
+          plan,
+          topicTitle: topic.title,
           material,
-          narration.sentences,
-          who,
-        );
-        const menu = buildMenu(
-          material,
-          narration.sentences,
-          `${doc.props.title}, the chapter "${topic.title}"`,
-          nearby,
-          await this.handPicked(who),
-        );
-        if (menu.missing.length)
-          this.logger.log(
-            `${who}: nothing draws ${menu.missing.length} of the things this page names: ${menu.missing.slice(0, 12).join(', ')}`,
-          );
-        // The cards: by rule from the narrator's own marks, or by the model
-        // director with its redo rounds, kept for a comparison and a way back.
-        const byRules =
-          this.config.get<string>('VISUAL_DIRECTOR', 'rules') !== 'model';
-        const rulesContext = {
-          field: fieldFor(`${material} ${narration.sentences.join(' ')}`),
-          near: nearby,
-          handPicked: await this.handPicked(who),
-        };
-        let decisions: VisualDecisions;
-        if (byRules) {
-          decisions = directByRules(narration, rulesContext);
-          const marked = narration.moments.filter((m) => m.show).length;
-          this.logger.log(
-            `${who}: ${decisions.moments.length} cards by rule from ${marked} of ${narration.moments.length} marked moments`,
-          );
-        } else {
-          const directed = await this.llm.visualDirector({
-            narration,
-            menu: menu.text,
-            plan,
-            topicTitle: topic.title,
-            material,
-            context: where,
-          });
-          await this.record(documentId, 'visual_director', directed.usage);
-          decisions = directed.value;
-        }
-        const build = () => {
-          const built = tidyTutorial(assembleTutorial(narration, decisions));
-          return { tutorial: built, scripts: this.staged(built) };
+          context: where,
+          previous: decisions,
+          only,
+          notes,
+        });
+        await this.record(documentId, 'visual_director', redo.usage);
+        decisions = mergeDecisions(decisions, redo.value, only);
+        ({ tutorial, scripts } = build());
+      };
+      /** Moments that cannot be made sound ship plain: their intent in big type. */
+      const shipPlain = (indexes: number[]) => {
+        decisions = {
+          moments: decisions.moments.filter((d) => !indexes.includes(d.index)),
         };
         ({ tutorial, scripts } = build());
-        const problemsNow = () => [
-          ...tutorialProblems(tutorial, pool, materialWords, material),
-          ...this.problemsOf(scripts),
-        ];
-        /** The narration's index of each tutorial moment named by position. */
-        const originOf = (positions: number[]) =>
-          positions
-            .map((k) => tutorial.moments[k]?.index)
-            .filter((i): i is number => i !== undefined);
-        const everyMoment = narration.moments.map((_, i) => i);
-        const redoWith = async (only: number[], notes: string[]) => {
-          if (byRules) {
-            // No round trip: the card steps down to its own words.
-            decisions = stepDown(decisions, only, narration, notes);
-            ({ tutorial, scripts } = build());
-            return;
-          }
-          const redo = await this.llm.visualDirector({
-            narration,
-            menu: menu.text,
-            plan,
-            topicTitle: topic.title,
-            material,
-            context: where,
-            previous: decisions,
-            only,
-            notes,
-          });
-          await this.record(documentId, 'visual_director', redo.usage);
-          decisions = mergeDecisions(decisions, redo.value, only);
-          ({ tutorial, scripts } = build());
-        };
-        /** Moments that cannot be made sound ship plain: their intent in big type. */
-        const shipPlain = (indexes: number[]) => {
-          decisions = {
-            moments: decisions.moments.filter(
-              (d) => !indexes.includes(d.index),
-            ),
-          };
-          ({ tutorial, scripts } = build());
-        };
-        let problems = problemsNow();
-        for (
-          let round = 0;
-          problems.length && round < REPAIR_ROUNDS;
-          round += 1
-        ) {
-          const named = originOf(momentsNamed(problems));
-          await redoWith(named.length ? named : everyMoment, [
-            ...problems,
-            ...tutorialWarnings(tutorial),
-            ...visualWarnings(scripts.box),
-          ]);
+      };
+      let problems = problemsNow();
+      for (
+        let round = 0;
+        problems.length && round < REPAIR_ROUNDS;
+        round += 1
+      ) {
+        const named = originOf(momentsNamed(problems));
+        await redoWith(named.length ? named : everyMoment, [
+          ...problems,
+          ...tutorialWarnings(tutorial),
+          ...visualWarnings(scripts.box),
+        ]);
+        problems = problemsNow();
+      }
+      if (problems.length) {
+        const named = originOf(momentsNamed(problems));
+        if (named.length) {
+          this.logger.warn(
+            `${who}: moments ${named.join(', ')} ship plain after ${REPAIR_ROUNDS} redos: ${problems.slice(0, 3).join(' ')}`,
+          );
+          shipPlain(named);
           problems = problemsNow();
         }
-        if (problems.length) {
-          const named = originOf(momentsNamed(problems));
-          if (named.length) {
-            this.logger.warn(
-              `${who}: moments ${named.join(', ')} ship plain after ${REPAIR_ROUNDS} redos: ${problems.slice(0, 3).join(' ')}`,
-            );
-            shipPlain(named);
-            problems = problemsNow();
-          }
-        }
-        if (problems.length) {
-          this.logger.warn(
-            `${who}: ${problems.length} problems left after ${REPAIR_ROUNDS} repairs:\n- ${problems.join('\n- ')}`,
-          );
-          throw new Error(
-            `The scene could not be made sound: ${problems.slice(0, 3).join(' ')}`,
-          );
-        }
+      }
+      if (problems.length) {
+        this.logger.warn(
+          `${who}: ${problems.length} problems left after ${REPAIR_ROUNDS} repairs:\n- ${problems.join('\n- ')}`,
+        );
+        throw new Error(
+          `The scene could not be made sound: ${problems.slice(0, 3).join(' ')}`,
+        );
+      }
 
-        // The judge looks at a filmstrip of every moment against the
-        // director's brief. A moment it sends back goes to the director
-        // alone, twice at most; then it ships plain.
-        let judged = await this.judge(documentId, tutorial, scripts.box, who);
-        for (
-          let round = 0;
-          judged.redo.length && round < JUDGE_ROUNDS;
-          round += 1
-        ) {
-          const only = judged.redo.map((r) => r.index);
+      // The judge looks at a filmstrip of every moment against the
+      // director's brief. A moment it sends back goes to the director
+      // alone, twice at most; then it ships plain.
+      let judged = await this.judge(documentId, tutorial, scripts.box, who);
+      for (
+        let round = 0;
+        judged.redo.length && round < JUDGE_ROUNDS;
+        round += 1
+      ) {
+        const only = judged.redo.map((r) => r.index);
+        this.logger.log(
+          `${who}: the judge sent back ${only.length} moment(s):\n- ${judged.redo.map((r) => `${r.index + 1}: ${r.note}`).join('\n- ')}`,
+        );
+        const before = new Map(
+          decisions.moments.map((d) => [d.index, decisionKey(d)] as const),
+        );
+        await redoWith(
+          only,
+          judged.redo.map((r) => `Moment ${r.index + 1}: ${r.note}`),
+        );
+        // A moment the director stands by, unchanged, is not asked about
+        // again: the judge has had its say and the director its reasons.
+        const stood = decisions.moments
+          .filter(
+            (d) =>
+              only.includes(d.index) && before.get(d.index) === decisionKey(d),
+          )
+          .map((d) => d.index);
+        if (stood.length)
           this.logger.log(
-            `${who}: the judge sent back ${only.length} moment(s):\n- ${judged.redo.map((r) => `${r.index + 1}: ${r.note}`).join('\n- ')}`,
+            `${who}: the director stood by moment(s) ${stood.map((i) => i + 1).join(', ')}.`,
           );
-          const before = new Map(
-            decisions.moments.map((d) => [d.index, decisionKey(d)] as const),
-          );
-          await redoWith(
-            only,
-            judged.redo.map((r) => `Moment ${r.index + 1}: ${r.note}`),
-          );
-          // A moment the director stands by, unchanged, is not asked about
-          // again: the judge has had its say and the director its reasons.
-          const stood = decisions.moments
-            .filter(
-              (d) =>
-                only.includes(d.index) &&
-                before.get(d.index) === decisionKey(d),
-            )
-            .map((d) => d.index);
-          if (stood.length)
-            this.logger.log(
-              `${who}: the director stood by moment(s) ${stood.map((i) => i + 1).join(', ')}.`,
-            );
-          problems = problemsNow();
-          if (problems.length) {
-            const named = originOf(momentsNamed(problems));
-            shipPlain(named.length ? named : only);
-            problems = problemsNow();
-            if (problems.length)
-              throw new Error(
-                `The scene could not be made sound after the judge: ${problems.slice(0, 3).join(' ')}`,
-              );
-          }
-          const again = only.filter((i) => !stood.includes(i));
-          judged = again.length
-            ? await this.judge(documentId, tutorial, scripts.box, who, again)
-            : { sheet: judged.sheet, redo: [] };
-        }
-        if (judged.redo.length) {
-          this.logger.warn(
-            `${who}: moments ${judged.redo.map((r) => r.index + 1).join(', ')} ship plain after the judge said redo ${JUDGE_ROUNDS} times.`,
-          );
-          shipPlain(judged.redo.map((r) => r.index));
+        problems = problemsNow();
+        if (problems.length) {
+          const named = originOf(momentsNamed(problems));
+          shipPlain(named.length ? named : only);
           problems = problemsNow();
           if (problems.length)
             throw new Error(
-              `The scene could not be made sound: ${problems.slice(0, 3).join(' ')}`,
+              `The scene could not be made sound after the judge: ${problems.slice(0, 3).join(' ')}`,
             );
         }
+        const again = only.filter((i) => !stood.includes(i));
+        judged = again.length
+          ? await this.judge(documentId, tutorial, scripts.box, who, again)
+          : { sheet: judged.sheet, redo: [] };
       }
-
+      if (judged.redo.length) {
+        this.logger.warn(
+          `${who}: moments ${judged.redo.map((r) => r.index + 1).join(', ')} ship plain after the judge said redo ${JUDGE_ROUNDS} times.`,
+        );
+        shipPlain(judged.redo.map((r) => r.index));
+        problems = problemsNow();
+        if (problems.length)
+          throw new Error(
+            `The scene could not be made sound: ${problems.slice(0, 3).join(' ')}`,
+          );
+      }
       // Written down: what this lesson reached for and what was found
       // for it. The answers are kept so a word looks the same everywhere
       // and a bad match has one place to be put right; the misses,
@@ -627,15 +529,7 @@ export class VisualSceneProcessor {
         await this.visuals.noteTerms({
           documentId,
           pageNumber,
-          terms: (stageScene
-            ? stageScene.sections.flatMap((section) =>
-                section.cast.map((thing) => ({
-                  term: thing.name.toLowerCase(),
-                  drawing: thing.picture ?? null,
-                })),
-              )
-            : namedDrawings(tutorial)
-          ).map((one) => ({
+          terms: namedDrawings(tutorial).map((one) => ({
             ...one,
             foundBy: nearby.has(one.term)
               ? ('meaning' as const)
@@ -672,9 +566,7 @@ export class VisualSceneProcessor {
       // that instant. The stress mark goes on the spoken form, after the
       // numbers and the school's pronunciations, so the voice reads it and
       // the aligner never sees it.
-      const delivery = stageScene
-        ? stageDelivery(stageScene)
-        : sceneDelivery(tutorial);
+      const delivery = sceneDelivery(tutorial);
       const pauses = delivery.map((piece) => piece.pauseAfter);
       // One short recording, on the warm voice, whoever the document
       // belongs to: a school's Modal box is for a batch of pages and

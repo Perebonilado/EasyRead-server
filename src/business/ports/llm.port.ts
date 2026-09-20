@@ -4,7 +4,6 @@ import type {
   RecapBody,
   TopicPreviewBody,
 } from '../../contracts';
-import type { StageNarration } from '../domain/visual-direct';
 
 export type LlmTask =
   | 'ocr_page'
@@ -504,49 +503,6 @@ export interface LlmGatewayPort {
     material: string;
     context?: string;
   }): Promise<LlmResult<VisualNarration>>;
-
-  /**
-   * What a thing looks like, in plain words, with nothing about what it
-   * is for. The first of the two calls that draw the library out.
-   */
-  thingForm(input: {
-    term: string;
-    field?: string;
-    context?: string;
-  }): Promise<
-    LlmResult<{ looksLike: string; parts: string[]; aspect: number }>
-  >;
-
-  /**
-   * A drawing of that form, on the unit square. The name of the thing is
-   * never passed: the drawer works from the description alone, so it
-   * cannot draw what the word means instead of what the thing looks like.
-   */
-  thingDrawing(input: {
-    looksLike: string;
-    parts: string[];
-    aspect: number;
-    correction?: string;
-  }): Promise<
-    LlmResult<{
-      body: string;
-      detail: string | null;
-      aspect: number;
-      parts: { name: string; at: number[] }[];
-    }>
-  >;
-
-  /**
-   * Narrates one page for a stage: the sentences, the cast of each
-   * stretch, and one verb a sentence. The rules do the rest; there is no
-   * director after this.
-   */
-  stageNarration(input: {
-    plan: VisualPlan;
-    topicTitle: string;
-    material: string;
-    context?: string;
-  }): Promise<LlmResult<StageNarration>>;
 
   /**
    * Decides how each moment is shown, reasoning first, from the menu of

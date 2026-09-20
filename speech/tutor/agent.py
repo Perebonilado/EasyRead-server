@@ -33,6 +33,7 @@ from livekit.agents import (
     llm,
     utils,
 )
+from livekit.agents.llm import StopResponse
 from livekit.plugins import openai, silero
 from livekit.plugins.turn_detector.english import EnglishModel
 
@@ -80,6 +81,16 @@ def browser_tools(tools: list, learner: str, room: rtc.Room) -> list:
             except Exception as error:
                 log.warning("tool %s failed: %s", _name, error)
                 return json.dumps({"error": "the screen did not answer"})
+            # A silent tool: the screen answers with __noReply when nothing
+            # should be said after it (the lecture resuming, a line drawn),
+            # and the model is stopped rather than left to fill the quiet.
+            try:
+                parsed = json.loads(answer) if answer else {}
+            except ValueError:
+                parsed = None
+            if isinstance(parsed, dict) and parsed.pop("__noReply", False):
+                log.info("tool %s: silent", _name)
+                raise StopResponse()
             return answer or "{}"
 
         made.append(
@@ -289,7 +300,7 @@ async def tutor(ctx: JobContext) -> None:
         item = event.item
         kind = getattr(item, "type", "?")
         if kind == "message":
-            log.info("%s: %s", getattr(item, "role", "?"), (getattr(item, "text_content", None) or "")[:160])
+            log.info("%s: %s", getattr(item, "role", "?"), (getattr(item, "text_content", None) or "")[:600])
         else:
             log.info("%s %s %s", kind, getattr(item, "name", ""), str(getattr(item, "arguments", getattr(item, "output", "")))[:120])
 

@@ -1,3 +1,4 @@
+import { ConfigService } from '@nestjs/config';
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import {
   wordTimesFromAligned,
@@ -66,13 +67,13 @@ import {
   renderThumb,
 } from '../../business/domain/visual-render';
 import type { AlignerPort } from '../../business/ports/aligner.port';
+import { catalogueSpeechCost } from '../../business/domain/cost';
 import type { LlmGatewayPort } from '../../business/ports/llm.port';
 import type { StoragePort } from '../../business/ports/storage.port';
 import {
   ALIGNER,
-  LECTURE_SPEECH,
   LLM_GATEWAY,
-  SPEECH,
+  UPLOAD_SPEECH,
   STORAGE,
 } from '../../business/ports/tokens';
 import type { SpeechPort } from '../../business/ports/voice.port';
@@ -212,8 +213,8 @@ export class VisualSceneProcessor {
     private readonly pronunciations: PronunciationRepository,
     @Inject(AI_CALL_LOG_REPOSITORY) private readonly calls: AiCallLogRepository,
     @Inject(LLM_GATEWAY) private readonly llm: LlmGatewayPort,
-    @Inject(LECTURE_SPEECH) private readonly catalogueSpeech: SpeechPort,
-    @Inject(SPEECH) private readonly speech: SpeechPort,
+    @Inject(UPLOAD_SPEECH) private readonly speech: SpeechPort,
+    private readonly config: ConfigService,
     @Inject(STORAGE) private readonly storage: StoragePort,
     @Inject(ALIGNER) private readonly aligner: AlignerPort,
   ) {}
@@ -535,9 +536,10 @@ export class VisualSceneProcessor {
       const spoken = sceneSpoken(forms);
       // The voice breathes between sentences and waits where a card comes in.
       const pauses = pausesFor(tutorial);
-      const speech = doc.props.institutionId
-        ? this.catalogueSpeech
-        : this.speech;
+      // One short recording, on the warm voice, whoever the document
+      // belongs to: a school's Modal box is for a batch of pages and
+      // would wake for this. The pieces and their pauses are honoured.
+      const speech = this.speech;
       const { model, voice } = speech.label();
       const result = await speech.synthesize({
         text: spoken.text,
@@ -583,7 +585,20 @@ export class VisualSceneProcessor {
         tokensOut: null,
         latencyMs: null,
         outcome: 'ok',
-        costUsd: null,
+        // A voice of our own is priced by the audio it made at its rate.
+        costUsd: result.model.startsWith('kokoro:')
+          ? catalogueSpeechCost(
+              durationMs,
+              Number(this.config.get<string>('KOKORO_USD_PER_AUDIO_HOUR', '0')),
+            )
+          : result.model.startsWith('modal:')
+            ? catalogueSpeechCost(
+                durationMs,
+                Number(
+                  this.config.get<string>('MODAL_USD_PER_AUDIO_HOUR', '0'),
+                ),
+              )
+            : null,
       });
 
       // Timing: the words measured on the audio, or estimated from it.

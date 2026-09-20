@@ -1,3 +1,4 @@
+import type { LectureStyle } from '../../contracts';
 import { Injectable, Logger, OnModuleDestroy } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { Queue } from 'bullmq';
@@ -271,6 +272,36 @@ export class BullmqQueueAdapter implements JobQueuePort, OnModuleDestroy {
         job.kind,
       ),
     );
+  }
+
+  async bumpLectureVoice(job: {
+    documentId: string;
+    contentVersion: number;
+    pageNumber: number;
+    style: LectureStyle;
+  }): Promise<void> {
+    const queue = this.queue(QUEUE.lectureVoice);
+    for (const kind of ['page', 'part'] as const) {
+      const found = await queue.getJob(
+        lectureVoiceJobId(
+          job.documentId,
+          job.pageNumber,
+          job.contentVersion,
+          job.style,
+          kind,
+        ),
+      );
+      if (!found) continue;
+      const state = await found.getState();
+      // Only a job still in line moves; one being voiced is nearly there.
+      if (
+        state === 'waiting' ||
+        state === 'prioritized' ||
+        state === 'delayed'
+      ) {
+        await found.changePriority({ priority: 1 });
+      }
+    }
   }
 
   async enqueueLectureVoices(jobs: LectureVoiceJob[]): Promise<void> {

@@ -150,3 +150,32 @@ export function estimatePrepare(input: {
 function round(value: number): number {
   return Math.round(value * 10_000) / 10_000;
 }
+
+/** What a minute of live conversation costs on each line, in dollars. */
+export interface TalkRates {
+  livekit: number;
+  openai: number;
+  elevenlabs: number;
+}
+
+/**
+ * The cost of a live voice session, from the seconds the browser reports
+ * at hang-up and the line it ran on: our own line at the bench's rate, a
+ * provider's at its per-minute rate. Null when the line is unknown.
+ */
+export function voiceSessionCost(
+  provider: string,
+  seconds: number,
+  rates: TalkRates,
+): number | null {
+  const rate =
+    provider === 'livekit'
+      ? rates.livekit
+      : provider === 'openai'
+        ? rates.openai
+        : provider === 'elevenlabs'
+          ? rates.elevenlabs
+          : undefined;
+  if (rate === undefined || !(seconds > 0)) return null;
+  return Math.round((seconds / 60) * rate * 1e6) / 1e6;
+}

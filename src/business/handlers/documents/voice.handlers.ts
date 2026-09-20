@@ -84,6 +84,9 @@ import { CommandResponse } from '../response/CommandResponse';
 import { ComputeService } from './compute.service';
 import { ElevenLabsRealtimeAdapter } from '../../../web/adapters/elevenlabs-voice.adapters';
 import { GAP, STYLE_SPEED } from '../../domain/delivery';
+import { voiceSessionCost } from '../../domain/cost';
+import { PRONUNCIATION_REPOSITORY } from '../../repositories/tokens';
+import type { PronunciationRepository } from '../../repositories/pronunciation.repository';
 import { LiveKitRealtimeAdapter } from '../../../web/adapters/livekit-realtime.adapter';
 
 /**
@@ -969,6 +972,8 @@ export class StartVoiceSessionHandler extends AbstractRequestHandlerTemplate<
     @Inject(REALTIME) private readonly realtime: RealtimePort,
     private readonly elevenlabs: ElevenLabsRealtimeAdapter,
     private readonly livekit: LiveKitRealtimeAdapter,
+    @Inject(PRONUNCIATION_REPOSITORY)
+    private readonly pronunciations: PronunciationRepository,
     @Inject(SUMMARY_REPOSITORY) private readonly summaries: SummaryRepository,
     @Inject(LECTURE_REPOSITORY)
     private readonly lectures: LectureRepository,
@@ -1098,7 +1103,17 @@ export class StartVoiceSessionHandler extends AbstractRequestHandlerTemplate<
                     question: GAP.question,
                   },
                   lead: 0.5,
-                  pronunciations: [],
+                  // A school's dictionary of how its terms are said; a
+                  // learner's own document has none.
+                  pronunciations: doc.props.institutionId
+                    ? [
+                        ...(
+                          await this.pronunciations.kept(
+                            doc.props.institutionId,
+                          )
+                        ).entries(),
+                      ]
+                    : [],
                 },
               }
             : {}),
@@ -1939,5 +1954,59 @@ export class ComputeHandler extends AbstractRequestHandlerTemplate<
       result: outcome.result,
       tex: this.compute.toTex(cmd.expression, outcome.result),
     });
+  }
+}
+
+export interface VoiceSessionEndRequest {
+  userId: string;
+  documentId: string;
+  /** The line the session ran on, as the browser was told at the start. */
+  provider: string;
+  seconds: number;
+}
+
+/**
+ * A finished voice session, priced into the ledger. The browser reports
+ * the seconds and the line at hang-up; the cost is minutes at that line's
+ * rate, so the cost page counts live sessions as it counts every other
+ * call. Not the allowance: that is the heartbeat's job.
+ */
+@Injectable()
+export class RecordVoiceSessionHandler extends AbstractRequestHandlerTemplate<
+  VoiceSessionEndRequest,
+  { costUsd: number | null }
+> {
+  constructor(
+    private readonly access: DocumentAccessService,
+    @Inject(AI_CALL_LOG_REPOSITORY) private readonly calls: AiCallLogRepository,
+    private readonly config: ConfigService,
+  ) {
+    super();
+  }
+
+  protected async handleRequest(cmd: VoiceSessionEndRequest) {
+    const doc = await this.access.require(cmd.documentId, cmd.userId);
+    const seconds = Math.max(0, Math.min(6 * 3600, Math.round(cmd.seconds)));
+    const rate = (key: string, fallback: string) =>
+      Number(this.config.get<string>(key, fallback));
+    const costUsd = voiceSessionCost(cmd.provider, seconds, {
+      livekit: rate('LIVEKIT_USD_PER_TALK_MINUTE', '0.004'),
+      openai: rate('OPENAI_REALTIME_USD_PER_MINUTE', '0.015'),
+      elevenlabs: rate('ELEVENLABS_USD_PER_MINUTE', '0.08'),
+    });
+    if (seconds > 0) {
+      await this.calls.record({
+        documentId: doc.id,
+        task: 'voice_session_minutes',
+        model: `${cmd.provider}:talk`,
+        // Seconds of conversation, so the ledger can add them up.
+        tokensIn: seconds,
+        tokensOut: null,
+        latencyMs: null,
+        outcome: 'ok',
+        costUsd,
+      });
+    }
+    return CommandResponse.of({ costUsd });
   }
 }

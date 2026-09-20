@@ -648,12 +648,22 @@ export class LectureAudioHandler extends AbstractRequestHandlerTemplate<
   constructor(
     @Inject(LECTURE_REPOSITORY) private readonly lectures: LectureRepository,
     private readonly access: DocumentAccessService,
+    @Inject(JOB_QUEUE) private readonly queue: JobQueuePort,
   ) {
     super();
   }
 
   protected async handleRequest(cmd: LectureAudioRequest) {
     const doc = await this.access.require(cmd.documentId, cmd.userId);
+    // The page they are waiting on goes to the front of the voice queue.
+    void this.queue
+      .bumpLectureVoice({
+        documentId: doc.id,
+        contentVersion: doc.contentVersion,
+        pageNumber: cmd.pageNumber,
+        style: cmd.style ?? DEFAULT_LECTURE_STYLE,
+      })
+      .catch(() => undefined);
     const segment = await this.lectures.findSegment(
       doc.id,
       cmd.pageNumber,
@@ -685,6 +695,7 @@ export class SaveLecturePositionHandler extends AbstractRequestHandlerTemplate<
   constructor(
     @Inject(LECTURE_REPOSITORY) private readonly lectures: LectureRepository,
     private readonly access: DocumentAccessService,
+    @Inject(JOB_QUEUE) private readonly queue: JobQueuePort,
   ) {
     super();
   }
@@ -696,6 +707,15 @@ export class SaveLecturePositionHandler extends AbstractRequestHandlerTemplate<
       offsetMs: Math.max(0, Math.round(cmd.offsetMs)),
       style: cmd.style ?? DEFAULT_LECTURE_STYLE,
     };
+    // Where they are listening is the page to voice next.
+    void this.queue
+      .bumpLectureVoice({
+        documentId: doc.id,
+        contentVersion: doc.contentVersion,
+        pageNumber: position.pageNumber,
+        style: position.style,
+      })
+      .catch(() => undefined);
     await this.lectures.savePosition({
       userId: cmd.userId,
       documentId: doc.id,

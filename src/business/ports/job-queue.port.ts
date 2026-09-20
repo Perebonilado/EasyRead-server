@@ -91,6 +91,13 @@ export interface JobQueuePort {
   enqueueLectureChapters(jobs: LectureChapterJob[]): Promise<void>;
   /** One job per finished script: turn it into audio. */
   enqueueLectureVoices(jobs: LectureVoiceJob[]): Promise<void>;
+  /** The page a learner has opened goes to the front of the voice queue, its part with it, if still waiting. */
+  bumpLectureVoice(job: {
+    documentId: string;
+    contentVersion: number;
+    pageNumber: number;
+    style: LectureStyle;
+  }): Promise<void>;
   /** One job per voiced row: measure where each word is heard. */
   enqueueLectureAligns(jobs: LectureAlignJob[]): Promise<void>;
   /** One job per figure the plan asked for. */

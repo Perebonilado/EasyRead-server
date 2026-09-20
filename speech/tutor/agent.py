@@ -66,7 +66,17 @@ SAY_DIRECT = "say.direct"
 SAY_NOTE = "say.note"
 SAY_STOP = "say.stop"
 
-server = AgentServer()
+# How many conversations this box is sized for. Its load is that count,
+# not its processor: one conversation hearing and thinking once read as
+# "full" and a second learner in those seconds would have found no tutor.
+MAX_SESSIONS = int(os.environ.get("TUTOR_MAX_SESSIONS", "6"))
+
+
+def crowd(current: AgentServer) -> float:
+    return len(current.active_jobs) / MAX_SESSIONS
+
+
+server = AgentServer(load_fnc=crowd, load_threshold=0.99)
 
 
 def browser_tools(tools: list, learner: str, room: rtc.Room) -> list:

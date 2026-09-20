@@ -1,4 +1,9 @@
-import { catalogueSpeechCost, costOf, estimatePrepare } from './cost';
+import {
+  catalogueSpeechCost,
+  costOf,
+  estimatePrepare,
+  voiceSessionCost,
+} from './cost';
 
 describe('the cost of a call', () => {
   it('prices text by tokens and speech by characters, and leaves the unknown null', () => {
@@ -98,5 +103,20 @@ describe('the estimate before the button', () => {
     expect(estimate.textUsd).toBeCloseTo(100 * 0.002 + 200 * 0.003, 4);
     expect(estimate.audioUsd).toBe(0);
     expect(estimate.totalUsd).toBe(estimate.textUsd);
+  });
+});
+
+describe('voiceSessionCost', () => {
+  const rates = { livekit: 0.004, openai: 0.015, elevenlabs: 0.08 };
+
+  it('prices a session by its minutes at the line it ran on', () => {
+    expect(voiceSessionCost('livekit', 600, rates)).toBe(0.04);
+    expect(voiceSessionCost('openai', 600, rates)).toBe(0.15);
+    expect(voiceSessionCost('elevenlabs', 60, rates)).toBe(0.08);
+  });
+
+  it('gives no price for an unknown line or no time', () => {
+    expect(voiceSessionCost('other', 600, rates)).toBeNull();
+    expect(voiceSessionCost('livekit', 0, rates)).toBeNull();
   });
 });

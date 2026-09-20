@@ -62,6 +62,7 @@ import {
   DrawSketchHandler,
   PageAudioHandler,
   StartVoiceSessionHandler,
+  RecordVoiceSessionHandler,
 } from './business/handlers/documents/voice.handlers';
 import {
   GenerateLectureHandler,
@@ -284,6 +285,7 @@ const handlers = [
   GetExportHandler,
   PageAudioHandler,
   StartVoiceSessionHandler,
+  RecordVoiceSessionHandler,
   GenerateLectureHandler,
   LectureStatusHandler,
   LectureAudioHandler,

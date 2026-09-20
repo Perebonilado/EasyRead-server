@@ -465,6 +465,7 @@ function fakes(
         );
         return Promise.resolve();
       },
+      bumpLectureVoice: () => Promise.resolve(),
       enqueueLectureVoices: (
         jobs: { pageNumber: number; style: LectureStyle; kind?: SegmentKind }[],
       ) => {

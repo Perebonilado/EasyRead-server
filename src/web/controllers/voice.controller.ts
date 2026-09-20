@@ -50,6 +50,7 @@ import {
   DrawSketchHandler,
   PageAudioHandler,
   StartVoiceSessionHandler,
+  RecordVoiceSessionHandler,
   type AudioLevel,
 } from '../../business/handlers/documents/voice.handlers';
 import { BoardDiagramHandler } from '../../business/handlers/documents/board-diagram.handler';
@@ -74,6 +75,15 @@ class ConversationLineDto {
   @IsString()
   @MaxLength(600)
   text!: string;
+}
+
+class VoiceSessionEndDto {
+  @IsIn(['openai', 'elevenlabs', 'livekit'])
+  provider!: 'openai' | 'elevenlabs' | 'livekit';
+
+  @IsInt()
+  @Min(0)
+  seconds!: number;
 }
 
 class LectureContextDto {
@@ -311,6 +321,7 @@ export class VoiceController {
   constructor(
     private readonly pageAudio: PageAudioHandler,
     private readonly startSession: StartVoiceSessionHandler,
+    private readonly endSession: RecordVoiceSessionHandler,
     private readonly drawDiagram: DrawDiagramHandler,
     private readonly boardDiagram: BoardDiagramHandler,
     private readonly bookFind: BookFindHandler,
@@ -381,6 +392,23 @@ export class VoiceController {
       revisitTopicId: body.revisitTopicId,
       intent: body.intent,
       lectureContext: body.lectureContext,
+    });
+    return result.data;
+  }
+
+  /** A finished voice session: its seconds and its line, priced into the ledger. */
+  @Post('voice-session/end')
+  @HttpCode(200)
+  async voiceSessionEnd(
+    @CurrentUser('id') userId: string,
+    @Param('id') documentId: string,
+    @Body() body: VoiceSessionEndDto,
+  ): Promise<{ costUsd: number | null }> {
+    const result = await this.endSession.handle({
+      userId,
+      documentId,
+      provider: body.provider,
+      seconds: body.seconds,
     });
     return result.data;
   }

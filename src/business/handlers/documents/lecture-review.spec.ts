@@ -137,6 +137,7 @@ function harness(options: {
     llm,
     { record: () => Promise.resolve() },
     {
+      bumpLectureVoice: () => Promise.resolve(),
       enqueueLectureVoices: (jobs: { pageNumber: number; kind?: string }[]) => {
         voiced.push(...jobs);
         return Promise.resolve();

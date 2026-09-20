@@ -1,6 +1,7 @@
 import { numberedSentences } from '../../../business/domain/board';
 import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import type { StageNarration } from '../../../business/domain/visual-direct';
 import type { LanguageModelUsage } from 'ai';
 import type { Block, RecapBody, TopicPreviewBody } from '../../../contracts';
 import type {
@@ -42,6 +43,9 @@ import {
   lectureSketchSchema,
   visualPlanSchema,
   visualJudgeSchema,
+  stageNarrationSchema,
+  thingDrawingSchema,
+  thingFormSchema,
   visualNarrationSchema,
   visualDecisionsSchema,
   sketchJudgeSchema,
@@ -757,6 +761,100 @@ export class AiSdkLlmAdapter implements LlmGatewayPort, OnModuleInit {
       model,
       schema: visualNarrationSchema,
       system: PROMPTS.visualNarration,
+      prompt: [
+        `Chapter: ${input.topicTitle}`,
+        input.context ? `This page: ${input.context}` : '',
+        `The chapter's plan: ${JSON.stringify(input.plan)}`,
+        `The page:\n${input.material}`,
+      ]
+        .filter(Boolean)
+        .join('\n\n'),
+      maxRetries: this.maxRetries(),
+    });
+    return {
+      value: result.object,
+      usage: this.usage(ref, result.usage, started),
+    };
+  }
+
+  async thingForm(input: {
+    term: string;
+    field?: string;
+    context?: string;
+  }): Promise<
+    LlmResult<{ looksLike: string; parts: string[]; aspect: number }>
+  > {
+    const started = Date.now();
+    const { generateObject } = await this.registry.modules();
+    const { model, ref } = await this.registry.languageModel('sketch');
+    const result = await generateObject({
+      model,
+      schema: thingFormSchema,
+      system: PROMPTS.thingForm,
+      prompt: [
+        `The thing: ${input.term}`,
+        input.field ? `Its subject: ${input.field}` : '',
+        input.context ? `Where it is used: ${input.context}` : '',
+      ]
+        .filter(Boolean)
+        .join('\n'),
+      maxRetries: this.maxRetries(),
+    });
+    return {
+      value: result.object,
+      usage: this.usage(ref, result.usage, started),
+    };
+  }
+
+  async thingDrawing(input: {
+    looksLike: string;
+    parts: string[];
+    aspect: number;
+    correction?: string;
+  }) {
+    const started = Date.now();
+    const { generateObject } = await this.registry.modules();
+    const { model, ref } = await this.registry.languageModel('sketch');
+    const result = await generateObject({
+      model,
+      schema: thingDrawingSchema,
+      system: PROMPTS.thingDrawing,
+      // The name never comes this way: the drawing follows the form.
+      prompt: [
+        `Draw this: ${input.looksLike}`,
+        input.parts.length ? `Name these parts: ${input.parts.join(', ')}` : '',
+        `It is about ${input.aspect} times as wide as it is tall.`,
+        input.correction ? `Last time: ${input.correction}` : '',
+      ]
+        .filter(Boolean)
+        .join('\n'),
+      maxRetries: this.maxRetries(),
+    });
+    return {
+      value: {
+        body: result.object.body,
+        detail: result.object.detail,
+        aspect: result.object.aspect,
+        parts: result.object.parts.map((p) => ({ name: p.name, at: p.at })),
+      },
+      usage: this.usage(ref, result.usage, started),
+    };
+  }
+
+  async stageNarration(input: {
+    plan: VisualPlan;
+    topicTitle: string;
+    material: string;
+    context?: string;
+  }): Promise<LlmResult<StageNarration>> {
+    const started = Date.now();
+    const { generateObject } = await this.registry.modules();
+    const { model, ref } =
+      await this.registry.languageModel('visual_narration');
+    const result = await generateObject({
+      model,
+      schema: stageNarrationSchema,
+      system: PROMPTS.stageNarration,
       prompt: [
         `Chapter: ${input.topicTitle}`,
         input.context ? `This page: ${input.context}` : '',

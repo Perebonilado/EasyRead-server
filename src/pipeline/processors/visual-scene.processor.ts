@@ -7,6 +7,7 @@ import {
 import { noteProse } from '../../business/domain/follow';
 import { mp3DurationMs } from '../../business/domain/speech';
 import { spokenForm, type Pronunciations } from '../../business/domain/spoken';
+import { stressSentence } from '../../business/domain/delivery';
 import {
   STAGES,
   VISUAL_GENERATOR_VERSION,
@@ -32,7 +33,7 @@ import {
   layoutTutorial,
   mergeDecisions,
   momentsNamed,
-  pausesFor,
+  sceneDelivery,
   tidyNarration,
   tidyTutorial,
   tutorialProblems,
@@ -560,8 +561,13 @@ export class VisualSceneProcessor {
         spokenForm(segment.text, kept),
       );
       const spoken = sceneSpoken(forms);
-      // The voice breathes between sentences and waits where a card comes in.
-      const pauses = pausesFor(tutorial);
+      // How each sentence is said: its pace, the silence after it, and the
+      // one phrase it leans on, which is the thing the screen is naming at
+      // that instant. The stress mark goes on the spoken form, after the
+      // numbers and the school's pronunciations, so the voice reads it and
+      // the aligner never sees it.
+      const delivery = sceneDelivery(tutorial);
+      const pauses = delivery.map((piece) => piece.pauseAfter);
       // One short recording, on the warm voice, whoever the document
       // belongs to: a school's Modal box is for a batch of pages and
       // would wake for this. The pieces and their pauses are honoured.
@@ -572,9 +578,9 @@ export class VisualSceneProcessor {
         voice,
         speed: 1,
         pieces: forms.map((form, index) => ({
-          text: form.text,
-          speed: 1,
-          pauseAfter: pauses[index],
+          text: stressSentence(form.text, delivery[index].emphasis),
+          speed: delivery[index].speed,
+          pauseAfter: delivery[index].pauseAfter,
         })),
       });
       const audioKey = `documents/${doc.id}/visuals/v${contentVersion}/p${pageNumber}-${VISUAL_GENERATOR_VERSION}-${voice}-${model}.mp3`;

@@ -1,6 +1,11 @@
 import { layoutProblems, repairVisual, visualProblems } from './visual';
+import { stressSentence } from './delivery';
 import {
+  PAUSE_S,
+  SCENE_SPEED,
   layoutTutorial,
+  pausesFor,
+  sceneDelivery,
   tidyTutorial,
   tutorialProblems,
   tutorialWarnings,
@@ -606,5 +611,57 @@ describe('a picture that stands for an idea', () => {
         expect.stringContaining('these sentences never say it'),
       ]),
     );
+  });
+});
+
+describe('how the scene is spoken', () => {
+  const delivery = sceneDelivery(tutorial);
+
+  it('says a definition and the line to remember slower, and a figure a little slower', () => {
+    expect(delivery.map((piece) => piece.speed)).toEqual([
+      1,
+      1,
+      1,
+      1,
+      1,
+      SCENE_SPEED.figure,
+      1,
+      SCENE_SPEED.define,
+      SCENE_SPEED.define,
+    ]);
+  });
+
+  it('holds the silence after a figure and at the end', () => {
+    expect(delivery[5].pauseAfter).toBe(PAUSE_S.afterNumber);
+    expect(delivery[8].pauseAfter).toBe(PAUSE_S.tail);
+    expect(delivery.map((piece) => piece.pauseAfter)).toEqual(
+      pausesFor(tutorial),
+    );
+  });
+
+  it('leans on the thing the screen is naming, one to a sentence and never twice', () => {
+    expect(delivery.map((piece) => piece.emphasis)).toEqual([
+      [],
+      ['leaf'],
+      ['sunlight'],
+      [],
+      ['water splits'],
+      [],
+      [],
+      ['whole'],
+      ['plant'],
+    ]);
+  });
+
+  it('puts the weight on the words the voice reads, leaving the sentence whole', () => {
+    expect(stressSentence(sentences[1], delivery[1].emphasis)).toContain(
+      '[leaf](+1)',
+    );
+    expect(
+      stressSentence(sentences[1], delivery[1].emphasis).replace(
+        /\[|\]\(\+1\)/g,
+        '',
+      ),
+    ).toBe(sentences[1]);
   });
 });

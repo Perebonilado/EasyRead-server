@@ -231,7 +231,11 @@ export const PAUSE_S = {
   sentence: 0.45,
   card: 0.7,
   title: 1.2,
-  afterStatement: 0.8,
+  /** After a claim the learner is meant to keep: long enough to write it down. */
+  afterStatement: 1.0,
+  /** After a word has just been given its meaning, or a figure its caption. */
+  afterTerm: 1.0,
+  afterNumber: 0.9,
   tail: 1.2,
 } as const;
 
@@ -254,9 +258,108 @@ export function pausesFor(tutorial: VisualTutorial): number[] {
     const next = starts.get(i + 1);
     let pause: number = PAUSE_S.sentence;
     if (next) pause = next.card === 'title' ? PAUSE_S.title : PAUSE_S.card;
-    if (ends.get(i)?.card === 'statement')
-      pause = Math.max(pause, PAUSE_S.afterStatement);
+    const held = HELD_AFTER[ends.get(i)?.card ?? ''];
+    if (held) pause = Math.max(pause, held);
     return pause;
+  });
+}
+
+/** The silence a card holds when its last sentence ends, in seconds. */
+const HELD_AFTER: Record<string, number> = {
+  statement: PAUSE_S.afterStatement,
+  term: PAUSE_S.afterTerm,
+  number: PAUSE_S.afterNumber,
+};
+
+/**
+ * The pace of a sentence, against the voice's own. A definition and the
+ * line to remember are said slower, because they are the sentences a
+ * learner writes down; a figure a little slower, because a number said
+ * at speed is a number lost. Everything else is said plain, which is
+ * what makes the slow sentences read as slow.
+ */
+export const SCENE_SPEED = {
+  plain: 1,
+  define: 0.93,
+  figure: 0.95,
+} as const;
+
+/**
+ * One phrase a sentence leans on: the thing the screen is naming at that
+ * instant. For a card holding one thing it is the same phrase throughout;
+ * for a list or a flow it is the item the sentence has reached, which is
+ * what makes a walked list sound walked. Figures carry their own weight
+ * already, so a number card offers none.
+ */
+function subjectsOf(moment: Moment): string[] {
+  const words = (text?: string | null): string[] => {
+    const phrase = (text ?? '').trim();
+    if (!phrase) return [];
+    return phrase.split(/\s+/).length <= 3 ? [phrase] : [];
+  };
+  switch (moment.card) {
+    case 'term':
+      return words(moment.term);
+    case 'picture':
+    case 'scene':
+      return words(moment.name);
+    case 'statement':
+      return (moment.emphasis ?? []).flatMap(words);
+    case 'hub':
+      return words(moment.centre?.text);
+    case 'chips':
+    case 'list':
+    case 'flow':
+    case 'count':
+    case 'rings':
+    case 'timeline':
+      return (moment.items ?? []).flatMap((item) => words(item.text));
+    default:
+      return [];
+  }
+}
+
+/** A sentence of the scene, as the voice is handed it. */
+export interface ScenePiece {
+  speed: number;
+  /** Silence after the sentence, in seconds. */
+  pauseAfter: number;
+  /** At most one phrase to lean on, where the sentence says it. */
+  emphasis: string[];
+}
+
+/**
+ * How the scene is spoken, sentence by sentence: its pace, the silence
+ * after it, and the one phrase it leans on. The pauses are the card
+ * changes; the pace and the weight are the card's kind and what it names.
+ */
+export function sceneDelivery(tutorial: VisualTutorial): ScenePiece[] {
+  const pauses = pausesFor(tutorial);
+  const owner = new Map<number, Moment>();
+  for (const m of tutorial.moments)
+    for (let i = m.from; i <= m.to; i += 1) owner.set(i, m);
+  const spent = new Set<string>();
+  return tutorial.sentences.map((sentence, i) => {
+    const moment = owner.get(i);
+    const kind = moment?.card;
+    const speed =
+      kind === 'term' || kind === 'statement'
+        ? SCENE_SPEED.define
+        : kind === 'number'
+          ? SCENE_SPEED.figure
+          : SCENE_SPEED.plain;
+    // The phrase this sentence has reached, said here and not already
+    // leaned on: one to a sentence, and never the same one twice.
+    const lower = sentence.toLowerCase();
+    const emphasis: string[] = [];
+    for (const phrase of subjectsOf(moment ?? ({} as Moment))) {
+      const key = phrase.toLowerCase();
+      if (spent.has(key) || !lower.includes(key)) continue;
+      spent.add(key);
+      emphasis.push(phrase);
+      break;
+    }
+    return { speed, pauseAfter: pauses[i], emphasis };
   });
 }
 

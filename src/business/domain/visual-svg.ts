@@ -30,7 +30,8 @@ export const SVG_GATE = {
   minElements: 4,
   /** Room for a real diagram. Forty elements is a pictogram. */
   maxElements: 240,
-  maxChars: 24000,
+  /** Room for a real drawing; the old cap was quietly throttling it. */
+  maxChars: 40000,
 } as const;
 
 /**
@@ -239,6 +240,32 @@ export function framed(
     ),
     aspect: Math.min(3, Math.max(0.3, (w + pad * 2) / (h + pad * 2))),
   };
+}
+
+/**
+ * The parts a drawing turned out to have, read off the drawing itself.
+ *
+ * Asked for a list of parts alongside the markup, the model has to
+ * invent a taxonomy and then keep it in step with what it draws. It is
+ * easier and more honest to let it draw, and then see what it named:
+ * every group is a part, and where a label line should meet it is the
+ * middle of its own ink, which is arithmetic rather than a guess.
+ */
+export function partsOf(svg: string): { name: string; at: number[] }[] {
+  return groupsOf(svg)
+    .map((name) => {
+      const box = boxOf(groupInk(svg, name));
+      return box
+        ? {
+            name,
+            at: [
+              Math.round(((box.minX + box.maxX) / 2) * 100) / 100,
+              Math.round(((box.minY + box.maxY) / 2) * 100) / 100,
+            ],
+          }
+        : null;
+    })
+    .filter((p): p is { name: string; at: number[] } => p !== null);
 }
 
 /**

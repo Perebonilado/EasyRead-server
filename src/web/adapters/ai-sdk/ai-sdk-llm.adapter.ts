@@ -4,6 +4,7 @@ import { ConfigService } from '@nestjs/config';
 import type { StageNarration } from '../../../business/domain/visual-direct';
 import type { LanguageModelUsage } from 'ai';
 import type { ZodType } from 'zod';
+import { boxOf, partsOf } from '../../../business/domain/visual-svg';
 import type { Block, RecapBody, TopicPreviewBody } from '../../../contracts';
 import type {
   GeneratedItem,
@@ -45,7 +46,6 @@ import {
   visualPlanSchema,
   visualJudgeSchema,
   stageNarrationSchema,
-  thingDrawingSchema,
   visualNarrationSchema,
   visualDecisionsSchema,
   drawingChoiceSchema,
@@ -827,30 +827,61 @@ export class AiSdkLlmAdapter implements LlmGatewayPort, OnModuleInit {
     note?: string;
     /** Raised so several candidates disagree; several of one mind is one candidate. */
     temperature?: number;
-  }) {
-    const result = await this.objectOrJson({
-      task: 'thing_draw',
-      schema: thingDrawingSchema,
+  }): Promise<
+    LlmResult<{
+      svg: string;
+      aspect: number;
+      parts: { name: string; at: number[] }[];
+    }>
+  > {
+    const started = Date.now();
+    const { generateText } = await this.registry.modules();
+    const { model, ref } = await this.registry.languageModel('thing_draw');
+    // Free text, and no schema.
+    //
+    // Every other call here is generateObject, and for a drawing that
+    // turned out to be the wrong shape of question: it asks the model to
+    // escape four thousand characters of markup inside a JSON string
+    // field while also inventing a parts list to go beside it. Writing
+    // an SVG into a reply is the thing it has done a million times. So
+    // it writes one, and the markup is taken out of whatever it says.
+    const result = await generateText({
+      model,
       system: PROMPTS.thingDrawing,
-      temperature: input.temperature,
       prompt: [
         `Draw: ${input.term}`,
         input.note ? `Last time: ${input.note}` : '',
       ]
         .filter(Boolean)
         .join('\n'),
+      maxRetries: this.maxRetries(),
+      ...(input.temperature === undefined
+        ? {}
+        : { temperature: input.temperature }),
     });
+    // Models put a fence round markup however plainly the prompt says
+    // not to, and sometimes a sentence in front of it.
+    const found = /<svg[\s\S]*<\/svg>/i.exec(result.text);
+    const svg = (found ? found[0] : result.text.trim())
+      .replace(/^```(?:svg|xml|html)?\s*/i, '')
+      .replace(/```\s*$/, '')
+      .trim();
+    const box = boxOf(svg);
     return {
       value: {
-        svg: result.value.svg
-          .trim()
-          .replace(/^```(?:svg|xml|html)?\s*/i, '')
-          .replace(/```\s*$/, '')
-          .trim(),
-        aspect: result.value.aspect,
-        parts: result.value.parts.map((p) => ({ name: p.name, at: p.at })),
+        svg,
+        // Read off the drawing rather than asked for: the model is busy
+        // drawing, and this is arithmetic.
+        aspect:
+          box && box.maxY > box.minY
+            ? Math.min(
+                3,
+                Math.max(0.3, (box.maxX - box.minX) / (box.maxY - box.minY)),
+              )
+            : 1,
+        parts: partsOf(svg),
       },
-      usage: result.usage,
+      usage: this.usage(ref, result.usage, started),
     };
   }
 

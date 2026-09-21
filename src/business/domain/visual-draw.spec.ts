@@ -9,6 +9,7 @@ import {
   boxOf,
   framed,
   groupsOf,
+  partsOf,
   renderable,
   svgProblems,
 } from './visual-svg';
@@ -238,5 +239,23 @@ describe('markup the rasteriser would die on', () => {
       aspect: 1,
     });
     expect(out.svg).not.toContain('NaN');
+  });
+});
+
+describe('the parts are read off the drawing', () => {
+  it('finds every group and puts its anchor in the middle of its own ink', () => {
+    // The model is busy drawing. Asking it for a parts list beside the
+    // markup made it invent a taxonomy and keep it in step with what it
+    // drew; the groups are already there and the anchor is arithmetic.
+    expect(partsOf(sound.svg)).toEqual([
+      { name: 'lid', at: [400, 150] },
+      { name: 'band', at: [390, 330] },
+    ]);
+  });
+
+  it('is empty for a drawing with no groups at all', () => {
+    expect(
+      partsOf('<svg viewBox="0 0 800 600"><rect x="1" y="1"/></svg>'),
+    ).toEqual([]);
   });
 });

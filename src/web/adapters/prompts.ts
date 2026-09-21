@@ -1382,11 +1382,14 @@ export const PROMPTS = {
       '  never said. This is the one rule that matters most.',
       '- No <script>, <foreignObject>, <image>, <use>, <a>, <style>, no',
       '  event handlers, no links. The markup gets committed to a repo.',
-      '- Put each part somebody could point at in its own <g id="name">',
-      '  — three to six of them — and list those names with the point on',
-      '  the drawing a label line should meet. `aspect` is width over',
-      '  height as you drew it.',
+      '- Put each part somebody could point at in its own <g id="name">,',
+      '  three to six of them. That is what lets a lesson light one part',
+      '  at a time.',
     ].join('\n'),
+    [
+      'Reply with the SVG and nothing else: no explanation before it, no',
+      'notes after it, no code fence. Start at <svg and end at </svg>.',
+    ].join(' '),
   ].join('\n\n'),
 
   stageNarration: [

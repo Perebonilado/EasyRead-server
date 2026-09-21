@@ -932,30 +932,6 @@ export const thingFormSchema = z.object({
 });
 
 /**
- * A drawing of that form: an SVG document drawn in line, with each named
- * part its own group.
- *
- * Markup and not path data. Asking for a single path string of cubic
- * bends on a unit square is the hardest way to ask a model for a
- * picture; asking for the elements it has written a million times is the
- * easiest, and it is what the spec describes and what the rest of this
- * codebase already does.
- */
-export const thingDrawingSchema = z.object({
-  svg: z.string().min(40).max(4000),
-  aspect: z.number().min(0.3).max(3),
-  /** Where a leader line should meet each part, in viewBox units. */
-  parts: z
-    .array(
-      z.object({
-        name: z.string().min(1).max(24),
-        at: z.array(z.number()).length(2),
-      }),
-    )
-    .max(6),
-});
-
-/**
  * The stage narration: the words, the cast of each stretch, and one verb
  * a sentence. Everything a scene shows follows from these by rule, so
  * this is all the writer is ever asked for.

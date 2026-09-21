@@ -98,41 +98,20 @@ async function inFlight<T>(
   return out;
 }
 
-/** The candidate drawn on its own square, for the judge and for the sheet. */
+/** The candidate on its own square, for the judge and for the sheet. */
 function svgOf(drawing: ThingDrawing, size = 200): string {
   const w = Math.round(size * Math.min(1, drawing.aspect));
   const h = Math.round(size / Math.max(1, drawing.aspect));
-  const scale = (d: string) =>
-    d.replace(/-?\d*\.?\d+/g, (n) =>
-      String(Math.round(Number(n) * 1000) / 1000),
-    );
+  // The drawing's own markup, dropped in as it will be stored, so what
+  // the judge and the person look at is what the library will hold.
+  const inner = drawing.svg
+    .replace(/^[\s\S]*?<svg[^>]*>/i, '')
+    .replace(/<\/svg>\s*$/i, '');
   return [
-    `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1 1" width="${w}" height="${h}">`,
-    `<rect width="1" height="1" fill="#11151F"/>`,
-    // Line, not silhouette, because that is what goes into the library
-    // and so it is what the judge and the person have to be looking at.
-    // Shown as a filled shape, a loop of wire is a disc and a section
-    // has no inside, and both of those were being accepted.
-    `<g transform="scale(1,1)" fill="none" stroke-linejoin="round" stroke-linecap="round">`,
-    `<path d="${scale(drawing.body)}" fill="none" stroke="#8DB4F3" stroke-width="0.014"/>`,
-    drawing.detail
-      ? `<path d="${scale(drawing.detail)}" fill="none" stroke="#8DB4F3" stroke-width="0.012"/>`
-      : '',
-    // Each part as its own group, the way the library will draw it, so
-    // what the judge and the person see is what a lesson gets.
-    ...drawing.parts.map((part) =>
-      [
-        `<g id="${part.name}">`,
-        part.shape
-          ? `<path d="${scale(part.shape)}" fill="none" stroke="#C9DCFB" stroke-width="0.011"/>`
-          : '',
-        part.line
-          ? `<path d="${scale(part.line)}" fill="none" stroke="#C9DCFB" stroke-width="0.011"/>`
-          : '',
-        `</g>`,
-      ].join(''),
-    ),
-    `</g></svg>`,
+    `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" width="${w}" height="${h}">`,
+    `<rect width="100" height="100" fill="#11151F"/>`,
+    `<g fill="none" stroke="#8DB4F3" stroke-width="2" stroke-linejoin="round" stroke-linecap="round" color="#8DB4F3">${inner}</g>`,
+    `</svg>`,
   ].join('');
 }
 
@@ -233,6 +212,8 @@ async function main(): Promise<void> {
       // one candidate, and six at once finds a rate limit.
       const drawn = await inFlight(candidates, 3, async () => {
         const one = await llm.thingDrawing({
+          // The drawer is given the name; the judge below never is.
+          term,
           looksLike: form.looksLike,
           parts: form.parts,
           aspect: form.aspect,

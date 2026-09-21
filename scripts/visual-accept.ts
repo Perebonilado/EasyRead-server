@@ -61,33 +61,28 @@ function packSource(entries: Record<string, unknown>): string {
     .sort(([a], [b]) => a.localeCompare(b))
     .map(([name, preset]) => {
       const p = preset as {
-        body: string;
-        detail?: string;
+        svg: string;
         aspect: number;
         tags: string;
-        parts?: Record<
-          string,
-          { at: number[]; fill?: string; stroke?: string }
-        >;
+        outline?: boolean;
+        parts?: Record<string, { at: number[] }>;
       };
       const parts = p.parts
         ? [
             '    parts: {',
             ...Object.entries(p.parts).map(
               ([part, spec]) =>
-                `      ${quote(part)}: { at: [${spec.at[0]}, ${spec.at[1]}]${
-                  spec.fill ? `, fill: ${quote(spec.fill)}` : ''
-                }${spec.stroke ? `, stroke: ${quote(spec.stroke)}` : ''} },`,
+                `      ${quote(part)}: { at: [${spec.at[0]}, ${spec.at[1]}] },`,
             ),
             '    },',
           ].join('\n')
         : null;
       return [
         `  ${quote(name)}: {`,
-        `    body: ${quote(p.body)},`,
-        p.detail ? `    detail: ${quote(p.detail)},` : null,
+        `    svg: ${quote(p.svg)},`,
         `    aspect: ${p.aspect},`,
         `    tags: ${quote(p.tags)},`,
+        p.outline ? '    outline: true,' : null,
         parts,
         '  },',
       ]

@@ -628,23 +628,25 @@ export class FakeLlmAdapter implements LlmGatewayPort {
     aspect: number;
   }) {
     const started = Date.now();
+    const groups = input.parts
+      .map(
+        (part, i) =>
+          `<g id="${part.id}"><line x1="20" y1="${30 + i * 12}" x2="80" y2="${30 + i * 12}"/></g>`,
+      )
+      .join('');
     return Promise.resolve({
       value: {
-        body: 'M0.08 0.22 L0.92 0.22 L0.92 0.86 L0.08 0.86 Z',
-        detail: 'M0.08 0.36 L0.92 0.36',
+        svg:
+          `<svg viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg" fill="none" stroke="currentColor" stroke-width="2">` +
+          `<path d="M6 8 L94 8 L94 92 L6 92 Z"/><line x1="6" y1="20" x2="94" y2="20"/>` +
+          `<circle cx="50" cy="60" r="20"/>` +
+          groups +
+          `</svg>`,
         aspect: input.aspect,
-        // Each part gets ink of its own, as the real drawer must: a band
-        // across the box, stepped down it, so a test exercises the same
-        // addressable-part path a real drawing takes.
-        parts: input.parts.map((part, i) => {
-          const y = 0.3 + i * 0.12;
-          return {
-            name: part.id,
-            at: [0.5, y],
-            shape: `M0.16 ${y.toFixed(2)} L0.84 ${y.toFixed(2)} L0.84 ${(y + 0.08).toFixed(2)} L0.16 ${(y + 0.08).toFixed(2)} Z`,
-            line: null,
-          };
-        }),
+        parts: input.parts.map((part, i) => ({
+          name: part.id,
+          at: [50, 30 + i * 12],
+        })),
       },
       usage: this.usage(started, 200, 140),
     });

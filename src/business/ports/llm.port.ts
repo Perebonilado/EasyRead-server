@@ -542,34 +542,29 @@ export interface LlmGatewayPort {
   >;
 
   /**
-   * A drawing of that form, on the unit square. The name of the thing is
-   * never passed: the drawer works from the description alone, so it
-   * cannot draw what the word means instead of what the thing looks like.
+   * A drawing of that form: a flat schematic SVG, drawn in line, with
+   * each named part its own group so a lesson can light one at a time.
+   *
+   * Markup rather than path data, because asking for a single path of
+   * cubic bends on a unit square is the hardest way to ask a model for a
+   * picture and the elements are the easiest.
    */
   thingDrawing(input: {
     looksLike: string;
     parts: { id: string; shape: string }[];
     aspect: number;
+    /** What it is called. Given to the drawer, withheld from the judge. */
+    term?: string;
     correction?: string;
     /** Raised so six candidates disagree; six of one mind is one candidate. */
     temperature?: number;
   }): Promise<
     LlmResult<{
-      body: string;
-      detail: string | null;
+      /** An SVG document drawn in line, each named part its own <g id>. */
+      svg: string;
       aspect: number;
-      /**
-       * Each part with its own ink, so it can be drawn and lit alone. A
-       * part with only a point can be pointed at and nothing more.
-       */
-      parts: {
-        name: string;
-        at: number[];
-        /** Closed path data for this part alone. Geometry, never paint. */
-        shape: string | null;
-        /** Open path data for this part alone. */
-        line: string | null;
-      }[];
+      /** Where a leader line meets each part, in viewBox units. */
+      parts: { name: string; at: number[] }[];
     }>
   >;
 

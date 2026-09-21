@@ -932,34 +932,24 @@ export const thingFormSchema = z.object({
 });
 
 /**
- * A drawing of that form: a closed outline on the unit square, and each
- * named part as its own ink over it.
+ * A drawing of that form: an SVG document drawn in line, with each named
+ * part its own group.
  *
- * The ink is what makes a part addressable. A part with only a point can
- * be pointed at; a part with its own path can be drawn, lit and dimmed
- * on its own, which is the difference between a lesson that builds a
- * thing up and one where the whole picture arrives at once.
+ * Markup and not path data. Asking for a single path string of cubic
+ * bends on a unit square is the hardest way to ask a model for a
+ * picture; asking for the elements it has written a million times is the
+ * easiest, and it is what the spec describes and what the rest of this
+ * codebase already does.
  */
 export const thingDrawingSchema = z.object({
-  body: z.string().min(8).max(700),
-  detail: z.string().max(700).nullable(),
+  svg: z.string().min(40).max(4000),
   aspect: z.number().min(0.3).max(3),
+  /** Where a leader line should meet each part, in viewBox units. */
   parts: z
     .array(
       z.object({
         name: z.string().min(1).max(24),
-        at: z.array(z.number().min(0).max(1)).length(2),
-        /**
-         * Closed path data for this part alone, drawn over the body.
-         *
-         * Called `shape` and not `fill` on purpose: in SVG, `fill` and
-         * `stroke` name the paint, so a model asked for them answers
-         * "none" and "black" — correctly, and uselessly. These want
-         * geometry, and the field names have to say so.
-         */
-        shape: z.string().max(700).nullable(),
-        /** Open path data for this part alone, drawn over the body. */
-        line: z.string().max(700).nullable(),
+        at: z.array(z.number()).length(2),
       }),
     )
     .max(6),

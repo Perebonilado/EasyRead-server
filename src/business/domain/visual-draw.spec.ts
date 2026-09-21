@@ -3,28 +3,25 @@ import {
   drawingProblems,
   formProblems,
   presetOf,
-  spreadOf,
   type ThingDrawing,
   type ThingForm,
 } from './visual-draw';
+import { SVG_GATE, groupsOf, svgProblems } from './visual-svg';
 
+/** A drawing that should be looked at: line, framed, parts in groups. */
 const sound: ThingDrawing = {
-  body: 'M0.08 0.2 L0.92 0.2 L0.92 0.9 C0.6 0.98 0.3 0.98 0.08 0.9 Z',
-  detail: 'M0.08 0.34 L0.92 0.34',
+  svg: [
+    '<svg viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg" fill="none" stroke="currentColor" stroke-width="2">',
+    '<path d="M6 10 L94 10 L94 90 L6 90 Z"/>',
+    '<line x1="6" y1="78" x2="94" y2="78"/>',
+    '<g id="lid"><line x1="6" y1="24" x2="94" y2="24"/></g>',
+    '<g id="band"><rect x="6" y="50" width="88" height="10"/></g>',
+    '</svg>',
+  ].join(''),
   aspect: 1.2,
   parts: [
-    {
-      name: 'lid',
-      at: [0.5, 0.27],
-      shape: 'M0.08 0.2 L0.92 0.2 L0.92 0.32 L0.08 0.32 Z',
-      line: null,
-    },
-    {
-      name: 'band',
-      at: [0.5, 0.6],
-      shape: null,
-      line: 'M0.08 0.6 L0.92 0.6',
-    },
+    { name: 'lid', at: [50, 24] },
+    { name: 'band', at: [50, 55] },
   ],
 };
 
@@ -38,139 +35,108 @@ const form: ThingForm = {
   aspect: 1.2,
 };
 
+const swap = (svg: string, from: string, to: string) => svg.replace(from, to);
+
 describe('the gate before a person looks', () => {
   it('passes a drawing worth judging', () => {
-    expect(drawingProblems(sound)).toEqual([]);
+    expect(drawingProblems(sound, form)).toEqual([]);
+  });
+
+  it('turns back markup that is not an svg at all', () => {
+    expect(
+      svgProblems('M0.5 0.1 C0.2 0.3 0.4 0.5 0.5 0.9 Z').join(' '),
+    ).toContain('does not start with an <svg>');
+  });
+
+  it('turns back an element the contract does not allow', () => {
+    expect(
+      svgProblems(swap(sound.svg, '<path', '<image href="x.png"/><path')).join(
+        ' ',
+      ),
+    ).toContain('<image> is not allowed');
+  });
+
+  it('turns back a word drawn inside the picture', () => {
+    // The labels go on at lesson time in the page's own words. A word
+    // baked into the drawing is a word the page never said.
+    expect(
+      svgProblems(
+        swap(sound.svg, '<path', '<text x="10" y="10">kidney</text><path'),
+      ).join(' '),
+    ).toContain('<text> is not allowed');
+  });
+
+  it('turns back a drawing that is filled in', () => {
+    // A filled loop of wire is a disc, a filled section has no inside,
+    // and a filled bean has no notch.
+    expect(
+      svgProblems(swap(sound.svg, '<path d', '<path fill="#fff" d')).join(' '),
+    ).toContain('fills the drawing in');
   });
 
   it('turns back a drawing with nothing on it to name', () => {
     expect(
-      drawingProblems({
-        ...sound,
-        body: 'M0.1 0.1 L0.9 0.1 Z',
-        detail: null,
-        parts: [],
-      }).join(' '),
+      svgProblems(
+        '<svg viewBox="0 0 100 100"><path d="M6 10 L94 10 L94 90 Z"/></svg>',
+      ).join(' '),
     ).toContain('nothing on it to name');
-  });
-
-  it('lets a triangle be a volcano and a rectangle be a circuit', () => {
-    // The outlines this set most wants are simple. A floor on the
-    // outline alone threw out both of these for being boxes; the ink
-    // that matters is the crater and the conduit drawn on them.
-    const cone: ThingDrawing = {
-      body: 'M0.5 0.04 L0.96 0.92 L0.04 0.92 Z',
-      detail: 'M0.02 0.92 L0.98 0.92',
-      aspect: 1.1,
-      parts: [
-        {
-          name: 'crater',
-          at: [0.5, 0.1],
-          shape: null,
-          line: 'M0.42 0.1 L0.46 0.14 L0.54 0.14 L0.58 0.1',
-        },
-        {
-          name: 'conduit',
-          at: [0.5, 0.6],
-          shape: null,
-          line: 'M0.47 0.14 L0.47 0.99 M0.53 0.14 L0.53 0.99',
-        },
-      ],
-    };
-    expect(drawingProblems(cone)).toEqual([]);
-  });
-
-  it('turns back an outline left open', () => {
-    expect(
-      drawingProblems({
-        ...sound,
-        body: 'M0.08 0.2 L0.92 0.2 L0.92 0.9 C0.6 0.98 0.3 0.98 0.08 0.9',
-      }).join(' '),
-    ).toContain('not closed');
   });
 
   it('turns back a drawing huddled in a corner', () => {
     expect(
-      drawingProblems({
-        ...sound,
-        body: 'M0.1 0.1 L0.3 0.1 L0.3 0.3 C0.25 0.32 0.15 0.32 0.1 0.3 Z',
-      }).join(' '),
-    ).toContain('percent of its square');
+      svgProblems(
+        '<svg viewBox="0 0 100 100"><path d="M2 2 L20 2 L20 20 Z"/><line x1="2" y1="2" x2="20" y2="20"/><circle cx="10" cy="10" r="5"/><rect x="2" y="2" width="8" height="8"/></svg>',
+      ).join(' '),
+    ).toContain('should fill the viewBox');
   });
 
-  it('turns back a path off the square, and one written in shorthand', () => {
+  it('turns back ink the frame would cut off', () => {
     expect(
-      drawingProblems({
-        ...sound,
-        body: sound.body.replace('0.92', '1.9'),
-      }).join(' '),
-    ).toContain('the outline is not sound');
+      svgProblems(swap(sound.svg, 'height="10"', 'height="140"')).join(' '),
+    ).toContain('would be cut off');
+  });
+});
+
+describe('the parts a lesson has to be able to reach', () => {
+  it('turns back a part with no group of its own', () => {
     expect(
-      drawingProblems({
-        ...sound,
-        body: sound.body.replace('L0.92', 'l0.92'),
-      }).join(' '),
-    ).toContain('relative');
+      drawingProblems(
+        { ...sound, svg: swap(sound.svg, 'id="band"', 'id="rim"') },
+        form,
+      ).join(' '),
+    ).toContain('has no <g id="band">');
   });
 
-  it('turns back a part that points at nothing, or is named twice', () => {
+  it('turns back a group with nothing drawn in it', () => {
+    expect(
+      svgProblems(
+        swap(
+          sound.svg,
+          '<g id="band"><rect x="6" y="50" width="88" height="10"/></g>',
+          '<g id="band"></g>',
+        ),
+        ['band'],
+      ).join(' '),
+    ).toContain('the group for "band" is empty');
+  });
+
+  it('turns back a part with no point for a line to meet it', () => {
+    expect(
+      drawingProblems({ ...sound, parts: [sound.parts[0]] }, form).join(' '),
+    ).toContain('no point for a line to meet it');
+  });
+
+  it('turns back a part named twice', () => {
     expect(
       drawingProblems({
         ...sound,
-        parts: [{ ...sound.parts[0], at: [1.4, 0.2] }],
-      }).join(' '),
-    ).toContain('points off the square');
-    expect(
-      drawingProblems({
-        ...sound,
-        parts: [{ ...sound.parts[0] }, { ...sound.parts[0], name: 'Lid' }],
+        parts: [sound.parts[0], { ...sound.parts[0], name: 'Lid' }],
       }).join(' '),
     ).toContain('named twice');
   });
 
-  it('turns back a part with no ink of its own', () => {
-    expect(
-      drawingProblems({
-        ...sound,
-        parts: [{ name: 'lid', at: [0.5, 0.27], shape: null, line: null }],
-      }).join(' '),
-    ).toContain('no ink of its own');
-  });
-
-  it('turns back a part whose own ink is unsound', () => {
-    expect(
-      drawingProblems({
-        ...sound,
-        parts: [{ ...sound.parts[0], shape: 'M0.1 0.1 l0.4 0.4 Z' }],
-      }).join(' '),
-    ).toContain('the part "lid" shape is not sound');
-  });
-
-  it('turns back a drawing that dropped a part the description named', () => {
-    expect(
-      drawingProblems({ ...sound, parts: [sound.parts[0]] }, form).join(' '),
-    ).toContain('"band" missing');
-  });
-
-  it('turns back a drawing that invented a part nobody asked for', () => {
-    expect(
-      drawingProblems(
-        {
-          ...sound,
-          parts: [...sound.parts, { ...sound.parts[0], name: 'spout' }],
-        },
-        form,
-      ).join(' '),
-    ).toContain('"spout" was not in the description');
-  });
-
-  it('counts a bend by where the pen lands, not by where its handles reach', () => {
-    // One short stroke whose control handles swing wide. Reading every
-    // number as a coordinate calls this a full-width drawing; it is not.
-    const handles = 'M0.40 0.45 C0.02 0.02 0.98 0.98 0.60 0.55 Z';
-    // Reading every number as a coordinate calls this 0.96 wide.
-    expect(spreadOf(handles).w).toBeLessThan(0.5);
-    expect(spreadOf(handles).w).toBeGreaterThan(0.2);
+  it('reads the groups out of the markup', () => {
+    expect(groupsOf(sound.svg)).toEqual(['lid', 'band']);
   });
 
   it('turns back a proportion no box can hold', () => {
@@ -178,6 +144,7 @@ describe('the gate before a person looks', () => {
       'outside what a box can hold',
     );
     expect(DRAW_GATE.maxAspect).toBe(3);
+    expect(SVG_GATE.minElements).toBe(4);
   });
 });
 
@@ -195,13 +162,13 @@ describe('the description, before anything is drawn from it', () => {
     ).toContain('says what it is for');
   });
 
-  it('turns back a part named for its job', () => {
+  it('turns back a part whose shape states a job', () => {
     expect(
       formProblems({
         ...form,
-        parts: [{ id: 'stores', shape: 'a band across the top' }],
+        parts: [{ id: 'mesh', shape: 'the layer that filters the water' }],
       }).join(' '),
-    ).toContain('named for what it does');
+    ).toContain('says what it does');
   });
 });
 
@@ -210,98 +177,32 @@ describe('what a passed drawing becomes', () => {
     const preset = presetOf('heat exchanger', sound, 'a wide box with a lid');
     expect(preset.name).toBe('heat-exchanger');
     expect(preset.aspect).toBe(1.2);
-    expect(preset.body).toBe(sound.body);
-    expect(preset.detail).toBe(sound.detail);
+    expect(preset.svg).toBe(sound.svg);
     expect(Object.keys(preset.parts ?? {})).toEqual(['lid', 'band']);
-    // Keyed by name and carrying its own ink: the shape every pack keeps,
-    // so an accepted drawing drops in without being transposed by hand.
-    expect(preset.parts?.lid.at).toEqual([0.5, 0.27]);
-    expect(preset.parts?.lid.fill).toBe(sound.parts[0].shape);
-    expect(preset.parts?.lid.stroke).toBeUndefined();
-    expect(preset.parts?.band.stroke).toBe(sound.parts[1].line);
+    expect(preset.parts?.lid.at).toEqual([50, 24]);
     expect(preset.tags).toContain('heat exchanger');
     expect(preset.tags).toContain('wide');
   });
 
-  it('leaves out a detail and parts it has none of', () => {
-    const bare = presetOf(
-      'slab',
-      { ...sound, detail: null, parts: [] },
-      'a slab',
-    );
-    expect(bare.detail).toBeUndefined();
-    expect(bare.parts).toBeUndefined();
-  });
-});
-
-describe('measuring a path', () => {
-  it('reads how much of the square it covers', () => {
-    expect(spreadOf('M0 0 L1 0 L1 1 Z')).toEqual({ w: 1, h: 1 });
-    const small = spreadOf('M0.4 0.4 L0.6 0.4 L0.6 0.6 Z');
-    expect(small.w).toBeCloseTo(0.2, 6);
-    expect(small.h).toBeCloseTo(0.2, 6);
-    expect(spreadOf('')).toEqual({ w: 0, h: 0 });
-  });
-});
-
-describe('the bean that used to measure zero', () => {
-  it('measures a curve by the curve, not by its endpoints', () => {
-    // A kidney is two symmetric cubics. Every endpoint shares one x, so
-    // reading endpoints alone called it zero wide and the gate threw out
-    // the exact shape the library most needed.
-    const bean = 'M0.5 0.1 C0.1 0.3 0.1 0.7 0.5 0.9 C0.9 0.7 0.9 0.3 0.5 0.1 Z';
-    expect(spreadOf(bean).w).toBeGreaterThan(DRAW_GATE.minSpread);
-    expect(spreadOf(bean).h).toBeGreaterThan(DRAW_GATE.minSpread);
-  });
-});
-
-describe('a part is a piece of the thing, not all of it', () => {
-  it('turns back a part that is the outline traced again', () => {
-    // The commonest thing that came back: cortex drawn onto the whole
-    // kidney, slope onto the whole volcano. It passes every other check
-    // and makes the drawing useless, because lighting that part lights
-    // the whole thing.
-    expect(
-      drawingProblems({
-        ...sound,
-        parts: [{ ...sound.parts[0], shape: sound.body }],
-      }).join(' '),
-    ).toContain('is the outline drawn again');
-  });
-
-  it('is not fooled by the same path spaced differently', () => {
-    expect(
-      drawingProblems({
-        ...sound,
-        parts: [{ ...sound.parts[0], shape: sound.body.replace(/ /g, '  ') }],
-      }).join(' '),
-    ).toContain('is the outline drawn again');
-  });
-});
-
-describe('what a passed drawing is drawn as', () => {
   it('is line, because a diagram cannot be a silhouette', () => {
-    const preset = presetOf('volcano', sound, 'a cone on a line');
-    expect(preset.outline).toBe(true);
+    expect(presetOf('volcano', sound, 'a cone on a line').outline).toBe(true);
+  });
+
+  it('leaves out parts it has none of', () => {
+    expect(
+      presetOf('slab', { ...sound, parts: [] }, 'a slab').parts,
+    ).toBeUndefined();
   });
 });
 
-describe('ink the box would cut off', () => {
-  it('turns back a part drawn below the square', () => {
-    // A chamber at y=1.05 passes the path contract, which leaves room
-    // for a control point to stray, and is then clipped away entirely:
-    // a part the description names and the learner never sees.
-    expect(
-      drawingProblems({
-        ...sound,
-        parts: [
-          { ...sound.parts[0], shape: 'M0.4 1.05 L0.6 1.05 L0.6 1.12 Z' },
-        ],
-      }).join(' '),
-    ).toContain('would be cut off');
-  });
-
-  it('leaves a drawing that stays inside it alone', () => {
-    expect(drawingProblems(sound)).toEqual([]);
+describe('the markup is model-authored, so it is refused at the door', () => {
+  it('turns back a handler or a link', () => {
+    for (const bad of [
+      '<path onload="x()" d="M6 10 L94 90"/>',
+      '<path href="http://x" d="M6 10 L94 90"/>',
+    ])
+      expect(
+        svgProblems(swap(sound.svg, '<path', bad + '<path')).join(' '),
+      ).toContain('is not allowed in a drawing');
   });
 });

@@ -11,28 +11,17 @@
  * is the judge's job, and the judge is shown the description and never
  * the name, for the same reason the drawer is not.
  */
-import { pathProblem } from './visual';
+import { svgProblems } from './visual-svg';
 
 export interface ThingPart {
   name: string;
+  /** Where a leader line meets this part, in viewBox units. */
   at: number[];
-  /**
-   * Closed path data for this part alone, drawn over the body.
-   *
-   * Named `shape` rather than `fill`, which is what the library calls it
-   * once accepted. In SVG, `fill` names the paint, so a model asked for
-   * a part's `fill` answers "none" or "black" — correctly, and with no
-   * geometry in it at all. The field the model sees has to say what it
-   * wants.
-   */
-  shape?: string | null;
-  /** Open path data for this part alone, drawn over the body. */
-  line?: string | null;
 }
 
 export interface ThingDrawing {
-  body: string;
-  detail: string | null;
+  /** An SVG document drawn in line, each named part its own <g id>. */
+  svg: string;
   aspect: number;
   parts: ThingPart[];
 }
@@ -67,123 +56,6 @@ export const DRAW_GATE = {
   maxAspect: 3,
   maxParts: 6,
 } as const;
-
-const COMMANDS = /[A-Za-z]/g;
-
-/** The corners a path reaches, on the unit square. */
-export interface Box {
-  minX: number;
-  minY: number;
-  maxX: number;
-  maxY: number;
-}
-
-/** A path stripped to its shape, so two ways of writing one compare equal. */
-const tidy = (d: string) =>
-  d
-    .replace(/[\s,]+/g, ' ')
-    .trim()
-    .toUpperCase();
-
-/** How many numbers each command carries, and how many of them are its endpoint. */
-const ARITY: Record<string, number> = { M: 2, L: 2, C: 6, Q: 4, Z: 0 };
-
-/**
- * The box a path covers, as fractions of the unit square.
- *
- * The curve itself is measured, not the numbers written down. Both
- * shortcuts are wrong and wrong in opposite directions: read every
- * number as a coordinate and a cubic's control handles, which the pen
- * never reaches, inflate a huddled drawing into a generous one; read
- * only the endpoints and a bean drawn as two symmetric curves measures
- * zero wide, because its width lives entirely in the bulge. So each
- * segment is walked and sampled, which is what the eye sees.
- */
-export function boxOf(d: string): Box | null {
-  const tokens = d.trim().match(/[A-Za-z]|-?\d*\.?\d+(?:e-?\d+)?/g) ?? [];
-  const xs: number[] = [];
-  const ys: number[] = [];
-  const mark = (x: number, y: number) => {
-    if (Number.isFinite(x) && Number.isFinite(y)) {
-      xs.push(x);
-      ys.push(y);
-    }
-  };
-  /** Points along a bend, enough that its widest part is not missed. */
-  const STEPS = 12;
-  let command = '';
-  let numbers: number[] = [];
-  let at: [number, number] = [0, 0];
-  let started: [number, number] = [0, 0];
-  const walk = () => {
-    const need = ARITY[command] ?? 0;
-    if (!need) {
-      // Close: back to where this subpath began.
-      if (command === 'Z') at = started;
-      return;
-    }
-    // A run of numbers after one letter is that command repeated.
-    for (let i = 0; i + need <= numbers.length; i += need) {
-      const n = numbers.slice(i, i + need);
-      if (command === 'M') {
-        at = [n[0], n[1]];
-        started = at;
-        mark(at[0], at[1]);
-      } else if (command === 'L') {
-        at = [n[0], n[1]];
-        mark(at[0], at[1]);
-      } else if (command === 'C' || command === 'Q') {
-        const [x0, y0] = at;
-        const end: [number, number] =
-          command === 'C' ? [n[4], n[5]] : [n[2], n[3]];
-        for (let k = 0; k <= STEPS; k += 1) {
-          const t = k / STEPS;
-          const u = 1 - t;
-          if (command === 'C')
-            mark(
-              u * u * u * x0 +
-                3 * u * u * t * n[0] +
-                3 * u * t * t * n[2] +
-                t * t * t * end[0],
-              u * u * u * y0 +
-                3 * u * u * t * n[1] +
-                3 * u * t * t * n[3] +
-                t * t * t * end[1],
-            );
-          else
-            mark(
-              u * u * x0 + 2 * u * t * n[0] + t * t * end[0],
-              u * u * y0 + 2 * u * t * n[1] + t * t * end[1],
-            );
-        }
-        at = end;
-      }
-    }
-  };
-  for (const token of tokens) {
-    if (/^[A-Za-z]$/.test(token)) {
-      walk();
-      command = token.toUpperCase();
-      numbers = [];
-    } else numbers.push(Number(token));
-  }
-  walk();
-  if (!xs.length || !ys.length) return null;
-  return {
-    minX: Math.min(...xs),
-    minY: Math.min(...ys),
-    maxX: Math.max(...xs),
-    maxY: Math.max(...ys),
-  };
-}
-
-/** How far across and down a path reaches, as fractions of the unit square. */
-export function spreadOf(d: string): { w: number; h: number } {
-  const box = boxOf(d);
-  return box
-    ? { w: box.maxX - box.minX, h: box.maxY - box.minY }
-    : { w: 0, h: 0 };
-}
 
 /**
  * Words that say what a part is for rather than what it looks like.
@@ -234,67 +106,8 @@ export function drawingProblems(
   drawing: ThingDrawing,
   form?: ThingForm,
 ): string[] {
-  const problems: string[] = [];
-  const bad = pathProblem(drawing.body);
-  if (bad) problems.push(`the outline is not sound: ${bad}`);
-  if (drawing.detail) {
-    const worse = pathProblem(drawing.detail);
-    if (worse) problems.push(`the detail is not sound: ${worse}`);
-  }
-  const count = (d: string | null | undefined) =>
-    ((d ?? '').match(COMMANDS) ?? []).length;
-  const commands = count(drawing.body);
-  if (commands < DRAW_GATE.minBodyCommands)
-    problems.push(
-      `the outline is ${commands} commands; it is a line, not a shape`,
-    );
-  const ink =
-    commands +
-    count(drawing.detail) +
-    drawing.parts.reduce((n, p) => n + count(p.shape) + count(p.line), 0);
-  if (ink < DRAW_GATE.minInk)
-    problems.push(
-      `the whole drawing is ${ink} commands; under ${DRAW_GATE.minInk} there is nothing on it to name`,
-    );
-  if (ink > DRAW_GATE.maxInk)
-    problems.push(
-      `the whole drawing is ${ink} commands; keep it under ${DRAW_GATE.maxInk} so it reads small`,
-    );
-  if (!drawing.body.toUpperCase().includes('Z'))
-    problems.push('the outline is not closed');
-  // Ink outside the square is ink the box clips off. A control point may
-  // stray, which is why the path contract allows a little room; the line
-  // itself may not, and a chamber drawn below the frame is a part the
-  // description names and the learner never sees.
-  for (const [what, d] of [
-    ['outline', drawing.body],
-    ['detail', drawing.detail],
-    ...drawing.parts.flatMap(
-      (p) =>
-        [
-          [`part "${p.name}"`, p.shape],
-          [`part "${p.name}"`, p.line],
-        ] as [string, string | null | undefined][],
-    ),
-  ] as [string, string | null | undefined][]) {
-    if (!d) continue;
-    const box = boxOf(d);
-    if (!box) continue;
-    if (
-      box.minX < -0.02 ||
-      box.minY < -0.02 ||
-      box.maxX > 1.02 ||
-      box.maxY > 1.02
-    )
-      problems.push(
-        `the ${what} is drawn outside the square and would be cut off; keep every line between 0 and 1`,
-      );
-  }
-  const spread = spreadOf(drawing.body);
-  if (spread.w < DRAW_GATE.minSpread || spread.h < DRAW_GATE.minSpread)
-    problems.push(
-      `the drawing fills ${Math.round(spread.w * 100)} by ${Math.round(spread.h * 100)} percent of its square; it should fill at least ${Math.round(DRAW_GATE.minSpread * 100)} each way`,
-    );
+  const asked = (form?.parts ?? []).map((p) => p.id);
+  const problems = svgProblems(drawing.svg, asked);
   if (
     drawing.aspect < DRAW_GATE.minAspect ||
     drawing.aspect > DRAW_GATE.maxAspect
@@ -312,61 +125,16 @@ export function drawingProblems(
     if (!key) problems.push('a part has no name');
     if (seen.has(key)) problems.push(`the part "${part.name}" is named twice`);
     seen.add(key);
-    const [x, y] = part.at;
-    if (
-      typeof x !== 'number' ||
-      typeof y !== 'number' ||
-      x < 0 ||
-      x > 1 ||
-      y < 0 ||
-      y > 1
-    )
-      problems.push(`the part "${part.name}" points off the square`);
-    // Ink is what makes a part a part. Without it the name is a pin in
-    // the picture: a line can point at it, but it can never be drawn,
-    // lit or dimmed on its own, and the lesson can only ever show the
-    // whole thing at once.
-    if (!part.shape && !part.line)
-      problems.push(
-        `the part "${part.name}" has no ink of its own; give it a shape or a line so it can be drawn alone`,
-      );
-    for (const [what, d] of [
-      ['shape', part.shape],
-      ['line', part.line],
-    ] as const) {
-      if (!d) continue;
-      const bad = pathProblem(d);
-      if (bad)
-        problems.push(`the part "${part.name}" ${what} is not sound: ${bad}`);
-      // A part that is the outline over again is not a part. It is the
-      // commonest thing that comes back — cortex traced onto the whole
-      // kidney, slope onto the whole volcano — and it passes every other
-      // check while making the drawing unusable, because lighting that
-      // part lights the entire thing.
-      if (tidy(d) === tidy(drawing.body))
-        problems.push(
-          `the part "${part.name}" is the outline drawn again; a part is one piece of the thing, not all of it`,
-        );
-    }
   }
-  // The parts are the description's, not the drawer's. A drawing that
-  // invents one is drawing something else; one that drops one cannot be
-  // used by the page that asked for it.
-  if (form) {
-    const asked = form.parts
-      .map((p) => p.id.trim().toLowerCase())
-      .filter(Boolean);
-    const drew = drawing.parts.map((p) => p.name.trim().toLowerCase());
-    const missing = asked.filter((p) => !drew.includes(p));
-    const extra = drew.filter((p) => p && !asked.includes(p));
-    if (missing.length)
-      problems.push(
-        `the description named ${asked.length} part(s) and this drew ${drew.length}; ${missing.map((p) => `"${p}"`).join(', ')} missing`,
-      );
-    if (extra.length)
-      problems.push(
-        `${extra.map((p) => `"${p}"`).join(', ')} was not in the description; draw only the parts named`,
-      );
+  // Every part the description named needs somewhere for a callout to
+  // land, as well as a group to light.
+  const pointed = new Set(
+    drawing.parts.map((p) => p.name.trim().toLowerCase()),
+  );
+  for (const id of asked) {
+    const key = id.trim().toLowerCase();
+    if (key && !pointed.has(key))
+      problems.push(`the part "${id}" has no point for a line to meet it`);
   }
   return problems;
 }
@@ -374,8 +142,6 @@ export function drawingProblems(
 /** One named part of a library drawing, in the shape the library keeps them. */
 export interface PresetPartOut {
   at: [number, number];
-  fill?: string;
-  stroke?: string;
 }
 
 /**
@@ -393,8 +159,7 @@ export function presetOf(
   looksLike: string,
 ): {
   name: string;
-  body: string;
-  detail?: string;
+  svg: string;
   aspect: number;
   tags: string;
   outline: true;
@@ -403,8 +168,7 @@ export function presetOf(
   const name = term.trim().toLowerCase().replace(/\s+/g, '-');
   return {
     name,
-    body: drawing.body,
-    ...(drawing.detail ? { detail: drawing.detail } : {}),
+    svg: drawing.svg,
     aspect: Math.round(drawing.aspect * 100) / 100,
     // Everything drawn here is a diagram, and a diagram is line. The
     // spec is flat about it: outline only, no fill on any element.
@@ -423,12 +187,7 @@ export function presetOf(
           parts: Object.fromEntries(
             drawing.parts.map((part) => [
               part.name.trim().toLowerCase(),
-              {
-                at: [part.at[0], part.at[1]] as [number, number],
-                // The library's own words for the same two things.
-                ...(part.shape ? { fill: part.shape } : {}),
-                ...(part.line ? { stroke: part.line } : {}),
-              },
+              { at: [part.at[0], part.at[1]] as [number, number] },
             ]),
           ),
         }

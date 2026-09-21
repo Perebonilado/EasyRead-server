@@ -851,6 +851,14 @@ export class AiSdkLlmAdapter implements LlmGatewayPort, OnModuleInit {
     looksLike: string;
     parts: { id: string; shape: string }[];
     aspect: number;
+    /**
+     * What the thing is called. The drawer is given it and the judge is
+     * not: a name carries what the word is associated with, which helps
+     * a drawing and would wreck a verdict. If the name pulls this toward
+     * a beaker, the judge — which only ever sees the description — still
+     * turns it back for not being a bean with a notch.
+     */
+    term?: string;
     correction?: string;
     /** Raised so six candidates disagree; six of one mind is one candidate. */
     temperature?: number;
@@ -860,9 +868,9 @@ export class AiSdkLlmAdapter implements LlmGatewayPort, OnModuleInit {
       schema: thingDrawingSchema,
       system: PROMPTS.thingDrawing,
       temperature: input.temperature,
-      // The name never comes this way: the drawing follows the form.
       prompt: [
-        `Draw this: ${input.looksLike}`,
+        input.term ? `Draw a ${input.term}.` : '',
+        `It looks like this: ${input.looksLike}`,
         input.parts.length
           ? [
               'Draw these parts, each with its own ink:',
@@ -873,8 +881,8 @@ export class AiSdkLlmAdapter implements LlmGatewayPort, OnModuleInit {
         // The contract again, in the turn that carries the work. Said
         // only in the system prompt it drifts, and what comes back is
         // shaded, three-quarter, and traced from a photograph.
-        'Flat and front-on. No perspective, no shading, no depth, no shadow.',
-        'Outline only: M, L, C, Q and Z, absolute, every number between 0 and 1.',
+        'viewBox="0 0 100 100". fill="none" on everything. Flat and front-on.',
+        'Each named part in its own <g id="...">, the outline outside them.',
         'Draw only what is listed above. Add nothing.',
         input.correction ? `Last time: ${input.correction}` : '',
       ]
@@ -883,15 +891,13 @@ export class AiSdkLlmAdapter implements LlmGatewayPort, OnModuleInit {
     });
     return {
       value: {
-        body: result.value.body,
-        detail: result.value.detail,
+        svg: result.value.svg
+          .trim()
+          .replace(/^```(?:svg|xml|html)?\s*/i, '')
+          .replace(/```\s*$/, '')
+          .trim(),
         aspect: result.value.aspect,
-        parts: result.value.parts.map((p) => ({
-          name: p.name,
-          at: p.at,
-          shape: p.shape,
-          line: p.line,
-        })),
+        parts: result.value.parts.map((p) => ({ name: p.name, at: p.at })),
       },
       usage: result.usage,
     };

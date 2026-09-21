@@ -46,8 +46,20 @@ export interface ThingForm {
 }
 
 export const DRAW_GATE = {
-  /** A silhouette of fewer commands than this is a box with pretensions. */
-  minBodyCommands: 5,
+  /**
+   * Ink across the whole drawing — outline, detail and every part.
+   *
+   * Counted over everything and not over the outline alone, because the
+   * outlines this set most wants are simple: a volcano is a triangle and
+   * a circuit is a rectangle, four commands each, and a floor on the
+   * outline threw out both for being boxes. They are boxes. The drawing
+   * is the box plus the crater, the conduit and the chamber, and that is
+   * what there has to be enough of.
+   */
+  minInk: 6,
+  maxInk: 140,
+  /** An outline still has to be a closed shape and not a line. */
+  minBodyCommands: 3,
   maxCommands: 40,
   /** How much of the square the drawing has to reach across and down. */
   minSpread: 0.6,
@@ -204,16 +216,24 @@ export function drawingProblems(
     const worse = pathProblem(drawing.detail);
     if (worse) problems.push(`the detail is not sound: ${worse}`);
   }
-  const commands = (drawing.body.match(COMMANDS) ?? []).length;
+  const count = (d: string | null | undefined) =>
+    ((d ?? '').match(COMMANDS) ?? []).length;
+  const commands = count(drawing.body);
   if (commands < DRAW_GATE.minBodyCommands)
     problems.push(
-      `the outline is ${commands} commands; under ${DRAW_GATE.minBodyCommands} is a box, not a drawing`,
+      `the outline is ${commands} commands; it is a line, not a shape`,
     );
-  const total =
-    commands + ((drawing.detail ?? '').match(COMMANDS) ?? []).length;
-  if (total > DRAW_GATE.maxCommands)
+  const ink =
+    commands +
+    count(drawing.detail) +
+    drawing.parts.reduce((n, p) => n + count(p.shape) + count(p.line), 0);
+  if (ink < DRAW_GATE.minInk)
     problems.push(
-      `the drawing is ${total} commands; keep it under ${DRAW_GATE.maxCommands} so it reads small`,
+      `the whole drawing is ${ink} commands; under ${DRAW_GATE.minInk} there is nothing on it to name`,
+    );
+  if (ink > DRAW_GATE.maxInk)
+    problems.push(
+      `the whole drawing is ${ink} commands; keep it under ${DRAW_GATE.maxInk} so it reads small`,
     );
   if (!drawing.body.toUpperCase().includes('Z'))
     problems.push('the outline is not closed');

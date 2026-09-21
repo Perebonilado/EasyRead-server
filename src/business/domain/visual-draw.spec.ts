@@ -43,10 +43,41 @@ describe('the gate before a person looks', () => {
     expect(drawingProblems(sound)).toEqual([]);
   });
 
-  it('turns back a box pretending to be a drawing', () => {
+  it('turns back a drawing with nothing on it to name', () => {
     expect(
-      drawingProblems({ ...sound, body: 'M0.1 0.1 L0.9 0.1 Z' }).join(' '),
-    ).toContain('is a box, not a drawing');
+      drawingProblems({
+        ...sound,
+        body: 'M0.1 0.1 L0.9 0.1 Z',
+        detail: null,
+        parts: [],
+      }).join(' '),
+    ).toContain('nothing on it to name');
+  });
+
+  it('lets a triangle be a volcano and a rectangle be a circuit', () => {
+    // The outlines this set most wants are simple. A floor on the
+    // outline alone threw out both of these for being boxes; the ink
+    // that matters is the crater and the conduit drawn on them.
+    const cone: ThingDrawing = {
+      body: 'M0.5 0.04 L0.96 0.92 L0.04 0.92 Z',
+      detail: 'M0.02 0.92 L0.98 0.92',
+      aspect: 1.1,
+      parts: [
+        {
+          name: 'crater',
+          at: [0.5, 0.1],
+          shape: null,
+          line: 'M0.42 0.1 L0.46 0.14 L0.54 0.14 L0.58 0.1',
+        },
+        {
+          name: 'conduit',
+          at: [0.5, 0.6],
+          shape: null,
+          line: 'M0.47 0.14 L0.47 0.99 M0.53 0.14 L0.53 0.99',
+        },
+      ],
+    };
+    expect(drawingProblems(cone)).toEqual([]);
   });
 
   it('turns back an outline left open', () => {

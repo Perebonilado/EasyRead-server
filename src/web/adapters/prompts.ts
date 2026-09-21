@@ -1304,6 +1304,39 @@ export const PROMPTS = {
       'If you cannot describe the form without naming what it is for,',
       'say so in looksLike and give no parts.',
     ].join(' '),
+    // Two descriptions in the shape wanted. A rule about cross-sections
+    // gets read and then not followed; a worked example of one is
+    // followed, and these two carry the whole register — an outline in
+    // one sentence, and parts placed against each other rather than
+    // explained.
+    'Two descriptions of the kind wanted.',
+    [
+      'A bean-shaped body, taller than wide, with a single notch cut into',
+      'the middle of the left edge. Parts:',
+      'cortex — a narrow band following the inside of the outer edge;',
+      'medulla — three wedges inside the band, each pointing toward the notch;',
+      'pelvis — a funnel in the notch, collecting the wedge tips;',
+      'ureter — a single tube leaving the notch and curving down.',
+    ].join(' '),
+    [
+      'A broad triangle standing on a horizontal line, with a small dip',
+      'cut into its apex; the line continues past the triangle on both',
+      'sides. Parts:',
+      'crater — the dip at the apex, a shallow flat-bottomed notch;',
+      'conduit — two near-vertical lines running from the dip down through',
+      'the triangle and below the horizontal line;',
+      'chamber — one rounded blob well below the horizontal line, joined to',
+      'the base of the conduit;',
+      'layers — two long curves inside the triangle, one on each side,',
+      'running parallel to the sloping edges.',
+    ].join(' '),
+    [
+      'Note what the second one does not say: nothing about smoke, ash,',
+      'heat or erupting. Those are what a photograph shows and none of',
+      'them can be drawn as a shape. It puts in the ground line, and the',
+      'ground line is what forces the cross-section that a lesson can',
+      'label.',
+    ].join(' '),
   ].join('\n\n'),
 
   thingDrawing: [
@@ -1313,10 +1346,22 @@ export const PROMPTS = {
       'more closed subpaths, using M, L, C, Q and Z only, absolute',
       'commands, every coordinate between 0 and 1. detail is the lines',
       'drawn over it, open paths, the same commands, or null. Keep it',
-      'simple: under forty commands in all, the shape a person would draw',
-      'in five seconds, recognisable at the size of a thumbnail. Fill the',
-      'square: the drawing touches at least three of its four edges.',
-      'aspect is width over height as you drew it.',
+      'simple: the shape a person would draw in five seconds,',
+      'recognisable at the size of a thumbnail.',
+    ].join(' '),
+    // The square is not the picture's proportion; `aspect` is. A model
+    // told a thing is six times taller than wide draws it down one side
+    // of the square and leaves the rest empty, and then a lesson shows a
+    // sliver. The square gets stretched into the box aspect asks for, so
+    // the drawing has to use all of it.
+    [
+      'Use the whole square, both ways: your drawing spans close to 0 to',
+      '1 across AND close to 0 to 1 down, whatever proportion the thing',
+      'really has. A tall thing is not drawn narrow down the middle of',
+      'the square — it is drawn filling the square, and `aspect`, which',
+      'is width over height, is what makes it tall when it is shown.',
+      'Leaving half the square empty is the single most common way a',
+      'drawing is thrown out.',
     ].join(' '),
     // Parts are ink, not pins. A drawing whose parts cannot be drawn on
     // their own can only ever appear all at once, and that is most of

@@ -3,6 +3,7 @@
  * that is the whole point of a deterministic offline stand-in. */
 import { createHash } from 'crypto';
 import { Injectable } from '@nestjs/common';
+import type { StageNarration } from '../../business/domain/visual-direct';
 import type { Block, RecapBody, TopicPreviewBody } from '../../contracts';
 import type {
   GeneratedItem,
@@ -588,6 +589,114 @@ export class FakeLlmAdapter implements LlmGatewayPort {
     });
   }
 
+  thingForm(input: {
+    term: string;
+  }): Promise<
+    LlmResult<{ looksLike: string; parts: string[]; aspect: number }>
+  > {
+    const started = Date.now();
+    return Promise.resolve({
+      value: {
+        looksLike: `a wide box with a flat lid across the top and a band around its middle, drawn from the side (${input.term})`,
+        parts: ['lid', 'band'],
+        aspect: 1.2,
+      },
+      usage: this.usage(started, 120, 60),
+    });
+  }
+
+  thingDrawing(input: { looksLike: string; parts: string[]; aspect: number }) {
+    const started = Date.now();
+    return Promise.resolve({
+      value: {
+        body: 'M0.08 0.22 L0.92 0.22 L0.92 0.86 L0.08 0.86 Z',
+        detail: 'M0.08 0.36 L0.92 0.36',
+        aspect: input.aspect,
+        parts: input.parts.map((name, i) => ({
+          name,
+          at: [0.5, i === 0 ? 0.29 : 0.6],
+        })),
+      },
+      usage: this.usage(started, 200, 140),
+    });
+  }
+
+  stageNarration(input: {
+    plan: VisualPlan;
+    topicTitle: string;
+    material: string;
+  }): Promise<LlmResult<StageNarration>> {
+    const started = Date.now();
+    const sentences = [
+      'Here is the idea at the heart of this page.',
+      'One thing feeds it, and one thing comes out.',
+      'The part in the middle is what does the work.',
+      'It takes what comes in and passes it along.',
+      'When the middle stalls, nothing reaches the other end.',
+      'A second one of them keeps the work moving.',
+      'Now there are three, sharing the load between them.',
+      'That is the shape of it, end to end.',
+    ];
+    return Promise.resolve({
+      value: {
+        title: input.topicTitle.slice(0, 60),
+        fit: 'good',
+        fitReason: null,
+        sentences,
+        sections: [
+          {
+            title: '1. The parts',
+            cast: [
+              { name: 'source', looksLike: 'a tank that holds things' },
+              { name: 'middle', looksLike: 'a box with a lid' },
+              { name: 'end', looksLike: 'a person waiting' },
+            ],
+            beats: [
+              {
+                sentence: 0,
+                about: ['middle'],
+                does: 'introduces',
+                word: null,
+              },
+              {
+                sentence: 1,
+                about: ['source'],
+                does: 'introduces',
+                word: null,
+              },
+              {
+                sentence: 2,
+                about: ['source', 'middle'],
+                does: 'sends',
+                word: 'in',
+              },
+              {
+                sentence: 3,
+                about: ['middle', 'end'],
+                does: 'sends',
+                word: 'out',
+              },
+            ],
+          },
+          {
+            title: '2. More of them',
+            cast: [
+              { name: 'middle', looksLike: 'a box with a lid' },
+              { name: 'end', looksLike: 'a person waiting' },
+            ],
+            beats: [
+              { sentence: 4, about: ['middle'], does: 'fails', word: null },
+              { sentence: 5, about: ['middle'], does: 'fixes', word: null },
+              { sentence: 6, about: ['middle'], does: 'copies', word: null },
+              { sentence: 7, about: ['middle'], does: 'focuses', word: null },
+            ],
+          },
+        ],
+      },
+      usage: this.usage(started, 400, 300),
+    });
+  }
+
   visualDirector(input: {
     narration: VisualNarration;
     previous?: VisualDecisions;
@@ -599,7 +708,7 @@ export class FakeLlmAdapter implements LlmGatewayPort {
       reasoning: 'A plain card for the test.',
       shouldSee: m.intent,
       confidence: 'high' as const,
-      card: (index === 0 ? 'title' : 'statement') as 'title' | 'statement',
+      card: index === 0 ? ('title' as const) : ('statement' as const),
       heading: index === 0 ? input.narration.title : undefined,
       text: index === 0 ? undefined : m.intent,
     }));

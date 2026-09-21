@@ -111,6 +111,13 @@ export const VISUAL_ICONS = [
   'scale',
   'arrows',
   'star',
+  'x-circle',
+  'check-circle',
+  'warning-circle',
+  'plus',
+  'minus',
+  'lock',
+  'prohibit',
 ] as const;
 export type VisualIcon = (typeof VISUAL_ICONS)[number];
 
@@ -203,178 +210,214 @@ export type VisualPoint = [number, number];
 /** An end of a line or arrow: a point, or the id of an element to attach to. */
 export type VisualEnd = VisualPoint | string;
 
-export type VisualElement =
-  | {
-      id: string;
-      type: 'label';
-      x: number;
-      y: number;
-      text: string;
-      /** eyebrow: small caps with a dot each side; huge: one big figure. */
-      size?: 'sm' | 'md' | 'lg' | 'xl' | 'eyebrow' | 'huge';
-      color?: VisualColor;
-      anchor?: 'start' | 'middle' | 'end';
-      /** Words of the text drawn in the accent colour. */
-      emphasis?: string[];
-      accent?: VisualColor;
-      /** A tick before the text, for an item in a list. */
-      tick?: boolean;
-      /** A figure that counts up to itself when it appears. */
-      count?: boolean;
-    }
-  | {
-      id: string;
-      type: 'chip';
-      x: number;
-      y: number;
-      text: string;
-      color?: VisualColor;
-      /** A small picture from the library at the chip's left. */
-      icon?: string;
-      carry?: string;
-    }
-  | {
-      id: string;
-      type: 'bar';
-      x: number;
-      y: number;
-      w: number;
-      /** How much of the bar is filled, zero to one. */
-      value: number;
-      color?: VisualColor;
-      /** Small text above the bar, left and right. */
-      left?: string;
-      right?: string;
-      /** Ticks below the bar, at a fraction of its width. */
-      markers?: { at: number; text: string }[];
-    }
-  | {
-      id: string;
-      type: 'figure';
-      x: number;
-      y: number;
-      w: number;
-      h: number;
-      /** What the thing is, in the page's own words. */
-      of: string;
-      outline: FigureOutline;
-      parts: FigurePart[];
-      manner: FigureManner;
-      seed: number;
-      color?: VisualColor;
-      carry?: string;
-    }
-  | {
-      id: string;
-      type: 'chart';
-      x: number;
-      y: number;
-      w: number;
-      h: number;
-      /** bars side by side; a line over the series; shares of a whole as one bar; a pair of magnitudes. */
-      kind: 'bars' | 'line' | 'shares' | 'pair';
-      series: { label: string; value: number }[];
-      unit?: string;
-      color?: VisualColor;
-    }
-  | {
-      id: string;
-      type: 'bubble';
-      x: number;
-      y: number;
-      text: string;
-      color?: VisualColor;
-      /** Which way the tail points. */
-      tail?: 'left' | 'right';
-    }
-  | {
-      id: string;
-      type: 'shape';
-      x: number;
-      y: number;
-      w: number;
-      h: number;
-      /** A plain kind, a preset's name from the library, or `path`. */
-      kind: ShapeKind | (PresetShape & Record<never, never>) | 'path';
-      /**
-       * The shape's own outline when the kind is `path`: on a unit square,
-       * move, line, curve and close commands only, scaled into the box.
-       * The one door through which the model draws the thing itself.
-       */
-      d?: string;
-      /** A short word inside the shape, when it needs one. */
-      text?: string;
-      color?: VisualColor;
-      fill?: 'solid' | 'outline' | 'tint';
-      /** How a drawn picture moves once shown. */
-      motion?: VisualMotion;
-      /** Where an `along` thing goes: the centre of the thing after it. */
-      motionTo?: { x: number; y: number };
-      /** What the thing is, so the player can carry it from one card to the next. */
-      carry?: string;
-    }
-  | {
-      id: string;
-      type: 'callout';
-      x: number;
-      y: number;
-      text: string;
-      /** The figure or mechanism the leader line runs to, and the part it points at. */
-      of: string;
-      part: string;
-      anchor?: 'start' | 'end';
-      color?: VisualColor;
-    }
-  | {
-      id: string;
-      type: 'mechanism';
-      x: number;
-      y: number;
-      w: number;
-      h: number;
-      kind: MechanismKind;
-      params: Record<string, number>;
-      /** The stages shown, in order; each runs from the word its phase chip comes in on. */
-      stages: string[];
-      /** The phase chips, one per stage, in order. */
-      phaseIds: string[];
-      seed: number;
-      color?: VisualColor;
-    }
-  | {
-      id: string;
-      type: 'line';
-      from: VisualEnd;
-      to: VisualEnd;
-      color?: VisualColor;
-      dashed?: boolean;
-    }
-  | {
-      id: string;
-      type: 'arrow';
-      from: VisualEnd;
-      to: VisualEnd;
-      /** Curve, minus forty to forty; zero is straight. */
-      bend?: number;
-      color?: VisualColor;
-      double?: boolean;
-    }
-  | {
-      id: string;
-      type: 'icon';
-      name: VisualIcon;
-      x: number;
-      y: number;
-      size: number;
-      color?: VisualColor;
-    }
-  | {
-      id: string;
-      type: 'dots';
-      points: VisualPoint[];
-      r?: number;
-      color?: VisualColor;
-    };
+/** A place a thing may take on the stage, beyond the one it is written at. */
+export interface VisualPlace {
+  x: number;
+  y: number;
+  /** Its size there, against the size it is written at; one is unchanged. */
+  scale?: number;
+}
+
+/**
+ * What every thing on the stage may carry, whatever kind it is.
+ *
+ * `places` are the other places it takes during the scene, and a move cue
+ * names one of them by its position in this list. `bornAt` is the thing it
+ * comes out of, so a copy flies off its original and a packet leaves the
+ * thing that sent it. `on` sits it over another thing, at a corner, so a
+ * cross or a tick or a count can be laid on what is already drawn without
+ * the layout having to know where that ended up.
+ */
+export interface VisualPlaced {
+  places?: VisualPlace[];
+  bornAt?: string;
+  on?: {
+    of: string;
+    corner?:
+      | 'topRight'
+      | 'topLeft'
+      | 'bottomRight'
+      | 'bottomLeft'
+      | 'centre'
+      /** Clear underneath, for the name of the thing above it. */
+      | 'under';
+  };
+}
+
+export type VisualElement = VisualPlaced &
+  (
+    | {
+        id: string;
+        type: 'label';
+        x: number;
+        y: number;
+        text: string;
+        /** eyebrow: small caps with a dot each side; huge: one big figure. */
+        size?: 'sm' | 'md' | 'lg' | 'xl' | 'eyebrow' | 'huge';
+        color?: VisualColor;
+        anchor?: 'start' | 'middle' | 'end';
+        /** Words of the text drawn in the accent colour. */
+        emphasis?: string[];
+        accent?: VisualColor;
+        /** A tick before the text, for an item in a list. */
+        tick?: boolean;
+        /** A figure that counts up to itself when it appears. */
+        count?: boolean;
+      }
+    | {
+        id: string;
+        type: 'chip';
+        x: number;
+        y: number;
+        text: string;
+        color?: VisualColor;
+        /** A small picture from the library at the chip's left. */
+        icon?: string;
+        carry?: string;
+      }
+    | {
+        id: string;
+        type: 'bar';
+        x: number;
+        y: number;
+        w: number;
+        /** How much of the bar is filled, zero to one. */
+        value: number;
+        color?: VisualColor;
+        /** Small text above the bar, left and right. */
+        left?: string;
+        right?: string;
+        /** Ticks below the bar, at a fraction of its width. */
+        markers?: { at: number; text: string }[];
+      }
+    | {
+        id: string;
+        type: 'figure';
+        x: number;
+        y: number;
+        w: number;
+        h: number;
+        /** What the thing is, in the page's own words. */
+        of: string;
+        outline: FigureOutline;
+        parts: FigurePart[];
+        manner: FigureManner;
+        seed: number;
+        color?: VisualColor;
+        carry?: string;
+      }
+    | {
+        id: string;
+        type: 'chart';
+        x: number;
+        y: number;
+        w: number;
+        h: number;
+        /** bars side by side; a line over the series; shares of a whole as one bar; a pair of magnitudes. */
+        kind: 'bars' | 'line' | 'shares' | 'pair';
+        series: { label: string; value: number }[];
+        unit?: string;
+        color?: VisualColor;
+      }
+    | {
+        id: string;
+        type: 'bubble';
+        x: number;
+        y: number;
+        text: string;
+        color?: VisualColor;
+        /** Which way the tail points. */
+        tail?: 'left' | 'right';
+      }
+    | {
+        id: string;
+        type: 'shape';
+        x: number;
+        y: number;
+        w: number;
+        h: number;
+        /** A plain kind, a preset's name from the library, or `path`. */
+        kind: ShapeKind | (PresetShape & Record<never, never>) | 'path';
+        /**
+         * The shape's own outline when the kind is `path`: on a unit square,
+         * move, line, curve and close commands only, scaled into the box.
+         * The one door through which the model draws the thing itself.
+         */
+        d?: string;
+        /** A short word inside the shape, when it needs one. */
+        text?: string;
+        color?: VisualColor;
+        fill?: 'solid' | 'outline' | 'tint';
+        /** How a drawn picture moves once shown. */
+        motion?: VisualMotion;
+        /** Where an `along` thing goes: the centre of the thing after it. */
+        motionTo?: { x: number; y: number };
+        /** What the thing is, so the player can carry it from one card to the next. */
+        carry?: string;
+      }
+    | {
+        id: string;
+        type: 'callout';
+        x: number;
+        y: number;
+        text: string;
+        /** The figure or mechanism the leader line runs to, and the part it points at. */
+        of: string;
+        part: string;
+        anchor?: 'start' | 'end';
+        color?: VisualColor;
+      }
+    | {
+        id: string;
+        type: 'mechanism';
+        x: number;
+        y: number;
+        w: number;
+        h: number;
+        kind: MechanismKind;
+        params: Record<string, number>;
+        /** The stages shown, in order; each runs from the word its phase chip comes in on. */
+        stages: string[];
+        /** The phase chips, one per stage, in order. */
+        phaseIds: string[];
+        seed: number;
+        color?: VisualColor;
+      }
+    | {
+        id: string;
+        type: 'line';
+        from: VisualEnd;
+        to: VisualEnd;
+        color?: VisualColor;
+        dashed?: boolean;
+      }
+    | {
+        id: string;
+        type: 'arrow';
+        from: VisualEnd;
+        to: VisualEnd;
+        /** Curve, minus forty to forty; zero is straight. */
+        bend?: number;
+        color?: VisualColor;
+        double?: boolean;
+      }
+    | {
+        id: string;
+        type: 'icon';
+        name: VisualIcon;
+        x: number;
+        y: number;
+        size: number;
+        color?: VisualColor;
+      }
+    | {
+        id: string;
+        type: 'dots';
+        points: VisualPoint[];
+        r?: number;
+        color?: VisualColor;
+      }
+  );
 
 export type VisualElementType = VisualElement['type'];
 
@@ -388,6 +431,7 @@ export const VISUAL_ACTIONS = [
   'flow',
   'highlight',
   'settle',
+  'move',
   'clear',
 ] as const;
 export type VisualAction = (typeof VISUAL_ACTIONS)[number];
@@ -421,6 +465,8 @@ export interface VisualCue {
   do: VisualAction;
   /** An element id, or "*" for clear. */
   target: string;
+  /** Which of the thing's places it moves to; only on a move. */
+  to?: number;
 }
 
 export interface VisualSegment {
@@ -453,6 +499,8 @@ export interface VisualPlan {
 
 /** A cue on the audio. */
 export interface TimedCue {
+  /** Which of the thing's places it moves to; only on a move. */
+  to?: number;
   atMs: number;
   do: VisualAction;
   target: string;
@@ -1231,7 +1279,13 @@ export function layoutProblems(
   const { W, H, M } = stage;
   const byId = new Map(script.elements.map((e) => [e.id, e] as const));
   const boxes = new Map<string, Box>();
+  // A badge sits on the thing it marks, and is put there by the player
+  // from wherever that thing has got to. Where it is written is only a
+  // still frame's guess, so it is neither measured nor made to keep off
+  // what it is deliberately on top of.
+  const worn = new Set(script.elements.filter((e) => e.on).map((e) => e.id));
   for (const element of script.elements) {
+    if (worn.has(element.id)) continue;
     if (element.type === 'shape' && element.text) {
       const need = shapeTextWidth(element.text);
       if (need > element.w) {
@@ -1314,8 +1368,16 @@ export function layoutProblems(
         if (seen.has(pair)) continue;
         const a = boxes.get(ids[i])!;
         const b = boxes.get(ids[j])!;
+        // A thing born out of another is meant to sit on it: that is what
+        // makes three of a thing read as three and not as a row.
+        const one = byId.get(ids[i]);
+        const two = byId.get(ids[j]);
+        const born =
+          one?.bornAt === ids[j] ||
+          two?.bornAt === ids[i] ||
+          (Boolean(one?.bornAt) && one?.bornAt === two?.bornAt);
         const o = overlap(a, b);
-        if (o.x > 4 && o.y > 4 && !contained(a, b)) {
+        if (!born && o.x > 4 && o.y > 4 && !contained(a, b)) {
           seen.add(pair);
           problems.push(
             `"${ids[i]}" (${round(a.x)} to ${round(a.x + a.w)}, ${round(a.y)} to ${round(a.y + a.h)}) and "${ids[j]}" (${round(b.x)} to ${round(b.x + b.w)}, ${round(b.y)} to ${round(b.y + b.h)}) overlap after sentence ${index + 1}; move one by at least ${round(Math.min(o.x, o.y) + VISUAL_GAP)} units.`,
@@ -2060,7 +2122,11 @@ export function timeVisual(input: {
         atMs = Math.min(startMs, lead);
       else if (SHOWS.has(cue.do))
         atMs = Math.max(startMs, atMs - ANTICIPATION_MS);
-      return { atMs, do: cue.do, target: cue.target };
+      // A move carries where it is going: without it the player has a
+      // thing told to move and nowhere to move to.
+      return cue.to === undefined
+        ? { atMs, do: cue.do, target: cue.target }
+        : { atMs, do: cue.do, target: cue.target, to: cue.to };
     });
     previousEnd = endMs;
     return { text: segment.text, startMs, endMs, words, cues };

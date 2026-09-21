@@ -61,3 +61,6 @@ storage/
 
 # python
 __pycache__/
+
+# Output of `npm run visual:draw`: sheets and candidates to look at.
+drawings/

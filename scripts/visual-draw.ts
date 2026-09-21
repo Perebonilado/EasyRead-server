@@ -44,7 +44,10 @@ import {
   type ThingForm,
 } from '../src/business/domain/visual-draw';
 import { rasterise } from '../src/business/domain/visual-render';
-import { ALLOWED_ELEMENTS } from '../src/business/domain/visual-svg';
+import {
+  ALLOWED_ELEMENTS,
+  DRAW_VIEWBOX,
+} from '../src/business/domain/visual-svg';
 
 const arg = (name: string): string | undefined => {
   const i = process.argv.indexOf(`--${name}`);
@@ -148,7 +151,10 @@ function sheetSvg(cells: { drawing: ThingDrawing; caption: string }[]): string {
       .replace(/^<svg[^>]*>/, '')
       .replace(/<\/svg>$/, '');
     return [
-      `<g transform="translate(${x + 15},${y + 15}) scale(${cell - 30})">${inner}</g>`,
+      // The drawing is on a 100-unit viewBox, not a unit square. Scaling
+      // by the cell drew everything a hundred times too big and clean off
+      // the sheet, which is why a page of them came back blank.
+      `<g transform="translate(${x + 15},${y + 15}) scale(${(cell - 30) / DRAW_VIEWBOX.w})">${inner}</g>`,
       `<text x="${x + cell / 2}" y="${y + cell + 6}" fill="#E9EDF5" font-size="13" font-family="sans-serif" text-anchor="middle">${one.caption}</text>`,
     ].join('');
   });
@@ -193,6 +199,7 @@ async function main(): Promise<void> {
   mkdirSync(out, { recursive: true });
 
   const kept: Kept[] = [];
+  const everyTried: { term: string; tried: Tried[] }[] = [];
   const missed: { term: string; why: string }[] = [];
   let spent = 0;
   const budgetLeft = () => maxCalls - spent;
@@ -311,6 +318,7 @@ async function main(): Promise<void> {
 
     // The sheet of everything tried, kept or not: the only way to see
     // what the drawer is actually producing when none of it gets through.
+    if (tried.length) everyTried.push({ term, tried });
     if (tried.length) {
       const file = join(out, `tried-${term.replace(/\W+/g, '-')}.png`);
       try {
@@ -337,6 +345,13 @@ async function main(): Promise<void> {
 
   // What the accept step reads, and what a person reads.
   writeFileSync(join(out, 'chosen.json'), `${JSON.stringify(kept, null, 2)}\n`);
+  // The candidates themselves, kept or not. A picture of a failed run is
+  // worth a lot; the markup behind it is worth more, and re-rendering it
+  // later costs nothing where redrawing it costs a hundred calls.
+  writeFileSync(
+    join(out, 'tried.json'),
+    `${JSON.stringify(everyTried, null, 2)}\n`,
+  );
   writeFileSync(
     join(out, 'presets.json'),
     `${JSON.stringify(

@@ -118,22 +118,21 @@ function safeInner(svg: string): string {
   );
 }
 
-/** The candidate on its own square, for the judge and for the sheet. */
+/** The candidate on its own tile, for the judge and for the sheet. */
 function svgOf(drawing: ThingDrawing, size = 200): string {
   const w = Math.round(size * Math.min(1, drawing.aspect));
   const h = Math.round(size / Math.max(1, drawing.aspect));
-  // The drawing's own markup, dropped in as it will be stored, so what
-  // the judge and the person look at is what the library will hold.
-  //
-  // Stripped to the allowed elements first, because the sheet now shows
-  // candidates that FAILED the gate, and a failing candidate is exactly
-  // the one carrying a <text> or a tag the rasteriser will refuse. One
-  // of those used to take the whole run down with it.
+  const view =
+    /viewBox\s*=\s*["']([^"']+)["']/i.exec(drawing.svg)?.[1] ??
+    `0 0 ${DRAW_VIEWBOX.w} ${DRAW_VIEWBOX.h}`;
   const inner = safeInner(drawing.svg);
+  // The drawing's own colours, on a light ground. It chooses how it is
+  // drawn now, so nothing here overrides its fills or its strokes;
+  // `color` only answers a currentColor that has nothing else to take.
   return [
-    `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" width="${w}" height="${h}">`,
-    `<rect width="100" height="100" fill="#11151F"/>`,
-    `<g fill="none" stroke="#8DB4F3" stroke-width="2" stroke-linejoin="round" stroke-linecap="round" color="#8DB4F3">${inner}</g>`,
+    `<svg xmlns="http://www.w3.org/2000/svg" viewBox="${view}" width="${w}" height="${h}">`,
+    `<rect x="-9999" y="-9999" width="19998" height="19998" fill="#FFFFFF"/>`,
+    `<g color="#1A2233">${inner}</g>`,
     `</svg>`,
   ].join('');
 }
@@ -146,14 +145,15 @@ function sheetSvg(cells: { drawing: ThingDrawing; caption: string }[]): string {
   const rows = cells.map((one, i) => {
     const x = (i % across) * cell;
     const y = Math.floor(i / across) * (cell + 26);
-    const inner = svgOf(one.drawing, cell - 30)
-      .replace(/^<svg[^>]*>/, '')
-      .replace(/<\/svg>$/, '');
+    // Each tile is a whole <svg> with its own viewBox, nested at the
+    // size it should occupy. Nesting rather than splicing means the
+    // drawing's own coordinate space is honoured whatever it chose.
+    const tile = svgOf(one.drawing, cell - 30).replace(
+      /^<svg /,
+      `<svg x="${x + 15}" y="${y + 15}" `,
+    );
     return [
-      // The drawing is on a 100-unit viewBox, not a unit square. Scaling
-      // by the cell drew everything a hundred times too big and clean off
-      // the sheet, which is why a page of them came back blank.
-      `<g transform="translate(${x + 15},${y + 15}) scale(${(cell - 30) / DRAW_VIEWBOX.w})">${inner}</g>`,
+      tile,
       `<text x="${x + cell / 2}" y="${y + cell + 6}" fill="#E9EDF5" font-size="13" font-family="sans-serif" text-anchor="middle">${one.caption}</text>`,
     ].join('');
   });

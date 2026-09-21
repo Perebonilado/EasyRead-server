@@ -16,16 +16,21 @@
  * what a callout attaches to and what a cue lights on its own.
  */
 
-/** The box every drawing is drawn on. Integers, because models count better than they divide. */
-export const DRAW_VIEWBOX = { w: 100, h: 100 } as const;
+/**
+ * The box every drawing is drawn on.
+ *
+ * Big, because a hundred units is not enough room to draw in. On a
+ * hundred-unit square every coordinate is coarse and what comes back is
+ * a doodle; given eight hundred the same model draws the thing.
+ */
+export const DRAW_VIEWBOX = { w: 800, h: 600 } as const;
 
 export const SVG_GATE = {
   /** Fewer drawn elements than this and there is nothing on it to name. */
   minElements: 4,
-  maxElements: 40,
-  /** How much of the viewBox the drawing has to reach across and down. */
-  minSpread: 0.7,
-  maxChars: 4000,
+  /** Room for a real diagram. Forty elements is a pictogram. */
+  maxElements: 240,
+  maxChars: 24000,
 } as const;
 
 /**
@@ -39,6 +44,7 @@ export const SVG_GATE = {
 export const ALLOWED_ELEMENTS = new Set([
   'svg',
   'g',
+  'defs',
   'path',
   'rect',
   'circle',
@@ -46,7 +52,14 @@ export const ALLOWED_ELEMENTS = new Set([
   'line',
   'polyline',
   'polygon',
+  'lineargradient',
+  'radialgradient',
+  'stop',
+  'clippath',
+  'mask',
+  'marker',
   'title',
+  'desc',
 ]);
 
 /** Elements that put ink on the page, as opposed to grouping it. */
@@ -270,16 +283,6 @@ export function svgProblems(svg: string, parts: string[] = []): string[] {
     problems.push(
       `the drawing is ${ink} elements; keep it under ${SVG_GATE.maxElements} so it reads small`,
     );
-
-  // Line, not silhouette. A filled loop of wire is a disc and a filled
-  // section has no inside, and both were being drawn and accepted.
-  for (const m of text.matchAll(/\bfill\s*=\s*["']([^"']*)["']/gi)) {
-    const v = m[1].trim().toLowerCase();
-    if (v && v !== 'none')
-      problems.push(
-        `fill="${m[1]}" fills the drawing in; every element is fill="none" so an inside edge survives`,
-      );
-  }
 
   // Every part the description named has to be somewhere a cue can reach.
   const written = groupsOf(text);

@@ -111,8 +111,8 @@ export function presetOf(
     name,
     svg: drawing.svg,
     aspect: Math.round(drawing.aspect * 100) / 100,
-    // Everything drawn here is a diagram, and a diagram is line. The
-    // spec is flat about it: outline only, no fill on any element.
+    // A drawing that brought its own colours is drawn as it came; the
+    // renderers leave its fills and strokes alone.
     outline: true as const,
     tags: [
       term.toLowerCase(),

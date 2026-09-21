@@ -134,12 +134,15 @@ function drawn(
 ): string | null {
   const preset = d ? { body: d, aspect: 1 } : PRESETS[name];
   // A drawing that came as markup is dropped in whole, scaled from its
-  // own viewBox into the box the card gave it, groups and all.
+  // own viewBox into the box the card gave it, groups and all. Its own
+  // colours are left alone — it chose how it is drawn — and `color` only
+  // answers a currentColor with nothing else to take.
   if (preset && 'svg' in preset && preset.svg) {
+    const view = /viewBox\s*=\s*["']([^"']+)["']/i.exec(preset.svg)?.[1];
     const inner = preset.svg
       .replace(/^[\s\S]*?<svg[^>]*>/i, '')
       .replace(/<\/svg>\s*$/i, '');
-    return `<g transform="translate(${n(x - w / 2)} ${n(y - h / 2)}) scale(${n(w / 100)} ${n(h / 100)})" fill="none" stroke="${paint.text}" stroke-width="2" stroke-linejoin="round" stroke-linecap="round" color="${paint.text}">${inner}</g>`;
+    return `<svg x="${n(x - w / 2)}" y="${n(y - h / 2)}" width="${n(w)}" height="${n(h)}" viewBox="${view ?? '0 0 800 600'}" overflow="visible"><g color="${paint.text}">${inner}</g></svg>`;
   }
   if (preset && 'body' in preset && preset.body) {
     const at = `translate(${n(x - w / 2)} ${n(y - h / 2)}) scale(${n(w)} ${n(h)})`;

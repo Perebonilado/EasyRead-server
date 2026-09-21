@@ -9,11 +9,11 @@ import { SVG_GATE, boxOf, framed, groupsOf, svgProblems } from './visual-svg';
 /** A drawing that should be looked at: line, parts in groups. */
 const sound: ThingDrawing = {
   svg: [
-    '<svg viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg" fill="none" stroke="currentColor" stroke-width="2">',
-    '<path d="M6 10 L94 10 L94 90 L6 90 Z"/>',
-    '<line x1="6" y1="78" x2="94" y2="78"/>',
-    '<g id="lid"><line x1="6" y1="24" x2="94" y2="24"/></g>',
-    '<g id="band"><rect x="6" y="50" width="88" height="10"/></g>',
+    '<svg viewBox="0 0 800 600" xmlns="http://www.w3.org/2000/svg">',
+    '<path d="M40 60 L760 60 L760 540 L40 540 Z" fill="#eef" stroke="#334"/>',
+    '<line x1="40" y1="470" x2="760" y2="470" stroke="#334"/>',
+    '<g id="lid"><line x1="40" y1="150" x2="760" y2="150" stroke="#334"/></g>',
+    '<g id="band"><rect x="40" y="300" width="700" height="60" fill="#fc8"/></g>',
     '</svg>',
   ].join(''),
   aspect: 1.2,
@@ -53,11 +53,24 @@ describe('the gate before a person looks', () => {
     ).toContain('<text> is not allowed');
   });
 
-  it('turns back a drawing that is filled in', () => {
-    // A filled loop of wire is a disc and a filled section has no inside.
+  it('lets a drawing bring its own colour', () => {
+    // How it is drawn is the drawing's business. Forcing every element
+    // to fill="none" on a 100-unit square is what turned these into
+    // doodles; it gets room and a palette now.
+    expect(drawingProblems(sound)).toEqual([]);
+    expect(SVG_GATE.maxElements).toBeGreaterThan(100);
+  });
+
+  it('lets it use a gradient', () => {
     expect(
-      svgProblems(swap(sound.svg, '<path d', '<path fill="#fff" d')).join(' '),
-    ).toContain('fills the drawing in');
+      svgProblems(
+        swap(
+          sound.svg,
+          '<path',
+          '<defs><linearGradient id="sky"><stop offset="0%"/></linearGradient></defs><path',
+        ),
+      ),
+    ).toEqual([]);
   });
 
   it('turns back a handler or a link', () => {
@@ -73,7 +86,7 @@ describe('the gate before a person looks', () => {
   it('turns back a drawing with nothing on it to name', () => {
     expect(
       svgProblems(
-        '<svg viewBox="0 0 100 100"><path d="M6 10 L94 10 L94 90 Z"/></svg>',
+        '<svg viewBox="0 0 800 600"><path d="M6 10 L94 10 L94 90 Z"/></svg>',
       ).join(' '),
     ).toContain('nothing on it to name');
   });
@@ -102,7 +115,7 @@ describe('the parts a lesson has to be able to reach', () => {
       svgProblems(
         swap(
           sound.svg,
-          '<g id="band"><rect x="6" y="50" width="88" height="10"/></g>',
+          '<g id="band"><rect x="40" y="300" width="700" height="60" fill="#fc8"/></g>',
           '<g id="band"></g>',
         ),
         ['band'],
@@ -138,7 +151,7 @@ describe('the frame is fixed, not failed', () => {
   // says to normalise the viewBox on accept; drawing it again six times
   // over to move it two percent is not a use of anybody's money.
   const cornered = {
-    svg: '<svg viewBox="0 0 100 100"><path d="M20 10 L80 10 L80 70 L20 70 Z"/></svg>',
+    svg: '<svg viewBox="0 0 800 600"><path d="M20 10 L80 10 L80 70 L20 70 Z"/></svg>',
     aspect: 1,
   };
 
@@ -153,7 +166,7 @@ describe('the frame is fixed, not failed', () => {
 
   it('measures the box per axis, from each kind of element', () => {
     const box = boxOf(
-      '<svg viewBox="0 0 100 100"><circle cx="50" cy="40" r="10"/><rect x="20" y="60" width="30" height="5"/></svg>',
+      '<svg viewBox="0 0 800 600"><circle cx="50" cy="40" r="10"/><rect x="20" y="60" width="30" height="5"/></svg>',
     );
     expect(box).toEqual({ minX: 20, minY: 30, maxX: 60, maxY: 65 });
   });

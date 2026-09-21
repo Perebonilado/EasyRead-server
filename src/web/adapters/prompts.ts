@@ -1289,6 +1289,13 @@ export const PROMPTS = {
       'geometry too: "three wedges inside the band, each pointing toward',
       'the notch", never "the part that filters".',
     ].join(' '),
+    [
+      'Parts are features ON the shape — an edge, a notch, a band, a',
+      'chamber, a set of lines. Do not name the whole outline as one of',
+      'them: if the outline is a cone, "cone" is not a part, and the',
+      'parts are the crater, the conduit, the layers. Each has to be',
+      'something a person could point at separately from the rest.',
+    ].join(' '),
     // The name is the trap. A word carries what it is associated with,
     // and reaching for that is how "circuit" becomes a printed board
     // with chips on it rather than the loop a lesson draws.
@@ -1334,6 +1341,14 @@ export const PROMPTS = {
       'and that line is what forces a section a lesson can label, instead',
       'of a picture of the outside.',
     ].join(' '),
+    // Two examples in front of it, and the last run put a kidney on a
+    // horizontal line because the tooth was standing on one.
+    [
+      'Those two show the shape of an answer, not features to reuse.',
+      'Take the register from them and nothing else: a thing that does',
+      'not stand on a line does not get one, and a thing with no roots',
+      'does not grow any.',
+    ].join(' '),
   ].join('\n\n'),
 
   thingDrawing: [
@@ -1363,9 +1378,11 @@ export const PROMPTS = {
       '- Draw only what the description lists. Add nothing. If it gives a',
       '  count, draw exactly that count.',
       '- Every named part is its own <g id="name"> with the ink of that',
-      '  part inside it and nothing else. The outline goes outside the',
-      '  groups. A group is what a lesson points at and lights on its',
-      '  own, so a part that is the whole outline again is no use.',
+      '  part inside it and nothing else. A group is what a lesson points',
+      '  at and lights on its own. If one of the named parts IS the',
+      '  overall shape — a cone, a loop, a bean — then the outline goes',
+      '  in that group; otherwise the outline sits outside them all.',
+      '  Every name you are given ends up as a group, without exception.',
     ].join('\n'),
     [
       'One drawing of the register expected — a thing described as "a dome',
@@ -1389,9 +1406,10 @@ export const PROMPTS = {
       '</svg>',
     ].join('\n'),
     [
-      'Note the outline is one path outside every group, each part is a',
-      'group with only its own ink in it, nothing is filled, and the',
-      'drawing touches all four edges.',
+      'Note each part is a group with only its own ink in it, nothing is',
+      'filled, and the drawing touches all four edges. Here the outline',
+      'was not one of the names asked for, so it sits outside the groups;',
+      'had "cap" been asked for, the dome would have gone in <g id="cap">.',
     ].join(' '),
     'Give `at` for each part: the point in viewBox units a leader line should meet it.',
   ].join('\n\n'),

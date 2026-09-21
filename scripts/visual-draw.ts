@@ -145,6 +145,12 @@ interface Kept {
   drawing: ThingDrawing;
 }
 
+/** Everything drawn for one term, kept or not, so a failed run can be looked at. */
+interface Tried {
+  drawing: ThingDrawing;
+  caption: string;
+}
+
 async function main(): Promise<void> {
   const asked = (arg('terms') ?? '')
     .split(',')
@@ -203,6 +209,7 @@ async function main(): Promise<void> {
 
     let taken: ThingDrawing | null = null;
     let note = '';
+    const tried: Tried[] = [];
     for (let round = 0; round <= repairs && !taken; round += 1) {
       if (budgetLeft() < candidates + 1) {
         note = note || 'ran out of budget';
@@ -228,6 +235,15 @@ async function main(): Promise<void> {
         one,
         wrong: drawingProblems(one, form),
       }));
+      // Every candidate is kept for the sheet, with what was wrong with
+      // it. A run that draws nothing used to leave nothing to look at,
+      // which is no way to find out why it drew nothing.
+      judged.forEach((j, i) =>
+        tried.push({
+          drawing: j.one,
+          caption: `${round + 1}.${i + 1} ${j.wrong.length ? j.wrong[0].slice(0, 44) : 'through the gate'}`,
+        }),
+      );
       const passed = judged.filter((j) => !j.wrong.length).map((j) => j.one);
       console.log(
         `  round ${round + 1}: ${passed.length} of ${drawn.length} through the gate`,
@@ -263,6 +279,17 @@ async function main(): Promise<void> {
         note = said.value.wrong ?? note;
         console.log(`  the judge took none: ${note}`);
       }
+    }
+
+    // The sheet of everything tried, kept or not: the only way to see
+    // what the drawer is actually producing when none of it gets through.
+    if (tried.length) {
+      const file = join(out, `tried-${term.replace(/\W+/g, '-')}.png`);
+      writeFileSync(
+        file,
+        await rasterise(sheetSvg(tried), Math.min(4, tried.length) * 210),
+      );
+      console.log(`  ${tried.length} candidate(s) drawn: ${file}`);
     }
 
     if (!taken) {

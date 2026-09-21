@@ -52,13 +52,16 @@ describe('the gate before a person looks', () => {
     ).toContain('<image> is not allowed');
   });
 
-  it('turns back a word drawn inside the picture', () => {
-    // The labels go on at lesson time in the page's own words.
+  it('lets it label the diagram', () => {
+    // Banning words asked for something no model has a reference for —
+    // every anatomical diagram it has seen is labelled — and what came
+    // back was an abstract blob. The words can be stripped afterwards;
+    // the shape cannot be put in afterwards.
     expect(
       svgProblems(
-        swap(sound.svg, '<path', '<text x="10" y="10">kidney</text><path'),
-      ).join(' '),
-    ).toContain('<text> is not allowed');
+        swap(sound.svg, '<path', '<text x="10" y="10">cortex</text><path'),
+      ),
+    ).toEqual([]);
   });
 
   it('lets a drawing bring its own colour', () => {

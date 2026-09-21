@@ -46,6 +46,26 @@ export const ALLOWED_ELEMENTS = new Set([
   'svg',
   'g',
   'defs',
+  // Words, which used to be banned outright.
+  //
+  // The reasoning was sound — the card rules put labels on at lesson
+  // time in the page's own vocabulary — and the cost was not worth it.
+  // Every anatomical diagram a model has ever seen is labelled, so
+  // asking for one without labels asks for something it has no
+  // reference for, and what comes back is an abstract blob. Asked for a
+  // labelled kidney it draws a kidney. The words can be taken out
+  // afterwards; the shape cannot be put in.
+  'text',
+  'tspan',
+  'filter',
+  'fedropshadow',
+  'fegaussianblur',
+  'feoffset',
+  'feblend',
+  'femerge',
+  'femergenode',
+  'feflood',
+  'fecomposite',
   'path',
   'rect',
   'circle',

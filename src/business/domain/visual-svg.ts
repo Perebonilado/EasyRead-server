@@ -222,7 +222,10 @@ export function framed(
   if (!box) return drawing;
   const w = box.maxX - box.minX;
   const h = box.maxY - box.minY;
-  if (w <= 0 || h <= 0) return drawing;
+  // `!(w > 0)` and not `w <= 0`, because NaN fails every comparison and
+  // would sail through the second form into a viewBox of NaNs.
+  if (!(w > 0) || !(h > 0) || !Number.isFinite(w) || !Number.isFinite(h))
+    return drawing;
   const view = [
     (box.minX - pad).toFixed(2),
     (box.minY - pad).toFixed(2),
@@ -236,6 +239,30 @@ export function framed(
     ),
     aspect: Math.min(3, Math.max(0.3, (w + pad * 2) / (h + pad * 2))),
   };
+}
+
+/**
+ * Whether the rasteriser will survive this markup.
+ *
+ * resvg is Rust, and on degenerate geometry it does not throw — it
+ * panics, and a panic in a native module takes the whole process down
+ * with it, so a try/catch around the call is no use at all. One bad
+ * candidate ended a run mid-way and lost the terms after it. So the
+ * numbers are checked here, before it is ever handed over.
+ */
+export function renderable(svg: string): boolean {
+  const view = /viewBox\s*=\s*["']([^"']+)["']/i.exec(svg);
+  if (!view) return false;
+  const box = nums(view[1]);
+  if (box.length !== 4) return false;
+  const [, , w, h] = box;
+  if (!(w > 0) || !(h > 0) || w > 1e6 || h > 1e6) return false;
+  // Any number anywhere that is not finite, or absurd enough to overflow
+  // the geometry it is turned into.
+  for (const m of svg.matchAll(/=\s*["']([^"']*)["']/g))
+    for (const n of nums(m[1]))
+      if (!Number.isFinite(n) || Math.abs(n) > 1e6) return false;
+  return !/\b(NaN|Infinity)\b/.test(svg);
 }
 
 /**
@@ -254,6 +281,11 @@ export function svgProblems(svg: string, parts: string[] = []): string[] {
     );
   if (!/\bviewBox\s*=\s*["'][^"']+["']/i.test(text))
     problems.push('the <svg> has no viewBox');
+
+  if (!renderable(text))
+    problems.push(
+      'the drawing has a number in it that nothing can draw; check the viewBox and the coordinates',
+    );
 
   const elements = elementsOf(text);
   const banned = [

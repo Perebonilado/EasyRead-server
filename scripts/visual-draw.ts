@@ -46,6 +46,7 @@ import {
   ALLOWED_ELEMENTS,
   DRAW_VIEWBOX,
   framed,
+  renderable,
 } from '../src/business/domain/visual-svg';
 
 const arg = (name: string): string | undefined => {
@@ -139,6 +140,11 @@ function svgOf(drawing: ThingDrawing, size = 200): string {
 
 /** A grid of drawings under captions, for the judge to choose from or a person to accept from. */
 function sheetSvg(cells: { drawing: ThingDrawing; caption: string }[]): string {
+  // A panic in the rasteriser aborts the process, so anything it cannot
+  // take is dropped here rather than risked.
+  cells = cells.filter((c) => renderable(c.drawing.svg));
+  if (!cells.length)
+    return '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 210 210" width="210" height="210"><rect width="100%" height="100%" fill="#0B0F17"/></svg>';
   const cell = 210;
   const across = Math.min(4, Math.max(1, cells.length));
   const down = Math.ceil(cells.length / across);

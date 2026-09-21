@@ -4,7 +4,14 @@ import {
   presetOf,
   type ThingDrawing,
 } from './visual-draw';
-import { SVG_GATE, boxOf, framed, groupsOf, svgProblems } from './visual-svg';
+import {
+  SVG_GATE,
+  boxOf,
+  framed,
+  groupsOf,
+  renderable,
+  svgProblems,
+} from './visual-svg';
 
 /** A drawing that should be looked at: line, parts in groups. */
 const sound: ThingDrawing = {
@@ -190,5 +197,46 @@ describe('what a passed drawing becomes', () => {
 
   it('is line, because a diagram cannot be a silhouette', () => {
     expect(presetOf('volcano', sound, 'volcano').outline).toBe(true);
+  });
+});
+
+describe('markup the rasteriser would die on', () => {
+  // resvg panics rather than throws, and a panic in a native module
+  // aborts the process — so a try/catch is no use and these have to be
+  // caught before it ever sees them. One of them ended a run mid-way.
+  it('refuses a viewBox with no size', () => {
+    expect(renderable('<svg viewBox="0 0 0 0"><path d="M1 1"/></svg>')).toBe(
+      false,
+    );
+  });
+
+  it('refuses a number that is not a number', () => {
+    expect(
+      renderable('<svg viewBox="0 0 NaN 600"><path d="M1 1"/></svg>'),
+    ).toBe(false);
+  });
+
+  it('refuses coordinates big enough to overflow the geometry', () => {
+    expect(
+      renderable('<svg viewBox="0 0 800 600"><rect x="1e12" y="0"/></svg>'),
+    ).toBe(false);
+  });
+
+  it('says so in the gate rather than letting it reach the sheet', () => {
+    expect(
+      svgProblems('<svg viewBox="0 0 0 0"><path d="M1 1"/></svg>').join(' '),
+    ).toContain('nothing can draw');
+  });
+
+  it('lets a sound drawing through', () => {
+    expect(renderable(sound.svg)).toBe(true);
+  });
+
+  it('never writes a viewBox of NaNs when the geometry is degenerate', () => {
+    const out = framed({
+      svg: '<svg viewBox="0 0 800 600"><g/></svg>',
+      aspect: 1,
+    });
+    expect(out.svg).not.toContain('NaN');
   });
 });

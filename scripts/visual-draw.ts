@@ -102,6 +102,25 @@ async function inFlight<T>(
   return out;
 }
 
+/**
+ * Whether the rasteriser can actually draw this one.
+ *
+ * The spec's first gate rule is "parses and renders", and until now
+ * nothing checked it: a candidate with a malformed attribute took out
+ * the judge's whole sheet, and with it the other five candidates and
+ * the round. Rendered small and on its own, it costs almost nothing and
+ * the failure belongs to the candidate that caused it.
+ */
+async function renders(drawing: ThingDrawing): Promise<boolean> {
+  if (!renderable(drawing.svg)) return false;
+  try {
+    await rasterise(svgOf(drawing, 48), 48);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 /** Markup cut down to what the rasteriser will certainly accept. */
 function safeInner(svg: string): string {
   return (
@@ -140,8 +159,9 @@ function svgOf(drawing: ThingDrawing, size = 200): string {
 
 /** A grid of drawings under captions, for the judge to choose from or a person to accept from. */
 function sheetSvg(cells: { drawing: ThingDrawing; caption: string }[]): string {
-  // A panic in the rasteriser aborts the process, so anything it cannot
-  // take is dropped here rather than risked.
+  // Anything the rasteriser cannot take is dropped rather than risked:
+  // a panic aborts the process outright, and a parse error used to take
+  // the whole sheet with it.
   cells = cells.filter((c) => renderable(c.drawing.svg));
   if (!cells.length)
     return '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 210 210" width="210" height="210"><rect width="100%" height="100%" fill="#0B0F17"/></svg>';
@@ -239,10 +259,16 @@ async function main(): Promise<void> {
       });
       spent += candidates;
 
-      const judged = drawn.map((one) => ({
-        one,
-        wrong: drawingProblems(one),
-      }));
+      const judged = await Promise.all(
+        drawn.map(async (one) => {
+          const wrong = drawingProblems(one);
+          if (!(await renders(one)))
+            wrong.unshift(
+              'the drawing will not render: check the markup is well formed',
+            );
+          return { one, wrong };
+        }),
+      );
       // Every candidate is kept for the sheet, with what was wrong with
       // it. A run that draws nothing used to leave nothing to look at,
       // which is no way to find out why it drew nothing.
@@ -301,12 +327,20 @@ async function main(): Promise<void> {
     if (tried.length) everyTried.push({ term, tried });
     if (tried.length) {
       const file = join(out, `tried-${term.replace(/\W+/g, '-')}.png`);
+      const drawable: Tried[] = [];
+      for (const one of tried)
+        if (await renders(one.drawing)) drawable.push(one);
       try {
         writeFileSync(
           file,
-          await rasterise(sheetSvg(tried), Math.min(4, tried.length) * 210),
+          await rasterise(
+            sheetSvg(drawable),
+            Math.min(4, Math.max(1, drawable.length)) * 210,
+          ),
         );
-        console.log(`  ${tried.length} candidate(s) drawn: ${file}`);
+        console.log(
+          `  ${drawable.length} of ${tried.length} candidate(s) drawn: ${file}`,
+        );
       } catch (cause) {
         // A sheet nobody can render is a shame, not a reason to lose the
         // other four terms and the hundred calls already spent.

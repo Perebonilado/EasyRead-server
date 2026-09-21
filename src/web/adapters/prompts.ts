@@ -1295,6 +1295,8 @@ export const PROMPTS = {
       'them: if the outline is a cone, "cone" is not a part, and the',
       'parts are the crater, the conduit, the layers. Each has to be',
       'something a person could point at separately from the rest.',
+      'Never name one "shape", "outline", "body" or "form" — those are',
+      'the thing itself and there is nothing left to point at.',
     ].join(' '),
     // The name is the trap. A word carries what it is associated with,
     // and reaching for that is how "circuit" becomes a printed board
@@ -1382,7 +1384,9 @@ export const PROMPTS = {
       '  at and lights on its own. If one of the named parts IS the',
       '  overall shape — a cone, a loop, a bean — then the outline goes',
       '  in that group; otherwise the outline sits outside them all.',
-      '  Every name you are given ends up as a group, without exception.',
+      '  Every name you are given ends up as a group, without exception,',
+      '  under the name you were given: id="renal pelvis" becomes',
+      '  id="renal-pelvis", and nothing else.',
     ].join('\n'),
     [
       'One drawing of the register expected — a thing described as "a dome',

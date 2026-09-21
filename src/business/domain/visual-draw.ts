@@ -11,7 +11,7 @@
  * is the judge's job, and the judge is shown the description and never
  * the name, for the same reason the drawer is not.
  */
-import { svgProblems } from './visual-svg';
+import { idKey, svgProblems } from './visual-svg';
 
 export interface ThingPart {
   name: string;
@@ -73,8 +73,15 @@ const PURPOSE =
  * What is wrong with a description, before anything is drawn from it.
  * Empty when it is geometry all the way down.
  */
+const WHOLE = /^(the\s+)?(shape|outline|body|form|silhouette|thing|object)$/i;
+
 export function formProblems(form: ThingForm): string[] {
   const problems: string[] = [];
+  for (const part of form.parts)
+    if (WHOLE.test(part.id.trim()))
+      problems.push(
+        `"${part.id}" is the whole thing, not a part of it; name a feature on it a person could point at separately`,
+      );
   const said = PURPOSE.exec(form.looksLike);
   if (said)
     problems.push(
@@ -121,18 +128,16 @@ export function drawingProblems(
     );
   const seen = new Set<string>();
   for (const part of drawing.parts) {
-    const key = part.name.trim().toLowerCase();
+    const key = idKey(part.name);
     if (!key) problems.push('a part has no name');
     if (seen.has(key)) problems.push(`the part "${part.name}" is named twice`);
     seen.add(key);
   }
   // Every part the description named needs somewhere for a callout to
   // land, as well as a group to light.
-  const pointed = new Set(
-    drawing.parts.map((p) => p.name.trim().toLowerCase()),
-  );
+  const pointed = new Set(drawing.parts.map((p) => idKey(p.name)));
   for (const id of asked) {
-    const key = id.trim().toLowerCase();
+    const key = idKey(id);
     if (key && !pointed.has(key))
       problems.push(`the part "${id}" has no point for a line to meet it`);
   }

@@ -100,6 +100,17 @@ export function groupHasInk(svg: string, id: string): boolean {
   return elementsOf(inside).some((el) => DRAWN.has(el));
 }
 
+/**
+ * A name reduced to what it is, for matching.
+ *
+ * The describer writes "renal pelvis" and the drawer writes
+ * `<g id="renal-pelvis">` or `renalPelvis`, and all three are the same
+ * part. Comparing the words as written failed every time a part had two
+ * of them in it.
+ */
+export const idKey = (name: string) =>
+  name.toLowerCase().replace(/[^a-z0-9]/g, '');
+
 /** Every number written in a coordinate or size attribute. */
 function coordsOf(svg: string): number[] {
   const out: number[] = [];
@@ -170,17 +181,22 @@ export function svgProblems(svg: string, parts: string[] = []): string[] {
   }
 
   // Every part the description named has to be somewhere a cue can reach.
-  const ids = groupsOf(text).map((id) => id.trim().toLowerCase());
+  const written = groupsOf(text);
+  const keys = written.map(idKey);
   for (const part of parts) {
-    const key = part.trim().toLowerCase();
+    const key = idKey(part);
     if (!key) continue;
-    if (!ids.includes(key)) {
+    const at = keys.indexOf(key);
+    if (at < 0) {
       problems.push(
-        `the part "${part}" has no <g id="${key}">; each named part is its own group so a lesson can point at it`,
+        `the part "${part}" has no group of its own; give it <g id="${part
+          .trim()
+          .toLowerCase()
+          .replace(/[^a-z0-9]+/g, '-')}"> so a lesson can point at it`,
       );
       continue;
     }
-    if (!groupHasInk(text, groupsOf(text)[ids.indexOf(key)]))
+    if (!groupHasInk(text, written[at]))
       problems.push(`the group for "${part}" is empty`);
   }
 

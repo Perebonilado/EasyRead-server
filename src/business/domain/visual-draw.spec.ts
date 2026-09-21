@@ -98,13 +98,22 @@ describe('the gate before a person looks', () => {
 });
 
 describe('the parts a lesson has to be able to reach', () => {
+  it('matches a two-word part to the id the drawer wrote for it', () => {
+    // "renal pelvis" and <g id="renal-pelvis"> are the same part; so is
+    // renalPelvis. Comparing them as written failed on every part whose
+    // name had a space in it.
+    expect(
+      svgProblems(swap(sound.svg, 'id="band"', 'id="the-Band"'), ['the band']),
+    ).toEqual([]);
+  });
+
   it('turns back a part with no group of its own', () => {
     expect(
       drawingProblems(
         { ...sound, svg: swap(sound.svg, 'id="band"', 'id="rim"') },
         form,
       ).join(' '),
-    ).toContain('has no <g id="band">');
+    ).toContain('the part "band" has no group of its own');
   });
 
   it('turns back a group with nothing drawn in it', () => {
@@ -204,5 +213,16 @@ describe('the markup is model-authored, so it is refused at the door', () => {
       expect(
         svgProblems(swap(sound.svg, '<path', bad + '<path')).join(' '),
       ).toContain('is not allowed in a drawing');
+  });
+});
+
+describe('a part has to be a part', () => {
+  it('turns back a description that names the whole thing as one', () => {
+    // It came back with a part called "shape", and then the drawer had
+    // nothing to put in a group that was not the drawing itself.
+    for (const id of ['shape', 'outline', 'the body'])
+      expect(
+        formProblems({ ...form, parts: [{ id, shape: 'a curve' }] }).join(' '),
+      ).toContain('is the whole thing, not a part of it');
   });
 });

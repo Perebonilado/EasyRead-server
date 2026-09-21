@@ -44,6 +44,7 @@ import {
   type ThingForm,
 } from '../src/business/domain/visual-draw';
 import { rasterise } from '../src/business/domain/visual-render';
+import { ALLOWED_ELEMENTS } from '../src/business/domain/visual-svg';
 
 const arg = (name: string): string | undefined => {
   const i = process.argv.indexOf(`--${name}`);
@@ -98,15 +99,35 @@ async function inFlight<T>(
   return out;
 }
 
+/** Markup cut down to what the rasteriser will certainly accept. */
+function safeInner(svg: string): string {
+  return (
+    svg
+      .replace(/^[\s\S]*?<svg[^>]*>/i, '')
+      .replace(/<\/svg>\s*$/i, '')
+      // Elements with content that is not ink: take the content too.
+      .replace(/<\s*(text|title|style|script)\b[\s\S]*?<\/\s*\1\s*>/gi, '')
+      // Anything else outside the allowed set, including a stray open tag.
+      .replace(
+        /<\s*\/?\s*([a-zA-Z][\w:-]*)\b[^>]*\/?>/g,
+        (tag, name: string) =>
+          ALLOWED_ELEMENTS.has(name.toLowerCase()) ? tag : '',
+      )
+  );
+}
+
 /** The candidate on its own square, for the judge and for the sheet. */
 function svgOf(drawing: ThingDrawing, size = 200): string {
   const w = Math.round(size * Math.min(1, drawing.aspect));
   const h = Math.round(size / Math.max(1, drawing.aspect));
   // The drawing's own markup, dropped in as it will be stored, so what
   // the judge and the person look at is what the library will hold.
-  const inner = drawing.svg
-    .replace(/^[\s\S]*?<svg[^>]*>/i, '')
-    .replace(/<\/svg>\s*$/i, '');
+  //
+  // Stripped to the allowed elements first, because the sheet now shows
+  // candidates that FAILED the gate, and a failing candidate is exactly
+  // the one carrying a <text> or a tag the rasteriser will refuse. One
+  // of those used to take the whole run down with it.
+  const inner = safeInner(drawing.svg);
   return [
     `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" width="${w}" height="${h}">`,
     `<rect width="100" height="100" fill="#11151F"/>`,
@@ -260,12 +281,19 @@ async function main(): Promise<void> {
 
       // Shown together and numbered, so the judge chooses rather than
       // settling for the first one it can live with.
-      const png = await rasterise(
-        sheetSvg(
-          passed.map((one, i) => ({ drawing: one, caption: String(i + 1) })),
-        ),
-        Math.min(4, passed.length) * 210,
-      );
+      let png: Buffer;
+      try {
+        png = await rasterise(
+          sheetSvg(
+            passed.map((one, i) => ({ drawing: one, caption: String(i + 1) })),
+          ),
+          Math.min(4, passed.length) * 210,
+        );
+      } catch (cause) {
+        note = `the drawing would not render: ${String(cause)}`;
+        console.log(`  ${note}`);
+        continue;
+      }
       const said = await llm.judgeDrawings({
         png,
         looksLike: form.looksLike,
@@ -285,11 +313,17 @@ async function main(): Promise<void> {
     // what the drawer is actually producing when none of it gets through.
     if (tried.length) {
       const file = join(out, `tried-${term.replace(/\W+/g, '-')}.png`);
-      writeFileSync(
-        file,
-        await rasterise(sheetSvg(tried), Math.min(4, tried.length) * 210),
-      );
-      console.log(`  ${tried.length} candidate(s) drawn: ${file}`);
+      try {
+        writeFileSync(
+          file,
+          await rasterise(sheetSvg(tried), Math.min(4, tried.length) * 210),
+        );
+        console.log(`  ${tried.length} candidate(s) drawn: ${file}`);
+      } catch (cause) {
+        // A sheet nobody can render is a shame, not a reason to lose the
+        // other four terms and the hundred calls already spent.
+        console.log(`  (could not draw the sheet: ${String(cause)})`);
+      }
     }
 
     if (!taken) {

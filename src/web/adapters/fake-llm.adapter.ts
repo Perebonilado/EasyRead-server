@@ -589,16 +589,21 @@ export class FakeLlmAdapter implements LlmGatewayPort {
     });
   }
 
-  thingForm(input: {
-    term: string;
-  }): Promise<
-    LlmResult<{ looksLike: string; parts: string[]; aspect: number }>
+  thingForm(input: { term: string }): Promise<
+    LlmResult<{
+      looksLike: string;
+      parts: { id: string; shape: string }[];
+      aspect: number;
+    }>
   > {
     const started = Date.now();
     return Promise.resolve({
       value: {
         looksLike: `a wide box with a flat lid across the top and a band around its middle, drawn from the side (${input.term})`,
-        parts: ['lid', 'band'],
+        parts: [
+          { id: 'lid', shape: 'a flat band across the top edge' },
+          { id: 'band', shape: 'a narrow band around the middle' },
+        ],
         aspect: 1.2,
       },
       usage: this.usage(started, 120, 60),
@@ -617,7 +622,11 @@ export class FakeLlmAdapter implements LlmGatewayPort {
     });
   }
 
-  thingDrawing(input: { looksLike: string; parts: string[]; aspect: number }) {
+  thingDrawing(input: {
+    looksLike: string;
+    parts: { id: string; shape: string }[];
+    aspect: number;
+  }) {
     const started = Date.now();
     return Promise.resolve({
       value: {
@@ -627,13 +636,13 @@ export class FakeLlmAdapter implements LlmGatewayPort {
         // Each part gets ink of its own, as the real drawer must: a band
         // across the box, stepped down it, so a test exercises the same
         // addressable-part path a real drawing takes.
-        parts: input.parts.map((name, i) => {
+        parts: input.parts.map((part, i) => {
           const y = 0.3 + i * 0.12;
           return {
-            name,
+            name: part.id,
             at: [0.5, y],
-            fill: `M0.16 ${y.toFixed(2)} L0.84 ${y.toFixed(2)} L0.84 ${(y + 0.08).toFixed(2)} L0.16 ${(y + 0.08).toFixed(2)} Z`,
-            stroke: null,
+            shape: `M0.16 ${y.toFixed(2)} L0.84 ${y.toFixed(2)} L0.84 ${(y + 0.08).toFixed(2)} L0.16 ${(y + 0.08).toFixed(2)} Z`,
+            line: null,
           };
         }),
       },

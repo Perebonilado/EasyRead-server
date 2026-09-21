@@ -16,14 +16,14 @@ const sound: ThingDrawing = {
     {
       name: 'lid',
       at: [0.5, 0.27],
-      fill: 'M0.08 0.2 L0.92 0.2 L0.92 0.32 L0.08 0.32 Z',
-      stroke: null,
+      shape: 'M0.08 0.2 L0.92 0.2 L0.92 0.32 L0.08 0.32 Z',
+      line: null,
     },
     {
       name: 'band',
       at: [0.5, 0.6],
-      fill: null,
-      stroke: 'M0.08 0.6 L0.92 0.6',
+      shape: null,
+      line: 'M0.08 0.6 L0.92 0.6',
     },
   ],
 };
@@ -31,7 +31,10 @@ const sound: ThingDrawing = {
 /** The description `sound` was drawn from. */
 const form: ThingForm = {
   looksLike: 'a wide box with a lid across the top and a band around it',
-  parts: ['lid', 'band'],
+  parts: [
+    { id: 'lid', shape: 'a flat band across the top edge' },
+    { id: 'band', shape: 'a narrow band around the middle' },
+  ],
   aspect: 1.2,
 };
 
@@ -89,10 +92,7 @@ describe('the gate before a person looks', () => {
     expect(
       drawingProblems({
         ...sound,
-        parts: [
-          { ...sound.parts[0] },
-          { ...sound.parts[0], name: 'Lid' },
-        ],
+        parts: [{ ...sound.parts[0] }, { ...sound.parts[0], name: 'Lid' }],
       }).join(' '),
     ).toContain('named twice');
   });
@@ -101,7 +101,7 @@ describe('the gate before a person looks', () => {
     expect(
       drawingProblems({
         ...sound,
-        parts: [{ name: 'lid', at: [0.5, 0.27], fill: null, stroke: null }],
+        parts: [{ name: 'lid', at: [0.5, 0.27], shape: null, line: null }],
       }).join(' '),
     ).toContain('no ink of its own');
   });
@@ -110,9 +110,9 @@ describe('the gate before a person looks', () => {
     expect(
       drawingProblems({
         ...sound,
-        parts: [{ ...sound.parts[0], fill: 'M0.1 0.1 l0.4 0.4 Z' }],
+        parts: [{ ...sound.parts[0], shape: 'M0.1 0.1 l0.4 0.4 Z' }],
       }).join(' '),
-    ).toContain('the part "lid" fill is not sound');
+    ).toContain('the part "lid" shape is not sound');
   });
 
   it('turns back a drawing that dropped a part the description named', () => {
@@ -124,7 +124,10 @@ describe('the gate before a person looks', () => {
   it('turns back a drawing that invented a part nobody asked for', () => {
     expect(
       drawingProblems(
-        { ...sound, parts: [...sound.parts, { ...sound.parts[0], name: 'spout' }] },
+        {
+          ...sound,
+          parts: [...sound.parts, { ...sound.parts[0], name: 'spout' }],
+        },
         form,
       ).join(' '),
     ).toContain('"spout" was not in the description');
@@ -134,8 +137,9 @@ describe('the gate before a person looks', () => {
     // One short stroke whose control handles swing wide. Reading every
     // number as a coordinate calls this a full-width drawing; it is not.
     const handles = 'M0.40 0.45 C0.02 0.02 0.98 0.98 0.60 0.55 Z';
-    expect(spreadOf(handles).w).toBeCloseTo(0.2, 2);
-    expect(spreadOf(handles).h).toBeCloseTo(0.1, 2);
+    // Reading every number as a coordinate calls this 0.96 wide.
+    expect(spreadOf(handles).w).toBeLessThan(0.5);
+    expect(spreadOf(handles).w).toBeGreaterThan(0.2);
   });
 
   it('turns back a proportion no box can hold', () => {
@@ -162,7 +166,10 @@ describe('the description, before anything is drawn from it', () => {
 
   it('turns back a part named for its job', () => {
     expect(
-      formProblems({ ...form, parts: ['lid', 'stores'] }).join(' '),
+      formProblems({
+        ...form,
+        parts: [{ id: 'stores', shape: 'a band across the top' }],
+      }).join(' '),
     ).toContain('named for what it does');
   });
 });
@@ -178,9 +185,9 @@ describe('what a passed drawing becomes', () => {
     // Keyed by name and carrying its own ink: the shape every pack keeps,
     // so an accepted drawing drops in without being transposed by hand.
     expect(preset.parts?.lid.at).toEqual([0.5, 0.27]);
-    expect(preset.parts?.lid.fill).toBe(sound.parts[0].fill);
+    expect(preset.parts?.lid.fill).toBe(sound.parts[0].shape);
     expect(preset.parts?.lid.stroke).toBeUndefined();
-    expect(preset.parts?.band.stroke).toBe(sound.parts[1].stroke);
+    expect(preset.parts?.band.stroke).toBe(sound.parts[1].line);
     expect(preset.tags).toContain('heat exchanger');
     expect(preset.tags).toContain('wide');
   });
@@ -203,5 +210,16 @@ describe('measuring a path', () => {
     expect(small.w).toBeCloseTo(0.2, 6);
     expect(small.h).toBeCloseTo(0.2, 6);
     expect(spreadOf('')).toEqual({ w: 0, h: 0 });
+  });
+});
+
+describe('the bean that used to measure zero', () => {
+  it('measures a curve by the curve, not by its endpoints', () => {
+    // A kidney is two symmetric cubics. Every endpoint shares one x, so
+    // reading endpoints alone called it zero wide and the gate threw out
+    // the exact shape the library most needed.
+    const bean = 'M0.5 0.1 C0.1 0.3 0.1 0.7 0.5 0.9 C0.9 0.7 0.9 0.3 0.5 0.1 Z';
+    expect(spreadOf(bean).w).toBeGreaterThan(DRAW_GATE.minSpread);
+    expect(spreadOf(bean).h).toBeGreaterThan(DRAW_GATE.minSpread);
   });
 });

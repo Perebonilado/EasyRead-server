@@ -119,11 +119,11 @@ function svgOf(drawing: ThingDrawing, size = 200): string {
     ...drawing.parts.map((part) =>
       [
         `<g id="${part.name}">`,
-        part.fill
-          ? `<path d="${scale(part.fill)}" fill="#8DB4F3" stroke="#8DB4F3" stroke-width="0.008" stroke-linejoin="round"/>`
+        part.shape
+          ? `<path d="${scale(part.shape)}" fill="#8DB4F3" stroke="#8DB4F3" stroke-width="0.008" stroke-linejoin="round"/>`
           : '',
-        part.stroke
-          ? `<path d="${scale(part.stroke)}" fill="none" stroke="#11151F" stroke-width="0.014" stroke-linecap="round"/>`
+        part.line
+          ? `<path d="${scale(part.line)}" fill="none" stroke="#11151F" stroke-width="0.014" stroke-linecap="round"/>`
           : '',
         `</g>`,
       ].join(''),

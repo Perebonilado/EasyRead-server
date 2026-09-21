@@ -914,7 +914,20 @@ export const visualNarrationSchema = z.object({
  */
 export const thingFormSchema = z.object({
   looksLike: z.string().min(20).max(400),
-  parts: z.array(z.string().min(1).max(24)).max(6),
+  /**
+   * Each part with its own shape and where it sits, not just its name.
+   * A name on its own leaves the drawer inventing the geometry of every
+   * part from the word alone, which is the same guessing the whole
+   * two-call split exists to stop.
+   */
+  parts: z
+    .array(
+      z.object({
+        id: z.string().min(1).max(24),
+        shape: z.string().min(4).max(200),
+      }),
+    )
+    .max(6),
   aspect: z.number().min(0.3).max(3),
 });
 
@@ -936,10 +949,17 @@ export const thingDrawingSchema = z.object({
       z.object({
         name: z.string().min(1).max(24),
         at: z.array(z.number().min(0).max(1)).length(2),
-        /** Closed ink that is this part alone, drawn over the body. */
-        fill: z.string().max(700).nullable(),
-        /** Open lines that are this part alone, drawn over the body. */
-        stroke: z.string().max(700).nullable(),
+        /**
+         * Closed path data for this part alone, drawn over the body.
+         *
+         * Called `shape` and not `fill` on purpose: in SVG, `fill` and
+         * `stroke` name the paint, so a model asked for them answers
+         * "none" and "black" — correctly, and uselessly. These want
+         * geometry, and the field names have to say so.
+         */
+        shape: z.string().max(700).nullable(),
+        /** Open path data for this part alone, drawn over the body. */
+        line: z.string().max(700).nullable(),
       }),
     )
     .max(6),

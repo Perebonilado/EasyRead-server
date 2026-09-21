@@ -112,8 +112,8 @@ export class AiSdkLlmAdapter implements LlmGatewayPort, OnModuleInit {
           role: 'user' as const,
           content: [
             {
-              type: 'image' as const,
-              image: input.png,
+              type: 'file' as const,
+              data: input.png,
               mediaType: 'image/png',
             },
             {
@@ -680,8 +680,8 @@ export class AiSdkLlmAdapter implements LlmGatewayPort, OnModuleInit {
           role: 'user' as const,
           content: [
             {
-              type: 'image' as const,
-              image: input.png,
+              type: 'file' as const,
+              data: input.png,
               mediaType: 'image/png',
             },
             {
@@ -730,8 +730,8 @@ export class AiSdkLlmAdapter implements LlmGatewayPort, OnModuleInit {
           role: 'user' as const,
           content: [
             {
-              type: 'image' as const,
-              image: input.png,
+              type: 'file' as const,
+              data: input.png,
               mediaType: 'image/png',
             },
             {
@@ -798,8 +798,8 @@ export class AiSdkLlmAdapter implements LlmGatewayPort, OnModuleInit {
           role: 'user' as const,
           content: [
             {
-              type: 'image' as const,
-              image: input.png,
+              type: 'file' as const,
+              data: input.png,
               mediaType: 'image/png',
             },
             {
@@ -827,7 +827,11 @@ export class AiSdkLlmAdapter implements LlmGatewayPort, OnModuleInit {
     field?: string;
     context?: string;
   }): Promise<
-    LlmResult<{ looksLike: string; parts: string[]; aspect: number }>
+    LlmResult<{
+      looksLike: string;
+      parts: { id: string; shape: string }[];
+      aspect: number;
+    }>
   > {
     return this.objectOrJson({
       task: 'thing_form',
@@ -845,7 +849,7 @@ export class AiSdkLlmAdapter implements LlmGatewayPort, OnModuleInit {
 
   async thingDrawing(input: {
     looksLike: string;
-    parts: string[];
+    parts: { id: string; shape: string }[];
     aspect: number;
     correction?: string;
     /** Raised so six candidates disagree; six of one mind is one candidate. */
@@ -860,7 +864,10 @@ export class AiSdkLlmAdapter implements LlmGatewayPort, OnModuleInit {
       prompt: [
         `Draw this: ${input.looksLike}`,
         input.parts.length
-          ? `Draw these parts, each with its own ink: ${input.parts.join(', ')}`
+          ? [
+              'Draw these parts, each with its own ink:',
+              ...input.parts.map((p) => `  ${p.id}: ${p.shape}`),
+            ].join('\n')
           : '',
         `It is about ${input.aspect} times as wide as it is tall.`,
         // The contract again, in the turn that carries the work. Said
@@ -882,8 +889,8 @@ export class AiSdkLlmAdapter implements LlmGatewayPort, OnModuleInit {
         parts: result.value.parts.map((p) => ({
           name: p.name,
           at: p.at,
-          fill: p.fill,
-          stroke: p.stroke,
+          shape: p.shape,
+          line: p.line,
         })),
       },
       usage: result.usage,

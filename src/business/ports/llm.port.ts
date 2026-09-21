@@ -533,7 +533,12 @@ export interface LlmGatewayPort {
     field?: string;
     context?: string;
   }): Promise<
-    LlmResult<{ looksLike: string; parts: string[]; aspect: number }>
+    LlmResult<{
+      looksLike: string;
+      /** Each part with its own shape, so the drawer is not inventing it. */
+      parts: { id: string; shape: string }[];
+      aspect: number;
+    }>
   >;
 
   /**
@@ -543,7 +548,7 @@ export interface LlmGatewayPort {
    */
   thingDrawing(input: {
     looksLike: string;
-    parts: string[];
+    parts: { id: string; shape: string }[];
     aspect: number;
     correction?: string;
     /** Raised so six candidates disagree; six of one mind is one candidate. */
@@ -560,8 +565,10 @@ export interface LlmGatewayPort {
       parts: {
         name: string;
         at: number[];
-        fill: string | null;
-        stroke: string | null;
+        /** Closed path data for this part alone. Geometry, never paint. */
+        shape: string | null;
+        /** Open path data for this part alone. */
+        line: string | null;
       }[];
     }>
   >;

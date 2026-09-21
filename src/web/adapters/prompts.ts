@@ -1268,16 +1268,43 @@ export const PROMPTS = {
   ].join('\n\n'),
 
   thingForm: [
-    'You say what a thing looks like, and nothing else. Twenty to sixty',
-    'words, plain, as if describing it to somebody who will draw it and',
-    'has never heard of it. Shape first, then what sits on it and where.',
-    'Say nothing about what it is for, what it does, what it means, or',
-    'what happens inside it: a filter is not "it cleans the blood", it is',
-    '"a flat disc with a fine mesh across its face". Name up to six parts',
-    'a person could point at on the outside, and give the proportion as',
-    'width over height. If the thing has no look of its own, say so in',
-    'looksLike and give no parts.',
-  ].join(' '),
+    [
+      'You describe what things look like, for an illustrator who has',
+      'never seen the thing and will not be told its name.',
+    ].join(' '),
+    [
+      'Describe form only: outline, proportion, how many of each part,',
+      'where each part sits relative to the others. Never state what the',
+      'thing does, what it is for, what it means, or what it is',
+      "associated with. Never use the thing's name or any word that",
+      'would identify it.',
+    ].join(' '),
+    [
+      'Use plain shape words: bean, tube, wedge, band, cone, loop, blade,',
+      'teardrop, column, chamber, disc, mesh, rod, dish.',
+    ].join(' '),
+    [
+      'Give the outline in one sentence. Then list three to six named',
+      "parts, each with its own shape and its position. A part's shape is",
+      'geometry too: "three wedges inside the band, each pointing toward',
+      'the notch", never "the part that filters".',
+    ].join(' '),
+    // The name is the trap. A word carries what it is associated with,
+    // and reaching for that is how "circuit" becomes a printed board
+    // with chips on it rather than the loop a lesson draws.
+    [
+      'Describe the thing a textbook diagram would show, not the object a',
+      'photograph would. Ask what a person draws on a board to teach it.',
+      'A circuit is a closed loop of thin line broken in places, not a',
+      'green board with components; a volcano is a cross-section through',
+      'a cone standing on a ground line, not a mountain with smoke.',
+    ].join(' '),
+    'Give the proportion as width over height.',
+    [
+      'If you cannot describe the form without naming what it is for,',
+      'say so in looksLike and give no parts.',
+    ].join(' '),
+  ].join('\n\n'),
 
   thingDrawing: [
     [
@@ -1295,14 +1322,17 @@ export const PROMPTS = {
     // their own can only ever appear all at once, and that is most of
     // why a lesson reads as a slide rather than as something being made.
     [
-      'Then draw each part the description named, as ink of its own that',
-      'sits over the body: fill for closed shapes that are that part and',
-      'nothing else, stroke for lines that are. Give every part both an',
-      'at point, where a line pointing at it should land, and at least',
-      'one of fill or stroke. Do not put a part in the body and leave its',
-      'fill null — the body is the outline; the parts are what is drawn',
-      'on it, one at a time. Draw exactly the parts you were given: not',
-      'one more, not one fewer, and under the names you were given.',
+      'Then draw each part the description gave you, from the shape it',
+      'gave for that part, as ink of its own sitting over the body:',
+      '`shape` for closed subpaths that are that part and nothing else,',
+      '`line` for open lines that are. Both are path data in exactly the',
+      'same language as body — "M0.22 0.34 L0.78 0.34 Z" — and never a',
+      'colour: "none", "black" and "#000" are not drawings. Give every',
+      'part an `at` point where a line pointing at it should land, and at',
+      'least one of `shape` or `line`. The body is the outline; the parts',
+      'are what is drawn on it, one at a time, so a lesson can light one',
+      'without the rest. Draw exactly the parts you were given: not one',
+      'more, not one fewer, under the names you were given.',
     ].join(' '),
     // The set it has to sit beside. Two real drawings say more about the
     // house hand than a page of adjectives: flat, front-on, thin even

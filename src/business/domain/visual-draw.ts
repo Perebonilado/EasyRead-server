@@ -16,10 +16,18 @@ import { pathProblem } from './visual';
 export interface ThingPart {
   name: string;
   at: number[];
-  /** Closed ink that is this part alone, drawn over the body. */
-  fill?: string | null;
-  /** Open lines that are this part alone, drawn over the body. */
-  stroke?: string | null;
+  /**
+   * Closed path data for this part alone, drawn over the body.
+   *
+   * Named `shape` rather than `fill`, which is what the library calls it
+   * once accepted. In SVG, `fill` names the paint, so a model asked for
+   * a part's `fill` answers "none" or "black" — correctly, and with no
+   * geometry in it at all. The field the model sees has to say what it
+   * wants.
+   */
+  shape?: string | null;
+  /** Open path data for this part alone, drawn over the body. */
+  line?: string | null;
 }
 
 export interface ThingDrawing {
@@ -32,7 +40,8 @@ export interface ThingDrawing {
 /** What the describer said the thing looks like, and the parts it named. */
 export interface ThingForm {
   looksLike: string;
-  parts: string[];
+  /** Each part with its own shape, so the drawer is not inventing it. */
+  parts: { id: string; shape: string }[];
   aspect: number;
 }
 
@@ -55,39 +64,83 @@ const ARITY: Record<string, number> = { M: 2, L: 2, C: 6, Q: 4, Z: 0 };
 /**
  * The box a path covers, as fractions of the unit square.
  *
- * Only points the pen actually reaches count. A cubic's two control
- * handles can sit well outside the ink they bend — read every number as
- * a coordinate and a modest drawing measures as a generous one, which is
- * how a drawing huddled in a corner passes a rule meant to stop exactly
- * that.
+ * The curve itself is measured, not the numbers written down. Both
+ * shortcuts are wrong and wrong in opposite directions: read every
+ * number as a coordinate and a cubic's control handles, which the pen
+ * never reaches, inflate a huddled drawing into a generous one; read
+ * only the endpoints and a bean drawn as two symmetric curves measures
+ * zero wide, because its width lives entirely in the bulge. So each
+ * segment is walked and sampled, which is what the eye sees.
  */
 export function spreadOf(d: string): { w: number; h: number } {
   const tokens = d.trim().match(/[A-Za-z]|-?\d*\.?\d+(?:e-?\d+)?/g) ?? [];
   const xs: number[] = [];
   const ys: number[] = [];
+  const mark = (x: number, y: number) => {
+    if (Number.isFinite(x) && Number.isFinite(y)) {
+      xs.push(x);
+      ys.push(y);
+    }
+  };
+  /** Points along a bend, enough that its widest part is not missed. */
+  const STEPS = 12;
   let command = '';
   let numbers: number[] = [];
-  const takeEndpoint = () => {
+  let at: [number, number] = [0, 0];
+  let started: [number, number] = [0, 0];
+  const walk = () => {
     const need = ARITY[command] ?? 0;
-    if (!need) return;
+    if (!need) {
+      // Close: back to where this subpath began.
+      if (command === 'Z') at = started;
+      return;
+    }
     // A run of numbers after one letter is that command repeated.
     for (let i = 0; i + need <= numbers.length; i += need) {
-      const x = numbers[i + need - 2];
-      const y = numbers[i + need - 1];
-      if (Number.isFinite(x) && Number.isFinite(y)) {
-        xs.push(x);
-        ys.push(y);
+      const n = numbers.slice(i, i + need);
+      if (command === 'M') {
+        at = [n[0], n[1]];
+        started = at;
+        mark(at[0], at[1]);
+      } else if (command === 'L') {
+        at = [n[0], n[1]];
+        mark(at[0], at[1]);
+      } else if (command === 'C' || command === 'Q') {
+        const [x0, y0] = at;
+        const end: [number, number] =
+          command === 'C' ? [n[4], n[5]] : [n[2], n[3]];
+        for (let k = 0; k <= STEPS; k += 1) {
+          const t = k / STEPS;
+          const u = 1 - t;
+          if (command === 'C')
+            mark(
+              u * u * u * x0 +
+                3 * u * u * t * n[0] +
+                3 * u * t * t * n[2] +
+                t * t * t * end[0],
+              u * u * u * y0 +
+                3 * u * u * t * n[1] +
+                3 * u * t * t * n[3] +
+                t * t * t * end[1],
+            );
+          else
+            mark(
+              u * u * x0 + 2 * u * t * n[0] + t * t * end[0],
+              u * u * y0 + 2 * u * t * n[1] + t * t * end[1],
+            );
+        }
+        at = end;
       }
     }
   };
   for (const token of tokens) {
     if (/^[A-Za-z]$/.test(token)) {
-      takeEndpoint();
+      walk();
       command = token.toUpperCase();
       numbers = [];
     } else numbers.push(Number(token));
   }
-  takeEndpoint();
+  walk();
   if (!xs.length || !ys.length) return { w: 0, h: 0 };
   return {
     w: Math.max(...xs) - Math.min(...xs),
@@ -119,10 +172,17 @@ export function formProblems(form: ThingForm): string[] {
       `"${said[0]}" says what it is for, not what it looks like; describe the shape instead`,
     );
   for (const part of form.parts) {
-    const bad = PURPOSE.exec(part);
-    if (bad)
+    const named = PURPOSE.exec(part.id);
+    if (named)
       problems.push(
-        `the part "${part}" is named for what it does ("${bad[0]}"); name the shape a person could point at`,
+        `the part "${part.id}" is named for what it does ("${named[0]}"); name the shape a person could point at`,
+      );
+    // The spec's own rule: a part's shape that states a purpose cannot
+    // be drawn, so it goes back before anything tries.
+    const said = PURPOSE.exec(part.shape);
+    if (said)
+      problems.push(
+        `the shape of "${part.id}" says what it does ("${said[0]}"): "${part.shape}". Say what it looks like instead`,
       );
   }
   return problems;
@@ -193,13 +253,13 @@ export function drawingProblems(
     // the picture: a line can point at it, but it can never be drawn,
     // lit or dimmed on its own, and the lesson can only ever show the
     // whole thing at once.
-    if (!part.fill && !part.stroke)
+    if (!part.shape && !part.line)
       problems.push(
-        `the part "${part.name}" has no ink of its own; give it a fill or a stroke so it can be drawn alone`,
+        `the part "${part.name}" has no ink of its own; give it a shape or a line so it can be drawn alone`,
       );
     for (const [what, d] of [
-      ['fill', part.fill],
-      ['stroke', part.stroke],
+      ['shape', part.shape],
+      ['line', part.line],
     ] as const) {
       if (!d) continue;
       const bad = pathProblem(d);
@@ -211,7 +271,9 @@ export function drawingProblems(
   // invents one is drawing something else; one that drops one cannot be
   // used by the page that asked for it.
   if (form) {
-    const asked = form.parts.map((p) => p.trim().toLowerCase()).filter(Boolean);
+    const asked = form.parts
+      .map((p) => p.id.trim().toLowerCase())
+      .filter(Boolean);
     const drew = drawing.parts.map((p) => p.name.trim().toLowerCase());
     const missing = asked.filter((p) => !drew.includes(p));
     const extra = drew.filter((p) => p && !asked.includes(p));
@@ -277,8 +339,9 @@ export function presetOf(
               part.name.trim().toLowerCase(),
               {
                 at: [part.at[0], part.at[1]] as [number, number],
-                ...(part.fill ? { fill: part.fill } : {}),
-                ...(part.stroke ? { stroke: part.stroke } : {}),
+                // The library's own words for the same two things.
+                ...(part.shape ? { fill: part.shape } : {}),
+                ...(part.line ? { stroke: part.line } : {}),
               },
             ]),
           ),

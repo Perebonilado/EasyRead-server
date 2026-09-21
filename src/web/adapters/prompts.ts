@@ -1304,38 +1304,35 @@ export const PROMPTS = {
       'If you cannot describe the form without naming what it is for,',
       'say so in looksLike and give no parts.',
     ].join(' '),
-    // Two descriptions in the shape wanted. A rule about cross-sections
-    // gets read and then not followed; a worked example of one is
-    // followed, and these two carry the whole register — an outline in
-    // one sentence, and parts placed against each other rather than
-    // explained.
+    // Two descriptions in the shape wanted. Deliberately NOT any of the
+    // terms the pipeline is measured on: put one of those here and it
+    // comes back verbatim, and the measurement stops meaning anything.
+    // These two carry the register — an outline in one sentence, parts
+    // placed against each other rather than explained, and a section cut
+    // by a line rather than a thing seen from outside.
     'Two descriptions of the kind wanted.',
     [
-      'A bean-shaped body, taller than wide, with a single notch cut into',
-      'the middle of the left edge. Parts:',
-      'cortex — a narrow band following the inside of the outer edge;',
-      'medulla — three wedges inside the band, each pointing toward the notch;',
-      'pelvis — a funnel in the notch, collecting the wedge tips;',
-      'ureter — a single tube leaving the notch and curving down.',
+      'A dome sitting on a short column, a little wider than it is tall.',
+      'Parts:',
+      'cap — the dome, a half circle;',
+      'gills — four short lines hanging under the dome, evenly spaced;',
+      'stalk — a narrow column from the middle of the dome down to the foot;',
+      'foot — a small flare where the column meets the ground.',
     ].join(' '),
     [
-      'A broad triangle standing on a horizontal line, with a small dip',
-      'cut into its apex; the line continues past the triangle on both',
-      'sides. Parts:',
-      'crater — the dip at the apex, a shallow flat-bottomed notch;',
-      'conduit — two near-vertical lines running from the dip down through',
-      'the triangle and below the horizontal line;',
-      'chamber — one rounded blob well below the horizontal line, joined to',
-      'the base of the conduit;',
-      'layers — two long curves inside the triangle, one on each side,',
-      'running parallel to the sloping edges.',
+      'A rounded block standing on a horizontal line, with two tapering',
+      'spikes descending below the line. Parts:',
+      'crown — the rounded block above the line;',
+      'enamel — a thin band following the outside of the crown;',
+      'pulp — a narrow chamber inside the crown, reaching down into the spikes;',
+      'roots — two spikes below the line, tapering to points.',
     ].join(' '),
     [
-      'Note what the second one does not say: nothing about smoke, ash,',
-      'heat or erupting. Those are what a photograph shows and none of',
-      'them can be drawn as a shape. It puts in the ground line, and the',
-      'ground line is what forces the cross-section that a lesson can',
-      'label.',
+      'Note what the second one does not say: nothing about biting,',
+      'chewing, decay or pain. Those are what the thing is for and none',
+      'of them can be drawn as a shape. It puts in the horizontal line,',
+      'and that line is what forces a section a lesson can label, instead',
+      'of a picture of the outside.',
     ].join(' '),
   ].join('\n\n'),
 

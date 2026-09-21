@@ -285,3 +285,23 @@ describe('what a passed drawing is drawn as', () => {
     expect(preset.outline).toBe(true);
   });
 });
+
+describe('ink the box would cut off', () => {
+  it('turns back a part drawn below the square', () => {
+    // A chamber at y=1.05 passes the path contract, which leaves room
+    // for a control point to stray, and is then clipped away entirely:
+    // a part the description names and the learner never sees.
+    expect(
+      drawingProblems({
+        ...sound,
+        parts: [
+          { ...sound.parts[0], shape: 'M0.4 1.05 L0.6 1.05 L0.6 1.12 Z' },
+        ],
+      }).join(' '),
+    ).toContain('would be cut off');
+  });
+
+  it('leaves a drawing that stays inside it alone', () => {
+    expect(drawingProblems(sound)).toEqual([]);
+  });
+});

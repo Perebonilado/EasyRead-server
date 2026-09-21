@@ -70,6 +70,14 @@ export const DRAW_GATE = {
 
 const COMMANDS = /[A-Za-z]/g;
 
+/** The corners a path reaches, on the unit square. */
+export interface Box {
+  minX: number;
+  minY: number;
+  maxX: number;
+  maxY: number;
+}
+
 /** A path stripped to its shape, so two ways of writing one compare equal. */
 const tidy = (d: string) =>
   d
@@ -91,7 +99,7 @@ const ARITY: Record<string, number> = { M: 2, L: 2, C: 6, Q: 4, Z: 0 };
  * zero wide, because its width lives entirely in the bulge. So each
  * segment is walked and sampled, which is what the eye sees.
  */
-export function spreadOf(d: string): { w: number; h: number } {
+export function boxOf(d: string): Box | null {
   const tokens = d.trim().match(/[A-Za-z]|-?\d*\.?\d+(?:e-?\d+)?/g) ?? [];
   const xs: number[] = [];
   const ys: number[] = [];
@@ -160,11 +168,21 @@ export function spreadOf(d: string): { w: number; h: number } {
     } else numbers.push(Number(token));
   }
   walk();
-  if (!xs.length || !ys.length) return { w: 0, h: 0 };
+  if (!xs.length || !ys.length) return null;
   return {
-    w: Math.max(...xs) - Math.min(...xs),
-    h: Math.max(...ys) - Math.min(...ys),
+    minX: Math.min(...xs),
+    minY: Math.min(...ys),
+    maxX: Math.max(...xs),
+    maxY: Math.max(...ys),
   };
+}
+
+/** How far across and down a path reaches, as fractions of the unit square. */
+export function spreadOf(d: string): { w: number; h: number } {
+  const box = boxOf(d);
+  return box
+    ? { w: box.maxX - box.minX, h: box.maxY - box.minY }
+    : { w: 0, h: 0 };
 }
 
 /**
@@ -244,6 +262,34 @@ export function drawingProblems(
     );
   if (!drawing.body.toUpperCase().includes('Z'))
     problems.push('the outline is not closed');
+  // Ink outside the square is ink the box clips off. A control point may
+  // stray, which is why the path contract allows a little room; the line
+  // itself may not, and a chamber drawn below the frame is a part the
+  // description names and the learner never sees.
+  for (const [what, d] of [
+    ['outline', drawing.body],
+    ['detail', drawing.detail],
+    ...drawing.parts.flatMap(
+      (p) =>
+        [
+          [`part "${p.name}"`, p.shape],
+          [`part "${p.name}"`, p.line],
+        ] as [string, string | null | undefined][],
+    ),
+  ] as [string, string | null | undefined][]) {
+    if (!d) continue;
+    const box = boxOf(d);
+    if (!box) continue;
+    if (
+      box.minX < -0.02 ||
+      box.minY < -0.02 ||
+      box.maxX > 1.02 ||
+      box.maxY > 1.02
+    )
+      problems.push(
+        `the ${what} is drawn outside the square and would be cut off; keep every line between 0 and 1`,
+      );
+  }
   const spread = spreadOf(drawing.body);
   if (spread.w < DRAW_GATE.minSpread || spread.h < DRAW_GATE.minSpread)
     problems.push(

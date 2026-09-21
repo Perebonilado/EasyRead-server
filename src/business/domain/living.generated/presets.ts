@@ -6,6 +6,18 @@ export interface Preset {
   detail?: string;
   /** Width over height, so the box keeps the drawing's proportions. */
   aspect: number;
+  /**
+   * Drawn as line rather than as a filled silhouette.
+   *
+   * The hand-made set is silhouettes, which suits a leaf or a flask: a
+   * solid shape with a stroke over it reads instantly at thumbnail size.
+   * It cannot carry a diagram. A circuit is a loop of thin wire, and a
+   * closed loop that gets filled is a disc; a volcano drawn in section
+   * is a cone with a crater and a chamber under the ground line, and a
+   * silhouette has no inside to put them in. Those are drawn as line,
+   * and this says which.
+   */
+  outline?: boolean;
   /** The words a chapter would use for this thing, so the server can find it. */
   tags?: string;
   /**

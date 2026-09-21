@@ -109,10 +109,14 @@ function svgOf(drawing: ThingDrawing, size = 200): string {
   return [
     `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1 1" width="${w}" height="${h}">`,
     `<rect width="1" height="1" fill="#11151F"/>`,
-    `<g transform="scale(1,1)">`,
-    `<path d="${scale(drawing.body)}" fill="#6E9EEA" stroke="#8DB4F3" stroke-width="0.012" stroke-linejoin="round"/>`,
+    // Line, not silhouette, because that is what goes into the library
+    // and so it is what the judge and the person have to be looking at.
+    // Shown as a filled shape, a loop of wire is a disc and a section
+    // has no inside, and both of those were being accepted.
+    `<g transform="scale(1,1)" fill="none" stroke-linejoin="round" stroke-linecap="round">`,
+    `<path d="${scale(drawing.body)}" fill="none" stroke="#8DB4F3" stroke-width="0.014"/>`,
     drawing.detail
-      ? `<path d="${scale(drawing.detail)}" fill="none" stroke="#11151F" stroke-width="0.016" stroke-linecap="round"/>`
+      ? `<path d="${scale(drawing.detail)}" fill="none" stroke="#8DB4F3" stroke-width="0.012"/>`
       : '',
     // Each part as its own group, the way the library will draw it, so
     // what the judge and the person see is what a lesson gets.
@@ -120,10 +124,10 @@ function svgOf(drawing: ThingDrawing, size = 200): string {
       [
         `<g id="${part.name}">`,
         part.shape
-          ? `<path d="${scale(part.shape)}" fill="#8DB4F3" stroke="#8DB4F3" stroke-width="0.008" stroke-linejoin="round"/>`
+          ? `<path d="${scale(part.shape)}" fill="none" stroke="#C9DCFB" stroke-width="0.011"/>`
           : '',
         part.line
-          ? `<path d="${scale(part.line)}" fill="none" stroke="#11151F" stroke-width="0.014" stroke-linecap="round"/>`
+          ? `<path d="${scale(part.line)}" fill="none" stroke="#C9DCFB" stroke-width="0.011"/>`
           : '',
         `</g>`,
       ].join(''),

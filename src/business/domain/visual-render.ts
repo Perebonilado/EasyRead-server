@@ -136,8 +136,12 @@ function drawn(
   if (preset) {
     const at = `translate(${n(x - w / 2)} ${n(y - h / 2)}) scale(${n(w)} ${n(h)})`;
     const pen = 2.6 / Math.sqrt(w * h);
-    const ink = mode === 'outline' ? paint.text : paint.rim;
-    const body = `<path d="${preset.body}" transform="${at}" fill="${mode === 'outline' ? 'none' : paint.fill}" stroke="${ink}" stroke-width="${n(pen)}" stroke-linejoin="round" stroke-linecap="round"/>`;
+    // A diagram is line whatever the card would have filled: a closed
+    // loop of wire that gets filled is a disc, and a section has no
+    // inside left to put anything in.
+    const line = ('outline' in preset && preset.outline) || mode === 'outline';
+    const ink = line ? paint.text : paint.rim;
+    const body = `<path d="${preset.body}" transform="${at}" fill="${line ? 'none' : paint.fill}" stroke="${ink}" stroke-width="${n(pen)}" stroke-linejoin="round" stroke-linecap="round"/>`;
     const detail =
       'detail' in preset && preset.detail
         ? `<path d="${preset.detail}" transform="${at}" fill="none" stroke="${ink}" stroke-width="${n(pen * 0.9)}" stroke-linejoin="round" stroke-linecap="round"/>`
@@ -153,7 +157,7 @@ function drawn(
             .map(([part, spec]) => {
               const marks = [
                 spec.fill
-                  ? `<path d="${spec.fill}" transform="${at}" fill="${mode === 'outline' ? 'none' : paint.fill}" stroke="${ink}" stroke-width="${n(pen)}" stroke-linejoin="round" stroke-linecap="round"/>`
+                  ? `<path d="${spec.fill}" transform="${at}" fill="${line ? 'none' : paint.fill}" stroke="${ink}" stroke-width="${n(pen)}" stroke-linejoin="round" stroke-linecap="round"/>`
                   : '',
                 spec.stroke
                   ? `<path d="${spec.stroke}" transform="${at}" fill="none" stroke="${ink}" stroke-width="${n(pen * 0.9)}" stroke-linejoin="round" stroke-linecap="round"/>`

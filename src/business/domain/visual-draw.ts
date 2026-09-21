@@ -70,6 +70,13 @@ export const DRAW_GATE = {
 
 const COMMANDS = /[A-Za-z]/g;
 
+/** A path stripped to its shape, so two ways of writing one compare equal. */
+const tidy = (d: string) =>
+  d
+    .replace(/[\s,]+/g, ' ')
+    .trim()
+    .toUpperCase();
+
 /** How many numbers each command carries, and how many of them are its endpoint. */
 const ARITY: Record<string, number> = { M: 2, L: 2, C: 6, Q: 4, Z: 0 };
 
@@ -285,6 +292,15 @@ export function drawingProblems(
       const bad = pathProblem(d);
       if (bad)
         problems.push(`the part "${part.name}" ${what} is not sound: ${bad}`);
+      // A part that is the outline over again is not a part. It is the
+      // commonest thing that comes back — cortex traced onto the whole
+      // kidney, slope onto the whole volcano — and it passes every other
+      // check while making the drawing unusable, because lighting that
+      // part lights the entire thing.
+      if (tidy(d) === tidy(drawing.body))
+        problems.push(
+          `the part "${part.name}" is the outline drawn again; a part is one piece of the thing, not all of it`,
+        );
     }
   }
   // The parts are the description's, not the drawer's. A drawing that
@@ -335,6 +351,7 @@ export function presetOf(
   detail?: string;
   aspect: number;
   tags: string;
+  outline: true;
   parts?: Record<string, PresetPartOut>;
 } {
   const name = term.trim().toLowerCase().replace(/\s+/g, '-');
@@ -343,6 +360,9 @@ export function presetOf(
     body: drawing.body,
     ...(drawing.detail ? { detail: drawing.detail } : {}),
     aspect: Math.round(drawing.aspect * 100) / 100,
+    // Everything drawn here is a diagram, and a diagram is line. The
+    // spec is flat about it: outline only, no fill on any element.
+    outline: true as const,
     tags: [
       term.toLowerCase(),
       ...(looksLike

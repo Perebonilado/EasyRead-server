@@ -1342,10 +1342,13 @@ export const PROMPTS = {
   thingDrawing: [
     [
       'You draw the thing described, on a square one unit across and one',
-      'unit down, as SVG path data. body is the filled silhouette: one or',
-      'more closed subpaths, using M, L, C, Q and Z only, absolute',
-      'commands, every coordinate between 0 and 1. detail is the lines',
-      'drawn over it, open paths, the same commands, or null. Keep it',
+      'unit down, as SVG path data, the way a textbook draws a diagram:',
+      'in line, never as a solid shape. body is the outline — one or more',
+      'subpaths, using M, L, C, Q and Z only, absolute commands, every',
+      'coordinate between 0 and 1. Nothing you draw is filled in, so an',
+      'inside edge, a notch and a hollow all survive, and a loop of wire',
+      'stays a loop instead of becoming a disc. detail is any further',
+      'lines over the outline, or null. Keep it',
       'simple: the shape a person would draw in five seconds,',
       'recognisable at the size of a thumbnail.',
     ].join(' '),
@@ -1382,7 +1385,7 @@ export const PROMPTS = {
     // The set it has to sit beside. Two real drawings say more about the
     // house hand than a page of adjectives: flat, front-on, thin even
     // line, no shading, no perspective.
-    'Two drawings from the set yours has to sit beside:',
+    'Two drawings in the hand wanted:',
     [
       'A leaf — "a pointed oval with a stem at one end and a rib down the',
       'middle":',
@@ -1395,7 +1398,10 @@ export const PROMPTS = {
       'body "M0.40 0.06 L0.60 0.06 L0.60 0.34 L0.92 0.90 L0.08 0.90 Z",',
       'detail "M0.36 0.06 L0.64 0.06 M0.22 0.72 L0.78 0.72".',
     ].join(' '),
-    'Yours is drawn in that hand: flat, front-on, one even line, no shading, no depth.',
+    [
+      'Yours is drawn in that hand: flat, front-on, one even line, no',
+      'shading, no depth, nothing filled in.',
+    ].join(' '),
   ].join('\n\n'),
 
   stageNarration: [
@@ -1856,6 +1862,18 @@ export const PROMPTS = {
       'and the right count of anything counted: three wedges means three.',
       'Prefer the plainer drawing when two are both right — these are read',
       'at the size of a thumbnail.',
+    ].join(' '),
+    // It was taking the last candidate every time and calling a filled
+    // egg a cone with a crater. Made to say what it can actually see
+    // first, it has to look before it answers.
+    [
+      'Before you pick, go through the description part by part and find',
+      'each one in the drawing. A part you cannot point at is not there,',
+      'however plausible the drawing looks. An outline that is roughly',
+      'the right sort of shape is not the right shape: a leaf is not a',
+      'bean, an egg is not a cone, a disc is not a loop. Be hard about',
+      'this. Most candidates you are shown are wrong and picking one of',
+      'them is worse than picking none.',
     ].join(' '),
     [
       'Ignore colour, centring, line weight and style. Do not reward',

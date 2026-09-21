@@ -254,3 +254,34 @@ describe('the bean that used to measure zero', () => {
     expect(spreadOf(bean).h).toBeGreaterThan(DRAW_GATE.minSpread);
   });
 });
+
+describe('a part is a piece of the thing, not all of it', () => {
+  it('turns back a part that is the outline traced again', () => {
+    // The commonest thing that came back: cortex drawn onto the whole
+    // kidney, slope onto the whole volcano. It passes every other check
+    // and makes the drawing useless, because lighting that part lights
+    // the whole thing.
+    expect(
+      drawingProblems({
+        ...sound,
+        parts: [{ ...sound.parts[0], shape: sound.body }],
+      }).join(' '),
+    ).toContain('is the outline drawn again');
+  });
+
+  it('is not fooled by the same path spaced differently', () => {
+    expect(
+      drawingProblems({
+        ...sound,
+        parts: [{ ...sound.parts[0], shape: sound.body.replace(/ /g, '  ') }],
+      }).join(' '),
+    ).toContain('is the outline drawn again');
+  });
+});
+
+describe('what a passed drawing is drawn as', () => {
+  it('is line, because a diagram cannot be a silhouette', () => {
+    const preset = presetOf('volcano', sound, 'a cone on a line');
+    expect(preset.outline).toBe(true);
+  });
+});

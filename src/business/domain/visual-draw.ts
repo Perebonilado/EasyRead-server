@@ -26,14 +26,6 @@ export interface ThingDrawing {
   parts: ThingPart[];
 }
 
-/** What the describer said the thing looks like, and the parts it named. */
-export interface ThingForm {
-  looksLike: string;
-  /** Each part with its own shape, so the drawer is not inventing it. */
-  parts: { id: string; shape: string }[];
-  aspect: number;
-}
-
 export const DRAW_GATE = {
   /**
    * Ink across the whole drawing — outline, detail and every part.
@@ -58,63 +50,15 @@ export const DRAW_GATE = {
 } as const;
 
 /**
- * Words that say what a part is for rather than what it looks like.
- *
- * A description that reaches for one of these has stopped describing and
- * started explaining, and nothing downstream can draw an explanation:
- * "filters blood" has no shape, so the drawer invents one, and what it
- * invents is the thing the word is associated with. Catching it here
- * costs one call; catching it at the judge costs seven.
- */
-const PURPOSE =
-  /\b(filters?|stores?|protects?|converts?|represents?|symbolis[ei]s?|symboliz[ei]s?|carries|transports?|produces?|controls?|regulates?|absorbs?|generates?|processes|means|signifies)\b/i;
-
-/**
- * What is wrong with a description, before anything is drawn from it.
- * Empty when it is geometry all the way down.
- */
-const WHOLE = /^(the\s+)?(shape|outline|body|form|silhouette|thing|object)$/i;
-
-export function formProblems(form: ThingForm): string[] {
-  const problems: string[] = [];
-  for (const part of form.parts)
-    if (WHOLE.test(part.id.trim()))
-      problems.push(
-        `"${part.id}" is the whole thing, not a part of it; name a feature on it a person could point at separately`,
-      );
-  const said = PURPOSE.exec(form.looksLike);
-  if (said)
-    problems.push(
-      `"${said[0]}" says what it is for, not what it looks like; describe the shape instead`,
-    );
-  for (const part of form.parts) {
-    const named = PURPOSE.exec(part.id);
-    if (named)
-      problems.push(
-        `the part "${part.id}" is named for what it does ("${named[0]}"); name the shape a person could point at`,
-      );
-    // The spec's own rule: a part's shape that states a purpose cannot
-    // be drawn, so it goes back before anything tries.
-    const said = PURPOSE.exec(part.shape);
-    if (said)
-      problems.push(
-        `the shape of "${part.id}" says what it does ("${said[0]}"): "${part.shape}". Say what it looks like instead`,
-      );
-  }
-  return problems;
-}
-
-/**
  * What is wrong with a drawn thing, or nothing when a person may look at
  * it. Given the description it was drawn from, it also checks that the
  * drawing drew that and not something adjacent.
  */
-export function drawingProblems(
-  drawing: ThingDrawing,
-  form?: ThingForm,
-): string[] {
-  const asked = (form?.parts ?? []).map((p) => p.id);
-  const problems = svgProblems(drawing.svg, asked);
+export function drawingProblems(drawing: ThingDrawing): string[] {
+  const problems = svgProblems(
+    drawing.svg,
+    drawing.parts.map((p) => p.name),
+  );
   if (
     drawing.aspect < DRAW_GATE.minAspect ||
     drawing.aspect > DRAW_GATE.maxAspect
@@ -132,14 +76,6 @@ export function drawingProblems(
     if (!key) problems.push('a part has no name');
     if (seen.has(key)) problems.push(`the part "${part.name}" is named twice`);
     seen.add(key);
-  }
-  // Every part the description named needs somewhere for a callout to
-  // land, as well as a group to light.
-  const pointed = new Set(drawing.parts.map((p) => idKey(p.name)));
-  for (const id of asked) {
-    const key = idKey(id);
-    if (key && !pointed.has(key))
-      problems.push(`the part "${id}" has no point for a line to meet it`);
   }
   return problems;
 }

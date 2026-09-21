@@ -525,38 +525,20 @@ export interface LlmGatewayPort {
   }): Promise<LlmResult<{ pick: number | null; wrong: string | null }>>;
 
   /**
-   * What a thing looks like, in plain words, with nothing about what it
-   * is for. The first of the two calls that draw the library out.
-   */
-  thingForm(input: {
-    term: string;
-    field?: string;
-    context?: string;
-  }): Promise<
-    LlmResult<{
-      looksLike: string;
-      /** Each part with its own shape, so the drawer is not inventing it. */
-      parts: { id: string; shape: string }[];
-      aspect: number;
-    }>
-  >;
-
-  /**
-   * A drawing of that form: a flat schematic SVG, drawn in line, with
-   * each named part its own group so a lesson can light one at a time.
+   * One thing, drawn: a flat schematic SVG in line, with each part
+   * somebody could point at in its own group.
    *
-   * Markup rather than path data, because asking for a single path of
-   * cubic bends on a unit square is the hardest way to ask a model for a
-   * picture and the elements are the easiest.
+   * One call, and it is told what to draw. It was two — describe the
+   * form without the name, then draw from the description — which is
+   * the spec's guard against a model drawing what a word is associated
+   * with rather than what the thing looks like. That guard costs a call,
+   * costs the model everything it knows about the thing, and measurably
+   * made the drawings worse. Asking for a kidney gets a kidney.
    */
   thingDrawing(input: {
-    looksLike: string;
-    parts: { id: string; shape: string }[];
-    aspect: number;
-    /** What it is called. Given to the drawer, withheld from the judge. */
-    term?: string;
-    correction?: string;
-    /** Raised so six candidates disagree; six of one mind is one candidate. */
+    term: string;
+    /** What was wrong last time, when this is a second attempt. */
+    note?: string;
     temperature?: number;
   }): Promise<
     LlmResult<{

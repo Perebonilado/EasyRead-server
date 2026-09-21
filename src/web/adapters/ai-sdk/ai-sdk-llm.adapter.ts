@@ -46,7 +46,6 @@ import {
   visualJudgeSchema,
   stageNarrationSchema,
   thingDrawingSchema,
-  thingFormSchema,
   visualNarrationSchema,
   visualDecisionsSchema,
   drawingChoiceSchema,
@@ -822,45 +821,11 @@ export class AiSdkLlmAdapter implements LlmGatewayPort, OnModuleInit {
     };
   }
 
-  async thingForm(input: {
-    term: string;
-    field?: string;
-    context?: string;
-  }): Promise<
-    LlmResult<{
-      looksLike: string;
-      parts: { id: string; shape: string }[];
-      aspect: number;
-    }>
-  > {
-    return this.objectOrJson({
-      task: 'thing_form',
-      schema: thingFormSchema,
-      system: PROMPTS.thingForm,
-      prompt: [
-        `The thing: ${input.term}`,
-        input.field ? `Its subject: ${input.field}` : '',
-        input.context ? `Where it is used: ${input.context}` : '',
-      ]
-        .filter(Boolean)
-        .join('\n'),
-    });
-  }
-
   async thingDrawing(input: {
-    looksLike: string;
-    parts: { id: string; shape: string }[];
-    aspect: number;
-    /**
-     * What the thing is called. The drawer is given it and the judge is
-     * not: a name carries what the word is associated with, which helps
-     * a drawing and would wreck a verdict. If the name pulls this toward
-     * a beaker, the judge — which only ever sees the description — still
-     * turns it back for not being a bean with a notch.
-     */
-    term?: string;
-    correction?: string;
-    /** Raised so six candidates disagree; six of one mind is one candidate. */
+    term: string;
+    /** What was wrong last time, when this is a second attempt. */
+    note?: string;
+    /** Raised so several candidates disagree; several of one mind is one candidate. */
     temperature?: number;
   }) {
     const result = await this.objectOrJson({
@@ -869,22 +834,8 @@ export class AiSdkLlmAdapter implements LlmGatewayPort, OnModuleInit {
       system: PROMPTS.thingDrawing,
       temperature: input.temperature,
       prompt: [
-        input.term ? `Draw a ${input.term}.` : '',
-        `It looks like this: ${input.looksLike}`,
-        input.parts.length
-          ? [
-              'Draw these parts, each with its own ink:',
-              ...input.parts.map((p) => `  ${p.id}: ${p.shape}`),
-            ].join('\n')
-          : '',
-        `It is about ${input.aspect} times as wide as it is tall.`,
-        // The contract again, in the turn that carries the work. Said
-        // only in the system prompt it drifts, and what comes back is
-        // shaded, three-quarter, and traced from a photograph.
-        'viewBox="0 0 100 100". fill="none" on everything. Flat and front-on.',
-        'Each named part in its own <g id="...">, the outline outside them.',
-        'Draw only what is listed above. Add nothing.',
-        input.correction ? `Last time: ${input.correction}` : '',
+        `Draw: ${input.term}`,
+        input.note ? `Last time: ${input.note}` : '',
       ]
         .filter(Boolean)
         .join('\n'),

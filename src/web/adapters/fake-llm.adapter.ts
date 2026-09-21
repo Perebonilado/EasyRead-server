@@ -589,27 +589,6 @@ export class FakeLlmAdapter implements LlmGatewayPort {
     });
   }
 
-  thingForm(input: { term: string }): Promise<
-    LlmResult<{
-      looksLike: string;
-      parts: { id: string; shape: string }[];
-      aspect: number;
-    }>
-  > {
-    const started = Date.now();
-    return Promise.resolve({
-      value: {
-        looksLike: `a wide box with a flat lid across the top and a band around its middle, drawn from the side (${input.term})`,
-        parts: [
-          { id: 'lid', shape: 'a flat band across the top edge' },
-          { id: 'band', shape: 'a narrow band around the middle' },
-        ],
-        aspect: 1.2,
-      },
-      usage: this.usage(started, 120, 60),
-    });
-  }
-
   judgeDrawings(input: { png: Buffer; looksLike: string; count: number }) {
     const started = Date.now();
     // The first candidate, so the loop runs to the end under --fake.
@@ -622,31 +601,24 @@ export class FakeLlmAdapter implements LlmGatewayPort {
     });
   }
 
-  thingDrawing(input: {
-    looksLike: string;
-    parts: { id: string; shape: string }[];
-    aspect: number;
-  }) {
+  thingDrawing() {
     const started = Date.now();
-    const groups = input.parts
+    const names = ['rim', 'core', 'stem'];
+    const groups = names
       .map(
-        (part, i) =>
-          `<g id="${part.id}"><line x1="20" y1="${30 + i * 12}" x2="80" y2="${30 + i * 12}"/></g>`,
+        (name, i) =>
+          `<g id="${name}"><line x1="10" y1="${30 + i * 20}" x2="90" y2="${30 + i * 20}"/></g>`,
       )
       .join('');
     return Promise.resolve({
       value: {
         svg:
           `<svg viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg" fill="none" stroke="currentColor" stroke-width="2">` +
-          `<path d="M6 8 L94 8 L94 92 L6 92 Z"/><line x1="6" y1="20" x2="94" y2="20"/>` +
-          `<circle cx="50" cy="60" r="20"/>` +
+          `<path d="M6 6 L94 6 L94 94 L6 94 Z"/><circle cx="50" cy="50" r="30"/>` +
           groups +
           `</svg>`,
-        aspect: input.aspect,
-        parts: input.parts.map((part, i) => ({
-          name: part.id,
-          at: [50, 30 + i * 12],
-        })),
+        aspect: 1,
+        parts: names.map((name, i) => ({ name, at: [50, 30 + i * 20] })),
       },
       usage: this.usage(started, 200, 140),
     });

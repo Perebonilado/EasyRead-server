@@ -38,15 +38,14 @@ import { AiSdkLlmAdapter } from '../src/web/adapters/ai-sdk/ai-sdk-llm.adapter';
 import { FakeLlmAdapter } from '../src/web/adapters/fake-llm.adapter';
 import {
   drawingProblems,
-  formProblems,
   presetOf,
   type ThingDrawing,
-  type ThingForm,
 } from '../src/business/domain/visual-draw';
 import { rasterise } from '../src/business/domain/visual-render';
 import {
   ALLOWED_ELEMENTS,
   DRAW_VIEWBOX,
+  framed,
 } from '../src/business/domain/visual-svg';
 
 const arg = (name: string): string | undefined => {
@@ -211,30 +210,6 @@ async function main(): Promise<void> {
     }
     console.log(`\n${term}`);
 
-    // The description first, and it has to be geometry. One retry with
-    // the offending word quoted, then the term is undrawable and no
-    // model is asked to draw an explanation.
-    let form: ThingForm | null = null;
-    let formNote = '';
-    for (let go = 0; go < 2 && !form; go += 1) {
-      const said = await llm.thingForm({
-        term: formNote ? `${term} — ${formNote}` : term,
-      });
-      spent += 1;
-      const wrong = formProblems(said.value);
-      if (!wrong.length) form = said.value;
-      else {
-        formNote = `say only what it looks like: ${wrong.join('; ')}`;
-        console.log(`  the description says what it is for: ${wrong[0]}`);
-      }
-    }
-    if (!form) {
-      missed.push({ term, why: 'no description of it that is not its job' });
-      console.log('  undrawable: nothing here but what it does');
-      continue;
-    }
-    console.log(`  looks like: ${form.looksLike}`);
-
     let taken: ThingDrawing | null = null;
     let note = '';
     const tried: Tried[] = [];
@@ -247,21 +222,20 @@ async function main(): Promise<void> {
       // one candidate, and six at once finds a rate limit.
       const drawn = await inFlight(candidates, 3, async () => {
         const one = await llm.thingDrawing({
-          // The drawer is given the name; the judge below never is.
           term,
-          looksLike: form.looksLike,
-          parts: form.parts,
-          aspect: form.aspect,
           temperature,
-          ...(note ? { correction: note } : {}),
+          ...(note ? { note } : {}),
         });
-        return one.value;
+        // Framed here rather than sent back for it: the spec says to
+        // normalise the viewBox on accept, and a well-drawn cone with a
+        // margin round it is not a fault worth six more calls.
+        return { ...one.value, ...framed(one.value) };
       });
       spent += candidates;
 
       const judged = drawn.map((one) => ({
         one,
-        wrong: drawingProblems(one, form),
+        wrong: drawingProblems(one),
       }));
       // Every candidate is kept for the sheet, with what was wrong with
       // it. A run that draws nothing used to leave nothing to look at,
@@ -303,7 +277,7 @@ async function main(): Promise<void> {
       }
       const said = await llm.judgeDrawings({
         png,
-        looksLike: form.looksLike,
+        looksLike: term,
         count: passed.length,
       });
       spent += 1;
@@ -339,7 +313,7 @@ async function main(): Promise<void> {
       console.log(`  nothing passed for "${term}"`);
       continue;
     }
-    kept.push({ term, looksLike: form.looksLike, drawing: taken });
+    kept.push({ term, looksLike: term, drawing: taken });
     console.log(`  kept, ${taken.parts.length} named part(s)`);
   }
 

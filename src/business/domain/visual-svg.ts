@@ -193,6 +193,39 @@ export function boxOf(svg: string): Box | null {
 }
 
 /**
+ * The drawing with its viewBox pulled in around what was actually drawn.
+ *
+ * The spec is explicit that a drawing floating in a corner is fixed on
+ * accept rather than sent back, and it is right: a good cone with a
+ * margin round it was being thrown out and drawn again six times over,
+ * when the frame is one line of arithmetic we can do ourselves. Also
+ * gives the true proportion, which the model was guessing at.
+ */
+export function framed(
+  drawing: { svg: string; aspect: number },
+  pad = 4,
+): { svg: string; aspect: number } {
+  const box = boxOf(drawing.svg);
+  if (!box) return drawing;
+  const w = box.maxX - box.minX;
+  const h = box.maxY - box.minY;
+  if (w <= 0 || h <= 0) return drawing;
+  const view = [
+    (box.minX - pad).toFixed(2),
+    (box.minY - pad).toFixed(2),
+    (w + pad * 2).toFixed(2),
+    (h + pad * 2).toFixed(2),
+  ].join(' ');
+  return {
+    svg: drawing.svg.replace(
+      /(<\s*svg\b[^>]*?)\bviewBox\s*=\s*["'][^"']*["']/i,
+      `$1viewBox="${view}"`,
+    ),
+    aspect: Math.min(3, Math.max(0.3, (w + pad * 2) / (h + pad * 2))),
+  };
+}
+
+/**
  * What is wrong with a drawn SVG, or nothing when a person may look at
  * it. Given the parts the description named, it also checks the drawing
  * drew those and made each one reachable.
@@ -289,27 +322,5 @@ export function svgProblems(svg: string, parts: string[] = []): string[] {
       );
   }
 
-  // Fills the frame, and stays inside it.
-  const box = boxOf(text);
-  if (box) {
-    const across = box.maxX - box.minX;
-    const down = box.maxY - box.minY;
-    if (
-      across < DRAW_VIEWBOX.w * SVG_GATE.minSpread ||
-      down < DRAW_VIEWBOX.h * SVG_GATE.minSpread
-    )
-      problems.push(
-        `the drawing covers ${Math.round(across)} by ${Math.round(down)} of ${DRAW_VIEWBOX.w} by ${DRAW_VIEWBOX.h}; it should fill the viewBox both ways`,
-      );
-    if (
-      box.maxX > DRAW_VIEWBOX.w * 1.02 ||
-      box.maxY > DRAW_VIEWBOX.h * 1.02 ||
-      box.minX < -DRAW_VIEWBOX.w * 0.02 ||
-      box.minY < -DRAW_VIEWBOX.h * 0.02
-    )
-      problems.push(
-        `the drawing goes outside the viewBox and would be cut off; keep it between 0 and ${DRAW_VIEWBOX.w}`,
-      );
-  }
   return problems;
 }

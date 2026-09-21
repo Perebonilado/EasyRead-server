@@ -3,6 +3,7 @@ import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import type { StageNarration } from '../../../business/domain/visual-direct';
 import type { LanguageModelUsage } from 'ai';
+import type { ZodType } from 'zod';
 import type { Block, RecapBody, TopicPreviewBody } from '../../../contracts';
 import type {
   GeneratedItem,
@@ -48,6 +49,7 @@ import {
   thingFormSchema,
   visualNarrationSchema,
   visualDecisionsSchema,
+  drawingChoiceSchema,
   sketchJudgeSchema,
   lectureExtraSchema,
   spokenQuizSchema,
@@ -777,6 +779,49 @@ export class AiSdkLlmAdapter implements LlmGatewayPort, OnModuleInit {
     };
   }
 
+  async judgeDrawings(input: {
+    png: Buffer;
+    looksLike: string;
+    count: number;
+  }): Promise<LlmResult<{ pick: number | null; wrong: string | null }>> {
+    const started = Date.now();
+    const { generateObject } = await this.registry.modules();
+    // Vision, so this one stays on a model that has eyes however the
+    // drawer is routed.
+    const { model, ref } = await this.registry.languageModel('sketch_judge');
+    const result = await generateObject({
+      model,
+      schema: drawingChoiceSchema,
+      system: PROMPTS.drawingJudge,
+      messages: [
+        {
+          role: 'user' as const,
+          content: [
+            {
+              type: 'image' as const,
+              image: input.png,
+              mediaType: 'image/png',
+            },
+            {
+              // The description, never the name.
+              type: 'text' as const,
+              text: `Candidates 1 to ${input.count}.\nThe thing looks like: ${input.looksLike}`,
+            },
+          ],
+        },
+      ],
+      maxRetries: this.maxRetries(),
+    });
+    const pick = result.object.pick;
+    return {
+      value: {
+        pick: pick && pick >= 1 && pick <= input.count ? pick : null,
+        wrong: result.object.wrong,
+      },
+      usage: this.usage(ref, result.usage, started),
+    };
+  }
+
   async thingForm(input: {
     term: string;
     field?: string;
@@ -784,11 +829,8 @@ export class AiSdkLlmAdapter implements LlmGatewayPort, OnModuleInit {
   }): Promise<
     LlmResult<{ looksLike: string; parts: string[]; aspect: number }>
   > {
-    const started = Date.now();
-    const { generateObject } = await this.registry.modules();
-    const { model, ref } = await this.registry.languageModel('sketch');
-    const result = await generateObject({
-      model,
+    return this.objectOrJson({
+      task: 'thing_form',
       schema: thingFormSchema,
       system: PROMPTS.thingForm,
       prompt: [
@@ -798,12 +840,7 @@ export class AiSdkLlmAdapter implements LlmGatewayPort, OnModuleInit {
       ]
         .filter(Boolean)
         .join('\n'),
-      maxRetries: this.maxRetries(),
     });
-    return {
-      value: result.object,
-      usage: this.usage(ref, result.usage, started),
-    };
   }
 
   async thingDrawing(input: {
@@ -811,33 +848,45 @@ export class AiSdkLlmAdapter implements LlmGatewayPort, OnModuleInit {
     parts: string[];
     aspect: number;
     correction?: string;
+    /** Raised so six candidates disagree; six of one mind is one candidate. */
+    temperature?: number;
   }) {
-    const started = Date.now();
-    const { generateObject } = await this.registry.modules();
-    const { model, ref } = await this.registry.languageModel('sketch');
-    const result = await generateObject({
-      model,
+    const result = await this.objectOrJson({
+      task: 'thing_draw',
       schema: thingDrawingSchema,
       system: PROMPTS.thingDrawing,
+      temperature: input.temperature,
       // The name never comes this way: the drawing follows the form.
       prompt: [
         `Draw this: ${input.looksLike}`,
-        input.parts.length ? `Name these parts: ${input.parts.join(', ')}` : '',
+        input.parts.length
+          ? `Draw these parts, each with its own ink: ${input.parts.join(', ')}`
+          : '',
         `It is about ${input.aspect} times as wide as it is tall.`,
+        // The contract again, in the turn that carries the work. Said
+        // only in the system prompt it drifts, and what comes back is
+        // shaded, three-quarter, and traced from a photograph.
+        'Flat and front-on. No perspective, no shading, no depth, no shadow.',
+        'Outline only: M, L, C, Q and Z, absolute, every number between 0 and 1.',
+        'Draw only what is listed above. Add nothing.',
         input.correction ? `Last time: ${input.correction}` : '',
       ]
         .filter(Boolean)
         .join('\n'),
-      maxRetries: this.maxRetries(),
     });
     return {
       value: {
-        body: result.object.body,
-        detail: result.object.detail,
-        aspect: result.object.aspect,
-        parts: result.object.parts.map((p) => ({ name: p.name, at: p.at })),
+        body: result.value.body,
+        detail: result.value.detail,
+        aspect: result.value.aspect,
+        parts: result.value.parts.map((p) => ({
+          name: p.name,
+          at: p.at,
+          fill: p.fill,
+          stroke: p.stroke,
+        })),
       },
-      usage: this.usage(ref, result.usage, started),
+      usage: result.usage,
     };
   }
 
@@ -1876,6 +1925,70 @@ export class AiSdkLlmAdapter implements LlmGatewayPort, OnModuleInit {
       value: result.text.trim(),
       usage: this.usage(ref, result.usage, started),
     };
+  }
+
+  /**
+   * A structured call that survives a provider without schema-constrained
+   * output.
+   *
+   * The two drawing calls are the only ones routed at a text-only
+   * provider on purpose, and not every such provider will hold a JSON
+   * schema: some offer JSON mode and no more. So the schema is tried
+   * first, and on refusal the same prompt is asked again as text and
+   * parsed here. The schema still decides what is acceptable either way,
+   * so a provider that cannot be constrained is held to the same shape
+   * as one that can.
+   */
+  private async objectOrJson<T>(args: {
+    task: LlmTask;
+    schema: ZodType<T>;
+    system: string;
+    prompt: string;
+    temperature?: number;
+  }): Promise<LlmResult<T>> {
+    const started = Date.now();
+    const { generateObject, generateText } = await this.registry.modules();
+    const { model, ref } = await this.registry.languageModel(args.task);
+    const common = {
+      model,
+      system: args.system,
+      prompt: args.prompt,
+      maxRetries: this.maxRetries(),
+      ...(args.temperature === undefined
+        ? {}
+        : { temperature: args.temperature }),
+    };
+    try {
+      const result = await generateObject({ ...common, schema: args.schema });
+      return {
+        value: result.object,
+        usage: this.usage(ref, result.usage, started),
+      };
+    } catch (cause) {
+      this.logger.warn(
+        `${args.task}: ${ref.provider} would not hold the schema; asking again as JSON (${String(cause)})`,
+      );
+      const result = await generateText({
+        ...common,
+        system: `${args.system}\n\nReply with one JSON object and nothing else: no prose, no code fences.`,
+      });
+      // Models fence JSON however plainly the prompt says not to.
+      const text = result.text
+        .trim()
+        .replace(/^```(?:json)?\s*/i, '')
+        .replace(/```\s*$/, '')
+        .trim();
+      const open = text.indexOf('{');
+      const close = text.lastIndexOf('}');
+      if (open < 0 || close <= open)
+        throw new Error(`${args.task}: no JSON object in the reply`);
+      return {
+        value: args.schema.parse(
+          JSON.parse(text.slice(open, close + 1)) as unknown,
+        ),
+        usage: this.usage(ref, result.usage, started),
+      };
+    }
   }
 
   /** Recorded per call, so cost is answerable per document and per task. */

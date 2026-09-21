@@ -1,9 +1,11 @@
 import {
   DRAW_GATE,
   drawingProblems,
+  formProblems,
   presetOf,
   spreadOf,
   type ThingDrawing,
+  type ThingForm,
 } from './visual-draw';
 
 const sound: ThingDrawing = {
@@ -11,9 +13,26 @@ const sound: ThingDrawing = {
   detail: 'M0.08 0.34 L0.92 0.34',
   aspect: 1.2,
   parts: [
-    { name: 'lid', at: [0.5, 0.27] },
-    { name: 'band', at: [0.5, 0.6] },
+    {
+      name: 'lid',
+      at: [0.5, 0.27],
+      fill: 'M0.08 0.2 L0.92 0.2 L0.92 0.32 L0.08 0.32 Z',
+      stroke: null,
+    },
+    {
+      name: 'band',
+      at: [0.5, 0.6],
+      fill: null,
+      stroke: 'M0.08 0.6 L0.92 0.6',
+    },
   ],
+};
+
+/** The description `sound` was drawn from. */
+const form: ThingForm = {
+  looksLike: 'a wide box with a lid across the top and a band around it',
+  parts: ['lid', 'band'],
+  aspect: 1.2,
 };
 
 describe('the gate before a person looks', () => {
@@ -64,18 +83,59 @@ describe('the gate before a person looks', () => {
     expect(
       drawingProblems({
         ...sound,
-        parts: [{ name: 'lid', at: [1.4, 0.2] }],
+        parts: [{ ...sound.parts[0], at: [1.4, 0.2] }],
       }).join(' '),
     ).toContain('points off the square');
     expect(
       drawingProblems({
         ...sound,
         parts: [
-          { name: 'lid', at: [0.5, 0.2] },
-          { name: 'Lid', at: [0.5, 0.6] },
+          { ...sound.parts[0] },
+          { ...sound.parts[0], name: 'Lid' },
         ],
       }).join(' '),
     ).toContain('named twice');
+  });
+
+  it('turns back a part with no ink of its own', () => {
+    expect(
+      drawingProblems({
+        ...sound,
+        parts: [{ name: 'lid', at: [0.5, 0.27], fill: null, stroke: null }],
+      }).join(' '),
+    ).toContain('no ink of its own');
+  });
+
+  it('turns back a part whose own ink is unsound', () => {
+    expect(
+      drawingProblems({
+        ...sound,
+        parts: [{ ...sound.parts[0], fill: 'M0.1 0.1 l0.4 0.4 Z' }],
+      }).join(' '),
+    ).toContain('the part "lid" fill is not sound');
+  });
+
+  it('turns back a drawing that dropped a part the description named', () => {
+    expect(
+      drawingProblems({ ...sound, parts: [sound.parts[0]] }, form).join(' '),
+    ).toContain('"band" missing');
+  });
+
+  it('turns back a drawing that invented a part nobody asked for', () => {
+    expect(
+      drawingProblems(
+        { ...sound, parts: [...sound.parts, { ...sound.parts[0], name: 'spout' }] },
+        form,
+      ).join(' '),
+    ).toContain('"spout" was not in the description');
+  });
+
+  it('counts a bend by where the pen lands, not by where its handles reach', () => {
+    // One short stroke whose control handles swing wide. Reading every
+    // number as a coordinate calls this a full-width drawing; it is not.
+    const handles = 'M0.40 0.45 C0.02 0.02 0.98 0.98 0.60 0.55 Z';
+    expect(spreadOf(handles).w).toBeCloseTo(0.2, 2);
+    expect(spreadOf(handles).h).toBeCloseTo(0.1, 2);
   });
 
   it('turns back a proportion no box can hold', () => {
@@ -86,6 +146,27 @@ describe('the gate before a person looks', () => {
   });
 });
 
+describe('the description, before anything is drawn from it', () => {
+  it('lets through a description that is all shape', () => {
+    expect(formProblems(form)).toEqual([]);
+  });
+
+  it('turns back a description that says what the thing is for', () => {
+    expect(
+      formProblems({
+        ...form,
+        looksLike: 'a bean-shaped organ that filters blood',
+      }).join(' '),
+    ).toContain('says what it is for');
+  });
+
+  it('turns back a part named for its job', () => {
+    expect(
+      formProblems({ ...form, parts: ['lid', 'stores'] }).join(' '),
+    ).toContain('named for what it does');
+  });
+});
+
 describe('what a passed drawing becomes', () => {
   it('is a preset the library can take, with its parts and its words', () => {
     const preset = presetOf('heat exchanger', sound, 'a wide box with a lid');
@@ -93,7 +174,13 @@ describe('what a passed drawing becomes', () => {
     expect(preset.aspect).toBe(1.2);
     expect(preset.body).toBe(sound.body);
     expect(preset.detail).toBe(sound.detail);
-    expect(preset.parts?.map((p) => p.name)).toEqual(['lid', 'band']);
+    expect(Object.keys(preset.parts ?? {})).toEqual(['lid', 'band']);
+    // Keyed by name and carrying its own ink: the shape every pack keeps,
+    // so an accepted drawing drops in without being transposed by hand.
+    expect(preset.parts?.lid.at).toEqual([0.5, 0.27]);
+    expect(preset.parts?.lid.fill).toBe(sound.parts[0].fill);
+    expect(preset.parts?.lid.stroke).toBeUndefined();
+    expect(preset.parts?.band.stroke).toBe(sound.parts[1].stroke);
     expect(preset.tags).toContain('heat exchanger');
     expect(preset.tags).toContain('wide');
   });

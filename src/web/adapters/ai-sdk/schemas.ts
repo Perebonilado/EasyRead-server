@@ -760,6 +760,19 @@ export const sketchJudgeSchema = z.object({
   wrong: z.string().max(300).nullable(),
 });
 
+/**
+ * Which of the candidates on a sheet is the thing described.
+ *
+ * One pick from several, not several verdicts one at a time: asked one
+ * at a time a judge takes the first it can live with, and the point of
+ * drawing six was to be able to choose. `pick` is the number written
+ * under a candidate, or null when none of them is the thing.
+ */
+export const drawingChoiceSchema = z.object({
+  pick: z.number().int().min(1).max(12).nullable(),
+  wrong: z.string().max(300).nullable(),
+});
+
 /** The judge's word on a page's stills: each drawing by name, and each moment as a whole. */
 export const visualJudgeSchema = z.object({
   moments: z
@@ -905,7 +918,15 @@ export const thingFormSchema = z.object({
   aspect: z.number().min(0.3).max(3),
 });
 
-/** A drawing of that form: closed outlines on the unit square, and where its parts sit. */
+/**
+ * A drawing of that form: a closed outline on the unit square, and each
+ * named part as its own ink over it.
+ *
+ * The ink is what makes a part addressable. A part with only a point can
+ * be pointed at; a part with its own path can be drawn, lit and dimmed
+ * on its own, which is the difference between a lesson that builds a
+ * thing up and one where the whole picture arrives at once.
+ */
 export const thingDrawingSchema = z.object({
   body: z.string().min(8).max(700),
   detail: z.string().max(700).nullable(),
@@ -915,6 +936,10 @@ export const thingDrawingSchema = z.object({
       z.object({
         name: z.string().min(1).max(24),
         at: z.array(z.number().min(0).max(1)).length(2),
+        /** Closed ink that is this part alone, drawn over the body. */
+        fill: z.string().max(700).nullable(),
+        /** Open lines that are this part alone, drawn over the body. */
+        stroke: z.string().max(700).nullable(),
       }),
     )
     .max(6),

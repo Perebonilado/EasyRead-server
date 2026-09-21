@@ -38,6 +38,11 @@ export type LlmTask =
   | 'visualize_query'
   | 'diagram'
   | 'sketch'
+  // The library's two drawing calls. Their own knobs, so the drawer can
+  // sit on a cheap text model without moving the tutor's live board with
+  // it: the board shares 'sketch' and wants a different trade.
+  | 'thing_form'
+  | 'thing_draw'
   | 'topic_quiz'
   | 'item_write'
   | 'item_verify'
@@ -506,6 +511,20 @@ export interface LlmGatewayPort {
   }): Promise<LlmResult<VisualNarration>>;
 
   /**
+   * Which candidate on a numbered sheet is the thing described, or none.
+   *
+   * One pick from several rather than a verdict on each: asked one at a
+   * time a judge keeps the first it can live with, and drawing six was
+   * only worth doing to be able to choose between them. The name is
+   * withheld here as it is from the drawer.
+   */
+  judgeDrawings(input: {
+    png: Buffer;
+    looksLike: string;
+    count: number;
+  }): Promise<LlmResult<{ pick: number | null; wrong: string | null }>>;
+
+  /**
    * What a thing looks like, in plain words, with nothing about what it
    * is for. The first of the two calls that draw the library out.
    */
@@ -527,12 +546,23 @@ export interface LlmGatewayPort {
     parts: string[];
     aspect: number;
     correction?: string;
+    /** Raised so six candidates disagree; six of one mind is one candidate. */
+    temperature?: number;
   }): Promise<
     LlmResult<{
       body: string;
       detail: string | null;
       aspect: number;
-      parts: { name: string; at: number[] }[];
+      /**
+       * Each part with its own ink, so it can be drawn and lit alone. A
+       * part with only a point can be pointed at and nothing more.
+       */
+      parts: {
+        name: string;
+        at: number[];
+        fill: string | null;
+        stroke: string | null;
+      }[];
     }>
   >;
 

@@ -79,6 +79,11 @@ const TASK_VAR: Record<LlmTask, string> = {
   // own knob so a deployment can route them to a stronger model without
   // paying for it on diagrams.
   sketch: 'AI_MODEL_SKETCH',
+  // The library's describer and drawer. Both are text and nothing else —
+  // a term in, a sentence about form out; that sentence in, path data
+  // out — so they are the two tasks a text-only provider can take whole.
+  thing_form: 'AI_MODEL_THING_FORM',
+  thing_draw: 'AI_MODEL_THING_DRAW',
   topic_quiz: 'AI_MODEL_QUIZ',
   // Guided reading: the preview is one call per chapter ever (cached), the
   // graders run once per checkpoint — all three default to the cheap model

@@ -1280,17 +1280,48 @@ export const PROMPTS = {
   ].join(' '),
 
   thingDrawing: [
-    'You draw the thing described, on a square one unit across and one',
-    'unit down, as SVG path data. body is the filled silhouette: one or',
-    'more closed subpaths, using M, L, C, Q and Z only, absolute',
-    'commands, every coordinate between 0 and 1. detail is the lines',
-    'drawn over it, open paths, the same commands, or null. Keep it',
-    'simple: under forty commands in all, the shape a person would draw',
-    'in five seconds, recognisable at the size of a thumbnail. Fill the',
-    'square: the drawing touches at least three of its four edges. Then',
-    'give each named part a point on the square where a line pointing at',
-    'it should land. aspect is width over height as you drew it.',
-  ].join(' '),
+    [
+      'You draw the thing described, on a square one unit across and one',
+      'unit down, as SVG path data. body is the filled silhouette: one or',
+      'more closed subpaths, using M, L, C, Q and Z only, absolute',
+      'commands, every coordinate between 0 and 1. detail is the lines',
+      'drawn over it, open paths, the same commands, or null. Keep it',
+      'simple: under forty commands in all, the shape a person would draw',
+      'in five seconds, recognisable at the size of a thumbnail. Fill the',
+      'square: the drawing touches at least three of its four edges.',
+      'aspect is width over height as you drew it.',
+    ].join(' '),
+    // Parts are ink, not pins. A drawing whose parts cannot be drawn on
+    // their own can only ever appear all at once, and that is most of
+    // why a lesson reads as a slide rather than as something being made.
+    [
+      'Then draw each part the description named, as ink of its own that',
+      'sits over the body: fill for closed shapes that are that part and',
+      'nothing else, stroke for lines that are. Give every part both an',
+      'at point, where a line pointing at it should land, and at least',
+      'one of fill or stroke. Do not put a part in the body and leave its',
+      'fill null — the body is the outline; the parts are what is drawn',
+      'on it, one at a time. Draw exactly the parts you were given: not',
+      'one more, not one fewer, and under the names you were given.',
+    ].join(' '),
+    // The set it has to sit beside. Two real drawings say more about the
+    // house hand than a page of adjectives: flat, front-on, thin even
+    // line, no shading, no perspective.
+    'Two drawings from the set yours has to sit beside:',
+    [
+      'A leaf — "a pointed oval with a stem at one end and a rib down the',
+      'middle":',
+      'body "M0.5 0.02 C0.86 0.22 0.98 0.58 0.5 0.98 C0.02 0.58 0.14 0.22 0.5 0.02 Z",',
+      'detail "M0.5 0.08 L0.5 0.92".',
+    ].join(' '),
+    [
+      'A flask — "a vessel with sloping sides, a flat base, wider than',
+      'its short straight neck":',
+      'body "M0.40 0.06 L0.60 0.06 L0.60 0.34 L0.92 0.90 L0.08 0.90 Z",',
+      'detail "M0.36 0.06 L0.64 0.06 M0.22 0.72 L0.78 0.72".',
+    ].join(' '),
+    'Yours is drawn in that hand: flat, front-on, one even line, no shading, no depth.',
+  ].join('\n\n'),
 
   stageNarration: [
     [
@@ -1733,6 +1764,37 @@ export const PROMPTS = {
     'not name. When it does not show it, say in one sentence what is',
     'wrong; otherwise null.',
   ].join(' '),
+
+  // Its own prompt, and not the tutor's whiteboard judge above. That one
+  // is written for diagrams — rings, stacked layers, comparisons side by
+  // side — and this is asked about the silhouette of a single thing.
+  drawingJudge: [
+    [
+      'You are shown several candidate drawings of one thing, numbered,',
+      'and a description of what that thing looks like. You are not told',
+      'what it is called, on purpose: judge the shape against the words,',
+      'and nothing else.',
+    ].join(' '),
+    [
+      'Pick the number of the one drawing that is the thing described. It',
+      'must have the outline the description gives, the parts it names,',
+      'and the right count of anything counted: three wedges means three.',
+      'Prefer the plainer drawing when two are both right — these are read',
+      'at the size of a thumbnail.',
+    ].join(' '),
+    [
+      'Ignore colour, centring, line weight and style. Do not reward',
+      'detail the description never asked for; a drawing that adds things',
+      'is wrong, not thorough.',
+    ].join(' '),
+    [
+      'If none of them is the thing described, pick null and say in one',
+      'sentence what they all get wrong, so the next attempt can fix it.',
+      'Saying none is a real answer and a wrong drawing in a lesson is',
+      'worse than no drawing: a learner remembers the picture over the',
+      'words.',
+    ].join(' '),
+  ].join('\n\n'),
 
   lectureVerify: [
     [

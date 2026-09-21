@@ -45,12 +45,18 @@ export interface PresetPart {
 }
 
 import { AGRICULTURE } from './packs/agriculture';
+import { DRAWN } from './packs/drawn';
 import { MEDICINE } from './packs/medicine';
 
-/** The field packs, each a field's own vocabulary drawn for it. */
+/**
+ * The field packs, each a field's own vocabulary drawn for it, and the
+ * open pack of things a page asked for that nothing could draw until
+ * somebody drew them.
+ */
 export const PACKS: Record<string, Record<string, Preset>> = {
   medicine: MEDICINE,
   agriculture: AGRICULTURE,
+  drawn: DRAWN,
 };
 
 /**

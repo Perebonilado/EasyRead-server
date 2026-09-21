@@ -32,6 +32,7 @@ import {
   type VisualSegment,
 } from './visual';
 import { PAUSE_S, SCENE_SPEED, findWord } from './visual-cards';
+import { resolveDrawing } from './visual-figures';
 
 /**
  * The form a thing takes when the library has no drawing of it. These
@@ -281,17 +282,41 @@ const FORM_PLAIN: Record<StageForm, string> = {
   money: 'circle',
 };
 
-/** How a thing is drawn: the library's picture, the form's, or a plain shape. */
+/**
+ * How a thing is drawn: the library's picture, what its own words say it
+ * is shaped like, the form's shape, or — when none of those answer — its
+ * name, written.
+ *
+ * The last of those is the point. Asking only whether the library knows
+ * a name leaves every abstract word falling through to a plain box, and
+ * a box with nothing in it and its name underneath reads as a picture
+ * that failed to arrive. A labelled card is not a failure: a learner who
+ * is told what they are looking at has been taught something, and a
+ * confident wrong picture teaches them something false.
+ */
 export function shapeOf(
   thing: StageThing,
   known: (name: string) => boolean,
-): string {
+): { kind: string; words: boolean } {
   const picture = thing.picture?.trim();
-  if (picture && known(picture)) return picture;
+  if (picture && known(picture)) return { kind: picture, words: false };
+  // The name the library actually files this under: a search by meaning
+  // places "screen images" on `images`, and a living thing on the figure
+  // its words say it is. Asking `known` alone never reaches either.
+  if (picture) {
+    const found = resolveDrawing(picture);
+    if (found?.kind === 'picture' && known(found.name))
+      return { kind: found.name, words: false };
+  }
   const form = thing.form ?? 'box';
   const drawn = FORM_SHAPE[form];
-  if (drawn && known(drawn)) return drawn;
-  return FORM_PLAIN[form] ?? 'roundRect';
+  if (drawn && known(drawn)) return { kind: drawn, words: false };
+  // A form the narrator named is a shape worth drawing even empty: a
+  // gate is a diamond, a ring is a circle, and those say something. A
+  // form nobody named is not, and that is where the words go.
+  if (thing.form)
+    return { kind: FORM_PLAIN[form] ?? 'roundRect', words: false };
+  return { kind: 'roundRect', words: true };
 }
 
 /* ------------------------------------------------------------------ *
@@ -379,21 +404,27 @@ export function layoutStage(
       const other: VisualPlace[] = [
         { x: then.x, y: then.y, scale: then.w / at.w },
       ];
+      const drawn = shapeOf(thing, known);
+      const name = shorten(thing.label ?? thing.name, 3);
       elements.push({
         id: key(i),
         type: 'shape',
-        kind: shapeOf(thing, known),
+        kind: drawn.kind,
         x: at.x,
         y: at.y,
         w: at.w,
         h: at.h,
+        // Nothing draws this, so the card carries its name instead of
+        // standing empty over it.
+        ...(drawn.words && name ? { text: name } : {}),
         color: thing.color ?? 'ink',
         fill: 'solid',
         carry: thing.name.toLowerCase(),
         places: other,
       });
-      const name = shorten(thing.label ?? thing.name, 3);
-      if (name)
+      // The name goes under the drawing, or inside the card when the
+      // card is all there is — never both.
+      if (name && !drawn.words)
         elements.push({
           id: `${key(i)}_n`,
           type: 'label',

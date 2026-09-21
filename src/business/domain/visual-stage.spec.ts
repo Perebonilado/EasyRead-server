@@ -3,11 +3,13 @@ import {
   STAGE_LIMITS,
   layoutStage,
   placesFor,
+  shapeOf,
   shorten,
   stageProblems,
   wordsOnStage,
   type StageScene,
 } from './visual-stage';
+import { knownPicture } from './visual-presets';
 
 const sentences = [
   'A payment looks simple, so here is what moves.',
@@ -372,5 +374,61 @@ describe('cutting text', () => {
       'one two three four'.slice(0, 18),
     );
     expect(STAGE_LIMITS.maxRunWords).toBe(4);
+  });
+});
+
+
+describe('what a thing is drawn as when the library is short', () => {
+  it('takes the library\'s drawing when it has one', () => {
+    expect(shapeOf({ name: 'kidney', picture: 'kidney' }, knownPicture)).toEqual(
+      { kind: 'kidney', words: false },
+    );
+  });
+
+  it('finds the name the library files it under', () => {
+    // "screen images" is not a drawing; `images` is, and only a search
+    // by meaning gets from one to the other.
+    expect(
+      shapeOf({ name: 'screen images', picture: 'screen images' }, knownPicture),
+    ).toEqual({ kind: 'images', words: false });
+  });
+
+  it('draws the form when the narrator named one', () => {
+    expect(
+      shapeOf({ name: 'a decision', picture: 'decision', form: 'gate' }, knownPicture),
+    ).toEqual({ kind: 'diamond', words: false });
+  });
+
+  it('writes the words when nothing draws it and no form was named', () => {
+    // The whole defect in one case: `film` has no drawing and no form,
+    // and used to become an empty rounded box with its name underneath.
+    const drawn = shapeOf({ name: 'film', picture: 'film' }, knownPicture);
+    expect(drawn.words).toBe(true);
+    expect(knownPicture('film')).toBe(false);
+  });
+
+  it('puts the name inside that card, and not underneath it as well', () => {
+    const scene: StageScene = {
+      title: 'What Visualize is trying to do',
+      sentences,
+      sections: [
+        {
+          title: 'Page to film',
+          cast: [{ name: 'film', picture: 'film' }],
+          beats: [{ sentence: 0, events: [{ do: 'place', what: ['film'] }] }],
+        },
+      ],
+    };
+    const script = layoutStage(scene, {
+      known: knownPicture,
+      stage: STAGES.box,
+    });
+    const shape = script.elements.find((e) => e.type === 'shape');
+    expect(shape).toBeTruthy();
+    expect((shape as { text?: string }).text).toBe('film');
+    // No separate label under it: the card already says what it is.
+    expect(
+      script.elements.filter((e) => e.type === 'label' && e.id.endsWith('_n')),
+    ).toEqual([]);
   });
 });

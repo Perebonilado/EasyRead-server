@@ -13,11 +13,27 @@
  */
 import { pathProblem } from './visual';
 
+export interface ThingPart {
+  name: string;
+  at: number[];
+  /** Closed ink that is this part alone, drawn over the body. */
+  fill?: string | null;
+  /** Open lines that are this part alone, drawn over the body. */
+  stroke?: string | null;
+}
+
 export interface ThingDrawing {
   body: string;
   detail: string | null;
   aspect: number;
-  parts: { name: string; at: number[] }[];
+  parts: ThingPart[];
+}
+
+/** What the describer said the thing looks like, and the parts it named. */
+export interface ThingForm {
+  looksLike: string;
+  parts: string[];
+  aspect: number;
 }
 
 export const DRAW_GATE = {
@@ -31,14 +47,47 @@ export const DRAW_GATE = {
   maxParts: 6,
 } as const;
 
-const NUMBERS = /-?\d*\.?\d+(?:e-?\d+)?/g;
 const COMMANDS = /[A-Za-z]/g;
 
-/** The box a path covers, as fractions of the unit square. */
+/** How many numbers each command carries, and how many of them are its endpoint. */
+const ARITY: Record<string, number> = { M: 2, L: 2, C: 6, Q: 4, Z: 0 };
+
+/**
+ * The box a path covers, as fractions of the unit square.
+ *
+ * Only points the pen actually reaches count. A cubic's two control
+ * handles can sit well outside the ink they bend — read every number as
+ * a coordinate and a modest drawing measures as a generous one, which is
+ * how a drawing huddled in a corner passes a rule meant to stop exactly
+ * that.
+ */
 export function spreadOf(d: string): { w: number; h: number } {
-  const all = (d.match(NUMBERS) ?? []).map(Number).filter(Number.isFinite);
-  const xs = all.filter((_, i) => i % 2 === 0);
-  const ys = all.filter((_, i) => i % 2 === 1);
+  const tokens = d.trim().match(/[A-Za-z]|-?\d*\.?\d+(?:e-?\d+)?/g) ?? [];
+  const xs: number[] = [];
+  const ys: number[] = [];
+  let command = '';
+  let numbers: number[] = [];
+  const takeEndpoint = () => {
+    const need = ARITY[command] ?? 0;
+    if (!need) return;
+    // A run of numbers after one letter is that command repeated.
+    for (let i = 0; i + need <= numbers.length; i += need) {
+      const x = numbers[i + need - 2];
+      const y = numbers[i + need - 1];
+      if (Number.isFinite(x) && Number.isFinite(y)) {
+        xs.push(x);
+        ys.push(y);
+      }
+    }
+  };
+  for (const token of tokens) {
+    if (/^[A-Za-z]$/.test(token)) {
+      takeEndpoint();
+      command = token.toUpperCase();
+      numbers = [];
+    } else numbers.push(Number(token));
+  }
+  takeEndpoint();
   if (!xs.length || !ys.length) return { w: 0, h: 0 };
   return {
     w: Math.max(...xs) - Math.min(...xs),
@@ -46,8 +95,48 @@ export function spreadOf(d: string): { w: number; h: number } {
   };
 }
 
-/** What is wrong with a drawn thing, or nothing when a person may look at it. */
-export function drawingProblems(drawing: ThingDrawing): string[] {
+/**
+ * Words that say what a part is for rather than what it looks like.
+ *
+ * A description that reaches for one of these has stopped describing and
+ * started explaining, and nothing downstream can draw an explanation:
+ * "filters blood" has no shape, so the drawer invents one, and what it
+ * invents is the thing the word is associated with. Catching it here
+ * costs one call; catching it at the judge costs seven.
+ */
+const PURPOSE =
+  /\b(filters?|stores?|protects?|converts?|represents?|symbolis[ei]s?|symboliz[ei]s?|carries|transports?|produces?|controls?|regulates?|absorbs?|generates?|processes|means|signifies)\b/i;
+
+/**
+ * What is wrong with a description, before anything is drawn from it.
+ * Empty when it is geometry all the way down.
+ */
+export function formProblems(form: ThingForm): string[] {
+  const problems: string[] = [];
+  const said = PURPOSE.exec(form.looksLike);
+  if (said)
+    problems.push(
+      `"${said[0]}" says what it is for, not what it looks like; describe the shape instead`,
+    );
+  for (const part of form.parts) {
+    const bad = PURPOSE.exec(part);
+    if (bad)
+      problems.push(
+        `the part "${part}" is named for what it does ("${bad[0]}"); name the shape a person could point at`,
+      );
+  }
+  return problems;
+}
+
+/**
+ * What is wrong with a drawn thing, or nothing when a person may look at
+ * it. Given the description it was drawn from, it also checks that the
+ * drawing drew that and not something adjacent.
+ */
+export function drawingProblems(
+  drawing: ThingDrawing,
+  form?: ThingForm,
+): string[] {
   const problems: string[] = [];
   const bad = pathProblem(drawing.body);
   if (bad) problems.push(`the outline is not sound: ${bad}`);
@@ -100,11 +189,60 @@ export function drawingProblems(drawing: ThingDrawing): string[] {
       y > 1
     )
       problems.push(`the part "${part.name}" points off the square`);
+    // Ink is what makes a part a part. Without it the name is a pin in
+    // the picture: a line can point at it, but it can never be drawn,
+    // lit or dimmed on its own, and the lesson can only ever show the
+    // whole thing at once.
+    if (!part.fill && !part.stroke)
+      problems.push(
+        `the part "${part.name}" has no ink of its own; give it a fill or a stroke so it can be drawn alone`,
+      );
+    for (const [what, d] of [
+      ['fill', part.fill],
+      ['stroke', part.stroke],
+    ] as const) {
+      if (!d) continue;
+      const bad = pathProblem(d);
+      if (bad)
+        problems.push(`the part "${part.name}" ${what} is not sound: ${bad}`);
+    }
+  }
+  // The parts are the description's, not the drawer's. A drawing that
+  // invents one is drawing something else; one that drops one cannot be
+  // used by the page that asked for it.
+  if (form) {
+    const asked = form.parts.map((p) => p.trim().toLowerCase()).filter(Boolean);
+    const drew = drawing.parts.map((p) => p.name.trim().toLowerCase());
+    const missing = asked.filter((p) => !drew.includes(p));
+    const extra = drew.filter((p) => p && !asked.includes(p));
+    if (missing.length)
+      problems.push(
+        `the description named ${asked.length} part(s) and this drew ${drew.length}; ${missing.map((p) => `"${p}"`).join(', ')} missing`,
+      );
+    if (extra.length)
+      problems.push(
+        `${extra.map((p) => `"${p}"`).join(', ')} was not in the description; draw only the parts named`,
+      );
   }
   return problems;
 }
 
-/** The preset a passed drawing becomes, ready to paste into the library. */
+/** One named part of a library drawing, in the shape the library keeps them. */
+export interface PresetPartOut {
+  at: [number, number];
+  fill?: string;
+  stroke?: string;
+}
+
+/**
+ * The preset a passed drawing becomes — in the library's own shape, not
+ * a shape near it.
+ *
+ * Parts are keyed by name here, as every pack keeps them, so an accepted
+ * drawing drops into the library whole. Emitting them as a list was the
+ * reason the old output could not be used without a person transposing
+ * it by hand first.
+ */
 export function presetOf(
   term: string,
   drawing: ThingDrawing,
@@ -115,7 +253,7 @@ export function presetOf(
   detail?: string;
   aspect: number;
   tags: string;
-  parts?: { name: string; at: [number, number] }[];
+  parts?: Record<string, PresetPartOut>;
 } {
   const name = term.trim().toLowerCase().replace(/\s+/g, '-');
   return {
@@ -134,10 +272,16 @@ export function presetOf(
       .join(' '),
     ...(drawing.parts.length
       ? {
-          parts: drawing.parts.map((part) => ({
-            name: part.name,
-            at: [part.at[0], part.at[1]] as [number, number],
-          })),
+          parts: Object.fromEntries(
+            drawing.parts.map((part) => [
+              part.name.trim().toLowerCase(),
+              {
+                at: [part.at[0], part.at[1]] as [number, number],
+                ...(part.fill ? { fill: part.fill } : {}),
+                ...(part.stroke ? { stroke: part.stroke } : {}),
+              },
+            ]),
+          ),
         }
       : {}),
   };

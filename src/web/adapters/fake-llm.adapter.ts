@@ -605,6 +605,18 @@ export class FakeLlmAdapter implements LlmGatewayPort {
     });
   }
 
+  judgeDrawings(input: { png: Buffer; looksLike: string; count: number }) {
+    const started = Date.now();
+    // The first candidate, so the loop runs to the end under --fake.
+    return Promise.resolve({
+      value: {
+        pick: input.count > 0 ? 1 : null,
+        wrong: input.count > 0 ? null : 'nothing came through the gate',
+      },
+      usage: this.usage(started, 260, 20),
+    });
+  }
+
   thingDrawing(input: { looksLike: string; parts: string[]; aspect: number }) {
     const started = Date.now();
     return Promise.resolve({
@@ -612,10 +624,18 @@ export class FakeLlmAdapter implements LlmGatewayPort {
         body: 'M0.08 0.22 L0.92 0.22 L0.92 0.86 L0.08 0.86 Z',
         detail: 'M0.08 0.36 L0.92 0.36',
         aspect: input.aspect,
-        parts: input.parts.map((name, i) => ({
-          name,
-          at: [0.5, i === 0 ? 0.29 : 0.6],
-        })),
+        // Each part gets ink of its own, as the real drawer must: a band
+        // across the box, stepped down it, so a test exercises the same
+        // addressable-part path a real drawing takes.
+        parts: input.parts.map((name, i) => {
+          const y = 0.3 + i * 0.12;
+          return {
+            name,
+            at: [0.5, y],
+            fill: `M0.16 ${y.toFixed(2)} L0.84 ${y.toFixed(2)} L0.84 ${(y + 0.08).toFixed(2)} L0.16 ${(y + 0.08).toFixed(2)} Z`,
+            stroke: null,
+          };
+        }),
       },
       usage: this.usage(started, 200, 140),
     });

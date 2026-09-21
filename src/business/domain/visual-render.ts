@@ -136,12 +136,34 @@ function drawn(
   if (preset) {
     const at = `translate(${n(x - w / 2)} ${n(y - h / 2)}) scale(${n(w)} ${n(h)})`;
     const pen = 2.6 / Math.sqrt(w * h);
-    const body = `<path d="${preset.body}" transform="${at}" fill="${mode === 'outline' ? 'none' : paint.fill}" stroke="${mode === 'outline' ? paint.text : paint.rim}" stroke-width="${n(pen)}" stroke-linejoin="round" stroke-linecap="round"/>`;
+    const ink = mode === 'outline' ? paint.text : paint.rim;
+    const body = `<path d="${preset.body}" transform="${at}" fill="${mode === 'outline' ? 'none' : paint.fill}" stroke="${ink}" stroke-width="${n(pen)}" stroke-linejoin="round" stroke-linecap="round"/>`;
     const detail =
       'detail' in preset && preset.detail
-        ? `<path d="${preset.detail}" transform="${at}" fill="none" stroke="${mode === 'outline' ? paint.text : paint.rim}" stroke-width="${n(pen * 0.9)}" stroke-linejoin="round" stroke-linecap="round"/>`
+        ? `<path d="${preset.detail}" transform="${at}" fill="none" stroke="${ink}" stroke-width="${n(pen * 0.9)}" stroke-linejoin="round" stroke-linecap="round"/>`
         : '';
-    return body + detail;
+    // A part that carries its own ink is drawn as its own group, named
+    // for the part. That name is the handle: a callout points at it, and
+    // a cue can draw, light or dim it without touching the rest. A part
+    // with only a point still works — it is a pin, not a group — which
+    // is every part in the hand-made set.
+    const parts =
+      'parts' in preset && preset.parts
+        ? Object.entries(preset.parts)
+            .map(([part, spec]) => {
+              const marks = [
+                spec.fill
+                  ? `<path d="${spec.fill}" transform="${at}" fill="${mode === 'outline' ? 'none' : paint.fill}" stroke="${ink}" stroke-width="${n(pen)}" stroke-linejoin="round" stroke-linecap="round"/>`
+                  : '',
+                spec.stroke
+                  ? `<path d="${spec.stroke}" transform="${at}" fill="none" stroke="${ink}" stroke-width="${n(pen * 0.9)}" stroke-linejoin="round" stroke-linecap="round"/>`
+                  : '',
+              ].join('');
+              return marks ? `<g id="${part}">${marks}</g>` : '';
+            })
+            .join('')
+        : '';
+    return body + detail + parts;
   }
   const icon = ICONS[name];
   if (!icon) return null;

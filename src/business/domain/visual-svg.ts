@@ -76,12 +76,17 @@ export function groupsOf(svg: string): string[] {
 
 /** Whether a named group has anything drawn inside it. */
 export function groupHasInk(svg: string, id: string): boolean {
+  return elementsOf(groupInk(svg, id)).some((el) => DRAWN.has(el));
+}
+
+/** The markup inside a named group, or empty when there is no such group. */
+export function groupInk(svg: string, id: string): string {
   const open = new RegExp(
     `<\\s*g\\b[^>]*\\bid\\s*=\\s*["']${id.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}["'][^>]*>`,
     'i',
   );
   const found = open.exec(svg);
-  if (!found) return false;
+  if (!found) return '';
   // Walk to this group's own close, so a nested group is not mistaken
   // for the end of it.
   let depth = 1;
@@ -96,8 +101,7 @@ export function groupHasInk(svg: string, id: string): boolean {
     else if (!step[2]) depth += 1;
     i = step.index + step[0].length;
   }
-  const inside = svg.slice(start, Math.max(start, i));
-  return elementsOf(inside).some((el) => DRAWN.has(el));
+  return svg.slice(start, Math.max(start, i));
 }
 
 /**
@@ -111,17 +115,81 @@ export function groupHasInk(svg: string, id: string): boolean {
 export const idKey = (name: string) =>
   name.toLowerCase().replace(/[^a-z0-9]/g, '');
 
-/** Every number written in a coordinate or size attribute. */
-function coordsOf(svg: string): number[] {
-  const out: number[] = [];
-  for (const m of svg.matchAll(
-    /\b(?:x|y|x1|y1|x2|y2|cx|cy|r|rx|ry|width|height|d|points)\s*=\s*["']([^"']*)["']/gi,
-  ))
-    for (const n of m[1].match(/-?\d*\.?\d+/g) ?? []) {
-      const v = Number(n);
-      if (Number.isFinite(v)) out.push(v);
+/** The corners a drawing reaches, per axis. */
+export interface Box {
+  minX: number;
+  minY: number;
+  maxX: number;
+  maxY: number;
+}
+
+const nums = (text: string): number[] =>
+  (text.match(/-?\d*\.?\d+(?:e-?\d+)?/g) ?? [])
+    .map(Number)
+    .filter(Number.isFinite);
+
+const attr = (el: string, name: string): number => {
+  const m = new RegExp(`\\b${name}\\s*=\\s*["']([^"']*)["']`, 'i').exec(el);
+  return m ? (nums(m[1])[0] ?? 0) : 0;
+};
+
+/**
+ * The box a drawing covers, per axis.
+ *
+ * Measured per axis and not from every number thrown together, because
+ * a drawing sitting from 20 to 80 across and 10 to 70 down covers three
+ * fifths of the box each way, while the numbers pooled together run 10
+ * to 80 and look like seven tenths. The first drawing to get through
+ * passed on exactly that arithmetic and came out in a corner.
+ */
+export function boxOf(svg: string): Box | null {
+  const xs: number[] = [];
+  const ys: number[] = [];
+  const pairs = (list: number[]) => {
+    for (let i = 0; i + 1 < list.length; i += 2) {
+      xs.push(list[i]);
+      ys.push(list[i + 1]);
     }
-  return out;
+  };
+  // Everything but the <svg> tag itself, so the viewBox is not counted.
+  const body = svg.replace(/<\s*svg\b[^>]*>/i, '');
+  for (const [, el] of body.matchAll(/<\s*([a-zA-Z][\w:-]*)\b[^>]*>/g)) void el;
+  for (const m of body.matchAll(/<\s*([a-zA-Z][\w:-]*)\b([^>]*)>/g)) {
+    const name = m[1].toLowerCase();
+    const el = m[0];
+    if (name === 'path') {
+      const d = /\bd\s*=\s*["']([^"']*)["']/i.exec(el);
+      // Every command in the allowed set takes its numbers as x,y pairs.
+      if (d) pairs(nums(d[1]));
+    } else if (name === 'rect') {
+      const x = attr(el, 'x');
+      const y = attr(el, 'y');
+      xs.push(x, x + attr(el, 'width'));
+      ys.push(y, y + attr(el, 'height'));
+    } else if (name === 'circle') {
+      const r = attr(el, 'r');
+      xs.push(attr(el, 'cx') - r, attr(el, 'cx') + r);
+      ys.push(attr(el, 'cy') - r, attr(el, 'cy') + r);
+    } else if (name === 'ellipse') {
+      const rx = attr(el, 'rx');
+      const ry = attr(el, 'ry');
+      xs.push(attr(el, 'cx') - rx, attr(el, 'cx') + rx);
+      ys.push(attr(el, 'cy') - ry, attr(el, 'cy') + ry);
+    } else if (name === 'line') {
+      xs.push(attr(el, 'x1'), attr(el, 'x2'));
+      ys.push(attr(el, 'y1'), attr(el, 'y2'));
+    } else if (name === 'polyline' || name === 'polygon') {
+      const pts = /\bpoints\s*=\s*["']([^"']*)["']/i.exec(el);
+      if (pts) pairs(nums(pts[1]));
+    }
+  }
+  if (!xs.length || !ys.length) return null;
+  return {
+    minX: Math.min(...xs),
+    minY: Math.min(...ys),
+    maxX: Math.max(...xs),
+    maxY: Math.max(...ys),
+  };
 }
 
 /**
@@ -200,19 +268,47 @@ export function svgProblems(svg: string, parts: string[] = []): string[] {
       problems.push(`the group for "${part}" is empty`);
   }
 
-  // Fills the frame, and stays inside it.
-  const nums = coordsOf(text);
-  if (nums.length) {
-    const biggest = Math.max(...nums);
-    const smallest = Math.min(...nums);
-    const span = Math.max(DRAW_VIEWBOX.w, DRAW_VIEWBOX.h);
-    if (biggest < span * SVG_GATE.minSpread)
+  // A part that is the outline over again is not a part: lighting it
+  // lights the whole drawing. This was caught when drawings were path
+  // data and the check did not survive the move to markup; the first
+  // real drawing to get through had a "lobe" that was the outline
+  // copied character for character.
+  const shapes = (markup: string) =>
+    [...markup.matchAll(/\bd\s*=\s*["']([^"']+)["']/gi)].map((m) =>
+      m[1]
+        .replace(/[\s,]+/g, ' ')
+        .trim()
+        .toUpperCase(),
+    );
+  const outside = shapes(text.replace(/<\s*g\b[\s\S]*<\/\s*g\s*>/gi, ''));
+  for (const id of written) {
+    const within = shapes(groupInk(text, id));
+    if (within.some((d) => outside.includes(d)))
       problems.push(
-        `the drawing only reaches ${Math.round(biggest)} of ${span}; it should fill the viewBox`,
+        `the group "${id}" is the outline drawn again; a part is one piece of the thing, not all of it`,
       );
-    if (biggest > span * 1.02 || smallest < -span * 0.02)
+  }
+
+  // Fills the frame, and stays inside it.
+  const box = boxOf(text);
+  if (box) {
+    const across = box.maxX - box.minX;
+    const down = box.maxY - box.minY;
+    if (
+      across < DRAW_VIEWBOX.w * SVG_GATE.minSpread ||
+      down < DRAW_VIEWBOX.h * SVG_GATE.minSpread
+    )
       problems.push(
-        `the drawing goes outside the viewBox and would be cut off; keep it between 0 and ${span}`,
+        `the drawing covers ${Math.round(across)} by ${Math.round(down)} of ${DRAW_VIEWBOX.w} by ${DRAW_VIEWBOX.h}; it should fill the viewBox both ways`,
+      );
+    if (
+      box.maxX > DRAW_VIEWBOX.w * 1.02 ||
+      box.maxY > DRAW_VIEWBOX.h * 1.02 ||
+      box.minX < -DRAW_VIEWBOX.w * 0.02 ||
+      box.minY < -DRAW_VIEWBOX.h * 0.02
+    )
+      problems.push(
+        `the drawing goes outside the viewBox and would be cut off; keep it between 0 and ${DRAW_VIEWBOX.w}`,
       );
   }
   return problems;

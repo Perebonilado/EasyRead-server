@@ -226,3 +226,28 @@ describe('a part has to be a part', () => {
       ).toContain('is the whole thing, not a part of it');
   });
 });
+
+describe('the first real drawing that got through, and what it got away with', () => {
+  // DeepSeek's kidney: a group called "lobe" holding the outline path
+  // character for character, and the whole thing sitting from 20 to 80.
+  const real = [
+    '<svg viewBox="0 0 100 100" fill="none" stroke="currentColor" stroke-width="2">',
+    '<path d="M20 40 C20 10, 80 10, 80 40 C80 70, 30 70, 30 40 Z"/>',
+    '<g id="lobe"><path d="M20 40 C20 10, 80 10, 80 40 C80 70, 30 70, 30 40 Z"/></g>',
+    '<g id="hilum"><path d="M40 40 Q42 35, 38 40 Z"/></g>',
+    '<g id="cortex"><path d="M30 40 C30 35, 50 35, 50 40 Z"/></g>',
+    '</svg>',
+  ].join('');
+
+  it('turns back the part that is the outline again', () => {
+    expect(svgProblems(real).join(' ')).toContain(
+      'the group "lobe" is the outline drawn again',
+    );
+  });
+
+  it('turns back a drawing that covers three fifths of the box', () => {
+    // It reaches 80, so a check on the far edge alone let it through;
+    // it covers 60 of 100 and sits in a corner.
+    expect(svgProblems(real).join(' ')).toContain('covers 60 by 60');
+  });
+});

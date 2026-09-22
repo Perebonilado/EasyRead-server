@@ -660,22 +660,30 @@ export class VisualsMaterialsHandler extends AbstractRequestHandlerTemplate<
     let queued = 0;
     let existing = 0;
     let documents = 0;
+    let skipped = 0;
     for (const doc of docs) {
       if (doc.props.status !== 'ready') continue;
       documents += 1;
-      const result = await queueVisuals(
-        {
-          topics: this.topics,
-          pages: this.pages,
-          visuals: this.visuals,
-          queue: this.queue,
-        },
-        { doc, userId: cmd.userId, mode: 'whole', fromPage: 1 },
-      );
-      queued += result.queued;
-      existing += result.existing;
+      try {
+        const result = await queueVisuals(
+          {
+            topics: this.topics,
+            pages: this.pages,
+            visuals: this.visuals,
+            queue: this.queue,
+          },
+          { doc, userId: cmd.userId, mode: 'whole', fromPage: 1 },
+        );
+        queued += result.queued;
+        existing += result.existing;
+      } catch (error) {
+        // A file with no chapters to draw from is skipped and counted; it
+        // used to stop the batch partway, leaving the rest unasked.
+        if (!(error instanceof ValidationError)) throw error;
+        skipped += 1;
+      }
     }
-    return CommandResponse.of({ documents, queued, existing });
+    return CommandResponse.of({ documents, queued, existing, skipped });
   }
 }
 

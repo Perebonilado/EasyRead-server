@@ -109,6 +109,29 @@ outside Railway (a laptop); the token guards it either way. With
 instead. That is configuration, not a fallback: a page the Voice service
 cannot narrate fails and is retried there, never sent to OpenAI.
 
+## Visualize
+
+A page's video is written by OpenAI (`AI_MODEL_SCENE_WRITE`, default
+`openai:gpt-4.1`), drawn by DeepSeek (`AI_MODEL_SCENE_DRAW`, default
+`deepseek:deepseek-flash`) and voiced by the Voice service above. The
+drawer's default names DeepSeek whatever `AI_MODEL_DEFAULT` says, so
+**`DEEPSEEK_API_KEY` must be set on both the API and the worker**: the
+boot check stops a process with a named provider and no key.
+
+The Voice service reports when it spoke each word when asked
+(`/health` says `version: 5`). Redeploy it once from `speech/kokoro`; until
+then the worker still makes every page, timing its words with the aligner
+instead. Nothing else about the service changes, and lectures ask it
+nothing new.
+
+Drawings are rendered in a child process by `@resvg/resvg-js`, now a
+runtime dependency of both the API and the worker, with the fonts that
+ship in `pdfjs-dist`.
+
+`npm run scene:page -- <documentId> <page>` makes pages with the worker's
+own processor against whatever the environment points at, and writes the
+scene, the audio and a gallery of the drawings to `scene-out/`.
+
 ## The live tutor
 
 A tutor marked `livekit` in `tutors.ts` talks on our own line: a LiveKit

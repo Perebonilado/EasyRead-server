@@ -865,28 +865,28 @@ export type LessonIntent = 'quick' | 'thorough' | 'gentle';
 
 // ── Lectures ────────────────────────────────────────────────────────────────
 
-/** A scripted lecture segment's life: written, voiced, or given up on. */
+/** A visual page's life: queued, being made, made, given up on, or not suited to a video. */
 export type VisualSceneStatus =
   'pending' | 'making' | 'done' | 'failed' | 'not_suitable';
 
-/** One chapter of a document's visuals, as the picker and the pane read it. */
+/** One page of a document's visuals, as the picker and the pane read it. */
 export interface VisualPageDto {
   page: number;
   /** The chapter the page is in, for grouping; null for a page outside every chapter. */
   topicId: string | null;
   chapterTitle: string | null;
-  /** The tutorial's own title, once made. */
+  /** The video's own title, once made. */
   title: string | null;
   status: VisualSceneStatus | 'none';
-  /** Where a scene being made is: planning, drawing, recording, timing. */
+  /** Where a page being made is: writing, drawing, voicing, composing. */
   step: string | null;
-  /** Why the page does not suit a tutorial, or why it failed. */
+  /** Why the page does not suit a video, or why it failed. */
   reason: string | null;
   durationMs: number | null;
   /** Set when the scene is done: fetched by the pane when it plays. */
   hasScene: boolean;
-  /** How the words were timed once made: measured on the voice, or estimated. */
-  timing: 'aligned' | 'estimated' | null;
+  /** How the words were timed: by the voice itself, measured on the audio, or estimated. */
+  timing: SceneTiming | null;
 }
 
 /** The document's visuals: every page, in order, with its chapter. */
@@ -896,38 +896,106 @@ export interface VisualSetDto {
   pages: VisualPageDto[];
 }
 
-/** The scene as the pane plays it: the elements, and every sentence and cue on the audio. */
-export interface VisualTimelineDto {
-  version: 2;
+export type SceneTiming = 'voice' | 'aligned' | 'estimated';
+export type SceneLayoutName =
+  'one' | 'row' | 'grid' | 'compare' | 'hub' | 'cycle' | 'focus';
+export type SceneEffectName = 'point' | 'show' | 'hide' | 'pulse' | 'zoom';
+export type SceneEnterName = 'pop' | 'fade' | 'slide' | 'wipe' | 'grow';
+
+/** One thing that can stand on the stage. */
+export type SceneThingDto =
+  | {
+      id: string;
+      kind: 'drawing';
+      /** The drawing, sanitised, with its own CSS or SMIL animation. */
+      svg: string;
+      /** Width over height. */
+      aspect: number;
+      caption: string | null;
+      /** Part name to the id of its group in the drawing. */
+      parts: Record<string, string>;
+      /** Part name to the id of its label's group. */
+      labels: Record<string, string>;
+      /** State name to the id of its overlay group. */
+      states: Record<string, string>;
+      /** Ids of groups hidden until an effect shows them: labels pointed at later, and states. */
+      hidden: string[];
+      /** Whether it animates itself; a still one gets a gentle float. */
+      moves: boolean;
+    }
+  | { id: string; kind: 'stat'; value: string; caption: string }
+  | {
+      id: string;
+      kind: 'words';
+      text: string;
+      /** A card stands in for a drawing that could not be made. */
+      style: 'title' | 'keyword' | 'card';
+    };
+
+export interface SceneArrowDto {
+  id: string;
+  from: string;
+  to: string;
+  label: string | null;
+  /** Dashes march along it. */
+  flow: boolean;
+}
+
+/** What stands on the stage from `atMs` until the next step. */
+export interface SceneStepDto {
+  atMs: number;
+  layout: SceneLayoutName;
+  show: string[];
+  arrows: SceneArrowDto[];
+  /** How each newcomer arrives; `from` is the thing a growing one comes out of. */
+  enter: Record<string, { how: SceneEnterName; from?: string }>;
+  /** The thing the camera leans toward. */
+  focus: string | null;
+}
+
+export interface SceneEffectDto {
+  atMs: number;
+  target: string;
+  /** A part or state of a drawing, by name; null for the whole thing. */
+  part: string | null;
+  do: SceneEffectName;
+}
+
+/** Where a thing stands at one step, in the staging's design units. */
+export interface ScenePlaceDto {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  /** The size its main text is set at: a stat's number, words, a card. */
+  size?: number;
+  caption?: { x: number; y: number; w: number; size: number; lines: string[] };
+}
+
+/** A page as an animated video: the voice's sentences, the things, and when each happens. */
+export interface SceneDto {
+  version: 3;
   generator: string;
   title: string;
-  space: { w: number; h: number };
-  elements: (Record<string, unknown> & { id: string; type: string })[];
-  /** The same script placed for the pane's box and the full screen's wide stage. */
+  durationMs: number;
+  timing: SceneTiming;
+  /** One per spoken sentence; one word entry per whitespace word of `text`: [charStart, charEnd, startMs, endMs]. */
+  beats: { text: string; startMs: number; endMs: number; words: number[][] }[];
+  things: SceneThingDto[];
+  steps: SceneStepDto[];
+  effects: SceneEffectDto[];
+  /** The same steps placed for the pane's box and the full screen's wide stage. */
   stagings: Record<
     'box' | 'wide',
-    {
-      space: { w: number; h: number };
-      elements: (Record<string, unknown> & { id: string; type: string })[];
-    }
+    { w: number; h: number; places: Record<string, ScenePlaceDto>[] }
   >;
-  segments: {
-    text: string;
-    startMs: number;
-    endMs: number;
-    /** [charStart, charEnd, startMs, endMs] per spoken word, chars into the scene's spoken text. */
-    words: number[][];
-    cues: { atMs: number; do: string; target: string }[];
-  }[];
-  durationMs: number;
-  timing: 'aligned' | 'estimated';
 }
 
 export interface VisualSceneDto {
   page: number;
   title: string;
   durationMs: number;
-  timeline: VisualTimelineDto;
+  scene: SceneDto;
 }
 
 /** Ahead of a page, the way the lecture prepares, or pages by number. */
@@ -959,8 +1027,10 @@ export interface VisualsResponse {
   documents: number;
   /** Pages sent to be drawn. */
   queued: number;
-  /** Pages that had a tutorial, or one on its way, already. */
+  /** Pages that had a video, or one on its way, already. */
   existing: number;
+  /** Ready files with no chapters to draw from, left out. */
+  skipped: number;
 }
 
 export interface RequestVisualsResponse extends VisualSetDto {

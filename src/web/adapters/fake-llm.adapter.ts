@@ -18,12 +18,10 @@ import type {
   SketchDraft,
   SketchTemplate,
 } from '../../business/ports/llm.port';
-import type { VisualJudgement, VisualPlan } from '../../business/domain/visual';
 import type {
-  VisualDecisions,
-  VisualNarration,
-  VisualTutorial,
-} from '../../business/domain/visual-cards';
+  DrawingThing,
+  SceneScriptDraft,
+} from '../../business/domain/scene-script';
 
 const EMBED_DIMENSIONS = 256;
 
@@ -510,137 +508,122 @@ export class FakeLlmAdapter implements LlmGatewayPort {
     });
   }
 
-  visualPlan(input: {
-    title: string;
+  /**
+   * The page's own sentences as the narration, one drawing and one word on
+   * the stage: enough for the whole scene pipeline to run with no key.
+   */
+  sceneScript(input: {
+    documentTitle: string;
     topicTitle: string;
     material: string;
-  }): Promise<LlmResult<VisualPlan>> {
+    context: string;
+  }): Promise<LlmResult<SceneScriptDraft>> {
     const started = Date.now();
     const sentences = input.material
+      .replace(/\s+/g, ' ')
       .split(/(?<=[.!?])\s+/)
-      .map((s) => s.trim())
-      .filter((s) => s.split(/\s+/).length >= 4)
-      .slice(0, 5);
-    const terms = Array.from(
-      new Set(
-        (input.material.match(/[A-Za-z][a-z]{4,}/g) ?? []).map((w: string) =>
-          w.toLowerCase(),
-        ),
-      ),
-    ).slice(0, 4);
+      .filter((s) => s.split(' ').length >= 3)
+      .slice(0, 8);
+    const says =
+      sentences.length >= 3
+        ? sentences
+        : [
+            'This page has a few ideas.',
+            'Here is the first of them.',
+            'And this is how it ends.',
+          ];
+    const opening = (say: string) => say.split(/\s+/).slice(0, 2).join(' ');
+    const none = {
+      brief: null,
+      motion: null,
+      parts: null,
+      states: null,
+      shape: null,
+      value: null,
+    };
     return Promise.resolve({
       value: {
-        learningGoal: `What ${input.topicTitle} means`,
-        keyTerms: terms,
-        diagramConcept:
-          'A centre with what feeds it on the left and what comes out on the right',
-        centre: { what: input.topicTitle, how: 'shape', picture: null },
-        beats:
-          sentences.length >= 3
-            ? sentences
-            : [
-                ...sentences,
-                'One more beat here.',
-                'And another beat here.',
-                'The last beat here.',
-              ].slice(0, 4),
-        fit: sentences.length >= 3 ? 'good' : 'poor',
-        fitReason:
-          sentences.length >= 3 ? null : 'The chapter has too little to draw.',
-      },
-      usage: this.usage(started, 200, 80),
-    });
-  }
-
-  visualNarration(input: {
-    plan: VisualPlan;
-    topicTitle: string;
-    material: string;
-  }): Promise<LlmResult<VisualNarration>> {
-    const started = Date.now();
-    const sentences = [
-      'Here is the idea at the heart of this page, and why it is worth a few minutes of your time.',
-      'We will take it one piece at a time, so that each part makes sense before the next one comes.',
-      'The first thing to know is what feeds into it, and the second is what comes out the other side.',
-      'Keep those two ends in mind, because everything in between exists to turn one into the other.',
-      'In the middle sits the part the page keeps coming back to, the one that does the work.',
-      'Once you see how the middle connects the two ends, the rest of the page reads itself.',
-      'That is the shape of it, from what goes in to what comes out, with one thing in between.',
-      'So in one line, the page is about how one thing turns into another through the part in the middle.',
-    ];
-    return Promise.resolve({
-      value: {
-        title: input.topicTitle.slice(0, 60),
         fit: 'good',
         fitReason: null,
-        sentences,
-        moments: [
-          { from: 0, to: 1, intent: 'why this matters' },
+        title: input.topicTitle.slice(0, 60),
+        beats: says.map((say, i) => ({
+          say,
+          pause: i === says.length - 1 ? ('long' as const) : ('short' as const),
+        })),
+        cast: [
           {
-            from: 2,
-            to: 4,
-            intent: 'what goes in, what comes out, the part between',
+            id: 'main',
+            kind: 'drawing',
+            name: input.topicTitle.split(/\s+/).slice(0, 3).join(' '),
+            brief: `A simple picture for ${input.topicTitle}`,
+            motion: 'a gentle sway',
+            parts: [{ name: 'core', label: true }],
+            states: [],
+            shape: 'square',
+            value: null,
+            style: null,
           },
-          { from: 5, to: 7, intent: 'the line to remember' },
+          {
+            id: 'idea',
+            kind: 'words',
+            name: 'Key idea',
+            ...none,
+            style: 'keyword',
+          },
+        ],
+        steps: [
+          {
+            beat: 0,
+            phrase: opening(says[0]),
+            layout: 'one',
+            show: ['main'],
+            arrows: [],
+            effects: null,
+          },
+          {
+            beat: 1,
+            phrase: opening(says[1]),
+            layout: 'row',
+            show: ['main', 'idea'],
+            arrows: [{ from: 'main', to: 'idea', label: null, flow: true }],
+            effects: null,
+          },
+          {
+            beat: 2,
+            phrase: opening(says[2]),
+            layout: null,
+            show: null,
+            arrows: null,
+            effects: [{ target: 'main.core', do: 'point' }],
+          },
         ],
       },
-      usage: this.usage(started, 400, 300),
+      usage: this.usage(started, 900, 400),
     });
   }
 
-  visualDirector(input: {
-    narration: VisualNarration;
-    previous?: VisualDecisions;
-    only?: number[];
-  }): Promise<LlmResult<VisualDecisions>> {
+  /** A swaying disc with a labelled core, drawn to the frame asked for. */
+  sceneDrawing(input: {
+    thing: Pick<
+      DrawingThing,
+      'name' | 'brief' | 'motion' | 'parts' | 'states' | 'shape'
+    >;
+    viewBox: { w: number; h: number };
+  }): Promise<LlmResult<string>> {
     const started = Date.now();
-    const moments = input.narration.moments.map((m, index) => ({
-      index,
-      reasoning: 'A plain card for the test.',
-      shouldSee: m.intent,
-      confidence: 'high' as const,
-      card: (index === 0 ? 'title' : 'statement') as 'title' | 'statement',
-      heading: index === 0 ? input.narration.title : undefined,
-      text: index === 0 ? undefined : m.intent,
-    }));
+    const { w, h } = input.viewBox;
+    const r = Math.min(w, h) * 0.32;
+    const svg =
+      `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${w} ${h}">` +
+      `<style>@keyframes sway { 50% { transform: rotate(5deg) } } .body { animation: sway 3s ease-in-out infinite; transform-box: fill-box; transform-origin: center; }</style>` +
+      `<g class="body"><circle cx="${w / 2}" cy="${h / 2}" r="${r}" fill="#3FA66B" stroke="#1F2A37" stroke-width="4"/>` +
+      `<g id="core"><circle cx="${w / 2}" cy="${h / 2}" r="${r * 0.3}" fill="#F2B33D" stroke="#1F2A37" stroke-width="4"/></g></g>` +
+      `<g id="core-label"><line x1="${w / 2}" y1="${h / 2}" x2="${w * 0.8}" y2="${h * 0.14}" stroke="#1F2A37" stroke-width="3"/>` +
+      `<text x="${w * 0.8}" y="${h * 0.11}" font-size="${Math.ceil(w * 0.04)}" font-weight="600" text-anchor="middle" fill="#1F2A37">core</text></g>` +
+      `</svg>`;
     return Promise.resolve({
-      value: {
-        moments: input.only?.length
-          ? moments.filter((m) => input.only!.includes(m.index))
-          : moments,
-      },
+      value: svg,
       usage: this.usage(started, 400, 300),
-    });
-  }
-
-  visualJudge(input: {
-    png: Buffer;
-    title: string;
-    moments: {
-      moment: number;
-      card: string;
-      drawings: string[];
-      shouldSee: string;
-    }[];
-  }): Promise<LlmResult<VisualJudgement>> {
-    const started = Date.now();
-    return Promise.resolve({
-      value: {
-        moments: input.moments.map((m) => ({
-          moment: m.moment,
-          drawings: m.drawings.map((name) => ({
-            name,
-            looksRight: true,
-            wrong: null,
-          })),
-          textTrouble: null,
-          crowded: false,
-          showsBrief: true,
-          verdict: 'go' as const,
-          note: null,
-        })),
-      },
-      usage: this.usage(started, 200, 100),
     });
   }
 

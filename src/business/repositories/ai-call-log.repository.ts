@@ -8,6 +8,8 @@ export interface AiCallLogInput {
   outcome: 'ok' | 'failed';
   /** Known by the caller, for providers billed by the second; otherwise priced from tokens. */
   costUsd?: number | null;
+  /** Of `tokensIn`, those the provider served from its cache: priced, not stored. */
+  tokensCached?: number | null;
 }
 
 /**

@@ -19,15 +19,11 @@ import type {
   SketchDraft,
   SketchTemplate,
 } from '../../../business/ports/llm.port';
-import type {
-  VisualJudgement,
-  VisualPlan,
-} from '../../../business/domain/visual';
-import type {
-  VisualDecisions,
-  VisualNarration,
-  VisualTutorial,
-} from '../../../business/domain/visual-cards';
+import {
+  groupId,
+  type DrawingThing,
+  type SceneScriptDraft,
+} from '../../../business/domain/scene-script';
 import { PROMPTS } from '../prompts';
 import { ModelRegistry, type ModelRef } from './models';
 import {
@@ -40,10 +36,7 @@ import {
   lectureBoardSchema,
   lectureDiagramSchema,
   lectureSketchSchema,
-  visualPlanSchema,
-  visualJudgeSchema,
-  visualNarrationSchema,
-  visualDecisionsSchema,
+  sceneScriptSchema,
   sketchJudgeSchema,
   lectureExtraSchema,
   spokenQuizSchema,
@@ -106,8 +99,8 @@ export class AiSdkLlmAdapter implements LlmGatewayPort, OnModuleInit {
           role: 'user' as const,
           content: [
             {
-              type: 'image' as const,
-              image: input.png,
+              type: 'file' as const,
+              data: input.png,
               mediaType: 'image/png',
             },
             {
@@ -674,8 +667,8 @@ export class AiSdkLlmAdapter implements LlmGatewayPort, OnModuleInit {
           role: 'user' as const,
           content: [
             {
-              type: 'image' as const,
-              image: input.png,
+              type: 'file' as const,
+              data: input.png,
               mediaType: 'image/png',
             },
             {
@@ -693,78 +686,33 @@ export class AiSdkLlmAdapter implements LlmGatewayPort, OnModuleInit {
     };
   }
 
-  async visualJudge(input: {
-    png: Buffer;
-    title: string;
-    moments: {
-      moment: number;
-      card: string;
-      drawings: string[];
-      shouldSee: string;
-      motion?: string;
-      /** This moment carries on the card the moment before laid, rather than a new one. */
-      continues?: boolean;
-    }[];
-  }): Promise<LlmResult<VisualJudgement>> {
-    const started = Date.now();
-    const { generateObject } = await this.registry.modules();
-    const { model, ref } = await this.registry.languageModel('visual_judge');
-    const listed = input.moments
-      .map(
-        (m) =>
-          `${m.moment}. ${m.card} card${m.continues ? ', carrying on the one before' : ''}${m.drawings.length ? `, drawing: ${m.drawings.join('; ')}` : ', no drawing'}. Should see: ${m.shouldSee}${m.motion ? ` Moves: ${m.motion}.` : ''}`,
-      )
-      .join('\n');
-    const result = await generateObject({
-      model,
-      schema: visualJudgeSchema,
-      system: PROMPTS.visualJudge,
-      messages: [
-        {
-          role: 'user' as const,
-          content: [
-            {
-              type: 'image' as const,
-              image: input.png,
-              mediaType: 'image/png',
-            },
-            {
-              type: 'text' as const,
-              text: `The lesson is "${input.title}". The moments, by number:\n${listed}`,
-            },
-          ],
-        },
-      ],
-      maxRetries: this.maxRetries(),
-    });
-    return {
-      value: result.object,
-      usage: this.usage(ref, result.usage, started),
-    };
-  }
-
-  async visualNarration(input: {
-    plan: VisualPlan;
+  async sceneScript(input: {
+    documentTitle: string;
     topicTitle: string;
     material: string;
-    context?: string;
-  }): Promise<LlmResult<VisualNarration>> {
+    context: string;
+    previous?: SceneScriptDraft;
+    problems?: string[];
+  }): Promise<LlmResult<SceneScriptDraft>> {
     const started = Date.now();
     const { generateObject } = await this.registry.modules();
-    const { model, ref } =
-      await this.registry.languageModel('visual_narration');
+    const { model, ref } = await this.registry.languageModel('scene_write');
     const result = await generateObject({
       model,
-      schema: visualNarrationSchema,
-      system: PROMPTS.visualNarration,
+      schema: sceneScriptSchema,
+      system: PROMPTS.sceneWrite,
       prompt: [
+        `Document: ${input.documentTitle}`,
         `Chapter: ${input.topicTitle}`,
-        input.context ? `This page: ${input.context}` : '',
-        `The chapter's plan: ${JSON.stringify(input.plan)}`,
+        input.context,
         `The page:\n${input.material}`,
-      ]
-        .filter(Boolean)
-        .join('\n\n'),
+        ...(input.previous && input.problems?.length
+          ? [
+              `Your last answer for this page:\n${JSON.stringify(input.previous)}`,
+              `Put these right and answer again in full:\n- ${input.problems.join('\n- ')}`,
+            ]
+          : []),
+      ].join('\n\n'),
       maxRetries: this.maxRetries(),
     });
     return {
@@ -773,77 +721,45 @@ export class AiSdkLlmAdapter implements LlmGatewayPort, OnModuleInit {
     };
   }
 
-  async visualDirector(input: {
-    narration: VisualNarration;
-    menu: string;
-    plan: VisualPlan;
-    topicTitle: string;
-    material: string;
-    context?: string;
-    previous?: VisualDecisions;
-    only?: number[];
+  async sceneDrawing(input: {
+    thing: Pick<
+      DrawingThing,
+      'name' | 'brief' | 'motion' | 'parts' | 'states' | 'shape'
+    >;
+    viewBox: { w: number; h: number };
+    topic: string;
+    neighbours: string[];
     notes?: string[];
-  }): Promise<LlmResult<VisualDecisions>> {
+    signal?: AbortSignal;
+  }): Promise<LlmResult<string>> {
     const started = Date.now();
-    const { generateObject } = await this.registry.modules();
-    const { model, ref } = await this.registry.languageModel('visual_director');
-    const moments = input.narration.moments
-      .map(
-        (m, i) =>
-          `${i}. sentences ${m.from} to ${m.to}: "${input.narration.sentences.slice(m.from, m.to + 1).join(' ')}" Intent: ${m.intent}`,
-      )
-      .join('\n');
-    const redo =
-      input.only?.length && input.previous
-        ? [
-            `Redo moments ${input.only.join(', ')} only. What was wrong:\n- ${(input.notes ?? []).join('\n- ')}`,
-            `Your earlier decisions for them: ${JSON.stringify(input.previous.moments.filter((d) => input.only!.includes(d.index)))}`,
-          ]
-        : [];
-    const result = await generateObject({
+    const { generateText } = await this.registry.modules();
+    const { model, ref } = await this.registry.languageModel('scene_draw');
+    const thinking =
+      this.config.get<string>('SCENE_DRAW_THINKING', 'off') === 'on';
+    // Free text: an SVG written into a reply is what a model has done a
+    // million times; escaped into a JSON field it is not (79c2523).
+    const result = await generateText({
       model,
-      schema: visualDecisionsSchema,
-      system: `${PROMPTS.visualDirector}\n\n${PROMPTS.visualCardGuide}\n\n${PROMPTS.visualWordBudget}`,
-      prompt: [
-        `Chapter: ${input.topicTitle}`,
-        input.context ? `This page: ${input.context}` : '',
-        `The chapter's plan: ${JSON.stringify(input.plan)}`,
-        `The page:\n${input.material}`,
-        `The narration, by moment:\n${moments}`,
-        `The menu of what can be drawn for this page:\n${input.menu}`,
-        ...redo,
-      ]
-        .filter(Boolean)
-        .join('\n\n'),
+      system: PROMPTS.sceneDraw,
+      prompt: drawingRequest(input),
       maxRetries: this.maxRetries(),
+      maxOutputTokens: thinking ? 32_000 : 16_000,
+      ...(input.signal ? { abortSignal: input.signal } : {}),
+      // Said on every call: the API thinks by default on deepseek-flash,
+      // and this provider version only knows its older ids as thinkers.
+      ...(ref.provider === 'deepseek'
+        ? {
+            providerOptions: {
+              deepseek: {
+                thinking: { type: thinking ? 'enabled' : 'disabled' },
+              },
+            },
+          }
+        : {}),
     });
     return {
-      value: result.object as VisualDecisions,
-      usage: this.usage(ref, result.usage, started),
-    };
-  }
-
-  async visualPlan(input: {
-    title: string;
-    topicTitle: string;
-    material: string;
-  }): Promise<LlmResult<VisualPlan>> {
-    const started = Date.now();
-    const { generateObject } = await this.registry.modules();
-    const { model, ref } = await this.registry.languageModel('visual_plan');
-    const result = await generateObject({
-      model,
-      schema: visualPlanSchema,
-      system: PROMPTS.visualPlan,
-      prompt: [
-        `Document: ${input.title}`,
-        `Chapter: ${input.topicTitle}`,
-        `\nThe chapter, from which every beat and term must come:\n${input.material}`,
-      ].join('\n'),
-      maxRetries: this.maxRetries(),
-    });
-    return {
-      value: result.object,
+      value: result.text,
       usage: this.usage(ref, result.usage, started),
     };
   }
@@ -1786,11 +1702,13 @@ export class AiSdkLlmAdapter implements LlmGatewayPort, OnModuleInit {
     usage: LanguageModelUsage,
     startedAt: number,
   ): LlmUsage {
+    const cached = usage.inputTokenDetails?.cacheReadTokens;
     return {
       model: `${ref.provider}:${ref.modelId}`,
       tokensIn: usage.inputTokens ?? 0,
       tokensOut: usage.outputTokens ?? 0,
       latencyMs: Date.now() - startedAt,
+      ...(cached ? { tokensCached: cached } : {}),
     };
   }
 
@@ -1812,20 +1730,43 @@ export class AiSdkLlmAdapter implements LlmGatewayPort, OnModuleInit {
   }
 }
 
-/**
- * A schema in strict mode has every optional field present as null; the
- * domain wants them absent. Nulls go, at every depth, arrays kept.
- */
-function withoutNulls(value: unknown): unknown {
-  if (Array.isArray(value)) return value.map(withoutNulls);
-  if (value && typeof value === 'object') {
-    const out: Record<string, unknown> = {};
-    for (const [key, inner] of Object.entries(value)) {
-      // A model now and then writes the word null instead of the value.
-      if (inner === null || inner === 'null' || inner === '') continue;
-      out[key] = withoutNulls(inner);
-    }
-    return out;
-  }
-  return value;
+/** What the artist is asked for one drawing: the brief, its groups, its frame. */
+export function drawingRequest(input: {
+  thing: Pick<
+    DrawingThing,
+    'name' | 'brief' | 'motion' | 'parts' | 'states' | 'shape'
+  >;
+  viewBox: { w: number; h: number };
+  topic: string;
+  neighbours: string[];
+  notes?: string[];
+}): string {
+  const { thing, viewBox } = input;
+  const id = groupId;
+  const parts = thing.parts.map((part) =>
+    part.label
+      ? `${part.name}: <g id="${id(part.name)}"> and its label in <g id="${id(part.name)}-label">`
+      : `${part.name}: <g id="${id(part.name)}">, not labelled`,
+  );
+  const states = thing.states.map(
+    (state) => `${state.name}: <g id="${id(state.name)}">, ${state.look}`,
+  );
+  return [
+    `Draw: ${thing.brief}`,
+    `It will be captioned "${thing.name}" under the drawing; do not write that on it.`,
+    parts.length
+      ? `Parts, each its own group:\n- ${parts.join('\n- ')}`
+      : 'No named parts and no labels.',
+    states.length
+      ? `States, each its own group drawn over the drawing:\n- ${states.join('\n- ')}`
+      : '',
+    `Moves: ${thing.motion || 'a gentle sway, so it is never still'}`,
+    `viewBox="0 0 ${viewBox.w} ${viewBox.h}" (${thing.shape}). Labels at font-size ${Math.ceil(viewBox.w * 0.042)} or more: the drawing is often shown small.`,
+    `Context: a lesson on "${input.topic}"${input.neighbours.length ? `; on the stage it stands with: ${input.neighbours.join(', ')}` : ''}.`,
+    input.notes?.length
+      ? `Last time this fell short:\n- ${input.notes.join('\n- ')}`
+      : '',
+  ]
+    .filter(Boolean)
+    .join('\n');
 }

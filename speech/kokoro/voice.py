@@ -109,38 +109,62 @@ class Renderer:
         self.render([(WARM_UP, 1.0, 0.0)], self.voice)
         return time.time() - started
 
-    def render(self, pieces: list, voice: str):
-        """The page as samples at 24 kHz, its length in seconds, and where each piece starts; pieces are (text, speed, silence after)."""
+    def render(self, pieces: list, voice: str, timestamps: bool = False):
+        """The page as samples at 24 kHz, its length in seconds, where each piece starts, and, when asked, when each word is spoken; pieces are (text, speed, silence after)."""
         import numpy as np
 
         out = []
         starts = []
+        words = []
+        length = 0
+
+        def add(chunk) -> None:
+            nonlocal length
+            out.append(chunk)
+            length += len(chunk)
+
         with self.lock:
             for text, speed, pause_after in pieces:
-                said = []
+                begun = None
                 for run in runs(text):
-                    spoken = []
+                    spoken = False
                     for result in self.pipeline(run, voice=voice, speed=speed, split_pattern=r"\n+"):
                         if result.audio is None:
                             continue
+                        piece, head = trimmed(result.audio.detach().cpu().numpy().astype(np.float32))
+                        # A breath between the voice's own chunks of a run, a longer
+                        # pause between runs; the same silences as ever.
                         if spoken:
-                            spoken.append(gap(BREATH))
-                        spoken.append(trimmed(result.audio.detach().cpu().numpy().astype(np.float32)))
-                    if not spoken:
-                        continue
-                    if said:
-                        said.append(gap(RUN_GAP))
-                    said.extend(spoken)
-                if not said:
+                            add(gap(BREATH))
+                        elif begun is not None:
+                            add(gap(RUN_GAP))
+                        if begun is None:
+                            begun = length
+                        if timestamps:
+                            # The voice times each token from the start of its own
+                            # chunk; the chunk lost `head` samples to the trim, and a
+                            # last word's time runs on into the silence trimmed off
+                            # its end, so every time is held inside the audio kept.
+                            origin = (length - head) / SAMPLE_RATE
+                            low = length / SAMPLE_RATE
+                            high = (length + len(piece)) / SAMPLE_RATE
+                            for token in result.tokens or []:
+                                if token.start_ts is None or token.end_ts is None:
+                                    continue
+                                start = min(max(origin + token.start_ts, low), high)
+                                end = min(max(origin + token.end_ts, start), high)
+                                words.append((token.text, start, end))
+                        add(piece)
+                        spoken = True
+                if begun is None:
                     continue
-                starts.append(sum(len(piece) for piece in out) / SAMPLE_RATE)
-                out.extend(said)
+                starts.append(begun / SAMPLE_RATE)
                 if pause_after > 0:
-                    out.append(gap(pause_after))
+                    add(gap(pause_after))
         if not out:
             raise ValueError("nothing to say")
         audio = np.concatenate(out)
-        return audio, len(audio) / SAMPLE_RATE, starts
+        return audio, len(audio) / SAMPLE_RATE, starts, words
 
     def check_voice(self, voice: str) -> None:
         """A voice is one name, or names joined by commas for an even blend; anything else is refused."""
@@ -180,7 +204,7 @@ def mount(api, renderer: Renderer, token: str, where: str, mode: str = "lecture"
 
     @api.get("/health")
     def health():
-        return {"status": "ok", "model": "kokoro-82m", "voice": renderer.voice, "gpu": where, "mode": mode, "version": 4}
+        return {"status": "ok", "model": "kokoro-82m", "voice": renderer.voice, "gpu": where, "mode": mode, "version": 5}
 
     @api.post("/v1/audio/stream")
     async def stream(request: Request, authorization: str = Header(default="")):
@@ -213,7 +237,7 @@ def mount(api, renderer: Renderer, token: str, where: str, mode: str = "lecture"
             if lead > 0:
                 yield _pcm(gap(lead))
             for text, speed, pause_after in parts:
-                audio, _seconds, _starts = await asyncio.to_thread(renderer.render, [(text, speed, 0.0)], voice)
+                audio, _seconds, _starts, _words = await asyncio.to_thread(renderer.render, [(text, speed, 0.0)], voice)
                 yield _pcm(audio)
                 if pause_after > 0:
                     yield _pcm(gap(pause_after))
@@ -223,6 +247,7 @@ def mount(api, renderer: Renderer, token: str, where: str, mode: str = "lecture"
 
     @api.post("/v1/audio/speech")
     async def speech(request: Request, authorization: str = Header(default="")):
+        """A page as mp3 or wav. With "timestamps": true the answer is JSON: the audio in base64, where each piece starts, and when each word is spoken."""
         if authorization != expected:
             raise HTTPException(status_code=401, detail="the key was refused")
         body = await request.json()
@@ -235,20 +260,38 @@ def mount(api, renderer: Renderer, token: str, where: str, mode: str = "lecture"
         fmt = str(body.get("response_format") or "mp3").lower()
         if fmt not in ("mp3", "wav"):
             raise HTTPException(status_code=400, detail="response_format must be mp3 or wav")
+        timestamps = bool(body.get("timestamps"))
         # The delivery note and the language, if sent, are read by no one here.
         started = time.time()
         try:
-            audio, seconds, starts = await asyncio.to_thread(renderer.render, pieces, voice)
+            audio, seconds, starts, words = await asyncio.to_thread(renderer.render, pieces, voice, timestamps)
         except ValueError as error:
             raise HTTPException(status_code=400, detail=str(error))
         data = await asyncio.to_thread(to_mp3 if fmt == "mp3" else to_wav, audio)
         release_memory()
+        rendered = time.time() - started
+        if timestamps:
+            import base64
+
+            from fastapi.responses import JSONResponse
+
+            # JSON, not a header: a long page's words outgrow a header's limit.
+            return JSONResponse(
+                {
+                    "audio": base64.b64encode(data).decode("ascii"),
+                    "mime_type": "audio/mpeg" if fmt == "mp3" else "audio/wav",
+                    "seconds": round(seconds, 3),
+                    "render_seconds": round(rendered, 2),
+                    "piece_starts": [round(start, 3) for start in starts],
+                    "words": [[text, round(start, 3), round(end, 3)] for text, start, end in words],
+                }
+            )
         return Response(
             content=data,
             media_type="audio/mpeg" if fmt == "mp3" else "audio/wav",
             headers={
                 "x-audio-seconds": f"{seconds:.2f}",
-                "x-render-seconds": f"{time.time() - started:.2f}",
+                "x-render-seconds": f"{rendered:.2f}",
                 # Where each piece starts, so a card can land in the pause before its sentence.
                 "x-piece-starts": ",".join(f"{start:.3f}" for start in starts),
             },
@@ -280,13 +323,13 @@ def runs(text: str) -> list:
 
 
 def trimmed(audio):
-    """The voice's dead air cut from both ends, a short margin kept, and the edges faded so nothing clicks."""
+    """The voice's dead air cut from both ends, a short margin kept, and the edges faded so nothing clicks; with how many samples came off the front."""
     import numpy as np
 
     floor = 10 ** (TRIM_DB / 20)
     loud = np.flatnonzero(np.abs(audio) > floor)
     if not len(loud):
-        return audio[: int(SAMPLE_RATE * HEAD_KEEP)]
+        return audio[: int(SAMPLE_RATE * HEAD_KEEP)], 0
     start = max(0, int(loud[0]) - int(SAMPLE_RATE * HEAD_KEEP))
     stop = min(len(audio), int(loud[-1]) + int(SAMPLE_RATE * TAIL_KEEP))
     piece = audio[start:stop].copy()
@@ -296,7 +339,7 @@ def trimmed(audio):
         piece[:fade_in] *= np.linspace(0.0, 1.0, fade_in, dtype=np.float32)
     if fade_out:
         piece[-fade_out:] *= np.linspace(1.0, 0.0, fade_out, dtype=np.float32)
-    return piece
+    return piece, start
 
 
 def gap(seconds: float):

@@ -58,6 +58,37 @@ describe('the cost of a call', () => {
       }),
     ).toBeNull();
   });
+
+  it('prices input the provider served from its cache at the cache rate', () => {
+    // The artist's fixed prompt, a million tokens of it from the cache.
+    expect(
+      costOf({
+        task: 'scene_draw',
+        model: 'deepseek:deepseek-flash',
+        tokensIn: 1_000_000,
+        tokensOut: 1_000_000,
+        tokensCached: 1_000_000,
+      }),
+    ).toBe(1.206);
+    expect(
+      costOf({
+        task: 'scene_draw',
+        model: 'deepseek:deepseek-flash',
+        tokensIn: 1_000_000,
+        tokensOut: 0,
+      }),
+    ).toBe(0.3);
+    // A model with no cache price is charged in full whatever was cached.
+    expect(
+      costOf({
+        task: 'scene_write',
+        model: 'openai:gpt-4.1',
+        tokensIn: 1_000_000,
+        tokensOut: 0,
+        tokensCached: 500_000,
+      }),
+    ).toBe(2);
+  });
 });
 
 describe('the rented voice', () => {

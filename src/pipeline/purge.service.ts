@@ -12,8 +12,12 @@ import { CLOCK, STORAGE, VECTOR_STORE } from '../business/ports/tokens';
 import type { ClockPort } from '../business/ports/clock.port';
 import type { StoragePort } from '../business/ports/storage.port';
 import type { VectorStorePort } from '../business/ports/vector-store.port';
-import { DOCUMENT_REPOSITORY } from '../business/repositories/tokens';
+import {
+  DOCUMENT_REPOSITORY,
+  VISUAL_SCENE_REPOSITORY,
+} from '../business/repositories/tokens';
 import type { DocumentRepository } from '../business/repositories/document.repository';
+import type { VisualSceneRepository } from '../business/repositories/visual.repository';
 import { DocumentModel, UserModel } from '../web/database/models';
 
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -35,6 +39,8 @@ export class PurgeService implements OnModuleInit, OnModuleDestroy {
 
   constructor(
     @Inject(DOCUMENT_REPOSITORY) private readonly documents: DocumentRepository,
+    @Inject(VISUAL_SCENE_REPOSITORY)
+    private readonly visuals: VisualSceneRepository,
     @Inject(STORAGE) private readonly storage: StoragePort,
     @Inject(VECTOR_STORE) private readonly vectors: VectorStorePort,
     @Inject(CLOCK) private readonly clock: ClockPort,
@@ -89,6 +95,10 @@ export class PurgeService implements OnModuleInit, OnModuleDestroy {
         if (ref) await this.storage.delete(ref).catch(() => undefined);
       }
       await this.vectors.deleteByDocument(row.id).catch(() => undefined);
+      // The videos' files and rows: their tables have no keys to cascade on.
+      for (const key of await this.visuals.filesOf(row.id))
+        await this.storage.delete(key).catch(() => undefined);
+      await this.visuals.purgeDocument(row.id);
       await this.documents.purge(row.id);
     }
 

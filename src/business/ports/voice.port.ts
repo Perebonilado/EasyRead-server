@@ -23,6 +23,12 @@ export interface SpeechPort {
      * (Kokoro). Ignored by the rest, which say `text`.
      */
     pieces?: { text: string; speed: number; pauseAfter: number }[];
+    /**
+     * Ask the voice when it spoke each word. Kokoro knows, from the
+     * durations it renders; a voice that does not simply leaves `words`
+     * out of the answer.
+     */
+    timestamps?: boolean;
   }): Promise<{
     audio: Buffer;
     mimeType: string;
@@ -34,6 +40,8 @@ export interface SpeechPort {
     durationMs?: number;
     /** Where each piece starts in the audio, in order, when the voice spoke pieces and measured them. */
     pieceStartsMs?: number[];
+    /** Each word as the voice spoke it, in order, when timestamps were asked for and the voice knows them. */
+    words?: { text: string; startMs: number; endMs: number }[];
   }>;
   /** What goes into a file's name so audio from one voice never overwrites another's. */
   label(): { model: string; voice: string };

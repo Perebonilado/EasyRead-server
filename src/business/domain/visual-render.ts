@@ -142,7 +142,19 @@ function drawn(
     const inner = preset.svg
       .replace(/^[\s\S]*?<svg[^>]*>/i, '')
       .replace(/<\/svg>\s*$/i, '');
-    return `<svg x="${n(x - w / 2)}" y="${n(y - h / 2)}" width="${n(w)}" height="${n(h)}" viewBox="${view ?? '0 0 800 600'}" overflow="visible"><g color="${paint.text}">${inner}</g></svg>`;
+    // Placed with a transform and not as a nested <svg>: resvg renders
+    // one nested svg and panics on two, and a scene holds several
+    // drawings. A panic in a native module aborts the process, so the
+    // shape of this has to avoid it rather than survive it.
+    const box = (view ?? '0 0 800 600')
+      .split(/[\s,]+/)
+      .map(Number)
+      .filter((v) => Number.isFinite(v));
+    const [vx, vy, vw, vh] =
+      box.length === 4 && box[2] > 0 && box[3] > 0 ? box : [0, 0, 800, 600];
+    const scale = Math.min(w / vw, h / vh);
+    const at = `translate(${n(x - w / 2 + (w - vw * scale) / 2)} ${n(y - h / 2 + (h - vh * scale) / 2)}) scale(${scale.toFixed(4)}) translate(${n(-vx)} ${n(-vy)})`;
+    return `<g transform="${at}"><g color="${paint.text}">${inner}</g></g>`;
   }
   if (preset && 'body' in preset && preset.body) {
     const at = `translate(${n(x - w / 2)} ${n(y - h / 2)}) scale(${n(w)} ${n(h)})`;

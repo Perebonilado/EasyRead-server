@@ -41,7 +41,7 @@ import {
   presetOf,
   type ThingDrawing,
 } from '../src/business/domain/visual-draw';
-import { rasterise } from '../src/business/domain/visual-render';
+import { execFileSync } from 'node:child_process';
 import {
   ALLOWED_ELEMENTS,
   DRAW_VIEWBOX,
@@ -103,6 +103,37 @@ async function inFlight<T>(
 }
 
 /**
+ * Rasterise, in a process that is allowed to die.
+ *
+ * resvg panics rather than throws on geometry it cannot handle, and a
+ * panic in a native module takes the whole run with it — which it did,
+ * twice, including from inside the very check meant to prevent it. Over
+ * here the worst a bad drawing can do is kill a child process and give
+ * us a false back.
+ */
+function draw(svg: string, width: number, out?: string): Buffer | null {
+  try {
+    const png = execFileSync(
+      process.execPath,
+      [
+        join(__dirname, 'rasterise-one.js'),
+        String(width),
+        ...(out ? [out] : []),
+      ],
+      {
+        input: svg,
+        maxBuffer: 64 * 1024 * 1024,
+        timeout: 20_000,
+        stdio: ['pipe', 'pipe', 'ignore'],
+      },
+    );
+    return out ? Buffer.alloc(0) : png;
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Whether the rasteriser can actually draw this one.
  *
  * The spec's first gate rule is "parses and renders", and until now
@@ -111,14 +142,8 @@ async function inFlight<T>(
  * the round. Rendered small and on its own, it costs almost nothing and
  * the failure belongs to the candidate that caused it.
  */
-async function renders(drawing: ThingDrawing): Promise<boolean> {
-  if (!renderable(drawing.svg)) return false;
-  try {
-    await rasterise(svgOf(drawing, 48), 48);
-    return true;
-  } catch {
-    return false;
-  }
+function renders(drawing: ThingDrawing): boolean {
+  return renderable(drawing.svg) && draw(svgOf(drawing, 48), 48) !== null;
 }
 
 /** Markup cut down to what the rasteriser will certainly accept. */
@@ -259,16 +284,14 @@ async function main(): Promise<void> {
       });
       spent += candidates;
 
-      const judged = await Promise.all(
-        drawn.map(async (one) => {
-          const wrong = drawingProblems(one);
-          if (!(await renders(one)))
-            wrong.unshift(
-              'the drawing will not render: check the markup is well formed',
-            );
-          return { one, wrong };
-        }),
-      );
+      const judged = drawn.map((one) => {
+        const wrong = drawingProblems(one);
+        if (!renders(one))
+          wrong.unshift(
+            'the drawing will not render: check the markup is well formed',
+          );
+        return { one, wrong };
+      });
       // Every candidate is kept for the sheet, with what was wrong with
       // it. A run that draws nothing used to leave nothing to look at,
       // which is no way to find out why it drew nothing.
@@ -294,16 +317,14 @@ async function main(): Promise<void> {
 
       // Shown together and numbered, so the judge chooses rather than
       // settling for the first one it can live with.
-      let png: Buffer;
-      try {
-        png = await rasterise(
-          sheetSvg(
-            passed.map((one, i) => ({ drawing: one, caption: String(i + 1) })),
-          ),
-          Math.min(4, passed.length) * 210,
-        );
-      } catch (cause) {
-        note = `the drawing would not render: ${String(cause)}`;
+      const png = draw(
+        sheetSvg(
+          passed.map((one, i) => ({ drawing: one, caption: String(i + 1) })),
+        ),
+        Math.min(4, passed.length) * 210,
+      );
+      if (!png) {
+        note = 'the sheet of these would not render';
         console.log(`  ${note}`);
         continue;
       }
@@ -327,25 +348,17 @@ async function main(): Promise<void> {
     if (tried.length) everyTried.push({ term, tried });
     if (tried.length) {
       const file = join(out, `tried-${term.replace(/\W+/g, '-')}.png`);
-      const drawable: Tried[] = [];
-      for (const one of tried)
-        if (await renders(one.drawing)) drawable.push(one);
-      try {
-        writeFileSync(
-          file,
-          await rasterise(
-            sheetSvg(drawable),
-            Math.min(4, Math.max(1, drawable.length)) * 210,
-          ),
-        );
-        console.log(
-          `  ${drawable.length} of ${tried.length} candidate(s) drawn: ${file}`,
-        );
-      } catch (cause) {
-        // A sheet nobody can render is a shame, not a reason to lose the
-        // other four terms and the hundred calls already spent.
-        console.log(`  (could not draw the sheet: ${String(cause)})`);
-      }
+      const drawable = tried.filter((one) => renders(one.drawing));
+      const ok = draw(
+        sheetSvg(drawable),
+        Math.min(4, Math.max(1, drawable.length)) * 210,
+        file,
+      );
+      console.log(
+        ok
+          ? `  ${drawable.length} of ${tried.length} candidate(s) drawn: ${file}`
+          : '  (the sheet would not render)',
+      );
     }
 
     if (!taken) {
@@ -384,12 +397,10 @@ async function main(): Promise<void> {
     `${JSON.stringify(missed, null, 2)}\n`,
   );
   if (kept.length)
-    writeFileSync(
+    draw(
+      sheetSvg(kept.map((k) => ({ drawing: k.drawing, caption: k.term }))),
+      Math.min(4, kept.length) * 210,
       join(out, 'sheet.png'),
-      await rasterise(
-        sheetSvg(kept.map((k) => ({ drawing: k.drawing, caption: k.term }))),
-        Math.min(4, kept.length) * 210,
-      ),
     );
 
   console.log(

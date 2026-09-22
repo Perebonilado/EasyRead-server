@@ -46,7 +46,14 @@ export const DRAW_GATE = {
   minSpread: 0.6,
   minAspect: 0.3,
   maxAspect: 3,
-  maxParts: 6,
+  /**
+   * A labelled diagram has more parts than a pictogram. Six was the cap
+   * when a drawing was a silhouette with a few anchors on it; a kidney
+   * drawn properly has a cortex, pyramids, columns, a pelvis, calyces,
+   * an artery, a vein, a ureter and a capsule, and being turned back for
+   * having nine of them is absurd.
+   */
+  maxParts: 12,
 } as const;
 
 /**

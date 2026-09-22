@@ -1,4 +1,5 @@
 import {
+  framedBox,
   gateDrawing,
   inspectSvg,
   numbersSane,
@@ -193,5 +194,16 @@ describe('the gate', () => {
     expect(inspected.mended).toContain(
       'removed a title that repeated the caption',
     );
+  });
+
+  it('grows the frame for a label a few units over the edge rather than cut it', () => {
+    const box = framedBox([0, 0, 960, 600], {
+      x: 62,
+      y: 57,
+      width: 901.2,
+      height: 492,
+    });
+    expect(box[0] + box[2]).toBeGreaterThan(963.2);
+    expect(box[0]).toBeLessThanOrEqual(0);
   });
 });

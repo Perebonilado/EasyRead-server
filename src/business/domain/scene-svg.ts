@@ -34,7 +34,7 @@ export const GATE = {
   /** A brightness or colour change quicker than this flashes; it is slowed to a second. */
   shortestCycleS: 0.34,
   /** A label smaller than this share of the drawing's width is hard to read once it is scaled. */
-  smallestLabel: 0.028,
+  smallestLabel: 0.034,
 } as const;
 
 /**
@@ -657,14 +657,19 @@ export function framedBox(
   ink: InkBox,
 ): [number, number, number, number] {
   const [x0, y0, w, h] = box;
+  // Any spill at all: a label a few units over the edge is a word cut in
+  // half, and the reading font sets it a little wider than this measure.
   const spills =
-    ink.x < x0 - w * 0.01 ||
-    ink.y < y0 - h * 0.01 ||
-    ink.x + ink.width > x0 + w * 1.01 ||
-    ink.y + ink.height > y0 + h * 1.01;
-  const small = ink.width < w * 0.7 && ink.height < h * 0.7;
+    ink.x < x0 - 0.5 ||
+    ink.y < y0 - 0.5 ||
+    ink.x + ink.width > x0 + w + 0.5 ||
+    ink.y + ink.height > y0 + h + 0.5;
+  // Empty room either way is room the drawing is shown smaller for: a
+  // figure standing in the lower half of its canvas came out half size.
+  const small = ink.width < w * 0.92 || ink.height < h * 0.92;
   if (!spills && !small) return box;
-  const pad = Math.max(ink.width, ink.height) * 0.07;
+  const pad =
+    Math.max(ink.width, ink.height) * (spills && !small ? 0.04 : 0.07);
   const round = (n: number) => Math.round(n * 100) / 100;
   if (spills && !small) {
     // Grown to take the spill in; never cut.

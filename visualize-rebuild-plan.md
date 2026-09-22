@@ -1,5 +1,41 @@
 # Visualize, rebuilt — plan
 
+**As built, 22 Sep 2026**, on `visualize-rebuild` in both repos, committed
+locally and not pushed. Everything below is in, with these differences:
+
+- **No thinking by default.** `SCENE_DRAW_THINKING` is off; the spike was
+  folded into the build, and Flash without thinking drew well.
+- **One slot function.** Rows share their width by each thing's
+  proportions (`slotsOf`), so a wide drawing beside a round one is not a
+  strip; the layout spec uses the same function.
+- **Framing is always to the ink.** A drawing is framed round its ink
+  unless it already fills its canvas; any spill past the edge grows the
+  frame. A title that repeats the caption is taken out.
+- **A restated stage is effects only.** A step that restates the stage
+  as it stands adds its effects, not a change.
+- **Not done: stability.** Things keep the writer's order when the
+  layout changes. The prompt asks the writer to keep things in place;
+  code does not reorder them.
+
+Tested on real pages from the local library with gpt-4.1, deepseek-flash
+and the Kokoro voice built from this branch:
+
+| Page | Made in | Audio | Timed by | Drawings |
+| --- | --- | --- | --- | --- |
+| Renal function tests, p3 | 72 s | 74 s | voice | 6 of 6 |
+| Pharmacology of Alzheimer's, p5 | 88 s | 52 s | voice | 5 of 5 |
+| General microbiology, p6 | 45–61 s | 47 s | voice | 5 of 5 |
+
+Each was played in the browser in both stagings, with checks on:
+
+- **Pause.** The drawings' own animations hold still.
+- **Seek.** They jump by exactly the seek.
+- **2×.** They track the audio within a frame.
+
+Original draft follows.
+
+---
+
 Draft, 22 Sep 2026. Nothing is built yet. Line numbers are from the
 working trees on that day: the server at `f02be9b` and the client at
 `bd9361b`, each with its uncommitted Visualize edits (§10.1).

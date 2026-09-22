@@ -55,17 +55,30 @@ const content = (staging: StagingName): Rect => {
   return { x: margin, y: margin, w: w - margin * 2, h: h - margin * 2 };
 };
 
-/** Slots in a line, each as wide as it can be, centred in the band given. */
-function line(band: Rect, n: number, gap = SLOT_GAP, tallest = 1.3): Rect[] {
-  const w = (band.w - gap * (n - 1)) / n;
-  const h = Math.min(band.h, Math.max(w * tallest, band.h * 0.5));
+/**
+ * Slots in a line, centred in the band given, the width shared by weight:
+ * a wide drawing beside a round one gets the room it needs, where equal
+ * shares made it a strip.
+ */
+function line(
+  band: Rect,
+  n: number,
+  gap = SLOT_GAP,
+  tallest = 1.3,
+  weights?: number[],
+): Rect[] {
+  const shares = Array.from({ length: n }, (_, i) => weights?.[i] ?? 1);
+  const total = shares.reduce((sum, w) => sum + w, 0) || n;
+  const room = band.w - gap * (n - 1);
+  const h = Math.min(band.h, Math.max((room / n) * tallest, band.h * 0.5));
   const y = band.y + (band.h - h) / 2;
-  return Array.from({ length: n }, (_, i) => ({
-    x: band.x + i * (w + gap),
-    y,
-    w,
-    h,
-  }));
+  let x = band.x;
+  return shares.map((share) => {
+    const w = (room * share) / total;
+    const slot = { x, y, w, h };
+    x += w + gap;
+    return slot;
+  });
 }
 
 /** Slots stacked in a column. */
@@ -103,6 +116,8 @@ export function slotsFor(
   layout: SceneLayout,
   count: number,
   staging: StagingName,
+  /** How much of a row's width each thing wants, by its proportions. */
+  weights?: number[],
 ): Rect[] {
   const area = content(staging);
   const wide = staging === 'wide';
@@ -113,7 +128,7 @@ export function slotsFor(
     case 'row':
       if (!wide && n === 4) return twoLines(area, 2, 2);
       if (!wide && n === 5) return twoLines(area, 3, 2);
-      return line(area, n);
+      return line(area, n, SLOT_GAP, 1.3, weights);
     case 'grid':
       return twoLines(area, 2, n - 2);
     case 'compare':
@@ -285,16 +300,26 @@ export function fitInSlot(
     const band = caption.lines.length * caption.size * LINE;
     const block = size * 1.1 + 18 + band;
     const top = slot.y + (slot.h - block) / 2;
+    // As wide as what it says, so an arrow reaches the words and not the
+    // edge of an empty slot.
+    const wide = Math.min(
+      slot.w,
+      Math.max(
+        measureText(thing.value, size, 700),
+        ...caption.lines.map((l) => measureText(l, caption.size, 600)),
+      ) + 24,
+    );
+    const left = slot.x + (slot.w - wide) / 2;
     return {
-      x: round(slot.x),
+      x: round(left),
       y: round(top),
-      w: round(slot.w),
+      w: round(wide),
       h: round(size * 1.1),
       size: Math.round(size),
       caption: {
-        x: round(slot.x + slot.w * 0.02),
+        x: round(left),
         y: round(top + size * 1.1 + 18),
-        w: round(slot.w * 0.96),
+        w: round(wide),
         size: caption.size,
         lines: caption.lines,
       },
@@ -348,6 +373,30 @@ export function fitInSlot(
   };
 }
 
+/** The share of a row a thing wants: a drawing by its proportions, words and numbers by their kind. */
+function weightOf(thing: LaidThing | undefined): number {
+  if (!thing) return 1;
+  if (thing.kind === 'drawing')
+    return Math.min(1.8, Math.max(0.6, thing.aspect));
+  if (thing.kind === 'stat') return 1.2;
+  return thing.style === 'title' ? 1.6 : thing.style === 'card' ? 1 : 0.9;
+}
+
+/** The slots a step's things are placed in: the template, a row shared out by what each wants. */
+export function slotsOf(
+  layout: SceneLayout,
+  show: string[],
+  things: ReadonlyMap<string, LaidThing>,
+  staging: StagingName,
+): Rect[] {
+  return slotsFor(
+    layout,
+    show.length,
+    staging,
+    show.map((id) => weightOf(things.get(id))),
+  );
+}
+
 /** Every thing on the stage at one step, placed. */
 export function layoutStep(
   layout: SceneLayout,
@@ -355,7 +404,7 @@ export function layoutStep(
   things: ReadonlyMap<string, LaidThing>,
   staging: StagingName,
 ): Record<string, Place> {
-  const slots = slotsFor(layout, show.length, staging);
+  const slots = slotsOf(layout, show, things, staging);
   const out: Record<string, Place> = {};
   show.forEach((id, i) => {
     const thing = things.get(id);

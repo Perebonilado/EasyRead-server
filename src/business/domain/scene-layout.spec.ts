@@ -10,6 +10,7 @@ import {
   layoutStep,
   overlaps,
   slotsFor,
+  slotsOf,
   type LaidThing,
   type StagingName,
 } from './scene-layout';
@@ -59,17 +60,14 @@ describe('the stage layout', () => {
               (_, i) => ids[(i + shift) % ids.length],
             );
             const places = layoutStep(layout, show, things, staging);
+            const own = slotsOf(layout, show, things, staging);
             const extents = show.map((id) => extentOf(places[id]));
             for (let i = 0; i < n; i += 1) {
               const e = extents[i];
-              expect(e.x).toBeGreaterThanOrEqual(slots[i].x - 1);
-              expect(e.x + e.w).toBeLessThanOrEqual(
-                slots[i].x + slots[i].w + 1,
-              );
-              expect(e.y).toBeGreaterThanOrEqual(slots[i].y - 1);
-              expect(e.y + e.h).toBeLessThanOrEqual(
-                slots[i].y + slots[i].h + 1,
-              );
+              expect(e.x).toBeGreaterThanOrEqual(own[i].x - 1);
+              expect(e.x + e.w).toBeLessThanOrEqual(own[i].x + own[i].w + 1);
+              expect(e.y).toBeGreaterThanOrEqual(own[i].y - 1);
+              expect(e.y + e.h).toBeLessThanOrEqual(own[i].y + own[i].h + 1);
               for (let j = i + 1; j < n; j += 1)
                 expect(overlaps(e, extents[j])).toBe(false);
             }

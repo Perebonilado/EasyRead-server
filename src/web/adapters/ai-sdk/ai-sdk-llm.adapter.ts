@@ -1762,7 +1762,7 @@ export function drawingRequest(input: {
       ? `States, each its own group drawn over the drawing:\n- ${states.join('\n- ')}`
       : '',
     `Moves: ${thing.motion || 'a gentle sway, so it is never still'}`,
-    `viewBox="0 0 ${viewBox.w} ${viewBox.h}" (${thing.shape}). Labels at font-size ${Math.ceil(viewBox.w * 0.032)} or more.`,
+    `viewBox="0 0 ${viewBox.w} ${viewBox.h}" (${thing.shape}). Labels at font-size ${Math.ceil(viewBox.w * 0.042)} or more: the drawing is often shown small.`,
     `Context: a lesson on "${input.topic}"${input.neighbours.length ? `; on the stage it stands with: ${input.neighbours.join(', ')}` : ''}.`,
     input.notes?.length
       ? `Last time this fell short:\n- ${input.notes.join('\n- ')}`

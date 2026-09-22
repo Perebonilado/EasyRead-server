@@ -75,7 +75,11 @@ import {
   resolveDrawing,
 } from '../../business/domain/visual-figures';
 import { MOTION_MEANINGS } from '../../business/domain/living.generated/motion';
-import { fieldFor, pickPicture } from '../../business/domain/visual-presets';
+import {
+  fieldFor,
+  knownPicture,
+  pickPicture,
+} from '../../business/domain/visual-presets';
 import {
   THUMB_WIDTH,
   rasterise,
@@ -373,7 +377,14 @@ export class VisualSceneProcessor {
           near: nearby,
           handPicked: await this.handPicked(who),
         });
-        const drawable = (name: string) => ALL_SHAPE_KINDS.includes(name);
+        // What can actually be drawn: the shape kinds the renderer knows
+        // plus everything in the library. ALL_SHAPE_KINDS is the
+        // primitives and the hand presets — eighty-six names — and
+        // leaves out the twelve hundred icons the renderer draws without
+        // trouble, so the stage was calling them undrawable. The rest of
+        // the codebase asks both (see visual.ts).
+        const drawable = (name: string) =>
+          ALL_SHAPE_KINDS.includes(name) || knownPicture(name);
         scripts = {
           box: layoutStage(stageScene, { stage: STAGES.box, known: drawable }),
           wide: layoutStage(stageScene, {

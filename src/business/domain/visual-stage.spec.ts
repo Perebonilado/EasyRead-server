@@ -9,7 +9,16 @@ import {
   wordsOnStage,
   type StageScene,
 } from './visual-stage';
-import { knownPicture } from './visual-presets';
+import { ALL_SHAPE_KINDS } from './visual';
+import { knownPicture as libraryHas } from './visual-presets';
+
+/**
+ * The same predicate the pipeline passes: "can the renderer draw a kind
+ * called this", which says yes to rect and roundRect. Testing against
+ * knownPicture instead hid this bug through three attempts at fixing it.
+ */
+const knownPicture = (name: string) =>
+  ALL_SHAPE_KINDS.includes(name) || libraryHas(name);
 
 const sentences = [
   'A payment looks simple, so here is what moves.',
@@ -406,7 +415,7 @@ describe('what a thing is drawn as when the library is short', () => {
         { name: 'a decision', picture: 'decision', form: 'gate' },
         knownPicture,
       ),
-    ).toEqual({ kind: 'diamond', words: false });
+    ).toEqual({ kind: 'diamond', words: true });
     expect(
       shapeOf(
         { name: 'EasiRead', picture: 'EasiRead', form: 'box' },

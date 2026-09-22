@@ -21,6 +21,7 @@
  * well, and the paragraph is already in the document they are reading.
  */
 import {
+  SHAPE_KINDS,
   STAGES,
   type Stage,
   type VisualColor,
@@ -310,7 +311,18 @@ export function shapeOf(
   }
   const form = thing.form ?? 'box';
   const drawn = FORM_SHAPE[form];
-  if (drawn && known(drawn)) return { kind: drawn, words: false };
+  // `known` here is the renderer's "can I draw a kind called this",
+  // which says yes to rect, circle and roundRect — they are shapes it
+  // can draw, they are just not drawings OF anything. A form that
+  // stands in for a library picture counts; a bare rectangle does not,
+  // and mistaking one for the other is what put an empty box on screen
+  // under every name the library was short of.
+  if (
+    drawn &&
+    !(SHAPE_KINDS as readonly string[]).includes(drawn) &&
+    known(drawn)
+  )
+    return { kind: drawn, words: false };
   // Nothing in the library draws this, so what is left is a plain
   // shape — and a plain shape carries the name inside it.
   //

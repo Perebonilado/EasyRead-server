@@ -377,26 +377,42 @@ describe('cutting text', () => {
   });
 });
 
-
 describe('what a thing is drawn as when the library is short', () => {
-  it('takes the library\'s drawing when it has one', () => {
-    expect(shapeOf({ name: 'kidney', picture: 'kidney' }, knownPicture)).toEqual(
-      { kind: 'kidney', words: false },
-    );
+  it("takes the library's drawing when it has one", () => {
+    expect(
+      shapeOf({ name: 'kidney', picture: 'kidney' }, knownPicture),
+    ).toEqual({ kind: 'kidney', words: false });
   });
 
   it('finds the name the library files it under', () => {
     // "screen images" is not a drawing; `images` is, and only a search
     // by meaning gets from one to the other.
     expect(
-      shapeOf({ name: 'screen images', picture: 'screen images' }, knownPicture),
+      shapeOf(
+        { name: 'screen images', picture: 'screen images' },
+        knownPicture,
+      ),
     ).toEqual({ kind: 'images', words: false });
   });
 
-  it('draws the form when the narrator named one', () => {
+  it("keeps the form's shape, and puts the name in it", () => {
+    // The narrator gives nearly everything form "box". Treating a named
+    // form as a drawing in its own right turned every undrawable thing
+    // into an empty rounded rectangle with its name underneath.
+    // A form the library has a drawing for keeps that drawing, and its
+    // name goes underneath as any drawing's does.
     expect(
-      shapeOf({ name: 'a decision', picture: 'decision', form: 'gate' }, knownPicture),
+      shapeOf(
+        { name: 'a decision', picture: 'decision', form: 'gate' },
+        knownPicture,
+      ),
     ).toEqual({ kind: 'diamond', words: false });
+    expect(
+      shapeOf(
+        { name: 'EasiRead', picture: 'EasiRead', form: 'box' },
+        knownPicture,
+      ),
+    ).toEqual({ kind: 'roundRect', words: true });
   });
 
   it('writes the words when nothing draws it and no form was named', () => {

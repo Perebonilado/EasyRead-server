@@ -311,12 +311,16 @@ export function shapeOf(
   const form = thing.form ?? 'box';
   const drawn = FORM_SHAPE[form];
   if (drawn && known(drawn)) return { kind: drawn, words: false };
-  // A form the narrator named is a shape worth drawing even empty: a
-  // gate is a diamond, a ring is a circle, and those say something. A
-  // form nobody named is not, and that is where the words go.
-  if (thing.form)
-    return { kind: FORM_PLAIN[form] ?? 'roundRect', words: false };
-  return { kind: 'roundRect', words: true };
+  // Nothing in the library draws this, so what is left is a plain
+  // shape — and a plain shape carries the name inside it.
+  //
+  // The narrator gives nearly everything the form "box", so treating a
+  // named form as a drawing in its own right meant almost every
+  // undrawable thing became an empty rounded rectangle with its name
+  // underneath: a picture that failed to arrive. A diamond still reads
+  // as a decision and a cloud as a cloud, and both read better with the
+  // word in them than without it.
+  return { kind: FORM_PLAIN[form] ?? 'roundRect', words: true };
 }
 
 /* ------------------------------------------------------------------ *

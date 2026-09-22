@@ -163,49 +163,88 @@ function safeInner(svg: string): string {
   );
 }
 
-/** The candidate on its own tile, for the judge and for the sheet. */
+/** The candidate on its own square, at full size, the way it will be stored. */
 function svgOf(drawing: ThingDrawing, size = 200): string {
-  const w = Math.round(size * Math.min(1, drawing.aspect));
-  const h = Math.round(size / Math.max(1, drawing.aspect));
-  const view =
-    /viewBox\s*=\s*["']([^"']+)["']/i.exec(drawing.svg)?.[1] ??
-    `0 0 ${DRAW_VIEWBOX.w} ${DRAW_VIEWBOX.h}`;
-  const inner = safeInner(drawing.svg);
-  // The drawing's own colours, on a light ground. It chooses how it is
-  // drawn now, so nothing here overrides its fills or its strokes;
-  // `color` only answers a currentColor that has nothing else to take.
+  const view = viewOf(drawing.svg);
   return [
-    `<svg xmlns="http://www.w3.org/2000/svg" viewBox="${view}" width="${w}" height="${h}">`,
-    `<rect x="-9999" y="-9999" width="19998" height="19998" fill="#FFFFFF"/>`,
-    `<g color="#1A2233">${inner}</g>`,
+    `<svg xmlns="http://www.w3.org/2000/svg" viewBox="${view.join(' ')}" width="${size}" height="${Math.round((size * view[3]) / view[2])}">`,
+    `<rect x="${view[0]}" y="${view[1]}" width="${view[2]}" height="${view[3]}" fill="#FFFFFF"/>`,
+    `<g color="#1A2233">${safeInner(drawing.svg)}</g>`,
     `</svg>`,
   ].join('');
 }
 
-/** A grid of drawings under captions, for the judge to choose from or a person to accept from. */
+/** A drawing's own viewBox, or a sane one when it has none. */
+function viewOf(svg: string): [number, number, number, number] {
+  const found = /viewBox\s*=\s*["']([^"']+)["']/i.exec(svg);
+  const n = (found?.[1].match(/-?\d*\.?\d+/g) ?? []).map(Number);
+  return n.length === 4 && n[2] > 0 && n[3] > 0
+    ? [n[0], n[1], n[2], n[3]]
+    : [0, 0, DRAW_VIEWBOX.w, DRAW_VIEWBOX.h];
+}
+
+/**
+ * The same markup with every id of its own made unique to this tile.
+ *
+ * A sheet holds several drawings at once and each brings its own defs.
+ * They all call their gradient bodyGrad, so on one sheet the last one
+ * defined wins and every tile is painted in the last tile's colours.
+ */
+function namespaced(svg: string, tag: string): string {
+  const ids = [...svg.matchAll(/\bid\s*=\s*["']([^"']+)["']/g)].map(
+    (m) => m[1],
+  );
+  let out = svg;
+  for (const id of new Set(ids)) {
+    const safe = id.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    out = out
+      .replace(
+        new RegExp(`\\bid\\s*=\\s*(["'])${safe}\\1`, 'g'),
+        `id="${tag}-${id}"`,
+      )
+      .replace(
+        new RegExp(`url\\(\\s*#${safe}\\s*\\)`, 'g'),
+        `url(#${tag}-${id})`,
+      )
+      .replace(
+        new RegExp(`\\b(href|xlink:href)\\s*=\\s*(["'])#${safe}\\2`, 'g'),
+        `$1="#${tag}-${id}"`,
+      );
+  }
+  return out;
+}
+
+/**
+ * A grid of drawings under captions.
+ *
+ * Laid out with a transform per tile rather than a nested <svg>. resvg
+ * panics outright on two nested svg elements in one document — one tile
+ * renders, two abort the process — and a panic is not something a
+ * try/catch can hold, so the shape of the sheet has to avoid it rather
+ * than survive it.
+ */
 function sheetSvg(cells: { drawing: ThingDrawing; caption: string }[]): string {
-  // Anything the rasteriser cannot take is dropped rather than risked:
-  // a panic aborts the process outright, and a parse error used to take
-  // the whole sheet with it.
   cells = cells.filter((c) => renderable(c.drawing.svg));
   if (!cells.length)
     return '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 210 210" width="210" height="210"><rect width="100%" height="100%" fill="#0B0F17"/></svg>';
   const cell = 210;
+  const pad = 15;
+  const inner = cell - pad * 2;
   const across = Math.min(4, Math.max(1, cells.length));
   const down = Math.ceil(cells.length / across);
   const rows = cells.map((one, i) => {
-    const x = (i % across) * cell;
-    const y = Math.floor(i / across) * (cell + 26);
-    // Each tile is a whole <svg> with its own viewBox, nested at the
-    // size it should occupy. Nesting rather than splicing means the
-    // drawing's own coordinate space is honoured whatever it chose.
-    const tile = svgOf(one.drawing, cell - 30).replace(
-      /^<svg /,
-      `<svg x="${x + 15}" y="${y + 15}" `,
-    );
+    const x = (i % across) * cell + pad;
+    const y = Math.floor(i / across) * (cell + 26) + pad;
+    const [vx, vy, vw, vh] = viewOf(one.drawing.svg);
+    const scale = inner / Math.max(vw, vh);
+    const at = `translate(${x} ${y}) scale(${scale.toFixed(4)}) translate(${-vx} ${-vy})`;
+    const markup = namespaced(safeInner(one.drawing.svg), `t${i}`);
     return [
-      tile,
-      `<text x="${x + cell / 2}" y="${y + cell + 6}" fill="#E9EDF5" font-size="13" font-family="sans-serif" text-anchor="middle">${one.caption}</text>`,
+      `<g transform="${at}">`,
+      `<rect x="${vx}" y="${vy}" width="${vw}" height="${vh}" fill="#FFFFFF"/>`,
+      `<g color="#1A2233">${markup}</g>`,
+      `</g>`,
+      `<text x="${x - pad + cell / 2}" y="${y - pad + cell + 6}" fill="#E9EDF5" font-size="13" font-family="sans-serif" text-anchor="middle">${one.caption}</text>`,
     ].join('');
   });
   return [

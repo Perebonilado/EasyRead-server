@@ -24,9 +24,12 @@ import {
   visualWarnings,
   timingProblems,
   type StagingName,
+  type VisualElement,
   type VisualScript,
   type VisualMotion,
 } from '../../business/domain/visual';
+import { drawingProblems } from '../../business/domain/visual-draw';
+import { framed } from '../../business/domain/visual-svg';
 import {
   assembleTutorial,
   momentStarts,
@@ -392,6 +395,9 @@ export class VisualSceneProcessor {
             known: drawable,
           }),
         };
+        // Anything the library had nothing for is drawn now, for this
+        // page, rather than waiting for a batch run and an accept.
+        await this.drawMissing(scripts, documentId, who);
         // The stage's own checks. Nothing here can be redone by a model,
         // so a fault is logged and the page ships: the rules answer for
         // it, and the measure below says how alive it came out.
@@ -1060,6 +1066,96 @@ export class VisualSceneProcessor {
     return out;
   }
 
+  /**
+   * Things drawn for this run, by term; an empty string is one that
+   * could not be drawn.
+   *
+   * A document says "EasiRead" on nine of its twelve pages. Drawing it
+   * nine times costs nine calls and, worse, gives the learner nine
+   * different pictures of one thing — so the first is kept and every
+   * later page uses it.
+   */
+  private readonly drawnThings = new Map<string, string>();
+
+  /**
+   * Draws the things on this stage that the library has no picture for.
+   *
+   * The library is the better way for a thing to get its picture: a
+   * drawing in it has been looked at by somebody before a learner ever
+   * sees it, and it costs nothing at lesson time. It is also only as
+   * good as what has been drawn into it so far, and a page whose words
+   * are not in it shows a row of cards with names on them. So the terms
+   * it is short of are drawn here, once, while the scene is made — and
+   * the drawing travels with the element rather than entering the
+   * library, because nobody has accepted it.
+   *
+   * A term that fails keeps its card. That is the same fallback as
+   * before and it is not a failure worth holding the page for.
+   */
+  private async drawMissing(
+    scripts: { box: VisualScript; wide: VisualScript },
+    documentId: string,
+    who: string,
+  ): Promise<void> {
+    // A card carrying its own name is the stage saying it found nothing.
+    const cards = [...scripts.box.elements, ...scripts.wide.elements].filter(
+      (e): e is Extract<VisualElement, { type: 'shape' }> =>
+        e.type === 'shape' && Boolean(e.text) && Boolean(e.carry),
+    );
+    const terms = [...new Set(cards.map((e) => e.carry!))];
+    if (!terms.length) return;
+
+    const drawn = new Map<string, string>();
+    // A few at a time: a page can be short of a dozen words and drawing
+    // them all at once finds a rate limit rather than a picture.
+    const width = 3;
+    let next = 0;
+    await Promise.all(
+      Array.from({ length: Math.min(width, terms.length) }, async () => {
+        for (;;) {
+          const i = next;
+          next += 1;
+          if (i >= terms.length) return;
+          const term = terms[i];
+          const already = this.drawnThings.get(term);
+          if (already !== undefined) {
+            if (already) drawn.set(term, already);
+            continue;
+          }
+          try {
+            const made = await this.llm.thingDrawing({ term });
+            await this.record(documentId, 'thing_draw', made.usage);
+            const framed_ = framed(made.value);
+            const wrong = drawingProblems({ ...made.value, ...framed_ });
+            if (wrong.length) {
+              // Remembered as a miss too: a term the drawer cannot manage
+              // will not manage it on the next page either.
+              this.drawnThings.set(term, '');
+              this.logger.warn(`${who}: "${term}" not drawn: ${wrong[0]}`);
+              continue;
+            }
+            this.drawnThings.set(term, framed_.svg);
+            drawn.set(term, framed_.svg);
+          } catch (cause) {
+            this.drawnThings.set(term, '');
+            this.logger.warn(`${who}: "${term}" not drawn: ${String(cause)}`);
+          }
+        }
+      }),
+    );
+
+    for (const card of cards) {
+      const svg = drawn.get(card.carry!);
+      if (!svg) continue;
+      card.svg = svg;
+      // The drawing carries its own labels, so the card's word goes.
+      delete card.text;
+    }
+    this.logger.log(
+      `${who}: drew ${drawn.size} of ${terms.length} thing(s) the library was short of`,
+    );
+  }
+
   private async record(
     documentId: string,
     task:
@@ -1067,6 +1163,7 @@ export class VisualSceneProcessor {
       | 'visual_narration'
       | 'visual_director'
       | 'visual_judge'
+      | 'thing_draw'
       | 'embed',
     usage: {
       model: string;

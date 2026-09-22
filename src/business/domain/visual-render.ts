@@ -122,6 +122,34 @@ function opsSvg(drawing: Drawing, paint: Paint, alpha = 1): string {
 }
 
 /** A hand-made preset or an icon scaled into its box. */
+/**
+ * Markup placed in a box: scaled from its own viewBox, colours left
+ * alone, and laid with a transform rather than a nested <svg> because
+ * resvg panics on two of those in one document.
+ */
+function placed(
+  svg: string,
+  x: number,
+  y: number,
+  w: number,
+  h: number,
+  paint: Paint,
+): string {
+  const found = /viewBox\s*=\s*["']([^"']+)["']/i.exec(svg);
+  const box = (found?.[1] ?? '')
+    .split(/[\s,]+/)
+    .map(Number)
+    .filter((v) => Number.isFinite(v));
+  const [vx, vy, vw, vh] =
+    box.length === 4 && box[2] > 0 && box[3] > 0 ? box : [0, 0, 800, 600];
+  const inner = svg
+    .replace(/^[\s\S]*?<svg[^>]*>/i, '')
+    .replace(/<\/svg>\s*$/i, '');
+  const scale = Math.min(w / vw, h / vh);
+  const at = `translate(${n(x - w / 2 + (w - vw * scale) / 2)} ${n(y - h / 2 + (h - vh * scale) / 2)}) scale(${scale.toFixed(4)}) translate(${n(-vx)} ${n(-vy)})`;
+  return `<g transform="${at}"><g color="${paint.text}">${inner}</g></g>`;
+}
+
 function drawn(
   name: string,
   x: number,
@@ -504,8 +532,11 @@ function elementSvg(
             700,
           )
         : '';
-      const picture =
-        element.kind === 'path'
+      // A drawing the element brought with it outranks the library: it
+      // was made for this term because the library had nothing.
+      const picture = element.svg
+        ? placed(element.svg, x, y, w, h, paint)
+        : element.kind === 'path'
           ? drawn('', x, y, w, h, paint, mode, element.d)
           : drawn(element.kind, x, y, w, h, paint, mode);
       // A moving thing is drawn where its motion has it at this time, as the player would.

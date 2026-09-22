@@ -344,6 +344,16 @@ export type VisualElement = VisualPlaced &
          * The one door through which the model draws the thing itself.
          */
         d?: string;
+        /**
+         * A whole drawing, as markup, carried by the element itself.
+         *
+         * The library is the usual way a thing gets a picture, and it is
+         * the better one: a drawing in it has been looked at by somebody.
+         * This is for the terms a page reaches for that the library has
+         * never held — drawn while the scene is made, so the page gets a
+         * picture today rather than after a batch run and an accept.
+         */
+        svg?: string;
         /** A short word inside the shape, when it needs one. */
         text?: string;
         color?: VisualColor;

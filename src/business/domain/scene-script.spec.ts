@@ -162,4 +162,20 @@ describe('the writer’s storyboard, mended', () => {
     expect(quietStretches(script, 5).length).toBeGreaterThan(0);
     expect(quietStretches(script, 50)).toEqual([]);
   });
+
+  it('reads a stage restated as it stands as its effects only', () => {
+    const restated = draft();
+    restated.steps = [
+      step(0, 'Plants make', { layout: 'one', show: ['leaf'] }),
+      step(1, 'sunlight', {
+        layout: 'one',
+        show: ['leaf'],
+        effects: [{ target: 'leaf', do: 'pulse' }],
+      }),
+    ];
+    const { script, mended } = mendScript(restated);
+    expect(script.steps[1].stage).toBeNull();
+    expect(script.steps[1].effects).toHaveLength(1);
+    expect(mended.join(' ')).toMatch(/restated/);
+  });
 });

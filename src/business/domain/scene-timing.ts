@@ -12,14 +12,11 @@
  * maps written words to spoken ones ("1918" is said as two), so the
  * phrase lands where it is heard.
  */
-import { estimateWordTimes } from './board';
 import type { SpokenForm } from './spoken';
-import { wordKey, wordsOf } from './scene-script';
+import { wordKey } from './scene-script';
 
 /** Each spoken word: [charStart, charEnd, startMs, endMs], chars into the scene's spoken text. */
 export type SpokenWords = number[][];
-
-export type TimingSource = 'voice' | 'aligned' | 'estimated';
 
 /** A sentence on the audio, its words the written words the captions show. */
 export interface TimedBeat {
@@ -132,14 +129,6 @@ export function estimateSpokenWords(input: {
       : cursor + span + (pausesS[index] ?? 0) * 1000;
   });
   return words;
-}
-
-/** The estimate for the whole spoken text alone, used only when nothing else is known. */
-export function evenSpokenWords(
-  spoken: string,
-  durationMs: number,
-): SpokenWords {
-  return estimateWordTimes(spoken, durationMs, '').words;
 }
 
 /**
@@ -368,9 +357,4 @@ export function quietGaps(
     if (next - points[i] > MAX_QUIET_MS) gaps.push([points[i], next]);
   }
   return gaps;
-}
-
-/** How many words each sentence has, for a check that the narration was not cut. */
-export function spokenCount(beats: { say: string }[]): number {
-  return beats.reduce((n, beat) => n + wordsOf(beat.say).length, 0);
 }

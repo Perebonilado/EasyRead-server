@@ -175,9 +175,6 @@ export function wordsOf(text: string): string[] {
 }
 
 /** A word reduced to what it is, for matching: lower case, letters and digits. */
-export const wordKey = (word: string) =>
-  word.toLowerCase().replace(/[^a-z0-9]/g, '');
-
 /**
  * A name reduced to what it is, for matching. The writer says "renal
  * pelvis" and the artist writes `<g id="renal-pelvis">` or `renalPelvis`,
@@ -185,6 +182,20 @@ export const wordKey = (word: string) =>
  */
 export const idKey = (name: string) =>
   name.toLowerCase().replace(/[^a-z0-9]/g, '');
+
+/** A word reduced the same way, to find a phrase in its sentence. */
+export const wordKey = idKey;
+
+/**
+ * The id a thing or a named group is written with: "renal pelvis" is
+ * `renal-pelvis`. One function, so the id the artist is asked for, the id
+ * its retry notes name and the writer's ids cannot drift apart.
+ */
+export const groupId = (name: string) =>
+  name
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '');
 
 /** Two words the same, or one the other with an ending: "chloroplast" and "chloroplasts". */
 function sameWord(a: string, b: string): boolean {
@@ -257,12 +268,7 @@ export function fitLayout(asked: SceneLayout, count: number): SceneLayout {
 
 // ── The mend ──────────────────────────────────────────────────────────────
 
-const slug = (text: string) =>
-  text
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, '-')
-    .replace(/^-+|-+$/g, '')
-    .slice(0, 32);
+const slug = (text: string) => groupId(text).slice(0, 32);
 
 const clean = (text: string | null | undefined) =>
   (text ?? '').replace(/\s+/g, ' ').trim();
@@ -462,6 +468,20 @@ export function mendScript(draft: SceneScriptDraft): MendedScript {
           });
         }
         stage = { layout, show, arrows: arrows.slice(0, MAX_ARROWS) };
+        // The stage restated as it stands is no change: its effects only.
+        const last = [...steps].reverse().find((s) => s.stage)?.stage;
+        if (
+          last &&
+          last.layout === stage.layout &&
+          last.show.join() === stage.show.join() &&
+          last.arrows.map((a) => `${a.from}>${a.to}`).join() ===
+            stage.arrows.map((a) => `${a.from}>${a.to}`).join()
+        ) {
+          mended.push(
+            `step ${one.index + 1}: the stage as it stands, restated`,
+          );
+          stage = null;
+        }
         onStage = show;
       }
     }
@@ -593,8 +613,11 @@ export function quietStretches(script: SceneScript, limit = 30): string[] {
     before += wordsOf(beat.say).length;
     return at;
   });
+  // What a learner sees change: the stage, a part named, a state shown.
+  // A pulse on what is already there is not something new to look at.
   for (const step of script.steps)
-    positions.push(offsets[step.at.beat] + step.word);
+    if (step.stage || step.effects.some((e) => e.do !== 'pulse'))
+      positions.push(offsets[step.at.beat] + step.word);
   positions.push(before);
   const out: string[] = [];
   let last = 0;

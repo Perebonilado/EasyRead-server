@@ -19,9 +19,10 @@ import type {
   SketchDraft,
   SketchTemplate,
 } from '../../../business/ports/llm.port';
-import type {
-  DrawingThing,
-  SceneScriptDraft,
+import {
+  groupId,
+  type DrawingThing,
+  type SceneScriptDraft,
 } from '../../../business/domain/scene-script';
 import { PROMPTS } from '../prompts';
 import { ModelRegistry, type ModelRef } from './models';
@@ -729,6 +730,7 @@ export class AiSdkLlmAdapter implements LlmGatewayPort, OnModuleInit {
     topic: string;
     neighbours: string[];
     notes?: string[];
+    signal?: AbortSignal;
   }): Promise<LlmResult<string>> {
     const started = Date.now();
     const { generateText } = await this.registry.modules();
@@ -743,6 +745,7 @@ export class AiSdkLlmAdapter implements LlmGatewayPort, OnModuleInit {
       prompt: drawingRequest(input),
       maxRetries: this.maxRetries(),
       maxOutputTokens: thinking ? 32_000 : 16_000,
+      ...(input.signal ? { abortSignal: input.signal } : {}),
       // Said on every call: the API thinks by default on deepseek-flash,
       // and this provider version only knows its older ids as thinkers.
       ...(ref.provider === 'deepseek'
@@ -1739,11 +1742,7 @@ export function drawingRequest(input: {
   notes?: string[];
 }): string {
   const { thing, viewBox } = input;
-  const id = (name: string) =>
-    name
-      .toLowerCase()
-      .replace(/[^a-z0-9]+/g, '-')
-      .replace(/^-+|-+$/g, '');
+  const id = groupId;
   const parts = thing.parts.map((part) =>
     part.label
       ? `${part.name}: <g id="${id(part.name)}"> and its label in <g id="${id(part.name)}-label">`

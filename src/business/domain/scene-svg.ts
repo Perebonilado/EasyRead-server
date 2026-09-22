@@ -15,7 +15,7 @@
 import { parseDocument } from 'htmlparser2';
 import render from 'dom-serializer';
 import { Element, Text, type ChildNode } from 'domhandler';
-import { idKey, type DrawingThing } from './scene-script';
+import { groupId, idKey, type DrawingThing } from './scene-script';
 import { renderSvg, type InkBox } from './scene-raster';
 
 /** The canvas the artist is given, by shape. */
@@ -296,8 +296,19 @@ export function numbersSane(root: Element): boolean {
 
 /** The markup from a reply: a fence and a sentence in front are expected and dropped (79c2523). */
 export function svgFromReply(reply: string): string | null {
-  const found = /<svg[\s\S]*<\/svg\s*>/i.exec(reply);
-  return found ? found[0] : null;
+  // The first drawing, to its own close: a reply offering two drawings
+  // must not become one document with the second nested in the first.
+  const start = reply.search(/<svg[\s>]/i);
+  if (start < 0) return null;
+  const tags = /<(\/?)svg\b[^>]*?(\/?)>/gi;
+  tags.lastIndex = start;
+  let depth = 0;
+  for (let tag = tags.exec(reply); tag; tag = tags.exec(reply)) {
+    if (tag[1]) depth -= 1;
+    else if (!tag[2]) depth += 1;
+    if (depth === 0) return reply.slice(start, tag.index + tag[0].length);
+  }
+  return null;
 }
 
 const elements = (nodes: ChildNode[]): Element[] =>
@@ -384,7 +395,8 @@ export function sanitizeTree(root: Element): string[] {
         lower.startsWith('on') ||
         (prefix !== null && !KEPT_PREFIXES.has(prefix)) ||
         lower === 'xml:base' ||
-        /javascript\s*:|vbscript\s*:|data\s*:/i.test(value) ||
+        /javascript\s*:|vbscript\s*:/i.test(value) ||
+        /^\s*data\s*:/i.test(value) ||
         ((lower === 'href' || lower === 'xlink:href') && !internal(value));
       if (bad) {
         removed.add(attr);
@@ -778,12 +790,6 @@ export function inspectSvg(
   };
 }
 
-const slugOf = (name: string) =>
-  name
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, '-')
-    .replace(/^-+|-+$/g, '');
-
 /** The artist's notes for what fell short, and whether it is worth a redraw. */
 function judged(
   short: Shortfall,
@@ -792,9 +798,9 @@ function judged(
 ): { notes: string[]; retry: boolean; score: number } {
   const notes: string[] = [];
   const groups = [
-    ...short.missingParts.map((name) => `<g id="${slugOf(name)}">`),
-    ...short.missingLabels.map((name) => `<g id="${slugOf(name)}-label">`),
-    ...short.missingStates.map((name) => `<g id="${slugOf(name)}">`),
+    ...short.missingParts.map((name) => `<g id="${groupId(name)}">`),
+    ...short.missingLabels.map((name) => `<g id="${groupId(name)}-label">`),
+    ...short.missingStates.map((name) => `<g id="${groupId(name)}">`),
   ];
   if (groups.length)
     notes.push(

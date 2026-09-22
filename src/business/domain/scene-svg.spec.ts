@@ -206,4 +206,12 @@ describe('the gate', () => {
     expect(box[0] + box[2]).toBeGreaterThan(963.2);
     expect(box[0]).toBeLessThanOrEqual(0);
   });
+
+  it('takes the first drawing whole from a reply that offers two', () => {
+    const reply =
+      'One:\n<svg viewBox="0 0 10 10"><svg x="1"><rect/></svg><circle/></svg>\nOr:\n<svg viewBox="0 0 5 5"><rect/></svg>';
+    expect(svgFromReply(reply)).toBe(
+      '<svg viewBox="0 0 10 10"><svg x="1"><rect/></svg><circle/></svg>',
+    );
+  });
 });

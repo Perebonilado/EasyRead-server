@@ -197,18 +197,31 @@ export class SceneProcessor {
         : new Map();
       const base = `documents/${doc.id}/visuals/v${contentVersion}/p${pageNumber}-${SCENE_GENERATOR_VERSION}`;
       let voiced = false;
-      const [drawings, voice] = await Promise.all([
-        this.drawAll(script, topic.title, documentId, who).then(
+      // A voice that fails stops the drawing: nothing more is asked for,
+      // and both branches have settled before the catch below touches the
+      // row, so neither writes to it afterwards.
+      const stop = new AbortController();
+      const [drawing, spoken] = await Promise.allSettled([
+        this.drawAll(script, topic.title, documentId, who, stop.signal).then(
           async (made) => {
-            if (!voiced)
+            if (!voiced && !stop.signal.aborted)
               await this.visuals.update(record.id, { step: 'voicing' });
             return made;
           },
         ),
-        this.voice(script, kept, base, documentId, who).finally(() => {
-          voiced = true;
-        }),
+        this.voice(script, kept, base, documentId, who)
+          .catch((error: unknown) => {
+            stop.abort();
+            throw error;
+          })
+          .finally(() => {
+            voiced = true;
+          }),
       ]);
+      if (spoken.status === 'rejected') throw spoken.reason;
+      if (drawing.status === 'rejected') throw drawing.reason;
+      const drawings = drawing.value;
+      const voice = spoken.value;
 
       await this.visuals.update(record.id, { step: 'composing' });
       const { scene, filled } = composeScene({
@@ -330,6 +343,7 @@ export class SceneProcessor {
     topic: string,
     documentId: string,
     who: string,
+    signal: AbortSignal,
   ): Promise<Map<string, GatedDrawing | null>> {
     const drawings = script.cast.filter(
       (thing): thing is DrawingThing => thing.kind === 'drawing',
@@ -361,6 +375,7 @@ export class SceneProcessor {
             [...neighbours].slice(0, 5),
             documentId,
             who,
+            signal,
           ),
         );
       }),
@@ -375,11 +390,13 @@ export class SceneProcessor {
     neighbours: string[],
     documentId: string,
     who: string,
+    signal: AbortSignal,
   ): Promise<GatedDrawing | null> {
     const viewBox = CANVAS[thing.shape];
     let best: GateResult | null = null;
     let notes: string[] | undefined;
     for (let attempt = 1; attempt <= DRAW_TRIES; attempt += 1) {
+      if (signal.aborted) return null;
       let reply: string;
       try {
         const made = await this.llm.sceneDrawing({
@@ -388,6 +405,7 @@ export class SceneProcessor {
           topic,
           neighbours,
           notes,
+          signal,
         });
         await this.record(documentId, 'scene_draw', made.usage);
         reply = made.value;

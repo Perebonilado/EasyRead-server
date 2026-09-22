@@ -4,6 +4,7 @@ import {
   Get,
   HttpCode,
   Inject,
+  NotFoundException,
   Param,
   ParseIntPipe,
   Patch,
@@ -140,9 +141,14 @@ export class VisualsController {
     @Param('page', ParseIntPipe) page: number,
   ): Promise<VisualSceneDto> {
     const { data } = await this.scene.handle({ userId, documentId, page });
-    const scene = JSON.parse(
-      (await this.storage.get(data.sceneKey!)).toString('utf8'),
-    ) as SceneDto;
+    let scene: SceneDto;
+    try {
+      scene = JSON.parse(
+        (await this.storage.get(data.sceneKey!)).toString('utf8'),
+      ) as SceneDto;
+    } catch {
+      throw new NotFoundException('Visual for this page');
+    }
     return {
       page: data.pageNumber,
       title: data.title ?? scene.title,

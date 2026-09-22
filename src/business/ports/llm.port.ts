@@ -493,6 +493,8 @@ export interface LlmGatewayPort {
     /** The names of what it shares the stage with. */
     neighbours: string[];
     notes?: string[];
+    /** Aborts the call: the page failed while it was being drawn. */
+    signal?: AbortSignal;
   }): Promise<LlmResult<string>>;
 
   lectureSketch(input: {

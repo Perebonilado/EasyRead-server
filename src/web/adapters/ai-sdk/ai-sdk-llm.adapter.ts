@@ -1,10 +1,7 @@
 import { numberedSentences } from '../../../business/domain/board';
 import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import type { StageNarration } from '../../../business/domain/visual-direct';
 import type { LanguageModelUsage } from 'ai';
-import type { ZodType } from 'zod';
-import { boxOf, partsOf } from '../../../business/domain/visual-svg';
 import type { Block, RecapBody, TopicPreviewBody } from '../../../contracts';
 import type {
   GeneratedItem,
@@ -23,14 +20,9 @@ import type {
   SketchTemplate,
 } from '../../../business/ports/llm.port';
 import type {
-  VisualJudgement,
-  VisualPlan,
-} from '../../../business/domain/visual';
-import type {
-  VisualDecisions,
-  VisualNarration,
-  VisualTutorial,
-} from '../../../business/domain/visual-cards';
+  DrawingThing,
+  SceneScriptDraft,
+} from '../../../business/domain/scene-script';
 import { PROMPTS } from '../prompts';
 import { ModelRegistry, type ModelRef } from './models';
 import {
@@ -43,12 +35,7 @@ import {
   lectureBoardSchema,
   lectureDiagramSchema,
   lectureSketchSchema,
-  visualPlanSchema,
-  visualJudgeSchema,
-  stageNarrationSchema,
-  visualNarrationSchema,
-  visualDecisionsSchema,
-  drawingChoiceSchema,
+  sceneScriptSchema,
   sketchJudgeSchema,
   lectureExtraSchema,
   spokenQuizSchema,
@@ -698,78 +685,33 @@ export class AiSdkLlmAdapter implements LlmGatewayPort, OnModuleInit {
     };
   }
 
-  async visualJudge(input: {
-    png: Buffer;
-    title: string;
-    moments: {
-      moment: number;
-      card: string;
-      drawings: string[];
-      shouldSee: string;
-      motion?: string;
-      /** This moment carries on the card the moment before laid, rather than a new one. */
-      continues?: boolean;
-    }[];
-  }): Promise<LlmResult<VisualJudgement>> {
-    const started = Date.now();
-    const { generateObject } = await this.registry.modules();
-    const { model, ref } = await this.registry.languageModel('visual_judge');
-    const listed = input.moments
-      .map(
-        (m) =>
-          `${m.moment}. ${m.card} card${m.continues ? ', carrying on the one before' : ''}${m.drawings.length ? `, drawing: ${m.drawings.join('; ')}` : ', no drawing'}. Should see: ${m.shouldSee}${m.motion ? ` Moves: ${m.motion}.` : ''}`,
-      )
-      .join('\n');
-    const result = await generateObject({
-      model,
-      schema: visualJudgeSchema,
-      system: PROMPTS.visualJudge,
-      messages: [
-        {
-          role: 'user' as const,
-          content: [
-            {
-              type: 'file' as const,
-              data: input.png,
-              mediaType: 'image/png',
-            },
-            {
-              type: 'text' as const,
-              text: `The lesson is "${input.title}". The moments, by number:\n${listed}`,
-            },
-          ],
-        },
-      ],
-      maxRetries: this.maxRetries(),
-    });
-    return {
-      value: result.object,
-      usage: this.usage(ref, result.usage, started),
-    };
-  }
-
-  async visualNarration(input: {
-    plan: VisualPlan;
+  async sceneScript(input: {
+    documentTitle: string;
     topicTitle: string;
     material: string;
-    context?: string;
-  }): Promise<LlmResult<VisualNarration>> {
+    context: string;
+    previous?: SceneScriptDraft;
+    problems?: string[];
+  }): Promise<LlmResult<SceneScriptDraft>> {
     const started = Date.now();
     const { generateObject } = await this.registry.modules();
-    const { model, ref } =
-      await this.registry.languageModel('visual_narration');
+    const { model, ref } = await this.registry.languageModel('scene_write');
     const result = await generateObject({
       model,
-      schema: visualNarrationSchema,
-      system: PROMPTS.visualNarration,
+      schema: sceneScriptSchema,
+      system: PROMPTS.sceneWrite,
       prompt: [
+        `Document: ${input.documentTitle}`,
         `Chapter: ${input.topicTitle}`,
-        input.context ? `This page: ${input.context}` : '',
-        `The chapter's plan: ${JSON.stringify(input.plan)}`,
+        input.context,
         `The page:\n${input.material}`,
-      ]
-        .filter(Boolean)
-        .join('\n\n'),
+        ...(input.previous && input.problems?.length
+          ? [
+              `Your last answer for this page:\n${JSON.stringify(input.previous)}`,
+              `Put these right and answer again in full:\n- ${input.problems.join('\n- ')}`,
+            ]
+          : []),
+      ].join('\n\n'),
       maxRetries: this.maxRetries(),
     });
     return {
@@ -778,214 +720,43 @@ export class AiSdkLlmAdapter implements LlmGatewayPort, OnModuleInit {
     };
   }
 
-  async judgeDrawings(input: {
-    png: Buffer;
-    looksLike: string;
-    count: number;
-  }): Promise<LlmResult<{ pick: number | null; wrong: string | null }>> {
-    const started = Date.now();
-    const { generateObject } = await this.registry.modules();
-    // Vision, so this one stays on a model that has eyes however the
-    // drawer is routed.
-    const { model, ref } = await this.registry.languageModel('sketch_judge');
-    const result = await generateObject({
-      model,
-      schema: drawingChoiceSchema,
-      system: PROMPTS.drawingJudge,
-      messages: [
-        {
-          role: 'user' as const,
-          content: [
-            {
-              type: 'file' as const,
-              data: input.png,
-              mediaType: 'image/png',
-            },
-            {
-              // The description, never the name.
-              type: 'text' as const,
-              text: `Candidates 1 to ${input.count}.\nThe thing looks like: ${input.looksLike}`,
-            },
-          ],
-        },
-      ],
-      maxRetries: this.maxRetries(),
-    });
-    const pick = result.object.pick;
-    return {
-      value: {
-        pick: pick && pick >= 1 && pick <= input.count ? pick : null,
-        wrong: result.object.wrong,
-      },
-      usage: this.usage(ref, result.usage, started),
-    };
-  }
-
-  async thingDrawing(input: {
-    term: string;
-    /** What was wrong last time, when this is a second attempt. */
-    note?: string;
-    /** Raised so several candidates disagree; several of one mind is one candidate. */
-    temperature?: number;
-  }): Promise<
-    LlmResult<{
-      svg: string;
-      aspect: number;
-      parts: { name: string; at: number[] }[];
-    }>
-  > {
+  async sceneDrawing(input: {
+    thing: Pick<
+      DrawingThing,
+      'name' | 'brief' | 'motion' | 'parts' | 'states' | 'shape'
+    >;
+    viewBox: { w: number; h: number };
+    topic: string;
+    neighbours: string[];
+    notes?: string[];
+  }): Promise<LlmResult<string>> {
     const started = Date.now();
     const { generateText } = await this.registry.modules();
-    const { model, ref } = await this.registry.languageModel('thing_draw');
-    // Free text, and no schema.
-    //
-    // Every other call here is generateObject, and for a drawing that
-    // turned out to be the wrong shape of question: it asks the model to
-    // escape four thousand characters of markup inside a JSON string
-    // field while also inventing a parts list to go beside it. Writing
-    // an SVG into a reply is the thing it has done a million times. So
-    // it writes one, and the markup is taken out of whatever it says.
+    const { model, ref } = await this.registry.languageModel('scene_draw');
+    const thinking =
+      this.config.get<string>('SCENE_DRAW_THINKING', 'off') === 'on';
+    // Free text: an SVG written into a reply is what a model has done a
+    // million times; escaped into a JSON field it is not (79c2523).
     const result = await generateText({
       model,
-      system: PROMPTS.thingDrawing,
-      prompt: [
-        `Draw: ${input.term}`,
-        input.note ? `Last time: ${input.note}` : '',
-      ]
-        .filter(Boolean)
-        .join('\n'),
+      system: PROMPTS.sceneDraw,
+      prompt: drawingRequest(input),
       maxRetries: this.maxRetries(),
-      ...(input.temperature === undefined
-        ? {}
-        : { temperature: input.temperature }),
-    });
-    // Models put a fence round markup however plainly the prompt says
-    // not to, and sometimes a sentence in front of it.
-    const found = /<svg[\s\S]*<\/svg>/i.exec(result.text);
-    const svg = (found ? found[0] : result.text.trim())
-      .replace(/^```(?:svg|xml|html)?\s*/i, '')
-      .replace(/```\s*$/, '')
-      .trim();
-    const box = boxOf(svg);
-    return {
-      value: {
-        svg,
-        // Read off the drawing rather than asked for: the model is busy
-        // drawing, and this is arithmetic.
-        aspect:
-          box && box.maxY > box.minY
-            ? Math.min(
-                3,
-                Math.max(0.3, (box.maxX - box.minX) / (box.maxY - box.minY)),
-              )
-            : 1,
-        parts: partsOf(svg),
-      },
-      usage: this.usage(ref, result.usage, started),
-    };
-  }
-
-  async stageNarration(input: {
-    plan: VisualPlan;
-    topicTitle: string;
-    material: string;
-    context?: string;
-  }): Promise<LlmResult<StageNarration>> {
-    const started = Date.now();
-    const { generateObject } = await this.registry.modules();
-    const { model, ref } =
-      await this.registry.languageModel('visual_narration');
-    const result = await generateObject({
-      model,
-      schema: stageNarrationSchema,
-      system: PROMPTS.stageNarration,
-      prompt: [
-        `Chapter: ${input.topicTitle}`,
-        input.context ? `This page: ${input.context}` : '',
-        `The chapter's plan: ${JSON.stringify(input.plan)}`,
-        `The page:\n${input.material}`,
-      ]
-        .filter(Boolean)
-        .join('\n\n'),
-      maxRetries: this.maxRetries(),
+      maxOutputTokens: thinking ? 32_000 : 16_000,
+      // Said on every call: the API thinks by default on deepseek-flash,
+      // and this provider version only knows its older ids as thinkers.
+      ...(ref.provider === 'deepseek'
+        ? {
+            providerOptions: {
+              deepseek: {
+                thinking: { type: thinking ? 'enabled' : 'disabled' },
+              },
+            },
+          }
+        : {}),
     });
     return {
-      value: result.object,
-      usage: this.usage(ref, result.usage, started),
-    };
-  }
-
-  async visualDirector(input: {
-    narration: VisualNarration;
-    menu: string;
-    plan: VisualPlan;
-    topicTitle: string;
-    material: string;
-    context?: string;
-    previous?: VisualDecisions;
-    only?: number[];
-    notes?: string[];
-  }): Promise<LlmResult<VisualDecisions>> {
-    const started = Date.now();
-    const { generateObject } = await this.registry.modules();
-    const { model, ref } = await this.registry.languageModel('visual_director');
-    const moments = input.narration.moments
-      .map(
-        (m, i) =>
-          `${i}. sentences ${m.from} to ${m.to}: "${input.narration.sentences.slice(m.from, m.to + 1).join(' ')}" Intent: ${m.intent}`,
-      )
-      .join('\n');
-    const redo =
-      input.only?.length && input.previous
-        ? [
-            `Redo moments ${input.only.join(', ')} only. What was wrong:\n- ${(input.notes ?? []).join('\n- ')}`,
-            `Your earlier decisions for them: ${JSON.stringify(input.previous.moments.filter((d) => input.only!.includes(d.index)))}`,
-          ]
-        : [];
-    const result = await generateObject({
-      model,
-      schema: visualDecisionsSchema,
-      system: `${PROMPTS.visualDirector}\n\n${PROMPTS.visualCardGuide}\n\n${PROMPTS.visualWordBudget}`,
-      prompt: [
-        `Chapter: ${input.topicTitle}`,
-        input.context ? `This page: ${input.context}` : '',
-        `The chapter's plan: ${JSON.stringify(input.plan)}`,
-        `The page:\n${input.material}`,
-        `The narration, by moment:\n${moments}`,
-        `The menu of what can be drawn for this page:\n${input.menu}`,
-        ...redo,
-      ]
-        .filter(Boolean)
-        .join('\n\n'),
-      maxRetries: this.maxRetries(),
-    });
-    return {
-      value: result.object as VisualDecisions,
-      usage: this.usage(ref, result.usage, started),
-    };
-  }
-
-  async visualPlan(input: {
-    title: string;
-    topicTitle: string;
-    material: string;
-  }): Promise<LlmResult<VisualPlan>> {
-    const started = Date.now();
-    const { generateObject } = await this.registry.modules();
-    const { model, ref } = await this.registry.languageModel('visual_plan');
-    const result = await generateObject({
-      model,
-      schema: visualPlanSchema,
-      system: PROMPTS.visualPlan,
-      prompt: [
-        `Document: ${input.title}`,
-        `Chapter: ${input.topicTitle}`,
-        `\nThe chapter, from which every beat and term must come:\n${input.material}`,
-      ].join('\n'),
-      maxRetries: this.maxRetries(),
-    });
-    return {
-      value: result.object,
+      value: result.text,
       usage: this.usage(ref, result.usage, started),
     };
   }
@@ -1922,81 +1693,19 @@ export class AiSdkLlmAdapter implements LlmGatewayPort, OnModuleInit {
     };
   }
 
-  /**
-   * A structured call that survives a provider without schema-constrained
-   * output.
-   *
-   * The two drawing calls are the only ones routed at a text-only
-   * provider on purpose, and not every such provider will hold a JSON
-   * schema: some offer JSON mode and no more. So the schema is tried
-   * first, and on refusal the same prompt is asked again as text and
-   * parsed here. The schema still decides what is acceptable either way,
-   * so a provider that cannot be constrained is held to the same shape
-   * as one that can.
-   */
-  private async objectOrJson<T>(args: {
-    task: LlmTask;
-    schema: ZodType<T>;
-    system: string;
-    prompt: string;
-    temperature?: number;
-  }): Promise<LlmResult<T>> {
-    const started = Date.now();
-    const { generateObject, generateText } = await this.registry.modules();
-    const { model, ref } = await this.registry.languageModel(args.task);
-    const common = {
-      model,
-      system: args.system,
-      prompt: args.prompt,
-      maxRetries: this.maxRetries(),
-      ...(args.temperature === undefined
-        ? {}
-        : { temperature: args.temperature }),
-    };
-    try {
-      const result = await generateObject({ ...common, schema: args.schema });
-      return {
-        value: result.object,
-        usage: this.usage(ref, result.usage, started),
-      };
-    } catch (cause) {
-      this.logger.warn(
-        `${args.task}: ${ref.provider} would not hold the schema; asking again as JSON (${String(cause)})`,
-      );
-      const result = await generateText({
-        ...common,
-        system: `${args.system}\n\nReply with one JSON object and nothing else: no prose, no code fences.`,
-      });
-      // Models fence JSON however plainly the prompt says not to.
-      const text = result.text
-        .trim()
-        .replace(/^```(?:json)?\s*/i, '')
-        .replace(/```\s*$/, '')
-        .trim();
-      const open = text.indexOf('{');
-      const close = text.lastIndexOf('}');
-      if (open < 0 || close <= open)
-        throw new Error(`${args.task}: no JSON object in the reply`);
-      return {
-        value: args.schema.parse(
-          JSON.parse(text.slice(open, close + 1)) as unknown,
-        ),
-        usage: this.usage(ref, result.usage, started),
-      };
-    }
-  }
-
   /** Recorded per call, so cost is answerable per document and per task. */
   private usage(
     ref: ModelRef,
     usage: LanguageModelUsage,
     startedAt: number,
   ): LlmUsage {
+    const cached = usage.inputTokenDetails?.cacheReadTokens;
     return {
       model: `${ref.provider}:${ref.modelId}`,
       tokensIn: usage.inputTokens ?? 0,
       tokensOut: usage.outputTokens ?? 0,
       latencyMs: Date.now() - startedAt,
+      ...(cached ? { tokensCached: cached } : {}),
     };
   }
 
@@ -2018,20 +1727,47 @@ export class AiSdkLlmAdapter implements LlmGatewayPort, OnModuleInit {
   }
 }
 
-/**
- * A schema in strict mode has every optional field present as null; the
- * domain wants them absent. Nulls go, at every depth, arrays kept.
- */
-function withoutNulls(value: unknown): unknown {
-  if (Array.isArray(value)) return value.map(withoutNulls);
-  if (value && typeof value === 'object') {
-    const out: Record<string, unknown> = {};
-    for (const [key, inner] of Object.entries(value)) {
-      // A model now and then writes the word null instead of the value.
-      if (inner === null || inner === 'null' || inner === '') continue;
-      out[key] = withoutNulls(inner);
-    }
-    return out;
-  }
-  return value;
+/** What the artist is asked for one drawing: the brief, its groups, its frame. */
+export function drawingRequest(input: {
+  thing: Pick<
+    DrawingThing,
+    'name' | 'brief' | 'motion' | 'parts' | 'states' | 'shape'
+  >;
+  viewBox: { w: number; h: number };
+  topic: string;
+  neighbours: string[];
+  notes?: string[];
+}): string {
+  const { thing, viewBox } = input;
+  const id = (name: string) =>
+    name
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/^-+|-+$/g, '');
+  const parts = thing.parts.map((part) =>
+    part.label
+      ? `${part.name}: <g id="${id(part.name)}"> and its label in <g id="${id(part.name)}-label">`
+      : `${part.name}: <g id="${id(part.name)}">, not labelled`,
+  );
+  const states = thing.states.map(
+    (state) => `${state.name}: <g id="${id(state.name)}">, ${state.look}`,
+  );
+  return [
+    `Draw: ${thing.brief}`,
+    `It will be captioned "${thing.name}" under the drawing; do not write that on it.`,
+    parts.length
+      ? `Parts, each its own group:\n- ${parts.join('\n- ')}`
+      : 'No named parts and no labels.',
+    states.length
+      ? `States, each its own group drawn over the drawing:\n- ${states.join('\n- ')}`
+      : '',
+    `Moves: ${thing.motion || 'a gentle sway, so it is never still'}`,
+    `viewBox="0 0 ${viewBox.w} ${viewBox.h}" (${thing.shape}). Labels at font-size ${Math.ceil(viewBox.w * 0.032)} or more.`,
+    `Context: a lesson on "${input.topic}"${input.neighbours.length ? `; on the stage it stands with: ${input.neighbours.join(', ')}` : ''}.`,
+    input.notes?.length
+      ? `Last time this fell short:\n- ${input.notes.join('\n- ')}`
+      : '',
+  ]
+    .filter(Boolean)
+    .join('\n');
 }

@@ -16,8 +16,8 @@ export class SequelizeAiCallLogRepository implements AiCallLogRepository {
 
   async record(input: AiCallLogInput): Promise<void> {
     // Priced as it lands, so spend per document is a sum and not a guess.
-    const { costUsd, ...row } = input;
-    const costEstimate = costUsd ?? costOf(row);
+    const { costUsd, tokensCached, ...row } = input;
+    const costEstimate = costUsd ?? costOf({ ...row, tokensCached });
     await this.logs.create({
       id: newId(),
       ...row,

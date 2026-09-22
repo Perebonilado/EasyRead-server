@@ -6,7 +6,7 @@ import type {
   VisualPositionDto,
 } from '../../../contracts';
 import type { Document } from '../../domain/entities/document';
-import { VISUAL_GENERATOR_VERSION } from '../../domain/visual';
+import { SCENE_GENERATOR_VERSION } from '../../domain/scene-script';
 import { pagesWanted, type VisualsMode } from '../../domain/visual-ahead';
 import { NotFoundError, ValidationError } from '../../domain/errors/errors';
 import { JOB_QUEUE } from '../../ports/tokens';
@@ -48,11 +48,7 @@ async function setOf(
 ): Promise<VisualSetDto> {
   const [chapters, rows] = await Promise.all([
     topics.listByDocument(documentId),
-    visuals.listByDocument(
-      documentId,
-      contentVersion,
-      VISUAL_GENERATOR_VERSION,
-    ),
+    visuals.listByDocument(documentId, contentVersion, SCENE_GENERATOR_VERSION),
   ]);
   const byPage = new Map<number, VisualSceneRecord>(
     rows.map((row) => [row.pageNumber, row]),
@@ -75,8 +71,8 @@ async function setOf(
             ? row.error
             : null,
       durationMs: row?.status === 'done' ? row.durationMs : null,
-      hasScene: row?.status === 'done' && Boolean(row.timeline),
-      timing: row?.status === 'done' ? (row.timeline?.timing ?? null) : null,
+      hasScene: row?.status === 'done' && Boolean(row.sceneKey),
+      timing: row?.status === 'done' ? row.timing : null,
     });
   }
   return { documentId, pageCount, pages };
@@ -209,7 +205,7 @@ export async function queueVisuals(
   const rows = await deps.visuals.listByDocument(
     doc.id,
     doc.contentVersion,
-    VISUAL_GENERATOR_VERSION,
+    SCENE_GENERATOR_VERSION,
   );
   // A page with a row on its way or made is had; a failed one is not,
   // and a named page is asked again whatever its row says.
@@ -246,7 +242,7 @@ export async function queueVisuals(
       contentVersion: doc.contentVersion,
       pageNumber: page,
       topicId: chapter.id,
-      generatorVersion: VISUAL_GENERATOR_VERSION,
+      generatorVersion: SCENE_GENERATOR_VERSION,
       requestedBy: input.userId,
     });
     const again =
@@ -272,7 +268,7 @@ export async function queueVisuals(
   return { queued, existing };
 }
 
-export interface VisualPositionRequest extends VisualSetRequest {}
+export type VisualPositionRequest = VisualSetRequest;
 
 /** Where the learner stopped in this document's visuals, if anywhere. */
 @Injectable()
@@ -340,7 +336,7 @@ export interface VisualSceneRequest extends VisualSetRequest {
   page: number;
 }
 
-/** One page's tutorial, once made: the timeline the pane plays. */
+/** One page's video, once made: the row, whose scene the controller reads from the bucket. */
 @Injectable()
 export class VisualSceneHandler extends AbstractRequestHandlerTemplate<
   VisualSceneRequest,
@@ -360,9 +356,9 @@ export class VisualSceneHandler extends AbstractRequestHandlerTemplate<
       doc.id,
       doc.contentVersion,
       cmd.page,
-      VISUAL_GENERATOR_VERSION,
+      SCENE_GENERATOR_VERSION,
     );
-    if (!record || record.status !== 'done' || !record.timeline) {
+    if (!record || record.status !== 'done' || !record.sceneKey) {
       throw new NotFoundError('Visual for this page');
     }
     return CommandResponse.of(record);

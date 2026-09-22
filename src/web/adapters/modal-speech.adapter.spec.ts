@@ -1,5 +1,9 @@
 import { ConfigService } from '@nestjs/config';
-import { KOKORO_HOME, ModalSpeechAdapter } from './modal-speech.adapter';
+import {
+  KOKORO_HOME,
+  ModalSpeechAdapter,
+  voicedFromJson,
+} from './modal-speech.adapter';
 
 /** A config from a plain object, the way the adapter reads .env. */
 function config(values: Record<string, string>): ConfigService {
@@ -179,5 +183,33 @@ describe('ModalSpeechAdapter', () => {
     answers[1]();
     answers[2]();
     await Promise.all(pages);
+  });
+});
+
+describe('the voice’s answer with word times', () => {
+  it('reads the audio, the piece starts and each word, in milliseconds', () => {
+    const voiced = voicedFromJson({
+      audio: Buffer.from('mp3 bytes').toString('base64'),
+      seconds: 3.474,
+      piece_starts: [0, 1.641],
+      words: [
+        ['Plants', 0, 0.282],
+        ['.', 1.291, 1.291],
+        ['They', 1.641, 1.721],
+        ['bad', 'not a number', 1],
+      ],
+    });
+    expect(voiced.audio.toString()).toBe('mp3 bytes');
+    expect(voiced.durationMs).toBe(3474);
+    expect(voiced.pieceStartsMs).toEqual([0, 1641]);
+    expect(voiced.words).toEqual([
+      { text: 'Plants', startMs: 0, endMs: 282 },
+      { text: '.', startMs: 1291, endMs: 1291 },
+      { text: 'They', startMs: 1641, endMs: 1721 },
+    ]);
+  });
+
+  it('refuses an answer with no audio in it', () => {
+    expect(() => voicedFromJson({ words: [] })).toThrow(/no audio/);
   });
 });

@@ -1,7 +1,6 @@
-import type { VisualSceneStatus } from '../../contracts';
-import type { VisualPlan, VisualTimeline } from '../domain/visual';
+import type { SceneTiming, VisualSceneStatus } from '../../contracts';
 
-/** One page's scene as stored: its state, and once done, its timeline and audio. */
+/** One page's video as stored: its state, and once done, where its scene, audio and still are. */
 export interface VisualSceneRecord {
   id: string;
   documentId: string;
@@ -17,8 +16,13 @@ export interface VisualSceneRecord {
   error: string | null;
   attempts: number;
   title: string | null;
-  timeline: VisualTimeline | null;
+  /** The scene the player plays, as JSON in the bucket. */
+  sceneKey: string | null;
   audioKey: string | null;
+  /** One still of the page for its card. */
+  thumbKey: string | null;
+  /** How the words were timed. */
+  timing: SceneTiming | null;
   durationMs: number | null;
   requestedBy: string | null;
   updatedAt: Date | null;
@@ -33,34 +37,7 @@ export interface VisualPositionRecord {
   updatedAt: Date | null;
 }
 
-/** What a page asked to be drawn, and what was found for it. */
-export interface VisualTermRecord {
-  term: string;
-  drawing: string | null;
-  foundBy: 'spelling' | 'meaning' | 'hand';
-  times: number;
-}
-
 export interface VisualSceneRepository {
-  /**
-   * What a page asked for, written down: the answer kept so the same
-   * word looks the same everywhere, and the misses counted so the list
-   * of what the library is short of is ranked by real demand. A term
-   * someone has set by hand is never written over.
-   */
-  noteTerms(input: {
-    documentId: string;
-    pageNumber: number;
-    terms: {
-      term: string;
-      drawing: string | null;
-      foundBy: 'spelling' | 'meaning';
-    }[];
-  }): Promise<void>;
-  /** The terms someone has set by hand, which win over anything the app finds. */
-  handPicked(): Promise<Map<string, string>>;
-  /** The things nothing draws, the most asked for first. */
-  missingTerms(limit: number): Promise<VisualTermRecord[]>;
   /** The learner's last position in the document's visuals, if any. */
   findPosition(
     documentId: string,
@@ -106,24 +83,16 @@ export interface VisualSceneRepository {
         | 'error'
         | 'attempts'
         | 'title'
-        | 'timeline'
+        | 'sceneKey'
         | 'audioKey'
+        | 'thumbKey'
+        | 'timing'
         | 'durationMs'
       >
     >,
   ): Promise<void>;
-  /** The chapter's plan, made once for all its pages. */
-  findPlan(
-    documentId: string,
-    contentVersion: number,
-    topicId: string,
-    generatorVersion: string,
-  ): Promise<VisualPlan | null>;
-  savePlan(input: {
-    documentId: string;
-    contentVersion: number;
-    topicId: string;
-    generatorVersion: string;
-    plan: VisualPlan;
-  }): Promise<void>;
+  /** Every file any of the document's pages made, in every version, for the purge. */
+  filesOf(documentId: string): Promise<string[]>;
+  /** The document's pages and positions, gone: the tables have no keys to cascade on. */
+  purgeDocument(documentId: string): Promise<void>;
 }

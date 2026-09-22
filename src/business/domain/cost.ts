@@ -5,8 +5,15 @@
  */
 import type { LectureStyle } from '../../contracts';
 
-/** Dollars per million tokens, in and out, by model id as the registry names it. */
-const PER_MILLION: Record<string, { in: number; out: number }> = {
+/**
+ * Dollars per million tokens, in and out, by model id as the registry
+ * names it; `cached` is the price of an input token served from the
+ * provider's cache, where it charges less for one.
+ */
+const PER_MILLION: Record<
+  string,
+  { in: number; out: number; cached?: number }
+> = {
   'gpt-4o-mini': { in: 0.15, out: 0.6 },
   'gpt-4o': { in: 2.5, out: 10 },
   'gpt-4.1-mini': { in: 0.4, out: 1.6 },
@@ -18,6 +25,11 @@ const PER_MILLION: Record<string, { in: number; out: number }> = {
   'text-embedding-3-large': { in: 0.13, out: 0 },
   'deepseek-chat': { in: 0.27, out: 1.1 },
   'deepseek-reasoner': { in: 0.55, out: 2.19 },
+  // V4.1 Flash, from September 2026, and V4 Pro, at the peak rate; the
+  // off-peak rate is half. The cache price is what makes the artist's long
+  // fixed prompt nearly free after the first drawing.
+  'deepseek-flash': { in: 0.3, out: 1.2, cached: 0.006 },
+  'deepseek-v4-pro': { in: 1.32, out: 3.96, cached: 0.044 },
 };
 
 /**
@@ -52,6 +64,8 @@ export function costOf(input: {
   model: string;
   tokensIn: number | null;
   tokensOut: number | null;
+  /** Of `tokensIn`, those served from the provider's cache. */
+  tokensCached?: number | null;
 }): number | null {
   const id = input.model.includes(':')
     ? input.model.slice(input.model.indexOf(':') + 1)
@@ -66,7 +80,16 @@ export function costOf(input: {
   const tokensIn = input.tokensIn ?? 0;
   const tokensOut = input.tokensOut ?? 0;
   if (!tokensIn && !tokensOut) return null;
-  return round((tokensIn * price.in + tokensOut * price.out) / 1_000_000);
+  const cached =
+    price.cached === undefined
+      ? 0
+      : Math.min(tokensIn, Math.max(0, input.tokensCached ?? 0));
+  return round(
+    ((tokensIn - cached) * price.in +
+      cached * (price.cached ?? price.in) +
+      tokensOut * price.out) /
+      1_000_000,
+  );
 }
 
 /**

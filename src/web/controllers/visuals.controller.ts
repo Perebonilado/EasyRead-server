@@ -22,6 +22,7 @@ import type { Response } from 'express';
 import type {
   RequestVisualsRequest,
   RequestVisualsResponse,
+  SceneDto,
   VisualPositionDto,
   VisualSceneDto,
   VisualSetDto,
@@ -34,16 +35,6 @@ import {
   VisualSetHandler,
 } from '../../business/handlers/documents/visual.handlers';
 import { STORAGE } from '../../business/ports/tokens';
-import { thumbFromFilm } from '../../business/domain/visual-render';
-import { STAGES, VISUAL_GENERATOR_VERSION } from '../../business/domain/visual';
-
-/** The key the page's stills share with its audio: up to the generator's name. */
-const stillsBase = (audioKey: string): string | null => {
-  const at = audioKey.indexOf(`-${VISUAL_GENERATOR_VERSION}-`);
-  return at < 0
-    ? null
-    : audioKey.slice(0, at + 1 + VISUAL_GENERATOR_VERSION.length);
-};
 import type { StoragePort } from '../../business/ports/storage.port';
 import { CurrentUser } from '../security/current-user.decorator';
 
@@ -76,7 +67,7 @@ class VisualPositionBody {
   offsetMs!: number;
 }
 
-/** A document's visuals: pages as short tutorials, asked for from the reader. */
+/** A document's visuals: pages as short animated videos, asked for from the reader. */
 @Controller('documents/:id/visuals')
 export class VisualsController {
   constructor(
@@ -136,11 +127,12 @@ export class VisualsController {
       documentId,
       fromPage: body.fromPage,
       pages: body.pages,
+      mode: body.mode,
     });
     return data;
   }
 
-  /** One page's tutorial, once made. */
+  /** One page's video, once made: the scene, read from beside its audio. */
   @Get(':page')
   async one(
     @CurrentUser('id') userId: string,
@@ -148,30 +140,32 @@ export class VisualsController {
     @Param('page', ParseIntPipe) page: number,
   ): Promise<VisualSceneDto> {
     const { data } = await this.scene.handle({ userId, documentId, page });
+    const scene = JSON.parse(
+      (await this.storage.get(data.sceneKey!)).toString('utf8'),
+    ) as SceneDto;
     return {
       page: data.pageNumber,
-      title: data.title ?? '',
-      durationMs: data.durationMs ?? 0,
-      timeline: data.timeline as unknown as VisualSceneDto['timeline'],
+      title: data.title ?? scene.title,
+      durationMs: data.durationMs ?? scene.durationMs,
+      scene,
     };
   }
 
-  /** The sheet of stills the judge looked at, one per moment; absent on a page made before there was one. */
-  @Get(':page/sheet')
-  async sheet(
+  /** One still of the page's video, for its card. */
+  @Get(':page/thumb')
+  async thumb(
     @CurrentUser('id') userId: string,
     @Param('id') documentId: string,
     @Param('page', ParseIntPipe) page: number,
     @Res() response: Response,
   ): Promise<void> {
     const { data } = await this.scene.handle({ userId, documentId, page });
-    const base = data.audioKey && stillsBase(data.audioKey);
-    if (!base) {
+    if (!data.thumbKey) {
       response.status(404).end();
       return;
     }
     try {
-      const { stream, size } = await this.storage.stream(`${base}-sheet.png`);
+      const { stream, size } = await this.storage.stream(data.thumbKey);
       response.setHeader('Content-Type', 'image/png');
       response.setHeader('Content-Length', size);
       response.setHeader('Cache-Control', 'private, max-age=86400');
@@ -182,47 +176,8 @@ export class VisualsController {
   }
 
   /**
-   * One picture of the page's tutorial, for a card: made with the page,
-   * or cut from the judge's sheet for a page made before cards had one.
-   */
-  @Get(':page/thumb')
-  async thumb(
-    @CurrentUser('id') userId: string,
-    @Param('id') documentId: string,
-    @Param('page', ParseIntPipe) page: number,
-    @Res() response: Response,
-  ): Promise<void> {
-    const { data } = await this.scene.handle({ userId, documentId, page });
-    const base = data.audioKey && stillsBase(data.audioKey);
-    if (!base) {
-      response.status(404).end();
-      return;
-    }
-    const key = `${base}-thumb.png`;
-    let png: Buffer;
-    try {
-      png = await this.storage.get(key);
-    } catch {
-      try {
-        png = await thumbFromFilm(await this.storage.get(`${base}-sheet.png`), {
-          w: STAGES.box.W,
-          h: STAGES.box.H,
-        });
-        await this.storage.put({ key, body: png, mimeType: 'image/png' });
-      } catch {
-        response.status(404).end();
-        return;
-      }
-    }
-    response.setHeader('Content-Type', 'image/png');
-    response.setHeader('Content-Length', png.length);
-    response.setHeader('Cache-Control', 'private, max-age=86400');
-    response.end(png);
-  }
-
-  /**
-   * The tutorial's audio. The client fetches it with the session token
-   * and plays a blob URL, as it does for the lecture.
+   * The video's audio. The client fetches it with the session token and
+   * plays a blob URL, as it does for the lecture.
    */
   @Get(':page/audio')
   async audio(

@@ -5,12 +5,12 @@ import {
   ForeignKey,
   Table,
 } from 'sequelize-typescript';
-import type { VisualSceneStatus } from '../../../contracts';
+import type { SceneTiming, VisualSceneStatus } from '../../../contracts';
 import { BaseModel } from './base';
 import { DocumentModel } from './document.model';
 import { TopicModel } from './topic.model';
 
-/** One page of a document as a short tutorial, made once per document version. */
+/** One page of a document as a short animated video, made once per document version. */
 @Table({ tableName: 'visual_scenes', underscored: true, timestamps: true })
 export class VisualSceneModel extends BaseModel {
   @ForeignKey(() => DocumentModel)
@@ -54,11 +54,17 @@ export class VisualSceneModel extends BaseModel {
   @Column({ type: DataType.STRING(80), allowNull: true })
   declare title: string | null;
 
-  @Column({ type: DataType.JSON, allowNull: true })
-  declare timeline: unknown;
+  @Column({ type: DataType.STRING(512), allowNull: true })
+  declare sceneKey: string | null;
 
   @Column({ type: DataType.STRING(512), allowNull: true })
   declare audioKey: string | null;
+
+  @Column({ type: DataType.STRING(512), allowNull: true })
+  declare thumbKey: string | null;
+
+  @Column({ type: DataType.STRING(16), allowNull: true })
+  declare timing: SceneTiming | null;
 
   @Column({ type: DataType.INTEGER, allowNull: true })
   declare durationMs: number | null;

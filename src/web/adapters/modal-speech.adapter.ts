@@ -136,18 +136,21 @@ export class ModalSpeechAdapter implements SpeechPort {
     instructions,
     speed,
     pieces,
+    timestamps,
   }: {
     text: string;
     voice?: string;
     instructions?: string;
     speed?: number;
     pieces?: { text: string; speed: number; pauseAfter: number }[];
+    timestamps?: boolean;
   }): Promise<{
     audio: Buffer;
     mimeType: string;
     model: string;
     durationMs?: number;
     pieceStartsMs?: number[];
+    words?: Voiced['words'];
   }> {
     const base = this.base();
     const token = this.config.getOrThrow<string>(`${this.home.keys}_TOKEN`);
@@ -157,7 +160,7 @@ export class ModalSpeechAdapter implements SpeechPort {
     // Kokoro takes the page as pieces, each at its pace with its silence
     // after; one request, the service joins them.
     if (engine === 'kokoro' && pieces?.length) {
-      const { audio, durationMs, pieceStartsMs } = await this.once(
+      const { audio, durationMs, pieceStartsMs, words } = await this.once(
         `${base}/v1/audio/speech`,
         token,
         {
@@ -168,6 +171,8 @@ export class ModalSpeechAdapter implements SpeechPort {
             pause_after: piece.pauseAfter,
           })),
           response_format: 'mp3',
+          // An older service ignores this and answers with the mp3 alone.
+          ...(timestamps ? { timestamps: true } : {}),
         },
       );
       return {
@@ -176,6 +181,7 @@ export class ModalSpeechAdapter implements SpeechPort {
         model: `${this.home.name}:${this.label().model}`,
         ...(durationMs !== undefined ? { durationMs } : {}),
         ...(pieceStartsMs?.length === pieces.length ? { pieceStartsMs } : {}),
+        ...(words?.length ? { words } : {}),
       };
     }
 
@@ -221,7 +227,7 @@ export class ModalSpeechAdapter implements SpeechPort {
     url: string,
     token: string,
     body: Record<string, unknown>,
-  ): Promise<{ audio: Buffer; durationMs?: number; pieceStartsMs?: number[] }> {
+  ): Promise<Voiced> {
     await this.enter();
     try {
       return await this.attempts(url, token, body);
@@ -249,7 +255,7 @@ export class ModalSpeechAdapter implements SpeechPort {
     url: string,
     token: string,
     body: Record<string, unknown>,
-  ): Promise<{ audio: Buffer; durationMs?: number; pieceStartsMs?: number[] }> {
+  ): Promise<Voiced> {
     let lastError: Error | null = null;
     for (
       let attempt = 1;
@@ -285,6 +291,13 @@ export class ModalSpeechAdapter implements SpeechPort {
             `The speech service answered ${response.status}: ${(await response.text()).slice(0, 200)}`,
           );
         }
+        // Asked for timestamps, a service that knows them answers in JSON.
+        if (
+          (response.headers.get('content-type') ?? '').includes(
+            'application/json',
+          )
+        )
+          return voicedFromJson(await response.json());
         const audio = Buffer.from(await response.arrayBuffer());
         if (!audio.length) throw new Error('The speech service sent no audio');
         // The true length, when the service measured it (Kokoro does), and
@@ -318,6 +331,61 @@ export class ModalSpeechAdapter implements SpeechPort {
     }
     throw lastError ?? new Error('The speech service did not answer');
   }
+}
+
+/** What one request to the service brings back. */
+export interface Voiced {
+  audio: Buffer;
+  durationMs?: number;
+  pieceStartsMs?: number[];
+  words?: { text: string; startMs: number; endMs: number }[];
+}
+
+/**
+ * The JSON answer to a request with timestamps: the audio in base64, and
+ * seconds turned to milliseconds. A word with no sensible time is left
+ * out rather than guessed.
+ */
+export function voicedFromJson(body: unknown): Voiced {
+  const answer = (body ?? {}) as {
+    audio?: unknown;
+    seconds?: unknown;
+    piece_starts?: unknown;
+    words?: unknown;
+  };
+  if (typeof answer.audio !== 'string' || !answer.audio)
+    throw new Error('The speech service sent no audio');
+  const audio = Buffer.from(answer.audio, 'base64');
+  if (!audio.length) throw new Error('The speech service sent no audio');
+  const seconds = Number(answer.seconds);
+  const starts = Array.isArray(answer.piece_starts)
+    ? answer.piece_starts.map(Number).filter((n) => Number.isFinite(n))
+    : [];
+  const words = Array.isArray(answer.words)
+    ? answer.words
+        .filter(
+          (w): w is [string, number, number] =>
+            Array.isArray(w) &&
+            typeof w[0] === 'string' &&
+            Number.isFinite(Number(w[1])) &&
+            Number.isFinite(Number(w[2])),
+        )
+        .map(([text, start, end]) => ({
+          text,
+          startMs: Math.round(Number(start) * 1000),
+          endMs: Math.round(Number(end) * 1000),
+        }))
+    : [];
+  return {
+    audio,
+    ...(Number.isFinite(seconds) && seconds > 0
+      ? { durationMs: Math.round(seconds * 1000) }
+      : {}),
+    ...(starts.length
+      ? { pieceStartsMs: starts.map((s) => Math.round(s * 1000)) }
+      : {}),
+    ...(words.length ? { words } : {}),
+  };
 }
 
 /**

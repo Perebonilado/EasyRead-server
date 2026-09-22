@@ -19,7 +19,7 @@ import {
   SimplifiedPageModel,
   VisualSceneModel,
 } from '../web/database/models';
-import { VISUAL_GENERATOR_VERSION } from '../business/domain/visual';
+import { SCENE_GENERATOR_VERSION } from '../business/domain/scene-script';
 import { toListItem } from './shared/document-shape';
 
 /**
@@ -125,7 +125,7 @@ export class MaterialsQuery {
       attributes: ['documentId', [fn('COUNT', col('id')), 'n']],
       where: {
         documentId: { [Op.in]: ids },
-        generatorVersion: VISUAL_GENERATOR_VERSION,
+        generatorVersion: SCENE_GENERATOR_VERSION,
         status: { [Op.in]: ['done', 'not_suitable'] },
       } as never,
       group: ['documentId'],

@@ -21,14 +21,6 @@ const API_KEY_VAR: Record<ProviderName, string> = {
  * can start with one model everywhere and later move only the expensive tasks —
  * simplification is 300 calls a document, a highlight is one.
  */
-/** The setting a task falls back to before the default, when it has none of its own. */
-const TASK_SHARED: Partial<Record<LlmTask, string>> = {
-  visual_narration: 'AI_MODEL_VISUAL_SCRIPT',
-  visual_director: 'AI_MODEL_VISUAL_SCRIPT',
-  visual_judge: 'AI_MODEL_VISUAL_SCRIPT',
-  visual_plan: 'AI_MODEL_VISUAL_SCRIPT',
-};
-
 const TASK_VAR: Record<LlmTask, string> = {
   lecture_outline: 'AI_MODEL_LECTURE_OUTLINE',
   lecture_segment: 'AI_MODEL_LECTURE_SEGMENT',
@@ -41,13 +33,7 @@ const TASK_VAR: Record<LlmTask, string> = {
   // The tutor's live sketch fills a template; the small default model
   // cannot, so a deployment points this at a stronger one.
   lecture_sketch: 'AI_MODEL_LECTURE_SKETCH',
-  visual_plan: 'AI_MODEL_VISUAL_PLAN',
-  visual_script: 'AI_MODEL_VISUAL_SCRIPT',
-  visual_repair: 'AI_MODEL_VISUAL_REPAIR',
   sketch_judge: 'AI_MODEL_SKETCH_JUDGE',
-  visual_judge: 'AI_MODEL_VISUAL_JUDGE',
-  visual_narration: 'AI_MODEL_VISUAL_NARRATION',
-  visual_director: 'AI_MODEL_VISUAL_DIRECTOR',
   ocr_page: 'AI_MODEL_OCR',
   summarize: 'AI_MODEL_SUMMARIZE',
   topics_outline: 'AI_MODEL_TOPICS',
@@ -79,11 +65,11 @@ const TASK_VAR: Record<LlmTask, string> = {
   // own knob so a deployment can route them to a stronger model without
   // paying for it on diagrams.
   sketch: 'AI_MODEL_SKETCH',
-  // The library's describer and drawer. Both are text and nothing else —
-  // a term in, a sentence about form out; that sentence in, path data
-  // out — so they are the two tasks a text-only provider can take whole.
-  thing_form: 'AI_MODEL_THING_FORM',
-  thing_draw: 'AI_MODEL_THING_DRAW',
+  // A page as an animated explainer. The writer is one call a page and
+  // plans everything, so it is worth a strong model; the artist draws
+  // each picture and is DeepSeek by design.
+  scene_write: 'AI_MODEL_SCENE_WRITE',
+  scene_draw: 'AI_MODEL_SCENE_DRAW',
   topic_quiz: 'AI_MODEL_QUIZ',
   // Guided reading: the preview is one call per chapter ever (cached), the
   // graders run once per checkpoint — all three default to the cheap model
@@ -92,6 +78,16 @@ const TASK_VAR: Record<LlmTask, string> = {
   recall_grade: 'AI_MODEL_RECALL_GRADE',
   question_check: 'AI_MODEL_QUESTION_CHECK',
   embed: 'AI_EMBED_MODEL',
+};
+
+/**
+ * Tasks whose default is not the global one. The artist in particular:
+ * with no setting of its own it once fell to AI_MODEL_DEFAULT, and every
+ * "DeepSeek" drawing was drawn by gpt-4o-mini (2161504).
+ */
+const TASK_DEFAULT: Partial<Record<LlmTask, string>> = {
+  scene_write: 'openai:gpt-4.1',
+  scene_draw: 'deepseek:deepseek-flash',
 };
 
 const DEFAULT_MODEL = 'openai:gpt-4o-mini';
@@ -174,15 +170,8 @@ export class ModelRegistry {
   refFor(task: LlmTask): ModelRef {
     const fallback =
       task === 'embed' ? this.defaultEmbedSpec() : this.defaultSpec();
-    // The visual writers share one setting unless given their own: the
-    // narrator, the director and the judge are the script writer's job
-    // split three ways, and a deployment that set the one should not
-    // fall to the small default on the others.
-    const shared = TASK_SHARED[task];
     return parseModelRef(
-      this.config.get<string>(TASK_VAR[task]) ||
-        (shared ? this.config.get<string>(shared) : undefined) ||
-        fallback,
+      this.config.get<string>(TASK_VAR[task]) || TASK_DEFAULT[task] || fallback,
     );
   }
 

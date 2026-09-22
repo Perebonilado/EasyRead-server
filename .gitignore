@@ -64,3 +64,6 @@ __pycache__/
 
 # Output of `npm run visual:draw`: sheets and candidates to look at.
 drawings/
+
+# Pages made by npm run scene:page, for looking at
+/scene-out

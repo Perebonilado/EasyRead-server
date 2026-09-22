@@ -24,7 +24,7 @@ import { LectureAlignProcessor } from './processors/lecture-align.processor';
 import { LectureDiagramProcessor } from './processors/lecture-diagram.processor';
 import { LectureBoardProcessor } from './processors/lecture-board.processor';
 import { LectureFollowProcessor } from './processors/lecture-follow.processor';
-import { VisualSceneProcessor } from './processors/visual-scene.processor';
+import { SceneProcessor } from './processors/scene.processor';
 import { SimplifyPageProcessor } from './processors/simplify.processor';
 import { SummarizeProcessor } from './processors/summarize.processor';
 import { TopicsProcessor } from './processors/topics.processor';
@@ -96,7 +96,7 @@ export class WorkerRunner implements OnModuleInit, OnModuleDestroy {
     private readonly lectureDiagram: LectureDiagramProcessor,
     private readonly lectureBoard: LectureBoardProcessor,
     private readonly lectureFollow: LectureFollowProcessor,
-    private readonly visualScene: VisualSceneProcessor,
+    private readonly visualScene: SceneProcessor,
     private readonly exports: ExportProcessor,
     private readonly learn: LearnProcessor,
     private readonly importer: ImportProcessor,

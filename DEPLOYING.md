@@ -160,6 +160,22 @@ sums are checked and a quotation must be the page's own words, or the
 storyboard goes back. `npm run scene:try -- <page.md>` makes a page from
 any text with no document behind it, to try a format.
 
+A book the profile calls a story (a novel, a play: `story` in
+`profile.json`) is read for its characters the first time one of its pages
+is made: `gpt-4.1-mini` (`AI_MODEL_SCENE_STORY`) reads it in stretches of
+about 40,000 characters, four at a time, at most 24 of them, and code
+merges what it says into `story.json` beside the videos: each character's
+look, what they are like, the page the book meets them on, and who is on
+each page and how they feel. The pages being made meanwhile wait on that
+one reading. Each character is then drawn once by the artist, with a face
+for every feeling, into the book's `cast.json`, and stands on every page
+they are on: the same figure, the one met first on the left, with the
+face the last page left them with, what they are like set beside them on
+the page the book meets them, and what they say in a bubble by their
+head. Both files go when the document is purged. `npm run scene:try --
+<story.md> --story --page 3` tries it on a story whose pages are parted by
+lines of three dashes.
+
 ## The live tutor
 
 A tutor marked `livekit` in `tutors.ts` talks on our own line: a LiveKit

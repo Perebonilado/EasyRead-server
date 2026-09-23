@@ -6,6 +6,7 @@
  */
 import type {
   SceneArrowDto,
+  SceneBubbleDto,
   SceneDto,
   SceneEffectDto,
   SceneEnterName,
@@ -21,6 +22,7 @@ import {
   auditStep,
   arrowPath,
   pillBox,
+  placeBubble,
   placeLabels,
   placePill,
   segmentsOf,
@@ -38,11 +40,51 @@ import {
   type StagingName,
 } from './scene-layout';
 import type { SceneScript, SceneStep, SceneThing } from './scene-script';
+import { EXPRESSIONS } from './scene-story';
 import type { GatedDrawing } from './scene-svg';
 import { anchorMs, quietGaps, spaced, type TimedBeat } from './scene-timing';
 
 /** Effects in one step come this far apart, so each is seen. */
 const EFFECT_STAGGER_MS = 180;
+/** How long a speech bubble stays after the voice has said its words. */
+const SAY_AFTER_MS = 700;
+
+/** The most a bubble holds, in characters: a line or two, read at a glance. */
+const SAY_CHARS = 80;
+
+/**
+ * What a character says in a sentence: the words it quotes, as the voice
+ * says them, or of a speech the sentences that start it, as many as a
+ * bubble holds at a glance. Null for a sentence that quotes no one: then
+ * there is nothing for a bubble to hold.
+ */
+export function spokenIn(sentence: string): string | null {
+  // Double quotes, straight or curly, and curly single quotes whose closing
+  // mark is not an apostrophe inside a word.
+  const quoted = [/“([^”]+)”/g, /"([^"]+)"/g, /‘(.+?)’(?!\p{L})/gu]
+    .flatMap((pattern) =>
+      [...sentence.matchAll(pattern)].map((m) => ({
+        at: m.index,
+        words: m[1].trim().replace(/[,;:]$/, ''),
+      })),
+    )
+    .filter((one) => /\p{L}/u.test(one.words))
+    .sort((a, b) => a.at - b.at)
+    .map((one) => one.words);
+  if (!quoted.length) return null;
+  const said = quoted.join(' … ');
+  if (said.length <= SAY_CHARS) return said;
+  // A speech: its first sentences, as many as fit, the first always.
+  const sentences = said.split(/(?<=[.!?…])\s+/);
+  let kept = sentences[0];
+  for (const next of sentences.slice(1)) {
+    if (kept.length + 1 + next.length > SAY_CHARS) break;
+    kept = `${kept} ${next}`;
+  }
+  if (kept.length <= SAY_CHARS * 1.5) return kept;
+  const cut = kept.slice(0, SAY_CHARS);
+  return `${cut.slice(0, cut.lastIndexOf(' ')).trimEnd()}…`;
+}
 
 /** The thing as the client gets it: its drawing, or a card with its name when the drawing failed. */
 export function thingDto(
@@ -87,7 +129,9 @@ export function thingDto(
     hidden: [],
     moves: drawing.moves,
     ambience: thing.kind === 'drawing' ? thing.sound : null,
-    ...(thing.kind === 'drawing' ? {} : { source: thing.kind }),
+    ...(thing.kind === 'math' || thing.kind === 'plot' || thing.kind === 'quote'
+      ? { source: thing.kind }
+      : {}),
     ...(drawing.callouts.length
       ? {
           callouts: Object.fromEntries(
@@ -106,6 +150,8 @@ interface Geometry {
   field: InkField | null;
   /** A passage's words: their size, which its notes are never set above. */
   words?: { size: number };
+  /** A character's head: where their bubbles point. */
+  head?: [number, number];
 }
 
 const laid = (thing: SceneThingDto, geometry?: Geometry): LaidThing =>
@@ -145,6 +191,94 @@ export function wordsFirst(
   if (main.length === 1 && rest.length <= 3)
     return { layout: 'focus', show: [...main, ...rest] };
   return { layout: 'stack', show: [...main, ...rest].slice(0, 4) };
+}
+
+/**
+ * Characters stand the same way round every time: in a row, whoever the
+ * book met first stands on the left, so any two who meet again stand as
+ * they stood before and never swap across the stage. Only the characters
+ * trade places; everything else keeps the writer's order.
+ */
+export function sidesKept(
+  stage: { layout: SceneStepDto['layout']; show: string[] },
+  cast: ReadonlyMap<string, SceneThing>,
+): { layout: SceneStepDto['layout']; show: string[] } {
+  if (stage.layout !== 'row' && stage.layout !== 'compare') return stage;
+  const people = stage.show
+    .map((id, at) => ({ id, at, thing: cast.get(id) }))
+    .filter((one) => one.thing?.kind === 'character');
+  if (people.length < 2) return stage;
+  const met = (thing: SceneThing | undefined) =>
+    thing?.kind === 'character' ? thing.met : 0;
+  const leftFirst = [...people].sort(
+    (a, b) => met(a.thing) - met(b.thing) || a.at - b.at,
+  );
+  const show = [...stage.show];
+  people.forEach((one, k) => {
+    show[one.at] = leftFirst[k].id;
+  });
+  return { layout: stage.layout, show };
+}
+
+/** How long before a character comes on their first face is put on: the player fades a state in over 320ms. */
+const FACE_EARLY_MS = 400;
+
+/**
+ * A character wears one face at a time: a face shown takes the place of
+ * the one before it, and a face hidden leaves them calm again, never with
+ * none. Every face is hidden until shown, so the first, the one they come
+ * on with, is shown just before they do: seen, not heard.
+ */
+export function oneFaceAtATime(
+  effects: SceneEffectDto[],
+  cast: readonly SceneThing[],
+  steps: readonly SceneStepDto[],
+  /** Whether they were drawn: one set as a card has no faces. */
+  drawn: (id: string) => boolean = () => true,
+): SceneEffectDto[] {
+  const faces = new Set<string>(EXPRESSIONS);
+  const characters = new Map(
+    cast.flatMap((thing) =>
+      thing.kind === 'character' && drawn(thing.id)
+        ? [[thing.id, thing] as const]
+        : [],
+    ),
+  );
+  const isFace = (effect: SceneEffectDto) =>
+    characters.has(effect.target) &&
+    Boolean(effect.part && faces.has(effect.part)) &&
+    (effect.do === 'show' || effect.do === 'hide');
+  const out = effects.filter((effect) => !isFace(effect));
+  for (const [id, character] of characters) {
+    const enters = steps.find((step) => step.show.includes(id));
+    if (!enters) continue;
+    let wearing: string = character.state ?? 'neutral';
+    out.push({
+      atMs: Math.max(0, enters.atMs - FACE_EARLY_MS),
+      target: id,
+      part: wearing,
+      do: 'show',
+      filler: true,
+    });
+    const asked = effects
+      .filter((effect) => effect.target === id && isFace(effect))
+      .sort((a, b) => a.atMs - b.atMs);
+    for (const effect of asked) {
+      const next =
+        effect.do === 'show'
+          ? effect.part!
+          : effect.part === wearing
+            ? 'neutral'
+            : wearing;
+      if (next === wearing) continue;
+      out.push(
+        { atMs: effect.atMs, target: id, part: wearing, do: 'hide' },
+        { atMs: effect.atMs, target: id, part: next, do: 'show' },
+      );
+      wearing = next;
+    }
+  }
+  return out.sort((a, b) => a.atMs - b.atMs);
 }
 
 /** Whether words only say what a thing on the stage already says: its caption, its number's caption, its words. */
@@ -204,6 +338,7 @@ export function composeScene(input: ComposeInput): {
     thingDto(thing, drawings.get(thing.id)),
   );
   const byId = new Map(things.map((thing) => [thing.id, thing]));
+  const castById = new Map(script.cast.map((thing) => [thing.id, thing]));
 
   // Every step on its words, in order; stage changes kept apart.
   const timed = script.steps.map((step) => ({
@@ -220,6 +355,7 @@ export function composeScene(input: ComposeInput): {
 
   const steps: SceneStepDto[] = [];
   const effects: SceneEffectDto[] = [];
+  let saying = 1;
   let before: string[] = [];
   let focus: string | null = null;
   const same = (a: SceneStepDto, stage: NonNullable<SceneStep['stage']>) =>
@@ -239,7 +375,10 @@ export function composeScene(input: ComposeInput): {
     if (step.stage)
       step = {
         ...step,
-        stage: { ...step.stage, ...wordsFirst(step.stage, byId) },
+        stage: {
+          ...step.stage,
+          ...sidesKept(wordsFirst(step.stage, byId), castById),
+        },
       };
     // The writer restating the stage as it stands: its effects, and no change.
     if (step.stage && steps.length && same(steps[steps.length - 1], step.stage))
@@ -285,14 +424,74 @@ export function composeScene(input: ComposeInput): {
       before = step.stage.show;
     }
     step.effects.forEach((effect, i) => {
+      const at = Math.round(
+        atMs + (step.stage ? 350 : 0) + i * EFFECT_STAGGER_MS,
+      );
+      // A character's words, from the sentence that quotes them, held
+      // until the voice has said the sentence.
+      const said =
+        effect.do === 'say'
+          ? spokenIn(script.beats[step.at.beat]?.say ?? '')
+          : null;
+      if (effect.do === 'say') {
+        effects.push(
+          said
+            ? {
+                atMs: at,
+                target: effect.target,
+                part: null,
+                do: 'say',
+                say: {
+                  id: `say-${saying++}`,
+                  text: said,
+                  untilMs: Math.round(
+                    (beats[step.at.beat]?.endMs ?? at) + SAY_AFTER_MS,
+                  ),
+                },
+              }
+            : { atMs: at, target: effect.target, part: null, do: 'pulse' },
+        );
+        return;
+      }
       effects.push({
-        atMs: Math.round(atMs + (step.stage ? 350 : 0) + i * EFFECT_STAGGER_MS),
+        atMs: at,
         target: effect.target,
         part: effect.part,
         do: effect.do,
       });
     });
   }
+
+  effects.splice(
+    0,
+    effects.length,
+    ...oneFaceAtATime(
+      effects,
+      script.cast,
+      steps,
+      (id) => byId.get(id)?.kind === 'drawing',
+    ),
+  );
+  // A bubble belongs to the stage it is said on and to its sentence: it
+  // goes at the next change of stage, or when someone speaks after it.
+  const says = effects.filter((effect) => effect.say);
+  says.forEach((effect, i) => {
+    const nextStage = steps.find((step) => step.atMs > effect.atMs)?.atMs;
+    effect.say!.untilMs = Math.min(
+      effect.say!.untilMs,
+      nextStage ?? durationMs,
+      says[i + 1]?.atMs ?? durationMs,
+      durationMs,
+    );
+  });
+  /** The step a moment falls in. */
+  const stepOf = (t: number) => {
+    let k = -1;
+    steps.forEach((step, i) => {
+      if (step.atMs <= t) k = i;
+    });
+    return k;
+  };
 
   // Working grows as the voice works it: a line the writer never showed
   // appears after the line before it, spread through its time on stage.
@@ -399,18 +598,44 @@ export function composeScene(input: ComposeInput): {
         viewBox: drawing.viewBox,
         field: drawing.field,
         ...(drawing.words ? { words: drawing.words } : {}),
+        ...(drawing.head ? { head: drawing.head } : {}),
       });
   }
+  const introduced = new Set(
+    script.cast.flatMap((thing) =>
+      thing.kind === 'character' && thing.intro.length ? [thing.id] : [],
+    ),
+  );
   const place = (staging: StagingName) => {
     const lookup = new Map(
       things.map((thing) => [thing.id, laid(thing, geometry.get(thing.id))]),
     );
+    // What a character is like is set beside them only while they have the
+    // room for it: with at most one other thing on the stage. In a crowd
+    // they stand without it, and give up no room to it.
+    const crowd = new Map(lookup);
+    for (const id of introduced) {
+      const thing = lookup.get(id);
+      if (thing?.kind === 'drawing')
+        crowd.set(id, {
+          kind: 'drawing',
+          aspect: thing.aspect,
+          caption: thing.caption,
+        });
+    }
     const stage = STAGINGS[staging];
     const places: Record<string, ScenePlaceDto>[] = [];
     const pills: Record<string, ScenePillDto | null>[] = [];
+    const bubbles: Record<string, SceneBubbleDto | null> = {};
     const audit: Collision[][] = [];
-    for (const step of steps) {
-      const laidOut = layoutStep(step.layout, step.show, lookup, staging);
+    for (const [k, step] of steps.entries()) {
+      const crowded = step.show.length > 2;
+      const laidOut = layoutStep(
+        step.layout,
+        step.show,
+        crowded ? crowd : lookup,
+        staging,
+      );
       const arrows = step.arrows.flatMap((arrow) => {
         const a = laidOut[arrow.from];
         const b = laidOut[arrow.to];
@@ -455,25 +680,79 @@ export function composeScene(input: ComposeInput): {
         const found = geometry.get(id);
         const at = laidOut[id];
         if (!found?.callouts.length || !at?.room) continue;
-        at.labels = placeLabels({
+        if (crowded && introduced.has(id)) continue;
+        const labels = placeLabels({
           place: at,
           room: at.room,
           viewBox: found.viewBox,
           callouts: found.callouts,
           avoid: { boxes: pillBoxes, segments },
         });
+        // What someone is like, cut short, is better not said at all.
+        if (
+          introduced.has(id) &&
+          labels.some((label) => label.lines.some((l) => l.endsWith('…')))
+        )
+          continue;
+        at.labels = labels;
       }
-      audit.push(
-        auditStep({
-          words: wordsOf(laidOut, byId, stepPills, arrows),
-          inks,
-          arrows: arrows.map((one) => ({
-            id: one.arrow.id,
-            segments: segmentsOf(one.path),
-          })),
-          stage,
-        }),
-      );
+      // What each character says at this step, in a bubble by their head,
+      // clear of every word, ink and arrow; audited as words like the rest.
+      const spoken: Words[] = [];
+      for (const effect of says) {
+        if (stepOf(effect.atMs) !== k) continue;
+        const at = laidOut[effect.target];
+        const found = geometry.get(effect.target);
+        let bubble: SceneBubbleDto | null = null;
+        if (at && found?.head) {
+          const s = at.w / found.viewBox[2];
+          bubble = placeBubble({
+            text: effect.say!.text,
+            head: [
+              at.x + (found.head[0] - found.viewBox[0]) * s,
+              at.y + (found.head[1] - found.viewBox[1]) * s,
+            ],
+            body: at,
+            stage,
+            avoid: {
+              boxes: [
+                ...solid,
+                ...pillBoxes,
+                ...wordsOf(laidOut, byId, stepPills, arrows).map((w) => w.box),
+              ],
+              segments,
+            },
+          });
+        }
+        bubbles[effect.say!.id] = bubble;
+        if (bubble)
+          spoken.push({
+            owner: `${effect.target}:say`,
+            what: effect.say!.id,
+            box: bubble,
+          });
+      }
+      const seen = {
+        inks,
+        arrows: arrows.map((one) => ({
+          id: one.arrow.id,
+          segments: segmentsOf(one.path),
+        })),
+        stage,
+      };
+      const standing = wordsOf(laidOut, byId, stepPills, arrows);
+      const found = auditStep({ words: standing, ...seen });
+      // A bubble is on the stage with everything else, but never with the
+      // bubble before it: each is checked against the step alone.
+      for (const bubble of spoken) {
+        const key = `${bubble.owner}:${bubble.what}`;
+        found.push(
+          ...auditStep({ words: [...standing, bubble], ...seen }).filter(
+            (one) => one.a === key || one.b === key,
+          ),
+        );
+      }
+      audit.push(found);
       places.push(
         Object.fromEntries(
           Object.entries(laidOut).map(([id, at]) => {
@@ -488,7 +767,7 @@ export function composeScene(input: ComposeInput): {
       );
       pills.push(stepPills);
     }
-    return { places, pills, audit };
+    return { places, pills, bubbles, audit };
   };
   const box = place('box');
   const wide = place('wide');
@@ -518,12 +797,14 @@ export function composeScene(input: ComposeInput): {
           h: STAGINGS.box.h,
           places: box.places,
           pills: box.pills,
+          ...(says.length ? { bubbles: box.bubbles } : {}),
         },
         wide: {
           w: STAGINGS.wide.w,
           h: STAGINGS.wide.h,
           places: wide.places,
           pills: wide.pills,
+          ...(says.length ? { bubbles: wide.bubbles } : {}),
         },
       },
     },

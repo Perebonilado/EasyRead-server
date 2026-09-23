@@ -1,4 +1,5 @@
 import { profileKey } from '../../business/domain/scene-profile';
+import { castKey, storyKey } from '../../business/domain/scene-story';
 import { Injectable } from '@nestjs/common';
 import { InjectModel } from '@nestjs/sequelize';
 import type {
@@ -145,7 +146,7 @@ export class SequelizeVisualSceneRepository implements VisualSceneRepository {
 
   async filesOf(documentId: string): Promise<string[]> {
     const rows = await this.model.findAll({ where: { documentId } });
-    // And each version's profile, which no row names.
+    // And each version's profile, story and cast, which no row names.
     const versions = [...new Set(rows.map((row) => row.contentVersion))];
     return [
       ...rows.flatMap((row) =>
@@ -153,7 +154,11 @@ export class SequelizeVisualSceneRepository implements VisualSceneRepository {
           (key): key is string => Boolean(key),
         ),
       ),
-      ...versions.map((version) => profileKey(documentId, version)),
+      ...versions.flatMap((version) => [
+        profileKey(documentId, version),
+        storyKey(documentId, version),
+        castKey(documentId, version),
+      ]),
     ];
   }
 

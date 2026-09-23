@@ -2,6 +2,7 @@ import { numberedSentences } from '../../../business/domain/board';
 import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import type { DocumentProfileDraft } from '../../../business/domain/scene-profile';
+import type { StoryDraft } from '../../../business/domain/scene-story';
 import type { LanguageModelUsage } from 'ai';
 import type { Block, RecapBody, TopicPreviewBody } from '../../../contracts';
 import type {
@@ -39,6 +40,7 @@ import {
   lectureSketchSchema,
   sceneProfileSchema,
   sceneScriptSchema,
+  sceneStorySchema,
   sketchJudgeSchema,
   lectureExtraSchema,
   spokenQuizSchema,
@@ -694,6 +696,7 @@ export class AiSdkLlmAdapter implements LlmGatewayPort, OnModuleInit {
     material: string;
     context: string;
     profile?: string;
+    story?: string;
     previous?: SceneScriptDraft;
     problems?: string[];
   }): Promise<LlmResult<SceneScriptDraft>> {
@@ -708,6 +711,7 @@ export class AiSdkLlmAdapter implements LlmGatewayPort, OnModuleInit {
         `Document: ${input.documentTitle}`,
         `Chapter: ${input.topicTitle}`,
         ...(input.profile ? [input.profile] : []),
+        ...(input.story ? [input.story] : []),
         input.context,
         `The page:\n${input.material}`,
         ...(input.previous && input.problems?.length
@@ -743,6 +747,38 @@ export class AiSdkLlmAdapter implements LlmGatewayPort, OnModuleInit {
           ? `Chapters:\n- ${input.chapters.slice(0, 40).join('\n- ')}`
           : '',
         `From its pages:\n${input.sample}`,
+      ]
+        .filter(Boolean)
+        .join('\n\n'),
+      maxRetries: this.maxRetries(),
+    });
+    return {
+      value: result.object,
+      usage: this.usage(ref, result.usage, started),
+    };
+  }
+
+  async sceneStory(input: {
+    documentTitle: string;
+    from: number;
+    to: number;
+    text: string;
+    known: string[];
+  }): Promise<LlmResult<StoryDraft>> {
+    const started = Date.now();
+    const { generateObject } = await this.registry.modules();
+    const { model, ref } = await this.registry.languageModel('scene_story');
+    const result = await generateObject({
+      model,
+      schema: sceneStorySchema,
+      system: PROMPTS.sceneStory,
+      prompt: [
+        `Book: ${input.documentTitle}`,
+        `Pages ${input.from} to ${input.to}.`,
+        input.known.length
+          ? `Characters met earlier in the book (call them by these names): ${input.known.slice(0, 40).join(', ')}.`
+          : '',
+        input.text,
       ]
         .filter(Boolean)
         .join('\n\n'),

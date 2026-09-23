@@ -1,4 +1,5 @@
 import type { DocumentProfileDraft } from '../domain/scene-profile';
+import type { StoryDraft } from '../domain/scene-story';
 import type {
   LearnQuestion,
   Block,
@@ -38,6 +39,7 @@ export type LlmTask =
   | 'scene_write'
   | 'scene_draw'
   | 'scene_profile'
+  | 'scene_story'
   | 'topic_quiz'
   | 'item_write'
   | 'item_verify'
@@ -477,6 +479,8 @@ export interface LlmGatewayPort {
     context: string;
     /** What the book is, and the ways its pages may be taught. */
     profile?: string;
+    /** A story's characters on the page, and where it happens. */
+    story?: string;
     previous?: SceneScriptDraft;
     problems?: string[];
   }): Promise<LlmResult<SceneScriptDraft>>;
@@ -491,6 +495,21 @@ export interface LlmGatewayPort {
     chapters: string[];
     sample: string;
   }): Promise<LlmResult<DocumentProfileDraft>>;
+
+  /**
+   * Who and where one stretch of a story meets: each character's look and
+   * what they are like, each place, and on each page who is there, how
+   * they feel, and where. `known` names the characters met before it, so
+   * it calls them the same.
+   */
+  sceneStory(input: {
+    documentTitle: string;
+    /** The pages it covers, and their text, each page marked "[page N]". */
+    from: number;
+    to: number;
+    text: string;
+    known: string[];
+  }): Promise<LlmResult<StoryDraft>>;
 
   /**
    * One drawing, as SVG markup with its own animation, from its brief.

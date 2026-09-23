@@ -9,6 +9,7 @@ import {
   labelLines,
   normalOf,
   pillBox,
+  placeBubble,
   placeLabels,
   placePill,
   segmentsOf,
@@ -389,5 +390,64 @@ describe('labels set beside their drawing', () => {
         stage: { w: 1200, h: 900 },
       }),
     ).toEqual([]);
+  });
+});
+
+describe('a speech bubble', () => {
+  const stage = { w: 1600, h: 900 };
+  const body = { x: 700, y: 200, w: 200, h: 600 };
+  const head: Point = [800, 280];
+  const text = 'You are holding the matches upside down';
+
+  it('stands up and to the side of the head, its tail toward it', () => {
+    const bubble = placeBubble({
+      text,
+      head,
+      body,
+      stage,
+      avoid: { boxes: [], segments: [] },
+    })!;
+    expect(bubble.y + bubble.h).toBeLessThanOrEqual(head[1]);
+    expect(bubble.x).toBeGreaterThan(head[0]);
+    expect(bubble.lines.length).toBeLessThanOrEqual(3);
+    expect(
+      Math.hypot(bubble.tail[0] - head[0], bubble.tail[1] - head[1]),
+    ).toBeLessThan(
+      Math.hypot(bubble.x - head[0], bubble.y + bubble.h - head[1]),
+    );
+  });
+
+  it('goes where nothing is, and nowhere when nothing is clear', () => {
+    const right = { x: 780, y: 0, w: 820, h: 900 };
+    const bubble = placeBubble({
+      text,
+      head,
+      body,
+      stage,
+      avoid: { boxes: [right], segments: [] },
+    })!;
+    expect(bubble.x + bubble.w).toBeLessThanOrEqual(right.x);
+    const everywhere = { x: 0, y: 0, w: 1600, h: 900 };
+    expect(
+      placeBubble({
+        text,
+        head,
+        body,
+        stage,
+        avoid: { boxes: [everywhere], segments: [] },
+      }),
+    ).toBeNull();
+  });
+
+  it('says a long speech in three lines at most, cut short past that', () => {
+    const bubble = placeBubble({
+      text: 'and then the fox said a great many things about lanterns and wicks and the wind and the sea and the boats coming home late',
+      head: [300, 500],
+      body: { x: 200, y: 400, w: 200, h: 400 },
+      stage,
+      avoid: { boxes: [], segments: [] },
+    })!;
+    expect(bubble.lines).toHaveLength(3);
+    expect(bubble.lines[2].endsWith('…')).toBe(true);
   });
 });

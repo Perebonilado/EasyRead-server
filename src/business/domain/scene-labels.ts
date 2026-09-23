@@ -728,6 +728,130 @@ function placeBand(input: {
   });
 }
 
+/** A character's words in a bubble: their size, the room round them, how wide it may be, and how far from the head it stands. */
+export const BUBBLE = {
+  size: 28,
+  min: 22,
+  width: 440,
+  padX: 22,
+  padY: 14,
+  gap: 20,
+  lines: 3,
+} as const;
+
+export interface BubblePlace {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  lines: string[];
+  size: number;
+  /** Where its tail reaches: toward the head, short of it. */
+  tail: Point;
+}
+
+/** Words broken greedily into lines no wider than a width. */
+function wrapped(words: string[], width: number, size: number): string[] {
+  const lines: string[] = [];
+  let current = '';
+  for (const word of words) {
+    const next = current ? `${current} ${word}` : word;
+    if (current && measureText(next, size, 600) > width) {
+      lines.push(current);
+      current = word;
+    } else current = next;
+  }
+  if (current) lines.push(current);
+  return lines;
+}
+
+/** A character's words in at most three lines inside a width, smaller if they must be, and cut short past that. */
+export function bubbleLines(
+  text: string,
+  width: number,
+): { lines: string[]; size: number } {
+  const words = text.trim().split(/\s+/).filter(Boolean);
+  for (let size = BUBBLE.size; size >= BUBBLE.min; size -= 2) {
+    const lines = wrapped(words, width, size);
+    if (lines.length <= BUBBLE.lines) return { lines, size };
+  }
+  const lines = wrapped(words, width, BUBBLE.min).slice(0, BUBBLE.lines);
+  let last = lines[lines.length - 1];
+  while (last.length > 1 && measureText(`${last}…`, BUBBLE.min, 600) > width)
+    last = last.slice(0, -1);
+  lines[lines.length - 1] = `${last.trimEnd()}…`;
+  return { lines, size: BUBBLE.min };
+}
+
+/**
+ * A character's words in a bubble by their head: up and to one side of
+ * it, or beside them level with it, or over them, whichever comes first
+ * clear of every word, ink and arrow on the stage and inside it; failing
+ * those, the clear spot nearest the head, above it rather than below.
+ * Null where there is no such room: the voice says the words all the same.
+ */
+export function placeBubble(input: {
+  text: string;
+  /** The speaker's head, and the box they are drawn in, on the stage. */
+  head: Point;
+  body: Rect;
+  stage: { w: number; h: number };
+  avoid: { boxes: Rect[]; segments: Segment[] };
+}): BubblePlace | null {
+  const set = bubbleLines(input.text, BUBBLE.width - BUBBLE.padX * 2);
+  const w =
+    Math.max(...set.lines.map((l) => measureText(l, set.size, 600))) +
+    BUBBLE.padX * 2;
+  const h = set.lines.length * set.size * LABEL.line + BUBBLE.padY * 2;
+  const [hx, hy] = input.head;
+  const { body } = input;
+  const g = BUBBLE.gap;
+  const candidates: Rect[] = [
+    { x: hx + g, y: hy - h - g, w, h },
+    { x: hx - w - g, y: hy - h - g, w, h },
+    { x: body.x + body.w + g, y: hy - h * 0.6, w, h },
+    { x: body.x - w - g, y: hy - h * 0.6, w, h },
+    { x: hx - w / 2, y: body.y - h - g, w, h },
+  ];
+  const margin = 8;
+  const clear = (one: Rect) =>
+    one.x >= margin &&
+    one.y >= margin &&
+    one.x + one.w <= input.stage.w - margin &&
+    one.y + one.h <= input.stage.h - margin &&
+    !input.avoid.boxes.some((other) => overlapArea(one, other) > 1) &&
+    !input.avoid.segments.some((segment) => crosses(segment, one, 4));
+  let box = candidates.find(clear) ?? null;
+  if (!box) {
+    let best: { box: Rect; score: number } | null = null;
+    for (let x = hx - w - 360; x <= hx + 360; x += 20)
+      for (let y = hy - h - 240; y <= hy + 80; y += 16) {
+        const one = { x, y, w, h };
+        const near = Math.hypot(
+          Math.min(x + w, Math.max(x, hx)) - hx,
+          Math.min(y + h, Math.max(y, hy)) - hy,
+        );
+        if (near < g || !clear(one)) continue;
+        const score = near + (y + h / 2 > hy ? 80 : 0);
+        if (!best || score < best.score) best = { box: one, score };
+      }
+    box = best?.box ?? null;
+  }
+  if (!box) return null;
+  // The tail: from the edge nearest the head, most of the way to it.
+  const nx = Math.min(box.x + box.w, Math.max(box.x, hx));
+  const ny = Math.min(box.y + box.h, Math.max(box.y, hy));
+  return {
+    x: round(box.x),
+    y: round(box.y),
+    w: round(w),
+    h: round(h),
+    lines: set.lines,
+    size: set.size,
+    tail: [round(nx + (hx - nx) * 0.45), round(ny + (hy - ny) * 0.45)],
+  };
+}
+
 /** The widths a segment spans inside a box's rows. */
 function clippedXs(segment: Segment, box: Rect): [number, number] | null {
   const [[x1, y1], [x2, y2]] = segment;

@@ -27,6 +27,8 @@ export interface DocumentProfile {
   tone: ProfileTone;
   /** The explainer always, and whichever others suit the book. */
   formats: SceneFormat[];
+  /** Whether it tells a story whose characters come back page after page. */
+  story: boolean;
 }
 
 /** What the model answers: the formats besides the explainer. */
@@ -35,6 +37,7 @@ export interface DocumentProfileDraft {
   kind: ProfileKind;
   tone: ProfileTone;
   formats: ('maths' | 'reading')[];
+  story?: boolean;
 }
 
 /** A document nothing is known about yet: the explainer, as every page has had. */
@@ -43,6 +46,7 @@ export const DEFAULT_PROFILE: DocumentProfile = {
   kind: 'other',
   tone: 'neutral',
   formats: ['explainer'],
+  story: false,
 };
 
 /** A draft made sound: known values only, and the explainer always first. */
@@ -53,15 +57,21 @@ export function profileOf(
   const formats = new Set<SceneFormat>(['explainer']);
   for (const format of draft.formats ?? [])
     if (SCENE_FORMATS.includes(format)) formats.add(format);
+  const kind = PROFILE_KINDS.includes(draft.kind as ProfileKind)
+    ? (draft.kind as ProfileKind)
+    : 'other';
   return {
     subject: (draft.subject ?? '').replace(/\s+/g, ' ').trim().slice(0, 80),
-    kind: PROFILE_KINDS.includes(draft.kind as ProfileKind)
-      ? (draft.kind as ProfileKind)
-      : 'other',
+    kind,
     tone: PROFILE_TONES.includes(draft.tone as ProfileTone)
       ? (draft.tone as ProfileTone)
       : 'neutral',
     formats: SCENE_FORMATS.filter((format) => formats.has(format)),
+    // A profile kept before stories were asked about: a novel or a play is one.
+    story:
+      typeof draft.story === 'boolean'
+        ? draft.story
+        : kind === 'fiction' || kind === 'drama',
   };
 }
 

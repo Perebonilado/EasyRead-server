@@ -658,6 +658,8 @@ export interface GatedDrawing {
   field: InkField | null;
   /** A passage set by code: the size of its words, in its own units, so its notes are never set larger. */
   words?: { size: number };
+  /** A character's head, in its own units: where their words come from. */
+  head?: [number, number];
 }
 
 export interface GateResult {

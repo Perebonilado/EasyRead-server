@@ -11,6 +11,7 @@ import {
   PROFILE_KINDS,
   PROFILE_TONES,
 } from '../../../business/domain/scene-profile';
+import { EXPRESSIONS, STORY_ROLES } from '../../../business/domain/scene-story';
 
 /**
  * Structured output contracts.
@@ -485,7 +486,15 @@ export const sceneScriptSchema = z.object({
   cast: z.array(
     z.object({
       id: z.string(),
-      kind: z.enum(['drawing', 'stat', 'words', 'math', 'plot', 'quote']),
+      kind: z.enum([
+        'drawing',
+        'stat',
+        'words',
+        'math',
+        'plot',
+        'quote',
+        'character',
+      ]),
       name: z.string(),
       brief: z.string().nullable(),
       motion: z.string().nullable(),
@@ -526,6 +535,8 @@ export const sceneScriptSchema = z.object({
           }),
         )
         .nullable(),
+      ref: z.string().nullable(),
+      state: z.enum(EXPRESSIONS).nullable(),
     }),
   ),
   steps: z.array(
@@ -556,6 +567,37 @@ export const sceneProfileSchema = z.object({
   kind: z.enum(PROFILE_KINDS),
   tone: z.enum(PROFILE_TONES),
   formats: z.array(z.enum(['maths', 'reading'])),
+  story: z.boolean(),
+});
+
+/** Who and where one stretch of a story meets, and who is on each of its pages. */
+export const sceneStorySchema = z.object({
+  characters: z.array(
+    z.object({
+      name: z.string(),
+      aliases: z.array(z.string()),
+      role: z.enum(STORY_ROLES),
+      look: z.string(),
+      traits: z.array(z.string()),
+    }),
+  ),
+  places: z.array(
+    z.object({
+      name: z.string(),
+      aliases: z.array(z.string()),
+      look: z.string(),
+    }),
+  ),
+  pages: z.array(
+    z.object({
+      page: z.number().int(),
+      summary: z.string(),
+      present: z.array(
+        z.object({ name: z.string(), mood: z.enum(EXPRESSIONS) }),
+      ),
+      place: z.string().nullable(),
+    }),
+  ),
 });
 
 export const lectureSketchSchema = z.object({

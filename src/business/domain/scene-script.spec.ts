@@ -26,6 +26,8 @@ const thing = (
   plot: null,
   quote: null,
   phrases: null,
+  ref: null,
+  state: null,
   ...extra,
 });
 
@@ -270,5 +272,102 @@ describe('the writer’s storyboard, mended', () => {
     expect(script.steps[1].stage).toBeNull();
     expect(script.steps[1].effects).toHaveLength(1);
     expect(mended.join(' ')).toMatch(/restated/);
+  });
+});
+
+describe('a story told with its own characters', () => {
+  const characters = [
+    { id: 'mira', name: 'Mira', aliases: ['Mira Arden'] },
+    { id: 'ember', name: 'Ember', aliases: ['the fox'] },
+  ];
+  const story = (): SceneScriptDraft => ({
+    fit: 'good',
+    fitReason: null,
+    title: 'The lantern goes out',
+    mood: 'serious',
+    beats: [
+      {
+        say: 'Mira stands at the end of the quay.',
+        pause: 'short',
+        delivery: 'hook',
+      },
+      {
+        say: 'A fox slips out of the dark and grins at her.',
+        pause: 'short',
+        delivery: 'explain',
+      },
+      { say: 'Mira gasps, then laughs.', pause: 'long', delivery: 'key' },
+    ],
+    cast: [
+      thing('girl', 'character', { ref: 'mira', state: 'sad' }),
+      // The writer's own words for the fox, and the same girl again.
+      thing('fox', 'character', {
+        ref: null,
+        name: 'The Fox',
+        state: 'grinning' as never,
+      }),
+      thing('mira-again', 'character', { ref: 'Mira Arden' }),
+      thing('ghost', 'character', { ref: 'nobody' }),
+      thing('quay', 'drawing'),
+    ],
+    steps: [
+      step(0, 'Mira stands', { layout: 'one', show: ['girl'] }),
+      step(1, 'A fox', {
+        layout: 'row',
+        show: ['fox', 'mira-again', 'ghost'],
+        effects: [{ target: 'fox.head', do: 'point' }],
+      }),
+      step(2, 'Mira gasps', {
+        effects: [{ target: 'mira-again.surprised', do: 'show' }],
+      }),
+      step(2, 'then laughs', {
+        effects: [{ target: 'girl.happy', do: 'show' }],
+      }),
+    ],
+  });
+
+  it("shows each character as the story's own, once, by id, name or alias", () => {
+    const { script, mended } = mendScript(story(), { characters });
+    const people = script.cast.filter((t) => t.kind === 'character');
+    expect(people).toEqual([
+      {
+        id: 'girl',
+        kind: 'character',
+        ref: 'mira',
+        name: 'Mira',
+        state: 'sad',
+        met: 0,
+        intro: [],
+      },
+      {
+        id: 'fox',
+        kind: 'character',
+        ref: 'ember',
+        name: 'Ember',
+        state: null,
+        met: 0,
+        intro: [],
+      },
+    ]);
+    // Someone the story does not have is set in type.
+    expect(script.cast.find((t) => t.id === 'ghost')).toMatchObject({
+      kind: 'words',
+    });
+    expect(mended.join(' ')).toContain(
+      '"nobody" is not one of the story\'s characters',
+    );
+    // The same girl twice is the one figure, wherever the storyboard names her.
+    expect(script.steps[1].stage!.show).toEqual(['fox', 'girl', 'ghost']);
+    expect(script.steps[2].effects).toEqual([
+      { target: 'girl', part: 'surprised', do: 'show' },
+    ]);
+    expect(script.steps[1].effects).toEqual([
+      { target: 'fox', part: 'head', do: 'point' },
+    ]);
+  });
+
+  it('sets characters in type in a book that is no story', () => {
+    const { script } = mendScript(story());
+    expect(script.cast.some((t) => t.kind === 'character')).toBe(false);
   });
 });

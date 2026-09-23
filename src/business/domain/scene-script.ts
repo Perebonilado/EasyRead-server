@@ -14,6 +14,12 @@
 import { checkArithmetic, markTerms, type MathLine } from './scene-math';
 import { sample, type PlotSpec } from './scene-plot';
 import { findPhrase, isVerbatim } from './scene-quote';
+import {
+  EXPRESSIONS,
+  SHEET_PARTS,
+  nameKey,
+  type Expression,
+} from './scene-story';
 
 /**
  * Rows are made per generator; a new generator is a new set of rows.
@@ -40,6 +46,7 @@ export const SCENE_EFFECTS = [
   'hide',
   'pulse',
   'zoom',
+  'say',
 ] as const;
 export type SceneEffectKind = (typeof SCENE_EFFECTS)[number];
 
@@ -178,7 +185,26 @@ export interface QuoteThing {
 /** A thing drawn by code and not by the artist. */
 export type CodeThing = MathThing | PlotThing | QuoteThing;
 
-export type SceneThing = DrawingThing | StatThing | WordsThing | CodeThing;
+/**
+ * One of the story's characters: drawn once for the whole book, and the
+ * same figure on every page they are on.
+ */
+export interface CharacterThing {
+  id: string;
+  kind: 'character';
+  /** Their id in the story. */
+  ref: string;
+  name: string;
+  /** The face they come on with; null keeps the one the last page left them with. */
+  state: Expression | null;
+  /** Where they come in the order the book meets its characters: the first met stands on the left. */
+  met: number;
+  /** On the page the book meets them: what they are like, set beside them. */
+  intro: string[];
+}
+
+export type SceneThing =
+  DrawingThing | StatThing | WordsThing | CodeThing | CharacterThing;
 
 /** The names of the parts the voice can point at in a thing. */
 export function partNames(thing: SceneThing): string[] {
@@ -194,6 +220,7 @@ export function partNames(thing: SceneThing): string[] {
   if (thing.kind === 'plot')
     return ['curve', ...thing.plot.points.map((p) => p.name)];
   if (thing.kind === 'quote') return thing.phrases.map((p) => p.name);
+  if (thing.kind === 'character') return [...SHEET_PARTS];
   return [];
 }
 
@@ -202,6 +229,7 @@ export function stateNames(thing: SceneThing): string[] {
   if (thing.kind === 'drawing') return thing.states.map((s) => s.name);
   if (thing.kind === 'math')
     return thing.lines.slice(1).map((_, k) => `line ${k + 2}`);
+  if (thing.kind === 'character') return [...EXPRESSIONS];
   return [];
 }
 
@@ -265,7 +293,8 @@ export interface SceneScriptDraft {
   }[];
   cast: {
     id: string;
-    kind: 'drawing' | 'stat' | 'words' | 'math' | 'plot' | 'quote';
+    kind:
+      'drawing' | 'stat' | 'words' | 'math' | 'plot' | 'quote' | 'character';
     /** A drawing's caption, a stat's caption, the words themselves. */
     name: string;
     brief: string | null;
@@ -292,6 +321,9 @@ export interface SceneScriptDraft {
     /** A quotation, word for word from the page. */
     quote: string | null;
     phrases: { name: string; phrase: string; note: string | null }[] | null;
+    /** A character: their id in the story, and the face they come on with. */
+    ref: string | null;
+    state: Expression | null;
   }[];
   steps: {
     beat: number;
@@ -417,6 +449,8 @@ export function mendScript(
     material?: string;
     /** The formats the document may use; a kind of another is set in type. */
     formats?: readonly SceneFormat[];
+    /** The story's characters, when the book is a story: who a character may be. */
+    characters?: readonly { id: string; name: string; aliases: string[] }[];
   } = {},
 ): MendedScript {
   const problems: string[] = [];
@@ -469,6 +503,36 @@ export function mendScript(
       mended.push(...made.mended);
       problems.push(...made.problems);
       cast.push(made.thing);
+      return;
+    }
+    if (raw.kind === 'character') {
+      const who = storyCharacter(options.characters ?? [], raw.ref, name);
+      if (!who) {
+        mended.push(
+          `${id}: "${raw.ref ?? name}" is not one of the story's characters; set in type`,
+        );
+        cast.push({ id, kind: 'words', text: name, style: 'keyword' });
+        return;
+      }
+      // One figure a character: a second of them is the first again.
+      const again = cast.find(
+        (thing) => thing.kind === 'character' && thing.ref === who.id,
+      );
+      if (again) {
+        used.delete(id);
+        for (const key of [raw.id, raw.id.toLowerCase(), slug(raw.id)])
+          idFor.set(key, again.id);
+        return;
+      }
+      cast.push({
+        id,
+        kind: 'character',
+        ref: who.id,
+        name: who.name,
+        state: raw.state && EXPRESSIONS.includes(raw.state) ? raw.state : null,
+        met: 0,
+        intro: [],
+      });
       return;
     }
     const brief = clean(raw.brief);
@@ -700,6 +764,22 @@ export function mendScript(
   };
 }
 
+/** The story's character the writer means: by their id, else by a name or alias. */
+function storyCharacter(
+  characters: readonly { id: string; name: string; aliases: string[] }[],
+  ref: string | null,
+  name: string,
+): { id: string; name: string } | null {
+  const byRef = characters.find((c) => c.id === clean(ref));
+  if (byRef) return byRef;
+  const keys = [clean(ref), name].map(nameKey).filter(Boolean);
+  return (
+    characters.find((c) =>
+      [c.id, c.name, ...c.aliases].map(nameKey).some((k) => keys.includes(k)),
+    ) ?? null
+  );
+}
+
 /**
  * A thing code draws, made sound: working whose sums hold, a graph whose
  * function has values, a quotation that is the page's own words. One the
@@ -861,6 +941,11 @@ function effectOf(
   const kind: SceneEffectKind = SCENE_EFFECTS.includes(effect.do)
     ? effect.do
     : 'pulse';
+  // Words in a bubble come only from the story's characters.
+  if (kind === 'say')
+    return thing?.kind === 'character'
+      ? { target: id, part: null, do: 'say' }
+      : `say on ${id}, which is not one of the story's characters`;
   const parts = thing ? partNames(thing) : [];
   const states = thing ? stateNames(thing) : [];
   if (!partName || (!parts.length && !states.length)) {

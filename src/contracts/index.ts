@@ -899,7 +899,8 @@ export interface VisualSetDto {
 export type SceneTiming = 'voice' | 'aligned' | 'estimated';
 export type SceneLayoutName =
   'one' | 'row' | 'grid' | 'compare' | 'hub' | 'cycle' | 'focus' | 'stack';
-export type SceneEffectName = 'point' | 'show' | 'hide' | 'pulse' | 'zoom';
+export type SceneEffectName =
+  'point' | 'show' | 'hide' | 'pulse' | 'zoom' | 'say';
 export type SceneEnterName = 'pop' | 'fade' | 'slide' | 'wipe' | 'grow';
 /** The page's feeling: which music plays under the voice. */
 export type SceneMoodName =
@@ -987,6 +988,19 @@ export interface SceneEffectDto {
   do: SceneEffectName;
   /** A pulse added only because nothing else happened for a while: seen, not heard. */
   filler?: boolean;
+  /** A character speaking: their words, in a bubble at their head until `untilMs`. */
+  say?: { id: string; text: string; untilMs: number };
+}
+
+/** A speech bubble as the stage sets it: its box, its words, and the point its tail reaches toward. */
+export interface SceneBubbleDto {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  lines: string[];
+  size: number;
+  tail: [number, number];
 }
 
 /** Where a thing stands at one step, in the staging's design units. */
@@ -1055,6 +1069,11 @@ export interface SceneDto {
        * made before they were placed.
        */
       pills?: Record<string, ScenePillDto | null>[];
+      /**
+       * Each speech bubble, by its say's id: where it goes at the step it is
+       * said in, or null where there is no room, and it is not shown.
+       */
+      bubbles?: Record<string, SceneBubbleDto | null>;
     }
   >;
 }

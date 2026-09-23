@@ -20,6 +20,7 @@ import {
   composeScene,
   describeStep,
   fullestStep,
+  hiddenAt,
   thumbSvg,
 } from '../../business/domain/scene-compose';
 import { rasterise } from '../../business/domain/scene-raster';
@@ -881,12 +882,15 @@ export class SceneProcessor {
     const step = scene.steps[index];
     const pngs = new Map<string, Buffer>();
     const scale = THUMB_WIDTH / scene.stagings.box.w;
+    // As the step stands at its end: its states shown, a character's face on.
+    const until = (scene.steps[index + 1]?.atMs ?? scene.durationMs) - 1;
     for (const id of step?.show ?? []) {
       const thing = scene.things.find((t) => t.id === id);
       const place = scene.stagings.box.places[index]?.[id];
       if (thing?.kind !== 'drawing' || !place) continue;
-      const hide = thing.hidden.length
-        ? `<style>${thing.hidden.map((h) => `[id="${h.replace(/"/g, '')}"]`).join(',')}{display:none}</style>`
+      const hidden = hiddenAt(scene, thing, until);
+      const hide = hidden.length
+        ? `<style>${hidden.map((h) => `[id="${h.replace(/"/g, '')}"]`).join(',')}{display:none}</style>`
         : '';
       const svg = hide
         ? thing.svg.replace(/(<svg\b[^>]*>)/i, `$1${hide}`)

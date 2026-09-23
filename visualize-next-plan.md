@@ -15,6 +15,31 @@ The rule that made the rebuild work carries through: **models decide what, code 
 - how the voice is paced;
 - when a sound plays.
 
+## Status, 2026-09-24
+
+All six phases are built and committed on `visualize-next` in both repos, locally; nothing is pushed.
+
+- **Phase 1 (the voice, directed):** built. The Gemini pilot is written and tested against a fake; the live test waits for a key.
+- **Phase 2 (sound design):** built.
+- **Phase 3 (a readable stage):** built. The frame audit finds nothing on any sample page.
+- **Phase 4 (teaching by subject):** built: the profile, `math`, `plot`, `quote` and `stack`. A passage's notes go in its margin, or are listed under it when the room is narrow. Not built: 4b (timelines, charts, an admin override of the profile).
+- **Phase 5 (stories that continue):** built:
+  - the story bible (`story.json`) and the cast drawn once (`cast.json`);
+  - the `character` kind, with one face at a time;
+  - first met stands on the left;
+  - trait notes on the page the book meets someone, while there is room;
+  - speech bubbles.
+
+  Not built:
+  - places as backdrops behind the stage;
+  - the "previously" opening;
+  - a who's-who panel;
+  - character voices, which need `speech/kokoro/voice.py` to take a voice per piece and the Railway voice service to be redeployed.
+- **Phase 6 (the yardstick):** `npm run scene:bench -- <parts dir> [--stills] [--against report.json]`.
+  - **First run:** 5 of 5 pages have nothing found by the audit, and 0 of 5 pass the text bar.
+  - **Why:** the stage's own words (labels at 24 units, arrow labels at 26, bubbles at 28) come out at 11–13px on a 560px pane, and at 8–9px at 390px.
+  - **The fix:** a floor of 30 units in the box staging, which is 14px on the pane. It costs the drawings room and cuts more labels short, so it waits on a decision.
+
 ---
 
 ## 0. Ground rules

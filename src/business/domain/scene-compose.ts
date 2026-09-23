@@ -901,6 +901,31 @@ function inksOf(
   return out;
 }
 
+/**
+ * A drawing's groups still hidden at `t`: every one hidden at the start
+ * but the states shown by then and not hidden again, and the labels
+ * pointed at. What a still of that moment shows, a character's face
+ * included.
+ */
+export function hiddenAt(
+  scene: SceneDto,
+  thing: Extract<SceneThingDto, { kind: 'drawing' }>,
+  t: number,
+): string[] {
+  const hidden = new Set(thing.hidden);
+  const mine = scene.effects
+    .filter((e) => e.target === thing.id && e.part && e.atMs <= t)
+    .sort((a, b) => a.atMs - b.atMs);
+  for (const effect of mine) {
+    const state = thing.states[effect.part!];
+    const label = thing.labels[effect.part!];
+    if (effect.do === 'show' && state) hidden.delete(state);
+    if (effect.do === 'hide' && state) hidden.add(state);
+    if (effect.do === 'point' && label) hidden.delete(label);
+  }
+  return [...hidden];
+}
+
 /** The step to show on the page's card: the fullest, the later one on a tie. */
 export function fullestStep(scene: SceneDto): number {
   let best = 0;
@@ -936,8 +961,21 @@ export function thumbSvg(
   scene: SceneDto,
   pngs: ReadonlyMap<string, Buffer>,
 ): string {
-  const staging = scene.stagings.box;
-  const index = fullestStep(scene);
+  return stepSvg(scene, pngs, 'box', fullestStep(scene));
+}
+
+/**
+ * One step of a staging as a still: its drawings from their PNGs, their
+ * captions and the labels shown by then, the numbers and the words, and
+ * the arrows as dashes. The card's still, and the bench's contact sheet.
+ */
+export function stepSvg(
+  scene: SceneDto,
+  pngs: ReadonlyMap<string, Buffer>,
+  stagingName: StagingName,
+  index: number,
+): string {
+  const staging = scene.stagings[stagingName];
   const step = scene.steps[index];
   if (!step)
     return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${staging.w} ${staging.h}"><rect width="${staging.w}" height="${staging.h}" fill="${STAGE_PAINT.ground}"/></svg>`;

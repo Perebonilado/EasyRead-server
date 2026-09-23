@@ -434,6 +434,77 @@ These are drawings made by code. They reuse the drawing contract, so the client 
 
 ---
 
+## Phase 7: what Phases 4 and 5 left
+
+Asked for on 2026-09-24: character voices, places as backdrops with a "previously on" opening, and timelines and charts. Built in this order: 7.4, 7.2, 7.1, 7.3, since the opening needs the backdrops and the voice's lead-in.
+
+### 7.1 Character voices
+
+- **The story says what kind of voice each character has.** The story reader gives each character a voice type: `girl`, `boy`, `woman`, `man`, `old woman`, `old man` or `creature`. The merge keeps the first type it is given.
+- **Code picks the voice, the same one every time.**
+  - For each engine, each type has a palette of voices, and a speed (children a touch quicker, old voices slower).
+  - A character gets the next voice in their type's palette, in the order the book meets them. The narrator's own voice is never used for a character.
+  - Kokoro palettes, for example: `girl`: af_sky, af_nova, bf_lily; `old man`: bm_george, am_santa, bm_daniel.
+  - Gemini palettes take its named voices, plus a line of direction: "as Mira, a young girl, brave and stubborn".
+- **A quoted line is said in the character's voice.**
+  - A sentence with a `say` effect is split at its quotation marks. The quoted words go in the character's voice; the rest ("says the fox") stays in the narrator's.
+  - A part with no letters of its own is never split off, so every part makes sound.
+  - Each sentence's start is its first part's start, so the timing code is unchanged.
+- **The Kokoro service** (`speech/kokoro/voice.py`) takes an optional `voice` on each piece and a `lead` (seconds of silence before the first piece) on `/v1/audio/speech`.
+  - Both are optional, so an older worker's requests mean what they did. `/health` says `version: 6`.
+  - The Voice service is redeployed from `speech/kokoro`. The Tutor Voice uses neither and is left as it is.
+- **The Gemini adapter** sends each run of pieces in the same voice as one request and joins the audio. It adds `lead` as silence at the start. It is tested against a fake until the key arrives.
+
+### 7.2 Places as backdrops
+
+- **The story reader gives each place a sound** from the ambience palette, or none.
+- **Each place is drawn once per book, as a set.**
+  - DeepSeek draws it with a set brief: the whole frame filled edge to edge, no people and no text, muted colours, and the lower middle kept simple, where characters stand.
+  - The canvas is 1600×900.
+  - The gate keeps the background, does not frame the set to its ink, and does not send a still set back.
+  - Sets are kept in `sets.json` beside `cast.json` and purged with the document.
+- **The writer shows a place with a `place` kind** and a `ref`.
+  - Shown in a step, the place becomes the backdrop from that step until another place is shown. It never takes a slot.
+  - A step that shows only a place is an establishing shot: the empty scene.
+  - On a story page, the page's own place from the story is the backdrop until the writer shows another.
+- **Contract:** a step gains `backdrop?: string | null`; the set is a drawing with `backdrop: true`.
+- **Client.**
+  - A backdrop layer sits under everything inside the camera. The set covers the stage (`slice`) at half opacity on the paper, and crossfades over 700 ms when it changes.
+  - The stage's words get a paper-coloured halo so they stay readable over it.
+  - The set's sound plays while it is the backdrop.
+- **Stills** (the card and the bench) show the backdrop faded.
+
+### 7.3 "Previously on"
+
+- **Who comes back.** On a story page, the characters who were on the page before and are on this one come back for a 2-second opening before the voice starts:
+  - at most three, the first met on the left;
+  - with the faces the last page left them with;
+  - on the last page's backdrop.
+- **Then the page begins.** Faces change to the ones the writer gave as the first step lands.
+- **The voice starts 2 seconds in:** Kokoro's `lead`, or Gemini's added silence. Every word time moves with it.
+- **Older voice service.** One that ignores `lead` starts speaking at once. Compose then drops the opening: it is kept only when the first word comes after 1.2 s.
+
+### 7.4 Timelines and charts (4b)
+
+- **`timeline`: events, each `{ when, name }`, along an axis.**
+  - Events are placed by date when every `when` is a year or a number, and evenly in order otherwise.
+  - Each event is a part the voice can point at.
+  - The axis draws itself, and the events arrive in turn, on entry.
+  - A date must be the page's own.
+- **`chart`: bars, or a line, from the page's own numbers.**
+  - Every value is checked against the page, so a number the page does not give goes back.
+  - The axis starts at zero with nice ticks. Each value is labelled, and each bar is a part.
+  - The bars grow in on entry. At most eight.
+- **Available to every book**, as part of the explainer.
+  - The DTO's `source` gains `timeline` and `chart`; the client needs only the type.
+  - The writer's draft gains `timeline` and `chart` fields, null on every other kind.
+
+### Verifying it
+
+For each item: specs, `scene:try` on a sample page (the lantern story for 7.1 to 7.3), the stage harness, and the bench. There is a local commit per item. The Voice service is redeployed after 7.1's local checks, then tested live.
+
+---
+
 ## Order of work
 
 1. **Phase 1:** delivery tags, the voice line-up, and the Gemini adapter (live test when the key arrives).

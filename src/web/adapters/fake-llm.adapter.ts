@@ -632,6 +632,8 @@ export class FakeLlmAdapter implements LlmGatewayPort {
       phrases: null,
       ref: null,
       state: null,
+      timeline: null,
+      chart: null,
     };
     return Promise.resolve({
       value: {
@@ -668,6 +670,8 @@ export class FakeLlmAdapter implements LlmGatewayPort {
             phrases: null,
             ref: null,
             state: null,
+            timeline: null,
+            chart: null,
           },
           {
             id: 'idea',

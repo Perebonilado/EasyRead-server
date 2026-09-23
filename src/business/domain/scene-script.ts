@@ -11,9 +11,11 @@
  * counted, so no miscount can move a picture off its words.
  */
 
+import { MAX_BARS, numbersIn, type ChartSpec } from './scene-chart';
 import { checkArithmetic, markTerms, type MathLine } from './scene-math';
 import { sample, type PlotSpec } from './scene-plot';
 import { findPhrase, isVerbatim } from './scene-quote';
+import { MAX_EVENTS, type TimelineSpec } from './scene-timeline';
 import {
   EXPRESSIONS,
   SHEET_PARTS,
@@ -182,8 +184,38 @@ export interface QuoteThing {
   phrases: { name: string; phrase: string; note: string | null }[];
 }
 
+/** The page's events along an axis, drawn by code. */
+export interface TimelineThing {
+  id: string;
+  kind: 'timeline';
+  name: string;
+  timeline: TimelineSpec;
+}
+
+/** Bars or a line from the page's own numbers, drawn by code. */
+export interface ChartThing {
+  id: string;
+  kind: 'chart';
+  name: string;
+  chart: ChartSpec;
+}
+
 /** A thing drawn by code and not by the artist. */
-export type CodeThing = MathThing | PlotThing | QuoteThing;
+export type CodeThing =
+  MathThing | PlotThing | QuoteThing | TimelineThing | ChartThing;
+
+/** The kinds code draws itself. */
+export const CODE_KINDS = [
+  'math',
+  'plot',
+  'quote',
+  'timeline',
+  'chart',
+] as const;
+
+/** Whether a thing is one code draws, not the artist. */
+export const isCodeThing = (thing: { kind: string }): thing is CodeThing =>
+  (CODE_KINDS as readonly string[]).includes(thing.kind);
 
 /**
  * One of the story's characters: drawn once for the whole book, and the
@@ -220,6 +252,9 @@ export function partNames(thing: SceneThing): string[] {
   if (thing.kind === 'plot')
     return ['curve', ...thing.plot.points.map((p) => p.name)];
   if (thing.kind === 'quote') return thing.phrases.map((p) => p.name);
+  if (thing.kind === 'timeline')
+    return thing.timeline.events.map((e) => e.name || e.when);
+  if (thing.kind === 'chart') return thing.chart.bars.map((b) => b.label);
   if (thing.kind === 'character') return [...SHEET_PARTS];
   return [];
 }
@@ -294,7 +329,15 @@ export interface SceneScriptDraft {
   cast: {
     id: string;
     kind:
-      'drawing' | 'stat' | 'words' | 'math' | 'plot' | 'quote' | 'character';
+      | 'drawing'
+      | 'stat'
+      | 'words'
+      | 'math'
+      | 'plot'
+      | 'quote'
+      | 'timeline'
+      | 'chart'
+      | 'character';
     /** A drawing's caption, a stat's caption, the words themselves. */
     name: string;
     brief: string | null;
@@ -324,6 +367,14 @@ export interface SceneScriptDraft {
     /** A character: their id in the story, and the face they come on with. */
     ref: string | null;
     state: Expression | null;
+    /** A timeline: the page's events in order, each when and what. */
+    timeline: { when: string; name: string }[] | null;
+    /** A chart: bars or a line, from the page's own numbers. */
+    chart: {
+      kind: 'bar' | 'line';
+      unit: string | null;
+      bars: { label: string; value: number }[];
+    } | null;
   }[];
   steps: {
     beat: number;
@@ -498,7 +549,7 @@ export function mendScript(
       });
       return;
     }
-    if (raw.kind === 'math' || raw.kind === 'plot' || raw.kind === 'quote') {
+    if (isCodeThing(raw)) {
       const made = codeThing(id, raw, name, formats, options.material);
       mended.push(...made.mended);
       problems.push(...made.problems);
@@ -875,6 +926,77 @@ function codeThing(
             .map((p) => ({ x: p.x, name: clean(p.name) })),
           xLabel: clean(plot.xLabel) || null,
           yLabel: clean(plot.yLabel) || null,
+        },
+      },
+      problems,
+      mended,
+    };
+  }
+  if (raw.kind === 'timeline') {
+    const events = (raw.timeline ?? [])
+      .map((e) => ({ when: clean(e.when), name: clean(e.name) }))
+      .filter((e) => e.when || e.name)
+      .slice(0, MAX_EVENTS);
+    if (events.length < 2) {
+      problems.push(`The timeline "${raw.id}" needs at least two events.`);
+      return words('a timeline with fewer than two events');
+    }
+    // A date the page does not give goes back, as a sum that does not add
+    // up does: every number in it must be one the page gives.
+    if (material) {
+      const given = new Set(numbersIn(material).map(Math.abs));
+      const unknown = events.filter((e) =>
+        numbersIn(e.when).some((n) => !given.has(Math.abs(n))),
+      );
+      if (unknown.length)
+        problems.push(
+          `The timeline "${raw.id}" has dates the page does not give: ${unknown.map((e) => e.when).join(', ')}. Use only the page's own dates.`,
+        );
+    }
+    return {
+      thing: {
+        id,
+        kind: 'timeline',
+        name: clean(raw.name),
+        timeline: { events },
+      },
+      problems,
+      mended,
+    };
+  }
+  if (raw.kind === 'chart') {
+    const bars = (raw.chart?.bars ?? [])
+      .map((b) => ({ label: clean(b.label), value: Number(b.value) }))
+      .filter((b) => b.label && Number.isFinite(b.value))
+      .slice(0, MAX_BARS);
+    if (bars.length < 2) {
+      problems.push(
+        `The chart "${raw.id}" needs at least two of the page's numbers.`,
+      );
+      return words('a chart with fewer than two numbers');
+    }
+    if (material) {
+      const given = numbersIn(material).map(Math.abs);
+      const unknown = bars.filter(
+        (b) =>
+          !given.some(
+            (n) => Math.abs(n - Math.abs(b.value)) <= 1e-9 * Math.max(1, n),
+          ),
+      );
+      if (unknown.length)
+        problems.push(
+          `The chart "${raw.id}" has numbers the page does not give: ${unknown.map((b) => `${b.label} ${b.value}`).join(', ')}. Chart only the page's own numbers.`,
+        );
+    }
+    return {
+      thing: {
+        id,
+        kind: 'chart',
+        name: clean(raw.name),
+        chart: {
+          kind: raw.chart?.kind === 'line' ? 'line' : 'bar',
+          unit: clean(raw.chart?.unit) || null,
+          bars,
         },
       },
       problems,

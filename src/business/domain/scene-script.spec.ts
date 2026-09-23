@@ -28,6 +28,8 @@ const thing = (
   phrases: null,
   ref: null,
   state: null,
+  timeline: null,
+  chart: null,
   ...extra,
 });
 
@@ -369,5 +371,103 @@ describe('a story told with its own characters', () => {
   it('sets characters in type in a book that is no story', () => {
     const { script } = mendScript(story());
     expect(script.cast.some((t) => t.kind === 'character')).toBe(false);
+  });
+});
+
+describe('timelines and charts, held to the page', () => {
+  const page =
+    'Scott set sail in 1910. Amundsen reached the pole in 1911, and Scott in 1912. Of the water a home uses, 34% goes on showers and 22% on the toilet.';
+  const draft = (cast: SceneScriptDraft['cast']): SceneScriptDraft => ({
+    fit: 'good',
+    fitReason: null,
+    title: 'The race to the pole',
+    mood: 'curious',
+    beats: [
+      {
+        say: 'Two teams raced to the South Pole.',
+        pause: 'short',
+        delivery: 'hook',
+      },
+      { say: 'Amundsen got there first.', pause: 'short', delivery: 'key' },
+      { say: 'Scott arrived a month later.', pause: 'long', delivery: 'recap' },
+    ],
+    cast,
+    steps: [
+      step(0, 'Two teams', { layout: 'one', show: cast.map((c) => c.id) }),
+    ],
+  });
+
+  it("keeps a timeline of the page's own dates, and sends back one it made up", () => {
+    const good = mendScript(
+      draft([
+        thing('race', 'timeline', {
+          timeline: [
+            { when: '1910', name: 'Scott sets sail' },
+            { when: '1911', name: 'Amundsen reaches the pole' },
+          ],
+        }),
+      ]),
+      { material: page },
+    );
+    expect(good.problems).toEqual([]);
+    expect(good.script.cast[0]).toMatchObject({
+      kind: 'timeline',
+      timeline: { events: [{ when: '1910' }, { when: '1911' }] },
+    });
+    const made = mendScript(
+      draft([
+        thing('race', 'timeline', {
+          timeline: [
+            { when: '1910', name: 'Scott sets sail' },
+            { when: '1913', name: 'The news reaches London' },
+          ],
+        }),
+      ]),
+      { material: page },
+    );
+    expect(made.problems.join(' ')).toContain(
+      'dates the page does not give: 1913',
+    );
+  });
+
+  it("keeps a chart of the page's own numbers, and sends back one it made up", () => {
+    const good = mendScript(
+      draft([
+        thing('water', 'chart', {
+          chart: {
+            kind: 'bar',
+            unit: '%',
+            bars: [
+              { label: 'Shower', value: 34 },
+              { label: 'Toilet', value: 22 },
+            ],
+          },
+        }),
+      ]),
+      { material: page },
+    );
+    expect(good.problems).toEqual([]);
+    expect(good.script.cast[0]).toMatchObject({
+      kind: 'chart',
+      chart: { kind: 'bar', unit: '%' },
+    });
+    const made = mendScript(
+      draft([
+        thing('water', 'chart', {
+          chart: {
+            kind: 'bar',
+            unit: '%',
+            bars: [
+              { label: 'Shower', value: 34 },
+              { label: 'Garden', value: 9 },
+            ],
+          },
+        }),
+      ]),
+      { material: page },
+    );
+    expect(made.problems.join(' ')).toContain(
+      'numbers the page does not give: Garden 9',
+    );
   });
 });

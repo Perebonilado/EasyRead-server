@@ -7,9 +7,11 @@
  * audit sees it the same way.
  */
 import type { Callout } from './scene-callouts';
+import { renderChart } from './scene-chart';
 import { renderMath } from './scene-math';
 import { renderPlot } from './scene-plot';
 import { renderQuote } from './scene-quote';
+import { renderTimeline } from './scene-timeline';
 import { renderSvg } from './scene-raster';
 import type { CodeThing } from './scene-script';
 import { framedBox, type GatedDrawing } from './scene-svg';
@@ -30,6 +32,14 @@ export async function drawByCode(thing: CodeThing): Promise<GatedDrawing> {
     const plot = renderPlot(thing.plot);
     ({ svg, viewBox, parts, callouts } = plot);
     // Its curve draws itself as it arrives.
+    moves = true;
+  } else if (thing.kind === 'timeline') {
+    // Its axis draws itself, and its events come in along it.
+    ({ svg, viewBox, parts } = renderTimeline(thing.timeline));
+    moves = true;
+  } else if (thing.kind === 'chart') {
+    // Its bars grow, or its line draws itself.
+    ({ svg, viewBox, parts } = renderChart(thing.chart));
     moves = true;
   } else {
     const quote = renderQuote({ text: thing.text, phrases: thing.phrases });

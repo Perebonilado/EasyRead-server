@@ -947,8 +947,8 @@ export type SceneThingDto =
       callouts?: Record<string, string>;
       /** Of those, the parts whose label waits until the voice points at the part. */
       calloutsLater?: string[];
-      /** Drawn by code, not by the artist: working, a graph, or the text's own words. */
-      source?: 'math' | 'plot' | 'quote';
+      /** Drawn by code, not by the artist: working, a graph, the text's own words, a timeline or a chart. */
+      source?: 'math' | 'plot' | 'quote' | 'timeline' | 'chart';
     }
   | { id: string; kind: 'stat'; value: string; caption: string }
   | {

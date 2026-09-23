@@ -493,6 +493,8 @@ export const sceneScriptSchema = z.object({
         'math',
         'plot',
         'quote',
+        'timeline',
+        'chart',
         'character',
       ]),
       name: z.string(),
@@ -537,6 +539,16 @@ export const sceneScriptSchema = z.object({
         .nullable(),
       ref: z.string().nullable(),
       state: z.enum(EXPRESSIONS).nullable(),
+      timeline: z
+        .array(z.object({ when: z.string(), name: z.string() }))
+        .nullable(),
+      chart: z
+        .object({
+          kind: z.enum(['bar', 'line']),
+          unit: z.string().nullable(),
+          bars: z.array(z.object({ label: z.string(), value: z.number() })),
+        })
+        .nullable(),
     }),
   ),
   steps: z.array(

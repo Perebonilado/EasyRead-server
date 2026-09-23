@@ -26,11 +26,11 @@ import {
 import { rasterise } from '../../business/domain/scene-raster';
 import {
   SCENE_GENERATOR_VERSION,
+  isCodeThing,
   mendScript,
   quietStretches,
   wordsOf,
   type CharacterThing,
-  type CodeThing,
   type DrawingThing,
   type SceneScript,
 } from '../../business/domain/scene-script';
@@ -614,14 +614,10 @@ export class SceneProcessor {
       ]),
     );
     const out = new Map<string, GatedDrawing | null>();
-    // What code draws itself: working, graphs, the text's own words. No
-    // model is asked, and one that cannot be set is a card, as a drawing is.
-    const coded = script.cast.filter(
-      (thing): thing is CodeThing =>
-        thing.kind === 'math' ||
-        thing.kind === 'plot' ||
-        thing.kind === 'quote',
-    );
+    // What code draws itself: working, graphs, the text's own words,
+    // timelines and charts. No model is asked, and one that cannot be set
+    // is a card, as a drawing is.
+    const coded = script.cast.filter(isCodeThing);
     for (const thing of coded)
       out.set(
         thing.id,

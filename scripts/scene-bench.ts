@@ -31,6 +31,7 @@ import {
 import { rasterise } from '../src/business/domain/scene-raster';
 import {
   SCENE_GENERATOR_VERSION,
+  isCodeThing,
   type SceneScript,
 } from '../src/business/domain/scene-script';
 import type { GatedDrawing } from '../src/business/domain/scene-svg';
@@ -172,11 +173,7 @@ async function main(): Promise<void> {
     const parts = JSON.parse(readFileSync(join(dir, file), 'utf8')) as Parts;
     const drawings = new Map(parts.drawings);
     for (const thing of parts.script.cast)
-      if (
-        thing.kind === 'math' ||
-        thing.kind === 'plot' ||
-        thing.kind === 'quote'
-      )
+      if (isCodeThing(thing))
         drawings.set(thing.id, await drawByCode(thing).catch(() => null));
     const { scene, audit } = composeScene({
       script: parts.script,

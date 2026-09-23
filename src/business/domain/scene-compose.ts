@@ -39,7 +39,12 @@ import {
   type Rect,
   type StagingName,
 } from './scene-layout';
-import type { SceneScript, SceneStep, SceneThing } from './scene-script';
+import {
+  isCodeThing,
+  type SceneScript,
+  type SceneStep,
+  type SceneThing,
+} from './scene-script';
 import { EXPRESSIONS } from './scene-story';
 import type { GatedDrawing } from './scene-svg';
 import { anchorMs, quietGaps, spaced, type TimedBeat } from './scene-timing';
@@ -108,13 +113,16 @@ export function thingDto(
   // What a thing drawn by code is called on a card, if it could not be drawn.
   const called =
     thing.name ||
-    (thing.kind === 'math'
-      ? 'Working'
-      : thing.kind === 'plot'
-        ? 'Graph'
-        : thing.kind === 'quote'
-          ? 'Quotation'
-          : thing.id);
+    (
+      {
+        math: 'Working',
+        plot: 'Graph',
+        quote: 'Quotation',
+        timeline: 'Timeline',
+        chart: 'Chart',
+      } as Record<string, string>
+    )[thing.kind] ||
+    thing.id;
   if (!drawing)
     return { id: thing.id, kind: 'words', text: called, style: 'card' };
   return {
@@ -129,9 +137,7 @@ export function thingDto(
     hidden: [],
     moves: drawing.moves,
     ambience: thing.kind === 'drawing' ? thing.sound : null,
-    ...(thing.kind === 'math' || thing.kind === 'plot' || thing.kind === 'quote'
-      ? { source: thing.kind }
-      : {}),
+    ...(isCodeThing(thing) ? { source: thing.kind } : {}),
     ...(drawing.callouts.length
       ? {
           callouts: Object.fromEntries(
@@ -820,9 +826,11 @@ function textBox(
   centreX: number,
   top: number,
   weight: 600 | 700 = 600,
+  /** A line's height, in sizes: a number alone, with nothing below its baseline, is shorter than words. */
+  line = 1.2,
 ): Rect {
   const w = Math.max(0, ...lines.map((l) => measureText(l, size, weight)));
-  return { x: centreX - w / 2, y: top, w, h: lines.length * size * 1.2 };
+  return { x: centreX - w / 2, y: top, w, h: lines.length * size * line };
 }
 
 /** Every run of words on the stage at one step, with whose it is. */
@@ -844,7 +852,15 @@ function wordsOf(
       out.push({
         owner: id,
         what: 'value',
-        box: textBox([thing.value], at.size ?? 80, at.x + at.w / 2, at.y, 700),
+        // As the layout keeps room for it: its figures and no more.
+        box: textBox(
+          [thing.value],
+          at.size ?? 80,
+          at.x + at.w / 2,
+          at.y,
+          700,
+          1.1,
+        ),
       });
     if (c)
       out.push({

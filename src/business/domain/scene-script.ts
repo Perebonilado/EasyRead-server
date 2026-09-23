@@ -34,6 +34,46 @@ export const SCENE_EFFECTS = [
 ] as const;
 export type SceneEffectKind = (typeof SCENE_EFFECTS)[number];
 
+/**
+ * How a sentence is said. The writer tags each one and code turns the tag
+ * into a pace and a silence (scene-voice.ts): a hook a touch quicker, the
+ * point slower with room after it, time to think after a question. One
+ * pace and two pauses for every sentence was a metronome.
+ */
+export const SCENE_DELIVERIES = [
+  'hook',
+  'explain',
+  'key',
+  'aside',
+  'question',
+  'recap',
+] as const;
+export type SceneDelivery = (typeof SCENE_DELIVERIES)[number];
+
+/** The page's feeling, for the music under the voice. */
+export const SCENE_MOODS = [
+  'calm',
+  'bright',
+  'curious',
+  'serious',
+  'playful',
+] as const;
+export type SceneMood = (typeof SCENE_MOODS)[number];
+
+/** What a drawn thing can sound like while it is on the stage: only a sound it makes in life. */
+export const SCENE_AMBIENCES = [
+  'heartbeat',
+  'bubbles',
+  'water',
+  'wind',
+  'rain',
+  'fire',
+  'electric',
+  'machine',
+  'clock',
+] as const;
+export type SceneAmbience = (typeof SCENE_AMBIENCES)[number];
+
 export const DRAWING_SHAPES = ['square', 'wide', 'tall'] as const;
 export type DrawingShape = (typeof DRAWING_SHAPES)[number];
 
@@ -54,6 +94,8 @@ export interface SceneBeat {
   say: string;
   /** The silence after it: short between sentences, long where the idea changes. */
   pause: 'short' | 'long';
+  /** How it is said: its pace and the silence after it follow from this. */
+  delivery: SceneDelivery;
 }
 
 export interface DrawingThing {
@@ -70,6 +112,8 @@ export interface DrawingThing {
   /** Overlays drawn over it and shown later: the bulb lit, the valve open. */
   states: { name: string; look: string }[];
   shape: DrawingShape;
+  /** The sound it makes while it is on stage, or null for none. */
+  sound: SceneAmbience | null;
 }
 
 export interface StatThing {
@@ -126,6 +170,7 @@ export interface SceneScript {
   fit: 'good' | 'poor';
   fitReason: string | null;
   title: string;
+  mood: SceneMood;
   beats: SceneBeat[];
   cast: SceneThing[];
   steps: SceneStep[];
@@ -140,7 +185,12 @@ export interface SceneScriptDraft {
   fit: 'good' | 'poor';
   fitReason: string | null;
   title: string;
-  beats: { say: string; pause: 'short' | 'long' }[];
+  mood: SceneMood;
+  beats: {
+    say: string;
+    pause: 'short' | 'long';
+    delivery: SceneDelivery;
+  }[];
   cast: {
     id: string;
     kind: 'drawing' | 'stat' | 'words';
@@ -153,6 +203,7 @@ export interface SceneScriptDraft {
     shape: DrawingShape | null;
     value: string | null;
     style: 'title' | 'keyword' | null;
+    sound: SceneAmbience | null;
   }[];
   steps: {
     beat: number;
@@ -273,12 +324,6 @@ const slug = (text: string) => groupId(text).slice(0, 32);
 const clean = (text: string | null | undefined) =>
   (text ?? '').replace(/\s+/g, ' ').trim();
 
-/** One pause, silence in seconds. */
-export const PAUSE_SECONDS: Record<SceneBeat['pause'], number> = {
-  short: 0.35,
-  long: 0.8,
-};
-
 export interface MendedScript {
   script: SceneScript;
   /** What the writer should redo; empty means the storyboard is sound. */
@@ -302,6 +347,9 @@ export function mendScript(draft: SceneScriptDraft): MendedScript {
     .map((beat) => ({
       say: clean(beat.say),
       pause: beat.pause === 'long' ? ('long' as const) : ('short' as const),
+      delivery: SCENE_DELIVERIES.includes(beat.delivery)
+        ? beat.delivery
+        : ('explain' as const),
     }))
     .filter((beat) => wordsOf(beat.say).length > 0);
 
@@ -371,6 +419,8 @@ export function mendScript(draft: SceneScriptDraft): MendedScript {
       states,
       shape:
         raw.shape && DRAWING_SHAPES.includes(raw.shape) ? raw.shape : 'square',
+      sound:
+        raw.sound && SCENE_AMBIENCES.includes(raw.sound) ? raw.sound : null,
     });
   });
   const byId = new Map(cast.map((thing) => [thing.id, thing]));
@@ -551,6 +601,7 @@ export function mendScript(draft: SceneScriptDraft): MendedScript {
       fit: draft.fit === 'poor' ? 'poor' : 'good',
       fitReason: clean(draft.fitReason) || null,
       title: clean(draft.title).slice(0, 80) || 'This page',
+      mood: SCENE_MOODS.includes(draft.mood) ? draft.mood : 'curious',
       beats,
       cast: cast.filter((thing) =>
         steps.some((step) => step.stage?.show.includes(thing.id)),

@@ -901,6 +901,20 @@ export type SceneLayoutName =
   'one' | 'row' | 'grid' | 'compare' | 'hub' | 'cycle' | 'focus';
 export type SceneEffectName = 'point' | 'show' | 'hide' | 'pulse' | 'zoom';
 export type SceneEnterName = 'pop' | 'fade' | 'slide' | 'wipe' | 'grow';
+/** The page's feeling: which music plays under the voice. */
+export type SceneMoodName =
+  'calm' | 'bright' | 'curious' | 'serious' | 'playful';
+/** What a drawn thing sounds like while it is on the stage. */
+export type SceneAmbienceName =
+  | 'heartbeat'
+  | 'bubbles'
+  | 'water'
+  | 'wind'
+  | 'rain'
+  | 'fire'
+  | 'electric'
+  | 'machine'
+  | 'clock';
 
 /** One thing that can stand on the stage. */
 export type SceneThingDto =
@@ -922,6 +936,8 @@ export type SceneThingDto =
       hidden: string[];
       /** Whether it animates itself; a still one gets a gentle float. */
       moves: boolean;
+      /** The sound it makes while it is on the stage; absent or null for none. */
+      ambience?: SceneAmbienceName | null;
     }
   | { id: string; kind: 'stat'; value: string; caption: string }
   | {
@@ -959,6 +975,8 @@ export interface SceneEffectDto {
   /** A part or state of a drawing, by name; null for the whole thing. */
   part: string | null;
   do: SceneEffectName;
+  /** A pulse added only because nothing else happened for a while: seen, not heard. */
+  filler?: boolean;
 }
 
 /** Where a thing stands at one step, in the staging's design units. */
@@ -974,7 +992,8 @@ export interface ScenePlaceDto {
 
 /** A page as an animated video: the voice's sentences, the things, and when each happens. */
 export interface SceneDto {
-  version: 3;
+  /** 4 adds the sound; a 3 plays the same, in silence but for the voice. */
+  version: 3 | 4;
   generator: string;
   title: string;
   durationMs: number;
@@ -984,6 +1003,8 @@ export interface SceneDto {
   things: SceneThingDto[];
   steps: SceneStepDto[];
   effects: SceneEffectDto[];
+  /** The music under the voice; absent on a scene made before there was any. */
+  sound?: { mood: SceneMoodName };
   /** The same steps placed for the pane's box and the full screen's wide stage. */
   stagings: Record<
     'box' | 'wide',

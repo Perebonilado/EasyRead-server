@@ -17,6 +17,7 @@ import {
   SPEECH,
   LECTURE_SPEECH,
   UPLOAD_SPEECH,
+  SCENE_SPEECH,
   TRANSCRIPTION,
   STORAGE,
   VECTOR_STORE,
@@ -28,6 +29,7 @@ import { BullmqQueueAdapter } from '../adapters/bullmq-queue.adapter';
 import { DriveConverterAdapter } from '../adapters/drive-converter.adapter';
 import { DriveStorageAdapter } from '../adapters/drive-storage.adapter';
 import { FakeLlmAdapter } from '../adapters/fake-llm.adapter';
+import { GeminiSpeechAdapter } from '../adapters/gemini-speech.adapter';
 import { FakePaymentsAdapter } from '../adapters/fake-payments.adapter';
 import { StripePaymentsAdapter } from '../adapters/stripe-payments.adapter';
 import { GoogleDriveClient } from '../adapters/google-drive.client';
@@ -116,6 +118,17 @@ export const portProviders: Provider[] = [
       config.get<string>('KOKORO_TTS_URL')
         ? new ModalSpeechAdapter(config, KOKORO_HOME)
         : openai,
+  },
+  // Visualize speaks with the upload voice (Kokoro on Railway) unless
+  // SCENE_VOICE_ENGINE=gemini puts it on Google's voice, the paid pilot.
+  // Lectures never come here.
+  {
+    provide: SCENE_SPEECH,
+    inject: [ConfigService, UPLOAD_SPEECH],
+    useFactory: (config: ConfigService, upload: SpeechPort) =>
+      config.get<string>('SCENE_VOICE_ENGINE') === 'gemini'
+        ? new GeminiSpeechAdapter(config)
+        : upload,
   },
   // Word timing for the lecture board: the script aligned to its audio.
   { provide: ALIGNER, useClass: EchogardenAlignerAdapter },

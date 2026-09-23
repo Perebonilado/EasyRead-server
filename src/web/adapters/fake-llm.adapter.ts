@@ -540,15 +540,23 @@ export class FakeLlmAdapter implements LlmGatewayPort {
       states: null,
       shape: null,
       value: null,
+      sound: null,
     };
     return Promise.resolve({
       value: {
         fit: 'good',
         fitReason: null,
         title: input.topicTitle.slice(0, 60),
+        mood: 'curious',
         beats: says.map((say, i) => ({
           say,
           pause: i === says.length - 1 ? ('long' as const) : ('short' as const),
+          delivery:
+            i === 0
+              ? ('hook' as const)
+              : i === says.length - 1
+                ? ('recap' as const)
+                : ('explain' as const),
         })),
         cast: [
           {
@@ -562,6 +570,7 @@ export class FakeLlmAdapter implements LlmGatewayPort {
             shape: 'square',
             value: null,
             style: null,
+            sound: null,
           },
           {
             id: 'idea',

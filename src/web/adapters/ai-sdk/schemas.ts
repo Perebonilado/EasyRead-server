@@ -1,8 +1,11 @@
 import { z } from 'zod';
 import {
   DRAWING_SHAPES,
+  SCENE_AMBIENCES,
+  SCENE_DELIVERIES,
   SCENE_EFFECTS,
   SCENE_LAYOUTS,
+  SCENE_MOODS,
 } from '../../../business/domain/scene-script';
 
 /**
@@ -467,10 +470,12 @@ export const sceneScriptSchema = z.object({
   fit: z.enum(['good', 'poor']),
   fitReason: z.string().nullable(),
   title: z.string(),
+  mood: z.enum(SCENE_MOODS),
   beats: z.array(
     z.object({
       say: z.string(),
       pause: z.enum(['short', 'long']),
+      delivery: z.enum(SCENE_DELIVERIES),
     }),
   ),
   cast: z.array(
@@ -489,6 +494,7 @@ export const sceneScriptSchema = z.object({
       shape: z.enum(DRAWING_SHAPES).nullable(),
       value: z.string().nullable(),
       style: z.enum(['title', 'keyword']).nullable(),
+      sound: z.enum(SCENE_AMBIENCES).nullable(),
     }),
   ),
   steps: z.array(

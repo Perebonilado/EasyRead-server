@@ -59,6 +59,7 @@ export function thingDto(
     states: drawing.states,
     hidden: [],
     moves: drawing.moves,
+    ambience: thing.sound,
   };
 }
 
@@ -233,7 +234,13 @@ export function composeScene(input: ComposeInput): {
       const current = [...steps].reverse().find((s) => s.atMs <= at);
       const target = current?.focus ?? current?.show[0];
       if (!target) continue;
-      effects.push({ atMs: at, target, part: null, do: 'pulse' });
+      effects.push({
+        atMs: at,
+        target,
+        part: null,
+        do: 'pulse',
+        filler: true,
+      });
       filled += 1;
     }
   }
@@ -252,11 +259,12 @@ export function composeScene(input: ComposeInput): {
 
   return {
     scene: {
-      version: 3,
+      version: 4,
       generator: input.generator,
       title: script.title,
       durationMs,
       timing: input.timing,
+      sound: { mood: script.mood },
       beats: beats.map((b) => ({
         text: b.text,
         startMs: b.startMs,

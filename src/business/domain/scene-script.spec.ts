@@ -21,6 +21,7 @@ const thing = (
   shape: null,
   value: kind === 'stat' ? '70%' : null,
   style: null,
+  sound: null,
   ...extra,
 });
 
@@ -42,15 +43,18 @@ const draft = (): SceneScriptDraft => ({
   fit: 'good',
   fitReason: null,
   title: 'How plants make food',
+  mood: 'curious',
   beats: [
-    { say: 'Plants make their own food.', pause: 'short' },
+    { say: 'Plants make their own food.', pause: 'short', delivery: 'hook' },
     {
       say: 'To do it, they need sunlight, water and carbon dioxide.',
       pause: 'short',
+      delivery: 'explain',
     },
     {
       say: 'All three meet inside the leaf, in tiny parts called chloroplasts.',
       pause: 'long',
+      delivery: 'key',
     },
   ],
   cast: [
@@ -161,6 +165,24 @@ describe('the writer’s storyboard, mended', () => {
     const { script } = mendScript(draft());
     expect(quietStretches(script, 5).length).toBeGreaterThan(0);
     expect(quietStretches(script, 50)).toEqual([]);
+  });
+
+  it('keeps how each sentence is said and what a drawing sounds like, and mends what is off the list', () => {
+    const odd = draft();
+    odd.mood = 'grim' as never;
+    odd.beats[1].delivery = 'shout' as never;
+    odd.cast[0].sound = 'heartbeat';
+    odd.cast[1].sound = 'trumpet' as never;
+    const { script } = mendScript(odd);
+    expect(script.mood).toBe('curious');
+    expect(script.beats.map((b) => b.delivery)).toEqual([
+      'hook',
+      'explain',
+      'key',
+    ]);
+    const [leaf, sun] = script.cast;
+    expect(leaf.kind === 'drawing' && leaf.sound).toBe('heartbeat');
+    expect(sun.kind === 'drawing' && sun.sound).toBeNull();
   });
 
   it('reads a stage restated as it stands as its effects only', () => {

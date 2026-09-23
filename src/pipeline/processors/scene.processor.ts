@@ -2,7 +2,10 @@ import { ConfigService } from '@nestjs/config';
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import type { SceneTiming } from '../../contracts';
 import { wordTimesFromAligned } from '../../business/domain/board';
-import { catalogueSpeechCost } from '../../business/domain/cost';
+import {
+  catalogueSpeechCost,
+  geminiSpeechCost,
+} from '../../business/domain/cost';
 import { noteProse } from '../../business/domain/follow';
 import {
   composeScene,
@@ -12,7 +15,6 @@ import {
 } from '../../business/domain/scene-compose';
 import { rasterise } from '../../business/domain/scene-raster';
 import {
-  PAUSE_SECONDS,
   SCENE_GENERATOR_VERSION,
   mendScript,
   quietStretches,
@@ -35,6 +37,11 @@ import {
   type SpokenWords,
   type TimedBeat,
 } from '../../business/domain/scene-timing';
+import {
+  deliveryPieces,
+  voiceSlug,
+  voiceStyle,
+} from '../../business/domain/scene-voice';
 import { mp3DurationMs } from '../../business/domain/speech';
 import { spokenForm, type Pronunciations } from '../../business/domain/spoken';
 import type { AlignerPort } from '../../business/ports/aligner.port';
@@ -43,8 +50,8 @@ import type { StoragePort } from '../../business/ports/storage.port';
 import {
   ALIGNER,
   LLM_GATEWAY,
+  SCENE_SPEECH,
   STORAGE,
-  UPLOAD_SPEECH,
 } from '../../business/ports/tokens';
 import type { SpeechPort } from '../../business/ports/voice.port';
 import type { AiCallLogRepository } from '../../business/repositories/ai-call-log.repository';
@@ -113,7 +120,7 @@ export class SceneProcessor {
     private readonly pronunciations: PronunciationRepository,
     @Inject(AI_CALL_LOG_REPOSITORY) private readonly calls: AiCallLogRepository,
     @Inject(LLM_GATEWAY) private readonly llm: LlmGatewayPort,
-    @Inject(UPLOAD_SPEECH) private readonly speech: SpeechPort,
+    @Inject(SCENE_SPEECH) private readonly speech: SpeechPort,
     private readonly config: ConfigService,
     @Inject(STORAGE) private readonly storage: StoragePort,
     @Inject(ALIGNER) private readonly aligner: AlignerPort,
@@ -285,6 +292,35 @@ export class SceneProcessor {
   }
 
   /**
+   * A page's script alone, written exactly as a page's is, for the tools
+   * that voice or study it (the voice line-up) without making the page.
+   */
+  async scriptFor(
+    documentId: string,
+    pageNumber: number,
+  ): Promise<SceneScript> {
+    const doc = await this.documents.findById(documentId);
+    if (!doc) throw new Error(`No document ${documentId}`);
+    const topic = (await this.topics.listByDocument(documentId)).find(
+      (t) => pageNumber >= t.startPage && pageNumber <= t.endPage,
+    );
+    if (!topic) throw new Error(`Page ${pageNumber} is outside every chapter`);
+    return this.write({
+      documentTitle: doc.props.title,
+      topic,
+      material: await this.material(documentId, pageNumber),
+      context: await this.where(
+        documentId,
+        doc.contentVersion,
+        topic,
+        pageNumber,
+      ),
+      documentId,
+      who: `${documentId} p${pageNumber}`,
+    });
+  }
+
+  /**
    * The script and storyboard: written, mended, and written once more when
    * the mend leaves problems. The better of the two is kept; a storyboard
    * that never puts anything on the stage fails the page.
@@ -453,9 +489,15 @@ export class SceneProcessor {
     timing: SceneTiming;
   }> {
     const forms = script.beats.map((beat) => spokenForm(beat.say, kept));
-    const pausesS = script.beats.map((beat) => PAUSE_SECONDS[beat.pause]);
+    // Each sentence at its own pace, with its own silence after it.
+    const delivered = deliveryPieces(script.beats);
+    const pausesS = delivered.map((piece) => piece.pauseAfter);
     const spoken = sceneSpoken(forms);
-    const { model, voice } = this.speech.label();
+    const { model } = this.speech.label();
+    // Visualize may speak in a voice of its own; lectures keep theirs.
+    const voice =
+      this.config.get<string>('SCENE_VOICE')?.trim() ||
+      this.speech.label().voice;
     const result = await this.speech.synthesize({
       text: spoken.text,
       voice,
@@ -463,11 +505,13 @@ export class SceneProcessor {
       timestamps: true,
       pieces: forms.map((form, i) => ({
         text: form.text,
-        speed: 1,
+        speed: delivered[i].speed,
         pauseAfter: pausesS[i],
+        // For a voice that takes direction; Kokoro goes by pace and silence.
+        style: voiceStyle(script.mood, script.beats[i].delivery),
       })),
     });
-    const audioKey = `${base}-${voice}-${model}.mp3`;
+    const audioKey = `${base}-${voiceSlug(voice)}-${model}.mp3`;
     await this.storage.put({
       key: audioKey,
       body: result.audio,
@@ -484,18 +528,29 @@ export class SceneProcessor {
       tokensOut: null,
       latencyMs: null,
       outcome: 'ok',
-      // A voice of our own is priced by the audio it made, at its rate.
-      costUsd: result.model.startsWith('kokoro:')
-        ? catalogueSpeechCost(
-            durationMs,
-            Number(this.config.get<string>('KOKORO_USD_PER_AUDIO_HOUR', '0')),
-          )
-        : result.model.startsWith('modal:')
+      // A voice of our own is priced by the audio it made, at its rate;
+      // Gemini by its tokens.
+      costUsd: result.model.startsWith('gemini:')
+        ? geminiSpeechCost({
+            model: result.model,
+            audioMs: durationMs,
+            textChars: spoken.text.length,
+            tokensIn: result.usage?.tokensIn,
+            tokensOut: result.usage?.tokensOut,
+          })
+        : result.model.startsWith('kokoro:')
           ? catalogueSpeechCost(
               durationMs,
-              Number(this.config.get<string>('MODAL_USD_PER_AUDIO_HOUR', '0')),
+              Number(this.config.get<string>('KOKORO_USD_PER_AUDIO_HOUR', '0')),
             )
-          : null,
+          : result.model.startsWith('modal:')
+            ? catalogueSpeechCost(
+                durationMs,
+                Number(
+                  this.config.get<string>('MODAL_USD_PER_AUDIO_HOUR', '0'),
+                ),
+              )
+            : null,
     });
 
     let words: SpokenWords | null = null;

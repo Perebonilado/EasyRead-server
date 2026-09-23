@@ -29,7 +29,12 @@ const script: SceneScript = {
   fit: 'good',
   fitReason: null,
   title: 'Plants make food',
-  beats: beats.map((b) => ({ say: b.text, pause: 'short' })),
+  mood: 'curious',
+  beats: beats.map((b) => ({
+    say: b.text,
+    pause: 'short',
+    delivery: 'explain',
+  })),
   cast: [
     {
       id: 'leaf',
@@ -43,6 +48,7 @@ const script: SceneScript = {
       ],
       states: [{ name: 'glowing', look: 'bright' }],
       shape: 'wide',
+      sound: null,
     },
     {
       id: 'sun',
@@ -53,6 +59,7 @@ const script: SceneScript = {
       parts: [],
       states: [],
       shape: 'square',
+      sound: 'fire',
     },
     { id: 'water', kind: 'words', text: 'water', style: 'keyword' },
   ],
@@ -126,6 +133,16 @@ describe('the scene put together', () => {
     expect(scene.stagings.wide.places[2].water).toBeDefined();
   });
 
+  it('carries the mood of the page for the music, and what a drawing sounds like', () => {
+    expect(scene.version).toBe(4);
+    expect(scene.sound).toEqual({ mood: 'curious' });
+    const leaf = scene.things.find((t) => t.id === 'leaf');
+    expect(leaf?.kind === 'drawing' && leaf.ambience).toBeNull();
+    // A drawing that failed is a card, and a card makes no sound.
+    const sun = scene.things.find((t) => t.id === 'sun');
+    expect(sun?.kind).toBe('words');
+  });
+
   it('decides how each newcomer arrives', () => {
     expect(scene.steps[0].enter.leaf).toEqual({ how: 'wipe' });
     expect(scene.steps[1].enter.sun).toEqual({ how: 'slide' });
@@ -160,6 +177,8 @@ describe('the scene put together', () => {
     expect(scene.effects.some((e) => e.atMs > 8000 && e.do === 'pulse')).toBe(
       true,
     );
+    // A pulse that only fills a stretch is marked, so the player keeps it silent.
+    expect(scene.effects.filter((e) => e.filler)).toHaveLength(filled);
   });
 
   it('draws the fullest step for the card', () => {

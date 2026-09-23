@@ -55,6 +55,57 @@ export function catalogueSpeechCost(
 }
 
 /**
+ * Gemini's voices, by the token: text in, audio out, per million, from
+ * Google's price list of September 2026. Audio is 25 tokens a second, so
+ * 3.8 Flash comes to $0.0135 a minute. Google has said 3.8's prices
+ * double on 1 January 2027; `from` is when a rate starts.
+ */
+const GEMINI_TTS: Record<string, { in: number; out: number; from?: string }[]> =
+  {
+    'gemini-3.8-flash-tts': [
+      { in: 0.5, out: 9 },
+      { in: 1, out: 18, from: '2027-01-01' },
+    ],
+    'gemini-3.8-flash-lite-tts': [
+      { in: 0.5, out: 6 },
+      { in: 1, out: 12, from: '2027-01-01' },
+    ],
+    'gemini-3.1-flash-tts-preview': [{ in: 1, out: 20 }],
+    'gemini-2.5-flash-preview-tts': [{ in: 0.5, out: 10 }],
+    'gemini-2.5-pro-preview-tts': [{ in: 1, out: 20 }],
+  };
+
+/** Audio tokens a second of Gemini speech. */
+export const GEMINI_AUDIO_TOKENS_PER_SECOND = 25;
+
+/**
+ * A page voiced by Gemini, priced by its tokens when Google reported them,
+ * else by the audio's length and the text's (about four characters a
+ * token). Null for a model the list does not know.
+ */
+export function geminiSpeechCost(input: {
+  model: string;
+  audioMs: number;
+  textChars: number;
+  tokensIn?: number;
+  tokensOut?: number;
+  at?: Date;
+}): number | null {
+  const id = input.model.replace(/^gemini:/, '');
+  const rates = GEMINI_TTS[id];
+  if (!rates) return null;
+  const day = (input.at ?? new Date()).toISOString().slice(0, 10);
+  const rate = [...rates].reverse().find((r) => !r.from || r.from <= day)!;
+  const tokensIn = input.tokensIn ?? Math.ceil(input.textChars / 4);
+  const tokensOut =
+    input.tokensOut ??
+    Math.ceil((input.audioMs / 1000) * GEMINI_AUDIO_TOKENS_PER_SECOND);
+  return (
+    Math.round(((tokensIn * rate.in + tokensOut * rate.out) / 1e6) * 1e6) / 1e6
+  );
+}
+
+/**
  * The cost of one logged call, or null when the log does not carry what is
  * needed to price it (a realtime session, a page-priced OCR call, a page of
  * lecture audio, whose price the voice job records itself).

@@ -235,8 +235,28 @@ export interface CharacterThing {
   intro: string[];
 }
 
+/**
+ * One of the story's places: painted once for the whole book, and the
+ * scene behind the stage whenever the story is there. Never a thing in a
+ * slot: shown, it becomes the backdrop.
+ */
+export interface PlaceThing {
+  id: string;
+  kind: 'place';
+  /** Its id in the story. */
+  ref: string;
+  name: string;
+  /** What it sounds like while the story is there. */
+  sound: SceneAmbience | null;
+}
+
 export type SceneThing =
-  DrawingThing | StatThing | WordsThing | CodeThing | CharacterThing;
+  | DrawingThing
+  | StatThing
+  | WordsThing
+  | CodeThing
+  | CharacterThing
+  | PlaceThing;
 
 /** The names of the parts the voice can point at in a thing. */
 export function partNames(thing: SceneThing): string[] {
@@ -281,6 +301,8 @@ export interface SceneStage {
   layout: SceneLayout;
   show: string[];
   arrows: SceneArrow[];
+  /** A place shown at this step: the scene behind the stage from now on. */
+  backdrop?: string;
 }
 
 export interface SceneEffect {
@@ -309,6 +331,8 @@ export interface SceneScript {
   beats: SceneBeat[];
   cast: SceneThing[];
   steps: SceneStep[];
+  /** A story page's own place: the scene behind the stage until the writer shows another. */
+  backdrop?: string | null;
 }
 
 /**
@@ -337,7 +361,8 @@ export interface SceneScriptDraft {
       | 'quote'
       | 'timeline'
       | 'chart'
-      | 'character';
+      | 'character'
+      | 'place';
     /** A drawing's caption, a stat's caption, the words themselves. */
     name: string;
     brief: string | null;
@@ -390,6 +415,44 @@ export interface SceneScriptDraft {
 }
 
 // ── Words ─────────────────────────────────────────────────────────────────
+
+/**
+ * Where a sentence quotes someone: each run of quoted words, as the
+ * [start, end) of the words without their marks. Double quotes, straight
+ * or curly; curly single quotes closed by a mark that is no apostrophe;
+ * straight single quotes opened at the start of a word and closed after
+ * punctuation ('You're late,' says Tobi). And a quote the writer never
+ * opened, from the sentence's start to its closing mark, or never closed,
+ * from its opening mark to the end.
+ */
+export function quotedSpans(sentence: string): [number, number][] {
+  const spans: [number, number][] = [];
+  const add = (start: number, end: number) => {
+    while (start < end && /\s/.test(sentence[start])) start += 1;
+    while (end > start && /\s/.test(sentence[end - 1])) end -= 1;
+    if (/\p{L}/u.test(sentence.slice(start, end))) spans.push([start, end]);
+  };
+  const runs = (pattern: RegExp) => {
+    for (const m of sentence.matchAll(pattern)) {
+      const inner = m.slice(1).find((g) => g !== undefined) ?? '';
+      const start = m.index + m[0].indexOf(inner);
+      add(start, start + inner.length);
+    }
+  };
+  runs(/“([^”]+)”|"([^"]+)"|‘(.+?)’(?!\p{L})/gu);
+  if (!spans.length) runs(/(?<![\p{L}\p{N}])'(\p{L}.*?[,.!?…])'(?!\p{L})/gu);
+  if (!spans.length) {
+    const unopened = /^(.+?[,.!?…])['’"”](?=\s|$)/u.exec(sentence);
+    const unclosed = /(?:^|\s)['‘"“](\p{L}.*)$/u.exec(sentence);
+    if (unopened) add(0, unopened[1].length);
+    else if (unclosed)
+      add(
+        unclosed.index + unclosed[0].length - unclosed[1].length,
+        sentence.length,
+      );
+  }
+  return spans.sort((a, b) => a[0] - b[0]);
+}
 
 /** The words of a sentence as the captions count them: a whitespace split. */
 export function wordsOf(text: string): string[] {
@@ -502,6 +565,13 @@ export function mendScript(
     formats?: readonly SceneFormat[];
     /** The story's characters, when the book is a story: who a character may be. */
     characters?: readonly { id: string; name: string; aliases: string[] }[];
+    /** And its places: where the story may be. */
+    places?: readonly {
+      id: string;
+      name: string;
+      aliases: string[];
+      sound?: SceneAmbience | null;
+    }[];
   } = {},
 ): MendedScript {
   const problems: string[] = [];
@@ -556,8 +626,44 @@ export function mendScript(
       cast.push(made.thing);
       return;
     }
+    // A story's place drawn as a picture is the place: the scene behind
+    // the stage, painted once for the book.
+    const asPlace =
+      raw.kind === 'drawing' && options.places?.length
+        ? storyEntry(options.places, raw.ref ?? raw.id, name)
+        : null;
+    if (asPlace)
+      mended.push(
+        `${id}: the story's place ${asPlace.id}, set behind the stage`,
+      );
+    if (raw.kind === 'place' || asPlace) {
+      const where = asPlace ?? storyEntry(options.places ?? [], raw.ref, name);
+      // One set a place; a place the story does not have is left out.
+      const again = where
+        ? cast.find((thing) => thing.kind === 'place' && thing.ref === where.id)
+        : undefined;
+      if (!where || again) {
+        used.delete(id);
+        for (const key of [raw.id, raw.id.toLowerCase(), slug(raw.id)])
+          if (again) idFor.set(key, again.id);
+          else idFor.delete(key);
+        if (!where)
+          mended.push(
+            `${id}: "${raw.ref ?? name}" is not one of the story's places; left out`,
+          );
+        return;
+      }
+      cast.push({
+        id,
+        kind: 'place',
+        ref: where.id,
+        name: where.name,
+        sound: where.sound ?? null,
+      });
+      return;
+    }
     if (raw.kind === 'character') {
-      const who = storyCharacter(options.characters ?? [], raw.ref, name);
+      const who = storyEntry(options.characters ?? [], raw.ref, name);
       if (!who) {
         mended.push(
           `${id}: "${raw.ref ?? name}" is not one of the story's characters; set in type`,
@@ -680,6 +786,8 @@ export function mendScript(
     let stage: SceneStage | null = null;
     if (raw.layout && raw.show?.length) {
       const show: string[] = [];
+      // A place shown is the scene behind the stage, not a thing on it.
+      let backdrop: string | undefined;
       for (const ref of raw.show) {
         const id = resolve(ref);
         if (!id) {
@@ -688,7 +796,13 @@ export function mendScript(
           );
           continue;
         }
-        if (!show.includes(id)) show.push(id);
+        if (byId.get(id)?.kind === 'place') backdrop = id;
+        else if (!show.includes(id)) show.push(id);
+      }
+      // A place alone: the empty scene, before anyone is in it.
+      if (!show.length && backdrop) {
+        stage = { layout: 'one', show: [], arrows: [], backdrop };
+        onStage = [];
       }
       if (show.length > MAX_ON_STAGE) {
         mended.push(
@@ -719,11 +833,17 @@ export function mendScript(
             flow: Boolean(arrow.flow),
           });
         }
-        stage = { layout, show, arrows: arrows.slice(0, MAX_ARROWS) };
+        stage = {
+          layout,
+          show,
+          arrows: arrows.slice(0, MAX_ARROWS),
+          ...(backdrop ? { backdrop } : {}),
+        };
         // The stage restated as it stands is no change: its effects only.
         const last = [...steps].reverse().find((s) => s.stage)?.stage;
         if (
           last &&
+          !backdrop &&
           last.layout === stage.layout &&
           last.show.join() === stage.show.join() &&
           last.arrows.map((a) => `${a.from}>${a.to}`).join() ===
@@ -806,7 +926,11 @@ export function mendScript(
       mood: SCENE_MOODS.includes(draft.mood) ? draft.mood : 'curious',
       beats,
       cast: cast.filter((thing) =>
-        steps.some((step) => step.stage?.show.includes(thing.id)),
+        steps.some(
+          (step) =>
+            step.stage?.show.includes(thing.id) ||
+            step.stage?.backdrop === thing.id,
+        ),
       ),
       steps,
     },
@@ -815,12 +939,12 @@ export function mendScript(
   };
 }
 
-/** The story's character the writer means: by their id, else by a name or alias. */
-function storyCharacter(
-  characters: readonly { id: string; name: string; aliases: string[] }[],
+/** The story's character or place the writer means: by its id, else by a name or alias. */
+function storyEntry<T extends { id: string; name: string; aliases: string[] }>(
+  characters: readonly T[],
   ref: string | null,
   name: string,
-): { id: string; name: string } | null {
+): T | null {
   const byRef = characters.find((c) => c.id === clean(ref));
   if (byRef) return byRef;
   const keys = [clean(ref), name].map(nameKey).filter(Boolean);

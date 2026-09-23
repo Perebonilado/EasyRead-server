@@ -738,6 +738,8 @@ interface Shortfall {
 export function inspectSvg(
   reply: string,
   thing: Pick<DrawingThing, 'parts' | 'states' | 'motion'> & { name?: string },
+  /** A set: the scene behind the stage, its ground kept and its stillness no fault. */
+  options: { backdrop?: boolean } = {},
 ):
   | {
       root: Element;
@@ -773,7 +775,8 @@ export function inspectSvg(
       mended: [],
     };
   const mended = sanitizeTree(root).map((what) => `removed ${what}`);
-  if (removeBackdrop(root, viewBox)) mended.push('removed a backdrop');
+  if (!options.backdrop && removeBackdrop(root, viewBox))
+    mended.push('removed a backdrop');
   const { parts, labels, states } = namedGroups(root, thing);
   if (
     thing.name &&
@@ -804,7 +807,7 @@ export function inspectSvg(
       missingStates: thing.states
         .filter((s) => !states[s.name])
         .map((s) => s.name),
-      still: Boolean(thing.motion) && !movesOf(root),
+      still: !options.backdrop && Boolean(thing.motion) && !movesOf(root),
       smallText: label !== null && label < GATE.smallestLabel ? label : null,
       tooMany: count > GATE.maxElements ? count : null,
     },
@@ -866,8 +869,10 @@ function judged(
 export async function gateDrawing(
   reply: string,
   thing: Pick<DrawingThing, 'parts' | 'states' | 'motion'> & { name?: string },
+  /** A set keeps its ground and its whole canvas: it covers the stage. */
+  options: { backdrop?: boolean } = {},
 ): Promise<GateResult> {
-  const inspected = inspectSvg(reply, thing);
+  const inspected = inspectSvg(reply, thing, options);
   if (!inspected.root)
     return {
       drawing: null,
@@ -932,7 +937,7 @@ export async function gateDrawing(
       mended.push(`labels left as drawn: ${(error as Error).message}`);
     }
   svg = render(root, { xmlMode: true, selfClosingTags: true });
-  const framed = framedBox(viewBox, ink);
+  const framed = options.backdrop ? viewBox : framedBox(viewBox, ink);
   if (framed.join(' ') !== viewBox.join(' ')) {
     viewBox = framed;
     root.attribs.viewBox = viewBox.join(' ');

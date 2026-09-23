@@ -1,5 +1,5 @@
 import { profileKey } from '../../business/domain/scene-profile';
-import { castKey, storyKey } from '../../business/domain/scene-story';
+import { castKey, setsKey, storyKey } from '../../business/domain/scene-story';
 import { Injectable } from '@nestjs/common';
 import { InjectModel } from '@nestjs/sequelize';
 import type {
@@ -158,6 +158,7 @@ export class SequelizeVisualSceneRepository implements VisualSceneRepository {
         profileKey(documentId, version),
         storyKey(documentId, version),
         castKey(documentId, version),
+        setsKey(documentId, version),
       ]),
     ];
   }

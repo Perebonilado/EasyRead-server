@@ -10,7 +10,12 @@
  * same drawing stands on every page they are on, the same way round
  * beside anyone else, with the face the last page left them with.
  */
-import type { DrawingThing, SceneScript } from './scene-script';
+import {
+  SCENE_AMBIENCES,
+  type DrawingThing,
+  type SceneAmbience,
+  type SceneScript,
+} from './scene-script';
 
 /** The faces a character is drawn with: one shown at a time. */
 export const EXPRESSIONS = [
@@ -68,6 +73,8 @@ export interface StoryPlace {
   aliases: string[];
   look: string;
   firstPage: number;
+  /** What the place sounds like while the story is there, or null. */
+  sound: SceneAmbience | null;
 }
 
 export interface StoryPage {
@@ -95,7 +102,12 @@ export interface StoryDraft {
     look: string;
     traits: string[];
   }[];
-  places: { name: string; aliases: string[]; look: string }[];
+  places: {
+    name: string;
+    aliases: string[];
+    look: string;
+    sound: SceneAmbience | null;
+  }[];
   pages: {
     page: number;
     summary: string;
@@ -127,6 +139,16 @@ export const storyKey = (documentId: string, contentVersion: number) =>
   `documents/${documentId}/visuals/v${contentVersion}/story.json`;
 export const castKey = (documentId: string, contentVersion: number) =>
   `documents/${documentId}/visuals/v${contentVersion}/cast.json`;
+export const setsKey = (documentId: string, contentVersion: number) =>
+  `documents/${documentId}/visuals/v${contentVersion}/sets.json`;
+
+/** A set's canvas: the wide stage's own shape, so it covers it whole. */
+export const SET_CANVAS = { w: 1600, h: 900 } as const;
+
+const soundOf = (sound: unknown): SceneAmbience | null =>
+  SCENE_AMBIENCES.includes(sound as SceneAmbience)
+    ? (sound as SceneAmbience)
+    : null;
 
 const clean = (text: string | null | undefined) =>
   (text ?? '').replace(/\s+/g, ' ').trim();
@@ -269,6 +291,7 @@ export function mergeStory(
         for (const key of [name, ...aliases].map(nameKey).filter(Boolean))
           found.keys.add(key);
         found.look = fuller(found.look, clean(raw.look));
+        found.sound ??= soundOf(raw.sound);
         continue;
       }
       places.push({
@@ -279,6 +302,7 @@ export function mergeStory(
           .slice(0, MAX_ALIASES),
         look: clean(raw.look).slice(0, 400),
         firstPage: Number.POSITIVE_INFINITY,
+        sound: soundOf(raw.sound),
         keys: new Set([name, ...aliases].map(nameKey).filter(Boolean)),
         named: part.from,
       });
@@ -347,6 +371,7 @@ export function mergeStory(
         aliases: p.aliases,
         look: p.look,
         firstPage: p.firstPage,
+        sound: p.sound,
       })),
     pages: [...pages.values()]
       .sort((a, b) => a.page - b.page)
@@ -385,6 +410,7 @@ export function bibleOf(
         aliases: (p.aliases ?? []).map(clean).filter(Boolean),
         look: clean(p.look),
         firstPage: Number.isFinite(p.firstPage) ? p.firstPage : 1,
+        sound: soundOf(p.sound),
       })),
     pages: (raw.pages ?? []).map((p) => ({
       page: p.page,
@@ -449,13 +475,22 @@ export function describeStory(bible: StoryBible, page: number): string {
       '.',
     ].join('');
   });
-  const place = here?.place
-    ? bible.places.find((p) => p.id === here.place)
-    : null;
+  const place = placeOn(bible, page);
+  // The places the story has reached by this page, the page's own first.
+  const places = [
+    ...(place ? [place] : []),
+    ...bible.places.filter((p) => p.firstPage <= page && p.id !== place?.id),
+  ].slice(0, MAX_ON_PAGE);
   return [
     'The story\'s characters on this page (show one as kind "character" with its id as ref):',
     ...lines,
-    place ? `It happens at: ${place.name}.` : '',
+    places.length
+      ? 'The story\'s places (show one as kind "place" with its id as ref; it becomes the scene behind the stage):'
+      : '',
+    ...places.map(
+      (p) =>
+        `- ${p.id}: ${p.name}${p === place ? ', where this page happens: behind the stage from the start' : ''}.`,
+    ),
     here?.summary ? `What happens: ${here.summary}` : '',
   ]
     .filter(Boolean)
@@ -498,26 +533,70 @@ export function storyPieces(
  * The page's characters made whole from the story: the order they keep,
  * the face each comes on with (the writer's, else the one the last page
  * left them with), and on the page the book meets them, what they are
- * like.
+ * like. And the page's own place, the scene behind the stage until the
+ * writer shows another.
  */
 export function castStory(
   script: SceneScript,
   bible: StoryBible,
   page: number,
 ): SceneScript {
+  const cast: SceneScript['cast'] = script.cast.map((thing) => {
+    if (thing.kind !== 'character') return thing;
+    const who = bible.characters.find((c) => c.id === thing.ref);
+    if (!who) return thing;
+    return {
+      ...thing,
+      state: thing.state ?? moodBefore(bible, who.id, page),
+      met: who.met,
+      intro: who.firstPage === page ? who.traits : [],
+    };
+  });
+  const here = placeOn(bible, page);
+  let backdrop: string | null = null;
+  if (here) {
+    const shown = cast.find((t) => t.kind === 'place' && t.ref === here.id);
+    if (shown) backdrop = shown.id;
+    else {
+      const taken = new Set(cast.map((t) => t.id));
+      backdrop = taken.has(here.id) ? `place-${here.id}` : here.id;
+      cast.push({
+        id: backdrop,
+        kind: 'place',
+        ref: here.id,
+        name: here.name,
+        sound: here.sound,
+      });
+    }
+  }
+  return { ...script, cast, backdrop };
+}
+
+/** Where a page happens: the place the story puts it in, or none. */
+export function placeOn(bible: StoryBible, page: number): StoryPlace | null {
+  const id = bible.pages.find((p) => p.page === page)?.place;
+  return id ? (bible.places.find((p) => p.id === id) ?? null) : null;
+}
+
+/**
+ * A place as the artist is asked to paint it, once for the book: the
+ * scene behind the stage, filling the frame, with no one in it.
+ */
+export function setThing(place: StoryPlace, bookTitle: string): DrawingThing {
   return {
-    ...script,
-    cast: script.cast.map((thing) => {
-      if (thing.kind !== 'character') return thing;
-      const who = bible.characters.find((c) => c.id === thing.ref);
-      if (!who) return thing;
-      return {
-        ...thing,
-        state: thing.state ?? moodBefore(bible, who.id, page),
-        met: who.met,
-        intro: who.firstPage === page ? who.traits : [],
-      };
-    }),
+    id: place.id,
+    kind: 'drawing',
+    name: place.name,
+    brief: [
+      `${place.name}, a place in "${bookTitle}"${place.look ? `: ${place.look}` : ''}.`,
+      'Seen from where a viewer stands, at eye level, the ground running across the lower part of the picture.',
+    ].join(' '),
+    motion:
+      'slow and ambient if anything moves at all: clouds drift, water shimmers, leaves stir',
+    parts: [],
+    states: [],
+    shape: 'wide',
+    sound: place.sound,
   };
 }
 

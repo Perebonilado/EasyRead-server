@@ -115,6 +115,30 @@ export function introCallouts(
   }));
 }
 
+/** Sets painted by an older way of painting them are painted again. */
+export const SET_VERSION = 1;
+
+/** A place painted once for a book: the scene behind the stage. */
+export interface SetSheet {
+  version: number;
+  drawing: GatedDrawing;
+}
+
+/** A book's places as painted, by their id in the story. */
+export type Sets = Record<string, SetSheet>;
+
+/** Sets read back from storage: only those painted the way they are painted now. */
+export function setsOf(raw: unknown): Sets {
+  if (!raw || typeof raw !== 'object') return {};
+  const out: Sets = {};
+  for (const [id, set] of Object.entries(raw as Record<string, unknown>)) {
+    const one = set as Partial<SetSheet> | null;
+    if (one?.version === SET_VERSION && one.drawing?.svg)
+      out[id] = one as SetSheet;
+  }
+  return out;
+}
+
 /** A cast read back from storage: only sheets drawn the way they are drawn now. */
 export function castOf(raw: unknown): Cast {
   if (!raw || typeof raw !== 'object') return {};

@@ -529,6 +529,8 @@ export interface LlmGatewayPort {
     notes?: string[];
     /** Aborts the call: the page failed while it was being drawn. */
     signal?: AbortSignal;
+    /** A story's place, painted as the scene behind the stage. */
+    backdrop?: boolean;
   }): Promise<LlmResult<string>>;
 
   lectureSketch(input: {

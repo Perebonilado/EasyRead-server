@@ -498,15 +498,24 @@ describe('what a character says, in a bubble', () => {
       'You’re late … again.',
     );
     expect(spokenIn('Mira says nothing at all.')).toBeNull();
+    // Straight single quotes, the apostrophes inside them left alone.
+    expect(
+      spokenIn("'You're holding the matches upside down,' says the fox."),
+    ).toBe("You're holding the matches upside down");
+    // A quote the writer never opened, or never closed.
+    expect(spokenIn("Foxes don't talk,' she says.")).toBe("Foxes don't talk");
+    expect(spokenIn('She calls out, "Same time tomorrow?')).toBe(
+      'Same time tomorrow?',
+    );
+    // A possessive is no quotation.
+    expect(spokenIn("The boys' fire goes out.")).toBeNull();
     // A speech: the sentences that start it, as many as a bubble holds.
     expect(
       spokenIn(
         '"And lanterns don\'t light themselves. I\'m Ember. Your grandfather and I go back a long way," says the fox.',
       ),
     ).toBe("And lanterns don't light themselves. I'm Ember.");
-    expect(spokenIn(`"${'word '.repeat(60)}"`)!.length).toBeLessThanOrEqual(
-      81,
-    );
+    expect(spokenIn(`"${'word '.repeat(60)}"`)!.length).toBeLessThanOrEqual(81);
   });
 
   /** A standing figure's ink: a column down the middle of its box, its sides empty. */
@@ -631,5 +640,98 @@ describe('what a character says, in a bubble', () => {
       );
       expect(audit[staging].flat()).toEqual([]);
     }
+  });
+});
+
+describe('the scene behind the stage', () => {
+  const quay = (): GatedDrawing =>
+    drawing({
+      aspect: 16 / 9,
+      viewBox: [0, 0, 1600, 900],
+      parts: {},
+      labels: {},
+      states: {},
+    });
+  const backdrops: SceneScript = {
+    ...script,
+    backdrop: 'quay',
+    cast: [
+      {
+        id: 'quay',
+        kind: 'place',
+        ref: 'quay',
+        name: 'The quay',
+        sound: 'water',
+      },
+      { id: 'home', kind: 'place', ref: 'home', name: 'Home', sound: null },
+      {
+        id: 'mira',
+        kind: 'character',
+        ref: 'mira',
+        name: 'Mira',
+        state: null,
+        met: 0,
+        intro: [],
+      },
+    ],
+    steps: [
+      {
+        at: { beat: 0, phrase: 'Plants make' },
+        word: 0,
+        stage: { layout: 'one', show: [], arrows: [] },
+        effects: [],
+      },
+      {
+        at: { beat: 1, phrase: 'sunlight' },
+        word: 2,
+        stage: { layout: 'one', show: ['mira'], arrows: [] },
+        effects: [],
+      },
+      // The same stage somewhere else: a change all the same.
+      {
+        at: { beat: 2, phrase: 'called chloroplasts' },
+        word: 6,
+        stage: { layout: 'one', show: ['mira'], arrows: [], backdrop: 'home' },
+        effects: [],
+      },
+    ],
+  };
+  const { scene, audit } = composeScene({
+    script: backdrops,
+    drawings: new Map([
+      ['quay', quay()],
+      ['home', quay()],
+      [
+        'mira',
+        drawing({
+          aspect: 0.6,
+          viewBox: [0, 0, 600, 900],
+          parts: {},
+          labels: {},
+          states: {},
+        }),
+      ],
+    ]),
+    beats,
+    durationMs: 16_000,
+    timing: 'voice',
+    generator: 'scene-2',
+  });
+
+  it("carries the page's own place from the start, and each place shown from its step", () => {
+    expect(scene.steps.map((s) => s.backdrop)).toEqual([
+      'quay',
+      'quay',
+      'home',
+    ]);
+    expect(scene.steps[0].show).toEqual([]);
+    const set = scene.things.find((t) => t.id === 'quay');
+    expect(set).toMatchObject({
+      kind: 'drawing',
+      backdrop: true,
+      caption: null,
+      ambience: 'water',
+    });
+    expect(audit.wide.flat()).toEqual([]);
   });
 });

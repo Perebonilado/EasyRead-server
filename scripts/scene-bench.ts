@@ -107,6 +107,15 @@ async function stillsOf(
   for (let k = 0; k < scene.steps.length; k += 1) {
     const until = (scene.steps[k + 1]?.atMs ?? scene.durationMs) - 1;
     const pngs = new Map<string, Buffer>();
+    const scenery = scene.steps[k].backdrop
+      ? scene.things.find((t) => t.id === scene.steps[k].backdrop)
+      : undefined;
+    if (scenery?.kind === 'drawing')
+      try {
+        pngs.set(scenery.id, await rasterise(scenery.svg, STILL_PX * 2));
+      } catch {
+        // A still with no scene behind it.
+      }
     for (const id of scene.steps[k].show) {
       const thing = scene.things.find((t) => t.id === id);
       const place = set.places[k]?.[id];

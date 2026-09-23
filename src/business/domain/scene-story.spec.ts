@@ -148,6 +148,7 @@ describe("a story's continuity", () => {
               name: 'the harbour',
               aliases: [],
               look: 'grey stone quay at dusk',
+              sound: 'water',
             },
           ],
           pages: [
@@ -179,7 +180,9 @@ describe("a story's continuity", () => {
     expect(told).toContain(
       '- ember: Ember, sly. Starts the page neutral; on it mostly neutral. The book meets them for the first time here.',
     );
-    expect(told).toContain('It happens at: the harbour.');
+    expect(told).toContain(
+      '- harbour: the harbour, where this page happens: behind the stage from the start.',
+    );
     // A page nothing is known of: the main characters met so far.
     expect(charactersOn(bible, 9).map((c) => c.id)).toEqual(['mira', 'ember']);
   });
@@ -310,5 +313,50 @@ describe("a story's continuity", () => {
         story: true,
       }).story,
     ).toBe(true);
+  });
+});
+
+describe("a story page's own place", () => {
+  it('stands behind the stage from the start, added to the cast when the writer left it out', () => {
+    const bible = mergeStory([
+      {
+        from: 1,
+        to: 2,
+        draft: draft({
+          characters: [person('Mira')],
+          places: [
+            { name: 'the quay', aliases: [], look: 'stone', sound: 'water' },
+          ],
+          pages: [
+            {
+              page: 1,
+              summary: '',
+              present: [{ name: 'Mira', mood: 'happy' }],
+              place: 'the quay',
+            },
+          ],
+        }),
+      },
+    ]);
+    const script = {
+      fit: 'good',
+      fitReason: null,
+      title: 't',
+      mood: 'calm',
+      beats: [],
+      steps: [],
+      cast: [{ id: 'quay', kind: 'words', text: 'quay', style: 'keyword' }],
+    } as SceneScript;
+    const cast = castStory(script, bible, 1);
+    // Its id taken by something else on the page, the place takes another.
+    expect(cast.backdrop).toBe('place-quay');
+    expect(cast.cast[1]).toEqual({
+      id: 'place-quay',
+      kind: 'place',
+      ref: 'quay',
+      name: 'the quay',
+      sound: 'water',
+    });
+    expect(castStory({ ...script, cast: [] }, bible, 2).backdrop).toBeNull();
   });
 });

@@ -31,29 +31,38 @@ import {
   quietStretches,
   wordsOf,
   type CharacterThing,
+  type PlaceThing,
   type DrawingThing,
   type SceneScript,
 } from '../../business/domain/scene-script';
 import {
+  SET_VERSION,
   castOf,
   introCallouts,
   measureSheet,
+  setsOf,
   type Cast,
   type CharacterSheet,
+  type SetSheet,
+  type Sets,
 } from '../../business/domain/scene-sheet';
 import {
   EMPTY_STORY,
   MAX_STORY_PIECES,
   bibleOf,
+  SET_CANVAS,
   castKey,
   castStory,
   describeStory,
   mergeStory,
+  setThing,
+  setsKey,
   sheetThing,
   storyKey,
   storyPieces,
   type StoryBible,
   type StoryCharacter,
+  type StoryPlace,
 } from '../../business/domain/scene-story';
 import {
   CANVAS,
@@ -130,6 +139,8 @@ export interface PageStory {
   bible: StoryBible;
   page: number;
   castKey: string;
+  /** Where the book's places, painted once, are kept. */
+  setsKey: string;
   bookTitle: string;
 }
 
@@ -552,7 +563,12 @@ export class SceneProcessor {
     const checks = {
       material: input.material,
       formats: input.profile.formats,
-      ...(input.story ? { characters: input.story.bible.characters } : {}),
+      ...(input.story
+        ? {
+            characters: input.story.bible.characters,
+            places: input.story.bible.places,
+          }
+        : {}),
     };
     const first = await this.llm.sceneScript(ask);
     await this.record(input.documentId, 'scene_write', first.usage);
@@ -602,6 +618,9 @@ export class SceneProcessor {
     );
     const characters = script.cast.filter(
       (thing): thing is CharacterThing => thing.kind === 'character',
+    );
+    const places = script.cast.filter(
+      (thing): thing is PlaceThing => thing.kind === 'place',
     );
     const names = new Map(
       script.cast.map((thing) => [
@@ -653,8 +672,24 @@ export class SceneProcessor {
           : null,
       );
     });
+    // The story's places, each painted once for the whole book.
+    const sets = places.map(async (thing) => {
+      const place = story?.bible.places.find((p) => p.id === thing.ref);
+      const set =
+        story && place
+          ? await this.setFor(
+              story.setsKey,
+              place,
+              story.bookTitle,
+              documentId,
+              who,
+            )
+          : null;
+      out.set(thing.id, set?.drawing ?? null);
+    });
     await Promise.all([
       ...cast,
+      ...sets,
       ...drawings.map(async (thing) => {
         // What it shares the stage with, so its scale and style agree with theirs.
         const neighbours = new Set<string>();
@@ -880,6 +915,21 @@ export class SceneProcessor {
     const scale = THUMB_WIDTH / scene.stagings.box.w;
     // As the step stands at its end: its states shown, a character's face on.
     const until = (scene.steps[index + 1]?.atMs ?? scene.durationMs) - 1;
+    const scenery = step?.backdrop
+      ? scene.things.find((t) => t.id === step.backdrop)
+      : undefined;
+    if (scenery?.kind === 'drawing')
+      try {
+        pngs.set(
+          scenery.id,
+          await rasterise(
+            scenery.svg,
+            Math.round(scene.stagings.box.w * scale),
+          ),
+        );
+      } catch {
+        // A still with no scene behind it.
+      }
     for (const id of step?.show ?? []) {
       const thing = scene.things.find((t) => t.id === id);
       const place = scene.stagings.box.places[index]?.[id];
@@ -918,6 +968,7 @@ export class SceneProcessor {
           bible,
           page,
           castKey: castKey(documentId, contentVersion),
+          setsKey: setsKey(documentId, contentVersion),
           bookTitle,
         }
       : null;
@@ -1081,6 +1132,106 @@ export class SceneProcessor {
       );
       return sheet;
     });
+  }
+
+  /**
+   * A place's set for the whole book: from the book's sets, or painted once
+   * and added to them, as a character is drawn once. Null when none comes
+   * through: the page has no scene behind it.
+   */
+  private setFor(
+    key: string,
+    place: StoryPlace,
+    bookTitle: string,
+    documentId: string | null,
+    who: string,
+  ): Promise<SetSheet | null> {
+    return this.once(`${key}#${place.id}`, async () => {
+      try {
+        const kept = (await this.setsAt(key))[place.id];
+        if (kept) return kept;
+      } catch (error) {
+        this.logger.warn(
+          `${who}: the sets could not be read: ${(error as Error).message}`,
+        );
+        return null;
+      }
+      const set = await this.paintSet(place, bookTitle, documentId, who);
+      if (!set) return null;
+      await this.inTurn(key, async () => {
+        const sets = await this.setsAt(key);
+        sets[place.id] = set;
+        await this.storage.put({
+          key,
+          body: Buffer.from(JSON.stringify(sets)),
+          mimeType: 'application/json',
+        });
+      }).catch((error: unknown) =>
+        this.logger.warn(
+          `${who}: ${place.name} was painted but not kept: ${(error as Error).message}`,
+        ),
+      );
+      return set;
+    });
+  }
+
+  /** The book's sets as kept, read as the cast is. */
+  private async setsAt(key: string): Promise<Sets> {
+    let kept: Buffer;
+    try {
+      kept = await this.storage.get(key);
+    } catch (error) {
+      if (error instanceof NotFoundError) return {};
+      throw error;
+    }
+    try {
+      return setsOf(JSON.parse(kept.toString('utf8')));
+    } catch {
+      return {};
+    }
+  }
+
+  /** A place painted for the book: asked for as a set, gated as one, and asked for once more when it falls short. */
+  private async paintSet(
+    place: StoryPlace,
+    bookTitle: string,
+    documentId: string | null,
+    who: string,
+  ): Promise<SetSheet | null> {
+    const thing = setThing(place, bookTitle);
+    let best: GateResult | null = null;
+    let notes: string[] | undefined;
+    for (let attempt = 1; attempt <= DRAW_TRIES; attempt += 1) {
+      let reply: string;
+      try {
+        const made = await this.llm.sceneDrawing({
+          thing,
+          viewBox: SET_CANVAS,
+          topic: bookTitle,
+          neighbours: [],
+          notes,
+          backdrop: true,
+        });
+        await this.record(documentId, 'scene_draw', made.usage);
+        reply = made.value;
+      } catch (error) {
+        this.logger.warn(
+          `${who}: ${place.name} could not be asked for: ${(error as Error).message}`,
+        );
+        continue;
+      }
+      const gated = await gateDrawing(reply, thing, { backdrop: true });
+      if (gated.drawing && (!best?.drawing || gated.score > best.score))
+        best = gated;
+      if (gated.drawing && !gated.retry) break;
+      notes = gated.notes;
+    }
+    if (!best?.drawing) {
+      this.logger.warn(`${who}: ${place.name} could not be painted`);
+      return null;
+    }
+    this.logger.log(`${who}: ${place.name} painted for the whole book`);
+    return { version: SET_VERSION, drawing: best.drawing };
   }
 
   /**

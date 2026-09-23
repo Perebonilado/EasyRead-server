@@ -172,7 +172,10 @@ for every feeling, into the book's `cast.json`, and stands on every page
 they are on: the same figure, the one met first on the left, with the
 face the last page left them with, what they are like set beside them on
 the page the book meets them, and what they say in a bubble by their
-head. Both files go when the document is purged. `npm run scene:try --
+head. Each place the story happens in is painted once too, into the
+book's `sets.json`, and stands faded behind the stage while the story is
+there, with its own sound. The three files go when the document is
+purged. `npm run scene:try --
 <story.md> --story --page 3` tries it on a story whose pages are parted by
 lines of three dashes.
 

@@ -471,3 +471,93 @@ describe('timelines and charts, held to the page', () => {
     );
   });
 });
+
+describe("a story's places, as the scene behind the stage", () => {
+  const places = [
+    {
+      id: 'quay',
+      name: 'the quay',
+      aliases: ['the harbour'],
+      sound: 'water' as const,
+    },
+    { id: 'house', name: 'the blue house', aliases: [], sound: null },
+  ];
+  const characters = [{ id: 'mira', name: 'Mira', aliases: [] }];
+  const draft = (): SceneScriptDraft => ({
+    fit: 'good',
+    fitReason: null,
+    title: 'Home',
+    mood: 'calm',
+    beats: [
+      { say: 'The quay is empty at dusk.', pause: 'short', delivery: 'hook' },
+      { say: 'Mira walks along it.', pause: 'short', delivery: 'explain' },
+      { say: 'Then she runs home.', pause: 'long', delivery: 'recap' },
+    ],
+    cast: [
+      thing('harbour', 'place', { ref: 'The Harbour' }),
+      thing('home', 'place', { ref: 'house' }),
+      thing('atlantis', 'place', { ref: 'atlantis' }),
+      thing('mira', 'character', { ref: 'mira' }),
+    ],
+    steps: [
+      step(0, 'The quay', { layout: 'one', show: ['harbour'] }),
+      step(1, 'Mira walks', { layout: 'row', show: ['harbour', 'mira'] }),
+      step(2, 'runs home', { layout: 'one', show: ['home', 'mira'] }),
+      step(2, 'she runs', { layout: 'one', show: ['atlantis', 'mira'] }),
+    ],
+  });
+
+  it("reads a picture of one of the story's places as the place itself", () => {
+    const { script } = mendScript(
+      {
+        ...draft(),
+        cast: [
+          thing('the-quay', 'drawing', { name: 'The Quay' }),
+          thing('mira', 'character', { ref: 'mira' }),
+        ],
+        steps: [
+          step(0, 'The quay', { layout: 'row', show: ['the-quay', 'mira'] }),
+        ],
+      },
+      { characters, places },
+    );
+    expect(script.cast[0]).toMatchObject({ kind: 'place', ref: 'quay' });
+    expect(script.steps[0].stage).toMatchObject({
+      show: ['mira'],
+      backdrop: 'the-quay',
+    });
+  });
+
+  it('turns a place shown into the backdrop, and a place alone into the empty scene', () => {
+    const { script, mended } = mendScript(draft(), { characters, places });
+    expect(script.cast.filter((t) => t.kind === 'place')).toEqual([
+      {
+        id: 'harbour',
+        kind: 'place',
+        ref: 'quay',
+        name: 'the quay',
+        sound: 'water',
+      },
+      {
+        id: 'home',
+        kind: 'place',
+        ref: 'house',
+        name: 'the blue house',
+        sound: null,
+      },
+    ]);
+    expect(mended.join(' ')).toContain(
+      '"atlantis" is not one of the story\'s places',
+    );
+    const [empty, walks, home] = script.steps.map((s) => s.stage);
+    expect(empty).toEqual({
+      layout: 'one',
+      show: [],
+      arrows: [],
+      backdrop: 'harbour',
+    });
+    // A place never takes a slot: the row holds Mira alone.
+    expect(walks).toMatchObject({ show: ['mira'], backdrop: 'harbour' });
+    expect(home).toMatchObject({ show: ['mira'], backdrop: 'home' });
+  });
+});

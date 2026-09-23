@@ -800,6 +800,7 @@ export class AiSdkLlmAdapter implements LlmGatewayPort, OnModuleInit {
     neighbours: string[];
     notes?: string[];
     signal?: AbortSignal;
+    backdrop?: boolean;
   }): Promise<LlmResult<string>> {
     const started = Date.now();
     const { generateText } = await this.registry.modules();
@@ -810,7 +811,7 @@ export class AiSdkLlmAdapter implements LlmGatewayPort, OnModuleInit {
     // million times; escaped into a JSON field it is not (79c2523).
     const result = await generateText({
       model,
-      system: PROMPTS.sceneDraw,
+      system: input.backdrop ? PROMPTS.sceneSet : PROMPTS.sceneDraw,
       prompt: drawingRequest(input),
       maxRetries: this.maxRetries(),
       maxOutputTokens: thinking ? 32_000 : 16_000,
@@ -1809,6 +1810,7 @@ export function drawingRequest(input: {
   topic: string;
   neighbours: string[];
   notes?: string[];
+  backdrop?: boolean;
 }): string {
   const { thing, viewBox } = input;
   const id = groupId;
@@ -1822,7 +1824,9 @@ export function drawingRequest(input: {
   );
   return [
     `Draw: ${thing.brief}`,
-    `It will be captioned "${thing.name}" under the drawing; do not write that on it.`,
+    input.backdrop
+      ? ''
+      : `It will be captioned "${thing.name}" under the drawing; do not write that on it.`,
     parts.length
       ? `Parts, each its own group:\n- ${parts.join('\n- ')}`
       : 'No named parts and no labels.',

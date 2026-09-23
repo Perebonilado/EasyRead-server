@@ -143,6 +143,7 @@ async function main(): Promise<void> {
             bible,
             page: pageNumber,
             castKey: `try/${book}-${SCENE_GENERATOR_VERSION}/cast.json`,
+            setsKey: `try/${book}-${SCENE_GENERATOR_VERSION}/sets.json`,
             bookTitle: title,
           }
         : null,

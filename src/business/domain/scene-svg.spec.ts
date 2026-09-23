@@ -250,3 +250,19 @@ describe('the gate', () => {
     );
   });
 });
+
+describe('a set, gated', () => {
+  const scene =
+    '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1600 900"><rect x="0" y="0" width="1600" height="900" fill="#BFD9EE"/><rect x="0" y="600" width="1600" height="300" fill="#9C8F7A"/></svg>';
+  const set = { parts: [], states: [], motion: 'clouds drift' };
+
+  it('keeps its ground and its whole canvas, and is no worse for keeping still', async () => {
+    const gated = await gateDrawing(scene, set, { backdrop: true });
+    expect(gated.drawing?.viewBox).toEqual([0, 0, 1600, 900]);
+    expect(gated.drawing?.svg).toContain('fill="#BFD9EE"');
+    expect(gated.retry).toBe(false);
+    // As any drawing, the ground goes and the drawing is framed to its ink.
+    const drawn = await gateDrawing(scene, set);
+    expect(drawn.drawing?.svg ?? '').not.toContain('#BFD9EE');
+  }, 20_000);
+});

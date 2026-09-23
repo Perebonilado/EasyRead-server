@@ -949,6 +949,8 @@ export type SceneThingDto =
       calloutsLater?: string[];
       /** Drawn by code, not by the artist: working, a graph, the text's own words, a timeline or a chart. */
       source?: 'math' | 'plot' | 'quote' | 'timeline' | 'chart';
+      /** A story's place: the scene behind the stage, never in a slot. */
+      backdrop?: true;
     }
   | { id: string; kind: 'stat'; value: string; caption: string }
   | {
@@ -978,6 +980,8 @@ export interface SceneStepDto {
   enter: Record<string, { how: SceneEnterName; from?: string }>;
   /** The thing the camera leans toward. */
   focus: string | null;
+  /** The scene behind the stage: a place's drawing, by id; absent for none. */
+  backdrop?: string;
 }
 
 export interface SceneEffectDto {

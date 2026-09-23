@@ -496,6 +496,7 @@ export const sceneScriptSchema = z.object({
         'timeline',
         'chart',
         'character',
+        'place',
       ]),
       name: z.string(),
       brief: z.string().nullable(),
@@ -598,6 +599,7 @@ export const sceneStorySchema = z.object({
       name: z.string(),
       aliases: z.array(z.string()),
       look: z.string(),
+      sound: z.enum(SCENE_AMBIENCES).nullable(),
     }),
   ),
   pages: z.array(

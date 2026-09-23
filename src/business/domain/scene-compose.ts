@@ -41,6 +41,7 @@ import {
 } from './scene-layout';
 import {
   isCodeThing,
+  quotedSpans,
   type SceneScript,
   type SceneStep,
   type SceneThing,
@@ -48,6 +49,9 @@ import {
 import { EXPRESSIONS } from './scene-story';
 import type { GatedDrawing } from './scene-svg';
 import { anchorMs, quietGaps, spaced, type TimedBeat } from './scene-timing';
+
+/** How strongly the scene behind the stage shows on its paper: enough to be there, faint enough to read over. */
+export const BACKDROP_OPACITY = 0.5;
 
 /** Effects in one step come this far apart, so each is seen. */
 const EFFECT_STAGGER_MS = 180;
@@ -64,18 +68,9 @@ const SAY_CHARS = 80;
  * there is nothing for a bubble to hold.
  */
 export function spokenIn(sentence: string): string | null {
-  // Double quotes, straight or curly, and curly single quotes whose closing
-  // mark is not an apostrophe inside a word.
-  const quoted = [/“([^”]+)”/g, /"([^"]+)"/g, /‘(.+?)’(?!\p{L})/gu]
-    .flatMap((pattern) =>
-      [...sentence.matchAll(pattern)].map((m) => ({
-        at: m.index,
-        words: m[1].trim().replace(/[,;:]$/, ''),
-      })),
-    )
-    .filter((one) => /\p{L}/u.test(one.words))
-    .sort((a, b) => a.at - b.at)
-    .map((one) => one.words);
+  const quoted = quotedSpans(sentence).map(([start, end]) =>
+    sentence.slice(start, end).replace(/[,;:]$/, ''),
+  );
   if (!quoted.length) return null;
   const said = quoted.join(' … ');
   if (said.length <= SAY_CHARS) return said;
@@ -136,8 +131,13 @@ export function thingDto(
     states: drawing.states,
     hidden: [],
     moves: drawing.moves,
-    ambience: thing.kind === 'drawing' ? thing.sound : null,
+    ambience:
+      thing.kind === 'drawing' || thing.kind === 'place' ? thing.sound : null,
     ...(isCodeThing(thing) ? { source: thing.kind } : {}),
+    // A place is the scene behind the stage, never in a slot, and uncaptioned.
+    ...(thing.kind === 'place'
+      ? { backdrop: true as const, caption: null }
+      : {}),
     ...(drawing.callouts.length
       ? {
           callouts: Object.fromEntries(
@@ -364,7 +364,13 @@ export function composeScene(input: ComposeInput): {
   let saying = 1;
   let before: string[] = [];
   let focus: string | null = null;
+  // The scene behind the stage: the page's own place from the start, and
+  // each place the writer shows from its step on, when it was painted.
+  const painted = (id: string | null | undefined) =>
+    id && byId.get(id)?.kind === 'drawing' ? id : null;
+  let backdrop = painted(script.backdrop);
   const same = (a: SceneStepDto, stage: NonNullable<SceneStep['stage']>) =>
+    (a.backdrop ?? null) === (painted(stage.backdrop) ?? backdrop) &&
     a.layout === stage.layout &&
     a.show.join() === stage.show.join() &&
     a.arrows
@@ -419,6 +425,7 @@ export function composeScene(input: ComposeInput): {
           ? focus
           : step.stage.show[0]) ??
         null;
+      backdrop = painted(step.stage.backdrop) ?? backdrop;
       steps.push({
         atMs: Math.round(atMs),
         layout: step.stage.layout,
@@ -426,6 +433,7 @@ export function composeScene(input: ComposeInput): {
         arrows,
         enter,
         focus,
+        ...(backdrop ? { backdrop } : {}),
       });
       before = step.stage.show;
     }
@@ -793,7 +801,7 @@ export function composeScene(input: ComposeInput): {
         words: b.words,
       })),
       things: things.filter((thing) =>
-        steps.some((s) => s.show.includes(thing.id)),
+        steps.some((s) => s.show.includes(thing.id) || s.backdrop === thing.id),
       ),
       steps,
       effects,
@@ -998,6 +1006,12 @@ export function stepSvg(
   const places = staging.places[index];
   const byId = new Map(scene.things.map((t) => [t.id, t]));
   const parts: string[] = [];
+  // The scene behind the stage, covering it, faded as the player fades it.
+  const scenery = step.backdrop ? pngs.get(step.backdrop) : undefined;
+  if (scenery)
+    parts.push(
+      `<image x="0" y="0" width="${staging.w}" height="${staging.h}" preserveAspectRatio="xMidYMid slice" opacity="${BACKDROP_OPACITY}" href="data:image/png;base64,${scenery.toString('base64')}"/>`,
+    );
   const text = (
     x: number,
     y: number,

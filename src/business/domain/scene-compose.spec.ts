@@ -103,6 +103,17 @@ const script: SceneScript = {
   ],
 };
 
+/** Ink in the middle of a 960 by 600 drawing, its corners empty, as a real drawing's map is. */
+const blob = (): GatedDrawing['field'] => {
+  const cols = 48;
+  const rows = 30;
+  let bits = '';
+  for (let r = 0; r < rows; r += 1)
+    for (let c = 0; c < cols; c += 1)
+      bits += (c - 24) ** 2 / 400 + (r - 15) ** 2 / 110 <= 1 ? '1' : '0';
+  return { viewBox: [0, 0, 960, 600], map: { cols, rows, bits } };
+};
+
 const drawing = (overrides: Partial<GatedDrawing> = {}): GatedDrawing => ({
   svg: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 600"><rect width="10" height="10"/></svg>',
   viewBox: [0, 0, 960, 600],
@@ -111,6 +122,8 @@ const drawing = (overrides: Partial<GatedDrawing> = {}): GatedDrawing => ({
   labels: { chloroplasts: 'chloroplasts-label' },
   states: { glowing: 'glow' },
   moves: true,
+  callouts: [],
+  field: null,
   ...overrides,
 });
 
@@ -141,6 +154,59 @@ describe('the scene put together', () => {
     // A drawing that failed is a card, and a card makes no sound.
     const sun = scene.things.find((t) => t.id === 'sun');
     expect(sun?.kind).toBe('words');
+  });
+
+  it("sets a drawing's lifted labels beside it at every step, and the arrow's label on its arrow", () => {
+    const lifted = composeScene({
+      script,
+      drawings: new Map([
+        [
+          'leaf',
+          drawing({
+            labels: {},
+            callouts: [
+              {
+                part: 'chloroplasts',
+                text: 'chloroplasts',
+                anchor: [700, 300],
+              },
+              { part: 'veins', text: 'veins', anchor: [200, 250] },
+            ],
+            field: blob(),
+          }),
+        ],
+        ['sun', drawing({ labels: {}, parts: {}, states: {}, field: blob() })],
+      ]),
+      beats,
+      durationMs: 16_000,
+      timing: 'voice',
+      generator: 'scene-1',
+    });
+    const leaf = lifted.scene.things.find((t) => t.id === 'leaf');
+    expect(leaf?.kind === 'drawing' && leaf.callouts).toEqual({
+      chloroplasts: 'chloroplasts',
+      veins: 'veins',
+    });
+    // Both are pointed at later, so both wait for their moment.
+    expect(leaf?.kind === 'drawing' && leaf.calloutsLater?.sort()).toEqual([
+      'chloroplasts',
+      'veins',
+    ]);
+    for (const staging of ['box', 'wide'] as const) {
+      const { places, pills } = lifted.scene.stagings[staging];
+      for (const step of places) {
+        const at = step.leaf;
+        expect(at.labels?.map((l) => l.part).sort()).toEqual([
+          'chloroplasts',
+          'veins',
+        ]);
+        expect(at).not.toHaveProperty('room');
+      }
+      // The row's arrow has its label placed; the hub's has none to place.
+      expect(pills?.[1]['sun>leaf']).toMatchObject({ size: 26 });
+      expect(pills?.[2]).toEqual({});
+    }
+    expect(lifted.audit.box).toHaveLength(lifted.scene.steps.length);
   });
 
   it('decides how each newcomer arrives', () => {

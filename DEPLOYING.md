@@ -132,6 +132,22 @@ ship in `pdfjs-dist`.
 own processor against whatever the environment points at, and writes the
 scene, the audio and a gallery of the drawings to `scene-out/`.
 
+The writer tags how each sentence is said, and the voice follows: Kokoro
+by each sentence's pace and silence, Gemini by a few words of direction.
+`SCENE_VOICE` picks Visualize's voice alone. To try the paid voice, set
+`SCENE_VOICE_ENGINE=gemini` and `GEMINI_API_KEY` on the **worker**; the
+worker encodes Gemini's WAV to mp3 itself (`@breezystack/lamejs`) and
+times the words with the aligner. `npm run scene:voices -- <documentId>
+<page>` says one page in a line-up of voices and writes a blind test to
+`scene-out/voices/`.
+
+A page's sound (its music, the stage's effects, a drawing's own sound)
+plays in the browser from what the scene says; the server sends no
+audio for it. Labels are lifted out of the drawings and set by the stage,
+and every page's log line `frame audit` counts anything left overlapping.
+Scenes are made by generator `scene-2`: pages made before are made again
+the next time they are asked for.
+
 ## The live tutor
 
 A tutor marked `livekit` in `tutors.ts` talks on our own line: a LiveKit

@@ -9,6 +9,13 @@
  * picture can never overlap another or leave the stage.
  */
 import { measureText } from './scene-font';
+import {
+  LABEL,
+  bandFor,
+  gutters,
+  type LabelMode,
+  type LabelPlace,
+} from './scene-labels';
 import type { SceneLayout } from './scene-script';
 
 export const STAGINGS = {
@@ -42,11 +49,24 @@ export interface Place extends Rect {
     size: number;
     lines: string[];
   };
+  /** The slot it was fitted in: the room its labels may use. Not sent to the player. */
+  room?: Rect;
+  /** A drawing's labels, set beside it at this step. */
+  labels?: LabelPlace[];
+  /** Where its labels go: the room kept for them when it was fitted. Not sent to the player. */
+  labelsAt?: LabelMode;
 }
 
 /** What the layout needs to know of a thing. */
 export type LaidThing =
-  | { kind: 'drawing'; aspect: number; caption: string | null }
+  | {
+      kind: 'drawing';
+      aspect: number;
+      caption: string | null;
+      /** Labels the stage sets beside it, and the drawing's own frame they point into. */
+      callouts?: { text: string; anchor: [number, number] }[];
+      viewBox?: [number, number, number, number];
+    }
   | { kind: 'stat'; value: string; caption: string }
   | { kind: 'words'; text: string; style: 'title' | 'keyword' | 'card' };
 
@@ -271,12 +291,35 @@ export function fitInSlot(
       h: Math.max(slot.h * 0.3, slot.h - band),
     };
     const aspect = thing.aspect > 0 ? thing.aspect : 1;
-    const w = Math.min(art.w, art.h * aspect);
+    // Room for the labels the stage sets: a band in the room the drawing
+    // leaves free when they all fit in one row there, else a column
+    // beside it on each side they point from, which the drawing gives up.
+    let mode: LabelMode | undefined;
+    let side = { left: 0, right: 0 };
+    if (thing.callouts?.length && thing.viewBox) {
+      const free = art.h - Math.min(art.w, art.h * aspect) / aspect;
+      const band = bandFor(
+        thing.callouts.map((c) => c.text),
+        slot,
+      );
+      if (band && free >= band.h + LABEL.leaderRoom + 12)
+        mode = captionOnTop ? 'below' : 'above';
+      else {
+        mode = 'sides';
+        side = gutters(thing.callouts, thing.viewBox, slot);
+      }
+    }
+    const w = Math.min(art.w - side.left - side.right, art.h * aspect);
     const h = w / aspect;
-    // Sat on its caption, so captions in a row line up and each hugs its picture.
-    const x = art.x + (art.w - w) / 2;
+    // Sat on its caption, so captions in a row line up and each hugs its
+    // picture; in the middle, unless its labels need it moved over.
+    const x = Math.min(
+      Math.max(art.x + (art.w - w) / 2, art.x + side.left),
+      art.x + art.w - side.right - w,
+    );
     const y = captionOnTop ? art.y : art.y + (art.h - h);
     const place: Place = { x: round(x), y: round(y), w: round(w), h: round(h) };
+    if (mode) place.labelsAt = mode;
     if (caption)
       place.caption = {
         x: round(slot.x + slot.w * 0.02),
@@ -410,7 +453,7 @@ export function layoutStep(
     const thing = things.get(id);
     const slot = slots[i];
     if (!thing || !slot) return;
-    out[id] = fitInSlot(thing, slot, layout === 'compare');
+    out[id] = { ...fitInSlot(thing, slot, layout === 'compare'), room: slot };
   });
   return out;
 }

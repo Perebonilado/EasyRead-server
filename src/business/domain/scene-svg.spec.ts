@@ -114,7 +114,22 @@ describe('the gate', () => {
     expect(result.drawing).not.toBeNull();
     expect(result.retry).toBe(false);
     expect(result.drawing!.parts.chloroplasts).toBe('Chloroplasts');
-    expect(result.drawing!.labels.stomata).toBe('stomata_label');
+    // Its labels are lifted out for the stage to set: what each says, and
+    // where it points, taken from the end of its leader line.
+    expect(result.drawing!.labels).toEqual({});
+    const lifted = Object.fromEntries(
+      result.drawing!.callouts.map((c) => [c.part, c]),
+    );
+    expect(lifted.chloroplasts.text).toBe('chloroplasts');
+    expect(lifted.chloroplasts.anchor).toEqual([400, 300]);
+    // No leader: it points at the side of its part nearest its words.
+    const [sx, sy] = lifted.stomata.anchor;
+    expect(sx).toBeGreaterThan(469);
+    expect(sx).toBeLessThan(491);
+    expect(sy).toBeGreaterThan(469);
+    expect(sy).toBeLessThan(491);
+    expect(result.drawing!.svg).not.toContain('>chloroplasts<');
+    expect(result.drawing!.field?.map.bits).toContain('1');
     expect(result.drawing!.states.lit).toBe('lit');
     expect(result.drawing!.moves).toBe(true);
     expect(result.drawing!.svg).not.toContain('100%');
@@ -194,6 +209,26 @@ describe('the gate', () => {
     expect(inspected.mended).toContain(
       'removed a title that repeated the caption',
     );
+  });
+
+  it('takes a title written as a label out with its leader, and leaves a drawing that holds a title alone', () => {
+    const inspected = inspectSvg(
+      `<svg viewBox="0 0 400 300"><g id="plaque"><circle cx="200" cy="150" r="80"/></g>
+        <g id="title"><line x1="260" y1="100" x2="330" y2="40"/><circle cx="260" cy="100" r="4"/><text x="335" y="35">Amyloid plaque</text></g>
+        <g id="body"><path d="M10 10 C 40 40 80 40 120 10"/><text x="20" y="290">Amyloid plaque</text></g></svg>`,
+      { name: 'Amyloid plaque', parts: [], states: [], motion: '' },
+    );
+    if (!inspected.root) throw new Error('should parse');
+    const ids: string[] = [];
+    const visit = (node: {
+      attribs?: Record<string, string>;
+      children?: unknown[];
+    }) => {
+      if (node.attribs?.id) ids.push(node.attribs.id);
+      for (const child of node.children ?? []) visit(child as typeof node);
+    };
+    visit(inspected.root);
+    expect(ids).toEqual(['plaque', 'body']);
   });
 
   it('grows the frame for a label a few units over the edge rather than cut it', () => {

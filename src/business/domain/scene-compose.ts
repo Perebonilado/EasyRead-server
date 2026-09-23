@@ -9,15 +9,32 @@ import type {
   SceneDto,
   SceneEffectDto,
   SceneEnterName,
+  ScenePillDto,
   ScenePlaceDto,
   SceneStepDto,
   SceneThingDto,
   SceneTiming,
 } from '../../contracts';
+import type { Callout, InkField } from './scene-callouts';
+import { measureText } from './scene-font';
+import {
+  auditStep,
+  arrowPath,
+  pillBox,
+  placeLabels,
+  placePill,
+  segmentsOf,
+  type Collision,
+  type Ink,
+  type Words,
+} from './scene-labels';
 import {
   STAGINGS,
+  extentOf,
   layoutStep,
   type LaidThing,
+  type Place,
+  type Rect,
   type StagingName,
 } from './scene-layout';
 import type { SceneScript, SceneStep, SceneThing } from './scene-script';
@@ -60,15 +77,51 @@ export function thingDto(
     hidden: [],
     moves: drawing.moves,
     ambience: thing.sound,
+    ...(drawing.callouts.length
+      ? {
+          callouts: Object.fromEntries(
+            drawing.callouts.map((c) => [c.part, c.text]),
+          ),
+          calloutsLater: [],
+        }
+      : {}),
   };
 }
 
-const laid = (thing: SceneThingDto): LaidThing =>
+/** What code knows of a drawing that the player never needs: where its labels point, where its ink is. */
+interface Geometry {
+  callouts: Callout[];
+  viewBox: [number, number, number, number];
+  field: InkField | null;
+}
+
+const laid = (thing: SceneThingDto, geometry?: Geometry): LaidThing =>
   thing.kind === 'drawing'
-    ? { kind: 'drawing', aspect: thing.aspect, caption: thing.caption }
+    ? {
+        kind: 'drawing',
+        aspect: thing.aspect,
+        caption: thing.caption,
+        ...(geometry?.callouts.length
+          ? { callouts: geometry.callouts, viewBox: geometry.viewBox }
+          : {}),
+      }
     : thing.kind === 'stat'
       ? { kind: 'stat', value: thing.value, caption: thing.caption }
       : { kind: 'words', text: thing.text, style: thing.style };
+
+/** Whether words only say what a thing on the stage already says: its caption, its number's caption, its words. */
+function repeats(words: string, thing: SceneThingDto | undefined): boolean {
+  if (!thing) return false;
+  const said =
+    thing.kind === 'drawing'
+      ? thing.caption
+      : thing.kind === 'stat'
+        ? thing.caption
+        : thing.text;
+  const key = (text: string | null) =>
+    (text ?? '').toLowerCase().replace(/[^a-z0-9]/g, '');
+  return Boolean(key(said)) && key(said) === key(words);
+}
 
 /** How a newcomer arrives: out of what an arrow brings it from, across in a row, wiped on when wide, else a pop. */
 export function entranceFor(
@@ -105,6 +158,8 @@ export interface ComposeInput {
 export function composeScene(input: ComposeInput): {
   scene: SceneDto;
   filled: number;
+  /** What the frame audit found wrong, per staging, per step. */
+  audit: Record<StagingName, Collision[][]>;
 } {
   const { script, drawings, beats, durationMs } = input;
   const things = script.cast.map((thing) =>
@@ -151,7 +206,12 @@ export function composeScene(input: ComposeInput): {
         id: `${a.from}>${a.to}`,
         from: a.from,
         to: a.to,
-        label: a.label,
+        // A label that only says what an end already says is noise.
+        label:
+          a.label &&
+          [a.from, a.to].some((id) => repeats(a.label!, byId.get(id)))
+            ? null
+            : a.label,
         flow: a.flow,
       }));
       const enter: SceneStepDto['enter'] = {};
@@ -198,6 +258,12 @@ export function composeScene(input: ComposeInput): {
     if (effect.do === 'point') {
       const label = thing.labels[effect.part];
       if (label && !thing.hidden.includes(label)) thing.hidden.push(label);
+      // A label the stage sets waits for its point the same way.
+      if (
+        thing.callouts?.[effect.part] !== undefined &&
+        !thing.calloutsLater?.includes(effect.part)
+      )
+        thing.calloutsLater?.push(effect.part);
     }
   }
   for (const thing of things)
@@ -216,7 +282,9 @@ export function composeScene(input: ComposeInput): {
     const known =
       effect.do === 'show' || effect.do === 'hide'
         ? thing.states[effect.part]
-        : (thing.parts[effect.part] ?? thing.labels[effect.part]);
+        : (thing.parts[effect.part] ??
+          thing.labels[effect.part] ??
+          thing.callouts?.[effect.part]);
     if (!known) {
       effect.part = null;
       effect.do = 'pulse';
@@ -246,16 +314,106 @@ export function composeScene(input: ComposeInput): {
   }
   effects.sort((a, b) => a.atMs - b.atMs);
 
+  const geometry = new Map<string, Geometry>();
+  for (const thing of script.cast) {
+    const drawing = drawings.get(thing.id);
+    if (thing.kind === 'drawing' && drawing)
+      geometry.set(thing.id, {
+        callouts: drawing.callouts,
+        viewBox: drawing.viewBox,
+        field: drawing.field,
+      });
+  }
   const place = (staging: StagingName) => {
-    const lookup = new Map(things.map((thing) => [thing.id, laid(thing)]));
-    return steps.map(
-      (step) =>
-        layoutStep(step.layout, step.show, lookup, staging) as Record<
-          string,
-          ScenePlaceDto
-        >,
+    const lookup = new Map(
+      things.map((thing) => [thing.id, laid(thing, geometry.get(thing.id))]),
     );
+    const stage = STAGINGS[staging];
+    const places: Record<string, ScenePlaceDto>[] = [];
+    const pills: Record<string, ScenePillDto | null>[] = [];
+    const audit: Collision[][] = [];
+    for (const step of steps) {
+      const laidOut = layoutStep(step.layout, step.show, lookup, staging);
+      const arrows = step.arrows.flatMap((arrow) => {
+        const a = laidOut[arrow.from];
+        const b = laidOut[arrow.to];
+        return a && b
+          ? [{ arrow, path: arrowPath(a, b, step.layout === 'cycle', stage) }]
+          : [];
+      });
+      // What an arrow's label must keep off: every run of words, a
+      // drawing's ink (not the empty corners of its box), and anything
+      // whose ink is not known, whole.
+      const inks = inksOf(laidOut, geometry);
+      const inked = new Set(inks.map((ink) => ink.owner));
+      const solid = [
+        ...wordsOf(laidOut, byId, {}, []).map((w) => w.box),
+        ...inks.flatMap((ink) => ink.boxes),
+        ...Object.entries(laidOut)
+          .filter(([id]) => byId.get(id)?.kind === 'drawing' && !inked.has(id))
+          .map(([, at]) => extentOf(at)),
+      ];
+      // Each arrow's label on its arrow, clear of the things and of one another.
+      const stepPills: Record<string, ScenePillDto | null> = {};
+      const pillBoxes: Rect[] = [];
+      for (const { arrow, path } of arrows) {
+        if (!arrow.label) continue;
+        const pill = placePill({
+          label: arrow.label,
+          path,
+          avoid: {
+            boxes: [...solid, ...pillBoxes],
+            segments: arrows
+              .filter((other) => other.arrow.id !== arrow.id)
+              .flatMap((other) => segmentsOf(other.path)),
+          },
+          stage,
+        });
+        stepPills[arrow.id] = pill;
+        if (pill) pillBoxes.push(pillBox(path, pill));
+      }
+      // Each drawing's labels beside it, clear of the arrows and their labels.
+      const segments = arrows.flatMap((one) => segmentsOf(one.path));
+      for (const id of step.show) {
+        const found = geometry.get(id);
+        const at = laidOut[id];
+        if (!found?.callouts.length || !at?.room) continue;
+        at.labels = placeLabels({
+          place: at,
+          room: at.room,
+          viewBox: found.viewBox,
+          callouts: found.callouts,
+          avoid: { boxes: pillBoxes, segments },
+        });
+      }
+      audit.push(
+        auditStep({
+          words: wordsOf(laidOut, byId, stepPills, arrows),
+          inks,
+          arrows: arrows.map((one) => ({
+            id: one.arrow.id,
+            segments: segmentsOf(one.path),
+          })),
+          stage,
+        }),
+      );
+      places.push(
+        Object.fromEntries(
+          Object.entries(laidOut).map(([id, at]) => {
+            // The room is code's own business: the player gets the place without it.
+            const { room, labelsAt, ...seen } = at;
+            void room;
+            void labelsAt;
+            return [id, seen];
+          }),
+        ),
+      );
+      pills.push(stepPills);
+    }
+    return { places, pills, audit };
   };
+  const box = place('box');
+  const wide = place('wide');
 
   return {
     scene: {
@@ -277,12 +435,111 @@ export function composeScene(input: ComposeInput): {
       steps,
       effects,
       stagings: {
-        box: { w: STAGINGS.box.w, h: STAGINGS.box.h, places: place('box') },
-        wide: { w: STAGINGS.wide.w, h: STAGINGS.wide.h, places: place('wide') },
+        box: {
+          w: STAGINGS.box.w,
+          h: STAGINGS.box.h,
+          places: box.places,
+          pills: box.pills,
+        },
+        wide: {
+          w: STAGINGS.wide.w,
+          h: STAGINGS.wide.h,
+          places: wide.places,
+          pills: wide.pills,
+        },
       },
     },
     filled,
+    audit: { box: box.audit, wide: wide.audit },
   };
+}
+
+/** Where a run of words sits: its measured width, centred where it is set. */
+function textBox(
+  lines: string[],
+  size: number,
+  centreX: number,
+  top: number,
+  weight: 600 | 700 = 600,
+): Rect {
+  const w = Math.max(0, ...lines.map((l) => measureText(l, size, weight)));
+  return { x: centreX - w / 2, y: top, w, h: lines.length * size * 1.2 };
+}
+
+/** Every run of words on the stage at one step, with whose it is. */
+function wordsOf(
+  places: Record<string, Place>,
+  things: ReadonlyMap<string, SceneThingDto>,
+  pills: Record<string, ScenePillDto | null>,
+  arrows: { arrow: SceneArrowDto; path: [number, number][] }[],
+): Words[] {
+  const out: Words[] = [];
+  for (const [id, at] of Object.entries(places)) {
+    const thing = things.get(id);
+    const c = at.caption;
+    if (thing?.kind === 'words') {
+      out.push({ owner: id, what: 'words', box: at });
+      continue;
+    }
+    if (thing?.kind === 'stat')
+      out.push({
+        owner: id,
+        what: 'value',
+        box: textBox([thing.value], at.size ?? 80, at.x + at.w / 2, at.y, 700),
+      });
+    if (c)
+      out.push({
+        owner: id,
+        what: 'caption',
+        box: textBox(c.lines, c.size, c.x + c.w / 2, c.y),
+      });
+    for (const label of at.labels ?? [])
+      out.push({ owner: id, what: `label ${label.part}`, box: label });
+  }
+  for (const { arrow, path } of arrows) {
+    const pill = pills[arrow.id];
+    if (pill)
+      out.push({ owner: arrow.id, what: 'pill', box: pillBox(path, pill) });
+  }
+  return out;
+}
+
+/** Where each drawing on the stage has ink at one step: its ink map's filled cells, run by run. */
+function inksOf(
+  places: Record<string, Place>,
+  geometry: ReadonlyMap<string, Geometry>,
+): Ink[] {
+  const out: Ink[] = [];
+  for (const [id, at] of Object.entries(places)) {
+    const found = geometry.get(id);
+    const field = found?.field;
+    if (!found || !field) continue;
+    const [vx, vy, vw] = found.viewBox;
+    const s = at.w / vw;
+    const [fx, fy, fw, fh] = field.viewBox;
+    const { cols, rows, bits } = field.map;
+    const cw = fw / cols;
+    const ch = fh / rows;
+    const boxes: Rect[] = [];
+    for (let row = 0; row < rows; row += 1) {
+      let start = -1;
+      for (let col = 0; col <= cols; col += 1) {
+        const inked = col < cols && bits[row * cols + col] === '1';
+        if (inked && start < 0) start = col;
+        if (!inked && start >= 0) {
+          boxes.push({
+            x: at.x + (fx + start * cw - vx) * s,
+            y: at.y + (fy + row * ch - vy) * s,
+            w: (col - start) * cw * s,
+            h: ch * s,
+          });
+          start = -1;
+        }
+      }
+    }
+    out.push({ owner: id, boxes });
+  }
+  return out;
 }
 
 /** The step to show on the page's card: the fullest, the later one on a tie. */
@@ -371,6 +628,30 @@ export function thumbSvg(
           `<image x="${p.x}" y="${p.y}" width="${p.w}" height="${p.h}" href="data:image/png;base64,${png.toString('base64')}"/>`,
         );
       parts.push(caption(p));
+      // Its labels as the stage sets them, those shown by this step.
+      const until = scene.steps[index + 1]?.atMs ?? scene.durationMs;
+      for (const label of p.labels ?? []) {
+        const later = thing.calloutsLater?.includes(label.part);
+        const pointed = scene.effects.some(
+          (e) =>
+            e.target === id &&
+            e.part === label.part &&
+            e.do === 'point' &&
+            e.atMs < until,
+        );
+        if (later && !pointed) continue;
+        if (label.leader) {
+          const [x1, y1, x2, y2] = label.leader;
+          parts.push(
+            `<line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}" stroke="${STAGE_PAINT.muted}" stroke-width="3" stroke-linecap="round"/><circle cx="${x2}" cy="${y2}" r="5" fill="${STAGE_PAINT.muted}"/>`,
+          );
+        }
+        label.lines.forEach((line, i) =>
+          parts.push(
+            `<text x="${label.align === 'end' ? label.x + label.w : label.align === 'middle' ? label.x + label.w / 2 : label.x}" y="${label.y + label.size * (0.9 + i * 1.2)}" font-size="${label.size}" font-weight="600" fill="${STAGE_PAINT.ink}" text-anchor="${label.align}" font-family="Liberation Sans, sans-serif">${escape(line)}</text>`,
+          ),
+        );
+      }
     } else if (thing.kind === 'stat') {
       parts.push(
         text(

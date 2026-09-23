@@ -11,8 +11,12 @@
  * counted, so no miscount can move a picture off its words.
  */
 
-/** Rows are made per generator; a new generator is a new set of rows. */
-export const SCENE_GENERATOR_VERSION = 'scene-1';
+/**
+ * Rows are made per generator; a new generator is a new set of rows.
+ * scene-2: labels lifted out of drawings and set by the stage, arrow
+ * labels placed, each sentence's delivery, the page's mood and sounds.
+ */
+export const SCENE_GENERATOR_VERSION = 'scene-2';
 
 export const SCENE_LAYOUTS = [
   'one',

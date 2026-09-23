@@ -231,7 +231,7 @@ export class SceneProcessor {
       const voice = spoken.value;
 
       await this.visuals.update(record.id, { step: 'composing' });
-      const { scene, filled } = composeScene({
+      const { scene, filled, audit } = composeScene({
         script,
         drawings,
         beats: voice.beats,
@@ -239,6 +239,46 @@ export class SceneProcessor {
         timing: voice.timing,
         generator: SCENE_GENERATOR_VERSION,
       });
+      // For working on the layout without the models: everything compose
+      // was given, kept where SCENE_KEEP_PARTS says (scripts/scene-recompose).
+      const keep = this.config.get<string>('SCENE_KEEP_PARTS')?.trim();
+      if (keep)
+        try {
+          const { mkdirSync, writeFileSync } = await import('node:fs');
+          mkdirSync(keep, { recursive: true });
+          writeFileSync(
+            `${keep}/${documentId}-p${pageNumber}-parts.json`,
+            JSON.stringify({
+              script,
+              drawings: [...drawings],
+              beats: voice.beats,
+              durationMs: voice.durationMs,
+              timing: voice.timing,
+            }),
+          );
+        } catch (error) {
+          this.logger.warn(
+            `${who}: parts not kept: ${(error as Error).message}`,
+          );
+        }
+      // What no layout promises by construction: nothing set on anything.
+      const found = [...audit.box.flat(), ...audit.wide.flat()];
+      const counted = new Map<string, number>();
+      for (const one of found)
+        counted.set(
+          `${one.kind} ${one.a} / ${one.b}`,
+          (counted.get(`${one.kind} ${one.a} / ${one.b}`) ?? 0) + 1,
+        );
+      this.logger.log(
+        `${who}: frame audit: ${audit.box.flat().length} in the box, ${audit.wide.flat().length} wide${
+          counted.size
+            ? `: ${[...counted]
+                .slice(0, 6)
+                .map(([what, n]) => `${what}${n > 1 ? ` ×${n}` : ''}`)
+                .join('; ')}`
+            : ''
+        }`,
+      );
       const sceneKey = `${base}-scene.json`;
       await this.storage.put({
         key: sceneKey,

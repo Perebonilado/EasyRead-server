@@ -33,7 +33,8 @@
     "ask:eval": "ts-node --transpile-only -r tsconfig-paths/register scripts/ask-eval.ts",
     "check:storage": "ts-node --transpile-only scripts/check-storage.ts",
     "scene:page": "ts-node --transpile-only -r tsconfig-paths/register scripts/scene-page.ts",
-    "scene:voices": "ts-node --transpile-only -r tsconfig-paths/register scripts/scene-voices.ts"
+    "scene:voices": "ts-node --transpile-only -r tsconfig-paths/register scripts/scene-voices.ts",
+    "scene:recompose": "ts-node --transpile-only -r tsconfig-paths/register scripts/scene-recompose.ts"
   },
   "dependencies": {
     "@ai-sdk/anthropic": "^4.0.38",

@@ -14,8 +14,10 @@
  */
 import { parseDocument } from 'htmlparser2';
 import render from 'dom-serializer';
-import { Element, Text, type ChildNode } from 'domhandler';
+import { Text, type Element } from 'domhandler';
+import { elements, removeNode, textOf, walk } from './scene-dom';
 import { groupId, idKey, type DrawingThing } from './scene-script';
+import { liftCallouts, type Callout, type InkField } from './scene-callouts';
 import { renderSvg, type InkBox } from './scene-raster';
 
 /** The canvas the artist is given, by shape. */
@@ -311,34 +313,11 @@ export function svgFromReply(reply: string): string | null {
   return null;
 }
 
-const elements = (nodes: ChildNode[]): Element[] =>
-  nodes.filter((node): node is Element => node instanceof Element);
-
-function* walk(node: Element): Generator<Element> {
-  yield node;
-  for (const child of elements(node.children)) yield* walk(child);
-}
-
-function textOf(node: Element): string {
-  let out = '';
-  for (const child of node.children) {
-    if (child instanceof Text) out += child.data;
-    else if ('children' in child) out += textOf(child as Element);
-  }
-  return out;
-}
-
 /** Removes every child and puts one text node in their place. */
 function setText(node: Element, text: string): void {
   const replacement = new Text(text);
   replacement.parent = node;
   node.children = [replacement];
-}
-
-function removeNode(node: Element): void {
-  const parent = node.parent as Element | null;
-  if (!parent) return;
-  parent.children = parent.children.filter((child) => child !== node);
 }
 
 function unwrapNode(node: Element): void {
@@ -533,11 +512,45 @@ export function removeOwnName(
     if (inside) continue;
     const said = idKey(textOf(node));
     if (said === key || (said.length >= key.length && said.includes(key))) {
+      const group = node.parent as Element | null;
       removeNode(node);
       removed += 1;
+      // A title written as a label: its leader goes with it, or the
+      // drawing keeps a line pointing at nothing.
+      if (
+        group &&
+        group !== root &&
+        group.name.toLowerCase() === 'g' &&
+        !(group.attribs.id && keep.has(group.attribs.id)) &&
+        onlyLeader(group)
+      )
+        removeNode(group);
     }
   }
   return removed;
+}
+
+/**
+ * Whether a group holds nothing but a leader: a few straight lines and
+ * perhaps a dot. A path counts only when it is straight (moves and lines,
+ * no curves), since drawings are made of curved paths.
+ */
+function onlyLeader(group: Element): boolean {
+  const inside = [...walk(group)].filter((n) => n !== group);
+  if (!inside.length || inside.length > 4) return false;
+  return inside.every((n) => {
+    const name = n.name.toLowerCase();
+    if (name === 'line') return true;
+    if (name === 'polyline')
+      return (n.attribs.points?.match(/-?\d*\.?\d+/g)?.length ?? 0) <= 6;
+    if (name === 'path')
+      return (
+        /^[\sMmLlHhVvZz\d.,-]*$/.test(n.attribs.d ?? '') &&
+        (n.attribs.d?.match(/[LlHhVv]/g)?.length ?? 0) <= 2
+      );
+    if (name === 'circle') return numbers(n.attribs.r ?? '0')[0] <= 12;
+    return false;
+  });
 }
 
 /** Ids in the drawing matched to the names the writer gave: parts, their labels, states. */
@@ -639,6 +652,10 @@ export interface GatedDrawing {
   /** State name to the id of its overlay group. */
   states: Record<string, string>;
   moves: boolean;
+  /** Labels lifted out of the drawing for the stage to set: what each says and where it points. */
+  callouts: Callout[];
+  /** Where the drawing has ink, so words set over it can keep to its empty room. */
+  field: InkField | null;
 }
 
 export interface GateResult {
@@ -890,6 +907,27 @@ export async function gateDrawing(
     return failed(
       'The drawing came out blank: draw the thing, large, inside the viewBox.',
     );
+  // Its labels lifted out for the stage to set, and the drawing framed to
+  // its own ink without them. A drawing whose labels cannot be measured
+  // keeps them, as drawn.
+  let callouts: Callout[] = [];
+  let field: InkField | null = null;
+  const before = namedGroups(root, thing);
+  if (Object.keys(before.labels).length)
+    try {
+      const lifted = await liftCallouts(root, before, viewBox);
+      callouts = lifted.callouts;
+      field = lifted.field;
+      if (lifted.ink && lifted.ink.width > 0 && lifted.ink.height > 0)
+        ink = lifted.ink;
+      if (lifted.lifted.length)
+        mended.push(
+          `lifted ${lifted.lifted.length} label${lifted.lifted.length === 1 ? '' : 's'} for the stage to set`,
+        );
+    } catch (error) {
+      mended.push(`labels left as drawn: ${(error as Error).message}`);
+    }
+  svg = render(root, { xmlMode: true, selfClosingTags: true });
   const framed = framedBox(viewBox, ink);
   if (framed.join(' ') !== viewBox.join(' ')) {
     viewBox = framed;
@@ -909,6 +947,8 @@ export async function gateDrawing(
       labels,
       states,
       moves: movesOf(root),
+      callouts,
+      field,
     },
     ...judged(short, thing, viewBox[2]),
     mended,

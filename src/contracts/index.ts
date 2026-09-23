@@ -938,6 +938,14 @@ export type SceneThingDto =
       moves: boolean;
       /** The sound it makes while it is on the stage; absent or null for none. */
       ambience?: SceneAmbienceName | null;
+      /**
+       * Labels the stage sets itself beside the drawing, by part: what each
+       * says. Placed per step (ScenePlaceDto.labels); absent on a drawing
+       * whose labels are drawn in it.
+       */
+      callouts?: Record<string, string>;
+      /** Of those, the parts whose label waits until the voice points at the part. */
+      calloutsLater?: string[];
     }
   | { id: string; kind: 'stat'; value: string; caption: string }
   | {
@@ -988,6 +996,33 @@ export interface ScenePlaceDto {
   /** The size its main text is set at: a stat's number, words, a card. */
   size?: number;
   caption?: { x: number; y: number; w: number; size: number; lines: string[] };
+  /** A drawing's labels at this step, set beside it by the stage. */
+  labels?: SceneLabelDto[];
+}
+
+/** One label set by the stage: its words' box, which edge they hang from, and its leader to the part. */
+export interface SceneLabelDto {
+  part: string;
+  lines: string[];
+  size: number;
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  /** Which edge the words hang from: the drawing's side in a column, the middle in a band. */
+  align: 'start' | 'middle' | 'end';
+  /** From the words to the point on the part: x1, y1, x2, y2; null when they sit on it. */
+  leader: [number, number, number, number] | null;
+}
+
+/** An arrow's label: how far along the arrow, which side of it, and its box's size. */
+export interface ScenePillDto {
+  t: number;
+  /** 1 above an arrow that runs across or right of one that runs down; -1 the other side. */
+  side: 1 | -1;
+  w: number;
+  h: number;
+  size: number;
 }
 
 /** A page as an animated video: the voice's sentences, the things, and when each happens. */
@@ -1008,7 +1043,17 @@ export interface SceneDto {
   /** The same steps placed for the pane's box and the full screen's wide stage. */
   stagings: Record<
     'box' | 'wide',
-    { w: number; h: number; places: Record<string, ScenePlaceDto>[] }
+    {
+      w: number;
+      h: number;
+      places: Record<string, ScenePlaceDto>[];
+      /**
+       * Each step's arrow labels, by arrow id: where each goes, or null for
+       * one with nowhere clear to go, which is not shown. Absent on a scene
+       * made before they were placed.
+       */
+      pills?: Record<string, ScenePillDto | null>[];
+    }
   >;
 }
 

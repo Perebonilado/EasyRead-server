@@ -24,6 +24,13 @@ export interface Callout {
   text: string;
   /** The point on the part it names, in the drawing's own units. */
   anchor: [number, number];
+  /**
+   * For words set by code: where a leader ends when its label is set on
+   * the left or on the right, at the edge of the lines it names, so that
+   * no leader runs through words. Such labels go on the right, in the
+   * margin.
+   */
+  ends?: { left: [number, number]; right: [number, number] };
 }
 
 /** Where the drawing has ink, in the units of the viewBox it was measured in. */

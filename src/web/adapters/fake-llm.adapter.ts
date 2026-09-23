@@ -3,6 +3,7 @@
  * that is the whole point of a deterministic offline stand-in. */
 import { createHash } from 'crypto';
 import { Injectable } from '@nestjs/common';
+import type { DocumentProfileDraft } from '../../business/domain/scene-profile';
 import type { Block, RecapBody, TopicPreviewBody } from '../../contracts';
 import type {
   GeneratedItem,
@@ -512,6 +513,33 @@ export class FakeLlmAdapter implements LlmGatewayPort {
    * The page's own sentences as the narration, one drawing and one word on
    * the stage: enough for the whole scene pipeline to run with no key.
    */
+  sceneProfile(input: {
+    documentTitle: string;
+    chapters: string[];
+    sample: string;
+  }): Promise<LlmResult<DocumentProfileDraft>> {
+    // A book with an equals sign in it is taught with maths too; one with
+    // verse in it, read closely.
+    const text = `${input.documentTitle}\n${input.sample}`;
+    return Promise.resolve({
+      value: {
+        subject: input.documentTitle.slice(0, 40),
+        kind: 'textbook',
+        tone: 'neutral',
+        formats: [
+          ...(/=|\\frac/.test(text) ? (['maths'] as const) : []),
+          ...(/poem|verse|stanza/i.test(text) ? (['reading'] as const) : []),
+        ],
+      },
+      usage: {
+        model: 'fake',
+        tokensIn: Math.ceil(text.length / 4),
+        tokensOut: 20,
+        latencyMs: 1,
+      },
+    });
+  }
+
   sceneScript(input: {
     documentTitle: string;
     topicTitle: string;
@@ -541,6 +569,10 @@ export class FakeLlmAdapter implements LlmGatewayPort {
       shape: null,
       value: null,
       sound: null,
+      lines: null,
+      plot: null,
+      quote: null,
+      phrases: null,
     };
     return Promise.resolve({
       value: {
@@ -571,6 +603,10 @@ export class FakeLlmAdapter implements LlmGatewayPort {
             value: null,
             style: null,
             sound: null,
+            lines: null,
+            plot: null,
+            quote: null,
+            phrases: null,
           },
           {
             id: 'idea',

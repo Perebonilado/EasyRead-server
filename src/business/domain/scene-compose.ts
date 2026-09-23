@@ -63,8 +63,18 @@ export function thingDto(
       text: thing.text,
       style: thing.style,
     };
+  // What a thing drawn by code is called on a card, if it could not be drawn.
+  const called =
+    thing.name ||
+    (thing.kind === 'math'
+      ? 'Working'
+      : thing.kind === 'plot'
+        ? 'Graph'
+        : thing.kind === 'quote'
+          ? 'Quotation'
+          : thing.id);
   if (!drawing)
-    return { id: thing.id, kind: 'words', text: thing.name, style: 'card' };
+    return { id: thing.id, kind: 'words', text: called, style: 'card' };
   return {
     id: thing.id,
     kind: 'drawing',
@@ -76,7 +86,8 @@ export function thingDto(
     states: drawing.states,
     hidden: [],
     moves: drawing.moves,
-    ambience: thing.sound,
+    ambience: thing.kind === 'drawing' ? thing.sound : null,
+    ...(thing.kind === 'drawing' ? {} : { source: thing.kind }),
     ...(drawing.callouts.length
       ? {
           callouts: Object.fromEntries(
@@ -93,6 +104,8 @@ interface Geometry {
   callouts: Callout[];
   viewBox: [number, number, number, number];
   field: InkField | null;
+  /** A passage's words: their size, which its notes are never set above. */
+  words?: { size: number };
 }
 
 const laid = (thing: SceneThingDto, geometry?: Geometry): LaidThing =>
@@ -101,13 +114,38 @@ const laid = (thing: SceneThingDto, geometry?: Geometry): LaidThing =>
         kind: 'drawing',
         aspect: thing.aspect,
         caption: thing.caption,
+        ...(thing.source ? { source: thing.source } : {}),
         ...(geometry?.callouts.length
           ? { callouts: geometry.callouts, viewBox: geometry.viewBox }
           : {}),
+        ...(geometry?.words ? { words: geometry.words } : {}),
       }
     : thing.kind === 'stat'
       ? { kind: 'stat', value: thing.value, caption: thing.caption }
       : { kind: 'words', text: thing.text, style: thing.style };
+
+/**
+ * Working, a graph or a passage beside pictures takes the main slot: on
+ * such a page they are what is read, and set a third of the stage wide
+ * they cannot be. One goes large in a focus with the rest beside it; two
+ * or more stand in a column.
+ */
+export function wordsFirst(
+  stage: { layout: SceneStepDto['layout']; show: string[] },
+  things: ReadonlyMap<string, SceneThingDto>,
+): { layout: SceneStepDto['layout']; show: string[] } {
+  const coded = (id: string) => {
+    const thing = things.get(id);
+    return thing?.kind === 'drawing' && Boolean(thing.source);
+  };
+  const main = stage.show.filter(coded);
+  if (!main.length || stage.show.length === 1 || stage.layout === 'stack')
+    return stage;
+  const rest = stage.show.filter((id) => !coded(id));
+  if (main.length === 1 && rest.length <= 3)
+    return { layout: 'focus', show: [...main, ...rest] };
+  return { layout: 'stack', show: [...main, ...rest].slice(0, 4) };
+}
 
 /** Whether words only say what a thing on the stage already says: its caption, its number's caption, its words. */
 function repeats(words: string, thing: SceneThingDto | undefined): boolean {
@@ -198,6 +236,11 @@ export function composeScene(input: ComposeInput): {
   for (const timedStep of timed) {
     const { atMs } = timedStep;
     let { step } = timedStep;
+    if (step.stage)
+      step = {
+        ...step,
+        stage: { ...step.stage, ...wordsFirst(step.stage, byId) },
+      };
     // The writer restating the stage as it stands: its effects, and no change.
     if (step.stage && steps.length && same(steps[steps.length - 1], step.stage))
       step = { ...step, stage: null };
@@ -248,6 +291,39 @@ export function composeScene(input: ComposeInput): {
         part: effect.part,
         do: effect.do,
       });
+    });
+  }
+
+  // Working grows as the voice works it: a line the writer never showed
+  // appears after the line before it, spread through its time on stage.
+  for (const thing of things) {
+    if (thing.kind !== 'drawing' || thing.source !== 'math') continue;
+    const lines = Object.keys(thing.states)
+      .map((name) => ({ name, k: Number(/\d+/.exec(name)?.[0] ?? 0) }))
+      .sort((a, b) => a.k - b.k);
+    const first = steps.findIndex((step) => step.show.includes(thing.id));
+    if (first < 0 || !lines.length) continue;
+    const leaves = steps.findIndex(
+      (step, i) => i > first && !step.show.includes(thing.id),
+    );
+    const end = leaves < 0 ? durationMs : steps[leaves].atMs;
+    let last = steps[first].atMs + 300;
+    lines.forEach(({ name }, i) => {
+      const shown = effects.find(
+        (e) => e.target === thing.id && e.part === name && e.do === 'show',
+      );
+      if (shown) {
+        last = shown.atMs;
+        return;
+      }
+      const left = lines.length - i + 1;
+      last = Math.round(
+        Math.min(
+          end - 200,
+          last + Math.min(3200, Math.max(1200, (end - last) / left)),
+        ),
+      );
+      effects.push({ atMs: last, target: thing.id, part: name, do: 'show' });
     });
   }
 
@@ -317,11 +393,12 @@ export function composeScene(input: ComposeInput): {
   const geometry = new Map<string, Geometry>();
   for (const thing of script.cast) {
     const drawing = drawings.get(thing.id);
-    if (thing.kind === 'drawing' && drawing)
+    if (thing.kind !== 'stat' && thing.kind !== 'words' && drawing)
       geometry.set(thing.id, {
         callouts: drawing.callouts,
         viewBox: drawing.viewBox,
         field: drawing.field,
+        ...(drawing.words ? { words: drawing.words } : {}),
       });
   }
   const place = (staging: StagingName) => {
@@ -401,9 +478,10 @@ export function composeScene(input: ComposeInput): {
         Object.fromEntries(
           Object.entries(laidOut).map(([id, at]) => {
             // The room is code's own business: the player gets the place without it.
-            const { room, labelsAt, ...seen } = at;
+            const { room, labelsAt, labelSize, ...seen } = at;
             void room;
             void labelsAt;
+            void labelSize;
             return [id, seen];
           }),
         ),

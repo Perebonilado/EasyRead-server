@@ -656,6 +656,8 @@ export interface GatedDrawing {
   callouts: Callout[];
   /** Where the drawing has ink, so words set over it can keep to its empty room. */
   field: InkField | null;
+  /** A passage set by code: the size of its words, in its own units, so its notes are never set larger. */
+  words?: { size: number };
 }
 
 export interface GateResult {

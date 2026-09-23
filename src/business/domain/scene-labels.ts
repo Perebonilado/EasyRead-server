@@ -58,8 +58,12 @@ export const LABEL = {
   columnNarrow: 0.34,
 } as const;
 
-/** Where a drawing's labels go: in a band above or below it, when all fit in one row and there is room; else in columns beside it. */
-export type LabelMode = 'above' | 'below' | 'sides';
+/**
+ * Where a drawing's labels go: in a band above or below it, when all fit
+ * in one row and there is room; else in columns beside it. A passage's
+ * notes go in its margin, or listed under it where it has none to spare.
+ */
+export type LabelMode = 'above' | 'below' | 'sides' | 'list';
 
 /** The share of a room's width one column may take. */
 const columnShare = (room: Rect) =>
@@ -136,10 +140,13 @@ export function labelWidth(text: string, width: number, size: number): number {
  * other, moving those that point nearest the middle.
  */
 export function sidesOf(
-  callouts: { anchor: Point }[],
+  callouts: { anchor: Point; ends?: unknown }[],
   viewBox: [number, number, number, number],
 ): ('left' | 'right')[] {
   const middle = viewBox[0] + viewBox[2] / 2;
+  // Notes on words go in the right margin, all of them.
+  if (callouts.length && callouts.every((c) => c.ends))
+    return callouts.map(() => 'right' as const);
   const sides = callouts.map((c) =>
     c.anchor[0] < middle ? ('left' as const) : ('right' as const),
   );
@@ -172,11 +179,11 @@ export function sidesOf(
  * widest label on that side, set to fit a column, and the leaders' run.
  */
 export function gutters(
-  callouts: { text: string; anchor: Point }[],
+  callouts: { text: string; anchor: Point; ends?: unknown }[],
   viewBox: [number, number, number, number],
   room: Rect,
+  size = labelSize(room),
 ): { left: number; right: number } {
-  const size = labelSize(room);
   const most = room.w * columnShare(room);
   const sides = sidesOf(callouts, viewBox);
   const want = (side: 'left' | 'right') => {
@@ -243,20 +250,49 @@ export function edgeToward(p: Rect, toward: Point, gap: number): Point {
 }
 
 /**
+ * An arrow's end moved below a thing's caption when the arrow runs down
+ * out of it (or up into it): otherwise it is drawn through the words.
+ * The player moves its arrows' ends by the same rule.
+ */
+export function clearOfCaption(
+  place: Place,
+  toward: Point,
+  end: Point,
+  gap: number,
+): Point {
+  const c = place.caption;
+  if (!c || c.y < place.y + place.h - 1) return end;
+  const dx = toward[0] - (place.x + place.w / 2);
+  const dy = toward[1] - (place.y + place.h / 2);
+  if (dy <= 0 || Math.abs(dy) < Math.abs(dx)) return end;
+  return [end[0], c.y + c.lines.length * c.size * LABEL.line + gap];
+}
+
+/**
  * An arrow as the player draws it between two things: straight, or on a
  * ring bowed outward from the stage's middle; as points along it.
  */
 export function arrowPath(
-  from: Rect,
-  to: Rect,
+  from: Place,
+  to: Place,
   curved: boolean,
   stage: { w: number; h: number },
   samples = 12,
 ): Point[] {
   const cf: Point = [from.x + from.w / 2, from.y + from.h / 2];
   const ct: Point = [to.x + to.w / 2, to.y + to.h / 2];
-  const a = edgeToward(from, ct, ARROW_GAP.tail);
-  const b = edgeToward(to, cf, ARROW_GAP.head);
+  const a = clearOfCaption(
+    from,
+    ct,
+    edgeToward(from, ct, ARROW_GAP.tail),
+    ARROW_GAP.tail,
+  );
+  const b = clearOfCaption(
+    to,
+    cf,
+    edgeToward(to, cf, ARROW_GAP.head),
+    ARROW_GAP.head,
+  );
   if (!curved) return [a, b];
   const mid: Point = [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2];
   const nx = -(b[1] - a[1]);
@@ -405,7 +441,12 @@ export function placeLabels(input: {
   /** The room it has on the stage: its slot. */
   room: Rect;
   viewBox: [number, number, number, number];
-  callouts: { part: string; text: string; anchor: Point }[];
+  callouts: {
+    part: string;
+    text: string;
+    anchor: Point;
+    ends?: { left: Point; right: Point };
+  }[];
   avoid: { boxes: Rect[]; segments: Segment[] };
 }): LabelPlace[] {
   const { place, room, viewBox, callouts } = input;
@@ -419,8 +460,9 @@ export function placeLabels(input: {
     const band = placeBand({ ...input, onStage, where: place.labelsAt });
     if (band) return band;
   }
+  if (place.labelsAt === 'list') return placeList(input);
   const sides = sidesOf(callouts, viewBox);
-  const size = labelSize(room);
+  const size = place.labelSize ?? labelSize(room);
   // Each side's column: from a leader's run beside the drawing out to the
   // room's edge, and no wider than a column may be.
   const inner = {
@@ -450,8 +492,13 @@ export function placeLabels(input: {
   const bottom = captionBelow ? caption.y - 8 : room.y + room.h;
   const out: LabelPlace[] = [];
   for (const side of ['left', 'right'] as const) {
+    // Each leader ends on its part: for words, at the edge of their lines.
     const mine = callouts
-      .map((c, i) => ({ ...c, at: onStage(c.anchor), i }))
+      .map((c, i) => ({
+        ...c,
+        at: onStage(c.ends ? c.ends[sides[i]] : c.anchor),
+        i,
+      }))
       .filter((c) => sides[c.i] === side)
       .sort((a, b) => a.at[1] - b.at[1]);
     if (!mine.length) continue;
@@ -522,6 +569,67 @@ export function placeLabels(input: {
     });
   }
   return out;
+}
+
+/**
+ * A passage's notes listed under it, where it has no margin to spare: in
+ * the order of the lines they are about, from its left edge, each broken
+ * to the room's width. No leaders: a note lights with its phrase, and a
+ * line up to it would run through the words.
+ */
+function placeList(input: {
+  place: Place;
+  room: Rect;
+  callouts: { part: string; text: string; anchor: Point }[];
+}): LabelPlace[] {
+  const { place, room } = input;
+  const size = place.labelSize ?? labelSize(room);
+  const width = listWidth(room, place.x);
+  let y = place.y + place.h + LABEL.leaderRoom;
+  return [...input.callouts]
+    .sort((a, b) => a.anchor[1] - b.anchor[1] || a.anchor[0] - b.anchor[0])
+    .map((c) => {
+      const set = labelLines(c.text, width, size);
+      const h = set.lines.length * set.size * LABEL.line;
+      const w = Math.max(
+        ...set.lines.map((l) => measureText(l, set.size, 600)),
+      );
+      const label: LabelPlace = {
+        part: c.part,
+        lines: set.lines,
+        size: set.size,
+        x: round(place.x),
+        y: round(y),
+        w: round(w),
+        h: round(h),
+        align: 'start',
+        leader: null,
+      };
+      y += h + LABEL.gap;
+      return label;
+    });
+}
+
+/** The width a list of notes is broken to: from where it starts to the room's edge. */
+export const listWidth = (room: Rect, x: number) =>
+  Math.max(40, room.x + room.w - x);
+
+/** How tall a passage's notes stand when listed under it, the room above them included. */
+export function listHeight(
+  texts: string[],
+  width: number,
+  size: number,
+): number {
+  if (!texts.length) return 0;
+  const heights = texts.map((text) => {
+    const set = labelLines(text, width, size);
+    return set.lines.length * set.size * LABEL.line;
+  });
+  return (
+    LABEL.leaderRoom +
+    heights.reduce((sum, h) => sum + h, 0) +
+    LABEL.gap * (texts.length - 1)
+  );
 }
 
 /**

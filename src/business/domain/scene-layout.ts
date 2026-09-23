@@ -13,6 +13,8 @@ import {
   LABEL,
   bandFor,
   gutters,
+  labelSize,
+  listHeight,
   type LabelMode,
   type LabelPlace,
 } from './scene-labels';
@@ -55,6 +57,8 @@ export interface Place extends Rect {
   labels?: LabelPlace[];
   /** Where its labels go: the room kept for them when it was fitted. Not sent to the player. */
   labelsAt?: LabelMode;
+  /** The size its labels are set at, when not the room's: a passage's notes, never larger than its words. Not sent to the player. */
+  labelSize?: number;
 }
 
 /** What the layout needs to know of a thing. */
@@ -64,8 +68,16 @@ export type LaidThing =
       aspect: number;
       caption: string | null;
       /** Labels the stage sets beside it, and the drawing's own frame they point into. */
-      callouts?: { text: string; anchor: [number, number] }[];
+      callouts?: {
+        text: string;
+        anchor: [number, number];
+        ends?: { left: [number, number]; right: [number, number] };
+      }[];
       viewBox?: [number, number, number, number];
+      /** Drawn by code: working, a graph or a passage, set in the middle of its room. */
+      source?: 'math' | 'plot' | 'quote';
+      /** A passage: the size of its words, in its own units. */
+      words?: { size: number };
     }
   | { kind: 'stat'; value: string; caption: string }
   | { kind: 'words'; text: string; style: 'title' | 'keyword' | 'card' };
@@ -101,8 +113,11 @@ function line(
   });
 }
 
-/** Slots stacked in a column. */
-function column(band: Rect, n: number, gap = SLOT_GAP / 1.5): Rect[] {
+/**
+ * Slots stacked in a column, as far apart as slots in a row: an arrow
+ * between two of them runs down past the upper one's caption.
+ */
+function column(band: Rect, n: number, gap = SLOT_GAP): Rect[] {
   const h = (band.h - gap * (n - 1)) / n;
   return Array.from({ length: n }, (_, i) => ({
     x: band.x,
@@ -189,6 +204,21 @@ export function slotsFor(
         : [];
       return [centre, ...leftSlots, ...rightSlots];
     }
+    case 'stack': {
+      // A column, full width, each as tall as its share: working and
+      // quotations, read top to bottom.
+      const shares = Array.from({ length: n }, (_, i) => weights?.[i] ?? 1);
+      const total = shares.reduce((sum, w) => sum + w, 0) || n;
+      const gap = SLOT_GAP / 1.5;
+      const room = area.h - gap * (n - 1);
+      let y = area.y;
+      return shares.map((share) => {
+        const h = (room * share) / total;
+        const slot = { x: area.x, y, w: area.w, h };
+        y += h + gap;
+        return slot;
+      });
+    }
     case 'cycle': {
       const w = area.w * (wide ? 0.22 : 0.3);
       const h = area.h * (n === 3 ? 0.36 : 0.3);
@@ -268,6 +298,64 @@ function sizeToFit(
   return Math.max(18, Math.min(ceiling, Math.floor((width / at100) * 100)));
 }
 
+/** A passage's notes are set at most this share of the size of its words. */
+const NOTE_SHARE = 0.8;
+/**
+ * The smallest a passage's words may be set, in stage units, for its notes
+ * to take a margin beside it: any smaller, and the notes are listed under
+ * it instead, so the passage keeps its room's whole width.
+ */
+const READABLE_WORDS = 32;
+
+type Callouts = NonNullable<
+  Extract<LaidThing, { kind: 'drawing' }>['callouts']
+>;
+
+/**
+ * Where a passage's notes go, and how large: in its right margin, beside
+ * the lines they are about, while that leaves its words large enough to
+ * read; else listed under it. Never larger than the words they are notes
+ * on.
+ */
+function passageNotes(
+  callouts: Callouts,
+  viewBox: [number, number, number, number],
+  wordSize: number,
+  art: Rect,
+  aspect: number,
+  room: Rect,
+): {
+  mode: LabelMode;
+  side: { left: number; right: number };
+  below: number;
+  size: number;
+} {
+  const most = labelSize(room);
+  // The size of the passage's words on the stage, at a width.
+  const words = (w: number) => (wordSize * w) / viewBox[2];
+  const fits = (right: number, below: number) =>
+    Math.min(art.w - right, (art.h - below) * aspect);
+  const sized = (w: number) =>
+    Math.round(Math.min(most, Math.max(LABEL.min, words(w) * NOTE_SHARE)));
+  // In the margin: sized to the passage the room's own label size leaves,
+  // then only as wide a margin as that size needs.
+  const size = sized(fits(gutters(callouts, viewBox, room, most).right, 0));
+  const right = gutters(callouts, viewBox, room, size).right;
+  if (words(fits(right, 0)) >= READABLE_WORDS)
+    return { mode: 'sides', side: { left: 0, right }, below: 0, size };
+  // Listed under it, measured a little narrow: the passage may stand in
+  // from the room's edge, and the list starts where it does.
+  const texts = callouts.map((c) => c.text);
+  const width = art.w * 0.85;
+  const listed = sized(fits(0, listHeight(texts, width, most)));
+  return {
+    mode: 'list',
+    side: { left: 0, right: 0 },
+    below: listHeight(texts, width, listed),
+    size: listed,
+  };
+}
+
 /** One thing fitted into its slot: the rectangle it is drawn in, and its caption. */
 export function fitInSlot(
   thing: LaidThing,
@@ -296,7 +384,23 @@ export function fitInSlot(
     // beside it on each side they point from, which the drawing gives up.
     let mode: LabelMode | undefined;
     let side = { left: 0, right: 0 };
-    if (thing.callouts?.length && thing.viewBox) {
+    let below = 0;
+    let labelSize_: number | undefined;
+    if (thing.callouts?.length && thing.viewBox && thing.words) {
+      ({
+        mode,
+        side,
+        below,
+        size: labelSize_,
+      } = passageNotes(
+        thing.callouts,
+        thing.viewBox,
+        thing.words.size,
+        art,
+        aspect,
+        slot,
+      ));
+    } else if (thing.callouts?.length && thing.viewBox) {
       const free = art.h - Math.min(art.w, art.h * aspect) / aspect;
       const band = bandFor(
         thing.callouts.map((c) => c.text),
@@ -309,7 +413,10 @@ export function fitInSlot(
         side = gutters(thing.callouts, thing.viewBox, slot);
       }
     }
-    const w = Math.min(art.w - side.left - side.right, art.h * aspect);
+    const w = Math.min(
+      art.w - side.left - side.right,
+      (art.h - below) * aspect,
+    );
     const h = w / aspect;
     // Sat on its caption, so captions in a row line up and each hugs its
     // picture; in the middle, unless its labels need it moved over.
@@ -317,9 +424,16 @@ export function fitInSlot(
       Math.max(art.x + (art.w - w) / 2, art.x + side.left),
       art.x + art.w - side.right - w,
     );
-    const y = captionOnTop ? art.y : art.y + (art.h - h);
+    // Working and passages stand in the middle of their room: nothing
+    // beside them needs its caption lined up with theirs.
+    const y = captionOnTop
+      ? art.y
+      : thing.source && thing.source !== 'plot'
+        ? art.y + (art.h - h - below) / 2
+        : art.y + (art.h - h);
     const place: Place = { x: round(x), y: round(y), w: round(w), h: round(h) };
     if (mode) place.labelsAt = mode;
+    if (labelSize_) place.labelSize = labelSize_;
     if (caption)
       place.caption = {
         x: round(slot.x + slot.w * 0.02),
@@ -436,7 +550,15 @@ export function slotsOf(
     layout,
     show.length,
     staging,
-    show.map((id) => weightOf(things.get(id))),
+    // A column shares its height: a wide thing needs less of it, and a
+    // number or a card never less than its words need.
+    show.map((id) => {
+      const thing = things.get(id);
+      if (layout !== 'stack') return weightOf(thing);
+      if (thing?.kind === 'drawing')
+        return Math.min(1.5, Math.max(0.5, 1 / (thing.aspect || 1)));
+      return thing?.kind === 'stat' ? 0.9 : 0.7;
+    }),
   );
 }
 

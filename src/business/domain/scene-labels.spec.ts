@@ -1,5 +1,7 @@
 import { fitInSlot, overlaps, slotsFor, type Rect } from './scene-layout';
+import { renderQuote } from './scene-quote';
 import {
+  LABEL,
   arrowPath,
   auditStep,
   crosses,
@@ -93,6 +95,79 @@ describe('labels set beside their drawing', () => {
     expect(labelled.x + labelled.w).toBeLessThanOrEqual(
       slot.x + slot.w - room.right + 0.5,
     );
+  });
+
+  it("sets a passage's notes in its margin, leaders stopping at the line ends, and lists them under it where the margin would shrink its words", () => {
+    const set = renderQuote({
+      text: "I wandered lonely as a cloud\nThat floats on high o'er vales and hills,\nWhen all at once I saw a crowd,\nA host, of golden daffodils;",
+      phrases: [
+        { name: 'simile', phrase: 'lonely as a cloud', note: 'begins alone' },
+        {
+          name: 'crowd',
+          phrase: 'a crowd, A host',
+          note: 'flowers described as people',
+        },
+      ],
+    });
+    const passage = {
+      kind: 'drawing' as const,
+      aspect: set.viewBox[2] / set.viewBox[3],
+      caption: null,
+      source: 'quote' as const,
+      callouts: set.callouts,
+      viewBox: set.viewBox,
+      words: { size: set.size },
+    };
+    const callouts = set.callouts;
+    const wordsOnStage = (w: number) => (set.size * w) / set.viewBox[2];
+
+    // A whole wide stage: a margin on the right, every note in it.
+    const wide: Rect = { x: 56, y: 56, w: 1488, h: 788 };
+    const inMargin = fitInSlot(passage, wide);
+    expect(inMargin.labelsAt).toBe('sides');
+    const margin = placeLabels({
+      place: inMargin,
+      room: wide,
+      viewBox: set.viewBox,
+      callouts,
+      avoid: { boxes: [], segments: [] },
+    });
+    const s = inMargin.w / set.viewBox[2];
+    for (const [i, label] of margin.entries()) {
+      expect(label.align).toBe('start');
+      expect(label.x).toBeGreaterThan(inMargin.x + inMargin.w);
+      // The leader ends past the end of its line: it crosses no words.
+      const end = set.callouts[i].ends!.right;
+      expect(label.leader![2]).toBeCloseTo(
+        inMargin.x + (end[0] - set.viewBox[0]) * s,
+        0,
+      );
+      expect(label.size).toBeLessThanOrEqual(
+        Math.max(LABEL.min, wordsOnStage(inMargin.w) * 0.8) + 0.5,
+      );
+    }
+
+    // A narrow room: listed under it, with no leaders, the passage as wide
+    // as the room.
+    const narrow: Rect = { x: 44, y: 44, w: 560, h: 812 };
+    const listed = fitInSlot(passage, narrow);
+    expect(listed.labelsAt).toBe('list');
+    expect(listed.w).toBeCloseTo(narrow.w, 0);
+    const list = placeLabels({
+      place: listed,
+      room: narrow,
+      viewBox: set.viewBox,
+      callouts,
+      avoid: { boxes: [], segments: [] },
+    });
+    expect(list.map((l) => l.part)).toEqual(['simile', 'crowd']);
+    for (const label of list) {
+      expect(label.leader).toBeNull();
+      expect(label.y).toBeGreaterThanOrEqual(listed.y + listed.h);
+      expect(label.y + label.h).toBeLessThanOrEqual(narrow.y + narrow.h);
+      expect(label.x + label.w).toBeLessThanOrEqual(narrow.x + narrow.w + 0.5);
+    }
+    expect(overlaps(list[0], list[1])).toBe(false);
   });
 
   it('never lets two labels touch, or touch the drawing, in any layout, even with an arrow running past', () => {

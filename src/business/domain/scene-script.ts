@@ -11,6 +11,10 @@
  * counted, so no miscount can move a picture off its words.
  */
 
+import { checkArithmetic, markTerms, type MathLine } from './scene-math';
+import { sample, type PlotSpec } from './scene-plot';
+import { findPhrase, isVerbatim } from './scene-quote';
+
 /**
  * Rows are made per generator; a new generator is a new set of rows.
  * scene-2: labels lifted out of drawings and set by the stage, arrow
@@ -26,6 +30,7 @@ export const SCENE_LAYOUTS = [
   'hub',
   'cycle',
   'focus',
+  'stack',
 ] as const;
 export type SceneLayout = (typeof SCENE_LAYOUTS)[number];
 
@@ -77,6 +82,15 @@ export const SCENE_AMBIENCES = [
   'clock',
 ] as const;
 export type SceneAmbience = (typeof SCENE_AMBIENCES)[number];
+
+/**
+ * How a page may be taught. Every page can be an explainer; a book of
+ * maths may also work on a board (maths set by code, and graphs); a book
+ * of poems, plays or stories may also read its own words closely. The
+ * document's profile says which a book may use.
+ */
+export const SCENE_FORMATS = ['explainer', 'maths', 'reading'] as const;
+export type SceneFormat = (typeof SCENE_FORMATS)[number];
 
 export const DRAWING_SHAPES = ['square', 'wide', 'tall'] as const;
 export type DrawingShape = (typeof DRAWING_SHAPES)[number];
@@ -135,7 +149,61 @@ export interface WordsThing {
   style: 'title' | 'keyword';
 }
 
-export type SceneThing = DrawingThing | StatThing | WordsThing;
+/** Working set by code: lines of TeX, their equals signs in one column. */
+export interface MathThing {
+  id: string;
+  kind: 'math';
+  /** A caption under the working, or empty for none. */
+  name: string;
+  lines: MathLine[];
+}
+
+/** A graph drawn by code from its function. */
+export interface PlotThing {
+  id: string;
+  kind: 'plot';
+  name: string;
+  plot: PlotSpec;
+}
+
+/** The text's own words, with the phrases the voice will talk about. */
+export interface QuoteThing {
+  id: string;
+  kind: 'quote';
+  name: string;
+  text: string;
+  phrases: { name: string; phrase: string; note: string | null }[];
+}
+
+/** A thing drawn by code and not by the artist. */
+export type CodeThing = MathThing | PlotThing | QuoteThing;
+
+export type SceneThing = DrawingThing | StatThing | WordsThing | CodeThing;
+
+/** The names of the parts the voice can point at in a thing. */
+export function partNames(thing: SceneThing): string[] {
+  if (thing.kind === 'drawing') return thing.parts.map((p) => p.name);
+  if (thing.kind === 'math')
+    return [
+      ...new Set(
+        thing.lines.flatMap((line, k) =>
+          markTerms(line.latex, k + 1).terms.map((t) => t.name),
+        ),
+      ),
+    ];
+  if (thing.kind === 'plot')
+    return ['curve', ...thing.plot.points.map((p) => p.name)];
+  if (thing.kind === 'quote') return thing.phrases.map((p) => p.name);
+  return [];
+}
+
+/** The names of the states a thing can show and hide: a drawing's overlays, a working's later lines. */
+export function stateNames(thing: SceneThing): string[] {
+  if (thing.kind === 'drawing') return thing.states.map((s) => s.name);
+  if (thing.kind === 'math')
+    return thing.lines.slice(1).map((_, k) => `line ${k + 2}`);
+  return [];
+}
 
 export interface SceneArrow {
   from: string;
@@ -197,7 +265,7 @@ export interface SceneScriptDraft {
   }[];
   cast: {
     id: string;
-    kind: 'drawing' | 'stat' | 'words';
+    kind: 'drawing' | 'stat' | 'words' | 'math' | 'plot' | 'quote';
     /** A drawing's caption, a stat's caption, the words themselves. */
     name: string;
     brief: string | null;
@@ -208,6 +276,22 @@ export interface SceneScriptDraft {
     value: string | null;
     style: 'title' | 'keyword' | null;
     sound: SceneAmbience | null;
+    /** A working's lines. */
+    lines: { latex: string; check: string | null }[] | null;
+    /** A graph. */
+    plot: {
+      fn: string;
+      xFrom: number;
+      xTo: number;
+      yFrom: number | null;
+      yTo: number | null;
+      xLabel: string | null;
+      yLabel: string | null;
+      points: { x: number; name: string }[] | null;
+    } | null;
+    /** A quotation, word for word from the page. */
+    quote: string | null;
+    phrases: { name: string; phrase: string; note: string | null }[] | null;
   }[];
   steps: {
     beat: number;
@@ -229,28 +313,8 @@ export function wordsOf(text: string): string[] {
   return text.trim().split(/\s+/).filter(Boolean);
 }
 
-/** A word reduced to what it is, for matching: lower case, letters and digits. */
-/**
- * A name reduced to what it is, for matching. The writer says "renal
- * pelvis" and the artist writes `<g id="renal-pelvis">` or `renalPelvis`,
- * and all three are the same part (242b871).
- */
-export const idKey = (name: string) =>
-  name.toLowerCase().replace(/[^a-z0-9]/g, '');
-
-/** A word reduced the same way, to find a phrase in its sentence. */
-export const wordKey = idKey;
-
-/**
- * The id a thing or a named group is written with: "renal pelvis" is
- * `renal-pelvis`. One function, so the id the artist is asked for, the id
- * its retry notes name and the writer's ids cannot drift apart.
- */
-export const groupId = (name: string) =>
-  name
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, '-')
-    .replace(/^-+|-+$/g, '');
+import { groupId, idKey, wordKey } from './scene-ids';
+export { groupId, idKey, wordKey };
 
 /** Two words the same, or one the other with an ending: "chloroplast" and "chloroplasts". */
 function sameWord(a: string, b: string): boolean {
@@ -309,6 +373,7 @@ export const LAYOUT_CAPACITY: Record<
   hub: { min: 3, max: 6 },
   cycle: { min: 3, max: 5 },
   focus: { min: 2, max: 4 },
+  stack: { min: 2, max: 4 },
 };
 
 /** The layout the writer asked for when it holds this many, else the nearest one that does. */
@@ -317,8 +382,10 @@ export function fitLayout(asked: SceneLayout, count: number): SceneLayout {
   if (count >= min && count <= max) return asked;
   if (count <= 1) return 'one';
   if (count === 2)
-    return asked === 'focus' || asked === 'compare' ? asked : 'row';
-  return 'row';
+    return asked === 'focus' || asked === 'compare' || asked === 'stack'
+      ? asked
+      : 'row';
+  return asked === 'stack' && count <= 4 ? 'stack' : 'row';
 }
 
 // ── The mend ──────────────────────────────────────────────────────────────
@@ -343,9 +410,18 @@ export interface MendedScript {
  * extra drawings set in type. What cannot be mended is a problem for the
  * one repair call.
  */
-export function mendScript(draft: SceneScriptDraft): MendedScript {
+export function mendScript(
+  draft: SceneScriptDraft,
+  options: {
+    /** The page, to hold a quotation to its own words. */
+    material?: string;
+    /** The formats the document may use; a kind of another is set in type. */
+    formats?: readonly SceneFormat[];
+  } = {},
+): MendedScript {
   const problems: string[] = [];
   const mended: string[] = [];
+  const formats = new Set(options.formats ?? SCENE_FORMATS);
 
   const beats: SceneBeat[] = draft.beats
     .map((beat) => ({
@@ -386,6 +462,13 @@ export function mendScript(draft: SceneScriptDraft): MendedScript {
         text: name,
         style: raw.style === 'title' ? 'title' : 'keyword',
       });
+      return;
+    }
+    if (raw.kind === 'math' || raw.kind === 'plot' || raw.kind === 'quote') {
+      const made = codeThing(id, raw, name, formats, options.material);
+      mended.push(...made.mended);
+      problems.push(...made.problems);
+      cast.push(made.thing);
       return;
     }
     const brief = clean(raw.brief);
@@ -617,6 +700,148 @@ export function mendScript(draft: SceneScriptDraft): MendedScript {
   };
 }
 
+/**
+ * A thing code draws, made sound: working whose sums hold, a graph whose
+ * function has values, a quotation that is the page's own words. One the
+ * document's formats do not include is set in type instead.
+ */
+function codeThing(
+  id: string,
+  raw: SceneScriptDraft['cast'][number],
+  name: string,
+  formats: ReadonlySet<SceneFormat>,
+  material: string | undefined,
+): { thing: SceneThing; problems: string[]; mended: string[] } {
+  const problems: string[] = [];
+  const mended: string[] = [];
+  const words = (why: string) => ({
+    thing: {
+      id,
+      kind: 'words' as const,
+      text: name || raw.id,
+      style: 'keyword' as const,
+    },
+    problems,
+    mended: [...mended, `${id}: ${why}; set in type`],
+  });
+  if (raw.kind === 'math') {
+    if (!formats.has('maths')) return words('not a maths book');
+    const lines = (raw.lines ?? [])
+      .map((line) => ({
+        latex: clean(line.latex),
+        check: clean(line.check) || null,
+      }))
+      .filter((line) => line.latex)
+      .slice(0, MAX_MATH_LINES);
+    if (!lines.length) {
+      problems.push(`The working "${raw.id}" has no lines.`);
+      return words('working with no lines');
+    }
+    lines.forEach((line, k) => {
+      if (!line.check) return;
+      const checked = checkArithmetic(line.check);
+      if (checked && !checked.holds)
+        problems.push(
+          `Line ${k + 1} of "${raw.id}" does not add up: ${line.check} (the left side is ${Number(checked.value.toPrecision(8))}). Put the sum right.`,
+        );
+    });
+    return {
+      thing: { id, kind: 'math', name: clean(raw.name), lines },
+      problems,
+      mended,
+    };
+  }
+  if (raw.kind === 'plot') {
+    if (!formats.has('maths')) return words('not a maths book');
+    const plot = raw.plot;
+    const fn = clean(plot?.fn);
+    if (!plot || !fn || !(Number(plot.xTo) > Number(plot.xFrom))) {
+      problems.push(
+        `The graph "${raw.id}" needs a function and a stretch of x from low to high.`,
+      );
+      return words('a graph with nothing to draw');
+    }
+    const values = (() => {
+      try {
+        return sample(fn, [plot.xFrom, plot.xTo], 60).filter(
+          (p) => p.y !== null,
+        ).length;
+      } catch {
+        return 0;
+      }
+    })();
+    if (values < 18) {
+      problems.push(
+        `The graph "${raw.id}" cannot be worked out: ${fn} has no values from ${plot.xFrom} to ${plot.xTo}. Write it as mathjs reads it, in x.`,
+      );
+      return words('a graph with no values');
+    }
+    const y: [number, number] | null =
+      plot.yFrom !== null && plot.yTo !== null && plot.yTo > plot.yFrom
+        ? [plot.yFrom, plot.yTo]
+        : null;
+    return {
+      thing: {
+        id,
+        kind: 'plot',
+        name: clean(raw.name),
+        plot: {
+          fn,
+          x: [plot.xFrom, plot.xTo],
+          y,
+          points: (plot.points ?? [])
+            .filter((p) => Number.isFinite(p.x) && clean(p.name))
+            .slice(0, 4)
+            .map((p) => ({ x: p.x, name: clean(p.name) })),
+          xLabel: clean(plot.xLabel) || null,
+          yLabel: clean(plot.yLabel) || null,
+        },
+      },
+      problems,
+      mended,
+    };
+  }
+  if (!formats.has('reading')) return words('not a book to read closely');
+  // A quotation keeps its line breaks; only spaces within a line are tidied.
+  const text = (raw.quote ?? '')
+    .split('\n')
+    .map((line) => line.replace(/\s+/g, ' ').trim())
+    .filter(Boolean)
+    .join('\n');
+  if (!text) {
+    problems.push(`The quotation "${raw.id}" has no words.`);
+    return words('a quotation with no words');
+  }
+  if (material && !isVerbatim(text, material)) {
+    problems.push(
+      `The quotation "${raw.id}" is not the page's own words. Copy it exactly from the page.`,
+    );
+    return words("not the page's own words");
+  }
+  const passage = text.split(/\s+/);
+  const phrases = (raw.phrases ?? [])
+    .map((p) => ({
+      name: clean(p.name),
+      phrase: clean(p.phrase),
+      note: clean(p.note) || null,
+    }))
+    .filter((p) => {
+      const ok = p.name && p.phrase && findPhrase(passage, p.phrase) >= 0;
+      if (!ok && p.phrase)
+        mended.push(`${id}: "${p.phrase}" is not in the quotation`);
+      return ok;
+    })
+    .slice(0, MAX_PARTS);
+  return {
+    thing: { id, kind: 'quote', name: clean(raw.name), text, phrases },
+    problems,
+    mended,
+  };
+}
+
+/** The most lines one working holds: more is a second working. */
+export const MAX_MATH_LINES = 6;
+
 /** An effect made sound, or why it was dropped. */
 function effectOf(
   effect: { target: string; do: SceneEffectKind },
@@ -636,8 +861,10 @@ function effectOf(
   const kind: SceneEffectKind = SCENE_EFFECTS.includes(effect.do)
     ? effect.do
     : 'pulse';
-  if (!partName || thing?.kind !== 'drawing') {
-    // A part or state is only a drawing's; on anything else the whole thing moves.
+  const parts = thing ? partNames(thing) : [];
+  const states = thing ? stateNames(thing) : [];
+  if (!partName || (!parts.length && !states.length)) {
+    // A thing with no parts or states: the whole thing moves.
     return {
       target: id,
       part: null,
@@ -646,15 +873,15 @@ function effectOf(
     };
   }
   const key = idKey(partName);
-  const part = thing.parts.find((p) => idKey(p.name) === key);
-  const state = thing.states.find((s) => idKey(s.name) === key);
+  const part = parts.find((name) => idKey(name) === key);
+  const state = states.find((name) => idKey(name) === key);
   if (state) {
     const does: SceneEffectKind = kind === 'hide' ? 'hide' : 'show';
-    return { target: id, part: state.name, do: does };
+    return { target: id, part: state, do: does };
   }
   if (part) {
     const does: SceneEffectKind = kind === 'pulse' ? 'pulse' : 'point';
-    return { target: id, part: part.name, do: does };
+    return { target: id, part, do: does };
   }
   return { target: id, part: null, do: 'pulse' };
 }

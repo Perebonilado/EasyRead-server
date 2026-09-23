@@ -1,3 +1,4 @@
+import { profileKey } from '../../business/domain/scene-profile';
 import { Injectable } from '@nestjs/common';
 import { InjectModel } from '@nestjs/sequelize';
 import type {
@@ -144,11 +145,16 @@ export class SequelizeVisualSceneRepository implements VisualSceneRepository {
 
   async filesOf(documentId: string): Promise<string[]> {
     const rows = await this.model.findAll({ where: { documentId } });
-    return rows.flatMap((row) =>
-      [row.sceneKey, row.audioKey, row.thumbKey].filter((key): key is string =>
-        Boolean(key),
+    // And each version's profile, which no row names.
+    const versions = [...new Set(rows.map((row) => row.contentVersion))];
+    return [
+      ...rows.flatMap((row) =>
+        [row.sceneKey, row.audioKey, row.thumbKey].filter(
+          (key): key is string => Boolean(key),
+        ),
       ),
-    );
+      ...versions.map((version) => profileKey(documentId, version)),
+    ];
   }
 
   async purgeDocument(documentId: string): Promise<void> {

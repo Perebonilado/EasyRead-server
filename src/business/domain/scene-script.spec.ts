@@ -8,7 +8,7 @@ import {
 
 const thing = (
   id: string,
-  kind: 'drawing' | 'stat' | 'words',
+  kind: SceneScriptDraft['cast'][number]['kind'],
   extra: Partial<SceneScriptDraft['cast'][number]> = {},
 ): SceneScriptDraft['cast'][number] => ({
   id,
@@ -22,6 +22,10 @@ const thing = (
   value: kind === 'stat' ? '70%' : null,
   style: null,
   sound: null,
+  lines: null,
+  plot: null,
+  quote: null,
+  phrases: null,
   ...extra,
 });
 
@@ -183,6 +187,73 @@ describe('the writer’s storyboard, mended', () => {
     const [leaf, sun] = script.cast;
     expect(leaf.kind === 'drawing' && leaf.sound).toBe('heartbeat');
     expect(sun.kind === 'drawing' && sun.sound).toBeNull();
+  });
+
+  it("checks a working's sums, a graph's function and a quotation's words, and points at their parts", () => {
+    const d = draft();
+    d.cast.push(
+      thing('work', 'math', {
+        lines: [
+          { latex: 'M = \\term{image}{h_i} / h_o', check: null },
+          { latex: '= 50/0.1', check: '50/0.1 = 5000' },
+        ],
+      }),
+      thing('graph', 'plot', {
+        plot: {
+          fn: 'x^2',
+          xFrom: -2,
+          xTo: 2,
+          yFrom: null,
+          yTo: null,
+          xLabel: null,
+          yLabel: null,
+          points: [{ x: 1, name: 'one' }],
+        },
+      }),
+      thing('poem', 'quote', {
+        quote: 'Plants make their own food.',
+        phrases: [
+          { name: 'own', phrase: 'their own food', note: 'made at home' },
+        ],
+      }),
+    );
+    d.steps.push(
+      step(2, 'called chloroplasts', {
+        layout: 'stack',
+        show: ['work', 'graph', 'poem'],
+        effects: [
+          { target: 'work.image', do: 'point' },
+          { target: 'work.line 2', do: 'show' },
+          { target: 'graph.one', do: 'point' },
+          { target: 'poem.own', do: 'point' },
+        ],
+      }),
+    );
+    const material = d.beats.map((b) => b.say).join(' ');
+    const { script, problems } = mendScript(d, { material });
+    expect(problems.join(' ')).toMatch(/does not add up: 50\/0\.1 = 5000/);
+    const last = script.steps[script.steps.length - 1];
+    expect(last.stage?.layout).toBe('stack');
+    expect(last.effects).toEqual([
+      { target: 'work', part: 'image', do: 'point' },
+      { target: 'work', part: 'line 2', do: 'show' },
+      { target: 'graph', part: 'one', do: 'point' },
+      { target: 'poem', part: 'own', do: 'point' },
+    ]);
+    // A book that may only explain: all three are set in type.
+    const plain = mendScript(d, { material, formats: ['explainer'] });
+    expect(
+      plain.script.cast.filter((t) => t.kind === 'words').map((t) => t.id),
+    ).toEqual(expect.arrayContaining(['work', 'graph', 'poem']));
+    // A quotation that is not the page's own words goes back.
+    const off = draft();
+    off.cast.push(thing('poem', 'quote', { quote: 'Trees are tall.' }));
+    off.steps.push(
+      step(0, 'Plants make', { layout: 'row', show: ['leaf', 'poem'] }),
+    );
+    expect(mendScript(off, { material }).problems.join(' ')).toMatch(
+      /not the page's own words/,
+    );
   });
 
   it('reads a stage restated as it stands as its effects only', () => {

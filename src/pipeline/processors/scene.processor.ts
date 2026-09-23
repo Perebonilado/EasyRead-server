@@ -1,12 +1,20 @@
 import { ConfigService } from '@nestjs/config';
 import { Inject, Injectable, Logger } from '@nestjs/common';
-import type { SceneTiming } from '../../contracts';
+import type { SceneDto, SceneTiming } from '../../contracts';
 import { wordTimesFromAligned } from '../../business/domain/board';
 import {
   catalogueSpeechCost,
   geminiSpeechCost,
 } from '../../business/domain/cost';
-import { noteProse } from '../../business/domain/follow';
+import { sceneProse } from '../../business/domain/follow';
+import { drawByCode } from '../../business/domain/scene-code';
+import {
+  DEFAULT_PROFILE,
+  describeProfile,
+  profileKey,
+  profileOf,
+  type DocumentProfile,
+} from '../../business/domain/scene-profile';
 import {
   composeScene,
   describeStep,
@@ -19,6 +27,7 @@ import {
   mendScript,
   quietStretches,
   wordsOf,
+  type CodeThing,
   type DrawingThing,
   type SceneScript,
 } from '../../business/domain/scene-script';
@@ -81,6 +90,8 @@ import { isPermanentFailure, type JobContext } from './base.processor';
 
 /** The most of a page the writer reads. */
 const MATERIAL_CHARS = 14_000;
+/** How much of a document's pages the profile is made from. */
+const PROFILE_SAMPLE_CHARS = 6_000;
 /** A page with fewer words than this has too little to teach. */
 const THIN_PAGE_WORDS = 40;
 /** The card's still, in pixels across. */
@@ -174,7 +185,8 @@ export class SceneProcessor {
         return;
       }
 
-      const script = await this.write({
+      const made = await this.make({
+        documentId,
         documentTitle: doc.props.title,
         topic,
         material,
@@ -184,120 +196,26 @@ export class SceneProcessor {
           topic,
           pageNumber,
         ),
-        documentId,
+        profile: await this.profileFor(documentId, contentVersion),
+        kept: doc.props.institutionId
+          ? await this.pronunciations.kept(doc.props.institutionId)
+          : new Map(),
+        base: `documents/${doc.id}/visuals/v${contentVersion}/p${pageNumber}-${SCENE_GENERATOR_VERSION}`,
         who,
+        keepAs: `${documentId}-p${pageNumber}`,
+        step: (step) => this.visuals.update(record.id, { step }),
       });
-      if (script.fit === 'poor') {
+      if (made.fit === 'poor') {
         await this.visuals.update(record.id, {
           status: 'not_suitable',
           step: null,
           fit: 'poor',
-          fitReason: script.fitReason ?? 'This page does not suit a video.',
+          fitReason: made.reason,
         });
         return;
       }
-
-      // Drawing and voicing need only the script, so they run together.
-      await this.visuals.update(record.id, { step: 'drawing' });
-      const kept: Pronunciations = doc.props.institutionId
-        ? await this.pronunciations.kept(doc.props.institutionId)
-        : new Map();
-      const base = `documents/${doc.id}/visuals/v${contentVersion}/p${pageNumber}-${SCENE_GENERATOR_VERSION}`;
-      let voiced = false;
-      // A voice that fails stops the drawing: nothing more is asked for,
-      // and both branches have settled before the catch below touches the
-      // row, so neither writes to it afterwards.
-      const stop = new AbortController();
-      const [drawing, spoken] = await Promise.allSettled([
-        this.drawAll(script, topic.title, documentId, who, stop.signal).then(
-          async (made) => {
-            if (!voiced && !stop.signal.aborted)
-              await this.visuals.update(record.id, { step: 'voicing' });
-            return made;
-          },
-        ),
-        this.voice(script, kept, base, documentId, who)
-          .catch((error: unknown) => {
-            stop.abort();
-            throw error;
-          })
-          .finally(() => {
-            voiced = true;
-          }),
-      ]);
-      if (spoken.status === 'rejected') throw spoken.reason;
-      if (drawing.status === 'rejected') throw drawing.reason;
-      const drawings = drawing.value;
-      const voice = spoken.value;
-
-      await this.visuals.update(record.id, { step: 'composing' });
-      const { scene, filled, audit } = composeScene({
-        script,
-        drawings,
-        beats: voice.beats,
-        durationMs: voice.durationMs,
-        timing: voice.timing,
-        generator: SCENE_GENERATOR_VERSION,
-      });
-      // For working on the layout without the models: everything compose
-      // was given, kept where SCENE_KEEP_PARTS says (scripts/scene-recompose).
-      const keep = this.config.get<string>('SCENE_KEEP_PARTS')?.trim();
-      if (keep)
-        try {
-          const { mkdirSync, writeFileSync } = await import('node:fs');
-          mkdirSync(keep, { recursive: true });
-          writeFileSync(
-            `${keep}/${documentId}-p${pageNumber}-parts.json`,
-            JSON.stringify({
-              script,
-              drawings: [...drawings],
-              beats: voice.beats,
-              durationMs: voice.durationMs,
-              timing: voice.timing,
-            }),
-          );
-        } catch (error) {
-          this.logger.warn(
-            `${who}: parts not kept: ${(error as Error).message}`,
-          );
-        }
-      // What no layout promises by construction: nothing set on anything.
-      const found = [...audit.box.flat(), ...audit.wide.flat()];
-      const counted = new Map<string, number>();
-      for (const one of found)
-        counted.set(
-          `${one.kind} ${one.a} / ${one.b}`,
-          (counted.get(`${one.kind} ${one.a} / ${one.b}`) ?? 0) + 1,
-        );
-      this.logger.log(
-        `${who}: frame audit: ${audit.box.flat().length} in the box, ${audit.wide.flat().length} wide${
-          counted.size
-            ? `: ${[...counted]
-                .slice(0, 6)
-                .map(([what, n]) => `${what}${n > 1 ? ` ×${n}` : ''}`)
-                .join('; ')}`
-            : ''
-        }`,
-      );
-      const sceneKey = `${base}-scene.json`;
-      await this.storage.put({
-        key: sceneKey,
-        body: Buffer.from(JSON.stringify(scene)),
-        mimeType: 'application/json',
-      });
-      const thumbKey = `${base}-thumb.png`;
-      try {
-        await this.storage.put({
-          key: thumbKey,
-          body: await this.thumb(scene),
-          mimeType: 'image/png',
-        });
-      } catch (error) {
-        // A card without its still is a card; the video is what matters.
-        this.logger.warn(
-          `${who}: no still for the card: ${(error as Error).message}`,
-        );
-      }
+      const { scene, sceneKey, thumbKey, voice, script, drawings, filled } =
+        made;
 
       await this.visuals.update(record.id, {
         status: 'done',
@@ -332,6 +250,162 @@ export class SceneProcessor {
   }
 
   /**
+   * A page made from its material: written, drawn and voiced together,
+   * put on its words, audited, and stored under `base` with a still for
+   * its card. The page's row is the caller's: `step` says where the
+   * making is. A page not fit to teach comes back as such, with nothing
+   * stored. `documentId` is null for a page made from any text at all
+   * (scripts/scene-try): its costs are logged against no document.
+   */
+  async make(input: {
+    documentId: string | null;
+    documentTitle: string;
+    topic: TopicRecord;
+    material: string;
+    context: string;
+    profile: DocumentProfile;
+    kept: Pronunciations;
+    base: string;
+    who: string;
+    /** What SCENE_KEEP_PARTS names the page's parts file. */
+    keepAs?: string;
+    step?: (step: 'drawing' | 'voicing' | 'composing') => Promise<void>;
+  }): Promise<
+    | { fit: 'poor'; reason: string }
+    | {
+        fit: 'good';
+        scene: SceneDto;
+        sceneKey: string;
+        thumbKey: string;
+        voice: Awaited<ReturnType<SceneProcessor['voice']>>;
+        script: SceneScript;
+        drawings: Map<string, GatedDrawing | null>;
+        filled: number;
+      }
+  > {
+    const { documentId, topic, who, base } = input;
+    const script = await this.write({
+      documentTitle: input.documentTitle,
+      topic,
+      material: input.material,
+      context: input.context,
+      profile: input.profile,
+      documentId,
+      who,
+    });
+    if (script.fit === 'poor')
+      return {
+        fit: 'poor',
+        reason: script.fitReason ?? 'This page does not suit a video.',
+      };
+
+    // Drawing and voicing need only the script, so they run together.
+    await input.step?.('drawing');
+    let voiced = false;
+    // A voice that fails stops the drawing: nothing more is asked for,
+    // and both branches have settled before the catch below touches the
+    // row, so neither writes to it afterwards.
+    const stop = new AbortController();
+    const [drawing, spoken] = await Promise.allSettled([
+      this.drawAll(script, topic.title, documentId, who, stop.signal).then(
+        async (made) => {
+          if (!voiced && !stop.signal.aborted) await input.step?.('voicing');
+          return made;
+        },
+      ),
+      this.voice(script, input.kept, base, documentId, who)
+        .catch((error: unknown) => {
+          stop.abort();
+          throw error;
+        })
+        .finally(() => {
+          voiced = true;
+        }),
+    ]);
+    if (spoken.status === 'rejected') throw spoken.reason;
+    if (drawing.status === 'rejected') throw drawing.reason;
+    const drawings = drawing.value;
+    const voice = spoken.value;
+
+    await input.step?.('composing');
+    const { scene, filled, audit } = composeScene({
+      script,
+      drawings,
+      beats: voice.beats,
+      durationMs: voice.durationMs,
+      timing: voice.timing,
+      generator: SCENE_GENERATOR_VERSION,
+    });
+    // For working on the layout without the models: everything compose
+    // was given, kept where SCENE_KEEP_PARTS says (scripts/scene-recompose).
+    const keep = this.config.get<string>('SCENE_KEEP_PARTS')?.trim();
+    if (keep)
+      try {
+        const { mkdirSync, writeFileSync } = await import('node:fs');
+        mkdirSync(keep, { recursive: true });
+        writeFileSync(
+          `${keep}/${input.keepAs ?? 'page'}-parts.json`,
+          JSON.stringify({
+            script,
+            drawings: [...drawings],
+            beats: voice.beats,
+            durationMs: voice.durationMs,
+            timing: voice.timing,
+          }),
+        );
+      } catch (error) {
+        this.logger.warn(`${who}: parts not kept: ${(error as Error).message}`);
+      }
+    // What no layout promises by construction: nothing set on anything.
+    const found = [...audit.box.flat(), ...audit.wide.flat()];
+    const counted = new Map<string, number>();
+    for (const one of found)
+      counted.set(
+        `${one.kind} ${one.a} / ${one.b}`,
+        (counted.get(`${one.kind} ${one.a} / ${one.b}`) ?? 0) + 1,
+      );
+    this.logger.log(
+      `${who}: frame audit: ${audit.box.flat().length} in the box, ${audit.wide.flat().length} wide${
+        counted.size
+          ? `: ${[...counted]
+              .slice(0, 6)
+              .map(([what, n]) => `${what}${n > 1 ? ` ×${n}` : ''}`)
+              .join('; ')}`
+          : ''
+      }`,
+    );
+    const sceneKey = `${base}-scene.json`;
+    await this.storage.put({
+      key: sceneKey,
+      body: Buffer.from(JSON.stringify(scene)),
+      mimeType: 'application/json',
+    });
+    const thumbKey = `${base}-thumb.png`;
+    try {
+      await this.storage.put({
+        key: thumbKey,
+        body: await this.thumb(scene),
+        mimeType: 'image/png',
+      });
+    } catch (error) {
+      // A card without its still is a card; the video is what matters.
+      this.logger.warn(
+        `${who}: no still for the card: ${(error as Error).message}`,
+      );
+    }
+    return {
+      fit: 'good',
+      scene,
+      sceneKey,
+      thumbKey,
+      voice,
+      script,
+      drawings,
+      filled,
+    };
+  }
+
+  /**
    * A page's script alone, written exactly as a page's is, for the tools
    * that voice or study it (the voice line-up) without making the page.
    */
@@ -355,6 +429,7 @@ export class SceneProcessor {
         topic,
         pageNumber,
       ),
+      profile: await this.profileFor(documentId, doc.contentVersion),
       documentId,
       who: `${documentId} p${pageNumber}`,
     });
@@ -370,7 +445,8 @@ export class SceneProcessor {
     topic: TopicRecord;
     material: string;
     context: string;
-    documentId: string;
+    profile: DocumentProfile;
+    documentId: string | null;
     who: string;
   }): Promise<SceneScript> {
     const ask = {
@@ -378,10 +454,13 @@ export class SceneProcessor {
       topicTitle: input.topic.title,
       material: input.material,
       context: input.context,
+      profile: describeProfile(input.profile),
     };
+    // The page, to hold a quotation to, and the formats the book may use.
+    const checks = { material: input.material, formats: input.profile.formats };
     const first = await this.llm.sceneScript(ask);
     await this.record(input.documentId, 'scene_write', first.usage);
-    let mended = mendScript(first.value);
+    let mended = mendScript(first.value, checks);
     if (mended.mended.length)
       this.logger.log(
         `${input.who}: mended: ${mended.mended.slice(0, 8).join('; ')}`,
@@ -396,7 +475,7 @@ export class SceneProcessor {
         problems: [...mended.problems, ...quietStretches(mended.script)],
       });
       await this.record(input.documentId, 'scene_write', again.usage);
-      const second = mendScript(again.value);
+      const second = mendScript(again.value, checks);
       if (second.problems.length <= mended.problems.length) mended = second;
     }
     const { script } = mended;
@@ -417,7 +496,7 @@ export class SceneProcessor {
   private async drawAll(
     script: SceneScript,
     topic: string,
-    documentId: string,
+    documentId: string | null,
     who: string,
     signal: AbortSignal,
   ): Promise<Map<string, GatedDrawing | null>> {
@@ -427,14 +506,32 @@ export class SceneProcessor {
     const names = new Map(
       script.cast.map((thing) => [
         thing.id,
-        thing.kind === 'drawing'
-          ? thing.name
-          : thing.kind === 'stat'
-            ? thing.caption
-            : thing.text,
+        thing.kind === 'stat'
+          ? thing.caption
+          : thing.kind === 'words'
+            ? thing.text
+            : thing.name || thing.kind,
       ]),
     );
     const out = new Map<string, GatedDrawing | null>();
+    // What code draws itself: working, graphs, the text's own words. No
+    // model is asked, and one that cannot be set is a card, as a drawing is.
+    const coded = script.cast.filter(
+      (thing): thing is CodeThing =>
+        thing.kind === 'math' ||
+        thing.kind === 'plot' ||
+        thing.kind === 'quote',
+    );
+    for (const thing of coded)
+      out.set(
+        thing.id,
+        await drawByCode(thing).catch((error: unknown) => {
+          this.logger.warn(
+            `${who}: "${thing.id}" (${thing.kind}) is set as a card: ${(error as Error).message}`,
+          );
+          return null;
+        }),
+      );
     await Promise.all(
       drawings.map(async (thing) => {
         // What it shares the stage with, so its scale and style agree with theirs.
@@ -464,7 +561,7 @@ export class SceneProcessor {
     thing: DrawingThing,
     topic: string,
     neighbours: string[],
-    documentId: string,
+    documentId: string | null,
     who: string,
     signal: AbortSignal,
   ): Promise<GatedDrawing | null> {
@@ -520,7 +617,7 @@ export class SceneProcessor {
     script: SceneScript,
     kept: Pronunciations,
     base: string,
-    documentId: string,
+    documentId: string | null,
     who: string,
   ): Promise<{
     beats: TimedBeat[];
@@ -712,6 +809,80 @@ export class SceneProcessor {
     ].join(' ');
   }
 
+  /**
+   * What the document is, for teaching it: kept beside its videos, made
+   * once from its title, its chapters and a sample of its pages. When it
+   * cannot be made, the page is taught as an explainer, as every page has
+   * been.
+   */
+  private async profileFor(
+    documentId: string,
+    contentVersion: number,
+  ): Promise<DocumentProfile> {
+    const key = profileKey(documentId, contentVersion);
+    try {
+      const kept = JSON.parse(
+        (await this.storage.get(key)).toString('utf8'),
+      ) as Parameters<typeof profileOf>[0];
+      return profileOf(kept);
+    } catch {
+      // Not made yet.
+    }
+    try {
+      const doc = await this.documents.findById(documentId);
+      const topics = await this.topics.listByDocument(documentId);
+      const sample = await this.sampleOf(documentId, doc?.props.pageCount ?? 0);
+      const made = await this.llm.sceneProfile({
+        documentTitle: doc?.props.title ?? '',
+        chapters: topics.map((topic) => topic.title),
+        sample,
+      });
+      await this.record(documentId, 'scene_profile', made.usage);
+      const profile = profileOf(made.value);
+      await this.storage.put({
+        key,
+        body: Buffer.from(JSON.stringify(profile)),
+        mimeType: 'application/json',
+      });
+      this.logger.log(`${documentId}: ${describeProfile(profile)}`);
+      return profile;
+    } catch (error) {
+      this.logger.warn(
+        `${documentId}: no profile, taught as an explainer: ${(error as Error).message}`,
+      );
+      return DEFAULT_PROFILE;
+    }
+  }
+
+  /** A few of a document's pages, to tell what it is: its first pages with words on them, and two from further in. */
+  private async sampleOf(
+    documentId: string,
+    pageCount: number,
+  ): Promise<string> {
+    const wanted = [
+      1,
+      2,
+      3,
+      4,
+      5,
+      Math.round(pageCount / 2),
+      Math.round((pageCount * 3) / 4),
+    ].filter(
+      (page, i, all) =>
+        page >= 1 && page <= Math.max(1, pageCount) && all.indexOf(page) === i,
+    );
+    const parts: string[] = [];
+    let length = 0;
+    for (const page of wanted) {
+      if (length > PROFILE_SAMPLE_CHARS) break;
+      const text = (await this.material(documentId, page)).slice(0, 1600);
+      if (wordsOf(text).length < 20) continue;
+      parts.push(`[page ${page}] ${text}`);
+      length += text.length;
+    }
+    return parts.join('\n\n').slice(0, PROFILE_SAMPLE_CHARS);
+  }
+
   /** The page: its simplified note when written, else its own text. */
   private async material(
     documentId: string,
@@ -719,7 +890,7 @@ export class SceneProcessor {
   ): Promise<string> {
     const note = await this.simplified.find(documentId, pageNumber);
     if (note?.status === 'done' && note.blocks?.length)
-      return noteProse(note.blocks).slice(0, MATERIAL_CHARS);
+      return sceneProse(note.blocks).slice(0, MATERIAL_CHARS);
     const pages: PageText[] = await this.pages.findRange(
       documentId,
       pageNumber,
@@ -731,8 +902,8 @@ export class SceneProcessor {
   }
 
   private async record(
-    documentId: string,
-    task: 'scene_write' | 'scene_draw',
+    documentId: string | null,
+    task: 'scene_write' | 'scene_draw' | 'scene_profile',
     usage: LlmUsage,
   ): Promise<void> {
     await this.calls.record({

@@ -1,6 +1,7 @@
 import { numberedSentences } from '../../../business/domain/board';
 import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import type { DocumentProfileDraft } from '../../../business/domain/scene-profile';
 import type { LanguageModelUsage } from 'ai';
 import type { Block, RecapBody, TopicPreviewBody } from '../../../contracts';
 import type {
@@ -36,6 +37,7 @@ import {
   lectureBoardSchema,
   lectureDiagramSchema,
   lectureSketchSchema,
+  sceneProfileSchema,
   sceneScriptSchema,
   sketchJudgeSchema,
   lectureExtraSchema,
@@ -691,6 +693,7 @@ export class AiSdkLlmAdapter implements LlmGatewayPort, OnModuleInit {
     topicTitle: string;
     material: string;
     context: string;
+    profile?: string;
     previous?: SceneScriptDraft;
     problems?: string[];
   }): Promise<LlmResult<SceneScriptDraft>> {
@@ -704,6 +707,7 @@ export class AiSdkLlmAdapter implements LlmGatewayPort, OnModuleInit {
       prompt: [
         `Document: ${input.documentTitle}`,
         `Chapter: ${input.topicTitle}`,
+        ...(input.profile ? [input.profile] : []),
         input.context,
         `The page:\n${input.material}`,
         ...(input.previous && input.problems?.length
@@ -713,6 +717,35 @@ export class AiSdkLlmAdapter implements LlmGatewayPort, OnModuleInit {
             ]
           : []),
       ].join('\n\n'),
+      maxRetries: this.maxRetries(),
+    });
+    return {
+      value: result.object,
+      usage: this.usage(ref, result.usage, started),
+    };
+  }
+
+  async sceneProfile(input: {
+    documentTitle: string;
+    chapters: string[];
+    sample: string;
+  }): Promise<LlmResult<DocumentProfileDraft>> {
+    const started = Date.now();
+    const { generateObject } = await this.registry.modules();
+    const { model, ref } = await this.registry.languageModel('scene_profile');
+    const result = await generateObject({
+      model,
+      schema: sceneProfileSchema,
+      system: PROMPTS.sceneProfile,
+      prompt: [
+        `Title: ${input.documentTitle}`,
+        input.chapters.length
+          ? `Chapters:\n- ${input.chapters.slice(0, 40).join('\n- ')}`
+          : '',
+        `From its pages:\n${input.sample}`,
+      ]
+        .filter(Boolean)
+        .join('\n\n'),
       maxRetries: this.maxRetries(),
     });
     return {

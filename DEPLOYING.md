@@ -148,6 +148,18 @@ and every page's log line `frame audit` counts anything left overlapping.
 Scenes are made by generator `scene-2`: pages made before are made again
 the next time they are asked for.
 
+Each document gets a profile the first time a page of it is made (one
+`gpt-4.1-mini` call, `AI_MODEL_SCENE_PROFILE`), kept in storage beside its
+videos as `profile.json`: its subject, kind and tone, and which formats
+its pages may use besides the explainer. `maths` lets a page set working
+(MathJax, `mathjax-full`, on the worker, as paths: nothing to fetch) and
+graphs drawn from their functions (`mathjs`, locked down); `reading` lets
+it set a passage in its own words, with notes in its margin (listed under
+it where the stage is too narrow for one). The writer's
+sums are checked and a quotation must be the page's own words, or the
+storyboard goes back. `npm run scene:try -- <page.md>` makes a page from
+any text with no document behind it, to try a format.
+
 ## The live tutor
 
 A tutor marked `livekit` in `tutors.ts` talks on our own line: a LiveKit

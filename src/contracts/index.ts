@@ -898,7 +898,7 @@ export interface VisualSetDto {
 
 export type SceneTiming = 'voice' | 'aligned' | 'estimated';
 export type SceneLayoutName =
-  'one' | 'row' | 'grid' | 'compare' | 'hub' | 'cycle' | 'focus';
+  'one' | 'row' | 'grid' | 'compare' | 'hub' | 'cycle' | 'focus' | 'stack';
 export type SceneEffectName = 'point' | 'show' | 'hide' | 'pulse' | 'zoom';
 export type SceneEnterName = 'pop' | 'fade' | 'slide' | 'wipe' | 'grow';
 /** The page's feeling: which music plays under the voice. */
@@ -946,6 +946,8 @@ export type SceneThingDto =
       callouts?: Record<string, string>;
       /** Of those, the parts whose label waits until the voice points at the part. */
       calloutsLater?: string[];
+      /** Drawn by code, not by the artist: working, a graph, or the text's own words. */
+      source?: 'math' | 'plot' | 'quote';
     }
   | { id: string; kind: 'stat'; value: string; caption: string }
   | {

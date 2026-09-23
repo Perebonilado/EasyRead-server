@@ -1,3 +1,4 @@
+import type { DocumentProfileDraft } from '../domain/scene-profile';
 import type {
   LearnQuestion,
   Block,
@@ -36,6 +37,7 @@ export type LlmTask =
   // and the artist (each drawing, as animated SVG).
   | 'scene_write'
   | 'scene_draw'
+  | 'scene_profile'
   | 'topic_quiz'
   | 'item_write'
   | 'item_verify'
@@ -473,9 +475,22 @@ export interface LlmGatewayPort {
     material: string;
     /** Where the page sits in its chapter, and what came before it. */
     context: string;
+    /** What the book is, and the ways its pages may be taught. */
+    profile?: string;
     previous?: SceneScriptDraft;
     problems?: string[];
   }): Promise<LlmResult<SceneScriptDraft>>;
+
+  /**
+   * What a document is, for teaching it: its subject, kind and tone, and
+   * which formats besides the explainer suit its pages. One cheap call a
+   * document, from its title, its chapters and a sample of its pages.
+   */
+  sceneProfile(input: {
+    documentTitle: string;
+    chapters: string[];
+    sample: string;
+  }): Promise<LlmResult<DocumentProfileDraft>>;
 
   /**
    * One drawing, as SVG markup with its own animation, from its brief.

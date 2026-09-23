@@ -209,6 +209,60 @@ describe('the scene put together', () => {
     expect(lifted.audit.box).toHaveLength(lifted.scene.steps.length);
   });
 
+  it('shows the lines of a working in turn when the writer did not say when', () => {
+    const worked = composeScene({
+      script: {
+        ...script,
+        cast: [
+          ...script.cast,
+          {
+            id: 'sum',
+            kind: 'math',
+            name: '',
+            lines: [
+              { latex: 'a = 1', check: null },
+              { latex: '= 2', check: null },
+              { latex: '= 3', check: null },
+            ],
+          },
+        ],
+        steps: [
+          ...script.steps,
+          {
+            at: { beat: 3, phrase: 'They trap' },
+            word: 0,
+            stage: { layout: 'one', show: ['sum'], arrows: [] },
+            effects: [],
+          },
+        ],
+      },
+      drawings: new Map([
+        ['leaf', drawing()],
+        ['sun', null],
+        [
+          'sum',
+          drawing({
+            parts: {},
+            labels: {},
+            states: { 'line 2': 'line-2', 'line 3': 'line-3' },
+          }),
+        ],
+      ]),
+      beats,
+      durationMs: 16_000,
+      timing: 'voice',
+      generator: 'scene-2',
+    });
+    const sum = worked.scene.things.find((t) => t.id === 'sum');
+    expect(sum?.kind === 'drawing' && sum.source).toBe('math');
+    const shows = worked.scene.effects.filter(
+      (e) => e.target === 'sum' && e.do === 'show',
+    );
+    expect(shows.map((e) => e.part)).toEqual(['line 2', 'line 3']);
+    expect(shows[0].atMs).toBeLessThan(shows[1].atMs);
+    expect(sum?.kind === 'drawing' && sum.hidden).toEqual(['line-2', 'line-3']);
+  });
+
   it('decides how each newcomer arrives', () => {
     expect(scene.steps[0].enter.leaf).toEqual({ how: 'wipe' });
     expect(scene.steps[1].enter.sun).toEqual({ how: 'slide' });

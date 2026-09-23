@@ -7,6 +7,10 @@ import {
   SCENE_LAYOUTS,
   SCENE_MOODS,
 } from '../../../business/domain/scene-script';
+import {
+  PROFILE_KINDS,
+  PROFILE_TONES,
+} from '../../../business/domain/scene-profile';
 
 /**
  * Structured output contracts.
@@ -481,7 +485,7 @@ export const sceneScriptSchema = z.object({
   cast: z.array(
     z.object({
       id: z.string(),
-      kind: z.enum(['drawing', 'stat', 'words']),
+      kind: z.enum(['drawing', 'stat', 'words', 'math', 'plot', 'quote']),
       name: z.string(),
       brief: z.string().nullable(),
       motion: z.string().nullable(),
@@ -495,6 +499,33 @@ export const sceneScriptSchema = z.object({
       value: z.string().nullable(),
       style: z.enum(['title', 'keyword']).nullable(),
       sound: z.enum(SCENE_AMBIENCES).nullable(),
+      lines: z
+        .array(z.object({ latex: z.string(), check: z.string().nullable() }))
+        .nullable(),
+      plot: z
+        .object({
+          fn: z.string(),
+          xFrom: z.number(),
+          xTo: z.number(),
+          yFrom: z.number().nullable(),
+          yTo: z.number().nullable(),
+          xLabel: z.string().nullable(),
+          yLabel: z.string().nullable(),
+          points: z
+            .array(z.object({ x: z.number(), name: z.string() }))
+            .nullable(),
+        })
+        .nullable(),
+      quote: z.string().nullable(),
+      phrases: z
+        .array(
+          z.object({
+            name: z.string(),
+            phrase: z.string(),
+            note: z.string().nullable(),
+          }),
+        )
+        .nullable(),
     }),
   ),
   steps: z.array(
@@ -518,6 +549,13 @@ export const sceneScriptSchema = z.object({
         .nullable(),
     }),
   ),
+});
+
+export const sceneProfileSchema = z.object({
+  subject: z.string(),
+  kind: z.enum(PROFILE_KINDS),
+  tone: z.enum(PROFILE_TONES),
+  formats: z.array(z.enum(['maths', 'reading'])),
 });
 
 export const lectureSketchSchema = z.object({

@@ -450,4 +450,22 @@ describe('a screenplay made sound and staged', () => {
       'Too much happens without a word after "Tell us a story,…"',
     );
   });
+
+  it('sends off together whoever the words say go together', () => {
+    const home = draft();
+    home.beats.push(
+      beat('action', "Ada takes her grandmother's hand.", {
+        who: 'ada',
+        to: 'nana',
+        do: 'reach',
+      }),
+      beat('action', 'Together, they walk toward the house.', {
+        who: 'ada',
+        do: 'leave',
+        hold: 2,
+      }),
+    );
+    const last = mend(home).script.steps.at(-1)?.stage;
+    expect(last).toMatchObject({ show: ['kofi'], leave: ['ada', 'nana'] });
+  });
 });

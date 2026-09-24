@@ -269,11 +269,23 @@ Built and tested on `visualize-story-script` in both repos, with Richard's recom
   - Watched on `/dev/stage`: fade-in openings, two-shots, close shots, bubbles in frame, captions with names.
 - **Tests:** server 1300, client 58. Type checks and lint are clean.
 
-Still open:
-- **Remakes waiting on credit.** The OpenAI account ran out of credit mid-test, so these still need a remake with the real writer:
-  - the goat page, where the goat arrives with Baba Sule;
-  - Lantern Keeper p2 (a long run of actions) and p4.
+- **After credit was added:**
+  - The goat page was remade, and the goat walks on with Baba Sule.
+  - Lantern Keeper p2 was remade: the first draft asked for 7 seconds of action after one sentence, went back, and came again spaced out.
+  - Lantern Keeper p4 was remade. Tobi arrives, Ember slips away, and Mira and Tobi leave together. Mira's "Same time tomorrow?" is called from off the stage over the empty quay.
+- **Fixed while watching:**
+  - Those who go together leave together: anyone the words name, or for "together" / "they" / "with", the one they go with, else whoever they last took by the hand.
+  - The writer is told to leave anyone who arrives later out of the opening.
+  - Before a hug or a hand taken across the row, one walks over first. They stay side by side after, and someone with two partners stands between them.
+- **All six pages** (characters' share, then narrator words before → after):
+  - Fireside 84%, 93 → 14;
+  - Goat 82%, 81 → 9;
+  - Lantern p1 33%, 135 → 36;
+  - Lantern p2 2% (the book's page has one quoted word), 138 → 58;
+  - Lantern p3 76%, 85 → 12;
+  - Lantern p4 32%, 124 → 30.
+- **Tests:** server 1302, client 58.
 
-  The fixes are covered by unit tests.
+Still open:
 - **Longer quiet.** Longer runs of wordless action need the voice server's 3 s pause limit raised, which is a redeploy.
 - **Push and PRs**, when Richard says.

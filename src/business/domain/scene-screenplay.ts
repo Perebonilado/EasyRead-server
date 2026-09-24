@@ -599,6 +599,23 @@ export function mendScreenplay(
     return [{ target: who, part, do: doing }];
   };
 
+  /** Whom each last hugged or took by the hand: who goes along with them. */
+  const touched = new Map<string, string>();
+  /**
+   * Who comes or goes with someone: whoever the words name ("leading a
+   * brown goat"); and where they go together ("together", "they", "both",
+   * "with"), whom the action is toward, or else whom they last took by
+   * the hand.
+   */
+  const companionsOf = (who: string, raw: ScreenplayBeatDraft): string[] => {
+    const named = peopleIn(raw.say);
+    const along = /\b(?:together|they|both|with)\b/iu.test(raw.say)
+      ? (known(raw.to, PEOPLE) ?? touched.get(who) ?? null)
+      : null;
+    return [...new Set([...named, ...(along ? [along] : [])])].filter(
+      (id) => id !== who,
+    );
+  };
   const steps: SceneStep[] = [];
   const opensQuiet = [...moments.values()].some((m) => m.after < 0);
   steps.push({
@@ -651,9 +668,7 @@ export function mendScreenplay(
       // With whoever they bring: "leading a brown goat on a rope".
       const coming = [
         who,
-        ...peopleIn(raw.say).filter(
-          (id) => id !== who && !present.includes(id),
-        ),
+        ...companionsOf(who, raw).filter((id) => !present.includes(id)),
       ];
       for (const id of coming) {
         present.push(id);
@@ -661,9 +676,20 @@ export function mendScreenplay(
       }
       stage = stageNow({ arrive: coming });
     } else if (raw.do === 'leave' && isPerson(who) && present.includes(who)) {
-      present.splice(present.indexOf(who), 1);
-      gone.add(who);
-      stage = stageNow({ leave: [who] });
+      // And whoever goes with them: "together, they walk home".
+      const going = [
+        who,
+        ...companionsOf(who, raw).filter((id) => present.includes(id)),
+      ];
+      for (const id of going) {
+        present.splice(present.indexOf(id), 1);
+        gone.add(id);
+      }
+      stage = stageNow({ leave: going });
+    }
+    if (isPerson(who) && (raw.do === 'hug' || raw.do === 'reach')) {
+      const other = known(raw.to, PEOPLE);
+      if (other) touched.set(who, other);
     }
     const prop = known(raw.show, ['drawing']);
     if (prop && !shown.includes(prop)) {

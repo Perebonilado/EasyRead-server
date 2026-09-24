@@ -72,6 +72,8 @@ export const OPENING_MIN_MS = 1200;
 const SAY_AFTER_MS = 700;
 /** A moment of quiet after a line starts this long after its last word. */
 const AFTER_WORDS_MS = 150;
+/** Walking over to someone before a hug: the hug comes this much later. */
+const TOGETHER_MS = 1100;
 
 /** The most a bubble holds, in characters: a line or two, read at a glance. */
 const SAY_CHARS = 80;
@@ -624,6 +626,37 @@ export function composeScene(input: ComposeInput): {
   let saying = 1;
   let before: string[] = [];
   let focus: string | null = null;
+  /** Two who came together (a hug, a hand taken), kept side by side from then on. */
+  const together: [string, string][] = [];
+  const keepTogether = (show: string[]): string[] => {
+    const out = [...show];
+    for (const [a, b] of together) {
+      const i = out.indexOf(a);
+      const j = out.indexOf(b);
+      if (i < 0 || j < 0 || Math.abs(i - j) === 1) continue;
+      // Someone already beside them they came together with: they stand
+      // between the two, one on each side.
+      const beside = [out[i - 1], out[i + 1]].find((id) =>
+        together.some(
+          ([p, q]) =>
+            (p === a && q === id) || (q === a && p === id && id !== b),
+        ),
+      );
+      if (beside) {
+        out.splice(out.indexOf(a), 1);
+        out.splice(out.indexOf(b), 1);
+        const at = out.indexOf(beside);
+        out.splice(at + 1, 0, a, b);
+        continue;
+      }
+      out.splice(j, 1);
+      const at = out.indexOf(a);
+      out.splice(j > i ? at + 1 : at, 0, b);
+    }
+    return out;
+  };
+  /** Whether the page's people walk: a story's. */
+  const walks = story;
   /** Whether a story's character has been on the stage yet, and the sentence the stage was first set in. */
   let charactersSeen = false;
   let firstBeat: number | undefined;
@@ -678,14 +711,13 @@ export function composeScene(input: ComposeInput): {
   for (const timedStep of timed) {
     const { atMs } = timedStep;
     let { step } = timedStep;
-    if (step.stage)
+    if (step.stage) {
+      const kept = sidesKept(wordsFirst(step.stage, byId), castById);
       step = {
         ...step,
-        stage: {
-          ...step.stage,
-          ...sidesKept(wordsFirst(step.stage, byId), castById),
-        },
+        stage: { ...step.stage, ...kept, show: keepTogether(kept.show) },
       };
+    }
     // The writer restating the stage as it stands: its effects, and no change.
     if (step.stage && steps.length && same(steps[steps.length - 1], step.stage))
       step = { ...step, stage: null };
@@ -816,10 +848,34 @@ export function composeScene(input: ComposeInput): {
             (actor === 'character' || actor === 'person') &&
             castById.has(effect.part)))
       ) {
+        // A hug or a hand taken between two with someone between them:
+        // the other walks over first, and they stay side by side.
+        const other = effect.part;
+        const apart =
+          (effect.do === 'hug' || effect.do === 'reach') &&
+          acts &&
+          walks &&
+          before.includes(effect.target) &&
+          before.includes(other) &&
+          Math.abs(before.indexOf(effect.target) - before.indexOf(other)) > 1;
+        if (apart) {
+          together.push([effect.target, other]);
+          const show = keepTogether(before);
+          const last = steps[steps.length - 1];
+          steps.push({
+            ...last,
+            atMs: at,
+            show,
+            enter: {},
+            focus: effect.target,
+          });
+          delete steps[steps.length - 1].cut;
+          before = show;
+        }
         directed.push({
-          atMs: at,
+          atMs: apart ? at + TOGETHER_MS : at,
           target: effect.target,
-          other: effect.part,
+          other,
           do: effect.do,
         });
         return;

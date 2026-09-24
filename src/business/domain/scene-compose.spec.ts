@@ -1192,6 +1192,65 @@ describe('what a character says, in a bubble', () => {
     expect([...look].reverse().find(([when]) => when <= 2200)?.[1]).toBe('fox');
   });
 
+  it('walks one over to the other before a hug across the row, and keeps them side by side', () => {
+    const three = composeScene({
+      script: {
+        ...talking,
+        cast: [
+          ...talking.cast,
+          {
+            id: 'tobi',
+            kind: 'character',
+            ref: 'tobi',
+            name: 'Tobi',
+            state: null,
+            met: 2,
+            intro: [],
+          },
+        ],
+        steps: [
+          {
+            at: { beat: 0, phrase: 'Plants make' },
+            word: 0,
+            stage: { layout: 'row', show: ['mira', 'fox', 'tobi'], arrows: [] },
+            effects: [],
+          },
+          {
+            at: { beat: 1, phrase: 'They need' },
+            word: 0,
+            after: 0,
+            stage: null,
+            effects: [{ target: 'mira', part: 'tobi', do: 'hug' }],
+          },
+          {
+            at: { beat: 3, phrase: 'They trap' },
+            word: 0,
+            stage: { layout: 'row', show: ['mira', 'fox', 'tobi'], arrows: [] },
+            effects: [],
+          },
+        ],
+      },
+      drawings: new Map([
+        ['mira', figure()],
+        ['fox', figure()],
+        ['tobi', figure()],
+      ]),
+      beats: beatsSaid,
+      durationMs: 16_000,
+      timing: 'voice',
+      generator: 'scene-2',
+    }).scene;
+    // Tobi walks over beside Mira, and the hug comes once he is there.
+    expect(three.steps.map((step) => step.show)).toEqual([
+      ['mira', 'fox', 'tobi'],
+      ['mira', 'tobi', 'fox'],
+    ]);
+    const hug = three.acting?.mira.moves?.find(([, what]) => what === 'hug');
+    expect(hug?.[0]).toBe(three.steps[1].atMs + 1100);
+    // Asked for the old row again later, they stay together: no change.
+    expect(three.steps).toHaveLength(2);
+  });
+
   it('opens a bubble for each line, from just before its first word', () => {
     const says = scene.effects.filter((e) => e.do === 'say');
     expect(says.map((e) => [e.target, e.atMs, e.say?.text])).toEqual([

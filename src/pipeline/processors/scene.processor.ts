@@ -14,8 +14,16 @@ import {
   describeProfile,
   profileKey,
   profileOf,
+  surenessOf,
   type DocumentProfile,
 } from '../../business/domain/scene-profile';
+import {
+  STAGE_RECIPES,
+  describeStage,
+  levelIn,
+  settleStage,
+  type LearningStage,
+} from '../../business/domain/scene-stage';
 import {
   composeScene,
   describeStep,
@@ -23,12 +31,18 @@ import {
   hiddenAt,
   thumbSvg,
 } from '../../business/domain/scene-compose';
+import {
+  mendScreenplay,
+  type ScreenplayDraft,
+} from '../../business/domain/scene-screenplay';
 import { rasterise } from '../../business/domain/scene-raster';
 import {
   SCENE_GENERATOR_VERSION,
   isCodeThing,
   mendScript,
+  type MendedScript,
   quietStretches,
+  quotedSpans,
   signsShown,
   wordsOf,
   type CharacterThing,
@@ -36,6 +50,7 @@ import {
   type PlaceThing,
   type DrawingThing,
   type SceneScript,
+  type SceneScriptDraft,
 } from '../../business/domain/scene-script';
 import {
   PLAIN_FIGURE,
@@ -49,7 +64,6 @@ import {
   castOf,
   figureDrawing,
   figureSheet,
-  introCallouts,
   measureSheet,
   setsOf,
   type Cast,
@@ -211,6 +225,12 @@ function figureByVoice(voice: StoryCharacter['voice']): FigureSpec {
  * cannot be made is set as a card with its name, never a reason to lose
  * the page.
  */
+/** What the writer is asked about a page, before any answer to put right. */
+type WriteAsk = Omit<
+  Parameters<LlmGatewayPort['sceneScript']>[0],
+  'previous' | 'problems'
+>;
+
 @Injectable()
 export class SceneProcessor {
   private readonly logger = new Logger(SceneProcessor.name);
@@ -469,8 +489,14 @@ export class SceneProcessor {
         documentId,
         who,
         story,
-        // The voice waits while a "previously" brings the last page back.
-        script.opening?.show.length ? OPENING_LEAD_S : 0,
+        // The voice waits while a "previously" brings the last page back,
+        // and while what happens before the first word happens.
+        Math.min(
+          3,
+          (script.opening?.show.length ? OPENING_LEAD_S : 0) +
+            (script.lead ?? 0),
+        ),
+        input.profile.stage ?? null,
       )
         .catch((error: unknown) => {
           stop.abort();
@@ -626,7 +652,13 @@ export class SceneProcessor {
       topicTitle: input.topic.title,
       material: input.material,
       context: input.context,
-      profile: describeProfile(input.profile),
+      // The book, and whom it is for with how to teach them.
+      profile: [
+        describeProfile(input.profile),
+        describeStage(input.profile.stage ?? null),
+      ]
+        .filter(Boolean)
+        .join('\n'),
       ...(told ? { story: told } : {}),
     };
     // The page, to hold a quotation to, the formats the book may use, and
@@ -634,6 +666,7 @@ export class SceneProcessor {
     const checks = {
       material: input.material,
       formats: input.profile.formats,
+      stage: input.profile.stage ?? null,
       ...(input.story
         ? {
             characters: input.story.bible.characters,
@@ -641,26 +674,23 @@ export class SceneProcessor {
           }
         : {}),
     };
-    const first = await this.llm.sceneScript(ask);
-    await this.record(input.documentId, 'scene_write', first.usage);
-    let mended = mendScript(first.value, checks);
-    if (mended.mended.length)
-      this.logger.log(
-        `${input.who}: mended: ${mended.mended.slice(0, 8).join('; ')}`,
-      );
-    if (mended.problems.length && mended.script.fit !== 'poor') {
-      this.logger.warn(
-        `${input.who}: the storyboard goes back: ${mended.problems.join(' ')}`,
-      );
-      const again = await this.llm.sceneScript({
-        ...ask,
-        previous: first.value,
-        problems: [...mended.problems, ...quietStretches(mended.script)],
-      });
-      await this.record(input.documentId, 'scene_write', again.usage);
-      const second = mendScript(again.value, checks);
-      if (second.problems.length <= mended.problems.length) mended = second;
-    }
+    // A story's page is a screenplay its characters play; any other page
+    // a lesson, narrated.
+    const mended = input.story
+      ? await this.written<ScreenplayDraft>(
+          ask,
+          (asked) => this.llm.sceneScreenplay(asked),
+          (draft) => mendScreenplay(draft, checks),
+          input,
+          false,
+        )
+      : await this.written<SceneScriptDraft>(
+          ask,
+          (asked) => this.llm.sceneScript(asked),
+          (draft) => mendScript(draft, checks),
+          input,
+          true,
+        );
     const { script } = mended;
     if (
       script.fit !== 'poor' &&
@@ -673,6 +703,50 @@ export class SceneProcessor {
       `${input.who}: "${script.title}", ${script.beats.length} sentences, ${script.cast.length} things:\n${script.steps.map(describeStep).join('\n')}`,
     );
     return script;
+  }
+
+  /**
+   * A draft written and mended, and written once more when the mend
+   * leaves problems: the better of the two kept.
+   */
+  private async written<D>(
+    ask: WriteAsk,
+    call: (
+      asked: WriteAsk & { previous?: D; problems?: string[] },
+    ) => Promise<{ value: D; usage: LlmUsage }>,
+    mend: (draft: D) => MendedScript,
+    input: { documentId: string | null; who: string },
+    /** Whether a quiet stretch is a problem too: a lesson's is; a story's quiet holds its actions. */
+    quiet: boolean,
+  ): Promise<MendedScript> {
+    const first = await call(ask);
+    await this.record(input.documentId, 'scene_write', first.usage);
+    let mended = mend(first.value);
+    if (mended.mended.length)
+      this.logger.log(
+        `${input.who}: mended: ${mended.mended.slice(0, 8).join('; ')}`,
+      );
+    if (mended.problems.length && mended.script.fit !== 'poor') {
+      this.logger.warn(
+        `${input.who}: the storyboard goes back: ${mended.problems.join(' ')}`,
+      );
+      const again = await call({
+        ...ask,
+        previous: first.value,
+        problems: [
+          ...mended.problems,
+          ...(quiet ? quietStretches(mended.script) : []),
+        ],
+      });
+      await this.record(input.documentId, 'scene_write', again.usage);
+      const second = mend(again.value);
+      if (second.mended.length)
+        this.logger.log(
+          `${input.who}: mended: ${second.mended.slice(0, 8).join('; ')}`,
+        );
+      if (second.problems.length <= mended.problems.length) mended = second;
+    }
+    return mended;
   }
 
   /** Every drawing the storyboard needs, all at once; a null is one that could not be made. */
@@ -752,18 +826,18 @@ export class SceneProcessor {
               who,
             )
           : null;
-      // A person doing something on this page (in bed, holding a
-      // lantern, shaking): drawn so by the kit, from their figure, with
-      // the signs the page shows on them. The book's sheet otherwise.
+      // A person is drawn by the kit afresh on every page, from their
+      // figure: doing what the page has them do (in bed, holding a
+      // lantern, shaking), with the signs it shows on them, and with the
+      // kit's rig as it is now, so they act. Anyone else, the book's sheet.
       const signs = signsShown(script, thing.id);
-      const onPage =
-        sheet?.figure && (thing.pose || thing.holding || signs.length)
-          ? await figureDrawing(sheet.figure, thing.ref, {
-              pose: thing.pose,
-              holding: thing.holding,
-              signs,
-            })
-          : null;
+      const onPage = sheet?.figure
+        ? await figureDrawing(sheet.figure, thing.ref, {
+            pose: thing.pose,
+            holding: thing.holding,
+            signs,
+          })
+        : null;
       const { anchors: pageAnchors, ...posed } = onPage ?? { anchors: null };
       const drawing = onPage ? (posed as GatedDrawing) : sheet?.drawing;
       out.set(
@@ -771,10 +845,9 @@ export class SceneProcessor {
         sheet && drawing
           ? {
               ...drawing,
-              callouts: introCallouts(
-                pageAnchors ? { ...sheet, anchors: pageAnchors } : sheet,
-                thing.intro,
-              ),
+              // Nothing is set beside a story's people: what they are
+              // like is in how they move.
+              callouts: [],
               ...((pageAnchors ?? sheet.anchors).head
                 ? { head: (pageAnchors ?? sheet.anchors).head! }
                 : {}),
@@ -895,6 +968,8 @@ export class SceneProcessor {
     story: PageStory | null = null,
     /** Seconds of quiet before the first word, for an opening on the stage alone. */
     leadS = 0,
+    /** Whom the document is for: its pace and pauses. */
+    stage: LearningStage | null = null,
   ): Promise<{
     beats: TimedBeat[];
     durationMs: number;
@@ -903,7 +978,10 @@ export class SceneProcessor {
   }> {
     const forms = script.beats.map((beat) => spokenForm(beat.say, kept));
     // Each sentence at its own pace, with its own silence after it.
-    const delivered = deliveryPieces(script.beats);
+    const delivered = deliveryPieces(
+      script.beats,
+      stage ? STAGE_RECIPES[stage] : undefined,
+    );
     const pausesS = delivered.map((piece) => piece.pauseAfter);
     const spoken = sceneSpoken(forms);
     const { model } = this.speech.label();
@@ -917,23 +995,38 @@ export class SceneProcessor {
       : model.startsWith('kokoro')
         ? 'kokoro'
         : null;
-    const speakers = script.beats.map((beat, k) => {
-      if (!story) return null;
-      // Whom the sentence quotes, as the writer named them, or the "say" on it.
-      const said =
-        beat.speaker ??
-        script.steps
-          .filter((step) => step.at.beat === k)
-          .flatMap((step) => step.effects)
-          .find((effect) => effect.do === 'say')?.target;
-      const thing = script.cast.find((t) => t.id === said);
+    // Each line a character says, in their own voice: its place in the
+    // spoken text is its quote's, the i-th quote of the sentence there.
+    /** The voice a character in the cast speaks in: none for someone the story does not name. */
+    const voiceOf = (id: string) => {
+      const thing = script.cast.find((t) => t.id === id);
       const character =
-        thing?.kind === 'character'
+        story && thing?.kind === 'character'
           ? story.bible.characters.find((c) => c.id === thing.ref)
           : undefined;
-      return character
+      return story && character
         ? characterVoice(story.bible, character, engine, voice)
         : null;
+    };
+    const lines = script.beats.map((beat, k) => {
+      if (!story || !beat.lines?.length) return [];
+      // A screenplay's line is all theirs: the whole sentence in their voice.
+      if (beat.kind === 'line') {
+        const speaker = voiceOf(beat.lines[0].speaker);
+        return speaker
+          ? [{ span: [0, forms[k].text.length] as [number, number], speaker }]
+          : [];
+      }
+      const written = quotedSpans(beat.say);
+      const spoken = quotedSpans(forms[k].text);
+      if (written.length !== spoken.length) return [];
+      return beat.lines.flatMap((line) => {
+        const at = written.findIndex(
+          ([a, b]) => a === line.span[0] && b === line.span[1],
+        );
+        const speaker = voiceOf(line.speaker);
+        return at >= 0 && speaker ? [{ span: spoken[at], speaker }] : [];
+      });
     });
     const pieces = voicedPieces({
       texts: forms.map((form) => form.text),
@@ -942,7 +1035,7 @@ export class SceneProcessor {
       styles: script.beats.map((beat) =>
         voiceStyle(script.mood, beat.delivery),
       ),
-      speakers,
+      lines,
     });
     const result = await this.speech.synthesize({
       text: spoken.text,
@@ -1602,11 +1695,15 @@ export class SceneProcessor {
     contentVersion: number,
   ): Promise<DocumentProfile> {
     const key = profileKey(documentId, contentVersion);
+    let kept: DocumentProfile | null = null;
     try {
-      const kept = JSON.parse(
-        (await this.storage.get(key)).toString('utf8'),
-      ) as Parameters<typeof profileOf>[0];
-      return profileOf(kept);
+      kept = profileOf(
+        JSON.parse(
+          (await this.storage.get(key)).toString('utf8'),
+        ) as Parameters<typeof profileOf>[0],
+      );
+      // Made before stages were asked about: read once more for its stage.
+      if ('stage' in kept) return kept;
     } catch {
       // Not made yet.
     }
@@ -1620,7 +1717,27 @@ export class SceneProcessor {
         sample,
       });
       await this.record(documentId, 'scene_profile', made.usage);
-      const profile = profileOf(made.value);
+      // The level the document names in its own words wins over a
+      // reading that says otherwise; an unsure reading is no stage.
+      const settled = settleStage(
+        {
+          stage: made.value.stage ?? null,
+          sure: surenessOf(made.value.stageSure),
+          why: made.value.stageWhy ?? '',
+        },
+        levelIn(
+          [doc?.props.title ?? '', ...topics.map((t) => t.title), sample].join(
+            '\n',
+          ),
+        ),
+      );
+      const read = profileOf(made.value);
+      // A profile kept before keeps all it said; only its stage is new.
+      const profile: DocumentProfile = {
+        ...(kept ?? read),
+        stage: settled.stage,
+        stageWhy: settled.why.slice(0, 200),
+      };
       await this.storage.put({
         key,
         body: Buffer.from(JSON.stringify(profile)),
@@ -1629,6 +1746,8 @@ export class SceneProcessor {
       this.logger.log(`${documentId}: ${describeProfile(profile)}`);
       return profile;
     } catch (error) {
+      // A profile kept before stages stands as it was.
+      if (kept) return kept;
       this.logger.warn(
         `${documentId}: no profile, taught as an explainer: ${(error as Error).message}`,
       );

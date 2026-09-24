@@ -458,9 +458,131 @@ describe('a story told with its own characters', () => {
     );
   });
 
+  it("finds who says each line in the words, with the writer's marks only a hint", () => {
+    const talk = story();
+    talk.beats = [
+      {
+        say: 'Mira stands at the end of the quay.',
+        pause: 'short',
+        delivery: 'hook',
+      },
+      {
+        say: '"Who goes there?" asks Mira.',
+        pause: 'short',
+        delivery: 'explain',
+      },
+      {
+        say: 'The fox grins. "A friend," he says.',
+        pause: 'short',
+        delivery: 'explain',
+      },
+      {
+        say: '"Foxes don\'t talk," Mira whispers.',
+        pause: 'long',
+        delivery: 'key',
+      },
+    ];
+    talk.steps = [
+      step(0, 'Mira stands', { layout: 'row', show: ['girl', 'fox'] }),
+      step(2, 'The fox grins', { effects: [{ target: 'fox', do: 'say' }] }),
+      step(3, 'Mira whispers', {
+        effects: [{ target: 'girl.surprised', do: 'show' }],
+      }),
+    ];
+    const { script } = mendScript(talk, { characters });
+    expect(script.beats.map((beat) => beat.lines ?? [])).toEqual([
+      [],
+      [{ span: [1, 16], speaker: 'girl' }],
+      [{ span: [16, 25], speaker: 'fox' }],
+      [{ span: [1, 18], speaker: 'girl' }],
+    ]);
+    expect(script.beats.map((beat) => beat.speaker)).toEqual([
+      undefined,
+      'girl',
+      'fox',
+      'girl',
+    ]);
+    // A "say" was only a hint: bubbles come from the lines, so the step with
+    // nothing else on it is gone, and no "say" is left on the stage.
+    expect(script.steps).toHaveLength(2);
+    expect(
+      script.steps.flatMap((step) => step.effects).map((e) => e.do),
+    ).toEqual(['show']);
+  });
+
+  it('reads one character toward another as acting: a look, a reach, a hug, a point, the camera on two', () => {
+    const acted = story();
+    acted.steps = [
+      step(0, 'Mira stands', { layout: 'row', show: ['girl', 'fox', 'quay'] }),
+      step(1, 'A fox', {
+        effects: [
+          { target: 'girl.fox', do: 'look' },
+          { target: 'fox.Mira', do: 'reach' },
+          { target: 'girl.quay', do: 'point' },
+          { target: 'fox.girl', do: 'zoom' },
+          // A drawing does not act, and no one hugs who is not there.
+          { target: 'quay.girl', do: 'look' },
+          { target: 'girl.ghost', do: 'hug' },
+        ],
+      }),
+    ];
+    const { script, mended } = mendScript(acted, { characters });
+    expect(script.steps[1].effects).toEqual([
+      { target: 'girl', part: 'fox', do: 'look' },
+      { target: 'fox', part: 'girl', do: 'reach' },
+      { target: 'girl', part: 'quay', do: 'point' },
+      { target: 'fox', part: 'girl', do: 'zoom' },
+    ]);
+    expect(mended.join(' ')).toContain('look on quay, who is no one to act');
+    expect(mended.join(' ')).toContain(
+      'hug from girl toward "ghost", which is not on the stage',
+    );
+  });
+
   it('sets characters in type in a book that is no story', () => {
     const { script } = mendScript(story());
     expect(script.cast.some((t) => t.kind === 'character')).toBe(false);
+  });
+});
+
+describe("teaching to the learners' stage", () => {
+  it('keeps a child to two labels on a drawing, the rest parts the voice can still point at', () => {
+    const d = draft();
+    d.cast[0] = {
+      ...d.cast[0],
+      parts: ['stem', 'leaf', 'root', 'flower'].map((name) => ({
+        name,
+        label: true,
+      })),
+    };
+    const { script, mended } = mendScript(d, { stage: 'early' });
+    const leaf = script.cast[0];
+    expect(leaf.kind === 'drawing' && leaf.parts).toEqual([
+      { name: 'stem', label: true },
+      { name: 'leaf', label: true },
+      { name: 'root', label: false },
+      { name: 'flower', label: false },
+    ]);
+    expect(mended.join(' ')).toContain('"root" unlabelled, for these learners');
+    // For a university page all four keep their labels.
+    const higher = mendScript(d, { stage: 'higher' }).script.cast[0];
+    expect(
+      higher.kind === 'drawing' && higher.parts.every((p) => p.label),
+    ).toBe(true);
+  });
+
+  it('sends back a page far too long for a child, and lets a little over be', () => {
+    const long = draft();
+    long.beats = Array.from({ length: 16 }, (_, i) => ({
+      say: `Sentence ${i} tells the child one more small thing about the plant and its leaves today.`,
+      pause: 'short' as const,
+      delivery: 'explain' as const,
+    }));
+    const { problems } = mendScript(long, { stage: 'early' });
+    expect(problems.join(' ')).toContain('these learners take 80 to 150');
+    expect(problems.join(' ')).toContain('Split them');
+    // Taught as always when the stage is not known.
+    expect(mendScript(long).problems.join(' ')).not.toContain('these learners');
   });
 });
 
@@ -1087,5 +1209,242 @@ describe("a story's places, as the scene behind the stage", () => {
     // A place never takes a slot: the row holds Mira alone.
     expect(walks).toMatchObject({ show: ['mira'], backdrop: 'harbour' });
     expect(home).toMatchObject({ show: ['mira'], backdrop: 'home' });
+  });
+
+  it('keeps who is on the stage when a place is shown alone after them', () => {
+    const later = draft();
+    later.steps = [
+      step(0, 'The quay', { layout: 'row', show: ['mira'] }),
+      // The writer shows the place in a step of its own, after Mira.
+      step(1, 'Mira walks', { layout: 'one', show: ['harbour'] }),
+      step(2, 'she runs', { effects: [{ target: 'mira.happy', do: 'show' }] }),
+    ];
+    const { script, mended } = mendScript(later, { characters, places });
+    expect(script.steps[1].stage).toMatchObject({
+      show: ['mira'],
+      backdrop: 'harbour',
+    });
+    // So what happens to her later is still on the stage.
+    expect(script.steps[2].effects).toEqual([
+      { target: 'mira', part: 'happy', do: 'show' },
+    ]);
+    expect(mended.join(' ')).toContain(
+      'the place goes behind who is on the stage',
+    );
+  });
+});
+
+describe('who comes and goes, and what they do, as the narration says', () => {
+  const characters = [
+    { id: 'musa', name: 'Musa', aliases: [], voice: 'boy' as const },
+    { id: 'zainab', name: 'Zainab', aliases: [], voice: 'girl' as const },
+    { id: 'baba', name: 'Baba Sule', aliases: [], voice: 'old man' as const },
+  ];
+  const say = (text: string) => ({
+    say: text,
+    pause: 'short' as const,
+    delivery: 'explain' as const,
+  });
+  const page = (): SceneScriptDraft => ({
+    fit: 'good',
+    fitReason: null,
+    title: 'The lost goat',
+    mood: 'calm',
+    beats: [
+      say('Musa sat outside the shop.'),
+      say('Zainab ran up the path.'),
+      say('Musa put his arm around her.'),
+      say('Just then, Baba Sule came along the road.'),
+      say('Zainab hugged Baba Sule.'),
+      say('Baba Sule laughed and walked off down the road.'),
+      say('Musa and Zainab smiled at each other.'),
+    ],
+    cast: [
+      thing('musa', 'character', { ref: 'musa' }),
+      thing('zainab', 'character', { ref: 'zainab' }),
+      thing('baba', 'character', { ref: 'baba' }),
+    ],
+    steps: [
+      step(0, 'Musa sat', { layout: 'one', show: ['musa'] }),
+      step(1, 'Zainab ran up', { layout: 'row', show: ['musa', 'zainab'] }),
+      // The writer never brings Baba Sule on.
+      step(6, 'Musa and Zainab', { layout: 'row', show: ['musa', 'zainab'] }),
+    ],
+  });
+
+  it('walks someone on at the words that bring them, and off at the words that take them', () => {
+    const { script, mended } = mendScript(page(), { characters });
+    expect(
+      script.steps.map((s) => [s.at.beat, s.word, s.stage?.show ?? null]),
+    ).toEqual([
+      [0, 0, ['musa']],
+      // Zainab runs up where the writer brought her: left as it is.
+      [1, 0, ['musa', 'zainab']],
+      [3, 4, ['musa', 'zainab', 'baba']],
+      [5, 4, ['musa', 'zainab']],
+    ]);
+    expect(mended).toEqual(
+      expect.arrayContaining([
+        'baba comes at "came along the road.", as the words say',
+        'baba leaves at "walked off down the", as the words say',
+      ]),
+    );
+    // Marked, so they walk on and off rather than cut.
+    expect(script.steps[2].stage?.arrive).toEqual(['baba']);
+    expect(script.steps[3].stage?.leave).toEqual(['baba']);
+  });
+
+  it('keeps someone on who came, among the people the writer shows, until they go', () => {
+    const later = page();
+    later.beats[5] = say('Baba Sule laughed.');
+    later.steps[2] = step(6, 'Musa and Zainab', {
+      layout: 'row',
+      show: ['zainab', 'musa'],
+    });
+    const { script } = mendScript(later, { characters });
+    expect(script.steps[script.steps.length - 1].stage?.show).toEqual([
+      'zainab',
+      'musa',
+      'baba',
+    ]);
+  });
+
+  it('writes down what each sentence says they do', () => {
+    const { script } = mendScript(page(), { characters });
+    expect(script.beats.map((beat) => beat.acts ?? [])).toEqual([
+      [],
+      [],
+      // "her" is Zainab: the last girl mentioned.
+      [{ at: 5, who: 'musa', do: 'hug', toward: 'zainab' }],
+      [],
+      [{ at: 7, who: 'zainab', do: 'hug', toward: 'baba' }],
+      [{ at: 10, who: 'baba', do: 'laugh', toward: null }],
+      [],
+    ]);
+  });
+
+  it('shows whoever speaks, cut in where they were all along, unless they speak from elsewhere or have gone', () => {
+    const talk = page();
+    talk.beats = [
+      say('Musa sat outside the shop.'),
+      say('"Is that you, Zainab?" asks Musa.'),
+      say('"It is me," says Zainab.'),
+      say('"Come and eat," Baba Sule calls from the house.'),
+      say('Zainab waves and runs off down the road.'),
+      say('"See you tomorrow!" Zainab shouts.'),
+    ];
+    talk.steps = [step(0, 'Musa sat', { layout: 'one', show: ['musa'] })];
+    const { script, mended } = mendScript(talk, { characters });
+    expect(
+      script.steps.map((s) => [
+        s.at.beat,
+        s.word,
+        s.stage?.show,
+        s.stage?.cutIn,
+      ]),
+    ).toEqual([
+      [0, 0, ['musa'], undefined],
+      // Zainab answers: shown as she speaks.
+      [2, 0, ['musa', 'zainab'], ['zainab']],
+      // Baba Sule calls from the house: not shown. Zainab runs off, and
+      // shouts from off the stage.
+      [4, 3, ['musa'], undefined],
+    ]);
+    expect(mended).toEqual(
+      expect.arrayContaining([
+        'zainab is shown as they speak, at ""It is me," says"',
+      ]),
+    );
+  });
+
+  it('marks where the words bring someone on, when the writer brings them there', () => {
+    const { script } = mendScript(page(), { characters });
+    // "Zainab ran up the path": the writer's own step brings her; she arrives.
+    expect(script.steps[1].stage?.arrive).toEqual(['zainab']);
+    expect(script.steps[0].stage?.arrive).toBeUndefined();
+  });
+
+  it('gives a place the sound of how it looks, when the story gave it none', () => {
+    const { script } = mendScript(
+      {
+        ...page(),
+        cast: [...page().cast, thing('yard', 'place', { ref: 'yard' })],
+        steps: [step(0, 'Musa sat', { layout: 'one', show: ['yard', 'musa'] })],
+      },
+      {
+        characters,
+        places: [
+          {
+            id: 'yard',
+            name: 'the yard',
+            aliases: [],
+            sound: null,
+            look: 'a yard at night, a warm fire burning',
+          },
+        ],
+      },
+    );
+    expect(script.cast.find((t) => t.id === 'yard')).toMatchObject({
+      sound: 'fire',
+    });
+  });
+});
+
+describe("a story's characters kept in their own words", () => {
+  const characters = [
+    { id: 'ada', name: 'Ada', aliases: [], voice: 'girl' as const },
+    {
+      id: 'nana',
+      name: 'Nana Efua',
+      aliases: ['Nana'],
+      voice: 'old woman' as const,
+    },
+  ];
+  const material = [
+    '"Tell us a story, Nana," said Ada.',
+    'Nana Efua laughed. "Tonight I will tell you about the moon."',
+    '"The moon?" asked Ada.',
+  ].join('\n\n');
+  const page = (says: string[]): SceneScriptDraft => ({
+    fit: 'good',
+    fitReason: null,
+    title: 'By the fire',
+    mood: 'calm',
+    beats: says.map((say) => ({
+      say,
+      pause: 'short' as const,
+      delivery: 'explain' as const,
+    })),
+    cast: [
+      thing('ada', 'character', { ref: 'ada' }),
+      thing('nana', 'character', { ref: 'nana' }),
+    ],
+    steps: [step(0, 'Ada', { layout: 'row', show: ['ada', 'nana'] })],
+  });
+
+  it('sends back a page that tells what they say as reported speech', () => {
+    const { problems } = mendScript(
+      page([
+        'Ada asks Nana Efua for a story.',
+        'Nana Efua laughs and says, tonight I will tell you about the moon.',
+        'Ada asks in surprise, does the moon have a story too?',
+      ]),
+      { characters, material },
+    );
+    expect(problems.join(' ')).toContain(
+      'The story\'s characters speak on this page ("Tell us a story, Nana,"), but your sentences quote no one',
+    );
+  });
+
+  it('lets a page quote only the lines that matter', () => {
+    const { problems } = mendScript(
+      page([
+        'Ada wants a story.',
+        'Nana Efua laughs. "Tonight I will tell you about the moon."',
+        'Ada is surprised.',
+      ]),
+      { characters, material },
+    );
+    expect(problems).toEqual([]);
   });
 });

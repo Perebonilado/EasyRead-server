@@ -5,6 +5,13 @@
  * its chapters and a sample of its pages, and kept beside its videos.
  */
 import { SCENE_FORMATS, type SceneFormat } from './scene-script';
+import {
+  LEARNING_STAGES,
+  STAGE_NAMES,
+  STAGE_SURENESS,
+  type LearningStage,
+  type StageSureness,
+} from './scene-stage';
 
 export const PROFILE_KINDS = [
   'textbook',
@@ -29,6 +36,14 @@ export interface DocumentProfile {
   formats: SceneFormat[];
   /** Whether it tells a story whose characters come back page after page. */
   story: boolean;
+  /**
+   * Whom it is for: read from the document itself. Null when it could not
+   * be told, and its pages are taught as they always were; absent on a
+   * profile made before stages, which is read once more.
+   */
+  stage?: LearningStage | null;
+  /** The words that told its stage, for the record. */
+  stageWhy?: string;
 }
 
 /** What the model answers: the formats besides the explainer. */
@@ -38,6 +53,9 @@ export interface DocumentProfileDraft {
   tone: ProfileTone;
   formats: ('maths' | 'reading')[];
   story?: boolean;
+  stage?: LearningStage | null;
+  stageSure?: StageSureness;
+  stageWhy?: string;
 }
 
 /** A document nothing is known about yet: the explainer, as every page has had. */
@@ -72,7 +90,29 @@ export function profileOf(
       typeof draft.story === 'boolean'
         ? draft.story
         : kind === 'fiction' || kind === 'drama',
+    // A stage the reader was unsure of is no stage; one kept before stages
+    // were asked about stays absent, so it is asked.
+    ...('stage' in draft
+      ? {
+          stage:
+            LEARNING_STAGES.includes(draft.stage as LearningStage) &&
+            draft.stageSure !== 'unsure'
+              ? draft.stage
+              : null,
+          stageWhy: (draft.stageWhy ?? '')
+            .replace(/\s+/g, ' ')
+            .trim()
+            .slice(0, 200),
+        }
+      : {}),
   };
+}
+
+/** How sure the reader said it was, made sound: an unknown answer is unsure. */
+export function surenessOf(value: unknown): StageSureness {
+  return STAGE_SURENESS.includes(value as StageSureness)
+    ? (value as StageSureness)
+    : 'unsure';
 }
 
 /** The profile as the writer is told it: one line. */
@@ -84,7 +124,10 @@ export function describeProfile(profile: DocumentProfile): string {
   ]
     .filter(Boolean)
     .join(', ');
-  return `${book ? `This book: ${book}. ` : ''}Formats you may use on its pages: ${profile.formats.join(', ')}.`;
+  const reader = profile.stage
+    ? ` It is for ${STAGE_NAMES[profile.stage]}.`
+    : '';
+  return `${book ? `This book: ${book}.` : ''}${reader} Formats you may use on its pages: ${profile.formats.join(', ')}.`.trim();
 }
 
 /** Where a document's profile is kept: beside its videos, one for each content version. */

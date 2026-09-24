@@ -970,6 +970,10 @@ export type SceneThingDto =
       source?: 'math' | 'plot' | 'quote' | 'timeline' | 'chart';
       /** A story's place: the scene behind the stage, never in a slot. */
       backdrop?: true;
+      /** Drawn by the figure kit: it moves its eyes, face, head, arms and mouth as it acts. */
+      rig?: true;
+      /** Where its head is, as shares of its box across and down: where it looks from. */
+      head?: [number, number];
     }
   | { id: string; kind: 'stat'; value: string; caption: string }
   | {
@@ -1001,6 +1005,11 @@ export interface SceneStepDto {
   focus: string | null;
   /** The scene behind the stage: a place's drawing, by id; absent for none. */
   backdrop?: string;
+  /**
+   * The stage changes whole, a cut: who leaves fades out and who comes fades
+   * in, where people would otherwise walk. Absent on a change that is walked.
+   */
+  cut?: true;
 }
 
 export interface SceneEffectDto {
@@ -1011,12 +1020,69 @@ export interface SceneEffectDto {
   do: SceneEffectName;
   /** A pulse added only because nothing else happened for a while: seen, not heard. */
   filler?: boolean;
+  /** A shot of the camera on a story's page: held until then, then back to the whole stage. Absent, a zoom holds until the stage next changes. */
+  untilMs?: number;
   /**
    * A character speaking: their words, in a bubble at their head until
    * `untilMs`; their mouth moves until `saidUntilMs`, when the voice has
    * said the words (absent in older scenes).
    */
-  say?: { id: string; text: string; untilMs: number; saidUntilMs?: number };
+  say?: {
+    id: string;
+    text: string;
+    untilMs: number;
+    saidUntilMs?: number;
+    /** Its line goes on in the next bubble, across a change of stage: it does not close. */
+    carried?: true;
+    /** It carries on a line from the bubble before: it does not open. */
+    continues?: true;
+  };
+}
+
+/**
+ * A move someone makes as they act: a nod, a gesture with the right or
+ * left arm, brows up, a lean back, a reach, a point (at someone, or up at
+ * the sky), a hug, a wave, a shake of the head, a laugh, a hop for joy, a
+ * clap, a sob, a shrug.
+ */
+export type SceneActingMove =
+  | 'nod'
+  | 'gesture'
+  | 'gesture-left'
+  | 'brows'
+  | 'lean'
+  | 'reach'
+  | 'point'
+  | 'point-up'
+  | 'hug'
+  | 'wave'
+  | 'shake'
+  | 'laugh'
+  | 'hop'
+  | 'clap'
+  | 'sob'
+  | 'shrug'
+  | 'lean-in';
+
+/**
+ * How someone acts on a page: planned by the server from who says what
+ * and when, played by the stage on the voice's clock.
+ */
+export interface SceneActingDto {
+  /**
+   * Where they look from each moment on: another thing's id, or null for
+   * the viewer, or "@up" or "@down" (the sky, the ground); and how far
+   * their face turns toward it, 0 to 1.
+   */
+  look?: [number, string | null, number][];
+  /** Their mouth as they speak: each line's first word, and its shapes at 30 a second, one digit each, 0 to 5. */
+  mouth?: [number, string][];
+  /** Moves: when, which, how long, and toward whom. */
+  moves?: [number, SceneActingMove, number, string?][];
+  /** They walk on, off and between places, rather than pop or slide. */
+  walks?: true;
+  /** How big their moves are, from what they are like: a shy one's smaller, a bold one's bigger; absent, as drawn. */
+  size?: number;
 }
 
 /** A speech bubble as the stage sets it: its box, its words, and the point its tail reaches toward. */
@@ -1028,6 +1094,11 @@ export interface SceneBubbleDto {
   lines: string[];
   size: number;
   tail: [number, number];
+  /**
+   * A line with no room by its speaker's head, set in a strip across the
+   * top of the stage instead: who says it, written before the words.
+   */
+  who?: string;
 }
 
 /** Where a thing stands at one step, in the staging's design units. */
@@ -1076,6 +1147,8 @@ export interface SceneDto {
   title: string;
   durationMs: number;
   timing: SceneTiming;
+  /** Whom the document is taught for, read from it; absent when it could not be told, or on an older page. */
+  stage?: 'early' | 'middle' | 'higher' | 'professional';
   /**
    * One per spoken sentence; one word entry per whitespace word of `text`:
    * [charStart, charEnd, startMs, endMs]. `delivery` when it is not plain
@@ -1087,6 +1160,8 @@ export interface SceneDto {
     endMs: number;
     words: number[][];
     delivery?: 'hook' | 'key' | 'aside' | 'question' | 'recap';
+    /** On a story's page, a line a character says: who says it, for the caption. */
+    who?: string;
   }[];
   things: SceneThingDto[];
   steps: SceneStepDto[];
@@ -1103,6 +1178,8 @@ export interface SceneDto {
     palette?: SceneMusicPalette;
     motif?: true;
   };
+  /** How each character acts, by id; absent on a page no one acts on, or an older one. */
+  acting?: Record<string, SceneActingDto>;
   /** The same steps placed for the pane's box and the full screen's wide stage. */
   stagings: Record<
     'box' | 'wide',

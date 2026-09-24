@@ -784,6 +784,46 @@ export function bubbleLines(
 }
 
 /**
+ * A line with no room by its speaker's head, in a strip across the top
+ * of the stage: who says it, then the words, and a short tail toward
+ * them. It is always shown: a line is never lost for want of room.
+ */
+export function placeStrip(input: {
+  text: string;
+  /** Who says it, as the page names them. */
+  who: string;
+  /** Their head on the stage, when they are on it. */
+  head: Point | null;
+  stage: { w: number; h: number };
+}): BubblePlace & { who: string } {
+  const margin = 12;
+  const width = Math.min(input.stage.w - margin * 2, 900);
+  const set = bubbleLines(
+    `${input.who}: ${input.text}`,
+    width - BUBBLE.padX * 2,
+  );
+  const w =
+    Math.max(...set.lines.map((l) => measureText(l, set.size, 600))) +
+    BUBBLE.padX * 2;
+  const h = set.lines.length * set.size * LABEL.line + BUBBLE.padY * 2;
+  const x = (input.stage.w - w) / 2;
+  const y = margin;
+  const tipX = input.head
+    ? Math.min(x + w - 30, Math.max(x + 30, input.head[0]))
+    : x + w / 2;
+  return {
+    x: round(x),
+    y: round(y),
+    w: round(w),
+    h: round(h),
+    lines: set.lines,
+    size: set.size,
+    tail: [round(tipX), round(y + h + 16)],
+    who: input.who,
+  };
+}
+
+/**
  * A character's words in a bubble by their head: up and to one side of
  * it, or beside them level with it, or over them, whichever comes first
  * clear of every word, ink and arrow on the stage and inside it; failing
@@ -797,8 +837,13 @@ export function placeBubble(input: {
   body: Rect;
   stage: { w: number; h: number };
   avoid: { boxes: Rect[]; segments: Segment[] };
+  /** Narrower than the usual, for a second try in a crowded step. */
+  width?: number;
 }): BubblePlace | null {
-  const set = bubbleLines(input.text, BUBBLE.width - BUBBLE.padX * 2);
+  const set = bubbleLines(
+    input.text,
+    (input.width ?? BUBBLE.width) - BUBBLE.padX * 2,
+  );
   const w =
     Math.max(...set.lines.map((l) => measureText(l, set.size, 600))) +
     BUBBLE.padX * 2;

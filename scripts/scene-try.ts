@@ -5,6 +5,7 @@
  *
  *   npm run scene:try -- <page.md> [--title "..."] [--formats maths,reading] [--out <dir>]
  *   npm run scene:try -- <story.md> --story [--page 2] [--title "..."]
+ *   npm run scene:try -- <page.md> --stage early|middle|higher|professional
  *
  * The page is written, drawn, voiced and put together exactly as a
  * document's page is, by the worker's own processor, and its scene.json,
@@ -27,6 +28,7 @@ import { CoreModule } from '../src/core.module';
 import {
   describeProfile,
   profileOf,
+  type DocumentProfile,
 } from '../src/business/domain/scene-profile';
 import { SCENE_GENERATOR_VERSION } from '../src/business/domain/scene-script';
 import { bibleOf, type StoryBible } from '../src/business/domain/scene-story';
@@ -81,7 +83,9 @@ async function main(): Promise<void> {
     const storage = app.get<StoragePort>(STORAGE);
     const llm = app.get<LlmGatewayPort>(LLM_GATEWAY);
     const given = option('--formats');
-    const profile = isStory
+    // Whom the page is taught for, when it is to be tried at a stage.
+    const stage = option('--stage') as DocumentProfile['stage'] | undefined;
+    const read = isStory
       ? profileOf({
           subject: title,
           kind: 'fiction',
@@ -107,6 +111,7 @@ async function main(): Promise<void> {
               })
             ).value,
           );
+    const profile: DocumentProfile = stage ? { ...read, stage } : read;
     console.log(describeProfile(profile));
     // The story read once, and kept for its other pages.
     let bible: StoryBible | null = null;

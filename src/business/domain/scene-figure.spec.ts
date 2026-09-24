@@ -155,13 +155,14 @@ describe('a person drawn by the kit', () => {
       top: 'uniform',
       extras: ['stethoscope', 'backpack'],
     });
-    expect(drawFigure(heavy).svg.length).toBeLessThan(12_000);
+    // The rig (its CSS, the mouth's shapes, the eye clip) is about 4 KB of it.
+    expect(drawFigure(heavy).svg.length).toBeLessThan(16_000);
     // A sign adds what it draws, and only the signs the page shows are drawn.
     expect(
       drawFigure(heavy, 'x', {
         signs: ['shaking', 'tingling hands', 'tingling feet'],
       }).svg.length,
-    ).toBeLessThan(16_000);
+    ).toBeLessThan(20_000);
   });
 
   it('frames every age alike: the same width, the head as tall, the ground at 0', () => {

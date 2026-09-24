@@ -694,11 +694,19 @@ function faceOf(name: Expression, R: Rig, skin: string): string {
   const f = FACES[name];
   const { y, dx, rx, ry } = R.eyes;
   const out: string[] = [];
+  // The pupils together, so the eyes can look where the stage says, kept
+  // inside the eyes' whites wherever they look; the lids over them.
+  out.push(
+    `<g clip-path="url(#eyes)"><g class="pupils">${[-1, 1]
+      .map(
+        (side) =>
+          `<circle cx="${r1(side * dx + f.look[0])}" cy="${r1(y + f.look[1])}" r="${f.pupil}" ${flat(FIGURE_INK)}/>`,
+      )
+      .join('')}</g></g>`,
+  );
+  const brows: string[] = [];
   for (const side of [-1, 1]) {
     const ex = side * dx;
-    out.push(
-      `<circle cx="${r1(ex + f.look[0])}" cy="${r1(y + f.look[1])}" r="${f.pupil}" ${flat(FIGURE_INK)}/>`,
-    );
     if (f.lower !== undefined)
       out.push(
         `<path d="${chord(ex, y, rx, ry, f.lower, 0, 'bottom')}" ${inked(skin)}/>`,
@@ -709,24 +717,44 @@ function faceOf(name: Expression, R: Rig, skin: string): string {
       out.push(
         `<path d="${chord(ex, y, rx, ry, lid[0], side === -1 ? lid[1] : -lid[1])}" ${inked(skin)}/>`,
       );
-    const brows = side === 1 && f.browRight ? f.browRight : f.brows;
-    if (brows) {
+    const brow = side === 1 && f.browRight ? f.browRight : f.brows;
+    if (brow) {
       // The outer end, then the inner: the left eye's outer end is on the left.
       const by = y - ry - 5;
-      out.push(
+      brows.push(
         line(
-          `M${pt(ex + side * 11, by + brows[0])} L${pt(ex - side * 8, by + brows[1])}`,
+          `M${pt(ex + side * 11, by + brow[0])} L${pt(ex - side * 8, by + brow[1])}`,
           FIGURE_INK,
           3.4,
         ),
       );
     }
   }
+  if (brows.length) out.push(`<g class="brows">${brows.join('')}</g>`);
   out.push(
     `<g class="mouth">${mouthShape(f.mouth, R.mouthY)}</g>`,
     `<g class="talk" opacity="0">${mouthShape(f.talk, R.mouthY)}</g>`,
   );
   return out.join('');
+}
+
+/**
+ * The mouth's shapes as someone speaks, drawn once for every face: shut
+ * (m, b, p), a little open, open (ah), wide (ee), round (oo) and the top
+ * teeth on the lip (f, v). The stage shows the one the voice is on.
+ */
+export const MOUTH_SHAPES = 6;
+function mouthsOf(R: Rig): string {
+  const my = R.mouthY;
+  const shapes = [
+    line(`M-9,${my} Q0,${my + 2} 9,${my}`, FIGURE_INK, 3),
+    `<ellipse cx="0" cy="${my + 1}" rx="7" ry="3.6" ${inked(MOUTH)}/>`,
+    `<ellipse cx="0" cy="${my + 2}" rx="9" ry="8" ${inked(MOUTH)}/><ellipse cx="0" cy="${my + 6.5}" rx="5" ry="2.6" ${flat('#d4777a')}/>`,
+    `<rect x="-12" y="${my - 3}" width="24" height="9" rx="4.5" ${inked(MOUTH)}/><rect x="-9" y="${my - 2}" width="18" height="3" rx="1" ${flat('#ffffff')}/>`,
+    `<ellipse cx="0" cy="${my + 1.5}" rx="5.5" ry="7" ${inked(MOUTH)}/>`,
+    `<rect x="-10" y="${my - 2}" width="20" height="7" rx="3.5" ${inked(MOUTH)}/><rect x="-7.5" y="${my - 2}" width="15" height="3.4" rx="1" ${flat('#ffffff')}/>`,
+  ];
+  return shapes.map((shape, k) => `<g class="vm v${k}">${shape}</g>`).join('');
 }
 
 /** Closed eyes, shown for a moment every few seconds; at a head's middle other than the rig's, for someone asleep in a pose. */
@@ -812,6 +840,9 @@ function shake(x: number, y: number, dir: number): string {
     .join('');
 }
 
+/** What sits on the face: it turns, tilts and nods with it (the rig's `.fm`). */
+const fm = (markup: string) => `<g class="fm">${markup}</g>`;
+
 /** Each sign's drawing: what sits on the body, and what floats over the head, upright however the body lies. */
 interface Signs {
   body: Record<FigureSign, string>;
@@ -847,6 +878,8 @@ function signsOf(p: SignPoints, R: Rig, skin: string): Signs {
       )
       .join('');
   const outward = (x: number) => (x < 0 ? -1 : 1);
+  const dot = (x: number, y: number) =>
+    `<circle cx="${r1(x)}" cy="${r1(y)}" r="2.3" ${flat('#d94b4b')}/>`;
   const question = (x: number, y: number, delay: number) =>
     `<g class="tw"${later(delay)}>${line(`M${pt(x - 5, y - 7)} Q${pt(x - 5, y - 14)} ${pt(x + 1, y - 14)} Q${pt(x + 7, y - 14)} ${pt(x + 7, y - 8)} Q${pt(x + 7, y - 3)} ${pt(x + 1, y - 1)} L${pt(x + 1, y + 3)}`, FIGURE_INK, 3.2)}<circle cx="${r1(x + 1)}" cy="${r1(y + 9)}" r="2.2" ${flat(FIGURE_INK)}/></g>`;
   const spiral = (x: number) => {
@@ -872,9 +905,9 @@ function signsOf(p: SignPoints, R: Rig, skin: string): Signs {
         ),
       )
       .join(''),
-    dizzy: eyes.map(spiral).join(''),
+    dizzy: fm(eyes.map(spiral).join('')),
     coughing: puffs(1.2),
-    sleeping: blinkOf(R, skin, hx, hy),
+    sleeping: fm(blinkOf(R, skin, hx, hy)),
     breathless: puffs(0.8),
     walking: '',
     jumping: '',
@@ -902,45 +935,48 @@ function signsOf(p: SignPoints, R: Rig, skin: string): Signs {
     headache: '',
     'chest pain': burst(p.chest[0] - 6, p.chest[1], 14),
     'stomach ache': burst(p.belly[0] - 4, p.belly[1] + 6, 14),
-    fever: eyes
-      .map(
-        (x) =>
-          `<ellipse cx="${r1(x + (x < hx ? -14 : 14))}" cy="${r1(hy + 17)}" rx="8" ry="5" fill="#e8574d" fill-opacity="0.45" stroke="none"/>`,
-      )
-      .join(''),
+    fever: fm(
+      eyes
+        .map(
+          (x) =>
+            `<ellipse cx="${r1(x + (x < hx ? -14 : 14))}" cy="${r1(hy + 17)}" rx="8" ry="5" fill="#e8574d" fill-opacity="0.45" stroke="none"/>`,
+        )
+        .join(''),
+    ),
     sweating: '',
-    tears: eyes
-      .map(
-        (x, k) =>
-          line(
-            `M${pt(x + (k ? 4 : -4), ey + 13)} Q${pt(x + (k ? 9 : -9), hy + 22)} ${pt(x + (k ? 8 : -8), hy + 36)}`,
-            TEAR,
-            4.5,
-          ) + drop(x + (k ? 8 : -8), hy + 40, k * 0.5),
-      )
-      .join(''),
-    rash: [
-      ...[
-        [-30, 12],
-        [-24, 20],
-        [-34, 22],
-        [28, 13],
-        [34, 21],
-        [24, 22],
-        [-8, -22],
-        [10, -20],
-      ].map(([x, y]) => [hx + x, hy + y]),
-      ...p.hands.flatMap(([x, y]) => [
-        [x - 4, y - 2],
-        [x + 3, y + 3],
-      ]),
-    ]
-      .map(
-        ([x, y]) =>
-          `<circle cx="${r1(x)}" cy="${r1(y)}" r="2.3" ${flat('#d94b4b')}/>`,
-      )
-      .join(''),
-    nausea: `<ellipse cx="${hx}" cy="${r1(hy + 8)}" rx="39" ry="30" fill="#7bbf52" fill-opacity="0.38" stroke="none"/>`,
+    tears: fm(
+      eyes
+        .map(
+          (x, k) =>
+            line(
+              `M${pt(x + (k ? 4 : -4), ey + 13)} Q${pt(x + (k ? 9 : -9), hy + 22)} ${pt(x + (k ? 8 : -8), hy + 36)}`,
+              TEAR,
+              4.5,
+            ) + drop(x + (k ? 8 : -8), hy + 40, k * 0.5),
+        )
+        .join(''),
+    ),
+    rash:
+      fm(
+        [
+          [-30, 12],
+          [-24, 20],
+          [-34, 22],
+          [28, 13],
+          [34, 21],
+          [24, 22],
+          [-8, -22],
+          [10, -20],
+        ]
+          .map(([x, y]) => dot(hx + x, hy + y))
+          .join(''),
+      ) +
+      p.hands
+        .flatMap(([x, y]) => [dot(x - 4, y - 2), dot(x + 3, y + 3)])
+        .join(''),
+    nausea: fm(
+      `<ellipse cx="${hx}" cy="${r1(hy + 8)}" rx="39" ry="30" fill="#7bbf52" fill-opacity="0.38" stroke="none"/>`,
+    ),
     confused: '',
     idea: '',
   };
@@ -1005,17 +1041,22 @@ function painFace(R: Rig, skin: string): string {
           `M${pt(ex - d * 8, y - 7)} L${pt(ex + d * 6, y)} L${pt(ex - d * 8, y + 7)}`,
           FIGURE_INK,
           3.4,
-        ) +
-        line(
-          `M${pt(ex + side * 11, y - ry - 2)} L${pt(ex - side * 8, y - ry - 9)}`,
-          FIGURE_INK,
-          3.4,
         )
       );
     })
     .join('');
+  const brows = [-1, 1]
+    .map((side) =>
+      line(
+        `M${pt(side * dx + side * 11, y - ry - 2)} L${pt(side * dx - side * 8, y - ry - 9)}`,
+        FIGURE_INK,
+        3.4,
+      ),
+    )
+    .join('');
   return (
     eyes +
+    `<g class="brows">${brows}</g>` +
     `<g class="mouth"><rect x="-14" y="${my - 4}" width="28" height="10" rx="3" ${inked('#ffffff')}/>${line(`M-14,${my + 1} L14,${my + 1}`, FIGURE_INK, 1.8)}</g>` +
     `<g class="talk" opacity="0"><rect x="-12" y="${my - 5}" width="24" height="14" rx="4" ${inked(MOUTH)}/><rect x="-9" y="${my - 3.6}" width="18" height="4" rx="1" ${flat('#ffffff')}/></g>`
   );
@@ -1737,9 +1778,13 @@ interface Layers {
   /** An arm that reaches the face, drawn in front of it: a hand on the head, over the mouth. */
   reach: string;
   head: string;
+  /** The eyes' whites, under every face. */
+  eyes: string;
   faces: Record<Expression, string>;
   /** The kit's own faces. */
   more: Record<KitFace, string>;
+  /** The mouth's shapes while speaking, shared by every face. */
+  mouths: string;
   signs: Record<FigureSign, string>;
   blink: string;
   over: string;
@@ -1927,51 +1972,59 @@ function layersOf(
     const { at: H, elbow, front } = plans.get(s)!;
     hands.push(H);
     const into = front ? reach : arms;
-    const start = into.length;
-    const { stretch } = alongOf(elbow ? [S, elbow, H] : [S, H]);
+    // The elbow: where a bent arm bends, else halfway down a straight one.
+    const E: Point2 = elbow ?? [r1((S[0] + H[0]) / 2), r1((S[1] + H[1]) / 2)];
+    const { stretch } = alongOf([S, E, H]);
+    const upperLength = Math.hypot(E[0] - S[0], E[1] - S[1]);
+    const u =
+      upperLength / (upperLength + Math.hypot(H[0] - E[0], H[1] - E[1]) || 1);
     if (s === stick) {
       const d = `M${pt(H[0] + s * 2, H[1] - 6)} L${pt(H[0] + s * 7, -3)}`;
       arms.push(line(d, FIGURE_INK, 7), line(d, WOOD, 4));
     }
     const w = dressed.sleeves === 'wide' ? width + 5 : width;
-    into.push(line(stretch(0, 1), FIGURE_INK, w + LINE * 2));
-    into.push(
-      line(
-        stretch(0, 1),
-        dressed.sleeves === 'short' ? skin : dressed.sleeve,
-        w,
-      ),
-    );
-    if (dressed.sleeves === 'short')
-      into.push(line(stretch(0, 0.42), dressed.sleeve, w));
+    const colour = dressed.sleeves === 'short' ? skin : dressed.sleeve;
+    // The forearm, from the elbow: its sleeve, a jumper's cuff, what the
+    // hand holds under the hand, the hand, a pointing finger.
+    const fore: string[] = [
+      line(stretch(u, 1), FIGURE_INK, w + LINE * 2),
+      line(stretch(u, 1), colour, w),
+    ];
     if (spec.top === 'jumper')
-      into.push(line(stretch(0.8, 0.9), shade(dressed.sleeve), w));
-    // What the hand holds, under the hand that holds it.
+      fore.push(line(stretch(Math.max(0.8, u), 0.9), shade(dressed.sleeve), w));
     if (holding && s === holds) {
       const prop = propOf(holding, CLOTH[spec.accentColour], R.top - H[1]);
-      into.push(
+      fore.push(
         `<g transform="translate(${r1(H[0])} ${r1(H[1])})${s < 0 ? ' scale(-1 1)' : ''}">${prop.markup}</g>`,
       );
       if (s > 0) beyond.right = Math.max(beyond.right, H[0] + prop.out + 3);
       else beyond.left = Math.max(beyond.left, -H[0] + prop.out + 3);
       beyond.top = Math.min(beyond.top, H[1] + prop.top - 3);
     }
-    into.push(
+    fore.push(
       `<circle cx="${r1(H[0])}" cy="${r1(H[1])}" r="8.5" ${inked(skin)}/>`,
     );
-    // A pointing finger; a wave from the shoulder.
     if (pose === 'pointing' && s === 1) {
-      into.push(
+      fore.push(
         `<rect x="${r1(H[0] + 4)}" y="${r1(H[1] - 3.5)}" width="13" height="7" rx="3.5" ${inked(skin)}/>`,
       );
       beyond.right = Math.max(beyond.right, H[0] + 20);
     }
+    // The upper arm: its outline under everything, its colour over the
+    // elbow, so the joint shows no seam however the forearm turns.
+    const upper = [line(stretch(0, u), colour, w)];
+    if (dressed.sleeves === 'short')
+      upper.push(line(stretch(0, Math.min(0.42, u)), dressed.sleeve, w));
+    let arm = `${line(stretch(0, u), FIGURE_INK, w + LINE * 2)}<g class="fore" style="transform-origin:${r1(E[0])}px ${r1(E[1])}px">${fore.join('')}</g>${upper.join('')}`;
+    // A wave, from the shoulder.
     if (pose === 'waving' && s === 1) {
-      into.splice(start, 0, '<g class="wave">');
-      into.push('</g>');
+      arm = `<g class="wave">${arm}</g>`;
       // The hand swings out as it waves.
       beyond.right = Math.max(beyond.right, H[0] + 22);
     }
+    into.push(
+      `<g class="arm ${s > 0 ? 'ar' : 'al'}" style="transform-origin:${r1(S[0])}px ${r1(S[1])}px">${arm}</g>`,
+    );
   }
 
   // The head: the face's ground, then hair and hats. A headscarf wraps it
@@ -2012,11 +2065,13 @@ function layersOf(
       `<path d="${chord(0, cy + 3, 47, 44, 0.3, 0, 'bottom')}" ${inked(hairColour)}/>`,
     );
   head.push(hairOver(spec, R), headwearOf(spec, R));
-  // The eyes' whites, the same under every face.
-  for (const side of [-1, 1])
-    head.push(
-      `<ellipse cx="${side * R.eyes.dx}" cy="${R.eyes.y}" rx="${R.eyes.rx}" ry="${R.eyes.ry}" ${inked('#ffffff')}/>`,
-    );
+  // The eyes' whites, the same under every face: they turn with it.
+  const whites = [-1, 1]
+    .map(
+      (side) =>
+        `<ellipse cx="${side * R.eyes.dx}" cy="${R.eyes.y}" rx="${R.eyes.rx}" ry="${R.eyes.ry}" ${inked('#ffffff')}/>`,
+    )
+    .join('');
 
   // Over the face: a moustache over the mouth, glasses over the eyes.
   const over: string[] = [];
@@ -2059,15 +2114,17 @@ function layersOf(
   return {
     R,
     legs: legs.join(''),
-    behind: packOf(spec, R) + hairBehind(spec, R),
+    behind: `${packOf(spec, R)}<g class="hd">${hairBehind(spec, R)}</g>`,
     body,
     arms: arms.join(''),
     reach: reach.join(''),
-    head: head.join(''),
+    head: `<g class="hd">${head.join('')}</g>`,
+    eyes: fm(whites),
     faces: Object.fromEntries(
-      FACE_NAMES.map((name) => [name, faceOf(name, R, skin)]),
+      FACE_NAMES.map((name) => [name, fm(faceOf(name, R, skin))]),
     ) as Record<Expression, string>,
-    more: { pain: painFace(R, skin) },
+    more: { pain: fm(painFace(R, skin)) },
+    mouths: fm(mouthsOf(R)),
     // Lying down, what floats over the head is turned back upright
     // about it, so steam rises and a question mark reads.
     signs: lying
@@ -2081,8 +2138,8 @@ function layersOf(
           ]),
         ) as Record<FigureSign, string>)
       : upright(signs),
-    blink: blinkOf(R, skin),
-    over: over.join(''),
+    blink: fm(blinkOf(R, skin)),
+    over: over.length ? fm(over.join('')) : '',
     beyond: {
       left: r1(beyond.left - FIGURE_FRAME.halfWidth),
       right: r1(beyond.right - FIGURE_FRAME.halfWidth),
@@ -2216,6 +2273,8 @@ function styleOf(
   blinks: number[],
   signs: readonly FigureSign[],
   waves = false,
+  /** Where the head turns about: the neck, in the kit's units. */
+  neck = 0,
 ): string {
   const moving = MOVES.filter(([, of]) =>
     of.some((one) => signs.includes(one)),
@@ -2247,7 +2306,51 @@ function styleOf(
       ? '.whole{transform-box:view-box;transform-origin:0 0}'
       : '',
     ...signs.map((one) => ACTS[one] ?? ''),
+    // Anyone may walk on and off, whatever their signs.
+    signs.includes('walking') ? '' : (ACTS.walking ?? ''),
+    rigStyle(neck),
   ].join('');
+}
+
+/**
+ * How the stage moves a figure as it acts: CSS variables on its <svg>,
+ * set each frame, and classes for the mouth's shape. At 0 every one, the
+ * figure stands exactly as drawn.
+ *
+ * --gx, --gy: where the pupils look, in the kit's units. --turn, -1 to 1:
+ * the face turned toward one side. --tilt, --nod: the head tilted (in
+ * degrees) and nodded (in units), about the neck. --brow: the brows
+ * raised. --ar, --arf, --al, --alf: the right and left arm about the
+ * shoulder, and the forearm about the elbow, in degrees. --lean and
+ * --flip: the whole figure leant about its feet, and mirrored.
+ */
+function rigStyle(neck: number): string {
+  const head = `transform-box:view-box;transform-origin:0 ${r1(neck)}px`;
+  const nodTilt =
+    'translateY(calc(var(--nod,0)*1px)) rotate(calc(var(--tilt,0)*1deg))';
+  return [
+    '.pupils{transform:translate(calc(var(--gx,0)*1px),calc(var(--gy,0)*1px))}',
+    '.brows{transform:translateY(calc(var(--brow,0)*-1px))}',
+    `.hd{${head};transform:${nodTilt}}`,
+    `.fm{${head};transform:${nodTilt} translateX(calc(var(--turn,0)*7px))}`,
+    '.arm,.fore{transform-box:view-box}',
+    '.ar{transform:rotate(calc(var(--ar,0)*1deg))}.ar .fore{transform:rotate(calc(var(--arf,0)*1deg))}',
+    '.al{transform:rotate(calc(var(--al,0)*1deg))}.al .fore{transform:rotate(calc(var(--alf,0)*1deg))}',
+    '.flip{transform-box:view-box;transform-origin:0 0;transform:scaleX(var(--flip,1)) rotate(calc(var(--lean,0)*1deg))}',
+    '.vm{opacity:0}.lipsync .mouth,.lipsync .talk{opacity:0}',
+    `${Array.from({ length: MOUTH_SHAPES }, (_, k) => `.lipsync.v${k} .v${k}`).join(',')}{opacity:1}`,
+  ].join('');
+}
+
+/** The eyes' whites as a clip: pupils never look out past them. */
+function eyeClip(R: Rig): string {
+  const { y, dx, rx, ry } = R.eyes;
+  return `<defs><clipPath id="eyes">${[-1, 1]
+    .map(
+      (side) =>
+        `<ellipse cx="${side * dx}" cy="${y}" rx="${rx - 1}" ry="${ry - 1}"/>`,
+    )
+    .join('')}</clipPath></defs>`;
 }
 
 /** Every state a figure has, by name to the id of its group: the faces, the kit's faces, and the signs drawn. */
@@ -2371,19 +2474,21 @@ function drawInBed(
   ];
   const svg = [
     `<svg xmlns="http://www.w3.org/2000/svg" viewBox="${[fx, fy, fw, fh].join(' ')}">`,
-    `<style>${styleOf(r1(beatOf(key) * 4.6), [r1(0.3 + beatOf(key) * 2.4)], drawn)}</style>`,
+    `<style>${styleOf(r1(beatOf(key) * 4.6), [r1(0.3 + beatOf(key) * 2.4)], drawn, false, R.sY + 6)}</style>`,
+    eyeClip(R),
     `<ellipse cx="0" cy="0" rx="${w}" ry="8" fill="#1d1a22" fill-opacity="0.16"/>`,
     `<g stroke="${FIGURE_INK}" stroke-width="${LINE}" stroke-linejoin="round">`,
     `<g id="legs">${bed}</g>`,
     `<g class="whole"><g class="breathe">`,
     `<g id="behind">${moved(layers.behind)}</g>`,
     `<g id="body">${torso}${cover}</g>`,
-    `<g id="head">${moved(layers.head)}</g>`,
+    `<g id="head">${moved(layers.head + layers.eyes)}</g>`,
     `<g id="arms">${arms}</g>`,
     FACE_NAMES.map(
       (name) => `<g id="${name}">${moved(layers.faces[name])}</g>`,
     ).join(''),
     `<g id="pain">${moved(layers.more.pain)}</g>`,
+    `<g class="mouths">${moved(layers.mouths)}</g>`,
     drawn.map((name) => `<g id="${signId(name)}">${signs[name]}</g>`).join(''),
     `<g class="blink b0" opacity="0">${moved(layers.blink)}</g>`,
     `<g id="over">${moved(layers.over)}</g>`,
@@ -2483,6 +2588,7 @@ export function drawFigure(
     members.map((_, i) => blinkAt(i)),
     drawn,
     posed === 'waving',
+    R.sY + 6,
   );
   const person = [
     `<g id="legs">${all((l) => l.legs)}</g>`,
@@ -2490,11 +2596,12 @@ export function drawFigure(
     `<g id="behind">${all((l) => l.behind)}</g>`,
     `<g id="body">${all((l) => l.body)}</g>`,
     `<g id="arms">${all((l) => l.arms)}</g>`,
-    `<g id="head">${all((l) => l.head)}</g>`,
+    `<g id="head">${all((l) => l.head + l.eyes)}</g>`,
     FACE_NAMES.map(
       (name) => `<g id="${name}">${all((l) => l.faces[name])}</g>`,
     ).join(''),
     `<g id="pain">${all((l) => l.more.pain)}</g>`,
+    `<g class="mouths">${all((l) => l.mouths)}</g>`,
     `<g id="reach">${all((l) => l.reach)}</g>`,
     drawn
       .map((name) => `<g id="${signId(name)}">${all((l) => l.signs[name])}</g>`)
@@ -2510,6 +2617,7 @@ export function drawFigure(
   const svg = [
     `<svg xmlns="http://www.w3.org/2000/svg" viewBox="${viewBox.join(' ')}">`,
     `<style>${style}</style>`,
+    eyeClip(R),
     lying
       ? `<ellipse cx="0" cy="0" rx="${lies.x}" ry="8" fill="#1d1a22" fill-opacity="0.16"/>`
       : members
@@ -2521,7 +2629,7 @@ export function drawFigure(
     `<g stroke="${FIGURE_INK}" stroke-width="${LINE}" stroke-linejoin="round">`,
     lying
       ? `<g transform="translate(${lies.x} ${lies.y}) rotate(-90)"><g class="whole">${person}</g></g>`
-      : `<g class="whole">${person}</g>`,
+      : `<g class="flip"><g class="whole">${person}</g></g>`,
     `</g>`,
     `</svg>`,
   ].join('');

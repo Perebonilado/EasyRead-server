@@ -30,11 +30,30 @@ import {
   type FigureSign,
   type FigureSpec,
 } from './scene-figure';
+import { dialogueOf, quotedSpans } from './scene-dialogue';
+import {
+  directionsIn,
+  speakersIn,
+  type Actor,
+  type NarratedMove,
+  type Passage,
+} from './scene-directions';
+import {
+  STAGE_RECIPES,
+  type LearningStage,
+  type StageRecipe,
+} from './scene-stage';
 import { checkArithmetic, markTerms, type MathLine } from './scene-math';
 import { sample, type PlotSpec } from './scene-plot';
 import { findPhrase, isVerbatim } from './scene-quote';
 import { MAX_EVENTS, type TimelineSpec } from './scene-timeline';
-import { SHEET_PARTS, nameKey, type Expression } from './scene-story';
+import {
+  SHEET_PARTS,
+  nameKey,
+  soundIn,
+  type Expression,
+  type StoryVoice,
+} from './scene-story';
 
 /**
  * Rows are made per generator; a new generator is a new set of rows.
@@ -62,8 +81,30 @@ export const SCENE_EFFECTS = [
   'pulse',
   'zoom',
   'say',
+  'look',
+  'reach',
+  'hug',
 ] as const;
-export type SceneEffectKind = (typeof SCENE_EFFECTS)[number];
+/** What someone does toward someone else, directed by the writer on a story's page: "ada.kofi", Ada toward Kofi. */
+export const ACTING_EFFECTS = ['look', 'reach', 'hug'] as const;
+/**
+ * What a story's people do besides, played by the rig where a screenplay
+ * says: a wave, a nod, a shake of the head, a laugh, a hop, a clap, a sob,
+ * a shrug, a lean in toward someone.
+ */
+export const STORY_MOVES = [
+  'wave',
+  'nod',
+  'shake',
+  'laugh',
+  'hop',
+  'clap',
+  'sob',
+  'shrug',
+  'lean-in',
+] as const;
+export type StoryMove = (typeof STORY_MOVES)[number];
+export type SceneEffectKind = (typeof SCENE_EFFECTS)[number] | StoryMove;
 
 /**
  * How a sentence is said. The writer tags each one and code turns the tag
@@ -71,6 +112,16 @@ export type SceneEffectKind = (typeof SCENE_EFFECTS)[number];
  * point slower with room after it, time to think after a question. One
  * pace and two pauses for every sentence was a metronome.
  */
+/** How a line is said: its pace, and how the face says it. */
+export const LINE_PACES = [
+  'calm',
+  'quick',
+  'slow',
+  'whisper',
+  'shout',
+] as const;
+export type LinePace = (typeof LINE_PACES)[number];
+
 export const SCENE_DELIVERIES = [
   'hook',
   'explain',
@@ -161,6 +212,34 @@ export interface SceneBeat {
   delivery: SceneDelivery;
   /** The story's character it quotes, by their id: their words in their voice, in a bubble by their head. */
   speaker?: string | null;
+  /**
+   * Each line it quotes and who says it, found in its own words: a quote
+   * with no speaker found is the narrator's and is not listed.
+   */
+  lines?: { span: [number, number]; speaker: string }[];
+  /**
+   * What its narration says the characters do, found in its own words:
+   * where the verb starts, who, what, and toward whom or what ("@up" is
+   * the sky).
+   */
+  acts?: {
+    at: number;
+    who: string;
+    do: NarratedMove;
+    toward: string | null;
+  }[];
+  /**
+   * On a story's page, written as a screenplay: a line a character says,
+   * the whole sentence in their voice, or the narrator's few words.
+   * Absent on a lesson's page, all of it narration.
+   */
+  kind?: 'line' | 'narration';
+  /** A line's listener: whom it is said to, by id. */
+  to?: string;
+  /** How a line is said. */
+  pace?: LinePace;
+  /** Seconds of quiet after it, for what happens without words: a hug, someone walking off. */
+  holdS?: number;
   /** The music from this sentence on; absent, it carries on as it was. */
   music?: SceneMusic;
   /** The music runs high from here: a chase, a rush, danger close. */
@@ -275,6 +354,8 @@ export interface CharacterThing {
   met: number;
   /** On the page the book meets them: what they are like, set beside them. */
   intro: string[];
+  /** What they are like, on every page: how they move. */
+  traits?: string[];
   /** The page the book meets them on: their name is written under them. */
   first?: boolean;
   /** Their pose on this page, when the kit draws them; absent, standing. */
@@ -369,7 +450,7 @@ export function stateNames(thing: SceneThing): string[] {
 
 /** Every face a person or a character can wear: the story's seven and the kit's own. */
 export const FACES = FIGURE_FACES;
-const isFace = (value: unknown): value is FigureFace =>
+export const isFace = (value: unknown): value is FigureFace =>
   (FACES as readonly unknown[]).includes(value);
 
 /**
@@ -409,6 +490,12 @@ export interface SceneStage {
   arrows: SceneArrow[];
   /** A place shown at this step: the scene behind the stage from now on. */
   backdrop?: string;
+  /** Who comes into view here without arriving: in the scene all along, now shown. */
+  cutIn?: string[];
+  /** Who arrives here as the words say ("Zainab ran up the path"): they walk on. */
+  arrive?: string[];
+  /** Who leaves here as the words say ("Baba Sule walked off"): they walk off. */
+  leave?: string[];
 }
 
 export interface SceneEffect {
@@ -424,6 +511,12 @@ export interface SceneStep {
   at: { beat: number; phrase: string };
   /** Where in the sentence the phrase starts, in words; set by the mend. */
   word: number;
+  /**
+   * A moment in the quiet after the sentence instead, this many seconds
+   * after its last word: what a screenplay shows without words. With the
+   * sentence -1, before the first, in the quiet the page opens with.
+   */
+  after?: number;
   /** Null: the stage stays as it is and only the effects happen. */
   stage: SceneStage | null;
   effects: SceneEffect[];
@@ -444,6 +537,8 @@ export interface SceneScript {
    * they were, on the scene they were in, before the voice starts.
    */
   opening?: { show: string[]; backdrop: string | null } | null;
+  /** Seconds of what happens without words before the first word: someone walking on. */
+  lead?: number;
 }
 
 /**
@@ -543,44 +638,6 @@ export interface SceneScriptDraft {
 
 // ── Words ─────────────────────────────────────────────────────────────────
 
-/**
- * Where a sentence quotes someone: each run of quoted words, as the
- * [start, end) of the words without their marks. Double quotes, straight
- * or curly; curly single quotes closed by a mark that is no apostrophe;
- * straight single quotes opened at the start of a word and closed after
- * punctuation ('You're late,' says Tobi). And a quote the writer never
- * opened, from the sentence's start to its closing mark, or never closed,
- * from its opening mark to the end.
- */
-export function quotedSpans(sentence: string): [number, number][] {
-  const spans: [number, number][] = [];
-  const add = (start: number, end: number) => {
-    while (start < end && /\s/.test(sentence[start])) start += 1;
-    while (end > start && /\s/.test(sentence[end - 1])) end -= 1;
-    if (/\p{L}/u.test(sentence.slice(start, end))) spans.push([start, end]);
-  };
-  const runs = (pattern: RegExp) => {
-    for (const m of sentence.matchAll(pattern)) {
-      const inner = m.slice(1).find((g) => g !== undefined) ?? '';
-      const start = m.index + m[0].indexOf(inner);
-      add(start, start + inner.length);
-    }
-  };
-  runs(/“([^”]+)”|"([^"]+)"|‘(.+?)’(?!\p{L})/gu);
-  if (!spans.length) runs(/(?<![\p{L}\p{N}])'(\p{L}.*?[,.!?…])'(?!\p{L})/gu);
-  if (!spans.length) {
-    const unopened = /^(.+?[,.!?…])['’"”](?=\s|$)/u.exec(sentence);
-    const unclosed = /(?:^|\s)['‘"“](\p{L}.*)$/u.exec(sentence);
-    if (unopened) add(0, unopened[1].length);
-    else if (unclosed)
-      add(
-        unclosed.index + unclosed[0].length - unclosed[1].length,
-        sentence.length,
-      );
-  }
-  return spans.sort((a, b) => a[0] - b[0]);
-}
-
 /** The words of a sentence as the captions count them: a whitespace split. */
 export function wordsOf(text: string): string[] {
   return text.trim().split(/\s+/).filter(Boolean);
@@ -588,6 +645,7 @@ export function wordsOf(text: string): string[] {
 
 import { groupId, idKey, wordKey } from './scene-ids';
 export { groupId, idKey, wordKey };
+export { quotedSpans };
 
 /** Two words the same, or one the other with an ending: "chloroplast" and "chloroplasts". */
 function sameWord(a: string, b: string): boolean {
@@ -665,7 +723,7 @@ export function fitLayout(asked: SceneLayout, count: number): SceneLayout {
 
 const slug = (text: string) => groupId(text).slice(0, 32);
 
-const clean = (text: string | null | undefined) =>
+export const clean = (text: string | null | undefined) =>
   (text ?? '').replace(/\s+/g, ' ').trim();
 
 /** A sentence's music, kept only when it is one the score plays; high only where it can run high. */
@@ -683,9 +741,9 @@ export function tellsOfLoss(say: string, next?: string): boolean {
   return GRAVE.test(say) || (next !== undefined && GRAVE.test(next));
 }
 
-function musicOf(
-  beat: SceneScriptDraft['beats'][number],
-  next: SceneScriptDraft['beats'][number] | undefined,
+export function musicOf(
+  beat: Pick<SceneScriptDraft['beats'][number], 'say' | 'music' | 'energy'>,
+  next: Pick<SceneScriptDraft['beats'][number], 'say'> | undefined,
   story: boolean,
 ): {
   music?: SceneMusic;
@@ -716,52 +774,238 @@ export interface MendedScript {
   mended: string[];
 }
 
+/** Whether "she" or "he" may mean a character, from the voice they speak in. */
+export function genderOf(
+  voice: StoryVoice | null | undefined,
+): 'f' | 'm' | null {
+  if (voice === 'girl' || voice === 'woman' || voice === 'old woman')
+    return 'f';
+  if (voice === 'boy' || voice === 'man' || voice === 'old man') return 'm';
+  return null;
+}
+
 /**
- * The writer's draft made sound without asking again: ids made safe and
- * unique, unknown ids dropped, a lost anchor found in another sentence or
- * put at its sentence's start, a stage trimmed to what its layout holds,
- * extra drawings set in type. What cannot be mended is a problem for the
- * one repair call.
+ * Who comes and goes as the narration says, on the stage: someone who
+ * leaves walks off at the words and stays off until the words bring them
+ * back; someone who comes walks on at the words, and stays until they
+ * go. Where the writer's storyboard has them come or go in that sentence
+ * or the next, it is left as the writer staged it.
  */
-export function mendScript(
-  draft: SceneScriptDraft,
-  options: {
-    /** The page, to hold a quotation to its own words. */
-    material?: string;
-    /** The formats the document may use; a kind of another is set in type. */
-    formats?: readonly SceneFormat[];
-    /** The story's characters, when the book is a story: who a character may be. */
-    characters?: readonly { id: string; name: string; aliases: string[] }[];
-    /** And its places: where the story may be. */
-    places?: readonly {
-      id: string;
-      name: string;
-      aliases: string[];
-      sound?: SceneAmbience | null;
-    }[];
-  } = {},
-): MendedScript {
-  const problems: string[] = [];
-  const mended: string[] = [];
-  const formats = new Set(options.formats ?? SCENE_FORMATS);
+function comingsAndGoings(
+  steps: SceneStep[],
+  passages: readonly Passage[],
+  beats: readonly SceneBeat[],
+  characters: ReadonlySet<string>,
+  mended: string[],
+): void {
+  /** The word a passage is said on: the one its first character is in. */
+  const wordAt = (p: Passage) => {
+    const before = beats[p.beat].say.slice(0, p.at);
+    const n = wordsOf(before).length;
+    return /\S$/u.test(before) ? n - 1 : n;
+  };
+  const key = (beat: number, word: number) => beat * 100_000 + word;
+  const keyOf = (step: SceneStep) => key(step.at.beat, step.word);
+  /** A stage as it was, as the base of a new one: who came into it then is no newcomer now. */
+  const base = (stage: SceneStage): SceneStage => {
+    const out = { ...stage };
+    delete out.cutIn;
+    delete out.arrive;
+    delete out.leave;
+    return out;
+  };
+  const without = (stage: SceneStage, id: string): SceneStage | null => {
+    const show = stage.show.filter((one) => one !== id);
+    if (!show.length) return null;
+    return {
+      ...stage,
+      layout: fitLayout(stage.layout, show.length),
+      show,
+      arrows: stage.arrows.filter((a) => a.from !== id && a.to !== id),
+    };
+  };
+  for (const passage of passages) {
+    const { who, how } = passage;
+    const word = wordAt(passage);
+    const at = key(passage.beat, word);
+    let k = -1;
+    steps.forEach((step, i) => {
+      if (keyOf(step) <= at) k = i;
+    });
+    let at0 = k;
+    while (at0 >= 0 && !steps[at0].stage) at0 -= 1;
+    const standing = at0 >= 0 ? steps[at0].stage : null;
+    const shown = standing?.show.includes(who) ?? false;
+    // The writer's own staging in this sentence or the next.
+    const nearby = steps.filter(
+      (s) => s.stage && keyOf(s) > at && s.at.beat <= passage.beat + 1,
+    );
+    // Until the words say otherwise: where they bring them back, or take them off.
+    const until = passages
+      .filter((p) => p.who === who && p.how !== how && !p.said)
+      .map((p) => key(p.beat, wordAt(p)))
+      .find((later) => later > at);
+    // Speaking after the words sent them away, they call from off the stage.
+    if (passage.said) {
+      const last = passages
+        .filter((p) => p.who === who && !p.said && key(p.beat, wordAt(p)) <= at)
+        .pop();
+      if (last?.how === 'leave') continue;
+    }
+    const phrase = wordsOf(beats[passage.beat].say)
+      .slice(word, word + 4)
+      .join(' ');
+    let stage: SceneStage;
+    if (how === 'leave') {
+      if (!standing || !shown) continue;
+      // The writer takes them off nearby: where the words say they go, they walk off.
+      const taking = nearby.find((s) => !s.stage!.show.includes(who));
+      if (taking) {
+        taking.stage!.leave = [...(taking.stage!.leave ?? []), who];
+        continue;
+      }
+      stage = without(base(standing), who) ?? {
+        layout: 'one',
+        show: [],
+        arrows: [],
+        ...(standing.backdrop ? { backdrop: standing.backdrop } : {}),
+      };
+      stage.leave = [who];
+      for (const later of steps)
+        if (
+          later.stage?.show.includes(who) &&
+          keyOf(later) > at &&
+          (until === undefined || keyOf(later) < until)
+        )
+          later.stage = without(later.stage, who);
+    } else {
+      if (shown) {
+        // On since the writer's step just before the words: they arrive there.
+        let prior = at0 - 1;
+        while (prior >= 0 && !steps[prior].stage) prior -= 1;
+        if (
+          !passage.said &&
+          standing &&
+          steps[at0].at.beat >= passage.beat - 1 &&
+          !(prior >= 0 && steps[prior].stage!.show.includes(who))
+        )
+          standing.arrive = [...(standing.arrive ?? []), who];
+        continue;
+      }
+      // The writer brings them on nearby: where the words say they arrive, they walk on.
+      const bringing = nearby.find((s) => s.stage!.show.includes(who));
+      if (bringing) {
+        if (!passage.said)
+          bringing.stage!.arrive = [...(bringing.stage!.arrive ?? []), who];
+        continue;
+      }
+      const show = [...(standing?.show ?? []), who];
+      if (show.length > MAX_ON_STAGE) continue;
+      stage = standing
+        ? {
+            ...base(standing),
+            layout: fitLayout(
+              standing.layout === 'one' ? 'row' : standing.layout,
+              show.length,
+            ),
+            show,
+          }
+        : { layout: 'one', show, arrows: [] };
+      if (passage.said) stage.cutIn = [who];
+      else stage.arrive = [who];
+      // They stay among the people the writer shows after, until they go.
+      for (const later of steps) {
+        const s = later.stage;
+        if (
+          !s ||
+          keyOf(later) <= at ||
+          (until !== undefined && keyOf(later) >= until) ||
+          s.show.includes(who) ||
+          s.show.length >= MAX_ON_STAGE ||
+          !s.show.some((id) => characters.has(id))
+        )
+          continue;
+        later.stage = {
+          ...s,
+          layout: fitLayout(
+            s.layout === 'one' ? 'row' : s.layout,
+            s.show.length + 1,
+          ),
+          show: [...s.show, who],
+        };
+      }
+    }
+    steps.splice(k + 1, 0, {
+      at: { beat: passage.beat, phrase },
+      word,
+      stage,
+      effects: [],
+    });
+    mended.push(
+      passage.said
+        ? `${who} is shown as they speak, at "${phrase}"`
+        : `${who} ${how === 'leave' ? 'leaves' : 'comes'} at "${phrase}", as the words say`,
+    );
+  }
+}
 
-  const kept = draft.beats.filter(
-    (beat) => wordsOf(clean(beat.say)).length > 0,
-  );
-  const beats: SceneBeat[] = kept.map((beat, index) => ({
-    say: clean(beat.say),
-    pause: beat.pause === 'long' ? ('long' as const) : ('short' as const),
-    delivery: SCENE_DELIVERIES.includes(beat.delivery)
-      ? beat.delivery
-      : ('explain' as const),
-    ...musicOf(beat, kept[index + 1], !!options.characters?.length),
-  }));
+/** What a mend holds a writer's draft to. */
+export interface MendOptions {
+  /** The page, to hold a quotation to its own words. */
+  material?: string;
+  /** The formats the document may use; a kind of another is set in type. */
+  formats?: readonly SceneFormat[];
+  /** The story's characters, when the book is a story: who a character may be. */
+  characters?: readonly {
+    id: string;
+    name: string;
+    aliases: string[];
+    /** The voice they speak in: whether "she" or "he" may mean them. */
+    voice?: StoryVoice | null;
+    /** What they are like: how they move. */
+    traits?: string[];
+  }[];
+  /** And its places: where the story may be. */
+  places?: readonly {
+    id: string;
+    name: string;
+    aliases: string[];
+    sound?: SceneAmbience | null;
+    /** How it looks, when the story says: a fire burning, a river. */
+    look?: string | null;
+  }[];
+  /** Whom the document is for: its recipe's limits hold. */
+  stage?: LearningStage | null;
+}
 
+/** What mending a cast needs to know and where it says what it did. */
+interface CastMend {
+  formats: ReadonlySet<SceneFormat>;
+  recipe: StageRecipe | null;
+  mended: string[];
+  problems: string[];
+}
+
+/**
+ * The writer's cast made sound: ids safe and unique, a story's characters
+ * and places the story's own, people drawn by the kit, code things set,
+ * drawings with briefs the artist can draw. With every way the writer
+ * might refer to each thing.
+ */
+export function mendCast(
+  given: SceneScriptDraft['cast'],
+  options: MendOptions,
+  { formats, recipe, mended, problems }: CastMend,
+): {
+  cast: SceneThing[];
+  byId: Map<string, SceneThing>;
+  resolve: (ref: string) => string | null;
+} {
   // Ids: safe, unique, and every way the writer might refer to one.
   const idFor = new Map<string, string>();
   const used = new Set<string>();
   const cast: SceneThing[] = [];
-  draft.cast.forEach((given, index) => {
+  given.forEach((given, index) => {
     // A person the story knows is its character, drawn once for the book.
     const known =
       given.kind === 'person' && options.characters?.length
@@ -839,7 +1083,8 @@ export function mendScript(
         kind: 'place',
         ref: where.id,
         name: where.name,
-        sound: where.sound ?? null,
+        // What it sounds like; when the story did not say, from how it looks.
+        sound: where.sound ?? soundIn(where.look ?? ''),
       });
       return;
     }
@@ -984,6 +1229,14 @@ export function mendScript(
         return true;
       })
       .slice(0, MAX_PARTS);
+    // A child reads two labels on a drawing, a student more: the rest stay
+    // parts the voice can point at, unlabelled.
+    let labelled = 0;
+    for (const part of parts)
+      if (part.label && ++labelled > (recipe?.labels ?? MAX_PARTS)) {
+        part.label = false;
+        mended.push(`${id}: "${part.name}" unlabelled, for these learners`);
+      }
     const states = (raw.states ?? [])
       .map((state) => ({ name: clean(state.name), look: clean(state.look) }))
       .filter((state) => {
@@ -1013,6 +1266,44 @@ export function mendScript(
     idFor.get(ref.toLowerCase()) ??
     idFor.get(slug(ref)) ??
     (byId.has(slug(ref)) ? slug(ref) : null);
+  return { cast, byId, resolve };
+}
+
+/**
+ * The writer's draft made sound without asking again: ids made safe and
+ * unique, unknown ids dropped, a lost anchor found in another sentence or
+ * put at its sentence's start, a stage trimmed to what its layout holds,
+ * extra drawings set in type. What cannot be mended is a problem for the
+ * one repair call.
+ */
+export function mendScript(
+  draft: SceneScriptDraft,
+  options: MendOptions = {},
+): MendedScript {
+  const recipe = options.stage ? STAGE_RECIPES[options.stage] : null;
+  const problems: string[] = [];
+  const mended: string[] = [];
+  const formats = new Set(options.formats ?? SCENE_FORMATS);
+
+  const kept = draft.beats.filter(
+    (beat) => wordsOf(clean(beat.say)).length > 0,
+  );
+  const beats: SceneBeat[] = kept.map((beat, index) => ({
+    say: clean(beat.say),
+    pause: beat.pause === 'long' ? ('long' as const) : ('short' as const),
+    delivery: SCENE_DELIVERIES.includes(beat.delivery)
+      ? beat.delivery
+      : ('explain' as const),
+    ...musicOf(beat, kept[index + 1], !!options.characters?.length),
+  }));
+
+  // The cast: every thing made sound, and every way the writer might refer to one.
+  const { cast, byId, resolve } = mendCast(draft.cast, options, {
+    formats,
+    recipe,
+    mended,
+    problems,
+  });
 
   // Who each sentence quotes: one of the story's characters in the cast.
   const speakerOf = (said: string): string | null => {
@@ -1097,8 +1388,16 @@ export function mendScript(
         if (byId.get(id)?.kind === 'place') backdrop = id;
         else if (!show.includes(id)) show.push(id);
       }
-      // A place alone: the empty scene, before anyone is in it.
-      if (!show.length && backdrop) {
+      // A place alone: the empty scene, before anyone is in it. Once
+      // people are on the stage, it is the scene changing behind them:
+      // they stay.
+      const standing = [...steps].reverse().find((s) => s.stage)?.stage;
+      if (!show.length && backdrop && onStage.length && standing) {
+        stage = { ...standing, backdrop };
+        mended.push(
+          `step ${one.index + 1}: the place goes behind who is on the stage`,
+        );
+      } else if (!show.length && backdrop) {
         stage = { layout: 'one', show: [], arrows: [], backdrop };
         onStage = [];
       }
@@ -1171,6 +1470,94 @@ export function mendScript(
     });
   }
 
+  // Who says each quoted line: the story's characters on the page, found
+  // in the sentences' own words, the writer's speakers and "say"s only a
+  // hint. Each line is said in its speaker's voice and shown in its own
+  // bubble; a "say" on the stage is no longer needed for either.
+  const speaking: Actor[] = cast.flatMap((thing) => {
+    if (thing.kind !== 'character') return [];
+    const who = (options.characters ?? []).find((c) => c.id === thing.ref);
+    return who
+      ? [
+          {
+            id: thing.id,
+            names: [who.name, ...who.aliases, thing.name],
+            gender: genderOf(who.voice),
+          },
+        ]
+      : [];
+  });
+  if (speaking.length) {
+    const given = new Map<number, string[]>();
+    beats.forEach((beat, k) => {
+      if (beat.speaker) given.set(k, [beat.speaker]);
+    });
+    for (const step of steps)
+      for (const effect of step.effects)
+        if (effect.do === 'say')
+          given.set(step.at.beat, [
+            ...(given.get(step.at.beat) ?? []),
+            effect.target,
+          ]);
+    for (const line of dialogueOf(
+      beats.map((beat) => beat.say),
+      speaking,
+      given,
+    ))
+      (beats[line.beat].lines ??= []).push({
+        span: line.span,
+        speaker: line.speaker,
+      });
+    beats.forEach((beat) => {
+      if (beat.lines?.length) beat.speaker = beat.lines[0].speaker;
+    });
+  }
+  for (const step of steps)
+    step.effects = step.effects.filter((effect) => effect.do !== 'say');
+
+  // What the narration says the characters do, acted where it says it;
+  // and who comes and goes, walking on and off at its words.
+  if (speaking.length) {
+    const { acts, passages } = directionsIn(
+      beats.map((beat) => beat.say),
+      speaking,
+      cast.flatMap((thing) =>
+        thing.kind !== 'character' &&
+        thing.kind !== 'place' &&
+        'name' in thing &&
+        thing.name
+          ? [{ id: thing.id, names: [thing.name] }]
+          : [],
+      ),
+      new Map(
+        beats.flatMap((beat, k) =>
+          beat.lines?.length ? [[k, beat.lines] as const] : [],
+        ),
+      ),
+    );
+    for (const { beat, ...act } of acts) (beats[beat].acts ??= []).push(act);
+    const said = speakersIn(
+      beats.map((beat) => beat.say),
+      new Map(
+        beats.flatMap((beat, k) =>
+          beat.lines?.length ? [[k, beat.lines] as const] : [],
+        ),
+      ),
+    );
+    comingsAndGoings(
+      steps,
+      [...passages, ...said].sort((a, b) => a.beat - b.beat || a.at - b.at),
+      beats,
+      new Set(speaking.map((one) => one.id)),
+      mended,
+    );
+  }
+  steps.splice(
+    0,
+    steps.length,
+    ...steps.filter((step) => step.stage || step.effects.length),
+  );
+
   // A sign the storyboard first shows at the words comes on then, not
   // before, whether the writer listed it or a caption said it: "Person
   // shaking", shaking shown as the voice says it starts. One first
@@ -1208,11 +1595,40 @@ export function mendScript(
       problems.push(
         `These phrases are not in their sentences, word for word: ${lostWhere.slice(0, 6).join('; ')}. Copy each phrase exactly from the sentence it names.`,
       );
+    // A story whose characters speak on this page keeps their words in
+    // quotes, with who says them: then they say them in their own voices,
+    // in bubbles, their mouths moving. Told as reported speech, everyone
+    // is the narrator.
+    if (options.material && speaking.length) {
+      const there = options.material
+        .split(/\n+/)
+        .flatMap((line) => quotedSpans(line).map(([a, b]) => line.slice(a, b)));
+      const here = beats.reduce((n, beat) => n + (beat.lines?.length ?? 0), 0);
+      if (there.length >= 2 && here < Math.min(2, Math.ceil(there.length / 4)))
+        problems.push(
+          `The story's characters speak on this page ("${there[0].slice(0, 60)}"), but ${here ? `only ${here} of your sentences quotes them` : 'your sentences quote no one'}: keep what they say in double quotes, word for word, in the sentence with who says it, so each line is said in its speaker's voice.`,
+        );
+    }
     const spoken = beats.reduce((n, beat) => n + beat.say.length, 0);
     if (spoken > MAX_SPOKEN_CHARS)
       problems.push(
         `The narration is ${spoken} characters; keep it under ${MAX_SPOKEN_CHARS}.`,
       );
+    // Far past what these learners take in: back, with their numbers. A
+    // little over is let be; a retry costs the writer once more.
+    if (recipe) {
+      const words = beats.map((beat) => wordsOf(beat.say).length);
+      const total = words.reduce((a, b) => a + b, 0);
+      if (total > recipe.spoken[1] * 1.3)
+        problems.push(
+          `The narration is ${total} spoken words; these learners take ${recipe.spoken[0]} to ${recipe.spoken[1]}. Say less, keeping the main ideas.`,
+        );
+      const long = words.filter((n) => n > recipe.sentence[1] * 1.3).length;
+      if (long > Math.max(1, words.length / 4))
+        problems.push(
+          `${long} sentences run over ${Math.round(recipe.sentence[1] * 1.3)} words; these learners take sentences of ${recipe.sentence[0]} to ${recipe.sentence[1]}. Split them.`,
+        );
+    }
     const drawings = cast.filter((thing) => thing.kind === 'drawing');
     if (drawings.length > MAX_DRAWINGS) {
       // The ones on stage longest keep their drawings; the rest are set in type.
@@ -1679,11 +2095,9 @@ export function mentionsPeople(brief: string): boolean {
 }
 
 /** The story's character or place the writer means: by its id, else by a name or alias. */
-function storyEntry<T extends { id: string; name: string; aliases: string[] }>(
-  characters: readonly T[],
-  ref: string | null,
-  name: string,
-): T | null {
+export function storyEntry<
+  T extends { id: string; name: string; aliases: string[] },
+>(characters: readonly T[], ref: string | null, name: string): T | null {
   const byRef = characters.find((c) => c.id === clean(ref));
   if (byRef) return byRef;
   const keys = [clean(ref), name].map(nameKey).filter(Boolean);
@@ -1923,7 +2337,9 @@ function effectOf(
   if (!onStage.includes(id))
     return `${effect.do} on ${id}, which is not on the stage`;
   const thing = byId.get(id);
-  const kind: SceneEffectKind = SCENE_EFFECTS.includes(effect.do)
+  const kind: SceneEffectKind = (
+    SCENE_EFFECTS as readonly SceneEffectKind[]
+  ).includes(effect.do)
     ? effect.do
     : 'pulse';
   // Words in a bubble come only from the story's characters.
@@ -1933,6 +2349,35 @@ function effectOf(
       : `say on ${id}, which is not one of the story's characters`;
   const parts = thing ? partNames(thing) : [];
   const states = thing ? stateNames(thing) : [];
+  // Someone toward someone or something else on the stage: a look, a
+  // reach, a hug, a point at it; the camera on the two of them.
+  const acts = thing?.kind === 'character' || thing?.kind === 'person';
+  // The other by id, or by the name the page gives them ("fox.Mira").
+  const other = partName
+    ? (resolve(partName) ??
+      [...byId.values()].find(
+        (one) =>
+          (one.kind === 'character' || one.kind === 'person') &&
+          one.name.toLowerCase() === partName.toLowerCase(),
+      )?.id ??
+      null)
+    : null;
+  const toward =
+    other &&
+    other !== id &&
+    onStage.includes(other) &&
+    !parts.some((name) => idKey(name) === idKey(partName)) &&
+    !states.some((name) => idKey(name) === idKey(partName))
+      ? other
+      : null;
+  if ((ACTING_EFFECTS as readonly string[]).includes(kind)) {
+    if (!acts) return `${kind} on ${id}, who is no one to act`;
+    if (!toward)
+      return `${kind} from ${id} toward "${partName}", which is not on the stage`;
+    return { target: id, part: toward, do: kind };
+  }
+  if (toward && (kind === 'zoom' || (kind === 'point' && acts)))
+    return { target: id, part: toward, do: kind };
   if (!partName || (!parts.length && !states.length)) {
     // A thing with no parts or states: the whole thing moves.
     return {
@@ -1976,6 +2421,14 @@ export function quietStretches(script: SceneScript, limit = 30): string[] {
   for (const step of script.steps)
     if (step.stage || step.effects.some((e) => e.do !== 'pulse'))
       positions.push(offsets[step.at.beat] + step.word);
+  // A character's line opens a bubble, and they start to speak.
+  script.beats.forEach((beat, k) => {
+    for (const line of beat.lines ?? [])
+      positions.push(
+        offsets[k] + wordsOf(beat.say.slice(0, line.span[0])).length,
+      );
+  });
+  positions.sort((a, b) => a - b);
   positions.push(before);
   const out: string[] = [];
   let last = 0;

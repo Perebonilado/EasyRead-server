@@ -10,9 +10,9 @@
  * and tested, and a voice that takes a pace per sentence (Kokoro) says them.
  */
 import {
-  quotedSpans,
   type SceneBeat,
   type SceneDelivery,
+  type LinePace,
   type SceneMood,
 } from './scene-script';
 import type { StoryBible, StoryCharacter, StoryVoice } from './scene-story';
@@ -36,21 +36,64 @@ export const BEFORE_KEY_S = 0.55;
 export const SPEED_RANGE = [0.88, 1.1] as const;
 /** No silence shorter or longer than this, in seconds. */
 export const PAUSE_RANGE = [0.2, 1.4] as const;
+/** The slowest a sentence is said, for the youngest learners. */
+export const SLOWEST = 0.82;
 
 const clamp = (n: number, [low, high]: readonly [number, number]) =>
   Math.min(high, Math.max(low, n));
 
+/**
+ * A screenplay's timing: a line at the speaker's own pace, the next line
+ * close behind it as a conversation goes; the narrator a touch slower,
+ * with a breath after.
+ */
+export const LINE_DELIVERY = { speed: 1, pause: 0.3 };
+export const NARRATION_DELIVERY = { speed: 0.95, pause: 0.55 };
+/** How a line's pace changes its speed. */
+export const LINE_PACE_SPEED: Record<LinePace, number> = {
+  calm: 1,
+  quick: 1.07,
+  slow: 0.9,
+  whisper: 0.9,
+  shout: 1.04,
+};
+/** The longest silence a sentence may keep after it, for what happens in it: as long as the voice holds. */
+export const HOLD_LIMIT_S = 3;
+
 /** Each sentence's pace and the silence after it, in seconds. */
 export function deliveryPieces(
-  beats: Pick<SceneBeat, 'delivery' | 'pause'>[],
+  beats: Pick<SceneBeat, 'delivery' | 'pause' | 'kind' | 'pace' | 'holdS'>[],
+  /** Whom it is for: a child is spoken to more slowly, with longer pauses. */
+  learners: { pace: number; pause: number } = { pace: 1, pause: 1 },
 ): { speed: number; pauseAfter: number }[] {
   return beats.map((beat, i) => {
-    const how = DELIVERY[beat.delivery] ?? DELIVERY.explain;
+    const how = beat.kind
+      ? beat.kind === 'line'
+        ? {
+            speed: LINE_DELIVERY.speed * LINE_PACE_SPEED[beat.pace ?? 'calm'],
+            // Before the narrator comes in, a breath more.
+            pause:
+              beats[i + 1]?.kind === 'narration'
+                ? NARRATION_DELIVERY.pause
+                : LINE_DELIVERY.pause,
+          }
+        : NARRATION_DELIVERY
+      : (DELIVERY[beat.delivery] ?? DELIVERY.explain);
     let pause = how.pause + (beat.pause === 'long' ? IDEA_CHANGE_S : 0);
-    if (beats[i + 1]?.delivery === 'key') pause = Math.max(pause, BEFORE_KEY_S);
+    if (beats[i + 1]?.delivery === 'key' && !beat.kind)
+      pause = Math.max(pause, BEFORE_KEY_S);
+    const paused =
+      Math.round(clamp(pause * learners.pause, PAUSE_RANGE) * 100) / 100;
     return {
-      speed: clamp(how.speed, SPEED_RANGE),
-      pauseAfter: Math.round(clamp(pause, PAUSE_RANGE) * 100) / 100,
+      speed:
+        Math.round(
+          clamp(how.speed * learners.pace, [
+            Math.min(SPEED_RANGE[0], SLOWEST),
+            SPEED_RANGE[1],
+          ]) * 100,
+        ) / 100,
+      // What happens after it without words takes its own time.
+      pauseAfter: Math.min(HOLD_LIMIT_S, Math.max(paused, beat.holdS ?? 0)),
     };
   });
 }
@@ -181,53 +224,61 @@ export interface VoicedPiece {
 
 /**
  * The narration as the voice is sent it: a piece a sentence, at its pace
- * with its silence after; and a sentence that quotes one of the story's
- * characters parted at its quotation, their words in their own voice at
- * their own pace, the narrator saying the rest. Every piece says words:
- * a mark with none of its own goes with the words after it.
+ * with its silence after; and a sentence that quotes the story's
+ * characters parted at each quotation, each line in its own speaker's
+ * voice at their own pace, the narrator saying the rest. Two characters
+ * in one sentence each say their own. Every piece says words: a mark with
+ * none of its own goes with the words after it.
  */
 export function voicedPieces(input: {
   texts: string[];
   delivered: { speed: number; pauseAfter: number }[];
   styles: string[];
-  speakers: (Speaker | null)[];
+  /** Each sentence's lines said by a character: where in its text, and by whom. */
+  lines: { span: [number, number]; speaker: Speaker }[][];
 }): VoicedPiece[] {
   const out: VoicedPiece[] = [];
   input.texts.forEach((text, beat) => {
     const { speed, pauseAfter } = input.delivered[beat];
     const style = input.styles[beat];
-    const speaker = input.speakers[beat];
-    const spans = speaker ? quotedSpans(text) : [];
-    if (!speaker || !spans.length) {
+    const lines = [...(input.lines[beat] ?? [])].sort(
+      (a, b) => a.span[0] - b.span[0],
+    );
+    if (!lines.length) {
       out.push({ text, speed, pauseAfter, style, beat });
       return;
     }
-    // The sentence cut at each quotation's edges.
-    const cuts = [0, ...spans.flat(), text.length];
-    const parts: { text: string; quoted: boolean }[] = [];
+    // The sentence cut at each line's edges, the narrator's words between.
+    const parts: { text: string; speaker: Speaker | null }[] = [];
     let carried = '';
-    for (let i = 0; i + 1 < cuts.length; i += 1) {
-      const piece = `${carried}${text.slice(cuts[i], cuts[i + 1])}`;
-      if (!/\p{L}|\p{N}/u.test(piece)) {
-        carried = piece;
-        continue;
+    const part = (piece: string, speaker: Speaker | null) => {
+      const joined = `${carried}${piece}`;
+      if (!/\p{L}|\p{N}/u.test(joined)) {
+        carried = joined;
+        return;
       }
       carried = '';
-      parts.push({ text: piece.trim(), quoted: i % 2 === 1 });
+      parts.push({ text: joined.trim(), speaker });
+    };
+    let at = 0;
+    for (const { span, speaker } of lines) {
+      if (span[0] < at) continue;
+      if (span[0] > at) part(text.slice(at, span[0]), null);
+      part(text.slice(span[0], span[1]), speaker);
+      at = span[1];
     }
+    if (at < text.length) part(text.slice(at), null);
     if (carried && parts.length)
       parts[parts.length - 1].text =
         `${parts[parts.length - 1].text}${carried}`.trim();
-    parts.forEach((part, i) => {
+    parts.forEach(({ text: said, speaker }, i) => {
       const last = i === parts.length - 1;
       out.push({
-        text: part.text,
-        speed: part.quoted
-          ? Math.round(speed * speaker.pace * 100) / 100
-          : speed,
+        text: said,
+        speed: speaker ? Math.round(speed * speaker.pace * 100) / 100 : speed,
         pauseAfter: last ? pauseAfter : TURN_S,
-        style: part.quoted ? speaker.style : style,
-        ...(part.quoted ? { voice: speaker.voice } : {}),
+        style: speaker ? speaker.style : style,
+        ...(speaker ? { voice: speaker.voice } : {}),
         beat,
       });
     });

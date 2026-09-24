@@ -1,3 +1,4 @@
+import type { ScreenplayDraft } from '../domain/scene-screenplay';
 import type { DocumentProfileDraft } from '../domain/scene-profile';
 import type { FigureDraft, StoryDraft } from '../domain/scene-story';
 import type {
@@ -484,6 +485,23 @@ export interface LlmGatewayPort {
     previous?: SceneScriptDraft;
     problems?: string[];
   }): Promise<LlmResult<SceneScriptDraft>>;
+
+  /**
+   * One page of a story as a screenplay: the lines its characters say to
+   * one another, what they do, the narrator's few words, and who is there
+   * as it opens; with its cast. With `previous` and `problems`, the same
+   * page again with those put right.
+   */
+  sceneScreenplay(input: {
+    documentTitle: string;
+    topicTitle: string;
+    material: string;
+    context: string;
+    profile?: string;
+    story?: string;
+    previous?: ScreenplayDraft;
+    problems?: string[];
+  }): Promise<LlmResult<ScreenplayDraft>>;
 
   /**
    * What a document is, for teaching it: its subject, kind and tone, and

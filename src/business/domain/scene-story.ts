@@ -210,6 +210,28 @@ const soundOf = (sound: unknown): SceneAmbience | null =>
     ? (sound as SceneAmbience)
     : null;
 
+/**
+ * What a place sounds like from how it looks, when the story did not say:
+ * a fire burning, rain, water close by, wind. None for anywhere else.
+ */
+export function soundIn(look: string): SceneAmbience | null {
+  if (
+    /\b(?:fire|campfire|bonfire|fireplace|hearth|flames?|embers)\b/iu.test(look)
+  )
+    return 'fire';
+  if (/\b(?:rain|raining|rainy|storm|stormy|downpour|drizzle)\b/iu.test(look))
+    return 'rain';
+  if (
+    /\b(?:river|riverbank|sea|seaside|lake|ocean|pond|stream|beach|shore|waves|waterfall|harbou?r|quay)\b/iu.test(
+      look,
+    )
+  )
+    return 'water';
+  if (/\b(?:windy|wind|breeze|breezy|gusts?|gale)\b/iu.test(look))
+    return 'wind';
+  return null;
+}
+
 const clean = (text: string | null | undefined) =>
   (text ?? '').replace(/\s+/g, ' ').trim();
 
@@ -630,6 +652,7 @@ export function castStory(
       state: thing.state ?? before,
       met: who.met,
       intro: who.firstPage === page ? who.traits : [],
+      traits: who.traits,
       first: who.firstPage === page,
       before,
     };

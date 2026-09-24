@@ -718,6 +718,8 @@ export interface GatedDrawing {
    * kit's units, so the stage draws everyone at one scale, on one ground.
    */
   stands?: { units: number };
+  /** Drawn by the figure kit, rigged to act: its eyes, face, head, arms and mouth move. */
+  acts?: true;
 }
 
 export interface GateResult {

@@ -1,6 +1,9 @@
 /* eslint-disable @typescript-eslint/require-await --
  * Every method implements the async LlmGatewayPort with a synchronous body;
  * that is the whole point of a deterministic offline stand-in. */
+import { dialogueOf } from '../../business/domain/scene-dialogue';
+import type { ScreenplayDraft } from '../../business/domain/scene-screenplay';
+import { levelIn } from '../../business/domain/scene-stage';
 import { createHash } from 'crypto';
 import { Injectable } from '@nestjs/common';
 import type { DocumentProfileDraft } from '../../business/domain/scene-profile';
@@ -537,6 +540,10 @@ export class FakeLlmAdapter implements LlmGatewayPort {
           ...(/poem|verse|stanza/i.test(text) ? (['reading'] as const) : []),
         ],
         story,
+        // The level the document names, if it names one.
+        stage: levelIn(text)?.stage ?? null,
+        stageSure: levelIn(text) ? 'sure' : 'unsure',
+        stageWhy: levelIn(text)?.words.join(', ') ?? '',
       },
       usage: {
         model: 'fake',
@@ -647,6 +654,108 @@ export class FakeLlmAdapter implements LlmGatewayPort {
         tokensIn: Math.ceil(input.text.length / 4),
         tokensOut: 50,
         latencyMs: 1,
+      },
+    });
+  }
+
+  /**
+   * A page's screenplay with no model: each quote in the page a line, by
+   * whoever the words say says it; each paragraph with no quote a short
+   * narration. The story's characters come from what the writer is told.
+   */
+  sceneScreenplay(input: {
+    documentTitle: string;
+    topicTitle: string;
+    material: string;
+    context: string;
+    story?: string;
+  }): Promise<LlmResult<ScreenplayDraft>> {
+    const started = Date.now();
+    const characters = [
+      ...(input.story ?? '').matchAll(/^- ([\w-]+): ([^,(.]+)/gm),
+    ].map((m) => ({ id: m[1], names: [m[2].trim()] }));
+    const paragraphs = input.material
+      .split(/\n+/)
+      .map((p) => p.trim())
+      .filter((p) => p && !p.startsWith('#'));
+    const lines = dialogueOf(paragraphs, characters);
+    const blank = {
+      to: null,
+      do: null,
+      state: null,
+      show: null,
+      pace: null,
+      hold: null,
+      place: null,
+      music: null,
+      energy: null,
+    };
+    const beats = paragraphs.flatMap(
+      (paragraph, k): ScreenplayDraft['beats'] => {
+        const said = lines.filter((line) => line.beat === k);
+        if (!said.length) {
+          const sentence = paragraph.split(/(?<=[.!?])\s+/)[0] ?? paragraph;
+          return [
+            {
+              ...blank,
+              kind: 'narration' as const,
+              who: null,
+              say: sentence.split(/\s+/).slice(0, 16).join(' '),
+            },
+          ];
+        }
+        return said.map((line) => ({
+          ...blank,
+          kind: 'line' as const,
+          who: line.speaker,
+          say: paragraph.slice(line.span[0], line.span[1]),
+        }));
+      },
+    );
+    const none = {
+      brief: null,
+      motion: null,
+      parts: null,
+      states: null,
+      shape: null,
+      sound: null,
+      state: null,
+      figure: null,
+      count: null,
+      pose: null,
+      signs: null,
+      holding: null,
+    };
+    return Promise.resolve({
+      value: {
+        fit: 'good',
+        fitReason: null,
+        title: input.topicTitle,
+        mood: 'calm',
+        opening: characters.map((c) => c.id),
+        beats: beats.length
+          ? beats
+          : [
+              {
+                ...blank,
+                kind: 'narration',
+                who: null,
+                say: 'The story goes on.',
+              },
+            ],
+        cast: characters.map((c) => ({
+          ...none,
+          id: c.id,
+          kind: 'character' as const,
+          name: c.names[0],
+          ref: c.id,
+        })),
+      },
+      usage: {
+        model: 'fake',
+        tokensIn: Math.ceil(input.material.length / 4),
+        tokensOut: 200,
+        latencyMs: Date.now() - started,
       },
     });
   }

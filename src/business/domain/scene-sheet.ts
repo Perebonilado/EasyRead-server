@@ -8,7 +8,12 @@
 import { parseDocument } from 'htmlparser2';
 import { isolate, type Callout } from './scene-callouts';
 import { elements } from './scene-dom';
-import { drawFigure, figureOf, type FigureSpec } from './scene-figure';
+import {
+  drawFigure,
+  figureOf,
+  type FigurePose,
+  type FigureSpec,
+} from './scene-figure';
 import { renderSvg, type InkBox } from './scene-raster';
 import { EXPRESSIONS, type StorySize } from './scene-story';
 import { revealedSvg, type GatedDrawing } from './scene-svg';
@@ -53,8 +58,10 @@ export async function figureDrawing(
   seed: string,
   /** A few people like them, standing together: a team, a family. */
   count = 1,
+  /** Standing, or in bed. */
+  pose: FigurePose = 'standing',
 ): Promise<GatedDrawing & { anchors: CharacterSheet['anchors'] }> {
-  const drawn = drawFigure(spec, seed, count);
+  const drawn = drawFigure(spec, seed, count, pose);
   const measured = await renderSvg(drawn.svg, undefined, {
     grid: { svg: drawn.svg, cols: 48 },
   });

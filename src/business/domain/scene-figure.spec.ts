@@ -226,6 +226,37 @@ describe('a few people standing together', () => {
   });
 });
 
+describe('someone in bed', () => {
+  const patient = as({ age: 'child', hair: 'curly', skin: 7 });
+
+  it('draws them sitting up in bed, their faces on their head as standing', async () => {
+    const drawn = drawFigure(patient, 'p', 1, 'in bed');
+    const [, , w, h] = drawn.viewBox;
+    expect(w).toBeGreaterThan(h);
+    expect(Object.keys(drawn.states)).toEqual([...EXPRESSIONS]);
+    const { notes } = await measureSheet({
+      svg: drawn.svg,
+      viewBox: drawn.viewBox,
+      aspect: w / h,
+      parts: drawn.parts,
+      labels: {},
+      states: drawn.states,
+      moves: true,
+      callouts: [],
+      field: null,
+    });
+    expect(notes).toEqual([]);
+    // They blink and talk as they do standing.
+    expect(drawn.svg).toContain('class="blink b0"');
+    expect(drawn.svg).toContain('<g class="talk" opacity="0">');
+  });
+
+  it('is one person in a bed, however many were asked for', () => {
+    const one = drawFigure(patient, 'p', 3, 'in bed').svg;
+    expect(one.match(/fill-opacity="0.16"/g)).toHaveLength(1);
+  });
+});
+
 describe('a face nothing covers', () => {
   const SIZE = 2;
   /** The colour at a point of the figure drawn with no face on, in the frame's units. */

@@ -269,6 +269,50 @@ export function figureOf(
   };
 }
 
+/**
+ * Someone the page shows whom no one described: dressed as `patch` says
+ * (for what they are: a doctor, a child), the rest chosen by their name,
+ * so each looks like themselves and not like the next plain person, and
+ * the same in every make.
+ */
+export function figureFor(
+  seed: string,
+  patch: Partial<FigureSpec> = {},
+): FigureSpec {
+  const pick = <T>(list: readonly T[], salt: string): T =>
+    list[Math.floor(beatOf(`${seed}:${salt}`) * list.length) % list.length];
+  const age = patch.age ?? PLAIN_FIGURE.age;
+  const hairs: readonly HairStyle[] =
+    age === 'child'
+      ? ['short', 'pigtails', 'curly', 'ponytail', 'spiky', 'bob', 'afro']
+      : age === 'elder'
+        ? ['balding', 'short', 'bun', 'curly', 'bald']
+        : ['short', 'curly', 'bob', 'bun', 'afro', 'long', 'ponytail', 'locs'];
+  return {
+    ...PLAIN_FIGURE,
+    age,
+    build: pick(FIGURE_BUILDS, 'build'),
+    skin:
+      1 +
+      Math.min(SKIN_TONES - 1, Math.floor(beatOf(`${seed}:skin`) * SKIN_TONES)),
+    hair: pick(hairs, 'hair'),
+    hairColour:
+      age === 'elder'
+        ? pick(['grey', 'white'] as const, 'colour')
+        : pick(HAIR_COLOURS.slice(0, 6), 'colour'),
+    topColour: pick(
+      CLOTH_COLOURS.filter((c) => c !== 'white' && c !== 'black'),
+      'top',
+    ),
+    bottomColour: pick(
+      ['navy', 'grey', 'brown', 'black', 'blue'] as const,
+      'bottom',
+    ),
+    accentColour: pick(CLOTH_COLOURS, 'accent'),
+    ...patch,
+  };
+}
+
 /** A figure in a few words, for a log line or a contact sheet. */
 export function describeFigure(spec: FigureSpec): string {
   const hair =
@@ -1316,6 +1360,124 @@ function companionOf(spec: FigureSpec, i: number, seed: string): FigureSpec {
   };
 }
 
+/** How someone is drawn on a page: standing, or lying in bed (a patient). */
+export const FIGURE_POSES = ['standing', 'in bed'] as const;
+export type FigurePose = (typeof FIGURE_POSES)[number];
+
+/** A figure's own motion: a breath, a blink for each of them on their own beat, a mouth that moves while talking. */
+function styleOf(breathAt: number, blinks: number[]): string {
+  return [
+    `.breathe{animation:breathe 4.6s ease-in-out infinite;animation-delay:-${breathAt}s}`,
+    '@keyframes breathe{0%,100%{transform:translateY(0)}50%{transform:translateY(-1.4px)}}',
+    '.blink{animation:blink 5.3s linear infinite}',
+    ...blinks.map((at, i) => `.b${i}{animation-delay:-${at}s}`),
+    '@keyframes blink{0%,95.4%{opacity:0}95.5%,98%{opacity:1}98.1%,100%{opacity:0}}',
+    '.talking .mouth{animation:shut 1.2s linear infinite}',
+    '.talking .talk{animation:talk 1.2s linear infinite}',
+    keyframes('talk', true),
+    keyframes('shut', false),
+  ].join('');
+}
+
+/** The bed, in the kit's units: the mattress's top, and where the head rests on the pillows. */
+const BED = { top: -78, head: [-76, -148] as [number, number], half: 138 };
+
+/**
+ * Someone in bed: a patient, the sick, the sleeping. The same head, face,
+ * hair and hat as they have standing, propped on pillows at the bed's
+ * head, their shoulders and top above the blanket and their hands on it;
+ * the bed a plain one with a rail at each end. Faces, blinks and talking
+ * work as they do standing, and the blanket rises and falls as they
+ * breathe.
+ */
+function drawInBed(spec: FigureSpec, key: string): FigureDrawing {
+  const layers = layersOf(spec);
+  const { R } = layers;
+  const skin = SKIN[Math.min(SKIN_TONES, Math.max(1, spec.skin)) - 1];
+  const top = BED.top;
+  const [hx, hy] = BED.head;
+  const moved = (markup: string) =>
+    `<g transform="translate(${hx} ${r1(hy - R.cy)})">${markup}</g>`;
+  const frame = '#b9c0ca';
+  const blanket = shade(CLOTH[spec.accentColour], 1.55);
+  const shirt = CLOTH[spec.topColour];
+  const w = BED.half;
+  const bed = [
+    // Legs, the base, the rails at each end, the mattress, the pillows.
+    ...[-w + 14, w - 22].map(
+      (x) =>
+        `<rect x="${x}" y="${top + 26}" width="8" height="${-top - 32}" ${inked(frame)}/><circle cx="${x + 4}" cy="-5" r="5" ${inked(SHOE)}/>`,
+    ),
+    `<rect x="${-w + 6}" y="${top + 10}" width="${2 * w - 12}" height="18" rx="4" ${inked(frame)}/>`,
+    `<rect x="${-w}" y="${top - 88}" width="14" height="${118}" rx="6" ${inked(frame)}/>`,
+    `<rect x="${w - 14}" y="${top - 36}" width="14" height="${66}" rx="6" ${inked(frame)}/>`,
+    `<rect x="${-w + 12}" y="${top}" width="${2 * w - 24}" height="14" rx="5" ${inked('#f3f1ec')}/>`,
+    `<ellipse cx="${hx - 6}" cy="${top - 40}" rx="50" ry="24" ${inked('#ffffff')}/>`,
+  ].join('');
+  // Their top: the shoulders, sitting up against the pillows.
+  const s2 = R.halfShoulder;
+  const sy = hy + 30;
+  const torso = `<path d="M${r1(hx - s2)},${top + 6} L${r1(hx - s2)},${sy + 12} Q${r1(hx - s2)},${sy} ${r1(hx - s2 + 12)},${sy} L${r1(hx + s2 - 12)},${sy} Q${r1(hx + s2)},${sy} ${r1(hx + s2)},${sy + 12} L${r1(hx + s2)},${top + 6} Z" ${inked(shirt)}/>`;
+  const cover = [
+    `<path d="M${hx + 20},${top - 10} C${hx + 50},${top - 30} ${hx + 100},${top - 32} ${hx + 150},${top - 26} C${hx + 180},${top - 22} ${w - 20},${top - 18} ${w - 12},${top - 14} L${w - 12},${top + 18} Q${hx + 120},${top + 24} ${hx + 20},${top + 18} Z" ${inked(blanket)}/>`,
+    `<path d="M${r1(hx - s2 - 6)},${top - 8} Q${hx},${top - 16} ${hx + 34},${top - 10} L${hx + 34},${top + 16} L${r1(hx - s2 - 6)},${top + 16} Z" ${inked(blanket)}/>`,
+    line(
+      `M${hx + 70},${top - 14} Q${hx + 120},${top - 6} ${w - 24},${top - 4}`,
+      shade(blanket, 0.85),
+      2.4,
+    ),
+  ].join('');
+  // Hands on the blanket, in their sleeves.
+  const arms = [
+    [r1(hx - s2 + 7), sy + 12, hx - 4, top - 8],
+    [r1(hx + s2 - 7), sy + 12, hx + 28, top - 10],
+  ]
+    .map(
+      ([x1, y1, x2, y2]) =>
+        line(`M${x1},${y1} L${x2},${y2}`, FIGURE_INK, 13 + LINE * 2) +
+        line(`M${x1},${y1} L${x2},${y2}`, shirt, 13) +
+        `<circle cx="${x2}" cy="${y2}" r="8" ${inked(skin)}/>`,
+    )
+    .join('');
+  const [fx, fy, fw, fh] = [
+    -w - 8,
+    r1(hy - 40 - FIGURE_FRAME.headroom),
+    2 * w + 16,
+    r1(FIGURE_FRAME.below - (hy - 40 - FIGURE_FRAME.headroom)),
+  ];
+  const svg = [
+    `<svg xmlns="http://www.w3.org/2000/svg" viewBox="${[fx, fy, fw, fh].join(' ')}">`,
+    `<style>${styleOf(r1(beatOf(key) * 4.6), [r1(0.3 + beatOf(key) * 2.4)])}</style>`,
+    `<ellipse cx="0" cy="0" rx="${w}" ry="8" fill="#1d1a22" fill-opacity="0.16"/>`,
+    `<g stroke="${FIGURE_INK}" stroke-width="${LINE}" stroke-linejoin="round">`,
+    `<g id="legs">${bed}</g>`,
+    `<g class="breathe">`,
+    `<g id="behind">${moved(layers.behind)}</g>`,
+    `<g id="body">${torso}${cover}</g>`,
+    `<g id="head">${moved(layers.head)}</g>`,
+    `<g id="arms">${arms}</g>`,
+    FACE_NAMES.map(
+      (name) => `<g id="${name}">${moved(layers.faces[name])}</g>`,
+    ).join(''),
+    `<g class="blink b0" opacity="0">${moved(layers.blink)}</g>`,
+    `<g id="over">${moved(layers.over)}</g>`,
+    `</g>`,
+    `</g>`,
+    `</svg>`,
+  ].join('');
+  return {
+    svg,
+    viewBox: [fx, fy, fw, fh],
+    parts: { head: 'head', body: 'body', arms: 'arms', legs: 'legs' },
+    states: Object.fromEntries(FACE_NAMES.map((name) => [name, name])),
+    anchors: {
+      head: [hx, hy],
+      body: [hx + 90, top - 12],
+      legs: [hx + 150, top + 20],
+    },
+  };
+}
+
 /**
  * A person drawn from their spec, or a few people like them standing
  * together (`count`, up to four): a team, a family, a class. `seed`
@@ -1326,8 +1488,10 @@ export function drawFigure(
   spec: FigureSpec,
   seed = '',
   count = 1,
+  pose: FigurePose = 'standing',
 ): FigureDrawing {
   const key = seed || JSON.stringify(spec);
+  if (pose === 'in bed') return drawInBed(spec, key);
   const n = Math.min(MOST_TOGETHER, Math.max(1, Math.round(count) || 1));
   const members = Array.from({ length: n }, (_, i) =>
     layersOf(i === 0 ? spec : companionOf(spec, i, key)),
@@ -1358,17 +1522,10 @@ export function drawFigure(
     r1(frame[2] + wider),
     frame[3],
   ];
-  const style = [
-    `.breathe{animation:breathe 4.6s ease-in-out infinite;animation-delay:-${breathAt}s}`,
-    '@keyframes breathe{0%,100%{transform:translateY(0)}50%{transform:translateY(-1.4px)}}',
-    '.blink{animation:blink 5.3s linear infinite}',
-    ...members.map((_, i) => `.b${i}{animation-delay:-${blinkAt(i)}s}`),
-    '@keyframes blink{0%,95.4%{opacity:0}95.5%,98%{opacity:1}98.1%,100%{opacity:0}}',
-    '.talking .mouth{animation:shut 1.2s linear infinite}',
-    '.talking .talk{animation:talk 1.2s linear infinite}',
-    keyframes('talk', true),
-    keyframes('shut', false),
-  ].join('');
+  const style = styleOf(
+    breathAt,
+    members.map((_, i) => blinkAt(i)),
+  );
   const svg = [
     `<svg xmlns="http://www.w3.org/2000/svg" viewBox="${viewBox.join(' ')}">`,
     `<style>${style}</style>`,

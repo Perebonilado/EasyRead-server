@@ -300,6 +300,24 @@ Richard said "implement and test", so each decision took its recommendation: as 
   - Each figure blinks at its own moment: about 150 ms at full pace, 300 ms when calm.
   - One scale and one floor in both stagings. Names show on the first meeting only.
 
+### After the first review (2026-09-24)
+
+Richard found a patient in bed drawn by the artist, not the kit.
+
+- **Why that page looked like that.** It was made by the local worker, which had been started before any of this was written and still ran the old code.
+- **A real gap underneath.** The new writer, told to keep people out of drawings, still wrote briefs whose subject was a person:
+  - "A patient in a hospital bed, unresponsive…";
+  - "A simple outline of a person looking tired…";
+  - "A silhouette of a person being bitten…".
+
+  The artist drew them whatever its prompt said. On Blood Protozoa p8, even with its new rule, it drew a patient in a bed, grey figures and pictograms.
+- **The fix, in code, before the artist is asked:**
+  - A drawing named for someone ("Doctor", "Sick child", "Amundsen's team") becomes a person. Words that mean something else in science are left out: an adult mosquito, a blood group, a worker ant.
+  - A drawing whose brief is about someone becomes one, with a face from the brief (tired, sick or unresponsive are sad; bitten or in pain are afraid), and in bed when the brief says so.
+  - A brief that still asks for people sends the page back to the writer once, naming the drawing. A brief that only mentions people tells the artist to leave them out. The artist's own prompt forbids figures, silhouettes, pictograms and stick figures, and allows a body part or the outline of a body for its organs.
+- **A new pose, `in bed`.** The kit draws a patient sitting up in a bed, with the same head, faces, blink and talking. The writer can ask for it on a person or a character.
+- **Result, remade locally.** Pages 6 and 8 came back with their patients drawn by the kit, in bed, and no people from the artist. Page 9's "Person" is drawn by the kit.
+
 ### Not done
 
 - **Poses.** Planned for later.

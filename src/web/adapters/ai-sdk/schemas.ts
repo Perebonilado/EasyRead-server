@@ -24,6 +24,7 @@ import {
   CLOTH_COLOURS,
   FACIAL_HAIR,
   FIGURE_AGES,
+  FIGURE_POSES,
   FIGURE_BUILDS,
   FIGURE_EXTRAS,
   HAIR_COLOURS,
@@ -583,6 +584,7 @@ export const sceneScriptSchema = z.object({
       state: z.enum(EXPRESSIONS).nullable(),
       figure: figureSchema.nullable(),
       count: z.number().int().nullable(),
+      pose: z.enum(FIGURE_POSES).nullable(),
       timeline: z
         .array(z.object({ when: z.string(), name: z.string() }))
         .nullable(),

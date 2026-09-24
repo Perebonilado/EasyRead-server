@@ -1,7 +1,9 @@
-import { PLAIN_FIGURE } from './scene-figure';
 import {
+  LEAVE_PEOPLE_OUT,
   fitLayout,
   mendScript,
+  mentionsPeople,
+  peopleAskedFor,
   phraseAt,
   quietStretches,
   tellsOfLoss,
@@ -538,13 +540,159 @@ describe('people the page shows', () => {
     expect(script.cast[1]).not.toHaveProperty('count');
   });
 
-  it('draws a person the writer said nothing of plainly, and says so', () => {
-    const { script, mended } = mendScript(page([thing('nurse', 'person')]));
-    expect(script.cast[0]).toMatchObject({
-      kind: 'person',
-      figure: PLAIN_FIGURE,
-    });
+  it('draws a person the writer said nothing of as themselves, the same every time, and says so', () => {
+    const made = () => mendScript(page([thing('nurse', 'person')]));
+    const { script, mended } = made();
+    const nurse = script.cast[0];
+    expect(nurse).toMatchObject({ kind: 'person', figure: { age: 'adult' } });
+    expect(nurse).toEqual(made().script.cast[0]);
     expect(mended.join(' ')).toContain('a person with no figure');
+  });
+
+  it('draws a drawing that is someone as a person, dressed for what they are', () => {
+    const { script, mended } = mendScript(
+      page([
+        thing('doctor', 'drawing', { name: 'Doctor' }),
+        thing('sick', 'drawing', { name: 'Sick child' }),
+        thing('team', 'drawing', { name: "Amundsen's team" }),
+      ]),
+    );
+    expect(script.cast.map((t) => t.kind)).toEqual([
+      'person',
+      'person',
+      'person',
+    ]);
+    expect(script.cast[0]).toMatchObject({
+      figure: { top: 'lab coat', extras: ['stethoscope'] },
+    });
+    expect(script.cast[1]).toMatchObject({ figure: { age: 'child' } });
+    expect(script.cast[2]).toMatchObject({ count: 3 });
+    expect(mended.join(' ')).toContain('"Doctor" is someone');
+  });
+
+  it('leaves as drawings what only sounds like someone', () => {
+    const { script } = mendScript(
+      page([
+        // Something of someone's, a diagram inside a body, a life stage, a kind.
+        thing('lungs', 'drawing', { name: "Person's lungs" }),
+        thing('body', 'drawing', {
+          name: 'Human',
+          parts: [{ name: 'spleen', label: true }],
+        }),
+        thing('stage', 'drawing', { name: 'Adult' }),
+        thing('blood', 'drawing', { name: 'Blood group' }),
+      ]),
+    );
+    expect(script.cast.map((t) => t.kind)).toEqual([
+      'drawing',
+      'drawing',
+      'drawing',
+      'drawing',
+    ]);
+  });
+
+  it('draws a drawing about someone as them: in bed, feeling as the brief says', () => {
+    const { script, mended } = mendScript(
+      page([
+        thing('coma', 'drawing', {
+          name: 'Coma and Death',
+          brief:
+            'A patient in a hospital bed, unresponsive, monitored by a machine with a flat line.',
+        }),
+        thing('early', 'drawing', {
+          name: 'Early Symptoms',
+          brief:
+            'A simple outline of a person looking tired and weak, with a thermometer by the head.',
+        }),
+        thing('again', 'drawing', {
+          name: 'Reinfection',
+          brief:
+            'A silhouette of a person is shown being bitten by two separate tsetse flies.',
+        }),
+        thing('pair', 'drawing', {
+          name: 'Handshake',
+          brief: 'Two people shaking hands in a clinic.',
+        }),
+      ]),
+    );
+    expect(script.cast).toMatchObject([
+      { id: 'coma', kind: 'person', pose: 'in bed', state: 'sad' },
+      { id: 'early', kind: 'person', state: 'sad' },
+      { id: 'again', kind: 'person', state: 'afraid' },
+      { id: 'pair', kind: 'person', count: 2 },
+    ]);
+    expect(script.cast[1]).not.toHaveProperty('pose');
+    expect(mended.join(' ')).toContain('coma: its brief is about someone');
+  });
+
+  it("leaves as drawings the briefs about something of someone's", () => {
+    const { script } = mendScript(
+      page([
+        thing('lungs', 'drawing', {
+          name: 'Lungs',
+          brief: "A person's lungs filling with air, in a cutaway.",
+        }),
+        thing('jab', 'drawing', {
+          name: 'Injection',
+          brief: "A doctor's hand holding a syringe against an arm.",
+        }),
+      ]),
+    );
+    expect(script.cast.map((t) => t.kind)).toEqual(['drawing', 'drawing']);
+  });
+
+  it('puts a person in bed when the writer says so, and a group never', () => {
+    const { script } = mendScript(
+      page([
+        thing('mum', 'person', { pose: 'in bed' }),
+        thing('team', 'person', { pose: 'in bed', count: 3 }),
+      ]),
+    );
+    expect(script.cast[0]).toMatchObject({ pose: 'in bed' });
+    expect(script.cast[1]).not.toHaveProperty('pose');
+  });
+
+  it('sends back to the writer a drawing that asks for people, and not one that asks for a part of someone', () => {
+    const { problems } = mendScript(
+      page([
+        thing('progress', 'drawing', {
+          name: 'Progression',
+          brief:
+            'Three panels: first a person falling asleep, then lying in bed, then a flat line.',
+        }),
+        thing('jab', 'drawing', {
+          name: 'Injection',
+          brief: "A doctor's hand holding a syringe against an arm.",
+        }),
+      ]),
+    );
+    expect(problems).toHaveLength(1);
+    expect(problems[0]).toContain('"progress" asks the artist for people');
+    expect(problems[0]).toContain('a person falling asleep');
+    expect(peopleAskedFor("A person's lungs in a cutaway.")).toBeNull();
+  });
+
+  it('tells the artist to leave out the people a brief mentions', () => {
+    const { script, mended } = mendScript(
+      page([
+        thing('bed', 'drawing', {
+          name: 'Hospital bed',
+          brief: 'A hospital bed with a drip beside it, ready for a patient.',
+        }),
+        thing('heart', 'drawing', {
+          name: 'Heart',
+          brief: 'A cross-section of the human heart.',
+        }),
+      ]),
+    );
+    const [bed, heart] = script.cast;
+    expect(bed.kind === 'drawing' && bed.brief).toContain(LEAVE_PEOPLE_OUT);
+    expect(heart.kind === 'drawing' && heart.brief).toBe(
+      'A cross-section of the human heart.',
+    );
+    expect(mended.join(' ')).toContain('bed: its brief mentions people');
+    expect(mentionsPeople('two stick figures side by side')).toBe(true);
+    expect(mentionsPeople('the human heart')).toBe(false);
   });
 
   it('takes a person a story knows for its character, drawn once for the book', () => {

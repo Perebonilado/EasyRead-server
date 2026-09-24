@@ -724,14 +724,17 @@ export class SceneProcessor {
     for (const thing of people)
       out.set(
         thing.id,
-        await figureDrawing(thing.figure, thing.id, thing.count).catch(
-          (error: unknown) => {
-            this.logger.warn(
-              `${who}: "${thing.id}" (a person) is set as a card: ${(error as Error).message}`,
-            );
-            return null;
-          },
-        ),
+        await figureDrawing(
+          thing.figure,
+          thing.id,
+          thing.count,
+          thing.pose,
+        ).catch((error: unknown) => {
+          this.logger.warn(
+            `${who}: "${thing.id}" (a person) is set as a card: ${(error as Error).message}`,
+          );
+          return null;
+        }),
       );
     // The story's characters, each drawn once for the whole book; the
     // first time the book meets one, what they are like beside them.
@@ -747,13 +750,24 @@ export class SceneProcessor {
               who,
             )
           : null;
+      // A person in bed on this page: drawn so by the kit, from their figure.
+      const inBed =
+        sheet?.figure && thing.pose === 'in bed'
+          ? await figureDrawing(sheet.figure, thing.ref, 1, 'in bed')
+          : null;
+      const { anchors: bedAnchors, ...posed } = inBed ?? { anchors: null };
       out.set(
         thing.id,
         sheet
           ? {
-              ...sheet.drawing,
-              callouts: introCallouts(sheet, thing.intro),
-              ...(sheet.anchors.head ? { head: sheet.anchors.head } : {}),
+              ...(inBed ? (posed as GatedDrawing) : sheet.drawing),
+              callouts: introCallouts(
+                bedAnchors ? { ...sheet, anchors: bedAnchors } : sheet,
+                thing.intro,
+              ),
+              ...((bedAnchors ?? sheet.anchors).head
+                ? { head: (bedAnchors ?? sheet.anchors).head! }
+                : {}),
               // A person stands at the kit's scale; an animal or a
               // creature at its size beside them.
               stands: sheet.drawing.stands ?? {

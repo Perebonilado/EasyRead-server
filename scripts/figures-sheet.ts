@@ -239,8 +239,9 @@ function placed(
   face: Expression = 'neutral',
   seed = '',
   count = 1,
+  pose: 'standing' | 'in bed' = 'standing',
 ) {
-  const drawn = drawFigure(spec, seed || JSON.stringify(spec), count);
+  const drawn = drawFigure(spec, seed || JSON.stringify(spec), count, pose);
   const [vx, vy, vw, vh] = drawn.viewBox;
   // The kit's ground, y = 0, on the sheet's.
   return {
@@ -284,6 +285,80 @@ for (const section of sections) {
     page.push(
       `<figure><template>${at.svg}</template><figcaption>${cell.label}</figcaption></figure>`,
     );
+  });
+  page.push('</div>');
+  y = ground + 10 * SCALE + LABEL + 30;
+}
+
+// In bed: a patient, with the faces they have standing.
+const patients: { label: string; spec: FigureSpec; face: Expression }[] = [
+  {
+    label: 'in bed, sad',
+    spec: as({
+      age: 'child',
+      hair: 'curly',
+      hairColour: 'black',
+      skin: 7,
+      topColour: 'yellow',
+      accentColour: 'blue',
+    }),
+    face: 'sad',
+  },
+  {
+    label: 'in bed, headscarf',
+    spec: as({
+      headwear: 'headscarf',
+      accentColour: 'teal',
+      skin: 5,
+      topColour: 'pink',
+    }),
+    face: 'neutral',
+  },
+  {
+    label: 'in bed, happy',
+    spec: as({
+      age: 'elder',
+      hair: 'balding',
+      hairColour: 'white',
+      facialHair: 'beard',
+      skin: 2,
+      topColour: 'green',
+      accentColour: 'purple',
+    }),
+    face: 'happy',
+  },
+];
+still.push(
+  `<text x="20" y="${y + TITLE}" font-size="${TITLE}" font-weight="700" fill="${INK}">In bed</text>`,
+);
+page.push('<h2>In bed</h2><div class="row">');
+y += TITLE + 14;
+{
+  const ground =
+    y + drawFigure(as({}), 'x', 1, 'in bed').viewBox[3] * SCALE - 10 * SCALE;
+  let left = 20;
+  patients.forEach((one, k) => {
+    const width =
+      drawFigure(one.spec, `bed-${k}`, 1, 'in bed').viewBox[2] * SCALE;
+    const at = placed(
+      one.spec,
+      left + width / 2,
+      ground,
+      one.face,
+      `bed-${k}`,
+      1,
+      'in bed',
+    );
+    still.push(
+      `<svg x="${at.left}" y="${at.y}" width="${at.w}" height="${at.h}" ${at.svg.slice(at.svg.indexOf('viewBox'))}`,
+    );
+    still.push(
+      `<text x="${left + width / 2}" y="${ground + 10 * SCALE + LABEL + 4}" font-size="${LABEL}" text-anchor="middle" fill="#666">${one.label}</text>`,
+    );
+    page.push(
+      `<figure style="width:${Math.round(width)}px"><template>${at.svg}</template><figcaption>${one.label}</figcaption></figure>`,
+    );
+    left += width + 30;
   });
   page.push('</div>');
   y = ground + 10 * SCALE + LABEL + 30;

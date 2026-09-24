@@ -213,7 +213,12 @@ seven faces, a blink, a breath, and a mouth that moves while the stage
 marks them talking; no model is asked, so people cost nothing to draw.
 Animals and creatures are still drawn by the artist, in the kit's style,
 at their size beside people. The writer shows people on any page, a doctor
-or a scientist, as `person` things drawn the same way. On the stage,
+or a scientist, as `person` things drawn the same way, a few together as
+a group, a patient in bed with pose `in bed`. The artist draws no one: a
+drawing named for someone ("Doctor", "Sick child") or whose brief is about
+someone ("A patient in a hospital bed…") becomes a person, any other brief
+that mentions people is told to leave them out, and one that asks for
+them sends the page back to the writer once, naming the drawing. On the stage,
 everyone standing together is drawn at one scale (a child is always
 shorter than a grown-up, a grown-up at most seven tenths of the stage)
 and, in front of a set, on its ground. A story character's name is written

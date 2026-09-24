@@ -724,6 +724,8 @@ describe('what a character says, in a bubble', () => {
         say: '"You are holding the matches upside down," says the fox.',
         pause: 'short',
         delivery: 'explain',
+        // As the mend finds it: the fox's line.
+        lines: [{ span: [1, 41], speaker: 'fox' }],
       },
     ],
     cast: [
@@ -754,16 +756,10 @@ describe('what a character says, in a bubble', () => {
         effects: [],
       },
       {
-        at: { beat: 3, phrase: 'says the fox' },
-        word: 0,
-        stage: null,
-        effects: [{ target: 'fox', part: null, do: 'say' }],
-      },
-      {
         at: { beat: 2, phrase: 'Inside the leaf' },
         word: 0,
         stage: null,
-        // A sentence that quotes no one: nothing to hold, so a pulse.
+        // A "say" left on the stage makes no bubble: lines do.
         effects: [{ target: 'mira', part: null, do: 'say' }],
       },
     ],
@@ -784,14 +780,84 @@ describe('what a character says, in a bubble', () => {
     generator: 'scene-2',
   });
 
-  it('gives a sentence the writer says quotes a character its bubble, with no "say" on it', () => {
-    const quoted = composeScene({
+  it('opens a bubble for each line, from just before its first word', () => {
+    const says = scene.effects.filter((e) => e.do === 'say');
+    expect(says.map((e) => [e.target, e.atMs, e.say?.text])).toEqual([
+      // The line's first word is at 7000ms.
+      ['fox', 6850, 'You are holding the matches upside down'],
+    ]);
+    // A "say" on the stage with no line under it is no bubble.
+    expect(
+      scene.effects.some((e) => e.target === 'mira' && e.do === 'say'),
+    ).toBe(false);
+  });
+
+  it('holds a line until the voice has said it, and the mouth for exactly that long', () => {
+    const [say] = scene.effects.filter((e) => e.do === 'say');
+    expect(say.say).toMatchObject({ id: 'say-1' });
+    // Its last word, "down,", ends at 9050ms; the sentence goes on after it.
+    expect(say.say!.saidUntilMs).toBe(9050);
+    expect(say.say!.untilMs).toBe(9050 + 700);
+  });
+
+  it('gives each of two speakers in a sentence their own bubble, never closed before its words end', () => {
+    const text = '"Is it far?" asks Mira. "Not far," says the fox.';
+    const two = composeScene({
       script: {
         ...talking,
-        beats: talking.beats.map((b, k) =>
-          k === 3 ? { ...b, speaker: 'fox' } : b,
-        ),
-        steps: talking.steps.filter((step) => !step.effects.length),
+        beats: [
+          ...talking.beats.slice(0, 3),
+          {
+            say: text,
+            pause: 'short',
+            delivery: 'explain',
+            lines: [
+              { span: [1, 11], speaker: 'mira' },
+              { span: [25, 33], speaker: 'fox' },
+            ],
+          },
+        ],
+      },
+      drawings: new Map([
+        ['mira', figure()],
+        ['fox', figure()],
+      ]),
+      beats: [...beats.slice(0, 3), beat(text, 7000)],
+      durationMs: 16_000,
+      timing: 'voice',
+      generator: 'scene-2',
+    }).scene;
+    const says = two.effects.filter((e) => e.do === 'say');
+    expect(says.map((e) => [e.target, e.say!.text])).toEqual([
+      ['mira', 'Is it far?'],
+      ['fox', 'Not far'],
+    ]);
+    // Mira's words end at 7850ms; the fox's bubble opens after them, and hers closes as it does.
+    expect(says[0].say!.saidUntilMs).toBe(7850);
+    expect(says[0].say!.untilMs).toBe(says[1].atMs);
+    expect(says[0].say!.untilMs).toBeGreaterThanOrEqual(7850);
+  });
+
+  it('carries a line across a change of stage, and ends it with its speaker leaving', () => {
+    const moving = composeScene({
+      script: {
+        ...talking,
+        steps: [
+          ...talking.steps,
+          // Mid-line, the stage changes: the fox stays, then goes.
+          {
+            at: { beat: 3, phrase: 'the matches' },
+            word: 3,
+            stage: { layout: 'row', show: ['fox', 'mira'], arrows: [] },
+            effects: [],
+          },
+          {
+            at: { beat: 3, phrase: 'down' },
+            word: 6,
+            stage: { layout: 'one', show: ['mira'], arrows: [] },
+            effects: [],
+          },
+        ],
       },
       drawings: new Map([
         ['mira', figure()],
@@ -802,28 +868,55 @@ describe('what a character says, in a bubble', () => {
       timing: 'voice',
       generator: 'scene-2',
     }).scene;
-    const says = quoted.effects.filter((e) => e.do === 'say');
-    expect(says.map((e) => [e.target, e.atMs, e.say?.text])).toEqual([
-      ['fox', beatsSaid[3].startMs, 'You are holding the matches upside down'],
-    ]);
+    const says = moving.effects.filter((e) => e.do === 'say');
+    expect(says).toHaveLength(2);
+    const [first, rest] = says;
+    const change = moving.steps[moving.steps.length - 2].atMs;
+    const leaves = moving.steps[moving.steps.length - 1].atMs;
+    expect(first.say).toMatchObject({ untilMs: change, carried: true });
+    expect(rest).toMatchObject({ atMs: change, target: 'fox' });
+    expect(rest.say).toMatchObject({
+      text: first.say!.text,
+      continues: true,
+      untilMs: leaves,
+    });
+    // Each part is placed for its own step.
+    for (const staging of ['box', 'wide'] as const)
+      for (const one of says)
+        expect(moving.stagings[staging].bubbles?.[one.say!.id]).toBeTruthy();
   });
 
-  it('holds the words from the sentence until the voice has said it', () => {
-    const says = scene.effects.filter((e) => e.do === 'say');
-    expect(says).toHaveLength(1);
-    expect(says[0].say).toMatchObject({
-      id: 'say-1',
-      text: 'You are holding the matches upside down',
-    });
-    expect(says[0].say!.untilMs).toBe(
-      Math.min(beatsSaid[3].endMs + 700, 16_000),
-    );
-    // The fox's mouth moves while the voice says his words, and no longer.
-    expect(says[0].say!.saidUntilMs).toBeLessThanOrEqual(beatsSaid[3].endMs);
-    expect(says[0].say!.saidUntilMs).toBeGreaterThan(says[0].atMs);
-    expect(
-      scene.effects.some((e) => e.target === 'mira' && e.do === 'pulse'),
-    ).toBe(true);
+  it('sets a line with no room by the speaker in a strip across the top, with their name', () => {
+    const off = composeScene({
+      script: {
+        ...talking,
+        // The fox is not on the stage when he speaks.
+        steps: [
+          {
+            at: { beat: 0, phrase: 'Plants make' },
+            word: 0,
+            stage: { layout: 'one', show: ['mira'], arrows: [] },
+            effects: [],
+          },
+        ],
+      },
+      drawings: new Map([
+        ['mira', figure()],
+        ['fox', figure()],
+      ]),
+      beats: beatsSaid,
+      durationMs: 16_000,
+      timing: 'voice',
+      generator: 'scene-2',
+    }).scene;
+    const [say] = off.effects.filter((e) => e.do === 'say');
+    for (const staging of ['box', 'wide'] as const) {
+      const strip = off.stagings[staging].bubbles?.[say.say!.id];
+      expect(strip).toMatchObject({ who: 'Ember', y: 12 });
+      expect(strip!.lines.join(' ')).toBe(
+        'Ember: You are holding the matches upside down',
+      );
+    }
   });
 
   it('sets the bubble by the head, clear of everything, in both stagings', () => {

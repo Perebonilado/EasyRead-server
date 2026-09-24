@@ -13,7 +13,7 @@ import {
   voicedPieces,
 } from './scene-voice';
 import type { StoryBible, StoryCharacter } from './scene-story';
-import { SCENE_DELIVERIES, SCENE_MOODS } from './scene-script';
+import { SCENE_DELIVERIES, SCENE_MOODS, quotedSpans } from './scene-script';
 
 describe('how the voice says each sentence', () => {
   it('gives every tag a pace and a silence inside the bounds', () => {
@@ -144,7 +144,18 @@ describe("a story's characters, in their own voices", () => {
         { speed: 1, pauseAfter: 0.4 },
       ],
       styles: ['calm', 'calm', 'calm'],
-      speakers: [null, speaker, null],
+      lines: [
+        [],
+        [
+          {
+            span: quotedSpans(
+              '"You are holding the matches upside down," says the fox.',
+            )[0],
+            speaker,
+          },
+        ],
+        [],
+      ],
     });
     expect(pieces).toEqual([
       {
@@ -189,6 +200,37 @@ describe("a story's characters, in their own voices", () => {
         ' ',
       ),
     );
+  });
+
+  it('gives two characters in one sentence each their own voice', () => {
+    const mira = { voice: 'af_sky', pace: 1.06, style: 'as Mira' };
+    const ember = { voice: 'am_fenrir', pace: 1, style: 'as Ember' };
+    const text = '"Ready?" asks Mira. "Always," says Ember.';
+    const [first, second] = quotedSpans(text);
+    const pieces = voicedPieces({
+      texts: [text],
+      delivered: [{ speed: 1, pauseAfter: 0.5 }],
+      styles: ['calm'],
+      lines: [
+        [
+          { span: first, speaker: mira },
+          { span: second, speaker: ember },
+        ],
+      ],
+    });
+    expect(pieces.map((p) => [p.text, p.voice ?? 'narrator'])).toEqual([
+      ['"Ready?', 'af_sky'],
+      ['" asks Mira. "', 'narrator'],
+      ['Always,', 'am_fenrir'],
+      ['" says Ember.', 'narrator'],
+    ]);
+    expect(pieces[0].speed).toBe(1.06);
+    expect(pieces.map((p) => p.pauseAfter)).toEqual([
+      TURN_S,
+      TURN_S,
+      TURN_S,
+      0.5,
+    ]);
   });
 
   it('starts each sentence where its first piece does', () => {

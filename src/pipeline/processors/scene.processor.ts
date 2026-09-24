@@ -29,6 +29,7 @@ import {
   isCodeThing,
   mendScript,
   quietStretches,
+  quotedSpans,
   signsShown,
   wordsOf,
   type CharacterThing,
@@ -917,23 +918,27 @@ export class SceneProcessor {
       : model.startsWith('kokoro')
         ? 'kokoro'
         : null;
-    const speakers = script.beats.map((beat, k) => {
-      if (!story) return null;
-      // Whom the sentence quotes, as the writer named them, or the "say" on it.
-      const said =
-        beat.speaker ??
-        script.steps
-          .filter((step) => step.at.beat === k)
-          .flatMap((step) => step.effects)
-          .find((effect) => effect.do === 'say')?.target;
-      const thing = script.cast.find((t) => t.id === said);
-      const character =
-        thing?.kind === 'character'
-          ? story.bible.characters.find((c) => c.id === thing.ref)
-          : undefined;
-      return character
-        ? characterVoice(story.bible, character, engine, voice)
-        : null;
+    // Each line a character says, in their own voice: its place in the
+    // spoken text is its quote's, the i-th quote of the sentence there.
+    const lines = script.beats.map((beat, k) => {
+      if (!story || !beat.lines?.length) return [];
+      const written = quotedSpans(beat.say);
+      const spoken = quotedSpans(forms[k].text);
+      if (written.length !== spoken.length) return [];
+      return beat.lines.flatMap((line) => {
+        const at = written.findIndex(
+          ([a, b]) => a === line.span[0] && b === line.span[1],
+        );
+        const thing = script.cast.find((t) => t.id === line.speaker);
+        const character =
+          thing?.kind === 'character'
+            ? story.bible.characters.find((c) => c.id === thing.ref)
+            : undefined;
+        const speaker = character
+          ? characterVoice(story.bible, character, engine, voice)
+          : null;
+        return at >= 0 && speaker ? [{ span: spoken[at], speaker }] : [];
+      });
     });
     const pieces = voicedPieces({
       texts: forms.map((form) => form.text),
@@ -942,7 +947,7 @@ export class SceneProcessor {
       styles: script.beats.map((beat) =>
         voiceStyle(script.mood, beat.delivery),
       ),
-      speakers,
+      lines,
     });
     const result = await this.speech.synthesize({
       text: spoken.text,

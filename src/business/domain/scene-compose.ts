@@ -23,6 +23,7 @@ import {
   arrowPath,
   pillBox,
   placeBubble,
+  placeStrip,
   placeLabels,
   placePill,
   segmentsOf,
@@ -71,17 +72,13 @@ const SAY_AFTER_MS = 700;
 const SAY_CHARS = 80;
 
 /**
- * What a character says in a sentence: the words it quotes, as the voice
- * says them, or of a speech the sentences that start it, as many as a
- * bubble holds at a glance. Null for a sentence that quotes no one: then
- * there is nothing for a bubble to hold.
+ * A line's words as its bubble holds them: all of a line or two, or of a
+ * speech the sentences that start it, as many as a bubble holds at a
+ * glance. Null for words with no letter in them.
  */
-export function spokenIn(sentence: string): string | null {
-  const quoted = quotedSpans(sentence).map(([start, end]) =>
-    sentence.slice(start, end).replace(/[,;:]$/, ''),
-  );
-  if (!quoted.length) return null;
-  const said = quoted.join(' … ');
+export function bubbleText(quote: string): string | null {
+  const said = quote.trim().replace(/[,;:]$/, '');
+  if (!/\p{L}/u.test(said)) return null;
   if (said.length <= SAY_CHARS) return said;
   // A speech: its first sentences, as many as fit, the first always.
   const sentences = said.split(/(?<=[.!?…])\s+/);
@@ -93,6 +90,24 @@ export function spokenIn(sentence: string): string | null {
   if (kept.length <= SAY_CHARS * 1.5) return kept;
   const cut = kept.slice(0, SAY_CHARS);
   return `${cut.slice(0, cut.lastIndexOf(' ')).trimEnd()}…`;
+}
+
+/** A character's or a person's name, as the page gives it. */
+const nameOf = (thing: SceneThing | undefined): string | null =>
+  thing?.kind === 'character' || thing?.kind === 'person' ? thing.name : null;
+
+/**
+ * What a character says in a sentence: the words it quotes, as the voice
+ * says them, or of a speech the sentences that start it, as many as a
+ * bubble holds at a glance. Null for a sentence that quotes no one: then
+ * there is nothing for a bubble to hold.
+ */
+export function spokenIn(sentence: string): string | null {
+  const quoted = quotedSpans(sentence).map(([start, end]) =>
+    sentence.slice(start, end).replace(/[,;:]$/, ''),
+  );
+  if (!quoted.length) return null;
+  return bubbleText(quoted.join(' … '));
 }
 
 /** The thing as the client gets it: its drawing, or a card with its name when the drawing failed. */
@@ -508,38 +523,8 @@ export function composeScene(input: ComposeInput): {
       const at = Math.round(
         atMs + (step.stage ? 350 : 0) + i * EFFECT_STAGGER_MS,
       );
-      // A character's words, from the sentence that quotes them, held
-      // until the voice has said the sentence.
-      const said =
-        effect.do === 'say'
-          ? spokenIn(script.beats[step.at.beat]?.say ?? '')
-          : null;
-      if (effect.do === 'say') {
-        effects.push(
-          said
-            ? {
-                atMs: at,
-                target: effect.target,
-                part: null,
-                do: 'say',
-                say: {
-                  id: `say-${saying++}`,
-                  text: said,
-                  untilMs: Math.round(
-                    (beats[step.at.beat]?.endMs ?? at) + SAY_AFTER_MS,
-                  ),
-                  saidUntilMs: Math.round(
-                    quotedUntil(
-                      script.beats[step.at.beat]?.say ?? '',
-                      beats[step.at.beat],
-                    ) ?? at,
-                  ),
-                },
-              }
-            : { atMs: at, target: effect.target, part: null, do: 'pulse' },
-        );
-        return;
-      }
+      // A character's words come from the sentence's own lines, below.
+      if (effect.do === 'say') return;
       effects.push({
         atMs: at,
         target: effect.target,
@@ -581,52 +566,78 @@ export function composeScene(input: ComposeInput): {
       },
     ),
   );
-  // A sentence the writer says quotes a character, with no "say" on it:
-  // its words in a bubble all the same, as the voice begins it.
+  // Each line a character says: a bubble by their head holding only its
+  // own words, open from just before its first word until a moment after
+  // its last. Their mouth moves while the voice says them.
   script.beats.forEach((beat, k) => {
-    if (!beat.speaker || byId.get(beat.speaker)?.kind !== 'drawing') return;
     const t = beats[k];
     if (!t) return;
-    const already = effects.some(
-      (e) => e.do === 'say' && e.atMs >= t.startMs - 600 && e.atMs <= t.endMs,
-    );
-    const text = spokenIn(beat.say);
-    if (already || !text) return;
-    // Open on the first quoted word, a breath early; close after the last.
-    const spans = quotedSpans(beat.say);
-    const from = t.words.find((w) => w[1] > (spans[0]?.[0] ?? 0))?.[2];
-    const to = quotedUntil(beat.say, t) ?? t.endMs;
-    effects.push({
-      atMs: Math.round(Math.max(t.startMs, (from ?? t.startMs) - 150)),
-      target: beat.speaker,
-      part: null,
-      do: 'say',
-      say: {
-        id: `say-${saying++}`,
-        text,
-        untilMs: Math.round(to + SAY_AFTER_MS),
-        saidUntilMs: Math.round(to),
-      },
-    });
+    for (const line of beat.lines ?? []) {
+      if (byId.get(line.speaker)?.kind !== 'drawing') continue;
+      const [a, b] = line.span;
+      const words = t.words.filter((w) => w[1] > a && w[0] < b);
+      const text = bubbleText(beat.say.slice(a, b));
+      if (!words.length || !text) continue;
+      const to = words[words.length - 1][3];
+      effects.push({
+        atMs: Math.round(Math.max(0, words[0][2] - 150)),
+        target: line.speaker,
+        part: null,
+        do: 'say',
+        say: {
+          id: `say-${saying++}`,
+          text,
+          untilMs: Math.round(to + SAY_AFTER_MS),
+          saidUntilMs: Math.round(to),
+        },
+      });
+    }
   });
   effects.sort((a, b) => a.atMs - b.atMs);
-  // A bubble belongs to the stage it is said on and to its sentence: it
-  // goes at the next change of stage, or when someone speaks after it.
-  const says = effects.filter((effect) => effect.say);
-  says.forEach((effect, i) => {
-    const nextStage = steps.find((step) => step.atMs > effect.atMs)?.atMs;
-    effect.say!.untilMs = Math.min(
-      effect.say!.untilMs,
-      nextStage ?? durationMs,
-      says[i + 1]?.atMs ?? durationMs,
-      durationMs,
-    );
-    if (effect.say!.saidUntilMs !== undefined)
-      effect.say!.saidUntilMs = Math.min(
-        effect.say!.saidUntilMs,
-        effect.say!.untilMs,
-      );
+  // A bubble stays while its words are said: the next line closes it no
+  // sooner than its own last word. It goes with its speaker if they leave
+  // the stage; if the stage changes while they stay, the rest of the line
+  // carries on in a bubble placed for the new step.
+  const lines = effects.filter((effect) => effect.say);
+  const carried: SceneEffectDto[] = [];
+  lines.forEach((effect, i) => {
+    const say = effect.say!;
+    const said = say.saidUntilMs ?? say.untilMs;
+    const next = lines[i + 1]?.atMs ?? durationMs;
+    let until = Math.min(durationMs, say.untilMs, Math.max(said, next));
+    let part = effect;
+    for (const step of steps) {
+      if (step.atMs <= part.atMs || step.atMs >= until) continue;
+      if (!step.show.includes(effect.target)) {
+        until = step.atMs;
+        break;
+      }
+      // The line so far ends at the change of stage; the rest carries on.
+      part.say!.untilMs = step.atMs;
+      part.say!.saidUntilMs = Math.min(said, step.atMs);
+      part.say!.carried = true;
+      const rest: SceneEffectDto = {
+        atMs: step.atMs,
+        target: effect.target,
+        part: null,
+        do: 'say',
+        say: {
+          id: `say-${saying++}`,
+          text: say.text,
+          untilMs: until,
+          saidUntilMs: Math.max(step.atMs, said),
+          continues: true,
+        },
+      };
+      carried.push(rest);
+      part = rest;
+    }
+    part.say!.untilMs = until;
+    part.say!.saidUntilMs = Math.min(part.say!.saidUntilMs ?? said, until);
   });
+  effects.push(...carried);
+  effects.sort((a, b) => a.atMs - b.atMs);
+  const says = effects.filter((effect) => effect.say);
   /** The step a moment falls in. */
   const stepOf = (t: number) => {
     let k = -1;
@@ -857,26 +868,38 @@ export function composeScene(input: ComposeInput): {
         const at = laidOut[effect.target];
         const found = geometry.get(effect.target);
         let bubble: SceneBubbleDto | null = null;
+        let head: [number, number] | null = null;
         if (at && found?.head) {
           const s = at.w / found.viewBox[2];
-          bubble = placeBubble({
-            text: effect.say!.text,
-            head: [
-              at.x + (found.head[0] - found.viewBox[0]) * s,
-              at.y + (found.head[1] - found.viewBox[1]) * s,
+          head = [
+            at.x + (found.head[0] - found.viewBox[0]) * s,
+            at.y + (found.head[1] - found.viewBox[1]) * s,
+          ];
+          const avoid = {
+            boxes: [
+              ...solid,
+              ...pillBoxes,
+              ...wordsOf(laidOut, byId, stepPills, arrows).map((w) => w.box),
             ],
+            segments,
+          };
+          const asked = {
+            text: effect.say!.text,
+            head,
             body: at,
             stage,
-            avoid: {
-              boxes: [
-                ...solid,
-                ...pillBoxes,
-                ...wordsOf(laidOut, byId, stepPills, arrows).map((w) => w.box),
-              ],
-              segments,
-            },
-          });
+            avoid,
+          };
+          // By their head, or narrower where the step is crowded.
+          bubble = placeBubble(asked) ?? placeBubble({ ...asked, width: 300 });
         }
+        // No room by them, or not on the stage: a strip across the top.
+        bubble ??= placeStrip({
+          text: effect.say!.text,
+          who: nameOf(castById.get(effect.target)) ?? effect.target,
+          head,
+          stage,
+        });
         bubbles[effect.say!.id] = bubble;
         if (bubble)
           spoken.push({
@@ -988,18 +1011,6 @@ export function composeScene(input: ComposeInput): {
     filled,
     audit: { box: box.audit, wide: wide.audit },
   };
-}
-
-/** When the voice has said the last of a sentence's quoted words: a speaker's mouth moves until then. */
-function quotedUntil(say: string, timed: TimedBeat | undefined): number | null {
-  if (!timed) return null;
-  const spans = quotedSpans(say);
-  return (
-    [...timed.words]
-      .reverse()
-      .find((w) => w[0] < (spans[spans.length - 1]?.[1] ?? say.length))?.[3] ??
-    timed.endMs
-  );
 }
 
 /** Where a run of words sits: its measured width, centred where it is set. */

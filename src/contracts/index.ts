@@ -1016,7 +1016,16 @@ export interface SceneEffectDto {
    * `untilMs`; their mouth moves until `saidUntilMs`, when the voice has
    * said the words (absent in older scenes).
    */
-  say?: { id: string; text: string; untilMs: number; saidUntilMs?: number };
+  say?: {
+    id: string;
+    text: string;
+    untilMs: number;
+    saidUntilMs?: number;
+    /** Its line goes on in the next bubble, across a change of stage: it does not close. */
+    carried?: true;
+    /** It carries on a line from the bubble before: it does not open. */
+    continues?: true;
+  };
 }
 
 /** A speech bubble as the stage sets it: its box, its words, and the point its tail reaches toward. */
@@ -1028,6 +1037,11 @@ export interface SceneBubbleDto {
   lines: string[];
   size: number;
   tail: [number, number];
+  /**
+   * A line with no room by its speaker's head, set in a strip across the
+   * top of the stage instead: who says it, written before the words.
+   */
+  who?: string;
 }
 
 /** Where a thing stands at one step, in the staging's design units. */

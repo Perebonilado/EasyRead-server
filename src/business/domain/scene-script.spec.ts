@@ -458,6 +458,58 @@ describe('a story told with its own characters', () => {
     );
   });
 
+  it("finds who says each line in the words, with the writer's marks only a hint", () => {
+    const talk = story();
+    talk.beats = [
+      {
+        say: 'Mira stands at the end of the quay.',
+        pause: 'short',
+        delivery: 'hook',
+      },
+      {
+        say: '"Who goes there?" asks Mira.',
+        pause: 'short',
+        delivery: 'explain',
+      },
+      {
+        say: 'The fox grins. "A friend," he says.',
+        pause: 'short',
+        delivery: 'explain',
+      },
+      {
+        say: '"Foxes don\'t talk," Mira whispers.',
+        pause: 'long',
+        delivery: 'key',
+      },
+    ];
+    talk.steps = [
+      step(0, 'Mira stands', { layout: 'row', show: ['girl', 'fox'] }),
+      step(2, 'The fox grins', { effects: [{ target: 'fox', do: 'say' }] }),
+      step(3, 'Mira whispers', {
+        effects: [{ target: 'girl.surprised', do: 'show' }],
+      }),
+    ];
+    const { script } = mendScript(talk, { characters });
+    expect(script.beats.map((beat) => beat.lines ?? [])).toEqual([
+      [],
+      [{ span: [1, 16], speaker: 'girl' }],
+      [{ span: [16, 25], speaker: 'fox' }],
+      [{ span: [1, 18], speaker: 'girl' }],
+    ]);
+    expect(script.beats.map((beat) => beat.speaker)).toEqual([
+      undefined,
+      'girl',
+      'fox',
+      'girl',
+    ]);
+    // A "say" was only a hint: bubbles come from the lines, so the step with
+    // nothing else on it is gone, and no "say" is left on the stage.
+    expect(script.steps).toHaveLength(2);
+    expect(
+      script.steps.flatMap((step) => step.effects).map((e) => e.do),
+    ).toEqual(['show']);
+  });
+
   it('sets characters in type in a book that is no story', () => {
     const { script } = mendScript(story());
     expect(script.cast.some((t) => t.kind === 'character')).toBe(false);
@@ -1087,5 +1139,27 @@ describe("a story's places, as the scene behind the stage", () => {
     // A place never takes a slot: the row holds Mira alone.
     expect(walks).toMatchObject({ show: ['mira'], backdrop: 'harbour' });
     expect(home).toMatchObject({ show: ['mira'], backdrop: 'home' });
+  });
+
+  it('keeps who is on the stage when a place is shown alone after them', () => {
+    const later = draft();
+    later.steps = [
+      step(0, 'The quay', { layout: 'row', show: ['mira'] }),
+      // The writer shows the place in a step of its own, after Mira.
+      step(1, 'Mira walks', { layout: 'one', show: ['harbour'] }),
+      step(2, 'she runs', { effects: [{ target: 'mira.happy', do: 'show' }] }),
+    ];
+    const { script, mended } = mendScript(later, { characters, places });
+    expect(script.steps[1].stage).toMatchObject({
+      show: ['mira'],
+      backdrop: 'harbour',
+    });
+    // So what happens to her later is still on the stage.
+    expect(script.steps[2].effects).toEqual([
+      { target: 'mira', part: 'happy', do: 'show' },
+    ]);
+    expect(mended.join(' ')).toContain(
+      'the place goes behind who is on the stage',
+    );
   });
 });

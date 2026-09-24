@@ -30,6 +30,7 @@ import {
   type FigureSign,
   type FigureSpec,
 } from './scene-figure';
+import { dialogueOf, quotedSpans, type Speaker } from './scene-dialogue';
 import { checkArithmetic, markTerms, type MathLine } from './scene-math';
 import { sample, type PlotSpec } from './scene-plot';
 import { findPhrase, isVerbatim } from './scene-quote';
@@ -161,6 +162,11 @@ export interface SceneBeat {
   delivery: SceneDelivery;
   /** The story's character it quotes, by their id: their words in their voice, in a bubble by their head. */
   speaker?: string | null;
+  /**
+   * Each line it quotes and who says it, found in its own words: a quote
+   * with no speaker found is the narrator's and is not listed.
+   */
+  lines?: { span: [number, number]; speaker: string }[];
   /** The music from this sentence on; absent, it carries on as it was. */
   music?: SceneMusic;
   /** The music runs high from here: a chase, a rush, danger close. */
@@ -543,44 +549,6 @@ export interface SceneScriptDraft {
 
 // ── Words ─────────────────────────────────────────────────────────────────
 
-/**
- * Where a sentence quotes someone: each run of quoted words, as the
- * [start, end) of the words without their marks. Double quotes, straight
- * or curly; curly single quotes closed by a mark that is no apostrophe;
- * straight single quotes opened at the start of a word and closed after
- * punctuation ('You're late,' says Tobi). And a quote the writer never
- * opened, from the sentence's start to its closing mark, or never closed,
- * from its opening mark to the end.
- */
-export function quotedSpans(sentence: string): [number, number][] {
-  const spans: [number, number][] = [];
-  const add = (start: number, end: number) => {
-    while (start < end && /\s/.test(sentence[start])) start += 1;
-    while (end > start && /\s/.test(sentence[end - 1])) end -= 1;
-    if (/\p{L}/u.test(sentence.slice(start, end))) spans.push([start, end]);
-  };
-  const runs = (pattern: RegExp) => {
-    for (const m of sentence.matchAll(pattern)) {
-      const inner = m.slice(1).find((g) => g !== undefined) ?? '';
-      const start = m.index + m[0].indexOf(inner);
-      add(start, start + inner.length);
-    }
-  };
-  runs(/“([^”]+)”|"([^"]+)"|‘(.+?)’(?!\p{L})/gu);
-  if (!spans.length) runs(/(?<![\p{L}\p{N}])'(\p{L}.*?[,.!?…])'(?!\p{L})/gu);
-  if (!spans.length) {
-    const unopened = /^(.+?[,.!?…])['’"”](?=\s|$)/u.exec(sentence);
-    const unclosed = /(?:^|\s)['‘"“](\p{L}.*)$/u.exec(sentence);
-    if (unopened) add(0, unopened[1].length);
-    else if (unclosed)
-      add(
-        unclosed.index + unclosed[0].length - unclosed[1].length,
-        sentence.length,
-      );
-  }
-  return spans.sort((a, b) => a[0] - b[0]);
-}
-
 /** The words of a sentence as the captions count them: a whitespace split. */
 export function wordsOf(text: string): string[] {
   return text.trim().split(/\s+/).filter(Boolean);
@@ -588,6 +556,7 @@ export function wordsOf(text: string): string[] {
 
 import { groupId, idKey, wordKey } from './scene-ids';
 export { groupId, idKey, wordKey };
+export { quotedSpans };
 
 /** Two words the same, or one the other with an ending: "chloroplast" and "chloroplasts". */
 function sameWord(a: string, b: string): boolean {
@@ -1097,8 +1066,16 @@ export function mendScript(
         if (byId.get(id)?.kind === 'place') backdrop = id;
         else if (!show.includes(id)) show.push(id);
       }
-      // A place alone: the empty scene, before anyone is in it.
-      if (!show.length && backdrop) {
+      // A place alone: the empty scene, before anyone is in it. Once
+      // people are on the stage, it is the scene changing behind them:
+      // they stay.
+      const standing = [...steps].reverse().find((s) => s.stage)?.stage;
+      if (!show.length && backdrop && onStage.length && standing) {
+        stage = { ...standing, backdrop };
+        mended.push(
+          `step ${one.index + 1}: the place goes behind who is on the stage`,
+        );
+      } else if (!show.length && backdrop) {
         stage = { layout: 'one', show: [], arrows: [], backdrop };
         onStage = [];
       }
@@ -1170,6 +1147,50 @@ export function mendScript(
       effects,
     });
   }
+
+  // Who says each quoted line: the story's characters on the page, found
+  // in the sentences' own words, the writer's speakers and "say"s only a
+  // hint. Each line is said in its speaker's voice and shown in its own
+  // bubble; a "say" on the stage is no longer needed for either.
+  const speaking: Speaker[] = cast.flatMap((thing) => {
+    if (thing.kind !== 'character') return [];
+    const who = (options.characters ?? []).find((c) => c.id === thing.ref);
+    return who
+      ? [{ id: thing.id, names: [who.name, ...who.aliases, thing.name] }]
+      : [];
+  });
+  if (speaking.length) {
+    const given = new Map<number, string[]>();
+    beats.forEach((beat, k) => {
+      if (beat.speaker) given.set(k, [beat.speaker]);
+    });
+    for (const step of steps)
+      for (const effect of step.effects)
+        if (effect.do === 'say')
+          given.set(step.at.beat, [
+            ...(given.get(step.at.beat) ?? []),
+            effect.target,
+          ]);
+    for (const line of dialogueOf(
+      beats.map((beat) => beat.say),
+      speaking,
+      given,
+    ))
+      (beats[line.beat].lines ??= []).push({
+        span: line.span,
+        speaker: line.speaker,
+      });
+    beats.forEach((beat) => {
+      if (beat.lines?.length) beat.speaker = beat.lines[0].speaker;
+    });
+  }
+  for (const step of steps)
+    step.effects = step.effects.filter((effect) => effect.do !== 'say');
+  steps.splice(
+    0,
+    steps.length,
+    ...steps.filter((step) => step.stage || step.effects.length),
+  );
 
   // A sign the storyboard first shows at the words comes on then, not
   // before, whether the writer listed it or a caption said it: "Person
@@ -1976,6 +1997,14 @@ export function quietStretches(script: SceneScript, limit = 30): string[] {
   for (const step of script.steps)
     if (step.stage || step.effects.some((e) => e.do !== 'pulse'))
       positions.push(offsets[step.at.beat] + step.word);
+  // A character's line opens a bubble, and they start to speak.
+  script.beats.forEach((beat, k) => {
+    for (const line of beat.lines ?? [])
+      positions.push(
+        offsets[k] + wordsOf(beat.say.slice(0, line.span[0])).length,
+      );
+  });
+  positions.sort((a, b) => a - b);
   positions.push(before);
   const out: string[] = [];
   let last = 0;

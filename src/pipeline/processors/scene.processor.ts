@@ -769,18 +769,18 @@ export class SceneProcessor {
               who,
             )
           : null;
-      // A person doing something on this page (in bed, holding a
-      // lantern, shaking): drawn so by the kit, from their figure, with
-      // the signs the page shows on them. The book's sheet otherwise.
+      // A person is drawn by the kit afresh on every page, from their
+      // figure: doing what the page has them do (in bed, holding a
+      // lantern, shaking), with the signs it shows on them, and with the
+      // kit's rig as it is now, so they act. Anyone else, the book's sheet.
       const signs = signsShown(script, thing.id);
-      const onPage =
-        sheet?.figure && (thing.pose || thing.holding || signs.length)
-          ? await figureDrawing(sheet.figure, thing.ref, {
-              pose: thing.pose,
-              holding: thing.holding,
-              signs,
-            })
-          : null;
+      const onPage = sheet?.figure
+        ? await figureDrawing(sheet.figure, thing.ref, {
+            pose: thing.pose,
+            holding: thing.holding,
+            signs,
+          })
+        : null;
       const { anchors: pageAnchors, ...posed } = onPage ?? { anchors: null };
       const drawing = onPage ? (posed as GatedDrawing) : sheet?.drawing;
       out.set(

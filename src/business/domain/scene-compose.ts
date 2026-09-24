@@ -576,6 +576,21 @@ export function composeScene(input: ComposeInput): {
       if (effect.do === 'say') return;
       // Someone toward someone: acted, not a change on the stage.
       const actor = castById.get(effect.target)?.kind;
+      // On a story's character, a point or a pulse is attention, acted:
+      // the others look at them; a pulse, a nod. Never a ring on a face.
+      if (
+        actor === 'character' &&
+        (effect.do === 'pulse' ||
+          (effect.do === 'point' && !castById.has(effect.part ?? '')))
+      ) {
+        directed.push({
+          atMs: at,
+          target: effect.target,
+          other: null,
+          do: effect.do === 'pulse' ? 'nod' : 'attend',
+        });
+        return;
+      }
       if (
         effect.part &&
         (effect.do === 'look' ||
@@ -717,6 +732,22 @@ export function composeScene(input: ComposeInput): {
   effects.sort((a, b) => a.atMs - b.atMs);
   const says = effects.filter((effect) => effect.say);
 
+  // What the narration says they do, at the word that says it.
+  script.beats.forEach((beat, k) => {
+    const words = beats[k]?.words ?? [];
+    for (const act of beat.acts ?? []) {
+      const word = words.find((w) => w[1] > act.at) ?? words[words.length - 1];
+      if (!word) continue;
+      directed.push({
+        atMs: Math.round(word[2]),
+        target: act.who,
+        other: act.toward,
+        do: act.do,
+      });
+    }
+  });
+  directed.sort((a, b) => a.atMs - b.atMs);
+
   // How each character acts, planned from who says what and when: where
   // they look, their mouths, their gestures, and what the writer asked.
   const acting = actingOf({
@@ -839,7 +870,8 @@ export function composeScene(input: ComposeInput): {
     }
   }
 
-  // The quiet stretches: a pulse on whatever holds the eye then.
+  // The quiet stretches: a pulse on whatever holds the eye then. Not on
+  // someone who acts: they are never still, and a pulse is no way to move.
   let filled = 0;
   const changes = [...steps.map((s) => s.atMs), ...effects.map((e) => e.atMs)];
   for (const [from, to] of quietGaps(changes, durationMs)) {
@@ -848,7 +880,9 @@ export function composeScene(input: ComposeInput): {
     for (let i = 1; i <= count; i += 1) {
       const at = Math.round(from + (span * i) / (count + 1));
       const current = [...steps].reverse().find((s) => s.atMs <= at);
-      const target = current?.focus ?? current?.show[0];
+      const target = [current?.focus, ...(current?.show ?? [])].find(
+        (id) => id && !acting[id],
+      );
       if (!target) continue;
       effects.push({
         atMs: at,

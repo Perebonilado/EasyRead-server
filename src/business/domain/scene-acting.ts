@@ -19,6 +19,7 @@ import type {
   SceneActingMove,
   SceneStepDto,
 } from '../../contracts';
+import type { NarratedMove } from './scene-directions';
 
 /** A line as it is said: who says it, when, and each word's time. */
 export interface SpokenLine {
@@ -28,16 +29,33 @@ export interface SpokenLine {
   words: { text: string; startMs: number; endMs: number }[];
 }
 
-/** What the writer asked someone to do, at a moment, toward someone. */
+/**
+ * What someone is asked to do, by the writer or the narration's words, at
+ * a moment, toward someone or something ("@up", the sky; "@down", the
+ * ground), or no one. "attend": everyone else looks at them.
+ */
 export interface DirectedMove {
   atMs: number;
   target: string;
-  other: string;
-  do: 'look' | 'reach' | 'hug' | 'point';
+  other: string | null;
+  do: NarratedMove | 'attend';
 }
 
 /** Frames of the mouth's shapes a second. */
 export const MOUTH_FPS = 30;
+
+/** How long each move the narration may ask for takes. */
+const MOVE_MS: Record<
+  'shake' | 'laugh' | 'hop' | 'clap' | 'sob' | 'shrug',
+  number
+> = {
+  shake: 1100,
+  laugh: 1500,
+  hop: 1100,
+  clap: 1500,
+  sob: 2600,
+  shrug: 1200,
+};
 
 /** A small, stable number from a name: the same choice in every make. */
 function beatOf(seed: string): number {
@@ -238,14 +256,32 @@ export function actingOf(input: {
       );
   };
 
-  // Lines: the speaker looks at whom they answer, the rest at them.
+  // Lines: the speaker looks at whom they talk to, the rest at them.
+  // Whom they talk to: whoever the line calls by name ("Tell us a story,
+  // Nana"), else whom they answer, else whom they spoke to last, going
+  // on, else whoever is nearest.
+  const spokeTo = new Map<string, string>();
   lines.forEach((line, i) => {
     const { speaker, startMs: from, endMs: to } = line;
     const before = lines[i - 1];
+    const bare = new Set(
+      line.words.map((w) => w.text.replace(/[^\p{L}\p{N}'-]/gu, '')),
+    );
+    const called = [...input.names].find(
+      ([id, names]) =>
+        id !== speaker &&
+        on(id, from) &&
+        names.some((name) => bare.has(name.split(/\s+/)[0])),
+    )?.[0];
+    const last = spokeTo.get(speaker);
     const answering =
-      before && before.speaker !== speaker && on(before.speaker, from)
+      called ??
+      (before && before.speaker !== speaker && on(before.speaker, from)
         ? before.speaker
-        : (others(speaker, from)[0] ?? null);
+        : last && on(last, from)
+          ? last
+          : (others(speaker, from)[0] ?? null));
+    if (answering) spokeTo.set(speaker, answering);
     gaze(speaker, {
       from: from - 250,
       to: to + 300,
@@ -268,13 +304,15 @@ export function actingOf(input: {
     ]);
     const words = line.words;
     const said = words.map((w) => w.text).join(' ');
-    // A gesture as a line starts, the arms in turn.
+    // A gesture as a line starts: the hand opens toward whom they answer,
+    // or, with no one to face, the arms in turn.
     if (words.length >= 4)
       move(
         speaker,
         from + 120,
-        i % 2 ? 'gesture-left' : 'gesture',
+        answering || i % 2 === 0 ? 'gesture' : 'gesture-left',
         Math.min(1500, Math.max(800, (to - from) * 0.6)),
+        answering ?? undefined,
       );
     // A nod on the stressed word: before a ! or ., else the longest.
     if (words.length >= 2) {
@@ -335,48 +373,63 @@ export function actingOf(input: {
     }
   });
 
-  // What the writer asked for, where it asked.
+  // What the writer or the narration asked for, where it asked.
   for (const one of input.directed) {
-    if (one.do === 'look')
-      gaze(one.target, {
-        from: one.atMs,
-        to: one.atMs + 2500,
-        target: one.other,
-        turn: 0.5,
-        rank: RANK.directed,
-      });
-    else if (one.do === 'hug') {
-      move(one.target, one.atMs, 'hug', 2200, one.other);
-      move(one.other, one.atMs + 120, 'hug', 2100, one.target);
-      gaze(one.target, {
-        from: one.atMs,
-        to: one.atMs + 2200,
-        target: one.other,
-        turn: 0.6,
-        rank: RANK.directed,
-      });
-      gaze(one.other, {
-        from: one.atMs,
-        to: one.atMs + 2200,
-        target: one.target,
-        turn: 0.6,
-        rank: RANK.directed,
-      });
-    } else {
-      move(
-        one.target,
-        one.atMs,
-        one.do,
-        one.do === 'point' ? 1700 : 1400,
-        one.other,
-      );
-      gaze(one.target, {
-        from: one.atMs,
-        to: one.atMs + 1800,
-        target: one.other,
-        turn: 0.4,
-        rank: RANK.directed,
-      });
+    const { atMs: at, target: who, other } = one;
+    /** Someone real to turn to: another on the stage, not the sky. */
+    const them =
+      other && !other.startsWith('@') && on(other, at) ? other : null;
+    const look = (
+      id: string,
+      target: string | null,
+      ms: number,
+      turn: number,
+    ) => gaze(id, { from: at, to: at + ms, target, turn, rank: RANK.directed });
+    switch (one.do) {
+      case 'look':
+        if (other) look(who, them ?? other, 2500, them ? 0.5 : 0);
+        break;
+      case 'attend':
+        for (const watcher of others(who, at)) look(watcher, who, 1600, 0.35);
+        break;
+      case 'hug':
+        if (!them) break;
+        move(who, at, 'hug', 2200, them);
+        move(them, at + 120, 'hug', 2100, who);
+        look(who, them, 2200, 0.6);
+        gaze(them, {
+          from: at,
+          to: at + 2200,
+          target: who,
+          turn: 0.6,
+          rank: RANK.directed,
+        });
+        break;
+      case 'reach':
+      case 'point':
+        if (other?.startsWith('@')) {
+          move(who, at, 'point-up', 1700);
+          look(who, other, 1900, 0);
+        } else if (them || other) {
+          move(
+            who,
+            at,
+            one.do,
+            one.do === 'point' ? 1700 : 1400,
+            them ?? other!,
+          );
+          look(who, them ?? other, 1800, 0.4);
+        }
+        break;
+      case 'wave':
+        move(who, at, 'wave', 1900, them ?? undefined);
+        if (them) look(who, them, 2000, 0.4);
+        break;
+      case 'nod':
+        move(who, at, 'nod', 600);
+        break;
+      default:
+        move(who, at, one.do, MOVE_MS[one.do]);
     }
   }
 

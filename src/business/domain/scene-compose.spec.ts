@@ -875,6 +875,59 @@ describe('what a character says, in a bubble', () => {
     );
   });
 
+  it('acts what the narration says at the word that says it, and attention on a character as looks', () => {
+    const sentence = talking.beats[3].say;
+    const at = sentence.indexOf('says');
+    const acted = composeScene({
+      script: {
+        ...talking,
+        beats: [
+          ...talking.beats.slice(0, 3),
+          {
+            ...talking.beats[3],
+            acts: [{ at, who: 'fox', do: 'wave', toward: 'mira' }],
+          },
+        ],
+        steps: [
+          ...talking.steps,
+          {
+            at: { beat: 1, phrase: 'They need' },
+            word: 0,
+            stage: null,
+            effects: [
+              // A lesson's ring and pulse, on a story's characters.
+              { target: 'mira', part: 'head', do: 'point' },
+              { target: 'fox', part: null, do: 'pulse' },
+            ],
+          },
+        ],
+      },
+      drawings: new Map([
+        ['mira', figure()],
+        ['fox', figure()],
+      ]),
+      beats: beatsSaid,
+      durationMs: 16_000,
+      timing: 'voice',
+      generator: 'scene-2',
+    }).scene;
+    // "says" is the line's eighth word: 7000 + 7 × 300.
+    expect(acted.acting?.fox.moves).toEqual(
+      expect.arrayContaining([[9100, 'wave', 1900, 'mira']]),
+    );
+    // No ring round a face, no pulse: the fox looks at Mira, and nods.
+    expect(
+      acted.effects.filter((e) => e.do === 'point' || e.do === 'pulse'),
+    ).toEqual([]);
+    const look = acted.acting?.fox.look ?? [];
+    const lookAt = (t: number) =>
+      [...look].reverse().find(([when]) => when <= t)?.[1] ?? null;
+    expect(lookAt(2600)).toBe('mira');
+    expect(acted.acting?.fox.moves).toEqual(
+      expect.arrayContaining([[expect.any(Number), 'nod', 600]]),
+    );
+  });
+
   it('opens a bubble for each line, from just before its first word', () => {
     const says = scene.effects.filter((e) => e.do === 'say');
     expect(says.map((e) => [e.target, e.atMs, e.say?.text])).toEqual([

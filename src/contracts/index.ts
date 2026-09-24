@@ -1032,7 +1032,12 @@ export interface SceneEffectDto {
   };
 }
 
-/** A move someone makes as they act: a nod, a gesture with the right or left arm, brows up, a lean back, a reach, a point, a hug. */
+/**
+ * A move someone makes as they act: a nod, a gesture with the right or
+ * left arm, brows up, a lean back, a reach, a point (at someone, or up at
+ * the sky), a hug, a wave, a shake of the head, a laugh, a hop for joy, a
+ * clap, a sob, a shrug.
+ */
 export type SceneActingMove =
   | 'nod'
   | 'gesture'
@@ -1041,7 +1046,15 @@ export type SceneActingMove =
   | 'lean'
   | 'reach'
   | 'point'
-  | 'hug';
+  | 'point-up'
+  | 'hug'
+  | 'wave'
+  | 'shake'
+  | 'laugh'
+  | 'hop'
+  | 'clap'
+  | 'sob'
+  | 'shrug';
 
 /**
  * How someone acts on a page: planned by the server from who says what
@@ -1050,7 +1063,8 @@ export type SceneActingMove =
 export interface SceneActingDto {
   /**
    * Where they look from each moment on: another thing's id, or null for
-   * the viewer; and how far their face turns toward it, 0 to 1.
+   * the viewer, or "@up" or "@down" (the sky, the ground); and how far
+   * their face turns toward it, 0 to 1.
    */
   look?: [number, string | null, number][];
   /** Their mouth as they speak: each line's first word, and its shapes at 30 a second, one digit each, 0 to 5. */

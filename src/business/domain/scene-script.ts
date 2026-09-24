@@ -30,13 +30,25 @@ import {
   type FigureSign,
   type FigureSpec,
 } from './scene-figure';
-import { dialogueOf, quotedSpans, type Speaker } from './scene-dialogue';
+import { dialogueOf, quotedSpans } from './scene-dialogue';
+import {
+  directionsIn,
+  type Actor,
+  type NarratedMove,
+  type Passage,
+} from './scene-directions';
 import { STAGE_RECIPES, type LearningStage } from './scene-stage';
 import { checkArithmetic, markTerms, type MathLine } from './scene-math';
 import { sample, type PlotSpec } from './scene-plot';
 import { findPhrase, isVerbatim } from './scene-quote';
 import { MAX_EVENTS, type TimelineSpec } from './scene-timeline';
-import { SHEET_PARTS, nameKey, type Expression } from './scene-story';
+import {
+  SHEET_PARTS,
+  nameKey,
+  soundIn,
+  type Expression,
+  type StoryVoice,
+} from './scene-story';
 
 /**
  * Rows are made per generator; a new generator is a new set of rows.
@@ -173,6 +185,17 @@ export interface SceneBeat {
    * with no speaker found is the narrator's and is not listed.
    */
   lines?: { span: [number, number]; speaker: string }[];
+  /**
+   * What its narration says the characters do, found in its own words:
+   * where the verb starts, who, what, and toward whom or what ("@up" is
+   * the sky).
+   */
+  acts?: {
+    at: number;
+    who: string;
+    do: NarratedMove;
+    toward: string | null;
+  }[];
   /** The music from this sentence on; absent, it carries on as it was. */
   music?: SceneMusic;
   /** The music runs high from here: a chase, a rush, danger close. */
@@ -691,6 +714,132 @@ export interface MendedScript {
   mended: string[];
 }
 
+/** Whether "she" or "he" may mean a character, from the voice they speak in. */
+function genderOf(voice: StoryVoice | null | undefined): 'f' | 'm' | null {
+  if (voice === 'girl' || voice === 'woman' || voice === 'old woman')
+    return 'f';
+  if (voice === 'boy' || voice === 'man' || voice === 'old man') return 'm';
+  return null;
+}
+
+/**
+ * Who comes and goes as the narration says, on the stage: someone who
+ * leaves walks off at the words and stays off until the words bring them
+ * back; someone who comes walks on at the words, and stays until they
+ * go. Where the writer's storyboard has them come or go in that sentence
+ * or the next, it is left as the writer staged it.
+ */
+function comingsAndGoings(
+  steps: SceneStep[],
+  passages: readonly Passage[],
+  beats: readonly SceneBeat[],
+  characters: ReadonlySet<string>,
+  mended: string[],
+): void {
+  const wordAt = (p: Passage) =>
+    wordsOf(beats[p.beat].say.slice(0, p.at)).length;
+  const key = (beat: number, word: number) => beat * 100_000 + word;
+  const keyOf = (step: SceneStep) => key(step.at.beat, step.word);
+  const without = (stage: SceneStage, id: string): SceneStage | null => {
+    const show = stage.show.filter((one) => one !== id);
+    if (!show.length) return null;
+    return {
+      ...stage,
+      layout: fitLayout(stage.layout, show.length),
+      show,
+      arrows: stage.arrows.filter((a) => a.from !== id && a.to !== id),
+    };
+  };
+  for (const passage of passages) {
+    const { who, how } = passage;
+    const word = wordAt(passage);
+    const at = key(passage.beat, word);
+    let k = -1;
+    steps.forEach((step, i) => {
+      if (keyOf(step) <= at) k = i;
+    });
+    const standing = [...steps.slice(0, k + 1)]
+      .reverse()
+      .find((s) => s.stage)?.stage;
+    const shown = standing?.show.includes(who) ?? false;
+    // The writer's own staging in this sentence or the next.
+    const nearby = steps.filter(
+      (s) => s.stage && keyOf(s) > at && s.at.beat <= passage.beat + 1,
+    );
+    // Until the words say otherwise: where they bring them back, or take them off.
+    const until = passages
+      .filter((p) => p.who === who && p.how !== how)
+      .map((p) => key(p.beat, wordAt(p)))
+      .find((later) => later > at);
+    const phrase = wordsOf(beats[passage.beat].say)
+      .slice(word, word + 4)
+      .join(' ');
+    let stage: SceneStage;
+    if (how === 'leave') {
+      if (!standing || !shown) continue;
+      if (nearby.some((s) => !s.stage!.show.includes(who))) continue;
+      stage = without(standing, who) ?? {
+        layout: 'one',
+        show: [],
+        arrows: [],
+        ...(standing.backdrop ? { backdrop: standing.backdrop } : {}),
+      };
+      for (const later of steps)
+        if (
+          later.stage?.show.includes(who) &&
+          keyOf(later) > at &&
+          (until === undefined || keyOf(later) < until)
+        )
+          later.stage = without(later.stage, who);
+    } else {
+      if (shown) continue;
+      if (nearby.some((s) => s.stage!.show.includes(who))) continue;
+      const show = [...(standing?.show ?? []), who];
+      if (show.length > MAX_ON_STAGE) continue;
+      stage = standing
+        ? {
+            ...standing,
+            layout: fitLayout(
+              standing.layout === 'one' ? 'row' : standing.layout,
+              show.length,
+            ),
+            show,
+          }
+        : { layout: 'one', show, arrows: [] };
+      // They stay among the people the writer shows after, until they go.
+      for (const later of steps) {
+        const s = later.stage;
+        if (
+          !s ||
+          keyOf(later) <= at ||
+          (until !== undefined && keyOf(later) >= until) ||
+          s.show.includes(who) ||
+          s.show.length >= MAX_ON_STAGE ||
+          !s.show.some((id) => characters.has(id))
+        )
+          continue;
+        later.stage = {
+          ...s,
+          layout: fitLayout(
+            s.layout === 'one' ? 'row' : s.layout,
+            s.show.length + 1,
+          ),
+          show: [...s.show, who],
+        };
+      }
+    }
+    steps.splice(k + 1, 0, {
+      at: { beat: passage.beat, phrase },
+      word,
+      stage,
+      effects: [],
+    });
+    mended.push(
+      `${who} ${how === 'leave' ? 'leaves' : 'comes'} at "${phrase}", as the words say`,
+    );
+  }
+}
+
 /**
  * The writer's draft made sound without asking again: ids made safe and
  * unique, unknown ids dropped, a lost anchor found in another sentence or
@@ -706,13 +855,21 @@ export function mendScript(
     /** The formats the document may use; a kind of another is set in type. */
     formats?: readonly SceneFormat[];
     /** The story's characters, when the book is a story: who a character may be. */
-    characters?: readonly { id: string; name: string; aliases: string[] }[];
+    characters?: readonly {
+      id: string;
+      name: string;
+      aliases: string[];
+      /** The voice they speak in: whether "she" or "he" may mean them. */
+      voice?: StoryVoice | null;
+    }[];
     /** And its places: where the story may be. */
     places?: readonly {
       id: string;
       name: string;
       aliases: string[];
       sound?: SceneAmbience | null;
+      /** How it looks, when the story says: a fire burning, a river. */
+      look?: string | null;
     }[];
     /** Whom the document is for: its recipe's limits hold. */
     stage?: LearningStage | null;
@@ -817,7 +974,8 @@ export function mendScript(
         kind: 'place',
         ref: where.id,
         name: where.name,
-        sound: where.sound ?? null,
+        // What it sounds like; when the story did not say, from how it looks.
+        sound: where.sound ?? soundIn(where.look ?? ''),
       });
       return;
     }
@@ -1169,11 +1327,17 @@ export function mendScript(
   // in the sentences' own words, the writer's speakers and "say"s only a
   // hint. Each line is said in its speaker's voice and shown in its own
   // bubble; a "say" on the stage is no longer needed for either.
-  const speaking: Speaker[] = cast.flatMap((thing) => {
+  const speaking: Actor[] = cast.flatMap((thing) => {
     if (thing.kind !== 'character') return [];
     const who = (options.characters ?? []).find((c) => c.id === thing.ref);
     return who
-      ? [{ id: thing.id, names: [who.name, ...who.aliases, thing.name] }]
+      ? [
+          {
+            id: thing.id,
+            names: [who.name, ...who.aliases, thing.name],
+            gender: genderOf(who.voice),
+          },
+        ]
       : [];
   });
   if (speaking.length) {
@@ -1203,6 +1367,36 @@ export function mendScript(
   }
   for (const step of steps)
     step.effects = step.effects.filter((effect) => effect.do !== 'say');
+
+  // What the narration says the characters do, acted where it says it;
+  // and who comes and goes, walking on and off at its words.
+  if (speaking.length) {
+    const { acts, passages } = directionsIn(
+      beats.map((beat) => beat.say),
+      speaking,
+      cast.flatMap((thing) =>
+        thing.kind !== 'character' &&
+        thing.kind !== 'place' &&
+        'name' in thing &&
+        thing.name
+          ? [{ id: thing.id, names: [thing.name] }]
+          : [],
+      ),
+      new Map(
+        beats.flatMap((beat, k) =>
+          beat.lines?.length ? [[k, beat.lines] as const] : [],
+        ),
+      ),
+    );
+    for (const { beat, ...act } of acts) (beats[beat].acts ??= []).push(act);
+    comingsAndGoings(
+      steps,
+      passages,
+      beats,
+      new Set(speaking.map((one) => one.id)),
+      mended,
+    );
+  }
   steps.splice(
     0,
     steps.length,
@@ -1246,6 +1440,20 @@ export function mendScript(
       problems.push(
         `These phrases are not in their sentences, word for word: ${lostWhere.slice(0, 6).join('; ')}. Copy each phrase exactly from the sentence it names.`,
       );
+    // A story whose characters speak on this page keeps their words in
+    // quotes, with who says them: then they say them in their own voices,
+    // in bubbles, their mouths moving. Told as reported speech, everyone
+    // is the narrator.
+    if (options.material && speaking.length) {
+      const there = options.material
+        .split(/\n+/)
+        .flatMap((line) => quotedSpans(line).map(([a, b]) => line.slice(a, b)));
+      const here = beats.reduce((n, beat) => n + (beat.lines?.length ?? 0), 0);
+      if (there.length >= 2 && here < Math.min(2, Math.ceil(there.length / 4)))
+        problems.push(
+          `The story's characters speak on this page ("${there[0].slice(0, 60)}"), but ${here ? `only ${here} of your sentences quotes them` : 'your sentences quote no one'}: keep what they say in double quotes, word for word, in the sentence with who says it, so each line is said in its speaker's voice.`,
+        );
+    }
     const spoken = beats.reduce((n, beat) => n + beat.say.length, 0);
     if (spoken > MAX_SPOKEN_CHARS)
       problems.push(

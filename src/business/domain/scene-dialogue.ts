@@ -75,7 +75,7 @@ const VERB = new RegExp(`\\b(?:${SPEECH}|${ACTION})\\b`, 'iu');
 const escape = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
 /** Where each speaker is named in a stretch of text: never as someone's ("Mira's grandfather"). */
-function namedIn(
+export function namedIn(
   text: string,
   speakers: readonly Speaker[],
 ): { id: string; at: number; end: number }[] {
@@ -94,16 +94,18 @@ function namedIn(
       for (const m of text.matchAll(pattern))
         found.push({ id: speaker.id, at: m.index, end: m.index + m[0].length });
     }
-  // A longer name wins over one inside it: "Nana Efua" over "Nana".
+  // A longer name wins over one inside it: "Nana Efua" over "Nana"; and
+  // two of someone's names on the same words are one.
   return found
     .filter(
-      (one) =>
+      (one, i) =>
         !found.some(
-          (other) =>
+          (other, j) =>
             other !== one &&
             other.at <= one.at &&
             other.end >= one.end &&
-            other.end - other.at > one.end - one.at,
+            (other.end - other.at > one.end - one.at ||
+              (j < i && other.id === one.id && other.at === one.at)),
         ),
     )
     .sort((a, b) => a.at - b.at);

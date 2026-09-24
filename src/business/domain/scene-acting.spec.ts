@@ -84,11 +84,11 @@ describe('a page acted from its lines', () => {
     walks: true,
   });
 
-  it('has the listeners look at whoever speaks, and the speaker at whom they answer', () => {
-    // Ada speaks: the others look at her; she looks at her neighbour.
+  it('has the listeners look at whoever speaks, and the speaker at whom they talk to', () => {
+    // Ada speaks to Nana, by name: the others look at her; she at Nana.
     expect(lookAt(acting.kofi.look, 2600)).toBe('ada');
     expect(lookAt(acting.nana.look, 2600)).toBe('ada');
-    expect(lookAt(acting.ada.look, 2600)).toBe('kofi');
+    expect(lookAt(acting.ada.look, 2600)).toBe('nana');
     // Nana answers Ada, and looks at her; Ada looks back.
     expect(lookAt(acting.nana.look, 6000)).toBe('ada');
     expect(lookAt(acting.ada.look, 6000)).toBe('nana');
@@ -169,10 +169,45 @@ describe('a page acted from its lines', () => {
     expect(lookAt(asked.ada.look, 1500)).toBe('kofi');
   });
 
+  it('plays what the narration says: a wave, a sob, a look and a point at the sky, and attention', () => {
+    const told = actingOf({
+      actors: ['ada', 'kofi', 'nana'],
+      names: new Map(),
+      steps: [step(0, ['ada', 'kofi', 'nana'])],
+      lines: [],
+      narration: [],
+      directed: [
+        { atMs: 1000, target: 'ada', other: 'kofi', do: 'wave' },
+        { atMs: 3000, target: 'kofi', other: null, do: 'sob' },
+        { atMs: 6000, target: 'nana', other: '@up', do: 'look' },
+        { atMs: 9000, target: 'ada', other: '@up', do: 'point' },
+        { atMs: 12_000, target: 'kofi', other: null, do: 'attend' },
+      ],
+      durationMs: 16_000,
+      walks: true,
+    });
+    expect(told.ada.moves).toEqual([
+      [1000, 'wave', 1900, 'kofi'],
+      [9000, 'point-up', 1700],
+    ]);
+    expect(told.kofi.moves).toEqual([[3000, 'sob', 2600]]);
+    // Up at the sky: no one's head, the sky itself.
+    expect(lookAt(told.nana.look, 6500)).toBe('@up');
+    expect(lookAt(told.ada.look, 9500)).toBe('@up');
+    expect(lookAt(told.ada.look, 1500)).toBe('kofi');
+    // Everyone else looks at the one the writer drew attention to.
+    expect(lookAt(told.ada.look, 12_500)).toBe('kofi');
+    expect(lookAt(told.nana.look, 12_500)).toBe('kofi');
+  });
+
   it('acts the same in every make', () => {
     const again = actingOf({
       actors: ['ada', 'kofi', 'nana'],
-      names: new Map(),
+      names: new Map([
+        ['ada', ['Ada']],
+        ['kofi', ['Kofi']],
+        ['nana', ['Nana Efua']],
+      ]),
       steps,
       lines,
       narration: [],

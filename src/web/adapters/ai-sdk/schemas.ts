@@ -7,6 +7,7 @@ import {
   SCENE_LAYOUTS,
   SCENE_MOODS,
   SCENE_MUSIC,
+  LINE_FROMS,
   LINE_PACES,
 } from '../../../business/domain/scene-script';
 import {
@@ -20,6 +21,7 @@ import {
 import {
   EXPRESSIONS,
   STORY_KINDS,
+  STORY_PRESENCES,
   STORY_ROLES,
   STORY_SIZES,
   STORY_VOICES,
@@ -650,6 +652,7 @@ export const sceneScreenplaySchema = z.object({
       kind: z.enum(SCREENPLAY_BEATS),
       who: z.string().nullable(),
       to: z.string().nullable(),
+      from: z.enum(LINE_FROMS).nullable(),
       say: z.string(),
       do: z.enum(SCREENPLAY_DOINGS).nullable(),
       state: z.string().nullable(),
@@ -707,6 +710,7 @@ export const sceneStorySchema = z.object({
       role: z.enum(STORY_ROLES),
       look: z.string(),
       kind: z.enum(STORY_KINDS),
+      presence: z.enum(STORY_PRESENCES),
       size: z.enum(STORY_SIZES).nullable(),
       figure: figureSchema.nullable(),
       traits: z.array(z.string()),

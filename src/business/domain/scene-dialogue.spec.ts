@@ -1,4 +1,9 @@
-import { dialogueOf, quotedSpans, type Speaker } from './scene-dialogue';
+import {
+  dialogueOf,
+  heardFrom,
+  quotedSpans,
+  type Speaker,
+} from './scene-dialogue';
 
 const fireside: Speaker[] = [
   { id: 'ada', names: ['Ada'] },
@@ -141,5 +146,118 @@ describe('who says each line', () => {
       "tobi: I can't,",
       'tobi: not tonight.',
     ]);
+  });
+});
+
+describe('voices beyond the stage', () => {
+  /** Matthew 3:13-17, World English Bible (public domain). */
+  const baptism = [
+    'Then Jesus came from Galilee to the Jordan to John, to be baptized by him.',
+    'But John would have hindered him, saying, “I need to be baptized by you, and you come to me?”',
+    'But Jesus, answering, said to him, “Allow it now, for this is the fitting way for us to fulfill all righteousness.”',
+    'Then he allowed him.',
+    'Behold, a voice out of the heavens said, “This is my beloved Son, with whom I am well pleased.”',
+  ];
+  const withGod: Speaker[] = [
+    { id: 'jesus', names: ['Jesus'] },
+    { id: 'john', names: ['John', 'John the Baptist'] },
+    { id: 'god', names: ['God', 'the Father'], presence: 'above' },
+  ];
+  const lines = (sentences: string[], speakers: Speaker[]) =>
+    dialogueOf(sentences, speakers).map(
+      (line) =>
+        `${line.speaker}${line.from ? ` (${line.from})` : ''}: ${sentences[line.beat].slice(line.span[0], line.span[1])}`,
+    );
+
+  it('gives a voice from heaven to the one heard from above, never to anyone on the stage', () => {
+    expect(lines(baptism, withGod)).toEqual([
+      'john: I need to be baptized by you, and you come to me?',
+      'jesus: Allow it now, for this is the fitting way for us to fulfill all righteousness.',
+      'god (above): This is my beloved Son, with whom I am well pleased.',
+    ]);
+  });
+
+  it('leaves a voice from heaven to the narrator when no one in the story is heard from above', () => {
+    const said = lines(
+      baptism,
+      withGod.filter((one) => one.id !== 'god'),
+    );
+    expect(said).toHaveLength(2);
+    expect(said.join('\n')).not.toContain('beloved Son');
+  });
+
+  it('knows a thought from words said aloud', () => {
+    const mira: Speaker[] = [
+      { id: 'mira', names: ['Mira'] },
+      { id: 'tobi', names: ['Tobi'] },
+    ];
+    expect(
+      lines(
+        [
+          '“I wish I could fly,” Mira thought.',
+          'Mira thought for a moment, then said, “Yes.”',
+          'In a small voice, Tobi said, “Sorry.”',
+          '“Where did it go?” Tobi wondered aloud.',
+        ],
+        mira,
+      ),
+    ).toEqual([
+      'mira (thought): I wish I could fly,',
+      'mira: Yes.',
+      'tobi: Sorry.',
+      'tobi: Where did it go?',
+    ]);
+  });
+
+  it('gives a voice down a phone, a letter and a crowd to whoever the words say', () => {
+    const cast: Speaker[] = [
+      { id: 'tobi', names: ['Tobi'] },
+      { id: 'dad', names: ['Dad'], presence: 'heard' },
+      { id: 'grandpa', names: ['Grandpa'] },
+      { id: 'crowd', names: ['The crowd', 'the crowd', 'the people'] },
+    ];
+    expect(
+      lines(
+        [
+          'Dad’s voice crackled over the phone: “I’m on my way.”',
+          'Tobi opened it. Grandpa’s letter said, “Dear Tobi, be brave.”',
+          'The crowd shouted, “Hosanna!”',
+        ],
+        cast,
+      ),
+    ).toEqual([
+      'dad (phone): I’m on my way.',
+      'grandpa (letter): Dear Tobi, be brave.',
+      'crowd: Hosanna!',
+    ]);
+  });
+
+  it('gives a voice from out of sight to the one only heard', () => {
+    const cast: Speaker[] = [
+      { id: 'ada', names: ['Ada'] },
+      { id: 'kofi', names: ['Kofi'] },
+      { id: 'mum', names: ['Mum'], presence: 'heard' },
+    ];
+    expect(
+      lines(
+        [
+          '“Race you home!” said Kofi.',
+          '“You are on,” said Ada.',
+          'A voice called from the house, “Dinner is ready!”',
+        ],
+        cast,
+      ),
+    ).toEqual([
+      'kofi: Race you home!',
+      'ada: You are on,',
+      'mum (off): Dinner is ready!',
+    ]);
+  });
+
+  it('reads where a line comes from only in the words that bring it in', () => {
+    expect(heardFrom('She put down the phone and said,', '', 'Hi.')).toBeNull();
+    expect(heardFrom('', ' Mira thought about it.', 'Yes.')).toBeNull();
+    expect(heardFrom('', ', she thought.', 'Maybe,')).toBe('thought');
+    expect(heardFrom('A voice from the sky boomed:', '', 'Go!')).toBe('above');
   });
 });

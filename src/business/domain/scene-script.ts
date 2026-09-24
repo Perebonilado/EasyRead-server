@@ -52,6 +52,8 @@ import {
   nameKey,
   soundIn,
   type Expression,
+  type StoryKind,
+  type StoryPresence,
   type StoryVoice,
 } from './scene-story';
 
@@ -121,6 +123,22 @@ export const LINE_PACES = [
   'shout',
 ] as const;
 export type LinePace = (typeof LINE_PACES)[number];
+
+/**
+ * Where a line comes from: said on the stage ("here"), from just off it,
+ * from above (heaven, the sky), down a phone, from a letter read out, in
+ * a thought, or in a dream or a memory.
+ */
+export const LINE_FROMS = [
+  'here',
+  'off',
+  'above',
+  'phone',
+  'letter',
+  'thought',
+  'dream',
+] as const;
+export type LineFrom = (typeof LINE_FROMS)[number];
 
 export const SCENE_DELIVERIES = [
   'hook',
@@ -236,6 +254,12 @@ export interface SceneBeat {
   kind?: 'line' | 'narration';
   /** A line's listener: whom it is said to, by id. */
   to?: string;
+  /**
+   * Where a line comes from, when not from someone on the stage: off it,
+   * above, a phone, a letter, a thought, a dream. A narration from above
+   * is words from heaven no character in the cast could say.
+   */
+  from?: Exclude<LineFrom, 'here'>;
   /** How a line is said. */
   pace?: LinePace;
   /** Seconds of quiet after it, for what happens without words: a hug, someone walking off. */
@@ -964,6 +988,10 @@ export interface MendOptions {
     voice?: StoryVoice | null;
     /** What they are like: how they move. */
     traits?: string[];
+    /** Whether they are seen, or only heard: a voice never stands on the stage. */
+    presence?: StoryPresence | null;
+    /** A group is a crowd, never one of the stage's things. */
+    kind?: StoryKind | null;
   }[];
   /** And its places: where the story may be. */
   places?: readonly {

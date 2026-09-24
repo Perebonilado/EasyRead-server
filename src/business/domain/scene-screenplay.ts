@@ -13,11 +13,19 @@
  * said by whoever says it there. And the narrator is held to a third of
  * a page whose book is mostly talk.
  */
-import { dialogueOf, namedIn, quotedSpans } from './scene-dialogue';
+import {
+  dialogueOf,
+  heardFrom,
+  namedIn,
+  quoteContext,
+  quotedSpans,
+  type HeardFrom,
+} from './scene-dialogue';
 import type { Actor } from './scene-directions';
 import { FIGURE_SIGNS } from './scene-figure';
 import { idKey } from './scene-ids';
 import {
+  LINE_FROMS,
   LINE_PACES,
   MAX_ON_STAGE,
   MAX_STATES,
@@ -31,6 +39,7 @@ import {
   musicOf,
   storyEntry,
   wordsOf,
+  type LineFrom,
   type LinePace,
   type MendOptions,
   type MendedScript,
@@ -45,6 +54,7 @@ import {
   type SceneThing,
 } from './scene-script';
 import { STAGE_RECIPES } from './scene-stage';
+import { standsOnStage } from './scene-story';
 
 export const SCREENPLAY_BEATS = ['line', 'narration', 'action'] as const;
 export type ScreenplayBeatKind = (typeof SCREENPLAY_BEATS)[number];
@@ -72,6 +82,8 @@ export interface ScreenplayBeatDraft {
   who: string | null;
   /** Whom a line is said to; whom or what an action is toward. */
   to: string | null;
+  /** Where a line comes from: the stage, off it, above, a phone, a letter, a thought, a dream. */
+  from: LineFrom | null;
   /** A line's words as the book has them; the narrator's sentence; what an action shows, unspoken. */
   say: string;
   do: ScreenplayDoing | null;
@@ -184,11 +196,12 @@ export function lineOf(say: string): { text: string; attributed: boolean } {
   };
 }
 
-/** A line the book's characters say on a page, and who says it where the book says. */
+/** A line the book's characters say on a page, who says it where the book says, and where it comes from. */
 export interface BookLine {
   text: string;
   words: string[];
   speaker: string | null;
+  from: HeardFrom | null;
 }
 
 /** Every line the book's characters say on the page, in order, each with its speaker where the book tells. */
@@ -203,15 +216,22 @@ export function bookLines(
   const found = dialogueOf(paragraphs, speakers);
   const out: BookLine[] = [];
   paragraphs.forEach((paragraph, k) => {
-    for (const [a, b] of quotedSpans(paragraph)) {
+    const spans = quotedSpans(paragraph);
+    spans.forEach(([a, b], i) => {
       const text = paragraph.slice(a, b);
       const words = keysOf(text);
-      if (!words.length) continue;
+      if (!words.length) return;
       const line = found.find(
         (one) => one.beat === k && one.span[0] === a && one.span[1] === b,
       );
-      out.push({ text, words, speaker: line?.speaker ?? null });
-    }
+      const { clause, after, quote } = quoteContext(paragraph, spans, i);
+      out.push({
+        text,
+        words,
+        speaker: line?.speaker ?? null,
+        from: heardFrom(clause, after, quote),
+      });
+    });
   });
   return out;
 }
@@ -309,6 +329,8 @@ export function mendScreenplay(
   // The beats: lines and narration spoken, each action a moment in the
   // quiet after the sentence before it, or in the quiet the page opens with.
   const beats: SceneBeat[] = [];
+  /** Where the writer says each line comes from, by beat. */
+  const fromAsked = new Map<number, LineFrom>();
   const spokenAt = new Map<number, number>();
   const moments = new Map<number, { after: number; offset: number }>();
   /** Each run of actions, after the sentence it follows (-1: before the first). */
@@ -351,6 +373,8 @@ export function mendScreenplay(
       const to = known(raw.to, PEOPLE);
       if (to && to !== speaker) beat.to = to;
       if (raw.pace && LINE_PACES.includes(raw.pace)) beat.pace = raw.pace;
+      if (raw.from && LINE_FROMS.includes(raw.from))
+        fromAsked.set(beats.length, raw.from);
     }
     spokenAt.set(at, beats.length);
     beats.push(beat);
@@ -384,7 +408,22 @@ export function mendScreenplay(
       `Too much happens without a word after ${crowded.join(', ')}: the quiet after one line or narration holds ${HOLD_MOST_S} seconds of action at most. Put a short narration or a line between the actions, or show fewer of them.`,
     );
 
-  // Who says each line, as the book tells it: the book wins.
+  // Who says each line, as the book tells it: the book wins. The story's
+  // characters the writer left out of the cast may say one too, and are
+  // brought in when they do: God's voice at a baptism is God's.
+  const storyOf = (id: string | null | undefined) => {
+    const thing = id ? byId.get(id) : undefined;
+    return thing?.kind === 'character'
+      ? (options.characters ?? []).find((c) => c.id === thing.ref)
+      : undefined;
+  };
+  const namesOf = (who: NonNullable<MendOptions['characters']>[number]) => {
+    const names = [who.name, ...who.aliases];
+    // A group or a voice is called by a common noun: "the crowd shouted".
+    return who.kind === 'group' || (who.presence ?? 'seen') !== 'seen'
+      ? [...names, ...names.map((name) => name.toLowerCase())]
+      : names;
+  };
   const speaking: Actor[] = cast.flatMap((thing) => {
     if (thing.kind !== 'character') return [];
     const who = (options.characters ?? []).find((c) => c.id === thing.ref);
@@ -392,18 +431,81 @@ export function mendScreenplay(
       ? [
           {
             id: thing.id,
-            names: [who.name, ...who.aliases, thing.name],
+            names: [...namesOf(who), thing.name],
             gender: genderOf(who.voice),
+            presence: who.presence ?? 'seen',
           },
         ]
       : [];
   });
+  const OUT_OF_CAST = '@';
+  for (const who of options.characters ?? [])
+    if (!cast.some((t) => t.kind === 'character' && t.ref === who.id))
+      speaking.push({
+        id: `${OUT_OF_CAST}${who.id}`,
+        names: namesOf(who),
+        gender: genderOf(who.voice),
+        presence: who.presence ?? 'seen',
+      });
+  /** A story's character the book gives a line, in the cast: added when the writer left them out. */
+  const inCastAs = (speaker: string): string | null => {
+    if (!speaker.startsWith(OUT_OF_CAST)) return speaker;
+    const ref = speaker.slice(OUT_OF_CAST.length);
+    const who = (options.characters ?? []).find((c) => c.id === ref);
+    if (!who) return null;
+    const there = cast.find((t) => t.kind === 'character' && t.ref === ref);
+    if (there) return there.id;
+    let id = ref;
+    for (let n = 2; inCast.has(id); n += 1) id = `${ref}-${n}`;
+    const thing: SceneThing = {
+      id,
+      kind: 'character',
+      ref,
+      name: who.name,
+      state: null,
+      met: 0,
+      intro: [],
+    };
+    cast.push(thing);
+    byId.set(id, thing);
+    inCast.add(id);
+    mended.push(`${id}: says a line of the book; brought into the cast`);
+    return id;
+  };
+  /** Whether someone in the cast can stand on the stage: a voice never does. */
+  const stands = (id: string | null | undefined): id is string =>
+    isPerson(id ?? null) && standsOnStage(storyOf(id) ?? {});
+  /**
+   * Where a line comes from: where the book's words say, else where the
+   * writer says, held to who says it. A voice from above is always from
+   * above; one only heard is never on the stage; someone the tradition
+   * never draws stands there as a light.
+   */
+  const fromFor = (
+    speaker: string | undefined,
+    said: HeardFrom | null,
+    asked: LineFrom | undefined,
+  ): LineFrom => {
+    const who = storyOf(speaker);
+    const presence = who?.presence ?? 'seen';
+    const from: LineFrom = said ?? asked ?? 'here';
+    if (presence === 'above')
+      return from === 'phone' || from === 'letter' || from === 'dream'
+        ? from
+        : 'above';
+    if (presence === 'heard' || who?.kind === 'group')
+      return from === 'here' || from === 'thought' || from === 'above'
+        ? 'off'
+        : from;
+    if (presence === 'light') return 'here';
+    return from === 'above' ? 'here' : from;
+  };
   const book = options.material ? bookLines(options.material, speaking) : [];
   /** Who of the cast a stretch of text names, people only. */
   const peopleIn = (text: string): string[] => [
     ...new Set(
       namedIn(text, [
-        ...speaking,
+        ...speaking.filter((one) => !one.id.startsWith(OUT_OF_CAST)),
         ...cast.flatMap((thing) =>
           thing.kind === 'person'
             ? [{ id: thing.id, names: [thing.name] }]
@@ -421,12 +523,34 @@ export function mendScreenplay(
       const found = covered(words, line.words) / Math.max(1, words.length);
       if (found > share) [best, share] = [line, found];
     }
-    if (best?.speaker && share >= 0.6 && best.speaker !== beat.speaker) {
+    const matched = best && share >= 0.6 ? best : null;
+    const said = matched?.speaker ? inCastAs(matched.speaker) : null;
+    if (said && said !== beat.speaker) {
       mended.push(
-        `line ${k + 1}: said by ${best.speaker} in the book${beat.speaker ? `, not ${beat.speaker}` : ''}`,
+        `line ${k + 1}: said by ${said} in the book${beat.speaker ? `, not ${beat.speaker}` : ''}`,
       );
-      beat.speaker = best.speaker;
-      if (beat.to === best.speaker) delete beat.to;
+      beat.speaker = said;
+      if (beat.to === said) delete beat.to;
+    }
+    // A voice from heaven, or out of sight, the book gives no one in the
+    // story: never someone on the stage. With no voice from above in the
+    // story, the narrator says it, from above.
+    if (
+      !said &&
+      (matched?.from === 'above' || matched?.from === 'off') &&
+      stands(beat.speaker)
+    ) {
+      mended.push(
+        `line ${k + 1}: a voice ${matched.from === 'above' ? 'from above' : 'out of sight'} in the book, not ${beat.speaker}`,
+      );
+      delete beat.speaker;
+      if (matched.from === 'above') {
+        beat.kind = 'narration';
+        beat.from = 'above';
+        delete beat.to;
+        delete beat.pace;
+        return;
+      }
     }
     if (!beat.speaker) {
       // No one to say it: the narrator does, as a quotation.
@@ -440,6 +564,8 @@ export function mendScreenplay(
       return;
     }
     beat.lines = [{ span: [0, beat.say.length], speaker: beat.speaker }];
+    const from = fromFor(beat.speaker, matched?.from ?? null, fromAsked.get(k));
+    if (from !== 'here') beat.from = from;
   });
 
   if (draft.fit !== 'poor') {
@@ -508,6 +634,8 @@ export function mendScreenplay(
   const shown: string[] = [];
   const gone = new Set<string>();
   const put = (id: string) => {
+    // A voice is never on the stage.
+    if (isPerson(id) && !stands(id)) return;
     const list = isPerson(id) ? present : shown;
     if (!list.includes(id)) list.push(id);
   };
@@ -523,8 +651,18 @@ export function mendScreenplay(
   const moved = new Set<string>();
   (draft.beats ?? []).forEach((raw, at) => {
     const beat = spokenAt.has(at) ? beats[spokenAt.get(at)!] : null;
+    // Someone heard from off the stage, down a phone or in a letter is
+    // not there for it.
+    const away =
+      beat?.kind === 'line' &&
+      beat.from !== undefined &&
+      beat.from !== 'thought';
     const id =
-      beat?.kind === 'line' ? (beat.speaker ?? null) : known(raw.who, PEOPLE);
+      beat?.kind === 'line'
+        ? away
+          ? null
+          : (beat.speaker ?? null)
+        : known(raw.who, PEOPLE);
     if (!id || moved.has(id)) return;
     if (raw.kind === 'action' && (raw.do === 'enter' || raw.do === 'leave')) {
       moved.add(id);
@@ -555,6 +693,7 @@ export function mendScreenplay(
     const thing = who ? byId.get(who) : undefined;
     if (!who || !name || !thing) return [];
     if (thing.kind === 'character' || thing.kind === 'person') {
+      if (!stands(who)) return [];
       if (isFace(name) || (FIGURE_SIGNS as readonly string[]).includes(name))
         return [{ target: who, part: name, do: 'show' }];
       mended.push(`${who}: no face or sign "${name}"`);
@@ -576,7 +715,7 @@ export function mendScreenplay(
   ): SceneEffect[] => {
     const doing = raw.do;
     if (
-      !isPerson(who) ||
+      !stands(who) ||
       !doing ||
       !(SCREENPLAY_DOINGS as readonly string[]).includes(doing)
     )
@@ -635,10 +774,35 @@ export function mendScreenplay(
       const place = known(raw.place, ['place']);
       const prop = known(raw.show, ['drawing']);
       if (prop && !shown.includes(prop)) shown.push(prop);
-      // Whoever speaks is on the stage: unless the words sent them off it.
+      // Whoever speaks is on the stage: unless the words sent them off it,
+      // or the line comes from somewhere else. Someone there says it from
+      // where they are, and a phone or a letter goes to whom it is to.
       const speaker = beat.kind === 'line' ? (beat.speaker ?? null) : null;
+      if (
+        speaker &&
+        present.includes(speaker) &&
+        (beat.from === 'off' || beat.from === 'phone' || beat.from === 'letter')
+      )
+        delete beat.from;
+      if (beat.from === 'phone' || beat.from === 'letter') {
+        const holder = beat.to ?? null;
+        const thing = holder ? byId.get(holder) : undefined;
+        if (
+          (thing?.kind === 'character' || thing?.kind === 'person') &&
+          !thing.holding &&
+          (thing.pose ?? 'standing') === 'standing'
+        ) {
+          thing.holding = beat.from;
+          mended.push(`${holder}: holds the ${beat.from} the line comes from`);
+        }
+      }
+      const here = beat.from === undefined || beat.from === 'thought';
       const cutIn =
-        speaker && !present.includes(speaker) && !gone.has(speaker)
+        speaker &&
+        here &&
+        stands(speaker) &&
+        !present.includes(speaker) &&
+        !gone.has(speaker)
           ? [speaker]
           : [];
       for (const id of cutIn) present.push(id);
@@ -664,7 +828,7 @@ export function mendScreenplay(
     const who = known(raw.who, [...PEOPLE, 'drawing']);
     const effects: SceneEffect[] = [];
     let stage: SceneStage | null = null;
-    if (raw.do === 'enter' && isPerson(who) && !present.includes(who)) {
+    if (raw.do === 'enter' && stands(who) && !present.includes(who)) {
       // With whoever they bring: "leading a brown goat on a rope".
       const coming = [
         who,
@@ -675,7 +839,7 @@ export function mendScreenplay(
         gone.delete(id);
       }
       stage = stageNow({ arrive: coming });
-    } else if (raw.do === 'leave' && isPerson(who) && present.includes(who)) {
+    } else if (raw.do === 'leave' && stands(who) && present.includes(who)) {
       // And whoever goes with them: "together, they walk home".
       const going = [
         who,
@@ -699,7 +863,7 @@ export function mendScreenplay(
     // Hugged or reached for, someone is there: in view, if they were not.
     const toward = known(raw.to, PEOPLE);
     if (
-      toward &&
+      stands(toward) &&
       (raw.do === 'hug' || raw.do === 'reach') &&
       !present.includes(toward) &&
       !gone.has(toward)

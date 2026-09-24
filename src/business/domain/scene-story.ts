@@ -49,7 +49,11 @@ export const SHEET_PARTS = ['head', 'body', 'arms', 'legs'] as const;
 export const STORY_ROLES = ['main', 'supporting', 'minor'] as const;
 export type StoryRole = (typeof STORY_ROLES)[number];
 
-/** The kinds of voice a character may have: code picks the voice itself (scene-voice). */
+/**
+ * The kinds of voice a character may have: code picks the voice itself
+ * (scene-voice). "divine" is God's, or a god's: deep, calm, unhurried;
+ * "crowd" is many people speaking as one.
+ */
 export const STORY_VOICES = [
   'girl',
   'boy',
@@ -58,6 +62,8 @@ export const STORY_VOICES = [
   'old woman',
   'old man',
   'creature',
+  'divine',
+  'crowd',
 ] as const;
 export type StoryVoice = (typeof STORY_VOICES)[number];
 
@@ -67,10 +73,22 @@ const voiceKind = (voice: unknown): StoryVoice | null =>
 /**
  * What a character is: a person, drawn by the kit like every person, or
  * an animal or a creature (a monster, a robot, a talking teapot), drawn
- * by the artist in the kit's style.
+ * by the artist in the kit's style; or a group who act and speak as one
+ * (the crowd, the disciples, the soldiers), a crowd on the stage.
  */
-export const STORY_KINDS = ['person', 'animal', 'creature'] as const;
+export const STORY_KINDS = ['person', 'animal', 'creature', 'group'] as const;
 export type StoryKind = (typeof STORY_KINDS)[number];
+
+/**
+ * Whether a character is seen. "seen": on the stage when they are there.
+ * "heard": only ever a voice, off the stage, on a phone, in a letter.
+ * "above": a voice from heaven or the sky, God's; light falls from the
+ * top of the stage as they speak. "light": someone the text's own
+ * tradition never draws: a soft light stands where they are, and the
+ * narrator says their words. Only "seen" and "light" stand on the stage.
+ */
+export const STORY_PRESENCES = ['seen', 'heard', 'above', 'light'] as const;
+export type StoryPresence = (typeof STORY_PRESENCES)[number];
 
 /** An animal's or a creature's size beside people: a cat, a dog, a horse. */
 export const STORY_SIZES = ['small', 'medium', 'large'] as const;
@@ -78,6 +96,64 @@ export type StorySize = (typeof STORY_SIZES)[number];
 
 const kindOf = (kind: unknown): StoryKind | null =>
   STORY_KINDS.includes(kind as StoryKind) ? (kind as StoryKind) : null;
+const presenceKind = (presence: unknown): StoryPresence | null =>
+  STORY_PRESENCES.includes(presence as StoryPresence)
+    ? (presence as StoryPresence)
+    : null;
+
+/**
+ * Names that are God's, whatever the story calls them: never drawn, a
+ * voice from above. Only names that could be no one else ("the Lord"
+ * could be a lord of the manor, so only as one of God's other names).
+ */
+const GOD =
+  /^(?:god|lord god|god almighty|almighty god|almighty|lord almighty|lord of hosts|yahweh|jehovah|allah|elohim|adonai|god the father|heavenly father|most high)$/u;
+
+/** Whether a character is God, by any of their names. */
+export function isGod(names: readonly string[]): boolean {
+  return names.some((name) =>
+    GOD.test(
+      name
+        .toLowerCase()
+        .replace(/[^\p{L}\s]/gu, '')
+        .replace(/\s+/g, ' ')
+        .trim()
+        .replace(/^the /u, ''),
+    ),
+  );
+}
+
+/**
+ * How a character is present, made sound: God is never drawn, whatever
+ * the reader said; someone seen anywhere in the book is seen, and one
+ * kept from drawing (above, light) stays so.
+ */
+export function presenceFor(
+  names: readonly string[],
+  said: StoryPresence | null | undefined,
+  before?: StoryPresence | null,
+): StoryPresence {
+  if (isGod(names)) return 'above';
+  const ranked = [before, said].filter((p): p is StoryPresence => Boolean(p));
+  if (ranked.includes('light')) return 'light';
+  if (ranked.includes('above')) return 'above';
+  if (ranked.includes('seen')) return 'seen';
+  return ranked[0] ?? 'seen';
+}
+
+/**
+ * Whether a character stands on the stage when they are there: someone
+ * seen, or a light where they are. A voice never does, and a group is a
+ * crowd behind the stage, never one of its things.
+ */
+export const standsOnStage = (character: {
+  presence?: StoryPresence | null;
+  kind?: StoryKind | null;
+}) =>
+  (character.presence ?? 'seen') !== 'heard' &&
+  character.presence !== 'above' &&
+  character.kind !== 'group';
+
 const sizeOf = (size: unknown): StorySize | null =>
   STORY_SIZES.includes(size as StorySize) ? (size as StorySize) : null;
 /** A person's figure as said, made sound; anyone else has none. */
@@ -112,6 +188,8 @@ export interface StoryCharacter {
   size?: StorySize | null;
   /** A person's look, as the kit draws them: the same on every page. */
   figure?: FigureSpec | null;
+  /** Whether they are seen or only heard; absent from a book read before it was asked: seen. */
+  presence?: StoryPresence | null;
 }
 
 export interface StoryPlace {
@@ -153,6 +231,7 @@ export interface StoryDraft {
     size?: StorySize | null;
     /** As the model said it; made sound by figureOf. */
     figure?: unknown;
+    presence?: StoryPresence | null;
   }[];
   places: {
     name: string;
@@ -352,6 +431,11 @@ export function mergeStory(
         found.kind ??= kindOf(raw.kind);
         found.size ??= sizeOf(raw.size);
         found.figure ??= figureFor(found.kind, raw.figure);
+        found.presence = presenceFor(
+          [found.name, ...found.aliases],
+          presenceKind(raw.presence),
+          found.presence,
+        );
         continue;
       }
       const kind = kindOf(raw.kind);
@@ -370,6 +454,7 @@ export function mergeStory(
         kind,
         size: sizeOf(raw.size),
         figure: figureFor(kind, raw.figure),
+        presence: presenceFor([name, ...aliases], presenceKind(raw.presence)),
         keys: new Set([name, ...aliases].map(nameKey).filter(Boolean)),
         order: order++,
         named: part.from,
@@ -458,6 +543,7 @@ export function mergeStory(
       kind: c.kind ?? null,
       size: c.size ?? null,
       figure: c.figure ?? null,
+      presence: c.presence ?? 'seen',
     })),
     places: places
       .sort((a, b) => a.firstPage - b.firstPage)
@@ -499,6 +585,10 @@ export function bibleOf(
       kind: kindOf(c.kind),
       size: sizeOf(c.size),
       figure: figureFor(kindOf(c.kind), c.figure),
+      presence: presenceFor(
+        [clean(c.name), ...(c.aliases ?? []).map(clean)],
+        presenceKind(c.presence),
+      ),
     }));
   const known = new Set(characters.map((c) => c.id));
   return {
@@ -537,6 +627,94 @@ export function moodBefore(
   return before?.present.find((one) => one.id === id)?.mood ?? 'neutral';
 }
 
+/**
+ * A voice from heaven, the way stories bring one in, and a crowd that
+ * speaks: the words the book uses for them.
+ */
+const VOICE_FROM_ABOVE =
+  /\b(?:a|the)\s+(?:loud\s+|great\s+|deep\s+|gentle\s+)?voice\s+(?:came\s+|spoke\s+|sounded\s+|was\s+heard\s+|rang\s+out\s+|boomed\s+|called\s+|said\s+)?(?:from|out\s+of)\s+(?:heaven|the\s+heavens|the\s+sky|the\s+skies|above|on\s+high|the\s+clouds?)\b/iu;
+const CROWD_SPEAKS =
+  /\b(?:the\s+)?(crowds?|people|multitude|throng|villagers|townspeople|onlookers)\s+(?:all\s+)?(?:shouted|cried(?:\s+out)?|called(?:\s+out)?|yelled|roared|cheered|answered|replied|said|murmured|asked|sang|chanted)\b|\b(?:shouted|cried|roared|cheered|chanted)\s+the\s+(crowds?|people|multitude|throng|villagers)\b/iu;
+
+/**
+ * The page's voices the reader did not list, from the page's own words:
+ * a voice from heaven, where the story has no one heard from above, and a
+ * crowd that speaks, where it has no group. Each a character for this
+ * page only, heard and never drawn, so no one on the stage says their
+ * lines.
+ */
+export function withVoices(
+  bible: StoryBible,
+  page: number,
+  material: string,
+): StoryBible {
+  const added: StoryCharacter[] = [];
+  const met = bible.characters.reduce((n, c) => Math.max(n, c.met + 1), 0);
+  const taken = new Set(bible.characters.map((c) => c.id));
+  const add = (character: Omit<StoryCharacter, 'firstPage' | 'met'>) => {
+    if (taken.has(character.id)) return;
+    added.push({ ...character, firstPage: page, met: met + added.length });
+  };
+  if (
+    VOICE_FROM_ABOVE.test(material) &&
+    !bible.characters.some((c) => c.presence === 'above')
+  )
+    add({
+      id: 'voice-from-above',
+      name: 'A voice from heaven',
+      aliases: ['the voice from heaven', 'the voice'],
+      role: 'minor',
+      look: '',
+      traits: [],
+      voice: 'divine',
+      kind: 'person',
+      size: null,
+      figure: null,
+      presence: 'above',
+    });
+  const crowd = CROWD_SPEAKS.exec(material);
+  if (crowd && !bible.characters.some((c) => c.kind === 'group')) {
+    const word = (crowd[1] ?? crowd[2] ?? 'crowd').toLowerCase();
+    add({
+      id: 'the-crowd',
+      name: `The ${word}`,
+      aliases: [`the ${word}`, 'the crowd', 'the people'],
+      role: 'minor',
+      look: '',
+      traits: [],
+      voice: 'crowd',
+      kind: 'group',
+      size: null,
+      figure: null,
+      presence: 'seen',
+    });
+  }
+  if (!added.length) return bible;
+  const here = bible.pages.find((p) => p.page === page);
+  // Whoever the writer would be told of anyway, and the voices besides.
+  const present = [
+    ...(here?.present.length
+      ? here.present
+      : charactersOn(bible, page).map((c): StoryPage['present'][number] => ({
+          id: c.id,
+          mood: 'neutral',
+        }))),
+    ...added.map((c): StoryPage['present'][number] => ({
+      id: c.id,
+      mood: 'neutral',
+    })),
+  ];
+  return {
+    ...bible,
+    characters: [...bible.characters, ...added],
+    pages: here
+      ? bible.pages.map((p) => (p === here ? { ...p, present } : p))
+      : [...bible.pages, { page, summary: '', present, place: null }].sort(
+          (a, b) => a.page - b.page,
+        ),
+  };
+}
+
 /** Who the writer is told of on a page: who is on it, else the book's main characters. */
 export function charactersOn(
   bible: StoryBible,
@@ -554,6 +732,19 @@ export function charactersOn(
     .slice(0, MAX_ON_PAGE);
 }
 
+/** What the writer is told of someone who is not simply seen on the stage. */
+const HEARD_NOTE: Record<StoryPresence | 'group', string> = {
+  seen: '',
+  heard:
+    '. Only ever heard, never on the stage: their lines come from off the stage, a phone, a letter or a dream',
+  above:
+    '. Never on the stage and never drawn: a voice from above, their lines from "above"',
+  light:
+    '. Never drawn: a soft light stands where they are, and the narrator says their words',
+  group:
+    '. A group who speak as one: a crowd behind the stage, never one of its things',
+};
+
 /**
  * The story as the writer is told it for one page: its characters, each
  * with what they are like, how they feel as the page starts and on it,
@@ -568,6 +759,7 @@ export function describeStory(bible: StoryBible, page: number): string {
     return [
       `- ${c.id}: ${c.name}${c.aliases.length ? ` (also ${c.aliases.slice(0, 3).join(', ')})` : ''}`,
       c.traits.length ? `, ${c.traits.join(', ')}` : '',
+      HEARD_NOTE[c.kind === 'group' ? 'group' : (c.presence ?? 'seen')],
       `. Starts the page ${moodBefore(bible, c.id, page)}`,
       mood ? `; on it mostly ${mood}` : '',
       c.firstPage === page
@@ -680,6 +872,7 @@ export function castStory(
     .filter(
       (t): t is CharacterThing =>
         t.kind === 'character' &&
+        standsOnStage(bible.characters.find((c) => c.id === t.ref) ?? {}) &&
         Boolean(
           bible.pages
             .find((p) => p.page === page - 1)

@@ -203,6 +203,7 @@ export const FIGURE_PROPS = [
   'bag',
   'ball',
   'lantern',
+  'letter',
 ] as const;
 export type FigureProp = (typeof FIGURE_PROPS)[number];
 
@@ -1522,6 +1523,7 @@ const GRIPS: Record<
   bag: { grip: 'down', size: 1.25 },
   ball: { grip: 'up', size: 1.4 },
   lantern: { grip: 'up', size: 1.35 },
+  letter: { grip: 'up', size: 1.35 },
 };
 const WOOD = '#8a5a3b';
 const STEEL = '#c9cdd3';
@@ -1567,6 +1569,22 @@ function propOf(
             lines,
           out: 28,
           top: -42,
+        };
+      }
+      case 'letter': {
+        // A sheet held up to read, a corner folded, its lines of writing.
+        const writing = [-34, -27, -20, -13]
+          .map((y, i) =>
+            line(`M-12,${y} L${i === 3 ? 3 : 12},${y}`, '#9d978f', W(1.8)),
+          )
+          .join('');
+        return {
+          markup:
+            `<path d="M-17,-3 L-17,-42 L10,-42 L17,-35 L17,-3 Z" ${inked('#fbf7ee')}/>` +
+            `<path d="M10,-42 L10,-35 L17,-35" fill="none" stroke="${FIGURE_INK}" stroke-width="${W(2)}" stroke-linejoin="round"/>` +
+            writing,
+          out: 18,
+          top: -43,
         };
       }
       case 'phone':

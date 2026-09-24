@@ -8,12 +8,16 @@ import {
   castStory,
   charactersOn,
   describeStory,
+  isGod,
   mergeStory,
   moodBefore,
   nameKey,
   setThing,
   sheetThing,
   storyPieces,
+  standsOnStage,
+  withVoices,
+  type StoryBible,
   type StoryDraft,
 } from './scene-story';
 
@@ -585,5 +589,104 @@ describe('a "previously" opening', () => {
     // Nobody from the page before: no opening.
     expect(castStory({ ...script, cast: [] }, bible, 2).opening).toBeNull();
     expect(castStory(script, bible, 1).opening).toBeNull();
+  });
+});
+
+describe('who is seen, and who is only heard', () => {
+  it('never draws God, whatever the reader said, by any of his names', () => {
+    expect(isGod(['God'])).toBe(true);
+    expect(isGod(['The Lord God'])).toBe(true);
+    expect(isGod(['the Almighty'])).toBe(true);
+    // A lord of the manor is not God.
+    expect(isGod(['the Lord', 'Lord Ashby'])).toBe(false);
+    const bible = mergeStory([
+      {
+        from: 1,
+        to: 2,
+        draft: draft({
+          characters: [
+            person('Jesus', { presence: 'seen', voice: 'man' }),
+            person('God', { presence: 'seen', voice: 'divine' }),
+            person('Mum', { presence: 'heard', voice: 'woman' }),
+          ],
+          pages: [],
+        }),
+      },
+      {
+        from: 3,
+        to: 4,
+        draft: draft({
+          // Heard on the phone first, seen later: seen.
+          characters: [person('Mum', { presence: 'seen', voice: 'woman' })],
+          pages: [],
+        }),
+      },
+    ]);
+    const at = (name: string) => bible.characters.find((c) => c.name === name)!;
+    expect(at('God').presence).toBe('above');
+    expect(at('Jesus').presence).toBe('seen');
+    expect(at('Mum').presence).toBe('seen');
+    expect(standsOnStage(at('God'))).toBe(false);
+    expect(standsOnStage(at('Jesus'))).toBe(true);
+    expect(standsOnStage({ presence: 'light' })).toBe(true);
+    expect(standsOnStage({ presence: 'seen', kind: 'group' })).toBe(false);
+    // Kept as it was read.
+    expect(
+      bibleOf(JSON.parse(JSON.stringify(bible)) as StoryBible).characters,
+    ).toEqual(bible.characters);
+  });
+
+  it('brings in a voice from heaven and a crowd the reader did not list, for the page', () => {
+    const bible: StoryBible = {
+      characters: [
+        {
+          id: 'jesus',
+          name: 'Jesus',
+          aliases: [],
+          role: 'main',
+          look: '',
+          traits: [],
+          firstPage: 1,
+          met: 0,
+          voice: 'man',
+          presence: 'seen',
+        },
+      ],
+      places: [],
+      pages: [],
+    };
+    const page =
+      'The crowds shouted, “Hosanna!” Behold, a voice out of the heavens said, “This is my beloved Son.”';
+    const withThem = withVoices(bible, 3, page);
+    const voice = withThem.characters.find((c) => c.presence === 'above');
+    const crowd = withThem.characters.find((c) => c.kind === 'group');
+    expect(voice?.voice).toBe('divine');
+    expect(crowd?.voice).toBe('crowd');
+    // The writer is still told of the story's own people on the page.
+    expect(charactersOn(withThem, 3).map((c) => c.id)).toEqual([
+      'jesus',
+      voice!.id,
+      crowd!.id,
+    ]);
+    expect(describeStory(withThem, 3)).toContain('a voice from above');
+    // God already in the story: no second voice from above.
+    const withGod = {
+      ...bible,
+      characters: [
+        ...bible.characters,
+        {
+          ...bible.characters[0],
+          id: 'god',
+          name: 'God',
+          presence: 'above' as const,
+        },
+      ],
+    };
+    expect(
+      withVoices(withGod, 3, page).characters.filter(
+        (c) => c.presence === 'above',
+      ),
+    ).toHaveLength(1);
+    expect(withVoices(bible, 3, 'Jesus walked on.')).toBe(bible);
   });
 });

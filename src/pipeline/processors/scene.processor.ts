@@ -49,6 +49,7 @@ import {
   type PersonThing,
   type PlaceThing,
   type DrawingThing,
+  type LineFrom,
   type SceneScript,
   type SceneScriptDraft,
 } from '../../business/domain/scene-script';
@@ -64,6 +65,7 @@ import {
   castOf,
   figureDrawing,
   figureSheet,
+  lightDrawing,
   measureSheet,
   setsOf,
   type Cast,
@@ -84,8 +86,10 @@ import {
   setThing,
   setsKey,
   sheetThing,
+  standsOnStage,
   storyKey,
   storyPieces,
+  withVoices,
   type StoryBible,
   type StoryCharacter,
   type StoryKind,
@@ -164,6 +168,14 @@ export const THUMB_WIDTH = 480;
 const DRAW_TRIES = 2;
 /** Stretches of a story read at once. */
 const STORY_READERS = 4;
+/** How a line from somewhere else is said, for a voice that takes direction. */
+const FROM_STYLE: Partial<Record<LineFrom, string>> = {
+  thought: 'thinking it quietly to themselves, not aloud',
+  above: 'from above, unhurried',
+  phone: 'down a phone line',
+  letter: 'reading out the words they wrote',
+  dream: 'as if remembered, soft and far away',
+};
 
 /** A story's page: the book's bible, the page's number in it, and where the book's characters are kept. */
 export interface PageStory {
@@ -443,7 +455,18 @@ export class SceneProcessor {
       }
   > {
     const { documentId, topic, who, base } = input;
-    const story = input.story ?? null;
+    // A story's page, with any voice its words bring in that the book's
+    // reader did not list: a voice from heaven, a crowd that speaks.
+    const story = input.story
+      ? {
+          ...input.story,
+          bible: withVoices(
+            input.story.bible,
+            input.story.page,
+            input.material,
+          ),
+        }
+      : null;
     const written = await this.write({
       documentTitle: input.documentTitle,
       topic,
@@ -816,6 +839,16 @@ export class SceneProcessor {
     // first time the book meets one, what they are like beside them.
     const cast = characters.map(async (thing) => {
       const character = story?.bible.characters.find((c) => c.id === thing.ref);
+      // A voice is never drawn; someone the text's tradition never shows
+      // is a light where they stand.
+      if (character && !standsOnStage(character)) {
+        out.set(thing.id, null);
+        return;
+      }
+      if (character?.presence === 'light') {
+        out.set(thing.id, lightDrawing(thing.ref));
+        return;
+      }
       const sheet =
         story && character
           ? await this.sheetFor(
@@ -1013,8 +1046,16 @@ export class SceneProcessor {
       // A screenplay's line is all theirs: the whole sentence in their voice.
       if (beat.kind === 'line') {
         const speaker = voiceOf(beat.lines[0].speaker);
+        const style = FROM_STYLE[beat.from ?? 'here'];
         return speaker
-          ? [{ span: [0, forms[k].text.length] as [number, number], speaker }]
+          ? [
+              {
+                span: [0, forms[k].text.length] as [number, number],
+                speaker: style
+                  ? { ...speaker, style: `${speaker.style}, ${style}` }
+                  : speaker,
+              },
+            ]
           : [];
       }
       const written = quotedSpans(beat.say);

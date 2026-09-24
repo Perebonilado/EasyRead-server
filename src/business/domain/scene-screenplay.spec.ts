@@ -7,7 +7,7 @@ import {
   type ScreenplayCastDraft,
   type ScreenplayDraft,
 } from './scene-screenplay';
-import type { StoryVoice } from './scene-story';
+import type { StoryPresence, StoryVoice } from './scene-story';
 
 const characters: {
   id: string;
@@ -44,6 +44,7 @@ const beat = (
   kind,
   who: null,
   to: null,
+  from: null,
   say,
   do: null,
   state: null,
@@ -467,5 +468,164 @@ describe('a screenplay made sound and staged', () => {
     );
     const last = mend(home).script.steps.at(-1)?.stage;
     expect(last).toMatchObject({ show: ['kofi'], leave: ['ada', 'nana'] });
+  });
+});
+
+describe('voices beyond the stage', () => {
+  /** Matthew 3:13-17, World English Bible (public domain). */
+  const baptism = [
+    'Then Jesus came from Galilee to the Jordan to John, to be baptized by him.',
+    'But John would have hindered him, saying, “I need to be baptized by you, and you come to me?”',
+    'But Jesus, answering, said to him, “Allow it now, for this is the fitting way for us to fulfill all righteousness.”',
+    'Then he allowed him. Jesus, when he was baptized, went up directly from the water: and behold, the heavens were opened to him.',
+    'Behold, a voice out of the heavens said, “This is my beloved Son, with whom I am well pleased.”',
+  ].join('\n\n');
+  const bible: {
+    id: string;
+    name: string;
+    aliases: string[];
+    voice: StoryVoice;
+    presence: StoryPresence;
+  }[] = [
+    { id: 'jesus', name: 'Jesus', aliases: [], voice: 'man', presence: 'seen' },
+    {
+      id: 'john',
+      name: 'John the Baptist',
+      aliases: ['John'],
+      voice: 'man',
+      presence: 'seen',
+    },
+    {
+      id: 'god',
+      name: 'God',
+      aliases: ['the Father'],
+      voice: 'divine',
+      presence: 'above',
+    },
+  ];
+  const river = [
+    {
+      id: 'jordan',
+      name: 'the Jordan',
+      aliases: [],
+      sound: null,
+      look: 'a river',
+    },
+  ];
+  /** The writer as it went wrong in production: God's line said by Jesus. */
+  const written = (): ScreenplayDraft => ({
+    fit: 'good',
+    fitReason: null,
+    title: 'The baptism',
+    mood: 'calm',
+    opening: ['john'],
+    beats: [
+      beat('narration', 'Jesus comes to the Jordan.', { place: 'jordan' }),
+      beat('action', 'Jesus walks to John.', {
+        who: 'jesus',
+        do: 'enter',
+        hold: 1.2,
+      }),
+      beat('line', 'I need to be baptized by you, and you come to me?', {
+        who: 'john',
+        to: 'jesus',
+      }),
+      beat(
+        'line',
+        'Allow it now, for this is the fitting way for us to fulfill all righteousness.',
+        { who: 'jesus', to: 'john' },
+      ),
+      beat('narration', 'The heavens open.'),
+      beat('line', 'This is my beloved Son, with whom I am well pleased.', {
+        who: 'jesus',
+      }),
+    ],
+    cast: [
+      thing('john', 'character', { name: 'John' }),
+      thing('jesus', 'character', { name: 'Jesus' }),
+      thing('jordan', 'place'),
+    ],
+  });
+
+  it("gives God's line back to God, from above, and never puts God on the stage", () => {
+    const { script, mended } = mendScreenplay(written(), {
+      material: baptism,
+      characters: bible,
+      places: river,
+    });
+    const last = script.beats[script.beats.length - 1];
+    expect(last.kind).toBe('line');
+    expect(last.from).toBe('above');
+    const god = script.cast.find(
+      (t) => t.kind === 'character' && t.ref === 'god',
+    );
+    expect(god).toBeDefined();
+    expect(last.speaker).toBe(god!.id);
+    expect(mended.join('\n')).toContain('brought into the cast');
+    for (const step of script.steps) {
+      expect(step.stage?.show ?? []).not.toContain(god!.id);
+      expect(step.stage?.cutIn ?? []).not.toContain(god!.id);
+    }
+  });
+
+  it('lets the narrator say words from above when the story has no one heard from above', () => {
+    const { script } = mendScreenplay(written(), {
+      material: baptism,
+      characters: bible.filter((c) => c.id !== 'god'),
+      places: river,
+    });
+    const last = script.beats[script.beats.length - 1];
+    expect(last.kind).toBe('narration');
+    expect(last.from).toBe('above');
+    expect(last.speaker).toBeUndefined();
+  });
+
+  it('puts a thinker on the stage, and a phone in the hand of whoever hears one', () => {
+    const cast = [
+      {
+        id: 'tobi',
+        name: 'Tobi',
+        aliases: [],
+        voice: 'boy' as const,
+        presence: 'seen' as const,
+      },
+      {
+        id: 'dad',
+        name: 'Dad',
+        aliases: [],
+        voice: 'man' as const,
+        presence: 'heard' as const,
+      },
+    ];
+    const material = [
+      '“Where is he?” Tobi thought.',
+      'The phone rang. Dad’s voice crackled over the phone: “I am on my way.”',
+    ].join('\n\n');
+    const { script } = mendScreenplay(
+      {
+        fit: 'good',
+        fitReason: null,
+        title: 'Waiting',
+        mood: 'calm',
+        opening: [],
+        beats: [
+          beat('line', 'Where is he?', { who: 'tobi' }),
+          beat('narration', 'The phone rings.'),
+          beat('line', 'I am on my way.', { who: 'dad', to: 'tobi' }),
+        ],
+        cast: [
+          thing('tobi', 'character', { name: 'Tobi' }),
+          thing('dad', 'character', { name: 'Dad' }),
+        ],
+      },
+      { material, characters: cast },
+    );
+    expect(script.beats[0].from).toBe('thought');
+    expect(script.beats[2].from).toBe('phone');
+    const shown = new Set(script.steps.flatMap((s) => s.stage?.show ?? []));
+    expect(shown.has('tobi')).toBe(true);
+    expect(shown.has('dad')).toBe(false);
+    const tobi = script.cast.find((t) => t.id === 'tobi');
+    expect(tobi?.kind === 'character' && tobi.holding).toBe('phone');
   });
 });

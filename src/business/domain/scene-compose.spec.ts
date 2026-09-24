@@ -1192,6 +1192,106 @@ describe('what a character says, in a bubble', () => {
     expect([...look].reverse().find(([when]) => when <= 2200)?.[1]).toBe('fox');
   });
 
+  it('shows where a voice from elsewhere comes from: above, off the stage, a thought', () => {
+    const line = (
+      say: string,
+      speaker: string,
+      extra: Partial<SceneScript['beats'][number]> = {},
+    ): SceneScript['beats'][number] => ({
+      say,
+      pause: 'short',
+      delivery: 'explain',
+      kind: 'line',
+      speaker,
+      lines: [{ span: [0, say.length], speaker }],
+      ...extra,
+    });
+    const played = composeScene({
+      script: {
+        ...talking,
+        cast: [
+          ...talking.cast,
+          {
+            id: 'god',
+            kind: 'character',
+            ref: 'god',
+            name: 'God',
+            state: null,
+            met: 2,
+            intro: [],
+          },
+          {
+            id: 'mum',
+            kind: 'character',
+            ref: 'mum',
+            name: 'Mum',
+            state: null,
+            met: 3,
+            intro: [],
+          },
+        ],
+        beats: [
+          {
+            say: 'A cold night on the quay.',
+            pause: 'short',
+            delivery: 'explain',
+            kind: 'narration',
+          },
+          line('This is my beloved child.', 'god', { from: 'above' }),
+          line('Dinner is ready!', 'mum', { from: 'off' }),
+          line('I wish I could fly.', 'mira', { from: 'thought' }),
+        ],
+        steps: [
+          {
+            at: { beat: 0, phrase: '' },
+            word: 0,
+            stage: { layout: 'row', show: ['mira', 'fox'], arrows: [] },
+            effects: [],
+          },
+        ],
+      },
+      // No one draws a voice.
+      drawings: new Map([
+        ['mira', figure()],
+        ['fox', figure()],
+      ]),
+      beats: [
+        beat('A cold night on the quay.', 0),
+        beat('This is my beloved child.', 2000),
+        beat('Dinner is ready!', 4500),
+        beat('I wish I could fly.', 7000),
+      ],
+      durationMs: 9500,
+      timing: 'voice',
+      generator: 'scene-2',
+    }).scene;
+    const says = played.effects.filter((e) => e.say);
+    expect(says.map((e) => [e.target, e.say!.from])).toEqual([
+      ['god', 'above'],
+      ['mum', 'off'],
+      ['mira', 'thought'],
+    ]);
+    const placed = played.stagings.wide.bubbles!;
+    const [above, off, thought] = says.map((e) => placed[e.say!.id]!);
+    // From above: across the top, pointing at no one on the stage.
+    expect(above.from).toBe('above');
+    expect(above.tail[1]).toBeLessThan(0);
+    // Mum, met after everyone: her voice from the right, out past the edge.
+    expect(off.from).toBe('off');
+    expect(off.tail[0]).toBeGreaterThan(off.x + off.w);
+    expect(thought.from).toBe('thought');
+    // Everyone looks up at the voice from above, and to the right at Mum's.
+    const lookAt = (id: string, t: number) =>
+      [...(played.acting?.[id]?.look ?? [])]
+        .reverse()
+        .find(([when]) => when <= t)?.[1];
+    expect(lookAt('fox', 2600)).toBe('@up');
+    expect(lookAt('mira', 5000)).toBe('@right');
+    // No mouth moves for a voice, nor for a thought.
+    expect(played.acting?.god).toBeUndefined();
+    expect(played.acting?.mira.mouth ?? []).toEqual([]);
+  });
+
   it('walks one over to the other before a hug across the row, and keeps them side by side', () => {
     const three = composeScene({
       script: {

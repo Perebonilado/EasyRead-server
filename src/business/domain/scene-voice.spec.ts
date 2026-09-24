@@ -281,3 +281,79 @@ describe('a screenplay, as the voice says it', () => {
     ]);
   });
 });
+
+describe('voices beyond the stage', () => {
+  const one = (over: Partial<StoryCharacter>): StoryCharacter => ({
+    id: 'x',
+    name: 'X',
+    aliases: [],
+    role: 'main',
+    look: '',
+    traits: [],
+    firstPage: 1,
+    met: 0,
+    voice: null,
+    ...over,
+  });
+  const bible: StoryBible = {
+    characters: [
+      one({ id: 'jesus', name: 'Jesus', voice: 'man', met: 0 }),
+      one({
+        id: 'god',
+        name: 'God',
+        voice: 'divine',
+        met: 1,
+        presence: 'above',
+      }),
+      one({
+        id: 'crowd',
+        name: 'The crowd',
+        voice: 'crowd',
+        met: 2,
+        kind: 'group',
+      }),
+      one({
+        id: 'prophet',
+        name: 'The Prophet',
+        voice: 'man',
+        met: 3,
+        presence: 'light',
+      }),
+    ],
+    places: [],
+    pages: [],
+  };
+  const at = (id: string) => bible.characters.find((c) => c.id === id)!;
+
+  it('gives God and a crowd voices no one character has, and a figure never drawn none', () => {
+    const god = characterVoice(bible, at('god'), 'kokoro', 'am_puck')!;
+    const crowd = characterVoice(bible, at('crowd'), 'kokoro', 'am_puck')!;
+    const jesus = characterVoice(bible, at('jesus'), 'kokoro', 'am_puck')!;
+    expect(god.voice).toContain(',');
+    expect(crowd.voice).toContain(',');
+    expect(god.voice).not.toBe(jesus.voice);
+    expect(god.pace).toBeLessThan(1);
+    expect(characterVoice(bible, at('god'), 'gemini', 'Kore')?.style).toContain(
+      'deep, calm and unhurried',
+    );
+    // The narrator says the words of someone the tradition never shows.
+    expect(
+      characterVoice(bible, at('prophet'), 'kokoro', 'am_puck'),
+    ).toBeNull();
+  });
+
+  it('says a thought and a voice from above more slowly than a line', () => {
+    const base = {
+      delivery: 'explain' as const,
+      pause: 'short' as const,
+      kind: 'line' as const,
+    };
+    const [said, thought, above] = deliveryPieces([
+      base,
+      { ...base, from: 'thought' },
+      { ...base, from: 'above' },
+    ]);
+    expect(thought.speed).toBeLessThan(said.speed);
+    expect(above.speed).toBeLessThan(said.speed);
+  });
+});

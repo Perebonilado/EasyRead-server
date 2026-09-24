@@ -26,6 +26,15 @@ export interface SpokenLine {
   speaker: string;
   /** Whom it is said to, when the screenplay says. */
   to?: string;
+  /**
+   * Where it comes from, when not from someone on the stage: a voice from
+   * above draws every eye up; one off the stage, to its side; a phone's
+   * or a letter's, to whoever hears it or holds it. A thought no one else
+   * hears, and a dream no one hears at all.
+   */
+  from?: 'off' | 'above' | 'phone' | 'letter' | 'thought' | 'dream';
+  /** The side of the stage an off-stage voice is on. */
+  side?: -1 | 1;
   startMs: number;
   endMs: number;
   words: { text: string; startMs: number; endMs: number }[];
@@ -309,6 +318,62 @@ export function actingOf(input: {
   const spokenBy = new Map<string, number>();
   lines.forEach((line, i) => {
     const { speaker, startMs: from, endMs: to } = line;
+    // A voice from above: every eye goes up, brows raised. From off the
+    // stage: every face turns to its side. Down a phone or from a letter:
+    // whoever hears it or holds it listens, and the rest look at them.
+    // A dream's no one hears.
+    if (line.from && line.from !== 'thought') {
+      const hearers = others(speaker, from);
+      const holder =
+        (line.from === 'phone' || line.from === 'letter') &&
+        line.to &&
+        hearers.includes(line.to)
+          ? line.to
+          : null;
+      if (line.from === 'dream') return;
+      hearers.forEach((one, k) => {
+        const toward =
+          line.from === 'above'
+            ? '@up'
+            : line.from === 'off' || (!holder && line.from === 'phone')
+              ? (line.side ?? 1) < 0
+                ? '@left'
+                : '@right'
+              : one === holder
+                ? line.from === 'letter'
+                  ? '@down'
+                  : null
+                : holder;
+        gaze(one, {
+          from: from + 150 + k * 110,
+          to: to + 600,
+          target: toward,
+          turn: toward === '@left' || toward === '@right' ? 0.6 : 0.35,
+          rank: RANK.listen,
+        });
+        if (line.from === 'above' && k < 2)
+          move(one, from + 200 + k * 150, 'brows', 1100);
+      });
+      if (
+        holder &&
+        /[.!]["'”’]?\s*$/.test(line.words.map((w) => w.text).join(' '))
+      )
+        move(holder, to + 150, 'nod', 500);
+      return;
+    }
+    // A thought: the thinker looks up and away, brows raised, their mouth
+    // still; no one else hears it.
+    if (line.from === 'thought') {
+      gaze(speaker, {
+        from: from - 200,
+        to: to + 300,
+        target: '@up',
+        turn: 0,
+        rank: RANK.speak,
+      });
+      move(speaker, from, 'brows', Math.min(1400, to - from));
+      return;
+    }
     const before = lines[i - 1];
     const bare = new Set(
       line.words.map((w) => w.text.replace(/[^\p{L}\p{N}'-]/gu, '')),

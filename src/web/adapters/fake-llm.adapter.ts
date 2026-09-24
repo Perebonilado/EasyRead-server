@@ -681,6 +681,7 @@ export class FakeLlmAdapter implements LlmGatewayPort {
     const lines = dialogueOf(paragraphs, characters);
     const blank = {
       to: null,
+      from: null,
       do: null,
       state: null,
       show: null,

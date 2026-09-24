@@ -1036,8 +1036,22 @@ export interface SceneEffectDto {
     carried?: true;
     /** It carries on a line from the bubble before: it does not open. */
     continues?: true;
+    /**
+     * Where the line comes from when not from someone on the stage: then
+     * no mouth moves for it, and its bubble shows where it comes from.
+     */
+    from?: SceneLineFrom;
   };
 }
+
+/**
+ * Where a line comes from, when not from someone on the stage: just off
+ * it; from above (heaven, the sky: light falls from the top of the stage
+ * and everyone looks up); down a phone; from a letter read out; a thought
+ * (a cloud, no mouth moving); a dream or a memory.
+ */
+export type SceneLineFrom =
+  'off' | 'above' | 'phone' | 'letter' | 'thought' | 'dream';
 
 /**
  * A move someone makes as they act: a nod, a gesture with the right or
@@ -1071,8 +1085,9 @@ export type SceneActingMove =
 export interface SceneActingDto {
   /**
    * Where they look from each moment on: another thing's id, or null for
-   * the viewer, or "@up" or "@down" (the sky, the ground); and how far
-   * their face turns toward it, 0 to 1.
+   * the viewer, or "@up" or "@down" (the sky, the ground), or "@left" or
+   * "@right" (a voice off the stage on that side); and how far their face
+   * turns toward it, 0 to 1.
    */
   look?: [number, string | null, number][];
   /** Their mouth as they speak: each line's first word, and its shapes at 30 a second, one digit each, 0 to 5. */
@@ -1099,6 +1114,15 @@ export interface SceneBubbleDto {
    * top of the stage instead: who says it, written before the words.
    */
   who?: string;
+  /**
+   * Where the line comes from, when not from someone on the stage: its
+   * shape shows it. From above, off the stage, or a dream, it keeps its
+   * place in the frame; a phone's or a letter's is by whoever hears or
+   * holds it, a thought's by the thinker.
+   */
+  from?: SceneLineFrom;
+  /** Whose head it is by, when not its speaker's: whoever hears the phone, or holds the letter. */
+  by?: string;
 }
 
 /** Where a thing stands at one step, in the staging's design units. */

@@ -11,6 +11,7 @@ import type {
   SceneEffectDto,
   SceneEffectName,
   SceneEnterName,
+  SceneLineFrom,
   ScenePillDto,
   ScenePlaceDto,
   SceneStepDto,
@@ -26,6 +27,7 @@ import {
   pillBox,
   placeBubble,
   placeStrip,
+  placeVoice,
   placeLabels,
   placePill,
   segmentsOf,
@@ -48,6 +50,7 @@ import {
   STORY_MOVES,
   isCodeThing,
   quotedSpans,
+  type CharacterThing,
   type SceneScript,
   type SceneStep,
   type SceneThing,
@@ -68,6 +71,9 @@ const EFFECT_STAGGER_MS = 180;
  * and the page opens as any page does.
  */
 export const OPENING_MIN_MS = 1200;
+/** Who says words from above that no one in the cast says: the narrator, from heaven. */
+const ABOVE = '@above';
+
 /** How long a speech bubble stays after the voice has said its words. */
 const SAY_AFTER_MS = 700;
 /** A moment of quiet after a line starts this long after its last word. */
@@ -486,8 +492,13 @@ export function storyShots(
           e.part !== null &&
           (FACES as readonly string[]).includes(e.part),
       )?.part ?? null;
+  // A voice from somewhere else is no one on the stage: the camera stays
+  // on the whole of it.
   const lines = script.beats.flatMap((beat, k) =>
-    beat.kind === 'line' && beat.speaker && beats[k]
+    beat.kind === 'line' &&
+    beat.speaker &&
+    beats[k] &&
+    (!beat.from || beat.from === 'thought')
       ? [{ beat, k, at: beats[k].startMs, end: beats[k].endMs }]
       : [],
   );
@@ -593,6 +604,24 @@ export function composeScene(input: ComposeInput): {
   );
   const byId = new Map(things.map((thing) => [thing.id, thing]));
   const castById = new Map(script.cast.map((thing) => [thing.id, thing]));
+  /** Each line from somewhere else, by its say's id: where from, whose head its bubble is by, and the side an off-stage voice is on. */
+  const heard = new Map<
+    string,
+    { from: SceneLineFrom; by: string | null; side: -1 | 1 }
+  >();
+  /**
+   * The side a voice off the stage comes from: the left for someone the
+   * book met before everyone else on the page, where they would stand;
+   * else the right.
+   */
+  const offSide = (speaker: string): -1 | 1 => {
+    const me = castById.get(speaker);
+    if (me?.kind !== 'character') return 1;
+    const others = script.cast.filter(
+      (t): t is CharacterThing => t.kind === 'character' && t.id !== speaker,
+    );
+    return others.length && others.every((t) => t.met > me.met) ? -1 : 1;
+  };
 
   // Every step on its words, in order; stage changes kept apart. A moment
   // a screenplay shows without words comes in the quiet after its line,
@@ -923,12 +952,24 @@ export function composeScene(input: ComposeInput): {
   );
   // Each line a character says: a bubble by their head holding only its
   // own words, open from just before its first word until a moment after
-  // its last. Their mouth moves while the voice says them.
+  // its last. Their mouth moves while the voice says them. A line from
+  // somewhere else (a voice from above, off the stage, down a phone, a
+  // letter, a thought) has a bubble that shows where it comes from, and
+  // no mouth moves for it; words from above no one in the cast says are
+  // the narrator's, at the top.
   script.beats.forEach((beat, k) => {
     const t = beats[k];
     if (!t) return;
-    for (const line of beat.lines ?? []) {
-      if (byId.get(line.speaker)?.kind !== 'drawing') continue;
+    const lines: { span: [number, number]; speaker: string }[] = beat.lines
+      ?.length
+      ? beat.lines
+      : beat.from === 'above'
+        ? [{ span: [0, beat.say.length], speaker: ABOVE }]
+        : [];
+    for (const line of lines) {
+      const from =
+        beat.kind === 'line' || line.speaker === ABOVE ? beat.from : undefined;
+      if (byId.get(line.speaker)?.kind !== 'drawing' && !from) continue;
       const [a, b] = line.span;
       const words = t.words.filter((w) => w[1] > a && w[0] < b);
       const text = bubbleText(beat.say.slice(a, b));
@@ -937,6 +978,7 @@ export function composeScene(input: ComposeInput): {
       spoken.push({
         speaker: line.speaker,
         ...(beat.to ? { to: beat.to } : {}),
+        ...(from ? { from, side: offSide(line.speaker) } : {}),
         startMs: words[0][2],
         endMs: to,
         words: words.map((w) => ({
@@ -945,16 +987,24 @@ export function composeScene(input: ComposeInput): {
           endMs: w[3],
         })),
       });
+      const id = `say-${saying++}`;
+      if (from)
+        heard.set(id, {
+          from,
+          by: from === 'phone' || from === 'letter' ? (beat.to ?? null) : null,
+          side: offSide(line.speaker),
+        });
       effects.push({
         atMs: Math.round(Math.max(0, words[0][2] - 150)),
         target: line.speaker,
         part: null,
         do: 'say',
         say: {
-          id: `say-${saying++}`,
+          id,
           text,
           untilMs: Math.round(to + SAY_AFTER_MS),
           saidUntilMs: Math.round(to),
+          ...(from ? { from } : {}),
         },
       });
     }
@@ -972,8 +1022,11 @@ export function composeScene(input: ComposeInput): {
     const next = lines[i + 1]?.atMs ?? durationMs;
     let until = Math.min(durationMs, say.untilMs, Math.max(said, next));
     let part = effect;
+    // A voice from elsewhere is never on the stage: its line runs on.
+    const elsewhere = say.from !== undefined && say.from !== 'thought';
     for (const step of steps) {
       if (step.atMs <= part.atMs || step.atMs >= until) continue;
+      if (elsewhere) continue;
       if (!step.show.includes(effect.target)) {
         until = step.atMs;
         break;
@@ -1309,8 +1362,12 @@ export function composeScene(input: ComposeInput): {
       const spoken: Words[] = [];
       for (const effect of says) {
         if (stepOf(effect.atMs) !== k) continue;
-        const at = laidOut[effect.target];
-        const found = geometry.get(effect.target);
+        const voice = heard.get(effect.say!.id);
+        // Whose head it is by: the speaker's, or whoever hears the phone
+        // or holds the letter; a voice from above or off the stage, no one's.
+        const by = voice && voice.from !== 'thought' ? voice.by : effect.target;
+        const at = by ? laidOut[by] : undefined;
+        const found = by ? geometry.get(by) : undefined;
         let bubble: SceneBubbleDto | null = null;
         let head: [number, number] | null = null;
         if (at && found?.head) {
@@ -1337,6 +1394,20 @@ export function composeScene(input: ComposeInput): {
           // By their head, or narrower where the step is crowded.
           bubble = placeBubble(asked) ?? placeBubble({ ...asked, width: 300 });
         }
+        // A voice with no one on the stage to be by: across the top, or at
+        // the edge it comes from.
+        if (!bubble && voice && voice.from !== 'thought')
+          bubble = placeVoice({
+            text: effect.say!.text,
+            from:
+              voice.from === 'phone'
+                ? 'off'
+                : voice.from === 'letter' || voice.from === 'dream'
+                  ? voice.from
+                  : voice.from,
+            side: voice.side,
+            stage,
+          });
         // No room by them, or not on the stage: a strip across the top.
         bubble ??= placeStrip({
           text: effect.say!.text,
@@ -1344,6 +1415,12 @@ export function composeScene(input: ComposeInput): {
           head,
           stage,
         });
+        if (voice)
+          bubble = {
+            ...bubble,
+            from: voice.from,
+            ...(by && by !== effect.target && at ? { by } : {}),
+          };
         bubbles[effect.say!.id] = bubble;
         if (bubble)
           spoken.push({

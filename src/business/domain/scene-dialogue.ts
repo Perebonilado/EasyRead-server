@@ -49,11 +49,30 @@ export function quotedSpans(sentence: string): [number, number][] {
 export interface Speaker {
   id: string;
   names: string[];
+  /**
+   * Whether they are seen, or only heard ("heard"), or a voice from above
+   * ("above"); absent, seen. A voice the words bring in is theirs.
+   */
+  presence?: 'seen' | 'heard' | 'above' | 'light';
 }
 
 /** How a line's speaker was found: the evidence, most certain first. */
 export type LineEvidence =
-  'lead' | 'verb' | 'before' | 'writer' | 'after' | 'continues' | 'turn';
+  | 'voice'
+  | 'lead'
+  | 'verb'
+  | 'before'
+  | 'writer'
+  | 'after'
+  | 'continues'
+  | 'turn';
+
+/**
+ * Where a line comes from when the words around it say so: a voice from
+ * heaven or the sky ("above"), a voice from somewhere out of sight
+ * ("off"), a phone or a radio, a letter read out, a thought.
+ */
+export type HeardFrom = 'above' | 'off' | 'phone' | 'letter' | 'thought';
 
 /** One quoted line: the sentence it is in, where in it, and who says it. */
 export interface DialogueLine {
@@ -62,11 +81,101 @@ export interface DialogueLine {
   span: [number, number];
   speaker: string;
   by: LineEvidence;
+  /** Where it comes from, when the words around it say. */
+  from?: HeardFrom;
 }
 
-/** Words that say someone speaks, as a story tells it. */
+/** A voice from heaven, the sky, the clouds: no one on the stage says it. */
+const VOICE_ABOVE =
+  /\b(?:a|the)\s+(?:loud\s+|great\s+|deep\s+|gentle\s+)?voice\s+(?:came\s+|spoke\s+|sounded\s+|was\s+heard\s+|rang\s+out\s+|boomed\s+|called\s+|said\s+)?(?:from|out\s+of)\s+(?:heaven|the\s+heavens|the\s+sky|the\s+skies|above|on\s+high|the\s+clouds?)\b|\bfrom\s+(?:heaven|the\s+heavens|the\s+clouds?|on\s+high)\s*,?\s*(?:a|the)\s+voice\b/iu;
+/** A voice out of sight, from no one the sentence names; never "in a small voice". */
+const VOICE_OFF =
+  /(?<!\b(?:in|with|of)\s)\b(?:a|the|an\s+unseen|a\s+distant|a\s+far-off)\s+(?:small\s+|loud\s+|low\s+|deep\s+|gentle\s+|strange\s+|familiar\s+|faint\s+|muffled\s+)?voices?\b/iu;
+/** A voice down a line: whoever says it is at the other end. */
+const PHONE =
+  /\bvoices?\s+(?:came\s+|crackled\s+|sounded\s+|buzzed\s+)?(?:over|down|through|from|on)\s+the\s+(?:phone|telephone|line|radio|walkie-talkie|intercom|receiver|speaker)\b|\b(?:phone|telephone|radio|receiver|walkie-talkie)\s+(?:crackled|buzzed)\b|\b(?:on|over)\s+the\s+(?:radio|intercom)\b/iu;
+/** A letter, a note, a message read out: its writer's words. */
+const LETTER =
+  /\b(?:letter|note|message|postcard|telegram|scroll)\s+(?:said|says|read|reads|went|ran)\b|\b(?:wrote|writes|had\s+written)\b/iu;
+/** Words said to oneself, never aloud. */
+const TO_ONESELF =
+  /\b(?:says|said|whispers|whispered|mutters|muttered)\s+to\s+(?:him|her|them)sel(?:f|ves)\b|\bin\s+(?:his|her|their)\s+(?:head|mind)\b/iu;
+const THINKS = /^(?:thinks|thought|thinking|wonders|wondered)$/iu;
+
+/**
+ * The words after a quote that may say who says it: the rest of its
+ * sentence, when the quote runs on into them ("…," she thought; "…?"
+ * asked Ada) or they go on in lower case. After a quote that ends its
+ * sentence, what comes next is a sentence of its own.
+ */
+function attributionAfter(quote: string, after: string): string {
+  const next = after.split(/(?<=[.!?…])\s/u)[0] ?? '';
+  return /[,?!—–-]$/u.test(quote.trim()) || /^[\s'"’”]*\p{Ll}/u.test(next)
+    ? next
+    : '';
+}
+
+/**
+ * Where a quoted line comes from, from the clause that leads into it and
+ * the words after it that say who says it: a voice from heaven, a voice
+ * out of sight, a voice down a phone, a letter read out, or a thought,
+ * whose verb is the one that brings the quote in ("Mira thought, …"; "…,"
+ * she wondered). Null for a line said on the stage, as most are.
+ */
+export function heardFrom(
+  lead: string,
+  after: string,
+  quote: string,
+): HeardFrom | null {
+  const near = attributionAfter(quote, after);
+  const around = `${lead} ${near}`;
+  if (VOICE_ABOVE.test(around)) return 'above';
+  if (PHONE.test(around)) return 'phone';
+  if (LETTER.test(around)) return 'letter';
+  if (!/\baloud\b/iu.test(around)) {
+    if (TO_ONESELF.test(around)) return 'thought';
+    const verbs = (text: string) =>
+      [...text.matchAll(new RegExp(`\\b(?:${SPEECH})\\b`, 'giu'))].map(
+        (m) => m[0],
+      );
+    const leadsIn = /[,:—–-]\s*['"“‘]?\s*$/u.test(lead);
+    const verb = leadsIn ? verbs(lead).at(-1) : verbs(near)[0];
+    if (verb && THINKS.test(verb)) return 'thought';
+  }
+  if (VOICE_OFF.test(around)) return 'off';
+  return null;
+}
+
+/**
+ * A quote in its sentence, as its speaker is found from it: the clause
+ * that leads into it, since the quote before or the sentence's start; the
+ * words after it, to the next quote; and its own words. Quotes are
+ * blanked, so only the words around them count.
+ */
+export function quoteContext(
+  sentence: string,
+  spans: readonly [number, number][],
+  i: number,
+): { clause: string; after: string; quote: string } {
+  let outside = sentence;
+  for (const [a, b] of spans)
+    outside = outside.slice(0, a) + ' '.repeat(b - a) + outside.slice(b);
+  const [a, b] = spans[i];
+  const next = spans[i + 1]?.[0] ?? sentence.length;
+  const before = outside.slice(i ? spans[i - 1][1] : 0, a);
+  const clauses = before
+    .split(/(?<=[.!?…])\s+/u)
+    .filter((c) => /\p{L}/u.test(c));
+  return {
+    clause: clauses[clauses.length - 1] ?? '',
+    after: outside.slice(b, next),
+    quote: sentence.slice(a, b),
+  };
+}
+
+/** Words that say someone speaks, as a story tells it: aloud, in a thought, or in writing. */
 const SPEECH =
-  'says|said|asks|asked|replies|replied|answers|answered|shouts|shouted|yells|yelled|calls|called|cries|cried|whispers|whispered|mutters|muttered|murmurs|murmured|adds|added|explains|explained|begins|began|continues|continued|snaps|snapped|exclaims|exclaimed|insists|insisted|agrees|agreed|admits|admitted|tells|told|warns|warned|promises|promised|squeaks|squeaked|growls|growled|barks|barked|chirps|chirped|hisses|hissed|roars|roared|pleads|pleaded|begs|begged|announces|announced|declares|declared|wonders|wondered|repeats|repeated|jokes|joked|teases|teased|grumbles|grumbled|sings|sang|calls out|called out';
+  'thinks|thought|writes|wrote|says|said|asks|asked|replies|replied|answers|answered|shouts|shouted|yells|yelled|calls|called|cries|cried|whispers|whispered|mutters|muttered|murmurs|murmured|adds|added|explains|explained|begins|began|continues|continued|snaps|snapped|exclaims|exclaimed|insists|insisted|agrees|agreed|admits|admitted|tells|told|warns|warned|promises|promised|squeaks|squeaked|growls|growled|barks|barked|chirps|chirped|hisses|hissed|roars|roared|pleads|pleaded|begs|begged|announces|announced|declares|declared|wonders|wondered|repeats|repeated|jokes|joked|teases|teased|grumbles|grumbled|sings|sang|calls out|called out';
 /** What someone does as they speak: theirs only when the sentence runs on into it ("Yes," Kofi nodded). */
 const ACTION =
   'laughs|laughed|giggles|giggled|chuckles|chuckled|groans|groaned|sighs|sighed|smiles|smiled|grins|grinned|nods|nodded|gasps|gasped|shrugs|shrugged|winks|winked|beams|beamed';
@@ -109,6 +218,24 @@ export function namedIn(
         ),
     )
     .sort((a, b) => a.at - b.at);
+}
+
+/**
+ * Whose voice, letter or note the words bring in, by the name that owns
+ * it ("Mum's voice came from the kitchen", "Grandpa's letter said").
+ */
+function ownerIn(text: string, speakers: readonly Speaker[]): string | null {
+  for (const speaker of speakers)
+    for (const name of speaker.names) {
+      const clean = name.trim();
+      if (!clean) continue;
+      const owned = new RegExp(
+        `(?<![\\p{L}\\p{N}])${escape(clean)}['’]s\\s+(?:\\p{L}+\\s+)?(?:voice|letter|note|message|postcard|telegram|words)\\b`,
+        /^\p{Lu}/u.test(clean) ? 'u' : 'iu',
+      );
+      if (owned.test(text)) return speaker.id;
+    }
+  return null;
 }
 
 /**
@@ -162,24 +289,34 @@ export function dialogueOf(
   sentences.forEach((sentence, beat) => {
     const spans = quotedSpans(sentence);
     if (!spans.length) return;
-    // The sentence with its quotes blanked: only the words around them count.
-    let outside = sentence;
-    for (const [a, b] of spans)
-      outside = outside.slice(0, a) + ' '.repeat(b - a) + outside.slice(b);
     const hints = (given.get(beat) ?? []).filter((id) => known.has(id));
     spans.forEach(([a, b], i) => {
-      const next = spans[i + 1]?.[0] ?? sentence.length;
-      const after = outside.slice(b, next);
-      const before = outside.slice(i ? spans[i - 1][1] : 0, a);
-      const clauses = before
-        .split(/(?<=[.!?…])\s+/u)
-        .filter((c) => /\p{L}/u.test(c));
-      const clause = clauses[clauses.length - 1] ?? '';
+      const { clause, after, quote } = quoteContext(sentence, spans, i);
       let speaker: string | null = null;
       let by: LineEvidence | null = null;
       const found = (id: string | null | undefined, how: LineEvidence) => {
         if (!speaker && id) [speaker, by] = [id, how];
       };
+      // 0. A voice from heaven, or from out of sight, naming no one: never
+      // anyone on the stage. The one heard from above says it, or the one
+      // only heard; with none, the narrator does.
+      const from = heardFrom(clause, after, quote);
+      const around = `${clause} ${attributionAfter(quote, after)}`;
+      if (
+        (VOICE_ABOVE.test(around) || VOICE_OFF.test(around)) &&
+        !namedIn(around, speakers).length
+      ) {
+        const heard = speakers.filter((s) =>
+          from === 'above'
+            ? s.presence === 'above'
+            : s.presence === 'heard' || s.presence === 'above',
+        );
+        if (heard.length === 1 || (from === 'above' && heard.length))
+          found(heard[0].id, 'voice');
+        if (!speaker) return;
+      }
+      // Someone's own voice, letter or note: "Mum's voice came from the hall".
+      found(ownerIn(around, speakers), 'voice');
       // 1. Ada asks, "…"
       found(leadIn(clause, speakers), 'lead');
       // 2. "…," said Ada / "…," Ada said / "Yes," Kofi nodded.
@@ -211,7 +348,14 @@ export function dialogueOf(
         if (x.speaker !== y.speaker && beat - y.beat <= 1)
           found(x.speaker, 'turn');
       }
-      if (speaker && by) lines.push({ beat, span: [a, b], speaker, by });
+      if (speaker && by)
+        lines.push({
+          beat,
+          span: [a, b],
+          speaker,
+          by,
+          ...(from ? { from } : {}),
+        });
     });
   });
   return lines;

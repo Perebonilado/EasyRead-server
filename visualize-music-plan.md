@@ -391,8 +391,25 @@ What was measured and tested:
   - The music now ends with the voice: about 2 s of fade and ring, measured, where it was 9–14 s.
   - A thing's own sound is heard for 3.5 s as it arrives, then fades over 1.5 s, and the same sound doesn't come again within 20 s.
 
+- **Recorded instruments and place sounds** (2026-09-24, client commit 18126fe, built as the technical plan above says).
+  - **What ships:** 46 instrument notes from VSCO 2 CE and 7 place sounds from Pixabay: 2.5 MB in `public/sound`, with sources, authors and licences in `manifest.json` and `scripts/sounds/sources.json`.
+  - **Checks:**
+    - Each note's pitch was checked against its name. The library names the marimba, glockenspiel and strings an octave below how they sound.
+    - The recordings are in tune: bells within 25 cents, the rest within 10.
+  - **Measured with recordings:**
+    - every state at −30.8 to −32.7 dBFS where no one speaks, with lesson playful about 3 dB softer;
+    - 23–25 dB under the voice;
+    - no clicks, and about 2 s of tail after the voice ends.
+  - **Tested:**
+    - 24 unit tests, covering onset finding, note choice, the seamless loop, and every shipped file;
+    - the live two-page run;
+    - `next build`.
+  - **Downloads**, all into the scratch folder:
+    - about 57 MB from GitHub (fetched by range);
+    - about 35 MB from Pixabay, whose server ignored ranges and sent whole files;
+    - a stray 60 MB of VCSL, fetched by mistake and deleted.
+
 Still open:
-- **Recorded instruments (route B)** need Richard's go-ahead to download a CC0 sample set.
 - **"motion" is still rarely chosen** by the writer; to watch on more pages.
 - **Short dramatic silences**, a one-sentence rest, would need a quick-cut "rest" in the conductor. Not built.
 

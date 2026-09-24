@@ -87,13 +87,13 @@ The writer says what each stretch feels like; code decides where the changes lan
 | State | For | How it sounds |
 |---|---|---|
 | **none** | Maths being worked, a passage read closely, a moment that needs quiet | No music. Effects and place sounds carry on. |
-| **calm** | Most explaining | Slow chords, one every two bars. Warm and low, a soft piano note now and then, no beat. On a "serious" page, a minor colour: thoughtful, not mournful. |
-| **curious** | A question, a discovery, "look at this" | Open chords that don't settle (added 2nds, a raised 4th). A light bell or celesta figure that rises. |
-| **bright** | Good news, a success, an answer found | Major and higher, with a gentle broken-chord figure. |
-| **playful** | Jokes, light fun | Bouncing plucked notes off the beat. |
-| **motion** | A journey, a flow (blood, a river, a process), growth, time passing. With energy high: a chase, a rush. | A short figure that repeats steadily over a pulsing bass, and the harmony climbs every four bars. Energy high doubles the figure's speed and adds a low pulse. |
-| **solemn** | Death, grief, loss, war, disaster, remembrance | Very slow: a chord every two to four bars. Low and smooth, in minor or Dorian, played like a hymn (strings or organ), no beat, more reverb. A soft low bell at the start of a phrase. |
-| **tense** | Danger, suspense, conflict (mostly in stories) | A held low note, close clashing notes, a slow heartbeat pulse. It doesn't resolve until the state ends. |
+| **calm** | Most explaining | A felt piano's slow broken chords over a low bass (a story's harp), a chord every two bars, no beat. On a "serious" page, a minor colour: thoughtful, not mournful. |
+| **curious** | A question, a discovery, "look at this" | Pizzicato off the beat on open chords that don't settle (added 2nds, a raised 4th), and a celesta asking a rising three-note question. |
+| **bright** | Good news, a success, an answer found | An electric piano's arpeggios, major and higher. |
+| **playful** | Jokes, light fun | Marimba off the beat over a bouncing bass, a pizzicato hook, a soft shaker. |
+| **motion** | A journey, a flow (blood, a river, a process), growth, time passing. With energy high: a chase, a rush. | A marimba's (a story's pizzicato's) short figure repeating steadily over a pulsing bass, a shaker ticking, the harmony climbing every four bars. Energy high doubles the figure's speed. |
+| **solemn** | Death, grief, loss, war, disaster, remembrance | Strings in a slow chorale, a chord every two bars, low and smooth, in minor, no beat. A soft low bell at the start of each long phrase. The only state that holds chords. |
+| **tense** | Danger, suspense, conflict (mostly in stories) | The home note held low by trembling strings, two bells a semitone apart far off, a heartbeat when it runs high. It doesn't resolve until the state ends. |
 
 - **One tempo.** Every state shares the document's key centre and tempo.
   - "Moving" feels faster through denser notes, and "solemn" slower through slower chords. The tempo itself never jumps, so any state can follow any other.
@@ -380,6 +380,12 @@ What was measured and tested:
   - Magnification: curious, then quiet for the working.
   - Daffodils: quiet under the poem, then the music comes in with the flowers.
   - The Lantern Keeper p2: tense → solemn.
+
+- **Every state its own sound** (after Richard listened: "why does every sound have pads in them?").
+  - Every state had stood on the same held pad (strings, in a story). It was the loudest and steadiest layer, and the moving parts stepped further back under the voice, so the states sounded alike.
+  - Now only solemn holds chords, and tense holds a trembling drone. The others carry their harmony in their own instruments: a felt piano, pizzicato and celesta, an electric piano, marimba, a shaker. The tests check that no two states play the same instruments.
+  - Between pages, the home chord is rolled once on the state's own instrument over a low home note, instead of a held pad.
+  - Levels were re-measured: every state is within about 1.5 dB of the others, with playful and tense a little softer, 23–25 dB under the voice, and no clicks. No change is rougher than the notes around it.
 
 Still open:
 - **Recorded instruments (route B)** need Richard's go-ahead to download a CC0 sample set.

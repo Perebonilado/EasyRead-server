@@ -3,6 +3,7 @@ import {
   costOf,
   estimatePrepare,
   voiceSessionCost,
+  geminiSpeechCost,
 } from './cost';
 
 describe('the cost of a call', () => {
@@ -98,6 +99,42 @@ describe('the rented voice', () => {
     expect(catalogueSpeechCost(60_000, 0.1)).toBe(0.001667);
     expect(catalogueSpeechCost(0, 0.1)).toBe(0);
     expect(catalogueSpeechCost(60_000, Number.NaN)).toBe(0);
+  });
+});
+
+describe('the Gemini voice', () => {
+  it('prices a minute of 3.8 Flash at $0.0135 of audio, plus its text', () => {
+    const cost = geminiSpeechCost({
+      model: 'gemini:gemini-3.8-flash-tts',
+      audioMs: 60_000,
+      textChars: 1000,
+      at: new Date('2026-10-01'),
+    });
+    expect(cost).toBeCloseTo(0.0135 + 250 * 0.5e-6, 6);
+  });
+
+  it('uses the tokens Google reported, and the doubled price from 2027', () => {
+    const now = geminiSpeechCost({
+      model: 'gemini-3.8-flash-tts',
+      audioMs: 1,
+      textChars: 1,
+      tokensIn: 1000,
+      tokensOut: 1000,
+      at: new Date('2026-12-31'),
+    });
+    const then = geminiSpeechCost({
+      model: 'gemini-3.8-flash-tts',
+      audioMs: 1,
+      textChars: 1,
+      tokensIn: 1000,
+      tokensOut: 1000,
+      at: new Date('2027-01-01'),
+    });
+    expect(now).toBeCloseTo(0.0095, 6);
+    expect(then).toBeCloseTo(0.019, 6);
+    expect(
+      geminiSpeechCost({ model: 'gemini-9-tts', audioMs: 1000, textChars: 10 }),
+    ).toBeNull();
   });
 });
 

@@ -1,6 +1,8 @@
 import { numberedSentences } from '../../../business/domain/board';
 import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import type { DocumentProfileDraft } from '../../../business/domain/scene-profile';
+import type { StoryDraft } from '../../../business/domain/scene-story';
 import type { LanguageModelUsage } from 'ai';
 import type { Block, RecapBody, TopicPreviewBody } from '../../../contracts';
 import type {
@@ -36,7 +38,9 @@ import {
   lectureBoardSchema,
   lectureDiagramSchema,
   lectureSketchSchema,
+  sceneProfileSchema,
   sceneScriptSchema,
+  sceneStorySchema,
   sketchJudgeSchema,
   lectureExtraSchema,
   spokenQuizSchema,
@@ -691,6 +695,8 @@ export class AiSdkLlmAdapter implements LlmGatewayPort, OnModuleInit {
     topicTitle: string;
     material: string;
     context: string;
+    profile?: string;
+    story?: string;
     previous?: SceneScriptDraft;
     problems?: string[];
   }): Promise<LlmResult<SceneScriptDraft>> {
@@ -704,6 +710,8 @@ export class AiSdkLlmAdapter implements LlmGatewayPort, OnModuleInit {
       prompt: [
         `Document: ${input.documentTitle}`,
         `Chapter: ${input.topicTitle}`,
+        ...(input.profile ? [input.profile] : []),
+        ...(input.story ? [input.story] : []),
         input.context,
         `The page:\n${input.material}`,
         ...(input.previous && input.problems?.length
@@ -713,6 +721,67 @@ export class AiSdkLlmAdapter implements LlmGatewayPort, OnModuleInit {
             ]
           : []),
       ].join('\n\n'),
+      maxRetries: this.maxRetries(),
+    });
+    return {
+      value: result.object,
+      usage: this.usage(ref, result.usage, started),
+    };
+  }
+
+  async sceneProfile(input: {
+    documentTitle: string;
+    chapters: string[];
+    sample: string;
+  }): Promise<LlmResult<DocumentProfileDraft>> {
+    const started = Date.now();
+    const { generateObject } = await this.registry.modules();
+    const { model, ref } = await this.registry.languageModel('scene_profile');
+    const result = await generateObject({
+      model,
+      schema: sceneProfileSchema,
+      system: PROMPTS.sceneProfile,
+      prompt: [
+        `Title: ${input.documentTitle}`,
+        input.chapters.length
+          ? `Chapters:\n- ${input.chapters.slice(0, 40).join('\n- ')}`
+          : '',
+        `From its pages:\n${input.sample}`,
+      ]
+        .filter(Boolean)
+        .join('\n\n'),
+      maxRetries: this.maxRetries(),
+    });
+    return {
+      value: result.object,
+      usage: this.usage(ref, result.usage, started),
+    };
+  }
+
+  async sceneStory(input: {
+    documentTitle: string;
+    from: number;
+    to: number;
+    text: string;
+    known: string[];
+  }): Promise<LlmResult<StoryDraft>> {
+    const started = Date.now();
+    const { generateObject } = await this.registry.modules();
+    const { model, ref } = await this.registry.languageModel('scene_story');
+    const result = await generateObject({
+      model,
+      schema: sceneStorySchema,
+      system: PROMPTS.sceneStory,
+      prompt: [
+        `Book: ${input.documentTitle}`,
+        `Pages ${input.from} to ${input.to}.`,
+        input.known.length
+          ? `Characters met earlier in the book (call them by these names): ${input.known.slice(0, 40).join(', ')}.`
+          : '',
+        input.text,
+      ]
+        .filter(Boolean)
+        .join('\n\n'),
       maxRetries: this.maxRetries(),
     });
     return {
@@ -731,6 +800,7 @@ export class AiSdkLlmAdapter implements LlmGatewayPort, OnModuleInit {
     neighbours: string[];
     notes?: string[];
     signal?: AbortSignal;
+    backdrop?: boolean;
   }): Promise<LlmResult<string>> {
     const started = Date.now();
     const { generateText } = await this.registry.modules();
@@ -741,7 +811,7 @@ export class AiSdkLlmAdapter implements LlmGatewayPort, OnModuleInit {
     // million times; escaped into a JSON field it is not (79c2523).
     const result = await generateText({
       model,
-      system: PROMPTS.sceneDraw,
+      system: input.backdrop ? PROMPTS.sceneSet : PROMPTS.sceneDraw,
       prompt: drawingRequest(input),
       maxRetries: this.maxRetries(),
       maxOutputTokens: thinking ? 32_000 : 16_000,
@@ -1740,6 +1810,7 @@ export function drawingRequest(input: {
   topic: string;
   neighbours: string[];
   notes?: string[];
+  backdrop?: boolean;
 }): string {
   const { thing, viewBox } = input;
   const id = groupId;
@@ -1753,7 +1824,9 @@ export function drawingRequest(input: {
   );
   return [
     `Draw: ${thing.brief}`,
-    `It will be captioned "${thing.name}" under the drawing; do not write that on it.`,
+    input.backdrop
+      ? ''
+      : `It will be captioned "${thing.name}" under the drawing; do not write that on it.`,
     parts.length
       ? `Parts, each its own group:\n- ${parts.join('\n- ')}`
       : 'No named parts and no labels.',

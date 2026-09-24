@@ -8,7 +8,7 @@ import {
 
 const thing = (
   id: string,
-  kind: 'drawing' | 'stat' | 'words',
+  kind: SceneScriptDraft['cast'][number]['kind'],
   extra: Partial<SceneScriptDraft['cast'][number]> = {},
 ): SceneScriptDraft['cast'][number] => ({
   id,
@@ -21,6 +21,15 @@ const thing = (
   shape: null,
   value: kind === 'stat' ? '70%' : null,
   style: null,
+  sound: null,
+  lines: null,
+  plot: null,
+  quote: null,
+  phrases: null,
+  ref: null,
+  state: null,
+  timeline: null,
+  chart: null,
   ...extra,
 });
 
@@ -42,15 +51,18 @@ const draft = (): SceneScriptDraft => ({
   fit: 'good',
   fitReason: null,
   title: 'How plants make food',
+  mood: 'curious',
   beats: [
-    { say: 'Plants make their own food.', pause: 'short' },
+    { say: 'Plants make their own food.', pause: 'short', delivery: 'hook' },
     {
       say: 'To do it, they need sunlight, water and carbon dioxide.',
       pause: 'short',
+      delivery: 'explain',
     },
     {
       say: 'All three meet inside the leaf, in tiny parts called chloroplasts.',
       pause: 'long',
+      delivery: 'key',
     },
   ],
   cast: [
@@ -163,6 +175,91 @@ describe('the writer’s storyboard, mended', () => {
     expect(quietStretches(script, 50)).toEqual([]);
   });
 
+  it('keeps how each sentence is said and what a drawing sounds like, and mends what is off the list', () => {
+    const odd = draft();
+    odd.mood = 'grim' as never;
+    odd.beats[1].delivery = 'shout' as never;
+    odd.cast[0].sound = 'heartbeat';
+    odd.cast[1].sound = 'trumpet' as never;
+    const { script } = mendScript(odd);
+    expect(script.mood).toBe('curious');
+    expect(script.beats.map((b) => b.delivery)).toEqual([
+      'hook',
+      'explain',
+      'key',
+    ]);
+    const [leaf, sun] = script.cast;
+    expect(leaf.kind === 'drawing' && leaf.sound).toBe('heartbeat');
+    expect(sun.kind === 'drawing' && sun.sound).toBeNull();
+  });
+
+  it("checks a working's sums, a graph's function and a quotation's words, and points at their parts", () => {
+    const d = draft();
+    d.cast.push(
+      thing('work', 'math', {
+        lines: [
+          { latex: 'M = \\term{image}{h_i} / h_o', check: null },
+          { latex: '= 50/0.1', check: '50/0.1 = 5000' },
+        ],
+      }),
+      thing('graph', 'plot', {
+        plot: {
+          fn: 'x^2',
+          xFrom: -2,
+          xTo: 2,
+          yFrom: null,
+          yTo: null,
+          xLabel: null,
+          yLabel: null,
+          points: [{ x: 1, name: 'one' }],
+        },
+      }),
+      thing('poem', 'quote', {
+        quote: 'Plants make their own food.',
+        phrases: [
+          { name: 'own', phrase: 'their own food', note: 'made at home' },
+        ],
+      }),
+    );
+    d.steps.push(
+      step(2, 'called chloroplasts', {
+        layout: 'stack',
+        show: ['work', 'graph', 'poem'],
+        effects: [
+          { target: 'work.image', do: 'point' },
+          { target: 'work.line 2', do: 'show' },
+          { target: 'graph.one', do: 'point' },
+          { target: 'poem.own', do: 'point' },
+        ],
+      }),
+    );
+    const material = d.beats.map((b) => b.say).join(' ');
+    const { script, problems } = mendScript(d, { material });
+    expect(problems.join(' ')).toMatch(/does not add up: 50\/0\.1 = 5000/);
+    const last = script.steps[script.steps.length - 1];
+    expect(last.stage?.layout).toBe('stack');
+    expect(last.effects).toEqual([
+      { target: 'work', part: 'image', do: 'point' },
+      { target: 'work', part: 'line 2', do: 'show' },
+      { target: 'graph', part: 'one', do: 'point' },
+      { target: 'poem', part: 'own', do: 'point' },
+    ]);
+    // A book that may only explain: all three are set in type.
+    const plain = mendScript(d, { material, formats: ['explainer'] });
+    expect(
+      plain.script.cast.filter((t) => t.kind === 'words').map((t) => t.id),
+    ).toEqual(expect.arrayContaining(['work', 'graph', 'poem']));
+    // A quotation that is not the page's own words goes back.
+    const off = draft();
+    off.cast.push(thing('poem', 'quote', { quote: 'Trees are tall.' }));
+    off.steps.push(
+      step(0, 'Plants make', { layout: 'row', show: ['leaf', 'poem'] }),
+    );
+    expect(mendScript(off, { material }).problems.join(' ')).toMatch(
+      /not the page's own words/,
+    );
+  });
+
   it('reads a stage restated as it stands as its effects only', () => {
     const restated = draft();
     restated.steps = [
@@ -177,5 +274,305 @@ describe('the writer’s storyboard, mended', () => {
     expect(script.steps[1].stage).toBeNull();
     expect(script.steps[1].effects).toHaveLength(1);
     expect(mended.join(' ')).toMatch(/restated/);
+  });
+});
+
+describe('a story told with its own characters', () => {
+  const characters = [
+    { id: 'mira', name: 'Mira', aliases: ['Mira Arden'] },
+    { id: 'ember', name: 'Ember', aliases: ['the fox'] },
+  ];
+  const story = (): SceneScriptDraft => ({
+    fit: 'good',
+    fitReason: null,
+    title: 'The lantern goes out',
+    mood: 'serious',
+    beats: [
+      {
+        say: 'Mira stands at the end of the quay.',
+        pause: 'short',
+        delivery: 'hook',
+      },
+      {
+        say: 'A fox slips out of the dark and grins at her.',
+        pause: 'short',
+        delivery: 'explain',
+      },
+      { say: 'Mira gasps, then laughs.', pause: 'long', delivery: 'key' },
+    ],
+    cast: [
+      thing('girl', 'character', { ref: 'mira', state: 'sad' }),
+      // The writer's own words for the fox, and the same girl again.
+      thing('fox', 'character', {
+        ref: null,
+        name: 'The Fox',
+        state: 'grinning' as never,
+      }),
+      thing('mira-again', 'character', { ref: 'Mira Arden' }),
+      thing('ghost', 'character', { ref: 'nobody' }),
+      thing('quay', 'drawing'),
+    ],
+    steps: [
+      step(0, 'Mira stands', { layout: 'one', show: ['girl'] }),
+      step(1, 'A fox', {
+        layout: 'row',
+        show: ['fox', 'mira-again', 'ghost'],
+        effects: [{ target: 'fox.head', do: 'point' }],
+      }),
+      step(2, 'Mira gasps', {
+        effects: [{ target: 'mira-again.surprised', do: 'show' }],
+      }),
+      step(2, 'then laughs', {
+        effects: [{ target: 'girl.happy', do: 'show' }],
+      }),
+    ],
+  });
+
+  it("shows each character as the story's own, once, by id, name or alias", () => {
+    const { script, mended } = mendScript(story(), { characters });
+    const people = script.cast.filter((t) => t.kind === 'character');
+    expect(people).toEqual([
+      {
+        id: 'girl',
+        kind: 'character',
+        ref: 'mira',
+        name: 'Mira',
+        state: 'sad',
+        met: 0,
+        intro: [],
+      },
+      {
+        id: 'fox',
+        kind: 'character',
+        ref: 'ember',
+        name: 'Ember',
+        state: null,
+        met: 0,
+        intro: [],
+      },
+    ]);
+    // Someone the story does not have is set in type.
+    expect(script.cast.find((t) => t.id === 'ghost')).toMatchObject({
+      kind: 'words',
+    });
+    expect(mended.join(' ')).toContain(
+      '"nobody" is not one of the story\'s characters',
+    );
+    // The same girl twice is the one figure, wherever the storyboard names her.
+    expect(script.steps[1].stage!.show).toEqual(['fox', 'girl', 'ghost']);
+    expect(script.steps[2].effects).toEqual([
+      { target: 'girl', part: 'surprised', do: 'show' },
+    ]);
+    expect(script.steps[1].effects).toEqual([
+      { target: 'fox', part: 'head', do: 'point' },
+    ]);
+  });
+
+  it("knows whom a sentence quotes, by id, name or alias, and only the story's characters", () => {
+    const quoted = story();
+    quoted.beats[1] = { ...quoted.beats[1], speaker: 'The Fox' };
+    quoted.beats[2] = { ...quoted.beats[2], speaker: 'quay' };
+    const { script, mended } = mendScript(quoted, { characters });
+    expect(script.beats.map((b) => b.speaker)).toEqual([
+      undefined,
+      'fox',
+      undefined,
+    ]);
+    expect(mended.join(' ')).toContain(
+      '"quay" is not one of the story\'s characters',
+    );
+  });
+
+  it('sets characters in type in a book that is no story', () => {
+    const { script } = mendScript(story());
+    expect(script.cast.some((t) => t.kind === 'character')).toBe(false);
+  });
+});
+
+describe('timelines and charts, held to the page', () => {
+  const page =
+    'Scott set sail in 1910. Amundsen reached the pole in 1911, and Scott in 1912. Of the water a home uses, 34% goes on showers and 22% on the toilet.';
+  const draft = (cast: SceneScriptDraft['cast']): SceneScriptDraft => ({
+    fit: 'good',
+    fitReason: null,
+    title: 'The race to the pole',
+    mood: 'curious',
+    beats: [
+      {
+        say: 'Two teams raced to the South Pole.',
+        pause: 'short',
+        delivery: 'hook',
+      },
+      { say: 'Amundsen got there first.', pause: 'short', delivery: 'key' },
+      { say: 'Scott arrived a month later.', pause: 'long', delivery: 'recap' },
+    ],
+    cast,
+    steps: [
+      step(0, 'Two teams', { layout: 'one', show: cast.map((c) => c.id) }),
+    ],
+  });
+
+  it("keeps a timeline of the page's own dates, and sends back one it made up", () => {
+    const good = mendScript(
+      draft([
+        thing('race', 'timeline', {
+          timeline: [
+            { when: '1910', name: 'Scott sets sail' },
+            { when: '1911', name: 'Amundsen reaches the pole' },
+          ],
+        }),
+      ]),
+      { material: page },
+    );
+    expect(good.problems).toEqual([]);
+    expect(good.script.cast[0]).toMatchObject({
+      kind: 'timeline',
+      timeline: { events: [{ when: '1910' }, { when: '1911' }] },
+    });
+    const made = mendScript(
+      draft([
+        thing('race', 'timeline', {
+          timeline: [
+            { when: '1910', name: 'Scott sets sail' },
+            { when: '1913', name: 'The news reaches London' },
+          ],
+        }),
+      ]),
+      { material: page },
+    );
+    expect(made.problems.join(' ')).toContain(
+      'dates the page does not give: 1913',
+    );
+  });
+
+  it("keeps a chart of the page's own numbers, and sends back one it made up", () => {
+    const good = mendScript(
+      draft([
+        thing('water', 'chart', {
+          chart: {
+            kind: 'bar',
+            unit: '%',
+            bars: [
+              { label: 'Shower', value: 34 },
+              { label: 'Toilet', value: 22 },
+            ],
+          },
+        }),
+      ]),
+      { material: page },
+    );
+    expect(good.problems).toEqual([]);
+    expect(good.script.cast[0]).toMatchObject({
+      kind: 'chart',
+      chart: { kind: 'bar', unit: '%' },
+    });
+    const made = mendScript(
+      draft([
+        thing('water', 'chart', {
+          chart: {
+            kind: 'bar',
+            unit: '%',
+            bars: [
+              { label: 'Shower', value: 34 },
+              { label: 'Garden', value: 9 },
+            ],
+          },
+        }),
+      ]),
+      { material: page },
+    );
+    expect(made.problems.join(' ')).toContain(
+      'numbers the page does not give: Garden 9',
+    );
+  });
+});
+
+describe("a story's places, as the scene behind the stage", () => {
+  const places = [
+    {
+      id: 'quay',
+      name: 'the quay',
+      aliases: ['the harbour'],
+      sound: 'water' as const,
+    },
+    { id: 'house', name: 'the blue house', aliases: [], sound: null },
+  ];
+  const characters = [{ id: 'mira', name: 'Mira', aliases: [] }];
+  const draft = (): SceneScriptDraft => ({
+    fit: 'good',
+    fitReason: null,
+    title: 'Home',
+    mood: 'calm',
+    beats: [
+      { say: 'The quay is empty at dusk.', pause: 'short', delivery: 'hook' },
+      { say: 'Mira walks along it.', pause: 'short', delivery: 'explain' },
+      { say: 'Then she runs home.', pause: 'long', delivery: 'recap' },
+    ],
+    cast: [
+      thing('harbour', 'place', { ref: 'The Harbour' }),
+      thing('home', 'place', { ref: 'house' }),
+      thing('atlantis', 'place', { ref: 'atlantis' }),
+      thing('mira', 'character', { ref: 'mira' }),
+    ],
+    steps: [
+      step(0, 'The quay', { layout: 'one', show: ['harbour'] }),
+      step(1, 'Mira walks', { layout: 'row', show: ['harbour', 'mira'] }),
+      step(2, 'runs home', { layout: 'one', show: ['home', 'mira'] }),
+      step(2, 'she runs', { layout: 'one', show: ['atlantis', 'mira'] }),
+    ],
+  });
+
+  it("reads a picture of one of the story's places as the place itself", () => {
+    const { script } = mendScript(
+      {
+        ...draft(),
+        cast: [
+          thing('the-quay', 'drawing', { name: 'The Quay' }),
+          thing('mira', 'character', { ref: 'mira' }),
+        ],
+        steps: [
+          step(0, 'The quay', { layout: 'row', show: ['the-quay', 'mira'] }),
+        ],
+      },
+      { characters, places },
+    );
+    expect(script.cast[0]).toMatchObject({ kind: 'place', ref: 'quay' });
+    expect(script.steps[0].stage).toMatchObject({
+      show: ['mira'],
+      backdrop: 'the-quay',
+    });
+  });
+
+  it('turns a place shown into the backdrop, and a place alone into the empty scene', () => {
+    const { script, mended } = mendScript(draft(), { characters, places });
+    expect(script.cast.filter((t) => t.kind === 'place')).toEqual([
+      {
+        id: 'harbour',
+        kind: 'place',
+        ref: 'quay',
+        name: 'the quay',
+        sound: 'water',
+      },
+      {
+        id: 'home',
+        kind: 'place',
+        ref: 'house',
+        name: 'the blue house',
+        sound: null,
+      },
+    ]);
+    expect(mended.join(' ')).toContain(
+      '"atlantis" is not one of the story\'s places',
+    );
+    const [empty, walks, home] = script.steps.map((s) => s.stage);
+    expect(empty).toEqual({
+      layout: 'one',
+      show: [],
+      arrows: [],
+      backdrop: 'harbour',
+    });
+    // A place never takes a slot: the row holds Mira alone.
+    expect(walks).toMatchObject({ show: ['mira'], backdrop: 'harbour' });
+    expect(home).toMatchObject({ show: ['mira'], backdrop: 'home' });
   });
 });

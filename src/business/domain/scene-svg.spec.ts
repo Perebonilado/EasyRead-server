@@ -3,6 +3,7 @@ import {
   gateDrawing,
   inspectSvg,
   numbersSane,
+  revealedSvg,
   sanitizeCss,
   svgFromReply,
 } from './scene-svg';
@@ -114,7 +115,22 @@ describe('the gate', () => {
     expect(result.drawing).not.toBeNull();
     expect(result.retry).toBe(false);
     expect(result.drawing!.parts.chloroplasts).toBe('Chloroplasts');
-    expect(result.drawing!.labels.stomata).toBe('stomata_label');
+    // Its labels are lifted out for the stage to set: what each says, and
+    // where it points, taken from the end of its leader line.
+    expect(result.drawing!.labels).toEqual({});
+    const lifted = Object.fromEntries(
+      result.drawing!.callouts.map((c) => [c.part, c]),
+    );
+    expect(lifted.chloroplasts.text).toBe('chloroplasts');
+    expect(lifted.chloroplasts.anchor).toEqual([400, 300]);
+    // No leader: it points at the side of its part nearest its words.
+    const [sx, sy] = lifted.stomata.anchor;
+    expect(sx).toBeGreaterThan(469);
+    expect(sx).toBeLessThan(491);
+    expect(sy).toBeGreaterThan(469);
+    expect(sy).toBeLessThan(491);
+    expect(result.drawing!.svg).not.toContain('>chloroplasts<');
+    expect(result.drawing!.field?.map.bits).toContain('1');
     expect(result.drawing!.states.lit).toBe('lit');
     expect(result.drawing!.moves).toBe(true);
     expect(result.drawing!.svg).not.toContain('100%');
@@ -196,6 +212,26 @@ describe('the gate', () => {
     );
   });
 
+  it('takes a title written as a label out with its leader, and leaves a drawing that holds a title alone', () => {
+    const inspected = inspectSvg(
+      `<svg viewBox="0 0 400 300"><g id="plaque"><circle cx="200" cy="150" r="80"/></g>
+        <g id="title"><line x1="260" y1="100" x2="330" y2="40"/><circle cx="260" cy="100" r="4"/><text x="335" y="35">Amyloid plaque</text></g>
+        <g id="body"><path d="M10 10 C 40 40 80 40 120 10"/><text x="20" y="290">Amyloid plaque</text></g></svg>`,
+      { name: 'Amyloid plaque', parts: [], states: [], motion: '' },
+    );
+    if (!inspected.root) throw new Error('should parse');
+    const ids: string[] = [];
+    const visit = (node: {
+      attribs?: Record<string, string>;
+      children?: unknown[];
+    }) => {
+      if (node.attribs?.id) ids.push(node.attribs.id);
+      for (const child of node.children ?? []) visit(child as typeof node);
+    };
+    visit(inspected.root);
+    expect(ids).toEqual(['plaque', 'body']);
+  });
+
   it('grows the frame for a label a few units over the edge rather than cut it', () => {
     const box = framedBox([0, 0, 960, 600], {
       x: 62,
@@ -214,4 +250,48 @@ describe('the gate', () => {
       '<svg viewBox="0 0 10 10"><svg x="1"><rect/></svg><circle/></svg>',
     );
   });
+});
+
+describe('a set, gated', () => {
+  const scene =
+    '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1600 900"><rect x="0" y="0" width="1600" height="900" fill="#BFD9EE"/><rect x="0" y="600" width="1600" height="300" fill="#9C8F7A"/></svg>';
+  const set = { parts: [], states: [], motion: 'clouds drift' };
+
+  it('keeps its ground and its whole canvas, and is no worse for keeping still', async () => {
+    const gated = await gateDrawing(scene, set, { backdrop: true });
+    expect(gated.drawing?.viewBox).toEqual([0, 0, 1600, 900]);
+    expect(gated.drawing?.svg).toContain('fill="#BFD9EE"');
+    expect(gated.retry).toBe(false);
+    // As any drawing, the ground goes and the drawing is framed to its ink.
+    const drawn = await gateDrawing(scene, set);
+    expect(drawn.drawing?.svg ?? '').not.toContain('#BFD9EE');
+  }, 20_000);
+});
+
+describe('a group the artist hid itself', () => {
+  it('is shown again, the rest of its style kept: the lesson does the hiding', async () => {
+    const hidden =
+      '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 400"><g id="head"><circle cx="200" cy="200" r="150" fill="#E9D8B4"/></g>' +
+      '<g id="neutral"><circle cx="170" cy="180" r="10"/></g>' +
+      '<g id="happy" style="display:none; fill: #1F2A37"><circle cx="170" cy="180" r="12"/></g>' +
+      '<g id="sad" visibility="hidden" opacity="0"><circle cx="170" cy="180" r="8"/></g></svg>';
+    const gated = await gateDrawing(hidden, {
+      parts: [{ name: 'head', label: false }],
+      states: [
+        { name: 'neutral', look: '' },
+        { name: 'happy', look: '' },
+        { name: 'sad', look: '' },
+      ],
+      motion: '',
+    });
+    const svg = gated.drawing!.svg;
+    expect(svg).toContain('<g id="happy" style=" fill: #1F2A37">');
+    expect(svg).toContain('<g id="sad">');
+    expect(gated.mended).toContain('showed 2 groups the drawing hid itself');
+    // A drawing kept from before is shown the same way when it is read.
+    expect(revealedSvg(hidden, ['happy'])).toContain(
+      '<g id="happy" style=" fill: #1F2A37">',
+    );
+    expect(revealedSvg(hidden, ['neutral'])).toBe(hidden);
+  }, 20_000);
 });

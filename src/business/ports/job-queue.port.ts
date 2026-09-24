@@ -56,6 +56,10 @@ export interface LectureBoardJob extends PipelineJob {
 }
 
 /** The follow-along track for one row. */
+/** Where a page's job stands in the queue. */
+export type VisualJobState =
+  { state: 'live' } | { state: 'gone' } | { state: 'failed'; reason: string };
+
 export interface VisualSceneJob extends PipelineJob {
   pageNumber: number;
   /** The chapter the page is in. */
@@ -108,6 +112,17 @@ export interface JobQueuePort {
   enqueueLectureFollows(jobs: LectureFollowJob[]): Promise<void>;
   /** A chapter's scene; asking again for one being made changes nothing. */
   enqueueVisualScenes(jobs: VisualSceneJob[]): Promise<void>;
+  /**
+   * Whether each page still has a job carrying it: live (waiting, running,
+   * or due to be tried again), gone (none, or one finished without making
+   * the page), or failed for good, with why.
+   */
+  visualSceneStates(
+    pages: Pick<
+      VisualSceneJob,
+      'documentId' | 'contentVersion' | 'pageNumber'
+    >[],
+  ): Promise<VisualJobState[]>;
   /** Writes a document about a topic, then starts the normal pipeline. */
   enqueueLearn(job: PipelineJob): Promise<void>;
   /** Fetches an imported document's pages, then starts the normal pipeline. */

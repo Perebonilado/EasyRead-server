@@ -1,25 +1,70 @@
 import { ConfigService } from '@nestjs/config';
 import { Inject, Injectable, Logger } from '@nestjs/common';
-import type { SceneTiming } from '../../contracts';
+import type { SceneDto, SceneTiming } from '../../contracts';
 import { wordTimesFromAligned } from '../../business/domain/board';
-import { catalogueSpeechCost } from '../../business/domain/cost';
-import { noteProse } from '../../business/domain/follow';
+import {
+  catalogueSpeechCost,
+  geminiSpeechCost,
+} from '../../business/domain/cost';
+import { NotFoundError } from '../../business/domain/errors/errors';
+import { sceneProse } from '../../business/domain/follow';
+import { drawByCode } from '../../business/domain/scene-code';
+import {
+  DEFAULT_PROFILE,
+  describeProfile,
+  profileKey,
+  profileOf,
+  type DocumentProfile,
+} from '../../business/domain/scene-profile';
 import {
   composeScene,
   describeStep,
   fullestStep,
+  hiddenAt,
   thumbSvg,
 } from '../../business/domain/scene-compose';
 import { rasterise } from '../../business/domain/scene-raster';
 import {
-  PAUSE_SECONDS,
   SCENE_GENERATOR_VERSION,
+  isCodeThing,
   mendScript,
   quietStretches,
   wordsOf,
+  type CharacterThing,
+  type PlaceThing,
   type DrawingThing,
   type SceneScript,
 } from '../../business/domain/scene-script';
+import {
+  SET_VERSION,
+  castOf,
+  introCallouts,
+  measureSheet,
+  setsOf,
+  type Cast,
+  type CharacterSheet,
+  type SetSheet,
+  type Sets,
+} from '../../business/domain/scene-sheet';
+import {
+  EMPTY_STORY,
+  MAX_STORY_PIECES,
+  OPENING_LEAD_S,
+  bibleOf,
+  SET_CANVAS,
+  castKey,
+  castStory,
+  describeStory,
+  mergeStory,
+  setThing,
+  setsKey,
+  sheetThing,
+  storyKey,
+  storyPieces,
+  type StoryBible,
+  type StoryCharacter,
+  type StoryPlace,
+} from '../../business/domain/scene-story';
 import {
   CANVAS,
   gateDrawing,
@@ -35,6 +80,14 @@ import {
   type SpokenWords,
   type TimedBeat,
 } from '../../business/domain/scene-timing';
+import {
+  characterVoice,
+  deliveryPieces,
+  sentenceStarts,
+  voiceSlug,
+  voiceStyle,
+  voicedPieces,
+} from '../../business/domain/scene-voice';
 import { mp3DurationMs } from '../../business/domain/speech';
 import { spokenForm, type Pronunciations } from '../../business/domain/spoken';
 import type { AlignerPort } from '../../business/ports/aligner.port';
@@ -43,8 +96,8 @@ import type { StoragePort } from '../../business/ports/storage.port';
 import {
   ALIGNER,
   LLM_GATEWAY,
+  SCENE_SPEECH,
   STORAGE,
-  UPLOAD_SPEECH,
 } from '../../business/ports/tokens';
 import type { SpeechPort } from '../../business/ports/voice.port';
 import type { AiCallLogRepository } from '../../business/repositories/ai-call-log.repository';
@@ -74,12 +127,46 @@ import { isPermanentFailure, type JobContext } from './base.processor';
 
 /** The most of a page the writer reads. */
 const MATERIAL_CHARS = 14_000;
+/** How much of a document's pages the profile is made from. */
+const PROFILE_SAMPLE_CHARS = 6_000;
 /** A page with fewer words than this has too little to teach. */
 const THIN_PAGE_WORDS = 40;
 /** The card's still, in pixels across. */
 export const THUMB_WIDTH = 480;
 /** Tries at one drawing: the first, and one more with the gate's notes. */
 const DRAW_TRIES = 2;
+/** Stretches of a story read at once. */
+const STORY_READERS = 4;
+
+/** A story's page: the book's bible, the page's number in it, and where the book's characters are kept. */
+export interface PageStory {
+  bible: StoryBible;
+  page: number;
+  castKey: string;
+  /** Where the book's places, painted once, are kept. */
+  setsKey: string;
+  bookTitle: string;
+}
+
+/** Each item through `work`, at most `limit` at a time, in order. */
+async function inBatches<T, R>(
+  items: T[],
+  limit: number,
+  work: (item: T) => Promise<R>,
+): Promise<R[]> {
+  const out: R[] = new Array<R>(items.length);
+  let next = 0;
+  const lane = async () => {
+    while (next < items.length) {
+      const at = next++;
+      out[at] = await work(items[at]);
+    }
+  };
+  await Promise.all(
+    Array.from({ length: Math.min(limit, items.length) }, lane),
+  );
+  return out;
+}
 
 /**
  * One page as an animated video.
@@ -99,6 +186,10 @@ const DRAW_TRIES = 2;
 @Injectable()
 export class SceneProcessor {
   private readonly logger = new Logger(SceneProcessor.name);
+  /** Work others wait on rather than repeat: a book's story, a character's drawing. */
+  private readonly running = new Map<string, Promise<unknown>>();
+  /** Writes to one file, each after the last. */
+  private readonly writing = new Map<string, Promise<unknown>>();
 
   constructor(
     @Inject(DOCUMENT_REPOSITORY) private readonly documents: DocumentRepository,
@@ -113,7 +204,7 @@ export class SceneProcessor {
     private readonly pronunciations: PronunciationRepository,
     @Inject(AI_CALL_LOG_REPOSITORY) private readonly calls: AiCallLogRepository,
     @Inject(LLM_GATEWAY) private readonly llm: LlmGatewayPort,
-    @Inject(UPLOAD_SPEECH) private readonly speech: SpeechPort,
+    @Inject(SCENE_SPEECH) private readonly speech: SpeechPort,
     private readonly config: ConfigService,
     @Inject(STORAGE) private readonly storage: StoragePort,
     @Inject(ALIGNER) private readonly aligner: AlignerPort,
@@ -167,7 +258,9 @@ export class SceneProcessor {
         return;
       }
 
-      const script = await this.write({
+      const profile = await this.profileFor(documentId, contentVersion);
+      const made = await this.make({
+        documentId,
         documentTitle: doc.props.title,
         topic,
         material,
@@ -177,80 +270,33 @@ export class SceneProcessor {
           topic,
           pageNumber,
         ),
-        documentId,
+        profile,
+        story: await this.pageStory(
+          profile.story,
+          documentId,
+          contentVersion,
+          doc.props.title,
+          pageNumber,
+        ),
+        kept: doc.props.institutionId
+          ? await this.pronunciations.kept(doc.props.institutionId)
+          : new Map(),
+        base: `documents/${doc.id}/visuals/v${contentVersion}/p${pageNumber}-${SCENE_GENERATOR_VERSION}`,
         who,
+        keepAs: `${documentId}-p${pageNumber}`,
+        step: (step) => this.visuals.update(record.id, { step }),
       });
-      if (script.fit === 'poor') {
+      if (made.fit === 'poor') {
         await this.visuals.update(record.id, {
           status: 'not_suitable',
           step: null,
           fit: 'poor',
-          fitReason: script.fitReason ?? 'This page does not suit a video.',
+          fitReason: made.reason,
         });
         return;
       }
-
-      // Drawing and voicing need only the script, so they run together.
-      await this.visuals.update(record.id, { step: 'drawing' });
-      const kept: Pronunciations = doc.props.institutionId
-        ? await this.pronunciations.kept(doc.props.institutionId)
-        : new Map();
-      const base = `documents/${doc.id}/visuals/v${contentVersion}/p${pageNumber}-${SCENE_GENERATOR_VERSION}`;
-      let voiced = false;
-      // A voice that fails stops the drawing: nothing more is asked for,
-      // and both branches have settled before the catch below touches the
-      // row, so neither writes to it afterwards.
-      const stop = new AbortController();
-      const [drawing, spoken] = await Promise.allSettled([
-        this.drawAll(script, topic.title, documentId, who, stop.signal).then(
-          async (made) => {
-            if (!voiced && !stop.signal.aborted)
-              await this.visuals.update(record.id, { step: 'voicing' });
-            return made;
-          },
-        ),
-        this.voice(script, kept, base, documentId, who)
-          .catch((error: unknown) => {
-            stop.abort();
-            throw error;
-          })
-          .finally(() => {
-            voiced = true;
-          }),
-      ]);
-      if (spoken.status === 'rejected') throw spoken.reason;
-      if (drawing.status === 'rejected') throw drawing.reason;
-      const drawings = drawing.value;
-      const voice = spoken.value;
-
-      await this.visuals.update(record.id, { step: 'composing' });
-      const { scene, filled } = composeScene({
-        script,
-        drawings,
-        beats: voice.beats,
-        durationMs: voice.durationMs,
-        timing: voice.timing,
-        generator: SCENE_GENERATOR_VERSION,
-      });
-      const sceneKey = `${base}-scene.json`;
-      await this.storage.put({
-        key: sceneKey,
-        body: Buffer.from(JSON.stringify(scene)),
-        mimeType: 'application/json',
-      });
-      const thumbKey = `${base}-thumb.png`;
-      try {
-        await this.storage.put({
-          key: thumbKey,
-          body: await this.thumb(scene),
-          mimeType: 'image/png',
-        });
-      } catch (error) {
-        // A card without its still is a card; the video is what matters.
-        this.logger.warn(
-          `${who}: no still for the card: ${(error as Error).message}`,
-        );
-      }
+      const { scene, sceneKey, thumbKey, voice, script, drawings, filled } =
+        made;
 
       await this.visuals.update(record.id, {
         status: 'done',
@@ -285,6 +331,221 @@ export class SceneProcessor {
   }
 
   /**
+   * A page made from its material: written, drawn and voiced together,
+   * put on its words, audited, and stored under `base` with a still for
+   * its card. The page's row is the caller's: `step` says where the
+   * making is. A page not fit to teach comes back as such, with nothing
+   * stored. `documentId` is null for a page made from any text at all
+   * (scripts/scene-try): its costs are logged against no document.
+   */
+  async make(input: {
+    documentId: string | null;
+    documentTitle: string;
+    topic: TopicRecord;
+    material: string;
+    context: string;
+    profile: DocumentProfile;
+    /** A story's page: its characters are the book's own. */
+    story?: PageStory | null;
+    kept: Pronunciations;
+    base: string;
+    who: string;
+    /** What SCENE_KEEP_PARTS names the page's parts file. */
+    keepAs?: string;
+    step?: (step: 'drawing' | 'voicing' | 'composing') => Promise<void>;
+  }): Promise<
+    | { fit: 'poor'; reason: string }
+    | {
+        fit: 'good';
+        scene: SceneDto;
+        sceneKey: string;
+        thumbKey: string;
+        voice: Awaited<ReturnType<SceneProcessor['voice']>>;
+        script: SceneScript;
+        drawings: Map<string, GatedDrawing | null>;
+        filled: number;
+      }
+  > {
+    const { documentId, topic, who, base } = input;
+    const story = input.story ?? null;
+    const written = await this.write({
+      documentTitle: input.documentTitle,
+      topic,
+      material: input.material,
+      context: input.context,
+      profile: input.profile,
+      story,
+      documentId,
+      who,
+    });
+    const script = story
+      ? castStory(written, story.bible, story.page)
+      : written;
+    if (script.fit === 'poor')
+      return {
+        fit: 'poor',
+        reason: script.fitReason ?? 'This page does not suit a video.',
+      };
+
+    // Drawing and voicing need only the script, so they run together.
+    await input.step?.('drawing');
+    let voiced = false;
+    // A voice that fails stops the drawing: nothing more is asked for,
+    // and both branches have settled before the catch below touches the
+    // row, so neither writes to it afterwards.
+    const stop = new AbortController();
+    const [drawing, spoken] = await Promise.allSettled([
+      this.drawAll(
+        script,
+        topic.title,
+        documentId,
+        who,
+        stop.signal,
+        story,
+      ).then(async (made) => {
+        if (!voiced && !stop.signal.aborted) await input.step?.('voicing');
+        return made;
+      }),
+      this.voice(
+        script,
+        input.kept,
+        base,
+        documentId,
+        who,
+        story,
+        // The voice waits while a "previously" brings the last page back.
+        script.opening?.show.length ? OPENING_LEAD_S : 0,
+      )
+        .catch((error: unknown) => {
+          stop.abort();
+          throw error;
+        })
+        .finally(() => {
+          voiced = true;
+        }),
+    ]);
+    if (spoken.status === 'rejected') throw spoken.reason;
+    if (drawing.status === 'rejected') throw drawing.reason;
+    const drawings = drawing.value;
+    const voice = spoken.value;
+
+    await input.step?.('composing');
+    const { scene, filled, audit } = composeScene({
+      script,
+      drawings,
+      beats: voice.beats,
+      durationMs: voice.durationMs,
+      timing: voice.timing,
+      generator: SCENE_GENERATOR_VERSION,
+    });
+    // For working on the layout without the models: everything compose
+    // was given, kept where SCENE_KEEP_PARTS says (scripts/scene-recompose).
+    const keep = this.config.get<string>('SCENE_KEEP_PARTS')?.trim();
+    if (keep)
+      try {
+        const { mkdirSync, writeFileSync } = await import('node:fs');
+        mkdirSync(keep, { recursive: true });
+        writeFileSync(
+          `${keep}/${input.keepAs ?? 'page'}-parts.json`,
+          JSON.stringify({
+            script,
+            drawings: [...drawings],
+            beats: voice.beats,
+            durationMs: voice.durationMs,
+            timing: voice.timing,
+          }),
+        );
+      } catch (error) {
+        this.logger.warn(`${who}: parts not kept: ${(error as Error).message}`);
+      }
+    // What no layout promises by construction: nothing set on anything.
+    const found = [...audit.box.flat(), ...audit.wide.flat()];
+    const counted = new Map<string, number>();
+    for (const one of found)
+      counted.set(
+        `${one.kind} ${one.a} / ${one.b}`,
+        (counted.get(`${one.kind} ${one.a} / ${one.b}`) ?? 0) + 1,
+      );
+    this.logger.log(
+      `${who}: frame audit: ${audit.box.flat().length} in the box, ${audit.wide.flat().length} wide${
+        counted.size
+          ? `: ${[...counted]
+              .slice(0, 6)
+              .map(([what, n]) => `${what}${n > 1 ? ` ×${n}` : ''}`)
+              .join('; ')}`
+          : ''
+      }`,
+    );
+    const sceneKey = `${base}-scene.json`;
+    await this.storage.put({
+      key: sceneKey,
+      body: Buffer.from(JSON.stringify(scene)),
+      mimeType: 'application/json',
+    });
+    const thumbKey = `${base}-thumb.png`;
+    try {
+      await this.storage.put({
+        key: thumbKey,
+        body: await this.thumb(scene),
+        mimeType: 'image/png',
+      });
+    } catch (error) {
+      // A card without its still is a card; the video is what matters.
+      this.logger.warn(
+        `${who}: no still for the card: ${(error as Error).message}`,
+      );
+    }
+    return {
+      fit: 'good',
+      scene,
+      sceneKey,
+      thumbKey,
+      voice,
+      script,
+      drawings,
+      filled,
+    };
+  }
+
+  /**
+   * A page's script alone, written exactly as a page's is, for the tools
+   * that voice or study it (the voice line-up) without making the page.
+   */
+  async scriptFor(
+    documentId: string,
+    pageNumber: number,
+  ): Promise<SceneScript> {
+    const doc = await this.documents.findById(documentId);
+    if (!doc) throw new Error(`No document ${documentId}`);
+    const topic = (await this.topics.listByDocument(documentId)).find(
+      (t) => pageNumber >= t.startPage && pageNumber <= t.endPage,
+    );
+    if (!topic) throw new Error(`Page ${pageNumber} is outside every chapter`);
+    const profile = await this.profileFor(documentId, doc.contentVersion);
+    return this.write({
+      documentTitle: doc.props.title,
+      topic,
+      material: await this.material(documentId, pageNumber),
+      context: await this.where(
+        documentId,
+        doc.contentVersion,
+        topic,
+        pageNumber,
+      ),
+      profile,
+      story: await this.pageStory(
+        profile.story,
+        documentId,
+        doc.contentVersion,
+        doc.props.title,
+        pageNumber,
+      ),
+      documentId,
+      who: `${documentId} p${pageNumber}`,
+    });
+  }
+
+  /**
    * The script and storyboard: written, mended, and written once more when
    * the mend leaves problems. The better of the two is kept; a storyboard
    * that never puts anything on the stage fails the page.
@@ -294,18 +555,37 @@ export class SceneProcessor {
     topic: TopicRecord;
     material: string;
     context: string;
-    documentId: string;
+    profile: DocumentProfile;
+    story?: PageStory | null;
+    documentId: string | null;
     who: string;
   }): Promise<SceneScript> {
+    const told = input.story
+      ? describeStory(input.story.bible, input.story.page)
+      : '';
     const ask = {
       documentTitle: input.documentTitle,
       topicTitle: input.topic.title,
       material: input.material,
       context: input.context,
+      profile: describeProfile(input.profile),
+      ...(told ? { story: told } : {}),
+    };
+    // The page, to hold a quotation to, the formats the book may use, and
+    // who the story's characters are.
+    const checks = {
+      material: input.material,
+      formats: input.profile.formats,
+      ...(input.story
+        ? {
+            characters: input.story.bible.characters,
+            places: input.story.bible.places,
+          }
+        : {}),
     };
     const first = await this.llm.sceneScript(ask);
     await this.record(input.documentId, 'scene_write', first.usage);
-    let mended = mendScript(first.value);
+    let mended = mendScript(first.value, checks);
     if (mended.mended.length)
       this.logger.log(
         `${input.who}: mended: ${mended.mended.slice(0, 8).join('; ')}`,
@@ -320,7 +600,7 @@ export class SceneProcessor {
         problems: [...mended.problems, ...quietStretches(mended.script)],
       });
       await this.record(input.documentId, 'scene_write', again.usage);
-      const second = mendScript(again.value);
+      const second = mendScript(again.value, checks);
       if (second.problems.length <= mended.problems.length) mended = second;
     }
     const { script } = mended;
@@ -341,26 +621,89 @@ export class SceneProcessor {
   private async drawAll(
     script: SceneScript,
     topic: string,
-    documentId: string,
+    documentId: string | null,
     who: string,
     signal: AbortSignal,
+    story: PageStory | null = null,
   ): Promise<Map<string, GatedDrawing | null>> {
     const drawings = script.cast.filter(
       (thing): thing is DrawingThing => thing.kind === 'drawing',
     );
+    const characters = script.cast.filter(
+      (thing): thing is CharacterThing => thing.kind === 'character',
+    );
+    const places = script.cast.filter(
+      (thing): thing is PlaceThing => thing.kind === 'place',
+    );
     const names = new Map(
       script.cast.map((thing) => [
         thing.id,
-        thing.kind === 'drawing'
-          ? thing.name
-          : thing.kind === 'stat'
-            ? thing.caption
-            : thing.text,
+        thing.kind === 'stat'
+          ? thing.caption
+          : thing.kind === 'words'
+            ? thing.text
+            : thing.name || thing.kind,
       ]),
     );
     const out = new Map<string, GatedDrawing | null>();
-    await Promise.all(
-      drawings.map(async (thing) => {
+    // What code draws itself: working, graphs, the text's own words,
+    // timelines and charts. No model is asked, and one that cannot be set
+    // is a card, as a drawing is.
+    const coded = script.cast.filter(isCodeThing);
+    for (const thing of coded)
+      out.set(
+        thing.id,
+        await drawByCode(thing).catch((error: unknown) => {
+          this.logger.warn(
+            `${who}: "${thing.id}" (${thing.kind}) is set as a card: ${(error as Error).message}`,
+          );
+          return null;
+        }),
+      );
+    // The story's characters, each drawn once for the whole book; the
+    // first time the book meets one, what they are like beside them.
+    const cast = characters.map(async (thing) => {
+      const character = story?.bible.characters.find((c) => c.id === thing.ref);
+      const sheet =
+        story && character
+          ? await this.sheetFor(
+              story.castKey,
+              character,
+              story.bookTitle,
+              documentId,
+              who,
+            )
+          : null;
+      out.set(
+        thing.id,
+        sheet
+          ? {
+              ...sheet.drawing,
+              callouts: introCallouts(sheet, thing.intro),
+              ...(sheet.anchors.head ? { head: sheet.anchors.head } : {}),
+            }
+          : null,
+      );
+    });
+    // The story's places, each painted once for the whole book.
+    const sets = places.map(async (thing) => {
+      const place = story?.bible.places.find((p) => p.id === thing.ref);
+      const set =
+        story && place
+          ? await this.setFor(
+              story.setsKey,
+              place,
+              story.bookTitle,
+              documentId,
+              who,
+            )
+          : null;
+      out.set(thing.id, set?.drawing ?? null);
+    });
+    await Promise.all([
+      ...cast,
+      ...sets,
+      ...drawings.map(async (thing) => {
         // What it shares the stage with, so its scale and style agree with theirs.
         const neighbours = new Set<string>();
         for (const step of script.steps)
@@ -379,7 +722,7 @@ export class SceneProcessor {
           ),
         );
       }),
-    );
+    ]);
     return out;
   }
 
@@ -388,7 +731,7 @@ export class SceneProcessor {
     thing: DrawingThing,
     topic: string,
     neighbours: string[],
-    documentId: string,
+    documentId: string | null,
     who: string,
     signal: AbortSignal,
   ): Promise<GatedDrawing | null> {
@@ -444,8 +787,11 @@ export class SceneProcessor {
     script: SceneScript,
     kept: Pronunciations,
     base: string,
-    documentId: string,
+    documentId: string | null,
     who: string,
+    story: PageStory | null = null,
+    /** Seconds of quiet before the first word, for an opening on the stage alone. */
+    leadS = 0,
   ): Promise<{
     beats: TimedBeat[];
     durationMs: number;
@@ -453,21 +799,72 @@ export class SceneProcessor {
     timing: SceneTiming;
   }> {
     const forms = script.beats.map((beat) => spokenForm(beat.say, kept));
-    const pausesS = script.beats.map((beat) => PAUSE_SECONDS[beat.pause]);
+    // Each sentence at its own pace, with its own silence after it.
+    const delivered = deliveryPieces(script.beats);
+    const pausesS = delivered.map((piece) => piece.pauseAfter);
     const spoken = sceneSpoken(forms);
-    const { model, voice } = this.speech.label();
+    const { model } = this.speech.label();
+    // Visualize may speak in a voice of its own; lectures keep theirs.
+    const voice =
+      this.config.get<string>('SCENE_VOICE')?.trim() ||
+      this.speech.label().voice;
+    // A story's characters say their own lines, in voices of their own.
+    const engine = model.startsWith('gemini')
+      ? 'gemini'
+      : model.startsWith('kokoro')
+        ? 'kokoro'
+        : null;
+    const speakers = script.beats.map((beat, k) => {
+      if (!story) return null;
+      // Whom the sentence quotes, as the writer named them, or the "say" on it.
+      const said =
+        beat.speaker ??
+        script.steps
+          .filter((step) => step.at.beat === k)
+          .flatMap((step) => step.effects)
+          .find((effect) => effect.do === 'say')?.target;
+      const thing = script.cast.find((t) => t.id === said);
+      const character =
+        thing?.kind === 'character'
+          ? story.bible.characters.find((c) => c.id === thing.ref)
+          : undefined;
+      return character
+        ? characterVoice(story.bible, character, engine, voice)
+        : null;
+    });
+    const pieces = voicedPieces({
+      texts: forms.map((form) => form.text),
+      delivered,
+      // For a voice that takes direction; Kokoro goes by pace and silence.
+      styles: script.beats.map((beat) =>
+        voiceStyle(script.mood, beat.delivery),
+      ),
+      speakers,
+    });
     const result = await this.speech.synthesize({
       text: spoken.text,
       voice,
       speed: 1,
       timestamps: true,
-      pieces: forms.map((form, i) => ({
-        text: form.text,
-        speed: 1,
-        pauseAfter: pausesS[i],
+      pieces: pieces.map((piece) => ({
+        text: piece.text,
+        speed: piece.speed,
+        pauseAfter: piece.pauseAfter,
+        ...(piece.style ? { style: piece.style } : {}),
+        ...(piece.voice ? { voice: piece.voice } : {}),
       })),
+      ...(leadS > 0 ? { lead: leadS } : {}),
     });
-    const audioKey = `${base}-${voice}-${model}.mp3`;
+    const voices = new Set(pieces.map((p) => p.voice).filter(Boolean));
+    if (voices.size)
+      this.logger.log(`${who}: characters speak in ${[...voices].join(', ')}`);
+    // Each sentence starts where its first piece does.
+    const starts = sentenceStarts(
+      pieces,
+      result.pieceStartsMs,
+      script.beats.length,
+    );
+    const audioKey = `${base}-${voiceSlug(voice)}-${model}.mp3`;
     await this.storage.put({
       key: audioKey,
       body: result.audio,
@@ -484,18 +881,29 @@ export class SceneProcessor {
       tokensOut: null,
       latencyMs: null,
       outcome: 'ok',
-      // A voice of our own is priced by the audio it made, at its rate.
-      costUsd: result.model.startsWith('kokoro:')
-        ? catalogueSpeechCost(
-            durationMs,
-            Number(this.config.get<string>('KOKORO_USD_PER_AUDIO_HOUR', '0')),
-          )
-        : result.model.startsWith('modal:')
+      // A voice of our own is priced by the audio it made, at its rate;
+      // Gemini by its tokens.
+      costUsd: result.model.startsWith('gemini:')
+        ? geminiSpeechCost({
+            model: result.model,
+            audioMs: durationMs,
+            textChars: spoken.text.length,
+            tokensIn: result.usage?.tokensIn,
+            tokensOut: result.usage?.tokensOut,
+          })
+        : result.model.startsWith('kokoro:')
           ? catalogueSpeechCost(
               durationMs,
-              Number(this.config.get<string>('MODAL_USD_PER_AUDIO_HOUR', '0')),
+              Number(this.config.get<string>('KOKORO_USD_PER_AUDIO_HOUR', '0')),
             )
-          : null,
+          : result.model.startsWith('modal:')
+            ? catalogueSpeechCost(
+                durationMs,
+                Number(
+                  this.config.get<string>('MODAL_USD_PER_AUDIO_HOUR', '0'),
+                ),
+              )
+            : null,
     });
 
     let words: SpokenWords | null = null;
@@ -530,7 +938,7 @@ export class SceneProcessor {
             forms,
             pausesS,
             durationMs,
-            result.pieceStartsMs,
+            starts,
           );
           timing = 'aligned';
         }
@@ -544,7 +952,7 @@ export class SceneProcessor {
       forms,
       pausesS,
       durationMs,
-      pieceStartsMs: result.pieceStartsMs,
+      pieceStartsMs: starts,
     });
     return {
       beats: timeBeats(script.beats, forms, words),
@@ -564,12 +972,30 @@ export class SceneProcessor {
     const step = scene.steps[index];
     const pngs = new Map<string, Buffer>();
     const scale = THUMB_WIDTH / scene.stagings.box.w;
+    // As the step stands at its end: its states shown, a character's face on.
+    const until = (scene.steps[index + 1]?.atMs ?? scene.durationMs) - 1;
+    const scenery = step?.backdrop
+      ? scene.things.find((t) => t.id === step.backdrop)
+      : undefined;
+    if (scenery?.kind === 'drawing')
+      try {
+        pngs.set(
+          scenery.id,
+          await rasterise(
+            scenery.svg,
+            Math.round(scene.stagings.box.w * scale),
+          ),
+        );
+      } catch {
+        // A still with no scene behind it.
+      }
     for (const id of step?.show ?? []) {
       const thing = scene.things.find((t) => t.id === id);
       const place = scene.stagings.box.places[index]?.[id];
       if (thing?.kind !== 'drawing' || !place) continue;
-      const hide = thing.hidden.length
-        ? `<style>${thing.hidden.map((h) => `[id="${h.replace(/"/g, '')}"]`).join(',')}{display:none}</style>`
+      const hidden = hiddenAt(scene, thing, until);
+      const hide = hidden.length
+        ? `<style>${hidden.map((h) => `[id="${h.replace(/"/g, '')}"]`).join(',')}{display:none}</style>`
         : '';
       const svg = hide
         ? thing.svg.replace(/(<svg\b[^>]*>)/i, `$1${hide}`)
@@ -584,6 +1010,387 @@ export class SceneProcessor {
       }
     }
     return rasterise(thumbSvg(scene, pngs), THUMB_WIDTH);
+  }
+
+  /** A story's page, when the book is a story and its story could be read. */
+  private async pageStory(
+    isStory: boolean,
+    documentId: string,
+    contentVersion: number,
+    bookTitle: string,
+    page: number,
+  ): Promise<PageStory | null> {
+    if (!isStory) return null;
+    const bible = await this.storyFor(documentId, contentVersion, bookTitle);
+    return bible?.characters.length
+      ? {
+          bible,
+          page,
+          castKey: castKey(documentId, contentVersion),
+          setsKey: setsKey(documentId, contentVersion),
+          bookTitle,
+        }
+      : null;
+  }
+
+  /**
+   * A story's bible, kept beside its videos: read, or made once from the
+   * whole book when the first of its pages is asked for, every page made
+   * meanwhile waiting on the one making it. Null when it cannot be made:
+   * the pages are then made as any page is, and it is tried again with
+   * the next.
+   */
+  private storyFor(
+    documentId: string,
+    contentVersion: number,
+    title: string,
+  ): Promise<StoryBible | null> {
+    const key = storyKey(documentId, contentVersion);
+    return this.once(key, async () => {
+      let kept: Buffer | null = null;
+      try {
+        kept = await this.storage.get(key);
+      } catch (error) {
+        // Not made yet; a store that cannot say is asked again next page.
+        if (!(error instanceof NotFoundError)) {
+          this.logger.warn(
+            `${documentId}: the story could not be read back: ${(error as Error).message}`,
+          );
+          return null;
+        }
+      }
+      if (kept)
+        try {
+          return bibleOf(
+            JSON.parse(kept.toString('utf8')) as Partial<StoryBible> | null,
+          );
+        } catch {
+          // Kept but unreadable: read from the book again.
+        }
+      try {
+        const doc = await this.documents.findById(documentId);
+        const pages = await this.pages.findRange(
+          documentId,
+          1,
+          Math.max(1, doc?.props.pageCount ?? 1),
+        );
+        const bible = await this.readStory({
+          documentId,
+          title,
+          pages: pages
+            .filter((page) => !page.isEmpty)
+            .map((page) => ({ page: page.pageNumber, text: page.text })),
+          who: documentId,
+        });
+        await this.storage.put({
+          key,
+          body: Buffer.from(JSON.stringify(bible)),
+          mimeType: 'application/json',
+        });
+        return bible;
+      } catch (error) {
+        this.logger.warn(
+          `${documentId}: no story, its pages made without one: ${(error as Error).message}`,
+        );
+        return null;
+      }
+    });
+  }
+
+  /**
+   * A story read from its pages by the model, a stretch at a time: the
+   * first stretch alone, so the rest call its people by the same names,
+   * then the rest a few at once; merged into one bible by code. A stretch
+   * that cannot be read is left out.
+   */
+  async readStory(input: {
+    documentId: string | null;
+    title: string;
+    pages: { page: number; text: string }[];
+    who: string;
+  }): Promise<StoryBible> {
+    const pieces = storyPieces(input.pages).slice(0, MAX_STORY_PIECES);
+    if (!pieces.length) return EMPTY_STORY;
+    const read = async (piece: (typeof pieces)[number], known: string[]) => {
+      try {
+        const made = await this.llm.sceneStory({
+          documentTitle: input.title,
+          from: piece.from,
+          to: piece.to,
+          text: piece.text,
+          known,
+        });
+        await this.record(input.documentId, 'scene_story', made.usage);
+        return { from: piece.from, to: piece.to, draft: made.value };
+      } catch (error) {
+        this.logger.warn(
+          `${input.who}: pages ${piece.from} to ${piece.to} of the story could not be read: ${(error as Error).message}`,
+        );
+        return null;
+      }
+    };
+    const first = await read(pieces[0], []);
+    const known = first?.draft.characters.map((c) => c.name) ?? [];
+    const rest = await inBatches(pieces.slice(1), STORY_READERS, (piece) =>
+      read(piece, known),
+    );
+    const parts = [first, ...rest].filter(
+      (part): part is NonNullable<typeof part> => Boolean(part),
+    );
+    if (!parts.length) throw new Error('no stretch of it could be read');
+    const bible = mergeStory(parts);
+    this.logger.log(
+      `${input.who}: story read in ${parts.length} of ${pieces.length} stretches: ${bible.characters.length} characters (${bible.characters
+        .slice(0, 8)
+        .map((c) => `${c.name} p${c.firstPage}`)
+        .join(
+          ', ',
+        )}), ${bible.places.length} places, ${bible.pages.length} pages`,
+    );
+    return bible;
+  }
+
+  /**
+   * A character's drawing for the whole book: from the book's cast, or
+   * drawn once and added to it, every page that needs them meanwhile
+   * waiting on the one drawing. Null when no drawing comes through: they
+   * are a card with their name on this page, and drawn again for the next.
+   */
+  private sheetFor(
+    key: string,
+    character: StoryCharacter,
+    bookTitle: string,
+    documentId: string | null,
+    who: string,
+  ): Promise<CharacterSheet | null> {
+    return this.once(`${key}#${character.id}`, async () => {
+      try {
+        const kept = (await this.castAt(key))[character.id];
+        if (kept) return kept;
+      } catch (error) {
+        this.logger.warn(
+          `${who}: the cast could not be read: ${(error as Error).message}`,
+        );
+        return null;
+      }
+      const sheet = await this.drawSheet(character, bookTitle, documentId, who);
+      if (!sheet) return null;
+      // Added to the cast as it stands now: others may have been drawn meanwhile.
+      await this.inTurn(key, async () => {
+        const cast = await this.castAt(key);
+        cast[character.id] = sheet;
+        await this.storage.put({
+          key,
+          body: Buffer.from(JSON.stringify(cast)),
+          mimeType: 'application/json',
+        });
+      }).catch((error: unknown) =>
+        this.logger.warn(
+          `${who}: ${character.name} was drawn but not kept: ${(error as Error).message}`,
+        ),
+      );
+      return sheet;
+    });
+  }
+
+  /**
+   * A place's set for the whole book: from the book's sets, or painted once
+   * and added to them, as a character is drawn once. Null when none comes
+   * through: the page has no scene behind it.
+   */
+  private setFor(
+    key: string,
+    place: StoryPlace,
+    bookTitle: string,
+    documentId: string | null,
+    who: string,
+  ): Promise<SetSheet | null> {
+    return this.once(`${key}#${place.id}`, async () => {
+      try {
+        const kept = (await this.setsAt(key))[place.id];
+        if (kept) return kept;
+      } catch (error) {
+        this.logger.warn(
+          `${who}: the sets could not be read: ${(error as Error).message}`,
+        );
+        return null;
+      }
+      const set = await this.paintSet(place, bookTitle, documentId, who);
+      if (!set) return null;
+      await this.inTurn(key, async () => {
+        const sets = await this.setsAt(key);
+        sets[place.id] = set;
+        await this.storage.put({
+          key,
+          body: Buffer.from(JSON.stringify(sets)),
+          mimeType: 'application/json',
+        });
+      }).catch((error: unknown) =>
+        this.logger.warn(
+          `${who}: ${place.name} was painted but not kept: ${(error as Error).message}`,
+        ),
+      );
+      return set;
+    });
+  }
+
+  /** The book's sets as kept, read as the cast is. */
+  private async setsAt(key: string): Promise<Sets> {
+    let kept: Buffer;
+    try {
+      kept = await this.storage.get(key);
+    } catch (error) {
+      if (error instanceof NotFoundError) return {};
+      throw error;
+    }
+    try {
+      return setsOf(JSON.parse(kept.toString('utf8')));
+    } catch {
+      return {};
+    }
+  }
+
+  /** A place painted for the book: asked for as a set, gated as one, and asked for once more when it falls short. */
+  private async paintSet(
+    place: StoryPlace,
+    bookTitle: string,
+    documentId: string | null,
+    who: string,
+  ): Promise<SetSheet | null> {
+    const thing = setThing(place, bookTitle);
+    let best: GateResult | null = null;
+    let notes: string[] | undefined;
+    for (let attempt = 1; attempt <= DRAW_TRIES; attempt += 1) {
+      let reply: string;
+      try {
+        const made = await this.llm.sceneDrawing({
+          thing,
+          viewBox: SET_CANVAS,
+          topic: bookTitle,
+          neighbours: [],
+          notes,
+          backdrop: true,
+        });
+        await this.record(documentId, 'scene_draw', made.usage);
+        reply = made.value;
+      } catch (error) {
+        this.logger.warn(
+          `${who}: ${place.name} could not be asked for: ${(error as Error).message}`,
+        );
+        continue;
+      }
+      const gated = await gateDrawing(reply, thing, { backdrop: true });
+      if (gated.drawing && (!best?.drawing || gated.score > best.score))
+        best = gated;
+      if (gated.drawing && !gated.retry) break;
+      notes = gated.notes;
+    }
+    if (!best?.drawing) {
+      this.logger.warn(`${who}: ${place.name} could not be painted`);
+      return null;
+    }
+    this.logger.log(`${who}: ${place.name} painted for the whole book`);
+    return { version: SET_VERSION, drawing: best.drawing };
+  }
+
+  /**
+   * The book's cast as kept: none yet, or none that can be read, is an
+   * empty one, whose characters are drawn again; a store that cannot say
+   * throws, so nothing kept is written over.
+   */
+  private async castAt(key: string): Promise<Cast> {
+    let kept: Buffer;
+    try {
+      kept = await this.storage.get(key);
+    } catch (error) {
+      if (error instanceof NotFoundError) return {};
+      throw error;
+    }
+    try {
+      return castOf(JSON.parse(kept.toString('utf8')));
+    } catch {
+      return {};
+    }
+  }
+
+  /**
+   * A character drawn for the book: asked for, gated, measured as a sheet
+   * (every face on the head), and asked for once more with what fell
+   * short; the better kept.
+   */
+  private async drawSheet(
+    character: StoryCharacter,
+    bookTitle: string,
+    documentId: string | null,
+    who: string,
+  ): Promise<CharacterSheet | null> {
+    const thing = sheetThing(character, bookTitle);
+    const viewBox = CANVAS[thing.shape];
+    let best: { sheet: CharacterSheet; faults: number } | null = null;
+    let notes: string[] | undefined;
+    for (let attempt = 1; attempt <= DRAW_TRIES; attempt += 1) {
+      let reply: string;
+      try {
+        const made = await this.llm.sceneDrawing({
+          thing,
+          viewBox,
+          topic: bookTitle,
+          neighbours: [],
+          notes,
+        });
+        await this.record(documentId, 'scene_draw', made.usage);
+        reply = made.value;
+      } catch (error) {
+        this.logger.warn(
+          `${who}: ${character.name} could not be asked for: ${(error as Error).message}`,
+        );
+        continue;
+      }
+      const gated = await gateDrawing(reply, thing);
+      if (!gated.drawing) {
+        notes = gated.notes;
+        continue;
+      }
+      const measured = await measureSheet(gated.drawing).catch(
+        (error: unknown) => ({
+          sheet: null,
+          notes: [`It could not be measured: ${(error as Error).message}`],
+        }),
+      );
+      const faults = (gated.retry ? 1 : 0) + measured.notes.length;
+      if (measured.sheet && (!best || faults < best.faults))
+        best = { sheet: measured.sheet, faults };
+      if (measured.sheet && !faults) break;
+      notes = [...gated.notes, ...measured.notes];
+      this.logger.log(
+        `${who}: ${character.name} try ${attempt} fell short: ${notes.join(' ')}`,
+      );
+    }
+    if (best)
+      this.logger.log(`${who}: ${character.name} drawn for the whole book`);
+    else this.logger.warn(`${who}: ${character.name} could not be drawn`);
+    return best?.sheet ?? null;
+  }
+
+  /** Work keyed by a name: a second caller while it runs waits on the first rather than doing it again. */
+  private once<T>(key: string, work: () => Promise<T>): Promise<T> {
+    const running = this.running.get(key);
+    if (running) return running as Promise<T>;
+    const started = work().finally(() => this.running.delete(key));
+    this.running.set(key, started);
+    return started;
+  }
+
+  /** Work on one file, after whatever work on it is under way. */
+  private inTurn<T>(key: string, work: () => Promise<T>): Promise<T> {
+    const before = this.writing.get(key) ?? Promise.resolve();
+    const mine = before.catch(() => undefined).then(work);
+    this.writing.set(key, mine);
+    const done = () => {
+      if (this.writing.get(key) === mine) this.writing.delete(key);
+    };
+    mine.then(done, done);
+    return mine;
   }
 
   /** Where the page sits: its chapter, and what the pages before it already taught. */
@@ -617,6 +1424,80 @@ export class SceneProcessor {
     ].join(' ');
   }
 
+  /**
+   * What the document is, for teaching it: kept beside its videos, made
+   * once from its title, its chapters and a sample of its pages. When it
+   * cannot be made, the page is taught as an explainer, as every page has
+   * been.
+   */
+  private async profileFor(
+    documentId: string,
+    contentVersion: number,
+  ): Promise<DocumentProfile> {
+    const key = profileKey(documentId, contentVersion);
+    try {
+      const kept = JSON.parse(
+        (await this.storage.get(key)).toString('utf8'),
+      ) as Parameters<typeof profileOf>[0];
+      return profileOf(kept);
+    } catch {
+      // Not made yet.
+    }
+    try {
+      const doc = await this.documents.findById(documentId);
+      const topics = await this.topics.listByDocument(documentId);
+      const sample = await this.sampleOf(documentId, doc?.props.pageCount ?? 0);
+      const made = await this.llm.sceneProfile({
+        documentTitle: doc?.props.title ?? '',
+        chapters: topics.map((topic) => topic.title),
+        sample,
+      });
+      await this.record(documentId, 'scene_profile', made.usage);
+      const profile = profileOf(made.value);
+      await this.storage.put({
+        key,
+        body: Buffer.from(JSON.stringify(profile)),
+        mimeType: 'application/json',
+      });
+      this.logger.log(`${documentId}: ${describeProfile(profile)}`);
+      return profile;
+    } catch (error) {
+      this.logger.warn(
+        `${documentId}: no profile, taught as an explainer: ${(error as Error).message}`,
+      );
+      return DEFAULT_PROFILE;
+    }
+  }
+
+  /** A few of a document's pages, to tell what it is: its first pages with words on them, and two from further in. */
+  private async sampleOf(
+    documentId: string,
+    pageCount: number,
+  ): Promise<string> {
+    const wanted = [
+      1,
+      2,
+      3,
+      4,
+      5,
+      Math.round(pageCount / 2),
+      Math.round((pageCount * 3) / 4),
+    ].filter(
+      (page, i, all) =>
+        page >= 1 && page <= Math.max(1, pageCount) && all.indexOf(page) === i,
+    );
+    const parts: string[] = [];
+    let length = 0;
+    for (const page of wanted) {
+      if (length > PROFILE_SAMPLE_CHARS) break;
+      const text = (await this.material(documentId, page)).slice(0, 1600);
+      if (wordsOf(text).length < 20) continue;
+      parts.push(`[page ${page}] ${text}`);
+      length += text.length;
+    }
+    return parts.join('\n\n').slice(0, PROFILE_SAMPLE_CHARS);
+  }
+
   /** The page: its simplified note when written, else its own text. */
   private async material(
     documentId: string,
@@ -624,7 +1505,7 @@ export class SceneProcessor {
   ): Promise<string> {
     const note = await this.simplified.find(documentId, pageNumber);
     if (note?.status === 'done' && note.blocks?.length)
-      return noteProse(note.blocks).slice(0, MATERIAL_CHARS);
+      return sceneProse(note.blocks).slice(0, MATERIAL_CHARS);
     const pages: PageText[] = await this.pages.findRange(
       documentId,
       pageNumber,
@@ -636,8 +1517,8 @@ export class SceneProcessor {
   }
 
   private async record(
-    documentId: string,
-    task: 'scene_write' | 'scene_draw',
+    documentId: string | null,
+    task: 'scene_write' | 'scene_draw' | 'scene_profile' | 'scene_story',
     usage: LlmUsage,
   ): Promise<void> {
     await this.calls.record({

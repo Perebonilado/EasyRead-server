@@ -1,5 +1,8 @@
+import { profileKey } from '../../business/domain/scene-profile';
+import { castKey, setsKey, storyKey } from '../../business/domain/scene-story';
 import { Injectable } from '@nestjs/common';
 import { InjectModel } from '@nestjs/sequelize';
+import { Op } from 'sequelize';
 import type {
   VisualPositionRecord,
   VisualSceneRecord,
@@ -101,6 +104,23 @@ export class SequelizeVisualSceneRepository implements VisualSceneRepository {
     return rows.map(toRecord);
   }
 
+  async listUnfinished(input: {
+    generatorVersion: string;
+    before: Date;
+    limit: number;
+  }): Promise<VisualSceneRecord[]> {
+    const rows = await this.model.findAll({
+      where: {
+        generatorVersion: input.generatorVersion,
+        status: { [Op.in]: ['pending', 'making'] },
+        updatedAt: { [Op.lt]: input.before },
+      },
+      order: [['updatedAt', 'ASC']],
+      limit: input.limit,
+    });
+    return rows.map(toRecord);
+  }
+
   async ensure(input: {
     documentId: string;
     contentVersion: number;
@@ -144,11 +164,21 @@ export class SequelizeVisualSceneRepository implements VisualSceneRepository {
 
   async filesOf(documentId: string): Promise<string[]> {
     const rows = await this.model.findAll({ where: { documentId } });
-    return rows.flatMap((row) =>
-      [row.sceneKey, row.audioKey, row.thumbKey].filter((key): key is string =>
-        Boolean(key),
+    // And each version's profile, story and cast, which no row names.
+    const versions = [...new Set(rows.map((row) => row.contentVersion))];
+    return [
+      ...rows.flatMap((row) =>
+        [row.sceneKey, row.audioKey, row.thumbKey].filter(
+          (key): key is string => Boolean(key),
+        ),
       ),
-    );
+      ...versions.flatMap((version) => [
+        profileKey(documentId, version),
+        storyKey(documentId, version),
+        castKey(documentId, version),
+        setsKey(documentId, version),
+      ]),
+    ];
   }
 
   async purgeDocument(documentId: string): Promise<void> {

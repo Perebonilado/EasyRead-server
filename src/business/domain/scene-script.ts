@@ -11,8 +11,24 @@
  * counted, so no miscount can move a picture off its words.
  */
 
-/** Rows are made per generator; a new generator is a new set of rows. */
-export const SCENE_GENERATOR_VERSION = 'scene-1';
+import { MAX_BARS, numbersIn, type ChartSpec } from './scene-chart';
+import { checkArithmetic, markTerms, type MathLine } from './scene-math';
+import { sample, type PlotSpec } from './scene-plot';
+import { findPhrase, isVerbatim } from './scene-quote';
+import { MAX_EVENTS, type TimelineSpec } from './scene-timeline';
+import {
+  EXPRESSIONS,
+  SHEET_PARTS,
+  nameKey,
+  type Expression,
+} from './scene-story';
+
+/**
+ * Rows are made per generator; a new generator is a new set of rows.
+ * scene-2: labels lifted out of drawings and set by the stage, arrow
+ * labels placed, each sentence's delivery, the page's mood and sounds.
+ */
+export const SCENE_GENERATOR_VERSION = 'scene-2';
 
 export const SCENE_LAYOUTS = [
   'one',
@@ -22,6 +38,7 @@ export const SCENE_LAYOUTS = [
   'hub',
   'cycle',
   'focus',
+  'stack',
 ] as const;
 export type SceneLayout = (typeof SCENE_LAYOUTS)[number];
 
@@ -31,8 +48,58 @@ export const SCENE_EFFECTS = [
   'hide',
   'pulse',
   'zoom',
+  'say',
 ] as const;
 export type SceneEffectKind = (typeof SCENE_EFFECTS)[number];
+
+/**
+ * How a sentence is said. The writer tags each one and code turns the tag
+ * into a pace and a silence (scene-voice.ts): a hook a touch quicker, the
+ * point slower with room after it, time to think after a question. One
+ * pace and two pauses for every sentence was a metronome.
+ */
+export const SCENE_DELIVERIES = [
+  'hook',
+  'explain',
+  'key',
+  'aside',
+  'question',
+  'recap',
+] as const;
+export type SceneDelivery = (typeof SCENE_DELIVERIES)[number];
+
+/** The page's feeling, for the music under the voice. */
+export const SCENE_MOODS = [
+  'calm',
+  'bright',
+  'curious',
+  'serious',
+  'playful',
+] as const;
+export type SceneMood = (typeof SCENE_MOODS)[number];
+
+/** What a drawn thing can sound like while it is on the stage: only a sound it makes in life. */
+export const SCENE_AMBIENCES = [
+  'heartbeat',
+  'bubbles',
+  'water',
+  'wind',
+  'rain',
+  'fire',
+  'electric',
+  'machine',
+  'clock',
+] as const;
+export type SceneAmbience = (typeof SCENE_AMBIENCES)[number];
+
+/**
+ * How a page may be taught. Every page can be an explainer; a book of
+ * maths may also work on a board (maths set by code, and graphs); a book
+ * of poems, plays or stories may also read its own words closely. The
+ * document's profile says which a book may use.
+ */
+export const SCENE_FORMATS = ['explainer', 'maths', 'reading'] as const;
+export type SceneFormat = (typeof SCENE_FORMATS)[number];
 
 export const DRAWING_SHAPES = ['square', 'wide', 'tall'] as const;
 export type DrawingShape = (typeof DRAWING_SHAPES)[number];
@@ -54,6 +121,10 @@ export interface SceneBeat {
   say: string;
   /** The silence after it: short between sentences, long where the idea changes. */
   pause: 'short' | 'long';
+  /** How it is said: its pace and the silence after it follow from this. */
+  delivery: SceneDelivery;
+  /** The story's character it quotes, by their id: their words in their voice, in a bubble by their head. */
+  speaker?: string | null;
 }
 
 export interface DrawingThing {
@@ -70,6 +141,8 @@ export interface DrawingThing {
   /** Overlays drawn over it and shown later: the bulb lit, the valve open. */
   states: { name: string; look: string }[];
   shape: DrawingShape;
+  /** The sound it makes while it is on stage, or null for none. */
+  sound: SceneAmbience | null;
 }
 
 export interface StatThing {
@@ -87,7 +160,137 @@ export interface WordsThing {
   style: 'title' | 'keyword';
 }
 
-export type SceneThing = DrawingThing | StatThing | WordsThing;
+/** Working set by code: lines of TeX, their equals signs in one column. */
+export interface MathThing {
+  id: string;
+  kind: 'math';
+  /** A caption under the working, or empty for none. */
+  name: string;
+  lines: MathLine[];
+}
+
+/** A graph drawn by code from its function. */
+export interface PlotThing {
+  id: string;
+  kind: 'plot';
+  name: string;
+  plot: PlotSpec;
+}
+
+/** The text's own words, with the phrases the voice will talk about. */
+export interface QuoteThing {
+  id: string;
+  kind: 'quote';
+  name: string;
+  text: string;
+  phrases: { name: string; phrase: string; note: string | null }[];
+}
+
+/** The page's events along an axis, drawn by code. */
+export interface TimelineThing {
+  id: string;
+  kind: 'timeline';
+  name: string;
+  timeline: TimelineSpec;
+}
+
+/** Bars or a line from the page's own numbers, drawn by code. */
+export interface ChartThing {
+  id: string;
+  kind: 'chart';
+  name: string;
+  chart: ChartSpec;
+}
+
+/** A thing drawn by code and not by the artist. */
+export type CodeThing =
+  MathThing | PlotThing | QuoteThing | TimelineThing | ChartThing;
+
+/** The kinds code draws itself. */
+export const CODE_KINDS = [
+  'math',
+  'plot',
+  'quote',
+  'timeline',
+  'chart',
+] as const;
+
+/** Whether a thing is one code draws, not the artist. */
+export const isCodeThing = (thing: { kind: string }): thing is CodeThing =>
+  (CODE_KINDS as readonly string[]).includes(thing.kind);
+
+/**
+ * One of the story's characters: drawn once for the whole book, and the
+ * same figure on every page they are on.
+ */
+export interface CharacterThing {
+  id: string;
+  kind: 'character';
+  /** Their id in the story. */
+  ref: string;
+  name: string;
+  /** The face they come on with; null keeps the one the last page left them with. */
+  state: Expression | null;
+  /** Where they come in the order the book meets its characters: the first met stands on the left. */
+  met: number;
+  /** On the page the book meets them: what they are like, set beside them. */
+  intro: string[];
+  /** The face the last page left them with: theirs through a "previously" opening. */
+  before?: Expression;
+}
+
+/**
+ * One of the story's places: painted once for the whole book, and the
+ * scene behind the stage whenever the story is there. Never a thing in a
+ * slot: shown, it becomes the backdrop.
+ */
+export interface PlaceThing {
+  id: string;
+  kind: 'place';
+  /** Its id in the story. */
+  ref: string;
+  name: string;
+  /** What it sounds like while the story is there. */
+  sound: SceneAmbience | null;
+}
+
+export type SceneThing =
+  | DrawingThing
+  | StatThing
+  | WordsThing
+  | CodeThing
+  | CharacterThing
+  | PlaceThing;
+
+/** The names of the parts the voice can point at in a thing. */
+export function partNames(thing: SceneThing): string[] {
+  if (thing.kind === 'drawing') return thing.parts.map((p) => p.name);
+  if (thing.kind === 'math')
+    return [
+      ...new Set(
+        thing.lines.flatMap((line, k) =>
+          markTerms(line.latex, k + 1).terms.map((t) => t.name),
+        ),
+      ),
+    ];
+  if (thing.kind === 'plot')
+    return ['curve', ...thing.plot.points.map((p) => p.name)];
+  if (thing.kind === 'quote') return thing.phrases.map((p) => p.name);
+  if (thing.kind === 'timeline')
+    return thing.timeline.events.map((e) => e.name || e.when);
+  if (thing.kind === 'chart') return thing.chart.bars.map((b) => b.label);
+  if (thing.kind === 'character') return [...SHEET_PARTS];
+  return [];
+}
+
+/** The names of the states a thing can show and hide: a drawing's overlays, a working's later lines. */
+export function stateNames(thing: SceneThing): string[] {
+  if (thing.kind === 'drawing') return thing.states.map((s) => s.name);
+  if (thing.kind === 'math')
+    return thing.lines.slice(1).map((_, k) => `line ${k + 2}`);
+  if (thing.kind === 'character') return [...EXPRESSIONS];
+  return [];
+}
 
 export interface SceneArrow {
   from: string;
@@ -102,6 +305,8 @@ export interface SceneStage {
   layout: SceneLayout;
   show: string[];
   arrows: SceneArrow[];
+  /** A place shown at this step: the scene behind the stage from now on. */
+  backdrop?: string;
 }
 
 export interface SceneEffect {
@@ -126,9 +331,17 @@ export interface SceneScript {
   fit: 'good' | 'poor';
   fitReason: string | null;
   title: string;
+  mood: SceneMood;
   beats: SceneBeat[];
   cast: SceneThing[];
   steps: SceneStep[];
+  /** A story page's own place: the scene behind the stage until the writer shows another. */
+  backdrop?: string | null;
+  /**
+   * A story page's "previously": who comes back from the page before, as
+   * they were, on the scene they were in, before the voice starts.
+   */
+  opening?: { show: string[]; backdrop: string | null } | null;
 }
 
 /**
@@ -140,10 +353,27 @@ export interface SceneScriptDraft {
   fit: 'good' | 'poor';
   fitReason: string | null;
   title: string;
-  beats: { say: string; pause: 'short' | 'long' }[];
+  mood: SceneMood;
+  beats: {
+    say: string;
+    pause: 'short' | 'long';
+    delivery: SceneDelivery;
+    /** A story's character the sentence quotes, or null. */
+    speaker?: string | null;
+  }[];
   cast: {
     id: string;
-    kind: 'drawing' | 'stat' | 'words';
+    kind:
+      | 'drawing'
+      | 'stat'
+      | 'words'
+      | 'math'
+      | 'plot'
+      | 'quote'
+      | 'timeline'
+      | 'chart'
+      | 'character'
+      | 'place';
     /** A drawing's caption, a stat's caption, the words themselves. */
     name: string;
     brief: string | null;
@@ -153,6 +383,34 @@ export interface SceneScriptDraft {
     shape: DrawingShape | null;
     value: string | null;
     style: 'title' | 'keyword' | null;
+    sound: SceneAmbience | null;
+    /** A working's lines. */
+    lines: { latex: string; check: string | null }[] | null;
+    /** A graph. */
+    plot: {
+      fn: string;
+      xFrom: number;
+      xTo: number;
+      yFrom: number | null;
+      yTo: number | null;
+      xLabel: string | null;
+      yLabel: string | null;
+      points: { x: number; name: string }[] | null;
+    } | null;
+    /** A quotation, word for word from the page. */
+    quote: string | null;
+    phrases: { name: string; phrase: string; note: string | null }[] | null;
+    /** A character: their id in the story, and the face they come on with. */
+    ref: string | null;
+    state: Expression | null;
+    /** A timeline: the page's events in order, each when and what. */
+    timeline: { when: string; name: string }[] | null;
+    /** A chart: bars or a line, from the page's own numbers. */
+    chart: {
+      kind: 'bar' | 'line';
+      unit: string | null;
+      bars: { label: string; value: number }[];
+    } | null;
   }[];
   steps: {
     beat: number;
@@ -169,33 +427,51 @@ export interface SceneScriptDraft {
 
 // ── Words ─────────────────────────────────────────────────────────────────
 
+/**
+ * Where a sentence quotes someone: each run of quoted words, as the
+ * [start, end) of the words without their marks. Double quotes, straight
+ * or curly; curly single quotes closed by a mark that is no apostrophe;
+ * straight single quotes opened at the start of a word and closed after
+ * punctuation ('You're late,' says Tobi). And a quote the writer never
+ * opened, from the sentence's start to its closing mark, or never closed,
+ * from its opening mark to the end.
+ */
+export function quotedSpans(sentence: string): [number, number][] {
+  const spans: [number, number][] = [];
+  const add = (start: number, end: number) => {
+    while (start < end && /\s/.test(sentence[start])) start += 1;
+    while (end > start && /\s/.test(sentence[end - 1])) end -= 1;
+    if (/\p{L}/u.test(sentence.slice(start, end))) spans.push([start, end]);
+  };
+  const runs = (pattern: RegExp) => {
+    for (const m of sentence.matchAll(pattern)) {
+      const inner = m.slice(1).find((g) => g !== undefined) ?? '';
+      const start = m.index + m[0].indexOf(inner);
+      add(start, start + inner.length);
+    }
+  };
+  runs(/“([^”]+)”|"([^"]+)"|‘(.+?)’(?!\p{L})/gu);
+  if (!spans.length) runs(/(?<![\p{L}\p{N}])'(\p{L}.*?[,.!?…])'(?!\p{L})/gu);
+  if (!spans.length) {
+    const unopened = /^(.+?[,.!?…])['’"”](?=\s|$)/u.exec(sentence);
+    const unclosed = /(?:^|\s)['‘"“](\p{L}.*)$/u.exec(sentence);
+    if (unopened) add(0, unopened[1].length);
+    else if (unclosed)
+      add(
+        unclosed.index + unclosed[0].length - unclosed[1].length,
+        sentence.length,
+      );
+  }
+  return spans.sort((a, b) => a[0] - b[0]);
+}
+
 /** The words of a sentence as the captions count them: a whitespace split. */
 export function wordsOf(text: string): string[] {
   return text.trim().split(/\s+/).filter(Boolean);
 }
 
-/** A word reduced to what it is, for matching: lower case, letters and digits. */
-/**
- * A name reduced to what it is, for matching. The writer says "renal
- * pelvis" and the artist writes `<g id="renal-pelvis">` or `renalPelvis`,
- * and all three are the same part (242b871).
- */
-export const idKey = (name: string) =>
-  name.toLowerCase().replace(/[^a-z0-9]/g, '');
-
-/** A word reduced the same way, to find a phrase in its sentence. */
-export const wordKey = idKey;
-
-/**
- * The id a thing or a named group is written with: "renal pelvis" is
- * `renal-pelvis`. One function, so the id the artist is asked for, the id
- * its retry notes name and the writer's ids cannot drift apart.
- */
-export const groupId = (name: string) =>
-  name
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, '-')
-    .replace(/^-+|-+$/g, '');
+import { groupId, idKey, wordKey } from './scene-ids';
+export { groupId, idKey, wordKey };
 
 /** Two words the same, or one the other with an ending: "chloroplast" and "chloroplasts". */
 function sameWord(a: string, b: string): boolean {
@@ -254,6 +530,7 @@ export const LAYOUT_CAPACITY: Record<
   hub: { min: 3, max: 6 },
   cycle: { min: 3, max: 5 },
   focus: { min: 2, max: 4 },
+  stack: { min: 2, max: 4 },
 };
 
 /** The layout the writer asked for when it holds this many, else the nearest one that does. */
@@ -262,8 +539,10 @@ export function fitLayout(asked: SceneLayout, count: number): SceneLayout {
   if (count >= min && count <= max) return asked;
   if (count <= 1) return 'one';
   if (count === 2)
-    return asked === 'focus' || asked === 'compare' ? asked : 'row';
-  return 'row';
+    return asked === 'focus' || asked === 'compare' || asked === 'stack'
+      ? asked
+      : 'row';
+  return asked === 'stack' && count <= 4 ? 'stack' : 'row';
 }
 
 // ── The mend ──────────────────────────────────────────────────────────────
@@ -272,12 +551,6 @@ const slug = (text: string) => groupId(text).slice(0, 32);
 
 const clean = (text: string | null | undefined) =>
   (text ?? '').replace(/\s+/g, ' ').trim();
-
-/** One pause, silence in seconds. */
-export const PAUSE_SECONDS: Record<SceneBeat['pause'], number> = {
-  short: 0.35,
-  long: 0.8,
-};
 
 export interface MendedScript {
   script: SceneScript;
@@ -294,16 +567,38 @@ export interface MendedScript {
  * extra drawings set in type. What cannot be mended is a problem for the
  * one repair call.
  */
-export function mendScript(draft: SceneScriptDraft): MendedScript {
+export function mendScript(
+  draft: SceneScriptDraft,
+  options: {
+    /** The page, to hold a quotation to its own words. */
+    material?: string;
+    /** The formats the document may use; a kind of another is set in type. */
+    formats?: readonly SceneFormat[];
+    /** The story's characters, when the book is a story: who a character may be. */
+    characters?: readonly { id: string; name: string; aliases: string[] }[];
+    /** And its places: where the story may be. */
+    places?: readonly {
+      id: string;
+      name: string;
+      aliases: string[];
+      sound?: SceneAmbience | null;
+    }[];
+  } = {},
+): MendedScript {
   const problems: string[] = [];
   const mended: string[] = [];
+  const formats = new Set(options.formats ?? SCENE_FORMATS);
 
-  const beats: SceneBeat[] = draft.beats
-    .map((beat) => ({
-      say: clean(beat.say),
-      pause: beat.pause === 'long' ? ('long' as const) : ('short' as const),
-    }))
-    .filter((beat) => wordsOf(beat.say).length > 0);
+  const kept = draft.beats.filter(
+    (beat) => wordsOf(clean(beat.say)).length > 0,
+  );
+  const beats: SceneBeat[] = kept.map((beat) => ({
+    say: clean(beat.say),
+    pause: beat.pause === 'long' ? ('long' as const) : ('short' as const),
+    delivery: SCENE_DELIVERIES.includes(beat.delivery)
+      ? beat.delivery
+      : ('explain' as const),
+  }));
 
   // Ids: safe, unique, and every way the writer might refer to one.
   const idFor = new Map<string, string>();
@@ -333,6 +628,79 @@ export function mendScript(draft: SceneScriptDraft): MendedScript {
         kind: 'words',
         text: name,
         style: raw.style === 'title' ? 'title' : 'keyword',
+      });
+      return;
+    }
+    if (isCodeThing(raw)) {
+      const made = codeThing(id, raw, name, formats, options.material);
+      mended.push(...made.mended);
+      problems.push(...made.problems);
+      cast.push(made.thing);
+      return;
+    }
+    // A story's place drawn as a picture is the place: the scene behind
+    // the stage, painted once for the book.
+    const asPlace =
+      raw.kind === 'drawing' && options.places?.length
+        ? storyEntry(options.places, raw.ref ?? raw.id, name)
+        : null;
+    if (asPlace)
+      mended.push(
+        `${id}: the story's place ${asPlace.id}, set behind the stage`,
+      );
+    if (raw.kind === 'place' || asPlace) {
+      const where = asPlace ?? storyEntry(options.places ?? [], raw.ref, name);
+      // One set a place; a place the story does not have is left out.
+      const again = where
+        ? cast.find((thing) => thing.kind === 'place' && thing.ref === where.id)
+        : undefined;
+      if (!where || again) {
+        used.delete(id);
+        for (const key of [raw.id, raw.id.toLowerCase(), slug(raw.id)])
+          if (again) idFor.set(key, again.id);
+          else idFor.delete(key);
+        if (!where)
+          mended.push(
+            `${id}: "${raw.ref ?? name}" is not one of the story's places; left out`,
+          );
+        return;
+      }
+      cast.push({
+        id,
+        kind: 'place',
+        ref: where.id,
+        name: where.name,
+        sound: where.sound ?? null,
+      });
+      return;
+    }
+    if (raw.kind === 'character') {
+      const who = storyEntry(options.characters ?? [], raw.ref, name);
+      if (!who) {
+        mended.push(
+          `${id}: "${raw.ref ?? name}" is not one of the story's characters; set in type`,
+        );
+        cast.push({ id, kind: 'words', text: name, style: 'keyword' });
+        return;
+      }
+      // One figure a character: a second of them is the first again.
+      const again = cast.find(
+        (thing) => thing.kind === 'character' && thing.ref === who.id,
+      );
+      if (again) {
+        used.delete(id);
+        for (const key of [raw.id, raw.id.toLowerCase(), slug(raw.id)])
+          idFor.set(key, again.id);
+        return;
+      }
+      cast.push({
+        id,
+        kind: 'character',
+        ref: who.id,
+        name: who.name,
+        state: raw.state && EXPRESSIONS.includes(raw.state) ? raw.state : null,
+        met: 0,
+        intro: [],
       });
       return;
     }
@@ -371,6 +739,8 @@ export function mendScript(draft: SceneScriptDraft): MendedScript {
       states,
       shape:
         raw.shape && DRAWING_SHAPES.includes(raw.shape) ? raw.shape : 'square',
+      sound:
+        raw.sound && SCENE_AMBIENCES.includes(raw.sound) ? raw.sound : null,
     });
   });
   const byId = new Map(cast.map((thing) => [thing.id, thing]));
@@ -379,6 +749,28 @@ export function mendScript(draft: SceneScriptDraft): MendedScript {
     idFor.get(ref.toLowerCase()) ??
     idFor.get(slug(ref)) ??
     (byId.has(slug(ref)) ? slug(ref) : null);
+
+  // Who each sentence quotes: one of the story's characters in the cast.
+  const speakerOf = (said: string): string | null => {
+    const id = resolve(said);
+    if (id && byId.get(id)?.kind === 'character') return id;
+    // Named as the story names them: by name or alias.
+    const who = storyEntry(options.characters ?? [], said, said);
+    const thing = who
+      ? cast.find((t) => t.kind === 'character' && t.ref === who.id)
+      : undefined;
+    return thing?.id ?? null;
+  };
+  kept.forEach((raw, k) => {
+    const said = clean(raw.speaker);
+    if (!said) return;
+    const id = speakerOf(said);
+    if (id) beats[k].speaker = id;
+    else
+      mended.push(
+        `sentence ${k + 1}: "${said}" is not one of the story's characters`,
+      );
+  });
 
   // Anchors: the phrase in its sentence, or in the one sentence it is
   // really in, or the sentence's start.
@@ -428,6 +820,8 @@ export function mendScript(draft: SceneScriptDraft): MendedScript {
     let stage: SceneStage | null = null;
     if (raw.layout && raw.show?.length) {
       const show: string[] = [];
+      // A place shown is the scene behind the stage, not a thing on it.
+      let backdrop: string | undefined;
       for (const ref of raw.show) {
         const id = resolve(ref);
         if (!id) {
@@ -436,7 +830,13 @@ export function mendScript(draft: SceneScriptDraft): MendedScript {
           );
           continue;
         }
-        if (!show.includes(id)) show.push(id);
+        if (byId.get(id)?.kind === 'place') backdrop = id;
+        else if (!show.includes(id)) show.push(id);
+      }
+      // A place alone: the empty scene, before anyone is in it.
+      if (!show.length && backdrop) {
+        stage = { layout: 'one', show: [], arrows: [], backdrop };
+        onStage = [];
       }
       if (show.length > MAX_ON_STAGE) {
         mended.push(
@@ -467,11 +867,17 @@ export function mendScript(draft: SceneScriptDraft): MendedScript {
             flow: Boolean(arrow.flow),
           });
         }
-        stage = { layout, show, arrows: arrows.slice(0, MAX_ARROWS) };
+        stage = {
+          layout,
+          show,
+          arrows: arrows.slice(0, MAX_ARROWS),
+          ...(backdrop ? { backdrop } : {}),
+        };
         // The stage restated as it stands is no change: its effects only.
         const last = [...steps].reverse().find((s) => s.stage)?.stage;
         if (
           last &&
+          !backdrop &&
           last.layout === stage.layout &&
           last.show.join() === stage.show.join() &&
           last.arrows.map((a) => `${a.from}>${a.to}`).join() ===
@@ -551,9 +957,14 @@ export function mendScript(draft: SceneScriptDraft): MendedScript {
       fit: draft.fit === 'poor' ? 'poor' : 'good',
       fitReason: clean(draft.fitReason) || null,
       title: clean(draft.title).slice(0, 80) || 'This page',
+      mood: SCENE_MOODS.includes(draft.mood) ? draft.mood : 'curious',
       beats,
       cast: cast.filter((thing) =>
-        steps.some((step) => step.stage?.show.includes(thing.id)),
+        steps.some(
+          (step) =>
+            step.stage?.show.includes(thing.id) ||
+            step.stage?.backdrop === thing.id,
+        ),
       ),
       steps,
     },
@@ -561,6 +972,235 @@ export function mendScript(draft: SceneScriptDraft): MendedScript {
     mended,
   };
 }
+
+/** The story's character or place the writer means: by its id, else by a name or alias. */
+function storyEntry<T extends { id: string; name: string; aliases: string[] }>(
+  characters: readonly T[],
+  ref: string | null,
+  name: string,
+): T | null {
+  const byRef = characters.find((c) => c.id === clean(ref));
+  if (byRef) return byRef;
+  const keys = [clean(ref), name].map(nameKey).filter(Boolean);
+  return (
+    characters.find((c) =>
+      [c.id, c.name, ...c.aliases].map(nameKey).some((k) => keys.includes(k)),
+    ) ?? null
+  );
+}
+
+/**
+ * A thing code draws, made sound: working whose sums hold, a graph whose
+ * function has values, a quotation that is the page's own words. One the
+ * document's formats do not include is set in type instead.
+ */
+function codeThing(
+  id: string,
+  raw: SceneScriptDraft['cast'][number],
+  name: string,
+  formats: ReadonlySet<SceneFormat>,
+  material: string | undefined,
+): { thing: SceneThing; problems: string[]; mended: string[] } {
+  const problems: string[] = [];
+  const mended: string[] = [];
+  const words = (why: string) => ({
+    thing: {
+      id,
+      kind: 'words' as const,
+      text: name || raw.id,
+      style: 'keyword' as const,
+    },
+    problems,
+    mended: [...mended, `${id}: ${why}; set in type`],
+  });
+  if (raw.kind === 'math') {
+    if (!formats.has('maths')) return words('not a maths book');
+    const lines = (raw.lines ?? [])
+      .map((line) => ({
+        latex: clean(line.latex),
+        check: clean(line.check) || null,
+      }))
+      .filter((line) => line.latex)
+      .slice(0, MAX_MATH_LINES);
+    if (!lines.length) {
+      problems.push(`The working "${raw.id}" has no lines.`);
+      return words('working with no lines');
+    }
+    lines.forEach((line, k) => {
+      if (!line.check) return;
+      const checked = checkArithmetic(line.check);
+      if (checked && !checked.holds)
+        problems.push(
+          `Line ${k + 1} of "${raw.id}" does not add up: ${line.check} (the left side is ${Number(checked.value.toPrecision(8))}). Put the sum right.`,
+        );
+    });
+    return {
+      thing: { id, kind: 'math', name: clean(raw.name), lines },
+      problems,
+      mended,
+    };
+  }
+  if (raw.kind === 'plot') {
+    if (!formats.has('maths')) return words('not a maths book');
+    const plot = raw.plot;
+    const fn = clean(plot?.fn);
+    if (!plot || !fn || !(Number(plot.xTo) > Number(plot.xFrom))) {
+      problems.push(
+        `The graph "${raw.id}" needs a function and a stretch of x from low to high.`,
+      );
+      return words('a graph with nothing to draw');
+    }
+    const values = (() => {
+      try {
+        return sample(fn, [plot.xFrom, plot.xTo], 60).filter(
+          (p) => p.y !== null,
+        ).length;
+      } catch {
+        return 0;
+      }
+    })();
+    if (values < 18) {
+      problems.push(
+        `The graph "${raw.id}" cannot be worked out: ${fn} has no values from ${plot.xFrom} to ${plot.xTo}. Write it as mathjs reads it, in x.`,
+      );
+      return words('a graph with no values');
+    }
+    const y: [number, number] | null =
+      plot.yFrom !== null && plot.yTo !== null && plot.yTo > plot.yFrom
+        ? [plot.yFrom, plot.yTo]
+        : null;
+    return {
+      thing: {
+        id,
+        kind: 'plot',
+        name: clean(raw.name),
+        plot: {
+          fn,
+          x: [plot.xFrom, plot.xTo],
+          y,
+          points: (plot.points ?? [])
+            .filter((p) => Number.isFinite(p.x) && clean(p.name))
+            .slice(0, 4)
+            .map((p) => ({ x: p.x, name: clean(p.name) })),
+          xLabel: clean(plot.xLabel) || null,
+          yLabel: clean(plot.yLabel) || null,
+        },
+      },
+      problems,
+      mended,
+    };
+  }
+  if (raw.kind === 'timeline') {
+    const events = (raw.timeline ?? [])
+      .map((e) => ({ when: clean(e.when), name: clean(e.name) }))
+      .filter((e) => e.when || e.name)
+      .slice(0, MAX_EVENTS);
+    if (events.length < 2) {
+      problems.push(`The timeline "${raw.id}" needs at least two events.`);
+      return words('a timeline with fewer than two events');
+    }
+    // A date the page does not give goes back, as a sum that does not add
+    // up does: every number in it must be one the page gives.
+    if (material) {
+      const given = new Set(numbersIn(material).map(Math.abs));
+      const unknown = events.filter((e) =>
+        numbersIn(e.when).some((n) => !given.has(Math.abs(n))),
+      );
+      if (unknown.length)
+        problems.push(
+          `The timeline "${raw.id}" has dates the page does not give: ${unknown.map((e) => e.when).join(', ')}. Use only the page's own dates.`,
+        );
+    }
+    return {
+      thing: {
+        id,
+        kind: 'timeline',
+        name: clean(raw.name),
+        timeline: { events },
+      },
+      problems,
+      mended,
+    };
+  }
+  if (raw.kind === 'chart') {
+    const bars = (raw.chart?.bars ?? [])
+      .map((b) => ({ label: clean(b.label), value: Number(b.value) }))
+      .filter((b) => b.label && Number.isFinite(b.value))
+      .slice(0, MAX_BARS);
+    if (bars.length < 2) {
+      problems.push(
+        `The chart "${raw.id}" needs at least two of the page's numbers.`,
+      );
+      return words('a chart with fewer than two numbers');
+    }
+    if (material) {
+      const given = numbersIn(material).map(Math.abs);
+      const unknown = bars.filter(
+        (b) =>
+          !given.some(
+            (n) => Math.abs(n - Math.abs(b.value)) <= 1e-9 * Math.max(1, n),
+          ),
+      );
+      if (unknown.length)
+        problems.push(
+          `The chart "${raw.id}" has numbers the page does not give: ${unknown.map((b) => `${b.label} ${b.value}`).join(', ')}. Chart only the page's own numbers.`,
+        );
+    }
+    return {
+      thing: {
+        id,
+        kind: 'chart',
+        name: clean(raw.name),
+        chart: {
+          kind: raw.chart?.kind === 'line' ? 'line' : 'bar',
+          unit: clean(raw.chart?.unit) || null,
+          bars,
+        },
+      },
+      problems,
+      mended,
+    };
+  }
+  if (!formats.has('reading')) return words('not a book to read closely');
+  // A quotation keeps its line breaks; only spaces within a line are tidied.
+  const text = (raw.quote ?? '')
+    .split('\n')
+    .map((line) => line.replace(/\s+/g, ' ').trim())
+    .filter(Boolean)
+    .join('\n');
+  if (!text) {
+    problems.push(`The quotation "${raw.id}" has no words.`);
+    return words('a quotation with no words');
+  }
+  if (material && !isVerbatim(text, material)) {
+    problems.push(
+      `The quotation "${raw.id}" is not the page's own words. Copy it exactly from the page.`,
+    );
+    return words("not the page's own words");
+  }
+  const passage = text.split(/\s+/);
+  const phrases = (raw.phrases ?? [])
+    .map((p) => ({
+      name: clean(p.name),
+      phrase: clean(p.phrase),
+      note: clean(p.note) || null,
+    }))
+    .filter((p) => {
+      const ok = p.name && p.phrase && findPhrase(passage, p.phrase) >= 0;
+      if (!ok && p.phrase)
+        mended.push(`${id}: "${p.phrase}" is not in the quotation`);
+      return ok;
+    })
+    .slice(0, MAX_PARTS);
+  return {
+    thing: { id, kind: 'quote', name: clean(raw.name), text, phrases },
+    problems,
+    mended,
+  };
+}
+
+/** The most lines one working holds: more is a second working. */
+export const MAX_MATH_LINES = 6;
 
 /** An effect made sound, or why it was dropped. */
 function effectOf(
@@ -581,8 +1221,15 @@ function effectOf(
   const kind: SceneEffectKind = SCENE_EFFECTS.includes(effect.do)
     ? effect.do
     : 'pulse';
-  if (!partName || thing?.kind !== 'drawing') {
-    // A part or state is only a drawing's; on anything else the whole thing moves.
+  // Words in a bubble come only from the story's characters.
+  if (kind === 'say')
+    return thing?.kind === 'character'
+      ? { target: id, part: null, do: 'say' }
+      : `say on ${id}, which is not one of the story's characters`;
+  const parts = thing ? partNames(thing) : [];
+  const states = thing ? stateNames(thing) : [];
+  if (!partName || (!parts.length && !states.length)) {
+    // A thing with no parts or states: the whole thing moves.
     return {
       target: id,
       part: null,
@@ -591,15 +1238,15 @@ function effectOf(
     };
   }
   const key = idKey(partName);
-  const part = thing.parts.find((p) => idKey(p.name) === key);
-  const state = thing.states.find((s) => idKey(s.name) === key);
+  const part = parts.find((name) => idKey(name) === key);
+  const state = states.find((name) => idKey(name) === key);
   if (state) {
     const does: SceneEffectKind = kind === 'hide' ? 'hide' : 'show';
-    return { target: id, part: state.name, do: does };
+    return { target: id, part: state, do: does };
   }
   if (part) {
     const does: SceneEffectKind = kind === 'pulse' ? 'pulse' : 'point';
-    return { target: id, part: part.name, do: does };
+    return { target: id, part, do: does };
   }
   return { target: id, part: null, do: 'pulse' };
 }

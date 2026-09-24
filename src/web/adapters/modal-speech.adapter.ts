@@ -137,13 +137,20 @@ export class ModalSpeechAdapter implements SpeechPort {
     speed,
     pieces,
     timestamps,
+    lead,
   }: {
     text: string;
     voice?: string;
     instructions?: string;
     speed?: number;
-    pieces?: { text: string; speed: number; pauseAfter: number }[];
+    pieces?: {
+      text: string;
+      speed: number;
+      pauseAfter: number;
+      voice?: string;
+    }[];
     timestamps?: boolean;
+    lead?: number;
   }): Promise<{
     audio: Buffer;
     mimeType: string;
@@ -169,7 +176,12 @@ export class ModalSpeechAdapter implements SpeechPort {
             text: piece.text,
             speed: piece.speed,
             pause_after: piece.pauseAfter,
+            // A story's character, in their own voice; an older service
+            // says it in the page's.
+            ...(piece.voice ? { voice: piece.voice.toLowerCase() } : {}),
           })),
+          // Quiet before the first word; an older service starts at once.
+          ...(lead && lead > 0 ? { lead } : {}),
           response_format: 'mp3',
           // An older service ignores this and answers with the mp3 alone.
           ...(timestamps ? { timestamps: true } : {}),

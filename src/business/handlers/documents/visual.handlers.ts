@@ -207,11 +207,29 @@ export async function queueVisuals(
     doc.contentVersion,
     SCENE_GENERATOR_VERSION,
   );
-  // A page with a row on its way or made is had; a failed one is not,
-  // and a named page is asked again whatever its row says.
+  // A page on its way that nothing carries any more (its job lost, or
+  // dropped by a worker of another generator) is not had: asked for
+  // again, it is queued again now rather than left for the watchdog.
+  const onTheirWay = rows.filter(
+    (row) => row.status === 'pending' || row.status === 'making',
+  );
+  const states = onTheirWay.length
+    ? await deps.queue.visualSceneStates(onTheirWay)
+    : [];
+  const lost = new Set(
+    onTheirWay
+      .filter((_, i) => states[i].state === 'gone')
+      .map((row) => row.pageNumber),
+  );
+  // A page with a row on its way or made is had; a failed or lost one is
+  // not, and a named page is asked again whatever its row says.
   const have = new Set(
     rows
-      .filter((row) => (byNumber ? false : row.status !== 'failed'))
+      .filter(
+        (row) =>
+          (byNumber ? false : row.status !== 'failed') &&
+          !lost.has(row.pageNumber),
+      )
       .map((row) => row.pageNumber),
   );
   const wanted = pagesWanted({
@@ -248,6 +266,7 @@ export async function queueVisuals(
     const again =
       !created &&
       (record.status === 'failed' ||
+        lost.has(page) ||
         (byNumber && record.status === 'not_suitable'));
     if (again) await deps.visuals.resetForRetry(record.id);
     if (created || again) {

@@ -1,5 +1,6 @@
 import type { PipelineStep } from '../contracts';
 import type { LectureStyle, SegmentKind } from '../contracts';
+import { SCENE_GENERATOR_VERSION } from '../business/domain/scene-script';
 
 /**
  * One queue per job type, so each gets its own concurrency and rate limit —
@@ -22,7 +23,10 @@ export const QUEUE = {
   lectureDiagram: 'lecture-diagram',
   lectureBoard: 'lecture-board',
   lectureFollow: 'lecture-follow',
-  visualScene: 'visual-scene',
+  // Named for the generator that makes its pages: a worker running another
+  // generator's code never sees these jobs, so a deploy's overlap, or a
+  // worker left running from before, cannot take one and drop it.
+  visualScene: `visual-${SCENE_GENERATOR_VERSION}`,
 } as const;
 
 export type QueueName = (typeof QUEUE)[keyof typeof QUEUE];
@@ -72,7 +76,7 @@ export const QUEUE_SETTINGS: Record<
   'lecture-follow': { concurrency: 4, attempts: 2, backoffMs: 10_000 },
   // One chapter's scene: two model calls, a voice call and an alignment.
   // A few at once; the alignment is the worker's own CPU.
-  'visual-scene': { concurrency: 3, attempts: 2, backoffMs: 20_000 },
+  [QUEUE.visualScene]: { concurrency: 3, attempts: 2, backoffMs: 20_000 },
 };
 
 export interface BaseJobData {

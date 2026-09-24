@@ -118,11 +118,13 @@ drawer's default names DeepSeek whatever `AI_MODEL_DEFAULT` says, so
 **`DEEPSEEK_API_KEY` must be set on both the API and the worker**: the
 boot check stops a process with a named provider and no key.
 
-The Voice service reports when it spoke each word when asked
-(`/health` says `version: 5`). Redeploy it once from `speech/kokoro`; until
-then the worker still makes every page, timing its words with the aligner
-instead. Nothing else about the service changes, and lectures ask it
-nothing new.
+The Voice service reports when it spoke each word when asked, takes a
+voice of its own for any piece of a page (a story's character saying
+their line), and a `lead` of quiet before the first word (`/health` says
+`version: 6`; redeployed from `speech/kokoro` on 2026-09-24). All three
+are asked for only when wanted, so lectures ask it nothing new, and an
+older service answers in the page's one voice, with no quiet first. The
+Modal home shares `voice.py` and picks the same up on its next deploy.
 
 Drawings are rendered in a child process by `@resvg/resvg-js`, now a
 runtime dependency of both the API and the worker, with the fonts that
@@ -131,6 +133,63 @@ ship in `pdfjs-dist`.
 `npm run scene:page -- <documentId> <page>` makes pages with the worker's
 own processor against whatever the environment points at, and writes the
 scene, the audio and a gallery of the drawings to `scene-out/`.
+
+The writer tags how each sentence is said, and the voice follows: Kokoro
+by each sentence's pace and silence, Gemini by a few words of direction.
+`SCENE_VOICE` picks Visualize's voice alone. To try the paid voice, set
+`SCENE_VOICE_ENGINE=gemini` and `GEMINI_API_KEY` on the **worker**; the
+worker encodes Gemini's WAV to mp3 itself (`@breezystack/lamejs`) and
+times the words with the aligner. `npm run scene:voices -- <documentId>
+<page>` says one page in a line-up of voices and writes a blind test to
+`scene-out/voices/`.
+
+A page's sound (its music, the stage's effects, a drawing's own sound)
+plays in the browser from what the scene says; the server sends no
+audio for it. Labels are lifted out of the drawings and set by the stage,
+and every page's log line `frame audit` counts anything left overlapping.
+Scenes are made by generator `scene-2`: pages made before are made again
+the next time they are asked for. Their jobs go on a queue named for the
+generator (`visual-scene-2`), so while a deploy runs old and new workers
+side by side, an old worker never takes a new page and drops it. The
+worker also runs a watchdog: every minute, a page still waiting or being
+made whose job is gone is queued again, and one whose job failed for good
+is marked failed, so the player moves past it rather than waiting on it.
+After the first deploy, jobs left on the old `visual-scene` queue are for
+old rows and can be ignored.
+
+Each document gets a profile the first time a page of it is made (one
+`gpt-4.1-mini` call, `AI_MODEL_SCENE_PROFILE`), kept in storage beside its
+videos as `profile.json`: its subject, kind and tone, and which formats
+its pages may use besides the explainer. `maths` lets a page set working
+(MathJax, `mathjax-full`, on the worker, as paths: nothing to fetch) and
+graphs drawn from their functions (`mathjs`, locked down); `reading` lets
+it set a passage in its own words, with notes in its margin (listed under
+it where the stage is too narrow for one). The writer's
+sums are checked and a quotation must be the page's own words, or the
+storyboard goes back. `npm run scene:try -- <page.md>` makes a page from
+any text with no document behind it, to try a format.
+
+A book the profile calls a story (a novel, a play: `story` in
+`profile.json`) is read for its characters the first time one of its pages
+is made: `gpt-4.1-mini` (`AI_MODEL_SCENE_STORY`) reads it in stretches of
+about 40,000 characters, four at a time, at most 24 of them, and code
+merges what it says into `story.json` beside the videos: each character's
+look, what they are like, the page the book meets them on, and who is on
+each page and how they feel. The pages being made meanwhile wait on that
+one reading. Each character is then drawn once by the artist, with a face
+for every feeling, into the book's `cast.json`, and stands on every page
+they are on: the same figure, the one met first on the left, with the
+face the last page left them with, what they are like set beside them on
+the page the book meets them, and what they say in a bubble by their
+head. Each place the story happens in is painted once too, into the
+book's `sets.json`, and stands faded behind the stage while the story is
+there, with its own sound. The three files go when the document is
+purged. A character's quoted lines are said in a voice of their own,
+chosen by the kind of voice the story gives them and never the
+narrator's, and a page whose characters were on the page before opens on
+them for two seconds before the voice begins. `npm run scene:try --
+<story.md> --story --page 3` tries it on a story whose pages are parted by
+lines of three dashes.
 
 ## The live tutor
 

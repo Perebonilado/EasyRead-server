@@ -19,10 +19,20 @@ export interface SpeechPort {
     speed?: number;
     /**
      * The same words as pieces, each at its own pace with a silence after
-     * it, for a voice that answers to pace and silence and not to a note
-     * (Kokoro). Ignored by the rest, which say `text`.
+     * it, for a voice that answers to pace and silence (Kokoro), or to a
+     * few words of direction a piece (Gemini, which takes `style`). Ignored
+     * by the rest, which say `text`.
      */
-    pieces?: { text: string; speed: number; pauseAfter: number }[];
+    pieces?: {
+      text: string;
+      speed: number;
+      pauseAfter: number;
+      style?: string;
+      /** Another voice for this piece than the page's: a story's character. Ignored by a voice that has one only. */
+      voice?: string;
+    }[];
+    /** Seconds of silence before the first word; the times it reports count from the true start. */
+    lead?: number;
     /**
      * Ask the voice when it spoke each word. Kokoro knows, from the
      * durations it renders; a voice that does not simply leaves `words`
@@ -42,6 +52,8 @@ export interface SpeechPort {
     pieceStartsMs?: number[];
     /** Each word as the voice spoke it, in order, when timestamps were asked for and the voice knows them. */
     words?: { text: string; startMs: number; endMs: number }[];
+    /** Tokens in and out, for a voice billed by the token (Gemini); absent otherwise. */
+    usage?: { tokensIn: number; tokensOut: number };
   }>;
   /** What goes into a file's name so audio from one voice never overwrites another's. */
   label(): { model: string; voice: string };

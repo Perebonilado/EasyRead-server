@@ -1,9 +1,21 @@
 import { z } from 'zod';
 import {
   DRAWING_SHAPES,
+  SCENE_AMBIENCES,
+  SCENE_DELIVERIES,
   SCENE_EFFECTS,
   SCENE_LAYOUTS,
+  SCENE_MOODS,
 } from '../../../business/domain/scene-script';
+import {
+  PROFILE_KINDS,
+  PROFILE_TONES,
+} from '../../../business/domain/scene-profile';
+import {
+  EXPRESSIONS,
+  STORY_ROLES,
+  STORY_VOICES,
+} from '../../../business/domain/scene-story';
 
 /**
  * Structured output contracts.
@@ -467,16 +479,30 @@ export const sceneScriptSchema = z.object({
   fit: z.enum(['good', 'poor']),
   fitReason: z.string().nullable(),
   title: z.string(),
+  mood: z.enum(SCENE_MOODS),
   beats: z.array(
     z.object({
       say: z.string(),
       pause: z.enum(['short', 'long']),
+      delivery: z.enum(SCENE_DELIVERIES),
+      speaker: z.string().nullable(),
     }),
   ),
   cast: z.array(
     z.object({
       id: z.string(),
-      kind: z.enum(['drawing', 'stat', 'words']),
+      kind: z.enum([
+        'drawing',
+        'stat',
+        'words',
+        'math',
+        'plot',
+        'quote',
+        'timeline',
+        'chart',
+        'character',
+        'place',
+      ]),
       name: z.string(),
       brief: z.string().nullable(),
       motion: z.string().nullable(),
@@ -489,6 +515,46 @@ export const sceneScriptSchema = z.object({
       shape: z.enum(DRAWING_SHAPES).nullable(),
       value: z.string().nullable(),
       style: z.enum(['title', 'keyword']).nullable(),
+      sound: z.enum(SCENE_AMBIENCES).nullable(),
+      lines: z
+        .array(z.object({ latex: z.string(), check: z.string().nullable() }))
+        .nullable(),
+      plot: z
+        .object({
+          fn: z.string(),
+          xFrom: z.number(),
+          xTo: z.number(),
+          yFrom: z.number().nullable(),
+          yTo: z.number().nullable(),
+          xLabel: z.string().nullable(),
+          yLabel: z.string().nullable(),
+          points: z
+            .array(z.object({ x: z.number(), name: z.string() }))
+            .nullable(),
+        })
+        .nullable(),
+      quote: z.string().nullable(),
+      phrases: z
+        .array(
+          z.object({
+            name: z.string(),
+            phrase: z.string(),
+            note: z.string().nullable(),
+          }),
+        )
+        .nullable(),
+      ref: z.string().nullable(),
+      state: z.enum(EXPRESSIONS).nullable(),
+      timeline: z
+        .array(z.object({ when: z.string(), name: z.string() }))
+        .nullable(),
+      chart: z
+        .object({
+          kind: z.enum(['bar', 'line']),
+          unit: z.string().nullable(),
+          bars: z.array(z.object({ label: z.string(), value: z.number() })),
+        })
+        .nullable(),
     }),
   ),
   steps: z.array(
@@ -510,6 +576,46 @@ export const sceneScriptSchema = z.object({
       effects: z
         .array(z.object({ target: z.string(), do: z.enum(SCENE_EFFECTS) }))
         .nullable(),
+    }),
+  ),
+});
+
+export const sceneProfileSchema = z.object({
+  subject: z.string(),
+  kind: z.enum(PROFILE_KINDS),
+  tone: z.enum(PROFILE_TONES),
+  formats: z.array(z.enum(['maths', 'reading'])),
+  story: z.boolean(),
+});
+
+/** Who and where one stretch of a story meets, and who is on each of its pages. */
+export const sceneStorySchema = z.object({
+  characters: z.array(
+    z.object({
+      name: z.string(),
+      aliases: z.array(z.string()),
+      role: z.enum(STORY_ROLES),
+      look: z.string(),
+      traits: z.array(z.string()),
+      voice: z.enum(STORY_VOICES).nullable(),
+    }),
+  ),
+  places: z.array(
+    z.object({
+      name: z.string(),
+      aliases: z.array(z.string()),
+      look: z.string(),
+      sound: z.enum(SCENE_AMBIENCES).nullable(),
+    }),
+  ),
+  pages: z.array(
+    z.object({
+      page: z.number().int(),
+      summary: z.string(),
+      present: z.array(
+        z.object({ name: z.string(), mood: z.enum(EXPRESSIONS) }),
+      ),
+      place: z.string().nullable(),
     }),
   ),
 });

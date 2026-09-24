@@ -1,4 +1,11 @@
-import { composeScene, fullestStep, thumbSvg } from './scene-compose';
+import {
+  composeScene,
+  fullestStep,
+  oneFaceAtATime,
+  sidesKept,
+  spokenIn,
+  thumbSvg,
+} from './scene-compose';
 import type { SceneScript } from './scene-script';
 import type { GatedDrawing } from './scene-svg';
 import type { TimedBeat } from './scene-timing';
@@ -29,7 +36,12 @@ const script: SceneScript = {
   fit: 'good',
   fitReason: null,
   title: 'Plants make food',
-  beats: beats.map((b) => ({ say: b.text, pause: 'short' })),
+  mood: 'curious',
+  beats: beats.map((b) => ({
+    say: b.text,
+    pause: 'short',
+    delivery: 'explain',
+  })),
   cast: [
     {
       id: 'leaf',
@@ -43,6 +55,7 @@ const script: SceneScript = {
       ],
       states: [{ name: 'glowing', look: 'bright' }],
       shape: 'wide',
+      sound: null,
     },
     {
       id: 'sun',
@@ -53,6 +66,7 @@ const script: SceneScript = {
       parts: [],
       states: [],
       shape: 'square',
+      sound: 'fire',
     },
     { id: 'water', kind: 'words', text: 'water', style: 'keyword' },
   ],
@@ -96,6 +110,17 @@ const script: SceneScript = {
   ],
 };
 
+/** Ink in the middle of a 960 by 600 drawing, its corners empty, as a real drawing's map is. */
+const blob = (): GatedDrawing['field'] => {
+  const cols = 48;
+  const rows = 30;
+  let bits = '';
+  for (let r = 0; r < rows; r += 1)
+    for (let c = 0; c < cols; c += 1)
+      bits += (c - 24) ** 2 / 400 + (r - 15) ** 2 / 110 <= 1 ? '1' : '0';
+  return { viewBox: [0, 0, 960, 600], map: { cols, rows, bits } };
+};
+
 const drawing = (overrides: Partial<GatedDrawing> = {}): GatedDrawing => ({
   svg: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 600"><rect width="10" height="10"/></svg>',
   viewBox: [0, 0, 960, 600],
@@ -104,6 +129,8 @@ const drawing = (overrides: Partial<GatedDrawing> = {}): GatedDrawing => ({
   labels: { chloroplasts: 'chloroplasts-label' },
   states: { glowing: 'glow' },
   moves: true,
+  callouts: [],
+  field: null,
   ...overrides,
 });
 
@@ -124,6 +151,123 @@ describe('the scene put together', () => {
     expect(scene.steps.map((s) => s.atMs)).toEqual([0, 2400, 3000]);
     expect(scene.stagings.box.places).toHaveLength(3);
     expect(scene.stagings.wide.places[2].water).toBeDefined();
+  });
+
+  it('carries the mood of the page for the music, and what a drawing sounds like', () => {
+    expect(scene.version).toBe(4);
+    expect(scene.sound).toEqual({ mood: 'curious' });
+    const leaf = scene.things.find((t) => t.id === 'leaf');
+    expect(leaf?.kind === 'drawing' && leaf.ambience).toBeNull();
+    // A drawing that failed is a card, and a card makes no sound.
+    const sun = scene.things.find((t) => t.id === 'sun');
+    expect(sun?.kind).toBe('words');
+  });
+
+  it("sets a drawing's lifted labels beside it at every step, and the arrow's label on its arrow", () => {
+    const lifted = composeScene({
+      script,
+      drawings: new Map([
+        [
+          'leaf',
+          drawing({
+            labels: {},
+            callouts: [
+              {
+                part: 'chloroplasts',
+                text: 'chloroplasts',
+                anchor: [700, 300],
+              },
+              { part: 'veins', text: 'veins', anchor: [200, 250] },
+            ],
+            field: blob(),
+          }),
+        ],
+        ['sun', drawing({ labels: {}, parts: {}, states: {}, field: blob() })],
+      ]),
+      beats,
+      durationMs: 16_000,
+      timing: 'voice',
+      generator: 'scene-1',
+    });
+    const leaf = lifted.scene.things.find((t) => t.id === 'leaf');
+    expect(leaf?.kind === 'drawing' && leaf.callouts).toEqual({
+      chloroplasts: 'chloroplasts',
+      veins: 'veins',
+    });
+    // Both are pointed at later, so both wait for their moment.
+    expect(leaf?.kind === 'drawing' && leaf.calloutsLater?.sort()).toEqual([
+      'chloroplasts',
+      'veins',
+    ]);
+    for (const staging of ['box', 'wide'] as const) {
+      const { places, pills } = lifted.scene.stagings[staging];
+      for (const step of places) {
+        const at = step.leaf;
+        expect(at.labels?.map((l) => l.part).sort()).toEqual([
+          'chloroplasts',
+          'veins',
+        ]);
+        expect(at).not.toHaveProperty('room');
+      }
+      // The row's arrow has its label placed; the hub's has none to place.
+      expect(pills?.[1]['sun>leaf']).toMatchObject({ size: 26 });
+      expect(pills?.[2]).toEqual({});
+    }
+    expect(lifted.audit.box).toHaveLength(lifted.scene.steps.length);
+  });
+
+  it('shows the lines of a working in turn when the writer did not say when', () => {
+    const worked = composeScene({
+      script: {
+        ...script,
+        cast: [
+          ...script.cast,
+          {
+            id: 'sum',
+            kind: 'math',
+            name: '',
+            lines: [
+              { latex: 'a = 1', check: null },
+              { latex: '= 2', check: null },
+              { latex: '= 3', check: null },
+            ],
+          },
+        ],
+        steps: [
+          ...script.steps,
+          {
+            at: { beat: 3, phrase: 'They trap' },
+            word: 0,
+            stage: { layout: 'one', show: ['sum'], arrows: [] },
+            effects: [],
+          },
+        ],
+      },
+      drawings: new Map([
+        ['leaf', drawing()],
+        ['sun', null],
+        [
+          'sum',
+          drawing({
+            parts: {},
+            labels: {},
+            states: { 'line 2': 'line-2', 'line 3': 'line-3' },
+          }),
+        ],
+      ]),
+      beats,
+      durationMs: 16_000,
+      timing: 'voice',
+      generator: 'scene-2',
+    });
+    const sum = worked.scene.things.find((t) => t.id === 'sum');
+    expect(sum?.kind === 'drawing' && sum.source).toBe('math');
+    const shows = worked.scene.effects.filter(
+      (e) => e.target === 'sum' && e.do === 'show',
+    );
+    expect(shows.map((e) => e.part)).toEqual(['line 2', 'line 3']);
+    expect(shows[0].atMs).toBeLessThan(shows[1].atMs);
+    expect(sum?.kind === 'drawing' && sum.hidden).toEqual(['line-2', 'line-3']);
   });
 
   it('decides how each newcomer arrives', () => {
@@ -160,6 +304,8 @@ describe('the scene put together', () => {
     expect(scene.effects.some((e) => e.atMs > 8000 && e.do === 'pulse')).toBe(
       true,
     );
+    // A pulse that only fills a stretch is marked, so the player keeps it silent.
+    expect(scene.effects.filter((e) => e.filler)).toHaveLength(filled);
   });
 
   it('draws the fullest step for the card', () => {
@@ -196,5 +342,497 @@ describe('the scene put together', () => {
         (e) => e.do === 'pulse' && e.atMs >= 1500 && e.atMs < 2100,
       ),
     ).toBe(true);
+  });
+});
+
+describe("a story's characters on the stage", () => {
+  const faces = Object.fromEntries(
+    ['neutral', 'happy', 'sad', 'angry', 'afraid', 'surprised', 'thinking'].map(
+      (f) => [f, f],
+    ),
+  );
+  const figure = (): GatedDrawing =>
+    drawing({
+      aspect: 0.6,
+      viewBox: [0, 0, 600, 900],
+      parts: { head: 'head', body: 'body' },
+      labels: {},
+      states: faces,
+      callouts: [{ part: 'trait-1', text: 'brave', anchor: [300, 200] }],
+    });
+  const story: SceneScript = {
+    ...script,
+    cast: [
+      {
+        id: 'fox',
+        kind: 'character',
+        ref: 'ember',
+        name: 'Ember',
+        state: null,
+        met: 1,
+        intro: [],
+      },
+      {
+        id: 'mira',
+        kind: 'character',
+        ref: 'mira',
+        name: 'Mira',
+        state: 'sad',
+        met: 0,
+        intro: ['brave'],
+      },
+      { id: 'lamp', kind: 'words', text: 'lamp', style: 'keyword' },
+    ],
+    steps: [
+      {
+        at: { beat: 0, phrase: 'Plants make' },
+        word: 0,
+        stage: { layout: 'one', show: ['mira'], arrows: [] },
+        effects: [],
+      },
+      {
+        at: { beat: 1, phrase: 'sunlight' },
+        word: 2,
+        // The writer put the fox first; she stands on the left all book long.
+        stage: { layout: 'row', show: ['fox', 'lamp', 'mira'], arrows: [] },
+        effects: [],
+      },
+      {
+        at: { beat: 2, phrase: 'called chloroplasts' },
+        word: 6,
+        stage: null,
+        effects: [
+          { target: 'mira', part: 'happy', do: 'show' },
+          { target: 'fox', part: 'head', do: 'point' },
+        ],
+      },
+      {
+        at: { beat: 3, phrase: 'They trap' },
+        word: 0,
+        stage: null,
+        effects: [{ target: 'mira', part: 'happy', do: 'hide' }],
+      },
+    ],
+  };
+  const { scene } = composeScene({
+    script: story,
+    drawings: new Map([
+      ['mira', figure()],
+      ['fox', figure()],
+    ]),
+    beats,
+    durationMs: 16_000,
+    timing: 'voice',
+    generator: 'scene-2',
+  });
+
+  it('keeps each on their own side of a row, the rest where the writer put them', () => {
+    expect(scene.steps[1].show).toEqual(['mira', 'lamp', 'fox']);
+    expect(
+      sidesKept(
+        { layout: 'focus', show: ['fox', 'mira'] },
+        new Map(story.cast.map((t) => [t.id, t])),
+      ).show,
+    ).toEqual(['fox', 'mira']);
+  });
+
+  it('shows one face at a time: the first as they come on, silently, each after replacing the last', () => {
+    const mira = scene.things.find((t) => t.id === 'mira');
+    expect(mira?.kind === 'drawing' && mira.hidden.sort()).toEqual(
+      Object.keys(faces).sort(),
+    );
+    const onMira = scene.effects
+      .filter((e) => e.target === 'mira' && e.part && e.part in faces)
+      .map((e) => `${e.do} ${e.part}${e.filler ? ' (silent)' : ''}`);
+    expect(onMira).toEqual([
+      'show sad (silent)',
+      'hide sad',
+      'show happy',
+      // Hiding the face she wears leaves her calm, never faceless.
+      'hide happy',
+      'show neutral',
+    ]);
+    // The fox comes on as the last page left him.
+    const fox = scene.effects.filter(
+      (e) => e.target === 'fox' && e.do === 'show',
+    );
+    expect(fox).toEqual([
+      expect.objectContaining({ part: 'neutral', filler: true }),
+    ]);
+    expect(fox[0].atMs).toBeLessThan(scene.steps[1].atMs);
+  });
+
+  it('sets what a character is like beside them the first time the book meets them', () => {
+    const mira = scene.things.find((t) => t.id === 'mira');
+    expect(mira?.kind === 'drawing' && mira.callouts).toEqual({
+      'trait-1': 'brave',
+    });
+    expect(mira?.kind === 'drawing' && mira.source).toBeUndefined();
+    expect(scene.stagings.wide.places[0].mira.labels?.[0].lines).toEqual([
+      'brave',
+    ]);
+    // In a row of three she stands without it, and gives up no room to it.
+    expect(scene.stagings.wide.places[1].mira.labels).toBeUndefined();
+  });
+
+  it('gives no faces to a character who could not be drawn', () => {
+    const effects = oneFaceAtATime(
+      [{ atMs: 500, target: 'mira', part: 'happy', do: 'show' }],
+      story.cast,
+      scene.steps,
+      (id) => id !== 'mira',
+    );
+    expect(effects.filter((e) => e.target === 'mira')).toEqual([
+      { atMs: 500, target: 'mira', part: 'happy', do: 'show' },
+    ]);
+  });
+});
+
+describe('what a character says, in a bubble', () => {
+  it('takes the quoted words from the sentence, in any quotation marks', () => {
+    expect(
+      spokenIn('"You are holding the matches upside down," says the fox.'),
+    ).toBe('You are holding the matches upside down');
+    expect(spokenIn('“Foxes don’t talk,” says Mira.')).toBe('Foxes don’t talk');
+    expect(spokenIn('‘You’re late,’ says Tobi, ‘again.’')).toBe(
+      'You’re late … again.',
+    );
+    expect(spokenIn('Mira says nothing at all.')).toBeNull();
+    // Straight single quotes, the apostrophes inside them left alone.
+    expect(
+      spokenIn("'You're holding the matches upside down,' says the fox."),
+    ).toBe("You're holding the matches upside down");
+    // A quote the writer never opened, or never closed.
+    expect(spokenIn("Foxes don't talk,' she says.")).toBe("Foxes don't talk");
+    expect(spokenIn('She calls out, "Same time tomorrow?')).toBe(
+      'Same time tomorrow?',
+    );
+    // A possessive is no quotation.
+    expect(spokenIn("The boys' fire goes out.")).toBeNull();
+    // A speech: the sentences that start it, as many as a bubble holds.
+    expect(
+      spokenIn(
+        '"And lanterns don\'t light themselves. I\'m Ember. Your grandfather and I go back a long way," says the fox.',
+      ),
+    ).toBe("And lanterns don't light themselves. I'm Ember.");
+    expect(spokenIn(`"${'word '.repeat(60)}"`)!.length).toBeLessThanOrEqual(81);
+  });
+
+  /** A standing figure's ink: a column down the middle of its box, its sides empty. */
+  const standing = (): GatedDrawing['field'] => {
+    const cols = 48;
+    const rows = 72;
+    let bits = '';
+    for (let r = 0; r < rows; r += 1)
+      for (let c = 0; c < cols; c += 1)
+        bits += Math.abs(c - 24) <= 8 && r >= 4 ? '1' : '0';
+    return { viewBox: [0, 0, 600, 900], map: { cols, rows, bits } };
+  };
+  const figure = (): GatedDrawing =>
+    drawing({
+      aspect: 0.6,
+      viewBox: [0, 0, 600, 900],
+      parts: { head: 'head' },
+      labels: {},
+      states: { neutral: 'neutral', happy: 'happy' },
+      head: [300, 180],
+      field: standing(),
+    });
+  const talking: SceneScript = {
+    ...script,
+    beats: [
+      ...script.beats.slice(0, 3),
+      {
+        say: '"You are holding the matches upside down," says the fox.',
+        pause: 'short',
+        delivery: 'explain',
+      },
+    ],
+    cast: [
+      {
+        id: 'fox',
+        kind: 'character',
+        ref: 'ember',
+        name: 'Ember',
+        state: null,
+        met: 1,
+        intro: [],
+      },
+      {
+        id: 'mira',
+        kind: 'character',
+        ref: 'mira',
+        name: 'Mira',
+        state: null,
+        met: 0,
+        intro: [],
+      },
+    ],
+    steps: [
+      {
+        at: { beat: 0, phrase: 'Plants make' },
+        word: 0,
+        stage: { layout: 'compare', show: ['mira', 'fox'], arrows: [] },
+        effects: [],
+      },
+      {
+        at: { beat: 3, phrase: 'says the fox' },
+        word: 0,
+        stage: null,
+        effects: [{ target: 'fox', part: null, do: 'say' }],
+      },
+      {
+        at: { beat: 2, phrase: 'Inside the leaf' },
+        word: 0,
+        stage: null,
+        // A sentence that quotes no one: nothing to hold, so a pulse.
+        effects: [{ target: 'mira', part: null, do: 'say' }],
+      },
+    ],
+  };
+  const beatsSaid = [
+    ...beats.slice(0, 3),
+    beat('"You are holding the matches upside down," says the fox.', 7000),
+  ];
+  const { scene, audit } = composeScene({
+    script: talking,
+    drawings: new Map([
+      ['mira', figure()],
+      ['fox', figure()],
+    ]),
+    beats: beatsSaid,
+    durationMs: 16_000,
+    timing: 'voice',
+    generator: 'scene-2',
+  });
+
+  it('gives a sentence the writer says quotes a character its bubble, with no "say" on it', () => {
+    const quoted = composeScene({
+      script: {
+        ...talking,
+        beats: talking.beats.map((b, k) =>
+          k === 3 ? { ...b, speaker: 'fox' } : b,
+        ),
+        steps: talking.steps.filter((step) => !step.effects.length),
+      },
+      drawings: new Map([
+        ['mira', figure()],
+        ['fox', figure()],
+      ]),
+      beats: beatsSaid,
+      durationMs: 16_000,
+      timing: 'voice',
+      generator: 'scene-2',
+    }).scene;
+    const says = quoted.effects.filter((e) => e.do === 'say');
+    expect(says.map((e) => [e.target, e.atMs, e.say?.text])).toEqual([
+      ['fox', beatsSaid[3].startMs, 'You are holding the matches upside down'],
+    ]);
+  });
+
+  it('holds the words from the sentence until the voice has said it', () => {
+    const says = scene.effects.filter((e) => e.do === 'say');
+    expect(says).toHaveLength(1);
+    expect(says[0].say).toMatchObject({
+      id: 'say-1',
+      text: 'You are holding the matches upside down',
+    });
+    expect(says[0].say!.untilMs).toBe(
+      Math.min(beatsSaid[3].endMs + 700, 16_000),
+    );
+    expect(
+      scene.effects.some((e) => e.target === 'mira' && e.do === 'pulse'),
+    ).toBe(true);
+  });
+
+  it('sets the bubble by the head, clear of everything, in both stagings', () => {
+    for (const staging of ['box', 'wide'] as const) {
+      const bubble = scene.stagings[staging].bubbles?.['say-1'];
+      expect(bubble).toBeTruthy();
+      const fox = scene.stagings[staging].places[0].fox;
+      // Its tail reaches toward the fox's head, from outside the fox.
+      const head = [fox.x + (300 / 600) * fox.w, fox.y + (180 / 900) * fox.h];
+      const [tx, ty] = bubble!.tail;
+      expect(Math.hypot(tx - head[0], ty - head[1])).toBeLessThan(
+        Math.hypot(
+          bubble!.x + bubble!.w / 2 - head[0],
+          bubble!.y + bubble!.h / 2 - head[1],
+        ),
+      );
+      expect(bubble!.lines.join(' ')).toBe(
+        'You are holding the matches upside down',
+      );
+      expect(audit[staging].flat()).toEqual([]);
+    }
+  });
+});
+
+describe('the scene behind the stage', () => {
+  const quay = (): GatedDrawing =>
+    drawing({
+      aspect: 16 / 9,
+      viewBox: [0, 0, 1600, 900],
+      parts: {},
+      labels: {},
+      states: {},
+    });
+  const backdrops: SceneScript = {
+    ...script,
+    backdrop: 'quay',
+    cast: [
+      {
+        id: 'quay',
+        kind: 'place',
+        ref: 'quay',
+        name: 'The quay',
+        sound: 'water',
+      },
+      { id: 'home', kind: 'place', ref: 'home', name: 'Home', sound: null },
+      {
+        id: 'mira',
+        kind: 'character',
+        ref: 'mira',
+        name: 'Mira',
+        state: null,
+        met: 0,
+        intro: [],
+      },
+    ],
+    steps: [
+      {
+        at: { beat: 0, phrase: 'Plants make' },
+        word: 0,
+        stage: { layout: 'one', show: [], arrows: [] },
+        effects: [],
+      },
+      {
+        at: { beat: 1, phrase: 'sunlight' },
+        word: 2,
+        stage: { layout: 'one', show: ['mira'], arrows: [] },
+        effects: [],
+      },
+      // The same stage somewhere else: a change all the same.
+      {
+        at: { beat: 2, phrase: 'called chloroplasts' },
+        word: 6,
+        stage: { layout: 'one', show: ['mira'], arrows: [], backdrop: 'home' },
+        effects: [],
+      },
+    ],
+  };
+  const { scene, audit } = composeScene({
+    script: backdrops,
+    drawings: new Map([
+      ['quay', quay()],
+      ['home', quay()],
+      [
+        'mira',
+        drawing({
+          aspect: 0.6,
+          viewBox: [0, 0, 600, 900],
+          parts: {},
+          labels: {},
+          states: {},
+        }),
+      ],
+    ]),
+    beats,
+    durationMs: 16_000,
+    timing: 'voice',
+    generator: 'scene-2',
+  });
+
+  it("carries the page's own place from the start, and each place shown from its step", () => {
+    expect(scene.steps.map((s) => s.backdrop)).toEqual([
+      'quay',
+      'quay',
+      'home',
+    ]);
+    expect(scene.steps[0].show).toEqual([]);
+    const set = scene.things.find((t) => t.id === 'quay');
+    expect(set).toMatchObject({
+      kind: 'drawing',
+      backdrop: true,
+      caption: null,
+      ambience: 'water',
+    });
+    expect(audit.wide.flat()).toEqual([]);
+  });
+});
+
+describe('the "previously" before a story page', () => {
+  const figure = (): GatedDrawing =>
+    drawing({
+      aspect: 0.6,
+      viewBox: [0, 0, 600, 900],
+      parts: {},
+      labels: {},
+      states: { neutral: 'neutral', happy: 'happy', afraid: 'afraid' },
+    });
+  const late = beats.map((b) => ({
+    ...b,
+    startMs: b.startMs + 2000,
+    endMs: b.endMs + 2000,
+    words: b.words.map((w) => [w[0], w[1], w[2] + 2000, w[3] + 2000]),
+  }));
+  const story: SceneScript = {
+    ...script,
+    opening: { show: ['mira'], backdrop: null },
+    cast: [
+      {
+        id: 'mira',
+        kind: 'character',
+        ref: 'mira',
+        name: 'Mira',
+        state: 'happy',
+        met: 0,
+        intro: [],
+        before: 'afraid',
+      },
+    ],
+    steps: [
+      {
+        at: { beat: 1, phrase: 'sunlight' },
+        word: 2,
+        stage: { layout: 'one', show: ['mira'], arrows: [] },
+        effects: [],
+      },
+    ],
+  };
+  const make = (timed: typeof beats) =>
+    composeScene({
+      script: story,
+      drawings: new Map([['mira', figure()]]),
+      beats: timed,
+      durationMs: 18_000,
+      timing: 'voice',
+      generator: 'scene-2',
+    }).scene;
+
+  it('opens on who comes back, with the face they left with, until the page turns it', () => {
+    const scene = make(late);
+    expect(scene.steps[0]).toMatchObject({
+      atMs: 0,
+      layout: 'one',
+      show: ['mira'],
+    });
+    const faces = scene.effects
+      .filter(
+        (e) => e.target === 'mira' && (e.do === 'show' || e.do === 'hide'),
+      )
+      .map((e) => `${e.atMs < 2000 ? 'before' : 'after'} ${e.do} ${e.part}`);
+    expect(faces).toEqual([
+      'before show afraid',
+      'after hide afraid',
+      'after show happy',
+    ]);
+  });
+
+  it('is left out when the voice did not wait for it', () => {
+    const scene = make(beats);
+    expect(scene.steps[0].atMs).toBeGreaterThan(0);
+    expect(
+      scene.effects.find((e) => e.target === 'mira' && e.do === 'show')?.part,
+    ).toBe('happy');
   });
 });

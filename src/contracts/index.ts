@@ -898,9 +898,24 @@ export interface VisualSetDto {
 
 export type SceneTiming = 'voice' | 'aligned' | 'estimated';
 export type SceneLayoutName =
-  'one' | 'row' | 'grid' | 'compare' | 'hub' | 'cycle' | 'focus';
-export type SceneEffectName = 'point' | 'show' | 'hide' | 'pulse' | 'zoom';
+  'one' | 'row' | 'grid' | 'compare' | 'hub' | 'cycle' | 'focus' | 'stack';
+export type SceneEffectName =
+  'point' | 'show' | 'hide' | 'pulse' | 'zoom' | 'say';
 export type SceneEnterName = 'pop' | 'fade' | 'slide' | 'wipe' | 'grow';
+/** The page's feeling: which music plays under the voice. */
+export type SceneMoodName =
+  'calm' | 'bright' | 'curious' | 'serious' | 'playful';
+/** What a drawn thing sounds like while it is on the stage. */
+export type SceneAmbienceName =
+  | 'heartbeat'
+  | 'bubbles'
+  | 'water'
+  | 'wind'
+  | 'rain'
+  | 'fire'
+  | 'electric'
+  | 'machine'
+  | 'clock';
 
 /** One thing that can stand on the stage. */
 export type SceneThingDto =
@@ -922,6 +937,20 @@ export type SceneThingDto =
       hidden: string[];
       /** Whether it animates itself; a still one gets a gentle float. */
       moves: boolean;
+      /** The sound it makes while it is on the stage; absent or null for none. */
+      ambience?: SceneAmbienceName | null;
+      /**
+       * Labels the stage sets itself beside the drawing, by part: what each
+       * says. Placed per step (ScenePlaceDto.labels); absent on a drawing
+       * whose labels are drawn in it.
+       */
+      callouts?: Record<string, string>;
+      /** Of those, the parts whose label waits until the voice points at the part. */
+      calloutsLater?: string[];
+      /** Drawn by code, not by the artist: working, a graph, the text's own words, a timeline or a chart. */
+      source?: 'math' | 'plot' | 'quote' | 'timeline' | 'chart';
+      /** A story's place: the scene behind the stage, never in a slot. */
+      backdrop?: true;
     }
   | { id: string; kind: 'stat'; value: string; caption: string }
   | {
@@ -951,6 +980,8 @@ export interface SceneStepDto {
   enter: Record<string, { how: SceneEnterName; from?: string }>;
   /** The thing the camera leans toward. */
   focus: string | null;
+  /** The scene behind the stage: a place's drawing, by id; absent for none. */
+  backdrop?: string;
 }
 
 export interface SceneEffectDto {
@@ -959,6 +990,21 @@ export interface SceneEffectDto {
   /** A part or state of a drawing, by name; null for the whole thing. */
   part: string | null;
   do: SceneEffectName;
+  /** A pulse added only because nothing else happened for a while: seen, not heard. */
+  filler?: boolean;
+  /** A character speaking: their words, in a bubble at their head until `untilMs`. */
+  say?: { id: string; text: string; untilMs: number };
+}
+
+/** A speech bubble as the stage sets it: its box, its words, and the point its tail reaches toward. */
+export interface SceneBubbleDto {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  lines: string[];
+  size: number;
+  tail: [number, number];
 }
 
 /** Where a thing stands at one step, in the staging's design units. */
@@ -970,11 +1016,39 @@ export interface ScenePlaceDto {
   /** The size its main text is set at: a stat's number, words, a card. */
   size?: number;
   caption?: { x: number; y: number; w: number; size: number; lines: string[] };
+  /** A drawing's labels at this step, set beside it by the stage. */
+  labels?: SceneLabelDto[];
+}
+
+/** One label set by the stage: its words' box, which edge they hang from, and its leader to the part. */
+export interface SceneLabelDto {
+  part: string;
+  lines: string[];
+  size: number;
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  /** Which edge the words hang from: the drawing's side in a column, the middle in a band. */
+  align: 'start' | 'middle' | 'end';
+  /** From the words to the point on the part: x1, y1, x2, y2; null when they sit on it. */
+  leader: [number, number, number, number] | null;
+}
+
+/** An arrow's label: how far along the arrow, which side of it, and its box's size. */
+export interface ScenePillDto {
+  t: number;
+  /** 1 above an arrow that runs across or right of one that runs down; -1 the other side. */
+  side: 1 | -1;
+  w: number;
+  h: number;
+  size: number;
 }
 
 /** A page as an animated video: the voice's sentences, the things, and when each happens. */
 export interface SceneDto {
-  version: 3;
+  /** 4 adds the sound; a 3 plays the same, in silence but for the voice. */
+  version: 3 | 4;
   generator: string;
   title: string;
   durationMs: number;
@@ -984,10 +1058,27 @@ export interface SceneDto {
   things: SceneThingDto[];
   steps: SceneStepDto[];
   effects: SceneEffectDto[];
+  /** The music under the voice; absent on a scene made before there was any. */
+  sound?: { mood: SceneMoodName };
   /** The same steps placed for the pane's box and the full screen's wide stage. */
   stagings: Record<
     'box' | 'wide',
-    { w: number; h: number; places: Record<string, ScenePlaceDto>[] }
+    {
+      w: number;
+      h: number;
+      places: Record<string, ScenePlaceDto>[];
+      /**
+       * Each step's arrow labels, by arrow id: where each goes, or null for
+       * one with nowhere clear to go, which is not shown. Absent on a scene
+       * made before they were placed.
+       */
+      pills?: Record<string, ScenePillDto | null>[];
+      /**
+       * Each speech bubble, by its say's id: where it goes at the step it is
+       * said in, or null where there is no room, and it is not shown.
+       */
+      bubbles?: Record<string, SceneBubbleDto | null>;
+    }
   >;
 }
 

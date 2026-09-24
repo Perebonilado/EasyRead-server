@@ -43,13 +43,24 @@ process.stdin.on('end', () => {
       ? { fontFiles: request.fonts, loadSystemFonts: false, defaultFontFamily: 'Liberation Sans' }
       : { loadSystemFonts: true },
   };
-  if (request.width) options.fitTo = { mode: 'width', value: request.width };
-  const resvg = new Resvg(request.svg, options);
-  const box = resvg.getBBox();
-  const answer = {
-    ink: box ? { x: box.x, y: box.y, width: box.width, height: box.height } : null,
+  const boxOf = (svg) => {
+    const box = new Resvg(svg, options).getBBox();
+    return box ? { x: box.x, y: box.y, width: box.width, height: box.height } : null;
   };
-  if (request.width) answer.png = resvg.render().asPng().toString('base64');
+  const answer = { ink: boxOf(request.svg) };
+  if (request.width) {
+    const sized = new Resvg(request.svg, { ...options, fitTo: { mode: 'width', value: request.width } });
+    answer.png = sized.render().asPng().toString('base64');
+  }
+  // Parts of the drawing on their own: where each one's ink is.
+  if (request.variants) answer.inks = request.variants.map((svg) => boxOf(svg));
+  // The drawing as a coarse map of where there is ink and where there is room.
+  if (request.grid) {
+    const image = new Resvg(request.grid.svg, { ...options, fitTo: { mode: 'width', value: request.grid.cols } }).render();
+    let bits = '';
+    for (let i = 0; i < image.width * image.height; i += 1) bits += image.pixels[i * 4 + 3] > 24 ? '1' : '0';
+    answer.grid = { cols: image.width, rows: image.height, bits };
+  }
   process.stdout.write(JSON.stringify(answer));
 });
 `;
@@ -73,15 +84,31 @@ function fontFiles(): string[] {
   return fonts;
 }
 
+/** Where there is ink in a drawing, cell by cell: '1' ink, '0' room, row by row. */
+export interface InkMap {
+  cols: number;
+  rows: number;
+  bits: string;
+}
+
 /**
  * Where the ink is, and a PNG `width` pixels across when a width is
- * given. Rejects when the drawing will not render, whatever the reason:
- * a panic, a parse error, a render that never finishes.
+ * given. Also, when asked, the ink of each of `variants` (the drawing cut
+ * down to one part) and a coarse map of `grid.svg`'s ink `grid.cols`
+ * cells across, all in the one child. Rejects when the drawing will not
+ * render, whatever the reason: a panic, a parse error, a render that
+ * never finishes.
  */
 export function renderSvg(
   svg: string,
   width?: number,
-): Promise<{ ink: InkBox | null; png?: Buffer }> {
+  extra: { variants?: string[]; grid?: { svg: string; cols: number } } = {},
+): Promise<{
+  ink: InkBox | null;
+  png?: Buffer;
+  inks?: (InkBox | null)[];
+  grid?: InkMap;
+}> {
   return new Promise((resolve, reject) => {
     const child = spawn(process.execPath, ['-e', CHILD], {
       stdio: ['pipe', 'pipe', 'pipe'],
@@ -113,10 +140,14 @@ export function renderSvg(
         const answer = JSON.parse(Buffer.concat(out).toString('utf8')) as {
           ink: InkBox | null;
           png?: string;
+          inks?: (InkBox | null)[];
+          grid?: InkMap;
         };
         resolve({
           ink: answer.ink,
           ...(answer.png ? { png: Buffer.from(answer.png, 'base64') } : {}),
+          ...(answer.inks ? { inks: answer.inks } : {}),
+          ...(answer.grid ? { grid: answer.grid } : {}),
         });
       } catch (error) {
         reject(error instanceof Error ? error : new Error(String(error)));
@@ -126,6 +157,15 @@ export function renderSvg(
       JSON.stringify({
         svg,
         width: width ? Math.max(1, Math.round(width)) : 0,
+        ...(extra.variants?.length ? { variants: extra.variants } : {}),
+        ...(extra.grid
+          ? {
+              grid: {
+                svg: extra.grid.svg,
+                cols: Math.max(4, Math.round(extra.grid.cols)),
+              },
+            }
+          : {}),
         resvg: require.resolve('@resvg/resvg-js'),
         fonts: fontFiles(),
       }),

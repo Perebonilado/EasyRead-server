@@ -14,8 +14,10 @@
  */
 import { parseDocument } from 'htmlparser2';
 import render from 'dom-serializer';
-import { Element, Text, type ChildNode } from 'domhandler';
+import { Text, type Element } from 'domhandler';
+import { elements, removeNode, textOf, walk } from './scene-dom';
 import { groupId, idKey, type DrawingThing } from './scene-script';
+import { liftCallouts, type Callout, type InkField } from './scene-callouts';
 import { renderSvg, type InkBox } from './scene-raster';
 
 /** The canvas the artist is given, by shape. */
@@ -311,34 +313,11 @@ export function svgFromReply(reply: string): string | null {
   return null;
 }
 
-const elements = (nodes: ChildNode[]): Element[] =>
-  nodes.filter((node): node is Element => node instanceof Element);
-
-function* walk(node: Element): Generator<Element> {
-  yield node;
-  for (const child of elements(node.children)) yield* walk(child);
-}
-
-function textOf(node: Element): string {
-  let out = '';
-  for (const child of node.children) {
-    if (child instanceof Text) out += child.data;
-    else if ('children' in child) out += textOf(child as Element);
-  }
-  return out;
-}
-
 /** Removes every child and puts one text node in their place. */
 function setText(node: Element, text: string): void {
   const replacement = new Text(text);
   replacement.parent = node;
   node.children = [replacement];
-}
-
-function removeNode(node: Element): void {
-  const parent = node.parent as Element | null;
-  if (!parent) return;
-  parent.children = parent.children.filter((child) => child !== node);
 }
 
 function unwrapNode(node: Element): void {
@@ -533,14 +512,101 @@ export function removeOwnName(
     if (inside) continue;
     const said = idKey(textOf(node));
     if (said === key || (said.length >= key.length && said.includes(key))) {
+      const group = node.parent as Element | null;
       removeNode(node);
       removed += 1;
+      // A title written as a label: its leader goes with it, or the
+      // drawing keeps a line pointing at nothing.
+      if (
+        group &&
+        group !== root &&
+        group.name.toLowerCase() === 'g' &&
+        !(group.attribs.id && keep.has(group.attribs.id)) &&
+        onlyLeader(group)
+      )
+        removeNode(group);
     }
   }
   return removed;
 }
 
+/**
+ * Whether a group holds nothing but a leader: a few straight lines and
+ * perhaps a dot. A path counts only when it is straight (moves and lines,
+ * no curves), since drawings are made of curved paths.
+ */
+function onlyLeader(group: Element): boolean {
+  const inside = [...walk(group)].filter((n) => n !== group);
+  if (!inside.length || inside.length > 4) return false;
+  return inside.every((n) => {
+    const name = n.name.toLowerCase();
+    if (name === 'line') return true;
+    if (name === 'polyline')
+      return (n.attribs.points?.match(/-?\d*\.?\d+/g)?.length ?? 0) <= 6;
+    if (name === 'path')
+      return (
+        /^[\sMmLlHhVvZz\d.,-]*$/.test(n.attribs.d ?? '') &&
+        (n.attribs.d?.match(/[LlHhVv]/g)?.length ?? 0) <= 2
+      );
+    if (name === 'circle') return numbers(n.attribs.r ?? '0')[0] <= 12;
+    return false;
+  });
+}
+
 /** Ids in the drawing matched to the names the writer gave: parts, their labels, states. */
+/**
+ * The named groups the artist hid in its own markup (display none,
+ * hidden, or clear) shown again, and how many were: the lesson hides and
+ * shows parts, labels and states itself, and a group hidden in the file
+ * could never be shown. A character's faces came back hidden, all but one.
+ */
+export function revealGroups(root: Element, ids: Iterable<string>): number {
+  const wanted = new Set(ids);
+  const hides = (property: string, value: string) =>
+    (property === 'display' && /^none\b/i.test(value)) ||
+    (property === 'visibility' && /^(hidden|collapse)\b/i.test(value)) ||
+    (property === 'opacity' && /^0*(\.0*)?\s*(!important)?$/i.test(value));
+  let shown = 0;
+  for (const node of walk(root)) {
+    if (!wanted.has(node.attribs.id)) continue;
+    let changed = false;
+    for (const property of ['display', 'visibility', 'opacity'])
+      if (
+        node.attribs[property] !== undefined &&
+        hides(property, node.attribs[property].trim())
+      ) {
+        delete node.attribs[property];
+        changed = true;
+      }
+    if (node.attribs.style) {
+      const kept = node.attribs.style.split(';').filter((declaration) => {
+        const at = declaration.indexOf(':');
+        if (at < 0) return declaration.trim().length > 0;
+        const hidden = hides(
+          declaration.slice(0, at).trim().toLowerCase(),
+          declaration.slice(at + 1).trim(),
+        );
+        if (hidden) changed = true;
+        return !hidden;
+      });
+      if (kept.join(';').trim()) node.attribs.style = kept.join(';');
+      else delete node.attribs.style;
+    }
+    if (changed) shown += 1;
+  }
+  return shown;
+}
+
+/** A kept drawing's named groups shown again, as the gate now shows them: the same markup when none was hidden. */
+export function revealedSvg(svg: string, ids: string[]): string {
+  const doc = parseDocument(svg, { xmlMode: true, recognizeCDATA: true });
+  const root = elements(doc.children).find(
+    (node) => node.name.toLowerCase() === 'svg',
+  );
+  if (!root || !revealGroups(root, ids)) return svg;
+  return render(root, { xmlMode: true, selfClosingTags: true });
+}
+
 export function namedGroups(
   root: Element,
   thing: Pick<DrawingThing, 'parts' | 'states'>,
@@ -639,6 +705,14 @@ export interface GatedDrawing {
   /** State name to the id of its overlay group. */
   states: Record<string, string>;
   moves: boolean;
+  /** Labels lifted out of the drawing for the stage to set: what each says and where it points. */
+  callouts: Callout[];
+  /** Where the drawing has ink, so words set over it can keep to its empty room. */
+  field: InkField | null;
+  /** A passage set by code: the size of its words, in its own units, so its notes are never set larger. */
+  words?: { size: number };
+  /** A character's head, in its own units: where their words come from. */
+  head?: [number, number];
 }
 
 export interface GateResult {
@@ -717,6 +791,8 @@ interface Shortfall {
 export function inspectSvg(
   reply: string,
   thing: Pick<DrawingThing, 'parts' | 'states' | 'motion'> & { name?: string },
+  /** A set: the scene behind the stage, its ground kept and its stillness no fault. */
+  options: { backdrop?: boolean } = {},
 ):
   | {
       root: Element;
@@ -752,8 +828,18 @@ export function inspectSvg(
       mended: [],
     };
   const mended = sanitizeTree(root).map((what) => `removed ${what}`);
-  if (removeBackdrop(root, viewBox)) mended.push('removed a backdrop');
+  if (!options.backdrop && removeBackdrop(root, viewBox))
+    mended.push('removed a backdrop');
   const { parts, labels, states } = namedGroups(root, thing);
+  const hid = revealGroups(root, [
+    ...Object.values(parts),
+    ...Object.values(labels),
+    ...Object.values(states),
+  ]);
+  if (hid)
+    mended.push(
+      `showed ${hid} group${hid === 1 ? '' : 's'} the drawing hid itself`,
+    );
   if (
     thing.name &&
     removeOwnName(
@@ -783,7 +869,7 @@ export function inspectSvg(
       missingStates: thing.states
         .filter((s) => !states[s.name])
         .map((s) => s.name),
-      still: Boolean(thing.motion) && !movesOf(root),
+      still: !options.backdrop && Boolean(thing.motion) && !movesOf(root),
       smallText: label !== null && label < GATE.smallestLabel ? label : null,
       tooMany: count > GATE.maxElements ? count : null,
     },
@@ -845,8 +931,10 @@ function judged(
 export async function gateDrawing(
   reply: string,
   thing: Pick<DrawingThing, 'parts' | 'states' | 'motion'> & { name?: string },
+  /** A set keeps its ground and its whole canvas: it covers the stage. */
+  options: { backdrop?: boolean } = {},
 ): Promise<GateResult> {
-  const inspected = inspectSvg(reply, thing);
+  const inspected = inspectSvg(reply, thing, options);
   if (!inspected.root)
     return {
       drawing: null,
@@ -890,7 +978,28 @@ export async function gateDrawing(
     return failed(
       'The drawing came out blank: draw the thing, large, inside the viewBox.',
     );
-  const framed = framedBox(viewBox, ink);
+  // Its labels lifted out for the stage to set, and the drawing framed to
+  // its own ink without them. A drawing whose labels cannot be measured
+  // keeps them, as drawn.
+  let callouts: Callout[] = [];
+  let field: InkField | null = null;
+  const before = namedGroups(root, thing);
+  if (Object.keys(before.labels).length)
+    try {
+      const lifted = await liftCallouts(root, before, viewBox);
+      callouts = lifted.callouts;
+      field = lifted.field;
+      if (lifted.ink && lifted.ink.width > 0 && lifted.ink.height > 0)
+        ink = lifted.ink;
+      if (lifted.lifted.length)
+        mended.push(
+          `lifted ${lifted.lifted.length} label${lifted.lifted.length === 1 ? '' : 's'} for the stage to set`,
+        );
+    } catch (error) {
+      mended.push(`labels left as drawn: ${(error as Error).message}`);
+    }
+  svg = render(root, { xmlMode: true, selfClosingTags: true });
+  const framed = options.backdrop ? viewBox : framedBox(viewBox, ink);
   if (framed.join(' ') !== viewBox.join(' ')) {
     viewBox = framed;
     root.attribs.viewBox = viewBox.join(' ');
@@ -909,6 +1018,8 @@ export async function gateDrawing(
       labels,
       states,
       moves: movesOf(root),
+      callouts,
+      field,
     },
     ...judged(short, thing, viewBox[2]),
     mended,

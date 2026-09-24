@@ -1,3 +1,5 @@
+import type { DocumentProfileDraft } from '../domain/scene-profile';
+import type { StoryDraft } from '../domain/scene-story';
 import type {
   LearnQuestion,
   Block,
@@ -36,6 +38,8 @@ export type LlmTask =
   // and the artist (each drawing, as animated SVG).
   | 'scene_write'
   | 'scene_draw'
+  | 'scene_profile'
+  | 'scene_story'
   | 'topic_quiz'
   | 'item_write'
   | 'item_verify'
@@ -473,9 +477,39 @@ export interface LlmGatewayPort {
     material: string;
     /** Where the page sits in its chapter, and what came before it. */
     context: string;
+    /** What the book is, and the ways its pages may be taught. */
+    profile?: string;
+    /** A story's characters on the page, and where it happens. */
+    story?: string;
     previous?: SceneScriptDraft;
     problems?: string[];
   }): Promise<LlmResult<SceneScriptDraft>>;
+
+  /**
+   * What a document is, for teaching it: its subject, kind and tone, and
+   * which formats besides the explainer suit its pages. One cheap call a
+   * document, from its title, its chapters and a sample of its pages.
+   */
+  sceneProfile(input: {
+    documentTitle: string;
+    chapters: string[];
+    sample: string;
+  }): Promise<LlmResult<DocumentProfileDraft>>;
+
+  /**
+   * Who and where one stretch of a story meets: each character's look and
+   * what they are like, each place, and on each page who is there, how
+   * they feel, and where. `known` names the characters met before it, so
+   * it calls them the same.
+   */
+  sceneStory(input: {
+    documentTitle: string;
+    /** The pages it covers, and their text, each page marked "[page N]". */
+    from: number;
+    to: number;
+    text: string;
+    known: string[];
+  }): Promise<LlmResult<StoryDraft>>;
 
   /**
    * One drawing, as SVG markup with its own animation, from its brief.
@@ -495,6 +529,8 @@ export interface LlmGatewayPort {
     notes?: string[];
     /** Aborts the call: the page failed while it was being drawn. */
     signal?: AbortSignal;
+    /** A story's place, painted as the scene behind the stage. */
+    backdrop?: boolean;
   }): Promise<LlmResult<string>>;
 
   lectureSketch(input: {

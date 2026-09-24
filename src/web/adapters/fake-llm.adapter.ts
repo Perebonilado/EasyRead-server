@@ -3,6 +3,8 @@
  * that is the whole point of a deterministic offline stand-in. */
 import { createHash } from 'crypto';
 import { Injectable } from '@nestjs/common';
+import type { DocumentProfileDraft } from '../../business/domain/scene-profile';
+import type { StoryDraft } from '../../business/domain/scene-story';
 import type { Block, RecapBody, TopicPreviewBody } from '../../contracts';
 import type {
   GeneratedItem,
@@ -512,6 +514,90 @@ export class FakeLlmAdapter implements LlmGatewayPort {
    * The page's own sentences as the narration, one drawing and one word on
    * the stage: enough for the whole scene pipeline to run with no key.
    */
+  sceneProfile(input: {
+    documentTitle: string;
+    chapters: string[];
+    sample: string;
+  }): Promise<LlmResult<DocumentProfileDraft>> {
+    // A book with an equals sign in it is taught with maths too; one with
+    // verse in it, read closely.
+    const text = `${input.documentTitle}\n${input.sample}`;
+    // And one where people say things to each other is a story.
+    const story = /\bsaid\b/.test(text);
+    return Promise.resolve({
+      value: {
+        subject: input.documentTitle.slice(0, 40),
+        kind: story ? 'fiction' : 'textbook',
+        tone: 'neutral',
+        formats: [
+          ...(/=|\\frac/.test(text) ? (['maths'] as const) : []),
+          ...(/poem|verse|stanza/i.test(text) ? (['reading'] as const) : []),
+        ],
+        story,
+      },
+      usage: {
+        model: 'fake',
+        tokensIn: Math.ceil(text.length / 4),
+        tokensOut: 20,
+        latencyMs: 1,
+      },
+    });
+  }
+
+  /** Whoever "said" something is a character; each page has whoever it names. */
+  sceneStory(input: {
+    documentTitle: string;
+    from: number;
+    to: number;
+    text: string;
+    known: string[];
+  }): Promise<LlmResult<StoryDraft>> {
+    const names = [
+      ...new Set(
+        [...input.text.matchAll(/\b([A-Z][a-z]+) said\b/g)].map((m) => m[1]),
+      ),
+    ];
+    const pages = input.text
+      .split(/\[page (\d+)\]/)
+      .slice(1)
+      .reduce<{ page: number; text: string }[]>((out, part, i, all) => {
+        if (i % 2 === 0)
+          out.push({ page: Number(part), text: all[i + 1] ?? '' });
+        return out;
+      }, []);
+    return Promise.resolve({
+      value: {
+        characters: names.map((name) => ({
+          name,
+          aliases: [],
+          role: 'main' as const,
+          look: 'a child in plain clothes',
+          traits: ['curious'],
+          voice: 'girl' as const,
+        })),
+        places: [],
+        pages: pages.map(({ page, text }) => ({
+          page,
+          summary:
+            text
+              .trim()
+              .split(/(?<=[.!?])\s/)[0]
+              ?.slice(0, 120) ?? '',
+          present: names
+            .filter((name) => text.includes(name))
+            .map((name) => ({ name, mood: 'neutral' as const })),
+          place: null,
+        })),
+      },
+      usage: {
+        model: 'fake',
+        tokensIn: Math.ceil(input.text.length / 4),
+        tokensOut: 50,
+        latencyMs: 1,
+      },
+    });
+  }
+
   sceneScript(input: {
     documentTitle: string;
     topicTitle: string;
@@ -540,15 +626,31 @@ export class FakeLlmAdapter implements LlmGatewayPort {
       states: null,
       shape: null,
       value: null,
+      sound: null,
+      lines: null,
+      plot: null,
+      quote: null,
+      phrases: null,
+      ref: null,
+      state: null,
+      timeline: null,
+      chart: null,
     };
     return Promise.resolve({
       value: {
         fit: 'good',
         fitReason: null,
         title: input.topicTitle.slice(0, 60),
+        mood: 'curious',
         beats: says.map((say, i) => ({
           say,
           pause: i === says.length - 1 ? ('long' as const) : ('short' as const),
+          delivery:
+            i === 0
+              ? ('hook' as const)
+              : i === says.length - 1
+                ? ('recap' as const)
+                : ('explain' as const),
         })),
         cast: [
           {
@@ -562,6 +664,15 @@ export class FakeLlmAdapter implements LlmGatewayPort {
             shape: 'square',
             value: null,
             style: null,
+            sound: null,
+            lines: null,
+            plot: null,
+            quote: null,
+            phrases: null,
+            ref: null,
+            state: null,
+            timeline: null,
+            chart: null,
           },
           {
             id: 'idea',

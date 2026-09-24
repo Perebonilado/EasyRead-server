@@ -662,6 +662,22 @@ function blockProse(block: Block): string {
   return text;
 }
 
+/**
+ * The note as the video's writer reads it: as the lecturer does, but with
+ * the maths kept whole, as TeX, and a table's rows, so a page's working
+ * and its numbers can reach the stage.
+ */
+export function sceneProse(blocks: Block[]): string {
+  return blocks
+    .map((block) => {
+      if (block.type === 'math') return `$$ ${block.text.trim()} $$`;
+      if (block.type === 'table') return `(a table)\n${block.text.trim()}`;
+      return blockProse(block);
+    })
+    .filter(Boolean)
+    .join('\n\n');
+}
+
 /** The note as the page the lecturer teaches from: its blocks as paragraphs. */
 export function noteProse(blocks: Block[]): string {
   return blocks.map(blockProse).filter(Boolean).join('\n\n');

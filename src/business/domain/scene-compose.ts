@@ -41,6 +41,7 @@ import {
   type StagingName,
 } from './scene-layout';
 import {
+  FACES,
   isCodeThing,
   quotedSpans,
   type SceneScript,
@@ -49,7 +50,6 @@ import {
 } from './scene-script';
 import { paletteOf, placeMusic } from './scene-music';
 import type { DocumentProfile } from './scene-profile';
-import { EXPRESSIONS } from './scene-story';
 import type { GatedDrawing } from './scene-svg';
 import { anchorMs, quietGaps, spaced, type TimedBeat } from './scene-timing';
 
@@ -244,11 +244,16 @@ export function sidesKept(
 /** How long before a character comes on their first face is put on: the player fades a state in over 320ms. */
 const FACE_EARLY_MS = 400;
 
+/** A face a drawing does not have, as the nearest one it does: an animal the artist drew has no face of pain. */
+const NEAREST_FACE: Record<string, string> = { pain: 'afraid' };
+
 /**
  * A character wears one face at a time: a face shown takes the place of
  * the one before it, and a face hidden leaves them calm again, never with
  * none. Every face is hidden until shown, so the first, the one they come
- * on with, is shown just before they do: seen, not heard.
+ * on with, is shown just before they do: seen, not heard. So are the
+ * signs they come on with (a shake, a fever), which stay on until an
+ * effect hides them.
  */
 export function oneFaceAtATime(
   effects: SceneEffectDto[],
@@ -258,8 +263,12 @@ export function oneFaceAtATime(
   drawn: (id: string) => boolean = () => true,
   /** The face each comes on with, when not the one the writer gave: back from the page before. */
   firstFaces: ReadonlyMap<string, string> = new Map(),
+  /** Whether their drawing has a face or a sign: an animal the artist drew has only the story's faces. */
+  has: (id: string, state: string) => boolean = () => true,
 ): SceneEffectDto[] {
-  const faces = new Set<string>(EXPRESSIONS);
+  const faces = new Set<string>(FACES);
+  const faceOf = (id: string, face: string) =>
+    has(id, face) ? face : (NEAREST_FACE[face] ?? 'neutral');
   const characters = new Map(
     cast.flatMap((thing) =>
       (thing.kind === 'character' || thing.kind === 'person') && drawn(thing.id)
@@ -275,22 +284,35 @@ export function oneFaceAtATime(
   for (const [id, character] of characters) {
     const enters = steps.find((step) => step.show.includes(id));
     if (!enters) continue;
-    let wearing: string = firstFaces.get(id) ?? character.state ?? 'neutral';
+    let wearing = faceOf(
+      id,
+      firstFaces.get(id) ?? character.state ?? 'neutral',
+    );
+    const early = Math.max(0, enters.atMs - FACE_EARLY_MS);
     out.push({
-      atMs: Math.max(0, enters.atMs - FACE_EARLY_MS),
+      atMs: early,
       target: id,
       part: wearing,
       do: 'show',
       filler: true,
     });
+    for (const sign of character.signs ?? [])
+      if (has(id, sign))
+        out.push({
+          atMs: early,
+          target: id,
+          part: sign,
+          do: 'show',
+          filler: true,
+        });
     const asked = effects
       .filter((effect) => effect.target === id && isFace(effect))
       .sort((a, b) => a.atMs - b.atMs);
     for (const effect of asked) {
       const next =
         effect.do === 'show'
-          ? effect.part!
-          : effect.part === wearing
+          ? faceOf(id, effect.part!)
+          : faceOf(id, effect.part!) === wearing
             ? 'neutral'
             : wearing;
       if (next === wearing) continue;
@@ -553,6 +575,10 @@ export function composeScene(input: ComposeInput): {
       steps,
       (id) => byId.get(id)?.kind === 'drawing',
       faces,
+      (id, state) => {
+        const drawing = byId.get(id);
+        return drawing?.kind === 'drawing' && state in drawing.states;
+      },
     ),
   );
   // A sentence the writer says quotes a character, with no "say" on it:

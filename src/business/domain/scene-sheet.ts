@@ -11,7 +11,7 @@ import { elements } from './scene-dom';
 import {
   drawFigure,
   figureOf,
-  type FigurePose,
+  type FigureHow,
   type FigureSpec,
 } from './scene-figure';
 import { renderSvg, type InkBox } from './scene-raster';
@@ -56,12 +56,10 @@ export const SIZE_UNITS: Record<StorySize, number> = {
 export async function figureDrawing(
   spec: FigureSpec,
   seed: string,
-  /** A few people like them, standing together: a team, a family. */
-  count = 1,
-  /** Standing, or in bed. */
-  pose: FigurePose = 'standing',
+  /** How many, their pose, what they hold, the signs they show on the page. */
+  how: FigureHow = {},
 ): Promise<GatedDrawing & { anchors: CharacterSheet['anchors'] }> {
-  const drawn = drawFigure(spec, seed, count, pose);
+  const drawn = drawFigure(spec, seed, how);
   const measured = await renderSvg(drawn.svg, undefined, {
     grid: { svg: drawn.svg, cols: 48 },
   });

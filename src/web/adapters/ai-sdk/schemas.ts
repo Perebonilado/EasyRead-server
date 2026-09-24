@@ -25,11 +25,14 @@ import {
   FACIAL_HAIR,
   FIGURE_AGES,
   FIGURE_POSES,
+  FIGURE_PROPS,
+  FIGURE_SIGNS,
   FIGURE_BUILDS,
   FIGURE_EXTRAS,
   HAIR_COLOURS,
   HAIR_STYLES,
   HEADWEAR,
+  KIT_FACES,
   TOPS,
 } from '../../../business/domain/scene-figure';
 
@@ -581,10 +584,12 @@ export const sceneScriptSchema = z.object({
         )
         .nullable(),
       ref: z.string().nullable(),
-      state: z.enum(EXPRESSIONS).nullable(),
+      state: z.enum([...EXPRESSIONS, ...KIT_FACES]).nullable(),
       figure: figureSchema.nullable(),
       count: z.number().int().nullable(),
       pose: z.enum(FIGURE_POSES).nullable(),
+      signs: z.array(z.enum(FIGURE_SIGNS)).nullable(),
+      holding: z.enum(FIGURE_PROPS).nullable(),
       timeline: z
         .array(z.object({ when: z.string(), name: z.string() }))
         .nullable(),

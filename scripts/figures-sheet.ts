@@ -23,16 +23,21 @@ import {
   FIGURE_EXTRAS,
   HAIR_COLOURS,
   HAIR_STYLES,
+  FIGURE_POSES,
+  FIGURE_PROPS,
+  FIGURE_SIGNS,
   HEADWEAR,
   TOPS,
   drawFigure,
+  type FigureDrawing,
+  type FigureFace,
+  type FigureHow,
+  type FigurePose,
+  type FigureSign,
   type FigureSpec,
 } from '../src/business/domain/scene-figure';
 import { rasterise } from '../src/business/domain/scene-raster';
-import {
-  EXPRESSIONS,
-  type Expression,
-} from '../src/business/domain/scene-story';
+import { EXPRESSIONS } from '../src/business/domain/scene-story';
 
 const out = process.argv[2] ?? '.';
 /** Stage units a kit unit is drawn at on the sheet. */
@@ -66,7 +71,7 @@ const colours = CLOTH_COLOURS.filter((c) => c !== 'white' && c !== 'black');
 
 const sections: {
   title: string;
-  cells: { label: string; spec: FigureSpec; face?: Expression }[];
+  cells: { label: string; spec: FigureSpec; face?: FigureFace }[];
 }[] = [
   {
     title: 'Ages and builds',
@@ -205,7 +210,7 @@ const sections: {
   },
   {
     title: 'Faces',
-    cells: EXPRESSIONS.map((face, k) => ({
+    cells: [...EXPRESSIONS, 'pain' as const].map((face, k) => ({
       label: face,
       face,
       spec: as({
@@ -219,33 +224,38 @@ const sections: {
   },
 ];
 
-/** A figure with only one face on, as the stage would show it. */
-function withFace(svg: string, face: Expression): string {
-  const doc = parseDocument(svg, { xmlMode: true });
+/** A figure with only the given states on (a face, its signs), as the stage would show it. */
+function showing(drawn: FigureDrawing, on: readonly string[]): string {
+  const doc = parseDocument(drawn.svg, { xmlMode: true });
   const root = elements(doc.children)[0];
-  for (const name of EXPRESSIONS)
-    if (name !== face) {
-      const group = byId(root, name);
+  for (const [name, id] of Object.entries(drawn.states))
+    if (!on.includes(name)) {
+      const group = byId(root, id);
       if (group) removeNode(group);
     }
   return render(doc, { xmlMode: true });
 }
+
+/** The classes the stage sets on a figure while its signs are on: what moves it. */
+const classesFor = (drawn: FigureDrawing, on: readonly string[]) =>
+  on
+    .filter((name) => (FIGURE_SIGNS as readonly string[]).includes(name))
+    .map((name) => `on-${drawn.states[name]}`)
+    .join(' ');
 
 /** A figure with its feet on `ground` at `x`: where its frame goes on the sheet, and its markup. */
 function placed(
   spec: FigureSpec,
   x: number,
   ground: number,
-  face: Expression = 'neutral',
+  face: FigureFace = 'neutral',
   seed = '',
-  count = 1,
-  pose: 'standing' | 'in bed' = 'standing',
 ) {
-  const drawn = drawFigure(spec, seed || JSON.stringify(spec), count, pose);
+  const drawn = drawFigure(spec, seed || JSON.stringify(spec));
   const [vx, vy, vw, vh] = drawn.viewBox;
   // The kit's ground, y = 0, on the sheet's.
   return {
-    svg: withFace(drawn.svg, face),
+    svg: showing(drawn, [face]),
     left: x + vx * SCALE,
     y: ground + vy * SCALE,
     w: vw * SCALE,
@@ -290,10 +300,158 @@ for (const section of sections) {
   y = ground + 10 * SCALE + LABEL + 30;
 }
 
-// In bed: a patient, with the faces they have standing.
-const patients: { label: string; spec: FigureSpec; face: Expression }[] = [
+interface Posed {
+  label: string;
+  spec: FigureSpec;
+  /** The face and the signs on. */
+  on: string[];
+  how?: FigureHow;
+}
+
+/**
+ * Figures side by side, as wide as each is drawn, wrapping into rows on
+ * one ground: poses, signs, props, people in bed, groups. In the page,
+ * their signs move while "moving" is ticked, as the stage moves them.
+ */
+function flow(title: string, cells: Posed[]): void {
+  still.push(
+    `<text x="20" y="${y + TITLE}" font-size="${TITLE}" font-weight="700" fill="${INK}">${title}</text>`,
+  );
+  page.push(`<h2>${title}</h2><div class="row">`);
+  y += TITLE + 14;
+  const made = cells.map((cell, k) => ({
+    cell,
+    drawn: drawFigure(cell.spec, `${title}-${k}`, {
+      ...cell.how,
+      signs: cell.on.filter((name): name is FigureSign =>
+        (FIGURE_SIGNS as readonly string[]).includes(name),
+      ),
+    }),
+  }));
+  const rows: (typeof made)[] = [[]];
+  let used = 20;
+  for (const one of made) {
+    const w = Math.max(one.drawn.viewBox[2] * SCALE, CELL - 14);
+    if (used + w > width - 20 && rows[rows.length - 1].length) {
+      rows.push([]);
+      used = 20;
+    }
+    rows[rows.length - 1].push(one);
+    used += w + 14;
+  }
+  for (const row of rows) {
+    const above = Math.max(...row.map(({ drawn }) => -drawn.viewBox[1]));
+    const ground = y + above * SCALE;
+    let left = 20;
+    for (const { cell, drawn } of row) {
+      const [vx, vy, vw, vh] = drawn.viewBox;
+      const w = Math.max(vw * SCALE, CELL - 14);
+      const x = left + (w - vw * SCALE) / 2;
+      const svg = showing(drawn, cell.on);
+      still.push(
+        `<svg x="${x}" y="${ground + vy * SCALE}" width="${vw * SCALE}" height="${vh * SCALE}" ${svg.slice(svg.indexOf('viewBox'))}`,
+        `<text x="${left + w / 2}" y="${ground + 10 * SCALE + LABEL + 4}" font-size="${LABEL}" text-anchor="middle" fill="#666">${cell.label}</text>`,
+      );
+      page.push(
+        `<figure style="width:${Math.round(w)}px" data-on="${classesFor(drawn, cell.on)}"><template>${svg}</template><figcaption>${cell.label}</figcaption></figure>`,
+      );
+      left += w + 14;
+      void x;
+      void vx;
+    }
+    y = ground + 10 * SCALE + LABEL + 26;
+  }
+  page.push('</div>');
+  y += 4;
+}
+
+const tones = [2, 5, 8, 3, 9, 6, 1, 7, 4, 10];
+const dressed = (k: number, patch: Partial<FigureSpec> = {}) =>
+  as({
+    skin: tones[k % tones.length],
+    hair: (['short', 'long', 'curly', 'bun', 'afro', 'ponytail'] as const)[
+      k % 6
+    ],
+    hairColour: (['dark brown', 'black', 'blonde', 'auburn'] as const)[k % 4],
+    topColour: (['teal', 'orange', 'purple', 'green', 'red', 'navy'] as const)[
+      k % 6
+    ],
+    accentColour: (['red', 'blue', 'yellow', 'pink'] as const)[k % 4],
+    ...patch,
+  });
+
+flow(
+  'Poses',
+  FIGURE_POSES.filter((pose) => pose !== 'holding').map((pose, k) => ({
+    label: pose,
+    spec: dressed(k),
+    on: [pose === 'waving' || pose === 'arms up' ? 'happy' : 'neutral'],
+    how: { pose },
+  })),
+);
+
+/** Each sign on someone, with the face and the pose it goes with. */
+const SIGNED: Record<FigureSign, { face: FigureFace; pose?: FigurePose }> = {
+  shaking: { face: 'afraid' },
+  shivering: { face: 'afraid' },
+  dizzy: { face: 'neutral' },
+  coughing: { face: 'sad', pose: 'hand on mouth' },
+  sleeping: { face: 'neutral' },
+  breathless: { face: 'surprised' },
+  walking: { face: 'happy' },
+  jumping: { face: 'happy', pose: 'arms up' },
+  'tingling hands': { face: 'thinking' },
+  'tingling feet': { face: 'thinking' },
+  headache: { face: 'pain', pose: 'hand on head' },
+  'chest pain': { face: 'pain' },
+  'stomach ache': { face: 'pain', pose: 'hands on belly' },
+  fever: { face: 'sad' },
+  sweating: { face: 'sad' },
+  tears: { face: 'sad' },
+  rash: { face: 'sad' },
+  nausea: { face: 'sad' },
+  confused: { face: 'thinking' },
+  idea: { face: 'happy', pose: 'arms up' },
+};
+flow('Signs', [
+  ...FIGURE_SIGNS.map((sign, k) => ({
+    label: sign,
+    spec: dressed(k + 3),
+    on: [SIGNED[sign].face, sign],
+    how: { pose: SIGNED[sign].pose },
+  })),
   {
-    label: 'in bed, sad',
+    label: 'lying, shaking',
+    spec: dressed(1),
+    on: ['afraid', 'shaking'],
+    how: { pose: 'lying' as const },
+  },
+  {
+    label: 'lying, asleep',
+    spec: dressed(4),
+    on: ['neutral', 'sleeping'],
+    how: { pose: 'lying' as const },
+  },
+]);
+
+flow('Props', [
+  ...FIGURE_PROPS.map((holding, k) => ({
+    label: holding,
+    spec: dressed(k + 5, holding === 'syringe' ? { top: 'lab coat' } : {}),
+    on: ['neutral'],
+    how: { holding },
+  })),
+  {
+    label: 'pointing, a book in the other hand',
+    spec: dressed(2, { top: 'shirt and tie', topColour: 'white' }),
+    on: ['neutral'],
+    how: { pose: 'pointing' as const, holding: 'book' as const },
+  },
+]);
+
+flow('In bed', [
+  {
+    label: 'in bed, a fever',
     spec: as({
       age: 'child',
       hair: 'curly',
@@ -302,7 +460,8 @@ const patients: { label: string; spec: FigureSpec; face: Expression }[] = [
       topColour: 'yellow',
       accentColour: 'blue',
     }),
-    face: 'sad',
+    on: ['sad', 'fever', 'sweating'],
+    how: { pose: 'in bed' },
   },
   {
     label: 'in bed, headscarf',
@@ -312,10 +471,11 @@ const patients: { label: string; spec: FigureSpec; face: Expression }[] = [
       skin: 5,
       topColour: 'pink',
     }),
-    face: 'neutral',
+    on: ['neutral'],
+    how: { pose: 'in bed' },
   },
   {
-    label: 'in bed, happy',
+    label: 'in bed, asleep',
     spec: as({
       age: 'elder',
       hair: 'balding',
@@ -325,47 +485,13 @@ const patients: { label: string; spec: FigureSpec; face: Expression }[] = [
       topColour: 'green',
       accentColour: 'purple',
     }),
-    face: 'happy',
+    on: ['neutral', 'sleeping'],
+    how: { pose: 'in bed' },
   },
-];
-still.push(
-  `<text x="20" y="${y + TITLE}" font-size="${TITLE}" font-weight="700" fill="${INK}">In bed</text>`,
-);
-page.push('<h2>In bed</h2><div class="row">');
-y += TITLE + 14;
-{
-  const ground =
-    y + drawFigure(as({}), 'x', 1, 'in bed').viewBox[3] * SCALE - 10 * SCALE;
-  let left = 20;
-  patients.forEach((one, k) => {
-    const width =
-      drawFigure(one.spec, `bed-${k}`, 1, 'in bed').viewBox[2] * SCALE;
-    const at = placed(
-      one.spec,
-      left + width / 2,
-      ground,
-      one.face,
-      `bed-${k}`,
-      1,
-      'in bed',
-    );
-    still.push(
-      `<svg x="${at.left}" y="${at.y}" width="${at.w}" height="${at.h}" ${at.svg.slice(at.svg.indexOf('viewBox'))}`,
-    );
-    still.push(
-      `<text x="${left + width / 2}" y="${ground + 10 * SCALE + LABEL + 4}" font-size="${LABEL}" text-anchor="middle" fill="#666">${one.label}</text>`,
-    );
-    page.push(
-      `<figure style="width:${Math.round(width)}px"><template>${at.svg}</template><figcaption>${one.label}</figcaption></figure>`,
-    );
-    left += width + 30;
-  });
-  page.push('</div>');
-  y = ground + 10 * SCALE + LABEL + 30;
-}
+]);
 
 // Groups: a few people like the one described, each their own.
-const groups: { label: string; spec: FigureSpec; count: number }[] = [
+flow('Groups', [
   {
     label: 'a team (3)',
     spec: as({
@@ -376,10 +502,11 @@ const groups: { label: string; spec: FigureSpec; count: number }[] = [
       bottomColour: 'grey',
       skin: 2,
     }),
-    count: 3,
+    on: ['neutral'],
+    how: { count: 3 },
   },
   {
-    label: 'a class (4)',
+    label: 'a class (4), waving',
     spec: as({
       age: 'child',
       top: 'jumper',
@@ -388,10 +515,11 @@ const groups: { label: string; spec: FigureSpec; count: number }[] = [
       bottomColour: 'grey',
       skin: 5,
     }),
-    count: 4,
+    on: ['happy'],
+    how: { count: 4, pose: 'waving' },
   },
   {
-    label: 'two elders',
+    label: 'two elders, shivering',
     spec: as({
       age: 'elder',
       hair: 'balding',
@@ -400,42 +528,10 @@ const groups: { label: string; spec: FigureSpec; count: number }[] = [
       topColour: 'green',
       skin: 7,
     }),
-    count: 2,
+    on: ['afraid', 'shivering'],
+    how: { count: 2 },
   },
-];
-still.push(
-  `<text x="20" y="${y + TITLE}" font-size="${TITLE}" font-weight="700" fill="${INK}">Groups</text>`,
-);
-page.push('<h2>Groups</h2><div class="row">');
-y += TITLE + 14;
-{
-  const ground = y + drawFigure(as({})).viewBox[3] * SCALE - 10 * SCALE;
-  let left = 20;
-  groups.forEach((group, k) => {
-    const width =
-      drawFigure(group.spec, `group-${k}`, group.count).viewBox[2] * SCALE;
-    const at = placed(
-      group.spec,
-      left + width / 2,
-      ground,
-      'neutral',
-      `group-${k}`,
-      group.count,
-    );
-    still.push(
-      `<svg x="${at.left}" y="${at.y}" width="${at.w}" height="${at.h}" ${at.svg.slice(at.svg.indexOf('viewBox'))}`,
-    );
-    still.push(
-      `<text x="${left + width / 2}" y="${ground + 10 * SCALE + LABEL + 4}" font-size="${LABEL}" text-anchor="middle" fill="#666">${group.label}</text>`,
-    );
-    page.push(
-      `<figure style="width:${Math.round(width)}px"><template>${at.svg}</template><figcaption>${group.label}</figcaption></figure>`,
-    );
-    left += width + 30;
-  });
-  page.push('</div>');
-  y = ground + 10 * SCALE + LABEL + 30;
-}
+]);
 
 // A few people together on a set, one scale and one ground line.
 const cast: FigureSpec[] = [
@@ -530,7 +626,7 @@ void (async () => {
     join(out, 'figures.html'),
     `<!doctype html><meta charset="utf-8"><title>Figure kit</title>
 <style>body{font:15px Helvetica,Arial,sans-serif;background:#fbf8f2;color:#2d2a32;margin:24px}h2{font-size:20px;margin:28px 0 8px}.row{display:flex;flex-wrap:wrap;gap:6px;align-items:flex-end}figure{margin:0;width:${CELL}px;text-align:center}figure div{height:190px}figcaption{color:#666;font-size:13px}</style>
-<label><input type="checkbox" id="talk"> talking</label>
+<label><input type="checkbox" id="talk"> talking</label> <label><input type="checkbox" id="moving" checked> signs moving</label>
 ${page.join('\n')}
 <script>
 for (const figure of document.querySelectorAll('figure')) {
@@ -543,6 +639,16 @@ document.getElementById('talk').addEventListener('change', (e) => {
   for (const holder of document.querySelectorAll('figure div'))
     holder.shadowRoot.querySelector('svg').classList.toggle('talking', e.target.checked);
 });
+// While a sign is on, the stage sets its class on the figure: what moves it.
+const moving = document.getElementById('moving');
+const move = () => {
+  for (const figure of document.querySelectorAll('figure[data-on]')) {
+    const svg = figure.querySelector('div').shadowRoot.querySelector('svg');
+    for (const name of figure.dataset.on.split(' ').filter(Boolean)) svg.classList.toggle(name, moving.checked);
+  }
+};
+moving.addEventListener('change', move);
+move();
 </script>`,
   );
   console.log(`figures.png and figures.html in ${out}`);

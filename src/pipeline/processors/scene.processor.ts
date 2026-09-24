@@ -29,6 +29,7 @@ import {
   isCodeThing,
   mendScript,
   quietStretches,
+  signsShown,
   wordsOf,
   type CharacterThing,
   type PersonThing,
@@ -720,16 +721,17 @@ export class SceneProcessor {
           return null;
         }),
       );
-    // People the page shows, drawn by the kit: no model is asked.
+    // People the page shows, drawn by the kit: no model is asked. Each
+    // carries the signs the page shows on them, and no others.
     for (const thing of people)
       out.set(
         thing.id,
-        await figureDrawing(
-          thing.figure,
-          thing.id,
-          thing.count,
-          thing.pose,
-        ).catch((error: unknown) => {
+        await figureDrawing(thing.figure, thing.id, {
+          count: thing.count,
+          pose: thing.pose,
+          holding: thing.holding,
+          signs: signsShown(script, thing.id),
+        }).catch((error: unknown) => {
           this.logger.warn(
             `${who}: "${thing.id}" (a person) is set as a card: ${(error as Error).message}`,
           );
@@ -750,27 +752,36 @@ export class SceneProcessor {
               who,
             )
           : null;
-      // A person in bed on this page: drawn so by the kit, from their figure.
-      const inBed =
-        sheet?.figure && thing.pose === 'in bed'
-          ? await figureDrawing(sheet.figure, thing.ref, 1, 'in bed')
+      // A person doing something on this page (in bed, holding a
+      // lantern, shaking): drawn so by the kit, from their figure, with
+      // the signs the page shows on them. The book's sheet otherwise.
+      const signs = signsShown(script, thing.id);
+      const onPage =
+        sheet?.figure && (thing.pose || thing.holding || signs.length)
+          ? await figureDrawing(sheet.figure, thing.ref, {
+              pose: thing.pose,
+              holding: thing.holding,
+              signs,
+            })
           : null;
-      const { anchors: bedAnchors, ...posed } = inBed ?? { anchors: null };
+      const { anchors: pageAnchors, ...posed } = onPage ?? { anchors: null };
+      const drawing = onPage ? (posed as GatedDrawing) : sheet?.drawing;
       out.set(
         thing.id,
-        sheet
+        sheet && drawing
           ? {
-              ...(inBed ? (posed as GatedDrawing) : sheet.drawing),
+              ...drawing,
               callouts: introCallouts(
-                bedAnchors ? { ...sheet, anchors: bedAnchors } : sheet,
+                pageAnchors ? { ...sheet, anchors: pageAnchors } : sheet,
                 thing.intro,
               ),
-              ...((bedAnchors ?? sheet.anchors).head
-                ? { head: (bedAnchors ?? sheet.anchors).head! }
+              ...((pageAnchors ?? sheet.anchors).head
+                ? { head: (pageAnchors ?? sheet.anchors).head! }
                 : {}),
-              // A person stands at the kit's scale; an animal or a
-              // creature at its size beside them.
-              stands: sheet.drawing.stands ?? {
+              // A person stands at the kit's scale, in the frame they are
+              // drawn in on the page; an animal or a creature at its size
+              // beside them.
+              stands: drawing.stands ?? {
                 units: SIZE_UNITS[sheet.size ?? character?.size ?? 'medium'],
               },
             }

@@ -123,6 +123,89 @@ export const FIGURE_EXTRAS = [
 ] as const;
 export type FigureExtra = (typeof FIGURE_EXTRAS)[number];
 
+/**
+ * How someone is placed on a page: standing, their arms doing
+ * something, lying on the floor, or in bed (a patient). A group takes
+ * any pose but lying and in bed, which are for one person.
+ */
+export const FIGURE_POSES = [
+  'standing',
+  'hand on head',
+  'hands on belly',
+  'hand on mouth',
+  'arms up',
+  'pointing',
+  'waving',
+  'holding',
+  'lying',
+  'in bed',
+] as const;
+export type FigurePose = (typeof FIGURE_POSES)[number];
+/** The poses one person alone takes. */
+export const LYING_POSES: readonly FigurePose[] = ['lying', 'in bed'];
+
+/**
+ * What someone is going through, shown the way cartoons show it, and
+ * switched on and off at the words like a face. Actions move the whole
+ * body (a shake, a shiver, a sway, a walk); marks sit on it (sparkles
+ * where it tingles, bolts where it hurts, heat over a fever). Any number
+ * at once.
+ */
+export const FIGURE_ACTIONS = [
+  'shaking',
+  'shivering',
+  'dizzy',
+  'coughing',
+  'sleeping',
+  'breathless',
+  'walking',
+  'jumping',
+] as const;
+export const FIGURE_MARKS = [
+  'tingling hands',
+  'tingling feet',
+  'headache',
+  'chest pain',
+  'stomach ache',
+  'fever',
+  'sweating',
+  'tears',
+  'rash',
+  'nausea',
+  'confused',
+  'idea',
+] as const;
+export const FIGURE_SIGNS = [...FIGURE_ACTIONS, ...FIGURE_MARKS] as const;
+export type FigureSign = (typeof FIGURE_SIGNS)[number];
+/** Actions for someone on their feet: no one walks or jumps lying down. */
+export const ON_FOOT: readonly FigureSign[] = ['walking', 'jumping'];
+/** The most signs someone comes on with: more and no one reads them. */
+export const MAX_SIGNS = 4;
+/** The group a sign is drawn in: "tingling hands" in "tingling-hands". */
+export const signId = (sign: string) => sign.replace(/\s+/g, '-');
+/** Faces only the kit draws, besides the story's seven: worn one at a time with them. */
+export const KIT_FACES = ['pain'] as const;
+export type KitFace = (typeof KIT_FACES)[number];
+/** Every face someone drawn by the kit can wear. */
+export type FigureFace = Expression | KitFace;
+
+/** What someone can hold in their hand. */
+export const FIGURE_PROPS = [
+  'book',
+  'phone',
+  'cup',
+  'thermometer',
+  'syringe',
+  'pills',
+  'flag',
+  'umbrella',
+  'magnifier',
+  'bag',
+  'ball',
+  'lantern',
+] as const;
+export type FigureProp = (typeof FIGURE_PROPS)[number];
+
 /** The skin tones, from 1, the lightest, to 10, the deepest. */
 export const SKIN_TONES = 10;
 /** The most extras one person carries: more and no one reads them. */
@@ -566,6 +649,11 @@ const FACES: Record<Expression, Face> = {
 };
 
 const FACE_NAMES = Object.keys(FACES) as Expression[];
+/** Every face a person or a character drawn by the kit can wear: the story's seven, in its order, and the kit's own. */
+export const FIGURE_FACES: readonly FigureFace[] = [
+  ...FACE_NAMES,
+  ...KIT_FACES,
+];
 
 function mouthShape(name: string, my: number): string {
   switch (name) {
@@ -641,12 +729,13 @@ function faceOf(name: Expression, R: Rig, skin: string): string {
   return out.join('');
 }
 
-/** Closed eyes, shown for a moment every few seconds. */
-function blinkOf(R: Rig, skin: string): string {
-  const { y, dx, rx, ry } = R.eyes;
+/** Closed eyes, shown for a moment every few seconds; at a head's middle other than the rig's, for someone asleep in a pose. */
+function blinkOf(R: Rig, skin: string, hx = 0, hy = R.cy): string {
+  const { dx, rx, ry } = R.eyes;
+  const y = hy + 3;
   return [-1, 1]
     .map((side) => {
-      const ex = side * dx;
+      const ex = hx + side * dx;
       return (
         `<ellipse cx="${ex}" cy="${y}" rx="${rx + 0.8}" ry="${ry + 0.8}" ${inked(skin)}/>` +
         line(
@@ -657,6 +746,279 @@ function blinkOf(R: Rig, skin: string): string {
       );
     })
     .join('');
+}
+
+// ── Signs: what someone is going through ──────────────────────────────────
+
+/** Where signs go on someone: their head's middle, their mouth, chest, belly, hands and feet, and beside them. */
+interface SignPoints {
+  head: [number, number];
+  mouth: [number, number];
+  chest: [number, number];
+  belly: [number, number];
+  hands: [number, number][];
+  feet: [number, number][];
+  /** Beside the body, where lines of motion go, and which way is out: lying down, only the side off the floor. */
+  sides: { x: number; out: -1 | 1 }[];
+}
+
+const RED = '#e0463a';
+const TEAR = '#6cb8e6';
+const WARM = '#e8743b';
+const later = (s: number) => (s ? ` style="animation-delay:-${s}s"` : '');
+
+/** A four-pointed sparkle: where it tingles. */
+function sparkle(x: number, y: number, r: number, delay: number): string {
+  const k = r * 0.22;
+  return `<path class="tw"${later(delay)} d="M${pt(x, y - r)} Q${pt(x + k, y - k)} ${pt(x + r, y)} Q${pt(x + k, y + k)} ${pt(x, y + r)} Q${pt(x - k, y + k)} ${pt(x - r, y)} Q${pt(x - k, y - k)} ${pt(x, y - r)} Z" ${inked(GOLD, 1.6)}/>`;
+}
+
+/** A zigzag bolt, out from a point along an angle: where it hurts. */
+function bolt(x: number, y: number, angle: number, delay: number): string {
+  const a = (angle * Math.PI) / 180;
+  const [ux, uy] = [Math.cos(a), Math.sin(a)];
+  const [nx, ny] = [-uy, ux];
+  const at = (along: number, across: number) =>
+    pt(x + ux * along + nx * across, y + uy * along + ny * across);
+  return `<path class="throb"${later(delay)} d="M${at(0, 0)} L${at(6, 5)} L${at(10, -4)} L${at(16, 3)}" fill="none" stroke="${RED}" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round"/>`;
+}
+
+/** A burst on the body: where it aches. */
+function burst(x: number, y: number, r: number): string {
+  const spikes: string[] = [];
+  for (let k = 0; k < 16; k += 1) {
+    const a = (k * Math.PI) / 8;
+    const d = k % 2 ? r * 0.5 : r;
+    spikes.push(pt(x + Math.cos(a) * d, y + Math.sin(a) * d));
+  }
+  return `<path class="throb" d="M${spikes.join(' L')} Z" fill="${RED}" fill-opacity="0.8" stroke="${FIGURE_INK}" stroke-width="1.8"/>`;
+}
+
+/** A drop: sweat, or a tear. */
+function drop(x: number, y: number, delay: number): string {
+  return `<path class="drip"${later(delay)} d="M${pt(x, y - 7)} C${pt(x + 5, y - 1)} ${pt(x + 5, y + 4)} ${pt(x, y + 4)} C${pt(x - 5, y + 4)} ${pt(x - 5, y - 1)} ${pt(x, y - 7)} Z" ${inked(TEAR, 1.4)}/>`;
+}
+
+/** A curl of motion beside the body, bowing outward. */
+function shake(x: number, y: number, dir: number): string {
+  return [0, 8]
+    .map((k) =>
+      line(
+        `M${pt(x + dir * k, y - 13)} Q${pt(x + dir * (k + 7), y)} ${pt(x + dir * k, y + 13)}`,
+        FIGURE_INK,
+        3,
+      ),
+    )
+    .join('');
+}
+
+/** Each sign's drawing: what sits on the body, and what floats over the head, upright however the body lies. */
+interface Signs {
+  body: Record<FigureSign, string>;
+  air: Partial<Record<FigureSign, string>>;
+}
+
+/**
+ * Every sign someone can show, drawn where it goes on them: each its own
+ * group, hidden until the stage shows it. Those that move do so in their
+ * own CSS; what moves the whole body is keyed on a class the stage sets
+ * while the sign is on (styleOf). What floats over the head (stars,
+ * steam, a Z, a question mark, a bulb) is drawn apart, so it can stay
+ * upright over someone lying down.
+ */
+function signsOf(p: SignPoints, R: Rig, skin: string): Signs {
+  const [hx, hy] = p.head;
+  const { dx, rx, ry } = R.eyes;
+  const ey = hy + 3;
+  const [, my] = p.mouth;
+  const eyes = [-1, 1].map((side) => hx + side * dx);
+  const around = (angle: number, r = 1) => {
+    const a = (angle * Math.PI) / 180;
+    return [hx + Math.cos(a) * 58 * r, hy + Math.sin(a) * 52 * r] as const;
+  };
+  const star = (x: number, y: number, delay: number) => sparkle(x, y, 7, delay);
+  const zed = (x: number, y: number, size: number, delay: number) =>
+    `<path class="rise"${later(delay)} d="M${pt(x, y)} L${pt(x + size, y)} L${pt(x, y + size)} L${pt(x + size, y + size)}" fill="none" stroke="#6a79c9" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>`;
+  const puffs = (big: number) =>
+    [0, 1, 2]
+      .map(
+        (k) =>
+          `<circle class="puff"${later(k * 0.25)} cx="${r1(hx + 20 + k * 12 * big)}" cy="${r1(my - 2 - k * 4 * big)}" r="${r1((4 + k * 2) * big)}" ${inked('#ecebe6', 1.6)}/>`,
+      )
+      .join('');
+  const outward = (x: number) => (x < 0 ? -1 : 1);
+  const question = (x: number, y: number, delay: number) =>
+    `<g class="tw"${later(delay)}>${line(`M${pt(x - 5, y - 7)} Q${pt(x - 5, y - 14)} ${pt(x + 1, y - 14)} Q${pt(x + 7, y - 14)} ${pt(x + 7, y - 8)} Q${pt(x + 7, y - 3)} ${pt(x + 1, y - 1)} L${pt(x + 1, y + 3)}`, FIGURE_INK, 3.2)}<circle cx="${r1(x + 1)}" cy="${r1(y + 9)}" r="2.2" ${flat(FIGURE_INK)}/></g>`;
+  const spiral = (x: number) => {
+    const turn: string[] = [];
+    for (let k = 0; k <= 26; k += 1) {
+      const t = k * 0.42;
+      const r = 1 + t * 1.25;
+      turn.push(pt(x + Math.cos(t) * r, ey + Math.sin(t) * r * (ry / rx)));
+    }
+    return `<ellipse cx="${x}" cy="${ey}" rx="${rx}" ry="${ry}" ${inked('#ffffff')}/>${line(`M${turn.join(' L')}`, FIGURE_INK, 2.2)}`;
+  };
+  const body: Record<FigureSign, string> = {
+    // Motion: the body's own is in styleOf, keyed on the sign.
+    shaking: [p.chest[1], p.belly[1] + 16]
+      .flatMap((y) => p.sides.map((side) => shake(side.x, y, side.out)))
+      .map((arc) => `<g class="flicker">${arc}</g>`)
+      .join(''),
+    shivering: [p.chest[1], p.belly[1]]
+      .flatMap((y) =>
+        p.sides.map(
+          ({ x, out }) =>
+            `<g class="flicker">${line(`M${pt(x, y - 10)} L${pt(x + out * 5, y - 5)} L${pt(x, y)} L${pt(x + out * 5, y + 5)} L${pt(x, y + 10)}`, TEAR, 3)}</g>`,
+        ),
+      )
+      .join(''),
+    dizzy: eyes.map(spiral).join(''),
+    coughing: puffs(1.2),
+    sleeping: blinkOf(R, skin, hx, hy),
+    breathless: puffs(0.8),
+    walking: '',
+    jumping: '',
+    // Signs on the body.
+    'tingling hands': p.hands
+      .map(([x, y]) => {
+        const o = outward(x);
+        return (
+          sparkle(x + o * 15, y - 15, 6, 0) +
+          sparkle(x + o * 23, y + 2, 4.5, 0.35) +
+          sparkle(x + o * 7, y + 17, 4, 0.7)
+        );
+      })
+      .join(''),
+    'tingling feet': p.feet
+      .map(([x, y]) => {
+        const o = outward(x);
+        return (
+          sparkle(x + o * 24, y - 14, 6, 0.2) +
+          sparkle(x + o * 32, y + 1, 4.5, 0.55) +
+          sparkle(x + o * 6, y - 22, 4, 0.9)
+        );
+      })
+      .join(''),
+    headache: '',
+    'chest pain': burst(p.chest[0] - 6, p.chest[1], 14),
+    'stomach ache': burst(p.belly[0] - 4, p.belly[1] + 6, 14),
+    fever: eyes
+      .map(
+        (x) =>
+          `<ellipse cx="${r1(x + (x < hx ? -14 : 14))}" cy="${r1(hy + 17)}" rx="8" ry="5" fill="#e8574d" fill-opacity="0.45" stroke="none"/>`,
+      )
+      .join(''),
+    sweating: '',
+    tears: eyes
+      .map(
+        (x, k) =>
+          line(
+            `M${pt(x + (k ? 4 : -4), ey + 13)} Q${pt(x + (k ? 9 : -9), hy + 22)} ${pt(x + (k ? 8 : -8), hy + 36)}`,
+            TEAR,
+            4.5,
+          ) + drop(x + (k ? 8 : -8), hy + 40, k * 0.5),
+      )
+      .join(''),
+    rash: [
+      ...[
+        [-30, 12],
+        [-24, 20],
+        [-34, 22],
+        [28, 13],
+        [34, 21],
+        [24, 22],
+        [-8, -22],
+        [10, -20],
+      ].map(([x, y]) => [hx + x, hy + y]),
+      ...p.hands.flatMap(([x, y]) => [
+        [x - 4, y - 2],
+        [x + 3, y + 3],
+      ]),
+    ]
+      .map(
+        ([x, y]) =>
+          `<circle cx="${r1(x)}" cy="${r1(y)}" r="2.3" ${flat('#d94b4b')}/>`,
+      )
+      .join(''),
+    nausea: `<ellipse cx="${hx}" cy="${r1(hy + 8)}" rx="39" ry="30" fill="#7bbf52" fill-opacity="0.38" stroke="none"/>`,
+    confused: '',
+    idea: '',
+  };
+  const air: Partial<Record<FigureSign, string>> = {
+    dizzy: [-150, -90, -30]
+      .map((a, k) => star(...around(a), k * 0.35))
+      .join(''),
+    sleeping: [0, 1, 2]
+      .map((k) => zed(hx + 36 + k * 10, hy - 48 - k * 14, 8 + k * 2, k * 0.8))
+      .join(''),
+    headache: [-155, -90, -25]
+      .map((a, k) => bolt(...around(a, 1.02), a, k * 0.3))
+      .join(''),
+    fever: [-18, 0, 18]
+      .map(
+        (x, k) =>
+          `<path class="rise"${later(k * 0.6)} d="M${pt(hx + x, hy - 50)} q5,-4 0,-8 q-5,-4 0,-8 q5,-4 0,-8" fill="none" stroke="${WARM}" stroke-width="3" stroke-linecap="round"/>`,
+      )
+      .join(''),
+    sweating: [-1, 1]
+      .flatMap((side) => [
+        drop(hx + side * 48, hy - 20, side < 0 ? 0 : 0.6),
+        drop(hx + side * 54, hy + 4, side < 0 ? 0.35 : 0.9),
+      ])
+      .join(''),
+    confused: question(hx - 20, hy - 52, 0) + question(hx + 22, hy - 56, 0.5),
+    idea:
+      `<g class="throb"><circle cx="${hx}" cy="${hy - 56}" r="10" ${inked('#ffe16b')}/><rect x="${hx - 5}" y="${hy - 47}" width="10" height="6" rx="2" ${inked('#c9c3ba', 1.8)}/></g>` +
+      [-70, -35, 35, 70]
+        .map((a) => {
+          const r = ((a - 90) * Math.PI) / 180;
+          return line(
+            `M${pt(hx + Math.cos(r) * 14, hy - 56 + Math.sin(r) * 14)} L${pt(hx + Math.cos(r) * 19, hy - 56 + Math.sin(r) * 19)}`,
+            '#e2b75d',
+            2.6,
+          );
+        })
+        .join(''),
+  };
+  return { body, air };
+}
+
+/** Each sign's whole drawing, on the body and over the head, for someone upright. */
+function upright({ body, air }: Signs): Record<FigureSign, string> {
+  return Object.fromEntries(
+    FIGURE_SIGNS.map((name) => [name, body[name] + (air[name] ?? '')]),
+  ) as Record<FigureSign, string>;
+}
+
+/** The pain face: eyes squeezed shut, brows pinched, teeth gritted. */
+function painFace(R: Rig, skin: string): string {
+  const { y, dx, rx, ry } = R.eyes;
+  const my = R.mouthY;
+  const eyes = [-1, 1]
+    .map((side) => {
+      const ex = side * dx;
+      // The squeeze points in, toward the nose.
+      const d = side < 0 ? 1 : -1;
+      return (
+        `<ellipse cx="${ex}" cy="${y}" rx="${rx + 0.8}" ry="${ry + 0.8}" ${flat(skin)}/>` +
+        line(
+          `M${pt(ex - d * 8, y - 7)} L${pt(ex + d * 6, y)} L${pt(ex - d * 8, y + 7)}`,
+          FIGURE_INK,
+          3.4,
+        ) +
+        line(
+          `M${pt(ex + side * 11, y - ry - 2)} L${pt(ex - side * 8, y - ry - 9)}`,
+          FIGURE_INK,
+          3.4,
+        )
+      );
+    })
+    .join('');
+  return (
+    eyes +
+    `<g class="mouth"><rect x="-14" y="${my - 4}" width="28" height="10" rx="3" ${inked('#ffffff')}/>${line(`M-14,${my + 1} L14,${my + 1}`, FIGURE_INK, 1.8)}</g>` +
+    `<g class="talk" opacity="0"><rect x="-12" y="${my - 5}" width="24" height="14" rx="4" ${inked(MOUTH)}/><rect x="-9" y="${my - 3.6}" width="18" height="4" rx="1" ${flat('#ffffff')}/></g>`
+  );
 }
 
 // ── Hair and headwear ──────────────────────────────────────────────────────
@@ -1095,6 +1457,238 @@ function extrasOnBody(spec: FigureSpec, R: Rig): string {
   return out.join('');
 }
 
+// ── Props ──────────────────────────────────────────────────────────────────
+
+/**
+ * How a prop is held: up in front, the arm bent at the elbow; high, by
+ * a pole beside the head; or down at the side, hanging from the hand.
+ * And how much larger than life it is drawn, as a cartoon draws what
+ * matters: beside a head this big, a cup the size of a hand is lost.
+ */
+const GRIPS: Record<
+  FigureProp,
+  { grip: 'up' | 'high' | 'down'; size: number }
+> = {
+  book: { grip: 'up', size: 1.3 },
+  phone: { grip: 'up', size: 1.5 },
+  cup: { grip: 'up', size: 1.5 },
+  thermometer: { grip: 'up', size: 1.35 },
+  syringe: { grip: 'up', size: 1.35 },
+  pills: { grip: 'up', size: 1.45 },
+  flag: { grip: 'high', size: 1 },
+  umbrella: { grip: 'high', size: 1 },
+  magnifier: { grip: 'up', size: 1.4 },
+  bag: { grip: 'down', size: 1.25 },
+  ball: { grip: 'up', size: 1.4 },
+  lantern: { grip: 'up', size: 1.35 },
+};
+const WOOD = '#8a5a3b';
+const STEEL = '#c9cdd3';
+
+/**
+ * A prop as held in a right hand, drawn from the hand (at 0,0) outward
+ * to +x, at its own size: the left hand's is its mirror. `up` is how far
+ * above the hand the top of the head is, for a pole to clear it. With
+ * how far it reaches out from the hand, and up.
+ */
+function propOf(
+  prop: FigureProp,
+  accent: string,
+  up: number,
+): { markup: string; out: number; top: number } {
+  const k = GRIPS[prop].size;
+  // Its lines as wide as the figure's, however large it is drawn.
+  const W = (n: number) => r1(n / k);
+  const drawn = ((): { markup: string; out: number; top: number } => {
+    switch (prop) {
+      case 'book': {
+        // Open, its pages to the reader.
+        const lines = [0.25, 0.45, 0.65]
+          .flatMap((v) =>
+            [-1, 1].map((s) =>
+              line(
+                `M${pt(s * 3.6, -32 + 24 * v)} L${pt(s * 20.4, -37 + 24 * v)}`,
+                '#b9b4ae',
+                W(1.6),
+              ),
+            ),
+          )
+          .join('');
+        return {
+          markup:
+            `<path d="M0,-3 L-27,-11 L-27,-41 L0,-33 L27,-41 L27,-11 Z" ${inked(accent)}/>` +
+            [-1, 1]
+              .map(
+                (s) =>
+                  `<path d="M0,-7 L${s * 24},-14 L${s * 24},-38 L0,-31 Z" ${inked('#ffffff', W(2))}/>`,
+              )
+              .join('') +
+            lines,
+          out: 28,
+          top: -42,
+        };
+      }
+      case 'phone':
+        return {
+          markup: `<rect x="-8" y="-32" width="16" height="30" rx="3.5" ${inked('#3a3740')}/><rect x="-5.5" y="-29" width="11" height="21" rx="1.5" ${flat('#9fd3f0')}/>`,
+          out: 9,
+          top: -33,
+        };
+      case 'cup': {
+        const handle = 'M10,-22 Q21,-22 21,-15 Q21,-8 10,-8';
+        return {
+          markup:
+            line(handle, FIGURE_INK, W(8.2)) +
+            line(handle, accent, W(3)) +
+            `<rect x="-11" y="-28" width="22" height="24" rx="3" ${inked(accent)}/>` +
+            `<rect x="-9.7" y="-21" width="19.4" height="4" ${flat(shade(accent))}/>`,
+          out: 24,
+          top: -29,
+        };
+      }
+      case 'thermometer':
+        // Held up, the bulb under the hand.
+        return {
+          markup:
+            `<rect x="-4" y="-46" width="8" height="54" rx="4" ${inked('#f5f5f2', W(2))}/>` +
+            `<rect x="-1.6" y="-30" width="3.2" height="38" ${flat(RED)}/>` +
+            [-38, -30, -22]
+              .map((y) => line(`M4,${y} L7,${y}`, FIGURE_INK, W(1.6)))
+              .join('') +
+            `<circle cx="0" cy="12" r="6" ${inked(RED, W(2))}/>`,
+          out: 8,
+          top: -47,
+        };
+      case 'syringe':
+        // Needle up, as a nurse holds it.
+        return {
+          markup:
+            `<g transform="rotate(-38)">` +
+            line('M30,0 L48,0', '#8d8f96', W(2.2)) +
+            `<rect x="-6" y="-6" width="36" height="12" rx="2" ${inked('#eef6fb', W(2))}/>` +
+            `<rect x="8" y="-3.6" width="20.5" height="7.2" ${flat('#7cc3e8')}/>` +
+            [12, 18, 24]
+              .map((x) => line(`M${x},-6 L${x},-2.5`, FIGURE_INK, W(1.2)))
+              .join('') +
+            `<rect x="-17" y="-2" width="12" height="4" ${inked(STEEL, W(1.6))}/>` +
+            `<rect x="-21" y="-7" width="4" height="14" rx="1" ${inked(STEEL, W(1.6))}/>` +
+            `<rect x="-8" y="-10" width="4" height="20" rx="1" ${inked(STEEL, W(1.6))}/>` +
+            `</g>`,
+          out: 39,
+          top: -31,
+        };
+      case 'pills':
+        // A bottle, a cross on its label.
+        return {
+          markup:
+            `<rect x="-10" y="-30" width="20" height="28" rx="3" ${inked('#f0924a')}/>` +
+            `<rect x="-7" y="-24" width="14" height="13" rx="1" ${flat('#ffffff')}/>` +
+            `<path d="M-1.4,-21.5 h2.8 v3.1 h3.1 v2.8 h-3.1 v3.1 h-2.8 v-3.1 h-3.1 v-2.8 h3.1 Z" ${flat(RED)}/>` +
+            `<rect x="-11.5" y="-39" width="23" height="10" rx="2" ${inked('#f5f5f2')}/>`,
+          out: 12,
+          top: -40,
+        };
+      case 'flag': {
+        const top = r1(up / k - 24);
+        return {
+          markup:
+            line(`M0,14 L0,${top}`, FIGURE_INK, W(6.6)) +
+            line(`M0,14 L0,${top}`, WOOD, W(3.4)) +
+            `<circle cx="0" cy="${r1(top - 3)}" r="3.6" ${inked(GOLD, W(1.8))}/>` +
+            `<path d="M2,${top} Q12,${r1(top - 5)} 23,${top} Q34,${r1(top + 5)} 45,${top} L45,${r1(top + 28)} Q34,${r1(top + 33)} 23,${r1(top + 28)} Q12,${r1(top + 23)} 2,${r1(top + 28)} Z" ${inked(accent)}/>`,
+          out: 46,
+          top: r1(top - 8),
+        };
+      }
+      case 'umbrella': {
+        // Over the head, the shaft leaning in from the hand beside it.
+        const top = r1(up / k - 10);
+        const cx = -40;
+        const w = 64;
+        const scallops = [2, 1, 0, -1]
+          .map((j) => {
+            const a = cx + (j * w) / 2;
+            const b = cx + ((j - 1) * w) / 2;
+            return `Q${r1((a + b) / 2)},${r1(top - 9)} ${r1(b)},${top}`;
+          })
+          .join(' ');
+        return {
+          markup:
+            line(`M0,8 L0,16 Q0,24 -7,24 Q-12,24 -12,19`, FIGURE_INK, W(3.4)) +
+            line(`M0,10 L${cx},${top}`, FIGURE_INK, W(3)) +
+            `<path d="M${cx - w},${top} Q${cx - w},${r1(top - 28)} ${cx},${r1(top - 30)} Q${cx + w},${r1(top - 28)} ${cx + w},${top} ${scallops} Z" ${inked(accent)}/>` +
+            [-1, 1]
+              .map((s) =>
+                line(
+                  `M${cx},${r1(top - 30)} Q${cx + (s * w) / 4},${r1(top - 22)} ${cx + (s * w) / 2},${top}`,
+                  shade(accent, 0.75),
+                  W(2),
+                ),
+              )
+              .join('') +
+            line(
+              `M${cx},${r1(top - 30)} L${cx},${r1(top - 36)}`,
+              FIGURE_INK,
+              W(3),
+            ),
+          out: cx + w + 1,
+          top: r1(top - 37),
+        };
+      }
+      case 'magnifier':
+        return {
+          markup:
+            line('M-2,8 L9,-14', FIGURE_INK, W(7.6)) +
+            line('M-2,8 L9,-14', WOOD, W(4.2)) +
+            `<circle cx="15" cy="-27" r="14" fill="#d6ecf7" fill-opacity="0.85" stroke-width="${W(4.6)}"/>` +
+            line('M7,-30 Q9,-36 15,-37', '#ffffff', W(2.4)),
+          out: 31,
+          top: -43,
+        };
+      case 'bag':
+        // Hanging from the hand at the side.
+        return {
+          markup:
+            `<path d="M-8,6 Q-8,-9 0,-9 Q8,-9 8,6" fill="none" stroke-width="${W(2.6)}"/>` +
+            `<path d="M-15,5 L15,5 L17,31 L-17,31 Z" ${inked(accent)}/>` +
+            line('M-15.4,11 L15.4,11', shade(accent), W(2)),
+          out: 18,
+          top: -10,
+        };
+      case 'ball':
+        return {
+          markup:
+            `<circle cx="0" cy="-19" r="14" ${inked(accent)}/>` +
+            line('M-13.6,-17 Q0,-11 13.6,-17', shade(accent, 0.7), W(2.2)) +
+            line('M-2,-32.8 Q-7,-19 -2,-5.2', shade(accent, 0.7), W(2.2)),
+          out: 15,
+          top: -34,
+        };
+      default:
+        // A lantern, hanging from the hand held up: its glow round it.
+        return {
+          markup:
+            `<circle cx="0" cy="25" r="21" fill="#ffe16b" fill-opacity="0.3" stroke="none"/>` +
+            `<path d="M-8,10 Q-8,-5 0,-5 Q8,-5 8,10" fill="none" stroke-width="${W(2.4)}"/>` +
+            `<path d="M-9,10 L9,10 L12,15 L-12,15 Z" ${inked('#3a3740', W(2))}/>` +
+            `<rect x="-10" y="15" width="20" height="20" ${inked('#ffe16b', W(2))}/>` +
+            `<path d="M0,19.5 Q4.5,25 0,30.5 Q-4.5,25 0,19.5 Z" ${flat('#f0924a')}/>` +
+            `<rect x="-12" y="35" width="24" height="5" rx="1.5" ${inked('#3a3740', W(2))}/>`,
+          out: 21,
+          top: -6,
+        };
+    }
+  })();
+  return {
+    markup:
+      k === 1
+        ? drawn.markup
+        : `<g transform="scale(${k})" stroke-width="${W(LINE)}">${drawn.markup}</g>`,
+    out: r1(drawn.out * k),
+    top: r1(drawn.top * k),
+  };
+}
+
 // ── The figure ─────────────────────────────────────────────────────────────
 
 export interface FigureDrawing {
@@ -1140,19 +1734,86 @@ interface Layers {
   behind: string;
   body: string;
   arms: string;
+  /** An arm that reaches the face, drawn in front of it: a hand on the head, over the mouth. */
+  reach: string;
   head: string;
   faces: Record<Expression, string>;
+  /** The kit's own faces. */
+  more: Record<KitFace, string>;
+  signs: Record<FigureSign, string>;
   blink: string;
   over: string;
+  /** How far they reach past the frame, in the kit's units: a pointing hand, a flag, an umbrella over the head. */
+  beyond: { left: number; right: number; up: number };
 }
 
-function layersOf(spec: FigureSpec): Layers {
+/** Whether someone in a pose has a hand free to hold something. */
+export function canHold(pose: FigurePose): boolean {
+  return holderOf(pose, 'book') !== 0;
+}
+
+/** Which hand holds a prop in a pose: the right, the left when the right is busy, none when both are. */
+function holderOf(pose: FigurePose, holding: FigureProp | null): -1 | 0 | 1 {
+  if (!holding) return 0;
+  switch (pose) {
+    case 'standing':
+    case 'holding':
+      return 1;
+    case 'hand on head':
+    case 'hand on mouth':
+    case 'pointing':
+    case 'waving':
+      return -1;
+    default:
+      return 0;
+  }
+}
+
+type Point2 = [number, number];
+
+/** A point a share of the way along a line through points, and the line between two shares of it. */
+function alongOf(joints: Point2[]) {
+  const lengths = joints
+    .slice(1)
+    .map((p, i) => Math.hypot(p[0] - joints[i][0], p[1] - joints[i][1]));
+  const total = lengths.reduce((a, b) => a + b, 0) || 1;
+  const at = (k: number): Point2 => {
+    let left = k * total;
+    for (let i = 0; i < lengths.length; i += 1) {
+      if (left <= lengths[i] || i === lengths.length - 1) {
+        const f = lengths[i] ? Math.min(1, left / lengths[i]) : 0;
+        const [a, b] = [joints[i], joints[i + 1]];
+        return [a[0] + (b[0] - a[0]) * f, a[1] + (b[1] - a[1]) * f];
+      }
+      left -= lengths[i];
+    }
+    return joints[joints.length - 1];
+  };
+  const stretch = (from: number, to: number): string => {
+    const points = [at(from)];
+    let run = 0;
+    for (let i = 0; i < lengths.length - 1; i += 1) {
+      run += lengths[i];
+      if (run / total > from && run / total < to) points.push(joints[i + 1]);
+    }
+    points.push(at(to));
+    return `M${points.map((p) => pt(...p)).join(' L')}`;
+  };
+  return { at, stretch };
+}
+
+function layersOf(
+  spec: FigureSpec,
+  pose: FigurePose = 'standing',
+  holding: FigureProp | null = null,
+): Layers {
   const R = rigOf(spec.age, spec.build);
   const skin = SKIN[Math.min(SKIN_TONES, Math.max(1, spec.skin)) - 1];
   const hairColour = HAIR[spec.hairColour];
   const dressed = dressOf(spec, R);
   const { hemY, sY, cy, halfShoulder: s2 } = R;
   const h2 = R.halfHem;
+  const lying = pose === 'lying';
 
   const bottom = hemY + dressed.longer;
   // The body's half-width at a height, along its slope, flared below the hem.
@@ -1162,7 +1823,8 @@ function layersOf(spec: FigureSpec): Layers {
     slope * (y - (sY + 12)) +
     (y > hemY ? (dressed.flare * (y - hemY)) / Math.max(1, dressed.longer) : 0);
 
-  // Legs, shoes, and what is worn on the legs.
+  // Legs, shoes, and what is worn on the legs: each leg its own group, so
+  // a walk lifts one and then the other.
   const legs: string[] = [];
   const bare =
     spec.top === 'dress' || spec.top === 'robe' || spec.bottom === 'skirt';
@@ -1170,18 +1832,17 @@ function layersOf(spec: FigureSpec): Layers {
   const legTop = hemY - 4;
   for (const s of [-1, 1]) {
     const x = s * 15 - 8;
-    legs.push(
+    const leg = [
       `<rect x="${x}" y="${legTop}" width="16" height="${r1(-FEET - legTop)}" ${inked(bare || spec.bottom === 'shorts' ? skin : trousers)}/>`,
-    );
+    ];
     if (!bare && spec.bottom === 'shorts') {
       const cut = hemY + Math.max(8, (-FEET - hemY) * 0.45);
-      legs.push(
+      leg.push(
         `<rect x="${x - 1}" y="${legTop}" width="18" height="${r1(cut - legTop)}" ${inked(trousers)}/>`,
       );
     }
-    legs.push(
-      `<ellipse cx="${s * 17}" cy="-6" rx="15" ry="7" ${inked(SHOE)}/>`,
-    );
+    leg.push(`<ellipse cx="${s * 17}" cy="-6" rx="15" ry="7" ${inked(SHOE)}/>`);
+    legs.push(`<g class="leg l${s < 0 ? 0 : 1}">${leg.join('')}</g>`);
   }
   if (spec.bottom === 'skirt' && spec.top !== 'dress' && spec.top !== 'robe') {
     const down = hemY + Math.max(12, R.legs * 0.5);
@@ -1199,39 +1860,118 @@ function layersOf(spec: FigureSpec): Layers {
     dressed.collar,
   ].join('');
 
-  // Arms over the body: a sleeve, then a mitten hand.
+  // Arms over the body: a sleeve, then a mitten hand, where the pose
+  // puts it, bent at the elbow to hold something up. One that reaches
+  // the face is drawn in front of it.
   const arms: string[] = [];
+  const reach: string[] = [];
+  const hands: Point2[] = [];
   const width = spec.build === 'slim' ? 14 : spec.build === 'broad' ? 16 : 15;
+  const belly = r1(sY + (hemY - sY) * 0.66);
+  const long = hemY - sY;
+  const holds = holderOf(pose, holding);
+  const beyond: { left: number; right: number; top: number } = {
+    left: FIGURE_FRAME.halfWidth,
+    right: FIGURE_FRAME.halfWidth,
+    top: R.top - FIGURE_FRAME.headroom,
+  };
+  const rest = (s: number): Point2 => [s * (h2 + 3), hemY - 8];
+  const handFor = (
+    s: number,
+  ): { at: Point2; elbow?: Point2; front?: boolean } => {
+    if (holding && s === holds)
+      switch (GRIPS[holding].grip) {
+        case 'down':
+          // Low enough to swing clear of the floor, however short the legs.
+          return { at: [s * (h2 + 3), Math.min(hemY - 8, -46)] };
+        case 'high':
+          return {
+            at: [s * (s2 + 18), r1(sY + 4)],
+            elbow: [s * (s2 + 16), r1(sY + long * 0.5)],
+          };
+        default:
+          return {
+            at: [s * (s2 + 20), r1(sY + long * 0.3)],
+            elbow: [s * (s2 + 5), r1(sY + long * 0.62)],
+          };
+      }
+    const right = s === 1;
+    switch (pose) {
+      case 'hand on head':
+        return right ? { at: [36, cy - 16], front: true } : { at: rest(s) };
+      case 'hand on mouth':
+        return right ? { at: [6, R.mouthY + 3], front: true } : { at: rest(s) };
+      case 'hands on belly':
+        return { at: [s * 12, belly] };
+      case 'arms up':
+        return { at: [s * (s2 + 24), sY - 40] };
+      case 'pointing':
+        return right ? { at: [s2 + 44, sY + 14] } : { at: rest(s) };
+      case 'waving':
+        return right ? { at: [s2 + 30, sY - 38] } : { at: rest(s) };
+      default:
+        return { at: rest(s) };
+    }
+  };
+  const plans = new Map([-1, 1].map((s) => [s, handFor(s)]));
+  // A walking stick is in a hand free at the side: the right, else the left.
+  const free = (s: number) =>
+    s !== holds &&
+    plans.get(s)!.at[0] === rest(s)[0] &&
+    plans.get(s)!.at[1] === rest(s)[1];
+  const stick = spec.extras.includes('walking stick')
+    ? [1, -1].find(free)
+    : undefined;
   for (const s of [-1, 1]) {
-    const S: [number, number] = [s * (s2 - 7), sY + 12];
-    const H: [number, number] = [s * (h2 + 3), hemY - 8];
-    const along = (k: number): [number, number] => [
-      S[0] + (H[0] - S[0]) * k,
-      S[1] + (H[1] - S[1]) * k,
-    ];
-    const arm = (to: [number, number], colour: string, w: number) =>
-      line(`M${pt(...S)} L${pt(...to)}`, colour, w);
-    if (s === 1 && spec.extras.includes('walking stick'))
-      arms.push(
-        line(`M${pt(H[0] + 2, H[1] - 6)} L${pt(H[0] + 7, -3)}`, FIGURE_INK, 7),
-        line(`M${pt(H[0] + 2, H[1] - 6)} L${pt(H[0] + 7, -3)}`, '#8a5a3b', 4),
-      );
+    const S: Point2 = [s * (s2 - 7), sY + 12];
+    const { at: H, elbow, front } = plans.get(s)!;
+    hands.push(H);
+    const into = front ? reach : arms;
+    const start = into.length;
+    const { stretch } = alongOf(elbow ? [S, elbow, H] : [S, H]);
+    if (s === stick) {
+      const d = `M${pt(H[0] + s * 2, H[1] - 6)} L${pt(H[0] + s * 7, -3)}`;
+      arms.push(line(d, FIGURE_INK, 7), line(d, WOOD, 4));
+    }
     const w = dressed.sleeves === 'wide' ? width + 5 : width;
-    arms.push(arm(H, FIGURE_INK, w + LINE * 2));
-    arms.push(arm(H, dressed.sleeves === 'short' ? skin : dressed.sleeve, w));
+    into.push(line(stretch(0, 1), FIGURE_INK, w + LINE * 2));
+    into.push(
+      line(
+        stretch(0, 1),
+        dressed.sleeves === 'short' ? skin : dressed.sleeve,
+        w,
+      ),
+    );
     if (dressed.sleeves === 'short')
-      arms.push(arm(along(0.42), dressed.sleeve, w));
+      into.push(line(stretch(0, 0.42), dressed.sleeve, w));
     if (spec.top === 'jumper')
-      arms.push(
-        line(
-          `M${pt(...along(0.8))} L${pt(...along(0.9))}`,
-          shade(dressed.sleeve),
-          w,
-        ),
+      into.push(line(stretch(0.8, 0.9), shade(dressed.sleeve), w));
+    // What the hand holds, under the hand that holds it.
+    if (holding && s === holds) {
+      const prop = propOf(holding, CLOTH[spec.accentColour], R.top - H[1]);
+      into.push(
+        `<g transform="translate(${r1(H[0])} ${r1(H[1])})${s < 0 ? ' scale(-1 1)' : ''}">${prop.markup}</g>`,
       );
-    arms.push(
+      if (s > 0) beyond.right = Math.max(beyond.right, H[0] + prop.out + 3);
+      else beyond.left = Math.max(beyond.left, -H[0] + prop.out + 3);
+      beyond.top = Math.min(beyond.top, H[1] + prop.top - 3);
+    }
+    into.push(
       `<circle cx="${r1(H[0])}" cy="${r1(H[1])}" r="8.5" ${inked(skin)}/>`,
     );
+    // A pointing finger; a wave from the shoulder.
+    if (pose === 'pointing' && s === 1) {
+      into.push(
+        `<rect x="${r1(H[0] + 4)}" y="${r1(H[1] - 3.5)}" width="13" height="7" rx="3.5" ${inked(skin)}/>`,
+      );
+      beyond.right = Math.max(beyond.right, H[0] + 20);
+    }
+    if (pose === 'waving' && s === 1) {
+      into.splice(start, 0, '<g class="wave">');
+      into.push('</g>');
+      // The hand swings out as it waves.
+      beyond.right = Math.max(beyond.right, H[0] + 22);
+    }
   }
 
   // The head: the face's ground, then hair and hats. A headscarf wraps it
@@ -1294,18 +2034,60 @@ function layersOf(spec: FigureSpec): Layers {
         line(`M${s * 34},${y - 2} L${s * 45},${y - 5}`, FIGURE_INK, 2.4),
       );
   }
+  const signs = signsOf(
+    {
+      head: [0, cy],
+      mouth: [0, R.mouthY],
+      chest: [0, r1(sY + (hemY - sY) * 0.3)],
+      belly: [0, belly],
+      hands,
+      feet: [
+        [-17, -6],
+        [17, -6],
+      ],
+      // Lying on their left side, only the right is off the floor.
+      sides: lying
+        ? [{ x: r1(h2 + 20), out: 1 }]
+        : [
+            { x: r1(-h2 - 20), out: -1 },
+            { x: r1(h2 + 20), out: 1 },
+          ],
+    },
+    R,
+    skin,
+  );
   return {
     R,
     legs: legs.join(''),
     behind: packOf(spec, R) + hairBehind(spec, R),
     body,
     arms: arms.join(''),
+    reach: reach.join(''),
     head: head.join(''),
     faces: Object.fromEntries(
       FACE_NAMES.map((name) => [name, faceOf(name, R, skin)]),
     ) as Record<Expression, string>,
+    more: { pain: painFace(R, skin) },
+    // Lying down, what floats over the head is turned back upright
+    // about it, so steam rises and a question mark reads.
+    signs: lying
+      ? (Object.fromEntries(
+          FIGURE_SIGNS.map((name) => [
+            name,
+            signs.body[name] +
+              (signs.air[name]
+                ? `<g transform="rotate(90 0 ${cy})">${signs.air[name]}</g>`
+                : ''),
+          ]),
+        ) as Record<FigureSign, string>)
+      : upright(signs),
     blink: blinkOf(R, skin),
     over: over.join(''),
+    beyond: {
+      left: r1(beyond.left - FIGURE_FRAME.halfWidth),
+      right: r1(beyond.right - FIGURE_FRAME.halfWidth),
+      up: r1(R.top - FIGURE_FRAME.headroom - beyond.top),
+    },
   };
 }
 
@@ -1360,12 +2142,84 @@ function companionOf(spec: FigureSpec, i: number, seed: string): FigureSpec {
   };
 }
 
-/** How someone is drawn on a page: standing, or lying in bed (a patient). */
-export const FIGURE_POSES = ['standing', 'in bed'] as const;
-export type FigurePose = (typeof FIGURE_POSES)[number];
+/**
+ * Which signs' marks move in each of the kit's motions: each moves only
+ * while a sign of its own is on, so a still, and a stage with motion
+ * reduced, shows them at rest.
+ */
+const MOVES: [string, readonly FigureSign[], string, string][] = [
+  [
+    'tw',
+    ['tingling hands', 'tingling feet', 'dizzy', 'confused'],
+    'twinkle 1s ease-in-out infinite',
+    '@keyframes twinkle{0%,100%{transform:scale(.55);opacity:.45}50%{transform:scale(1.1);opacity:1}}',
+  ],
+  [
+    'throb',
+    ['headache', 'chest pain', 'stomach ache', 'idea'],
+    'throb .9s ease-in-out infinite',
+    '@keyframes throb{0%,100%{transform:scale(.85)}50%{transform:scale(1.15)}}',
+  ],
+  [
+    'rise',
+    ['fever', 'sleeping'],
+    'rise 2.4s linear infinite',
+    '@keyframes rise{0%{transform:translateY(6px);opacity:0}25%{opacity:1}100%{transform:translateY(-22px);opacity:0}}',
+  ],
+  [
+    'drip',
+    ['sweating', 'tears'],
+    'drip 1.3s ease-in infinite',
+    '@keyframes drip{0%{transform:translateY(0);opacity:1}100%{transform:translateY(16px);opacity:0}}',
+  ],
+  [
+    'flicker',
+    ['shaking', 'shivering'],
+    'flicker .32s linear infinite',
+    '@keyframes flicker{0%,49%{opacity:1}50%,100%{opacity:.25}}',
+  ],
+  [
+    'puff',
+    ['coughing', 'breathless'],
+    'puff 1.8s ease-out infinite',
+    '@keyframes puff{0%{transform:scale(.3);opacity:0}8%{opacity:.95}45%{transform:scale(1.25);opacity:0}100%{opacity:0}}',
+  ],
+];
 
-/** A figure's own motion: a breath, a blink for each of them on their own beat, a mouth that moves while talking. */
-function styleOf(breathAt: number, blinks: number[]): string {
+/** How each action moves the whole body, while it is on: about the feet, which stay on the ground. */
+const ACTS: Partial<Record<FigureSign, string>> = {
+  shaking:
+    '.on-shaking .whole{animation:shake .16s linear infinite}@keyframes shake{0%,100%{transform:translate(0,0) rotate(0)}25%{transform:translate(-3px,-1px) rotate(-1.6deg)}50%{transform:translate(3px,0) rotate(1.2deg)}75%{transform:translate(-2px,-1px) rotate(-1deg)}}',
+  shivering:
+    '.on-shivering .whole{animation:shiver .1s linear infinite}@keyframes shiver{0%,100%{transform:translateX(-1px)}50%{transform:translateX(1.2px)}}',
+  dizzy:
+    '.on-dizzy .whole{animation:sway 2.6s ease-in-out infinite}@keyframes sway{0%,100%{transform:rotate(-3deg)}50%{transform:rotate(3deg)}}',
+  coughing:
+    '.on-coughing .whole{animation:cough 1.8s ease-out infinite}@keyframes cough{0%,24%,100%{transform:translateY(0) rotate(0)}6%{transform:translateY(3px) rotate(2.4deg)}14%{transform:translateY(0) rotate(0)}}',
+  sleeping: '.on-sleeping .breathe{animation-duration:6.5s}',
+  breathless: '.on-breathless .breathe{animation-duration:1.1s}',
+  // A walk in place: the body bobs as one foot lifts, then the other.
+  walking:
+    '.on-walking .breathe{animation:bob .64s ease-in-out infinite}@keyframes bob{0%,50%,100%{transform:translateY(0)}25%,75%{transform:translateY(-3px)}}.on-walking .leg{animation:step .64s ease-in-out infinite}.on-walking .l1{animation-delay:-.32s}@keyframes step{0%,50%,100%{transform:translateY(0)}25%{transform:translateY(-8px)}}',
+  // Up and down again, squashed on landing.
+  jumping:
+    '.on-jumping .whole{animation:jump .9s ease-in-out infinite}@keyframes jump{0%,100%{transform:translateY(0) scale(1.05,.93)}12%{transform:translateY(0) scale(1)}45%{transform:translateY(-30px) scale(.98,1.03)}78%{transform:translateY(0) scale(1)}88%{transform:translateY(0) scale(1.06,.92)}}',
+};
+
+/**
+ * A figure's own motion: a breath, a blink for each of them on their own
+ * beat, a mouth that moves while talking, a wave; and for each sign
+ * drawn, how its marks and the body move while it is on.
+ */
+function styleOf(
+  breathAt: number,
+  blinks: number[],
+  signs: readonly FigureSign[],
+  waves = false,
+): string {
+  const moving = MOVES.filter(([, of]) =>
+    of.some((one) => signs.includes(one)),
+  );
   return [
     `.breathe{animation:breathe 4.6s ease-in-out infinite;animation-delay:-${breathAt}s}`,
     '@keyframes breathe{0%,100%{transform:translateY(0)}50%{transform:translateY(-1.4px)}}',
@@ -1376,7 +2230,46 @@ function styleOf(breathAt: number, blinks: number[]): string {
     '.talking .talk{animation:talk 1.2s linear infinite}',
     keyframes('talk', true),
     keyframes('shut', false),
+    waves
+      ? '.wave{transform-box:fill-box;transform-origin:0% 100%;animation:wave 1s ease-in-out infinite}@keyframes wave{0%,100%{transform:rotate(-10deg)}50%{transform:rotate(12deg)}}'
+      : '',
+    moving.length
+      ? `${moving.map(([cls]) => `.${cls}`).join(',')}{transform-box:fill-box;transform-origin:center}`
+      : '',
+    ...moving.map(
+      ([cls, of, animation, frames]) =>
+        `${of
+          .filter((one) => signs.includes(one))
+          .map((one) => `.on-${signId(one)} .${cls}`)
+          .join(',')}{animation:${animation}}${frames}`,
+    ),
+    signs.some((one) => ACTS[one]?.includes('.whole'))
+      ? '.whole{transform-box:view-box;transform-origin:0 0}'
+      : '',
+    ...signs.map((one) => ACTS[one] ?? ''),
   ].join('');
+}
+
+/** Every state a figure has, by name to the id of its group: the faces, the kit's faces, and the signs drawn. */
+function statesOf(signs: readonly FigureSign[]): Record<string, string> {
+  return Object.fromEntries(
+    [
+      ...FIGURE_FACES.map((name) => [name, name]),
+      ...signs.map((name) => [name, signId(name)]),
+    ].map(([name, id]): [string, string] => [name, id]),
+  );
+}
+
+/** The signs to draw for someone in a pose: those asked for, in the list's order; none that needs their feet when they are lying down. */
+function signsFor(
+  pose: FigurePose,
+  asked: readonly FigureSign[] = [],
+): FigureSign[] {
+  return FIGURE_SIGNS.filter(
+    (sign) =>
+      asked.includes(sign) &&
+      !(LYING_POSES.includes(pose) && ON_FOOT.includes(sign)),
+  );
 }
 
 /** The bed, in the kit's units: the mattress's top, and where the head rests on the pillows. */
@@ -1390,7 +2283,11 @@ const BED = { top: -78, head: [-76, -148] as [number, number], half: 138 };
  * work as they do standing, and the blanket rises and falls as they
  * breathe.
  */
-function drawInBed(spec: FigureSpec, key: string): FigureDrawing {
+function drawInBed(
+  spec: FigureSpec,
+  key: string,
+  asked?: readonly FigureSign[],
+): FigureDrawing {
   const layers = layersOf(spec);
   const { R } = layers;
   const skin = SKIN[Math.min(SKIN_TONES, Math.max(1, spec.skin)) - 1];
@@ -1439,6 +2336,33 @@ function drawInBed(spec: FigureSpec, key: string): FigureDrawing {
         `<circle cx="${x2}" cy="${y2}" r="8" ${inked(skin)}/>`,
     )
     .join('');
+  // Where signs go on someone in bed: their head on the pillows, their
+  // hands on the blanket, the blanket over them.
+  const signs = upright(
+    signsOf(
+      {
+        head: [hx, hy],
+        mouth: [hx, hy + (R.mouthY - R.cy)],
+        chest: [hx, top - 8],
+        belly: [hx + 70, top - 20],
+        hands: [
+          [hx - 4, top - 8],
+          [hx + 28, top - 10],
+        ],
+        feet: [
+          [w - 40, top - 16],
+          [w - 22, top - 14],
+        ],
+        sides: [
+          { x: hx - 60, out: -1 },
+          { x: hx + 64, out: 1 },
+        ],
+      },
+      R,
+      skin,
+    ),
+  );
+  const drawn = signsFor('in bed', asked);
   const [fx, fy, fw, fh] = [
     -w - 8,
     r1(hy - 40 - FIGURE_FRAME.headroom),
@@ -1447,11 +2371,11 @@ function drawInBed(spec: FigureSpec, key: string): FigureDrawing {
   ];
   const svg = [
     `<svg xmlns="http://www.w3.org/2000/svg" viewBox="${[fx, fy, fw, fh].join(' ')}">`,
-    `<style>${styleOf(r1(beatOf(key) * 4.6), [r1(0.3 + beatOf(key) * 2.4)])}</style>`,
+    `<style>${styleOf(r1(beatOf(key) * 4.6), [r1(0.3 + beatOf(key) * 2.4)], drawn)}</style>`,
     `<ellipse cx="0" cy="0" rx="${w}" ry="8" fill="#1d1a22" fill-opacity="0.16"/>`,
     `<g stroke="${FIGURE_INK}" stroke-width="${LINE}" stroke-linejoin="round">`,
     `<g id="legs">${bed}</g>`,
-    `<g class="breathe">`,
+    `<g class="whole"><g class="breathe">`,
     `<g id="behind">${moved(layers.behind)}</g>`,
     `<g id="body">${torso}${cover}</g>`,
     `<g id="head">${moved(layers.head)}</g>`,
@@ -1459,9 +2383,11 @@ function drawInBed(spec: FigureSpec, key: string): FigureDrawing {
     FACE_NAMES.map(
       (name) => `<g id="${name}">${moved(layers.faces[name])}</g>`,
     ).join(''),
+    `<g id="pain">${moved(layers.more.pain)}</g>`,
+    drawn.map((name) => `<g id="${signId(name)}">${signs[name]}</g>`).join(''),
     `<g class="blink b0" opacity="0">${moved(layers.blink)}</g>`,
     `<g id="over">${moved(layers.over)}</g>`,
-    `</g>`,
+    `</g></g>`,
     `</g>`,
     `</svg>`,
   ].join('');
@@ -1469,7 +2395,7 @@ function drawInBed(spec: FigureSpec, key: string): FigureDrawing {
     svg,
     viewBox: [fx, fy, fw, fh],
     parts: { head: 'head', body: 'body', arms: 'arms', legs: 'legs' },
-    states: Object.fromEntries(FACE_NAMES.map((name) => [name, name])),
+    states: statesOf(drawn),
     anchors: {
       head: [hx, hy],
       body: [hx + 90, top - 12],
@@ -1478,23 +2404,43 @@ function drawInBed(spec: FigureSpec, key: string): FigureDrawing {
   };
 }
 
+/** How someone is drawn on a page: how many, in what pose, holding what, and which signs they can show. */
+export interface FigureHow {
+  /** A few people like them, standing together: a team, a family, a class, up to four. */
+  count?: number;
+  pose?: FigurePose;
+  /** A prop in their hand: the right, or the left when the pose uses the right. */
+  holding?: FigureProp | null;
+  /** The signs drawn, ready to be shown: only those the page shows, so a figure carries no more than it needs. */
+  signs?: readonly FigureSign[];
+}
+
 /**
  * A person drawn from their spec, or a few people like them standing
  * together (`count`, up to four): a team, a family, a class. `seed`
  * (their id) sets when each blinks and breathes, so no two blink
- * together, and a group's others are the same in every make.
+ * together, and a group's others are the same in every make. A group
+ * takes the pose and the prop together; lying down and in bed are for
+ * one person.
  */
 export function drawFigure(
   spec: FigureSpec,
   seed = '',
-  count = 1,
-  pose: FigurePose = 'standing',
+  how: FigureHow = {},
 ): FigureDrawing {
   const key = seed || JSON.stringify(spec);
-  if (pose === 'in bed') return drawInBed(spec, key);
-  const n = Math.min(MOST_TOGETHER, Math.max(1, Math.round(count) || 1));
+  const pose = how.pose ?? 'standing';
+  if (pose === 'in bed') return drawInBed(spec, key, how.signs);
+  const lying = pose === 'lying';
+  const n = lying
+    ? 1
+    : Math.min(MOST_TOGETHER, Math.max(1, Math.round(how.count ?? 1) || 1));
+  const holding = lying ? null : (how.holding ?? null);
+  // Something in hand and no pose for it: held up.
+  const posed = holding && pose === 'standing' ? 'holding' : pose;
+  const drawn = signsFor(pose, how.signs);
   const members = Array.from({ length: n }, (_, i) =>
-    layersOf(i === 0 ? spec : companionOf(spec, i, key)),
+    layersOf(i === 0 ? spec : companionOf(spec, i, key), posed, holding),
   );
   // The one described stands in the middle of their group.
   const order = members
@@ -1516,26 +2462,29 @@ export function drawFigure(
     r1(0.3 + beatOf(i ? `${key}:${i}` : key) * 2.4);
   const frame = figureFrame(spec.age);
   const wider = (n - 1) * APART;
-  const viewBox: [number, number, number, number] = [
-    r1(frame[0] - wider / 2),
-    frame[1],
-    r1(frame[2] + wider),
-    frame[3],
-  ];
+  // What reaches past the frame widens it on that side, or raises it: a
+  // pointing hand, a flag, an umbrella over the head.
+  const left = Math.max(0, ...members.map((l) => l.beyond.left));
+  const right = Math.max(0, ...members.map((l) => l.beyond.right));
+  const up = Math.max(0, ...members.map((l) => l.beyond.up));
+  // Lying on the floor, head to the left: the standing figure turned a
+  // quarter over, its side on the ground.
+  const lies = { x: r1(-R.top / 2), y: -60 };
+  const viewBox: [number, number, number, number] = lying
+    ? [r1(R.top / 2 - 44), -150, r1(-R.top + 60), 160]
+    : [
+        r1(frame[0] - wider / 2 - left),
+        r1(frame[1] - up),
+        r1(frame[2] + wider + left + right),
+        r1(frame[3] + up),
+      ];
   const style = styleOf(
     breathAt,
     members.map((_, i) => blinkAt(i)),
+    drawn,
+    posed === 'waving',
   );
-  const svg = [
-    `<svg xmlns="http://www.w3.org/2000/svg" viewBox="${viewBox.join(' ')}">`,
-    `<style>${style}</style>`,
-    members
-      .map(
-        (_, i) =>
-          `<ellipse cx="${x(i)}" cy="0" rx="50" ry="7" fill="#1d1a22" fill-opacity="0.16"/>`,
-      )
-      .join(''),
-    `<g stroke="${FIGURE_INK}" stroke-width="${LINE}" stroke-linejoin="round">`,
+  const person = [
     `<g id="legs">${all((l) => l.legs)}</g>`,
     `<g class="breathe">`,
     `<g id="behind">${all((l) => l.behind)}</g>`,
@@ -1545,6 +2494,11 @@ export function drawFigure(
     FACE_NAMES.map(
       (name) => `<g id="${name}">${all((l) => l.faces[name])}</g>`,
     ).join(''),
+    `<g id="pain">${all((l) => l.more.pain)}</g>`,
+    `<g id="reach">${all((l) => l.reach)}</g>`,
+    drawn
+      .map((name) => `<g id="${signId(name)}">${all((l) => l.signs[name])}</g>`)
+      .join(''),
     order
       .map(({ layers, i }) =>
         placeAt(i, layers.blink, ` class="blink b${i}" opacity="0"`),
@@ -1552,18 +2506,37 @@ export function drawFigure(
       .join(''),
     `<g id="over">${all((l) => l.over)}</g>`,
     `</g>`,
+  ].join('');
+  const svg = [
+    `<svg xmlns="http://www.w3.org/2000/svg" viewBox="${viewBox.join(' ')}">`,
+    `<style>${style}</style>`,
+    lying
+      ? `<ellipse cx="0" cy="0" rx="${lies.x}" ry="8" fill="#1d1a22" fill-opacity="0.16"/>`
+      : members
+          .map(
+            (_, i) =>
+              `<ellipse cx="${x(i)}" cy="0" rx="50" ry="7" fill="#1d1a22" fill-opacity="0.16"/>`,
+          )
+          .join(''),
+    `<g stroke="${FIGURE_INK}" stroke-width="${LINE}" stroke-linejoin="round">`,
+    lying
+      ? `<g transform="translate(${lies.x} ${lies.y}) rotate(-90)"><g class="whole">${person}</g></g>`
+      : `<g class="whole">${person}</g>`,
     `</g>`,
     `</svg>`,
   ].join('');
+  // Lying, the rig's points turn with it: (x, y) is at (y + x0, -x + y0).
+  const at = ([px, py]: [number, number]): [number, number] =>
+    lying ? [r1(py + lies.x), r1(-px + lies.y)] : [px, py];
   return {
     svg,
     viewBox,
     parts: { head: 'head', body: 'body', arms: 'arms', legs: 'legs' },
-    states: Object.fromEntries(FACE_NAMES.map((name) => [name, name])),
+    states: statesOf(drawn),
     anchors: {
-      head: [0, R.cy],
-      body: [0, r1((R.sY + R.hemY) / 2)],
-      legs: [0, r1((R.hemY - FEET) / 2)],
+      head: at([0, R.cy]),
+      body: at([0, r1((R.sY + R.hemY) / 2)]),
+      legs: at([0, r1((R.hemY - FEET) / 2)]),
     },
   };
 }

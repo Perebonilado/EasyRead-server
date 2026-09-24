@@ -591,6 +591,66 @@ describe("a story's characters on the stage", () => {
     ]);
   });
 
+  it('shows the signs someone comes on with before they come on, and wears pain as a face', () => {
+    const effects = oneFaceAtATime(
+      [
+        { atMs: 4000, target: 'patient', part: 'pain', do: 'show' },
+        { atMs: 6000, target: 'patient', part: 'shaking', do: 'hide' },
+      ],
+      [
+        {
+          id: 'patient',
+          kind: 'person',
+          name: 'Patient',
+          figure: PLAIN_FIGURE,
+          pose: 'lying',
+          signs: ['shaking', 'sweating'],
+          state: 'afraid',
+        },
+      ],
+      [{ ...scene.steps[0], atMs: 1000, show: ['patient'] }],
+    );
+    expect(effects.map((e) => `${e.atMs} ${e.do} ${e.part}`)).toEqual([
+      '600 show afraid',
+      '600 show shaking',
+      '600 show sweating',
+      '4000 hide afraid',
+      '4000 show pain',
+      // A sign stays on until an effect hides it.
+      '6000 hide shaking',
+    ]);
+    expect(effects.filter((e) => e.atMs === 600).every((e) => e.filler)).toBe(
+      true,
+    );
+  });
+
+  it('gives an animal drawn by the artist the nearest face it has, and none of the kit’s signs', () => {
+    const effects = oneFaceAtATime(
+      [{ atMs: 4000, target: 'fox', part: 'pain', do: 'show' }],
+      [
+        {
+          id: 'fox',
+          kind: 'character',
+          ref: 'fox',
+          name: 'Fox',
+          state: null,
+          met: 1,
+          intro: [],
+          signs: ['shivering'],
+        },
+      ],
+      [{ ...scene.steps[0], atMs: 1000, show: ['fox'] }],
+      () => true,
+      new Map(),
+      (_, state) => state !== 'pain' && state !== 'shivering',
+    );
+    expect(effects.map((e) => `${e.atMs} ${e.do} ${e.part}`)).toEqual([
+      '600 show neutral',
+      '4000 hide neutral',
+      '4000 show afraid',
+    ]);
+  });
+
   it('gives no faces to a character who could not be drawn', () => {
     const effects = oneFaceAtATime(
       [{ atMs: 500, target: 'mira', part: 'happy', do: 'show' }],

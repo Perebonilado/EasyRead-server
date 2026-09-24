@@ -224,6 +224,24 @@ shorter than a grown-up, a grown-up at most seven tenths of the stage)
 and, in front of a set, on its ground. A story character's name is written
 under them only on the page the book meets them.
 
+People also do things and go through them, so no one stands still under
+a caption that says what is happening to them. The writer gives a person
+or a character a pose (hand on head, hands on belly, hand on mouth, arms
+up, pointing, waving, holding, lying on the floor, in bed), a prop in the
+hand (a book, a cup, a thermometer, a syringe, a lantern and seven more),
+and signs, switched on and off at the words like faces: actions that move
+the body (shaking, shivering, dizzy, coughing, sleeping, breathless,
+walking, jumping) and marks drawn on it (tingling hands and feet, a
+headache, chest pain, a stomach ache, a fever, sweat, tears, a rash,
+nausea, confusion, an idea); and a face of pain besides the seven. A
+drawing turned into a person takes its signs, pose and prop from its
+name and brief ("Seizure: shaking" shakes), and so does a person the
+writer gave none. A figure carries only the signs its page shows. The
+player sets an `on-<sign>` class on a figure while a sign is on, and the
+figure's own CSS moves it; with motion reduced it sets none, so the marks
+show and no one moves. Either repo can go first: an older player shows the
+marks without the motion, and an older page has no signs.
+
 Sheets are now version 2 and sets version 2 (painted to match the people),
 so a story book's characters and places are drawn again the next time one
 of its pages is made, and a book whose story was read before this is

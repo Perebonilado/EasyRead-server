@@ -368,6 +368,21 @@ describe('a story told with its own characters', () => {
     ]);
   });
 
+  it("knows whom a sentence quotes, by id, name or alias, and only the story's characters", () => {
+    const quoted = story();
+    quoted.beats[1] = { ...quoted.beats[1], speaker: 'The Fox' };
+    quoted.beats[2] = { ...quoted.beats[2], speaker: 'quay' };
+    const { script, mended } = mendScript(quoted, { characters });
+    expect(script.beats.map((b) => b.speaker)).toEqual([
+      undefined,
+      'fox',
+      undefined,
+    ]);
+    expect(mended.join(' ')).toContain(
+      '"quay" is not one of the story\'s characters',
+    );
+  });
+
   it('sets characters in type in a book that is no story', () => {
     const { script } = mendScript(story());
     expect(script.cast.some((t) => t.kind === 'character')).toBe(false);

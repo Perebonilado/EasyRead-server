@@ -32,6 +32,7 @@ const mira = sheetThing(
     traits: [],
     firstPage: 1,
     met: 0,
+    voice: null,
   },
   'The Lantern',
 );

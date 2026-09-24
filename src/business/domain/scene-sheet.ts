@@ -10,7 +10,7 @@ import { isolate, type Callout } from './scene-callouts';
 import { elements } from './scene-dom';
 import { renderSvg, type InkBox } from './scene-raster';
 import { EXPRESSIONS } from './scene-story';
-import type { GatedDrawing } from './scene-svg';
+import { revealedSvg, type GatedDrawing } from './scene-svg';
 
 /** Sheets drawn by an older way of drawing them are drawn again. */
 export const SHEET_VERSION = 1;
@@ -145,8 +145,21 @@ export function castOf(raw: unknown): Cast {
   const out: Cast = {};
   for (const [id, sheet] of Object.entries(raw as Record<string, unknown>)) {
     const one = sheet as Partial<CharacterSheet> | null;
-    if (one?.version === SHEET_VERSION && one.drawing?.svg && one.anchors)
-      out[id] = one as CharacterSheet;
+    if (one?.version === SHEET_VERSION && one.drawing?.svg && one.anchors) {
+      // Kept before the gate showed what an artist hid: shown now.
+      const d = one.drawing;
+      out[id] = {
+        ...(one as CharacterSheet),
+        drawing: {
+          ...d,
+          svg: revealedSvg(d.svg, [
+            ...Object.values(d.parts ?? {}),
+            ...Object.values(d.states ?? {}),
+            ...Object.values(d.labels ?? {}),
+          ]),
+        },
+      };
+    }
   }
   return out;
 }

@@ -49,6 +49,7 @@ import {
 import {
   EMPTY_STORY,
   MAX_STORY_PIECES,
+  OPENING_LEAD_S,
   bibleOf,
   SET_CANVAS,
   castKey,
@@ -80,9 +81,12 @@ import {
   type TimedBeat,
 } from '../../business/domain/scene-timing';
 import {
+  characterVoice,
   deliveryPieces,
+  sentenceStarts,
   voiceSlug,
   voiceStyle,
+  voicedPieces,
 } from '../../business/domain/scene-voice';
 import { mp3DurationMs } from '../../business/domain/speech';
 import { spokenForm, type Pronunciations } from '../../business/domain/spoken';
@@ -402,7 +406,16 @@ export class SceneProcessor {
         if (!voiced && !stop.signal.aborted) await input.step?.('voicing');
         return made;
       }),
-      this.voice(script, input.kept, base, documentId, who)
+      this.voice(
+        script,
+        input.kept,
+        base,
+        documentId,
+        who,
+        story,
+        // The voice waits while a "previously" brings the last page back.
+        script.opening?.show.length ? OPENING_LEAD_S : 0,
+      )
         .catch((error: unknown) => {
           stop.abort();
           throw error;
@@ -776,6 +789,9 @@ export class SceneProcessor {
     base: string,
     documentId: string | null,
     who: string,
+    story: PageStory | null = null,
+    /** Seconds of quiet before the first word, for an opening on the stage alone. */
+    leadS = 0,
   ): Promise<{
     beats: TimedBeat[];
     durationMs: number;
@@ -792,19 +808,62 @@ export class SceneProcessor {
     const voice =
       this.config.get<string>('SCENE_VOICE')?.trim() ||
       this.speech.label().voice;
+    // A story's characters say their own lines, in voices of their own.
+    const engine = model.startsWith('gemini')
+      ? 'gemini'
+      : model.startsWith('kokoro')
+        ? 'kokoro'
+        : null;
+    const speakers = script.beats.map((beat, k) => {
+      if (!story) return null;
+      // Whom the sentence quotes, as the writer named them, or the "say" on it.
+      const said =
+        beat.speaker ??
+        script.steps
+          .filter((step) => step.at.beat === k)
+          .flatMap((step) => step.effects)
+          .find((effect) => effect.do === 'say')?.target;
+      const thing = script.cast.find((t) => t.id === said);
+      const character =
+        thing?.kind === 'character'
+          ? story.bible.characters.find((c) => c.id === thing.ref)
+          : undefined;
+      return character
+        ? characterVoice(story.bible, character, engine, voice)
+        : null;
+    });
+    const pieces = voicedPieces({
+      texts: forms.map((form) => form.text),
+      delivered,
+      // For a voice that takes direction; Kokoro goes by pace and silence.
+      styles: script.beats.map((beat) =>
+        voiceStyle(script.mood, beat.delivery),
+      ),
+      speakers,
+    });
     const result = await this.speech.synthesize({
       text: spoken.text,
       voice,
       speed: 1,
       timestamps: true,
-      pieces: forms.map((form, i) => ({
-        text: form.text,
-        speed: delivered[i].speed,
-        pauseAfter: pausesS[i],
-        // For a voice that takes direction; Kokoro goes by pace and silence.
-        style: voiceStyle(script.mood, script.beats[i].delivery),
+      pieces: pieces.map((piece) => ({
+        text: piece.text,
+        speed: piece.speed,
+        pauseAfter: piece.pauseAfter,
+        ...(piece.style ? { style: piece.style } : {}),
+        ...(piece.voice ? { voice: piece.voice } : {}),
       })),
+      ...(leadS > 0 ? { lead: leadS } : {}),
     });
+    const voices = new Set(pieces.map((p) => p.voice).filter(Boolean));
+    if (voices.size)
+      this.logger.log(`${who}: characters speak in ${[...voices].join(', ')}`);
+    // Each sentence starts where its first piece does.
+    const starts = sentenceStarts(
+      pieces,
+      result.pieceStartsMs,
+      script.beats.length,
+    );
     const audioKey = `${base}-${voiceSlug(voice)}-${model}.mp3`;
     await this.storage.put({
       key: audioKey,
@@ -879,7 +938,7 @@ export class SceneProcessor {
             forms,
             pausesS,
             durationMs,
-            result.pieceStartsMs,
+            starts,
           );
           timing = 'aligned';
         }
@@ -893,7 +952,7 @@ export class SceneProcessor {
       forms,
       pausesS,
       durationMs,
-      pieceStartsMs: result.pieceStartsMs,
+      pieceStartsMs: starts,
     });
     return {
       beats: timeBeats(script.beats, forms, words),

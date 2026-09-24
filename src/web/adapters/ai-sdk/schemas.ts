@@ -11,7 +11,11 @@ import {
   PROFILE_KINDS,
   PROFILE_TONES,
 } from '../../../business/domain/scene-profile';
-import { EXPRESSIONS, STORY_ROLES } from '../../../business/domain/scene-story';
+import {
+  EXPRESSIONS,
+  STORY_ROLES,
+  STORY_VOICES,
+} from '../../../business/domain/scene-story';
 
 /**
  * Structured output contracts.
@@ -481,6 +485,7 @@ export const sceneScriptSchema = z.object({
       say: z.string(),
       pause: z.enum(['short', 'long']),
       delivery: z.enum(SCENE_DELIVERIES),
+      speaker: z.string().nullable(),
     }),
   ),
   cast: z.array(
@@ -592,6 +597,7 @@ export const sceneStorySchema = z.object({
       role: z.enum(STORY_ROLES),
       look: z.string(),
       traits: z.array(z.string()),
+      voice: z.enum(STORY_VOICES).nullable(),
     }),
   ),
   places: z.array(

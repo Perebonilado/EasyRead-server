@@ -4,10 +4,15 @@ import {
   IDEA_CHANGE_S,
   PAUSE_RANGE,
   SPEED_RANGE,
+  TURN_S,
+  characterVoice,
   deliveryPieces,
+  sentenceStarts,
   voiceSlug,
   voiceStyle,
+  voicedPieces,
 } from './scene-voice';
+import type { StoryBible, StoryCharacter } from './scene-story';
 import { SCENE_DELIVERIES, SCENE_MOODS } from './scene-script';
 
 describe('how the voice says each sentence', () => {
@@ -64,5 +69,134 @@ describe('how the voice says each sentence', () => {
   it('names a blend of voices so it can go in a file name', () => {
     expect(voiceSlug('af_heart,af_bella')).toBe('af_heart+af_bella');
     expect(voiceSlug('Kore')).toBe('kore');
+  });
+});
+
+describe("a story's characters, in their own voices", () => {
+  const person = (over: Partial<StoryCharacter>): StoryCharacter => ({
+    id: 'x',
+    name: 'X',
+    aliases: [],
+    role: 'main',
+    look: '',
+    traits: [],
+    firstPage: 1,
+    met: 0,
+    voice: null,
+    ...over,
+  });
+  const bible: StoryBible = {
+    characters: [
+      person({
+        id: 'mira',
+        name: 'Mira',
+        voice: 'girl',
+        met: 0,
+        traits: ['brave'],
+      }),
+      person({ id: 'tobi', name: 'Tobi', voice: 'old man', met: 1 }),
+      person({ id: 'ember', name: 'Ember', voice: 'creature', met: 2 }),
+      person({ id: 'lily', name: 'Lily', voice: 'girl', met: 3 }),
+      person({ id: 'crowd', name: 'The crowd', voice: null, met: 4 }),
+    ],
+    places: [],
+    pages: [],
+  };
+  const at = (id: string) => bible.characters.find((c) => c.id === id)!;
+
+  it("gives each the next voice of their kind in the order met, never the narrator's, the same every time", () => {
+    expect(characterVoice(bible, at('mira'), 'kokoro', 'am_puck')?.voice).toBe(
+      'af_sky',
+    );
+    expect(characterVoice(bible, at('lily'), 'kokoro', 'am_puck')?.voice).toBe(
+      'af_nova',
+    );
+    // The narrator speaks in the first creature voice: Ember takes the next.
+    expect(
+      characterVoice(bible, at('ember'), 'kokoro', 'bm_fable')?.voice,
+    ).toBe('am_fenrir');
+    expect(
+      characterVoice(bible, at('tobi'), 'gemini', 'Sulafat'),
+    ).toMatchObject({
+      voice: 'Algenib',
+      pace: 0.92,
+      style: 'as Tobi, an old man, saying their own line',
+    });
+    expect(characterVoice(bible, at('mira'), 'gemini', 'Sulafat')?.style).toBe(
+      'as Mira, a girl, brave, saying their own line',
+    );
+    // No kind of voice, or a voice with no palette: the narrator says it.
+    expect(characterVoice(bible, at('crowd'), 'kokoro', 'am_puck')).toBeNull();
+    expect(characterVoice(bible, at('mira'), null, 'alloy')).toBeNull();
+  });
+
+  it("parts a sentence at its quotation: the quoted words theirs, the rest the narrator's", () => {
+    const speaker = { voice: 'am_fenrir', pace: 1, style: 'as Ember' };
+    const pieces = voicedPieces({
+      texts: [
+        'A fox steps out.',
+        '"You are holding the matches upside down," says the fox.',
+        'Mira stares.',
+      ],
+      delivered: [
+        { speed: 1, pauseAfter: 0.35 },
+        { speed: 1.02, pauseAfter: 0.5 },
+        { speed: 1, pauseAfter: 0.4 },
+      ],
+      styles: ['calm', 'calm', 'calm'],
+      speakers: [null, speaker, null],
+    });
+    expect(pieces).toEqual([
+      {
+        text: 'A fox steps out.',
+        speed: 1,
+        pauseAfter: 0.35,
+        style: 'calm',
+        beat: 0,
+      },
+      {
+        text: '"You are holding the matches upside down,',
+        speed: 1.02,
+        pauseAfter: TURN_S,
+        style: 'as Ember',
+        voice: 'am_fenrir',
+        beat: 1,
+      },
+      {
+        text: '" says the fox.',
+        speed: 1.02,
+        pauseAfter: 0.5,
+        style: 'calm',
+        beat: 1,
+      },
+      {
+        text: 'Mira stares.',
+        speed: 1,
+        pauseAfter: 0.4,
+        style: 'calm',
+        beat: 2,
+      },
+    ]);
+    // Every word still said, in order: the times fall on the same words.
+    expect(
+      pieces
+        .map((p) => p.text)
+        .join(' ')
+        .replace(/[^a-z ]/gi, '')
+        .split(/\s+/),
+    ).toEqual(
+      'A fox steps out You are holding the matches upside down says the fox Mira stares'.split(
+        ' ',
+      ),
+    );
+  });
+
+  it('starts each sentence where its first piece does', () => {
+    const pieces = [{ beat: 0 }, { beat: 1 }, { beat: 1 }, { beat: 2 }];
+    expect(sentenceStarts(pieces, [0, 1200, 3000, 4100], 3)).toEqual([
+      0, 1200, 4100,
+    ]);
+    // A voice that left a piece out: no starts to trust.
+    expect(sentenceStarts(pieces, [0, 1200, 4100], 3)).toBeUndefined();
   });
 });

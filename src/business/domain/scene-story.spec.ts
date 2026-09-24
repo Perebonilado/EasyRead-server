@@ -28,6 +28,7 @@ const person = (
   role: 'main',
   look: '',
   traits: [],
+  voice: null,
   ...over,
 });
 
@@ -276,6 +277,7 @@ describe("a story's continuity", () => {
         traits: [],
         firstPage: 1,
         met: 0,
+        voice: null,
       },
       'The Lantern',
     );
@@ -358,5 +360,77 @@ describe("a story page's own place", () => {
       sound: 'water',
     });
     expect(castStory({ ...script, cast: [] }, bible, 2).backdrop).toBeNull();
+  });
+});
+
+describe('a "previously" opening', () => {
+  it('brings back who was on the page before, in the place they were, with the face they left with', () => {
+    const bible = mergeStory([
+      {
+        from: 1,
+        to: 3,
+        draft: draft({
+          characters: [person('Mira'), person('Ember'), person('Tobi')],
+          places: [
+            { name: 'the quay', aliases: [], look: '', sound: null },
+            { name: 'the house', aliases: [], look: '', sound: null },
+          ],
+          pages: [
+            {
+              page: 1,
+              summary: '',
+              present: [
+                { name: 'Ember', mood: 'happy' },
+                { name: 'Mira', mood: 'afraid' },
+              ],
+              place: 'the quay',
+            },
+            {
+              page: 2,
+              summary: '',
+              present: [{ name: 'Mira', mood: 'neutral' }],
+              place: 'the house',
+            },
+          ],
+        }),
+      },
+    ]);
+    const script = {
+      fit: 'good',
+      fitReason: null,
+      title: 't',
+      mood: 'calm',
+      beats: [],
+      steps: [],
+      cast: [
+        {
+          id: 'fox',
+          kind: 'character',
+          ref: 'ember',
+          name: 'Ember',
+          state: null,
+          met: 0,
+          intro: [],
+        },
+        {
+          id: 'mira',
+          kind: 'character',
+          ref: 'mira',
+          name: 'Mira',
+          state: 'happy',
+          met: 0,
+          intro: [],
+        },
+      ],
+    } as SceneScript;
+    const cast = castStory(script, bible, 2);
+    // Mira and Ember were on page 1: back in the order met, on the quay.
+    expect(cast.opening).toEqual({ show: ['mira', 'fox'], backdrop: 'quay' });
+    expect(cast.backdrop).toBe('house');
+    const mira = cast.cast.find((t) => t.id === 'mira');
+    expect(mira).toMatchObject({ before: 'afraid', state: 'happy' });
+    // Nobody from the page before: no opening.
+    expect(castStory({ ...script, cast: [] }, bible, 2).opening).toBeNull();
+    expect(castStory(script, bible, 1).opening).toBeNull();
   });
 });

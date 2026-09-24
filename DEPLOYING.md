@@ -118,11 +118,13 @@ drawer's default names DeepSeek whatever `AI_MODEL_DEFAULT` says, so
 **`DEEPSEEK_API_KEY` must be set on both the API and the worker**: the
 boot check stops a process with a named provider and no key.
 
-The Voice service reports when it spoke each word when asked
-(`/health` says `version: 5`). Redeploy it once from `speech/kokoro`; until
-then the worker still makes every page, timing its words with the aligner
-instead. Nothing else about the service changes, and lectures ask it
-nothing new.
+The Voice service reports when it spoke each word when asked, takes a
+voice of its own for any piece of a page (a story's character saying
+their line), and a `lead` of quiet before the first word (`/health` says
+`version: 6`; redeployed from `speech/kokoro` on 2026-09-24). All three
+are asked for only when wanted, so lectures ask it nothing new, and an
+older service answers in the page's one voice, with no quiet first. The
+Modal home shares `voice.py` and picks the same up on its next deploy.
 
 Drawings are rendered in a child process by `@resvg/resvg-js`, now a
 runtime dependency of both the API and the worker, with the fonts that
@@ -175,7 +177,10 @@ the page the book meets them, and what they say in a bubble by their
 head. Each place the story happens in is painted once too, into the
 book's `sets.json`, and stands faded behind the stage while the story is
 there, with its own sound. The three files go when the document is
-purged. `npm run scene:try --
+purged. A character's quoted lines are said in a voice of their own,
+chosen by the kind of voice the story gives them and never the
+narrator's, and a page whose characters were on the page before opens on
+them for two seconds before the voice begins. `npm run scene:try --
 <story.md> --story --page 3` tries it on a story whose pages are parted by
 lines of three dashes.
 

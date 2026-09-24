@@ -123,6 +123,8 @@ export interface SceneBeat {
   pause: 'short' | 'long';
   /** How it is said: its pace and the silence after it follow from this. */
   delivery: SceneDelivery;
+  /** The story's character it quotes, by their id: their words in their voice, in a bubble by their head. */
+  speaker?: string | null;
 }
 
 export interface DrawingThing {
@@ -233,6 +235,8 @@ export interface CharacterThing {
   met: number;
   /** On the page the book meets them: what they are like, set beside them. */
   intro: string[];
+  /** The face the last page left them with: theirs through a "previously" opening. */
+  before?: Expression;
 }
 
 /**
@@ -333,6 +337,11 @@ export interface SceneScript {
   steps: SceneStep[];
   /** A story page's own place: the scene behind the stage until the writer shows another. */
   backdrop?: string | null;
+  /**
+   * A story page's "previously": who comes back from the page before, as
+   * they were, on the scene they were in, before the voice starts.
+   */
+  opening?: { show: string[]; backdrop: string | null } | null;
 }
 
 /**
@@ -349,6 +358,8 @@ export interface SceneScriptDraft {
     say: string;
     pause: 'short' | 'long';
     delivery: SceneDelivery;
+    /** A story's character the sentence quotes, or null. */
+    speaker?: string | null;
   }[];
   cast: {
     id: string;
@@ -578,15 +589,16 @@ export function mendScript(
   const mended: string[] = [];
   const formats = new Set(options.formats ?? SCENE_FORMATS);
 
-  const beats: SceneBeat[] = draft.beats
-    .map((beat) => ({
-      say: clean(beat.say),
-      pause: beat.pause === 'long' ? ('long' as const) : ('short' as const),
-      delivery: SCENE_DELIVERIES.includes(beat.delivery)
-        ? beat.delivery
-        : ('explain' as const),
-    }))
-    .filter((beat) => wordsOf(beat.say).length > 0);
+  const kept = draft.beats.filter(
+    (beat) => wordsOf(clean(beat.say)).length > 0,
+  );
+  const beats: SceneBeat[] = kept.map((beat) => ({
+    say: clean(beat.say),
+    pause: beat.pause === 'long' ? ('long' as const) : ('short' as const),
+    delivery: SCENE_DELIVERIES.includes(beat.delivery)
+      ? beat.delivery
+      : ('explain' as const),
+  }));
 
   // Ids: safe, unique, and every way the writer might refer to one.
   const idFor = new Map<string, string>();
@@ -737,6 +749,28 @@ export function mendScript(
     idFor.get(ref.toLowerCase()) ??
     idFor.get(slug(ref)) ??
     (byId.has(slug(ref)) ? slug(ref) : null);
+
+  // Who each sentence quotes: one of the story's characters in the cast.
+  const speakerOf = (said: string): string | null => {
+    const id = resolve(said);
+    if (id && byId.get(id)?.kind === 'character') return id;
+    // Named as the story names them: by name or alias.
+    const who = storyEntry(options.characters ?? [], said, said);
+    const thing = who
+      ? cast.find((t) => t.kind === 'character' && t.ref === who.id)
+      : undefined;
+    return thing?.id ?? null;
+  };
+  kept.forEach((raw, k) => {
+    const said = clean(raw.speaker);
+    if (!said) return;
+    const id = speakerOf(said);
+    if (id) beats[k].speaker = id;
+    else
+      mended.push(
+        `sentence ${k + 1}: "${said}" is not one of the story's characters`,
+      );
+  });
 
   // Anchors: the phrase in its sentence, or in the one sentence it is
   // really in, or the sentence's start.

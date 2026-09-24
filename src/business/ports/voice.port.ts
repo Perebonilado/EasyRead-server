@@ -28,7 +28,11 @@ export interface SpeechPort {
       speed: number;
       pauseAfter: number;
       style?: string;
+      /** Another voice for this piece than the page's: a story's character. Ignored by a voice that has one only. */
+      voice?: string;
     }[];
+    /** Seconds of silence before the first word; the times it reports count from the true start. */
+    lead?: number;
     /**
      * Ask the voice when it spoke each word. Kokoro knows, from the
      * durations it renders; a voice that does not simply leaves `words`

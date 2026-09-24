@@ -35,6 +35,12 @@ All six phases are built and committed on `visualize-next` in both repos, locall
   - the "previously" opening;
   - a who's-who panel;
   - character voices, which need `speech/kokoro/voice.py` to take a voice per piece and the Railway voice service to be redeployed.
+- **Phase 7 (what Phases 4 and 5 left):** built, 2026-09-24.
+  - Timelines and charts.
+  - Places painted once as backdrops.
+  - Characters speaking in their own voices. The Voice service is redeployed at version 6.
+  - The "previously" opening.
+  - Sentences also name their speaker, since the writer did not reliably add the `say` effect.
 - **Phase 6 (the yardstick):** `npm run scene:bench -- <parts dir> [--stills] [--against report.json]`.
   - **First run:** 5 of 5 pages have nothing found by the audit, and 0 of 5 pass the text bar.
   - **Why:** the stage's own words (labels at 24 units, arrow labels at 26, bubbles at 28) come out at 11–13px on a 560px pane, and at 8–9px at 390px.

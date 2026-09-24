@@ -9,7 +9,13 @@
  * which sentence is which; the numbers are here, where they can be tuned
  * and tested, and a voice that takes a pace per sentence (Kokoro) says them.
  */
-import type { SceneBeat, SceneDelivery, SceneMood } from './scene-script';
+import {
+  quotedSpans,
+  type SceneBeat,
+  type SceneDelivery,
+  type SceneMood,
+} from './scene-script';
+import type { StoryBible, StoryCharacter, StoryVoice } from './scene-story';
 
 /** The pace and the silence after a sentence, by how it is said. */
 export const DELIVERY: Record<SceneDelivery, { speed: number; pause: number }> =
@@ -85,3 +91,163 @@ export function voiceStyle(mood: SceneMood, delivery: SceneDelivery): string {
  */
 export const voiceSlug = (voice: string) =>
   voice.toLowerCase().replace(/[^a-z0-9_]+/g, '+');
+
+/** The voices a story's characters speak in, by engine and by kind: never the narrator's own. */
+export const CHARACTER_VOICES: Record<
+  'kokoro' | 'gemini',
+  Record<StoryVoice, string[]>
+> = {
+  kokoro: {
+    girl: ['af_sky', 'af_nova', 'bf_lily'],
+    boy: ['am_puck', 'am_echo', 'am_liam'],
+    woman: ['af_bella', 'bf_emma', 'af_sarah', 'af_jessica'],
+    man: ['am_michael', 'am_eric', 'bm_lewis', 'am_adam'],
+    'old woman': ['bf_alice', 'bf_isabella', 'af_aoede'],
+    'old man': ['bm_george', 'am_santa', 'bm_daniel'],
+    creature: ['bm_fable', 'am_fenrir', 'am_onyx'],
+  },
+  gemini: {
+    girl: ['Leda', 'Aoede', 'Laomedeia'],
+    boy: ['Puck', 'Zubenelgenubi', 'Sadachbia'],
+    woman: ['Kore', 'Despina', 'Callirrhoe', 'Erinome'],
+    man: ['Charon', 'Iapetus', 'Orus', 'Alnilam'],
+    'old woman': ['Gacrux', 'Vindemiatrix', 'Achernar'],
+    'old man': ['Algenib', 'Schedar', 'Rasalgethi'],
+    creature: ['Fenrir', 'Enceladus', 'Umbriel'],
+  },
+};
+
+/** How quickly each kind speaks, against the sentence's own pace. */
+export const CHARACTER_PACE: Record<StoryVoice, number> = {
+  girl: 1.06,
+  boy: 1.06,
+  woman: 1,
+  man: 0.98,
+  'old woman': 0.93,
+  'old man': 0.92,
+  creature: 1,
+};
+
+/** Who says a sentence's quoted words, and how. */
+export interface Speaker {
+  voice: string;
+  /** Against the sentence's pace. */
+  pace: number;
+  /** Direction, for a voice that takes it. */
+  style: string;
+}
+
+/**
+ * The voice a character speaks in, the same every page: the next of their
+ * kind's voices in the order the book met them, never the narrator's.
+ * Null for a character with no voice of their own, or an engine with no
+ * palette: the narrator says their lines.
+ */
+export function characterVoice(
+  bible: StoryBible,
+  character: StoryCharacter,
+  engine: 'kokoro' | 'gemini' | null,
+  narrator: string,
+): Speaker | null {
+  if (!engine || !character.voice) return null;
+  const own = new Set(narrator.toLowerCase().split(','));
+  const palette = CHARACTER_VOICES[engine][character.voice].filter(
+    (voice) => !own.has(voice.toLowerCase()),
+  );
+  if (!palette.length) return null;
+  const before = bible.characters.filter(
+    (c) => c.voice === character.voice && c.met < character.met,
+  ).length;
+  return {
+    voice: palette[before % palette.length],
+    pace: CHARACTER_PACE[character.voice],
+    style: `as ${character.name}, ${character.voice === 'creature' ? 'a creature' : `${/^[aeiou]/.test(character.voice) ? 'an' : 'a'} ${character.voice}`}${character.traits.length ? `, ${character.traits.join(', ')}` : ''}, saying their own line`,
+  };
+}
+
+/** A breath between the narrator and a character within one sentence. */
+export const TURN_S = 0.12;
+
+/** One piece of narration as the voice is sent it, and the sentence it is part of. */
+export interface VoicedPiece {
+  text: string;
+  speed: number;
+  pauseAfter: number;
+  style?: string;
+  /** Another voice than the narrator's: a character's. */
+  voice?: string;
+  beat: number;
+}
+
+/**
+ * The narration as the voice is sent it: a piece a sentence, at its pace
+ * with its silence after; and a sentence that quotes one of the story's
+ * characters parted at its quotation, their words in their own voice at
+ * their own pace, the narrator saying the rest. Every piece says words:
+ * a mark with none of its own goes with the words after it.
+ */
+export function voicedPieces(input: {
+  texts: string[];
+  delivered: { speed: number; pauseAfter: number }[];
+  styles: string[];
+  speakers: (Speaker | null)[];
+}): VoicedPiece[] {
+  const out: VoicedPiece[] = [];
+  input.texts.forEach((text, beat) => {
+    const { speed, pauseAfter } = input.delivered[beat];
+    const style = input.styles[beat];
+    const speaker = input.speakers[beat];
+    const spans = speaker ? quotedSpans(text) : [];
+    if (!speaker || !spans.length) {
+      out.push({ text, speed, pauseAfter, style, beat });
+      return;
+    }
+    // The sentence cut at each quotation's edges.
+    const cuts = [0, ...spans.flat(), text.length];
+    const parts: { text: string; quoted: boolean }[] = [];
+    let carried = '';
+    for (let i = 0; i + 1 < cuts.length; i += 1) {
+      const piece = `${carried}${text.slice(cuts[i], cuts[i + 1])}`;
+      if (!/\p{L}|\p{N}/u.test(piece)) {
+        carried = piece;
+        continue;
+      }
+      carried = '';
+      parts.push({ text: piece.trim(), quoted: i % 2 === 1 });
+    }
+    if (carried && parts.length)
+      parts[parts.length - 1].text =
+        `${parts[parts.length - 1].text}${carried}`.trim();
+    parts.forEach((part, i) => {
+      const last = i === parts.length - 1;
+      out.push({
+        text: part.text,
+        speed: part.quoted
+          ? Math.round(speed * speaker.pace * 100) / 100
+          : speed,
+        pauseAfter: last ? pauseAfter : TURN_S,
+        style: part.quoted ? speaker.style : style,
+        ...(part.quoted ? { voice: speaker.voice } : {}),
+        beat,
+      });
+    });
+  });
+  return out;
+}
+
+/** Where each sentence starts on the audio: where its first piece does. */
+export function sentenceStarts(
+  pieces: { beat: number }[],
+  pieceStartsMs: number[] | undefined,
+  count: number,
+): number[] | undefined {
+  if (!pieceStartsMs || pieceStartsMs.length !== pieces.length)
+    return undefined;
+  const starts: number[] = [];
+  for (let beat = 0; beat < count; beat += 1) {
+    const first = pieces.findIndex((piece) => piece.beat === beat);
+    if (first < 0) return undefined;
+    starts.push(pieceStartsMs[first]);
+  }
+  return starts;
+}

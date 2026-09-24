@@ -12,6 +12,7 @@
  */
 import {
   SCENE_AMBIENCES,
+  type CharacterThing,
   type DrawingThing,
   type SceneAmbience,
   type SceneScript,
@@ -47,6 +48,21 @@ export const SHEET_PARTS = ['head', 'body', 'arms', 'legs'] as const;
 export const STORY_ROLES = ['main', 'supporting', 'minor'] as const;
 export type StoryRole = (typeof STORY_ROLES)[number];
 
+/** The kinds of voice a character may have: code picks the voice itself (scene-voice). */
+export const STORY_VOICES = [
+  'girl',
+  'boy',
+  'woman',
+  'man',
+  'old woman',
+  'old man',
+  'creature',
+] as const;
+export type StoryVoice = (typeof STORY_VOICES)[number];
+
+const voiceKind = (voice: unknown): StoryVoice | null =>
+  STORY_VOICES.includes(voice as StoryVoice) ? (voice as StoryVoice) : null;
+
 export interface StoryCharacter {
   /** Theirs for the whole book: the writer shows them by it. */
   id: string;
@@ -65,6 +81,8 @@ export interface StoryCharacter {
    * two stand the same way round every time they meet.
    */
   met: number;
+  /** The kind of voice their lines are said in; null for the narrator's. */
+  voice: StoryVoice | null;
 }
 
 export interface StoryPlace {
@@ -101,6 +119,7 @@ export interface StoryDraft {
     role: StoryRole;
     look: string;
     traits: string[];
+    voice: StoryVoice | null;
   }[];
   places: {
     name: string;
@@ -264,6 +283,7 @@ export function mergeStory(
           MAX_TRAITS,
         );
         if (RANK[role] < RANK[found.role]) found.role = role;
+        found.voice ??= voiceKind(raw.voice);
         continue;
       }
       characters.push({
@@ -277,6 +297,7 @@ export function mergeStory(
         traits: [...new Set(traits)].slice(0, MAX_TRAITS),
         firstPage: Number.POSITIVE_INFINITY,
         met: 0,
+        voice: voiceKind(raw.voice),
         keys: new Set([name, ...aliases].map(nameKey).filter(Boolean)),
         order: order++,
         named: part.from,
@@ -361,6 +382,7 @@ export function mergeStory(
       traits: c.traits,
       firstPage: c.firstPage,
       met: c.met,
+      voice: c.voice,
     })),
     places: places
       .sort((a, b) => a.firstPage - b.firstPage)
@@ -398,6 +420,7 @@ export function bibleOf(
       traits: (c.traits ?? []).map(clean).filter(Boolean).slice(0, MAX_TRAITS),
       firstPage: Number.isFinite(c.firstPage) ? c.firstPage : 1,
       met: Number.isFinite(c.met) ? c.met : Number.MAX_SAFE_INTEGER,
+      voice: voiceKind(c.voice),
     }));
   const known = new Set(characters.map((c) => c.id));
   return {
@@ -545,32 +568,63 @@ export function castStory(
     if (thing.kind !== 'character') return thing;
     const who = bible.characters.find((c) => c.id === thing.ref);
     if (!who) return thing;
+    const before = moodBefore(bible, who.id, page);
     return {
       ...thing,
-      state: thing.state ?? moodBefore(bible, who.id, page),
+      state: thing.state ?? before,
       met: who.met,
       intro: who.firstPage === page ? who.traits : [],
+      before,
     };
   });
+  // A place in the cast: the writer's own for it, or added as the page's.
+  const placed = (where: StoryPlace): string => {
+    const shown = cast.find((t) => t.kind === 'place' && t.ref === where.id);
+    if (shown) return shown.id;
+    const taken = new Set(cast.map((t) => t.id));
+    const id = taken.has(where.id) ? `place-${where.id}` : where.id;
+    cast.push({
+      id,
+      kind: 'place',
+      ref: where.id,
+      name: where.name,
+      sound: where.sound,
+    });
+    return id;
+  };
   const here = placeOn(bible, page);
-  let backdrop: string | null = null;
-  if (here) {
-    const shown = cast.find((t) => t.kind === 'place' && t.ref === here.id);
-    if (shown) backdrop = shown.id;
-    else {
-      const taken = new Set(cast.map((t) => t.id));
-      backdrop = taken.has(here.id) ? `place-${here.id}` : here.id;
-      cast.push({
-        id: backdrop,
-        kind: 'place',
-        ref: here.id,
-        name: here.name,
-        sound: here.sound,
-      });
-    }
-  }
-  return { ...script, cast, backdrop };
+  const backdrop = here ? placed(here) : null;
+  // Who comes back from the page before: on it and on this one, at most
+  // three, the first met first, in the place they were.
+  const back = cast
+    .filter(
+      (t): t is CharacterThing =>
+        t.kind === 'character' &&
+        Boolean(
+          bible.pages
+            .find((p) => p.page === page - 1)
+            ?.present.some((one) => one.id === t.ref),
+        ),
+    )
+    .sort((a, b) => a.met - b.met)
+    .slice(0, OPENING_MOST);
+  const there = back.length ? placeOn(bible, page - 1) : null;
+  return {
+    ...script,
+    cast,
+    backdrop,
+    opening: back.length
+      ? {
+          show: back.map((t) => t.id),
+          backdrop: there ? placed(there) : backdrop,
+        }
+      : null,
+  };
 }
+
+/** The most characters a "previously" brings back, and how long the voice waits for it. */
+export const OPENING_MOST = 3;
+export const OPENING_LEAD_S = 2;
 
 /** Where a page happens: the place the story puts it in, or none. */
 export function placeOn(bible: StoryBible, page: number): StoryPlace | null {

@@ -3,6 +3,7 @@ import {
   gateDrawing,
   inspectSvg,
   numbersSane,
+  revealedSvg,
   sanitizeCss,
   svgFromReply,
 } from './scene-svg';
@@ -264,5 +265,33 @@ describe('a set, gated', () => {
     // As any drawing, the ground goes and the drawing is framed to its ink.
     const drawn = await gateDrawing(scene, set);
     expect(drawn.drawing?.svg ?? '').not.toContain('#BFD9EE');
+  }, 20_000);
+});
+
+describe('a group the artist hid itself', () => {
+  it('is shown again, the rest of its style kept: the lesson does the hiding', async () => {
+    const hidden =
+      '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 400"><g id="head"><circle cx="200" cy="200" r="150" fill="#E9D8B4"/></g>' +
+      '<g id="neutral"><circle cx="170" cy="180" r="10"/></g>' +
+      '<g id="happy" style="display:none; fill: #1F2A37"><circle cx="170" cy="180" r="12"/></g>' +
+      '<g id="sad" visibility="hidden" opacity="0"><circle cx="170" cy="180" r="8"/></g></svg>';
+    const gated = await gateDrawing(hidden, {
+      parts: [{ name: 'head', label: false }],
+      states: [
+        { name: 'neutral', look: '' },
+        { name: 'happy', look: '' },
+        { name: 'sad', look: '' },
+      ],
+      motion: '',
+    });
+    const svg = gated.drawing!.svg;
+    expect(svg).toContain('<g id="happy" style=" fill: #1F2A37">');
+    expect(svg).toContain('<g id="sad">');
+    expect(gated.mended).toContain('showed 2 groups the drawing hid itself');
+    // A drawing kept from before is shown the same way when it is read.
+    expect(revealedSvg(hidden, ['happy'])).toContain(
+      '<g id="happy" style=" fill: #1F2A37">',
+    );
+    expect(revealedSvg(hidden, ['neutral'])).toBe(hidden);
   }, 20_000);
 });

@@ -17,7 +17,22 @@ type Piece = {
   pauseAfter: number;
   speed?: number;
   style?: string;
+  /** Another of its voices for this piece: a story's character. */
+  voice?: string;
 };
+
+/** The pieces in runs of one voice, in order: each run is one request. */
+export function voiceRuns<T extends { voice?: string }>(
+  pieces: T[],
+): { voice: string | undefined; pieces: T[] }[] {
+  const runs: { voice: string | undefined; pieces: T[] }[] = [];
+  for (const piece of pieces) {
+    const last = runs[runs.length - 1];
+    if (last && last.voice === piece.voice) last.pieces.push(piece);
+    else runs.push({ voice: piece.voice, pieces: [piece] });
+  }
+  return runs;
+}
 
 /** One sentence as the voice is sent it: its words, a pause after it, and how it goes. */
 export interface GeminiItem {
@@ -212,10 +227,12 @@ export class GeminiSpeechAdapter implements SpeechPort {
     text,
     voice,
     pieces,
+    lead,
   }: {
     text: string;
     voice?: string;
     pieces?: Piece[];
+    lead?: number;
   }): Promise<{
     audio: Buffer;
     mimeType: string;
@@ -233,31 +250,62 @@ export class GeminiSpeechAdapter implements SpeechPort {
       );
     const { model } = this.label();
     const speaker = voice?.trim() || this.label().voice;
-    const items = geminiItems(
-      pieces?.length ? pieces : [{ text, pauseAfter: 0 }],
-    );
-    if (!items.length) throw refused(400, 'There is nothing to say');
-    const { url, body } =
-      this.config.get<string>('GEMINI_TTS_API') === 'generate'
-        ? generateRequest(model, speaker, items)
-        : interactionRequest(model, speaker, items);
-
-    const answer = await this.attempts(url, key, body);
-    const found = audioIn(answer);
-    if (!found) throw new Error('The Gemini voice sent no audio');
-    const bytes = Buffer.from(found.data, 'base64');
-    const wav = readWav(bytes);
-    if (!wav && /wav/i.test(found.mimeType))
-      throw new Error('The Gemini voice sent audio that is not 16-bit PCM');
-    const pcm = wav ?? readPcm16(bytes, rateOf(found.mimeType) ?? 24000);
-    if (!pcm.samples.length) throw new Error('The Gemini voice sent silence');
-    const usage = usageIn(answer);
+    const given: Piece[] = pieces?.length ? pieces : [{ text, pauseAfter: 0 }];
+    if (!geminiItems(given).length)
+      throw refused(400, 'There is nothing to say');
+    // A story's characters speak in voices of their own: each run of one
+    // voice is its own request, and the runs are joined with the silence
+    // the last piece of each asked for.
+    const runs = voiceRuns(given);
+    const parts: Int16Array[] = [];
+    let rate = 24000;
+    let tokensIn = 0;
+    let tokensOut = 0;
+    let counted = false;
+    for (const [k, run] of runs.entries()) {
+      const items = geminiItems(run.pieces);
+      if (!items.length) continue;
+      const who = run.voice?.trim() || speaker;
+      const { url, body } =
+        this.config.get<string>('GEMINI_TTS_API') === 'generate'
+          ? generateRequest(model, who, items)
+          : interactionRequest(model, who, items);
+      const answer = await this.attempts(url, key, body);
+      const found = audioIn(answer);
+      if (!found) throw new Error('The Gemini voice sent no audio');
+      const bytes = Buffer.from(found.data, 'base64');
+      const wav = readWav(bytes);
+      if (!wav && /wav/i.test(found.mimeType))
+        throw new Error('The Gemini voice sent audio that is not 16-bit PCM');
+      const pcm = wav ?? readPcm16(bytes, rateOf(found.mimeType) ?? 24000);
+      if (!pcm.samples.length) throw new Error('The Gemini voice sent silence');
+      rate = pcm.sampleRate;
+      parts.push(pcm.samples);
+      const pause = run.pieces[run.pieces.length - 1].pauseAfter;
+      if (k < runs.length - 1 && pause > 0)
+        parts.push(new Int16Array(Math.round(pause * rate)));
+      const usage = usageIn(answer);
+      if (usage) {
+        tokensIn += usage.tokensIn;
+        tokensOut += usage.tokensOut;
+        counted = true;
+      }
+    }
+    // Quiet before the first word, when the page opens on the stage alone.
+    if (lead && lead > 0)
+      parts.unshift(new Int16Array(Math.round(lead * rate)));
+    const samples = new Int16Array(parts.reduce((n, p) => n + p.length, 0));
+    let at = 0;
+    for (const part of parts) {
+      samples.set(part, at);
+      at += part.length;
+    }
     return {
-      audio: await this.encode(pcm.samples, pcm.sampleRate),
+      audio: await this.encode(samples, rate),
       mimeType: 'audio/mpeg',
       model: `gemini:${model}`,
-      durationMs: pcmMs(pcm),
-      ...(usage ? { usage } : {}),
+      durationMs: pcmMs({ samples, sampleRate: rate }),
+      ...(counted ? { usage: { tokensIn, tokensOut } } : {}),
     };
   }
 

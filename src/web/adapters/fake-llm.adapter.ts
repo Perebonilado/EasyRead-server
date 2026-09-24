@@ -573,6 +573,7 @@ export class FakeLlmAdapter implements LlmGatewayPort {
           role: 'main' as const,
           look: 'a child in plain clothes',
           traits: ['curious'],
+          voice: 'girl' as const,
         })),
         places: [],
         pages: pages.map(({ page, text }) => ({

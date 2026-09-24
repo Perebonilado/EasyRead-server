@@ -554,6 +554,59 @@ function onlyLeader(group: Element): boolean {
 }
 
 /** Ids in the drawing matched to the names the writer gave: parts, their labels, states. */
+/**
+ * The named groups the artist hid in its own markup (display none,
+ * hidden, or clear) shown again, and how many were: the lesson hides and
+ * shows parts, labels and states itself, and a group hidden in the file
+ * could never be shown. A character's faces came back hidden, all but one.
+ */
+export function revealGroups(root: Element, ids: Iterable<string>): number {
+  const wanted = new Set(ids);
+  const hides = (property: string, value: string) =>
+    (property === 'display' && /^none\b/i.test(value)) ||
+    (property === 'visibility' && /^(hidden|collapse)\b/i.test(value)) ||
+    (property === 'opacity' && /^0*(\.0*)?\s*(!important)?$/i.test(value));
+  let shown = 0;
+  for (const node of walk(root)) {
+    if (!wanted.has(node.attribs.id)) continue;
+    let changed = false;
+    for (const property of ['display', 'visibility', 'opacity'])
+      if (
+        node.attribs[property] !== undefined &&
+        hides(property, node.attribs[property].trim())
+      ) {
+        delete node.attribs[property];
+        changed = true;
+      }
+    if (node.attribs.style) {
+      const kept = node.attribs.style.split(';').filter((declaration) => {
+        const at = declaration.indexOf(':');
+        if (at < 0) return declaration.trim().length > 0;
+        const hidden = hides(
+          declaration.slice(0, at).trim().toLowerCase(),
+          declaration.slice(at + 1).trim(),
+        );
+        if (hidden) changed = true;
+        return !hidden;
+      });
+      if (kept.join(';').trim()) node.attribs.style = kept.join(';');
+      else delete node.attribs.style;
+    }
+    if (changed) shown += 1;
+  }
+  return shown;
+}
+
+/** A kept drawing's named groups shown again, as the gate now shows them: the same markup when none was hidden. */
+export function revealedSvg(svg: string, ids: string[]): string {
+  const doc = parseDocument(svg, { xmlMode: true, recognizeCDATA: true });
+  const root = elements(doc.children).find(
+    (node) => node.name.toLowerCase() === 'svg',
+  );
+  if (!root || !revealGroups(root, ids)) return svg;
+  return render(root, { xmlMode: true, selfClosingTags: true });
+}
+
 export function namedGroups(
   root: Element,
   thing: Pick<DrawingThing, 'parts' | 'states'>,
@@ -778,6 +831,15 @@ export function inspectSvg(
   if (!options.backdrop && removeBackdrop(root, viewBox))
     mended.push('removed a backdrop');
   const { parts, labels, states } = namedGroups(root, thing);
+  const hid = revealGroups(root, [
+    ...Object.values(parts),
+    ...Object.values(labels),
+    ...Object.values(states),
+  ]);
+  if (hid)
+    mended.push(
+      `showed ${hid} group${hid === 1 ? '' : 's'} the drawing hid itself`,
+    );
   if (
     thing.name &&
     removeOwnName(

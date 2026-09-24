@@ -606,6 +606,30 @@ describe('what a character says, in a bubble', () => {
     generator: 'scene-2',
   });
 
+  it('gives a sentence the writer says quotes a character its bubble, with no "say" on it', () => {
+    const quoted = composeScene({
+      script: {
+        ...talking,
+        beats: talking.beats.map((b, k) =>
+          k === 3 ? { ...b, speaker: 'fox' } : b,
+        ),
+        steps: talking.steps.filter((step) => !step.effects.length),
+      },
+      drawings: new Map([
+        ['mira', figure()],
+        ['fox', figure()],
+      ]),
+      beats: beatsSaid,
+      durationMs: 16_000,
+      timing: 'voice',
+      generator: 'scene-2',
+    }).scene;
+    const says = quoted.effects.filter((e) => e.do === 'say');
+    expect(says.map((e) => [e.target, e.atMs, e.say?.text])).toEqual([
+      ['fox', beatsSaid[3].startMs, 'You are holding the matches upside down'],
+    ]);
+  });
+
   it('holds the words from the sentence until the voice has said it', () => {
     const says = scene.effects.filter((e) => e.do === 'say');
     expect(says).toHaveLength(1);
@@ -733,5 +757,82 @@ describe('the scene behind the stage', () => {
       ambience: 'water',
     });
     expect(audit.wide.flat()).toEqual([]);
+  });
+});
+
+describe('the "previously" before a story page', () => {
+  const figure = (): GatedDrawing =>
+    drawing({
+      aspect: 0.6,
+      viewBox: [0, 0, 600, 900],
+      parts: {},
+      labels: {},
+      states: { neutral: 'neutral', happy: 'happy', afraid: 'afraid' },
+    });
+  const late = beats.map((b) => ({
+    ...b,
+    startMs: b.startMs + 2000,
+    endMs: b.endMs + 2000,
+    words: b.words.map((w) => [w[0], w[1], w[2] + 2000, w[3] + 2000]),
+  }));
+  const story: SceneScript = {
+    ...script,
+    opening: { show: ['mira'], backdrop: null },
+    cast: [
+      {
+        id: 'mira',
+        kind: 'character',
+        ref: 'mira',
+        name: 'Mira',
+        state: 'happy',
+        met: 0,
+        intro: [],
+        before: 'afraid',
+      },
+    ],
+    steps: [
+      {
+        at: { beat: 1, phrase: 'sunlight' },
+        word: 2,
+        stage: { layout: 'one', show: ['mira'], arrows: [] },
+        effects: [],
+      },
+    ],
+  };
+  const make = (timed: typeof beats) =>
+    composeScene({
+      script: story,
+      drawings: new Map([['mira', figure()]]),
+      beats: timed,
+      durationMs: 18_000,
+      timing: 'voice',
+      generator: 'scene-2',
+    }).scene;
+
+  it('opens on who comes back, with the face they left with, until the page turns it', () => {
+    const scene = make(late);
+    expect(scene.steps[0]).toMatchObject({
+      atMs: 0,
+      layout: 'one',
+      show: ['mira'],
+    });
+    const faces = scene.effects
+      .filter(
+        (e) => e.target === 'mira' && (e.do === 'show' || e.do === 'hide'),
+      )
+      .map((e) => `${e.atMs < 2000 ? 'before' : 'after'} ${e.do} ${e.part}`);
+    expect(faces).toEqual([
+      'before show afraid',
+      'after hide afraid',
+      'after show happy',
+    ]);
+  });
+
+  it('is left out when the voice did not wait for it', () => {
+    const scene = make(beats);
+    expect(scene.steps[0].atMs).toBeGreaterThan(0);
+    expect(
+      scene.effects.find((e) => e.target === 'mira' && e.do === 'show')?.part,
+    ).toBe('happy');
   });
 });

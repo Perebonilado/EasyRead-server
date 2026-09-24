@@ -138,6 +138,46 @@ describe('the Gemini voice', () => {
     );
   });
 
+  it('speaks each run of one voice as its own request, joined by its silence, after the lead', async () => {
+    const bodies: { voice: unknown; texts: string[] }[] = [];
+    const adapter = new GeminiSpeechAdapter(
+      config({ GEMINI_API_KEY: 'k' }),
+      (samples) => Promise.resolve(Buffer.from(`mp3:${samples.length}`)),
+      (_url: string | URL | Request, init?: RequestInit) => {
+        const body = JSON.parse(init?.body as string) as {
+          generation_config: { speech_config: { voice: string }[] };
+          input: { content: { text: string }[] }[];
+        };
+        bodies.push({
+          voice: body.generation_config.speech_config[0].voice,
+          texts: body.input[0].content.map((c) => c.text),
+        });
+        return Promise.resolve(reply(200, answer(wav(1))));
+      },
+    );
+    const said = await adapter.synthesize({
+      text: 'x',
+      lead: 2,
+      pieces: [
+        { text: 'A fox steps out.', speed: 1, pauseAfter: 0.4 },
+        {
+          text: '"You are late,"',
+          speed: 1,
+          pauseAfter: 0.12,
+          voice: 'Fenrir',
+        },
+        { text: 'says the fox.', speed: 1, pauseAfter: 0.5 },
+      ],
+    });
+    expect(bodies).toEqual([
+      { voice: 'Sulafat', texts: ['A fox steps out.'] },
+      { voice: 'Fenrir', texts: ['"You are late,"'] },
+      { voice: 'Sulafat', texts: ['says the fox.'] },
+    ]);
+    // Two seconds of quiet, three seconds said, and the two silences between runs.
+    expect(said.durationMs).toBe(2000 + 3000 + 400 + 120);
+  });
+
   it('waits out a rate limit, and gives up at once on a refusal', async () => {
     let calls = 0;
     const limited = new GeminiSpeechAdapter(

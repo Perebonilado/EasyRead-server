@@ -55,6 +55,12 @@ export const BACKDROP_OPACITY = 0.5;
 
 /** Effects in one step come this far apart, so each is seen. */
 const EFFECT_STAGGER_MS = 180;
+/**
+ * The first word must come at least this late for a "previously" to be
+ * shown: the voice waited for it. A voice that did not starts at once,
+ * and the page opens as any page does.
+ */
+export const OPENING_MIN_MS = 1200;
 /** How long a speech bubble stays after the voice has said its words. */
 const SAY_AFTER_MS = 700;
 
@@ -241,6 +247,8 @@ export function oneFaceAtATime(
   steps: readonly SceneStepDto[],
   /** Whether they were drawn: one set as a card has no faces. */
   drawn: (id: string) => boolean = () => true,
+  /** The face each comes on with, when not the one the writer gave: back from the page before. */
+  firstFaces: ReadonlyMap<string, string> = new Map(),
 ): SceneEffectDto[] {
   const faces = new Set<string>(EXPRESSIONS);
   const characters = new Map(
@@ -258,7 +266,7 @@ export function oneFaceAtATime(
   for (const [id, character] of characters) {
     const enters = steps.find((step) => step.show.includes(id));
     if (!enters) continue;
-    let wearing: string = character.state ?? 'neutral';
+    let wearing: string = firstFaces.get(id) ?? character.state ?? 'neutral';
     out.push({
       atMs: Math.max(0, enters.atMs - FACE_EARLY_MS),
       target: id,
@@ -381,6 +389,32 @@ export function composeScene(input: ComposeInput): {
         .map((x) => `${x.from}>${x.to}`)
         .sort()
         .join();
+  // A story page's "previously": who comes back from the page before,
+  // as they were, on the scene they were in, while the voice waits.
+  const opening =
+    script.opening && (beats[0]?.startMs ?? 0) >= OPENING_MIN_MS
+      ? script.opening.show.filter((id) => byId.get(id)?.kind === 'drawing')
+      : [];
+  if (opening.length) {
+    const stage = sidesKept(
+      { layout: opening.length === 1 ? 'one' : 'row', show: opening },
+      castById,
+    );
+    const there = painted(script.opening?.backdrop) ?? backdrop;
+    steps.push({
+      atMs: 0,
+      layout: stage.layout,
+      show: stage.show,
+      arrows: [],
+      enter: Object.fromEntries(
+        stage.show.map((id) => [id, { how: 'fade' as const }]),
+      ),
+      focus: stage.show[0] ?? null,
+      ...(there ? { backdrop: there } : {}),
+    });
+    before = stage.show;
+    focus = stage.show[0] ?? null;
+  }
   for (const timedStep of timed) {
     const { atMs } = timedStep;
     let { step } = timedStep;
@@ -476,6 +510,23 @@ export function composeScene(input: ComposeInput): {
     });
   }
 
+  // Back from the page before, a character wears the face it left them
+  // with, and the one the writer gave them once the page is under way.
+  const faces = new Map<string, string>();
+  for (const id of opening) {
+    const cast = castById.get(id);
+    if (cast?.kind !== 'character' || !cast.before) continue;
+    faces.set(id, cast.before);
+    // On their next step, or, staying on from the opening, as the voice begins.
+    const next = steps.find((step, k) => k > 0 && step.show.includes(id));
+    if (cast.state && cast.state !== cast.before)
+      effects.push({
+        atMs: next ? next.atMs + 350 : Math.round(beats[0]?.startMs ?? 0),
+        target: id,
+        part: cast.state,
+        do: 'show',
+      });
+  }
   effects.splice(
     0,
     effects.length,
@@ -484,8 +535,41 @@ export function composeScene(input: ComposeInput): {
       script.cast,
       steps,
       (id) => byId.get(id)?.kind === 'drawing',
+      faces,
     ),
   );
+  // A sentence the writer says quotes a character, with no "say" on it:
+  // its words in a bubble all the same, as the voice begins it.
+  script.beats.forEach((beat, k) => {
+    if (!beat.speaker || byId.get(beat.speaker)?.kind !== 'drawing') return;
+    const t = beats[k];
+    if (!t) return;
+    const already = effects.some(
+      (e) => e.do === 'say' && e.atMs >= t.startMs - 600 && e.atMs <= t.endMs,
+    );
+    const text = spokenIn(beat.say);
+    if (already || !text) return;
+    // Open on the first quoted word, a breath early; close after the last.
+    const spans = quotedSpans(beat.say);
+    const from = t.words.find((w) => w[1] > (spans[0]?.[0] ?? 0))?.[2];
+    const to = [...t.words]
+      .reverse()
+      .find(
+        (w) => w[0] < (spans[spans.length - 1]?.[1] ?? beat.say.length),
+      )?.[3];
+    effects.push({
+      atMs: Math.round(Math.max(t.startMs, (from ?? t.startMs) - 150)),
+      target: beat.speaker,
+      part: null,
+      do: 'say',
+      say: {
+        id: `say-${saying++}`,
+        text,
+        untilMs: Math.round((to ?? t.endMs) + SAY_AFTER_MS),
+      },
+    });
+  });
+  effects.sort((a, b) => a.atMs - b.atMs);
   // A bubble belongs to the stage it is said on and to its sentence: it
   // goes at the next change of stage, or when someone speaks after it.
   const says = effects.filter((effect) => effect.say);

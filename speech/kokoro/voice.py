@@ -109,8 +109,8 @@ class Renderer:
         self.render([(WARM_UP, 1.0, 0.0)], self.voice)
         return time.time() - started
 
-    def render(self, pieces: list, voice: str, timestamps: bool = False):
-        """The page as samples at 24 kHz, its length in seconds, where each piece starts, and, when asked, when each word is spoken; pieces are (text, speed, silence after)."""
+    def render(self, pieces: list, voice: str, timestamps: bool = False, lead: float = 0.0):
+        """The page as samples at 24 kHz, its length in seconds, where each piece starts, and, when asked, when each word is spoken; pieces are (text, speed, silence after), or with a voice of their own as a fourth, and `lead` seconds of quiet come first."""
         import numpy as np
 
         out = []
@@ -124,11 +124,16 @@ class Renderer:
             length += len(chunk)
 
         with self.lock:
-            for text, speed, pause_after in pieces:
+            if lead > 0:
+                add(gap(lead))
+            for item in pieces:
+                text, speed, pause_after = item[0], item[1], item[2]
+                # A story's character says their own line in their own voice.
+                speaker = item[3] if len(item) > 3 and item[3] else voice
                 begun = None
                 for run in runs(text):
                     spoken = False
-                    for result in self.pipeline(run, voice=voice, speed=speed, split_pattern=r"\n+"):
+                    for result in self.pipeline(run, voice=speaker, speed=speed, split_pattern=r"\n+"):
                         if result.audio is None:
                             continue
                         piece, head = trimmed(result.audio.detach().cpu().numpy().astype(np.float32))
@@ -204,7 +209,7 @@ def mount(api, renderer: Renderer, token: str, where: str, mode: str = "lecture"
 
     @api.get("/health")
     def health():
-        return {"status": "ok", "model": "kokoro-82m", "voice": renderer.voice, "gpu": where, "mode": mode, "version": 5}
+        return {"status": "ok", "model": "kokoro-82m", "voice": renderer.voice, "gpu": where, "mode": mode, "version": 6}
 
     @api.post("/v1/audio/stream")
     async def stream(request: Request, authorization: str = Header(default="")):
@@ -236,7 +241,7 @@ def mount(api, renderer: Renderer, token: str, where: str, mode: str = "lecture"
         async def pieces():
             if lead > 0:
                 yield _pcm(gap(lead))
-            for text, speed, pause_after in parts:
+            for text, speed, pause_after, *_ in parts:
                 audio, _seconds, _starts, _words = await asyncio.to_thread(renderer.render, [(text, speed, 0.0)], voice)
                 yield _pcm(audio)
                 if pause_after > 0:
@@ -255,7 +260,12 @@ def mount(api, renderer: Renderer, token: str, where: str, mode: str = "lecture"
         try:
             renderer.check_voice(voice)
             pieces = read_pieces(body)
-        except ValueError as error:
+            for piece in pieces:
+                if piece[3]:
+                    renderer.check_voice(piece[3])
+            # Quiet before the first word: the stage opens on its own first.
+            lead = min(PAUSE_LIMIT, max(0.0, float(body.get("lead") or 0.0)))
+        except (TypeError, ValueError) as error:
             raise HTTPException(status_code=400, detail=str(error))
         fmt = str(body.get("response_format") or "mp3").lower()
         if fmt not in ("mp3", "wav"):
@@ -264,7 +274,7 @@ def mount(api, renderer: Renderer, token: str, where: str, mode: str = "lecture"
         # The delivery note and the language, if sent, are read by no one here.
         started = time.time()
         try:
-            audio, seconds, starts, words = await asyncio.to_thread(renderer.render, pieces, voice, timestamps)
+            audio, seconds, starts, words = await asyncio.to_thread(renderer.render, pieces, voice, timestamps, lead)
         except ValueError as error:
             raise HTTPException(status_code=400, detail=str(error))
         data = await asyncio.to_thread(to_mp3 if fmt == "mp3" else to_wav, audio)
@@ -356,7 +366,7 @@ def gap(seconds: float):
 
 
 def read_pieces(body: dict) -> list:
-    """The page as (text, speed, silence after) triples, from `pieces` or from a plain `input`."""
+    """The page as (text, speed, silence after, voice or None) from `pieces`, or from a plain `input`."""
     raw = body.get("pieces")
     if raw is None:
         text = str(body.get("input") or "").strip()
@@ -381,7 +391,9 @@ def read_pieces(body: dict) -> list:
             pause_after = min(PAUSE_LIMIT, max(0.0, float(item.get("pause_after") or 0.0)))
         except (TypeError, ValueError):
             raise ValueError("speed and pause_after must be numbers")
-        pieces.append((text, speed, pause_after))
+        # A voice of its own for this piece, checked by the caller.
+        own = str(item.get("voice") or "").strip() or None
+        pieces.append((text, speed, pause_after, own))
     if not pieces:
         raise ValueError("input is empty")
     if total > INPUT_LIMIT:

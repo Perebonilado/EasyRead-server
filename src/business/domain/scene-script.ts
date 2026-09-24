@@ -31,6 +31,7 @@ import {
   type FigureSpec,
 } from './scene-figure';
 import { dialogueOf, quotedSpans, type Speaker } from './scene-dialogue';
+import { STAGE_RECIPES, type LearningStage } from './scene-stage';
 import { checkArithmetic, markTerms, type MathLine } from './scene-math';
 import { sample, type PlotSpec } from './scene-plot';
 import { findPhrase, isVerbatim } from './scene-quote';
@@ -708,8 +709,11 @@ export function mendScript(
       aliases: string[];
       sound?: SceneAmbience | null;
     }[];
+    /** Whom the document is for: its recipe's limits hold. */
+    stage?: LearningStage | null;
   } = {},
 ): MendedScript {
+  const recipe = options.stage ? STAGE_RECIPES[options.stage] : null;
   const problems: string[] = [];
   const mended: string[] = [];
   const formats = new Set(options.formats ?? SCENE_FORMATS);
@@ -953,6 +957,14 @@ export function mendScript(
         return true;
       })
       .slice(0, MAX_PARTS);
+    // A child reads two labels on a drawing, a student more: the rest stay
+    // parts the voice can point at, unlabelled.
+    let labelled = 0;
+    for (const part of parts)
+      if (part.label && ++labelled > (recipe?.labels ?? MAX_PARTS)) {
+        part.label = false;
+        mended.push(`${id}: "${part.name}" unlabelled, for these learners`);
+      }
     const states = (raw.states ?? [])
       .map((state) => ({ name: clean(state.name), look: clean(state.look) }))
       .filter((state) => {
@@ -1234,6 +1246,21 @@ export function mendScript(
       problems.push(
         `The narration is ${spoken} characters; keep it under ${MAX_SPOKEN_CHARS}.`,
       );
+    // Far past what these learners take in: back, with their numbers. A
+    // little over is let be; a retry costs the writer once more.
+    if (recipe) {
+      const words = beats.map((beat) => wordsOf(beat.say).length);
+      const total = words.reduce((a, b) => a + b, 0);
+      if (total > recipe.spoken[1] * 1.3)
+        problems.push(
+          `The narration is ${total} spoken words; these learners take ${recipe.spoken[0]} to ${recipe.spoken[1]}. Say less, keeping the main ideas.`,
+        );
+      const long = words.filter((n) => n > recipe.sentence[1] * 1.3).length;
+      if (long > Math.max(1, words.length / 4))
+        problems.push(
+          `${long} sentences run over ${Math.round(recipe.sentence[1] * 1.3)} words; these learners take sentences of ${recipe.sentence[0]} to ${recipe.sentence[1]}. Split them.`,
+        );
+    }
     const drawings = cast.filter((thing) => thing.kind === 'drawing');
     if (drawings.length > MAX_DRAWINGS) {
       // The ones on stage longest keep their drawings; the rest are set in type.

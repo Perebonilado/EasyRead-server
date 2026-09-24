@@ -20,6 +20,10 @@ import {
   STORY_VOICES,
 } from '../../../business/domain/scene-story';
 import {
+  LEARNING_STAGES,
+  STAGE_SURENESS,
+} from '../../../business/domain/scene-stage';
+import {
   BOTTOMS,
   CLOTH_COLOURS,
   FACIAL_HAIR,
@@ -631,6 +635,9 @@ export const sceneProfileSchema = z.object({
   tone: z.enum(PROFILE_TONES),
   formats: z.array(z.enum(['maths', 'reading'])),
   story: z.boolean(),
+  stage: z.enum(LEARNING_STAGES).nullable(),
+  stageSure: z.enum(STAGE_SURENESS),
+  stageWhy: z.string(),
 });
 
 /** Who and where one stretch of a story meets, and who is on each of its pages. */

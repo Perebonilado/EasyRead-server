@@ -3,6 +3,7 @@ import {
   DELIVERY,
   IDEA_CHANGE_S,
   PAUSE_RANGE,
+  SLOWEST,
   SPEED_RANGE,
   TURN_S,
   characterVoice,
@@ -200,6 +201,22 @@ describe("a story's characters, in their own voices", () => {
         ' ',
       ),
     );
+  });
+
+  it('speaks to young learners more slowly, with longer pauses', () => {
+    const beats = [
+      { delivery: 'explain' as const, pause: 'short' as const },
+      { delivery: 'key' as const, pause: 'long' as const },
+    ];
+    const usual = deliveryPieces(beats);
+    const child = deliveryPieces(beats, { pace: 0.9, pause: 1.3 });
+    child.forEach((piece, i) => {
+      expect(piece.speed).toBeLessThan(usual[i].speed);
+      expect(piece.speed).toBeGreaterThanOrEqual(SLOWEST);
+      expect(piece.pauseAfter).toBeGreaterThanOrEqual(usual[i].pauseAfter);
+    });
+    // The same for anyone else as before.
+    expect(deliveryPieces(beats, { pace: 1, pause: 1 })).toEqual(usual);
   });
 
   it('gives two characters in one sentence each their own voice', () => {

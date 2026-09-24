@@ -14,8 +14,16 @@ import {
   describeProfile,
   profileKey,
   profileOf,
+  surenessOf,
   type DocumentProfile,
 } from '../../business/domain/scene-profile';
+import {
+  STAGE_RECIPES,
+  describeStage,
+  levelIn,
+  settleStage,
+  type LearningStage,
+} from '../../business/domain/scene-stage';
 import {
   composeScene,
   describeStep,
@@ -472,6 +480,7 @@ export class SceneProcessor {
         story,
         // The voice waits while a "previously" brings the last page back.
         script.opening?.show.length ? OPENING_LEAD_S : 0,
+        input.profile.stage ?? null,
       )
         .catch((error: unknown) => {
           stop.abort();
@@ -627,7 +636,13 @@ export class SceneProcessor {
       topicTitle: input.topic.title,
       material: input.material,
       context: input.context,
-      profile: describeProfile(input.profile),
+      // The book, and whom it is for with how to teach them.
+      profile: [
+        describeProfile(input.profile),
+        describeStage(input.profile.stage ?? null),
+      ]
+        .filter(Boolean)
+        .join('\n'),
       ...(told ? { story: told } : {}),
     };
     // The page, to hold a quotation to, the formats the book may use, and
@@ -635,6 +650,7 @@ export class SceneProcessor {
     const checks = {
       material: input.material,
       formats: input.profile.formats,
+      stage: input.profile.stage ?? null,
       ...(input.story
         ? {
             characters: input.story.bible.characters,
@@ -896,6 +912,8 @@ export class SceneProcessor {
     story: PageStory | null = null,
     /** Seconds of quiet before the first word, for an opening on the stage alone. */
     leadS = 0,
+    /** Whom the document is for: its pace and pauses. */
+    stage: LearningStage | null = null,
   ): Promise<{
     beats: TimedBeat[];
     durationMs: number;
@@ -904,7 +922,10 @@ export class SceneProcessor {
   }> {
     const forms = script.beats.map((beat) => spokenForm(beat.say, kept));
     // Each sentence at its own pace, with its own silence after it.
-    const delivered = deliveryPieces(script.beats);
+    const delivered = deliveryPieces(
+      script.beats,
+      stage ? STAGE_RECIPES[stage] : undefined,
+    );
     const pausesS = delivered.map((piece) => piece.pauseAfter);
     const spoken = sceneSpoken(forms);
     const { model } = this.speech.label();
@@ -1607,11 +1628,15 @@ export class SceneProcessor {
     contentVersion: number,
   ): Promise<DocumentProfile> {
     const key = profileKey(documentId, contentVersion);
+    let kept: DocumentProfile | null = null;
     try {
-      const kept = JSON.parse(
-        (await this.storage.get(key)).toString('utf8'),
-      ) as Parameters<typeof profileOf>[0];
-      return profileOf(kept);
+      kept = profileOf(
+        JSON.parse(
+          (await this.storage.get(key)).toString('utf8'),
+        ) as Parameters<typeof profileOf>[0],
+      );
+      // Made before stages were asked about: read once more for its stage.
+      if ('stage' in kept) return kept;
     } catch {
       // Not made yet.
     }
@@ -1625,7 +1650,27 @@ export class SceneProcessor {
         sample,
       });
       await this.record(documentId, 'scene_profile', made.usage);
-      const profile = profileOf(made.value);
+      // The level the document names in its own words wins over a
+      // reading that says otherwise; an unsure reading is no stage.
+      const settled = settleStage(
+        {
+          stage: made.value.stage ?? null,
+          sure: surenessOf(made.value.stageSure),
+          why: made.value.stageWhy ?? '',
+        },
+        levelIn(
+          [doc?.props.title ?? '', ...topics.map((t) => t.title), sample].join(
+            '\n',
+          ),
+        ),
+      );
+      const read = profileOf(made.value);
+      // A profile kept before keeps all it said; only its stage is new.
+      const profile: DocumentProfile = {
+        ...(kept ?? read),
+        stage: settled.stage,
+        stageWhy: settled.why.slice(0, 200),
+      };
       await this.storage.put({
         key,
         body: Buffer.from(JSON.stringify(profile)),
@@ -1634,6 +1679,8 @@ export class SceneProcessor {
       this.logger.log(`${documentId}: ${describeProfile(profile)}`);
       return profile;
     } catch (error) {
+      // A profile kept before stages stands as it was.
+      if (kept) return kept;
       this.logger.warn(
         `${documentId}: no profile, taught as an explainer: ${(error as Error).message}`,
       );

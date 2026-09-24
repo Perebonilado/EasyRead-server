@@ -35,6 +35,8 @@ export const BEFORE_KEY_S = 0.55;
 export const SPEED_RANGE = [0.88, 1.1] as const;
 /** No silence shorter or longer than this, in seconds. */
 export const PAUSE_RANGE = [0.2, 1.4] as const;
+/** The slowest a sentence is said, for the youngest learners. */
+export const SLOWEST = 0.82;
 
 const clamp = (n: number, [low, high]: readonly [number, number]) =>
   Math.min(high, Math.max(low, n));
@@ -42,14 +44,23 @@ const clamp = (n: number, [low, high]: readonly [number, number]) =>
 /** Each sentence's pace and the silence after it, in seconds. */
 export function deliveryPieces(
   beats: Pick<SceneBeat, 'delivery' | 'pause'>[],
+  /** Whom it is for: a child is spoken to more slowly, with longer pauses. */
+  learners: { pace: number; pause: number } = { pace: 1, pause: 1 },
 ): { speed: number; pauseAfter: number }[] {
   return beats.map((beat, i) => {
     const how = DELIVERY[beat.delivery] ?? DELIVERY.explain;
     let pause = how.pause + (beat.pause === 'long' ? IDEA_CHANGE_S : 0);
     if (beats[i + 1]?.delivery === 'key') pause = Math.max(pause, BEFORE_KEY_S);
     return {
-      speed: clamp(how.speed, SPEED_RANGE),
-      pauseAfter: Math.round(clamp(pause, PAUSE_RANGE) * 100) / 100,
+      speed:
+        Math.round(
+          clamp(how.speed * learners.pace, [
+            Math.min(SPEED_RANGE[0], SLOWEST),
+            SPEED_RANGE[1],
+          ]) * 100,
+        ) / 100,
+      pauseAfter:
+        Math.round(clamp(pause * learners.pause, PAUSE_RANGE) * 100) / 100,
     };
   });
 }

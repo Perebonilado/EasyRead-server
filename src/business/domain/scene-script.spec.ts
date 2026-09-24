@@ -516,6 +516,47 @@ describe('a story told with its own characters', () => {
   });
 });
 
+describe("teaching to the learners' stage", () => {
+  it('keeps a child to two labels on a drawing, the rest parts the voice can still point at', () => {
+    const d = draft();
+    d.cast[0] = {
+      ...d.cast[0],
+      parts: ['stem', 'leaf', 'root', 'flower'].map((name) => ({
+        name,
+        label: true,
+      })),
+    };
+    const { script, mended } = mendScript(d, { stage: 'early' });
+    const leaf = script.cast[0];
+    expect(leaf.kind === 'drawing' && leaf.parts).toEqual([
+      { name: 'stem', label: true },
+      { name: 'leaf', label: true },
+      { name: 'root', label: false },
+      { name: 'flower', label: false },
+    ]);
+    expect(mended.join(' ')).toContain('"root" unlabelled, for these learners');
+    // For a university page all four keep their labels.
+    const higher = mendScript(d, { stage: 'higher' }).script.cast[0];
+    expect(
+      higher.kind === 'drawing' && higher.parts.every((p) => p.label),
+    ).toBe(true);
+  });
+
+  it('sends back a page far too long for a child, and lets a little over be', () => {
+    const long = draft();
+    long.beats = Array.from({ length: 16 }, (_, i) => ({
+      say: `Sentence ${i} tells the child one more small thing about the plant and its leaves today.`,
+      pause: 'short' as const,
+      delivery: 'explain' as const,
+    }));
+    const { problems } = mendScript(long, { stage: 'early' });
+    expect(problems.join(' ')).toContain('these learners take 80 to 150');
+    expect(problems.join(' ')).toContain('Split them');
+    // Taught as always when the stage is not known.
+    expect(mendScript(long).problems.join(' ')).not.toContain('these learners');
+  });
+});
+
 describe('people the page shows', () => {
   const page = (cast: SceneScriptDraft['cast']): SceneScriptDraft => ({
     fit: 'good',

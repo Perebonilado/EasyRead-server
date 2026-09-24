@@ -1,6 +1,7 @@
 /* eslint-disable @typescript-eslint/require-await --
  * Every method implements the async LlmGatewayPort with a synchronous body;
  * that is the whole point of a deterministic offline stand-in. */
+import { levelIn } from '../../business/domain/scene-stage';
 import { createHash } from 'crypto';
 import { Injectable } from '@nestjs/common';
 import type { DocumentProfileDraft } from '../../business/domain/scene-profile';
@@ -537,6 +538,10 @@ export class FakeLlmAdapter implements LlmGatewayPort {
           ...(/poem|verse|stanza/i.test(text) ? (['reading'] as const) : []),
         ],
         story,
+        // The level the document names, if it names one.
+        stage: levelIn(text)?.stage ?? null,
+        stageSure: levelIn(text) ? 'sure' : 'unsure',
+        stageWhy: levelIn(text)?.words.join(', ') ?? '',
       },
       usage: {
         model: 'fake',

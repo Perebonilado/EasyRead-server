@@ -664,6 +664,50 @@ describe("a story's characters on the stage", () => {
   });
 });
 
+describe("a page taught to its learners' stage", () => {
+  const labelled = drawing({
+    parts: { chloroplasts: 'chloroplasts', veins: 'veins' },
+    labels: {},
+    callouts: [
+      { part: 'chloroplasts', text: 'Chloroplasts', anchor: [100, 100] },
+      // The artist labelled a part the writer left unlabelled.
+      { part: 'veins', text: 'Veins', anchor: [300, 200] },
+    ],
+  });
+  const make = (stage?: 'middle') =>
+    composeScene({
+      script,
+      drawings: new Map([
+        ['leaf', labelled],
+        ['sun', null],
+      ]),
+      beats,
+      durationMs: 16_000,
+      timing: 'voice',
+      generator: 'scene-2',
+      profile: stage
+        ? { kind: 'textbook', tone: 'neutral', story: false, stage }
+        : null,
+    }).scene;
+
+  it("keeps only the writer's labels for learners who take few, and says whom it is for", () => {
+    const staged = make('middle');
+    const leaf = staged.things.find((t) => t.id === 'leaf');
+    expect(leaf?.kind === 'drawing' && leaf.callouts).toEqual({
+      chloroplasts: 'Chloroplasts',
+    });
+    expect(staged.stage).toBe('middle');
+    // With no stage read, every label as drawn, and nothing said.
+    const plain = make();
+    const all = plain.things.find((t) => t.id === 'leaf');
+    expect(all?.kind === 'drawing' && Object.keys(all.callouts ?? {})).toEqual([
+      'chloroplasts',
+      'veins',
+    ]);
+    expect('stage' in plain).toBe(false);
+  });
+});
+
 describe('what a character says, in a bubble', () => {
   it('takes the quoted words from the sentence, in any quotation marks', () => {
     expect(

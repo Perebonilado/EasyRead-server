@@ -380,8 +380,34 @@ export interface ComposeInput {
   durationMs: number;
   timing: SceneTiming;
   generator: string;
-  /** The book: its instruments, the bounds on its music, whether it is a story. */
-  profile?: Pick<DocumentProfile, 'kind' | 'tone' | 'story'> | null;
+  /** The book: its instruments, the bounds on its music, whether it is a story, whom it is for. */
+  profile?: Pick<DocumentProfile, 'kind' | 'tone' | 'story' | 'stage'> | null;
+}
+
+/**
+ * For learners whose stage takes few labels, a drawing's labels only on
+ * the parts the writer labelled: the artist's own extras, lifted from its
+ * drawing, are left off the stage. Every label as drawn otherwise.
+ */
+function labelledOnly(
+  drawings: ReadonlyMap<string, GatedDrawing | null>,
+  script: SceneScript,
+  stage: DocumentProfile['stage'],
+): ReadonlyMap<string, GatedDrawing | null> {
+  if (!stage) return drawings;
+  const out = new Map(drawings);
+  for (const thing of script.cast) {
+    const drawing = drawings.get(thing.id);
+    if (thing.kind !== 'drawing' || !drawing?.callouts.length) continue;
+    const labelled = new Set(
+      thing.parts.filter((part) => part.label).map((part) => part.name),
+    );
+    out.set(thing.id, {
+      ...drawing,
+      callouts: drawing.callouts.filter((c) => labelled.has(c.part)),
+    });
+  }
+  return out;
 }
 
 /**
@@ -395,7 +421,8 @@ export function composeScene(input: ComposeInput): {
   /** What the frame audit found wrong, per staging, per step. */
   audit: Record<StagingName, Collision[][]>;
 } {
-  const { script, drawings, beats, durationMs } = input;
+  const { script, beats, durationMs } = input;
+  const drawings = labelledOnly(input.drawings, script, input.profile?.stage);
   const things = script.cast.map((thing) =>
     thingDto(thing, drawings.get(thing.id)),
   );
@@ -955,6 +982,7 @@ export function composeScene(input: ComposeInput): {
       title: script.title,
       durationMs,
       timing: input.timing,
+      ...(input.profile?.stage ? { stage: input.profile.stage } : {}),
       sound: {
         mood: script.mood,
         music: placeMusic({

@@ -1090,6 +1090,8 @@ export interface SceneDto {
   title: string;
   durationMs: number;
   timing: SceneTiming;
+  /** Whom the document is taught for, read from it; absent when it could not be told, or on an older page. */
+  stage?: 'early' | 'middle' | 'higher' | 'professional';
   /**
    * One per spoken sentence; one word entry per whitespace word of `text`:
    * [charStart, charEnd, startMs, endMs]. `delivery` when it is not plain

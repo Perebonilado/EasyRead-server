@@ -5,7 +5,7 @@ Richard's request (2026-09-24):
 - They can wear different clothes and must fit the scenery.
 - The look should be somewhat like South Park. His reference image is a flat scene with round-headed children: big white eyes, dot pupils, simple bodies, and different hats and hair.
 
-Status: this is a plan only; nothing is built. A first sketch of the figure, drawn by code, is in `visualize-characters-sketch.svg` and was shown in the chat. The plan is on the server branch `visualize-characters` and is not pushed.
+Status: built and tested on `visualize-characters` in both repos, following the recommendation on every decision; not pushed. See Status at the end. The first sketch is `visualize-characters-sketch.svg`; the kit as built is drawn by `npm run figures:sheet`.
 
 ## How characters are drawn today, and why they look off
 
@@ -242,3 +242,78 @@ Every field is a closed list, so every answer can be drawn.
 2. Stories: the reader's spec, sheets v2, the stage rules, and moving existing books over.
 3. People on lesson pages, the set style guide, and talking.
 4. As wanted: poses, an animal kit, crowds, a set kit.
+
+## Status (2026-09-24, built on `visualize-characters` in both repos, not pushed)
+
+Richard said "implement and test", so each decision took its recommendation: as sketched; existing books remade on request; lesson people drawn by the kit; animals by the artist with the style guide; talking and blinking; the reader choosing looks that fit the setting.
+
+### What was built
+
+- **The kit (`scene-figure.ts`).**
+  - The options: 4 ages × 3 builds, 10 skin tones, 13 hair styles in 8 colours, 4 kinds of facial hair, 10 headwear, 13 tops, 3 bottoms, 13 clothing colours, 8 extras.
+  - The 7 faces, each with a second mouth for talking. A blink on each person's own beat, and a breath.
+  - A figure is 8 KB, the heaviest 9.9 KB.
+- **Groups (added).** On the South Pole pages the writer showed "Amundsen's Team" as one drawing, which the artist drew in its own style. So a person can now have a `count` of up to 4: the one described plus others dressed the same, each with their own build, hair and skin tone near the described one. Same group, same people every make.
+- **Stories.**
+  - The reader says each character's `kind` (person, animal, creature), an animal's `size`, and a person's `figure`.
+  - Books read before this are asked once per character (`sceneFigure`, gpt-4.1-mini).
+  - Sheets v2: people are drawn by the kit, and redrawn from their figure whenever a page needs them, so kit changes reach the book's next pages.
+  - Sets v2: painted to go with the people. The set painter's own prompt was changed too, since it asked for gradients.
+- **The stage.**
+  - One scale per line of the template. A grown-up is at most 70% of the stage.
+  - A single line in front of a set is set down on the stage's floor.
+  - Animals stand at their size: small 95, medium 130, large 230 units. They are bigger than life, because a 70-unit fox read as a speck.
+  - A character's name shows only where the book meets them.
+- **Talking.**
+  - Compose writes when the voice has said a speaker's words (`say.saidUntilMs`).
+  - The player marks the speaker `talking` until then, never under reduced motion, and runs their animation at full pace while they speak.
+- **Remaking a book (`npm run scene:recast -- <id> [--go | --here]`).**
+  - A remake job flag keeps the page playable until its new version is ready.
+  - The old files are deleted after the swap, because a purge only knows the row's own files.
+  - The audio now has an ETag and is checked each time. It used to be cached for a day, marked immutable, which would have played a remade page with its old voice.
+- **Review tools.**
+  - `npm run figures:sheet -- <dir>` writes `figures.png`, and `figures.html` where the figures blink and talk.
+  - The client's `/dev/stage` plays any locally made page on the real stage, in either staging. It replaces the planned `/dev/figures`: the kit lives on the server, and a builder in the client would have meant a second copy of it.
+
+### Tested
+
+- **Automated checks.**
+  - Server: 1,193 tests, up from 1,159.
+  - Client: 28 tests, up from 24.
+  - Lint and types are clean in both repos, and `next build` passes.
+- **Kit tests.**
+  - Every top with every headwear passes the gate's allowlist unchanged.
+  - Across every headwear and every hair style, the eyes' whites and the mouth render clear.
+  - Every face sits on the head, including for groups of 4.
+  - The same spec gives the same drawing, and a heavy figure stays under 10 KB.
+- **The Lantern Keeper, remade locally (`scene:recast --here`).**
+  - All 4 pages took 43–54 s each, with 0 overlaps in the frame audit.
+  - Mira came from her old look as "slim child, brown long hair, yellow coat". Tobi came out as "elder, white balding hair, beard, green jumper, walking stick", which covers his limp.
+  - Ember was redrawn by the artist in the kit's style, and the three sets were repainted.
+- **South Pole.**
+  - Scott and Amundsen are people.
+  - Both teams are groups of 4.
+  - Ships, ponies, the flag and the timeline stay drawings.
+- **Hemoglobinopathies.** No people, and no people inside its drawings.
+- **On the stage (`/dev/stage`).**
+  - The mouth opens and shuts while the voice says the words, stops at `saidUntilMs`, and anyone not speaking stays still.
+  - Each figure blinks at its own moment: about 150 ms at full pace, 300 ms when calm.
+  - One scale and one floor in both stagings. Names show on the first meeting only.
+
+### Not done
+
+- **Poses.** Planned for later.
+- **An animal kit.** Ember in the artist's new style sits reasonably beside the people.
+- **A set kit.**
+- **Keeping each page's parts** so a later recast needs no writer or voice.
+
+### For Richard
+
+- **Sign off the look:**
+  - `npm run figures:sheet -- <dir>`;
+  - `/dev/stage` with pages from `scene-out/`, or from `public/dev-scenes/`, which git ignores.
+- **Deploying.** Both branches build on `visualize-music`, so merge those first. Nothing to set, no migration, and either repo can go first.
+- **On deploy:**
+  - A story book's animals and places are drawn once more the next time one of its pages is made.
+  - Its people cost nothing to draw, plus one small call per character for a book read before this.
+  - Pages made before keep their old people until the book is recast: `npm run scene:recast -- <documentId>` shows the count, and `--go` queues them. Each page costs the writer and the voice once more.

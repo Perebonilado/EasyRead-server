@@ -78,6 +78,7 @@ export async function figureDrawing(
       : null,
     head: drawn.anchors.head,
     stands: { units: h },
+    acts: true,
     anchors: drawn.anchors,
   };
 }

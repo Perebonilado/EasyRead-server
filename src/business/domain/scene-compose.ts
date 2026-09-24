@@ -9,6 +9,7 @@ import type {
   SceneBubbleDto,
   SceneDto,
   SceneEffectDto,
+  SceneEffectName,
   SceneEnterName,
   ScenePillDto,
   ScenePlaceDto,
@@ -16,6 +17,7 @@ import type {
   SceneThingDto,
   SceneTiming,
 } from '../../contracts';
+import { actingOf, type DirectedMove, type SpokenLine } from './scene-acting';
 import type { Callout, InkField } from './scene-callouts';
 import { measureText } from './scene-font';
 import {
@@ -171,6 +173,22 @@ export function thingDto(
             drawing.callouts.map((c) => [c.part, c.text]),
           ),
           calloutsLater: [],
+        }
+      : {}),
+    // Someone drawn by the kit acts; where their head is, they look from.
+    ...(drawing.acts ? { rig: true as const } : {}),
+    ...(drawing.head
+      ? {
+          head: [
+            Math.round(
+              ((drawing.head[0] - drawing.viewBox[0]) / drawing.viewBox[2]) *
+                1000,
+            ) / 1000,
+            Math.round(
+              ((drawing.head[1] - drawing.viewBox[1]) / drawing.viewBox[3]) *
+                1000,
+            ) / 1000,
+          ] as [number, number],
         }
       : {}),
   };
@@ -444,6 +462,10 @@ export function composeScene(input: ComposeInput): {
 
   const steps: SceneStepDto[] = [];
   const effects: SceneEffectDto[] = [];
+  /** What the writer asked someone to do toward someone: acted, below. */
+  const directed: DirectedMove[] = [];
+  /** Each line as said, with its words' times: for the mouths. */
+  const spoken: SpokenLine[] = [];
   let saying = 1;
   let before: string[] = [];
   let focus: string | null = null;
@@ -552,11 +574,30 @@ export function composeScene(input: ComposeInput): {
       );
       // A character's words come from the sentence's own lines, below.
       if (effect.do === 'say') return;
+      // Someone toward someone: acted, not a change on the stage.
+      const actor = castById.get(effect.target)?.kind;
+      if (
+        effect.part &&
+        (effect.do === 'look' ||
+          effect.do === 'reach' ||
+          effect.do === 'hug' ||
+          (effect.do === 'point' &&
+            (actor === 'character' || actor === 'person') &&
+            castById.has(effect.part)))
+      ) {
+        directed.push({
+          atMs: at,
+          target: effect.target,
+          other: effect.part,
+          do: effect.do,
+        });
+        return;
+      }
       effects.push({
         atMs: at,
         target: effect.target,
         part: effect.part,
-        do: effect.do,
+        do: effect.do as SceneEffectName,
       });
     });
   }
@@ -606,6 +647,16 @@ export function composeScene(input: ComposeInput): {
       const text = bubbleText(beat.say.slice(a, b));
       if (!words.length || !text) continue;
       const to = words[words.length - 1][3];
+      spoken.push({
+        speaker: line.speaker,
+        startMs: words[0][2],
+        endMs: to,
+        words: words.map((w) => ({
+          text: beat.say.slice(w[0], w[1]),
+          startMs: w[2],
+          endMs: w[3],
+        })),
+      });
       effects.push({
         atMs: Math.round(Math.max(0, words[0][2] - 150)),
         target: line.speaker,
@@ -665,6 +716,45 @@ export function composeScene(input: ComposeInput): {
   effects.push(...carried);
   effects.sort((a, b) => a.atMs - b.atMs);
   const says = effects.filter((effect) => effect.say);
+
+  // How each character acts, planned from who says what and when: where
+  // they look, their mouths, their gestures, and what the writer asked.
+  const acting = actingOf({
+    actors: script.cast
+      .filter(
+        (thing) =>
+          (thing.kind === 'character' || thing.kind === 'person') &&
+          byId.get(thing.id)?.kind === 'drawing',
+      )
+      .map((thing) => thing.id),
+    names: new Map(
+      script.cast.flatMap((thing) =>
+        thing.kind === 'character' || thing.kind === 'person'
+          ? [[thing.id, [thing.name]] as const]
+          : [],
+      ),
+    ),
+    steps,
+    lines: spoken,
+    narration: script.beats.flatMap((beat, k) => {
+      const t = beats[k];
+      if (!t) return [];
+      const quoted = quotedSpans(beat.say);
+      return t.words
+        .filter((w) => !quoted.some(([a, b]) => w[0] >= a && w[1] <= b))
+        .map((w) => ({
+          text: beat.say.slice(w[0], w[1]),
+          startMs: w[2],
+          endMs: w[3],
+        }));
+    }),
+    directed,
+    durationMs,
+    // A story's people walk on and off; a lesson's arrive as things do.
+    walks: script.cast.some(
+      (thing) => thing.kind === 'character' || thing.kind === 'place',
+    ),
+  });
   /** The step a moment falls in. */
   const stepOf = (t: number) => {
     let k = -1;
@@ -735,6 +825,8 @@ export function composeScene(input: ComposeInput): {
       if (effect.do !== 'zoom') effect.do = 'pulse';
       continue;
     }
+    // The camera on two things: the second is no part, and needs none.
+    if (effect.do === 'zoom' && byId.has(effect.part)) continue;
     const known =
       effect.do === 'show' || effect.do === 'hide'
         ? thing.states[effect.part]
@@ -983,6 +1075,7 @@ export function composeScene(input: ComposeInput): {
       durationMs,
       timing: input.timing,
       ...(input.profile?.stage ? { stage: input.profile.stage } : {}),
+      ...(Object.keys(acting).length ? { acting } : {}),
       sound: {
         mood: script.mood,
         music: placeMusic({

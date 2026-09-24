@@ -970,6 +970,10 @@ export type SceneThingDto =
       source?: 'math' | 'plot' | 'quote' | 'timeline' | 'chart';
       /** A story's place: the scene behind the stage, never in a slot. */
       backdrop?: true;
+      /** Drawn by the figure kit: it moves its eyes, face, head, arms and mouth as it acts. */
+      rig?: true;
+      /** Where its head is, as shares of its box across and down: where it looks from. */
+      head?: [number, number];
     }
   | { id: string; kind: 'stat'; value: string; caption: string }
   | {
@@ -1026,6 +1030,35 @@ export interface SceneEffectDto {
     /** It carries on a line from the bubble before: it does not open. */
     continues?: true;
   };
+}
+
+/** A move someone makes as they act: a nod, a gesture with the right or left arm, brows up, a lean back, a reach, a point, a hug. */
+export type SceneActingMove =
+  | 'nod'
+  | 'gesture'
+  | 'gesture-left'
+  | 'brows'
+  | 'lean'
+  | 'reach'
+  | 'point'
+  | 'hug';
+
+/**
+ * How someone acts on a page: planned by the server from who says what
+ * and when, played by the stage on the voice's clock.
+ */
+export interface SceneActingDto {
+  /**
+   * Where they look from each moment on: another thing's id, or null for
+   * the viewer; and how far their face turns toward it, 0 to 1.
+   */
+  look?: [number, string | null, number][];
+  /** Their mouth as they speak: each line's first word, and its shapes at 30 a second, one digit each, 0 to 5. */
+  mouth?: [number, string][];
+  /** Moves: when, which, how long, and toward whom. */
+  moves?: [number, SceneActingMove, number, string?][];
+  /** They walk on, off and between places, rather than pop or slide. */
+  walks?: true;
 }
 
 /** A speech bubble as the stage sets it: its box, its words, and the point its tail reaches toward. */
@@ -1119,6 +1152,8 @@ export interface SceneDto {
     palette?: SceneMusicPalette;
     motif?: true;
   };
+  /** How each character acts, by id; absent on a page no one acts on, or an older one. */
+  acting?: Record<string, SceneActingDto>;
   /** The same steps placed for the pane's box and the full screen's wide stage. */
   stagings: Record<
     'box' | 'wide',

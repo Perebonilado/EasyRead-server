@@ -510,6 +510,35 @@ describe('a story told with its own characters', () => {
     ).toEqual(['show']);
   });
 
+  it('reads one character toward another as acting: a look, a reach, a hug, a point, the camera on two', () => {
+    const acted = story();
+    acted.steps = [
+      step(0, 'Mira stands', { layout: 'row', show: ['girl', 'fox', 'quay'] }),
+      step(1, 'A fox', {
+        effects: [
+          { target: 'girl.fox', do: 'look' },
+          { target: 'fox.Mira', do: 'reach' },
+          { target: 'girl.quay', do: 'point' },
+          { target: 'fox.girl', do: 'zoom' },
+          // A drawing does not act, and no one hugs who is not there.
+          { target: 'quay.girl', do: 'look' },
+          { target: 'girl.ghost', do: 'hug' },
+        ],
+      }),
+    ];
+    const { script, mended } = mendScript(acted, { characters });
+    expect(script.steps[1].effects).toEqual([
+      { target: 'girl', part: 'fox', do: 'look' },
+      { target: 'fox', part: 'girl', do: 'reach' },
+      { target: 'girl', part: 'quay', do: 'point' },
+      { target: 'fox', part: 'girl', do: 'zoom' },
+    ]);
+    expect(mended.join(' ')).toContain('look on quay, who is no one to act');
+    expect(mended.join(' ')).toContain(
+      'hug from girl toward "ghost", which is not on the stage',
+    );
+  });
+
   it('sets characters in type in a book that is no story', () => {
     const { script } = mendScript(story());
     expect(script.cast.some((t) => t.kind === 'character')).toBe(false);

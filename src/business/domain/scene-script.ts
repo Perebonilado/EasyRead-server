@@ -64,7 +64,12 @@ export const SCENE_EFFECTS = [
   'pulse',
   'zoom',
   'say',
+  'look',
+  'reach',
+  'hug',
 ] as const;
+/** What someone does toward someone else, directed by the writer on a story's page: "ada.kofi", Ada toward Kofi. */
+export const ACTING_EFFECTS = ['look', 'reach', 'hug'] as const;
 export type SceneEffectKind = (typeof SCENE_EFFECTS)[number];
 
 /**
@@ -1981,6 +1986,35 @@ function effectOf(
       : `say on ${id}, which is not one of the story's characters`;
   const parts = thing ? partNames(thing) : [];
   const states = thing ? stateNames(thing) : [];
+  // Someone toward someone or something else on the stage: a look, a
+  // reach, a hug, a point at it; the camera on the two of them.
+  const acts = thing?.kind === 'character' || thing?.kind === 'person';
+  // The other by id, or by the name the page gives them ("fox.Mira").
+  const other = partName
+    ? (resolve(partName) ??
+      [...byId.values()].find(
+        (one) =>
+          (one.kind === 'character' || one.kind === 'person') &&
+          one.name.toLowerCase() === partName.toLowerCase(),
+      )?.id ??
+      null)
+    : null;
+  const toward =
+    other &&
+    other !== id &&
+    onStage.includes(other) &&
+    !parts.some((name) => idKey(name) === idKey(partName)) &&
+    !states.some((name) => idKey(name) === idKey(partName))
+      ? other
+      : null;
+  if ((ACTING_EFFECTS as readonly string[]).includes(kind)) {
+    if (!acts) return `${kind} on ${id}, who is no one to act`;
+    if (!toward)
+      return `${kind} from ${id} toward "${partName}", which is not on the stage`;
+    return { target: id, part: toward, do: kind };
+  }
+  if (toward && (kind === 'zoom' || (kind === 'point' && acts)))
+    return { target: id, part: toward, do: kind };
   if (!partName || (!parts.length && !states.length)) {
     // A thing with no parts or states: the whole thing moves.
     return {

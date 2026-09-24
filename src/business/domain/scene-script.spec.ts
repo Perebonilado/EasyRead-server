@@ -1,3 +1,4 @@
+import { PLAIN_FIGURE } from './scene-figure';
 import {
   fitLayout,
   mendScript,
@@ -456,6 +457,103 @@ describe('a story told with its own characters', () => {
   it('sets characters in type in a book that is no story', () => {
     const { script } = mendScript(story());
     expect(script.cast.some((t) => t.kind === 'character')).toBe(false);
+  });
+});
+
+describe('people the page shows', () => {
+  const page = (cast: SceneScriptDraft['cast']): SceneScriptDraft => ({
+    fit: 'good',
+    fitReason: null,
+    title: 'At the clinic',
+    mood: 'calm',
+    beats: [
+      {
+        say: 'A doctor listens to your chest.',
+        pause: 'short',
+        delivery: 'hook',
+      },
+      {
+        say: 'She hears the valves close.',
+        pause: 'short',
+        delivery: 'explain',
+      },
+      { say: 'Then she smiles: all is well.', pause: 'long', delivery: 'key' },
+    ],
+    cast,
+    steps: [
+      step(0, 'A doctor', { layout: 'row', show: cast.map((t) => t.id) }),
+      step(2, 'she smiles', {
+        effects: [{ target: 'doctor.happy', do: 'show' }],
+      }),
+      step(1, 'She hears', {
+        effects: [{ target: 'doctor.body', do: 'point' }],
+      }),
+    ],
+  });
+
+  it('draws a person from their figure, made sound, with faces and parts like a character', () => {
+    const { script } = mendScript(
+      page([
+        thing('doctor', 'person', {
+          name: 'Doctor',
+          state: 'neutral',
+          figure: {
+            age: 'adult',
+            skin: 6,
+            hair: 'bun',
+            top: 'lab coat',
+            extras: ['stethoscope', 'glasses', 'scarf'],
+          },
+        }),
+      ]),
+    );
+    const doctor = script.cast[0];
+    expect(doctor).toMatchObject({
+      id: 'doctor',
+      kind: 'person',
+      name: 'Doctor',
+      state: 'neutral',
+      figure: {
+        age: 'adult',
+        skin: 6,
+        hair: 'bun',
+        top: 'lab coat',
+        extras: ['stethoscope', 'glasses'],
+      },
+    });
+    expect(script.steps.flatMap((s) => s.effects)).toEqual([
+      { target: 'doctor', part: 'body', do: 'point' },
+      { target: 'doctor', part: 'happy', do: 'show' },
+    ]);
+  });
+
+  it('stands a group as a few people like the one described, at most four', () => {
+    const { script } = mendScript(
+      page([
+        thing('doctor', 'person', { count: 7 }),
+        thing('nurse', 'person', { count: 1 }),
+      ]),
+    );
+    expect(script.cast[0]).toMatchObject({ kind: 'person', count: 4 });
+    expect(script.cast[1]).not.toHaveProperty('count');
+  });
+
+  it('draws a person the writer said nothing of plainly, and says so', () => {
+    const { script, mended } = mendScript(page([thing('nurse', 'person')]));
+    expect(script.cast[0]).toMatchObject({
+      kind: 'person',
+      figure: PLAIN_FIGURE,
+    });
+    expect(mended.join(' ')).toContain('a person with no figure');
+  });
+
+  it('takes a person a story knows for its character, drawn once for the book', () => {
+    const { script, mended } = mendScript(
+      page([thing('doctor', 'person', { name: 'Mira' })]),
+      { characters: [{ id: 'mira', name: 'Mira', aliases: [] }] },
+    );
+    expect(script.cast[0]).toMatchObject({ kind: 'character', ref: 'mira' });
+    expect(mended.join(' ')).toContain("the story's character mira");
   });
 });
 

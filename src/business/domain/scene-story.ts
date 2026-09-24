@@ -10,6 +10,7 @@
  * same drawing stands on every page they are on, the same way round
  * beside anyone else, with the face the last page left them with.
  */
+import { figureOf, type FigureSpec } from './scene-figure';
 import {
   SCENE_AMBIENCES,
   type CharacterThing,
@@ -63,6 +64,28 @@ export type StoryVoice = (typeof STORY_VOICES)[number];
 const voiceKind = (voice: unknown): StoryVoice | null =>
   STORY_VOICES.includes(voice as StoryVoice) ? (voice as StoryVoice) : null;
 
+/**
+ * What a character is: a person, drawn by the kit like every person, or
+ * an animal or a creature (a monster, a robot, a talking teapot), drawn
+ * by the artist in the kit's style.
+ */
+export const STORY_KINDS = ['person', 'animal', 'creature'] as const;
+export type StoryKind = (typeof STORY_KINDS)[number];
+
+/** An animal's or a creature's size beside people: a cat, a dog, a horse. */
+export const STORY_SIZES = ['small', 'medium', 'large'] as const;
+export type StorySize = (typeof STORY_SIZES)[number];
+
+const kindOf = (kind: unknown): StoryKind | null =>
+  STORY_KINDS.includes(kind as StoryKind) ? (kind as StoryKind) : null;
+const sizeOf = (size: unknown): StorySize | null =>
+  STORY_SIZES.includes(size as StorySize) ? (size as StorySize) : null;
+/** A person's figure as said, made sound; anyone else has none. */
+const figureFor = (kind: StoryKind | null, figure: unknown) =>
+  kind === 'person' && figure && typeof figure === 'object'
+    ? figureOf(figure)
+    : null;
+
 export interface StoryCharacter {
   /** Theirs for the whole book: the writer shows them by it. */
   id: string;
@@ -83,6 +106,12 @@ export interface StoryCharacter {
   met: number;
   /** The kind of voice their lines are said in; null for the narrator's. */
   voice: StoryVoice | null;
+  /** What they are; absent from a book read before it was asked. */
+  kind?: StoryKind | null;
+  /** An animal's or a creature's size beside people. */
+  size?: StorySize | null;
+  /** A person's look, as the kit draws them: the same on every page. */
+  figure?: FigureSpec | null;
 }
 
 export interface StoryPlace {
@@ -120,6 +149,10 @@ export interface StoryDraft {
     look: string;
     traits: string[];
     voice: StoryVoice | null;
+    kind?: StoryKind | null;
+    size?: StorySize | null;
+    /** As the model said it; made sound by figureOf. */
+    figure?: unknown;
   }[];
   places: {
     name: string;
@@ -133,6 +166,14 @@ export interface StoryDraft {
     present: { name: string; mood: Expression }[];
     place: string | null;
   }[];
+}
+
+/** What a character is, as a model said from the look kept for them. */
+export interface FigureDraft {
+  kind: StoryKind;
+  size: StorySize | null;
+  /** As the model said it; made sound by figureOf. */
+  figure: unknown;
 }
 
 export const EMPTY_STORY: StoryBible = {
@@ -284,8 +325,14 @@ export function mergeStory(
         );
         if (RANK[role] < RANK[found.role]) found.role = role;
         found.voice ??= voiceKind(raw.voice);
+        // What someone is and how they look is settled where the book
+        // first meets them: a later stretch fills in, never restyles.
+        found.kind ??= kindOf(raw.kind);
+        found.size ??= sizeOf(raw.size);
+        found.figure ??= figureFor(found.kind, raw.figure);
         continue;
       }
+      const kind = kindOf(raw.kind);
       characters.push({
         id: idFrom(name, takenIds),
         name,
@@ -298,6 +345,9 @@ export function mergeStory(
         firstPage: Number.POSITIVE_INFINITY,
         met: 0,
         voice: voiceKind(raw.voice),
+        kind,
+        size: sizeOf(raw.size),
+        figure: figureFor(kind, raw.figure),
         keys: new Set([name, ...aliases].map(nameKey).filter(Boolean)),
         order: order++,
         named: part.from,
@@ -383,6 +433,9 @@ export function mergeStory(
       firstPage: c.firstPage,
       met: c.met,
       voice: c.voice,
+      kind: c.kind ?? null,
+      size: c.size ?? null,
+      figure: c.figure ?? null,
     })),
     places: places
       .sort((a, b) => a.firstPage - b.firstPage)
@@ -421,6 +474,9 @@ export function bibleOf(
       firstPage: Number.isFinite(c.firstPage) ? c.firstPage : 1,
       met: Number.isFinite(c.met) ? c.met : Number.MAX_SAFE_INTEGER,
       voice: voiceKind(c.voice),
+      kind: kindOf(c.kind),
+      size: sizeOf(c.size),
+      figure: figureFor(kindOf(c.kind), c.figure),
     }));
   const known = new Set(characters.map((c) => c.id));
   return {
@@ -574,6 +630,7 @@ export function castStory(
       state: thing.state ?? before,
       met: who.met,
       intro: who.firstPage === page ? who.traits : [],
+      first: who.firstPage === page,
       before,
     };
   });
@@ -633,6 +690,17 @@ export function placeOn(bible: StoryBible, page: number): StoryPlace | null {
 }
 
 /**
+ * How a set is painted to go with the people drawn by the kit: their flat
+ * colours and dark outline, softer, so the people stand out in front of
+ * it; and open ground low down, where they stand.
+ */
+export const SET_STYLE = [
+  'Paint it to go with cartoon people drawn in front of it: flat colours with no gradients, shading or texture, simple rounded shapes like cut paper, and one dark outline (#2d2a32) about three units wide.',
+  'Keep its colours softer and lighter than the people, so they stand out in front of it.',
+  'The ground is flat and open across the lower third of the picture, with nothing tall in the middle of it, where people will stand.',
+].join(' ');
+
+/**
  * A place as the artist is asked to paint it, once for the book: the
  * scene behind the stage, filling the frame, with no one in it.
  */
@@ -644,6 +712,7 @@ export function setThing(place: StoryPlace, bookTitle: string): DrawingThing {
     brief: [
       `${place.name}, a place in "${bookTitle}"${place.look ? `: ${place.look}` : ''}.`,
       'Seen from where a viewer stands, at eye level, the ground running across the lower part of the picture.',
+      SET_STYLE,
     ].join(' '),
     motion:
       'slow and ambient if anything moves at all: clouds drift, water shimmers, leaves stir',
@@ -654,10 +723,23 @@ export function setThing(place: StoryPlace, bookTitle: string): DrawingThing {
   };
 }
 
+/** How an animal or a creature is drawn to stand beside the people the kit draws. */
+export const CAST_STYLE = [
+  'Draw it to stand beside cartoon people drawn in one style: flat colours with no gradients, shading or texture, simple rounded shapes like cut paper, one dark outline (#2d2a32) about three units wide, and big round white eyes with small black dot pupils.',
+  'It faces the viewer, standing, its feet on the bottom edge of the frame.',
+].join(' ');
+
+const SIZES: Record<StorySize, string> = {
+  small: 'It is small: beside a grown-up it would come up to their knee.',
+  medium: "It is about as tall as a grown-up's waist.",
+  large: 'It is as tall as a grown-up, or taller.',
+};
+
 /**
- * A character as the artist is asked to draw them, once for the book: the
- * whole figure, a face with nothing on it, and every expression drawn
- * over it in the same place, so the stage can change how they feel.
+ * A character as the artist is asked to draw them, once for the book: an
+ * animal or a creature, in the kit's style, a face with nothing on it,
+ * and every expression drawn over it in the same place, so the stage can
+ * change how they feel. People are drawn by the kit (scene-figure).
  */
 export function sheetThing(
   character: StoryCharacter,
@@ -669,9 +751,13 @@ export function sheetThing(
     name: character.name,
     brief: [
       `${character.name}, a character in "${bookTitle}"${character.look ? `: ${character.look}` : ''}.`,
-      'The whole figure, standing, turned a little toward the viewer, in a friendly flat picture-book style, drawn so the same figure can stand on every page of the story.',
+      'The whole figure, drawn so the same figure can stand on every page of the story.',
+      CAST_STYLE,
+      character.size ? SIZES[character.size] : '',
       'The face inside the head has no eyes, brows or mouth: each expression group draws the eyes, brows and mouth, all in the same place on the face.',
-    ].join(' '),
+    ]
+      .filter(Boolean)
+      .join(' '),
     motion:
       'breathes slowly: the body rises and falls a little; nothing else moves',
     parts: SHEET_PARTS.map((name) => ({ name, label: false })),
@@ -679,7 +765,8 @@ export function sheetThing(
       name,
       look: EXPRESSION_LOOKS[name],
     })),
-    shape: 'tall',
+    // An animal on all fours needs the room across; a creature stands up.
+    shape: character.kind === 'animal' ? 'square' : 'tall',
     sound: null,
   };
 }

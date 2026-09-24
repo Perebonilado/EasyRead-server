@@ -36,7 +36,9 @@
     "scene:voices": "ts-node --transpile-only -r tsconfig-paths/register scripts/scene-voices.ts",
     "scene:recompose": "ts-node --transpile-only -r tsconfig-paths/register scripts/scene-recompose.ts",
     "scene:try": "ts-node --transpile-only -r tsconfig-paths/register scripts/scene-try.ts",
-    "scene:bench": "ts-node --transpile-only -r tsconfig-paths/register scripts/scene-bench.ts"
+    "scene:bench": "ts-node --transpile-only -r tsconfig-paths/register scripts/scene-bench.ts",
+    "scene:recast": "ts-node --transpile-only -r tsconfig-paths/register scripts/scene-recast.ts",
+    "figures:sheet": "ts-node --transpile-only -r tsconfig-paths/register scripts/figures-sheet.ts"
   },
   "dependencies": {
     "@ai-sdk/anthropic": "^4.0.38",

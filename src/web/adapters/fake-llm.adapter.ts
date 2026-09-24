@@ -4,7 +4,10 @@
 import { createHash } from 'crypto';
 import { Injectable } from '@nestjs/common';
 import type { DocumentProfileDraft } from '../../business/domain/scene-profile';
-import type { StoryDraft } from '../../business/domain/scene-story';
+import type {
+  FigureDraft,
+  StoryDraft,
+} from '../../business/domain/scene-story';
 import type { Block, RecapBody, TopicPreviewBody } from '../../contracts';
 import type {
   GeneratedItem,
@@ -544,6 +547,39 @@ export class FakeLlmAdapter implements LlmGatewayPort {
     });
   }
 
+  /** Anyone is a person, dressed plainly, a child when their voice is. */
+  sceneFigure(input: {
+    bookTitle: string;
+    name: string;
+    look: string;
+    voice: string | null;
+  }): Promise<LlmResult<FigureDraft>> {
+    const creature = input.voice === 'creature';
+    return Promise.resolve({
+      value: {
+        kind: creature ? 'creature' : 'person',
+        size: creature ? 'medium' : null,
+        figure: creature
+          ? null
+          : {
+              age:
+                input.voice === 'girl' || input.voice === 'boy'
+                  ? 'child'
+                  : 'adult',
+              skin: 4,
+              hair: 'short',
+              hairColour: 'brown',
+            },
+      },
+      usage: {
+        model: 'fake',
+        tokensIn: Math.ceil(input.look.length / 4),
+        tokensOut: 20,
+        latencyMs: 1,
+      },
+    });
+  }
+
   /** Whoever "said" something is a character; each page has whoever it names. */
   sceneStory(input: {
     documentTitle: string;
@@ -572,6 +608,23 @@ export class FakeLlmAdapter implements LlmGatewayPort {
           aliases: [],
           role: 'main' as const,
           look: 'a child in plain clothes',
+          kind: 'person' as const,
+          size: null,
+          figure: {
+            age: 'child',
+            build: 'average',
+            skin: 3,
+            hair: 'pigtails',
+            hairColour: 'brown',
+            facialHair: 'none',
+            headwear: 'none',
+            top: 't-shirt',
+            topColour: 'teal',
+            bottom: 'shorts',
+            bottomColour: 'navy',
+            accentColour: 'yellow',
+            extras: [],
+          },
           traits: ['curious'],
           voice: 'girl' as const,
         })),

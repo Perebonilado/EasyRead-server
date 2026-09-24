@@ -12,6 +12,7 @@
  */
 
 import { MAX_BARS, numbersIn, type ChartSpec } from './scene-chart';
+import { MOST_TOGETHER, figureOf, type FigureSpec } from './scene-figure';
 import { checkArithmetic, markTerms, type MathLine } from './scene-math';
 import { sample, type PlotSpec } from './scene-plot';
 import { findPhrase, isVerbatim } from './scene-quote';
@@ -262,8 +263,28 @@ export interface CharacterThing {
   met: number;
   /** On the page the book meets them: what they are like, set beside them. */
   intro: string[];
+  /** The page the book meets them on: their name is written under them. */
+  first?: boolean;
   /** The face the last page left them with: theirs through a "previously" opening. */
   before?: Expression;
+}
+
+/**
+ * A person the page shows who is not one of a story's characters: a
+ * doctor, a patient, a scientist, a shopkeeper. Drawn by the kit from
+ * the writer's figure, in the same style as everyone else, never by the
+ * artist.
+ */
+export interface PersonThing {
+  id: string;
+  kind: 'person';
+  /** Their caption: "Doctor", "Marie Curie". */
+  name: string;
+  figure: FigureSpec;
+  /** How many people like them stand together: 1, or a team, a family, a class, as up to four. */
+  count?: number;
+  /** The face they come on with; null for a calm one. */
+  state: Expression | null;
 }
 
 /**
@@ -287,6 +308,7 @@ export type SceneThing =
   | WordsThing
   | CodeThing
   | CharacterThing
+  | PersonThing
   | PlaceThing;
 
 /** The names of the parts the voice can point at in a thing. */
@@ -306,7 +328,8 @@ export function partNames(thing: SceneThing): string[] {
   if (thing.kind === 'timeline')
     return thing.timeline.events.map((e) => e.name || e.when);
   if (thing.kind === 'chart') return thing.chart.bars.map((b) => b.label);
-  if (thing.kind === 'character') return [...SHEET_PARTS];
+  if (thing.kind === 'character' || thing.kind === 'person')
+    return [...SHEET_PARTS];
   return [];
 }
 
@@ -315,7 +338,8 @@ export function stateNames(thing: SceneThing): string[] {
   if (thing.kind === 'drawing') return thing.states.map((s) => s.name);
   if (thing.kind === 'math')
     return thing.lines.slice(1).map((_, k) => `line ${k + 2}`);
-  if (thing.kind === 'character') return [...EXPRESSIONS];
+  if (thing.kind === 'character' || thing.kind === 'person')
+    return [...EXPRESSIONS];
   return [];
 }
 
@@ -403,6 +427,7 @@ export interface SceneScriptDraft {
       | 'timeline'
       | 'chart'
       | 'character'
+      | 'person'
       | 'place';
     /** A drawing's caption, a stat's caption, the words themselves. */
     name: string;
@@ -430,9 +455,13 @@ export interface SceneScriptDraft {
     /** A quotation, word for word from the page. */
     quote: string | null;
     phrases: { name: string; phrase: string; note: string | null }[] | null;
-    /** A character: their id in the story, and the face they come on with. */
+    /** A character: their id in the story, and the face they come on with (a person's too). */
     ref: string | null;
     state: Expression | null;
+    /** A person: how they look, from the kit's lists; made sound by figureOf. */
+    figure?: Record<string, unknown> | null;
+    /** A person: how many like them stand together. */
+    count?: number | null;
     /** A timeline: the page's events in order, each when and what. */
     timeline: { when: string; name: string }[] | null;
     /** A chart: bars or a line, from the page's own numbers. */
@@ -675,7 +704,19 @@ export function mendScript(
   const idFor = new Map<string, string>();
   const used = new Set<string>();
   const cast: SceneThing[] = [];
-  draft.cast.forEach((raw, index) => {
+  draft.cast.forEach((given, index) => {
+    // A person the story knows is its character, drawn once for the book.
+    const known =
+      given.kind === 'person' && options.characters?.length
+        ? storyEntry(
+            options.characters,
+            given.ref ?? given.id,
+            clean(given.name) || clean(given.id),
+          )
+        : null;
+    const raw = known
+      ? { ...given, kind: 'character' as const, ref: known.id }
+      : given;
     let id = slug(raw.id) || `thing-${index + 1}`;
     while (used.has(id)) id = `${id}-${index + 1}`;
     used.add(id);
@@ -746,6 +787,7 @@ export function mendScript(
       return;
     }
     if (raw.kind === 'character') {
+      if (known) mended.push(`${id}: the story's character ${known.id}`);
       const who = storyEntry(options.characters ?? [], raw.ref, name);
       if (!who) {
         mended.push(
@@ -772,6 +814,23 @@ export function mendScript(
         state: raw.state && EXPRESSIONS.includes(raw.state) ? raw.state : null,
         met: 0,
         intro: [],
+      });
+      return;
+    }
+    if (raw.kind === 'person') {
+      if (!raw.figure)
+        mended.push(`${id}: a person with no figure, drawn plainly`);
+      const count = Math.min(
+        MOST_TOGETHER,
+        Math.max(1, Math.round(Number(raw.count)) || 1),
+      );
+      cast.push({
+        id,
+        kind: 'person',
+        name,
+        figure: figureOf(raw.figure),
+        ...(count > 1 ? { count } : {}),
+        state: raw.state && EXPRESSIONS.includes(raw.state) ? raw.state : null,
       });
       return;
     }

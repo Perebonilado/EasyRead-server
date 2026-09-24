@@ -158,6 +158,8 @@ export interface VisualSceneJobData extends BaseJobData {
   topicId: string;
   requestedBy: string;
   priority?: number;
+  /** A page already made, made again; the one made stays until the new one is ready. */
+  remake?: boolean;
 }
 
 export const visualSceneJobId = (

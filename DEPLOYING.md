@@ -203,6 +203,39 @@ them for two seconds before the voice begins. `npm run scene:try --
 <story.md> --story --page 3` tries it on a story whose pages are parted by
 lines of three dashes.
 
+People are drawn by code, not by the artist (`scene-figure.ts`, the plan
+in `visualize-characters-plan.md`). The story reader says what each
+character is (a person, an animal or a creature) and, for a person, their
+figure from the kit's closed lists: age, build, skin tone 1–10, hair,
+headwear, clothes and colours, up to two extras. The kit draws everyone
+from one rig (the same head, eyes, outline and proportions), with the
+seven faces, a blink, a breath, and a mouth that moves while the stage
+marks them talking; no model is asked, so people cost nothing to draw.
+Animals and creatures are still drawn by the artist, in the kit's style,
+at their size beside people. The writer shows people on any page, a doctor
+or a scientist, as `person` things drawn the same way. On the stage,
+everyone standing together is drawn at one scale (a child is always
+shorter than a grown-up, a grown-up at most seven tenths of the stage)
+and, in front of a set, on its ground. A story character's name is written
+under them only on the page the book meets them.
+
+Sheets are now version 2 and sets version 2 (painted to match the people),
+so a story book's characters and places are drawn again the next time one
+of its pages is made, and a book whose story was read before this is
+asked once per character what they are (one `gpt-4.1-mini` call each).
+Pages made before keep the people they were made with. To make a book's
+made pages again so every page matches: `npm run scene:recast --
+<documentId>` says how many pages that is, `--go` queues them for the
+worker (behind everything learners asked for), and `--here` makes them in
+its own process. Each page stays playable until its new one is ready, and
+one that cannot be made again stays as it was. A page costs what making
+it costs: the writer and the voice once more. A page's audio is now sent
+with an ETag and checked each time (it was kept a day unchecked), so a
+page made again is never heard with its old voice. Nothing to set, no
+migration; the contract only gains optional fields (`say.saidUntilMs`).
+`npm run figures:sheet -- <dir>` draws every choice in the kit on one
+sheet (`figures.png`, and `figures.html` where they blink and talk).
+
 ## The live tutor
 
 A tutor marked `livekit` in `tutors.ts` talks on our own line: a LiveKit

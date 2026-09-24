@@ -31,13 +31,23 @@ import {
   quietStretches,
   wordsOf,
   type CharacterThing,
+  type PersonThing,
   type PlaceThing,
   type DrawingThing,
   type SceneScript,
 } from '../../business/domain/scene-script';
 import {
+  PLAIN_FIGURE,
+  describeFigure,
+  figureOf,
+  type FigureSpec,
+} from '../../business/domain/scene-figure';
+import {
   SET_VERSION,
+  SIZE_UNITS,
   castOf,
+  figureDrawing,
+  figureSheet,
   introCallouts,
   measureSheet,
   setsOf,
@@ -63,7 +73,9 @@ import {
   storyPieces,
   type StoryBible,
   type StoryCharacter,
+  type StoryKind,
   type StoryPlace,
+  type StorySize,
 } from '../../business/domain/scene-story';
 import {
   CANVAS,
@@ -168,6 +180,21 @@ async function inBatches<T, R>(
   return out;
 }
 
+/** A person no model could describe: plainly dressed, as old as their voice. */
+function figureByVoice(voice: StoryCharacter['voice']): FigureSpec {
+  const age =
+    voice === 'girl' || voice === 'boy'
+      ? 'child'
+      : voice === 'old woman' || voice === 'old man'
+        ? 'elder'
+        : 'adult';
+  return {
+    ...PLAIN_FIGURE,
+    age,
+    hairColour: age === 'elder' ? 'grey' : PLAIN_FIGURE.hairColour,
+  };
+}
+
 /**
  * One page as an animated video.
  *
@@ -222,7 +249,10 @@ export class SceneProcessor {
       pageNumber,
       SCENE_GENERATOR_VERSION,
     );
-    if (!record || record.status === 'done') return;
+    // A page made already is made again only when asked to remake it: it
+    // stays as it was, playable, until the new one takes its place.
+    const remaking = Boolean(job.remake) && record?.status === 'done';
+    if (!record || (record.status === 'done' && !remaking)) return;
     const topics = await this.topics.listByDocument(documentId);
     const topic =
       topics.find((candidate) => candidate.id === record.topicId) ??
@@ -231,24 +261,27 @@ export class SceneProcessor {
           pageNumber >= candidate.startPage && pageNumber <= candidate.endPage,
       );
     if (!topic) {
+      if (remaking) return;
       await this.visuals.update(record.id, {
         status: 'failed',
         error: 'The page is outside every chapter',
       });
       return;
     }
-    const who = `${documentId} p${pageNumber}`;
+    const who = `${documentId} p${pageNumber}${remaking ? ' (remade)' : ''}`;
     const started = Date.now();
 
     try {
-      await this.visuals.update(record.id, {
-        status: 'making',
-        step: 'writing',
-        error: null,
-        attempts: record.attempts + 1,
-      });
+      if (!remaking)
+        await this.visuals.update(record.id, {
+          status: 'making',
+          step: 'writing',
+          error: null,
+          attempts: record.attempts + 1,
+        });
       const material = await this.material(documentId, pageNumber);
       if (wordsOf(material).length < THIN_PAGE_WORDS) {
+        if (remaking) return;
         await this.visuals.update(record.id, {
           status: 'not_suitable',
           step: null,
@@ -281,11 +314,21 @@ export class SceneProcessor {
         kept: doc.props.institutionId
           ? await this.pronunciations.kept(doc.props.institutionId)
           : new Map(),
-        base: `documents/${doc.id}/visuals/v${contentVersion}/p${pageNumber}-${SCENE_GENERATOR_VERSION}`,
+        // Remade, under its own names: the page made before plays on
+        // from its own files until the row points at the new ones.
+        base: `documents/${doc.id}/visuals/v${contentVersion}/p${pageNumber}-${SCENE_GENERATOR_VERSION}${remaking ? `-r${Date.now().toString(36)}` : ''}`,
         who,
         keepAs: `${documentId}-p${pageNumber}`,
-        step: (step) => this.visuals.update(record.id, { step }),
+        step: remaking
+          ? undefined
+          : (step) => this.visuals.update(record.id, { step }),
       });
+      if (made.fit === 'poor' && remaking) {
+        this.logger.warn(
+          `${who}: judged unsuited this time; the page made before stays`,
+        );
+        return;
+      }
       if (made.fit === 'poor') {
         await this.visuals.update(record.id, {
           status: 'not_suitable',
@@ -309,6 +352,13 @@ export class SceneProcessor {
         durationMs: voice.durationMs,
         error: null,
       });
+      // The files the page was made from before, now no one's: a learner
+      // who has the page open has its audio already (it is fetched whole,
+      // through the row), and a purge knows only the row's own files.
+      if (remaking)
+        for (const key of [record.sceneKey, record.audioKey, record.thumbKey])
+          if (key && ![sceneKey, voice.audioKey, thumbKey].includes(key))
+            await this.storage.delete(key).catch(() => undefined);
       const drawn = [...drawings.values()].filter(Boolean).length;
       this.logger.log(
         `${who}: made in ${Math.round((Date.now() - started) / 1000)}s: ${script.beats.length} sentences, ${Math.round(voice.durationMs / 1000)}s of audio timed by ${voice.timing}, ${scene.steps.length} stage changes, ${scene.effects.length} effects (${filled} filled), ${drawn} of ${drawings.size} drawings`,
@@ -316,6 +366,11 @@ export class SceneProcessor {
     } catch (error) {
       const message = (error as Error).message;
       this.logger.warn(`${who}: scene failed: ${message}`);
+      // A remake that fails leaves the page as it was made before.
+      if (remaking) {
+        if (!context.isFinalAttempt && !isPermanentFailure(error)) throw error;
+        return;
+      }
       // A refusal cannot come right on a retry; nor can the last attempt.
       // Either way the row says so, and can be asked for again.
       if (!context.isFinalAttempt && !isPermanentFailure(error)) {
@@ -637,6 +692,9 @@ export class SceneProcessor {
     const places = script.cast.filter(
       (thing): thing is PlaceThing => thing.kind === 'place',
     );
+    const people = script.cast.filter(
+      (thing): thing is PersonThing => thing.kind === 'person',
+    );
     const names = new Map(
       script.cast.map((thing) => [
         thing.id,
@@ -662,6 +720,19 @@ export class SceneProcessor {
           return null;
         }),
       );
+    // People the page shows, drawn by the kit: no model is asked.
+    for (const thing of people)
+      out.set(
+        thing.id,
+        await figureDrawing(thing.figure, thing.id, thing.count).catch(
+          (error: unknown) => {
+            this.logger.warn(
+              `${who}: "${thing.id}" (a person) is set as a card: ${(error as Error).message}`,
+            );
+            return null;
+          },
+        ),
+      );
     // The story's characters, each drawn once for the whole book; the
     // first time the book meets one, what they are like beside them.
     const cast = characters.map(async (thing) => {
@@ -683,6 +754,11 @@ export class SceneProcessor {
               ...sheet.drawing,
               callouts: introCallouts(sheet, thing.intro),
               ...(sheet.anchors.head ? { head: sheet.anchors.head } : {}),
+              // A person stands at the kit's scale; an animal or a
+              // creature at its size beside them.
+              stands: sheet.drawing.stands ?? {
+                units: SIZE_UNITS[sheet.size ?? character?.size ?? 'medium'],
+              },
             }
           : null,
       );
@@ -1168,6 +1244,9 @@ export class SceneProcessor {
     return this.once(`${key}#${character.id}`, async () => {
       try {
         const kept = (await this.castAt(key))[character.id];
+        // A person is drawn again from their figure: code, and the kit as
+        // it is now. The figure is what was kept.
+        if (kept?.figure) return figureSheet(kept.figure, character.id);
         if (kept) return kept;
       } catch (error) {
         this.logger.warn(
@@ -1175,7 +1254,12 @@ export class SceneProcessor {
         );
         return null;
       }
-      const sheet = await this.drawSheet(character, bookTitle, documentId, who);
+      const sheet = await this.drawCharacter(
+        character,
+        bookTitle,
+        documentId,
+        who,
+      );
       if (!sheet) return null;
       // Added to the cast as it stands now: others may have been drawn meanwhile.
       await this.inTurn(key, async () => {
@@ -1193,6 +1277,62 @@ export class SceneProcessor {
       );
       return sheet;
     });
+  }
+
+  /**
+   * A character drawn for the book: a person by the kit, from their
+   * figure, with no model asked; an animal or a creature by the artist,
+   * in the kit's style. A book read before characters had kinds is asked
+   * what each is once, from the look kept for them.
+   */
+  private async drawCharacter(
+    character: StoryCharacter,
+    bookTitle: string,
+    documentId: string | null,
+    who: string,
+  ): Promise<CharacterSheet | null> {
+    let kind: StoryKind | null = character.kind ?? null;
+    let size: StorySize | null = character.size ?? null;
+    let figure: FigureSpec | null = character.figure ?? null;
+    if (!kind) {
+      try {
+        const made = await this.llm.sceneFigure({
+          bookTitle,
+          name: character.name,
+          look: character.look,
+          voice: character.voice,
+        });
+        await this.record(documentId, 'scene_story', made.usage);
+        kind = made.value.kind;
+        size = made.value.size;
+        figure =
+          kind === 'person' && made.value.figure
+            ? figureOf(made.value.figure)
+            : null;
+      } catch (error) {
+        // Unasked, anyone who speaks as a creature is one; anyone else a
+        // person, as old as their voice.
+        this.logger.warn(
+          `${who}: what ${character.name} is could not be asked: ${(error as Error).message}`,
+        );
+        kind = character.voice === 'creature' ? 'creature' : 'person';
+      }
+    }
+    if (kind === 'person') {
+      const spec = figure ?? figureByVoice(character.voice);
+      const sheet = await figureSheet(spec, character.id);
+      this.logger.log(
+        `${who}: ${character.name} drawn by the kit: ${describeFigure(spec)}`,
+      );
+      return sheet;
+    }
+    const sheet = await this.drawSheet(
+      { ...character, kind, size },
+      bookTitle,
+      documentId,
+      who,
+    );
+    return sheet ? { ...sheet, size: size ?? 'medium' } : null;
   }
 
   /**

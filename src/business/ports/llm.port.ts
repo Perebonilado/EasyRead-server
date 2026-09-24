@@ -1,5 +1,5 @@
 import type { DocumentProfileDraft } from '../domain/scene-profile';
-import type { StoryDraft } from '../domain/scene-story';
+import type { FigureDraft, StoryDraft } from '../domain/scene-story';
 import type {
   LearnQuestion,
   Block,
@@ -510,6 +510,18 @@ export interface LlmGatewayPort {
     text: string;
     known: string[];
   }): Promise<LlmResult<StoryDraft>>;
+
+  /**
+   * What a story's character is, and how a person among them looks, from
+   * the look a bible kept before people were drawn by the kit: one small
+   * call a character, once, for a book read before it was asked.
+   */
+  sceneFigure(input: {
+    bookTitle: string;
+    name: string;
+    look: string;
+    voice: string | null;
+  }): Promise<LlmResult<FigureDraft>>;
 
   /**
    * One drawing, as SVG markup with its own animation, from its brief.

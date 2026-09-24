@@ -1011,8 +1011,12 @@ export interface SceneEffectDto {
   do: SceneEffectName;
   /** A pulse added only because nothing else happened for a while: seen, not heard. */
   filler?: boolean;
-  /** A character speaking: their words, in a bubble at their head until `untilMs`. */
-  say?: { id: string; text: string; untilMs: number };
+  /**
+   * A character speaking: their words, in a bubble at their head until
+   * `untilMs`; their mouth moves until `saidUntilMs`, when the voice has
+   * said the words (absent in older scenes).
+   */
+  say?: { id: string; text: string; untilMs: number; saidUntilMs?: number };
 }
 
 /** A speech bubble as the stage sets it: its box, its words, and the point its tail reaches toward. */

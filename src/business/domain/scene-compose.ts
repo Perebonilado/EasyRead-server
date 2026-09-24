@@ -34,6 +34,7 @@ import {
   STAGINGS,
   extentOf,
   layoutStep,
+  standTogether,
   type LaidThing,
   type Place,
   type Rect,
@@ -133,7 +134,10 @@ export function thingDto(
     kind: 'drawing',
     svg: drawing.svg,
     aspect: drawing.aspect,
-    caption: thing.name || null,
+    // A story's character is named where the book meets them; after that
+    // they are known by how they look, as a cartoon's cast is.
+    caption:
+      thing.kind === 'character' && !thing.first ? null : thing.name || null,
     parts: drawing.parts,
     labels: drawing.labels,
     states: drawing.states,
@@ -166,6 +170,8 @@ interface Geometry {
   words?: { size: number };
   /** A character's head: where their bubbles point. */
   head?: [number, number];
+  /** Someone who stands with people: the kit's units their frame is tall. */
+  stands?: { units: number };
 }
 
 const laid = (thing: SceneThingDto, geometry?: Geometry): LaidThing =>
@@ -179,6 +185,7 @@ const laid = (thing: SceneThingDto, geometry?: Geometry): LaidThing =>
           ? { callouts: geometry.callouts, viewBox: geometry.viewBox }
           : {}),
         ...(geometry?.words ? { words: geometry.words } : {}),
+        ...(geometry?.stands ? { stands: geometry.stands } : {}),
       }
     : thing.kind === 'stat'
       ? { kind: 'stat', value: thing.value, caption: thing.caption }
@@ -255,7 +262,7 @@ export function oneFaceAtATime(
   const faces = new Set<string>(EXPRESSIONS);
   const characters = new Map(
     cast.flatMap((thing) =>
-      thing.kind === 'character' && drawn(thing.id)
+      (thing.kind === 'character' || thing.kind === 'person') && drawn(thing.id)
         ? [[thing.id, thing] as const]
         : [],
     ),
@@ -499,6 +506,12 @@ export function composeScene(input: ComposeInput): {
                   untilMs: Math.round(
                     (beats[step.at.beat]?.endMs ?? at) + SAY_AFTER_MS,
                   ),
+                  saidUntilMs: Math.round(
+                    quotedUntil(
+                      script.beats[step.at.beat]?.say ?? '',
+                      beats[step.at.beat],
+                    ) ?? at,
+                  ),
                 },
               }
             : { atMs: at, target: effect.target, part: null, do: 'pulse' },
@@ -556,11 +569,7 @@ export function composeScene(input: ComposeInput): {
     // Open on the first quoted word, a breath early; close after the last.
     const spans = quotedSpans(beat.say);
     const from = t.words.find((w) => w[1] > (spans[0]?.[0] ?? 0))?.[2];
-    const to = [...t.words]
-      .reverse()
-      .find(
-        (w) => w[0] < (spans[spans.length - 1]?.[1] ?? beat.say.length),
-      )?.[3];
+    const to = quotedUntil(beat.say, t) ?? t.endMs;
     effects.push({
       atMs: Math.round(Math.max(t.startMs, (from ?? t.startMs) - 150)),
       target: beat.speaker,
@@ -569,7 +578,8 @@ export function composeScene(input: ComposeInput): {
       say: {
         id: `say-${saying++}`,
         text,
-        untilMs: Math.round((to ?? t.endMs) + SAY_AFTER_MS),
+        untilMs: Math.round(to + SAY_AFTER_MS),
+        saidUntilMs: Math.round(to),
       },
     });
   });
@@ -585,6 +595,11 @@ export function composeScene(input: ComposeInput): {
       says[i + 1]?.atMs ?? durationMs,
       durationMs,
     );
+    if (effect.say!.saidUntilMs !== undefined)
+      effect.say!.saidUntilMs = Math.min(
+        effect.say!.saidUntilMs,
+        effect.say!.untilMs,
+      );
   });
   /** The step a moment falls in. */
   const stepOf = (t: number) => {
@@ -701,6 +716,7 @@ export function composeScene(input: ComposeInput): {
         field: drawing.field,
         ...(drawing.words ? { words: drawing.words } : {}),
         ...(drawing.head ? { head: drawing.head } : {}),
+        ...(drawing.stands ? { stands: drawing.stands } : {}),
       });
   }
   const introduced = new Set(
@@ -723,6 +739,7 @@ export function composeScene(input: ComposeInput): {
           kind: 'drawing',
           aspect: thing.aspect,
           caption: thing.caption,
+          ...(thing.stands ? { stands: thing.stands } : {}),
         });
     }
     const stage = STAGINGS[staging];
@@ -737,6 +754,14 @@ export function composeScene(input: ComposeInput): {
         step.show,
         crowded ? crowd : lookup,
         staging,
+      );
+      // People stand as people do: one scale, one ground.
+      standTogether(
+        laidOut,
+        crowded ? crowd : lookup,
+        step.show,
+        staging,
+        Boolean(step.backdrop),
       );
       const arrows = step.arrows.flatMap((arrow) => {
         const a = laidOut[arrow.from];
@@ -937,6 +962,18 @@ export function composeScene(input: ComposeInput): {
     filled,
     audit: { box: box.audit, wide: wide.audit },
   };
+}
+
+/** When the voice has said the last of a sentence's quoted words: a speaker's mouth moves until then. */
+function quotedUntil(say: string, timed: TimedBeat | undefined): number | null {
+  if (!timed) return null;
+  const spans = quotedSpans(say);
+  return (
+    [...timed.words]
+      .reverse()
+      .find((w) => w[0] < (spans[spans.length - 1]?.[1] ?? say.length))?.[3] ??
+    timed.endMs
+  );
 }
 
 /** Where a run of words sits: its measured width, centred where it is set. */

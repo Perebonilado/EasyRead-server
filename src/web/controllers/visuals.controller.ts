@@ -9,6 +9,7 @@ import {
   ParseIntPipe,
   Patch,
   Post,
+  Req,
   Res,
 } from '@nestjs/common';
 import {
@@ -19,7 +20,8 @@ import {
   IsOptional,
   Min,
 } from 'class-validator';
-import type { Response } from 'express';
+import { createHash } from 'node:crypto';
+import type { Request, Response } from 'express';
 import type {
   RequestVisualsRequest,
   RequestVisualsResponse,
@@ -183,20 +185,29 @@ export class VisualsController {
 
   /**
    * The video's audio. The client fetches it with the session token and
-   * plays a blob URL, as it does for the lecture.
+   * plays a blob URL, as it does for the lecture. Kept by the browser, and
+   * checked each time against the file the page is made from now: a page
+   * made again (scene:recast) is never heard with its old voice.
    */
   @Get(':page/audio')
   async audio(
     @CurrentUser('id') userId: string,
     @Param('id') documentId: string,
     @Param('page', ParseIntPipe) page: number,
+    @Req() request: Request,
     @Res() response: Response,
   ): Promise<void> {
     const { data } = await this.scene.handle({ userId, documentId, page });
+    const tag = `"${createHash('sha1').update(data.audioKey!).digest('hex').slice(0, 16)}"`;
+    response.setHeader('Cache-Control', 'private, no-cache');
+    response.setHeader('ETag', tag);
+    if (request.headers['if-none-match'] === tag) {
+      response.status(304).end();
+      return;
+    }
     const { stream, size } = await this.storage.stream(data.audioKey!);
     response.setHeader('Content-Type', 'audio/mpeg');
     response.setHeader('Content-Length', size);
-    response.setHeader('Cache-Control', 'private, max-age=86400, immutable');
     stream.pipe(response);
   }
 }

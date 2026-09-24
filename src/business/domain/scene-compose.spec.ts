@@ -1,3 +1,4 @@
+import { PLAIN_FIGURE } from './scene-figure';
 import {
   composeScene,
   fullestStep,
@@ -543,6 +544,53 @@ describe("a story's characters on the stage", () => {
     expect(scene.stagings.wide.places[1].mira.labels).toBeUndefined();
   });
 
+  it('names a character under them only on the page the book meets them', () => {
+    const named = composeScene({
+      script: {
+        ...story,
+        cast: story.cast.map((t) =>
+          t.kind === 'character' && t.id === 'mira' ? { ...t, first: true } : t,
+        ),
+      },
+      drawings: new Map([
+        ['mira', figure()],
+        ['fox', figure()],
+      ]),
+      beats,
+      durationMs: 16_000,
+      timing: 'voice',
+      generator: 'scene-2',
+    }).scene;
+    const caption = (id: string) => {
+      const thing = named.things.find((t) => t.id === id);
+      return thing?.kind === 'drawing' ? thing.caption : undefined;
+    };
+    expect(caption('mira')).toBe('Mira');
+    // Met on an earlier page: known by how he looks.
+    expect(caption('fox')).toBeNull();
+  });
+
+  it('gives a person the page shows their faces one at a time, as a character', () => {
+    const effects = oneFaceAtATime(
+      [{ atMs: 5000, target: 'doctor', part: 'happy', do: 'show' }],
+      [
+        {
+          id: 'doctor',
+          kind: 'person',
+          name: 'Doctor',
+          figure: PLAIN_FIGURE,
+          state: null,
+        },
+      ],
+      [{ ...scene.steps[0], atMs: 1000, show: ['doctor'] }],
+    );
+    expect(effects.map((e) => `${e.atMs} ${e.do} ${e.part}`)).toEqual([
+      '600 show neutral',
+      '5000 hide neutral',
+      '5000 show happy',
+    ]);
+  });
+
   it('gives no faces to a character who could not be drawn', () => {
     const effects = oneFaceAtATime(
       [{ atMs: 500, target: 'mira', part: 'happy', do: 'show' }],
@@ -596,6 +644,7 @@ describe('what a character says, in a bubble', () => {
         bits += Math.abs(c - 24) <= 8 && r >= 4 ? '1' : '0';
     return { viewBox: [0, 0, 600, 900], map: { cols, rows, bits } };
   };
+  // Drawn as characters are: standing with people, a grown-up's height.
   const figure = (): GatedDrawing =>
     drawing({
       aspect: 0.6,
@@ -605,6 +654,7 @@ describe('what a character says, in a bubble', () => {
       states: { neutral: 'neutral', happy: 'happy' },
       head: [300, 180],
       field: standing(),
+      stands: { units: 234 },
     });
   const talking: SceneScript = {
     ...script,
@@ -708,6 +758,9 @@ describe('what a character says, in a bubble', () => {
     expect(says[0].say!.untilMs).toBe(
       Math.min(beatsSaid[3].endMs + 700, 16_000),
     );
+    // The fox's mouth moves while the voice says his words, and no longer.
+    expect(says[0].say!.saidUntilMs).toBeLessThanOrEqual(beatsSaid[3].endMs);
+    expect(says[0].say!.saidUntilMs).toBeGreaterThan(says[0].atMs);
     expect(
       scene.effects.some((e) => e.target === 'mira' && e.do === 'pulse'),
     ).toBe(true);

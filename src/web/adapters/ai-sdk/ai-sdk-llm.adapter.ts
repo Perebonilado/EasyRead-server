@@ -2,7 +2,10 @@ import { numberedSentences } from '../../../business/domain/board';
 import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import type { DocumentProfileDraft } from '../../../business/domain/scene-profile';
-import type { StoryDraft } from '../../../business/domain/scene-story';
+import type {
+  FigureDraft,
+  StoryDraft,
+} from '../../../business/domain/scene-story';
 import type { LanguageModelUsage } from 'ai';
 import type { Block, RecapBody, TopicPreviewBody } from '../../../contracts';
 import type {
@@ -40,6 +43,7 @@ import {
   lectureSketchSchema,
   sceneProfileSchema,
   sceneScriptSchema,
+  sceneFigureSchema,
   sceneStorySchema,
   sketchJudgeSchema,
   lectureExtraSchema,
@@ -782,6 +786,33 @@ export class AiSdkLlmAdapter implements LlmGatewayPort, OnModuleInit {
       ]
         .filter(Boolean)
         .join('\n\n'),
+      maxRetries: this.maxRetries(),
+    });
+    return {
+      value: result.object,
+      usage: this.usage(ref, result.usage, started),
+    };
+  }
+
+  async sceneFigure(input: {
+    bookTitle: string;
+    name: string;
+    look: string;
+    voice: string | null;
+  }): Promise<LlmResult<FigureDraft>> {
+    const started = Date.now();
+    const { generateObject } = await this.registry.modules();
+    const { model, ref } = await this.registry.languageModel('scene_story');
+    const result = await generateObject({
+      model,
+      schema: sceneFigureSchema,
+      system: PROMPTS.sceneFigure,
+      prompt: [
+        `Book: ${input.bookTitle}`,
+        `Character: ${input.name}`,
+        `Look: ${input.look || 'not described'}`,
+        `Voice: ${input.voice ?? 'none given'}`,
+      ].join('\n'),
       maxRetries: this.maxRetries(),
     });
     return {

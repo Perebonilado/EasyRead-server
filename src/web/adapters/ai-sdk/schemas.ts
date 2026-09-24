@@ -14,9 +14,41 @@ import {
 } from '../../../business/domain/scene-profile';
 import {
   EXPRESSIONS,
+  STORY_KINDS,
   STORY_ROLES,
+  STORY_SIZES,
   STORY_VOICES,
 } from '../../../business/domain/scene-story';
+import {
+  BOTTOMS,
+  CLOTH_COLOURS,
+  FACIAL_HAIR,
+  FIGURE_AGES,
+  FIGURE_BUILDS,
+  FIGURE_EXTRAS,
+  HAIR_COLOURS,
+  HAIR_STYLES,
+  HEADWEAR,
+  TOPS,
+} from '../../../business/domain/scene-figure';
+
+/** How a person looks, from the figure kit's lists: every person drawn in one style. */
+export const figureSchema = z.object({
+  age: z.enum(FIGURE_AGES),
+  build: z.enum(FIGURE_BUILDS),
+  /** 1, the lightest, to 10, the deepest. */
+  skin: z.number().int(),
+  hair: z.enum(HAIR_STYLES),
+  hairColour: z.enum(HAIR_COLOURS),
+  facialHair: z.enum(FACIAL_HAIR),
+  headwear: z.enum(HEADWEAR),
+  top: z.enum(TOPS),
+  topColour: z.enum(CLOTH_COLOURS),
+  bottom: z.enum(BOTTOMS),
+  bottomColour: z.enum(CLOTH_COLOURS),
+  accentColour: z.enum(CLOTH_COLOURS),
+  extras: z.array(z.enum(FIGURE_EXTRAS)),
+});
 
 /**
  * Structured output contracts.
@@ -504,6 +536,7 @@ export const sceneScriptSchema = z.object({
         'timeline',
         'chart',
         'character',
+        'person',
         'place',
       ]),
       name: z.string(),
@@ -548,6 +581,8 @@ export const sceneScriptSchema = z.object({
         .nullable(),
       ref: z.string().nullable(),
       state: z.enum(EXPRESSIONS).nullable(),
+      figure: figureSchema.nullable(),
+      count: z.number().int().nullable(),
       timeline: z
         .array(z.object({ when: z.string(), name: z.string() }))
         .nullable(),
@@ -599,6 +634,9 @@ export const sceneStorySchema = z.object({
       aliases: z.array(z.string()),
       role: z.enum(STORY_ROLES),
       look: z.string(),
+      kind: z.enum(STORY_KINDS),
+      size: z.enum(STORY_SIZES).nullable(),
+      figure: figureSchema.nullable(),
       traits: z.array(z.string()),
       voice: z.enum(STORY_VOICES).nullable(),
     }),
@@ -621,6 +659,13 @@ export const sceneStorySchema = z.object({
       place: z.string().nullable(),
     }),
   ),
+});
+
+/** What a story's character is, and a person's figure: from a look kept before the kit drew people. */
+export const sceneFigureSchema = z.object({
+  kind: z.enum(STORY_KINDS),
+  size: z.enum(STORY_SIZES).nullable(),
+  figure: figureSchema.nullable(),
 });
 
 export const lectureSketchSchema = z.object({

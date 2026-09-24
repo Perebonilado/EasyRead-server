@@ -320,7 +320,7 @@ Richard found a patient in bed drawn by the artist, not the kit.
 
 ### Not done
 
-- **Poses.** Planned for later.
+- **Poses.** Since built, with signs and props: see "People who do things" below.
 - **An animal kit.** Ember in the artist's new style sits reasonably beside the people.
 - **A set kit.**
 - **Keeping each page's parts** so a later recast needs no writer or voice.
@@ -335,3 +335,155 @@ Richard found a patient in bed drawn by the artist, not the kit.
   - A story book's animals and places are drawn once more the next time one of its pages is made.
   - Its people cost nothing to draw, plus one small call per character for a book read before this.
   - Pages made before keep their old people until the book is recast: `npm run scene:recast -- <documentId>` shows the count, and `--go` queues them. Each page costs the writer and the voice once more.
+
+## Technical plan: people who do things (2026-09-24)
+
+Richard's second review: on "What is a Seizure?", two people drawn by the kit stood still under the captions "Seizure: shaking" and "Seizure: altered sensation". The kit knew who someone is and seven faces, but nothing of what their body is doing or going through. So the page showed neither the shaking nor the altered sensation, and a drawing turned into a person lost what it was showing.
+
+**The fix:** give people a vocabulary of what they do and go through, drawn by the kit in its style, and let the writer switch it on and off at the words, as it does faces. The prototype sheet (poses and signs) was shown in the chat.
+
+### The vocabulary (`scene-figure.ts`)
+
+- **Poses.** How someone is placed on a page. One per person per page, since changing pose on the fly is not needed.
+  - `standing`, `hand on head`, `hands on belly`, `hand on mouth`, `arms up`, `pointing`, `waving` and `holding`.
+  - `lying` (on the floor) and `in bed`.
+  - A group can take any standing pose; lying and in bed are for one person.
+- **Signs.** What someone is going through. They are states, hidden until shown, and any number can be on at once.
+  - **Actions**, which move the whole body while on: `shaking`, `shivering`, `dizzy`, `coughing`, `sleeping`, `breathless`, `walking` and `jumping`.
+  - **Marks**, drawn on the body: `tingling hands`, `tingling feet`, `headache`, `chest pain`, `stomach ache`, `fever`, `sweating`, `tears`, `rash`, `nausea`, `confused` and `idea`.
+- **Faces.** The seven, plus `pain` (squeezed eyes, gritted teeth). A person wears one at a time, as now.
+- **Props, held in the hand** (pose `holding`, or with `pointing` in the other hand): `book`, `phone`, `cup`, `thermometer`, `syringe`, `pills`, `flag`, `umbrella`, `magnifier`, `bag`, `ball` and `lantern`.
+
+### Drawing
+
+- Each sign is its own group (id `tingling-hands`), placed at points the pose gives: the head, the mouth, the chest, the belly, both hands, both feet, and beside the body. In bed they sit on the bed's own points; lying on the floor, they turn with the body.
+- Marks move in their own CSS: sparkles twinkle, pain throbs, heat rises, sweat and tears drip, puffs spread.
+- Actions move the whole body through CSS keyed on a class on the figure's `<svg>`, `on-<sign>`, which the player sets while the sign is on:
+  - shaking jitters; shivering trembles; dizzy sways;
+  - coughing jolts; jumping bounces;
+  - walking bobs, with each leg swinging;
+  - breathless breathes fast.
+- A still shows the marks and none of the motion.
+- A group shows its signs on everyone, and blinks and breathes as before.
+
+### Writer (`schemas.ts`, `prompts.ts`, `scene-script.ts`)
+
+- **New fields on `person` and `character` cast things:**
+  - `pose`: one of the poses;
+  - `signs`: what they come on with, at most four;
+  - `holding`: a prop, or null.
+- **Effects switch signs on and off at the words,** as faces: `show` "id.shaking" when the voice says the arms begin to jerk, and `hide` it when it stops. The instructions give examples.
+- **The mend keeps only values on the lists.**
+  - A group keeps no lying or in-bed pose.
+  - A prop comes with the `holding` pose unless another pose was given.
+- **Reading a brief (`someoneIn`, `personIn`).** A drawing turned into a person takes signs, pose and prop from the brief's words, so it is never still. Examples:
+  - "shaking", "convulsing", "jerking" or "seizure" gives shaking;
+  - "tingling", "numb" or "pins and needles" gives tingling, at the hands, the feet or both as the brief says;
+  - "fever" gives fever and sweating; "cough" gives coughing and a hand over the mouth;
+  - "headache" gives a hand on the head and the headache sign;
+  - "stomach ache" gives hands on the belly;
+  - "asleep", "coma" or "unconscious" gives sleeping; "lying on the floor" or "collapsed" gives lying;
+  - "holding a book" gives the book.
+
+### Compose (`scene-compose.ts`)
+
+- A person's or character's first signs are shown just before they come on, silently, as their first face is.
+- `pain` counts as a face, so a person wears it, or one of the others, one at a time.
+- Signs stay on until hidden.
+
+### Player (`stage.ts`, `timeline.ts`)
+
+- `signsOnAt(scene, t, reduced)` gives each thing's shown state groups; the stage sets `on-<group>` on each figure's `<svg>` for them.
+- Under reduced motion no classes are set, so no one moves; the marks still show.
+
+### Checks
+
+- **Kit tests:**
+  - every pose draws, with every part, face and sign as its own group, once;
+  - the eyes stay clear with the signs off;
+  - every face stays on the head in every standing pose;
+  - lying and pointing frames are wider;
+  - props are drawn at the hand.
+- **Writer tests:**
+  - poses, signs and props are mended;
+  - a group keeps no lying pose;
+  - signs are read from a brief (the seizure's shaking and tingling);
+  - `show` and `hide` on a sign become state effects.
+- **Compose tests:** first signs are shown before a person comes on; `pain` is one of the faces.
+- **Player test:** `signsOnAt`, and none under reduced motion.
+- **Contact sheet:** Poses, Signs and Props sections.
+- **Remade locally:** the seizure pages and a few others, watched on `/dev/stage` for shaking, sparkles, drips and faces.
+
+### Built and tested (2026-09-24, on `visualize-characters` in both repos, not pushed)
+
+Richard said "implement and test", so the plan was built as written, with these changes made along the way:
+
+- **The kit (`scene-figure.ts`).**
+  - 10 poses, 20 signs, 12 props and the pain face, drawn in the kit's own lines.
+  - Props are drawn larger than life (1.25–1.5 times) with outlines as thick as the figure's own, because a cup the size of a hand was lost beside the big head. A bag hangs from the hand at the side, clear of a child's short legs.
+  - A thermometer is held up, its bulb under the hand; hanging down, it did not read.
+  - The umbrella is held over the head, not beside it.
+  - A walking stick moves to the free hand.
+  - Lying down, what floats over the head (steam, a Z, a question mark, a bulb, stars) stays upright about the head, and the lines of motion are drawn only on the side off the floor.
+- **Only the signs a page shows are drawn**, not all of them.
+  - A plain figure is still about 9–10 KB.
+  - A figure with three signs is under 16 KB.
+  - Every sign drawn would come to about 25 KB.
+- **Marks move only while their sign is on**, by the same class that moves the body. So a still, or a stage with motion reduced, shows them at rest.
+- **Whole-body motion is about the feet** (`transform-origin` at the ground), so a shake or a sway never lifts anyone off the floor, and a jump lands where it started.
+- **Reading a name as well as a brief.** A person the writer gave no signs takes them from their own caption, which is why "Seizure: shaking" now shakes. "Seizure" alone does not shake, since an altered-sensation seizure does not, and "shaking hands" is a handshake.
+- **Held things need words for holding.** "With a thermometer" gives one; "getting an injection" does not put the syringe in the patient's hand.
+- **In compose,** an animal the artist drew has no pain face, so it wears "afraid" instead, and gets none of the kit's signs.
+- **Characters.** A story character drawn by the kit gets a drawing for the page when the page poses them, gives them something to hold, or shows a sign. They then stand at the height of that drawing's frame; before, an in-bed character was measured as if standing.
+- **Reading drawings for people.**
+  - A brief that says there is no one ("No face or person attached", "without people") no longer asks for anyone.
+  - "A cartoon of a person…" is read as a person.
+  - "Feeling strange" gives tingling.
+- **A listed sign that is also shown at the words comes on at those words.** The writer listed shaking up front *and* showed it at "unusual movements". Now a sign whose first effect is a show comes on then, and one first hidden was on from the start. Another word for a sign in an effect ("convulsing", "pins and needles") is taken as the sign.
+
+### Tested
+
+- **Automated checks.**
+  - Server: 1,218 tests, up from 1,202.
+  - Client: 30 tests, up from 28.
+  - Types are clean in both repos. Lint is clean on every file changed; the full server lint reports errors only in files this work did not touch.
+- **Kit tests:**
+  - every pose, with every sign, draws each part, face and sign as its own group, once, and passes the gate's allowlist;
+  - the eyes stay clear in every standing pose with the signs off;
+  - every face, pain included, sits on the head, for every age and headwear and in every standing pose;
+  - pointing and lying frames are wider, and an umbrella raises the frame while the ground stays at its foot;
+  - every prop is in the right hand at the side, and in the left when pointing;
+  - no prop is drawn with both hands busy or lying down;
+  - motion rules are keyed on `on-<sign>` only, and each leg is its own group;
+  - a group waves together;
+  - lying down, only one person is drawn, with no walking, and what floats over the head is turned upright;
+  - figures stay within their size limits.
+- **Writer, compose and player tests.**
+  - The mend's rules.
+  - Signs read from captions and briefs: shaking hands is not a shake, a walking stick is not a walk, and an injection is not something the patient holds.
+  - Effects on signs, and the signs each page draws.
+  - First signs shown silently before entry, and pain worn as a face.
+  - An animal wears "afraid" for pain and gets no signs.
+  - `signsOnAt`, with nothing when motion is reduced.
+- **The seizure lecture ("Epilepsy and Status Epilepticus Lecture", pages 3, 4 and 6), remade locally twice with the real writer and voice.**
+  - **First run.**
+    - Page 3's first draft asked the artist for "a cartoon of a person experiencing a seizure" and went back to the writer.
+    - Page 3's second draft had "Person shaking" lying on the floor, shaking with the pain face, and "Person feeling strange" with no sign.
+    - Page 4 went back to the writer by mistake over "No face or person attached".
+    - Page 6's writer listed every sign up front.
+    - Each was fixed as above, and the instructions now say that signs lists only what someone already has as they come on.
+  - **Second run: no page went back.**
+    - On page 6, "Person with seizures" starts shaking at "several seizures close together" (3.4 s), stops at "seizure clusters" (6.8 s), shakes again for "two or more seizures", and stops at "returns to normal thinking" (19.1 s).
+    - On page 3, the person lies on the floor, shaking.
+    - On page 4, "Age-Linked Epilepsy" became a person, a child.
+- **On the stage (`/dev/stage`).**
+  - The figure's `<svg>` gains `on-shaking` exactly while the sign is on.
+  - The body's transform changes from frame to frame (about ±1.5° and ±3 units about the feet), and the motion lines flicker.
+  - Off again, it stands still.
+- **Stills.** A still of a step shows the marks at rest: the lines beside the body, the lying person's pain face.
+- **Contact sheet.** `npm run figures:sheet` now has Poses, Signs (each sign with the face and pose that go with it, and two lying down), Props, In bed and Groups. In `figures.html` the signs move while "signs moving" is ticked.
+
+### Not done
+
+- **Moving across the stage.** Walking and jumping happen in place. Moving someone from one slot to another is left to the stage's own entrances.
+- **Keeping sign changes for a recompose.** A page remade with `SCENE_KEEP_PARTS` keeps the mended script, so changes to the mend need the writer again.

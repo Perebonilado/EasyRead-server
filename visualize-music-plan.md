@@ -76,7 +76,7 @@ Two research passes, one on learning and accessibility and one on music craft. S
 Each document gets one score instead of a loop per page. The whole document shares one key and one tempo.
 - **States on the sentences.** Each page's music is a short list of states placed on its sentences: calm, curious, bright, playful, motion, solemn, tense or none.
 - **Smooth changes.** The music moves between states on bar lines, through the same key. Layers fade in and out; loops are never swapped.
-- **It carries on.** The music continues across a page change and the "Up next" card, and stops by finishing its phrase.
+- **It ends with the video.** The music comes home as the voice ends and fades in a second and a half. The next page starts its own, in the same key, where the progression left off. (It first carried on through the "Up next" wait; Richard heard that as sound after the video had ended, so it now stops.)
 - **It gives way to the voice.** It steps back steadily under speech instead of pumping.
 - **It has a room.** One reverb lets endings ring out.
 
@@ -109,7 +109,7 @@ The writer says what each stretch feels like; code decides where the changes lan
   - stories get strings, harp and piano;
   - textbooks get soft keys, mallets and pad;
   - poetry and drama get piano and strings, sparingly.
-- **Stories have a theme.** A short motif (three to five notes) belongs to the story. It plays under the "previously" opening and at the page's close, so the music carries on from page to page the way the characters do.
+- **Stories have a theme.** A short motif (four notes) belongs to the story. It plays under the "previously" opening, so the music links page to page the way the characters do.
 
 ## 3. Changes that don't jar
 
@@ -118,7 +118,7 @@ The writer says what each stretch feels like; code decides where the changes lan
 | **State A to state B within a page** | It waits for the next bar line. The old state's layers fade out over one bar (about 3 s at 72 BPM) while the new state's layers fade in, and the harmony moves through a chord the two share. |
 | **Into "none"** | It stops starting new notes at the end of the phrase, and the last chord rings out into the reverb over 2–4 s. |
 | **Out of "none"** | It comes back at the start of a sentence or in a long pause: the pad first, faded in over a bar, then the rest at the next bar. |
-| **Page end, "Up next", next page** | It doesn't stop. It settles on the home chord and holds softly through the countdown, and the next page picks up from there on a bar line. If the learner cancels, or nothing follows within about 6 s, it fades over 3 s. |
+| **Page end, "Up next", next page** | Its last bar comes home as the voice ends, and it fades in 1.5 s; nothing plays through the countdown. The next page starts its own music, in the same key, where the progression left off. |
 | **End of the last page** | It closes on a cadence, then the tail. |
 | **Pause and play** | Pause fades it out in 0.4 s. Play fades it back in over 0.8 s, and the score carries on; it doesn't restart. |
 | **Seeking** | It carries on. If the state at the new time is different, it changes at the next half-bar. |
@@ -159,7 +159,7 @@ The rule stays the same: models decide what, code decides where and when.
   - Up to about 8–10 dB under before the first sentence.
 - **The voice keeps its band.** While the voice speaks, a gentle dip of about 4 dB on the music around 1–4 kHz, where speech is understood. The music's moving figures sit below or above the voice's range, never in it.
 - **Key points land.** On a sentence the writer marked as a key point, the music thins to its pad (the moving figures rest), so the point lands in space.
-- **Place sounds come first.** When rain, wind or water plays, the music drops its brightest layer, so the two don't fight.
+- **Place sounds come first, briefly.** A thing's own sound (wind, water, rain, a fire, a clock) is heard only as it arrives: 3.5 s, then a 1.5 s fade, and the same sound not again within 20 s. While it plays, the music drops its brightest layer. (It first looped the whole time the thing was on stage; Richard found that distracting.)
 
 ## 6. Better sound
 
@@ -200,7 +200,7 @@ All changes are additive. There is no generator bump, so no page has to be remad
 - **Old pages** (no `music`) play as one state from their mood:
   - calm, bright, curious and playful map to themselves;
   - serious maps to calm in its minor colour, not to solemn, because most "serious" pages are plain medical or historical teaching.
-- **What old pages get without a remake:** the score and its continuity across pages, no pumping, flowing chords, the room, no repeating loops, the better instruments and the new switches.
+- **What old pages get without a remake:** the score in one key across pages, no pumping, flowing chords, the room, no repeating loops, the better instruments, brief place sounds, music that ends with the video, and the new switches.
 - **What only new pages get:** changes within a page (motion, solemn, none, tense) and the story motif.
 
 ## Technical plan (2026-09-24)
@@ -278,7 +278,7 @@ This builds on branch `visualize-music` in both repos, cut from `visualize-next`
     - out of `none`: the pad first, the rest at the next bar.
   - Pause fades out in 0.4 s and keeps its place in the progression. Play fades back in over 0.8 s.
   - A seek adapts at the next bar. Above 1.25× the music stops.
-  - At the page's end it settles on the home chord at −6 dB and holds for up to two bars. Unless the next page plays, it then fades over 3 s.
+  - At the voice's end it fades in 1.5 s (as built at first, it held the home chord for two bars through the "Up next" wait; that was changed at Richard's request).
   - Mix settings:
     - duck: open 0 dB, long pause −3 dB, speech −12 dB;
     - figures: −9 dB under key sentences, −6 dB under place sounds;
@@ -348,7 +348,7 @@ This builds on branch `visualize-music` in both repos, cut from `visualize-next`
 - **Generated music can still sound amateur.** Hence the audition before anything is built, and states kept sparse.
 - **The writer over-uses a state** (motion everywhere, solemn on medical pages). Mitigated by a tight definition, the placement rules (at least 10 s, at most three changes), the profile's bounds, and bench counts to watch it.
 - **Phones.** Real-time synthesis costs CPU. Route B's recorded notes are cheap to play, and there is one reverb for everything.
-- **Browsers' autoplay rules.** Music that carries on across pages needs the audio context kept running. The existing unlock on the play press covers the first page, and the context is shared.
+- **Browsers' autoplay rules.** The next page's music starts without a press, so the audio context must stay running. The existing unlock on the play press covers the first page, and the context is shared.
 
 ## Status (2026-09-24, built on `visualize-music`, not pushed)
 
@@ -386,6 +386,10 @@ What was measured and tested:
   - Now only solemn holds chords, and tense holds a trembling drone. The others carry their harmony in their own instruments: a felt piano, pizzicato and celesta, an electric piano, marimba, a shaker. The tests check that no two states play the same instruments.
   - Between pages, the home chord is rolled once on the state's own instrument over a low home note, instead of a held pad.
   - Levels were re-measured: every state is within about 1.5 dB of the others, with playful and tense a little softer, 23–25 dB under the voice, and no clicks. No change is rougher than the notes around it.
+
+- **Nothing plays after the video, and place sounds are a moment** (Richard: sound kept playing after the end; wind and water on and on were distracting).
+  - The music now ends with the voice: about 2 s of fade and ring, measured, where it was 9–14 s.
+  - A thing's own sound is heard for 3.5 s as it arrives, then fades over 1.5 s, and the same sound doesn't come again within 20 s.
 
 Still open:
 - **Recorded instruments (route B)** need Richard's go-ahead to download a CC0 sample set.

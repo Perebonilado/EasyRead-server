@@ -437,6 +437,7 @@ export class SceneProcessor {
       durationMs: voice.durationMs,
       timing: voice.timing,
       generator: SCENE_GENERATOR_VERSION,
+      profile: input.profile,
     });
     // For working on the layout without the models: everything compose
     // was given, kept where SCENE_KEEP_PARTS says (scripts/scene-recompose).
@@ -453,6 +454,7 @@ export class SceneProcessor {
             beats: voice.beats,
             durationMs: voice.durationMs,
             timing: voice.timing,
+            profile: input.profile,
           }),
         );
       } catch (error) {

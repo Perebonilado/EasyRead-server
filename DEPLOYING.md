@@ -145,8 +145,18 @@ times the words with the aligner. `npm run scene:voices -- <documentId>
 
 A page's sound (its music, the stage's effects, a drawing's own sound)
 plays in the browser from what the scene says; the server sends no
-audio for it. Labels are lifted out of the drawings and set by the stage,
-and every page's log line `frame audit` counts anything left overlapping.
+audio for it. The music is a score composed in the browser, one per
+document (one key, one tempo), that carries on from page to page: the
+writer says what each stretch of a page feels like (`music` on its
+sentences: calm, curious, bright, playful, motion, solemn, tense, none),
+and compose places the changes (`sound.music`: at least two sentences
+and ten seconds each, at most three a page, quiet while maths is worked
+or a passage read closely, solemn only where the page tells of a death
+or loss). A page made before has one state from its mood. Nothing to
+set, no migration; the contract only gains optional fields.
+
+Labels are lifted out of the drawings and set by the stage, and every
+page's log line `frame audit` counts anything left overlapping.
 Scenes are made by generator `scene-2`: pages made before are made again
 the next time they are asked for. Their jobs go on a queue named for the
 generator (`visual-scene-2`), so while a deploy runs old and new workers

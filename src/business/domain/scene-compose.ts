@@ -46,6 +46,8 @@ import {
   type SceneStep,
   type SceneThing,
 } from './scene-script';
+import { paletteOf, placeMusic } from './scene-music';
+import type { DocumentProfile } from './scene-profile';
 import { EXPRESSIONS } from './scene-story';
 import type { GatedDrawing } from './scene-svg';
 import { anchorMs, quietGaps, spaced, type TimedBeat } from './scene-timing';
@@ -334,6 +336,8 @@ export interface ComposeInput {
   durationMs: number;
   timing: SceneTiming;
   generator: string;
+  /** The book: its instruments, the bounds on its music, whether it is a story. */
+  profile?: Pick<DocumentProfile, 'kind' | 'tone' | 'story'> | null;
 }
 
 /**
@@ -877,13 +881,37 @@ export function composeScene(input: ComposeInput): {
       title: script.title,
       durationMs,
       timing: input.timing,
-      sound: { mood: script.mood },
-      beats: beats.map((b) => ({
-        text: b.text,
-        startMs: b.startMs,
-        endMs: b.endMs,
-        words: b.words,
-      })),
+      sound: {
+        mood: script.mood,
+        music: placeMusic({
+          beats: beats.map((b, i) => ({
+            startMs: b.startMs,
+            endMs: b.endMs,
+            music: script.beats[i]?.music,
+            energy: script.beats[i]?.energy,
+          })),
+          mood: script.mood,
+          steps,
+          things,
+          durationMs,
+          tone: input.profile?.tone,
+        }),
+        palette: paletteOf(input.profile),
+        // The story's few notes, as a page of it opens.
+        ...(input.profile?.story || script.opening
+          ? { motif: true as const }
+          : {}),
+      },
+      beats: beats.map((b, i) => {
+        const delivery = script.beats[i]?.delivery;
+        return {
+          text: b.text,
+          startMs: b.startMs,
+          endMs: b.endMs,
+          words: b.words,
+          ...(delivery && delivery !== 'explain' ? { delivery } : {}),
+        };
+      }),
       things: things.filter((thing) =>
         steps.some((s) => s.show.includes(thing.id) || s.backdrop === thing.id),
       ),

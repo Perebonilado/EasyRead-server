@@ -3,6 +3,7 @@ import {
   mendScript,
   phraseAt,
   quietStretches,
+  tellsOfLoss,
   type SceneScriptDraft,
 } from './scene-script';
 
@@ -274,6 +275,75 @@ describe('the writer’s storyboard, mended', () => {
     expect(script.steps[1].stage).toBeNull();
     expect(script.steps[1].effects).toHaveLength(1);
     expect(mended.join(' ')).toMatch(/restated/);
+  });
+});
+
+describe("the writer's music, mended", () => {
+  it('keeps a state the score plays, and running high only where it can', () => {
+    const d = draft();
+    d.beats[0] = { ...d.beats[0], music: 'motion', energy: 'high' };
+    d.beats[1] = {
+      ...d.beats[1],
+      say: 'Without sunlight, the plant dies.',
+      music: 'solemn',
+      energy: 'high',
+    };
+    d.beats[2] = {
+      ...d.beats[2],
+      music: 'loud' as unknown as 'calm',
+      energy: 'low',
+    };
+    const { script } = mendScript(d);
+    expect(script.beats.map((b) => [b.music, b.energy])).toEqual([
+      ['motion', 'high'],
+      ['solemn', undefined],
+      [undefined, undefined],
+    ]);
+  });
+});
+
+describe('solemn music, held to the page', () => {
+  it('is solemn only where the page tells of a death, a grief, a war or a disaster', () => {
+    expect(
+      tellsOfLoss("All five men in Scott's team died on the march back."),
+    ).toBe(true);
+    expect(tellsOfLoss('The war ended in 1918.')).toBe(true);
+    expect(tellsOfLoss('Her grief was hard to bear.')).toBe(true);
+    // Said a sentence early: the next one tells it.
+    expect(
+      tellsOfLoss('Then the news came.', 'The ship sank with all hands.'),
+    ).toBe(true);
+    // Symptoms and illness explained are not grave enough.
+    expect(
+      tellsOfLoss(
+        'People with thalassemia may feel tired, weak, or look pale.',
+      ),
+    ).toBe(false);
+    expect(
+      tellsOfLoss('Blood transfusions raise the number of red blood cells.'),
+    ).toBe(false);
+  });
+
+  it('makes solemn over symptoms calm, and leaves a story its sadness', () => {
+    const d = draft();
+    d.beats[1] = {
+      ...d.beats[1],
+      say: 'People with the condition may feel tired and look pale.',
+      music: 'solemn',
+    };
+    expect(mendScript(d).script.beats[1].music).toBe('calm');
+    // In a story, a light gone out may be solemn: no one need have died.
+    const story = draft();
+    story.beats[1] = {
+      ...story.beats[1],
+      say: "The boats are coming home, but the lantern's light is gone.",
+      music: 'solemn',
+    };
+    expect(
+      mendScript(story, {
+        characters: [{ id: 'mira', name: 'Mira', aliases: [] }],
+      }).script.beats[1].music,
+    ).toBe('solemn');
   });
 });
 

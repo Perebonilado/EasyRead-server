@@ -902,9 +902,28 @@ export type SceneLayoutName =
 export type SceneEffectName =
   'point' | 'show' | 'hide' | 'pulse' | 'zoom' | 'say';
 export type SceneEnterName = 'pop' | 'fade' | 'slide' | 'wipe' | 'grow';
-/** The page's feeling: which music plays under the voice. */
+/** The page's feeling: how the voice sounds, and the music on a page made before the score. */
 export type SceneMoodName =
   'calm' | 'bright' | 'curious' | 'serious' | 'playful';
+/** What the score plays from a sentence on; "none" is quiet. */
+export type SceneMusicName =
+  | 'none'
+  | 'calm'
+  | 'curious'
+  | 'bright'
+  | 'playful'
+  | 'motion'
+  | 'solemn'
+  | 'tense';
+/** The score changes here, on the voice's clock: the bar line nearest it. */
+export interface SceneMusicCueDto {
+  atMs: number;
+  state: SceneMusicName;
+  /** Running high: a chase, a rush, danger close. */
+  energy?: 'high';
+}
+/** Which family of instruments plays a document's score. */
+export type SceneMusicPalette = 'lesson' | 'story' | 'verse';
 /** What a drawn thing sounds like while it is on the stage. */
 export type SceneAmbienceName =
   | 'heartbeat'
@@ -1053,13 +1072,33 @@ export interface SceneDto {
   title: string;
   durationMs: number;
   timing: SceneTiming;
-  /** One per spoken sentence; one word entry per whitespace word of `text`: [charStart, charEnd, startMs, endMs]. */
-  beats: { text: string; startMs: number; endMs: number; words: number[][] }[];
+  /**
+   * One per spoken sentence; one word entry per whitespace word of `text`:
+   * [charStart, charEnd, startMs, endMs]. `delivery` when it is not plain
+   * explaining: a key point's music thins so the point lands.
+   */
+  beats: {
+    text: string;
+    startMs: number;
+    endMs: number;
+    words: number[][];
+    delivery?: 'hook' | 'key' | 'aside' | 'question' | 'recap';
+  }[];
   things: SceneThingDto[];
   steps: SceneStepDto[];
   effects: SceneEffectDto[];
-  /** The music under the voice; absent on a scene made before there was any. */
-  sound?: { mood: SceneMoodName };
+  /**
+   * The music under the voice; absent on a scene made before there was any.
+   * `music` places the score's states on the page (absent before the score:
+   * one state from the mood); `palette` is the document's instruments;
+   * `motif` plays the story's own few notes as the page opens.
+   */
+  sound?: {
+    mood: SceneMoodName;
+    music?: SceneMusicCueDto[];
+    palette?: SceneMusicPalette;
+    motif?: true;
+  };
   /** The same steps placed for the pane's box and the full screen's wide stage. */
   stagings: Record<
     'box' | 'wide',

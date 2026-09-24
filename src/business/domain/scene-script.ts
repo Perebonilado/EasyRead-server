@@ -68,7 +68,7 @@ export const SCENE_DELIVERIES = [
 ] as const;
 export type SceneDelivery = (typeof SCENE_DELIVERIES)[number];
 
-/** The page's feeling, for the music under the voice. */
+/** The page's feeling: how the voice sounds, and the music on a page made before the score. */
 export const SCENE_MOODS = [
   'calm',
   'bright',
@@ -77,6 +77,29 @@ export const SCENE_MOODS = [
   'playful',
 ] as const;
 export type SceneMood = (typeof SCENE_MOODS)[number];
+
+/**
+ * What the music does from a sentence on (scene-music.ts places it). The
+ * page's mood sets how the voice sounds; these say what the score under it
+ * plays, and where it should play nothing at all.
+ */
+export const SCENE_MUSIC = [
+  'none',
+  'calm',
+  'curious',
+  'bright',
+  'playful',
+  'motion',
+  'solemn',
+  'tense',
+] as const;
+export type SceneMusic = (typeof SCENE_MUSIC)[number];
+/** The states whose music can also run high: a chase, a celebration, danger close. */
+export const MUSIC_WITH_ENERGY: readonly SceneMusic[] = [
+  'motion',
+  'bright',
+  'tense',
+];
 
 /** What a drawn thing can sound like while it is on the stage: only a sound it makes in life. */
 export const SCENE_AMBIENCES = [
@@ -125,6 +148,10 @@ export interface SceneBeat {
   delivery: SceneDelivery;
   /** The story's character it quotes, by their id: their words in their voice, in a bubble by their head. */
   speaker?: string | null;
+  /** The music from this sentence on; absent, it carries on as it was. */
+  music?: SceneMusic;
+  /** The music runs high from here: a chase, a rush, danger close. */
+  energy?: 'high';
 }
 
 export interface DrawingThing {
@@ -360,6 +387,9 @@ export interface SceneScriptDraft {
     delivery: SceneDelivery;
     /** A story's character the sentence quotes, or null. */
     speaker?: string | null;
+    /** The music from this sentence on, or null to carry on. */
+    music?: SceneMusic | null;
+    energy?: 'low' | 'high' | null;
   }[];
   cast: {
     id: string;
@@ -552,6 +582,46 @@ const slug = (text: string) => groupId(text).slice(0, 32);
 const clean = (text: string | null | undefined) =>
   (text ?? '').replace(/\s+/g, ' ').trim();
 
+/** A sentence's music, kept only when it is one the score plays; high only where it can run high. */
+/**
+ * What a page that is not a story must say for its music to be solemn: a
+ * death, grief, a war, a disaster. The writer reaches for solemn on
+ * symptoms and illness too (an illness explained is calm), so, like a
+ * chart's numbers, solemn is held to the page's own words.
+ */
+const GRAVE =
+  /\b(die[ds]?|dying|dead|deaths?|deadly|fatal(ly|ity|ities)?|kill(s|ed|ing)?|perish(es|ed|ing)?|lost (his|her|their|its) li(fe|ves)|grie(f|ve[ds]?|ving)|mourn(s|ed|ing)?|funerals?|graves?|trag(edy|edies|ic)|disasters?|catastroph\w*|wars?|battles?|massacres?|genocide|famine|murder(s|ed)?|drown(s|ed)?|victims?|casualt(y|ies)|slain|sorrow|holocaust|bur(y|ied)|sank|sunk)\b/i;
+
+/** Whether a sentence, or the one after it, tells of something grave enough for solemn music. */
+export function tellsOfLoss(say: string, next?: string): boolean {
+  return GRAVE.test(say) || (next !== undefined && GRAVE.test(next));
+}
+
+function musicOf(
+  beat: SceneScriptDraft['beats'][number],
+  next: SceneScriptDraft['beats'][number] | undefined,
+  story: boolean,
+): {
+  music?: SceneMusic;
+  energy?: 'high';
+} {
+  const asked =
+    beat.music && SCENE_MUSIC.includes(beat.music) ? beat.music : undefined;
+  // Outside a story, solemn where the page tells of no loss is calm. A
+  // story's sadness (a light gone out, a boat lost in the fog) is its own
+  // to score, and is left as the writer asked.
+  const music =
+    asked === 'solemn' && !story && !tellsOfLoss(beat.say, next?.say)
+      ? 'calm'
+      : asked;
+  return {
+    ...(music ? { music } : {}),
+    ...(beat.energy === 'high' && (!music || MUSIC_WITH_ENERGY.includes(music))
+      ? { energy: 'high' as const }
+      : {}),
+  };
+}
+
 export interface MendedScript {
   script: SceneScript;
   /** What the writer should redo; empty means the storyboard is sound. */
@@ -592,12 +662,13 @@ export function mendScript(
   const kept = draft.beats.filter(
     (beat) => wordsOf(clean(beat.say)).length > 0,
   );
-  const beats: SceneBeat[] = kept.map((beat) => ({
+  const beats: SceneBeat[] = kept.map((beat, index) => ({
     say: clean(beat.say),
     pause: beat.pause === 'long' ? ('long' as const) : ('short' as const),
     delivery: SCENE_DELIVERIES.includes(beat.delivery)
       ? beat.delivery
       : ('explain' as const),
+    ...musicOf(beat, kept[index + 1], !!options.characters?.length),
   }));
 
   // Ids: safe, unique, and every way the writer might refer to one.

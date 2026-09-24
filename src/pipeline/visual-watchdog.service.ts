@@ -22,6 +22,13 @@ export const WATCH_INTERVAL_MS = 60 * 1000;
 export const WATCH_AFTER_MS = 60 * 1000;
 /** The most pages looked at in one sweep; the rest wait for the next. */
 const WATCH_BATCH = 200;
+/**
+ * A page being made is someone's work: the worker's, or `scene:page`
+ * making it in its own process with no job at all. It is taken for lost
+ * only when it has not moved for this long; the maker marks each step, and
+ * a page takes minutes, never ten.
+ */
+export const MAKING_STALE_MS = 10 * 60 * 1000;
 
 /**
  * Every page asked for gets made. A page is lost when nothing carries it
@@ -29,9 +36,10 @@ const WATCH_BATCH = 200;
  * lost with a crashed worker, or never queued because the queue was down
  * when it was asked for. Its row then waits as pending for ever, and the
  * player with it, waiting on the next page. So each minute every page
- * waiting or being made is checked against the queue: one whose job is
- * gone is queued again, and one whose job failed for good is marked
- * failed, so the player moves past it instead of waiting on it.
+ * waiting (or being made, and not moved for ten minutes) is checked
+ * against the queue: one whose job is gone is queued again, and one whose
+ * job failed for good is marked failed, so the player moves past it
+ * instead of waiting on it.
  */
 @Injectable()
 export class VisualWatchdog implements OnModuleInit, OnModuleDestroy {
@@ -62,11 +70,18 @@ export class VisualWatchdog implements OnModuleInit, OnModuleDestroy {
     if (this.sweeping) return { requeued: 0, failed: 0 };
     this.sweeping = true;
     try {
-      const rows = await this.visuals.listUnfinished({
-        generatorVersion: SCENE_GENERATOR_VERSION,
-        before: new Date(this.clock.now().getTime() - WATCH_AFTER_MS),
-        limit: WATCH_BATCH,
-      });
+      const now = this.clock.now().getTime();
+      const rows = (
+        await this.visuals.listUnfinished({
+          generatorVersion: SCENE_GENERATOR_VERSION,
+          before: new Date(now - WATCH_AFTER_MS),
+          limit: WATCH_BATCH,
+        })
+      ).filter(
+        (row) =>
+          row.status !== 'making' ||
+          (row.updatedAt?.getTime() ?? 0) < now - MAKING_STALE_MS,
+      );
       if (!rows.length) return { requeued: 0, failed: 0 };
       const states = await this.queue.visualSceneStates(rows);
       const lost = rows.filter((_, i) => states[i].state === 'gone');

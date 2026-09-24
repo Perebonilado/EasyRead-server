@@ -28,6 +28,7 @@ import {
   hiddenAt,
   stepSvg,
 } from '../src/business/domain/scene-compose';
+import type { DocumentProfile } from '../src/business/domain/scene-profile';
 import { rasterise } from '../src/business/domain/scene-raster';
 import {
   SCENE_GENERATOR_VERSION,
@@ -44,6 +45,8 @@ interface Parts {
   beats: TimedBeat[];
   durationMs: number;
   timing: SceneTiming;
+  /** The book, when the parts were kept after the score came in. */
+  profile?: DocumentProfile | null;
 }
 
 /** The widths the stage is read at: a phone and the reading pane (the box), a desktop (wide). */
@@ -64,8 +67,51 @@ interface PageReport {
   found: { box: number; wide: number; what: string[] };
   /** The smallest words, in pixels, at each width, and what they are. */
   smallest: { px: number; width: number; what: string }[];
+  /** The score on the page: its states and where they start, the shortest, and sentences over maths or a passage that still have music. */
+  music: {
+    cues: string;
+    shortestS: number;
+    changes: number;
+    loudOnWork: number;
+  };
   passes: boolean;
   stills: string[];
+}
+
+/** The page's music, read back: what the conductor will play, and whether a working was left in quiet. */
+function musicOf(scene: SceneDto): PageReport['music'] {
+  const cues = scene.sound?.music ?? [];
+  const ends = cues.map((c, i) => cues[i + 1]?.atMs ?? scene.durationMs);
+  const lengths = cues.map((c, i) => ends[i] - c.atMs);
+  const quietIds = new Set(
+    scene.things
+      .filter(
+        (t) =>
+          t.kind === 'drawing' &&
+          (t.source === 'math' || t.source === 'plot' || t.source === 'quote'),
+      )
+      .map((t) => t.id),
+  );
+  const stateAt = (ms: number) =>
+    [...cues].reverse().find((c) => c.atMs <= ms)?.state;
+  const showing = (ms: number) =>
+    [...scene.steps].reverse().find((s) => s.atMs <= ms)?.show ?? [];
+  const loudOnWork = scene.beats.filter((b) => {
+    const mid = (b.startMs + b.endMs) / 2;
+    return (
+      showing(mid).some((id) => quietIds.has(id)) && stateAt(mid) !== 'none'
+    );
+  }).length;
+  return {
+    cues: cues
+      .map(
+        (c) => `${c.state}${c.energy ? '!' : ''}@${(c.atMs / 1000).toFixed(1)}`,
+      )
+      .join(' → '),
+    shortestS: lengths.length ? Math.round(Math.min(...lengths) / 100) / 10 : 0,
+    changes: Math.max(0, cues.length - 1),
+    loudOnWork,
+  };
 }
 
 /** Every run of words on a staging's stage: its size in stage units, and what it is. */
@@ -191,6 +237,7 @@ async function main(): Promise<void> {
       durationMs: parts.durationMs,
       timing: parts.timing,
       generator: SCENE_GENERATOR_VERSION,
+      profile: parts.profile ?? null,
     });
     const smallest = WIDTHS.map(({ px, staging }) => {
       const sizes = sizesOf(scene, staging);
@@ -219,6 +266,7 @@ async function main(): Promise<void> {
         what: [...new Set(found)],
       },
       smallest,
+      music: musicOf(scene),
       passes:
         !found.length &&
         (smallest.find((s) => s.width === 560)?.px ?? 0) >= PASS_PX,
@@ -237,6 +285,9 @@ async function main(): Promise<void> {
     const was = earlier.get(page);
     console.log(
       `${report.passes ? 'pass' : 'FAIL'} ${page}: audit ${report.found.box}+${report.found.wide}${was ? ` (was ${was.found.box}+${was.found.wide})` : ''}; smallest ${smallest.map((s) => `${s.px}px@${s.width}`).join(' ')}`,
+    );
+    console.log(
+      `     music ${report.music.cues || '(none placed)'}; shortest ${report.music.shortestS}s${report.music.loudOnWork ? `; ${report.music.loudOnWork} sentences of working with music` : ''}`,
     );
   }
   writeFileSync(
@@ -260,8 +311,9 @@ async function main(): Promise<void> {
       <td>${p.found.box} + ${p.found.wide}${was ? `<br><small>was ${was.found.box} + ${was.found.wide}</small>` : ''}${p.found.what.length ? `<br><small>${p.found.what.map(escape).join('<br>')}</small>` : ''}</td>
       ${p.smallest.map((s) => `<td class="${s.width === 560 && s.px < PASS_PX ? 'small' : ''}">${s.px}px<br><small>${escape(s.what)}</small></td>`).join('')}
       <td>${p.steps} · ${p.timing}</td>
+      <td>${escape(p.music?.cues ?? '')}${p.music?.loudOnWork ? `<br><small>${p.music.loudOnWork} sentences of working with music</small>` : ''}</td>
     </tr>
-    ${p.stills.length ? `<tr><td colspan="6" class="stills">${p.stills.map((s) => `<img src="${s}" width="${STILL_PX / 2}">`).join('')}</td></tr>` : ''}`;
+    ${p.stills.length ? `<tr><td colspan="7" class="stills">${p.stills.map((s) => `<img src="${s}" width="${STILL_PX / 2}">`).join('')}</td></tr>` : ''}`;
   };
   writeFileSync(
     join(out, 'index.html'),
@@ -279,7 +331,7 @@ async function main(): Promise<void> {
 </style>
 <h1>Scene bench, ${escape(SCENE_GENERATOR_VERSION)}</h1>
 <p>${pages.filter((p) => p.passes).length} of ${pages.length} pages pass: nothing found by the audit, and no words under ${PASS_PX}px on a 560px pane.</p>
-<table><tr><th>Page</th><th>Audit, box + wide</th>${WIDTHS.map((w) => `<th>Smallest at ${w.px}px</th>`).join('')}<th>Steps · timing</th></tr>
+<table><tr><th>Page</th><th>Audit, box + wide</th>${WIDTHS.map((w) => `<th>Smallest at ${w.px}px</th>`).join('')}<th>Steps · timing</th><th>Music</th></tr>
 ${pages.map(row).join('\n')}
 </table>`,
   );

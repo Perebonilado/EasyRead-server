@@ -12,6 +12,7 @@
  */
 import { readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import type { DocumentProfile } from '../src/business/domain/scene-profile';
 import type { SceneTiming } from '../src/contracts';
 import { drawByCode } from '../src/business/domain/scene-code';
 import { composeScene } from '../src/business/domain/scene-compose';
@@ -30,6 +31,8 @@ interface Parts {
   beats: TimedBeat[];
   durationMs: number;
   timing: SceneTiming;
+  /** The book, when the parts were kept after the score came in. */
+  profile?: DocumentProfile | null;
 }
 
 const [partsFile, out] = process.argv.slice(2);
@@ -50,6 +53,7 @@ async function main(): Promise<void> {
     durationMs: parts.durationMs,
     timing: parts.timing,
     generator: SCENE_GENERATOR_VERSION,
+    profile: parts.profile ?? null,
   });
   writeFileSync(join(out, 'scene.json'), JSON.stringify(scene, null, 2));
   for (const staging of ['box', 'wide'] as const) {

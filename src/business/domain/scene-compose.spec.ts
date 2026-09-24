@@ -153,9 +153,14 @@ describe('the scene put together', () => {
     expect(scene.stagings.wide.places[2].water).toBeDefined();
   });
 
-  it('carries the mood of the page for the music, and what a drawing sounds like', () => {
+  it('carries the mood of the page, its score, and what a drawing sounds like', () => {
     expect(scene.version).toBe(4);
-    expect(scene.sound).toEqual({ mood: 'curious' });
+    // No profile: a lesson's instruments, one state from the mood all the way.
+    expect(scene.sound).toEqual({
+      mood: 'curious',
+      music: [{ atMs: 0, state: 'curious' }],
+      palette: 'lesson',
+    });
     const leaf = scene.things.find((t) => t.id === 'leaf');
     expect(leaf?.kind === 'drawing' && leaf.ambience).toBeNull();
     // A drawing that failed is a card, and a card makes no sound.
@@ -342,6 +347,69 @@ describe('the scene put together', () => {
         (e) => e.do === 'pulse' && e.atMs >= 1500 && e.atMs < 2100,
       ),
     ).toBe(true);
+  });
+});
+
+describe('the score on the page', () => {
+  const long = [
+    beat('A river starts as rain on a hill.', 0),
+    beat('The water gathers in a stream.', 4000),
+    beat('Streams meet other streams.', 8000),
+    beat('The stream runs down, faster and faster, over the rocks.', 12000),
+    beat('It joins other streams and grows wide.', 17000),
+    beat('At last it reaches the sea.', 22000),
+    beat('Remember: water always flows downhill.', 27000),
+  ];
+  const music: SceneScript = {
+    ...script,
+    mood: 'calm',
+    beats: long.map((b, i) => ({
+      say: b.text,
+      pause: 'short',
+      delivery: i === 6 ? 'key' : i === 0 ? 'hook' : 'explain',
+      ...(i === 3 ? { music: 'motion' as const, energy: 'high' as const } : {}),
+      ...(i === 6 ? { music: 'calm' as const } : {}),
+    })),
+  };
+  const made = (profile?: Parameters<typeof composeScene>[0]['profile']) =>
+    composeScene({
+      script: music,
+      drawings: new Map([
+        ['leaf', drawing()],
+        ['sun', null],
+      ]),
+      beats: long,
+      durationMs: 34_000,
+      timing: 'voice',
+      generator: 'scene-2',
+      profile,
+    }).scene;
+
+  it("places the writer's changes on their sentences, and marks the key point", () => {
+    const scene = made();
+    // The last calm is one sentence long: it merges into the moving before it.
+    expect(scene.sound?.music).toEqual([
+      { atMs: 0, state: 'calm' },
+      { atMs: 12000, state: 'motion', energy: 'high' },
+    ]);
+    expect(scene.beats.map((b) => b.delivery)).toEqual([
+      'hook',
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      'key',
+    ]);
+  });
+
+  it("gives a story its instruments and its motif, and holds the music to the book's tone", () => {
+    const scene = made({ kind: 'fiction', tone: 'neutral', story: true });
+    expect(scene.sound?.palette).toBe('story');
+    expect(scene.sound?.motif).toBe(true);
+    expect(
+      made({ kind: 'poetry', tone: 'neutral', story: false }).sound?.palette,
+    ).toBe('verse');
   });
 });
 

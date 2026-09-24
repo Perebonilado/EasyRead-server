@@ -9,7 +9,11 @@ import type {
 } from '../business/repositories/visual.repository';
 import { SCENE_GENERATOR_VERSION } from '../business/domain/scene-script';
 import { QUEUE } from './queues';
-import { VisualWatchdog, WATCH_AFTER_MS } from './visual-watchdog.service';
+import {
+  MAKING_STALE_MS,
+  VisualWatchdog,
+  WATCH_AFTER_MS,
+} from './visual-watchdog.service';
 
 const row = (
   page: number,
@@ -95,6 +99,21 @@ describe('the visual watchdog', () => {
         { status: 'failed', step: null, error: 'The voice refused the page' },
       ],
     ]);
+  });
+
+  it('leaves a page being made alone until it has not moved for ten minutes', async () => {
+    // Made in scene:page's own process: no job, and its row marked making.
+    const making = (page: number, agoMs: number) => ({
+      ...row(page, 'making'),
+      updatedAt: new Date(now.getTime() - agoMs),
+    });
+    const { watchdog, queued } = setup(
+      [making(1, 2 * 60 * 1000), making(2, MAKING_STALE_MS + 60 * 1000)],
+      // Only the page that has not moved is asked about.
+      [{ state: 'gone' }],
+    );
+    expect(await watchdog.sweep()).toEqual({ requeued: 1, failed: 0 });
+    expect(queued.map((job) => job.pageNumber)).toEqual([2]);
   });
 
   it('does nothing when every page is on its way', async () => {

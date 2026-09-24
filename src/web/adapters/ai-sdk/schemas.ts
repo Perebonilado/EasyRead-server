@@ -6,6 +6,7 @@ import {
   SCENE_EFFECTS,
   SCENE_LAYOUTS,
   SCENE_MOODS,
+  SCENE_MUSIC,
 } from '../../../business/domain/scene-script';
 import {
   PROFILE_KINDS,
@@ -486,6 +487,8 @@ export const sceneScriptSchema = z.object({
       pause: z.enum(['short', 'long']),
       delivery: z.enum(SCENE_DELIVERIES),
       speaker: z.string().nullable(),
+      music: z.enum(SCENE_MUSIC).nullable(),
+      energy: z.enum(['low', 'high']).nullable(),
     }),
   ),
   cast: z.array(

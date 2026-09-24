@@ -416,6 +416,48 @@ The recommendation:
 - **Keep the synthesized effects** as Richard likes them. Recorded ones are an option later.
 - **No pre-made music.** It can't follow a page sentence by sentence, and its licences tie it to subscriptions or to tracks staying unchanged.
 
+## Technical plan: recorded instruments and place sounds (2026-09-24)
+
+Richard said go ahead with both downloads. The build happens in the client repo, on `visualize-music`.
+
+**What is fetched** (only what is played, using HTTP ranges, into the scratch folder, never the repo):
+- **VSCO 2 CE** (CC0), from `raw.githubusercontent.com/sgossner/VSCO-2-CE`:
+  - Upright piano, softest layer: 7 notes, every major third from 57 to 81; the first 4.5 s of each.
+  - Harp, mf: 7 notes, 55 to 76.
+  - Marimba: 6 notes.
+  - Glockenspiel: all 6 notes.
+  - Violin section pizzicato: 8 notes.
+  - Cello and viola sections, sustained with vibrato: 4 notes each, the first 7 s.
+  - Cello section tremolo: 4 notes.
+  - About 40 MB of 24-bit WAV in all.
+- **Seven place sounds** from Pixabay (the Pixabay Content License): wind, water, rain, fire, clock, heartbeat, bubbles. None marked Content ID. Each item's page, author and licence are recorded.
+
+**The build** (`scripts/build-sounds.mjs`, run by hand, needs ffmpeg). For each file:
+- **Pitch:** measure the real pitch (the library names octaves two ways), and keep the note it is.
+- **Trimming:** start at the onset; trim to the length it is played for; fade the tail.
+- **Output:** mono MP3 at 96 kbps, normalised to one peak, written to `public/sound/`.
+- **Manifest:** `public/sound/manifest.json` gives each instrument's notes and each place sound's source, author and licence.
+- **Budget:** about 2.5 MB in all, checked by a test.
+
+**At runtime** (`src/lib/scene/sound/samples.ts`):
+- **Loading:** the manifest and an instrument's notes load when the Visualize pane opens, decoded once and shared. Place sounds load when a page has one.
+- **Playing a note:** the nearest recorded note, pitch-shifted at most two semitones, started at its measured onset (an MP3's lead-in is skipped by measuring, not by trust). Release follows the instrument: the piano's damper, the harp left to ring, pizzicato short.
+- **Held strings** (solemn chords, tense's drone) loop seamlessly past their recorded length. The loop is built when loaded, with a crossfade from the tail into the sustain.
+- **Fallback:** until a sample is ready, or if one fails, the synthesized instrument plays. The music never waits.
+- **Instruments by state:**
+  - felt piano: the upright, soft and low-passed;
+  - harp: the harp;
+  - marimba and glockenspiel for mallets and bells, except the low toll, which stays synthesized;
+  - pizzicato: the violins;
+  - solemn: cello and viola;
+  - tense: cello tremolo.
+  - The electric piano (bright), the bass, the pulse and the shaker stay synthesized.
+- **Place sounds:** a place sound plays its recording once (3.5 s, then a 1.5 s fade), at the level the synthesized loops were set to, measured.
+
+**Checks:**
+- Pure specs for the loop crossfade, onset finding, note choice and the manifest (every file present, the budget).
+- Lab renders re-measured and levels set again; the live two-page test; `next build`.
+
 ## Sources
 
 Learning and accessibility:

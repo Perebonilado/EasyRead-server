@@ -8,12 +8,21 @@
 import { parseDocument } from 'htmlparser2';
 import { isolate, type Callout } from './scene-callouts';
 import { elements } from './scene-dom';
+import {
+  drawFigure,
+  figureOf,
+  type FigureHow,
+  type FigureSpec,
+} from './scene-figure';
 import { renderSvg, type InkBox } from './scene-raster';
-import { EXPRESSIONS } from './scene-story';
+import { EXPRESSIONS, type StorySize } from './scene-story';
 import { revealedSvg, type GatedDrawing } from './scene-svg';
 
-/** Sheets drawn by an older way of drawing them are drawn again. */
-export const SHEET_VERSION = 1;
+/**
+ * Sheets drawn by an older way of drawing them are drawn again. 2: people
+ * drawn by the kit, everyone else by the artist in the kit's style.
+ */
+export const SHEET_VERSION = 2;
 
 export type Point = [number, number];
 
@@ -22,6 +31,64 @@ export interface CharacterSheet {
   drawing: GatedDrawing;
   /** Where each is, in the drawing's own units. */
   anchors: { head: Point | null; body: Point | null; legs: Point | null };
+  /** A person's look, as the kit drew them. */
+  figure?: FigureSpec;
+  /** An animal's or a creature's size beside people, as the artist was told. */
+  size?: StorySize;
+}
+
+/**
+ * How tall an animal or a creature stands, in the kit's units, by its
+ * size: a grown-up's frame is 234, a child's 190. Larger than life for
+ * the small ones, as a cartoon's are: a fox who talks must be seen to.
+ */
+export const SIZE_UNITS: Record<StorySize, number> = {
+  small: 95,
+  medium: 130,
+  large: 230,
+};
+
+/**
+ * A person drawn by the kit, made ready for the stage the way a drawing
+ * is: measured for its ink, so words set round them keep off it, and
+ * marked as one who stands with people.
+ */
+export async function figureDrawing(
+  spec: FigureSpec,
+  seed: string,
+  /** How many, their pose, what they hold, the signs they show on the page. */
+  how: FigureHow = {},
+): Promise<GatedDrawing & { anchors: CharacterSheet['anchors'] }> {
+  const drawn = drawFigure(spec, seed, how);
+  const measured = await renderSvg(drawn.svg, undefined, {
+    grid: { svg: drawn.svg, cols: 48 },
+  });
+  const [, , w, h] = drawn.viewBox;
+  return {
+    svg: drawn.svg,
+    viewBox: drawn.viewBox,
+    aspect: w / h,
+    parts: drawn.parts,
+    labels: {},
+    states: drawn.states,
+    moves: true,
+    callouts: [],
+    field: measured.grid
+      ? { viewBox: drawn.viewBox, map: measured.grid }
+      : null,
+    head: drawn.anchors.head,
+    stands: { units: h },
+    anchors: drawn.anchors,
+  };
+}
+
+/** A story's person drawn by the kit, once for the whole book. */
+export async function figureSheet(
+  spec: FigureSpec,
+  seed: string,
+): Promise<CharacterSheet> {
+  const { anchors, ...drawing } = await figureDrawing(spec, seed);
+  return { version: SHEET_VERSION, drawing, anchors, figure: spec };
 }
 
 /** A book's characters as drawn, by their id in the story. */
@@ -115,8 +182,11 @@ export function introCallouts(
   }));
 }
 
-/** Sets painted by an older way of painting them are painted again. */
-export const SET_VERSION = 1;
+/**
+ * Sets painted by an older way of painting them are painted again. 2:
+ * painted to go with the people the kit draws (SET_STYLE).
+ */
+export const SET_VERSION = 2;
 
 /** A place painted once for a book: the scene behind the stage. */
 export interface SetSheet {
@@ -150,6 +220,7 @@ export function castOf(raw: unknown): Cast {
       const d = one.drawing;
       out[id] = {
         ...(one as CharacterSheet),
+        ...(one.figure ? { figure: figureOf(one.figure) } : {}),
         drawing: {
           ...d,
           svg: revealedSvg(d.svg, [

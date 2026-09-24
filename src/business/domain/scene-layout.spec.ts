@@ -3,14 +3,17 @@ import {
   SCENE_LAYOUTS,
   type SceneLayout,
 } from './scene-script';
+import { figureFrame } from './scene-figure';
 import {
   STAGINGS,
+  TALLEST_ADULT,
   captionLines,
   extentOf,
   layoutStep,
   overlaps,
   slotsFor,
   slotsOf,
+  standTogether,
   type LaidThing,
   type StagingName,
 } from './scene-layout';
@@ -94,5 +97,82 @@ describe('the stage layout', () => {
   it('keeps a drawing at its own proportions', () => {
     const places = layoutStep('one', ['a'], things, 'wide');
     expect(places.a.w / places.a.h).toBeCloseTo(1.6, 1);
+  });
+});
+
+describe('people standing together', () => {
+  // A grown-up's frame and a child's, as the kit frames them.
+  const adult = figureFrame('adult');
+  const child = figureFrame('child');
+  const person = (frame: number[]): LaidThing => ({
+    kind: 'drawing',
+    aspect: frame[2] / frame[3],
+    caption: null,
+    stands: { units: frame[3] },
+  });
+  const people = new Map<string, LaidThing>([
+    ['mum', person(adult)],
+    ['kid', person(child)],
+    ['gran', person(adult)],
+    ['lamp', { kind: 'drawing', aspect: 0.5, caption: 'The lantern' }],
+  ]);
+  const scaleOf = (at: { h: number }, frame: number[]) => at.h / frame[3];
+
+  it('draws everyone in a line at one scale, a child shorter than a grown-up', () => {
+    for (const staging of Object.keys(STAGINGS) as StagingName[]) {
+      const places = layoutStep('row', ['mum', 'kid'], people, staging);
+      standTogether(places, people, ['mum', 'kid'], staging, false);
+      expect(scaleOf(places.mum, adult)).toBeCloseTo(
+        scaleOf(places.kid, child),
+        3,
+      );
+      expect(places.kid.h).toBeLessThan(places.mum.h);
+      // Their feet on one floor.
+      expect(places.kid.y + places.kid.h).toBeCloseTo(
+        places.mum.y + places.mum.h,
+        1,
+      );
+    }
+  });
+
+  it('never stands a grown-up taller than seven tenths of the stage', () => {
+    for (const staging of Object.keys(STAGINGS) as StagingName[]) {
+      const places = layoutStep('one', ['mum'], people, staging);
+      standTogether(places, people, ['mum'], staging, false);
+      const { h, margin } = STAGINGS[staging];
+      expect(places.mum.h).toBeLessThanOrEqual(
+        (h - margin * 2) * TALLEST_ADULT + 0.1,
+      );
+      // On the floor of its slot, in the middle of it.
+      expect(places.mum.y + places.mum.h).toBeCloseTo(h - margin, 0);
+    }
+  });
+
+  it('sets a floating line down on the floor in front of a set, everything in it', () => {
+    const show = ['mum', 'lamp', 'gran'];
+    const floating = layoutStep('row', show, people, 'wide');
+    standTogether(floating, people, show, 'wide', false);
+    const grounded = layoutStep('row', show, people, 'wide');
+    standTogether(grounded, people, show, 'wide', true);
+    const { h, margin } = STAGINGS.wide;
+    const floor = h - margin;
+    expect(floating.mum.y + floating.mum.h).toBeLessThan(floor - 20);
+    const drop = grounded.mum.y - floating.mum.y;
+    expect(grounded.mum.y + grounded.mum.h).toBeCloseTo(floor, 0);
+    // What stands with them comes down with them, caption and all.
+    expect(grounded.lamp.y - floating.lamp.y).toBeCloseTo(drop, 1);
+    expect(grounded.lamp.caption!.y - floating.lamp.caption!.y).toBeCloseTo(
+      drop,
+      1,
+    );
+    expect(grounded.lamp.room!.y - floating.lamp.room!.y).toBeCloseTo(drop, 1);
+  });
+
+  it('leaves alone a stage with no one standing on it', () => {
+    const show = ['lamp'];
+    const before = layoutStep('one', show, people, 'box');
+    const after = layoutStep('one', show, people, 'box');
+    standTogether(after, people, show, 'box', true);
+    expect(after).toEqual(before);
   });
 });

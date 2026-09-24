@@ -1,5 +1,8 @@
+import { PLAIN_FIGURE, figureFrame } from './scene-figure';
 import {
+  SIZE_UNITS,
   castOf,
+  figureSheet,
   introCallouts,
   measureSheet,
   SHEET_VERSION,
@@ -95,5 +98,47 @@ describe('a character drawn once for the book', () => {
       'mira',
     ]);
     expect(castOf('not a cast')).toEqual({});
+  });
+});
+
+describe('a person drawn by the kit, once for the book', () => {
+  const mira = {
+    ...PLAIN_FIGURE,
+    age: 'child' as const,
+    hair: 'pigtails' as const,
+    top: 'dress' as const,
+  };
+
+  it("is a sheet of this version with its figure, and stands with people at the kit's scale", async () => {
+    const sheet = await figureSheet(mira, 'mira');
+    expect(sheet.version).toBe(SHEET_VERSION);
+    expect(sheet.figure).toEqual(mira);
+    const [, y, , h] = sheet.drawing.viewBox;
+    expect(sheet.drawing.stands).toEqual({ units: h });
+    expect(sheet.drawing.moves).toBe(true);
+    // Its anchors are the rig's, inside its frame, head above body above legs.
+    const { head, body, legs } = sheet.anchors;
+    expect(head![1]).toBeGreaterThan(y);
+    expect(head![1]).toBeLessThan(body![1]);
+    expect(body![1]).toBeLessThan(legs![1]);
+    expect(sheet.drawing.head).toEqual(head);
+    expect(sheet.drawing.field?.map.bits).toMatch(/1/);
+  });
+
+  it('keeps its figure through the cast file, made sound', async () => {
+    const sheet = await figureSheet(mira, 'mira');
+    const kept = castOf(
+      JSON.parse(
+        JSON.stringify({
+          mira: { ...sheet, figure: { ...mira, hair: 'PIGTAILS' } },
+        }),
+      ),
+    );
+    expect(kept.mira.figure).toEqual(mira);
+  });
+
+  it('stands an animal at its size beside people', () => {
+    expect(SIZE_UNITS.small).toBeLessThan(SIZE_UNITS.medium);
+    expect(SIZE_UNITS.large).toBeLessThanOrEqual(figureFrame('adult')[3]);
   });
 });

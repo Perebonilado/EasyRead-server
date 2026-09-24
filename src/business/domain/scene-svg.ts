@@ -713,6 +713,11 @@ export interface GatedDrawing {
   words?: { size: number };
   /** A character's head, in its own units: where their words come from. */
   head?: [number, number];
+  /**
+   * Someone who stands with people: its frame's height in the figure
+   * kit's units, so the stage draws everyone at one scale, on one ground.
+   */
+  stands?: { units: number };
 }
 
 export interface GateResult {

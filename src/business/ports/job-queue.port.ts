@@ -67,6 +67,11 @@ export interface VisualSceneJob extends PipelineJob {
   requestedBy: string;
   /** Lower goes first; the page the learner is on gets 1. */
   priority?: number;
+  /**
+   * Make a page that is already made again, keeping it playable until
+   * the new one is ready: a book whose people are drawn anew (scene:recast).
+   */
+  remake?: boolean;
 }
 
 export interface LectureFollowJob extends PipelineJob {

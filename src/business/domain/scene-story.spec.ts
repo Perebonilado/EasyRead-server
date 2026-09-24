@@ -1,12 +1,17 @@
 import { profileOf } from './scene-profile';
 import type { SceneScript } from './scene-script';
+import { PLAIN_FIGURE } from './scene-figure';
 import {
+  CAST_STYLE,
+  SET_STYLE,
+  bibleOf,
   castStory,
   charactersOn,
   describeStory,
   mergeStory,
   moodBefore,
   nameKey,
+  setThing,
   sheetThing,
   storyPieces,
   type StoryDraft,
@@ -247,11 +252,17 @@ describe("a story's continuity", () => {
       ],
     } as SceneScript;
     const [mira, fox] = castStory(script, bible, 2).cast;
-    expect(mira).toMatchObject({ state: 'sad', met: 0, intro: [] });
+    expect(mira).toMatchObject({
+      state: 'sad',
+      met: 0,
+      intro: [],
+      first: false,
+    });
     expect(fox).toMatchObject({
       state: 'angry',
       met: 1,
       intro: ['sly', 'quick'],
+      first: true,
     });
   });
 
@@ -291,6 +302,148 @@ describe("a story's continuity", () => {
     ]);
     expect(thing.states.map((s) => s.name)).toContain('neutral');
     expect(thing.shape).toBe('tall');
+  });
+
+  it("asks the artist for an animal in the people's style, its size beside them", () => {
+    const fox = sheetThing(
+      {
+        id: 'ember',
+        name: 'Ember',
+        aliases: [],
+        role: 'main',
+        look: 'a fox the colour of rust',
+        traits: [],
+        firstPage: 1,
+        met: 1,
+        voice: 'creature',
+        kind: 'animal',
+        size: 'medium',
+      },
+      'The Lantern',
+    );
+    expect(fox.brief).toContain(CAST_STYLE);
+    expect(fox.brief).toContain("grown-up's waist");
+    // On all fours, it needs the room across.
+    expect(fox.shape).toBe('square');
+  });
+
+  it("asks the set painter for a place in the people's style, open where they stand", () => {
+    const quay = setThing(
+      {
+        id: 'quay',
+        name: 'The quay',
+        aliases: [],
+        look: 'stone steps down to the water',
+        firstPage: 1,
+        sound: 'water',
+      },
+      'The Lantern',
+    );
+    expect(quay.brief).toContain('stone steps');
+    expect(quay.brief).toContain(SET_STYLE);
+  });
+
+  it('keeps what each character is and how a person looks from where the book first meets them', () => {
+    const first = {
+      ...PLAIN_FIGURE,
+      age: 'child' as const,
+      hair: 'pigtails' as const,
+    };
+    const later = {
+      ...PLAIN_FIGURE,
+      age: 'adult' as const,
+      hair: 'bob' as const,
+    };
+    const bible = mergeStory([
+      {
+        from: 1,
+        to: 5,
+        draft: draft({
+          characters: [
+            person('Mira', { kind: 'person', figure: first }),
+            person('Ember', { kind: 'animal', size: 'medium', figure: first }),
+            person('Tobi', {}),
+          ],
+        }),
+      },
+      {
+        from: 6,
+        to: 9,
+        draft: draft({
+          characters: [
+            person('Mira', { kind: 'person', figure: later }),
+            person('Tobi', { kind: 'person', figure: later }),
+          ],
+        }),
+      },
+    ]);
+    const [mira, ember, tobi] = ['Mira', 'Ember', 'Tobi'].map((name) =>
+      bible.characters.find((c) => c.name === name)!,
+    );
+    // A later stretch never restyles them; it fills in what was missing.
+    expect(mira).toMatchObject({
+      kind: 'person',
+      figure: { age: 'child', hair: 'pigtails' },
+    });
+    expect(tobi).toMatchObject({
+      kind: 'person',
+      figure: { age: 'adult', hair: 'bob' },
+    });
+    // An animal has a size, and no figure: the artist draws it.
+    expect(ember).toMatchObject({
+      kind: 'animal',
+      size: 'medium',
+      figure: null,
+    });
+  });
+
+  it('reads back a bible kept before characters had kinds, and one kept after', () => {
+    const older = bibleOf({
+      characters: [
+        {
+          id: 'mira',
+          name: 'Mira',
+          aliases: [],
+          role: 'main',
+          look: 'a girl',
+          traits: [],
+          firstPage: 1,
+          met: 0,
+          voice: 'girl',
+        },
+      ],
+      places: [],
+      pages: [],
+    });
+    expect(older.characters[0]).toMatchObject({
+      kind: null,
+      size: null,
+      figure: null,
+    });
+    const newer = bibleOf({
+      characters: [
+        {
+          id: 'mira',
+          name: 'Mira',
+          aliases: [],
+          role: 'main',
+          look: 'a girl',
+          traits: [],
+          firstPage: 1,
+          met: 0,
+          voice: 'girl',
+          kind: 'person',
+          size: null,
+          figure: { ...PLAIN_FIGURE, age: 'child', hair: 'Pigtails' } as never,
+        },
+      ],
+      places: [],
+      pages: [],
+    });
+    expect(newer.characters[0].figure).toMatchObject({
+      age: 'child',
+      hair: 'pigtails',
+    });
   });
 
   it('counts a novel or a play as a story when an older profile never said', () => {

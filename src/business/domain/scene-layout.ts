@@ -18,6 +18,7 @@ import {
   type LabelMode,
   type LabelPlace,
 } from './scene-labels';
+import { figureFrame } from './scene-figure';
 import type { SceneLayout } from './scene-script';
 
 export const STAGINGS = {
@@ -78,6 +79,8 @@ export type LaidThing =
       source?: 'math' | 'plot' | 'quote' | 'timeline' | 'chart';
       /** A passage: the size of its words, in its own units. */
       words?: { size: number };
+      /** Someone who stands with people: its frame's height in the figure kit's units. */
+      stands?: { units: number };
     }
   | { kind: 'stat'; value: string; caption: string }
   | { kind: 'words'; text: string; style: 'title' | 'keyword' | 'card' };
@@ -578,6 +581,81 @@ export function layoutStep(
     out[id] = { ...fitInSlot(thing, slot, layout === 'compare'), room: slot };
   });
   return out;
+}
+
+/** The most of the stage's height a grown-up stands: a crowd of one is not a giant. */
+export const TALLEST_ADULT = 0.7;
+
+/**
+ * People (and the animals among them) on the stage together stand as
+ * people do. All at one scale, so a child is shorter than a grown-up
+ * beside them and no one is drawn bigger for having a wider slot: a
+ * line of the template shares one scale, and no one is taller than a
+ * grown-up standing at most seven tenths of the stage. Each keeps their
+ * feet where their slot's floor is, and in front of a set a single line
+ * that floats in the middle of the stage is set down on its floor, the
+ * ground the set is painted with. Changes the places in place.
+ */
+export function standTogether(
+  places: Record<string, Place>,
+  things: ReadonlyMap<string, LaidThing>,
+  show: string[],
+  staging: StagingName,
+  grounded: boolean,
+): void {
+  const area = content(staging);
+  const cap = (area.h * TALLEST_ADULT) / figureFrame('adult')[3];
+  const units = (id: string) => {
+    const thing = things.get(id);
+    return thing?.kind === 'drawing' ? (thing.stands?.units ?? 0) : 0;
+  };
+  const standing = show.filter((id) => places[id] && units(id) > 0);
+  if (!standing.length) return;
+  const round = (n: number) => Math.round(n * 10) / 10;
+  const lines = new Map<string, string[]>();
+  for (const id of standing) {
+    const room = places[id].room ?? places[id];
+    const key = `${Math.round(room.y)}:${Math.round(room.h)}`;
+    lines.set(key, [...(lines.get(key) ?? []), id]);
+  }
+  for (const ids of lines.values()) {
+    const scale = Math.min(cap, ...ids.map((id) => places[id].h / units(id)));
+    for (const id of ids) {
+      const at = places[id];
+      // The floor they stand on: over their caption, or their slot's foot.
+      const floor =
+        at.caption && at.caption.y > at.y
+          ? at.caption.y - 14
+          : at.room
+            ? at.room.y + at.room.h
+            : at.y + at.h;
+      const h = units(id) * scale;
+      const w = (h * at.w) / at.h;
+      at.x = round(at.x + (at.w - w) / 2);
+      at.y = round(floor - h);
+      at.w = round(w);
+      at.h = round(h);
+    }
+  }
+  if (!grounded) return;
+  const rooms = show.flatMap((id) =>
+    places[id]?.room ? [places[id].room] : [],
+  );
+  if (!rooms.length) return;
+  const oneLine = rooms.every(
+    (room) =>
+      Math.abs(room.y - rooms[0].y) < 1 && Math.abs(room.h - rooms[0].h) < 1,
+  );
+  const drop = area.y + area.h - (rooms[0].y + rooms[0].h);
+  if (!oneLine || drop < 1) return;
+  for (const id of show) {
+    const at = places[id];
+    if (!at) continue;
+    at.y = round(at.y + drop);
+    if (at.room) at.room = { ...at.room, y: round(at.room.y + drop) };
+    if (at.caption)
+      at.caption = { ...at.caption, y: round(at.caption.y + drop) };
+  }
 }
 
 /** Whether two rectangles overlap by more than a hair. */

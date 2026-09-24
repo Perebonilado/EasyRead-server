@@ -12,16 +12,29 @@
  */
 
 import { MAX_BARS, numbersIn, type ChartSpec } from './scene-chart';
+import {
+  FIGURE_FACES,
+  FIGURE_POSES,
+  FIGURE_PROPS,
+  FIGURE_SIGNS,
+  LYING_POSES,
+  MAX_SIGNS,
+  MOST_TOGETHER,
+  ON_FOOT,
+  canHold,
+  figureFor,
+  figureOf,
+  type FigureFace,
+  type FigurePose,
+  type FigureProp,
+  type FigureSign,
+  type FigureSpec,
+} from './scene-figure';
 import { checkArithmetic, markTerms, type MathLine } from './scene-math';
 import { sample, type PlotSpec } from './scene-plot';
 import { findPhrase, isVerbatim } from './scene-quote';
 import { MAX_EVENTS, type TimelineSpec } from './scene-timeline';
-import {
-  EXPRESSIONS,
-  SHEET_PARTS,
-  nameKey,
-  type Expression,
-} from './scene-story';
+import { SHEET_PARTS, nameKey, type Expression } from './scene-story';
 
 /**
  * Rows are made per generator; a new generator is a new set of rows.
@@ -257,13 +270,45 @@ export interface CharacterThing {
   ref: string;
   name: string;
   /** The face they come on with; null keeps the one the last page left them with. */
-  state: Expression | null;
+  state: FigureFace | null;
   /** Where they come in the order the book meets its characters: the first met stands on the left. */
   met: number;
   /** On the page the book meets them: what they are like, set beside them. */
   intro: string[];
+  /** The page the book meets them on: their name is written under them. */
+  first?: boolean;
+  /** Their pose on this page, when the kit draws them; absent, standing. */
+  pose?: FigurePose;
+  /** What they are going through as they come on: a shake, a fever, sparkles where it tingles. */
+  signs?: FigureSign[];
+  /** What they hold on this page. */
+  holding?: FigureProp;
   /** The face the last page left them with: theirs through a "previously" opening. */
   before?: Expression;
+}
+
+/**
+ * A person the page shows who is not one of a story's characters: a
+ * doctor, a patient, a scientist, a shopkeeper. Drawn by the kit from
+ * the writer's figure, in the same style as everyone else, never by the
+ * artist.
+ */
+export interface PersonThing {
+  id: string;
+  kind: 'person';
+  /** Their caption: "Doctor", "Marie Curie". */
+  name: string;
+  figure: FigureSpec;
+  /** How many people like them stand together: 1, or a team, a family, a class, as up to four. */
+  count?: number;
+  /** How they are placed: their arms doing something, lying down, in bed (a patient); absent, standing. */
+  pose?: FigurePose;
+  /** What they are going through as they come on: a shake, a fever, sparkles where it tingles. */
+  signs?: FigureSign[];
+  /** What they hold. */
+  holding?: FigureProp;
+  /** The face they come on with; null for a calm one. */
+  state: FigureFace | null;
 }
 
 /**
@@ -287,6 +332,7 @@ export type SceneThing =
   | WordsThing
   | CodeThing
   | CharacterThing
+  | PersonThing
   | PlaceThing;
 
 /** The names of the parts the voice can point at in a thing. */
@@ -306,7 +352,8 @@ export function partNames(thing: SceneThing): string[] {
   if (thing.kind === 'timeline')
     return thing.timeline.events.map((e) => e.name || e.when);
   if (thing.kind === 'chart') return thing.chart.bars.map((b) => b.label);
-  if (thing.kind === 'character') return [...SHEET_PARTS];
+  if (thing.kind === 'character' || thing.kind === 'person')
+    return [...SHEET_PARTS];
   return [];
 }
 
@@ -315,8 +362,36 @@ export function stateNames(thing: SceneThing): string[] {
   if (thing.kind === 'drawing') return thing.states.map((s) => s.name);
   if (thing.kind === 'math')
     return thing.lines.slice(1).map((_, k) => `line ${k + 2}`);
-  if (thing.kind === 'character') return [...EXPRESSIONS];
+  if (thing.kind === 'character' || thing.kind === 'person')
+    return [...FACES, ...FIGURE_SIGNS];
   return [];
+}
+
+/** Every face a person or a character can wear: the story's seven and the kit's own. */
+export const FACES = FIGURE_FACES;
+const isFace = (value: unknown): value is FigureFace =>
+  (FACES as readonly unknown[]).includes(value);
+
+/**
+ * The signs a person or a character shows on a page: those they come
+ * on with, and those an effect shows. Only these are drawn.
+ */
+export function signsShown(script: SceneScript, id: string): FigureSign[] {
+  const thing = script.cast.find((one) => one.id === id);
+  const first =
+    thing?.kind === 'person' || thing?.kind === 'character'
+      ? (thing.signs ?? [])
+      : [];
+  const shown = new Set(
+    script.steps.flatMap((step) =>
+      step.effects.flatMap((effect) =>
+        effect.target === id && effect.do === 'show' && effect.part
+          ? [effect.part]
+          : [],
+      ),
+    ),
+  );
+  return FIGURE_SIGNS.filter((sign) => first.includes(sign) || shown.has(sign));
 }
 
 export interface SceneArrow {
@@ -403,6 +478,7 @@ export interface SceneScriptDraft {
       | 'timeline'
       | 'chart'
       | 'character'
+      | 'person'
       | 'place';
     /** A drawing's caption, a stat's caption, the words themselves. */
     name: string;
@@ -430,9 +506,19 @@ export interface SceneScriptDraft {
     /** A quotation, word for word from the page. */
     quote: string | null;
     phrases: { name: string; phrase: string; note: string | null }[] | null;
-    /** A character: their id in the story, and the face they come on with. */
+    /** A character: their id in the story, and the face they come on with (a person's too). */
     ref: string | null;
-    state: Expression | null;
+    state: FigureFace | null;
+    /** A person: how they look, from the kit's lists; made sound by figureOf. */
+    figure?: Record<string, unknown> | null;
+    /** A person: how many like them stand together. */
+    count?: number | null;
+    /** A person or a character: how they are placed. */
+    pose?: FigurePose | null;
+    /** A person or a character: what they are going through as they come on. */
+    signs?: FigureSign[] | null;
+    /** A person or a character: what they hold. */
+    holding?: FigureProp | null;
     /** A timeline: the page's events in order, each when and what. */
     timeline: { when: string; name: string }[] | null;
     /** A chart: bars or a line, from the page's own numbers. */
@@ -675,7 +761,19 @@ export function mendScript(
   const idFor = new Map<string, string>();
   const used = new Set<string>();
   const cast: SceneThing[] = [];
-  draft.cast.forEach((raw, index) => {
+  draft.cast.forEach((given, index) => {
+    // A person the story knows is its character, drawn once for the book.
+    const known =
+      given.kind === 'person' && options.characters?.length
+        ? storyEntry(
+            options.characters,
+            given.ref ?? given.id,
+            clean(given.name) || clean(given.id),
+          )
+        : null;
+    const raw = known
+      ? { ...given, kind: 'character' as const, ref: known.id }
+      : given;
     let id = slug(raw.id) || `thing-${index + 1}`;
     while (used.has(id)) id = `${id}-${index + 1}`;
     used.add(id);
@@ -746,6 +844,7 @@ export function mendScript(
       return;
     }
     if (raw.kind === 'character') {
+      if (known) mended.push(`${id}: the story's character ${known.id}`);
       const who = storyEntry(options.characters ?? [], raw.ref, name);
       if (!who) {
         mended.push(
@@ -769,13 +868,107 @@ export function mendScript(
         kind: 'character',
         ref: who.id,
         name: who.name,
-        state: raw.state && EXPRESSIONS.includes(raw.state) ? raw.state : null,
+        state: isFace(raw.state) ? raw.state : null,
         met: 0,
         intro: [],
+        ...postureOf(id, raw, 1, mended),
       });
       return;
     }
-    const brief = clean(raw.brief);
+    if (raw.kind === 'person') {
+      if (!raw.figure)
+        mended.push(`${id}: a person with no figure, drawn plainly`);
+      const count = Math.min(
+        MOST_TOGETHER,
+        Math.max(1, Math.round(Number(raw.count)) || 1),
+      );
+      // What the writer left out of how they are placed and what they go
+      // through, their caption may say: "Seizure: shaking" shakes.
+      const read = doingIn(name);
+      cast.push({
+        id,
+        kind: 'person',
+        name,
+        // What the writer left out is chosen by their name, not plain.
+        figure: figureOf(raw.figure, figureFor(id)),
+        ...(count > 1 ? { count } : {}),
+        ...postureOf(
+          id,
+          {
+            pose: raw.pose || read.pose,
+            signs: raw.signs?.length ? raw.signs : read.signs,
+            holding: raw.holding || read.holding,
+          },
+          count,
+          mended,
+        ),
+        state: isFace(raw.state) ? raw.state : null,
+      });
+      return;
+    }
+    // A drawing that is someone ("Person", "Sick child", "Scott's team")
+    // is a person, drawn by the kit like everyone else.
+    // Not one whose named parts are inside a body: that is a diagram.
+    const someone =
+      raw.kind === 'drawing' &&
+      (raw.parts ?? []).every((part) =>
+        (SHEET_PARTS as readonly string[]).includes(idKey(part.name)),
+      ) &&
+      !(raw.states ?? []).length
+        ? someoneIn(name)
+        : null;
+    if (someone) {
+      mended.push(`${id}: "${name}" is someone; drawn as a person`);
+      cast.push({
+        id,
+        kind: 'person',
+        name,
+        figure: figureFor(id, someone.dressed),
+        ...(someone.count > 1 ? { count: someone.count } : {}),
+        ...postureOf(
+          id,
+          doingIn(`${name}. ${clean(raw.brief)}`),
+          someone.count,
+          mended,
+        ),
+        state: null,
+      });
+      return;
+    }
+    const asked = clean(raw.brief);
+    // A drawing about someone ("A patient in a hospital bed…", "A simple
+    // outline of a person…") is them, drawn by the kit: what else the
+    // brief asks for is left to the voice.
+    const about = raw.kind === 'drawing' && !someone ? personIn(asked) : null;
+    if (about) {
+      mended.push(`${id}: its brief is about someone; drawn as a person`);
+      cast.push({
+        id,
+        kind: 'person',
+        name,
+        figure: figureFor(id, about.dressed),
+        ...(about.count > 1 ? { count: about.count } : {}),
+        // What the brief says they do and go through: a shake, a fever, a
+        // book in hand. The rest it asks for is left to the voice.
+        ...postureOf(id, doingIn(`${name}. ${asked}`), about.count, mended),
+        state: about.face,
+      });
+      return;
+    }
+    // The artist draws no one: people stand beside a drawing, as persons.
+    const brief =
+      asked && mentionsPeople(asked) ? `${asked} ${LEAVE_PEOPLE_OUT}` : asked;
+    if (brief !== asked)
+      mended.push(
+        `${id}: its brief mentions people; the artist leaves them out`,
+      );
+    // And the writer, told which drawing asks for someone, shows them as
+    // people when it writes the page again.
+    const wanted = asked ? peopleAskedFor(asked) : null;
+    if (wanted)
+      problems.push(
+        `The drawing "${raw.id}" asks the artist for people ("${wanted}"), and the artist draws no one: show each person as a person (a pose for how they are placed, "in bed" for someone in bed; signs for what they go through, shown at the words; count for a few), with a face that fits, and let drawings show only things.`,
+      );
     if (!brief) {
       problems.push(`The drawing "${raw.id}" has no brief: say what to draw.`);
       cast.push({ id, kind: 'words', text: name, style: 'keyword' });
@@ -978,6 +1171,32 @@ export function mendScript(
     });
   }
 
+  // A sign the storyboard first shows at the words comes on then, not
+  // before, whether the writer listed it or a caption said it: "Person
+  // shaking", shaking shown as the voice says it starts. One first
+  // hidden was on from the start.
+  for (const thing of cast) {
+    if ((thing.kind !== 'person' && thing.kind !== 'character') || !thing.signs)
+      continue;
+    const first = new Map<string, SceneEffectKind>();
+    for (const step of steps)
+      for (const effect of step.effects)
+        if (
+          effect.target === thing.id &&
+          effect.part &&
+          !first.has(effect.part) &&
+          (effect.do === 'show' || effect.do === 'hide')
+        )
+          first.set(effect.part, effect.do);
+    const kept = thing.signs.filter((sign) => first.get(sign) !== 'show');
+    if (kept.length < thing.signs.length)
+      mended.push(
+        `${thing.id}: ${thing.signs.filter((sign) => !kept.includes(sign)).join(', ')} on at the words that show it, not before`,
+      );
+    if (kept.length) thing.signs = kept;
+    else delete thing.signs;
+  }
+
   if (draft.fit !== 'poor') {
     if (beats.length < 3)
       problems.push(
@@ -1042,6 +1261,421 @@ export function mendScript(
     problems,
     mended,
   };
+}
+
+/** What the artist is told when a drawing's brief mentions people. */
+export const LEAVE_PEOPLE_OUT =
+  'Draw no person in it: no figure, silhouette, pictogram or stick figure of anyone; people are drawn separately, beside it. Only a body part close up is fine, or the outline of a body when the drawing is about the organs inside it.';
+
+/**
+ * Who a drawing's name can say it is, as its last word: one, or a few
+ * together. Only words that mean people wherever they are said: not
+ * "adult" (a mosquito's is one), "worker" (an ant), "group" (a blood
+ * group), "class" or "family" (of drugs, of proteins).
+ */
+const ONE_OF_US = [
+  'person',
+  'man',
+  'woman',
+  'boy',
+  'girl',
+  'child',
+  'kid',
+  'baby',
+  'patient',
+  'doctor',
+  'nurse',
+  'farmer',
+  'builder',
+  'teacher',
+  'student',
+  'pupil',
+  'scientist',
+  'explorer',
+  'soldier',
+  'mother',
+  'father',
+  'parent',
+  'grandmother',
+  'grandfather',
+  'someone',
+  'human',
+  'teenager',
+  'villager',
+  'traveller',
+  'traveler',
+  'hunter',
+  'fisherman',
+  'merchant',
+  'chef',
+  'pilot',
+];
+const A_FEW = [
+  'people',
+  'men',
+  'women',
+  'boys',
+  'girls',
+  'children',
+  'kids',
+  'patients',
+  'doctors',
+  'nurses',
+  'farmers',
+  'builders',
+  'teachers',
+  'students',
+  'pupils',
+  'scientists',
+  'explorers',
+  'soldiers',
+  'parents',
+  'grandparents',
+  'humans',
+  'teenagers',
+  'villagers',
+  'travellers',
+  'travelers',
+  'hunters',
+  'fishermen',
+  'merchants',
+  'team',
+  'crew',
+];
+const SOMEONE_WORDS = new Map<string, number>([
+  ...ONE_OF_US.map((word): [string, number] => [word, 1]),
+  ...A_FEW.map((word): [string, number] => [word, 3]),
+  ['crowd', 4],
+]);
+
+/** How a word dresses someone, or says how old they are. */
+const DRESSED: [RegExp, Partial<FigureSpec>][] = [
+  [
+    /\b(child|children|kids?|boys?|girls?|baby|babies|pupils?)\b/,
+    { age: 'child' },
+  ],
+  [/\b(teen|teens|teenagers?|adolescents?)\b/, { age: 'teen' }],
+  [/\b(old|elderly|aged|grand(mother|father|parents?)s?)\b/, { age: 'elder' }],
+  [/\b(doctors?|nurses?)\b/, { top: 'lab coat', extras: ['stethoscope'] }],
+  [/\b(scientists?|chemists?|lab)\b/, { top: 'lab coat', extras: ['glasses'] }],
+  [/\b(soldiers?|guards?|police)\b/, { top: 'uniform', headwear: 'helmet' }],
+  [/\b(builders?|workers?)\b/, { top: 'jacket', headwear: 'hard hat' }],
+  [/\b(farmers?)\b/, { top: 'apron', headwear: 'sun hat' }],
+  [/\b(explorers?|crew)\b/, { top: 'coat', headwear: 'beanie' }],
+  [/\b(students?|pupils?)\b/, { top: 'jumper', extras: ['backpack'] }],
+  [/\b(kings?|queens?|emperors?)\b/, { top: 'robe', headwear: 'crown' }],
+  [/\b(chefs?)\b/, { top: 'apron' }],
+  [/\b(patients?)\b/, { top: 't-shirt' }],
+];
+
+/**
+ * Whether a drawing's name says it is someone: its last word a person, or
+ * a few together ("Person", "Sick child", "Amundsen's team"), and not
+ * something of theirs ("Person's lungs"). How they are dressed follows
+ * from the name's words.
+ */
+export function someoneIn(
+  name: string,
+): { count: number; dressed: Partial<FigureSpec> } | null {
+  const words = name
+    .toLowerCase()
+    .replace(/['’]s\b/g, '')
+    .split(/[^a-z]+/)
+    .filter(Boolean);
+  const count = SOMEONE_WORDS.get(words[words.length - 1] ?? '');
+  if (!count) return null;
+  const said = words.join(' ');
+  const dressed: Partial<FigureSpec> = {};
+  for (const [pattern, patch] of DRESSED)
+    if (pattern.test(said)) Object.assign(dressed, patch);
+  return { count, dressed };
+}
+
+/** A brief's first words when it is about someone: "A patient…", "Two people…", "A simple outline of a person…". */
+const ABOUT_SOMEONE =
+  /^(?:(?:a|an|the|one|two|three|four|several|some|many)\s+)?(?:(?:simple|cartoon|small|young|old|elderly|sick|ill|tired|weak|healthy|infected|little|happy|sad|worried|pale|thin|sleeping|unconscious|feverish|coughing|typical|generic|faceless|grey|gray|dark)\s+)*(?:(?:outline|silhouette|figure|drawing|picture|illustration|cartoon|image|sketch|depiction)\s+of\s+(?:(?:a|an|the|two|three|several)\s+)?(?:(?:sick|tired|weak|young|old|healthy|infected)\s+)*)?(persons?|people|patients?|man|men|woman|women|boys?|girls?|child|children|kids?|doctors?|nurses?|farmers?|students?|teachers?|scientists?|soldiers?|explorers?|someone|human figures?|stick figures?|family|crowd)\b(?!['’]s)/i;
+
+/** How someone a brief is about feels, from its words. */
+const FEELINGS: [RegExp, FigureFace][] = [
+  [/\b(happy|smiling|healthy|well|cheerful|relieved|laughing)\b/, 'happy'],
+  [
+    /\b(in pain|pain(?:ful)?|hurts?|hurting|aching|agony|headaches?|migraines?)\b/,
+    'pain',
+  ],
+  [/\b(afraid|scared|frightened|worried|anxious|bitten)\b/, 'afraid'],
+  [/\b(surprised|shocked|amazed)\b/, 'surprised'],
+  [/\b(angry|cross|furious)\b/, 'angry'],
+  [/\b(thinking|confused|puzzled|wondering)\b/, 'thinking'],
+  [
+    /\b(sick|ill|tired|weak|sad|unwell|feverish|fever|coma|unresponsive|dying|exhausted|sleepy|drowsy|waking|pale|sunken)\b/,
+    'sad',
+  ],
+];
+
+/**
+ * Whether a brief is about someone rather than a thing: its first words
+ * a person ("A patient in a hospital bed…", "A simple outline of a person
+ * looking tired…", "Two people…"), and not something of theirs ("A
+ * person's lungs", "A doctor's hand"). How many, how they feel and how
+ * they are dressed follow from the brief's words; what they are doing,
+ * from doingIn.
+ */
+export function personIn(brief: string): {
+  count: number;
+  face: FigureFace | null;
+  dressed: Partial<FigureSpec>;
+} | null {
+  const found = ABOUT_SOMEONE.exec(brief.trim());
+  if (!found) return null;
+  const said = brief.toLowerCase();
+  const word = found[1].toLowerCase();
+  const many = /^(two|three|four|several|some|many)\b/i.exec(brief.trim())?.[1];
+  const count =
+    word === 'crowd'
+      ? 4
+      : many
+        ? Math.min(
+            MOST_TOGETHER,
+            { two: 2, three: 3, four: 4 }[many.toLowerCase()] ?? 3,
+          )
+        : /s$|people|men$|women|children|family/.test(word) &&
+            word !== 'someone'
+          ? 3
+          : 1;
+  const dressed: Partial<FigureSpec> = {};
+  for (const [pattern, patch] of DRESSED)
+    if (pattern.test(said)) Object.assign(dressed, patch);
+  return {
+    count,
+    face: FEELINGS.find(([pattern]) => pattern.test(said))?.[1] ?? null,
+    dressed,
+  };
+}
+
+/**
+ * The words in a brief that ask for someone to be drawn ("a patient
+ * lying in bed", "two people"), not for something of theirs ("a
+ * person's lungs", "a doctor's hand"): what the writer is told to show
+ * as people instead. Null when it asks for no one.
+ */
+export function peopleAskedFor(brief: string): string | null {
+  const found = [
+    ...brief.matchAll(
+      /\b(persons?|people|man|men|woman|women|boys?|girls?|child|children|kids?|patients?|doctors?|nurses?|farmers?|workers?|teachers?|students?|scientists?|explorers?|soldiers?|someone|stick figures?|silhouettes? of (?:a |an )?(?:person|man|woman|child))\b(?!['’]s)/gi,
+    ),
+  ].find((one) => !denied(brief, one.index));
+  if (!found) return null;
+  // The words round it, to name it to the writer.
+  const from = Math.max(
+    0,
+    brief.lastIndexOf(' ', Math.max(0, found.index - 12)),
+  );
+  return brief.slice(from, found.index + found[0].length + 24).trim();
+}
+
+/** The words that say what someone is going through, and the signs that show it. */
+const SIGN_WORDS: [RegExp, FigureSign[]][] = [
+  [
+    /\b(shak(?:e|es|ing)(?! hands)|convuls\w*|jerk(?:s|ing|ed)?|twitch\w*|spasms?)\b/,
+    ['shaking'],
+  ],
+  [/\b(shiver\w*|chills?|freezing|trembl\w*)\b/, ['shivering']],
+  [/\b(dizz\w*|faint(?:s|ing|ed)?|vertigo|light-?headed)\b/, ['dizzy']],
+  [/\b(cough\w*|sneez\w*)\b/, ['coughing']],
+  [
+    /\b(asleep|sleep(?:s|ing|y)?|unconscious|coma|unresponsive|passed out|drowsy)\b/,
+    ['sleeping'],
+  ],
+  [
+    /\b(breathless\w*|out of breath|short(?:ness)? of breath|panting|gasping|wheez\w*)\b/,
+    ['breathless'],
+  ],
+  [/\b(walk(?:s|ing)?(?! stick)|marching|strolling|hiking)\b/, ['walking']],
+  [/\b(jump\w*|leap\w*|hopping|bouncing)\b/, ['jumping']],
+  [/\b(headaches?|migraines?|head (?:hurts|pain|aches?))\b/, ['headache']],
+  [/\b(chest (?:pain|hurts|tight\w*)|heart attack|angina)\b/, ['chest pain']],
+  [
+    /\b(stomach ?aches?|tummy ?aches?|belly ?aches?|stomach (?:pain|cramps?)|abdominal pain)\b/,
+    ['stomach ache'],
+  ],
+  [/\b(fever\w*|high temperature|burning up)\b/, ['fever', 'sweating']],
+  [/\b(sweat\w*)\b/, ['sweating']],
+  [/\b(cry(?:ing)?|cries|tears|tearful|weep\w*|sobb\w*)\b/, ['tears']],
+  [/\b(rash\w*|hives|itch\w*|blisters?|red spots)\b/, ['rash']],
+  [/\b(nause\w*|queasy|vomit\w*|throw(?:s|ing)? up|feels? sick)\b/, ['nausea']],
+  [/\b(confus\w*|disorient\w*|forgetful|memory loss)\b/, ['confused']],
+  [
+    /\b(an idea|eureka|realis(?:es|ing)|realiz(?:es|ing)|light ?bulb)\b/,
+    ['idea'],
+  ],
+];
+/** Tingling, and where: the hands, the feet, or both when the words say neither. */
+const TINGLING =
+  /\b(tingl\w*|numb\w*|pins and needles|prickl\w*|(?:altered|strange|odd|unusual|funny|weird) (?:sensations?|feelings?)|feel(?:s|ing)? (?:strange|odd|funny|weird))\b/;
+const HANDS = /\b(hands?|arms?|fingers?|wrists?)\b/;
+const FEET = /\b(feet|foot|legs?|toes?|ankles?)\b/;
+
+/** The words that say how someone is placed. */
+const POSE_WORDS: [RegExp, FigurePose][] = [
+  [
+    /\b(in (?:a |the |their |his |her )?(?:hospital )?bed|bedridden|bedside)\b/,
+    'in bed',
+  ],
+  [/\b(lying|lies|laid|collapsed|fallen|on the (?:floor|ground))\b/, 'lying'],
+  [
+    /\b(headaches?|migraines?|holding (?:their|his|her|the) head|hand on (?:their|his|her|the) head)\b/,
+    'hand on head',
+  ],
+  [
+    /\b(stomach ?aches?|tummy ?aches?|belly ?aches?|stomach (?:pain|cramps?)|abdominal pain|holding (?:their|his|her) (?:stomach|belly|tummy))\b/,
+    'hands on belly',
+  ],
+  [
+    /\b(cough\w*|sneez\w*|yawn\w*|(?:hand over|covering) (?:their|his|her) mouth)\b/,
+    'hand on mouth',
+  ],
+  [/\b(cheer\w*|celebrat\w*|arms (?:raised|up)|hands up|hooray)\b/, 'arms up'],
+  [/\b(point(?:s|ing)(?: at| to)?)\b/, 'pointing'],
+  [/\b(wav(?:e|es|ing)(?! a flag)|greet\w*|saying hello)\b/, 'waving'],
+];
+
+/** The words for what someone holds, after a word for holding it: "holding a book", "with a lantern". */
+const HELD =
+  /\b(?:holding|holds|carrying|carries|with|reading|reads|using|uses|taking|takes|showing|shows|waving|waves)\s+(?:(?:an?|the|some|their|his|her|a few)\s+)?(?:[a-z]+\s+)?(books?|textbooks?|notebooks?|phones?|smartphones?|mobile phones?|cups?|mugs?|glass of water|thermometers?|syringes?|injections?|needles?|pills?|tablets?|medicines?|medication|flags?|umbrellas?|magnifying glass|magnifiers?|bags?|handbags?|briefcases?|suitcases?|balls?|lanterns?|lamps?|torch|torches)\b/;
+const PROP_WORDS: [RegExp, FigureProp][] = [
+  [/^(books?|textbooks?|notebooks?)$/, 'book'],
+  [/^(phones?|smartphones?|mobile phones?)$/, 'phone'],
+  [/^(cups?|mugs?|glass of water)$/, 'cup'],
+  [/^thermometers?$/, 'thermometer'],
+  [/^(syringes?|injections?|needles?)$/, 'syringe'],
+  [/^(pills?|tablets?|medicines?|medication)$/, 'pills'],
+  [/^flags?$/, 'flag'],
+  [/^umbrellas?$/, 'umbrella'],
+  [/^(magnifying glass|magnifiers?)$/, 'magnifier'],
+  [/^(bags?|handbags?|briefcases?|suitcases?)$/, 'bag'],
+  [/^balls?$/, 'ball'],
+  [/^(lanterns?|lamps?|torch|torches)$/, 'lantern'],
+];
+
+/**
+ * What words about someone (a drawing's name and brief, a person's
+ * caption) say they are doing and going through: the signs that show it,
+ * how they are placed, what they hold. So someone turned from a drawing
+ * into a person is never drawn standing still: "Seizure: shaking" shakes,
+ * "tingling in the hands and feet" sparkles there, "holding a book"
+ * holds one.
+ */
+export function doingIn(words: string): {
+  signs: FigureSign[];
+  pose: FigurePose | null;
+  holding: FigureProp | null;
+} {
+  const said = words.toLowerCase().replace(/[’']/g, "'");
+  const signs = new Set<FigureSign>();
+  for (const [pattern, found] of SIGN_WORDS)
+    if (pattern.test(said)) for (const sign of found) signs.add(sign);
+  if (TINGLING.test(said)) {
+    const hands = HANDS.test(said);
+    const feet = FEET.test(said);
+    if (hands || !feet) signs.add('tingling hands');
+    if (feet || !hands) signs.add('tingling feet');
+  }
+  const held =
+    HELD.exec(said)?.[1] ??
+    (/\breading\b/.test(said)
+      ? 'book'
+      : /\bdrinking\b/.test(said)
+        ? 'cup'
+        : '');
+  return {
+    signs: FIGURE_SIGNS.filter((sign) => signs.has(sign)).slice(0, MAX_SIGNS),
+    pose: POSE_WORDS.find(([pattern]) => pattern.test(said))?.[1] ?? null,
+    holding: PROP_WORDS.find(([pattern]) => pattern.test(held))?.[1] ?? null,
+  };
+}
+
+/** A value a model wrote, as the kit's lists write theirs: lower case, single spaces. */
+const listWord = (value: unknown) =>
+  typeof value === 'string'
+    ? value
+        .trim()
+        .toLowerCase()
+        .replace(/[\s_-]+/g, ' ')
+    : '';
+
+/**
+ * A person's or a character's pose, signs and prop on a page, as the
+ * writer gave them, made sound: only what is on the kit's lists; lying
+ * down and in bed for one person, and no walk or jump there; at most
+ * four signs. A prop needs a free hand, and one held with no pose for
+ * it is held up.
+ */
+export function postureOf(
+  id: string,
+  raw: { pose?: unknown; signs?: unknown; holding?: unknown },
+  count: number,
+  mended: string[],
+): { pose?: FigurePose; signs?: FigureSign[]; holding?: FigureProp } {
+  const asked = listWord(raw.pose);
+  let pose: FigurePose = (FIGURE_POSES as readonly string[]).includes(asked)
+    ? (asked as FigurePose)
+    : 'standing';
+  if (asked && asked !== pose)
+    mended.push(`${id}: no pose "${String(raw.pose)}"; standing`);
+  if (count > 1 && LYING_POSES.includes(pose)) {
+    mended.push(`${id}: a group stands; not ${pose}`);
+    pose = 'standing';
+  }
+  const signs: FigureSign[] = [];
+  for (const one of Array.isArray(raw.signs) ? raw.signs : []) {
+    const sign = listWord(one);
+    if (!(FIGURE_SIGNS as readonly string[]).includes(sign)) {
+      mended.push(`${id}: no sign "${String(one)}"`);
+      continue;
+    }
+    if (LYING_POSES.includes(pose) && ON_FOOT.includes(sign as FigureSign)) {
+      mended.push(`${id}: ${pose}, so not ${sign}`);
+      continue;
+    }
+    if (!signs.includes(sign as FigureSign)) signs.push(sign as FigureSign);
+  }
+  if (signs.length > MAX_SIGNS)
+    mended.push(`${id}: ${signs.length} signs; the first ${MAX_SIGNS} kept`);
+  const prop = listWord(raw.holding);
+  let holding = (FIGURE_PROPS as readonly string[]).includes(prop)
+    ? (prop as FigureProp)
+    : undefined;
+  if (prop && !holding) mended.push(`${id}: nothing called "${prop}" to hold`);
+  if (holding && pose === 'standing') pose = 'holding';
+  if (holding && !canHold(pose)) {
+    mended.push(`${id}: no hand free for the ${holding}`);
+    holding = undefined;
+  }
+  // Held up, with nothing in the hand: standing.
+  if (!holding && pose === 'holding') pose = 'standing';
+  return {
+    ...(pose !== 'standing' ? { pose } : {}),
+    ...(signs.length ? { signs: signs.slice(0, MAX_SIGNS) } : {}),
+    ...(holding ? { holding } : {}),
+  };
+}
+
+/**
+ * Whether the words just before a place in a brief say there is none
+ * there: "no person", "without people", "no face or person attached".
+ */
+function denied(brief: string, at: number): boolean {
+  const before = brief.slice(Math.max(0, at - 40), at);
+  return /\b(no|not|without|never|nor|none)\b[^.;:!?,]*$/i.test(before);
+}
+
+/** Whether a brief asks the artist for anyone. */
+export function mentionsPeople(brief: string): boolean {
+  return [
+    ...brief.matchAll(
+      /\b(persons?|people|man|men|woman|women|boys?|girls?|child|children|kids?|patients?|doctors?|nurses?|farmers?|workers?|teachers?|students?|scientists?|explorers?|soldiers?|family|families|crowds?|someone|stick figures?|human figures?|figures? of (a|an) (person|man|woman|child))\b/gi,
+    ),
+  ].some((one) => !denied(brief, one.index));
 }
 
 /** The story's character or place the writer means: by its id, else by a name or alias. */
@@ -1310,7 +1944,13 @@ function effectOf(
   }
   const key = idKey(partName);
   const part = parts.find((name) => idKey(name) === key);
-  const state = states.find((name) => idKey(name) === key);
+  // A person's or a character's state by another word ("convulsing",
+  // "pins and needles") is the sign the word names.
+  const state =
+    states.find((name) => idKey(name) === key) ??
+    (thing?.kind === 'person' || thing?.kind === 'character'
+      ? doingIn(partName).signs[0]
+      : undefined);
   if (state) {
     const does: SceneEffectKind = kind === 'hide' ? 'hide' : 'show';
     return { target: id, part: state, do: does };

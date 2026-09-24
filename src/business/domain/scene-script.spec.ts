@@ -1,6 +1,11 @@
 import {
+  LEAVE_PEOPLE_OUT,
+  doingIn,
   fitLayout,
   mendScript,
+  signsShown,
+  mentionsPeople,
+  peopleAskedFor,
   phraseAt,
   quietStretches,
   tellsOfLoss,
@@ -456,6 +461,444 @@ describe('a story told with its own characters', () => {
   it('sets characters in type in a book that is no story', () => {
     const { script } = mendScript(story());
     expect(script.cast.some((t) => t.kind === 'character')).toBe(false);
+  });
+});
+
+describe('people the page shows', () => {
+  const page = (cast: SceneScriptDraft['cast']): SceneScriptDraft => ({
+    fit: 'good',
+    fitReason: null,
+    title: 'At the clinic',
+    mood: 'calm',
+    beats: [
+      {
+        say: 'A doctor listens to your chest.',
+        pause: 'short',
+        delivery: 'hook',
+      },
+      {
+        say: 'She hears the valves close.',
+        pause: 'short',
+        delivery: 'explain',
+      },
+      { say: 'Then she smiles: all is well.', pause: 'long', delivery: 'key' },
+    ],
+    cast,
+    steps: [
+      step(0, 'A doctor', { layout: 'row', show: cast.map((t) => t.id) }),
+      step(2, 'she smiles', {
+        effects: [{ target: 'doctor.happy', do: 'show' }],
+      }),
+      step(1, 'She hears', {
+        effects: [{ target: 'doctor.body', do: 'point' }],
+      }),
+    ],
+  });
+
+  it('draws a person from their figure, made sound, with faces and parts like a character', () => {
+    const { script } = mendScript(
+      page([
+        thing('doctor', 'person', {
+          name: 'Doctor',
+          state: 'neutral',
+          figure: {
+            age: 'adult',
+            skin: 6,
+            hair: 'bun',
+            top: 'lab coat',
+            extras: ['stethoscope', 'glasses', 'scarf'],
+          },
+        }),
+      ]),
+    );
+    const doctor = script.cast[0];
+    expect(doctor).toMatchObject({
+      id: 'doctor',
+      kind: 'person',
+      name: 'Doctor',
+      state: 'neutral',
+      figure: {
+        age: 'adult',
+        skin: 6,
+        hair: 'bun',
+        top: 'lab coat',
+        extras: ['stethoscope', 'glasses'],
+      },
+    });
+    expect(script.steps.flatMap((s) => s.effects)).toEqual([
+      { target: 'doctor', part: 'body', do: 'point' },
+      { target: 'doctor', part: 'happy', do: 'show' },
+    ]);
+  });
+
+  it('stands a group as a few people like the one described, at most four', () => {
+    const { script } = mendScript(
+      page([
+        thing('doctor', 'person', { count: 7 }),
+        thing('nurse', 'person', { count: 1 }),
+      ]),
+    );
+    expect(script.cast[0]).toMatchObject({ kind: 'person', count: 4 });
+    expect(script.cast[1]).not.toHaveProperty('count');
+  });
+
+  it('draws a person the writer said nothing of as themselves, the same every time, and says so', () => {
+    const made = () => mendScript(page([thing('nurse', 'person')]));
+    const { script, mended } = made();
+    const nurse = script.cast[0];
+    expect(nurse).toMatchObject({ kind: 'person', figure: { age: 'adult' } });
+    expect(nurse).toEqual(made().script.cast[0]);
+    expect(mended.join(' ')).toContain('a person with no figure');
+  });
+
+  it('draws a drawing that is someone as a person, dressed for what they are', () => {
+    const { script, mended } = mendScript(
+      page([
+        thing('doctor', 'drawing', { name: 'Doctor' }),
+        thing('sick', 'drawing', { name: 'Sick child' }),
+        thing('team', 'drawing', { name: "Amundsen's team" }),
+      ]),
+    );
+    expect(script.cast.map((t) => t.kind)).toEqual([
+      'person',
+      'person',
+      'person',
+    ]);
+    expect(script.cast[0]).toMatchObject({
+      figure: { top: 'lab coat', extras: ['stethoscope'] },
+    });
+    expect(script.cast[1]).toMatchObject({ figure: { age: 'child' } });
+    expect(script.cast[2]).toMatchObject({ count: 3 });
+    expect(mended.join(' ')).toContain('"Doctor" is someone');
+  });
+
+  it('leaves as drawings what only sounds like someone', () => {
+    const { script } = mendScript(
+      page([
+        // Something of someone's, a diagram inside a body, a life stage, a kind.
+        thing('lungs', 'drawing', { name: "Person's lungs" }),
+        thing('body', 'drawing', {
+          name: 'Human',
+          parts: [{ name: 'spleen', label: true }],
+        }),
+        thing('stage', 'drawing', { name: 'Adult' }),
+        thing('blood', 'drawing', { name: 'Blood group' }),
+      ]),
+    );
+    expect(script.cast.map((t) => t.kind)).toEqual([
+      'drawing',
+      'drawing',
+      'drawing',
+      'drawing',
+    ]);
+  });
+
+  it('draws a drawing about someone as them: in bed, feeling as the brief says', () => {
+    const { script, mended } = mendScript(
+      page([
+        thing('coma', 'drawing', {
+          name: 'Coma and Death',
+          brief:
+            'A patient in a hospital bed, unresponsive, monitored by a machine with a flat line.',
+        }),
+        thing('early', 'drawing', {
+          name: 'Early Symptoms',
+          brief:
+            'A simple outline of a person looking tired and weak, with a thermometer by the head.',
+        }),
+        thing('again', 'drawing', {
+          name: 'Reinfection',
+          brief:
+            'A silhouette of a person is shown being bitten by two separate tsetse flies.',
+        }),
+        thing('pair', 'drawing', {
+          name: 'Handshake',
+          brief: 'Two people shaking hands in a clinic.',
+        }),
+      ]),
+    );
+    expect(script.cast).toMatchObject([
+      {
+        id: 'coma',
+        kind: 'person',
+        pose: 'in bed',
+        signs: ['sleeping'],
+        state: 'sad',
+      },
+      {
+        id: 'early',
+        kind: 'person',
+        pose: 'holding',
+        holding: 'thermometer',
+        state: 'sad',
+      },
+      { id: 'again', kind: 'person', state: 'afraid' },
+      { id: 'pair', kind: 'person', count: 2 },
+    ]);
+    // Shaking hands is not a shake.
+    expect(script.cast[3]).not.toHaveProperty('signs');
+    expect(mended.join(' ')).toContain('coma: its brief is about someone');
+  });
+
+  it("leaves as drawings the briefs about something of someone's", () => {
+    const { script } = mendScript(
+      page([
+        thing('lungs', 'drawing', {
+          name: 'Lungs',
+          brief: "A person's lungs filling with air, in a cutaway.",
+        }),
+        thing('jab', 'drawing', {
+          name: 'Injection',
+          brief: "A doctor's hand holding a syringe against an arm.",
+        }),
+      ]),
+    );
+    expect(script.cast.map((t) => t.kind)).toEqual(['drawing', 'drawing']);
+  });
+
+  it('puts a person in bed when the writer says so, and a group never', () => {
+    const { script } = mendScript(
+      page([
+        thing('mum', 'person', { pose: 'in bed' }),
+        thing('team', 'person', { pose: 'in bed', count: 3 }),
+      ]),
+    );
+    expect(script.cast[0]).toMatchObject({ pose: 'in bed' });
+    expect(script.cast[1]).not.toHaveProperty('pose');
+  });
+
+  it('sends back to the writer a drawing that asks for people, and not one that asks for a part of someone', () => {
+    const { problems } = mendScript(
+      page([
+        thing('progress', 'drawing', {
+          name: 'Progression',
+          brief:
+            'Three panels: first a person falling asleep, then lying in bed, then a flat line.',
+        }),
+        thing('jab', 'drawing', {
+          name: 'Injection',
+          brief: "A doctor's hand holding a syringe against an arm.",
+        }),
+      ]),
+    );
+    expect(problems).toHaveLength(1);
+    expect(problems[0]).toContain('"progress" asks the artist for people');
+    expect(problems[0]).toContain('a person falling asleep');
+    expect(peopleAskedFor("A person's lungs in a cutaway.")).toBeNull();
+    // A brief that says there is no one asks for no one.
+    expect(
+      peopleAskedFor(
+        'A brain glowing with electrical activity. No face or person attached.',
+      ),
+    ).toBeNull();
+    expect(
+      mentionsPeople('An empty clinic room, without people, a clock.'),
+    ).toBe(false);
+    expect(peopleAskedFor('No hands, but a patient in bed.')).toContain(
+      'patient',
+    );
+  });
+
+  it('tells the artist to leave out the people a brief mentions', () => {
+    const { script, mended } = mendScript(
+      page([
+        thing('bed', 'drawing', {
+          name: 'Hospital bed',
+          brief: 'A hospital bed with a drip beside it, ready for a patient.',
+        }),
+        thing('heart', 'drawing', {
+          name: 'Heart',
+          brief: 'A cross-section of the human heart.',
+        }),
+      ]),
+    );
+    const [bed, heart] = script.cast;
+    expect(bed.kind === 'drawing' && bed.brief).toContain(LEAVE_PEOPLE_OUT);
+    expect(heart.kind === 'drawing' && heart.brief).toBe(
+      'A cross-section of the human heart.',
+    );
+    expect(mended.join(' ')).toContain('bed: its brief mentions people');
+    expect(mentionsPeople('two stick figures side by side')).toBe(true);
+    expect(mentionsPeople('the human heart')).toBe(false);
+  });
+
+  it('mends what a person does: poses, signs and props on the lists', () => {
+    const { script, mended } = mendScript(
+      page([
+        // As a model might write them.
+        thing('doctor', 'person', {
+          pose: 'Pointing' as never,
+          signs: ['shaking', 'glowing', 'tingling_hands', 'shaking'] as never,
+          holding: 'book',
+        }),
+        thing('nurse', 'person', { holding: 'syringe' }),
+        thing('team', 'person', {
+          count: 3,
+          pose: 'lying',
+          signs: ['walking'],
+        }),
+        thing('patient', 'person', {
+          pose: 'in bed',
+          signs: ['walking', 'fever', 'sweating', 'tears', 'rash', 'nausea'],
+        }),
+        thing('child', 'person', { pose: 'arms up', holding: 'ball' }),
+      ]),
+    );
+    expect(script.cast).toMatchObject([
+      {
+        pose: 'pointing',
+        signs: ['shaking', 'tingling hands'],
+        holding: 'book',
+      },
+      // Something held, with no pose for it: held up.
+      { pose: 'holding', holding: 'syringe' },
+      // A group stands, and walks.
+      { count: 3, signs: ['walking'] },
+      // No one walks in bed; four signs at most.
+      { pose: 'in bed', signs: ['fever', 'sweating', 'tears', 'rash'] },
+      { pose: 'arms up' },
+    ]);
+    expect(script.cast[2]).not.toHaveProperty('pose');
+    expect(script.cast[4]).not.toHaveProperty('holding');
+    const said = mended.join(' ');
+    expect(said).toContain('doctor: no sign "glowing"');
+    expect(said).toContain('team: a group stands; not lying');
+    expect(said).toContain('patient: in bed, so not walking');
+    expect(said).toContain('child: no hand free for the ball');
+  });
+
+  it('reads what someone goes through from their caption and brief', () => {
+    const { script } = mendScript(
+      page([
+        thing('shaking', 'person', { name: 'Seizure: shaking' }),
+        thing('feeling', 'drawing', {
+          name: 'Seizure: altered sensation',
+          brief:
+            'A person feeling a strange tingling in their hands and feet, looking puzzled.',
+        }),
+        thing('floor', 'drawing', {
+          name: 'Tonic-clonic seizure',
+          brief:
+            'A person lying on the floor, their arms and legs jerking, unconscious.',
+        }),
+        thing('told', 'person', { name: 'Fever', signs: ['coughing'] }),
+        thing('cartoon', 'drawing', {
+          name: 'Seizure',
+          brief:
+            'A cartoon of a person experiencing a seizure: their body convulsing on the ground.',
+        }),
+      ]),
+    );
+    expect(script.cast).toMatchObject([
+      { kind: 'person', signs: ['shaking'] },
+      {
+        kind: 'person',
+        signs: ['tingling hands', 'tingling feet'],
+        state: 'thinking',
+      },
+      { kind: 'person', pose: 'lying', signs: ['shaking', 'sleeping'] },
+      // What the writer said is kept; the caption fills only what it left out.
+      { kind: 'person', signs: ['coughing'] },
+      { kind: 'person', pose: 'lying', signs: ['shaking'] },
+    ]);
+  });
+
+  it('brings a sign on at the words that first show it, not before', () => {
+    const cast = [
+      thing('shaker', 'person', { name: 'Person shaking' }),
+      thing('still', 'person', { name: 'Person shaking' }),
+      // Listed and shown later: on at the words. Listed and hidden: on from the start.
+      thing('listed', 'person', { signs: ['fever', 'sweating'] }),
+    ];
+    const draft = page(cast);
+    draft.steps[1].effects = [
+      { target: 'shaker.convulsing', do: 'show' },
+      { target: 'shaker.pins and needles', do: 'show' },
+      { target: 'listed.fever', do: 'show' },
+      { target: 'listed.sweating', do: 'hide' },
+    ];
+    const { script, mended } = mendScript(draft);
+    // Shown as the voice says it starts, not before; the other shakes from the start.
+    expect(script.cast[0]).not.toHaveProperty('signs');
+    expect(script.cast[1]).toMatchObject({ signs: ['shaking'] });
+    expect(script.cast[2]).toMatchObject({ signs: ['sweating'] });
+    expect(mended.join(' ')).toContain(
+      'listed: fever on at the words that show it, not before',
+    );
+    // Another word for a sign is the sign.
+    expect(script.steps.flatMap((step) => step.effects)).toEqual(
+      expect.arrayContaining([
+        { target: 'shaker', part: 'shaking', do: 'show' },
+        { target: 'shaker', part: 'tingling hands', do: 'show' },
+      ]),
+    );
+  });
+
+  it('reads signs, a pose and a prop from words', () => {
+    expect(doingIn('A child with a headache')).toEqual({
+      signs: ['headache'],
+      pose: 'hand on head',
+      holding: null,
+    });
+    expect(doingIn('A man coughing into his hand').pose).toBe('hand on mouth');
+    expect(doingIn('Pins and needles in the feet').signs).toEqual([
+      'tingling feet',
+    ]);
+    expect(doingIn('An old man with a walking stick').signs).toEqual([]);
+    expect(doingIn('Two people shaking hands').signs).toEqual([]);
+    expect(doingIn('A feverish girl in bed')).toMatchObject({
+      signs: ['fever', 'sweating'],
+      pose: 'in bed',
+    });
+    expect(doingIn('A keeper carrying a lantern').holding).toBe('lantern');
+    expect(doingIn('A girl reading').holding).toBe('book');
+    expect(doingIn('A child getting an injection').holding).toBeNull();
+    expect(doingIn('Person feeling strange').signs).toEqual([
+      'tingling hands',
+      'tingling feet',
+    ]);
+  });
+
+  it('switches a sign on and off at the words, as a face, and draws only those shown', () => {
+    const cast = [
+      thing('patient', 'person', { signs: ['fever'] }),
+      thing('nurse', 'person'),
+    ];
+    const draft = page(cast);
+    draft.steps[1].effects = [
+      { target: 'patient.shaking', do: 'show' },
+      { target: 'patient.Tingling Hands', do: 'show' },
+    ];
+    draft.steps[2].effects = [
+      { target: 'patient.shaking', do: 'hide' },
+      { target: 'nurse.pain', do: 'show' },
+    ];
+    const { script } = mendScript(draft);
+    const effects = script.steps.flatMap((step) => step.effects);
+    expect(effects).toEqual(
+      expect.arrayContaining([
+        { target: 'patient', part: 'shaking', do: 'show' },
+        { target: 'patient', part: 'tingling hands', do: 'show' },
+        { target: 'patient', part: 'shaking', do: 'hide' },
+        { target: 'nurse', part: 'pain', do: 'show' },
+      ]),
+    );
+    // In the kit's order: what moves the body, then what sits on it.
+    expect(signsShown(script, 'patient')).toEqual([
+      'shaking',
+      'tingling hands',
+      'fever',
+    ]);
+    expect(signsShown(script, 'nurse')).toEqual([]);
+  });
+
+  it('takes a person a story knows for its character, drawn once for the book', () => {
+    const { script, mended } = mendScript(
+      page([thing('doctor', 'person', { name: 'Mira' })]),
+      { characters: [{ id: 'mira', name: 'Mira', aliases: [] }] },
+    );
+    expect(script.cast[0]).toMatchObject({ kind: 'character', ref: 'mira' });
+    expect(mended.join(' ')).toContain("the story's character mira");
   });
 });
 

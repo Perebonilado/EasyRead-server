@@ -396,6 +396,26 @@ Still open:
 - **"motion" is still rarely chosen** by the writer; to watch on more pages.
 - **Short dramatic silences**, a one-sentence rest, would need a quick-cut "rest" in the conductor. Not built.
 
+## Recorded sounds: where they could come from (researched 2026-09-24)
+
+Richard pointed at Motion Array, Pixabay and Uppbeat. The question that decides it is whether a site's licence lets us build its files into a paid web app, served to browsers as part of the product. Nothing was downloaded.
+
+| Source | Verdict for us | Why |
+|---|---|---|
+| **Motion Array** | No | Apps and software need a separate business licence (Terms §4). The terms also forbid uses that let end users extract the files, and use in automated systems or websites (§3a, §3g, §3i). After a paid plan ends, only finished projects stay covered. https://motionarray.com/terms-of-service/ |
+| **Pixabay** | Yes, with conditions | Perpetual, commercial, no attribution. Its FAQ counts building content into an app as enough change. We must not offer the files on their own, must avoid tracks marked Content ID or registered with ASCAP, and must not scrape or bulk-copy. Audio is MP3; the API doesn't cover audio; quality varies. https://pixabay.com/service/terms/ |
+| **Uppbeat** | Poor fit | Apps need Pro or Business, $15–35 a month, and downloaded content may not be used after the subscription ends. Tracks must stay recognisable. The free plan requires credit and allows three downloads a month. https://uppbeat.io/user-agreement |
+| **Freesound (CC0 filter)** | Yes | Public domain, any use. Downloading needs a login. Quality and provenance vary. https://freesound.org/help/faq/#licenses |
+| **Sonniss GDC bundles** | Yes | Royalty-free, commercial, no attribution. Allowed in apps when synchronised to our own project, not as a sound service. Large zip archives. https://sonniss.com/gdc-bundle-license/ |
+| **BBC Sound Effects** | No | Non-commercial use only. https://sound-effects.bbcrewind.co.uk/licensing |
+| **VCSL and VSCO 2 CE** | Yes, the best fit for the score | CC0 instrument samples: pianos, harp, marimba, glockenspiel, tubular bells, organ, and in VSCO 2 CE, strings held and plucked. https://github.com/sgossner/VCSL and https://github.com/sgossner/VSCO-2-CE |
+
+The recommendation:
+- **Keep the generative score**, because only it can change mood on a sentence, and give it CC0 recorded instruments from VCSL and VSCO 2 CE. That is a few notes per instrument, about 1–2 MB shipped.
+- **Record the brief place sounds** (wind, water, rain, fire, clock, heartbeat, bubbles) from Freesound CC0 or Sonniss, with Pixabay as a backup. Each is trimmed to about 5 s, with its source, author and licence written down.
+- **Keep the synthesized effects** as Richard likes them. Recorded ones are an option later.
+- **No pre-made music.** It can't follow a page sentence by sentence, and its licences tie it to subscriptions or to tracks staying unchanged.
+
 ## Sources
 
 Learning and accessibility:

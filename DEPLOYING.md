@@ -151,9 +151,11 @@ Scenes are made by generator `scene-2`: pages made before are made again
 the next time they are asked for. Their jobs go on a queue named for the
 generator (`visual-scene-2`), so while a deploy runs old and new workers
 side by side, an old worker never takes a new page and drops it. The
-worker also runs a watchdog: every minute, a page still waiting or being
-made whose job is gone is queued again, and one whose job failed for good
-is marked failed, so the player moves past it rather than waiting on it.
+worker also runs a watchdog: every minute, a page still waiting whose job
+is gone is queued again, and one whose job failed for good is marked
+failed, so the player moves past it rather than waiting on it. A page
+being made is left alone unless it has not moved for ten minutes, so a
+page `scene:page` is making in its own process is never made twice.
 After the first deploy, jobs left on the old `visual-scene` queue are for
 old rows and can be ignored.
 

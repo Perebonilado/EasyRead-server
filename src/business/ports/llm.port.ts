@@ -16,6 +16,8 @@ export type LlmTask =
   | 'topics_page_tag'
   | 'topics_prereqs'
   | 'simplify_standard'
+  // A maths page: a stronger model, keeping every step of its working.
+  | 'simplify_maths'
   | 'highlight_explain'
   | 'highlight_simplify'
   | 'highlight_define'
@@ -597,6 +599,11 @@ export interface LlmGatewayPort {
     pageText: string;
     summary: string | null;
     pageNumber: number;
+    /** A maths page: its working kept as steps, by the maths model. */
+    maths?: boolean;
+    /** A second try: the blocks the first gave, and what code found wrong in them. */
+    previous?: Block[];
+    problems?: string[];
   }): Promise<LlmResult<Block[]>>;
 
   /** Streams tokens for the answer panel; resolves with the full text. */

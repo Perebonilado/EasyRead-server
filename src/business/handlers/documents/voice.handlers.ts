@@ -227,6 +227,17 @@ export class PageAudioHandler extends AbstractRequestHandlerTemplate<
 export function blocksToProse(blocks: Block[]): string {
   return blocks
     .map((block) => {
+      // A worked solution is heard as a teacher says it: the problem,
+      // then each step.
+      const said =
+        block.type === 'working' && block.working
+          ? [block.text, ...block.working.steps.map((step) => step.says)]
+              .map((one) => one.trim().replace(/\s+/g, ' '))
+              .filter(Boolean)
+              .map((one) => (/[.!?:]$/.test(one) ? one : `${one}.`))
+              .join(' ')
+          : null;
+      if (said) return said;
       const text = block.text.trim().replace(/\s+/g, ' ');
       if (!text) return '';
       const ended = /[.!?:]$/.test(text) ? text : `${text}.`;

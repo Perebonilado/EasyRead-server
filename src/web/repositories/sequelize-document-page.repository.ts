@@ -14,6 +14,7 @@ const toRecord = (row: DocumentPageModel): PageText => ({
   charCount: row.charCount,
   isEmpty: row.isEmpty,
   textSource: row.textSource,
+  hasMaths: row.hasMaths ?? false,
 });
 
 @Injectable()
@@ -60,6 +61,12 @@ export class SequelizeDocumentPageRepository implements DocumentPageRepository {
 
   async countEmpty(documentId: string): Promise<number> {
     return this.model.count({ where: { documentId, isEmpty: true } });
+  }
+
+  async countUnreadMaths(documentId: string): Promise<number> {
+    return this.model.count({
+      where: { documentId, hasMaths: true, textSource: 'extracted' },
+    });
   }
 
   async writeOcrText(

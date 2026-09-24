@@ -100,6 +100,74 @@ export const blocksSchema = z.object({
     .min(1),
 });
 
+/** A calculation worked through, as the maths writer sets it out: code checks every line. */
+export const workingSchema = z.object({
+  given: z
+    .array(z.string())
+    .describe(
+      'What the problem gives, each "symbol = value" in LaTeX, its unit in \\text{}',
+    ),
+  wanted: z.string().nullable(),
+  steps: z
+    .array(
+      z.object({
+        latex: z
+          .string()
+          .describe('The whole line after this step, display LaTeX, no $'),
+        does: z
+          .string()
+          .describe(
+            'What is done, in plain words: "subtract 3 from both sides"',
+          ),
+        why: z.string().nullable(),
+        changes: z
+          .array(z.string())
+          .describe(
+            'The parts of the line this step changed, as LaTeX pieces of it',
+          ),
+        says: z
+          .string()
+          .describe(
+            'What a teacher says aloud for this step, the maths in words',
+          ),
+      }),
+    )
+    .min(1),
+  answer: z.string().nullable(),
+  check: z.string().nullable(),
+});
+
+/**
+ * A maths page's blocks: as any page's, and a "working" block for each
+ * calculation it works, its working set out as data.
+ */
+export const mathsBlocksSchema = z.object({
+  blocks: z
+    .array(
+      z.object({
+        type: z
+          .enum([
+            'headingOne',
+            'headingTwo',
+            'paragraph',
+            'bullet',
+            'code',
+            'table',
+            'math',
+            'working',
+          ])
+          .describe(
+            '"working" is a calculation worked through, its steps in working; ' +
+              '"math" is display-mode LaTeX without $$ delimiters, for a formula ' +
+              'stated and not worked; "table" is pipe-separated rows, header first.',
+          ),
+        text: z.string().min(1),
+        working: workingSchema.nullable(),
+      }),
+    )
+    .min(1),
+});
+
 /**
  * OCR of one scanned page. Unlike simplification, an empty result is a valid
  * answer here — a page can genuinely hold nothing readable — so `blocks` has

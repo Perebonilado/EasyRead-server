@@ -40,6 +40,9 @@ const TASK_VAR: Record<LlmTask, string> = {
   topics_page_tag: 'AI_MODEL_TOPICS',
   topics_prereqs: 'AI_MODEL_TOPICS',
   simplify_standard: 'AI_MODEL_SIMPLIFY_STANDARD',
+  // Maths pages need their steps exact and in order; the small model drops
+  // and reorders them. One page in a few, at most.
+  simplify_maths: 'AI_MODEL_SIMPLIFY_MATHS',
   highlight_explain: 'AI_MODEL_HIGHLIGHT',
   highlight_simplify: 'AI_MODEL_HIGHLIGHT',
   highlight_define: 'AI_MODEL_HIGHLIGHT',
@@ -88,6 +91,7 @@ const TASK_VAR: Record<LlmTask, string> = {
  * "DeepSeek" drawing was drawn by gpt-4o-mini (2161504).
  */
 const TASK_DEFAULT: Partial<Record<LlmTask, string>> = {
+  simplify_maths: 'openai:gpt-4.1',
   scene_write: 'openai:gpt-4.1',
   scene_draw: 'deepseek:deepseek-flash',
   // What a document is: one small call a document.

@@ -18,6 +18,7 @@ import { newId } from '../../web/database/uuid';
 import type { DocumentPageRepository } from '../../business/repositories/document-page.repository';
 import type { DocumentRepository } from '../../business/repositories/document.repository';
 import type { PipelineRunRepository } from '../../business/repositories/misc.repository';
+import { mathsSignals } from '../../business/domain/maths-work';
 import { cleanExtractedText } from '../../business/domain/text';
 import { PipelineOrchestrator } from '../orchestrator.service';
 import type { BaseJobData } from '../queues';
@@ -95,6 +96,11 @@ export class ExtractProcessor extends BasePipelineProcessor<BaseJobData> {
       }
 
       const empty = extracted.filter((page) => page.isEmpty).length;
+      const maths = extracted.filter((page) => page.hasMaths).length;
+      if (maths)
+        this.logger.log(
+          `${doc.id}: ${maths}/${extracted.length} pages are maths`,
+        );
       doc.markExtracted(empty, extracted.length);
       await this.documents.save(doc);
 
@@ -132,7 +138,7 @@ export class ExtractProcessor extends BasePipelineProcessor<BaseJobData> {
       props: { sourceMimeType: string; originalFileRef: string | null };
     },
     extracted: ExtractedPage[],
-  ): Promise<ExtractedPage[]> {
+  ): Promise<(ExtractedPage & { hasMaths: boolean })[]> {
     let slides: string[] | null = null;
     if (doc.props.sourceMimeType === SLIDE_DECK && doc.props.originalFileRef) {
       try {
@@ -153,9 +159,21 @@ export class ExtractProcessor extends BasePipelineProcessor<BaseJobData> {
     }
     return extracted.map((page, index) => {
       const fromSlide = slides?.[index]?.trim();
-      const text = cleanExtractedText(fromSlide || page.text);
+      // Whether the page is maths is read before anything is tidied: the
+      // glyphs a symbol font lost are a sign of it. A slide's equations
+      // come as LaTeX.
+      const raw = fromSlide || page.text;
+      const hasMaths =
+        mathsSignals(raw).maths || /\$[^$\n]*\\?[=^_{}]|\$\$/u.test(raw);
+      const text = cleanExtractedText(raw);
       const charCount = text.replace(/\s/g, '').length;
-      return { ...page, text, charCount, isEmpty: page.isEmpty && !fromSlide };
+      return {
+        ...page,
+        text,
+        charCount,
+        isEmpty: page.isEmpty && !fromSlide,
+        hasMaths,
+      };
     });
   }
 

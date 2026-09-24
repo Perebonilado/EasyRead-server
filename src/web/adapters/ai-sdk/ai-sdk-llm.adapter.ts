@@ -1,5 +1,10 @@
 import type { ScreenplayDraft } from '../../../business/domain/scene-screenplay';
 import { numberedSentences } from '../../../business/domain/board';
+import {
+  repairInlineLatex,
+  repairLatex,
+  repairWorking,
+} from '../../../business/domain/maths-work';
 import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import type { DocumentProfileDraft } from '../../../business/domain/scene-profile';
@@ -34,6 +39,7 @@ import { PROMPTS } from '../prompts';
 import { ModelRegistry, type ModelRef } from './models';
 import {
   blocksSchema,
+  mathsBlocksSchema,
   diagramClozeSchema,
   diagramSchema,
   sketchSchema,
@@ -993,32 +999,75 @@ export class AiSdkLlmAdapter implements LlmGatewayPort, OnModuleInit {
     pageText: string;
     summary: string | null;
     pageNumber: number;
+    maths?: boolean;
+    previous?: Block[];
+    problems?: string[];
   }): Promise<LlmResult<Block[]>> {
     const started = Date.now();
     const { generateObject } = await this.registry.modules();
-    const { model, ref } =
-      await this.registry.languageModel('simplify_standard');
+    const { model, ref } = await this.registry.languageModel(
+      input.maths ? 'simplify_maths' : 'simplify_standard',
+    );
 
     const context = input.summary
       ? `Document summary:\n${input.summary}\n\n`
       : '';
+    // A second try is told what code found wrong with the first.
+    const again =
+      input.previous && input.problems?.length
+        ? `\n\nYour previous rewrite of this page:\n${JSON.stringify({ blocks: input.previous })}\n\nCode checked it and found these problems. Write the page again with them put right:\n- ${input.problems.join('\n- ')}`
+        : '';
+    const prompt = `${context}Page ${input.pageNumber}:\n${input.pageText}${again}`;
 
-    const result = await generateObject({
-      model,
-      schema: blocksSchema,
-      system: PROMPTS.simplifyStandard,
-      prompt: `${context}Page ${input.pageNumber}:\n${input.pageText}`,
-      maxRetries: this.maxRetries(),
-    });
+    let usage: Parameters<typeof this.usage>[1] | undefined;
+    const blocks: Block[] = input.maths
+      ? (
+          await generateObject({
+            model,
+            schema: mathsBlocksSchema,
+            system: PROMPTS.simplifyMaths,
+            prompt,
+            maxRetries: this.maxRetries(),
+          }).then((result) => {
+            usage = result.usage;
+            return result.object.blocks;
+          })
+        ).map(({ type, text, working }): Block => {
+          // LaTeX written into JSON loses backslashes to its escapes: put
+          // them back before anything reads it.
+          if (type === 'working' && working)
+            return {
+              type,
+              text: repairInlineLatex(text),
+              working: repairWorking(working),
+            };
+          if (type === 'math') return { type, text: repairLatex(text) };
+          return {
+            type: type === 'working' ? 'paragraph' : type,
+            text: repairInlineLatex(text),
+          };
+        })
+      : await generateObject({
+          model,
+          schema: blocksSchema,
+          system: PROMPTS.simplifyStandard,
+          prompt,
+          maxRetries: this.maxRetries(),
+        }).then((result) => {
+          usage = result.usage;
+          return result.object.blocks.map((block) =>
+            block.type === 'math'
+              ? { ...block, text: repairLatex(block.text) }
+              : block,
+          );
+        });
 
     // The schema guarantees at least one block, but never trust a page to
     // silently become empty — a page that wasn't simplified still beats a
     // blank one in the reader.
-    const blocks = result.object.blocks.length
-      ? result.object.blocks
-      : this.asParagraphs(input.pageText);
+    const value = blocks.length ? blocks : this.asParagraphs(input.pageText);
 
-    return { value: blocks, usage: this.usage(ref, result.usage, started) };
+    return { value, usage: this.usage(ref, usage!, started) };
   }
 
   async answerHighlight(input: {

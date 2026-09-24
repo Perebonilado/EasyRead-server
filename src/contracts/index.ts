@@ -21,8 +21,48 @@ export type BlockType =
   | 'code'
   | 'table'
   /** Display-mode LaTeX, no $$ delimiters. */
-  | 'math';
-export type Block = { type: BlockType; text: string };
+  | 'math'
+  /** A calculation worked through: `text` says the problem in words; `working` is the working. */
+  | 'working';
+export type Block = {
+  type: BlockType;
+  text: string;
+  /** A "working" block's working, every line checked by code. */
+  working?: WorkedSolutionDto;
+};
+
+/**
+ * A calculation worked through, step by step: what the problem gives and
+ * wants, each step's line and what is done to get it, and the answer with
+ * its units. Every line was checked by code before it was kept.
+ */
+export interface WorkedSolutionDto {
+  /** What the problem gives, each a line of LaTeX ("u = 5\,\text{m/s}"). */
+  given: string[];
+  /** What it asks for, in words. */
+  wanted: string | null;
+  steps: WorkedStepDto[];
+  /** The answer, LaTeX, with its units. */
+  answer: string | null;
+  /** The answer put back in, LaTeX. */
+  check: string | null;
+  /** The working stops at the last line code could stand behind; the answer is code's. */
+  cut?: true;
+}
+
+/** One step of a worked solution. */
+export interface WorkedStepDto {
+  /** The line after this step, display LaTeX. */
+  latex: string;
+  /** What is done to get it: "subtract 3 from both sides". */
+  does: string;
+  /** Why it is allowed or why it helps; null when what is done says it. */
+  why: string | null;
+  /** The parts of the line this step changes, as LaTeX pieces of it. */
+  changes: string[];
+  /** What the voice says for it. */
+  says: string;
+}
 
 export type DocumentStatus = 'uploading' | 'processing' | 'ready' | 'failed';
 export type PageStatus = 'pending' | 'processing' | 'done' | 'failed';

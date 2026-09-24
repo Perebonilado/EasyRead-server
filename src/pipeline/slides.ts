@@ -1,4 +1,7 @@
 import { inflateRawSync } from 'node:zlib';
+import { Element, Text, type ChildNode } from 'domhandler';
+import { parseDocument } from 'htmlparser2';
+import { ommlToLatex } from './omml';
 
 /**
  * The text of a slide deck, read from the deck itself rather than from the
@@ -53,34 +56,55 @@ export function readSlideTexts(file: Buffer): string[] | null {
   return texts;
 }
 
-/** A slide's paragraphs, each on its own line, runs joined as written. */
-function slideText(xml: string): string {
+/**
+ * A slide's paragraphs, each on its own line, runs joined as written; an
+ * equation as LaTeX between dollar signs, where it stands in its
+ * paragraph (two of them for one set on its own). What PowerPoint keeps
+ * for an older reader in place of an equation (a picture of it, or its
+ * symbols as plain text) is passed over.
+ */
+export function slideText(xml: string): string {
+  const doc = parseDocument(xml, { xmlMode: true });
   const lines: string[] = [];
-  for (const paragraph of xml.matchAll(/<a:p\b[^>]*>([\s\S]*?)<\/a:p>/g)) {
-    const runs = [
-      ...paragraph[1].matchAll(/<a:t(?:\s[^>]*)?>([\s\S]*?)<\/a:t>/g),
-    ].map((run) => decodeXml(run[1]));
-    // A line break inside a paragraph is a break in the text too.
-    const line = runs.join('').replace(/\s+/g, ' ').trim();
-    if (line) lines.push(line);
-  }
+  const visit = (nodes: ChildNode[]) => {
+    for (const node of nodes) {
+      if (!(node instanceof Element) || node.name === 'mc:Fallback') continue;
+      if (node.name === 'a:p') {
+        const line = paragraphText(node);
+        if (line) lines.push(line);
+      } else visit(node.children);
+    }
+  };
+  visit(doc.children);
   return lines.join('\n');
 }
 
-function decodeXml(text: string): string {
-  return text
-    .replace(/&lt;/g, '<')
-    .replace(/&gt;/g, '>')
-    .replace(/&quot;/g, '"')
-    .replace(/&apos;/g, "'")
-    .replace(/&#(\d+);/g, (_, code: string) =>
-      String.fromCodePoint(Number(code)),
-    )
-    .replace(/&#x([0-9a-fA-F]+);/g, (_, code: string) =>
-      String.fromCodePoint(parseInt(code, 16)),
-    )
-    .replace(/&amp;/g, '&');
+/** One paragraph's words and equations, in order. */
+function paragraphText(paragraph: Element): string {
+  let out = '';
+  const visit = (nodes: ChildNode[]) => {
+    for (const node of nodes) {
+      if (!(node instanceof Element) || node.name === 'mc:Fallback') continue;
+      if (node.name === 'a:t')
+        out += node.children
+          .map((c) => (c instanceof Text ? c.data : ''))
+          .join('');
+      else if (node.name === 'm:oMathPara')
+        out += ` $$${kidsOf(node, 'm:oMath').map(ommlToLatex).join(' \\\\ ')}$$ `;
+      else if (node.name === 'm:oMath') out += ` $${ommlToLatex(node)}$ `;
+      else if (node.name === 'a:br') out += ' ';
+      else visit(node.children);
+    }
+  };
+  visit(paragraph.children);
+  // A line break inside a paragraph is a break in the text too.
+  return out.replace(/\s+/g, ' ').trim();
 }
+
+const kidsOf = (node: Element, name: string): Element[] =>
+  node.children.filter(
+    (one): one is Element => one instanceof Element && one.name === name,
+  );
 
 /**
  * The zip's files by name, read from its central directory. Only the XML

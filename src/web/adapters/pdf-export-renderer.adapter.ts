@@ -158,6 +158,23 @@ export class PdfExportRendererAdapter implements ExportRendererPort {
             pdf.table(tableRowsOf(block.text));
             pdf.space(6);
             break;
+          case 'working': {
+            // The problem, then each line of the working beside what is
+            // done to get it, as LaTeX in the monospace well.
+            pdf.space(4);
+            pdf.text(block.text, { font: 'bold', size: 11, leading: 17 });
+            const w = block.working;
+            if (w) {
+              const lines = [
+                ...w.given.map((given) => `given: ${given}`),
+                ...w.steps.map((step) => `${step.latex}    % ${step.does}`),
+                ...(w.answer ? [`answer: ${w.answer}`] : []),
+              ];
+              if (lines.length) pdf.code(lines.join('\n'));
+            }
+            pdf.space(6);
+            break;
+          }
           default:
             pdf.text(block.text, { size: 11, leading: 17 });
             pdf.space(6);

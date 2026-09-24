@@ -102,7 +102,12 @@ export function splitSentences(text: string): string[] {
 /** The bold marks the note carries, dropped for matching and for splitting. */
 const plainText = (text: string) => text.replace(/\*\*/g, '');
 
-const WHOLE_TYPES = new Set<Block['type']>(['table', 'code', 'math']);
+const WHOLE_TYPES = new Set<Block['type']>([
+  'table',
+  'code',
+  'math',
+  'working',
+]);
 const HEADING_TYPES = new Set<Block['type']>(['headingOne', 'headingTwo']);
 
 /**
@@ -653,12 +658,30 @@ export function followIsCurrent(track: FollowTrack | null): boolean {
   return track?.generator === FOLLOW_GENERATOR_VERSION;
 }
 
-/** A block as one line of prose for the lecturer: tables, code and equations named, not read. */
+/**
+ * A block as one line of prose for the lecturer: tables, code and
+ * equations named, not read; a worked solution as its steps, in the words
+ * a teacher says them, so the lecture can work it through.
+ */
 function blockProse(block: Block): string {
   const text = plainText(block.text).replace(/\s+/g, ' ').trim();
   if (block.type === 'code') return `(a code sample: ${text.slice(0, 160)})`;
   if (block.type === 'math') return `(an equation: ${text.slice(0, 120)})`;
   if (block.type === 'table') return `(a table: ${text.slice(0, 200)})`;
+  if (block.type === 'working' && block.working) {
+    const w = block.working;
+    return [
+      `(a worked solution) ${text}`,
+      w.wanted ? `Wanted: ${w.wanted}.` : '',
+      ...w.steps.map(
+        (step, i) =>
+          `Step ${i + 1}: ${step.does}${step.why ? ` (${step.why})` : ''}: ${step.says}`,
+      ),
+      w.answer ? `Answer: ${w.answer}.` : '',
+    ]
+      .filter(Boolean)
+      .join(' ');
+  }
   return text;
 }
 
@@ -672,6 +695,18 @@ export function sceneProse(blocks: Block[]): string {
     .map((block) => {
       if (block.type === 'math') return `$$ ${block.text.trim()} $$`;
       if (block.type === 'table') return `(a table)\n${block.text.trim()}`;
+      // The working as its lines, each with what is done, for the stage.
+      if (block.type === 'working' && block.working)
+        return [
+          `(a worked solution) ${block.text.trim()}`,
+          ...block.working.given.map((given) => `Given: $$ ${given} $$`),
+          ...block.working.steps.map(
+            (step) => `$$ ${step.latex} $$ (${step.does})`,
+          ),
+          block.working.answer ? `Answer: $$ ${block.working.answer} $$` : '',
+        ]
+          .filter(Boolean)
+          .join('\n');
       return blockProse(block);
     })
     .filter(Boolean)

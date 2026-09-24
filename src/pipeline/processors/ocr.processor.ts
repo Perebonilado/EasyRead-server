@@ -84,14 +84,38 @@ export class OcrProcessor extends BasePipelineProcessor<BaseJobData> {
 
       const pageCount = doc.props.pageCount ?? 0;
       const all = await this.pages.findRange(doc.id, 1, pageCount);
-      const targets = all.filter((page) => page.isEmpty);
+      // Scanned pages, and maths pages read from a text layer, which loses
+      // fraction bars, powers and symbols the image still has. A deck's
+      // equations were read from the deck itself.
+      const deck = doc.props.sourceMimeType === SLIDE_DECK;
+      const targets = all.filter(
+        (page) =>
+          page.isEmpty ||
+          (page.hasMaths && page.textSource === 'extracted' && !deck),
+      );
+      const layer = new Map(
+        all
+          .filter((page) => !page.isEmpty)
+          .map((page) => [page.pageNumber, page.charCount]),
+      );
 
       const bytes = await this.storage.get(ref);
       const pageNumbers = targets.map((page) => page.pageNumber);
 
+      // The engine, and on the last attempt, if it still fails (busy, out
+      // of quota), the vision model: a scan read slowly beats a scan
+      // unread.
       const read = this.engine.isConfigured()
-        ? await this.readWithEngine(doc.id, bytes, pageNumbers)
-        : await this.readWithVision(doc.id, bytes, pageNumbers);
+        ? await this.readWithEngine(doc.id, bytes, pageNumbers, layer).catch(
+            (error: unknown) => {
+              if (!context.isFinalAttempt) throw error;
+              this.logger.warn(
+                `${doc.id}: the OCR engine failed (${(error as Error).message}); reading with the vision model`,
+              );
+              return this.readWithVision(doc.id, bytes, pageNumbers, layer);
+            },
+          )
+        : await this.readWithVision(doc.id, bytes, pageNumbers, layer);
 
       const stillEmpty = await this.pages.countEmpty(doc.id);
       doc.refreshAfterOcr(stillEmpty, pageCount);
@@ -130,6 +154,8 @@ export class OcrProcessor extends BasePipelineProcessor<BaseJobData> {
     documentId: string,
     bytes: Buffer,
     pageNumbers: number[],
+    /** The text layer's size of each page that has one: a reading that loses most of it is not kept. */
+    layer: ReadonlyMap<number, number>,
   ): Promise<number> {
     const started = Date.now();
     const results = await this.engine.readPages(bytes, pageNumbers);
@@ -148,6 +174,7 @@ export class OcrProcessor extends BasePipelineProcessor<BaseJobData> {
     for (const page of results) {
       const charCount = page.markdown.replace(/\s/g, '').length;
       if (charCount === 0) continue;
+      if (!keeps(charCount, layer.get(page.pageNumber))) continue;
       await this.pages.writeOcrText(
         documentId,
         page.pageNumber,
@@ -165,6 +192,7 @@ export class OcrProcessor extends BasePipelineProcessor<BaseJobData> {
     documentId: string,
     bytes: Buffer,
     pageNumbers: number[],
+    layer: ReadonlyMap<number, number>,
   ): Promise<number> {
     this.logger.warn(
       `${documentId}: MISTRAL_API_KEY not set — OCR falling back to per-page vision, which is much slower`,
@@ -179,7 +207,7 @@ export class OcrProcessor extends BasePipelineProcessor<BaseJobData> {
         for (;;) {
           const image = queue.shift();
           if (!image) return;
-          if (await this.readPage(documentId, image)) read += 1;
+          if (await this.readPage(documentId, image, layer)) read += 1;
         }
       },
     );
@@ -191,6 +219,7 @@ export class OcrProcessor extends BasePipelineProcessor<BaseJobData> {
   private async readPage(
     documentId: string,
     image: { pageNumber: number; png: Buffer },
+    layer: ReadonlyMap<number, number>,
   ): Promise<{ handwritten: boolean } | null> {
     try {
       const result = await this.llm.ocrPage({
@@ -211,6 +240,7 @@ export class OcrProcessor extends BasePipelineProcessor<BaseJobData> {
       const text = serialize(result.value.blocks);
       const charCount = text.replace(/\s/g, '').length;
       if (charCount === 0) return null;
+      if (!keeps(charCount, layer.get(image.pageNumber))) return null;
 
       await this.pages.writeOcrText(
         documentId,
@@ -231,8 +261,9 @@ export class OcrProcessor extends BasePipelineProcessor<BaseJobData> {
 
 /**
  * Blocks → the plain text the rest of the pipeline reads. Structure survives
- * as convention: bullets keep their dash, tables keep their pipes — the same
- * signals the simplify model already reconstructs from.
+ * as convention: bullets keep their dash, tables keep their pipes, maths is
+ * LaTeX between double dollars — the same signals the simplify model
+ * already reconstructs from.
  */
 function serialize(blocks: Block[]): string {
   return blocks
@@ -241,8 +272,22 @@ function serialize(blocks: Block[]): string {
         ? // The model sometimes keeps the page's own dash in the text; one
           // marker is structure, two is stutter.
           `- ${block.text.replace(/^[-•*]\s+/, '')}`
-        : block.text,
+        : block.type === 'math'
+          ? `$$${block.text}$$`
+          : block.text,
     )
     .join('\n')
     .trim();
 }
+
+/** A deck: its text is read from the deck itself, equations and all. */
+const SLIDE_DECK =
+  'application/vnd.openxmlformats-officedocument.presentationml.presentation';
+
+/**
+ * Whether a page's reading from its image is kept: always for a page with
+ * no text, and for one with a text layer, when it holds most of what that
+ * layer did (a maths page read again must not lose its words).
+ */
+const keeps = (read: number, layer: number | undefined) =>
+  layer === undefined || read >= layer * 0.6;

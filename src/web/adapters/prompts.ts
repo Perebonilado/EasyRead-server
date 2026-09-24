@@ -58,6 +58,47 @@ const MATH_SHAPE =
   'or after the math block.';
 
 /**
+ * A worked calculation kept as its steps, on a maths page. Every line is
+ * checked by code before a learner sees it, so the rule is truth and
+ * completeness: the page's own steps in its own order, a line for every
+ * step, broken down for whom the document is for, and no number the page
+ * did not give.
+ */
+const WORKED_STEPS = [
+  'When the page works a calculation, solves an equation or a problem, or',
+  'derives a result, keep it as a "working" block: text is the problem in',
+  'one plain sentence, and working sets out the working. given lists what',
+  'the problem gives, each "symbol = value" in LaTeX with its unit in',
+  '\\text{} ("u = 5\\,\\text{m/s}"), with only the numbers the page gives.',
+  'wanted says in words what is asked. steps are the working, one line a',
+  "step, in the page's own order, never skipped, merged or reordered. Each",
+  'step has latex, the whole line after the step as display LaTeX without $',
+  '("2x = 8"); does, what is done to get it, in plain words ("subtract 3',
+  'from both sides", "put in the numbers"); why, why it is allowed or why it',
+  'helps, or null; changes, the parts of the line the step changed, as LaTeX',
+  'pieces of it; and says, what a teacher says aloud for the step, the maths',
+  'in words ("so two x is eight"). A line that goes on from the one before',
+  'begins with "=" ("= x + 6"). answer is the result with its unit ("v =',
+  '11\\,\\text{m/s}"); check puts the answer back into the problem as a line',
+  'of numbers ("2(4) + 3 = 11"), or null.',
+  'Break the working down for the reader the document is written for (the',
+  'summary says who): for a young learner, one operation a step; for a',
+  'school student, the usual steps with the rule named in why ("do the same',
+  'to both sides"); for a university or professional reader, the key steps',
+  'with the method named. Where the page leaves out a step that reader needs,',
+  "put it in. A word problem's first step writes the equation from what is",
+  'given. Every line must be true: code checks each one before anyone sees',
+  'it.',
+  'A formula or an equation the page states without working it is a "math"',
+  'block. In running text, write a symbol or a short expression as LaTeX',
+  'between single dollar signs ($v$, $x^2$).',
+].join(' ');
+
+const MATHS_BLOCK_SHAPE =
+  'Reply with JSON: {"blocks":[{"type":"headingOne"|"headingTwo"|"paragraph"|"bullet"|"code"|"table"|"math"|"working","text":"...","working":{...}|null}]}. ' +
+  'working is null on every block but a "working" block. No markdown, no numbering in the text, no other keys.';
+
+/**
  * Code passes through untouched. One mangled identifier destroys a
  * developer's trust in every other page, so the rule is absolute: no
  * rewriting, no summarising, no "explaining inline", no reformatting.
@@ -204,6 +245,27 @@ export const PROMPTS = {
     TABLE_SHAPE,
     MATH_SHAPE,
     BLOCK_SHAPE,
+  ].join(' '),
+
+  /**
+   * A maths page, rewritten as any page is, its working kept as steps a
+   * learner can follow, every one checked by code afterwards.
+   */
+  simplifyMaths: [
+    'You rewrite one page of a study document that works maths, so that',
+    'understanding it takes the least possible effort, and so that every',
+    'calculation on it can be followed one step at a time.',
+    'Everyday words only in the prose, and the plain idea BEFORE the name:',
+    'say what a thing is or does first, then give its real name once in',
+    'brackets. Short sentences, one idea each.',
+    'Simplify the language, never the maths: every number, symbol, unit and',
+    'step stays exactly right, and nothing the page does not give is added,',
+    'except the steps of its own working that a learner needs.',
+    KEEP_TERMS,
+    WORKED_STEPS,
+    CODE_VERBATIM,
+    TABLE_SHAPE,
+    MATHS_BLOCK_SHAPE,
   ].join(' '),
 
   /**

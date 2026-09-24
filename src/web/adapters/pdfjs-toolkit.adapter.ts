@@ -40,6 +40,9 @@ const stripScannerWatermarks = (text: string): string =>
  * Imported lazily because pdfjs-dist evaluates browser globals at module load;
  * requiring it at the top of a Nest module breaks the bootstrap.
  */
+/** How long a page's image may take to arrive once its operators are read. */
+const IMAGE_WAIT_MS = 5000;
+
 @Injectable()
 export class PdfjsToolkitAdapter implements PdfToolkitPort {
   private readonly logger = new Logger(PdfjsToolkitAdapter.name);
@@ -200,19 +203,25 @@ export class PdfjsToolkitAdapter implements PdfToolkitPort {
             const args = ops.argsArray[i] as unknown[];
             const name = typeof args?.[0] === 'string' ? args[0] : '';
             if (!name) continue;
+            // pdfjs keeps an image a document shares ("g_…") with the
+            // document's objects, and a page's own with the page's.
+            const store = name.startsWith('g_') ? page.commonObjs : page.objs;
             const image = await new Promise<{
               width: number;
               height: number;
               data?: Uint8ClampedArray | Uint8Array;
               kind?: number;
             } | null>((resolve) => {
+              // An image can arrive after the operator list does: wait for
+              // it a while, rather than take its absence for none.
+              const timer = setTimeout(() => resolve(null), IMAGE_WAIT_MS);
               try {
-                if (page.objs.has(name)) {
-                  page.objs.get(name, (value: never) => resolve(value));
-                } else {
-                  resolve(null);
-                }
+                store.get(name, (value: never) => {
+                  clearTimeout(timer);
+                  resolve(value);
+                });
               } catch {
+                clearTimeout(timer);
                 resolve(null);
               }
             });
@@ -298,19 +307,24 @@ export class PdfjsToolkitAdapter implements PdfToolkitPort {
             const name = typeof args?.[0] === 'string' ? args[0] : '';
             if (!name) continue;
 
+            // pdfjs keeps an image a document shares ("g_…") with the
+            // document's objects, and a page's own with the page's; either
+            // can arrive after the operator list does.
+            const store = name.startsWith('g_') ? page.commonObjs : page.objs;
             const image = await new Promise<{
               width: number;
               height: number;
               data?: Uint8ClampedArray | Uint8Array;
               kind?: number;
             } | null>((resolve) => {
+              const timer = setTimeout(() => resolve(null), IMAGE_WAIT_MS);
               try {
-                if (page.objs.has(name)) {
-                  page.objs.get(name, (value: never) => resolve(value));
-                } else {
-                  resolve(null);
-                }
+                store.get(name, (value: never) => {
+                  clearTimeout(timer);
+                  resolve(value);
+                });
               } catch {
+                clearTimeout(timer);
                 resolve(null);
               }
             });

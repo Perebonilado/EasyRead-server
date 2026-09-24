@@ -2,6 +2,7 @@ import { profileKey } from '../../business/domain/scene-profile';
 import { castKey, setsKey, storyKey } from '../../business/domain/scene-story';
 import { Injectable } from '@nestjs/common';
 import { InjectModel } from '@nestjs/sequelize';
+import { Op } from 'sequelize';
 import type {
   VisualPositionRecord,
   VisualSceneRecord,
@@ -99,6 +100,23 @@ export class SequelizeVisualSceneRepository implements VisualSceneRepository {
     const rows = await this.model.findAll({
       where: { documentId, contentVersion, generatorVersion },
       order: [['pageNumber', 'ASC']],
+    });
+    return rows.map(toRecord);
+  }
+
+  async listUnfinished(input: {
+    generatorVersion: string;
+    before: Date;
+    limit: number;
+  }): Promise<VisualSceneRecord[]> {
+    const rows = await this.model.findAll({
+      where: {
+        generatorVersion: input.generatorVersion,
+        status: { [Op.in]: ['pending', 'making'] },
+        updatedAt: { [Op.lt]: input.before },
+      },
+      order: [['updatedAt', 'ASC']],
+      limit: input.limit,
     });
     return rows.map(toRecord);
   }

@@ -21,6 +21,7 @@ import { SimplifyPageProcessor } from './pipeline/processors/simplify.processor'
 import { SummarizeProcessor } from './pipeline/processors/summarize.processor';
 import { TopicsProcessor } from './pipeline/processors/topics.processor';
 import { PurgeService } from './pipeline/purge.service';
+import { VisualWatchdog } from './pipeline/visual-watchdog.service';
 import { WorkerRunner } from './pipeline/worker-runner.service';
 
 /**
@@ -52,6 +53,7 @@ import { WorkerRunner } from './pipeline/worker-runner.service';
     ImportProcessor,
     WorkerRunner,
     PurgeService,
+    VisualWatchdog,
   ],
 })
 export class WorkerModule {}

@@ -148,7 +148,14 @@ plays in the browser from what the scene says; the server sends no
 audio for it. Labels are lifted out of the drawings and set by the stage,
 and every page's log line `frame audit` counts anything left overlapping.
 Scenes are made by generator `scene-2`: pages made before are made again
-the next time they are asked for.
+the next time they are asked for. Their jobs go on a queue named for the
+generator (`visual-scene-2`), so while a deploy runs old and new workers
+side by side, an old worker never takes a new page and drops it. The
+worker also runs a watchdog: every minute, a page still waiting or being
+made whose job is gone is queued again, and one whose job failed for good
+is marked failed, so the player moves past it rather than waiting on it.
+After the first deploy, jobs left on the old `visual-scene` queue are for
+old rows and can be ignored.
 
 Each document gets a profile the first time a page of it is made (one
 `gpt-4.1-mini` call, `AI_MODEL_SCENE_PROFILE`), kept in storage beside its

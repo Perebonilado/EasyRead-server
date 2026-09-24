@@ -60,6 +60,16 @@ export interface VisualSceneRepository {
     contentVersion: number,
     generatorVersion: string,
   ): Promise<VisualSceneRecord[]>;
+  /**
+   * Pages of a generator still waiting or being made that have not
+   * changed since `before`, the longest waiting first: what the watchdog
+   * checks still has a job carrying it.
+   */
+  listUnfinished(input: {
+    generatorVersion: string;
+    before: Date;
+    limit: number;
+  }): Promise<VisualSceneRecord[]>;
   /** A pending row for the page, or the one already there. */
   ensure(input: {
     documentId: string;

@@ -6,16 +6,17 @@ import Redis from 'ioredis';
 import type { PipelineStep } from '../../contracts';
 import type {
   ExportJob,
+  JobQueuePort,
   LectureAlignJob,
   LectureBoardJob,
-  LectureFollowJob,
-  VisualSceneJob,
   LectureChapterJob,
   LectureDiagramJob,
+  LectureFollowJob,
   LectureVoiceJob,
-  JobQueuePort,
   PipelineJob,
   SimplifyJob,
+  VisualJobState,
+  VisualSceneJob,
 } from '../../business/ports/job-queue.port';
 import {
   importJobId,
@@ -237,6 +238,37 @@ export class BullmqQueueAdapter implements JobQueuePort, OnModuleDestroy {
           job.contentVersion,
           job.style,
         ),
+    );
+  }
+
+  async visualSceneStates(
+    pages: Pick<
+      VisualSceneJob,
+      'documentId' | 'contentVersion' | 'pageNumber'
+    >[],
+  ): Promise<VisualJobState[]> {
+    const queue = this.queue(QUEUE.visualScene);
+    return Promise.all(
+      pages.map(async (page): Promise<VisualJobState> => {
+        const job = await queue.getJob(
+          visualSceneJobId(
+            page.documentId,
+            page.pageNumber,
+            page.contentVersion,
+          ),
+        );
+        if (!job) return { state: 'gone' };
+        const state = await job.getState();
+        // Finished, yet the page is not made: nothing carries it any more.
+        if (state === 'completed' || state === 'unknown')
+          return { state: 'gone' };
+        if (state === 'failed')
+          return {
+            state: 'failed',
+            reason: job.failedReason || 'The page could not be made',
+          };
+        return { state: 'live' };
+      }),
     );
   }
 

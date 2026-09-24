@@ -33,6 +33,7 @@ import {
 import { dialogueOf, quotedSpans } from './scene-dialogue';
 import {
   directionsIn,
+  speakersIn,
   type Actor,
   type NarratedMove,
   type Passage,
@@ -444,6 +445,12 @@ export interface SceneStage {
   arrows: SceneArrow[];
   /** A place shown at this step: the scene behind the stage from now on. */
   backdrop?: string;
+  /** Who comes into view here without arriving: in the scene all along, now shown. */
+  cutIn?: string[];
+  /** Who arrives here as the words say ("Zainab ran up the path"): they walk on. */
+  arrive?: string[];
+  /** Who leaves here as the words say ("Baba Sule walked off"): they walk off. */
+  leave?: string[];
 }
 
 export interface SceneEffect {
@@ -736,10 +743,22 @@ function comingsAndGoings(
   characters: ReadonlySet<string>,
   mended: string[],
 ): void {
-  const wordAt = (p: Passage) =>
-    wordsOf(beats[p.beat].say.slice(0, p.at)).length;
+  /** The word a passage is said on: the one its first character is in. */
+  const wordAt = (p: Passage) => {
+    const before = beats[p.beat].say.slice(0, p.at);
+    const n = wordsOf(before).length;
+    return /\S$/u.test(before) ? n - 1 : n;
+  };
   const key = (beat: number, word: number) => beat * 100_000 + word;
   const keyOf = (step: SceneStep) => key(step.at.beat, step.word);
+  /** A stage as it was, as the base of a new one: who came into it then is no newcomer now. */
+  const base = (stage: SceneStage): SceneStage => {
+    const out = { ...stage };
+    delete out.cutIn;
+    delete out.arrive;
+    delete out.leave;
+    return out;
+  };
   const without = (stage: SceneStage, id: string): SceneStage | null => {
     const show = stage.show.filter((one) => one !== id);
     if (!show.length) return null;
@@ -758,9 +777,9 @@ function comingsAndGoings(
     steps.forEach((step, i) => {
       if (keyOf(step) <= at) k = i;
     });
-    const standing = [...steps.slice(0, k + 1)]
-      .reverse()
-      .find((s) => s.stage)?.stage;
+    let at0 = k;
+    while (at0 >= 0 && !steps[at0].stage) at0 -= 1;
+    const standing = at0 >= 0 ? steps[at0].stage : null;
     const shown = standing?.show.includes(who) ?? false;
     // The writer's own staging in this sentence or the next.
     const nearby = steps.filter(
@@ -768,22 +787,35 @@ function comingsAndGoings(
     );
     // Until the words say otherwise: where they bring them back, or take them off.
     const until = passages
-      .filter((p) => p.who === who && p.how !== how)
+      .filter((p) => p.who === who && p.how !== how && !p.said)
       .map((p) => key(p.beat, wordAt(p)))
       .find((later) => later > at);
+    // Speaking after the words sent them away, they call from off the stage.
+    if (passage.said) {
+      const last = passages
+        .filter((p) => p.who === who && !p.said && key(p.beat, wordAt(p)) <= at)
+        .pop();
+      if (last?.how === 'leave') continue;
+    }
     const phrase = wordsOf(beats[passage.beat].say)
       .slice(word, word + 4)
       .join(' ');
     let stage: SceneStage;
     if (how === 'leave') {
       if (!standing || !shown) continue;
-      if (nearby.some((s) => !s.stage!.show.includes(who))) continue;
-      stage = without(standing, who) ?? {
+      // The writer takes them off nearby: where the words say they go, they walk off.
+      const taking = nearby.find((s) => !s.stage!.show.includes(who));
+      if (taking) {
+        taking.stage!.leave = [...(taking.stage!.leave ?? []), who];
+        continue;
+      }
+      stage = without(base(standing), who) ?? {
         layout: 'one',
         show: [],
         arrows: [],
         ...(standing.backdrop ? { backdrop: standing.backdrop } : {}),
       };
+      stage.leave = [who];
       for (const later of steps)
         if (
           later.stage?.show.includes(who) &&
@@ -792,13 +824,31 @@ function comingsAndGoings(
         )
           later.stage = without(later.stage, who);
     } else {
-      if (shown) continue;
-      if (nearby.some((s) => s.stage!.show.includes(who))) continue;
+      if (shown) {
+        // On since the writer's step just before the words: they arrive there.
+        let prior = at0 - 1;
+        while (prior >= 0 && !steps[prior].stage) prior -= 1;
+        if (
+          !passage.said &&
+          standing &&
+          steps[at0].at.beat >= passage.beat - 1 &&
+          !(prior >= 0 && steps[prior].stage!.show.includes(who))
+        )
+          standing.arrive = [...(standing.arrive ?? []), who];
+        continue;
+      }
+      // The writer brings them on nearby: where the words say they arrive, they walk on.
+      const bringing = nearby.find((s) => s.stage!.show.includes(who));
+      if (bringing) {
+        if (!passage.said)
+          bringing.stage!.arrive = [...(bringing.stage!.arrive ?? []), who];
+        continue;
+      }
       const show = [...(standing?.show ?? []), who];
       if (show.length > MAX_ON_STAGE) continue;
       stage = standing
         ? {
-            ...standing,
+            ...base(standing),
             layout: fitLayout(
               standing.layout === 'one' ? 'row' : standing.layout,
               show.length,
@@ -806,6 +856,8 @@ function comingsAndGoings(
             show,
           }
         : { layout: 'one', show, arrows: [] };
+      if (passage.said) stage.cutIn = [who];
+      else stage.arrive = [who];
       // They stay among the people the writer shows after, until they go.
       for (const later of steps) {
         const s = later.stage;
@@ -835,7 +887,9 @@ function comingsAndGoings(
       effects: [],
     });
     mended.push(
-      `${who} ${how === 'leave' ? 'leaves' : 'comes'} at "${phrase}", as the words say`,
+      passage.said
+        ? `${who} is shown as they speak, at "${phrase}"`
+        : `${who} ${how === 'leave' ? 'leaves' : 'comes'} at "${phrase}", as the words say`,
     );
   }
 }
@@ -1389,9 +1443,17 @@ export function mendScript(
       ),
     );
     for (const { beat, ...act } of acts) (beats[beat].acts ??= []).push(act);
+    const said = speakersIn(
+      beats.map((beat) => beat.say),
+      new Map(
+        beats.flatMap((beat, k) =>
+          beat.lines?.length ? [[k, beat.lines] as const] : [],
+        ),
+      ),
+    );
     comingsAndGoings(
       steps,
-      passages,
+      [...passages, ...said].sort((a, b) => a.beat - b.beat || a.at - b.at),
       beats,
       new Set(speaking.map((one) => one.id)),
       mended,

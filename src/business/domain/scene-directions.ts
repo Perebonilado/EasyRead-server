@@ -55,6 +55,39 @@ export interface Passage {
   at: number;
   who: string;
   how: 'enter' | 'leave';
+  /** Brought in by speaking, not by the words: in the scene all along, shown now. */
+  said?: true;
+}
+
+/** A line said from somewhere else: from the kitchen, over the phone. */
+const ELSEWHERE =
+  /\b(?:from (?:the |inside|outside|behind|upstairs|downstairs|far|across|another|next door|somewhere)|(?:on|over) the (?:phone|radio)|in (?:a|her|his|their) (?:letter|message))\b/iu;
+
+/**
+ * Whoever speaks and is not on the stage is brought into view as their
+ * line starts: a line from somewhere else ("…," Mum called from the
+ * kitchen) excepted, and anyone the words have sent away.
+ */
+export function speakersIn(
+  sentences: readonly string[],
+  lines: ReadonlyMap<
+    number,
+    readonly { span: [number, number]; speaker: string }[]
+  >,
+): Passage[] {
+  const out: Passage[] = [];
+  sentences.forEach((sentence, beat) => {
+    if (ELSEWHERE.test(sentence)) return;
+    for (const line of lines.get(beat) ?? [])
+      out.push({
+        beat,
+        at: line.span[0],
+        who: line.speaker,
+        how: 'enter',
+        said: true,
+      });
+  });
+  return out;
 }
 
 /** How people go on foot, or otherwise. */
@@ -153,6 +186,13 @@ const VERBS: {
 /** Words before a verb that say it is not happening: wanted, would, did not. */
 const NOT_DONE =
   /\b(?:to|would|will|could|should|might|must|can|cannot|can't|couldn't|wouldn't|didn't|did not|don't|do not|doesn't|does not|never|not|let's|let us|about to)\s+(?:\p{L}+ly\s+)?$/iu;
+
+/**
+ * Words that tell of what happens as a rule, not now: "every evening",
+ * "usually", "used to". A sentence that says them tells no one to move.
+ */
+const HABIT =
+  /\b(?:(?:every|each) (?:morning|evening|afternoon|day|night|week|year|time|summer|winter|spring|autumn)|usually|always|often|sometimes|used to)\b/iu;
 
 /** Words that join a clause to the verb without naming anyone: "and then", "slowly". */
 const FILLER =
@@ -329,6 +369,7 @@ export function directionsIn(
       subjects = who;
       if (NOT_DONE.test(outside.slice(Math.max(0, verb.at - 24), verb.at)))
         continue;
+      if (HABIT.test(outside.slice(0, verb.at))) continue;
       if (verb.does === 'enter' || verb.does === 'leave') {
         for (const id of who)
           passages.push({ beat, at: verb.at, who: id, how: verb.does });

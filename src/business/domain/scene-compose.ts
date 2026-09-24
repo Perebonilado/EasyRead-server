@@ -469,6 +469,11 @@ export function composeScene(input: ComposeInput): {
   let saying = 1;
   let before: string[] = [];
   let focus: string | null = null;
+  /** Whether a story's character has been on the stage yet, and the sentence the stage was first set in. */
+  let charactersSeen = false;
+  let firstBeat: number | undefined;
+  /** Who a cut took off the stage, until they are back. */
+  const cutAway = new Set<string>();
   // The scene behind the stage: the page's own place from the start, and
   // each place the writer shows from its step on, when it was painted.
   const painted = (id: string | null | undefined) =>
@@ -511,6 +516,9 @@ export function composeScene(input: ComposeInput): {
     });
     before = stage.show;
     focus = stage.show[0] ?? null;
+    charactersSeen = stage.show.some(
+      (id) => castById.get(id)?.kind === 'character',
+    );
   }
   for (const timedStep of timed) {
     const { atMs } = timedStep;
@@ -541,13 +549,48 @@ export function composeScene(input: ComposeInput): {
       }));
       const enter: SceneStepDto['enter'] = {};
       const newcomers = step.stage.show.filter((id) => !before.includes(id));
+      const arriving = new Set(step.stage.arrive ?? []);
+      const leaving = new Set(step.stage.leave ?? []);
+      // A cut: a new place, or everyone on the stage gone or swapped for
+      // others, where no words bring anyone or take anyone off. Who leaves
+      // fades out and who comes fades in.
+      const place = painted(step.stage.backdrop);
+      const cut =
+        before.length > 0 &&
+        ((place !== null && place !== backdrop) ||
+          (!step.stage.show.some((id) => before.includes(id)) &&
+            !newcomers.some((id) => arriving.has(id)) &&
+            !before.some((id) => leaving.has(id))));
+      // A story's characters there as the page opens, in its first
+      // sentence, are found in the scene, and one shown as they speak was
+      // there all along: they fade in. Those the words bring walk on, and
+      // anyone who comes later.
+      const character = (id: string) => castById.get(id)?.kind === 'character';
+      firstBeat ??= step.at.beat;
+      const opening = !charactersSeen && step.at.beat === firstBeat;
       for (const id of newcomers)
-        enter[id] = entranceFor(
-          id,
-          { layout: step.stage.layout, arrows },
-          before,
-          byId.get(id),
-        );
+        enter[id] =
+          character(id) &&
+          (cut ||
+            step.stage.cutIn?.includes(id) ||
+            (opening && !arriving.has(id)) ||
+            (cutAway.has(id) && !arriving.has(id)))
+            ? { how: 'fade' }
+            : entranceFor(
+                id,
+                { layout: step.stage.layout, arrows },
+                before,
+                byId.get(id),
+              );
+      if (step.stage.show.some(character)) charactersSeen = true;
+      // Whoever a cut takes off the stage comes back by a cut too, not
+      // walking on; whoever walks off is gone.
+      for (const id of before)
+        if (!step.stage.show.includes(id)) {
+          if (cut) cutAway.add(id);
+          else cutAway.delete(id);
+        }
+      for (const id of newcomers) cutAway.delete(id);
       const zoom = step.effects.find((e) => e.do === 'zoom')?.target;
       focus =
         newcomers[0] ??
@@ -565,6 +608,7 @@ export function composeScene(input: ComposeInput): {
         enter,
         focus,
         ...(backdrop ? { backdrop } : {}),
+        ...(cut ? { cut: true as const } : {}),
       });
       before = step.stage.show;
     }

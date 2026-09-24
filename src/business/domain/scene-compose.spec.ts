@@ -928,6 +928,144 @@ describe('what a character says, in a bubble', () => {
     );
   });
 
+  it('finds characters in the scene as it opens, walks on those the words bring, and cuts in a speaker', () => {
+    const staged = (second: { arrive?: string[]; cutIn?: string[] }) =>
+      composeScene({
+        script: {
+          ...talking,
+          steps: [
+            {
+              at: { beat: 0, phrase: 'Plants make' },
+              word: 0,
+              stage: { layout: 'one', show: ['mira'], arrows: [] },
+              effects: [],
+            },
+            {
+              at: { beat: 1, phrase: 'They need' },
+              word: 0,
+              stage: {
+                layout: 'row',
+                show: ['mira', 'fox'],
+                arrows: [],
+                ...second,
+              },
+              effects: [],
+            },
+          ],
+        },
+        drawings: new Map([
+          ['mira', figure()],
+          ['fox', figure()],
+        ]),
+        beats: beatsSaid,
+        durationMs: 16_000,
+        timing: 'voice',
+        generator: 'scene-2',
+      }).scene;
+    const arriving = staged({ arrive: ['fox'] });
+    expect(arriving.steps[0].enter).toEqual({ mira: { how: 'fade' } });
+    expect(arriving.steps[1].enter.fox.how).toBe('slide');
+    expect(arriving.steps[1].cut).toBeUndefined();
+    expect(staged({ cutIn: ['fox'] }).steps[1].enter.fox.how).toBe('fade');
+  });
+
+  it('cuts, rather than walks, when the stage is swapped whole', () => {
+    const swapped = composeScene({
+      script: {
+        ...talking,
+        steps: [
+          {
+            at: { beat: 0, phrase: 'Plants make' },
+            word: 0,
+            stage: { layout: 'one', show: ['mira'], arrows: [] },
+            effects: [],
+          },
+          {
+            at: { beat: 1, phrase: 'They need' },
+            word: 0,
+            stage: { layout: 'one', show: ['fox'], arrows: [] },
+            effects: [],
+          },
+        ],
+      },
+      drawings: new Map([
+        ['mira', figure()],
+        ['fox', figure()],
+      ]),
+      beats: beatsSaid,
+      durationMs: 16_000,
+      timing: 'voice',
+      generator: 'scene-2',
+    }).scene;
+    expect(swapped.steps[1]).toMatchObject({
+      cut: true,
+      enter: { fox: { how: 'fade' } },
+    });
+    // The stage emptied: a cut away, unless the words take them off.
+    const emptied = (leave?: string[]) =>
+      composeScene({
+        script: {
+          ...talking,
+          steps: [
+            talking.steps[0],
+            {
+              at: { beat: 1, phrase: 'They need' },
+              word: 0,
+              stage: {
+                layout: 'one',
+                show: [],
+                arrows: [],
+                ...(leave ? { leave } : {}),
+              },
+              effects: [],
+            },
+          ],
+        },
+        drawings: new Map([
+          ['mira', figure()],
+          ['fox', figure()],
+        ]),
+        beats: beatsSaid,
+        durationMs: 16_000,
+        timing: 'voice',
+        generator: 'scene-2',
+      }).scene.steps[1].cut;
+    expect(emptied()).toBe(true);
+    expect(emptied(['fox'])).toBeUndefined();
+  });
+
+  it('cuts back to whoever was there before a cut away', () => {
+    const back = composeScene({
+      script: {
+        ...talking,
+        steps: [
+          talking.steps[0],
+          {
+            at: { beat: 1, phrase: 'They need' },
+            word: 0,
+            stage: { layout: 'one', show: [], arrows: [] },
+            effects: [],
+          },
+          {
+            at: { beat: 2, phrase: 'Inside the leaf' },
+            word: 0,
+            stage: { layout: 'one', show: ['mira'], arrows: [] },
+            effects: [],
+          },
+        ],
+      },
+      drawings: new Map([
+        ['mira', figure()],
+        ['fox', figure()],
+      ]),
+      beats: beatsSaid,
+      durationMs: 16_000,
+      timing: 'voice',
+      generator: 'scene-2',
+    }).scene;
+    expect(back.steps[2].enter).toEqual({ mira: { how: 'fade' } });
+  });
+
   it('opens a bubble for each line, from just before its first word', () => {
     const says = scene.effects.filter((e) => e.do === 'say');
     expect(says.map((e) => [e.target, e.atMs, e.say?.text])).toEqual([

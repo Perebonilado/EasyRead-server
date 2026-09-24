@@ -452,3 +452,41 @@ Actors are the story's characters and people. A figure drawn by the kit has the 
   - the fire glow.
 - **Frame rate** checked with the browser's performance timing.
 - **Commits** local on `visualize-acting`, with a status section at the end of this plan.
+
+## Status (2026-09-24)
+
+All seven milestones are built and tested, on `visualize-acting` in both repos. Nothing is pushed.
+
+- **M1 dialogue.** Every quoted line is given to its speaker from the sentence's own words, said in their voice, and shown in its own bubble. The fire page has three voices and eight bubbles. A page that turns the story's quotes into reported speech goes back to the writer.
+- **M2 stages.** Detected from the document itself: 11 of 13 local documents and 5 of 5 samples came out as expected. A recipe for each stage; the photosynthesis page came out at 112, 174 and 243 words for early, middle and higher.
+- **M3 the rig.** Eyes, brows, head, arms at shoulder and elbow, lean, and six mouth shapes. A figure at rest is unchanged. Every person in a story is drawn afresh on each page, so books made before the rig get it too.
+- **M4 the performance.** Listeners look at whoever speaks. A speaker turns and opens a hand to whoever the line names, else whom they answer, else whom they spoke to last. Mouths follow the words; nods, brows and gestures play.
+- **M4b stage directions from the words** (added while testing). The narration's verbs are acted at the word that says them: hug, wave, nod, head shake, laugh, hop, clap, sob, shrug, point (at the sky too), give, look. "She" and "he" are known by each character's voice. The following are not acted:
+  - anything wanted, denied or habitual ("every evening", "used to");
+  - anything inside a quote.
+
+  Who comes and goes is staged where the writer didn't:
+  - a character walks on or off at "came walking", "ran up" or "walked off down the road";
+  - someone who speaks while off the stage is cut in;
+  - a lesson's ring or pulse on a character becomes the others looking at them.
+- **M5 the player.** Gaze, turn, lip-sync, moves and walking are all pure of time. Walks run at about a quarter of the stage a second, easing in and out. The camera leans toward a speaker and frames two when asked. Traits show for a while after a character arrives, then fade. Moves were tuned on a pose sheet so waves and pointing clear the head.
+- **Film grammar** (added while testing):
+  - characters there as a page opens fade in; only those the words bring walk on;
+  - swapping the whole stage or changing place is a cut, and people fade out and in;
+  - after a cutaway, people cut back in rather than walking on again.
+- **M6 a world that moves.**
+  - Parallax: the scenery moves at 40% of the camera.
+  - Light and weather from a place's sound: fire glow, rain, wind-blown leaves, glints on water. A place with no sound takes one from how it looks.
+  - The set painter may mark groups to flicker, twinkle, sway, ripple or drift.
+- **M7 end to end.** Remade with the real writer and voice:
+  - the fire story;
+  - a new walking test story (The Lost Goat: an arrival, two hugs, a wave and an exit);
+  - The Lantern Keeper's four pages.
+
+  Watched on `/dev/stage`: it plays at 120 fps (median frame 8.3 ms, 95th percentile 8.8 ms). The lesson pages for each stage were compared in M2.
+- **Tests:** server 1278, client 53. Type checks and lint are clean.
+
+Still open:
+- Push and PRs, when Richard says.
+- Pages already made keep their old scenes until they are made again. New acting needs a new page make.
+- The set painter's moving classes only reach sets painted from now on.

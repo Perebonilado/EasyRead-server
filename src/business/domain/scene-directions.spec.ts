@@ -84,7 +84,7 @@ describe('what the narration says the characters do', () => {
     ]);
   });
 
-  it('acts nothing wanted, denied or said inside a quote', () => {
+  it('acts nothing wanted, denied, habitual or said inside a quote', () => {
     expect(
       read(
         [
@@ -92,6 +92,9 @@ describe('what the narration says the characters do', () => {
           'Zainab did not laugh.',
           '"Wave to Baba Sule!" said Zainab.',
           'Musa would never hug the goat.',
+          // What happens as a rule, not now.
+          'Every evening, Baba Sule walks out to the road.',
+          'Zainab usually waves at the boats.',
         ],
         goatCast,
       ),

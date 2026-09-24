@@ -1289,6 +1289,9 @@ describe('who comes and goes, and what they do, as the narration says', () => {
         'baba leaves at "walked off down the", as the words say',
       ]),
     );
+    // Marked, so they walk on and off rather than cut.
+    expect(script.steps[2].stage?.arrive).toEqual(['baba']);
+    expect(script.steps[3].stage?.leave).toEqual(['baba']);
   });
 
   it('keeps someone on who came, among the people the writer shows, until they go', () => {
@@ -1318,6 +1321,47 @@ describe('who comes and goes, and what they do, as the narration says', () => {
       [{ at: 10, who: 'baba', do: 'laugh', toward: null }],
       [],
     ]);
+  });
+
+  it('shows whoever speaks, cut in where they were all along, unless they speak from elsewhere or have gone', () => {
+    const talk = page();
+    talk.beats = [
+      say('Musa sat outside the shop.'),
+      say('"Is that you, Zainab?" asks Musa.'),
+      say('"It is me," says Zainab.'),
+      say('"Come and eat," Baba Sule calls from the house.'),
+      say('Zainab waves and runs off down the road.'),
+      say('"See you tomorrow!" Zainab shouts.'),
+    ];
+    talk.steps = [step(0, 'Musa sat', { layout: 'one', show: ['musa'] })];
+    const { script, mended } = mendScript(talk, { characters });
+    expect(
+      script.steps.map((s) => [
+        s.at.beat,
+        s.word,
+        s.stage?.show,
+        s.stage?.cutIn,
+      ]),
+    ).toEqual([
+      [0, 0, ['musa'], undefined],
+      // Zainab answers: shown as she speaks.
+      [2, 0, ['musa', 'zainab'], ['zainab']],
+      // Baba Sule calls from the house: not shown. Zainab runs off, and
+      // shouts from off the stage.
+      [4, 3, ['musa'], undefined],
+    ]);
+    expect(mended).toEqual(
+      expect.arrayContaining([
+        'zainab is shown as they speak, at ""It is me," says"',
+      ]),
+    );
+  });
+
+  it('marks where the words bring someone on, when the writer brings them there', () => {
+    const { script } = mendScript(page(), { characters });
+    // "Zainab ran up the path": the writer's own step brings her; she arrives.
+    expect(script.steps[1].stage?.arrive).toEqual(['zainab']);
+    expect(script.steps[0].stage?.arrive).toBeUndefined();
   });
 
   it('gives a place the sound of how it looks, when the story gave it none', () => {

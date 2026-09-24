@@ -1005,6 +1005,11 @@ export interface SceneStepDto {
   focus: string | null;
   /** The scene behind the stage: a place's drawing, by id; absent for none. */
   backdrop?: string;
+  /**
+   * The stage changes whole, a cut: who leaves fades out and who comes fades
+   * in, where people would otherwise walk. Absent on a change that is walked.
+   */
+  cut?: true;
 }
 
 export interface SceneEffectDto {

@@ -24,6 +24,8 @@ import type { NarratedMove } from './scene-directions';
 /** A line as it is said: who says it, when, and each word's time. */
 export interface SpokenLine {
   speaker: string;
+  /** Whom it is said to, when the screenplay says. */
+  to?: string;
   startMs: number;
   endMs: number;
   words: { text: string; startMs: number; endMs: number }[];
@@ -38,11 +40,45 @@ export interface DirectedMove {
   atMs: number;
   target: string;
   other: string | null;
-  do: NarratedMove | 'attend';
+  do: NarratedMove | 'attend' | 'lean-in';
 }
 
 /** Frames of the mouth's shapes a second. */
 export const MOUTH_FPS = 30;
+
+/**
+ * How someone moves, from what the story says they are like: how often
+ * and how quickly (energy), and how big (size). Both 1 for anyone the
+ * story says nothing of, or nothing these words tell.
+ */
+export interface ActingStyle {
+  energy: number;
+  size: number;
+}
+const NEUTRAL: ActingStyle = { energy: 1, size: 1 };
+const LIVELY =
+  /\b(?:playful|lively|cheerful|excited|energetic|impatient|cheeky|mischievous|curious|eager|funny|restless|chatty|boisterous|bubbly|adventurous|naughty|noisy)\b/i;
+const CALM =
+  /\b(?:calm|wise|gentle|patient|old|elderly|tired|sleepy|slow|serene|thoughtful|dignified|solemn|peaceful|storyteller)\b/i;
+const SHY =
+  /\b(?:shy|timid|nervous|scared|anxious|worried|fearful|meek|cautious)\b/i;
+const BIG = /\b(?:proud|loud|bossy|confident|dramatic|boastful|bold|brave)\b/i;
+
+/** Someone's style of moving, from the words the story uses of them. */
+export function styleOf(traits: readonly string[]): ActingStyle {
+  let energy = 1;
+  let size = 1;
+  for (const trait of traits) {
+    if (LIVELY.test(trait)) energy = Math.max(energy, 1.25);
+    if (CALM.test(trait)) energy = Math.min(energy, 0.8);
+    if (SHY.test(trait)) {
+      size = Math.min(size, 0.75);
+      energy = Math.min(energy, 0.85);
+    }
+    if (BIG.test(trait)) size = Math.max(size, 1.2);
+  }
+  return { energy, size };
+}
 
 /** How long each move the narration may ask for takes. */
 const MOVE_MS: Record<
@@ -216,9 +252,17 @@ export function actingOf(input: {
   durationMs: number;
   /** Whether they walk on and off, and between places: in a story. */
   walks: boolean;
+  /** What each is like, as the story says: how they move. */
+  traits?: ReadonlyMap<string, readonly string[]>;
+  /** Who the book meets for the first time on this page. */
+  firsts?: ReadonlySet<string>;
 }): Record<string, SceneActingDto> {
   const { steps, lines, durationMs } = input;
   const actors = new Set(input.actors);
+  const styles = new Map(
+    input.actors.map((id) => [id, styleOf(input.traits?.get(id) ?? [])]),
+  );
+  const styleFor = (id: string) => styles.get(id) ?? NEUTRAL;
   const onStage = presence(steps, durationMs);
   const on = (id: string, t: number) =>
     (onStage.get(id) ?? []).some(([a, b]) => a <= t && t < b);
@@ -261,18 +305,22 @@ export function actingOf(input: {
   // Nana"), else whom they answer, else whom they spoke to last, going
   // on, else whoever is nearest.
   const spokeTo = new Map<string, string>();
+  /** How many lines each has said so far. */
+  const spokenBy = new Map<string, number>();
   lines.forEach((line, i) => {
     const { speaker, startMs: from, endMs: to } = line;
     const before = lines[i - 1];
     const bare = new Set(
       line.words.map((w) => w.text.replace(/[^\p{L}\p{N}'-]/gu, '')),
     );
-    const called = [...input.names].find(
-      ([id, names]) =>
-        id !== speaker &&
-        on(id, from) &&
-        names.some((name) => bare.has(name.split(/\s+/)[0])),
-    )?.[0];
+    const called =
+      (line.to && on(line.to, from) ? line.to : undefined) ??
+      [...input.names].find(
+        ([id, names]) =>
+          id !== speaker &&
+          on(id, from) &&
+          names.some((name) => bare.has(name.split(/\s+/)[0])),
+      )?.[0];
     const last = spokeTo.get(speaker);
     const answering =
       called ??
@@ -305,13 +353,18 @@ export function actingOf(input: {
     const words = line.words;
     const said = words.map((w) => w.text).join(' ');
     // A gesture as a line starts: the hand opens toward whom they answer,
-    // or, with no one to face, the arms in turn.
-    if (words.length >= 4)
+    // or, with no one to face, the arms in turn. A lively one gestures on
+    // a short line too, and quicker; a calm one on every other long one.
+    const style = styleFor(speaker);
+    const fewest = style.energy > 1.1 ? 3 : style.energy < 0.9 ? 6 : 4;
+    const nth = spokenBy.get(speaker) ?? 0;
+    spokenBy.set(speaker, nth + 1);
+    if (words.length >= fewest && !(style.energy < 0.9 && nth % 2 === 1))
       move(
         speaker,
         from + 120,
         answering || i % 2 === 0 ? 'gesture' : 'gesture-left',
-        Math.min(1500, Math.max(800, (to - from) * 0.6)),
+        Math.min(1500, Math.max(800, (to - from) * 0.6)) / style.energy,
         answering ?? undefined,
       );
     // A nod on the stressed word: before a ! or ., else the longest.
@@ -428,9 +481,32 @@ export function actingOf(input: {
       case 'nod':
         move(who, at, 'nod', 600);
         break;
+      case 'lean-in':
+        move(who, at, 'lean-in', 1500, them ?? undefined);
+        break;
       default:
         move(who, at, one.do, MOVE_MS[one.do]);
     }
+  }
+
+  // Met for the first time: a move that says what they are like, a
+  // moment after they first come on. A lively one hops, a calm one nods
+  // slowly, a shy one looks down.
+  for (const id of input.firsts ?? []) {
+    const came = (onStage.get(id) ?? [])[0]?.[0];
+    if (came === undefined || !actors.has(id)) continue;
+    const style = styleFor(id);
+    const at = came + 700;
+    if (style.energy > 1.1) move(id, at, 'hop', 1100);
+    else if (style.size < 0.9)
+      gaze(id, {
+        from: at,
+        to: at + 1400,
+        target: '@down',
+        turn: 0,
+        rank: RANK.directed,
+      });
+    else if (style.energy < 0.9) move(id, at, 'nod', 900);
   }
 
   // A long quiet stretch: a glance now and then at someone else there.
@@ -464,6 +540,8 @@ export function actingOf(input: {
     const moved = moves.get(id);
     if (moved?.length) acted.moves = moved.sort((a, b) => a[0] - b[0]);
     if (input.walks && onStage.has(id)) acted.walks = true;
+    const { size } = styleFor(id);
+    if (size !== 1) acted.size = size;
     if (Object.keys(acted).length) out[id] = acted;
   }
   return out;

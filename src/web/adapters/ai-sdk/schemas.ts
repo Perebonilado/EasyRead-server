@@ -7,7 +7,12 @@ import {
   SCENE_LAYOUTS,
   SCENE_MOODS,
   SCENE_MUSIC,
+  LINE_PACES,
 } from '../../../business/domain/scene-script';
+import {
+  SCREENPLAY_BEATS,
+  SCREENPLAY_DOINGS,
+} from '../../../business/domain/scene-screenplay';
 import {
   PROFILE_KINDS,
   PROFILE_TONES,
@@ -625,6 +630,59 @@ export const sceneScriptSchema = z.object({
       effects: z
         .array(z.object({ target: z.string(), do: z.enum(SCENE_EFFECTS) }))
         .nullable(),
+    }),
+  ),
+});
+
+/**
+ * A story's page as a screenplay: its lines, its actions and the
+ * narrator's few words, with who and what is there as it opens, and its
+ * cast. Flat, as the lesson writer's is; mended in scene-screenplay.ts.
+ */
+export const sceneScreenplaySchema = z.object({
+  fit: z.enum(['good', 'poor']),
+  fitReason: z.string().nullable(),
+  title: z.string(),
+  mood: z.enum(SCENE_MOODS),
+  opening: z.array(z.string()),
+  beats: z.array(
+    z.object({
+      kind: z.enum(SCREENPLAY_BEATS),
+      who: z.string().nullable(),
+      to: z.string().nullable(),
+      say: z.string(),
+      do: z.enum(SCREENPLAY_DOINGS).nullable(),
+      state: z.string().nullable(),
+      show: z.string().nullable(),
+      pace: z.enum(LINE_PACES).nullable(),
+      hold: z.number().nullable(),
+      place: z.string().nullable(),
+      music: z.enum(SCENE_MUSIC).nullable(),
+      energy: z.enum(['low', 'high']).nullable(),
+    }),
+  ),
+  cast: z.array(
+    z.object({
+      id: z.string(),
+      kind: z.enum(['character', 'person', 'drawing', 'place']),
+      name: z.string(),
+      brief: z.string().nullable(),
+      motion: z.string().nullable(),
+      parts: z
+        .array(z.object({ name: z.string(), label: z.boolean() }))
+        .nullable(),
+      states: z
+        .array(z.object({ name: z.string(), look: z.string() }))
+        .nullable(),
+      shape: z.enum(DRAWING_SHAPES).nullable(),
+      sound: z.enum(SCENE_AMBIENCES).nullable(),
+      ref: z.string().nullable(),
+      state: z.enum([...EXPRESSIONS, ...KIT_FACES]).nullable(),
+      figure: figureSchema.nullable(),
+      count: z.number().int().nullable(),
+      pose: z.enum(FIGURE_POSES).nullable(),
+      signs: z.array(z.enum(FIGURE_SIGNS)).nullable(),
+      holding: z.enum(FIGURE_PROPS).nullable(),
     }),
   ),
 });

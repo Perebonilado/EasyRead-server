@@ -1,5 +1,11 @@
 import type { SceneStepDto } from '../../contracts';
-import { actingOf, mouthOf, shapesOf, type SpokenLine } from './scene-acting';
+import {
+  actingOf,
+  mouthOf,
+  shapesOf,
+  styleOf,
+  type SpokenLine,
+} from './scene-acting';
 
 /** A line said word by word, 300ms a word. */
 const said = (speaker: string, text: string, startMs: number): SpokenLine => {
@@ -217,5 +223,77 @@ describe('a page acted from its lines', () => {
     });
     expect(again.ada.moves).toEqual(acting.ada.moves);
     expect(again.kofi.look).toEqual(acting.kofi.look);
+  });
+});
+
+describe('what someone is like, in how they move', () => {
+  it('reads a lively one, a calm one, a shy one and a bold one from their traits', () => {
+    expect(styleOf(['playful', 'impatient'])).toEqual({
+      energy: 1.25,
+      size: 1,
+    });
+    expect(styleOf(['wise', 'storyteller'])).toEqual({ energy: 0.8, size: 1 });
+    expect(styleOf(['shy'])).toEqual({ energy: 0.85, size: 0.75 });
+    expect(styleOf(['brave'])).toEqual({ energy: 1, size: 1.2 });
+    expect(styleOf(['kind'])).toEqual({ energy: 1, size: 1 });
+  });
+
+  it('gestures on a short line when lively, on every other when calm, and hops or nods when first met', () => {
+    const three = (who: string, text: string, at: number) =>
+      said(who, text, at);
+    const acting = actingOf({
+      actors: ['ada', 'nana'],
+      names: new Map(),
+      steps: [step(0, ['ada', 'nana'])],
+      lines: [
+        three('ada', 'Tell us more!', 2000),
+        three('nana', 'Long ago, the moon lived in a village.', 4000),
+        three('nana', 'She lit a lamp for the fishermen every night.', 8000),
+      ],
+      narration: [],
+      directed: [],
+      durationMs: 14_000,
+      walks: true,
+      traits: new Map([
+        ['ada', ['playful']],
+        ['nana', ['wise', 'shy']],
+      ]),
+      firsts: new Set(['ada', 'nana']),
+    });
+    const moved = (id: string) =>
+      (acting[id].moves ?? []).map(([at, what]) => `${what}@${at}`);
+    // Three words, and lively: a gesture all the same; a hop as she comes on.
+    expect(moved('ada')).toEqual(
+      expect.arrayContaining(['gesture@2120', 'hop@700']),
+    );
+    // Calm: a gesture on the first long line, none on the next.
+    expect(moved('nana').filter((m) => m.startsWith('gesture'))).toEqual([
+      'gesture@4120',
+    ]);
+    // Shy: smaller moves, and eyes down as she is first met.
+    expect(acting.nana.size).toBe(0.75);
+    expect(acting.ada.size).toBeUndefined();
+    expect(lookAt(acting.nana.look, 1000)).toBe('@down');
+  });
+
+  it('turns to whom the screenplay says a line is for', () => {
+    const acting = actingOf({
+      actors: ['ada', 'kofi', 'nana'],
+      names: new Map([
+        ['ada', ['Ada']],
+        ['kofi', ['Kofi']],
+        ['nana', ['Nana Efua']],
+      ]),
+      steps: [step(0, ['ada', 'kofi', 'nana'])],
+      // The line names Nana, but is said to Kofi.
+      lines: [
+        { ...said('ada', 'Nana says you must come, Kofi.', 2000), to: 'kofi' },
+      ],
+      narration: [],
+      directed: [],
+      durationMs: 6000,
+      walks: true,
+    });
+    expect(lookAt(acting.ada.look, 2600)).toBe('kofi');
   });
 });

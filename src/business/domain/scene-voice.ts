@@ -12,6 +12,7 @@
 import {
   type SceneBeat,
   type SceneDelivery,
+  type LinePace,
   type SceneMood,
 } from './scene-script';
 import type { StoryBible, StoryCharacter, StoryVoice } from './scene-story';
@@ -41,16 +42,48 @@ export const SLOWEST = 0.82;
 const clamp = (n: number, [low, high]: readonly [number, number]) =>
   Math.min(high, Math.max(low, n));
 
+/**
+ * A screenplay's timing: a line at the speaker's own pace, the next line
+ * close behind it as a conversation goes; the narrator a touch slower,
+ * with a breath after.
+ */
+export const LINE_DELIVERY = { speed: 1, pause: 0.3 };
+export const NARRATION_DELIVERY = { speed: 0.95, pause: 0.55 };
+/** How a line's pace changes its speed. */
+export const LINE_PACE_SPEED: Record<LinePace, number> = {
+  calm: 1,
+  quick: 1.07,
+  slow: 0.9,
+  whisper: 0.9,
+  shout: 1.04,
+};
+/** The longest silence a sentence may keep after it, for what happens in it: as long as the voice holds. */
+export const HOLD_LIMIT_S = 3;
+
 /** Each sentence's pace and the silence after it, in seconds. */
 export function deliveryPieces(
-  beats: Pick<SceneBeat, 'delivery' | 'pause'>[],
+  beats: Pick<SceneBeat, 'delivery' | 'pause' | 'kind' | 'pace' | 'holdS'>[],
   /** Whom it is for: a child is spoken to more slowly, with longer pauses. */
   learners: { pace: number; pause: number } = { pace: 1, pause: 1 },
 ): { speed: number; pauseAfter: number }[] {
   return beats.map((beat, i) => {
-    const how = DELIVERY[beat.delivery] ?? DELIVERY.explain;
+    const how = beat.kind
+      ? beat.kind === 'line'
+        ? {
+            speed: LINE_DELIVERY.speed * LINE_PACE_SPEED[beat.pace ?? 'calm'],
+            // Before the narrator comes in, a breath more.
+            pause:
+              beats[i + 1]?.kind === 'narration'
+                ? NARRATION_DELIVERY.pause
+                : LINE_DELIVERY.pause,
+          }
+        : NARRATION_DELIVERY
+      : (DELIVERY[beat.delivery] ?? DELIVERY.explain);
     let pause = how.pause + (beat.pause === 'long' ? IDEA_CHANGE_S : 0);
-    if (beats[i + 1]?.delivery === 'key') pause = Math.max(pause, BEFORE_KEY_S);
+    if (beats[i + 1]?.delivery === 'key' && !beat.kind)
+      pause = Math.max(pause, BEFORE_KEY_S);
+    const paused =
+      Math.round(clamp(pause * learners.pause, PAUSE_RANGE) * 100) / 100;
     return {
       speed:
         Math.round(
@@ -59,8 +92,8 @@ export function deliveryPieces(
             SPEED_RANGE[1],
           ]) * 100,
         ) / 100,
-      pauseAfter:
-        Math.round(clamp(pause * learners.pause, PAUSE_RANGE) * 100) / 100,
+      // What happens after it without words takes its own time.
+      pauseAfter: Math.min(HOLD_LIMIT_S, Math.max(paused, beat.holdS ?? 0)),
     };
   });
 }

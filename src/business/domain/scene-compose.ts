@@ -45,6 +45,7 @@ import {
 } from './scene-layout';
 import {
   FACES,
+  STORY_MOVES,
   isCodeThing,
   quotedSpans,
   type SceneScript,
@@ -69,6 +70,8 @@ const EFFECT_STAGGER_MS = 180;
 export const OPENING_MIN_MS = 1200;
 /** How long a speech bubble stays after the voice has said its words. */
 const SAY_AFTER_MS = 700;
+/** A moment of quiet after a line starts this long after its last word. */
+const AFTER_WORDS_MS = 150;
 
 /** The most a bubble holds, in characters: a line or two, read at a glance. */
 const SAY_CHARS = 80;
@@ -112,10 +115,16 @@ export function spokenIn(sentence: string): string | null {
   return bubbleText(quoted.join(' … '));
 }
 
-/** The thing as the client gets it: its drawing, or a card with its name when the drawing failed. */
+/**
+ * The thing as the client gets it: its drawing, or a card with its name
+ * when the drawing failed. On a story's page nothing is labelled: no
+ * names, no captions, no labels on a drawing's parts. Who someone is, the
+ * story says; the only words on its stage are the ones its people speak.
+ */
 export function thingDto(
   thing: SceneThing,
   drawing: GatedDrawing | null | undefined,
+  story = false,
 ): SceneThingDto {
   if (thing.kind === 'stat')
     return {
@@ -151,14 +160,14 @@ export function thingDto(
     kind: 'drawing',
     svg: drawing.svg,
     aspect: drawing.aspect,
-    // A story's character is named where the book meets them; after that
-    // they are known by how they look, as a cartoon's cast is.
-    caption:
-      thing.kind === 'character' && !thing.first ? null : thing.name || null,
+    // A lesson's drawing is captioned with its name; on a story's page no
+    // one and nothing is.
+    caption: story || thing.kind === 'character' ? null : thing.name || null,
     parts: drawing.parts,
-    labels: drawing.labels,
+    // A story's drawing keeps the labels drawn in it hidden, pointed at or not.
+    labels: story ? {} : drawing.labels,
     states: drawing.states,
-    hidden: [],
+    hidden: story ? [...new Set(Object.values(drawing.labels))] : [],
     moves: drawing.moves,
     ambience:
       thing.kind === 'drawing' || thing.kind === 'place' ? thing.sound : null,
@@ -167,7 +176,7 @@ export function thingDto(
     ...(thing.kind === 'place'
       ? { backdrop: true as const, caption: null }
       : {}),
-    ...(drawing.callouts.length
+    ...(drawing.callouts.length && !story
       ? {
           callouts: Object.fromEntries(
             drawing.callouts.map((c) => [c.part, c.text]),
@@ -428,6 +437,135 @@ function labelledOnly(
   return out;
 }
 
+/** A close shot holds at least this long; one comes no sooner than this after the last. */
+const SHOT_LEAST_MS = 1200;
+const SHOT_APART_MS = 5000;
+/** Two framed together this long at most: then the whole stage again. */
+const TWO_SHOT_MOST_MS = 9000;
+/** Faces the camera moves in on. */
+const STRONG_FACES = new Set(['afraid', 'sad', 'surprised', 'angry', 'pain']);
+
+/**
+ * The camera on a screenplay's page, as a film cuts it: the whole stage
+ * as the page opens and while the narrator speaks; the two in a
+ * conversation framed together while others stand by, from its first
+ * line to its last; one alone, close, for a whisper, a shout, or a line
+ * said with a strong face. A shot ends before the stage changes, so an
+ * arrival is seen whole.
+ */
+export function storyShots(
+  script: SceneScript,
+  beats: readonly TimedBeat[],
+  steps: readonly SceneStepDto[],
+  effects: readonly SceneEffectDto[],
+  durationMs: number,
+): SceneEffectDto[] {
+  const shots: SceneEffectDto[] = [];
+  const people = new Set(
+    script.cast.flatMap((thing) =>
+      thing.kind === 'character' || thing.kind === 'person' ? [thing.id] : [],
+    ),
+  );
+  /** Who is on the stage at a moment: people, not things. */
+  const stageAt = (t: number) =>
+    ([...steps].reverse().find((step) => step.atMs <= t)?.show ?? []).filter(
+      (id) => people.has(id),
+    );
+  const changeAfter = (t: number) =>
+    steps.find((step) => step.atMs > t)?.atMs ?? durationMs;
+  const faceAt = (id: string, t: number) =>
+    [...effects]
+      .reverse()
+      .find(
+        (e) =>
+          e.target === id &&
+          e.do === 'show' &&
+          e.atMs <= t &&
+          e.part !== null &&
+          (FACES as readonly string[]).includes(e.part),
+      )?.part ?? null;
+  const lines = script.beats.flatMap((beat, k) =>
+    beat.kind === 'line' && beat.speaker && beats[k]
+      ? [{ beat, k, at: beats[k].startMs, end: beats[k].endMs }]
+      : [],
+  );
+  let lastClose = -Infinity;
+  for (let i = 0; i < lines.length;) {
+    const { beat, at, end } = lines[i];
+    const speaker = beat.speaker!;
+    const on = stageAt(at);
+    // A conversation of two, line after line, while others stand by.
+    const next = lines[i + 1];
+    const other =
+      beat.to ??
+      (next && next.k === lines[i].k + 1 && next.beat.speaker !== speaker
+        ? next.beat.speaker
+        : undefined);
+    if (other && on.includes(other) && on.length >= 3) {
+      let j = i;
+      while (
+        j + 1 < lines.length &&
+        lines[j + 1].k === lines[j].k + 1 &&
+        [speaker, other].includes(lines[j + 1].beat.speaker!)
+      )
+        j += 1;
+      if (j > i) {
+        const from = Math.max(0, at - 200);
+        const until = Math.min(
+          lines[j].end + 400,
+          changeAfter(at),
+          from + TWO_SHOT_MOST_MS,
+        );
+        if (until - from >= SHOT_LEAST_MS)
+          shots.push({
+            atMs: Math.round(from),
+            target: speaker,
+            part: other,
+            do: 'zoom',
+            untilMs: Math.round(until),
+          });
+        i = j + 1;
+        continue;
+      }
+    }
+    // Close on one: a whisper, a shout, a strong face.
+    const strong =
+      beat.pace === 'whisper' ||
+      beat.pace === 'shout' ||
+      STRONG_FACES.has(faceAt(speaker, at + 400) ?? '');
+    if (strong && on.length >= 2 && at - lastClose >= SHOT_APART_MS) {
+      const from = Math.max(0, at - 200);
+      const until = Math.min(end + 500, changeAfter(at));
+      if (until - from >= SHOT_LEAST_MS) {
+        shots.push({
+          atMs: Math.round(from),
+          target: speaker,
+          part: null,
+          do: 'zoom',
+          untilMs: Math.round(until),
+        });
+        lastClose = at;
+      }
+    }
+    i += 1;
+  }
+  return shots;
+}
+
+/** A story's drawings with nothing set beside them: the labels a lesson would, and what a character is like. */
+function unlabelled(
+  drawings: ReadonlyMap<string, GatedDrawing | null>,
+  story: boolean,
+): ReadonlyMap<string, GatedDrawing | null> {
+  if (!story) return drawings;
+  return new Map(
+    [...drawings].map(([id, drawing]) => [
+      id,
+      drawing ? { ...drawing, callouts: [] } : drawing,
+    ]),
+  );
+}
+
 /**
  * The scene the player plays. Steps are timed on their phrases and kept
  * apart; effects follow their step; a stretch longer than the quiet limit
@@ -440,17 +578,34 @@ export function composeScene(input: ComposeInput): {
   audit: Record<StagingName, Collision[][]>;
 } {
   const { script, beats, durationMs } = input;
-  const drawings = labelledOnly(input.drawings, script, input.profile?.stage);
+  // A story's page: its characters and places are the story's own.
+  const story = script.cast.some(
+    (thing) => thing.kind === 'character' || thing.kind === 'place',
+  );
+  const drawings = unlabelled(
+    labelledOnly(input.drawings, script, input.profile?.stage),
+    story,
+  );
   const things = script.cast.map((thing) =>
-    thingDto(thing, drawings.get(thing.id)),
+    thingDto(thing, drawings.get(thing.id), story),
   );
   const byId = new Map(things.map((thing) => [thing.id, thing]));
   const castById = new Map(script.cast.map((thing) => [thing.id, thing]));
 
-  // Every step on its words, in order; stage changes kept apart.
+  // Every step on its words, in order; stage changes kept apart. A moment
+  // a screenplay shows without words comes in the quiet after its line,
+  // or, before the first, in the quiet the page opens with.
+  const firstWord = beats[0]?.startMs ?? 0;
+  const momentMs = (beat: number, after: number) =>
+    beat >= 0 && beats[beat]
+      ? beats[beat].endMs + AFTER_WORDS_MS + after * 1000
+      : Math.max(0, firstWord - (script.lead ?? 0) * 1000 + after * 1000);
   const timed = script.steps.map((step) => ({
     step,
-    atMs: anchorMs(beats, step.at.beat, step.word),
+    atMs:
+      step.after !== undefined
+        ? momentMs(step.at.beat, step.after)
+        : anchorMs(beats, step.at.beat, step.word),
   }));
   timed.sort((a, b) => a.atMs - b.atMs);
   const stageTimes = spaced(
@@ -620,6 +775,23 @@ export function composeScene(input: ComposeInput): {
       if (effect.do === 'say') return;
       // Someone toward someone: acted, not a change on the stage.
       const actor = castById.get(effect.target)?.kind;
+      const acts = actor === 'character' || actor === 'person';
+      // What a story's people do, played by the rig: toward whom or what
+      // it names, or up at the sky.
+      if (
+        acts &&
+        ((STORY_MOVES as readonly string[]).includes(effect.do) ||
+          ((effect.do === 'look' || effect.do === 'point') &&
+            effect.part?.startsWith('@')))
+      ) {
+        directed.push({
+          atMs: at,
+          target: effect.target,
+          other: effect.part,
+          do: effect.do as DirectedMove['do'],
+        });
+        return;
+      }
       // On a story's character, a point or a pulse is attention, acted:
       // the others look at them; a pulse, a nod. Never a ring on a face.
       if (
@@ -708,6 +880,7 @@ export function composeScene(input: ComposeInput): {
       const to = words[words.length - 1][3];
       spoken.push({
         speaker: line.speaker,
+        ...(beat.to ? { to: beat.to } : {}),
         startMs: words[0][2],
         endMs: to,
         words: words.map((w) => ({
@@ -813,7 +986,8 @@ export function composeScene(input: ComposeInput): {
     lines: spoken,
     narration: script.beats.flatMap((beat, k) => {
       const t = beats[k];
-      if (!t) return [];
+      // A screenplay's line is all the speaker's: no narration in it.
+      if (!t || beat.kind === 'line') return [];
       const quoted = quotedSpans(beat.say);
       return t.words
         .filter((w) => !quoted.some(([a, b]) => w[0] >= a && w[1] <= b))
@@ -829,7 +1003,24 @@ export function composeScene(input: ComposeInput): {
     walks: script.cast.some(
       (thing) => thing.kind === 'character' || thing.kind === 'place',
     ),
+    traits: new Map(
+      script.cast.flatMap((thing) =>
+        thing.kind === 'character' && thing.traits?.length
+          ? [[thing.id, thing.traits] as const]
+          : [],
+      ),
+    ),
+    firsts: new Set(
+      script.cast.flatMap((thing) =>
+        thing.kind === 'character' && thing.first ? [thing.id] : [],
+      ),
+    ),
   });
+  // A screenplay's camera: the whole stage as it opens and while the
+  // narrator speaks; on two who trade lines while others stand by; close
+  // on a whisper, a shout or a strong face.
+  if (script.beats.some((beat) => beat.kind))
+    effects.push(...storyShots(script, beats, steps, effects, durationMs));
   /** The step a moment falls in. */
   const stepOf = (t: number) => {
     let k = -1;
@@ -1176,13 +1367,20 @@ export function composeScene(input: ComposeInput): {
           : {}),
       },
       beats: beats.map((b, i) => {
-        const delivery = script.beats[i]?.delivery;
+        const beat = script.beats[i];
+        const delivery = beat?.delivery;
+        // A screenplay's line: who says it, for the caption.
+        const who =
+          beat?.kind === 'line' && beat.speaker
+            ? nameOf(castById.get(beat.speaker))
+            : null;
         return {
           text: b.text,
           startMs: b.startMs,
           endMs: b.endMs,
           words: b.words,
           ...(delivery && delivery !== 'explain' ? { delivery } : {}),
+          ...(who ? { who } : {}),
         };
       }),
       things: things.filter((thing) =>

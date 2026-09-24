@@ -1,6 +1,7 @@
 import { PLAIN_FIGURE } from './scene-figure';
 import {
   composeScene,
+  storyShots,
   fullestStep,
   oneFaceAtATime,
   sidesKept,
@@ -531,43 +532,80 @@ describe("a story's characters on the stage", () => {
     expect(fox[0].atMs).toBeLessThan(scene.steps[1].atMs);
   });
 
-  it('sets what a character is like beside them the first time the book meets them', () => {
-    const mira = scene.things.find((t) => t.id === 'mira');
-    expect(mira?.kind === 'drawing' && mira.callouts).toEqual({
-      'trait-1': 'brave',
-    });
-    expect(mira?.kind === 'drawing' && mira.source).toBeUndefined();
-    expect(scene.stagings.wide.places[0].mira.labels?.[0].lines).toEqual([
-      'brave',
-    ]);
-    // In a row of three she stands without it, and gives up no room to it.
-    expect(scene.stagings.wide.places[1].mira.labels).toBeUndefined();
-  });
-
-  it('names a character under them only on the page the book meets them', () => {
-    const named = composeScene({
+  it("labels nothing on a story's page: no names, no traits, no captions, no parts", () => {
+    const labelled = composeScene({
       script: {
         ...story,
         cast: story.cast.map((t) =>
-          t.kind === 'character' && t.id === 'mira' ? { ...t, first: true } : t,
+          t.kind === 'character' && t.id === 'mira'
+            ? { ...t, first: true }
+            : t.id === 'lamp'
+              ? {
+                  id: 'lamp',
+                  kind: 'drawing' as const,
+                  name: 'lamp',
+                  brief: 'a brass lamp',
+                  motion: '',
+                  parts: [{ name: 'wick', label: true }],
+                  states: [],
+                  shape: 'square' as const,
+                  sound: null,
+                }
+              : t,
         ),
       },
       drawings: new Map([
         ['mira', figure()],
         ['fox', figure()],
+        [
+          'lamp',
+          drawing({
+            parts: { wick: 'wick' },
+            labels: { wick: 'wick-label' },
+            callouts: [{ part: 'glass', text: 'glass', anchor: [10, 10] }],
+          }),
+        ],
       ]),
       beats,
       durationMs: 16_000,
       timing: 'voice',
       generator: 'scene-2',
     }).scene;
-    const caption = (id: string) => {
-      const thing = named.things.find((t) => t.id === id);
-      return thing?.kind === 'drawing' ? thing.caption : undefined;
-    };
-    expect(caption('mira')).toBe('Mira');
-    // Met on an earlier page: known by how he looks.
-    expect(caption('fox')).toBeNull();
+    for (const id of ['mira', 'fox', 'lamp']) {
+      const thing = labelled.things.find((t) => t.id === id);
+      expect(thing?.kind === 'drawing' && thing.caption).toBeNull();
+      expect(thing?.kind === 'drawing' && thing.callouts).toBeUndefined();
+    }
+    // The label the artist drew stays hidden, and no effect can show it.
+    const lamp = labelled.things.find((t) => t.id === 'lamp');
+    expect(lamp?.kind === 'drawing' && lamp.labels).toEqual({});
+    expect(lamp?.kind === 'drawing' && lamp.hidden).toContain('wick-label');
+    expect(
+      labelled.stagings.wide.places.flatMap((step) =>
+        Object.values(step).flatMap((place) => place.labels ?? []),
+      ),
+    ).toEqual([]);
+  });
+
+  it("captions and labels a lesson's drawings as ever", () => {
+    const lesson = composeScene({
+      script,
+      drawings: new Map([
+        [
+          'leaf',
+          drawing({
+            callouts: [{ part: 'vein', text: 'vein', anchor: [10, 10] }],
+          }),
+        ],
+      ]),
+      beats,
+      durationMs: 16_000,
+      timing: 'voice',
+      generator: 'scene-2',
+    }).scene;
+    const leaf = lesson.things.find((t) => t.kind === 'drawing');
+    expect(leaf?.kind === 'drawing' && leaf.caption).toBeTruthy();
+    expect(leaf?.kind === 'drawing' && leaf.callouts).toEqual({ vein: 'vein' });
   });
 
   it('gives a person the page shows their faces one at a time, as a character', () => {
@@ -1066,6 +1104,94 @@ describe('what a character says, in a bubble', () => {
     expect(back.steps[2].enter).toEqual({ mira: { how: 'fade' } });
   });
 
+  it('plays a screenplay: moments in the quiet after a line, a close shot on a whisper, and who says each line', () => {
+    const line = (
+      say: string,
+      speaker: string,
+      extra: Partial<SceneScript['beats'][number]> = {},
+    ): SceneScript['beats'][number] => ({
+      say,
+      pause: 'short',
+      delivery: 'explain',
+      kind: 'line',
+      speaker,
+      lines: [{ span: [0, say.length], speaker }],
+      ...extra,
+    });
+    const played = composeScene({
+      script: {
+        ...talking,
+        beats: [
+          {
+            say: 'A cold night on the quay.',
+            pause: 'short',
+            delivery: 'explain',
+            kind: 'narration',
+          },
+          line('Who goes there?', 'mira', { to: 'fox', holdS: 1.2 }),
+          line('A friend of your grandfather.', 'fox', {
+            to: 'mira',
+            pace: 'whisper',
+          }),
+          line('Foxes do not talk.', 'mira'),
+        ],
+        steps: [
+          {
+            at: { beat: 0, phrase: '' },
+            word: 0,
+            stage: { layout: 'row', show: ['mira', 'fox'], arrows: [] },
+            effects: [],
+          },
+          {
+            at: { beat: 1, phrase: 'The fox waves' },
+            word: 0,
+            after: 0.2,
+            stage: null,
+            effects: [{ target: 'fox', part: 'mira', do: 'wave' }],
+          },
+        ],
+      },
+      drawings: new Map([
+        ['mira', figure()],
+        ['fox', figure()],
+      ]),
+      beats: [
+        beat('A cold night on the quay.', 0),
+        beat('Who goes there?', 2000),
+        beat('A friend of your grandfather.', 4500),
+        beat('Foxes do not talk.', 7000),
+      ],
+      durationMs: 9000,
+      timing: 'voice',
+      generator: 'scene-2',
+    }).scene;
+    // The line ends at 2900: the wave 150ms after, and 0.2s into the quiet.
+    expect(played.acting?.fox.moves).toEqual(
+      expect.arrayContaining([[3250, 'wave', 1900, 'mira']]),
+    );
+    expect(played.beats.map((b) => b.who)).toEqual([
+      undefined,
+      'Mira',
+      'Ember',
+      'Mira',
+    ]);
+    // The whisper, close on the fox until just after its last word.
+    const shots = played.effects.filter((e) => e.untilMs !== undefined);
+    expect(shots).toEqual([
+      {
+        atMs: 4300,
+        target: 'fox',
+        part: null,
+        do: 'zoom',
+        // Five words from 4500, and half a second after.
+        untilMs: 4500 + 5 * 300 + 500,
+      },
+    ]);
+    // Mira speaks to the fox, and looks at him.
+    const look = played.acting?.mira.look ?? [];
+    expect([...look].reverse().find(([when]) => when <= 2200)?.[1]).toBe('fox');
+  });
+
   it('opens a bubble for each line, from just before its first word', () => {
     const says = scene.effects.filter((e) => e.do === 'say');
     expect(says.map((e) => [e.target, e.atMs, e.say?.text])).toEqual([
@@ -1394,5 +1520,96 @@ describe('the "previously" before a story page', () => {
     expect(
       scene.effects.find((e) => e.target === 'mira' && e.do === 'show')?.part,
     ).toBe('happy');
+  });
+});
+
+describe("a screenplay's camera", () => {
+  const person = (id: string) => ({
+    id,
+    kind: 'character' as const,
+    ref: id,
+    name: id,
+    state: null,
+    met: 0,
+    intro: [],
+  });
+  const cast = ['ada', 'kofi', 'nana', 'mira', 'fox', 'tobi'].map(person);
+  const line = (say: string, speaker: string, to?: string) => ({
+    say,
+    pause: 'short' as const,
+    delivery: 'explain' as const,
+    kind: 'line' as const,
+    speaker,
+    ...(to ? { to } : {}),
+    lines: [{ span: [0, say.length] as [number, number], speaker }],
+  });
+  const step = (atMs: number, show: string[]) => ({
+    atMs,
+    layout: 'row' as const,
+    show,
+    arrows: [],
+    enter: {},
+    focus: null,
+  });
+
+  it('frames the two in a conversation together while a third stands by, and goes wide for the narrator', () => {
+    const shots = storyShots(
+      {
+        ...script,
+        cast,
+        beats: [
+          line('Is it far?', 'ada', 'kofi'),
+          line('Not far.', 'kofi', 'ada'),
+          line('Will we be back by dark?', 'ada', 'kofi'),
+          {
+            say: 'They walk on.',
+            pause: 'short',
+            delivery: 'explain',
+            kind: 'narration',
+          },
+          line('Wait for me!', 'nana'),
+        ],
+      },
+      [
+        beat('Is it far?', 1000),
+        beat('Not far.', 2500),
+        beat('Will we be back by dark?', 4000),
+        beat('They walk on.', 6500),
+        beat('Wait for me!', 8000),
+      ],
+      [step(0, ['ada', 'kofi', 'nana'])],
+      [],
+      10_000,
+    );
+    expect(shots).toEqual([
+      {
+        atMs: 800,
+        target: 'ada',
+        part: 'kofi',
+        do: 'zoom',
+        untilMs: 4000 + 6 * 300 + 400,
+      },
+    ]);
+  });
+
+  it('ends a shot where the stage changes, and waits a while between close shots', () => {
+    const shots = storyShots(
+      {
+        ...script,
+        cast,
+        beats: [
+          { ...line('Please.', 'mira'), pace: 'whisper' as const },
+          { ...line('Please, please.', 'mira'), pace: 'whisper' as const },
+        ],
+      },
+      [beat('Please.', 1000, 800), beat('Please, please.', 3000, 800)],
+      [step(0, ['mira', 'fox']), step(2000, ['mira', 'fox', 'tobi'])],
+      [],
+      6000,
+    );
+    // The first cut short by the change at 2000; the second too soon after.
+    expect(shots).toEqual([
+      { atMs: 800, target: 'mira', part: null, do: 'zoom', untilMs: 2000 },
+    ]);
   });
 });

@@ -31,11 +31,16 @@ import {
   hiddenAt,
   thumbSvg,
 } from '../../business/domain/scene-compose';
+import {
+  mendScreenplay,
+  type ScreenplayDraft,
+} from '../../business/domain/scene-screenplay';
 import { rasterise } from '../../business/domain/scene-raster';
 import {
   SCENE_GENERATOR_VERSION,
   isCodeThing,
   mendScript,
+  type MendedScript,
   quietStretches,
   quotedSpans,
   signsShown,
@@ -45,6 +50,7 @@ import {
   type PlaceThing,
   type DrawingThing,
   type SceneScript,
+  type SceneScriptDraft,
 } from '../../business/domain/scene-script';
 import {
   PLAIN_FIGURE,
@@ -58,7 +64,6 @@ import {
   castOf,
   figureDrawing,
   figureSheet,
-  introCallouts,
   measureSheet,
   setsOf,
   type Cast,
@@ -220,6 +225,12 @@ function figureByVoice(voice: StoryCharacter['voice']): FigureSpec {
  * cannot be made is set as a card with its name, never a reason to lose
  * the page.
  */
+/** What the writer is asked about a page, before any answer to put right. */
+type WriteAsk = Omit<
+  Parameters<LlmGatewayPort['sceneScript']>[0],
+  'previous' | 'problems'
+>;
+
 @Injectable()
 export class SceneProcessor {
   private readonly logger = new Logger(SceneProcessor.name);
@@ -478,8 +489,13 @@ export class SceneProcessor {
         documentId,
         who,
         story,
-        // The voice waits while a "previously" brings the last page back.
-        script.opening?.show.length ? OPENING_LEAD_S : 0,
+        // The voice waits while a "previously" brings the last page back,
+        // and while what happens before the first word happens.
+        Math.min(
+          3,
+          (script.opening?.show.length ? OPENING_LEAD_S : 0) +
+            (script.lead ?? 0),
+        ),
         input.profile.stage ?? null,
       )
         .catch((error: unknown) => {
@@ -658,26 +674,23 @@ export class SceneProcessor {
           }
         : {}),
     };
-    const first = await this.llm.sceneScript(ask);
-    await this.record(input.documentId, 'scene_write', first.usage);
-    let mended = mendScript(first.value, checks);
-    if (mended.mended.length)
-      this.logger.log(
-        `${input.who}: mended: ${mended.mended.slice(0, 8).join('; ')}`,
-      );
-    if (mended.problems.length && mended.script.fit !== 'poor') {
-      this.logger.warn(
-        `${input.who}: the storyboard goes back: ${mended.problems.join(' ')}`,
-      );
-      const again = await this.llm.sceneScript({
-        ...ask,
-        previous: first.value,
-        problems: [...mended.problems, ...quietStretches(mended.script)],
-      });
-      await this.record(input.documentId, 'scene_write', again.usage);
-      const second = mendScript(again.value, checks);
-      if (second.problems.length <= mended.problems.length) mended = second;
-    }
+    // A story's page is a screenplay its characters play; any other page
+    // a lesson, narrated.
+    const mended = input.story
+      ? await this.written<ScreenplayDraft>(
+          ask,
+          (asked) => this.llm.sceneScreenplay(asked),
+          (draft) => mendScreenplay(draft, checks),
+          input,
+          false,
+        )
+      : await this.written<SceneScriptDraft>(
+          ask,
+          (asked) => this.llm.sceneScript(asked),
+          (draft) => mendScript(draft, checks),
+          input,
+          true,
+        );
     const { script } = mended;
     if (
       script.fit !== 'poor' &&
@@ -690,6 +703,50 @@ export class SceneProcessor {
       `${input.who}: "${script.title}", ${script.beats.length} sentences, ${script.cast.length} things:\n${script.steps.map(describeStep).join('\n')}`,
     );
     return script;
+  }
+
+  /**
+   * A draft written and mended, and written once more when the mend
+   * leaves problems: the better of the two kept.
+   */
+  private async written<D>(
+    ask: WriteAsk,
+    call: (
+      asked: WriteAsk & { previous?: D; problems?: string[] },
+    ) => Promise<{ value: D; usage: LlmUsage }>,
+    mend: (draft: D) => MendedScript,
+    input: { documentId: string | null; who: string },
+    /** Whether a quiet stretch is a problem too: a lesson's is; a story's quiet holds its actions. */
+    quiet: boolean,
+  ): Promise<MendedScript> {
+    const first = await call(ask);
+    await this.record(input.documentId, 'scene_write', first.usage);
+    let mended = mend(first.value);
+    if (mended.mended.length)
+      this.logger.log(
+        `${input.who}: mended: ${mended.mended.slice(0, 8).join('; ')}`,
+      );
+    if (mended.problems.length && mended.script.fit !== 'poor') {
+      this.logger.warn(
+        `${input.who}: the storyboard goes back: ${mended.problems.join(' ')}`,
+      );
+      const again = await call({
+        ...ask,
+        previous: first.value,
+        problems: [
+          ...mended.problems,
+          ...(quiet ? quietStretches(mended.script) : []),
+        ],
+      });
+      await this.record(input.documentId, 'scene_write', again.usage);
+      const second = mend(again.value);
+      if (second.mended.length)
+        this.logger.log(
+          `${input.who}: mended: ${second.mended.slice(0, 8).join('; ')}`,
+        );
+      if (second.problems.length <= mended.problems.length) mended = second;
+    }
+    return mended;
   }
 
   /** Every drawing the storyboard needs, all at once; a null is one that could not be made. */
@@ -788,10 +845,9 @@ export class SceneProcessor {
         sheet && drawing
           ? {
               ...drawing,
-              callouts: introCallouts(
-                pageAnchors ? { ...sheet, anchors: pageAnchors } : sheet,
-                thing.intro,
-              ),
+              // Nothing is set beside a story's people: what they are
+              // like is in how they move.
+              callouts: [],
               ...((pageAnchors ?? sheet.anchors).head
                 ? { head: (pageAnchors ?? sheet.anchors).head! }
                 : {}),
@@ -941,8 +997,26 @@ export class SceneProcessor {
         : null;
     // Each line a character says, in their own voice: its place in the
     // spoken text is its quote's, the i-th quote of the sentence there.
+    /** The voice a character in the cast speaks in: none for someone the story does not name. */
+    const voiceOf = (id: string) => {
+      const thing = script.cast.find((t) => t.id === id);
+      const character =
+        story && thing?.kind === 'character'
+          ? story.bible.characters.find((c) => c.id === thing.ref)
+          : undefined;
+      return story && character
+        ? characterVoice(story.bible, character, engine, voice)
+        : null;
+    };
     const lines = script.beats.map((beat, k) => {
       if (!story || !beat.lines?.length) return [];
+      // A screenplay's line is all theirs: the whole sentence in their voice.
+      if (beat.kind === 'line') {
+        const speaker = voiceOf(beat.lines[0].speaker);
+        return speaker
+          ? [{ span: [0, forms[k].text.length] as [number, number], speaker }]
+          : [];
+      }
       const written = quotedSpans(beat.say);
       const spoken = quotedSpans(forms[k].text);
       if (written.length !== spoken.length) return [];
@@ -950,14 +1024,7 @@ export class SceneProcessor {
         const at = written.findIndex(
           ([a, b]) => a === line.span[0] && b === line.span[1],
         );
-        const thing = script.cast.find((t) => t.id === line.speaker);
-        const character =
-          thing?.kind === 'character'
-            ? story.bible.characters.find((c) => c.id === thing.ref)
-            : undefined;
-        const speaker = character
-          ? characterVoice(story.bible, character, engine, voice)
-          : null;
+        const speaker = voiceOf(line.speaker);
         return at >= 0 && speaker ? [{ span: spoken[at], speaker }] : [];
       });
     });

@@ -38,7 +38,11 @@ import {
   type NarratedMove,
   type Passage,
 } from './scene-directions';
-import { STAGE_RECIPES, type LearningStage } from './scene-stage';
+import {
+  STAGE_RECIPES,
+  type LearningStage,
+  type StageRecipe,
+} from './scene-stage';
 import { checkArithmetic, markTerms, type MathLine } from './scene-math';
 import { sample, type PlotSpec } from './scene-plot';
 import { findPhrase, isVerbatim } from './scene-quote';
@@ -83,7 +87,24 @@ export const SCENE_EFFECTS = [
 ] as const;
 /** What someone does toward someone else, directed by the writer on a story's page: "ada.kofi", Ada toward Kofi. */
 export const ACTING_EFFECTS = ['look', 'reach', 'hug'] as const;
-export type SceneEffectKind = (typeof SCENE_EFFECTS)[number];
+/**
+ * What a story's people do besides, played by the rig where a screenplay
+ * says: a wave, a nod, a shake of the head, a laugh, a hop, a clap, a sob,
+ * a shrug, a lean in toward someone.
+ */
+export const STORY_MOVES = [
+  'wave',
+  'nod',
+  'shake',
+  'laugh',
+  'hop',
+  'clap',
+  'sob',
+  'shrug',
+  'lean-in',
+] as const;
+export type StoryMove = (typeof STORY_MOVES)[number];
+export type SceneEffectKind = (typeof SCENE_EFFECTS)[number] | StoryMove;
 
 /**
  * How a sentence is said. The writer tags each one and code turns the tag
@@ -91,6 +112,16 @@ export type SceneEffectKind = (typeof SCENE_EFFECTS)[number];
  * point slower with room after it, time to think after a question. One
  * pace and two pauses for every sentence was a metronome.
  */
+/** How a line is said: its pace, and how the face says it. */
+export const LINE_PACES = [
+  'calm',
+  'quick',
+  'slow',
+  'whisper',
+  'shout',
+] as const;
+export type LinePace = (typeof LINE_PACES)[number];
+
 export const SCENE_DELIVERIES = [
   'hook',
   'explain',
@@ -197,6 +228,18 @@ export interface SceneBeat {
     do: NarratedMove;
     toward: string | null;
   }[];
+  /**
+   * On a story's page, written as a screenplay: a line a character says,
+   * the whole sentence in their voice, or the narrator's few words.
+   * Absent on a lesson's page, all of it narration.
+   */
+  kind?: 'line' | 'narration';
+  /** A line's listener: whom it is said to, by id. */
+  to?: string;
+  /** How a line is said. */
+  pace?: LinePace;
+  /** Seconds of quiet after it, for what happens without words: a hug, someone walking off. */
+  holdS?: number;
   /** The music from this sentence on; absent, it carries on as it was. */
   music?: SceneMusic;
   /** The music runs high from here: a chase, a rush, danger close. */
@@ -311,6 +354,8 @@ export interface CharacterThing {
   met: number;
   /** On the page the book meets them: what they are like, set beside them. */
   intro: string[];
+  /** What they are like, on every page: how they move. */
+  traits?: string[];
   /** The page the book meets them on: their name is written under them. */
   first?: boolean;
   /** Their pose on this page, when the kit draws them; absent, standing. */
@@ -405,7 +450,7 @@ export function stateNames(thing: SceneThing): string[] {
 
 /** Every face a person or a character can wear: the story's seven and the kit's own. */
 export const FACES = FIGURE_FACES;
-const isFace = (value: unknown): value is FigureFace =>
+export const isFace = (value: unknown): value is FigureFace =>
   (FACES as readonly unknown[]).includes(value);
 
 /**
@@ -466,6 +511,12 @@ export interface SceneStep {
   at: { beat: number; phrase: string };
   /** Where in the sentence the phrase starts, in words; set by the mend. */
   word: number;
+  /**
+   * A moment in the quiet after the sentence instead, this many seconds
+   * after its last word: what a screenplay shows without words. With the
+   * sentence -1, before the first, in the quiet the page opens with.
+   */
+  after?: number;
   /** Null: the stage stays as it is and only the effects happen. */
   stage: SceneStage | null;
   effects: SceneEffect[];
@@ -486,6 +537,8 @@ export interface SceneScript {
    * they were, on the scene they were in, before the voice starts.
    */
   opening?: { show: string[]; backdrop: string | null } | null;
+  /** Seconds of what happens without words before the first word: someone walking on. */
+  lead?: number;
 }
 
 /**
@@ -670,7 +723,7 @@ export function fitLayout(asked: SceneLayout, count: number): SceneLayout {
 
 const slug = (text: string) => groupId(text).slice(0, 32);
 
-const clean = (text: string | null | undefined) =>
+export const clean = (text: string | null | undefined) =>
   (text ?? '').replace(/\s+/g, ' ').trim();
 
 /** A sentence's music, kept only when it is one the score plays; high only where it can run high. */
@@ -688,9 +741,9 @@ export function tellsOfLoss(say: string, next?: string): boolean {
   return GRAVE.test(say) || (next !== undefined && GRAVE.test(next));
 }
 
-function musicOf(
-  beat: SceneScriptDraft['beats'][number],
-  next: SceneScriptDraft['beats'][number] | undefined,
+export function musicOf(
+  beat: Pick<SceneScriptDraft['beats'][number], 'say' | 'music' | 'energy'>,
+  next: Pick<SceneScriptDraft['beats'][number], 'say'> | undefined,
   story: boolean,
 ): {
   music?: SceneMusic;
@@ -722,7 +775,9 @@ export interface MendedScript {
 }
 
 /** Whether "she" or "he" may mean a character, from the voice they speak in. */
-function genderOf(voice: StoryVoice | null | undefined): 'f' | 'm' | null {
+export function genderOf(
+  voice: StoryVoice | null | undefined,
+): 'f' | 'm' | null {
   if (voice === 'girl' || voice === 'woman' || voice === 'old woman')
     return 'f';
   if (voice === 'boy' || voice === 'man' || voice === 'old man') return 'm';
@@ -894,63 +949,63 @@ function comingsAndGoings(
   }
 }
 
+/** What a mend holds a writer's draft to. */
+export interface MendOptions {
+  /** The page, to hold a quotation to its own words. */
+  material?: string;
+  /** The formats the document may use; a kind of another is set in type. */
+  formats?: readonly SceneFormat[];
+  /** The story's characters, when the book is a story: who a character may be. */
+  characters?: readonly {
+    id: string;
+    name: string;
+    aliases: string[];
+    /** The voice they speak in: whether "she" or "he" may mean them. */
+    voice?: StoryVoice | null;
+    /** What they are like: how they move. */
+    traits?: string[];
+  }[];
+  /** And its places: where the story may be. */
+  places?: readonly {
+    id: string;
+    name: string;
+    aliases: string[];
+    sound?: SceneAmbience | null;
+    /** How it looks, when the story says: a fire burning, a river. */
+    look?: string | null;
+  }[];
+  /** Whom the document is for: its recipe's limits hold. */
+  stage?: LearningStage | null;
+}
+
+/** What mending a cast needs to know and where it says what it did. */
+interface CastMend {
+  formats: ReadonlySet<SceneFormat>;
+  recipe: StageRecipe | null;
+  mended: string[];
+  problems: string[];
+}
+
 /**
- * The writer's draft made sound without asking again: ids made safe and
- * unique, unknown ids dropped, a lost anchor found in another sentence or
- * put at its sentence's start, a stage trimmed to what its layout holds,
- * extra drawings set in type. What cannot be mended is a problem for the
- * one repair call.
+ * The writer's cast made sound: ids safe and unique, a story's characters
+ * and places the story's own, people drawn by the kit, code things set,
+ * drawings with briefs the artist can draw. With every way the writer
+ * might refer to each thing.
  */
-export function mendScript(
-  draft: SceneScriptDraft,
-  options: {
-    /** The page, to hold a quotation to its own words. */
-    material?: string;
-    /** The formats the document may use; a kind of another is set in type. */
-    formats?: readonly SceneFormat[];
-    /** The story's characters, when the book is a story: who a character may be. */
-    characters?: readonly {
-      id: string;
-      name: string;
-      aliases: string[];
-      /** The voice they speak in: whether "she" or "he" may mean them. */
-      voice?: StoryVoice | null;
-    }[];
-    /** And its places: where the story may be. */
-    places?: readonly {
-      id: string;
-      name: string;
-      aliases: string[];
-      sound?: SceneAmbience | null;
-      /** How it looks, when the story says: a fire burning, a river. */
-      look?: string | null;
-    }[];
-    /** Whom the document is for: its recipe's limits hold. */
-    stage?: LearningStage | null;
-  } = {},
-): MendedScript {
-  const recipe = options.stage ? STAGE_RECIPES[options.stage] : null;
-  const problems: string[] = [];
-  const mended: string[] = [];
-  const formats = new Set(options.formats ?? SCENE_FORMATS);
-
-  const kept = draft.beats.filter(
-    (beat) => wordsOf(clean(beat.say)).length > 0,
-  );
-  const beats: SceneBeat[] = kept.map((beat, index) => ({
-    say: clean(beat.say),
-    pause: beat.pause === 'long' ? ('long' as const) : ('short' as const),
-    delivery: SCENE_DELIVERIES.includes(beat.delivery)
-      ? beat.delivery
-      : ('explain' as const),
-    ...musicOf(beat, kept[index + 1], !!options.characters?.length),
-  }));
-
+export function mendCast(
+  given: SceneScriptDraft['cast'],
+  options: MendOptions,
+  { formats, recipe, mended, problems }: CastMend,
+): {
+  cast: SceneThing[];
+  byId: Map<string, SceneThing>;
+  resolve: (ref: string) => string | null;
+} {
   // Ids: safe, unique, and every way the writer might refer to one.
   const idFor = new Map<string, string>();
   const used = new Set<string>();
   const cast: SceneThing[] = [];
-  draft.cast.forEach((given, index) => {
+  given.forEach((given, index) => {
     // A person the story knows is its character, drawn once for the book.
     const known =
       given.kind === 'person' && options.characters?.length
@@ -1211,6 +1266,44 @@ export function mendScript(
     idFor.get(ref.toLowerCase()) ??
     idFor.get(slug(ref)) ??
     (byId.has(slug(ref)) ? slug(ref) : null);
+  return { cast, byId, resolve };
+}
+
+/**
+ * The writer's draft made sound without asking again: ids made safe and
+ * unique, unknown ids dropped, a lost anchor found in another sentence or
+ * put at its sentence's start, a stage trimmed to what its layout holds,
+ * extra drawings set in type. What cannot be mended is a problem for the
+ * one repair call.
+ */
+export function mendScript(
+  draft: SceneScriptDraft,
+  options: MendOptions = {},
+): MendedScript {
+  const recipe = options.stage ? STAGE_RECIPES[options.stage] : null;
+  const problems: string[] = [];
+  const mended: string[] = [];
+  const formats = new Set(options.formats ?? SCENE_FORMATS);
+
+  const kept = draft.beats.filter(
+    (beat) => wordsOf(clean(beat.say)).length > 0,
+  );
+  const beats: SceneBeat[] = kept.map((beat, index) => ({
+    say: clean(beat.say),
+    pause: beat.pause === 'long' ? ('long' as const) : ('short' as const),
+    delivery: SCENE_DELIVERIES.includes(beat.delivery)
+      ? beat.delivery
+      : ('explain' as const),
+    ...musicOf(beat, kept[index + 1], !!options.characters?.length),
+  }));
+
+  // The cast: every thing made sound, and every way the writer might refer to one.
+  const { cast, byId, resolve } = mendCast(draft.cast, options, {
+    formats,
+    recipe,
+    mended,
+    problems,
+  });
 
   // Who each sentence quotes: one of the story's characters in the cast.
   const speakerOf = (said: string): string | null => {
@@ -2002,11 +2095,9 @@ export function mentionsPeople(brief: string): boolean {
 }
 
 /** The story's character or place the writer means: by its id, else by a name or alias. */
-function storyEntry<T extends { id: string; name: string; aliases: string[] }>(
-  characters: readonly T[],
-  ref: string | null,
-  name: string,
-): T | null {
+export function storyEntry<
+  T extends { id: string; name: string; aliases: string[] },
+>(characters: readonly T[], ref: string | null, name: string): T | null {
   const byRef = characters.find((c) => c.id === clean(ref));
   if (byRef) return byRef;
   const keys = [clean(ref), name].map(nameKey).filter(Boolean);
@@ -2246,7 +2337,9 @@ function effectOf(
   if (!onStage.includes(id))
     return `${effect.do} on ${id}, which is not on the stage`;
   const thing = byId.get(id);
-  const kind: SceneEffectKind = SCENE_EFFECTS.includes(effect.do)
+  const kind: SceneEffectKind = (
+    SCENE_EFFECTS as readonly SceneEffectKind[]
+  ).includes(effect.do)
     ? effect.do
     : 'pulse';
   // Words in a bubble come only from the story's characters.

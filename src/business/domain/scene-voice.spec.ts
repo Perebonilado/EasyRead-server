@@ -259,3 +259,25 @@ describe("a story's characters, in their own voices", () => {
     expect(sentenceStarts(pieces, [0, 1200, 4100], 3)).toBeUndefined();
   });
 });
+
+describe('a screenplay, as the voice says it', () => {
+  it('keeps a conversation close, lets the narrator breathe, and holds the quiet an action takes', () => {
+    const pieces = deliveryPieces([
+      { delivery: 'explain', pause: 'short', kind: 'narration' },
+      { delivery: 'explain', pause: 'short', kind: 'line', holdS: 1 },
+      { delivery: 'explain', pause: 'short', kind: 'line', pace: 'quick' },
+      { delivery: 'explain', pause: 'short', kind: 'line', pace: 'whisper' },
+      { delivery: 'explain', pause: 'short', kind: 'narration', holdS: 5 },
+    ]);
+    expect(pieces).toEqual([
+      { speed: 0.95, pauseAfter: 0.55 },
+      // A groan after the line: its second of quiet.
+      { speed: 1, pauseAfter: 1 },
+      { speed: 1.07, pauseAfter: 0.3 },
+      // Before the narrator comes in, a breath more.
+      { speed: 0.9, pauseAfter: 0.55 },
+      // No quiet longer than the voice holds.
+      { speed: 0.95, pauseAfter: 3 },
+    ]);
+  });
+});

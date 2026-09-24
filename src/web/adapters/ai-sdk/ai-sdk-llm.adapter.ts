@@ -1,3 +1,4 @@
+import type { ScreenplayDraft } from '../../../business/domain/scene-screenplay';
 import { numberedSentences } from '../../../business/domain/board';
 import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
@@ -43,6 +44,7 @@ import {
   lectureSketchSchema,
   sceneProfileSchema,
   sceneScriptSchema,
+  sceneScreenplaySchema,
   sceneFigureSchema,
   sceneStorySchema,
   sketchJudgeSchema,
@@ -711,6 +713,45 @@ export class AiSdkLlmAdapter implements LlmGatewayPort, OnModuleInit {
       model,
       schema: sceneScriptSchema,
       system: PROMPTS.sceneWrite,
+      prompt: [
+        `Document: ${input.documentTitle}`,
+        `Chapter: ${input.topicTitle}`,
+        ...(input.profile ? [input.profile] : []),
+        ...(input.story ? [input.story] : []),
+        input.context,
+        `The page:\n${input.material}`,
+        ...(input.previous && input.problems?.length
+          ? [
+              `Your last answer for this page:\n${JSON.stringify(input.previous)}`,
+              `Put these right and answer again in full:\n- ${input.problems.join('\n- ')}`,
+            ]
+          : []),
+      ].join('\n\n'),
+      maxRetries: this.maxRetries(),
+    });
+    return {
+      value: result.object,
+      usage: this.usage(ref, result.usage, started),
+    };
+  }
+
+  async sceneScreenplay(input: {
+    documentTitle: string;
+    topicTitle: string;
+    material: string;
+    context: string;
+    profile?: string;
+    story?: string;
+    previous?: ScreenplayDraft;
+    problems?: string[];
+  }): Promise<LlmResult<ScreenplayDraft>> {
+    const started = Date.now();
+    const { generateObject } = await this.registry.modules();
+    const { model, ref } = await this.registry.languageModel('scene_write');
+    const result = await generateObject({
+      model,
+      schema: sceneScreenplaySchema,
+      system: PROMPTS.sceneScreenplay,
       prompt: [
         `Document: ${input.documentTitle}`,
         `Chapter: ${input.topicTitle}`,

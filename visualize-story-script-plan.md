@@ -234,3 +234,46 @@ line  mira       Please.                                  (whisper, afraid)
 1. S1 (labels) first: small and visible.
 2. Then S2 to S6 together as one change, since the screenplay needs its mend, staging and voice to play.
 3. Then S7.
+
+## Status (2026-09-24)
+
+Built and tested on `visualize-story-script` in both repos, with Richard's recommended choices. Nothing is pushed.
+
+- **S1. No labels on story pages.**
+  - no names, traits, captions or part labels, and a drawing's own label groups stay hidden;
+  - the caption band shows "Name: line";
+  - traits shape how a character moves: a lively one gestures on short lines and hops when first met, a calm one gestures less and nods, a shy one moves smaller and looks down.
+- **S2–S6. The screenplay.**
+  - `sceneScreenplay` writer: its prompt, schema, and a fake writer for runs without keys;
+  - `scene-screenplay.ts` mender:
+    - the book's lines are held to the book, and the book says who speaks each;
+    - the narrator's share is capped;
+    - actions become moments in the quiet after a line, and a run that asks for too long is spread over the quiet or sent back;
+    - staging comes from who is there, arrivals (with whoever they bring), exits and speakers;
+  - voice: lines whole in the speaker's voice, conversational gaps, action quiet up to the 3 s the voice holds;
+  - compose: moments timed, the new moves acted;
+  - camera: two-shots for a conversation of two while others stand by (9 s at most), close shots for a whisper, a shout or a strong face;
+  - speech bubbles drawn over the camera, so they stay in frame and point at the speaker's head in every shot.
+- **S7. Remade with the real writer:**
+
+  | Page | Characters' share before | After | Narrator words before | After |
+  |---|---|---|---|---|
+  | Fireside p1 | 37% | 84% | 93 | 14 |
+  | The Lost Goat p1 | 33% | 82% | 81 | 9 |
+  | Lantern Keeper p1 | 12% | 33% | 135 | 36 |
+  | Lantern Keeper p2 | 1% | 3% | 138 | 37 |
+  | Lantern Keeper p3 | 31% | 76% | 85 | 12 |
+
+  - No labels on any of these pages, and no page was sent back to the writer.
+  - The fireside page kept all 76 of the book's quoted words.
+  - Watched on `/dev/stage`: fade-in openings, two-shots, close shots, bubbles in frame, captions with names.
+- **Tests:** server 1300, client 58. Type checks and lint are clean.
+
+Still open:
+- **Remakes waiting on credit.** The OpenAI account ran out of credit mid-test, so these still need a remake with the real writer:
+  - the goat page, where the goat arrives with Baba Sule;
+  - Lantern Keeper p2 (a long run of actions) and p4.
+
+  The fixes are covered by unit tests.
+- **Longer quiet.** Longer runs of wordless action need the voice server's 3 s pause limit raised, which is a redeploy.
+- **Push and PRs**, when Richard says.

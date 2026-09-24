@@ -1020,6 +1020,8 @@ export interface SceneEffectDto {
   do: SceneEffectName;
   /** A pulse added only because nothing else happened for a while: seen, not heard. */
   filler?: boolean;
+  /** A shot of the camera on a story's page: held until then, then back to the whole stage. Absent, a zoom holds until the stage next changes. */
+  untilMs?: number;
   /**
    * A character speaking: their words, in a bubble at their head until
    * `untilMs`; their mouth moves until `saidUntilMs`, when the voice has
@@ -1059,7 +1061,8 @@ export type SceneActingMove =
   | 'hop'
   | 'clap'
   | 'sob'
-  | 'shrug';
+  | 'shrug'
+  | 'lean-in';
 
 /**
  * How someone acts on a page: planned by the server from who says what
@@ -1078,6 +1081,8 @@ export interface SceneActingDto {
   moves?: [number, SceneActingMove, number, string?][];
   /** They walk on, off and between places, rather than pop or slide. */
   walks?: true;
+  /** How big their moves are, from what they are like: a shy one's smaller, a bold one's bigger; absent, as drawn. */
+  size?: number;
 }
 
 /** A speech bubble as the stage sets it: its box, its words, and the point its tail reaches toward. */
@@ -1155,6 +1160,8 @@ export interface SceneDto {
     endMs: number;
     words: number[][];
     delivery?: 'hook' | 'key' | 'aside' | 'question' | 'recap';
+    /** On a story's page, a line a character says: who says it, for the caption. */
+    who?: string;
   }[];
   things: SceneThingDto[];
   steps: SceneStepDto[];

@@ -652,6 +652,7 @@ export function castStory(
       state: thing.state ?? before,
       met: who.met,
       intro: who.firstPage === page ? who.traits : [],
+      traits: who.traits,
       first: who.firstPage === page,
       before,
     };

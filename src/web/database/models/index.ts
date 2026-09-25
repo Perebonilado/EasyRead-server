@@ -1,4 +1,5 @@
 export { AiCallLogModel } from './ai-call-log.model';
+export { AppSettingsModel } from './app-settings.model';
 export {
   InstitutionModel,
   DepartmentModel,
@@ -55,6 +56,7 @@ export {
 export { WebhookEventModel } from './webhook-event.model';
 
 import { AiCallLogModel } from './ai-call-log.model';
+import { AppSettingsModel } from './app-settings.model';
 import {
   InstitutionModel,
   DepartmentModel,
@@ -140,6 +142,7 @@ export const ALL_MODELS = [
   PipelineRunModel,
   DocumentChunkModel,
   AiCallLogModel,
+  AppSettingsModel,
   InstitutionModel,
   DepartmentModel,
   LevelModel,

@@ -155,13 +155,7 @@ import { startMathsSpeech } from '../../business/domain/maths-speech';
 import type { AlignerPort } from '../../business/ports/aligner.port';
 import type { LlmGatewayPort, LlmUsage } from '../../business/ports/llm.port';
 import type { StoragePort } from '../../business/ports/storage.port';
-import {
-  ALIGNER,
-  LLM_GATEWAY,
-  SCENE_SPEECH,
-  STORAGE,
-} from '../../business/ports/tokens';
-import type { SpeechPort } from '../../business/ports/voice.port';
+import { ALIGNER, LLM_GATEWAY, STORAGE } from '../../business/ports/tokens';
 import type { AiCallLogRepository } from '../../business/repositories/ai-call-log.repository';
 import type {
   DocumentPageRepository,
@@ -188,6 +182,7 @@ import {
 import type { VisualSceneRepository } from '../../business/repositories/visual.repository';
 import type { VisualSceneJobData } from '../queues';
 import { isPermanentFailure, type JobContext } from './base.processor';
+import { SceneVoiceService } from '../../business/handlers/admin/scene-voice.service';
 
 /** The most of a page the writer reads. */
 const MATERIAL_CHARS = 14_000;
@@ -317,7 +312,7 @@ export class SceneProcessor {
     private readonly pronunciations: PronunciationRepository,
     @Inject(AI_CALL_LOG_REPOSITORY) private readonly calls: AiCallLogRepository,
     @Inject(LLM_GATEWAY) private readonly llm: LlmGatewayPort,
-    @Inject(SCENE_SPEECH) private readonly speech: SpeechPort,
+    private readonly voices: SceneVoiceService,
     private readonly config: ConfigService,
     @Inject(STORAGE) private readonly storage: StoragePort,
     @Inject(ALIGNER) private readonly aligner: AlignerPort,
@@ -1229,11 +1224,9 @@ export class SceneProcessor {
     );
     const pausesS = delivered.map((piece) => piece.pauseAfter);
     const spoken = sceneSpoken(forms);
-    const { model } = this.speech.label();
-    // Visualize may speak in a voice of its own; lectures keep theirs.
-    const voice =
-      this.config.get<string>('SCENE_VOICE')?.trim() ||
-      this.speech.label().voice;
+    // Whichever engine the admin has Visualize speak in now.
+    const { speech, voice } = await this.voices.current();
+    const { model } = speech.label();
     // A story's characters say their own lines, in voices of their own.
     const engine = model.startsWith('gemini')
       ? 'gemini'
@@ -1290,7 +1283,7 @@ export class SceneProcessor {
       ),
       lines,
     });
-    const result = await this.speech.synthesize({
+    const result = await speech.synthesize({
       text: spoken.text,
       voice,
       speed: 1,

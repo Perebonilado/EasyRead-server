@@ -356,3 +356,36 @@ export function sentenceStarts(
   }
   return starts;
 }
+
+/**
+ * Visualize's voice engines: Google's Gemini, our own Kokoro server on
+ * Railway, or OpenAI's. The admin picks one while the app runs.
+ */
+export const SCENE_VOICE_ENGINES = ['gemini', 'kokoro', 'openai'] as const;
+export type SceneVoiceEngine = (typeof SCENE_VOICE_ENGINES)[number];
+
+export const isSceneVoiceEngine = (value: unknown): value is SceneVoiceEngine =>
+  SCENE_VOICE_ENGINES.includes(value as SceneVoiceEngine);
+
+/**
+ * The engine the deployment names for itself, before any choice:
+ * SCENE_VOICE_ENGINE when it names one that is ready, else our own
+ * server when it is set up, else OpenAI.
+ */
+export function deploymentEngine(
+  named: string | undefined,
+  ready: Record<SceneVoiceEngine, boolean>,
+): SceneVoiceEngine {
+  const wanted = named?.trim().toLowerCase();
+  if (isSceneVoiceEngine(wanted) && ready[wanted]) return wanted;
+  return ready.kokoro ? 'kokoro' : 'openai';
+}
+
+/** The engine a page is voiced by: the admin's choice while it is ready, else the deployment's. */
+export function sceneEngine(
+  chosen: SceneVoiceEngine | null,
+  named: string | undefined,
+  ready: Record<SceneVoiceEngine, boolean>,
+): SceneVoiceEngine {
+  return chosen && ready[chosen] ? chosen : deploymentEngine(named, ready);
+}

@@ -17,7 +17,7 @@ import {
   SPEECH,
   LECTURE_SPEECH,
   UPLOAD_SPEECH,
-  SCENE_SPEECH,
+  SCENE_VOICES,
   TRANSCRIPTION,
   STORAGE,
   VECTOR_STORE,
@@ -119,16 +119,22 @@ export const portProviders: Provider[] = [
         ? new ModalSpeechAdapter(config, KOKORO_HOME)
         : openai,
   },
-  // Visualize speaks with the upload voice (Kokoro on Railway) unless
-  // SCENE_VOICE_ENGINE=gemini puts it on Google's voice, the paid pilot.
-  // Lectures never come here.
+  // Visualize's voices, each engine's: the admin picks one on the admin
+  // page, per page, with no redeploy. Our own server is the upload voice's
+  // very adapter, so the two share its limit on requests in flight; it is
+  // null when KOKORO_TTS_URL is not set. Lectures never come here.
   {
-    provide: SCENE_SPEECH,
-    inject: [ConfigService, UPLOAD_SPEECH],
-    useFactory: (config: ConfigService, upload: SpeechPort) =>
-      config.get<string>('SCENE_VOICE_ENGINE') === 'gemini'
-        ? new GeminiSpeechAdapter(config)
-        : upload,
+    provide: SCENE_VOICES,
+    inject: [ConfigService, SPEECH, UPLOAD_SPEECH],
+    useFactory: (
+      config: ConfigService,
+      openai: SpeechPort,
+      upload: SpeechPort,
+    ) => ({
+      gemini: new GeminiSpeechAdapter(config),
+      kokoro: config.get<string>('KOKORO_TTS_URL') ? upload : null,
+      openai,
+    }),
   },
   // Word timing for the lecture board: the script aligned to its audio.
   { provide: ALIGNER, useClass: EchogardenAlignerAdapter },

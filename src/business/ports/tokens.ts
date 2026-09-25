@@ -23,8 +23,11 @@ export const SPEECH = Symbol('SpeechPort');
 export const LECTURE_SPEECH = Symbol('LectureSpeechPort');
 /** A learner's own upload's voice: Kokoro on Railway when it is set up, else SPEECH. */
 export const UPLOAD_SPEECH = Symbol('UploadSpeechPort');
-/** Visualize's voice: the upload voice, or Gemini when SCENE_VOICE_ENGINE says so. */
-export const SCENE_SPEECH = Symbol('SceneSpeechPort');
+/**
+ * Visualize's voices, one per engine, the one used chosen per page by the
+ * admin's setting (SceneVoiceChooser): null for an engine not set up here.
+ */
+export const SCENE_VOICES = Symbol('SceneVoices');
 export const TRANSCRIPTION = Symbol('TranscriptionPort');
 export const REALTIME = Symbol('RealtimePort');
 export const WEB_IMPORT = Symbol('WebImportPort');

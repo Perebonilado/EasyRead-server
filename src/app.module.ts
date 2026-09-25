@@ -179,6 +179,7 @@ import { InstitutionsController } from './web/controllers/institutions.controlle
 import { AdminInstitutionsController } from './web/controllers/admin-institutions.controller';
 import { AdminMaterialsController } from './web/controllers/admin-materials.controller';
 import { AdminPronunciationsController } from './web/controllers/admin-pronunciations.controller';
+import { AdminSettingsController } from './web/controllers/admin-settings.controller';
 import { PronunciationHandlers } from './business/handlers/institutions/pronunciation.handlers';
 import {
   AdminUploadIntentHandler,
@@ -399,6 +400,7 @@ const queries = [
     AdminInstitutionsController,
     AdminMaterialsController,
     AdminPronunciationsController,
+    AdminSettingsController,
     TutorsController,
     EventsController,
     HealthController,

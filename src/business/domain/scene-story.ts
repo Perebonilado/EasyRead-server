@@ -293,6 +293,9 @@ export interface StoryBible {
   world?: StoryWorld | null;
   /** How it was read (STORY_VERSION); absent, before the world was read. */
   version?: number;
+  /** The book's own title and author, as its first pages give them. */
+  title?: string | null;
+  author?: string | null;
 }
 
 /** What the model says of one stretch of the book, by names. */
@@ -335,6 +338,8 @@ export interface StoryDraft {
   }[];
   /** The story's world, as this stretch shows it; null where it cannot tell. */
   world?: StoryWorld | null;
+  /** The book's title and author, where this stretch shows them. */
+  book?: { title: string | null; author: string | null } | null;
 }
 
 /** What a character is, as a model said from the look kept for them. */
@@ -351,8 +356,61 @@ export const EMPTY_STORY: StoryBible = {
   pages: [],
 };
 
+/** A book's name from its file's: "001-HIDE-AND-SEEK-Free-Childrens-Book" as "Hide And Seek Free Childrens Book". */
+function titleFromFile(file: string): string {
+  const words = file
+    .replace(/\.[a-z0-9]{2,4}$/i, '')
+    .replace(/[_-]+/g, ' ')
+    .replace(/^\s*\d+\s+/, '')
+    .trim()
+    .split(/\s+/);
+  return words
+    .map((word) => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
+    .join(' ');
+}
+
+/**
+ * A story book's first page, when it comes before the story: a title
+ * card. Its title set large, and the narrator saying it with its author.
+ * Made by code: a title page has no story for the writer to play, and
+ * its characters reading out its credits was the wrong way round.
+ */
+export function titleCard(bible: StoryBible, file: string): SceneScript {
+  const title = bible.title || titleFromFile(file);
+  return {
+    fit: 'good',
+    fitReason: null,
+    title,
+    mood: 'bright',
+    beats: [
+      {
+        say: bible.author ? `${title}, by ${bible.author}.` : `${title}.`,
+        pause: 'long',
+        delivery: 'explain',
+        kind: 'narration',
+      },
+    ],
+    cast: [{ id: 'book-title', kind: 'words', text: title, style: 'title' }],
+    steps: [
+      {
+        at: { beat: 0, phrase: '' },
+        word: 0,
+        stage: { layout: 'one', show: ['book-title'], arrows: [] },
+        effects: [],
+      },
+    ],
+  };
+}
+
+/** Whether a page comes before a story's first page or after its last: its front or back matter. */
+export function outsideStory(bible: StoryBible, page: number): boolean {
+  const pages = bible.pages.map((p) => p.page);
+  if (!pages.length) return false;
+  return page < Math.min(...pages) || page > Math.max(...pages);
+}
+
 /** The most characters and places a book keeps: beyond them, the crowd and the scenery. */
-export const MAX_CHARACTERS = 24;
+export const MAX_CHARACTERS = 40;
 export const MAX_PLACES = 16;
 const MAX_TRAITS = 3;
 const MAX_ALIASES = 6;
@@ -610,9 +668,14 @@ export function mergeStory(
   const places: (StoryPlace & Named & { named: number })[] = [];
   const pages = new Map<number, StoryPage>();
   const sorted = [...parts].sort((a, b) => a.from - b.from);
-  // The world as the first stretch that could tell it says.
+  // The world as the first stretch that could tell it says; the book's
+  // title and author as its first pages give them.
   const world =
     sorted.map((part) => worldOf(part.draft.world)).find(Boolean) ?? null;
+  const title =
+    sorted.map((part) => clean(part.draft.book?.title)).find(Boolean) ?? null;
+  const author =
+    sorted.map((part) => clean(part.draft.book?.author)).find(Boolean) ?? null;
   let order = 0;
   for (const part of sorted) {
     for (const raw of aliasesApart(part.draft.characters)) {
@@ -746,14 +809,18 @@ export function mergeStory(
   }
   for (const one of [...characters, ...places])
     if (!Number.isFinite(one.firstPage)) one.firstPage = one.named;
-  // A page that gives no clue happens where the page before did.
+  // A page that gives no clue happens where, and when, the page before
+  // did: never a sunny afternoon made up between two nights.
   let last: string | null = null;
+  let lastTime: StoryPage['time'] = null;
   for (const page of [...pages.values()].sort((a, b) => a.page - b.page)) {
     if (!page.place && last) {
       page.place = last;
       page.placeInferred = true;
     }
     last = page.place ?? last;
+    if (!page.time && lastTime) page.time = lastTime;
+    lastTime = page.time ?? lastTime;
   }
   // The ones the book cannot do without, when there are too many.
   const onPages = (id: string) =>
@@ -818,6 +885,8 @@ export function mergeStory(
       })),
     world,
     version: STORY_VERSION,
+    title,
+    author,
   };
 }
 
@@ -885,6 +954,8 @@ export function bibleOf(
     })),
     world: worldOf(raw.world),
     version: typeof raw.version === 'number' ? raw.version : 1,
+    title: clean(raw.title) || null,
+    author: clean(raw.author) || null,
   };
 }
 

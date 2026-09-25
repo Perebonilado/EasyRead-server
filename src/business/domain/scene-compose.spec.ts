@@ -1616,6 +1616,36 @@ describe('what a character says, in a bubble', () => {
         expect(moving.stagings[staging].bubbles?.[one.say!.id]).toBeTruthy();
   });
 
+  it('never shows a finished line again when the stage changes as its bubble lingers', () => {
+    const lingering = composeScene({
+      script: {
+        ...talking,
+        steps: [
+          ...talking.steps,
+          // The stage changes on "fox", after the fox's line is all said,
+          // while its bubble lingers.
+          {
+            at: { beat: 3, phrase: 'fox' },
+            word: 9,
+            stage: { layout: 'row', show: ['fox', 'mira'], arrows: [] },
+            effects: [],
+          },
+        ],
+      },
+      drawings: new Map([
+        ['mira', figure()],
+        ['fox', figure()],
+      ]),
+      beats: beatsSaid,
+      durationMs: 16_000,
+      timing: 'voice',
+      generator: 'scene-2',
+    }).scene;
+    const says = lingering.effects.filter((e) => e.do === 'say');
+    // Each line once: none carried on after its last word.
+    expect(says.filter((e) => e.say!.continues)).toEqual([]);
+  });
+
   it('sets a line with no room by the speaker in a strip across the top, with their name', () => {
     const off = composeScene({
       script: {

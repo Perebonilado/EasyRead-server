@@ -95,8 +95,14 @@ export interface ScreenplayBeatDraft {
   pace: LinePace | null;
   /** An action's seconds of quiet. */
   hold: number | null;
-  /** A narration's new place: the scene moves there. */
+  /**
+   * A narration's new place: the scene moves there. A line's: where its
+   * speaker is, when the page cuts between two places (Sally in the cave,
+   * the boys above it).
+   */
   place: string | null;
+  /** A narration that opens a scene: who is there in it, by id. */
+  with?: string[] | null;
   music: SceneMusic | null;
   energy: 'low' | 'high' | null;
 }
@@ -146,6 +152,13 @@ export const TALKY = 0.25;
 /** The narrator's words on any page, at most. */
 export const NARRATION_MOST = 60;
 const NARRATION_MOST_EARLY = 80;
+/** The most people a story's stage shows at once: more are a crowd, and cut each other in half. */
+const STORY_ON_STAGE = 3;
+
+/** A narration that moves the story on in time: a new scene, where it is. */
+const TIME_PASSES =
+  /^\s*(?:that\s+(?:evening|night|morning|afternoon)|the\s+next\s+(?:day|morning|evening|night)|next\s+(?:day|morning)|later\b|afterwards?\b|meanwhile\b|some\s+(?:days|weeks|months|time)\s+later|(?:a\s+few|several|many)\s+(?:days|weeks|months|hours)\s+(?:later|went\s+by|passed)|when\s+(?:it\s+was\s+)?(?:evening|night|morning)|in\s+the\s+(?:evening|morning)|one\s+(?:day|evening|morning|night)\b)/iu;
+
 /** A book's line is kept when lines on the page hold this share of its words. */
 export const KEPT = 0.8;
 /** Actions after one sentence asking this long or longer go back to the writer. */
@@ -826,51 +839,173 @@ export function mendScreenplay(
       problems.push('A screenplay needs at least two lines or narrations.');
   }
 
-  // The stage: who is there as the page opens, as the writer says, and
-  // whoever speaks or does something before they are said to come.
+  // The page's scenes. A page may hold several: a new one where a
+  // narration moves the story, to a place (the writer's, or one of the
+  // story's places its words name) or on in time ("That evening"), or
+  // says who is there. Each scene shows only its own people, in its own
+  // place: those who speak or act in it, are spoken to, or are named in
+  // its narration. Someone who comes on with "enter" arrives, and is not
+  // there before.
+  const placesById = new Map(
+    cast
+      .filter((thing) => thing.kind === 'place')
+      .map((thing) => {
+        const story = (options.places ?? []).find(
+          (place) => thing.kind === 'place' && place.id === thing.ref,
+        );
+        return [thing.id, [thing.name, ...(story?.aliases ?? [])]] as const;
+      }),
+  );
+  const flat = (text: string) =>
+    ` ${text
+      .toLowerCase()
+      .replace(/[’']/g, "'")
+      .replace(/[^\p{L}\p{N}']+/gu, ' ')} `;
+  /** One of the page's places its words name. */
+  const placeNamed = (text: string): string | null => {
+    const said = flat(text);
+    for (const [id, names] of placesById)
+      if (
+        names.some((name) => {
+          const key = flat(name).trim();
+          return key.length > 2 && said.includes(` ${key} `);
+        })
+      )
+        return id;
+    return null;
+  };
+  interface Scene {
+    /** The draft's beat it opens on. */
+    start: number;
+    place: string | null;
+    /** Who is there as it opens, in order. */
+    people: string[];
+    /** Whom the writer said is there. */
+    given: boolean;
+  }
+  const scenes: Scene[] = [];
+  {
+    let current: Scene = { start: 0, place: null, people: [], given: false };
+    let begun = false;
+    (draft.beats ?? []).forEach((raw, at) => {
+      if (raw.kind !== 'narration') {
+        begun = true;
+        return;
+      }
+      const place = known(raw.place, ['place']) ?? placeNamed(raw.say);
+      const given = (raw.with ?? [])
+        .map((ref) => known(ref, PEOPLE))
+        .filter((id): id is string => stands(id));
+      const moves =
+        (place !== null && current.place !== null && place !== current.place) ||
+        given.length > 0 ||
+        TIME_PASSES.test(raw.say);
+      if (moves && begun) {
+        scenes.push(current);
+        current = {
+          start: at,
+          place: place ?? current.place,
+          people: [],
+          given: false,
+        };
+        begun = false;
+      } else if (place) current.place = place;
+      if (given.length) {
+        current.people = [...new Set(given)];
+        current.given = true;
+      }
+    });
+    scenes.push(current);
+  }
+  const sceneOf = (at: number) =>
+    scenes.reduce((found, scene, i) => (scene.start <= at ? i : found), 0);
+  // Who each scene opens with, where the writer did not say: the first
+  // scene, those who speak or act in it before they are said to come; a
+  // later one, those its opening narration names. Anyone else in it comes
+  // into view as they speak, or walks on with "enter".
+  /** Who has a part in each scene, in order. */
+  const parts: string[][] = [];
+  scenes.forEach((scene, i) => {
+    const end = scenes[i + 1]?.start ?? (draft.beats ?? []).length;
+    const seen: string[] = [];
+    const arriving = new Set<string>();
+    const meet = (id: string | null | undefined, arrives = false) => {
+      if (!stands(id) || seen.includes(id) || arriving.has(id)) return;
+      if (arrives) arriving.add(id);
+      else seen.push(id);
+    };
+    for (let at = scene.start; at < end; at += 1) {
+      const raw = (draft.beats ?? [])[at];
+      const beat = spokenAt.has(at) ? beats[spokenAt.get(at)!] : null;
+      if (raw.kind === 'action') {
+        const who = known(raw.who, PEOPLE);
+        meet(who, raw.do === 'enter');
+        if (raw.do !== 'enter' && raw.do !== 'leave')
+          meet(known(raw.to, PEOPLE));
+      } else if (beat?.kind === 'line') {
+        // Heard from off the stage, down a phone or in a letter: not here.
+        if (beat.from === undefined || beat.from === 'thought')
+          meet(beat.speaker);
+        meet(beat.to);
+      } else if (beat) for (const id of peopleIn(beat.say)) meet(id);
+    }
+    parts.push([...seen, ...arriving]);
+    if (scene.given) return;
+    if (i === 0) {
+      scene.people = seen;
+      return;
+    }
+    const opener = (draft.beats ?? [])[scene.start];
+    const beat = spokenAt.has(scene.start)
+      ? beats[spokenAt.get(scene.start)!]
+      : null;
+    scene.people =
+      opener?.kind === 'narration' && beat
+        ? peopleIn(beat.say).filter((id) => stands(id) && !arriving.has(id))
+        : [];
+  });
+  // The first scene opens with whom the writer listed who is in it, and
+  // anyone else in it who is there before they come; never someone the
+  // writer listed who has no part in it until later.
+  const opening = (draft.opening ?? [])
+    .map((ref) => known(ref, [...PEOPLE, 'drawing']))
+    .filter((id): id is string => Boolean(id));
   const present: string[] = [];
   const shown: string[] = [];
   const gone = new Set<string>();
-  const put = (id: string) => {
-    // A voice is never on the stage.
-    if (isPerson(id) && !stands(id)) return;
-    const list = isPerson(id) ? present : shown;
-    if (!list.includes(id)) list.push(id);
+  /** Who is in another place of the scene, apart from the rest, by the place. */
+  const apart = new Map<string, string>();
+  /** When each last spoke, by the draft's beat, for whom three a stage shows. */
+  const lastSpoke = new Map<string, number>();
+  for (const id of opening)
+    if (byId.get(id)?.kind === 'drawing') shown.push(id);
+    else if (stands(id) && parts[0].includes(id)) present.push(id);
+  // The writer said no one who is in it: those who are there before they
+  // are said to come.
+  if (!present.length) for (const id of scenes[0].people) present.push(id);
+  /** The three a story's stage shows of those there: who spoke last first, kept in their places. */
+  const three = (people: readonly string[]): string[] => {
+    if (people.length <= STORY_ON_STAGE) return [...people];
+    const recent = [...people]
+      .sort(
+        (a, b) =>
+          (lastSpoke.get(b) ?? -1) - (lastSpoke.get(a) ?? -1) ||
+          people.indexOf(a) - people.indexOf(b),
+      )
+      .slice(0, STORY_ON_STAGE);
+    return people.filter((id) => recent.includes(id));
   };
-  for (const ref of draft.opening ?? []) {
-    const id = known(ref, [...PEOPLE, 'drawing']);
-    if (id) put(id);
-  }
-  // Someone who leaves before they are said to come was there; and when
-  // the writer did not say who is there, so is anyone who speaks or does
-  // something before they are said to come. Otherwise, whoever speaks
-  // without being there is cut in as they speak.
-  const listed = (draft.opening ?? []).length > 0;
-  const moved = new Set<string>();
-  (draft.beats ?? []).forEach((raw, at) => {
-    const beat = spokenAt.has(at) ? beats[spokenAt.get(at)!] : null;
-    // Someone heard from off the stage, down a phone or in a letter is
-    // not there for it.
-    const away =
-      beat?.kind === 'line' &&
-      beat.from !== undefined &&
-      beat.from !== 'thought';
-    const id =
-      beat?.kind === 'line'
-        ? away
-          ? null
-          : (beat.speaker ?? null)
-        : known(raw.who, PEOPLE);
-    if (!id || moved.has(id)) return;
-    if (raw.kind === 'action' && (raw.do === 'enter' || raw.do === 'leave')) {
-      moved.add(id);
-      if (raw.do === 'leave') put(id);
-      return;
-    }
-    if (!listed) put(id);
-  });
+  /** Where the stage looks: the scene's own place, or another where someone is apart. */
+  let view: string | null = null;
   const stageNow = (extra: Partial<SceneStage> = {}): SceneStage => {
-    const show = [...present, ...shown].slice(0, MAX_ON_STAGE);
+    const people =
+      view === null
+        ? present.filter((id) => !apart.has(id))
+        : [...apart].filter(([, place]) => place === view).map(([id]) => id);
+    const show = [...three(people), ...(view === null ? shown : [])].slice(
+      0,
+      MAX_ON_STAGE,
+    );
     return {
       layout: show.length
         ? fitLayout(show.length > 1 ? 'row' : 'one', show.length)
@@ -945,7 +1080,21 @@ export function mendScreenplay(
    * the hand.
    */
   const companionsOf = (who: string, raw: ScreenplayBeatDraft): string[] => {
-    const named = peopleIn(raw.say);
+    // Never the one left ("John's followers leave Jesus"), nor whom the
+    // action is toward.
+    const left = new RegExp(
+      `\\b(?:leave|leaves|left|leaving|from|to|toward|towards)\\s+(?:the\\s+)?$`,
+      'iu',
+    );
+    const named = namedIn(raw.say, [
+      ...speaking.filter((one) => !one.id.startsWith(OUT_OF_CAST)),
+    ])
+      .filter(
+        (one) =>
+          !left.test(raw.say.slice(Math.max(0, one.at - 20), one.at)) &&
+          one.id !== known(raw.to, PEOPLE),
+      )
+      .map((one) => one.id);
     const along = /\b(?:together|they|both|with)\b/iu.test(raw.say)
       ? (known(raw.to, PEOPLE) ?? touched.get(who) ?? null)
       : null;
@@ -955,21 +1104,47 @@ export function mendScreenplay(
   };
   const steps: SceneStep[] = [];
   const opensQuiet = [...moments.values()].some((m) => m.after < 0);
+  /** What the stage last showed: a new step only where that changes. */
+  let lastShow: string[] = [];
+  const differs = (show: readonly string[]) =>
+    show.length !== lastShow.length || show.some((id, i) => id !== lastShow[i]);
+  const first = stageNow(scenes[0].place ? { backdrop: scenes[0].place } : {});
+  lastShow = first.show;
+  /** The place the stage last showed: a narration naming it again changes nothing. */
+  let shownPlace: string | null = scenes[0].place;
   steps.push({
     at: { beat: opensQuiet ? -1 : 0, phrase: '' },
     word: 0,
     ...(opensQuiet ? { after: 0 } : {}),
-    stage: stageNow(),
+    stage: first,
     effects: [],
   });
+  let sceneIndex = 0;
   (draft.beats ?? []).forEach((raw, at) => {
+    // A new scene: the stage clears to its people, in its place, by a cut.
+    let fresh: Partial<SceneStage> | null = null;
+    const nowScene = sceneOf(at);
+    if (nowScene !== sceneIndex) {
+      sceneIndex = nowScene;
+      const scene = scenes[nowScene];
+      present.splice(0, present.length, ...scene.people);
+      shown.length = 0;
+      gone.clear();
+      apart.clear();
+      view = null;
+      fresh = { ...(scene.place ? { backdrop: scene.place } : {}), cut: true };
+    }
+    const scenePlace = scenes[sceneIndex].place;
     const k = spokenAt.get(at);
     if (k !== undefined) {
       // As a line or a narration begins.
       const beat = beats[k];
       const effects: SceneEffect[] = [];
-      let stage: SceneStage | null = null;
-      const place = known(raw.place, ['place']);
+      const named =
+        beat.kind === 'narration' && !fresh
+          ? known(raw.place, ['place'])
+          : null;
+      const place = named && named !== shownPlace ? named : null;
       const prop = known(raw.show, ['drawing']);
       if (prop && !shown.includes(prop)) shown.push(prop);
       // Whoever speaks is on the stage: unless the words sent them off it,
@@ -995,20 +1170,66 @@ export function mendScreenplay(
         }
       }
       const here = beat.from === undefined || beat.from === 'thought';
+      if (speaker) lastSpoke.set(speaker, at);
+      // Where the stage looks: at the speaker, in their own place if it is
+      // not the scene's (the cave, while the others are above it); for a
+      // narration about only those apart, at them.
+      let look = fresh ? null : view;
+      if (beat.kind === 'line' && speaker && here && stands(speaker)) {
+        const lineAt = known(raw.place, ['place']);
+        if (lineAt && lineAt !== scenePlace) apart.set(speaker, lineAt);
+        look = apart.get(speaker) ?? null;
+      } else if (beat.kind === 'narration') {
+        const about = [
+          ...new Set([
+            ...(known(raw.who, PEOPLE) ? [known(raw.who, PEOPLE)!] : []),
+            ...peopleIn(beat.say),
+          ]),
+        ].filter(stands);
+        if (about.length)
+          look = about.every((id) => apart.has(id))
+            ? apart.get(about[0])!
+            : null;
+      }
+      // Someone here who is not on the stage comes into view. One the
+      // words sent off calls from off it, unless no one is left: then the
+      // scene goes with them, and they are back.
       const cutIn =
         speaker &&
         here &&
+        look === null &&
         stands(speaker) &&
         !present.includes(speaker) &&
-        !gone.has(speaker)
+        (!gone.has(speaker) || !present.length)
           ? [speaker]
           : [];
-      for (const id of cutIn) present.push(id);
-      if (place || prop || cutIn.length)
-        stage = stageNow({
-          ...(place ? { backdrop: place } : {}),
-          ...(cutIn.length ? { cutIn } : {}),
-        });
+      for (const id of cutIn) {
+        present.push(id);
+        gone.delete(id);
+      }
+      const switched = look !== view;
+      view = look;
+      const next = stageNow({
+        ...(fresh ?? {}),
+        ...(place ? { backdrop: place } : {}),
+        ...(switched && !fresh
+          ? { backdrop: view ?? scenePlace ?? undefined, cut: true as const }
+          : {}),
+        ...(cutIn.length ? { cutIn } : {}),
+      });
+      let stage: SceneStage | null = null;
+      if (
+        fresh ||
+        place ||
+        prop ||
+        cutIn.length ||
+        switched ||
+        differs(next.show)
+      ) {
+        stage = next;
+        lastShow = next.show;
+        shownPlace = next.backdrop ?? shownPlace;
+      }
       const who = speaker ?? known(raw.who, [...PEOPLE, 'drawing']);
       effects.push(...stateOf(who, raw.state, raw.say), ...moveOf(who, raw));
       if (stage || effects.length)
@@ -1025,7 +1246,18 @@ export function mendScreenplay(
     // A moment of quiet: someone comes or goes, moves, or something changes.
     const who = known(raw.who, [...PEOPLE, 'drawing']);
     const effects: SceneEffect[] = [];
-    let stage: SceneStage | null = null;
+    let extra: Partial<SceneStage> | null = fresh;
+    // What someone apart does is seen where they are.
+    const look =
+      who && apart.has(who)
+        ? apart.get(who)!
+        : who && stands(who)
+          ? null
+          : view;
+    if (look !== view && !fresh) {
+      view = look;
+      extra = { backdrop: view ?? scenePlace ?? undefined, cut: true };
+    }
     if (raw.do === 'enter' && stands(who) && !present.includes(who)) {
       // With whoever they bring: "leading a brown goat on a rope".
       const coming = [
@@ -1035,8 +1267,9 @@ export function mendScreenplay(
       for (const id of coming) {
         present.push(id);
         gone.delete(id);
+        lastSpoke.set(id, at);
       }
-      stage = stageNow({ arrive: coming });
+      extra = { ...(extra ?? {}), arrive: coming };
     } else if (raw.do === 'leave' && stands(who) && present.includes(who)) {
       // And whoever goes with them: "together, they walk home".
       const going = [
@@ -1046,18 +1279,16 @@ export function mendScreenplay(
       for (const id of going) {
         present.splice(present.indexOf(id), 1);
         gone.add(id);
+        apart.delete(id);
       }
-      stage = stageNow({ leave: going });
+      extra = { ...(extra ?? {}), leave: going };
     }
     if (isPerson(who) && (raw.do === 'hug' || raw.do === 'reach')) {
       const other = known(raw.to, PEOPLE);
       if (other) touched.set(who, other);
     }
     const prop = known(raw.show, ['drawing']);
-    if (prop && !shown.includes(prop)) {
-      shown.push(prop);
-      stage = stageNow(stage?.arrive ? { arrive: stage.arrive } : {});
-    }
+    if (prop && !shown.includes(prop)) shown.push(prop);
     // Hugged or reached for, someone is there: in view, if they were not.
     const toward = known(raw.to, PEOPLE);
     if (
@@ -1067,10 +1298,15 @@ export function mendScreenplay(
       !gone.has(toward)
     ) {
       present.push(toward);
-      stage = stageNow({
-        ...(stage?.arrive ? { arrive: stage.arrive } : {}),
-        cutIn: [toward],
-      });
+      lastSpoke.set(toward, at);
+      extra = { ...(extra ?? {}), cutIn: [toward] };
+    }
+    const next = stageNow(extra ?? {});
+    let stage: SceneStage | null = null;
+    if (extra || prop || differs(next.show)) {
+      stage = next;
+      lastShow = next.show;
+      shownPlace = next.backdrop ?? shownPlace;
     }
     effects.push(...moveOf(who, raw), ...stateOf(who, raw.state, raw.say));
     if (stage || effects.length)

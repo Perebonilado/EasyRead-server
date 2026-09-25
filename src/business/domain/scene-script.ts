@@ -532,6 +532,8 @@ export interface SceneStage {
   arrive?: string[];
   /** Who leaves here as the words say ("Baba Sule walked off"): they walk off. */
   leave?: string[];
+  /** A cut: a new scene, or to another place of it, even where the place is the same. */
+  cut?: true;
 }
 
 export interface SceneEffect {

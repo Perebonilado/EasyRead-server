@@ -733,6 +733,7 @@ export const sceneScreenplaySchema = z.object({
       pace: z.enum(LINE_PACES).nullable(),
       hold: z.number().nullable(),
       place: z.string().nullable(),
+      with: z.array(z.string()).nullable(),
       music: z.enum(SCENE_MUSIC).nullable(),
       energy: z.enum(['low', 'high']).nullable(),
     }),
@@ -793,6 +794,9 @@ const FIGURE_FIELDS = [
 ] as const;
 
 export const sceneStorySchema = z.object({
+  book: z
+    .object({ title: z.string().nullable(), author: z.string().nullable() })
+    .nullable(),
   world: z
     .object({
       era: z.string(),

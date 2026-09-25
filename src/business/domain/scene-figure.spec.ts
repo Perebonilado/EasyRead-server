@@ -14,6 +14,7 @@ import {
   ON_FOOT,
   PLAIN_FIGURE,
   TOPS,
+  oldWorld,
   describeFigure,
   drawFigure,
   figureFrame,
@@ -518,5 +519,30 @@ describe('someone doing something', () => {
     expect(render(zeds, { xmlMode: true })).toContain(
       `rotate(90 0 ${rigOf(spec.age).cy})`,
     );
+  });
+});
+
+describe('a bed as the story’s world has them', () => {
+  it('knows a world before metal beds by its era', () => {
+    expect(
+      [
+        'first century AD',
+        'ancient Egypt',
+        'medieval England',
+        '12th century',
+        'the 1990s',
+        'modern Lagos',
+        null,
+      ].map(oldWorld),
+    ).toEqual([true, true, true, true, false, false, false]);
+  });
+
+  it('draws someone in bed on a wooden pallet and a mat there, with no rails', () => {
+    const spec = figureOf({});
+    const modern = drawFigure(spec, 'patient', { pose: 'in bed' }).svg;
+    const old = drawFigure(spec, 'patient', { pose: 'in bed', old: true }).svg;
+    expect(modern).toContain('#b9c0ca');
+    expect(old).not.toContain('#b9c0ca');
+    expect(old).toContain('#9a6b3f');
   });
 });

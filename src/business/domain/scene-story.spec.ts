@@ -12,7 +12,9 @@ import {
   mergeStory,
   moodBefore,
   nameKey,
+  outsideStory,
   setThing,
+  titleCard,
   sheetThing,
   storyPieces,
   standsOnStage,
@@ -131,15 +133,19 @@ describe("a story's continuity", () => {
   });
 
   it('keeps the characters a book cannot do without when there are too many', () => {
-    const crowd = Array.from({ length: 30 }, (_, i) =>
-      person(`Walker ${String.fromCharCode(65 + i)}`, {
-        role: i === 29 ? 'main' : 'minor',
-      }),
+    const crowd = Array.from({ length: 50 }, (_, i) =>
+      person(
+        `Walker ${String.fromCharCode(65 + (i % 26))}${i >= 26 ? 'x' : ''}`,
+        {
+          role: i === 49 ? 'main' : 'minor',
+        },
+      ),
     );
     const bible = mergeStory([
       { from: 1, to: 5, draft: draft({ characters: crowd }) },
     ]);
-    expect(bible.characters).toHaveLength(24);
+    // Forty: a gospel's speakers who are named once and never again.
+    expect(bible.characters).toHaveLength(40);
     expect(bible.characters.some((c) => c.role === 'main')).toBe(true);
   });
 
@@ -768,5 +774,53 @@ describe('telling apart the people a story names', () => {
       'Jack Merridew / Jack',
       'King Herod / Herod',
     ]);
+  });
+});
+
+describe('the pages around a story', () => {
+  const bible = (title: string | null, author: string | null): StoryBible => ({
+    ...bibleOf({}),
+    pages: [4, 5, 6].map((page) => ({
+      page,
+      summary: '',
+      present: [],
+      place: null,
+      placeInferred: false,
+      time: null,
+      weather: null,
+      crowd: null,
+    })),
+    title,
+    author,
+  });
+
+  it('knows the front and back matter: before the story’s first page, after its last', () => {
+    expect(
+      [1, 3, 4, 6, 7].map((page) => outsideStory(bible(null, null), page)),
+    ).toEqual([true, true, false, false, true]);
+    // A book whose pages the reader never listed is all story.
+    expect(outsideStory(bibleOf({}), 1)).toBe(false);
+  });
+
+  it('makes the first a title card, said by the narrator with its author', () => {
+    const card = titleCard(
+      bible('Hide-and-Seek', 'T. Albert'),
+      '001-HIDE-AND-SEEK.pdf',
+    );
+    expect(card.beats.map((b) => [b.kind, b.say])).toEqual([
+      ['narration', 'Hide-and-Seek, by T. Albert.'],
+    ]);
+    expect(card.cast).toEqual([
+      {
+        id: 'book-title',
+        kind: 'words',
+        text: 'Hide-and-Seek',
+        style: 'title',
+      },
+    ]);
+    // With no title read, the file's name, made readable.
+    expect(
+      titleCard(bible(null, null), '001-HIDE-AND-SEEK-Free-Book.pdf').title,
+    ).toBe('Hide And Seek Free Book');
   });
 });

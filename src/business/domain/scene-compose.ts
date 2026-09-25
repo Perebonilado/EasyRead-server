@@ -857,7 +857,8 @@ export function composeScene(input: ComposeInput): {
       const place = painted(step.stage.backdrop);
       const cut =
         before.length > 0 &&
-        ((place !== null && place !== backdrop) ||
+        (step.stage.cut === true ||
+          (place !== null && place !== backdrop) ||
           (!step.stage.show.some((id) => before.includes(id)) &&
             !newcomers.some((id) => arriving.has(id)) &&
             !before.some((id) => leaving.has(id))));
@@ -1122,6 +1123,12 @@ export function composeScene(input: ComposeInput): {
         until = step.atMs;
         break;
       }
+      // Its words all said, a line's bubble ends at the change: carried,
+      // a finished line would flash up again.
+      if (step.atMs >= said) {
+        until = step.atMs;
+        break;
+      }
       // The line so far ends at the change of stage; the rest carries on.
       part.say!.untilMs = step.atMs;
       part.say!.saidUntilMs = Math.min(said, step.atMs);
@@ -1137,6 +1144,8 @@ export function composeScene(input: ComposeInput): {
           untilMs: until,
           saidUntilMs: Math.max(step.atMs, said),
           continues: true,
+          // A thought carried on is still a thought.
+          ...(say.from ? { from: say.from } : {}),
         },
       };
       carried.push(rest);

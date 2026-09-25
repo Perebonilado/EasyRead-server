@@ -42,8 +42,25 @@ interface Wardrobe {
   skins: readonly number[];
 }
 
-const EARTH = ['#9a6b4b', '#f5f5f2', '#34518f', '#8d8f96', '#c9a36a', '#b85c4a', '#6d8f5a'];
-const BRIGHT = ['#f0924a', '#6dbf73', '#f4c95d', '#8a6bd1', '#4a8fd9', '#d9534f', '#3fb0a4', '#ef8fb3'];
+const EARTH = [
+  '#9a6b4b',
+  '#f5f5f2',
+  '#34518f',
+  '#8d8f96',
+  '#c9a36a',
+  '#b85c4a',
+  '#6d8f5a',
+];
+const BRIGHT = [
+  '#f0924a',
+  '#6dbf73',
+  '#f4c95d',
+  '#8a6bd1',
+  '#4a8fd9',
+  '#d9534f',
+  '#3fb0a4',
+  '#ef8fb3',
+];
 
 /**
  * The wardrobe for a story's world: the ancient world in robes and head
@@ -108,7 +125,9 @@ function person(
   index: number,
 ): string {
   const pick = <T>(list: readonly T[], salt: string): T =>
-    list[Math.floor(beatOf(`${seed}:${index}:${salt}`) * list.length) % list.length];
+    list[
+      Math.floor(beatOf(`${seed}:${index}:${salt}`) * list.length) % list.length
+    ];
   const cut = pick(wardrobe.cuts, 'cut');
   const head = pick(wardrobe.heads, 'head');
   const cloth = pick(wardrobe.colours, 'cloth');
@@ -119,7 +138,8 @@ function person(
   const s = k * (child ? 0.78 : 1);
   // The body: shoulders to the ground, a robe wider at the foot.
   const half = (cut === 'wide' ? 34 : 26) * s;
-  const foot = (cut === 'robe' || cut === 'dress' || cut === 'wide' ? 34 : 28) * s;
+  const foot =
+    (cut === 'robe' || cut === 'dress' || cut === 'wide' ? 34 : 28) * s;
   const top = y - 118 * s;
   const cy = top - 22 * s;
   const body = `<path d="M${r1(x - foot)},${r1(y)} L${r1(x - half)},${r1(top + 10 * s)} Q${r1(x - half)},${r1(top)} ${r1(x - half + 10 * s)},${r1(top)} L${r1(x + half - 10 * s)},${r1(top)} Q${r1(x + half)},${r1(top)} ${r1(x + half)},${r1(top + 10 * s)} L${r1(x + foot)},${r1(y)} Z" fill="${cloth}"/>`;
@@ -163,10 +183,11 @@ function person(
 }
 
 /**
- * The crowd for a page: a few people in one row, or many in three, the
- * back rows smaller and higher; a gap in the middle of the front row,
- * where the story's people stand in front of them. The same crowd for
- * the same seed.
+ * The crowd for a page: a few people in one row, or many in three, all
+ * smaller than the story's people and the back rows smaller and higher
+ * still, so they read as farther off; the front row keeps to the sides,
+ * leaving the middle, where the story's people stand, clear of heads
+ * between theirs. The same crowd for the same seed.
  */
 export function drawCrowd(input: {
   size: 'few' | 'many';
@@ -178,19 +199,18 @@ export function drawCrowd(input: {
   const rows =
     input.size === 'many'
       ? [
-          { n: 9, y: h - 150, k: 0.62, spread: 0.94 },
-          { n: 8, y: h - 80, k: 0.78, spread: 0.96 },
-          { n: 6, y: h - 8, k: 0.92, spread: 1 },
+          { n: 10, y: h - 170, k: 0.5, spread: 0.96 },
+          { n: 8, y: h - 95, k: 0.6, spread: 0.98 },
+          { n: 6, y: h - 20, k: 0.72, spread: 1 },
         ]
-      : [{ n: 6, y: h - 8, k: 0.9, spread: 1 }];
+      : [{ n: 6, y: h - 20, k: 0.72, spread: 1 }];
   const people: string[] = [];
   let index = 0;
   rows.forEach((row, r) => {
     for (let i = 0; i < row.n; i += 1) {
       const t = (i + 0.5) / row.n;
       // The front row leaves the middle to the story's people.
-      if (r === rows.length - 1 && input.size === 'many' && t > 0.34 && t < 0.66)
-        continue;
+      if (r === rows.length - 1 && t > 0.26 && t < 0.74) continue;
       const jitter = (beatOf(`${input.seed}:${r}:${i}:x`) - 0.5) * 40;
       const x = r1(w * (0.5 + (t - 0.5) * row.spread) + jitter);
       people.push(person(x, row.y, row.k, input.seed, wardrobe, index));

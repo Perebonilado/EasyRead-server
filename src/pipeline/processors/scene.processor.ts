@@ -59,6 +59,7 @@ import {
   describeFigure,
   figureOf,
   type FigureSpec,
+  oldWorld,
 } from '../../business/domain/scene-figure';
 import {
   SET_VERSION,
@@ -91,6 +92,8 @@ import {
   standsOnStage,
   STORY_VERSION,
   storyKey,
+  outsideStory,
+  titleCard,
   storyPieces,
   withVoices,
   type StoryBible,
@@ -324,6 +327,29 @@ export class SceneProcessor {
           attempts: record.attempts + 1,
         });
       const profile = await this.profileFor(documentId, contentVersion);
+      const story = await this.pageStory(
+        profile.story,
+        documentId,
+        contentVersion,
+        doc.props.title,
+        pageNumber,
+      );
+      // A story book's pages before its story or after it are not played
+      // as story: the first is a title card, the rest are not made.
+      let premade: SceneScript | null = null;
+      if (story && outsideStory(story.bible, pageNumber)) {
+        if (pageNumber === 1) premade = titleCard(story.bible, doc.props.title);
+        else {
+          if (remaking) return;
+          await this.visuals.update(record.id, {
+            status: 'not_suitable',
+            step: null,
+            fit: 'poor',
+            fitReason: 'This page is not part of the story.',
+          });
+          return;
+        }
+      }
       // A story's page is written from the book's own words, its note
       // beside them for plainer wording; any other page from its note.
       const { material, plain } = profile.story
@@ -333,8 +359,9 @@ export class SceneProcessor {
             plain: null,
           };
       if (
+        !premade &&
         wordsOf(material).length <
-        (profile.story ? THIN_STORY_WORDS : THIN_PAGE_WORDS)
+          (profile.story ? THIN_STORY_WORDS : THIN_PAGE_WORDS)
       ) {
         if (remaking) return;
         await this.visuals.update(record.id, {
@@ -359,13 +386,8 @@ export class SceneProcessor {
           pageNumber,
         ),
         profile,
-        story: await this.pageStory(
-          profile.story,
-          documentId,
-          contentVersion,
-          doc.props.title,
-          pageNumber,
-        ),
+        story: premade ? null : story,
+        ...(premade ? { script: premade } : {}),
         kept: doc.props.institutionId
           ? await this.pronunciations.kept(doc.props.institutionId)
           : new Map(),
@@ -459,6 +481,8 @@ export class SceneProcessor {
     profile: DocumentProfile;
     /** A story's page: its characters are the book's own. */
     story?: PageStory | null;
+    /** A script made by code (a story book's title card): no writer. */
+    script?: SceneScript;
     kept: Pronunciations;
     base: string;
     who: string;
@@ -491,20 +515,22 @@ export class SceneProcessor {
           ),
         }
       : null;
-    const written = await this.write({
-      documentTitle: input.documentTitle,
-      topic,
-      material: input.material,
-      plain: input.plain ?? null,
-      context: input.context,
-      profile: input.profile,
-      story,
-      documentId,
-      who,
-    });
-    const script = story
-      ? castStory(written, story.bible, story.page)
-      : written;
+    // A script code made (a story book's title card) needs no writer.
+    const script: SceneScript =
+      input.script ??
+      (await this.write({
+        documentTitle: input.documentTitle,
+        topic,
+        material: input.material,
+        plain: input.plain ?? null,
+        context: input.context,
+        profile: input.profile,
+        story,
+        documentId,
+        who,
+      }).then((written) =>
+        story ? castStory(written, story.bible, story.page) : written,
+      ));
     if (script.fit === 'poor')
       return {
         fit: 'poor',
@@ -859,6 +885,7 @@ export class SceneProcessor {
           pose: thing.pose,
           holding: thing.holding,
           signs: signsShown(script, thing.id),
+          old: oldWorld(story?.bible.world?.era),
         }).catch((error: unknown) => {
           this.logger.warn(
             `${who}: "${thing.id}" (a person) is set as a card: ${(error as Error).message}`,
@@ -900,6 +927,7 @@ export class SceneProcessor {
             pose: thing.pose,
             holding: thing.holding,
             signs,
+            old: oldWorld(story?.bible.world?.era),
           })
         : null;
       const { anchors: pageAnchors, ...posed } = onPage ?? { anchors: null };

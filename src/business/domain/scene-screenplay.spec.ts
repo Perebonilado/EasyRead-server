@@ -194,16 +194,21 @@ describe('a screenplay made sound and staged', () => {
 
   it('stages everyone there as it opens, and keeps them on: the camera, not the writer, goes close', () => {
     const { script } = mend();
+    // The scene's place from its first step: the narration names the yard.
     expect(script.steps[0].stage).toEqual({
       layout: 'row',
       show: ['ada', 'kofi', 'nana'],
       arrows: [],
+      backdrop: 'yard',
     });
-    // The narration moves the scene to the yard; Ada's face as she asks.
-    expect(script.steps[1].stage?.backdrop).toBe('yard');
-    expect(script.steps[2].effects).toEqual([
-      { target: 'ada', part: 'happy', do: 'show' },
-    ]);
+    // The scene is the yard from its first step; Ada's face as she asks.
+    expect(
+      script.steps.filter((s) => s.stage?.backdrop === 'yard'),
+    ).toHaveLength(1);
+    expect(
+      script.steps.find((s) => s.effects.some((e) => e.target === 'ada'))
+        ?.effects,
+    ).toEqual([{ target: 'ada', part: 'happy', do: 'show' }]);
     expect(
       script.steps.every((s) => !s.stage || s.stage.show.length === 3),
     ).toBe(true);
@@ -407,7 +412,9 @@ describe('a screenplay made sound and staged', () => {
         { id: 'goat', name: 'goat', aliases: ['brown goat'], voice: 'boy' },
       ]),
     ).toMatchObject({
-      show: ['ada', 'kofi', 'nana', 'goat'],
+      // Three at most on a story's stage: Kofi, who has said nothing,
+      // steps out of the frame as Nana comes with her goat.
+      show: ['ada', 'nana', 'goat'],
       arrive: ['nana', 'goat'],
     });
     const hugged = draft();
@@ -641,3 +648,207 @@ describe('voices beyond the stage', () => {
   });
 });
 
+describe('scenes: only who is in them, where they are', () => {
+  const gospel = [
+    { id: 'jesus', name: 'Jesus', aliases: [], voice: 'man' as const },
+    { id: 'centurion', name: 'Centurion', aliases: [], voice: 'man' as const },
+    {
+      id: 'mother-in-law',
+      name: 'Peter’s mother-in-law',
+      aliases: [],
+      voice: 'old woman' as const,
+    },
+  ];
+  const towns = [
+    {
+      id: 'capernaum',
+      name: 'Capernaum',
+      aliases: [],
+      sound: null,
+      look: 'a town',
+    },
+    {
+      id: 'peters-house',
+      name: 'Peter’s House',
+      aliases: [],
+      sound: null,
+      look: 'a house',
+    },
+    {
+      id: 'hillside',
+      name: 'the hillside',
+      aliases: [],
+      sound: null,
+      look: 'a slope',
+    },
+  ];
+  const cast = [
+    thing('jesus', 'character', { name: 'Jesus' }),
+    thing('centurion', 'character', { name: 'Centurion' }),
+    thing('mother-in-law', 'character', { name: 'Peter’s mother-in-law' }),
+    thing('leper', 'person', { name: 'Man with leprosy' }),
+    thing('capernaum', 'place'),
+    thing('peters-house', 'place'),
+    thing('hillside', 'place'),
+  ];
+  const staged = (beats: ScreenplayBeatDraft[], opening: string[] = []) =>
+    mendScreenplay(
+      { ...draft(), opening, beats, cast },
+      { characters: gospel, places: towns },
+    ).script.steps.flatMap((step) =>
+      step.stage
+        ? [
+            `${step.stage.show.join('+')}${step.stage.backdrop ? ` @${step.stage.backdrop}` : ''}`,
+          ]
+        : [],
+    );
+
+  it('clears the stage at each scene: the leper, the centurion, Peter’s house', () => {
+    expect(
+      staged(
+        [
+          beat(
+            'narration',
+            'On the hillside, a man with leprosy comes to Jesus.',
+            {
+              place: 'hillside',
+            },
+          ),
+          beat('line', 'Lord, if you are willing, you can make me clean.', {
+            who: 'leper',
+          }),
+          beat('line', 'I am willing. Be clean!', { who: 'jesus' }),
+          beat(
+            'narration',
+            'Later, in Capernaum, a centurion comes to Jesus.',
+            {
+              place: 'capernaum',
+            },
+          ),
+          beat('line', 'Lord, my servant is lying at home paralyzed.', {
+            who: 'centurion',
+          }),
+          beat('line', 'I will come and heal him.', { who: 'jesus' }),
+          beat(
+            'narration',
+            'Jesus enters Peter’s house and sees Peter’s mother-in-law lying ill.',
+          ),
+        ],
+        // The writer listed everyone as the page opens: only those in the
+        // first scene are there.
+        ['jesus', 'centurion', 'leper'],
+      ),
+    ).toEqual([
+      'jesus+leper @hillside',
+      'centurion+jesus @capernaum',
+      'jesus+mother-in-law @peters-house',
+    ]);
+  });
+
+  it('starts a scene where time passes, with whom its narration names', () => {
+    expect(
+      staged([
+        beat('narration', 'In Capernaum, the centurion asks Jesus for help.', {
+          place: 'capernaum',
+        }),
+        beat('line', 'Lord, my servant is lying at home paralyzed.', {
+          who: 'centurion',
+        }),
+        beat('narration', 'That evening, Peter’s mother-in-law lies ill.'),
+        beat('line', 'Get up.', { who: 'jesus' }),
+      ]),
+    ).toEqual([
+      // In the order the words name them.
+      'centurion+jesus @capernaum',
+      'mother-in-law @capernaum',
+      'mother-in-law+jesus',
+    ]);
+  });
+
+  it('brings back the one the scene follows when no one else is left', () => {
+    expect(
+      staged(
+        [
+          beat('narration', 'In Capernaum, Jesus teaches.', {
+            place: 'capernaum',
+          }),
+          beat('line', 'Stretch out your hand.', { who: 'jesus' }),
+          beat('action', 'Jesus leaves.', {
+            who: 'jesus',
+            do: 'leave',
+            hold: 1,
+          }),
+          beat('line', 'Do not tell others about me.', { who: 'jesus' }),
+        ],
+        ['jesus'],
+      ),
+    ).toEqual(['jesus @capernaum', '', 'jesus']);
+  });
+});
+
+describe('two places at once: cutting between them', () => {
+  const kids = [
+    { id: 'sally', name: 'Sally', aliases: [], voice: 'girl' as const },
+    { id: 'james', name: 'James', aliases: [], voice: 'boy' as const },
+    { id: 'mark', name: 'Mark', aliases: [], voice: 'boy' as const },
+  ];
+  const woods = [
+    { id: 'woods', name: 'the woods', aliases: [], sound: null, look: 'trees' },
+    {
+      id: 'cave',
+      name: 'the cave',
+      aliases: [],
+      sound: null,
+      look: 'a dark cave',
+    },
+  ];
+
+  it('shows Sally alone in the cave when she speaks, and the boys above when they do', () => {
+    const { script } = mendScreenplay(
+      {
+        ...draft(),
+        opening: ['james', 'mark'],
+        cast: [
+          thing('sally', 'character', { name: 'Sally' }),
+          thing('james', 'character', { name: 'James' }),
+          thing('mark', 'character', { name: 'Mark' }),
+          thing('woods', 'place'),
+          thing('cave', 'place'),
+        ],
+        beats: [
+          beat(
+            'narration',
+            'Night in the woods. The boys reach the fallen tree.',
+            {
+              place: 'woods',
+            },
+          ),
+          beat('line', 'Hey! Are you stuck under this tree?', { who: 'james' }),
+          beat('line', 'Kind of! I fell into a cave.', {
+            who: 'sally',
+            place: 'cave',
+          }),
+          beat('line', 'James, you stay with Sally. I will get my dad.', {
+            who: 'mark',
+          }),
+          beat('line', 'Please hurry, I am scared.', { who: 'sally' }),
+        ],
+      },
+      { characters: kids, places: woods },
+    );
+    expect(
+      script.steps.flatMap((step) =>
+        step.stage
+          ? [
+              `${step.stage.show.join('+')}${step.stage.backdrop ? ` @${step.stage.backdrop}` : ''}${step.stage.cut ? ' cut' : ''}`,
+            ]
+          : [],
+      ),
+    ).toEqual([
+      'james+mark @woods',
+      'sally @cave cut',
+      'james+mark @woods cut',
+      'sally @cave cut',
+    ]);
+  });
+});

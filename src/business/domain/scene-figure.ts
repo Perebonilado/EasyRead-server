@@ -1323,8 +1323,16 @@ function headwearOf(spec: FigureSpec, R: Rig): string {
       // Tied high and wide, its folds fanned out above the brow.
       return (
         `<path d="M-52,${cy - 24} Q-74,${cy - 60} -40,${cy - 82} Q-14,${cy - 100} 8,${cy - 86} Q38,${cy - 104} 58,${cy - 76} Q76,${cy - 50} 52,${cy - 24} Q0,${cy - 40} -52,${cy - 24} Z" ${inked(c)}/>` +
-        line(`M-40,${cy - 34} Q-44,${cy - 66} -18,${cy - 80}`, shade(c, 0.72), 2.4) +
-        line(`M-10,${cy - 38} Q-6,${cy - 74} 22,${cy - 90}`, shade(c, 0.72), 2.4) +
+        line(
+          `M-40,${cy - 34} Q-44,${cy - 66} -18,${cy - 80}`,
+          shade(c, 0.72),
+          2.4,
+        ) +
+        line(
+          `M-10,${cy - 38} Q-6,${cy - 74} 22,${cy - 90}`,
+          shade(c, 0.72),
+          2.4,
+        ) +
         line(`M20,${cy - 38} Q34,${cy - 66} 56,${cy - 70}`, shade(c, 0.72), 2.4)
       );
     case 'kufi':
@@ -1602,11 +1610,7 @@ function dressOf(spec: FigureSpec, R: Rig): Dressed {
         flare: 18,
         details:
           `<path d="M-22,${sY} L22,${sY} L24,${sY + 34} Q0,${sY + 48} -24,${sY + 34} Z" ${inked(shade(top, 0.88))}/>` +
-          line(
-            `M-15,${sY + 10} Q0,${sY + 34} 15,${sY + 10}`,
-            accent,
-            2.6,
-          ) +
+          line(`M-15,${sY + 10} Q0,${sY + 34} 15,${sY + 10}`, accent, 2.6) +
           line(`M-9,${sY + 22} Q0,${sY + 38} 9,${sY + 22}`, accent, 2.2),
       };
     case 'armour': {
@@ -2731,6 +2735,8 @@ function drawInBed(
   spec: FigureSpec,
   key: string,
   asked?: readonly FigureSign[],
+  /** Before beds had metal frames: a low wooden pallet and a woven mat. */
+  old = false,
 ): FigureDrawing {
   const layers = layersOf(spec);
   const { R } = layers;
@@ -2743,18 +2749,34 @@ function drawInBed(
   const blanket = shade(CLOTH[spec.accentColour], 1.55);
   const shirt = CLOTH[spec.topColour];
   const w = BED.half;
-  const bed = [
-    // Legs, the base, the rails at each end, the mattress, the pillows.
-    ...[-w + 14, w - 22].map(
-      (x) =>
-        `<rect x="${x}" y="${top + 26}" width="8" height="${-top - 32}" ${inked(frame)}/><circle cx="${x + 4}" cy="-5" r="5" ${inked(SHOE)}/>`,
-    ),
-    `<rect x="${-w + 6}" y="${top + 10}" width="${2 * w - 12}" height="18" rx="4" ${inked(frame)}/>`,
-    `<rect x="${-w}" y="${top - 88}" width="14" height="${118}" rx="6" ${inked(frame)}/>`,
-    `<rect x="${w - 14}" y="${top - 36}" width="14" height="${66}" rx="6" ${inked(frame)}/>`,
-    `<rect x="${-w + 12}" y="${top}" width="${2 * w - 24}" height="14" rx="5" ${inked('#f3f1ec')}/>`,
-    `<ellipse cx="${hx - 6}" cy="${top - 40}" rx="50" ry="24" ${inked('#ffffff')}/>`,
-  ].join('');
+  const wood = '#9a6b3f';
+  const mat = '#d9c49a';
+  const bed = old
+    ? [
+        // A low wooden pallet on short legs, a woven mat, a rolled cloth.
+        ...[-w + 16, w - 26].map(
+          (x) =>
+            `<rect x="${x}" y="${top + 26}" width="10" height="${-top - 26}" rx="2" ${inked(wood)}/>`,
+        ),
+        `<rect x="${-w + 6}" y="${top + 10}" width="${2 * w - 12}" height="18" rx="3" ${inked(wood)}/>`,
+        `<rect x="${-w + 10}" y="${top}" width="${2 * w - 20}" height="14" rx="4" ${inked(mat)}/>`,
+        ...[-w + 40, -w + 90, -w + 140, -w + 190, -w + 240].map((x) =>
+          line(`M${x},${top + 2} L${x},${top + 12}`, shade(mat, 0.8), 2),
+        ),
+        `<ellipse cx="${hx - 6}" cy="${top - 34}" rx="46" ry="18" ${inked(shade(mat, 0.92))}/>`,
+      ].join('')
+    : [
+        // Legs, the base, the rails at each end, the mattress, the pillows.
+        ...[-w + 14, w - 22].map(
+          (x) =>
+            `<rect x="${x}" y="${top + 26}" width="8" height="${-top - 32}" ${inked(frame)}/><circle cx="${x + 4}" cy="-5" r="5" ${inked(SHOE)}/>`,
+        ),
+        `<rect x="${-w + 6}" y="${top + 10}" width="${2 * w - 12}" height="18" rx="4" ${inked(frame)}/>`,
+        `<rect x="${-w}" y="${top - 88}" width="14" height="${118}" rx="6" ${inked(frame)}/>`,
+        `<rect x="${w - 14}" y="${top - 36}" width="14" height="${66}" rx="6" ${inked(frame)}/>`,
+        `<rect x="${-w + 12}" y="${top}" width="${2 * w - 24}" height="14" rx="5" ${inked('#f3f1ec')}/>`,
+        `<ellipse cx="${hx - 6}" cy="${top - 40}" rx="50" ry="24" ${inked('#ffffff')}/>`,
+      ].join('');
   // Their top: the shoulders, sitting up against the pillows.
   const s2 = R.halfShoulder;
   const sy = hy + 30;
@@ -2859,6 +2881,51 @@ export interface FigureHow {
   holding?: FigureProp | null;
   /** The signs drawn, ready to be shown: only those the page shows, so a figure carries no more than it needs. */
   signs?: readonly FigureSign[];
+  /** A story set before beds had metal frames: a bed is a low wooden pallet with a mat. */
+  old?: boolean;
+}
+
+/**
+ * Whether a story's era is before beds with metal frames, hospital
+ * rails, and the like: an ancient, biblical or medieval world, or any
+ * before the eighteenth century.
+ */
+export function oldWorld(era: string | null | undefined): boolean {
+  const text = (era ?? '').toLowerCase();
+  if (!text) return false;
+  if (
+    /\b(?:ancient|antiquity|biblical|medieval|middle ages|prehistoric|stone age|bronze age|iron age|roman|greek|egyptian|bc|bce|b\.c\.?)\b/u.test(
+      text,
+    )
+  )
+    return true;
+  const ORDINALS = [
+    'first',
+    'second',
+    'third',
+    'fourth',
+    'fifth',
+    'sixth',
+    'seventh',
+    'eighth',
+    'ninth',
+    'tenth',
+    'eleventh',
+    'twelfth',
+    'thirteenth',
+    'fourteenth',
+    'fifteenth',
+    'sixteenth',
+    'seventeenth',
+  ];
+  const century =
+    /\b(\d{1,2})(?:st|nd|rd|th)\s+century\b/u.exec(text)?.[1] ??
+    (() => {
+      const word = /\b([a-z]+)\s+century\b/u.exec(text)?.[1];
+      const at = word ? ORDINALS.indexOf(word) : -1;
+      return at >= 0 ? String(at + 1) : undefined;
+    })();
+  return century !== undefined && Number(century) < 18;
 }
 
 /**
@@ -2876,7 +2943,7 @@ export function drawFigure(
 ): FigureDrawing {
   const key = seed || JSON.stringify(spec);
   const pose = how.pose ?? 'standing';
-  if (pose === 'in bed') return drawInBed(spec, key, how.signs);
+  if (pose === 'in bed') return drawInBed(spec, key, how.signs, how.old);
   const lying = pose === 'lying';
   const n = lying
     ? 1

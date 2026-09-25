@@ -10,6 +10,7 @@ import { isolate, type Callout } from './scene-callouts';
 import { elements } from './scene-dom';
 import {
   drawFigure,
+  figureFrame,
   figureOf,
   type FigureHow,
   type FigureSpec,
@@ -80,6 +81,44 @@ export async function figureDrawing(
     stands: { units: h },
     acts: true,
     anchors: drawn.anchors,
+  };
+}
+
+/**
+ * Someone the text's own tradition never draws, as the stage shows them:
+ * a soft light where they stand, the height of a grown-up, glowing gently.
+ * No face, no body, nothing that acts; their words come from it.
+ */
+export function lightDrawing(seed: string): GatedDrawing {
+  const viewBox = figureFrame('adult');
+  const [x, y, w, h] = viewBox;
+  const cx = x + w / 2;
+  const cy = y + h * 0.5;
+  const id = `light-${seed.replace(/[^a-z0-9-]/gi, '')}`;
+  const svg = [
+    `<svg xmlns="http://www.w3.org/2000/svg" viewBox="${viewBox.join(' ')}">`,
+    `<defs><radialGradient id="${id}" cx="50%" cy="50%" r="50%">`,
+    '<stop offset="0" stop-color="#fffdf2" stop-opacity="0.95"/>',
+    '<stop offset="0.4" stop-color="#fff0bf" stop-opacity="0.7"/>',
+    '<stop offset="1" stop-color="#ffe08a" stop-opacity="0"/>',
+    '</radialGradient></defs>',
+    `<style>.glow{transform-box:fill-box;transform-origin:50% 50%;animation:${id}-glow 4.8s ease-in-out infinite}@keyframes ${id}-glow{0%,100%{opacity:.82;transform:scale(1)}50%{opacity:1;transform:scale(1.05)}}</style>`,
+    `<g class="glow"><ellipse cx="${cx}" cy="${cy}" rx="${w * 0.46}" ry="${h * 0.5}" fill="url(#${id})"/></g>`,
+    '</svg>',
+  ].join('');
+  return {
+    svg,
+    viewBox,
+    aspect: w / h,
+    parts: {},
+    labels: {},
+    states: {},
+    moves: true,
+    callouts: [],
+    field: null,
+    // Their words come from about where a head would be.
+    head: [cx, y + h * 0.22],
+    stands: { units: h },
   };
 }
 
@@ -185,9 +224,11 @@ export function introCallouts(
 
 /**
  * Sets painted by an older way of painting them are painted again. 2:
- * painted to go with the people the kit draws (SET_STYLE).
+ * painted to go with the people the kit draws (SET_STYLE). 3: a whole,
+ * recognisable place, dressed for the story's world, and what stands in
+ * front of people's legs (a boat's side) a group of its own.
  */
-export const SET_VERSION = 2;
+export const SET_VERSION = 3;
 
 /** A place painted once for a book: the scene behind the stage. */
 export interface SetSheet {

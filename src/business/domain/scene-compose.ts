@@ -11,6 +11,7 @@ import type {
   SceneEffectDto,
   SceneEffectName,
   SceneEnterName,
+  SceneLineFrom,
   ScenePillDto,
   ScenePlaceDto,
   SceneStepDto,
@@ -18,7 +19,9 @@ import type {
   SceneTiming,
 } from '../../contracts';
 import { actingOf, type DirectedMove, type SpokenLine } from './scene-acting';
+import { CROWD_CANVAS, drawCrowd } from './scene-crowd';
 import type { Callout, InkField } from './scene-callouts';
+import { numbersIn } from './scene-chart';
 import { measureText } from './scene-font';
 import {
   auditStep,
@@ -26,6 +29,7 @@ import {
   pillBox,
   placeBubble,
   placeStrip,
+  placeVoice,
   placeLabels,
   placePill,
   segmentsOf,
@@ -48,6 +52,7 @@ import {
   STORY_MOVES,
   isCodeThing,
   quotedSpans,
+  type CharacterThing,
   type SceneScript,
   type SceneStep,
   type SceneThing,
@@ -56,6 +61,7 @@ import { paletteOf, placeMusic } from './scene-music';
 import type { DocumentProfile } from './scene-profile';
 import type { GatedDrawing } from './scene-svg';
 import { anchorMs, quietGaps, spaced, type TimedBeat } from './scene-timing';
+import { numberWords } from './spoken';
 
 /** How strongly the scene behind the stage shows on its paper: enough to be there, faint enough to read over. */
 export const BACKDROP_OPACITY = 0.5;
@@ -68,6 +74,39 @@ const EFFECT_STAGGER_MS = 180;
  * and the page opens as any page does.
  */
 export const OPENING_MIN_MS = 1200;
+/** Who says words from above that no one in the cast says: the narrator, from heaven. */
+const ABOVE = '@above';
+
+/** The crowd's thing, when a story page has one. */
+export const CROWD_ID = '@crowd';
+
+/**
+ * Where a crowd stands on a stage: across its width, its feet a little
+ * above the story's people's, as those farther back are; and the point
+ * over their heads a group's words come from. The stage draws it there.
+ */
+export function crowdBand(stage: { w: number; h: number }): {
+  box: { x: number; y: number; w: number; h: number };
+  head: [number, number];
+} {
+  const h = (stage.w * CROWD_CANVAS.h) / CROWD_CANVAS.w;
+  const y = stage.h * 0.86 - h;
+  return {
+    box: { x: 0, y, w: stage.w, h },
+    head: [stage.w / 2, y + h * 0.3],
+  };
+}
+
+/** Words that say a crowd cheers, and that it gasps. */
+const CHEERS =
+  /\b(?:cheer(?:s|ed|ing)?|shout(?:s|ed|ing)?|roar(?:s|ed)?|applaud(?:s|ed)?|clap(?:s|ped)?|rejoic(?:e|es|ed|ing)|hosanna|praised?)\b/iu;
+const GASPS =
+  /\b(?:gasp(?:s|ed)?|marvel(?:l?ed|s)?|amaz(?:ed|ement)|astonish(?:ed|ment)|terrified|frightened|afraid|fear(?:ed)?|trembl(?:e|ed))\b/iu;
+const CROWD_WORDS =
+  /\b(?:crowds?|people|multitude|throng|everyone|all of them|they all|villagers|townspeople|disciples)\b/iu;
+/** How long the crowd cheers or gasps. */
+const CROWD_MOVE_MS = 1400;
+
 /** How long a speech bubble stays after the voice has said its words. */
 const SAY_AFTER_MS = 700;
 /** A moment of quiet after a line starts this long after its last word. */
@@ -188,6 +227,9 @@ export function thingDto(
       : {}),
     // Someone drawn by the kit acts; where their head is, they look from.
     ...(drawing.acts ? { rig: true as const } : {}),
+    ...(thing.kind === 'character' && thing.minor
+      ? { minor: true as const }
+      : {}),
     ...(drawing.head
       ? {
           head: [
@@ -444,6 +486,8 @@ const SHOT_LEAST_MS = 1200;
 const SHOT_APART_MS = 5000;
 /** Two framed together this long at most: then the whole stage again. */
 const TWO_SHOT_MOST_MS = 9000;
+/** How long the camera stays on someone the book meets for the first time. */
+const FIRST_SHOT_MS = 2200;
 /** Faces the camera moves in on. */
 const STRONG_FACES = new Set(['afraid', 'sad', 'surprised', 'angry', 'pain']);
 
@@ -486,8 +530,13 @@ export function storyShots(
           e.part !== null &&
           (FACES as readonly string[]).includes(e.part),
       )?.part ?? null;
+  // A voice from somewhere else is no one on the stage: the camera stays
+  // on the whole of it.
   const lines = script.beats.flatMap((beat, k) =>
-    beat.kind === 'line' && beat.speaker && beats[k]
+    beat.kind === 'line' &&
+    beat.speaker &&
+    beats[k] &&
+    (!beat.from || beat.from === 'thought')
       ? [{ beat, k, at: beats[k].startMs, end: beats[k].endMs }]
       : [],
   );
@@ -551,7 +600,28 @@ export function storyShots(
     }
     i += 1;
   }
-  return shots;
+  // The first time the book meets someone, the camera moves in on them for
+  // a moment as they first speak: who they are is in how they look.
+  for (const thing of script.cast) {
+    if (thing.kind !== 'character' || !thing.first || thing.group) continue;
+    const first = lines.find((line) => line.beat.speaker === thing.id);
+    if (!first) continue;
+    const from = Math.max(0, first.at - 200);
+    const until = Math.min(from + FIRST_SHOT_MS, changeAfter(first.at));
+    const busy = shots.some(
+      (shot) => shot.atMs < until + 400 && (shot.untilMs ?? 0) > from - 400,
+    );
+    if (busy || stageAt(first.at).length < 2 || until - from < SHOT_LEAST_MS)
+      continue;
+    shots.push({
+      atMs: Math.round(from),
+      target: thing.id,
+      part: null,
+      do: 'zoom',
+      untilMs: Math.round(until),
+    });
+  }
+  return shots.sort((a, b) => a.atMs - b.atMs);
 }
 
 /** A story's drawings with nothing set beside them: the labels a lesson would, and what a character is like. */
@@ -591,8 +661,51 @@ export function composeScene(input: ComposeInput): {
   const things = script.cast.map((thing) =>
     thingDto(thing, drawings.get(thing.id), story),
   );
+  // A story page that is busy has a crowd behind its people, drawn by
+  // code for its world.
+  const crowdSize = story ? script.setting?.crowd : null;
+  const crowd =
+    crowdSize === 'few' || crowdSize === 'many'
+      ? drawCrowd({
+          size: crowdSize,
+          world: script.setting?.world ?? null,
+          seed: script.setting?.world?.region || script.title,
+        })
+      : null;
+  if (crowd)
+    things.push({
+      id: CROWD_ID,
+      kind: 'drawing',
+      svg: crowd.svg,
+      aspect: crowd.aspect,
+      caption: null,
+      parts: {},
+      labels: {},
+      states: {},
+      hidden: [],
+      moves: true,
+      ambience: null,
+    });
   const byId = new Map(things.map((thing) => [thing.id, thing]));
   const castById = new Map(script.cast.map((thing) => [thing.id, thing]));
+  /** Each line from somewhere else, by its say's id: where from, whose head its bubble is by, and the side an off-stage voice is on. */
+  const heard = new Map<
+    string,
+    { from: SceneLineFrom; by: string | null; side: -1 | 1 }
+  >();
+  /**
+   * The side a voice off the stage comes from: the left for someone the
+   * book met before everyone else on the page, where they would stand;
+   * else the right.
+   */
+  const offSide = (speaker: string): -1 | 1 => {
+    const me = castById.get(speaker);
+    if (me?.kind !== 'character') return 1;
+    const others = script.cast.filter(
+      (t): t is CharacterThing => t.kind === 'character' && t.id !== speaker,
+    );
+    return others.length && others.every((t) => t.met > me.met) ? -1 : 1;
+  };
 
   // Every step on its words, in order; stage changes kept apart. A moment
   // a screenplay shows without words comes in the quiet after its line,
@@ -744,7 +857,8 @@ export function composeScene(input: ComposeInput): {
       const place = painted(step.stage.backdrop);
       const cut =
         before.length > 0 &&
-        ((place !== null && place !== backdrop) ||
+        (step.stage.cut === true ||
+          (place !== null && place !== backdrop) ||
           (!step.stage.show.some((id) => before.includes(id)) &&
             !newcomers.some((id) => arriving.has(id)) &&
             !before.some((id) => leaving.has(id))));
@@ -923,12 +1037,31 @@ export function composeScene(input: ComposeInput): {
   );
   // Each line a character says: a bubble by their head holding only its
   // own words, open from just before its first word until a moment after
-  // its last. Their mouth moves while the voice says them.
+  // its last. Their mouth moves while the voice says them. A line from
+  // somewhere else (a voice from above, off the stage, down a phone, a
+  // letter, a thought) has a bubble that shows where it comes from, and
+  // no mouth moves for it; words from above no one in the cast says are
+  // the narrator's, at the top.
   script.beats.forEach((beat, k) => {
     const t = beats[k];
     if (!t) return;
-    for (const line of beat.lines ?? []) {
-      if (byId.get(line.speaker)?.kind !== 'drawing') continue;
+    const lines: { span: [number, number]; speaker: string }[] = beat.lines
+      ?.length
+      ? beat.lines
+      : beat.from === 'above'
+        ? [{ span: [0, beat.say.length], speaker: ABOVE }]
+        : [];
+    for (const line of lines) {
+      const speaker = castById.get(line.speaker);
+      // A group's line, with its crowd behind the stage, comes from it.
+      const fromCrowd =
+        crowd && speaker?.kind === 'character' && speaker.group && !beat.from;
+      const from: SceneLineFrom | undefined = fromCrowd
+        ? 'crowd'
+        : beat.kind === 'line' || line.speaker === ABOVE
+          ? beat.from
+          : undefined;
+      if (byId.get(line.speaker)?.kind !== 'drawing' && !from) continue;
       const [a, b] = line.span;
       const words = t.words.filter((w) => w[1] > a && w[0] < b);
       const text = bubbleText(beat.say.slice(a, b));
@@ -937,6 +1070,7 @@ export function composeScene(input: ComposeInput): {
       spoken.push({
         speaker: line.speaker,
         ...(beat.to ? { to: beat.to } : {}),
+        ...(from ? { from, side: offSide(line.speaker) } : {}),
         startMs: words[0][2],
         endMs: to,
         words: words.map((w) => ({
@@ -945,16 +1079,24 @@ export function composeScene(input: ComposeInput): {
           endMs: w[3],
         })),
       });
+      const id = `say-${saying++}`;
+      if (from)
+        heard.set(id, {
+          from,
+          by: from === 'phone' || from === 'letter' ? (beat.to ?? null) : null,
+          side: offSide(line.speaker),
+        });
       effects.push({
         atMs: Math.round(Math.max(0, words[0][2] - 150)),
         target: line.speaker,
         part: null,
         do: 'say',
         say: {
-          id: `say-${saying++}`,
+          id,
           text,
           untilMs: Math.round(to + SAY_AFTER_MS),
           saidUntilMs: Math.round(to),
+          ...(from ? { from } : {}),
         },
       });
     }
@@ -972,9 +1114,18 @@ export function composeScene(input: ComposeInput): {
     const next = lines[i + 1]?.atMs ?? durationMs;
     let until = Math.min(durationMs, say.untilMs, Math.max(said, next));
     let part = effect;
+    // A voice from elsewhere is never on the stage: its line runs on.
+    const elsewhere = say.from !== undefined && say.from !== 'thought';
     for (const step of steps) {
       if (step.atMs <= part.atMs || step.atMs >= until) continue;
+      if (elsewhere) continue;
       if (!step.show.includes(effect.target)) {
+        until = step.atMs;
+        break;
+      }
+      // Its words all said, a line's bubble ends at the change: carried,
+      // a finished line would flash up again.
+      if (step.atMs >= said) {
         until = step.atMs;
         break;
       }
@@ -993,6 +1144,8 @@ export function composeScene(input: ComposeInput): {
           untilMs: until,
           saidUntilMs: Math.max(step.atMs, said),
           continues: true,
+          // A thought carried on is still a thought.
+          ...(say.from ? { from: say.from } : {}),
         },
       };
       carried.push(rest);
@@ -1072,6 +1225,56 @@ export function composeScene(input: ComposeInput): {
       ),
     ),
   });
+  /**
+   * A story page's setting: its set at full strength, the light of its
+   * time and its weather, and its crowd, which cheers when a group's line
+   * is a shout or the words say it cheers, and gasps when they say it
+   * marvels or is afraid.
+   */
+  const settingOf = (): NonNullable<SceneDto['setting']> => {
+    const moves: [number, 'cheer' | 'gasp', number][] = [];
+    if (crowd)
+      script.beats.forEach((beat, k) => {
+        const t = beats[k];
+        if (!t) return;
+        const groupLine =
+          beat.kind === 'line' &&
+          beat.speaker &&
+          castById.get(beat.speaker)?.kind === 'character' &&
+          (castById.get(beat.speaker) as CharacterThing).group;
+        if (groupLine && /!/.test(beat.say)) {
+          moves.push([Math.round(t.startMs), 'cheer', CROWD_MOVE_MS]);
+          return;
+        }
+        if (beat.kind === 'line' && !groupLine) return;
+        if (!CROWD_WORDS.test(beat.say) && !groupLine) return;
+        for (const [pattern, move] of [
+          [CHEERS, 'cheer'],
+          [GASPS, 'gasp'],
+        ] as const) {
+          const m = pattern.exec(beat.say);
+          if (!m) continue;
+          const word = t.words.find((w) => w[1] > m.index) ?? t.words[0];
+          if (word) moves.push([Math.round(word[2]), move, CROWD_MOVE_MS]);
+          break;
+        }
+      });
+    const time = script.setting?.time;
+    const weather = script.setting?.weather;
+    return {
+      full: true,
+      ...(time && time !== 'day' ? { time } : {}),
+      ...(weather && weather !== 'clear' ? { weather } : {}),
+      ...(crowd
+        ? {
+            crowd: {
+              id: CROWD_ID,
+              ...(moves.length ? { moves } : {}),
+            },
+          }
+        : {}),
+    };
+  };
   // A screenplay's camera: the whole stage as it opens and while the
   // narrator speaks; on two who trade lines while others stand by; close
   // on a whisper, a shout or a strong face.
@@ -1087,9 +1290,37 @@ export function composeScene(input: ComposeInput): {
   };
 
   // Working grows as the voice works it: a line the writer never showed
-  // appears after the line before it, spread through its time on stage.
+  // appears as the voice says what it comes to (its last number, in
+  // figures or in words), or failing that after the line before it,
+  // spread through its time on stage.
+  const said = script.beats.flatMap((beat, k) =>
+    (beats[k]?.words ?? []).map((w) => ({
+      word: beat.say
+        .slice(w[0], w[1])
+        .toLowerCase()
+        .replace(/[^\p{L}\p{N}.]/gu, '')
+        .replace(/\.$/, ''),
+      at: w[2],
+    })),
+  );
+  /** When the voice first says a number after a moment: in figures, or in words. */
+  const saysAt = (n: number, after: number, before: number) => {
+    const figures = String(n);
+    const inWords = numberWords(figures)
+      .toLowerCase()
+      .split(/[\s-]+/);
+    for (let i = 0; i < said.length; i += 1) {
+      if (said[i].at <= after || said[i].at >= before) continue;
+      if (said[i].word.replace(/,/g, '') === figures) return said[i].at;
+      if (inWords.every((w, j) => said[i + j]?.word === w)) return said[i].at;
+    }
+    return null;
+  };
   for (const thing of things) {
     if (thing.kind !== 'drawing' || thing.source !== 'math') continue;
+    const source = castById.get(thing.id);
+    const latex =
+      source?.kind === 'math' ? source.lines.map((l) => l.latex) : [];
     const lines = Object.keys(thing.states)
       .map((name) => ({ name, k: Number(/\d+/.exec(name)?.[0] ?? 0) }))
       .sort((a, b) => a.k - b.k);
@@ -1100,7 +1331,7 @@ export function composeScene(input: ComposeInput): {
     );
     const end = leaves < 0 ? durationMs : steps[leaves].atMs;
     let last = steps[first].atMs + 300;
-    lines.forEach(({ name }, i) => {
+    lines.forEach(({ name, k }, i) => {
       const shown = effects.find(
         (e) => e.target === thing.id && e.part === name && e.do === 'show',
       );
@@ -1108,12 +1339,21 @@ export function composeScene(input: ComposeInput): {
         last = shown.atMs;
         return;
       }
+      // What the line comes to: the last number on it.
+      const tex = (latex[k - 1] ?? '').replace(/\{,\}/g, '');
+      const result = numbersIn(tex.split('=').pop() ?? '').pop();
+      const cue =
+        result !== undefined
+          ? saysAt(Math.abs(result), last + 300, end - 200)
+          : null;
       const left = lines.length - i + 1;
       last = Math.round(
-        Math.min(
-          end - 200,
-          last + Math.min(3200, Math.max(1200, (end - last) / left)),
-        ),
+        cue !== null
+          ? Math.max(last + 400, cue - 150)
+          : Math.min(
+              end - 200,
+              last + Math.min(3200, Math.max(1200, (end - last) / left)),
+            ),
       );
       effects.push({ atMs: last, target: thing.id, part: name, do: 'show' });
     });
@@ -1309,8 +1549,12 @@ export function composeScene(input: ComposeInput): {
       const spoken: Words[] = [];
       for (const effect of says) {
         if (stepOf(effect.atMs) !== k) continue;
-        const at = laidOut[effect.target];
-        const found = geometry.get(effect.target);
+        const voice = heard.get(effect.say!.id);
+        // Whose head it is by: the speaker's, or whoever hears the phone
+        // or holds the letter; a voice from above or off the stage, no one's.
+        const by = voice && voice.from !== 'thought' ? voice.by : effect.target;
+        const at = by ? laidOut[by] : undefined;
+        const found = by ? geometry.get(by) : undefined;
         let bubble: SceneBubbleDto | null = null;
         let head: [number, number] | null = null;
         if (at && found?.head) {
@@ -1337,6 +1581,53 @@ export function composeScene(input: ComposeInput): {
           // By their head, or narrower where the step is crowded.
           bubble = placeBubble(asked) ?? placeBubble({ ...asked, width: 300 });
         }
+        // A crowd's words, over the crowd: on the side of it farther from
+        // the story's people, so the words are never taken for theirs.
+        if (!bubble && voice?.from === 'crowd') {
+          const band = crowdBand(stage);
+          const people = Object.entries(laidOut)
+            .filter(([id]) => castById.get(id)?.kind === 'character')
+            .map(([, at]) => at.x + at.w / 2);
+          const sides = [0.2, 0.8].map((k) => stage.w * k);
+          const clear = (x: number) =>
+            Math.min(...people.map((p) => Math.abs(p - x)), Infinity);
+          const x = clear(sides[0]) >= clear(sides[1]) ? sides[0] : sides[1];
+          head = [x, band.head[1]];
+          const asked = {
+            text: effect.say!.text,
+            head,
+            body: {
+              x: x - stage.w * 0.15,
+              y: band.box.y,
+              w: stage.w * 0.3,
+              h: band.box.h,
+            },
+            stage,
+            avoid: {
+              boxes: [
+                ...solid,
+                ...pillBoxes,
+                ...wordsOf(laidOut, byId, stepPills, arrows).map((w) => w.box),
+              ],
+              segments,
+            },
+          };
+          bubble = placeBubble(asked) ?? placeBubble({ ...asked, width: 300 });
+        }
+        // A voice with no one on the stage to be by: across the top, or at
+        // the edge it comes from.
+        if (!bubble && voice && voice.from !== 'thought')
+          bubble = placeVoice({
+            text: effect.say!.text,
+            from:
+              voice.from === 'phone'
+                ? 'off'
+                : voice.from === 'crowd'
+                  ? 'above'
+                  : voice.from,
+            side: voice.side,
+            stage,
+          });
         // No room by them, or not on the stage: a strip across the top.
         bubble ??= placeStrip({
           text: effect.say!.text,
@@ -1344,6 +1635,12 @@ export function composeScene(input: ComposeInput): {
           head,
           stage,
         });
+        if (voice)
+          bubble = {
+            ...bubble,
+            from: voice.from,
+            ...(by && by !== effect.target && at ? { by } : {}),
+          };
         bubbles[effect.say!.id] = bubble;
         if (bubble)
           spoken.push({
@@ -1401,6 +1698,7 @@ export function composeScene(input: ComposeInput): {
       timing: input.timing,
       ...(input.profile?.stage ? { stage: input.profile.stage } : {}),
       ...(Object.keys(acting).length ? { acting } : {}),
+      ...(story ? { setting: settingOf() } : {}),
       sound: {
         mood: script.mood,
         music: placeMusic({
@@ -1439,8 +1737,12 @@ export function composeScene(input: ComposeInput): {
           ...(who ? { who } : {}),
         };
       }),
-      things: things.filter((thing) =>
-        steps.some((s) => s.show.includes(thing.id) || s.backdrop === thing.id),
+      things: things.filter(
+        (thing) =>
+          thing.id === CROWD_ID ||
+          steps.some(
+            (s) => s.show.includes(thing.id) || s.backdrop === thing.id,
+          ),
       ),
       steps,
       effects,

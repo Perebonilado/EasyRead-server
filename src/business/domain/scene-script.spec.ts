@@ -250,11 +250,14 @@ describe('the writer’s storyboard, mended', () => {
       { target: 'graph', part: 'one', do: 'point' },
       { target: 'poem', part: 'own', do: 'point' },
     ]);
-    // A book that may only explain: all three are set in type.
+    // A book that may only explain: its graph and its quotation are set
+    // in type; working is on any page that works a calculation.
     const plain = mendScript(d, { material, formats: ['explainer'] });
-    expect(
-      plain.script.cast.filter((t) => t.kind === 'words').map((t) => t.id),
-    ).toEqual(expect.arrayContaining(['work', 'graph', 'poem']));
+    const typed = plain.script.cast
+      .filter((t) => t.kind === 'words')
+      .map((t) => t.id);
+    expect(typed).toEqual(expect.arrayContaining(['graph', 'poem']));
+    expect(typed).not.toContain('work');
     // A quotation that is not the page's own words goes back.
     const off = draft();
     off.cast.push(thing('poem', 'quote', { quote: 'Trees are tall.' }));

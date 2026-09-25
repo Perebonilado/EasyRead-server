@@ -14,6 +14,7 @@ import type { DocumentPageRepository } from '../../business/repositories/documen
 import type { DocumentRepository } from '../../business/repositories/document.repository';
 import type { SummaryRepository } from '../../business/repositories/misc.repository';
 import type { SimplifiedPageRepository } from '../../business/repositories/simplified-page.repository';
+import { checkNote, settleNote } from '../../business/domain/maths-work';
 import { PipelineOrchestrator } from '../orchestrator.service';
 import { LectureFollowService } from './lecture-follow.service';
 import type { SimplifyJobData } from '../queues';
@@ -83,29 +84,43 @@ export class SimplifyPageProcessor {
       }
 
       const summary = await this.summaries.find(documentId);
-      const result = await this.llm.simplifyPage({
-        pageText: page.text,
-        summary,
-        pageNumber,
-      });
+      const maths = page.hasMaths;
+      const task = maths ? 'simplify_maths' : 'simplify_standard';
+      const ask = { pageText: page.text, summary, pageNumber, maths };
+      let result = await this.llm.simplifyPage(ask);
+      await this.record(documentId, task, result.usage);
+      let blocks = result.value;
+
+      // A maths page's working is checked by code: a wrong line, a lost
+      // number, goes back once; what is still wrong after that is cut at
+      // its last true line, so no wrong line reaches the reader.
+      if (maths) {
+        const problems = checkNote(blocks, page.text);
+        if (problems.length) {
+          this.logger.warn(
+            `${documentId} p${pageNumber}: the maths goes back: ${problems.slice(0, 3).join(' ')}`,
+          );
+          const second = await this.llm.simplifyPage({
+            ...ask,
+            previous: blocks,
+            problems,
+          });
+          await this.record(documentId, task, second.usage);
+          if (checkNote(second.value, page.text).length <= problems.length) {
+            blocks = second.value;
+            result = second;
+          }
+        }
+        blocks = settleNote(blocks, page.text);
+      }
 
       await this.simplified.markDone({
         documentId,
         pageNumber,
-        blocks: result.value,
+        blocks,
         model: result.usage.model,
         tokensIn: result.usage.tokensIn,
         tokensOut: result.usage.tokensOut,
-      });
-
-      await this.calls.record({
-        documentId,
-        task: 'simplify_standard',
-        model: result.usage.model,
-        tokensIn: result.usage.tokensIn,
-        tokensOut: result.usage.tokensOut,
-        latencyMs: result.usage.latencyMs,
-        outcome: 'ok',
       });
 
       await this.announce(documentId, pageNumber);
@@ -142,6 +157,27 @@ export class SimplifyPageProcessor {
       });
       await this.pipeline.afterSimplifyPage(documentId);
     }
+  }
+
+  private async record(
+    documentId: string,
+    task: 'simplify_standard' | 'simplify_maths',
+    usage: {
+      model: string;
+      tokensIn: number;
+      tokensOut: number;
+      latencyMs: number;
+    },
+  ) {
+    await this.calls.record({
+      documentId,
+      task,
+      model: usage.model,
+      tokensIn: usage.tokensIn,
+      tokensOut: usage.tokensOut,
+      latencyMs: usage.latencyMs,
+      outcome: 'ok',
+    });
   }
 
   private async announce(documentId: string, pageNumber: number) {

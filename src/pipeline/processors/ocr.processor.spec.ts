@@ -11,6 +11,15 @@ const PAGE_COUNT = 3;
 const DOC_ID = 'doc-1';
 
 function build(overrides: {
+  /** The page rows as extraction left them; by default two scans and a page of text. */
+  rows?: {
+    pageNumber: number;
+    text: string;
+    charCount: number;
+    isEmpty: boolean;
+    hasMaths?: boolean;
+    textSource?: 'extracted' | 'ocr';
+  }[];
   ocrPage?: (input: { png: Buffer; pageNumber: number }) => Promise<unknown>;
   pageImages?: () => Promise<unknown[]>;
   engine?: {
@@ -62,16 +71,17 @@ function build(overrides: {
     } as never,
     // pages
     {
-      findRange: async () => [
-        { pageNumber: 1, text: '', charCount: 0, isEmpty: true },
-        {
-          pageNumber: 2,
-          text: 'digital text here',
-          charCount: 17,
-          isEmpty: false,
-        },
-        { pageNumber: 3, text: '', charCount: 0, isEmpty: true },
-      ],
+      findRange: async () =>
+        overrides.rows ?? [
+          { pageNumber: 1, text: '', charCount: 0, isEmpty: true },
+          {
+            pageNumber: 2,
+            text: 'digital text here',
+            charCount: 17,
+            isEmpty: false,
+          },
+          { pageNumber: 3, text: '', charCount: 0, isEmpty: true },
+        ],
       countEmpty: async () =>
         2 - written.filter((page) => !page.isEmpty).length,
       writeOcrText: async (
@@ -203,5 +213,58 @@ describe('OcrProcessor', () => {
     expect(chained).toEqual(['afterOcr']);
     // Untouched: the document remains what it was, a viewable scan.
     expect(doc.props.simplificationUnavailable).toBe(true);
+  });
+
+  it('reads a maths page again from its image, and keeps the reading only when it holds most of the text', async () => {
+    const calls: number[][] = [];
+    const layer = 'x2 + 3x 10 so x 2 or x 5 the working goes on at length';
+    const { processor, written } = build({
+      rows: [
+        {
+          pageNumber: 1,
+          text: layer,
+          charCount: layer.replace(/\s/g, '').length,
+          isEmpty: false,
+          hasMaths: true,
+          textSource: 'extracted',
+        },
+        {
+          pageNumber: 2,
+          text: 'prose',
+          charCount: 5,
+          isEmpty: false,
+          hasMaths: false,
+          textSource: 'extracted',
+        },
+        {
+          pageNumber: 3,
+          text: layer,
+          charCount: layer.replace(/\s/g, '').length,
+          isEmpty: false,
+          hasMaths: true,
+          textSource: 'extracted',
+        },
+      ],
+      engine: {
+        isConfigured: () => true,
+        readPages: async (_pdf, pageNumbers) => {
+          calls.push(pageNumbers);
+          return [
+            {
+              pageNumber: 1,
+              markdown:
+                '$$x^{2} + 3x = 10$$\n\nso $x = 2$ or $x = -5$, and the working goes on at length.',
+            },
+            // A reading that lost most of the page is not kept.
+            { pageNumber: 3, markdown: '$x$' },
+          ];
+        },
+      },
+    });
+    await processor.process(job, context);
+
+    expect(calls).toEqual([[1, 3]]);
+    expect(written.map((page) => page.pageNumber)).toEqual([1]);
+    expect(written[0].text).toContain('x^{2} + 3x = 10');
   });
 });

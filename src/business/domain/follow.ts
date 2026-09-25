@@ -7,6 +7,7 @@
  * the spoken words' measured times and the note's own sentences, and the
  * client only ever reads it against the audio clock. Nothing waits on a pen.
  */
+import { sayLatex } from './maths-speech';
 import type { Block } from '../../contracts';
 import { contentWords, estimateWordTimes, numbersAsWords } from './board';
 import { scriptForTts as scriptForTtsLocal } from './lecture';
@@ -102,7 +103,12 @@ export function splitSentences(text: string): string[] {
 /** The bold marks the note carries, dropped for matching and for splitting. */
 const plainText = (text: string) => text.replace(/\*\*/g, '');
 
-const WHOLE_TYPES = new Set<Block['type']>(['table', 'code', 'math']);
+const WHOLE_TYPES = new Set<Block['type']>([
+  'table',
+  'code',
+  'math',
+  'working',
+]);
 const HEADING_TYPES = new Set<Block['type']>(['headingOne', 'headingTwo']);
 
 /**
@@ -126,13 +132,43 @@ export function noteCuts(blocks: Block[]): [number, number][][] {
  * paragraph or bullet, a heading as one unit, and a table, code sample or
  * equation as one unit for the whole block, so the tutor reading a table
  * lands on the table. Units and cuts come from the same ranges, so unit
- * n of a block is always the client's span n.
+ * n of a block is always the client's span n; a worked solution's units
+ * are its problem and then its steps, which the reader marks as such.
  */
 export function noteUnits(blocks: Block[]): NoteUnit[] {
   const units: NoteUnit[] = [];
   const cuts = noteCuts(blocks);
   blocks.forEach((block, index) => {
     const wordsOf = (text: string) => contentWords(numbersAsWords(text));
+    // A worked solution is followed a step at a time: its problem, then
+    // each step, as what is done and the words the voice says for it,
+    // with its line as said too, for a voice that reads the line out.
+    if (block.type === 'working' && block.working) {
+      const problem = plainText(block.text).replace(/\s+/g, ' ').trim();
+      if (problem)
+        units.push({
+          block: index,
+          sentence: 0,
+          start: 0,
+          end: block.text.length,
+          text: problem,
+          words: wordsOf(problem),
+        });
+      block.working.steps.forEach((step, i) => {
+        const text = `Step ${i + 1}: ${step.does}: ${step.says}`
+          .replace(/\s+/g, ' ')
+          .trim();
+        units.push({
+          block: index,
+          sentence: i + 1,
+          start: block.text.length,
+          end: block.text.length,
+          text,
+          words: wordsOf(`${text} ${sayLatex(step.latex)}`),
+        });
+      });
+      return;
+    }
     if (WHOLE_TYPES.has(block.type)) {
       const text = plainText(block.text).replace(/\s+/g, ' ').trim();
       if (!text) return;
@@ -653,12 +689,31 @@ export function followIsCurrent(track: FollowTrack | null): boolean {
   return track?.generator === FOLLOW_GENERATOR_VERSION;
 }
 
-/** A block as one line of prose for the lecturer: tables, code and equations named, not read. */
+/**
+ * A block as one line of prose for the lecturer: tables, code and
+ * equations named, not read; a worked solution as its steps, in the words
+ * a teacher says them, so the lecture can work it through.
+ */
 function blockProse(block: Block): string {
   const text = plainText(block.text).replace(/\s+/g, ' ').trim();
   if (block.type === 'code') return `(a code sample: ${text.slice(0, 160)})`;
-  if (block.type === 'math') return `(an equation: ${text.slice(0, 120)})`;
+  if (block.type === 'math')
+    return `(an equation, said: ${sayLatex(block.text).slice(0, 160)})`;
   if (block.type === 'table') return `(a table: ${text.slice(0, 200)})`;
+  if (block.type === 'working' && block.working) {
+    const w = block.working;
+    return [
+      `(a worked solution) ${text}`,
+      w.wanted ? `Wanted: ${w.wanted}.` : '',
+      ...w.steps.map(
+        (step, i) =>
+          `Step ${i + 1}: ${step.does}${step.why ? ` (${step.why})` : ''}: ${step.says}`,
+      ),
+      w.answer ? `Answer: ${w.answer}.` : '',
+    ]
+      .filter(Boolean)
+      .join(' ');
+  }
   return text;
 }
 
@@ -672,6 +727,18 @@ export function sceneProse(blocks: Block[]): string {
     .map((block) => {
       if (block.type === 'math') return `$$ ${block.text.trim()} $$`;
       if (block.type === 'table') return `(a table)\n${block.text.trim()}`;
+      // The working as its lines, each with what is done, for the stage.
+      if (block.type === 'working' && block.working)
+        return [
+          `(a worked solution) ${block.text.trim()}`,
+          ...block.working.given.map((given) => `Given: $$ ${given} $$`),
+          ...block.working.steps.map(
+            (step) => `$$ ${step.latex} $$ (${step.does})`,
+          ),
+          block.working.answer ? `Answer: $$ ${block.working.answer} $$` : '',
+        ]
+          .filter(Boolean)
+          .join('\n');
       return blockProse(block);
     })
     .filter(Boolean)

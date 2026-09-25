@@ -26,7 +26,7 @@ export async function drawByCode(thing: CodeThing): Promise<GatedDrawing> {
   let moves = false;
   let words: { size: number } | undefined;
   if (thing.kind === 'math') {
-    const set = renderMath(thing.lines);
+    const set = renderMath(thing.lines, thing.picture ?? null);
     ({ svg, viewBox, parts, states } = set);
   } else if (thing.kind === 'plot') {
     const plot = renderPlot(thing.plot);

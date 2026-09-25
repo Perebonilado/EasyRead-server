@@ -71,6 +71,16 @@ export const HEADWEAR = [
   'helmet',
   'crown',
   'graduation cap',
+  // A veil over the head and shoulders, down the back: Mary's mantle.
+  'mantle',
+  // A folded head tie, worn high: West Africa's.
+  'gele',
+  // A round brimless cap.
+  'kufi',
+  // A pharaoh's striped headcloth.
+  'nemes',
+  // A soldier's helmet with a crest: Rome's.
+  'crested helmet',
 ] as const;
 export type Headwear = (typeof HEADWEAR)[number];
 
@@ -88,10 +98,19 @@ export const TOPS = [
   'robe',
   'apron',
   'tunic',
+  // A rough garment of hide or camel's hair: John the Baptist's.
+  'animal skin',
+  // A long shirt to the shins.
+  'kaftan',
+  // A flowing robe over a kaftan, its sleeves wide: West Africa's.
+  'agbada',
+  // A soldier's plated breastplate over a tunic.
+  'armour',
 ] as const;
 export type Top = (typeof TOPS)[number];
 
-export const BOTTOMS = ['trousers', 'shorts', 'skirt'] as const;
+/** A wrapper is a cloth wrapped as a long skirt, to the ankles. */
+export const BOTTOMS = ['trousers', 'shorts', 'skirt', 'wrapper'] as const;
 export type Bottom = (typeof BOTTOMS)[number];
 
 export const CLOTH_COLOURS = [
@@ -120,6 +139,11 @@ export const FIGURE_EXTRAS = [
   'stethoscope',
   'bow tie',
   'earrings',
+  // A cloak or cape from the shoulders, in the accent colour.
+  'cloak',
+  'sandals',
+  // An angel's.
+  'wings',
 ] as const;
 export type FigureExtra = (typeof FIGURE_EXTRAS)[number];
 
@@ -203,6 +227,9 @@ export const FIGURE_PROPS = [
   'bag',
   'ball',
   'lantern',
+  'letter',
+  // A shepherd's crook, a traveller's staff, Moses's.
+  'staff',
 ] as const;
 export type FigureProp = (typeof FIGURE_PROPS)[number];
 
@@ -282,6 +309,32 @@ const SAME: Record<string, string> = {
   dreadlocks: 'locs',
   dreads: 'locs',
   plaits: 'braids',
+  veil: 'mantle',
+  shawl: 'mantle',
+  'head tie': 'gele',
+  headtie: 'gele',
+  fila: 'kufi',
+  skullcap: 'kufi',
+  'pharaoh headdress': 'nemes',
+  'roman helmet': 'crested helmet',
+  'animal hide': 'animal skin',
+  'camel hair': 'animal skin',
+  "camel's hair": 'animal skin',
+  fur: 'animal skin',
+  hide: 'animal skin',
+  boubou: 'kaftan',
+  dashiki: 'kaftan',
+  babariga: 'agbada',
+  armor: 'armour',
+  breastplate: 'armour',
+  sarong: 'wrapper',
+  lappa: 'wrapper',
+  pagne: 'wrapper',
+  cape: 'cloak',
+  mantle: 'mantle',
+  crook: 'staff',
+  "shepherd's staff": 'staff',
+  rod: 'staff',
 };
 
 /** A word as the lists write it: lower case, single spaces, a known other word taken for its own. */
@@ -1066,7 +1119,11 @@ function painFace(R: Rig, skin: string): string {
 
 /** Whether a hat hides every hair. */
 const wrapped = (spec: FigureSpec) =>
-  spec.headwear === 'headscarf' || spec.headwear === 'turban';
+  spec.headwear === 'headscarf' ||
+  spec.headwear === 'turban' ||
+  spec.headwear === 'mantle' ||
+  spec.headwear === 'gele' ||
+  spec.headwear === 'nemes';
 
 /** Hair behind the head: what shows past it, over the shoulders or above. */
 function hairBehind(spec: FigureSpec, R: Rig): string {
@@ -1262,6 +1319,47 @@ function headwearOf(spec: FigureSpec, R: Rig): string {
         line(`M0,${cy - 48} L40,${cy - 44} L44,${cy - 28}`, GOLD, 2.6) +
         `<circle cx="44" cy="${cy - 26}" r="3.5" ${flat(GOLD)}/>`
       );
+    case 'gele':
+      // Tied high and wide, its folds fanned out above the brow.
+      return (
+        `<path d="M-52,${cy - 24} Q-74,${cy - 60} -40,${cy - 82} Q-14,${cy - 100} 8,${cy - 86} Q38,${cy - 104} 58,${cy - 76} Q76,${cy - 50} 52,${cy - 24} Q0,${cy - 40} -52,${cy - 24} Z" ${inked(c)}/>` +
+        line(
+          `M-40,${cy - 34} Q-44,${cy - 66} -18,${cy - 80}`,
+          shade(c, 0.72),
+          2.4,
+        ) +
+        line(
+          `M-10,${cy - 38} Q-6,${cy - 74} 22,${cy - 90}`,
+          shade(c, 0.72),
+          2.4,
+        ) +
+        line(`M20,${cy - 38} Q34,${cy - 66} 56,${cy - 70}`, shade(c, 0.72), 2.4)
+      );
+    case 'kufi':
+      return (
+        `<path d="${chord(0, cy, 48, 43, -0.66)}" ${inked(c)}/>` +
+        [-26, -9, 9, 26]
+          .map(
+            (x) =>
+              `<circle cx="${x}" cy="${cy - 34 - (Math.abs(x) < 10 ? 3 : 0)}" r="2.6" ${flat(shade(c, 0.7))}/>`,
+          )
+          .join('')
+      );
+    case 'crested helmet': {
+      const steel = '#b9bec6';
+      return (
+        `<path d="${chord(0, cy - 2, 51, 47, -0.5)}" ${inked(steel)}/>` +
+        // Its crest, front to back over the top.
+        `<path d="M-30,${cy - 42} Q0,${cy - 86} 30,${cy - 42} Q0,${cy - 62} -30,${cy - 42} Z" ${inked(CLOTH.red)}/>` +
+        `<rect x="-56" y="${cy - 30}" width="112" height="6" rx="3" ${inked(shade(steel, 0.8))}/>` +
+        [-1, 1]
+          .map(
+            (s2) =>
+              `<path d="M${s2 * 46},${cy - 26} L${s2 * 50},${cy + 6} Q${s2 * 44},${cy + 14} ${s2 * 38},${cy + 6} L${s2 * 38},${cy - 26} Z" ${inked(steel)}/>`,
+          )
+          .join('')
+      );
+    }
     default:
       return '';
   }
@@ -1275,7 +1373,7 @@ interface Dressed {
   /** How far down the garment reaches, from the hem's line; and how much wider it flares. */
   longer: number;
   flare: number;
-  sleeves: 'short' | 'long' | 'wide';
+  sleeves: 'short' | 'long' | 'wide' | 'flowing';
   sleeve: string;
   /** Drawn on the body, after it. */
   details: string;
@@ -1452,9 +1550,148 @@ function dressOf(spec: FigureSpec, R: Rig): Dressed {
           `<path d="M-6,${sY} L6,${sY} L0,${sY + 18} Z" ${inked(shade(top))}/>` +
           `<rect x="${r1(-R.halfHem + 2)}" y="${mid + 6}" width="${r1(R.halfHem * 2 - 4)}" height="6" ${inked(CLOTH.brown)}/>`,
       };
+    case 'animal skin': {
+      // Rough hide to the knees, its hem torn, its spots darker, belted
+      // with leather.
+      const hide = '#b8905a';
+      const longer = legs * 0.4;
+      const bottom = hemY + longer;
+      const half = R.halfHem + 4;
+      const teeth: string[] = [];
+      for (let x = -half; x < half - 2; x += 12)
+        teeth.push(
+          `<path d="M${r1(x)},${r1(bottom - 1)} L${r1(x + 6)},${r1(bottom + 7)} L${r1(x + 12)},${r1(bottom - 1)}" ${inked(hide)}/>`,
+        );
+      return {
+        ...plain,
+        fill: hide,
+        sleeve: hide,
+        sleeves: 'short',
+        longer,
+        flare: 4,
+        details:
+          teeth.join('') +
+          [
+            [-18, sY + 20, 6, 4],
+            [14, sY + 32, 5, 3.5],
+            [-8, mid + 20, 5, 3],
+            [20, mid + 28, 4, 3],
+          ]
+            .map(
+              ([x, y, rx, ry]) =>
+                `<ellipse cx="${x}" cy="${r1(y)}" rx="${rx}" ry="${ry}" ${flat(shade(hide, 0.7))}/>`,
+            )
+            .join('') +
+          `<rect x="${r1(-R.halfHem + 2)}" y="${mid + 4}" width="${r1(R.halfHem * 2 - 4)}" height="7" ${inked('#6b4a2f')}/>`,
+      };
+    }
+    case 'kaftan':
+      // A long shirt to the shins, its neck and front embroidered.
+      return {
+        ...plain,
+        longer: legs * 0.62,
+        flare: 4,
+        details:
+          `<path d="M-15,${sY} L15,${sY} L10,${sY + 30} L-10,${sY + 30} Z" ${inked(accent)}/>` +
+          [0, 1, 2, 3]
+            .map(
+              (k) =>
+                `<circle cx="0" cy="${r1(sY + 36 + k * 11)}" r="2.2" ${flat(accent)}/>`,
+            )
+            .join(''),
+      };
+    case 'agbada':
+      // A great flowing robe over the kaftan, to the shins, its sleeves
+      // wide as wings and its chest embroidered.
+      return {
+        ...plain,
+        sleeves: 'flowing',
+        longer: legs * 0.72,
+        flare: 18,
+        details:
+          `<path d="M-22,${sY} L22,${sY} L24,${sY + 34} Q0,${sY + 48} -24,${sY + 34} Z" ${inked(shade(top, 0.88))}/>` +
+          line(`M-15,${sY + 10} Q0,${sY + 34} 15,${sY + 10}`, accent, 2.6) +
+          line(`M-9,${sY + 22} Q0,${sY + 38} 9,${sY + 22}`, accent, 2.2),
+      };
+    case 'armour': {
+      // A breastplate of bands over a tunic in the accent colour, whose
+      // skirt shows below it in strips of leather.
+      const steel = '#b9bec6';
+      const skirt = legs * 0.35;
+      const strips: string[] = [];
+      for (let x = -R.halfHem + 4; x < R.halfHem - 6; x += 11)
+        strips.push(
+          `<rect x="${r1(x)}" y="${r1(hemY - 2)}" width="8" height="${r1(skirt)}" rx="2" ${inked('#7a5334', 2)}/>`,
+        );
+      return {
+        ...plain,
+        fill: steel,
+        sleeves: 'short',
+        sleeve: accent,
+        longer: skirt,
+        details:
+          `<rect x="${r1(-R.halfHem - 1)}" y="${r1(hemY - 2)}" width="${r1(R.halfHem * 2 + 2)}" height="${r1(skirt)}" ${inked(accent)}/>` +
+          strips.join('') +
+          [0.28, 0.5, 0.72]
+            .map((k) =>
+              line(
+                `M${r1(-s2 + 4)},${r1(sY + (hemY - sY) * k)} L${r1(s2 - 4)},${r1(sY + (hemY - sY) * k)}`,
+                shade(steel, 0.72),
+                2.4,
+              ),
+            )
+            .join(''),
+      };
+    }
     default:
       return plain;
   }
+}
+
+/** How far past the frame's sides an angel's wings reach. */
+const WING_SPAN = 118;
+
+/**
+ * What hangs or spreads behind the body: a cloak from the shoulders, a
+ * mantle's fall from the head, an angel's wings. Drawn first, so the
+ * body stands in front of it.
+ */
+function backOf(
+  spec: FigureSpec,
+  R: Rig,
+  bottom: number,
+  halfBottom: number,
+): string {
+  const out: string[] = [];
+  const { sY, cy, halfShoulder: s2 } = R;
+  const accent = CLOTH[spec.accentColour];
+  if (spec.extras.includes('wings'))
+    for (const s of [-1, 1]) {
+      const tip = s * WING_SPAN;
+      out.push(
+        `<path d="M${s * 14},${sY + 14} Q${s * 60},${sY - 70} ${tip},${sY - 44} Q${s * 104},${sY + 4} ${s * 96},${sY + 22} Q${s * 84},${sY + 52} ${s * 70},${sY + 58} Q${s * 50},${sY + 70} ${s * 22},${sY + 50} Z" ${inked('#fbfbf6')}/>`,
+        ...[0, 1, 2].map((k) =>
+          line(
+            `M${s * (30 + k * 8)},${sY + 36 - k * 4} Q${s * (60 + k * 10)},${sY + 20 - k * 16} ${s * (86 + k * 8)},${sY - 6 - k * 14}`,
+            '#d7d5cc',
+            2.4,
+          ),
+        ),
+      );
+    }
+  if (spec.extras.includes('cloak')) {
+    // A cape from the shoulders to the calves, flaring past the arms.
+    const down = r1(Math.max(bottom + 6, -FEET - 16));
+    const half = r1(halfBottom + 30);
+    out.push(
+      `<path d="M${r1(-s2 - 2)},${sY + 6} Q${r1(-s2 - 6)},${sY} ${r1(-s2 + 10)},${sY - 2} L${r1(s2 - 10)},${sY - 2} Q${r1(s2 + 6)},${sY} ${r1(s2 + 2)},${sY + 6} L${half},${down} Q0,${r1(down + 8)} ${-half},${down} Z" ${inked(shade(accent, 0.9))}/>`,
+    );
+  }
+  if (spec.headwear === 'mantle')
+    out.push(
+      `<path d="M-54,${cy} Q-54,${cy - 52} 0,${cy - 52} Q54,${cy - 52} 54,${cy} L${r1(halfBottom + 10)},${r1(bottom - 14)} L${r1(-halfBottom - 10)},${r1(bottom - 14)} Z" ${inked(shade(accent, 0.88))}/>`,
+    );
+  return out.join('');
 }
 
 /** A backpack's pack, showing past the shoulders behind the body. */
@@ -1489,6 +1726,16 @@ function extrasOnBody(spec: FigureSpec, R: Rig): string {
       `<path d="M-30,${sY + 8} Q0,${sY + 18} 30,${sY + 8} L30,${sY + 18} Q0,${sY + 28} -30,${sY + 18} Z" ${inked(accent)}/>` +
         `<path d="M12,${sY + 20} L24,${sY + 20} L22,${sY + 48} L10,${sY + 48} Z" ${inked(accent)}/>`,
     );
+  if (spec.extras.includes('cloak'))
+    // Its fronts over the shoulders, fastened below the chin.
+    out.push(
+      [-1, 1]
+        .map(
+          (s) =>
+            `<path d="M${s * 6},${sY + 12} Q${s * (s2 - 2)},${sY - 2} ${s * (s2 + 1)},${sY + 10} L${s * (s2 - 1)},${sY + 44} Q${s * (s2 - 8)},${sY + 30} ${s * 6},${sY + 18} Z" ${inked(accent)}/>`,
+        )
+        .join('') + `<circle cx="0" cy="${sY + 16}" r="5" ${inked(GOLD, 2)}/>`,
+    );
   if (spec.extras.includes('bow tie'))
     out.push(
       `<path d="M0,${sY + 15} L-13,${sY + 9} L-13,${sY + 21} Z" ${inked(accent)}/>` +
@@ -1522,6 +1769,8 @@ const GRIPS: Record<
   bag: { grip: 'down', size: 1.25 },
   ball: { grip: 'up', size: 1.4 },
   lantern: { grip: 'up', size: 1.35 },
+  letter: { grip: 'up', size: 1.35 },
+  staff: { grip: 'high', size: 1 },
 };
 const WOOD = '#8a5a3b';
 const STEEL = '#c9cdd3';
@@ -1536,6 +1785,8 @@ function propOf(
   prop: FigureProp,
   accent: string,
   up: number,
+  /** How far below the hand the ground is. */
+  down = 0,
 ): { markup: string; out: number; top: number } {
   const k = GRIPS[prop].size;
   // Its lines as wide as the figure's, however large it is drawn.
@@ -1567,6 +1818,22 @@ function propOf(
             lines,
           out: 28,
           top: -42,
+        };
+      }
+      case 'letter': {
+        // A sheet held up to read, a corner folded, its lines of writing.
+        const writing = [-34, -27, -20, -13]
+          .map((y, i) =>
+            line(`M-12,${y} L${i === 3 ? 3 : 12},${y}`, '#9d978f', W(1.8)),
+          )
+          .join('');
+        return {
+          markup:
+            `<path d="M-17,-3 L-17,-42 L10,-42 L17,-35 L17,-3 Z" ${inked('#fbf7ee')}/>` +
+            `<path d="M10,-42 L10,-35 L17,-35" fill="none" stroke="${FIGURE_INK}" stroke-width="${W(2)}" stroke-linejoin="round"/>` +
+            writing,
+          out: 18,
+          top: -43,
         };
       }
       case 'phone':
@@ -1629,6 +1896,17 @@ function propOf(
           out: 12,
           top: -40,
         };
+      case 'staff': {
+        // From the ground to above the head, its crook curled outward.
+        const top = r1(up / k - 34);
+        const foot = r1(down / k - 2);
+        const d = `M0,${foot} L0,${r1(top + 16)} Q0,${top} 12,${top} Q24,${top} 24,${r1(top + 12)} L24,${r1(top + 19)}`;
+        return {
+          markup: line(d, FIGURE_INK, W(7.4)) + line(d, WOOD, W(4)),
+          out: 28,
+          top: r1(top - 5),
+        };
+      }
       case 'flag': {
         const top = r1(up / k - 24);
         return {
@@ -1872,7 +2150,12 @@ function layersOf(
   // a walk lifts one and then the other.
   const legs: string[] = [];
   const bare =
-    spec.top === 'dress' || spec.top === 'robe' || spec.bottom === 'skirt';
+    spec.top === 'dress' ||
+    spec.top === 'robe' ||
+    spec.top === 'animal skin' ||
+    spec.top === 'armour' ||
+    spec.bottom === 'skirt' ||
+    spec.bottom === 'wrapper';
   const trousers = CLOTH[spec.bottomColour];
   const legTop = hemY - 4;
   for (const s of [-1, 1]) {
@@ -1886,14 +2169,39 @@ function layersOf(
         `<rect x="${x - 1}" y="${legTop}" width="18" height="${r1(cut - legTop)}" ${inked(trousers)}/>`,
       );
     }
-    leg.push(`<ellipse cx="${s * 17}" cy="-6" rx="15" ry="7" ${inked(SHOE)}/>`);
+    // Sandals: the foot, and straps over it.
+    if (spec.extras.includes('sandals'))
+      leg.push(
+        `<ellipse cx="${s * 17}" cy="-6" rx="15" ry="7" ${inked(skin)}/>`,
+        line(`M${s * 17 - 11},-5 L${s * 17 + 11},-5`, '#6b4a2f', 3),
+        line(`M${s * 17 - 4},-11 L${s * 17 - 4},-1`, '#6b4a2f', 3),
+      );
+    else
+      leg.push(
+        `<ellipse cx="${s * 17}" cy="-6" rx="15" ry="7" ${inked(SHOE)}/>`,
+      );
     legs.push(`<g class="leg l${s < 0 ? 0 : 1}">${leg.join('')}</g>`);
   }
-  if (spec.bottom === 'skirt' && spec.top !== 'dress' && spec.top !== 'robe') {
-    const down = hemY + Math.max(12, R.legs * 0.5);
+  if (
+    (spec.bottom === 'skirt' || spec.bottom === 'wrapper') &&
+    spec.top !== 'dress' &&
+    spec.top !== 'robe'
+  ) {
+    // A wrapper falls to the ankles, its end tucked across the front.
+    const wrapper = spec.bottom === 'wrapper';
+    const down = wrapper ? -FEET - 3 : hemY + Math.max(12, R.legs * 0.5);
     legs.push(
       `<path d="M${r1(-h2 + 2)},${hemY - 6} L${r1(h2 - 2)},${hemY - 6} L${r1(h2 + 6)},${r1(down)} L${r1(-h2 - 6)},${r1(down)} Z" ${inked(trousers)}/>`,
     );
+    if (wrapper)
+      legs.push(
+        line(
+          `M${r1(h2 - 4)},${hemY - 4} L${r1(-h2 * 0.2)},${r1(down)}`,
+          shade(trousers, 0.72),
+          2.4,
+        ),
+        `<rect x="${r1(-h2 + 2)}" y="${hemY - 6}" width="${r1(h2 * 2 - 4)}" height="6" ${inked(shade(trousers, 0.85), 2)}/>`,
+      );
   }
 
   // The body: a trapezoid rounded at the shoulders, as long as what is worn.
@@ -1920,6 +2228,11 @@ function layersOf(
     right: FIGURE_FRAME.halfWidth,
     top: R.top - FIGURE_FRAME.headroom,
   };
+  // Wings reach out past the frame's sides.
+  if (spec.extras.includes('wings')) {
+    beyond.left = Math.max(beyond.left, WING_SPAN + 4);
+    beyond.right = Math.max(beyond.right, WING_SPAN + 4);
+  }
   const rest = (s: number): Point2 => [s * (h2 + 3), hemY - 8];
   const handFor = (
     s: number,
@@ -1982,7 +2295,12 @@ function layersOf(
       const d = `M${pt(H[0] + s * 2, H[1] - 6)} L${pt(H[0] + s * 7, -3)}`;
       arms.push(line(d, FIGURE_INK, 7), line(d, WOOD, 4));
     }
-    const w = dressed.sleeves === 'wide' ? width + 5 : width;
+    const w =
+      dressed.sleeves === 'flowing'
+        ? width + 14
+        : dressed.sleeves === 'wide'
+          ? width + 5
+          : width;
     const colour = dressed.sleeves === 'short' ? skin : dressed.sleeve;
     // The forearm, from the elbow: its sleeve, a jumper's cuff, what the
     // hand holds under the hand, the hand, a pointing finger.
@@ -1993,7 +2311,12 @@ function layersOf(
     if (spec.top === 'jumper')
       fore.push(line(stretch(Math.max(0.8, u), 0.9), shade(dressed.sleeve), w));
     if (holding && s === holds) {
-      const prop = propOf(holding, CLOTH[spec.accentColour], R.top - H[1]);
+      const prop = propOf(
+        holding,
+        CLOTH[spec.accentColour],
+        R.top - H[1],
+        -H[1],
+      );
       fore.push(
         `<g transform="translate(${r1(H[0])} ${r1(H[1])})${s < 0 ? ' scale(-1 1)' : ''}">${prop.markup}</g>`,
       );
@@ -2030,11 +2353,33 @@ function layersOf(
   // The head: the face's ground, then hair and hats. A headscarf wraps it
   // and falls over the shoulders, leaving the face.
   const head: string[] = [];
-  if (spec.headwear === 'headscarf') {
+  if (spec.headwear === 'headscarf' || spec.headwear === 'mantle') {
+    // A mantle falls further, over the shoulders.
     const c = CLOTH[spec.accentColour];
+    const fall = spec.headwear === 'mantle' ? sY + 44 : sY + 30;
     head.push(
-      `<path d="M-54,${cy} Q-54,${cy - 52} 0,${cy - 52} Q54,${cy - 52} 54,${cy} Q56,${sY + 22} 40,${sY + 30} L-40,${sY + 30} Q-56,${sY + 22} -54,${cy} Z" ${inked(c)}/>`,
+      `<path d="M-54,${cy} Q-54,${cy - 52} 0,${cy - 52} Q54,${cy - 52} 54,${cy} Q58,${sY + 22} 46,${fall} L-46,${fall} Q-58,${sY + 22} -54,${cy} Z" ${inked(c)}/>`,
       `<ellipse cx="0" cy="${cy + 5}" rx="41" ry="36" ${inked(skin)}/>`,
+    );
+  } else if (spec.headwear === 'nemes') {
+    // A pharaoh's headcloth: striped, flat over the brow, falling in two
+    // lappets in front of the shoulders.
+    const stripes = [-1, 1]
+      .flatMap((s) =>
+        [0, 1, 2].map((k) =>
+          line(
+            `M${s * (46 + k * 3)},${cy + k * 14} L${s * (40 + k * 3)},${sY + 30}`,
+            CLOTH.navy,
+            3,
+          ),
+        ),
+      )
+      .join('');
+    head.push(
+      `<path d="M-50,${cy - 22} Q-48,${cy - 50} 0,${cy - 52} Q48,${cy - 50} 50,${cy - 22} L62,${sY + 36} L28,${sY + 36} L30,${cy + 10} L-30,${cy + 10} L-28,${sY + 36} L-62,${sY + 36} Z" ${inked(GOLD)}/>`,
+      stripes,
+      `<ellipse cx="0" cy="${cy + 5}" rx="40" ry="35" ${inked(skin)}/>`,
+      `<path d="M-42,${cy - 20} Q0,${cy - 34} 42,${cy - 20} L40,${cy - 10} Q0,${cy - 22} -40,${cy - 10} Z" ${inked(CLOTH.navy)}/>`,
     );
   } else {
     head.push(
@@ -2114,7 +2459,7 @@ function layersOf(
   return {
     R,
     legs: legs.join(''),
-    behind: `${packOf(spec, R)}<g class="hd">${hairBehind(spec, R)}</g>`,
+    behind: `${backOf(spec, R, bottom, hb)}${packOf(spec, R)}<g class="hd">${hairBehind(spec, R)}</g>`,
     body,
     arms: arms.join(''),
     reach: reach.join(''),
@@ -2390,6 +2735,8 @@ function drawInBed(
   spec: FigureSpec,
   key: string,
   asked?: readonly FigureSign[],
+  /** Before beds had metal frames: a low wooden pallet and a woven mat. */
+  old = false,
 ): FigureDrawing {
   const layers = layersOf(spec);
   const { R } = layers;
@@ -2402,18 +2749,34 @@ function drawInBed(
   const blanket = shade(CLOTH[spec.accentColour], 1.55);
   const shirt = CLOTH[spec.topColour];
   const w = BED.half;
-  const bed = [
-    // Legs, the base, the rails at each end, the mattress, the pillows.
-    ...[-w + 14, w - 22].map(
-      (x) =>
-        `<rect x="${x}" y="${top + 26}" width="8" height="${-top - 32}" ${inked(frame)}/><circle cx="${x + 4}" cy="-5" r="5" ${inked(SHOE)}/>`,
-    ),
-    `<rect x="${-w + 6}" y="${top + 10}" width="${2 * w - 12}" height="18" rx="4" ${inked(frame)}/>`,
-    `<rect x="${-w}" y="${top - 88}" width="14" height="${118}" rx="6" ${inked(frame)}/>`,
-    `<rect x="${w - 14}" y="${top - 36}" width="14" height="${66}" rx="6" ${inked(frame)}/>`,
-    `<rect x="${-w + 12}" y="${top}" width="${2 * w - 24}" height="14" rx="5" ${inked('#f3f1ec')}/>`,
-    `<ellipse cx="${hx - 6}" cy="${top - 40}" rx="50" ry="24" ${inked('#ffffff')}/>`,
-  ].join('');
+  const wood = '#9a6b3f';
+  const mat = '#d9c49a';
+  const bed = old
+    ? [
+        // A low wooden pallet on short legs, a woven mat, a rolled cloth.
+        ...[-w + 16, w - 26].map(
+          (x) =>
+            `<rect x="${x}" y="${top + 26}" width="10" height="${-top - 26}" rx="2" ${inked(wood)}/>`,
+        ),
+        `<rect x="${-w + 6}" y="${top + 10}" width="${2 * w - 12}" height="18" rx="3" ${inked(wood)}/>`,
+        `<rect x="${-w + 10}" y="${top}" width="${2 * w - 20}" height="14" rx="4" ${inked(mat)}/>`,
+        ...[-w + 40, -w + 90, -w + 140, -w + 190, -w + 240].map((x) =>
+          line(`M${x},${top + 2} L${x},${top + 12}`, shade(mat, 0.8), 2),
+        ),
+        `<ellipse cx="${hx - 6}" cy="${top - 34}" rx="46" ry="18" ${inked(shade(mat, 0.92))}/>`,
+      ].join('')
+    : [
+        // Legs, the base, the rails at each end, the mattress, the pillows.
+        ...[-w + 14, w - 22].map(
+          (x) =>
+            `<rect x="${x}" y="${top + 26}" width="8" height="${-top - 32}" ${inked(frame)}/><circle cx="${x + 4}" cy="-5" r="5" ${inked(SHOE)}/>`,
+        ),
+        `<rect x="${-w + 6}" y="${top + 10}" width="${2 * w - 12}" height="18" rx="4" ${inked(frame)}/>`,
+        `<rect x="${-w}" y="${top - 88}" width="14" height="${118}" rx="6" ${inked(frame)}/>`,
+        `<rect x="${w - 14}" y="${top - 36}" width="14" height="${66}" rx="6" ${inked(frame)}/>`,
+        `<rect x="${-w + 12}" y="${top}" width="${2 * w - 24}" height="14" rx="5" ${inked('#f3f1ec')}/>`,
+        `<ellipse cx="${hx - 6}" cy="${top - 40}" rx="50" ry="24" ${inked('#ffffff')}/>`,
+      ].join('');
   // Their top: the shoulders, sitting up against the pillows.
   const s2 = R.halfShoulder;
   const sy = hy + 30;
@@ -2518,6 +2881,51 @@ export interface FigureHow {
   holding?: FigureProp | null;
   /** The signs drawn, ready to be shown: only those the page shows, so a figure carries no more than it needs. */
   signs?: readonly FigureSign[];
+  /** A story set before beds had metal frames: a bed is a low wooden pallet with a mat. */
+  old?: boolean;
+}
+
+/**
+ * Whether a story's era is before beds with metal frames, hospital
+ * rails, and the like: an ancient, biblical or medieval world, or any
+ * before the eighteenth century.
+ */
+export function oldWorld(era: string | null | undefined): boolean {
+  const text = (era ?? '').toLowerCase();
+  if (!text) return false;
+  if (
+    /\b(?:ancient|antiquity|biblical|medieval|middle ages|prehistoric|stone age|bronze age|iron age|roman|greek|egyptian|bc|bce|b\.c\.?)\b/u.test(
+      text,
+    )
+  )
+    return true;
+  const ORDINALS = [
+    'first',
+    'second',
+    'third',
+    'fourth',
+    'fifth',
+    'sixth',
+    'seventh',
+    'eighth',
+    'ninth',
+    'tenth',
+    'eleventh',
+    'twelfth',
+    'thirteenth',
+    'fourteenth',
+    'fifteenth',
+    'sixteenth',
+    'seventeenth',
+  ];
+  const century =
+    /\b(\d{1,2})(?:st|nd|rd|th)\s+century\b/u.exec(text)?.[1] ??
+    (() => {
+      const word = /\b([a-z]+)\s+century\b/u.exec(text)?.[1];
+      const at = word ? ORDINALS.indexOf(word) : -1;
+      return at >= 0 ? String(at + 1) : undefined;
+    })();
+  return century !== undefined && Number(century) < 18;
 }
 
 /**
@@ -2535,7 +2943,7 @@ export function drawFigure(
 ): FigureDrawing {
   const key = seed || JSON.stringify(spec);
   const pose = how.pose ?? 'standing';
-  if (pose === 'in bed') return drawInBed(spec, key, how.signs);
+  if (pose === 'in bed') return drawInBed(spec, key, how.signs, how.old);
   const lying = pose === 'lying';
   const n = lying
     ? 1

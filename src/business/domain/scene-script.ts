@@ -43,6 +43,8 @@ import {
   type LearningStage,
   type StageRecipe,
 } from './scene-stage';
+import { checkLines } from './maths-work';
+import { numberPicture, type NumberPicture } from './scene-numbers';
 import { checkArithmetic, markTerms, type MathLine } from './scene-math';
 import { sample, type PlotSpec } from './scene-plot';
 import { findPhrase, isVerbatim } from './scene-quote';
@@ -52,7 +54,13 @@ import {
   nameKey,
   soundIn,
   type Expression,
+  type StoryCrowd,
+  type StoryKind,
+  type StoryPresence,
+  type StoryTime,
   type StoryVoice,
+  type StoryWeather,
+  type StoryWorld,
 } from './scene-story';
 
 /**
@@ -121,6 +129,22 @@ export const LINE_PACES = [
   'shout',
 ] as const;
 export type LinePace = (typeof LINE_PACES)[number];
+
+/**
+ * Where a line comes from: said on the stage ("here"), from just off it,
+ * from above (heaven, the sky), down a phone, from a letter read out, in
+ * a thought, or in a dream or a memory.
+ */
+export const LINE_FROMS = [
+  'here',
+  'off',
+  'above',
+  'phone',
+  'letter',
+  'thought',
+  'dream',
+] as const;
+export type LineFrom = (typeof LINE_FROMS)[number];
 
 export const SCENE_DELIVERIES = [
   'hook',
@@ -236,6 +260,12 @@ export interface SceneBeat {
   kind?: 'line' | 'narration';
   /** A line's listener: whom it is said to, by id. */
   to?: string;
+  /**
+   * Where a line comes from, when not from someone on the stage: off it,
+   * above, a phone, a letter, a thought, a dream. A narration from above
+   * is words from heaven no character in the cast could say.
+   */
+  from?: Exclude<LineFrom, 'here'>;
   /** How a line is said. */
   pace?: LinePace;
   /** Seconds of quiet after it, for what happens without words: a hug, someone walking off. */
@@ -286,6 +316,8 @@ export interface MathThing {
   /** A caption under the working, or empty for none. */
   name: string;
   lines: MathLine[];
+  /** For a young learner, its sum as a picture under it: blocks, bars, dots. */
+  picture?: NumberPicture;
 }
 
 /** A graph drawn by code from its function. */
@@ -366,6 +398,10 @@ export interface CharacterThing {
   holding?: FigureProp;
   /** The face the last page left them with: theirs through a "previously" opening. */
   before?: Expression;
+  /** A group who speak as one: the crowd behind the stage is them. */
+  group?: true;
+  /** One of the story's minor characters: drawn a little smaller and quieter. */
+  minor?: true;
 }
 
 /**
@@ -496,6 +532,8 @@ export interface SceneStage {
   arrive?: string[];
   /** Who leaves here as the words say ("Baba Sule walked off"): they walk off. */
   leave?: string[];
+  /** A cut: a new scene, or to another place of it, even where the place is the same. */
+  cut?: true;
 }
 
 export interface SceneEffect {
@@ -539,6 +577,13 @@ export interface SceneScript {
   opening?: { show: string[]; backdrop: string | null } | null;
   /** Seconds of what happens without words before the first word: someone walking on. */
   lead?: number;
+  /** A story page's time, weather and crowd, and the story's world: how the stage dresses it. */
+  setting?: {
+    time: StoryTime | null;
+    weather: StoryWeather | null;
+    crowd: StoryCrowd | null;
+    world: StoryWorld | null;
+  };
 }
 
 /**
@@ -964,6 +1009,10 @@ export interface MendOptions {
     voice?: StoryVoice | null;
     /** What they are like: how they move. */
     traits?: string[];
+    /** Whether they are seen, or only heard: a voice never stands on the stage. */
+    presence?: StoryPresence | null;
+    /** A group is a crowd, never one of the stage's things. */
+    kind?: StoryKind | null;
   }[];
   /** And its places: where the story may be. */
   places?: readonly {
@@ -976,6 +1025,17 @@ export interface MendOptions {
   }[];
   /** Whom the document is for: its recipe's limits hold. */
   stage?: LearningStage | null;
+  /** A crowd is behind the stage: a group speaks from it, not from off the stage. */
+  crowd?: boolean;
+  /**
+   * Where the story has the page's people, when some are apart from the
+   * rest (Sally in the cave, the boys beside it): where the page happens,
+   * and each character's place, by the story's ids.
+   */
+  whereabouts?: {
+    place: string | null;
+    people: Readonly<Record<string, string>>;
+  } | null;
 }
 
 /** What mending a cast needs to know and where it says what it did. */
@@ -1045,7 +1105,14 @@ export function mendCast(
       return;
     }
     if (isCodeThing(raw)) {
-      const made = codeThing(id, raw, name, formats, options.material);
+      const made = codeThing(
+        id,
+        raw,
+        name,
+        formats,
+        options.material,
+        options.stage === 'early',
+      );
       mended.push(...made.mended);
       problems.push(...made.problems);
       cast.push(made.thing);
@@ -1619,7 +1686,12 @@ export function mendScript(
     if (recipe) {
       const words = beats.map((beat) => wordsOf(beat.say).length);
       const total = words.reduce((a, b) => a + b, 0);
-      if (total > recipe.spoken[1] * 1.3)
+      // Working takes the words to walk through it: a few more for each line.
+      const working = cast.reduce(
+        (n, thing) => n + (thing.kind === 'math' ? thing.lines.length * 20 : 0),
+        0,
+      );
+      if (total > recipe.spoken[1] * 1.3 + Math.min(160, working))
         problems.push(
           `The narration is ${total} spoken words; these learners take ${recipe.spoken[0]} to ${recipe.spoken[1]}. Say less, keeping the main ideas.`,
         );
@@ -2119,6 +2191,8 @@ function codeThing(
   name: string,
   formats: ReadonlySet<SceneFormat>,
   material: string | undefined,
+  /** A young learner's page: a sum is shown as a picture too. */
+  young = false,
 ): { thing: SceneThing; problems: string[]; mended: string[] } {
   const problems: string[] = [];
   const mended: string[] = [];
@@ -2133,7 +2207,8 @@ function codeThing(
     mended: [...mended, `${id}: ${why}; set in type`],
   });
   if (raw.kind === 'math') {
-    if (!formats.has('maths')) return words('not a maths book');
+    // Working on any page that works a calculation: a law page's interest,
+    // a biology page's dose, not only a maths book's.
     const lines = (raw.lines ?? [])
       .map((line) => ({
         latex: clean(line.latex),
@@ -2153,8 +2228,32 @@ function codeThing(
           `Line ${k + 1} of "${raw.id}" does not add up: ${line.check} (the left side is ${Number(checked.value.toPrecision(8))}). Put the sum right.`,
         );
     });
+    // Every line checked as a working is: a line its problem's solution
+    // does not satisfy goes back; the working on the stage stops before it.
+    const verdicts = checkLines(
+      lines.map((line) => line.latex.replace(/\\term\{[^{}]*\}/g, '')),
+    );
+    const wrong = verdicts.indexOf('false');
+    if (wrong >= 0) {
+      problems.push(
+        `Line ${wrong + 1} of "${raw.id}", ${lines[wrong].latex.slice(0, 60)}, is not true: it does not follow from the lines before it. Work it again.`,
+      );
+      if (wrong > 0) {
+        mended.push(
+          `${id}: the working stops before its wrong line ${wrong + 1}`,
+        );
+        lines.splice(wrong);
+      }
+    }
+    const picture = young ? numberPicture(lines) : null;
     return {
-      thing: { id, kind: 'math', name: clean(raw.name), lines },
+      thing: {
+        id,
+        kind: 'math',
+        name: clean(raw.name),
+        lines,
+        ...(picture ? { picture } : {}),
+      },
       problems,
       mended,
     };

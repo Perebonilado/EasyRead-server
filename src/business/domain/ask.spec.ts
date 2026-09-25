@@ -170,9 +170,11 @@ describe('a question mid-lecture: the board', () => {
       LECTURE_TOOLS.DIAGRAM,
       LECTURE_TOOLS.REST,
       LECTURE_TOOLS.FIND,
+      LECTURE_TOOLS.WORK,
     ]) {
       expect(text).toContain(tool);
     }
+    expect(text).toContain('Never do arithmetic yourself');
     expect(text).toContain('IN THREE BEATS');
     expect(text).toContain('say nothing while an item is being written');
     expect(text).toContain('setting the picture up in their words');

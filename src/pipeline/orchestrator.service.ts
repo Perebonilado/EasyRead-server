@@ -78,10 +78,16 @@ export class PipelineOrchestrator {
   ): Promise<void> {
     const doc = await this.documents.findById(documentId);
     const empty = await this.pages.countEmpty(documentId);
+    // A maths page is read again from its image, unless its equations came
+    // from the deck itself.
+    const deck =
+      doc?.props.sourceMimeType ===
+      'application/vnd.openxmlformats-officedocument.presentationml.presentation';
+    const maths = deck ? 0 : await this.pages.countUnreadMaths(documentId);
 
-    if (doc?.props.source === 'uploaded' && empty > 0) {
+    if (doc?.props.source === 'uploaded' && (empty > 0 || maths > 0)) {
       this.logger.log(
-        `${documentId}: ${empty} pages without text — routing through OCR`,
+        `${documentId}: ${empty} pages without text, ${maths} maths pages — routing through OCR`,
       );
       await this.queue.enqueueStep('ocr', { documentId, contentVersion });
       return;

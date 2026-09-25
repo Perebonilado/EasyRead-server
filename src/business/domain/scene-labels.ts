@@ -824,6 +824,55 @@ export function placeStrip(input: {
 }
 
 /**
+ * Words from a voice no one on the stage has: from above (heaven, the
+ * sky), a dream or a memory, or a letter no one holds, across the top of
+ * the stage with nothing pointing at anyone; and from just off the stage,
+ * at its edge on the side the voice comes from, its tail pointing out.
+ */
+export function placeVoice(input: {
+  text: string;
+  from: 'above' | 'off' | 'dream' | 'letter';
+  /** The side of the stage an off-stage voice comes from. */
+  side: -1 | 1;
+  stage: { w: number; h: number };
+}): BubblePlace {
+  const margin = 12;
+  const off = input.from === 'off';
+  const width = off ? BUBBLE.width : Math.min(input.stage.w - margin * 2, 760);
+  const set = bubbleLines(input.text, width - BUBBLE.padX * 2);
+  const w =
+    Math.max(...set.lines.map((l) => measureText(l, set.size, 600))) +
+    BUBBLE.padX * 2;
+  const h = set.lines.length * set.size * LABEL.line + BUBBLE.padY * 2;
+  if (off) {
+    const x = input.side < 0 ? margin + 6 : input.stage.w - margin - 6 - w;
+    const y = round(input.stage.h * 0.16);
+    return {
+      x: round(x),
+      y,
+      w: round(w),
+      h: round(h),
+      lines: set.lines,
+      size: set.size,
+      // Out past the edge, where the voice is.
+      tail: [input.side < 0 ? -40 : input.stage.w + 40, round(y + h * 0.6)],
+    };
+  }
+  const x = (input.stage.w - w) / 2;
+  const y = margin + 10;
+  return {
+    x: round(x),
+    y,
+    w: round(w),
+    h: round(h),
+    lines: set.lines,
+    size: set.size,
+    // Up out of the frame: nothing on the stage says it.
+    tail: [round(x + w / 2), -60],
+  };
+}
+
+/**
  * A character's words in a bubble by their head: up and to one side of
  * it, or beside them level with it, or over them, whichever comes first
  * clear of every word, ink and arrow on the stage and inside it; failing

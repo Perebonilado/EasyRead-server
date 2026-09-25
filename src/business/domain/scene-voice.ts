@@ -12,6 +12,7 @@
 import {
   type SceneBeat,
   type SceneDelivery,
+  type LineFrom,
   type LinePace,
   type SceneMood,
 } from './scene-script';
@@ -61,8 +62,21 @@ export const LINE_PACE_SPEED: Record<LinePace, number> = {
 export const HOLD_LIMIT_S = 3;
 
 /** Each sentence's pace and the silence after it, in seconds. */
+/**
+ * A line's pace by where it comes from: a thought is quieter and slower
+ * than speech, and a voice from above is unhurried.
+ */
+const FROM_SPEED: Partial<Record<LineFrom, number>> = {
+  thought: 0.92,
+  above: 0.94,
+  dream: 0.95,
+};
+
 export function deliveryPieces(
-  beats: Pick<SceneBeat, 'delivery' | 'pause' | 'kind' | 'pace' | 'holdS'>[],
+  beats: Pick<
+    SceneBeat,
+    'delivery' | 'pause' | 'kind' | 'pace' | 'holdS' | 'from'
+  >[],
   /** Whom it is for: a child is spoken to more slowly, with longer pauses. */
   learners: { pace: number; pause: number } = { pace: 1, pause: 1 },
 ): { speed: number; pauseAfter: number }[] {
@@ -70,7 +84,10 @@ export function deliveryPieces(
     const how = beat.kind
       ? beat.kind === 'line'
         ? {
-            speed: LINE_DELIVERY.speed * LINE_PACE_SPEED[beat.pace ?? 'calm'],
+            speed:
+              LINE_DELIVERY.speed *
+              LINE_PACE_SPEED[beat.pace ?? 'calm'] *
+              (FROM_SPEED[beat.from ?? 'here'] ?? 1),
             // Before the narrator comes in, a breath more.
             pause:
               beats[i + 1]?.kind === 'narration'
@@ -148,6 +165,10 @@ export const CHARACTER_VOICES: Record<
     'old woman': ['bf_alice', 'bf_isabella', 'af_aoede'],
     'old man': ['bm_george', 'am_santa', 'bm_daniel'],
     creature: ['bm_fable', 'am_fenrir', 'am_onyx'],
+    // Blends, evenly: voices no one character has. God's is deep and calm;
+    // a crowd's is a man and a woman as one.
+    divine: ['am_onyx,bm_george', 'am_onyx,bm_daniel', 'am_fenrir,bm_george'],
+    crowd: ['am_michael,af_bella', 'am_eric,af_sarah', 'bm_lewis,bf_emma'],
   },
   gemini: {
     girl: ['Leda', 'Aoede', 'Laomedeia'],
@@ -157,6 +178,8 @@ export const CHARACTER_VOICES: Record<
     'old woman': ['Gacrux', 'Vindemiatrix', 'Achernar'],
     'old man': ['Algenib', 'Schedar', 'Rasalgethi'],
     creature: ['Fenrir', 'Enceladus', 'Umbriel'],
+    divine: ['Algieba', 'Sadaltager', 'Achird'],
+    crowd: ['Zephyr', 'Autonoe', 'Pulcherrima'],
   },
 };
 
@@ -169,6 +192,14 @@ export const CHARACTER_PACE: Record<StoryVoice, number> = {
   'old woman': 0.93,
   'old man': 0.92,
   creature: 1,
+  divine: 0.88,
+  crowd: 1,
+};
+
+/** How each kind is asked to sound, for a voice that takes direction. */
+const CHARACTER_MANNER: Partial<Record<StoryVoice, string>> = {
+  divine: 'deep, calm and unhurried, a voice from above',
+  crowd: 'many voices speaking as one, a crowd',
 };
 
 /** Who says a sentence's quoted words, and how. */
@@ -192,7 +223,10 @@ export function characterVoice(
   engine: 'kokoro' | 'gemini' | null,
   narrator: string,
 ): Speaker | null {
-  if (!engine || !character.voice) return null;
+  // Someone the text's tradition never draws is never voiced either: the
+  // narrator says their words.
+  if (!engine || !character.voice || character.presence === 'light')
+    return null;
   const own = new Set(narrator.toLowerCase().split(','));
   const palette = CHARACTER_VOICES[engine][character.voice].filter(
     (voice) => !own.has(voice.toLowerCase()),
@@ -201,10 +235,11 @@ export function characterVoice(
   const before = bible.characters.filter(
     (c) => c.voice === character.voice && c.met < character.met,
   ).length;
+  const kind = character.voice;
   return {
     voice: palette[before % palette.length],
-    pace: CHARACTER_PACE[character.voice],
-    style: `as ${character.name}, ${character.voice === 'creature' ? 'a creature' : `${/^[aeiou]/.test(character.voice) ? 'an' : 'a'} ${character.voice}`}${character.traits.length ? `, ${character.traits.join(', ')}` : ''}, saying their own line`,
+    pace: CHARACTER_PACE[kind],
+    style: `as ${character.name}, ${CHARACTER_MANNER[kind] ?? (kind === 'creature' ? 'a creature' : `${/^[aeiou]/.test(kind) ? 'an' : 'a'} ${kind}`)}${character.traits.length ? `, ${character.traits.join(', ')}` : ''}, saying their own line`,
   };
 }
 

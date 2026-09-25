@@ -7,6 +7,7 @@ import {
   SCENE_LAYOUTS,
   SCENE_MOODS,
   SCENE_MUSIC,
+  LINE_FROMS,
   LINE_PACES,
 } from '../../../business/domain/scene-script';
 import {
@@ -19,7 +20,13 @@ import {
 } from '../../../business/domain/scene-profile';
 import {
   EXPRESSIONS,
+  PLACE_KINDS,
+  PLACE_STANDS,
+  STORY_CROWDS,
   STORY_KINDS,
+  STORY_PRESENCES,
+  STORY_TIMES,
+  STORY_WEATHERS,
   STORY_ROLES,
   STORY_SIZES,
   STORY_VOICES,
@@ -93,6 +100,74 @@ export const blocksSchema = z.object({
               'display-mode LaTeX without $$ delimiters, never prose.',
           ),
         text: z.string().min(1),
+      }),
+    )
+    .min(1),
+});
+
+/** A calculation worked through, as the maths writer sets it out: code checks every line. */
+export const workingSchema = z.object({
+  given: z
+    .array(z.string())
+    .describe(
+      'What the problem gives, each "symbol = value" in LaTeX, its unit in \\text{}',
+    ),
+  wanted: z.string().nullable(),
+  steps: z
+    .array(
+      z.object({
+        latex: z
+          .string()
+          .describe('The whole line after this step, display LaTeX, no $'),
+        does: z
+          .string()
+          .describe(
+            'What is done, in plain words: "subtract 3 from both sides"',
+          ),
+        why: z.string().nullable(),
+        changes: z
+          .array(z.string())
+          .describe(
+            'The parts of the line this step changed, as LaTeX pieces of it',
+          ),
+        says: z
+          .string()
+          .describe(
+            'What a teacher says aloud for this step, the maths in words',
+          ),
+      }),
+    )
+    .min(1),
+  answer: z.string().nullable(),
+  check: z.string().nullable(),
+});
+
+/**
+ * A maths page's blocks: as any page's, and a "working" block for each
+ * calculation it works, its working set out as data.
+ */
+export const mathsBlocksSchema = z.object({
+  blocks: z
+    .array(
+      z.object({
+        type: z
+          .enum([
+            'headingOne',
+            'headingTwo',
+            'paragraph',
+            'bullet',
+            'code',
+            'table',
+            'math',
+            'working',
+          ])
+          .describe(
+            '"working" is a calculation worked through, its steps in working; ' +
+              '"math" is display-mode LaTeX without $$ delimiters, for a formula ' +
+              'stated and not worked; "table" is pipe-separated rows, header first.',
+          ),
+        text: z.string().min(1),
+        working: workingSchema.nullable(),
       }),
     )
     .min(1),
@@ -650,6 +725,7 @@ export const sceneScreenplaySchema = z.object({
       kind: z.enum(SCREENPLAY_BEATS),
       who: z.string().nullable(),
       to: z.string().nullable(),
+      from: z.enum(LINE_FROMS).nullable(),
       say: z.string(),
       do: z.enum(SCREENPLAY_DOINGS).nullable(),
       state: z.string().nullable(),
@@ -657,6 +733,7 @@ export const sceneScreenplaySchema = z.object({
       pace: z.enum(LINE_PACES).nullable(),
       hold: z.number().nullable(),
       place: z.string().nullable(),
+      with: z.array(z.string()).nullable(),
       music: z.enum(SCENE_MUSIC).nullable(),
       energy: z.enum(['low', 'high']).nullable(),
     }),
@@ -699,7 +776,36 @@ export const sceneProfileSchema = z.object({
 });
 
 /** Who and where one stretch of a story meets, and who is on each of its pages. */
+/** A person's look, field by field: what a reader may say the text itself gives. */
+const FIGURE_FIELDS = [
+  'age',
+  'build',
+  'skin',
+  'hair',
+  'hairColour',
+  'facialHair',
+  'headwear',
+  'top',
+  'topColour',
+  'bottom',
+  'bottomColour',
+  'accentColour',
+  'extras',
+] as const;
+
 export const sceneStorySchema = z.object({
+  book: z
+    .object({ title: z.string().nullable(), author: z.string().nullable() })
+    .nullable(),
+  world: z
+    .object({
+      era: z.string(),
+      region: z.string(),
+      culture: z.string(),
+      landscape: z.string(),
+      homes: z.string(),
+    })
+    .nullable(),
   characters: z.array(
     z.object({
       name: z.string(),
@@ -707,8 +813,11 @@ export const sceneStorySchema = z.object({
       role: z.enum(STORY_ROLES),
       look: z.string(),
       kind: z.enum(STORY_KINDS),
+      presence: z.enum(STORY_PRESENCES),
+      iconic: z.boolean(),
       size: z.enum(STORY_SIZES).nullable(),
       figure: figureSchema.nullable(),
+      fromText: z.array(z.enum(FIGURE_FIELDS)),
       traits: z.array(z.string()),
       voice: z.enum(STORY_VOICES).nullable(),
     }),
@@ -718,17 +827,30 @@ export const sceneStorySchema = z.object({
       name: z.string(),
       aliases: z.array(z.string()),
       look: z.string(),
+      kind: z.enum(PLACE_KINDS),
+      stand: z.enum(PLACE_STANDS),
+      front: z.string().nullable(),
       sound: z.enum(SCENE_AMBIENCES).nullable(),
     }),
   ),
   pages: z.array(
     z.object({
       page: z.number().int(),
+      story: z.boolean(),
       summary: z.string(),
       present: z.array(
-        z.object({ name: z.string(), mood: z.enum(EXPRESSIONS) }),
+        z.object({
+          name: z.string(),
+          mood: z.enum(EXPRESSIONS),
+          place: z.string().nullable(),
+        }),
       ),
       place: z.string().nullable(),
+      placeInferred: z.boolean(),
+      also: z.array(z.string()),
+      time: z.enum(STORY_TIMES).nullable(),
+      weather: z.enum(STORY_WEATHERS).nullable(),
+      crowd: z.enum(STORY_CROWDS),
     }),
   ),
 });

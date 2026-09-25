@@ -35,4 +35,8 @@ export class DocumentPageModel extends BaseModel {
     defaultValue: 'extracted',
   })
   declare textSource: 'extracted' | 'ocr';
+
+  /** A page that works maths: read again from its image, simplified keeping every step. */
+  @Column({ type: DataType.BOOLEAN, allowNull: false, defaultValue: false })
+  declare hasMaths: boolean;
 }

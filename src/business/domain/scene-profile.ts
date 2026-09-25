@@ -127,7 +127,7 @@ export function describeProfile(profile: DocumentProfile): string {
   const reader = profile.stage
     ? ` It is for ${STAGE_NAMES[profile.stage]}.`
     : '';
-  return `${book ? `This book: ${book}.` : ''}${reader} Formats you may use on its pages: ${profile.formats.join(', ')}.`.trim();
+  return `${book ? `This book: ${book}.` : ''}${reader} Formats you may use on its pages: ${profile.formats.join(', ')}${profile.formats.includes('maths') ? '' : ', and working ("math") on a page that works a calculation'}.`.trim();
 }
 
 /** Where a document's profile is kept: beside its videos, one for each content version. */

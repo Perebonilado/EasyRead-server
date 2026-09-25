@@ -14,6 +14,7 @@
  */
 import { all, create } from 'mathjs';
 import { groupId } from './scene-ids';
+import { drawNumbers, type NumberPicture } from './scene-numbers';
 
 /** One line of the working: its TeX, and a plain equality to check when it is arithmetic. */
 export interface MathLine {
@@ -245,8 +246,15 @@ export interface SetMath {
 const LINE_GAP = 420;
 const PAD = 160;
 
-/** The whole working, set: lines stacked, equals signs in one column. */
-export function renderMath(lines: MathLine[]): SetMath {
+/**
+ * The whole working, set: lines stacked, equals signs in one column; and
+ * for a young learner, its sum as a picture under the lines, as wide as
+ * they are.
+ */
+export function renderMath(
+  lines: MathLine[],
+  picture: NumberPicture | null = null,
+): SetMath {
   const parts: Record<string, string> = {};
   const states: Record<string, string> = {};
   const rows = lines.map((line, k) => {
@@ -286,7 +294,18 @@ export function renderMath(lines: MathLine[]): SetMath {
     if (k > 0) states[`line ${k + 1}`] = id;
     return `<g id="${id}">${left}${right}</g>`;
   });
-  const height = y - LINE_GAP + PAD;
+  let height = y - LINE_GAP + PAD;
+  if (picture) {
+    // The picture drawn 1000 across, set to the working's width, below it.
+    const drawn = drawNumbers(picture);
+    const across = Math.max(width, 6000) - PAD * 2;
+    const k = across / 1000;
+    groups.push(
+      `<g id="numbers" transform="translate(${PAD} ${round(height)}) scale(${round(k * 100) / 100})">${drawn.markup}</g>`,
+    );
+    width = Math.max(width, across + PAD * 2);
+    height += drawn.height * k + PAD;
+  }
   const viewBox: [number, number, number, number] = [
     0,
     0,

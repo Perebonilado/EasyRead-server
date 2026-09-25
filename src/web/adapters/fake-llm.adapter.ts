@@ -3,6 +3,7 @@
  * that is the whole point of a deterministic offline stand-in. */
 import { dialogueOf } from '../../business/domain/scene-dialogue';
 import type { ScreenplayDraft } from '../../business/domain/scene-screenplay';
+import type { WorkedSolution } from '../../business/domain/maths-work';
 import { levelIn } from '../../business/domain/scene-stage';
 import { createHash } from 'crypto';
 import { Injectable } from '@nestjs/common';
@@ -681,6 +682,7 @@ export class FakeLlmAdapter implements LlmGatewayPort {
     const lines = dialogueOf(paragraphs, characters);
     const blank = {
       to: null,
+      from: null,
       do: null,
       state: null,
       show: null,
@@ -968,6 +970,42 @@ export class FakeLlmAdapter implements LlmGatewayPort {
         problems: grounded ? [] : ['Invented a claim the page does not make'],
       },
       usage: this.usage(started, 200, 10),
+    };
+  }
+
+  async workThrough({
+    problem,
+  }: {
+    problem: string;
+    summary: string | null;
+    context: string | null;
+  }): Promise<LlmResult<WorkedSolution>> {
+    const started = Date.now();
+    // A sum written in the problem, worked in one step; else a note that
+    // there is nothing to work.
+    const sum = /(\d+(?:\.\d+)?)\s*([+\-*x×])\s*(\d+(?:\.\d+)?)/.exec(problem);
+    const a = sum ? Number(sum[1]) : 1;
+    const b = sum ? Number(sum[3]) : 1;
+    const sign = sum?.[2] ?? '+';
+    const value = sign === '+' ? a + b : sign === '-' ? a - b : a * b;
+    const tex = sign === '+' || sign === '-' ? sign : '\\times';
+    return {
+      value: {
+        given: [],
+        wanted: problem,
+        steps: [
+          {
+            latex: `${a} ${tex} ${b} = ${value}`,
+            does: 'work it out',
+            why: null,
+            changes: [],
+            says: `${a} ${sign === '+' ? 'plus' : sign === '-' ? 'minus' : 'times'} ${b} is ${value}`,
+          },
+        ],
+        answer: String(value),
+        check: null,
+      },
+      usage: this.usage(started, problem.length, 40),
     };
   }
 

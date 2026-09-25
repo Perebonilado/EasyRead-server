@@ -9,6 +9,10 @@ import type {
   PdfToolkitPort,
 } from '../../business/ports/pdf-toolkit.port';
 import { OCR_MAX_IMAGE_WIDTH } from '../../business/domain/values';
+import {
+  readingOrder,
+  type TextRun,
+} from '../../business/domain/reading-order';
 import { downsampleRgba, encodePng } from './images/image-codec';
 
 /** Filters that separate a figure from furniture. */
@@ -40,6 +44,9 @@ const stripScannerWatermarks = (text: string): string =>
  * Imported lazily because pdfjs-dist evaluates browser globals at module load;
  * requiring it at the top of a Nest module breaks the bootstrap.
  */
+/** How long a page's image may take to arrive once its operators are read. */
+const IMAGE_WAIT_MS = 5000;
+
 @Injectable()
 export class PdfjsToolkitAdapter implements PdfToolkitPort {
   private readonly logger = new Logger(PdfjsToolkitAdapter.name);
@@ -93,44 +100,21 @@ export class PdfjsToolkitAdapter implements PdfToolkitPort {
         continue;
       }
 
-      // Group runs onto lines by baseline, and restore the spaces pdf.js drops
-      // between runs by looking at the horizontal gap.
-      type Part = { x: number; width: number; str: string };
-      const rows: { y: number; height: number; parts: Part[] }[] = [];
-
+      // The page's runs in reading order: two columns read down the left
+      // and then the right, the notes set smaller beneath after the body.
+      const runs: TextRun[] = [];
       for (const item of content.items) {
         if (!('str' in item) || !item.str) continue;
-        const y = item.transform[5];
-        const height = Math.abs(item.transform[3]) || 10;
-        const row = rows.find(
-          (r) => Math.abs(r.y - y) < Math.max(r.height, height) * 0.5,
-        );
-        const part = { x: item.transform[4], width: item.width, str: item.str };
-        if (row) row.parts.push(part);
-        else rows.push({ y, height, parts: [part] });
+        const transform = item.transform as number[];
+        runs.push({
+          x: transform[4],
+          y: transform[5],
+          width: item.width,
+          height: Math.abs(transform[3]) || 10,
+          str: item.str,
+        });
       }
-
-      const text = rows
-        .sort((a, b) => b.y - a.y) // PDF origin is bottom-left
-        .map((row) => {
-          const gap = row.height * 0.18;
-          return row.parts
-            .sort((a, b) => a.x - b.x)
-            .reduce((line, part, index, parts) => {
-              if (index === 0) return part.str;
-              const previous = parts[index - 1];
-              const distance = part.x - (previous.x + previous.width);
-              const needsSpace =
-                distance > gap && !/\s$/.test(line) && !/^\s/.test(part.str);
-              return line + (needsSpace ? ' ' : '') + part.str;
-            }, '')
-            .replace(/[ \t]+/g, ' ')
-            .trim();
-        })
-        .filter(Boolean)
-        // Rejoin words split across a line break with a hyphen.
-        .join('\n')
-        .replace(/(\w)-\n(\w)/g, '$1$2');
+      const text = readingOrder(runs);
 
       page.cleanup();
       const cleaned = stripScannerWatermarks(text);
@@ -200,19 +184,25 @@ export class PdfjsToolkitAdapter implements PdfToolkitPort {
             const args = ops.argsArray[i] as unknown[];
             const name = typeof args?.[0] === 'string' ? args[0] : '';
             if (!name) continue;
+            // pdfjs keeps an image a document shares ("g_…") with the
+            // document's objects, and a page's own with the page's.
+            const store = name.startsWith('g_') ? page.commonObjs : page.objs;
             const image = await new Promise<{
               width: number;
               height: number;
               data?: Uint8ClampedArray | Uint8Array;
               kind?: number;
             } | null>((resolve) => {
+              // An image can arrive after the operator list does: wait for
+              // it a while, rather than take its absence for none.
+              const timer = setTimeout(() => resolve(null), IMAGE_WAIT_MS);
               try {
-                if (page.objs.has(name)) {
-                  page.objs.get(name, (value: never) => resolve(value));
-                } else {
-                  resolve(null);
-                }
+                store.get(name, (value: never) => {
+                  clearTimeout(timer);
+                  resolve(value);
+                });
               } catch {
+                clearTimeout(timer);
                 resolve(null);
               }
             });
@@ -298,19 +288,24 @@ export class PdfjsToolkitAdapter implements PdfToolkitPort {
             const name = typeof args?.[0] === 'string' ? args[0] : '';
             if (!name) continue;
 
+            // pdfjs keeps an image a document shares ("g_…") with the
+            // document's objects, and a page's own with the page's; either
+            // can arrive after the operator list does.
+            const store = name.startsWith('g_') ? page.commonObjs : page.objs;
             const image = await new Promise<{
               width: number;
               height: number;
               data?: Uint8ClampedArray | Uint8Array;
               kind?: number;
             } | null>((resolve) => {
+              const timer = setTimeout(() => resolve(null), IMAGE_WAIT_MS);
               try {
-                if (page.objs.has(name)) {
-                  page.objs.get(name, (value: never) => resolve(value));
-                } else {
-                  resolve(null);
-                }
+                store.get(name, (value: never) => {
+                  clearTimeout(timer);
+                  resolve(value);
+                });
               } catch {
+                clearTimeout(timer);
                 resolve(null);
               }
             });

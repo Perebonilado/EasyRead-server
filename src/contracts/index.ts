@@ -21,8 +21,48 @@ export type BlockType =
   | 'code'
   | 'table'
   /** Display-mode LaTeX, no $$ delimiters. */
-  | 'math';
-export type Block = { type: BlockType; text: string };
+  | 'math'
+  /** A calculation worked through: `text` says the problem in words; `working` is the working. */
+  | 'working';
+export type Block = {
+  type: BlockType;
+  text: string;
+  /** A "working" block's working, every line checked by code. */
+  working?: WorkedSolutionDto;
+};
+
+/**
+ * A calculation worked through, step by step: what the problem gives and
+ * wants, each step's line and what is done to get it, and the answer with
+ * its units. Every line was checked by code before it was kept.
+ */
+export interface WorkedSolutionDto {
+  /** What the problem gives, each a line of LaTeX ("u = 5\,\text{m/s}"). */
+  given: string[];
+  /** What it asks for, in words. */
+  wanted: string | null;
+  steps: WorkedStepDto[];
+  /** The answer, LaTeX, with its units. */
+  answer: string | null;
+  /** The answer put back in, LaTeX. */
+  check: string | null;
+  /** The working stops at the last line code could stand behind; the answer is code's. */
+  cut?: true;
+}
+
+/** One step of a worked solution. */
+export interface WorkedStepDto {
+  /** The line after this step, display LaTeX. */
+  latex: string;
+  /** What is done to get it: "subtract 3 from both sides". */
+  does: string;
+  /** Why it is allowed or why it helps; null when what is done says it. */
+  why: string | null;
+  /** The parts of the line this step changes, as LaTeX pieces of it. */
+  changes: string[];
+  /** What the voice says for it. */
+  says: string;
+}
 
 export type DocumentStatus = 'uploading' | 'processing' | 'ready' | 'failed';
 export type PageStatus = 'pending' | 'processing' | 'done' | 'failed';
@@ -974,6 +1014,8 @@ export type SceneThingDto =
       rig?: true;
       /** Where its head is, as shares of its box across and down: where it looks from. */
       head?: [number, number];
+      /** A story's minor character: a little smaller and quieter than those the story follows. */
+      minor?: true;
     }
   | { id: string; kind: 'stat'; value: string; caption: string }
   | {
@@ -1036,6 +1078,39 @@ export interface SceneEffectDto {
     carried?: true;
     /** It carries on a line from the bubble before: it does not open. */
     continues?: true;
+    /**
+     * Where the line comes from when not from someone on the stage: then
+     * no mouth moves for it, and its bubble shows where it comes from.
+     */
+    from?: SceneLineFrom;
+  };
+}
+
+/**
+ * Where a line comes from, when not from someone on the stage: just off
+ * it; from above (heaven, the sky: light falls from the top of the stage
+ * and everyone looks up); down a phone; from a letter read out; a thought
+ * (a cloud, no mouth moving); a dream or a memory.
+ */
+export type SceneLineFrom =
+  'off' | 'above' | 'phone' | 'letter' | 'thought' | 'dream' | 'crowd';
+
+/**
+ * A story page's setting as the stage shows it: the set at full strength
+ * behind a story (a lesson's is faded, like paper, under its labels); the
+ * light of its time of day and its weather over the set; and a crowd
+ * behind the story's own people, who breathe, look at whoever speaks, and
+ * cheer or gasp together at the moments given.
+ */
+export interface SceneSettingDto {
+  full?: true;
+  time?: 'dawn' | 'day' | 'dusk' | 'night';
+  weather?: 'clear' | 'rain' | 'storm' | 'wind' | 'snow' | 'fog';
+  crowd?: {
+    /** The crowd's drawing, by its thing's id. */
+    id: string;
+    /** When they react: the moment, how, and for how long. */
+    moves?: [number, 'cheer' | 'gasp', number][];
   };
 }
 
@@ -1071,8 +1146,9 @@ export type SceneActingMove =
 export interface SceneActingDto {
   /**
    * Where they look from each moment on: another thing's id, or null for
-   * the viewer, or "@up" or "@down" (the sky, the ground); and how far
-   * their face turns toward it, 0 to 1.
+   * the viewer, or "@up" or "@down" (the sky, the ground), or "@left" or
+   * "@right" (a voice off the stage on that side); and how far their face
+   * turns toward it, 0 to 1.
    */
   look?: [number, string | null, number][];
   /** Their mouth as they speak: each line's first word, and its shapes at 30 a second, one digit each, 0 to 5. */
@@ -1099,6 +1175,15 @@ export interface SceneBubbleDto {
    * top of the stage instead: who says it, written before the words.
    */
   who?: string;
+  /**
+   * Where the line comes from, when not from someone on the stage: its
+   * shape shows it. From above, off the stage, or a dream, it keeps its
+   * place in the frame; a phone's or a letter's is by whoever hears or
+   * holds it, a thought's by the thinker.
+   */
+  from?: SceneLineFrom;
+  /** Whose head it is by, when not its speaker's: whoever hears the phone, or holds the letter. */
+  by?: string;
 }
 
 /** Where a thing stands at one step, in the staging's design units. */
@@ -1180,6 +1265,8 @@ export interface SceneDto {
   };
   /** How each character acts, by id; absent on a page no one acts on, or an older one. */
   acting?: Record<string, SceneActingDto>;
+  /** A story page's setting: its set at full strength, its light and weather, a crowd; absent on a lesson's page. */
+  setting?: SceneSettingDto;
   /** The same steps placed for the pane's box and the full screen's wide stage. */
   stagings: Record<
     'box' | 'wide',
@@ -1393,6 +1480,8 @@ export const TEACH_TOOLS = {
   RECALL: 'recall_page',
   ASK_DIAGRAM: 'ask_diagram_check',
   COMPUTE: 'compute',
+  /** A problem worked through, step by step, every step checked by code. */
+  WORK_THROUGH: 'work_through',
   FOCUS_BOARD: 'focus_board',
   MARK_TOPIC_COMPLETE: 'mark_topic_complete',
   ASK_QUIZ: 'ask_quiz',
@@ -1418,6 +1507,8 @@ export const LECTURE_TOOLS = {
   DIAGRAM: 'board_diagram',
   REST: 'board_rest',
   FIND: 'book_find',
+  /** A problem worked through on the board, every step checked by code. */
+  WORK: 'board_work',
   RESUME: 'lecture_resume',
   /** The interactive session: the tutor files each verdict, and can put an item on the sheet. */
   VERDICT: 'lecture_verdict',
@@ -1695,6 +1786,34 @@ export type TranscribeResponse = { text: string };
 export type ComputeResponse =
   | { ok: true; result: string; tex: string | null }
   | { ok: false; error: string };
+
+/**
+ * A problem the tutor asked to have worked through: the worked solution,
+ * every line checked by code (cut at the last line code could stand
+ * behind), and each line as the board writes it and the voice says it.
+ */
+export type WorkThroughResponse =
+  | {
+      ok: true;
+      working: WorkedSolutionDto;
+      /** The lines to write, in order: what the problem gives, each step, the answer, the check. */
+      lines: WorkLineDto[];
+    }
+  | { ok: false; error: string };
+
+/** One line of worked maths, for a board and a voice. */
+export interface WorkLineDto {
+  /** Display LaTeX: shown typeset. */
+  latex: string;
+  /** The same in plain characters, as a pen writes it: "2x + 3 = 11". */
+  plain: string;
+  /** The same said aloud: "2 x plus 3 equals 11". */
+  said: string;
+  /** What is done to get it; null for the problem and the answer. */
+  does: string | null;
+  why: string | null;
+  role: 'problem' | 'step' | 'answer' | 'check';
+}
 
 export type AssessmentKind = 'mcq' | 'flashcard' | 'verbal';
 

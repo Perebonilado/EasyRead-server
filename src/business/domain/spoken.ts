@@ -1,3 +1,4 @@
+import { SIGNS, sayLatex } from './maths-speech';
 /**
  * What the voice is handed, as against what the reader sees.
  *
@@ -247,7 +248,7 @@ export function year(value: number): string {
 }
 
 /** The digits of a number as words, with a decimal point read out. */
-function numberWords(raw: string): string {
+export function numberWords(raw: string): string {
   const clean = raw.replace(/,/g, '');
   if (/^\d+\.\d+$/.test(clean)) {
     const [whole, fraction] = clean.split('.');
@@ -484,6 +485,44 @@ export function spokenForm(
   for (let i = 0; i < words.length; i += 1) {
     const word = words[i];
     const start = out.length;
+    // Maths between dollar signs, however many words it runs to, is said
+    // as maths: its first written word takes all the spoken words, and
+    // the rest of it none.
+    if (/^\$/.test(word)) {
+      let end = i;
+      while (
+        end < words.length - 1 &&
+        !/\$[.,;:!?)]*$/.test(words[end].slice(end === i ? 1 : 0))
+      )
+        end += 1;
+      const run = words.slice(i, end + 1).join(' ');
+      const tex = /^\$\$?([\s\S]*?)\$\$?([.,;:!?)]*)$/.exec(run);
+      if (tex && tex[1].trim()) {
+        const said = `${sayLatex(tex[1])}${tex[2]}`.match(/\S+/g) ?? [word];
+        out.push(...said);
+        spans.push([start, out.length]);
+        for (let k = i + 1; k <= end; k += 1)
+          spans.push([out.length, out.length]);
+        i = end;
+        continue;
+      }
+    }
+    // A sign on its own, and a power written on a word: "=", "x²".
+    const sign = SIGNS[word];
+    if (sign) {
+      out.push(...sign.split(' '));
+      spans.push([start, out.length]);
+      continue;
+    }
+    const power = /^([\p{L}\d]+)([²³])([.,;:!?)]*)$/u.exec(word);
+    if (power) {
+      out.push(
+        power[1],
+        `${power[2] === '²' ? 'squared' : 'cubed'}${power[3]}`,
+      );
+      spans.push([start, out.length]);
+      continue;
+    }
     const lead = word.match(/^[("'“‘[]+/)?.[0] ?? '';
     const trail = word.match(/[)"'”’\].,;:!?]+$/)?.[0] ?? '';
     const core = word.slice(lead.length, word.length - trail.length);

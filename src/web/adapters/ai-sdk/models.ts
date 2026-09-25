@@ -40,6 +40,12 @@ const TASK_VAR: Record<LlmTask, string> = {
   topics_page_tag: 'AI_MODEL_TOPICS',
   topics_prereqs: 'AI_MODEL_TOPICS',
   simplify_standard: 'AI_MODEL_SIMPLIFY_STANDARD',
+  // Maths pages need their steps exact and in order; the small model drops
+  // and reorders them. One page in a few, at most.
+  simplify_maths: 'AI_MODEL_SIMPLIFY_MATHS',
+  // The tutor's worked problems: the maths page's writer, one call a
+  // problem, while the learner waits.
+  work_through: 'AI_MODEL_WORK_THROUGH',
   highlight_explain: 'AI_MODEL_HIGHLIGHT',
   highlight_simplify: 'AI_MODEL_HIGHLIGHT',
   highlight_define: 'AI_MODEL_HIGHLIGHT',
@@ -88,11 +94,17 @@ const TASK_VAR: Record<LlmTask, string> = {
  * "DeepSeek" drawing was drawn by gpt-4o-mini (2161504).
  */
 const TASK_DEFAULT: Partial<Record<LlmTask, string>> = {
+  simplify_maths: 'openai:gpt-4.1',
+  work_through: 'openai:gpt-4.1',
   scene_write: 'openai:gpt-4.1',
   scene_draw: 'deepseek:deepseek-flash',
   // What a document is: one small call a document.
   scene_profile: 'openai:gpt-4.1-mini',
-  // A story's characters, places and pages: one small call a stretch of it.
+  // A story's characters, places and pages: one small call a stretch of
+  // it, once a book. gpt-4.1 says more reliably where each person is when
+  // some are apart (the small model put the boy who stayed with Sally in
+  // the cave with her two readings in three), at about five times the
+  // cost: the small model by choice, 4.1 by setting AI_MODEL_SCENE_STORY.
   scene_story: 'openai:gpt-4.1-mini',
 };
 

@@ -5,6 +5,8 @@ export interface PageText {
   isEmpty: boolean;
   /** Where the text came from: the PDF's own text layer, or a vision model. */
   textSource: 'extracted' | 'ocr';
+  /** It works maths: its steps are kept, and checked. */
+  hasMaths: boolean;
 }
 
 export interface DocumentPageRepository {
@@ -15,6 +17,8 @@ export interface DocumentPageRepository {
   findRange(documentId: string, from: number, to: number): Promise<PageText[]>;
   findOne(documentId: string, pageNumber: number): Promise<PageText | null>;
   countEmpty(documentId: string): Promise<number>;
+  /** Maths pages whose text is still the text layer's: to be read again from their image. */
+  countUnreadMaths(documentId: string): Promise<number>;
   /** OCR writing what extraction couldn't: replaces one page's text in place. */
   writeOcrText(
     documentId: string,

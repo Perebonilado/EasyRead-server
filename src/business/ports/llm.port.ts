@@ -8,6 +8,7 @@ import type {
   TopicPreviewBody,
 } from '../../contracts';
 import type { DrawingThing, SceneScriptDraft } from '../domain/scene-script';
+import type { WorkedSolution } from '../domain/maths-work';
 
 export type LlmTask =
   | 'ocr_page'
@@ -16,6 +17,10 @@ export type LlmTask =
   | 'topics_page_tag'
   | 'topics_prereqs'
   | 'simplify_standard'
+  // A maths page: a stronger model, keeping every step of its working.
+  | 'simplify_maths'
+  // A problem the tutor asks to have worked through, every step checked.
+  | 'work_through'
   | 'highlight_explain'
   | 'highlight_simplify'
   | 'highlight_define'
@@ -482,6 +487,8 @@ export interface LlmGatewayPort {
     profile?: string;
     /** A story's characters on the page, and where it happens. */
     story?: string;
+    /** The page in plainer words, when the page is the book's own. */
+    plain?: string;
     previous?: SceneScriptDraft;
     problems?: string[];
   }): Promise<LlmResult<SceneScriptDraft>>;
@@ -499,6 +506,10 @@ export interface LlmGatewayPort {
     context: string;
     profile?: string;
     story?: string;
+    /** The page in plainer words: how to say it to this reader. */
+    plain?: string;
+    /** How the page before ends, in the book's own words. */
+    before?: string;
     previous?: ScreenplayDraft;
     problems?: string[];
   }): Promise<LlmResult<ScreenplayDraft>>;
@@ -527,6 +538,8 @@ export interface LlmGatewayPort {
     to: number;
     text: string;
     known: string[];
+    /** The places met earlier, to call by the same names and use again. */
+    knownPlaces?: string[];
   }): Promise<LlmResult<StoryDraft>>;
 
   /**
@@ -597,7 +610,29 @@ export interface LlmGatewayPort {
     pageText: string;
     summary: string | null;
     pageNumber: number;
+    /** A maths page: its working kept as steps, by the maths model. */
+    maths?: boolean;
+    /** A second try: the blocks the first gave, and what code found wrong in them. */
+    previous?: Block[];
+    problems?: string[];
   }): Promise<LlmResult<Block[]>>;
+
+  /**
+   * One problem worked through, step by step, for the tutor to take a
+   * learner through: the same shape as a maths page's working, and checked
+   * by code the same way.
+   */
+  workThrough(input: {
+    /** The problem, as the tutor put it, with its numbers. */
+    problem: string;
+    /** Who the document is for, and what it covers. */
+    summary: string | null;
+    /** The page the learner is on, for context. */
+    context: string | null;
+    /** A second try: the working the first gave, and what code found wrong in it. */
+    previous?: WorkedSolution;
+    problems?: string[];
+  }): Promise<LlmResult<WorkedSolution>>;
 
   /** Streams tokens for the answer panel; resolves with the full text. */
   answerHighlight(input: {

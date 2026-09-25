@@ -138,3 +138,85 @@ describe('what the narration says the characters do', () => {
     ).toEqual(['zainab point lamp @ pointed at']);
   });
 });
+
+describe('what the narration says people do with things', () => {
+  const supper: Actor[] = [
+    { id: 'jesus', names: ['Jesus'], gender: 'm' },
+    { id: 'disciples', names: ['the disciples', 'disciples'], gender: null },
+    { id: 'judas', names: ['Judas'], gender: 'm' },
+  ];
+  const business = (
+    sentences: string[],
+    props: Parameters<typeof directionsIn>[4] = [],
+  ) =>
+    directionsIn(sentences, supper, [], new Map(), props).business.map((b) => {
+      const word = sentences[b.beat]
+        .slice(b.at)
+        .split(/\s+/)[0]
+        .replace(/[.,]$/u, '');
+      return `${b.who} ${b.does} ${b.prop}${b.to ? ` to ${b.to}` : ''} @ ${word}`;
+    });
+
+  it('reads the bread taken, blessed, broken and given, each on its word', () => {
+    expect(
+      business([
+        'While they were eating, Jesus took bread, blessed it, broke it, and gave it to the disciples.',
+      ]),
+    ).toEqual([
+      'jesus take bread @ took',
+      'jesus raise bread @ blessed',
+      'jesus break bread @ broke',
+      'jesus give bread to disciples @ gave',
+    ]);
+  });
+
+  it('reads a cup taken with thanks and handed on, and what "it" is from before', () => {
+    expect(
+      business([
+        'Jesus sat down with them.',
+        'Then he took the cup.',
+        'Jesus gave thanks and handed it to them.',
+      ]),
+    ).toEqual([
+      'jesus take cup @ took',
+      'jesus raise cup @ gave',
+      'jesus give cup @ handed',
+    ]);
+  });
+
+  it('lets people eat and drink what is on the table when nothing is named', () => {
+    expect(
+      business(['Judas ate quietly.', 'Jesus drank.'], ['bread', 'cup']),
+    ).toEqual(['judas eat bread @ ate', 'jesus drink cup @ drank']);
+    // Nothing to eat on the page: nothing acted.
+    expect(business(['Judas ate quietly.'])).toEqual([]);
+  });
+
+  it('takes the meal going on for a background, not a bite', () => {
+    expect(
+      business(['While they eat, Jesus takes bread and breaks it.']),
+    ).toEqual(['jesus take bread @ takes', 'jesus break bread @ breaks']);
+    expect(
+      business(['As Judas was drinking, Jesus looked at him.'], ['cup']),
+    ).toEqual([]);
+  });
+
+  it('dips into the bowl, and never acts what is only wanted or said', () => {
+    expect(business(['Judas dipped his hand into the bowl.'])).toEqual([
+      'judas dip bowl @ dipped',
+    ]);
+    expect(business(['Judas wanted to take the bread.'])).toEqual([]);
+    expect(business(['Jesus said, "Take the bread and eat it."'])).toEqual([]);
+  });
+
+  it('still gives a hand held out when nothing is given', () => {
+    const { acts, business: none } = directionsIn(
+      ['Jesus gave Judas a long look.'],
+      supper,
+    );
+    expect(none).toEqual([]);
+    expect(acts.map((a) => `${a.who} ${a.do} ${a.toward}`)).toEqual([
+      'jesus reach judas',
+    ]);
+  });
+});

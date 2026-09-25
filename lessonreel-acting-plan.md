@@ -170,3 +170,65 @@ Richard: "implement this on easy read and test".
 - acting beats from the writer;
 - walks with a stride, sitting and turning;
 - faces as parameters (they still switch as groups).
+
+## Status (2026-09-26): the business and the faces
+
+Richard: "implement this. It is very important that the micro interactions mentioned by the narrator are acted out. If there is food on the table then we should see it. If a character eats it, we should see it. As a character interacts, their facial expressions should match what is being said and should be fluid."
+
+**Found first:** story pages never read their narration for actions. `directionsIn` ran on lesson pages only, so "Jesus took bread and broke it" in a story was never acted.
+
+**Server (branch `visualize-acting-rig`):**
+- **The props.** `scene-props.ts` covers bread, cup (and wine), fish, bowl or dish, jar, plate, basket, fruit ("the fruit of the vine" excepted) and lamp.
+  - Each is found in the page's words and drawn in the kit's style: flat colours, the figure's outline, a grip point and a mouth point.
+  - Bread also has a broken half.
+- **Finding the business.** `directionsIn` now also finds business: take, raise (bless, give thanks), break (and "brake"), give (to whom), eat, drink, dip, put.
+  - Who does it is resolved the same way as moves; what is done it to is the prop named, or "it" for the one last named.
+  - Eating and drinking with nothing named use what there is on the page.
+  - A meal going on ("while they eat") is background, not a bite.
+  - A give with nothing to give stays a reach, as before.
+- **Where it's read.** It runs on story pages over the narration only; a character's line ("Take, eat") is said, not done.
+- **The writer's part.** The writer may also stage business as actions (take, raise, break, give, eat, drink, dip, put).
+  - Bread or a cup the writer draws as a thing in the row becomes the stage's prop instead.
+  - An unnamed "breaks it" is the thing last handled.
+- **The book check.** The book's own text is read the same way. Business it tells that the storyboard leaves out sends the draft back. If it's still missing, it is acted anyway, beside the rest of that thing's business.
+- **Tidying.** Business is kept in the order of its words, each act once. One person's acts are spaced at least 650 ms apart. The narration's moves don't repeat the writer's.
+- **Faces.**
+  - A line with no face (or "neutral") gets the face its words tell (`scene-feeling.ts`): "betray", "woe", "blood" are sad; "surely not" afraid; "rejoice" or "thank" happy; a plain question thinking.
+  - Feelings the writer names in other words map to the kit's faces ("serious" is sad, "worried" afraid).
+  - The one a line is said to reacts as it ends: angry makes them afraid, sad sad, happy happy, surprised surprised.
+- **The scene.** `SceneDto.props` gives each prop its drawing, whom it rests near, and its timed events.
+- **The prompt.** The story prompt asks for a face on every line and for business in the book's words, and says props are never cast.
+
+**Client:**
+- **`business.ts`: the clips.**
+  - Each event becomes a clip whose moment lands on its word: the hand closes on "took", the snap is on "broke", the hand-over on "gave".
+  - A take is added when someone uses what is still on the table.
+  - A quick run of business is squeezed around fixed moments, never late.
+  - A ledger tracks every piece: on the table, in which hand, broken into halves, handed over, bitten (three bites and it's eaten), put down.
+  - Each clip has a choreography: the eyes lead the hand; a blessing lifts it in both hands with the eyes up; a break is a press, then a snap, with crumbs; a hand-over has the giver hold it out and the receiver reach, lift their brows, take it and look up at the giver; eating brings it to the mouth, bites, chews and dips the head; drinking tips the cup with the head back.
+- **`motion.ts`.** It solves those hands with the IK, points the eyes, chews, and nods.
+  - A giver and receiver too far apart step in and lean to meet, then step back.
+  - A thing taken from out of reach glides into the hand.
+  - A thing given to someone not drawn to hold it is carried out and fades.
+  - Things nobody handles sit in the middle of the table.
+- **`stage.ts`.** It draws the props over the people, in hand or on the table (the height of a hand at rest when the set has a table front, else the ground), with crumbs.
+  - Faces change behind a blink: the lids close while one face gives way to the next.
+  - With reduced motion the props are still there, at rest or in hand.
+
+**Tests:**
+- Server: 1520 pass. New tests cover the prop finder, story business and the listener's face, drawn props, the book check, props in the scene, and the face reader.
+- Client: 84 pass. New tests cover clips on their words, the squeeze, the ledger, the implied take, poses, the bread resting on the table and taken into the hand, and the break into halves with crumbs.
+
+**Seen in the player** (Matthew p53, remade; frames captured from the stage lab in headless Chrome at quarter speed):
+- The narration now reads "While they eat, Jesus takes bread, gives thanks, breaks it and gives it to his disciples".
+- The loaf and the cup sit on the table.
+- Jesus looks to the loaf, reaches, takes it, lifts it in both hands with his eyes up, presses and snaps it into halves (crumbs fall), and holds the right half out to the disciples; it goes with them.
+- Then the cup is taken, blessed and held out.
+- Judas is afraid on "Surely not I, Rabbi?", behind a blink. Jesus is sad on "this is my blood".
+- A lab-only variant (the half given to Judas, who then eats) shows the two stepping in to meet, the half passing hand to hand, both stepping back, and Judas looking down at it, bringing it to his mouth, biting and chewing.
+
+**Left:**
+- The disciples are drawn as a group, which can't hold things, so a thing given to them fades. Drawing a few disciples as people would let them take and eat it.
+- Drinking has no dedicated test yet.
+- The face lexicon is English only.
+- Blessing and eating poses may want tuning by eye.

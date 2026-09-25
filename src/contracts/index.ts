@@ -1171,6 +1171,31 @@ export type SceneActingMove =
  * How someone acts on a page: planned by the server from who says what
  * and when, played by the stage on the voice's clock.
  */
+/** What people do with a thing on a story's stage. */
+export type ScenePropAction =
+  'take' | 'raise' | 'break' | 'give' | 'eat' | 'drink' | 'dip' | 'put';
+
+/**
+ * A thing on a story's stage that people handle: bread on the table, a
+ * cup. Drawn in the figure kit's own units, its base resting on a surface
+ * at y = 0; on the table (or the ground) near whoever first handles it,
+ * until then and after they put it down.
+ */
+export interface ScenePropDto {
+  id: string;
+  svg: string;
+  viewBox: [number, number, number, number];
+  /** Where a hand holds it, and the part that goes to the mouth, in its own units. */
+  grip: [number, number];
+  mouth: [number, number];
+  /** Broken, each hand holds a half: the left half; the right is its mirror. */
+  half?: string;
+  /** Near whom it rests. */
+  near: string | null;
+  /** What is done with it, in order: when, who, what, and to whom it is given. */
+  does: [number, string, ScenePropAction, string?][];
+}
+
 export interface SceneActingDto {
   /**
    * Where they look from each moment on: another thing's id, or null for
@@ -1293,6 +1318,8 @@ export interface SceneDto {
   };
   /** How each character acts, by id; absent on a page no one acts on, or an older one. */
   acting?: Record<string, SceneActingDto>;
+  /** The things on a story's stage that people handle; absent when there are none. */
+  props?: ScenePropDto[];
   /** A story page's setting: its set at full strength, its light and weather, a crowd; absent on a lesson's page. */
   setting?: SceneSettingDto;
   /** The same steps placed for the pane's box and the full screen's wide stage. */

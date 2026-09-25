@@ -15,6 +15,7 @@
  * acted ("wanted to go home", "did not laugh").
  */
 import { namedIn, quotedSpans, type Speaker } from './scene-dialogue';
+import { PROP_KIND, PROP_WORDS, type StageProp } from './scene-props';
 
 /** Someone who may act on a page: their id there, their names, and whether "she" or "he" may mean them. */
 export interface Actor extends Speaker {
@@ -47,6 +48,34 @@ export interface NarratedAct {
   do: NarratedMove;
   /** Toward whom or what: an id on the page, "@up" or "@down" (the sky, the ground), or no one. */
   toward: string | null;
+}
+
+/** What people do with the things on the stage, where the narration says it. */
+export const PROP_ACTIONS = [
+  'take',
+  'raise',
+  'break',
+  'give',
+  'eat',
+  'drink',
+  'dip',
+  'put',
+] as const;
+export type PropAction = (typeof PROP_ACTIONS)[number];
+
+/**
+ * Someone handling a thing, where the narration says so: Jesus takes the
+ * bread, blesses it, breaks it and gives it to the disciples; they eat.
+ */
+export interface PropBusiness {
+  beat: number;
+  /** Where the verb starts in the sentence. */
+  at: number;
+  who: string;
+  does: PropAction;
+  prop: StageProp;
+  /** Given to whom, by id; or no one. */
+  to: string | null;
 }
 
 /** Someone coming onto the scene or leaving it, where the narration says so. */
@@ -106,7 +135,7 @@ const COMING = new RegExp(
   'giu',
 );
 
-type Doing = NarratedMove | 'enter' | 'leave';
+type Doing = NarratedMove | 'enter' | 'leave' | PropAction;
 
 /** Each verb, what it is acted as, and whether it is done to someone: needed, maybe, or never. */
 const VERBS: {
@@ -114,6 +143,53 @@ const VERBS: {
   does: Doing;
   object: 'must' | 'may' | 'none';
 }[] = [
+  // What is done with things: the longer phrases first, so "gave thanks"
+  // is a blessing and not a giving.
+  {
+    pattern:
+      /\b(?:bless(?:es|ed|ing)?|g(?:ave|ives|iving|ive) thanks|raised|raises|raising|lift(?:s|ed|ing)? (?:it |them )?up|h(?:eld|olds|olding) (?:it |them )?up)\b/giu,
+    does: 'raise',
+    object: 'may',
+  },
+  {
+    pattern:
+      /\b(?:took|takes|taking|picked up|picks up|picking up|pick(?:s|ed)? (?:it|them) up|lifted|lifts|lifting|grabbed|grabs|seized)\b/giu,
+    does: 'take',
+    object: 'must',
+  },
+  {
+    pattern: /\b(?:broke|brake|breaks|breaking|tore|tears|tearing)\b/giu,
+    does: 'break',
+    object: 'must',
+  },
+  {
+    pattern:
+      /\b(?:gave|gives|giving|handed|hands|handing|passed|passes|passing|shared|shares|sharing|offered|offers|offering)\b/giu,
+    does: 'give',
+    object: 'must',
+  },
+  {
+    pattern:
+      /\b(?:ate|eats|eating|bit|bites|biting|chewed|chews|tasted|tastes)\b|\beat\b(?! (?:up|away))/giu,
+    does: 'eat',
+    object: 'may',
+  },
+  {
+    pattern: /\b(?:drank|drinks|drinking|drink|sipped|sips|sipping)\b/giu,
+    does: 'drink',
+    object: 'may',
+  },
+  {
+    pattern: /\b(?:dipped|dips|dipping|dip)\b/giu,
+    does: 'dip',
+    object: 'may',
+  },
+  {
+    pattern:
+      /\b(?:put|puts|set|sets|laid|lays|placed|places) (?:it |them |the \p{L}+ )?(?:down|on the table|back)\b/giu,
+    does: 'put',
+    object: 'may',
+  },
   {
     pattern:
       /\b(?:hug(?:s|ged|ging)?|embrac(?:e|es|ed|ing)|cuddl(?:e|es|ed|ing))\b/giu,
@@ -253,9 +329,26 @@ export function directionsIn(
     number,
     readonly { span: [number, number]; speaker: string }[]
   > = new Map(),
-): { acts: NarratedAct[]; passages: Passage[] } {
+  /** The things the page's words set on the stage, for "they ate" with nothing named. */
+  props: readonly StageProp[] = [],
+): { acts: NarratedAct[]; passages: Passage[]; business: PropBusiness[] } {
   const acts: NarratedAct[] = [];
   const passages: Passage[] = [];
+  const business: PropBusiness[] = [];
+  /** The thing last named: what "it" and "them" are. */
+  let lastProp: StageProp | null = null;
+  /** The first prop a text names, and where. */
+  const propIn = (text: string): { prop: StageProp; at: number } | null => {
+    let best: { prop: StageProp; at: number } | null = null;
+    for (const [prop, words] of Object.entries(PROP_WORDS) as [
+      StageProp,
+      RegExp,
+    ][]) {
+      const m = words.exec(text);
+      if (m && (!best || m.index < best.at)) best = { prop, at: m.index };
+    }
+    return best;
+  };
   const genderOf = new Map(actors.map((a) => [a.id, a.gender ?? null]));
   /** Whoever was mentioned, the latest last. */
   const recent: string[] = [];
@@ -365,9 +458,25 @@ export function directionsIn(
         );
         who = subjects.length ? subjects : lead ? [lead.id] : [];
       }
+      // "They ate", "they all drank": everyone the page has named so far.
+      if (
+        !who.length &&
+        (verb.does === 'eat' || verb.does === 'drink') &&
+        /\bthey\b(?:\s+(?:all|both|were|had|then|each))*\s*$/iu.test(bare)
+      )
+        who = recent.slice(-3);
       if (!who.length) continue;
       subjects = who;
       if (NOT_DONE.test(outside.slice(Math.max(0, verb.at - 24), verb.at)))
+        continue;
+      // "While they were eating", "as he was drinking": the meal going on
+      // behind what happens, not a bite at a moment.
+      if (
+        (verb.does === 'eat' || verb.does === 'drink') &&
+        /\b(?:(?:while|as)\s+(?:they|he|she|we|you|\p{L}+)\s+(?:(?:were|was|are|is)\s+)?|when\s+(?:they|he|she|we|you|\p{L}+)\s+(?:were|was|are|is)\s+)$/iu.test(
+          outside.slice(Math.max(0, verb.at - 32), verb.at),
+        )
+      )
         continue;
       if (HABIT.test(outside.slice(0, verb.at))) continue;
       if (verb.does === 'enter' || verb.does === 'leave') {
@@ -379,6 +488,40 @@ export function directionsIn(
       const rest = outside.slice(verb.end);
       const clauseEnd = rest.search(/[.!?;:,]|\s{2}/u);
       const after = clauseEnd >= 0 ? rest.slice(0, clauseEnd) : rest;
+      // What is done with a thing: the thing named after the verb, or "it",
+      // or, eaten or drunk, what there is to eat or drink.
+      const before = propIn(outside.slice(0, verb.at));
+      if (before) lastProp = before.prop;
+      if ((PROP_ACTIONS as readonly string[]).includes(verb.does)) {
+        const does = verb.does as PropAction;
+        const named = propIn(after);
+        const it =
+          /^\s*(?:\p{L}+ly\s+)?(?:it|them|some|one|a piece|a bit|pieces)\b/iu.test(
+            after,
+          );
+        let prop: StageProp | null = named?.prop ?? (it ? lastProp : null);
+        if (!prop && does === 'eat')
+          prop = props.find((p) => PROP_KIND[p] === 'food') ?? null;
+        if (!prop && does === 'drink')
+          prop = props.find((p) => PROP_KIND[p] === 'drink') ?? null;
+        if (!prop && does === 'dip')
+          prop = props.includes('bowl') ? 'bowl' : null;
+        if (!prop && (does === 'raise' || does === 'put')) prop = lastProp;
+        if (prop) {
+          lastProp = prop;
+          const to =
+            does === 'give'
+              ? (namedIn(after, actors).find((n) => !who.includes(n.id))?.id ??
+                null)
+              : null;
+          for (const id of who)
+            business.push({ beat, at: verb.at, who: id, does, prop, to });
+          continue;
+        }
+        // Given with no thing named: a hand held out to them, as before.
+        if (does !== 'give') continue;
+      }
+      const does = verb.does === 'give' ? 'reach' : (verb.does as NarratedMove);
       let toward: string | null =
         namedIn(after, actors).find((n) => !who.includes(n.id))?.id ??
         namedIn(after, things)[0]?.id ??
@@ -392,22 +535,27 @@ export function directionsIn(
         if (word) toward = pronounFor(word, who);
       }
       const looking = /\b(up|down)\b/iu.exec(outside.slice(verb.at, verb.end));
-      if (verb.does === 'look') {
+      if (does === 'look') {
         if (!toward && looking)
           toward = looking[1].toLowerCase() === 'up' ? '@up' : '@down';
         if (!toward) continue;
       }
-      if (
-        verb.does === 'point' &&
-        !toward &&
-        looking?.[1].toLowerCase() === 'up'
-      )
+      if (does === 'point' && !toward && looking?.[1].toLowerCase() === 'up')
         toward = '@up';
       if (verb.object === 'must' && !toward) continue;
       for (const id of who)
-        acts.push({ beat, at: verb.at, who: id, do: verb.does, toward });
+        acts.push({ beat, at: verb.at, who: id, do: does, toward });
     }
     mentionUpTo(Infinity);
+    // What the whole sentence names last is what the next "it" is.
+    const named = [...Object.entries(PROP_WORDS)]
+      .map(([prop, words]) => ({
+        prop: prop as StageProp,
+        at: outside.search(new RegExp(words.source, 'giu')),
+      }))
+      .filter((f) => f.at >= 0)
+      .sort((a, b) => b.at - a.at)[0];
+    if (named) lastProp = named.prop;
   });
-  return { acts, passages };
+  return { acts, passages, business };
 }

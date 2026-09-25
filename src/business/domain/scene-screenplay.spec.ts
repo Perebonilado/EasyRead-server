@@ -1206,3 +1206,128 @@ describe('two places at once: cutting between them', () => {
     ]);
   });
 });
+
+describe('what people do with the things on the table', () => {
+  const supper = (): ScreenplayDraft => ({
+    ...draft(),
+    beats: [
+      beat(
+        'narration',
+        'Nana Efua took the bread, broke it and gave it to Kofi.',
+        {
+          place: 'yard',
+        },
+      ),
+      beat('line', 'Take it, and eat, child.', {
+        who: 'nana',
+        to: 'kofi',
+        state: 'happy',
+      }),
+      beat('narration', 'Kofi ate.'),
+      beat('action', 'Ada drinks from the cup.', {
+        who: 'ada',
+        do: 'drink',
+        hold: 1,
+      }),
+      beat('line', 'Thank you.', { who: 'kofi', to: 'nana' }),
+    ],
+  });
+
+  it('acts the narration’s business on its words, never a line’s own words, and sets the table from the page', () => {
+    const { script, mended } = mend(supper());
+    const business = script.beats.flatMap((b, k) =>
+      (b.business ?? []).map(
+        (one) =>
+          `${k}: ${one.who} ${one.does} ${one.prop}${one.to ? ` to ${one.to}` : ''}`,
+      ),
+    );
+    expect(business.sort()).toEqual([
+      '0: nana break bread',
+      '0: nana give bread to kofi',
+      '0: nana take bread',
+      // Staged by the writer after the sentence before it.
+      '2: ada drink cup',
+      '2: kofi eat bread',
+    ]);
+    // "Take it, and eat" is said, not done.
+    expect(script.beats[1].business).toBeUndefined();
+    expect(script.props).toEqual(['bread', 'cup']);
+    expect(mended.join(' ')).toContain("the narration's business acted");
+  });
+
+  it('puts bread the writer drew as a thing on the table instead, and breaks what is in hand', () => {
+    const drawn: ScreenplayDraft = {
+      ...draft(),
+      beats: [
+        beat('narration', 'Night falls by the fire.', { place: 'yard' }),
+        beat('action', 'Nana takes the bread.', {
+          who: 'nana',
+          do: 'take',
+          show: 'bread',
+          hold: 1,
+        }),
+        beat('action', 'She breaks it.', { who: 'nana', do: 'break', hold: 1 }),
+        beat('line', 'Share it, children.', { who: 'nana', to: 'ada' }),
+      ],
+      cast: [
+        ...draft().cast,
+        thing('bread', 'drawing', {
+          name: 'loaf of bread',
+          brief: 'a round loaf',
+        }),
+      ],
+    };
+    const { script, mended } = mend(drawn);
+    expect(script.cast.some((t) => t.id === 'bread')).toBe(false);
+    expect(script.steps.some((s) => s.stage?.show.includes('bread'))).toBe(
+      false,
+    );
+    expect(script.props).toContain('bread');
+    const business = script.beats.flatMap((b) =>
+      (b.business ?? []).map((one) => `${one.who} ${one.does} ${one.prop}`),
+    );
+    expect(business).toEqual(['nana take bread', 'nana break bread']);
+    expect(mended.join(' ')).toContain('bread: on the table as a prop');
+  });
+
+  it('acts what the book says is done with things even when the storyboard leaves it out, and asks again', () => {
+    const book =
+      'Nana Efua took the bread, broke it and gave it to Kofi.\n\n"Eat, child," she said.';
+    const dropped: ScreenplayDraft = {
+      ...draft(),
+      beats: [
+        beat('narration', 'Nana Efua took the bread.', { place: 'yard' }),
+        beat('line', 'Eat, child.', { who: 'nana', to: 'kofi' }),
+      ],
+    };
+    const { script, problems, mended } = mendScreenplay(dropped, {
+      material: book,
+      characters,
+      places,
+    });
+    const business = script.beats.flatMap((b) =>
+      (b.business ?? []).map(
+        (one) =>
+          `${one.who} ${one.does} ${one.prop}${one.to ? ` to ${one.to}` : ''}`,
+      ),
+    );
+    expect(business).toEqual([
+      'nana take bread',
+      'nana break bread',
+      'nana give bread to kofi',
+    ]);
+    expect(problems.join(' ')).toContain('nana breaks the bread');
+    expect(mended.join(' ')).toContain('from the book, acted though left out');
+  });
+
+  it('shows how a line lands on the one it is said to, as it ends', () => {
+    const { script } = mend(supper());
+    const reaction = script.steps.find((step) =>
+      step.effects.some(
+        (e) => e.target === 'kofi' && e.part === 'happy' && e.do === 'show',
+      ),
+    );
+    expect(reaction?.at.beat).toBe(1);
+    expect(reaction?.word).toBeGreaterThan(0);
+  });
+});

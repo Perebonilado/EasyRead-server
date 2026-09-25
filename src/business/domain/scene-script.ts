@@ -37,7 +37,9 @@ import {
   type Actor,
   type NarratedMove,
   type Passage,
+  type PropAction,
 } from './scene-directions';
+import { propsIn, type StageProp } from './scene-props';
 import {
   STAGE_RECIPES,
   type LearningStage,
@@ -251,6 +253,18 @@ export interface SceneBeat {
     who: string;
     do: NarratedMove;
     toward: string | null;
+  }[];
+  /**
+   * What its narration says people do with the things on the stage, found
+   * in its own words: where the verb starts, who, what, with which thing,
+   * and to whom it is given.
+   */
+  business?: {
+    at: number;
+    who: string;
+    does: PropAction;
+    prop: StageProp;
+    to: string | null;
   }[];
   /**
    * On a story's page, written as a screenplay: a line a character says,
@@ -577,6 +591,8 @@ export interface SceneScript {
   opening?: { show: string[]; backdrop: string | null } | null;
   /** Seconds of what happens without words before the first word: someone walking on. */
   lead?: number;
+  /** The things the page's words set on the stage (bread, a cup): on the table from the start, handled as the narration says. */
+  props?: StageProp[];
   /** A story page's time, weather and crowd, and the story's world: how the stage dresses it. */
   setting?: {
     time: StoryTime | null;
@@ -1584,8 +1600,12 @@ export function mendScript(
 
   // What the narration says the characters do, acted where it says it;
   // and who comes and goes, walking on and off at its words.
+  // The things the page's words set on the stage: bread, a cup.
+  const props = options.characters?.length
+    ? propsIn([...beats.map((beat) => beat.say), options.material ?? ''])
+    : [];
   if (speaking.length) {
-    const { acts, passages } = directionsIn(
+    const { acts, passages, business } = directionsIn(
       beats.map((beat) => beat.say),
       speaking,
       cast.flatMap((thing) =>
@@ -1601,8 +1621,11 @@ export function mendScript(
           beat.lines?.length ? [[k, beat.lines] as const] : [],
         ),
       ),
+      props,
     );
     for (const { beat, ...act } of acts) (beats[beat].acts ??= []).push(act);
+    for (const { beat, ...one } of business)
+      (beats[beat].business ??= []).push(one);
     const said = speakersIn(
       beats.map((beat) => beat.say),
       new Map(
@@ -1756,6 +1779,7 @@ export function mendScript(
         ),
       ),
       steps,
+      ...(props.length ? { props } : {}),
     },
     problems,
     mended,

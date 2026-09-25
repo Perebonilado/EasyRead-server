@@ -960,6 +960,63 @@ describe('what a character says, in a bubble', () => {
     ]);
   });
 
+  it('sets the things on the table, and times each thing done with them to its word', () => {
+    const withBread = composeScene({
+      script: {
+        ...talking,
+        props: ['bread', 'cup'],
+        beats: talking.beats.map((b, k) =>
+          k === 1
+            ? {
+                ...b,
+                business: [
+                  {
+                    at: 0,
+                    who: 'fox',
+                    does: 'take' as const,
+                    prop: 'bread' as const,
+                    to: null,
+                  },
+                  {
+                    at: 0,
+                    who: 'fox',
+                    does: 'give' as const,
+                    prop: 'bread' as const,
+                    to: 'mira',
+                  },
+                ],
+              }
+            : b,
+        ),
+      },
+      drawings: new Map([
+        ['mira', figure()],
+        ['fox', figure()],
+      ]),
+      beats: beatsSaid,
+      durationMs: 16_000,
+      timing: 'voice',
+      generator: 'scene-2',
+    }).scene;
+    const [bread, cup] = withBread.props ?? [];
+    const first = beatsSaid[1].words[0][2];
+    expect(bread).toMatchObject({
+      id: 'bread',
+      near: 'fox',
+      // Both on one word: the second a beat after the first.
+      does: [
+        [first, 'fox', 'take'],
+        [first + 650, 'fox', 'give', 'mira'],
+      ],
+    });
+    expect(bread.svg).toContain('<svg');
+    expect(bread.half).toContain('<svg');
+    // On the table from the start, though no one handles it.
+    expect(cup).toMatchObject({ id: 'cup', near: null, does: [] });
+    // A page with nothing on it has no props at all.
+    expect(scene.props).toBeUndefined();
+  });
+
   it('acts what the writer directs, and keeps the camera on two', () => {
     const directed = composeScene({
       script: {

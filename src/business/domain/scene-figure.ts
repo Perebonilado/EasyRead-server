@@ -2023,6 +2023,13 @@ export interface FigureDrawing {
     body: [number, number];
     legs: [number, number];
   };
+  /**
+   * One person standing: each arm's shoulder, elbow and hand as drawn, in
+   * the frame's units, so the player can put a hand where it means to:
+   * on a shoulder, toward a face, round someone. None for a group, or for
+   * one lying down.
+   */
+  joints?: Record<'r' | 'l', [Point2, Point2, Point2]>;
 }
 
 /** How the mouth moves while talking: open and shut, unevenly, as speech does. */
@@ -2068,6 +2075,8 @@ interface Layers {
   over: string;
   /** How far they reach past the frame, in the kit's units: a pointing hand, a flag, an umbrella over the head. */
   beyond: { left: number; right: number; up: number };
+  /** Each arm's shoulder, elbow and hand as drawn: the rig's joints. */
+  joints: Record<'r' | 'l', [Point2, Point2, Point2]>;
 }
 
 /** Whether someone in a pose has a hand free to hold something. */
@@ -2219,6 +2228,7 @@ function layersOf(
   const arms: string[] = [];
   const reach: string[] = [];
   const hands: Point2[] = [];
+  const joints = {} as Layers['joints'];
   const width = spec.build === 'slim' ? 14 : spec.build === 'broad' ? 16 : 15;
   const belly = r1(sY + (hemY - sY) * 0.66);
   const long = hemY - sY;
@@ -2288,6 +2298,7 @@ function layersOf(
     // The elbow: where a bent arm bends, else halfway down a straight one.
     const E: Point2 = elbow ?? [r1((S[0] + H[0]) / 2), r1((S[1] + H[1]) / 2)];
     const { stretch } = alongOf([S, E, H]);
+    joints[s > 0 ? 'r' : 'l'] = [S, E, H];
     const upperLength = Math.hypot(E[0] - S[0], E[1] - S[1]);
     const u =
       upperLength / (upperLength + Math.hypot(H[0] - E[0], H[1] - E[1]) || 1);
@@ -2490,6 +2501,7 @@ function layersOf(
       right: r1(beyond.right - FIGURE_FRAME.halfWidth),
       up: r1(R.top - FIGURE_FRAME.headroom - beyond.top),
     },
+    joints,
   };
 }
 
@@ -3054,5 +3066,6 @@ export function drawFigure(
       body: at([0, r1((R.sY + R.hemY) / 2)]),
       legs: at([0, r1((R.hemY - FEET) / 2)]),
     },
+    ...(n === 1 && !lying ? { joints: members[0].joints } : {}),
   };
 }

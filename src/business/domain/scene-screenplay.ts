@@ -23,8 +23,15 @@ import {
   type HeardFrom,
   type LineEvidence,
 } from './scene-dialogue';
-import type { Actor } from './scene-directions';
-import { FIGURE_SIGNS, figureFor } from './scene-figure';
+import {
+  PROP_ACTIONS,
+  directionsIn,
+  type Actor,
+  type PropAction,
+} from './scene-directions';
+import { PROP_KIND, PROP_WORDS, propsIn, type StageProp } from './scene-props';
+import { faceNamed, faceOfLine } from './scene-feeling';
+import { FIGURE_SIGNS, figureFor, type FigureFace } from './scene-figure';
 import { idKey } from './scene-ids';
 import {
   LINE_FROMS,
@@ -47,6 +54,7 @@ import {
   type MendedScript,
   type SceneBeat,
   type SceneEffect,
+  type SceneEffectKind,
   type SceneMood,
   type SceneMusic,
   type SceneScript,
@@ -73,6 +81,8 @@ export const SCREENPLAY_DOINGS = [
   'point',
   'look',
   ...STORY_MOVES,
+  // What they do with a thing: bread, a cup.
+  ...PROP_ACTIONS,
   'still',
 ] as const;
 export type ScreenplayDoing = (typeof SCREENPLAY_DOINGS)[number];
@@ -387,6 +397,18 @@ const phraseOf = (text: string) => wordsOf(text).slice(0, 4).join(' ');
  * (a line of the book lost or reworded, a narrator who says too much) is
  * a problem.
  */
+/** The things a stage may hold, as the props module lists them. */
+const STAGE_PROP_ORDER = Object.keys(PROP_WORDS) as StageProp[];
+
+/** How a line said with a feeling lands on the one it is said to. */
+const LANDS: Record<string, FigureFace> = {
+  angry: 'afraid',
+  sad: 'sad',
+  happy: 'happy',
+  surprised: 'surprised',
+  pain: 'sad',
+};
+
 export function mendScreenplay(
   draft: ScreenplayDraft,
   options: MendOptions = {},
@@ -1155,6 +1177,8 @@ export function mendScreenplay(
     )
       return [];
     if (doing === 'enter' || doing === 'leave' || doing === 'still') return [];
+    // Something done with a thing is business, acted with the thing.
+    if ((PROP_ACTIONS as readonly string[]).includes(doing)) return [];
     const toward = known(raw.to, [...PEOPLE, 'drawing']);
     const sky = /\b(?:up|sky|stars?|moon|heavens?)\b/iu.test(raw.say)
       ? '@up'
@@ -1169,8 +1193,14 @@ export function mendScreenplay(
           : null;
     if ((doing === 'hug' || doing === 'reach') && !toward) return [];
     if (doing === 'look' && !part) return [];
-    return [{ target: who, part, do: doing }];
+    return [{ target: who, part, do: doing as SceneEffectKind }];
   };
+
+  /** The face each speaker last spoke with. */
+  const lastFace = new Map<string, string>();
+
+  /** The thing the writer last had someone handle: what an unnamed "it" is. */
+  let lastHandled: StageProp | null = null;
 
   /** Whom each last hugged or took by the hand: who goes along with them. */
   const touched = new Map<string, string>();
@@ -1392,7 +1422,20 @@ export function mendScreenplay(
         shownPlace = next.backdrop ?? shownPlace;
       }
       const who = speaker ?? known(raw.who, [...PEOPLE, 'drawing']);
-      effects.push(...stateOf(who, raw.state, raw.say), ...moveOf(who, raw));
+      // A line the writer gave no face is said with the face its words
+      // tell ("one of you will betray me": sad), unless it is theirs already.
+      // A feeling named in other words is the nearest face ("serious" is
+      // sad); "neutral", or none, is what the words tell.
+      const asked = isFace(clean(raw.state))
+        ? clean(raw.state)
+        : (faceNamed(raw.state) ?? clean(raw.state));
+      const told =
+        beat.kind === 'line' && speaker && (!asked || asked === 'neutral')
+          ? faceOfLine(beat.say)
+          : null;
+      const face = told && told !== lastFace.get(speaker ?? '') ? told : asked;
+      if (speaker && (clean(face) || null)) lastFace.set(speaker, clean(face));
+      effects.push(...stateOf(who, face, raw.say), ...moveOf(who, raw));
       if (stage || effects.length)
         steps.push({
           at: { beat: k, phrase: phraseOf(beat.say) },
@@ -1400,6 +1443,27 @@ export function mendScreenplay(
           stage,
           effects,
         });
+      // The one it is said to shows how it lands, as it ends: an angry
+      // word frightens, a sad one saddens, good news gladdens.
+      const said = clean(face);
+      const heard =
+        beat.kind === 'line' &&
+        speaker &&
+        beat.to &&
+        beat.to !== speaker &&
+        present.includes(beat.to)
+          ? LANDS[said]
+          : undefined;
+      if (heard && beat.to) {
+        const words = wordsOf(beat.say);
+        const last = Math.max(0, words.length - 2);
+        steps.push({
+          at: { beat: k, phrase: words.slice(last).join(' ') },
+          word: last,
+          stage: null,
+          effects: [{ target: beat.to, part: heard, do: 'show' }],
+        });
+      }
       return;
     }
     const moment = moments.get(at);
@@ -1502,6 +1566,46 @@ export function mendScreenplay(
       shownPlace = next.backdrop ?? shownPlace;
     }
     effects.push(...moveOf(who, raw), ...stateOf(who, raw.state, raw.say));
+    // Business the writer stages: done with the thing its words name, or
+    // with what there is to eat, drink or dip into; at the end of the
+    // sentence it follows.
+    if (
+      who &&
+      stands(who) &&
+      raw.do &&
+      (PROP_ACTIONS as readonly string[]).includes(raw.do)
+    ) {
+      const does = raw.do as PropAction;
+      const pageProps = propsIn([
+        ...draft.beats.map((b) => clean(b.say)),
+        options.material ?? '',
+      ]);
+      const named = STAGE_PROP_ORDER.find((p) => PROP_WORDS[p].test(raw.say));
+      // Unnamed, it is what they were last doing something with; eaten or
+      // drunk, what there is to eat or drink.
+      const prop: StageProp | undefined =
+        named ??
+        (does === 'eat'
+          ? pageProps.find((p) => PROP_KIND[p] === 'food')
+          : does === 'drink'
+            ? pageProps.find((p) => PROP_KIND[p] === 'drink')
+            : does === 'dip'
+              ? pageProps.find((p) => p === 'bowl')
+              : (lastHandled ?? pageProps[0]));
+      const onto = beats[moment.after];
+      if (prop && onto) {
+        const to = does === 'give' ? known(raw.to, [...PEOPLE]) : null;
+        (onto.business ??= []).push({
+          at: onto.say.length,
+          who,
+          does,
+          prop,
+          to: to && to !== who ? to : null,
+        });
+        lastHandled = prop;
+        mended.push(`${who} ${does} ${prop}, as the writer staged it`);
+      }
+    }
     if (stage || effects.length)
       steps.push({
         at: { beat: moment.after, phrase: phraseOf(clean(raw.say)) },
@@ -1512,6 +1616,144 @@ export function mendScreenplay(
       });
   });
 
+  // What the narrator says people do, acted on the narrator's words: the
+  // gestures and moves the writer did not stage, and all that is done
+  // with the things on the table (the bread taken, blessed, broken and
+  // given; the cup drunk from). A line's own words are its speaker's, not
+  // directions: "Take, eat" is said, not done.
+  const props = propsIn([
+    ...draft.beats.map((beat) => clean(beat.say)),
+    options.material ?? '',
+  ]);
+  const actors: Actor[] = cast.flatMap((thing) => {
+    if (thing.kind !== 'character') return [];
+    const who = (options.characters ?? []).find((c) => c.id === thing.ref);
+    return who
+      ? [
+          {
+            id: thing.id,
+            names: [who.name, ...who.aliases, thing.name],
+            gender: genderOf(who.voice),
+          },
+        ]
+      : [];
+  });
+  if (actors.length) {
+    const { acts, business } = directionsIn(
+      beats.map((beat) => (beat.kind === 'line' ? '' : beat.say)),
+      actors,
+      [],
+      new Map(),
+      props,
+    );
+    for (const { beat, ...act } of acts) (beats[beat].acts ??= []).push(act);
+    for (const { beat, ...one } of business)
+      (beats[beat].business ??= []).push(one);
+    // The book's own words say what people do with things: every one of
+    // those is acted, whatever the writer kept. Missing, the writer is
+    // asked again; and meanwhile it is acted beside what the storyboard
+    // has of the same thing, or where the thing is first said.
+    if (options.material) {
+      const book = options.material
+        .split(/\n+/u)
+        .flatMap((para) => para.split(/(?<=[.!?]["”’]?)\s+/u))
+        .filter((sentence) => sentence.trim());
+      const told = directionsIn(book, actors, [], new Map(), props).business;
+      const staged = (x: { who: string; does: string; prop: string }) =>
+        beats.some((b) =>
+          (b.business ?? []).some(
+            (y) => y.who === x.who && y.does === x.does && y.prop === x.prop,
+          ),
+        );
+      const missing = told.filter(
+        (x, i) =>
+          !staged(x) &&
+          told.findIndex(
+            (y) => y.who === x.who && y.does === x.does && y.prop === x.prop,
+          ) === i,
+      );
+      if (missing.length) {
+        const said = (x: (typeof missing)[number]) =>
+          `${x.who} ${x.does === 'raise' ? 'blesses' : `${x.does}s`} the ${x.prop}${x.to ? ` for ${x.to}` : ''}`;
+        problems.push(
+          `The page says ${missing.map(said).join('; ')}; the storyboard leaves it out. Keep it in the narration in the book's own words, or stage each as an action ("take", "raise", "break", "give", "eat", "drink", "dip", "put"), so it is seen.`,
+        );
+        for (const x of missing) {
+          let k = -1;
+          beats.forEach((b, i) => {
+            if ((b.business ?? []).some((y) => y.prop === x.prop)) k = i;
+          });
+          if (k < 0) k = beats.findIndex((b) => PROP_WORDS[x.prop].test(b.say));
+          if (k < 0) continue;
+          (beats[k].business ??= []).push({
+            at: beats[k].say.length,
+            who: x.who,
+            does: x.does,
+            prop: x.prop,
+            to: x.to,
+          });
+          mended.push(
+            `${x.who} ${x.does} ${x.prop}: from the book, acted though left out`,
+          );
+        }
+      }
+    }
+    // In the order its words come; and each thing done once: the writer's
+    // staging of what the narration says is the same act.
+    const seen = new Set<string>();
+    for (const beat of beats) {
+      if (!beat.business?.length) continue;
+      beat.business.sort((a, b) => a.at - b.at);
+      beat.business = beat.business.filter((one) => {
+        const key = `${one.who}|${one.does}|${one.prop}|${one.to ?? ''}`;
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      });
+      if (!beat.business.length) delete beat.business;
+    }
+    // Whatever is handled is on the stage, named or not.
+    for (const beat of beats)
+      for (const one of beat.business ?? [])
+        if (!props.includes(one.prop)) props.push(one.prop);
+    if (business.length)
+      mended.push(
+        `the narration's business acted: ${business
+          .map(
+            (b) => `${b.who} ${b.does} ${b.prop}${b.to ? ` to ${b.to}` : ''}`,
+          )
+          .join('; ')}`,
+      );
+  }
+
+  // Bread or a cup the writer brought on as a drawing of its own, standing
+  // in a row with the people, is one of the stage's own props: on the
+  // table and in hands, never a picture beside them.
+  const asProps = cast.filter(
+    (thing): thing is Extract<SceneThing, { kind: 'drawing' }> =>
+      thing.kind === 'drawing' &&
+      STAGE_PROP_ORDER.some(
+        (p) => PROP_WORDS[p].test(thing.name) || PROP_WORDS[p].test(thing.id),
+      ),
+  );
+  /** Steps whose stage showed only the prop: they change nothing now. */
+  const emptied = new Set<SceneStep>();
+  for (const thing of asProps) {
+    const prop = STAGE_PROP_ORDER.find(
+      (p) => PROP_WORDS[p].test(thing.name) || PROP_WORDS[p].test(thing.id),
+    )!;
+    if (!props.includes(prop)) props.push(prop);
+    cast.splice(cast.indexOf(thing), 1);
+    for (const step of steps) {
+      step.effects = step.effects.filter((e) => e.target !== thing.id);
+      if (!step.stage?.show.includes(thing.id)) continue;
+      step.stage.show = step.stage.show.filter((id) => id !== thing.id);
+      if (!step.stage.show.length && !step.stage.backdrop) emptied.add(step);
+    }
+    mended.push(`${thing.id}: on the table as a prop, not drawn in the row`);
+  }
+  for (const step of emptied) step.stage = null;
+
   const script: SceneScript = {
     fit: draft.fit === 'poor' ? 'poor' : 'good',
     fitReason: draft.fit === 'poor' ? clean(draft.fitReason) || null : null,
@@ -1521,6 +1763,7 @@ export function mendScreenplay(
     cast,
     steps,
     ...(lead > 0 ? { lead } : {}),
+    ...(props.length ? { props } : {}),
   };
   return { script, problems, mended };
 }

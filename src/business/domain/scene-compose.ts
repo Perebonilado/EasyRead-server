@@ -14,6 +14,7 @@ import type {
   SceneLineFrom,
   ScenePillDto,
   ScenePlaceDto,
+  ScenePropDto,
   SceneStepDto,
   SceneThingDto,
   SceneTiming,
@@ -58,6 +59,7 @@ import {
   type SceneThing,
 } from './scene-script';
 import { paletteOf, placeMusic } from './scene-music';
+import { drawProp } from './scene-props';
 import type { DocumentProfile } from './scene-profile';
 import type { GatedDrawing } from './scene-svg';
 import { anchorMs, quietGaps, spaced, type TimedBeat } from './scene-timing';
@@ -156,6 +158,18 @@ export function spokenIn(sentence: string): string | null {
   return bubbleText(quoted.join(' … '));
 }
 
+/** Two things one person does with things are at least this far apart: a take, then a break. */
+const BUSINESS_APART_MS = 650;
+
+/** A point in a drawing's own units, as shares of its box across and down. */
+const shareOf = (
+  viewBox: [number, number, number, number],
+  [x, y]: [number, number],
+): [number, number] => [
+  Math.round(((x - viewBox[0]) / viewBox[2]) * 1000) / 1000,
+  Math.round(((y - viewBox[1]) / viewBox[3]) * 1000) / 1000,
+];
+
 /**
  * The thing as the client gets it: its drawing, or a card with its name
  * when the drawing failed. On a story's page nothing is labelled: no
@@ -227,23 +241,20 @@ export function thingDto(
       : {}),
     // Someone drawn by the kit acts; where their head is, they look from.
     ...(drawing.acts ? { rig: true as const } : {}),
+    // And where each arm's shoulder, elbow and hand are, as shares of the
+    // box: so a hand goes where it means to, not just up by so much.
+    ...(drawing.acts && drawing.joints
+      ? {
+          joints: {
+            r: drawing.joints.r.map((p) => shareOf(drawing.viewBox, p)),
+            l: drawing.joints.l.map((p) => shareOf(drawing.viewBox, p)),
+          },
+        }
+      : {}),
     ...(thing.kind === 'character' && thing.minor
       ? { minor: true as const }
       : {}),
-    ...(drawing.head
-      ? {
-          head: [
-            Math.round(
-              ((drawing.head[0] - drawing.viewBox[0]) / drawing.viewBox[2]) *
-                1000,
-            ) / 1000,
-            Math.round(
-              ((drawing.head[1] - drawing.viewBox[1]) / drawing.viewBox[3]) *
-                1000,
-            ) / 1000,
-          ] as [number, number],
-        }
-      : {}),
+    ...(drawing.head ? { head: shareOf(drawing.viewBox, drawing.head) } : {}),
   };
 }
 
@@ -1164,6 +1175,16 @@ export function composeScene(input: ComposeInput): {
     for (const act of beat.acts ?? []) {
       const word = words.find((w) => w[1] > act.at) ?? words[words.length - 1];
       if (!word) continue;
+      // The writer staged it already, near here: once is enough.
+      if (
+        directed.some(
+          (move) =>
+            move.target === act.who &&
+            move.do === act.do &&
+            Math.abs(move.atMs - word[2]) < 2500,
+        )
+      )
+        continue;
       directed.push({
         atMs: Math.round(word[2]),
         target: act.who,
@@ -1173,6 +1194,43 @@ export function composeScene(input: ComposeInput): {
     }
   });
   directed.sort((a, b) => a.atMs - b.atMs);
+
+  // The things on the stage, and what is done with each, at the word
+  // that says it: taken, blessed, broken, given, eaten, drunk.
+  const handled = new Map<string, ScenePropDto['does']>();
+  /** When each person last did something with a thing: the next is at least a beat later. */
+  const lastDone = new Map<string, number>();
+  script.beats.forEach((beat, k) => {
+    const words = beats[k]?.words ?? [];
+    for (const one of beat.business ?? []) {
+      const word = words.find((w) => w[1] > one.at) ?? words[words.length - 1];
+      if (!word) continue;
+      const at = Math.max(
+        Math.round(word[2]),
+        (lastDone.get(one.who) ?? -Infinity) + BUSINESS_APART_MS,
+      );
+      lastDone.set(one.who, at);
+      const list = handled.get(one.prop) ?? [];
+      list.push(
+        one.to ? [at, one.who, one.does, one.to] : [at, one.who, one.does],
+      );
+      handled.set(one.prop, list);
+    }
+  });
+  const props: ScenePropDto[] = (script.props ?? []).map((prop) => {
+    const drawn = drawProp(prop);
+    const does = (handled.get(prop) ?? []).sort((a, b) => a[0] - b[0]);
+    return {
+      id: prop,
+      svg: drawn.svg,
+      viewBox: drawn.viewBox,
+      grip: drawn.grip,
+      mouth: drawn.mouth,
+      ...(drawn.half ? { half: drawn.half } : {}),
+      near: does[0]?.[1] ?? null,
+      does,
+    };
+  });
 
   // How each character acts, planned from who says what and when: where
   // they look, their mouths, their gestures, and what the writer asked.
@@ -1695,6 +1753,7 @@ export function composeScene(input: ComposeInput): {
       timing: input.timing,
       ...(input.profile?.stage ? { stage: input.profile.stage } : {}),
       ...(Object.keys(acting).length ? { acting } : {}),
+      ...(props.length ? { props } : {}),
       ...(story ? { setting: settingOf() } : {}),
       sound: {
         mood: script.mood,

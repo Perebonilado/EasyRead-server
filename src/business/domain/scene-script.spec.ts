@@ -8,6 +8,9 @@ import {
   peopleAskedFor,
   phraseAt,
   quietStretches,
+  sendBack,
+  betterDraft,
+  type MendedScript,
   tellsOfLoss,
   type SceneScriptDraft,
 } from './scene-script';
@@ -179,6 +182,39 @@ describe('the writer’s storyboard, mended', () => {
     const { script } = mendScript(draft());
     expect(quietStretches(script, 5).length).toBeGreaterThan(0);
     expect(quietStretches(script, 50)).toEqual([]);
+  });
+
+  it('sends a lesson whose picture sits still too long back on its own, and keeps the better draft', () => {
+    const mended = mendScript(draft());
+    const words = (n: number) =>
+      Array.from({ length: n }, () => 'word').join(' ');
+    // Forty-five words said over a stage set once, on the first words.
+    const still: MendedScript = {
+      ...mended,
+      problems: [],
+      script: {
+        ...mended.script,
+        beats: mended.script.beats.map((beat, k) => ({
+          ...beat,
+          say: k === 0 ? `${words(44)}.` : 'Done.',
+        })),
+        steps: mended.script.steps.slice(0, 1),
+      },
+    };
+    const reasons = sendBack(still, true);
+    expect(reasons).toHaveLength(1);
+    expect(reasons[0]).toContain('nothing new to see');
+    // A story's quiet holds its actions; a page not taught this way stays.
+    expect(sendBack(still, false)).toEqual([]);
+    expect(
+      sendBack({ ...still, script: { ...still.script, fit: 'poor' } }, true),
+    ).toEqual([]);
+    // The draft written again is kept unless it is worse.
+    const moving: MendedScript = { ...mended, problems: [] };
+    expect(sendBack(moving, true)).toEqual([]);
+    expect(betterDraft(still, moving, true)).toBe(moving);
+    expect(betterDraft(moving, still, true)).toBe(moving);
+    expect(betterDraft(moving, { ...moving }, true)).not.toBe(moving);
   });
 
   it('keeps how each sentence is said and what a drawing sounds like, and mends what is off the list', () => {

@@ -30,6 +30,7 @@ import {
   describeStep,
   fullestStep,
   hiddenAt,
+  rhythmOf,
   thumbSvg,
 } from '../../business/domain/scene-compose';
 import {
@@ -43,6 +44,8 @@ import {
   mendScript,
   type MendedScript,
   quietStretches,
+  sendBack,
+  betterDraft,
   quotedSpans,
   signsShown,
   wordsOf,
@@ -441,8 +444,9 @@ export class SceneProcessor {
           if (key && ![sceneKey, voice.audioKey, thumbKey].includes(key))
             await this.storage.delete(key).catch(() => undefined);
       const drawn = [...drawings.values()].filter(Boolean).length;
+      const rhythm = rhythmOf(scene);
       this.logger.log(
-        `${who}: made in ${Math.round((Date.now() - started) / 1000)}s: ${script.beats.length} sentences, ${Math.round(voice.durationMs / 1000)}s of audio timed by ${voice.timing}, ${scene.steps.length} stage changes, ${scene.effects.length} effects (${filled} filled), ${drawn} of ${drawings.size} drawings`,
+        `${who}: made in ${Math.round((Date.now() - started) / 1000)}s: ${script.beats.length} sentences, ${Math.round(voice.durationMs / 1000)}s of audio timed by ${voice.timing}, ${scene.steps.length} stage changes, ${scene.effects.length} effects (${filled} filled), ${drawn} of ${drawings.size} drawings; still at most ${Math.round(rhythm.stillMs / 1000)}s, ${rhythm.perMinute} changes a minute`,
       );
     } catch (error) {
       const message = (error as Error).message;
@@ -817,9 +821,11 @@ export class SceneProcessor {
       this.logger.log(
         `${input.who}: mended: ${mended.mended.slice(0, 8).join('; ')}`,
       );
-    if (mended.problems.length && mended.script.fit !== 'poor') {
+    // A lesson's picture that sits still too long goes back on its own.
+    const reasons = sendBack(mended, quiet);
+    if (reasons.length) {
       this.logger.warn(
-        `${input.who}: the storyboard goes back: ${mended.problems.join(' ')}`,
+        `${input.who}: the storyboard goes back: ${reasons.join(' ')}`,
       );
       const again = await call({
         ...ask,
@@ -835,7 +841,7 @@ export class SceneProcessor {
         this.logger.log(
           `${input.who}: mended: ${second.mended.slice(0, 8).join('; ')}`,
         );
-      if (second.problems.length <= mended.problems.length) mended = second;
+      mended = betterDraft(mended, second, quiet);
     }
     return mended;
   }

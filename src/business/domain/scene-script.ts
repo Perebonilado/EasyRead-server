@@ -2507,6 +2507,13 @@ function effectOf(
 }
 
 /** How many spoken words pass between one change on the stage and the next: the writer's cadence, before any audio. */
+/**
+ * Spoken words with nothing new to see that send a lesson's draft back on
+ * their own, about sixteen seconds: a picture that sits still that long
+ * has lost the learner.
+ */
+export const STILL_WORDS = 40;
+
 export function quietStretches(script: SceneScript, limit = 30): string[] {
   const positions: number[] = [];
   let before = 0;
@@ -2534,9 +2541,34 @@ export function quietStretches(script: SceneScript, limit = 30): string[] {
   for (const at of positions) {
     if (at - last > limit)
       out.push(
-        `${at - last} words pass with nothing changing, from word ${last}`,
+        `${at - last} spoken words pass with nothing new to see, from word ${last} (about ${Math.round((at - last) / 2.5)} seconds): give each small idea in them its own change on its first words (a part pointed at, a state shown, a new thing, a zoom).`,
       );
     last = at;
   }
   return out;
+}
+
+/**
+ * Why a written draft goes back to its writer: its problems, and for a
+ * lesson a picture that sits still too long. Nothing for a page the writer
+ * said cannot be taught this way.
+ */
+export function sendBack(mended: MendedScript, lesson: boolean): string[] {
+  if (mended.script.fit === 'poor') return [];
+  return [
+    ...mended.problems,
+    ...(lesson ? quietStretches(mended.script, STILL_WORDS) : []),
+  ];
+}
+
+/** Of a draft and the one written again, the one to keep: the second, unless it is worse. */
+export function betterDraft(
+  first: MendedScript,
+  second: MendedScript,
+  lesson: boolean,
+): MendedScript {
+  const faults = (m: MendedScript) =>
+    m.problems.length +
+    (lesson ? quietStretches(m.script, STILL_WORDS).length : 0);
+  return faults(second) <= faults(first) ? second : first;
 }

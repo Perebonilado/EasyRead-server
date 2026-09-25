@@ -21,6 +21,7 @@ import type {
 import { actingOf, type DirectedMove, type SpokenLine } from './scene-acting';
 import { CROWD_CANVAS, drawCrowd } from './scene-crowd';
 import type { Callout, InkField } from './scene-callouts';
+import { numbersIn } from './scene-chart';
 import { measureText } from './scene-font';
 import {
   auditStep,
@@ -60,6 +61,7 @@ import { paletteOf, placeMusic } from './scene-music';
 import type { DocumentProfile } from './scene-profile';
 import type { GatedDrawing } from './scene-svg';
 import { anchorMs, quietGaps, spaced, type TimedBeat } from './scene-timing';
+import { numberWords } from './spoken';
 
 /** How strongly the scene behind the stage shows on its paper: enough to be there, faint enough to read over. */
 export const BACKDROP_OPACITY = 0.5;
@@ -225,7 +227,9 @@ export function thingDto(
       : {}),
     // Someone drawn by the kit acts; where their head is, they look from.
     ...(drawing.acts ? { rig: true as const } : {}),
-    ...(thing.kind === 'character' && thing.minor ? { minor: true as const } : {}),
+    ...(thing.kind === 'character' && thing.minor
+      ? { minor: true as const }
+      : {}),
     ...(drawing.head
       ? {
           head: [
@@ -1277,9 +1281,37 @@ export function composeScene(input: ComposeInput): {
   };
 
   // Working grows as the voice works it: a line the writer never showed
-  // appears after the line before it, spread through its time on stage.
+  // appears as the voice says what it comes to (its last number, in
+  // figures or in words), or failing that after the line before it,
+  // spread through its time on stage.
+  const said = script.beats.flatMap((beat, k) =>
+    (beats[k]?.words ?? []).map((w) => ({
+      word: beat.say
+        .slice(w[0], w[1])
+        .toLowerCase()
+        .replace(/[^\p{L}\p{N}.]/gu, '')
+        .replace(/\.$/, ''),
+      at: w[2],
+    })),
+  );
+  /** When the voice first says a number after a moment: in figures, or in words. */
+  const saysAt = (n: number, after: number, before: number) => {
+    const figures = String(n);
+    const inWords = numberWords(figures)
+      .toLowerCase()
+      .split(/[\s-]+/);
+    for (let i = 0; i < said.length; i += 1) {
+      if (said[i].at <= after || said[i].at >= before) continue;
+      if (said[i].word.replace(/,/g, '') === figures) return said[i].at;
+      if (inWords.every((w, j) => said[i + j]?.word === w)) return said[i].at;
+    }
+    return null;
+  };
   for (const thing of things) {
     if (thing.kind !== 'drawing' || thing.source !== 'math') continue;
+    const source = castById.get(thing.id);
+    const latex =
+      source?.kind === 'math' ? source.lines.map((l) => l.latex) : [];
     const lines = Object.keys(thing.states)
       .map((name) => ({ name, k: Number(/\d+/.exec(name)?.[0] ?? 0) }))
       .sort((a, b) => a.k - b.k);
@@ -1290,7 +1322,7 @@ export function composeScene(input: ComposeInput): {
     );
     const end = leaves < 0 ? durationMs : steps[leaves].atMs;
     let last = steps[first].atMs + 300;
-    lines.forEach(({ name }, i) => {
+    lines.forEach(({ name, k }, i) => {
       const shown = effects.find(
         (e) => e.target === thing.id && e.part === name && e.do === 'show',
       );
@@ -1298,12 +1330,21 @@ export function composeScene(input: ComposeInput): {
         last = shown.atMs;
         return;
       }
+      // What the line comes to: the last number on it.
+      const tex = (latex[k - 1] ?? '').replace(/\{,\}/g, '');
+      const result = numbersIn(tex.split('=').pop() ?? '').pop();
+      const cue =
+        result !== undefined
+          ? saysAt(Math.abs(result), last + 300, end - 200)
+          : null;
       const left = lines.length - i + 1;
       last = Math.round(
-        Math.min(
-          end - 200,
-          last + Math.min(3200, Math.max(1200, (end - last) / left)),
-        ),
+        cue !== null
+          ? Math.max(last + 400, cue - 150)
+          : Math.min(
+              end - 200,
+              last + Math.min(3200, Math.max(1200, (end - last) / left)),
+            ),
       );
       effects.push({ atMs: last, target: thing.id, part: name, do: 'show' });
     });
@@ -1546,7 +1587,12 @@ export function composeScene(input: ComposeInput): {
           const asked = {
             text: effect.say!.text,
             head,
-            body: { x: x - stage.w * 0.15, y: band.box.y, w: stage.w * 0.3, h: band.box.h },
+            body: {
+              x: x - stage.w * 0.15,
+              y: band.box.y,
+              w: stage.w * 0.3,
+              h: band.box.h,
+            },
             stage,
             avoid: {
               boxes: [

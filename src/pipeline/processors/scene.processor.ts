@@ -124,6 +124,7 @@ import {
 } from '../../business/domain/scene-voice';
 import { mp3DurationMs } from '../../business/domain/speech';
 import { spokenForm, type Pronunciations } from '../../business/domain/spoken';
+import { startMathsSpeech } from '../../business/domain/maths-speech';
 import type { AlignerPort } from '../../business/ports/aligner.port';
 import type { LlmGatewayPort, LlmUsage } from '../../business/ports/llm.port';
 import type { StoragePort } from '../../business/ports/storage.port';
@@ -1019,6 +1020,8 @@ export class SceneProcessor {
     audioKey: string;
     timing: SceneTiming;
   }> {
+    // Maths said as a teacher says it, not as its signs.
+    await startMathsSpeech();
     const forms = script.beats.map((beat) => spokenForm(beat.say, kept));
     // Each sentence at its own pace, with its own silence after it.
     const delivered = deliveryPieces(
@@ -1557,13 +1560,7 @@ export class SceneProcessor {
         );
         return null;
       }
-      const set = await this.paintSet(
-        place,
-        bookTitle,
-        documentId,
-        who,
-        world,
-      );
+      const set = await this.paintSet(place, bookTitle, documentId, who, world);
       if (!set) return null;
       await this.inTurn(key, async () => {
         const sets = await this.setsAt(key);

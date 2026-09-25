@@ -43,6 +43,9 @@ const TASK_VAR: Record<LlmTask, string> = {
   // Maths pages need their steps exact and in order; the small model drops
   // and reorders them. One page in a few, at most.
   simplify_maths: 'AI_MODEL_SIMPLIFY_MATHS',
+  // The tutor's worked problems: the maths page's writer, one call a
+  // problem, while the learner waits.
+  work_through: 'AI_MODEL_WORK_THROUGH',
   highlight_explain: 'AI_MODEL_HIGHLIGHT',
   highlight_simplify: 'AI_MODEL_HIGHLIGHT',
   highlight_define: 'AI_MODEL_HIGHLIGHT',
@@ -92,6 +95,7 @@ const TASK_VAR: Record<LlmTask, string> = {
  */
 const TASK_DEFAULT: Partial<Record<LlmTask, string>> = {
   simplify_maths: 'openai:gpt-4.1',
+  work_through: 'openai:gpt-4.1',
   scene_write: 'openai:gpt-4.1',
   scene_draw: 'deepseek:deepseek-flash',
   // What a document is: one small call a document.

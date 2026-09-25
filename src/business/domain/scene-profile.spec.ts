@@ -41,10 +41,10 @@ describe("a document's profile", () => {
         profileOf({ ...read, stage: 'early', stageSure: 'sure' }),
       ),
     ).toBe(
-      'This book: biology, textbook. It is for primary school. Formats you may use on its pages: explainer.',
+      'This book: biology, textbook. It is for primary school. Formats you may use on its pages: explainer, and working ("math") on a page that works a calculation.',
     );
     expect(describeProfile(profileOf(read))).toBe(
-      'This book: biology, textbook. Formats you may use on its pages: explainer.',
+      'This book: biology, textbook. Formats you may use on its pages: explainer, and working ("math") on a page that works a calculation.',
     );
   });
 });

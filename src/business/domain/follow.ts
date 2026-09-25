@@ -7,6 +7,7 @@
  * the spoken words' measured times and the note's own sentences, and the
  * client only ever reads it against the audio clock. Nothing waits on a pen.
  */
+import { sayLatex } from './maths-speech';
 import type { Block } from '../../contracts';
 import { contentWords, estimateWordTimes, numbersAsWords } from './board';
 import { scriptForTts as scriptForTtsLocal } from './lecture';
@@ -666,7 +667,8 @@ export function followIsCurrent(track: FollowTrack | null): boolean {
 function blockProse(block: Block): string {
   const text = plainText(block.text).replace(/\s+/g, ' ').trim();
   if (block.type === 'code') return `(a code sample: ${text.slice(0, 160)})`;
-  if (block.type === 'math') return `(an equation: ${text.slice(0, 120)})`;
+  if (block.type === 'math')
+    return `(an equation, said: ${sayLatex(block.text).slice(0, 160)})`;
   if (block.type === 'table') return `(a table: ${text.slice(0, 200)})`;
   if (block.type === 'working' && block.working) {
     const w = block.working;

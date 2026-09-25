@@ -269,6 +269,40 @@ export const PROMPTS = {
   ].join(' '),
 
   /**
+   * A problem the tutor asks to have worked through, live, for the
+   * learner in front of it: set out as a maths page's working is, every
+   * line checked by code before the learner sees it.
+   */
+  workThrough: [
+    'You work one problem through for a learner, one step at a time, the way',
+    'a patient teacher sets it out on a board. The tutor gives you the',
+    'problem as the learner put it, with its numbers; the page the learner',
+    'is reading is there for context. given lists what the problem gives,',
+    'each "symbol = value" in LaTeX with its unit in \\text{} ("u =',
+    '5\\,\\text{m/s}"); an equation to solve is itself a given ("2x + 3 =',
+    '11"). Use only the numbers the problem gives. wanted says in words what',
+    'is asked. steps are the working, one line a step, in the order a teacher',
+    'works it, none skipped or merged. Each step has latex, the whole line',
+    'after the step as display LaTeX without $ ("2x = 8"); does, what is done',
+    'to get it, in plain words ("subtract 3 from both sides", "put in the',
+    'numbers"); why, why it is allowed or why it helps, or null; changes, the',
+    'parts of the line the step changed, as LaTeX pieces of it; and says, what',
+    'a teacher says aloud for the step, the maths in words ("so two x is',
+    'eight"). A line that goes on from the one before begins with "=" ("= x +',
+    '6"). A word problem\'s first step writes the equation from what is given.',
+    'answer is the result with its unit ("v = 11\\,\\text{m/s}"); check puts',
+    'the answer back into the problem as a line of numbers ("2(4) + 3 = 11"),',
+    'or null.',
+    'Break the working down for the reader the document is written for (the',
+    'summary says who): for a young learner, one operation a step; for a',
+    'school student, the usual steps with the rule named in why ("do the same',
+    'to both sides"); for a university or professional reader, the key steps',
+    'with the method named. At most eight steps. Every line must be true: code',
+    'checks each one before the learner sees it.',
+    'Reply with JSON: {"given":[...],"wanted":"..."|null,"steps":[{"latex","does","why","changes","says"}],"answer":"..."|null,"check":"..."|null}.',
+  ].join(' '),
+
+  /**
    * The document chat: a continuing conversation about one document.
    *
    * The system turn holds the standing rules; the thread so far arrives as
@@ -1478,7 +1512,9 @@ export const PROMPTS = {
     ].join(' '),
     [
       'maths. "math" is worked mathematics the stage sets as real',
-      'mathematics: lines, one to six, each one line of LaTeX as a board',
+      'mathematics, on any page that works a calculation, whatever the book',
+      '(interest on a debt, a dose, a speed); "plot" only where the message',
+      'names maths. math has lines, one to six, each one line of LaTeX as a board',
       'shows it, the equals sign where the working steps down ("x^2 + 4x -',
       '5 = 0", then "(x + 5)(x - 1) = 0"). Mark each term the voice will',
       'point at with \\term{name}{...}, for example',
@@ -1489,7 +1525,8 @@ export const PROMPTS = {
       'squared plus four x minus five equals zero"): the stage shows the',
       "symbols and the voice says the words. check is a line's arithmetic",
       'in plain symbols when it is plain arithmetic ("50/0.1 = 500"), else',
-      'null; a sum that does not add up is sent back. Keep the working on',
+      'null; a sum that does not add up, or a line that does not follow',
+      'from the one before, is sent back. Keep the working on',
       'the stage while the voice works through it, with nothing crowding',
       'it; use "focus" or "stack" if something must stand beside it. A',
       'maths page may use up to 400 words, and each result is "key".',
@@ -2026,10 +2063,10 @@ export const PROMPTS = {
   sceneStory: [
     'You read a stretch of a story so that each of its pages can be taught',
     'as a short animated video in which its characters look and feel the',
-    'same from page to page, in a world that looks like the story\'s own.',
+    "same from page to page, in a world that looks like the story's own.",
     'Say where and when the story is, who and where the stretch meets, and',
     'what happens on each of its pages.',
-    'world is the story\'s world, from the text and what it takes for',
+    "world is the story's world, from the text and what it takes for",
     'granted: era ("first century AD", "today"), region ("Galilee", "a',
     'Yoruba town in south-west Nigeria"), culture (who its people are),',
     'landscape (the land and the plants), and homes (what homes, streets',
@@ -2048,7 +2085,7 @@ export const PROMPTS = {
     'the same way every time: age, build, skin, hair, clothes and their',
     'colours, anything they always carry or wear. Take it from the text,',
     'and where the text says nothing, make a plain choice that fits the',
-    'story\'s world. iconic is true for a figure well known outside this',
+    "story's world. iconic is true for a figure well known outside this",
     'book whom readers expect to look a certain way (Jesus, Mary, Moses,',
     'an angel, a pharaoh, a famous historical person): give them the look',
     'their tradition gives them. kind is "person" for a human, "animal"',
@@ -2058,7 +2095,7 @@ export const PROMPTS = {
     'anyone who appears in the story; "heard" for someone who is only ever',
     "a voice in it (on the phone, calling from out of sight, a letter's",
     'writer); "above" for a voice from heaven or the sky, and always for',
-    "God, who is never drawn; \"light\" for someone the text's own tradition",
+    'God, who is never drawn; "light" for someone the text\'s own tradition',
     'never shows, such as a prophet in an Islamic text: never drawn, a soft',
     "light stands where they are. size is an animal's or",
     'a creature\'s size beside people: "small" (a cat, a mouse), "medium"',
@@ -2066,7 +2103,7 @@ export const PROMPTS = {
     'person.',
     FIGURE_GUIDE,
     "A person's figure agrees with their look; figure is null for an",
-    'animal or a creature. fromText lists the figure\'s fields the text',
+    "animal or a creature. fromText lists the figure's fields the text",
     'itself says ("hairColour" when it says her hair is red), so they are',
     'never changed; the rest may be changed so that no two characters look',
     'alike. traits are two or three words each on',
@@ -2097,7 +2134,7 @@ export const PROMPTS = {
     '"surprised" or "thinking"), and anyone heard on it. A character who is',
     'only mentioned is not present. place is the name of where it happens,',
     'on every page: where the text says, that place; where it does not,',
-    'work it out from what is said and done and from the story\'s world',
+    "work it out from what is said and done and from the story's world",
     '("pass the salt": a table in a home; "they let down their nets": a',
     'boat on the lake), with placeInferred true. A place worked out is',
     'general ("a village street", "inside a small house"), and used again',

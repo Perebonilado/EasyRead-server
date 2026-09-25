@@ -1093,13 +1093,7 @@ export interface SceneEffectDto {
  * (a cloud, no mouth moving); a dream or a memory.
  */
 export type SceneLineFrom =
-  | 'off'
-  | 'above'
-  | 'phone'
-  | 'letter'
-  | 'thought'
-  | 'dream'
-  | 'crowd';
+  'off' | 'above' | 'phone' | 'letter' | 'thought' | 'dream' | 'crowd';
 
 /**
  * A story page's setting as the stage shows it: the set at full strength
@@ -1486,6 +1480,8 @@ export const TEACH_TOOLS = {
   RECALL: 'recall_page',
   ASK_DIAGRAM: 'ask_diagram_check',
   COMPUTE: 'compute',
+  /** A problem worked through, step by step, every step checked by code. */
+  WORK_THROUGH: 'work_through',
   FOCUS_BOARD: 'focus_board',
   MARK_TOPIC_COMPLETE: 'mark_topic_complete',
   ASK_QUIZ: 'ask_quiz',
@@ -1511,6 +1507,8 @@ export const LECTURE_TOOLS = {
   DIAGRAM: 'board_diagram',
   REST: 'board_rest',
   FIND: 'book_find',
+  /** A problem worked through on the board, every step checked by code. */
+  WORK: 'board_work',
   RESUME: 'lecture_resume',
   /** The interactive session: the tutor files each verdict, and can put an item on the sheet. */
   VERDICT: 'lecture_verdict',
@@ -1788,6 +1786,34 @@ export type TranscribeResponse = { text: string };
 export type ComputeResponse =
   | { ok: true; result: string; tex: string | null }
   | { ok: false; error: string };
+
+/**
+ * A problem the tutor asked to have worked through: the worked solution,
+ * every line checked by code (cut at the last line code could stand
+ * behind), and each line as the board writes it and the voice says it.
+ */
+export type WorkThroughResponse =
+  | {
+      ok: true;
+      working: WorkedSolutionDto;
+      /** The lines to write, in order: what the problem gives, each step, the answer, the check. */
+      lines: WorkLineDto[];
+    }
+  | { ok: false; error: string };
+
+/** One line of worked maths, for a board and a voice. */
+export interface WorkLineDto {
+  /** Display LaTeX: shown typeset. */
+  latex: string;
+  /** The same in plain characters, as a pen writes it: "2x + 3 = 11". */
+  plain: string;
+  /** The same said aloud: "2 x plus 3 equals 11". */
+  said: string;
+  /** What is done to get it; null for the problem and the answer. */
+  does: string | null;
+  why: string | null;
+  role: 'problem' | 'step' | 'answer' | 'check';
+}
 
 export type AssessmentKind = 'mcq' | 'flashcard' | 'verbal';
 

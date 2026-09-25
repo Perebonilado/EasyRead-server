@@ -1,3 +1,4 @@
+import { Throttle } from '@nestjs/throttler';
 import {
   Body,
   Controller,
@@ -30,6 +31,7 @@ import {
 import {
   type AssessmentKind,
   type ComputeResponse,
+  type WorkThroughResponse,
   type DiagramCheckResponse,
   type DiagramResponse,
   type MasteryResponse,
@@ -44,6 +46,7 @@ import {
 import {
   AskDiagramCheckHandler,
   ComputeHandler,
+  WorkThroughHandler,
   DrawDiagramHandler,
   GenerateTopicQuizHandler,
   type TopicQuizResponse,
@@ -276,6 +279,24 @@ class ComputeDto {
   scope?: Record<string, number>;
 }
 
+class WorkThroughDto {
+  @IsOptional()
+  @IsString()
+  @Length(0, 1000)
+  problem?: string;
+
+  @IsOptional()
+  @IsString()
+  @Length(0, 500)
+  expression?: string;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  page?: number;
+}
+
 class AssessmentDto {
   @IsOptional()
   @IsString()
@@ -328,6 +349,7 @@ export class VoiceController {
     private readonly invitation: LectureInvitationHandler,
     private readonly drawSketch: DrawSketchHandler,
     private readonly compute: ComputeHandler,
+    private readonly workThrough: WorkThroughHandler,
     private readonly diagramCheck: AskDiagramCheckHandler,
     private readonly topicQuiz: GenerateTopicQuizHandler,
     private readonly recordAssessment: RecordAssessmentHandler,
@@ -553,6 +575,26 @@ export class VoiceController {
       documentId,
       expression: body.expression,
       scope: body.scope,
+    });
+    return result.data;
+  }
+
+  /** A problem worked through, every step checked by code: the tutor takes the learner through it. */
+  @Post('work-through')
+  @HttpCode(201)
+  // A model call each: far above any lesson's need, well below a runaway loop's.
+  @Throttle({ default: { limit: 30, ttl: 60_000 } })
+  async workThroughRoute(
+    @CurrentUser('id') userId: string,
+    @Param('id') documentId: string,
+    @Body() body: WorkThroughDto,
+  ): Promise<WorkThroughResponse> {
+    const result = await this.workThrough.handle({
+      userId,
+      documentId,
+      problem: body.problem ?? '',
+      expression: body.expression,
+      page: body.page,
     });
     return result.data;
   }

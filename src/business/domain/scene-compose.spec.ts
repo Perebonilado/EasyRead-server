@@ -277,6 +277,69 @@ describe('the scene put together', () => {
     expect(sum?.kind === 'drawing' && sum.hidden).toEqual(['line-2', 'line-3']);
   });
 
+  it('shows a line of working as the voice says what it comes to', () => {
+    const said = [
+      beat('We work out the interest.', 0),
+      beat(
+        'Two hundred thousand times nought point nought five is ten thousand.',
+        2000,
+      ),
+      beat('Times three years makes thirty thousand naira.', 6000),
+    ];
+    const worked = composeScene({
+      script: {
+        ...script,
+        beats: said.map((b) => ({
+          say: b.text,
+          pause: 'short' as const,
+          delivery: 'explain' as const,
+        })),
+        cast: [
+          {
+            id: 'sum',
+            kind: 'math',
+            name: '',
+            lines: [
+              { latex: 'I = P r t', check: null },
+              { latex: '= 200{,}000 \\times 0.05 = 10{,}000', check: null },
+              { latex: '= 10{,}000 \\times 3 = 30{,}000', check: null },
+            ],
+          },
+        ],
+        steps: [
+          {
+            at: { beat: 0, phrase: '' },
+            word: 0,
+            stage: { layout: 'one', show: ['sum'], arrows: [] },
+            effects: [],
+          },
+        ],
+      },
+      drawings: new Map([
+        [
+          'sum',
+          drawing({
+            parts: {},
+            labels: {},
+            states: { 'line 2': 'line-2', 'line 3': 'line-3' },
+          }),
+        ],
+      ]),
+      beats: said,
+      durationMs: 10_000,
+      timing: 'voice',
+      generator: 'scene-2',
+    });
+    const shows = worked.scene.effects.filter(
+      (e) => e.target === 'sum' && e.do === 'show',
+    );
+    // "ten thousand" starts the tenth word from 2000; "thirty thousand" the fifth from 6000.
+    expect(shows.map((e) => e.atMs)).toEqual([
+      2000 + 9 * 300 - 150,
+      6000 + 4 * 300 - 150,
+    ]);
+  });
+
   it('decides how each newcomer arrives', () => {
     expect(scene.steps[0].enter.leaf).toEqual({ how: 'wipe' });
     expect(scene.steps[1].enter.sun).toEqual({ how: 'slide' });
@@ -1342,7 +1405,12 @@ describe('what a character says, in a bubble', () => {
             effects: [],
           },
         ],
-        setting: { time: 'night', weather: 'storm', crowd: 'many', world: null },
+        setting: {
+          time: 'night',
+          weather: 'storm',
+          crowd: 'many',
+          world: null,
+        },
       },
       drawings: new Map([
         ['mira', figure()],
@@ -1364,8 +1432,12 @@ describe('what a character says, in a bubble', () => {
       crowd: { id: '@crowd', moves: [[5000, 'cheer', 1400]] },
     });
     // The crowd is drawn by code, and never stands in a step.
-    expect(played.things.some((t) => t.id === '@crowd' && t.kind === 'drawing')).toBe(true);
-    expect(played.steps.every((step) => !step.show.includes('@crowd'))).toBe(true);
+    expect(
+      played.things.some((t) => t.id === '@crowd' && t.kind === 'drawing'),
+    ).toBe(true);
+    expect(played.steps.every((step) => !step.show.includes('@crowd'))).toBe(
+      true,
+    );
     // The crowd's line comes from over the crowd.
     const shout = played.effects.find((e) => e.target === 'crowd-people');
     expect(shout?.say?.from).toBe('crowd');
@@ -1373,7 +1445,8 @@ describe('what a character says, in a bubble', () => {
     // Mira, met here for the first time, gets a moment of the camera.
     expect(
       played.effects.some(
-        (e) => e.do === 'zoom' && e.target === 'mira' && e.untilMs !== undefined,
+        (e) =>
+          e.do === 'zoom' && e.target === 'mira' && e.untilMs !== undefined,
       ),
     ).toBe(true);
   });

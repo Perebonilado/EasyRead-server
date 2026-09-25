@@ -37,6 +37,7 @@
     "scene:recompose": "ts-node --transpile-only -r tsconfig-paths/register scripts/scene-recompose.ts",
     "scene:try": "ts-node --transpile-only -r tsconfig-paths/register scripts/scene-try.ts",
     "maths:try": "ts-node --transpile-only -r tsconfig-paths/register scripts/maths-try.ts",
+    "work:try": "ts-node --transpile-only -r tsconfig-paths/register scripts/work-try.ts",
     "scene:bench": "ts-node --transpile-only -r tsconfig-paths/register scripts/scene-bench.ts",
     "scene:recast": "ts-node --transpile-only -r tsconfig-paths/register scripts/scene-recast.ts",
     "figures:sheet": "ts-node --transpile-only -r tsconfig-paths/register scripts/figures-sheet.ts"

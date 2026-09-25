@@ -18,6 +18,7 @@ import {
 } from '../../business/domain/board';
 import { scriptForTts } from '../../business/domain/lecture';
 import { remapAligned, spokenForm } from '../../business/domain/spoken';
+import { startMathsSpeech } from '../../business/domain/maths-speech';
 import type { LectureAlignJobData } from '../queues';
 import type { JobContext } from './base.processor';
 import { LectureBoardService } from './lecture-board.service';
@@ -85,6 +86,7 @@ export class LectureAlignProcessor {
         const audio = await this.storage.get(row.audioKey);
         // The audio says the spoken form, so that is what is aligned; the
         // times are then given to the written words the reader follows.
+        await startMathsSpeech();
         const said = spokenForm(
           spoken,
           doc.props.institutionId

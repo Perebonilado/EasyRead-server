@@ -71,7 +71,7 @@ export const STAGE_RECIPES: Record<LearningStage, StageRecipe> = {
     checks:
       'Once or twice, ask the child a simple question and leave a long pause for them to answer ("Can you spot the leaf?").',
     pictures:
-      'Characters and big, simple drawings of things a child can recognise, with at most two labels on a drawing. Bright, warm and playful.',
+      'Characters and big, simple drawings of things a child can recognise, with at most two labels on a drawing. Bright, warm and playful. A sum the page works goes on the stage as working ("math"), one operation a line: code draws its numbers under it as blocks, bars, rows of dots or a shaded bar, so draw no counters of your own for it.',
     tone: 'playful and bright, lively motion',
   },
   middle: {

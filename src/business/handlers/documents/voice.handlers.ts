@@ -7,6 +7,7 @@ import {
   type Block,
   type LessonIntent,
   type ComputeResponse,
+  type WorkThroughResponse,
   type DiagramCheckResponse,
   type DiagramResponse,
   type SketchResponse,
@@ -82,6 +83,9 @@ import type { SimplifiedPageRepository } from '../../repositories/simplified-pag
 import AbstractRequestHandlerTemplate from '../AbstractRequestHandlerTemplate';
 import { CommandResponse } from '../response/CommandResponse';
 import { ComputeService } from './compute.service';
+import { settleWorking, type WorkedSolution } from '../../domain/maths-work';
+import { workLines } from '../../domain/maths-board';
+import { startMathsSpeech } from '../../domain/maths-speech';
 import { ElevenLabsRealtimeAdapter } from '../../../web/adapters/elevenlabs-voice.adapters';
 import { GAP, STYLE_SPEED } from '../../domain/delivery';
 import { voiceSessionCost } from '../../domain/cost';
@@ -555,6 +559,33 @@ export const LECTURE_BOARD_TOOLS: RealtimeTool[] = [
     },
   },
   {
+    name: LECTURE_TOOLS.WORK,
+    description:
+      'Work maths out on the board, every step checked: a problem to solve, ' +
+      'a formula to use, or one sum. Use it for ANY number you are about to ' +
+      'say that is not in the book, and never do arithmetic yourself. Say ' +
+      'first, in a sentence, what we know and what we want; then call it. ' +
+      'The lines are written on the board one after another and come back to ' +
+      'you: take the learner through them in order, one at a time, saying ' +
+      'what we do and then the line in the words given. Never add a step or ' +
+      'a number of your own.',
+    parameters: {
+      type: 'object',
+      properties: {
+        problem: {
+          type: 'string',
+          description:
+            'The problem in words with all its numbers, e.g. "solve 2x + 3 = 11"',
+        },
+        expression: {
+          type: 'string',
+          description:
+            'Instead, for one sum: the sum in mathjs syntax, e.g. "0.05 * 200000"',
+        },
+      },
+    },
+  },
+  {
     name: LECTURE_TOOLS.RESUME,
     description:
       'The conversation is over by their say-so: hand back to the lecture. Call it only after your closing line.',
@@ -735,6 +766,29 @@ export const TEACHING_TOOLS: RealtimeTool[] = [
         },
       },
       required: ['expression'],
+    },
+  },
+  {
+    name: TEACH_TOOLS.WORK_THROUGH,
+    description:
+      'Work a problem through, step by step, every step checked: an ' +
+      'equation to solve, a formula to use, a word problem, any sum of more ' +
+      'than one step. Say first, in a sentence, what we know and what we ' +
+      'want; then call it. The working goes on the board and comes back as ' +
+      'lines: take the learner through them in order, one at a time, saying ' +
+      'what we do, then the line in the words given, then why where it ' +
+      'helps. Never add a step or a number of your own.',
+    parameters: {
+      type: 'object',
+      properties: {
+        problem: {
+          type: 'string',
+          description:
+            'The problem in words with all its numbers, e.g. "solve 2x + 3 = ' +
+            '11" or "a car goes from 5 m/s at 2 m/s² for 3 s: its final speed"',
+        },
+      },
+      required: ['problem'],
     },
   },
   {
@@ -1531,7 +1585,7 @@ export class StartVoiceSessionHandler extends AbstractRequestHandlerTemplate<
           '  specifically, then continue.',
         ].join('\n'),
         '- The student should be taking notes, like in a real classroom. After you explain an idea, leave a short pause for them to write it down. When a term is exam-critical or easily confused, say that it belongs in their notes — then give them the moment to jot it.',
-        `- Visuals are yours to initiate — a good tutor reaches for the board unprompted, and the student should NEVER have to ask for a drawing. The moment an idea has shape, put it up as you begin explaining it: ${TEACH_TOOLS.DRAW_DIAGRAM} for a process, sequence, hierarchy or comparison; ${TEACH_TOOLS.SKETCH} for the thing itself — anatomy, apparatus, a labelled curve; ${TEACH_TOOLS.SHOW_IMAGES} for real photographs; ${TEACH_TOOLS.COMPUTE} for ANY arithmetic before a number leaves your mouth. Aim for at least one visual per topic whenever the material has any shape to show, and simply start describing what the student now sees — never announce that you are about to draw.`,
+        `- Visuals are yours to initiate — a good tutor reaches for the board unprompted, and the student should NEVER have to ask for a drawing. The moment an idea has shape, put it up as you begin explaining it: ${TEACH_TOOLS.DRAW_DIAGRAM} for a process, sequence, hierarchy or comparison; ${TEACH_TOOLS.SKETCH} for the thing itself — anatomy, apparatus, a labelled curve; ${TEACH_TOOLS.SHOW_IMAGES} for real photographs; ${TEACH_TOOLS.COMPUTE} for ANY arithmetic before a number leaves your mouth, and ${TEACH_TOOLS.WORK_THROUGH} for any problem of more than one step. Aim for at least one visual per topic whenever the material has any shape to show, and simply start describing what the student now sees — never announce that you are about to draw.`,
         `- Drawings take a few seconds. When you call for one, the student sees it being drawn and YOU KEEP TEACHING — never announce it, never wait in silence for it. A note will tell you the moment it is on screen; only from that moment may you refer to it or walk through it. It fills the screen when ready — teach from it part by part while it is large, then call ${TEACH_TOOLS.FOCUS_BOARD} with action "close" before moving on. Bring anything back later with action "expand" and its title.`,
         `- Close every topic with the student doing the work. If they raised questions during the lesson, return to them now: read each back and have them answer it aloud; one they can now answer is the victory lap, one they can't gets a short re-teach. Then run one memory check: first ask "before we check — how solid does this topic feel, one to five?", then call ${TEACH_TOOLS.RECALL} with action "start", ask them to say the main ideas back, listen fully without interrupting, call it with "end", and walk anything they missed. Record ${TEACH_TOOLS.REPORT_UNDERSTANDING} — noting their own one-to-five prediction in the note alongside your read — then call ${TEACH_TOOLS.MARK_TOPIC_COMPLETE} with its id and move to the next. When the profile says brisk and their mastery is already strong, shorten these closings — depth belongs where mastery is weak.`,
         [
@@ -1965,6 +2019,158 @@ export class ComputeHandler extends AbstractRequestHandlerTemplate<
       result: outcome.result,
       tex: this.compute.toTex(cmd.expression, outcome.result),
     });
+  }
+}
+
+export interface WorkThroughRequest {
+  userId: string;
+  documentId: string;
+  /** The problem, as the tutor puts it, with its numbers. */
+  problem: string;
+  /** One sum in mathjs syntax: worked by code at once, with no model. */
+  expression?: string;
+  /** The page the learner is on, for context. */
+  page?: number;
+}
+
+/**
+ * A problem worked through for the tutor, every line checked by code. The
+ * maths page's writer sets it out; code checks each step; a working with
+ * a wrong line goes back once, and what still fails is cut at the last
+ * line code can stand behind, with code's answer. A single sum is code's
+ * alone, at once. The tutor takes the learner through the lines: it never
+ * works the maths itself.
+ */
+@Injectable()
+export class WorkThroughHandler extends AbstractRequestHandlerTemplate<
+  WorkThroughRequest,
+  WorkThroughResponse
+> {
+  constructor(
+    @Inject(LLM_GATEWAY) private readonly llm: LlmGatewayPort,
+    @Inject(SUMMARY_REPOSITORY) private readonly summaries: SummaryRepository,
+    @Inject(DOCUMENT_PAGE_REPOSITORY)
+    private readonly pages: DocumentPageRepository,
+    @Inject(SIMPLIFIED_PAGE_REPOSITORY)
+    private readonly simplified: SimplifiedPageRepository,
+    @Inject(AI_CALL_LOG_REPOSITORY) private readonly calls: AiCallLogRepository,
+    private readonly compute: ComputeService,
+    private readonly access: DocumentAccessService,
+  ) {
+    super();
+  }
+
+  protected async handleRequest(cmd: WorkThroughRequest) {
+    const doc = await this.access.require(cmd.documentId, cmd.userId);
+    await startMathsSpeech();
+    const problem = cmd.problem?.trim() ?? '';
+    const expression = cmd.expression?.trim() ?? '';
+
+    // One sum: code's alone, at once.
+    if (expression) {
+      const started = Date.now();
+      const outcome = this.compute.evaluate(expression);
+      const tex = outcome.ok
+        ? this.compute.toTex(expression, outcome.result)
+        : null;
+      await this.calls.record({
+        documentId: doc.id,
+        task: 'work_through',
+        model: 'mathjs',
+        tokensIn: 0,
+        tokensOut: 0,
+        latencyMs: Date.now() - started,
+        outcome: tex ? 'ok' : 'failed',
+      });
+      if (tex) {
+        const working: WorkedSolution = {
+          given: [],
+          wanted: null,
+          steps: [
+            {
+              latex: tex,
+              does: 'work it out',
+              why: null,
+              changes: [],
+              says: '',
+            },
+          ],
+          answer: null,
+          check: null,
+        };
+        return CommandResponse.of<WorkThroughResponse>({
+          ok: true,
+          working,
+          lines: workLines(working),
+        });
+      }
+      if (!problem)
+        return CommandResponse.of<WorkThroughResponse>({
+          ok: false,
+          error: outcome.ok ? 'The sum could not be set out' : outcome.error,
+        });
+    }
+    if (!problem)
+      return CommandResponse.of<WorkThroughResponse>({
+        ok: false,
+        error: 'A problem is needed',
+      });
+
+    const [summary, context] = await Promise.all([
+      this.summaries.find(doc.id).catch(() => null),
+      this.pageText(doc.id, cmd.page),
+    ]);
+    const write = async (again?: {
+      previous: WorkedSolution;
+      problems: string[];
+    }) => {
+      const result = await this.llm.workThrough({
+        problem,
+        summary,
+        context,
+        ...again,
+      });
+      await this.calls.record({
+        documentId: doc.id,
+        task: 'work_through',
+        model: result.usage.model,
+        tokensIn: result.usage.tokensIn,
+        tokensOut: result.usage.tokensOut,
+        latencyMs: result.usage.latencyMs,
+        tokensCached: result.usage.tokensCached ?? null,
+        outcome: 'ok',
+      });
+      return result.value;
+    };
+
+    const kept = await settleWorking(write);
+    if (!kept.steps.length)
+      return CommandResponse.of<WorkThroughResponse>({
+        ok: false,
+        error: 'It could not be worked through with every step checked',
+      });
+    return CommandResponse.of<WorkThroughResponse>({
+      ok: true,
+      working: kept,
+      lines: workLines(kept),
+    });
+  }
+
+  /** The page the learner is on, as they read it, for the writer's context. */
+  private async pageText(
+    documentId: string,
+    page: number | undefined,
+  ): Promise<string | null> {
+    if (!page || page < 1) return null;
+    const simplified = await this.simplified
+      .find(documentId, page)
+      .catch(() => null);
+    if (simplified?.status === 'done' && simplified.blocks?.length)
+      return blocksToProse(simplified.blocks);
+    const original = await this.pages
+      .findOne(documentId, page)
+      .catch(() => null);
+    return original && !original.isEmpty ? original.text : null;
   }
 }
 

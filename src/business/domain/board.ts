@@ -13,6 +13,7 @@
  * produces), never the raw script: the voice and the aligner see the
  * spoken text, so that is the one coordinate system the board lives in.
  */
+import { figureLatex } from './maths-board';
 import type { LectureStyle } from '../../contracts';
 
 export const BOARD_GENERATOR_VERSION = 'board-9';
@@ -80,7 +81,15 @@ export type BoardOp =
       level?: 1 | 2;
       important?: boolean;
     })
-  | (OpBase & { kind: 'figure'; text: string; important?: boolean })
+  | (OpBase & {
+      kind: 'figure';
+      text: string;
+      important?: boolean;
+      /** A formula's LaTeX: set in type beside the handwriting. */
+      latex?: string | null;
+      /** How the voice says it, when that is not its written words: the walk-through listens for these. */
+      said?: string | null;
+    })
   | (OpBase & {
       kind: 'relation';
       fromId: string;
@@ -3008,6 +3017,9 @@ export function buildBoardOps(
           important,
         });
       } else {
+        // A formula is set in type beside its handwriting, where type
+        // shows it better.
+        const latex = figureLatex(text);
         ops.push({
           ...base,
           ...dictated,
@@ -3017,6 +3029,7 @@ export function buildBoardOps(
           priority: 3,
           text,
           important,
+          ...(latex ? { latex } : {}),
         });
       }
       prevWritten = { index, kind: item.kind, text };

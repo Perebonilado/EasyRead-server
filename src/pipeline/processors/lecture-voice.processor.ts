@@ -35,6 +35,7 @@ import type { LectureStyle } from '../../contracts';
 import type { LectureVoiceJobData } from '../queues';
 import { catalogueSpeechCost } from '../../business/domain/cost';
 import { spokenForm } from '../../business/domain/spoken';
+import { startMathsSpeech } from '../../business/domain/maths-speech';
 import {
   DELIVERY_VERSION,
   deliveryPieces,
@@ -101,6 +102,8 @@ export class LectureVoiceProcessor {
     const kept = doc.props.institutionId
       ? await this.pronunciations.kept(doc.props.institutionId)
       : undefined;
+    // Maths said as a teacher says it, not as its signs.
+    await startMathsSpeech();
     const spoken = spokenForm(scriptForTts(row.scriptText), kept).text;
     // The page cut at each [pause] the writer placed, each stretch in its
     // spoken form, for a voice that answers to pace and silence: a held

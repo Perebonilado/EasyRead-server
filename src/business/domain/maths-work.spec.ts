@@ -384,3 +384,96 @@ describe('LaTeX through JSON', () => {
     ).toEqual(['true', 'true', 'true']);
   });
 });
+
+describe('a percentage, either way', () => {
+  const step = (latex: string) => ({
+    latex,
+    does: '',
+    why: null,
+    changes: [],
+    says: '',
+  });
+  const given = [
+    'P = 200{,}000\\,\\text{Naira}',
+    'r = 5\\% \\text{ per year}',
+    't = 3 \\text{ years}',
+  ];
+
+  it('reads a rate as its whole number where the formula divides by a hundred', () => {
+    const found = checkSolution({
+      given,
+      wanted: 'the simple interest',
+      steps: [
+        step('I = \\frac{P \\times r \\times t}{100}'),
+        step('I = 200{,}000 \\times \\dfrac{5}{100} \\times 3'),
+        step('I = 10{,}000 \\times 3'),
+        step('I = 30{,}000'),
+      ],
+      answer: 'I = 30{,}000\\,\\text{Naira}',
+      check: null,
+    });
+    expect(found.steps).toEqual(['true', 'true', 'true', 'true']);
+    expect(found.answer).toBe('true');
+    expect(found.problems).toEqual([]);
+    expect(found.wholePercent).toBe(true);
+  });
+
+  it('reads it as a fraction where the formula takes it so', () => {
+    const found = checkSolution({
+      given,
+      wanted: 'the simple interest',
+      steps: [
+        step('I = P \\times r \\times t'),
+        step('I = 200{,}000 \\times 0.05 \\times 3'),
+        step('I = 30{,}000'),
+      ],
+      answer: null,
+      check: null,
+    });
+    expect(found.steps).toEqual(['true', 'true', 'true']);
+    expect(found.wholePercent).toBeUndefined();
+  });
+
+  it('gives the right answer when a working is cut', () => {
+    const working = {
+      given,
+      wanted: 'the simple interest',
+      steps: [
+        step('I = \\frac{P \\times r \\times t}{100}'),
+        step('I = 200{,}000 \\times \\dfrac{5}{100} \\times 3'),
+        step('I = 20{,}000'),
+      ],
+      answer: 'I = 20{,}000',
+      check: null,
+    };
+    const cut = trimSolution(working, checkSolution(working));
+    expect(cut.steps).toHaveLength(2);
+    expect(cut.answer).toBe('I = 30{,}000');
+  });
+});
+
+describe('a working whose check alone is wrong', () => {
+  it('keeps every step and the answer, drops the check, and cuts nothing', () => {
+    const step = (latex: string) => ({
+      latex,
+      does: '',
+      why: null,
+      changes: [],
+      says: '',
+    });
+    const working = {
+      given: ['2x + 3 = 11'],
+      wanted: 'x',
+      steps: [step('2x = 8'), step('x = 4')],
+      answer: 'x = 4',
+      check: '2(4) + 3 = 12',
+    };
+    const found = checkSolution(working);
+    expect(found.check).toBe('false');
+    const kept = trimSolution(working, found);
+    expect(kept.steps).toHaveLength(2);
+    expect(kept.answer).toBe('x = 4');
+    expect(kept.check).toBeNull();
+    expect(kept.cut).toBeUndefined();
+  });
+});

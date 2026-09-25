@@ -4,6 +4,7 @@ import {
   repairInlineLatex,
   repairLatex,
   repairWorking,
+  type WorkedSolution,
 } from '../../../business/domain/maths-work';
 import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
@@ -40,6 +41,7 @@ import { ModelRegistry, type ModelRef } from './models';
 import {
   blocksSchema,
   mathsBlocksSchema,
+  workingSchema,
   diagramClozeSchema,
   diagramSchema,
   sketchSchema,
@@ -1072,6 +1074,43 @@ export class AiSdkLlmAdapter implements LlmGatewayPort, OnModuleInit {
     const value = blocks.length ? blocks : this.asParagraphs(input.pageText);
 
     return { value, usage: this.usage(ref, usage!, started) };
+  }
+
+  async workThrough(input: {
+    problem: string;
+    summary: string | null;
+    context: string | null;
+    previous?: WorkedSolution;
+    problems?: string[];
+  }): Promise<LlmResult<WorkedSolution>> {
+    const started = Date.now();
+    const { generateObject } = await this.registry.modules();
+    const { model, ref } = await this.registry.languageModel('work_through');
+    // A second try is told what code found wrong with the first.
+    const again =
+      input.previous && input.problems?.length
+        ? `\n\nYour previous working:\n${JSON.stringify(input.previous)}\n\nCode checked it and found these problems. Work it again with them put right:\n- ${input.problems.join('\n- ')}`
+        : '';
+    const result = await generateObject({
+      model,
+      schema: workingSchema,
+      system: PROMPTS.workThrough,
+      prompt: [
+        input.summary ? `Document summary:\n${input.summary}` : null,
+        input.context
+          ? `The page the learner is reading:\n${input.context.slice(0, 4000)}`
+          : null,
+        `The problem:\n${input.problem}${again}`,
+      ]
+        .filter(Boolean)
+        .join('\n\n'),
+      maxRetries: this.maxRetries(),
+    });
+    return {
+      // LaTeX written into JSON loses backslashes to its escapes.
+      value: repairWorking(result.object),
+      usage: this.usage(ref, result.usage, started),
+    };
   }
 
   async answerHighlight(input: {

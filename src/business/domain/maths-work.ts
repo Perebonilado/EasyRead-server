@@ -1403,20 +1403,36 @@ function antiderivative(
 }
 
 /** The values a line of givens sets: "u = 5 m/s" sets u. */
-function givenScope(given: readonly string[]): Map<string, number> {
+function givenScope(
+  given: readonly string[],
+  wholePercent = false,
+): Map<string, number> {
   const scope = new Map<string, number>();
   for (const line of given) {
+    // A rate given as a percentage, read as its whole number: r = 5 in
+    // I = PRT/100, where the formula divides by the hundred itself.
+    const percent = wholePercent
+      ? /=\s*(\d[\d{},]*(?:\.\d+)?)\s*\\?%/.exec(line)
+      : null;
     for (const statement of statementsOf(line) ?? []) {
       if (statement.sides.length < 2 || statement.relations[0] !== '=')
         continue;
       const name = /^v_[A-Za-z0-9_]+$/.exec(statement.sides[0].trim())?.[0];
       if (!name) continue;
+      if (percent) {
+        scope.set(name, Number(percent[1].replace(/\{,\}|,/g, '')));
+        continue;
+      }
       const value = valueOf(statement.sides[statement.sides.length - 1], scope);
       if (value && Math.abs(value.im) < 1e-12) scope.set(name, value.re);
     }
   }
   return scope;
 }
+
+/** Whether a given states a percentage, which a formula may take either way: 0.05, or 5 over a hundred. */
+const givesPercent = (given: readonly string[]) =>
+  given.some((line) => /=\s*\d[\d{},]*(?:\.\d+)?\s*\\?%/.test(line));
 
 /** A statement as the working reaches it: what is known by then, and whether it names a new quantity. */
 interface Reached {
@@ -1436,8 +1452,9 @@ interface Reached {
 function reach(
   lines: readonly string[],
   given: readonly string[],
+  wholePercent = false,
 ): (Reached[] | null)[] {
-  const scope = givenScope(given);
+  const scope = givenScope(given, wholePercent);
   const seen = new Set<string>(scope.keys());
   const out: (Reached[] | null)[] = [];
   let last: string | null = null;
@@ -1510,8 +1527,9 @@ function reach(
 export function checkLines(
   lines: readonly string[],
   given: readonly string[] = [],
+  wholePercent = false,
 ): LineVerdict[] {
-  const read = reach(lines, given);
+  const read = reach(lines, given, wholePercent);
   const all = read.flatMap((reached) => reached ?? []);
   // The problem: the first equation code can read that still has unknowns
   // and is no identity, and names nothing new.
@@ -1606,8 +1624,22 @@ export function checkLines(
         continue;
       }
       if (identity(statement, scope, free)) continue;
-      // A link in a chain of equal things must hold everywhere.
-      if (statement.continued) return 'false';
+      // A link in a chain of equal things must hold everywhere; one that
+      // puts numbers in for letters code has no values for is a
+      // substitution it cannot follow.
+      if (statement.continued) {
+        const lettered = statement.sides.map((side) => {
+          const read = readExpr(side);
+          return read
+            ? [...symbolsOf(read.node)].some((name) => !scope.has(name))
+            : true;
+        });
+        if (lettered.some((one) => !one)) {
+          verdict = 'unchecked';
+          continue;
+        }
+        return 'false';
+      }
       if (one === problem) continue;
       if (
         !problem ||
@@ -1655,6 +1687,10 @@ function texName(variable: string): string {
 
 /** A number as a line shows it: up to six significant figures, no trailing noughts. */
 export function numberTex(value: number): string {
+  // A root found by search lands a hair from a whole number: it is one.
+  const near = Math.round(value);
+  if (Math.abs(value - near) <= 1e-9 * Math.max(1, Math.abs(value)))
+    value = near;
   if (Number.isInteger(value) && Math.abs(value) < 1e15) {
     const text = Math.abs(value).toString();
     const grouped =
@@ -1672,8 +1708,9 @@ export function numberTex(value: number): string {
 export function answerOf(
   lines: readonly string[],
   given: readonly string[] = [],
+  wholePercent = false,
 ): string | null {
-  const scope = givenScope(given);
+  const scope = givenScope(given, wholePercent);
   for (const line of lines) {
     for (const statement of statementsOf(line) ?? []) {
       if (statement.relations[0] !== '=' || statement.sides.some((s) => !s))
@@ -1744,6 +1781,8 @@ export interface SolutionCheck {
   strangers: number[];
   /** What the writer is told to put right. */
   problems: string[];
+  /** A percentage among the givens was read as its whole number (r = 5 in PRT/100). */
+  wholePercent?: true;
 }
 
 /** A line's words, cut short for a message. */
@@ -1759,51 +1798,18 @@ export function checkSolution(
   solution: WorkedSolution,
   pageText: string | null = null,
 ): SolutionCheck {
+  const fraction = verdictsOf(solution, false);
+  // A percentage may be meant either way; the reading more of the lines
+  // hold under is the one they were written in.
+  const whole = givesPercent(solution.given)
+    ? verdictsOf(solution, true)
+    : null;
+  const wrongs = (found: Verdicts) =>
+    [...found.steps, found.answer, found.check].filter((v) => v === 'false')
+      .length;
+  const wholePercent = whole !== null && wrongs(whole) < wrongs(fraction);
+  const { steps, answer, check } = wholePercent ? whole : fraction;
   const lines = solution.steps.map((step) => step.latex);
-  // An equation among the givens is the problem itself: the first step is
-  // checked against it, not taken for it.
-  const problem = solution.given.filter((given) =>
-    (statementsOf(given) ?? []).some(
-      (statement) =>
-        statement.relations.length > 0 &&
-        !/^v_[A-Za-z0-9_]+$/.test(statement.sides[0]?.trim() ?? ''),
-    ),
-  );
-  const all = checkLines(
-    [...problem, ...lines, ...(solution.answer ? [solution.answer] : [])],
-    solution.given,
-  ).slice(problem.length);
-  const steps = all.slice(0, lines.length);
-  let answer: LineVerdict = solution.answer ? all[lines.length] : 'unchecked';
-  // A bare answer ("11 m/s") is the last line's value.
-  if (solution.answer && answer === 'true') {
-    const alone = statementsOf(solution.answer);
-    if (alone?.length === 1 && !alone[0].relations.length) {
-      const last = [...lines]
-        .reverse()
-        .map(statementsOf)
-        .find((s) => s?.length);
-      const final = last?.[last.length - 1];
-      const scope = givenScope(solution.given);
-      const want = final
-        ? valueOf(final.sides[final.sides.length - 1], scope)
-        : null;
-      const got = valueOf(alone[0].sides[0], scope);
-      answer =
-        want && got
-          ? same(
-              want,
-              got,
-              Math.max(0.5 * 10 ** -placesIn(solution.answer), 1e-9),
-            )
-            ? 'true'
-            : 'false'
-          : 'unchecked';
-    }
-  }
-  const check = solution.check
-    ? (checkLines([solution.check], solution.given)[0] ?? 'unchecked')
-    : 'unchecked';
   const strangers = pageText ? strangersIn(solution.given, pageText) : [];
   const problems: string[] = [];
   steps.forEach((verdict, i) => {
@@ -1824,7 +1830,72 @@ export function checkSolution(
     problems.push(
       `The givens use numbers the page does not give: ${strangers.slice(0, 5).join(', ')}. Take the givens from the page.`,
     );
-  return { steps, answer, check, strangers, problems };
+  return {
+    steps,
+    answer,
+    check,
+    strangers,
+    problems,
+    ...(wholePercent ? { wholePercent: true as const } : {}),
+  };
+}
+
+/** A worked solution's verdicts, line by line, under one reading of its percentages. */
+interface Verdicts {
+  steps: LineVerdict[];
+  answer: LineVerdict;
+  check: LineVerdict;
+}
+
+function verdictsOf(solution: WorkedSolution, wholePercent: boolean): Verdicts {
+  const lines = solution.steps.map((step) => step.latex);
+  // An equation among the givens is the problem itself: the first step is
+  // checked against it, not taken for it.
+  const problem = solution.given.filter((given) =>
+    (statementsOf(given) ?? []).some(
+      (statement) =>
+        statement.relations.length > 0 &&
+        !/^v_[A-Za-z0-9_]+$/.test(statement.sides[0]?.trim() ?? ''),
+    ),
+  );
+  const all = checkLines(
+    [...problem, ...lines, ...(solution.answer ? [solution.answer] : [])],
+    solution.given,
+    wholePercent,
+  ).slice(problem.length);
+  const steps = all.slice(0, lines.length);
+  let answer: LineVerdict = solution.answer ? all[lines.length] : 'unchecked';
+  // A bare answer ("11 m/s") is the last line's value.
+  if (solution.answer && answer === 'true') {
+    const alone = statementsOf(solution.answer);
+    if (alone?.length === 1 && !alone[0].relations.length) {
+      const last = [...lines]
+        .reverse()
+        .map(statementsOf)
+        .find((s) => s?.length);
+      const final = last?.[last.length - 1];
+      const scope = givenScope(solution.given, wholePercent);
+      const want = final
+        ? valueOf(final.sides[final.sides.length - 1], scope)
+        : null;
+      const got = valueOf(alone[0].sides[0], scope);
+      answer =
+        want && got
+          ? same(
+              want,
+              got,
+              Math.max(0.5 * 10 ** -placesIn(solution.answer), 1e-9),
+            )
+            ? 'true'
+            : 'false'
+          : 'unchecked';
+    }
+  }
+  const check = solution.check
+    ? (checkLines([solution.check], solution.given, wholePercent)[0] ??
+      'unchecked')
+    : 'unchecked';
+  return { steps, answer, check };
 }
 
 /**
@@ -1838,8 +1909,9 @@ export function trimSolution(
   found: SolutionCheck,
 ): WorkedSolution {
   const wrong = found.steps.indexOf('false');
-  if (wrong < 0 && found.answer !== 'false' && found.check !== 'false')
-    return solution;
+  // Every step and the answer hold: nothing is cut, only a wrong check goes.
+  if (wrong < 0 && found.answer !== 'false')
+    return found.check === 'false' ? { ...solution, check: null } : solution;
   const steps = wrong < 0 ? solution.steps : solution.steps.slice(0, wrong);
   // Code's answer, from the problem as the first true line states it;
   // none where not even that stood.
@@ -1847,7 +1919,11 @@ export function trimSolution(
     wrong < 0 && found.answer !== 'false'
       ? solution.answer
       : steps.length
-        ? answerOf([steps[0].latex], solution.given)
+        ? answerOf(
+            [steps[0].latex],
+            solution.given,
+            found.wholePercent ?? false,
+          )
         : null;
   // A check of an answer code replaced checks nothing.
   const kept = answer === solution.answer && found.check === 'true';
@@ -1858,6 +1934,31 @@ export function trimSolution(
     check: kept ? solution.check : null,
     cut: true,
   };
+}
+
+/**
+ * A worked solution a writer sets out, settled: checked by code, sent
+ * back once with what was wrong, the better of the two tries kept, and
+ * cut at the last line code can stand behind.
+ */
+export async function settleWorking(
+  write: (again?: {
+    previous: WorkedSolution;
+    problems: string[];
+  }) => Promise<WorkedSolution>,
+): Promise<WorkedSolution> {
+  let working = await write();
+  let found = checkSolution(working);
+  if (found.problems.length) {
+    const second = await write({ previous: working, problems: found.problems });
+    const again = checkSolution(second);
+    // The second try is kept unless it is wrong in more places.
+    if (again.problems.length <= found.problems.length) {
+      working = second;
+      found = again;
+    }
+  }
+  return trimSolution(working, found);
 }
 
 // ── Finding maths on a page ────────────────────────────────────────────────

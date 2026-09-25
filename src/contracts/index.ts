@@ -36,6 +36,28 @@ export type Block = {
  * wants, each step's line and what is done to get it, and the answer with
  * its units. Every line was checked by code before it was kept.
  */
+/** Visualize's voice engines, as the admin page offers them. */
+export type SceneVoiceEngineDto = 'gemini' | 'kokoro' | 'openai';
+
+/** Which engine voices Visualize, and which could. */
+export interface SceneVoiceStatusDto {
+  /** The admin's choice; null for the deployment's own. */
+  chosen: SceneVoiceEngineDto | null;
+  /** What the next page is voiced by. */
+  current: SceneVoiceEngineDto;
+  /** The deployment's own, from SCENE_VOICE_ENGINE. */
+  deployment: SceneVoiceEngineDto;
+  options: {
+    value: SceneVoiceEngineDto;
+    label: string;
+    /** Set up here: a key, or a server. */
+    ready: boolean;
+    model: string;
+    voice: string;
+  }[];
+  changedAt: string | null;
+}
+
 export interface WorkedSolutionDto {
   /** What the problem gives, each a line of LaTeX ("u = 5\,\text{m/s}"). */
   given: string[];

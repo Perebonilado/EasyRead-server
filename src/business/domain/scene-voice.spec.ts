@@ -61,10 +61,14 @@ describe('how the voice says each sentence', () => {
     for (const mood of SCENE_MOODS)
       for (const delivery of SCENE_DELIVERIES) {
         const style = voiceStyle(mood, delivery);
-        expect(style.split(';')).toHaveLength(3);
-        expect(style.length).toBeLessThan(140);
+        expect(style.split(';')).toHaveLength(2);
+        expect(style.length).toBeLessThan(80);
       }
-    expect(voiceStyle('serious', 'key')).toMatch(/sober.*landing the point/);
+    expect(voiceStyle('serious', 'key')).toMatch(/sober; speaking slowly/);
+    // A sentence that says a new term first gives it weight.
+    expect(voiceStyle('calm', 'explain', ['latency'])).toMatch(
+      /clear, unhurried; stressing "latency"$/,
+    );
   });
 
   it('names a blend of voices so it can go in a file name', () => {

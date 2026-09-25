@@ -1,5 +1,6 @@
 import type { ScreenplayDraft } from '../domain/scene-screenplay';
 import type { DocumentProfileDraft } from '../domain/scene-profile';
+import type { NotesDraft } from '../domain/lesson-notes';
 import type { FigureDraft, StoryDraft } from '../domain/scene-story';
 import type {
   LearnQuestion,
@@ -45,6 +46,7 @@ export type LlmTask =
   | 'scene_write'
   | 'scene_draw'
   | 'scene_profile'
+  | 'scene_notes'
   | 'scene_story'
   | 'topic_quiz'
   | 'item_write'
@@ -489,6 +491,8 @@ export interface LlmGatewayPort {
     story?: string;
     /** The page in plainer words, when the page is the book's own. */
     plain?: string;
+    /** The page's part of its chapter's teacher's notes. */
+    notes?: string;
     previous?: SceneScriptDraft;
     problems?: string[];
   }): Promise<LlmResult<SceneScriptDraft>>;
@@ -524,6 +528,25 @@ export interface LlmGatewayPort {
     chapters: string[];
     sample: string;
   }): Promise<LlmResult<DocumentProfileDraft>>;
+
+  /**
+   * A chapter's teacher's notes, before any of its videos: its thread,
+   * and each page planned as part of one lesson (whether it carries on
+   * from the page before, its goal, its small ideas with what to show,
+   * what it leaves for the next). A long chapter is read in parts;
+   * `before` is how the part before ends.
+   */
+  sceneNotes(input: {
+    documentTitle: string;
+    topicTitle: string;
+    /** The book in brief, and whom it is for. */
+    about: string;
+    from: number;
+    to: number;
+    /** Each page's note, marked "[page N]". */
+    text: string;
+    before?: string;
+  }): Promise<LlmResult<NotesDraft>>;
 
   /**
    * Who and where one stretch of a story meets: each character's look and

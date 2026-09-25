@@ -8,6 +8,7 @@ import { levelIn } from '../../business/domain/scene-stage';
 import { createHash } from 'crypto';
 import { Injectable } from '@nestjs/common';
 import type { DocumentProfileDraft } from '../../business/domain/scene-profile';
+import type { NotesDraft } from '../../business/domain/lesson-notes';
 import type {
   FigureDraft,
   StoryDraft,
@@ -521,6 +522,44 @@ export class FakeLlmAdapter implements LlmGatewayPort {
    * The page's own sentences as the narration, one drawing and one word on
    * the stage: enough for the whole scene pipeline to run with no key.
    */
+  sceneNotes(input: {
+    documentTitle: string;
+    topicTitle: string;
+    about: string;
+    from: number;
+    to: number;
+    text: string;
+    before?: string;
+  }): Promise<LlmResult<NotesDraft>> {
+    // Every page fresh, planned as one idea shown: the shape, not a lesson.
+    const pages: NotesDraft['pages'] = [];
+    for (let page = input.from; page <= input.to; page += 1)
+      pages.push({
+        page,
+        relation: 'fresh',
+        evidence: 'a new heading',
+        goal: `what page ${page} says`,
+        newHere: [],
+        callback: null,
+        points: [{ say: "The page's idea", show: 'its idea', kind: 'explain' }],
+        lists: [],
+        pitfall: null,
+        check: null,
+        handoff: null,
+        endsOn: [],
+      });
+    return Promise.resolve({
+      value: {
+        thread: input.topicTitle,
+        example: null,
+        diagram: null,
+        pictures: [],
+        pages,
+      },
+      usage: this.usage(Date.now(), input.text.length / 4, pages.length * 60),
+    });
+  }
+
   sceneProfile(input: {
     documentTitle: string;
     chapters: string[];

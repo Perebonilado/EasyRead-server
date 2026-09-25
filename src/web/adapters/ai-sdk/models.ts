@@ -72,11 +72,12 @@ const TASK_VAR: Record<LlmTask, string> = {
   // paying for it on diagrams.
   sketch: 'AI_MODEL_SKETCH',
   // A page as an animated explainer. The writer is one call a page and
-  // plans everything, so it is worth a strong model; the artist draws
-  // each picture and is DeepSeek by design.
+  // plans everything; the artist draws each picture and is DeepSeek by
+  // design.
   scene_write: 'AI_MODEL_SCENE_WRITE',
   scene_draw: 'AI_MODEL_SCENE_DRAW',
   scene_profile: 'AI_MODEL_SCENE_PROFILE',
+  scene_notes: 'AI_MODEL_SCENE_NOTES',
   scene_story: 'AI_MODEL_SCENE_STORY',
   topic_quiz: 'AI_MODEL_QUIZ',
   // Guided reading: the preview is one call per chapter ever (cached), the
@@ -94,12 +95,23 @@ const TASK_VAR: Record<LlmTask, string> = {
  * "DeepSeek" drawing was drawn by gpt-4o-mini (2161504).
  */
 const TASK_DEFAULT: Partial<Record<LlmTask, string>> = {
-  simplify_maths: 'openai:gpt-4.1',
-  work_through: 'openai:gpt-4.1',
-  scene_write: 'openai:gpt-4.1',
+  // The maths note and the tutor's working: gpt-4o-mini by Richard's
+  // choice (2026-09-25), for cost; gpt-4.1 again with AI_MODEL_SIMPLIFY_MATHS
+  // and AI_MODEL_WORK_THROUGH.
+  simplify_maths: 'openai:gpt-4o-mini',
+  work_through: 'openai:gpt-4o-mini',
+  // The video writer on DeepSeek, Richard's choice (2026-09-25): gpt-4.1
+  // spent the credit too fast, and on gpt-4o-mini a page kept one drawing
+  // for a minute and a half, sent back or not. deepseek-flash costs about
+  // what gpt-4o-mini does and keeps the picture moving (still for ten
+  // seconds at most on the page tried). Thinking: SCENE_WRITE_THINKING.
+  scene_write: 'deepseek:deepseek-flash',
   scene_draw: 'deepseek:deepseek-flash',
   // What a document is: one small call a document.
   scene_profile: 'openai:gpt-4.1-mini',
+  // A chapter's teacher's notes: one careful read a chapter, before any
+  // of its videos, on DeepSeek for its price. Thinking: SCENE_NOTES_THINKING.
+  scene_notes: 'deepseek:deepseek-flash',
   // A story's characters, places and pages: one small call a stretch of
   // it, once a book. gpt-4.1 says more reliably where each person is when
   // some are apart (the small model put the boy who stayed with Sally in

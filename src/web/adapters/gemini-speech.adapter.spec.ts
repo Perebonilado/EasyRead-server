@@ -4,9 +4,11 @@ import {
   GeminiSpeechAdapter,
   audioIn,
   geminiItems,
+  voiceRuns,
+  sentenceGaps,
+  withPauses,
   generateRequest,
   interactionRequest,
-  pauseTag,
   rateOf,
   usageIn,
 } from './gemini-speech.adapter';
@@ -49,19 +51,74 @@ const reply = (
   });
 
 describe('the Gemini voice', () => {
-  it('marks only the silences that matter, and none after the last sentence', () => {
-    expect(pauseTag(0.3)).toBe('');
-    expect(pauseTag(0.45)).toBe(' <short pause>');
-    expect(pauseTag(0.8)).toBe(' <long pause>');
+  it('sends only the words, never a mark it could read aloud', () => {
     const items = geminiItems([
       { text: 'Why do we breathe?', pauseAfter: 0.75, style: 'asking' },
       { text: '  ', pauseAfter: 0.5 },
       { text: 'To burn our food.', pauseAfter: 0.9 },
     ]);
     expect(items).toEqual([
-      { text: 'Why do we breathe? <long pause>', style: 'asking' },
+      { text: 'Why do we breathe?', style: 'asking' },
       { text: 'To burn our food.', style: null },
     ]);
+    expect(JSON.stringify(items)).not.toMatch(/pause/iu);
+  });
+
+  it('asks once a voice: a page in one voice is one request, a story’s character its own', () => {
+    const piece = (text: string, voice?: string) => ({
+      text,
+      pauseAfter: 0.8,
+      ...(voice ? { voice } : {}),
+    });
+    const runs = voiceRuns([
+      piece('One.'),
+      piece('Two.'),
+      piece('Three.', 'Puck'),
+      piece('Four.', 'Puck'),
+      piece('Five.'),
+    ]);
+    expect(runs.map((r) => r.pieces.map((p) => p.text).join(' '))).toEqual([
+      'One. Two.',
+      'Three. Four.',
+      'Five.',
+    ]);
+  });
+
+  it('finds the quiet after each sentence, and makes it as long as the page asked', () => {
+    const rate = 1000;
+    // Said, quiet, said, quiet, said: 1 s, 0.2 s, 2 s, 0.15 s, 1 s.
+    const spans: [number, boolean][] = [
+      [1000, true],
+      [200, false],
+      [2000, true],
+      [150, false],
+      [1000, true],
+    ];
+    const samples = new Int16Array(4350);
+    let at = 0;
+    for (const [length, loud] of spans) {
+      if (loud)
+        for (let i = 0; i < length; i += 1)
+          samples[at + i] = i % 2 ? 4000 : -4000;
+      at += length;
+    }
+    // A short quiet inside the long sentence is not its end.
+    samples.fill(0, 1800, 1890);
+    const lengths = [10, 20, 10];
+    expect(sentenceGaps(samples, rate, lengths)).toEqual([
+      [1000, 1200],
+      [3200, 3350],
+    ]);
+    const paused = withPauses(samples, rate, [
+      { text: 'a'.repeat(10), pauseAfter: 0.7 },
+      { text: 'b'.repeat(20), pauseAfter: 0.1 },
+      { text: 'c'.repeat(10), pauseAfter: 0 },
+    ]);
+    // The first quiet made up to 0.7 s; the second already long enough.
+    expect(paused.length).toBe(4350 + 500);
+    expect(withPauses(samples, rate, [{ text: 'x', pauseAfter: 1 }])).toBe(
+      samples,
+    );
   });
 
   it('asks each route the way it documents, and keeps nothing on Google', () => {
@@ -169,6 +226,7 @@ describe('the Gemini voice', () => {
         { text: 'says the fox.', speed: 1, pauseAfter: 0.5 },
       ],
     });
+    // Each run a steady tone: no quiet inside it to lengthen.
     expect(bodies).toEqual([
       { voice: 'Sulafat', texts: ['A fox steps out.'] },
       { voice: 'Fenrir', texts: ['"You are late,"'] },

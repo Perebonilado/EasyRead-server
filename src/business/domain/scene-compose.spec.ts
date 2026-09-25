@@ -1,6 +1,8 @@
 import { PLAIN_FIGURE } from './scene-figure';
 import {
   composeScene,
+  fillQuiet,
+  rhythmOf,
   storyShots,
   fullestStep,
   oneFaceAtATime,
@@ -371,10 +373,12 @@ describe('the scene put together', () => {
 
   it('fills a long stretch where nothing would change', () => {
     expect(filled).toBeGreaterThan(0);
-    expect(scene.effects.some((e) => e.atMs > 8000 && e.do === 'pulse')).toBe(
-      true,
-    );
-    // A pulse that only fills a stretch is marked, so the player keeps it silent.
+    // Nothing on the stage named then: no close-up on something the
+    // voice is not talking about, only a pulse.
+    const fill = scene.effects.find((e) => e.filler && e.atMs > 8000);
+    expect(fill).toMatchObject({ do: 'pulse', part: null });
+    expect(scene.effects.some((e) => e.filler && e.do === 'zoom')).toBe(false);
+    // A change that only fills a stretch is marked, so the player keeps it silent.
     expect(scene.effects.filter((e) => e.filler)).toHaveLength(filled);
   });
 
@@ -1959,5 +1963,122 @@ describe("a screenplay's camera", () => {
     expect(shots).toEqual([
       { atMs: 800, target: 'mira', part: null, do: 'zoom', untilMs: 2000 },
     ]);
+  });
+});
+
+describe('a quiet stretch filled with what the words bring', () => {
+  const step = (atMs: number, show: string[], focus: string | null = null) =>
+    ({
+      atMs,
+      layout: show.length > 1 ? 'row' : 'one',
+      show,
+      arrows: [],
+      enter: {},
+      focus: focus ?? show[0],
+    }) as never;
+  /** Twenty seconds of words, one every 400 ms, some of them names. */
+  const said = (words: Record<number, string>) => {
+    const list = Array.from({ length: 50 }, (_, i) => words[i] ?? 'and');
+    return [beat(`${list.join(' ')}.`, 0, 400)];
+  };
+  const fill = (
+    steps: never[],
+    words: Record<number, string>,
+    parts: Record<string, string[]> = {},
+    names: Record<string, string> = {},
+  ) => {
+    const effects: Parameters<typeof fillQuiet>[0]['effects'] = [];
+    const added = fillQuiet({
+      steps,
+      effects,
+      beats: said(words),
+      durationMs: 20_000,
+      names: (id) => (names[id] ? [names[id]] : []),
+      parts: (id) => parts[id] ?? [],
+      acting: () => false,
+    });
+    return { effects, added };
+  };
+
+  it('points at a part of a drawing when the voice names it', () => {
+    // "…the left ventricle…" said about 6.5 s in, the heart alone on stage.
+    const { effects } = fill(
+      [step(0, ['heart'])],
+      { 16: 'left', 17: 'ventricle' },
+      { heart: ['left-ventricle', 'aorta'] },
+    );
+    expect(effects[0]).toMatchObject({
+      target: 'heart',
+      part: 'left-ventricle',
+      do: 'point',
+      filler: true,
+    });
+  });
+
+  it('moves in close on a thing the voice names, when there is more than one', () => {
+    const { effects } = fill(
+      [step(0, ['heart', 'lungs'], 'heart')],
+      { 16: 'lungs' },
+      {},
+      { heart: 'Heart', lungs: 'Lungs' },
+    );
+    expect(effects[0]).toMatchObject({ target: 'lungs', do: 'zoom' });
+    expect(effects[0].untilMs! - effects[0].atMs).toBeGreaterThanOrEqual(1500);
+  });
+
+  it('keeps its distance from other changes, and changes about every six seconds', () => {
+    const { effects, added } = fill([step(0, ['heart', 'lungs'])], {});
+    // Twenty quiet seconds: three changes, each clear of the start and end.
+    expect(added).toBe(3);
+    for (const e of effects) {
+      expect(e.atMs).toBeGreaterThanOrEqual(2000);
+      expect(e.untilMs ?? e.atMs).toBeLessThanOrEqual(20_000 - 400);
+    }
+    // Nothing named: no close-ups at all.
+    expect(effects.every((e) => e.do === 'pulse')).toBe(true);
+  });
+
+  it('fills a stretch of pulses too, which show nothing new, keeping clear of them', () => {
+    const effects: Parameters<typeof fillQuiet>[0]['effects'] = [
+      { atMs: 4000, target: 'heart', part: null, do: 'pulse' },
+      { atMs: 9000, target: 'heart', part: null, do: 'pulse' },
+    ];
+    const added = fillQuiet({
+      steps: [step(0, ['heart', 'lungs'])],
+      effects,
+      beats: said({}),
+      durationMs: 20_000,
+      names: () => [],
+      parts: () => [],
+      acting: () => false,
+    });
+    expect(added).toBeGreaterThan(0);
+    const fills = effects.filter((e) => e.filler);
+    for (const f of fills)
+      expect(
+        effects
+          .filter((e) => !e.filler)
+          .every((e) => Math.abs(e.atMs - f.atMs) >= 1000),
+      ).toBe(true);
+  });
+
+  it('pulses what holds the eye only when there is nothing else to do', () => {
+    const { effects } = fill([step(0, ['heart'])], {});
+    expect(effects.map((e) => e.do)).toEqual(['pulse', 'pulse', 'pulse']);
+  });
+});
+
+describe('the rhythm of a page', () => {
+  it('finds the longest the picture sits still, and the changes a minute, pulses aside', () => {
+    expect(
+      rhythmOf({
+        steps: [{ atMs: 0 }, { atMs: 20_000 }],
+        effects: [
+          { atMs: 5000, do: 'point' },
+          { atMs: 12_000, do: 'pulse' },
+        ],
+        durationMs: 60_000,
+      }),
+    ).toEqual({ stillMs: 40_000, perMinute: 3, stagesPerMinute: 2 });
   });
 });

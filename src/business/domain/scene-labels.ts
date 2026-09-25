@@ -446,6 +446,7 @@ export function placeLabels(input: {
     text: string;
     anchor: Point;
     ends?: { left: Point; right: Point };
+    box?: [number, number, number, number];
   }[];
   avoid: { boxes: Rect[]; segments: Segment[] };
 }): LabelPlace[] {
@@ -559,12 +560,11 @@ export function placeLabels(input: {
         w: round(w),
         h: round(h),
         align: side === 'left' ? 'end' : 'start',
-        leader: [
-          round(edge[0]),
-          round(edge[1]),
-          round(c.at[0]),
-          round(c.at[1]),
-        ],
+        // A label for words ends at their lines' edge, as it was; one
+        // for a part at the part's near edge.
+        leader: c.ends
+          ? [round(edge[0]), round(edge[1]), round(c.at[0]), round(c.at[1])]
+          : leaderTo(edge, c.at, c.box, onStage),
       });
     });
   }
@@ -641,7 +641,12 @@ export function listHeight(
 function placeBand(input: {
   place: Place;
   room: Rect;
-  callouts: { part: string; text: string; anchor: Point }[];
+  callouts: {
+    part: string;
+    text: string;
+    anchor: Point;
+    box?: [number, number, number, number];
+  }[];
   avoid: { boxes: Rect[]; segments: Segment[] };
   onStage: (p: Point) => Point;
   where: 'above' | 'below';
@@ -723,9 +728,39 @@ function placeBand(input: {
       w: round(w),
       h: round(h),
       align: 'middle' as const,
-      leader: [round(from[0]), round(from[1]), round(at[0]), round(at[1])],
+      leader: leaderTo(from, at, c.box, input.onStage),
     };
   });
+}
+
+/**
+ * Where a leader from a label ends: at the edge of its part nearest the
+ * label, a little into it, the way a textbook figure's does; never run on
+ * through the part to a point beyond it. With no box for the part, at the
+ * point the label names.
+ */
+export function leaderTo(
+  from: Point,
+  at: Point,
+  box: [number, number, number, number] | undefined,
+  onStage: (p: Point) => Point,
+): [number, number, number, number] {
+  let end = at;
+  if (box) {
+    const [x0, y0] = onStage([box[0], box[1]]);
+    const [x1, y1] = onStage([box[0] + box[2], box[1] + box[3]]);
+    const near: Point = [
+      Math.min(x1, Math.max(x0, from[0])),
+      Math.min(y1, Math.max(y0, from[1])),
+    ];
+    // A little way in, toward the point it names: onto the part's ink.
+    const inset = Math.min(8, (x1 - x0) / 4, (y1 - y0) / 4);
+    const dx = at[0] - near[0];
+    const dy = at[1] - near[1];
+    const len = Math.hypot(dx, dy) || 1;
+    end = [near[0] + (dx / len) * inset, near[1] + (dy / len) * inset];
+  }
+  return [round(from[0]), round(from[1]), round(end[0]), round(end[1])];
 }
 
 /** A character's words in a bubble: their size, the room round them, how wide it may be, and how far from the head it stands. */

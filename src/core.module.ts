@@ -12,6 +12,7 @@ import {
   LectureStatusHandler,
 } from './business/handlers/documents/lecture.handlers';
 import { PronunciationSeeder } from './business/handlers/institutions/pronunciation.handlers';
+import { SceneVoiceService } from './business/handlers/admin/scene-voice.service';
 import { PipelineOrchestrator } from './pipeline/orchestrator.service';
 import { DatabaseModule } from './web/database/database.module';
 import { portProviders } from './web/providers/ports.providers';
@@ -32,6 +33,8 @@ const shared = [
   LectureStatusHandler,
   GenerateLectureHandler,
   PronunciationSeeder,
+  // Visualize's voice as the admin chose it: set by the API, read by the worker.
+  SceneVoiceService,
   PipelineOrchestrator,
 ];
 

@@ -41,6 +41,7 @@
     "doc:reread": "ts-node --transpile-only -r tsconfig-paths/register scripts/reread-document.ts",
     "scene:bench": "ts-node --transpile-only -r tsconfig-paths/register scripts/scene-bench.ts",
     "scene:recast": "ts-node --transpile-only -r tsconfig-paths/register scripts/scene-recast.ts",
+    "scene:notes": "ts-node --transpile-only -r tsconfig-paths/register scripts/scene-notes.ts",
     "figures:sheet": "ts-node --transpile-only -r tsconfig-paths/register scripts/figures-sheet.ts"
   },
   "dependencies": {

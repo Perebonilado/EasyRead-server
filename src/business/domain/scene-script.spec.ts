@@ -8,6 +8,11 @@ import {
   peopleAskedFor,
   phraseAt,
   quietStretches,
+  sendBack,
+  listsIn,
+  flowOrder,
+  betterDraft,
+  type MendedScript,
   tellsOfLoss,
   type SceneScriptDraft,
 } from './scene-script';
@@ -123,11 +128,15 @@ describe('the writer’s storyboard, mended', () => {
   it('makes ids safe, drops what is not in the cast, and moves a phrase to the sentence it is in', () => {
     const { script, problems, mended } = mendScript(draft());
     expect(problems).toEqual([]);
-    const [first, second, third] = script.steps;
+    // The writer's own steps: the list said aloud comes on between them.
+    const [first, second, third] = script.steps.filter(
+      (step) => !step.stage?.show.some((id) => id.startsWith('item-')),
+    );
     expect(first.stage).toEqual({ layout: 'one', show: ['leaf'], arrows: [] });
     // Two things left once "nobody" is dropped: a hub cannot hold two.
     expect(second.stage?.layout).toBe('row');
-    expect(second.stage?.show).toEqual(['leaf', 'sun']);
+    // The sun's light runs to the leaf: the sun first, so the arrow reads forward.
+    expect(second.stage?.show).toEqual(['sun', 'leaf']);
     expect(second.stage?.arrows).toEqual([
       { from: 'sun', to: 'leaf', label: 'light', flow: true },
     ]);
@@ -142,7 +151,9 @@ describe('the writer’s storyboard, mended', () => {
     const leaf = script.cast.find((t) => t.id === 'leaf');
     expect(leaf?.kind === 'drawing' && leaf.parts).toHaveLength(1);
     // A number with no value is set as words, and a thing never on stage is dropped.
-    expect(script.cast.map((t) => t.id)).toEqual(['leaf', 'sun']);
+    expect(
+      script.cast.map((t) => t.id).filter((id) => !id.startsWith('item-')),
+    ).toEqual(['leaf', 'sun']);
   });
 
   it('asks for a redo when the phrases are not in the narration or nothing is ever shown', () => {
@@ -179,6 +190,213 @@ describe('the writer’s storyboard, mended', () => {
     const { script } = mendScript(draft());
     expect(quietStretches(script, 5).length).toBeGreaterThan(0);
     expect(quietStretches(script, 50)).toEqual([]);
+  });
+
+  it('hears the lists a sentence reads out, and never a run of clauses', () => {
+    const items = (sentence: string) =>
+      listsIn(sentence).map((list) =>
+        list.map((item) => `${item.word}:${item.text}`),
+      );
+    expect(
+      items('The main parts are storage, compute, and the network.'),
+    ).toEqual([['4:storage', '5:compute', '7:the network']]);
+    expect(items('There are three kinds: disk, memory and cache.')).toEqual([
+      ['4:disk', '5:memory', '7:cache'],
+    ]);
+    expect(
+      items('To do it, they need sunlight, water and carbon dioxide.'),
+    ).toEqual([['5:sunlight', '6:water', '8:carbon dioxide']]);
+    expect(items('He came, he saw, and he won.')).toEqual([]);
+    expect(
+      items(
+        'Data is copied, checked, and stored in three regions across the world.',
+      ),
+    ).toEqual([]);
+  });
+
+  it('sets a row so its arrows run forward, to the next thing, keeping what stood before', () => {
+    // Page 254: the queue listed first, the client sending to it.
+    expect(
+      flowOrder(
+        ['backup-queue', 'client'],
+        [{ from: 'client', to: 'backup-queue' }],
+      ),
+    ).toEqual(['client', 'backup-queue']);
+    // A chain listed out of order reads as a chain.
+    expect(
+      flowOrder(
+        ['db', 'server', 'client'],
+        [
+          { from: 'client', to: 'server' },
+          { from: 'server', to: 'db' },
+        ],
+      ),
+    ).toEqual(['client', 'server', 'db']);
+    // What stood before keeps its place; the one pointed at comes next to
+    // the one pointing, not across the thing between them.
+    expect(
+      flowOrder(
+        ['backup-queue', 'client', 'server'],
+        [{ from: 'client', to: 'server' }],
+        ['client', 'backup-queue'],
+      ),
+    ).toEqual(['client', 'server', 'backup-queue']);
+    // A ring of arrows, or none, as it was.
+    expect(flowOrder(['a', 'b'], [])).toEqual(['a', 'b']);
+    expect(
+      flowOrder(
+        ['a', 'b'],
+        [
+          { from: 'a', to: 'b' },
+          { from: 'b', to: 'a' },
+        ],
+      ),
+    ).toHaveLength(2);
+  });
+
+  it('keeps a zoom only where its sentence names the thing or a part of it', () => {
+    const d = draft();
+    d.steps.push(
+      // The sun is on stage, but the third sentence is about the leaf.
+      step(2, 'inside the leaf', {
+        effects: [{ target: 'sun', do: 'zoom' }],
+      }),
+      // It names the leaf and its chloroplasts: kept.
+      step(2, 'tiny parts', {
+        effects: [{ target: 'leaf', do: 'zoom' }],
+      }),
+    );
+    const { script, mended } = mendScript(d);
+    const zooms = script.steps.flatMap((s) =>
+      s.effects
+        .filter((e) => e.do === 'zoom')
+        .map((e) => `${s.at.beat}:${e.target}`),
+    );
+    expect(zooms).toEqual(['2:leaf']);
+    expect(mended.join(' ')).toContain(
+      'a zoom on sun, which its sentence does not name',
+    );
+  });
+
+  it('builds a stage up a thing at a time, each as the voice names it', () => {
+    const built: SceneScriptDraft = {
+      ...draft(),
+      beats: [
+        {
+          say: 'A web server answers each request.',
+          pause: 'short',
+          delivery: 'explain',
+        },
+        {
+          say: 'Behind it sits a database.',
+          pause: 'short',
+          delivery: 'explain',
+        },
+        {
+          say: 'Photos go to storage instead.',
+          pause: 'long',
+          delivery: 'key',
+        },
+      ],
+      cast: [
+        thing('server', 'drawing', { name: 'web server' }),
+        thing('database', 'drawing'),
+        thing('storage', 'drawing'),
+      ],
+      steps: [
+        step(0, 'A web', {
+          layout: 'row',
+          show: ['server', 'database', 'storage'],
+          arrows: [
+            { from: 'server', to: 'database', label: null, flow: true },
+            { from: 'server', to: 'storage', label: null, flow: true },
+          ],
+        }),
+      ],
+    };
+    const { script, mended } = mendScript(built);
+    const stages = script.steps.filter((s) => s.stage);
+    expect(
+      stages.map((s) => [s.at.beat, s.stage!.show, s.stage!.arrows.length]),
+    ).toEqual([
+      [0, ['server'], 0],
+      [1, ['server', 'database'], 1],
+      [2, ['server', 'database', 'storage'], 2],
+    ]);
+    expect(stages[0].stage!.layout).toBe('one');
+    expect(mended.join(' ')).toContain(
+      'database, storage brought on as the voice names them',
+    );
+  });
+
+  it('brings a list said aloud on stage item by item, beside what it is about', () => {
+    const { script, mended } = mendScript(draft());
+    const cards = script.cast.filter((t) => t.id.startsWith('item-'));
+    expect(cards.map((t) => t.kind === 'words' && t.text)).toEqual([
+      'Sunlight',
+      'Water',
+      'Carbon dioxide',
+    ]);
+    // Each on its own words, joining the ones before it, the leaf kept.
+    const listing = script.steps.filter((s) =>
+      s.stage?.show.some((id) => id.startsWith('item-')),
+    );
+    expect(listing.map((s) => [s.word, s.stage!.show.length])).toEqual([
+      [5, 3],
+      [6, 4],
+      [8, 5],
+    ]);
+    // What the writer had up, the sun and the leaf, stays beside them, as
+    // it stood.
+    expect(listing[2].stage!.show.slice(0, 2)).toEqual(['sun', 'leaf']);
+    expect(mended.join(' ')).toContain('a list of 3 said aloud');
+  });
+
+  it('sends a lesson whose picture sits still too long back on its own, and keeps the better draft', () => {
+    const mended = mendScript(draft());
+    const words = (n: number) =>
+      Array.from({ length: n }, () => 'word').join(' ');
+    // Forty-five words said over a stage set once, on the first words.
+    const still: MendedScript = {
+      ...mended,
+      problems: [],
+      script: {
+        ...mended.script,
+        beats: mended.script.beats.map((beat, k) => ({
+          ...beat,
+          say: k === 0 ? `${words(44)}.` : 'Done.',
+        })),
+        steps: mended.script.steps.slice(0, 1),
+      },
+    };
+    const reasons = sendBack(still, true);
+    expect(reasons).toHaveLength(1);
+    expect(reasons[0]).toContain('nothing new to see');
+    // A page of 132 words on one stage: two changes of stage wanted.
+    const long: MendedScript = {
+      ...still,
+      script: {
+        ...still.script,
+        beats: still.script.beats.map((beat) => ({
+          ...beat,
+          say: `${words(44)}.`,
+        })),
+      },
+    };
+    expect(sendBack(long, true).join(' ')).toContain(
+      'The stage changes 1 times in 132 spoken words',
+    );
+    // A story's quiet holds its actions; a page not taught this way stays.
+    expect(sendBack(still, false)).toEqual([]);
+    expect(
+      sendBack({ ...still, script: { ...still.script, fit: 'poor' } }, true),
+    ).toEqual([]);
+    // The draft written again is kept unless it is worse.
+    const moving: MendedScript = { ...mended, problems: [] };
+    expect(sendBack(moving, true)).toEqual([]);
+    expect(betterDraft(still, moving, true)).toBe(moving);
+    expect(betterDraft(moving, still, true)).toBe(moving);
+    expect(betterDraft(moving, { ...moving }, true)).not.toBe(moving);
   });
 
   it('keeps how each sentence is said and what a drawing sounds like, and mends what is off the list', () => {

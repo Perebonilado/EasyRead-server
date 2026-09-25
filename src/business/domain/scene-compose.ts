@@ -1401,30 +1401,27 @@ export function composeScene(input: ComposeInput): {
     }
   }
 
-  // The quiet stretches: a pulse on whatever holds the eye then. Not on
+  // The quiet stretches, filled with changes the words bring: a part the
+  // voice names pointed at, the camera in close on a thing it names, or
+  // on the one in focus; a pulse only when there is nothing else. Not on
   // someone who acts: they are never still, and a pulse is no way to move.
-  let filled = 0;
-  const changes = [...steps.map((s) => s.atMs), ...effects.map((e) => e.atMs)];
-  for (const [from, to] of quietGaps(changes, durationMs)) {
-    const span = to - from;
-    const count = Math.floor(span / 6000);
-    for (let i = 1; i <= count; i += 1) {
-      const at = Math.round(from + (span * i) / (count + 1));
-      const current = [...steps].reverse().find((s) => s.atMs <= at);
-      const target = [current?.focus, ...(current?.show ?? [])].find(
-        (id) => id && !acting[id],
-      );
-      if (!target) continue;
-      effects.push({
-        atMs: at,
-        target,
-        part: null,
-        do: 'pulse',
-        filler: true,
-      });
-      filled += 1;
-    }
-  }
+  const filled = fillQuiet({
+    steps,
+    effects,
+    beats,
+    durationMs,
+    names: (id) => namesOf(castById.get(id)),
+    parts: (id) => {
+      const thing = castById.get(id);
+      const dto = byId.get(id);
+      return thing?.kind === 'drawing' && dto?.kind === 'drawing'
+        ? thing.parts
+            .map((part) => part.name)
+            .filter((name) => dto.parts[name] ?? dto.labels[name])
+        : [];
+    },
+    acting: (id) => Boolean(acting[id]),
+  });
   effects.sort((a, b) => a.atMs - b.atMs);
 
   const geometry = new Map<string, Geometry>();
@@ -2046,4 +2043,168 @@ export function stepSvg(
 /** The step as one line for the log: when, what layout, what is on it. */
 export function describeStep(step: SceneStep, index: number): string {
   return `${index + 1}. [${step.at.beat + 1}:${step.word}] "${step.at.phrase}" ${step.stage ? `${step.stage.layout}(${step.stage.show.join(', ')})` : ''}${step.effects.length ? ` ${step.effects.map((e) => `${e.do} ${e.target}${e.part ? `.${e.part}` : ''}`).join(', ')}` : ''}`;
+}
+
+/** A code-made change fills a quiet stretch this often, and keeps this far from any other change. */
+const FILL_EVERY_MS = 6500;
+const FILL_CLEAR_MS = 2500;
+/** How long the camera stays in close on a thing, at most, and at least. */
+const FILL_SHOT_MS = 3500;
+const FILL_SHOT_LEAST_MS = 1500;
+
+/** The words of a name or a part, as they are said: "red-blood-cells" is red, blood, cells. */
+const keysIn = (text: string) =>
+  text
+    .toLowerCase()
+    .split(/[^\p{L}\p{N}]+/u)
+    .filter((word) => word.length >= 4)
+    .map((word) => word.replace(/(?:es|s)$/u, ''));
+
+/** A thing's names: what it is called, and the words on a card. */
+function namesOf(thing: SceneThing | undefined): string[] {
+  if (!thing) return [];
+  if (thing.kind === 'words') return [thing.text];
+  return 'name' in thing && typeof thing.name === 'string' ? [thing.name] : [];
+}
+
+/**
+ * The quiet stretches of a page filled with changes to see, one about
+ * every FILL_EVERY_MS and none nearer another change than FILL_CLEAR_MS,
+ * each tied to what the voice says then:
+ *
+ * 1. a part of a drawing on the stage that the voice names: pointed at,
+ *    so it glows and its label shows;
+ * 2. with two or more on the stage, a thing the voice names then: the
+ *    camera in close on it for a few seconds, all of it and its labels,
+ *    then back to the whole stage; never on one it is not talking about;
+ * 3. else a pulse on what holds the eye, as before.
+ *
+ * Each is marked a filler: silent, and never what the camera follows.
+ * Returns how many it added.
+ */
+export function fillQuiet(input: {
+  steps: SceneStepDto[];
+  effects: SceneEffectDto[];
+  beats: TimedBeat[];
+  durationMs: number;
+  names: (id: string) => string[];
+  parts: (id: string) => string[];
+  acting: (id: string) => boolean;
+}): number {
+  const { steps, effects, beats, durationMs } = input;
+  // A pulse draws the eye to what is already there: nothing new to see,
+  // so a stretch of pulses is still a quiet one.
+  const changes = [
+    ...steps.map((s) => s.atMs),
+    ...effects.filter((e) => e.do !== 'pulse').map((e) => e.atMs),
+  ];
+  /** The words said from one time to another, as keys. */
+  const saidBetween = (from: number, to: number) =>
+    new Set(
+      beats.flatMap((beat) =>
+        beat.words
+          .filter(([, , start]) => start >= from && start <= to)
+          .flatMap(([a, b]) => keysIn(beat.text.slice(a, b))),
+      ),
+    );
+  const named = (keys: string[], said: Set<string>) =>
+    keys.length > 0 && keys.every((key) => said.has(key));
+  const pointed = new Set<string>();
+  let lastShot: string | null = null;
+  let added = 0;
+  for (const [from, to] of quietGaps(changes, durationMs)) {
+    const span = to - from;
+    const count = Math.max(1, Math.floor(span / FILL_EVERY_MS));
+    for (let i = 1; i <= count; i += 1) {
+      const at = Math.round(from + (span * i) / (count + 1));
+      if (at - from < FILL_CLEAR_MS || to - at < FILL_CLEAR_MS) continue;
+      // Clear of a pulse of the writer's, by a second at least, the close
+      // up's lead in too.
+      if (effects.some((e) => Math.abs(e.atMs - at) < 1200)) continue;
+      const current = [...steps].reverse().find((s) => s.atMs <= at);
+      if (!current) continue;
+      const on = current.show.filter((id) => !input.acting(id));
+      const said = saidBetween(at - 1000, at + 3000);
+      // 1. A part the voice names.
+      let made: SceneEffectDto | null = null;
+      for (const id of on) {
+        const part = input
+          .parts(id)
+          .find(
+            (name) =>
+              !pointed.has(`${id}.${name}`) && named(keysIn(name), said),
+          );
+        if (part) {
+          pointed.add(`${id}.${part}`);
+          made = { atMs: at, target: id, part, do: 'point', filler: true };
+          break;
+        }
+      }
+      // 2. The camera in close on a thing the voice names then, and only
+      // then: never on one it is not talking about.
+      const until = Math.min(at + FILL_SHOT_MS, to - 400);
+      if (
+        !made &&
+        current.show.length >= 2 &&
+        until - at >= FILL_SHOT_LEAST_MS
+      ) {
+        const target = current.show.find(
+          (id) =>
+            id !== lastShot &&
+            input.names(id).some((name) => named(keysIn(name), said)),
+        );
+        if (target) {
+          lastShot = target;
+          made = {
+            atMs: at - 200,
+            target,
+            part: null,
+            do: 'zoom',
+            untilMs: until,
+            filler: true,
+          };
+        }
+      }
+      // 3. A pulse on what holds the eye.
+      if (!made) {
+        const target = [current.focus, ...on].find(
+          (id): id is string => id !== null && !input.acting(id),
+        );
+        if (target)
+          made = { atMs: at, target, part: null, do: 'pulse', filler: true };
+      }
+      if (made) {
+        effects.push(made);
+        added += 1;
+      }
+    }
+  }
+  return added;
+}
+
+/**
+ * How a page's picture keeps up with its voice: the longest it sits still,
+ * and how many changes a learner sees a minute. A change is the stage, or
+ * anything but a pulse, which draws the eye to what is already there.
+ */
+export function rhythmOf(scene: {
+  steps: { atMs: number }[];
+  effects: { atMs: number; do: string }[];
+  durationMs: number;
+}): { stillMs: number; perMinute: number; stagesPerMinute: number } {
+  const times = [
+    0,
+    ...scene.steps.map((s) => s.atMs),
+    ...scene.effects.filter((e) => e.do !== 'pulse').map((e) => e.atMs),
+    scene.durationMs,
+  ].sort((a, b) => a - b);
+  let stillMs = 0;
+  for (let i = 1; i < times.length; i += 1)
+    stillMs = Math.max(stillMs, times[i] - times[i - 1]);
+  const minutes = Math.max(scene.durationMs, 1) / 60_000;
+  return {
+    stillMs,
+    perMinute: Math.round(((times.length - 2) / minutes) * 10) / 10,
+    stagesPerMinute: Math.round((scene.steps.length / minutes) * 10) / 10,
+  };
 }

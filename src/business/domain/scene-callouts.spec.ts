@@ -118,8 +118,14 @@ describe('labels lifted out of a drawing', () => {
       },
       [0, 0, 400, 300],
     );
+    // The part's own box kept too, for the leader to end at its edge.
     expect(callouts).toEqual([
-      { part: 'cell', text: 'cell', anchor: [250, 110] },
+      {
+        part: 'cell',
+        text: 'cell',
+        anchor: [250, 110],
+        box: [120, 70, 160, 160],
+      },
     ]);
     expect(lifted).toEqual(['cell-label']);
     // Gone from the drawing; the one with no words stays.

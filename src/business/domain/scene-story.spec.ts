@@ -18,6 +18,7 @@ import {
   sheetThing,
   storyPieces,
   standsOnStage,
+  whereaboutsOn,
   withVoices,
   type StoryBible,
   type StoryDraft,
@@ -802,6 +803,50 @@ describe('the pages around a story', () => {
     expect(outsideStory(bibleOf({}), 1)).toBe(false);
   });
 
+  it('knows the pages the reader said are not the story, and none it said are between', () => {
+    // As Hide-and-Seek was read: a title page, a blurb and a publisher's
+    // letter before; an advert and the back cover after, a place carried
+    // onto them from the page before until pages were told apart.
+    const read = mergeStory([
+      {
+        from: 1,
+        to: 8,
+        draft: draft({
+          characters: [person('Sally')],
+          places: [{ name: 'the park', aliases: [], look: '', sound: null }],
+          pages: [1, 2, 3, 4, 5, 6, 7, 8].map((page) => ({
+            page,
+            story: page >= 4 && page <= 6 ? true : page === 5,
+            summary: page === 7 ? 'An advert.' : '',
+            present:
+              page === 4 || page === 6
+                ? [{ name: 'Sally', mood: 'happy' }]
+                : [],
+            place: page === 4 ? 'the park' : page === 7 ? 'the park' : null,
+            time: page === 4 ? 'dusk' : null,
+          })),
+        }),
+      },
+    ]);
+    expect(
+      [1, 2, 3, 4, 5, 6, 7, 8].map((page) => outsideStory(read, page)),
+    ).toEqual([true, true, true, false, false, false, true, true]);
+    const page = (n: number) => read.pages.find((p) => p.page === n);
+    // The story's page with nothing said happens where, and when, the one
+    // before it did; the advert, nowhere and at no time.
+    expect([page(5)?.place, page(5)?.time]).toEqual(['park', 'dusk']);
+    expect(page(7)).toMatchObject({
+      story: false,
+      present: [],
+      place: null,
+      time: null,
+    });
+    // Kept and read back the same.
+    const back = bibleOf(JSON.parse(JSON.stringify(read)) as StoryBible);
+    expect(back.pages[6].story).toBe(false);
+    expect(back.pages[4].story).toBeUndefined();
+  });
+
   it('makes the first a title card, said by the narrator with its author', () => {
     const card = titleCard(
       bible('Hide-and-Seek', 'T. Albert'),
@@ -822,5 +867,266 @@ describe('the pages around a story', () => {
     expect(
       titleCard(bible(null, null), '001-HIDE-AND-SEEK-Free-Book.pdf').title,
     ).toBe('Hide And Seek Free Book');
+  });
+});
+
+describe('someone apart from the rest', () => {
+  // Hide-and-Seek: Sally falls into a cave under a tree; the boys look for
+  // her in the woods, and call down to her from beside the tree.
+  const read = mergeStory([
+    {
+      from: 1,
+      to: 3,
+      draft: draft({
+        characters: [person('Sally'), person('James'), person('Mark')],
+        places: [
+          { name: 'the woods', aliases: [], look: '', sound: null },
+          { name: 'the cave', aliases: [], look: '', sound: null },
+        ],
+        pages: [
+          {
+            page: 1,
+            summary: 'They hide.',
+            present: [
+              { name: 'Sally', mood: 'happy', place: null },
+              { name: 'James', mood: 'happy', place: null },
+              { name: 'Mark', mood: 'happy', place: null },
+            ],
+            place: 'the woods',
+          },
+          {
+            page: 2,
+            summary: 'The boys find her under the tree.',
+            present: [
+              { name: 'James', mood: 'surprised', place: 'the woods' },
+              { name: 'Mark', mood: 'surprised', place: null },
+              { name: 'Sally', mood: 'afraid', place: 'the cave' },
+            ],
+            place: 'the woods',
+          },
+          {
+            page: 3,
+            summary: 'James stays with her.',
+            present: [
+              { name: 'James', mood: 'neutral', place: null },
+              { name: 'Sally', mood: 'afraid', place: 'a hole nobody named' },
+            ],
+            place: 'the woods',
+          },
+        ],
+      }),
+    },
+  ]);
+
+  it('keeps where one is apart, and no place for those where the page happens', () => {
+    expect(read.pages[1].present).toEqual([
+      { id: 'james', mood: 'surprised' },
+      { id: 'mark', mood: 'surprised' },
+      { id: 'sally', mood: 'afraid', at: 'cave' },
+    ]);
+    // A place the story never listed is none.
+    expect(read.pages[2].present[1]).toEqual({ id: 'sally', mood: 'afraid' });
+    expect(
+      bibleOf(JSON.parse(JSON.stringify(read)) as StoryBible).pages[1],
+    ).toEqual(read.pages[1]);
+  });
+
+  it('keeps one the reader gave no place where they last were, when the page follows another down', () => {
+    const merged = mergeStory([
+      {
+        from: 1,
+        to: 3,
+        draft: draft({
+          characters: [person('Sally'), person('James'), person('Dad')],
+          places: [
+            { name: 'the woods', aliases: [], look: '', sound: null },
+            { name: 'the cave', aliases: [], look: '', sound: null },
+          ],
+          pages: [
+            {
+              page: 1,
+              summary: '',
+              present: [
+                { name: 'James', mood: 'happy', place: 'the woods' },
+                { name: 'Sally', mood: 'afraid', place: 'the cave' },
+              ],
+              place: 'the woods',
+            },
+            // Dad down in the cave with her, James left unplaced: above.
+            {
+              page: 2,
+              summary: '',
+              present: [
+                { name: 'Dad', mood: 'happy', place: 'the cave' },
+                { name: 'Sally', mood: 'afraid', place: 'the cave' },
+                { name: 'James', mood: 'happy', place: null },
+              ],
+              place: 'the cave',
+            },
+            // All home, none placed: together, where the page is.
+            {
+              page: 3,
+              summary: '',
+              present: [
+                { name: 'James', mood: 'happy', place: null },
+                { name: 'Sally', mood: 'happy', place: null },
+              ],
+              place: 'the cave',
+            },
+          ],
+        }),
+      },
+    ]);
+    expect(merged.pages[1].present).toEqual([
+      { id: 'dad', mood: 'happy' },
+      { id: 'sally', mood: 'afraid' },
+      { id: 'james', mood: 'happy', at: 'woods' },
+    ]);
+    expect(merged.pages[2].present).toEqual([
+      { id: 'james', mood: 'happy' },
+      { id: 'sally', mood: 'happy' },
+    ]);
+  });
+
+  it('says where each is on a page where some are apart, and nothing where they are together', () => {
+    expect(whereaboutsOn(read, 2)).toEqual({
+      place: 'woods',
+      people: { james: 'woods', mark: 'woods', sally: 'cave' },
+    });
+    expect(whereaboutsOn(read, 1)).toBeNull();
+    expect(whereaboutsOn(read, 3)).toBeNull();
+    // A crowd apart splits no page: it is never on the stage.
+    const crowd = mergeStory([
+      {
+        from: 1,
+        to: 1,
+        draft: draft({
+          characters: [person('Jesus'), person('Crowds', { kind: 'group' })],
+          places: [
+            { name: 'a boat', aliases: [], look: '', sound: null },
+            { name: 'Capernaum', aliases: [], look: '', sound: null },
+          ],
+          pages: [
+            {
+              page: 1,
+              summary: '',
+              present: [
+                { name: 'Jesus', mood: 'neutral', place: null },
+                { name: 'Crowds', mood: 'neutral', place: 'Capernaum' },
+              ],
+              place: 'a boat',
+            },
+          ],
+        }),
+      },
+    ]);
+    expect(crowd.pages[0].present[1].at).toBe('capernaum');
+    expect(whereaboutsOn(crowd, 1)).toBeNull();
+  });
+
+  it('tells the writer who is apart, and where', () => {
+    const told = describeStory(read, 2);
+    expect(told).toContain(
+      '- sally: Sally. Starts the page happy; on it mostly afraid. On this page they are apart from the rest, in the cave (cave).',
+    );
+    expect(told).toContain(
+      '- cave: the cave, where some are apart on this page: the place of each line said there.',
+    );
+  });
+
+  it('brings back only those who were where the page before happened', () => {
+    const script = {
+      fit: 'good',
+      fitReason: null,
+      title: 't',
+      mood: 'calm',
+      beats: [],
+      steps: [],
+      cast: ['sally', 'james', 'mark'].map((id) => ({
+        id,
+        kind: 'character',
+        ref: id,
+        name: id,
+        state: null,
+        met: 0,
+        intro: [],
+      })),
+    } as unknown as SceneScript;
+    // Not Sally, who was in the cave.
+    expect(castStory(script, read, 3).opening?.show).toEqual(['james', 'mark']);
+  });
+});
+
+describe('a page that goes to several places', () => {
+  it('keeps where else it goes, in order, and tells the writer', () => {
+    // Matthew 8:28–9:1: the tombs across the lake, then home to Capernaum.
+    const read = mergeStory([
+      {
+        from: 1,
+        to: 1,
+        draft: draft({
+          characters: [person('Jesus')],
+          places: [
+            { name: 'Capernaum', aliases: [], look: '', sound: null },
+            { name: 'the tombs of Gadara', aliases: [], look: '', sound: null },
+            { name: 'a boat', aliases: [], look: '', sound: null },
+          ],
+          pages: [
+            {
+              page: 1,
+              summary: 'Jesus frees two men at the tombs, and sails home.',
+              present: [{ name: 'Jesus', mood: 'neutral' }],
+              place: 'Capernaum',
+              also: ['the tombs of Gadara', 'a boat', 'Capernaum', 'Rome'],
+            },
+          ],
+        }),
+      },
+    ]);
+    // Neither the page's own place nor one the story never listed.
+    expect(read.pages[0].also).toEqual(['tombs-of-gadara', 'a-boat']);
+    expect(
+      bibleOf(JSON.parse(JSON.stringify(read)) as StoryBible).pages[0].also,
+    ).toEqual(['tombs-of-gadara', 'a-boat']);
+    expect(describeStory(read, 1)).toContain(
+      '- tombs-of-gadara: the tombs of Gadara, where this page also goes: the place of the scene there.',
+    );
+  });
+});
+
+describe('a group named with its people', () => {
+  it('never joins one person through a name of theirs', () => {
+    // A stretch of Matthew listed the disciples with Peter, James and John
+    // among their names, and the merge made them John the Baptist.
+    const bible = mergeStory([
+      {
+        from: 1,
+        to: 4,
+        draft: draft({
+          characters: [
+            person('John the Baptist', { aliases: ['John'] }),
+            person('Disciples', { kind: 'group', aliases: ['the twelve'] }),
+          ],
+        }),
+      },
+      {
+        from: 5,
+        to: 9,
+        draft: draft({
+          characters: [
+            person('The disciples', {
+              kind: 'group',
+              aliases: ['Disciples', 'Peter', 'James', 'John'],
+            }),
+          ],
+        }),
+      },
+    ]);
+    const john = bible.characters.find((c) => c.id === 'john-the-baptist');
+    expect(john?.aliases).toEqual(['John']);
+    expect(bible.characters.map((c) => c.id)).toEqual([
+      'john-the-baptist',
+      'disciples',
+    ]);
   });
 });

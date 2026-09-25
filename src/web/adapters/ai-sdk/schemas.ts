@@ -836,12 +836,18 @@ export const sceneStorySchema = z.object({
   pages: z.array(
     z.object({
       page: z.number().int(),
+      story: z.boolean(),
       summary: z.string(),
       present: z.array(
-        z.object({ name: z.string(), mood: z.enum(EXPRESSIONS) }),
+        z.object({
+          name: z.string(),
+          mood: z.enum(EXPRESSIONS),
+          place: z.string().nullable(),
+        }),
       ),
       place: z.string().nullable(),
       placeInferred: z.boolean(),
+      also: z.array(z.string()),
       time: z.enum(STORY_TIMES).nullable(),
       weather: z.enum(STORY_WEATHERS).nullable(),
       crowd: z.enum(STORY_CROWDS),

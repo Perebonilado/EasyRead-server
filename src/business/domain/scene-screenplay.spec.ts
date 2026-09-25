@@ -7,7 +7,10 @@ import {
   type ScreenplayCastDraft,
   type ScreenplayDraft,
 } from './scene-screenplay';
+import type { SceneStage } from './scene-script';
 import type { StoryPresence, StoryVoice } from './scene-story';
+
+type SceneStageLike = Pick<SceneStage, 'show' | 'backdrop' | 'cut' | 'arrive'>;
 
 const characters: {
   id: string;
@@ -228,6 +231,18 @@ describe('a screenplay made sound and staged', () => {
     const { problems } = mend(lost);
     expect(problems.join(' ')).toContain(
       'These lines of the book are missing or reworded: "Not the one about the tortoise again!" (kofi)',
+    );
+  });
+
+  it('names who a lost line is by, when the writer left them out of the cast', () => {
+    const lost = draft();
+    lost.cast = lost.cast.filter((t) => t.id !== 'kofi');
+    lost.opening = ['ada', 'nana'];
+    lost.beats[2] = beat('narration', 'Someone groans.');
+    lost.beats[3] = beat('narration', 'Nobody wants that story again.');
+    const { problems } = mend(lost);
+    expect(problems.join(' ')).toContain(
+      '"Not the one about the tortoise again!" (kofi, not in your cast yet)',
     );
   });
 
@@ -786,6 +801,92 @@ describe('scenes: only who is in them, where they are', () => {
   });
 });
 
+describe('a stage never left empty', () => {
+  const shows = (script: { steps: { stage: { show: string[] } | null }[] }) =>
+    script.steps.flatMap((step) =>
+      step.stage ? [step.stage.show.join('+') || '(no one)'] : [],
+    );
+
+  it('goes on with whoever was there when a new scene names no one', () => {
+    // Matthew 8:16: "When evening came, many…" after a scene in the house.
+    const { script } = mendScreenplay(
+      {
+        ...draft(),
+        opening: ['ada', 'nana'],
+        beats: [
+          beat('narration', 'A warm night in the yard.', { place: 'yard' }),
+          beat('line', 'Tell us a story, Nana.', { who: 'ada', to: 'nana' }),
+          beat('narration', 'Later, more neighbours gather round the fire.'),
+          beat('line', 'Tonight I will tell you about the moon.', {
+            who: 'nana',
+          }),
+        ],
+      },
+      { material, characters, places },
+    );
+    expect(shows(script)).not.toContain('(no one)');
+    expect(shows(script).at(-1)).toBe('ada+nana');
+  });
+
+  it('brings on the one a narration is about', () => {
+    const { script } = mendScreenplay(
+      {
+        ...draft(),
+        opening: ['ada'],
+        beats: [
+          beat('narration', 'A warm night in the yard.', { place: 'yard' }),
+          beat('line', 'Tell us a story, Nana.', { who: 'ada' }),
+          beat('narration', 'Kofi comes running up the path.'),
+          beat('action', 'Kofi groans.', { who: 'kofi', do: 'shake' }),
+        ],
+      },
+      { material, characters, places },
+    );
+    expect(shows(script)).toEqual(['ada', 'ada+kofi']);
+    expect(script.steps.find((s) => s.stage?.cutIn)?.stage?.cutIn).toEqual([
+      'kofi',
+    ]);
+  });
+});
+
+describe('scripture the book quotes', () => {
+  it('is read out by the narrator, as a quotation, whoever the writer gave it to', () => {
+    const { script, mended } = mendScreenplay(
+      {
+        ...draft(),
+        opening: ['ada'],
+        beats: [
+          beat('narration', 'Evening in the yard.', { place: 'yard' }),
+          beat('line', 'He took our weaknesses and carried our diseases.', {
+            who: 'nana',
+          }),
+          beat('line', 'Tell us a story, Nana.', { who: 'ada' }),
+        ],
+      },
+      {
+        material: [
+          'In this way what was spoken by Isaiah the prophet was fulfilled: “He took our weaknesses and carried our diseases.”',
+          '“Tell us a story, Nana,” said Ada.',
+        ].join('\n\n'),
+        characters,
+        places,
+      },
+    );
+    expect(script.beats.map((b) => [b.kind, b.speaker ?? null, b.say])).toEqual(
+      [
+        ['narration', null, 'Evening in the yard.'],
+        [
+          'narration',
+          null,
+          '"He took our weaknesses and carried our diseases."',
+        ],
+        ['line', 'ada', 'Tell us a story, Nana.'],
+      ],
+    );
+    expect(mended.join(' ')).toContain('scripture the book quotes');
+  });
+});
+
 describe('two places at once: cutting between them', () => {
   const kids = [
     { id: 'sally', name: 'Sally', aliases: [], voice: 'girl' as const },
@@ -849,6 +950,193 @@ describe('two places at once: cutting between them', () => {
       'sally @cave cut',
       'james+mark @woods cut',
       'sally @cave cut',
+    ]);
+  });
+
+  const stages = (script: { steps: { stage: SceneStageLike | null }[] }) =>
+    script.steps.flatMap((step) =>
+      step.stage
+        ? [
+            `${step.stage.show.join('+')}${step.stage.backdrop ? ` @${step.stage.backdrop}` : ''}${step.stage.cut ? ' cut' : ''}${step.stage.arrive ? ` arrive ${step.stage.arrive.join('+')}` : ''}`,
+          ]
+        : [],
+    );
+  const whereabouts = {
+    place: 'woods',
+    people: { sally: 'cave', james: 'woods', mark: 'woods' },
+  };
+  const kidsCast = [
+    thing('sally', 'character', { name: 'Sally' }),
+    thing('james', 'character', { name: 'James' }),
+    thing('mark', 'character', { name: 'Mark' }),
+  ];
+
+  it('keeps Sally in the cave where the story has her, when the writer puts them all in one place', () => {
+    // As the writer set Hide-and-Seek's page 11: everyone in the cave, no
+    // line given a place, the cave left out of the cast.
+    const { script, mended } = mendScreenplay(
+      {
+        ...draft(),
+        opening: ['mark', 'james', 'sally'],
+        cast: [...kidsCast, thing('woods', 'place')],
+        beats: [
+          beat(
+            'narration',
+            'Night falls by the old tree. Mark, James and Sally are here.',
+            { place: 'woods', with: ['mark', 'james', 'sally'] },
+          ),
+          beat('line', 'James, you stay with Sally. I will get my dad.', {
+            who: 'mark',
+          }),
+          beat('line', 'Don’t be scared. I am right here with you.', {
+            who: 'james',
+            to: 'sally',
+          }),
+          beat('line', 'No, you’re not. You’re up there and I’m down here.', {
+            who: 'sally',
+          }),
+          beat('narration', 'Sally waits in the dark.'),
+          beat('line', 'Hurry!', { who: 'james' }),
+        ],
+      },
+      { characters: kids, places: woods, whereabouts },
+    );
+    expect(stages(script)).toEqual([
+      'mark+james @woods',
+      'sally @cave cut',
+      'mark+james @woods cut',
+    ]);
+    // The cave, where she is, brought into the cast to cut to.
+    expect(script.cast.find((t) => t.id === 'cave')).toEqual({
+      id: 'cave',
+      kind: 'place',
+      ref: 'cave',
+      name: 'the cave',
+      sound: null,
+    });
+    expect(mended.join(' ')).toContain(
+      "cave: one of the story's places; brought into the cast",
+    );
+  });
+
+  it('moves to one of the story’s places the writer names, though it left it out of its cast', () => {
+    // Matthew 8:14, as its page ends: "Jesus enters Peter's house".
+    const { script } = mendScreenplay(
+      {
+        ...draft(),
+        opening: ['james'],
+        cast: [...kidsCast, thing('woods', 'place')],
+        beats: [
+          beat('narration', 'Night in the woods.', { place: 'woods' }),
+          beat('line', 'Where is she?', { who: 'james' }),
+          beat('narration', 'Later, James climbs down into the cave.', {
+            place: 'the cave',
+            with: ['james'],
+          }),
+        ],
+      },
+      { characters: kids, places: woods },
+    );
+    expect(stages(script)).toEqual(['james @woods', 'james @cave cut']);
+    // Or one its narration names, with no place given at all.
+    const named = mendScreenplay(
+      {
+        ...draft(),
+        opening: ['james'],
+        cast: [...kidsCast, thing('woods', 'place')],
+        beats: [
+          beat('narration', 'Night in the woods.', { place: 'woods' }),
+          beat('line', 'Where is she?', { who: 'james' }),
+          beat('narration', 'Later, James goes down into the cave.'),
+        ],
+      },
+      { characters: kids, places: woods },
+    );
+    expect(stages(named.script)).toEqual(['james @woods', 'james @cave cut']);
+  });
+
+  it('cuts to those elsewhere when the last one where the stage looks leaves', () => {
+    const { script } = mendScreenplay(
+      {
+        ...draft(),
+        opening: ['sally'],
+        cast: [...kidsCast, thing('cave', 'place')],
+        beats: [
+          beat('narration', 'Night in the cave.', { place: 'cave' }),
+          beat('line', 'Pull me up!', { who: 'sally' }),
+          beat('line', 'Hold on!', { who: 'james' }),
+          beat('narration', 'Sally climbs up the rope.'),
+          beat('action', 'Sally climbs out of the cave.', {
+            who: 'sally',
+            do: 'leave',
+          }),
+        ],
+      },
+      {
+        characters: kids,
+        places: woods,
+        whereabouts: {
+          place: 'cave',
+          people: { sally: 'cave', james: 'woods', mark: 'woods' },
+        },
+      },
+    );
+    expect(stages(script)).toEqual([
+      'sally @cave',
+      'james @woods cut',
+      'sally @cave cut',
+      'james @woods cut',
+    ]);
+  });
+
+  it('lets a later scene take someone where the story did not have them yet, and brings one on where they are', () => {
+    // Mark's father comes to the tree, then goes down into the cave: the
+    // writer's second scene takes him there.
+    const { script } = mendScreenplay(
+      {
+        ...draft(),
+        opening: ['james'],
+        cast: [
+          ...kidsCast,
+          thing('dad', 'character', { name: 'Dad' }),
+          thing('woods', 'place'),
+          thing('cave', 'place'),
+        ],
+        beats: [
+          beat('narration', 'Night by the old tree.', { place: 'woods' }),
+          beat('line', 'She is down there!', { who: 'james' }),
+          beat('action', 'Dad runs up with a rope.', {
+            who: 'dad',
+            do: 'enter',
+          }),
+          beat('line', 'Sally, are you hurt?', { who: 'dad' }),
+          beat('line', 'No, but I am scared.', { who: 'sally' }),
+          beat('narration', 'Dad climbs down into the cave.', {
+            place: 'cave',
+            with: ['dad', 'sally'],
+          }),
+          beat('line', 'I am here now.', { who: 'dad' }),
+          beat('line', 'Pull us up!', { who: 'james' }),
+        ],
+      },
+      {
+        characters: [
+          ...kids,
+          { id: 'dad', name: 'Dad', aliases: [], voice: 'man' as const },
+        ],
+        places: woods,
+        whereabouts: {
+          ...whereabouts,
+          people: { ...whereabouts.people, dad: 'woods' },
+        },
+      },
+    );
+    expect(stages(script)).toEqual([
+      'james @woods',
+      'james+dad arrive dad',
+      'sally @cave cut',
+      'dad+sally @cave cut',
+      'james @woods cut',
     ]);
   });
 });

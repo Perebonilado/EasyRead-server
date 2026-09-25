@@ -132,6 +132,26 @@ export class ExtractProcessor extends BasePipelineProcessor<BaseJobData> {
    * every page. A deck whose slide count does not match the PDF's pages is
    * left to the PDF entirely rather than risk every page being off by one.
    */
+  /**
+   * A document's pages read again from its PDF, as extraction reads them
+   * now, written over the ones kept: for a book read before extraction
+   * learned two columns (scripts/reread-document). Its figures and the
+   * rest of the pipeline are left as they are; a page OCR had read is
+   * read from its text layer again.
+   */
+  async rereadPages(documentId: string): Promise<number> {
+    const doc = await this.documents.findById(documentId);
+    if (!doc) throw new Error(`No document ${documentId}`);
+    const ref = doc.props.canonicalPdfRef;
+    if (!ref) throw new Error('No canonical PDF to extract from');
+    const extracted = await this.withCleanText(
+      doc,
+      await this.pdf.extractPages(await this.storage.get(ref)),
+    );
+    await this.pages.replaceAll(doc.id, extracted);
+    return extracted.length;
+  }
+
   private async withCleanText(
     doc: {
       id: string;

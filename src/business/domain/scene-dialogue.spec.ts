@@ -147,6 +147,35 @@ describe('who says each line', () => {
       'tobi: not tonight.',
     ]);
   });
+
+  it('hears a speech that runs on past its paragraph, beside quotes that are whole', () => {
+    // Matthew 8:10-12 and 8:13, the speech running on to the next page.
+    const end =
+      'But the centurion replied, “Lord, I am not worthy.” When Jesus heard this he was amazed and said, “I tell you the truth, many will come from the east and west, where';
+    expect(quotedSpans(end).map(([a, b]) => end.slice(a, b))).toEqual([
+      'Lord, I am not worthy.',
+      'I tell you the truth, many will come from the east and west, where',
+    ]);
+    const start =
+      'there will be weeping and gnashing of teeth.” Then Jesus said to the centurion, “Go; just as you believed, it will be done for you.”';
+    expect(quotedSpans(start).map(([a, b]) => start.slice(a, b))).toEqual([
+      'there will be weeping and gnashing of teeth.',
+      'Go; just as you believed, it will be done for you.',
+    ]);
+  });
+
+  it('hears a count said aloud, but not a number or a time set in quotes', () => {
+    // Hide-and-Seek, as its book sets the seeker's count.
+    const text =
+      'Mark turned, faced a big tree, closed his eyes, and started counting out loud. “100 – 99 – 98 – 97 …..”';
+    expect(quotedSpans(text).map(([a, b]) => text.slice(a, b))).toEqual([
+      '100 – 99 – 98 – 97 …..',
+    ]);
+    expect(
+      said([text], [{ id: 'mark', names: ['Mark'], gender: 'm' }]),
+    ).toEqual(['mark: 100 – 99 – 98 – 97 …..']);
+    expect(quotedSpans('The door said “12” and the clock “3:15”.')).toEqual([]);
+  });
 });
 
 describe('voices beyond the stage', () => {
@@ -261,6 +290,138 @@ describe('voices beyond the stage', () => {
     expect(heardFrom('A voice from the sky boomed:', '', 'Go!')).toBe('above');
   });
 
+  describe('in Matthew, where one sentence names several', () => {
+    const cast: Speaker[] = [
+      { id: 'jesus', names: ['Jesus'], gender: 'm' },
+      { id: 'matthew', names: ['Matthew'], gender: 'm' },
+      { id: 'blind-men', names: ['blind men'], group: true },
+      { id: 'crowds', names: ['crowds', 'crowd'], group: true },
+    ];
+
+    it('gives a line to the ones "shouting" it, not to the one the opening names', () => {
+      expect(
+        said(
+          [
+            'As Jesus went on from there, two blind men followed him, shouting, “Have mercy on us, Son of David!”',
+          ],
+          cast,
+        ),
+      ).toEqual(['blind-men: Have mercy on us, Son of David!']);
+    });
+
+    it('gives "he said" to the one the sentence opens with, not the crowd before it', () => {
+      expect(
+        said(
+          [
+            'When Jesus entered the leader’s house and saw the flute players and the disorderly crowd, he said, “Go away, for the girl is not dead but asleep.”',
+          ],
+          cast,
+        ),
+      ).toEqual(['jesus: Go away, for the girl is not dead but asleep.']);
+    });
+
+    it('takes "he" after an opening to be the one it names, not the man he saw', () => {
+      expect(
+        said(
+          [
+            'As Jesus went on from there, he saw a man named Matthew sitting at the tax booth. “Follow me,” he said to him.',
+          ],
+          cast,
+        ),
+      ).toEqual(['jesus: Follow me,']);
+    });
+
+    it('never takes the one asked for the one asking', () => {
+      expect(
+        said(
+          [
+            'A man was there who had a withered hand. And they asked Jesus, “Is it lawful to heal on the Sabbath?”',
+          ],
+          [...cast, { id: 'pharisees', names: ['Pharisees'], group: true }],
+        ),
+      ).toEqual([]);
+    });
+
+    it('gives a new speaker the tag that leads in after a quote that ended', () => {
+      const cast2: Speaker[] = [
+        ...cast,
+        { id: 'pharisees', names: ['Pharisees'], group: true },
+      ];
+      // Matthew 12:38-39: "He answered them" is Jesus, not the Pharisees
+      // going on.
+      expect(
+        said(
+          [
+            'Then some Pharisees answered him, “Teacher, we want to see a sign from you.” He answered them, “An evil and adulterous generation asks for a sign.”',
+          ],
+          cast2,
+        ),
+      ).not.toContain(
+        'pharisees: An evil and adulterous generation asks for a sign.',
+      );
+      expect(
+        said(
+          [
+            '“Keep yelling,” James screamed. “That way we can find you.” Sally heard her brother and kept screaming.',
+          ],
+          [
+            { id: 'james', names: ['James'], gender: 'm' },
+            { id: 'sally', names: ['Sally'], gender: 'f' },
+          ],
+        ),
+      ).toEqual(['james: Keep yelling,', 'james: That way we can find you.']);
+    });
+
+    it('leaves a line to the writer when someone the story does not name says it', () => {
+      expect(
+        said(
+          [
+            'As he was saying these things, a ruler came, bowed low before him, and said, “My daughter has just died.” Jesus and his disciples got up and followed him.',
+          ],
+          cast,
+        ),
+      ).toEqual([]);
+      // And a crowd two sentences on is not who said it.
+      expect(
+        said(
+          [
+            '“Stand up, take your stretcher, and go home.” And he stood up and went home. When the crowd saw this, they were afraid.',
+          ],
+          cast,
+        ),
+      ).toEqual([]);
+    });
+  });
+
+  it('knows scripture the book quotes, read out by no one there', () => {
+    // Matthew 8:17, 13:35 and 3:3.
+    expect(
+      heardFrom(
+        'In this way what was spoken by Isaiah the prophet was fulfilled:',
+        '',
+        'He took our weaknesses and carried our diseases.',
+      ),
+    ).toBe('written');
+    expect(
+      heardFrom(
+        'This fulfilled what was spoken by the prophet:',
+        '',
+        'I will open my mouth in parables.',
+      ),
+    ).toBe('written');
+    expect(
+      heardFrom(
+        'For John is the one Isaiah the prophet spoke about when he said,',
+        '',
+        'The voice of one shouting in the wilderness.',
+      ),
+    ).toBe('written');
+    // Someone speaking of a prophet is still speaking.
+    expect(
+      heardFrom('Jesus said to them,', '', 'A prophet is not without honor.'),
+    ).toBeNull();
+  });
+
   it('gives "they" to the story\'s group, and "he" to the man named last', () => {
     const feeding = [
       'Jesus came out, saw a great multitude, and he began to teach them many things.',
@@ -282,4 +443,3 @@ describe('voices beyond the stage', () => {
     ]);
   });
 });
-

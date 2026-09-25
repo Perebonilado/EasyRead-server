@@ -139,6 +139,37 @@ In the end, the leper's plea and both of the centurion's lines are said by Jesus
    - A bubble is carried only while words remain, keeping its thought style.
    - A stretcher, not a hospital bed, in an ancient world.
 
+## Status (2026-09-25): built, tested, and both books remade locally
+
+On branch `visualize-true-stories` in both repos, committed locally, not pushed. Richard took all five recommendations.
+
+**Built, by part:**
+- **Part 1, reading the book right.**
+  - The column-aware reading order (`reading-order.ts`), now also reading a page's running head first when it is split across the gutter.
+  - Every note keeps direct speech.
+  - The story's own words (`story-text.ts`) drop verse numbers, footnote marks, running heads and notes, including a mark or verse number set on a line of its own, and join words broken around a mark.
+  - `npm run doc:reread -- <id> [--go]` reads a document again in place: its pages, its notes, and its story.
+- **Part 2, who's who and who says it.**
+  - The merge, the attribution rules and the checks, as planned.
+  - Testing Matthew found more, now fixed:
+    - a lead-in with "shouting" or "crying";
+    - "When Jesus entered…, he said";
+    - "As Jesus went on…, he saw Matthew";
+    - someone the story does not name ("a ruler came and said"), left to the writer;
+    - a speech running on to the next page;
+    - scripture the book quotes, read by the narrator.
+- **Part 3, scenes, and where people are.**
+  - Scenes as planned.
+  - The story reading now says where each person is when some are apart (Sally in the cave, the boys beside it). The stage keeps them there and cuts between the places, and a later scene the writer gives moves them (Mark's father climbing down).
+  - A stage is never left empty. A scene that names no one keeps who was there, and the one a narration is about comes into view.
+  - A place the writer or the narration names is found among the story's places.
+  - The first page is a title card; the other front and back pages are not made.
+
+**Decided while testing:**
+- **The story reader is gpt-4.1 now, not 4.1-mini** (`AI_MODEL_SCENE_STORY`). Mini put James in the cave with Sally in two of three readings; 4.1 got it right in three of three. It costs about five times as much, once a book: about $0.04 for Hide-and-Seek and $0.30 for Matthew.
+- **The writer gets how the page before ends.** Without it, a line at the top of a page went to the wrong one ("Mark, James, there's something down here", Mark's father's).
+- **A book keeps its 32 most used places, not its first 16.** The reading also lists the other places a page moves through.
+
 ## Decisions for Richard
 1. **Existing books.** The two-column fix needs a document's pages extracted again, and its notes simplified again.
    - Recommended: a script that re-extracts one document in place and remakes its notes, run on Matthew and Hide-and-Seek.

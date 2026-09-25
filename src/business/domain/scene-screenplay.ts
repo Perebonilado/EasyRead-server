@@ -19,6 +19,7 @@ import {
   namedIn,
   quoteContext,
   quotedSpans,
+  subjectsIn,
   type HeardFrom,
   type LineEvidence,
 } from './scene-dialogue';
@@ -411,6 +412,28 @@ export function mendScreenplay(
       thing.parts = thing.parts.map((part) => ({ ...part, label: false }));
   const inCast = new Set(cast.map((thing) => thing.id));
 
+  /** One of the story's places in the cast: the writer's own for it, or brought in. */
+  const castPlace = (ref: string | null | undefined): string | null => {
+    if (!ref) return null;
+    const there = cast.find((t) => t.kind === 'place' && t.ref === ref);
+    if (there) return there.id;
+    const story = (options.places ?? []).find((p) => p.id === ref);
+    if (!story) return null;
+    let id = ref;
+    for (let n = 2; inCast.has(id); n += 1) id = `${ref}-${n}`;
+    const thing: SceneThing = {
+      id,
+      kind: 'place',
+      ref,
+      name: story.name,
+      sound: story.sound ?? null,
+    };
+    cast.push(thing);
+    byId.set(id, thing);
+    inCast.add(id);
+    mended.push(`${id}: one of the story's places; brought into the cast`);
+    return id;
+  };
   /** The thing the writer means, of one of these kinds: by its id, or by a name the story calls them. */
   const known = (
     ref: string | null | undefined,
@@ -425,6 +448,18 @@ export function mendScreenplay(
         ? (cast.find((t) => t.kind === 'character' && t.ref === who.id)?.id ??
           null)
         : null;
+    }
+    if (!id && kinds.includes('place')) {
+      // One of the story's places, which the writer named and left out
+      // of its cast: "place": "peter-s-house".
+      const key = idKey(said);
+      const place = (options.places ?? []).find(
+        (p) =>
+          p.id === said ||
+          idKey(p.id) === key ||
+          [p.name, ...p.aliases].some((name) => idKey(name) === key),
+      );
+      if (place) id = castPlace(place.id);
     }
     const kind = id ? byId.get(id)?.kind : undefined;
     return id && kind && kinds.includes(kind) ? id : null;
@@ -610,7 +645,9 @@ export function mendScreenplay(
   ): LineFrom => {
     const who = storyOf(speaker);
     const presence = who?.presence ?? 'seen';
-    const from: LineFrom = said ?? asked ?? 'here';
+    // Scripture read out is the narrator's, and never reaches here.
+    const from: LineFrom =
+      (said === 'written' ? null : said) ?? asked ?? 'here';
     if (presence === 'above')
       return from === 'phone' || from === 'letter' || from === 'dream'
         ? from
@@ -629,18 +666,18 @@ export function mendScreenplay(
   };
   const book = options.material ? bookLines(options.material, speaking) : [];
   /** Who of the cast a stretch of text names, people only. */
-  const peopleIn = (text: string): string[] => [
-    ...new Set(
-      namedIn(text, [
-        ...speaking.filter((one) => !one.id.startsWith(OUT_OF_CAST)),
-        ...cast.flatMap((thing) =>
-          thing.kind === 'person'
-            ? [{ id: thing.id, names: [thing.name] }]
-            : [],
-        ),
-      ]).map((one) => one.id),
+  const people = () => [
+    ...speaking.filter((one) => !one.id.startsWith(OUT_OF_CAST)),
+    ...cast.flatMap((thing) =>
+      thing.kind === 'person' ? [{ id: thing.id, names: [thing.name] }] : [],
     ),
   ];
+  const peopleIn = (text: string): string[] => [
+    ...new Set(namedIn(text, people()).map((one) => one.id)),
+  ];
+  /** Whom a narration is about, as the one who acts: "Jesus sees the crowd". */
+  const actorIn = (text: string): string | null =>
+    subjectsIn(text, people())[0]?.id ?? null;
   beats.forEach((beat, k) => {
     if (beat.kind !== 'line') return;
     const words = keysOf(beat.say);
@@ -651,6 +688,20 @@ export function mendScreenplay(
       if (found > share) [best, share] = [line, found];
     }
     const matched = best && share >= 0.6 ? best : null;
+    // Scripture the book quotes ("what was spoken by Isaiah the prophet
+    // was fulfilled: …"): read out by the narrator, as a quotation, and
+    // said by no one on the stage.
+    if (matched?.from === 'written') {
+      mended.push(
+        `line ${k + 1}: scripture the book quotes; the narrator reads it`,
+      );
+      beat.kind = 'narration';
+      beat.say = `"${beat.say}"`;
+      delete beat.speaker;
+      delete beat.to;
+      delete beat.pace;
+      return;
+    }
     // Words no character says: the narrator's, whoever the writer gave
     // them to (a question to the viewer; someone telling of themselves as
     // another would; someone's words reported).
@@ -799,10 +850,12 @@ export function mendScreenplay(
       problems.push(
         `These lines of the book are missing or reworded: ${lost
           .slice(0, 5)
-          .map(
-            (line) =>
-              `"${line.text}"${line.speaker ? ` (${line.speaker})` : ''}`,
-          )
+          .map((line) => {
+            const who = line.speaker?.startsWith(OUT_OF_CAST)
+              ? `${line.speaker.slice(OUT_OF_CAST.length)}, not in your cast yet`
+              : line.speaker;
+            return `"${line.text}"${who ? ` (${who})` : ''}`;
+          })
           .join(
             '; ',
           )}. Keep every line the book's characters say on this page, in order and word for word, each a line said by whoever says it; a long speech may be split into lines, never reworded.`,
@@ -839,6 +892,33 @@ export function mendScreenplay(
       problems.push('A screenplay needs at least two lines or narrations.');
   }
 
+  // Where the story has the page's people, when some are apart from the
+  // rest: Sally in the cave, the boys beside it. Each place in the cast,
+  // added where the writer left it out, so the stage can cut to it.
+  const whereabouts = options.whereabouts ?? null;
+  /** Where the page happens, and every place someone on it is. */
+  const pageHere = whereabouts ? castPlace(whereabouts.place) : null;
+  const pagePlaces = new Set(
+    whereabouts
+      ? [pageHere, ...Object.values(whereabouts.people).map(castPlace)]
+      : [],
+  );
+  /** Where someone went on the page, by the writer's words: past where the story has them. */
+  const movedTo = new Map<string, string>();
+  /** Where someone is now: where they went, else where the story has them. */
+  const whereOf = (id: string): string | null => {
+    if (!whereabouts) return null;
+    const moved = movedTo.get(id);
+    if (moved) return moved;
+    const thing = byId.get(id);
+    return thing?.kind === 'character'
+      ? castPlace(whereabouts.people[thing.ref])
+      : null;
+  };
+  /** Where a scene is, as the story knows it: a place of the writer's own is where the page happens. */
+  const sceneAt = (place: string | null): string | null =>
+    place && pagePlaces.has(place) ? place : (pageHere ?? place);
+
   // The page's scenes. A page may hold several: a new one where a
   // narration moves the story, to a place (the writer's, or one of the
   // story's places its words name) or on in time ("That evening"), or
@@ -861,17 +941,18 @@ export function mendScreenplay(
       .toLowerCase()
       .replace(/[’']/g, "'")
       .replace(/[^\p{L}\p{N}']+/gu, ' ')} `;
-  /** One of the page's places its words name. */
+  /** One of the page's places its words name: the cast's, else one of the story's, brought in. */
   const placeNamed = (text: string): string | null => {
     const said = flat(text);
-    for (const [id, names] of placesById)
-      if (
-        names.some((name) => {
-          const key = flat(name).trim();
-          return key.length > 2 && said.includes(` ${key} `);
-        })
-      )
-        return id;
+    const names = (all: readonly string[]) =>
+      all.some((name) => {
+        const key = flat(name).trim();
+        return key.length > 2 && said.includes(` ${key} `);
+      });
+    for (const [id, all] of placesById) if (names(all)) return id;
+    // "Jesus goes to Peter's house", which the writer left out of its cast.
+    for (const place of options.places ?? [])
+      if (names([place.name, ...place.aliases])) return castPlace(place.id);
     return null;
   };
   interface Scene {
@@ -975,6 +1056,19 @@ export function mendScreenplay(
   const gone = new Set<string>();
   /** Who is in another place of the scene, apart from the rest, by the place. */
   const apart = new Map<string, string>();
+  /**
+   * Whether someone is apart from a scene, where the story has them (the
+   * boys beside the tree while the scene is in the cave): kept in view
+   * there, never brought into the scene's place.
+   */
+  const settle = (id: string | null | undefined, scenePlace: string | null) => {
+    if (!whereabouts || !stands(id)) return;
+    const at = whereOf(id);
+    const here = sceneAt(scenePlace);
+    if (!at || !here) return;
+    if (at !== here) apart.set(id, at);
+    else apart.delete(id);
+  };
   /** When each last spoke, by the draft's beat, for whom three a stage shows. */
   const lastSpoke = new Map<string, number>();
   for (const id of opening)
@@ -983,6 +1077,10 @@ export function mendScreenplay(
   // The writer said no one who is in it: those who are there before they
   // are said to come.
   if (!present.length) for (const id of scenes[0].people) present.push(id);
+  // As the page opens, everyone where the story has them: the writer's
+  // first scene is the page as the story tells it.
+  for (const id of new Set([...present, ...parts[0]]))
+    settle(id, scenes[0].place);
   /** The three a story's stage shows of those there: who spoke last first, kept in their places. */
   const three = (people: readonly string[]): string[] => {
     if (people.length <= STORY_ON_STAGE) return [...people];
@@ -1127,12 +1225,25 @@ export function mendScreenplay(
     if (nowScene !== sceneIndex) {
       sceneIndex = nowScene;
       const scene = scenes[nowScene];
-      present.splice(0, present.length, ...scene.people);
+      // A scene that names no one ("When evening comes, …") goes on with
+      // whoever was there: never an empty stage.
+      const stay = present.filter((id) => !apart.has(id) && !gone.has(id));
+      present.splice(
+        0,
+        present.length,
+        ...(scene.people.length ? scene.people : stay),
+      );
       shown.length = 0;
       gone.clear();
       apart.clear();
       view = null;
       fresh = { ...(scene.place ? { backdrop: scene.place } : {}), cut: true };
+      // A later scene's people went there; the rest are where they were.
+      const there = sceneAt(scene.place);
+      if (whereabouts && there)
+        for (const id of scene.people) movedTo.set(id, there);
+      for (const id of new Set([...present, ...parts[nowScene]]))
+        settle(id, scene.place);
     }
     const scenePlace = scenes[sceneIndex].place;
     const k = spokenAt.get(at);
@@ -1176,8 +1287,15 @@ export function mendScreenplay(
       // narration about only those apart, at them.
       let look = fresh ? null : view;
       if (beat.kind === 'line' && speaker && here && stands(speaker)) {
+        // Where the writer says the line is said; else where the story
+        // has them.
         const lineAt = known(raw.place, ['place']);
-        if (lineAt && lineAt !== scenePlace) apart.set(speaker, lineAt);
+        if (lineAt) {
+          if (sceneAt(lineAt) !== sceneAt(scenePlace))
+            apart.set(speaker, lineAt);
+          else apart.delete(speaker);
+          if (whereabouts) movedTo.set(speaker, sceneAt(lineAt) ?? lineAt);
+        } else settle(speaker, scenePlace);
         look = apart.get(speaker) ?? null;
       } else if (beat.kind === 'narration') {
         const about = [
@@ -1186,6 +1304,7 @@ export function mendScreenplay(
             ...peopleIn(beat.say),
           ]),
         ].filter(stands);
+        for (const id of about) settle(id, scenePlace);
         if (about.length)
           look = about.every((id) => apart.has(id))
             ? apart.get(about[0])!
@@ -1194,14 +1313,23 @@ export function mendScreenplay(
       // Someone here who is not on the stage comes into view. One the
       // words sent off calls from off it, unless no one is left: then the
       // scene goes with them, and they are back.
+      // So does the one a narration is about ("Jesus sees the crowd").
+      const comer =
+        beat.kind === 'line'
+          ? here
+            ? speaker
+            : null
+          : beat.kind === 'narration'
+            ? actorIn(beat.say)
+            : null;
       const cutIn =
-        speaker &&
-        here &&
+        comer &&
         look === null &&
-        stands(speaker) &&
-        !present.includes(speaker) &&
-        (!gone.has(speaker) || !present.length)
-          ? [speaker]
+        stands(comer) &&
+        !present.includes(comer) &&
+        !apart.has(comer) &&
+        (!gone.has(comer) || !present.length)
+          ? [comer]
           : [];
       for (const id of cutIn) {
         present.push(id);
@@ -1213,7 +1341,10 @@ export function mendScreenplay(
         ...(fresh ?? {}),
         ...(place ? { backdrop: place } : {}),
         ...(switched && !fresh
-          ? { backdrop: view ?? scenePlace ?? undefined, cut: true as const }
+          ? {
+              backdrop: view ?? scenePlace ?? pageHere ?? undefined,
+              cut: true as const,
+            }
           : {}),
         ...(cutIn.length ? { cutIn } : {}),
       });
@@ -1247,25 +1378,47 @@ export function mendScreenplay(
     const who = known(raw.who, [...PEOPLE, 'drawing']);
     const effects: SceneEffect[] = [];
     let extra: Partial<SceneStage> | null = fresh;
-    // What someone apart does is seen where they are.
-    const look =
-      who && apart.has(who)
+    // What someone apart does is seen where they are. Someone coming
+    // arrives in the scene's place, or where the story has them.
+    const entering =
+      raw.do === 'enter' &&
+      stands(who) &&
+      (!present.includes(who) || apart.has(who));
+    if (!entering) settle(who, scenePlace);
+    const arriveAt = (() => {
+      const at = entering ? whereOf(who) : null;
+      return at && at !== sceneAt(scenePlace) ? at : null;
+    })();
+    const look = entering
+      ? arriveAt
+      : who && apart.has(who)
         ? apart.get(who)!
         : who && stands(who)
           ? null
           : view;
     if (look !== view && !fresh) {
       view = look;
-      extra = { backdrop: view ?? scenePlace ?? undefined, cut: true };
+      extra = {
+        backdrop: view ?? scenePlace ?? pageHere ?? undefined,
+        cut: true,
+      };
     }
-    if (raw.do === 'enter' && stands(who) && !present.includes(who)) {
+    if (entering) {
       // With whoever they bring: "leading a brown goat on a rope".
       const coming = [
         who,
-        ...companionsOf(who, raw).filter((id) => !present.includes(id)),
+        ...companionsOf(who, raw).filter(
+          (id) => !present.includes(id) || apart.has(id),
+        ),
       ];
       for (const id of coming) {
-        present.push(id);
+        if (!present.includes(id)) present.push(id);
+        if (arriveAt) apart.set(id, arriveAt);
+        else apart.delete(id);
+        if (whereabouts) {
+          const into = arriveAt ?? sceneAt(scenePlace);
+          if (into) movedTo.set(id, into);
+        }
         gone.delete(id);
         lastSpoke.set(id, at);
       }
@@ -1282,6 +1435,16 @@ export function mendScreenplay(
         apart.delete(id);
       }
       extra = { ...(extra ?? {}), leave: going };
+      // No one left where the stage looks, and some of the page elsewhere
+      // (the last two climb out of the cave, the boys above): it cuts to
+      // them, and is never left empty.
+      if (!stageNow().show.length) {
+        const elsewhere = [...apart.values()].find((place) => place !== view);
+        if (elsewhere) {
+          view = elsewhere;
+          extra = { ...extra, backdrop: elsewhere, cut: true };
+        }
+      }
     }
     if (isPerson(who) && (raw.do === 'hug' || raw.do === 'reach')) {
       const other = known(raw.to, PEOPLE);

@@ -261,14 +261,25 @@ export interface StoryPlace {
 
 export interface StoryPage {
   page: number;
+  /**
+   * False for a page that is not the story itself: a title page, a
+   * publisher's letter, an advert. Missing on a page read before pages
+   * were told apart, which is the story's.
+   */
+  story?: false;
   /** What happens, in a sentence. */
   summary: string;
-  /** Who is there, and how each feels. */
-  present: { id: string; mood: Expression }[];
+  /**
+   * Who is there, and how each feels; where one is apart from the rest,
+   * the place they are in (Sally in the cave, the boys beside it).
+   */
+  present: { id: string; mood: Expression; at?: string }[];
   /** Where it happens: a place's id. */
   place: string | null;
   /** Whether where it happens was worked out rather than said. */
   placeInferred?: boolean;
+  /** The other places the page moves to, in order: the tombs, then home. */
+  also?: string[];
   /** When it happens, as the light shows it; null where nothing says. */
   time?: StoryTime | null;
   weather?: StoryWeather | null;
@@ -328,10 +339,12 @@ export interface StoryDraft {
   }[];
   pages: {
     page: number;
+    story?: boolean | null;
     summary: string;
-    present: { name: string; mood: Expression }[];
+    present: { name: string; mood: Expression; place?: string | null }[];
     place: string | null;
     placeInferred?: boolean | null;
+    also?: string[] | null;
     time?: StoryTime | null;
     weather?: StoryWeather | null;
     crowd?: StoryCrowd | null;
@@ -402,16 +415,20 @@ export function titleCard(bible: StoryBible, file: string): SceneScript {
   };
 }
 
-/** Whether a page comes before a story's first page or after its last: its front or back matter. */
+/**
+ * Whether a page comes before a story's first page or after its last: its
+ * front or back matter, a title page to a back cover's advert. A page the
+ * reader never listed, or one between two of the story's, is the story's.
+ */
 export function outsideStory(bible: StoryBible, page: number): boolean {
-  const pages = bible.pages.map((p) => p.page);
+  const pages = bible.pages.filter((p) => p.story !== false).map((p) => p.page);
   if (!pages.length) return false;
   return page < Math.min(...pages) || page > Math.max(...pages);
 }
 
 /** The most characters and places a book keeps: beyond them, the crowd and the scenery. */
 export const MAX_CHARACTERS = 40;
-export const MAX_PLACES = 16;
+export const MAX_PLACES = 32;
 const MAX_TRAITS = 3;
 const MAX_ALIASES = 6;
 /** The most characters the writer is told of on one page. */
@@ -667,6 +684,8 @@ export function mergeStory(
     Named & { order: number; named: number; marked: boolean })[] = [];
   const places: (StoryPlace & Named & { named: number })[] = [];
   const pages = new Map<number, StoryPage>();
+  /** Who the reader gave a place of their own, page by page. */
+  const placedBy = new Set<string>();
   const sorted = [...parts].sort((a, b) => a.from - b.from);
   // The world as the first stretch that could tell it says; the book's
   // title and author as its first pages give them.
@@ -682,7 +701,15 @@ export function mergeStory(
       const name = clean(raw.name);
       if (!name) continue;
       const aliases = (raw.aliases ?? []).map(clean).filter(Boolean);
-      const found = findNamed(characters, [name, ...aliases], part.from);
+      // Whom the stretch means: the one its own name names; else one its
+      // other names name, but never a group for one person or one for a
+      // group ("the disciples", with Peter and John among their names, are
+      // not John the Baptist).
+      const group = kindOf(raw.kind) === 'group';
+      const byAlias = findNamed(characters, [name, ...aliases], part.from);
+      const found =
+        findNamed(characters, [name], part.from) ??
+        (byAlias && (byAlias.kind === 'group') === group ? byAlias : null);
       const traits = (raw.traits ?? [])
         .map((trait) => clean(trait).slice(0, 40))
         .filter(Boolean);
@@ -775,17 +802,20 @@ export function mergeStory(
     for (const raw of part.draft.pages) {
       const page = Math.round(raw.page);
       if (!(page >= part.from && page <= part.to)) continue;
-      const present: StoryPage['present'] = [];
-      for (const one of raw.present ?? []) {
-        // A page names who is on it by any of their names, shortened too.
-        const who = findNamed(characters, [clean(one.name)], -1);
-        if (!who || present.some((p) => p.id === who.id)) continue;
-        present.push({
-          id: who.id,
-          mood: EXPRESSIONS.includes(one.mood) ? one.mood : 'neutral',
+      // A page that is not the story: no one is on it, nowhere, never.
+      if (raw.story === false) {
+        pages.set(page, {
+          page,
+          story: false,
+          summary: clean(raw.summary).slice(0, 300),
+          present: [],
+          place: null,
+          placeInferred: false,
+          time: null,
+          weather: null,
+          crowd: 'none',
         });
-        // The book meets them where they are first on a page.
-        who.firstPage = Math.min(who.firstPage, page);
+        continue;
       }
       const where = raw.place
         ? findNamed(places, [clean(raw.place)], -1)
@@ -795,12 +825,46 @@ export function mergeStory(
         // A place any page says outright is the text's, not worked out.
         if (!raw.placeInferred) where.inferred = false;
       }
+      const present: StoryPage['present'] = [];
+      for (const one of raw.present ?? []) {
+        // A page names who is on it by any of their names, shortened too.
+        const who = findNamed(characters, [clean(one.name)], -1);
+        if (!who || present.some((p) => p.id === who.id)) continue;
+        // Apart from the rest, in one of the story's places.
+        const apart = one.place
+          ? findNamed(places, [clean(one.place)], -1)
+          : null;
+        if (apart) placedBy.add(`${page}:${who.id}`);
+        if (apart && apart !== where)
+          apart.firstPage = Math.min(apart.firstPage, page);
+        present.push({
+          id: who.id,
+          mood: EXPRESSIONS.includes(one.mood) ? one.mood : 'neutral',
+          ...(apart && apart !== where ? { at: apart.id } : {}),
+        });
+        // The book meets them where they are first on a page.
+        who.firstPage = Math.min(who.firstPage, page);
+      }
+      // The other places it goes, each one of the story's, in order.
+      const also = [
+        ...new Set(
+          (raw.also ?? [])
+            .map((name) => findNamed(places, [clean(name)], -1))
+            .filter((one): one is NonNullable<typeof one> => Boolean(one))
+            .filter((one) => one !== where)
+            .map((one) => {
+              one.firstPage = Math.min(one.firstPage, page);
+              return one.id;
+            }),
+        ),
+      ];
       pages.set(page, {
         page,
         summary: clean(raw.summary).slice(0, 300),
         present,
         place: where?.id ?? null,
         placeInferred: Boolean(where && raw.placeInferred),
+        ...(also.length ? { also } : {}),
         time: timeOf(raw.time),
         weather: weatherOf(raw.weather),
         crowd: crowdOf(raw.crowd),
@@ -814,6 +878,8 @@ export function mergeStory(
   let last: string | null = null;
   let lastTime: StoryPage['time'] = null;
   for (const page of [...pages.values()].sort((a, b) => a.page - b.page)) {
+    // An advert between two pages happens nowhere, and is passed over.
+    if (page.story === false) continue;
     if (!page.place && last) {
       page.place = last;
       page.placeInferred = true;
@@ -821,6 +887,26 @@ export function mergeStory(
     last = page.place ?? last;
     if (!page.time && lastTime) page.time = lastTime;
     lastTime = page.time ?? lastTime;
+  }
+  // On a page where some are apart (or the reader placed some and not
+  // the rest), one it gave no place is where they were on the last page
+  // they were on: the boys stay above while the page follows Sally's
+  // rescuer down into the cave.
+  const lastAt = new Map<string, string>();
+  for (const page of [...pages.values()].sort((a, b) => a.page - b.page)) {
+    if (page.story === false) continue;
+    const placed = (id: string) => placedBy.has(`${page.page}:${id}`);
+    const split =
+      page.present.some((one) => one.at) ||
+      (page.present.some((one) => placed(one.id)) &&
+        page.present.some((one) => !placed(one.id)));
+    for (const one of page.present) {
+      const was = lastAt.get(one.id);
+      if (split && !one.at && !placed(one.id) && was && was !== page.place)
+        one.at = was;
+      const at = one.at ?? page.place;
+      if (at) lastAt.set(one.id, at);
+    }
   }
   // The ones the book cannot do without, when there are too many.
   const onPages = (id: string) =>
@@ -862,9 +948,23 @@ export function mergeStory(
       })),
       new Set(kept.filter((c) => c.marked).map((c) => c.id)),
     ),
+    // The places most of its pages happen in, in the order the book
+    // reaches them: never only the first ones, so a long book's last
+    // chapters still have their own.
     places: places
-      .sort((a, b) => a.firstPage - b.firstPage)
+      .map((place) => ({
+        place,
+        used: [...pages.values()].filter(
+          (page) =>
+            page.place === place.id ||
+            Boolean(page.also?.includes(place.id)) ||
+            page.present.some((one) => one.at === place.id),
+        ).length,
+      }))
+      .sort((a, b) => b.used - a.used || a.place.firstPage - b.place.firstPage)
       .slice(0, MAX_PLACES)
+      .map(({ place }) => place)
+      .sort((a, b) => a.firstPage - b.firstPage)
       .map((p) => ({
         id: p.id,
         name: p.name,
@@ -919,6 +1019,21 @@ export function bibleOf(
       carries: c.carries ?? null,
     }));
   const known = new Set(characters.map((c) => c.id));
+  const places = (raw.places ?? [])
+    .filter((p) => p && clean(p.id) && clean(p.name))
+    .map((p) => ({
+      id: clean(p.id),
+      name: clean(p.name),
+      aliases: (p.aliases ?? []).map(clean).filter(Boolean),
+      look: clean(p.look),
+      firstPage: Number.isFinite(p.firstPage) ? p.firstPage : 1,
+      sound: soundOf(p.sound),
+      kind: placeKindOf(p.kind),
+      stand: standOf(p.stand),
+      front: clean(p.front) || null,
+      inferred: Boolean(p.inferred),
+    }));
+  const placeIds = new Set(places.map((p) => p.id));
   return {
     // A well-known figure is drawn as their tradition shows them, in a
     // book read before they were: by a name that could be no one else.
@@ -926,28 +1041,28 @@ export function bibleOf(
       characters,
       new Set(characters.filter((c) => c.iconic).map((c) => c.id)),
     ),
-    places: (raw.places ?? [])
-      .filter((p) => p && clean(p.id) && clean(p.name))
-      .map((p) => ({
-        id: clean(p.id),
-        name: clean(p.name),
-        aliases: (p.aliases ?? []).map(clean).filter(Boolean),
-        look: clean(p.look),
-        firstPage: Number.isFinite(p.firstPage) ? p.firstPage : 1,
-        sound: soundOf(p.sound),
-        kind: placeKindOf(p.kind),
-        stand: standOf(p.stand),
-        front: clean(p.front) || null,
-        inferred: Boolean(p.inferred),
-      })),
+    places,
     pages: (raw.pages ?? []).map((p) => ({
       page: p.page,
+      ...(p.story === false ? { story: false as const } : {}),
       summary: clean(p.summary),
-      present: (p.present ?? []).filter(
-        (one) => known.has(one.id) && EXPRESSIONS.includes(one.mood),
-      ),
+      present: (p.present ?? [])
+        .filter((one) => known.has(one.id) && EXPRESSIONS.includes(one.mood))
+        .map((one) =>
+          typeof one.at === 'string' &&
+          placeIds.has(one.at) &&
+          one.at !== p.place
+            ? { id: one.id, mood: one.mood, at: one.at }
+            : { id: one.id, mood: one.mood },
+        ),
       place: p.place ?? null,
       placeInferred: Boolean(p.placeInferred),
+      ...(Array.isArray(p.also) &&
+      p.also.some((id) => placeIds.has(id) && id !== p.place)
+        ? {
+            also: p.also.filter((id) => placeIds.has(id) && id !== p.place),
+          }
+        : {}),
       time: timeOf(p.time),
       weather: weatherOf(p.weather),
       crowd: crowdOf(p.crowd),
@@ -1130,14 +1245,20 @@ export function describeStory(bible: StoryBible, page: number): string {
   const here = bible.pages.find((p) => p.page === page);
   const people = charactersOn(bible, page);
   if (!people.length) return '';
+  const placeOf = (id: string | undefined) =>
+    id ? bible.places.find((p) => p.id === id) : undefined;
   const lines = people.map((c) => {
-    const mood = here?.present.find((one) => one.id === c.id)?.mood;
+    const one = here?.present.find((p) => p.id === c.id);
+    const apart = placeOf(one?.at);
     return [
       `- ${c.id}: ${c.name}${c.aliases.length ? ` (also ${c.aliases.slice(0, 3).join(', ')})` : ''}`,
       c.traits.length ? `, ${c.traits.join(', ')}` : '',
       HEARD_NOTE[c.kind === 'group' ? 'group' : (c.presence ?? 'seen')],
       `. Starts the page ${moodBefore(bible, c.id, page)}`,
-      mood ? `; on it mostly ${mood}` : '',
+      one?.mood ? `; on it mostly ${one.mood}` : '',
+      apart
+        ? `. On this page they are apart from the rest, in ${apart.name} (${apart.id})`
+        : '',
       c.firstPage === page
         ? '. The book meets them for the first time here'
         : '',
@@ -1145,10 +1266,31 @@ export function describeStory(bible: StoryBible, page: number): string {
     ].join('');
   });
   const place = placeOn(bible, page);
+  // Where those apart are, after where the page happens.
+  const apartIn = [
+    ...new Set(here?.present.flatMap((one) => (one.at ? [one.at] : []))),
+  ]
+    .map(placeOf)
+    .filter((p): p is StoryPlace => Boolean(p) && p !== place);
+  // Where else the page goes, in order.
+  const goesTo = (here?.also ?? [])
+    .map(placeOf)
+    .filter(
+      (p): p is StoryPlace =>
+        p !== undefined && p !== place && !apartIn.includes(p),
+    );
   // The places the story has reached by this page, the page's own first.
   const places = [
     ...(place ? [place] : []),
-    ...bible.places.filter((p) => p.firstPage <= page && p.id !== place?.id),
+    ...apartIn,
+    ...goesTo,
+    ...bible.places.filter(
+      (p) =>
+        p.firstPage <= page &&
+        p !== place &&
+        !apartIn.includes(p) &&
+        !goesTo.includes(p),
+    ),
   ].slice(0, MAX_ON_PAGE);
   const world = bible.world;
   const crowd = crowdOn(bible, page);
@@ -1174,7 +1316,7 @@ export function describeStory(bible: StoryBible, page: number): string {
       : '',
     ...places.map(
       (p) =>
-        `- ${p.id}: ${p.name}${p === place ? ', where this page happens: behind the stage from the start' : ''}${p === place && p.stand === 'in' && p.front ? `; the characters are in it, behind ${p.front}` : ''}.`,
+        `- ${p.id}: ${p.name}${p === place ? ', where this page happens: behind the stage from the start' : ''}${apartIn.includes(p) ? ', where some are apart on this page: the place of each line said there' : ''}${goesTo.includes(p) ? ', where this page also goes: the place of the scene there' : ''}${p === place && p.stand === 'in' && p.front ? `; the characters are in it, behind ${p.front}` : ''}.`,
     ),
     when.length ? `${when.join('; ')}.` : '',
     here?.summary ? `What happens: ${here.summary}` : '',
@@ -1278,7 +1420,7 @@ export function castStory(
         Boolean(
           bible.pages
             .find((p) => p.page === page - 1)
-            ?.present.some((one) => one.id === t.ref),
+            ?.present.some((one) => one.id === t.ref && !one.at),
         ),
     )
     .sort((a, b) => a.met - b.met)
@@ -1325,6 +1467,39 @@ export function crowdOn(bible: StoryBible, page: number): StoryCrowd | null {
 export function placeOn(bible: StoryBible, page: number): StoryPlace | null {
   const id = bible.pages.find((p) => p.page === page)?.place;
   return id ? (bible.places.find((p) => p.id === id) ?? null) : null;
+}
+
+/** Where a page's people are, when they are not all in one place. */
+export interface Whereabouts {
+  /** Where the page happens: the place of those not apart. */
+  place: string | null;
+  /** Each one's place, by their id. */
+  people: Record<string, string>;
+}
+
+/**
+ * Where a page's people are when some are apart from the rest (Sally in
+ * the cave, the boys beside it): each one's place. Null on a page where
+ * they are all in one place.
+ */
+export function whereaboutsOn(
+  bible: StoryBible,
+  page: number,
+): Whereabouts | null {
+  const on = bible.pages.find((p) => p.page === page);
+  // Only those who stand on the stage: a crowd or a voice apart splits
+  // no page.
+  const standing = (on?.present ?? []).filter((one) =>
+    standsOnStage(bible.characters.find((c) => c.id === one.id) ?? {}),
+  );
+  if (!on || !standing.some((one) => one.at && one.at !== on.place))
+    return null;
+  const people: Record<string, string> = {};
+  for (const one of standing) {
+    const at = one.at ?? on.place;
+    if (at) people[one.id] = at;
+  }
+  return { place: on.place, people };
 }
 
 /**

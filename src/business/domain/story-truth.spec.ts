@@ -50,6 +50,15 @@ describe('the story truth set: Hide-and-Seek', () => {
     ]);
   });
 
+  it('goes on with the one whose tag stands between two quotes, not the one named after', () => {
+    const page10 =
+      '“Keep yelling Sally,” James screamed. “That way we can find you.” Sally heard her brother and kept screaming.';
+    expect(said(page10, HIDE)).toEqual([
+      'james: Keep yelling Sally,',
+      'james: That way we can',
+    ]);
+  });
+
   it('never gives a line the tag of the quote beside it', () => {
     const page5 =
       '“I was just going to say that,” James said. “Yah, I’ll bet,” replied his sister. “Do not!” James said in a loud voice. “Do too,” yelled Sally.';

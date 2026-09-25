@@ -751,6 +751,7 @@ export class AiSdkLlmAdapter implements LlmGatewayPort, OnModuleInit {
     profile?: string;
     story?: string;
     plain?: string;
+    before?: string;
     previous?: ScreenplayDraft;
     problems?: string[];
   }): Promise<LlmResult<ScreenplayDraft>> {
@@ -767,6 +768,11 @@ export class AiSdkLlmAdapter implements LlmGatewayPort, OnModuleInit {
         ...(input.profile ? [input.profile] : []),
         ...(input.story ? [input.story] : []),
         input.context,
+        ...(input.before
+          ? [
+              `The page before ends, for whom a line at the top of this one follows on from; it is not this page's to tell:\n${input.before}`,
+            ]
+          : []),
         `The page, in the book's own words:\n${input.material}`,
         ...(input.plain
           ? [

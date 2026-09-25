@@ -150,6 +150,28 @@ function gutterOf(rows: readonly Row[]): number | null {
   return gutter;
 }
 
+/**
+ * The running head: a short line at the top of the page, set off from the
+ * body by more than its lines are apart from each other. Read first and
+ * whole, wherever its parts stand: split at the gutter, its page number
+ * would begin one column and its title the other, in the middle of the
+ * page's words.
+ */
+function headOf(rows: readonly Row[], body: number): Row | null {
+  const lines = rows.filter((row) => sizeOf(row) >= body * 0.85);
+  if (lines.length < 4) return null;
+  const gaps = lines
+    .slice(1, -1)
+    .map((row, i) => row.y - lines[i + 2].y)
+    .sort((a, b) => a - b);
+  const usual = gaps[Math.floor(gaps.length / 2)];
+  const [top, next] = lines;
+  const words = lineOf(top.parts, top.height)
+    .split(/\s+/)
+    .filter(Boolean).length;
+  return usual > 0 && top.y - next.y > usual * 1.35 && words <= 8 ? top : null;
+}
+
 /** A line of one column: its words and its type size. */
 interface Line {
   text: string;
@@ -182,6 +204,7 @@ function readRows(rows: readonly Row[], body: number): [string[], string[]] {
     const [main, notes] = footOf(lines, body);
     return [main.map((l) => l.text), notes.map((l) => l.text)];
   }
+  const head = headOf(rows, body);
   const out: string[] = [];
   let left: Line[] = [];
   let right: Line[] = [];
@@ -198,9 +221,9 @@ function readRows(rows: readonly Row[], body: number): [string[], string[]] {
     return [...leftNotes, ...rightNotes].map((l) => l.text);
   };
   for (const row of rows) {
-    const crosses = row.parts.some(
-      (p) => p.x < gutter - 0.5 && p.x + p.width > gutter + 0.5,
-    );
+    const crosses =
+      row === head ||
+      row.parts.some((p) => p.x < gutter - 0.5 && p.x + p.width > gutter + 0.5);
     if (crosses) {
       flush(false);
       const line = lineOf(row.parts, row.height);

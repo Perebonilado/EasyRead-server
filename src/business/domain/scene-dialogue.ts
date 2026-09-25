@@ -14,14 +14,17 @@
  * straight single quotes opened at the start of a word and closed after
  * punctuation ('You're late,' says Tobi). And a quote the writer never
  * opened, from the sentence's start to its closing mark, or never closed,
- * from its opening mark to the end.
+ * from its opening mark to the end. Words are said; so is a count ("100 –
+ * 99 – 98"), but not a number or a time set in quotes.
  */
 export function quotedSpans(sentence: string): [number, number][] {
   const spans: [number, number][] = [];
   const add = (start: number, end: number) => {
     while (start < end && /\s/.test(sentence[start])) start += 1;
     while (end > start && /\s/.test(sentence[end - 1])) end -= 1;
-    if (/\p{L}/u.test(sentence.slice(start, end))) spans.push([start, end]);
+    const inner = sentence.slice(start, end);
+    if (/\p{L}/u.test(inner) || (inner.match(/\p{N}+/gu) ?? []).length >= 3)
+      spans.push([start, end]);
   };
   const runs = (pattern: RegExp) => {
     for (const m of sentence.matchAll(pattern)) {
@@ -31,6 +34,23 @@ export function quotedSpans(sentence: string): [number, number][] {
     }
   };
   runs(/“([^”]+)”|"([^"]+)"|‘(.+?)’(?!\p{L})/gu);
+  if (spans.length) {
+    // A speech that runs on past the sentence, into the next paragraph or
+    // page, as a Bible sets a long one: open at its end, or closed at its
+    // start, beside quotes that are whole.
+    const first = spans[0][0];
+    const last = spans[spans.length - 1][1];
+    const closes = sentence.indexOf('”');
+    if (
+      closes >= 0 &&
+      closes < first - 1 &&
+      !sentence.slice(0, closes).includes('“')
+    )
+      add(0, closes);
+    const opens = sentence.lastIndexOf('“');
+    if (opens >= last && !sentence.includes('”', opens))
+      add(opens + 1, sentence.length);
+  }
   if (!spans.length) runs(/(?<![\p{L}\p{N}])'(\p{L}.*?[,.!?…])'(?!\p{L})/gu);
   if (!spans.length) {
     const unopened = /^(.+?[,.!?…])['’"”](?=\s|$)/u.exec(sentence);
@@ -77,7 +97,8 @@ export type LineEvidence =
  * heaven or the sky ("above"), a voice from somewhere out of sight
  * ("off"), a phone or a radio, a letter read out, a thought.
  */
-export type HeardFrom = 'above' | 'off' | 'phone' | 'letter' | 'thought';
+export type HeardFrom =
+  'above' | 'off' | 'phone' | 'letter' | 'thought' | 'written';
 
 /** One quoted line: the sentence it is in, where in it, and who says it. */
 export interface DialogueLine {
@@ -90,6 +111,12 @@ export interface DialogueLine {
   from?: HeardFrom;
 }
 
+/**
+ * Scripture the book quotes, read out and said by no one there: "what was
+ * spoken by Isaiah the prophet was fulfilled:", "as it is written".
+ */
+const SCRIPTURE =
+  /\b(?:spoken|said|written|foretold)\s+(?:by|through)\s+(?:the\s+lord\s+through\s+)?(?:the\s+)?(?:prophets?|\p{L}+\s+the\s+prophet)\b|\b(?:it\s+is|it\s+was|as\s+it\s+is|for\s+it\s+is)\s+written\b|\bthe\s+prophet\s+(?:spoke|said|says|wrote)\b|\bthe\s+scriptures?\s+(?:says?|said)\b/iu;
 /** A voice from heaven, the sky, the clouds: no one on the stage says it. */
 const VOICE_ABOVE =
   /\b(?:a|the)\s+(?:loud\s+|great\s+|deep\s+|gentle\s+)?voice\s+(?:came\s+|spoke\s+|sounded\s+|was\s+heard\s+|rang\s+out\s+|boomed\s+|called\s+|said\s+)?(?:from|out\s+of)\s+(?:heaven|the\s+heavens|the\s+sky|the\s+skies|above|on\s+high|the\s+clouds?)\b|\bfrom\s+(?:heaven|the\s+heavens|the\s+clouds?|on\s+high)\s*,?\s*(?:a|the)\s+voice\b/iu;
@@ -132,6 +159,7 @@ export function heardFrom(
   after: string,
   quote: string,
 ): HeardFrom | null {
+  if (SCRIPTURE.test(lead)) return 'written';
   const near = attributionAfter(quote, after);
   const around = `${lead} ${near}`;
   if (VOICE_ABOVE.test(around)) return 'above';
@@ -195,10 +223,13 @@ function subjectOf(
     .trim()
     .replace(/^(?:then|and|but|so|now|again)\s+/iu, '');
   if (!/\p{L}/u.test(main)) return undefined;
+  // "As Jesus went on from there, he saw a man named Matthew": the "he"
+  // is the one the opening names, never the man he saw.
+  if (/^(?:he|she|they|it|his|her|their|its)\b/iu.test(main))
+    return openedBy(sentence, fits);
   const head = main.split(/\s+/).slice(0, 8).join(' ');
   const named = subjectsIn(head, fits)[0];
   if (named) return named.id;
-  if (/^(?:he|she|they|it|his|her|their|its)\b/iu.test(main)) return undefined;
   if (subjectsIn(head, everyone).length) return undefined;
   if (
     /^(?:a|an|the|some|one|another|two|three|four|five|several|many)\b/iu.test(
@@ -220,10 +251,19 @@ function outsideQuotes(sentence: string): string {
 /** Words that say someone speaks, as a story tells it: aloud, in a thought, or in writing. */
 const SPEECH =
   'thinks|thought|writes|wrote|says|said|asks|asked|replies|replied|answers|answered|shouts|shouted|yells|yelled|calls|called|cries|cried|whispers|whispered|mutters|muttered|murmurs|murmured|adds|added|explains|explained|begins|began|continues|continued|snaps|snapped|exclaims|exclaimed|insists|insisted|agrees|agreed|admits|admitted|tells|told|warns|warned|promises|promised|squeaks|squeaked|growls|growled|barks|barked|chirps|chirped|hisses|hissed|roars|roared|pleads|pleaded|begs|begged|announces|announced|declares|declared|wonders|wondered|repeats|repeated|jokes|joked|teases|teased|grumbles|grumbled|sings|sang|calls out|called out|responds|responded|remarks|remarked|demands|demanded|inquires|inquired|screams|screamed|sobs|sobbed|urges|urged|interrupts|interrupted|commands|commanded|orders|ordered|rebukes|rebuked|scolds|scolded|mumbles|mumbled|stammers|stammered|whimpers|whimpered|bellows|bellowed|saying|say|ask|tell|reply|answer|shout|yell';
+/**
+ * Speaking as it leads into a quote ("two blind men followed him,
+ * shouting, …"): before a quote only, never a tag after one, where
+ * "…and kept screaming." is no one's tag.
+ */
+const LEADING =
+  'shouting|crying|calling|asking|answering|replying|whispering|pleading|begging|praying|screaming|yelling|exclaiming|declaring|announcing|warning|commanding|telling';
 /** What someone does as they speak: theirs only when the sentence runs on into it ("Yes," Kofi nodded). */
 const ACTION =
   'laughs|laughed|giggles|giggled|chuckles|chuckled|groans|groaned|sighs|sighed|smiles|smiled|grins|grinned|nods|nodded|gasps|gasped|shrugs|shrugged|winks|winked|beams|beamed';
 const VERB = new RegExp(`\\b(?:${SPEECH}|${ACTION})\\b`, 'iu');
+/** Speaking, or doing as one speaks, in the words that lead into a quote. */
+const LEAD_VERB = new RegExp(`\\b(?:${SPEECH}|${LEADING}|${ACTION})\\b`, 'iu');
 
 const escape = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
@@ -293,13 +333,46 @@ export function subjectsIn(
   );
 }
 
+/** A sentence's opening before its main clause: "When Jesus went to Capernaum,". */
+const OPENING =
+  /^\s*(?:when|while|as|after|before|if|because|since|although|though|once|until|whenever)\b([^,]*),/iu;
+
 /** The sentence's main clause: past a leading "When Jesus went to Capernaum," and the like. */
 const mainClause = (sentence: string) =>
-  /^\s*(?:when|while|as|after|before|if|because|since|although|though|once|until|whenever)\b[^,]*,/iu.test(
-    sentence,
+  OPENING.test(sentence) ? sentence.replace(/^[^,]*,/u, '') : sentence;
+
+/**
+ * Who a sentence's opening is about, of those who fit: the "he" of the
+ * main clause after "As Jesus went on from there, he saw…".
+ */
+const openedBy = (
+  sentence: string,
+  fits: readonly Speaker[],
+): string | undefined => {
+  const opening = OPENING.exec(outsideQuotes(sentence));
+  return opening ? subjectsIn(opening[1], fits)[0]?.id : undefined;
+};
+
+/**
+ * Whether a clause leading into a quote has someone the story does not
+ * name say it: "a ruler came, bowed low before him, and said,"; "two
+ * blind men followed him, shouting,". The line is theirs, and no one's
+ * the words nearby name.
+ */
+function unnamedLead(clause: string, speakers: readonly Speaker[]): boolean {
+  if (!/[,:—–-]\s*['"“‘]?\s*$/u.test(clause) || !LEAD_VERB.test(clause))
+    return false;
+  const main = mainClause(outsideQuotes(clause))
+    .trim()
+    .replace(/^(?:then|and|but|so|now|again)\s+/iu, '');
+  if (
+    !/^(?:a|an|some|one|another|two|three|four|five|several|many)\s+\p{L}/iu.test(
+      main,
+    )
   )
-    ? sentence.replace(/^[^,]*,/u, '')
-    : sentence;
+    return false;
+  return !subjectsIn(main.split(/\s+/).slice(0, 6).join(' '), speakers).length;
+}
 
 /**
  * Whose voice, letter or note the words bring in, by the name that owns
@@ -328,9 +401,28 @@ function ownerIn(text: string, speakers: readonly Speaker[]): string | null {
  */
 function leadIn(clause: string, speakers: readonly Speaker[]): string | null {
   if (!/[,:—–-]\s*['"“‘]?\s*$/u.test(clause)) return null;
-  const parts = clause.split(/[,;:]|\s(?:and|but|then)\s/u);
+  // Its main clause only: "As Jesus went on from there, two blind men
+  // followed him, shouting," is theirs, never the one the opening names.
+  const parts = mainClause(clause).split(/[,;:]|\s(?:and|but|then)\s/u);
   let k = parts.length - 1;
-  while (k >= 0 && !VERB.test(parts[k])) k -= 1;
+  while (k >= 0 && !LEAD_VERB.test(parts[k])) k -= 1;
+  // In the part with the verb, only the words before it name who speaks:
+  // "they asked Jesus," is asked of Jesus, by them.
+  if (k >= 0) {
+    const verb = LEAD_VERB.exec(parts[k]);
+    if (verb) parts[k] = parts[k].slice(0, verb.index + verb[0].length);
+  }
+  // "…and the disorderly crowd, he said,": the "he" says it, and who he
+  // is is the pronoun's to find, never the crowd named before him.
+  if (
+    k >= 0 &&
+    new RegExp(
+      `\\b(?:he|she|they)\\s+(?:\\w+\\s+)?(?:${SPEECH}|${LEADING})\\b`,
+      'iu',
+    ).test(parts[k]) &&
+    !subjectsIn(parts[k], speakers).length
+  )
+    return null;
   for (let j = k; j >= 0; j -= 1) {
     const named = subjectsIn(parts[j], speakers)[0];
     if (named) return named.id;
@@ -350,9 +442,10 @@ function leadIn(clause: string, speakers: readonly Speaker[]): string | null {
  * 3. the first character named in the last clause before it, since the
  *    last quote or the sentence's start (Nana Efua smiles. "…");
  * 4. the writer's own word for who the sentence quotes;
- * 5. the first character named after it, before the next quote;
- * 6. the speaker of the quote before it in the same sentence, whose speech
+ * 5. the speaker of the quote before it in the same sentence, whose speech
  *    it goes on with ("Ah," he said. "So you've met…");
+ * 6. the first character named in the sentence right after it, before the
+ *    next quote;
  * 7. in a conversation of two, the other of them.
  *
  * Names inside a quote never count, nor anyone's that is someone else's
@@ -401,6 +494,9 @@ export function dialogueOf(
       found(ownerIn(around, speakers), 'voice');
       // 1. Ada asks, "…"
       found(leadIn(clause, speakers), 'lead');
+      // Someone the story does not name leads into it: "a ruler came and
+      // said, …". The writer, who read the page whole, says who.
+      if (!speaker && unnamedLead(clause, speakers)) return;
       // Words after the quote that lead into the next one are the next
       // one's: "…," replied James. "…" Then Sally said, "…".
       const leadsNext =
@@ -429,7 +525,7 @@ export function dialogueOf(
       if (!speaker) {
         const lead = /[,:—–-]\s*['"“‘]?\s*$/u.test(clause)
           ? new RegExp(
-              `^[\\s'"’”]*(?:(?:then|and|so|but|now|again)\\s+)?(he|she|they)\\b[^.!?…]*\\b(?:${SPEECH})\\b`,
+              `^[\\s'"’”]*(?:(?:then|and|so|but|now|again)\\s+)?(he|she|they)\\b[^.!?…]*\\b(?:${SPEECH}|${LEADING})\\b`,
               'iu',
             ).exec(clause)?.[1]
           : undefined;
@@ -447,7 +543,7 @@ export function dialogueOf(
             .find(Boolean) ??
           (own
             ? new RegExp(
-                `\\b(he|she|they)\\s+(?:\\w+\\s+)?(?:${SPEECH})\\b`,
+                `\\b(he|she|they)\\s+(?:\\w+\\s+)?(?:${SPEECH}|${LEADING})\\b`,
                 'iu',
               ).exec(clause)?.[1]
             : undefined);
@@ -459,6 +555,10 @@ export function dialogueOf(
               : s.gender === (word === 'she' ? 'f' : 'm'),
           );
           if (fits.length === 1) found(fits[0].id, 'pronoun');
+          // "When Jesus entered the house…, he said": the one the clause
+          // opens with.
+          else if (fits.length > 1 && openedBy(clause, fits))
+            found(openedBy(clause, fits), 'pronoun');
           else if (fits.length > 1) {
             // Whom it stands for: the subject of the nearest sentence
             // before that has one who fits, this paragraph's or the ones
@@ -505,14 +605,13 @@ export function dialogueOf(
           `^[\\s\\p{P}]*(?:\\p{L}+\\s+){0,3}(?:${SPEECH})\\b(?:\\s+\\p{L}+){0,3}[\\s\\p{P}]*$`,
           'iu',
         ).test(outsideQuotes(sentence).slice(spans[i - 1][1], a));
-      if (!tagOfLast) found(subjectsIn(clause, speakers)[0]?.id, 'before');
+      if (!tagOfLast)
+        found(subjectsIn(mainClause(clause), speakers)[0]?.id, 'before');
       // 4. The writer's word: one for each quote, the last for any after.
       found(hints[Math.min(i, hints.length - 1)], 'writer');
-      // 5. Named after it, before the next quote: never whoever the words
-      // lead into the next quote with ("Jesus reached out, saying, …").
-      if (!leadsNext) found(subjectsIn(after, speakers)[0]?.id, 'after');
-      // 6. Going on with the quote before it, with nothing between them
-      // but its speaker's own "he said".
+      // 5. Going on with the quote before it, with nothing between them
+      // but its speaker's own "he said": "“Keep yelling,” James screamed.
+      // “That way we can find you.”".
       const last = lines[lines.length - 1];
       if (i > 0 && last?.beat === beat) {
         const between = outsideQuotes(sentence).slice(spans[i - 1][1], a);
@@ -525,10 +624,34 @@ export function dialogueOf(
         );
         // A quote with its own tag after it ("…," replied his sister) is
         // whoever that tag is about, even one the story has no name for.
-        const ownTag = new RegExp(`\\b(?:${SPEECH})\\b`, 'iu').test(near);
-        if (same.test(between) && !others.length && !ownTag)
+        const ownTag = new RegExp(
+          `^[\\s\\p{P}]*(?:\\p{L}+\\s+){0,3}(?:${SPEECH})\\b`,
+          'iu',
+        ).test(near);
+        // A tag leading in after a quote that ended its sentence is the
+        // next one's: "…a sign from you.” He answered them, “…".
+        const leadsInAfterEnd =
+          /[,:—–-]\s*$/u.test(between.replace(/['"“”‘’]/gu, '')) &&
+          /[.!?…]$/u.test(
+            sentence.slice(spans[i - 1][0], spans[i - 1][1]).trim(),
+          );
+        if (same.test(between) && !others.length && !ownTag && !leadsInAfterEnd)
           found(last.speaker, 'continues');
       }
+      // 6. Named after it, in the sentence right after and before the next
+      // quote ("“Yes!” Kofi jumped up."): never in one further on ("…went
+      // home. When the crowd saw this…"), nor whoever the words lead into
+      // the next quote with ("Jesus reached out, saying, …").
+      // One who acts there alone: "Sally and Mark stopped arguing" is
+      // neither's tag.
+      const acting = [
+        ...new Set(
+          subjectsIn(after.split(/(?<=[.!?…])\s+/u)[0] ?? '', speakers).map(
+            (one) => one.id,
+          ),
+        ),
+      ];
+      if (!leadsNext && acting.length === 1) found(acting[0], 'after');
       // 7. A conversation of two: the other one answers.
       if (lines.length >= 2) {
         const [x, y] = lines.slice(-2);

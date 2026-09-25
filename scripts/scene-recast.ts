@@ -7,6 +7,8 @@
  *   npm run scene:recast -- <documentId>          says what would be made again
  *   npm run scene:recast -- <documentId> --go     queues it: the worker makes each page again
  *   npm run scene:recast -- <documentId> --here   makes each page again now, in this process
+ *   ... --pages 9-15,20                           only those pages, and one
+ *                                                 turned down before tried again
  *
  * Each page stays as it was, playable, until its new one is ready; a page
  * that cannot be made again stays as it was. A page costs what making it
@@ -42,13 +44,30 @@ class SceneRecastModule {}
 /** Remade pages wait behind every page a learner asked for. */
 const REMAKE_PRIORITY = 50;
 
+/** The pages "9-15,20" names. */
+function pagesIn(list: string): Set<number> {
+  const pages = new Set<number>();
+  for (const part of list.split(',')) {
+    const [from, to = from] = part.split('-').map((n) => Number(n.trim()));
+    if (!Number.isInteger(from) || !Number.isInteger(to)) continue;
+    for (let page = from; page <= to; page += 1) pages.add(page);
+  }
+  return pages;
+}
+
 async function main(): Promise<void> {
   const args = process.argv.slice(2);
-  const documentId = args.find((a) => !a.startsWith('--'));
+  const pagesAt = args.indexOf('--pages');
+  const only = pagesAt >= 0 ? pagesIn(args[pagesAt + 1] ?? '') : null;
+  const documentId = args.find(
+    (a, i) => !a.startsWith('--') && (pagesAt < 0 || i !== pagesAt + 1),
+  );
   const go = args.includes('--go');
   const here = args.includes('--here');
-  if (!documentId) {
-    console.error('npm run scene:recast -- <documentId> [--go | --here]');
+  if (!documentId || (only && !only.size)) {
+    console.error(
+      'npm run scene:recast -- <documentId> [--go | --here] [--pages 9-15,20]',
+    );
     process.exit(2);
   }
   const app = await NestFactory.createApplicationContext(SceneRecastModule, {
@@ -86,7 +105,14 @@ async function main(): Promise<void> {
     const made = (
       await visuals.listByDocument(doc.id, version, SCENE_GENERATOR_VERSION)
     )
-      .filter((row) => row.status === 'done')
+      // A page named is tried again though it was turned down before: it
+      // may have been judged on its note, not the book's own words.
+      .filter(
+        (row) =>
+          row.status === 'done' ||
+          (only !== null && row.status === 'not_suitable'),
+      )
+      .filter((row) => !only || only.has(row.pageNumber))
       .sort((a, b) => a.pageNumber - b.pageNumber);
     console.log(
       `"${doc.props.title}": ${made.length} page${made.length === 1 ? '' : 's'} made (${made.map((r) => r.pageNumber).join(', ') || 'none'}); ${drawn} character${drawn === 1 ? '' : 's'} kept, ${older} drawn the older way.`,

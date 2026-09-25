@@ -508,6 +508,8 @@ export interface LlmGatewayPort {
     story?: string;
     /** The page in plainer words: how to say it to this reader. */
     plain?: string;
+    /** How the page before ends, in the book's own words. */
+    before?: string;
     previous?: ScreenplayDraft;
     problems?: string[];
   }): Promise<LlmResult<ScreenplayDraft>>;

@@ -8,7 +8,7 @@ import {
 } from '../../business/domain/cost';
 import { NotFoundError } from '../../business/domain/errors/errors';
 import { sceneProse } from '../../business/domain/follow';
-import { storyText } from '../../business/domain/story-text';
+import { pageEnd, storyText } from '../../business/domain/story-text';
 import { drawByCode } from '../../business/domain/scene-code';
 import {
   DEFAULT_PROFILE,
@@ -92,6 +92,7 @@ import {
   standsOnStage,
   STORY_VERSION,
   storyKey,
+  whereaboutsOn,
   outsideStory,
   titleCard,
   storyPieces,
@@ -340,7 +341,8 @@ export class SceneProcessor {
       if (story && outsideStory(story.bible, pageNumber)) {
         if (pageNumber === 1) premade = titleCard(story.bible, doc.props.title);
         else {
-          if (remaking) return;
+          // Made again or not: a video of what is not the story was the
+          // wrong thing, and does not stay.
           await this.visuals.update(record.id, {
             status: 'not_suitable',
             step: null,
@@ -352,11 +354,12 @@ export class SceneProcessor {
       }
       // A story's page is written from the book's own words, its note
       // beside them for plainer wording; any other page from its note.
-      const { material, plain } = profile.story
+      const { material, plain, before } = profile.story
         ? await this.storyMaterial(documentId, pageNumber)
         : {
             material: await this.material(documentId, pageNumber),
             plain: null,
+            before: null,
           };
       if (
         !premade &&
@@ -379,6 +382,7 @@ export class SceneProcessor {
         topic,
         material,
         plain,
+        before,
         context: await this.where(
           documentId,
           contentVersion,
@@ -477,6 +481,8 @@ export class SceneProcessor {
     material: string;
     /** The page's note, when the material is the book's own words. */
     plain?: string | null;
+    /** How a story's page before ends, in the book's own words. */
+    before?: string | null;
     context: string;
     profile: DocumentProfile;
     /** A story's page: its characters are the book's own. */
@@ -523,6 +529,7 @@ export class SceneProcessor {
         topic,
         material: input.material,
         plain: input.plain ?? null,
+        before: input.before ?? null,
         context: input.context,
         profile: input.profile,
         story,
@@ -713,6 +720,7 @@ export class SceneProcessor {
     topic: TopicRecord;
     material: string;
     plain?: string | null;
+    before?: string | null;
     context: string;
     profile: DocumentProfile;
     story?: PageStory | null;
@@ -736,6 +744,7 @@ export class SceneProcessor {
         .join('\n'),
       ...(told ? { story: told } : {}),
       ...(input.plain ? { plain: input.plain } : {}),
+      ...(input.story && input.before ? { before: input.before } : {}),
     };
     // The page, to hold a quotation to, the formats the book may use, and
     // who the story's characters are.
@@ -751,6 +760,8 @@ export class SceneProcessor {
             crowd: ['few', 'many'].includes(
               crowdOn(input.story.bible, input.story.page) ?? '',
             ),
+            // Who is apart from the rest, and where: Sally in the cave.
+            whereabouts: whereaboutsOn(input.story.bible, input.story.page),
           }
         : {}),
     };
@@ -1370,24 +1381,12 @@ export class SceneProcessor {
           // Kept but unreadable: read from the book again.
         }
       try {
-        const doc = await this.documents.findById(documentId);
-        const pages = await this.pages.findRange(
-          documentId,
-          1,
-          Math.max(1, doc?.props.pageCount ?? 1),
-        );
+        const pages = await this.storyPages(documentId);
         // A story read the old way is read once more, for its world and
         // where each page happens; a very long one is left as it was
         // until someone asks for it (scripts/scene-recast).
         if (older) {
-          const stretches = storyPieces(
-            pages
-              .filter((page) => !page.isEmpty)
-              .map((page) => ({
-                page: page.pageNumber,
-                text: storyText(page.text),
-              })),
-          ).length;
+          const stretches = storyPieces(pages).length;
           if (stretches > REREAD_MOST_STRETCHES) {
             this.logger.log(
               `${documentId}: the story was read the old way; at ${stretches} stretches it is not read again unasked`,
@@ -1398,24 +1397,10 @@ export class SceneProcessor {
             `${documentId}: the story was read the old way; reading it once more`,
           );
         }
-        const bible = await this.readStory({
-          documentId,
-          title,
-          // The story's own words: no notes, verse numbers or running heads.
-          pages: pages
-            .filter((page) => !page.isEmpty)
-            .map((page) => ({
-              page: page.pageNumber,
-              text: storyText(page.text),
-            })),
-          who: documentId,
-        });
-        await this.storage.put({
+        return await this.keepStory(
           key,
-          body: Buffer.from(JSON.stringify(bible)),
-          mimeType: 'application/json',
-        });
-        return bible;
+          await this.readStory({ documentId, title, pages, who: documentId }),
+        );
       } catch (error) {
         this.logger.warn(
           `${documentId}: ${older ? 'the story could not be read again; kept as it was' : 'no story, its pages made without one'}: ${(error as Error).message}`,
@@ -1423,6 +1408,57 @@ export class SceneProcessor {
         return older;
       }
     });
+  }
+
+  /**
+   * A book's story read again from its pages as they are now, and kept in
+   * place of the one before: for a book whose pages were read again
+   * (scripts/reread-document). Null, and nothing read, for a book with no
+   * story kept: whether it is one is its next page's to find.
+   */
+  async rereadStory(documentId: string): Promise<StoryBible | null> {
+    const doc = await this.documents.findById(documentId);
+    if (!doc) return null;
+    const key = storyKey(documentId, doc.contentVersion);
+    try {
+      await this.storage.get(key);
+    } catch (error) {
+      if (error instanceof NotFoundError) return null;
+      throw error;
+    }
+    return this.keepStory(
+      key,
+      await this.readStory({
+        documentId,
+        title: doc.props.title,
+        pages: await this.storyPages(documentId),
+        who: documentId,
+      }),
+    );
+  }
+
+  /** The story's own words, page by page: no notes, verse numbers or running heads. */
+  private async storyPages(
+    documentId: string,
+  ): Promise<{ page: number; text: string }[]> {
+    const doc = await this.documents.findById(documentId);
+    const pages = await this.pages.findRange(
+      documentId,
+      1,
+      Math.max(1, doc?.props.pageCount ?? 1),
+    );
+    return pages
+      .filter((page) => !page.isEmpty)
+      .map((page) => ({ page: page.pageNumber, text: storyText(page.text) }));
+  }
+
+  private async keepStory(key: string, bible: StoryBible): Promise<StoryBible> {
+    await this.storage.put({
+      key,
+      body: Buffer.from(JSON.stringify(bible)),
+      mimeType: 'application/json',
+    });
+    return bible;
   }
 
   /**
@@ -1935,7 +1971,11 @@ export class SceneProcessor {
   private async storyMaterial(
     documentId: string,
     pageNumber: number,
-  ): Promise<{ material: string; plain: string | null }> {
+  ): Promise<{
+    material: string;
+    plain: string | null;
+    before: string | null;
+  }> {
     const note = await this.simplified.find(documentId, pageNumber);
     const plain =
       note?.status === 'done' && note.blocks?.length
@@ -1943,14 +1983,22 @@ export class SceneProcessor {
         : null;
     const pages: PageText[] = await this.pages.findRange(
       documentId,
-      pageNumber,
+      Math.max(1, pageNumber - 1),
       pageNumber,
     );
     const own = storyText(
       pages.find((row) => row.pageNumber === pageNumber)?.text ?? '',
     ).slice(0, MATERIAL_CHARS);
-    if (wordsOf(own).length >= STORY_OWN_WORDS) return { material: own, plain };
-    return { material: plain ?? own, plain: null };
+    // How the page before ends: whom a line at the top of this one follows.
+    const before =
+      pageEnd(
+        storyText(
+          pages.find((row) => row.pageNumber === pageNumber - 1)?.text ?? '',
+        ),
+      ) || null;
+    if (wordsOf(own).length >= STORY_OWN_WORDS)
+      return { material: own, plain, before };
+    return { material: plain ?? own, plain: null, before };
   }
 
   /** The page: its simplified note when written, else its own text. */

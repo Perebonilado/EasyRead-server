@@ -56,6 +56,34 @@ describe('a page in reading order', () => {
     );
   });
 
+  it('reads the running head first and whole, though its parts stand either side of the gutter', () => {
+    // As Matthew's PDF sets page 18: its number left of the gutter, its
+    // title and verse right of it, above the columns by more than a line.
+    const left = [
+      'names of the twelve',
+      'apostles: first, Simon',
+      'and Andrew his',
+      'brother; James son',
+    ];
+    const right = [
+      'demons. Freely you',
+      'received, freely give.',
+      'Do not take gold,',
+      'silver, or copper',
+    ];
+    const runs = [
+      run(270, 724, '185', 18),
+      run(420, 724, 'MATTHEW 10:16', 65),
+      ...left.map((line, i) => run(40, 700 - i * 14, line, 250)),
+      ...right.map((line, i) => run(320, 700 - i * 14, line, 250)),
+    ];
+    expect(readingOrder(runs).split('\n')).toEqual([
+      '185 MATTHEW 10:16',
+      ...left,
+      ...right,
+    ]);
+  });
+
   it('keeps a heading across both columns where it stands, a band on each side', () => {
     const runs = [
       run(40, 720, 'Left above one.', 250),

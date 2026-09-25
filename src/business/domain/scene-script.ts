@@ -1027,6 +1027,15 @@ export interface MendOptions {
   stage?: LearningStage | null;
   /** A crowd is behind the stage: a group speaks from it, not from off the stage. */
   crowd?: boolean;
+  /**
+   * Where the story has the page's people, when some are apart from the
+   * rest (Sally in the cave, the boys beside it): where the page happens,
+   * and each character's place, by the story's ids.
+   */
+  whereabouts?: {
+    place: string | null;
+    people: Readonly<Record<string, string>>;
+  } | null;
 }
 
 /** What mending a cast needs to know and where it says what it did. */

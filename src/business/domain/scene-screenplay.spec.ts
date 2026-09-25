@@ -828,6 +828,46 @@ describe('a stage never left empty', () => {
     expect(shows(script).at(-1)).toBe('ada+nana');
   });
 
+  it('brings back one who went, for a conversation with someone there', () => {
+    // Matthew 8:18-20: Jesus orders the crossing, the writer has him go,
+    // and the expert in the law then speaks to him.
+    const { script } = mendScreenplay(
+      {
+        ...draft(),
+        opening: ['ada', 'nana'],
+        beats: [
+          beat('narration', 'A warm night in the yard.', { place: 'yard' }),
+          beat('line', 'Tell us a story, Nana.', { who: 'ada', to: 'nana' }),
+          beat('action', 'Nana goes inside.', { who: 'nana', do: 'leave' }),
+          beat('line', 'Wait, Nana! One more story!', {
+            who: 'ada',
+            to: 'nana',
+          }),
+        ],
+      },
+      { material, characters, places },
+    );
+    expect(shows(script).at(-1)).toBe('ada+nana');
+  });
+
+  it('starts a new scene "soon after", with only its own people', () => {
+    const { script } = mendScreenplay(
+      {
+        ...draft(),
+        opening: ['ada', 'nana'],
+        beats: [
+          beat('narration', 'A warm night in the yard.', { place: 'yard' }),
+          beat('line', 'Tell us a story, Nana.', { who: 'ada', to: 'nana' }),
+          beat('narration', 'Soon after, Kofi sits by the fire.'),
+          beat('line', 'Not the tortoise again!', { who: 'kofi' }),
+        ],
+      },
+      { material, characters, places },
+    );
+    expect(shows(script)).toEqual(['ada+nana', 'kofi']);
+    expect(script.steps.filter((s) => s.stage?.cut)).toHaveLength(1);
+  });
+
   it('brings on the one a narration is about', () => {
     const { script } = mendScreenplay(
       {

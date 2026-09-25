@@ -158,7 +158,7 @@ const STORY_ON_STAGE = 3;
 
 /** A narration that moves the story on in time: a new scene, where it is. */
 const TIME_PASSES =
-  /^\s*(?:that\s+(?:evening|night|morning|afternoon)|the\s+next\s+(?:day|morning|evening|night)|next\s+(?:day|morning)|later\b|afterwards?\b|meanwhile\b|some\s+(?:days|weeks|months|time)\s+later|(?:a\s+few|several|many)\s+(?:days|weeks|months|hours)\s+(?:later|went\s+by|passed)|when\s+(?:it\s+was\s+)?(?:evening|night|morning)|in\s+the\s+(?:evening|morning)|one\s+(?:day|evening|morning|night)\b)/iu;
+  /^\s*(?:that\s+(?:evening|night|morning|afternoon)|the\s+next\s+(?:day|morning|evening|night)|next\s+(?:day|morning)|later\b|afterwards?\b|(?:soon|shortly)\s+after(?:wards?)?\b|after\s+(?:that|this)\b|meanwhile\b|some\s+(?:days|weeks|months|time)\s+later|(?:a\s+few|several|many)\s+(?:days|weeks|months|hours)\s+(?:later|went\s+by|passed)|when\s+(?:it\s+was\s+)?(?:evening|night|morning)|in\s+the\s+(?:evening|morning)|one\s+(?:day|evening|morning|night)\b)/iu;
 
 /** A book's line is kept when lines on the page hold this share of its words. */
 export const KEPT = 0.8;
@@ -1322,18 +1322,31 @@ export function mendScreenplay(
           : beat.kind === 'narration'
             ? actorIn(beat.say)
             : null;
-      const cutIn =
-        comer &&
-        look === null &&
-        stands(comer) &&
-        !present.includes(comer) &&
-        !apart.has(comer) &&
-        (!gone.has(comer) || !present.length)
-          ? [comer]
-          : [];
+      // One the words sent off is back for a conversation with someone
+      // here, and so is one spoken to who went: "Teacher, I will follow
+      // you" is said to Jesus, there, though the writer had him leave.
+      const to = beat.kind === 'line' && here ? (beat.to ?? null) : null;
+      const cutIn: string[] = [];
+      const bring = (id: string | null, back: boolean) => {
+        if (
+          id &&
+          look === null &&
+          stands(id) &&
+          !present.includes(id) &&
+          !apart.has(id) &&
+          !cutIn.includes(id) &&
+          (!gone.has(id) || !present.length || back)
+        )
+          cutIn.push(id);
+      };
+      bring(comer, Boolean(to && present.includes(to)));
+      if (speaker && (present.includes(speaker) || cutIn.includes(speaker)))
+        bring(to, true);
       for (const id of cutIn) {
         present.push(id);
         gone.delete(id);
+        // In the conversation: never the one of the three left out.
+        lastSpoke.set(id, at);
       }
       const switched = look !== view;
       view = look;

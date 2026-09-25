@@ -386,3 +386,79 @@ describe('follow-along: a step back', () => {
     expect(held.every((unit, i) => i === 0 || unit >= held[i - 1])).toBe(true);
   });
 });
+
+describe('following a worked solution a step at a time', () => {
+  const WORKED: Block[] = [
+    { type: 'headingOne', text: 'Adding tens and ones' },
+    {
+      type: 'working',
+      text: 'Tunde has 47 marbles and wins 28 more. How many does he have?',
+      working: {
+        given: [],
+        wanted: 'how many marbles',
+        steps: [
+          {
+            latex: '40 + 20 = 60',
+            does: 'add the tens',
+            why: null,
+            changes: [],
+            says: 'forty and twenty make sixty',
+          },
+          {
+            latex: '7 + 8 = 15',
+            does: 'add the ones',
+            why: null,
+            changes: [],
+            says: 'seven and eight make fifteen',
+          },
+          {
+            latex: '60 + 15 = 75',
+            does: 'put them together',
+            why: null,
+            changes: [],
+            says: 'sixty and fifteen make seventy-five',
+          },
+        ],
+        answer: '75',
+        check: null,
+      },
+    },
+  ];
+
+  it('has a unit for its problem and one for each step', () => {
+    const units = noteUnits(WORKED).filter((unit) => unit.block === 1);
+    expect(units.map((unit) => [unit.sentence, unit.whole ?? false])).toEqual([
+      [0, false],
+      [1, false],
+      [2, false],
+      [3, false],
+    ]);
+    expect(units[2].text).toBe(
+      'Step 2: add the ones: seven and eight make fifteen',
+    );
+  });
+
+  it('lights the step the voice is on', () => {
+    const spoken =
+      'Tunde has forty-seven marbles and wins twenty-eight more. ' +
+      'First we add the tens: forty and twenty make sixty. ' +
+      'Next we add the ones: seven and eight make fifteen. ' +
+      'Then we put them together: sixty and fifteen make seventy-five.';
+    const sentences: number[][] = [];
+    let cursor = 0;
+    for (const sentence of splitSentences(spoken)) {
+      const start = spoken.indexOf(sentence, cursor);
+      sentences.push([
+        start,
+        start + sentence.length,
+        sentences.length * 1000,
+        (sentences.length + 1) * 1000,
+      ]);
+      cursor = start + sentence.length;
+    }
+    const track = trackFromAlignment(spoken, sentences, WORKED);
+    expect(track.spans.map((span) => `${span.block}.${span.sentence}`)).toEqual(
+      ['1.0', '1.1', '1.2', '1.3'],
+    );
+  });
+});

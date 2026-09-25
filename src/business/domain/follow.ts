@@ -132,13 +132,43 @@ export function noteCuts(blocks: Block[]): [number, number][][] {
  * paragraph or bullet, a heading as one unit, and a table, code sample or
  * equation as one unit for the whole block, so the tutor reading a table
  * lands on the table. Units and cuts come from the same ranges, so unit
- * n of a block is always the client's span n.
+ * n of a block is always the client's span n; a worked solution's units
+ * are its problem and then its steps, which the reader marks as such.
  */
 export function noteUnits(blocks: Block[]): NoteUnit[] {
   const units: NoteUnit[] = [];
   const cuts = noteCuts(blocks);
   blocks.forEach((block, index) => {
     const wordsOf = (text: string) => contentWords(numbersAsWords(text));
+    // A worked solution is followed a step at a time: its problem, then
+    // each step, as what is done and the words the voice says for it,
+    // with its line as said too, for a voice that reads the line out.
+    if (block.type === 'working' && block.working) {
+      const problem = plainText(block.text).replace(/\s+/g, ' ').trim();
+      if (problem)
+        units.push({
+          block: index,
+          sentence: 0,
+          start: 0,
+          end: block.text.length,
+          text: problem,
+          words: wordsOf(problem),
+        });
+      block.working.steps.forEach((step, i) => {
+        const text = `Step ${i + 1}: ${step.does}: ${step.says}`
+          .replace(/\s+/g, ' ')
+          .trim();
+        units.push({
+          block: index,
+          sentence: i + 1,
+          start: block.text.length,
+          end: block.text.length,
+          text,
+          words: wordsOf(`${text} ${sayLatex(step.latex)}`),
+        });
+      });
+      return;
+    }
     if (WHOLE_TYPES.has(block.type)) {
       const text = plainText(block.text).replace(/\s+/g, ' ').trim();
       if (!text) return;

@@ -14,6 +14,7 @@ import type { SpeechPort } from '../../ports/voice.port';
 import type {
   AppSettingsRecord,
   AppSettingsRepository,
+  WorkerVoices,
 } from '../../repositories/settings.repository';
 import { APP_SETTINGS_REPOSITORY } from '../../repositories/tokens';
 
@@ -85,16 +86,54 @@ export class SceneVoiceService {
     };
   }
 
+  /** What this process can speak with: said by the worker as it starts. */
+  here(): WorkerVoices {
+    const ready = this.ready();
+    const labels = {} as WorkerVoices['labels'];
+    for (const engine of SCENE_VOICE_ENGINES) {
+      const label = ready[engine] ? this.voices[engine]?.label() : null;
+      labels[engine] = label
+        ? { model: label.model, voice: label.voice }
+        : null;
+    }
+    return {
+      ready,
+      deployment: deploymentEngine(
+        this.config.get<string>('SCENE_VOICE_ENGINE'),
+        ready,
+      ),
+      labels,
+      at: this.clock.now().toISOString(),
+    };
+  }
+
+  /**
+   * The worker says what it can speak with, as it starts: the API serves
+   * the admin page and may lack the worker's voice server, so the page
+   * offers what the worker has.
+   */
+  async announce(): Promise<void> {
+    await this.settings.announce(this.here());
+    this.cached = null;
+  }
+
+  /** The voices the worker has, when it has said; this process's own until then. */
+  private async worker(): Promise<WorkerVoices> {
+    return (await this.record()).worker ?? this.here();
+  }
+
   async status(): Promise<SceneVoiceStatusDto> {
     const record = await this.record();
-    const ready = this.ready();
-    const named = this.config.get<string>('SCENE_VOICE_ENGINE');
+    const { ready, deployment, labels } = await this.worker();
     return {
       chosen: record.sceneVoice,
-      current: sceneEngine(record.sceneVoice, named, ready),
-      deployment: deploymentEngine(named, ready),
+      current:
+        record.sceneVoice && ready[record.sceneVoice]
+          ? record.sceneVoice
+          : deployment,
+      deployment,
       options: SCENE_VOICE_ENGINES.map((engine) => {
-        const label = this.voices[engine]?.label();
+        const label = labels[engine];
         return {
           value: engine,
           label: LABEL[engine],
@@ -112,7 +151,7 @@ export class SceneVoiceService {
     engine: SceneVoiceEngine | null,
     changedBy: string,
   ): Promise<SceneVoiceStatusDto> {
-    if (engine && !this.ready()[engine])
+    if (engine && !(await this.worker()).ready[engine])
       throw new ValidationError(
         `${LABEL[engine]} is not set up on this server, so it cannot voice pages`,
       );

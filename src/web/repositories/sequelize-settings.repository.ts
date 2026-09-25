@@ -4,9 +4,21 @@ import { isSceneVoiceEngine } from '../../business/domain/scene-voice';
 import type {
   AppSettingsRecord,
   AppSettingsRepository,
+  WorkerVoices,
 } from '../../business/repositories/settings.repository';
 import { AppSettingsModel } from '../database/models';
 import { newId } from '../database/uuid';
+
+/** The worker's voices as kept; null for none, or for what cannot be read. */
+function workerVoices(kept: string | null): WorkerVoices | null {
+  if (!kept) return null;
+  try {
+    const read = JSON.parse(kept) as WorkerVoices;
+    return read?.ready && isSceneVoiceEngine(read.deployment) ? read : null;
+  } catch {
+    return null;
+  }
+}
 
 @Injectable()
 export class SequelizeAppSettingsRepository implements AppSettingsRepository {
@@ -19,6 +31,7 @@ export class SequelizeAppSettingsRepository implements AppSettingsRepository {
     return {
       // A value no engine answers to now is no choice.
       sceneVoice: isSceneVoiceEngine(row.sceneVoice) ? row.sceneVoice : null,
+      worker: workerVoices(row.workerVoices),
       changedBy: row.changedBy,
       changedAt: row.changedAt,
     };
@@ -32,6 +45,7 @@ export class SequelizeAppSettingsRepository implements AppSettingsRepository {
     return this.model.create({
       id: newId(),
       sceneVoice: null,
+      workerVoices: null,
       changedBy: null,
       changedAt: null,
     } as never);
@@ -39,6 +53,11 @@ export class SequelizeAppSettingsRepository implements AppSettingsRepository {
 
   async get(): Promise<AppSettingsRecord> {
     return this.toRecord(await this.row());
+  }
+
+  async announce(worker: WorkerVoices): Promise<void> {
+    const row = await this.row();
+    await row.update({ workerVoices: JSON.stringify(worker) });
   }
 
   async set(

@@ -24,6 +24,7 @@ const config = (values: Record<string, string>) =>
 function store(): AppSettingsRepository & { reads: number } {
   let record: AppSettingsRecord = {
     sceneVoice: null,
+    worker: null,
     changedBy: null,
     changedAt: null,
   };
@@ -36,6 +37,10 @@ function store(): AppSettingsRepository & { reads: number } {
     set(patch, changedBy, now) {
       record = { ...record, ...patch, changedBy, changedAt: now };
       return Promise.resolve(record);
+    },
+    announce(worker) {
+      record = { ...record, worker };
+      return Promise.resolve();
     },
   };
   return repository;
@@ -116,6 +121,35 @@ describe('the admin’s voice setting', () => {
       'Gemini (Google) is not set up',
     );
     expect((await service.current()).engine).toBe('openai');
+  });
+
+  it('offers what the worker can speak with, though the API serving the page has less', async () => {
+    const settings = store();
+    const worker = new SceneVoiceService(
+      voices(true),
+      settings,
+      clock({ ms: 0 }),
+      config({ OPENAI_API_KEY: 'o' }),
+    );
+    const api = new SceneVoiceService(
+      voices(false),
+      settings,
+      clock({ ms: 0 }),
+      config({ OPENAI_API_KEY: 'o' }),
+    );
+    // Before the worker has said, the API goes by its own.
+    expect((await api.status()).deployment).toBe('openai');
+    await worker.announce();
+    api['cached'] = null;
+    const status = await api.status();
+    expect(status.deployment).toBe('kokoro');
+    expect(status.options.find((o) => o.value === 'kokoro')).toMatchObject({
+      ready: true,
+      model: 'kokoro-82m',
+      voice: 'am_puck',
+    });
+    expect((await api.choose('kokoro', 'admin-1')).current).toBe('kokoro');
+    await expect(api.choose('gemini', 'admin-1')).rejects.toThrow('not set up');
   });
 
   it('reads the row at most once in ten seconds', async () => {

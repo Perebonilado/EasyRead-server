@@ -25,6 +25,12 @@ export interface Callout {
   /** The point on the part it names, in the drawing's own units. */
   anchor: [number, number];
   /**
+   * The part's own box, in the drawing's units, where it was measured: a
+   * leader ends at its edge, never running on through it (absent on
+   * drawings lifted before).
+   */
+  box?: [number, number, number, number];
+  /**
    * For words set by code: where a leader ends when its label is set on
    * the left or on the right, at the edge of the lines it names, so that
    * no leader runs through words. Such labels go on the right, in the
@@ -385,6 +391,16 @@ export async function liftCallouts(
         part: one.part,
         text: one.text,
         anchor: [round(at[0]), round(at[1])],
+        ...(part
+          ? {
+              box: [
+                round(part.x),
+                round(part.y),
+                round(part.width),
+                round(part.height),
+              ] as [number, number, number, number],
+            }
+          : {}),
       });
   });
   return {

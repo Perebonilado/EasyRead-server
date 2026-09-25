@@ -15,6 +15,7 @@ import {
   segmentsOf,
   sidesOf,
   type Point,
+  leaderTo,
 } from './scene-labels';
 
 /** A small seeded generator, so a failing case can be found again. */
@@ -449,5 +450,24 @@ describe('a speech bubble', () => {
     })!;
     expect(bubble.lines).toHaveLength(3);
     expect(bubble.lines[2].endsWith('…')).toBe(true);
+  });
+});
+
+describe('a leader to its part', () => {
+  const same = (p: [number, number]) => p;
+  it('ends at the edge of the part nearest its label, never through it', () => {
+    // A label above a tall card: its anchor fell below the card, and the
+    // leader ran down through all of it.
+    expect(leaderTo([100, 20], [100, 400], [50, 100, 100, 250], same)).toEqual([
+      100, 20, 100, 108,
+    ]);
+    // From the side: onto the part's near edge, at its height.
+    expect(leaderTo([10, 150], [80, 150], [60, 100, 40, 100], same)).toEqual([
+      10, 150, 68, 150,
+    ]);
+    // With no box, to the point the label names.
+    expect(leaderTo([10, 150], [80, 150], undefined, same)).toEqual([
+      10, 150, 80, 150,
+    ]);
   });
 });

@@ -10,6 +10,7 @@ import {
   quietStretches,
   sendBack,
   listsIn,
+  flowOrder,
   betterDraft,
   type MendedScript,
   tellsOfLoss,
@@ -134,7 +135,8 @@ describe('the writer’s storyboard, mended', () => {
     expect(first.stage).toEqual({ layout: 'one', show: ['leaf'], arrows: [] });
     // Two things left once "nobody" is dropped: a hub cannot hold two.
     expect(second.stage?.layout).toBe('row');
-    expect(second.stage?.show).toEqual(['leaf', 'sun']);
+    // The sun's light runs to the leaf: the sun first, so the arrow reads forward.
+    expect(second.stage?.show).toEqual(['sun', 'leaf']);
     expect(second.stage?.arrows).toEqual([
       { from: 'sun', to: 'leaf', label: 'light', flow: true },
     ]);
@@ -212,6 +214,46 @@ describe('the writer’s storyboard, mended', () => {
     ).toEqual([]);
   });
 
+  it('sets a row so its arrows run forward, to the next thing, keeping what stood before', () => {
+    // Page 254: the queue listed first, the client sending to it.
+    expect(
+      flowOrder(
+        ['backup-queue', 'client'],
+        [{ from: 'client', to: 'backup-queue' }],
+      ),
+    ).toEqual(['client', 'backup-queue']);
+    // A chain listed out of order reads as a chain.
+    expect(
+      flowOrder(
+        ['db', 'server', 'client'],
+        [
+          { from: 'client', to: 'server' },
+          { from: 'server', to: 'db' },
+        ],
+      ),
+    ).toEqual(['client', 'server', 'db']);
+    // What stood before keeps its place; the one pointed at comes next to
+    // the one pointing, not across the thing between them.
+    expect(
+      flowOrder(
+        ['backup-queue', 'client', 'server'],
+        [{ from: 'client', to: 'server' }],
+        ['client', 'backup-queue'],
+      ),
+    ).toEqual(['client', 'server', 'backup-queue']);
+    // A ring of arrows, or none, as it was.
+    expect(flowOrder(['a', 'b'], [])).toEqual(['a', 'b']);
+    expect(
+      flowOrder(
+        ['a', 'b'],
+        [
+          { from: 'a', to: 'b' },
+          { from: 'b', to: 'a' },
+        ],
+      ),
+    ).toHaveLength(2);
+  });
+
   it('brings a list said aloud on stage item by item, beside what it is about', () => {
     const { script, mended } = mendScript(draft());
     const cards = script.cast.filter((t) => t.id.startsWith('item-'));
@@ -229,8 +271,9 @@ describe('the writer’s storyboard, mended', () => {
       [6, 4],
       [8, 5],
     ]);
-    // What the writer had up, the leaf and the sun, stays beside them.
-    expect(listing[2].stage!.show.slice(0, 2)).toEqual(['leaf', 'sun']);
+    // What the writer had up, the sun and the leaf, stays beside them, as
+    // it stood.
+    expect(listing[2].stage!.show.slice(0, 2)).toEqual(['sun', 'leaf']);
     expect(mended.join(' ')).toContain('a list of 3 said aloud');
   });
 

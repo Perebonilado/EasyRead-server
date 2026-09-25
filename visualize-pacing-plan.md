@@ -67,3 +67,23 @@ All four fixes are in, and all 1,477 server tests pass. The client needed no cha
 - **With gpt-4o-mini writing**, which production has used since this morning, a page often keeps one drawing for its whole length. Sent back, it still does, and the code can only point at parts the narrator names, or pulse. It also sometimes writes a much shorter video.
 
 The pacing depends on the writer model more than on anything here.
+
+## Part two (2026-09-25): lists, more stage changes, labels and arrows
+
+Richard asked for more movement: the stage itself changing more, and a list the narrator reads out shown item by item. He also reported labels whose lines cut across drawings, and arrows whose direction and placement were off.
+
+- **Lists said aloud.** A spoken series ("storage, compute and the network"; "three kinds: disk, memory and cache") comes on stage item by item. Each item is a card on its own words, beside up to two things already shown. The writer is asked for the same, and code builds it when the writer doesn't. A clause is never an item.
+- **More stage changes.** The writer is asked to change what's shown at least every two or three sentences. A draft with fewer than one stage change per 45 spoken words goes back. The log shows stage changes a minute.
+- **Labels.** A label's anchor was the far end of the leader the artist drew, accepted even beyond the part (12% slack). The stage then set the label above the drawing and drew its leader through the whole part to that point: the lines cutting across the files. Now each part's outline is kept when labels are lifted, and a leader ends just inside the part's edge nearest its label.
+- **Arrows.** The writer often lists the arrow's destination before its source, so arrows in a row pointed right to left, or crossed the thing between them. A row, stack or pair is now ordered so its arrows run forward to the next thing. The step before's order is kept where the arrows allow.
+
+**Remade with DeepSeek writing, System Design Interview:**
+
+| Page | Stage changes | Per minute | Longest still |
+|---|---|---|---|
+| 248 | 11 (was 8) | 6.2 | 19 s |
+| 253 | 21 | 11.7 | 13 s |
+| 255 | 11 | 8.9 | 9 s |
+| 37 | 7 | 4.4 | 16 s |
+
+Every arrow on them runs forward.

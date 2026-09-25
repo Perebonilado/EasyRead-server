@@ -1730,7 +1730,10 @@ export function mendScript(
     }
   }
 
-  // A list the voice reads out comes on stage item by item, as it is said.
+  // Arrows read forward: left to right along a row, down a stack. Then a
+  // list the voice reads out comes on stage item by item, as it is said,
+  // beside what is shown as it now stands.
+  flowForward(steps, mended);
   if (draft.fit !== 'poor') showSpokenLists(beats, cast, steps, mended);
 
   return {
@@ -2817,4 +2820,68 @@ function showSpokenLists(
       current = lastWriters;
     }
   }
+}
+
+/** Layouts read in order, where an arrow should run forward: left to right, or down. */
+const IN_ORDER = new Set<SceneLayout>(['row', 'stack', 'compare']);
+
+/**
+ * The things of a row, a stack or a pair set so every arrow between them
+ * runs forward, to the next one where it can: the writer lists what is
+ * shown in any order ("the queue, the client" for the client sending to
+ * the queue), and an arrow drawn backward, or across the thing between
+ * two, reads wrong. What stood on the stage before keeps its order where
+ * the arrows allow, so nothing moves without a reason.
+ */
+export function flowOrder(
+  show: readonly string[],
+  arrows: readonly { from: string; to: string }[],
+  before: readonly string[] = [],
+): string[] {
+  const edges = arrows.filter(
+    (a) => a.from !== a.to && show.includes(a.from) && show.includes(a.to),
+  );
+  if (!edges.length) return [...show];
+  const priority = (id: string) => {
+    const was = before.indexOf(id);
+    return was >= 0 ? was : 100 + show.indexOf(id);
+  };
+  const incoming = new Map(show.map((id) => [id, 0]));
+  for (const e of edges) incoming.set(e.to, (incoming.get(e.to) ?? 0) + 1);
+  const out: string[] = [];
+  const left = new Set(show);
+  while (left.size) {
+    const ready = [...left].filter((id) => (incoming.get(id) ?? 0) === 0);
+    // A ring of arrows: the rest as they stood.
+    const pool = ready.length ? ready : [...left];
+    const last = out[out.length - 1];
+    // Next to the one just set, what it points at; else as it stood.
+    const next =
+      pool.find((id) => edges.some((e) => e.from === last && e.to === id)) ??
+      [...pool].sort((a, b) => priority(a) - priority(b))[0];
+    out.push(next);
+    left.delete(next);
+    for (const e of edges)
+      if (e.from === next) incoming.set(e.to, (incoming.get(e.to) ?? 1) - 1);
+  }
+  return out;
+}
+
+/** Every row, stack and pair with arrows, set so its arrows run forward. */
+function flowForward(steps: SceneStep[], mended: string[]): void {
+  let before: string[] = [];
+  steps.forEach((step, k) => {
+    const stage = step.stage;
+    if (!stage) return;
+    if (IN_ORDER.has(stage.layout) && stage.arrows.length) {
+      const order = flowOrder(stage.show, stage.arrows, before);
+      if (order.some((id, i) => id !== stage.show[i])) {
+        mended.push(
+          `step ${k + 1}: ${stage.show.join(', ')} set as ${order.join(', ')}, so its arrows run forward`,
+        );
+        stage.show = order;
+      }
+    }
+    before = stage.show;
+  });
 }

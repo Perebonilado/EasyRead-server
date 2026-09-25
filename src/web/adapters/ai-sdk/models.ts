@@ -77,6 +77,7 @@ const TASK_VAR: Record<LlmTask, string> = {
   scene_write: 'AI_MODEL_SCENE_WRITE',
   scene_draw: 'AI_MODEL_SCENE_DRAW',
   scene_profile: 'AI_MODEL_SCENE_PROFILE',
+  scene_notes: 'AI_MODEL_SCENE_NOTES',
   scene_story: 'AI_MODEL_SCENE_STORY',
   topic_quiz: 'AI_MODEL_QUIZ',
   // Guided reading: the preview is one call per chapter ever (cached), the
@@ -108,6 +109,9 @@ const TASK_DEFAULT: Partial<Record<LlmTask, string>> = {
   scene_draw: 'deepseek:deepseek-flash',
   // What a document is: one small call a document.
   scene_profile: 'openai:gpt-4.1-mini',
+  // A chapter's teacher's notes: one careful read a chapter, before any
+  // of its videos, on DeepSeek for its price. Thinking: SCENE_NOTES_THINKING.
+  scene_notes: 'deepseek:deepseek-flash',
   // A story's characters, places and pages: one small call a stretch of
   // it, once a book. gpt-4.1 says more reliably where each person is when
   // some are apart (the small model put the boy who stayed with Sally in

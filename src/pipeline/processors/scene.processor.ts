@@ -8,6 +8,27 @@ import {
 } from '../../business/domain/cost';
 import { NotFoundError } from '../../business/domain/errors/errors';
 import { sceneProse } from '../../business/domain/follow';
+import {
+  NOTES_PAGE_CHARS,
+  NOTES_VERSION,
+  carryOver,
+  describeNotes,
+  drawnAsTheyAre,
+  endingKey,
+  endingOf,
+  firstSaid,
+  joinDrafts,
+  mendNotes,
+  notesKey,
+  notesParts,
+  notesProblems,
+  pageSign,
+  wordsPerMinute,
+  type ChapterNotes,
+  type PageEnding,
+  type PageNotes,
+  type PageSign,
+} from '../../business/domain/lesson-notes';
 import { pageEnd, storyText } from '../../business/domain/story-text';
 import { drawByCode } from '../../business/domain/scene-code';
 import {
@@ -43,9 +64,7 @@ import {
   isCodeThing,
   mendScript,
   type MendedScript,
-  quietStretches,
   sendBack,
-  betterDraft,
   quotedSpans,
   signsShown,
   wordsOf,
@@ -150,6 +169,7 @@ import type {
 } from '../../business/repositories/document-page.repository';
 import type { DocumentRepository } from '../../business/repositories/document.repository';
 import type {
+  SummaryRepository,
   TopicRecord,
   TopicRepository,
 } from '../../business/repositories/misc.repository';
@@ -161,6 +181,7 @@ import {
   DOCUMENT_REPOSITORY,
   PRONUNCIATION_REPOSITORY,
   SIMPLIFIED_PAGE_REPOSITORY,
+  SUMMARY_REPOSITORY,
   TOPIC_REPOSITORY,
   VISUAL_SCENE_REPOSITORY,
 } from '../../business/repositories/tokens';
@@ -180,6 +201,10 @@ const STORY_OWN_WORDS = 20;
 const THIN_STORY_WORDS = 12;
 /** The card's still, in pixels across. */
 export const THUMB_WIDTH = 480;
+/** Seconds of quiet after the sentence that first says a new term: room for it to land. */
+const TERM_LANDS_S = 0.7;
+/** Parts of a chapter read for its notes at once. */
+const NOTES_READERS = 3;
 /** Tries at one drawing: the first, and one more with the gate's notes. */
 const DRAW_TRIES = 2;
 /** Stretches of a story read at once. */
@@ -203,6 +228,15 @@ export interface PageStory {
   /** Where the book's places, painted once, are kept. */
   setsKey: string;
   bookTitle: string;
+}
+
+/** An explainer page's part of its chapter's teacher's notes, and how the page before it ended. */
+interface Lesson {
+  notes: ChapterNotes;
+  here: PageNotes;
+  ending: PageEnding | null;
+  /** The notes as the writer reads them. */
+  text: string;
 }
 
 /** Each item through `work`, at most `limit` at a time, in order. */
@@ -272,6 +306,7 @@ export class SceneProcessor {
   constructor(
     @Inject(DOCUMENT_REPOSITORY) private readonly documents: DocumentRepository,
     @Inject(TOPIC_REPOSITORY) private readonly topics: TopicRepository,
+    @Inject(SUMMARY_REPOSITORY) private readonly summaries: SummaryRepository,
     @Inject(DOCUMENT_PAGE_REPOSITORY)
     private readonly pages: DocumentPageRepository,
     @Inject(SIMPLIFIED_PAGE_REPOSITORY)
@@ -379,6 +414,30 @@ export class SceneProcessor {
         return;
       }
 
+      // An explainer's page is one part of its chapter's lesson: written
+      // from the teacher's notes, carrying on from the page before.
+      const lesson =
+        profile.story || premade
+          ? null
+          : await this.lessonFor(
+              documentId,
+              contentVersion,
+              topic,
+              pageNumber,
+              doc.props.title,
+              profile,
+            );
+      if (lesson?.here.relation === 'skip') {
+        if (remaking) return;
+        await this.visuals.update(record.id, {
+          status: 'not_suitable',
+          step: null,
+          fit: 'poor',
+          fitReason: `Not a page to teach: ${lesson.here.evidence}.`,
+        });
+        return;
+      }
+
       const made = await this.make({
         documentId,
         documentTitle: doc.props.title,
@@ -391,7 +450,9 @@ export class SceneProcessor {
           contentVersion,
           topic,
           pageNumber,
+          Boolean(lesson),
         ),
+        lesson,
         profile,
         story: premade ? null : story,
         ...(premade ? { script: premade } : {}),
@@ -443,10 +504,22 @@ export class SceneProcessor {
         for (const key of [record.sceneKey, record.audioKey, record.thumbKey])
           if (key && ![sceneKey, voice.audioKey, thumbKey].includes(key))
             await this.storage.delete(key).catch(() => undefined);
+      // How it ended, for the page after it to carry on from.
+      if (!profile.story)
+        await this.keepEnding(
+          documentId,
+          contentVersion,
+          pageNumber,
+          script,
+          drawings,
+        );
       const drawn = [...drawings.values()].filter(Boolean).length;
       const rhythm = rhythmOf(scene);
+      const held = lesson
+        ? notesProblems(script, lesson.notes, pageNumber, material)
+        : null;
       this.logger.log(
-        `${who}: made in ${Math.round((Date.now() - started) / 1000)}s: ${script.beats.length} sentences, ${Math.round(voice.durationMs / 1000)}s of audio timed by ${voice.timing}, ${scene.steps.length} stage changes, ${scene.effects.length} effects (${filled} filled), ${drawn} of ${drawings.size} drawings; still at most ${Math.round(rhythm.stillMs / 1000)}s, ${rhythm.perMinute} changes a minute, ${rhythm.stagesPerMinute} of the stage`,
+        `${who}: made in ${Math.round((Date.now() - started) / 1000)}s: ${script.beats.length} sentences, ${Math.round(voice.durationMs / 1000)}s of audio timed by ${voice.timing}, ${wordsPerMinute(scene.beats)} words a minute, ${scene.steps.length} stage changes, ${scene.effects.length} effects (${filled} filled), ${drawn} of ${drawings.size} drawings; still at most ${Math.round(rhythm.stillMs / 1000)}s, ${rhythm.perMinute} changes a minute, ${rhythm.stagesPerMinute} of the stage${lesson && held ? `; a ${lesson.here.relation} page, ${held.shown} of ${held.points} planned ideas shown` : ''}`,
       );
     } catch (error) {
       const message = (error as Error).message;
@@ -488,6 +561,8 @@ export class SceneProcessor {
     /** How a story's page before ends, in the book's own words. */
     before?: string | null;
     context: string;
+    /** An explainer page's teacher's notes, and how the page before ended. */
+    lesson?: Lesson | null;
     profile: DocumentProfile;
     /** A story's page: its characters are the book's own. */
     story?: PageStory | null;
@@ -526,7 +601,7 @@ export class SceneProcessor {
         }
       : null;
     // A script code made (a story book's title card) needs no writer.
-    const script: SceneScript =
+    const written: SceneScript =
       input.script ??
       (await this.write({
         documentTitle: input.documentTitle,
@@ -535,6 +610,7 @@ export class SceneProcessor {
         plain: input.plain ?? null,
         before: input.before ?? null,
         context: input.context,
+        lesson: input.lesson ?? null,
         profile: input.profile,
         story,
         documentId,
@@ -542,6 +618,16 @@ export class SceneProcessor {
       }).then((written) =>
         story ? castStory(written, story.bible, story.page) : written,
       ));
+    // Each thing drawn as the notes say it really is: a client in a
+    // system's design is a computer, never a person.
+    const truly = drawnAsTheyAre(written, input.lesson?.notes ?? null);
+    if (truly.mended.length)
+      this.logger.log(`${who}: ${truly.mended.slice(0, 4).join('; ')}`);
+    // What the page before left on the stage, brought back: drawn once.
+    const carried = carryOver(truly.script, input.lesson?.ending ?? null);
+    if (carried.mended.length)
+      this.logger.log(`${who}: ${carried.mended.slice(0, 4).join('; ')}`);
+    const script = carried.script;
     if (script.fit === 'poor')
       return {
         fit: 'poor',
@@ -563,6 +649,7 @@ export class SceneProcessor {
         who,
         stop.signal,
         story,
+        carried.reuse,
       ).then(async (made) => {
         if (!voiced && !stop.signal.aborted) await input.step?.('voicing');
         return made;
@@ -582,6 +669,7 @@ export class SceneProcessor {
             (script.lead ?? 0),
         ),
         input.profile.stage ?? null,
+        input.lesson?.here.newHere ?? [],
       )
         .catch((error: unknown) => {
           stop.abort();
@@ -691,6 +779,16 @@ export class SceneProcessor {
     );
     if (!topic) throw new Error(`Page ${pageNumber} is outside every chapter`);
     const profile = await this.profileFor(documentId, doc.contentVersion);
+    const lesson = profile.story
+      ? null
+      : await this.lessonFor(
+          documentId,
+          doc.contentVersion,
+          topic,
+          pageNumber,
+          doc.props.title,
+          profile,
+        );
     return this.write({
       documentTitle: doc.props.title,
       topic,
@@ -700,7 +798,9 @@ export class SceneProcessor {
         doc.contentVersion,
         topic,
         pageNumber,
+        Boolean(lesson),
       ),
+      lesson,
       profile,
       story: await this.pageStory(
         profile.story,
@@ -726,6 +826,7 @@ export class SceneProcessor {
     plain?: string | null;
     before?: string | null;
     context: string;
+    lesson?: Lesson | null;
     profile: DocumentProfile;
     story?: PageStory | null;
     documentId: string | null;
@@ -749,6 +850,7 @@ export class SceneProcessor {
       ...(told ? { story: told } : {}),
       ...(input.plain ? { plain: input.plain } : {}),
       ...(input.story && input.before ? { before: input.before } : {}),
+      ...(input.lesson ? { notes: input.lesson.text } : {}),
     };
     // The page, to hold a quotation to, the formats the book may use, and
     // who the story's characters are.
@@ -785,6 +887,16 @@ export class SceneProcessor {
           (draft) => mendScript(draft, checks),
           input,
           true,
+          // What the teacher's notes planned, held to.
+          input.lesson
+            ? (drafted) =>
+                notesProblems(
+                  drafted.script,
+                  input.lesson!.notes,
+                  input.lesson!.here.page,
+                  input.material,
+                ).problems
+            : undefined,
         );
     const { script } = mended;
     if (
@@ -813,6 +925,8 @@ export class SceneProcessor {
     input: { documentId: string | null; who: string },
     /** Whether a quiet stretch is a problem too: a lesson's is; a story's quiet holds its actions. */
     quiet: boolean,
+    /** What else sends a draft back: what the teacher's notes planned and it missed. */
+    extra?: (mended: MendedScript) => string[],
   ): Promise<MendedScript> {
     const first = await call(ask);
     await this.record(input.documentId, 'scene_write', first.usage);
@@ -821,8 +935,13 @@ export class SceneProcessor {
       this.logger.log(
         `${input.who}: mended: ${mended.mended.slice(0, 8).join('; ')}`,
       );
-    // A lesson's picture that sits still too long goes back on its own.
-    const reasons = sendBack(mended, quiet);
+    // A lesson's picture that sits still too long goes back on its own,
+    // as does one that leaves out what its notes planned.
+    const faults = (one: MendedScript) =>
+      one.script.fit === 'poor'
+        ? []
+        : [...sendBack(one, quiet), ...(extra?.(one) ?? [])];
+    const reasons = faults(mended);
     if (reasons.length) {
       this.logger.warn(
         `${input.who}: the storyboard goes back: ${reasons.join(' ')}`,
@@ -830,10 +949,7 @@ export class SceneProcessor {
       const again = await call({
         ...ask,
         previous: first.value,
-        problems: [
-          ...mended.problems,
-          ...(quiet ? quietStretches(mended.script) : []),
-        ],
+        problems: reasons,
       });
       await this.record(input.documentId, 'scene_write', again.usage);
       const second = mend(again.value);
@@ -841,7 +957,8 @@ export class SceneProcessor {
         this.logger.log(
           `${input.who}: mended: ${second.mended.slice(0, 8).join('; ')}`,
         );
-      mended = betterDraft(mended, second, quiet);
+      // The second, unless it is worse.
+      if (faults(second).length <= reasons.length) mended = second;
     }
     return mended;
   }
@@ -854,6 +971,8 @@ export class SceneProcessor {
     who: string,
     signal: AbortSignal,
     story: PageStory | null = null,
+    /** Drawings the page before made, carried on: not drawn again. */
+    reuse: ReadonlyMap<string, GatedDrawing> = new Map(),
   ): Promise<Map<string, GatedDrawing | null>> {
     const drawings = script.cast.filter(
       (thing): thing is DrawingThing => thing.kind === 'drawing',
@@ -990,6 +1109,11 @@ export class SceneProcessor {
       ...cast,
       ...sets,
       ...drawings.map(async (thing) => {
+        const kept = reuse.get(thing.id);
+        if (kept) {
+          out.set(thing.id, kept);
+          return;
+        }
         // What it shares the stage with, so its scale and style agree with theirs.
         const neighbours = new Set<string>();
         for (const step of script.steps)
@@ -1080,6 +1204,8 @@ export class SceneProcessor {
     leadS = 0,
     /** Whom the document is for: its pace and pauses. */
     stage: LearningStage | null = null,
+    /** The terms the page teaches first: given weight, and room after, where first said. */
+    terms: readonly string[] = [],
   ): Promise<{
     beats: TimedBeat[];
     durationMs: number;
@@ -1090,9 +1216,16 @@ export class SceneProcessor {
     await startMathsSpeech();
     const forms = script.beats.map((beat) => spokenForm(beat.say, kept));
     // Each sentence at its own pace, with its own silence after it.
+    // A new term lands: a little weight where it is first said, and a
+    // moment after the sentence for it to sink in.
+    const first = firstSaid(script.beats, terms);
     const delivered = deliveryPieces(
       script.beats,
       stage ? STAGE_RECIPES[stage] : undefined,
+    ).map((piece, k) =>
+      first.has(k)
+        ? { ...piece, pauseAfter: Math.max(piece.pauseAfter, TERM_LANDS_S) }
+        : piece,
     );
     const pausesS = delivered.map((piece) => piece.pauseAfter);
     const spoken = sceneSpoken(forms);
@@ -1152,8 +1285,8 @@ export class SceneProcessor {
       texts: forms.map((form) => form.text),
       delivered,
       // For a voice that takes direction; Kokoro goes by pace and silence.
-      styles: script.beats.map((beat) =>
-        voiceStyle(script.mood, beat.delivery),
+      styles: script.beats.map((beat, k) =>
+        voiceStyle(script.mood, beat.delivery, first.get(k) ?? []),
       ),
       lines,
     });
@@ -1843,7 +1976,11 @@ export class SceneProcessor {
     contentVersion: number,
     topic: TopicRecord,
     pageNumber: number,
+    /** The teacher's notes say what came before: only where the page is. */
+    notes = false,
   ): Promise<string> {
+    const where = `This is page ${pageNumber} of the chapter "${topic.title}", which runs from page ${topic.startPage} to ${topic.endPage}.`;
+    if (notes) return where;
     const earlier = (
       await this.visuals.listByDocument(
         documentId,
@@ -1861,11 +1998,253 @@ export class SceneProcessor {
       .slice(-6)
       .map((row) => `page ${row.pageNumber}: ${row.title}`);
     return [
-      `This is page ${pageNumber} of the chapter "${topic.title}", which runs from page ${topic.startPage} to ${topic.endPage}.`,
+      where,
       earlier.length
         ? `The videos before it in the chapter covered: ${earlier.join('; ')}. Do not introduce those again; build on them.`
         : 'It is the first video of the chapter.',
     ].join(' ');
+  }
+
+  /**
+   * The teacher's notes of the chapter a page is in, made if they are not
+   * yet, or made again: for looking them over (scripts/scene-notes).
+   */
+  async chapterNotes(
+    documentId: string,
+    pageNumber: number,
+    again = false,
+  ): Promise<{ topic: TopicRecord; notes: ChapterNotes | null }> {
+    const doc = await this.documents.findById(documentId);
+    if (!doc) throw new Error(`No document ${documentId}`);
+    const topic = (await this.topics.listByDocument(documentId)).find(
+      (t) => pageNumber >= t.startPage && pageNumber <= t.endPage,
+    );
+    if (!topic) throw new Error(`Page ${pageNumber} is outside every chapter`);
+    if (again)
+      await this.storage
+        .delete(notesKey(documentId, doc.contentVersion, topic.id))
+        .catch(() => undefined);
+    const profile = await this.profileFor(documentId, doc.contentVersion);
+    return {
+      topic,
+      notes: await this.notesFor(
+        documentId,
+        doc.contentVersion,
+        topic,
+        doc.props.title,
+        profile,
+      ),
+    };
+  }
+
+  /**
+   * A page's part of its chapter's teacher's notes, with how the page
+   * before it ended when it carries on from it. Null when the notes could
+   * not be made: the page is written alone, as pages were before notes.
+   */
+  private async lessonFor(
+    documentId: string,
+    contentVersion: number,
+    topic: TopicRecord,
+    pageNumber: number,
+    documentTitle: string,
+    profile: DocumentProfile,
+  ): Promise<Lesson | null> {
+    const notes = await this.notesFor(
+      documentId,
+      contentVersion,
+      topic,
+      documentTitle,
+      profile,
+    );
+    const here = notes?.pages.find((one) => one.page === pageNumber);
+    if (!notes || !here) return null;
+    const ending =
+      here.relation !== 'fresh' &&
+      here.relation !== 'skip' &&
+      pageNumber > topic.startPage
+        ? await this.endingBefore(documentId, contentVersion, pageNumber)
+        : null;
+    return {
+      notes,
+      here,
+      ending,
+      text: describeNotes(notes, pageNumber, ending),
+    };
+  }
+
+  /**
+   * A chapter's teacher's notes: kept beside its videos, made once, the
+   * first time any of its pages is wanted, from every page's note. Pages
+   * asked for together wait on the one reading. Null when they cannot be
+   * made; the next page asked for tries again.
+   */
+  private async notesFor(
+    documentId: string,
+    contentVersion: number,
+    topic: TopicRecord,
+    documentTitle: string,
+    profile: DocumentProfile,
+  ): Promise<ChapterNotes | null> {
+    const key = notesKey(documentId, contentVersion, topic.id);
+    try {
+      const kept = JSON.parse(
+        (await this.storage.get(key)).toString('utf8'),
+      ) as ChapterNotes;
+      if (
+        kept.version === NOTES_VERSION &&
+        kept.from === topic.startPage &&
+        kept.to === topic.endPage
+      )
+        return kept;
+    } catch {
+      // Not made yet.
+    }
+    return this.once(key, () =>
+      this.readChapter(key, documentId, topic, documentTitle, profile),
+    );
+  }
+
+  /** The chapter read whole, in parts, and its notes kept. */
+  private async readChapter(
+    key: string,
+    documentId: string,
+    topic: TopicRecord,
+    documentTitle: string,
+    profile: DocumentProfile,
+  ): Promise<ChapterNotes | null> {
+    const from = topic.startPage;
+    const to = topic.endPage;
+    const who = `${documentId} "${topic.title}"`;
+    try {
+      const [written, raw, summary] = await Promise.all([
+        this.simplified.findRange(documentId, from, to),
+        this.pages.findRange(documentId, Math.max(1, from - 1), to),
+        this.summaries.find(documentId).catch(() => null),
+      ]);
+      const own = new Map(raw.map((row) => [row.pageNumber, row.text ?? '']));
+      const noteOf = (page: number) => {
+        const row = written.find((one) => one.pageNumber === page);
+        return (
+          row?.status === 'done' && row.blocks?.length
+            ? sceneProse(row.blocks)
+            : (own.get(page) ?? '')
+        ).slice(0, NOTES_PAGE_CHARS);
+      };
+      // What the pages' own text shows: a page begun mid-sentence.
+      const signs = new Map<number, PageSign>();
+      for (let page = from + 1; page <= to; page += 1)
+        signs.set(
+          page,
+          pageSign(own.get(page - 1) ?? null, own.get(page) ?? ''),
+        );
+      const about = [
+        summary ? `The book in brief: ${summary}` : '',
+        describeProfile(profile),
+        describeStage(profile.stage ?? null),
+      ]
+        .filter(Boolean)
+        .join('\n');
+      const drafts = await inBatches(
+        notesParts(from, to),
+        NOTES_READERS,
+        async (part) => {
+          const pages: string[] = [];
+          for (let page = part.from; page <= part.to; page += 1)
+            pages.push(`[page ${page}]\n${noteOf(page) || '(nothing on it)'}`);
+          const made = await this.llm.sceneNotes({
+            documentTitle,
+            topicTitle: topic.title,
+            about,
+            from: part.from,
+            to: part.to,
+            text: pages.join('\n\n'),
+            ...(part.from > from
+              ? { before: noteOf(part.from - 1).slice(-800) }
+              : {}),
+          });
+          await this.record(documentId, 'scene_notes', made.usage);
+          return made.value;
+        },
+      );
+      const { notes, mended } = mendNotes(
+        joinDrafts(drafts),
+        { topicId: topic.id, from, to },
+        signs,
+      );
+      if (mended.length)
+        this.logger.log(
+          `${who}: notes mended: ${mended.slice(0, 8).join('; ')}`,
+        );
+      await this.storage.put({
+        key,
+        body: Buffer.from(JSON.stringify(notes)),
+        mimeType: 'application/json',
+      });
+      const count = (relation: string) =>
+        notes.pages.filter((one) => one.relation === relation).length;
+      this.logger.log(
+        `${who}: teacher's notes for pages ${from}-${to}: ${count('fresh')} fresh, ${count('continues')} carrying on, ${count('example') + count('recap') + count('exercise')} examples, recaps or exercises, ${count('skip')} not taught; ${notes.pages.reduce((n, one) => n + one.points.length, 0)} small ideas`,
+      );
+      return notes;
+    } catch (error) {
+      this.logger.warn(
+        `${who}: no teacher's notes, pages written alone: ${(error as Error).message}`,
+      );
+      return null;
+    }
+  }
+
+  /** How the page before this one ended, when it has been made. */
+  private async endingBefore(
+    documentId: string,
+    contentVersion: number,
+    pageNumber: number,
+  ): Promise<PageEnding | null> {
+    try {
+      return JSON.parse(
+        (
+          await this.storage.get(
+            endingKey(
+              documentId,
+              contentVersion,
+              pageNumber - 1,
+              SCENE_GENERATOR_VERSION,
+            ),
+          )
+        ).toString('utf8'),
+      ) as PageEnding;
+    } catch {
+      return null;
+    }
+  }
+
+  /** How a page ended, kept for the page after it; a page is made without it. */
+  private async keepEnding(
+    documentId: string,
+    contentVersion: number,
+    pageNumber: number,
+    script: SceneScript,
+    drawings: ReadonlyMap<string, GatedDrawing | null>,
+  ): Promise<void> {
+    try {
+      await this.storage.put({
+        key: endingKey(
+          documentId,
+          contentVersion,
+          pageNumber,
+          SCENE_GENERATOR_VERSION,
+        ),
+        body: Buffer.from(
+          JSON.stringify(endingOf(script, pageNumber, drawings)),
+        ),
+        mimeType: 'application/json',
+      });
+    } catch (error) {
+      this.logger.warn(
+        `${documentId} p${pageNumber}: its ending not kept: ${(error as Error).message}`,
+      );
+    }
   }
 
   /**
@@ -2027,7 +2406,12 @@ export class SceneProcessor {
 
   private async record(
     documentId: string | null,
-    task: 'scene_write' | 'scene_draw' | 'scene_profile' | 'scene_story',
+    task:
+      | 'scene_write'
+      | 'scene_draw'
+      | 'scene_profile'
+      | 'scene_story'
+      | 'scene_notes',
     usage: LlmUsage,
   ): Promise<void> {
     await this.calls.record({

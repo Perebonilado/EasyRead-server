@@ -2896,7 +2896,7 @@ function flowForward(steps: SceneStep[], mended: string[]): void {
 }
 
 /** A word as names are matched by: four letters or more, without a plural's end. */
-const nameKeys = (text: string) =>
+export const nameKeys = (text: string) =>
   text
     .toLowerCase()
     .split(/[^\p{L}\p{N}]+/u)

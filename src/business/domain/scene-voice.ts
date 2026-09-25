@@ -116,13 +116,13 @@ export function deliveryPieces(
 }
 
 /**
- * The same tags as words, for a voice that takes direction (Gemini): who
- * is speaking, how the page feels, and how this sentence goes. Short, as
- * Google advises; the voice reads the text itself word for word, so the
- * direction never goes in the text.
+ * The same tags as words, for a voice that takes direction (Gemini): how
+ * the page feels and how this sentence goes, in a few words. Google's
+ * guide (2026-09): the text is read as a verbatim transcript, so nothing
+ * but the words goes in it; style is for emotion, pace and tone, kept
+ * short, since more prompt text makes the voice drift; who the voice is
+ * belongs to the voice itself, not to every sentence.
  */
-export const PERSONA = 'a warm, lively teacher talking to one learner';
-
 export const MOOD_STYLE: Record<SceneMood, string> = {
   calm: 'calm and unhurried',
   bright: 'bright and upbeat',
@@ -131,18 +131,37 @@ export const MOOD_STYLE: Record<SceneMood, string> = {
   playful: 'playful, with a smile in the voice',
 };
 
+/**
+ * How each sentence goes, pace included: the voice takes no speed, so
+ * the pace is said in words. About 140 to 160 words a minute is the pace
+ * a listener understands best: slower for what is new or matters most, a
+ * little quicker for what is known.
+ */
 export const DELIVERY_STYLE: Record<SceneDelivery, string> = {
-  hook: 'drawing the listener in',
-  explain: 'clear and friendly',
-  key: 'slower, landing the point',
-  aside: 'light and quick, an aside',
-  question: 'genuinely asking, leaving room to think',
-  recap: 'warm, summing up',
+  hook: 'inviting',
+  explain: 'clear, unhurried',
+  key: 'speaking slowly, landing it',
+  aside: 'light, a little quicker',
+  question: 'asking, then leaving room',
+  recap: 'warm, steady',
 };
 
-/** One sentence's direction: the persona, the page's mood, the sentence's delivery. */
-export function voiceStyle(mood: SceneMood, delivery: SceneDelivery): string {
-  return `${PERSONA}; ${MOOD_STYLE[mood] ?? MOOD_STYLE.curious}; ${DELIVERY_STYLE[delivery] ?? DELIVERY_STYLE.explain}`;
+/**
+ * One sentence's direction: the page's mood, the sentence's delivery,
+ * and the new term it says first, stressed.
+ */
+export function voiceStyle(
+  mood: SceneMood,
+  delivery: SceneDelivery,
+  terms: readonly string[] = [],
+): string {
+  const stress = terms.length
+    ? `; stressing ${terms
+        .slice(0, 2)
+        .map((term) => `"${term}"`)
+        .join(' and ')}`
+    : '';
+  return `${MOOD_STYLE[mood] ?? MOOD_STYLE.curious}; ${DELIVERY_STYLE[delivery] ?? DELIVERY_STYLE.explain}${stress}`;
 }
 
 /**

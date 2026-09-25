@@ -36,6 +36,7 @@ import {
   type DrawingThing,
   type SceneScriptDraft,
 } from '../../../business/domain/scene-script';
+import type { NotesDraft } from '../../../business/domain/lesson-notes';
 import { PROMPTS } from '../prompts';
 import { ModelRegistry, type ModelRef } from './models';
 import {
@@ -51,6 +52,7 @@ import {
   lectureDiagramSchema,
   lectureSketchSchema,
   sceneProfileSchema,
+  sceneNotesSchema,
   sceneScriptSchema,
   sceneScreenplaySchema,
   sceneFigureSchema,
@@ -711,6 +713,7 @@ export class AiSdkLlmAdapter implements LlmGatewayPort, OnModuleInit {
     context: string;
     profile?: string;
     story?: string;
+    notes?: string;
     previous?: SceneScriptDraft;
     problems?: string[];
   }): Promise<LlmResult<SceneScriptDraft>> {
@@ -728,6 +731,7 @@ export class AiSdkLlmAdapter implements LlmGatewayPort, OnModuleInit {
           ...(input.profile ? [input.profile] : []),
           ...(input.story ? [input.story] : []),
           input.context,
+          ...(input.notes ? [input.notes] : []),
           `The page:\n${input.material}`,
           ...(input.previous && input.problems?.length
             ? [
@@ -823,16 +827,60 @@ export class AiSdkLlmAdapter implements LlmGatewayPort, OnModuleInit {
    * DeepSeek's thinking for the video writer, said on every call: the API
    * thinks by default on deepseek-flash, and this provider version only
    * knows its older ids as thinkers, so a thinking answer can come back
-   * unreadable. Off unless SCENE_WRITE_THINKING=on.
+   * unreadable. Off unless SCENE_WRITE_THINKING=on; the teacher's notes,
+   * one careful read a chapter, think unless SCENE_NOTES_THINKING=off.
    */
-  private writerThinking(ref: { provider: string }) {
+  private writerThinking(
+    ref: { provider: string },
+    setting = 'SCENE_WRITE_THINKING',
+    otherwise: 'on' | 'off' = 'off',
+  ) {
     if (ref.provider !== 'deepseek') return {};
-    const on = this.config.get<string>('SCENE_WRITE_THINKING', 'off') === 'on';
+    const on = this.config.get<string>(setting, otherwise) === 'on';
     return {
       providerOptions: {
         deepseek: { thinking: { type: on ? 'enabled' : 'disabled' } },
       },
     } as const;
+  }
+
+  async sceneNotes(input: {
+    documentTitle: string;
+    topicTitle: string;
+    about: string;
+    from: number;
+    to: number;
+    text: string;
+    before?: string;
+  }): Promise<LlmResult<NotesDraft>> {
+    const started = Date.now();
+    const { generateObject } = await this.registry.modules();
+    const { model, ref } = await this.registry.languageModel('scene_notes');
+    const result = await this.againIfMisshapen(() =>
+      generateObject({
+        model,
+        schema: sceneNotesSchema,
+        system: PROMPTS.sceneNotes,
+        prompt: [
+          `Document: ${input.documentTitle}`,
+          `Chapter: ${input.topicTitle}`,
+          input.about,
+          `Plan pages ${input.from} to ${input.to}, one entry for each.`,
+          ...(input.before
+            ? [`How the page before these ends:\n${input.before}`]
+            : []),
+          `The pages:\n${input.text}`,
+        ]
+          .filter(Boolean)
+          .join('\n\n'),
+        maxRetries: this.maxRetries(),
+        ...this.writerThinking(ref, 'SCENE_NOTES_THINKING', 'on'),
+      }),
+    );
+    return {
+      value: result.object,
+      usage: this.usage(ref, result.usage, started),
+    };
   }
 
   async sceneProfile(input: {

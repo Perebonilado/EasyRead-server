@@ -11,6 +11,10 @@ import {
   LINE_PACES,
 } from '../../../business/domain/scene-script';
 import {
+  PAGE_RELATIONS,
+  POINT_KINDS,
+} from '../../../business/domain/lesson-notes';
+import {
   SCREENPLAY_BEATS,
   SCREENPLAY_DOINGS,
 } from '../../../business/domain/scene-screenplay';
@@ -773,6 +777,43 @@ export const sceneProfileSchema = z.object({
   stage: z.enum(LEARNING_STAGES).nullable(),
   stageSure: z.enum(STAGE_SURENESS),
   stageWhy: z.string(),
+});
+
+/** A chapter's teacher's notes: its thread, and each page planned as part of one lesson. */
+export const sceneNotesSchema = z.object({
+  thread: z.string(),
+  example: z.string().nullable(),
+  diagram: z.string().nullable(),
+  pictures: z.array(
+    z.object({
+      name: z.string(),
+      is: z.string(),
+      draw: z.string(),
+      person: z.boolean(),
+    }),
+  ),
+  pages: z.array(
+    z.object({
+      page: z.number().int(),
+      relation: z.enum(PAGE_RELATIONS),
+      evidence: z.string(),
+      goal: z.string(),
+      newHere: z.array(z.string()),
+      callback: z.string().nullable(),
+      points: z.array(
+        z.object({
+          say: z.string(),
+          show: z.string(),
+          kind: z.enum(POINT_KINDS),
+        }),
+      ),
+      lists: z.array(z.string()),
+      pitfall: z.string().nullable(),
+      check: z.string().nullable(),
+      handoff: z.string().nullable(),
+      endsOn: z.array(z.string()),
+    }),
+  ),
 });
 
 /** Who and where one stretch of a story meets, and who is on each of its pages. */

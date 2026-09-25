@@ -21,44 +21,134 @@ type Piece = {
   voice?: string;
 };
 
-/** A silence this long or longer is made by the page, not asked of the voice. */
-export const LONG_PAUSE_S = 0.6;
-/** The most requests one page is voiced in, and how many are out at once. */
-export const MOST_RUNS = 8;
+/** Runs of one voice asked for at once. */
 const AT_ONCE = 3;
 
 /**
- * The pieces in runs, each one request: a new run where the voice changes
- * (a story's character), and where a long silence falls, so the page puts
- * the silence in itself. Asked for in the text, as "<long pause>", the
- * voice sometimes read it aloud. At most MOST_RUNS: past that, only the
- * longest silences part the runs, and the rest are left to the sentence's
- * own full stop.
+ * The pieces in runs, each one request: a new run only where the voice
+ * changes (a story's character). A page in one voice is one request; the
+ * daily quota counts requests, and a page parted at every long silence
+ * spent eight of them.
  */
-export function voiceRuns<T extends { voice?: string; pauseAfter?: number }>(
+export function voiceRuns<T extends { voice?: string }>(
   pieces: T[],
-  most = MOST_RUNS,
 ): { voice: string | undefined; pieces: T[] }[] {
-  const changes = new Set<number>();
-  for (let i = 0; i + 1 < pieces.length; i += 1)
-    if (pieces[i].voice !== pieces[i + 1].voice) changes.add(i);
-  const pauses = pieces
-    .map((piece, i) => ({ i, pause: piece.pauseAfter ?? 0 }))
-    .filter(
-      ({ i, pause }) =>
-        i + 1 < pieces.length && !changes.has(i) && pause >= LONG_PAUSE_S,
-    )
-    .sort((a, b) => b.pause - a.pause || a.i - b.i)
-    .slice(0, Math.max(0, most - 1 - changes.size))
-    .map(({ i }) => i);
-  const cuts = new Set([...changes, ...pauses]);
   const runs: { voice: string | undefined; pieces: T[] }[] = [];
-  pieces.forEach((piece, i) => {
+  for (const piece of pieces) {
     const last = runs[runs.length - 1];
-    if (last && !cuts.has(i - 1)) last.pieces.push(piece);
+    if (last && last.voice === piece.voice) last.pieces.push(piece);
     else runs.push({ voice: piece.voice, pieces: [piece] });
-  });
+  }
   return runs;
+}
+
+/** Frames the loudness is measured over, in ms. */
+const FRAME_MS = 10;
+/** Quieter than this share of the loudest frame is quiet. */
+const QUIET_SHARE = 0.04;
+/** The shortest quiet taken for the gap after a sentence. */
+const GAP_LEAST_MS = 80;
+/** How far from where a sentence should end its gap may be. */
+const GAP_REACH_MS = 1800;
+
+/**
+ * Where each sentence of a run ends: the quiet after it, as samples
+ * [from, to], found near where the sentence's share of the words puts
+ * its end, the longest quiet there winning. Null where there is none
+ * near: that sentence keeps its own full stop.
+ */
+export function sentenceGaps(
+  samples: Int16Array,
+  rate: number,
+  lengths: number[],
+): ([number, number] | null)[] {
+  const frame = Math.max(1, Math.round((rate * FRAME_MS) / 1000));
+  const frames = Math.floor(samples.length / frame);
+  const level: number[] = [];
+  for (let f = 0; f < frames; f += 1) {
+    let sum = 0;
+    for (let i = f * frame; i < (f + 1) * frame; i += 1)
+      sum += samples[i] * samples[i];
+    level.push(Math.sqrt(sum / frame));
+  }
+  const loudest = Math.max(0, ...level);
+  const boundaries = lengths.length - 1;
+  if (!loudest || boundaries < 1)
+    return new Array<null>(Math.max(0, boundaries)).fill(null);
+  const quiet = level.map((one) => one < loudest * QUIET_SHARE);
+  const first = quiet.indexOf(false);
+  const last = quiet.lastIndexOf(false);
+  // The quiet stretches inside the speech.
+  const gaps: [number, number][] = [];
+  for (let f = first; f <= last; f += 1) {
+    if (!quiet[f]) continue;
+    let to = f;
+    while (to + 1 <= last && quiet[to + 1]) to += 1;
+    if ((to - f + 1) * FRAME_MS >= GAP_LEAST_MS) gaps.push([f, to]);
+    f = to;
+  }
+  const total = lengths.reduce((sum, one) => sum + one, 0) || 1;
+  const reach = GAP_REACH_MS / FRAME_MS;
+  const found: ([number, number] | null)[] = [];
+  let said = 0;
+  let after = first;
+  for (let b = 0; b < boundaries; b += 1) {
+    said += lengths[b];
+    const expected = first + ((last - first) * said) / total;
+    let best: [number, number] | null = null;
+    let bestScore = -Infinity;
+    for (const gap of gaps) {
+      const middle = (gap[0] + gap[1]) / 2;
+      if (gap[0] <= after || Math.abs(middle - expected) > reach) continue;
+      // The longest quiet near where it should be; nearer breaks a tie.
+      const score = gap[1] - gap[0] - Math.abs(middle - expected) / 8;
+      if (score > bestScore) {
+        best = gap;
+        bestScore = score;
+      }
+    }
+    if (best) after = best[1];
+    found.push(best ? [best[0] * frame, (best[1] + 1) * frame] : null);
+  }
+  return found;
+}
+
+/**
+ * A run's audio with each sentence's silence as the page asked for it:
+ * the quiet the voice left after a sentence made up to its pause, never
+ * cut shorter. The voice is never asked for a pause in words, which it
+ * sometimes read aloud.
+ */
+export function withPauses(
+  samples: Int16Array,
+  rate: number,
+  pieces: { text: string; pauseAfter: number }[],
+): Int16Array {
+  const gaps = sentenceGaps(
+    samples,
+    rate,
+    pieces.map((piece) => piece.text.length),
+  );
+  const parts: Int16Array[] = [];
+  let from = 0;
+  gaps.forEach((gap, b) => {
+    if (!gap) return;
+    const wanted = Math.round(pieces[b].pauseAfter * rate);
+    const more = wanted - (gap[1] - gap[0]);
+    if (more <= 0) return;
+    const middle = Math.round((gap[0] + gap[1]) / 2);
+    parts.push(samples.subarray(from, middle), new Int16Array(more));
+    from = middle;
+  });
+  if (!parts.length) return samples;
+  parts.push(samples.subarray(from));
+  const out = new Int16Array(parts.reduce((n, p) => n + p.length, 0));
+  let at = 0;
+  for (const part of parts) {
+    out.set(part, at);
+    at += part.length;
+  }
+  return out;
 }
 
 /** One sentence as the voice is sent it: its words, a pause after it, and how it goes. */
@@ -204,8 +294,9 @@ export function rateOf(mimeType: string): number | null {
  * chosen with SCENE_VOICE_ENGINE=gemini and a GEMINI_API_KEY.
  *
  * One request a page: each sentence a text item with a few words of
- * direction (who is speaking, the page's mood, how the sentence goes),
- * the long silences marked inline. The answer is WAV; it is encoded to
+ * direction (who is speaking, the page's mood, how the sentence goes).
+ * The silences are not asked for (the voice read "long pause" aloud):
+ * each is made here, in the quiet it left after the sentence. The answer is WAV; it is encoded to
  * mp3 here so the page's audio is stored and played like every other.
  * Gemini says nothing of when it spoke each word, so the page is timed
  * by the aligner, as a voice without timestamps always has been.
@@ -286,7 +377,7 @@ export class GeminiSpeechAdapter implements SpeechPort {
       samples: Int16Array;
       rate: number;
       usage: { tokensIn: number; tokensOut: number } | null;
-    } | null)[] = new Array(runs.length).fill(null);
+    } | null)[] = runs.map(() => null);
     for (let from = 0; from < runs.length; from += AT_ONCE)
       await Promise.all(
         runs.slice(from, from + AT_ONCE).map(async (run, j) => {
@@ -310,7 +401,12 @@ export class GeminiSpeechAdapter implements SpeechPort {
           if (!pcm.samples.length)
             throw new Error('The Gemini voice sent silence');
           spoken[from + j] = {
-            samples: pcm.samples,
+            // Each sentence's silence, made here: never asked for in words.
+            samples: withPauses(
+              pcm.samples,
+              pcm.sampleRate,
+              run.pieces.filter((piece) => piece.text.trim()),
+            ),
             rate: pcm.sampleRate,
             usage: usageIn(answer),
           };

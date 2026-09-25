@@ -1095,6 +1095,29 @@ describe('two places at once: cutting between them', () => {
     expect(stages(named.script)).toEqual(['james @woods', 'james @cave cut']);
   });
 
+  it('never makes a question to the viewer a scene that moves anyone', () => {
+    // Hide-and-Seek page 10: the writer set its last question in the woods
+    // with Sally in it, and Sally was drawn in the woods.
+    const { script } = mendScreenplay(
+      {
+        ...draft(),
+        opening: ['james'],
+        cast: [...kidsCast, thing('woods', 'place'), thing('cave', 'place')],
+        beats: [
+          beat('narration', 'Night in the woods.', { place: 'woods' }),
+          beat('line', 'Hey! Are you stuck under this tree?', { who: 'james' }),
+          beat('line', 'Kind of! I fell into a cave.', { who: 'sally' }),
+          beat('narration', 'Can you spot the big tree trunk?', {
+            place: 'woods',
+            with: ['sally'],
+          }),
+        ],
+      },
+      { characters: kids, places: woods, whereabouts },
+    );
+    expect(stages(script)).toEqual(['james @woods', 'sally @cave cut']);
+  });
+
   it('cuts to those elsewhere when the last one where the stage looks leaves', () => {
     const { script } = mendScreenplay(
       {
@@ -1129,9 +1152,9 @@ describe('two places at once: cutting between them', () => {
     ]);
   });
 
-  it('lets a later scene take someone where the story did not have them yet, and brings one on where they are', () => {
-    // Mark's father comes to the tree, then goes down into the cave: the
-    // writer's second scene takes him there.
+  it('keeps someone where the story has them though a later scene lists them elsewhere, until their own words move them', () => {
+    // Mark's father comes to the tree. The writer lists him in its cave
+    // scene; he is only there once he speaks from it.
     const { script } = mendScreenplay(
       {
         ...draft(),
@@ -1155,7 +1178,7 @@ describe('two places at once: cutting between them', () => {
             place: 'cave',
             with: ['dad', 'sally'],
           }),
-          beat('line', 'I am here now.', { who: 'dad' }),
+          beat('line', 'I am here now.', { who: 'dad', place: 'cave' }),
           beat('line', 'Pull us up!', { who: 'james' }),
         ],
       },
@@ -1175,6 +1198,9 @@ describe('two places at once: cutting between them', () => {
       'james @woods',
       'james+dad arrive dad',
       'sally @cave cut',
+      // "Dad climbs down into the cave": seen above, where he still is.
+      'dad+james @woods cut',
+      // "I am here now", said in the cave: he is there.
       'dad+sally @cave cut',
       'james @woods cut',
     ]);

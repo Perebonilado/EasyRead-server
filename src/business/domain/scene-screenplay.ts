@@ -905,16 +905,16 @@ export function mendScreenplay(
   );
   /** Where someone went on the page, by the writer's words: past where the story has them. */
   const movedTo = new Map<string, string>();
-  /** Where someone is now: where they went, else where the story has them. */
-  const whereOf = (id: string): string | null => {
-    if (!whereabouts) return null;
-    const moved = movedTo.get(id);
-    if (moved) return moved;
+  /** Where the story has someone on this page, if it does. */
+  const storyWhere = (id: string): string | null => {
     const thing = byId.get(id);
-    return thing?.kind === 'character'
+    return whereabouts && thing?.kind === 'character'
       ? castPlace(whereabouts.people[thing.ref])
       : null;
   };
+  /** Where someone is now: where they went, else where the story has them. */
+  const whereOf = (id: string): string | null =>
+    whereabouts ? (movedTo.get(id) ?? storyWhere(id)) : null;
   /** Where a scene is, as the story knows it: a place of the writer's own is where the page happens. */
   const sceneAt = (place: string | null): string | null =>
     place && pagePlaces.has(place) ? place : (pageHere ?? place);
@@ -973,6 +973,9 @@ export function mendScreenplay(
         begun = true;
         return;
       }
+      // A question to the viewer ("Can you spot the big tree trunk?") is
+      // the narrator's aside: never a scene of its own.
+      if (TO_VIEWER.test(raw.say)) return;
       const place = known(raw.place, ['place']) ?? placeNamed(raw.say);
       const given = (raw.with ?? [])
         .map((ref) => known(ref, PEOPLE))
@@ -1239,9 +1242,14 @@ export function mendScreenplay(
       view = null;
       fresh = { ...(scene.place ? { backdrop: scene.place } : {}), cut: true };
       // A later scene's people went there; the rest are where they were.
+      // One the story has somewhere on this page stays there: only their
+      // own words move them (a line said there, their coming there), never
+      // a scene the writer lists them in ("Mark's dad hears her", listed
+      // in the cave with Sally, is still above it).
       const there = sceneAt(scene.place);
       if (whereabouts && there)
-        for (const id of scene.people) movedTo.set(id, there);
+        for (const id of scene.people)
+          if (!storyWhere(id)) movedTo.set(id, there);
       for (const id of new Set([...present, ...parts[nowScene]]))
         settle(id, scene.place);
     }
@@ -1251,11 +1259,11 @@ export function mendScreenplay(
       // As a line or a narration begins.
       const beat = beats[k];
       const effects: SceneEffect[] = [];
+      // A place the narration names; never a question to the viewer's.
       const named =
-        beat.kind === 'narration' && !fresh
+        beat.kind === 'narration' && !fresh && !TO_VIEWER.test(beat.say)
           ? known(raw.place, ['place'])
           : null;
-      const place = named && named !== shownPlace ? named : null;
       const prop = known(raw.show, ['drawing']);
       if (prop && !shown.includes(prop)) shown.push(prop);
       // Whoever speaks is on the stage: unless the words sent them off it,
@@ -1309,7 +1317,14 @@ export function mendScreenplay(
           look = about.every((id) => apart.has(id))
             ? apart.get(about[0])!
             : null;
+        // Where some are apart, the place it names is where the stage
+        // looks: the scene's own, or theirs.
+        if (named && pagePlaces.has(named))
+          look = sceneAt(named) === sceneAt(scenePlace) ? null : named;
       }
+      // Looking at the scene's own place, one it names is behind the stage.
+      const place =
+        named && look === null && named !== shownPlace ? named : null;
       // Someone here who is not on the stage comes into view. One the
       // words sent off calls from off it, unless no one is left: then the
       // scene goes with them, and they are back.
@@ -1359,6 +1374,8 @@ export function mendScreenplay(
               cut: true as const,
             }
           : {}),
+        // A new scene opening on someone elsewhere is seen where they are.
+        ...(fresh && view ? { backdrop: view } : {}),
         ...(cutIn.length ? { cutIn } : {}),
       });
       let stage: SceneStage | null = null;

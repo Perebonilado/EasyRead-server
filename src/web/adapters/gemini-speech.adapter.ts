@@ -21,16 +21,43 @@ type Piece = {
   voice?: string;
 };
 
-/** The pieces in runs of one voice, in order: each run is one request. */
-export function voiceRuns<T extends { voice?: string }>(
+/** A silence this long or longer is made by the page, not asked of the voice. */
+export const LONG_PAUSE_S = 0.6;
+/** The most requests one page is voiced in, and how many are out at once. */
+export const MOST_RUNS = 8;
+const AT_ONCE = 3;
+
+/**
+ * The pieces in runs, each one request: a new run where the voice changes
+ * (a story's character), and where a long silence falls, so the page puts
+ * the silence in itself. Asked for in the text, as "<long pause>", the
+ * voice sometimes read it aloud. At most MOST_RUNS: past that, only the
+ * longest silences part the runs, and the rest are left to the sentence's
+ * own full stop.
+ */
+export function voiceRuns<T extends { voice?: string; pauseAfter?: number }>(
   pieces: T[],
+  most = MOST_RUNS,
 ): { voice: string | undefined; pieces: T[] }[] {
+  const changes = new Set<number>();
+  for (let i = 0; i + 1 < pieces.length; i += 1)
+    if (pieces[i].voice !== pieces[i + 1].voice) changes.add(i);
+  const pauses = pieces
+    .map((piece, i) => ({ i, pause: piece.pauseAfter ?? 0 }))
+    .filter(
+      ({ i, pause }) =>
+        i + 1 < pieces.length && !changes.has(i) && pause >= LONG_PAUSE_S,
+    )
+    .sort((a, b) => b.pause - a.pause || a.i - b.i)
+    .slice(0, Math.max(0, most - 1 - changes.size))
+    .map(({ i }) => i);
+  const cuts = new Set([...changes, ...pauses]);
   const runs: { voice: string | undefined; pieces: T[] }[] = [];
-  for (const piece of pieces) {
+  pieces.forEach((piece, i) => {
     const last = runs[runs.length - 1];
-    if (last && last.voice === piece.voice) last.pieces.push(piece);
+    if (last && !cuts.has(i - 1)) last.pieces.push(piece);
     else runs.push({ voice: piece.voice, pieces: [piece] });
-  }
+  });
   return runs;
 }
 
@@ -41,23 +68,15 @@ export interface GeminiItem {
 }
 
 /**
- * The silence after a sentence, as the voice's own inline mark. It reads
- * the text word for word and cannot be held to a length, so only the
- * silences that matter are marked; the aligner measures what was said.
+ * The page as the voice's text items: a sentence each, with its direction,
+ * and nothing it could read aloud but the words. A short silence is the
+ * sentence's own full stop; a long one is put in by the page (voiceRuns).
  */
-export function pauseTag(seconds: number): string {
-  if (seconds >= 0.6) return ' <long pause>';
-  if (seconds >= 0.4) return ' <short pause>';
-  return '';
-}
-
-/** The page as the voice's text items: a sentence each, with its direction. */
 export function geminiItems(pieces: Piece[]): GeminiItem[] {
   return pieces
     .filter((piece) => piece.text.trim())
-    .map((piece, i, all) => ({
-      // Nothing after the last sentence: the page simply ends.
-      text: `${piece.text.trim()}${i < all.length - 1 ? pauseTag(piece.pauseAfter) : ''}`,
+    .map((piece) => ({
+      text: piece.text.trim(),
       style: piece.style?.trim() || null,
     }));
 }
@@ -262,32 +281,52 @@ export class GeminiSpeechAdapter implements SpeechPort {
     let tokensIn = 0;
     let tokensOut = 0;
     let counted = false;
+    // A few runs at once, joined in order with the silence each asked for.
+    const spoken: ({
+      samples: Int16Array;
+      rate: number;
+      usage: { tokensIn: number; tokensOut: number } | null;
+    } | null)[] = new Array(runs.length).fill(null);
+    for (let from = 0; from < runs.length; from += AT_ONCE)
+      await Promise.all(
+        runs.slice(from, from + AT_ONCE).map(async (run, j) => {
+          const items = geminiItems(run.pieces);
+          if (!items.length) return;
+          const who = run.voice?.trim() || speaker;
+          const { url, body } =
+            this.config.get<string>('GEMINI_TTS_API') === 'generate'
+              ? generateRequest(model, who, items)
+              : interactionRequest(model, who, items);
+          const answer = await this.attempts(url, key, body);
+          const found = audioIn(answer);
+          if (!found) throw new Error('The Gemini voice sent no audio');
+          const bytes = Buffer.from(found.data, 'base64');
+          const wav = readWav(bytes);
+          if (!wav && /wav/i.test(found.mimeType))
+            throw new Error(
+              'The Gemini voice sent audio that is not 16-bit PCM',
+            );
+          const pcm = wav ?? readPcm16(bytes, rateOf(found.mimeType) ?? 24000);
+          if (!pcm.samples.length)
+            throw new Error('The Gemini voice sent silence');
+          spoken[from + j] = {
+            samples: pcm.samples,
+            rate: pcm.sampleRate,
+            usage: usageIn(answer),
+          };
+        }),
+      );
     for (const [k, run] of runs.entries()) {
-      const items = geminiItems(run.pieces);
-      if (!items.length) continue;
-      const who = run.voice?.trim() || speaker;
-      const { url, body } =
-        this.config.get<string>('GEMINI_TTS_API') === 'generate'
-          ? generateRequest(model, who, items)
-          : interactionRequest(model, who, items);
-      const answer = await this.attempts(url, key, body);
-      const found = audioIn(answer);
-      if (!found) throw new Error('The Gemini voice sent no audio');
-      const bytes = Buffer.from(found.data, 'base64');
-      const wav = readWav(bytes);
-      if (!wav && /wav/i.test(found.mimeType))
-        throw new Error('The Gemini voice sent audio that is not 16-bit PCM');
-      const pcm = wav ?? readPcm16(bytes, rateOf(found.mimeType) ?? 24000);
-      if (!pcm.samples.length) throw new Error('The Gemini voice sent silence');
-      rate = pcm.sampleRate;
-      parts.push(pcm.samples);
+      const one = spoken[k];
+      if (!one) continue;
+      rate = one.rate;
+      parts.push(one.samples);
       const pause = run.pieces[run.pieces.length - 1].pauseAfter;
       if (k < runs.length - 1 && pause > 0)
         parts.push(new Int16Array(Math.round(pause * rate)));
-      const usage = usageIn(answer);
-      if (usage) {
-        tokensIn += usage.tokensIn;
-        tokensOut += usage.tokensOut;
+      if (one.usage) {
+        tokensIn += one.usage.tokensIn;
+        tokensOut += one.usage.tokensOut;
         counted = true;
       }
     }

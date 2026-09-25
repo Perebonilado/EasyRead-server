@@ -4,9 +4,9 @@ import {
   GeminiSpeechAdapter,
   audioIn,
   geminiItems,
+  voiceRuns,
   generateRequest,
   interactionRequest,
-  pauseTag,
   rateOf,
   usageIn,
 } from './gemini-speech.adapter';
@@ -49,18 +49,50 @@ const reply = (
   });
 
 describe('the Gemini voice', () => {
-  it('marks only the silences that matter, and none after the last sentence', () => {
-    expect(pauseTag(0.3)).toBe('');
-    expect(pauseTag(0.45)).toBe(' <short pause>');
-    expect(pauseTag(0.8)).toBe(' <long pause>');
+  it('sends only the words, never a mark it could read aloud', () => {
     const items = geminiItems([
       { text: 'Why do we breathe?', pauseAfter: 0.75, style: 'asking' },
       { text: '  ', pauseAfter: 0.5 },
       { text: 'To burn our food.', pauseAfter: 0.9 },
     ]);
     expect(items).toEqual([
-      { text: 'Why do we breathe? <long pause>', style: 'asking' },
+      { text: 'Why do we breathe?', style: 'asking' },
       { text: 'To burn our food.', style: null },
+    ]);
+    expect(JSON.stringify(items)).not.toMatch(/pause/iu);
+  });
+
+  it('parts the page where a long silence falls, so the silence is made, not read', () => {
+    const piece = (text: string, pauseAfter: number, voice?: string) => ({
+      text,
+      pauseAfter,
+      ...(voice ? { voice } : {}),
+    });
+    const runs = voiceRuns([
+      piece('One.', 0.3),
+      piece('Two.', 0.8),
+      piece('Three.', 0.4),
+      piece('Four.', 1.2, 'Puck'),
+      piece('Five.', 0.3, 'Puck'),
+    ]);
+    // After each long silence ("Two.", "Four.") and where the voice changes.
+    expect(runs.map((r) => r.pieces.map((p) => p.text).join(' '))).toEqual([
+      'One. Two.',
+      'Three.',
+      'Four.',
+      'Five.',
+    ]);
+    // Past the most requests, only the longest silences part it.
+    const many = Array.from({ length: 12 }, (_, i) =>
+      piece(`S${i}.`, 0.6 + i / 100),
+    );
+    const few = voiceRuns(many, 4);
+    expect(few).toHaveLength(4);
+    expect(few.map((r) => r.pieces[r.pieces.length - 1].text)).toEqual([
+      'S8.',
+      'S9.',
+      'S10.',
+      'S11.',
     ]);
   });
 

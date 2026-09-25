@@ -2074,11 +2074,10 @@ function namesOf(thing: SceneThing | undefined): string[] {
  *
  * 1. a part of a drawing on the stage that the voice names: pointed at,
  *    so it glows and its label shows;
- * 2. with two or more on the stage, a thing the voice names: the camera
- *    in close on it for a few seconds, then back to the whole stage;
- * 3. with two or more on the stage, the camera in close on the one in
- *    focus, then another;
- * 4. else a pulse on what holds the eye, as before.
+ * 2. with two or more on the stage, a thing the voice names then: the
+ *    camera in close on it for a few seconds, all of it and its labels,
+ *    then back to the whole stage; never on one it is not talking about;
+ * 3. else a pulse on what holds the eye, as before.
  *
  * Each is marked a filler: silent, and never what the camera follows.
  * Returns how many it added.
@@ -2141,21 +2140,19 @@ export function fillQuiet(input: {
           break;
         }
       }
-      // 2 and 3. The camera in close: on a thing the voice names, else on
-      // the one in focus, else the next.
+      // 2. The camera in close on a thing the voice names then, and only
+      // then: never on one it is not talking about.
       const until = Math.min(at + FILL_SHOT_MS, to - 400);
       if (
         !made &&
         current.show.length >= 2 &&
         until - at >= FILL_SHOT_LEAST_MS
       ) {
-        const target =
-          current.show.find((id) =>
+        const target = current.show.find(
+          (id) =>
+            id !== lastShot &&
             input.names(id).some((name) => named(keysIn(name), said)),
-          ) ??
-          [current.focus, ...current.show].find(
-            (id): id is string => Boolean(id) && id !== lastShot,
-          );
+        );
         if (target) {
           lastShot = target;
           made = {
@@ -2168,7 +2165,7 @@ export function fillQuiet(input: {
           };
         }
       }
-      // 4. A pulse on what holds the eye.
+      // 3. A pulse on what holds the eye.
       if (!made) {
         const target = [current.focus, ...on].find(
           (id): id is string => id !== null && !input.acting(id),

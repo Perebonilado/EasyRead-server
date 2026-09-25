@@ -87,3 +87,22 @@ Richard asked for more movement: the stage itself changing more, and a list the 
 | 37 | 7 | 4.4 | 16 s |
 
 Every arrow on them runs forward.
+
+## Part three (2026-09-25): a stage built up, zooms that frame and follow the voice, Gemini's pauses
+
+Richard liked page 253's 21 stage changes and asked for more on other pages. He also asked for two fixes: a zoom should keep both the drawing and its labels in view, and it should happen only while the narrator is talking about that thing. And the Gemini voice was reading "Long Pause" aloud.
+
+- **A stage built up.** When the writer brings several new things on at once, each now arrives where the voice first names it, or where something first points at it, before the stage next changes. An arrow comes on once both of its ends are shown. A thing never named arrives with the stage, as the writer had it. Stages with people are left alone. A draft now goes back with fewer than one stage change per 30 spoken words (was 45).
+- **Zoom framing (client).** A close-up frames the drawing together with its labels and caption, not the drawing alone.
+- **Zoom only when named.** The writer's zooms are kept only when their sentence names the thing, by id, name, words or a part name. The code's own filler zooms only on a thing the voice names while two or more are on stage. It no longer zooms on whatever is in focus.
+- **Gemini pauses.** Pauses were sent as bracketed tags, which Gemini read aloud. Now only the words are sent. A page is split into requests at voice changes and at its longest pauses (0.6 s or more, up to 8 requests), three at a time. The silence between them is added by code.
+
+**Remade with DeepSeek writing:**
+
+| Page | Stage changes | Per minute | Longest still |
+|---|---|---|---|
+| 248 | 14 (was 9–11) | 7.0 | 15 s |
+| 256 | 10 (was 8) | 5.0 | 21 s |
+| 37 | 5 (was 4–6) | 3.6 | 18 s |
+
+Page 37's writer already brings things on one at a time, so there is nothing for the build-up to split. The count there is up to the writer.

@@ -373,12 +373,11 @@ describe('the scene put together', () => {
 
   it('fills a long stretch where nothing would change', () => {
     expect(filled).toBeGreaterThan(0);
-    // With three on the stage and nothing named, the camera in close on
-    // the one in focus, and back before the page ends.
+    // Nothing on the stage named then: no close-up on something the
+    // voice is not talking about, only a pulse.
     const fill = scene.effects.find((e) => e.filler && e.atMs > 8000);
-    expect(fill).toMatchObject({ do: 'zoom', part: null });
-    expect(fill!.untilMs! - fill!.atMs).toBeGreaterThanOrEqual(1500);
-    expect(fill!.untilMs!).toBeLessThanOrEqual(16_000 - 400);
+    expect(fill).toMatchObject({ do: 'pulse', part: null });
+    expect(scene.effects.some((e) => e.filler && e.do === 'zoom')).toBe(false);
     // A change that only fills a stretch is marked, so the player keeps it silent.
     expect(scene.effects.filter((e) => e.filler)).toHaveLength(filled);
   });
@@ -2035,8 +2034,8 @@ describe('a quiet stretch filled with what the words bring', () => {
       expect(e.atMs).toBeGreaterThanOrEqual(2000);
       expect(e.untilMs ?? e.atMs).toBeLessThanOrEqual(20_000 - 400);
     }
-    // Never the same close-up twice running.
-    expect(effects[0].target).not.toBe(effects[1].target);
+    // Nothing named: no close-ups at all.
+    expect(effects.every((e) => e.do === 'pulse')).toBe(true);
   });
 
   it('fills a stretch of pulses too, which show nothing new, keeping clear of them', () => {

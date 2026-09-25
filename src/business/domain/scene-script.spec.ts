@@ -254,6 +254,81 @@ describe('the writer’s storyboard, mended', () => {
     ).toHaveLength(2);
   });
 
+  it('keeps a zoom only where its sentence names the thing or a part of it', () => {
+    const d = draft();
+    d.steps.push(
+      // The sun is on stage, but the third sentence is about the leaf.
+      step(2, 'inside the leaf', {
+        effects: [{ target: 'sun', do: 'zoom' }],
+      }),
+      // It names the leaf and its chloroplasts: kept.
+      step(2, 'tiny parts', {
+        effects: [{ target: 'leaf', do: 'zoom' }],
+      }),
+    );
+    const { script, mended } = mendScript(d);
+    const zooms = script.steps.flatMap((s) =>
+      s.effects
+        .filter((e) => e.do === 'zoom')
+        .map((e) => `${s.at.beat}:${e.target}`),
+    );
+    expect(zooms).toEqual(['2:leaf']);
+    expect(mended.join(' ')).toContain(
+      'a zoom on sun, which its sentence does not name',
+    );
+  });
+
+  it('builds a stage up a thing at a time, each as the voice names it', () => {
+    const built: SceneScriptDraft = {
+      ...draft(),
+      beats: [
+        {
+          say: 'A web server answers each request.',
+          pause: 'short',
+          delivery: 'explain',
+        },
+        {
+          say: 'Behind it sits a database.',
+          pause: 'short',
+          delivery: 'explain',
+        },
+        {
+          say: 'Photos go to storage instead.',
+          pause: 'long',
+          delivery: 'key',
+        },
+      ],
+      cast: [
+        thing('server', 'drawing', { name: 'web server' }),
+        thing('database', 'drawing'),
+        thing('storage', 'drawing'),
+      ],
+      steps: [
+        step(0, 'A web', {
+          layout: 'row',
+          show: ['server', 'database', 'storage'],
+          arrows: [
+            { from: 'server', to: 'database', label: null, flow: true },
+            { from: 'server', to: 'storage', label: null, flow: true },
+          ],
+        }),
+      ],
+    };
+    const { script, mended } = mendScript(built);
+    const stages = script.steps.filter((s) => s.stage);
+    expect(
+      stages.map((s) => [s.at.beat, s.stage!.show, s.stage!.arrows.length]),
+    ).toEqual([
+      [0, ['server'], 0],
+      [1, ['server', 'database'], 1],
+      [2, ['server', 'database', 'storage'], 2],
+    ]);
+    expect(stages[0].stage!.layout).toBe('one');
+    expect(mended.join(' ')).toContain(
+      'database, storage brought on as the voice names them',
+    );
+  });
+
   it('brings a list said aloud on stage item by item, beside what it is about', () => {
     const { script, mended } = mendScript(draft());
     const cards = script.cast.filter((t) => t.id.startsWith('item-'));

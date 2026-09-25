@@ -166,7 +166,8 @@ On branch `visualize-true-stories` in both repos, committed locally, not pushed.
   - The first page is a title card; the other front and back pages are not made.
 
 **Decided while testing:**
-- **The story reader is gpt-4.1 now, not 4.1-mini** (`AI_MODEL_SCENE_STORY`). Mini put James in the cave with Sally in two of three readings; 4.1 got it right in three of three. It costs about five times as much, once a book: about $0.04 for Hide-and-Seek and $0.30 for Matthew.
+- **The story reader stays on gpt-4.1-mini**, Richard's choice after gpt-4.1 was tried. On Hide-and-Seek's page 11, gpt-4.1 put James above the cave in three readings of three; mini put him in it with Sally in two of three. gpt-4.1 costs about five times as much, once a book: about $0.04 for Hide-and-Seek and $0.30 for Matthew. It can be switched on with `AI_MODEL_SCENE_STORY=openai:gpt-4.1`.
+  - Both books here were read with gpt-4.1 while it was the default, and keep those readings until they are read again.
 - **The writer gets how the page before ends.** Without it, a line at the top of a page went to the wrong one ("Mark, James, there's something down here", Mark's father's).
 - **A book keeps its 32 most used places, not its first 16.** The reading also lists the other places a page moves through.
 
@@ -196,7 +197,7 @@ On branch `visualize-true-stories` in both repos, committed locally, not pushed.
 - **Someone the story does not name** ("a ruler") is the writer's to cast. Now it usually is.
 
 **To deploy** (no migration):
-- Story books are read again on their next page made (`STORY_VERSION` 3), with gpt-4.1. If Railway sets `AI_MODEL_SCENE_STORY` to gpt-4.1-mini, change it to `openai:gpt-4.1`.
+- Story books are read again on their next page made (`STORY_VERSION` 3), with gpt-4.1-mini as before; no variable changes.
 - Books already made need `npm run doc:reread -- <id> --go` (pages, notes and story), then `npm run scene:recast -- <id> --here` (or `--go` for the worker). Ask before running either on a production book.
 - The API and the worker need restarting to run the new code.
 

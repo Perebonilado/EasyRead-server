@@ -100,11 +100,12 @@ const TASK_DEFAULT: Partial<Record<LlmTask, string>> = {
   scene_draw: 'deepseek:deepseek-flash',
   // What a document is: one small call a document.
   scene_profile: 'openai:gpt-4.1-mini',
-  // A story's characters, places and pages: one call a stretch of it, once
-  // a book. Where each of its people is when they are apart (Sally in the
-  // cave, the boys above calling down) is beyond the small model: it put
-  // the boy who stayed with her in the cave with her two readings in three.
-  scene_story: 'openai:gpt-4.1',
+  // A story's characters, places and pages: one small call a stretch of
+  // it, once a book. gpt-4.1 says more reliably where each person is when
+  // some are apart (the small model put the boy who stayed with Sally in
+  // the cave with her two readings in three), at about five times the
+  // cost: the small model by choice, 4.1 by setting AI_MODEL_SCENE_STORY.
+  scene_story: 'openai:gpt-4.1-mini',
 };
 
 const DEFAULT_MODEL = 'openai:gpt-4o-mini';

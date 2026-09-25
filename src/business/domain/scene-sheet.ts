@@ -224,9 +224,11 @@ export function introCallouts(
 
 /**
  * Sets painted by an older way of painting them are painted again. 2:
- * painted to go with the people the kit draws (SET_STYLE).
+ * painted to go with the people the kit draws (SET_STYLE). 3: a whole,
+ * recognisable place, dressed for the story's world, and what stands in
+ * front of people's legs (a boat's side) a group of its own.
  */
-export const SET_VERSION = 2;
+export const SET_VERSION = 3;
 
 /** A place painted once for a book: the scene behind the stage. */
 export interface SetSheet {

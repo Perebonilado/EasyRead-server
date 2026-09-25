@@ -81,12 +81,14 @@ import {
   SET_CANVAS,
   castKey,
   castStory,
+  crowdOn,
   describeStory,
   mergeStory,
   setThing,
   setsKey,
   sheetThing,
   standsOnStage,
+  STORY_VERSION,
   storyKey,
   storyPieces,
   withVoices,
@@ -95,6 +97,7 @@ import {
   type StoryKind,
   type StoryPlace,
   type StorySize,
+  type StoryWorld,
 } from '../../business/domain/scene-story';
 import {
   CANVAS,
@@ -168,6 +171,8 @@ export const THUMB_WIDTH = 480;
 const DRAW_TRIES = 2;
 /** Stretches of a story read at once. */
 const STORY_READERS = 4;
+/** The most stretches (about 20 pages each) a story read the old way is read again in, unasked. */
+const REREAD_MOST_STRETCHES = 6;
 /** How a line from somewhere else is said, for a voice that takes direction. */
 const FROM_STYLE: Partial<Record<LineFrom, string>> = {
   thought: 'thinking it quietly to themselves, not aloud',
@@ -694,6 +699,10 @@ export class SceneProcessor {
         ? {
             characters: input.story.bible.characters,
             places: input.story.bible.places,
+            // A group speaks from the crowd behind the stage, if there is one.
+            crowd: ['few', 'many'].includes(
+              crowdOn(input.story.bible, input.story.page) ?? '',
+            ),
           }
         : {}),
     };
@@ -905,6 +914,7 @@ export class SceneProcessor {
               story.bookTitle,
               documentId,
               who,
+              story.bible.world ?? null,
             )
           : null;
       out.set(thing.id, set?.drawing ?? null);
@@ -1296,11 +1306,14 @@ export class SceneProcessor {
           return null;
         }
       }
+      let older: StoryBible | null = null;
       if (kept)
         try {
-          return bibleOf(
+          const bible = bibleOf(
             JSON.parse(kept.toString('utf8')) as Partial<StoryBible> | null,
           );
+          if ((bible.version ?? 1) >= STORY_VERSION) return bible;
+          older = bible;
         } catch {
           // Kept but unreadable: read from the book again.
         }
@@ -1311,6 +1324,25 @@ export class SceneProcessor {
           1,
           Math.max(1, doc?.props.pageCount ?? 1),
         );
+        // A story read the old way is read once more, for its world and
+        // where each page happens; a very long one is left as it was
+        // until someone asks for it (scripts/scene-recast).
+        if (older) {
+          const stretches = storyPieces(
+            pages
+              .filter((page) => !page.isEmpty)
+              .map((page) => ({ page: page.pageNumber, text: page.text })),
+          ).length;
+          if (stretches > REREAD_MOST_STRETCHES) {
+            this.logger.log(
+              `${documentId}: the story was read the old way; at ${stretches} stretches it is not read again unasked`,
+            );
+            return older;
+          }
+          this.logger.log(
+            `${documentId}: the story was read the old way; reading it once more`,
+          );
+        }
         const bible = await this.readStory({
           documentId,
           title,
@@ -1327,9 +1359,9 @@ export class SceneProcessor {
         return bible;
       } catch (error) {
         this.logger.warn(
-          `${documentId}: no story, its pages made without one: ${(error as Error).message}`,
+          `${documentId}: ${older ? 'the story could not be read again; kept as it was' : 'no story, its pages made without one'}: ${(error as Error).message}`,
         );
-        return null;
+        return older;
       }
     });
   }
@@ -1348,7 +1380,11 @@ export class SceneProcessor {
   }): Promise<StoryBible> {
     const pieces = storyPieces(input.pages).slice(0, MAX_STORY_PIECES);
     if (!pieces.length) return EMPTY_STORY;
-    const read = async (piece: (typeof pieces)[number], known: string[]) => {
+    const read = async (
+      piece: (typeof pieces)[number],
+      known: string[],
+      knownPlaces: string[] = [],
+    ) => {
       try {
         const made = await this.llm.sceneStory({
           documentTitle: input.title,
@@ -1356,6 +1392,7 @@ export class SceneProcessor {
           to: piece.to,
           text: piece.text,
           known,
+          knownPlaces,
         });
         await this.record(input.documentId, 'scene_story', made.usage);
         return { from: piece.from, to: piece.to, draft: made.value };
@@ -1368,8 +1405,9 @@ export class SceneProcessor {
     };
     const first = await read(pieces[0], []);
     const known = first?.draft.characters.map((c) => c.name) ?? [];
+    const knownPlaces = first?.draft.places.map((p) => p.name) ?? [];
     const rest = await inBatches(pieces.slice(1), STORY_READERS, (piece) =>
-      read(piece, known),
+      read(piece, known, knownPlaces),
     );
     const parts = [first, ...rest].filter(
       (part): part is NonNullable<typeof part> => Boolean(part),
@@ -1404,8 +1442,10 @@ export class SceneProcessor {
       try {
         const kept = (await this.castAt(key))[character.id];
         // A person is drawn again from their figure: code, and the kit as
-        // it is now. The figure is what was kept.
-        if (kept?.figure) return figureSheet(kept.figure, character.id);
+        // it is now. The story's figure wins over the one kept, so a look
+        // set apart or a well-known figure's reaches a book drawn before.
+        if (kept?.figure)
+          return figureSheet(character.figure ?? kept.figure, character.id);
         if (kept) return kept;
       } catch (error) {
         this.logger.warn(
@@ -1505,6 +1545,7 @@ export class SceneProcessor {
     bookTitle: string,
     documentId: string | null,
     who: string,
+    world: StoryWorld | null = null,
   ): Promise<SetSheet | null> {
     return this.once(`${key}#${place.id}`, async () => {
       try {
@@ -1516,7 +1557,13 @@ export class SceneProcessor {
         );
         return null;
       }
-      const set = await this.paintSet(place, bookTitle, documentId, who);
+      const set = await this.paintSet(
+        place,
+        bookTitle,
+        documentId,
+        who,
+        world,
+      );
       if (!set) return null;
       await this.inTurn(key, async () => {
         const sets = await this.setsAt(key);
@@ -1557,8 +1604,9 @@ export class SceneProcessor {
     bookTitle: string,
     documentId: string | null,
     who: string,
+    world: StoryWorld | null = null,
   ): Promise<SetSheet | null> {
-    const thing = setThing(place, bookTitle);
+    const thing = setThing(place, bookTitle, world);
     let best: GateResult | null = null;
     let notes: string[] | undefined;
     for (let attempt = 1; attempt <= DRAW_TRIES; attempt += 1) {

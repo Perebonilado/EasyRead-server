@@ -260,4 +260,26 @@ describe('voices beyond the stage', () => {
     expect(heardFrom('', ', she thought.', 'Maybe,')).toBe('thought');
     expect(heardFrom('A voice from the sky boomed:', '', 'Go!')).toBe('above');
   });
+
+  it('gives "they" to the story\'s group, and "he" to the man named last', () => {
+    const feeding = [
+      'Jesus came out, saw a great multitude, and he began to teach them many things.',
+      'When it was late in the day, his disciples came to him, and said, “This place is deserted.”',
+      'But he answered them, “You give them something to eat.” They asked him, “Shall we go and buy bread?”',
+      'He said to them, “How many loaves do you have?” When they knew, they said, “Five, and two fish.”',
+    ];
+    const cast: Speaker[] = [
+      { id: 'jesus', names: ['Jesus'], gender: 'm' },
+      { id: 'john', names: ['John'], gender: 'm' },
+      { id: 'disciples', names: ['Disciples', 'disciples'], group: true },
+    ];
+    expect(lines(feeding, cast)).toEqual([
+      'disciples: This place is deserted.',
+      'jesus: You give them something to eat.',
+      'disciples: Shall we go and buy bread?',
+      'jesus: How many loaves do you have?',
+      'disciples: Five, and two fish.',
+    ]);
+  });
 });
+

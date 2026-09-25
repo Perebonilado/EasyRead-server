@@ -1292,6 +1292,92 @@ describe('what a character says, in a bubble', () => {
     expect(played.acting?.mira.mouth ?? []).toEqual([]);
   });
 
+  it("dresses a story's page: its set at full strength, its night and storm, and a crowd that speaks and cheers", () => {
+    const line = (
+      say: string,
+      speaker: string,
+      extra: Partial<SceneScript['beats'][number]> = {},
+    ): SceneScript['beats'][number] => ({
+      say,
+      pause: 'short',
+      delivery: 'explain',
+      kind: 'line',
+      speaker,
+      lines: [{ span: [0, say.length], speaker }],
+      ...extra,
+    });
+    const played = composeScene({
+      script: {
+        ...talking,
+        cast: [
+          ...talking.cast.map((thing) =>
+            thing.id === 'mira' ? { ...thing, first: true } : thing,
+          ),
+          {
+            id: 'crowd-people',
+            kind: 'character',
+            ref: 'the-crowd',
+            name: 'The crowd',
+            state: null,
+            met: 2,
+            intro: [],
+            group: true,
+          },
+        ],
+        beats: [
+          {
+            say: 'A great multitude gathers on the shore.',
+            pause: 'short',
+            delivery: 'explain',
+            kind: 'narration',
+          },
+          line('Who goes there?', 'mira'),
+          line('Hosanna!', 'crowd-people'),
+        ],
+        steps: [
+          {
+            at: { beat: 0, phrase: '' },
+            word: 0,
+            stage: { layout: 'row', show: ['mira', 'fox'], arrows: [] },
+            effects: [],
+          },
+        ],
+        setting: { time: 'night', weather: 'storm', crowd: 'many', world: null },
+      },
+      drawings: new Map([
+        ['mira', figure()],
+        ['fox', figure()],
+      ]),
+      beats: [
+        beat('A great multitude gathers on the shore.', 0),
+        beat('Who goes there?', 3000),
+        beat('Hosanna!', 5000),
+      ],
+      durationMs: 7000,
+      timing: 'voice',
+      generator: 'scene-2',
+    }).scene;
+    expect(played.setting).toEqual({
+      full: true,
+      time: 'night',
+      weather: 'storm',
+      crowd: { id: '@crowd', moves: [[5000, 'cheer', 1400]] },
+    });
+    // The crowd is drawn by code, and never stands in a step.
+    expect(played.things.some((t) => t.id === '@crowd' && t.kind === 'drawing')).toBe(true);
+    expect(played.steps.every((step) => !step.show.includes('@crowd'))).toBe(true);
+    // The crowd's line comes from over the crowd.
+    const shout = played.effects.find((e) => e.target === 'crowd-people');
+    expect(shout?.say?.from).toBe('crowd');
+    expect(played.stagings.wide.bubbles![shout!.say!.id]?.from).toBe('crowd');
+    // Mira, met here for the first time, gets a moment of the camera.
+    expect(
+      played.effects.some(
+        (e) => e.do === 'zoom' && e.target === 'mira' && e.untilMs !== undefined,
+      ),
+    ).toBe(true);
+  });
+
   it('walks one over to the other before a hug across the row, and keeps them side by side', () => {
     const three = composeScene({
       script: {

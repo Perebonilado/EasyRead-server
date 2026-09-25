@@ -32,7 +32,7 @@ export interface SpokenLine {
    * or a letter's, to whoever hears it or holds it. A thought no one else
    * hears, and a dream no one hears at all.
    */
-  from?: 'off' | 'above' | 'phone' | 'letter' | 'thought' | 'dream';
+  from?: 'off' | 'above' | 'phone' | 'letter' | 'thought' | 'dream' | 'crowd';
   /** The side of the stage an off-stage voice is on. */
   side?: -1 | 1;
   startMs: number;
@@ -333,7 +333,9 @@ export function actingOf(input: {
       if (line.from === 'dream') return;
       hearers.forEach((one, k) => {
         const toward =
-          line.from === 'above'
+          line.from === 'crowd'
+            ? null
+            : line.from === 'above'
             ? '@up'
             : line.from === 'off' || (!holder && line.from === 'phone')
               ? (line.side ?? 1) < 0

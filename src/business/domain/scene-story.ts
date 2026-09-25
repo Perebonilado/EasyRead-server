@@ -10,7 +10,9 @@
  * same drawing stands on every page they are on, the same way round
  * beside anyone else, with the face the last page left them with.
  */
-import { figureOf, type FigureSpec } from './scene-figure';
+import { figureOf, type FigureProp, type FigureSpec } from './scene-figure';
+import { iconicOf } from './scene-iconic';
+import { setApart } from './scene-looks';
 import {
   SCENE_AMBIENCES,
   type CharacterThing,
@@ -190,6 +192,53 @@ export interface StoryCharacter {
   figure?: FigureSpec | null;
   /** Whether they are seen or only heard; absent from a book read before it was asked: seen. */
   presence?: StoryPresence | null;
+  /** A well-known figure (scene-iconic), drawn as their tradition shows them: its key. */
+  iconic?: string | null;
+  /** What they carry when the page gives them nothing else: Moses's staff. */
+  carries?: FigureProp | null;
+  /** The figure's fields the text itself says: never changed to set them apart. */
+  fromText?: string[] | null;
+}
+
+/** What a place is: out of doors, a room, or something people ride in (a boat, a cart). */
+export const PLACE_KINDS = ['outdoor', 'indoor', 'vessel'] as const;
+export type PlaceKind = (typeof PLACE_KINDS)[number];
+/** How people are in a place: standing on its ground, or in it, behind its side (a boat, a room behind a table). */
+export const PLACE_STANDS = ['on', 'in'] as const;
+export type PlaceStand = (typeof PLACE_STANDS)[number];
+/** When a page happens, as the light shows it. */
+export const STORY_TIMES = ['dawn', 'day', 'dusk', 'night'] as const;
+export type StoryTime = (typeof STORY_TIMES)[number];
+/** The weather a page happens in. */
+export const STORY_WEATHERS = [
+  'clear',
+  'rain',
+  'storm',
+  'wind',
+  'snow',
+  'fog',
+] as const;
+export type StoryWeather = (typeof STORY_WEATHERS)[number];
+/** How busy a page is: no one else, a few people, or a crowd. */
+export const STORY_CROWDS = ['none', 'few', 'many'] as const;
+export type StoryCrowd = (typeof STORY_CROWDS)[number];
+
+/**
+ * The story's world, read once for the book: when and where it happens,
+ * its people's culture, the land, and what homes and streets look like.
+ * Clothes, sets and crowds are all dressed for it.
+ */
+export interface StoryWorld {
+  /** "first century AD", "today", "the 1960s". */
+  era: string;
+  /** "Galilee", "a Yoruba town in south-west Nigeria". */
+  region: string;
+  /** "Jewish villagers and fishermen", "Yoruba". */
+  culture: string;
+  /** "dry hills, olive trees and a large lake". */
+  landscape: string;
+  /** "flat-roofed stone houses, fishing boats", "compounds of mud-brick houses". */
+  homes: string;
 }
 
 export interface StoryPlace {
@@ -200,6 +249,14 @@ export interface StoryPlace {
   firstPage: number;
   /** What the place sounds like while the story is there, or null. */
   sound: SceneAmbience | null;
+  /** Out of doors, a room, or a vessel; absent from a book read before it was asked. */
+  kind?: PlaceKind | null;
+  /** How people are in it: on its ground, or in it behind its side. */
+  stand?: PlaceStand | null;
+  /** What stands in front of people's legs there: the boat's side, a table, a wall; null for nothing. */
+  front?: string | null;
+  /** Worked out from what happens there, not said by the text: general, and shared. */
+  inferred?: boolean;
 }
 
 export interface StoryPage {
@@ -210,12 +267,32 @@ export interface StoryPage {
   present: { id: string; mood: Expression }[];
   /** Where it happens: a place's id. */
   place: string | null;
+  /** Whether where it happens was worked out rather than said. */
+  placeInferred?: boolean;
+  /** When it happens, as the light shows it; null where nothing says. */
+  time?: StoryTime | null;
+  weather?: StoryWeather | null;
+  /** How many other people are about: a crowd is drawn behind the story's own. */
+  crowd?: StoryCrowd | null;
 }
+
+/**
+ * How a story is read now. 2: its world, where each page happens (worked
+ * out where the text does not say), its time and weather and crowd, what
+ * stands in front in a place, heard speakers and well-known figures. A
+ * book read before is read again once, on its next page (not a very long
+ * one, unasked).
+ */
+export const STORY_VERSION = 2;
 
 export interface StoryBible {
   characters: StoryCharacter[];
   places: StoryPlace[];
   pages: StoryPage[];
+  /** The story's world; absent from a book read before it was asked. */
+  world?: StoryWorld | null;
+  /** How it was read (STORY_VERSION); absent, before the world was read. */
+  version?: number;
 }
 
 /** What the model says of one stretch of the book, by names. */
@@ -232,19 +309,32 @@ export interface StoryDraft {
     /** As the model said it; made sound by figureOf. */
     figure?: unknown;
     presence?: StoryPresence | null;
+    /** A well-known figure, as their tradition draws them. */
+    iconic?: boolean | null;
+    /** The figure's fields the text says. */
+    fromText?: string[] | null;
   }[];
   places: {
     name: string;
     aliases: string[];
     look: string;
     sound: SceneAmbience | null;
+    kind?: PlaceKind | null;
+    stand?: PlaceStand | null;
+    front?: string | null;
   }[];
   pages: {
     page: number;
     summary: string;
     present: { name: string; mood: Expression }[];
     place: string | null;
+    placeInferred?: boolean | null;
+    time?: StoryTime | null;
+    weather?: StoryWeather | null;
+    crowd?: StoryCrowd | null;
   }[];
+  /** The story's world, as this stretch shows it; null where it cannot tell. */
+  world?: StoryWorld | null;
 }
 
 /** What a character is, as a model said from the look kept for them. */
@@ -283,6 +373,32 @@ export const setsKey = (documentId: string, contentVersion: number) =>
 
 /** A set's canvas: the wide stage's own shape, so it covers it whole. */
 export const SET_CANVAS = { w: 1600, h: 900 } as const;
+
+const oneOf =
+  <T extends string>(list: readonly T[]) =>
+  (value: unknown): T | null =>
+    list.includes(value as T) ? (value as T) : null;
+const placeKindOf = oneOf(PLACE_KINDS);
+const standOf = oneOf(PLACE_STANDS);
+const timeOf = oneOf(STORY_TIMES);
+const weatherOf = oneOf(STORY_WEATHERS);
+const crowdOf = oneOf(STORY_CROWDS);
+
+/** A world as the reader said it, made sound: every field some words, or none at all. */
+function worldOf(raw: unknown): StoryWorld | null {
+  if (!raw || typeof raw !== 'object') return null;
+  const said = raw as Record<string, unknown>;
+  const field = (key: string) =>
+    typeof said[key] === 'string' ? clean(said[key]).slice(0, 160) : '';
+  const world = {
+    era: field('era'),
+    region: field('region'),
+    culture: field('culture'),
+    landscape: field('landscape'),
+    homes: field('homes'),
+  };
+  return Object.values(world).some(Boolean) ? world : null;
+}
 
 const soundOf = (sound: unknown): SceneAmbience | null =>
   SCENE_AMBIENCES.includes(sound as SceneAmbience)
@@ -398,10 +514,13 @@ export function mergeStory(
   const takenIds = new Set<string>();
   // Each with the stretch it was first named in, for one never found on a page.
   const characters: (StoryCharacter &
-    Named & { order: number; named: number })[] = [];
+    Named & { order: number; named: number; marked: boolean })[] = [];
   const places: (StoryPlace & Named & { named: number })[] = [];
   const pages = new Map<number, StoryPage>();
   const sorted = [...parts].sort((a, b) => a.from - b.from);
+  // The world as the first stretch that could tell it says.
+  const world =
+    sorted.map((part) => worldOf(part.draft.world)).find(Boolean) ?? null;
   let order = 0;
   for (const part of sorted) {
     for (const raw of part.draft.characters) {
@@ -436,6 +555,10 @@ export function mergeStory(
           presenceKind(raw.presence),
           found.presence,
         );
+        found.marked ||= Boolean(raw.iconic);
+        found.fromText = [
+          ...new Set([...(found.fromText ?? []), ...(raw.fromText ?? [])]),
+        ];
         continue;
       }
       const kind = kindOf(raw.kind);
@@ -455,6 +578,8 @@ export function mergeStory(
         size: sizeOf(raw.size),
         figure: figureFor(kind, raw.figure),
         presence: presenceFor([name, ...aliases], presenceKind(raw.presence)),
+        marked: Boolean(raw.iconic),
+        fromText: [...new Set(raw.fromText ?? [])],
         keys: new Set([name, ...aliases].map(nameKey).filter(Boolean)),
         order: order++,
         named: part.from,
@@ -470,6 +595,9 @@ export function mergeStory(
           found.keys.add(key);
         found.look = fuller(found.look, clean(raw.look));
         found.sound ??= soundOf(raw.sound);
+        found.kind ??= placeKindOf(raw.kind);
+        found.stand ??= standOf(raw.stand);
+        found.front ??= clean(raw.front).slice(0, 120) || null;
         continue;
       }
       places.push({
@@ -481,6 +609,10 @@ export function mergeStory(
         look: clean(raw.look).slice(0, 400),
         firstPage: Number.POSITIVE_INFINITY,
         sound: soundOf(raw.sound),
+        kind: placeKindOf(raw.kind),
+        stand: standOf(raw.stand),
+        front: clean(raw.front).slice(0, 120) || null,
+        inferred: true,
         keys: new Set([name, ...aliases].map(nameKey).filter(Boolean)),
         named: part.from,
       });
@@ -500,17 +632,34 @@ export function mergeStory(
         who.firstPage = Math.min(who.firstPage, page);
       }
       const where = raw.place ? findNamed(places, [clean(raw.place)]) : null;
-      if (where) where.firstPage = Math.min(where.firstPage, page);
+      if (where) {
+        where.firstPage = Math.min(where.firstPage, page);
+        // A place any page says outright is the text's, not worked out.
+        if (!raw.placeInferred) where.inferred = false;
+      }
       pages.set(page, {
         page,
         summary: clean(raw.summary).slice(0, 300),
         present,
         place: where?.id ?? null,
+        placeInferred: Boolean(where && raw.placeInferred),
+        time: timeOf(raw.time),
+        weather: weatherOf(raw.weather),
+        crowd: crowdOf(raw.crowd),
       });
     }
   }
   for (const one of [...characters, ...places])
     if (!Number.isFinite(one.firstPage)) one.firstPage = one.named;
+  // A page that gives no clue happens where the page before did.
+  let last: string | null = null;
+  for (const page of [...pages.values()].sort((a, b) => a.page - b.page)) {
+    if (!page.place && last) {
+      page.place = last;
+      page.placeInferred = true;
+    }
+    last = page.place ?? last;
+  }
   // The ones the book cannot do without, when there are too many.
   const onPages = (id: string) =>
     [...pages.values()].filter((p) => p.present.some((one) => one.id === id))
@@ -530,21 +679,27 @@ export function mergeStory(
       character.met = i;
     });
   return {
-    characters: kept.map((c) => ({
-      id: c.id,
-      name: c.name,
-      aliases: c.aliases,
-      role: c.role,
-      look: c.look,
-      traits: c.traits,
-      firstPage: c.firstPage,
-      met: c.met,
-      voice: c.voice,
-      kind: c.kind ?? null,
-      size: c.size ?? null,
-      figure: c.figure ?? null,
-      presence: c.presence ?? 'seen',
-    })),
+    characters: lookedAt(
+      kept.map((c) => ({
+        id: c.id,
+        name: c.name,
+        aliases: c.aliases,
+        role: c.role,
+        look: c.look,
+        traits: c.traits,
+        firstPage: c.firstPage,
+        met: c.met,
+        voice: c.voice,
+        kind: c.kind ?? null,
+        size: c.size ?? null,
+        figure: c.figure ?? null,
+        presence: c.presence ?? 'seen',
+        fromText: c.fromText ?? [],
+        iconic: null,
+        carries: null,
+      })),
+      new Set(kept.filter((c) => c.marked).map((c) => c.id)),
+    ),
     places: places
       .sort((a, b) => a.firstPage - b.firstPage)
       .slice(0, MAX_PLACES)
@@ -555,6 +710,10 @@ export function mergeStory(
         look: p.look,
         firstPage: p.firstPage,
         sound: p.sound,
+        kind: p.kind ?? null,
+        stand: p.stand ?? null,
+        front: p.front ?? null,
+        inferred: p.inferred ?? false,
       })),
     pages: [...pages.values()]
       .sort((a, b) => a.page - b.page)
@@ -562,6 +721,8 @@ export function mergeStory(
         ...page,
         present: page.present.filter((one) => keptIds.has(one.id)),
       })),
+    world,
+    version: STORY_VERSION,
   };
 }
 
@@ -589,10 +750,18 @@ export function bibleOf(
         [clean(c.name), ...(c.aliases ?? []).map(clean)],
         presenceKind(c.presence),
       ),
+      fromText: Array.isArray(c.fromText) ? c.fromText.map(clean) : [],
+      iconic: typeof c.iconic === 'string' ? c.iconic : null,
+      carries: c.carries ?? null,
     }));
   const known = new Set(characters.map((c) => c.id));
   return {
-    characters,
+    // A well-known figure is drawn as their tradition shows them, in a
+    // book read before they were: by a name that could be no one else.
+    characters: lookedAt(
+      characters,
+      new Set(characters.filter((c) => c.iconic).map((c) => c.id)),
+    ),
     places: (raw.places ?? [])
       .filter((p) => p && clean(p.id) && clean(p.name))
       .map((p) => ({
@@ -602,6 +771,10 @@ export function bibleOf(
         look: clean(p.look),
         firstPage: Number.isFinite(p.firstPage) ? p.firstPage : 1,
         sound: soundOf(p.sound),
+        kind: placeKindOf(p.kind),
+        stand: standOf(p.stand),
+        front: clean(p.front) || null,
+        inferred: Boolean(p.inferred),
       })),
     pages: (raw.pages ?? []).map((p) => ({
       page: p.page,
@@ -610,8 +783,45 @@ export function bibleOf(
         (one) => known.has(one.id) && EXPRESSIONS.includes(one.mood),
       ),
       place: p.place ?? null,
+      placeInferred: Boolean(p.placeInferred),
+      time: timeOf(p.time),
+      weather: weatherOf(p.weather),
+      crowd: crowdOf(p.crowd),
     })),
+    world: worldOf(raw.world),
+    version: typeof raw.version === 'number' ? raw.version : 1,
   };
+}
+
+/**
+ * The book's people as they are drawn: a well-known figure (by a name that
+ * could be no one else, or as the reader marked them) in the look their
+ * tradition gives them; and everyone who matters set apart from everyone
+ * else, so each is known at a glance (scene-looks).
+ */
+function lookedAt(
+  characters: StoryCharacter[],
+  marked: ReadonlySet<string>,
+): StoryCharacter[] {
+  const known = characters.map((c) => {
+    if ((c.kind ?? 'person') !== 'person' || !standsOnStage(c)) return c;
+    const iconic = iconicOf([c.name, ...c.aliases], marked.has(c.id));
+    return iconic
+      ? {
+          ...c,
+          kind: 'person' as const,
+          figure: iconic.figure,
+          iconic: iconic.key,
+          carries: iconic.carries ?? null,
+        }
+      : c;
+  });
+  // Whom the story follows first, so the main characters keep their looks.
+  const order = [...known].sort(
+    (a, b) => RANK[a.role] - RANK[b.role] || a.met - b.met,
+  );
+  const apart = new Map(setApart(order).map((c) => [c.id, c]));
+  return known.map((c) => apart.get(c.id) ?? c);
 }
 
 /** How a character feels as a page starts: as the last page they were on left them. */
@@ -774,7 +984,23 @@ export function describeStory(bible: StoryBible, page: number): string {
     ...(place ? [place] : []),
     ...bible.places.filter((p) => p.firstPage <= page && p.id !== place?.id),
   ].slice(0, MAX_ON_PAGE);
+  const world = bible.world;
+  const crowd = crowdOn(bible, page);
+  const when = [
+    here?.time && here.time !== 'day' ? `It is ${here.time}` : '',
+    here?.weather && here.weather !== 'clear'
+      ? `the weather: ${here.weather}`
+      : '',
+    crowd === 'many'
+      ? 'a crowd is about, drawn behind the characters'
+      : crowd === 'few'
+        ? 'a few other people are about, drawn behind the characters'
+        : '',
+  ].filter(Boolean);
   return [
+    world
+      ? `The story's world: ${[world.era, world.region, world.culture].filter(Boolean).join('; ')}.`
+      : '',
     'The story\'s characters on this page (show one as kind "character" with its id as ref):',
     ...lines,
     places.length
@@ -782,8 +1008,9 @@ export function describeStory(bible: StoryBible, page: number): string {
       : '',
     ...places.map(
       (p) =>
-        `- ${p.id}: ${p.name}${p === place ? ', where this page happens: behind the stage from the start' : ''}.`,
+        `- ${p.id}: ${p.name}${p === place ? ', where this page happens: behind the stage from the start' : ''}${p === place && p.stand === 'in' && p.front ? `; the characters are in it, behind ${p.front}` : ''}.`,
     ),
+    when.length ? `${when.join('; ')}.` : '',
     here?.summary ? `What happens: ${here.summary}` : '',
   ]
     .filter(Boolean)
@@ -839,8 +1066,17 @@ export function castStory(
     const who = bible.characters.find((c) => c.id === thing.ref);
     if (!who) return thing;
     const before = moodBefore(bible, who.id, page);
+    // What they always carry, when the page gives them nothing else to
+    // hold and they stand: Moses's staff.
+    const carries =
+      who.carries && !thing.holding && (thing.pose ?? 'standing') === 'standing'
+        ? { holding: who.carries }
+        : {};
     return {
       ...thing,
+      ...carries,
+      ...(who.kind === 'group' ? { group: true as const } : {}),
+      ...(who.role === 'minor' ? { minor: true as const } : {}),
       state: thing.state ?? before,
       met: who.met,
       intro: who.firstPage === page ? who.traits : [],
@@ -882,9 +1118,16 @@ export function castStory(
     .sort((a, b) => a.met - b.met)
     .slice(0, OPENING_MOST);
   const there = back.length ? placeOn(bible, page - 1) : null;
+  const on = bible.pages.find((p) => p.page === page);
   return {
     ...script,
     cast,
+    setting: {
+      time: on?.time ?? null,
+      weather: on?.weather ?? null,
+      crowd: crowdOn(bible, page),
+      world: bible.world ?? null,
+    },
     backdrop,
     opening: back.length
       ? {
@@ -899,6 +1142,19 @@ export function castStory(
 export const OPENING_MOST = 3;
 export const OPENING_LEAD_S = 2;
 
+/**
+ * How busy a page is: as the reader said, and a crowd wherever a group of
+ * the story's is on the page, since a group is drawn as one.
+ */
+export function crowdOn(bible: StoryBible, page: number): StoryCrowd | null {
+  const here = bible.pages.find((p) => p.page === page);
+  const group = here?.present.some(
+    (one) => bible.characters.find((c) => c.id === one.id)?.kind === 'group',
+  );
+  if (here?.crowd === 'many' || here?.crowd === 'few') return here.crowd;
+  return group ? 'few' : (here?.crowd ?? null);
+}
+
 /** Where a page happens: the place the story puts it in, or none. */
 export function placeOn(bible: StoryBible, page: number): StoryPlace | null {
   const id = bible.pages.find((p) => p.page === page)?.place;
@@ -907,32 +1163,56 @@ export function placeOn(bible: StoryBible, page: number): StoryPlace | null {
 
 /**
  * How a set is painted to go with the people drawn by the kit: their flat
- * colours and dark outline, softer, so the people stand out in front of
- * it; and open ground low down, where they stand.
+ * colours and dark outline; a whole, recognisable place, a little softer
+ * than the people so they stand out in front of it; and open ground low
+ * down, where they stand.
  */
 export const SET_STYLE = [
   'Paint it to go with cartoon people drawn in front of it: flat colours with no gradients, shading or texture, simple rounded shapes like cut paper, and one dark outline (#2d2a32) about three units wide.',
-  'Keep its colours softer and lighter than the people, so they stand out in front of it.',
+  'Make the place recognisable at a glance, with the things that make it that place (a boat\'s mast and nets, the stalls of a market, the houses of a village), a full, finished scene from edge to edge.',
+  'Keep its colours a little softer than the people, so they stand out in front of it.',
   'The ground is flat and open across the lower third of the picture, with nothing tall in the middle of it, where people will stand.',
 ].join(' ');
 
+/** The story's world, as the artist is told it. */
+const worldText = (world: StoryWorld | null | undefined) =>
+  world
+    ? `The story happens in ${[world.region, world.era].filter(Boolean).join(', ')}${world.landscape ? `: ${world.landscape}` : ''}${world.homes ? `; ${world.homes}` : ''}.`
+    : '';
+
 /**
  * A place as the artist is asked to paint it, once for the book: the
- * scene behind the stage, filling the frame, with no one in it.
+ * scene behind the stage, filling the frame, with no one in it, dressed
+ * for the story's world. Where people are in it behind its side (a boat,
+ * a table, a well), that side is its own group, "front", which the stage
+ * draws in front of the people, so they are in the boat and not before it.
  */
-export function setThing(place: StoryPlace, bookTitle: string): DrawingThing {
+export function setThing(
+  place: StoryPlace,
+  bookTitle: string,
+  world: StoryWorld | null = null,
+): DrawingThing {
+  const front = place.front && place.stand === 'in' ? place.front : null;
   return {
     id: place.id,
     kind: 'drawing',
     name: place.name,
     brief: [
       `${place.name}, a place in "${bookTitle}"${place.look ? `: ${place.look}` : ''}.`,
-      'Seen from where a viewer stands, at eye level, the ground running across the lower part of the picture.',
+      worldText(world),
+      place.kind === 'indoor'
+        ? 'Seen from inside, at eye level, the floor running across the lower part of the picture.'
+        : 'Seen from where a viewer stands, at eye level, the ground running across the lower part of the picture.',
       SET_STYLE,
-    ].join(' '),
+      front
+        ? `Draw ${front} as its own group with id "front": across the bottom of the picture, from the bottom edge up to about a fifth of its height, where it will stand in front of the people's legs so they are in the ${place.kind === 'vessel' ? place.name : 'place'}, behind it. Everything else of the place is the scene behind.`
+        : '',
+    ]
+      .filter(Boolean)
+      .join(' '),
     motion:
       'slow and ambient if anything moves at all: clouds drift, water shimmers, leaves stir',
-    parts: [],
+    parts: front ? [{ name: 'front', label: false }] : [],
     states: [],
     shape: 'wide',
     sound: place.sound,

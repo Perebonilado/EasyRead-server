@@ -52,9 +52,13 @@ import {
   nameKey,
   soundIn,
   type Expression,
+  type StoryCrowd,
   type StoryKind,
   type StoryPresence,
+  type StoryTime,
   type StoryVoice,
+  type StoryWeather,
+  type StoryWorld,
 } from './scene-story';
 
 /**
@@ -390,6 +394,10 @@ export interface CharacterThing {
   holding?: FigureProp;
   /** The face the last page left them with: theirs through a "previously" opening. */
   before?: Expression;
+  /** A group who speak as one: the crowd behind the stage is them. */
+  group?: true;
+  /** One of the story's minor characters: drawn a little smaller and quieter. */
+  minor?: true;
 }
 
 /**
@@ -563,6 +571,13 @@ export interface SceneScript {
   opening?: { show: string[]; backdrop: string | null } | null;
   /** Seconds of what happens without words before the first word: someone walking on. */
   lead?: number;
+  /** A story page's time, weather and crowd, and the story's world: how the stage dresses it. */
+  setting?: {
+    time: StoryTime | null;
+    weather: StoryWeather | null;
+    crowd: StoryCrowd | null;
+    world: StoryWorld | null;
+  };
 }
 
 /**
@@ -1004,6 +1019,8 @@ export interface MendOptions {
   }[];
   /** Whom the document is for: its recipe's limits hold. */
   stage?: LearningStage | null;
+  /** A crowd is behind the stage: a group speaks from it, not from off the stage. */
+  crowd?: boolean;
 }
 
 /** What mending a cast needs to know and where it says what it did. */

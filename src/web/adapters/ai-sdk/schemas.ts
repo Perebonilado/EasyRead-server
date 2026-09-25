@@ -20,8 +20,13 @@ import {
 } from '../../../business/domain/scene-profile';
 import {
   EXPRESSIONS,
+  PLACE_KINDS,
+  PLACE_STANDS,
+  STORY_CROWDS,
   STORY_KINDS,
   STORY_PRESENCES,
+  STORY_TIMES,
+  STORY_WEATHERS,
   STORY_ROLES,
   STORY_SIZES,
   STORY_VOICES,
@@ -770,7 +775,33 @@ export const sceneProfileSchema = z.object({
 });
 
 /** Who and where one stretch of a story meets, and who is on each of its pages. */
+/** A person's look, field by field: what a reader may say the text itself gives. */
+const FIGURE_FIELDS = [
+  'age',
+  'build',
+  'skin',
+  'hair',
+  'hairColour',
+  'facialHair',
+  'headwear',
+  'top',
+  'topColour',
+  'bottom',
+  'bottomColour',
+  'accentColour',
+  'extras',
+] as const;
+
 export const sceneStorySchema = z.object({
+  world: z
+    .object({
+      era: z.string(),
+      region: z.string(),
+      culture: z.string(),
+      landscape: z.string(),
+      homes: z.string(),
+    })
+    .nullable(),
   characters: z.array(
     z.object({
       name: z.string(),
@@ -779,8 +810,10 @@ export const sceneStorySchema = z.object({
       look: z.string(),
       kind: z.enum(STORY_KINDS),
       presence: z.enum(STORY_PRESENCES),
+      iconic: z.boolean(),
       size: z.enum(STORY_SIZES).nullable(),
       figure: figureSchema.nullable(),
+      fromText: z.array(z.enum(FIGURE_FIELDS)),
       traits: z.array(z.string()),
       voice: z.enum(STORY_VOICES).nullable(),
     }),
@@ -790,6 +823,9 @@ export const sceneStorySchema = z.object({
       name: z.string(),
       aliases: z.array(z.string()),
       look: z.string(),
+      kind: z.enum(PLACE_KINDS),
+      stand: z.enum(PLACE_STANDS),
+      front: z.string().nullable(),
       sound: z.enum(SCENE_AMBIENCES).nullable(),
     }),
   ),
@@ -801,6 +837,10 @@ export const sceneStorySchema = z.object({
         z.object({ name: z.string(), mood: z.enum(EXPRESSIONS) }),
       ),
       place: z.string().nullable(),
+      placeInferred: z.boolean(),
+      time: z.enum(STORY_TIMES).nullable(),
+      weather: z.enum(STORY_WEATHERS).nullable(),
+      crowd: z.enum(STORY_CROWDS),
     }),
   ),
 });

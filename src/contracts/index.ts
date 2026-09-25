@@ -1014,6 +1014,8 @@ export type SceneThingDto =
       rig?: true;
       /** Where its head is, as shares of its box across and down: where it looks from. */
       head?: [number, number];
+      /** A story's minor character: a little smaller and quieter than those the story follows. */
+      minor?: true;
     }
   | { id: string; kind: 'stat'; value: string; caption: string }
   | {
@@ -1091,7 +1093,32 @@ export interface SceneEffectDto {
  * (a cloud, no mouth moving); a dream or a memory.
  */
 export type SceneLineFrom =
-  'off' | 'above' | 'phone' | 'letter' | 'thought' | 'dream';
+  | 'off'
+  | 'above'
+  | 'phone'
+  | 'letter'
+  | 'thought'
+  | 'dream'
+  | 'crowd';
+
+/**
+ * A story page's setting as the stage shows it: the set at full strength
+ * behind a story (a lesson's is faded, like paper, under its labels); the
+ * light of its time of day and its weather over the set; and a crowd
+ * behind the story's own people, who breathe, look at whoever speaks, and
+ * cheer or gasp together at the moments given.
+ */
+export interface SceneSettingDto {
+  full?: true;
+  time?: 'dawn' | 'day' | 'dusk' | 'night';
+  weather?: 'clear' | 'rain' | 'storm' | 'wind' | 'snow' | 'fog';
+  crowd?: {
+    /** The crowd's drawing, by its thing's id. */
+    id: string;
+    /** When they react: the moment, how, and for how long. */
+    moves?: [number, 'cheer' | 'gasp', number][];
+  };
+}
 
 /**
  * A move someone makes as they act: a nod, a gesture with the right or
@@ -1244,6 +1271,8 @@ export interface SceneDto {
   };
   /** How each character acts, by id; absent on a page no one acts on, or an older one. */
   acting?: Record<string, SceneActingDto>;
+  /** A story page's setting: its set at full strength, its light and weather, a crowd; absent on a lesson's page. */
+  setting?: SceneSettingDto;
   /** The same steps placed for the pane's box and the full screen's wide stage. */
   stagings: Record<
     'box' | 'wide',

@@ -529,6 +529,8 @@ export interface LlmGatewayPort {
     to: number;
     text: string;
     known: string[];
+    /** The places met earlier, to call by the same names and use again. */
+    knownPlaces?: string[];
   }): Promise<LlmResult<StoryDraft>>;
 
   /**

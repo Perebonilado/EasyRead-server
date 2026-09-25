@@ -628,4 +628,16 @@ describe('voices beyond the stage', () => {
     const tobi = script.cast.find((t) => t.id === 'tobi');
     expect(tobi?.kind === 'character' && tobi.holding).toBe('phone');
   });
+
+  it("sends back a line the book's characters never say", () => {
+    const d = draft();
+    d.beats.push(
+      beat('line', 'The fire is warm and the stars are bright tonight.', {
+        who: 'ada',
+      }),
+    );
+    const { problems } = mend(d);
+    expect(problems.join(' ')).toContain('not in the book');
+  });
 });
+

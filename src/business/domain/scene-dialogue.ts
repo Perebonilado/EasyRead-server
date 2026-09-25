@@ -49,6 +49,10 @@ export function quotedSpans(sentence: string): [number, number][] {
 export interface Speaker {
   id: string;
   names: string[];
+  /** Whether "she" or "he" may mean them; "they", a group. */
+  gender?: 'f' | 'm' | null;
+  /** A group who speak as one: the "they" of a line. */
+  group?: boolean;
   /**
    * Whether they are seen, or only heard ("heard"), or a voice from above
    * ("above"); absent, seen. A voice the words bring in is theirs.
@@ -61,6 +65,7 @@ export type LineEvidence =
   | 'voice'
   | 'lead'
   | 'verb'
+  | 'pronoun'
   | 'before'
   | 'writer'
   | 'after'
@@ -301,7 +306,8 @@ export function dialogueOf(
       // anyone on the stage. The one heard from above says it, or the one
       // only heard; with none, the narrator does.
       const from = heardFrom(clause, after, quote);
-      const around = `${clause} ${attributionAfter(quote, after)}`;
+      const near = attributionAfter(quote, after);
+      const around = `${clause} ${near}`;
       if (
         (VOICE_ABOVE.test(around) || VOICE_OFF.test(around)) &&
         !namedIn(around, speakers).length
@@ -332,6 +338,38 @@ export function dialogueOf(
             namedIn(attributed[1] ?? attributed[2] ?? '', speakers)[0]?.id,
             'verb',
           );
+      }
+      // 2b. They asked him, "…" / "…," she said: the pronoun's own. "They"
+      // is the story's one group; "he" or "she" the one speaker who fits,
+      // or of those who fit, the one named last before the quote.
+      if (!speaker) {
+        const pronoun =
+          new RegExp(
+            `\\b(he|she|they)\\s+(?:\\w+\\s+)?(?:${SPEECH})\\b`,
+            'iu',
+          ).exec(clause)?.[1] ??
+          new RegExp(
+            `^[\\s'"’”]*(?:(?:${SPEECH})\\s+(he|she|they)\\b|(he|she|they)\\s+(?:${SPEECH})\\b)`,
+            'iu',
+          )
+            .exec(near)
+            ?.slice(1)
+            .find(Boolean);
+        if (pronoun) {
+          const word = pronoun.toLowerCase();
+          const fits = speakers.filter((s) =>
+            word === 'they' ? s.group : s.gender === (word === 'she' ? 'f' : 'm'),
+          );
+          if (fits.length === 1) found(fits[0].id, 'pronoun');
+          else if (fits.length > 1) {
+            const before = `${sentences.slice(0, beat).join(' ')} ${clause}`;
+            const last = namedIn(before, fits).pop();
+            found(last?.id, 'pronoun');
+          }
+          // A pronoun no one fits leaves the quote to the steps below,
+          // never to the speaker of the quote before (a new speaker).
+          if (!speaker && word === 'they') return;
+        }
       }
       // 3. Nana Efua smiles. "…"
       found(namedIn(clause, speakers)[0]?.id, 'before');

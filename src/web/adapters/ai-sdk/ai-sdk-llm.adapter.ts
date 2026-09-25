@@ -815,6 +815,7 @@ export class AiSdkLlmAdapter implements LlmGatewayPort, OnModuleInit {
     to: number;
     text: string;
     known: string[];
+    knownPlaces?: string[];
   }): Promise<LlmResult<StoryDraft>> {
     const started = Date.now();
     const { generateObject } = await this.registry.modules();
@@ -828,6 +829,9 @@ export class AiSdkLlmAdapter implements LlmGatewayPort, OnModuleInit {
         `Pages ${input.from} to ${input.to}.`,
         input.known.length
           ? `Characters met earlier in the book (call them by these names): ${input.known.slice(0, 40).join(', ')}.`
+          : '',
+        input.knownPlaces?.length
+          ? `Places met earlier in the book (call them by these names, and use one again where it fits): ${input.knownPlaces.slice(0, 30).join(', ')}.`
           : '',
         input.text,
       ]

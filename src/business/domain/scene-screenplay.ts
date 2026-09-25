@@ -331,6 +331,8 @@ export function mendScreenplay(
   const beats: SceneBeat[] = [];
   /** Where the writer says each line comes from, by beat. */
   const fromAsked = new Map<number, LineFrom>();
+  /** Whom the writer says says each line, by beat, as written. */
+  const whoAsked = new Map<number, string>();
   const spokenAt = new Map<number, number>();
   const moments = new Map<number, { after: number; offset: number }>();
   /** Each run of actions, after the sentence it follows (-1: before the first). */
@@ -370,6 +372,7 @@ export function mendScreenplay(
     if (kind === 'line') {
       const speaker = known(raw.who, PEOPLE);
       if (speaker) beat.speaker = speaker;
+      if (raw.who) whoAsked.set(beats.length, raw.who);
       const to = known(raw.to, PEOPLE);
       if (to && to !== speaker) beat.to = to;
       if (raw.pace && LINE_PACES.includes(raw.pace)) beat.pace = raw.pace;
@@ -434,6 +437,7 @@ export function mendScreenplay(
             names: [...namesOf(who), thing.name],
             gender: genderOf(who.voice),
             presence: who.presence ?? 'seen',
+            group: who.kind === 'group',
           },
         ]
       : [];
@@ -446,6 +450,7 @@ export function mendScreenplay(
         names: namesOf(who),
         gender: genderOf(who.voice),
         presence: who.presence ?? 'seen',
+        group: who.kind === 'group',
       });
   /** A story's character the book gives a line, in the cast: added when the writer left them out. */
   const inCastAs = (speaker: string): string | null => {
@@ -493,6 +498,11 @@ export function mendScreenplay(
       return from === 'phone' || from === 'letter' || from === 'dream'
         ? from
         : 'above';
+    // A group speaks from the crowd behind the stage when there is one.
+    if (who?.kind === 'group' && options.crowd && presence !== 'heard')
+      return from === 'phone' || from === 'letter' || from === 'dream'
+        ? from
+        : 'here';
     if (presence === 'heard' || who?.kind === 'group')
       return from === 'here' || from === 'thought' || from === 'above'
         ? 'off'
@@ -552,6 +562,18 @@ export function mendScreenplay(
         return;
       }
     }
+    // Whom the writer named, now the cast may have grown to take them in:
+    // one of the story's characters the writer left out of it.
+    if (!beat.speaker && whoAsked.has(k)) {
+      const asked = whoAsked.get(k)!;
+      const again =
+        known(asked, PEOPLE) ??
+        (() => {
+          const who = storyEntry(options.characters ?? [], asked, asked);
+          return who ? inCastAs(`${OUT_OF_CAST}${who.id}`) : null;
+        })();
+      if (again) beat.speaker = again;
+    }
     if (!beat.speaker) {
       // No one to say it: the narrator does, as a quotation.
       mended.push(
@@ -584,6 +606,28 @@ export function mendScreenplay(
       }
       return best < KEPT;
     });
+    // A line the book's characters never say: the narrator's words, or
+    // the writer's own, put in someone's mouth.
+    const invented = beats.filter((b) => {
+      if (b.kind !== 'line' || !book.length) return false;
+      const words = keysOf(b.say);
+      return (
+        words.length >= 3 &&
+        Math.max(
+          0,
+          ...book.map((line) => covered(words, line.words) / words.length),
+        ) < 0.5
+      );
+    });
+    if (invented.length)
+      problems.push(
+        `These lines are not in the book: ${invented
+          .slice(0, 3)
+          .map((b) => `"${b.say}"`)
+          .join(
+            '; ',
+          )}. A character says only the book's own quoted words; what the book tells, the narrator says, or the stage shows as an action.`,
+      );
     if (lost.length)
       problems.push(
         `These lines of the book are missing or reworded: ${lost

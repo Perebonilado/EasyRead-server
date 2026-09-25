@@ -283,7 +283,7 @@ export interface StoryPage {
  * book read before is read again once, on its next page (not a very long
  * one, unasked).
  */
-export const STORY_VERSION = 2;
+export const STORY_VERSION = 3;
 
 export interface StoryBible {
   characters: StoryCharacter[];
@@ -472,27 +472,119 @@ function idFrom(name: string, taken: Set<string>): string {
 
 interface Named {
   keys: Set<string>;
+  /** The stretch the entry was first named in. */
+  named: number;
 }
 
 /**
- * The one entry a name belongs to: the one it is a name or alias of, or
- * failing that the only one whose name holds all its words or all of
- * whose words it holds ("Jack" and "Jack Merridew").
+ * Words that say whom someone is to someone else, not who they are: a
+ * name with one of these names two people ("Mark's father", "the mother
+ * of Jesus", "Joseph, husband to Mary") and is never the other's.
  */
-function findNamed<T extends Named>(entries: T[], names: string[]): T | null {
+const RELATION = new Set([
+  'of',
+  'to',
+  'husband',
+  'wife',
+  'widow',
+  'mother',
+  'father',
+  'mum',
+  'mom',
+  'dad',
+  'son',
+  'daughter',
+  'brother',
+  'sister',
+  'uncle',
+  'aunt',
+  'cousin',
+  'nephew',
+  'niece',
+  'grandmother',
+  'grandfather',
+  'grandma',
+  'grandpa',
+  'granny',
+  'nana',
+  'in',
+  'law',
+  'friend',
+  'friends',
+  'servant',
+  'slave',
+  'master',
+  'child',
+  'children',
+  'baby',
+  'followers',
+  'disciples',
+]);
+
+/** Whether a name (as nameKey reads it) names someone by whom they are to another. */
+const relational = (key: string) => {
+  const words = key.split(' ');
+  // "mark s father": the possessive's s, standing alone.
+  return words.length > 1 && words.some((w) => w === 's' || RELATION.has(w));
+};
+
+/** Whether a's words begin or end b's: "jack" in "jack merridew", "herod" in "king herod". */
+const edgeOf = (a: string, b: string) => {
+  const x = a.split(' ');
+  const y = b.split(' ');
+  if (x.length >= y.length) return false;
+  const start = x.every((word, i) => y[i] === word);
+  const end = x.every((word, i) => y[y.length - x.length + i] === word);
+  return start || end;
+};
+
+/**
+ * The one entry a name belongs to: the one it is a name or alias of; or,
+ * failing that, the only one it is a shorter or fuller form of ("Jack" and
+ * "Jack Merridew", "Herod" and "King Herod"). Never by a name that names
+ * someone by whom they are to another ("Mark's father" is not Mark, "the
+ * mother of Jesus" is not Jesus), and never one first named in the same
+ * stretch: the reader listed them apart, as two.
+ */
+function findNamed<T extends Named>(
+  entries: T[],
+  names: string[],
+  stretch: number,
+): T | null {
   const keys = names.map(nameKey).filter(Boolean);
   const exact = entries.find((entry) => keys.some((k) => entry.keys.has(k)));
   if (exact) return exact;
-  const within = (a: string, b: string) => {
-    const words = new Set(b.split(' '));
-    return a.split(' ').every((word) => words.has(word));
-  };
-  const loose = entries.filter((entry) =>
-    keys.some((k) =>
-      [...entry.keys].some((known) => within(k, known) || within(known, k)),
-    ),
+  const loose = entries.filter(
+    (entry) =>
+      entry.named !== stretch &&
+      keys.some(
+        (k) =>
+          !relational(k) &&
+          [...entry.keys].some(
+            (known) =>
+              !relational(known) && (edgeOf(k, known) || edgeOf(known, k)),
+          ),
+      ),
   );
   return loose.length === 1 ? loose[0] : null;
+}
+
+/**
+ * A stretch's characters with no one's name among another's aliases: a
+ * reader that lists Mary, and gives "Mary" as another name of Jesus too,
+ * means two people.
+ */
+function aliasesApart<T extends { name: string; aliases?: string[] | null }>(
+  list: readonly T[],
+): T[] {
+  const names = new Map(list.map((one) => [nameKey(clean(one.name)), one]));
+  return list.map((one) => ({
+    ...one,
+    aliases: (one.aliases ?? []).filter((alias) => {
+      const other = names.get(nameKey(clean(alias)));
+      return !other || other === one;
+    }),
+  }));
 }
 
 const RANK: Record<StoryRole, number> = { main: 0, supporting: 1, minor: 2 };
@@ -523,11 +615,11 @@ export function mergeStory(
     sorted.map((part) => worldOf(part.draft.world)).find(Boolean) ?? null;
   let order = 0;
   for (const part of sorted) {
-    for (const raw of part.draft.characters) {
+    for (const raw of aliasesApart(part.draft.characters)) {
       const name = clean(raw.name);
       if (!name) continue;
       const aliases = (raw.aliases ?? []).map(clean).filter(Boolean);
-      const found = findNamed(characters, [name, ...aliases]);
+      const found = findNamed(characters, [name, ...aliases], part.from);
       const traits = (raw.traits ?? [])
         .map((trait) => clean(trait).slice(0, 40))
         .filter(Boolean);
@@ -585,11 +677,11 @@ export function mergeStory(
         named: part.from,
       });
     }
-    for (const raw of part.draft.places) {
+    for (const raw of aliasesApart(part.draft.places)) {
       const name = clean(raw.name);
       if (!name) continue;
       const aliases = (raw.aliases ?? []).map(clean).filter(Boolean);
-      const found = findNamed(places, [name, ...aliases]);
+      const found = findNamed(places, [name, ...aliases], part.from);
       if (found) {
         for (const key of [name, ...aliases].map(nameKey).filter(Boolean))
           found.keys.add(key);
@@ -622,7 +714,8 @@ export function mergeStory(
       if (!(page >= part.from && page <= part.to)) continue;
       const present: StoryPage['present'] = [];
       for (const one of raw.present ?? []) {
-        const who = findNamed(characters, [clean(one.name)]);
+        // A page names who is on it by any of their names, shortened too.
+        const who = findNamed(characters, [clean(one.name)], -1);
         if (!who || present.some((p) => p.id === who.id)) continue;
         present.push({
           id: who.id,
@@ -631,7 +724,9 @@ export function mergeStory(
         // The book meets them where they are first on a page.
         who.firstPage = Math.min(who.firstPage, page);
       }
-      const where = raw.place ? findNamed(places, [clean(raw.place)]) : null;
+      const where = raw.place
+        ? findNamed(places, [clean(raw.place)], -1)
+        : null;
       if (where) {
         where.firstPage = Math.min(where.firstPage, page);
         // A place any page says outright is the text's, not worked out.
@@ -1169,7 +1264,7 @@ export function placeOn(bible: StoryBible, page: number): StoryPlace | null {
  */
 export const SET_STYLE = [
   'Paint it to go with cartoon people drawn in front of it: flat colours with no gradients, shading or texture, simple rounded shapes like cut paper, and one dark outline (#2d2a32) about three units wide.',
-  'Make the place recognisable at a glance, with the things that make it that place (a boat\'s mast and nets, the stalls of a market, the houses of a village), a full, finished scene from edge to edge.',
+  "Make the place recognisable at a glance, with the things that make it that place (a boat's mast and nets, the stalls of a market, the houses of a village), a full, finished scene from edge to edge.",
   'Keep its colours a little softer than the people, so they stand out in front of it.',
   'The ground is flat and open across the lower third of the picture, with nothing tall in the middle of it, where people will stand.',
 ].join(' ');

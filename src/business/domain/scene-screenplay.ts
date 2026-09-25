@@ -20,9 +20,10 @@ import {
   quoteContext,
   quotedSpans,
   type HeardFrom,
+  type LineEvidence,
 } from './scene-dialogue';
 import type { Actor } from './scene-directions';
-import { FIGURE_SIGNS } from './scene-figure';
+import { FIGURE_SIGNS, figureFor } from './scene-figure';
 import { idKey } from './scene-ids';
 import {
   LINE_FROMS,
@@ -196,13 +197,104 @@ export function lineOf(say: string): { text: string; attributed: boolean } {
   };
 }
 
+/** Words in a name that say a man or a woman: "the man with leprosy", "Mark's mother". */
+export function genderIn(name: string): 'f' | 'm' | null {
+  const words = name.toLowerCase().split(/[^a-z]+/);
+  const has = (list: readonly string[]) => words.some((w) => list.includes(w));
+  if (
+    has([
+      'woman',
+      'women',
+      'mother',
+      'mum',
+      'mom',
+      'girl',
+      'daughter',
+      'sister',
+      'wife',
+      'queen',
+      'lady',
+      'aunt',
+      'grandmother',
+      'granny',
+      'widow',
+      'princess',
+    ])
+  )
+    return 'f';
+  if (
+    has([
+      'man',
+      'men',
+      'father',
+      'dad',
+      'boy',
+      'son',
+      'brother',
+      'husband',
+      'king',
+      'lord',
+      'uncle',
+      'grandfather',
+      'prince',
+      'leader',
+      'ruler',
+      'centurion',
+      'soldier',
+      'captain',
+    ])
+  )
+    return 'm';
+  return null;
+}
+
+/** A question to the viewer: the stage's check, never a character's line. */
+const TO_VIEWER =
+  /^\s*(?:think\b|imagine\b|can you (?:spot|see|find|count|guess|remember|work out|tell|name)\b|what would you do\b|what do you think\b|how many\b[^?]*\bcan you\b)/iu;
+/** Someone's words reported, not said: "He yelled, asking what was going on." */
+const REPORTED =
+  /^\s*(?:he|she|they)\s+(?:said|asked|yelled|shouted|told|replied|answered|explained|called|cried|whispered|screamed|sobbed)\b/iu;
+
+/**
+ * Why a line is the narrator's, whoever the writer gave it to: a question
+ * to the viewer, the speaker telling of themselves by name as another
+ * would ("…if Jesus had not gone…", said by Jesus), or words reported
+ * rather than said. Null for a line a character may say.
+ */
+export function narratorsLine(
+  say: string,
+  speakerNames: readonly string[],
+): string | null {
+  if (TO_VIEWER.test(say)) return 'a question to the viewer';
+  if (REPORTED.test(say)) return 'words reported, not said';
+  for (const name of speakerNames) {
+    const clean = name.trim();
+    if (!clean) continue;
+    const self = new RegExp(
+      `\\b${clean.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s+(?:had|has|is|was|does|did|will|would|could|can|went|goes|came|comes|said|says|thinks|thought|looks|looked)\\b`,
+      'iu',
+    );
+    if (self.test(say)) return 'the speaker told of by name';
+  }
+  return null;
+}
+
 /** A line the book's characters say on a page, who says it where the book says, and where it comes from. */
 export interface BookLine {
   text: string;
   words: string[];
   speaker: string | null;
+  /** How the speaker was found; strong only when the line's own sentence names them. */
+  by: LineEvidence | null;
   from: HeardFrom | null;
 }
+
+/**
+ * Evidence that names the speaker beside the line, strong enough to
+ * overrule the writer: in its own sentence ("Ada asks, …", "…," said
+ * Kofi), or acting in the sentence just before it ("Kofi groaned. …").
+ */
+const STRONG: readonly LineEvidence[] = ['voice', 'lead', 'verb', 'before'];
 
 /** Every line the book's characters say on the page, in order, each with its speaker where the book tells. */
 export function bookLines(
@@ -229,6 +321,7 @@ export function bookLines(
         text,
         words,
         speaker: line?.speaker ?? null,
+        by: line?.by ?? null,
         from: heardFrom(clause, after, quote),
       });
     });
@@ -442,6 +535,17 @@ export function mendScreenplay(
         ]
       : [];
   });
+  // Someone the story does not name, whom the writer put on the page (the
+  // man with leprosy): found as "the man with leprosy", in any case.
+  for (const thing of cast)
+    if (thing.kind === 'person' && thing.name)
+      speaking.push({
+        id: thing.id,
+        names: [thing.name, thing.name.toLowerCase()],
+        gender: genderIn(thing.name),
+        presence: 'seen',
+        group: (thing.count ?? 1) > 1,
+      });
   const OUT_OF_CAST = '@';
   for (const who of options.characters ?? [])
     if (!cast.some((t) => t.kind === 'character' && t.ref === who.id))
@@ -534,7 +638,33 @@ export function mendScreenplay(
       if (found > share) [best, share] = [line, found];
     }
     const matched = best && share >= 0.6 ? best : null;
-    const said = matched?.speaker ? inCastAs(matched.speaker) : null;
+    // Words no character says: the narrator's, whoever the writer gave
+    // them to (a question to the viewer; someone telling of themselves as
+    // another would; someone's words reported).
+    const theirs = beat.speaker ? byId.get(beat.speaker) : undefined;
+    const names =
+      theirs?.kind === 'character'
+        ? [theirs.name, ...(storyOf(beat.speaker)?.aliases ?? [])]
+        : theirs?.kind === 'person'
+          ? [theirs.name]
+          : [];
+    const narrators = narratorsLine(beat.say, names);
+    if (!matched && narrators) {
+      mended.push(`line ${k + 1}: ${narrators}; the narrator says it`);
+      beat.kind = 'narration';
+      delete beat.speaker;
+      delete beat.to;
+      delete beat.pace;
+      return;
+    }
+    // The book overrules the writer only where the line's own sentence
+    // names who says it; a pronoun or a name nearby is no match for a
+    // writer who read the page whole.
+    const said =
+      matched?.speaker &&
+      (!beat.speaker || (matched.by && STRONG.includes(matched.by)))
+        ? inCastAs(matched.speaker)
+        : null;
     if (said && said !== beat.speaker) {
       mended.push(
         `line ${k + 1}: said by ${said} in the book${beat.speaker ? `, not ${beat.speaker}` : ''}`,
@@ -573,6 +703,30 @@ export function mendScreenplay(
           return who ? inCastAs(`${OUT_OF_CAST}${who.id}`) : null;
         })();
       if (again) beat.speaker = again;
+    }
+    if (!beat.speaker && whoAsked.has(k)) {
+      // Someone the writer names and no one in the story is: brought on,
+      // drawn by the kit, rather than their line given to the narrator.
+      const asked = clean(whoAsked.get(k));
+      if (asked && wordsOf(asked).length <= 5) {
+        let id = idKey(asked) || 'someone';
+        for (let n = 2; inCast.has(id); n += 1) id = `${idKey(asked)}-${n}`;
+        const person: SceneThing = {
+          id,
+          kind: 'person',
+          name: asked,
+          figure: figureFor(
+            id,
+            genderIn(asked) === 'f' ? { hair: 'long' } : {},
+          ),
+          state: null,
+        };
+        cast.push(person);
+        byId.set(id, person);
+        inCast.add(id);
+        mended.push(`${id}: says a line and is no one in the cast; brought on`);
+        beat.speaker = id;
+      }
     }
     if (!beat.speaker) {
       // No one to say it: the narrator does, as a quotation.

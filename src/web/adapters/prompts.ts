@@ -30,6 +30,22 @@ const KEEP_TERMS =
   'This does not change the order: the plain phrase still leads and the term ' +
   'follows it in brackets. What it forbids is dropping the term altogether.';
 
+/**
+ * A page's speech and its story kept as the page has them. Rewritten as
+ * reported speech ("Mark tells James…"), a story loses who says what, and
+ * its videos and lectures with it; summarised, it loses what happens.
+ */
+const KEEP_SPEECH =
+  'Direct speech stays direct speech: every line anyone says on the page ' +
+  "stays in quotation marks, in its speaker's own words (only a hard word " +
+  'made plainer), with who says it named in the same sentence ("Mark said, ' +
+  "'Did you hear that, James?'\"). Never turn a quote into reported speech. " +
+  'A page that tells a story is retold in its own order, event by event, ' +
+  'never summarised: who does what, where, and who says what. Leave out ' +
+  "the translator's or editor's notes, verse numbers, running heads and " +
+  'page numbers. Say only what this page says: never a summary of the ' +
+  'rest of the book.';
+
 const BLOCK_SHAPE =
   'Reply with JSON: {"blocks":[{"type":"headingOne"|"headingTwo"|"paragraph"|"bullet"|"code"|"table"|"math","text":"..."}]}. ' +
   'No markdown, no numbering in the text, no other keys.';
@@ -241,6 +257,7 @@ export const PROMPTS = {
     'four terms and stop. If the page is unclear, keep it unclear rather',
     'than guessing.',
     KEEP_TERMS,
+    KEEP_SPEECH,
     CODE_VERBATIM,
     TABLE_SHAPE,
     MATH_SHAPE,
@@ -262,6 +279,7 @@ export const PROMPTS = {
     'step stays exactly right, and nothing the page does not give is added,',
     'except the steps of its own working that a learner needs.',
     KEEP_TERMS,
+    KEEP_SPEECH,
     WORKED_STEPS,
     CODE_VERBATIM,
     TABLE_SHAPE,

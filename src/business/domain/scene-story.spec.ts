@@ -690,3 +690,83 @@ describe('who is seen, and who is only heard', () => {
     expect(withVoices(bible, 3, 'Jesus walked on.')).toBe(bible);
   });
 });
+
+describe('telling apart the people a story names', () => {
+  const names = (bible: StoryBible) =>
+    bible.characters.map((c) => [c.name, ...c.aliases].join(' / '));
+
+  it('never makes one person of two whom a name relates: a mother, a husband, a father', () => {
+    const bible = mergeStory([
+      {
+        from: 1,
+        to: 40,
+        draft: draft({
+          characters: [
+            person('Jesus', { aliases: ['Jesus Christ'] }),
+            person('Mary', { aliases: ['Mother of Jesus'] }),
+          ],
+        }),
+      },
+      {
+        from: 41,
+        to: 80,
+        draft: draft({
+          characters: [
+            person('Joseph', { aliases: ['Joseph, husband to Mary'] }),
+            person("Mark's father", { aliases: ['Mark’s dad'] }),
+            person('Mark'),
+          ],
+        }),
+      },
+    ]);
+    expect(names(bible)).toEqual([
+      'Jesus / Jesus Christ',
+      'Mary / Mother of Jesus',
+      'Joseph / Joseph, husband to Mary',
+      "Mark's father / Mark’s dad",
+      'Mark',
+    ]);
+  });
+
+  it('keeps apart two a stretch lists apart, and a name another carries as an alias', () => {
+    const bible = mergeStory([
+      {
+        from: 1,
+        to: 20,
+        draft: draft({
+          characters: [
+            person('John the Baptist', { aliases: ['John', 'Simon Peter'] }),
+            person('Simon Peter', { aliases: ['Peter'] }),
+            person('John, brother of James'),
+          ],
+        }),
+      },
+    ]);
+    expect(names(bible)).toEqual([
+      'John the Baptist / John',
+      'Simon Peter / Peter',
+      'John, brother of James',
+    ]);
+  });
+
+  it('still knows a shorter or fuller name across stretches: Jack is Jack Merridew, Herod King Herod', () => {
+    const bible = mergeStory([
+      {
+        from: 1,
+        to: 20,
+        draft: draft({
+          characters: [person('Jack Merridew'), person('King Herod')],
+        }),
+      },
+      {
+        from: 21,
+        to: 40,
+        draft: draft({ characters: [person('Jack'), person('Herod')] }),
+      },
+    ]);
+    expect(names(bible)).toEqual([
+      'Jack Merridew / Jack',
+      'King Herod / Herod',
+    ]);
+  });
+});

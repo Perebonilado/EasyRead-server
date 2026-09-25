@@ -8,6 +8,7 @@ import {
 } from '../../business/domain/cost';
 import { NotFoundError } from '../../business/domain/errors/errors';
 import { sceneProse } from '../../business/domain/follow';
+import { storyText } from '../../business/domain/story-text';
 import { drawByCode } from '../../business/domain/scene-code';
 import {
   DEFAULT_PROFILE,
@@ -166,6 +167,10 @@ const MATERIAL_CHARS = 14_000;
 const PROFILE_SAMPLE_CHARS = 6_000;
 /** A page with fewer words than this has too little to teach. */
 const THIN_PAGE_WORDS = 40;
+/** A story page's own text with fewer words than this is too little to write from: its note is used. */
+const STORY_OWN_WORDS = 20;
+/** A story's page is a scene with this many of its own words: a picture book's page has few. */
+const THIN_STORY_WORDS = 12;
 /** The card's still, in pixels across. */
 export const THUMB_WIDTH = 480;
 /** Tries at one drawing: the first, and one more with the gate's notes. */
@@ -318,8 +323,19 @@ export class SceneProcessor {
           error: null,
           attempts: record.attempts + 1,
         });
-      const material = await this.material(documentId, pageNumber);
-      if (wordsOf(material).length < THIN_PAGE_WORDS) {
+      const profile = await this.profileFor(documentId, contentVersion);
+      // A story's page is written from the book's own words, its note
+      // beside them for plainer wording; any other page from its note.
+      const { material, plain } = profile.story
+        ? await this.storyMaterial(documentId, pageNumber)
+        : {
+            material: await this.material(documentId, pageNumber),
+            plain: null,
+          };
+      if (
+        wordsOf(material).length <
+        (profile.story ? THIN_STORY_WORDS : THIN_PAGE_WORDS)
+      ) {
         if (remaking) return;
         await this.visuals.update(record.id, {
           status: 'not_suitable',
@@ -330,12 +346,12 @@ export class SceneProcessor {
         return;
       }
 
-      const profile = await this.profileFor(documentId, contentVersion);
       const made = await this.make({
         documentId,
         documentTitle: doc.props.title,
         topic,
         material,
+        plain,
         context: await this.where(
           documentId,
           contentVersion,
@@ -437,6 +453,8 @@ export class SceneProcessor {
     documentTitle: string;
     topic: TopicRecord;
     material: string;
+    /** The page's note, when the material is the book's own words. */
+    plain?: string | null;
     context: string;
     profile: DocumentProfile;
     /** A story's page: its characters are the book's own. */
@@ -477,6 +495,7 @@ export class SceneProcessor {
       documentTitle: input.documentTitle,
       topic,
       material: input.material,
+      plain: input.plain ?? null,
       context: input.context,
       profile: input.profile,
       story,
@@ -667,6 +686,7 @@ export class SceneProcessor {
     documentTitle: string;
     topic: TopicRecord;
     material: string;
+    plain?: string | null;
     context: string;
     profile: DocumentProfile;
     story?: PageStory | null;
@@ -689,6 +709,7 @@ export class SceneProcessor {
         .filter(Boolean)
         .join('\n'),
       ...(told ? { story: told } : {}),
+      ...(input.plain ? { plain: input.plain } : {}),
     };
     // The page, to hold a quotation to, the formats the book may use, and
     // who the story's characters are.
@@ -1334,7 +1355,10 @@ export class SceneProcessor {
           const stretches = storyPieces(
             pages
               .filter((page) => !page.isEmpty)
-              .map((page) => ({ page: page.pageNumber, text: page.text })),
+              .map((page) => ({
+                page: page.pageNumber,
+                text: storyText(page.text),
+              })),
           ).length;
           if (stretches > REREAD_MOST_STRETCHES) {
             this.logger.log(
@@ -1349,9 +1373,13 @@ export class SceneProcessor {
         const bible = await this.readStory({
           documentId,
           title,
+          // The story's own words: no notes, verse numbers or running heads.
           pages: pages
             .filter((page) => !page.isEmpty)
-            .map((page) => ({ page: page.pageNumber, text: page.text })),
+            .map((page) => ({
+              page: page.pageNumber,
+              text: storyText(page.text),
+            })),
           who: documentId,
         });
         await this.storage.put({
@@ -1868,6 +1896,33 @@ export class SceneProcessor {
       length += text.length;
     }
     return parts.join('\n\n').slice(0, PROFILE_SAMPLE_CHARS);
+  }
+
+  /**
+   * A story's page for its writer: the book's own words, cleaned and in
+   * reading order, the authority for what happens and who says what; and
+   * its note, for plainer wording. The note alone where the page's own
+   * text has too little in it to read (a scan the OCR could not).
+   */
+  private async storyMaterial(
+    documentId: string,
+    pageNumber: number,
+  ): Promise<{ material: string; plain: string | null }> {
+    const note = await this.simplified.find(documentId, pageNumber);
+    const plain =
+      note?.status === 'done' && note.blocks?.length
+        ? sceneProse(note.blocks).slice(0, MATERIAL_CHARS)
+        : null;
+    const pages: PageText[] = await this.pages.findRange(
+      documentId,
+      pageNumber,
+      pageNumber,
+    );
+    const own = storyText(
+      pages.find((row) => row.pageNumber === pageNumber)?.text ?? '',
+    ).slice(0, MATERIAL_CHARS);
+    if (wordsOf(own).length >= STORY_OWN_WORDS) return { material: own, plain };
+    return { material: plain ?? own, plain: null };
   }
 
   /** The page: its simplified note when written, else its own text. */

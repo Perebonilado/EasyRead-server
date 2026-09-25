@@ -9,6 +9,10 @@ import type {
   PdfToolkitPort,
 } from '../../business/ports/pdf-toolkit.port';
 import { OCR_MAX_IMAGE_WIDTH } from '../../business/domain/values';
+import {
+  readingOrder,
+  type TextRun,
+} from '../../business/domain/reading-order';
 import { downsampleRgba, encodePng } from './images/image-codec';
 
 /** Filters that separate a figure from furniture. */
@@ -96,44 +100,21 @@ export class PdfjsToolkitAdapter implements PdfToolkitPort {
         continue;
       }
 
-      // Group runs onto lines by baseline, and restore the spaces pdf.js drops
-      // between runs by looking at the horizontal gap.
-      type Part = { x: number; width: number; str: string };
-      const rows: { y: number; height: number; parts: Part[] }[] = [];
-
+      // The page's runs in reading order: two columns read down the left
+      // and then the right, the notes set smaller beneath after the body.
+      const runs: TextRun[] = [];
       for (const item of content.items) {
         if (!('str' in item) || !item.str) continue;
-        const y = item.transform[5];
-        const height = Math.abs(item.transform[3]) || 10;
-        const row = rows.find(
-          (r) => Math.abs(r.y - y) < Math.max(r.height, height) * 0.5,
-        );
-        const part = { x: item.transform[4], width: item.width, str: item.str };
-        if (row) row.parts.push(part);
-        else rows.push({ y, height, parts: [part] });
+        const transform = item.transform as number[];
+        runs.push({
+          x: transform[4],
+          y: transform[5],
+          width: item.width,
+          height: Math.abs(transform[3]) || 10,
+          str: item.str,
+        });
       }
-
-      const text = rows
-        .sort((a, b) => b.y - a.y) // PDF origin is bottom-left
-        .map((row) => {
-          const gap = row.height * 0.18;
-          return row.parts
-            .sort((a, b) => a.x - b.x)
-            .reduce((line, part, index, parts) => {
-              if (index === 0) return part.str;
-              const previous = parts[index - 1];
-              const distance = part.x - (previous.x + previous.width);
-              const needsSpace =
-                distance > gap && !/\s$/.test(line) && !/^\s/.test(part.str);
-              return line + (needsSpace ? ' ' : '') + part.str;
-            }, '')
-            .replace(/[ \t]+/g, ' ')
-            .trim();
-        })
-        .filter(Boolean)
-        // Rejoin words split across a line break with a hyphen.
-        .join('\n')
-        .replace(/(\w)-\n(\w)/g, '$1$2');
+      const text = readingOrder(runs);
 
       page.cleanup();
       const cleaned = stripScannerWatermarks(text);

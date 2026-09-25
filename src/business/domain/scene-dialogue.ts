@@ -178,9 +178,48 @@ export function quoteContext(
   };
 }
 
+/**
+ * Who a sentence is about, as a pronoun after it may mean them: the first
+ * of those who fit named near its start as someone who acts. Undefined
+ * when it begins with a pronoun or names only someone who does not fit
+ * (the disciples, for "he"): look further back. Null when its subject is
+ * someone the story does not name ("A man with leprosy came…"): the
+ * pronoun is theirs, and no one's here.
+ */
+function subjectOf(
+  sentence: string,
+  fits: readonly Speaker[],
+  everyone: readonly Speaker[],
+): string | null | undefined {
+  const main = mainClause(outsideQuotes(sentence))
+    .trim()
+    .replace(/^(?:then|and|but|so|now|again)\s+/iu, '');
+  if (!/\p{L}/u.test(main)) return undefined;
+  const head = main.split(/\s+/).slice(0, 8).join(' ');
+  const named = subjectsIn(head, fits)[0];
+  if (named) return named.id;
+  if (/^(?:he|she|they|it|his|her|their|its)\b/iu.test(main)) return undefined;
+  if (subjectsIn(head, everyone).length) return undefined;
+  if (
+    /^(?:a|an|the|some|one|another|two|three|four|five|several|many)\b/iu.test(
+      main,
+    )
+  )
+    return null;
+  return undefined;
+}
+
+/** A sentence with its quoted words blanked out, so only the words around them count. */
+function outsideQuotes(sentence: string): string {
+  let outside = sentence;
+  for (const [a, b] of quotedSpans(sentence))
+    outside = outside.slice(0, a) + ' '.repeat(b - a) + outside.slice(b);
+  return outside;
+}
+
 /** Words that say someone speaks, as a story tells it: aloud, in a thought, or in writing. */
 const SPEECH =
-  'thinks|thought|writes|wrote|says|said|asks|asked|replies|replied|answers|answered|shouts|shouted|yells|yelled|calls|called|cries|cried|whispers|whispered|mutters|muttered|murmurs|murmured|adds|added|explains|explained|begins|began|continues|continued|snaps|snapped|exclaims|exclaimed|insists|insisted|agrees|agreed|admits|admitted|tells|told|warns|warned|promises|promised|squeaks|squeaked|growls|growled|barks|barked|chirps|chirped|hisses|hissed|roars|roared|pleads|pleaded|begs|begged|announces|announced|declares|declared|wonders|wondered|repeats|repeated|jokes|joked|teases|teased|grumbles|grumbled|sings|sang|calls out|called out';
+  'thinks|thought|writes|wrote|says|said|asks|asked|replies|replied|answers|answered|shouts|shouted|yells|yelled|calls|called|cries|cried|whispers|whispered|mutters|muttered|murmurs|murmured|adds|added|explains|explained|begins|began|continues|continued|snaps|snapped|exclaims|exclaimed|insists|insisted|agrees|agreed|admits|admitted|tells|told|warns|warned|promises|promised|squeaks|squeaked|growls|growled|barks|barked|chirps|chirped|hisses|hissed|roars|roared|pleads|pleaded|begs|begged|announces|announced|declares|declared|wonders|wondered|repeats|repeated|jokes|joked|teases|teased|grumbles|grumbled|sings|sang|calls out|called out|responds|responded|remarks|remarked|demands|demanded|inquires|inquired|screams|screamed|sobs|sobbed|urges|urged|interrupts|interrupted|commands|commanded|orders|ordered|rebukes|rebuked|scolds|scolded|mumbles|mumbled|stammers|stammered|whimpers|whimpered|bellows|bellowed|saying|say|ask|tell|reply|answer|shout|yell';
 /** What someone does as they speak: theirs only when the sentence runs on into it ("Yes," Kofi nodded). */
 const ACTION =
   'laughs|laughed|giggles|giggled|chuckles|chuckled|groans|groaned|sighs|sighed|smiles|smiled|grins|grinned|nods|nodded|gasps|gasped|shrugs|shrugged|winks|winked|beams|beamed';
@@ -199,7 +238,9 @@ export function namedIn(
       const clean = name.trim();
       if (!clean) continue;
       // A name is a name as written ("Rose", never the sun that rose); a
-      // lower-case one ("the fox") is found at a sentence's start too.
+      // lower-case one ("the fox") is found at a sentence's start too. A
+      // name after "the" or "a" is a noun, in any case: "the centurion"
+      // is the Centurion.
       const proper = /^\p{Lu}/u.test(clean);
       const pattern = new RegExp(
         `(?<![\\p{L}\\p{N}])${escape(clean)}(?![\\p{L}\\p{N}])(?!['’]s\\b)`,
@@ -207,6 +248,19 @@ export function namedIn(
       );
       for (const m of text.matchAll(pattern))
         found.push({ id: speaker.id, at: m.index, end: m.index + m[0].length });
+      if (proper) {
+        const noun = new RegExp(
+          `(?<=\\b(?:the|a|an|this|that)\\s+)${escape(clean)}(?![\\p{L}\\p{N}])(?!['’]s\\b)`,
+          'giu',
+        );
+        for (const m of text.matchAll(noun))
+          if (!found.some((f) => f.id === speaker.id && f.at === m.index))
+            found.push({
+              id: speaker.id,
+              at: m.index,
+              end: m.index + m[0].length,
+            });
+      }
     }
   // A longer name wins over one inside it: "Nana Efua" over "Nana"; and
   // two of someone's names on the same words are one.
@@ -224,6 +278,28 @@ export function namedIn(
     )
     .sort((a, b) => a.at - b.at);
 }
+
+/** Words before a name that make it the object, not the one who acts: "pointed to his disciples". */
+const OBJECT_BEFORE =
+  /\b(?:to|at|with|toward|towards|for|from|about|of|by|on|into|onto|before|behind|beside|near|among|after|like|unto|upon|over|under|around)\s+(?:(?:the|a|an|his|her|their|its|our|my|your)\s+)?$/iu;
+
+/** Where each speaker is named as someone who acts: never as the object of a word like "to" or "with". */
+export function subjectsIn(
+  text: string,
+  speakers: readonly Speaker[],
+): { id: string; at: number; end: number }[] {
+  return namedIn(text, speakers).filter(
+    (one) => !OBJECT_BEFORE.test(text.slice(Math.max(0, one.at - 24), one.at)),
+  );
+}
+
+/** The sentence's main clause: past a leading "When Jesus went to Capernaum," and the like. */
+const mainClause = (sentence: string) =>
+  /^\s*(?:when|while|as|after|before|if|because|since|although|though|once|until|whenever)\b[^,]*,/iu.test(
+    sentence,
+  )
+    ? sentence.replace(/^[^,]*,/u, '')
+    : sentence;
 
 /**
  * Whose voice, letter or note the words bring in, by the name that owns
@@ -256,7 +332,7 @@ function leadIn(clause: string, speakers: readonly Speaker[]): string | null {
   let k = parts.length - 1;
   while (k >= 0 && !VERB.test(parts[k])) k -= 1;
   for (let j = k; j >= 0; j -= 1) {
-    const named = namedIn(parts[j], speakers)[0];
+    const named = subjectsIn(parts[j], speakers)[0];
     if (named) return named.id;
   }
   return null;
@@ -325,8 +401,14 @@ export function dialogueOf(
       found(ownerIn(around, speakers), 'voice');
       // 1. Ada asks, "…"
       found(leadIn(clause, speakers), 'lead');
+      // Words after the quote that lead into the next one are the next
+      // one's: "…," replied James. "…" Then Sally said, "…".
+      const leadsNext =
+        i < spans.length - 1 &&
+        /[,:—–-]\s*['"“‘]?\s*$/u.test(after) &&
+        VERB.test(after.split(/(?<=[.!?…])\s+/u).pop() ?? '');
       // 2. "…," said Ada / "…," Ada said / "Yes," Kofi nodded.
-      if (!speaker) {
+      if (!speaker && !(leadsNext && !/[,—–-]$/u.test(sentence.slice(a, b)))) {
         const runsOn = /[,—–-]$/u.test(sentence.slice(a, b));
         const verbs = runsOn ? `${SPEECH}|${ACTION}` : SPEECH;
         const attributed = new RegExp(
@@ -339,47 +421,114 @@ export function dialogueOf(
             'verb',
           );
       }
-      // 2b. They asked him, "…" / "…," she said: the pronoun's own. "They"
-      // is the story's one group; "he" or "she" the one speaker who fits,
-      // or of those who fit, the one named last before the quote.
+      // 2b. They asked him, "…" / "…," she said / He bowed down and asked,
+      // "…": the pronoun's own. "They" is the story's one group; "he" or
+      // "she" the one speaker who fits, or of those who fit, the one the
+      // sentence before is about: its subject, never someone it names as
+      // the object ("came to Jesus"). None there, and it is not guessed.
       if (!speaker) {
+        const lead = /[,:—–-]\s*['"“‘]?\s*$/u.test(clause)
+          ? new RegExp(
+              `^[\\s'"’”]*(?:(?:then|and|so|but|now|again)\\s+)?(he|she|they)\\b[^.!?…]*\\b(?:${SPEECH})\\b`,
+              'iu',
+            ).exec(clause)?.[1]
+          : undefined;
+        // A clause that ends its own sentence ("…," he asked. "No," she
+        // said.) is the quote before's: the words after this one come first.
+        const own = !/[.!?…]['"’”]?\s*$/u.test(clause);
         const pronoun =
-          new RegExp(
-            `\\b(he|she|they)\\s+(?:\\w+\\s+)?(?:${SPEECH})\\b`,
-            'iu',
-          ).exec(clause)?.[1] ??
+          lead ??
           new RegExp(
             `^[\\s'"’”]*(?:(?:${SPEECH})\\s+(he|she|they)\\b|(he|she|they)\\s+(?:${SPEECH})\\b)`,
             'iu',
           )
             .exec(near)
             ?.slice(1)
-            .find(Boolean);
+            .find(Boolean) ??
+          (own
+            ? new RegExp(
+                `\\b(he|she|they)\\s+(?:\\w+\\s+)?(?:${SPEECH})\\b`,
+                'iu',
+              ).exec(clause)?.[1]
+            : undefined);
         if (pronoun) {
           const word = pronoun.toLowerCase();
           const fits = speakers.filter((s) =>
-            word === 'they' ? s.group : s.gender === (word === 'she' ? 'f' : 'm'),
+            word === 'they'
+              ? s.group
+              : s.gender === (word === 'she' ? 'f' : 'm'),
           );
           if (fits.length === 1) found(fits[0].id, 'pronoun');
           else if (fits.length > 1) {
-            const before = `${sentences.slice(0, beat).join(' ')} ${clause}`;
-            const last = namedIn(before, fits).pop();
-            found(last?.id, 'pronoun');
+            // Whom it stands for: the subject of the nearest sentence
+            // before that has one who fits, this paragraph's or the ones
+            // before; none if a sentence's subject is someone the story
+            // does not name ("A man with leprosy came to Jesus.").
+            // Split where the book's own sentences end, quotes and all
+            // ("…my brothers?” And pointing…"), before any is blanked.
+            const earlier = sentence
+              .slice(0, a)
+              .split(/(?<=[.!?…]['"’”]?)\s+/u)
+              .slice(0, -1);
+            const before = [
+              ...sentences
+                .slice(Math.max(0, beat - 2), beat)
+                .flatMap((one) => one.split(/(?<=[.!?…]['"’”]?)\s+/u)),
+              ...earlier,
+            ].reverse();
+            // "He stretched out his hand and touched him saying, …": two
+            // of them, a "he" and a "him", and the one who spoke last is
+            // as likely the "him". Not guessed.
+            const two =
+              (word === 'he' && /\bhim\b/iu.test(clause)) ||
+              (word === 'she' && /\bher\b/iu.test(clause));
+            const spoke = lines[lines.length - 1]?.speaker;
+            for (const one of before.slice(0, 4)) {
+              const subject = subjectOf(one, fits, speakers);
+              if (subject === null) break;
+              if (subject) {
+                if (!(two && subject === spoke)) found(subject, 'pronoun');
+                break;
+              }
+            }
           }
           // A pronoun no one fits leaves the quote to the steps below,
           // never to the speaker of the quote before (a new speaker).
           if (!speaker && word === 'they') return;
         }
       }
-      // 3. Nana Efua smiles. "…"
-      found(namedIn(clause, speakers)[0]?.id, 'before');
+      // 3. Nana Efua smiles. "…": an action, never the quote before's own
+      // "James said." standing between the two.
+      const tagOfLast =
+        i > 0 &&
+        new RegExp(
+          `^[\\s\\p{P}]*(?:\\p{L}+\\s+){0,3}(?:${SPEECH})\\b(?:\\s+\\p{L}+){0,3}[\\s\\p{P}]*$`,
+          'iu',
+        ).test(outsideQuotes(sentence).slice(spans[i - 1][1], a));
+      if (!tagOfLast) found(subjectsIn(clause, speakers)[0]?.id, 'before');
       // 4. The writer's word: one for each quote, the last for any after.
       found(hints[Math.min(i, hints.length - 1)], 'writer');
-      // 5. Named after it, before the next quote.
-      found(namedIn(after, speakers)[0]?.id, 'after');
-      // 6. Going on with the quote before it.
+      // 5. Named after it, before the next quote: never whoever the words
+      // lead into the next quote with ("Jesus reached out, saying, …").
+      if (!leadsNext) found(subjectsIn(after, speakers)[0]?.id, 'after');
+      // 6. Going on with the quote before it, with nothing between them
+      // but its speaker's own "he said".
       const last = lines[lines.length - 1];
-      if (i > 0 && last?.beat === beat) found(last.speaker, 'continues');
+      if (i > 0 && last?.beat === beat) {
+        const between = outsideQuotes(sentence).slice(spans[i - 1][1], a);
+        const same = new RegExp(
+          `^[\\s\\p{P}]*(?:(?:\\p{L}+\\s+){0,3}(?:${SPEECH})(?:\\s+\\p{L}+){0,3})?[\\s\\p{P}]*$`,
+          'iu',
+        );
+        const others = namedIn(between, speakers).filter(
+          (one) => one.id !== last.speaker,
+        );
+        // A quote with its own tag after it ("…," replied his sister) is
+        // whoever that tag is about, even one the story has no name for.
+        const ownTag = new RegExp(`\\b(?:${SPEECH})\\b`, 'iu').test(near);
+        if (same.test(between) && !others.length && !ownTag)
+          found(last.speaker, 'continues');
+      }
       // 7. A conversation of two: the other one answers.
       if (lines.length >= 2) {
         const [x, y] = lines.slice(-2);

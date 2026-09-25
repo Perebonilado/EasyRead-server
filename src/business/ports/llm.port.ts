@@ -487,6 +487,8 @@ export interface LlmGatewayPort {
     profile?: string;
     /** A story's characters on the page, and where it happens. */
     story?: string;
+    /** The page in plainer words, when the page is the book's own. */
+    plain?: string;
     previous?: SceneScriptDraft;
     problems?: string[];
   }): Promise<LlmResult<SceneScriptDraft>>;
@@ -504,6 +506,8 @@ export interface LlmGatewayPort {
     context: string;
     profile?: string;
     story?: string;
+    /** The page in plainer words: how to say it to this reader. */
+    plain?: string;
     previous?: ScreenplayDraft;
     problems?: string[];
   }): Promise<LlmResult<ScreenplayDraft>>;

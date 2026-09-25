@@ -1130,3 +1130,32 @@ describe('a group named with its people', () => {
     ]);
   });
 });
+
+describe('a name anyone could be called by', () => {
+  it('is never one person’s other name, merged or read back', () => {
+    const bible = mergeStory([
+      {
+        from: 1,
+        to: 2,
+        draft: draft({
+          characters: [
+            person('Canaanite woman', { aliases: ['the woman', 'she'] }),
+          ],
+        }),
+      },
+    ]);
+    expect(bible.characters[0].aliases).toEqual(['she']);
+    const kept = bibleOf({
+      ...JSON.parse(JSON.stringify(bible)),
+      characters: [
+        {
+          ...bible.characters[0],
+          aliases: ['the woman', 'the woman with the alabaster jar'],
+        },
+      ],
+    } as StoryBible);
+    expect(kept.characters[0].aliases).toEqual([
+      'the woman with the alabaster jar',
+    ]);
+  });
+});

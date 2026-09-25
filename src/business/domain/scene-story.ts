@@ -662,6 +662,16 @@ function aliasesApart<T extends { name: string; aliases?: string[] | null }>(
   }));
 }
 
+/**
+ * A name anyone could be called by ("the woman", "a man"): never one
+ * person's other name, or the woman healed in Capernaum is the Canaanite
+ * woman of another chapter.
+ */
+const anyonesName = (name: string) =>
+  /^(?:the|a|an|that|this)\s+(?:(?:old|young|little)\s+)?(?:woman|man|girl|boy|child|lady|stranger|person|people|men|women)$/iu.test(
+    name.trim(),
+  );
+
 const RANK: Record<StoryRole, number> = { main: 0, supporting: 1, minor: 2 };
 
 /** The longer of two descriptions, within reason: later chapters often say more. */
@@ -700,7 +710,9 @@ export function mergeStory(
     for (const raw of aliasesApart(part.draft.characters)) {
       const name = clean(raw.name);
       if (!name) continue;
-      const aliases = (raw.aliases ?? []).map(clean).filter(Boolean);
+      const aliases = (raw.aliases ?? [])
+        .map(clean)
+        .filter((alias) => alias && !anyonesName(alias));
       // Whom the stretch means: the one its own name names; else one its
       // other names name, but never a group for one person or one for a
       // group ("the disciples", with Peter and John among their names, are
@@ -1000,7 +1012,9 @@ export function bibleOf(
     .map((c) => ({
       id: clean(c.id),
       name: clean(c.name),
-      aliases: (c.aliases ?? []).map(clean).filter(Boolean),
+      aliases: (c.aliases ?? [])
+        .map(clean)
+        .filter((alias) => alias && !anyonesName(alias)),
       role: STORY_ROLES.includes(c.role) ? c.role : ('minor' as const),
       look: clean(c.look),
       traits: (c.traits ?? []).map(clean).filter(Boolean).slice(0, MAX_TRAITS),

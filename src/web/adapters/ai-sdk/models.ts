@@ -72,8 +72,8 @@ const TASK_VAR: Record<LlmTask, string> = {
   // paying for it on diagrams.
   sketch: 'AI_MODEL_SKETCH',
   // A page as an animated explainer. The writer is one call a page and
-  // plans everything, so it is worth a strong model; the artist draws
-  // each picture and is DeepSeek by design.
+  // plans everything; the artist draws each picture and is DeepSeek by
+  // design.
   scene_write: 'AI_MODEL_SCENE_WRITE',
   scene_draw: 'AI_MODEL_SCENE_DRAW',
   scene_profile: 'AI_MODEL_SCENE_PROFILE',
@@ -94,9 +94,13 @@ const TASK_VAR: Record<LlmTask, string> = {
  * "DeepSeek" drawing was drawn by gpt-4o-mini (2161504).
  */
 const TASK_DEFAULT: Partial<Record<LlmTask, string>> = {
-  simplify_maths: 'openai:gpt-4.1',
-  work_through: 'openai:gpt-4.1',
-  scene_write: 'openai:gpt-4.1',
+  // The maths note, the tutor's working and the video writer: gpt-4o-mini
+  // by Richard's choice (2026-09-25), for cost; gpt-4.1 wrote them better
+  // and can be set again with AI_MODEL_SIMPLIFY_MATHS, AI_MODEL_WORK_THROUGH
+  // and AI_MODEL_SCENE_WRITE.
+  simplify_maths: 'openai:gpt-4o-mini',
+  work_through: 'openai:gpt-4o-mini',
+  scene_write: 'openai:gpt-4o-mini',
   scene_draw: 'deepseek:deepseek-flash',
   // What a document is: one small call a document.
   scene_profile: 'openai:gpt-4.1-mini',

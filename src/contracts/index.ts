@@ -1036,6 +1036,12 @@ export type SceneThingDto =
       rig?: true;
       /** Where its head is, as shares of its box across and down: where it looks from. */
       head?: [number, number];
+      /**
+       * One person drawn by the kit: each arm's shoulder, elbow and hand as
+       * drawn, as shares of its box: the joints the player turns the arm
+       * and forearm about, so a hand can be put where it means to go.
+       */
+      joints?: Record<'r' | 'l', [number, number][]>;
       /** A story's minor character: a little smaller and quieter than those the story follows. */
       minor?: true;
     }

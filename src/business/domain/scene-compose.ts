@@ -156,6 +156,15 @@ export function spokenIn(sentence: string): string | null {
   return bubbleText(quoted.join(' … '));
 }
 
+/** A point in a drawing's own units, as shares of its box across and down. */
+const shareOf = (
+  viewBox: [number, number, number, number],
+  [x, y]: [number, number],
+): [number, number] => [
+  Math.round(((x - viewBox[0]) / viewBox[2]) * 1000) / 1000,
+  Math.round(((y - viewBox[1]) / viewBox[3]) * 1000) / 1000,
+];
+
 /**
  * The thing as the client gets it: its drawing, or a card with its name
  * when the drawing failed. On a story's page nothing is labelled: no
@@ -227,23 +236,20 @@ export function thingDto(
       : {}),
     // Someone drawn by the kit acts; where their head is, they look from.
     ...(drawing.acts ? { rig: true as const } : {}),
+    // And where each arm's shoulder, elbow and hand are, as shares of the
+    // box: so a hand goes where it means to, not just up by so much.
+    ...(drawing.acts && drawing.joints
+      ? {
+          joints: {
+            r: drawing.joints.r.map((p) => shareOf(drawing.viewBox, p)),
+            l: drawing.joints.l.map((p) => shareOf(drawing.viewBox, p)),
+          },
+        }
+      : {}),
     ...(thing.kind === 'character' && thing.minor
       ? { minor: true as const }
       : {}),
-    ...(drawing.head
-      ? {
-          head: [
-            Math.round(
-              ((drawing.head[0] - drawing.viewBox[0]) / drawing.viewBox[2]) *
-                1000,
-            ) / 1000,
-            Math.round(
-              ((drawing.head[1] - drawing.viewBox[1]) / drawing.viewBox[3]) *
-                1000,
-            ) / 1000,
-          ] as [number, number],
-        }
-      : {}),
+    ...(drawing.head ? { head: shareOf(drawing.viewBox, drawing.head) } : {}),
   };
 }
 

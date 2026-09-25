@@ -81,6 +81,7 @@ export async function figureDrawing(
     stands: { units: h },
     acts: true,
     anchors: drawn.anchors,
+    ...(drawn.joints ? { joints: drawn.joints } : {}),
   };
 }
 

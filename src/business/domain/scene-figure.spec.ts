@@ -190,6 +190,32 @@ describe('a person drawn by the kit', () => {
   });
 });
 
+describe('the rig a person is drawn on', () => {
+  it('gives each arm of one person its shoulder, elbow and hand, where they are drawn', () => {
+    const drawn = drawFigure(as({}), 'x');
+    const { r, l } = drawn.joints!;
+    for (const [S, E, H] of [r, l]) {
+      // A straight arm at rest: the elbow halfway, the hand below the shoulder.
+      expect(E).toEqual([(S[0] + H[0]) / 2, (S[1] + H[1]) / 2]);
+      expect(H[1]).toBeGreaterThan(S[1]);
+    }
+    expect(r[0][0]).toBeGreaterThan(0);
+    expect(l[0][0]).toBeLessThan(0);
+    // The rotation's pivots in the drawing are those joints.
+    expect(drawn.svg).toContain(`transform-origin:${r[0][0]}px ${r[0][1]}px`);
+    expect(drawn.svg).toContain(`transform-origin:${r[1][0]}px ${r[1][1]}px`);
+  });
+
+  it('bends the arm where the pose bends it, and has no joints for a group or someone lying', () => {
+    const holding = drawFigure(as({}), 'x', { holding: 'cup' });
+    const bent = ([S, E, H]: [number, number][]) =>
+      E[0] !== (S[0] + H[0]) / 2 || E[1] !== (S[1] + H[1]) / 2;
+    expect([holding.joints!.r, holding.joints!.l].some(bent)).toBe(true);
+    expect(drawFigure(as({}), 'x', { count: 3 }).joints).toBeUndefined();
+    expect(drawFigure(as({}), 'x', { pose: 'lying' }).joints).toBeUndefined();
+  });
+});
+
 describe('a few people standing together', () => {
   const team = as({
     headwear: 'beanie',

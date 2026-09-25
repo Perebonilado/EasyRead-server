@@ -864,6 +864,19 @@ describe('what a character says, in a bubble', () => {
       head: [300, 180],
       field: standing(),
       stands: { units: 234 },
+      acts: true,
+      joints: {
+        r: [
+          [360, 360],
+          [380, 480],
+          [400, 600],
+        ],
+        l: [
+          [240, 360],
+          [220, 480],
+          [200, 600],
+        ],
+      },
     });
   const talking: SceneScript = {
     ...script,
@@ -938,6 +951,13 @@ describe('what a character says, in a bubble', () => {
     // Where each one's head is, to look from.
     const fox = scene.things.find((t) => t.id === 'fox');
     expect(fox?.kind === 'drawing' && fox.head).toEqual([0.5, 0.2]);
+    // And its arms' joints, as shares of its box, for the player to bend.
+    expect(fox?.kind === 'drawing' && fox.rig).toBe(true);
+    expect(fox?.kind === 'drawing' && fox.joints?.r).toEqual([
+      [0.6, 0.4],
+      [0.633, 0.533],
+      [0.667, 0.667],
+    ]);
   });
 
   it('acts what the writer directs, and keeps the camera on two', () => {

@@ -720,6 +720,11 @@ export interface GatedDrawing {
   stands?: { units: number };
   /** Drawn by the figure kit, rigged to act: its eyes, face, head, arms and mouth move. */
   acts?: true;
+  /** One person drawn by the kit: each arm's shoulder, elbow and hand, in its own units. */
+  joints?: Record<
+    'r' | 'l',
+    [[number, number], [number, number], [number, number]]
+  >;
 }
 
 export interface GateResult {

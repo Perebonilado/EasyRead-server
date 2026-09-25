@@ -263,3 +263,65 @@ Each part is tested as the last ones were: unit tests, then real pages remade an
   - OCR of maths pages: small, per maths page.
   - The stronger model for simplifying maths pages: more per maths page.
   - Step checks, spoken maths and rendering: code.
+
+## Status (2026-09-25): built and tested, all four parts
+
+Built on `visualize-world` in both repos. It sits on `visualize-story-script`, which is already in main (PR #15), so its PR holds only this work. Nothing is pushed yet.
+
+**Decisions taken:** the six recommendations above.
+1. God is never drawn: light from above, and a voice. Bible figures are drawn as children's Bibles draw them. A text's own tradition is followed: prophets are never drawn in Islamic texts.
+2. No glow behind revered figures.
+3. An existing story is read again once, on its next page make, when it is short (six stretches or fewer). A longer book waits for `scene:recast`, asked for first.
+4. Algebra is checked in the server with mathjs and sample values.
+5. Maths pages always go through OCR.
+6. gpt-4.1 simplifies maths pages only.
+
+**What was built:**
+1. **Voices beyond the stage** (server 01d2782, client 1f8c3fd).
+   - Each line has a presence and a `from`. God is always above.
+   - A voice from heaven or a crowd is added from the page's own text.
+   - Off-stage, phone, letter and thought lines get their own bubbles.
+   - People who hear a voice look toward it.
+2. **Maths, part one** (397fb42, fc20c2f).
+   - Maths is detected on each page and read in right: Symbol-font glyphs, PowerPoint equations, and OCR of maths pages with a vision fallback.
+   - Migration 0054.
+   - The worked solution is data, and code checks every line (`maths-work.ts`).
+   - gpt-4.1 writes maths pages. A page with a wrong line is sent back once, then cut at the last true line.
+   - The reader has a step-by-step block and shows inline `$…$`.
+3. **Characters apart and places** (4ae962a, 1952267).
+   - New costume pieces and a registry of iconic figures.
+   - Code keeps looks distinct.
+   - The story's world, inferred places, and a front piece (a boat's side).
+   - Crowds drawn by code, plus time of day, weather and grades.
+   - `STORY_VERSION` 2, `SET_VERSION` 3.
+4. **Maths, part two** (edb62e4, 9d540e1).
+   - Maths is said the way a teacher says it: MathJax with Speech Rule Engine ClearSpeak.
+   - Working appears on any page, checked line by line. A line is revealed when the voice says what it comes to.
+   - Young learners get number pictures: blocks, bars, rows of dots, sharing, and fraction bars.
+   - The tutor's "work it through" tool, in a lesson and in a lecture: checked steps on both boards, with the words the tutor is to say.
+   - Typeset maths beside the board's handwriting.
+   - The checker reads a percentage either way (0.05, or 5 in PRT/100).
+   - Step-level follow-along (b1af6d2, 59ca17a).
+
+**How it was tested:**
+- **Unit tests:** server 1408, client 64, all passing. Lint is clean on the changed files.
+- **Bible chapters** (baptism, storm on the lake, feeding the crowd), remade and watched on `/dev/stage`:
+  - God's voice comes from above, and both look up.
+  - Jesus and John are drawn as iconic figures.
+  - Jesus stands in the boat behind its side.
+  - The storm has dusk and rain; the hillside has its crowd.
+- **The maths test set:** every line checks true on all seven documents, including the scanned page.
+- **The tutor's tool on seven problems** (primary through university and law): in the last run, every one checked in one try, in 1.3 to 3.7 seconds. An earlier run had one reply that took 9.6 seconds. They were watched on `/dev/board?work=tutor` (a new board lab) on both boards.
+- **A primary page remade:** three workings, each with its number picture.
+
+**Deploy:**
+- New optional settings: `AI_MODEL_SIMPLIFY_MATHS` and `AI_MODEL_WORK_THROUGH`, both defaulting to `openai:gpt-4.1`.
+- Migration 0054 (`document_pages.has_maths`).
+- `SET_VERSION` 3 repaints places on their next page make. `STORY_VERSION` 2 reads short stories again.
+- The contracts changed, so merge the server and the client together.
+- Locally, Mistral OCR returned 429 on every try; the vision fallback read those pages.
+
+**Not done:**
+- Echo on the voice from heaven needs a Voice Server change, which was optional.
+- Number lines and place-value (tens and ones) blocks for young learners. Small amounts are unit blocks and bigger ones bars.
+- In a lecture, the tutor's free `board_write` figures get no typeset line. Board figures the lecture writes, and every line the tutor works through, do.

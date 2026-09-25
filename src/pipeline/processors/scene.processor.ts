@@ -446,7 +446,7 @@ export class SceneProcessor {
       const drawn = [...drawings.values()].filter(Boolean).length;
       const rhythm = rhythmOf(scene);
       this.logger.log(
-        `${who}: made in ${Math.round((Date.now() - started) / 1000)}s: ${script.beats.length} sentences, ${Math.round(voice.durationMs / 1000)}s of audio timed by ${voice.timing}, ${scene.steps.length} stage changes, ${scene.effects.length} effects (${filled} filled), ${drawn} of ${drawings.size} drawings; still at most ${Math.round(rhythm.stillMs / 1000)}s, ${rhythm.perMinute} changes a minute`,
+        `${who}: made in ${Math.round((Date.now() - started) / 1000)}s: ${script.beats.length} sentences, ${Math.round(voice.durationMs / 1000)}s of audio timed by ${voice.timing}, ${scene.steps.length} stage changes, ${scene.effects.length} effects (${filled} filled), ${drawn} of ${drawings.size} drawings; still at most ${Math.round(rhythm.stillMs / 1000)}s, ${rhythm.perMinute} changes a minute, ${rhythm.stagesPerMinute} of the stage`,
       );
     } catch (error) {
       const message = (error as Error).message;

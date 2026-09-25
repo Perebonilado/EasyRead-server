@@ -2194,7 +2194,7 @@ export function rhythmOf(scene: {
   steps: { atMs: number }[];
   effects: { atMs: number; do: string }[];
   durationMs: number;
-}): { stillMs: number; perMinute: number } {
+}): { stillMs: number; perMinute: number; stagesPerMinute: number } {
   const times = [
     0,
     ...scene.steps.map((s) => s.atMs),
@@ -2208,5 +2208,6 @@ export function rhythmOf(scene: {
   return {
     stillMs,
     perMinute: Math.round(((times.length - 2) / minutes) * 10) / 10,
+    stagesPerMinute: Math.round((scene.steps.length / minutes) * 10) / 10,
   };
 }

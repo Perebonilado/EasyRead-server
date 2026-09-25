@@ -1730,6 +1730,9 @@ export function mendScript(
     }
   }
 
+  // A list the voice reads out comes on stage item by item, as it is said.
+  if (draft.fit !== 'poor') showSpokenLists(beats, cast, steps, mended);
+
   return {
     script: {
       fit: draft.fit === 'poor' ? 'poor' : 'good',
@@ -2558,6 +2561,24 @@ export function sendBack(mended: MendedScript, lesson: boolean): string[] {
   return [
     ...mended.problems,
     ...(lesson ? quietStretches(mended.script, STILL_WORDS) : []),
+    ...(lesson ? fewStageChanges(mended.script) : []),
+  ];
+}
+
+/** Spoken words a lesson's stage may go without changing what it shows, on average: about eighteen seconds. */
+export const WORDS_A_STAGE = 45;
+
+/**
+ * A lesson whose stage itself hardly changes: points and states on one
+ * picture are not enough for a page of any length. Nothing for a short one.
+ */
+export function fewStageChanges(script: SceneScript): string[] {
+  const words = script.beats.reduce((n, b) => n + wordsOf(b.say).length, 0);
+  const stages = script.steps.filter((step) => step.stage).length;
+  const wanted = Math.floor(words / WORDS_A_STAGE);
+  if (words < 2 * WORDS_A_STAGE || stages >= wanted) return [];
+  return [
+    `The stage changes ${stages} times in ${words} spoken words; change what is shown, or how it is laid out, about every two or three sentences (${wanted} times or more): bring on each thing, term or list item as it is named, and send off what the voice is done with.`,
   ];
 }
 
@@ -2569,6 +2590,231 @@ export function betterDraft(
 ): MendedScript {
   const faults = (m: MendedScript) =>
     m.problems.length +
-    (lesson ? quietStretches(m.script, STILL_WORDS).length : 0);
+    (lesson
+      ? quietStretches(m.script, STILL_WORDS).length +
+        fewStageChanges(m.script).length
+      : 0);
   return faults(second) <= faults(first) ? second : first;
+}
+
+/** An item of a list said aloud: its words, and where in the sentence it starts. */
+export interface SpokenItem {
+  text: string;
+  /** Its first word's index among the sentence's words. */
+  word: number;
+}
+
+/** Words that open a clause, never a list's item: "he came, he saw, and he won". */
+const NOT_AN_ITEM =
+  /^(?:he|she|it|they|we|you|i|this|that|these|those|there|then|so|but|which|who|when|if)\b/iu;
+/** Where a list's first item begins, after what leads into it: "three kinds: …", "such as …". */
+const LEADS_INTO =
+  /(?::|\bsuch as|\bincluding|\blike|\bnamely|\bare|\bwere|\bis|\binclude|\bincludes)\s+/giu;
+
+/**
+ * The lists a sentence reads out: three or more short items (four words at
+ * most each) set apart by commas, the last after "and" or "or" ("storage,
+ * compute, and the network"; "three parts: the disk, memory and cache").
+ * A clause is never an item.
+ */
+export function listsIn(sentence: string): SpokenItem[][] {
+  const out: SpokenItem[][] = [];
+  const parts: { text: string; at: number }[] = [];
+  let at = 0;
+  for (const piece of sentence.split(',')) {
+    parts.push({ text: piece, at });
+    at += piece.length + 1;
+  }
+  const wordAt = (chars: number) => wordsOf(sentence.slice(0, chars)).length;
+  const short = (text: string) => {
+    const words = wordsOf(text);
+    return (
+      words.length >= 1 && words.length <= 4 && !NOT_AN_ITEM.test(text.trim())
+    );
+  };
+  let i = 0;
+  while (i < parts.length) {
+    // The run of short parts ending in one that says "and" or "or".
+    let j = i;
+    const run: { text: string; at: number }[] = [];
+    // Its first item: the part's tail past what leads into the list.
+    const head = parts[i];
+    let lead = -1;
+    for (const m of head.text.matchAll(LEADS_INTO))
+      lead = m.index + m[0].length;
+    let firstText = lead >= 0 ? head.text.slice(lead) : head.text;
+    let firstAt = head.at + (lead >= 0 ? lead : 0);
+    // "they need sunlight, water and …": the first item is the clause's
+    // last words, as many as the next item has.
+    if (!short(firstText) && i + 1 < parts.length) {
+      const next = parts[i + 1].text
+        .replace(/^\s*(?:and|or)\s+/iu, '')
+        .split(/\s+(?:and|or)\s+/iu)[0];
+      const n = Math.min(3, Math.max(1, wordsOf(next).length));
+      const tail = head.text.trimEnd().split(/\s+/).slice(-n).join(' ');
+      if (short(tail) && short(next)) {
+        firstText = tail;
+        firstAt = head.at + head.text.trimEnd().length - tail.length;
+      }
+    }
+    if (!short(firstText)) {
+      i += 1;
+      continue;
+    }
+    run.push({ text: firstText, at: firstAt });
+    j = i + 1;
+    let closed = false;
+    while (j < parts.length) {
+      const piece = parts[j].text;
+      const last = /^\s*(?:and|or)\s+([^.;:!?]+)/iu.exec(piece);
+      if (last) {
+        if (!short(last[1])) break;
+        run.push({ text: last[1], at: parts[j].at + piece.indexOf(last[1]) });
+        closed = true;
+        break;
+      }
+      // "memory and cache": the last two joined without a comma.
+      const pair = /^([^.;:!?]+?)\s+(?:and|or)\s+([^.;:!?]+)/iu.exec(piece);
+      if (pair && short(pair[1]) && short(pair[2])) {
+        run.push({ text: pair[1], at: parts[j].at + piece.indexOf(pair[1]) });
+        run.push({
+          text: pair[2],
+          at: parts[j].at + piece.lastIndexOf(pair[2]),
+        });
+        closed = true;
+        break;
+      }
+      if (!short(piece)) break;
+      run.push({ text: piece, at: parts[j].at });
+      j += 1;
+    }
+    if (closed && run.length >= 3)
+      out.push(
+        run.map((item) => {
+          const lead = item.text.length - item.text.trimStart().length;
+          return {
+            text: item.text.trim().replace(/[.;:!?)"'”’]+$/u, ''),
+            word: wordAt(item.at + lead),
+          };
+        }),
+      );
+    i = closed ? j + 1 : i + 1;
+  }
+  return out;
+}
+
+/** Things the stage needs room for: a list is never squeezed in beside them. */
+const ROOMY = new Set(['math', 'code', 'quote', 'graph', 'timeline', 'table']);
+/** The most items of a list shown at once, beside the thing it is about. */
+const LIST_MOST = 4;
+
+/**
+ * Each list the voice reads out, not already on the stage, brought on
+ * item by item as it is said: a card for each, beside the one thing the
+ * stage was showing, until the stage next changes. What was on the stage
+ * comes back where the page goes on to point at something the list took
+ * the place of.
+ */
+function showSpokenLists(
+  beats: SceneBeat[],
+  cast: SceneThing[],
+  steps: SceneStep[],
+  mended: string[],
+): void {
+  const before = (a: SceneStep, beat: number, word: number) =>
+    a.at.beat < beat || (a.at.beat === beat && a.word <= word);
+  const stageAt = (beat: number, word: number) =>
+    [...steps].reverse().find((step) => step.stage && before(step, beat, word))
+      ?.stage ?? null;
+  const byId = new Map(cast.map((thing) => [thing.id, thing]));
+  const nameOf = (id: string) => {
+    const thing = byId.get(id);
+    if (!thing) return '';
+    if (thing.kind === 'words') return thing.text;
+    return 'name' in thing && typeof thing.name === 'string' ? thing.name : id;
+  };
+  const keys = (text: string) =>
+    wordsOf(text.toLowerCase())
+      .map((word) => word.replace(/[^\p{L}\p{N}]/gu, ''))
+      .filter((word) => word.length >= 3);
+  const taken = new Set(cast.map((thing) => thing.id));
+  beats.forEach((beat, k) => {
+    for (const list of listsIn(beat.say)) {
+      const items = list.slice(0, 6);
+      // Shown already: the writer put most of them on the stage by now.
+      const shown = steps
+        .filter((step) => step.stage && step.at.beat <= k + 1)
+        .flatMap((step) => step.stage!.show.map(nameOf));
+      const onStage = items.filter((item) =>
+        keys(item.text).some((key) =>
+          shown.some((name) => keys(name).includes(key)),
+        ),
+      ).length;
+      if (onStage * 2 >= items.length) continue;
+      const stage = stageAt(k, items[0].word);
+      if (stage?.show.some((id) => ROOMY.has(byId.get(id)?.kind ?? '')))
+        continue;
+      // What the list is about stays, two things at most; the rest make
+      // room.
+      const base = (stage?.show ?? [])
+        .filter((id) => !id.startsWith('item-'))
+        .slice(0, 2);
+      const cards = items.map((item) => {
+        let id = `item-${groupId(item.text).slice(0, 24)}`;
+        for (let n = 2; taken.has(id); n += 1)
+          id = `item-${groupId(item.text).slice(0, 22)}-${n}`;
+        taken.add(id);
+        const text = item.text.replace(/^(?:the|a|an)\s+/iu, '');
+        const card: WordsThing = {
+          id,
+          kind: 'words',
+          text: text.charAt(0).toUpperCase() + text.slice(1),
+          style: 'keyword',
+        };
+        cast.push(card);
+        byId.set(id, card);
+        return { id, word: item.word, text: item.text };
+      });
+      cards.forEach((card, n) => {
+        const upTo = cards
+          .slice(0, n + 1)
+          .map((c) => c.id)
+          .slice(-Math.min(LIST_MOST, MAX_ON_STAGE - base.length));
+        const show = [...base, ...upTo];
+        steps.push({
+          at: { beat: k, phrase: wordsOf(card.text).slice(0, 3).join(' ') },
+          word: card.word,
+          stage: {
+            layout: fitLayout(base.length === 1 ? 'focus' : 'row', show.length),
+            show,
+            arrows: [],
+          },
+          effects: [],
+        });
+      });
+      mended.push(
+        `line ${k + 1}: a list of ${cards.length} said aloud; each shown as it is said`,
+      );
+    }
+  });
+  steps.sort((a, b) => a.at.beat - b.at.beat || a.word - b.word);
+  // Where the page goes on to point at something a list took the place
+  // of, what was on the stage comes back.
+  let current: SceneStage | null = null;
+  let lastWriters: SceneStage | null = null;
+  for (const step of steps) {
+    if (step.stage) {
+      current = step.stage;
+      if (!step.stage.show.some((id) => id.startsWith('item-')))
+        lastWriters = step.stage;
+      continue;
+    }
+    const missing = step.effects.some(
+      (effect) => current && !current.show.includes(effect.target),
+    );
+    if (missing && lastWriters) {
+      step.stage = { ...lastWriters };
+      current = lastWriters;
+    }
+  }
 }

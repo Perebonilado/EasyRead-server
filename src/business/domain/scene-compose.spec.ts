@@ -2080,6 +2080,6 @@ describe('the rhythm of a page', () => {
         ],
         durationMs: 60_000,
       }),
-    ).toEqual({ stillMs: 40_000, perMinute: 3 });
+    ).toEqual({ stillMs: 40_000, perMinute: 3, stagesPerMinute: 2 });
   });
 });

@@ -9,6 +9,7 @@ import {
   phraseAt,
   quietStretches,
   sendBack,
+  listsIn,
   betterDraft,
   type MendedScript,
   tellsOfLoss,
@@ -126,7 +127,10 @@ describe('the writer’s storyboard, mended', () => {
   it('makes ids safe, drops what is not in the cast, and moves a phrase to the sentence it is in', () => {
     const { script, problems, mended } = mendScript(draft());
     expect(problems).toEqual([]);
-    const [first, second, third] = script.steps;
+    // The writer's own steps: the list said aloud comes on between them.
+    const [first, second, third] = script.steps.filter(
+      (step) => !step.stage?.show.some((id) => id.startsWith('item-')),
+    );
     expect(first.stage).toEqual({ layout: 'one', show: ['leaf'], arrows: [] });
     // Two things left once "nobody" is dropped: a hub cannot hold two.
     expect(second.stage?.layout).toBe('row');
@@ -145,7 +149,9 @@ describe('the writer’s storyboard, mended', () => {
     const leaf = script.cast.find((t) => t.id === 'leaf');
     expect(leaf?.kind === 'drawing' && leaf.parts).toHaveLength(1);
     // A number with no value is set as words, and a thing never on stage is dropped.
-    expect(script.cast.map((t) => t.id)).toEqual(['leaf', 'sun']);
+    expect(
+      script.cast.map((t) => t.id).filter((id) => !id.startsWith('item-')),
+    ).toEqual(['leaf', 'sun']);
   });
 
   it('asks for a redo when the phrases are not in the narration or nothing is ever shown', () => {
@@ -184,6 +190,50 @@ describe('the writer’s storyboard, mended', () => {
     expect(quietStretches(script, 50)).toEqual([]);
   });
 
+  it('hears the lists a sentence reads out, and never a run of clauses', () => {
+    const items = (sentence: string) =>
+      listsIn(sentence).map((list) =>
+        list.map((item) => `${item.word}:${item.text}`),
+      );
+    expect(
+      items('The main parts are storage, compute, and the network.'),
+    ).toEqual([['4:storage', '5:compute', '7:the network']]);
+    expect(items('There are three kinds: disk, memory and cache.')).toEqual([
+      ['4:disk', '5:memory', '7:cache'],
+    ]);
+    expect(
+      items('To do it, they need sunlight, water and carbon dioxide.'),
+    ).toEqual([['5:sunlight', '6:water', '8:carbon dioxide']]);
+    expect(items('He came, he saw, and he won.')).toEqual([]);
+    expect(
+      items(
+        'Data is copied, checked, and stored in three regions across the world.',
+      ),
+    ).toEqual([]);
+  });
+
+  it('brings a list said aloud on stage item by item, beside what it is about', () => {
+    const { script, mended } = mendScript(draft());
+    const cards = script.cast.filter((t) => t.id.startsWith('item-'));
+    expect(cards.map((t) => t.kind === 'words' && t.text)).toEqual([
+      'Sunlight',
+      'Water',
+      'Carbon dioxide',
+    ]);
+    // Each on its own words, joining the ones before it, the leaf kept.
+    const listing = script.steps.filter((s) =>
+      s.stage?.show.some((id) => id.startsWith('item-')),
+    );
+    expect(listing.map((s) => [s.word, s.stage!.show.length])).toEqual([
+      [5, 3],
+      [6, 4],
+      [8, 5],
+    ]);
+    // What the writer had up, the leaf and the sun, stays beside them.
+    expect(listing[2].stage!.show.slice(0, 2)).toEqual(['leaf', 'sun']);
+    expect(mended.join(' ')).toContain('a list of 3 said aloud');
+  });
+
   it('sends a lesson whose picture sits still too long back on its own, and keeps the better draft', () => {
     const mended = mendScript(draft());
     const words = (n: number) =>
@@ -204,6 +254,20 @@ describe('the writer’s storyboard, mended', () => {
     const reasons = sendBack(still, true);
     expect(reasons).toHaveLength(1);
     expect(reasons[0]).toContain('nothing new to see');
+    // A page of 132 words on one stage: two changes of stage wanted.
+    const long: MendedScript = {
+      ...still,
+      script: {
+        ...still.script,
+        beats: still.script.beats.map((beat) => ({
+          ...beat,
+          say: `${words(44)}.`,
+        })),
+      },
+    };
+    expect(sendBack(long, true).join(' ')).toContain(
+      'The stage changes 1 times in 132 spoken words',
+    );
     // A story's quiet holds its actions; a page not taught this way stays.
     expect(sendBack(still, false)).toEqual([]);
     expect(

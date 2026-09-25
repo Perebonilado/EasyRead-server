@@ -94,13 +94,15 @@ const TASK_VAR: Record<LlmTask, string> = {
  * "DeepSeek" drawing was drawn by gpt-4o-mini (2161504).
  */
 const TASK_DEFAULT: Partial<Record<LlmTask, string>> = {
-  // The maths note, the tutor's working and the video writer: gpt-4o-mini
-  // by Richard's choice (2026-09-25), for cost; gpt-4.1 wrote them better
-  // and can be set again with AI_MODEL_SIMPLIFY_MATHS, AI_MODEL_WORK_THROUGH
-  // and AI_MODEL_SCENE_WRITE.
+  // The maths note and the tutor's working: gpt-4o-mini by Richard's
+  // choice (2026-09-25), for cost; gpt-4.1 again with AI_MODEL_SIMPLIFY_MATHS
+  // and AI_MODEL_WORK_THROUGH.
   simplify_maths: 'openai:gpt-4o-mini',
   work_through: 'openai:gpt-4o-mini',
-  scene_write: 'openai:gpt-4o-mini',
+  // The video writer stays on gpt-4.1: on gpt-4o-mini a page kept one
+  // drawing for a minute and a half, sent back or not; on gpt-4.1-mini
+  // still for up to a minute. On gpt-4.1, still for 7 to 24 seconds.
+  scene_write: 'openai:gpt-4.1',
   scene_draw: 'deepseek:deepseek-flash',
   // What a document is: one small call a document.
   scene_profile: 'openai:gpt-4.1-mini',

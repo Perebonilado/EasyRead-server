@@ -139,7 +139,7 @@ In the end, the leper's plea and both of the centurion's lines are said by Jesus
    - A bubble is carried only while words remain, keeping its thought style.
    - A stretcher, not a hospital bed, in an ancient world.
 
-## Status (2026-09-25): built, tested, and both books remade locally
+## Status (2026-09-25): built and tested; both books remade locally, partly (the OpenAI credit ran out)
 
 On branch `visualize-true-stories` in both repos, committed locally, not pushed. Richard took all five recommendations.
 
@@ -160,8 +160,8 @@ On branch `visualize-true-stories` in both repos, committed locally, not pushed.
     - scripture the book quotes, read by the narrator.
 - **Part 3, scenes, and where people are.**
   - Scenes as planned.
-  - The story reading now says where each person is when some are apart (Sally in the cave, the boys beside it). The stage keeps them there and cuts between the places, and a later scene the writer gives moves them (Mark's father climbing down).
-  - A stage is never left empty. A scene that names no one keeps who was there, and the one a narration is about comes into view.
+  - The story reading now says where each person is when some are apart (Sally in the cave, the boys beside it). The stage keeps them there and cuts between the places. Only their own words move them: a line said in the other place, or their coming there. A scene the writer lists them in does not, and a question to the viewer is never a scene.
+  - A stage is never left empty. A scene that names no one keeps who was there, and the one a narration is about comes into view. Someone who went is back for a conversation with someone there. "Soon after" starts a scene.
   - A place the writer or the narration names is found among the story's places.
   - The first page is a title card; the other front and back pages are not made.
 
@@ -169,6 +169,36 @@ On branch `visualize-true-stories` in both repos, committed locally, not pushed.
 - **The story reader is gpt-4.1 now, not 4.1-mini** (`AI_MODEL_SCENE_STORY`). Mini put James in the cave with Sally in two of three readings; 4.1 got it right in three of three. It costs about five times as much, once a book: about $0.04 for Hide-and-Seek and $0.30 for Matthew.
 - **The writer gets how the page before ends.** Without it, a line at the top of a page went to the wrong one ("Mark, James, there's something down here", Mark's father's).
 - **A book keeps its 32 most used places, not its first 16.** The reading also lists the other places a page moves through.
+
+**Results, on the two books remade locally:**
+- **The notes keep the speech.** Hide-and-Seek's notes kept 15 of its 76 quotes before and 48 after; most of the rest are merged with the next quote, not lost. Matthew's notes hold 415 quoted passages, up from 129.
+- **Who says it.** Every Hide-and-Seek line the text reader settles is right. Matthew 13–27 were checked line by line against the book:
+  - "Follow me" is Jesus's, not Matthew's.
+  - "Have mercy on us" is the blind men's, not Jesus's.
+  - "Go away, the girl is not dead" is Jesus's, not the crowd's.
+  - "An evil and adulterous generation" is Jesus's, not the Pharisees'.
+  - "My daughter has just died" is the ruler's.
+  - A line whose speaker the words cannot settle is left to the writer, as planned.
+- **The cave.** Pages 9–13 cut between Sally in the cave and the boys (and later Mark's father) at the tree. On page 12 Mark's father stays above while Sally talks from below, and he climbs down on page 13.
+- **Front and back pages.** Page 1 is the title card ("Hide-and-Seek, by T. Albert."). Pages 2, 3, 26 and 27 are not made. Page 7, turned down before as too thin when videos were made from the note, is made.
+
+**Not finished: the OpenAI credit ran out** during the last remake.
+- **Made with the final code:** Hide-and-Seek 1 and 4–13, and Matthew 13–18.
+- **Kept their earlier videos:** Hide-and-Seek 14–25 were made with part four's first commit, and checked. Matthew 19–27 were made before the Matthew attribution fixes.
+- Matthew 17's remake after the last fix (a name anyone could be called by) failed too, so it still calls the bleeding woman "Canaanite woman".
+- Once the credit is topped up:
+  - `npm run scene:recast -- 01a0d669-e03c-70b3-b309-01d55bc724d0 --here --pages 14-25`
+  - `npm run scene:recast -- 01a0d65e-e6cf-7bdf-8eaa-52bb16b6b67d --here --pages 17,19-27`
+
+**Still imperfect:**
+- **The story reading of a long book varies from one reading to the next.** One reading of Matthew made the disciples John the Baptist (fixed in the merge). The current one still makes the Marys one person, and gives Peter "Simon the leper". Places are general ("inside a small house"), and a page that tells of several places does not always list them. A book is read once, so a bad reading stays until it is read again.
+- **The writer sometimes squashes nested quotes** ("‘Go’ and he goes, and to another ‘Come’" became "Go Come Do this"). It also marks no scene where the book moves on without saying so (Matthew 17: the girl stays on stage through the next healings), and on a page with no quotes it may give someone a short line of its own. The checks send most of these back once; what is left after the second try is kept.
+- **Someone the story does not name** ("a ruler") is the writer's to cast. Now it usually is.
+
+**To deploy** (no migration):
+- Story books are read again on their next page made (`STORY_VERSION` 3), with gpt-4.1. If Railway sets `AI_MODEL_SCENE_STORY` to gpt-4.1-mini, change it to `openai:gpt-4.1`.
+- Books already made need `npm run doc:reread -- <id> --go` (pages, notes and story), then `npm run scene:recast -- <id> --here` (or `--go` for the worker). Ask before running either on a production book.
+- The API and the worker need restarting to run the new code.
 
 ## Decisions for Richard
 1. **Existing books.** The two-column fix needs a document's pages extracted again, and its notes simplified again.

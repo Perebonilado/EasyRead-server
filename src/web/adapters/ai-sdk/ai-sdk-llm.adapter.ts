@@ -717,26 +717,29 @@ export class AiSdkLlmAdapter implements LlmGatewayPort, OnModuleInit {
     const started = Date.now();
     const { generateObject } = await this.registry.modules();
     const { model, ref } = await this.registry.languageModel('scene_write');
-    const result = await generateObject({
-      model,
-      schema: sceneScriptSchema,
-      system: PROMPTS.sceneWrite,
-      prompt: [
-        `Document: ${input.documentTitle}`,
-        `Chapter: ${input.topicTitle}`,
-        ...(input.profile ? [input.profile] : []),
-        ...(input.story ? [input.story] : []),
-        input.context,
-        `The page:\n${input.material}`,
-        ...(input.previous && input.problems?.length
-          ? [
-              `Your last answer for this page:\n${JSON.stringify(input.previous)}`,
-              `Put these right and answer again in full:\n- ${input.problems.join('\n- ')}`,
-            ]
-          : []),
-      ].join('\n\n'),
-      maxRetries: this.maxRetries(),
-    });
+    const result = await this.againIfMisshapen(() =>
+      generateObject({
+        model,
+        schema: sceneScriptSchema,
+        system: PROMPTS.sceneWrite,
+        prompt: [
+          `Document: ${input.documentTitle}`,
+          `Chapter: ${input.topicTitle}`,
+          ...(input.profile ? [input.profile] : []),
+          ...(input.story ? [input.story] : []),
+          input.context,
+          `The page:\n${input.material}`,
+          ...(input.previous && input.problems?.length
+            ? [
+                `Your last answer for this page:\n${JSON.stringify(input.previous)}`,
+                `Put these right and answer again in full:\n- ${input.problems.join('\n- ')}`,
+              ]
+            : []),
+        ].join('\n\n'),
+        maxRetries: this.maxRetries(),
+        ...this.writerThinking(ref),
+      }),
+    );
     return {
       value: result.object,
       usage: this.usage(ref, result.usage, started),
@@ -758,40 +761,78 @@ export class AiSdkLlmAdapter implements LlmGatewayPort, OnModuleInit {
     const started = Date.now();
     const { generateObject } = await this.registry.modules();
     const { model, ref } = await this.registry.languageModel('scene_write');
-    const result = await generateObject({
-      model,
-      schema: sceneScreenplaySchema,
-      system: PROMPTS.sceneScreenplay,
-      prompt: [
-        `Document: ${input.documentTitle}`,
-        `Chapter: ${input.topicTitle}`,
-        ...(input.profile ? [input.profile] : []),
-        ...(input.story ? [input.story] : []),
-        input.context,
-        ...(input.before
-          ? [
-              `The page before ends, for whom a line at the top of this one follows on from; it is not this page's to tell:\n${input.before}`,
-            ]
-          : []),
-        `The page, in the book's own words:\n${input.material}`,
-        ...(input.plain
-          ? [
-              `The same page in plainer words, for how to say the narration to this reader; the book's own words above say what happens and who says what:\n${input.plain}`,
-            ]
-          : []),
-        ...(input.previous && input.problems?.length
-          ? [
-              `Your last answer for this page:\n${JSON.stringify(input.previous)}`,
-              `Put these right and answer again in full:\n- ${input.problems.join('\n- ')}`,
-            ]
-          : []),
-      ].join('\n\n'),
-      maxRetries: this.maxRetries(),
-    });
+    const result = await this.againIfMisshapen(() =>
+      generateObject({
+        model,
+        schema: sceneScreenplaySchema,
+        system: PROMPTS.sceneScreenplay,
+        prompt: [
+          `Document: ${input.documentTitle}`,
+          `Chapter: ${input.topicTitle}`,
+          ...(input.profile ? [input.profile] : []),
+          ...(input.story ? [input.story] : []),
+          input.context,
+          ...(input.before
+            ? [
+                `The page before ends, for whom a line at the top of this one follows on from; it is not this page's to tell:\n${input.before}`,
+              ]
+            : []),
+          `The page, in the book's own words:\n${input.material}`,
+          ...(input.plain
+            ? [
+                `The same page in plainer words, for how to say the narration to this reader; the book's own words above say what happens and who says what:\n${input.plain}`,
+              ]
+            : []),
+          ...(input.previous && input.problems?.length
+            ? [
+                `Your last answer for this page:\n${JSON.stringify(input.previous)}`,
+                `Put these right and answer again in full:\n- ${input.problems.join('\n- ')}`,
+              ]
+            : []),
+        ].join('\n\n'),
+        maxRetries: this.maxRetries(),
+        ...this.writerThinking(ref),
+      }),
+    );
     return {
       value: result.object,
       usage: this.usage(ref, result.usage, started),
     };
+  }
+
+  /**
+   * A model's answer that does not fit its schema, asked for once more: it
+   * is a miss of the moment, which a second try almost always gets right
+   * (DeepSeek, now and then), and one miss should not fail a page.
+   */
+  private async againIfMisshapen<T>(call: () => Promise<T>): Promise<T> {
+    try {
+      return await call();
+    } catch (error) {
+      const name = (error as { name?: string }).name ?? '';
+      if (!/NoObjectGenerated|TypeValidation|JSONParse/u.test(name))
+        throw error;
+      this.logger.warn(
+        `the writer's answer did not fit its shape; asked again: ${(error as Error).message.slice(0, 160)}`,
+      );
+      return call();
+    }
+  }
+
+  /**
+   * DeepSeek's thinking for the video writer, said on every call: the API
+   * thinks by default on deepseek-flash, and this provider version only
+   * knows its older ids as thinkers, so a thinking answer can come back
+   * unreadable. Off unless SCENE_WRITE_THINKING=on.
+   */
+  private writerThinking(ref: { provider: string }) {
+    if (ref.provider !== 'deepseek') return {};
+    const on = this.config.get<string>('SCENE_WRITE_THINKING', 'off') === 'on';
+    return {
+      providerOptions: {
+        deepseek: { thinking: { type: on ? 'enabled' : 'disabled' } },
+      },
+    } as const;
   }
 
   async sceneProfile(input: {

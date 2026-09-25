@@ -99,10 +99,12 @@ const TASK_DEFAULT: Partial<Record<LlmTask, string>> = {
   // and AI_MODEL_WORK_THROUGH.
   simplify_maths: 'openai:gpt-4o-mini',
   work_through: 'openai:gpt-4o-mini',
-  // The video writer stays on gpt-4.1: on gpt-4o-mini a page kept one
-  // drawing for a minute and a half, sent back or not; on gpt-4.1-mini
-  // still for up to a minute. On gpt-4.1, still for 7 to 24 seconds.
-  scene_write: 'openai:gpt-4.1',
+  // The video writer on DeepSeek, Richard's choice (2026-09-25): gpt-4.1
+  // spent the credit too fast, and on gpt-4o-mini a page kept one drawing
+  // for a minute and a half, sent back or not. deepseek-flash costs about
+  // what gpt-4o-mini does and keeps the picture moving (still for ten
+  // seconds at most on the page tried). Thinking: SCENE_WRITE_THINKING.
+  scene_write: 'deepseek:deepseek-flash',
   scene_draw: 'deepseek:deepseek-flash',
   // What a document is: one small call a document.
   scene_profile: 'openai:gpt-4.1-mini',

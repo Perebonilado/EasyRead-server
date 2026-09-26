@@ -161,31 +161,40 @@ export class StudioService {
 
   async shows(userId: string): Promise<StudioShowCardDto[]> {
     const shows = await this.studio.listShows(userId);
-    return Promise.all(
-      shows.map(async (show) => {
-        const episodes = await this.studio.listEpisodes(show.id);
-        const latest = episodes[episodes.length - 1];
-        const thumb = episodes.find((e) => e.thumbKey);
-        // The scenes of the film the still stands for, as the player plays it.
-        const made = thumb
-          ? (await this.studio.listScenes(thumb.id)).filter(
-              (s) => s.sceneKey && s.audioKey && s.durationMs,
-            )
-          : [];
-        return {
-          id: show.id,
-          title: show.title,
-          format: show.format,
-          episodes: episodes.length,
-          thumbEpisodeId: thumb?.id ?? null,
-          phase: latest?.phase ?? 'brief',
-          updatedAt: show.updatedAt.toISOString(),
-          busy: episodes.find((e) => e.busy)?.busy ?? null,
-          durationMs: thumb?.durationMs ?? null,
-          scenes: thumb ? made.length : null,
-        };
-      }),
+    const episodesOf = await Promise.all(
+      shows.map((show) => this.studio.listEpisodes(show.id)),
     );
+    // Each show's latest made episode stands for it: its still, and its film.
+    const thumbs = episodesOf.map((episodes) =>
+      episodes.findLast((e) => e.thumbKey),
+    );
+    // Their scenes in one query, kept as the player plays them, so the
+    // length agrees with the film the player cuts.
+    const scenes = await this.studio.listScenesOf(
+      thumbs.flatMap((e) => (e ? [e.id] : [])),
+    );
+    const played = scenes.filter(
+      (s) => s.sceneKey && s.audioKey && s.durationMs,
+    );
+    return shows.map((show, k) => {
+      const episodes = episodesOf[k];
+      const latest = episodes[episodes.length - 1];
+      const thumb = thumbs[k];
+      const made = thumb ? played.filter((s) => s.episodeId === thumb.id) : [];
+      const durationMs = made.reduce((n, s) => n + s.durationMs!, 0);
+      return {
+        id: show.id,
+        title: show.title,
+        format: show.format,
+        episodes: episodes.length,
+        thumbEpisodeId: thumb?.id ?? null,
+        phase: latest?.phase ?? 'brief',
+        updatedAt: show.updatedAt.toISOString(),
+        busy: episodes.find((e) => e.busy)?.busy ?? null,
+        durationMs: durationMs || null,
+        scenes: thumb ? made.length : null,
+      };
+    });
   }
 
   async show(userId: string, id: string): Promise<StudioShowDto> {

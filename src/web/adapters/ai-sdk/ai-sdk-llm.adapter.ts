@@ -2054,18 +2054,31 @@ export class AiSdkLlmAdapter implements LlmGatewayPort, OnModuleInit {
     const { streamObject, generateObject } = await this.registry.modules();
     const { model, ref } = await this.registry.languageModel('studio_chat');
     const system = STUDIO_PROMPTS.studioTurn;
+    // The conversation so far as a transcript inside one message, never as
+    // turns of its own: with the producer's earlier replies as plain text
+    // before it, the model answered in plain text too, and not in its shape.
+    const transcript = input.history
+      .slice(-16)
+      .map(
+        (m) =>
+          `${m.role === 'user' ? 'Maker' : 'Producer'}: ${m.content.replace(/\s+/g, ' ').slice(0, 800)}`,
+      )
+      .join('\n');
     const messages = [
-      ...input.history.slice(-16),
       {
         role: 'user' as const,
         content: [
           `Phase: ${input.phase}`,
           `What the maker sees now:\n${input.state}`,
-          `Their message:\n${input.message}`,
+          ...(transcript ? [`The conversation so far:\n${transcript}`] : []),
+          `Their message now:\n${input.message}`,
+          'Answer in the JSON shape asked for.',
         ].join('\n\n'),
       },
     ];
     const thinking = this.writerThinking(ref, 'STUDIO_CHAT_THINKING', 'off');
+    /** The reply as far as it has been streamed. */
+    let said = '';
     // The reply streams as it is written, a field of the answer: the
     // difference each partial answer adds is the next piece of it.
     if (input.onToken) {
@@ -2078,7 +2091,6 @@ export class AiSdkLlmAdapter implements LlmGatewayPort, OnModuleInit {
           maxRetries: this.maxRetries(),
           ...thinking,
         });
-        let said = '';
         for await (const partial of result.partialObjectStream) {
           const reply = typeof partial.reply === 'string' ? partial.reply : '';
           if (reply.length > said.length && reply.startsWith(said)) {
@@ -2090,7 +2102,7 @@ export class AiSdkLlmAdapter implements LlmGatewayPort, OnModuleInit {
         if (object.reply.length > said.length && object.reply.startsWith(said))
           input.onToken(object.reply.slice(said.length));
         return {
-          value: object,
+          value: turnOf(object),
           usage: this.usage(ref, await result.usage, started),
         };
       } catch (error) {
@@ -2109,9 +2121,10 @@ export class AiSdkLlmAdapter implements LlmGatewayPort, OnModuleInit {
         ...thinking,
       }),
     );
-    input.onToken?.(result.object.reply);
+    // Whatever of a broken stream was shown stays shown: the saved message replaces it.
+    if (!said) input.onToken?.(result.object.reply);
     return {
-      value: result.object,
+      value: turnOf(result.object),
       usage: this.usage(ref, result.usage, started),
     };
   }
@@ -2286,6 +2299,19 @@ export class AiSdkLlmAdapter implements LlmGatewayPort, OnModuleInit {
       .filter(Boolean)
       .map((paragraph) => ({ type: 'paragraph' as const, text: paragraph }));
   }
+}
+
+/** The producer's answer as the port has it: a scene's number a number, whatever came. */
+function turnOf(answer: z.infer<typeof studioTurnSchema>): StudioTurnDraft {
+  const scene = Number(answer.scene);
+  return {
+    ...answer,
+    brief: answer.brief,
+    scene:
+      answer.scene !== null && Number.isFinite(scene)
+        ? Math.round(scene)
+        : null,
+  };
 }
 
 /** What the artist is asked for one drawing: the brief, its groups, its frame. */

@@ -274,13 +274,15 @@ export const lectureVoiceJobId = (
 
 /** A piece of the Studio's work on one episode. */
 export interface StudioJobData {
-  kind: 'bible' | 'outline' | 'script' | 'scene' | 'make';
+  kind: 'bible' | 'outline' | 'script' | 'scene' | 'prepare' | 'make';
   showId: string;
   episodeId: string;
   /** Whose it is: the plan's allowance is theirs. */
   userId: string;
   /** The scene to write again or to make. */
   sceneId?: string;
+  /** The scenes to make once the cast and the places are drawn. */
+  sceneIds?: string[];
   /** The maker's own words for what to change. */
   request?: string;
 }

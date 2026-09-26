@@ -5,7 +5,12 @@
  * a scene the writer was never told of.
  */
 import { describeFigure } from '../scene-figure';
-import { STAGE_NAMES } from '../scene-stage';
+import {
+  STAGE_NAMES,
+  STAGE_RECIPES,
+  type LearningStage,
+} from '../scene-stage';
+import { WORDS_A_SECOND } from './studio';
 import {
   AUDIENCE_STAGE,
   briefMissing,
@@ -164,4 +169,30 @@ export function describeEarlier(
           .join(' ')}`,
     )
     .join('\n');
+}
+
+/**
+ * Whom an explainer's scene teaches and how, for the lesson writer: the
+ * stage's recipe, but with the scene's own length in place of a page's.
+ * A page runs as long as its text; a scene runs the seconds its outline
+ * gave it, and the writer is held to them.
+ */
+export function describeScene(
+  stage: LearningStage | null,
+  seconds: number,
+): string {
+  const words = Math.max(20, Math.round(seconds * WORDS_A_SECOND));
+  const budget = `This scene is spoken in about ${seconds} seconds: about ${words} spoken words in all, and never more than ${Math.round(words * 1.25)}. Say only what this scene teaches, in that many words; the scenes around it say the rest.`;
+  if (!stage) return budget;
+  const r = STAGE_RECIPES[stage];
+  return [
+    `Who the learner is: ${r.reader}`,
+    `Sentences of ${r.sentence[0]} to ${r.sentence[1]} words.`,
+    `At most ${r.terms} new terms in the scene.`,
+    `How to explain: ${r.explain}`,
+    `Checks: ${r.checks}`,
+    `What goes on the stage: ${r.pictures}`,
+    `Tone: ${r.tone}.`,
+    budget,
+  ].join('\n');
 }

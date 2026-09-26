@@ -903,6 +903,60 @@ interface Signs {
 }
 
 /**
+ * What floats over someone's head while a sign is on (stars, steam, a Z,
+ * a question mark, a bulb, drops), about the head at (hx, hy), in the
+ * kit's units: drawn apart from the body, so it stays upright over
+ * someone lying down, and can float over anyone the kit did not draw.
+ */
+function airOf(hx: number, hy: number): Partial<Record<FigureSign, string>> {
+  const around = (angle: number, r = 1) => {
+    const a = (angle * Math.PI) / 180;
+    return [hx + Math.cos(a) * 58 * r, hy + Math.sin(a) * 52 * r] as const;
+  };
+  const star = (x: number, y: number, delay: number) => sparkle(x, y, 7, delay);
+  const zed = (x: number, y: number, size: number, delay: number) =>
+    `<path class="rise"${later(delay)} d="M${pt(x, y)} L${pt(x + size, y)} L${pt(x, y + size)} L${pt(x + size, y + size)}" fill="none" stroke="#6a79c9" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>`;
+  const question = (x: number, y: number, delay: number) =>
+    `<g class="tw"${later(delay)}>${line(`M${pt(x - 5, y - 7)} Q${pt(x - 5, y - 14)} ${pt(x + 1, y - 14)} Q${pt(x + 7, y - 14)} ${pt(x + 7, y - 8)} Q${pt(x + 7, y - 3)} ${pt(x + 1, y - 1)} L${pt(x + 1, y + 3)}`, FIGURE_INK, 3.2)}<circle cx="${r1(x + 1)}" cy="${r1(y + 9)}" r="2.2" ${flat(FIGURE_INK)}/></g>`;
+  return {
+    dizzy: [-150, -90, -30]
+      .map((a, k) => star(...around(a), k * 0.35))
+      .join(''),
+    sleeping: [0, 1, 2]
+      .map((k) => zed(hx + 36 + k * 10, hy - 48 - k * 14, 8 + k * 2, k * 0.8))
+      .join(''),
+    headache: [-155, -90, -25]
+      .map((a, k) => bolt(...around(a, 1.02), a, k * 0.3))
+      .join(''),
+    fever: [-18, 0, 18]
+      .map(
+        (x, k) =>
+          `<path class="rise"${later(k * 0.6)} d="M${pt(hx + x, hy - 50)} q5,-4 0,-8 q-5,-4 0,-8 q5,-4 0,-8" fill="none" stroke="${WARM}" stroke-width="3" stroke-linecap="round"/>`,
+      )
+      .join(''),
+    sweating: [-1, 1]
+      .flatMap((side) => [
+        drop(hx + side * 48, hy - 20, side < 0 ? 0 : 0.6),
+        drop(hx + side * 54, hy + 4, side < 0 ? 0.35 : 0.9),
+      ])
+      .join(''),
+    confused: question(hx - 20, hy - 52, 0) + question(hx + 22, hy - 56, 0.5),
+    idea:
+      `<g class="throb"><circle cx="${hx}" cy="${hy - 56}" r="10" ${inked('#ffe16b')}/><rect x="${hx - 5}" y="${hy - 47}" width="10" height="6" rx="2" ${inked('#c9c3ba', 1.8)}/></g>` +
+      [-70, -35, 35, 70]
+        .map((a) => {
+          const r = ((a - 90) * Math.PI) / 180;
+          return line(
+            `M${pt(hx + Math.cos(r) * 14, hy - 56 + Math.sin(r) * 14)} L${pt(hx + Math.cos(r) * 19, hy - 56 + Math.sin(r) * 19)}`,
+            '#e2b75d',
+            2.6,
+          );
+        })
+        .join(''),
+  };
+}
+
+/**
  * Every sign someone can show, drawn where it goes on them: each its own
  * group, hidden until the stage shows it. Those that move do so in their
  * own CSS; what moves the whole body is keyed on a class the stage sets
@@ -916,13 +970,6 @@ function signsOf(p: SignPoints, R: Rig, skin: string): Signs {
   const ey = hy + 3;
   const [, my] = p.mouth;
   const eyes = [-1, 1].map((side) => hx + side * dx);
-  const around = (angle: number, r = 1) => {
-    const a = (angle * Math.PI) / 180;
-    return [hx + Math.cos(a) * 58 * r, hy + Math.sin(a) * 52 * r] as const;
-  };
-  const star = (x: number, y: number, delay: number) => sparkle(x, y, 7, delay);
-  const zed = (x: number, y: number, size: number, delay: number) =>
-    `<path class="rise"${later(delay)} d="M${pt(x, y)} L${pt(x + size, y)} L${pt(x, y + size)} L${pt(x + size, y + size)}" fill="none" stroke="#6a79c9" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>`;
   const puffs = (big: number) =>
     [0, 1, 2]
       .map(
@@ -933,8 +980,6 @@ function signsOf(p: SignPoints, R: Rig, skin: string): Signs {
   const outward = (x: number) => (x < 0 ? -1 : 1);
   const dot = (x: number, y: number) =>
     `<circle cx="${r1(x)}" cy="${r1(y)}" r="2.3" ${flat('#d94b4b')}/>`;
-  const question = (x: number, y: number, delay: number) =>
-    `<g class="tw"${later(delay)}>${line(`M${pt(x - 5, y - 7)} Q${pt(x - 5, y - 14)} ${pt(x + 1, y - 14)} Q${pt(x + 7, y - 14)} ${pt(x + 7, y - 8)} Q${pt(x + 7, y - 3)} ${pt(x + 1, y - 1)} L${pt(x + 1, y + 3)}`, FIGURE_INK, 3.2)}<circle cx="${r1(x + 1)}" cy="${r1(y + 9)}" r="2.2" ${flat(FIGURE_INK)}/></g>`;
   const spiral = (x: number) => {
     const turn: string[] = [];
     for (let k = 0; k <= 26; k += 1) {
@@ -1033,43 +1078,55 @@ function signsOf(p: SignPoints, R: Rig, skin: string): Signs {
     confused: '',
     idea: '',
   };
-  const air: Partial<Record<FigureSign, string>> = {
-    dizzy: [-150, -90, -30]
-      .map((a, k) => star(...around(a), k * 0.35))
-      .join(''),
-    sleeping: [0, 1, 2]
-      .map((k) => zed(hx + 36 + k * 10, hy - 48 - k * 14, 8 + k * 2, k * 0.8))
-      .join(''),
-    headache: [-155, -90, -25]
-      .map((a, k) => bolt(...around(a, 1.02), a, k * 0.3))
-      .join(''),
-    fever: [-18, 0, 18]
-      .map(
-        (x, k) =>
-          `<path class="rise"${later(k * 0.6)} d="M${pt(hx + x, hy - 50)} q5,-4 0,-8 q-5,-4 0,-8 q5,-4 0,-8" fill="none" stroke="${WARM}" stroke-width="3" stroke-linecap="round"/>`,
-      )
-      .join(''),
-    sweating: [-1, 1]
-      .flatMap((side) => [
-        drop(hx + side * 48, hy - 20, side < 0 ? 0 : 0.6),
-        drop(hx + side * 54, hy + 4, side < 0 ? 0.35 : 0.9),
-      ])
-      .join(''),
-    confused: question(hx - 20, hy - 52, 0) + question(hx + 22, hy - 56, 0.5),
-    idea:
-      `<g class="throb"><circle cx="${hx}" cy="${hy - 56}" r="10" ${inked('#ffe16b')}/><rect x="${hx - 5}" y="${hy - 47}" width="10" height="6" rx="2" ${inked('#c9c3ba', 1.8)}/></g>` +
-      [-70, -35, 35, 70]
-        .map((a) => {
-          const r = ((a - 90) * Math.PI) / 180;
-          return line(
-            `M${pt(hx + Math.cos(r) * 14, hy - 56 + Math.sin(r) * 14)} L${pt(hx + Math.cos(r) * 19, hy - 56 + Math.sin(r) * 19)}`,
-            '#e2b75d',
-            2.6,
-          );
-        })
-        .join(''),
-  };
+  const air = airOf(hx, hy);
   return { body, air };
+}
+
+/** The signs that float over the head, and so can float over anyone. */
+export const AIR_SIGNS: readonly FigureSign[] = [
+  'dizzy',
+  'sleeping',
+  'headache',
+  'fever',
+  'sweating',
+  'confused',
+  'idea',
+];
+
+/**
+ * The signs that float over a head, for someone the kit did not draw (an
+ * animal, a creature): each its own group about their head, at the
+ * kit's size on the stage, moving in CSS of its own. `scale` is the
+ * drawing's units to one of the kit's. Only the signs asked for.
+ */
+export function signsOver(
+  head: [number, number],
+  scale: number,
+  signs: readonly FigureSign[],
+  prefix: string,
+): { markup: string; css: string; states: Record<string, string> } {
+  const air = airOf(0, 0);
+  const shown = signs.filter((sign) => AIR_SIGNS.includes(sign) && air[sign]);
+  if (!shown.length) return { markup: '', css: '', states: {} };
+  const own = (markup: string) =>
+    markup.replace(/class="(tw|throb|rise|drip)"/g, 'class="sgn-$1"');
+  const states: Record<string, string> = {};
+  const groups = shown.map((sign) => {
+    const id = `${prefix}-${signId(sign)}`;
+    states[sign] = id;
+    return `<g id="${id}"><g transform="translate(${r1(head[0])} ${r1(head[1])}) scale(${Math.round(scale * 1000) / 1000})">${own(air[sign]!)}</g></g>`;
+  });
+  const moving = MOVES.filter(([, of]) => of.some((one) => shown.includes(one)));
+  const css = moving.length
+    ? [
+        `${moving.map(([cls]) => `.sgn-${cls}`).join(',')}{transform-box:fill-box;transform-origin:center}`,
+        ...moving.map(
+          ([cls, , animation, frames]) =>
+            `.sgn-${cls}{animation:${animation}}${frames}`,
+        ),
+      ].join('')
+    : '';
+  return { markup: groups.join(''), css, states };
 }
 
 /** Each sign's whole drawing, on the body and over the head, for someone upright. */

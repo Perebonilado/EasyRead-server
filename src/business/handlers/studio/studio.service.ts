@@ -38,7 +38,11 @@ import { storyBibleFor } from '../../domain/studio/studio-stage';
 import { describeForProducer } from '../../domain/studio/studio-words';
 import type { ClockPort } from '../../ports/clock.port';
 import type { JobQueuePort, StudioJob } from '../../ports/job-queue.port';
-import type { LlmGatewayPort, LlmUsage } from '../../ports/llm.port';
+import type {
+  LlmGatewayPort,
+  LlmUsage,
+  StudioTurnDraft,
+} from '../../ports/llm.port';
 import type { StoragePort } from '../../ports/storage.port';
 import { CLOCK, JOB_QUEUE, LLM_GATEWAY, STORAGE } from '../../ports/tokens';
 import type { AiCallLogRepository } from '../../repositories/ai-call-log.repository';
@@ -411,15 +415,31 @@ export class StudioService {
       phase: episode.phase,
       episode: episode.number,
     });
-    const result = await this.llm.studioTurn({
-      phase: episode.phase,
-      state,
-      history,
-      message: said,
-      onToken,
-    });
-    await this.record(episode.id, 'studio_chat', result.usage);
-    const draft = result.value;
+    let draft: StudioTurnDraft;
+    try {
+      const result = await this.llm.studioTurn({
+        phase: episode.phase,
+        state,
+        history,
+        message: said,
+        onToken,
+      });
+      await this.record(episode.id, 'studio_chat', result.usage);
+      draft = result.value;
+    } catch (error) {
+      // A reply that could not be read is said as one: the thread stays whole.
+      this.logger.warn(`studio ${show.id}: the producer could not answer: ${(error as Error).message}`);
+      draft = {
+        reply: "Sorry, I didn't catch that. Could you say it again?",
+        choices: [],
+        brief: {},
+        action: 'none',
+        scene: null,
+        request: null,
+        refuse: false,
+      };
+      onToken(draft.reply);
+    }
 
     let brief = briefOf(draft.brief, show.brief);
     if (pasted) brief = { ...brief, source: text.slice(0, SOURCE_CHARS) };
@@ -821,15 +841,11 @@ export class StudioService {
         step: null,
         error: null,
       });
-    await this.queue.enqueueStudio(
-      stale.map((scene) => ({
-        kind: 'make' as const,
-        showId: show.id,
-        episodeId: episode.id,
-        userId: show.userId,
-        sceneId: scene.id,
-      })),
-    );
+    // The cast and the places drawn first, once; then every scene at once.
+    await this.enqueue(show, episode, {
+      kind: 'prepare',
+      sceneIds: stale.map((scene) => scene.id),
+    });
     return null;
   }
 

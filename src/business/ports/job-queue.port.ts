@@ -83,11 +83,13 @@ export interface LectureFollowJob extends PipelineJob {
 
 /** A piece of the Studio's work on one episode. */
 export interface StudioJob {
-  kind: 'bible' | 'outline' | 'script' | 'scene' | 'make';
+  kind: 'bible' | 'outline' | 'script' | 'scene' | 'prepare' | 'make';
   showId: string;
   episodeId: string;
   userId: string;
   sceneId?: string;
+  /** For 'prepare': the scenes to make once the cast and the places are drawn. */
+  sceneIds?: string[];
   request?: string;
 }
 

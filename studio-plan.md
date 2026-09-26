@@ -365,3 +365,26 @@ Books bring their own story; the Studio has to be able to show whatever people a
 5. **Real people:** allow historical and public figures as history, but not living people in made-up situations?
 6. **Downloads:** is MP4 download needed at launch, or can it follow sharing (step 15 after 12)?
 7. **Animals kit:** build it early (kids' stories need it) or after launch?
+
+## Status (2026-09-26)
+
+Built on the `studio` branch in both repos, with Richard's go-ahead to take the recommendations: open to everyone, films kept in their own place as shows and episodes, story and explainer both (an explainer covers any lesson: a physics class, how vaccines work, numbers as charts), no download or export yet.
+
+**What is built**
+- The script format, the check and the mend (`src/business/domain/studio/`), and the stage that plays a sheet exactly, with no guessing (`studio-stage.ts`, `stageStory`). The camera goes where the sheet says (`directedShots` in compose), each character speaks in the voice picked for them (`voicePick`), and props rest before whoever the sheet says (`propsNear`).
+- The writers: producer (chat), cast, outline and scene sheet (`studio-prompts.ts`, `studio-schemas.ts`), all on DeepSeek. Explainer scenes are written by the lesson writer, held to the scene's seconds (`describeScene`).
+- Storage (migration 0056: `studio_shows`, `studio_episodes`, `studio_scenes`, `studio_messages`), the `studio` queue and its worker (`StudioProcessor`: bible, outline, script, scene, prepare, make), and the API (`/studio/...`, the chat streamed as NDJSON).
+- Studio minutes a month (Free 3, Pro 30), counted as scenes are made. Moderation on every message, a limit of 60 messages an hour, and one film made at a time per maker. A watermark on Free plans' films. Share links anyone can watch at `/s/[token]`.
+- The app: a Studio button in the header, `/studio` (your films, and a box to start from), and the workspace (chat beside the steps: brief, outline, cast, scenes, film). The outline, cast and every scene can be edited by hand or by asking. The episode player plays the scenes as one film.
+- Signs over artist-drawn characters (a Z asleep, a bulb for an idea, a question mark): `signsOver` in the figure kit.
+
+**What the local tests found and fixed**
+- The producer lost its JSON shape once the conversation grew. The conversation is now sent as a transcript inside one message.
+- Two workers each drew the same animal and painted the same place. A film now draws its cast and places once, in a `prepare` job, before its scenes are made side by side.
+- Explainer scenes ran three times their planned length (the lesson writer's own page length won). Each scene now has a word budget, and length is a warning (sent back once), never a block.
+- A reach toward a thing is mended into a point. The producer never asks permission for an action it has already set.
+
+**Still to do**
+- MP4 download and captions (step 15), left out for now by choice.
+- A code kit for animals (they are drawn by the artist in the kit's style: faces and floating signs, but no poses).
+- More stage props than the nine there are now.

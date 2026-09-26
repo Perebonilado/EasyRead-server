@@ -572,3 +572,18 @@ describe('a bed as the story’s world has them', () => {
     expect(old).toContain('#9a6b3f');
   });
 });
+
+describe('signs over someone the kit did not draw', () => {
+  it('floats a Z over a sleeping dog, a bulb over an idea, each its own group, only those that float', () => {
+    const { signsOver } = jest.requireActual<typeof import('./scene-figure')>('./scene-figure');
+    const over = signsOver([200, 120], 4, ['sleeping', 'idea', 'tears'], 'bingo-sign');
+    expect(Object.keys(over.states)).toEqual(['sleeping', 'idea']);
+    expect(over.states.sleeping).toBe('bingo-sign-sleeping');
+    expect(over.markup).toContain('id="bingo-sign-sleeping"');
+    expect(over.markup).toContain('translate(200 120) scale(4)');
+    // Its own motion, never the drawing's own classes.
+    expect(over.markup).toContain('class="sgn-rise"');
+    expect(over.css).toContain('.sgn-rise{animation:rise');
+    expect(signsOver([0, 0], 1, ['tears'], 'x').markup).toBe('');
+  });
+});

@@ -1,5 +1,4 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
-import { describeStage } from '../../business/domain/scene-stage';
 import type { DocumentProfile } from '../../business/domain/scene-profile';
 import {
   AUDIENCE_STAGE,
@@ -23,6 +22,7 @@ import {
   errorsIn,
   mendOutline,
   mendSheet,
+  sentBackFor,
   type EndState,
   type SheetProblem,
 } from '../../business/domain/studio/studio-check';
@@ -36,11 +36,13 @@ import {
   describeEarlier,
   describeOutline,
   describeOutlineScene,
+  describeScene,
 } from '../../business/domain/studio/studio-words';
 import { EntitlementsService } from '../../business/handlers/documents/entitlements.service';
 import type { LlmGatewayPort, LlmUsage } from '../../business/ports/llm.port';
 import type { StoragePort } from '../../business/ports/storage.port';
-import { LLM_GATEWAY, STORAGE } from '../../business/ports/tokens';
+import { JOB_QUEUE, LLM_GATEWAY, STORAGE } from '../../business/ports/tokens';
+import type { JobQueuePort } from '../../business/ports/job-queue.port';
 import type { AiCallLogRepository } from '../../business/repositories/ai-call-log.repository';
 import type { TopicRecord } from '../../business/repositories/misc.repository';
 import type {
@@ -65,6 +67,21 @@ import { SceneProcessor } from './scene.processor';
 
 /** Explainer scenes written at once: each is its own lesson page. */
 const WRITERS = 3;
+
+/**
+ * Whether one set of problems is worse than another: more that keep a
+ * scene from being made, then more of anything sent back. Below zero,
+ * better; zero, as good.
+ */
+function worse(
+  a: readonly SheetProblem[],
+  b: readonly SheetProblem[],
+): number {
+  return (
+    errorsIn(a).length - errorsIn(b).length ||
+    sentBackFor(a).length - sentBackFor(b).length
+  );
+}
 
 /** Each item through `work`, at most `limit` at a time. */
 async function inBatches<T>(
@@ -108,6 +125,7 @@ export class StudioProcessor {
     private readonly scenes: SceneProcessor,
     private readonly entitlements: EntitlementsService,
     private readonly cast: StudioCastService,
+    @Inject(JOB_QUEUE) private readonly queue: JobQueuePort,
   ) {}
 
   async process(job: StudioJobData, context: JobContext): Promise<void> {
@@ -123,6 +141,8 @@ export class StudioProcessor {
       else if (job.kind === 'script') await this.writeScript(show, episode);
       else if (job.kind === 'scene' && job.sceneId)
         await this.rewriteScene(show, episode, job.sceneId, job.request ?? '');
+      else if (job.kind === 'prepare')
+        await this.prepare(show, episode, job.userId, job.sceneIds ?? []);
       else if (job.kind === 'make' && job.sceneId)
         await this.make(show, episode, job.sceneId, job.userId, context);
     } catch (error) {
@@ -136,6 +156,17 @@ export class StudioProcessor {
           step: null,
           error: 'This scene could not be made. Try making it again.',
         });
+        await this.settle(episode.id);
+        return;
+      }
+      if (job.kind === 'prepare') {
+        if (!last) throw error;
+        for (const id of job.sceneIds ?? [])
+          await this.studio.updateScene(id, {
+            status: 'failed',
+            step: null,
+            error: 'The cast could not be drawn. Try making it again.',
+          });
         await this.settle(episode.id);
         return;
       }
@@ -378,20 +409,20 @@ export class StudioProcessor {
       };
     };
     let best = judged(first.value);
-    const errors = errorsIn(best.problems);
-    if (errors.length) {
+    const reasons = sentBackFor(best.problems);
+    if (reasons.length) {
       this.logger.log(
-        `studio ${episode.id} s${k + 1}: goes back: ${errors.map((p) => p.message).join(' ')}`,
+        `studio ${episode.id} s${k + 1}: goes back: ${reasons.map((p) => p.message).join(' ')}`,
       );
       const again = await this.llm.studioScene({
         ...ask,
         previous: first.value,
-        problems: errors.map((p) => p.message),
+        problems: reasons.map((p) => p.message),
         ...(request ? { request } : {}),
       });
       await this.record(episode.id, again.usage);
       const second = judged(again.value);
-      if (errorsIn(second.problems).length <= errors.length) best = second;
+      if (worse(second.problems, best.problems) <= 0) best = second;
     }
     if (best.mended.length)
       this.logger.log(
@@ -441,7 +472,7 @@ export class StudioProcessor {
       material: teach,
       context: `This is scene ${k + 1} of ${outline.scenes.length} of the animated lesson "${outline.title}": "${scene?.title ?? ''}", about ${scene?.seconds ?? 30} seconds. ${around} Teach only what this scene says; the scenes either side teach the rest.`,
       profile: [
-        describeStage(stage),
+        describeScene(stage, scene?.seconds ?? 30),
         `Subject: ${bible.subject || show.brief.idea}. Tone: ${show.brief.tone ?? 'calm'}.`,
       ]
         .filter(Boolean)
@@ -483,18 +514,20 @@ export class StudioProcessor {
       });
     let sheet = sheetFrom(first.value);
     let problems: SheetProblem[] = checkExplainer(sheet, options).problems;
-    const errors = errorsIn(problems);
-    if (errors.length) {
+    const reasons = sentBackFor(problems);
+    if (reasons.length) {
+      this.logger.log(
+        `studio ${episode.id} s${k + 1}: goes back: ${reasons.map((p) => p.message).join(' ')}`,
+      );
       const again = await this.llm.sceneScript({
         ...ask,
         previous: first.value,
-        problems: errors.map((p) => p.message),
+        problems: reasons.map((p) => p.message),
       });
       await this.record(episode.id, again.usage);
       const second = sheetFrom(again.value);
       const left = checkExplainer(second, options).problems;
-      if (errorsIn(left).length <= errors.length)
-        [sheet, problems] = [second, left];
+      if (worse(left, problems) <= 0) [sheet, problems] = [second, left];
     }
     await this.studio.updateScene(row.id, {
       sheet,
@@ -508,6 +541,62 @@ export class StudioProcessor {
   }
 
   // ── Making a scene ──────────────────────────────────────────────────────
+
+  /**
+   * Before a film's scenes are made side by side: everyone and everywhere
+   * in them drawn and painted, once, and kept for the whole show. Then
+   * each scene, made at once on whichever worker is free, draws on the
+   * same drawings, so no one looks different from one scene to the next.
+   */
+  private async prepare(
+    show: StudioShowRecord,
+    episode: StudioEpisodeRecord,
+    userId: string,
+    sceneIds: string[],
+  ): Promise<void> {
+    const rows = await this.studio.listScenes(episode.id);
+    const wanted = rows.filter((r) => sceneIds.includes(r.id));
+    const sheets = rows
+      .map((r) => r.sheet)
+      .filter((s): s is StorySheet => s?.kind === 'story');
+    const bible = show.bible;
+    if (bible && sheets.length) {
+      for (const row of wanted)
+        await this.studio.updateScene(row.id, { step: 'drawing' });
+      const made = wanted
+        .map((r) => r.sheet)
+        .filter((s): s is StorySheet => s?.kind === 'story');
+      await this.scenes.prepareStory(
+        {
+          bible: storyBibleFor(bible, sheets, show.title),
+          page: 1,
+          castKey: studioCastKey(show.id),
+          setsKey: studioSetsKey(show.id),
+          bookTitle: show.title,
+        },
+        episode.id,
+        `studio ${episode.id} (cast)`,
+        {
+          characters: new Set(
+            made.flatMap((s) => [
+              ...s.onStage.map((p) => p.who),
+              ...s.beats.flatMap((b) => (b.who ? [b.who] : [])),
+            ]),
+          ),
+          places: new Set(made.map((s) => s.set)),
+        },
+      );
+    }
+    await this.queue.enqueueStudio(
+      wanted.map((row) => ({
+        kind: 'make' as const,
+        showId: show.id,
+        episodeId: episode.id,
+        userId,
+        sceneId: row.id,
+      })),
+    );
+  }
 
   /**
    * One scene made into film: its sheet staged exactly, drawn, voiced and

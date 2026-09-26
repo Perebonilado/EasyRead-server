@@ -80,6 +80,7 @@ import {
   PLAIN_FIGURE,
   describeFigure,
   figureOf,
+  signsOver,
   type FigureSpec,
   oldWorld,
 } from '../../business/domain/scene-figure';
@@ -1062,7 +1063,31 @@ export class SceneProcessor {
           })
         : null;
       const { anchors: pageAnchors, ...posed } = onPage ?? { anchors: null };
-      const drawing = onPage ? (posed as GatedDrawing) : sheet?.drawing;
+      let drawing = onPage ? (posed as GatedDrawing) : sheet?.drawing;
+      // Someone the artist drew (a dog, a dragon) shows the signs the page
+      // gives them as the kit's people do: a Z over the head asleep, a
+      // bulb for an idea, a question mark puzzled.
+      const head = sheet?.anchors.head;
+      if (!onPage && drawing && head && signs.length) {
+        const units =
+          drawing.stands?.units ??
+          SIZE_UNITS[sheet?.size ?? character?.size ?? 'medium'];
+        const over = signsOver(
+          head,
+          drawing.viewBox[3] / units,
+          signs,
+          `${thing.ref}-sign`,
+        );
+        if (over.markup)
+          drawing = {
+            ...drawing,
+            svg: drawing.svg.replace(
+              /<\/svg>\s*$/i,
+              `<style>${over.css}</style>${over.markup}</svg>`,
+            ),
+            states: { ...drawing.states, ...over.states },
+          };
+      }
       out.set(
         thing.id,
         sheet && drawing
@@ -1940,6 +1965,43 @@ export class SceneProcessor {
       this.logger.log(`${who}: ${character.name} drawn for the whole book`);
     else this.logger.warn(`${who}: ${character.name} could not be drawn`);
     return best?.sheet ?? null;
+  }
+
+  /**
+   * A story's people and places drawn and painted ahead of its pages, once
+   * each, and kept: a film's scenes are then made side by side (and on
+   * more than one worker) from the same drawings, never each its own.
+   */
+  async prepareStory(
+    story: PageStory,
+    documentId: string | null,
+    who: string,
+    only?: { characters: ReadonlySet<string>; places: ReadonlySet<string> },
+  ): Promise<void> {
+    const characters = story.bible.characters.filter(
+      (c) =>
+        standsOnStage(c) &&
+        c.presence !== 'light' &&
+        (!only || only.characters.has(c.id)),
+    );
+    const places = story.bible.places.filter(
+      (p) => !only || only.places.has(p.id),
+    );
+    await Promise.all([
+      ...characters.map((c) =>
+        this.sheetFor(story.castKey, c, story.bookTitle, documentId, who),
+      ),
+      ...places.map((p) =>
+        this.setFor(
+          story.setsKey,
+          p,
+          story.bookTitle,
+          documentId,
+          who,
+          story.bible.world ?? null,
+        ),
+      ),
+    ]);
   }
 
   /** Work keyed by a name: a second caller while it runs waits on the first rather than doing it again. */

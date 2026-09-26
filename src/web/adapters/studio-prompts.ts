@@ -89,6 +89,10 @@ export const STUDIO_PROMPTS = {
       '"made": they have watched it. Changes as in "script"; a new episode',
       'of the same show is action "episode", request what it should be about.',
       'Anything else, or a question: action "none", and answer it.',
+      'An action is done as soon as you set it: the reply then says it is',
+      'being done ("Trimming scene 2 now."), never asks whether to. To ask',
+      'first ("Shall I trim it?"), action is "none", and the maker\'s yes',
+      'in the next message sets it.',
     ].join(' '),
     [
       'choices are two to five short answers the maker can tap for the',

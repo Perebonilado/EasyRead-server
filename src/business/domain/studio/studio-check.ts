@@ -15,7 +15,13 @@
 import { narratorsLine, lineOf } from '../scene-screenplay';
 import { faceNamed } from '../scene-feeling';
 import { PROP_KIND, type StageProp } from '../scene-props';
-import { mendScript, sendBack, type SceneScript } from '../scene-script';
+import {
+  STILL_WORDS,
+  fewStageChanges,
+  mendScript,
+  quietStretches,
+  type SceneScript,
+} from '../scene-script';
 import type { LearningStage } from '../scene-stage';
 import {
   LINE_WORDS,
@@ -298,6 +304,18 @@ export function mendSheet(
       } else if (beat.do !== 'still') {
         if (bible.characters.some((c) => c.id === beat.who))
           bringOn(beat.who, at, 'to be seen doing it');
+        // A reach toward a thing, not a person (under the stall, for the
+        // apple): the stage reaches only for people, so it points there.
+        const person = beat.to && bible.characters.some((c) => c.id === beat.to);
+        if (beat.do === 'reach' && !person) {
+          beat.do = 'point';
+          beat.to = null;
+          mended.push(`beat ${at + 1}: a reach toward no one is a point`);
+        }
+        if (beat.do === 'hug' && !person) {
+          mended.push(`beat ${at + 1}: a hug with no one to hug; left out`);
+          return;
+        }
         if (beat.to && beat.to !== '@up' && !here.has(beat.to)) {
           if (
             beat.do === 'hug' &&
@@ -619,8 +637,10 @@ export function checkSheet(
       'No one says anything in this scene: only the narrator speaks.',
     );
   const seconds = secondsOf(sheet);
+  // Too long is sent back to the writer once, and shown; the maker may
+  // still make it, knowing what it will run to.
   if (planned && seconds > planned * LONGEST)
-    error(
+    warn(
       'length',
       `The scene runs about ${seconds} seconds; the outline gives it ${planned}. Cut it down to about ${planned}.`,
     );
@@ -843,12 +863,26 @@ export function checkExplainer(
     formats: options.maths ? ['explainer', 'maths'] : ['explainer'],
     stage: options.stage,
   });
-  const problems: SheetProblem[] = sendBack(mended, true).map((message) => ({
-    rule: 'storyboard' as const,
-    message,
-    beat: null,
-    level: 'error' as const,
-  }));
+  // What the storyboard gets wrong keeps the scene from being made; a
+  // picture that sits still a while is sent back to the writer once, and
+  // shown, but the maker may make it as it is.
+  const problems: SheetProblem[] = [
+    ...mended.problems.map((message) => ({
+      rule: 'storyboard' as const,
+      message,
+      beat: null,
+      level: 'error' as const,
+    })),
+    ...[
+      ...quietStretches(mended.script, STILL_WORDS),
+      ...fewStageChanges(mended.script),
+    ].map((message) => ({
+      rule: 'storyboard' as const,
+      message,
+      beat: null,
+      level: 'warning' as const,
+    })),
+  ];
   if (!mended.script.beats.length)
     problems.push({
       rule: 'empty',
@@ -869,7 +903,7 @@ export function checkExplainer(
       rule: 'length',
       message: `The scene runs about ${seconds} seconds; the outline gives it ${options.planned}. Say it in fewer words.`,
       beat: null,
-      level: 'error',
+      level: 'warning',
     });
   return { script: mended.script, problems };
 }
@@ -877,3 +911,13 @@ export function checkExplainer(
 /** Only what keeps a scene from being made. */
 export const errorsIn = (problems: readonly SheetProblem[]) =>
   problems.filter((p) => p.level === 'error');
+
+/**
+ * What a written scene goes back to its writer for, once: whatever keeps
+ * it from being made, and a length or a still picture that does not.
+ */
+export const sentBackFor = (problems: readonly SheetProblem[]) =>
+  problems.filter(
+    (p) =>
+      p.level === 'error' || p.rule === 'length' || p.rule === 'storyboard',
+  );

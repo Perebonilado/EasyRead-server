@@ -21,9 +21,18 @@ import {
 import { PROP_ACTIONS } from '../../../business/domain/scene-directions';
 import { STAGE_PROPS } from '../../../business/domain/scene-props';
 import {
+  BOTTOMS,
+  CLOTH_COLOURS,
+  FACIAL_HAIR,
+  FIGURE_AGES,
+  FIGURE_BUILDS,
   FIGURE_POSES,
   FIGURE_PROPS,
   FIGURE_SIGNS,
+  HAIR_COLOURS,
+  HAIR_STYLES,
+  HEADWEAR,
+  TOPS,
 } from '../../../business/domain/scene-figure';
 import {
   LINE_FROMS,
@@ -40,7 +49,6 @@ import {
   STORY_TIMES,
   STORY_WEATHERS,
 } from '../../../business/domain/scene-story';
-import { figureSchema } from './schemas';
 
 export const STUDIO_ACTIONS = [
   'none',
@@ -52,23 +60,57 @@ export const STUDIO_ACTIONS = [
   'episode',
 ] as const;
 
+/**
+ * A value the model got a little wrong (a word not in the list, a number
+ * as text) is caught as nothing rather than failing the whole answer: the
+ * domain makes every field sound again, and a turn or a scene is not lost
+ * to one stray word. The lists still go to the model as its choices.
+ */
 export const studioTurnSchema = z.object({
   reply: z.string(),
-  choices: z.array(z.string()),
-  brief: z.object({
-    format: z.enum(STUDIO_FORMATS).nullable(),
-    idea: z.string().nullable(),
-    audience: z.enum(STUDIO_AUDIENCES).nullable(),
-    minutes: z.number().nullable(),
-    tone: z.enum(STUDIO_TONES).nullable(),
-    setting: z.string().nullable(),
-    characters: z.string().nullable(),
-    include: z.string().nullable(),
-  }),
-  action: z.enum(STUDIO_ACTIONS),
-  scene: z.number().int().nullable(),
-  request: z.string().nullable(),
-  refuse: z.boolean(),
+  choices: z.array(z.string()).catch([]),
+  brief: z
+    .object({
+      format: z.enum(STUDIO_FORMATS).nullable().catch(null),
+      idea: z.string().nullable().catch(null),
+      audience: z.enum(STUDIO_AUDIENCES).nullable().catch(null),
+      minutes: z.union([z.number(), z.string()]).nullable().catch(null),
+      tone: z.enum(STUDIO_TONES).nullable().catch(null),
+      setting: z.string().nullable().catch(null),
+      characters: z.string().nullable().catch(null),
+      include: z.string().nullable().catch(null),
+    })
+    .catch({
+      format: null,
+      idea: null,
+      audience: null,
+      minutes: null,
+      tone: null,
+      setting: null,
+      characters: null,
+      include: null,
+    }),
+  action: z.enum(STUDIO_ACTIONS).catch('none'),
+  scene: z.union([z.number(), z.string()]).nullable().catch(null),
+  request: z.string().nullable().catch(null),
+  refuse: z.boolean().catch(false),
+});
+
+/** A person's look from the kit's lists, each field caught as the plain choice when it is not one of them. */
+const lenientFigure = z.object({
+  age: z.enum(FIGURE_AGES).catch('adult'),
+  build: z.enum(FIGURE_BUILDS).catch('average'),
+  skin: z.number().catch(4),
+  hair: z.enum(HAIR_STYLES).catch('short'),
+  hairColour: z.enum(HAIR_COLOURS).catch('brown'),
+  facialHair: z.enum(FACIAL_HAIR).catch('none'),
+  headwear: z.enum(HEADWEAR).catch('none'),
+  top: z.enum(TOPS).catch('jumper'),
+  topColour: z.enum(CLOTH_COLOURS).catch('blue'),
+  bottom: z.enum(BOTTOMS).catch('trousers'),
+  bottomColour: z.enum(CLOTH_COLOURS).catch('navy'),
+  accentColour: z.enum(CLOTH_COLOURS).catch('red'),
+  extras: z.array(z.string()).catch([]),
 });
 
 export const studioBibleSchema = z.object({
@@ -76,26 +118,26 @@ export const studioBibleSchema = z.object({
     z.object({
       id: z.string(),
       name: z.string(),
-      kind: z.enum(STUDIO_KINDS),
-      role: z.enum(STUDIO_ROLES),
-      look: z.string(),
-      figure: figureSchema.nullable(),
-      size: z.enum(STORY_SIZES).nullable(),
-      voice: z.enum(STUDIO_VOICES as [string, ...string[]]),
-      voicePick: z.number().int(),
-      traits: z.array(z.string()),
-      carries: z.enum(FIGURE_PROPS).nullable(),
+      kind: z.enum(STUDIO_KINDS).catch('person'),
+      role: z.enum(STUDIO_ROLES).catch('supporting'),
+      look: z.string().catch(''),
+      figure: lenientFigure.nullable().catch(null),
+      size: z.enum(STORY_SIZES).nullable().catch(null),
+      voice: z.enum(STUDIO_VOICES as [string, ...string[]]).catch('woman'),
+      voicePick: z.number().catch(0),
+      traits: z.array(z.string()).catch([]),
+      carries: z.enum(FIGURE_PROPS).nullable().catch(null),
     }),
   ),
   sets: z.array(
     z.object({
       id: z.string(),
       name: z.string(),
-      look: z.string(),
-      kind: z.enum(PLACE_KINDS),
-      stand: z.enum(PLACE_STANDS),
-      front: z.string().nullable(),
-      sound: z.enum(SCENE_AMBIENCES).nullable(),
+      look: z.string().catch(''),
+      kind: z.enum(PLACE_KINDS).catch('outdoor'),
+      stand: z.enum(PLACE_STANDS).catch('on'),
+      front: z.string().nullable().catch(null),
+      sound: z.enum(SCENE_AMBIENCES).nullable().catch(null),
     }),
   ),
   world: z
@@ -133,46 +175,55 @@ export const studioOutlineSchema = z.object({
 export const studioSceneSchema = z.object({
   title: z.string(),
   set: z.string(),
-  time: z.enum(STORY_TIMES),
-  weather: z.enum(STORY_WEATHERS),
-  crowd: z.enum(STORY_CROWDS),
-  mood: z.enum(SCENE_MOODS),
-  music: z.enum(SCENE_MUSIC),
-  transition: z.enum(TRANSITIONS),
+  time: z.enum(STORY_TIMES).catch('day'),
+  weather: z.enum(STORY_WEATHERS).catch('clear'),
+  crowd: z.enum(STORY_CROWDS).catch('none'),
+  mood: z.enum(SCENE_MOODS).catch('calm'),
+  music: z.enum(SCENE_MUSIC).catch('calm'),
+  transition: z.enum(TRANSITIONS).catch('cut'),
   onStage: z.array(
     z.object({
       who: z.string(),
-      spot: z.enum(SPOTS),
-      pose: z.enum(FIGURE_POSES),
-      face: z.enum(STUDIO_FACES),
-      holding: z.enum(FIGURE_PROPS).nullable(),
+      spot: z.enum(SPOTS).catch('centre'),
+      pose: z.enum(FIGURE_POSES).catch('standing'),
+      face: z.enum(STUDIO_FACES).catch('neutral'),
+      holding: z.enum(FIGURE_PROPS).nullable().catch(null),
     }),
   ),
   props: z.array(
-    z.object({ prop: z.enum(STAGE_PROPS), near: z.string().nullable() }),
+    z.object({
+      // A thing the stage has not got is left out by the domain, not failed here.
+      prop: z.union([z.enum(STAGE_PROPS), z.string()]),
+      near: z.string().nullable().catch(null),
+    }),
   ),
   beats: z.array(
     z.object({
       kind: z.enum(BEAT_KINDS),
-      who: z.string().nullable(),
-      to: z.string().nullable(),
-      say: z.string(),
-      feeling: z.enum(STUDIO_FACES).nullable(),
-      sign: z.enum(FIGURE_SIGNS).nullable(),
-      do: z.enum([...STUDIO_DOINGS, ...PROP_ACTIONS]).nullable(),
-      prop: z.enum(STAGE_PROPS).nullable(),
-      spot: z.enum(SPOTS).nullable(),
-      from: z.enum(LINE_FROMS).nullable(),
-      pace: z.enum(LINE_PACES).nullable(),
-      seconds: z.number().nullable(),
+      who: z.string().nullable().catch(null),
+      to: z.string().nullable().catch(null),
+      say: z.string().catch(''),
+      feeling: z.enum(STUDIO_FACES).nullable().catch(null),
+      sign: z.enum(FIGURE_SIGNS).nullable().catch(null),
+      do: z
+        .enum([...STUDIO_DOINGS, ...PROP_ACTIONS])
+        .nullable()
+        .catch(null),
+      prop: z.enum(STAGE_PROPS).nullable().catch(null),
+      spot: z.enum(SPOTS).nullable().catch(null),
+      from: z.enum(LINE_FROMS).nullable().catch(null),
+      pace: z.enum(LINE_PACES).nullable().catch(null),
+      seconds: z.number().nullable().catch(null),
     }),
   ),
-  camera: z.array(
-    z.object({
-      beat: z.number().int(),
-      shot: z.enum(SHOTS),
-      on: z.string().nullable(),
-      with: z.string().nullable(),
-    }),
-  ),
+  camera: z
+    .array(
+      z.object({
+        beat: z.number(),
+        shot: z.enum(SHOTS).catch('wide'),
+        on: z.string().nullable().catch(null),
+        with: z.string().nullable().catch(null),
+      }),
+    )
+    .catch([]),
 });

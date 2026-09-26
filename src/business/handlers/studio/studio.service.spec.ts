@@ -55,6 +55,8 @@ function studioInMemory() {
   const messages: StudioMessageRecord[] = [];
   let ids = 0;
   const repo: Partial<StudioRepository> = {
+    listShows: (userId) =>
+      Promise.resolve([...shows.values()].filter((s) => s.userId === userId)),
     findShow: (id) => Promise.resolve(shows.get(id) ?? null),
     updateShow: (id, patch) => {
       shows.set(id, { ...shows.get(id)!, ...patch });
@@ -481,5 +483,42 @@ describe('the Studio records what happens in the thread', () => {
       'say',
     ]);
     expect(done.show.moreMessages).toBe(false);
+  });
+});
+
+describe('the Studio lists the shows', () => {
+  it('says what a show is busy with, and how long its film runs and in how many scenes', async () => {
+    const studio = studioInMemory();
+    const [before] = await studio.service.shows('u1');
+    expect(before).toMatchObject({
+      thumbEpisodeId: null,
+      phase: 'script',
+      busy: null,
+      durationMs: null,
+      scenes: null,
+    });
+
+    studio.episodes.set('e0', {
+      ...studio.episodes.get('e0')!,
+      phase: 'made',
+      busy: 'make',
+      durationMs: 61_000,
+      thumbKey: 'studio/e0/thumb.png',
+    });
+    // One scene made, one not yet: the film has the one.
+    studio.scenes.set('c1', {
+      ...studio.scenes.get('c1')!,
+      sceneKey: 'k1',
+      audioKey: 'a1',
+      durationMs: 61_000,
+    });
+    const [now] = await studio.service.shows('u1');
+    expect(now).toMatchObject({
+      thumbEpisodeId: 'e0',
+      phase: 'made',
+      busy: 'make',
+      durationMs: 61_000,
+      scenes: 1,
+    });
   });
 });

@@ -165,14 +165,24 @@ export class StudioService {
       shows.map(async (show) => {
         const episodes = await this.studio.listEpisodes(show.id);
         const latest = episodes[episodes.length - 1];
+        const thumb = episodes.find((e) => e.thumbKey);
+        // The scenes of the film the still stands for, as the player plays it.
+        const made = thumb
+          ? (await this.studio.listScenes(thumb.id)).filter(
+              (s) => s.sceneKey && s.audioKey && s.durationMs,
+            )
+          : [];
         return {
           id: show.id,
           title: show.title,
           format: show.format,
           episodes: episodes.length,
-          thumbEpisodeId: episodes.find((e) => e.thumbKey)?.id ?? null,
+          thumbEpisodeId: thumb?.id ?? null,
           phase: latest?.phase ?? 'brief',
           updatedAt: show.updatedAt.toISOString(),
+          busy: episodes.find((e) => e.busy)?.busy ?? null,
+          durationMs: thumb?.durationMs ?? null,
+          scenes: thumb ? made.length : null,
         };
       }),
     );

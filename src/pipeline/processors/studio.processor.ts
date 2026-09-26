@@ -39,6 +39,7 @@ import {
   describeScene,
 } from '../../business/domain/studio/studio-words';
 import { EntitlementsService } from '../../business/handlers/documents/entitlements.service';
+import { iconicOf } from '../../business/domain/scene-iconic';
 import type { LlmGatewayPort, LlmUsage } from '../../business/ports/llm.port';
 import type { StoragePort } from '../../business/ports/storage.port';
 import { JOB_QUEUE, LLM_GATEWAY, STORAGE } from '../../business/ports/tokens';
@@ -73,14 +74,37 @@ const WRITERS = 3;
  * scene from being made, then more of anything sent back. Below zero,
  * better; zero, as good.
  */
-function worse(
-  a: readonly SheetProblem[],
-  b: readonly SheetProblem[],
-): number {
+function worse(a: readonly SheetProblem[], b: readonly SheetProblem[]): number {
   return (
     errorsIn(a).length - errorsIn(b).length ||
     sentBackFor(a).length - sentBackFor(b).length
   );
+}
+
+/**
+ * A figure every tradition draws one way (Jesus, Moses, John the Baptist)
+ * starts out looking that way, as in a book's pages; after that the look
+ * is the maker's, changed on the cast card or by asking.
+ */
+function traditional(
+  bible: StudioBible,
+  before: StudioBible | null,
+): StudioBible {
+  return {
+    ...bible,
+    characters: bible.characters.map((c) => {
+      if (c.kind !== 'person') return c;
+      if (before?.characters.some((was) => was.id === c.id)) return c;
+      const known = iconicOf([c.name], false);
+      return known
+        ? {
+            ...c,
+            figure: known.figure,
+            carries: c.carries ?? known.carries ?? null,
+          }
+        : c;
+    }),
+  };
 }
 
 /** Each item through `work`, at most `limit` at a time. */
@@ -207,7 +231,7 @@ export class StudioProcessor {
       ...(request && before ? { previous: before, request } : {}),
     });
     await this.record(episode.id, first.usage);
-    let bible = distinctVoices(bibleOf(first.value));
+    let bible = distinctVoices(traditional(bibleOf(first.value), before));
     const problems = checkBible(bible, story);
     if (problems.length) {
       this.logger.log(
@@ -220,7 +244,7 @@ export class StudioProcessor {
         ...(request ? { request } : {}),
       });
       await this.record(episode.id, again.usage);
-      const second = distinctVoices(bibleOf(again.value));
+      const second = distinctVoices(traditional(bibleOf(again.value), before));
       if (checkBible(second, story).length <= problems.length) bible = second;
     }
     await this.studio.updateShow(show.id, { bible });

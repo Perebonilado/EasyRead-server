@@ -428,7 +428,9 @@ export class StudioService {
       draft = result.value;
     } catch (error) {
       // A reply that could not be read is said as one: the thread stays whole.
-      this.logger.warn(`studio ${show.id}: the producer could not answer: ${(error as Error).message}`);
+      this.logger.warn(
+        `studio ${show.id}: the producer could not answer: ${(error as Error).message}`,
+      );
       draft = {
         reply: "Sorry, I didn't catch that. Could you say it again?",
         choices: [],

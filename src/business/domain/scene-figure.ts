@@ -1116,7 +1116,9 @@ export function signsOver(
     states[sign] = id;
     return `<g id="${id}"><g transform="translate(${r1(head[0])} ${r1(head[1])}) scale(${Math.round(scale * 1000) / 1000})">${own(air[sign]!)}</g></g>`;
   });
-  const moving = MOVES.filter(([, of]) => of.some((one) => shown.includes(one)));
+  const moving = MOVES.filter(([, of]) =>
+    of.some((one) => shown.includes(one)),
+  );
   const css = moving.length
     ? [
         `${moving.map(([cls]) => `.sgn-${cls}`).join(',')}{transform-box:fill-box;transform-origin:center}`,

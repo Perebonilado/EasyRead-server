@@ -41,7 +41,9 @@ const sheet = storySheetOf({
   ],
 });
 
-const episode = (patch: Partial<StudioEpisodeRecord> = {}): StudioEpisodeRecord => ({
+const episode = (
+  patch: Partial<StudioEpisodeRecord> = {},
+): StudioEpisodeRecord => ({
   id: 'e1',
   showId: 's1',
   userId: 'u1',
@@ -106,15 +108,20 @@ describe('the Studio, as the app sees it', () => {
   });
 
   it('says in plain words why an episode cannot be made', () => {
-    expect(blockersOf(episode({ phase: 'cast' }), [scene()], bible, brief)[0]).toMatch(
-      /Approve the outline and the cast/,
-    );
-    expect(blockersOf(episode({ busy: 'make' }), [scene()], bible, brief)).toEqual([
-      'The film is being made now.',
-    ]);
+    expect(
+      blockersOf(episode({ phase: 'cast' }), [scene()], bible, brief)[0],
+    ).toMatch(/Approve the outline and the cast/);
+    expect(
+      blockersOf(episode({ busy: 'make' }), [scene()], bible, brief),
+    ).toEqual(['The film is being made now.']);
     const broken = scene({
       problems: [
-        { rule: 'speaker', message: 'No one says beat 2.', beat: 1, level: 'error' },
+        {
+          rule: 'speaker',
+          message: 'No one says beat 2.',
+          beat: 1,
+          level: 'error',
+        },
         { rule: 'length', message: 'Long.', beat: null, level: 'warning' },
       ],
     });
@@ -134,14 +141,40 @@ describe('the Studio, as the app sees it', () => {
         title: 'Forces',
         mood: 'curious',
         beats: [
-          { say: 'A force is a push or a pull.', pause: 'short', delivery: 'explain' },
-          { say: 'It is measured in newtons.', pause: 'short', delivery: 'explain' },
-          { say: 'Bigger forces speed things up faster.', pause: 'long', delivery: 'key' },
+          {
+            say: 'A force is a push or a pull.',
+            pause: 'short',
+            delivery: 'explain',
+          },
+          {
+            say: 'It is measured in newtons.',
+            pause: 'short',
+            delivery: 'explain',
+          },
+          {
+            say: 'Bigger forces speed things up faster.',
+            pause: 'long',
+            delivery: 'key',
+          },
         ],
         cast: [],
         steps: [
-          { beat: 0, phrase: 'A force', layout: 'one', show: ['push'], arrows: null, effects: null },
-          { beat: 1, phrase: 'newtons', layout: 'one', show: ['unit'], arrows: null, effects: null },
+          {
+            beat: 0,
+            phrase: 'A force',
+            layout: 'one',
+            show: ['push'],
+            arrows: null,
+            effects: null,
+          },
+          {
+            beat: 1,
+            phrase: 'newtons',
+            layout: 'one',
+            show: ['unit'],
+            arrows: null,
+            effects: null,
+          },
         ],
       },
     });

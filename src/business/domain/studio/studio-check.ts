@@ -306,7 +306,8 @@ export function mendSheet(
           bringOn(beat.who, at, 'to be seen doing it');
         // A reach toward a thing, not a person (under the stall, for the
         // apple): the stage reaches only for people, so it points there.
-        const person = beat.to && bible.characters.some((c) => c.id === beat.to);
+        const person =
+          beat.to && bible.characters.some((c) => c.id === beat.to);
         if (beat.do === 'reach' && !person) {
           beat.do = 'point';
           beat.to = null;

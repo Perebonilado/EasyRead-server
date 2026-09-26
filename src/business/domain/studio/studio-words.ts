@@ -5,11 +5,7 @@
  * a scene the writer was never told of.
  */
 import { describeFigure } from '../scene-figure';
-import {
-  STAGE_NAMES,
-  STAGE_RECIPES,
-  type LearningStage,
-} from '../scene-stage';
+import { STAGE_NAMES, STAGE_RECIPES, type LearningStage } from '../scene-stage';
 import { WORDS_A_SECOND } from './studio';
 import {
   AUDIENCE_STAGE,

@@ -593,6 +593,19 @@ export interface SceneScript {
   lead?: number;
   /** The things the page's words set on the stage (bread, a cup): on the table from the start, handled as the narration says. */
   props?: StageProp[];
+  /** Before whom each thing rests, when a scene says (the Studio's): else before whoever first handles it. */
+  propsNear?: Partial<Record<StageProp, string>>;
+  /**
+   * Where the camera is, from a sentence on, when a scene says (the
+   * Studio's): the whole stage, one person close, or two framed together.
+   * Absent, the camera is cut as a film cuts it (storyShots).
+   */
+  camera?: {
+    beat: number;
+    shot: 'wide' | 'close' | 'two';
+    on: string | null;
+    with: string | null;
+  }[];
   /** A story page's time, weather and crowd, and the story's world: how the stage dresses it. */
   setting?: {
     time: StoryTime | null;

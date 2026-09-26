@@ -7,6 +7,7 @@ import {
   INSTITUTION_REPOSITORY,
   PRONUNCIATION_REPOSITORY,
   APP_SETTINGS_REPOSITORY,
+  STUDIO_REPOSITORY,
   ASSESSMENT_REPOSITORY,
   ITEM_REPOSITORY,
   ITEM_REVIEW_REPOSITORY,
@@ -41,6 +42,7 @@ import { SequelizeAiCallLogRepository } from '../repositories/sequelize-ai-call-
 import { SequelizeInstitutionRepository } from '../repositories/sequelize-institution.repository';
 import { SequelizePronunciationRepository } from '../repositories/sequelize-pronunciation.repository';
 import { SequelizeAppSettingsRepository } from '../repositories/sequelize-settings.repository';
+import { SequelizeStudioRepository } from '../repositories/sequelize-studio.repository';
 import { SequelizeStruggleSignalRepository } from '../repositories/sequelize-struggle.repository';
 import {
   SequelizeDocumentLearningStateRepository,
@@ -158,6 +160,7 @@ export const repositoryProviders: Provider[] = [
     provide: APP_SETTINGS_REPOSITORY,
     useClass: SequelizeAppSettingsRepository,
   },
+  { provide: STUDIO_REPOSITORY, useClass: SequelizeStudioRepository },
   { provide: ASSESSMENT_REPOSITORY, useClass: SequelizeAssessmentRepository },
   { provide: ITEM_REPOSITORY, useClass: SequelizeItemRepository },
   { provide: ITEM_REVIEW_REPOSITORY, useClass: SequelizeItemReviewRepository },

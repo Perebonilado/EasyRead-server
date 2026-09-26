@@ -27,6 +27,10 @@ export const QUEUE = {
   // generator's code never sees these jobs, so a deploy's overlap, or a
   // worker left running from before, cannot take one and drop it.
   visualScene: `visual-${SCENE_GENERATOR_VERSION}`,
+  // The Studio's work: writing a show's cast, an episode's outline and
+  // scenes, and making each scene. Its own queue, so a maker's film and a
+  // reader's page never wait on each other.
+  studio: 'studio',
 } as const;
 
 export type QueueName = (typeof QUEUE)[keyof typeof QUEUE];
@@ -77,6 +81,9 @@ export const QUEUE_SETTINGS: Record<
   // One chapter's scene: two model calls, a voice call and an alignment.
   // A few at once; the alignment is the worker's own CPU.
   [QUEUE.visualScene]: { concurrency: 3, attempts: 2, backoffMs: 20_000 },
+  // A scene of a film is a page's work; writing an episode's scenes is a
+  // few model calls each, in order. A few at once.
+  studio: { concurrency: 4, attempts: 2, backoffMs: 20_000 },
 };
 
 export interface BaseJobData {
@@ -264,3 +271,16 @@ export const lectureVoiceJobId = (
   kind: SegmentKind = 'page',
 ) =>
   `lecture-voice-${documentId}-v${contentVersion}-${page}-${style}${kind === 'page' ? '' : `-${kind}`}`;
+
+/** A piece of the Studio's work on one episode. */
+export interface StudioJobData {
+  kind: 'bible' | 'outline' | 'script' | 'scene' | 'make';
+  showId: string;
+  episodeId: string;
+  /** Whose it is: the plan's allowance is theirs. */
+  userId: string;
+  /** The scene to write again or to make. */
+  sceneId?: string;
+  /** The maker's own words for what to change. */
+  request?: string;
+}

@@ -37,3 +37,4 @@ export const VISUAL_SCENE_REPOSITORY = Symbol('VisualSceneRepository');
 export const ITEM_REVIEW_REPOSITORY = Symbol('ItemReviewRepository');
 export const PRONUNCIATION_REPOSITORY = Symbol('PronunciationRepository');
 export const APP_SETTINGS_REPOSITORY = Symbol('AppSettingsRepository');
+export const STUDIO_REPOSITORY = Symbol('StudioRepository');

@@ -635,6 +635,57 @@ export function storyShots(
   return shots.sort((a, b) => a.atMs - b.atMs);
 }
 
+/** A close or two-shot the scene asked for holds this long at most: then the whole stage again. */
+const DIRECTED_MOST_MS = 8000;
+
+/**
+ * The camera as a scene says it (the Studio's sheets): from each shot's
+ * sentence until the next shot's, or the stage changing, the whole stage,
+ * one person close, or two framed together. Only on who is there.
+ */
+export function directedShots(
+  script: SceneScript,
+  beats: readonly TimedBeat[],
+  steps: readonly SceneStepDto[],
+  durationMs: number,
+): SceneEffectDto[] {
+  const shots: SceneEffectDto[] = [];
+  const stageAt = (t: number) =>
+    [...steps].reverse().find((step) => step.atMs <= t)?.show ?? [];
+  const changeAfter = (t: number) =>
+    steps.find((step) => step.atMs > t + 50)?.atMs ?? durationMs;
+  const asked = [...(script.camera ?? [])].sort((a, b) => a.beat - b.beat);
+  asked.forEach((shot, i) => {
+    if (shot.shot === 'wide' || !shot.on) return;
+    const beat = beats[Math.min(shot.beat, beats.length - 1)];
+    if (!beat) return;
+    const from = Math.max(0, beat.startMs - 200);
+    const next = asked[i + 1];
+    const nextAt = next
+      ? (beats[Math.min(next.beat, beats.length - 1)]?.startMs ?? durationMs)
+      : durationMs;
+    const until = Math.min(
+      nextAt - 100,
+      changeAfter(from),
+      from + DIRECTED_MOST_MS,
+      durationMs,
+    );
+    const on = stageAt(from + 250);
+    if (!on.includes(shot.on) || until - from < SHOT_LEAST_MS) return;
+    shots.push({
+      atMs: Math.round(from),
+      target: shot.on,
+      part:
+        shot.shot === 'two' && shot.with && on.includes(shot.with)
+          ? shot.with
+          : null,
+      do: 'zoom',
+      untilMs: Math.round(until),
+    });
+  });
+  return shots;
+}
+
 /** A story's drawings with nothing set beside them: the labels a lesson would, and what a character is like. */
 function unlabelled(
   drawings: ReadonlyMap<string, GatedDrawing | null>,
@@ -1227,7 +1278,7 @@ export function composeScene(input: ComposeInput): {
       grip: drawn.grip,
       mouth: drawn.mouth,
       ...(drawn.half ? { half: drawn.half } : {}),
-      near: does[0]?.[1] ?? null,
+      near: script.propsNear?.[prop] ?? does[0]?.[1] ?? null,
       does,
     };
   });
@@ -1336,7 +1387,9 @@ export function composeScene(input: ComposeInput): {
   // A screenplay's camera: the whole stage as it opens and while the
   // narrator speaks; on two who trade lines while others stand by; close
   // on a whisper, a shout or a strong face.
-  if (script.beats.some((beat) => beat.kind))
+  if (script.camera?.length)
+    effects.push(...directedShots(script, beats, steps, durationMs));
+  else if (script.beats.some((beat) => beat.kind))
     effects.push(...storyShots(script, beats, steps, effects, durationMs));
   /** The step a moment falls in. */
   const stepOf = (t: number) => {

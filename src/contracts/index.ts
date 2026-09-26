@@ -868,6 +868,8 @@ export type PlanDto = {
     studyMinutesPerDay: number | null;
     /** Monthly voice allowance in minutes; purchased credits stack on top. */
     voiceMinutesPerMonth: number | null;
+    /** Minutes of film the Studio makes a month; null is unlimited. */
+    studioMinutesPerMonth: number | null;
     watermarkedExports: boolean;
   };
 };
@@ -2139,3 +2141,262 @@ export type AnswerItemResponse = {
   dueAt: string;
   intervalDays: number;
 };
+
+// ── The Studio ─────────────────────────────────────────────────────────────
+// Animated episodes made from a conversation: shows, their episodes and
+// each episode's scenes, decided in full before anything is drawn.
+
+export type StudioFormatName = 'story' | 'explainer';
+export type StudioPhase = 'brief' | 'outline' | 'cast' | 'script' | 'made';
+export type StudioBusyName = 'bible' | 'outline' | 'script' | 'scene' | 'make';
+export type StudioSceneStatusName =
+  'writing' | 'ready' | 'making' | 'made' | 'failed';
+
+export interface StudioBriefDto {
+  format: StudioFormatName | null;
+  idea: string;
+  audience: 'young children' | 'children' | 'teens' | 'adults' | null;
+  minutes: number | null;
+  tone: 'funny' | 'gentle' | 'exciting' | 'serious' | 'calm' | null;
+  setting: string | null;
+  characters: string | null;
+  include: string | null;
+  /** How much of their own text the maker gave, in characters; 0 for none. */
+  sourceChars: number;
+}
+
+export interface StudioCharacterDto {
+  id: string;
+  name: string;
+  kind: 'person' | 'animal' | 'creature';
+  role: 'main' | 'supporting' | 'minor';
+  look: string;
+  /** A person's look, as the kit draws them. */
+  figure: Record<string, string | number | string[]> | null;
+  size: 'small' | 'medium' | 'large' | null;
+  voice: string;
+  voicePick: number;
+  traits: string[];
+  carries: string | null;
+  /** How they are drawn: an SVG, for a person now; for anyone else once they have been drawn. */
+  drawing: string | null;
+}
+
+export interface StudioSetDto {
+  id: string;
+  name: string;
+  look: string;
+  kind: 'outdoor' | 'indoor' | 'vessel';
+  stand: 'on' | 'in';
+  front: string | null;
+  sound: string | null;
+  /** Once painted, the backdrop as an SVG. */
+  drawing: string | null;
+}
+
+export interface StudioBibleDto {
+  characters: StudioCharacterDto[];
+  sets: StudioSetDto[];
+  world: {
+    era: string;
+    region: string;
+    culture: string;
+    landscape: string;
+    homes: string;
+  } | null;
+  subject: string;
+  maths: boolean;
+  pictures: { name: string; is: string; draw: string }[];
+}
+
+export interface StudioOutlineSceneDto {
+  title: string;
+  summary: string;
+  set: string | null;
+  cast: string[];
+  seconds: number;
+  teach: string | null;
+  points: string[];
+}
+
+export interface StudioOutlineDto {
+  title: string;
+  logline: string;
+  scenes: StudioOutlineSceneDto[];
+}
+
+export interface StudioProblemDto {
+  rule: string;
+  message: string;
+  beat: number | null;
+  level: 'error' | 'warning';
+}
+
+/** One beat of a story's scene, as its card shows and edits it. */
+export interface StudioBeatDto {
+  kind: 'line' | 'narration' | 'action' | 'business' | 'reaction' | 'pause';
+  who: string | null;
+  to: string | null;
+  say: string;
+  feeling: string | null;
+  sign: string | null;
+  do: string | null;
+  prop: string | null;
+  spot: string | null;
+  from: string | null;
+  pace: string | null;
+  seconds: number | null;
+}
+
+export interface StudioStorySheetDto {
+  kind: 'story';
+  title: string;
+  set: string;
+  time: string;
+  weather: string;
+  crowd: string;
+  mood: string;
+  music: string;
+  transition: 'cut' | 'fade';
+  onStage: {
+    who: string;
+    spot: string;
+    pose: string;
+    face: string;
+    holding: string | null;
+  }[];
+  props: { prop: string; near: string | null }[];
+  beats: StudioBeatDto[];
+  camera: {
+    beat: number;
+    shot: string;
+    on: string | null;
+    with: string | null;
+  }[];
+}
+
+/** An explainer's scene as its card shows it: each sentence, and what comes on the stage with it. */
+export interface StudioExplainerSheetDto {
+  kind: 'explainer';
+  title: string;
+  transition: 'cut' | 'fade';
+  lines: { say: string; shows: string[] }[];
+}
+
+export type StudioSheetDto = StudioStorySheetDto | StudioExplainerSheetDto;
+
+export interface StudioSceneDto {
+  id: string;
+  position: number;
+  title: string;
+  status: StudioSceneStatusName;
+  /** While being made: drawing, voicing or composing. */
+  step: string | null;
+  error: string | null;
+  sheet: StudioSheetDto | null;
+  problems: StudioProblemDto[];
+  /** Changed since it was made: made again when the episode is. */
+  stale: boolean;
+  /** Made, and playable. */
+  made: boolean;
+  /** How long it runs: made, or reckoned from its words. */
+  seconds: number;
+  durationMs: number | null;
+  /** A change to undo. */
+  canUndo: boolean;
+}
+
+export interface StudioEpisodeDto {
+  id: string;
+  showId: string;
+  number: number;
+  title: string;
+  logline: string | null;
+  phase: StudioPhase;
+  busy: StudioBusyName | null;
+  error: string | null;
+  outline: StudioOutlineDto | null;
+  scenes: StudioSceneDto[];
+  durationMs: number | null;
+  shareToken: string | null;
+  /** Seconds of film making it now would take from the month's allowance. */
+  toMakeSeconds: number;
+  /** Why it cannot be made now, in plain words; empty when it can. */
+  blockers: string[];
+  hasThumb: boolean;
+}
+
+export interface StudioMessageDto {
+  id: string;
+  role: 'user' | 'assistant';
+  content: string;
+  choices: string[];
+  refused: boolean;
+  createdAt: string;
+}
+
+export interface StudioBalanceDto {
+  remainingSeconds: number | null;
+  allowanceSeconds: number | null;
+  usedThisMonthSeconds: number;
+  watermarked: boolean;
+}
+
+export interface StudioShowDto {
+  id: string;
+  title: string;
+  format: StudioFormatName | null;
+  brief: StudioBriefDto;
+  /** What the brief still needs before an outline can be written. */
+  briefMissing: string[];
+  bible: StudioBibleDto | null;
+  episodes: {
+    id: string;
+    number: number;
+    title: string;
+    phase: StudioPhase;
+    durationMs: number | null;
+    hasThumb: boolean;
+  }[];
+  messages: StudioMessageDto[];
+  balance: StudioBalanceDto;
+}
+
+export interface StudioShowCardDto {
+  id: string;
+  title: string;
+  format: StudioFormatName | null;
+  episodes: number;
+  /** The episode whose still stands for the show, if one is made. */
+  thumbEpisodeId: string | null;
+  phase: StudioPhase;
+  updatedAt: string;
+}
+
+/** An episode as a player plays it: its scenes in order, each fetched on its own. */
+export interface StudioPlayDto {
+  episodeId: string;
+  title: string;
+  showTitle: string;
+  number: number;
+  /** Free-plan film carries the Studio's name on its end card. */
+  watermark: boolean;
+  madeWith: string;
+  scenes: {
+    id: string;
+    title: string;
+    durationMs: number;
+    transition: 'cut' | 'fade';
+  }[];
+}
+
+/** A line of the producer's streamed turn: a piece of the reply, then the whole outcome. */
+export type StudioTurnLine =
+  | { token: string }
+  | {
+      done: true;
+      message: StudioMessageDto;
+      show: StudioShowDto;
+      episode: StudioEpisodeDto;
+    }
+  | { error: string };

@@ -10,6 +10,8 @@ export interface UsageSnapshot {
   voiceSecondsThisMonth: number;
   /** Purchased voice credit balance, in seconds, on top of the allowance. */
   voiceCreditSeconds: number;
+  /** Seconds of film the Studio made this month. */
+  studioSecondsThisMonth?: number;
 }
 
 /**
@@ -103,6 +105,36 @@ export class Entitlements {
         limit: 'voice',
         remainingSeconds: remaining,
       });
+    }
+  }
+
+  /** Seconds of Studio film still to make this month; null when the plan has no ceiling. */
+  remainingStudioSeconds(): number | null {
+    const minutes = this.limits.studioMinutesPerMonth;
+    if (minutes === null) return null;
+    return Math.max(0, minutes * 60 - (this.usage.studioSecondsThisMonth ?? 0));
+  }
+
+  /**
+   * Before a film is made: enough of the month's allowance left for the
+   * seconds it will run, about, with a little room for a reckoning a few
+   * seconds short.
+   */
+  assertStudioAvailable(seconds: number): void {
+    const remaining = this.remainingStudioSeconds();
+    if (remaining === null) return;
+    if (remaining <= 0 || seconds > remaining + 15) {
+      const minutes = this.limits.studioMinutesPerMonth ?? 0;
+      throw new LimitReachedError(
+        remaining <= 0
+          ? `That's your ${minutes} minutes of Studio film this month`
+          : `This film runs about ${Math.ceil(seconds / 60)} minutes, and ${Math.floor(remaining / 60)} of your ${minutes} minutes are left this month`,
+        {
+          limit: 'studio',
+          remainingSeconds: remaining,
+          allowed: minutes * 60,
+        },
+      );
     }
   }
 

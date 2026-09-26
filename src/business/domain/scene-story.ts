@@ -198,6 +198,8 @@ export interface StoryCharacter {
   carries?: FigureProp | null;
   /** The figure's fields the text itself says: never changed to set them apart. */
   fromText?: string[] | null;
+  /** Which of their kind's voices is theirs, when someone chose it (the Studio): from 0. */
+  voicePick?: number | null;
 }
 
 /** What a place is: out of doors, a room, or something people ride in (a boat, a cart). */

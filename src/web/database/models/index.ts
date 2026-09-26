@@ -54,6 +54,12 @@ export {
   StudySessionModel,
 } from './study-group.model';
 export { WebhookEventModel } from './webhook-event.model';
+export {
+  StudioShowModel,
+  StudioEpisodeModel,
+  StudioSceneModel,
+  StudioMessageModel,
+} from './studio.model';
 
 import { AiCallLogModel } from './ai-call-log.model';
 import { AppSettingsModel } from './app-settings.model';
@@ -111,10 +117,20 @@ import {
   StudySessionModel,
 } from './study-group.model';
 import { WebhookEventModel } from './webhook-event.model';
+import {
+  StudioShowModel,
+  StudioEpisodeModel,
+  StudioSceneModel,
+  StudioMessageModel,
+} from './studio.model';
 
 /** Registered with SequelizeModule in both the API and the worker. */
 export const ALL_MODELS = [
   UserModel,
+  StudioShowModel,
+  StudioEpisodeModel,
+  StudioSceneModel,
+  StudioMessageModel,
   StudyGroupModel,
   StudyGroupMemberModel,
   StudySessionModel,

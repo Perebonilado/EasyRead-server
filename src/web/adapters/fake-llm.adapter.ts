@@ -27,6 +27,7 @@ import type {
   LectureDiagramDraft,
   SketchDraft,
   SketchTemplate,
+  StudioTurnDraft,
 } from '../../business/ports/llm.port';
 import type {
   DrawingThing,
@@ -1659,6 +1660,278 @@ export class FakeLlmAdapter implements LlmGatewayPort {
       value,
       usage: this.usage(started, texts.join(' ').length / 4, 0),
     };
+  }
+
+  // ── The Studio, offline ─────────────────────────────────────────────────
+
+  /**
+   * The producer, offline: whatever the message says of the format, the
+   * audience, the length and the tone, from plain keywords; the outline
+   * written as soon as nothing is missing.
+   */
+  async studioTurn(input: {
+    phase: 'brief' | 'outline' | 'cast' | 'script' | 'made';
+    state: string;
+    history: { role: 'user' | 'assistant'; content: string }[];
+    message: string;
+    onToken?: (chunk: string) => void;
+  }): Promise<LlmResult<StudioTurnDraft>> {
+    const started = Date.now();
+    const said = input.message.toLowerCase();
+    const brief: Record<string, unknown> = {
+      format: /\b(?:teach|explain|lesson|class|how|why)\b/.test(said)
+        ? 'explainer'
+        : /\bstory|tale\b/.test(said)
+          ? 'story'
+          : null,
+      idea: input.phase === 'brief' && said.length > 12 ? input.message : null,
+      audience: /\bteen/.test(said)
+        ? 'teens'
+        : /\badult/.test(said)
+          ? 'adults'
+          : /\bchild|kid/.test(said)
+            ? 'children'
+            : null,
+      minutes: Number(said.match(/(\d+(?:\.\d+)?)\s*min/)?.[1]) || null,
+      tone:
+        ['funny', 'gentle', 'exciting', 'serious', 'calm'].find((t) =>
+          said.includes(t),
+        ) ?? null,
+      setting: null,
+      characters: null,
+      include: null,
+    };
+    const yes = /\b(?:yes|go|ok|okay|sure|write it|looks good|make it)\b/.test(
+      said,
+    );
+    const action: StudioTurnDraft['action'] =
+      input.phase === 'brief'
+        ? yes
+          ? 'outline'
+          : 'none'
+        : input.phase === 'outline' || input.phase === 'cast'
+          ? yes
+            ? 'approve'
+            : 'outline'
+          : /\bmake\b/.test(said)
+            ? 'make'
+            : 'scene';
+    const reply =
+      action === 'outline' ? 'Writing the outline now.' : 'Tell me more.';
+    input.onToken?.(reply);
+    return {
+      value: {
+        reply,
+        choices: [],
+        brief,
+        action,
+        scene: action === 'scene' ? 1 : null,
+        request:
+          action === 'scene' ||
+          (action === 'outline' && input.phase !== 'brief')
+            ? input.message
+            : null,
+        refuse: false,
+      },
+      usage: this.usage(started, input.message.length / 4, reply.length / 4),
+    };
+  }
+
+  async studioBible(input: {
+    brief: string;
+  }): Promise<LlmResult<Record<string, unknown>>> {
+    const started = Date.now();
+    const explainer = /format: explainer/i.test(input.brief);
+    return {
+      value: explainer
+        ? {
+            characters: [],
+            sets: [],
+            world: null,
+            subject: 'a lesson',
+            maths: false,
+            pictures: [],
+          }
+        : {
+            characters: [
+              {
+                id: 'ada',
+                name: 'Ada',
+                kind: 'person',
+                role: 'main',
+                look: 'a girl in a red dress',
+                figure: {
+                  age: 'child',
+                  hair: 'afro',
+                  top: 'dress',
+                  topColour: 'red',
+                  skin: 7,
+                },
+                size: null,
+                voice: 'girl',
+                voicePick: 0,
+                traits: ['curious'],
+                carries: null,
+              },
+              {
+                id: 'kofi',
+                name: 'Kofi',
+                kind: 'person',
+                role: 'main',
+                look: 'a boy in a blue t-shirt',
+                figure: {
+                  age: 'child',
+                  hair: 'short',
+                  top: 't-shirt',
+                  topColour: 'blue',
+                  skin: 8,
+                },
+                size: null,
+                voice: 'boy',
+                voicePick: 0,
+                traits: ['cheeky'],
+                carries: null,
+              },
+            ],
+            sets: [
+              {
+                id: 'yard',
+                name: 'The yard',
+                look: 'a sunny yard with a mango tree',
+                kind: 'outdoor',
+                stand: 'on',
+                front: null,
+                sound: null,
+              },
+            ],
+            world: {
+              era: 'today',
+              region: 'Ghana',
+              culture: '',
+              landscape: '',
+              homes: '',
+            },
+            subject: '',
+            maths: false,
+            pictures: [],
+          },
+      usage: this.usage(started, input.brief.length / 4, 200),
+    };
+  }
+
+  async studioOutline(input: {
+    brief: string;
+    bible: string;
+  }): Promise<LlmResult<Record<string, unknown>>> {
+    const started = Date.now();
+    const explainer = /format: explainer/i.test(input.brief);
+    const scenes = [1, 2].map((n) =>
+      explainer
+        ? {
+            title: `Part ${n}`,
+            summary: `The lesson, part ${n}.`,
+            set: null,
+            cast: [],
+            seconds: 30,
+            teach:
+              'Plants make their own food from sunlight, water and air. The green leaves catch the light, and the plant uses its energy to turn water and carbon dioxide into sugar. This is called photosynthesis.',
+            points: ['a leaf in the sun'],
+          }
+        : {
+            title: `Scene ${n}`,
+            summary: `Ada and Kofi play, part ${n}.`,
+            set: 'yard',
+            cast: ['ada', 'kofi'],
+            seconds: 30,
+            teach: null,
+            points: [],
+          },
+    );
+    return {
+      value: {
+        title: explainer ? 'A lesson' : 'Ada and Kofi',
+        logline: 'Two friends play.',
+        scenes,
+      },
+      usage: this.usage(started, input.brief.length / 4, 200),
+    };
+  }
+
+  async studioScene(input: {
+    scene: string;
+  }): Promise<LlmResult<Record<string, unknown>>> {
+    const started = Date.now();
+    const line = (who: string, to: string, say: string, feeling: string) => ({
+      kind: 'line',
+      who,
+      to,
+      say,
+      feeling,
+      sign: null,
+      do: null,
+      prop: null,
+      spot: null,
+      from: 'here',
+      pace: null,
+      seconds: null,
+    });
+    return {
+      value: {
+        title: input.scene.split('\n')[0].slice(0, 40) || 'A scene',
+        set: 'yard',
+        time: 'day',
+        weather: 'clear',
+        crowd: 'none',
+        mood: 'playful',
+        music: 'playful',
+        transition: 'cut',
+        onStage: [
+          {
+            who: 'ada',
+            spot: 'centre-left',
+            pose: 'standing',
+            face: 'happy',
+            holding: null,
+          },
+          {
+            who: 'kofi',
+            spot: 'centre-right',
+            pose: 'standing',
+            face: 'neutral',
+            holding: null,
+          },
+        ],
+        props: [],
+        beats: [
+          {
+            kind: 'narration',
+            who: null,
+            to: null,
+            say: 'A hot afternoon in the yard.',
+            feeling: null,
+            sign: null,
+            do: null,
+            prop: null,
+            spot: null,
+            from: null,
+            pace: null,
+            seconds: null,
+          },
+          line('ada', 'kofi', 'Kofi, come and see this!', 'happy'),
+          line('kofi', 'ada', 'What is it?', 'thinking'),
+        ],
+        camera: [],
+      },
+      usage: this.usage(started, input.scene.length / 4, 200),
+    };
+  }
+
+  async moderate(input: {
+    text: string;
+  }): Promise<{ flagged: boolean; categories: string[] }> {
+    return /\bnsfw\b/i.test(input.text)
+      ? { flagged: true, categories: ['sexual'] }
+      : { flagged: false, categories: [] };
   }
 
   private sentences(text: string): string[] {

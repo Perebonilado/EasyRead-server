@@ -81,6 +81,16 @@ export interface LectureFollowJob extends PipelineJob {
   priority?: number;
 }
 
+/** A piece of the Studio's work on one episode. */
+export interface StudioJob {
+  kind: 'bible' | 'outline' | 'script' | 'scene' | 'make';
+  showId: string;
+  episodeId: string;
+  userId: string;
+  sceneId?: string;
+  request?: string;
+}
+
 export interface ExportJob extends PipelineJob {
   exportId: string;
 }
@@ -130,6 +140,8 @@ export interface JobQueuePort {
   ): Promise<VisualJobState[]>;
   /** Writes a document about a topic, then starts the normal pipeline. */
   enqueueLearn(job: PipelineJob): Promise<void>;
+  /** The Studio's work: a cast, an outline, an episode's scenes, a scene written again or made. */
+  enqueueStudio(jobs: StudioJob[]): Promise<void>;
   /** Fetches an imported document's pages, then starts the normal pipeline. */
   enqueueImport(job: PipelineJob): Promise<void>;
   /** Raises priority for pages N..N+3 so the page being read lands first. */

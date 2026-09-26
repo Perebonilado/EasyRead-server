@@ -25,6 +25,7 @@ import { LectureDiagramProcessor } from './processors/lecture-diagram.processor'
 import { LectureBoardProcessor } from './processors/lecture-board.processor';
 import { LectureFollowProcessor } from './processors/lecture-follow.processor';
 import { SceneProcessor } from './processors/scene.processor';
+import { StudioProcessor } from './processors/studio.processor';
 import { SimplifyPageProcessor } from './processors/simplify.processor';
 import { SummarizeProcessor } from './processors/summarize.processor';
 import { TopicsProcessor } from './processors/topics.processor';
@@ -44,6 +45,7 @@ import {
   LectureBoardJobData,
   LectureFollowJobData,
   VisualSceneJobData,
+  type StudioJobData,
 } from './queues';
 
 type Handler = (data: never, context: JobContext) => Promise<void>;
@@ -100,6 +102,7 @@ export class WorkerRunner implements OnModuleInit, OnModuleDestroy {
     private readonly exports: ExportProcessor,
     private readonly learn: LearnProcessor,
     private readonly importer: ImportProcessor,
+    private readonly studio: StudioProcessor,
   ) {}
 
   onModuleInit(): void {
@@ -140,6 +143,8 @@ export class WorkerRunner implements OnModuleInit, OnModuleDestroy {
         this.lectureFollow.process(data),
       [QUEUE.visualScene]: (data: VisualSceneJobData, ctx) =>
         this.visualScene.process(data, ctx),
+      [QUEUE.studio]: (data: StudioJobData, ctx) =>
+        this.studio.process(data, ctx),
     };
     // A chapter job the queue gives up on leaves pages pending for ever
     // unless someone says so; the other queues' rows go stale on their own.

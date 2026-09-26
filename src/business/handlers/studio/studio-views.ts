@@ -1,0 +1,274 @@
+/**
+ * The Studio as the app sees it: a show, an episode, a scene, made into
+ * what the client draws. A scene is stale when its sheet, or anyone or
+ * anywhere it shows, changed since it was made; what making the episode
+ * would take is the stale scenes' seconds; and what keeps it from being
+ * made is said in plain words.
+ */
+import type {
+  StudioBibleDto,
+  StudioBriefDto,
+  StudioEpisodeDto,
+  StudioExplainerSheetDto,
+  StudioMessageDto,
+  StudioSceneDto,
+  StudioSheetDto,
+} from '../../../contracts';
+import {
+  briefMissing,
+  secondsOf,
+  sheetHash,
+  type ExplainerSheet,
+  type SceneSheet,
+  type StudioBible,
+  type StudioBrief,
+} from '../../domain/studio/studio';
+import { checkExplainer, errorsIn } from '../../domain/studio/studio-check';
+import type { SceneThing } from '../../domain/scene-script';
+import type {
+  StudioEpisodeRecord,
+  StudioMessageRecord,
+  StudioSceneRecord,
+} from '../../repositories/studio.repository';
+
+/** A scene's fingerprint: its sheet, and the people and the place it shows as the show has them now. */
+export function sceneFingerprint(
+  sheet: SceneSheet,
+  bible: StudioBible | null,
+  brief: StudioBrief,
+): string {
+  if (sheet.kind === 'explainer')
+    return sheetHash(sheet, {
+      subject: bible?.subject ?? '',
+      maths: bible?.maths ?? false,
+      audience: brief.audience,
+    });
+  const who = new Set([
+    ...sheet.onStage.map((p) => p.who),
+    ...sheet.beats.flatMap((b) => (b.who ? [b.who] : [])),
+  ]);
+  return sheetHash(sheet, {
+    characters: (bible?.characters ?? []).filter((c) => who.has(c.id)),
+    set: (bible?.sets ?? []).find((s) => s.id === sheet.set) ?? null,
+    world: bible?.world ?? null,
+  });
+}
+
+/** Whether a scene needs making: never made, failed, or changed since. */
+export function needsMaking(
+  scene: StudioSceneRecord,
+  bible: StudioBible | null,
+  brief: StudioBrief,
+): boolean {
+  if (!scene.sheet) return false;
+  if (scene.status === 'failed' || !scene.sceneKey) return true;
+  return scene.madeHash !== sceneFingerprint(scene.sheet, bible, brief);
+}
+
+export function briefDto(brief: StudioBrief): StudioBriefDto {
+  return {
+    format: brief.format,
+    idea: brief.idea,
+    audience: brief.audience,
+    minutes: brief.minutes,
+    tone: brief.tone,
+    setting: brief.setting,
+    characters: brief.characters,
+    include: brief.include,
+    sourceChars: brief.source?.length ?? 0,
+  };
+}
+
+export function bibleDto(
+  bible: StudioBible,
+  drawings: { characters: Map<string, string>; sets: Map<string, string> },
+): StudioBibleDto {
+  return {
+    characters: bible.characters.map((c) => ({
+      id: c.id,
+      name: c.name,
+      kind: c.kind,
+      role: c.role,
+      look: c.look,
+      figure: c.figure
+        ? (c.figure as unknown as Record<string, string | number | string[]>)
+        : null,
+      size: c.size,
+      voice: c.voice,
+      voicePick: c.voicePick,
+      traits: c.traits,
+      carries: c.carries,
+      drawing: drawings.characters.get(c.id) ?? null,
+    })),
+    sets: bible.sets.map((s) => ({
+      ...s,
+      drawing: drawings.sets.get(s.id) ?? null,
+    })),
+    world: bible.world,
+    subject: bible.subject,
+    maths: bible.maths,
+    pictures: bible.pictures,
+  };
+}
+
+/** What a thing on a lesson's stage is called, for its card. */
+function nameOf(thing: SceneThing): string {
+  switch (thing.kind) {
+    case 'words':
+      return `"${thing.text}"`;
+    case 'stat':
+      return `${thing.value} ${thing.caption}`.trim();
+    case 'math':
+      return thing.name || 'working';
+    default:
+      return 'name' in thing && thing.name ? thing.name : thing.kind;
+  }
+}
+
+/** An explainer's sheet as its card reads: each sentence, and what comes on the stage as it is said. */
+export function explainerCard(
+  sheet: ExplainerSheet,
+  teach: string | null,
+): StudioExplainerSheetDto {
+  const { script } = checkExplainer(sheet, {
+    teach,
+    stage: null,
+    maths: true,
+    planned: null,
+  });
+  const byId = new Map(script.cast.map((t) => [t.id, t]));
+  const seen = new Set<string>();
+  const shows = script.beats.map(() => [] as string[]);
+  for (const step of [...script.steps].sort(
+    (a, b) => a.at.beat - b.at.beat || a.word - b.word,
+  )) {
+    const k = Math.max(0, Math.min(shows.length - 1, step.at.beat));
+    for (const id of step.stage?.show ?? []) {
+      if (seen.has(id)) continue;
+      seen.add(id);
+      const thing = byId.get(id);
+      if (thing && shows[k]) shows[k].push(nameOf(thing));
+    }
+  }
+  // The draft's own sentences, so a line's place is the one an edit
+  // names; what comes on with each, where the mend kept them all.
+  const aligned = script.beats.length === sheet.draft.beats.length;
+  return {
+    kind: 'explainer',
+    title: sheet.title,
+    transition: sheet.transition,
+    lines: sheet.draft.beats.map((beat, k) => ({
+      say: beat.say,
+      shows: aligned ? (shows[k] ?? []) : [],
+    })),
+  };
+}
+
+export function sheetDto(
+  sheet: SceneSheet,
+  teach: string | null,
+): StudioSheetDto {
+  return sheet.kind === 'explainer' ? explainerCard(sheet, teach) : sheet;
+}
+
+export function sceneDto(
+  scene: StudioSceneRecord,
+  episode: StudioEpisodeRecord,
+  bible: StudioBible | null,
+  brief: StudioBrief,
+): StudioSceneDto {
+  const planned = episode.outline?.scenes[scene.position];
+  const made = Boolean(scene.sceneKey);
+  return {
+    id: scene.id,
+    position: scene.position,
+    title:
+      scene.sheet?.title ?? planned?.title ?? `Scene ${scene.position + 1}`,
+    status: scene.status,
+    step: scene.step,
+    error: scene.error,
+    sheet: scene.sheet ? sheetDto(scene.sheet, planned?.teach ?? null) : null,
+    problems: scene.problems,
+    stale: made && needsMaking(scene, bible, brief),
+    made,
+    seconds: scene.durationMs
+      ? Math.round(scene.durationMs / 1000)
+      : scene.sheet
+        ? secondsOf(scene.sheet)
+        : (planned?.seconds ?? 0),
+    durationMs: scene.durationMs,
+    canUndo: Boolean(scene.previousSheet),
+  };
+}
+
+/** Why an episode cannot be made now; empty when it can. */
+export function blockersOf(
+  episode: StudioEpisodeRecord,
+  scenes: StudioSceneRecord[],
+  bible: StudioBible | null,
+  brief: StudioBrief,
+): string[] {
+  if (episode.phase !== 'script' && episode.phase !== 'made')
+    return [
+      brief.format === 'explainer'
+        ? 'Approve the outline first.'
+        : 'Approve the outline and the cast first.',
+    ];
+  if (episode.busy === 'make') return ['The film is being made now.'];
+  if (episode.busy) return ['Still writing: wait for it to finish.'];
+  const out: string[] = [];
+  if (!scenes.length) out.push('There are no scenes yet.');
+  if (scenes.some((s) => s.status === 'writing' || !s.sheet))
+    out.push('Some scenes are still being written.');
+  for (const scene of scenes) {
+    const error = errorsIn(scene.problems)[0];
+    if (error)
+      out.push(
+        `Scene ${scene.position + 1} has a problem to put right: ${error.message}`,
+      );
+  }
+  if (!out.length && !scenes.some((s) => needsMaking(s, bible, brief)))
+    out.push('Every scene is made already.');
+  return out;
+}
+
+export function episodeDto(
+  episode: StudioEpisodeRecord,
+  scenes: StudioSceneRecord[],
+  bible: StudioBible | null,
+  brief: StudioBrief,
+): StudioEpisodeDto {
+  const dtos = scenes.map((s) => sceneDto(s, episode, bible, brief));
+  return {
+    id: episode.id,
+    showId: episode.showId,
+    number: episode.number,
+    title: episode.title,
+    logline: episode.logline,
+    phase: episode.phase,
+    busy: episode.busy,
+    error: episode.error,
+    outline: episode.outline,
+    scenes: dtos,
+    durationMs: episode.durationMs,
+    shareToken: episode.shareToken,
+    toMakeSeconds: scenes
+      .filter((s) => needsMaking(s, bible, brief))
+      .reduce((n, s) => n + (s.sheet ? secondsOf(s.sheet) : 0), 0),
+    blockers: blockersOf(episode, scenes, bible, brief),
+    hasThumb: Boolean(episode.thumbKey),
+  };
+}
+
+export function messageDto(message: StudioMessageRecord): StudioMessageDto {
+  return {
+    id: message.id,
+    role: message.role,
+    content: message.content,
+    choices: message.meta?.choices ?? [],
+    refused: Boolean(message.meta?.refused),
+    createdAt: message.createdAt.toISOString(),
+  };
+}
+
+export { briefMissing };

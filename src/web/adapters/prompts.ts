@@ -146,7 +146,7 @@ const MERMAID_TYPES =
  * writer, and the call that turns an older description into the kit's
  * choices. The lists themselves are the schema's.
  */
-const FIGURE_GUIDE = [
+export const FIGURE_GUIDE = [
   'figure is how the person looks, as a drawing kit that draws every',
   'person in one cartoon style needs it, one choice a field: age',
   '(child, teen, adult, elder), build, skin a tone from 1, the lightest,',

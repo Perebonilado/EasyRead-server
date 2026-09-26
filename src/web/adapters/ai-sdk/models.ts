@@ -79,6 +79,10 @@ const TASK_VAR: Record<LlmTask, string> = {
   scene_profile: 'AI_MODEL_SCENE_PROFILE',
   scene_notes: 'AI_MODEL_SCENE_NOTES',
   scene_story: 'AI_MODEL_SCENE_STORY',
+  // The Studio: the producer is a quick call a turn; the writers plan a
+  // show, an episode and each scene, and are worth a careful model.
+  studio_chat: 'AI_MODEL_STUDIO_CHAT',
+  studio_write: 'AI_MODEL_STUDIO_WRITE',
   topic_quiz: 'AI_MODEL_QUIZ',
   // Guided reading: the preview is one call per chapter ever (cached), the
   // graders run once per checkpoint — all three default to the cheap model
@@ -118,6 +122,10 @@ const TASK_DEFAULT: Partial<Record<LlmTask, string>> = {
   // the cave with her two readings in three), at about five times the
   // cost: the small model by choice, 4.1 by setting AI_MODEL_SCENE_STORY.
   scene_story: 'openai:gpt-4.1-mini',
+  // The Studio on DeepSeek, as the video writer is: never gpt-4.1 for the
+  // writer (Richard, 2026-09-25). Thinking: STUDIO_WRITE_THINKING.
+  studio_chat: 'deepseek:deepseek-flash',
+  studio_write: 'deepseek:deepseek-flash',
 };
 
 const DEFAULT_MODEL = 'openai:gpt-4o-mini';

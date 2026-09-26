@@ -255,8 +255,15 @@ export function characterVoice(
     (c) => c.voice === character.voice && c.met < character.met,
   ).length;
   const kind = character.voice;
+  // A voice someone chose is theirs; else the next of their kind's.
+  const pick =
+    character.voicePick !== undefined &&
+    character.voicePick !== null &&
+    character.voicePick >= 0
+      ? character.voicePick
+      : before;
   return {
-    voice: palette[before % palette.length],
+    voice: palette[pick % palette.length],
     pace: CHARACTER_PACE[kind],
     style: `as ${character.name}, ${CHARACTER_MANNER[kind] ?? (kind === 'creature' ? 'a creature' : `${/^[aeiou]/.test(kind) ? 'an' : 'a'} ${kind}`)}${character.traits.length ? `, ${character.traits.join(', ')}` : ''}, saying their own line`,
   };

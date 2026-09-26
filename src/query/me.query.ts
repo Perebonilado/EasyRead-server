@@ -141,6 +141,7 @@ export class MeQuery {
             documentsPerMonth: plan.documentsPerMonth,
             studyMinutesPerDay: plan.studyMinutesPerDay,
             voiceMinutesPerMonth: plan.voiceMinutesPerMonth,
+            studioMinutesPerMonth: plan.studioMinutesPerMonth,
             watermarkedExports: plan.watermarkedExports,
           },
         };

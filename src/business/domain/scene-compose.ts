@@ -61,6 +61,7 @@ import {
 import { paletteOf, placeMusic } from './scene-music';
 import { drawProp } from './scene-props';
 import type { DocumentProfile } from './scene-profile';
+import { settledOf, withoutJumps } from './scene-film';
 import type { GatedDrawing } from './scene-svg';
 import { anchorMs, quietGaps, spaced, type TimedBeat } from './scene-timing';
 import { numberWords } from './spoken';
@@ -462,8 +463,16 @@ export interface ComposeInput {
   durationMs: number;
   timing: SceneTiming;
   generator: string;
-  /** The book: its instruments, the bounds on its music, whether it is a story, whom it is for. */
-  profile?: Pick<DocumentProfile, 'kind' | 'tone' | 'story' | 'stage'> | null;
+  /**
+   * The book: its instruments, the bounds on its music, whether it is a
+   * story, whom it is for; and `film` on a Studio film's scene, played as a
+   * clip of the film.
+   */
+  profile?:
+    | (Pick<DocumentProfile, 'kind' | 'tone' | 'story' | 'stage'> & {
+        film?: boolean;
+      })
+    | null;
 }
 
 /**
@@ -637,11 +646,55 @@ export function storyShots(
 
 /** A close or two-shot the scene asked for holds this long at most: then the whole stage again. */
 const DIRECTED_MOST_MS = 8000;
+/**
+ * A cut comes in the quiet before a line: this long after the last word
+ * said, and no sooner than this before the line, so the eye is on the new
+ * shot as the words begin and never leaves anyone in the middle of theirs.
+ */
+const CUT_AFTER_WORDS_MS = 120;
+const CUT_BEFORE_LINE_MS = 250;
+/** No shot changes this near a directed scene's end: the last shot holds, and the film goes on to the next from it. */
+const HOLD_LAST_MS = 1500;
 
 /**
- * The camera as a scene says it (the Studio's sheets): from each shot's
- * sentence until the next shot's, or the stage changing, the whole stage,
- * one person close, or two framed together. Only on who is there.
+ * Where cuts can go between a scene's lines. `before(b)`: in the quiet
+ * before line `b`. `from(t)`: at `t` when it is between lines, else in
+ * the quiet after the line it falls in.
+ */
+export function quietCuts(
+  beats: readonly Pick<TimedBeat, 'startMs' | 'endMs'>[],
+  durationMs: number,
+): { before: (b: number) => number; from: (t: number) => number } {
+  const before = (b: number) => {
+    const start = beats[b].startMs;
+    const said = b > 0 ? beats[b - 1].endMs : -Infinity;
+    return Math.max(
+      0,
+      Math.min(
+        start,
+        Math.max(said + CUT_AFTER_WORDS_MS, start - CUT_BEFORE_LINE_MS),
+      ),
+    );
+  };
+  const from = (t: number) => {
+    const b = beats.findIndex((beat) => beat.endMs + CUT_AFTER_WORDS_MS > t);
+    if (b < 0 || beats[b].startMs > t) return t;
+    return b + 1 < beats.length
+      ? before(b + 1)
+      : Math.min(durationMs, beats[b].endMs + CUT_AFTER_WORDS_MS);
+  };
+  return { before, from };
+}
+
+/**
+ * The camera as a scene says it (the Studio's sheets), cut as a film is:
+ * the whole stage, one person close, or two framed together, each from
+ * the quiet before its line until the next the sheet asks for (the whole
+ * stage between). A shot ends before the stage changes, so an arrival is
+ * seen whole; one held 8 s goes back to the whole stage in the quiet
+ * after the line it has reached. Two in a row on the same are one shot, a
+ * shot too short to take in is none, and nothing changes in the scene's
+ * last moments. Only on who is there. Every shot comes in by a cut.
  */
 export function directedShots(
   script: SceneScript,
@@ -649,41 +702,108 @@ export function directedShots(
   steps: readonly SceneStepDto[],
   durationMs: number,
 ): SceneEffectDto[] {
-  const shots: SceneEffectDto[] = [];
+  if (!beats.length) return [];
   const stageAt = (t: number) =>
     [...steps].reverse().find((step) => step.atMs <= t)?.show ?? [];
   const changeAfter = (t: number) =>
     steps.find((step) => step.atMs > t + 50)?.atMs ?? durationMs;
-  const asked = [...(script.camera ?? [])].sort((a, b) => a.beat - b.beat);
-  asked.forEach((shot, i) => {
-    if (shot.shot === 'wide' || !shot.on) return;
-    const beat = beats[Math.min(shot.beat, beats.length - 1)];
-    if (!beat) return;
-    const from = Math.max(0, beat.startMs - 200);
-    const next = asked[i + 1];
-    const nextAt = next
-      ? (beats[Math.min(next.beat, beats.length - 1)]?.startMs ?? durationMs)
-      : durationMs;
-    const until = Math.min(
-      nextAt - 100,
-      changeAfter(from),
-      from + DIRECTED_MOST_MS,
-      durationMs,
-    );
-    const on = stageAt(from + 250);
-    if (!on.includes(shot.on) || until - from < SHOT_LEAST_MS) return;
+  const cuts = quietCuts(beats, durationMs);
+  /** The line a moment falls in the words of, or -1. */
+  const lineAt = (t: number) =>
+    beats.findIndex((beat) => beat.startMs <= t && t < beat.endMs);
+  // What the sheet asks for, from where: a shot on who is there, or the
+  // whole stage (null). Two for one line: the later.
+  const wanted: {
+    at: number;
+    shot: { on: string; with: string | null } | null;
+  }[] = [];
+  for (const shot of [...(script.camera ?? [])].sort(
+    (a, b) => a.beat - b.beat,
+  )) {
+    const b = Math.min(shot.beat, beats.length - 1);
+    const at = Math.round(cuts.before(b));
+    const on = stageAt(beats[b].startMs + 50);
+    const framed =
+      shot.shot !== 'wide' && shot.on && on.includes(shot.on)
+        ? {
+            on: shot.on,
+            with:
+              shot.shot === 'two' &&
+              shot.with &&
+              shot.with !== shot.on &&
+              on.includes(shot.with)
+                ? shot.with
+                : null,
+          }
+        : null;
+    if (wanted[wanted.length - 1]?.at === at) wanted.pop();
+    wanted.push({ at, shot: framed });
+  }
+  const shots: SceneEffectDto[] = [];
+  wanted.forEach(({ at, shot }, i) => {
+    if (!shot) return;
+    let until = Math.min(wanted[i + 1]?.at ?? durationMs, durationMs);
+    // Before the stage changes; in the quiet before the line it changes in.
+    // A change in the shot's own first line comes on in the shot, which
+    // runs on to the quiet after that line: never lost, nor cut mid-line.
+    const change = changeAfter(at);
+    if (change < until) {
+      const line = lineAt(change);
+      const quiet = line >= 0 ? cuts.before(line) : change;
+      until = quiet > at ? quiet : Math.min(until, cuts.from(change));
+    }
+    if (until - at > DIRECTED_MOST_MS)
+      until = Math.min(until, cuts.from(at + DIRECTED_MOST_MS));
+    until = Math.round(until);
+    const last = shots[shots.length - 1];
+    // The same framing again at once: one shot.
+    if (
+      last &&
+      last.untilMs === at &&
+      last.target === shot.on &&
+      last.part === shot.with
+    ) {
+      last.untilMs = until;
+      return;
+    }
     shots.push({
-      atMs: Math.round(from),
+      atMs: at,
       target: shot.on,
-      part:
-        shot.shot === 'two' && shot.with && on.includes(shot.with)
-          ? shot.with
-          : null,
+      part: shot.with,
       do: 'zoom',
-      untilMs: Math.round(until),
+      untilMs: until,
+      shot: { enter: 'cut' },
     });
   });
-  return shots;
+  const same = (a: SceneEffectDto, b: SceneEffectDto) =>
+    a.target === b.target && a.part === b.part;
+  // A shot too short to take in is none: what was on before holds through it.
+  for (let i = shots.length - 1; i >= 0; i -= 1) {
+    const shot = shots[i];
+    if (shot.untilMs! - shot.atMs >= SHOT_LEAST_MS) continue;
+    const before = shots[i - 1];
+    if (before?.untilMs === shot.atMs) before.untilMs = shot.untilMs;
+    shots.splice(i, 1);
+  }
+  // So is a stretch of the whole stage between two shots: the shot before
+  // holds through it, and is one shot with the next where they frame the same.
+  for (let i = shots.length - 2; i >= 0; i -= 1) {
+    const [a, b] = [shots[i], shots[i + 1]];
+    if (b.atMs - a.untilMs! >= SHOT_LEAST_MS) continue;
+    a.untilMs = b.atMs;
+    if (same(a, b)) {
+      a.untilMs = b.untilMs;
+      shots.splice(i + 1, 1);
+    }
+  }
+  // Nothing changes in the last moments: a shot that would end there holds
+  // to the end, and none begins there.
+  const tail = durationMs - HOLD_LAST_MS;
+  return shots
+    .filter((shot) => shot.atMs < tail)
+    .map((shot) =>
+      shot.untilMs! > tail ? { ...shot, untilMs: durationMs } : shot,
+    );
 }
 
 /** A story's drawings with nothing set beside them: the labels a lesson would, and what a character is like. */
@@ -712,6 +832,9 @@ export function composeScene(input: ComposeInput): {
   audit: Record<StagingName, Collision[][]>;
 } {
   const { script, beats, durationMs } = input;
+  /** A Studio film's scene; and one whose camera its sheet directs. */
+  const film = input.profile?.film === true;
+  const cameraDirected = Boolean(script.camera?.length);
   // A story's page: its characters and places are the story's own.
   const story = script.cast.some(
     (thing) => thing.kind === 'character' || thing.kind === 'place',
@@ -1387,7 +1510,7 @@ export function composeScene(input: ComposeInput): {
   // A screenplay's camera: the whole stage as it opens and while the
   // narrator speaks; on two who trade lines while others stand by; close
   // on a whisper, a shout or a strong face.
-  if (script.camera?.length)
+  if (cameraDirected)
     effects.push(...directedShots(script, beats, steps, durationMs));
   else if (script.beats.some((beat) => beat.kind))
     effects.push(...storyShots(script, beats, steps, effects, durationMs));
@@ -1532,6 +1655,8 @@ export function composeScene(input: ComposeInput): {
         : [];
     },
     acting: (id) => Boolean(acting[id]),
+    // The camera a sheet directs is the whole of it.
+    shots: !cameraDirected,
   });
   effects.sort((a, b) => a.atMs - b.atMs);
 
@@ -1796,8 +1921,26 @@ export function composeScene(input: ComposeInput): {
   };
   const box = place('box');
   const wide = place('wide');
+  // A directed scene's shots with no jump cut: judged where the wide stage
+  // stands everyone, as the film shows it.
+  if (cameraDirected) {
+    const kept = withoutJumps(
+      effects.filter((e) => e.do === 'zoom'),
+      steps,
+      { ...STAGINGS.wide, places: wide.places },
+      durationMs,
+    );
+    effects.splice(
+      0,
+      effects.length,
+      ...[...effects.filter((e) => e.do !== 'zoom'), ...kept].sort(
+        (a, b) => a.atMs - b.atMs,
+      ),
+    );
+  }
+  const setting = story ? settingOf() : null;
 
-  return {
+  const composed: ReturnType<typeof composeScene> = {
     scene: {
       version: 4,
       generator: input.generator,
@@ -1807,7 +1950,9 @@ export function composeScene(input: ComposeInput): {
       ...(input.profile?.stage ? { stage: input.profile.stage } : {}),
       ...(Object.keys(acting).length ? { acting } : {}),
       ...(props.length ? { props } : {}),
-      ...(story ? { setting: settingOf() } : {}),
+      ...(setting || film
+        ? { setting: { ...setting, ...(film ? { film: true as const } : {}) } }
+        : {}),
       sound: {
         mood: script.mood,
         music: placeMusic({
@@ -1875,6 +2020,10 @@ export function composeScene(input: ComposeInput): {
     filled,
     audit: { box: box.audit, wide: wide.audit },
   };
+  // A film's scene says when all it plans has finished, which may be after
+  // its voice: the film's edit holds on it until then.
+  if (film) composed.scene.settledMs = settledOf(composed.scene);
+  return composed;
 }
 
 /** Where a run of words sits: its measured width, centred where it is set. */
@@ -2202,6 +2351,8 @@ export function fillQuiet(input: {
   names: (id: string) => string[];
   parts: (id: string) => string[];
   acting: (id: string) => boolean;
+  /** Whether the camera may go in close: not where a sheet directs it. */
+  shots?: boolean;
 }): number {
   const { steps, effects, beats, durationMs } = input;
   // A pulse draws the eye to what is already there: nothing new to see,
@@ -2257,6 +2408,7 @@ export function fillQuiet(input: {
       const until = Math.min(at + FILL_SHOT_MS, to - 400);
       if (
         !made &&
+        input.shots !== false &&
         current.show.length >= 2 &&
         until - at >= FILL_SHOT_LEAST_MS
       ) {

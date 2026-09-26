@@ -1576,11 +1576,51 @@ export function setThing(
   };
 }
 
-/** How an animal or a creature is drawn to stand beside the people the kit draws. */
+/**
+ * How an animal or a creature is drawn to stand beside the people the kit
+ * draws, and joined like a cut-paper puppet, so code can move its parts
+ * about their joints (scene-sheet-rig) with nothing coming loose.
+ */
 export const CAST_STYLE = [
   'Draw it to stand beside cartoon people drawn in one style: flat colours with no gradients, shading or texture, simple rounded shapes like cut paper, one dark outline (#2d2a32) about three units wide, and big round white eyes with small black dot pupils.',
-  'It faces the viewer, standing, its feet on the bottom edge of the frame.',
+  'Join it like a cut-paper puppet: every part overlaps the body a little where they meet, drawn behind it (the ears behind the head); nothing floats apart; a tail comes from behind the body at the hip.',
 ].join(' ');
+
+/** How an animal stands, and how a creature: an animal as the animal really stands, never upright like a person. */
+const STANCES: Record<'animal' | 'creature', string> = {
+  animal:
+    'It stands naturally on all four legs, as the animal really stands, seen in three-quarter view with its face turned to the viewer: not upright like a person, and with no arms. Its feet are on the bottom edge of the frame.',
+  creature:
+    'It faces the viewer, standing, its feet on the bottom edge of the frame.',
+};
+
+/** The parts each is drawn in: a tail and ears only when it has them. */
+const SHEET_PARTS_BY_KIND: Record<
+  'animal' | 'creature',
+  DrawingThing['parts']
+> = {
+  animal: [
+    { name: 'head', label: false },
+    { name: 'body', label: false },
+    { name: 'legs', label: false },
+    { name: 'tail', label: false, optional: true },
+    { name: 'ears', label: false, optional: true },
+  ],
+  creature: [
+    { name: 'head', label: false },
+    { name: 'body', label: false },
+    { name: 'arms', label: false },
+    { name: 'legs', label: false },
+    { name: 'tail', label: false, optional: true },
+  ],
+};
+
+const OPTIONAL_PARTS: Record<'animal' | 'creature', string> = {
+  animal:
+    'Draw the tail in <g id="tail"> and the ears in <g id="ears">, each ear a group of its own inside it, only if it has them; leave out a group it has no part for.',
+  creature:
+    'Draw a tail in <g id="tail"> only if it has one; leave the group out if not.',
+};
 
 const SIZES: Record<StorySize, string> = {
   small: 'It is small: beside a grown-up it would come up to their knee.',
@@ -1598,6 +1638,7 @@ export function sheetThing(
   character: StoryCharacter,
   bookTitle: string,
 ): DrawingThing {
+  const kind = character.kind === 'animal' ? 'animal' : 'creature';
   return {
     id: character.id,
     kind: 'drawing',
@@ -1606,14 +1647,18 @@ export function sheetThing(
       `${character.name}, a character in "${bookTitle}"${character.look ? `: ${character.look}` : ''}.`,
       'The whole figure, drawn so the same figure can stand on every page of the story.',
       CAST_STYLE,
+      STANCES[kind],
       character.size ? SIZES[character.size] : '',
       'The face inside the head has no eyes, brows or mouth: each expression group draws the eyes, brows and mouth, all in the same place on the face.',
+      OPTIONAL_PARTS[kind],
     ]
       .filter(Boolean)
       .join(' '),
+    // Code moves it, about the joints it measures: the artist's own
+    // motion turned a tail about a point off the drawing.
     motion:
-      'breathes slowly: the body rises and falls a little; nothing else moves',
-    parts: SHEET_PARTS.map((name) => ({ name, label: false })),
+      'none: draw it still, with no <style> animation and no SMIL; the stage moves it',
+    parts: SHEET_PARTS_BY_KIND[kind].map((part) => ({ ...part })),
     states: EXPRESSIONS.map((name) => ({
       name,
       look: EXPRESSION_LOOKS[name],

@@ -7,6 +7,7 @@ import {
   secondsOf,
   storySheetOf,
   EMPTY_BRIEF,
+  type SceneSheet,
 } from './studio';
 import {
   checkBible,
@@ -21,6 +22,7 @@ import {
   repairSheet,
   spelledNumbers,
 } from './studio-check';
+import { JOIN_SECONDS, joinOf, joinsSeconds, type Join } from './studio-edit';
 import { placeThingId, stageStory, storyBibleFor } from './studio-stage';
 
 /** "Tobi and Bingo": a boy loses his dog at the market. */
@@ -469,5 +471,78 @@ describe('a story scene the writer left wrong', () => {
       'Tobi looks everywhere.',
     ]);
     expect(fixed.camera.map((c) => c.beat)).toEqual([2]);
+  });
+});
+
+describe('how the film joins one scene to the next', () => {
+  const at = (more: Record<string, unknown>) =>
+    storySheetOf({
+      title: 'A scene',
+      set: 'market',
+      time: 'day',
+      weather: 'clear',
+      transition: 'cut',
+      beats: [{ kind: 'narration', say: 'The market is busy.' }],
+      ...more,
+    });
+  const market = at({});
+  const lesson = explainerSheetOf({
+    kind: 'explainer',
+    title: 'Antigens',
+    transition: 'cut',
+    draft: { title: 'Antigens', beats: [], cast: [], steps: [] },
+  });
+
+  const joins: [string, Join, SceneSheet | null, SceneSheet][] = [
+    ['the same place, time running on', 'cut', market, at({})],
+    ['a new place', 'dissolve', market, at({ set: 'yard' })],
+    ['the weather changing', 'dissolve', market, at({ weather: 'rain' })],
+    ['the light changing', 'dip', market, at({ time: 'night' })],
+    [
+      'the writer saying time passes',
+      'dip',
+      market,
+      at({ transition: 'fade' }),
+    ],
+    [
+      'time passing in a new place',
+      'dip',
+      market,
+      at({ set: 'yard', transition: 'fade' }),
+    ],
+    ["an explainer's next idea", 'dissolve', lesson, lesson],
+    [
+      "an explainer's scene where time passes",
+      'dip',
+      lesson,
+      { ...lesson, transition: 'fade' },
+    ],
+    ['a scene before it not known', 'dissolve', null, market],
+  ];
+  it.each(joins)('%s: a %s', (_, join, before, sheet) => {
+    expect(joinOf(before, sheet)).toBe(join);
+  });
+
+  it('counts the joins in the length of an outline', () => {
+    expect(joinsSeconds(1)).toBe(0);
+    expect(joinsSeconds(5)).toBe(4 * JOIN_SECONDS);
+    // Six scenes of 13 s: 78 s said, and 10 s of joins. For a minute's
+    // episode that is too long only once the joins are counted.
+    const outline = outlineOf({
+      title: 'Where is Bingo?',
+      scenes: Array.from({ length: 6 }, (_, k) => ({
+        title: `Scene ${k + 1}`,
+        summary: 'Tobi looks for Bingo with Mama',
+        set: 'market',
+        cast: ['tobi', 'mama', 'bingo'],
+        seconds: 13,
+      })),
+    });
+    expect(checkOutline(outline, bible, 1.5, true).join(' ')).not.toMatch(
+      /add up/,
+    );
+    expect(checkOutline(outline, bible, 1.0, true).join(' ')).toMatch(
+      /add up to 78 seconds, and the joins between them about 10 more/,
+    );
   });
 });

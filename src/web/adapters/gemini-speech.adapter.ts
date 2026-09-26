@@ -417,9 +417,10 @@ export class GeminiSpeechAdapter implements SpeechPort {
       if (!one) continue;
       rate = one.rate;
       parts.push(one.samples);
+      // The last run's too: the quiet planned after the last line is where
+      // the scene's last moments play, and the film holds on them.
       const pause = run.pieces[run.pieces.length - 1].pauseAfter;
-      if (k < runs.length - 1 && pause > 0)
-        parts.push(new Int16Array(Math.round(pause * rate)));
+      if (pause > 0) parts.push(new Int16Array(Math.round(pause * rate)));
       if (one.usage) {
         tokensIn += one.usage.tokensIn;
         tokensOut += one.usage.tokensOut;

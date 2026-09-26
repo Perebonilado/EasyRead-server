@@ -717,7 +717,9 @@ export class StudioProcessor {
           repairExplainer(row.sheet as ExplainerSheet, lesson),
           lesson,
         ).script;
-    const profile: DocumentProfile = {
+    // A film's scene: played as a clip of the film, its shots cut.
+    const profile: DocumentProfile & { film: true } = {
+      film: true,
       subject: story ? 'a story' : bible.subject,
       kind: story ? 'fiction' : 'textbook',
       tone:

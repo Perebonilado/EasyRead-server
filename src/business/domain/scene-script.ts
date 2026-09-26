@@ -299,8 +299,12 @@ export interface DrawingThing {
   brief: string;
   /** What moves while it is on screen, and why. */
   motion: string;
-  /** Things the voice names inside it, each drawn as its own group. */
-  parts: { name: string; label: boolean }[];
+  /**
+   * Things the voice names inside it, each drawn as its own group. An
+   * optional part is drawn only if the thing has one (a tail), and is no
+   * fault missing.
+   */
+  parts: { name: string; label: boolean; optional?: true }[];
   /** Overlays drawn over it and shown later: the bulb lit, the valve open. */
   states: { name: string; look: string }[];
   shape: DrawingShape;

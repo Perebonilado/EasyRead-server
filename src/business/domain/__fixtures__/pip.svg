@@ -1,0 +1,178 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="212.73 224.72 463.25 599.07">
+  <style>
+    @keyframes breathe {
+      0%, 100% { transform: scaleY(1); }
+      50% { transform: scaleY(1.03); }
+    }
+    @keyframes wag {
+      0%, 100% { transform: rotate(-20deg); }
+      50% { transform: rotate(20deg); }
+    }
+    @keyframes earflopL {
+      0%, 100% { transform: rotate(-5deg); }
+      50% { transform: rotate(5deg); }
+    }
+    @keyframes earflopR {
+      0%, 100% { transform: rotate(5deg); }
+      50% { transform: rotate(-5deg); }
+    }
+    #body-breathe {
+      animation: breathe 3s ease-in-out infinite;
+      transform-origin: 400px 620px;
+      transform-box: fill-box;
+    }
+    #tail-wag {
+      animation: wag 0.8s ease-in-out infinite;
+      transform-origin: 545px 560px;
+      transform-box: fill-box;
+    }
+    #ear-l {
+      animation: earflopL 2.2s ease-in-out infinite;
+      transform-origin: 310px 340px;
+      transform-box: fill-box;
+    }
+    #ear-r {
+      animation: earflopR 2.2s ease-in-out 0.3s infinite;
+      transform-origin: 490px 340px;
+      transform-box: fill-box;
+    }
+  </style>
+
+  <!-- Tail -->
+  <g id="tail">
+    <g id="tail-wag">
+      <path d="M 545 560 Q 590 530 620 560 Q 640 580 625 600 Q 610 615 595 600" fill="#8B5E3C" stroke="#2d2a32" stroke-width="7" stroke-linecap="round" stroke-linejoin="round"/>
+      <path d="M 620 560 Q 635 575 625 595" fill="none" stroke="#2d2a32" stroke-width="6" stroke-linecap="round"/>
+    </g>
+  </g>
+
+  <!-- Legs -->
+  <g id="legs">
+    <rect x="330" y="680" width="38" height="90" rx="18" fill="#8B5E3C" stroke="#2d2a32" stroke-width="7"/>
+    <rect x="430" y="680" width="38" height="90" rx="18" fill="#8B5E3C" stroke="#2d2a32" stroke-width="7"/>
+    <ellipse cx="349" cy="772" rx="22" ry="12" fill="#A0714F" stroke="#2d2a32" stroke-width="6"/>
+    <ellipse cx="449" cy="772" rx="22" ry="12" fill="#A0714F" stroke="#2d2a32" stroke-width="6"/>
+  </g>
+
+  <!-- Body -->
+  <g id="body">
+    <g id="body-breathe">
+      <ellipse cx="400" cy="590" rx="95" ry="115" fill="#8B5E3C" stroke="#2d2a32" stroke-width="7"/>
+      <ellipse cx="400" cy="610" rx="60" ry="70" fill="#A0714F" stroke="#2d2a32" stroke-width="5"/>
+      <!-- Collar -->
+      <path d="M 310 480 Q 400 510 490 480 L 490 505 Q 400 535 310 505 Z" fill="#D9577A" stroke="#2d2a32" stroke-width="6" stroke-linejoin="round"/>
+      <circle cx="400" cy="505" r="12" fill="#F2B33D" stroke="#2d2a32" stroke-width="5"/>
+    </g>
+  </g>
+
+  <!-- Arms -->
+  <g id="arms">
+    <path d="M 315 520 Q 280 560 290 620 Q 300 640 315 635" fill="#8B5E3C" stroke="#2d2a32" stroke-width="7" stroke-linecap="round" stroke-linejoin="round"/>
+    <path d="M 485 520 Q 520 560 510 620 Q 500 640 485 635" fill="#8B5E3C" stroke="#2d2a32" stroke-width="7" stroke-linecap="round" stroke-linejoin="round"/>
+  </g>
+
+  <!-- Head -->
+  <g id="head">
+    <!-- Ears -->
+    <g id="ear-l">
+      <path d="M 330 340 Q 260 310 255 380 Q 250 450 310 430 Q 335 415 340 380" fill="#8B5E3C" stroke="#2d2a32" stroke-width="7" stroke-linejoin="round"/>
+      <path d="M 315 360 Q 275 345 272 385 Q 270 420 305 410" fill="#A0714F" stroke="none"/>
+    </g>
+    <g id="ear-r">
+      <path d="M 470 340 Q 540 310 545 380 Q 550 450 490 430 Q 465 415 460 380" fill="#8B5E3C" stroke="#2d2a32" stroke-width="7" stroke-linejoin="round"/>
+      <path d="M 485 360 Q 525 345 528 385 Q 530 420 495 410" fill="#A0714F" stroke="none"/>
+    </g>
+
+    <!-- Head shape -->
+    <ellipse cx="400" cy="370" rx="115" ry="105" fill="#8B5E3C" stroke="#2d2a32" stroke-width="7"/>
+
+    <!-- White patch over right eye (viewer's left) -->
+    <ellipse cx="355" cy="355" rx="42" ry="48" fill="#FFFFFF" stroke="#2d2a32" stroke-width="5"/>
+
+    <!-- Muzzle -->
+    <ellipse cx="400" cy="420" rx="60" ry="45" fill="#A0714F" stroke="#2d2a32" stroke-width="5"/>
+
+    <!-- Nose -->
+    <ellipse cx="400" cy="405" rx="18" ry="12" fill="#2d2a32"/>
+    <ellipse cx="394" cy="402" rx="5" ry="3" fill="#6B7785"/>
+  </g>
+
+  <!-- Neutral State -->
+  <g id="neutral">
+    <circle cx="355" cy="350" r="20" fill="#FFFFFF" stroke="#2d2a32" stroke-width="4"/>
+    <circle cx="445" cy="350" r="20" fill="#FFFFFF" stroke="#2d2a32" stroke-width="4"/>
+    <circle cx="355" cy="350" r="8" fill="#2d2a32"/>
+    <circle cx="445" cy="350" r="8" fill="#2d2a32"/>
+    <path d="M 340 325 Q 355 318 370 325" fill="none" stroke="#2d2a32" stroke-width="5" stroke-linecap="round"/>
+    <path d="M 430 325 Q 445 318 460 325" fill="none" stroke="#2d2a32" stroke-width="5" stroke-linecap="round"/>
+    <path d="M 385 440 Q 400 448 415 440" fill="none" stroke="#2d2a32" stroke-width="5" stroke-linecap="round"/>
+  </g>
+
+  <!-- Happy State -->
+  <g id="happy">
+    <circle cx="355" cy="345" r="22" fill="#FFFFFF" stroke="#2d2a32" stroke-width="4"/>
+    <circle cx="445" cy="345" r="22" fill="#FFFFFF" stroke="#2d2a32" stroke-width="4"/>
+    <circle cx="355" cy="345" r="9" fill="#2d2a32"/>
+    <circle cx="445" cy="345" r="9" fill="#2d2a32"/>
+    <path d="M 335 315 Q 355 300 375 315" fill="none" stroke="#2d2a32" stroke-width="6" stroke-linecap="round"/>
+    <path d="M 425 315 Q 445 300 465 315" fill="none" stroke="#2d2a32" stroke-width="6" stroke-linecap="round"/>
+    <path d="M 370 435 Q 400 465 430 435" fill="none" stroke="#2d2a32" stroke-width="5" stroke-linecap="round"/>
+  </g>
+
+  <!-- Sad State -->
+  <g id="sad">
+    <circle cx="355" cy="358" r="18" fill="#FFFFFF" stroke="#2d2a32" stroke-width="4"/>
+    <circle cx="445" cy="358" r="18" fill="#FFFFFF" stroke="#2d2a32" stroke-width="4"/>
+    <circle cx="355" cy="363" r="7" fill="#2d2a32"/>
+    <circle cx="445" cy="363" r="7" fill="#2d2a32"/>
+    <path d="M 335 320 Q 355 328 375 335" fill="none" stroke="#2d2a32" stroke-width="5" stroke-linecap="round"/>
+    <path d="M 425 335 Q 445 328 465 320" fill="none" stroke="#2d2a32" stroke-width="5" stroke-linecap="round"/>
+    <path d="M 375 450 Q 400 435 425 450" fill="none" stroke="#2d2a32" stroke-width="5" stroke-linecap="round"/>
+  </g>
+
+  <!-- Angry State -->
+  <g id="angry">
+    <path d="M 338 342 Q 355 348 372 342" fill="none" stroke="#2d2a32" stroke-width="5" stroke-linecap="round"/>
+    <path d="M 428 342 Q 445 348 462 342" fill="none" stroke="#2d2a32" stroke-width="5" stroke-linecap="round"/>
+    <circle cx="355" cy="350" r="15" fill="#FFFFFF" stroke="#2d2a32" stroke-width="4"/>
+    <circle cx="445" cy="350" r="15" fill="#FFFFFF" stroke="#2d2a32" stroke-width="4"/>
+    <circle cx="355" cy="350" r="6" fill="#2d2a32"/>
+    <circle cx="445" cy="350" r="6" fill="#2d2a32"/>
+    <path d="M 340 310 L 370 325" fill="none" stroke="#2d2a32" stroke-width="6" stroke-linecap="round"/>
+    <path d="M 430 325 L 460 310" fill="none" stroke="#2d2a32" stroke-width="6" stroke-linecap="round"/>
+    <path d="M 380 442 L 420 442" fill="none" stroke="#2d2a32" stroke-width="5" stroke-linecap="round"/>
+  </g>
+
+  <!-- Afraid State -->
+  <g id="afraid">
+    <circle cx="355" cy="348" r="24" fill="#FFFFFF" stroke="#2d2a32" stroke-width="4"/>
+    <circle cx="445" cy="348" r="24" fill="#FFFFFF" stroke="#2d2a32" stroke-width="4"/>
+    <circle cx="355" cy="348" r="10" fill="#2d2a32"/>
+    <circle cx="445" cy="348" r="10" fill="#2d2a32"/>
+    <path d="M 332 312 Q 350 298 370 308" fill="none" stroke="#2d2a32" stroke-width="5" stroke-linecap="round"/>
+    <path d="M 430 308 Q 450 298 468 312" fill="none" stroke="#2d2a32" stroke-width="5" stroke-linecap="round"/>
+    <ellipse cx="400" cy="448" rx="14" ry="10" fill="none" stroke="#2d2a32" stroke-width="5"/>
+  </g>
+
+  <!-- Surprised State -->
+  <g id="surprised">
+    <circle cx="355" cy="345" r="26" fill="#FFFFFF" stroke="#2d2a32" stroke-width="4"/>
+    <circle cx="445" cy="345" r="26" fill="#FFFFFF" stroke="#2d2a32" stroke-width="4"/>
+    <circle cx="355" cy="345" r="11" fill="#2d2a32"/>
+    <circle cx="445" cy="345" r="11" fill="#2d2a32"/>
+    <path d="M 330 305 Q 355 285 380 305" fill="none" stroke="#2d2a32" stroke-width="6" stroke-linecap="round"/>
+    <path d="M 420 305 Q 445 285 470 305" fill="none" stroke="#2d2a32" stroke-width="6" stroke-linecap="round"/>
+    <circle cx="400" cy="450" r="16" fill="none" stroke="#2d2a32" stroke-width="5"/>
+  </g>
+
+  <!-- Thinking State -->
+  <g id="thinking">
+    <circle cx="365" cy="340" r="20" fill="#FFFFFF" stroke="#2d2a32" stroke-width="4"/>
+    <circle cx="445" cy="350" r="20" fill="#FFFFFF" stroke="#2d2a32" stroke-width="4"/>
+    <circle cx="370" cy="335" r="8" fill="#2d2a32"/>
+    <circle cx="445" cy="350" r="8" fill="#2d2a32"/>
+    <path d="M 345 312 Q 365 305 385 315" fill="none" stroke="#2d2a32" stroke-width="5" stroke-linecap="round"/>
+    <path d="M 430 328 Q 445 320 460 328" fill="none" stroke="#2d2a32" stroke-width="5" stroke-linecap="round"/>
+    <path d="M 380 440 Q 400 445 415 438" fill="none" stroke="#2d2a32" stroke-width="5" stroke-linecap="round"/>
+  </g>
+</svg>

@@ -1,7 +1,9 @@
 import { PLAIN_FIGURE } from './scene-figure';
 import {
   composeScene,
+  directedShots,
   fillQuiet,
+  quietCuts,
   rhythmOf,
   storyShots,
   fullestStep,
@@ -1057,6 +1059,62 @@ describe('what a character says, in a bubble', () => {
     );
   });
 
+  it("plays a Studio film's scene as a clip of the film, holding until all it plans has settled", () => {
+    const made = (film: boolean) =>
+      composeScene({
+        script: {
+          ...talking,
+          steps: [
+            ...talking.steps,
+            // Mira walks off a second after the fox's line.
+            {
+              at: { beat: 3, phrase: 'You are' },
+              word: 0,
+              after: 1,
+              stage: { layout: 'one', show: ['fox'], arrows: [] },
+              effects: [],
+            },
+          ],
+          camera: [{ beat: 3, shot: 'close', on: 'fox', with: null }],
+        },
+        drawings: new Map([
+          ['mira', figure()],
+          ['fox', figure()],
+        ]),
+        beats: beatsSaid,
+        durationMs: 11_000,
+        timing: 'voice',
+        generator: 'scene-2',
+        profile: {
+          kind: 'fiction',
+          tone: 'neutral',
+          story: true,
+          ...(film ? { film } : {}),
+        },
+      }).scene;
+    const film = made(true);
+    expect(film.setting?.film).toBe(true);
+    const last = beatsSaid[beatsSaid.length - 1].endMs;
+    // Mira's walk off starts after the voice has ended, and ends later still.
+    const off = film.steps[film.steps.length - 1].atMs;
+    expect(off).toBeGreaterThan(last);
+    expect(film.settledMs).toBeGreaterThan(off + 1000);
+    expect(film.settledMs).toBeGreaterThan(film.durationMs);
+    // The camera as the sheet says: cut in.
+    const zooms = film.effects.filter((e) => e.do === 'zoom');
+    expect(zooms).toEqual([
+      expect.objectContaining({
+        target: 'fox',
+        shot: { enter: 'cut' },
+        atMs: beatsSaid[3].startMs - 250,
+      }),
+    ]);
+    // A book's page: no film, no settled time.
+    const page = made(false);
+    expect(page.setting?.film).toBeUndefined();
+    expect(page.settledMs).toBeUndefined();
+  });
+
   it('acts what the narration says at the word that says it, and attention on a character as looks', () => {
     const sentence = talking.beats[3].say;
     const at = sentence.indexOf('says');
@@ -2043,6 +2101,210 @@ describe("a screenplay's camera", () => {
   });
 });
 
+describe("a sheet's camera, cut as a film is", () => {
+  const person = (id: string) => ({
+    id,
+    kind: 'character' as const,
+    ref: id,
+    name: id,
+    state: null,
+    met: 0,
+    intro: [],
+  });
+  const step = (atMs: number, show: string[]) => ({
+    atMs,
+    layout: 'row' as const,
+    show,
+    arrows: [],
+    enter: {},
+    focus: null,
+  });
+  /** A line said from one time to another, by someone (null: the narrator). */
+  const said = (startMs: number, endMs: number) => ({
+    text: 'Words.',
+    startMs,
+    endMs,
+    words: [] as TimedBeat['words'],
+  });
+  // The Maya film's first scene, as it was voiced: twelve lines, Maya
+  // off after the ninth.
+  const maya = [
+    said(447, 4345),
+    said(5769, 7335),
+    said(7920, 9810),
+    said(10_612, 11_798),
+    said(13_571, 15_438),
+    said(16_428, 18_706),
+    said(19_676, 20_671),
+    said(21_182, 22_120),
+    said(22_859, 23_759),
+    said(25_404, 26_900),
+    said(28_074, 29_880),
+    said(33_019, 34_750),
+  ];
+  const speakers = [
+    null,
+    'maya',
+    'maya',
+    'maya',
+    'maya',
+    'mama',
+    'maya',
+    'maya',
+    'maya',
+    'mama',
+    'mama',
+    null,
+  ];
+  const sheet = (camera: SceneScript['camera']): SceneScript => ({
+    ...script,
+    cast: ['maya', 'pip', 'mama'].map(person),
+    beats: speakers.map((speaker) =>
+      speaker
+        ? {
+            say: 'Words.',
+            pause: 'short' as const,
+            delivery: 'explain' as const,
+            kind: 'line' as const,
+            speaker,
+          }
+        : {
+            say: 'Words.',
+            pause: 'short' as const,
+            delivery: 'explain' as const,
+            kind: 'narration' as const,
+          },
+    ),
+    camera,
+  });
+  const steps = [
+    step(0, ['maya', 'pip', 'mama']),
+    step(11_948, ['maya', 'mama']),
+    step(23_909, ['mama']),
+  ];
+  const close = (beat: number, on: string) => ({
+    beat,
+    shot: 'close' as const,
+    on,
+    with: null,
+  });
+  const wide = (beat: number) => ({
+    beat,
+    shot: 'wide' as const,
+    on: null,
+    with: null,
+  });
+  const shotsOf = (camera: SceneScript['camera'], durationMs = 35_240) =>
+    directedShots(sheet(camera), maya, steps, durationMs);
+  /** Whether a moment falls in someone's words. */
+  const inWords = (t: number) =>
+    maya.some((line) => t > line.startMs && t < line.endMs);
+
+  it('cuts in the quiet before a line, never in anyone’s words', () => {
+    const cuts = quietCuts(maya, 35_240);
+    // A long quiet: a quarter of a second before the line.
+    expect(cuts.before(4)).toBe(13_571 - 250);
+    // A short one: just after the words before it.
+    expect(cuts.before(8)).toBe(22_859 - 250);
+    expect(quietCuts([said(0, 1000), said(1200, 2000)], 3000).before(1)).toBe(
+      1120,
+    );
+    // In the words of a line: the quiet after it.
+    expect(cuts.from(21_371)).toBe(22_609);
+    expect(cuts.from(24_500)).toBe(24_500);
+    const shots = shotsOf([close(4, 'maya'), close(10, 'mama')]);
+    for (const shot of shots) {
+      expect(inWords(shot.atMs)).toBe(false);
+      expect(inWords(shot.untilMs!)).toBe(false);
+      expect(shot.shot).toEqual({ enter: 'cut' });
+    }
+  });
+
+  it('ends a shot held 8 s in the quiet after the line it has reached', () => {
+    // Close on Maya from "Pip! Where are you going?": held 8 s, it would
+    // end at 21 321, in "I have to catch him!" (21 182–22 120).
+    const [first, second] = shotsOf([close(4, 'maya'), close(10, 'mama')]);
+    expect(first).toMatchObject({ atMs: 13_321, target: 'maya' });
+    expect(first.untilMs).toBeGreaterThan(22_120);
+    expect(first.untilMs).toBeLessThan(22_859);
+    expect(second).toMatchObject({
+      atMs: 27_824,
+      target: 'mama',
+      untilMs: 35_240,
+    });
+  });
+
+  it('makes two in a row on the same one shot, and goes wide where the sheet says', () => {
+    expect(
+      shotsOf([close(1, 'maya'), close(2, 'maya')]).map((s) => [
+        s.atMs,
+        s.untilMs,
+      ]),
+    ).toEqual([[5519, 11_948]]);
+    // Wide at the fourth line: the close shot ends in the quiet before it.
+    const [one, two] = shotsOf([close(1, 'maya'), wide(3), close(5, 'mama')]);
+    expect([one.atMs, one.untilMs]).toEqual([5519, 10_362]);
+    expect(two).toMatchObject({ atMs: 16_178, target: 'mama' });
+  });
+
+  it('ends before the stage changes, in the quiet before the line it changes in', () => {
+    // Pip runs off at 11 948, between two lines: the shot ends there.
+    expect(shotsOf([close(2, 'maya')])[0].untilMs).toBe(11_948);
+    const [shot] = directedShots(
+      sheet([close(2, 'maya')]),
+      maya,
+      [step(0, ['maya', 'pip', 'mama']), step(11_000, ['maya', 'mama'])],
+      35_240,
+    );
+    // In the middle of "Not the gate, Pip!": before it instead.
+    expect(shot.untilMs).toBe(10_362);
+    // A change in the shot's own first line, as its first word is said or
+    // in the middle of it: the shot runs on to the quiet after that line.
+    const after = quietCuts(maya, 35_240).before(5);
+    for (const at of [13_571, 14_571]) {
+      const found = directedShots(
+        sheet([close(4, 'maya')]),
+        maya,
+        [...steps.slice(0, 2), step(at, ['maya']), steps[2]],
+        35_240,
+      );
+      expect(found.map((one) => [one.atMs, one.untilMs])).toEqual([
+        [13_321, after],
+      ]);
+      expect(inWords(after)).toBe(false);
+    }
+  });
+
+  it('changes nothing in the last moments: the last shot holds, and none begins there', () => {
+    // Mama at the last line but one, the narrator's last at the very end.
+    const late = shotsOf([close(10, 'mama'), close(11, 'mama')], 34_900);
+    expect(late.map((s) => [s.atMs, s.untilMs])).toEqual([[27_824, 34_900]]);
+    // A shot asked for in the last second and a half is not taken.
+    expect(
+      directedShots(
+        sheet([close(11, 'mama')]),
+        [...maya.slice(0, 11), said(34_000, 34_700)],
+        steps,
+        35_000,
+      ),
+    ).toEqual([]);
+    // One that would end there runs on to the end.
+    const [held] = directedShots(
+      sheet([close(10, 'mama'), wide(11)]),
+      [...maya.slice(0, 11), said(34_000, 34_700)],
+      steps,
+      35_000,
+    );
+    expect(held.untilMs).toBe(35_000);
+  });
+
+  it('frames only who is there, and one alone when the other is not', () => {
+    expect(shotsOf([close(9, 'maya')])).toEqual([]);
+    const [two] = shotsOf([{ beat: 5, shot: 'two', on: 'mama', with: 'pip' }]);
+    expect(two).toMatchObject({ target: 'mama', part: null });
+  });
+});
+
 describe('a quiet stretch filled with what the words bring', () => {
   const step = (atMs: number, show: string[], focus: string | null = null) =>
     ({
@@ -2101,6 +2363,22 @@ describe('a quiet stretch filled with what the words bring', () => {
     );
     expect(effects[0]).toMatchObject({ target: 'lungs', do: 'zoom' });
     expect(effects[0].untilMs! - effects[0].atMs).toBeGreaterThanOrEqual(1500);
+  });
+
+  it('leaves the camera alone where a sheet directs it', () => {
+    const effects: Parameters<typeof fillQuiet>[0]['effects'] = [];
+    fillQuiet({
+      steps: [step(0, ['heart', 'lungs'], 'heart')],
+      effects,
+      beats: said({ 16: 'lungs' }),
+      durationMs: 20_000,
+      names: (id) => [id === 'heart' ? 'Heart' : 'Lungs'],
+      parts: () => [],
+      acting: () => false,
+      shots: false,
+    });
+    expect(effects.length).toBeGreaterThan(0);
+    expect(effects.some((e) => e.do === 'zoom')).toBe(false);
   });
 
   it('keeps its distance from other changes, and changes about every six seconds', () => {

@@ -186,8 +186,9 @@ describe('the Gemini voice', () => {
       text: 'Hi.',
       pieces: [{ text: 'Hi.', speed: 1, pauseAfter: 0.3, style: 'warm' }],
     });
-    expect(said.audio.toString()).toBe('mp3:60000');
-    expect(said.durationMs).toBe(2500);
+    // Its pause after it kept too: 2.5 s said, 0.3 s of quiet.
+    expect(said.audio.toString()).toBe('mp3:67200');
+    expect(said.durationMs).toBe(2800);
     expect(said.model).toBe('gemini:gemini-3.8-flash-tts');
     expect(said.mimeType).toBe('audio/mpeg');
     expect((sent[0].headers as Record<string, string>)['x-goog-api-key']).toBe(
@@ -232,8 +233,30 @@ describe('the Gemini voice', () => {
       { voice: 'Fenrir', texts: ['"You are late,"'] },
       { voice: 'Sulafat', texts: ['says the fox.'] },
     ]);
-    // Two seconds of quiet, three seconds said, and the two silences between runs.
-    expect(said.durationMs).toBe(2000 + 3000 + 400 + 120);
+    // Two seconds of quiet, three seconds said, the two silences between
+    // runs, and the quiet after the last.
+    expect(said.durationMs).toBe(2000 + 3000 + 400 + 120 + 500);
+  });
+
+  it('keeps the quiet planned after the last line, where the scene’s last moments play', async () => {
+    const adapter = new GeminiSpeechAdapter(
+      config({ GEMINI_API_KEY: 'k' }),
+      (samples) => Promise.resolve(Buffer.from(`mp3:${samples.length}`)),
+      () => Promise.resolve(reply(200, answer(wav(1)))),
+    );
+    const said = (tail: number) =>
+      adapter.synthesize({
+        text: 'x',
+        pieces: [
+          { text: '"Home at last,"', speed: 1, pauseAfter: 0.3, voice: 'Kore' },
+          { text: 'says Mama.', speed: 1, pauseAfter: tail },
+        ],
+      });
+    const bare = await said(0);
+    const held = await said(2.4);
+    // Everyone laughs after the last line: the voice waits for it.
+    expect(held.durationMs - bare.durationMs).toBe(2400);
+    expect(bare.durationMs).toBe(2000 + 300);
   });
 
   it('waits out a rate limit, and gives up at once on a refusal', async () => {

@@ -34,6 +34,7 @@ import {
   type SheetProblem,
 } from '../../domain/studio/studio-check';
 import { MADE_WITH } from '../../domain/studio/studio-brand';
+import { joinOf } from '../../domain/studio/studio-edit';
 import { storyBibleFor } from '../../domain/studio/studio-stage';
 import { describeForProducer } from '../../domain/studio/studio-words';
 import type { ClockPort } from '../../ports/clock.port';
@@ -934,11 +935,13 @@ export class StudioService {
       madeWith: MADE_WITH,
       scenes: scenes
         .filter((s) => s.sceneKey && s.audioKey && s.durationMs)
-        .map((s) => ({
+        .map((s, i, made) => ({
           id: s.id,
           title: s.sheet?.title ?? `Scene ${s.position + 1}`,
           durationMs: s.durationMs!,
           transition: s.sheet?.transition ?? 'cut',
+          // From the scene the film shows before it; the first comes up from black.
+          join: i ? joinOf(made[i - 1].sheet, s.sheet) : 'dip',
         })),
     };
   }

@@ -1094,6 +1094,8 @@ export interface SceneEffectDto {
   filler?: boolean;
   /** A shot of the camera on a story's page: held until then, then back to the whole stage. Absent, a zoom holds until the stage next changes. */
   untilMs?: number;
+  /** How a shot of the camera comes in: by a cut, or by a move from where the camera was. Absent, as the player plays the page (a film's cut, a book's move). */
+  shot?: { enter: 'cut' | 'move' };
   /**
    * A character speaking: their words, in a bubble at their head until
    * `untilMs`; their mouth moves until `saidUntilMs`, when the voice has
@@ -1134,6 +1136,8 @@ export type SceneLineFrom =
  */
 export interface SceneSettingDto {
   full?: true;
+  /** A Studio film's scene: drawn as a clip of a film, whole from its first frame and alive before and after its voice, its shots cut rather than moved. */
+  film?: true;
   time?: 'dawn' | 'day' | 'dusk' | 'night';
   weather?: 'clear' | 'rain' | 'storm' | 'wind' | 'snow' | 'fog';
   crowd?: {
@@ -1286,6 +1290,8 @@ export interface SceneDto {
   generator: string;
   title: string;
   durationMs: number;
+  /** When everything the scene plans has finished: its last line, its last walk and move. Can be after `durationMs`, where the voice has ended; absent on an older scene, and on a book's page. */
+  settledMs?: number;
   timing: SceneTiming;
   /** Whom the document is taught for, read from it; absent when it could not be told, or on an older page. */
   stage?: 'early' | 'middle' | 'higher' | 'professional';
@@ -1322,7 +1328,7 @@ export interface SceneDto {
   acting?: Record<string, SceneActingDto>;
   /** The things on a story's stage that people handle; absent when there are none. */
   props?: ScenePropDto[];
-  /** A story page's setting: its set at full strength, its light and weather, a crowd; absent on a lesson's page. */
+  /** A story page's setting: its set at full strength, its light and weather, a crowd; absent on a lesson's page, but for a Studio film's (`film` alone). */
   setting?: SceneSettingDto;
   /** The same steps placed for the pane's box and the full screen's wide stage. */
   stagings: Record<
@@ -2387,6 +2393,8 @@ export interface StudioPlayDto {
     title: string;
     durationMs: number;
     transition: 'cut' | 'fade';
+    /** How the film joins this scene to the one before: a cut (the same place, time running on), a dissolve (a new place) or a dip to black (time has passed). The first comes up from black. */
+    join: 'cut' | 'dissolve' | 'dip';
   }[];
 }
 

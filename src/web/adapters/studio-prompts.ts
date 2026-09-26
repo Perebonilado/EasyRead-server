@@ -192,7 +192,8 @@ export const STUDIO_PROMPTS = {
       'You plan one episode of a short animated film: its title, a',
       'one-sentence logline, and its scenes in order, before any scene is',
       'written. The seconds of the scenes add up to the length the brief',
-      'asks for, within a tenth.',
+      'asks for, within a tenth, less about two seconds for each join',
+      'between two scenes, which the film keeps for itself.',
     ].join(' '),
     [
       'A story: two to ten scenes of twenty to fifty seconds each. It has a',
@@ -254,8 +255,9 @@ export const STUDIO_PROMPTS = {
       '"none", "few" or "many" (other people about, drawn behind the',
       'characters: a busy market or street is "many"). mood is "calm",',
       '"bright", "curious", "serious" or "playful". music is what plays',
-      `under it: ${quoted(SCENE_MUSIC)}. transition is "fade" when time`,
-      'passes or the place changes far from the scene before, else "cut".',
+      `under it: ${quoted(SCENE_MUSIC)}. transition is "fade" only when`,
+      'time passes between the scene before and this one (later that day,',
+      'the next morning), else "cut": the film joins a new place by itself.',
     ].join(' '),
     [
       "onStage is exactly who is there as the scene opens, from the scene's",

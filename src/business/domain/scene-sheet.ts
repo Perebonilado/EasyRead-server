@@ -16,6 +16,7 @@ import {
   type FigureSpec,
 } from './scene-figure';
 import { renderSvg, type InkBox } from './scene-raster';
+import { jointNotes, type SheetRig } from './scene-sheet-rig';
 import { EXPRESSIONS, type StorySize } from './scene-story';
 import { revealedSvg, type GatedDrawing } from './scene-svg';
 
@@ -36,6 +37,8 @@ export interface CharacterSheet {
   figure?: FigureSpec;
   /** An animal's or a creature's size beside people, as the artist was told. */
   size?: StorySize;
+  /** An animal or a creature rigged by code: its joints, and the parts moved in to meet the body. */
+  rig?: SheetRig;
 }
 
 /**
@@ -150,7 +153,8 @@ const overlap = (a: InkBox, b: InkBox) =>
 
 /**
  * A gated drawing measured as a sheet: its parts' places, its ink map,
- * and what is wrong with its faces, to tell the artist on a second try.
+ * and what is wrong with its faces and its joints, to tell the artist on
+ * a second try.
  */
 export async function measureSheet(
   drawing: GatedDrawing,
@@ -163,10 +167,17 @@ export async function measureSheet(
   const ids = names.map(
     (name) => drawing.parts[name] ?? drawing.states[name] ?? null,
   );
-  const measured = await renderSvg(drawing.svg, undefined, {
-    variants: ids.map((id) => (id && root ? isolate(root, id) : null) ?? EMPTY),
-    grid: { svg: drawing.svg, cols: 48 },
-  });
+  const [measured, floating] = await Promise.all([
+    renderSvg(drawing.svg, undefined, {
+      variants: ids.map(
+        (id) => (id && root ? isolate(root, id) : null) ?? EMPTY,
+      ),
+      grid: { svg: drawing.svg, cols: 48 },
+    }),
+    // A part that floats off the body is drawn again once before code
+    // moves it in. Advice only: a drawing measured well is never lost to it.
+    jointNotes(drawing).catch(() => []),
+  ]);
   const inks = measured.inks ?? [];
   const box = (name: string) => inks[names.indexOf(name)] ?? null;
   const at = (name: string) => {
@@ -189,6 +200,7 @@ export async function measureSheet(
     notes.push(
       'Draw the neutral face: <g id="neutral"> with its eyes, brows and mouth.',
     );
+  notes.push(...floating);
   return {
     sheet: {
       version: SHEET_VERSION,

@@ -7,10 +7,11 @@ import {
   measureSheet,
   SHEET_VERSION,
 } from './scene-sheet';
+import * as rig from './scene-sheet-rig';
 import { EXPRESSIONS, sheetThing } from './scene-story';
 import { gateDrawing } from './scene-svg';
 
-/** A figure as the artist might draw it: a blank head, a body, legs, and every face on the head. */
+/** A figure as the artist might draw it: a blank head, a body, legs, and every face on the head, every part joined. */
 function figure(astray: string | null = null): string {
   const faces = EXPRESSIONS.map((name) => {
     const x = name === astray ? 560 : 200;
@@ -18,8 +19,8 @@ function figure(astray: string | null = null): string {
   }).join('');
   return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 600 900">
     <g id="legs"><rect x="150" y="600" width="40" height="250" fill="#3D8FD1"/><rect x="210" y="600" width="40" height="250" fill="#3D8FD1"/></g>
-    <g id="body"><rect x="120" y="300" width="160" height="320" rx="30" fill="#F2B33D"/></g>
-    <g id="arms"><rect x="70" y="320" width="40" height="220" fill="#F2B33D"/><rect x="290" y="320" width="40" height="220" fill="#F2B33D"/></g>
+    <g id="body"><rect x="120" y="270" width="160" height="350" rx="30" fill="#F2B33D"/></g>
+    <g id="arms"><rect x="90" y="320" width="40" height="220" fill="#F2B33D"/><rect x="270" y="320" width="40" height="220" fill="#F2B33D"/></g>
     <g id="head"><circle cx="200" cy="190" r="90" fill="#E9D8B4"/></g>
     ${faces}
   </svg>`;
@@ -53,10 +54,34 @@ describe('a character drawn once for the book', () => {
     expect(sheet.version).toBe(SHEET_VERSION);
   }, 20_000);
 
+  it('keeps a figure measured well when looking for what floats fails', async () => {
+    const gated = await gateDrawing(figure(), mira);
+    const failing = jest
+      .spyOn(rig, 'jointNotes')
+      .mockRejectedValueOnce(new Error('the parts came back unmeasured'));
+    try {
+      const { sheet, notes } = await measureSheet(gated.drawing!);
+      expect(failing).toHaveBeenCalled();
+      expect(notes).toEqual([]);
+      expect(sheet.anchors.head).not.toBeNull();
+    } finally {
+      failing.mockRestore();
+    }
+  }, 20_000);
+
   it('sends back a figure with a face drawn off the head', async () => {
     const gated = await gateDrawing(figure('angry'), mira);
     const { notes } = await measureSheet(gated.drawing!);
     expect(notes.join(' ')).toContain('The faces angry are not on the head');
+  }, 20_000);
+
+  it('sends back a figure whose head floats above its body', async () => {
+    const floating = figure().replace('cy="190" r="90"', 'cy="150" r="90"');
+    const gated = await gateDrawing(floating, mira);
+    const { notes } = await measureSheet(gated.drawing!);
+    expect(notes.join(' ')).toMatch(
+      /The head floats \d+ units from the body: draw the neck overlapping the body\./,
+    );
   }, 20_000);
 
   it('points what a character is like at their head, then their body, then their legs', () => {

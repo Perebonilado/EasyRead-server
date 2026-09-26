@@ -653,6 +653,65 @@ export function namedGroups(
   return { parts, labels, states };
 }
 
+/**
+ * A transform origin in px under `transform-box: fill-box`, read as the
+ * drawing coordinates its author meant. Under fill-box a length counts
+ * from the part's own corner, so `545px 560px` on a tail at (545, 545)
+ * turned it about (1090, 1105), far off the drawing. Under view-box the
+ * same lengths are the drawing's own coordinates. Only a block that sets
+ * both is changed, and only lengths: a keyword or a percentage is the
+ * part's own box, as meant. Returns how many were read so.
+ */
+/** How near the drawing's top or left edge a point may be read as a part's own offset: a share of its size. */
+const NEAR_EDGE = 0.15;
+
+export function mendOrigins(root: Element): number {
+  const [x0, y0, w, h] = viewBoxOf(root) ?? [0, 0, Infinity, Infinity];
+  let mended = 0;
+  const mend = (block: string): string => {
+    if (!/transform-box\s*:\s*fill-box/i.test(block)) return block;
+    const origin = /transform-origin\s*:\s*([^;}]*)/i.exec(block);
+    const lengths = origin?.[1]
+      .trim()
+      .replace(/\s*!important$/i, '')
+      .split(/\s+/);
+    if (
+      !lengths ||
+      lengths.length < 2 ||
+      !lengths.every((one) => /^-?\d*\.?\d+(?:px)?$/i.test(one))
+    )
+      return block;
+    const [x, y] = lengths.map((one) => parseFloat(one));
+    // Only a point well inside the drawing: one off it is no coordinates,
+    // and one near its top or left edge may as well be a point in a small
+    // part's own box (a flame's foot at 15px 40px), as CSS reads it.
+    if (
+      x - x0 < w * NEAR_EDGE ||
+      y - y0 < h * NEAR_EDGE ||
+      x > x0 + w ||
+      y > y0 + h
+    )
+      return block;
+    mended += 1;
+    return block.replace(
+      /(transform-box\s*:\s*)fill-box/i,
+      (_, property: string) => `${property}view-box`,
+    );
+  };
+  for (const node of walk(root)) {
+    if (node.name.toLowerCase() === 'style') {
+      const css = textOf(node);
+      const read = css.replace(
+        /\{([^{}]*)\}/g,
+        (_, block: string) => `{${mend(block)}}`,
+      );
+      if (read !== css) setText(node, read);
+    }
+    if (node.attribs.style) node.attribs.style = mend(node.attribs.style);
+  }
+  return mended;
+}
+
 /** Whether anything in the drawing moves: a keyframes rule in use, or SMIL. */
 export function movesOf(root: Element): boolean {
   let keyframes = false;
@@ -840,6 +899,11 @@ export function inspectSvg(
       mended: [],
     };
   const mended = sanitizeTree(root).map((what) => `removed ${what}`);
+  const origins = mendOrigins(root);
+  if (origins)
+    mended.push(
+      `read ${origins} transform origin${origins === 1 ? '' : 's'} as drawing coordinates`,
+    );
   if (!options.backdrop && removeBackdrop(root, viewBox))
     mended.push('removed a backdrop');
   const { parts, labels, states } = namedGroups(root, thing);
@@ -872,8 +936,9 @@ export function inspectSvg(
     viewBox,
     mended,
     short: {
+      // A part asked for only if the thing has one (a tail) is no fault missing.
       missingParts: thing.parts
-        .filter((p) => !parts[p.name])
+        .filter((p) => !p.optional && !parts[p.name])
         .map((p) => p.name),
       missingLabels: thing.parts
         .filter((p) => p.label && parts[p.name] && !labels[p.name])

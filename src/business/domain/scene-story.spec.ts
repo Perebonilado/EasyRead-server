@@ -305,14 +305,59 @@ describe("a story's continuity", () => {
     );
     expect(thing.brief).toContain('yellow raincoat');
     expect(thing.brief).toContain('no eyes, brows or mouth');
-    expect(thing.parts.map((p) => p.name)).toEqual([
-      'head',
-      'body',
-      'arms',
-      'legs',
+    expect(thing.parts).toEqual([
+      { name: 'head', label: false },
+      { name: 'body', label: false },
+      { name: 'arms', label: false },
+      { name: 'legs', label: false },
+      { name: 'tail', label: false, optional: true },
     ]);
+    expect(thing.brief).toContain('It faces the viewer, standing');
     expect(thing.states.map((s) => s.name)).toContain('neutral');
     expect(thing.shape).toBe('tall');
+  });
+
+  it('asks for an animal on all fours, jointed like a puppet and drawn still for the stage to move', () => {
+    const dog = sheetThing(
+      {
+        id: 'pip',
+        name: 'Pip',
+        aliases: [],
+        role: 'supporting',
+        look: 'a small brown dog with floppy ears',
+        traits: [],
+        firstPage: 1,
+        met: 1,
+        voice: 'creature',
+        kind: 'animal',
+        size: 'small',
+      },
+      'Maya',
+    );
+    // Head, body, legs, and a tail and ears only if it has them; no arms.
+    expect(dog.parts).toEqual([
+      { name: 'head', label: false },
+      { name: 'body', label: false },
+      { name: 'legs', label: false },
+      { name: 'tail', label: false, optional: true },
+      { name: 'ears', label: false, optional: true },
+    ]);
+    expect(dog.brief).toContain('on all four legs');
+    expect(dog.brief).toContain('three-quarter view');
+    expect(dog.brief).toContain('not upright like a person, and with no arms');
+    expect(dog.brief).not.toContain('It faces the viewer, standing');
+    // Joined, so nothing floats when code moves it.
+    expect(dog.brief).toContain(
+      'every part overlaps the body a little where they meet, drawn behind it',
+    );
+    expect(dog.brief).toContain('nothing floats apart');
+    expect(dog.brief).toContain('a tail comes from behind the body at the hip');
+    expect(dog.brief).toContain('only if it has them');
+    // Drawn still: code moves it, about its joints.
+    expect(dog.motion).toMatch(/^none: draw it still/);
+    expect(dog.motion).toContain('no <style> animation and no SMIL');
+    // The canvas the stage expects for an animal.
+    expect(dog.shape).toBe('square');
   });
 
   it("asks the artist for an animal in the people's style, its size beside them", () => {

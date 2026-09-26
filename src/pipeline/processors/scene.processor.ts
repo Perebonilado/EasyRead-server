@@ -98,6 +98,7 @@ import {
   type SetSheet,
   type Sets,
 } from '../../business/domain/scene-sheet';
+import { RIG_VERSION, rigSheet } from '../../business/domain/scene-sheet-rig';
 import {
   EMPTY_STORY,
   MAX_STORY_PIECES,
@@ -298,6 +299,8 @@ export class SceneProcessor {
   private readonly running = new Map<string, Promise<unknown>>();
   /** Writes to one file, each after the last. */
   private readonly writing = new Map<string, Promise<unknown>>();
+  /** A kept drawing that would not rig, by book and character: not tried again here. */
+  private readonly unrigged = new Map<string, string>();
 
   constructor(
     @Inject(DOCUMENT_REPOSITORY) private readonly documents: DocumentRepository,
@@ -1698,6 +1701,11 @@ export class SceneProcessor {
         // set apart or a well-known figure's reaches a book drawn before.
         if (kept?.figure)
           return figureSheet(character.figure ?? kept.figure, character.id);
+        // Drawn before code moved what the artist draws: rigged now, with
+        // no model asked, and kept so, the same drawing with its parts
+        // joined and its motion code's.
+        if (kept && kept.rig?.version !== RIG_VERSION)
+          return this.rigKept(key, kept, character, who);
         if (kept) return kept;
       } catch (error) {
         this.logger.warn(
@@ -1728,6 +1736,51 @@ export class SceneProcessor {
       );
       return sheet;
     });
+  }
+
+  /**
+   * A kept sheet the artist drew, rigged by code and written back to the
+   * cast as it stands now. The sheet as kept when it cannot be.
+   */
+  private async rigKept(
+    key: string,
+    kept: CharacterSheet,
+    character: StoryCharacter,
+    who: string,
+  ): Promise<CharacterSheet> {
+    const tried = `${key}#${character.id}`;
+    if (this.unrigged.get(tried) === kept.drawing.svg) return kept;
+    let sheet: CharacterSheet;
+    try {
+      const rigged = await rigSheet(kept);
+      sheet = rigged.sheet;
+      this.logger.log(
+        `${who}: ${character.name} rigged${sheet.rig?.mended.length ? `, ${sheet.rig.mended.map((m) => `${m.part} moved in by (${m.dx}, ${m.dy})`).join(', ')}` : ''}${rigged.notes.length ? `: ${rigged.notes.join(' ')}` : ''}`,
+      );
+    } catch (error) {
+      this.unrigged.set(tried, kept.drawing.svg);
+      this.logger.warn(
+        `${who}: ${character.name} could not be rigged: ${(error as Error).message}`,
+      );
+      return kept;
+    }
+    await this.inTurn(key, async () => {
+      const cast = await this.castAt(key);
+      // Only over the drawing it rigged: one forgotten meanwhile (its look
+      // changed in the Studio) or rigged already is left as it is.
+      if (cast[character.id]?.drawing.svg !== kept.drawing.svg) return;
+      cast[character.id] = sheet;
+      await this.storage.put({
+        key,
+        body: Buffer.from(JSON.stringify(cast)),
+        mimeType: 'application/json',
+      });
+    }).catch((error: unknown) =>
+      this.logger.warn(
+        `${who}: ${character.name} was rigged but not kept: ${(error as Error).message}`,
+      ),
+    );
+    return sheet;
   }
 
   /**
@@ -1910,8 +1963,8 @@ export class SceneProcessor {
 
   /**
    * A character drawn for the book: asked for, gated, measured as a sheet
-   * (every face on the head), and asked for once more with what fell
-   * short; the better kept.
+   * (every face on the head, every part joined), and asked for once more
+   * with what fell short; the better kept, and rigged by code.
    */
   private async drawSheet(
     character: StoryCharacter,
@@ -1941,7 +1994,8 @@ export class SceneProcessor {
         );
         continue;
       }
-      const gated = await gateDrawing(reply, thing);
+      // Drawn still, as asked: code moves it, so stillness is no fault.
+      const gated = await gateDrawing(reply, { ...thing, motion: '' });
       if (!gated.drawing) {
         notes = gated.notes;
         continue;
@@ -1961,10 +2015,24 @@ export class SceneProcessor {
         `${who}: ${character.name} try ${attempt} fell short: ${notes.join(' ')}`,
       );
     }
-    if (best)
-      this.logger.log(`${who}: ${character.name} drawn for the whole book`);
-    else this.logger.warn(`${who}: ${character.name} could not be drawn`);
-    return best?.sheet ?? null;
+    if (!best) {
+      this.logger.warn(`${who}: ${character.name} could not be drawn`);
+      return null;
+    }
+    this.logger.log(`${who}: ${character.name} drawn for the whole book`);
+    // Its parts joined and moved by code; unrigged, it is rigged when
+    // next read from the cast.
+    try {
+      const rigged = await rigSheet(best.sheet);
+      if (rigged.notes.length)
+        this.logger.log(`${who}: ${character.name}: ${rigged.notes.join(' ')}`);
+      return rigged.sheet;
+    } catch (error) {
+      this.logger.warn(
+        `${who}: ${character.name} could not be rigged: ${(error as Error).message}`,
+      );
+      return best.sheet;
+    }
   }
 
   /**

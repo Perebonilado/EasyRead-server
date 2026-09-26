@@ -38,6 +38,7 @@ import {
   type StudioOutline,
   type StorySheet,
 } from './studio';
+import { joinsSeconds } from './studio-edit';
 
 export interface SheetProblem {
   /** Which rule: for the card's icon and for tests. */
@@ -735,11 +736,14 @@ export function checkOutline(
 ): string[] {
   const problems: string[] = [];
   if (outline.scenes.length < 1) problems.push('The outline has no scenes.');
-  const seconds = outline.scenes.reduce((n, s) => n + s.seconds, 0);
+  // The film runs a little longer than its scenes: the joins between them.
+  const said = outline.scenes.reduce((n, s) => n + s.seconds, 0);
+  const joins = joinsSeconds(outline.scenes.length);
+  const seconds = said + joins;
   const wanted = minutes * 60;
   if (seconds > wanted * 1.35 || seconds < wanted * 0.65)
     problems.push(
-      `The scenes add up to ${seconds} seconds; the episode should run about ${wanted}. Change the scenes' seconds, or how many there are.`,
+      `The scenes add up to ${said} seconds, and the joins between them about ${joins} more; the episode should run about ${wanted}. Change the scenes' seconds, or how many there are.`,
     );
   if (story) {
     outline.scenes.forEach((scene, k) => {

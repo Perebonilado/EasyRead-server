@@ -412,6 +412,18 @@ export class StudioService {
       bible: show.bible,
       outline: episode.outline,
       sheets: scenes.map((s) => s.sheet),
+      // Whether the film shows each scene as it now is.
+      states: scenes.map((s) =>
+        s.status === 'writing'
+          ? 'being written'
+          : s.status === 'making'
+            ? 'being made now'
+            : !s.sceneKey
+              ? 'not made yet'
+              : needsMaking(s, show.bible, show.brief)
+                ? 'changed since it was made: the film shows the old version until it is made again'
+                : 'made: the film shows it',
+      ),
       phase: episode.phase,
       episode: episode.number,
     });
@@ -484,13 +496,17 @@ export class StudioService {
       note = (error as Error).message;
     }
 
+    // A step that could not be taken is said plainly, in place of a reply
+    // that took it for done.
     const message = await this.studio.addMessage({
       showId: show.id,
       episodeId: episode.id,
       role: 'assistant',
-      content: note ? `${draft.reply}\n\n${note}` : draft.reply,
+      content: note ?? draft.reply,
       meta: {
-        choices: draft.choices.slice(0, 5).map((c) => c.slice(0, 40)),
+        choices: note
+          ? []
+          : draft.choices.slice(0, 5).map((c) => c.slice(0, 40)),
         action: draft.action,
         refused: draft.refuse,
       },
@@ -556,8 +572,16 @@ export class StudioService {
   ): Promise<string | null> {
     if (episode.phase !== 'script' && episode.phase !== 'made')
       return 'The scenes are not written yet.';
-    if (!(await this.studio.claimEpisode(episode.id, 'scene')))
-      return 'I am still working on the last change; ask again when it is done.';
+    if (scene.status === 'writing' || scene.status === 'making')
+      return `Scene ${scene.position + 1} is being worked on right now; ask again in a moment.`;
+    // Another scene being written again is no reason to wait: each is its own.
+    if (
+      episode.busy !== 'scene' &&
+      !(await this.studio.claimEpisode(episode.id, 'scene'))
+    )
+      return episode.busy === 'make'
+        ? 'The film is being made right now; ask again when it is done.'
+        : 'I am still working on the last change; ask again when it is done.';
     await this.studio.updateScene(scene.id, { status: 'writing', error: null });
     await this.enqueue(show, episode, {
       kind: 'scene',

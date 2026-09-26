@@ -390,7 +390,10 @@ export class StudioProcessor {
         );
       }
     } finally {
-      await this.studio.updateEpisode(episode.id, { busy: null });
+      // Free once no other scene is being written again.
+      const rows = await this.studio.listScenes(episode.id);
+      if (!rows.some((r) => r.status === 'writing'))
+        await this.studio.updateEpisode(episode.id, { busy: null });
     }
   }
 

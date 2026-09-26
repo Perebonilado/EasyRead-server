@@ -125,6 +125,8 @@ export function describeForProducer(input: {
   bible: StudioBible | null;
   outline: StudioOutline | null;
   sheets: (SceneSheet | null)[];
+  /** Each scene's state in the film: made, changed since it was made, not made yet, being written or made. */
+  states?: string[];
   phase: string;
   episode: number;
 }): string {
@@ -144,9 +146,10 @@ export function describeForProducer(input: {
   if (input.phase === 'script' || input.phase === 'made')
     parts.push(
       `The scenes:\n${input.sheets
-        .map((sheet, k) =>
-          sheet ? describeSheet(sheet, k) : `Scene ${k + 1}: being written`,
-        )
+        .map((sheet, k) => {
+          const state = input.states?.[k];
+          return `${sheet ? describeSheet(sheet, k) : `Scene ${k + 1}: being written`}${state ? ` [${state}]` : ''}`;
+        })
         .join('\n')}`,
     );
   return parts.join('\n\n');

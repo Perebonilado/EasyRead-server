@@ -593,3 +593,204 @@ describe('signs over someone the kit did not draw', () => {
     expect(signsOver([0, 0], 1, ['tears'], 'x').markup).toBe('');
   });
 });
+
+describe('the kit’s own people, unchanged by the crowd', () => {
+  it('draws everyone it drew before exactly as before, byte for byte', () => {
+    const { createHash } =
+      jest.requireActual<typeof import('node:crypto')>('node:crypto');
+    // A sample of ages, clothes, hats, poses, props, signs, a group, one
+    // lying down and one in bed. The hash is of the kit before extras were
+    // drawn with it: a change to how the story's people look must be meant.
+    const cases: [FigureSpec, string, FigureHow][] = [
+      [PLAIN_FIGURE, 'plain', {}],
+      [
+        as({
+          age: 'child',
+          hair: 'braids',
+          skin: 8,
+          top: 'dress',
+          topColour: 'yellow',
+        }),
+        'maya',
+        { holding: 'ball' },
+      ],
+      [
+        as({
+          age: 'child',
+          hair: 'short',
+          headwear: 'cap',
+          top: 't-shirt',
+          topColour: 'green',
+          bottom: 'shorts',
+        }),
+        'tobi',
+        { holding: 'magnifier' },
+      ],
+      [
+        as({
+          age: 'adult',
+          headwear: 'gele',
+          top: 'kaftan',
+          bottom: 'wrapper',
+          build: 'broad',
+          skin: 9,
+        }),
+        'mama',
+        { pose: 'arms up' },
+      ],
+      [
+        as({
+          age: 'elder',
+          hair: 'balding',
+          hairColour: 'grey',
+          facialHair: 'beard',
+          top: 'agbada',
+          headwear: 'kufi',
+          extras: ['glasses', 'walking stick'],
+        }),
+        'elder',
+        { pose: 'pointing' },
+      ],
+      [
+        as({
+          age: 'teen',
+          hair: 'afro',
+          top: 'hoodie',
+          extras: ['backpack', 'earrings'],
+        }),
+        'teen',
+        { pose: 'waving', signs: ['walking', 'tears'] },
+      ],
+      [
+        as({
+          headwear: 'headscarf',
+          top: 'robe',
+          extras: ['sandals', 'cloak'],
+        }),
+        'robe',
+        { pose: 'hand on mouth', holding: 'staff' },
+      ],
+      [
+        as({ headwear: 'nemes', top: 'tunic', extras: ['wings'] }),
+        'nemes',
+        { pose: 'hands on belly', count: 3 },
+      ],
+      [
+        as({ hair: 'long', headwear: 'mantle', top: 'dress' }),
+        'mantle',
+        { pose: 'lying', signs: ['sleeping'] },
+      ],
+      [
+        as({ hair: 'ponytail', top: 'lab coat', extras: ['stethoscope'] }),
+        'bed',
+        { pose: 'in bed', signs: ['fever'], old: true },
+      ],
+      [
+        as({ headwear: 'crested helmet', top: 'armour' }),
+        'soldier',
+        {
+          pose: 'hand on head',
+          holding: 'umbrella',
+          signs: ['shaking', 'idea'],
+        },
+      ],
+    ];
+    const all = cases.map(([spec, seed, how]) =>
+      JSON.stringify(drawFigure(spec, seed, how)),
+    );
+    expect(createHash('sha256').update(all.join('\n')).digest('hex')).toBe(
+      '338e3b72ea2573a2d3b7a70f648f3a7d64216ca594793b12a3a3a72ae351898c',
+    );
+  });
+});
+
+describe('someone in a crowd, drawn by the kit', () => {
+  const { drawExtra, extraFor, wardrobeOf } =
+    jest.requireActual<typeof import('./scene-figure')>('./scene-figure');
+  const spec = as({
+    age: 'adult',
+    hair: 'short',
+    facialHair: 'moustache',
+    extras: ['glasses'],
+    top: 'kaftan',
+  });
+  const markup = (detail: 0 | 1 | 2, view: 'front' | 'back' = 'front') => {
+    const drawn = drawExtra(spec, { detail, view, id: 'cr7' });
+    return `${drawn.legs}${drawn.upper}`;
+  };
+
+  it('draws the kit’s face near, dots for eyes farther, and a shape far off', () => {
+    const near = markup(0);
+    expect(near).toContain('clip-path="url(#cr7-eyes)"');
+    expect(near).toContain('<clipPath id="cr7-eyes">');
+    expect(near).not.toContain('class="talk"');
+    expect(near).not.toContain('class="vm');
+    expect(near).not.toContain('class="blink');
+    const middle = markup(1);
+    expect(middle).not.toContain('clip-path');
+    expect(middle).toMatch(/<ellipse cx="-15.5" cy="[-\d.]+" rx="6" ry="7"/);
+    const far = markup(2);
+    expect(far).not.toContain('class="fm"');
+    expect(far).not.toContain(`stroke="#2d2a32"`);
+    // Its hair and hat still show who they are.
+    expect(far).toContain('class="hd"');
+  });
+
+  it('turns away with the back of the head and no face', () => {
+    const back = markup(1, 'back');
+    expect(back).not.toContain('class="fm"');
+    expect(back).not.toContain('url(#');
+    // A pose that needs the hands is dropped: arms at the sides.
+    const drawn = drawExtra(spec, {
+      detail: 0,
+      view: 'back',
+      pose: 'pointing',
+      holding: 'bag',
+      id: 'cr8',
+    });
+    expect(drawn.joints.r[2][1]).toBeGreaterThan(drawn.cy);
+    // From behind, nothing of the front of what they wear: no hood's
+    // collar, no pocket.
+    const hoodie = as({ age: 'adult', top: 'hoodie' });
+    const [front, behind] = (['front', 'back'] as const).map(
+      (view) => drawExtra(hoodie, { detail: 0, view, id: 'cr6' }).upper,
+    );
+    expect(front).toContain('rx="38" ry="12"');
+    expect(front).toContain('rx="6"');
+    expect(behind).not.toContain('rx="38" ry="12"');
+    expect(behind).not.toMatch(/<rect[^>]*rx="6"/);
+  });
+
+  it('frames them as the kit frames their age, their feet at 0', () => {
+    const drawn = drawExtra(spec, { detail: 1, id: 'cr9' });
+    expect(drawn.viewBox).toEqual(figureFrame('adult'));
+    expect(drawn.top).toBe(rigOf('adult').top);
+  });
+
+  it('dresses a crowd for its world from the kit’s own lists, the same every time', () => {
+    const lagos = {
+      era: 'today',
+      region: 'Lagos, Nigeria',
+      culture: 'Yoruba',
+      landscape: '',
+      homes: '',
+    };
+    const people = Array.from({ length: 40 }, (_, i) =>
+      extraFor(lagos, 'market', i),
+    );
+    expect(people).toEqual(
+      Array.from({ length: 40 }, (_, i) => extraFor(lagos, 'market', i)),
+    );
+    const w = wardrobeOf(lagos);
+    for (const one of people) {
+      expect(TOPS).toContain(one.top);
+      expect(w.tops).toContain(one.top);
+      // Dressed as a woman, beardless; a child in a child's clothes.
+      if (one.top === 'dress' || one.headwear === 'gele')
+        expect(one.facialHair).toBe('none');
+      if (one.age === 'child') expect(one.top).not.toBe('agbada');
+    }
+    expect(new Set(people.map((p) => p.age)).size).toBeGreaterThanOrEqual(3);
+    expect(wardrobeOf(null).tops).not.toContain('agbada');
+  });
+});

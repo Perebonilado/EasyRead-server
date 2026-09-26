@@ -4,6 +4,7 @@ import type {
   SceneDto,
   StudioEpisodeDto,
   StudioMessageDto,
+  StudioMessagePageDto,
   StudioPlayDto,
   StudioSceneDto,
   StudioShowCardDto,
@@ -48,7 +49,9 @@ import type { StoragePort } from '../../ports/storage.port';
 import { CLOCK, JOB_QUEUE, LLM_GATEWAY, STORAGE } from '../../ports/tokens';
 import type { AiCallLogRepository } from '../../repositories/ai-call-log.repository';
 import type {
+  EpisodePhase,
   StudioEpisodeRecord,
+  StudioEventRecord,
   StudioRepository,
   StudioSceneRecord,
   StudioShowRecord,
@@ -60,6 +63,7 @@ import {
 import { SceneVoiceService } from '../admin/scene-voice.service';
 import { EntitlementsService } from '../documents/entitlements.service';
 import { StudioCastService } from './studio-cast.service';
+import { EVENT_LINES, historyOf, logEvent } from './studio-log';
 import {
   bibleDto,
   blockersOf,
@@ -77,6 +81,15 @@ export const MESSAGES_AN_HOUR = 60;
 const MESSAGE_CHARS = 4000;
 /** A message this long, while the brief is being made, is the maker's own text to make it from. */
 const SOURCE_AT = 900;
+/** The latest of a show's thread sent with it; earlier ones are asked for a page at a time. */
+const THREAD = 80;
+/** What the maker is looking at, in the producer's words. */
+const LOOKING_AT: Partial<Record<EpisodePhase, string>> = {
+  outline: 'the outline',
+  cast: 'the cast',
+  script: 'the scenes',
+  made: 'the film',
+};
 /** What the producer says to what the Studio does not make. */
 const REFUSAL =
   "That's not something the Studio can make. It makes stories and lessons that are safe for everyone: try a different idea, and I'll help you shape it.";
@@ -170,11 +183,12 @@ export class StudioService {
   }
 
   private async showDto(show: StudioShowRecord): Promise<StudioShowDto> {
-    const [episodes, messages, balance] = await Promise.all([
+    const [episodes, thread, balance] = await Promise.all([
       this.studio.listEpisodes(show.id),
-      this.studio.listMessages(show.id, 80),
+      this.studio.listMessages(show.id, THREAD + 1),
       this.entitlements.studioBalance(show.userId),
     ]);
+    const messages = thread.slice(-THREAD);
     const bible = show.bible
       ? bibleDto(show.bible, await this.cast.drawings(show.id, show.bible))
       : null;
@@ -194,7 +208,22 @@ export class StudioService {
         hasThumb: Boolean(e.thumbKey),
       })),
       messages: messages.map(messageDto),
+      moreMessages: thread.length > THREAD,
       balance,
+    };
+  }
+
+  /** Earlier messages of a show's thread: a page of those before one. */
+  async messages(
+    userId: string,
+    id: string,
+    before: string,
+  ): Promise<StudioMessagePageDto> {
+    const show = await this.requireShow(userId, id);
+    const page = await this.studio.listMessages(show.id, THREAD + 1, before);
+    return {
+      messages: page.slice(-THREAD).map(messageDto),
+      more: page.length > THREAD,
     };
   }
 
@@ -340,16 +369,33 @@ export class StudioService {
 
   // ── The producer ────────────────────────────────────────────────────────
 
+  /** The hour's fair use: a message to the producer, or words for a change, over it is turned away. */
+  private async fairUse(userId: string): Promise<void> {
+    const hourAgo = new Date(this.clock.now().getTime() - 3_600_000);
+    if (
+      (await this.studio.countUserMessagesSince(userId, hourAgo)) >=
+      MESSAGES_AN_HOUR
+    )
+      throw new ValidationError(
+        'That is a lot of messages in an hour. Take a short break and carry on in a few minutes.',
+      );
+  }
+
   /**
    * One turn of the conversation: the maker's message, the producer's
    * reply (streamed as it is written), what it learnt of the brief, and
    * the step it takes: an outline written, approved, a cast or a scene
-   * changed, the film made, a new episode begun.
+   * changed, the film made, a new episode begun. With a focus, the
+   * producer knows what the maker is looking at in the panel.
    */
   async turn(
     userId: string,
     showId: string,
-    input: { episodeId?: string | null; message: string },
+    input: {
+      episodeId?: string | null;
+      message: string;
+      focus?: { step?: string; sceneId?: string } | null;
+    },
     onToken: (chunk: string) => void,
   ): Promise<{
     message: StudioMessageDto;
@@ -359,21 +405,14 @@ export class StudioService {
     const show = await this.requireShow(userId, showId);
     const text = input.message.trim().slice(0, MESSAGE_CHARS + SOURCE_CHARS);
     if (!text) throw new ValidationError('Say what you would like to make');
-    const hourAgo = new Date(this.clock.now().getTime() - 3_600_000);
-    if (
-      (await this.studio.countUserMessagesSince(userId, hourAgo)) >=
-      MESSAGES_AN_HOUR
-    )
-      throw new ValidationError(
-        'That is a lot of messages in an hour. Take a short break and carry on in a few minutes.',
-      );
+    await this.fairUse(userId);
     const episodes = await this.studio.listEpisodes(show.id);
     let episode =
       episodes.find((e) => e.id === input.episodeId) ??
       episodes[episodes.length - 1];
     if (!episode) throw new NotFoundError('Episode');
 
-    await this.studio.addMessage({
+    const mine = await this.studio.addMessage({
       showId: show.id,
       episodeId: episode.id,
       role: 'user',
@@ -404,11 +443,16 @@ export class StudioService {
     const said = pasted
       ? `${text.slice(0, 600)}… (their own text, ${text.length} characters, kept as the brief's source)`
       : text.slice(0, MESSAGE_CHARS);
-    const history = (await this.studio.listMessages(show.id, 17))
-      .slice(0, -1)
-      .map((m) => ({ role: m.role, content: m.content.slice(0, 1500) }));
+    // What the buttons did is in it too, a line each from the Studio; the
+    // message now is its own, even if work finished just after it came.
+    const history = historyOf(
+      (await this.studio.listMessages(show.id, 17)).filter(
+        (m) => m.id !== mine.id,
+      ),
+    );
     const scenes = await this.studio.listScenes(episode.id);
     const state = describeForProducer({
+      looking: this.lookingAt(input.focus, scenes),
       brief: show.brief,
       bible: show.bible,
       outline: episode.outline,
@@ -458,7 +502,8 @@ export class StudioService {
 
     let brief = briefOf(draft.brief, show.brief);
     if (pasted) brief = { ...brief, source: text.slice(0, SOURCE_CHARS) };
-    if (JSON.stringify(brief) !== JSON.stringify(show.brief)) {
+    const briefChanged = JSON.stringify(brief) !== JSON.stringify(show.brief);
+    if (briefChanged) {
       await this.studio.updateShow(show.id, { brief, format: brief.format });
       show.brief = brief;
       show.format = brief.format;
@@ -469,7 +514,12 @@ export class StudioService {
       if (!draft.refuse)
         switch (draft.action) {
           case 'outline':
-            note = await this.askOutline(show, episode, draft.request);
+            note = await this.askOutline(
+              show,
+              episode,
+              draft.request,
+              briefChanged,
+            );
             break;
           case 'approve':
             note = await this.approveEpisode(show, episode);
@@ -521,6 +571,71 @@ export class StudioService {
     };
   }
 
+  /** What the maker is looking at in the panel, in words: a scene by its number and title. */
+  private lookingAt(
+    focus: { step?: string; sceneId?: string } | null | undefined,
+    scenes: StudioSceneRecord[],
+  ): string | null {
+    const scene = focus?.sceneId
+      ? scenes.find((s) => s.id === focus.sceneId)
+      : undefined;
+    if (scene)
+      return `scene ${scene.position + 1}${scene.sheet ? ` ("${scene.sheet.title}")` : ''}`;
+    return LOOKING_AT[focus?.step as EpisodePhase] ?? null;
+  }
+
+  /**
+   * Something that happened, recorded in the thread under its episode:
+   * the maker sees it, and the producer reads it. Never in the way of
+   * what was done.
+   */
+  private async log(
+    show: StudioShowRecord,
+    episode: StudioEpisodeRecord,
+    event: StudioEventRecord,
+  ): Promise<void> {
+    await logEvent(
+      this.studio,
+      { showId: show.id, episodeId: episode.id },
+      event,
+    ).catch((error: Error) =>
+      this.logger.warn(`studio ${show.id}: not recorded: ${error.message}`),
+    );
+  }
+
+  /**
+   * The maker's own words for a change asked on part of the episode,
+   * checked as a message to the producer is: within the hour's fair use,
+   * and nothing the Studio does not make.
+   */
+  private async hear(userId: string, words: string): Promise<void> {
+    await this.fairUse(userId);
+    const flagged = await this.llm.moderate({ text: words });
+    if (flagged.flagged) throw new ValidationError(REFUSAL);
+  }
+
+  /**
+   * The maker's words kept in the thread, named for what they change:
+   * "Scene 3: …". Never in the way of the change, which is made by now.
+   */
+  private async heard(
+    show: StudioShowRecord,
+    episode: StudioEpisodeRecord,
+    about: string,
+    words: string,
+  ): Promise<void> {
+    await this.studio
+      .addMessage({
+        showId: show.id,
+        episodeId: episode.id,
+        role: 'user',
+        content: `${about}: ${words}`,
+      })
+      .catch((error: Error) =>
+        this.logger.warn(`studio ${show.id}: not kept: ${error.message}`),
+      );
+  }
+
   // ── Steps ───────────────────────────────────────────────────────────────
 
   private async enqueue(
@@ -533,11 +648,17 @@ export class StudioService {
     ]);
   }
 
-  /** The outline written, or written again as asked. A note when it cannot be yet. */
+  /**
+   * The outline written, or written again as asked. A note when it cannot
+   * be yet: while it is being written, what the brief now says is taken in
+   * (the outline is written again with it once done, `briefChanged`), and
+   * anything else is asked again after.
+   */
   private async askOutline(
     show: StudioShowRecord,
     episode: StudioEpisodeRecord,
     request: string | null,
+    briefChanged = false,
   ): Promise<string | null> {
     if (episode.phase === 'script' || episode.phase === 'made')
       return 'The scenes are written now: tell me which scene to change, and how.';
@@ -545,7 +666,9 @@ export class StudioService {
     if (missing.length)
       return `Before the outline, I still need: ${missing.join(', ')}.`;
     if (!(await this.studio.claimEpisode(episode.id, 'outline')))
-      return 'I am still working on the last change; this comes next once it is done.';
+      return episode.busy === 'outline' && briefChanged
+        ? 'Noted. The outline is being written right now; once it is done I will write it again with that in it.'
+        : 'I am still working on the last change; ask me again once it is done.';
     await this.enqueue(show, episode, {
       kind: 'outline',
       ...(request && episode.outline ? { request } : {}),
@@ -617,6 +740,17 @@ export class StudioService {
     const { show, episode } = await this.requireEpisode(userId, episodeId);
     const note = await this.approveEpisode(show, episode);
     if (note) throw new ValidationError(note);
+    if (episode.phase === 'outline' || episode.phase === 'cast') {
+      const next =
+        episode.phase === 'outline' && show.brief.format !== 'explainer'
+          ? 'cast'
+          : 'script';
+      await this.log(show, episode, {
+        what: 'approved',
+        step: next,
+        line: EVENT_LINES.approved(episode.phase, next),
+      });
+    }
     return this.episode(userId, episodeId);
   }
 
@@ -626,8 +760,18 @@ export class StudioService {
     request: string | null,
   ): Promise<StudioEpisodeDto> {
     const { show, episode } = await this.requireEpisode(userId, episodeId);
-    const note = await this.askOutline(show, episode, request?.trim() || null);
+    const words = request?.trim().slice(0, MESSAGE_CHARS) || null;
+    if (words) await this.hear(userId, words);
+    const note = await this.askOutline(show, episode, words);
     if (note) throw new ValidationError(note);
+    if (words) await this.heard(show, episode, 'Outline', words);
+    await this.log(show, episode, {
+      what: 'asked',
+      step: 'outline',
+      line: episode.outline
+        ? 'Writing the outline again'
+        : 'Writing the outline',
+    });
     return this.episode(userId, episodeId);
   }
 
@@ -654,6 +798,11 @@ export class StudioService {
       title: outline.title,
       logline: outline.logline,
     });
+    await this.log(show, episode, {
+      what: 'edited',
+      step: 'outline',
+      line: 'Outline changed by hand',
+    });
     return this.episode(userId, episodeId);
   }
 
@@ -665,12 +814,18 @@ export class StudioService {
   ): Promise<StudioEpisodeDto> {
     const { show, episode } = await this.requireEpisode(userId, episodeId);
     if (show.id !== showId) throw new NotFoundError('Episode');
-    const note = await this.askCast(
-      show,
-      episode,
-      request.trim().slice(0, MESSAGE_CHARS),
-    );
+    const words = request.trim().slice(0, MESSAGE_CHARS);
+    if (words) await this.hear(userId, words);
+    const note = await this.askCast(show, episode, words);
     if (note) throw new ValidationError(note);
+    if (show.brief.format !== 'explainer') {
+      if (words) await this.heard(show, episode, 'Cast', words);
+      await this.log(show, episode, {
+        what: 'asked',
+        step: 'cast',
+        line: 'Changing the cast',
+      });
+    }
     return this.episode(userId, episodeId);
   }
 
@@ -682,10 +837,16 @@ export class StudioService {
     const { show, episode, scene } = await this.requireScene(userId, sceneId);
     const clean = request.trim().slice(0, MESSAGE_CHARS);
     if (!clean) throw new ValidationError('Say what to change');
-    const flagged = await this.llm.moderate({ text: clean });
-    if (flagged.flagged) throw new ValidationError(REFUSAL);
+    await this.hear(userId, clean);
     const note = await this.askScene(show, episode, scene, clean);
     if (note) throw new ValidationError(note);
+    await this.heard(show, episode, `Scene ${scene.position + 1}`, clean);
+    await this.log(show, episode, {
+      what: 'asked',
+      step: 'script',
+      sceneId: scene.id,
+      line: `Writing scene ${scene.position + 1} again`,
+    });
     return this.episodeView(show, (await this.studio.findEpisode(episode.id))!);
   }
 
@@ -733,6 +894,12 @@ export class StudioService {
       problems,
       status: scene.status === 'failed' ? 'ready' : scene.status,
     });
+    await this.log(show, episode, {
+      what: 'edited',
+      step: 'script',
+      sceneId: scene.id,
+      line: `Scene ${scene.position + 1} changed by hand`,
+    });
     const now = (await this.studio.findScene(scene.id))!;
     return sceneDto(now, episode, bible, show.brief);
   }
@@ -768,6 +935,12 @@ export class StudioService {
       sheetHash: sceneFingerprint(sheet, show.bible, show.brief),
       problems,
     });
+    await this.log(show, episode, {
+      what: 'edited',
+      step: 'script',
+      sceneId: scene.id,
+      line: `Scene ${scene.position + 1}: the last change undone`,
+    });
     const now = (await this.studio.findScene(scene.id))!;
     return sceneDto(now, episode, show.bible, show.brief);
   }
@@ -794,6 +967,7 @@ export class StudioService {
       );
     const clean = request.trim().slice(0, MESSAGE_CHARS);
     if (!clean) throw new ValidationError('Say what happens in the new scene');
+    await this.hear(userId, clean);
     const outline = episode.outline;
     if (!outline) throw new ValidationError('There is no outline');
     const at = Math.max(0, Math.min(outline.scenes.length, after + 1));
@@ -816,6 +990,13 @@ export class StudioService {
       { ...episode, outline },
       { kind: 'scene', sceneId: row.id, request: clean },
     );
+    await this.heard(show, episode, `New scene ${at + 1}`, clean);
+    await this.log(show, episode, {
+      what: 'asked',
+      step: 'script',
+      sceneId: row.id,
+      line: `Writing the new scene ${at + 1}`,
+    });
     return this.episode(userId, episodeId);
   }
 
@@ -823,7 +1004,7 @@ export class StudioService {
     userId: string,
     sceneId: string,
   ): Promise<StudioEpisodeDto> {
-    const { episode, scene } = await this.requireScene(userId, sceneId);
+    const { show, episode, scene } = await this.requireScene(userId, sceneId);
     if (scene.status === 'making' || episode.busy)
       throw new ValidationError('One moment: I am still working on it.');
     const scenes = await this.studio.listScenes(episode.id);
@@ -837,6 +1018,13 @@ export class StudioService {
     await this.studio.removeScene(scene.id);
     for (const key of [scene.sceneKey, scene.audioKey, scene.thumbKey])
       if (key) await this.storage.delete(key).catch(() => undefined);
+    const title =
+      scene.sheet?.title ?? episode.outline?.scenes[scene.position]?.title;
+    await this.log(show, episode, {
+      what: 'edited',
+      step: 'script',
+      line: `Scene ${scene.position + 1} taken out${title ? `: “${title}”` : ''}`,
+    });
     return this.episode(userId, episode.id);
   }
 
@@ -882,7 +1070,16 @@ export class StudioService {
     const { show, episode } = await this.requireEpisode(userId, episodeId);
     const note = await this.makeEpisode(userId, show, episode);
     if (note) throw new ValidationError(note);
-    return this.episode(userId, episodeId);
+    const view = await this.episode(userId, episodeId);
+    await this.log(show, episode, {
+      what: 'make',
+      step: 'made',
+      line: EVENT_LINES.make(
+        view.scenes.filter((s) => s.status === 'making').length,
+        view.toMakeSeconds,
+      ),
+    });
+    return view;
   }
 
   /** The next episode of a show: the same cast and places, what it is about as the maker says. */
@@ -913,8 +1110,18 @@ export class StudioService {
     request: string,
   ): Promise<StudioEpisodeDto> {
     const show = await this.requireShow(userId, showId);
-    const clean = request.trim().slice(0, MESSAGE_CHARS) || 'What happens next';
-    const episode = await this.newEpisode(show, clean);
+    const words = request.trim().slice(0, MESSAGE_CHARS);
+    if (words) await this.hear(userId, words);
+    const created = await this.newEpisode(show, words || 'What happens next');
+    const episode = (await this.studio.findEpisode(created.id)) ?? created;
+    if (words)
+      await this.heard(show, episode, `Episode ${episode.number}`, words);
+    const writing = episode.busy === 'outline';
+    await this.log(show, episode, {
+      what: 'episode',
+      step: writing ? 'outline' : 'brief',
+      line: `Episode ${episode.number} begun${writing ? ': writing its outline' : ''}`,
+    });
     return this.episodeView(show, episode);
   }
 
@@ -1006,6 +1213,12 @@ export class StudioService {
       ? (episode.shareToken ?? randomBytes(18).toString('base64url'))
       : null;
     await this.studio.updateEpisode(episode.id, { shareToken });
+    if (Boolean(shareToken) !== Boolean(episode.shareToken))
+      await this.log(show, episode, {
+        what: 'shared',
+        step: 'made',
+        line: EVENT_LINES.shared(on),
+      });
     return this.episodeView(show, { ...episode, shareToken });
   }
 

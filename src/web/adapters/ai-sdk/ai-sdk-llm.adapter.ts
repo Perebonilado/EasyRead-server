@@ -2046,7 +2046,7 @@ export class AiSdkLlmAdapter implements LlmGatewayPort, OnModuleInit {
   async studioTurn(input: {
     phase: 'brief' | 'outline' | 'cast' | 'script' | 'made';
     state: string;
-    history: { role: 'user' | 'assistant'; content: string }[];
+    history: { role: 'user' | 'assistant' | 'studio'; content: string }[];
     message: string;
     onToken?: (chunk: string) => void;
   }): Promise<LlmResult<StudioTurnDraft>> {
@@ -2061,7 +2061,7 @@ export class AiSdkLlmAdapter implements LlmGatewayPort, OnModuleInit {
       .slice(-16)
       .map(
         (m) =>
-          `${m.role === 'user' ? 'Maker' : 'Producer'}: ${m.content.replace(/\s+/g, ' ').slice(0, 800)}`,
+          `${m.role === 'user' ? 'Maker' : m.role === 'studio' ? 'Studio' : 'Producer'}: ${m.content.replace(/\s+/g, ' ').slice(0, 800)}`,
       )
       .join('\n');
     const messages = [

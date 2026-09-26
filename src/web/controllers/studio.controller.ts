@@ -8,24 +8,29 @@ import {
   Param,
   Patch,
   Post,
+  Query,
   Req,
   Res,
 } from '@nestjs/common';
 import { Throttle } from '@nestjs/throttler';
 import { createHash } from 'node:crypto';
 import type { Request, Response } from 'express';
+import { Type } from 'class-transformer';
 import {
   IsBoolean,
+  IsIn,
   IsInt,
   IsObject,
   IsOptional,
   IsString,
   Length,
   Min,
+  ValidateNested,
 } from 'class-validator';
 import type {
   SceneDto,
   StudioEpisodeDto,
+  StudioMessagePageDto,
   StudioPlayDto,
   StudioSceneDto,
   StudioShowCardDto,
@@ -38,6 +43,17 @@ import { STORAGE } from '../../business/ports/tokens';
 import { CurrentUser } from '../security/current-user.decorator';
 import { Public } from '../security/public.decorator';
 
+/** What the maker is looking at in the panel as they write. */
+class FocusDto {
+  @IsIn(['brief', 'outline', 'cast', 'script', 'made'])
+  step!: string;
+
+  @IsOptional()
+  @IsString()
+  @Length(1, 64)
+  sceneId?: string;
+}
+
 class TurnDto {
   @IsString()
   @Length(1, 16_000)
@@ -46,6 +62,17 @@ class TurnDto {
   @IsOptional()
   @IsString()
   episodeId?: string;
+
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => FocusDto)
+  focus?: FocusDto;
+}
+
+class BeforeDto {
+  @IsString()
+  @Length(1, 64)
+  before!: string;
 }
 
 class RequestDto {
@@ -182,6 +209,16 @@ export class StudioController {
     return this.studio.addEpisode(userId, id, body.request ?? '');
   }
 
+  /** Earlier messages of the thread: those before one, a page at a time. */
+  @Get('shows/:id/messages')
+  messages(
+    @CurrentUser('id') userId: string,
+    @Param('id') id: string,
+    @Query() query: BeforeDto,
+  ): Promise<StudioMessagePageDto> {
+    return this.studio.messages(userId, id, query.before);
+  }
+
   /**
    * The producer's turn, streamed as newline-delimited JSON: pieces of the
    * reply as they are written, then the whole outcome.
@@ -210,7 +247,11 @@ export class StudioController {
       const result = await this.studio.turn(
         userId,
         id,
-        { episodeId: body.episodeId ?? null, message: body.message },
+        {
+          episodeId: body.episodeId ?? null,
+          message: body.message,
+          focus: body.focus ?? null,
+        },
         (token) => write({ token }),
       );
       write({ done: true, ...result });

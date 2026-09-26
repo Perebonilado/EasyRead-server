@@ -3,7 +3,14 @@ import type {
   ScenePlaceDto,
   SceneStepDto,
 } from '../../contracts';
-import { apart, settledOf, viewOf, withoutJumps } from './scene-film';
+import {
+  PARALLAX,
+  againstScenery,
+  apart,
+  settledOf,
+  viewOf,
+  withoutJumps,
+} from './scene-film';
 
 const W = 1600;
 const H = 900;
@@ -125,6 +132,24 @@ describe('where a shot looks, and a jump cut', () => {
     expect(two.x).toBe(810);
     // Someone not there: the whole stage.
     expect(viewOf(shot('pip'), show, places, W, H).s).toBe(1);
+  });
+
+  it('shows the stage’s people larger against the scenery close in, and across it, as the player moves the two', () => {
+    const view = viewOf(shot('mama'), show, places, W, H);
+    const { k, at: against } = againstScenery(view, W, H);
+    const far = 1 + (view.s - 1) * PARALLAX;
+    expect(k).toBeCloseTo(view.s / far);
+    // The player: each layer scaled about one point, the scenery by less.
+    const c = (W / 2 - view.s * view.x) / (1 - view.s);
+    const onScreen = (x: number, s: number) => c * (1 - s) + s * x;
+    for (const x of [0, 700, 1400]) {
+      const [sx] = against(x, 450);
+      expect(onScreen(sx, far)).toBeCloseTo(onScreen(x, view.s));
+    }
+    // On the whole stage, where they stand.
+    expect(
+      againstScenery(viewOf(null, show, places, W, H), W, H).at(300, 200),
+    ).toEqual([300, 200]);
   });
 
   it('calls a cut between two framings too alike a jump', () => {

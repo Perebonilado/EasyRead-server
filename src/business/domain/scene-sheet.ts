@@ -15,6 +15,7 @@ import {
   type FigureHow,
   type FigureSpec,
 } from './scene-figure';
+import { groundOf, type SetGround } from './scene-ground';
 import { renderSvg, type InkBox } from './scene-raster';
 import { jointNotes, type SheetRig } from './scene-sheet-rig';
 import { EXPRESSIONS, type StorySize } from './scene-story';
@@ -85,6 +86,11 @@ export async function figureDrawing(
     acts: true,
     anchors: drawn.anchors,
     ...(drawn.joints ? { joints: drawn.joints } : {}),
+    wears: {
+      top: spec.top,
+      topColour: spec.topColour,
+      headwear: spec.headwear,
+    },
   };
 }
 
@@ -247,6 +253,8 @@ export const SET_VERSION = 3;
 export interface SetSheet {
   version: number;
   drawing: GatedDrawing;
+  /** Where its open ground is, measured once from the painting; absent on a set kept before, measured when next used. */
+  ground?: SetGround;
 }
 
 /** A book's places as painted, by their id in the story. */
@@ -258,8 +266,12 @@ export function setsOf(raw: unknown): Sets {
   const out: Sets = {};
   for (const [id, set] of Object.entries(raw as Record<string, unknown>)) {
     const one = set as Partial<SetSheet> | null;
-    if (one?.version === SET_VERSION && one.drawing?.svg)
-      out[id] = one as SetSheet;
+    if (one?.version === SET_VERSION && one.drawing?.svg) {
+      // A ground that cannot be read is measured again.
+      const { ground, ...rest } = one as SetSheet;
+      const read = ground ? groundOf(ground) : null;
+      out[id] = read ? { ...rest, ground: read } : rest;
+    }
   }
   return out;
 }

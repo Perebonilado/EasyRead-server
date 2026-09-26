@@ -1451,6 +1451,7 @@ export function castStory(
       weather: on?.weather ?? null,
       crowd: crowdOn(bible, page),
       world: bible.world ?? null,
+      ...(here?.kind ? { place: here.kind } : {}),
     },
     backdrop,
     opening: back.length
@@ -1543,6 +1544,12 @@ const worldText = (world: StoryWorld | null | undefined) =>
  * for the story's world. Where people are in it behind its side (a boat,
  * a table, a well), that side is its own group, "front", which the stage
  * draws in front of the people, so they are in the boat and not before it.
+ * The camera is pinned, so a crowd stands in it at the right size: out of
+ * doors the horizon at eye level, about 64% down; in a room the floor
+ * meeting the back wall about 68 to 72% down. And the open ground or
+ * floor is its own group, "ground", where a crowd may stand; a painter
+ * who leaves it out is not asked again, the ground is read from the
+ * colours.
  */
 export function setThing(
   place: StoryPlace,
@@ -1558,9 +1565,10 @@ export function setThing(
       `${place.name}, a place in "${bookTitle}"${place.look ? `: ${place.look}` : ''}.`,
       worldText(world),
       place.kind === 'indoor'
-        ? 'Seen from inside, at eye level, the floor running across the lower part of the picture.'
-        : 'Seen from where a viewer stands, at eye level, the ground running across the lower part of the picture.',
+        ? 'Seen from inside, at eye level, the floor running across the lower part of the picture: the floor meets the back wall about 68 to 72% of the way down.'
+        : 'Seen from where a viewer stands, at eye level, the ground running across the lower part of the picture: the horizon at eye level, about 64% of the way down, and the far edge of the open ground on it or just below it.',
       SET_STYLE,
+      `Draw the open ${place.kind === 'indoor' ? 'floor' : 'ground'} people could stand on as its own group with id "ground", with everything that stands on it (stalls, walls, trees, furniture) drawn after it, over it.`,
       front
         ? `Draw ${front} as its own group with id "front": across the bottom of the picture, from the bottom edge up to about a fifth of its height, where it will stand in front of the people's legs so they are in the ${place.kind === 'vessel' ? place.name : 'place'}, behind it. Everything else of the place is the scene behind.`
         : '',
@@ -1569,7 +1577,11 @@ export function setThing(
       .join(' '),
     motion:
       'slow and ambient if anything moves at all: clouds drift, water shimmers, leaves stir',
-    parts: front ? [{ name: 'front', label: false }] : [],
+    parts: [
+      ...(front ? [{ name: 'front', label: false }] : []),
+      // Asked for, never a fault missing: the ground is read without it.
+      { name: 'ground', label: false, optional: true },
+    ],
     states: [],
     shape: 'wide',
     sound: place.sound,

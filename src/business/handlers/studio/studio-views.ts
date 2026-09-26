@@ -254,9 +254,23 @@ export function episodeDto(
 }
 
 export function messageDto(message: StudioMessageRecord): StudioMessageDto {
+  const event =
+    message.meta?.kind === 'event' ? (message.meta.event ?? null) : null;
   return {
     id: message.id,
     role: message.role,
+    episodeId: message.episodeId,
+    // One kept from before events were: something said.
+    kind: event ? 'event' : 'say',
+    event: event
+      ? {
+          what: event.what,
+          step: event.step,
+          ...(event.sceneId ? { sceneId: event.sceneId } : {}),
+          ...(event.version ? { version: event.version } : {}),
+          line: event.line,
+        }
+      : null,
     content: message.content,
     choices: message.meta?.choices ?? [],
     refused: Boolean(message.meta?.refused),

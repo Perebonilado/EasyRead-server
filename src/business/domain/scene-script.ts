@@ -56,6 +56,7 @@ import {
   nameKey,
   soundIn,
   type Expression,
+  type PlaceKind,
   type StoryCrowd,
   type StoryKind,
   type StoryPresence,
@@ -616,6 +617,8 @@ export interface SceneScript {
     weather: StoryWeather | null;
     crowd: StoryCrowd | null;
     world: StoryWorld | null;
+    /** The page's place: out of doors, a room or a vessel, which the crowd stands in accordingly; absent, out of doors. */
+    place?: PlaceKind | null;
   };
 }
 

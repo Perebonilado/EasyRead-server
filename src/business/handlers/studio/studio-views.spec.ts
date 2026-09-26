@@ -8,11 +8,13 @@ import {
 import { describeScene } from '../../domain/studio/studio-words';
 import type {
   StudioEpisodeRecord,
+  StudioMessageRecord,
   StudioSceneRecord,
 } from '../../repositories/studio.repository';
 import {
   blockersOf,
   explainerCard,
+  messageDto,
   needsMaking,
   sceneFingerprint,
 } from './studio-views';
@@ -195,6 +197,47 @@ describe('the Studio, as the app sees it', () => {
       [1, ['unit']],
     ]);
     expect(explainerCard(next, null).lines.map((l) => l.say)).toHaveLength(3);
+  });
+
+  it('sends each message with its episode and kind; one kept from before events is something said', () => {
+    const at = new Date('2026-09-26T10:00:00Z');
+    const message = (
+      patch: Partial<StudioMessageRecord>,
+    ): StudioMessageRecord => ({
+      id: 'm1',
+      showId: 's1',
+      episodeId: 'e1',
+      role: 'assistant',
+      content: 'Scene 2 written again: “Home”',
+      meta: null,
+      createdAt: at,
+      ...patch,
+    });
+    const event = {
+      what: 'scene' as const,
+      step: 'script' as const,
+      sceneId: 'c2',
+      line: 'Scene 2 written again: “Home”',
+    };
+    expect(
+      messageDto(message({ meta: { kind: 'event', event } })),
+    ).toMatchObject({
+      episodeId: 'e1',
+      kind: 'event',
+      event,
+      choices: [],
+      refused: false,
+    });
+    const old = messageDto(
+      message({ episodeId: null, meta: { choices: ['Funny'] } }),
+    );
+    expect(old).toMatchObject({
+      episodeId: null,
+      kind: 'say',
+      event: null,
+      choices: ['Funny'],
+      createdAt: at.toISOString(),
+    });
   });
 
   it("holds an explainer's scene to its seconds, not a page's length", () => {

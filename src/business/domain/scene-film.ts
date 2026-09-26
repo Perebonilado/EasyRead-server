@@ -201,6 +201,31 @@ export function viewOf(
   );
 }
 
+/** How much less the scenery moves than the stage in front of it as the camera moves: the player's PARALLAX. */
+export const PARALLAX = 0.4;
+
+/**
+ * Where what stands on the stage shows against the scenery behind it
+ * while the camera is on `view`, in the scenery's own place on the stage,
+ * and how much larger: the scenery is scaled less about the same point
+ * (the player's sceneryCamera), so close in, the stage's people are
+ * larger against it and further across it.
+ */
+export function againstScenery(
+  view: View,
+  W: number,
+  H: number,
+): { k: number; at: (x: number, y: number) => [number, number] } {
+  const far = 1 + (view.s - 1) * PARALLAX;
+  return {
+    k: view.s / far,
+    at: (x, y) => [
+      (view.s * x + (1 - PARALLAX) * (W / 2 - view.s * view.x)) / far,
+      (view.s * y + (1 - PARALLAX) * (H / 2 - view.s * view.y)) / far,
+    ],
+  };
+}
+
 /** Whether a cut from one view to the other changes the picture enough not to be a jump. */
 export function apart(a: View, b: View, W: number, H: number): boolean {
   const scale = Math.max(a.s, b.s) / Math.min(a.s, b.s);

@@ -1,12 +1,15 @@
 import { PLAIN_FIGURE, figureFrame } from './scene-figure';
 import {
+  SET_VERSION,
   SIZE_UNITS,
   castOf,
   figureSheet,
   introCallouts,
   measureSheet,
+  setsOf,
   SHEET_VERSION,
 } from './scene-sheet';
+import { conventionGround } from './scene-ground';
 import * as rig from './scene-sheet-rig';
 import { EXPRESSIONS, sheetThing } from './scene-story';
 import { gateDrawing } from './scene-svg';
@@ -165,5 +168,34 @@ describe('a person drawn by the kit, once for the book', () => {
   it('stands an animal at its size beside people', () => {
     expect(SIZE_UNITS.small).toBeLessThan(SIZE_UNITS.medium);
     expect(SIZE_UNITS.large).toBeLessThanOrEqual(figureFrame('adult')[3]);
+  });
+});
+
+describe('a book’s sets read back', () => {
+  const drawing = {
+    svg: '<svg viewBox="0 0 1600 900"></svg>',
+    viewBox: [0, 0, 1600, 900] as [number, number, number, number],
+    aspect: 16 / 9,
+    parts: {},
+    labels: {},
+    states: {},
+    moves: false,
+    callouts: [],
+    field: null,
+  };
+
+  it('keeps each set’s ground, and a set kept before it was measured as it is', () => {
+    const ground = conventionGround();
+    const sets = setsOf({
+      market: { version: SET_VERSION, drawing, ground },
+      yard: { version: SET_VERSION, drawing },
+      field: { version: SET_VERSION, drawing, ground: { top: 'flat' } },
+      old: { version: SET_VERSION - 1, drawing },
+    });
+    expect(sets.market.ground).toEqual(ground);
+    // No ground: measured when it is next used, with no painting again.
+    expect(sets.yard).toEqual({ version: SET_VERSION, drawing });
+    expect(sets.field.ground).toBeUndefined();
+    expect(sets.old).toBeUndefined();
   });
 });

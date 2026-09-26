@@ -76,13 +76,41 @@ export interface StudioSceneRecord {
   updatedAt: Date;
 }
 
+/** Something the Studio recorded in the thread: what happened, and the step it belongs to. */
+export interface StudioEventRecord {
+  what:
+    | 'outline'
+    | 'cast'
+    | 'scenes'
+    | 'scene'
+    | 'made'
+    | 'approved'
+    | 'asked'
+    | 'edited'
+    | 'make'
+    | 'shared'
+    | 'episode'
+    | 'failed';
+  step: EpisodePhase;
+  sceneId?: string;
+  version?: number;
+  line: string;
+}
+
 export interface StudioMessageRecord {
   id: string;
   showId: string;
   episodeId: string | null;
   role: 'user' | 'assistant';
   content: string;
-  meta: { choices?: string[]; action?: string; refused?: boolean } | null;
+  meta: {
+    choices?: string[];
+    action?: string;
+    refused?: boolean;
+    /** An event, not something said: the content is its line. */
+    kind?: 'event';
+    event?: StudioEventRecord;
+  } | null;
   createdAt: Date;
 }
 
@@ -168,15 +196,27 @@ export interface StudioRepository {
   /** How many scenes of a maker's are being made now. */
   makingFor(userId: string): Promise<number>;
 
+  /**
+   * A message added to a show's thread. Given an id already taken, the
+   * message is there already: the one kept is returned, and nothing added.
+   */
   addMessage(input: {
+    id?: string;
     showId: string;
     episodeId: string | null;
     role: 'user' | 'assistant';
     content: string;
     meta?: StudioMessageRecord['meta'];
   }): Promise<StudioMessageRecord>;
-  /** A show's conversation, the latest `limit`, oldest first. */
-  listMessages(showId: string, limit?: number): Promise<StudioMessageRecord[]>;
+  /**
+   * A show's conversation, the latest `limit`, oldest first; with `before`
+   * (a message's id), the latest of those that came before it.
+   */
+  listMessages(
+    showId: string,
+    limit?: number,
+    before?: string,
+  ): Promise<StudioMessageRecord[]>;
   /** How many messages a maker has sent since a moment: for the fair-use limit. */
   countUserMessagesSince(userId: string, since: Date): Promise<number>;
 }

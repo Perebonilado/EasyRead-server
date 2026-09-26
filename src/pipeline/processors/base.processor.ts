@@ -82,4 +82,6 @@ export interface JobContext {
   /** True when BullMQ has no retries left, so the failure is now permanent. */
   isFinalAttempt: boolean;
   attemptsMade: number;
+  /** The queue's id for the job: the same on every try of it. */
+  jobId?: string;
 }

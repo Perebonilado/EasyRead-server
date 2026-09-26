@@ -20,7 +20,7 @@
  * stage marks it `talking` its mouth opens and closes. A still (the
  * card, the contact sheet) shows it at rest, eyes open, mouth shut.
  */
-import type { Expression } from './scene-story';
+import type { Expression, StoryWorld } from './scene-story';
 
 export const FIGURE_AGES = ['child', 'teen', 'adult', 'elder'] as const;
 export type FigureAge = (typeof FIGURE_AGES)[number];
@@ -742,15 +742,15 @@ function mouthShape(name: string, my: number): string {
   }
 }
 
-/** One face over the eyes' whites: the pupils, their lids and brows, and the mouth, at rest and talking. */
-function faceOf(name: Expression, R: Rig, skin: string): string {
+/** One face over the eyes' whites: the pupils, their lids and brows, and the mouth, at rest and talking. `clip` is the eyes' clip's id. */
+function faceOf(name: Expression, R: Rig, skin: string, clip = 'eyes'): string {
   const f = FACES[name];
   const { y, dx, rx, ry } = R.eyes;
   const out: string[] = [];
   // The pupils together, so the eyes can look where the stage says, kept
   // inside the eyes' whites wherever they look; the lids over them.
   out.push(
-    `<g clip-path="url(#eyes)"><g class="pupils">${[-1, 1]
+    `<g clip-path="url(#${clip})"><g class="pupils">${[-1, 1]
       .map(
         (side) =>
           `<circle cx="${r1(side * dx + f.look[0])}" cy="${r1(y + f.look[1])}" r="${f.pupil}" ${flat(FIGURE_INK)}/>`,
@@ -2118,6 +2118,8 @@ interface Layers {
   legs: string;
   behind: string;
   body: string;
+  /** The body seen from behind: what is worn, with nothing of its front (no collar, no buttons). */
+  bodyBack: string;
   arms: string;
   /** An arm that reaches the face, drawn in front of it: a hand on the head, over the mouth. */
   reach: string;
@@ -2274,8 +2276,9 @@ function layersOf(
 
   // The body: a trapezoid rounded at the shoulders, as long as what is worn.
   const hb = halfAt(bottom);
+  const shape = `<path d="M${r1(-hb)},${r1(bottom)} L${r1(-s2)},${sY + 12} Q${r1(-s2)},${sY} ${r1(-s2 + 12)},${sY} L${r1(s2 - 12)},${sY} Q${r1(s2)},${sY} ${r1(s2)},${sY + 12} L${r1(hb)},${r1(bottom)} Z" ${inked(dressed.fill)}/>`;
   const body = [
-    `<path d="M${r1(-hb)},${r1(bottom)} L${r1(-s2)},${sY + 12} Q${r1(-s2)},${sY} ${r1(-s2 + 12)},${sY} L${r1(s2 - 12)},${sY} Q${r1(s2)},${sY} ${r1(s2)},${sY + 12} L${r1(hb)},${r1(bottom)} Z" ${inked(dressed.fill)}/>`,
+    shape,
     dressed.details,
     extrasOnBody(spec, R),
     dressed.collar,
@@ -2531,6 +2534,7 @@ function layersOf(
     legs: legs.join(''),
     behind: `${backOf(spec, R, bottom, hb)}${packOf(spec, R)}<g class="hd">${hairBehind(spec, R)}</g>`,
     body,
+    bodyBack: shape,
     arms: arms.join(''),
     reach: reach.join(''),
     head: `<g class="hd">${head.join('')}</g>`,
@@ -2758,10 +2762,10 @@ function rigStyle(neck: number): string {
   ].join('');
 }
 
-/** The eyes' whites as a clip: pupils never look out past them. */
-function eyeClip(R: Rig): string {
+/** The eyes' whites as a clip: pupils never look out past them. `id` is the clip's own, unique where many people share a drawing. */
+function eyeClip(R: Rig, id = 'eyes'): string {
   const { y, dx, rx, ry } = R.eyes;
-  return `<defs><clipPath id="eyes">${[-1, 1]
+  return `<defs><clipPath id="${id}">${[-1, 1]
     .map(
       (side) =>
         `<ellipse cx="${side * dx}" cy="${y}" rx="${rx - 1}" ry="${ry - 1}"/>`,
@@ -3126,5 +3130,344 @@ export function drawFigure(
       legs: at([0, r1((R.hemY - FEET) / 2)]),
     },
     ...(n === 1 && !lying ? { joints: members[0].joints } : {}),
+  };
+}
+
+// ── Extras ─────────────────────────────────────────────────────────────────
+
+/**
+ * How much of someone in a crowd is drawn, by how tall they stand on the
+ * stage: 0, the kit's own face; 1, dark dots for eyes and no mouth; 2, a
+ * shape with no face and no outline, as someone far off reads.
+ */
+export type ExtraDetail = 0 | 1 | 2;
+/** Which way someone in a crowd faces: toward the viewer, or away. */
+export type ExtraView = 'front' | 'back';
+
+/** Someone in a crowd, drawn by the kit at the rig's origin: their feet at 0. */
+export interface ExtraDrawing {
+  /** Their legs and shoes, each leg its own group. */
+  legs: string;
+  /** Everything above the legs, which breathes: what hangs behind, the body, the arms, the head and the face. */
+  upper: string;
+  /** Their frame, as figureFrame has it, widened for what reaches past it. */
+  viewBox: [number, number, number, number];
+  /** The top of the head (hair and hats aside), the head's middle and the mouth, in the kit's units. */
+  top: number;
+  cy: number;
+  mouthY: number;
+  /** Each arm's shoulder, elbow and hand as drawn: its groups turn about the first two. */
+  joints: Record<'r' | 'l', [Point2, Point2, Point2]>;
+}
+
+/**
+ * The back of a head: hair over all of it but the nape, or what is worn
+ * over it; hats as they are from the front.
+ */
+function backOfHead(spec: FigureSpec, R: Rig, skin: string): string {
+  const { cy } = R;
+  const cover =
+    spec.headwear === 'nemes'
+      ? GOLD
+      : wrapped(spec) || spec.headwear === 'mantle'
+        ? CLOTH[spec.accentColour]
+        : null;
+  const out = [
+    `<ellipse cx="0" cy="${cy}" rx="${HEAD.rx}" ry="${HEAD.ry}" ${inked(cover ?? skin)}/>`,
+  ];
+  if (!cover && spec.hair !== 'bald' && spec.hair !== 'balding')
+    out.push(
+      `<path d="${chord(0, cy, HEAD.rx, HEAD.ry, 0.5)}" ${inked(HAIR[spec.hairColour])}/>`,
+    );
+  if (spec.headwear !== 'headscarf' && spec.headwear !== 'mantle')
+    out.push(headwearOf(spec, R));
+  return `<g class="hd">${out.join('')}</g>`;
+}
+
+/**
+ * Someone in a crowd, drawn by the kit as everyone is, with less of them
+ * the farther off they are (`detail`). Facing the viewer, their eyes and
+ * face at rest (none of the other faces, no mouth shapes, no blink, no
+ * signs); or turned away (`view`), the back of their head and no face.
+ * `id` makes the eyes' clip their own, so many can share one drawing.
+ */
+export function drawExtra(
+  spec: FigureSpec,
+  how: {
+    detail: ExtraDetail;
+    view?: ExtraView;
+    pose?: FigurePose;
+    holding?: FigureProp | null;
+    /** How far the face is turned to one side, -1 to 1, as the stage's --turn. */
+    turn?: number;
+    id: string;
+  },
+): ExtraDrawing {
+  const back = how.view === 'back';
+  // Turned away, they stand with their arms at their sides.
+  const asked = how.pose ?? 'standing';
+  const pose = back || LYING_POSES.includes(asked) ? 'standing' : asked;
+  const holding = back ? null : (how.holding ?? null);
+  const posed = holding && pose === 'standing' ? 'holding' : pose;
+  const L = layersOf(spec, posed, holding);
+  const { R } = L;
+  const skin = SKIN[Math.min(SKIN_TONES, Math.max(1, spec.skin)) - 1];
+  let upper: string;
+  if (back)
+    // From behind, what hangs at the back (long hair, a cloak) is over the body.
+    upper = `${L.bodyBack}${L.arms}${backOfHead(spec, R, skin)}${L.behind}`;
+  else {
+    let face = '';
+    if (how.detail === 0) {
+      const clip = `${how.id}-eyes`;
+      // The face at rest, without the second mouth it speaks with.
+      const rest = faceOf('neutral', R, skin, clip).replace(
+        /<g class="talk" opacity="0">.*?<\/g>/,
+        '',
+      );
+      face = `${eyeClip(R, clip)}${L.eyes}${fm(rest)}`;
+    } else if (how.detail === 1)
+      face = fm(
+        [-1, 1]
+          .map(
+            (side) =>
+              `<ellipse cx="${side * R.eyes.dx}" cy="${R.eyes.y}" rx="6" ry="7" ${flat(FIGURE_INK)}/>`,
+          )
+          .join(''),
+      );
+    // Turned a little to one side: the face and what is over it, as the stage turns it.
+    const turn = r1((how.turn ?? 0) * 7);
+    const turned = (markup: string) =>
+      turn && markup
+        ? `<g transform="translate(${turn} 0)">${markup}</g>`
+        : markup;
+    upper = `${L.behind}${L.body}${L.arms}${L.head}${turned(face)}${L.reach}${how.detail === 2 ? '' : turned(L.over)}`;
+  }
+  let legs = L.legs;
+  // Far off, a shape: no outline anywhere, not even the arms' own.
+  if (how.detail === 2) {
+    const bare = (markup: string) =>
+      markup.replace(
+        new RegExp(`stroke="${FIGURE_INK}"`, 'g'),
+        'stroke="none"',
+      );
+    upper = bare(upper);
+    legs = bare(legs);
+  }
+  const frame = figureFrame(spec.age);
+  const left = Math.max(0, L.beyond.left);
+  const right = Math.max(0, L.beyond.right);
+  const up = Math.max(0, L.beyond.up);
+  return {
+    legs,
+    upper,
+    viewBox: [
+      r1(frame[0] - left),
+      r1(frame[1] - up),
+      r1(frame[2] + left + right),
+      r1(frame[3] + up),
+    ],
+    top: R.top,
+    cy: R.cy,
+    mouthY: R.mouthY,
+    joints: L.joints,
+  };
+}
+
+/** What people wear in a story's world, from the kit's own lists, and the colours they wear it in. */
+interface Wardrobe {
+  tops: readonly Top[];
+  bottoms: readonly Bottom[];
+  headwear: readonly Headwear[];
+  colours: readonly ClothColour[];
+  /** Skin tones, 1 to 10, as most are there. */
+  skins: readonly number[];
+  extras: readonly FigureExtra[];
+}
+
+const EARTHY: readonly ClothColour[] = [
+  'brown',
+  'white',
+  'grey',
+  'navy',
+  'yellow',
+  'red',
+  'green',
+  'brown',
+  'white',
+];
+const BRIGHT: readonly ClothColour[] = CLOTH_COLOURS.filter(
+  (c) => c !== 'black' && c !== 'grey',
+);
+
+/**
+ * The wardrobe for a story's world: the ancient world in robes, tunics
+ * and head cloths; West Africa in kaftans, agbadas, wrappers and geles;
+ * anywhere else in everyday clothes.
+ */
+export function wardrobeOf(world: StoryWorld | null): Wardrobe {
+  const text = world
+    ? [world.era, world.region, world.culture, world.homes, world.landscape]
+        .join(' ')
+        .toLowerCase()
+    : '';
+  if (
+    /\b(?:bc|ad|first century|1st century|ancient|biblical|bible|roman|galilee|judea|judaea|jerusalem|israel|nazareth|egypt|egyptian|pharaoh|babylon|medieval|middle ages)\b/.test(
+      text,
+    )
+  )
+    return {
+      tops: ['robe', 'robe', 'tunic', 'tunic', 'robe', 'apron'],
+      bottoms: ['trousers'],
+      headwear: ['none', 'none', 'headscarf', 'turban', 'mantle', 'headscarf'],
+      colours: EARTHY,
+      skins: [4, 5, 5, 6, 6, 7],
+      extras: ['sandals', 'sandals', 'cloak'],
+    };
+  if (
+    /\b(?:nigeria|nigerian|yoruba|igbo|hausa|ghana|ghanaian|akan|west africa|west african|lagos|accra|ibadan|kano|abuja)\b/.test(
+      text,
+    )
+  )
+    return {
+      tops: [
+        't-shirt',
+        't-shirt',
+        'kaftan',
+        'kaftan',
+        'dress',
+        'shirt and tie',
+        'agbada',
+        'apron',
+        'jacket',
+      ],
+      bottoms: [
+        'trousers',
+        'trousers',
+        'wrapper',
+        'wrapper',
+        'skirt',
+        'shorts',
+      ],
+      headwear: ['none', 'none', 'none', 'gele', 'kufi', 'cap', 'headscarf'],
+      colours: BRIGHT,
+      skins: [6, 7, 8, 8, 9, 9, 10],
+      extras: ['earrings', 'glasses'],
+    };
+  return {
+    tops: [
+      't-shirt',
+      'jumper',
+      'hoodie',
+      'shirt and tie',
+      'jacket',
+      'coat',
+      'dress',
+      'cardigan',
+    ],
+    bottoms: ['trousers', 'trousers', 'shorts', 'skirt'],
+    headwear: ['none', 'none', 'none', 'none', 'cap', 'beanie', 'sun hat'],
+    colours: CLOTH_COLOURS,
+    skins: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10],
+    extras: ['glasses', 'scarf', 'backpack'],
+  };
+}
+
+/** Who in a crowd is how old: mostly grown-ups, a few children, teenagers and elders. */
+const CROWD_AGES: [FigureAge, number][] = [
+  ['child', 0.14],
+  ['teen', 0.1],
+  ['adult', 0.62],
+  ['elder', 0.14],
+];
+
+/**
+ * The `i`th person of a crowd in a story's world, dressed from the kit's
+ * own lists for it: their age, build, skin, hair, clothes and colours
+ * their own, and the same for the same seed every time.
+ */
+export function extraFor(
+  world: StoryWorld | null,
+  seed: string,
+  i: number,
+): FigureSpec {
+  const key = `${seed}:${i}`;
+  const pick = <T>(list: readonly T[], salt: string): T =>
+    list[Math.floor(beatOf(`${key}:${salt}`) * list.length) % list.length];
+  const w = wardrobeOf(world);
+  let a = beatOf(`${key}:age`);
+  let age: FigureAge = 'adult';
+  for (const [one, share] of CROWD_AGES) {
+    if (a < share) {
+      age = one;
+      break;
+    }
+    a -= share;
+  }
+  const grown = age === 'adult' || age === 'elder';
+  // A child in a child's clothes: no agbada, no tie, no apron.
+  const tops = grown
+    ? w.tops
+    : w.tops.filter((t) => !['agbada', 'shirt and tie', 'apron'].includes(t));
+  const top = pick(tops.length ? tops : ['t-shirt' as const], 'top');
+  const headwear = pick(
+    grown ? w.headwear : w.headwear.filter((h) => h !== 'gele'),
+    'headwear',
+  );
+  // One dressed as a woman is dressed so all through, and beardless.
+  const woman =
+    top === 'dress' ||
+    headwear === 'gele' ||
+    headwear === 'headscarf' ||
+    headwear === 'mantle';
+  const hairs: readonly HairStyle[] =
+    age === 'elder'
+      ? ['balding', 'short', 'bun', 'bald', 'curly']
+      : woman
+        ? ['bun', 'braids', 'long', 'bob', 'afro', 'ponytail', 'locs']
+        : age === 'child'
+          ? ['short', 'pigtails', 'curly', 'afro', 'spiky', 'bob']
+          : ['short', 'curly', 'afro', 'locs', 'short', 'bald'];
+  const covered = headwear !== 'none';
+  return {
+    age,
+    build: pick(FIGURE_BUILDS, 'build'),
+    skin: pick(w.skins, 'skin'),
+    // Under a hat, hair that would stand out from under it is left out.
+    hair: pick(
+      covered
+        ? hairs.filter((h) => h !== 'afro' && h !== 'bun' && h !== 'bald')
+        : hairs,
+      'hair',
+    ),
+    hairColour:
+      age === 'elder'
+        ? pick(['grey', 'white'] as const, 'colour')
+        : pick(
+            w.skins[0] >= 6
+              ? (['black', 'black', 'dark brown'] as const)
+              : HAIR_COLOURS.slice(0, 6),
+            'colour',
+          ),
+    facialHair:
+      grown && !woman
+        ? pick(['none', 'none', 'none', 'moustache', 'beard'] as const, 'beard')
+        : 'none',
+    headwear,
+    top,
+    topColour: pick(w.colours, 'topColour'),
+    bottom:
+      top === 'dress' || top === 'robe' || top === 'agbada'
+        ? 'trousers'
+        : pick(
+            woman ? w.bottoms : w.bottoms.filter((b) => b !== 'skirt'),
+            'bottom',
+          ),
+    bottomColour: pick(
+      ['navy', 'brown', 'grey', 'black', 'teal', 'blue', 'purple'] as const,
+      'bottomColour',
+    ),
+    accentColour: pick(w.colours, 'accent'),
+    extras: beatOf(`${key}:extra`) < 0.2 ? [pick(w.extras, 'extras')] : [],
   };
 }

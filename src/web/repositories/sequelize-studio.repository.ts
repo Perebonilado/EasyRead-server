@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { InjectModel } from '@nestjs/sequelize';
-import { Op } from 'sequelize';
+import { Op, UniqueConstraintError } from 'sequelize';
 import {
   bibleOf,
   briefOf,
@@ -375,30 +375,54 @@ export class SequelizeStudioRepository implements StudioRepository {
   }
 
   async addMessage(input: {
+    id?: string;
     showId: string;
     episodeId: string | null;
     role: 'user' | 'assistant';
     content: string;
     meta?: StudioMessageRecord['meta'];
   }): Promise<StudioMessageRecord> {
-    const row = await this.messages.create({
-      id: newId(),
-      showId: input.showId,
-      episodeId: input.episodeId,
-      role: input.role,
-      content: input.content.slice(0, 20_000),
-      meta: json(input.meta ?? null),
-    } as never);
-    return this.message(row);
+    try {
+      const row = await this.messages.create({
+        id: input.id ?? newId(),
+        showId: input.showId,
+        episodeId: input.episodeId,
+        role: input.role,
+        content: input.content.slice(0, 20_000),
+        meta: json(input.meta ?? null),
+      } as never);
+      return this.message(row);
+    } catch (error) {
+      // Its id taken: added already, by a try before this one.
+      if (!(error instanceof UniqueConstraintError) || !input.id) throw error;
+      const kept = await this.messages.findByPk(input.id);
+      if (!kept) throw error;
+      return this.message(kept);
+    }
   }
 
   async listMessages(
     showId: string,
     limit = 60,
+    before?: string,
   ): Promise<StudioMessageRecord[]> {
+    // Those said in the same second are kept in the order of their ids.
+    const from = before ? await this.messages.findByPk(before) : null;
+    if (before && from?.showId !== showId) return [];
     const rows = await this.messages.findAll({
-      where: { showId },
-      order: [['createdAt', 'DESC']],
+      where: from
+        ? {
+            showId,
+            [Op.or]: [
+              { createdAt: { [Op.lt]: from.createdAt } },
+              { createdAt: from.createdAt, id: { [Op.lt]: from.id } },
+            ],
+          }
+        : { showId },
+      order: [
+        ['createdAt', 'DESC'],
+        ['id', 'DESC'],
+      ],
       limit,
     });
     return rows.reverse().map((row) => this.message(row));

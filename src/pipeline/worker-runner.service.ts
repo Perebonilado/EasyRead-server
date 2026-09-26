@@ -173,6 +173,7 @@ export class WorkerRunner implements OnModuleInit, OnModuleDestroy {
         const context: JobContext = {
           attemptsMade: job.attemptsMade + 1,
           isFinalAttempt: job.attemptsMade + 1 >= attempts,
+          jobId: job.id,
         };
         try {
           await handle(job.data as never, context);

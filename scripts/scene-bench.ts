@@ -24,7 +24,9 @@ import { basename, join, resolve } from 'node:path';
 import type { SceneDto, SceneTiming } from '../src/contracts';
 import { drawByCode } from '../src/business/domain/scene-code';
 import {
+  CROWD_ID,
   composeScene,
+  crowdShown,
   hiddenAt,
   stepSvg,
 } from '../src/business/domain/scene-compose';
@@ -47,6 +49,8 @@ interface Parts {
   timing: SceneTiming;
   /** The book, when the parts were kept after the score came in. */
   profile?: DocumentProfile | null;
+  /** The book's own key, when kept after crowds were seeded by it. */
+  key?: string | null;
 }
 
 /** The widths the stage is read at: a phone and the reading pane (the box), a desktop (wide). */
@@ -162,6 +166,16 @@ async function stillsOf(
       } catch {
         // A still with no scene behind it.
       }
+    // Its crowd, laid over it as the set is.
+    const crowd = crowdShown(scene, k)
+      ? scene.things.find((t) => t.id === CROWD_ID)
+      : undefined;
+    if (crowd?.kind === 'drawing')
+      try {
+        pngs.set(CROWD_ID, await rasterise(crowd.svg, STILL_PX * 2));
+      } catch {
+        // A still with no crowd.
+      }
     for (const id of scene.steps[k].show) {
       const thing = scene.things.find((t) => t.id === id);
       const place = set.places[k]?.[id];
@@ -238,6 +252,7 @@ async function main(): Promise<void> {
       timing: parts.timing,
       generator: SCENE_GENERATOR_VERSION,
       profile: parts.profile ?? null,
+      key: parts.key ?? null,
     });
     const smallest = WIDTHS.map(({ px, staging }) => {
       const sizes = sizesOf(scene, staging);

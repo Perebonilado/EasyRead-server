@@ -51,6 +51,7 @@ import type { AiCallLogRepository } from '../../business/repositories/ai-call-lo
 import type { TopicRecord } from '../../business/repositories/misc.repository';
 import type {
   StudioEpisodeRecord,
+  StudioEventRecord,
   StudioRepository,
   StudioSceneRecord,
   StudioShowRecord,
@@ -60,6 +61,10 @@ import {
   STUDIO_REPOSITORY,
 } from '../../business/repositories/tokens';
 import { sceneFingerprint } from '../../business/handlers/studio/studio-views';
+import {
+  EVENT_LINES,
+  logEvent,
+} from '../../business/handlers/studio/studio-log';
 import {
   StudioCastService,
   studioCastKey,
@@ -71,6 +76,109 @@ import { SceneProcessor } from './scene.processor';
 
 /** Explainer scenes written at once: each is its own lesson page. */
 const WRITERS = 3;
+
+/** Work that did not go through, as the thread says it: where, and what to do. */
+const FAILED: Record<
+  'bible' | 'outline' | 'script' | 'scene',
+  { step: StudioEventRecord['step']; line: string }
+> = {
+  bible: {
+    step: 'cast',
+    line: 'The cast could not be changed. Try again in a moment.',
+  },
+  outline: {
+    step: 'outline',
+    line: 'The outline could not be written. Try again in a moment.',
+  },
+  script: {
+    step: 'script',
+    line: 'The scenes could not all be written. Try again in a moment.',
+  },
+  scene: {
+    step: 'script',
+    line: 'The scene could not be written. Try again in a moment.',
+  },
+};
+
+/**
+ * What one scene of a film is made from, as the worker makes it: its
+ * sheet put right and staged, the film's profile, its episode as the
+ * chapter, and the show's cast and sets. Shared with scripts/studio-remake,
+ * which makes a scene again the same way without touching its row.
+ */
+export function studioMakeOf(
+  show: StudioShowRecord,
+  episode: StudioEpisodeRecord,
+  row: StudioSceneRecord,
+  rows: StudioSceneRecord[],
+  bible: StudioBible,
+): Omit<Parameters<SceneProcessor['make']>[0], 'base' | 'who'> {
+  const story = row.sheet?.kind === 'story';
+  const stage = show.brief.audience
+    ? AUDIENCE_STAGE[show.brief.audience]
+    : null;
+  const lesson = {
+    teach: episode.outline?.scenes[row.position]?.teach ?? null,
+    source: show.brief.source,
+    stage,
+    maths: bible.maths,
+    planned: null,
+  };
+  // Whatever the writer left wrong is put right here, so a scene is
+  // always one the stage can play.
+  const script = story
+    ? stageStory(repairSheet(row.sheet as StorySheet, bible), bible)
+    : checkExplainer(
+        repairExplainer(row.sheet as ExplainerSheet, lesson),
+        lesson,
+      ).script;
+  // A film's scene: played as a clip of the film, its shots cut.
+  const profile: DocumentProfile & { film: true } = {
+    film: true,
+    subject: story ? 'a story' : bible.subject,
+    kind: story ? 'fiction' : 'textbook',
+    tone:
+      show.brief.tone === 'serious'
+        ? 'serious'
+        : show.brief.tone === 'funny' || show.brief.tone === 'exciting'
+          ? 'light'
+          : 'neutral',
+    formats: bible.maths ? ['explainer', 'maths'] : ['explainer'],
+    story,
+    stage,
+  };
+  const sheets = rows
+    .map((r) => r.sheet)
+    .filter((s): s is StorySheet => s?.kind === 'story');
+  const topic: TopicRecord = {
+    id: episode.id,
+    title: episode.outline?.title ?? episode.title,
+    shortDescription: null,
+    startPage: 1,
+    endPage: rows.length,
+    orderIndex: episode.number,
+  };
+  return {
+    // The ledger keeps the film's cost against its episode.
+    documentId: episode.id,
+    documentTitle: show.title,
+    topic,
+    material: '',
+    context: '',
+    profile,
+    story: story
+      ? {
+          bible: storyBibleFor(bible, sheets, show.title),
+          page: row.position + 1,
+          castKey: studioCastKey(show.id),
+          setsKey: studioSetsKey(show.id),
+          bookTitle: show.title,
+        }
+      : null,
+    script,
+    kept: new Map(),
+  };
+}
 
 /**
  * Whether one set of problems is worse than another: more that keep a
@@ -160,14 +268,24 @@ export class StudioProcessor {
     const episode = await this.studio.findEpisode(job.episodeId);
     if (!show || !episode) return;
     const who = `studio ${episode.id} (${job.kind})`;
+    // What the job records in the thread: once, however often it is tried.
+    const key = context.jobId ? `job:${context.jobId}` : undefined;
+    const failed = key ? `${key}:failed` : undefined;
     try {
       if (job.kind === 'bible')
-        await this.writeBible(show, episode, job.request);
+        await this.writeBible(show, episode, job.request, true, key);
       else if (job.kind === 'outline')
-        await this.writeOutline(show, episode, job.request);
-      else if (job.kind === 'script') await this.writeScript(show, episode);
+        await this.writeOutline(show, episode, job.request, key);
+      else if (job.kind === 'script')
+        await this.writeScript(show, episode, key);
       else if (job.kind === 'scene' && job.sceneId)
-        await this.rewriteScene(show, episode, job.sceneId, job.request ?? '');
+        await this.rewriteScene(
+          show,
+          episode,
+          job.sceneId,
+          job.request ?? '',
+          key,
+        );
       else if (job.kind === 'prepare')
         await this.prepare(show, episode, job.userId, job.sceneIds ?? []);
       else if (job.kind === 'make' && job.sceneId)
@@ -183,7 +301,19 @@ export class StudioProcessor {
           step: null,
           error: 'This scene could not be made. Try making it again.',
         });
-        await this.settle(episode.id);
+        const row = await this.studio.findScene(job.sceneId);
+        await this.log(
+          show,
+          episode,
+          {
+            what: 'failed',
+            step: 'made',
+            sceneId: job.sceneId,
+            line: `Scene ${(row?.position ?? 0) + 1} could not be made. Make the film again to try once more.`,
+          },
+          failed,
+        );
+        await this.settle(show, episode);
         return;
       }
       if (job.kind === 'prepare') {
@@ -194,10 +324,40 @@ export class StudioProcessor {
             step: null,
             error: 'The cast could not be drawn. Try making it again.',
           });
-        await this.settle(episode.id);
+        await this.log(
+          show,
+          episode,
+          {
+            what: 'failed',
+            step: 'made',
+            line: 'The cast could not be drawn for the film. Make the film again to try once more.',
+          },
+          failed,
+        );
+        await this.settle(show, episode);
         return;
       }
       if (!last) throw error;
+      if (job.kind !== 'make') {
+        const row = job.sceneId
+          ? await this.studio.findScene(job.sceneId)
+          : null;
+        await this.log(
+          show,
+          episode,
+          {
+            what: 'failed',
+            ...FAILED[job.kind],
+            ...(row
+              ? {
+                  sceneId: row.id,
+                  line: `Scene ${row.position + 1} could not be written. Try again in a moment.`,
+                }
+              : {}),
+          },
+          failed,
+        );
+      }
       if (job.kind === 'scene' && job.sceneId)
         await this.studio.updateScene(job.sceneId, { status: 'ready' });
       if (job.kind === 'script')
@@ -227,6 +387,8 @@ export class StudioProcessor {
     request?: string,
     /** Whether the episode is free once the cast is written: not when an outline comes next. */
     release = true,
+    /** What the job records in the thread under, once. */
+    key?: string,
   ): Promise<StudioBible> {
     const story = show.brief.format !== 'explainer';
     const before = show.bible;
@@ -254,8 +416,19 @@ export class StudioProcessor {
     }
     await this.studio.updateShow(show.id, { bible });
     if (before) await this.cast.forgetChanged(show.id, before, bible);
-    if (request && release)
+    if (request && release) {
+      await this.log(
+        show,
+        episode,
+        {
+          what: 'cast',
+          step: 'cast',
+          line: EVENT_LINES.cast(bible.characters.length, bible.sets.length),
+        },
+        key,
+      );
       await this.studio.updateEpisode(episode.id, { busy: null, error: null });
+    }
     this.logger.log(
       `studio ${episode.id}: cast of ${bible.characters.map((c) => c.name).join(', ') || 'no one'}; places ${bible.sets.map((s) => s.name).join(', ') || 'none'}`,
     );
@@ -268,6 +441,7 @@ export class StudioProcessor {
     show: StudioShowRecord,
     episode: StudioEpisodeRecord,
     request?: string,
+    key?: string,
   ): Promise<void> {
     const story = show.brief.format !== 'explainer';
     // A new episode of a story may go somewhere new, or meet someone new:
@@ -328,14 +502,50 @@ export class StudioProcessor {
       if (left.length <= problems.length) [outline, problems] = [second, left];
     }
     if (!outline.scenes.length) throw new Error('The outline came back empty');
+    await this.log(
+      show,
+      episode,
+      {
+        what: 'outline',
+        step: 'outline',
+        line: EVENT_LINES.outline(outline, revising),
+      },
+      key,
+    );
+    // What the maker added to the brief while it was being written is taken
+    // in: it is written again with the brief as it is now, straight after.
+    const now = await this.studio.findShow(show.id);
+    const moved =
+      now !== null && describeBrief(now.brief) !== describeBrief(show.brief);
     await this.studio.updateEpisode(episode.id, {
       outline,
       title: outline.title,
       logline: outline.logline,
       phase: 'outline',
-      busy: null,
+      busy: moved ? 'outline' : null,
       error: null,
     });
+    if (moved) {
+      await this.queue.enqueueStudio([
+        {
+          kind: 'outline',
+          showId: show.id,
+          episodeId: episode.id,
+          userId: show.userId,
+          request: 'Take in what the brief says now.',
+        },
+      ]);
+      await this.log(
+        show,
+        episode,
+        {
+          what: 'asked',
+          step: 'outline',
+          line: 'Writing the outline again with what the brief says now',
+        },
+        key && `${key}:again`,
+      );
+    }
     if (episode.number === 1 && (show.title === 'New show' || !show.title))
       await this.studio.updateShow(show.id, { title: outline.title });
     this.logger.log(
@@ -349,6 +559,7 @@ export class StudioProcessor {
   private async writeScript(
     show: StudioShowRecord,
     episode: StudioEpisodeRecord,
+    key?: string,
   ): Promise<void> {
     const outline = episode.outline;
     if (!outline) throw new Error('No outline to write from');
@@ -376,6 +587,12 @@ export class StudioProcessor {
         before = sheet ? endStateOf(sheet) : null;
       }
     }
+    await this.log(
+      show,
+      episode,
+      { what: 'scenes', step: 'script', line: EVENT_LINES.scenes(rows.length) },
+      key,
+    );
     await this.studio.updateEpisode(episode.id, { busy: null, error: null });
   }
 
@@ -385,6 +602,7 @@ export class StudioProcessor {
     episode: StudioEpisodeRecord,
     sceneId: string,
     request: string,
+    key?: string,
   ): Promise<void> {
     const outline = episode.outline;
     const row = await this.studio.findScene(sceneId);
@@ -392,31 +610,52 @@ export class StudioProcessor {
     const bible = show.bible ?? (await this.writeBible(show, episode));
     const k = row.position;
     try {
+      let title: string | undefined;
       if (show.brief.format === 'explainer')
-        await this.writeExplainerScene(
-          show,
-          episode,
-          outline,
-          bible,
-          row,
-          k,
-          request,
-        );
+        title = (
+          await this.writeExplainerScene(
+            show,
+            episode,
+            outline,
+            bible,
+            row,
+            k,
+            request,
+          )
+        ).title;
       else {
         const rows = await this.studio.listScenes(episode.id);
         const prev = rows[k - 1]?.sheet;
         const before = prev?.kind === 'story' ? endStateOf(prev) : null;
-        await this.writeStoryScene(
-          show,
-          episode,
-          outline,
-          bible,
-          row,
-          k,
-          before,
-          request,
-        );
+        title = (
+          await this.writeStoryScene(
+            show,
+            episode,
+            outline,
+            bible,
+            row,
+            k,
+            before,
+            request,
+          )
+        )?.title;
       }
+      // A scene added has no sheet before this one: it is written, not written again.
+      await this.log(
+        show,
+        episode,
+        {
+          what: 'scene',
+          step: 'script',
+          sceneId: row.id,
+          line: EVENT_LINES.scene(
+            k,
+            title ?? outline.scenes[k]?.title ?? `Scene ${k + 1}`,
+            Boolean(row.sheet),
+          ),
+        },
+        key,
+      );
     } finally {
       // Free once no other scene is being written again.
       const rows = await this.studio.listScenes(episode.id);
@@ -696,77 +935,14 @@ export class StudioProcessor {
     const bible = show.bible ?? (await this.writeBible(show, episode));
     const rows = await this.studio.listScenes(episode.id);
     const fingerprint = sceneFingerprint(row.sheet, bible, show.brief);
-    const story = row.sheet.kind === 'story';
-    const stage = show.brief.audience
-      ? AUDIENCE_STAGE[show.brief.audience]
-      : null;
     const who = `studio ${episode.id} s${row.position + 1}`;
-
-    const lesson = {
-      teach: episode.outline?.scenes[row.position]?.teach ?? null,
-      source: show.brief.source,
-      stage,
-      maths: bible.maths,
-      planned: null,
-    };
-    // Whatever the writer left wrong is put right here, so a scene is
-    // always one the stage can play.
-    const script = story
-      ? stageStory(repairSheet(row.sheet as StorySheet, bible), bible)
-      : checkExplainer(
-          repairExplainer(row.sheet as ExplainerSheet, lesson),
-          lesson,
-        ).script;
-    // A film's scene: played as a clip of the film, its shots cut.
-    const profile: DocumentProfile & { film: true } = {
-      film: true,
-      subject: story ? 'a story' : bible.subject,
-      kind: story ? 'fiction' : 'textbook',
-      tone:
-        show.brief.tone === 'serious'
-          ? 'serious'
-          : show.brief.tone === 'funny' || show.brief.tone === 'exciting'
-            ? 'light'
-            : 'neutral',
-      formats: bible.maths ? ['explainer', 'maths'] : ['explainer'],
-      story,
-      stage,
-    };
-    const sheets = rows
-      .map((r) => r.sheet)
-      .filter((s): s is StorySheet => s?.kind === 'story');
-    const topic: TopicRecord = {
-      id: episode.id,
-      title: episode.outline?.title ?? episode.title,
-      shortDescription: null,
-      startPage: 1,
-      endPage: rows.length,
-      orderIndex: episode.number,
-    };
     await this.studio.updateScene(row.id, {
       status: 'making',
       step: 'drawing',
       error: null,
     });
     const made = await this.scenes.make({
-      // The ledger keeps the film's cost against its episode.
-      documentId: episode.id,
-      documentTitle: show.title,
-      topic,
-      material: '',
-      context: '',
-      profile,
-      story: story
-        ? {
-            bible: storyBibleFor(bible, sheets, show.title),
-            page: row.position + 1,
-            castKey: studioCastKey(show.id),
-            setsKey: studioSetsKey(show.id),
-            bookTitle: show.title,
-          }
-        : null,
-      script,
-      kept: new Map(),
+      ...studioMakeOf(show, episode, row, rows, bible),
       base: `studio/${show.id}/${episode.id}/${row.id}-${fingerprint.slice(0, 8)}-${Date.now().toString(36)}`,
       who,
       keepAs: `studio-${row.id}`,
@@ -795,23 +971,49 @@ export class StudioProcessor {
     this.logger.log(
       `${who}: made "${scene.title}" in ${Math.round(voice.durationMs / 1000)}s of film, ${scene.steps.length} stage changes, ${scene.effects.length} effects${context.attemptsMade > 1 ? ` (try ${context.attemptsMade})` : ''}`,
     );
-    await this.settle(episode.id);
+    await this.settle(show, episode);
   }
 
   /**
    * An episode whose scenes are all made, or given up on: made, its length
-   * the sum of its scenes', its still the first scene's.
+   * the sum of its scenes', its still the first scene's; and the film
+   * recorded in the thread, once, however many scenes finish at once, and
+   * only when something in it was made anew: saying how many of its scenes
+   * it has when some could not be made.
    */
-  private async settle(episodeId: string): Promise<void> {
+  private async settle(
+    show: StudioShowRecord,
+    episode: StudioEpisodeRecord,
+  ): Promise<void> {
+    const episodeId = episode.id;
     const rows = await this.studio.listScenes(episodeId);
     if (rows.some((r) => r.status === 'making')) return;
     const made = rows.filter((r) => r.status === 'made' && r.sceneKey);
+    const durationMs = made.reduce((n, r) => n + (r.durationMs ?? 0), 0);
+    if (made.length)
+      await this.log(
+        show,
+        episode,
+        {
+          what: 'made',
+          step: 'made',
+          line: EVENT_LINES.made(
+            episode.outline?.title ?? episode.title,
+            durationMs / 1000,
+            { made: made.length, of: rows.length },
+          ),
+        },
+        // Every scene made anew is a new file, and one that could not be
+        // made again keeps the file it had: the same files, the same film,
+        // so a make that made nothing new records nothing.
+        `made:${rows.flatMap((r) => (r.sceneKey ? [r.sceneKey] : [])).join(',')}`,
+      );
     await this.studio.updateEpisode(episodeId, {
       busy: null,
       ...(made.length
         ? {
             phase: 'made',
-            durationMs: made.reduce((n, r) => n + (r.durationMs ?? 0), 0),
+            durationMs,
             thumbKey: made[0].thumbKey,
           }
         : {}),
@@ -819,6 +1021,23 @@ export class StudioProcessor {
         ? 'Some scenes could not be made. Make the episode again to try them once more.'
         : null,
     });
+  }
+
+  /** Something that happened, recorded in the thread, once for its key: never in the way of the work. */
+  private async log(
+    show: StudioShowRecord,
+    episode: StudioEpisodeRecord,
+    event: StudioEventRecord,
+    key?: string,
+  ): Promise<void> {
+    await logEvent(
+      this.studio,
+      { showId: show.id, episodeId: episode.id },
+      event,
+      key,
+    ).catch((error: Error) =>
+      this.logger.warn(`studio ${episode.id}: not recorded: ${error.message}`),
+    );
   }
 
   private async record(episodeId: string, usage: LlmUsage): Promise<void> {

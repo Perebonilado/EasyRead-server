@@ -397,6 +397,31 @@ describe("a story's continuity", () => {
     );
     expect(quay.brief).toContain('stone steps');
     expect(quay.brief).toContain(SET_STYLE);
+    // The camera pinned, so a crowd stands in it at the right size; and
+    // the open ground its own group, never a fault left out.
+    expect(quay.brief).toContain('the horizon at eye level, about 64%');
+    expect(quay.brief).toContain('id "ground"');
+    expect(quay.parts).toEqual([
+      { name: 'ground', label: false, optional: true },
+    ]);
+    const room = setThing(
+      {
+        id: 'kitchen',
+        name: 'The kitchen',
+        aliases: [],
+        look: 'a small kitchen',
+        firstPage: 1,
+        sound: null,
+        kind: 'indoor',
+        stand: 'in',
+        front: 'the table',
+      },
+      'The Lantern',
+    );
+    expect(room.brief).toContain(
+      'the floor meets the back wall about 68 to 72%',
+    );
+    expect(room.parts.map((p) => p.name)).toEqual(['front', 'ground']);
   });
 
   it('keeps what each character is and how a person looks from where the book first meets them', () => {

@@ -1494,7 +1494,7 @@ describe('what a character says, in a bubble', () => {
     expect(played.acting?.mira.mouth ?? []).toEqual([]);
   });
 
-  it("dresses a story's page: its set at full strength, its night and storm, and a crowd that speaks and cheers", () => {
+  it("dresses a story's page: its set at full strength, its night and storm, and a crowd in it that speaks and cheers", () => {
     const line = (
       say: string,
       speaker: string,
@@ -1525,7 +1525,15 @@ describe('what a character says, in a bubble', () => {
             intro: [],
             group: true,
           },
+          {
+            id: 'quay',
+            kind: 'place',
+            ref: 'quay',
+            name: 'The quay',
+            sound: null,
+          },
         ],
+        backdrop: 'quay',
         beats: [
           {
             say: 'A great multitude gathers on the shore.',
@@ -1540,7 +1548,12 @@ describe('what a character says, in a bubble', () => {
           {
             at: { beat: 0, phrase: '' },
             word: 0,
-            stage: { layout: 'row', show: ['mira', 'fox'], arrows: [] },
+            stage: {
+              layout: 'row',
+              show: ['mira', 'fox'],
+              arrows: [],
+              backdrop: 'quay',
+            },
             effects: [],
           },
         ],
@@ -1554,7 +1567,25 @@ describe('what a character says, in a bubble', () => {
       drawings: new Map([
         ['mira', figure()],
         ['fox', figure()],
+        [
+          'quay',
+          drawing({
+            viewBox: [0, 0, 1600, 900],
+            aspect: 16 / 9,
+            parts: {},
+            labels: {},
+            states: {},
+            // Its ground, measured when it was painted: open to 0.64 of the way down.
+            ground: {
+              top: Array.from({ length: 320 }, () => 0.64),
+              horizon: 0.636,
+              haze: '#dfe6ea',
+              source: 'colour',
+            },
+          }),
+        ],
       ]),
+      key: 'books/ember.json',
       beats: [
         beat('A great multitude gathers on the shore.', 0),
         beat('Who goes there?', 3000),
@@ -1568,7 +1599,12 @@ describe('what a character says, in a bubble', () => {
       full: true,
       time: 'night',
       weather: 'storm',
-      crowd: { id: '@crowd', moves: [[5000, 'cheer', 1400]] },
+      crowd: {
+        id: '@crowd',
+        place: 'quay',
+        frame: 'set',
+        moves: [[5000, 'cheer', 1400]],
+      },
     });
     // The crowd is drawn by code, and never stands in a step.
     expect(
@@ -1577,10 +1613,37 @@ describe('what a character says, in a bubble', () => {
     expect(played.steps.every((step) => !step.show.includes('@crowd'))).toBe(
       true,
     );
-    // The crowd's line comes from over the crowd.
+    // Drawn in its set's frame, on its ground: no one's feet above it.
+    const crowd = played.things.find((t) => t.id === '@crowd');
+    expect(crowd?.kind === 'drawing' && crowd.svg).toContain(
+      'viewBox="0 0 1600 900"',
+    );
+    // The crowd's line comes from over the crowd, and from none of the
+    // story's people.
     const shout = played.effects.find((e) => e.target === 'crowd-people');
     expect(shout?.say?.from).toBe('crowd');
-    expect(played.stagings.wide.bubbles![shout!.say!.id]?.from).toBe('crowd');
+    for (const staging of ['box', 'wide'] as const) {
+      const bubble = played.stagings[staging].bubbles![shout!.say!.id]!;
+      expect(bubble.from).toBe('crowd');
+      // By the heads of a group of it, back by the horizon.
+      const [tx, ty] = bubble.tail;
+      expect(ty).toBeGreaterThan(400);
+      expect(ty).toBeLessThan(620);
+      for (const at of Object.values(played.stagings[staging].places[0]))
+        expect(tx < at.x + at.w * 0.2 || tx > at.x + at.w * 0.8).toBe(true);
+    }
+    // The card's still shows the crowd over its set, laid as the set is.
+    const still = thumbSvg(
+      played,
+      new Map([
+        ['quay', Buffer.from('the set')],
+        ['@crowd', Buffer.from('the crowd')],
+      ]),
+    );
+    const set = still.indexOf(Buffer.from('the set').toString('base64'));
+    const people = still.indexOf(Buffer.from('the crowd').toString('base64'));
+    expect(set).toBeGreaterThan(0);
+    expect(people).toBeGreaterThan(set);
     // Mira, met here for the first time, gets a moment of the camera.
     expect(
       played.effects.some(
@@ -1588,6 +1651,123 @@ describe('what a character says, in a bubble', () => {
           e.do === 'zoom' && e.target === 'mira' && e.untilMs !== undefined,
       ),
     ).toBe(true);
+  });
+
+  it('gives the crowd’s words no heads to come from where its place is not behind the stage', () => {
+    const say = 'Hosanna!';
+    const played = composeScene({
+      script: {
+        ...talking,
+        cast: [
+          ...talking.cast,
+          {
+            id: 'crowd-people',
+            kind: 'character',
+            ref: 'the-crowd',
+            name: 'The crowd',
+            state: null,
+            met: 2,
+            intro: [],
+            group: true,
+          },
+          {
+            id: 'quay',
+            kind: 'place',
+            ref: 'quay',
+            name: 'The quay',
+            sound: null,
+          },
+          {
+            id: 'road',
+            kind: 'place',
+            ref: 'road',
+            name: 'The road',
+            sound: null,
+          },
+        ],
+        backdrop: 'quay',
+        beats: [
+          {
+            say: 'A great multitude gathers on the shore.',
+            pause: 'short',
+            delivery: 'explain',
+            kind: 'narration',
+          },
+          {
+            say: 'Mira runs up the road.',
+            pause: 'short',
+            delivery: 'explain',
+            kind: 'narration',
+          },
+          {
+            say,
+            pause: 'short',
+            delivery: 'explain',
+            kind: 'line',
+            speaker: 'crowd-people',
+            lines: [{ span: [0, say.length], speaker: 'crowd-people' }],
+          },
+        ],
+        steps: [
+          {
+            at: { beat: 0, phrase: '' },
+            word: 0,
+            stage: {
+              layout: 'row',
+              show: ['mira', 'fox'],
+              arrows: [],
+              backdrop: 'quay',
+            },
+            effects: [],
+          },
+          {
+            at: { beat: 1, phrase: '' },
+            word: 0,
+            stage: {
+              layout: 'row',
+              show: ['mira'],
+              arrows: [],
+              backdrop: 'road',
+            },
+            effects: [],
+          },
+        ],
+        setting: { time: null, weather: null, crowd: 'many', world: null },
+      },
+      drawings: new Map([
+        ['mira', figure()],
+        ['fox', figure()],
+        ...(['quay', 'road'] as const).map(
+          (id) =>
+            [
+              id,
+              drawing({
+                viewBox: [0, 0, 1600, 900],
+                aspect: 16 / 9,
+                parts: {},
+                labels: {},
+                states: {},
+              }),
+            ] as const,
+        ),
+      ]),
+      key: 'books/ember.json',
+      beats: [
+        beat('A great multitude gathers on the shore.', 0),
+        beat('Mira runs up the road.', 3000),
+        beat(say, 5000),
+      ],
+      durationMs: 7000,
+      timing: 'voice',
+      generator: 'scene-2',
+    }).scene;
+    expect(played.setting?.crowd?.place).toBe('quay');
+    const shout = played.effects.find((e) => e.target === 'crowd-people');
+    for (const staging of ['box', 'wide'] as const) {
+      const bubble = played.stagings[staging].bubbles![shout!.say!.id]!;
+      // On the road the crowd is not seen: its words come from above.
+      expect(bubble.tail[1]).toBeLessThan(0);
+    }
   });
 
   it('walks one over to the other before a hug across the row, and keeps them side by side', () => {

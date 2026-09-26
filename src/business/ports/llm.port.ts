@@ -694,7 +694,8 @@ export interface LlmGatewayPort {
     phase: 'brief' | 'outline' | 'cast' | 'script' | 'made';
     /** What the maker can see now, in words: the brief, the outline, the scenes. */
     state: string;
-    history: { role: 'user' | 'assistant'; content: string }[];
+    /** The conversation: the maker, the producer, and what the Studio did ('studio'), a line each. */
+    history: { role: 'user' | 'assistant' | 'studio'; content: string }[];
     message: string;
     onToken?: (chunk: string) => void;
   }): Promise<LlmResult<StudioTurnDraft>>;

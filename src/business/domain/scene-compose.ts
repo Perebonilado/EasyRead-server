@@ -20,7 +20,14 @@ import type {
   SceneTiming,
 } from '../../contracts';
 import { actingOf, type DirectedMove, type SpokenLine } from './scene-acting';
-import { CROWD_CANVAS, drawCrowd } from './scene-crowd';
+import {
+  crowdHeads,
+  drawCrowd,
+  planCrowd,
+  type CastAt,
+  type CrowdPlan,
+} from './scene-crowd';
+import { conventionGround } from './scene-ground';
 import type { Callout, InkField } from './scene-callouts';
 import { numbersIn } from './scene-chart';
 import { measureText } from './scene-font';
@@ -61,7 +68,7 @@ import {
 import { paletteOf, placeMusic } from './scene-music';
 import { drawProp } from './scene-props';
 import type { DocumentProfile } from './scene-profile';
-import { settledOf, withoutJumps } from './scene-film';
+import { againstScenery, settledOf, viewOf, withoutJumps } from './scene-film';
 import type { GatedDrawing } from './scene-svg';
 import { anchorMs, quietGaps, spaced, type TimedBeat } from './scene-timing';
 import { numberWords } from './spoken';
@@ -84,19 +91,26 @@ const ABOVE = '@above';
 export const CROWD_ID = '@crowd';
 
 /**
- * Where a crowd stands on a stage: across its width, its feet a little
- * above the story's people's, as those farther back are; and the point
- * over their heads a group's words come from. The stage draws it there.
+ * How a set's frame lies on a stage: covering it, cut to its shape, as
+ * the stage lays every set (xMidYMid slice). A point of the stage in the
+ * set's own units, and the stage's pixels to one of the set's.
  */
-export function crowdBand(stage: { w: number; h: number }): {
-  box: { x: number; y: number; w: number; h: number };
-  head: [number, number];
+export function setFrameOn(
+  frame: [number, number, number, number],
+  stage: { w: number; h: number },
+): {
+  scale: number;
+  toSet: (x: number, y: number) => [number, number];
+  toStage: (x: number, y: number) => [number, number];
 } {
-  const h = (stage.w * CROWD_CANVAS.h) / CROWD_CANVAS.w;
-  const y = stage.h * 0.86 - h;
+  const [vx, vy, vw, vh] = frame;
+  const scale = Math.max(stage.w / vw, stage.h / vh);
+  const ox = (stage.w - vw * scale) / 2;
+  const oy = (stage.h - vh * scale) / 2;
   return {
-    box: { x: 0, y, w: stage.w, h },
-    head: [stage.w / 2, y + h * 0.3],
+    scale,
+    toSet: (x, y) => [(x - ox) / scale + vx, (y - oy) / scale + vy],
+    toStage: (x, y) => [(x - vx) * scale + ox, (y - vy) * scale + oy],
   };
 }
 
@@ -473,6 +487,8 @@ export interface ComposeInput {
         film?: boolean;
       })
     | null;
+  /** The book's or the show's own key: each of its places keeps the same crowd, its regulars, whenever the story comes back to it. */
+  key?: string | null;
 }
 
 /**
@@ -847,30 +863,9 @@ export function composeScene(input: ComposeInput): {
     thingDto(thing, drawings.get(thing.id), story),
   );
   // A story page that is busy has a crowd behind its people, drawn by
-  // code for its world.
+  // code for its world once everyone's place is known (below).
   const crowdSize = story ? script.setting?.crowd : null;
-  const crowd =
-    crowdSize === 'few' || crowdSize === 'many'
-      ? drawCrowd({
-          size: crowdSize,
-          world: script.setting?.world ?? null,
-          seed: script.setting?.world?.region || script.title,
-        })
-      : null;
-  if (crowd)
-    things.push({
-      id: CROWD_ID,
-      kind: 'drawing',
-      svg: crowd.svg,
-      aspect: crowd.aspect,
-      caption: null,
-      parts: {},
-      labels: {},
-      states: {},
-      hidden: [],
-      moves: true,
-      ambience: null,
-    });
+  const crowd = crowdSize === 'few' || crowdSize === 'many' ? crowdSize : null;
   const byId = new Map(things.map((thing) => [thing.id, thing]));
   const castById = new Map(script.cast.map((thing) => [thing.id, thing]));
   /** Each line from somewhere else, by its say's id: where from, whose head its bubble is by, and the side an off-stage voice is on. */
@@ -1458,12 +1453,10 @@ export function composeScene(input: ComposeInput): {
     ),
   });
   /**
-   * A story page's setting: its set at full strength, the light of its
-   * time and its weather, and its crowd, which cheers when a group's line
-   * is a shout or the words say it cheers, and gasps when they say it
-   * marvels or is afraid.
+   * When the crowd reacts: it cheers when a group's line is a shout or the
+   * words say it cheers, and gasps when they say it marvels or is afraid.
    */
-  const settingOf = (): NonNullable<SceneDto['setting']> => {
+  const crowdMoves = (): [number, 'cheer' | 'gasp', number][] => {
     const moves: [number, 'cheer' | 'gasp', number][] = [];
     if (crowd)
       script.beats.forEach((beat, k) => {
@@ -1491,16 +1484,27 @@ export function composeScene(input: ComposeInput): {
           break;
         }
       });
+    return moves;
+  };
+  /**
+   * A story page's setting: its set at full strength, the light of its
+   * time and its weather, and its crowd, drawn in its place's frame, with
+   * when it reacts.
+   */
+  const settingOf = (): NonNullable<SceneDto['setting']> => {
+    const moves = crowdMoves();
     const time = script.setting?.time;
     const weather = script.setting?.weather;
     return {
       full: true,
       ...(time && time !== 'day' ? { time } : {}),
       ...(weather && weather !== 'clear' ? { weather } : {}),
-      ...(crowd
+      ...(crowdDrawn
         ? {
             crowd: {
               id: CROWD_ID,
+              ...(crowdPlace ? { place: crowdPlace } : {}),
+              frame: 'set' as const,
               ...(moves.length ? { moves } : {}),
             },
           }
@@ -1678,7 +1682,8 @@ export function composeScene(input: ComposeInput): {
       thing.kind === 'character' && thing.intro.length ? [thing.id] : [],
     ),
   );
-  const place = (staging: StagingName) => {
+  /** Every step of a staging laid out: each thing in its slot, and people standing together. */
+  const layoutsOf = (staging: StagingName): Record<string, Place>[] => {
     const lookup = new Map(
       things.map((thing) => [thing.id, laid(thing, geometry.get(thing.id))]),
     );
@@ -1696,12 +1701,7 @@ export function composeScene(input: ComposeInput): {
           ...(thing.stands ? { stands: thing.stands } : {}),
         });
     }
-    const stage = STAGINGS[staging];
-    const places: Record<string, ScenePlaceDto>[] = [];
-    const pills: Record<string, ScenePillDto | null>[] = [];
-    const bubbles: Record<string, SceneBubbleDto | null> = {};
-    const audit: Collision[][] = [];
-    for (const [k, step] of steps.entries()) {
+    return steps.map((step) => {
       const crowded = step.show.length > 2;
       const laidOut = layoutStep(
         step.layout,
@@ -1717,6 +1717,226 @@ export function composeScene(input: ComposeInput): {
         staging,
         Boolean(step.backdrop),
       );
+      return laidOut;
+    });
+  };
+  const layouts = { box: layoutsOf('box'), wide: layoutsOf('wide') };
+  const refOf = (thing: SceneThing | undefined) =>
+    thing && 'ref' in thing ? thing.ref : undefined;
+  /**
+   * The story's people wherever the crowd is seen with them: each step its
+   * place is behind, in each staging, in the set's own units, with its
+   * share of the time. Close in, the set moves less than the people in
+   * front of it, so each close shot is a stretch of its own, with them
+   * where they show against the set: larger, and across it. A set people
+   * are in (a boat's side before them) moves with them, and has none.
+   */
+  const crowdSeen = (): Parameters<typeof planCrowd>[0]['seen'] => {
+    const shown = steps
+      .map((step, k) => ({
+        step,
+        k,
+        ms: (steps[k + 1]?.atMs ?? durationMs) - step.atMs,
+      }))
+      .filter(
+        ({ step, ms }) => (step.backdrop ?? null) === crowdPlace && ms > 0,
+      );
+    const total = shown.reduce((n, one) => n + one.ms, 0) || 1;
+    const shots = crowdSet?.parts.front
+      ? []
+      : effects.filter((effect) => effect.do === 'zoom');
+    return (['box', 'wide'] as const).flatMap((staging) => {
+      const stage = STAGINGS[staging];
+      const on = setFrameOn(crowdFrame, stage);
+      const castOf = (
+        step: SceneStepDto,
+        k: number,
+        view: ReturnType<typeof viewOf> | null,
+      ) =>
+        step.show.flatMap((id): CastAt[] => {
+          const placed = layouts[staging][k][id];
+          const dto = byId.get(id);
+          const found = geometry.get(id);
+          if (!placed || dto?.kind !== 'drawing') return [];
+          // Out of the shot, no one is beside them.
+          if (
+            view &&
+            (placed.x + placed.w < view.x - stage.w / (2 * view.s) ||
+              placed.x > view.x + stage.w / (2 * view.s))
+          )
+            return [];
+          const shot = view && againstScenery(view, stage.w, stage.h);
+          const [sx, sy] = shot ? shot.at(placed.x, placed.y) : [0, 0];
+          const at = shot
+            ? { x: sx, y: sy, w: placed.w * shot.k, h: placed.h * shot.k }
+            : placed;
+          const [x, y] = on.toSet(at.x, at.y);
+          const w = at.w / on.scale;
+          const h = at.h / on.scale;
+          const box = found?.viewBox;
+          const u = box ? h / box[3] : 0;
+          const rig = dto.rig === true;
+          const who = castById.get(id);
+          // The kit's feet are at its 0; anyone else's at their foot.
+          const zero = box ? box[1] < 0 && box[1] + box[3] > 0 : false;
+          return [
+            {
+              x,
+              y,
+              w,
+              h,
+              head:
+                found?.head && box
+                  ? [
+                      x + (found.head[0] - box[0]) * u,
+                      y + (found.head[1] - box[1]) * u,
+                    ]
+                  : null,
+              rig,
+              stands:
+                found?.stands && box
+                  ? {
+                      feet: rig && zero ? y - box[1] * u : y + h,
+                      unit: h / found.stands.units,
+                    }
+                  : null,
+              lead: who?.kind === 'character' && !who.minor,
+              // A child's head is lower in the kit's frame than anyone's.
+              child: rig && (found?.head?.[1] ?? -200) > -117,
+            },
+          ];
+        });
+      return shown.flatMap(({ step, k, ms }) => {
+        const until = step.atMs + ms;
+        const seen: Parameters<typeof planCrowd>[0]['seen'] = [];
+        let rest = ms;
+        for (const shot of shots) {
+          const from = Math.max(step.atMs, shot.atMs);
+          const to = Math.min(until, shot.untilMs ?? durationMs);
+          if (to <= from) continue;
+          const view = viewOf(
+            shot,
+            step.show,
+            Object.fromEntries(
+              Object.entries(layouts[staging][k]).map(([id, p]) => [
+                id,
+                { x: p.x, y: p.y, w: p.w, h: p.h },
+              ]),
+            ),
+            stage.w,
+            stage.h,
+          );
+          if (view.s <= 1.01) continue;
+          rest -= to - from;
+          seen.push({
+            share: (to - from) / total / 2,
+            wide: staging === 'wide',
+            close: true,
+            cast: castOf(step, k, view),
+          });
+        }
+        if (rest > 0)
+          seen.unshift({
+            share: rest / total / 2,
+            wide: staging === 'wide',
+            cast: castOf(step, k, null),
+          });
+        return seen;
+      });
+    });
+  };
+  /**
+   * Where a crowd's words come from on a stage: over the heads of its
+   * group farthest from the story's people, in view; null with no crowd,
+   * or at a step its place is not behind, where it is not seen.
+   */
+  const crowdVoice = (
+    staging: StagingName,
+    step: SceneStepDto,
+    laidOut: Record<string, Place>,
+  ): {
+    head: [number, number];
+    body: { x: number; y: number; w: number; h: number };
+  } | null => {
+    if (!crowdDrawn || (step.backdrop ?? null) !== crowdPlace) return null;
+    const stage = STAGINGS[staging];
+    const on = setFrameOn(crowdFrame, stage);
+    const people = Object.entries(laidOut)
+      .filter(([id]) => castById.get(id)?.kind === 'character')
+      .map(([, at]) => at.x + at.w / 2);
+    let best: { head: [number, number]; body: Rect; clear: number } | null =
+      null;
+    for (const group of crowdHeads(crowdDrawn)) {
+      const [x, y] = on.toStage(group.x, group.y);
+      if (x < stage.w * 0.08 || x > stage.w * 0.92) continue;
+      const clear = Math.min(...people.map((p) => Math.abs(p - x)), stage.w);
+      if (best && clear <= best.clear) continue;
+      const [x0] = on.toStage(group.x0, group.y);
+      const [x1, feet] = on.toStage(group.x1, group.feet);
+      best = {
+        head: [x, y],
+        body: { x: x0, y, w: x1 - x0, h: feet - y },
+        clear,
+      };
+    }
+    return best && { head: best.head, body: best.body };
+  };
+
+  // The crowd, now everyone's place is known: planned about the story's
+  // people in the set's own frame, on its ground, and drawn.
+  const crowdPlace = crowd ? painted(script.backdrop) : null;
+  const crowdSet = crowdPlace ? drawings.get(crowdPlace) : null;
+  const crowdFrame: [number, number, number, number] = crowdSet?.viewBox ?? [
+    0, 0, 1600, 900,
+  ];
+  const crowdPlan: CrowdPlan | null = crowd
+    ? planCrowd({
+        size: crowd,
+        kind: script.setting?.place ?? 'outdoor',
+        ground: crowdSet?.ground ?? conventionGround(),
+        frame: crowdFrame,
+        scale: setFrameOn(crowdFrame, STAGINGS.wide).scale,
+        seen: crowdSeen(),
+        // What the story's people wear, for no one in it to wear the same.
+        wearing: script.cast.flatMap((thing) => {
+          const wears = drawings.get(thing.id)?.wears;
+          return wears ? [wears] : [];
+        }),
+        seed: `${input.key || script.setting?.world?.region || script.title}:${
+          (crowdPlace && refOf(castById.get(crowdPlace))) ||
+          crowdPlace ||
+          'stage'
+        }`,
+        world: script.setting?.world ?? null,
+      })
+    : null;
+  const crowdDrawn = crowdPlan?.people.length ? crowdPlan : null;
+  if (crowdDrawn) {
+    const [, , vw, vh] = crowdFrame;
+    things.push({
+      id: CROWD_ID,
+      kind: 'drawing',
+      svg: drawCrowd(crowdDrawn, { moves: crowdMoves(), durationMs }),
+      aspect: vw / vh,
+      caption: null,
+      parts: {},
+      labels: {},
+      states: {},
+      hidden: [],
+      moves: true,
+      ambience: null,
+    });
+  }
+
+  const place = (staging: StagingName) => {
+    const stage = STAGINGS[staging];
+    const places: Record<string, ScenePlaceDto>[] = [];
+    const pills: Record<string, ScenePillDto | null>[] = [];
+    const bubbles: Record<string, SceneBubbleDto | null> = {};
+    const audit: Collision[][] = [];
+    for (const [k, step] of steps.entries()) {
+      const crowded = step.show.length > 2;
+      const laidOut = layouts[staging][k];
       const arrows = step.arrows.flatMap((arrow) => {
         const a = laidOut[arrow.from];
         const b = laidOut[arrow.to];
@@ -1814,27 +2034,18 @@ export function composeScene(input: ComposeInput): {
           // By their head, or narrower where the step is crowded.
           bubble = placeBubble(asked) ?? placeBubble({ ...asked, width: 300 });
         }
-        // A crowd's words, over the crowd: on the side of it farther from
-        // the story's people, so the words are never taken for theirs.
-        if (!bubble && voice?.from === 'crowd') {
-          const band = crowdBand(stage);
-          const people = Object.entries(laidOut)
-            .filter(([id]) => castById.get(id)?.kind === 'character')
-            .map(([, at]) => at.x + at.w / 2);
-          const sides = [0.2, 0.8].map((k) => stage.w * k);
-          const clear = (x: number) =>
-            Math.min(...people.map((p) => Math.abs(p - x)), Infinity);
-          const x = clear(sides[0]) >= clear(sides[1]) ? sides[0] : sides[1];
-          head = [x, band.head[1]];
+        // A crowd's words, over the crowd: from the group of it farthest
+        // from the story's people, so the words are never taken for theirs.
+        const group =
+          !bubble && voice?.from === 'crowd'
+            ? crowdVoice(staging, step, laidOut)
+            : null;
+        if (group) {
+          head = group.head;
           const asked = {
             text: effect.say!.text,
             head,
-            body: {
-              x: x - stage.w * 0.15,
-              y: band.box.y,
-              w: stage.w * 0.3,
-              h: band.box.h,
-            },
+            body: group.body,
             stage,
             avoid: {
               boxes: [
@@ -2149,6 +2360,18 @@ export function hiddenAt(
   return [...hidden];
 }
 
+/**
+ * Whether a step shows the page's crowd: one drawn in its set's frame,
+ * while its place is behind the stage (or, with no place, always). A
+ * crowd stored before stood in a band the stills never drew.
+ */
+export function crowdShown(scene: SceneDto, index: number): boolean {
+  const crowd = scene.setting?.crowd;
+  const step = scene.steps[index];
+  if (!crowd || crowd.frame !== 'set' || !step) return false;
+  return (step.backdrop ?? null) === (crowd.place ?? null);
+}
+
 /** The step to show on the page's card: the fullest, the later one on a tie. */
 export function fullestStep(scene: SceneDto): number {
   let best = 0;
@@ -2205,11 +2428,15 @@ export function stepSvg(
   const places = staging.places[index];
   const byId = new Map(scene.things.map((t) => [t.id, t]));
   const parts: string[] = [];
-  // The scene behind the stage, covering it, faded as the player fades it.
+  // The scene behind the stage, covering it, and its crowd over it, laid
+  // as the set is: the two faded together, as the player fades them.
   const scenery = step.backdrop ? pngs.get(step.backdrop) : undefined;
-  if (scenery)
+  const crowd = crowdShown(scene, index) ? pngs.get(CROWD_ID) : undefined;
+  const cover = (png: Buffer) =>
+    `<image x="0" y="0" width="${staging.w}" height="${staging.h}" preserveAspectRatio="xMidYMid slice" href="data:image/png;base64,${png.toString('base64')}"/>`;
+  if (scenery || crowd)
     parts.push(
-      `<image x="0" y="0" width="${staging.w}" height="${staging.h}" preserveAspectRatio="xMidYMid slice" opacity="${BACKDROP_OPACITY}" href="data:image/png;base64,${scenery.toString('base64')}"/>`,
+      `<g opacity="${scenery ? BACKDROP_OPACITY : 1}">${scenery ? cover(scenery) : ''}${crowd ? cover(crowd) : ''}</g>`,
     );
   const text = (
     x: number,

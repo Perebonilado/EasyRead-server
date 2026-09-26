@@ -66,6 +66,12 @@ process.stdin.on('end', () => {
   if (request.grid) answer.grid = mapOf(request.grid.svg, request.grid.cols);
   // Several versions of one drawing, each a map at the same size.
   if (request.masks) answer.masks = request.masks.svgs.map((svg) => mapOf(svg, request.masks.cols));
+  // A set's ground: versions of it in full colour, every pixel's RGBA.
+  if (request.ground)
+    answer.ground = request.ground.svgs.map((svg) => {
+      const image = new Resvg(svg, { ...options, fitTo: { mode: 'width', value: request.ground.cols } }).render();
+      return { cols: image.width, rows: image.height, rgba: Buffer.from(image.pixels).toString('base64') };
+    });
   process.stdout.write(JSON.stringify(answer));
 });
 `;
@@ -96,12 +102,21 @@ export interface InkMap {
   bits: string;
 }
 
+/** A drawing's pixels: red, green, blue and alpha, four bytes each, row by row. */
+export interface Pixels {
+  cols: number;
+  rows: number;
+  rgba: Buffer;
+}
+
 /**
  * Where the ink is, and a PNG `width` pixels across when a width is
  * given. Also, when asked, the ink of each of `variants` (the drawing cut
  * down to one part), a coarse map of `grid.svg`'s ink `grid.cols` cells
- * across, and a map of each of `masks.svgs` at `masks.cols` (versions of
- * one drawing, so every map is the same size), all in the one child.
+ * across, a map of each of `masks.svgs` at `masks.cols` (versions of
+ * one drawing, so every map is the same size), and every pixel of each
+ * of `ground.svgs` at `ground.cols` (a set, read for where its ground
+ * is), all in the one child.
  * Rejects when the drawing will not render, whatever the reason: a panic,
  * a parse error, a render that never finishes.
  */
@@ -112,6 +127,7 @@ export function renderSvg(
     variants?: string[];
     grid?: { svg: string; cols: number };
     masks?: { svgs: string[]; cols: number };
+    ground?: { svgs: string[]; cols: number };
   } = {},
 ): Promise<{
   ink: InkBox | null;
@@ -119,6 +135,7 @@ export function renderSvg(
   inks?: (InkBox | null)[];
   grid?: InkMap;
   masks?: InkMap[];
+  ground?: Pixels[];
 }> {
   return new Promise((resolve, reject) => {
     const child = spawn(process.execPath, ['-e', CHILD], {
@@ -154,6 +171,7 @@ export function renderSvg(
           inks?: (InkBox | null)[];
           grid?: InkMap;
           masks?: InkMap[];
+          ground?: { cols: number; rows: number; rgba: string }[];
         };
         resolve({
           ink: answer.ink,
@@ -161,6 +179,15 @@ export function renderSvg(
           ...(answer.inks ? { inks: answer.inks } : {}),
           ...(answer.grid ? { grid: answer.grid } : {}),
           ...(answer.masks ? { masks: answer.masks } : {}),
+          ...(answer.ground
+            ? {
+                ground: answer.ground.map((one) => ({
+                  cols: one.cols,
+                  rows: one.rows,
+                  rgba: Buffer.from(one.rgba, 'base64'),
+                })),
+              }
+            : {}),
         });
       } catch (error) {
         reject(error instanceof Error ? error : new Error(String(error)));
@@ -184,6 +211,14 @@ export function renderSvg(
               masks: {
                 svgs: extra.masks.svgs,
                 cols: Math.max(4, Math.round(extra.masks.cols)),
+              },
+            }
+          : {}),
+        ...(extra.ground?.svgs.length
+          ? {
+              ground: {
+                svgs: extra.ground.svgs,
+                cols: Math.max(4, Math.round(extra.ground.cols)),
               },
             }
           : {}),

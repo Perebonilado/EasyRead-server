@@ -459,6 +459,8 @@ export function stageStory(sheet: StorySheet, bible: StudioBible): SceneScript {
       weather: sheet.weather,
       crowd: sheet.crowd,
       world: bible.world,
+      // Out of doors, a room or a vessel: the crowd stands in it so.
+      ...(place ? { place: place.kind } : {}),
     },
   };
 }

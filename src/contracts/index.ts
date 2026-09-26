@@ -1143,6 +1143,14 @@ export interface SceneSettingDto {
   crowd?: {
     /** The crowd's drawing, by its thing's id. */
     id: string;
+    /** The place it stands in, by its set's thing id: seen only while that set is, and faded with it. */
+    place?: string;
+    /**
+     * 'set': drawn in its set's own frame, laid over it as the set is laid
+     * (covering the stage) and moved with the set's camera; absent on a
+     * scene stored before, a band across the stage behind the people.
+     */
+    frame?: 'set';
     /** When they react: the moment, how, and for how long. */
     moves?: [number, 'cheer' | 'gasp', number][];
   };
@@ -2332,13 +2340,55 @@ export interface StudioEpisodeDto {
   hasThumb: boolean;
 }
 
+/**
+ * What happened, as the thread records it: a result come (the outline,
+ * the cast, the scenes, a scene, the film), a step taken with a button
+ * (approved, asked for, changed by hand, making, shared, a new episode),
+ * or work that did not go through.
+ */
+export type StudioEventName =
+  | 'outline'
+  | 'cast'
+  | 'scenes'
+  | 'scene'
+  | 'made'
+  | 'approved'
+  | 'asked'
+  | 'edited'
+  | 'make'
+  | 'shared'
+  | 'episode'
+  | 'failed';
+
+export interface StudioEventDto {
+  what: StudioEventName;
+  /** The step it belongs to: where its card opens the panel. */
+  step: StudioPhase;
+  sceneId?: string;
+  /** Which writing of it this is, from 1: the outline's, the cast's or a scene's. */
+  version?: number;
+  /** What happened, in a line. */
+  line: string;
+}
+
 export interface StudioMessageDto {
   id: string;
   role: 'user' | 'assistant';
+  /** The episode it was said in or happened to; null for one kept from before episodes were noted. */
+  episodeId: string | null;
+  /** Said by the maker or the producer, or an event the Studio recorded. */
+  kind: 'say' | 'event';
+  event: StudioEventDto | null;
   content: string;
   choices: string[];
   refused: boolean;
   createdAt: string;
+}
+
+/** Earlier messages of a show's thread, the oldest first, and whether there are earlier still. */
+export interface StudioMessagePageDto {
+  messages: StudioMessageDto[];
+  more: boolean;
 }
 
 export interface StudioBalanceDto {
@@ -2364,7 +2414,10 @@ export interface StudioShowDto {
     durationMs: number | null;
     hasThumb: boolean;
   }[];
+  /** The latest of the thread, the oldest first. */
   messages: StudioMessageDto[];
+  /** Whether the thread goes back further than `messages`. */
+  moreMessages: boolean;
   balance: StudioBalanceDto;
 }
 

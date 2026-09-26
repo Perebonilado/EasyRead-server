@@ -47,13 +47,19 @@ import {
   type LearningStage,
 } from '../../business/domain/scene-stage';
 import {
+  CROWD_ID,
   composeScene,
+  crowdShown,
   describeStep,
   fullestStep,
   hiddenAt,
   rhythmOf,
   thumbSvg,
 } from '../../business/domain/scene-compose';
+import {
+  conventionGround,
+  measureGround,
+} from '../../business/domain/scene-ground';
 import {
   mendScreenplay,
   type ScreenplayDraft,
@@ -692,6 +698,8 @@ export class SceneProcessor {
       timing: voice.timing,
       generator: SCENE_GENERATOR_VERSION,
       profile: input.profile,
+      // The book's or the show's own: each place keeps its regulars.
+      key: story?.setsKey ?? null,
     });
     // For working on the layout without the models: everything compose
     // was given, kept where SCENE_KEEP_PARTS says (scripts/scene-recompose).
@@ -709,6 +717,7 @@ export class SceneProcessor {
             durationMs: voice.durationMs,
             timing: voice.timing,
             profile: input.profile,
+            key: story?.setsKey ?? null,
           }),
         );
       } catch (error) {
@@ -1126,7 +1135,12 @@ export class SceneProcessor {
               story.bible.world ?? null,
             )
           : null;
-      out.set(thing.id, set?.drawing ?? null);
+      out.set(
+        thing.id,
+        set
+          ? { ...set.drawing, ...(set.ground ? { ground: set.ground } : {}) }
+          : null,
+      );
     });
     await Promise.all([
       ...cast,
@@ -1458,6 +1472,19 @@ export class SceneProcessor {
         );
       } catch {
         // A still with no scene behind it.
+      }
+    // Its crowd, at the set's size, laid over it as the set is.
+    const crowd = crowdShown(scene, index)
+      ? scene.things.find((t) => t.id === CROWD_ID)
+      : undefined;
+    if (crowd?.kind === 'drawing')
+      try {
+        pngs.set(
+          CROWD_ID,
+          await rasterise(crowd.svg, Math.round(scene.stagings.box.w * scale)),
+        );
+      } catch {
+        // A still with no crowd; the video has it.
       }
     for (const id of step?.show ?? []) {
       const thing = scene.things.find((t) => t.id === id);
@@ -1853,9 +1880,38 @@ export class SceneProcessor {
     world: StoryWorld | null = null,
   ): Promise<SetSheet | null> {
     return this.once(`${key}#${place.id}`, async () => {
+      const keep = (set: SetSheet, what: string) =>
+        this.inTurn(key, async () => {
+          const sets = await this.setsAt(key);
+          sets[place.id] = set;
+          await this.storage.put({
+            key,
+            body: Buffer.from(JSON.stringify(sets)),
+            mimeType: 'application/json',
+          });
+        }).catch((error: unknown) =>
+          this.logger.warn(
+            `${who}: ${place.name} was ${what} but not kept: ${(error as Error).message}`,
+          ),
+        );
       try {
         const kept = (await this.setsAt(key))[place.id];
-        if (kept) return kept;
+        if (kept?.ground) return kept;
+        if (kept) {
+          // Kept before its ground was measured: measured now, once, and
+          // kept with it. No model is asked and nothing is painted again.
+          // A render that failed keeps nothing: the convention this once.
+          const ground = await measureGround(kept.drawing);
+          if (!ground) {
+            this.logger.warn(
+              `${who}: ${place.name}'s ground could not be measured; measured again next time`,
+            );
+            return { ...kept, ground: conventionGround() };
+          }
+          const measured = { ...kept, ground };
+          await keep(measured, 'measured');
+          return measured;
+        }
       } catch (error) {
         this.logger.warn(
           `${who}: the sets could not be read: ${(error as Error).message}`,
@@ -1864,19 +1920,7 @@ export class SceneProcessor {
       }
       const set = await this.paintSet(place, bookTitle, documentId, who, world);
       if (!set) return null;
-      await this.inTurn(key, async () => {
-        const sets = await this.setsAt(key);
-        sets[place.id] = set;
-        await this.storage.put({
-          key,
-          body: Buffer.from(JSON.stringify(sets)),
-          mimeType: 'application/json',
-        });
-      }).catch((error: unknown) =>
-        this.logger.warn(
-          `${who}: ${place.name} was painted but not kept: ${(error as Error).message}`,
-        ),
-      );
+      await keep(set, 'painted');
       return set;
     });
   }
@@ -1938,7 +1982,18 @@ export class SceneProcessor {
       return null;
     }
     this.logger.log(`${who}: ${place.name} painted for the whole book`);
-    return { version: SET_VERSION, drawing: best.drawing };
+    // Where its ground is, read once, for the crowds that will stand on it;
+    // kept without it when the render failed, to be measured next time.
+    const ground = await measureGround(best.drawing);
+    if (!ground)
+      this.logger.warn(
+        `${who}: ${place.name}'s ground could not be measured; measured again next time`,
+      );
+    return {
+      version: SET_VERSION,
+      drawing: best.drawing,
+      ...(ground ? { ground } : {}),
+    };
   }
 
   /**

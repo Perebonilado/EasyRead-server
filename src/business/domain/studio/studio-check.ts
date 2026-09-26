@@ -166,6 +166,14 @@ export function mendSheet(
     bible.characters.find((c) => c.id === id)?.name ?? id;
 
   sheet.set = setId(sheet.set, bible) ?? sheet.set;
+  // A vessel (a bus, a boat) holds a few people besides the story's, never a crowd.
+  if (
+    sheet.crowd === 'many' &&
+    bible.sets.find((s) => s.id === sheet.set)?.kind === 'vessel'
+  ) {
+    sheet.crowd = 'few';
+    mended.push('a vessel holds a few people, not a crowd');
+  }
 
   // Who is there as it opens: the bible's people, each once, each on a spot of their own.
   const taken = new Set<Spot>();

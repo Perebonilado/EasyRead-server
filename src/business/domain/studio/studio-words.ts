@@ -129,6 +129,8 @@ export function describeForProducer(input: {
   states?: string[];
   phase: string;
   episode: number;
+  /** What the maker is looking at in the panel as they write: "scene 3 ("The ball")", "the cast". */
+  looking?: string | null;
 }): string {
   const story = input.brief.format !== 'explainer';
   const missing = briefMissing(input.brief);
@@ -151,6 +153,10 @@ export function describeForProducer(input: {
           return `${sheet ? describeSheet(sheet, k) : `Scene ${k + 1}: being written`}${state ? ` [${state}]` : ''}`;
         })
         .join('\n')}`,
+    );
+  if (input.looking)
+    parts.push(
+      `The maker is looking at ${input.looking} as they write: "it" or "this" most likely means that.`,
     );
   return parts.join('\n\n');
 }

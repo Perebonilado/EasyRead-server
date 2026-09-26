@@ -33,6 +33,8 @@ interface Parts {
   timing: SceneTiming;
   /** The book, when the parts were kept after the score came in. */
   profile?: DocumentProfile | null;
+  /** The book's own key, when kept after crowds were seeded by it. */
+  key?: string | null;
 }
 
 const [partsFile, out] = process.argv.slice(2);
@@ -54,6 +56,7 @@ async function main(): Promise<void> {
     timing: parts.timing,
     generator: SCENE_GENERATOR_VERSION,
     profile: parts.profile ?? null,
+    key: parts.key ?? null,
   });
   writeFileSync(join(out, 'scene.json'), JSON.stringify(scene, null, 2));
   for (const staging of ['box', 'wide'] as const) {

@@ -326,6 +326,34 @@ describe('the Studio: a scene decided before it is drawn', () => {
       { beat: 3, shot: 'close', on: 'tobi', with: null },
     ]);
     expect(script.setting?.crowd).toBe('many');
+    // The crowd stands as its place has room for it: out of doors here.
+    expect(script.setting?.place).toBe('outdoor');
+  });
+
+  it('quietly keeps a vessel to a few people, never a crowd', () => {
+    const boat = {
+      ...bible,
+      sets: [
+        ...bible.sets,
+        {
+          id: 'boat',
+          name: 'Boat',
+          look: 'a small fishing boat',
+          kind: 'vessel' as const,
+          stand: 'in' as const,
+          front: "the boat's side",
+          sound: null,
+        },
+      ],
+    };
+    const { sheet } = mendSheet(storySheetOf({ ...market, set: 'boat' }), boat);
+    expect(sheet.crowd).toBe('few');
+    expect(stageStory(sheet, boat).setting).toMatchObject({
+      crowd: 'few',
+      place: 'vessel',
+    });
+    // Nothing is said to the maker about it.
+    expect(errorsIn(checkSheet(sheet, boat, 30))).toEqual([]);
   });
 
   it('carries the scene on: who it leaves on the stage, and what with', () => {

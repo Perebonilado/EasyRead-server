@@ -19,6 +19,8 @@ import { elements, removeNode, textOf, walk } from './scene-dom';
 import { groupId, idKey, type DrawingThing } from './scene-script';
 import { liftCallouts, type Callout, type InkField } from './scene-callouts';
 import { renderSvg, type InkBox } from './scene-raster';
+import type { SetGround } from './scene-ground';
+import type { FigureSpec } from './scene-figure';
 
 /** The canvas the artist is given, by shape. */
 export const CANVAS: Record<DrawingThing['shape'], { w: number; h: number }> = {
@@ -784,6 +786,10 @@ export interface GatedDrawing {
     'r' | 'l',
     [[number, number], [number, number], [number, number]]
   >;
+  /** A set: where its open ground is, measured once, so a crowd stands on it. */
+  ground?: SetGround;
+  /** One person drawn by the kit: what they wear that says who they are, so no one in a crowd wears the same. */
+  wears?: Pick<FigureSpec, 'top' | 'topColour' | 'headwear'>;
 }
 
 export interface GateResult {

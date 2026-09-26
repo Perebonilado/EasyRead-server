@@ -37,7 +37,7 @@ import type { CharacterSheet } from './scene-sheet';
 import type { GatedDrawing } from './scene-svg';
 
 /** Rigs made by an older way of making them are made again. */
-export const RIG_VERSION = 2;
+export const RIG_VERSION = 3;
 
 /** What the rig found and did: each part's joint, in the drawing's units, and each part moved in to meet the body. */
 export interface SheetRig {
@@ -265,9 +265,76 @@ function aboveLegs(node: Element, legs: Element | null): Element[] {
   });
 }
 
+const TAIL_NAME = /(?:^|[-_\s])tail|^tail/i;
+
+/**
+ * A tail drawn before tails were asked for, by any name that says so
+ * ("tailwag", "dog-tail"): the outermost such element, never one on the
+ * head.
+ */
+function tailByName(root: Element, head: Element | null): Element | null {
+  const named = (node: Element) =>
+    TAIL_NAME.test(node.attribs.id ?? '') ||
+    (node.attribs.class ?? '').split(/\s+/).some((one) => TAIL_NAME.test(one));
+  const found = [...walk(root)].filter(
+    (node) =>
+      node !== root &&
+      named(node) &&
+      hasInk(node) &&
+      !(head && holds(head, node)),
+  );
+  return (
+    found.find(
+      (node) => !found.some((other) => other !== node && holds(other, node)),
+    ) ?? null
+  );
+}
+
+/**
+ * A tail drawn inside the body (or the legs or arms) taken out to be a
+ * part of its own, just behind the part it was in and drawn exactly where
+ * it was: then it can be measured against the body and turn about its own
+ * joint without taking the body with it.
+ */
+function lifted(
+  root: Element,
+  tail: Element | null,
+  parts: (Element | null)[],
+): Element | null {
+  const within =
+    tail && parts.find((part) => part && part !== tail && holds(part, tail));
+  if (!tail || !within) return tail;
+  const from = spaceOf(root, tail);
+  const to = spaceOf(root, within);
+  const back = to && invert(to);
+  if (!from || !back) return tail;
+  const [a, b, c, d, e, f] = multiply(back, from);
+  const parent = tail.parent as Element;
+  parent.children.splice(parent.children.indexOf(tail), 1);
+  const home = within.parent as Element;
+  const identity = [a, b, c, d, e, f].every(
+    (n, i) => Math.abs(n - IDENTITY[i]) < 1e-9,
+  );
+  const placed = identity
+    ? tail
+    : new Element('g', {
+        transform: `matrix(${[a, b, c, d, e, f].map((n) => r4(n)).join(' ')})`,
+      });
+  if (placed !== tail) {
+    placed.children = [tail];
+    tail.parent = placed;
+  }
+  home.children.splice(home.children.indexOf(within), 0, placed);
+  placed.parent = home;
+  return tail;
+}
+
+const r4 = (n: number) => Math.round(n * 10000) / 10000;
+
 /**
  * The figure's parts, found by the names the gate matched, and a tail
- * drawn before tails were asked for by its group's own id.
+ * drawn before tails were asked for, by its own name, taken out of the
+ * body when it was drawn inside it.
  */
 function figureOf(
   root: Element,
@@ -283,13 +350,16 @@ function figureOf(
     elements(node.children).flatMap((child) =>
       /\brig-mend\b/.test(child.attribs.class ?? '') ? top(child) : [child],
     );
-  const tail =
+  const tail = lifted(
+    root,
     part('tail') ??
-    top(root).find(
-      (node) =>
-        node.name.toLowerCase() === 'g' && /^tail$/i.test(node.attribs.id),
-    ) ??
-    null;
+      top(root).find(
+        (node) =>
+          node.name.toLowerCase() === 'g' && /^tail$/i.test(node.attribs.id),
+      ) ??
+      tailByName(root, head),
+    [part('body'), part('arms'), part('legs')],
+  );
   const faces = Object.values(drawing.states)
     .map((id) => byId(root, id))
     .filter((node): node is Element => Boolean(node));

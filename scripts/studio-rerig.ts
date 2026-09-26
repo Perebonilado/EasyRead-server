@@ -135,7 +135,15 @@ async function main(): Promise<void> {
       ? new S3StorageAdapter(config)
       : new LocalStorageAdapter(config);
   const key = studioCastKey(showId);
-  const raw = await storage.get(key);
+  // A show with no cast (an explainer, or one never drawn) has nothing to rig.
+  const raw = await storage.get(key).catch((error: unknown) => {
+    if (error instanceof NotFoundError) return null;
+    throw error;
+  });
+  if (!raw) {
+    console.log(`${showId}: no cast drawn, nothing to rig.`);
+    return;
+  }
   const cast = JSON.parse(raw.toString('utf8')) as Record<
     string,
     Partial<CharacterSheet>

@@ -406,3 +406,48 @@ describe("taking an artist's motion out of a drawing", () => {
     expect(svg).not.toMatch(/keyframes|animate|@media|rotate\(3deg\)/);
   });
 });
+
+describe('Bingo, as the artist drew him: a tail drawn inside the body', () => {
+  const BINGO_BOX: ViewBox = [228.75, 255.75, 369.5, 484.5];
+  const bingoSvg = readFileSync(
+    join(__dirname, '__fixtures__', 'bingo.svg'),
+    'utf8',
+  );
+  const bingo = sheetOf(bingoSvg, BINGO_BOX, {
+    head: 'head',
+    body: 'body',
+    arms: 'arms',
+    legs: 'legs',
+  });
+
+  it('finds the tail by the name it was given, takes it out of the body, and wags it about its base', async () => {
+    const { sheet } = await rigSheet(bingo);
+    const root = parse(sheet.drawing.svg);
+    const tail = [...elements(root.children)]
+      .flatMap(function all(node: Element): Element[] {
+        return [node, ...elements(node.children).flatMap(all)];
+      })
+      .find((node) => /\btailwag\b/.test(node.attribs.class ?? ''))!;
+    expect(tail).toBeTruthy();
+    // No longer inside the body, so it turns without the body.
+    for (
+      let at = tail.parent as Element | null;
+      at;
+      at = at.parent as Element | null
+    )
+      expect(at.attribs?.id).not.toBe('body');
+    expect(sheet.rig!.joints.tail).toBeDefined();
+    expect(sheet.drawing.svg).toMatch(/rig-tail/);
+    // Drawn exactly where it was: the rest frame's ink is the same.
+    const before = parse(bingoSvg);
+    stillSheet(before);
+    const { masks } = await renderSvg(render(before), undefined, {
+      masks: { svgs: [render(before), sheet.drawing.svg], cols: 300 },
+    });
+    const [a, b] = masks!;
+    let differ = 0;
+    for (let i = 0; i < a.bits.length; i += 1)
+      if (a.bits[i] !== b.bits[i]) differ += 1;
+    expect(differ / a.bits.length).toBeLessThan(0.002);
+  }, 60_000);
+});

@@ -107,7 +107,7 @@ describe('the Studio, as the app sees it', () => {
     expect(needsMaking(made, animal, brief)).toBe(false);
   });
 
-  it('says in plain words why an episode cannot be made', () => {
+  it('says in plain words why an episode cannot be made, never for a slip of the writer', () => {
     expect(
       blockersOf(episode({ phase: 'cast' }), [scene()], bible, brief)[0],
     ).toMatch(/Approve the outline and the cast/);
@@ -125,9 +125,8 @@ describe('the Studio, as the app sees it', () => {
         { rule: 'length', message: 'Long.', beat: null, level: 'warning' },
       ],
     });
-    expect(blockersOf(episode(), [broken], bible, brief)).toEqual([
-      'Scene 1 has a problem to put right: No one says beat 2.',
-    ]);
+    // What the writer got wrong is the Studio's to put right, not the maker's.
+    expect(blockersOf(episode(), [broken], bible, brief)).toEqual([]);
     expect(blockersOf(episode(), [scene()], bible, brief)).toEqual([]);
   });
 

@@ -2,6 +2,7 @@ import {
   bibleOf,
   briefMissing,
   briefOf,
+  explainerSheetOf,
   outlineOf,
   secondsOf,
   storySheetOf,
@@ -9,12 +10,16 @@ import {
 } from './studio';
 import {
   checkBible,
+  checkExplainer,
   checkOutline,
   checkSheet,
   distinctVoices,
   endStateOf,
   errorsIn,
   mendSheet,
+  repairExplainer,
+  repairSheet,
+  spelledNumbers,
 } from './studio-check';
 import { placeThingId, stageStory, storyBibleFor } from './studio-stage';
 
@@ -142,6 +147,25 @@ describe('the Studio: a scene decided before it is drawn', () => {
     expect(problems.join(' ')).toMatch(/Scene 2 is set in "the moon"/);
     expect(problems.join(' ')).toMatch(/baba/);
     expect(problems.join(' ')).toMatch(/Mama is in no scene/);
+  });
+
+  it("holds a lesson's outline to what its narrator has time to say", () => {
+    const page = (n: number) => Array(n).fill('word').join(' ');
+    const lesson = (teach: string, seconds: number) =>
+      outlineOf({
+        title: 'Vaccines',
+        scenes: [
+          { title: 'Antigens', summary: 'What an antigen is', teach, seconds },
+        ],
+      });
+    // 120 words is fifty seconds of talk: too much for twenty.
+    expect(
+      checkOutline(lesson(page(120), 20), bible, 0.33, false).join(' '),
+    ).toMatch(/Scene 1 teaches 120 words in 20 seconds/);
+    expect(checkOutline(lesson(page(120), 45), bible, 0.75, false)).toEqual([]);
+    expect(
+      checkOutline(lesson(page(10), 30), bible, 0.5, false).join(' '),
+    ).toMatch(/says too little/);
   });
 
   const market = storySheetOf({
@@ -323,5 +347,127 @@ describe('the Studio: a scene decided before it is drawn', () => {
     });
     expect(story.places[0]).toMatchObject({ id: 'market', firstPage: 1 });
     expect(story.pages[0].present.map((p) => p.id)).toEqual(['tobi', 'bingo']);
+  });
+});
+
+describe("the Studio's lessons, held to their own words", () => {
+  const lesson = (when: string[]) =>
+    explainerSheetOf({
+      kind: 'explainer',
+      title: 'The first response',
+      draft: {
+        fit: 'good',
+        fitReason: null,
+        title: 'The first response',
+        mood: 'curious',
+        beats: [
+          {
+            say: 'Antibody takes three to seven days to appear.',
+            pause: 'short',
+            delivery: 'explain',
+          },
+          {
+            say: 'It peaks in one to two weeks.',
+            pause: 'short',
+            delivery: 'explain',
+          },
+          {
+            say: 'Speed is exactly what is missing.',
+            pause: 'long',
+            delivery: 'key',
+          },
+        ],
+        cast: [
+          {
+            id: 'timeline',
+            kind: 'timeline',
+            name: 'First response',
+            brief: null,
+            motion: null,
+            parts: null,
+            states: null,
+            shape: null,
+            value: null,
+            style: null,
+            sound: null,
+            lines: null,
+            plot: null,
+            quote: null,
+            phrases: null,
+            ref: null,
+            state: null,
+            timeline: when.map((w) => ({ when: w, name: 'A step' })),
+            chart: null,
+          },
+        ],
+        steps: [
+          {
+            beat: 0,
+            phrase: 'Antibody',
+            layout: 'one',
+            show: ['timeline'],
+            arrows: null,
+            effects: null,
+          },
+        ],
+      },
+    });
+  const options = {
+    teach: 'How slow the first response is',
+    stage: null,
+    maths: false,
+    planned: null,
+  };
+
+  it('reads numbers said in words as digits', () => {
+    expect(spelledNumbers('three to seven days, one to two weeks')).toEqual([
+      3, 7, 1, 2,
+    ]);
+    expect(
+      spelledNumbers('two thousand and five, forty-two, a hundred'),
+    ).toEqual([2005, 42]);
+  });
+
+  it('shows the dates the scene says, and sends back one it never says', () => {
+    const said = checkExplainer(lesson(['Days 3–7', '1–2 weeks']), options);
+    expect(said.problems.map((p) => p.message).join(' ')).not.toMatch(/dates/);
+    const made = checkExplainer(lesson(['Days 3–7', 'Day 30']), options);
+    expect(made.problems.map((p) => p.message).join(' ')).toContain(
+      'dates the scene never says: Day 30',
+    );
+    // Left so by the writer, it is set in type: nothing made up is drawn.
+    const repaired = repairExplainer(lesson(['Days 3–7', 'Day 30']), options);
+    expect(repaired.draft.cast[0]).toMatchObject({
+      kind: 'words',
+      timeline: null,
+    });
+    expect(errorsIn(checkExplainer(repaired, options).problems)).toEqual([]);
+  });
+});
+
+describe('a story scene the writer left wrong', () => {
+  it("is put right, never handed back: a line by a stranger left out, the place made the show's", () => {
+    const wrong = storySheetOf({
+      title: 'Lost',
+      set: 'the moon',
+      onStage: [{ who: 'tobi', spot: 'left' }],
+      beats: [
+        { kind: 'narration', say: 'The market is busy.' },
+        { kind: 'line', who: 'tobi', say: 'Where is Bingo?' },
+        { kind: 'line', who: 'zorg', say: 'I am not in this show.' },
+        { kind: 'narration', say: 'Tobi looks everywhere.' },
+      ],
+      camera: [{ beat: 3, shot: 'wide' }],
+    });
+    expect(errorsIn(checkSheet(wrong, bible)).length).toBeGreaterThan(0);
+    const fixed = repairSheet(wrong, bible);
+    expect(errorsIn(checkSheet(fixed, bible))).toEqual([]);
+    expect(fixed.set).toBe(bible.sets[0].id);
+    expect(fixed.beats.map((b) => b.say)).toEqual([
+      'The market is busy.',
+      'Where is Bingo?',
+      'Tobi looks everywhere.',
+    ]);
+    expect(fixed.camera.map((c) => c.beat)).toEqual([2]);
   });
 });

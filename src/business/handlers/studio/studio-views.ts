@@ -23,7 +23,7 @@ import {
   type StudioBible,
   type StudioBrief,
 } from '../../domain/studio/studio';
-import { checkExplainer, errorsIn } from '../../domain/studio/studio-check';
+import { checkExplainer } from '../../domain/studio/studio-check';
 import type { SceneThing } from '../../domain/scene-script';
 import type {
   StudioEpisodeRecord,
@@ -220,13 +220,6 @@ export function blockersOf(
   if (!scenes.length) out.push('There are no scenes yet.');
   if (scenes.some((s) => s.status === 'writing' || !s.sheet))
     out.push('Some scenes are still being written.');
-  for (const scene of scenes) {
-    const error = errorsIn(scene.problems)[0];
-    if (error)
-      out.push(
-        `Scene ${scene.position + 1} has a problem to put right: ${error.message}`,
-      );
-  }
   if (!out.length && !scenes.some((s) => needsMaking(s, bible, brief)))
     out.push('Every scene is made already.');
   return out;

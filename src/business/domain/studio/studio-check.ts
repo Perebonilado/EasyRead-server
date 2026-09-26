@@ -29,6 +29,7 @@ import {
   SPOTS,
   secondsOf,
   studioId,
+  WORDS_A_SECOND,
   type ExplainerSheet,
   type SheetBeat,
   type Spot,
@@ -767,9 +768,17 @@ export function checkOutline(
       );
   } else
     outline.scenes.forEach((scene, k) => {
-      if (!scene.teach || words(scene.teach) < 25)
+      const said = scene.teach ? words(scene.teach) : 0;
+      // The narrator says about 2.4 words a second, and a little less than
+      // what the scene teaches: more than that, and the scene runs long.
+      const fits = Math.round(scene.seconds * WORDS_A_SECOND * 1.25);
+      if (said < 25)
         problems.push(
-          `Scene ${k + 1} says too little of what it teaches: write it out as a good book would, 60 to 200 words.`,
+          `Scene ${k + 1} says too little of what it teaches: write it out as a good book would, about ${fits} words.`,
+        );
+      else if (said > fits * 1.4)
+        problems.push(
+          `Scene ${k + 1} teaches ${said} words in ${scene.seconds} seconds, more than a narrator can say: give it more seconds, split it in two, or teach it in about ${fits} words.`,
         );
     });
   return problems;
@@ -848,6 +857,83 @@ export function distinctVoices(bible: StudioBible): StudioBible {
   };
 }
 
+const SMALL_NUMBERS =
+  'zero one two three four five six seven eight nine ten eleven twelve thirteen fourteen fifteen sixteen seventeen eighteen nineteen'.split(
+    ' ',
+  );
+const TENS = ' _ twenty thirty forty fifty sixty seventy eighty ninety'.split(
+  ' ',
+);
+const SCALES: Record<string, number> = {
+  hundred: 100,
+  thousand: 1_000,
+  million: 1_000_000,
+  billion: 1_000_000_000,
+};
+
+/**
+ * Numbers said in words, as digits: "three to seven days" gives 3 and 7,
+ * "two thousand and five" 2005. A lesson says its numbers aloud in words;
+ * a picture writes them in digits.
+ */
+export function spelledNumbers(text: string): number[] {
+  const out: number[] = [];
+  let total = 0;
+  let current = 0;
+  let open = false;
+  const close = () => {
+    if (open) out.push(total + current);
+    [total, current, open] = [0, 0, false];
+  };
+  // A comma or a full stop ends a number; "forty-two" is one.
+  for (const [word] of text.toLowerCase().matchAll(/[a-z]+|[^\sa-z-]/g)) {
+    const small = SMALL_NUMBERS.indexOf(word);
+    const tens = TENS.indexOf(word);
+    // "five six" is two numbers; "forty two" one.
+    const units = current % 100;
+    if (
+      open &&
+      (small >= 0 || tens >= 2) &&
+      units &&
+      !(units % 10 === 0 && units >= 20 && small > 0 && small < 10)
+    )
+      close();
+    if (small >= 0) [current, open] = [current + small, true];
+    else if (tens >= 2) [current, open] = [current + tens * 10, true];
+    else if (word in SCALES && open) {
+      const scale = SCALES[word];
+      if (scale === 100) current *= 100;
+      else [total, current] = [total + current * scale, 0];
+    } else if (!(word === 'and' && open)) close();
+  }
+  close();
+  return out;
+}
+
+/**
+ * What an explainer scene's pictures are held to. The Studio has no page:
+ * the scene is its own, so a date or a number it shows must be one it says,
+ * in digits or in words, or one the maker's source or the outline's lesson
+ * for it gives.
+ */
+function studioMaterial(
+  sheet: ExplainerSheet,
+  teach: string | null,
+  source: string | null,
+): string {
+  const said = [source, teach, sheet.draft.beats.map((b) => b.say).join('\n')]
+    .filter(Boolean)
+    .join('\n');
+  return `${said}\n${spelledNumbers(said).join(' ')}`;
+}
+
+/** A lesson writer's word for its page, as the Studio has it: the scene. */
+const asScene = (message: string) =>
+  message
+    .replace(/the page does not give/g, 'the scene never says')
+    .replace(/the page's own/g, "the scene's own")
+    .replace(/\bthe page\b/g, 'the scene');
+
 /**
  * An explainer's sheet checked: its storyboard mended as a lesson's page
  * is, what the lesson writer would be sent back for, and its length.
@@ -856,13 +942,14 @@ export function checkExplainer(
   sheet: ExplainerSheet,
   options: {
     teach: string | null;
+    source?: string | null;
     stage: LearningStage | null;
     maths: boolean;
     planned: number | null;
   },
 ): { script: SceneScript; problems: SheetProblem[] } {
   const mended = mendScript(sheet.draft, {
-    material: options.teach ?? undefined,
+    material: studioMaterial(sheet, options.teach, options.source ?? null),
     formats: options.maths ? ['explainer', 'maths'] : ['explainer'],
     stage: options.stage,
   });
@@ -872,7 +959,7 @@ export function checkExplainer(
   const problems: SheetProblem[] = [
     ...mended.problems.map((message) => ({
       rule: 'storyboard' as const,
-      message,
+      message: asScene(message),
       beat: null,
       level: 'error' as const,
     })),
@@ -909,6 +996,94 @@ export function checkExplainer(
       level: 'warning',
     });
   return { script: mended.script, problems };
+}
+
+/**
+ * A story scene made sound whatever its writer left wrong, so the film is
+ * always made and its maker never asked to put the writer's slips right:
+ * a place the show has not got becomes its first place, the opening keeps
+ * the show's own people on spots of their own, and a moment the stage
+ * cannot play (a line by someone not there, a prop no one has) is left
+ * out. Everything else is kept as written.
+ */
+export function repairSheet(
+  input: StorySheet,
+  bible: StudioBible,
+  before: EndState | null = null,
+): StorySheet {
+  let sheet = mendSheet(input, bible).sheet;
+  for (let round = 0; round < 6; round += 1) {
+    const errors = errorsIn(checkSheet(sheet, bible, null, before));
+    if (!errors.length) break;
+    const next = JSON.parse(JSON.stringify(sheet)) as StorySheet;
+    if (!bible.sets.some((s) => s.id === next.set) && bible.sets[0])
+      next.set = bible.sets[0].id;
+    const cast = new Set(bible.characters.map((c) => c.id));
+    const spots = new Set<Spot>();
+    next.onStage = next.onStage
+      .filter((p) => {
+        if (!cast.has(p.who) || spots.has(p.spot)) return false;
+        spots.add(p.spot);
+        return true;
+      })
+      .slice(0, MOST_ON_STAGE);
+    const bad = new Set(
+      errors.flatMap((e) => (e.beat === null ? [] : [e.beat])),
+    );
+    if (bad.size) {
+      const kept = next.beats.flatMap((_, k) => (bad.has(k) ? [] : [k]));
+      next.beats = kept.map((k) => next.beats[k]);
+      next.camera = next.camera.flatMap((shot) => {
+        const at = kept.indexOf(shot.beat);
+        return at < 0 ? [] : [{ ...shot, beat: at }];
+      });
+    }
+    const mended = mendSheet(next, bible).sheet;
+    if (JSON.stringify(mended) === JSON.stringify(sheet)) break;
+    sheet = mended;
+  }
+  return sheet;
+}
+
+/**
+ * An explainer scene made sound whatever its writer left wrong: a chart,
+ * a timeline, a graph or a quotation the check turns down is shown as its
+ * name in type instead, so nothing made up is drawn, and the film is made.
+ */
+export function repairExplainer(
+  sheet: ExplainerSheet,
+  options: Parameters<typeof checkExplainer>[1],
+): ExplainerSheet {
+  const refused = new Set(
+    errorsIn(checkExplainer(sheet, options).problems).flatMap((p) => {
+      const named = /^The (?:chart|timeline|graph|quotation) "([^"]+)"/.exec(
+        p.message,
+      );
+      return named ? [named[1]] : [];
+    }),
+  );
+  if (!refused.size) return sheet;
+  return {
+    ...sheet,
+    draft: {
+      ...sheet.draft,
+      cast: sheet.draft.cast.map((thing) =>
+        refused.has(thing.id)
+          ? {
+              ...thing,
+              kind: 'words',
+              style: 'keyword',
+              plot: null,
+              chart: null,
+              timeline: null,
+              quote: null,
+              phrases: null,
+              lines: null,
+            }
+          : thing,
+      ),
+    },
+  };
 }
 
 /** Only what keeps a scene from being made. */

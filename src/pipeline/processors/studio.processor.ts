@@ -6,6 +6,7 @@ import {
   explainerSheetOf,
   outlineOf,
   storySheetOf,
+  WORDS_A_SECOND,
   type ExplainerSheet,
   type StorySheet,
   type StudioBible,
@@ -22,6 +23,8 @@ import {
   errorsIn,
   mendOutline,
   mendSheet,
+  repairExplainer,
+  repairSheet,
   sentBackFor,
   type EndState,
   type SheetProblem,
@@ -296,7 +299,13 @@ export class StudioProcessor {
     });
     await this.record(episode.id, first.usage);
     let outline = mendOutline(outlineOf(first.value), bible);
-    let problems = checkOutline(outline, bible, minutes, story, episode.number === 1);
+    let problems = checkOutline(
+      outline,
+      bible,
+      minutes,
+      story,
+      episode.number === 1,
+    );
     if (problems.length) {
       this.logger.log(
         `studio ${episode.id}: the outline goes back: ${problems.join(' ')}`,
@@ -309,7 +318,13 @@ export class StudioProcessor {
       });
       await this.record(episode.id, again.usage);
       const second = mendOutline(outlineOf(again.value), bible);
-      const left = checkOutline(second, bible, minutes, story, episode.number === 1);
+      const left = checkOutline(
+        second,
+        bible,
+        minutes,
+        story,
+        episode.number === 1,
+      );
       if (left.length <= problems.length) [outline, problems] = [second, left];
     }
     if (!outline.scenes.length) throw new Error('The outline came back empty');
@@ -464,6 +479,21 @@ export class StudioProcessor {
       const second = judged(again.value);
       if (worse(second.problems, best.problems) <= 0) best = second;
     }
+    // What the writer still got wrong is put right here, not handed to
+    // the maker: the scene is always one the stage can play.
+    if (errorsIn(best.problems).length) {
+      this.logger.log(
+        `studio ${episode.id} s${k + 1}: repaired: ${errorsIn(best.problems)
+          .map((p) => p.message)
+          .join(' ')}`,
+      );
+      const sheet = repairSheet(best.sheet, bible, before);
+      best = {
+        ...best,
+        sheet,
+        problems: checkSheet(sheet, bible, planned, before),
+      };
+    }
     if (best.mended.length)
       this.logger.log(
         `studio ${episode.id} s${k + 1}: mended: ${best.mended.slice(0, 8).join('; ')}`,
@@ -498,6 +528,10 @@ export class StudioProcessor {
       ? AUDIENCE_STAGE[show.brief.audience]
       : null;
     const teach = scene?.teach ?? scene?.summary ?? show.brief.idea;
+    // A page fuller than the seconds can say: the writer keeps to its main
+    // ideas, and does not run long to say them all.
+    const fuller =
+      teach.split(/\s+/).length > (scene?.seconds ?? 30) * WORDS_A_SECOND * 1.4;
     const around = [
       outline.scenes[k - 1]
         ? `The scene before taught: ${outline.scenes[k - 1].summary}`
@@ -510,7 +544,7 @@ export class StudioProcessor {
       documentTitle: show.title,
       topicTitle: outline.title,
       material: teach,
-      context: `This is scene ${k + 1} of ${outline.scenes.length} of the animated lesson "${outline.title}": "${scene?.title ?? ''}", about ${scene?.seconds ?? 30} seconds. ${around} Teach only what this scene says; the scenes either side teach the rest.`,
+      context: `This is scene ${k + 1} of ${outline.scenes.length} of the animated lesson "${outline.title}": "${scene?.title ?? ''}", about ${scene?.seconds ?? 30} seconds. ${around} Teach only what this scene says; the scenes either side teach the rest.${fuller ? ` The page is fuller than ${scene?.seconds ?? 30} seconds can say: keep to its main ideas and leave out the detail.` : ''}`,
       profile: [
         describeScene(stage, scene?.seconds ?? 30),
         `Subject: ${bible.subject || show.brief.idea}. Tone: ${show.brief.tone ?? 'calm'}.`,
@@ -541,6 +575,7 @@ export class StudioProcessor {
     await this.record(episode.id, first.usage);
     const options = {
       teach,
+      source: show.brief.source,
       stage,
       maths: bible.maths,
       planned: scene?.seconds ?? null,
@@ -568,6 +603,12 @@ export class StudioProcessor {
       const second = sheetFrom(again.value);
       const left = checkExplainer(second, options).problems;
       if (worse(left, problems) <= 0) [sheet, problems] = [second, left];
+    }
+    // A picture the writer still got wrong is set in type, not handed to
+    // the maker to put right.
+    if (errorsIn(problems).length) {
+      sheet = repairExplainer(sheet, options);
+      problems = checkExplainer(sheet, options).problems;
     }
     await this.studio.updateScene(row.id, {
       sheet,
@@ -661,14 +702,21 @@ export class StudioProcessor {
       : null;
     const who = `studio ${episode.id} s${row.position + 1}`;
 
+    const lesson = {
+      teach: episode.outline?.scenes[row.position]?.teach ?? null,
+      source: show.brief.source,
+      stage,
+      maths: bible.maths,
+      planned: null,
+    };
+    // Whatever the writer left wrong is put right here, so a scene is
+    // always one the stage can play.
     const script = story
-      ? stageStory(row.sheet as StorySheet, bible)
-      : checkExplainer(row.sheet as ExplainerSheet, {
-          teach: episode.outline?.scenes[row.position]?.teach ?? null,
-          stage,
-          maths: bible.maths,
-          planned: null,
-        }).script;
+      ? stageStory(repairSheet(row.sheet as StorySheet, bible), bible)
+      : checkExplainer(
+          repairExplainer(row.sheet as ExplainerSheet, lesson),
+          lesson,
+        ).script;
     const profile: DocumentProfile = {
       subject: story ? 'a story' : bible.subject,
       kind: story ? 'fiction' : 'textbook',

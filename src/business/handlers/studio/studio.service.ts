@@ -719,6 +719,7 @@ export class StudioService {
       next = mendExplainerLines(scene.sheet, body);
       problems = checkExplainer(next, {
         teach: planned?.teach ?? null,
+        source: show.brief.source,
         stage: null,
         maths: bible?.maths ?? false,
         planned: planned?.seconds ?? null,
@@ -755,6 +756,7 @@ export class StudioService {
           : []
         : checkExplainer(sheet, {
             teach: planned?.teach ?? null,
+            source: show.brief.source,
             stage: null,
             maths: show.bible?.maths ?? false,
             planned: planned?.seconds ?? null,

@@ -222,6 +222,8 @@ export class StudioProcessor {
     show: StudioShowRecord,
     episode: StudioEpisodeRecord,
     request?: string,
+    /** Whether the episode is free once the cast is written: not when an outline comes next. */
+    release = true,
   ): Promise<StudioBible> {
     const story = show.brief.format !== 'explainer';
     const before = show.bible;
@@ -249,7 +251,7 @@ export class StudioProcessor {
     }
     await this.studio.updateShow(show.id, { bible });
     if (before) await this.cast.forgetChanged(show.id, before, bible);
-    if (request)
+    if (request && release)
       await this.studio.updateEpisode(episode.id, { busy: null, error: null });
     this.logger.log(
       `studio ${episode.id}: cast of ${bible.characters.map((c) => c.name).join(', ') || 'no one'}; places ${bible.sets.map((s) => s.name).join(', ') || 'none'}`,
@@ -265,7 +267,18 @@ export class StudioProcessor {
     request?: string,
   ): Promise<void> {
     const story = show.brief.format !== 'explainer';
-    const bible = show.bible ?? (await this.writeBible(show, episode));
+    // A new episode of a story may go somewhere new, or meet someone new:
+    // they join the cast first, everyone else as they were.
+    const fresh = story && episode.number > 1 && !episode.outline && request;
+    const bible =
+      show.bible && fresh
+        ? await this.writeBible(
+            show,
+            episode,
+            `The next episode: ${request}. Add any place and any character it needs that the show does not have yet; keep everyone and everywhere else exactly as they are.`,
+            false,
+          )
+        : (show.bible ?? (await this.writeBible(show, episode)));
     const earlier = (await this.studio.listEpisodes(show.id)).filter(
       (e) => e.number < episode.number,
     );
@@ -283,7 +296,7 @@ export class StudioProcessor {
     });
     await this.record(episode.id, first.usage);
     let outline = mendOutline(outlineOf(first.value), bible);
-    let problems = checkOutline(outline, bible, minutes, story);
+    let problems = checkOutline(outline, bible, minutes, story, episode.number === 1);
     if (problems.length) {
       this.logger.log(
         `studio ${episode.id}: the outline goes back: ${problems.join(' ')}`,
@@ -296,7 +309,7 @@ export class StudioProcessor {
       });
       await this.record(episode.id, again.usage);
       const second = mendOutline(outlineOf(again.value), bible);
-      const left = checkOutline(second, bible, minutes, story);
+      const left = checkOutline(second, bible, minutes, story, episode.number === 1);
       if (left.length <= problems.length) [outline, problems] = [second, left];
     }
     if (!outline.scenes.length) throw new Error('The outline came back empty');

@@ -729,6 +729,8 @@ export function checkOutline(
   bible: StudioBible,
   minutes: number,
   story: boolean,
+  /** Whether every main character must have a part: in a first episode; later ones may rest some. */
+  everyone = true,
 ): string[] {
   const problems: string[] = [];
   if (outline.scenes.length < 1) problems.push('The outline has no scenes.');
@@ -759,7 +761,7 @@ export function checkOutline(
     const unused = bible.characters.filter(
       (c) => c.role !== 'minor' && !used.has(c.id),
     );
-    if (unused.length)
+    if (unused.length && everyone)
       problems.push(
         `${unused.map((c) => c.name).join(' and ')} ${unused.length > 1 ? 'are' : 'is'} in no scene: give them a part, or leave them out of the show.`,
       );

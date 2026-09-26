@@ -225,7 +225,8 @@ export const STUDIO_PROMPTS = {
     [
       'An episode after the first carries on from the episodes before it,',
       'whose summaries you are given: the same characters, what they learnt',
-      'and what happened stays true. With your outline as it was and a',
+      'and what happened stays true. It tells a new story, never one told',
+      'before, and goes where its request says. With your outline as it was and a',
       'request, change what the request asks and keep the rest. With',
       'problems, put each one right.',
       SAFE,

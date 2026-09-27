@@ -422,6 +422,25 @@ describe('a scene changed as the maker asked, made again and checked', () => {
     expect(s.queued).toEqual([]);
   });
 
+  it('says a make asked for could not be made, and no more', async () => {
+    const s = studio(shown());
+    Object.assign((s.processor as unknown as { scenes: object }).scenes, {
+      make: () => Promise.reject(new Error('The voice is rate limited')),
+    });
+    s.scenes.set('c1', { ...s.scenes.get('c1')!, status: 'making' });
+    await s.processor.process(
+      job({ ask: ask({ before: { key: 'before', lines: ['b'] } }) }),
+      context,
+    );
+    expect(s.events()).toEqual([
+      {
+        what: 'failed',
+        line: 'Scene 1 could not be made. Make the film again to try once more.',
+      },
+    ]);
+    expect(s.checks).toEqual([]);
+  });
+
   it("holds a fault code sees in what the maker asked about over the check's word", async () => {
     const s = studio(shown('all good'));
     // The film as made before: the bed still in Tobi's drawing.

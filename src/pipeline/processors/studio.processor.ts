@@ -443,7 +443,8 @@ export class StudioProcessor {
           },
           failed,
         );
-        await this.settle(show, episode);
+        // Made again as asked: its failure is the word on it, not a film.
+        await this.settle(show, episode, Boolean(job.ask));
         return;
       }
       if (job.kind === 'prepare') {

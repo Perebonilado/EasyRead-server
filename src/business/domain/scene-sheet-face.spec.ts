@@ -14,7 +14,13 @@ import {
   withFace,
   type SheetFace,
 } from './scene-sheet-face';
-import { SWINGS, rigSheet, stillSheet, variant } from './scene-sheet-rig';
+import {
+  SWINGS,
+  jointNotes,
+  rigSheet,
+  stillSheet,
+  variant,
+} from './scene-sheet-rig';
 import { EXPRESSIONS } from './scene-story';
 import type { GatedDrawing } from './scene-svg';
 
@@ -474,4 +480,16 @@ describe('a character drawn before mouths were code’s', () => {
     expect(sheet.drawing.svg).not.toContain('cm-rest');
     expect(sheet.drawing.svg).not.toContain('rig-arm');
   }, 120_000);
+});
+
+describe('what the artist is told of arms and legs drawn to the new brief', () => {
+  it('says a leg drawn off the body floats, leg by leg', async () => {
+    const apart = egg().replace(
+      '<rect x="218" y="470" width="36" height="110"',
+      '<rect x="218" y="520" width="36" height="60"',
+    );
+    const notes = await jointNotes(drawingOf(apart));
+    expect(notes.join(' ')).toMatch(/A leg floats \d+ units from the body/);
+    expect(await jointNotes(drawingOf(egg()))).toEqual([]);
+  }, 60_000);
 });

@@ -9,7 +9,7 @@ import render from 'dom-serializer';
 import { Element } from 'domhandler';
 import { parseDocument } from 'htmlparser2';
 import { isolate, type Callout } from './scene-callouts';
-import { elements, byId } from './scene-dom';
+import { elements, byId, walk } from './scene-dom';
 import {
   drawFigure,
   figureFrame,
@@ -296,6 +296,65 @@ export async function mouthOf(drawing: GatedDrawing): Promise<Point | null> {
   });
   return lowMiddle(measured.inks?.[0] ?? null);
 }
+
+/** The attributes that say where a shape is and what shape it is. */
+const GEOMETRY = [
+  'd',
+  'points',
+  'x',
+  'y',
+  'cx',
+  'cy',
+  'r',
+  'rx',
+  'ry',
+  'width',
+  'height',
+  'x1',
+  'y1',
+  'x2',
+  'y2',
+  'transform',
+];
+
+/**
+ * How alike two drawings are, 0 to 1: the share of their shapes, each by
+ * its kind and geometry, that both have. A drawing asked to change that
+ * comes back 1, or near it, was copied, not changed.
+ */
+export function drawnAlike(a: string, b: string): number {
+  const shapes = (svg: string): Map<string, number> => {
+    const out = new Map<string, number>();
+    const root = elements(parseDocument(svg, { xmlMode: true }).children)[0];
+    if (!root) return out;
+    for (const node of walk(root)) {
+      const name = node.name.toLowerCase();
+      if (!SHAPES.has(name)) continue;
+      const key = `${name}|${GEOMETRY.map((k) => node.attribs[k] ?? '').join('|')}`;
+      out.set(key, (out.get(key) ?? 0) + 1);
+    }
+    return out;
+  };
+  const one = shapes(a);
+  const two = shapes(b);
+  let both = 0;
+  let either = 0;
+  for (const key of new Set([...one.keys(), ...two.keys()])) {
+    both += Math.min(one.get(key) ?? 0, two.get(key) ?? 0);
+    either += Math.max(one.get(key) ?? 0, two.get(key) ?? 0);
+  }
+  return either ? both / either : 1;
+}
+
+const SHAPES = new Set([
+  'path',
+  'rect',
+  'circle',
+  'ellipse',
+  'line',
+  'polyline',
+  'polygon',
+]);
 
 /**
  * What a character is like, set beside them the first time the book meets

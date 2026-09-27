@@ -778,7 +778,9 @@ export async function jointNotes(drawing: GatedDrawing): Promise<string[]> {
   const root = parse(drawing.svg);
   if (!root) return [];
   stillSheet(root);
-  const figure = figureOf(root, drawing);
+  // One drawn to the brief that marks its mouth's place (scene-sheet-face's
+  // MOUTH_MARK) has each arm and leg its own: each must meet the body.
+  const figure = figureOf(root, drawing, Boolean(drawing.parts['mouth-at']));
   const measured = await measure(root, figure, drawing.viewBox);
   return figure.limbs.flatMap((limb) => {
     const one = measured.get(limb.name);

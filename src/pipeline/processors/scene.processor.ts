@@ -104,6 +104,7 @@ import {
   lightDrawing,
   measureOwnFeature,
   measureOwnThing,
+  drawnAlike,
   measureSheet,
   mouthOf,
   notDrawnYet,
@@ -280,6 +281,9 @@ interface Lesson {
 }
 
 /** Each item through `work`, at most `limit` at a time, in order. */
+/** A drawing asked to change that is this alike the one before was copied, not changed. */
+const COPIED = 0.8;
+
 /** The most of a drawing the artist is shown to draw from, in characters. */
 const REFERENCE_CHARS = 24_000;
 
@@ -2807,7 +2811,7 @@ export class SceneProcessor {
     const thing = again
       ? {
           ...asked,
-          brief: `${asked.brief} Draw them again as the maker asks: "${again.words.replace(/"/g, "'")}". Keep everything the maker does not ask to change as it is in the drawing they have now.`,
+          brief: `The maker asks for a change to how ${character.name} looks: "${again.words.replace(/"/g, "'")}". Draw them changed so, plainly: the change must show at a glance (asked to be rounder, they are clearly rounder). Keep everything the maker does not ask to change as it is in the drawing they have now. ${asked.brief}`,
         }
       : asked;
     const viewBox = CANVAS[thing.shape];
@@ -2858,6 +2862,14 @@ export class SceneProcessor {
           })
         : null;
       const short = faced ? faceNotes(faced) : [];
+      // Asked to change, and come back as it was: told so, once.
+      if (
+        again?.reference &&
+        drawnAlike(gated.drawing.svg, again.reference) >= COPIED
+      )
+        short.push(
+          `It came back as it was drawn before: change it as the maker asks ("${again.words.replace(/"/g, "'")}"), moving and reshaping its parts so the change shows at a glance.`,
+        );
       const faults =
         (gated.retry ? 1 : 0) + measured.notes.length + short.length;
       if (measured.sheet && (!best || faults < best.faults))

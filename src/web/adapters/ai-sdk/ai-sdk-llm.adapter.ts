@@ -2435,7 +2435,7 @@ export function drawingRequest(input: {
       ? `Last time this fell short:\n- ${input.notes.join('\n- ')}`
       : '',
     input.reference
-      ? `How they are drawn now, to draw them again from (the same character, changed only as asked; its groups as asked above):\n${input.reference}`
+      ? `How they are drawn now: the same character, to draw again with the change asked for made plainly, never copied unchanged (its groups as asked above, whatever this one has):\n${input.reference}`
       : '',
   ]
     .filter(Boolean)

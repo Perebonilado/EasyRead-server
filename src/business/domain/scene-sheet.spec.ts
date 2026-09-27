@@ -3,6 +3,7 @@ import {
   SET_VERSION,
   SIZE_UNITS,
   castOf,
+  drawnAlike,
   figureSheet,
   introCallouts,
   measureSheet,
@@ -315,5 +316,27 @@ describe('what a scene stands on its stage that is not drawn yet', () => {
         },
       ),
     ).toEqual([]);
+  });
+});
+
+describe('a drawing asked to change, and what came back', () => {
+  const egg = (rx: number) =>
+    `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 600"><g id="body"><ellipse cx="200" cy="300" rx="${rx}" ry="200" fill="#fff"/></g><g id="neutral"><circle cx="170" cy="250" r="10"/><circle cx="230" cy="250" r="10"/></g><g id="legs"><rect x="150" y="480" width="20" height="100"/><rect x="230" y="480" width="20" height="100"/></g></svg>`;
+
+  it('is all alike when copied, style and all aside', () => {
+    expect(drawnAlike(egg(120), egg(120))).toBe(1);
+    expect(
+      drawnAlike(
+        egg(120).replace('<g id="body">', '<style>.x{}</style><g id="body">'),
+        egg(120),
+      ),
+    ).toBe(1);
+  });
+
+  it('is less alike once a part is reshaped', () => {
+    // Rounder: the shell's shape changed, the rest kept.
+    const rounder = drawnAlike(egg(190), egg(120));
+    expect(rounder).toBeLessThan(0.8);
+    expect(rounder).toBeGreaterThan(0.5);
   });
 });

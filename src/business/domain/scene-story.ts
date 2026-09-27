@@ -1733,7 +1733,7 @@ const LIMBS: Record<'animal' | 'creature', string> = {
 
 /** The face: the eyes and brows the artist's, the mouth code's, at the place the artist marks. */
 const FACE_BRIEF =
-  'The face inside the head has no eyes, brows or mouth: each expression group draws only the eyes and brows, all in the same place on the face. Draw no mouth anywhere: the stage draws it. Mark where the mouth goes with <g id="mouth-at"> holding one small circle (r 4) at the middle of the mouth\'s place, below the eyes.';
+  'The face inside the head has no eyes, brows or mouth: each expression group draws only the eyes and brows, all in the same place on the face. Draw no mouth anywhere: the stage draws it. Mark where the mouth goes with <g id="mouth-at"> holding one small circle (r 4) at the middle of the mouth\'s place: below the eyes, or on a muzzle or a beak where it would open.';
 
 const OPTIONAL_PARTS: Record<'animal' | 'creature', string> = {
   animal:

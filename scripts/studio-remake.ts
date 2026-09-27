@@ -71,7 +71,7 @@ import {
   StudioProcessor,
   studioMakeOf,
 } from '../src/pipeline/processors/studio.processor';
-import { paintedSets } from './studio-show';
+import { gesturingCast, paintedSets } from './studio-show';
 
 @Module({
   imports: [ConfigModule.forRoot({ isGlobal: true }), CoreModule],
@@ -422,6 +422,8 @@ async function main(): Promise<void> {
           rows,
           bible,
           await paintedSets(storage, show.id),
+          // Those the artist drew gesture as the worker stages them.
+          await gesturingCast(storage, show.id),
         ),
         base: `studio-remake/${episode.id}/${row.id}-${Date.now().toString(36)}`,
         who: `studio ${episode.id} s${n} (remake)`,

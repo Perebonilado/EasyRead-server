@@ -1550,7 +1550,7 @@ export function whereaboutsOn(
  * down, where they stand.
  */
 export const SET_STYLE = [
-  'Paint it to go with cartoon people drawn in front of it: flat colours with no gradients, shading or texture, simple rounded shapes like cut paper, and one dark outline (#2d2a32) about three units wide.',
+  'Paint it to go with cartoon people drawn in front of it: flat colours with no gradients, shading or texture, simple rounded shapes like cut paper, and one dark outline (#2d2a32) at the width asked for.',
   "Make the place recognisable at a glance, with the things that make it that place (a boat's mast and nets, the stalls of a market, the houses of a village), a full, finished scene from edge to edge.",
   'Keep its colours a little softer than the people, so they stand out in front of it.',
   'The ground is flat and open across the lower third of the picture, with nothing tall in the middle of it, where people will stand.',
@@ -1690,7 +1690,7 @@ export function setThing(
  * about their joints (scene-sheet-rig) with nothing coming loose.
  */
 export const CAST_STYLE = [
-  'Draw it to stand beside cartoon people drawn in one style: flat colours with no gradients, shading or texture, simple rounded shapes like cut paper, one dark outline (#2d2a32) about three units wide, and big round white eyes with small black dot pupils.',
+  'Draw it to stand beside cartoon people drawn in one style: flat colours with no gradients, shading or texture, simple rounded shapes like cut paper, one dark outline (#2d2a32) at the width asked for, and big round white eyes with small black dot pupils.',
   'Join it like a cut-paper puppet: every part overlaps the body a little where they meet, drawn behind it (the ears behind the head); nothing floats apart; a tail comes from behind the body at the hip.',
 ].join(' ');
 
@@ -1762,7 +1762,7 @@ export const OWN_FEATURE_CANVAS = { w: 640, h: 400 } as const;
 
 /** How a show's own is drawn to stand among its people: the kit's hand, and nothing else. */
 const OWN_STYLE = [
-  'Draw it to stand beside cartoon people drawn in one style: flat colours with no gradients, shading or texture, simple rounded shapes like cut paper, and one dark outline (#2d2a32) about three units wide.',
+  'Draw it to stand beside cartoon people drawn in one style: flat colours with no gradients, shading or texture, simple rounded shapes like cut paper, and one dark outline (#2d2a32) at the width asked for.',
   'Draw it alone: no people, no faces on it, no words, no ground, shadow or backdrop under it.',
 ].join(' ');
 

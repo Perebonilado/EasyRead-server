@@ -2,6 +2,8 @@ import {
   PASS_MARK,
   cleanVerdict,
   judgedPoints,
+  redrawNotes,
+  verdictNotes,
   verdictPasses,
   verdictScore,
   type DrawingVerdict,
@@ -57,5 +59,32 @@ describe('the scorecard, as the judge scores it', () => {
     expect(cleaned.anatomy).toBe(0);
     expect(cleaned.face).toBeNull();
     expect(cleaned.problems).toEqual(['a', 'b', 'c', 'd', 'e']);
+  });
+});
+
+describe('what the artist is told of a verdict', () => {
+  it('passes on the judge’s own instructions, or what each short point asks', () => {
+    expect(verdictNotes(verdict({ problems: ['Draw her side-on'] }))).toEqual([
+      'Draw her side-on',
+    ]);
+    expect(verdictNotes(verdict())).toEqual([
+      expect.stringMatching(/Put its face right/),
+    ]);
+    expect(verdictNotes(verdict({ face: 9 }))).toEqual([]);
+    expect(verdictNotes(null)).toEqual([]);
+  });
+
+  it('sends a redraw back when the change does not show or it is someone else, in the maker’s words', () => {
+    const notes = redrawNotes(
+      verdict({ change: 4, same: 6 }),
+      'a red "saddle" blanket on her back',
+      'Clover',
+    );
+    expect(notes).toHaveLength(2);
+    expect(notes[0]).toMatch(/does not show yet: "a red 'saddle' blanket/);
+    expect(notes[1]).toMatch(/Keep Clover the same character/);
+    expect(redrawNotes(verdict({ change: 9, same: 9 }), 'x', 'Clover')).toEqual(
+      [],
+    );
   });
 });

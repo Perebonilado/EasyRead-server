@@ -5,6 +5,7 @@ import {
   codeFaults,
   codeNotes,
   codePasses,
+  faceFaults,
   feetOn,
 } from './drawing-checks';
 import { conventionGround } from './scene-ground';
@@ -104,8 +105,15 @@ describe('the checks code makes', () => {
     };
     const checks = await checkSheet({ ...sheet, face }, { legs: 4 });
     expect(checks.face?.ok).toBe(false);
-    expect(checks.face?.notes.join(' ')).toMatch(/not below the eyes/);
-    expect(checks.face?.notes.join(' ')).toMatch(/draw them bigger/);
+    expect(checks.face?.notes.join(' ')).toMatch(/below the eyes/);
+    expect(checks.face?.notes.join(' ')).toMatch(/too small to read/);
+    // One eye is a brief's own, or a side view's: no fault.
+    expect(
+      faceFaults({ ...sheet.face!, eyes: [sheet.face!.eyes[0]] }, 95 / 300),
+    ).toEqual([]);
+    expect(faceFaults({ ...sheet.face!, eyes: [] }, 95 / 300)).toEqual([
+      expect.stringMatching(/Draw big round white eyes/),
+    ]);
   }, 30_000);
 
   it('checks a thing in the kit’s units: its line, and a size a person can hold', async () => {

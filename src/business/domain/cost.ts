@@ -32,6 +32,9 @@ const PER_MILLION: Record<
   // fixed prompt nearly free after the first drawing.
   'deepseek-flash': { in: 0.3, out: 1.2, cached: 0.006 },
   'deepseek-v4-pro': { in: 1.32, out: 3.96, cached: 0.044 },
+  // A Gemini the drawing bench tried as the artist, at Google's list
+  // price of September 2026 (thinking billed as output).
+  'gemini-3.5-flash-lite': { in: 0.3, out: 2.5 },
 };
 
 /**

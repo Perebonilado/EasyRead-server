@@ -381,8 +381,44 @@ The bench measures the real cost per drawing for each candidate model before the
 
 ## 14. Status
 
-- [ ] Phase 0: drawing bench
-- [ ] Phase A: style, polish, model bake-off, see-and-fix, best of three, redraw checks
+- [x] Phase 0: drawing bench
+  - **What was built (2026-09-27):**
+    - 42 briefs in `src/business/domain/drawing-bench/`: 22 animals, 7 creatures, 4 things, a bicycle (a feature), 6 places, and Clover and Eggbert drawn again from their real sheets (kept in `old/`).
+    - The artist's loops moved out of the scene processor into `SceneArtist` (`src/pipeline/processors/scene-artist.ts`). The bench draws each brief exactly as a show does, with no storage or database.
+    - The scorecard's code checks are in `drawing-checks.ts`: house style, clean, composition, joined, feet on the ground, face, and a set's ground.
+    - The vision judge is `drawingJudge`, on the `drawing_judge` task (`AI_MODEL_DRAWING_JUDGE`). `drawing-score.ts` reads its verdicts.
+    - The kit's palette and line are in `scene-ink.ts`, unchanged, so people's byte lock holds.
+    - `npm run drawing:bench` writes `report.json`, `index.html` and `sheet.png`. Options: `--against <report | baseline>`, `--write-baseline`, `--only`, `--mark <dir> <id> ok|not "note"` (Richard's marks, kept in `marks.json`), `--sheet` (the page again), and `--rejudge` (the kept pictures scored again by another judge).
+  - **Baseline** (today's pipeline, judged by Gemini 3.8 Flash): median 4.47, mean 4.56, none pass, 2% in the house style, 0.48¢ and 14 s a drawing. Kept in `drawing-bench/baseline.json`.
+  - **The judge, as the bench chose it:** on Clover, Dot and Eggbert, Gemini 3.8 Flash named every flaw Richard found: the blanket drawn as a scarf, the beak beside the face, the stern brows, the face on the belly, the zigzag. gpt-4.1 found some. gpt-4.1-mini, the plan's default, passed Eggbert at 8. So the judge's default is Gemini 3.8 Flash, about 0.4¢ a look.
+- [x] Phase A: style, polish, model bake-off, see-and-fix, best of three, redraw checks
+  - **What was built (2026-09-27):**
+    - A1: `PROMPTS.castDraw`, the kit's house style in its own terms. It carries the palette by name and samples cut from what code draws (`scene-house.ts`): a face on the kit's rig, the kit's bag, and a crate. `sceneDrawing` has a `purpose` (explainers keep `sceneDraw`). Each request gives the outline for its canvas, the least size for eyes and parts, a framing hint and the artist's own drawing to revise. `measureSheet` no longer asks for mouths.
+    - A2: `polishDrawing` (`scene-polish.ts`) runs on every model-made character, thing and set, after the gate and before measuring. It inks outlines, scales every line so the commonest lands at 2.6 kit units on the stage (never more than 30% of a small shape), and makes gradients flat (their middle colour). It takes filters and patterns off, snaps colours within ΔE 12 of the house palette (two colours never merged) and removes stray strokes, specks and ground lines. Pip and Bingo come out with every shape where it was.
+    - A3: the new tasks `cast_draw` and `set_paint` (`AI_MODEL_CAST_DRAW`, `AI_MODEL_SET_PAINT`). Gemini 3.8 Flash and 3.5 Flash-Lite are priced in the ledger (3.8's rate doubles on 1 January 2027), and so are cached tokens for the 4.1 models. The Google key is also read from `GEMINI_API_KEY`. A show's artist refused for want of credit draws on the explainer's artist, DeepSeek, rather than not at all.
+    - A4 and A5: `SceneArtist.take`, the see-and-fix loop. Each take is drawn, gated, polished and measured, rendered with its neutral face, and judged. It is sent back up to twice with the judge's instructions and code's faults, and its own SVG goes back in `previous`. A new character gets three takes side by side, each framed its own way at temperature 0.8; sets and things get two. The best is kept by judge score, then code faults, and every call is recorded. The other takes' best are returned (`drawCandidates`) and kept beside the cast in `cast-options.json`, for Phase E.
+    - A6: a redraw is judged beside the drawing before (`old`). A missing change or a different character sends it back with the reason (`redrawNotes`), and the copy check stays.
+    - A7: `studio:remake` and `studio:recompose` pass the gesture list (`gesturingIn`). `studio:redraw` writes a still with one face and code's mouth. A candidate logs "drawn again as asked".
+  - **Bake-off** (20 briefs, one blind draw each, house style and polish, judged by Gemini 3.8 Flash; the same briefs had a baseline median of 4.64):
+
+    | Artist | Median | Pass | Cost a drawing | Time |
+    |---|---|---|---|---|
+    | deepseek:deepseek-flash (today) | 4.33 | 5% | 0.26¢ | 26 s |
+    | openai:gpt-4.1-mini | 3.33 | 0% | 0.41¢ | 32 s |
+    | openai:gpt-4.1 | 3.90 | 5% | 2.07¢ | 31 s |
+    | google:gemini-3.8-flash, thinking as it likes | 6.67 | 10% | 7.36¢ | 75 s |
+    | **google:gemini-3.8-flash, thinking low** | **6.67** | **20%** | **1.23¢** | **11 s** |
+    | google:gemini-3.5-flash-lite | 3.75 | 0% | 0.63¢ | 8 s |
+
+    The plain ratio of score to cents favours whatever is cheapest, however badly it draws. DeepSeek scores 16.7 points a cent, but it drew below today's baseline. So the choice is the best gain in score per extra cent over today's artist: Gemini 3.8 Flash with thinking low, at +2.4 points a cent. It is also the best scorer. It is now the default for `cast_draw`, `set_paint` and `drawing_judge`, with `DRAW_THINKING_LEVEL` defaulting to low.
+  - **Result**, the full bench with a show's own settings against the baseline, both judged by Gemini 3.8 Flash:
+    - Overall: median 4.47 → 7.84, pass 0% → 45%, the house style 2% → 100% of drawings made, no gradients.
+    - Cost and time: 10.8¢ and 61 s a drawing.
+    - Gemini's prepaid credits ran out near the end of the run. The beach, forest, market, drum, kite, umbrella and Eggbert went unjudged or undrawn and score 0.
+    - On the 33 briefs the credits did not touch: median 4.33 → 8.33, pass 0% → 58%, none below its baseline.
+    - Judged again by gpt-4.1, a judge the loop never saw: baseline median 6.84 (0% pass) → 9.33 (86% pass). Both redraws show the asked change (change 10, same character 9). Only the umbrella is below its baseline, and it was never drawn.
+    - Gemini, stricter, scored Clover's blanket 7 for the change: it shows, but it is not yet at the pass mark. Its last round was cut by the credits.
+  - **Still to do:** top up Gemini's prepaid credits, then run the cut briefs again: `npm run drawing:bench -- --only beach,forest,market,drum,kite,umbrella,uniform,clover-blanket,eggbert-rounder --judge google:gemini-3.8-flash --against baseline`. Richard's marks go on the contact sheet with `--mark`.
 - [ ] Phase B: animal kit and look editor
 - [ ] Phase C: creature kit
 - [ ] Phase D: places from layouts; clothes at rest

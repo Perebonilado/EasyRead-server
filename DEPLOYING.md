@@ -118,6 +118,18 @@ drawer's default names DeepSeek whatever `AI_MODEL_DEFAULT` says, so
 **`DEEPSEEK_API_KEY` must be set on both the API and the worker**: the
 boot check stops a process with a named provider and no key.
 
+A show's characters, its own things and its places (the Studio, and a
+book's story pages) are drawn by Gemini (`AI_MODEL_CAST_DRAW`,
+`AI_MODEL_SET_PAINT`, default `google:gemini-3.8-flash`, thinking low:
+`DRAW_THINKING_LEVEL`), each drawn in takes side by side, judged from its
+picture by a model that can see (`AI_MODEL_DRAWING_JUDGE`, the same
+Gemini) and revised; explainer drawings stay on DeepSeek. So
+**`GOOGLE_GENERATIVE_AI_API_KEY` (or `GEMINI_API_KEY`) must be set on both
+the API and the worker**, or those three set to another provider: the
+boot check stops a process without it. `npm run drawing:bench` draws the
+bench's forty-two briefs through the same path and scores them against
+the kept baseline (`src/business/domain/drawing-bench/baseline.json`).
+
 The Voice service reports when it spoke each word when asked, takes a
 voice of its own for any piece of a page (a story's character saying
 their line), and a `lead` of quiet before the first word (`/health` says

@@ -18,6 +18,7 @@ import {
 } from './scene-polish';
 import { renderSvg, type InkBox, type InkMap } from './scene-raster';
 import type { CharacterSheet, SetSheet } from './scene-sheet';
+import type { SheetFace } from './scene-sheet-face';
 import { variant } from './scene-sheet-rig';
 import type { PlaceKind } from './scene-story';
 
@@ -81,7 +82,6 @@ function parse(svg: string): Element | null {
 }
 
 const pct = (n: number) => `${Math.round(n * 100)}%`;
-const r1 = (n: number) => Math.round(n * 10) / 10;
 
 /** The share of a map's cells with ink. */
 function filled(map: InkMap): number {
@@ -217,7 +217,9 @@ export async function checkSheet(
   const wanted = options.legs ?? null;
   if (wanted !== null && wanted >= 2) {
     const count = legsMap ? feetOn(legsMap) : 0;
-    const least = Math.min(wanted, 2);
+    // Four legs: the front pair apart from the back, two feet at least on
+    // the ground. Two (a bird side-on): one, the near foot before the far.
+    const least = wanted >= 4 ? 2 : 1;
     checks.feet = {
       ok: count >= least,
       count,
@@ -232,31 +234,47 @@ export async function checkSheet(
     };
   }
 
-  const face: string[] = [];
-  const f = sheet.face;
-  if (!f) face.push('no face could be measured: draw the neutral face');
-  else {
-    if (f.eyes.length !== 2)
-      face.push(
-        'the eyes are not two big white eyes with dot pupils, as the kit draws them',
-      );
-    const eyeLine = f.eyes.length
-      ? Math.max(...f.eyes.map((e) => e.box.y + e.box.height / 2))
-      : null;
-    if (eyeLine !== null && f.mouth[1] <= eyeLine)
-      face.push("the mouth's mark is not below the eyes");
-    if (headBox && !inside(f.mouth, headBox, 0.08))
-      face.push("the mouth's mark is not on the head");
-    const tallest = f.eyes.length
-      ? Math.max(...f.eyes.map((e) => e.box.height)) * kitPerUnit
-      : 0;
-    if (f.eyes.length && tallest < 6)
-      face.push(
-        `the eyes are ${r1(tallest)} of the kit's units tall on the stage: draw them bigger, as big as a person's are beside it`,
-      );
-  }
+  const face = faceFaults(sheet.face ?? null, kitPerUnit);
+  if (sheet.face && headBox && !inside(sheet.face.mouth, headBox, 0.08))
+    face.push("the mouth's mark is not on the head");
   checks.face = { ok: !face.length, notes: face };
   return checks;
+}
+
+/** The least an eye may be tall on the stage, in the kit's units, and still read. */
+const LEAST_EYE = 6;
+
+/**
+ * What is wrong with a face as measured, in words for the artist: big
+ * white eyes with dot pupils, the mouth's mark below them, and eyes that
+ * read at the size it stands on the stage (`kitPerUnit`).
+ */
+export function faceFaults(
+  face: SheetFace | null,
+  kitPerUnit: number,
+): string[] {
+  if (!face) return ['No face could be measured: draw the neutral face.'];
+  const out: string[] = [];
+  // One eye is a brief's own (a one-eyed monster) or a side view's.
+  if (!face.eyes.length)
+    out.push(
+      'Draw big round white eyes, each with a small dark dot pupil, as the people have.',
+    );
+  const eyeLine = face.eyes.length
+    ? Math.max(...face.eyes.map((e) => e.box.y + e.box.height / 2))
+    : null;
+  if (eyeLine !== null && face.mouth[1] <= eyeLine)
+    out.push(
+      "Mark the mouth's place below the eyes, on the muzzle or at the beak.",
+    );
+  const tallest = face.eyes.length
+    ? Math.max(...face.eyes.map((e) => e.box.height)) * kitPerUnit
+    : 0;
+  if (face.eyes.length && tallest < LEAST_EYE)
+    out.push(
+      `The eyes are too small to read beside the people: draw them about ${Math.ceil(LEAST_EYE / kitPerUnit / 0.7)} units across or more.`,
+    );
+  return out;
 }
 
 /** Whether a point is inside a box, with a share of its size to spare. */

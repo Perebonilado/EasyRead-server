@@ -57,6 +57,19 @@ export function castWorkOf(raw: unknown): CastWork {
   return { drawing, candidates };
 }
 
+/**
+ * Those of a cast the artist drew whose rigs turn their arms and nod:
+ * they gesture on the stage as the kit's people do. The worker, and the
+ * scripts that make a scene again, stage them the same way.
+ */
+export function gesturingIn(cast: Cast): Set<string> {
+  return new Set(
+    Object.entries(cast)
+      .filter(([, sheet]) => sheet.rig?.arms || sheet.rig?.nods)
+      .map(([id]) => id),
+  );
+}
+
 /** Whether the artist draws them: an animal or a creature. A person is the kit's. */
 export const drawnByArtist = (c: Pick<StudioCharacter, 'kind'>) =>
   c.kind !== 'person';

@@ -178,6 +178,15 @@ export async function figureSheet(
 /** A book's characters as drawn, by their id in the story. */
 export type Cast = Record<string, CharacterSheet>;
 
+/**
+ * Where the other drawings of a book's or a show's characters are kept,
+ * beside its cast: the takes not chosen, to be offered later.
+ */
+export const optionsKey = (castKey: string): string =>
+  castKey.endsWith('.json')
+    ? `${castKey.slice(0, -'.json'.length)}-options.json`
+    : `${castKey}-options`;
+
 const EMPTY = '<svg xmlns="http://www.w3.org/2000/svg"/>';
 
 const centre = (box: InkBox): Point => [
@@ -242,12 +251,12 @@ export async function measureSheet(
     });
     if (astray.length)
       notes.push(
-        `The faces ${astray.join(', ')} are not on the head: draw every expression's eyes, brows and mouth inside the head, all in the same place.`,
+        `The faces ${astray.join(', ')} are not on the head: draw every expression's eyes and brows inside the head, all in the same place.`,
       );
   }
   if (!box('neutral'))
     notes.push(
-      'Draw the neutral face: <g id="neutral"> with its eyes, brows and mouth.',
+      'Draw the neutral face: <g id="neutral"> with its eyes and brows, and no mouth.',
     );
   notes.push(...floating);
   return {
@@ -544,6 +553,50 @@ async function measuredParts(
 }
 
 /**
+ * How much a thing of a show's own is scaled into the kit's units, from
+ * where its ink is: its longest side as long as the thing really is,
+ * where that is known; else as drawn, at its true size in the kit's
+ * units, and one drawn filling the canvas taken as one held in both arms.
+ */
+export function ownThingScale(ink: InkBox, real: RealSize | null): number {
+  const canvas = OWN_THING_CANVAS;
+  const long = Math.max(ink.width, ink.height);
+  const filled = ink.width >= canvas.w * 0.9 || ink.height >= canvas.h * 0.9;
+  const units = sane(real)
+    ? Math.min(
+        220,
+        Math.max(8, Math.max(real.heightCm, real.lengthCm) * UNITS_PER_CM),
+      )
+    : filled
+      ? 70
+      : Math.min(140, Math.max(12, long));
+  return long > 0 ? units / long : 1;
+}
+
+/**
+ * How much a feature of a show's own is scaled into the kit's units, from
+ * where its ink is: as long as it really is when it is long, else as tall;
+ * else as drawn, and one filling its canvas about a bench and a half high.
+ */
+export function ownFeatureScale(ink: InkBox, size: RealSize | null): number {
+  const canvas = OWN_FEATURE_CANVAS;
+  const filled = ink.width >= canvas.w * 0.92 || ink.height >= canvas.h * 0.92;
+  const real = sane(size)
+    ? size.lengthCm > size.heightCm * 1.5
+      ? (size.lengthCm * UNITS_PER_CM) / ink.width
+      : (size.heightCm * UNITS_PER_CM) / ink.height
+    : null;
+  return Math.min(
+    420 / ink.height,
+    800 / ink.width,
+    real ??
+      (filled
+        ? Math.min(150 / ink.height, 400 / ink.width)
+        : Math.min(380, Math.max(24, ink.height)) / ink.height),
+  );
+}
+
+/**
  * A thing of a show's own, drawn by the artist, measured for the stage:
  * how big it is (its longest side as long as the thing really is, where
  * that is known; else as drawn, at its true size in the kit's units on a
@@ -561,18 +614,8 @@ export async function measureOwnThing(
   real: RealSize | null = null,
 ): Promise<OwnPropDrawing> {
   const { root, ink, boxes, grid } = await measuredParts(drawing, ['grip']);
-  const canvas = OWN_THING_CANVAS;
-  const long = Math.max(ink.width, ink.height);
-  const filled = ink.width >= canvas.w * 0.9 || ink.height >= canvas.h * 0.9;
-  const units = sane(real)
-    ? Math.min(
-        220,
-        Math.max(8, Math.max(real.heightCm, real.lengthCm) * UNITS_PER_CM),
-      )
-    : filled
-      ? 70
-      : Math.min(140, Math.max(12, long));
-  const scale = units / long;
+  const scale = ownThingScale(ink, real);
+  const units = Math.max(ink.width, ink.height) * scale;
   // In a hand (a cup, a key); held in the arms or both hands (a kite, a
   // drum); longer than a child's arm (a spear, a pole).
   const size: PropSize =
@@ -657,23 +700,9 @@ export async function measureOwnFeature(
     'opening',
     'seat',
   ]);
-  const canvas = OWN_FEATURE_CANVAS;
-  const filled = ink.width >= canvas.w * 0.92 || ink.height >= canvas.h * 0.92;
   // As long as it really is, when it is long (a bicycle, a canoe); else as
   // tall (a hut, a signpost).
-  const real = sane(size)
-    ? size.lengthCm > size.heightCm * 1.5
-      ? (size.lengthCm * UNITS_PER_CM) / ink.width
-      : (size.heightCm * UNITS_PER_CM) / ink.height
-    : null;
-  const scale = Math.min(
-    420 / ink.height,
-    800 / ink.width,
-    real ??
-      (filled
-        ? Math.min(150 / ink.height, 400 / ink.width)
-        : Math.min(380, Math.max(24, ink.height)) / ink.height),
-  );
+  const scale = ownFeatureScale(ink, size);
   const cx = ink.x + ink.width / 2;
   const base = ink.y + ink.height;
   const at = ([x, y]: Point): Point => [

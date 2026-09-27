@@ -13,7 +13,7 @@ import type {
   FigureDraft,
   StoryDraft,
 } from '../../../business/domain/scene-story';
-import type { LanguageModelUsage } from 'ai';
+import type { LanguageModel, LanguageModelUsage } from 'ai';
 import type { Block, RecapBody, TopicPreviewBody } from '../../../contracts';
 import type {
   GeneratedItem,
@@ -1097,50 +1097,74 @@ export class AiSdkLlmAdapter implements LlmGatewayPort, OnModuleInit {
         : input.backdrop
           ? 'set_paint'
           : 'scene_draw';
-    const { model, ref } = await this.registry.languageModel(task);
     const thinking =
       this.config.get<string>('SCENE_DRAW_THINKING', 'off') === 'on';
-    // Gemini thinks as it sees fit unless told; its thinking is output.
-    const level = this.config.get<string>('DRAW_THINKING_LEVEL');
-    // Free text: an SVG written into a reply is what a model has done a
-    // million times; escaped into a JSON field it is not (79c2523).
-    const result = await generateText({
-      model,
-      system:
-        input.purpose === 'cast'
-          ? PROMPTS.castDraw
-          : input.backdrop
-            ? PROMPTS.sceneSet
-            : PROMPTS.sceneDraw,
-      prompt: drawingRequest(input),
-      maxRetries: this.maxRetries(),
-      maxOutputTokens: thinking || ref.provider === 'google' ? 32_000 : 16_000,
-      ...(input.temperature !== undefined
-        ? { temperature: input.temperature }
-        : {}),
-      ...(input.signal ? { abortSignal: input.signal } : {}),
-      // Said on every call: the API thinks by default on deepseek-flash,
-      // and this provider version only knows its older ids as thinkers.
-      ...(ref.provider === 'deepseek'
-        ? {
-            providerOptions: {
-              deepseek: {
-                thinking: { type: thinking ? 'enabled' : 'disabled' },
-              },
-            },
-          }
-        : ref.provider === 'google' &&
-            (level === 'minimal' ||
-              level === 'low' ||
-              level === 'medium' ||
-              level === 'high')
+    // Gemini draws nearly as well thinking a little as thinking at length,
+    // at a sixth of the cost and the time (the drawing bench, 2026-09-27):
+    // low unless DRAW_THINKING_LEVEL says otherwise ("auto": as it sees fit).
+    const level = this.config.get<string>('DRAW_THINKING_LEVEL') || 'low';
+    const draw = (model: LanguageModel, ref: ModelRef) =>
+      // Free text: an SVG written into a reply is what a model has done a
+      // million times; escaped into a JSON field it is not (79c2523).
+      generateText({
+        model,
+        system:
+          input.purpose === 'cast'
+            ? PROMPTS.castDraw
+            : input.backdrop
+              ? PROMPTS.sceneSet
+              : PROMPTS.sceneDraw,
+        prompt: drawingRequest(input),
+        maxRetries: this.maxRetries(),
+        maxOutputTokens:
+          thinking || ref.provider === 'google' ? 32_000 : 16_000,
+        ...(input.temperature !== undefined
+          ? { temperature: input.temperature }
+          : {}),
+        ...(input.signal ? { abortSignal: input.signal } : {}),
+        // Said on every call: the API thinks by default on deepseek-flash,
+        // and this provider version only knows its older ids as thinkers.
+        ...(ref.provider === 'deepseek'
           ? {
               providerOptions: {
-                google: { thinkingConfig: { thinkingLevel: level } },
+                deepseek: {
+                  thinking: { type: thinking ? 'enabled' : 'disabled' },
+                },
               },
             }
-          : {}),
-    });
+          : ref.provider === 'google' &&
+              (level === 'minimal' ||
+                level === 'low' ||
+                level === 'medium' ||
+                level === 'high')
+            ? {
+                providerOptions: {
+                  google: { thinkingConfig: { thinkingLevel: level } },
+                },
+              }
+            : {}),
+      });
+    let { model, ref } = await this.registry.languageModel(task);
+    let result: Awaited<ReturnType<typeof draw>>;
+    try {
+      result = await draw(model, ref);
+    } catch (error) {
+      // A show's artist refused for want of credit or quota draws with the
+      // explainer's artist instead: a drawing is better made by another
+      // hand than not made at all. Anything else is the call's own failure.
+      if (task === 'scene_draw' || !refusedForCredit(error)) throw error;
+      const instead = await this.registry.languageModel('scene_draw');
+      if (
+        `${instead.ref.provider}:${instead.ref.modelId}` ===
+        `${ref.provider}:${ref.modelId}`
+      )
+        throw error;
+      this.logger.warn(
+        `${task} on ${ref.provider}:${ref.modelId} was refused (${(error as Error).message.slice(0, 120)}); drawn on ${instead.ref.provider}:${instead.ref.modelId} instead`,
+      );
+      ({ model, ref } = instead);
+      result = await draw(model, ref);
+    }
     return {
       value: result.text,
       usage: this.usage(ref, result.usage, started),
@@ -2486,6 +2510,30 @@ function turnOf(answer: z.infer<typeof studioTurnSchema>): StudioTurnDraft {
 }
 
 /** What the artist is asked for one drawing: the brief, its groups, its frame. */
+/**
+ * Whether a call was refused for want of credit or quota (a prepaid
+ * balance spent, a daily limit reached), rather than failing on its own:
+ * another provider may still answer it.
+ */
+export function refusedForCredit(error: unknown): boolean {
+  // After its own retries the SDK says so, with the last refusal inside.
+  const last = (error as { lastError?: unknown }).lastError;
+  if (last && refusedForCredit(last)) return true;
+  const status =
+    (error as { statusCode?: number; status?: number }).statusCode ??
+    (error as { status?: number }).status;
+  const said = `${(error as Error).message ?? ''} ${
+    (error as { responseBody?: string }).responseBody ?? ''
+  }`;
+  return (
+    status === 402 ||
+    status === 429 ||
+    /\b(?:credits?|quota|billing|prepay\w*|RESOURCE_EXHAUSTED|insufficient[_ ]balance)\b/i.test(
+      said,
+    )
+  );
+}
+
 export function drawingRequest(input: {
   thing: Pick<
     DrawingThing,

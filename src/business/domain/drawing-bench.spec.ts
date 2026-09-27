@@ -88,7 +88,7 @@ describe('the briefs', () => {
 });
 
 describe('a run, summed up', () => {
-  it('takes the median and the shares over every brief, nothing drawn as 0', () => {
+  it('takes the median and the pass share over every brief, nothing drawn as 0, and the style share over the drawings made', () => {
     expect(median([3, 1, 2])).toBe(2);
     expect(median([1, 2, 3, 4])).toBe(2.5);
     const summary = summarise([
@@ -98,7 +98,8 @@ describe('a run, summed up', () => {
     ]);
     expect(summary.median).toBe(6);
     expect(summary.passes).toBe(0.33);
-    expect(summary.stylePasses).toBe(0.67);
+    // Of the drawings made: the one never drawn is no drawing out of style.
+    expect(summary.stylePasses).toBe(0.5);
     expect(summary.drawn).toBe(2);
     expect(summary.costPerDrawing).toBe(0.01);
   });

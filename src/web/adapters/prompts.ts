@@ -2568,7 +2568,7 @@ export const PROMPTS = {
       'dark outline, like cut paper, and the place is painted to go with',
       'them: simple rounded shapes, one flat colour a shape with no',
       'gradients, shading, texture or noise, and one dark outline',
-      '(#2d2a32) about three units wide with round caps and joins. Use soft,',
+      '(#2d2a32) at the width the request gives, with round caps and joins. Use soft,',
       'light colours: sky #CFE6F3, grass #A7D58C, hills #B9DEA0, earth',
       '#E6D3A8, wood #B9875F, stone #C9C3BA, water #8CC4E3, walls #EFE3CF,',
       'roofs #D98A6C, leaves #6FB35F, unless the place has its own colour.',

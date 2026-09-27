@@ -11,6 +11,7 @@ import {
   chosen,
   doneDrawing,
   drawnStamp,
+  gesturingIn,
   keptDrawn,
   markDrawing,
   named,
@@ -251,5 +252,21 @@ describe('what a change to the whole cast is said to have done', () => {
     expect(castLine(bible, after)).toBe(
       "Cast changed: the King's Horse left out; a new place, The Yard; The Wall taken out",
     );
+  });
+});
+
+describe('who gestures on the stage', () => {
+  it('is whoever the artist drew with arms that turn or a head that nods', () => {
+    const rigged = (rig: CharacterSheet['rig']): CharacterSheet => ({
+      ...sheet('<svg/>'),
+      rig,
+    });
+    const cast = {
+      humpty: rigged({ version: 5, joints: {}, mended: [], arms: { r: 30 } }),
+      horse: rigged({ version: 5, joints: {}, mended: [], nods: true }),
+      dot: rigged({ version: 5, joints: {}, mended: [] }),
+      kingsman: sheet('<svg/>'),
+    };
+    expect([...gesturingIn(cast)].sort()).toEqual(['horse', 'humpty']);
   });
 });

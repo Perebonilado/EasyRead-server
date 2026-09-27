@@ -111,6 +111,7 @@ import { DRAWN } from '../../business/domain/scene-own';
 import {
   castLine,
   doneDrawing,
+  gesturingIn,
   keptDrawn,
   withCandidate,
 } from '../../business/domain/studio/studio-drawings';
@@ -1573,11 +1574,7 @@ export class StudioProcessor {
     } catch {
       // None known: everyone the artist drew bobs, as before.
     }
-    return new Set(
-      Object.entries(cast)
-        .filter(([, sheet]) => sheet.rig?.arms || sheet.rig?.nods)
-        .map(([id]) => id),
-    );
+    return gesturingIn(cast);
   }
 
   /** The show's sets as painted: none yet, or none that can be read, is none. */

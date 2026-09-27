@@ -128,6 +128,13 @@ const TASK_DEFAULT: Partial<Record<LlmTask, string>> = {
   // seconds at most on the page tried). Thinking: SCENE_WRITE_THINKING.
   scene_write: 'deepseek:deepseek-flash',
   scene_draw: 'deepseek:deepseek-flash',
+  // A show's characters, own things and places, chosen by the drawing
+  // bench's bake-off (2026-09-27; twenty briefs, one blind draw each,
+  // judged by Gemini 3.8 Flash): median 6.67 at 1.2 cents and 11 s a
+  // drawing, thinking low (DRAW_THINKING_LEVEL), against DeepSeek Flash's
+  // 4.33, gpt-4.1's 3.9 and gpt-4.1-mini's 3.33. Needs Google's key.
+  cast_draw: 'google:gemini-3.8-flash',
+  set_paint: 'google:gemini-3.8-flash',
   // What a document is: one small call a document.
   scene_profile: 'openai:gpt-4.1-mini',
   // A chapter's teacher's notes: one careful read a chapter, before any
@@ -146,9 +153,11 @@ const TASK_DEFAULT: Partial<Record<LlmTask, string>> = {
   // The check of a scene made again as asked: a few thousand tokens in, a
   // verdict out, thinking off (STUDIO_CHECK_THINKING).
   studio_check: 'deepseek:deepseek-flash',
-  // A drawing judged from its picture: DeepSeek cannot see, so a small
-  // vision model, about a tenth of a cent a look.
-  drawing_judge: 'openai:gpt-4.1-mini',
+  // A drawing judged from its picture: DeepSeek cannot see. Gemini 3.8
+  // Flash named every flaw Richard found in Clover, Dot and Eggbert (a
+  // blanket drawn as a scarf, a beak beside the face, a face on the belly),
+  // where gpt-4.1-mini passed Eggbert: about 0.4 cents a look.
+  drawing_judge: 'google:gemini-3.8-flash',
 };
 
 const DEFAULT_MODEL = 'openai:gpt-4o-mini';

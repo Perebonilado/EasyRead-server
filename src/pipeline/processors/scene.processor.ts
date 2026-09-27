@@ -104,6 +104,9 @@ import {
   measureOwnFeature,
   measureOwnThing,
   mouthOf,
+  optionsKey,
+  ownFeatureScale,
+  ownThingScale,
   notDrawnYet,
   ownSheetsOf,
   setsOf,
@@ -208,7 +211,14 @@ import {
 import type { VisualSceneRepository } from '../../business/repositories/visual.repository';
 import type { VisualSceneJobData } from '../queues';
 import { isPermanentFailure, type JobContext } from './base.processor';
-import { DRAW_TRIES, SceneArtist, referenceOf } from './scene-artist';
+import {
+  DRAW_TRIES,
+  SceneArtist,
+  referenceOf,
+  type ArtistOptions,
+  type DrawAgain,
+} from './scene-artist';
+import { KIT_LINE } from '../../business/domain/scene-ink';
 import { SceneVoiceService } from '../../business/handlers/admin/scene-voice.service';
 
 /** The most of a page the writer reads. */
@@ -942,13 +952,14 @@ export class SceneProcessor {
     if (!character) throw new Error(`No character ${characterId}`);
     if (!character.kind || character.kind === 'person')
       throw new Error(`${character.name} is drawn by the kit, not the artist`);
-    const sheet = await this.drawCharacter(
+    const drawn = await this.drawCharacter(
       character,
       story.bookTitle,
       documentId,
       who,
     );
-    if (!sheet) return null;
+    if (!drawn) return null;
+    const { sheet } = drawn;
     await this.inTurn(story.castKey, async () => {
       const cast = await this.castAt(story.castKey);
       cast[character.id] = sheet;
@@ -958,6 +969,7 @@ export class SceneProcessor {
         mimeType: 'application/json',
       });
     });
+    await this.keepOthers(story.castKey, character.id, drawn.others, who);
     return sheet;
   }
 
@@ -976,14 +988,83 @@ export class SceneProcessor {
     documentId: string | null,
     who: string,
   ): Promise<CharacterSheet | null> {
+    const drawn = await this.drawCandidates(
+      story,
+      characterId,
+      words,
+      now,
+      documentId,
+      who,
+    );
+    return drawn[0] ?? null;
+  }
+
+  /**
+   * A character drawn again as the maker asks, every take's best, better
+   * first: the first is the one drawCandidate gives; the rest are there to
+   * be offered beside it. None when nothing came through.
+   */
+  async drawCandidates(
+    story: Pick<PageStory, 'bible' | 'bookTitle'>,
+    characterId: string,
+    words: string,
+    now: CharacterSheet | null,
+    documentId: string | null,
+    who: string,
+    options: ArtistOptions = {},
+  ): Promise<CharacterSheet[]> {
     const character = story.bible.characters.find((c) => c.id === characterId);
     if (!character) throw new Error(`No character ${characterId}`);
     if (!character.kind || character.kind === 'person')
       throw new Error(`${character.name} is drawn by the kit, not the artist`);
-    return this.drawCharacter(character, story.bookTitle, documentId, who, {
-      words,
-      reference: now ? referenceOf(now) : null,
-    });
+    const drawn = await this.drawCharacter(
+      character,
+      story.bookTitle,
+      documentId,
+      who,
+      { words, reference: now ? referenceOf(now) : null, before: now },
+      options,
+    );
+    return drawn ? [drawn.sheet, ...drawn.others] : [];
+  }
+
+  /**
+   * A character's other drawings, the takes not chosen, kept beside the
+   * cast (cast-options.json beside cast.json) to be offered later; none
+   * kept is none written. What cannot be kept is only logged.
+   */
+  private async keepOthers(
+    castKey: string,
+    characterId: string,
+    others: CharacterSheet[],
+    who: string,
+  ): Promise<void> {
+    if (!others.length) return;
+    const key = optionsKey(castKey);
+    await this.inTurn(key, async () => {
+      let kept: Record<string, CharacterSheet[]> = {};
+      try {
+        kept = JSON.parse(
+          (await this.storage.get(key)).toString('utf8'),
+        ) as Record<string, CharacterSheet[]>;
+      } catch (error) {
+        if (
+          !(error instanceof NotFoundError) &&
+          !(error instanceof SyntaxError)
+        )
+          throw error;
+      }
+      kept[characterId] = others;
+      await this.storage.put({
+        key,
+        body: Buffer.from(JSON.stringify(kept)),
+        mimeType: 'application/json',
+      });
+    }).catch((error: unknown) =>
+      this.logger.warn(
+        `${who}: the other drawings were not kept: ${(error as Error).message}`,
+      ),
+    );
   }
 
   /** A character's sheet kept in a book's or a show's cast, in place of any before it. */
@@ -2115,13 +2196,14 @@ export class SceneProcessor {
         );
         return null;
       }
-      const sheet = await this.drawCharacter(
+      const drawn = await this.drawCharacter(
         character,
         bookTitle,
         documentId,
         who,
       );
-      if (!sheet) return null;
+      if (!drawn) return null;
+      const { sheet } = drawn;
       // Added to the cast as it stands now: others may have been drawn meanwhile.
       await this.inTurn(key, async () => {
         const cast = await this.castAt(key);
@@ -2136,6 +2218,7 @@ export class SceneProcessor {
           `${who}: ${character.name} was drawn but not kept: ${(error as Error).message}`,
         ),
       );
+      await this.keepOthers(key, character.id, drawn.others, who);
       return sheet;
     });
   }
@@ -2237,8 +2320,9 @@ export class SceneProcessor {
     documentId: string | null,
     who: string,
     /** Drawn again as the maker asks, from how they are drawn now. */
-    again?: { words: string; reference: string | null },
-  ): Promise<CharacterSheet | null> {
+    again?: DrawAgain,
+    options: ArtistOptions = {},
+  ): Promise<{ sheet: CharacterSheet; others: CharacterSheet[] } | null> {
     let kind: StoryKind | null = character.kind ?? null;
     let size: StorySize | null = character.size ?? null;
     let figure: FigureSpec | null = character.figure ?? null;
@@ -2272,7 +2356,7 @@ export class SceneProcessor {
       this.logger.log(
         `${who}: ${character.name} drawn by the kit: ${describeFigure(spec)}`,
       );
-      return sheet;
+      return { sheet, others: [] };
     }
     const drawn = await this.artist.drawSheet(
       { ...character, kind, size },
@@ -2280,8 +2364,15 @@ export class SceneProcessor {
       documentId,
       who,
       again,
+      options,
     );
-    return drawn ? { ...drawn.sheet, size: size ?? 'medium' } : null;
+    const sized = (sheet: CharacterSheet): CharacterSheet => ({
+      ...sheet,
+      size: size ?? 'medium',
+    });
+    return drawn
+      ? { sheet: sized(drawn.sheet), others: drawn.others.map(sized) }
+      : null;
   }
 
   /**
@@ -2443,6 +2534,14 @@ export class SceneProcessor {
         documentId,
         who,
         stop,
+        {
+          // The kit's line at the size it will stand at among the people.
+          line: (ink) => KIT_LINE / ownThingScale(ink, size),
+          about: {
+            kind: 'thing',
+            brief: `a ${thing.look ? `${thing.look} ` : ''}${thing.name}`,
+          },
+        },
       );
       if (!drawn) {
         await this.ownFailed(key, who, thing.name, mark, size, stop);
@@ -2505,6 +2604,10 @@ export class SceneProcessor {
         documentId,
         who,
         stop,
+        {
+          line: (ink) => KIT_LINE / ownFeatureScale(ink, size),
+          about: { kind: 'feature', brief: `a ${feature.name}` },
+        },
       );
       if (!piece) {
         await this.ownFailed(key, who, feature.name, mark, size, stop);
@@ -3178,6 +3281,9 @@ export class SceneProcessor {
     task:
       | 'scene_write'
       | 'scene_draw'
+      | 'cast_draw'
+      | 'set_paint'
+      | 'drawing_judge'
       | 'scene_profile'
       | 'scene_story'
       | 'scene_notes',

@@ -132,6 +132,8 @@ export interface BenchEntry {
   calls: number;
   /** What drawing it cost, in US dollars: the bench's own judging aside. */
   costUsd: number;
+  /** The tokens it took, in and out (thinking is out). */
+  tokens?: { in: number; out: number };
   /** How long drawing it took. */
   ms: number;
   checks: Record<string, CheckKept>;
@@ -156,8 +158,9 @@ export interface BenchSummary {
   /** The judge's median and mean, over every brief (nothing drawn is 0). */
   median: number;
   mean: number;
-  /** Shares of every brief. */
+  /** The share of every brief that passes (nothing drawn does not). */
   passes: number;
+  /** Shares of the drawings made: every code check holds; the house style holds. */
   codePasses: number;
   stylePasses: number;
   /** Drawings with any gradient left in them. */
@@ -193,6 +196,7 @@ export function summarise(entries: readonly BenchEntry[]): BenchSummary {
   const count = entries.length || 1;
   const drawn = entries.filter((one) => one.drawn);
   const share = (n: number) => r2(n / count);
+  const ofDrawn = (n: number) => (drawn.length ? r2(n / drawn.length) : 0);
   const byKind: BenchSummary['byKind'] = {};
   for (const kind of [...new Set(entries.map((one) => one.kind))]) {
     const of = entries.filter((one) => one.kind === kind);
@@ -207,12 +211,11 @@ export function summarise(entries: readonly BenchEntry[]): BenchSummary {
     median: median(entries.map((one) => one.score)),
     mean: r2(entries.reduce((sum, one) => sum + one.score, 0) / count),
     passes: share(entries.filter((one) => one.passes).length),
-    codePasses: share(
-      entries.filter(
-        (one) => one.drawn && Object.values(one.checks).every((c) => c.ok),
-      ).length,
+    codePasses: ofDrawn(
+      drawn.filter((one) => Object.values(one.checks).every((c) => c.ok))
+        .length,
     ),
-    stylePasses: share(entries.filter((one) => one.styleOk).length),
+    stylePasses: ofDrawn(drawn.filter((one) => one.styleOk).length),
     gradients: entries.filter((one) => (one.style?.gradients ?? 0) > 0).length,
     costPerDrawing: drawn.length
       ? Math.round(

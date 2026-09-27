@@ -64,7 +64,12 @@ import {
 } from '../src/pipeline/processors/studio.processor';
 import type { StoragePort } from '../src/business/ports/storage.port';
 import { STORAGE } from '../src/business/ports/tokens';
-import { onItsQuiets, paintedSets, showStory } from './studio-show';
+import {
+  gesturingCast,
+  onItsQuiets,
+  paintedSets,
+  showStory,
+} from './studio-show';
 
 /** What the processor keeps when SCENE_KEEP_PARTS is set. */
 interface Parts {
@@ -244,6 +249,8 @@ async function stored(
       rows,
       bible,
       await paintedSets(app.get<StoragePort>(STORAGE), show.id),
+      // Those the artist drew gesture as the worker stages them.
+      await gesturingCast(app.get<StoragePort>(STORAGE), show.id),
     );
     // Its words as voiced: staged as the stage is now, on the voice's own
     // quiets, however long the stage would ask for them now.

@@ -6,7 +6,8 @@ import type { StudioBible } from '../src/business/domain/studio/studio';
 import { foundIn } from '../src/business/domain/studio/studio-check';
 import { storyBibleFor } from '../src/business/domain/studio/studio-stage';
 import type { StoragePort } from '../src/business/ports/storage.port';
-import { setsOf, type Sets } from '../src/business/domain/scene-sheet';
+import { castOf, setsOf, type Sets } from '../src/business/domain/scene-sheet';
+import { gesturingIn } from '../src/business/domain/studio/studio-drawings';
 import type {
   StudioEpisodeRecord,
   StudioRepository,
@@ -76,6 +77,23 @@ export async function paintedSets(
     return setsOf(JSON.parse(kept.toString('utf8')));
   } catch {
     return null;
+  }
+}
+
+/**
+ * Those of a show's cast whose rigs turn their arms and nod, as the
+ * worker stages them (studio.processor's gesturing): none when the cast
+ * cannot be read.
+ */
+export async function gesturingCast(
+  storage: StoragePort,
+  showId: string,
+): Promise<Set<string>> {
+  try {
+    const kept = await storage.get(studioCastKey(showId));
+    return gesturingIn(castOf(JSON.parse(kept.toString('utf8'))));
+  } catch {
+    return new Set();
   }
 }
 

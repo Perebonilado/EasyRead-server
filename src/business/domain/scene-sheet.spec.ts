@@ -90,6 +90,9 @@ describe('a character drawn once for the book', () => {
     const gated = await gateDrawing(figure('angry'), mira);
     const { notes } = await measureSheet(gated.drawing!);
     expect(notes.join(' ')).toContain('The faces angry are not on the head');
+    // The stage draws the mouth: the artist is never asked for one.
+    expect(notes.join(' ')).toContain("every expression's eyes and brows");
+    expect(notes.join(' ')).not.toMatch(/mouth/);
   }, 20_000);
 
   it('sends back a figure whose head floats above its body', async () => {

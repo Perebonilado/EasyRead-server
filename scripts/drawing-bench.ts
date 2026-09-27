@@ -8,15 +8,22 @@
  *
  *   npm run drawing:bench -- --out <dir> [--label "<words>"] [--only dog,horse]
  *        [--against <report.json> | --against baseline] [--write-baseline]
- *        [--model provider:id] [--judge provider:id] [--concurrency 6]
+ *        [--model provider:id] [--judge provider:id] [--see-with provider:id]
+ *        [--takes n] [--revisions n] [--no-see] [--concurrency 6]
  *   npm run drawing:bench -- --mark <dir> <id> ok|not ["note"]
  *   npm run drawing:bench -- --sheet <dir> [--against <report.json> | baseline]
+ *   npm run drawing:bench -- --rejudge <dir> --judge provider:id
  *
  * Writes <dir>/report.json, <dir>/index.html (the contact sheet), and
  * <dir>/sheet.png (every drawing in one picture), with each brief's
  * pictures and drawing in <dir>/<id>/. --model draws with that model in
  * place of each drawing task's own; --judge judges the run with that one
- * (else the drawing_judge task's). Every model call the drawing makes is
+ * (else the drawing_judge task's), and --see-with is the judge the artist
+ * looks through while drawing (else the same default). --takes, --revisions
+ * and --no-see set how hard the artist works: by default as a show's does
+ * (three takes of a new character, two revisions, judged as it goes); a
+ * bake-off of models draws each brief once (--takes 1 --revisions 0).
+ * Every model call the drawing makes is
  * priced as the ledger prices it (cost.ts); the bench's own judging is
  * not counted in a drawing's cost. --mark keeps Richard's word on one
  * drawing beside the report (marks.json) and writes the page again.
@@ -32,6 +39,7 @@ import {
   SceneArtist,
   referenceOf,
   type ArtistLog,
+  type ArtistOptions,
 } from '../src/pipeline/processors/scene-artist';
 import type { LlmUsage } from '../src/business/ports/llm.port';
 import { costOf } from '../src/business/domain/cost';
@@ -66,11 +74,17 @@ import {
 } from '../src/business/domain/drawing-score';
 import { byId, elements, removeNode } from '../src/business/domain/scene-dom';
 import { PLAIN_FIGURE, drawFigure } from '../src/business/domain/scene-figure';
-import { SET_UNIT_SHARE, SIZE_UNITS } from '../src/business/domain/scene-ink';
+import {
+  KIT_LINE,
+  SET_UNIT_SHARE,
+  SIZE_UNITS,
+} from '../src/business/domain/scene-ink';
 import { rasterise } from '../src/business/domain/scene-raster';
 import {
   measureOwnFeature,
   measureOwnThing,
+  ownFeatureScale,
+  ownThingScale,
   type CharacterSheet,
   type SetSheet,
 } from '../src/business/domain/scene-sheet';
@@ -283,6 +297,7 @@ function judged(fixture: DrawingFixture): {
 async function drawFixture(
   fixture: DrawingFixture,
   artist: SceneArtist,
+  options: ArtistOptions,
 ): Promise<Drawn | null> {
   const who = `bench ${fixture.id}`;
   switch (fixture.kind) {
@@ -292,6 +307,8 @@ async function drawFixture(
         fixture.book,
         null,
         who,
+        undefined,
+        options,
       );
       return drawn
         ? {
@@ -308,7 +325,8 @@ async function drawFixture(
         fixture.book,
         null,
         who,
-        { words: fixture.words, reference: referenceOf(before) },
+        { words: fixture.words, reference: referenceOf(before), before },
+        options,
       );
       return drawn
         ? {
@@ -329,6 +347,15 @@ async function drawFixture(
         fixture.book,
         null,
         who,
+        undefined,
+        {
+          ...options,
+          line: (ink) => KIT_LINE / ownThingScale(ink, fixture.real),
+          about: {
+            kind: 'thing',
+            brief: `a ${fixture.look ? `${fixture.look} ` : ''}${fixture.name}`,
+          },
+        },
       );
       return piece ? { kind: 'own', piece } : null;
     }
@@ -343,6 +370,12 @@ async function drawFixture(
         fixture.book,
         null,
         who,
+        undefined,
+        {
+          ...options,
+          line: (ink) => KIT_LINE / ownFeatureScale(ink, fixture.real),
+          about: { kind: 'feature', brief: `a ${fixture.name}` },
+        },
       );
       return piece ? { kind: 'own', piece } : null;
     }
@@ -353,6 +386,7 @@ async function drawFixture(
         null,
         who,
         fixture.world ?? null,
+        options,
       );
       return set ? { kind: 'set', set } : null;
     }
@@ -414,6 +448,7 @@ async function runOne(
   llm: AiSdkLlmAdapter,
   judge: AiSdkLlmAdapter,
   out: string,
+  options: ArtistOptions,
 ): Promise<BenchEntry> {
   const dir = join(out, fixture.id);
   mkdirSync(dir, { recursive: true });
@@ -455,13 +490,17 @@ async function runOne(
   };
   let drawn: Drawn | null = null;
   try {
-    drawn = await drawFixture(fixture, artist);
+    drawn = await drawFixture(fixture, artist, options);
   } catch (error) {
     entry.error = (error as Error).message;
     say(`! ${fixture.id}: ${(error as Error).message}`);
   }
   entry.ms = Date.now() - started;
   entry.calls = calls.length;
+  entry.tokens = {
+    in: calls.reduce((sum, one) => sum + one.tokensIn, 0),
+    out: calls.reduce((sum, one) => sum + one.tokensOut, 0),
+  };
   entry.models = calls.map((one) => one.model);
   entry.costUsd =
     Math.round(
@@ -642,6 +681,80 @@ async function writePages(
   writeFileSync(join(out, 'sheet.png'), await sheetPng(report, out));
 }
 
+/**
+ * A run judged again from its kept pictures by another judge (--judge):
+ * so a run the loop judged is also measured by a judge it never saw, and
+ * a run cut short can be scored. Code's checks stand as they were. Writes
+ * report-<judge>.json and index-<judge>.html beside the run's own.
+ */
+async function rejudge(dir: string, model: string | undefined): Promise<void> {
+  const kept = JSON.parse(
+    readFileSync(join(dir, 'report.json'), 'utf8'),
+  ) as BenchReport;
+  const env: Record<string, string | undefined> = { ...process.env };
+  if (model) env.AI_MODEL_DRAWING_JUDGE = model;
+  const judge = new AiSdkLlmAdapter(new ConfigService(env));
+  const fixtures = new Map(loadDrawingFixtures().map((one) => [one.id, one]));
+  const entries = await inBatches(kept.entries, 6, async (entry) => {
+    const fixture = fixtures.get(entry.id);
+    if (!fixture || !entry.files.card)
+      return { ...entry, verdict: null, score: 0, passes: false };
+    const asked = judged(fixture);
+    const png = readFileSync(join(dir, entry.files.card));
+    const old =
+      fixture.kind === 'redraw' && entry.files.before
+        ? {
+            png: readFileSync(join(dir, entry.files.before)),
+            words: fixture.words,
+          }
+        : undefined;
+    try {
+      const verdict = (
+        await judge.drawingJudge({
+          png,
+          kind: asked.kind,
+          brief: asked.brief,
+          ...(old ? { old } : {}),
+        })
+      ).value;
+      const score = verdictScore(verdict);
+      const codeOk = Object.values(entry.checks).every((c) => c.ok);
+      console.log(
+        `${entry.id.padEnd(16)} ${String(entry.score).padStart(5)} → ${score}  ${verdict.sees}`,
+      );
+      return {
+        ...entry,
+        verdict,
+        score,
+        passes: codeOk && verdictPasses(verdict),
+      };
+    } catch (error) {
+      console.warn(`! ${entry.id}: ${(error as Error).message}`);
+      return { ...entry, verdict: null, score: 0, passes: false };
+    }
+  });
+  const slug = (model ?? 'default').replace(/[^a-z0-9.-]+/gi, '_');
+  const report: BenchReport = {
+    ...kept,
+    label: `${kept.label} (judged again by ${model ?? 'the default judge'})`,
+    setup: { ...kept.setup, judge: model ?? 'drawing_judge default' },
+    entries,
+    summary: summarise(entries),
+  };
+  writeFileSync(
+    join(dir, `report-${slug}.json`),
+    JSON.stringify(report, null, 2),
+  );
+  writeFileSync(
+    join(dir, `index-${slug}.html`),
+    contactSheetHtml(report, { marks: readMarks(dir) }),
+  );
+  const s = report.summary;
+  console.log(
+    `\nmedian ${s.median} · mean ${s.mean} · pass ${Math.round(s.passes * 100)}% → ${join(dir, `report-${slug}.json`)}`,
+  );
+}
+
 async function main(): Promise<void> {
   const markAt = flag('--mark');
   if (markAt) {
@@ -660,11 +773,18 @@ async function main(): Promise<void> {
     console.log(`${id}: ${said}${note ? ` (${note})` : ''}`);
     return;
   }
+  const rejudgeAt = flag('--rejudge');
+  if (rejudgeAt) {
+    await rejudge(rejudgeAt, flag('--judge'));
+    return;
+  }
   const sheetAt = flag('--sheet');
   if (sheetAt) {
-    const report = JSON.parse(
+    const kept = JSON.parse(
       readFileSync(join(sheetAt, 'report.json'), 'utf8'),
     ) as BenchReport;
+    // Summed up again, as runs are summed up now.
+    const report = { ...kept, summary: summarise(kept.entries) };
     await writePages(report, sheetAt, againstOf(flag('--against')));
     console.log(`→ ${join(sheetAt, 'index.html')}`);
     return;
@@ -676,12 +796,19 @@ async function main(): Promise<void> {
   mkdirSync(out, { recursive: true });
   const model = flag('--model');
   const judgeModel = flag('--judge');
+  const seeWith = flag('--see-with');
+  const options: ArtistOptions = {
+    ...(flag('--takes') ? { takes: Number(flag('--takes')) } : {}),
+    ...(flag('--revisions') ? { revisions: Number(flag('--revisions')) } : {}),
+    ...(args.includes('--no-see') ? { see: false } : {}),
+  };
   const only = (flag('--only') ?? '')
     .split(',')
     .map((one) => one.trim())
     .filter(Boolean);
   const env: Record<string, string | undefined> = { ...process.env };
   if (model) for (const name of DRAW_TASKS) env[name] = model;
+  if (seeWith) env.AI_MODEL_DRAWING_JUDGE = seeWith;
   const llm = new AiSdkLlmAdapter(new ConfigService(env));
   const judge = new AiSdkLlmAdapter(
     new ConfigService({
@@ -696,7 +823,7 @@ async function main(): Promise<void> {
   const concurrency = Number(flag('--concurrency') ?? 6);
   console.log(`${fixtures.length} briefs → ${out} (${concurrency} at a time)`);
   const entries = await inBatches(fixtures, concurrency, (fixture) =>
-    runOne(fixture, llm, judge, out),
+    runOne(fixture, llm, judge, out, options),
   );
   const report: BenchReport = {
     at: new Date().toISOString(),
@@ -704,7 +831,15 @@ async function main(): Promise<void> {
     setup: {
       draw: model ?? 'each task’s own',
       judge:
-        judgeModel ?? env.AI_MODEL_DRAWING_JUDGE ?? 'drawing_judge default',
+        judgeModel ??
+        process.env.AI_MODEL_DRAWING_JUDGE ??
+        'drawing_judge default',
+      seeing:
+        options.see === false
+          ? 'blind'
+          : (seeWith ?? env.AI_MODEL_DRAWING_JUDGE ?? 'drawing_judge default'),
+      takes: options.takes ?? 'a show’s',
+      revisions: options.revisions ?? 'a show’s',
       briefs: fixtures.length,
     },
     entries,

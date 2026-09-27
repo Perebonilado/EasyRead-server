@@ -101,6 +101,7 @@ import {
   walkEase,
   walksOf,
   withoutJumps,
+  type StageWalk,
 } from './scene-film';
 import type { GatedDrawing } from './scene-svg';
 import { anchorMs, quietGaps, spaced, type TimedBeat } from './scene-timing';
@@ -968,6 +969,39 @@ export function directedShots(
     .map((shot) =>
       shot.untilMs! > tail ? { ...shot, untilMs: durationMs } : shot,
     );
+}
+
+/**
+ * The shots on someone who goes across the stage as it would run: one
+ * that would begin as they set off comes in once they are there, framed
+ * where they end up; one they would set off in ends as they do. A shot
+ * left too short to take in is none. Going on or off is the shot's own.
+ */
+export function shotsBesideWalks(
+  shots: readonly SceneEffectDto[],
+  walks: readonly StageWalk[],
+  W: number,
+): SceneEffectDto[] {
+  const across = walks.filter(
+    (one) =>
+      one.start.x + one.start.w > 0 &&
+      one.start.x < W &&
+      one.end.x + one.end.w > 0 &&
+      one.end.x < W,
+  );
+  return shots.flatMap((shot) => {
+    let at = shot.atMs;
+    let until = shot.untilMs ?? at;
+    for (const one of across) {
+      if (one.id !== shot.target && one.id !== shot.part) continue;
+      if (one.from >= until || one.to <= at) continue;
+      if (one.from <= at + SHOT_LEAST_MS) at = Math.max(at, Math.round(one.to));
+      else until = Math.min(until, Math.round(one.from));
+    }
+    return until - at >= SHOT_LEAST_MS
+      ? [{ ...shot, atMs: at, untilMs: until }]
+      : [];
+  });
 }
 
 /** A story's drawings with nothing set beside them: the labels a lesson would, and what a character is like. */
@@ -2839,8 +2873,24 @@ export function composeScene(input: ComposeInput): {
   // A directed scene's shots with no jump cut: judged where the wide stage
   // stands everyone, as the film shows it.
   if (cameraDirected) {
+    const wideStage = {
+      w: STAGINGS.wide.w,
+      h: STAGINGS.wide.h,
+      places: wide.places,
+    };
+    const paced = {
+      steps,
+      stagings: { box: wideStage, wide: wideStage },
+      acting,
+      props,
+      setting: { features: featuresDto() },
+    };
     const kept = withoutJumps(
-      effects.filter((e) => e.do === 'zoom'),
+      shotsBesideWalks(
+        effects.filter((e) => e.do === 'zoom'),
+        walksOf({ ...paced, steps: film ? hurried(paced) : steps }),
+        STAGINGS.wide.w,
+      ),
       steps,
       { ...STAGINGS.wide, places: wide.places },
       durationMs,

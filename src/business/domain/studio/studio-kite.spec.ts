@@ -4,6 +4,7 @@ import { caughtUpIn, openedOut, paintedAt, stageStory } from './studio-stage';
 import { voiced } from './__fixtures__/voiced';
 import { ownWords } from '../scene-own';
 import { drawPiece } from '../scene-set-pieces';
+import { shotsBesideWalks } from '../scene-compose';
 import type { OwnPropDrawing } from '../scene-props';
 
 /** "Kofi and the Kite": a boy, his grandmother, their dog, a kite and a palm on the beach. */
@@ -398,5 +399,40 @@ describe('the camera', () => {
         [4, 'wide', null],
       ],
     );
+  });
+});
+
+describe('a shot on someone crossing the stage', () => {
+  const box = (x: number) => ({ x, y: 400, w: 150, h: 220 });
+  const run = {
+    id: 'zuri',
+    from: 2000,
+    to: 3000,
+    start: box(700),
+    end: box(1400),
+  };
+  const close = (atMs: number, untilMs: number) => ({
+    atMs,
+    untilMs,
+    target: 'zuri',
+    part: null,
+    do: 'zoom' as const,
+    shot: { enter: 'cut' as const },
+  });
+
+  it('comes in once they are there, or ends as they set off, never framing where they left', () => {
+    expect(shotsBesideWalks([close(1900, 6000)], [run], 1600)).toEqual([
+      close(3000, 6000),
+    ]);
+    expect(shotsBesideWalks([close(0, 6000)], [run], 1600)).toEqual([
+      close(0, 2000),
+    ]);
+    // Too short once they are there: none.
+    expect(shotsBesideWalks([close(1900, 3500)], [run], 1600)).toEqual([]);
+    // Going off is the shot's own: seen going.
+    const off = { ...run, end: box(1700) };
+    expect(shotsBesideWalks([close(1900, 6000)], [off], 1600)).toEqual([
+      close(1900, 6000),
+    ]);
   });
 });

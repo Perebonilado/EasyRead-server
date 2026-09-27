@@ -446,6 +446,59 @@ describe('an animal the artist drew, rigged by code', () => {
   }, 30_000);
 });
 
+describe('a creature whose look lived by its own motion', () => {
+  const fill = 'fill="#E0463A" stroke="#2d2a32" stroke-width="3"';
+  /** A creature with wings on its body, a flame on its head and a halo over it: each named as the artist names them. */
+  const creature = (wingAt = 260) =>
+    `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 800">
+      ${animalParts(`<path d="M530 500 Q620 440 680 470" ${stroke}/>`)}
+      <g id="wing-l"><path d="M${wingAt + 20} 470 L${wingAt - 140} 380 L${wingAt - 80} 520 Z" ${fill}/></g>
+      <g id="wing-r"><path d="M520 470 L680 380 L620 520 Z" ${fill}/></g>
+      <g id="flame"><path d="M375 200 Q400 110 425 200 Z" ${fill}/></g>
+      <g class="halo"><ellipse cx="400" cy="130" rx="60" ry="12" fill="none" stroke="#F2C14E" stroke-width="8"/></g>
+    </svg>`;
+
+  it('flaps its wings about where they join it, the right mirrored, flickers its flame about its foot, and pulses its halo', async () => {
+    const { sheet, notes } = await rigSheet(
+      sheetOf(creature(), [0, 0, 800, 800], ANIMAL_PARTS),
+    );
+    expect(sheet.rig!.version).toBe(RIG_VERSION);
+    const svg = sheet.drawing.svg;
+    expect(svg).toContain('class="rig-flap"');
+    expect(svg).toContain('class="rig-flap rig-flap-r"');
+    expect(svg).toMatch(/@keyframes rig-flap\{0%,100%\{transform:rotate\(-\d/);
+    expect(svg).toContain('@keyframes rig-flap-r{');
+    // The flame about its foot, on the head.
+    const flame =
+      /class="rig-flicker" style="transform-origin:([\d.]+)px ([\d.]+)px"/.exec(
+        svg,
+      );
+    expect(Number(flame![1])).toBeCloseTo(400, -1);
+    expect(Number(flame![2])).toBeGreaterThan(185);
+    expect(svg).toContain('@keyframes rig-flicker{');
+    // The halo floats over the head: it brightens and dims, and is never
+    // moved in, nor told of.
+    expect(svg).toContain('class="rig-pulse"');
+    expect(svg).toContain('@keyframes rig-pulse{');
+    expect(sheet.rig!.mended).toEqual([]);
+    expect(notes.join(' ')).not.toMatch(/halo|float/i);
+    expect(sheet.drawing.moves).toBe(true);
+  }, 60_000);
+
+  it('keeps a wing that would come off still, and takes the motion out again when rigged again', async () => {
+    // The left wing drawn far off the body: it cannot flap and stay on.
+    const { sheet } = await rigSheet(
+      sheetOf(creature(80), [0, 0, 800, 800], ANIMAL_PARTS),
+    );
+    expect(sheet.drawing.svg).not.toMatch(
+      /class="rig-flap"[^>]*>\s*<g id="wing-l"/,
+    );
+    expect(sheet.drawing.svg).toContain('class="rig-flap rig-flap-r"');
+    const again = await rigSheet({ ...sheet, rig: undefined });
+    expect(again.sheet.drawing.svg.match(/rig-flap-r"/g)).toHaveLength(1);
+  }, 60_000);
+});
+
 describe('which way an animal on all fours faces', () => {
   /** A dog seen from the side, its head at one end: at the right, or mirrored. */
   const dog = (mirror: boolean) => {

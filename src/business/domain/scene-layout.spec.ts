@@ -270,6 +270,14 @@ describe("a Studio scene's stations", () => {
     expect(middle(step.mama)).toBeGreaterThan(bench.x + bench.w / 2);
   });
 
+  it('draws a gate and a goalpost as they are beside the people: wider than high, a gate lower than a grown-up', () => {
+    const [, , gw, gh] = drawPiece('gate').viewBox;
+    expect(gw / gh).toBeGreaterThan(1.1);
+    expect(gh).toBeLessThan(-figureFrame('adult')[1] * 0.9);
+    const [, , pw, ph] = drawPiece('goalpost').viewBox;
+    expect(pw / ph).toBeGreaterThan(1.5);
+  });
+
   it('stands a piece the stage draws among the people at their scale, or farther off at the back', () => {
     const piece = drawPiece('gate');
     const front = placeFeature({

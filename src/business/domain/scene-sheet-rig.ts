@@ -39,9 +39,11 @@ import type { GatedDrawing } from './scene-svg';
 /**
  * Rigs made by an older way of making them are made again. 4: the head
  * dips about its joint, the tail wags wide on cue, and the body sinks on
- * its legs, for the stage to act the words with.
+ * its legs, for the stage to act the words with. 5: what lived by its
+ * own motion, found by its name, moves by code: a flame flickers, wings
+ * flap, a glow pulses, a fin swishes, leaves rustle.
  */
-export const RIG_VERSION = 4;
+export const RIG_VERSION = 5;
 
 /** What the rig found and did: each part's joint, in the drawing's units, and each part moved in to meet the body. */
 export interface SheetRig {
@@ -98,7 +100,53 @@ export const SWINGS = {
   afraid: 40,
   afraidS: 1.4,
   surprised: 15,
+  /** What moved by its own motion: a flame's flicker (a share of its size), a wing's flap, a fin's swish and leaves' rustle (degrees), a glow's swell (a share). */
+  flicker: 0.12,
+  flickerS: 0.9,
+  flap: 22,
+  flapS: 0.7,
+  swish: 16,
+  swishS: 1.2,
+  rustle: 4,
+  rustleS: 1.1,
+  pulse: 0.06,
+  pulseS: 2.2,
 } as const;
+
+/** How a part that lived by its own motion moves, found by its name. */
+export type Mover = 'flicker' | 'flap' | 'pulse' | 'swish' | 'rustle';
+
+/** The words in a part's name that say how it moves: its id's, or its classes'. */
+const MOVER_WORDS: Record<string, Mover> = {
+  flame: 'flicker',
+  flames: 'flicker',
+  fire: 'flicker',
+  blaze: 'flicker',
+  wing: 'flap',
+  wings: 'flap',
+  glow: 'pulse',
+  halo: 'pulse',
+  aura: 'pulse',
+  shine: 'pulse',
+  sparkle: 'pulse',
+  fin: 'swish',
+  fins: 'swish',
+  leaf: 'rustle',
+  leaves: 'rustle',
+  foliage: 'rustle',
+  frond: 'rustle',
+  fronds: 'rustle',
+};
+
+/** How a part moves by its name, or null for one that does not. */
+export function moverOf(node: Pick<Element, 'attribs'>): Mover | null {
+  const names = [node.attribs.id ?? '', node.attribs.class ?? '']
+    .join(' ')
+    .toLowerCase()
+    .split(/[^a-z]+/);
+  for (const word of names) if (MOVER_WORDS[word]) return MOVER_WORDS[word];
+  return null;
+}
 
 const SMIL = new Set(['animate', 'animatetransform', 'animatemotion', 'set']);
 
@@ -220,7 +268,9 @@ export function stillSheet(root: Element): string[] {
     if (
       name === 'g' &&
       !node.attribs.id &&
-      /\brig-(?:breathe|tail|ear|head|legs)\b/.test(node.attribs.class ?? '')
+      /\brig-(?:breathe|tail|ear|head|legs|flicker|flap|pulse|swish|rustle)\b/.test(
+        node.attribs.class ?? '',
+      )
     ) {
       unwrap(node);
       removed.add('an old rig');
@@ -246,9 +296,11 @@ export function stillSheet(root: Element): string[] {
 
 /** A part of the figure measured against the rest. */
 interface Limb {
-  /** Its name in the rig: head, legs, arms, tail, ears, or an ear's own id. */
+  /** Its name in the rig: head, legs, arms, tail, ears, or an ear's own id; or a part that moves by its name, by its own. */
   name: string;
-  kind: 'head' | 'legs' | 'arms' | 'tail' | 'ear' | 'ears';
+  kind: 'head' | 'legs' | 'arms' | 'tail' | 'ear' | 'ears' | 'mover';
+  /** How a part found by its name moves. */
+  motion?: Mover;
   node: Element;
   /** What moves it: the part, or the rig's group round it once it is moved in. */
   outer: Element;
@@ -426,6 +478,30 @@ function figureOf(
         )
         .forEach((ear, i) => add(ear.attribs.id || `ear-${i + 1}`, 'ear', ear));
   }
+  // Parts that lived by their own motion, by their names (a flame, a wing,
+  // a glow): the outermost of each, never a part or a face named above.
+  const named = [...walk(root)].filter(
+    (node) =>
+      node !== root &&
+      moverOf(node) &&
+      hasInk(node) &&
+      !limbs.some((limb) => holds(node, limb.node) || limb.node === node) &&
+      !faces.some((face) => holds(face, node) || holds(node, face)),
+  );
+  named
+    .filter(
+      (node) => !named.some((other) => other !== node && holds(other, node)),
+    )
+    .forEach((node, i) => {
+      const motion = moverOf(node)!;
+      limbs.push({
+        name: node.attribs.id || `${motion}-${i + 1}`,
+        kind: 'mover',
+        motion,
+        node,
+        outer: outerOf(node),
+      });
+    });
   return { body: part('body'), head, faces, limbs };
 }
 
@@ -437,6 +513,14 @@ function referenceOf(
   limb: Limb,
   figure: Figure,
 ): { keep: Element[] | null; drop: Element[] } | null {
+  // A part that moves by its name, against what it is on: the head, when
+  // it is drawn in it (a flame for hair); else all the rest of the figure.
+  if (limb.kind === 'mover')
+    return figure.head &&
+      figure.head !== limb.node &&
+      holds(figure.head, limb.node)
+      ? { keep: [figure.head], drop: [...figure.faces, limb.node] }
+      : { keep: null, drop: [...figure.faces, limb.node] };
   if (limb.kind === 'ear' || limb.kind === 'ears')
     return figure.head
       ? {
@@ -932,6 +1016,51 @@ export function rigCss(
   ].join('');
 }
 
+/**
+ * The CSS for what moves by its name, each kind as far as it was proved:
+ * a flame stretching and squashing about its foot, wings beating (the
+ * right one mirrored), a fin swishing, leaves rustling in small uneven
+ * shakes, a glow swelling and dimming. Each on the still frame as drawn.
+ */
+export function moverCss(moving: ReadonlyMap<Mover, number>): string {
+  const run = (name: Mover, s: number) =>
+    `.rig-${name}{transform-box:view-box;animation:rig-${name} ${s}s ease-in-out ${restDelay(s)}s infinite}`;
+  const out: string[] = [];
+  const flicker = moving.get('flicker');
+  if (flicker)
+    out.push(
+      run('flicker', SWINGS.flickerS),
+      `@keyframes rig-flicker{0%,100%{transform:scale(1,1)}30%{transform:scale(${r4(1 + flicker * 0.4)},${r4(1 - flicker)})}65%{transform:scale(${r4(1 - flicker * 0.5)},${r4(1 + flicker)})}}`,
+    );
+  const flap = moving.get('flap');
+  if (flap)
+    out.push(
+      run('flap', SWINGS.flapS),
+      '.rig-flap-r{animation-name:rig-flap-r}',
+      swingFrames('rig-flap', -flap, flap),
+      swingFrames('rig-flap-r', flap, -flap),
+    );
+  const swish = moving.get('swish');
+  if (swish)
+    out.push(
+      run('swish', SWINGS.swishS),
+      swingFrames('rig-swish', -swish, swish),
+    );
+  const rustle = moving.get('rustle');
+  if (rustle)
+    out.push(
+      run('rustle', SWINGS.rustleS),
+      `@keyframes rig-rustle{0%,100%{transform:rotate(0deg)}20%{transform:rotate(${r2(rustle)}deg)}40%{transform:rotate(${r2(-rustle * 0.6)}deg)}60%{transform:rotate(${r2(rustle * 0.5)}deg)}80%{transform:rotate(${r2(-rustle * 0.3)}deg)}}`,
+    );
+  const pulse = moving.get('pulse');
+  if (pulse !== undefined)
+    out.push(
+      run('pulse', SWINGS.pulseS),
+      `@keyframes rig-pulse{0%,100%{opacity:1;transform:scale(1)}50%{opacity:0.7;transform:scale(${r4(1 + pulse)})}}`,
+    );
+  return out.join('');
+}
+
 const centreOf = (box: InkBox): Point => [
   box.x + box.width / 2,
   box.y + box.height / 2,
@@ -959,8 +1088,14 @@ export async function rigSheet(
   const mended: SheetRig['mended'] = [];
   for (const limb of figure.limbs) {
     const one = measured.get(limb.name);
-    // Legs stand on the ground where the frame says: never moved up to the body.
-    if (!one?.box || limb.kind === 'legs' || joined(one.relation, viewBox))
+    // Legs stand on the ground where the frame says: never moved up to the
+    // body; and what moves by its name (a halo, a spark) may float.
+    if (
+      !one?.box ||
+      limb.kind === 'legs' ||
+      limb.kind === 'mover' ||
+      joined(one.relation, viewBox)
+    )
       continue;
     const move =
       one.relation.gap <= Math.max(one.box.width, one.box.height)
@@ -976,7 +1111,7 @@ export async function rigSheet(
     if (!one) continue;
     if (joined(one.relation, viewBox) && one.relation.joint)
       joints[limb.name] = one.relation.joint;
-    else
+    else if (limb.kind !== 'mover')
       notes.push(
         `${floatNote(limb.kind, one.relation.gap)} ${limb.kind === 'legs' ? 'They are left standing where they are drawn.' : 'It could not be moved in, so it is kept still.'}`,
       );
@@ -1094,13 +1229,63 @@ export async function rigSheet(
       },
     });
   }
+  // What moved by its own motion, about where it is held: a flame about
+  // its foot, a glow about its middle, a wing, a fin and leaves about where
+  // they join what they are on.
+  const movers = figure.limbs.flatMap((limb) => {
+    const one = measured.get(limb.name);
+    const motion = limb.motion;
+    if (limb.kind !== 'mover' || !motion || !one?.box) return [];
+    const box = one.box;
+    const at: Point | undefined =
+      motion === 'flicker'
+        ? [box.x + box.width / 2, box.y + box.height]
+        : motion === 'pulse'
+          ? centreOf(box)
+          : joints[limb.name];
+    const pivot = at && localPoint(root, limb.outer, at);
+    if (!at || !pivot) return [];
+    const [px, py] = pivot.map(r1);
+    const scaled = (sx: number, sy: number) =>
+      `translate(${px} ${py}) scale(${r4(sx)} ${r4(sy)}) translate(${-px} ${-py})`;
+    const moved = (amount: number) =>
+      new Map([
+        [
+          limb.outer,
+          motion === 'flicker'
+            ? scaled(1 - amount * 0.5, 1 + amount)
+            : motion === 'pulse'
+              ? scaled(1 + amount, 1 + amount)
+              : `rotate(${r2(amount)} ${px} ${py})`,
+        ],
+      ]);
+    // A wing on the right flaps the other way to one on the left.
+    const right =
+      one.restBox && at[0] > centreOf(one.restBox)[0] ? true : false;
+    return [
+      {
+        limb,
+        motion,
+        pivot: [px, py] as Point,
+        right,
+        swing: {
+          part: partOf(limb, figure),
+          ref: referenceOf(limb, figure)!,
+          moved,
+          amplitude: SWINGS[motion],
+          both: motion !== 'pulse',
+        } satisfies Swing,
+      },
+    ];
+  });
   const still = render(root, { xmlMode: true, selfClosingTags: true });
   const proved = await holdsTogether(
     root,
     viewBox,
-    swings.map((one) => one.swing),
+    [...swings.map((one) => one.swing), ...movers.map((one) => one.swing)],
     still,
   );
+  const moverAmplitudes = proved.amplitudes.slice(swings.length);
   const amplitude = (name: keyof Motion) => {
     const found = swings
       .map((one, i) => ({ name: one.name, amplitude: proved.amplitudes[i] }))
@@ -1252,13 +1437,33 @@ export async function rigSheet(
         class: k ? `rig-breathe rig-breathe-${k}` : 'rig-breathe',
       });
     }
-  const css = rigCss(motion, lifts, lows);
+  // What moves by its name: each of a kind moving as far as the least of
+  // them may; a glow that may not swell still brightens and dims.
+  const moving = new Map<Mover, number>();
+  movers.forEach((one, i) => {
+    const amplitude = Math.abs(moverAmplitudes[i] ?? 0);
+    if (!amplitude && one.motion !== 'pulse') return;
+    moving.set(
+      one.motion,
+      Math.min(moving.get(one.motion) ?? Infinity, amplitude),
+    );
+  });
+  for (const one of movers) {
+    if (!moving.has(one.motion)) continue;
+    wrap(outermost(one.limb.outer), {
+      class: `rig-${one.motion}${one.motion === 'flap' && one.right ? ' rig-flap-r' : ''}`,
+      style: `transform-origin:${one.pivot[0]}px ${one.pivot[1]}px`,
+    });
+  }
+  const css = rigCss(motion, lifts, lows) + moverCss(moving);
   const style = new Element('style', {});
   setText(style, css);
   style.parent = root;
   root.children.push(style);
   const svg = render(root, { xmlMode: true, selfClosingTags: true });
-  const moves = Boolean(motion.breathe || tailMoves || motion.ear);
+  const moves = Boolean(
+    motion.breathe || tailMoves || motion.ear || moving.size,
+  );
   return {
     sheet: {
       ...sheet,

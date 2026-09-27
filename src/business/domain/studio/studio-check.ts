@@ -1172,6 +1172,7 @@ export function mendSheet(
       pace: 'walk',
       seconds: walkSeconds(mine, spot, 'walk'),
       target: prop,
+      thing: prop,
       say: `${nameOf(who)} goes over to the ${prop}.`,
     });
     here.set(who, spot);
@@ -1411,10 +1412,11 @@ export function mendSheet(
             (one.do === 'open' || one.do === 'close') && one.target
               ? features.find((x) => x.id === featureIdOf(one.target!))
               : undefined;
-          if (!f || !one.who || !here.has(one.who) || f.spot === 'back')
-            continue;
+          if (!f || !one.who || !here.has(one.who)) continue;
+          // One at the back stands in the middle, far off: they go to it
+          // there, as the stage has them.
           const by = freeSpot(
-            f.spot,
+            f.spot === 'back' ? 'centre' : f.spot,
             new Set(
               [...here].filter(([id]) => id !== one.who).map(([, s]) => s),
             ),
@@ -1713,6 +1715,26 @@ export const withFound = (
   found: { features: readonly StudioFeature[]; things: readonly StudioThing[] },
 ): StudioBible =>
   withThings(withFeatures(bible, setId, found.features), found.things);
+
+/**
+ * A show's bible with every feature of its sets and thing of its own that
+ * its scenes' words name, as the writer would have added them: the scenes
+ * in order, each carrying on from how the one before left things. What a
+ * set is painted with and a scene is staged on; nothing is written.
+ */
+export function foundIn(
+  bible: StudioBible,
+  scenes: readonly { position: number; sheet: SceneSheet | null }[],
+): StudioBible {
+  let grown = bible;
+  for (const scene of [...scenes].sort((a, b) => a.position - b.position)) {
+    if (scene.sheet?.kind !== 'story') continue;
+    const before = endBefore(scenes, scene.position, grown);
+    const sheet = repairSheet(scene.sheet, grown, before);
+    grown = withFound(grown, sheet.set, mendSheet(sheet, grown, before));
+  }
+  return grown;
+}
 
 /**
  * A bible written again with every feature its sets had kept, and every

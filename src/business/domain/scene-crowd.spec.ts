@@ -7,6 +7,7 @@ import {
   MOST_DEPTH,
   MOST_DEPTH_INDOORS,
   cameraOf,
+  asideOf,
   clearOf,
   crowdHeads,
   depthOf,
@@ -22,7 +23,7 @@ import {
   type CrowdInput,
   type CrowdPlan,
 } from './scene-crowd';
-import { rigOf } from './scene-figure';
+import { extraFor, rigOf } from './scene-figure';
 import { conventionGround, topAt, type SetGround } from './scene-ground';
 
 const LAGOS = {
@@ -342,15 +343,130 @@ describe('a crowd seen through one camera', () => {
     const plan = planCrowd(market({ seen }));
     expect(plan.camera).toEqual(cameraOf(market()));
     const keep = keepOutsOf([close]);
+    // No head peeps out at the edge of the face close in: clear of it, or
+    // wholly behind the middle of it.
     for (const p of plan.people)
       expect(
         keep[0].faces.some((f) => {
           const head = headOf(p);
-          return (
-            head.x0 < f.x1 && f.x0 < head.x1 && head.y0 < f.y1 && f.y0 < head.y1
-          );
+          const meets =
+            head.x0 < f.x1 &&
+            f.x0 < head.x1 &&
+            head.y0 < f.y1 &&
+            f.y0 < head.y1;
+          const [dx, dy] = [(f.x1 - f.x0) * 0.15, (f.y1 - f.y0) * 0.15];
+          const behind =
+            head.x0 >= f.x0 + dx &&
+            head.x1 <= f.x1 - dx &&
+            head.y0 >= f.y0 + dy &&
+            head.y1 <= f.y1 - dy;
+          return meets && !behind;
         }),
       ).toBe(false);
+  });
+});
+
+describe('a crowd making way', () => {
+  const camera = { horizon: 596, feet: 820, unit: 2.357, eye: 576 };
+  const one = (x: number, r: number) => {
+    const feet = camera.horizon + r * (camera.feet - camera.horizon);
+    return {
+      spec: extraFor(null, 'way', Math.round(x)),
+      x,
+      feet,
+      sc: camera.unit * r,
+      row: 0,
+      cluster: 0,
+      detail: 1 as const,
+      view: 'front' as const,
+      flip: false,
+      turn: 0,
+      pose: 'standing' as const,
+      holding: null,
+      talks: false,
+      looks: false,
+      walk: 0,
+      haze: 0.2,
+    };
+  };
+  const plan = {
+    people: [one(800, 0.62), one(300, 0.14)],
+    camera,
+    haze: '#dddddd',
+    frame: [0, 0, 1600, 900] as [number, number, number, number],
+    middle: 800,
+  };
+  /** Someone walking from the left edge to the right across the front, from 1 s to 4 s. */
+  const across = {
+    from: 1000,
+    to: 4000,
+    x: [100, 1500] as [number, number],
+    feet: [820, 820] as [number, number],
+    w: 200,
+  };
+
+  it('steps aside for one going through where they stand, away from them, and back once passed', () => {
+    const [near, far] = asideOf(plan, [across], (p) => p);
+    expect(near).toHaveLength(1);
+    const [way] = near;
+    // Reached about half way across, from the left: aside to the right, a
+    // moment before, and back after.
+    expect(way.dx).toBeGreaterThan(0);
+    expect(way.lean).toBeGreaterThan(0);
+    expect(way.at).toBeGreaterThan(1500);
+    expect(way.at).toBeLessThan(2500);
+    expect(way.until).toBeGreaterThan(way.at + 400);
+    expect(way.until).toBeLessThan(4600);
+    // One far off, whom going across in front of is no going through: stays.
+    expect(far).toEqual([]);
+    // Drawn: their own track on the page's clock.
+    const svg = drawCrowd(plan, {
+      durationMs: 6000,
+      asides: [near, far],
+    });
+    expect(svg).toContain('@keyframes cr-by0{');
+    expect(svg).toContain('animation:cr-by0 var(--d) linear both');
+    expect(svg).not.toContain('cr-by1');
+  });
+
+  it('makes way for one coming out from the back, at their own depth', () => {
+    const [, far] = asideOf(
+      plan,
+      [{ ...across, x: [300, 300], feet: [620, 820] }],
+      (p) => p,
+    );
+    expect(far).toHaveLength(1);
+  });
+});
+
+describe('a head close in', () => {
+  it('may peep past someone’s shoulder, or be wholly behind their face, but never peep out at its edge', () => {
+    const close = [
+      {
+        share: 0.2,
+        close: true,
+        cast: [
+          {
+            x: 600,
+            y: 200,
+            w: 400,
+            h: 700,
+            head: [800, 330] as [number, number],
+            rig: false,
+            stands: null,
+            lead: true,
+            child: true,
+          },
+        ],
+      },
+    ];
+    const keep = keepOutsOf(close);
+    // Past the shoulder, low and to the side: seen, not in the face.
+    expect(clearOf({ x0: 560, x1: 620, y0: 520, y1: 580 }, keep)).toBe(true);
+    // Peeping out at the face's edge: never.
+    expect(clearOf({ x0: 860, x1: 920, y0: 300, y1: 360 }, keep)).toBe(false);
+    // Wholly behind the middle of the face: hidden there, as anywhere else.
+    expect(clearOf({ x0: 780, x1: 820, y0: 310, y1: 350 }, keep)).toBe(true);
   });
 });
 

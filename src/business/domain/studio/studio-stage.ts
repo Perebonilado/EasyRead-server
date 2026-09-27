@@ -80,6 +80,8 @@ export const QUIET_MOST_S = 6;
 const REACTION_S = 0.6;
 /** What comes after someone else's doing starts this long after its moment. */
 const AFTER_MOMENT_S = 0.15;
+/** A quiet's first moment begins this long after the last word before it (the stage's AFTER_WORDS_MS). */
+const QUIET_STARTS_S = 0.15;
 /** How a line said with a feeling lands on the one it is said to. */
 const LANDS: Partial<Record<FigureFace, FigureFace>> = {
   angry: 'afraid',
@@ -357,6 +359,45 @@ export function timeQuiet(
   items: readonly QuietItem[],
   most = QUIET_MOST_S,
 ): { starts: number[]; lengths: number[]; total: number; asked: number } {
+  const asked = inTurn(
+    items,
+    items.map((item) => item.s),
+  );
+  if (asked.end <= most)
+    return {
+      starts: asked.starts.map(round),
+      lengths: items.map((item) => item.s),
+      total: round(asked.end),
+      asked: round(asked.end),
+    };
+  // Quickened as little as fits, each in turn after the one it waits for
+  // as quickened, from the moment the quiet's first begins: none runs on
+  // past the quiet where they may all fit. The quiet itself is as long as
+  // a quiet may be.
+  const room = most - QUIET_STARTS_S;
+  let fit = items.map((item) => item.leastS);
+  let [low, high] = [0, 1];
+  for (let n = 0; n < 14; n += 1) {
+    const share = (low + high) / 2;
+    const lengths = items.map((item) => Math.max(item.leastS, item.s * share));
+    if (inTurn(items, lengths).end <= room) {
+      low = share;
+      fit = lengths;
+    } else high = share;
+  }
+  return {
+    starts: inTurn(items, fit).starts.map(round),
+    lengths: fit.map(round),
+    total: most,
+    asked: round(asked.end),
+  };
+}
+
+/** When each thing in a quiet starts, as long as each is given, one after another as timeQuiet has them; and when all are done. */
+function inTurn(
+  items: readonly QuietItem[],
+  lengths: readonly number[],
+): { starts: number[]; end: number } {
   const starts: number[] = [];
   const endOf = new Map<string, number>();
   let handled = 0;
@@ -366,40 +407,21 @@ export function timeQuiet(
     let at = 0;
     if (prev) {
       const prevAt = starts[i - 1];
+      const prevS = lengths[i - 1];
       if (prev.pause || item.pause) at = allDone;
-      else if (item.handles && prev.handles) at = prevAt + prev.s;
-      else if (item.who && item.who === prev.who) at = prevAt + prev.s;
-      else at = prevAt + prev.s * prev.keyAt + AFTER_MOMENT_S;
+      else if (item.handles && prev.handles) at = prevAt + prevS;
+      else if (item.who && item.who === prev.who) at = prevAt + prevS;
+      else at = prevAt + prevS * prev.keyAt + AFTER_MOMENT_S;
     }
     if (item.who) at = Math.max(at, endOf.get(item.who) ?? 0);
     if (item.handles) at = Math.max(at, handled);
     starts.push(at);
-    const end = at + item.s;
+    const end = at + lengths[i];
     if (item.who) endOf.set(item.who, end);
     if (item.handles) handled = end;
     allDone = Math.max(allDone, end);
   });
-  const asked = allDone;
-  if (asked <= most)
-    return {
-      starts: starts.map(round),
-      lengths: items.map((item) => item.s),
-      total: round(asked),
-      asked: round(asked),
-    };
-  const fit = most / asked;
-  const lengths = items.map((item) => Math.max(item.leastS, item.s * fit));
-  const quick = starts.map((at) => at * fit);
-  const total = Math.min(
-    most,
-    Math.max(...quick.map((at, k) => at + lengths[k])),
-  );
-  return {
-    starts: quick.map(round),
-    lengths: lengths.map(round),
-    total: round(total),
-    asked: round(asked),
-  };
+  return { starts, end: allDone };
 }
 
 /** Each sheet beat that is not spoken, grouped by the spoken beat before it (-1 for before the first). */

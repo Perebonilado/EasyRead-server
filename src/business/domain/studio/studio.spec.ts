@@ -16,6 +16,7 @@ import {
   checkSheet,
   distinctVoices,
   endStateOf,
+  foundIn,
   errorsIn,
   mendSheet,
   repairExplainer,
@@ -852,6 +853,39 @@ describe('held things carry on', () => {
   });
 });
 
+describe('a show as its scenes find it', () => {
+  it('has every feature the words name on its set, the scenes in order, and writes nothing', () => {
+    const bare = {
+      ...mayaBible,
+      sets: mayaBible.sets.map((set) => ({ ...set, features: undefined })),
+    };
+    const rows = [1, 2, 3, 4, 5].map((n) => ({
+      position: n - 1,
+      sheet: mayaSheet(n),
+    }));
+    const found = foundIn(bare, rows);
+    const ids = (set: string) =>
+      found.sets.find((s) => s.id === set)?.features?.map((f) => f.id) ?? [];
+    expect(ids('yard')).toContain('gate');
+    expect(ids('field')).toContain('goalpost');
+    expect(ids('bus')).toContain('bench');
+    expect(bare.sets.every((set) => !set.features)).toBe(true);
+    // Found again, nothing more.
+    expect(foundIn(found, rows)).toEqual(found);
+  });
+});
+
+describe('a place on the move', () => {
+  it('rattles a danfo on the road and slides the road past; a yard stays put', () => {
+    const scene = (n: number) =>
+      voiced(stageStory(repairSheet(mayaSheet(n), mayaBible), mayaBible), [
+        'pip',
+      ]).scene;
+    expect(scene(3).setting?.moving).toBe(true);
+    expect(scene(1).setting?.moving).toBeUndefined();
+  });
+});
+
 describe('things in order', () => {
   const staged = () => {
     const s5 = repairSheet(mayaSheet(5), mayaBible);
@@ -1483,7 +1517,7 @@ describe("the set's features, and everyone at a station of their own", () => {
     const gate = scene.setting!.features!.find((f) => f.id === 'gate')!;
     // Open a crack as it opens, shut at the end.
     expect(featureSvgAt(scene, gate, 0)).toContain(
-      '<g id="leaf" transform="translate(-58 -86) scale(0.18 1)',
+      '<g id="leaf" transform="translate(-76 -70) scale(0.18 1)',
     );
     expect(featureSvgAt(scene, gate, scene.durationMs)).toBe(gate.svg);
     const png = Buffer.from('png');
@@ -1928,6 +1962,42 @@ describe('where the words put people and things', () => {
     expect(script.featureStates).toEqual([
       expect.objectContaining({ feature: 'gate', state: 'shut' }),
     ]);
+  });
+
+  it('has one who shut a gate at the back go back over to the cup they left there before taking it up, as the stage has them', () => {
+    const yard = withSet('yard', [{ id: 'gate', kind: 'gate', spot: 'back' }]);
+    const { sheet, script } = staged(
+      storySheetOf({
+        ...(maya('s5-sheet.json') as object),
+        beats: [
+          {
+            kind: 'narration',
+            say: 'Back at the compound, Mama shuts the gate.',
+          },
+          { kind: 'line', who: 'mama', say: 'Home safe.' },
+          {
+            kind: 'business',
+            who: 'mama',
+            do: 'take',
+            prop: 'cup',
+            say: 'Mama picks up the cup.',
+          },
+        ],
+      }),
+      yard,
+    );
+    const take = sheet.beats.findIndex((b) => b.do === 'take');
+    expect(sheet.beats[take - 1]).toMatchObject({
+      who: 'mama',
+      do: 'walk',
+      target: 'cup',
+    });
+    // The stage has her by the gate, then back where the cup lies.
+    const at = script.steps
+      .filter((s) => s.stage?.at?.mama)
+      .map((s) => s.stage!.at!.mama);
+    expect(at[1]).toMatch(/^by:gate:/);
+    expect(at[at.length - 1]).toBe('left');
   });
 
   it('brings one who comes in after someone in the way they came, and into a vessel by its door', () => {

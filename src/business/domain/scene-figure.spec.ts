@@ -708,7 +708,7 @@ describe('the kit’s own people, unchanged by the crowd', () => {
 });
 
 describe('someone in a crowd, drawn by the kit', () => {
-  const { drawExtra, extraFor, wardrobeOf } =
+  const { drawExtra, extraFor, readable, wardrobeOf } =
     jest.requireActual<typeof import('./scene-figure')>('./scene-figure');
   const spec = as({
     age: 'adult',
@@ -795,6 +795,37 @@ describe('someone in a crowd, drawn by the kit', () => {
     }
     expect(new Set(people.map((p) => p.age)).size).toBeGreaterThanOrEqual(3);
     expect(wardrobeOf(null).tops).not.toContain('agbada');
+  });
+
+  it('never has a dark head run into dark clothes or a dark hat, keeping skin tones as they are', () => {
+    const lagos = {
+      era: 'today',
+      region: 'Lagos, Nigeria',
+      culture: 'Yoruba',
+      landscape: '',
+      homes: '',
+    };
+    const people = Array.from({ length: 200 }, (_, i) =>
+      extraFor(lagos, 'market', i),
+    );
+    const dark = new Set(['navy', 'black']);
+    for (const one of people)
+      if (one.skin >= 9) {
+        expect(dark.has(one.topColour)).toBe(false);
+        if (one.headwear !== 'none')
+          expect(dark.has(one.accentColour)).toBe(false);
+      }
+    // Skin tones kept varied and true: the world's darkest are there.
+    expect(people.some((p) => p.skin === 10)).toBe(true);
+    // Only a dark head is dressed again: lighter skin keeps its navy.
+    const navy = as({ age: 'adult', topColour: 'navy', skin: 10 });
+    expect(readable(navy, ['navy', 'yellow'], 's').topColour).toBe('yellow');
+    expect(
+      readable({ ...navy, skin: 3 }, ['navy', 'yellow'], 's').topColour,
+    ).toBe('navy');
+    // Dots for eyes on dark skin are whites with a dot, so they show.
+    const middle = drawExtra(navy, { detail: 1, id: 'cr5' }).upper;
+    expect(middle).toContain('fill="#f5f1e8"');
   });
 });
 

@@ -1579,10 +1579,23 @@ export function setThing(
   // A show's own (a bicycle, a signpost) the artist draws apart, once for
   // the show, and the stage stands among the people: left out too.
   const features = place.features ?? [];
+  // One the stage draws is left out, unless the place's look names it
+  // (a lopsided goalpost): then the painter paints it anyway, so it is a
+  // group of its own, which the stage finds and stands its own in for.
+  const named = (f: (typeof features)[number]) =>
+    new RegExp(
+      `\\b${f.name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`,
+      'i',
+    ).test(place.look);
   const stages = (f: (typeof features)[number]) =>
-    f.kind === DRAWN || ACTED_PIECES.includes(f.kind);
+    f.kind === DRAWN || (ACTED_PIECES.includes(f.kind) && !named(f));
   const left = features.filter(stages);
   const drawn = features.filter((f) => !stages(f));
+  // A Studio room or vessel is painted from inside: its floor and walls,
+  // a vessel's seats and windows; never the street outside it.
+  const inside =
+    place.features !== undefined &&
+    (place.kind === 'indoor' || place.kind === 'vessel');
   const where = (spot: string) =>
     ({
       left: 'at the left',
@@ -1598,11 +1611,23 @@ export function setThing(
     brief: [
       `${place.name}, a place in "${bookTitle}"${place.look ? `: ${place.look}` : ''}.`,
       worldText(world),
-      place.kind === 'indoor'
-        ? 'Seen from inside, at eye level, the floor running across the lower part of the picture: the floor meets the back wall about 68 to 72% of the way down.'
-        : 'Seen from where a viewer stands, at eye level, the ground running across the lower part of the picture: the horizon at eye level, about 64% of the way down, and the far edge of the open ground on it or just below it.',
+      inside && place.kind === 'vessel'
+        ? `The inside of ${place.name}, seen from inside it at eye level, as someone riding in it sees it: its floor across the lower part of the picture, its roof or ceiling across the top if it has one, its seats or benches, and its far side with what is outside seen beyond it (through its windows if it has them, the road or the houses going by; over its side if it is open, the water), and its door or opening where it has one. Never ${place.name} seen from the street or from outside. The floor meets its far side about 68 to 72% of the way down.`
+        : inside
+          ? 'A room seen from inside, at eye level: its floor across the lower part of the picture, its back wall with what is on it, and its side walls meeting it at the corners. A room with a floor and walls, never a street or a place out of doors. The floor meets the back wall about 68 to 72% of the way down.'
+          : place.kind === 'indoor'
+            ? 'Seen from inside, at eye level, the floor running across the lower part of the picture: the floor meets the back wall about 68 to 72% of the way down.'
+            : 'Seen from where a viewer stands, at eye level, the ground running across the lower part of the picture: the horizon at eye level, about 64% of the way down, and the far edge of the open ground on it or just below it.',
       SET_STYLE,
-      `Draw the open ${place.kind === 'indoor' ? 'floor' : 'ground'} people could stand on as its own group with id "ground", with everything that stands on it (stalls, walls, trees, furniture) drawn after it, over it.`,
+      // A Studio set: no stray strokes (a line on the ground, a string to
+      // nowhere), which read as marks on the film.
+      place.features !== undefined
+        ? 'Every line is the outline of a shape: no loose strokes, and no lines drawn on the ground or across the picture on their own.'
+        : '',
+      `Draw the open ${place.kind === 'indoor' || inside ? 'floor' : 'ground'} people could stand on as its own group with id "ground", with everything that stands on it (stalls, walls, trees, furniture) drawn after it, over it.`,
+      inside && place.kind === 'vessel'
+        ? 'Draw what is seen outside it (the road, the trees and houses going by) as its own group with id "outside", first, behind its walls and windows, across the whole width of the picture, so it can slide past as it goes; and draw its windows and door as frames with nothing filled inside them, no glass, so what is outside shows through.'
+        : '',
       front
         ? `Draw ${front} as its own group with id "front": across the bottom of the picture, from the bottom edge up to about a fifth of its height, where it will stand in front of the people's legs so they are in the ${place.kind === 'vessel' ? place.name : 'place'}, behind it. Everything else of the place is the scene behind.`
         : '',
@@ -1627,6 +1652,9 @@ export function setThing(
       // a crowd stands in front of what has no group, and the stage draws
       // a feature the painting has not got.
       { name: 'ground', label: false, optional: true },
+      ...(inside && place.kind === 'vessel'
+        ? [{ name: 'outside', label: false, optional: true as const }]
+        : []),
       ...(props
         ? [{ name: 'props', label: false, optional: true as const }]
         : []),
@@ -1687,6 +1715,10 @@ const OPTIONAL_PARTS: Record<'animal' | 'creature', string> = {
   creature:
     'Draw a tail in <g id="tail"> only if it has one; leave the group out if not.',
 };
+
+/** Parts that move by themselves, named so that code moves them (scene-sheet-rig's movers). */
+const MOVING_PARTS =
+  'If it has wings, fins, a flame, a glow or leaves, draw each as a group of its own, still, joined to what it grows from, its id saying what it is ("wing-left", "wing-right", "fin", "flame", "glow", "leaves"): the stage moves them.';
 
 const SIZES: Record<StorySize, string> = {
   small: 'It is small: beside a grown-up it would come up to their knee.',
@@ -1805,6 +1837,7 @@ export function sheetThing(
       character.size ? SIZES[character.size] : '',
       'The face inside the head has no eyes, brows or mouth: each expression group draws the eyes, brows and mouth, all in the same place on the face.',
       OPTIONAL_PARTS[kind],
+      MOVING_PARTS,
     ]
       .filter(Boolean)
       .join(' '),

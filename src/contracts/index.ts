@@ -1113,6 +1113,8 @@ export interface SceneStepDto {
   >;
   /** Who goes at a run at this step, on, off or across: faster than a walk. */
   pace?: Record<string, 'run'>;
+  /** Who walks briskly across at this step, and how much quicker than a walk (up to a run's): hurried to be there in time for what they do next. */
+  hurry?: Record<string, number>;
   /** Who stands behind a feature at this step, by the feature: it is drawn over them. */
   behind?: Record<string, string>;
   /** The thing the camera leans toward. */
@@ -1198,6 +1200,8 @@ export interface SceneSettingDto {
   };
   /** A Studio set's fixed things its story acts on: a gate, a bench, a goalpost, a danfo. */
   features?: SceneFeatureDto[];
+  /** The place its people ride in is on the move (a danfo on the road): the stage rattles it gently, and what is outside it slides past. */
+  moving?: true;
   /** When a feature opens or shuts: the moment, which, and how it is left. */
   featureStates?: [number, string, 'open' | 'shut'][];
 }

@@ -472,6 +472,86 @@ describe("a story's continuity", () => {
     );
     expect(field.brief).toContain('Leave out the bicycle (at the left)');
     expect(field.parts.map((p) => p.name)).not.toContain('f-bicycle');
+    // One the stage draws that the look names is painted anyway: a group
+    // of its own, found and stood in for, never painted twice.
+    const pitch = setThing(
+      {
+        id: 'field',
+        name: 'The open field',
+        aliases: [],
+        look: 'open grass, a lopsided goalpost, palm trees beyond',
+        firstPage: 1,
+        sound: null,
+        features: [
+          { id: 'goalpost', name: 'goalpost', kind: 'goalpost', spot: 'back' },
+        ],
+      },
+      'Maya',
+    );
+    expect(pitch.brief).not.toContain('Leave out the goalpost');
+    expect(pitch.brief).toContain(
+      'Draw the goalpost, at the back, as its own group with id "f-goalpost"',
+    );
+  });
+
+  it("paints a Studio room or vessel from inside: a danfo's seats and windows, the road going by, never the street", () => {
+    const danfo = setThing(
+      {
+        id: 'bus',
+        name: 'The Danfo',
+        aliases: [],
+        look: 'the inside of a yellow danfo minibus',
+        firstPage: 1,
+        sound: 'machine',
+        kind: 'vessel',
+        stand: 'in',
+        front: 'seat back',
+        features: [],
+      },
+      'Maya',
+    );
+    expect(danfo.brief).toContain('seen from inside it at eye level');
+    expect(danfo.brief).toContain('its seats or benches');
+    expect(danfo.brief).toContain('Never The Danfo seen from the street');
+    expect(danfo.brief).not.toContain('the horizon at eye level');
+    expect(danfo.brief).toContain('id "outside"');
+    expect(danfo.parts.map((p) => p.name)).toEqual([
+      'front',
+      'ground',
+      'outside',
+    ]);
+    const room = setThing(
+      {
+        id: 'room',
+        name: "Maya's room",
+        aliases: [],
+        look: 'a small bedroom',
+        firstPage: 1,
+        sound: null,
+        kind: 'indoor',
+        features: [],
+      },
+      'Maya',
+    );
+    expect(room.brief).toContain('A room with a floor and walls');
+    expect(room.brief).not.toContain('id "outside"');
+    // A book's boat is painted as it always was.
+    const boat = setThing(
+      {
+        id: 'boat',
+        name: 'The boat',
+        aliases: [],
+        look: 'a fishing boat',
+        firstPage: 1,
+        sound: 'water',
+        kind: 'vessel',
+        stand: 'in',
+        front: "the boat's side",
+      },
+      'The Lantern',
+    );
+    expect(boat.brief).toContain('the horizon at eye level');
+    expect(boat.brief).not.toContain('seen from inside it');
   });
 
   it('keeps what each character is and how a person looks from where the book first meets them', () => {

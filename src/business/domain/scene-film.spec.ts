@@ -7,6 +7,7 @@ import {
   PARALLAX,
   againstScenery,
   apart,
+  hurried,
   settledOf,
   viewOf,
   withoutJumps,
@@ -140,6 +141,60 @@ describe("a film's scene, settled", () => {
       steps: [talk().steps[0], step(6200, [])],
     });
     expect(settledOf(still)).toBe(6200 + 380);
+  });
+});
+
+describe('a walk in time for what comes next', () => {
+  /** Mama walks back to the cup at 1 s, from 1200 to 100 across: then takes it up, as `take` has it. */
+  const fetch = (
+    take: number,
+    walks = true,
+  ): Parameters<typeof hurried>[0] => ({
+    steps: [step(0, ['mama']), step(1000, ['mama'])],
+    acting: { mama: walks ? { walks } : {} },
+    props: [
+      {
+        id: 'cup',
+        does: [[take, 'mama', 'take']],
+      } as never,
+    ],
+    stagings: {
+      box: { w: 1200, h: 900, places: [{}, {}] },
+      wide: {
+        w: W,
+        h: H,
+        places: [{ mama: at(1200) }, { mama: at(100) }],
+      },
+    },
+  });
+
+  it('leaves a walk with the time it takes as it is', () => {
+    const steps = hurried(fetch(6000));
+    expect(steps[1]).toEqual(step(1000, ['mama']));
+  });
+
+  it('hurries one who would take the cup before reaching it, briskly or at a run', () => {
+    // The walk takes 2.75 s; the hand goes to the cup at 2.9 s.
+    const brisk = hurried(fetch(3400))[1];
+    expect(brisk.pace).toBeUndefined();
+    expect(brisk.hurry?.mama).toBeGreaterThan(1);
+    expect(brisk.hurry?.mama).toBeLessThanOrEqual(1.7);
+    // Given no more than a second, it is a run.
+    expect(hurried(fetch(1900))[1].pace).toEqual({ mama: 'run' });
+    // One who does not walk (a figure that pops) is left alone.
+    expect(hurried(fetch(1900, false))[1]).toEqual(step(1000, ['mama']));
+  });
+
+  it('settles a hurried walk as sooner done', () => {
+    const scene = {
+      ...fetch(3400),
+      props: [],
+      beats: [line(0, 500)],
+      durationMs: 1000,
+      effects: [],
+    };
+    const steps = hurried(fetch(3400));
+    expect(settledOf({ ...scene, steps })).toBeLessThan(settledOf(scene));
   });
 });
 

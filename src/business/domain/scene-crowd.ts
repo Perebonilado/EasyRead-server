@@ -284,6 +284,12 @@ const meets = (a: Box, b: Box) =>
   a.x0 < b.x1 && b.x0 < a.x1 && a.y0 < b.y1 && b.y0 < a.y1;
 const inside = (a: Box, b: Box) =>
   a.x0 >= b.x0 && a.x1 <= b.x1 && a.y0 >= b.y0 && a.y1 <= b.y1;
+/** The middle of a face's keep-out, well inside the head it is about: what is there is behind the head. */
+const coreOf = (b: Box): Box => {
+  const dx = (b.x1 - b.x0) * 0.15;
+  const dy = (b.y1 - b.y0) * 0.15;
+  return { x0: b.x0 + dx, x1: b.x1 - dx, y0: b.y0 + dy, y1: b.y1 - dy };
+};
 
 /** Where the story's people are, at each moment, for the crowd to keep clear of: their faces, and their shapes. */
 interface KeepOut {
@@ -349,7 +355,9 @@ function headBox(spec: FigureSpec, x: number, feet: number, sc: number): Box {
  * Whether a head is clear of the story's people: over a face for no more
  * than a fifth of the time, hidden behind someone no more than half of
  * it, and cut by someone's outline no more than a quarter. Close in,
- * where a face fills the picture, never beside it or peeping past it.
+ * where a face fills the picture, never peeping out at a face's edge;
+ * one wholly behind the face, or past a shoulder clear of it, is as
+ * anywhere else.
  */
 export function clearOf(head: Box, keep: KeepOut[]): boolean {
   let face = 0;
@@ -359,7 +367,14 @@ export function clearOf(head: Box, keep: KeepOut[]): boolean {
     const over = one.faces.some((f) => meets(head, f));
     const behind = one.shapes.some((s) => inside(head, s));
     const peeps = !behind && one.shapes.some((s) => meets(head, s));
-    if (one.close && (over || peeps)) return false;
+    // Close in, a head peeping out at the edge of a face is never; one
+    // wholly behind it is hidden there, and only counts as hidden.
+    if (one.close) {
+      if (over && !one.faces.some((f) => inside(head, coreOf(f)))) return false;
+      if (behind || over) hidden += one.share;
+      else if (peeps) cut += one.share;
+      continue;
+    }
     if (over) face += one.share;
     if (behind) hidden += one.share;
     else if (peeps) cut += one.share;
@@ -442,15 +457,24 @@ export function planCrowd(input: CrowdInput): CrowdPlan {
     if (x - BODY * sc * 0.5 < vx || x + BODY * sc * 0.5 > vx + vw) return false;
     if (behind ? !standsBehind(spec, x, feet, sc) : feet < groundUnder(x, sc))
       return false;
-    // Drawn over the crowd, a piece of the stage's hides whoever it meets.
+    // Drawn over the crowd, a piece of the stage's hides whoever it meets:
+    // someone may stand behind it (a bus, a crate), their head over it,
+    // but never in front of it, nor with their head behind it.
+    const head = headBox(spec, x, feet, sc);
     const body = {
       x0: x - BODY * sc * 0.4,
       x1: x + BODY * sc * 0.4,
-      y0: feet + rigOf(spec.age, spec.build).top * sc,
+      y0: head.y0,
       y1: feet,
     };
-    if ((input.pieces ?? []).some((piece) => meets(body, piece))) return false;
-    return clearOf(headBox(spec, x, feet, sc), keep);
+    if (
+      (input.pieces ?? []).some(
+        (piece) =>
+          meets(body, piece) && (feet >= piece.y1 - 2 || meets(head, piece)),
+      )
+    )
+      return false;
+    return clearOf(head, keep);
   };
 
   const people: Extra[] = [];
@@ -680,6 +704,110 @@ export function depthOf(camera: CrowdCamera, feet: number): number {
   return (feet - camera.horizon) / (camera.feet - camera.horizon);
 }
 
+// ── Making way ──────────────────────────────────────────────────────────
+
+/** Someone of the story's going by: when, their middle and their feet from where to where, and how wide they are, in the set's units. */
+export interface GoingBy {
+  from: number;
+  to: number;
+  x: [number, number];
+  feet: [number, number];
+  w: number;
+}
+
+/** One of the crowd making way: from when, until when, how far aside and back (in the kit's units), and how far they lean. */
+export interface Aside {
+  at: number;
+  until: number;
+  dx: number;
+  dy: number;
+  lean: number;
+}
+
+/** How near in depth someone going by comes before one of the crowd makes way: a share of the depth from the horizon to the story's people. */
+const ASIDE_DEPTH = 0.16;
+/** Those this near make way for anyone going across in front of them too. */
+const ASIDE_NEAR = 0.3;
+/** Ahead of being reached, and after being passed, in ms; and how far aside, in a body's widths. */
+const ASIDE_BEFORE_MS = 450;
+const ASIDE_AFTER_MS = 500;
+const ASIDE_STEP = 0.3;
+
+/**
+ * Who of the crowd makes way, and when: one whose spot someone of the
+ * story's walks or runs through (near them in depth, or near enough that
+ * going across in front of them is going through them) steps a little
+ * aside and back, away from where they come from, leaning away, and
+ * stands where they were once they have passed. By each one in the plan.
+ */
+export function asideOf(
+  plan: CrowdPlan,
+  passes: readonly GoingBy[],
+  ease: (p: number) => number,
+): Aside[][] {
+  return plan.people.map((p) => {
+    const mine = depthOf(plan.camera, p.feet);
+    const reach = BODY * p.sc * 0.35;
+    const out: Aside[] = [];
+    for (const one of passes) {
+      if (one.to <= one.from) continue;
+      let first: { t: number; x: number } | null = null;
+      let last = 0;
+      for (let t = one.from; t <= one.to + 1; t += 40) {
+        const k = ease(Math.min(1, (t - one.from) / (one.to - one.from)));
+        const x = one.x[0] + (one.x[1] - one.x[0]) * k;
+        const feet = one.feet[0] + (one.feet[1] - one.feet[0]) * k;
+        const near =
+          Math.abs(depthOf(plan.camera, feet) - mine) < ASIDE_DEPTH ||
+          (mine >= ASIDE_NEAR && feet > p.feet);
+        if (!near || Math.abs(x - p.x) >= one.w / 2 + reach) continue;
+        first ??= { t, x };
+        last = t;
+      }
+      if (!first) continue;
+      // Away from where they come from; a little back, and leaning away.
+      const away = p.x >= first.x ? 1 : -1;
+      out.push({
+        at: Math.max(0, first.t - ASIDE_BEFORE_MS),
+        until: last + ASIDE_AFTER_MS,
+        dx: r1(away * BODY * ASIDE_STEP),
+        dy: -6,
+        lean: away * 4,
+      });
+    }
+    // One after another, never two at once: a second joins the first.
+    return out
+      .sort((a, b) => a.at - b.at)
+      .reduce<Aside[]>((all, one) => {
+        const before = all[all.length - 1];
+        if (before && one.at <= before.until)
+          before.until = Math.max(before.until, one.until);
+        else all.push(one);
+        return all;
+      }, []);
+  });
+}
+
+/** One of the crowd's making way as keyframes over the page's whole length: `n` their own. */
+function asideFrames(
+  n: number,
+  asides: readonly Aside[],
+  total: number,
+): string {
+  const frames = ['0%{transform:none}'];
+  for (const one of asides) {
+    const move = `transform:translate(${one.dx}px,${one.dy}px) rotate(${one.lean}deg)`;
+    const settle = Math.min(one.until - 1, one.at + 350);
+    const back = Math.max(settle + 1, one.until - 350);
+    frames.push(
+      `${pc(one.at, total)}{transform:none}`,
+      `${pc(settle, total)},${pc(back, total)}{${move}}`,
+      `${pc(one.until, total)}{transform:none}`,
+    );
+  }
+  return `@keyframes cr-by${n}{${[...frames, '100%{transform:none}'].join('')}}`;
+}
+
 // ── Colour ────────────────────────────────────────────────────────────────
 
 const channels = (hex: string) => {
@@ -882,7 +1010,7 @@ function wanderFrames(
 const IDLE = [
   '.cb{animation:cr-br 4.4s ease-in-out infinite}',
   '@keyframes cr-br{0%,100%{transform:translateY(0)}50%{transform:translateY(-1.6px)}}',
-  '.cs,.cx,.cw,.ct{transform-box:view-box;transform-origin:0 0}',
+  '.cs,.cx,.cw,.ct,.ca{transform-box:view-box;transform-origin:0 0}',
   ...[0.6, 0.9, 1.2].map(
     (a, k) =>
       `.s${k}{animation:cr-s${k} 7.5s ease-in-out infinite}@keyframes cr-s${k}{0%,100%{transform:rotate(-${a}deg)}50%{transform:rotate(${a}deg)}}`,
@@ -911,6 +1039,8 @@ export function drawCrowd(
   timing: {
     moves?: readonly [number, 'cheer' | 'gasp', number][];
     durationMs: number;
+    /** When each one makes way for someone of the story's going by, by each one in the plan. */
+    asides?: readonly (readonly Aside[])[];
   },
 ): string {
   const [vx, vy, vw, vh] = plan.frame;
@@ -927,6 +1057,7 @@ export function drawCrowd(
     .map((p, i) => ({ p, i }))
     .sort((a, b) => a.p.feet - b.p.feet || a.p.x - b.p.x);
   let wanderers = 0;
+  let makingWay = 0;
   const talkers = new Map<number, number>();
   for (const { p, i } of order) {
     const b = (salt: string) => beatOf(`${i}:${p.x}:${salt}`);
@@ -1029,6 +1160,15 @@ export function drawCrowd(
           (_, own?: string) =>
             `class="leg l1" style="${run(`cr-l${n}1`)}${own ? `;${own}` : ''}"`,
         );
+    }
+    // Making way for someone of the story's going by, on the page's clock.
+    const asides = timing.asides?.[i] ?? [];
+    if (asides.length) {
+      const n = makingWay;
+      makingWay += 1;
+      styles.push(asideFrames(n, asides, Math.max(1, timing.durationMs)));
+      open = `<g class="ca" style="animation:cr-by${n} var(--d) linear both">${open}`;
+      close = `${close}</g>`;
     }
     const person = [
       `<svg x="${r1(p.x + bx * p.sc)}" y="${r1(p.feet + by * p.sc)}" width="${r1(bw * p.sc)}" height="${r1(bh * p.sc)}" viewBox="${bx} ${by} ${bw} ${bh}" overflow="visible">`,

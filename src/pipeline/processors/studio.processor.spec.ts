@@ -14,7 +14,11 @@ import type {
 } from '../../business/repositories/studio.repository';
 import type { StudioJobData } from '../queues';
 import type { SceneProcessor } from './scene.processor';
-import { StudioProcessor, studioMakeOf } from './studio.processor';
+import {
+  StudioProcessor,
+  settledEpisode,
+  studioMakeOf,
+} from './studio.processor';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { SceneDto } from '../../contracts';
@@ -610,5 +614,45 @@ describe("a show's own things and features, as a film is made", () => {
     expect(story.ownKey).toBe('studio/s9/own.json');
     expect(own.things).toEqual([{ id: 'kite', name: 'kite', kind: 'thing' }]);
     expect(own.features.map((f) => f.id)).toEqual(['signpost']);
+  });
+});
+
+describe('an episode as its scenes leave it', () => {
+  const row = (
+    status: StudioSceneRecord['status'],
+    durationMs: number | null,
+    n: number,
+  ) => ({
+    status,
+    sceneKey: status === 'made' || status === 'failed' ? `s${n}.json` : null,
+    durationMs,
+    thumbKey: `s${n}.png`,
+  });
+
+  it('is made, as long as its made scenes, its still the first made one', () => {
+    expect(
+      settledEpisode([row('made', 30000, 1), row('made', 12000, 2)]),
+    ).toEqual({
+      phase: 'made',
+      durationMs: 42000,
+      thumbKey: 's1.png',
+      error: null,
+    });
+  });
+
+  it('says so when a scene could not be made, and counts only those made', () => {
+    const settled = settledEpisode([
+      row('failed', 9000, 1),
+      row('made', 12000, 2),
+    ]);
+    expect(settled.durationMs).toBe(12000);
+    expect(settled.thumbKey).toBe('s2.png');
+    expect(settled.error).toMatch(/could not be made/);
+  });
+
+  it('keeps its film as it was when none is made', () => {
+    const settled = settledEpisode([row('failed', null, 1)]);
+    expect(Object.keys(settled)).toEqual(['error']);
+    expect(settled.error).toMatch(/could not be made/);
   });
 });

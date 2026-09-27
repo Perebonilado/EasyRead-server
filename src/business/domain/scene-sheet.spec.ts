@@ -7,9 +7,13 @@ import {
   introCallouts,
   measureSheet,
   mouthOf,
+  notDrawnYet,
   setsOf,
   SHEET_VERSION,
+  type CharacterSheet,
+  type SetSheet,
 } from './scene-sheet';
+import type { SceneScript } from './scene-script';
 import { conventionGround } from './scene-ground';
 import * as rig from './scene-sheet-rig';
 import { EXPRESSIONS, sheetThing } from './scene-story';
@@ -206,5 +210,77 @@ describe('a book’s sets read back', () => {
     expect(sets.yard).toEqual({ version: SET_VERSION, drawing });
     expect(sets.field.ground).toBeUndefined();
     expect(sets.old).toBeUndefined();
+  });
+});
+
+describe('what a scene stands on its stage that is not drawn yet', () => {
+  const person = (id: string, name: string, presence?: 'heard' | 'light') => ({
+    id,
+    name,
+    aliases: [],
+    role: 'main' as const,
+    look: '',
+    traits: [],
+    firstPage: 1,
+    met: 0,
+    voice: null,
+    ...(presence ? { presence } : {}),
+  });
+  const bible = {
+    characters: [
+      person('maya', 'Maya'),
+      person('pip', 'Pip'),
+      person('voice', 'The Voice', 'heard'),
+    ],
+    places: [
+      {
+        id: 'yard',
+        name: 'The Compound',
+        aliases: [],
+        look: '',
+        firstPage: 1,
+        sound: null,
+      },
+    ],
+  };
+  const script = {
+    cast: [
+      { id: 'maya', kind: 'character', ref: 'maya' },
+      { id: 'pip', kind: 'character', ref: 'pip' },
+      { id: 'voice', kind: 'character', ref: 'voice' },
+      { id: 'place-yard', kind: 'place', ref: 'yard' },
+    ],
+    ownThings: [{ id: 'kite', name: 'kite' }],
+    features: [
+      { id: 'gate', name: 'gate', kind: 'gate', spot: 'right', opens: true },
+      { id: 'hut', name: 'hut', kind: 'drawn', spot: 'left', opens: true },
+    ],
+  } as unknown as Pick<SceneScript, 'cast' | 'ownThings' | 'features'>;
+  const sheet = {} as CharacterSheet;
+  const set = {} as SetSheet;
+
+  it('names each character, place and thing of its own not kept, and never a voice', () => {
+    expect(notDrawnYet(script, bible, { maya: sheet }, {}, null)).toEqual([
+      'Pip',
+      'The Compound',
+      'kite',
+      'hut',
+    ]);
+  });
+
+  it('is nothing once all are kept: a gate the stage draws needs no drawing', () => {
+    expect(
+      notDrawnYet(
+        script,
+        bible,
+        { maya: sheet, pip: sheet },
+        { yard: set },
+        {
+          version: 1,
+          things: { kite: {} as never },
+          features: { hut: {} as never },
+        },
+      ),
+    ).toEqual([]);
   });
 });

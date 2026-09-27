@@ -23,8 +23,10 @@ import type {
 import { actingOf, type DirectedMove, type SpokenLine } from './scene-acting';
 import {
   crowdHeads,
+  asideOf,
   drawCrowd,
   planCrowd,
+  type GoingBy,
   type CastAt,
   type CrowdPlan,
 } from './scene-crowd';
@@ -91,7 +93,15 @@ import {
   featureGroup,
 } from './scene-set-pieces';
 import type { DocumentProfile } from './scene-profile';
-import { againstScenery, settledOf, viewOf, withoutJumps } from './scene-film';
+import {
+  againstScenery,
+  hurried,
+  settledOf,
+  viewOf,
+  walkEase,
+  walksOf,
+  withoutJumps,
+} from './scene-film';
 import type { GatedDrawing } from './scene-svg';
 import { anchorMs, quietGaps, spaced, type TimedBeat } from './scene-timing';
 import { numberWords } from './spoken';
@@ -1820,10 +1830,17 @@ export function composeScene(input: ComposeInput): {
     const moves = crowdMoves();
     const time = script.setting?.time;
     const weather = script.setting?.weather;
+    // A vessel with an engine is going somewhere: a danfo on the road.
+    const set = script.backdrop ? castById.get(script.backdrop) : undefined;
+    const moving =
+      script.setting?.place === 'vessel' &&
+      set?.kind === 'place' &&
+      set.sound === 'machine';
     return {
       full: true,
       ...(time && time !== 'day' ? { time } : {}),
       ...(weather && weather !== 'clear' ? { weather } : {}),
+      ...(moving ? { moving: true as const } : {}),
       ...(setFeatures.length ? { features: featuresDto() } : {}),
       ...(featureStates.length ? { featureStates } : {}),
       ...(crowdDrawn
@@ -2278,6 +2295,9 @@ export function composeScene(input: ComposeInput): {
     }
   const refOf = (thing: SceneThing | undefined) =>
     thing && 'ref' in thing ? thing.ref : undefined;
+  /** The stagings a crowd is planned for: a film's, wide alone. */
+  const crowdStagings = (): readonly StagingName[] =>
+    film ? ['wide'] : ['box', 'wide'];
   /**
    * The story's people wherever the crowd is seen with them: each step its
    * place is behind, in each staging, in the set's own units, with its
@@ -2300,7 +2320,10 @@ export function composeScene(input: ComposeInput): {
     const shots = crowdSet?.parts.front
       ? []
       : effects.filter((effect) => effect.do === 'zoom');
-    return (['box', 'wide'] as const).flatMap((staging) => {
+    // A film is only ever played wide: its crowd keeps clear of the story's
+    // people as they stand there; a page's, in either staging.
+    const stagings = crowdStagings();
+    return stagings.flatMap((staging) => {
       const stage = STAGINGS[staging];
       const on = setFrameOn(crowdFrame, stage);
       /** The pieces the stage draws, in the set's units: no one is placed hidden behind one. */
@@ -2404,7 +2427,7 @@ export function composeScene(input: ComposeInput): {
           if (view.s <= 1.01) continue;
           rest -= to - from;
           seen.push({
-            share: (to - from) / total / 2,
+            share: (to - from) / total / stagings.length,
             wide: staging === 'wide',
             close: true,
             cast: castOf(step, k, view),
@@ -2412,7 +2435,7 @@ export function composeScene(input: ComposeInput): {
         }
         if (rest > 0)
           seen.unshift({
-            share: rest / total / 2,
+            share: rest / total / stagings.length,
             wide: staging === 'wide',
             cast: [...castOf(step, k, null), ...piecesSeen(staging)],
           });
@@ -2422,7 +2445,7 @@ export function composeScene(input: ComposeInput): {
   };
   /** The pieces the stage draws over the crowd, where each staging stands them, in the set's units. */
   const piecesOverCrowd = () =>
-    (['box', 'wide'] as const).flatMap((staging) => {
+    crowdStagings().flatMap((staging) => {
       const on = setFrameOn(crowdFrame, STAGINGS[staging]);
       return setFeatures.flatMap(({ feature, piece }) => {
         const f = featurePlaces[staging].get(feature.id);
@@ -2499,12 +2522,61 @@ export function composeScene(input: ComposeInput): {
       })
     : null;
   const crowdDrawn = crowdPlan?.people.length ? crowdPlan : null;
+  /**
+   * The story's people going by the crowd, as the player walks them on the
+   * wide stage (a film's hurried where they must be), in the set's units: their
+   * middle, and their feet, where the crowd makes way for them.
+   */
+  const goingBy = (): GoingBy[] => {
+    const wideStage = {
+      w: STAGINGS.wide.w,
+      h: STAGINGS.wide.h,
+      places: layouts.wide,
+    };
+    const paced = {
+      steps,
+      stagings: { box: wideStage, wide: wideStage },
+      acting,
+      props,
+      setting: { features: featuresDto() },
+    };
+    const on = setFrameOn(crowdFrame, STAGINGS.wide);
+    return walksOf({ ...paced, steps: film ? hurried(paced) : steps }).map(
+      (one) => {
+        const found = geometry.get(one.id);
+        const box = found?.viewBox;
+        const dto = byId.get(one.id);
+        const rig = dto?.kind === 'drawing' && dto.rig === true;
+        /** Their feet, in a box they stand in: the kit's at its 0, anyone else's at its foot. */
+        const feet = (at: Place) =>
+          rig && box && box[1] < 0 && box[1] + box[3] > 0
+            ? at.y - (box[1] * at.h) / box[3]
+            : at.y + at.h;
+        const [x0, f0] = on.toSet(
+          one.start.x + one.start.w / 2,
+          feet(one.start),
+        );
+        const [x1, f1] = on.toSet(one.end.x + one.end.w / 2, feet(one.end));
+        return {
+          from: one.from,
+          to: one.to,
+          x: [x0, x1],
+          feet: [f0, f1],
+          w: Math.max(one.start.w, one.end.w) / on.scale,
+        };
+      },
+    );
+  };
   if (crowdDrawn) {
     const [, , vw, vh] = crowdFrame;
     things.push({
       id: CROWD_ID,
       kind: 'drawing',
-      svg: drawCrowd(crowdDrawn, { moves: crowdMoves(), durationMs }),
+      svg: drawCrowd(crowdDrawn, {
+        moves: crowdMoves(),
+        durationMs,
+        asides: asideOf(crowdDrawn, goingBy(), walkEase),
+      }),
       aspect: vw / vh,
       caption: null,
       parts: {},
@@ -2819,9 +2891,13 @@ export function composeScene(input: ComposeInput): {
     filled,
     audit: { box: box.audit, wide: wide.audit },
   };
-  // A film's scene says when all it plans has finished, which may be after
-  // its voice: the film's edit holds on it until then.
-  if (film) composed.scene.settledMs = settledOf(composed.scene);
+  // A film's walks as long as the time they have, hurried where they are
+  // not; and when all it plans has finished, which may be after its
+  // voice: the film's edit holds on it until then.
+  if (film) {
+    composed.scene.steps = hurried(composed.scene);
+    composed.scene.settledMs = settledOf(composed.scene);
+  }
   return composed;
 }
 

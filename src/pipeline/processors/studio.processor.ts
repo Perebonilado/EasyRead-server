@@ -220,6 +220,37 @@ export function studioMakeOf(
 }
 
 /**
+ * An episode as its scenes leave it once none is making: made, its length
+ * the sum of its made scenes', its still the first's; and a word for the
+ * maker when some could not be made. Its film as it was when none is made.
+ */
+export function settledEpisode(
+  rows: readonly Pick<
+    StudioSceneRecord,
+    'status' | 'sceneKey' | 'durationMs' | 'thumbKey'
+  >[],
+): {
+  phase?: 'made';
+  durationMs?: number;
+  thumbKey?: string | null;
+  error: string | null;
+} {
+  const made = rows.filter((r) => r.status === 'made' && r.sceneKey);
+  return {
+    ...(made.length
+      ? {
+          phase: 'made' as const,
+          durationMs: made.reduce((n, r) => n + (r.durationMs ?? 0), 0),
+          thumbKey: made[0].thumbKey,
+        }
+      : {}),
+    error: rows.some((r) => r.status === 'failed')
+      ? 'Some scenes could not be made. Make the episode again to try them once more.'
+      : null,
+  };
+}
+
+/**
  * Whether one set of problems is worse than another: more that keep a
  * scene from being made, then more of anything sent back. Below zero,
  * better; zero, as good.
@@ -1065,7 +1096,8 @@ export class StudioProcessor {
     const rows = await this.studio.listScenes(episodeId);
     if (rows.some((r) => r.status === 'making')) return;
     const made = rows.filter((r) => r.status === 'made' && r.sceneKey);
-    const durationMs = made.reduce((n, r) => n + (r.durationMs ?? 0), 0);
+    const settled = settledEpisode(rows);
+    const durationMs = settled.durationMs ?? 0;
     if (made.length)
       await this.log(
         show,
@@ -1084,19 +1116,7 @@ export class StudioProcessor {
         // so a make that made nothing new records nothing.
         `made:${rows.flatMap((r) => (r.sceneKey ? [r.sceneKey] : [])).join(',')}`,
       );
-    await this.studio.updateEpisode(episodeId, {
-      busy: null,
-      ...(made.length
-        ? {
-            phase: 'made',
-            durationMs,
-            thumbKey: made[0].thumbKey,
-          }
-        : {}),
-      error: rows.some((r) => r.status === 'failed')
-        ? 'Some scenes could not be made. Make the episode again to try them once more.'
-        : null,
-    });
+    await this.studio.updateEpisode(episodeId, { busy: null, ...settled });
   }
 
   /** Something that happened, recorded in the thread, once for its key: never in the way of the work. */

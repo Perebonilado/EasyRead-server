@@ -105,6 +105,7 @@ import {
   measureOwnThing,
   measureSheet,
   mouthOf,
+  notDrawnYet,
   ownSheetsOf,
   setsOf,
   type Cast,
@@ -757,29 +758,235 @@ export class SceneProcessor {
       composed = compose(script);
     }
     const { scene, filled, audit } = composed;
-    // For working on the layout without the models: everything compose
-    // was given, kept where SCENE_KEEP_PARTS says (scripts/scene-recompose).
+    await this.keepParts(input.keepAs ?? 'page', who, {
+      script,
+      drawings: [...drawings],
+      beats: voice.beats,
+      durationMs: voice.durationMs,
+      timing: voice.timing,
+      profile: input.profile,
+      key: story?.setsKey ?? null,
+    });
+    this.logAudit(who, audit);
+    const { sceneKey, thumbKey } = await this.store(base, scene, who);
+    return {
+      fit: 'good',
+      scene,
+      sceneKey,
+      thumbKey,
+      voice,
+      script,
+      drawings,
+      filled,
+    };
+  }
+
+  /**
+   * A scene composed again from what it was made from (its script, and
+   * its voice's words and times), on the show's drawings as they are now:
+   * its cast, its sets and its own things, as kept. No model is asked and
+   * nothing is voiced; one not drawn yet is not drawn here, and the scene
+   * is not composed. Stored as a make stores it, with its still, beside
+   * the voice it was made with.
+   */
+  async recompose(input: {
+    script: SceneScript;
+    /** The drawings it was composed with: a drawing of its own is used again as it was. */
+    kept: ReadonlyMap<string, GatedDrawing | null>;
+    beats: TimedBeat[];
+    durationMs: number;
+    timing: SceneTiming;
+    profile: DocumentProfile;
+    story: PageStory;
+    base: string;
+    who: string;
+    keepAs?: string;
+    recheck?: (scene: SceneDto) => {
+      notes: string[];
+      script: SceneScript | null;
+    };
+  }): Promise<{
+    scene: SceneDto;
+    sceneKey: string;
+    thumbKey: string;
+    script: SceneScript;
+  }> {
+    const { story, who } = input;
+    const [cast, sets, own] = await Promise.all([
+      this.castAt(story.castKey),
+      this.setsAt(story.setsKey),
+      story.ownKey ? this.ownAt(story.ownKey) : null,
+    ]);
+    let script = input.script;
+    const reuse = new Map(
+      [...input.kept].flatMap(([id, drawing]): [string, GatedDrawing][] =>
+        drawing &&
+        script.cast.some((thing) => thing.id === id && thing.kind === 'drawing')
+          ? [[id, drawing]]
+          : [],
+      ),
+    );
+    const missing = [
+      ...notDrawnYet(script, story.bible, cast, sets, own),
+      ...script.cast.flatMap((thing) =>
+        thing.kind === 'drawing' && !reuse.has(thing.id) ? [thing.name] : [],
+      ),
+    ];
+    if (missing.length)
+      throw new Error(
+        `Not drawn for the show yet, so not composed: ${missing.join(', ')}`,
+      );
+    const [drawings, drawn] = await Promise.all([
+      this.drawAll(
+        script,
+        script.title,
+        null,
+        who,
+        new AbortController().signal,
+        story,
+        reuse,
+      ),
+      this.drawOwn(script, story, null, who),
+    ]);
+    if (drawn) script = { ...script, drawn };
+    const compose = (from: SceneScript) =>
+      composeScene({
+        script: from,
+        drawings,
+        beats: input.beats,
+        durationMs: input.durationMs,
+        timing: input.timing,
+        generator: SCENE_GENERATOR_VERSION,
+        profile: input.profile,
+        key: story.setsKey,
+      });
+    let composed = compose(script);
+    const again = input.recheck?.(composed.scene);
+    for (const note of again?.notes ?? []) this.logger.log(`${who}: ${note}`);
+    if (again?.script) {
+      script = { ...again.script, ...(drawn ? { drawn } : {}) };
+      composed = compose(script);
+    }
+    await this.keepParts(input.keepAs ?? 'page', who, {
+      script,
+      drawings: [...drawings],
+      beats: input.beats,
+      durationMs: input.durationMs,
+      timing: input.timing,
+      profile: input.profile,
+      key: story.setsKey,
+    });
+    this.logAudit(who, composed.audit);
+    const { sceneKey, thumbKey } = await this.store(
+      input.base,
+      composed.scene,
+      who,
+    );
+    return { scene: composed.scene, sceneKey, thumbKey, script };
+  }
+
+  /**
+   * A place painted again for its book or show, with the painter's brief
+   * as it is now, its ground and groups measured, and kept in place of
+   * the painting before (which the caller keeps a copy of first). Null
+   * when no painting came through: the one before is left as it was.
+   */
+  async repaintSet(
+    story: Pick<PageStory, 'bible' | 'setsKey' | 'bookTitle'>,
+    placeId: string,
+    documentId: string | null,
+    who: string,
+  ): Promise<SetSheet | null> {
+    const place = story.bible.places.find((p) => p.id === placeId);
+    if (!place) throw new Error(`No place ${placeId}`);
+    const set = await this.paintSet(
+      place,
+      story.bookTitle,
+      documentId,
+      who,
+      story.bible.world ?? null,
+    );
+    if (!set) return null;
+    await this.inTurn(story.setsKey, async () => {
+      const sets = await this.setsAt(story.setsKey);
+      sets[place.id] = set;
+      await this.storage.put({
+        key: story.setsKey,
+        body: Buffer.from(JSON.stringify(sets)),
+        mimeType: 'application/json',
+      });
+    });
+    return set;
+  }
+
+  /**
+   * A character the artist drew, drawn again with the brief as it is now,
+   * rigged by code, and kept in place of the drawing before (which the
+   * caller keeps a copy of first). A person is the kit's, never redrawn
+   * here. Null when no drawing came through: the one before is kept.
+   */
+  async redrawCharacter(
+    story: Pick<PageStory, 'bible' | 'castKey' | 'bookTitle'>,
+    characterId: string,
+    documentId: string | null,
+    who: string,
+  ): Promise<CharacterSheet | null> {
+    const character = story.bible.characters.find((c) => c.id === characterId);
+    if (!character) throw new Error(`No character ${characterId}`);
+    if (!character.kind || character.kind === 'person')
+      throw new Error(`${character.name} is drawn by the kit, not the artist`);
+    const sheet = await this.drawCharacter(
+      character,
+      story.bookTitle,
+      documentId,
+      who,
+    );
+    if (!sheet) return null;
+    await this.inTurn(story.castKey, async () => {
+      const cast = await this.castAt(story.castKey);
+      cast[character.id] = sheet;
+      await this.storage.put({
+        key: story.castKey,
+        body: Buffer.from(JSON.stringify(cast)),
+        mimeType: 'application/json',
+      });
+    });
+    return sheet;
+  }
+
+  /**
+   * For working on the layout without the models: everything compose was
+   * given, kept where SCENE_KEEP_PARTS says (scripts/studio-recompose).
+   */
+  private async keepParts(
+    keepAs: string,
+    who: string,
+    parts: {
+      script: SceneScript;
+      drawings: [string, GatedDrawing | null][];
+      beats: TimedBeat[];
+      durationMs: number;
+      timing: SceneTiming;
+      profile: DocumentProfile;
+      key: string | null;
+    },
+  ): Promise<void> {
     const keep = this.config.get<string>('SCENE_KEEP_PARTS')?.trim();
-    if (keep)
-      try {
-        const { mkdirSync, writeFileSync } = await import('node:fs');
-        mkdirSync(keep, { recursive: true });
-        writeFileSync(
-          `${keep}/${input.keepAs ?? 'page'}-parts.json`,
-          JSON.stringify({
-            script,
-            drawings: [...drawings],
-            beats: voice.beats,
-            durationMs: voice.durationMs,
-            timing: voice.timing,
-            profile: input.profile,
-            key: story?.setsKey ?? null,
-          }),
-        );
-      } catch (error) {
-        this.logger.warn(`${who}: parts not kept: ${(error as Error).message}`);
-      }
-    // What no layout promises by construction: nothing set on anything.
+    if (!keep) return;
+    try {
+      const { mkdirSync, writeFileSync } = await import('node:fs');
+      mkdirSync(keep, { recursive: true });
+      writeFileSync(`${keep}/${keepAs}-parts.json`, JSON.stringify(parts));
+    } catch (error) {
+      this.logger.warn(`${who}: parts not kept: ${(error as Error).message}`);
+    }
+  }
+
+  /** What no layout promises by construction, logged: nothing set on anything. */
+  private logAudit(
+    who: string,
+    audit: ReturnType<typeof composeScene>['audit'],
+  ): void {
     const found = [...audit.box.flat(), ...audit.wide.flat()];
     const counted = new Map<string, number>();
     for (const one of found)
@@ -797,6 +1004,14 @@ export class SceneProcessor {
           : ''
       }`,
     );
+  }
+
+  /** A scene stored, and its still beside it. */
+  private async store(
+    base: string,
+    scene: SceneDto,
+    who: string,
+  ): Promise<{ sceneKey: string; thumbKey: string }> {
     const sceneKey = `${base}-scene.json`;
     await this.storage.put({
       key: sceneKey,
@@ -816,16 +1031,7 @@ export class SceneProcessor {
         `${who}: no still for the card: ${(error as Error).message}`,
       );
     }
-    return {
-      fit: 'good',
-      scene,
-      sceneKey,
-      thumbKey,
-      voice,
-      script,
-      drawings,
-      filled,
-    };
+    return { sceneKey, thumbKey };
   }
 
   /**

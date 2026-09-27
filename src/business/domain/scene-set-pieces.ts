@@ -125,29 +125,31 @@ const bars = (x0: number, x1: number, y0: number, y1: number, n: number) =>
 export function drawPiece(kind: FeatureKind): SetPiece {
   switch (kind) {
     case 'gate': {
-      // A compound's metal gate between two concrete posts: its leaf
-      // hinged on the left post, a latch on the right.
+      // A compound's metal gate between two concrete posts, wider than it
+      // is high and about a grown-up's shoulder high, as such gates are:
+      // its leaf hinged on the left post, a latch on the right.
       const leaf =
         `<g id="leaf">` +
-        rect(-58, -164, 116, 10, METAL) +
-        rect(-58, -18, 116, 10, METAL) +
-        rect(-58, -164, 10, 156, METAL) +
-        rect(48, -164, 10, 156, METAL) +
-        bars(-48, 48, -154, -18, 5) +
-        rect(40, -92, 14, 10, YELLOW) +
+        rect(-76, -128, 152, 10, METAL) +
+        rect(-76, -22, 152, 10, METAL) +
+        rect(-76, -128, 10, 116, METAL) +
+        rect(66, -128, 10, 116, METAL) +
+        rect(-76, -76, 152, 8, METAL) +
+        bars(-66, 66, -118, -22, 7) +
+        rect(56, -92, 14, 10, YELLOW) +
         `</g>`;
       return {
         ...framed(
-          shadow(74) +
+          shadow(90) +
             leaf +
-            rect(-76, -184, 18, 184, CONCRETE) +
-            rect(58, -184, 18, 184, CONCRETE) +
-            rect(-80, -192, 26, 10, CONCRETE) +
-            rect(54, -192, 26, 10, CONCRETE),
-          [-80, -192, 160, 198],
+            rect(-94, -146, 18, 146, CONCRETE) +
+            rect(76, -146, 18, 146, CONCRETE) +
+            rect(-98, -154, 26, 10, CONCRETE) +
+            rect(72, -154, 26, 10, CONCRETE),
+          [-98, -154, 196, 160],
         ),
-        leaf: { id: 'leaf', hinge: [-58, -86] },
-        opening: [-58, -164, 58, 0],
+        leaf: { id: 'leaf', hinge: [-76, -70] },
+        opening: [-76, -128, 76, 0],
       };
     }
     case 'door': {
@@ -262,24 +264,25 @@ export function drawPiece(kind: FeatureKind): SetPiece {
         ),
       };
     case 'goalpost': {
-      // Two white posts and a bar, and the net behind them.
+      // Two white posts and a bar, half again as wide as they are high as
+      // a children's goal is, and the net behind them.
       const net = Array.from(
-        { length: 7 },
-        (_, i) => `M${-96 + i * 32},-166 L${-80 + i * 26},-20`,
+        { length: 9 },
+        (_, i) => `M${-134 + i * 33.5},-160 L${-118 + i * 29.5},-20`,
       ).join(' ');
       return {
         ...framed(
           line(
-            `${net} M-96,-120 L96,-120 M-92,-70 L92,-70 M-86,-20 L86,-20`,
+            `${net} M-134,-116 L134,-116 M-128,-68 L128,-68 M-122,-20 L122,-20`,
             '#8d8f96',
             1.6,
           ) +
-            rect(-106, -176, 12, 176, WHITE) +
-            rect(94, -176, 12, 176, WHITE) +
-            rect(-110, -182, 220, 12, WHITE),
-          [-110, -182, 220, 182],
+            rect(-146, -170, 12, 170, WHITE) +
+            rect(134, -170, 12, 170, WHITE) +
+            rect(-150, -176, 300, 12, WHITE),
+          [-150, -176, 300, 176],
         ),
-        opening: [-94, -170, 94, 0],
+        opening: [-134, -164, 134, 0],
       };
     }
     case 'wall':

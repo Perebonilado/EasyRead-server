@@ -15,6 +15,7 @@ import {
   type LineFrom,
   type LinePace,
   type SceneMood,
+  type SceneScript,
 } from './scene-script';
 import type { StoryBible, StoryCharacter, StoryVoice } from './scene-story';
 
@@ -399,4 +400,37 @@ export function sceneEngine(
   ready: Record<SceneVoiceEngine, boolean>,
 ): SceneVoiceEngine {
   return chosen && ready[chosen] ? chosen : deploymentEngine(named, ready);
+}
+
+/** What of a sentence its voice is made from: its words, who says them and how, and the quiet after. */
+const voicedOf = (beat: SceneBeat) => [
+  beat.say,
+  beat.pause,
+  beat.delivery,
+  beat.kind ?? null,
+  beat.pace ?? null,
+  beat.from ?? null,
+  beat.holdS ?? null,
+  beat.speaker ?? null,
+  beat.lines ?? null,
+];
+
+/**
+ * Whether two scripts are voiced alike: the same sentences said the same
+ * way by the same people, with the same quiet after each and before the
+ * first. A scene staged again that is voiced alike is composed on the
+ * voice it was made with, never voiced again.
+ */
+export function voicedAlike(
+  a: Pick<SceneScript, 'beats' | 'mood' | 'lead' | 'opening'>,
+  b: Pick<SceneScript, 'beats' | 'mood' | 'lead' | 'opening'>,
+): boolean {
+  const said = (script: typeof a) =>
+    JSON.stringify([
+      script.mood,
+      script.lead ?? 0,
+      script.opening?.show.length ? 1 : 0,
+      script.beats.map(voicedOf),
+    ]);
+  return said(a) === said(b);
 }

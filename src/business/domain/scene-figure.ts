@@ -3276,11 +3276,14 @@ export function drawExtra(
       );
       face = `${eyeClip(R, clip)}${L.eyes}${fm(rest)}`;
     } else if (how.detail === 1)
+      // Dots for eyes; on dark skin, whites with a dot in each, which a
+      // dark dot on it would not show.
       face = fm(
         [-1, 1]
-          .map(
-            (side) =>
-              `<ellipse cx="${side * R.eyes.dx}" cy="${R.eyes.y}" rx="6" ry="7" ${flat(FIGURE_INK)}/>`,
+          .map((side) =>
+            lightness(skin) < DARK_SKIN
+              ? `<ellipse cx="${side * R.eyes.dx}" cy="${R.eyes.y}" rx="7" ry="8" ${flat('#f5f1e8')}/><circle cx="${side * R.eyes.dx}" cy="${R.eyes.y + 1}" r="3.4" ${flat(FIGURE_INK)}/>`
+              : `<ellipse cx="${side * R.eyes.dx}" cy="${R.eyes.y}" rx="6" ry="7" ${flat(FIGURE_INK)}/>`,
           )
           .join(''),
       );
@@ -3422,6 +3425,49 @@ export function wardrobeOf(world: StoryWorld | null): Wardrobe {
   };
 }
 
+/** How light a colour looks, 0 (black) to 1 (white). */
+function lightness(hex: string): number {
+  const n = parseInt(hex.slice(1), 16);
+  return (
+    (0.299 * (n >> 16) + 0.587 * ((n >> 8) & 255) + 0.114 * (n & 255)) / 255
+  );
+}
+
+/** Skin this dark, in clothes or a hat this dark, and a head far off is a dark blob: what they wear is at least this light. */
+const DARK_SKIN = 0.3;
+const DARK_CLOTH = 0.35;
+const READS_ON_DARK = 0.45;
+
+/**
+ * An extra's colours where their head reads: someone with dark skin in a
+ * dark top or a dark hat (navy, black) wears one of the world's lighter
+ * colours instead, as the seed picks it, so their head never runs into
+ * what is under and on it. Their skin and hair are as they are; anyone
+ * else is left as they are.
+ */
+export function readable(
+  spec: FigureSpec,
+  colours: readonly ClothColour[],
+  seed: string,
+): FigureSpec {
+  const skin = SKIN[Math.min(SKIN_TONES, Math.max(1, spec.skin)) - 1];
+  if (lightness(skin) >= DARK_SKIN) return spec;
+  const light = colours.filter((c) => lightness(CLOTH[c]) >= READS_ON_DARK);
+  const lighter = (colour: ClothColour, salt: string): ClothColour =>
+    lightness(CLOTH[colour]) >= DARK_CLOTH || !light.length
+      ? colour
+      : light[
+          Math.floor(beatOf(`${seed}:${salt}`) * light.length) % light.length
+        ];
+  return {
+    ...spec,
+    topColour: lighter(spec.topColour, 'top'),
+    ...(spec.headwear !== 'none'
+      ? { accentColour: lighter(spec.accentColour, 'hat') }
+      : {}),
+  };
+}
+
 /** Who in a crowd is how old: mostly grown-ups, a few children, teenagers and elders. */
 const CROWD_AGES: [FigureAge, number][] = [
   ['child', 0.14],
@@ -3478,45 +3524,52 @@ export function extraFor(
           ? ['short', 'pigtails', 'curly', 'afro', 'spiky', 'bob']
           : ['short', 'curly', 'afro', 'locs', 'short', 'bald'];
   const covered = headwear !== 'none';
-  return {
-    age,
-    build: pick(FIGURE_BUILDS, 'build'),
-    skin: pick(w.skins, 'skin'),
-    // Under a hat, hair that would stand out from under it is left out.
-    hair: pick(
-      covered
-        ? hairs.filter((h) => h !== 'afro' && h !== 'bun' && h !== 'bald')
-        : hairs,
-      'hair',
-    ),
-    hairColour:
-      age === 'elder'
-        ? pick(['grey', 'white'] as const, 'colour')
-        : pick(
-            w.skins[0] >= 6
-              ? (['black', 'black', 'dark brown'] as const)
-              : HAIR_COLOURS.slice(0, 6),
-            'colour',
-          ),
-    facialHair:
-      grown && !woman
-        ? pick(['none', 'none', 'none', 'moustache', 'beard'] as const, 'beard')
-        : 'none',
-    headwear,
-    top,
-    topColour: pick(w.colours, 'topColour'),
-    bottom:
-      top === 'dress' || top === 'robe' || top === 'agbada'
-        ? 'trousers'
-        : pick(
-            woman ? w.bottoms : w.bottoms.filter((b) => b !== 'skirt'),
-            'bottom',
-          ),
-    bottomColour: pick(
-      ['navy', 'brown', 'grey', 'black', 'teal', 'blue', 'purple'] as const,
-      'bottomColour',
-    ),
-    accentColour: pick(w.colours, 'accent'),
-    extras: beatOf(`${key}:extra`) < 0.2 ? [pick(w.extras, 'extras')] : [],
-  };
+  return readable(
+    {
+      age,
+      build: pick(FIGURE_BUILDS, 'build'),
+      skin: pick(w.skins, 'skin'),
+      // Under a hat, hair that would stand out from under it is left out.
+      hair: pick(
+        covered
+          ? hairs.filter((h) => h !== 'afro' && h !== 'bun' && h !== 'bald')
+          : hairs,
+        'hair',
+      ),
+      hairColour:
+        age === 'elder'
+          ? pick(['grey', 'white'] as const, 'colour')
+          : pick(
+              w.skins[0] >= 6
+                ? (['black', 'black', 'dark brown'] as const)
+                : HAIR_COLOURS.slice(0, 6),
+              'colour',
+            ),
+      facialHair:
+        grown && !woman
+          ? pick(
+              ['none', 'none', 'none', 'moustache', 'beard'] as const,
+              'beard',
+            )
+          : 'none',
+      headwear,
+      top,
+      topColour: pick(w.colours, 'topColour'),
+      bottom:
+        top === 'dress' || top === 'robe' || top === 'agbada'
+          ? 'trousers'
+          : pick(
+              woman ? w.bottoms : w.bottoms.filter((b) => b !== 'skirt'),
+              'bottom',
+            ),
+      bottomColour: pick(
+        ['navy', 'brown', 'grey', 'black', 'teal', 'blue', 'purple'] as const,
+        'bottomColour',
+      ),
+      accentColour: pick(w.colours, 'accent'),
+      extras: beatOf(`${key}:extra`) < 0.2 ? [pick(w.extras, 'extras')] : [],
+    },
+    w.colours,
+    key,
+  );
 }

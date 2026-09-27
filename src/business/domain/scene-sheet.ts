@@ -30,10 +30,14 @@ import type { OwnPropDrawing, PropSize } from './scene-props';
 import { renderSvg, type InkBox, type InkMap } from './scene-raster';
 import type { SetPiece } from './scene-set-pieces';
 import { jointNotes, type SheetRig } from './scene-sheet-rig';
+import { DRAWN } from './scene-own';
+import type { SceneScript } from './scene-script';
 import {
   EXPRESSIONS,
   OWN_FEATURE_CANVAS,
   OWN_THING_CANVAS,
+  standsOnStage,
+  type StoryBible,
   type StorySize,
 } from './scene-story';
 import { revealedSvg, stillTree, type GatedDrawing } from './scene-svg';
@@ -701,4 +705,42 @@ export function ownSheetsOf(raw: unknown): OwnSheets {
     if (feature?.piece?.svg && feature.piece.viewBox?.length === 4)
       out.features[id] = feature;
   return out;
+}
+
+/**
+ * What a script stands on its stage that its book or show has not drawn
+ * yet, by name: a character not in the cast, a place not in the sets, a
+ * thing or feature of the show's own not kept. Someone never seen (a
+ * voice, a light where they stand) needs no drawing.
+ */
+export function notDrawnYet(
+  script: Pick<SceneScript, 'cast' | 'ownThings' | 'features'>,
+  bible: Pick<StoryBible, 'characters' | 'places'>,
+  cast: Cast,
+  sets: Sets,
+  own: OwnSheets | null,
+): string[] {
+  const missing: string[] = [];
+  for (const thing of script.cast) {
+    if (thing.kind === 'character') {
+      const character = bible.characters.find((c) => c.id === thing.ref);
+      if (
+        character &&
+        standsOnStage(character) &&
+        character.presence !== 'light' &&
+        !cast[character.id]
+      )
+        missing.push(character.name);
+    }
+    if (thing.kind === 'place') {
+      const place = bible.places.find((p) => p.id === thing.ref);
+      if (place && !sets[place.id]) missing.push(place.name);
+    }
+  }
+  for (const thing of script.ownThings ?? [])
+    if (!own?.things[thing.id]) missing.push(thing.name);
+  for (const feature of script.features ?? [])
+    if (feature.kind === DRAWN && !own?.features[feature.id])
+      missing.push(feature.name);
+  return missing;
 }

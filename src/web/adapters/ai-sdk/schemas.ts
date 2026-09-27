@@ -896,6 +896,12 @@ export const sceneStorySchema = z.object({
   ),
 });
 
+/** How big a thing really is, in centimetres. */
+export const sceneSizeSchema = z.object({
+  heightCm: z.number(),
+  lengthCm: z.number(),
+});
+
 /** What a story's character is, and a person's figure: from a look kept before the kit drew people. */
 export const sceneFigureSchema = z.object({
   kind: z.enum(STORY_KINDS),

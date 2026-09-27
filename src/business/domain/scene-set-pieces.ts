@@ -32,6 +32,10 @@ export interface SetPiece {
   opening?: [number, number, number, number];
   /** How high its seat is, for someone who sits on it. */
   seat?: number;
+  /** It stands in front of the people by it, low before their legs: a canoe they stand in, a drum. */
+  front?: true;
+  /** Someone going by it goes in and is gone, as at a door: one of a show's own that opens. */
+  enters?: true;
 }
 
 /**
@@ -412,3 +416,17 @@ export function drawPiece(kind: FeatureKind): SetPiece {
 /** Whether the stage draws a feature itself: always one people act on; any other, where the painting has not got it. */
 export const drawnByStage = (kind: FeatureKind, painted: boolean): boolean =>
   ACTED_PIECES.includes(kind) || !painted;
+
+/**
+ * What stands for one of a show's own features whose drawing could not be
+ * made: something under a cloth, about as big as a bench, so what a scene
+ * names is never missing from its stage.
+ */
+export function coveredPiece(): SetPiece {
+  return framed(
+    shadow(70) +
+      `<path d="M-72,0 Q-76,-58 -34,-82 Q0,-98 36,-80 Q78,-58 72,0 Z" ${fill('#9aa68a')}/>` +
+      line('M-40,-8 Q-44,-44 -18,-70 M22,-6 Q30,-46 10,-76', '#7f8a70', 2.4),
+    [-78, -98, 156, 98],
+  );
+}

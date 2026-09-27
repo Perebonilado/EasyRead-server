@@ -471,3 +471,144 @@ describe('a Studio scene as it is made', () => {
     });
   });
 });
+
+describe("a show's own things and features, as a film is made", () => {
+  const kofi = bibleOf({
+    characters: [
+      { name: 'Kofi', voice: 'boy', figure: { age: 'child' } },
+      { name: 'Ama', voice: 'girl', figure: { age: 'child' } },
+    ],
+    sets: [{ name: 'Field', look: 'a dusty field' }],
+  });
+  const flies = storySheetOf({
+    title: 'The kite',
+    set: 'field',
+    onStage: [
+      { who: 'kofi', spot: 'centre-left' },
+      { who: 'ama', spot: 'right' },
+    ],
+    beats: [
+      { kind: 'line', who: 'kofi', say: 'Look!', feeling: 'happy' },
+      {
+        kind: 'business',
+        who: 'kofi',
+        do: 'raise',
+        say: 'Kofi flies his kite.',
+      },
+      {
+        kind: 'action',
+        who: 'ama',
+        do: 'run',
+        say: 'Ama runs to the signpost.',
+      },
+      { kind: 'line', who: 'ama', say: 'Here!', feeling: 'happy' },
+    ],
+  });
+  const show: StudioShowRecord = {
+    id: 's9',
+    userId: 'u1',
+    title: 'Kofi and the Kite',
+    format: 'story',
+    brief,
+    bible: kofi,
+    createdAt: at,
+    updatedAt: at,
+  };
+  const episode = {
+    id: 'e9',
+    showId: 's9',
+    userId: 'u1',
+    number: 1,
+    title: 'The kite',
+    logline: null,
+    phase: 'script',
+    busy: null,
+    error: null,
+    outline: null,
+    shareToken: null,
+    durationMs: null,
+    thumbKey: null,
+    createdAt: at,
+    updatedAt: at,
+  } as StudioEpisodeRecord;
+  const row = {
+    id: 'c9',
+    episodeId: 'e9',
+    position: 0,
+    sheet: flies,
+    status: 'ready',
+  } as StudioSceneRecord;
+
+  it('stages the kite and the signpost the words name, kept where the show keeps its own', () => {
+    const made = studioMakeOf(show, episode, row, [row], kofi);
+    expect(made.story?.ownKey).toBe('studio/s9/own.json');
+    expect(made.script?.ownThings).toEqual([{ id: 'kite', name: 'kite' }]);
+    expect(made.script?.propsHeld).toEqual({
+      kite: { by: 'kofi', in: 'hand' },
+    });
+    expect(made.script?.features?.map((f) => [f.id, f.kind])).toEqual([
+      ['signpost', 'drawn'],
+    ]);
+  });
+
+  it("draws the show's own once, before its scenes are made side by side", async () => {
+    const grown = {
+      ...kofi,
+      things: [{ id: 'kite', name: 'kite', kind: 'thing' as const }],
+      sets: kofi.sets.map((s) => ({
+        ...s,
+        features: [
+          {
+            id: 'signpost',
+            name: 'signpost',
+            kind: 'drawn' as const,
+            spot: 'right' as const,
+            opens: false,
+          },
+        ],
+      })),
+    };
+    const prepared: unknown[][] = [];
+    const processor = new StudioProcessor(
+      {
+        findShow: () => Promise.resolve({ ...show, bible: grown }),
+        findEpisode: () => Promise.resolve(episode),
+        listScenes: () => Promise.resolve([row]),
+        updateScene: () => Promise.resolve(),
+      } as unknown as StudioRepository,
+      {} as LlmGatewayPort,
+      { record: () => Promise.resolve() },
+      {} as never,
+      {
+        prepareStory: (...args: unknown[]) => {
+          prepared.push(args);
+          return Promise.resolve();
+        },
+      } as unknown as SceneProcessor,
+      {} as never,
+      {} as never,
+      { enqueueStudio: () => Promise.resolve() } as never,
+    );
+    await processor.process(
+      {
+        kind: 'prepare',
+        showId: 's9',
+        episodeId: 'e9',
+        userId: 'u1',
+        sceneIds: ['c9'],
+      },
+      { attemptsMade: 1, isFinalAttempt: true },
+    );
+    expect(prepared).toHaveLength(1);
+    const [story, , , , own] = prepared[0] as [
+      { ownKey: string },
+      unknown,
+      unknown,
+      unknown,
+      { things: unknown[]; features: { id: string }[] },
+    ];
+    expect(story.ownKey).toBe('studio/s9/own.json');
+    expect(own.things).toEqual([{ id: 'kite', name: 'kite', kind: 'thing' }]);
+    expect(own.features.map((f) => f.id)).toEqual(['signpost']);
+  });
+});

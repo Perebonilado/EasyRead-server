@@ -28,7 +28,7 @@ import {
   repairSheet,
   sentBackFor,
   keptFeatures,
-  withFeatures,
+  withFound,
   type EndState,
   type SheetProblem,
 } from '../../business/domain/studio/studio-check';
@@ -76,8 +76,10 @@ import {
 import {
   StudioCastService,
   studioCastKey,
+  studioOwnKey,
   studioSetsKey,
 } from '../../business/handlers/studio/studio-cast.service';
+import { DRAWN } from '../../business/domain/scene-own';
 import type { StudioJobData } from '../queues';
 import { isPermanentFailure, type JobContext } from './base.processor';
 import { SceneProcessor } from './scene.processor';
@@ -140,7 +142,7 @@ export function studioMakeOf(
     ? repairSheet(row.sheet as StorySheet, bible, before)
     : null;
   const staged = sheet
-    ? withFeatures(bible, sheet.set, mendSheet(sheet, bible, before).features)
+    ? withFound(bible, sheet.set, mendSheet(sheet, bible, before))
     : bible;
   const script = sheet
     ? stageStory(sheet, staged, { before })
@@ -207,6 +209,7 @@ export function studioMakeOf(
           page: row.position + 1,
           castKey: studioCastKey(show.id),
           setsKey: studioSetsKey(show.id),
+          ownKey: studioOwnKey(show.id),
           bookTitle: show.title,
         }
       : null,
@@ -742,7 +745,13 @@ export class StudioProcessor {
         sheet: mended.sheet,
         mended: mended.mended,
         features: mended.features,
-        problems: checkSheet(mended.sheet, bible, planned, before),
+        // Held to the show as the words grew it: a thing they named is there.
+        problems: checkSheet(
+          mended.sheet,
+          withFound(bible, mended.sheet.set, mended),
+          planned,
+          before,
+        ),
       };
     };
     let best = judged(first.value);
@@ -773,20 +782,27 @@ export class StudioProcessor {
       best = {
         ...best,
         sheet,
-        problems: checkSheet(sheet, bible, planned, before),
+        problems: checkSheet(
+          sheet,
+          withFound(bible, sheet.set, mendSheet(sheet, bible, before)),
+          planned,
+          before,
+        ),
       };
     }
     if (best.mended.length)
       this.logger.log(
         `studio ${episode.id} s${k + 1}: mended: ${best.mended.slice(0, 8).join('; ')}`,
       );
-    // A feature the words name joins its set for good, as new places and
-    // people join the cast: the next scene there has it too.
-    const features = mendSheet(best.sheet, bible, before).features;
-    if (features.length) {
-      const grown = withFeatures(bible, best.sheet.set, features);
+    // A feature the words name joins its set for good, and a thing of the
+    // show's own the show, as new places and people join the cast: the
+    // next scene has them too.
+    const found = mendSheet(best.sheet, bible, before);
+    if (found.features.length || found.things.length) {
+      const grown = withFound(bible, best.sheet.set, found);
       await this.studio.updateShow(show.id, { bible: grown });
       bible.sets.splice(0, bible.sets.length, ...grown.sets);
+      if (grown.things) bible.things = grown.things;
     }
     await this.studio.updateScene(row.id, {
       sheet: best.sheet,
@@ -937,12 +953,14 @@ export class StudioProcessor {
       const made = wanted
         .map((r) => r.sheet)
         .filter((s): s is StorySheet => s?.kind === 'story');
+      const places = new Set(made.map((s) => s.set));
       await this.scenes.prepareStory(
         {
           bible: storyBibleFor(bible, sheets, show.title),
           page: 1,
           castKey: studioCastKey(show.id),
           setsKey: studioSetsKey(show.id),
+          ownKey: studioOwnKey(show.id),
           bookTitle: show.title,
         },
         episode.id,
@@ -954,7 +972,14 @@ export class StudioProcessor {
               ...s.beats.flatMap((b) => (b.who ? [b.who] : [])),
             ]),
           ),
-          places: new Set(made.map((s) => s.set)),
+          places,
+        },
+        // The show's own too, each drawn once before the scenes need it.
+        {
+          things: bible.things ?? [],
+          features: bible.sets
+            .filter((s) => places.has(s.id))
+            .flatMap((s) => (s.features ?? []).filter((f) => f.kind === DRAWN)),
         },
       );
     }

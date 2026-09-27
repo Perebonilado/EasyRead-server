@@ -14,7 +14,7 @@
 import { MAX_BARS, numbersIn, type ChartSpec } from './scene-chart';
 import type {
   ActedMove,
-  FeatureKind,
+  AnyFeatureKind,
   StoryMove,
   ThingAction,
 } from './scene-doings';
@@ -45,7 +45,8 @@ import {
   type Passage,
   type PropAction,
 } from './scene-directions';
-import { propsIn, type StageProp } from './scene-props';
+import { propsIn, type OwnPropDrawing } from './scene-props';
+import type { SetPiece } from './scene-set-pieces';
 import {
   STAGE_RECIPES,
   type LearningStage,
@@ -259,7 +260,8 @@ export interface SceneBeat {
     at: number;
     who: string;
     does: PropAction | ThingAction;
-    prop: StageProp;
+    /** One of the lists' things, or a show's own. */
+    prop: string;
     to: string | null;
     /**
      * A screenplay's own moment for it instead of a word: this many
@@ -585,7 +587,8 @@ export interface SceneGoing {
 export interface SceneFeature {
   id: string;
   name: string;
-  kind: FeatureKind;
+  /** One of the list's kinds, or "drawn": a show's own, which the artist draws. */
+  kind: AnyFeatureKind;
   /** Where it stands, as the viewer sees it: a spot, or at the back. */
   spot: string;
   opens: boolean;
@@ -647,12 +650,23 @@ export interface SceneScript {
   opening?: { show: string[]; backdrop: string | null } | null;
   /** Seconds of what happens without words before the first word: someone walking on. */
   lead?: number;
-  /** The things the page's words set on the stage (bread, a cup): on the table from the start, handled as the narration says. */
-  props?: StageProp[];
+  /** The things the page's words set on the stage (bread, a cup): on the table from the start, handled as the narration says. A Studio show's own too (a kite). */
+  props?: string[];
   /** Before whom each thing rests, when a scene says (the Studio's): else before whoever first handles it. */
-  propsNear?: Partial<Record<StageProp, string>>;
+  propsNear?: Partial<Record<string, string>>;
   /** Who holds each thing as the scene opens, in a hand or the mouth (the Studio's): the ball in Pip's mouth. */
-  propsHeld?: Partial<Record<StageProp, { by: string; in: 'hand' | 'mouth' }>>;
+  propsHeld?: Partial<Record<string, { by: string; in: 'hand' | 'mouth' }>>;
+  /** A Studio show's own things among `props`, which the artist draws once for the show: each by its id and name. */
+  ownThings?: { id: string; name: string }[];
+  /**
+   * A Studio show's own things and features as the artist drew them and
+   * code measured them, by id: put in before the scene is composed. One
+   * missing is stood in for (a parcel, something under a cloth).
+   */
+  drawn?: {
+    things?: Record<string, OwnPropDrawing>;
+    features?: Record<string, SetPiece>;
+  };
   /**
    * Where the camera is, from a sentence on, when a scene says (the
    * Studio's): the whole stage, one person close, or two framed together.

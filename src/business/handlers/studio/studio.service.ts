@@ -33,7 +33,7 @@ import {
   mendOutline,
   mendSheet,
   keptFeatures,
-  withFeatures,
+  withFound,
   pickedBeats,
   type SheetProblem,
 } from '../../domain/studio/studio-check';
@@ -900,12 +900,12 @@ export class StudioService {
       edited.beats = pickedBeats(scene.sheet.beats, edited.beats, bible);
       const mended = mendSheet(edited, bible, before);
       next = mended.sheet;
-      // A feature the words now name joins its set, as a writer's would.
-      if (mended.features.length)
-        await this.studio.updateShow(show.id, {
-          bible: withFeatures(bible, next.set, mended.features),
-        });
-      problems = checkSheet(next, bible, planned?.seconds ?? null, before);
+      // A feature the words now name joins its set, and a thing of the
+      // show's own the show, as a writer's would.
+      const grown = withFound(bible, next.set, mended);
+      if (grown !== bible)
+        await this.studio.updateShow(show.id, { bible: grown });
+      problems = checkSheet(next, grown, planned?.seconds ?? null, before);
     } else {
       next = mendExplainerLines(scene.sheet, body);
       problems = checkExplainer(next, {

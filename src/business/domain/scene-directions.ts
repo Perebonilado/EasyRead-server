@@ -29,13 +29,15 @@ import {
   featureIdOf,
   featureKindOf,
   featuresNamedIn,
+  newFeaturesIn,
+  newThingIn,
   type DoingId,
   type NarratedMove,
   type PropAction,
   type Side,
-  type ThingId,
   type TravelPace,
 } from './scene-doings';
+import { ownNamedIn, type OwnWord } from './scene-own';
 
 /** Someone who may act on a page: their id there, their names, and whether "she" or "he" may mean them. */
 export interface Actor extends Speaker {
@@ -575,8 +577,8 @@ export interface ReadDoing {
   who: string | null;
   /** Toward whom or what: a character's id, a feature's (the word the words use), a thing's, or a side ("@left", "@up"). */
   target: string | null;
-  /** The thing it is done with. */
-  thing: ThingId | null;
+  /** The thing it is done with: one of the lists', or a show's own. */
+  thing: string | null;
   /** The feature gone out or in by: "out the gate", "under the fence". */
   via: string | null;
   pace: TravelPace | null;
@@ -584,6 +586,14 @@ export interface ReadDoing {
   away: boolean;
   /** Its own words: from whoever does it to where the next begins. */
   words: string;
+  /**
+   * A thing or a feature no list has, and the show has not got yet, that
+   * its words name where nothing else could be meant: the thing a verb of
+   * handling is done with ("flies his kite"), the feature someone goes to
+   * or sits on ("runs to the signpost"). Its `thing`, `target` or `via` is
+   * that word, for the Studio to have drawn.
+   */
+  fresh?: { thing?: string; feature?: string };
 }
 
 /** Words before a verb that make it a word for a thing, not something done: "a dropped piece", "the open door". */
@@ -627,11 +637,22 @@ export function doingsIn(
     /** Whose beat it is: never their own target. */
     who?: string | null;
     /** The thing "it" means, from the beats before. */
-    lastThing?: ThingId | null;
+    lastThing?: string | null;
     /** Who was named before, the latest last: whom "him" and "her" mean. */
     recent?: readonly string[];
+    /** A show's own things and features, drawn by the artist: known by their names as the lists' are. */
+    things?: readonly OwnWord[];
+    features?: readonly OwnWord[];
   },
 ): ReadDoing[] {
+  const ownThings = known.things ?? [];
+  const ownFeatures = known.features ?? [];
+  /** Words that are never a new thing or feature: the show's own, and its people's names. */
+  const knownWords = [
+    ...ownThings.map((t) => t.name),
+    ...ownFeatures.map((f) => f.name),
+    ...known.actors.flatMap((a) => a.names),
+  ];
   const text = words;
   const found: { id: DoingId; at: number; end: number; order: number }[] = [];
   DOINGS.forEach((doing, order) => {
@@ -718,15 +739,20 @@ export function doingsIn(
           break;
         }
     }
-    const named = featuresNamedIn(after)[0];
-    const feature = named ? { at: named.at, word: named.word } : null;
+    const named = featuresNamedIn(after, ownFeatures)[0];
+    let feature = named ? { at: named.at, word: named.word } : null;
     // The thing: named after the verb, or inside its words ("lifts the cup
     // up"), never the verb itself ("bowls the ball").
     const own = text
       .slice(verb.at, upTo)
       .replace(/^\S+/u, (word) => ' '.repeat(word.length));
     // A thing's word naming a feature ("a tomato crate") is the feature's.
-    const firstThing = firstOf(own, THING_WORDS);
+    const listedThing = firstOf(own, THING_WORDS);
+    const showsThing = ownNamedIn(own, ownThings);
+    const firstThing =
+      showsThing && (!listedThing || showsThing.at < listedThing.at)
+        ? { key: showsThing.id, at: showsThing.at, word: showsThing.word }
+        : listedThing;
     const nextWord = firstThing
       ? /^\s+([\p{L}-]+)/u.exec(
           own.slice(firstThing.at + firstThing.word.length),
@@ -736,13 +762,43 @@ export function doingsIn(
     const itIs = /^\s*(?:\p{L}+ly\s+)?(?:it|them|one|a piece|a bit)\b/iu.test(
       after,
     );
-    const thing: ThingId | null =
+    let thing: string | null =
       thingNamed?.key ??
       (itIs &&
       (doing.kind === 'handle' || verb.id === 'chase' || verb.id === 'fetch')
         ? lastThing
         : null);
+    // A thing no list has, done with as only a thing is: "flies his kite",
+    // "picks up a drum", "fetches the frisbee".
+    let fresh: ReadDoing['fresh'];
+    if (
+      !thing &&
+      ((doing.kind === 'handle' && verb.id !== 'open' && verb.id !== 'close') ||
+        verb.id === 'fetch')
+    ) {
+      const found = newThingIn(after, knownWords);
+      if (found) {
+        thing = found.word;
+        fresh = { thing: found.word };
+      }
+    }
     if (thing) lastThing = thing;
+    // A feature no list has, where the words go to it, sit on it, hide
+    // behind it or open it: "runs to the signpost", "opens the cupboard".
+    if (
+      !feature &&
+      !thingNamed &&
+      (doing.aims.includes('feature') || doing.kind === 'travel')
+    ) {
+      const skip = verb.end - verb.at;
+      const found = newFeaturesIn(text.slice(verb.at, upTo), knownWords).find(
+        (one) => one.at >= skip,
+      );
+      if (found) {
+        feature = { at: found.at - skip, word: found.word };
+        fresh = { ...fresh, feature: found.word };
+      }
+    }
     // A thing is where a move goes only when the words send it there:
     // "after it", "at the cup"; never "ball in his mouth".
     const thingAimed =
@@ -808,6 +864,13 @@ export function doingsIn(
           ? 'walk'
           : null;
     const upToNext = verbs[i + 1] ? subjects[i + 1].start : upTo;
+    const freshThing =
+      fresh?.thing && fresh.thing === thing ? fresh.thing : undefined;
+    const freshFeature =
+      fresh?.feature &&
+      (target === fresh.feature || (byWay && featureId === fresh.feature))
+        ? fresh.feature
+        : undefined;
     out.push({
       do: verb.id,
       at: verb.at,
@@ -822,6 +885,15 @@ export function doingsIn(
         .slice(subjects[i].start, Math.min(upTo, upToNext))
         .replace(/[\s,]*(?:and|then|and then)?[\s,]*$/iu, '')
         .trim(),
+      // Only what the doing has taken for its own.
+      ...(freshThing || freshFeature
+        ? {
+            fresh: {
+              ...(freshThing ? { thing: freshThing } : {}),
+              ...(freshFeature ? { feature: freshFeature } : {}),
+            },
+          }
+        : {}),
     });
   });
   // Going out and vanishing is one going: the squeeze under the gate is

@@ -14,6 +14,16 @@
  * parts of this one.
  */
 import { FIGURE_GEAR, type FigureGear } from './scene-figure';
+import {
+  DRAWN,
+  OWN_DETERMINER,
+  mayBeFeature,
+  nounAt,
+  ownIdOf,
+  ownWords,
+  type Drawn,
+  type OwnWord,
+} from './scene-own';
 import { PROP_WORDS, STAGE_PROPS, type StageProp } from './scene-props';
 
 /** A move of the body, going somewhere, or handling a thing. */
@@ -933,8 +943,9 @@ const doings: Record<DoingId, Omit<Doing, 'id'>> = {
     thing: 'held',
     aims: ['side'],
     aimed: false,
+    // A kite flown is held up high.
     words:
-      /\b(?:rais(?:e|es|ed|ing)|lift(?:s|ed|ing)? (?:it |them |the \p{L}+ )?up|h(?:olds?|eld|olding) (?:it |them |the \p{L}+ )?(?:up|high|aloft)|bless(?:es|ed|ing)?|g(?:ive|ives|ave|iving) thanks)\b/iu,
+      /\b(?:rais(?:e|es|ed|ing)|lift(?:s|ed|ing)? (?:it |them |the \p{L}+ )?up|h(?:olds?|eld|olding) (?:it |them |the \p{L}+ )?(?:up|high|aloft)|bless(?:es|ed|ing)?|g(?:ive|ives|ave|iving) thanks|fl(?:y|ies|ew|ying)(?= (?:a|an|the|his|her|their|its|my|your|our) ))\b/iu,
     ms: 1400,
     leastMs: 700,
     keyAt: 0.5,
@@ -1105,6 +1116,10 @@ export const THING_WORDS: Record<ThingId, RegExp> = {
   staff: /\b(?:staffs?|crooks?|walking sticks?)\b/iu,
 };
 
+/** Whether a word names one of the lists' things: a ball, a cup, a staff. */
+export const isThingWord = (word: string): boolean =>
+  THINGS.some((thing) => THING_WORDS[thing].test(word));
+
 /** Whether a thing is one of the stage's own, handled and passed about apart from anyone, not gear drawn in a hand. */
 export const isStageProp = (
   thing: string | null | undefined,
@@ -1174,21 +1189,43 @@ export const OPENING_FEATURES: readonly FeatureKind[] = [
   'vehicle',
 ];
 
+/** A feature's kind: one of the list's, or one of a show's own, which the artist draws. */
+export type AnyFeatureKind = FeatureKind | Drawn;
+
+/** The words for a feature: its kind's, or, one of a show's own, its name's. */
+export const featureWordsOf = (feature: {
+  kind: AnyFeatureKind;
+  name: string;
+}): RegExp =>
+  feature.kind === DRAWN ? ownWords(feature.name) : FEATURE_WORDS[feature.kind];
+
 /**
  * The features a text names, first first: a word for one after "the", "a"
  * or "his" and at most one word more ("the open door", "a tomato crate"),
  * never a likeness ("faster than a danfo") or a verb ("the gate swings").
+ * `own` are a show's own features, known by their names.
  */
 export function featuresNamedIn(
   text: string,
-): { kind: FeatureKind; word: string; at: number }[] {
-  const found: { kind: FeatureKind; word: string; at: number }[] = [];
-  for (const kind of FEATURE_KINDS) {
+  own: readonly OwnWord[] = [],
+): { kind: AnyFeatureKind; word: string; at: number }[] {
+  const found: { kind: AnyFeatureKind; word: string; at: number }[] = [];
+  const all: { kind: AnyFeatureKind; words: RegExp }[] = [
+    ...FEATURE_KINDS.map((kind) => ({ kind, words: FEATURE_WORDS[kind] })),
+    ...own.map((one) => ({ kind: DRAWN, words: ownWords(one.name) })),
+  ];
+  for (const { kind, words } of all) {
     const pattern = new RegExp(
-      `(?<=\\b(?:the|a|an|that|this|his|her|their|its|our|my|your)\\s+(?:[\\p{L}-]+\\s+)?)(?:${FEATURE_WORDS[kind].source})`,
+      `(?<=\\b(?:the|a|an|that|this|his|her|their|its|our|my|your)\\s+(?:[\\p{L}-]+\\s+)?)(?:${words.source})`,
       'giu',
     );
     for (const m of text.matchAll(pattern)) {
+      // One of the lists' own words is theirs, never a show's.
+      if (
+        kind === DRAWN &&
+        found.some((f) => f.at <= m.index && m.index < f.at + f.word.length)
+      )
+        continue;
       const before = text.slice(Math.max(0, m.index - 32), m.index);
       if (
         /\b(?:than|like|as)\s+(?:a|an|the)\s+(?:[\p{L}-]+\s+)?$/iu.test(before)
@@ -1200,7 +1237,7 @@ export function featuresNamedIn(
         !/^(?:the|a|an|that|this|his|her|their|its|our|my|your)$/iu.test(
           between,
         ) &&
-        FEATURE_KINDS.some((other) => FEATURE_WORDS[other].test(between))
+        all.some((other) => other.words.test(between))
       )
         continue;
       found.push({ kind, word: m[0], at: m.index });
@@ -1230,8 +1267,12 @@ const DOES_SHUT =
  * opens") at the words that say it, or how it stands ("the gate is open
  * a crack", "the open door"), which is how the scene finds it.
  */
-export function featureStatesIn(text: string): {
-  kind: FeatureKind;
+export function featureStatesIn(
+  text: string,
+  /** A show's own features, known by their names. */
+  own: readonly OwnWord[] = [],
+): {
+  kind: AnyFeatureKind;
   word: string;
   state: 'open' | 'shut';
   /** How it stands, not a change. */
@@ -1240,7 +1281,7 @@ export function featureStatesIn(text: string): {
   at: number;
 }[] {
   const found: ReturnType<typeof featureStatesIn> = [];
-  for (const named of featuresNamedIn(text)) {
+  for (const named of featuresNamedIn(text, own)) {
     const before = text.slice(0, named.at);
     const after = text.slice(named.at + named.word.length);
     const stateOf = (w: string): 'open' | 'shut' =>
@@ -1306,6 +1347,151 @@ export function featureStatesIn(text: string): {
 /** The kind of feature a word names, or null for none. */
 export const featureKindOf = (word: string): FeatureKind | null =>
   FEATURE_KINDS.find((kind) => FEATURE_WORDS[kind].test(word)) ?? null;
+
+/** Whether a word is one of the lists' things or features: never one of a show's own. */
+const listed = (word: string) =>
+  featureKindOf(word) !== null || isThingWord(word);
+
+/** Where someone may be found by a feature, or something set: "by the", "against a". */
+const PLACING =
+  '(?:next to|by|beside|near|under|underneath|beneath|behind|against|in front of|on top of|at the foot of)';
+/** Where a thing comes to rest in or on one: "stuck in the", "lands on a". */
+const LODGED =
+  '(?:stuck|caught|tangled|lodged|hangs?|hanging|hung|lands?|landed|landing|perched|high up|up) (?:in|on|on top of)';
+/** Verbs that set something big somewhere, and so make it a feature: "leans her bicycle against". */
+const STANDS_UP =
+  '(?:lean(?:s|ed|t|ing)?|park(?:s|ed|ing)?|prop(?:s|ped|ping)?|chain(?:s|ed|ing)?)';
+/** Ways of going to or into one, or being at it: "runs to the", "climbs into a", "sits on the". */
+const GOES_TO = `(?:${[
+  'walk(?:s|ed|ing)?',
+  'r[au]n(?:s|ning)?',
+  'go(?:es|ing)?',
+  'went',
+  'head(?:s|ed|ing)?',
+  'hurr(?:y|ies|ied|ying)',
+  'rush(?:es|ed|ing)?',
+  'dash(?:es|ed|ing)?',
+  'rac(?:e|es|ed|ing)',
+  'dart(?:s|ed|ing)?',
+  'step(?:s|ped|ping)?',
+  'jump(?:s|ed|ing)?',
+  'leap(?:s|t|ed|ing)?',
+  'hop(?:s|ped|ping)?',
+  'climb(?:s|ed|ing)?',
+  'clamber(?:s|ed|ing)?',
+  'scrambl(?:e|es|ed|ing)',
+  'crawl(?:s|ed|ing)?',
+  'creep(?:s|ing)?',
+  'crept',
+  'sneak(?:s|ing)?',
+  'squeez(?:e|es|ed|ing)',
+  'slip(?:s|ped|ping)?',
+  'wriggl(?:e|es|ed|ing)',
+  'duck(?:s|ed|ing)?',
+  'hid(?:e|es|ing)?',
+  'sit(?:s|ting)?',
+  'sat',
+  'st(?:and|ands|ood|anding)',
+  'li(?:e|es|ying)',
+  'lay',
+  'perch(?:es|ed|ing)?',
+  'kneel(?:s|ing)?',
+  'knelt',
+  'shelter(?:s|ed|ing)?',
+  'wait(?:s|ed|ing)?',
+  'paddl(?:e|es|ed|ing)',
+  'get(?:s|ting)?',
+  'got',
+].join(
+  '|',
+)})(?:\\s+\\p{L}+ly)?(?:\\s+(?:back|over|up|down|out|off|away|in))?\\s+(?:to|into|onto|through|under|out of|up|over|across|toward|towards|round|around|past|behind|beside|by|near|next to|on|in|inside|against|up to|over to|across to|down to|in through|out through)`;
+/** Someone opening or shutting something: "opens the", "slams his"; never how it stands ("open a crack"). */
+const OPENS_SHUTS =
+  '(?:opens|opened|opening|unlocks|unlocked|shuts|shutting|closes|closed|closing|slams|slammed|locks|locked|(?:swings?|swung|push(?:es|ed)?|pull(?:s|ed)?|throws?|threw|flings?|flung|kicks?|kicked) open)(?=\\s+(?:the|his|her|their|its|my|your|our|that|this)\\s)';
+
+/**
+ * The features a text names that no list has, first first, each where
+ * the words say plainly it is one: someone found or something set by it
+ * ("by the signpost", "against the shed"), a thing lodged in it ("stuck
+ * in the baobab"), something big set there ("leans her bicycle against"),
+ * someone going to, into or under it, or sitting on it ("runs to the
+ * signpost", "sits on the log"), or it opened or shut ("opens the
+ * cupboard"). Never one of the lists' own words, nor `known` (a show's
+ * own features and things, and its people's names), nor a word for the
+ * body, people, a place or the weather.
+ */
+export function newFeaturesIn(
+  text: string,
+  known: readonly string[] = [],
+  /** Only where someone or something is found by it or on it ("by the signpost"): what a line says is there. */
+  placedOnly = false,
+): { word: string; at: number }[] {
+  const found: { word: string; at: number }[] = [];
+  const add = (from: number) => {
+    const noun = nounAt(text.slice(from));
+    if (!noun) return;
+    const word = ownIdOf(noun.word);
+    if (
+      !word ||
+      !mayBeFeature(noun.word) ||
+      listed(noun.word) ||
+      known.some((k) => ownIdOf(k) === word || k.toLowerCase() === noun.word) ||
+      found.some((f) => f.word === word)
+    )
+      return;
+    found.push({ word, at: from + noun.at });
+  };
+  for (const phrase of placedOnly
+    ? [PLACING, LODGED]
+    : [PLACING, LODGED, GOES_TO, OPENS_SHUTS])
+    for (const m of text.matchAll(new RegExp(`\\b${phrase}\\s*`, 'giu')))
+      add(m.index + m[0].length);
+  // "leans her bicycle against the wall": the bicycle, set by the wall.
+  if (!placedOnly)
+    for (const m of text.matchAll(
+      new RegExp(
+        `\\b${STANDS_UP}\\s+(?=${OWN_DETERMINER}\\s+(?:[\\p{L}-]+\\s+){1,3}?${PLACING}\\b)`,
+        'giu',
+      ),
+    ))
+      add(m.index + m[0].length);
+  return found.sort((a, b) => a.at - b.at);
+}
+
+/**
+ * A thing no list has, handled in the words that follow a verb of
+ * handling: the first named ("his kite", "a drum") that is no place it
+ * goes to ("to the gate"), none of the lists' own words, nor `known`, nor
+ * a word for the body or for people. Null for none.
+ */
+export function newThingIn(
+  after: string,
+  known: readonly string[] = [],
+): { word: string; at: number } | null {
+  for (const m of after.matchAll(
+    new RegExp(`(?:^|\\s)(?=${OWN_DETERMINER}\\s)`, 'gu'),
+  )) {
+    const from = m.index + m[0].length;
+    // Where it goes, not what it is: "to the gate", "at Maya's feet".
+    if (
+      /\b(?:to|at|toward|towards|into|onto|under|over|through|against|by|beside|behind|near|on|in|inside|from|off|of|for|with|after|past|across|round|around)\s*$/iu.test(
+        after.slice(0, from),
+      )
+    )
+      continue;
+    const noun = nounAt(after.slice(from));
+    if (!noun) continue;
+    const word = ownIdOf(noun.word);
+    if (
+      !word ||
+      listed(noun.word) ||
+      known.some((k) => ownIdOf(k) === word || k.toLowerCase() === noun.word)
+    )
+      return null;
+    return { word, at: from + noun.at };
+  }
+  return null;
+}
 
 /** The id a feature is known by: the word the words use for it, singular. */
 export function featureIdOf(word: string): string {

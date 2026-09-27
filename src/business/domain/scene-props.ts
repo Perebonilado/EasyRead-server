@@ -126,16 +126,21 @@ export const PROP_KIND: Record<StageProp, 'food' | 'drink' | 'thing'> = {
   fur: 'thing',
 };
 
+/** How a thing moves loose, once it leaves a hand, and how it is carried. */
+export interface PropLoose {
+  bounce: number;
+  rolls?: true;
+  spins?: true;
+  hangs?: true;
+}
+
 /**
  * How each thing moves loose, once it leaves a hand: how often it bounces
  * where it lands (a ball twice, a cup not at all), whether it rolls on,
  * and whether it turns over in the air. And a bag is carried hanging at
  * the side, not held up before them.
  */
-export const PROP_LOOSE: Record<
-  StageProp,
-  { bounce: number; rolls?: true; spins?: true; hangs?: true }
-> = {
+export const PROP_LOOSE: Record<StageProp, PropLoose> = {
   bread: { bounce: 0 },
   cup: { bounce: 0 },
   fish: { bounce: 1, spins: true },
@@ -180,6 +185,9 @@ export function propsIn(
   return found.sort((a, b) => a.at - b.at).map((f) => f.prop);
 }
 
+/** How big a thing of a show's own is, beside the people: in a hand, in the arms, or bigger. */
+export type PropSize = 'small' | 'medium' | 'large';
+
 /** A prop as the player gets it: its drawing, where it is held, and where it goes to the mouth. */
 export interface PropDrawing {
   svg: string;
@@ -192,6 +200,17 @@ export interface PropDrawing {
   bite: [number, number];
   /** A broken piece, for bread: the left half; the right is its mirror. */
   half?: string;
+}
+
+/**
+ * A thing of a show's own as the stage gets it: the artist's drawing, in
+ * the kit's units, standing on its base at y = 0, and what code measured
+ * of it: how big it is, where a hand and a mouth hold it, and how it moves
+ * loose.
+ */
+export interface OwnPropDrawing extends PropDrawing {
+  size: PropSize;
+  loose: PropLoose;
 }
 
 const LINE = 2.6;

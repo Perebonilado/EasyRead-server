@@ -20,7 +20,6 @@
 import { faceOfLine } from '../scene-feeling';
 import { directionsIn, doingsIn, type Actor } from '../scene-directions';
 import {
-  FEATURE_WORDS,
   aimedFeature,
   bobbingMove,
   doingOf,
@@ -28,17 +27,18 @@ import {
   featureAim,
   featureIdOf,
   featureStatesIn,
+  featureWordsOf,
   isStageProp,
+  type AnyFeatureKind,
   type Doing,
   type DoingId,
-  type FeatureKind,
   type StageMove,
   type ThingAction,
-  type ThingId,
 } from '../scene-doings';
 import { STATION_SHARES } from '../scene-layout';
 import { genderOf } from '../scene-script';
-import { PROP_KIND, type StageProp } from '../scene-props';
+import { PROP_KIND } from '../scene-props';
+import { DRAWN } from '../scene-own';
 import {
   fitLayout,
   type SceneBeat,
@@ -66,6 +66,8 @@ import {
   type StudioBible,
   type StudioCharacter,
   type StudioFeature,
+  handledOn,
+  kindOn,
 } from './studio';
 
 /**
@@ -265,7 +267,7 @@ export function placementsOf(
   sheet.beats.forEach((beat, at) => {
     if ((beat.kind === 'line' || beat.kind === 'narration') && beat.say.trim())
       for (const feature of features) {
-        const word = `(?:${FEATURE_WORDS[feature.kind].source}|${escapedWord(feature.name)})`;
+        const word = `(?:${featureWordsOf(feature).source}|${escapedWord(feature.name)})`;
         const m = new RegExp(
           `\\b(next to|by|beside|near|under|underneath|beneath|behind)\\s+(?:the|a|an|that|this|his|her|their|its)\\s+(?:[\\p{L}-]+\\s+)?${word}`,
           'iu',
@@ -330,10 +332,10 @@ export function featureSide(
 export function comesWith(
   character: StudioCharacter | undefined,
   before:
-    | { cast?: string[]; held?: { who: string; thing: ThingId }[] }
+    | { cast?: string[]; held?: { who: string; thing: string }[] }
     | null
     | undefined,
-): ThingId[] {
+): string[] {
   if (!character) return [];
   if (before?.cast?.includes(character.id))
     return (before.held ?? [])
@@ -539,11 +541,12 @@ export function featureStatesOf(
   const open = new Set<string>();
   const changes: SceneFeatureState[] = [];
   const known = new Set<string>();
-  const byWord = (word: string, kind: FeatureKind) =>
+  const byWord = (word: string, kind: AnyFeatureKind) =>
     features.find((f) => f.id === featureIdOf(word)) ??
-    (features.filter((f) => f.kind === kind).length === 1
+    (kind !== DRAWN && features.filter((f) => f.kind === kind).length === 1
       ? features.find((f) => f.kind === kind)
       : undefined);
+  const own = features.filter((f) => f.kind === DRAWN);
   let spoken = -1;
   for (const beat of sheet.beats) {
     if (beat.kind !== 'line' && beat.kind !== 'narration') continue;
@@ -551,7 +554,7 @@ export function featureStatesOf(
     spoken += 1;
     if (beat.kind !== 'narration') continue;
     const say = beat.say.trim();
-    for (const one of featureStatesIn(say)) {
+    for (const one of featureStatesIn(say, own)) {
       const feature = byWord(one.word, one.kind);
       if (!feature?.opens) continue;
       if (!known.has(feature.id)) {
@@ -588,7 +591,7 @@ export function stageStory(
     /** How the scene before left things: what someone who comes on later still holds. */
     before?: {
       cast?: string[];
-      held?: { who: string; thing: ThingId }[];
+      held?: { who: string; thing: string }[];
     } | null;
   } = {},
 ): SceneScript {
@@ -596,10 +599,18 @@ export function stageStory(
   const place = bible.sets.find((s) => s.id === sheet.set) ?? null;
   const placeId = place ? placeThingId(place.id) : null;
   const features = new Map((place?.features ?? []).map((f) => [f.id, f]));
+  /** A thing handled apart from anyone (one of the lists', or the show's own), and what it is. */
+  const handled = handledOn(bible);
+  const kindOf = kindOn(bible);
+  /** The show's own, as the words reader knows them. */
+  const own = {
+    things: bible.things ?? [],
+    features: [...features.values()].filter((f) => f.kind === DRAWN),
+  };
   /** Whether the set's painting shows a feature: its look names it. */
   const inLook = (f: StudioFeature) =>
     Boolean(place?.look) &&
-    (FEATURE_WORDS[f.kind].test(place!.look) ||
+    (featureWordsOf(f).test(place!.look) ||
       place!.look.toLowerCase().includes(f.name.toLowerCase()));
 
   // Everyone the scene has a part for: on the stage as it opens, coming
@@ -609,7 +620,7 @@ export function stageStory(
     if (beat.who && byId.has(beat.who)) parts.add(beat.who);
   const opening = new Map(sheet.onStage.map((p) => [p.who, p]));
   /** Who holds each thing as the scene opens, or brings it on: a thing of its own, apart from them. */
-  const startsHeld = new Map<StageProp, string>();
+  const startsHeld = new Map<string, string>();
   const resting = new Set(sheet.props.map((p) => p.prop));
   const cast: SceneThing[] = [];
   if (place && placeId)
@@ -637,7 +648,7 @@ export function stageStory(
     const holding = holds.find(isGear) ?? null;
     for (const thing of holds)
       if (
-        isStageProp(thing) &&
+        handled(thing) &&
         !startsHeld.has(thing) &&
         !(resting.has(thing) && !at)
       )
@@ -1032,11 +1043,11 @@ export function stageStory(
       const hands: SceneEffect[] = [];
       let walked = false;
       if (beat.kind === 'narration')
-        for (const one of doingsIn(beat.say, { actors: called })) {
+        for (const one of doingsIn(beat.say, { actors: called, ...own })) {
           const feature = one.target
             ? (features.get(featureIdOf(one.target)) ??
               [...features.values()].find((f) =>
-                FEATURE_WORDS[f.kind].test(one.target!),
+                featureWordsOf(f).test(one.target!),
               ))
             : undefined;
           if (
@@ -1223,7 +1234,7 @@ export function stageStory(
             if (
               doing.id === 'chase' &&
               after &&
-              isStageProp(after) &&
+              handled(after) &&
               holders.get(after) === null &&
               lies.has(after)
             )
@@ -1253,7 +1264,7 @@ export function stageStory(
             feature,
             state: doing.id === 'open' ? 'open' : 'shut',
           });
-      } else if (raw.prop && isStageProp(raw.prop))
+      } else if (raw.prop && handled(raw.prop))
         handleBeat(raw, raw.prop, who, plays.prop, aim, moment);
       else
         // Nothing to hand: a kick at the air, a chew on nothing; else the
@@ -1298,18 +1309,14 @@ export function stageStory(
    */
   function handleBeat(
     raw: SheetBeat,
-    prop: StageProp,
+    prop: string,
     who: string,
     asked: ThingAction,
     aim: string | null,
     moment: { after: number; offset: number; s: number },
   ): void {
     let does = asked;
-    if (
-      does === 'chew' &&
-      PROP_KIND[prop] === 'food' &&
-      holders.get(prop) === who
-    )
+    if (does === 'chew' && kindOf(prop) === 'food' && holders.get(prop) === who)
       does = 'eat';
     if (does === 'catch') {
       // Thrown to them: the throw's own catch has it.
@@ -1352,7 +1359,7 @@ export function stageStory(
   }
 
   /** Whether the next thing someone does after a beat is to go after a thing: a chase, a fetch. */
-  function chasedNext(raw: SheetBeat, by: string, prop: StageProp): boolean {
+  function chasedNext(raw: SheetBeat, by: string, prop: string): boolean {
     const next = sheet.beats
       .slice(sheet.beats.indexOf(raw) + 1)
       .find(
@@ -1398,7 +1405,7 @@ export function stageStory(
 
   /** A thing handled at its own moment in the quiet, in the sheet's order. */
   function handle(
-    prop: StageProp,
+    prop: string,
     who: string,
     does: ThingAction,
     to: string | null,
@@ -1454,19 +1461,19 @@ export function stageStory(
   // Every thing on the stage: resting as it opens, or in someone's hand
   // or mouth; and any the sheet handles that it did not list.
   const props = [
-    ...new Set<StageProp>([
+    ...new Set<string>([
       ...sheet.props.map((p) => p.prop),
       ...startsHeld.keys(),
       ...beats.flatMap((b) => (b.business ?? []).map((one) => one.prop)),
     ]),
-  ];
+  ].filter(handled);
   if (actors.length) {
     const { acts, business } = directionsIn(
       beats.map((beat) => (beat.kind === 'line' ? '' : beat.say)),
       actors,
       [],
       new Map(),
-      props,
+      props.filter(isStageProp),
     );
     for (const { beat, ...act } of acts) (beats[beat].acts ??= []).push(act);
     const done = new Set(
@@ -1534,6 +1541,14 @@ export function stageStory(
     ...(placeId ? { backdrop: placeId } : {}),
     ...(lead > 0 ? { lead } : {}),
     ...(props.length ? { props } : {}),
+    // The show's own among them, for the artist to draw once for the show.
+    ...(props.some((p) => !isStageProp(p))
+      ? {
+          ownThings: own.things
+            .filter((t) => props.includes(t.id))
+            .map((t) => ({ id: t.id, name: t.name })),
+        }
+      : {}),
     ...(Object.keys(propsNear).length ? { propsNear } : {}),
     ...(Object.keys(propsHeld).length ? { propsHeld } : {}),
     ...(camera.some((shot) => shot.shot !== 'wide') ? { camera } : {}),

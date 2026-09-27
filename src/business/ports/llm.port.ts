@@ -607,6 +607,18 @@ export interface LlmGatewayPort {
   }): Promise<LlmResult<FigureDraft>>;
 
   /**
+   * How big a thing a story names really is, as it is in the story's
+   * world (a kite, a bicycle, a hut): its height as it usually stands, and
+   * its length, in centimetres. For drawing a show's own among its people
+   * at their scale: an artist draws to fill its canvas, whatever the size.
+   */
+  sceneSize(input: {
+    name: string;
+    /** The story's world, in a few words: "a village in Ghana, today". */
+    world: string | null;
+  }): Promise<LlmResult<{ heightCm: number; lengthCm: number }>>;
+
+  /**
    * One drawing, as SVG markup with its own animation, from its brief.
    * The value is the artist's whole reply; the gate takes the markup out
    * of it. `notes` say what fell short last time.

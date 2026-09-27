@@ -10,7 +10,8 @@
  * same drawing stands on every page they are on, the same way round
  * beside anyone else, with the face the last page left them with.
  */
-import type { FeatureKind } from './scene-doings';
+import type { AnyFeatureKind } from './scene-doings';
+import { DRAWN } from './scene-own';
 import { figureOf, type FigureProp, type FigureSpec } from './scene-figure';
 import { iconicOf } from './scene-iconic';
 import { setApart } from './scene-looks';
@@ -262,7 +263,12 @@ export interface StoryPlace {
   /** Worked out from what happens there, not said by the text: general, and shared. */
   inferred?: boolean;
   /** A Studio set's fixed things its stories act on, and where each stands: the painter draws those the stage does not. */
-  features?: { id: string; name: string; kind: FeatureKind; spot: string }[];
+  features?: {
+    id: string;
+    name: string;
+    kind: AnyFeatureKind;
+    spot: string;
+  }[];
 }
 
 export interface StoryPage {
@@ -1570,9 +1576,13 @@ export function setThing(
     place.kind !== 'vessel';
   // The fixed things its stories act on: the stage draws those people go
   // through, sit on or stand by; the painter the rest, each a group.
+  // A show's own (a bicycle, a signpost) the artist draws apart, once for
+  // the show, and the stage stands among the people: left out too.
   const features = place.features ?? [];
-  const left = features.filter((f) => ACTED_PIECES.includes(f.kind));
-  const drawn = features.filter((f) => !ACTED_PIECES.includes(f.kind));
+  const stages = (f: (typeof features)[number]) =>
+    f.kind === DRAWN || ACTED_PIECES.includes(f.kind);
+  const left = features.filter(stages);
+  const drawn = features.filter((f) => !stages(f));
   const where = (spot: string) =>
     ({
       left: 'at the left',
@@ -1683,6 +1693,94 @@ const SIZES: Record<StorySize, string> = {
   medium: "It is about as tall as a grown-up's waist.",
   large: 'It is as tall as a grown-up, or taller.',
 };
+
+/**
+ * The canvases a show's own things and features are drawn on, in the
+ * figure kit's units: a grown-up stands 224 tall beside them, so what is
+ * drawn at its true size is measured at it.
+ */
+export const OWN_THING_CANVAS = { w: 240, h: 240 } as const;
+export const OWN_FEATURE_CANVAS = { w: 640, h: 400 } as const;
+
+/** How a show's own is drawn to stand among its people: the kit's hand, and nothing else. */
+const OWN_STYLE = [
+  'Draw it to stand beside cartoon people drawn in one style: flat colours with no gradients, shading or texture, simple rounded shapes like cut paper, and one dark outline (#2d2a32) about three units wide.',
+  'Draw it alone: no people, no faces on it, no words, no ground, shadow or backdrop under it.',
+].join(' ');
+
+/**
+ * A thing of a show's own (a kite, a drum) as the artist is asked to draw
+ * it, once for the show: still, at its true size in the kit's units, and
+ * the part a hand holds it by a group of its own, so code can measure how
+ * big it is and where a hand and a mouth hold it.
+ */
+export function ownThingBrief(
+  thing: { id: string; name: string },
+  bookTitle: string,
+  world: StoryWorld | null = null,
+): DrawingThing {
+  return {
+    id: `thing-${thing.id}`,
+    kind: 'drawing',
+    name: thing.name,
+    brief: [
+      `A ${thing.name}, a thing the people of "${bookTitle}" hold, carry and throw: the ${thing.name} alone and whole, seen from the side.`,
+      worldText(world),
+      OWN_STYLE,
+      `The canvas is in the units of the people it is drawn beside: a grown-up is 224 units tall, a child 190, a hand about 20 across. Draw it at its true size in those units, resting on the bottom edge in the middle, and leave the rest of the canvas empty: a key is about 16 long, a cup 30 tall, a ball 26 across, a drum 60 tall, a kite about 90 tall, an umbrella 110 long.`,
+      'Draw the part a hand holds it by (its handle, its string, its strap, or its middle) as its own group with id "grip".',
+    ]
+      .filter(Boolean)
+      .join(' '),
+    motion:
+      'none: draw it still, with no <style> animation and no SMIL; the stage moves it',
+    parts: [{ name: 'grip', label: false }],
+    states: [],
+    shape: 'square',
+    sound: null,
+  };
+}
+
+/**
+ * A feature of a show's own (a bicycle leant on a wall, a signpost, a
+ * canoe) as the artist is asked to draw it, once for the show: still, at
+ * its true size in the kit's units, with what opens, the way through or
+ * under it, and its seat each a group of its own where it has them, so
+ * code can measure how people go through it, sit on it and stand by it.
+ */
+export function ownFeatureBrief(
+  feature: { id: string; name: string; opens: boolean },
+  bookTitle: string,
+  world: StoryWorld | null = null,
+): DrawingThing {
+  return {
+    id: `feature-${feature.id}`,
+    kind: 'drawing',
+    name: feature.name,
+    brief: [
+      `A ${feature.name}, a fixed thing of a place in "${bookTitle}" that its people go to, stand by or use: the ${feature.name} alone and whole, at eye level, as it stands in a scene: side on if it is long (a bicycle, a canoe, a cart), from the front if it is faced (a hut, a stall, a shrine).`,
+      worldText(world),
+      OWN_STYLE,
+      `The canvas is in the units of the people who stand beside it: a grown-up is 224 units tall. Draw it at its true size in those units, standing on the bottom edge in the middle, and leave the rest of the canvas empty: a bicycle is about 110 tall and 180 long, a signpost 230 tall, a canoe 60 tall and 320 long, a hut 280 tall.`,
+      feature.opens
+        ? 'It opens: draw the part that opens (its door, its lid, its flap) shut, as its own group with id "leaf", over a dark way in behind it.'
+        : '',
+      'Only if it has a doorway, an arch or a gap underneath that a person could fit through, draw that way through, down to the ground, as its own group with id "opening". Only if it is made to be sat on (a log, a stool, a sofa, a saddle), draw the top of its seat as its own group with id "seat". Leave out a group it has nothing for.',
+    ]
+      .filter(Boolean)
+      .join(' '),
+    motion:
+      'none: draw it still, with no <style> animation and no SMIL; the stage moves it',
+    parts: [
+      ...(feature.opens ? [{ name: 'leaf', label: false }] : []),
+      { name: 'opening', label: false, optional: true },
+      { name: 'seat', label: false, optional: true },
+    ],
+    states: [],
+    shape: 'wide',
+    sound: null,
+  };
+}
 
 /**
  * A character as the artist is asked to draw them, once for the book: an

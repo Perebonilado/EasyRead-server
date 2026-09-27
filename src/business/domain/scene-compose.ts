@@ -72,17 +72,24 @@ import {
   type SceneThing,
 } from './scene-script';
 import { paletteOf, placeMusic } from './scene-music';
-import { PROP_LOOSE, drawProp } from './scene-props';
+import { PROP_LOOSE, drawProp, type PropLoose } from './scene-props';
 import {
   ACTED_MOVES,
   HELD_MOVES,
   THING_ACTIONS,
   aimedFeature,
   doingOf,
+  isStageProp,
   type ThingAction,
 } from './scene-doings';
 import { figureFrame } from './scene-figure';
-import { ACTED_PIECES, drawPiece, featureGroup } from './scene-set-pieces';
+import { DRAWN } from './scene-own';
+import {
+  ACTED_PIECES,
+  coveredPiece,
+  drawPiece,
+  featureGroup,
+} from './scene-set-pieces';
 import type { DocumentProfile } from './scene-profile';
 import { againstScenery, settledOf, viewOf, withoutJumps } from './scene-film';
 import type { GatedDrawing } from './scene-svg';
@@ -1618,8 +1625,12 @@ export function composeScene(input: ComposeInput): {
     return hand;
   };
   const props: ScenePropDto[] = (script.props ?? []).map((prop) => {
-    const drawn = drawProp(prop);
-    const loose = PROP_LOOSE[prop];
+    // A show's own as the artist drew it; one whose drawing could not be
+    // made is a parcel, so what a scene handles is never missing.
+    const own = script.drawn?.things?.[prop];
+    const drawn = own ?? drawProp(isStageProp(prop) ? prop : 'box');
+    const loose: PropLoose =
+      own?.loose ?? (isStageProp(prop) ? PROP_LOOSE[prop] : PROP_LOOSE.box);
     const held = script.propsHeld?.[prop];
     const does = (handled.get(prop) ?? []).sort((a, b) => a[0] - b[0]);
     return {
@@ -1776,6 +1787,8 @@ export function composeScene(input: ComposeInput): {
           ? {
               svg: piece.svg,
               ...(piece.leaf ? { leaf: piece.leaf } : {}),
+              ...(piece.front ? { front: true as const } : {}),
+              ...(piece.enters ? { enters: true as const } : {}),
             }
           : {}),
         at: { box: at('box'), wide: at('wide') },
@@ -2077,7 +2090,8 @@ export function composeScene(input: ComposeInput): {
       setDrawing?.parts[group] ??
       (setDrawing?.ground?.boxes?.[group] ? group : null);
     const box = found ? setDrawing?.ground?.boxes?.[found] : undefined;
-    const acted = ACTED_PIECES.includes(feature.kind);
+    // A show's own is always the stage's, drawn by the artist for the show.
+    const acted = feature.kind === DRAWN || ACTED_PIECES.includes(feature.kind);
     // One the painting shows where the painter drew it, the stage stands
     // in for when people act on it; one it shows somewhere far off is left
     // as painted, unless it opens or is gone through.
@@ -2090,7 +2104,11 @@ export function composeScene(input: ComposeInput): {
         : !feature.looked;
     return {
       feature,
-      piece: drawn ? drawPiece(feature.kind) : null,
+      piece: !drawn
+        ? null
+        : feature.kind === DRAWN
+          ? (script.drawn?.features?.[feature.id] ?? coveredPiece())
+          : drawPiece(feature.kind),
       group: box ? found : null,
       box: box ?? null,
     };
@@ -2208,7 +2226,9 @@ export function composeScene(input: ComposeInput): {
           return piece &&
             f &&
             feature.spot !== 'back' &&
-            (feature.kind === 'gate' || feature.kind === 'door')
+            (feature.kind === 'gate' ||
+              feature.kind === 'door' ||
+              (feature.kind === DRAWN && piece.enters))
             ? [{ x: f.x + f.w / 2, w: f.w }]
             : [];
         }),

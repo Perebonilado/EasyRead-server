@@ -49,7 +49,7 @@ import {
   endBefore,
   mendSheet,
   repairSheet,
-  withFeatures,
+  withFound,
 } from '../src/business/domain/studio/studio-check';
 import { EntitlementsService } from '../src/business/handlers/documents/entitlements.service';
 import { StudioCastService } from '../src/business/handlers/studio/studio-cast.service';
@@ -240,10 +240,10 @@ async function main(): Promise<void> {
         if (row.sheet?.kind !== 'story') continue;
         const before = endBefore(rows, row.position, bible);
         const sheet = repairSheet(row.sheet, bible, before);
-        const grown = withFeatures(
+        const grown = withFound(
           bible,
           sheet.set,
-          mendSheet(sheet, bible, before).features,
+          mendSheet(sheet, bible, before),
         );
         const had = new Set(
           bible.sets
@@ -253,9 +253,21 @@ async function main(): Promise<void> {
         const added = (
           grown.sets.find((s) => s.id === sheet.set)?.features ?? []
         ).filter((f) => !had.has(f.id));
-        if (!added.length) continue;
+        const things = (grown.things ?? []).filter(
+          (t) => !bible.things?.some((o) => o.id === t.id),
+        );
+        if (!added.length && !things.length) continue;
         console.log(
-          `scene ${row.position + 1}: ${sheet.set} gains ${added.map((f) => f.id).join(', ')}`,
+          `scene ${row.position + 1}: ${[
+            added.length
+              ? `${sheet.set} gains ${added.map((f) => f.id).join(', ')}`
+              : '',
+            things.length
+              ? `the show gains ${things.map((t) => t.id).join(', ')}`
+              : '',
+          ]
+            .filter(Boolean)
+            .join('; ')}`,
         );
         bible = grown;
       }

@@ -1225,6 +1225,10 @@ export interface SceneFeatureDto {
   painted?: string;
   /** Open as the scene opens. */
   open?: true;
+  /** It stands low before the people by it, drawn over them: a show's own canoe, a drum. */
+  front?: true;
+  /** Someone going by it goes in and is gone, as at a door: a show's own that opens (a hut). */
+  enters?: true;
 }
 
 /**
@@ -2349,6 +2353,8 @@ export interface StudioBibleDto {
   subject: string;
   maths: boolean;
   pictures: { name: string; is: string; draw: string }[];
+  /** The show's own things its scenes handle, drawn for it (a kite, a drum), by id; absent, none yet. */
+  things?: string[];
 }
 
 export interface StudioOutlineSceneDto {

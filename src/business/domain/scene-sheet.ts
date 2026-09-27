@@ -5,9 +5,11 @@
  * words set round them keep off it. Checked that every face sits on the
  * head, since a face drawn anywhere else is a second head.
  */
+import render from 'dom-serializer';
+import { Element } from 'domhandler';
 import { parseDocument } from 'htmlparser2';
 import { isolate, type Callout } from './scene-callouts';
-import { elements } from './scene-dom';
+import { elements, byId } from './scene-dom';
 import {
   drawFigure,
   figureFrame,
@@ -16,10 +18,25 @@ import {
   type FigureSpec,
 } from './scene-figure';
 import { groundOf, type SetGround } from './scene-ground';
-import { renderSvg, type InkBox } from './scene-raster';
+import {
+  IDENTITY,
+  apply,
+  invert,
+  multiply,
+  parseTransform,
+  type Matrix,
+} from './scene-joints';
+import type { OwnPropDrawing, PropSize } from './scene-props';
+import { renderSvg, type InkBox, type InkMap } from './scene-raster';
+import type { SetPiece } from './scene-set-pieces';
 import { jointNotes, type SheetRig } from './scene-sheet-rig';
-import { EXPRESSIONS, type StorySize } from './scene-story';
-import { revealedSvg, type GatedDrawing } from './scene-svg';
+import {
+  EXPRESSIONS,
+  OWN_FEATURE_CANVAS,
+  OWN_THING_CANVAS,
+  type StorySize,
+} from './scene-story';
+import { revealedSvg, stillTree, type GatedDrawing } from './scene-svg';
 
 /**
  * Sheets drawn by an older way of drawing them are drawn again. 2: people
@@ -342,5 +359,346 @@ export function castOf(raw: unknown): Cast {
       };
     }
   }
+  return out;
+}
+
+// ── A show's own things and features, measured ──────────────────────────
+
+const r1 = (n: number) => Math.round(n * 10) / 10;
+const r3 = (n: number) => Math.round(n * 1000) / 1000;
+
+/** The kit's units to a centimetre: a grown-up, 224 tall, is about 170 cm. */
+const UNITS_PER_CM = 224 / 170;
+
+/** How big a thing really is, in centimetres, where a model has said. */
+export interface RealSize {
+  heightCm: number;
+  lengthCm: number;
+}
+
+/** A real size that can be drawn at: both sizes numbers, one of them more than nothing. */
+const sane = (size: RealSize | null | undefined): size is RealSize =>
+  Boolean(size) &&
+  Number.isFinite(size!.heightCm) &&
+  Number.isFinite(size!.lengthCm) &&
+  Math.max(size!.heightCm, size!.lengthCm) > 0;
+
+/** How much of a box an ink map fills, 0 to 1: a ball about 0.79, a book nearly all of it. */
+function filling(
+  map: InkMap,
+  viewBox: [number, number, number, number],
+  box: InkBox,
+): number {
+  const [vx, vy, vw, vh] = viewBox;
+  const col = (x: number) =>
+    Math.min(map.cols - 1, Math.max(0, Math.floor(((x - vx) / vw) * map.cols)));
+  const row = (y: number) =>
+    Math.min(map.rows - 1, Math.max(0, Math.floor(((y - vy) / vh) * map.rows)));
+  let ink = 0;
+  let all = 0;
+  for (let r = row(box.y); r <= row(box.y + box.height); r += 1)
+    for (let c = col(box.x); c <= col(box.x + box.width); c += 1) {
+      all += 1;
+      if (map.bits[r * map.cols + c] === '1') ink += 1;
+    }
+  return all ? ink / all : 0;
+}
+
+/**
+ * A drawing of the artist's, still and its own (stillTree), set in the
+ * kit's units: its ink's bottom middle at (0, 0), scaled by `scale`. What
+ * the drawing's root sets for all it holds (a fill, a stroke) is kept.
+ */
+function inKitUnits(
+  root: Element,
+  ink: InkBox,
+  scale: number,
+  pad: number,
+): { svg: string; viewBox: [number, number, number, number] } {
+  const cx = ink.x + ink.width / 2;
+  const base = ink.y + ink.height;
+  const w = ink.width * scale;
+  const h = ink.height * scale;
+  const viewBox: [number, number, number, number] = [
+    r1(-w / 2 - pad),
+    r1(-h - pad),
+    r1(w + pad * 2),
+    r1(h + pad * 2),
+  ];
+  const carried = [
+    'fill',
+    'stroke',
+    'stroke-width',
+    'stroke-linejoin',
+    'stroke-linecap',
+    'style',
+  ]
+    .filter((name) => root.attribs[name])
+    .map((name) => ` ${name}="${root.attribs[name].replace(/"/g, '&quot;')}"`)
+    .join('');
+  const inner = render(root.children, { xmlMode: true, selfClosingTags: true });
+  const xlink = inner.includes('xlink:')
+    ? ' xmlns:xlink="http://www.w3.org/1999/xlink"'
+    : '';
+  return {
+    viewBox,
+    svg: `<svg xmlns="http://www.w3.org/2000/svg"${xlink} viewBox="${viewBox.join(' ')}"><g transform="translate(${r3(-cx * scale)} ${r3(-base * scale)}) scale(${r3(scale)})"${carried}>${inner}</g></svg>`,
+  };
+}
+
+/** A drawing's root and the ink of each of its named parts, measured once. */
+async function measuredParts(
+  drawing: GatedDrawing,
+  parts: readonly string[],
+): Promise<{
+  root: Element;
+  ink: InkBox;
+  boxes: Record<string, InkBox | null>;
+  grid: InkMap | null;
+}> {
+  const doc = parseDocument(drawing.svg, { xmlMode: true });
+  const root = elements(doc.children).find(
+    (node) => node.name.toLowerCase() === 'svg',
+  );
+  if (!root) throw new Error('it has no drawing in it');
+  const ids = parts.map((name) => drawing.parts[name] ?? null);
+  const measured = await renderSvg(drawing.svg, undefined, {
+    variants: ids.map((id) => (id ? isolate(root, id) : null) ?? EMPTY),
+    grid: { svg: drawing.svg, cols: 48 },
+  });
+  const ink = measured.ink;
+  if (!ink || ink.width <= 0 || ink.height <= 0)
+    throw new Error('it came out blank');
+  const boxes: Record<string, InkBox | null> = {};
+  parts.forEach((name, k) => {
+    const box = measured.inks?.[k] ?? null;
+    boxes[name] = box && box.width > 0 && box.height > 0 ? box : null;
+  });
+  return { root, ink, boxes, grid: measured.grid ?? null };
+}
+
+/**
+ * A thing of a show's own, drawn by the artist, measured for the stage:
+ * how big it is (its longest side as long as the thing really is, where
+ * that is known; else as drawn, at its true size in the kit's units on a
+ * canvas as tall as a grown-up, and one drawn filling the canvas, as though
+ * told nothing of its size, taken as one held in both arms), where a
+ * hand holds it (its "grip") and a mouth (the same, a dog's jaws on the
+ * handle), whether it hangs from its grip at the side (a bucket), and how
+ * it goes loose: a round one rolls, bounces once and spins; a long thin
+ * one bounces and spins; a big one does neither. Set in the kit's units,
+ * still and its own.
+ */
+export async function measureOwnThing(
+  drawing: GatedDrawing,
+  id: string,
+  real: RealSize | null = null,
+): Promise<OwnPropDrawing> {
+  const { root, ink, boxes, grid } = await measuredParts(drawing, ['grip']);
+  const canvas = OWN_THING_CANVAS;
+  const long = Math.max(ink.width, ink.height);
+  const filled = ink.width >= canvas.w * 0.9 || ink.height >= canvas.h * 0.9;
+  const units = sane(real)
+    ? Math.min(
+        220,
+        Math.max(8, Math.max(real.heightCm, real.lengthCm) * UNITS_PER_CM),
+      )
+    : filled
+      ? 70
+      : Math.min(140, Math.max(12, long));
+  const scale = units / long;
+  // In a hand (a cup, a key); held in the arms or both hands (a kite, a
+  // drum); longer than a child's arm (a spear, a pole).
+  const size: PropSize =
+    units <= 45 ? 'small' : units <= 130 ? 'medium' : 'large';
+  const cx = ink.x + ink.width / 2;
+  const base = ink.y + ink.height;
+  const at = ([x, y]: Point): Point => [
+    r1((x - cx) * scale),
+    r1((y - base) * scale),
+  ];
+  const gripBox = boxes.grip;
+  const middle: Point = [cx, ink.y + ink.height / 2];
+  const held = gripBox ? centre(gripBox) : middle;
+  const grip = at(held);
+  const aspect = ink.width / ink.height;
+  const round =
+    aspect >= 0.8 &&
+    aspect <= 1.25 &&
+    grid !== null &&
+    Math.abs(filling(grid, drawing.viewBox, ink) - 0.79) < 0.1;
+  // Held by a handle at its top, and not small: carried hanging at the side.
+  const hangs =
+    gripBox !== null &&
+    size !== 'small' &&
+    (held[1] - ink.y) / ink.height < 0.3;
+  const thin = aspect > 2.5 || aspect < 0.4;
+  stillTree(root, `own-${id}`);
+  return {
+    ...inKitUnits(root, ink, scale, 3),
+    grip,
+    bite: grip,
+    // What goes to a mouth: its top, the rim of a bowl or a bottle's neck.
+    mouth: [0, r1(-ink.height * scale * 0.9)],
+    size,
+    loose: {
+      bounce: round || thin ? 1 : 0,
+      ...(round && !hangs ? { rolls: true as const } : {}),
+      ...(size !== 'large' && !hangs ? { spins: true as const } : {}),
+      ...(hangs ? { hangs: true as const } : {}),
+    },
+  };
+}
+
+/**
+ * The ancestors' transforms of an element, as one matrix: the space its
+ * own transform, or a stage's in place of it, is set in.
+ */
+function spaceOf(node: Element, root: Element): Matrix {
+  const chain: Element[] = [];
+  for (
+    let at = node.parent as Element | null;
+    at && at !== root;
+    at = at.parent as Element | null
+  )
+    chain.unshift(at);
+  return chain.reduce(
+    (m, at) => multiply(m, parseTransform(at.attribs.transform) ?? IDENTITY),
+    IDENTITY,
+  );
+}
+
+/**
+ * A feature of a show's own, drawn by the artist, measured for the stage:
+ * its footprint in the kit's units (as big as the thing really is, where
+ * that is known: a bicycle as long as a bicycle, a hut or a signpost as
+ * tall as one; else as drawn, at its true size, and one filling
+ * its canvas, told nothing of its size, about as high as a bench and a
+ * half), the part that opens (its "leaf", turned about the edge of
+ * it nearer the feature's middle, where its hinge is), the way in, through
+ * or under it (its "opening", else what its leaf covers), how high its
+ * seat is, and whether it stands low before the people by it, rather than
+ * behind them: something low that is no seat and no way through (a
+ * canoe's side, a drum). Set in the kit's units, still and its own.
+ */
+export async function measureOwnFeature(
+  drawing: GatedDrawing,
+  id: string,
+  size: RealSize | null = null,
+): Promise<SetPiece> {
+  const { root, ink, boxes } = await measuredParts(drawing, [
+    'leaf',
+    'opening',
+    'seat',
+  ]);
+  const canvas = OWN_FEATURE_CANVAS;
+  const filled = ink.width >= canvas.w * 0.92 || ink.height >= canvas.h * 0.92;
+  // As long as it really is, when it is long (a bicycle, a canoe); else as
+  // tall (a hut, a signpost).
+  const real = sane(size)
+    ? size.lengthCm > size.heightCm * 1.5
+      ? (size.lengthCm * UNITS_PER_CM) / ink.width
+      : (size.heightCm * UNITS_PER_CM) / ink.height
+    : null;
+  const scale = Math.min(
+    420 / ink.height,
+    800 / ink.width,
+    real ??
+      (filled
+        ? Math.min(150 / ink.height, 400 / ink.width)
+        : Math.min(380, Math.max(24, ink.height)) / ink.height),
+  );
+  const cx = ink.x + ink.width / 2;
+  const base = ink.y + ink.height;
+  const at = ([x, y]: Point): Point => [
+    r1((x - cx) * scale),
+    r1((y - base) * scale),
+  ];
+  const boxAt = (box: InkBox): [number, number, number, number] => [
+    ...at([box.x, box.y]),
+    ...at([box.x + box.width, box.y + box.height]),
+  ];
+  // Its leaf turned about the edge nearer its middle, in the space its
+  // own transform is set in: that transform moved to a group around it,
+  // so the stage's turning of it is all there is on it.
+  const prefix = `own-${id}`;
+  const leafBox = boxes.leaf;
+  const leafId = drawing.parts.leaf;
+  let leaf: SetPiece['leaf'];
+  stillTree(root, prefix);
+  const leafNode = leafBox && leafId ? byId(root, `${prefix}-${leafId}`) : null;
+  if (leafBox && leafNode) {
+    const own = parseTransform(leafNode.attribs.transform) ?? IDENTITY;
+    const space = invert(multiply(spaceOf(leafNode, root), own));
+    if (space) {
+      if (leafNode.attribs.transform) {
+        const around = new Element('g', {
+          transform: leafNode.attribs.transform,
+        });
+        delete leafNode.attribs.transform;
+        const parent = leafNode.parent as Element;
+        parent.children = parent.children.map((child) =>
+          child === leafNode ? around : child,
+        );
+        around.parent = parent;
+        around.children = [leafNode];
+        leafNode.parent = around;
+      }
+      const near =
+        Math.abs(leafBox.x - cx) <= Math.abs(leafBox.x + leafBox.width - cx)
+          ? leafBox.x
+          : leafBox.x + leafBox.width;
+      const [hx, hy] = apply(space, [near, leafBox.y + leafBox.height / 2]);
+      leaf = { id: `${prefix}-${leafId}`, hinge: [r1(hx), r1(hy)] };
+    }
+  }
+  // A way through is one a person could fit: down to the ground, and as
+  // wide as someone; a seat is at a height someone sits at.
+  const fits = (box: InkBox) =>
+    (base - (box.y + box.height)) * scale < 30 &&
+    box.width * scale >= 36 &&
+    box.height * scale >= 40;
+  const opening = boxes.opening;
+  const way = opening && fits(opening) ? opening : leaf ? leafBox : null;
+  const high = boxes.seat ? r1(-at([0, boxes.seat.y])[1]) : null;
+  const seat = high !== null && high >= 20 && high <= 130 ? high : null;
+  const low = ink.height * scale < 80;
+  return {
+    ...inKitUnits(root, ink, scale, 4),
+    ...(leaf ? { leaf, enters: true as const } : {}),
+    ...(way ? { opening: boxAt(way) } : {}),
+    ...(seat ? { seat } : {}),
+    ...(low && !seat && !way ? { front: true as const } : {}),
+  };
+}
+
+/**
+ * A show's own things and features as the artist drew them and code
+ * measured them, each once for the whole show, by id: kept beside its
+ * cast and its sets for every later scene and episode. A feature keeps
+ * whether it was drawn to open, so one the words later open is drawn
+ * again with a leaf.
+ */
+export interface OwnSheets {
+  version: number;
+  things: Record<string, OwnPropDrawing>;
+  features: Record<string, { piece: SetPiece; opens: boolean }>;
+}
+
+/** Own things and features drawn by an older way of drawing them are drawn again. */
+export const OWN_VERSION = 1;
+
+/** A show's own drawings read back from storage: only those drawn the way they are drawn now, and whole. */
+export function ownSheetsOf(raw: unknown): OwnSheets {
+  const out: OwnSheets = { version: OWN_VERSION, things: {}, features: {} };
+  const said = raw as Partial<OwnSheets> | null;
+  if (!said || typeof said !== 'object' || said.version !== OWN_VERSION)
+    return out;
+  for (const [id, thing] of Object.entries(said.things ?? {}))
+    if (thing?.svg && thing.viewBox?.length === 4 && thing.grip && thing.loose)
+      out.things[id] = thing;
+  for (const [id, feature] of Object.entries(said.features ?? {}))
+    if (feature?.piece?.svg && feature.piece.viewBox?.length === 4)
+      out.features[id] = feature;
   return out;
 }

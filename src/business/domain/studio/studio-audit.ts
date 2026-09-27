@@ -23,8 +23,8 @@ import {
   type Doing,
   type DoingId,
   type StageMove,
-  type ThingId,
 } from '../scene-doings';
+import { DRAWN } from '../scene-own';
 import { genderOf } from '../scene-script';
 import type { StorySheet, StudioBible } from './studio';
 
@@ -108,6 +108,14 @@ export function auditScene(
   const end = Math.max(scene.durationMs, scene.settledMs ?? 0);
   const props = new Set((scene.props ?? []).map((p) => p.id));
   const features = scene.setting?.features ?? [];
+  // The show's own, known by their names as the lists' are.
+  const own = {
+    things: bible?.things ?? [],
+    features: (
+      bible?.sets.find((s) => s.id === sheet.set)?.features ?? []
+    ).filter((f) => f.kind === DRAWN),
+  };
+  const isOwnFeature = (id: string) => own.features.some((f) => f.id === id);
   const out: BeatSeen[] = [];
   let spoken = -1;
   sheet.beats.forEach((beat, at) => {
@@ -207,13 +215,13 @@ export function auditScene(
 
     // What the words say it should be.
     const read = beat.say.trim()
-      ? doingsIn(beat.say, { actors, who }).filter(
+      ? doingsIn(beat.say, { actors, who, ...own }).filter(
           (r) => r.who === null || r.who === who,
         )
       : [];
     const expected: {
       do: DoingId;
-      thing: ThingId | null;
+      thing: string | null;
       via: string | null;
       target: string | null;
     }[] = read.length
@@ -235,7 +243,7 @@ export function auditScene(
       if (expected.some((one) => SWINGS.has(one.do)))
         seen.push(`the ${id} ${state === 'open' ? 'opens' : 'shuts'}`);
     const missing: string[] = [];
-    const shown = (doing: Doing, thing: ThingId | null): boolean => {
+    const shown = (doing: Doing, thing: string | null): boolean => {
       if (doing.id === 'open' || doing.id === 'close')
         return swung.some(
           ([, , state]) => state === (doing.id === 'open' ? 'open' : 'shut'),
@@ -278,7 +286,9 @@ export function auditScene(
         missing.push(`the ${thing}`);
       const feature =
         one.via ??
-        (one.target && featureKindOf(one.target) ? one.target : null);
+        (one.target && (featureKindOf(one.target) || isOwnFeature(one.target))
+          ? one.target
+          : null);
       // One a doing cannot be done without, not on the set's stage.
       const kind = feature ? featureKindOf(feature) : null;
       if (

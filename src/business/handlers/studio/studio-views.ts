@@ -112,6 +112,7 @@ export function bibleDto(
     subject: bible.subject,
     maths: bible.maths,
     pictures: bible.pictures,
+    ...(bible.things?.length ? { things: bible.things.map((t) => t.id) } : {}),
   };
 }
 

@@ -21,6 +21,7 @@ import {
   FIGURE_SIGNS,
   PLAIN_FIGURE,
   figureOf,
+  isGear,
   type FigureFace,
   type FigurePose,
   type FigureSign,
@@ -40,13 +41,16 @@ import {
   doingOf,
   featureIdOf,
   isDoing,
+  isStageProp,
+  isThingWord,
+  type AnyFeatureKind,
   type DoingId,
-  type FeatureKind,
   type PropAction,
   type ThingId,
   type TravelPace,
 } from '../scene-doings';
-import { STAGE_PROPS, type StageProp } from '../scene-props';
+import { DRAWN, mayBeFeature, mayBeThing, ownIdOf } from '../scene-own';
+import { PROP_KIND, STAGE_PROPS, type StageProp } from '../scene-props';
 import {
   LINE_FROMS,
   LINE_PACES,
@@ -283,14 +287,17 @@ export interface StudioSet {
 
 /**
  * A fixed thing of a set that a story acts on: a gate someone goes out by,
- * a bench someone looks under, a goalpost someone stands by. Kept on the
- * set for good once a scene names it, as new places and people are.
+ * a bench someone looks under, a goalpost someone stands by; or one of the
+ * show's own, which no list has (a bicycle leant on a wall, a signpost),
+ * drawn by the artist once for the show. Kept on the set for good once a
+ * scene names it, as new places and people are.
  */
 export interface StudioFeature {
   /** Its id in every sheet: the word for it, "gate", "danfo". */
   id: string;
   name: string;
-  kind: FeatureKind;
+  /** One of the list's kinds, or "drawn": one of the show's own, which the artist draws. */
+  kind: AnyFeatureKind;
   /** Where it stands, as the viewer sees it: a spot, or at the back. */
   spot: Spot | 'back';
   /** Whether it opens and shuts: a gate, a door, a window. */
@@ -300,7 +307,7 @@ export interface StudioFeature {
 /** The most features a set keeps. */
 export const MAX_FEATURES = 8;
 
-/** A set's features made sound: each an id of its own, a kind from the list, a spot. */
+/** A set's features made sound: each an id of its own, a kind from the list (or the artist's), a spot. */
 export function featuresOf(raw: unknown): StudioFeature[] {
   const taken = new Set<string>();
   return (Array.isArray(raw) ? raw : [])
@@ -309,9 +316,16 @@ export function featuresOf(raw: unknown): StudioFeature[] {
       if (!one || typeof one !== 'object') return [];
       const f = one as Record<string, unknown>;
       const name = text(f.name, 40) || text(f.id, 40);
-      const kind = oneOf(FEATURE_KINDS)(f.kind);
+      // A kind none of the list's is the artist's to draw, if its name
+      // could be one: never a place, the ground or the weather.
+      const kind: AnyFeatureKind | null =
+        oneOf(FEATURE_KINDS)(f.kind) ??
+        (name && mayBeFeature(name.split(/\s+/).pop() ?? '') ? DRAWN : null);
       if (!name || !kind) return [];
-      const id = featureIdOf(text(f.id, 40) || name);
+      const id =
+        kind === DRAWN
+          ? ownIdOf(text(f.id, 40) || name)
+          : featureIdOf(text(f.id, 40) || name);
       if (!id || taken.has(id)) return [];
       taken.add(id);
       return [
@@ -323,11 +337,65 @@ export function featuresOf(raw: unknown): StudioFeature[] {
           opens:
             typeof f.opens === 'boolean'
               ? f.opens
-              : OPENING_FEATURES.includes(kind),
+              : kind !== DRAWN && OPENING_FEATURES.includes(kind),
         },
       ];
     });
 }
+
+/**
+ * A thing of the show's own, which no list has, that its stories handle:
+ * a kite, a drum, an umbrella. Drawn by the artist once for the show,
+ * held, thrown and carried as the lists' things are, and kept for good
+ * once a scene's words name it.
+ */
+export interface StudioThing {
+  /** Its id in every sheet: its name, singular. */
+  id: string;
+  name: string;
+  /** Eaten, drunk from, or neither: what may be done with it. */
+  kind: 'food' | 'drink' | 'thing';
+}
+
+/** The most things of its own a show keeps. */
+export const MAX_THINGS = 24;
+
+/** A show's own things made sound: each a name that is no word of the lists', once. */
+export function thingsOf(raw: unknown): StudioThing[] {
+  const taken = new Set<string>();
+  return (Array.isArray(raw) ? raw : [])
+    .slice(0, MAX_THINGS)
+    .flatMap((one: unknown): StudioThing[] => {
+      if (!one || typeof one !== 'object') return [];
+      const t = one as Record<string, unknown>;
+      const name = text(t.name, 40) || text(t.id, 40);
+      const id = ownIdOf(text(t.id, 40) || name);
+      if (!name || !id || taken.has(id) || isThingWord(id)) return [];
+      taken.add(id);
+      return [
+        {
+          id,
+          name,
+          kind: t.kind === 'food' || t.kind === 'drink' ? t.kind : 'thing',
+        },
+      ];
+    });
+}
+
+/** Whether a thing is handled apart from anyone on a show's stage: one of the lists', or the show's own. */
+export const handledOn =
+  (bible: Pick<StudioBible, 'things'> | null) =>
+  (thing: string | null | undefined): thing is string =>
+    isStageProp(thing) ||
+    Boolean(thing && bible?.things?.some((t) => t.id === thing));
+
+/** What a thing on a show's stage is, for what may be done with it: food, a drink, or neither. */
+export const kindOn =
+  (bible: Pick<StudioBible, 'things'> | null) =>
+  (prop: string): StudioThing['kind'] =>
+    isStageProp(prop)
+      ? PROP_KIND[prop]
+      : (bible?.things?.find((t) => t.id === prop)?.kind ?? 'thing');
 
 /** A thing an explainer draws the same way in every scene: the cell, the atom, the heart. */
 export interface StudioPicture {
@@ -348,6 +416,8 @@ export interface StudioBible {
   maths: boolean;
   /** An explainer's recurring pictures. */
   pictures: StudioPicture[];
+  /** The show's own things its stories handle, drawn by the artist. Absent, none yet. */
+  things?: StudioThing[];
 }
 
 export const EMPTY_BIBLE: StudioBible = {
@@ -476,10 +546,13 @@ export function bibleOf(raw: unknown): StudioBible {
           return Object.values(out).some(Boolean) ? out : null;
         })()
       : null;
+  const things = thingsOf(said.things);
   return {
     characters,
     sets,
     world,
+    // Kept only when there are some, so a bible without is as it was.
+    ...(things.length ? { things } : {}),
     subject: text(said.subject, 80),
     maths: said.maths === true,
     pictures: (Array.isArray(said.pictures) ? said.pictures : [])
@@ -622,7 +695,8 @@ export interface SheetBeat {
   feeling: FigureFace | null;
   sign: FigureSign | null;
   do: DoingId | null;
-  prop: StageProp | null;
+  /** The thing handled: one of the lists', or one of the show's own. */
+  prop: string | null;
   spot: Spot | null;
   from: LineFrom | null;
   /** How a line is said; how someone goes: at a walk, or a run. */
@@ -633,8 +707,8 @@ export interface SheetBeat {
    * side ("@left", "@right", "@up", "@down"). Absent, toward no one.
    */
   target?: string;
-  /** The thing handled or named: a thing on the stage, or one carried. */
-  thing?: ThingId;
+  /** The thing handled or named: a thing on the stage (one of the show's own too), or one carried. */
+  thing?: string;
   /** The feature someone goes in or out by: "gate", "door". */
   via?: string;
   /** What the writer asked for that is none of the doings, kept as they wrote it. */
@@ -648,12 +722,12 @@ export interface SheetPlace {
   pose: FigurePose;
   face: FigureFace;
   /** What they hold as it opens, in a hand or an animal's mouth; null for nothing. */
-  holding: ThingId | null;
+  holding: string | null;
 }
 
-/** A thing on the stage to be handled, resting before whom. */
+/** A thing on the stage to be handled (one of the lists', or the show's own), resting before whom. */
 export interface SheetProp {
-  prop: StageProp;
+  prop: string;
   near: string | null;
 }
 
@@ -712,6 +786,25 @@ const asFace = (value: unknown): FigureFace | null =>
     ? (value as FigureFace)
     : null;
 
+/**
+ * A thing as a model or a person named it: one of the lists', else a
+ * name of a word or two that may be one of the show's own (the check
+ * holds it to the scene's words); null for anything else.
+ */
+export function thingNamed(value: unknown): string | null {
+  const listed = oneOf(THINGS)(value);
+  if (listed) return listed;
+  const said = text(value, 32);
+  if (
+    !said ||
+    !/^\p{L}[\p{L}\s'’-]*$/u.test(said) ||
+    said.split(/\s+/).length > 3
+  )
+    return null;
+  const id = ownIdOf(said);
+  return id && mayBeThing(id.split('-').pop() ?? '') ? id : null;
+}
+
 /** A beat made sound: its kind's fields kept, the rest null. */
 export function beatOf(raw: unknown): SheetBeat | null {
   if (!raw || typeof raw !== 'object') return null;
@@ -735,14 +828,14 @@ export function beatOf(raw: unknown): SheetBeat | null {
     : aimed
       ? studioId(aimed)
       : '';
-  const thing = acts ? oneOf(THINGS)(b.thing) : null;
+  const thing = acts ? thingNamed(b.thing) : null;
   const via = kind === 'action' ? text(b.via, 40) : '';
+  // Gear is drawn in a hand for good, never a thing handled apart.
+  const own = (named: string | null) =>
+    named && !isGear(named) ? named : null;
   const prop =
     kind === 'business'
-      ? (oneOf(STAGE_PROPS)(b.prop) ??
-        (thing && (STAGE_PROPS as readonly string[]).includes(thing)
-          ? (thing as StageProp)
-          : null))
+      ? (oneOf(STAGE_PROPS)(b.prop) ?? own(thingNamed(b.prop)) ?? own(thing))
       : null;
   const out: SheetBeat = {
     kind,
@@ -800,7 +893,7 @@ export function storySheetOf(raw: unknown): StorySheet {
           spot: oneOf(SPOTS)(p.spot) ?? 'centre',
           pose: oneOf(FIGURE_POSES)(p.pose) ?? 'standing',
           face: asFace(p.face) ?? 'neutral',
-          holding: oneOf(THINGS)(p.holding),
+          holding: thingNamed(p.holding),
         },
       ];
     });
@@ -809,7 +902,8 @@ export function storySheetOf(raw: unknown): StorySheet {
     .flatMap((one: unknown): SheetProp[] => {
       if (!one || typeof one !== 'object') return [];
       const p = one as Record<string, unknown>;
-      const prop = oneOf(STAGE_PROPS)(p.prop);
+      const named = thingNamed(p.prop);
+      const prop = named && !isGear(named) ? named : null;
       return prop ? [{ prop, near: id(p.near) || null }] : [];
     });
   const beats = (Array.isArray(said.beats) ? said.beats : [])

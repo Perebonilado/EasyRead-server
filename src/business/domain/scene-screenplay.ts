@@ -36,6 +36,7 @@ import {
   propsIn,
   type StageProp,
 } from './scene-props';
+import { isStageProp } from './scene-doings';
 import { faceNamed, faceOfLine } from './scene-feeling';
 import { FIGURE_SIGNS, figureFor, type FigureFace } from './scene-figure';
 import { idKey } from './scene-ids';
@@ -1718,10 +1719,12 @@ export function mendScreenplay(
       });
       if (!beat.business.length) delete beat.business;
     }
-    // Whatever is handled is on the stage, named or not.
+    // Whatever is handled is on the stage, named or not: a book's page
+    // handles only the lists' things.
     for (const beat of beats)
       for (const one of beat.business ?? [])
-        if (!props.includes(one.prop)) props.push(one.prop);
+        if (isStageProp(one.prop) && !props.includes(one.prop))
+          props.push(one.prop);
     if (business.length)
       mended.push(
         `the narration's business acted: ${business

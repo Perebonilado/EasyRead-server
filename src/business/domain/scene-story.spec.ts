@@ -454,6 +454,24 @@ describe("a story's continuity", () => {
       'props',
       'f-well',
     ]);
+    // One of the show's own is the artist's, drawn apart and stood among
+    // the people: the painter leaves it out too.
+    const field = setThing(
+      {
+        id: 'field',
+        name: 'The field',
+        aliases: [],
+        look: 'a dusty field',
+        firstPage: 1,
+        sound: null,
+        features: [
+          { id: 'bicycle', name: 'bicycle', kind: 'drawn', spot: 'left' },
+        ],
+      },
+      'Kofi',
+    );
+    expect(field.brief).toContain('Leave out the bicycle (at the left)');
+    expect(field.parts.map((p) => p.name)).not.toContain('f-bicycle');
   });
 
   it('keeps what each character is and how a person looks from where the book first meets them', () => {

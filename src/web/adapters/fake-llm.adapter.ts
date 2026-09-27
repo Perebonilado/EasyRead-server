@@ -595,6 +595,22 @@ export class FakeLlmAdapter implements LlmGatewayPort {
     });
   }
 
+  /** Anything is about as big as a drum. */
+  sceneSize(input: {
+    name: string;
+    world: string | null;
+  }): Promise<LlmResult<{ heightCm: number; lengthCm: number }>> {
+    return Promise.resolve({
+      value: { heightCm: 60, lengthCm: 40 },
+      usage: {
+        model: 'fake',
+        tokensIn: Math.ceil(input.name.length / 4),
+        tokensOut: 10,
+        latencyMs: 0,
+      },
+    });
+  }
+
   /** Anyone is a person, dressed plainly, a child when their voice is. */
   sceneFigure(input: {
     bookTitle: string;

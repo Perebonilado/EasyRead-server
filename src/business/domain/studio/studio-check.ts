@@ -16,12 +16,7 @@
  */
 import { narratorsLine, lineOf } from '../scene-screenplay';
 import { faceNamed } from '../scene-feeling';
-import {
-  PROP_KIND,
-  PROP_WORDS,
-  STAGE_PROPS,
-  type StageProp,
-} from '../scene-props';
+import { PROP_KIND, PROP_WORDS, STAGE_PROPS } from '../scene-props';
 import { doingsIn, type Actor, type ReadDoing } from '../scene-directions';
 import { STATION_SHARES } from '../scene-layout';
 import {
@@ -35,10 +30,19 @@ import {
   fallbackFor,
   featureKindOf,
   isStageProp,
+  isThingWord,
+  newFeaturesIn,
   type Doer,
   type DoingId,
-  type ThingId,
 } from '../scene-doings';
+import { isGear } from '../scene-figure';
+import {
+  DRAWN,
+  mayBeThing,
+  ownIdOf,
+  ownWords,
+  type OwnWord,
+} from '../scene-own';
 import {
   STILL_WORDS,
   fewStageChanges,
@@ -63,7 +67,10 @@ import {
   type StudioCharacter,
   type StudioFeature,
   type StudioOutline,
+  type StudioThing,
   type StorySheet,
+  handledOn,
+  kindOn,
 } from './studio';
 import { joinsSeconds } from './studio-edit';
 import {
@@ -104,15 +111,15 @@ export interface SheetProblem {
 export interface EndState {
   set: string;
   onStage: { who: string; spot: Spot }[];
-  /** Every thing on the stage: in whose hand or mouth, or lying on the ground (and where, when known). */
+  /** Every thing on the stage (the show's own too): in whose hand or mouth, or lying on the ground (and where, when known). */
   props: {
-    prop: StageProp;
+    prop: string;
     holder: string | null;
     gone: boolean;
     at?: Spot;
   }[];
   /** What each one carries on into the next scene: the ball in Pip's mouth. */
-  held?: { who: string; thing: ThingId }[];
+  held?: { who: string; thing: string }[];
   /** Everyone who was in the scene at all: what they hold next is what it left them with. */
   cast?: string[];
 }
@@ -210,9 +217,12 @@ const CLOSE_TO = new Set<DoingId>([
   'dig',
   'lick',
 ]);
-/** Words that find someone by a feature, just before its name: "by the", "under a". */
+/**
+ * Words that find someone by a feature, or something set or caught on it,
+ * just before its name: "by the", "under a", "against the", "stuck in the".
+ */
 const PLACED =
-  /\b(?:next to|by|beside|near|under|underneath|beneath|behind)\s+(?:the|a|an|that|this|his|her|their|its)\s+(?:[\p{L}-]+\s+)?$/iu;
+  /\b(?:next to|by|beside|near|under|underneath|beneath|behind|against|in front of|on top of|(?:stuck|caught|tangled|lodged|hangs?|hanging|hung|lands?|landed|perched|high up|up) (?:in|on|on top of))\s+(?:the|a|an|that|this|his|her|their|its)\s+(?:[\p{L}-]+\s+)?$/iu;
 /** Words that find a thing there, just before its name: "A tuft of", "Look, a", "and the", "there's a". */
 const FOUND_BEFORE =
   /(?:^|[.!?]\s+)(?:(?:oh|look|and|wow|hey|see)[,!]?\s+)*(?:(?:there|here)(?:'s|’s| is| are| lies| lay)\s+)?(?:a|an|the|some|this|that)\s+(?:[\p{L}-]+\s+){0,3}$/iu;
@@ -223,12 +233,21 @@ const NOT_THERE =
 /**
  * The things of the stage the words find there: a line's said as found
  * ("A tuft of white fur!", "And a chewed red pepper!"), the narration's
- * named at all; never one said to be gone or wanted.
+ * named at all; never one said to be gone or wanted. `own` are the show's
+ * own things, found by their names as the lists' are.
  */
-export function thingsFoundIn(text: string, narration: boolean): StageProp[] {
-  const found: StageProp[] = [];
-  for (const prop of STAGE_PROPS) {
-    const m = new RegExp(PROP_WORDS[prop].source, 'iu').exec(text);
+export function thingsFoundIn(
+  text: string,
+  narration: boolean,
+  own: readonly OwnWord[] = [],
+): string[] {
+  const found: string[] = [];
+  const words: [string, RegExp][] = [
+    ...STAGE_PROPS.map((prop): [string, RegExp] => [prop, PROP_WORDS[prop]]),
+    ...own.map((one): [string, RegExp] => [one.id, ownWords(one.name)]),
+  ];
+  for (const [prop, pattern] of words) {
+    const m = new RegExp(pattern.source, 'iu').exec(text);
     if (!m) continue;
     const before = text.slice(0, m.index);
     const sentence = before.slice(before.search(/[^.!?]*$/u));
@@ -273,13 +292,19 @@ const called = (id: DoingId | null | undefined) =>
  * handled's words read against the list of doings, and what they say is
  * what is done. `before` is how the scene before left things, for what
  * each one still holds. What was done is listed, and the features of the
- * set the words name that it had not got yet.
+ * set the words name that it had not got yet, and the things of its own
+ * the show had not got (a kite, a drum), for the artist to draw.
  */
 export function mendSheet(
   input: StorySheet,
   bible: StudioBible,
   before: EndState | null = null,
-): { sheet: StorySheet; mended: string[]; features: StudioFeature[] } {
+): {
+  sheet: StorySheet;
+  mended: string[];
+  features: StudioFeature[];
+  things: StudioThing[];
+} {
   const mended: string[] = [];
   const sheet: StorySheet = JSON.parse(JSON.stringify(input)) as StorySheet;
   const byId = new Map(bible.characters.map((c) => [c.id, c]));
@@ -288,8 +313,65 @@ export function mendSheet(
     Boolean(id && byId.has(id));
   const doerOf = (id: string): Doer => byId.get(id)?.kind ?? 'person';
 
+  // The show's own things, and those the words name that it has not got.
+  const ownThings: StudioThing[] = [...(bible.things ?? [])];
+  const newThings: StudioThing[] = [];
+  /** Whether a thing is handled apart from anyone: one of the lists', or the show's own. */
+  const handled = (thing: string | null | undefined): thing is string =>
+    isStageProp(thing) || ownThings.some((t) => t.id === thing);
+  const kindOf = (prop: string) =>
+    isStageProp(prop)
+      ? PROP_KIND[prop]
+      : (ownThings.find((t) => t.id === prop)?.kind ?? 'thing');
+  /** Everything the words of the scene say. */
+  const allWords = input.beats.map((b) => b.say).join(' ');
+  /**
+   * A thing no list has, the show's own from now on: never one of the
+   * cast, gear, a feature, or a word for the body, people or a place.
+   */
+  const ownThing = (
+    word: string,
+    kind: StudioThing['kind'] = 'thing',
+  ): string | null => {
+    const id = ownIdOf(word);
+    if (!id) return null;
+    if (isStageProp(id) || ownThings.some((t) => t.id === id)) return id;
+    const named = (name: string) => ownIdOf(name) === id;
+    if (
+      isGear(id) ||
+      isThingWord(id) ||
+      featureKindOf(id) ||
+      !mayBeThing(id.split('-').pop() ?? '') ||
+      bible.characters.some(
+        (c) => c.id === id || named(c.name) || named(c.name.split(/\s+/)[0]),
+      ) ||
+      features.some((f) => f.id === id)
+    )
+      return null;
+    const made: StudioThing = { id, name: id.replace(/-/g, ' '), kind };
+    ownThings.push(made);
+    newThings.push(made);
+    mended.push(`the ${made.name} is the show's own, drawn for it`);
+    return id;
+  };
+  /** The show's own things and features, as the words reader knows them. */
+  const ownKnown = () => ({
+    things: ownThings,
+    features: features.filter((f) => f.kind === DRAWN),
+  });
+
   sheet.set = setId(sheet.set, bible) ?? sheet.set;
   const set = bible.sets.find((s) => s.id === sheet.set) ?? null;
+  // The set's features, and the ones the words name that it has not got.
+  const features: StudioFeature[] = [...(set?.features ?? [])];
+  const found: StudioFeature[] = [];
+  /** A thing the sheet names that no list has, the show's own if the scene's words name it too; else nothing. */
+  const ownIfNamed = (word: string): string | null =>
+    handled(word)
+      ? word
+      : ownWords(word).test(allWords)
+        ? ownThing(word)
+        : null;
   // A vessel (a bus, a boat) holds a few people besides the story's, never a crowd.
   if (sheet.crowd === 'many' && set?.kind === 'vessel') {
     sheet.crowd = 'few';
@@ -313,6 +395,18 @@ export function mendSheet(
       );
     taken.add(spot);
     opening.push({ ...place, who, spot });
+  }
+  // What someone holds that no list has is the show's own if the scene's
+  // words name it; else their hands are empty.
+  for (const place of opening) {
+    const held = place.holding;
+    if (!held || isGear(held) || isStageProp(held)) continue;
+    const kept = ownIfNamed(held);
+    if (!kept)
+      mended.push(
+        `${nameOf(place.who)} holds nothing: no "${held}" is in the scene's words`,
+      );
+    place.holding = kept;
   }
   // Each thing in one hand: what the scene before left in someone's hand
   // is still theirs if they are here, and no one else holds it too.
@@ -341,8 +435,17 @@ export function mendSheet(
 
   // The things on the stage: each once, and none resting on the ground
   // that someone holds as it opens.
-  const props = new Map<StageProp, string | null>();
-  for (const one of sheet.props) {
+  const props = new Map<string, string | null>();
+  for (const listed of sheet.props) {
+    // One no list has, only if the scene's words name it.
+    const prop = ownIfNamed(listed.prop);
+    if (!prop) {
+      mended.push(
+        `no ${listed.prop} is set out: the scene's words never name it`,
+      );
+      continue;
+    }
+    const one = { ...listed, prop };
     if (props.has(one.prop)) continue;
     const holder = opening.find((p) => p.holding === one.prop);
     if (holder) {
@@ -354,17 +457,13 @@ export function mendSheet(
     props.set(one.prop, characterId(one.near, bible) ?? null);
   }
 
-  // The set's features, and the ones the words name that it has not got.
-  const features: StudioFeature[] = [...(set?.features ?? [])];
-  const found: StudioFeature[] = [];
-
   const here = new Map<string, Spot>(opening.map((p) => [p.who, p.spot]));
   /** Who holds each thing on the stage now, in a hand or a mouth; null, it lies on the ground. Someone gone keeps what they took. */
-  const holders = new Map<StageProp, string | null>(
+  const holders = new Map<string, string | null>(
     [...props.keys()].map((prop) => [prop, null]),
   );
   for (const place of opening)
-    if (isStageProp(place.holding)) holders.set(place.holding, place.who);
+    if (handled(place.holding)) holders.set(place.holding, place.who);
   const actors: Actor[] = bible.characters.map((c) => ({
     id: c.id,
     names: [...new Set([c.name, c.name.split(/\s+/)[0]])],
@@ -379,7 +478,7 @@ export function mendSheet(
     recent.push(id);
   };
   /** The thing last named: what "it" means. */
-  let lastThing: ThingId | null = null;
+  let lastThing: string | null = null;
   /** The side each one who went went off by, and the last to go: where a look after them goes. */
   const wentBy = new Map<string, '@left' | '@right'>();
   /** The feature each one who went went out by. */
@@ -391,7 +490,7 @@ export function mendSheet(
   /** The way each one came in by: whoever comes in after them comes the same way. */
   const cameVia = new Map<string, string | null>();
   /** Where each thing no one holds lies, where that is known: before whom it was set out, where it was let go. */
-  const restsBy = new Map<StageProp, Spot>(
+  const restsBy = new Map<string, Spot>(
     [...props].flatMap(([prop, near]) => {
       const spot = near ? here.get(near) : undefined;
       return spot ? [[prop, spot] as const] : [];
@@ -400,7 +499,7 @@ export function mendSheet(
   /** What someone coming on brings, in hand or mouth: theirs unless the stage has it already. */
   const bringsOn = (who: string) => {
     for (const brings of comesWith(byId.get(who), before))
-      if (isStageProp(brings) && !holders.has(brings)) holders.set(brings, who);
+      if (handled(brings) && !holders.has(brings)) holders.set(brings, who);
   };
   const bringOn = (who: string, at: number, why: string): boolean => {
     if (here.has(who)) return true;
@@ -426,15 +525,26 @@ export function mendSheet(
    * A feature of the set by the word for it: the set's own, or one of
    * its kind it has only one of, or a new one, standing where the one
    * who first acts on it would find it: at the nearer edge for a way out
-   * or somewhere to go, else beside them. Null for no feature, or for the
-   * set itself (the bus a scene is set in).
+   * or somewhere to go (`going`; one of the show's own, "to" it, two
+   * along where that edge is beside them, so their going is seen), else
+   * beside them. Null for no feature, or for the
+   * set itself (the bus a scene is set in). `fresh` is a word no list has
+   * that the words said plainly is a feature: the artist's to draw, the
+   * show's own. `opens`: the words open or shut it.
    */
   const featureFor = (
     word: string,
     who: string | null,
-    going: boolean,
+    going: false | 'way' | 'to',
+    fresh = false,
+    opens = false,
   ): string | null => {
-    const kind = featureKindOf(word);
+    const kind =
+      featureKindOf(word) ??
+      (features.some((f) => f.id === word && f.kind === DRAWN) ||
+      (fresh && !handled(word) && !inCast(word))
+        ? DRAWN
+        : null);
     if (!kind) return null;
     if (
       set &&
@@ -445,9 +555,19 @@ export function mendSheet(
       return null;
     const own =
       features.find((f) => f.id === word) ??
-      (features.filter((f) => f.kind === kind).length === 1
+      (kind !== DRAWN && features.filter((f) => f.kind === kind).length === 1
         ? features.find((f) => f.kind === kind)
         : undefined);
+    // One of the show's own that the words now open: it opens, for good.
+    if (own && opens && !own.opens && own.kind === DRAWN) {
+      const now = { ...own, opens: true };
+      features[features.indexOf(own)] = now;
+      const k = found.indexOf(own);
+      if (k >= 0) found[k] = now;
+      else found.push(now);
+      mended.push(`the ${own.name} opens and shuts`);
+      return featureFor(word, who, going, fresh, false);
+    }
     // Named only in words said, by no one going to it: at the back, until
     // someone in this scene acts on it and so says where it stands.
     const k = SPOTS.indexOf((who && here.get(who)) || 'centre');
@@ -461,10 +581,43 @@ export function mendSheet(
         if (!used.has(SPOTS[n])) return SPOTS[n];
       return SPOTS[edge];
     };
+    const beside =
+      SPOTS[k < 2 ? Math.max(0, k - 1) : Math.min(SPOTS.length - 1, k + 1)];
+    /** Of these, the first no one stands at and no feature stands at; else the first. */
+    const clearOf = (spots: readonly Spot[]): Spot =>
+      spots.find(
+        (one) => !used.has(one) && !features.some((f) => f.spot === one),
+      ) ??
+      spots.find((one) => !features.some((f) => f.spot === one)) ??
+      spots[0];
+    /** The spots by distance from one, it first. */
+    const near = (from: Spot) =>
+      [...SPOTS].sort(
+        (a, b) =>
+          Math.abs(SPOTS.indexOf(a) - SPOTS.indexOf(from)) -
+          Math.abs(SPOTS.indexOf(b) - SPOTS.indexOf(from)),
+      );
+    const to = (): Spot => {
+      const spot = way();
+      if (Math.abs(SPOTS.indexOf(spot) - k) > 1) return spot;
+      const far = near(spot).filter(
+        (one) => Math.abs(SPOTS.indexOf(one) - k) > 1,
+      );
+      return far.length ? clearOf(far) : spot;
+    };
+    // One of the show's own, new to the scene, stands where going to it
+    // is seen and clear of the set's other features; one of the lists'
+    // where it always has.
     const where = (): Spot =>
-      going
-        ? way()
-        : SPOTS[k < 2 ? Math.max(0, k - 1) : Math.min(SPOTS.length - 1, k + 1)];
+      kind === DRAWN
+        ? going === 'to'
+          ? to()
+          : going
+            ? way()
+            : clearOf(near(beside).filter((one) => one !== SPOTS[k]))
+        : going
+          ? way()
+          : beside;
     if (own) {
       if (who && own.spot === 'back' && found.includes(own)) own.spot = where();
       return own.id;
@@ -472,31 +625,51 @@ export function mendSheet(
     const spot: Spot | 'back' = who ? where() : 'back';
     const made: StudioFeature = {
       id: word,
-      name: word,
+      name: word.replace(/-/g, ' '),
       kind,
       spot,
-      opens: OPENING_FEATURES.includes(kind),
+      opens: kind === DRAWN ? opens : OPENING_FEATURES.includes(kind),
     };
     features.push(made);
     found.push(made);
     mended.push(
-      `the ${word} is on the ${sheet.set} set for good, ${spot === 'back' ? 'at the back' : `on the ${spot}`}`,
+      `the ${made.name} is on the ${sheet.set} set for good, ${spot === 'back' ? 'at the back' : `on the ${spot}`}${kind === DRAWN ? ', drawn for the show' : ''}`,
     );
     return made.id;
   };
+
+  /** Words that are never a new feature: the show's own things and features, and its people's names. */
+  const knownWords = () => [
+    ...ownThings.map((t) => t.name),
+    ...features.map((f) => f.name),
+    ...bible.characters.flatMap((c) => [c.name, c.name.split(/\s+/)[0]]),
+  ];
 
   // Where the lines and the narration find someone ("There he is, by the
   // goalpost!"): a feature the set had not got that someone is found by
   // is on it; and one found there who goes nowhere before is there from
   // the start, as the stage has them.
+  // So too one no list has, where the words say plainly it is one: "by
+  // the signpost", "stuck up in the baobab".
   for (const beat of sheet.beats)
-    if (beat.kind === 'line' || beat.kind === 'narration')
-      for (const named of featuresNamedIn(beat.say))
+    if (beat.kind === 'line' || beat.kind === 'narration') {
+      for (const named of featuresNamedIn(beat.say, ownKnown().features))
         if (
           PLACED.test(beat.say.slice(0, named.at)) &&
-          !features.some((f) => f.kind === named.kind)
+          !features.some((f) =>
+            named.kind === DRAWN
+              ? f.id === featureIdOf(named.word)
+              : f.kind === named.kind,
+          )
         )
           featureFor(featureIdOf(named.word), null, false);
+      for (const one of newFeaturesIn(
+        beat.say,
+        knownWords(),
+        beat.kind === 'line',
+      ))
+        featureFor(one.word, null, false, true);
+    }
   const placed = placementsOf(
     {
       ...sheet,
@@ -551,14 +724,28 @@ export function mendSheet(
       id = instead;
     }
     let target: string | null = plan.target;
+    const opensIt = id === 'open' || id === 'close';
     if (target && !target.startsWith('@')) {
       const person = characterId(target, bible);
       if (person) target = person;
-      else if (featureKindOf(target) && !isThing(target))
-        target = featureFor(target, who, doingOf(id)?.kind === 'travel');
+      else if (
+        (featureKindOf(target) ||
+          isFeature(target) ||
+          plan.fresh?.feature === target) &&
+        !isThing(target)
+      )
+        target = featureFor(
+          target,
+          who,
+          doingOf(id)?.kind === 'travel' ? 'to' : false,
+          plan.fresh?.feature === target,
+          opensIt,
+        );
     }
     if (target === who) target = null;
-    let via = plan.via ? featureFor(plan.via, who, true) : null;
+    let via = plan.via
+      ? featureFor(plan.via, who, 'way', plan.fresh?.feature === plan.via)
+      : null;
     // Into or out of the vessel the scene is set in: by its door.
     if (
       !via &&
@@ -568,7 +755,21 @@ export function mendSheet(
       featureKindOf(plan.via) === 'vehicle'
     )
       via = features.find((f) => f.opens)?.id ?? null;
-    const thing = plan.thing;
+    // A thing no list has, done with as only a thing is ("flies his
+    // kite"), or named so by the sheet and the words: the show's own.
+    let thing = plan.thing;
+    if (thing && !handled(thing) && !isGear(thing)) {
+      const handles = doingOf(id)?.kind === 'handle' || id === 'fetch';
+      thing =
+        handles &&
+        !opensIt &&
+        (plan.fresh?.thing === thing || ownWords(thing).test(allWords))
+          ? ownThing(
+              thing,
+              id === 'eat' ? 'food' : id === 'drink' ? 'drink' : 'thing',
+            )
+          : null;
+    }
     const person = (t: string | null): t is string => inCast(t);
     const make = (kind: SheetBeat['kind'], extra: Partial<SheetBeat>): void => {
       out.push(
@@ -703,7 +904,7 @@ export function mendSheet(
         ...(pace ? { pace } : {}),
       });
       // Fetched, a thing lying about is picked up.
-      if (id === 'fetch' && isStageProp(thing) && holders.get(thing) === null)
+      if (id === 'fetch' && handled(thing) && holders.get(thing) === null)
         act(
           beat,
           { ...plan, do: 'take', target: null, thing },
@@ -747,7 +948,7 @@ export function mendSheet(
     }
 
     // ── Handling a thing ──
-    let prop: StageProp | null = isStageProp(thing) ? thing : null;
+    let prop: string | null = handled(thing) ? thing : null;
     if (!prop && !thing) {
       // Eaten or drunk with nothing named: what there is to eat or drink.
       const kind =
@@ -757,14 +958,16 @@ export function mendSheet(
             ? 'drink'
             : null;
       prop =
-        (beat.prop && (!kind || PROP_KIND[beat.prop] === kind)
+        (beat.prop &&
+        handled(beat.prop) &&
+        (!kind || kindOf(beat.prop) === kind)
           ? beat.prop
           : null) ??
         (kind
-          ? ([...props.keys()].find((p) => PROP_KIND[p] === kind) ?? null)
+          ? ([...props.keys()].find((p) => kindOf(p) === kind) ?? null)
           : null);
     }
-    const carried: ThingId | null = prop ?? thing;
+    const carried: string | null = prop ?? thing;
     const fall = (why: string): void => {
       const instead =
         doingOf(fallbackFor(doing.fallback ?? 'nod', doer)) ?? doingOf('nod')!;
@@ -812,9 +1015,9 @@ export function mendSheet(
         mended.push(`the ${prop} set on the stage, before ${nameOf(who)}`);
       }
     }
-    if (id === 'eat' && PROP_KIND[prop] !== 'food')
-      return act(beat, { ...plan, do: 'chew' }, at, kept);
-    if (id === 'drink' && PROP_KIND[prop] !== 'drink')
+    if (id === 'eat' && kindOf(prop) !== 'food')
+      return act(beat, { ...plan, do: 'chew', thing: prop }, at, kept);
+    if (id === 'drink' && kindOf(prop) !== 'drink')
       return fall(`the ${prop} is nothing to drink from`);
     if (id === 'break' && prop !== 'bread')
       return fall(`only bread is broken on the stage, not the ${prop}`);
@@ -945,7 +1148,7 @@ export function mendSheet(
     );
   };
   /** Someone going over to a thing lying far off to take it, to the free spot nearest it. */
-  const goToThing = (who: string, prop: StageProp, at: number) => {
+  const goToThing = (who: string, prop: string, at: number) => {
     const lies = restsBy.get(prop);
     const mine = here.get(who);
     if (!lies || !mine) return;
@@ -1110,8 +1313,32 @@ export function mendSheet(
     return goesAgain ? null : found.feature;
   };
   const isThing = (word: string) =>
-    (Object.keys(THING_WORDS) as ThingId[]).includes(word as ThingId);
+    Object.keys(THING_WORDS).includes(word) ||
+    ownThings.some((t) => t.id === word);
   const isFeature = (word: string) => features.some((f) => f.id === word);
+  /**
+   * What an action's words set somewhere, or someone by ("leans her
+   * bicycle against the wall"): each feature they name so is on the set,
+   * beside whoever does it.
+   */
+  const placedBy = (beat: SheetBeat) => {
+    const who = inCast(beat.who) && here.has(beat.who) ? beat.who : null;
+    const placed = [
+      ...featuresNamedIn(beat.say, ownKnown().features)
+        .filter((named) => PLACED.test(beat.say.slice(0, named.at)))
+        .map((named) => ({
+          at: named.at,
+          id: featureIdOf(named.word),
+          fresh: false,
+        })),
+      ...newFeaturesIn(beat.say, knownWords()).map((one) => ({
+        at: one.at,
+        id: one.word,
+        fresh: true,
+      })),
+    ].sort((a, b) => a.at - b.at);
+    for (const one of placed) featureFor(one.id, who, false, one.fresh);
+  };
 
   sheet.beats.forEach((raw, at) => {
     where[at] = out.length;
@@ -1167,17 +1394,19 @@ export function mendSheet(
         if (actor.names.some((name) => name && beat.say.includes(name)))
           mention(actor.id);
       for (const [thing, pattern] of Object.entries(THING_WORDS))
-        if (pattern.test(beat.say)) lastThing = thing as ThingId;
+        if (pattern.test(beat.say)) lastThing = thing;
+      for (const one of ownThings)
+        if (ownWords(one.name).test(beat.say)) lastThing = one.id;
       // A feature the narration tells open or shut is on its set: "the
       // gate is open a crack". One only named, in a line or in passing,
       // is never made for it: "we must not miss the bus", "take a seat".
       if (beat.kind === 'narration')
-        for (const told of featureStatesIn(beat.say))
-          featureFor(featureIdOf(told.word), null, false);
+        for (const told of featureStatesIn(beat.say, ownKnown().features))
+          featureFor(featureIdOf(told.word), null, false, false, true);
       // One the narration says opens or shuts it goes to it, as the stage
       // has them: where they stand now is by it.
       if (beat.kind === 'narration')
-        for (const one of doingsIn(beat.say, { actors })) {
+        for (const one of doingsIn(beat.say, { actors, ...ownKnown() })) {
           const f =
             (one.do === 'open' || one.do === 'close') && one.target
               ? features.find((x) => x.id === featureIdOf(one.target!))
@@ -1195,16 +1424,23 @@ export function mendSheet(
       // A thing the words find there ("A tuft of white fur!", "a bone lies
       // by the step") is set out, before whoever says so; never one someone
       // is bringing, nor one said to be gone.
-      for (const found of thingsFoundIn(beat.say, beat.kind === 'narration')) {
+      for (const found of thingsFoundIn(
+        beat.say,
+        beat.kind === 'narration',
+        ownThings,
+      )) {
         // One someone handles next is set out before them, as they do.
-        const handled = sheet.beats
+        const words = isStageProp(found)
+          ? PROP_WORDS[found]
+          : ownWords(found.replace(/-/g, ' '));
+        const handledNext = sheet.beats
           .slice(at + 1)
           .some(
             (b) =>
               (b.kind === 'business' || b.kind === 'action') &&
-              PROP_WORDS[found].test(b.say),
+              words.test(b.say),
           );
-        if (holders.has(found) || handled) continue;
+        if (holders.has(found) || handledNext) continue;
         if (
           bible.characters.some(
             (c) =>
@@ -1226,7 +1462,13 @@ export function mendSheet(
       inCast(beat.who)
     ) {
       // The words win: what they say is done is what is done.
-      const known = { actors, who: beat.who, lastThing, recent };
+      const known = {
+        actors,
+        who: beat.who,
+        lastThing,
+        recent,
+        ...ownKnown(),
+      };
       const read = beat.say.trim() ? doingsIn(beat.say, known) : [];
       const plans = read.length
         ? read
@@ -1251,6 +1493,7 @@ export function mendSheet(
             `beat ${at + 1}: "${beat.doSaid ?? beat.say}" is none of the doings; a nod`,
           );
         act(beat, { ...own, spot: beat.spot }, at, beat.say);
+        placedBy(beat);
         return;
       }
       if (plans.length > 1)
@@ -1282,8 +1525,9 @@ export function mendSheet(
             ? `${plan.words.charAt(0).toUpperCase()}${plan.words.slice(1)}${/[.!?]$/u.test(plan.words) ? '' : '.'}`
             : beat.say;
         act(beat, merged, at, kept);
-        if (merged.thing) lastThing = merged.thing;
+        if (merged.thing && handled(merged.thing)) lastThing = merged.thing;
       });
+      placedBy(beat);
       return;
     }
     if (beat.kind === 'reaction' && beat.who && !beat.feeling && !beat.sign)
@@ -1318,7 +1562,7 @@ export function mendSheet(
       },
     ];
   });
-  return { sheet, mended, features: found };
+  return { sheet, mended, features: found, things: newThings };
 }
 
 /** How each doing is said of someone, where it is not its id with an "s": "reaches for", "leans in toward". */
@@ -1434,24 +1678,59 @@ export function withFeatures(
       if (s.id !== setId) return s;
       const own = s.features ?? [];
       const more = features.filter((f) => !own.some((o) => o.id === f.id));
-      return more.length ? { ...s, features: [...own, ...more] } : s;
+      // One of the show's own the words have since opened opens for good.
+      const opened = own.map((o) =>
+        !o.opens && features.some((f) => f.id === o.id && f.opens)
+          ? { ...o, opens: true }
+          : o,
+      );
+      const changed = opened.some((o, k) => o !== own[k]);
+      return more.length || changed
+        ? { ...s, features: [...opened, ...more] }
+        : s;
     }),
   };
 }
 
+/** The bible with the things of its own a scene's words named added, for good. */
+export function withThings(
+  bible: StudioBible,
+  things: readonly StudioThing[],
+): StudioBible {
+  const own = bible.things ?? [];
+  const more = things.filter((t) => !own.some((o) => o.id === t.id));
+  return more.length ? { ...bible, things: [...own, ...more] } : bible;
+}
+
 /**
- * A bible written again with every feature its sets had kept: a feature,
- * once a set's, is its for good, whatever the writer left out.
+ * The bible with what a scene's words named that the show had not got:
+ * the features of its set, and things of its own. Each is the show's for
+ * good, as new places and people are.
+ */
+export const withFound = (
+  bible: StudioBible,
+  setId: string,
+  found: { features: readonly StudioFeature[]; things: readonly StudioThing[] },
+): StudioBible =>
+  withThings(withFeatures(bible, setId, found.features), found.things);
+
+/**
+ * A bible written again with every feature its sets had kept, and every
+ * thing of its own: a feature, once a set's, is its for good, and a thing
+ * once the show's, whatever the writer left out.
  */
 export function keptFeatures(
   bible: StudioBible,
   before: StudioBible | null,
 ): StudioBible {
   if (!before) return bible;
-  return before.sets.reduce(
-    (out, was) =>
-      was.features?.length ? withFeatures(out, was.id, was.features) : out,
-    bible,
+  return withThings(
+    before.sets.reduce(
+      (out, was) =>
+        was.features?.length ? withFeatures(out, was.id, was.features) : out,
+      bible,
+    ),
+    before.things ?? [],
   );
 }
 
@@ -1518,12 +1797,14 @@ export function checkSheet(
     error('crowded', 'Two people stand on the same spot as the scene opens.');
 
   const here = new Map<string, Spot>(sheet.onStage.map((p) => [p.who, p.spot]));
-  const holders = new Map<StageProp, string | null>(
+  const handled = handledOn(bible);
+  const kindOf = kindOn(bible);
+  const holders = new Map<string, string | null>(
     sheet.props.map((p) => [p.prop, null]),
   );
   // Each thing in one place: in one hand as it opens, or on the ground.
   for (const place of sheet.onStage) {
-    if (!isStageProp(place.holding)) continue;
+    if (!handled(place.holding)) continue;
     const had = holders.get(place.holding);
     if (had !== undefined)
       error(
@@ -1532,7 +1813,7 @@ export function checkSheet(
       );
     holders.set(place.holding, place.who);
   }
-  const eaten = new Set<StageProp>();
+  const eaten = new Set<string>();
   let spoken = 0;
   sheet.beats.forEach((beat, at) => {
     const n = at + 1;
@@ -1617,7 +1898,7 @@ export function checkSheet(
         here.set(beat.who, beat.spot ?? 'centre');
         // With what they bring, unless the stage has it already.
         for (const brings of comesWith(byId.get(beat.who), before))
-          if (isStageProp(brings) && !holders.has(brings))
+          if (handled(brings) && !holders.has(brings))
             holders.set(brings, beat.who);
       } else if (beat.do === 'leave' || beat.do === 'squeeze')
         here.delete(beat.who);
@@ -1675,9 +1956,9 @@ export function checkSheet(
           `Only bread is broken on the stage; beat ${n} breaks the ${prop}.`,
           at,
         );
-      if (beat.do === 'eat' && PROP_KIND[prop] !== 'food')
+      if (beat.do === 'eat' && kindOf(prop) !== 'food')
         error('prop', `The ${prop} is not something to eat (beat ${n}).`, at);
-      if (beat.do === 'drink' && PROP_KIND[prop] !== 'drink')
+      if (beat.do === 'drink' && kindOf(prop) !== 'drink')
         error(
           'prop',
           `The ${prop} is not something to drink from (beat ${n}).`,
@@ -1763,11 +2044,12 @@ export function endStateOf(
   before: EndState | null = null,
 ): EndState {
   const here = new Map<string, Spot>(sheet.onStage.map((p) => [p.who, p.spot]));
-  const holders = new Map<StageProp, string | null>(
+  const handled = handledOn(bible);
+  const holders = new Map<string, string | null>(
     sheet.props.map((p) => [p.prop, null]),
   );
   /** Where each thing on the ground lies: before whom it was set out, where it fell. */
-  const lies = new Map<StageProp, Spot | null>(
+  const lies = new Map<string, Spot | null>(
     sheet.props.map((p) => [
       p.prop,
       p.near
@@ -1776,18 +2058,18 @@ export function endStateOf(
     ]),
   );
   /** Gear, drawn in a hand for good. */
-  const gear = new Map<string, ThingId>();
+  const gear = new Map<string, string>();
   for (const p of sheet.onStage)
-    if (isStageProp(p.holding)) holders.set(p.holding, p.who);
+    if (handled(p.holding)) holders.set(p.holding, p.who);
     else if (p.holding) gear.set(p.who, p.holding);
-  const gone = new Set<StageProp>();
+  const gone = new Set<string>();
   const character = (id: string) => bible?.characters.find((c) => c.id === id);
   for (const beat of sheet.beats) {
     if (beat.kind === 'action' && beat.who) {
       if (beat.do === 'enter') {
         here.set(beat.who, beat.spot ?? 'centre');
         for (const brings of comesWith(character(beat.who), before))
-          if (isStageProp(brings) && !holders.has(brings))
+          if (handled(brings) && !holders.has(brings))
             holders.set(brings, beat.who);
       } else if (beat.spot && doingOf(beat.do)?.kind === 'travel')
         here.set(beat.who, beat.spot);
@@ -1836,7 +2118,7 @@ export function endStateOf(
       b.kind === 'line' && b.who && b.from !== 'off' ? [b.who] : [],
     ),
   ]);
-  const onGround = (prop: StageProp) => {
+  const onGround = (prop: string) => {
     const spot = lies.get(prop);
     return spot ? { at: spot } : {};
   };
@@ -1856,8 +2138,7 @@ export function endStateOf(
       ...[...gear].map(([who, thing]) => ({ who, thing })),
       // Whoever this scene did not have still has what they last held.
       ...(before?.held ?? []).filter(
-        (h) =>
-          !cast.has(h.who) && !(isStageProp(h.thing) && holders.has(h.thing)),
+        (h) => !cast.has(h.who) && !(handled(h.thing) && holders.has(h.thing)),
       ),
     ],
     // Everyone seen so far: what they hold next is what they were left with.
@@ -1881,8 +2162,10 @@ export function endBefore(
   for (const { sheet } of [...scenes]
     .filter((scene) => scene.position < position)
     .sort((a, b) => a.position - b.position))
-    if (sheet?.kind === 'story')
-      end = endStateOf(repairSheet(sheet, bible, end), bible, end);
+    if (sheet?.kind === 'story') {
+      const repaired = repairedWith(sheet, bible, end);
+      end = endStateOf(repaired.sheet, repaired.bible, end);
+    }
   return end;
 }
 
@@ -2207,7 +2490,22 @@ export function repairSheet(
   bible: StudioBible,
   before: EndState | null = null,
 ): StorySheet {
-  let sheet = mendSheet(input, bible, before).sheet;
+  return repairedWith(input, bible, before).sheet;
+}
+
+/**
+ * A story's sheet repaired as repairSheet does, and the bible it was
+ * repaired against: the show's, with what the scene's words named that it
+ * had not got (a feature of its set, a thing of its own) the show's now.
+ */
+export function repairedWith(
+  input: StorySheet,
+  given: StudioBible,
+  before: EndState | null = null,
+): { sheet: StorySheet; bible: StudioBible } {
+  const first = mendSheet(input, given, before);
+  const bible = withFound(given, first.sheet.set, first);
+  let sheet = first.sheet;
   const cast = new Set(bible.characters.map((c) => c.id));
   /** Beats already played as a nod once: still wrong, they cannot be seen at all. */
   const nodded = new Set<string>();
@@ -2263,7 +2561,7 @@ export function repairSheet(
     if (JSON.stringify(mended) === JSON.stringify(sheet)) break;
     sheet = mended;
   }
-  return sheet;
+  return { sheet, bible };
 }
 
 /**

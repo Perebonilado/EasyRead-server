@@ -66,6 +66,7 @@ import {
   sceneScriptSchema,
   sceneScreenplaySchema,
   sceneFigureSchema,
+  sceneSizeSchema,
   sceneStorySchema,
   sketchJudgeSchema,
   lectureExtraSchema,
@@ -977,6 +978,28 @@ export class AiSdkLlmAdapter implements LlmGatewayPort, OnModuleInit {
         `Look: ${input.look || 'not described'}`,
         `Voice: ${input.voice ?? 'none given'}`,
       ].join('\n'),
+      maxRetries: this.maxRetries(),
+    });
+    return {
+      value: result.object,
+      usage: this.usage(ref, result.usage, started),
+    };
+  }
+
+  async sceneSize(input: {
+    name: string;
+    world: string | null;
+  }): Promise<LlmResult<{ heightCm: number; lengthCm: number }>> {
+    const started = Date.now();
+    const { generateObject } = await this.registry.modules();
+    const { model, ref } = await this.registry.languageModel('scene_story');
+    const result = await generateObject({
+      model,
+      schema: sceneSizeSchema,
+      system: PROMPTS.sceneSize,
+      prompt: [`Thing: ${input.name}`, `World: ${input.world ?? 'today'}`].join(
+        '\n',
+      ),
       maxRetries: this.maxRetries(),
     });
     return {

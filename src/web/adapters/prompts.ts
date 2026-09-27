@@ -2360,6 +2360,18 @@ export const PROMPTS = {
     'otherwise.',
   ].join(' '),
 
+  /** How big a thing a story names really is: for drawing it among the people at their size. */
+  sceneSize: [
+    'You say how big a thing really is, as it is in the world of the story:',
+    'heightCm is how tall it stands as it usually stands, and lengthCm how',
+    'long it is from end to end, both in centimetres. A key is about 1 tall',
+    'and 6 long; a kite 90 tall and 60 across; a drum 60 tall and 40 across;',
+    'an umbrella 90 long; a bicycle 100 tall and 170 long; a signpost 220',
+    'tall and 80 across; a canoe 50 tall and 450 long; a hut 300 tall and',
+    '400 long. Say the usual size of the usual kind, never a toy or a',
+    'giant one unless its name says so.',
+  ].join(' '),
+
   /** What a story's character is, and a person's figure, from the look kept for them before the kit drew people. */
   sceneFigure: [
     'You turn one character of a story, as a reader of the book described',

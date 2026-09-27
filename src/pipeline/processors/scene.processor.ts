@@ -94,26 +94,39 @@ import {
   oldWorld,
 } from '../../business/domain/scene-figure';
 import {
+  OWN_VERSION,
   SET_VERSION,
   SIZE_UNITS,
   castOf,
   figureDrawing,
   figureSheet,
   lightDrawing,
+  measureOwnFeature,
+  measureOwnThing,
   measureSheet,
   mouthOf,
+  ownSheetsOf,
   setsOf,
   type Cast,
   type CharacterSheet,
+  type OwnSheets,
+  type RealSize,
   type SetSheet,
   type Sets,
 } from '../../business/domain/scene-sheet';
+import { DRAWN } from '../../business/domain/scene-own';
+import type { OwnPropDrawing } from '../../business/domain/scene-props';
+import type { SetPiece } from '../../business/domain/scene-set-pieces';
 import { RIG_VERSION, rigSheet } from '../../business/domain/scene-sheet-rig';
 import {
   EMPTY_STORY,
   MAX_STORY_PIECES,
   OPENING_LEAD_S,
+  OWN_FEATURE_CANVAS,
+  OWN_THING_CANVAS,
   bibleOf,
+  ownFeatureBrief,
+  ownThingBrief,
   SET_CANVAS,
   castKey,
   castStory,
@@ -239,6 +252,11 @@ export interface PageStory {
   /** Where the book's places, painted once, are kept. */
   setsKey: string;
   bookTitle: string;
+  /**
+   * Where a Studio show's own things and features, each drawn once by the
+   * artist, are kept (a kite, a signpost). A book's pages have none.
+   */
+  ownKey?: string;
 }
 
 /** An explainer page's part of its chapter's teacher's notes, and how the page before it ended. */
@@ -664,15 +682,20 @@ export class SceneProcessor {
     // row, so neither writes to it afterwards.
     const stop = new AbortController();
     const [drawing, spoken] = await Promise.allSettled([
-      this.drawAll(
-        script,
-        topic.title,
-        documentId,
-        who,
-        stop.signal,
-        story,
-        carried.reuse,
-      ).then(async (made) => {
+      Promise.all([
+        this.drawAll(
+          script,
+          topic.title,
+          documentId,
+          who,
+          stop.signal,
+          story,
+          carried.reuse,
+        ),
+        this.drawOwn(script, story, documentId, who),
+      ]).then(async ([made, own]) => {
+        // The show's own, as drawn: the stage holds and stands them.
+        if (own) script = { ...script, drawn: own };
         if (!voiced && !stop.signal.aborted) await input.step?.('voicing');
         return made;
       }),
@@ -726,7 +749,11 @@ export class SceneProcessor {
     const again = input.recheck?.(composed.scene);
     for (const note of again?.notes ?? []) this.logger.log(`${who}: ${note}`);
     if (again?.script) {
-      script = again.script;
+      // On the same drawings: the show's own as drawn too.
+      script = {
+        ...again.script,
+        ...(script.drawn ? { drawn: script.drawn } : {}),
+      };
       composed = compose(script);
     }
     const { scene, filled, audit } = composed;
@@ -2043,6 +2070,267 @@ export class SceneProcessor {
     });
   }
 
+  /**
+   * The show's own things and features a scene stands on its stage, each
+   * drawn once for the show and kept: null for a scene with none, and for
+   * a book's page, which has none. One that cannot be drawn is left out,
+   * and the stage stands something in for it (a parcel, something under a
+   * cloth); it is drawn again for the next scene.
+   */
+  private async drawOwn(
+    script: SceneScript,
+    story: PageStory | null,
+    documentId: string | null,
+    who: string,
+  ): Promise<NonNullable<SceneScript['drawn']> | null> {
+    const key = story?.ownKey;
+    const things = script.ownThings ?? [];
+    const features = (script.features ?? []).filter((f) => f.kind === DRAWN);
+    if (!story || !key || (!things.length && !features.length)) return null;
+    const out: {
+      things: Record<string, OwnPropDrawing>;
+      features: Record<string, SetPiece>;
+    } = { things: {}, features: {} };
+    await Promise.all([
+      ...things.map(async (thing) => {
+        const drawn = await this.ownThingFor(
+          key,
+          thing,
+          story,
+          documentId,
+          who,
+        );
+        if (drawn) out.things[thing.id] = drawn;
+      }),
+      ...features.map(async (feature) => {
+        const drawn = await this.ownFeatureFor(
+          key,
+          feature,
+          story,
+          documentId,
+          who,
+        );
+        if (drawn) out.features[feature.id] = drawn;
+      }),
+    ]);
+    return out;
+  }
+
+  /**
+   * A thing of the show's own (a kite, a drum) for the whole show: kept,
+   * or drawn once by the artist, measured, and kept. Null when no drawing
+   * comes through.
+   */
+  private ownThingFor(
+    key: string,
+    thing: { id: string; name: string },
+    story: Pick<PageStory, 'bookTitle' | 'bible'>,
+    documentId: string | null,
+    who: string,
+  ): Promise<OwnPropDrawing | null> {
+    return this.once(`${key}#thing:${thing.id}`, async () => {
+      try {
+        const kept = (await this.ownAt(key)).things[thing.id];
+        if (kept) return kept;
+      } catch (error) {
+        this.logger.warn(
+          `${who}: the show's own could not be read: ${(error as Error).message}`,
+        );
+        return null;
+      }
+      const size = await this.sizeOf(thing.name, story, documentId, who);
+      const drawn = await this.drawOwnOne(
+        ownThingBrief(thing, story.bookTitle, story.bible.world ?? null),
+        OWN_THING_CANVAS,
+        (drawing) => measureOwnThing(drawing, thing.id, size),
+        story.bookTitle,
+        documentId,
+        who,
+      );
+      if (!drawn) return null;
+      this.logger.log(
+        `${who}: the ${thing.name} drawn for the whole show, ${drawn.size} (${Math.round(-drawn.viewBox[1])} tall)${drawn.loose.hangs ? ', hanging from its grip' : ''}${drawn.loose.rolls ? ', rolling' : ''}`,
+      );
+      await this.keepOwn(key, who, thing.name, (own) => {
+        own.things[thing.id] = drawn;
+      });
+      return drawn;
+    });
+  }
+
+  /**
+   * A feature of the show's own (a bicycle, a signpost) for the whole
+   * show: kept, or drawn once by the artist, measured, and kept. One the
+   * words have since opened, drawn when nothing opened, is drawn again
+   * with what opens. Null when no drawing comes through.
+   */
+  private ownFeatureFor(
+    key: string,
+    feature: { id: string; name: string; opens: boolean },
+    story: Pick<PageStory, 'bookTitle' | 'bible'>,
+    documentId: string | null,
+    who: string,
+  ): Promise<SetPiece | null> {
+    return this.once(`${key}#feature:${feature.id}`, async () => {
+      try {
+        const kept = (await this.ownAt(key)).features[feature.id];
+        if (kept && (kept.opens || !feature.opens)) return kept.piece;
+      } catch (error) {
+        this.logger.warn(
+          `${who}: the show's own could not be read: ${(error as Error).message}`,
+        );
+        return null;
+      }
+      const size = await this.sizeOf(feature.name, story, documentId, who);
+      const piece = await this.drawOwnOne(
+        ownFeatureBrief(feature, story.bookTitle, story.bible.world ?? null),
+        OWN_FEATURE_CANVAS,
+        (drawing) => measureOwnFeature(drawing, feature.id, size),
+        story.bookTitle,
+        documentId,
+        who,
+      );
+      if (!piece) return null;
+      this.logger.log(
+        `${who}: the ${feature.name} drawn for the whole show, ${Math.round(piece.viewBox[2])} by ${Math.round(-piece.viewBox[1])}${piece.leaf ? ', opening' : ''}${piece.seat ? `, a seat ${piece.seat} high` : ''}${piece.opening ? ', a way through' : ''}${piece.front ? ', before the people' : ''}`,
+      );
+      await this.keepOwn(key, who, feature.name, (own) => {
+        own.features[feature.id] = { piece, opens: feature.opens };
+      });
+      return piece;
+    });
+  }
+
+  /**
+   * How big one of the show's own really is, in its story's world, for it
+   * to stand among the people at their scale: the artist draws to fill its
+   * canvas, whatever the size. Null when it cannot be asked: it is drawn
+   * at the size it was drawn at.
+   */
+  private async sizeOf(
+    name: string,
+    story: Pick<PageStory, 'bible'>,
+    documentId: string | null,
+    who: string,
+  ): Promise<RealSize | null> {
+    const world = story.bible.world;
+    try {
+      const made = await this.llm.sceneSize({
+        name,
+        world: world
+          ? [world.region, world.era].filter(Boolean).join(', ') || null
+          : null,
+      });
+      await this.record(documentId, 'scene_draw', made.usage);
+      return made.value;
+    } catch (error) {
+      this.logger.warn(
+        `${who}: how big the ${name} is could not be asked: ${(error as Error).message}`,
+      );
+      return null;
+    }
+  }
+
+  /**
+   * One of the show's own, drawn: asked for, gated, measured, and asked
+   * for once more with what fell short; the better kept. Its cost is the
+   * scene's, as every drawing's is.
+   */
+  private async drawOwnOne<T>(
+    thing: DrawingThing,
+    canvas: { w: number; h: number },
+    measure: (drawing: GatedDrawing) => Promise<T>,
+    topic: string,
+    documentId: string | null,
+    who: string,
+  ): Promise<T | null> {
+    let best: { value: T; faults: number } | null = null;
+    let notes: string[] | undefined;
+    for (let attempt = 1; attempt <= DRAW_TRIES; attempt += 1) {
+      let reply: string;
+      try {
+        const made = await this.llm.sceneDrawing({
+          thing,
+          viewBox: canvas,
+          topic,
+          neighbours: [],
+          notes,
+        });
+        await this.record(documentId, 'scene_draw', made.usage);
+        reply = made.value;
+      } catch (error) {
+        this.logger.warn(
+          `${who}: the ${thing.name} could not be asked for: ${(error as Error).message}`,
+        );
+        continue;
+      }
+      // Drawn still, as asked: code moves it, so stillness is no fault.
+      const gated = await gateDrawing(reply, { ...thing, motion: '' });
+      if (!gated.drawing) {
+        notes = gated.notes;
+        continue;
+      }
+      let value: T;
+      try {
+        value = await measure(gated.drawing);
+      } catch (error) {
+        notes = [
+          ...gated.notes,
+          `It could not be measured: ${(error as Error).message}.`,
+        ];
+        continue;
+      }
+      const faults = gated.retry ? 1 : 0;
+      if (!best || faults < best.faults) best = { value, faults };
+      if (!faults) break;
+      notes = gated.notes;
+      this.logger.log(
+        `${who}: the ${thing.name} try ${attempt} fell short: ${notes.join(' ')}`,
+      );
+    }
+    if (!best) this.logger.warn(`${who}: the ${thing.name} could not be drawn`);
+    return best?.value ?? null;
+  }
+
+  /** The show's own drawings as kept: none yet, or none that can be read, is none; a store that cannot say throws. */
+  private async ownAt(key: string): Promise<OwnSheets> {
+    let kept: Buffer;
+    try {
+      kept = await this.storage.get(key);
+    } catch (error) {
+      if (error instanceof NotFoundError)
+        return { version: OWN_VERSION, things: {}, features: {} };
+      throw error;
+    }
+    try {
+      return ownSheetsOf(JSON.parse(kept.toString('utf8')));
+    } catch {
+      return { version: OWN_VERSION, things: {}, features: {} };
+    }
+  }
+
+  /** One of the show's own added to what is kept as it stands now: others may have been drawn meanwhile. */
+  private async keepOwn(
+    key: string,
+    who: string,
+    name: string,
+    change: (own: OwnSheets) => void,
+  ): Promise<void> {
+    await this.inTurn(key, async () => {
+      const own = await this.ownAt(key);
+      change(own);
+      await this.storage.put({
+        key,
+        body: Buffer.from(JSON.stringify(own)),
+        mimeType: 'application/json',
+      });
+    }).catch((error: unknown) =>
+      this.logger.warn(
+        `${who}: the ${name} was drawn but not kept: ${(error as Error).message}`,
+      ),
+    );
+  }
+
   /** The book's sets as kept, read as the cast is. */
   private async setsAt(key: string): Promise<Sets> {
     let kept: Buffer;
@@ -2218,6 +2506,11 @@ export class SceneProcessor {
     documentId: string | null,
     who: string,
     only?: { characters: ReadonlySet<string>; places: ReadonlySet<string> },
+    /** A show's own things and features its scenes stand on their stages, drawn once each too. */
+    own: {
+      things: { id: string; name: string }[];
+      features: { id: string; name: string; opens: boolean }[];
+    } = { things: [], features: [] },
   ): Promise<void> {
     const characters = story.bible.characters.filter(
       (c) =>
@@ -2242,6 +2535,22 @@ export class SceneProcessor {
           story.bible.world ?? null,
         ),
       ),
+      ...(story.ownKey
+        ? [
+            ...own.things.map((thing) =>
+              this.ownThingFor(story.ownKey!, thing, story, documentId, who),
+            ),
+            ...own.features.map((feature) =>
+              this.ownFeatureFor(
+                story.ownKey!,
+                feature,
+                story,
+                documentId,
+                who,
+              ),
+            ),
+          ]
+        : []),
     ]);
   }
 

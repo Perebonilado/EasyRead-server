@@ -5,6 +5,7 @@
  * a scene the writer was never told of.
  */
 import { describeFigure } from '../scene-figure';
+import { DRAWN } from '../scene-own';
 import { STAGE_NAMES, STAGE_RECIPES, type LearningStage } from '../scene-stage';
 import { WORDS_A_SECOND } from './studio';
 import {
@@ -65,7 +66,7 @@ export function describeBible(
           ? ` Features (by id): ${s.features
               .map(
                 (f) =>
-                  `${f.id} (a ${f.kind}${f.spot === 'back' ? ', at the back' : `, on the ${f.spot}`}${f.opens ? ', opens and shuts' : ''})`,
+                  `${f.id} (${f.kind === DRAWN ? `the show's own ${f.name}` : `a ${f.kind}`}${f.spot === 'back' ? ', at the back' : `, on the ${f.spot}`}${f.opens ? ', opens and shuts' : ''})`,
               )
               .join(', ')}.`
           : ''
@@ -74,9 +75,14 @@ export function describeBible(
   const world = bible.world
     ? `The world: ${[bible.world.era, bible.world.region, bible.world.culture].filter(Boolean).join('; ')}`
     : '';
+  // The show's own things, drawn for it: named as they are, by id.
+  const things = bible.things?.length
+    ? `The show's own things (by id), handled like any other: ${bible.things.map((t) => t.id).join(', ')}.`
+    : '';
   return [
     `The characters (by id):\n${people.join('\n') || '- none'}`,
     `The places (by id):\n${places.join('\n') || '- none'}`,
+    things,
     world,
   ]
     .filter(Boolean)

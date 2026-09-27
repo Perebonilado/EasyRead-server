@@ -149,7 +149,8 @@ export const studioBibleSchema = z.object({
           z.object({
             id: z.string(),
             name: z.string(),
-            kind: z.enum(FEATURE_KINDS).catch('wall'),
+            // One none of the list's is the artist's to draw.
+            kind: z.union([z.enum(FEATURE_KINDS), z.string()]).catch('drawn'),
             spot: z.enum([...SPOTS, 'back']).catch('back'),
             opens: z.boolean().catch(false),
           }),
@@ -204,8 +205,10 @@ export const studioSceneSchema = z.object({
       spot: z.enum(SPOTS).catch('centre'),
       pose: z.enum(FIGURE_POSES).catch('standing'),
       face: z.enum(STUDIO_FACES).catch('neutral'),
+      // A thing none of the list's may be the show's own: the domain holds
+      // it to the scene's words.
       holding: z
-        .enum(THINGS as [string, ...string[]])
+        .union([z.enum(THINGS as [string, ...string[]]), z.string()])
         .nullable()
         .catch(null),
     }),
@@ -233,11 +236,14 @@ export const studioSceneSchema = z.object({
         .catch(null),
       target: z.string().nullable().catch(null),
       thing: z
-        .enum(THINGS as [string, ...string[]])
+        .union([z.enum(THINGS as [string, ...string[]]), z.string()])
         .nullable()
         .catch(null),
       via: z.string().nullable().catch(null),
-      prop: z.enum(STAGE_PROPS).nullable().catch(null),
+      prop: z
+        .union([z.enum(STAGE_PROPS), z.string()])
+        .nullable()
+        .catch(null),
       spot: z.enum(SPOTS).nullable().catch(null),
       from: z.enum(LINE_FROMS).nullable().catch(null),
       pace: z

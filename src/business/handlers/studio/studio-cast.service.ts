@@ -12,6 +12,8 @@ import { STORAGE } from '../../ports/tokens';
 /** Where a show's characters and places are kept, each drawn once for every episode. */
 export const studioCastKey = (showId: string) => `studio/${showId}/cast.json`;
 export const studioSetsKey = (showId: string) => `studio/${showId}/sets.json`;
+/** Where a show's own things and features are kept, each drawn once by the artist: a kite, a signpost. */
+export const studioOwnKey = (showId: string) => `studio/${showId}/own.json`;
 
 /** A drawing with only the states named kept: a face, no others over it. */
 function withOnly(

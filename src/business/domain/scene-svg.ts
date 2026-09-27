@@ -1122,3 +1122,111 @@ export async function gateDrawing(
     mended,
   };
 }
+
+/** A CSS rule of a drawing's own: its selectors, each a list of compounds (".cls", "g", "#id.cls"), and what it sets. */
+interface StyleRule {
+  selectors: string[][];
+  declarations: string;
+}
+
+/** A drawing's own CSS as rules, leaving out @-blocks (keyframes, media) and anything unreadable. */
+function styleRules(css: string): StyleRule[] {
+  const text = css.replace(/\/\*[\s\S]*?\*\//g, '');
+  const rules: StyleRule[] = [];
+  let at = 0;
+  while (at < text.length) {
+    const open = text.indexOf('{', at);
+    if (open < 0) break;
+    const head = text.slice(at, open).trim();
+    let depth = 1;
+    let end = open + 1;
+    for (; end < text.length && depth; end += 1)
+      if (text[end] === '{') depth += 1;
+      else if (text[end] === '}') depth -= 1;
+    const body = text.slice(open + 1, end - 1).trim();
+    at = end;
+    if (!head || head.startsWith('@') || body.includes('{')) continue;
+    const selectors = head
+      .split(',')
+      .map((one) =>
+        one.replace(/[>+~]/g, ' ').trim().split(/\s+/).filter(Boolean),
+      )
+      .filter((compounds) =>
+        compounds.every((c) => /^(?:[a-zA-Z][\w-]*)?(?:[.#][\w-]+)*$/.test(c)),
+      );
+    if (selectors.length) rules.push({ selectors, declarations: body });
+  }
+  return rules;
+}
+
+/** Whether an element is what one compound selector names: "path", ".leaf", "g#tail.dark". */
+function isCompound(node: Element, compound: string): boolean {
+  const tag = /^[a-zA-Z][\w-]*/.exec(compound)?.[0];
+  if (tag && node.name.toLowerCase() !== tag.toLowerCase()) return false;
+  const classes = (node.attribs.class ?? '').split(/\s+/);
+  for (const m of compound.matchAll(/([.#])([\w-]+)/g))
+    if (m[1] === '.' ? !classes.includes(m[2]) : node.attribs.id !== m[2])
+      return false;
+  return true;
+}
+
+/** Whether an element is what a selector names, its ancestors the compounds before. */
+function isSelected(node: Element, compounds: readonly string[]): boolean {
+  if (!isCompound(node, compounds[compounds.length - 1])) return false;
+  let k = compounds.length - 2;
+  for (
+    let at = node.parent as Element | null;
+    at && k >= 0;
+    at = at.parent as Element | null
+  )
+    if (at.attribs && isCompound(at, compounds[k])) k -= 1;
+  return k < 0;
+}
+
+/**
+ * A drawing made still and its own, to be set among others: its CSS set
+ * on each shape it styles and taken out, with its animation; every id
+ * given `prefix`, and every reference to one with it; its classes gone.
+ * So nothing of it reaches another drawing, nor anything of another it.
+ * Changes `root` in place.
+ */
+export function stillTree(root: Element, prefix: string): void {
+  const nodes = [...walk(root)];
+  const rules = nodes
+    .filter((node) => node.name.toLowerCase() === 'style')
+    .flatMap((node) => styleRules(textOf(node)));
+  for (const node of nodes) {
+    const name = node.name.toLowerCase();
+    if (name === 'style' || SMIL.has(name)) {
+      removeNode(node);
+      continue;
+    }
+    const set = rules
+      .filter((rule) => rule.selectors.some((s) => isSelected(node, s)))
+      .map((rule) => rule.declarations);
+    const own = node.attribs.style ?? '';
+    const style = [...set, own]
+      .join(';')
+      .split(';')
+      .map((one) => one.trim())
+      // Still: nothing of its own motion is kept.
+      .filter((one) => one && !/^(?:animation|transition)[\w-]*\s*:/i.test(one))
+      .join(';');
+    if (style) node.attribs.style = style;
+    else delete node.attribs.style;
+    delete node.attribs.class;
+  }
+  const renamed = (id: string) => `${prefix}-${id}`;
+  for (const node of walk(root)) {
+    if (node.attribs.id) node.attribs.id = renamed(node.attribs.id);
+    for (const [key, value] of Object.entries(node.attribs)) {
+      if ((key === 'href' || key === 'xlink:href') && value.startsWith('#'))
+        node.attribs[key] = `#${renamed(value.slice(1))}`;
+      else if (value.includes('url(#'))
+        node.attribs[key] = value.replace(
+          /url\(\s*#([^)\s]+)\s*\)/g,
+          (_, id: string) => `url(#${renamed(id)})`,
+        );
+    }
+  }
+}

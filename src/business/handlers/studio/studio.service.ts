@@ -1,5 +1,5 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
-import { randomBytes } from 'node:crypto';
+import { randomBytes, randomUUID } from 'node:crypto';
 import type {
   SceneDto,
   StudioEpisodeDto,
@@ -27,6 +27,7 @@ import {
   type StudioOutline,
 } from '../../domain/studio/studio';
 import {
+  carriedWears,
   checkExplainer,
   checkSheet,
   endBefore,
@@ -40,9 +41,16 @@ import {
 import { MADE_WITH } from '../../domain/studio/studio-brand';
 import { joinOf } from '../../domain/studio/studio-edit';
 import { storyBibleFor } from '../../domain/studio/studio-stage';
-import { describeForProducer } from '../../domain/studio/studio-words';
+import {
+  describeForProducer,
+  honestReply,
+} from '../../domain/studio/studio-words';
 import type { ClockPort } from '../../ports/clock.port';
-import type { JobQueuePort, StudioJob } from '../../ports/job-queue.port';
+import type {
+  JobQueuePort,
+  StudioAsk,
+  StudioJob,
+} from '../../ports/job-queue.port';
 import type {
   LlmGatewayPort,
   LlmUsage,
@@ -474,6 +482,7 @@ export class StudioService {
       ),
     );
     const scenes = await this.studio.listScenes(episode.id);
+    const carried = carriedWears(scenes, show.bible);
     const state = describeForProducer({
       looking: this.lookingAt(input.focus, scenes),
       brief: show.brief,
@@ -488,7 +497,7 @@ export class StudioService {
             ? 'being made now'
             : !s.sceneKey
               ? 'not made yet'
-              : needsMaking(s, show.bible, show.brief)
+              : needsMaking(s, show.bible, show.brief, carried.get(s.position))
                 ? 'changed since it was made: the film shows the old version until it is made again'
                 : 'made: the film shows it',
       ),
@@ -551,10 +560,32 @@ export class StudioService {
             note = await this.askCast(show, episode, draft.request ?? said);
             break;
           case 'scene': {
-            const scene = scenes[(draft.scene ?? 0) - 1];
-            note = scene
-              ? await this.askScene(show, episode, scene, draft.request ?? said)
-              : 'Which scene should I change? Tell me its number.';
+            // Each scene asked for is its own change, at most three at once;
+            // one that was made is made again and checked, as the maker's
+            // own words ask.
+            const numbers = (
+              draft.scenes?.length ? draft.scenes : [draft.scene ?? 0]
+            ).slice(0, 3);
+            const asked = numbers.map((n) => scenes[n - 1]);
+            if (!asked.length || asked.some((one) => !one)) {
+              note = 'Which scene should I change? Tell me its number.';
+              break;
+            }
+            const notes: string[] = [];
+            for (const scene of asked) {
+              // As the one before left it: writing a scene already.
+              const now =
+                (await this.studio.findEpisode(episode.id)) ?? episode;
+              const one = await this.askScene(
+                show,
+                now,
+                scene,
+                draft.request ?? said,
+                { id: mine.id, words: said },
+              );
+              if (one) notes.push(one);
+            }
+            note = notes.length ? notes.join(' ') : null;
             break;
           }
           case 'make':
@@ -576,7 +607,14 @@ export class StudioService {
       showId: show.id,
       episodeId: episode.id,
       role: 'assistant',
-      content: note ?? draft.reply,
+      // A change set going is a try, checked where it is made again: never done yet.
+      content:
+        note ??
+        honestReply(
+          draft.reply,
+          draft.refuse ? 'none' : draft.action,
+          scenes.some((s) => s.sceneKey),
+        ),
       meta: {
         choices: note
           ? []
@@ -716,6 +754,8 @@ export class StudioService {
     episode: StudioEpisodeRecord,
     scene: StudioSceneRecord,
     request: string,
+    /** Where the maker asked it and in what words: a made story scene is made again and checked against them. */
+    from?: { id: string; words: string },
   ): Promise<string | null> {
     if (episode.phase !== 'script' && episode.phase !== 'made')
       return 'The scenes are not written yet.';
@@ -730,10 +770,21 @@ export class StudioService {
         ? 'The film is being made right now; ask again when it is done.'
         : 'I am still working on the last change; ask again when it is done.';
     await this.studio.updateScene(scene.id, { status: 'writing', error: null });
+    // A story scene that was made: made again once written, and checked.
+    const ask: StudioAsk | undefined =
+      scene.sceneKey && scene.sheet?.kind === 'story'
+        ? {
+            id: from?.id ?? randomUUID(),
+            words: (from?.words ?? request).slice(0, MESSAGE_CHARS),
+            request,
+            tries: 1,
+          }
+        : undefined;
     await this.enqueue(show, episode, {
       kind: 'scene',
       sceneId: scene.id,
       request,
+      ...(ask ? { ask } : {}),
     });
     return null;
   }
@@ -861,7 +912,10 @@ export class StudioService {
     const clean = request.trim().slice(0, MESSAGE_CHARS);
     if (!clean) throw new ValidationError('Say what to change');
     await this.hear(userId, clean);
-    const note = await this.askScene(show, episode, scene, clean);
+    const note = await this.askScene(show, episode, scene, clean, {
+      id: randomUUID(),
+      words: clean,
+    });
     if (note) throw new ValidationError(note);
     await this.heard(show, episode, `Scene ${scene.position + 1}`, clean);
     await this.log(show, episode, {
@@ -916,10 +970,17 @@ export class StudioService {
         planned: planned?.seconds ?? null,
       }).problems;
     }
+    const carried =
+      carriedWears(
+        (await this.studio.listScenes(episode.id)).map((s) =>
+          s.id === scene.id ? { ...s, sheet: next } : s,
+        ),
+        bible,
+      ).get(scene.position) ?? [];
     await this.studio.updateScene(scene.id, {
       previousSheet: scene.sheet,
       sheet: next,
-      sheetHash: sceneFingerprint(next, bible, show.brief),
+      sheetHash: sceneFingerprint(next, bible, show.brief, carried),
       problems,
       status: scene.status === 'failed' ? 'ready' : scene.status,
     });
@@ -930,7 +991,7 @@ export class StudioService {
       line: `Scene ${scene.position + 1} changed by hand`,
     });
     const now = (await this.studio.findScene(scene.id))!;
-    return sceneDto(now, episode, bible, show.brief);
+    return sceneDto(now, episode, bible, show.brief, carried);
   }
 
   /** A scene's last change undone. */
@@ -958,10 +1019,17 @@ export class StudioService {
             maths: show.bible?.maths ?? false,
             planned: planned?.seconds ?? null,
           }).problems;
+    const carried =
+      carriedWears(
+        (await this.studio.listScenes(episode.id)).map((s) =>
+          s.id === scene.id ? { ...s, sheet } : s,
+        ),
+        show.bible,
+      ).get(scene.position) ?? [];
     await this.studio.updateScene(scene.id, {
       sheet,
       previousSheet: scene.sheet,
-      sheetHash: sceneFingerprint(sheet, show.bible, show.brief),
+      sheetHash: sceneFingerprint(sheet, show.bible, show.brief, carried),
       problems,
     });
     await this.log(show, episode, {
@@ -971,7 +1039,7 @@ export class StudioService {
       line: `Scene ${scene.position + 1}: the last change undone`,
     });
     const now = (await this.studio.findScene(scene.id))!;
-    return sceneDto(now, episode, show.bible, show.brief);
+    return sceneDto(now, episode, show.bible, show.brief, carried);
   }
 
   /** How the scenes before one left the stage: what it carries on from. */
@@ -1075,7 +1143,10 @@ export class StudioService {
     if (blockers.length) return blockers[0];
     if ((await this.studio.makingFor(userId)) > 0)
       return 'Another of your films is being made. This one can be made as soon as it is done.';
-    const stale = scenes.filter((s) => needsMaking(s, show.bible, show.brief));
+    const carried = carriedWears(scenes, show.bible);
+    const stale = scenes.filter((s) =>
+      needsMaking(s, show.bible, show.brief, carried.get(s.position)),
+    );
     // What it will run, about, from its words: the allowance is spent as made.
     const seconds = stale.reduce(
       (n, s) => n + (s.sheet ? secondsOf(s.sheet) : 30),

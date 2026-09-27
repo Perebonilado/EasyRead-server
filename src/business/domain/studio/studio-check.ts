@@ -35,7 +35,17 @@ import {
   type Doer,
   type DoingId,
 } from '../scene-doings';
-import { isGear } from '../scene-figure';
+import { isGear, type FigureSpec } from '../scene-figure';
+import {
+  WEAR_WORDS,
+  outfitWords,
+  putOn,
+  sameOutfit,
+  takeOff,
+  wearableOf,
+  type Wearable,
+} from '../scene-wear';
+import { outfitAtEnd, outfitsOf } from './studio-posture';
 import {
   DRAWN,
   looksOf,
@@ -128,6 +138,8 @@ export interface EndState {
   held?: { who: string; thing: string }[];
   /** Everyone who was in the scene at all: what they hold next is what it left them with. */
   cast?: string[];
+  /** What each one wears as it ends, where that is not their usual look: the next scene opens with them in it. */
+  wears?: { who: string; figure: FigureSpec }[];
 }
 
 /** A story's scene may run this much longer, or shorter, than its outline said before it goes back. */
@@ -268,6 +280,47 @@ export function thingsFoundIn(
 
 /** Lines that come from somewhere with no one standing on the stage to say them. */
 const FROM_AWAY = new Set(['off', 'phone', 'letter', 'above', 'dream']);
+
+/**
+ * Words that say someone has a thing on: "in his new uniform", "wearing
+ * her red coat", "dressed in pyjamas". Whose it is, and the thing.
+ */
+const WORN_SAID = new RegExp(
+  `\\b(?<how>wearing|wears|wore|dressed in|dressed up in|has on|had on|(?<!\\b(?:puts?|put|putting|tucks?|tucked|places?|placed|drops?|dropped|stuffs?|stuffed|packs?|packed|keeps?|kept|hides?|hid|carries|carried|carrying|holds?|held|holding|it|them)\\s)in) (?:(?<whose>my|your|his|her|their|the|a|an|its|our) )?(?<thing>(?:[\\p{L}-]+ ){0,2}?(?:${WEAR_WORDS}))\\b`,
+  'giu',
+);
+
+/** What the words say is worn, by whom and where: each thing worn they name, and the word before it that says whose. */
+export function wornSaidIn(
+  text: string,
+): { at: number; thing: string; whose: string | null; wearing: boolean }[] {
+  const out: {
+    at: number;
+    thing: string;
+    whose: string | null;
+    wearing: boolean;
+  }[] = [];
+  for (const m of text.matchAll(WORN_SAID)) {
+    const said = m.groups?.thing ?? '';
+    const wear = wearableOf(said);
+    // "In" names clothes only: never "in his bag" or "in his glasses case".
+    if (
+      !wear ||
+      (m.groups?.how === 'in' &&
+        wear.slot !== 'top' &&
+        wear.slot !== 'headwear' &&
+        wear.slot !== 'outfit')
+    )
+      continue;
+    out.push({
+      at: m.index,
+      thing: said.split(/\s+/).pop() ?? said,
+      whose: m.groups?.whose?.toLowerCase() ?? null,
+      wearing: m.groups?.how !== 'in',
+    });
+  }
+  return out;
+}
 
 /**
  * How long a walk from one spot to another takes on the stage, in seconds:
@@ -474,6 +527,28 @@ export function mendSheet(
       );
       place.holding = null;
     }
+  // A thing to wear that someone opens holding (the scene before left it
+  // in their hand) and the words have them in: worn from the start.
+  const wornInWords = wornSaidIn(allWords);
+  for (const place of opening) {
+    const held = place.holding;
+    if (!held || isGear(held)) continue;
+    const name = ownThings.find((t) => t.id === held)?.name ?? held;
+    const wear = wearableOf(name);
+    if (!wear || wear.slot === 'none' || wear.slot === 'outfit') continue;
+    const said = wornInWords.some((w) => wearableOf(w.thing)?.kit === wear.kit);
+    const putsOn = sheet.beats.some(
+      (b) =>
+        characterId(b.who, bible) === place.who &&
+        (b.do === 'dress' || /\bput(?:s|ting)? on\b/iu.test(b.say)),
+    );
+    if (!said || putsOn) continue;
+    place.wears = [...(place.wears ?? []), held];
+    place.holding = null;
+    mended.push(
+      `${nameOf(place.who)} wears the ${name} from the start: the words have them in it`,
+    );
+  }
   sheet.onStage = opening;
 
   // The things on the stage: each once, and none resting on the ground
@@ -806,7 +881,23 @@ export function mendSheet(
       via = features.find((f) => f.opens)?.id ?? null;
     // A thing no list has, done with as only a thing is ("flies his
     // kite"), or named so by the sheet and the words: the show's own.
+    // Clothes put on or taken off that are not on the stage, and not the
+    // words' own new thing ("gets changed into his clothes"), are only
+    // what they wear.
+    const clothes = id === 'dress' || id === 'undress';
     let thing = plan.thing;
+    let wornOnly: string | null = null;
+    if (
+      clothes &&
+      thing &&
+      !handled(thing) &&
+      (plan.fresh?.thing !== thing ||
+        wearableOf(thing)?.slot === 'outfit' ||
+        wearableOf(thing)?.slot === 'none')
+    ) {
+      wornOnly = thing;
+      thing = null;
+    }
     if (thing && !handled(thing) && !isGear(thing)) {
       const handles = doingOf(id)?.kind === 'handle' || id === 'fetch';
       thing =
@@ -1065,6 +1156,26 @@ export function mendSheet(
       make('business', { do: id, target: feature });
       return;
     }
+    // Put on or taken off: only a thing worn. With none on the stage,
+    // their clothes change as the words say; taken off, it is in hand.
+    if (clothes) {
+      const named = prop ?? wornOnly;
+      if (named && !wearOf(named))
+        return fall(`the ${named} is nothing to wear`);
+      if (!prop) {
+        make('business', { do: id, ...(wornOnly ? { thing: wornOnly } : {}) });
+        changeClothes(who, id as 'dress' | 'undress', wornOnly);
+        return;
+      }
+      if (id === 'undress') {
+        make('business', { do: id, prop, thing: prop });
+        holders.set(prop, who);
+        restsBy.delete(prop);
+        changeClothes(who, id, prop);
+        lastThing = prop;
+        return;
+      }
+    }
     // Gear is drawn in the hand for good: a staff is never handed about.
     if (!prop && thing) return fall(`the ${thing} is never let go of`);
     if (!prop) {
@@ -1196,6 +1307,12 @@ export function mendSheet(
     if (id === 'throw') {
       if (to) mouthFree(to);
       holders.set(prop, to);
+    }
+    // Put on, it is worn: in no one's hand, and nowhere on the stage.
+    if (id === 'dress') {
+      holders.delete(prop);
+      restsBy.delete(prop);
+      changeClothes(who, id, prop);
     }
     make('business', {
       do: id,
@@ -1431,11 +1548,203 @@ export function mendSheet(
     for (const one of placed) featureFor(one.id, who, false, one.fresh);
   };
 
+  // Words that find someone in bed before they do anything ("Tobi is
+  // still fast asleep in his bed"): in bed as the scene opens.
+  for (const place of sheet.onStage) {
+    if (place.pose !== 'standing' || !inCast(place.who)) continue;
+    const names = namesOf(byId.get(place.who)!);
+    const first = sheet.beats.findIndex(
+      (b) =>
+        characterId(b.who, bible) === place.who &&
+        b.kind !== 'narration' &&
+        b.kind !== 'reaction',
+    );
+    const told = sheet.beats
+      .slice(0, first < 0 ? sheet.beats.length : first)
+      .filter((b) => b.kind === 'narration')
+      .map((b) => b.say)
+      .join(' ');
+    const found = names.some((name) =>
+      new RegExp(
+        `\\b${name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b[^.!?]{0,40}\\b(?:is|lies|lay|sleeps|slept|sits|sat|stays|stayed|still|snuggled|tucked up)\\b[^.!?]{0,24}\\bin (?:his|her|their|the) bed\\b`,
+        'iu',
+      ).test(told),
+    );
+    if (!found) continue;
+    // Asleep, lying down in it; else sitting up in it.
+    if (/\b(?:asleep|sleeps|slept|sleeping|snoring)\b/iu.test(told)) {
+      place.pose = 'lying';
+      place.on = 'bed';
+    } else place.pose = 'in bed';
+    mended.push(`${nameOf(place.who)} is in bed as it opens, as the words say`);
+  }
+  // One in bed as the scene opens is in the set's own bed: the set has
+  // one, or it is put on it, never drawn into them. One sitting or lying
+  // on something the set has not got has it there too.
+  for (const place of sheet.onStage) {
+    const bedded =
+      place.pose === 'in bed' ||
+      (place.pose === 'lying' &&
+        Boolean(place.on) &&
+        featureKindOf(place.on!) === 'bed');
+    if (bedded) {
+      const bed = featureFor(
+        place.on && featureKindOf(place.on) === 'bed' ? place.on : 'bed',
+        place.who,
+        false,
+      );
+      if (bed && place.on !== bed) {
+        if (!place.on) mended.push(`${nameOf(place.who)} is in the ${bed}`);
+        place.on = bed;
+      }
+    } else if (
+      (place.pose === 'sitting' || place.pose === 'lying') &&
+      place.on
+    ) {
+      const on = featureFor(place.on, place.who, false, true);
+      if (on) place.on = on;
+      else delete place.on;
+    } else if (place.on) delete place.on;
+  }
+
+  /**
+   * What each one the kit draws is wearing, as the scene has it so far:
+   * what the scene before left them in, else their usual clothes; one in
+   * bed or lying down as it opens, not dressed yet.
+   */
+  const dressed = new Map<string, { spec: FigureSpec; undressed: boolean }>();
+  /** A thing as worn: what the kit draws for it, by its name. */
+  const wearOf = (thing: string | null | undefined): Wearable | null =>
+    thing
+      ? wearableOf(ownThings.find((t) => t.id === thing)?.name ?? thing)
+      : null;
+  for (const c of bible.characters) {
+    if (c.kind !== 'person' || !c.figure) continue;
+    const carried = before?.wears?.find((w) => w.who === c.id)?.figure;
+    const place = sheet.onStage.find((p) => p.who === c.id);
+    let spec = carried ?? c.figure;
+    for (const thing of place?.wears ?? []) {
+      const wear = wearOf(thing);
+      if (wear) spec = putOn(spec, c.figure, wear);
+    }
+    dressed.set(c.id, {
+      spec,
+      undressed:
+        !carried && (place?.pose === 'in bed' || place?.pose === 'lying'),
+    });
+  }
+  /** Whether someone has a thing on already: their clothes have it. */
+  const hasOn = (who: string, thing: string): boolean => {
+    const now = dressed.get(who);
+    const wear = wearOf(thing);
+    if (!now || !wear) return true;
+    if (now.undressed) return wear.slot === 'none';
+    if (wear.slot === 'top') return now.spec.top === wear.kit;
+    if (wear.slot === 'headwear') return now.spec.headwear === wear.kit;
+    if (wear.slot === 'extras')
+      return now.spec.extras.includes(wear.kit as never);
+    return true;
+  };
+  /** Someone putting a thing on or taking it off: what they wear now. */
+  const changeClothes = (
+    who: string,
+    id: 'dress' | 'undress',
+    thing: string | null,
+  ) => {
+    const now = dressed.get(who);
+    const usual = byId.get(who)?.figure;
+    if (!now || !usual) return;
+    const wear = wearOf(thing) ?? { slot: 'outfit' as const, kit: null };
+    dressed.set(who, {
+      spec:
+        id === 'dress'
+          ? putOn(now.undressed ? usual : now.spec, usual, wear)
+          : takeOff(now.spec, wear),
+      undressed: false,
+    });
+  };
+  /** The thing a word for something worn means here: one on the stage or the show's own by that word; else none. */
+  const wornThingFor = (word: string): string | null => {
+    const id = ownIdOf(nounOf(word));
+    if (handled(id)) return id;
+    const own = ownThings.find((t) => ownWords(t.name).test(word));
+    return own?.id ?? null;
+  };
+
   sheet.beats.forEach((raw, at) => {
     where[at] = out.length;
     const beat: SheetBeat = { ...raw };
     beat.who = characterId(beat.who, bible) ?? beat.who;
     beat.to = characterId(beat.to, bible) ?? beat.to;
+    // Words that say someone has something on that they have not put on
+    // ("spins round in his new uniform"): they put it on first, quietly,
+    // taking it up where it lies.
+    if (beat.say.trim())
+      for (const worn of wornSaidIn(beat.say)) {
+        const before = beat.say.slice(0, worn.at);
+        const sentence = before.slice(before.search(/[^.!?]*$/u));
+        const named = actors
+          .flatMap((a) =>
+            a.names.map((name) => ({
+              id: a.id,
+              at: name ? sentence.lastIndexOf(name) : -1,
+            })),
+          )
+          .filter((one) => one.at >= 0)
+          .sort((a, b) => b.at - a.at)[0]?.id;
+        const who =
+          worn.whose === 'my'
+            ? beat.kind === 'line'
+              ? beat.who
+              : null
+            : worn.whose === 'your'
+              ? beat.kind === 'line'
+                ? beat.to
+                : null
+              : (named ??
+                (beat.kind === 'action' || beat.kind === 'business'
+                  ? beat.who
+                  : null));
+        if (!inCast(who) || !here.has(who)) continue;
+        const thing = wornThingFor(worn.thing);
+        if (hasOn(who, thing ?? worn.thing)) continue;
+        // Already being put on here: the words' own doing does it.
+        if (
+          (beat.kind === 'business' || beat.kind === 'action') &&
+          beat.who === who &&
+          (beat.do === 'dress' ||
+            doingsIn(beat.say, { actors, who }).some((d) => d.do === 'dress'))
+        )
+          continue;
+        const whose =
+          byId.get(who)?.voice && genderOf(byId.get(who)!.voice) === 'f'
+            ? 'her'
+            : genderOf(byId.get(who)!.voice) === 'm'
+              ? 'his'
+              : 'their';
+        mended.push(
+          `beat ${at + 1}: ${nameOf(who)} puts on the ${worn.thing} first, as the words have them in it`,
+        );
+        const plan = {
+          do: 'dress' as const,
+          at: 0,
+          end: 0,
+          who: null,
+          target: null,
+          thing: thing ?? worn.thing,
+          via: null,
+          pace: null,
+          away: false,
+          words: '',
+          spot: null,
+        };
+        act(
+          { ...blankBeat('business'), who },
+          plan,
+          at,
+          `${nameOf(who)} puts on ${whose} ${worn.thing}.`,
+        );
+      }
     // What the words send up into a feature, or find caught there, is in
     // no one's hand from then on.
     if (beat.kind === 'line' || beat.kind === 'narration')
@@ -1672,6 +1981,41 @@ export function mendSheet(
   return { sheet, mended, features: found, things: newThings };
 }
 
+/**
+ * A sheet with clothes someone wears from the start of it: the check of
+ * a scene made as asked found them carried instead. One on the stage as
+ * it opens wears it from then; one who comes on later puts it on as the
+ * first thing they do.
+ */
+export function wearFrom(
+  sheet: StorySheet,
+  wear: readonly { who: string; thing: string }[],
+): StorySheet {
+  const out: StorySheet = JSON.parse(JSON.stringify(sheet)) as StorySheet;
+  for (const one of wear) {
+    const place = out.onStage.find((p) => p.who === one.who);
+    if (place) {
+      if (!place.wears?.includes(one.thing))
+        place.wears = [...(place.wears ?? []), one.thing];
+      if (place.holding === one.thing) place.holding = null;
+      continue;
+    }
+    const first = out.beats.findIndex(
+      (b) =>
+        b.who === one.who && (b.kind === 'action' || b.kind === 'business'),
+    );
+    if (first < 0) continue;
+    out.beats.splice(first + 1, 0, {
+      ...blankBeat('business'),
+      who: one.who,
+      do: 'dress',
+      thing: one.thing,
+      say: `Puts on the ${one.thing}.`,
+    });
+  }
+  return out;
+}
+
 /** How each doing is said of someone, where it is not its id with an "s": "reaches for", "leans in toward". */
 const SAID: Partial<Record<DoingId, string>> = {
   'lean-in': 'leans in toward',
@@ -1697,6 +2041,8 @@ const SAID: Partial<Record<DoingId, string>> = {
   use: 'uses',
   spin: 'spins round',
   fall: 'falls over',
+  dress: 'puts on',
+  undress: 'takes off',
 };
 
 /** A going said at a run. */
@@ -1728,6 +2074,9 @@ export function wordsFor(beat: SheetBeat, bible: StudioBible): string {
     (/(?:s|sh|ch|x)$/u.test(id) ? `${id}es` : `${id.replace(/-/g, ' ')}s`);
   const thing = beat.thing ?? beat.prop;
   const aim = beat.target ?? beat.to;
+  // Dressed or undressed with nothing named: into or out of their clothes.
+  if ((id === 'dress' || id === 'undress') && !thing)
+    return `${nameOf(beat.who)} gets ${id === 'dress' ? 'dressed' : 'undressed'}.`;
   const parts = [nameOf(beat.who), verb];
   const handles = doingOf(id)?.kind === 'handle';
   if (handles && thing && id !== 'open' && id !== 'close')
@@ -2045,6 +2394,11 @@ export function checkSheet(
     }
     if (beat.kind === 'business' && beat.who && beat.prop) {
       const prop = beat.prop;
+      // Taken off, it comes off them into their hand: it was worn, not on the stage.
+      if (beat.do === 'undress') {
+        holders.set(prop, beat.who);
+        return;
+      }
       if (!holders.has(prop))
         error(
           'prop',
@@ -2112,6 +2466,7 @@ export function checkSheet(
       if (beat.do === 'throw')
         holders.set(prop, beat.to && here.has(beat.to) ? beat.to : null);
       if (beat.do === 'eat') eaten.add(prop);
+      if (beat.do === 'dress') holders.delete(prop);
     }
   });
   if (spoken < 2)
@@ -2266,6 +2621,12 @@ export function endStateOf(
           );
       }
       if (beat.do === 'eat') gone.add(prop);
+      // Put on, it is worn, not held; taken off, it is in their hand.
+      if (beat.do === 'dress') {
+        holders.delete(prop);
+        lies.delete(prop);
+      }
+      if (beat.do === 'undress') holders.set(prop, beat.who);
     }
   }
   const cast = new Set([
@@ -2306,6 +2667,22 @@ export function endStateOf(
     ],
     // Everyone seen so far: what they hold next is what they were left with.
     cast: [...new Set([...(before?.cast ?? []), ...cast])],
+    // What each one wears, where it is not their usual look: this scene's
+    // for those in it, the scene before's for the rest.
+    ...(() => {
+      if (!bible) return {};
+      const outfits = outfitsOf(sheet, bible, before);
+      const wears = [
+        ...[...outfits]
+          .filter(([who]) => cast.has(who))
+          .flatMap(([who, one]) => {
+            const figure = outfitAtEnd(one);
+            return sameOutfit(figure, one.usual) ? [] : [{ who, figure }];
+          }),
+        ...(before?.wears ?? []).filter((w) => !cast.has(w.who)),
+      ];
+      return wears.length ? { wears } : {};
+    })(),
   };
 }
 
@@ -2332,6 +2709,43 @@ export function endBefore(
   return end;
 }
 
+/**
+ * The clothes each scene's people come into it wearing, from how the
+ * scenes before left them, by the scene's position: only where some
+ * scene changes clothes, so an episode whose scenes do not is left
+ * alone (and so none is read again for it).
+ */
+export function carriedWears(
+  scenes: readonly { position: number; sheet: SceneSheet | null }[],
+  bible: StudioBible | null,
+): Map<number, NonNullable<EndState['wears']>> {
+  const out = new Map<number, NonNullable<EndState['wears']>>();
+  if (!bible) return out;
+  const changes = scenes.some(
+    (scene) =>
+      scene.sheet?.kind === 'story' &&
+      (scene.sheet.onStage.some((p) => p.wears?.length) ||
+        scene.sheet.beats.some(
+          (b) =>
+            b.do === 'dress' ||
+            b.do === 'undress' ||
+            wornSaidIn(b.say).length > 0,
+        )),
+  );
+  if (!changes) return out;
+  let end: EndState | null = null;
+  for (const { position, sheet } of [...scenes].sort(
+    (a, b) => a.position - b.position,
+  )) {
+    if (end?.wears?.length) out.set(position, end.wears);
+    if (sheet?.kind === 'story') {
+      const repaired = repairedWith(sheet, bible, end);
+      end = endStateOf(repaired.sheet, repaired.bible, end);
+    }
+  }
+  return out;
+}
+
 /** How the scene before left things, said for the writer. */
 export function describeEnd(end: EndState | null, bible: StudioBible): string {
   if (!end) return 'This is the first scene: nothing came before it.';
@@ -2355,6 +2769,9 @@ export function describeEnd(end: EndState | null, bible: StudioBible): string {
     held.length
       ? `Who holds what: ${held.map((h) => `${nameOf(h.who)} has the ${h.thing}${animal(h.who) ? ' in their mouth' : ''}`).join(', ')}; everyone else's hands are empty. Carry it on: onStage.holding says the same, unless this scene says otherwise.`
       : 'No one holds anything.',
+    end.wears?.length
+      ? `What they wear: ${end.wears.map((w) => `${nameOf(w.who)} is wearing ${outfitWords(w.figure)}`).join(', ')}; everyone else wears their usual clothes. Carry it on: they are still dressed so, unless this scene has them change.`
+      : '',
     'Carry on from there: in the same place and time, the people there are still there unless they left; in a new place or time, start afresh.',
   ]
     .filter(Boolean)

@@ -781,14 +781,29 @@ export interface SheetBeat {
   doSaid?: string;
 }
 
+/**
+ * How someone is as a Studio scene opens: standing, sitting (on a seat
+ * of the set, or the ground), lying down (on the ground, or along a bed
+ * or a sofa), or in bed, sitting up under its cover. Whoever is not
+ * standing gets up before they go anywhere.
+ */
+export const STUDIO_POSES = ['standing', 'sitting', 'lying', 'in bed'] as const;
+export type StudioPose = (typeof STUDIO_POSES)[number];
+/** A pose a sheet may carry: the Studio's own, or one of the kit's from a sheet written before (an arm's, played as a move). */
+export type SheetPose = StudioPose | FigurePose;
+
 /** Someone on the stage as a scene opens. */
 export interface SheetPlace {
   who: string;
   spot: Spot;
-  pose: FigurePose;
+  pose: SheetPose;
   face: FigureFace;
   /** What they hold as it opens, in a hand or an animal's mouth; null for nothing. */
   holding: string | null;
+  /** The feature of the set they sit or lie on, or are in, as it opens: "bed", "bench". Absent, the ground where they are. */
+  on?: string;
+  /** Things they wear as it opens besides their usual clothes, by the things' ids: the coat the scene before left them holding. */
+  wears?: string[];
 }
 
 /** A thing on the stage to be handled (one of the lists', or the show's own), resting before whom. */
@@ -944,6 +959,14 @@ export function beatOf(raw: unknown): SheetBeat | null {
   return out;
 }
 
+/** Every pose a sheet may carry, the Studio's first. */
+const SHEET_POSES: readonly SheetPose[] = [
+  ...STUDIO_POSES,
+  ...FIGURE_POSES.filter(
+    (pose) => !(STUDIO_POSES as readonly string[]).includes(pose),
+  ),
+];
+
 /** A story's sheet made sound. Ids are lower-cased as ids are; the check says what is still wrong. */
 export function storySheetOf(raw: unknown): StorySheet {
   const said =
@@ -956,13 +979,21 @@ export function storySheetOf(raw: unknown): StorySheet {
       const p = one as Record<string, unknown>;
       const who = id(p.who);
       if (!who) return [];
+      const on = id(p.on);
+      const wears = (Array.isArray(p.wears) ? p.wears : [])
+        .map(thingNamed)
+        .filter((w): w is string => Boolean(w))
+        .slice(0, 3);
       return [
         {
           who,
           spot: oneOf(SPOTS)(p.spot) ?? 'centre',
-          pose: oneOf(FIGURE_POSES)(p.pose) ?? 'standing',
+          pose: oneOf(SHEET_POSES)(p.pose) ?? 'standing',
           face: asFace(p.face) ?? 'neutral',
           holding: thingNamed(p.holding),
+          // Where they sit or lie, and what they wear: kept only when said.
+          ...(on ? { on: featureIdOf(on) } : {}),
+          ...(wears.length ? { wears } : {}),
         },
       ];
     });

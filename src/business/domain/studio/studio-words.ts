@@ -216,3 +216,40 @@ export function describeScene(
     budget,
   ].join('\n');
 }
+
+/**
+ * A sentence of the producer's that says a change is done, or happening
+ * now: "I'm changing that now.", "Fixed!", "Trimming scene 2 now."
+ */
+const CLAIMS_DONE = new RegExp(
+  [
+    "[^.!?]*\\b(?:i['’]m|i am|we['’]re|we are|i['’]ve|i have|we['’]ve|we have|it['’]s|that['’]s|this is|it is|all|scene \\d+ is|they['’]re)\\s+(?:now\\s+|just\\s+|already\\s+|all\\s+)?(?:changing|fixing|fixed|changed|sorted|sorting|updating|updated|rewriting|rewritten|redoing|redone|done|making\\s+(?:that|the|this|those|it)\\s+changes?)\\b[^.!?]*[.!?]*",
+    '(?<=^|[.!?]\\s*)\\s*(?:all\\s+)?(?:done|fixed|sorted)\\s*[.!]+',
+    '[^.!?]*\\b[a-z]+ing\\b[^.!?]*\\bnow\\s*[.!]+',
+  ].join('|'),
+  'giu',
+);
+
+/**
+ * The producer's reply as the maker gets it when it changes a scene: a
+ * sentence that says the change is done, or happening now, is said as
+ * what it is, a try ("I'll try that and check it.", where the scene was
+ * made and so is made again and checked); once, however many such
+ * sentences there were. Any other reply is as it was.
+ */
+export function honestReply(
+  reply: string,
+  action: string,
+  /** Whether what is changed is made again and checked: a scene that was made. */
+  checked = true,
+): string {
+  if (action !== 'scene') return reply;
+  let said = false;
+  const out = reply.replace(CLAIMS_DONE, (sentence) => {
+    const lead = /^\s*/u.exec(sentence)?.[0] ?? '';
+    if (said) return '';
+    said = true;
+    return `${lead}${checked ? "I'll try that and check it." : "I'll try that."}`;
+  });
+  return out.replace(/\s{2,}/gu, ' ').trim();
+}

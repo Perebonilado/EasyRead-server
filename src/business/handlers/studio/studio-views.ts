@@ -23,7 +23,7 @@ import {
   type StudioBible,
   type StudioBrief,
 } from '../../domain/studio/studio';
-import { checkExplainer } from '../../domain/studio/studio-check';
+import { carriedWears, checkExplainer } from '../../domain/studio/studio-check';
 import type { SceneThing } from '../../domain/scene-script';
 import type {
   StudioEpisodeRecord,
@@ -31,11 +31,17 @@ import type {
   StudioSceneRecord,
 } from '../../repositories/studio.repository';
 
-/** A scene's fingerprint: its sheet, and the people and the place it shows as the show has them now. */
+/**
+ * A scene's fingerprint: its sheet, and the people and the place it shows
+ * as the show has them now; and the clothes they come into it wearing,
+ * only where they wear something the scenes before changed them into, so
+ * a film whose scenes change no clothes keeps the fingerprint it had.
+ */
 export function sceneFingerprint(
   sheet: SceneSheet,
   bible: StudioBible | null,
   brief: StudioBrief,
+  carried: readonly { who: string; figure: unknown }[] = [],
 ): string {
   if (sheet.kind === 'explainer')
     return sheetHash(sheet, {
@@ -51,22 +57,27 @@ export function sceneFingerprint(
   // later changes no scene that does not name it.
   const set = (bible?.sets ?? []).find((s) => s.id === sheet.set) ?? null;
   const plain = set ? { ...set, features: undefined } : null;
+  const worn = carried.filter((w) => who.has(w.who));
   return sheetHash(sheet, {
     characters: (bible?.characters ?? []).filter((c) => who.has(c.id)),
     set: plain,
     world: bible?.world ?? null,
+    ...(worn.length ? { worn } : {}),
   });
 }
 
-/** Whether a scene needs making: never made, failed, or changed since. */
+/** Whether a scene needs making: never made, failed, or changed since. `carried`: the clothes its people come into it in (carriedWears). */
 export function needsMaking(
   scene: StudioSceneRecord,
   bible: StudioBible | null,
   brief: StudioBrief,
+  carried: readonly { who: string; figure: unknown }[] = [],
 ): boolean {
   if (!scene.sheet) return false;
   if (scene.status === 'failed' || !scene.sceneKey) return true;
-  return scene.madeHash !== sceneFingerprint(scene.sheet, bible, brief);
+  return (
+    scene.madeHash !== sceneFingerprint(scene.sheet, bible, brief, carried)
+  );
 }
 
 export function briefDto(brief: StudioBrief): StudioBriefDto {
@@ -181,6 +192,8 @@ export function sceneDto(
   episode: StudioEpisodeRecord,
   bible: StudioBible | null,
   brief: StudioBrief,
+  /** The clothes its people come into it in, where the scenes before changed them. */
+  carried: readonly { who: string; figure: unknown }[] = [],
 ): StudioSceneDto {
   const planned = episode.outline?.scenes[scene.position];
   const made = Boolean(scene.sceneKey);
@@ -194,7 +207,7 @@ export function sceneDto(
     error: scene.error,
     sheet: scene.sheet ? sheetDto(scene.sheet, planned?.teach ?? null) : null,
     problems: scene.problems,
-    stale: made && needsMaking(scene, bible, brief),
+    stale: made && needsMaking(scene, bible, brief, carried),
     made,
     seconds: scene.durationMs
       ? Math.round(scene.durationMs / 1000)
@@ -225,7 +238,11 @@ export function blockersOf(
   if (!scenes.length) out.push('There are no scenes yet.');
   if (scenes.some((s) => s.status === 'writing' || !s.sheet))
     out.push('Some scenes are still being written.');
-  if (!out.length && !scenes.some((s) => needsMaking(s, bible, brief)))
+  const carried = carriedWears(scenes, bible);
+  if (
+    !out.length &&
+    !scenes.some((s) => needsMaking(s, bible, brief, carried.get(s.position)))
+  )
     out.push('Every scene is made already.');
   return out;
 }
@@ -236,7 +253,10 @@ export function episodeDto(
   bible: StudioBible | null,
   brief: StudioBrief,
 ): StudioEpisodeDto {
-  const dtos = scenes.map((s) => sceneDto(s, episode, bible, brief));
+  const carried = carriedWears(scenes, bible);
+  const dtos = scenes.map((s) =>
+    sceneDto(s, episode, bible, brief, carried.get(s.position)),
+  );
   return {
     id: episode.id,
     showId: episode.showId,
@@ -251,7 +271,7 @@ export function episodeDto(
     durationMs: episode.durationMs,
     shareToken: episode.shareToken,
     toMakeSeconds: scenes
-      .filter((s) => needsMaking(s, bible, brief))
+      .filter((s) => needsMaking(s, bible, brief, carried.get(s.position)))
       .reduce((n, s) => n + (s.sheet ? secondsOf(s.sheet) : 0), 0),
     blockers: blockersOf(episode, scenes, bible, brief),
     hasThumb: Boolean(episode.thumbKey),

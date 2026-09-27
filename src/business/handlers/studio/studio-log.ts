@@ -84,6 +84,8 @@ export async function logEvent(
   at: { showId: string; episodeId: string },
   event: StudioEventRecord,
   key?: string,
+  /** What we keep with it besides, never the maker's to see: a check that could not show what was asked. */
+  check?: NonNullable<StudioMessageRecord['meta']>['check'],
 ): Promise<StudioMessageRecord> {
   const version =
     event.what === 'outline' && event.version === undefined
@@ -101,6 +103,7 @@ export async function logEvent(
     meta: {
       kind: 'event',
       event: { ...event, ...(version ? { version } : {}) },
+      ...(check ? { check } : {}),
     },
   });
 }
@@ -127,4 +130,23 @@ export const EVENT_LINES = {
     `Making the film: ${scenesOf(count)}, about ${clockOf(seconds)}`,
   shared: (on: boolean) =>
     on ? 'Link on: anyone with it can watch' : 'Link off: only you can watch',
+  /** Making a scene again after changing it as asked, to check it. */
+  remake: (position: number) =>
+    `Making scene ${position + 1} again to check it`,
+  /**
+   * A scene made again as asked, and looked at: shown as asked, not yet
+   * (never "done" when it is not), or not looked at this time.
+   */
+  checked: (
+    position: number,
+    came: 'shown' | 'not yet' | 'unchecked',
+    tell = '',
+  ) => {
+    const told = tell.trim().replace(/[.!\s]+$/u, '');
+    return came === 'shown'
+      ? `Scene ${position + 1} made again and checked${told ? `: ${told}` : ''}.`
+      : came === 'not yet'
+        ? `Scene ${position + 1} made again, but I couldn't change this yet${told ? `: ${told}` : ''}. I've passed it on to be fixed.`
+        : `Scene ${position + 1} made again. I couldn't check it this time: have a look.`;
+  },
 } as const;

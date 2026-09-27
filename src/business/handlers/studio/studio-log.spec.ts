@@ -135,3 +135,18 @@ describe('the thread as the record', () => {
     ]);
   });
 });
+
+describe('what a check of a scene made as asked says', () => {
+  it('says it shows, that it does not yet and never as done, or that it could not look', () => {
+    expect(EVENT_LINES.checked(0, 'shown', 'Tobi now climbs out of bed.')).toBe(
+      'Scene 1 made again and checked: Tobi now climbs out of bed.',
+    );
+    expect(EVENT_LINES.checked(2, 'not yet', 'the bed still moves')).toBe(
+      "Scene 3 made again, but I couldn't change this yet: the bed still moves. I've passed it on to be fixed.",
+    );
+    expect(EVENT_LINES.checked(0, 'unchecked')).toBe(
+      "Scene 1 made again. I couldn't check it this time: have a look.",
+    );
+    expect(EVENT_LINES.remake(0)).toBe('Making scene 1 again to check it');
+  });
+});

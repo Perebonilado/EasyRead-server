@@ -395,7 +395,11 @@ export class BullmqQueueAdapter implements JobQueuePort, OnModuleDestroy {
         data: job,
         opts: {
           ...this.options(QUEUE.studio),
-          jobId: `studio-${job.kind}-${job.sceneId ?? job.episodeId}-${stamp}-${i}`,
+          // A request's own work once however often it is asked: a check
+          // taken up again queues its try again once.
+          jobId: job.ask
+            ? `studio-${job.kind}-${job.sceneId ?? job.sceneIds?.join('-') ?? job.episodeId}-ask-${job.ask.id}-${job.ask.tries}`
+            : `studio-${job.kind}-${job.sceneId ?? job.episodeId}-${stamp}-${i}`,
         },
       })),
     );

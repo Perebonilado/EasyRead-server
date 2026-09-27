@@ -1,0 +1,361 @@
+{
+ "characters": [
+  {
+   "id": "tobi",
+   "name": "Tobi",
+   "kind": "person",
+   "role": "main",
+   "look": "a bright-eyed boy with a wide grin, short black hair, a blue school jumper, grey trousers and a red backpack with a rocket patch",
+   "figure": {
+    "age": "child",
+    "build": "average",
+    "skin": 6,
+    "hair": "short",
+    "hairColour": "black",
+    "facialHair": "none",
+    "headwear": "none",
+    "top": "uniform",
+    "topColour": "blue",
+    "bottom": "trousers",
+    "bottomColour": "grey",
+    "accentColour": "red",
+    "extras": [
+     "backpack"
+    ]
+   },
+   "size": null,
+   "voice": "boy",
+   "voicePick": 0,
+   "traits": [
+    "excited",
+    "talkative",
+    "friendly"
+   ],
+   "carries": "bag"
+  },
+  {
+   "id": "mama",
+   "name": "Mama",
+   "kind": "person",
+   "role": "supporting",
+   "look": "a warm woman with dark brown hair in a bun, a green dress, a yellow scarf and a practical tote bag",
+   "figure": {
+    "age": "adult",
+    "build": "average",
+    "skin": 7,
+    "hair": "bun",
+    "hairColour": "dark brown",
+    "facialHair": "none",
+    "headwear": "none",
+    "top": "dress",
+    "topColour": "green",
+    "bottom": "trousers",
+    "bottomColour": "navy",
+    "accentColour": "yellow",
+    "extras": []
+   },
+   "size": null,
+   "voice": "woman",
+   "voicePick": 0,
+   "traits": [
+    "warm",
+    "encouraging",
+    "practical"
+   ],
+   "carries": null
+  },
+  {
+   "id": "maya",
+   "name": "Maya",
+   "kind": "person",
+   "role": "supporting",
+   "look": "a cheerful girl with brown pigtails tied with yellow bobbles, glasses, a blue school jumper and purple trousers",
+   "figure": {
+    "age": "child",
+    "build": "slim",
+    "skin": 4,
+    "hair": "pigtails",
+    "hairColour": "brown",
+    "facialHair": "none",
+    "headwear": "none",
+    "top": "uniform",
+    "topColour": "blue",
+    "bottom": "trousers",
+    "bottomColour": "purple",
+    "accentColour": "yellow",
+    "extras": [
+     "glasses"
+    ]
+   },
+   "size": null,
+   "voice": "girl",
+   "voicePick": 0,
+   "traits": [
+    "curious",
+    "loyal",
+    "giggly"
+   ],
+   "carries": "book"
+  },
+  {
+   "id": "sam",
+   "name": "Sam",
+   "kind": "person",
+   "role": "supporting",
+   "look": "a friendly boy with curly black hair, a blue school jumper, grey shorts and a green backpack",
+   "figure": {
+    "age": "child",
+    "build": "broad",
+    "skin": 9,
+    "hair": "curly",
+    "hairColour": "black",
+    "facialHair": "none",
+    "headwear": "none",
+    "top": "uniform",
+    "topColour": "blue",
+    "bottom": "shorts",
+    "bottomColour": "grey",
+    "accentColour": "green",
+    "extras": [
+     "backpack"
+    ]
+   },
+   "size": null,
+   "voice": "boy",
+   "voicePick": 1,
+   "traits": [
+    "energetic",
+    "funny",
+    "sporty"
+   ],
+   "carries": "ball"
+  },
+  {
+   "id": "mr-okafor",
+   "name": "Mr Okafor",
+   "kind": "person",
+   "role": "minor",
+   "look": "a kind teacher with short grey hair, a beard, a white shirt and blue tie, dark trousers and a book under his arm",
+   "figure": {
+    "age": "adult",
+    "build": "broad",
+    "skin": 8,
+    "hair": "short",
+    "hairColour": "grey",
+    "facialHair": "beard",
+    "headwear": "none",
+    "top": "shirt and tie",
+    "topColour": "white",
+    "bottom": "trousers",
+    "bottomColour": "black",
+    "accentColour": "blue",
+    "extras": []
+   },
+   "size": null,
+   "voice": "man",
+   "voicePick": 0,
+   "traits": [
+    "kind",
+    "jolly",
+    "encouraging"
+   ],
+   "carries": "book"
+  }
+ ],
+ "sets": [
+  {
+   "id": "bedroom",
+   "name": "Tobi's bedroom",
+   "look": "a small child's bedroom in a terraced house: a bed with a rocket duvet, a chest of drawers with a lamp and an alarm clock, a window showing the street, school clothes laid out on a chair",
+   "kind": "indoor",
+   "stand": "on",
+   "front": null,
+   "sound": "clock",
+   "features": [
+    {
+     "id": "bed",
+     "name": "bed",
+     "kind": "bed",
+     "spot": "centre",
+     "opens": false
+    },
+    {
+     "id": "window",
+     "name": "window",
+     "kind": "window",
+     "spot": "back",
+     "opens": true
+    },
+    {
+     "id": "door",
+     "name": "door",
+     "kind": "door",
+     "spot": "right",
+     "opens": true
+    },
+    {
+     "id": "chair",
+     "name": "chair",
+     "kind": "chair",
+     "spot": "left",
+     "opens": false
+    }
+   ]
+  },
+  {
+   "id": "school-gate",
+   "name": "School gate",
+   "look": "the front gate of a friendly primary school: a low brick wall with a colourful welcome sign, a red gate, a tree-lined pavement, and the school building and playground beyond",
+   "kind": "outdoor",
+   "stand": "on",
+   "front": null,
+   "sound": "wind",
+   "features": [
+    {
+     "id": "gate",
+     "name": "the red gate",
+     "kind": "gate",
+     "spot": "centre",
+     "opens": true
+    },
+    {
+     "id": "wall",
+     "name": "brick wall",
+     "kind": "wall",
+     "spot": "left",
+     "opens": false
+    },
+    {
+     "id": "sign",
+     "name": "welcome sign",
+     "kind": "drawn",
+     "spot": "centre-left",
+     "opens": false
+    },
+    {
+     "id": "tree",
+     "name": "tree",
+     "kind": "tree",
+     "spot": "right",
+     "opens": false
+    }
+   ]
+  },
+  {
+   "id": "classroom",
+   "name": "Classroom",
+   "look": "a bright primary-school classroom: blue desks in rows, a whiteboard with a welcome message, a reading corner with cushions and books, windows along one side, children's paintings on the wall",
+   "kind": "indoor",
+   "stand": "on",
+   "front": "table",
+   "sound": "clock",
+   "features": [
+    {
+     "id": "door",
+     "name": "door",
+     "kind": "door",
+     "spot": "right",
+     "opens": true
+    },
+    {
+     "id": "window",
+     "name": "window",
+     "kind": "window",
+     "spot": "left",
+     "opens": true
+    },
+    {
+     "id": "whiteboard",
+     "name": "whiteboard",
+     "kind": "drawn",
+     "spot": "back",
+     "opens": false
+    },
+    {
+     "id": "table",
+     "name": "desk",
+     "kind": "table",
+     "spot": "centre",
+     "opens": false
+    },
+    {
+     "id": "bookshelf",
+     "name": "bookshelf",
+     "kind": "drawn",
+     "spot": "centre-right",
+     "opens": false
+    }
+   ]
+  },
+  {
+   "id": "playground",
+   "name": "Playground",
+   "look": "a primary-school playground: a hopscotch grid, a wooden bench, a big oak tree, a football goal, and the school building with bright windows behind",
+   "kind": "outdoor",
+   "stand": "on",
+   "front": null,
+   "sound": "wind",
+   "features": [
+    {
+     "id": "bench",
+     "name": "bench",
+     "kind": "bench",
+     "spot": "left",
+     "opens": false
+    },
+    {
+     "id": "tree",
+     "name": "oak tree",
+     "kind": "tree",
+     "spot": "right",
+     "opens": false
+    },
+    {
+     "id": "goalpost",
+     "name": "goalpost",
+     "kind": "goalpost",
+     "spot": "back",
+     "opens": false
+    },
+    {
+     "id": "hopscotch",
+     "name": "hopscotch grid",
+     "kind": "drawn",
+     "spot": "centre",
+     "opens": false
+    },
+    {
+     "id": "grid",
+     "name": "grid",
+     "kind": "drawn",
+     "spot": "centre-right",
+     "opens": false
+    },
+    {
+     "id": "door",
+     "name": "door",
+     "kind": "door",
+     "spot": "centre-right",
+     "opens": true
+    }
+   ]
+  }
+ ],
+ "world": {
+  "era": "today",
+  "region": "a friendly British town",
+  "culture": "a diverse primary-school community",
+  "landscape": "leafy streets, small parks and low brick school buildings",
+  "homes": "terraced houses with small gardens and bright front doors"
+ },
+ "subject": "",
+ "maths": false,
+ "pictures": [],
+ "things": [
+  {
+   "id": "uniform",
+   "name": "uniform",
+   "kind": "thing"
+  }
+ ]
+}

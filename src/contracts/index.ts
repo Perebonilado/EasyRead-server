@@ -1063,6 +1063,8 @@ export type SceneThingDto =
       faces?: -1 | 1;
       /** One who stands with people: how tall its frame is in the figure kit's units, so a thing it holds is drawn at the kit's size. */
       units?: number;
+      /** A person the kit drew in a pose for the whole scene, not standing: in bed (the bed part of the drawing), or lying. Absent, standing. */
+      drawnAs?: 'in bed' | 'lying';
     }
   | { id: string; kind: 'stat'; value: string; caption: string }
   | {
@@ -1117,6 +1119,8 @@ export interface SceneStepDto {
   hurry?: Record<string, number>;
   /** Who stands behind a feature at this step, by the feature: it is drawn over them. */
   behind?: Record<string, string>;
+  /** Who is in a bed at this step, by the bed: its cover is drawn over them, and only while they are in it. */
+  abed?: Record<string, string>;
   /** The thing the camera leans toward. */
   focus: string | null;
   /** The scene behind the stage: a place's drawing, by id; absent for none. */
@@ -1237,6 +1241,12 @@ export interface SceneFeatureDto {
   enters?: true;
   /** Where something caught up in it rests, at each staging: a kite in a palm's crown. Absent, nothing is. */
   up?: Record<'box' | 'wide', { x: number; y: number }>;
+  /** The group of its drawing that covers whoever is in it (a bed's duvet), drawn over them while they are; absent, it has none. */
+  cover?: string;
+  /** How high someone sitting on it sits, at each staging: the y of its seat. Absent, it is not sat on. */
+  seat?: Record<'box' | 'wide', number>;
+  /** Where one lying on it lies, at each staging: along its top (y), from its foot to its head (x). */
+  lies?: Record<'box' | 'wide', { y: number; foot: number; head: number }>;
 }
 
 /**
@@ -1306,7 +1316,11 @@ export type ScenePropAction =
   | 'catch'
   | 'drop'
   | 'kick'
-  | 'chew';
+  | 'chew'
+  /** Put on: from its moment it is gone into what they wear. */
+  | 'wear'
+  /** Taken off: from its moment it is in their hand. */
+  | 'doff';
 
 /**
  * A thing on a story's stage that people handle: bread on the table, a
@@ -2512,7 +2526,9 @@ export type StudioEventName =
   | 'make'
   | 'shared'
   | 'episode'
-  | 'failed';
+  | 'failed'
+  /** A scene made again as the maker asked, and looked at: whether what they asked for shows. */
+  | 'checked';
 
 export interface StudioEventDto {
   what: StudioEventName;

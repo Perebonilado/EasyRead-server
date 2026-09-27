@@ -25,6 +25,7 @@ import {
   type OwnWord,
 } from './scene-own';
 import { PROP_WORDS, STAGE_PROPS, type StageProp } from './scene-props';
+import { WEAR_WORDS } from './scene-wear';
 
 /** A move of the body, going somewhere, or handling a thing. */
 export const DOING_KINDS = ['body', 'travel', 'handle'] as const;
@@ -104,6 +105,9 @@ export const THING_ACTIONS = [
   'drop',
   'kick',
   'chew',
+  // Put on, it is gone into what they wear; taken off, it is in their hand.
+  'wear',
+  'doff',
 ] as const;
 export type ThingAction = (typeof THING_ACTIONS)[number];
 
@@ -140,6 +144,26 @@ export type ActedMove = (typeof ACTED_MOVES)[number];
 export const HELD_MOVES: readonly ActedMove[] = ['sit', 'lie'];
 /** How long getting into one takes, as the player plays it (HELD_IN_MS). */
 export const HELD_IN_MS = 500;
+/**
+ * The moves that need someone on their feet, and so end sitting or lying
+ * down: getting up itself, and any move that cannot be made sitting. One
+ * who is down and makes one of them gets up first.
+ */
+export const NEEDS_FEET: ReadonlySet<string> = new Set<string>([
+  'stand',
+  'jump',
+  'sit',
+  'lie',
+  'fall',
+  'spin',
+  'roll',
+  'bow',
+  'kick',
+  'dig',
+  'shake-off',
+  'hop',
+  'hug',
+]);
 
 /** A move the stage plays on someone today: one of a story's moves, a look, a point, a reach, a hug, or one of the body's own. */
 export type StageMove =
@@ -209,6 +233,8 @@ export const DOING_IDS = [
   'open',
   'close',
   'use',
+  'dress',
+  'undress',
 ] as const;
 export type DoingId = (typeof DOING_IDS)[number];
 
@@ -253,6 +279,18 @@ const GOING =
 /** Verbs of going at a walk from one place on the stage to another. */
 const WALKING =
   'walk(?:s|ed|ing)?|go(?:es|ing)?|went|head(?:s|ed|ing)?|wander(?:s|ed|ing)?|stroll(?:s|ed|ing)?|step(?:s|ped|ping)?|march(?:es|ed|ing)?|limp(?:s|ed|ing)?|tiptoe(?:s|d|ing)?|creep(?:s|ing)?|crept|sneak(?:s|ing)?|snuck|shuffl(?:e|es|ed|ing)|pac(?:e|es|ed|ing)';
+
+/** The words for what someone sits or lies on or in: a bed, a chair, a sofa. */
+const RESTS_ON =
+  'beds?|bunks?|hammocks?|cots?|chairs?|arm ?chairs?|seats?|stools?|sofas?|couch(?:es)?|settees?|benches|bench';
+/** The words for a bed, of any kind. */
+const BEDS = 'beds?|bunks?|hammocks?|cots?';
+/** The words before one: "the", "his", or none ("out of bed"). */
+const WHOSE = '(?:(?:the|a|an|his|her|their|its|my|your|our) )?';
+/** A bed or a seat the words name, as someone gets into it, out of it or up in it: its word. */
+export const RESTING_WORDS = new RegExp(`\\b(${RESTS_ON})\\b`, 'iu');
+/** A thing worn, named after a verb: "on his new school uniform". */
+const WORN = `${WHOSE}(?:[\\p{L}-]+ ){0,2}?(?:${WEAR_WORDS})\\b`;
 
 const doings: Record<DoingId, Omit<Doing, 'id'>> = {
   // ── The body ─────────────────────────────────────────────────────────────
@@ -468,8 +506,11 @@ const doings: Record<DoingId, Omit<Doing, 'id'>> = {
     thing: null,
     aims: ['feature', 'character'],
     aimed: false,
-    words:
-      /\b(?:sit(?:s|ting)?(?! up)|sat(?! up)|takes? a seat|took a seat|perch(?:es|ed|ing)?|plop(?:s|ped)? down|flop(?:s|ped)? down)\b/iu,
+    // Sitting up in bed is sitting, in it.
+    words: new RegExp(
+      `\\b(?:sit(?:s|ting)? up in ${WHOSE}(?:${RESTS_ON})|sat up in ${WHOSE}(?:${RESTS_ON})|sit(?:s|ting)?|sat|takes? a seat|took a seat|perch(?:es|ed|ing)?|plop(?:s|ped)? down|flop(?:s|ped)? down)\\b`,
+      'iu',
+    ),
     ms: 1400,
     leastMs: 800,
     keyAt: 0.6,
@@ -480,10 +521,14 @@ const doings: Record<DoingId, Omit<Doing, 'id'>> = {
     kind: 'body',
     by: ALL,
     thing: null,
-    aims: [],
+    // What they get up out of: the bed, the chair.
+    aims: ['feature'],
     aimed: false,
-    words:
-      /\b(?:st(?:and|ands|ood|anding) up|gets? up|got up|getting up|ris(?:e|es|ing)|rose|sits? up|sat up|(?:jump|leap|spring)(?:s|ed)? to (?:his|her|their|its) feet|gets? to (?:his|her|their|its) feet)\b/iu,
+    // Out of bed is up, never off the stage: "jumps out of bed" is no leaving.
+    words: new RegExp(
+      `\\b(?:(?:gets?|got|getting|jumps?|jumped|jumping|climbs?|climbed|climbing|hops?|hopped|hopping|rolls?|rolled|rolling|springs?|sprang|sprung|springing|leaps?|leapt|leaped|leaping|scrambles?|scrambled|scrambling|slips?|slipped|slipping|tumbles?|tumbled|tumbling|crawls?|crawled|crawling|swings?|swung|swinging|throws? back the covers and gets?) (?:up )?out of ${WHOSE}(?:${RESTS_ON})|st(?:and|ands|ood|anding) up|gets? up|got up|getting up|ris(?:e|es|ing)|rose|(?:jump|leap|spring)(?:s|ed)? to (?:his|her|their|its) feet|gets? to (?:his|her|their|its) feet)\\b`,
+      'iu',
+    ),
     ms: 1200,
     leastMs: 700,
     keyAt: 0.6,
@@ -496,8 +541,11 @@ const doings: Record<DoingId, Omit<Doing, 'id'>> = {
     thing: null,
     aims: ['feature'],
     aimed: false,
-    words:
-      /\b(?:lies? down|lay down|lying down|lies on|curl(?:s|ed|ing)? up|stretch(?:es|ed|ing)? out on|flops? on)\b/iu,
+    // Into bed is lying down in it, never coming on: "climbs into bed".
+    words: new RegExp(
+      `\\b(?:(?:gets?|got|getting|climbs?|climbed|climbing|hops?|hopped|hopping|jumps?|jumped|jumping|crawls?|crawled|crawling|slips?|slipped|slipping|snuggles?|snuggled|snuggling|creeps?|crept|creeping|tumbles?|tumbled|tumbling|dives?|dived|diving|flops?|flopped|flopping|curls? up|curled up) (?:back )?in(?:to)? ${WHOSE}(?:${BEDS})|(?:goes|went|go|going|gone|gets?|got|getting|heads?|headed|heading) (?:back )?to bed|(?:lies|lay|lying|lie|stays?|stayed|staying|snuggles? down|snuggled down) in ${WHOSE}(?:${BEDS})|tucks? (?:\\p{L}+ )?(?:up )?in(?:to)? ${WHOSE}bed|lies? down|lay down|lying down|lies on|curl(?:s|ed|ing)? up|stretch(?:es|ed|ing)? out on|flops? on)\\b`,
+      'iu',
+    ),
     ms: 1600,
     leastMs: 900,
     keyAt: 0.6,
@@ -1021,7 +1069,45 @@ const doings: Record<DoingId, Omit<Doing, 'id'>> = {
     fallback: 'lean-in',
     plays: { move: 'lean-in' },
   },
+  // Only a thing worn is put on: "puts on a show" and "puts the cup on
+  // the table" are none. What is put on is worn from then on, never held.
+  dress: {
+    kind: 'handle',
+    by: HANDS,
+    thing: 'held',
+    aims: [],
+    aimed: false,
+    words: new RegExp(
+      `\\b(?:(?:puts?|putting|pulls?|pulled|pulling|slips?|slipped|slipping|tries|tried|trying|try|throws?|threw|throwing|shrugs?|shrugged|shrugging|wriggles?|wriggled|wriggling) on ${WORN}|(?:buttons?|buttoned|buttoning|zips?|zipped|zipping) up ${WORN}|(?:puts?|putting|pulls?|pulled|pulling|slips?|slipped|slipping|tries|tried|trying) ${WORN} on|(?:gets?|got|getting) (?:dressed|changed)|(?:changes?|changed|changing) (?:in)?to ${WORN}|dress(?:es|ed|ing)? (?:(?:him|her|them)sel(?:f|ves) )?in ${WORN}|wraps? ${WORN} (?:round|around) (?:him|her|them)sel(?:f|ves))`,
+      'iu',
+    ),
+    ms: 1600,
+    leastMs: 900,
+    keyAt: 0.6,
+    fallback: 'nod',
+    plays: { prop: 'wear' },
+  },
+  undress: {
+    kind: 'handle',
+    by: HANDS,
+    thing: null,
+    aims: [],
+    aimed: false,
+    words: new RegExp(
+      `\\b(?:(?:takes?|took|taking|pulls?|pulled|pulling|slips?|slipped|slipping|shrugs?|shrugged|shrugging) off ${WORN}|(?:takes?|took|taking|pulls?|pulled|pulling|slips?|slipped|slipping) ${WORN} off|(?:gets?|got|getting) undressed|(?:changes?|changed|changing) out of ${WORN})`,
+      'iu',
+    ),
+    ms: 1300,
+    leastMs: 800,
+    keyAt: 0.55,
+    fallback: 'nod',
+    plays: { prop: 'doff' },
+  },
 };
+
+/** The doing that plays a handling of a thing: its own id, but for putting on and taking off. */
+export const actionDoing = (action: ThingAction): DoingId =>
+  action === 'wear' ? 'dress' : action === 'doff' ? 'undress' : action;
 
 /** Every doing, in the list's order. */
 export const DOINGS: readonly Doing[] = DOING_IDS.map((id) => ({
@@ -1135,6 +1221,7 @@ export const FEATURE_KINDS = [
   'door',
   'bench',
   'chair',
+  'sofa',
   'table',
   'bed',
   'tree',
@@ -1158,7 +1245,8 @@ export const FEATURE_WORDS: Record<FeatureKind, RegExp> = {
   // Never a seat, a stand or a goal: words said in passing ("take a
   // seat", "her mother stands", "our goal is") are no feature.
   bench: /\bbench(?:es)?\b/iu,
-  chair: /\b(?:chairs?|stools?)\b/iu,
+  chair: /\b(?:chairs?|stools?|armchairs?)\b/iu,
+  sofa: /\b(?:sofas?|couch(?:es)?|settees?)\b/iu,
   table: /\btables?\b/iu,
   bed: /\bbeds?\b/iu,
   tree: /\b(?:trees?|mango tree|palm tree)\b/iu,
@@ -1513,6 +1601,7 @@ export function featureIdOf(word: string): string {
   if (/^(?:steps|stairs|staircase)$/.test(w)) return 'steps';
   if (/^(?:mango-tree|palm-tree)$/.test(w)) return 'tree';
   if (w === 'tyre-swing') return 'swing';
+  if (/^(?:couch(?:es)?|settees?)$/.test(w)) return 'sofa';
   if (w === 'gateway') return 'gate';
   if (w === 'doorway') return 'door';
   if (w === 'lorries') return 'lorry';

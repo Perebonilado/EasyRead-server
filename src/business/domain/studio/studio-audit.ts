@@ -85,6 +85,37 @@ const HANDLED: Record<string, string> = {
 };
 
 /**
+ * Each beat of a sheet's time in the film: from the end of the line
+ * before it to the start of the next (the quiet it is done in); a line's
+ * or narration's own, while it is said. Shared by the audit and by what
+ * the film is said to show, so both mean the same moments.
+ */
+export function beatWindows(
+  sheet: Pick<StorySheet, 'beats'>,
+  scene: Pick<SceneDto, 'beats' | 'durationMs' | 'settledMs'>,
+): { from: number; until: number }[] {
+  const end = Math.max(scene.durationMs, scene.settledMs ?? 0);
+  let spoken = -1;
+  return sheet.beats.map((beat) => {
+    if (
+      (beat.kind === 'line' || beat.kind === 'narration') &&
+      beat.say.trim()
+    ) {
+      spoken += 1;
+      const said = scene.beats[spoken];
+      return {
+        from: said?.startMs ?? 0,
+        until: said?.endMs ?? end,
+      };
+    }
+    return {
+      from: spoken >= 0 ? (scene.beats[spoken]?.endMs ?? 0) : 0,
+      until: scene.beats[spoken + 1]?.startMs ?? end,
+    };
+  });
+}
+
+/**
  * What a made scene shows for each action, thing handled and reaction of
  * its sheet. `bible` gives the names the words call people by, and who is
  * drawn by the artist (and so moves as a drawing with no rig does).
@@ -105,7 +136,7 @@ export function auditScene(
   };
   const W = scene.stagings.wide.w;
   const places = scene.stagings.wide.places;
-  const end = Math.max(scene.durationMs, scene.settledMs ?? 0);
+  const windows = beatWindows(sheet, scene);
   const props = new Set((scene.props ?? []).map((p) => p.id));
   const features = scene.setting?.features ?? [];
   // The show's own, known by their names as the lists' are.
@@ -117,16 +148,11 @@ export function auditScene(
   };
   const isOwnFeature = (id: string) => own.features.some((f) => f.id === id);
   const out: BeatSeen[] = [];
-  let spoken = -1;
   sheet.beats.forEach((beat, at) => {
-    if (beat.kind === 'line' || beat.kind === 'narration') {
-      if (beat.say.trim()) spoken += 1;
-      return;
-    }
+    if (beat.kind === 'line' || beat.kind === 'narration') return;
     if (beat.kind === 'pause' || !beat.who) return;
     const who = beat.who;
-    const from = spoken >= 0 ? (scene.beats[spoken]?.endMs ?? 0) : 0;
-    const until = scene.beats[spoken + 1]?.startMs ?? end;
+    const { from, until } = windows[at];
     const within = (t: number, before = BEFORE_MS, after = AFTER_MS) =>
       t >= from - before && t < until + after;
 

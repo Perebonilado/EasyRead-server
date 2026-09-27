@@ -81,6 +81,30 @@ export interface LectureFollowJob extends PipelineJob {
   priority?: number;
 }
 
+/**
+ * A maker's request for a change to a scene that was made, carried with
+ * the work it sets going (written again, made again, checked): so what
+ * comes of it is checked against the film, and said honestly, once.
+ */
+export interface StudioAsk {
+  /** Its own id: the message it came in, else one of its own. What the thread records of it is keyed by it. */
+  id: string;
+  /** The maker's own words. */
+  words: string;
+  /** What the producer took them to ask for. */
+  request: string;
+  /** The first try, or the Studio's one try again. */
+  tries: 1 | 2;
+  /** The film as it was before the change, in words from what it plays, and the same without its times. */
+  before?: { key: string; lines: string[] } | null;
+  /** What the check found still wrong, for the writer's second try. */
+  problems?: string[];
+  /** What the stage does besides, for what the check found: clothes someone wears from the start. */
+  remedy?: { wear?: { who: string; thing: string }[] };
+  /** Made again without spending the maker's film: the Studio's own try again. */
+  free?: boolean;
+}
+
 /** A piece of the Studio's work on one episode. */
 export interface StudioJob {
   kind: 'bible' | 'outline' | 'script' | 'scene' | 'prepare' | 'make';
@@ -91,6 +115,8 @@ export interface StudioJob {
   /** For 'prepare': the scenes to make once the cast and the places are drawn. */
   sceneIds?: string[];
   request?: string;
+  /** A maker's request for a change to a made scene: written, made again and checked. */
+  ask?: StudioAsk;
 }
 
 export interface ExportJob extends PipelineJob {

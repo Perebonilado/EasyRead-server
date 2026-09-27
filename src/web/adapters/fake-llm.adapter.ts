@@ -27,6 +27,7 @@ import type {
   LectureDiagramDraft,
   SketchDraft,
   SketchTemplate,
+  StudioCheckVerdict,
   StudioTurnDraft,
 } from '../../business/ports/llm.port';
 import type {
@@ -1940,6 +1941,37 @@ export class FakeLlmAdapter implements LlmGatewayPort {
       },
       usage: this.usage(started, input.scene.length / 4, 200),
     };
+  }
+
+  /**
+   * The check of a scene made again as asked, offline: done when the film
+   * reads differently now and code sees nothing wrong in it.
+   */
+  async studioCheck(input: {
+    words: string;
+    request: string;
+    before: string[];
+    after: string[];
+    faults: string[];
+  }): Promise<LlmResult<StudioCheckVerdict>> {
+    const started = Date.now();
+    const changed =
+      input.before.join('\n') !== input.after.join('\n') ||
+      !input.before.length;
+    const resolved = changed && !input.faults.length;
+    return Promise.resolve({
+      value: {
+        resolved,
+        reason: resolved
+          ? ''
+          : (input.faults[0] ?? 'the film shows what it did before'),
+        tell: resolved
+          ? 'it now shows what you asked for'
+          : (input.faults[0] ?? 'the film still shows what it did before'),
+        faults: resolved ? [] : ['other'],
+      },
+      usage: this.usage(started, 1000, 60),
+    });
   }
 
   async moderate(input: {

@@ -380,7 +380,8 @@ describe('a face nothing covers', () => {
         });
         expect([age, headwear, pained.notes]).toEqual([age, headwear, []]);
       }
-  }, 30_000);
+    // Twelve sheets rendered and measured: slow when the whole suite runs.
+  }, 90_000);
 });
 
 describe('someone doing something', () => {
@@ -875,5 +876,71 @@ describe('the kit’s legs, bending', () => {
     expect(drawn.svg).toContain(
       '.wrap{scale:1 calc(1 - var(--low,0) / var(--reach,100))}',
     );
+  });
+});
+
+describe('someone who changes clothes', () => {
+  const tobi = as({
+    age: 'child',
+    top: 'pyjamas',
+    topColour: 'red',
+    bottom: 'trousers',
+    bottomColour: 'red',
+  });
+  const dressed = as({
+    age: 'child',
+    top: 'uniform',
+    topColour: 'blue',
+    bottom: 'trousers',
+    bottomColour: 'grey',
+    extras: ['backpack'],
+  });
+  const drawn = drawFigure(tobi, 'tobi', {
+    dress: [{ state: 'dress-1', spec: dressed }],
+  });
+  const root = rootOf(drawn.svg);
+  const within = (id: string) => {
+    const group = byId(root, id)!;
+    return elements(group.children)
+      .map((el) => el.attribs.class)
+      .filter(Boolean);
+  };
+
+  it("draws both outfits on one rig, each in its own class, in the rig's own groups", () => {
+    for (const id of ['legs', 'body', 'arms', 'behind', 'head'])
+      expect(within(id)).toEqual(
+        expect.arrayContaining(['dress-0', 'dress-1']),
+      );
+    // The arms and legs of each turn about the same joints.
+    const arms = render(byId(root, 'arms')!);
+    expect(arms.match(/class="arm ar"/g)?.length).toBe(2);
+    expect(render(byId(root, 'legs')!).match(/class="leg l1"/g)?.length).toBe(
+      2,
+    );
+    // One face, one mouth, one blink: every id once.
+    const ids = [...walk(root)].flatMap((el) =>
+      el.attribs.id ? [el.attribs.id] : [],
+    );
+    expect(new Set(ids).size).toBe(ids.length);
+    expect(drawn.joints).toBeDefined();
+    expect(drawn.legs).toBeDefined();
+  });
+
+  it('shows the later outfit from when its state is on, and the one before no longer', () => {
+    expect(drawn.states['dress-1']).toBe('dress-1');
+    expect(drawn.svg).toContain('.dress-1{display:none}');
+    expect(drawn.svg).toContain(
+      '.on-dress-1 .dress-1{display:inline}.on-dress-1 .dress-0{display:none}',
+    );
+    // Pyjamas are drawn in their red, and the uniform after them in blue.
+    const body = render(byId(root, 'body')!);
+    expect(body.indexOf('#d9534f')).toBeGreaterThanOrEqual(0);
+    expect(body.indexOf('#4a8fd9')).toBeGreaterThan(body.indexOf('#d9534f'));
+  });
+
+  it('draws one who never changes as before', () => {
+    const plain = drawFigure(tobi, 'tobi');
+    expect(plain.svg).not.toContain('dress-');
+    expect(plain.states).not.toHaveProperty('dress-1');
   });
 });

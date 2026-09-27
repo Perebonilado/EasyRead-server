@@ -1147,7 +1147,10 @@ describe('a move picked by hand', () => {
           from: null,
           pace: null,
           seconds: null,
-          ...(doing.thing ? { thing: 'ball' as const } : {}),
+          // Only a thing worn is put on, as only food is eaten.
+          ...(doing.thing
+            ? { thing: doing.id === 'dress' ? 'coat' : 'ball' }
+            : {}),
           ...(target ? { target } : {}),
         },
         mayaBible,

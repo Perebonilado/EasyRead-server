@@ -90,7 +90,8 @@ export interface StudioEventRecord {
     | 'make'
     | 'shared'
     | 'episode'
-    | 'failed';
+    | 'failed'
+    | 'checked';
   step: EpisodePhase;
   sceneId?: string;
   version?: number;
@@ -110,6 +111,20 @@ export interface StudioMessageRecord {
     /** An event, not something said: the content is its line. */
     kind?: 'event';
     event?: StudioEventRecord;
+    /**
+     * A request that was checked and could not be shown yet, for us: what
+     * was asked, why it still does not show, and the film before and after
+     * in words. Never sent to the maker.
+     */
+    check?: {
+      words: string;
+      request: string;
+      reason: string;
+      before: string[];
+      after: string[];
+      faults: string[];
+      tries: number;
+    };
   } | null;
   createdAt: Date;
 }

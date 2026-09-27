@@ -6,6 +6,7 @@ import {
   storySheetOf,
 } from '../../domain/studio/studio';
 import { describeScene } from '../../domain/studio/studio-words';
+import { carriedWears } from '../../domain/studio/studio-check';
 import type {
   StudioEpisodeRecord,
   StudioMessageRecord,
@@ -244,5 +245,64 @@ describe('the Studio, as the app sees it', () => {
     const said = describeScene('middle', 20);
     expect(said).toMatch(/about 20 seconds: about 48 spoken words/);
     expect(said).not.toMatch(/150 to 250/);
+  });
+});
+
+describe('clothes carried from one scene into the next', () => {
+  const coatBible = bibleOf({
+    characters: [
+      { name: 'Mama', voice: 'woman', figure: { age: 'adult', top: 'dress' } },
+    ],
+    things: [{ id: 'coat', name: 'coat', kind: 'thing', look: 'red' }],
+    sets: [{ id: 'hall', name: 'Hall' }],
+  });
+  const next = storySheetOf({
+    title: 'Out',
+    set: 'hall',
+    onStage: [{ who: 'mama', spot: 'centre' }],
+    beats: [
+      { kind: 'line', who: 'mama', say: 'Brr.' },
+      { kind: 'line', who: 'mama', say: 'So cold.' },
+    ],
+  });
+  const withCoat = storySheetOf({
+    title: 'Coat on',
+    set: 'hall',
+    onStage: [{ who: 'mama', spot: 'centre', holding: 'coat' }],
+    beats: [
+      { kind: 'line', who: 'mama', say: 'It is cold out.' },
+      {
+        kind: 'business',
+        who: 'mama',
+        do: 'dress',
+        thing: 'coat',
+        say: 'Mama puts on her red coat.',
+      },
+    ],
+  });
+
+  it('marks the next scene changed once the one before leaves someone dressed otherwise', () => {
+    const plain = storySheetOf({
+      ...withCoat,
+      beats: withCoat.beats.slice(0, 1),
+    });
+    const rows = (first: typeof withCoat) => [
+      { position: 0, sheet: first },
+      { position: 1, sheet: next },
+    ];
+    // No scene changes clothes: nothing carried, the fingerprint as before.
+    expect(carriedWears(rows(plain), coatBible).size).toBe(0);
+    const carried = carriedWears(rows(withCoat), coatBible).get(1)!;
+    expect(carried).toMatchObject([{ who: 'mama', figure: { top: 'coat' } }]);
+    expect(carried).toHaveLength(1);
+    const made = sceneFingerprint(next, coatBible, brief);
+    const row = {
+      sheet: next,
+      status: 'made',
+      sceneKey: 'k',
+      madeHash: made,
+    } as StudioSceneRecord;
+    expect(needsMaking(row, coatBible, brief)).toBe(false);
+    expect(needsMaking(row, coatBible, brief, carried)).toBe(true);
   });
 });

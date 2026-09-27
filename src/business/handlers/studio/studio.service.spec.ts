@@ -625,3 +625,64 @@ describe('the Studio lists the shows', () => {
     expect(all).toHaveBeenCalledTimes(1);
   });
 });
+
+describe('a change asked for a scene', () => {
+  it("changes each scene asked for, and carries the maker's own words with one that was made", async () => {
+    const studio = studioInMemory();
+    studio.scenes.set('c1', {
+      ...studio.scenes.get('c1')!,
+      sceneKey: 'k1',
+      audioKey: 'a1',
+      status: 'made',
+    });
+    Object.assign(studio.answer, {
+      reply: "Got it. I'm changing that now.",
+      action: 'scene',
+      scene: 2,
+      scenes: [2, 1],
+      request: 'Tobi gets out of bed himself',
+    });
+    const done = await studio.service.turn(
+      'u1',
+      's1',
+      { episodeId: 'e0', message: 'the bed moves with him in scenes 1 and 2' },
+      () => undefined,
+    );
+    expect(studio.jobs.map((j) => [j.kind, j.sceneId])).toEqual([
+      ['scene', 'c2'],
+      ['scene', 'c1'],
+    ]);
+    // Scene 2 was never made: nothing to check. Scene 1 was: its film is.
+    expect(studio.jobs[0].ask).toBeUndefined();
+    expect(studio.jobs[1].ask).toMatchObject({
+      words: 'the bed moves with him in scenes 1 and 2',
+      request: 'Tobi gets out of bed himself',
+      tries: 1,
+    });
+    expect(studio.jobs[1].ask!.id).toBe(
+      studio.messages.find((m) => m.role === 'user')!.id,
+    );
+    // Never "done" before it is: a try, checked.
+    expect(done.message.content).toBe("Got it. I'll try that and check it.");
+  });
+
+  it('asks which scene when a number is none of them', async () => {
+    const studio = studioInMemory();
+    Object.assign(studio.answer, {
+      reply: 'On it.',
+      action: 'scene',
+      scene: 5,
+      request: 'x',
+    });
+    const done = await studio.service.turn(
+      'u1',
+      's1',
+      { episodeId: 'e0', message: 'change scene 5' },
+      () => undefined,
+    );
+    expect(done.message.content).toBe(
+      'Which scene should I change? Tell me its number.',
+    );
+    expect(studio.jobs).toEqual([]);
+  });
+});

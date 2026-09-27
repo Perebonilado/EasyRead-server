@@ -24,6 +24,7 @@ import {
 import {
   DOINGS,
   PROP_ACTIONS,
+  RESTING_WORDS,
   THING_WORDS,
   doingOf,
   featureIdOf,
@@ -38,6 +39,12 @@ import {
   type TravelPace,
 } from './scene-doings';
 import { ownNamedIn, type OwnWord } from './scene-own';
+import { WEAR_WORDS } from './scene-wear';
+
+/** Doings done in or on a bed or a seat, named in their own words: "climbs into bed", "sits up in bed". */
+const IN_OR_ON: ReadonlySet<DoingId> = new Set(['stand-up', 'lie-down', 'sit']);
+/** A thing worn, named in a doing's own words: "puts his coat on". */
+const WORN_IN = new RegExp(`\\b(?:${WEAR_WORDS})\\b`, 'iu');
 
 /** Someone who may act on a page: their id there, their names, and whether "she" or "he" may mean them. */
 export interface Actor extends Speaker {
@@ -741,6 +748,12 @@ export function doingsIn(
     }
     const named = featuresNamedIn(after, ownFeatures)[0];
     let feature = named ? { at: named.at, word: named.word } : null;
+    // A bed or a seat got into, out of or sat up in, in the doing's own
+    // words ("climbs into bed", "jumps out of bed"): where it is done.
+    if (IN_OR_ON.has(verb.id)) {
+      const rests = RESTING_WORDS.exec(text.slice(verb.at, verb.end));
+      if (rests) feature = { at: -1, word: rests[1] };
+    }
     // The thing: named after the verb, or inside its words ("lifts the cup
     // up"), never the verb itself ("bowls the ball").
     const own = text
@@ -768,9 +781,20 @@ export function doingsIn(
       (doing.kind === 'handle' || verb.id === 'chase' || verb.id === 'fetch')
         ? lastThing
         : null);
+    // A thing worn, in the words of putting it on or taking it off: "puts
+    // his coat on", "takes off her hat".
+    const wornWord =
+      verb.id === 'dress' || verb.id === 'undress'
+        ? WORN_IN.exec(text.slice(verb.at, upTo))
+        : null;
     // A thing no list has, done with as only a thing is: "flies his kite",
     // "picks up a drum", "fetches the frisbee".
     let fresh: ReadDoing['fresh'];
+    if (!thing && wornWord) {
+      const word = wornWord[0].toLowerCase().replace(/\s+/g, '-');
+      thing = word;
+      fresh = { thing: word };
+    }
     if (
       !thing &&
       ((doing.kind === 'handle' && verb.id !== 'open' && verb.id !== 'close') ||

@@ -52,6 +52,8 @@ export type LlmTask =
   // of a show's cast, an episode's outline and each scene's sheet.
   | 'studio_chat'
   | 'studio_write'
+  // Whether a scene made again as the maker asked now shows what they asked for.
+  | 'studio_check'
   | 'topic_quiz'
   | 'item_write'
   | 'item_verify'
@@ -103,10 +105,27 @@ export interface StudioTurnDraft {
     'none' | 'outline' | 'approve' | 'cast' | 'scene' | 'make' | 'episode';
   /** A scene's number, from 1, for a change to it. */
   scene: number | null;
+  /** For a change to several scenes: each one's number, from 1, the first first. Absent, only `scene`. */
+  scenes?: number[];
   /** The change asked for, in the maker's words. */
   request: string | null;
   /** Asked for what the Studio does not make. */
   refuse: boolean;
+}
+
+/**
+ * What the Studio's check makes of a scene made again as the maker asked:
+ * whether what they asked for now shows in the film, judged by what the
+ * film shows and never by the scene's words.
+ */
+export interface StudioCheckVerdict {
+  resolved: boolean;
+  /** For the writer and for us: which beat, and what still shows. */
+  reason: string;
+  /** One plain sentence for the maker. */
+  tell: string;
+  /** What is still wrong, from the list code sees; "other" for anything else. */
+  faults: string[];
 }
 
 /** What a Studio writer is asked again with: its answer, and what to change or put right. */
@@ -740,6 +759,20 @@ export interface LlmGatewayPort {
       before: string;
     } & StudioRevision,
   ): Promise<LlmResult<Record<string, unknown>>>;
+
+  /**
+   * Whether a scene made again as the maker asked now shows what they
+   * asked for: their words, the producer's reading of them, the film as it
+   * was before and as it is now (each in words, from what it plays), and
+   * the faults code sees in it.
+   */
+  studioCheck(input: {
+    words: string;
+    request: string;
+    before: string[];
+    after: string[];
+    faults: string[];
+  }): Promise<LlmResult<StudioCheckVerdict>>;
 
   /** Whether text asks for what no one should be made: flagged, with the categories. */
   moderate(input: {

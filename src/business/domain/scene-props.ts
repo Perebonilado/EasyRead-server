@@ -215,6 +215,52 @@ export interface OwnPropDrawing extends PropDrawing {
   look?: string;
 }
 
+/**
+ * How tall clothes are carried, in the kit's units: held up or over an
+ * arm, never as tall as someone wearing them (a child stands 190).
+ */
+export const CARRIED_CLOTHES = 72;
+
+/**
+ * A thing drawn at a size, drawn no taller than `most`: its drawing
+ * scaled down about its base, and where it is held with it. As it was
+ * when it is no taller.
+ */
+export function noTallerThan<T extends PropDrawing>(
+  drawing: T,
+  most: number,
+): T {
+  const [x, y, w, h] = drawing.viewBox;
+  const tall = Math.max(w, h);
+  if (tall <= most || tall <= 0) return drawing;
+  const k = most / tall;
+  const at = ([px, py]: [number, number]): [number, number] => [
+    r1(px * k),
+    r1(py * k),
+  ];
+  const viewBox: [number, number, number, number] = [
+    r1(x * k),
+    r1(y * k),
+    r1(w * k),
+    r1(h * k),
+  ];
+  const svg = drawing.svg
+    .replace(/(<svg\b[^>]*?\bviewBox=")[^"]*(")/u, `$1${viewBox.join(' ')}$2`)
+    .replace(
+      /(<svg\b[^>]*>)/u,
+      `$1<g transform="scale(${Math.round(k * 1000) / 1000})">`,
+    )
+    .replace(/<\/svg>\s*$/u, '</g></svg>');
+  return {
+    ...drawing,
+    svg,
+    viewBox,
+    grip: at(drawing.grip),
+    mouth: at(drawing.mouth),
+    bite: at(drawing.bite),
+  };
+}
+
 const LINE = 2.6;
 const r1 = (n: number) => Math.round(n * 10) / 10;
 const inked = (fill: string) => `fill="${fill}"`;

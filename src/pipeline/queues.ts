@@ -1,6 +1,7 @@
 import type { PipelineStep } from '../contracts';
 import type { LectureStyle, SegmentKind } from '../contracts';
 import { SCENE_GENERATOR_VERSION } from '../business/domain/scene-script';
+import type { StudioAsk } from '../business/ports/job-queue.port';
 
 /**
  * One queue per job type, so each gets its own concurrency and rate limit —
@@ -285,4 +286,6 @@ export interface StudioJobData {
   sceneIds?: string[];
   /** The maker's own words for what to change. */
   request?: string;
+  /** A maker's request for a change to a made scene: written, made again and checked. */
+  ask?: StudioAsk;
 }

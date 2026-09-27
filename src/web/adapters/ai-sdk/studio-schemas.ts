@@ -9,6 +9,7 @@ import {
   SHOTS,
   SPOTS,
   STUDIO_AUDIENCES,
+  STUDIO_POSES,
   STUDIO_FACES,
   STUDIO_FORMATS,
   STUDIO_KINDS,
@@ -30,7 +31,6 @@ import {
   FACIAL_HAIR,
   FIGURE_AGES,
   FIGURE_BUILDS,
-  FIGURE_POSES,
   FIGURE_SIGNS,
   HAIR_COLOURS,
   HAIR_STYLES,
@@ -95,8 +95,21 @@ export const studioTurnSchema = z.object({
     }),
   action: z.enum(STUDIO_ACTIONS).catch('none'),
   scene: z.union([z.number(), z.string()]).nullable().catch(null),
+  // A change to several scenes: each one's number.
+  scenes: z
+    .array(z.union([z.number(), z.string()]))
+    .nullable()
+    .catch(null),
   request: z.string().nullable().catch(null),
   refuse: z.boolean().catch(false),
+});
+
+/** Whether a scene made again as asked shows it: the check's verdict. */
+export const studioCheckSchema = z.object({
+  resolved: z.boolean().catch(false),
+  reason: z.string().catch(''),
+  tell: z.string().catch(''),
+  faults: z.array(z.string()).catch([]),
 });
 
 /** A person's look from the kit's lists, each field caught as the plain choice when it is not one of them. */
@@ -203,7 +216,9 @@ export const studioSceneSchema = z.object({
     z.object({
       who: z.string(),
       spot: z.enum(SPOTS).catch('centre'),
-      pose: z.enum(FIGURE_POSES).catch('standing'),
+      pose: z.enum(STUDIO_POSES).catch('standing'),
+      // The feature they sit or lie on, or are in: "bed", "bench".
+      on: z.string().nullable().catch(null),
       face: z.enum(STUDIO_FACES).catch('neutral'),
       // A thing none of the list's may be the show's own: the domain holds
       // it to the scene's words.
@@ -211,6 +226,8 @@ export const studioSceneSchema = z.object({
         .union([z.enum(THINGS as [string, ...string[]]), z.string()])
         .nullable()
         .catch(null),
+      // What they have on as it opens besides their usual clothes.
+      wears: z.array(z.string()).nullable().catch(null),
     }),
   ),
   props: z.array(

@@ -106,6 +106,8 @@ export const TOPS = [
   'agbada',
   // A soldier's plated breastplate over a tunic.
   'armour',
+  // Striped nightclothes, top and trousers alike: for bed.
+  'pyjamas',
 ] as const;
 export type Top = (typeof TOPS)[number];
 
@@ -336,6 +338,8 @@ const SAME: Record<string, string> = {
   babariga: 'agbada',
   armor: 'armour',
   breastplate: 'armour',
+  pajamas: 'pyjamas',
+  pjs: 'pyjamas',
   sarong: 'wrapper',
   lappa: 'wrapper',
   pagne: 'wrapper',
@@ -1711,6 +1715,27 @@ function dressOf(spec: FigureSpec, R: Rig): Dressed {
             .join(''),
       };
     }
+    case 'pyjamas':
+      // Soft stripes down the front and a row of buttons.
+      return {
+        ...plain,
+        details:
+          [-0.62, -0.2, 0.2, 0.62]
+            .map((k) =>
+              line(
+                `M${r1(k * s2)},${sY + 8} L${r1(k * R.halfHem)},${hemY - 2}`,
+                shade(top, 1.3),
+                3,
+              ),
+            )
+            .join('') +
+          [0, 1, 2]
+            .map(
+              (k) =>
+                `<circle cx="0" cy="${r1(sY + 14 + k * ((hemY - sY - 24) / 2))}" r="2.4" ${flat(shade(top, 0.6))}/>`,
+            )
+            .join(''),
+      };
     default:
       return plain;
   }
@@ -3005,6 +3030,37 @@ export interface FigureHow {
   signs?: readonly FigureSign[];
   /** A story set before beds had metal frames: a bed is a low wooden pallet with a mat. */
   old?: boolean;
+  /**
+   * The clothes one person changes into later on (a Studio story's "puts
+   * on his uniform"), each a state of its own ("dress-1"): drawn on the
+   * same rig as the clothes they start in, and worn from when the state is
+   * shown, in place of those before it. None for a group, or lying.
+   */
+  dress?: readonly { state: string; spec: FigureSpec }[];
+}
+
+/** The class a figure's clothes are drawn in: 0 what they start in, then each they change into. */
+const dressClass = (k: number) => `dress-${k}`;
+
+/**
+ * The clothes of a figure that changes clothes, as its own CSS shows them:
+ * each later outfit hidden until its state is on, and every outfit before
+ * it hidden once it is.
+ */
+function dressStyle(states: readonly string[]): string {
+  if (!states.length) return '';
+  const later = states.map((_, i) => `.${dressClass(i + 1)}`).join(',');
+  return [
+    `${later}{display:none}`,
+    ...states.map((state, i) => {
+      const k = i + 1;
+      const before = Array.from(
+        { length: k },
+        (_, j) => `.on-${state} .${dressClass(j)}`,
+      ).join(',');
+      return `.on-${state} .${dressClass(k)}{display:inline}${before}{display:none}`;
+    }),
+  ].join('');
 }
 
 /**
@@ -3077,6 +3133,19 @@ export function drawFigure(
   const members = Array.from({ length: n }, (_, i) =>
     layersOf(i === 0 ? spec : companionOf(spec, i, key), posed, holding),
   );
+  // One person who changes clothes: each outfit's clothed layers drawn on
+  // the same rig, the later ones shown as their states are.
+  const changes = n === 1 && !lying ? (how.dress ?? []) : [];
+  const outfits = [
+    members[0],
+    ...changes.map((one) => layersOf(one.spec, posed, holding)),
+  ];
+  const worn = (layer: (l: Layers) => string): string =>
+    changes.length
+      ? outfits
+          .map((l, k) => `<g class="${dressClass(k)}">${layer(l)}</g>`)
+          .join('')
+      : all(layer);
   // The one described stands in the middle of their group.
   const order = members
     .map((layers, i) => ({ layers, i }))
@@ -3099,9 +3168,10 @@ export function drawFigure(
   const wider = (n - 1) * APART;
   // What reaches past the frame widens it on that side, or raises it: a
   // pointing hand, a flag, an umbrella over the head.
-  const left = Math.max(0, ...members.map((l) => l.beyond.left));
-  const right = Math.max(0, ...members.map((l) => l.beyond.right));
-  const up = Math.max(0, ...members.map((l) => l.beyond.up));
+  const reaching = [...members, ...outfits.slice(1)];
+  const left = Math.max(0, ...reaching.map((l) => l.beyond.left));
+  const right = Math.max(0, ...reaching.map((l) => l.beyond.right));
+  const up = Math.max(0, ...reaching.map((l) => l.beyond.up));
   // Lying on the floor, head to the left: the standing figure turned a
   // quarter over, its side on the ground.
   const lies = { x: r1(-R.top / 2), y: -60 };
@@ -3113,26 +3183,27 @@ export function drawFigure(
         r1(frame[2] + wider + left + right),
         r1(frame[3] + up),
       ];
-  const style = styleOf(
-    breathAt,
-    members.map((_, i) => blinkAt(i)),
-    drawn,
-    posed === 'waving',
-    R.sY + 6,
-  );
+  const style =
+    styleOf(
+      breathAt,
+      members.map((_, i) => blinkAt(i)),
+      drawn,
+      posed === 'waving',
+      R.sY + 6,
+    ) + dressStyle(changes.map((one) => one.state));
   const person = [
-    `<g id="legs">${all((l) => l.legs)}</g>`,
+    `<g id="legs">${worn((l) => l.legs)}</g>`,
     `<g class="breathe">`,
-    `<g id="behind">${all((l) => l.behind)}</g>`,
-    `<g id="body">${all((l) => l.body)}</g>`,
-    `<g id="arms">${all((l) => l.arms)}</g>`,
-    `<g id="head">${all((l) => l.head + l.eyes)}</g>`,
+    `<g id="behind">${worn((l) => l.behind)}</g>`,
+    `<g id="body">${worn((l) => l.body)}</g>`,
+    `<g id="arms">${worn((l) => l.arms)}</g>`,
+    `<g id="head">${changes.length ? worn((l) => l.head) + members[0].eyes : all((l) => l.head + l.eyes)}</g>`,
     FACE_NAMES.map(
       (name) => `<g id="${name}">${all((l) => l.faces[name])}</g>`,
     ).join(''),
     `<g id="pain">${all((l) => l.more.pain)}</g>`,
     `<g class="mouths">${all((l) => l.mouths)}</g>`,
-    `<g id="reach">${all((l) => l.reach)}</g>`,
+    `<g id="reach">${worn((l) => l.reach)}</g>`,
     drawn
       .map((name) => `<g id="${signId(name)}">${all((l) => l.signs[name])}</g>`)
       .join(''),
@@ -3141,7 +3212,7 @@ export function drawFigure(
         placeAt(i, layers.blink, ` class="blink b${i}" opacity="0"`),
       )
       .join(''),
-    `<g id="over">${all((l) => l.over)}</g>`,
+    `<g id="over">${worn((l) => l.over)}</g>`,
     `</g>`,
   ].join('');
   const svg = [
@@ -3170,7 +3241,10 @@ export function drawFigure(
     svg,
     viewBox,
     parts: { head: 'head', body: 'body', arms: 'arms', legs: 'legs' },
-    states: statesOf(drawn),
+    states: {
+      ...statesOf(drawn),
+      ...Object.fromEntries(changes.map((one) => [one.state, one.state])),
+    },
     anchors: {
       head: at([0, R.cy]),
       body: at([0, r1((R.sY + R.hemY) / 2)]),

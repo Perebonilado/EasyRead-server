@@ -79,8 +79,13 @@ export type LaidThing =
       source?: 'math' | 'plot' | 'quote' | 'timeline' | 'chart';
       /** A passage: the size of its words, in its own units. */
       words?: { size: number };
-      /** Someone who stands with people: its frame's height in the figure kit's units. */
-      stands?: { units: number };
+      /**
+       * Someone who stands with people: its frame's height in the figure
+       * kit's units; for one the kit draws, how high their hips are from
+       * the ground once sat down, and how long they are head to foot, in
+       * those units, so they sit on a seat and lie along a bed.
+       */
+      stands?: { units: number; seated?: number; length?: number };
     }
   | { kind: 'stat'; value: string; caption: string }
   | { kind: 'words'; text: string; style: 'title' | 'keyword' | 'card' };
@@ -729,6 +734,39 @@ export interface FeatureAcross {
   w: number;
   /** Its own ground, and how big someone is there beside the people: where one under or behind it stands; and where one up it stands, across and their feet's y. */
   way?: { y: number; k: number; perch?: number; upX?: number };
+  /** The y of its seat, for one who sits on it. */
+  seat?: number;
+  /** Where one lies along it: its top's y, its head end and its foot end across, and where one sitting up in it sits across. */
+  lies?: { y: number; head: number; foot: number; sits: number };
+}
+
+/**
+ * How far the player sinks the kit's hips sitting down, as a share of the
+ * legs' length: its knees folded as far as a sit folds them (legsOf of
+ * 0.72 on the player).
+ */
+export const SIT_SINKS = 0.474;
+
+/** How high one the kit draws sits from the ground, in its units: their hips, once their legs fold. */
+export function seatedHeight(legs: {
+  r: [number, number][];
+}): number | undefined {
+  const [hip, , foot] = legs.r;
+  if (!hip || !foot) return undefined;
+  const leg = Math.abs(foot[1] - hip[1]);
+  return Math.round((-hip[1] - SIT_SINKS * leg) * 10) / 10;
+}
+
+/**
+ * A station on or in a feature: sitting on it ("on:bench"), sitting up in
+ * it under its cover ("in:bed"), or lying along it ("on:sofa:lie",
+ * "in:bed:lie"). Null for any other station.
+ */
+export function restingAt(
+  station: string,
+): { feature: string; in: boolean; lie: boolean } | null {
+  const m = /^(on|in):([^:]+)(?::(lie))?$/.exec(station);
+  return m ? { feature: m[2], in: m[1] === 'in', lie: Boolean(m[3]) } : null;
 }
 
 /**
@@ -758,6 +796,11 @@ export function layoutStations(input: {
   const { w: W, margin } = STAGINGS[input.staging];
   const { unit, floor, slot } = input.scale;
   const round = (n: number) => Math.round(n * 10) / 10;
+  /** How one the kit draws sits and lies, in its units. */
+  const standsOf = (id: string) => {
+    const thing = input.things.get(id);
+    return thing?.kind === 'drawing' ? thing.stands : undefined;
+  };
   const sizeOf = (id: string): { w: number; h: number } | null => {
     const thing = input.things.get(id);
     if (!thing) return null;
@@ -771,9 +814,15 @@ export function layoutStations(input: {
   const across = (station: string, w: number, flip = false): number => {
     const shares: Record<string, number> = input.shares ?? STATION_SHARES;
     let x = W / 2;
+    const rests = restingAt(station);
+    const on = rests ? input.features.get(rests.feature) : undefined;
     if (station in shares) x = shares[station] * W;
     else if (station.startsWith('@')) x = (Number(station.slice(1)) || 0.5) * W;
-    else if (/^(?:behind|under|up):/.test(station)) {
+    else if (rests) {
+      // Sitting up in it against its head end; on it, in its middle.
+      if (on) x = rests.in && on.lies ? on.lies.sits : on.x;
+      return x;
+    } else if (/^(?:behind|under|up):/.test(station)) {
       // Behind it, under it or up it: where it stands.
       const feature = input.features.get(station.replace(/^\w+:/, ''));
       if (feature) x = feature.x;
@@ -813,11 +862,14 @@ export function layoutStations(input: {
       else {
         x = across(station, size.w);
         // Going to a feature, or to a thing on the ground, they go there.
-        const byOrBehind = /^(?:by:|behind:|under:|up:|@)/.test(station);
+        const byOrBehind = /^(?:by:|behind:|under:|up:|on:|in:|@)/.test(
+          station,
+        );
         // Where someone stands already (behind a feature or under it, at
         // its own depth, no one is in the way), or, at a spot of their
         // own, in a gateway; or before one under a feature, who is seen.
-        const hidden = /^(?:behind|under|up):/.test(station);
+        // On it or in it, it is theirs: no one else is in their way.
+        const hidden = /^(?:behind|under|up|on|in):/.test(station);
         const crowded = (at: number) =>
           (!hidden &&
             placed.some(
@@ -852,16 +904,45 @@ export function layoutStations(input: {
       kept.set(id, { station, x });
       // Under or behind a feature: on its ground, as big as they are there;
       // up it, where one who climbs it stands, beside where things catch.
-      const at = /^(?:behind|under|up):(.+)$/.exec(station);
-      const way = at ? input.features.get(at[1])?.way : undefined;
+      const at = /^(?:behind|under|up|on|in):([^:]+)/.exec(station);
+      const feature = at ? input.features.get(at[1]) : undefined;
+      const way = feature?.way;
       const up = station.startsWith('up:') && way?.perch !== undefined;
       const k = way?.k ?? 1;
       const low = Boolean(at) && station.startsWith('under:');
       if (up && way?.upX !== undefined) x = way.upX - size.w * 0.3;
+      let feet = up ? way.perch! : (way?.y ?? floor);
+      // On a seat or in a bed: their hips where it is sat on, their legs
+      // hanging before it (or under its cover); lying, along it from its
+      // foot end, their head at its head.
+      const rests = restingAt(station);
+      const stands = sizeOf(id) && unit ? standsOf(id) : undefined;
+      if (rests && feature && unit) {
+        const seatY = rests.in || rests.lie ? feature.lies?.y : feature.seat;
+        const top = seatY ?? feature.seat ?? feet;
+        if (rests.lie && feature.lies) {
+          const long = (stands?.length ?? size.h / unit) * unit * k;
+          const way = feature.lies.head < feature.lies.foot ? 1 : -1;
+          x =
+            feature.lies.head +
+            way *
+              Math.min(
+                long * 0.96,
+                Math.abs(feature.lies.foot - feature.lies.head),
+              );
+          // Lying on their side from their feet: the body's half its
+          // width above them, under the cover as far again below.
+          feet = top - (rests.in ? 0.04 : 0.14) * size.h * k;
+          kept.set(id, { station, x });
+        } else {
+          const seated = (stands?.seated ?? (size.h / unit) * 0.12) * unit * k;
+          feet = Math.min(floor, top + seated);
+        }
+      }
       placed.push({ id, x, w: size.w * k, ...(low ? { low } : {}) });
       out[id] = {
         x: round(x - (size.w * k) / 2),
-        y: round((up ? way.perch! : (way?.y ?? floor)) - size.h * k),
+        y: round(feet - size.h * k),
         w: round(size.w * k),
         h: round(size.h * k),
       };
@@ -878,7 +959,14 @@ export interface FeaturePlace extends Rect {
   way: { x: number; y: number; k: number };
   /** Up in it: where a thing caught up in it rests (a kite in a tree's crown), and how high one who climbs it stands, their feet's y. */
   up: { x: number; y: number; perch: number };
+  /** The y of its seat, for one who sits on it. */
+  seat?: number;
+  /** Where one lies along it: its top's y, its head end and its foot end across, and where one sitting up in it sits. */
+  lies?: { y: number; head: number; foot: number; sits: number };
 }
+
+/** A show's own feature, drawn by the artist, is sat on at this share of its height: a log, a drum, a rock. */
+export const OWN_SEAT = 0.45;
 
 /**
  * Where a feature of a set stands on a stage. A piece the stage draws
@@ -896,7 +984,11 @@ export function placeFeature(input: {
     opening?: [number, number, number, number];
     perch?: number;
     crown?: [number, number];
+    seat?: number;
+    lies?: { top: number; head: number; foot: number; sits: number };
   };
+  /** One of a show's own, drawn by the artist: sat on at a share of its height. */
+  own?: boolean;
   /** Where the painter drew it, on this stage. */
   painted?: Rect | null;
   /** Stands at the back, farther off than the people. */
@@ -980,6 +1072,9 @@ export function placeFeature(input: {
   // Up in it: its own crown and perch; else high in its upper part.
   const crown = input.piece.crown ?? [vx + vw / 2, vy + vh * 0.25];
   const perch = input.piece.perch ?? -vy * 0.55;
+  // Sat on at its seat; one of a show's own at a share of its height.
+  const seat = input.piece.seat ?? (input.own ? -vy * OWN_SEAT : undefined);
+  const lies = input.piece.lies;
   return {
     x: round(middle + vx * u),
     y: round(feet + vy * u),
@@ -995,6 +1090,17 @@ export function placeFeature(input: {
       y: round(feet + crown[1] * u),
       perch: round(feet - perch * u),
     },
+    ...(seat !== undefined ? { seat: round(feet - seat * u) } : {}),
+    ...(lies
+      ? {
+          lies: {
+            y: round(feet - lies.top * u),
+            head: round(middle + lies.head * u),
+            foot: round(middle + lies.foot * u),
+            sits: round(middle + lies.sits * u),
+          },
+        }
+      : {}),
   };
 }
 

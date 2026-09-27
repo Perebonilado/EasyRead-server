@@ -30,6 +30,7 @@ import type {
   LectureDiagramDraft,
   SketchDraft,
   SketchTemplate,
+  StudioCheckVerdict,
   StudioRevision,
   StudioTurnDraft,
 } from '../../../business/ports/llm.port';
@@ -45,6 +46,7 @@ import type { z } from 'zod';
 import {
   studioBibleSchema,
   studioOutlineSchema,
+  studioCheckSchema,
   studioSceneSchema,
   studioTurnSchema,
 } from './studio-schemas';
@@ -2246,6 +2248,47 @@ export class AiSdkLlmAdapter implements LlmGatewayPort, OnModuleInit {
   }
 
   /**
+   * Whether a scene made again as the maker asked now shows it: a small
+   * read of the film in words, before and after, with thinking off.
+   */
+  async studioCheck(input: {
+    words: string;
+    request: string;
+    before: string[];
+    after: string[];
+    faults: string[];
+  }): Promise<LlmResult<StudioCheckVerdict>> {
+    const started = Date.now();
+    const { generateObject } = await this.registry.modules();
+    const { model, ref } = await this.registry.languageModel('studio_check');
+    const prompt = [
+      `The maker's own words:\n${input.words}`,
+      `What the producer took them to ask for:\n${input.request}`,
+      input.before.length
+        ? `The film as it was before, in words:\n${input.before.join('\n')}`
+        : 'The film before is not known.',
+      `The film as it is now, in words:\n${input.after.join('\n')}`,
+      input.faults.length
+        ? `What code sees wrong in it now:\n- ${input.faults.join('\n- ')}`
+        : 'Code sees nothing wrong in it now.',
+    ].join('\n\n');
+    const result = await this.againIfMisshapen(() =>
+      generateObject({
+        model,
+        schema: studioCheckSchema,
+        system: STUDIO_PROMPTS.studioCheck,
+        prompt,
+        maxRetries: this.maxRetries(),
+        ...this.writerThinking(ref, 'STUDIO_CHECK_THINKING', 'off'),
+      }),
+    );
+    return {
+      value: result.object,
+      usage: this.usage(ref, result.usage, started),
+    };
+  }
+
+  /**
    * OpenAI's moderation, which costs nothing: whether text asks for what
    * no one should be made. A deployment without an OpenAI key, or a
    * moderation that cannot answer, lets the text through; the writers'
@@ -2327,13 +2370,19 @@ export class AiSdkLlmAdapter implements LlmGatewayPort, OnModuleInit {
 /** The producer's answer as the port has it: a scene's number a number, whatever came. */
 function turnOf(answer: z.infer<typeof studioTurnSchema>): StudioTurnDraft {
   const scene = Number(answer.scene);
+  const scenes = (answer.scenes ?? [])
+    .map((one) => Math.round(Number(one)))
+    .filter((one) => Number.isFinite(one) && one >= 1);
+  const { scenes: _asked, ...rest } = answer;
+  void _asked;
   return {
-    ...answer,
+    ...rest,
     brief: answer.brief,
     scene:
       answer.scene !== null && Number.isFinite(scene)
         ? Math.round(scene)
         : null,
+    ...(scenes.length ? { scenes: [...new Set(scenes)] } : {}),
   };
 }
 

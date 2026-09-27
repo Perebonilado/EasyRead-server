@@ -15,3 +15,34 @@ describe("the producer's instructions", () => {
     );
   });
 });
+
+describe('what the producer may say of a change', () => {
+  it('says what it will try and that it will be checked, never that it is done', () => {
+    const turn = STUDIO_PROMPTS.studioTurn;
+    expect(turn).not.toContain('being done');
+    expect(turn).not.toContain('Trimming scene 2 now');
+    expect(turn).toContain('then make it again and');
+    expect(turn).toContain(
+      'Never say a change is done, fixed, sorted or happening',
+    );
+    expect(turn).toMatch(/A "checked" line says whether what[^]*never more/);
+    // Several scenes at once, every one of them.
+    expect(turn).toContain('scenes lists every one of their numbers');
+    // What the stage can show now: beds, seats, clothes.
+    expect(turn).toMatch(/get into bed and out of it/);
+    expect(turn).toMatch(/put clothes on and take them off/);
+  });
+
+  it('tells the writer the poses, getting up first, and putting clothes on', () => {
+    const scene = STUDIO_PROMPTS.studioScene;
+    expect(scene).toContain('"standing", "sitting", "lying", "in bed"');
+    expect(scene).toMatch(/gets up first \("stand-up"/);
+    expect(scene).toMatch(/never carry clothes about/);
+  });
+
+  it('checks a remade scene by what its film shows, never its script', () => {
+    const check = STUDIO_PROMPTS.studioCheck;
+    expect(check).toContain('Judge only by what the film shows now.');
+    expect(check).toContain('"furniture-moves"');
+  });
+});

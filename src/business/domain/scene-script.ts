@@ -429,6 +429,10 @@ export interface CharacterThing {
   group?: true;
   /** One of the story's minor characters: drawn a little smaller and quieter. */
   minor?: true;
+  /** What they wear as the scene opens, when it is not their usual look (a Studio story's: pyjamas in bed, what the scene before left them in). */
+  wears?: FigureSpec;
+  /** The clothes they change into later, each shown from its state ("dress-1"): a Studio story's "puts on his uniform". */
+  dress?: { state: string; spec: FigureSpec }[];
 }
 
 /**

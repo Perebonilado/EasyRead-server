@@ -14,14 +14,18 @@ import {
   layoutStep,
   overlaps,
   placeFeature,
+  restingAt,
+  seatedHeight,
   slotsFor,
   slotsOf,
   stationScale,
   standTogether,
+  type FeatureAcross,
   type LaidThing,
   type StagingName,
 } from './scene-layout';
-import { drawPiece } from './scene-set-pieces';
+import { ACTED_PIECES, drawPiece } from './scene-set-pieces';
+import { PLAIN_FIGURE, drawFigure } from './scene-figure';
 
 const things = new Map<string, LaidThing>([
   ['a', { kind: 'drawing', aspect: 1.6, caption: 'Kidney' }],
@@ -363,4 +367,110 @@ describe("a Studio scene's stations", () => {
     expect(painted.way.y).toBe(680);
     expect(middle(painted)).toBeCloseTo(175, 0);
   });
+});
+
+describe("beds and seats, the set's own", () => {
+  it('draws the bed itself, long enough for a grown-up, its cover apart', () => {
+    expect(ACTED_PIECES).toContain('bed');
+    expect(ACTED_PIECES).toContain('sofa');
+    const bed = drawPiece('bed');
+    expect(bed.svg).toContain('<g id="frame">');
+    expect(bed.svg).toContain('<g id="cover">');
+    expect(bed.cover).toBe('cover');
+    const [, , w] = bed.viewBox;
+    expect(w).toBeGreaterThan(-figureFrame('adult')[1]);
+    expect(bed.lies).toMatchObject({ top: bed.seat });
+    expect(bed.lies!.head).toBeLessThan(bed.lies!.foot);
+    expect(drawPiece('sofa').seat).toBeGreaterThan(0);
+    // A window hangs on the wall, nothing of it down to the floor.
+    expect(drawPiece('window').svg).not.toMatch(/y="-220"/);
+  });
+
+  it('knows how high one the kit draws sits, and the stations on and in a feature', () => {
+    const child = drawFigure({ ...PLAIN_FIGURE, age: 'child' }, 'c');
+    expect(seatedHeight(child.legs!)).toBeCloseTo(16.4, 1);
+    expect(restingAt('in:bed')).toEqual({
+      feature: 'bed',
+      in: true,
+      lie: false,
+    });
+    expect(restingAt('on:sofa:lie')).toEqual({
+      feature: 'sofa',
+      in: false,
+      lie: true,
+    });
+    expect(restingAt('by:bed:1')).toBeNull();
+  });
+
+  for (const staging of ['box', 'wide'] as StagingName[])
+    it(`places a bed's seat and where one lies along it, and sits people there (${staging})`, () => {
+      const piece = drawPiece('bed');
+      const bed = placeFeature({
+        staging,
+        spot: 'centre',
+        piece,
+        back: false,
+        unit: 2.4,
+        floor: STAGINGS[staging].h - 60,
+        horizon: 400,
+      });
+      const feet = STAGINGS[staging].h - 60;
+      expect(bed.seat).toBeCloseTo(feet - piece.seat! * 2.4, 0);
+      expect(bed.lies!.y).toBeCloseTo(bed.seat!, 0);
+      expect(bed.lies!.sits).toBeLessThan(bed.x + bed.w / 2);
+      const kid: LaidThing = {
+        kind: 'drawing',
+        aspect: 160 / 190,
+        caption: null,
+        stands: { units: 190, seated: 16.4, length: 148 },
+      };
+      const grown: LaidThing = {
+        kind: 'drawing',
+        aspect: 160 / 234,
+        caption: null,
+        stands: { units: 234, seated: 30, length: 192 },
+      };
+      const scale = stationScale([kid, grown], 2, staging);
+      const unit = scale.unit!;
+      const across = {
+        x: bed.x + bed.w / 2,
+        w: bed.w,
+        seat: bed.seat,
+        lies: bed.lies,
+      };
+      const bench = {
+        x: STAGINGS[staging].w * 0.2,
+        w: 200,
+        seat: scale.floor - 50 * unit,
+      };
+      const [step, next] = layoutStations({
+        steps: [
+          { show: ['tobi', 'mama'], at: { tobi: 'in:bed', mama: 'on:bench' } },
+          {
+            show: ['tobi', 'mama'],
+            at: { tobi: 'by:bed:1', mama: 'on:bench' },
+          },
+        ],
+        things: new Map([
+          ['tobi', kid],
+          ['mama', grown],
+        ]),
+        staging,
+        scale,
+        features: new Map<string, FeatureAcross>([
+          ['bed', across],
+          ['bench', bench],
+        ]),
+      });
+      // In bed, sat against the pillow end, the hips at the mattress.
+      const hips = (p: { y: number; h: number }, seated: number) =>
+        p.y + p.h - seated * unit;
+      expect(hips(step.tobi, 16.4)).toBeCloseTo(bed.lies!.y, 0);
+      expect(step.tobi.x + step.tobi.w / 2).toBeCloseTo(bed.lies!.sits, 0);
+      // On the bench: the hips at its seat, the feet never under the floor.
+      expect(hips(step.mama, 30)).toBeCloseTo(bench.seat, 0);
+      expect(step.mama.y + step.mama.h).toBeLessThanOrEqual(scale.floor);
+      // Out of bed, beside it, on the ground.
+      expect(next.tobi.y + next.tobi.h).toBe(scale.floor);
+    });
 });

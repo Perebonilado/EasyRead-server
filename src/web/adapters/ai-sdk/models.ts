@@ -83,6 +83,8 @@ const TASK_VAR: Record<LlmTask, string> = {
   // show, an episode and each scene, and are worth a careful model.
   studio_chat: 'AI_MODEL_STUDIO_CHAT',
   studio_write: 'AI_MODEL_STUDIO_WRITE',
+  // Whether a scene made again as asked shows it: a small read, a make.
+  studio_check: 'AI_MODEL_STUDIO_CHECK',
   topic_quiz: 'AI_MODEL_QUIZ',
   // Guided reading: the preview is one call per chapter ever (cached), the
   // graders run once per checkpoint — all three default to the cheap model
@@ -126,6 +128,9 @@ const TASK_DEFAULT: Partial<Record<LlmTask, string>> = {
   // writer (Richard, 2026-09-25). Thinking: STUDIO_WRITE_THINKING.
   studio_chat: 'deepseek:deepseek-flash',
   studio_write: 'deepseek:deepseek-flash',
+  // The check of a scene made again as asked: a few thousand tokens in, a
+  // verdict out, thinking off (STUDIO_CHECK_THINKING).
+  studio_check: 'deepseek:deepseek-flash',
 };
 
 const DEFAULT_MODEL = 'openai:gpt-4o-mini';

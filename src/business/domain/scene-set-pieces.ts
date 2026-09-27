@@ -40,6 +40,14 @@ export interface SetPiece {
   perch?: number;
   /** Where a thing caught up in it rests: a kite in a tree's crown. */
   crown?: [number, number];
+  /**
+   * Where someone lies along it, in its own units: its top (how high it
+   * is, as a seat is), its head end and its foot end across; and where one
+   * sitting up in it sits across, their back to the head end.
+   */
+  lies?: { top: number; head: number; foot: number; sits: number };
+  /** The group that covers whoever is in it, drawn over them while they are: a bed's duvet. */
+  cover?: string;
 }
 
 /**
@@ -53,6 +61,8 @@ export const ACTED_PIECES: readonly FeatureKind[] = [
   'window',
   'bench',
   'chair',
+  'sofa',
+  'bed',
   'steps',
   'goalpost',
   'crate',
@@ -235,9 +245,11 @@ export function drawPiece(kind: FeatureKind, name = ''): SetPiece {
       };
     }
     case 'window': {
+      // A window in the wall, framed, with its sill: the wall below it is
+      // the painter's, never a panel down to the floor before the room.
       return {
         ...framed(
-          rect(-84, -220, 168, 220, CONCRETE, 0) +
+          rect(-62, -194, 124, 118, CONCRETE, 4) +
             rect(-50, -180, 100, 90, GLASS, 0) +
             line('M0,-180 L0,-90 M-50,-135 L50,-135', FIGURE_INK, 3) +
             `<g id="leaf">` +
@@ -269,6 +281,7 @@ export function drawPiece(kind: FeatureKind, name = ''): SetPiece {
           [-100, -104, 200, 110],
         ),
         seat: 50,
+        lies: { top: 58, head: -80, foot: 88, sits: 0 },
         opening: [-70, -46, 70, 0],
       };
     case 'chair':
@@ -297,17 +310,52 @@ export function drawPiece(kind: FeatureKind, name = ''): SetPiece {
         opening: [-60, -68, 60, 0],
       };
     case 'bed':
+      // A bed long enough for a grown-up to lie on, its head to the left:
+      // the frame (a headboard, a footboard, the mattress and the pillow)
+      // and the duvet over it apart, which is drawn again over whoever is
+      // in the bed while they are, and hangs over its near side.
       return {
         ...framed(
-          shadow(100) +
-            rect(-104, -112, 14, 112, WOOD) +
-            rect(90, -70, 12, 70, WOOD) +
-            rect(-92, -58, 184, 30, '#e8edf3', 6) +
-            rect(-92, -36, 184, 16, '#6f93c7', 4) +
-            rect(-88, -74, 52, 18, WHITE, 8),
-          [-104, -112, 206, 118],
+          `<g id="frame">` +
+            shadow(128) +
+            rect(-134, -126, 16, 126, WOOD) +
+            rect(-138, -132, 24, 12, WOOD_DARK) +
+            rect(118, -70, 14, 70, WOOD) +
+            rect(-118, -34, 236, 20, WOOD_DARK, 3) +
+            rect(-116, -14, 10, 14, WOOD_DARK) +
+            rect(106, -14, 10, 14, WOOD_DARK) +
+            rect(-118, -54, 236, 22, '#e8edf3', 7) +
+            `<ellipse cx="-92" cy="-60" rx="28" ry="13" ${fill(WHITE)}/>` +
+            `</g>` +
+            // From the pillow to the foot, a little above the mattress, so
+            // one sitting up in the bed is under it to the waist.
+            `<g id="cover">` +
+            `<path d="M-116,-60 Q-84,-68 -40,-64 Q40,-60 118,-58 L124,-22 Q30,-14 -114,-22 Z" ${fill('#6f93c7')}/>` +
+            line('M-104,-50 Q-20,-44 100,-50', '#5a7cb0', 2.4) +
+            `</g>`,
+          [-138, -132, 270, 132],
+        ),
+        seat: 54,
+        lies: { top: 54, head: -100, foot: 104, sits: -78 },
+        cover: 'cover',
+      };
+    case 'sofa':
+      // A sofa: its back, two arms and the cushions, long enough to lie on.
+      return {
+        ...framed(
+          shadow(118) +
+            rect(-112, -104, 224, 56, '#b5654d', 10) +
+            rect(-124, -76, 24, 68, '#9a5240', 8) +
+            rect(100, -76, 24, 68, '#9a5240', 8) +
+            rect(-100, -58, 100, 20, '#c97a60', 6) +
+            rect(0, -58, 100, 20, '#c97a60', 6) +
+            rect(-110, -40, 220, 30, '#a95c47', 4) +
+            rect(-108, -10, 10, 10, WOOD_DARK) +
+            rect(98, -10, 10, 10, WOOD_DARK),
+          [-124, -104, 248, 104],
         ),
         seat: 50,
+        lies: { top: 50, head: -92, foot: 92, sits: -40 },
       };
     case 'tree':
       return {

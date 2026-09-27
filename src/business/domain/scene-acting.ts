@@ -23,6 +23,7 @@ import type { NarratedMove } from './scene-directions';
 import {
   ACTED_MOVES,
   HELD_MOVES,
+  NEEDS_FEET,
   aimedFeature,
   type ActedMove,
 } from './scene-doings';
@@ -192,22 +193,8 @@ const EYES_ON: readonly ActedMove[] = [
   'bark',
 ];
 
-/** What ends sitting or lying down: getting up, or any move that cannot be made sitting. */
-const ENDS_HOLD = new Set<string>([
-  'stand',
-  'jump',
-  'sit',
-  'lie',
-  'fall',
-  'spin',
-  'roll',
-  'bow',
-  'kick',
-  'dig',
-  'shake-off',
-  'hop',
-  'hug',
-]);
+/** What ends sitting or lying down: getting up, or any move that cannot be made sitting (the one list's). */
+const ENDS_HOLD = NEEDS_FEET;
 
 /** A small, stable number from a name: the same choice in every make. */
 function beatOf(seed: string): number {

@@ -52,6 +52,8 @@ import {
   STAGINGS,
   extentOf,
   layoutStations,
+  restingAt,
+  seatedHeight,
   layoutStep,
   placeFeature,
   stationScale,
@@ -74,17 +76,25 @@ import {
   type SceneThing,
 } from './scene-script';
 import { paletteOf, placeMusic } from './scene-music';
-import { PROP_LOOSE, drawProp, type PropLoose } from './scene-props';
+import {
+  CARRIED_CLOTHES,
+  PROP_LOOSE,
+  drawProp,
+  noTallerThan,
+  type PropLoose,
+} from './scene-props';
+import { wearableOf } from './scene-wear';
 import {
   ACTED_MOVES,
   HELD_MOVES,
   THING_ACTIONS,
+  actionDoing,
   aimedFeature,
   doingOf,
   isStageProp,
   type ThingAction,
 } from './scene-doings';
-import { figureFrame } from './scene-figure';
+import { FIGURE_FRAME, figureFrame } from './scene-figure';
 import { DRAWN } from './scene-own';
 import {
   ACTED_PIECES,
@@ -212,10 +222,10 @@ const BUSINESS_APART_MS = 650;
 
 /** How long each handling of a thing takes on the stage, and how far into it the thing changes hands: as the list of doings has it. */
 const HANDLING_MS = Object.fromEntries(
-  THING_ACTIONS.map((id) => [id, doingOf(id)!.ms]),
+  THING_ACTIONS.map((id) => [id, doingOf(actionDoing(id))!.ms]),
 ) as Record<ThingAction, number>;
 const HANDLING_AT = Object.fromEntries(
-  THING_ACTIONS.map((id) => [id, doingOf(id)!.keyAt]),
+  THING_ACTIONS.map((id) => [id, doingOf(actionDoing(id))!.keyAt]),
 ) as Record<ThingAction, number>;
 
 /** A point in a drawing's own units, as shares of its box across and down. */
@@ -334,6 +344,12 @@ export function thingDto(
     ...(drawing.sinks && !drawing.acts ? { sinks: drawing.sinks } : {}),
     ...(drawing.faces && !drawing.acts ? { faces: drawing.faces } : {}),
     ...(drawing.stands && !drawing.acts ? { units: drawing.stands.units } : {}),
+    // A person the kit drew in bed or lying for the whole scene: so said.
+    ...(drawing.acts &&
+    (thing.kind === 'character' || thing.kind === 'person') &&
+    (thing.pose === 'in bed' || thing.pose === 'lying')
+      ? { drawnAs: thing.pose }
+      : {}),
   };
 }
 
@@ -346,8 +362,8 @@ interface Geometry {
   words?: { size: number };
   /** A character's head: where their bubbles point. */
   head?: [number, number];
-  /** Someone who stands with people: the kit's units their frame is tall. */
-  stands?: { units: number };
+  /** Someone who stands with people: the kit's units their frame is tall; how high they sit and how long they lie, when the kit draws them. */
+  stands?: { units: number; seated?: number; length?: number };
 }
 
 const laid = (thing: SceneThingDto, geometry?: Geometry): LaidThing =>
@@ -1284,6 +1300,13 @@ export function composeScene(input: ComposeInput): {
           return at ? [[id, at[1]]] : [];
         }),
       );
+      // Who is in a bed, under its cover: it is drawn over them.
+      const abed: NonNullable<SceneStepDto['abed']> = Object.fromEntries(
+        Object.entries(step.stage.at ?? {}).flatMap(([id, station]) => {
+          const rests = restingAt(station);
+          return rests?.in ? [[id, rests.feature]] : [];
+        }),
+      );
       for (const [id, how] of Object.entries(going)) {
         if (how.pace === 'run') pace[id] = 'run';
         if (before.includes(id) && !step.stage.show.includes(id))
@@ -1316,6 +1339,7 @@ export function composeScene(input: ComposeInput): {
         ...(Object.keys(exit).length ? { exit } : {}),
         ...(Object.keys(pace).length ? { pace } : {}),
         ...(Object.keys(behind).length ? { behind } : {}),
+        ...(Object.keys(abed).length ? { abed } : {}),
       });
       stationsAt.push({ ...(step.stage.at ?? {}) });
       before = step.stage.show;
@@ -1685,7 +1709,11 @@ export function composeScene(input: ComposeInput): {
   const props: ScenePropDto[] = (script.props ?? []).map((prop) => {
     // A show's own as the artist drew it; one whose drawing could not be
     // made is a parcel, so what a scene handles is never missing.
-    const own = script.drawn?.things?.[prop];
+    // Clothes are carried held up or over an arm, never as tall as whoever
+    // wears them: a show's own uniform drawn as worn is drawn smaller.
+    const kept = script.drawn?.things?.[prop];
+    const own =
+      kept && wearableOf(prop) ? noTallerThan(kept, CARRIED_CLOTHES) : kept;
     const drawn = own ?? drawProp(isStageProp(prop) ? prop : 'box');
     const loose: PropLoose =
       own?.loose ?? (isStageProp(prop) ? PROP_LOOSE[prop] : PROP_LOOSE.box);
@@ -1829,6 +1857,12 @@ export function composeScene(input: ComposeInput): {
       });
     return moves;
   };
+  /** Where one lies along a feature, as the player gets it. */
+  const liesOn = (lies: FeaturePlace['lies']) => ({
+    y: lies?.y ?? 0,
+    head: lies?.head ?? 0,
+    foot: lies?.foot ?? 0,
+  });
   /**
    * The set's features as the player gets them: the stage's own drawing
    * of each it draws, where each stands at each staging and where one goes
@@ -1870,6 +1904,24 @@ export function composeScene(input: ComposeInput): {
         ...(piece && group ? { painted: group } : {}),
         ...(feature.open ? { open: true as const } : {}),
         ...(feature.open && feature.ajar ? { ajar: true as const } : {}),
+        // What covers whoever is in it, and where one sits or lies on it.
+        ...(piece?.cover ? { cover: piece.cover } : {}),
+        ...(featurePlaces.wide.get(feature.id)?.seat !== undefined
+          ? {
+              seat: {
+                box: featurePlaces.box.get(feature.id)?.seat ?? 0,
+                wide: featurePlaces.wide.get(feature.id)?.seat ?? 0,
+              },
+            }
+          : {}),
+        ...(featurePlaces.wide.get(feature.id)?.lies
+          ? {
+              lies: {
+                box: liesOn(featurePlaces.box.get(feature.id)?.lies),
+                wide: liesOn(featurePlaces.wide.get(feature.id)?.lies),
+              },
+            }
+          : {}),
       };
     });
   /** When each feature opens or shuts: at its word, or its moment in a quiet. */
@@ -2141,7 +2193,23 @@ export function composeScene(input: ComposeInput): {
         field: drawing.field,
         ...(drawing.words ? { words: drawing.words } : {}),
         ...(drawing.head ? { head: drawing.head } : {}),
-        ...(drawing.stands ? { stands: drawing.stands } : {}),
+        ...(drawing.stands
+          ? {
+              stands: {
+                ...drawing.stands,
+                // One the kit draws: how high they sit, how long they lie.
+                ...(drawing.legs
+                  ? {
+                      seated: seatedHeight(drawing.legs),
+                      length: Math.max(
+                        0,
+                        -drawing.viewBox[1] - FIGURE_FRAME.headroom,
+                      ),
+                    }
+                  : {}),
+              },
+            }
+          : {}),
       });
   }
   const introduced = new Set(
@@ -2233,6 +2301,7 @@ export function composeScene(input: ComposeInput): {
         staging,
         spot: one.feature.spot,
         ...(one.piece ? { piece: one.piece } : {}),
+        ...(one.feature.kind === DRAWN ? { own: true } : {}),
         painted: one.box ? { x: x0, y: y0, w: x1 - x0, h: y1 - y0 } : null,
         back,
         unit,
@@ -2309,6 +2378,8 @@ export function composeScene(input: ComposeInput): {
               x: f.x + f.w / 2,
               w: f.w,
               way: { y: f.way.y, k: f.way.k, perch: f.up.perch, upX: f.up.x },
+              ...(f.seat !== undefined ? { seat: f.seat } : {}),
+              ...(f.lies ? { lies: f.lies } : {}),
             },
           ]),
         ),

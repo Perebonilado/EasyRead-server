@@ -10,7 +10,7 @@ import type {
   ScenePlaceDto,
   SceneStepDto,
 } from '../../contracts';
-import { HELD_IN_MS, HELD_MOVES, doingOf } from './scene-doings';
+import { HELD_IN_MS, HELD_MOVES, actionDoing, doingOf } from './scene-doings';
 
 /** The player's timings, in milliseconds. */
 const MOVE_MS = 700;
@@ -173,7 +173,7 @@ export function settledOf(
   // the cup reaches the lips.
   for (const prop of scene.props ?? [])
     for (const [moment, , does] of prop.does) {
-      const doing = doingOf(does);
+      const doing = doingOf(actionDoing(does));
       if (doing) at = Math.max(at, moment + doing.ms * (1 - doing.keyAt));
     }
   for (const effect of scene.effects) {
@@ -323,7 +323,7 @@ export function hurried(
     doings.set(id, [...(doings.get(id) ?? []), at]);
   for (const prop of scene.props ?? [])
     for (const [moment, who, does] of prop.does) {
-      const doing = doingOf(does);
+      const doing = doingOf(actionDoing(does));
       begins(who, moment - (doing ? doing.ms * doing.keyAt : 0));
     }
   for (const [id, acting] of Object.entries(scene.acting ?? {}))

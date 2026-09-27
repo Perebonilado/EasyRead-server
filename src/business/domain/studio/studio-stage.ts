@@ -17,6 +17,7 @@
  * does ("Mama waved"), acted as it is said, so that a gesture the
  * narration tells is seen; and only by someone on the stage.
  */
+import type { SceneDto } from '../../../contracts';
 import { faceOfLine } from '../scene-feeling';
 import { directionsIn, doingsIn, type Actor } from '../scene-directions';
 import {
@@ -58,7 +59,17 @@ import {
   type StoryCharacter,
   type StoryPlace,
 } from '../scene-story';
-import { isGear, type FigureFace } from '../scene-figure';
+import { isGear, type FigureFace, type FigureSpec } from '../scene-figure';
+import { sameOutfit } from '../scene-wear';
+import {
+  RISE_S,
+  STEP_OFF_S,
+  outfitsOf,
+  postureSeconds,
+  posturesOf,
+  stationOf,
+  type Posture,
+} from './studio-posture';
 import {
   SPOTS,
   type SheetBeat,
@@ -120,8 +131,24 @@ export interface QuietItem {
   keyAt: number;
 }
 
-/** A beat of the sheet that is not spoken, as the quiet's timing sees it. */
-export function quietItem(beat: SheetBeat): QuietItem {
+/**
+ * A beat of the sheet that is not spoken, as the quiet's timing sees it.
+ * `extraS` is what its doer does first for how they are: getting up
+ * before they go, stepping out of bed, going over to a seat.
+ */
+export function quietItem(beat: SheetBeat, extraS = 0): QuietItem {
+  const item = ownItem(beat);
+  if (extraS <= 0 || item.pause) return item;
+  return {
+    ...item,
+    s: item.s + extraS,
+    leastS: item.leastS + extraS,
+    keyAt: (extraS + item.keyAt * item.s) / (item.s + extraS),
+  };
+}
+
+/** A beat of the sheet that is not spoken, as its own doing takes. */
+function ownItem(beat: SheetBeat): QuietItem {
   if (beat.kind === 'pause') {
     const s = beat.seconds ?? 1;
     return { who: null, handles: false, pause: true, s, leastS: s, keyAt: 1 };
@@ -240,7 +267,7 @@ export function stationShare(
 ): number {
   if (station in SPOT_SHARE) return SPOT_SHARE[station as Spot];
   if (station.startsWith('@')) return Number(station.slice(1)) || 0.5;
-  const behind = /^(?:behind|under|up):(.+)$/.exec(station);
+  const behind = /^(?:behind|under|up|on|in):([^:]+)/.exec(station);
   const hiding = behind ? features.get(behind[1]) : undefined;
   if (hiding) return SPOT_SHARE[hiding.spot];
   const by = /^by:(.+):(-1|1)$/.exec(station);
@@ -259,6 +286,13 @@ export const behindStation = (feature: string) => `behind:${feature}`;
 export const underStation = (feature: string) => `under:${feature}`;
 /** A station up a feature: up a tree, on a wall, where one who climbs it stands. */
 export const upStation = (feature: string) => `up:${feature}`;
+
+/** How each pose of the kit's arms, from a sheet written before, is played on the standing rig as the scene opens: a doing's move, once. */
+const ARM_POSES: Partial<Record<string, DoingId>> = {
+  waving: 'wave',
+  pointing: 'point',
+  'arms up': 'hop',
+};
 
 /** The words for a feature: its kind's or its name's, its name, and its id ("the palm" for the tall palm tree). */
 const featureWordsIn = (feature: StudioFeature) =>
@@ -625,6 +659,35 @@ export function storyBibleFor(
   };
 }
 
+/**
+ * A script staged anew, put on the voice a scene was made with: each
+ * line's quiet after it as long as the voice left it, the quiet before
+ * the first as long as it was. Null when its words are not the voice's
+ * own: then it must be voiced again.
+ */
+export function onItsVoice(
+  script: SceneScript,
+  voiced: Pick<SceneDto, 'beats' | 'durationMs'>,
+): SceneScript | null {
+  if (
+    script.beats.length !== voiced.beats.length ||
+    script.beats.some(
+      (beat, k) => beat.say.trim() !== voiced.beats[k].text.trim(),
+    )
+  )
+    return null;
+  const beats = script.beats.map((beat, k) => {
+    const next = voiced.beats[k + 1]?.startMs ?? voiced.durationMs;
+    const gap = Math.max(0, next - voiced.beats[k].endMs) / 1000;
+    return { ...beat, holdS: round(gap) };
+  });
+  const lead = round(Math.max(0, voiced.beats[0]?.startMs ?? 0) / 1000);
+  return { ...script, beats, ...(lead > 0 ? { lead } : {}) };
+}
+
+/** The state a figure's clothes change at: the first outfit they change into, the second. */
+export const dressState = (k: number) => `dress-${k}`;
+
 /** Whoever the sheet has on the stage, left to right by where they stand. */
 function inSpotOrder(
   here: ReadonlyMap<string, string>,
@@ -697,13 +760,16 @@ export function stageStory(
   bible: StudioBible,
   options: {
     plain?: ReadonlySet<number>;
-    /** How the scene before left things: what someone who comes on later still holds. */
+    /** How the scene before left things: what someone who comes on later still holds, and what each one wears. */
     before?: {
       cast?: string[];
       held?: { who: string; thing: string }[];
+      wears?: { who: string; figure: FigureSpec }[];
     } | null;
     /** Where the set's painting shows each feature it has, as a share of the stage across (paintedAt). */
     painted?: Readonly<Record<string, number>>;
+    /** Beats whose doer gets up first whatever the sheet has them do: where a made scene showed someone moving while they were down. */
+    rise?: ReadonlySet<number>;
   } = {},
 ): SceneScript {
   const byId = new Map(bible.characters.map((c) => [c.id, c]));
@@ -731,6 +797,22 @@ export function stageStory(
     things: bible.things ?? [],
     features: [...features.values()].filter((f) => f.kind === DRAWN),
   };
+  /**
+   * How everyone is through the scene: who opens down (in bed, sitting,
+   * lying), who gets up at which beat, and who must get up first to do
+   * what a beat has them do; and what each person wears.
+   */
+  const postures = posturesOf(sheet, [...features.values()]);
+  for (const at of options.rise ?? [])
+    if (!postures.rises.has(at) && !postures.standsFrom.has(at)) {
+      const who = sheet.beats[at]?.who;
+      const down = who ? postures.opening.get(who) : undefined;
+      postures.rises.set(at, down ?? { how: 'sit', on: null, in: false });
+    }
+  const outfits = outfitsOf(sheet, bible, options.before ?? null);
+  /** Whether one lies along a feature with their head at its left: a bed, a sofa or a bench, as the stage draws them. */
+  const headLeft = (feature: string | null) =>
+    ['bed', 'sofa', 'bench'].includes(features.get(feature ?? '')?.kind ?? '');
   /** Whether the set's painting shows a feature: its look names it. */
   const inLook = (f: StudioFeature) =>
     Boolean(place?.look) &&
@@ -777,10 +859,12 @@ export function stageStory(
         !(resting.has(thing) && !at)
       )
         startsHeld.set(thing, id);
-    // Holding a thing of its own, they stand as anyone does: the stage
-    // puts their hand to it, and lets it fall when they let it go.
-    const pose =
-      at?.pose === 'holding' && !holding ? 'standing' : (at?.pose ?? null);
+    // Everyone is the kit's one standing figure, rigged, whatever their
+    // pose: in bed, sitting or lying is how they are at their station
+    // (held sat or lain down), and an arm's pose a move as it opens; never
+    // a drawing that carries a bed about. What they wear as it opens, and
+    // each outfit they change into, is drawn on that one rig.
+    const dressed = outfits.get(id);
     cast.push({
       id,
       kind: 'character',
@@ -791,9 +875,19 @@ export function stageStory(
       met: 0,
       intro: [],
       traits: c.traits,
-      ...(pose && pose !== 'standing' ? { pose } : {}),
       ...(holding ? { holding } : {}),
       ...(c.role === 'minor' ? { minor: true as const } : {}),
+      ...(dressed && !sameOutfit(dressed.opening, dressed.usual)
+        ? { wears: dressed.opening }
+        : {}),
+      ...(dressed?.changes.length
+        ? {
+            dress: dressed.changes.map((change, k) => ({
+              state: dressState(k + 1),
+              spec: change.spec,
+            })),
+          }
+        : {}),
     });
   }
   const inCast = new Set(cast.map((t) => t.id));
@@ -863,7 +957,9 @@ export function stageStory(
   >();
   let lead = 0;
   for (const [after, run] of quietRuns(sheet)) {
-    const timed = timeQuiet(run.map((at) => quietItem(sheet.beats[at])));
+    const timed = timeQuiet(
+      run.map((at) => quietItem(sheet.beats[at], postureSeconds(postures, at))),
+    );
     run.forEach((at, k) =>
       moments.set(at, {
         after,
@@ -880,10 +976,15 @@ export function stageStory(
   }
 
   // The stage, step by step: everyone at a station of their own, kept
-  // until a beat moves them.
+  // until a beat moves them. One in bed or on a seat as it opens is there.
   const here = new Map<string, string>(
-    sheet.onStage.map((p) => [p.who, p.spot]),
+    sheet.onStage.map((p) => {
+      const down = postures.opening.get(p.who);
+      return [p.who, (down && stationOf(down)) ?? p.spot];
+    }),
   );
+  /** How each one is down now: sitting or lying, and where. */
+  const down = new Map<string, Posture>(postures.opening);
   /** The station by a feature, under it or behind it, for one standing at `from`. */
   const stationAt = (
     how: 'by' | 'under' | 'behind',
@@ -1006,16 +1107,52 @@ export function stageStory(
   };
   /** Someone drawn by the artist, with no rig: they bob, hop and step toward someone. */
   const bobs = (id: string) => (byId.get(id)?.kind ?? 'person') !== 'person';
-  // An animal lying down as the scene opens lies there from its first
-  // frame, sunk on its legs, until the sheet has it get up: a person is
-  // drawn lying by the kit.
-  for (const p of sheet.onStage)
-    if (
-      bobs(p.who) &&
-      inCast.has(p.who) &&
-      (p.pose === 'lying' || p.pose === 'in bed')
-    )
-      steps[0].effects.push({ target: p.who, part: null, do: 'lie' });
+  /**
+   * Sitting or lying down, held until they get up: an animal lies (it
+   * sits only when told to), a person as they are; lying along a bed or a
+   * sofa, their head to its head end.
+   */
+  const heldDown = (
+    who: string,
+    posture: Posture,
+    how: 'sit' | 'lie' = posture.how,
+  ): SceneEffect => ({
+    target: who,
+    part: how === 'lie' && headLeft(posture.on) ? '@right' : null,
+    do: how,
+  });
+  // Whoever is down as the scene opens is so from its first frame, until
+  // the sheet has them get up (an animal in bed lies there); an arm's
+  // pose from a sheet written before is a move as it opens.
+  for (const p of sheet.onStage) {
+    if (!inCast.has(p.who)) continue;
+    const posture = postures.opening.get(p.who);
+    if (posture)
+      steps[0].effects.push(
+        heldDown(
+          p.who,
+          posture,
+          bobs(p.who) && p.pose !== 'sitting' ? 'lie' : posture.how,
+        ),
+      );
+    const arms = bobs(p.who) ? undefined : ARM_POSES[p.pose];
+    const move = arms ? doingOf(arms) : undefined;
+    if (move && 'move' in move.plays)
+      steps.push({
+        at: { beat: opensQuiet ? -1 : 0, phrase: '' },
+        word: 0,
+        ...(opensQuiet ? { after: 0.4 } : {}),
+        stage: null,
+        effects: [
+          {
+            target: p.who,
+            part: arms === 'point' ? '@up' : null,
+            do: move.plays.move,
+            ms: move.ms,
+          },
+        ],
+      });
+  }
   // One found under something (a bench, a table) is low there: an animal
   // lies, a person sits, so they fit under it.
   const lowUnder = (who: string): SceneEffect => ({
@@ -1441,8 +1578,9 @@ export function stageStory(
       }
       return;
     }
-    const moment = moments.get(at);
-    if (!moment) return;
+    const timed = moments.get(at);
+    if (!timed) return;
+    let moment = timed;
     const effects: SceneEffect[] = [];
     let stage: SceneStage | null = null;
     /** What happens later in the same moment: coming back from a run out. */
@@ -1453,6 +1591,10 @@ export function stageStory(
       who &&
       inCast.has(who)
     ) {
+      // How they are as it comes first: down, they get up before they go
+      // anywhere or do what needs their feet, and step out beside what
+      // they were on or in; the doing itself comes after.
+      moment = standFirst(raw, at, who, timed);
       const doing = doingOf(raw.do) ?? doingOf('nod')!;
       const aim = aimOf(raw, who, doing);
       const plays = doing.plays;
@@ -1610,6 +1752,18 @@ export function stageStory(
         // does it comes up to them first, and does it once there, as the
         // room allows.
         const was = here.get(who);
+        // Sitting or lying down on a seat or in a bed the words name (on
+        // the bench, into bed): over to it first, then down on it, held
+        // there until they get up; getting up out of one, up, and out
+        // beside it, and it stays where it is.
+        const downTo = plain ? undefined : postures.downTo.get(at);
+        const upFrom = plain ? undefined : postures.standsFrom.get(at);
+        const seat = downTo ? stationOf(downTo) : null;
+        // Its own share of the moment, besides stepping out or going over.
+        const own = quietItem(raw).s;
+        const ownS = round(
+          (moment.s * own) / Math.max(0.01, own + postureSeconds(postures, at)),
+        );
         const to =
           TOUCHES.has(doing.id) &&
           !plain &&
@@ -1619,7 +1773,29 @@ export function stageStory(
           Math.abs(share(was) - share(here.get(aim)!)) > ONE_SPOT
             ? travelTo(who, aim, { ...raw, spot: null }, false)
             : null;
-        if (to && was && to !== was) {
+        if (downTo && (move === 'sit' || move === 'lie')) {
+          const lies = move === 'lie' && headLeft(downTo.on);
+          const held: SceneEffect = {
+            ...heldDown(who, downTo, move),
+            // Sat facing what they sit at; lying along it, head to its head.
+            part: lies ? '@right' : aim,
+            ms: Math.round(ownS * 1000),
+          };
+          down.set(who, downTo);
+          const there = seat ? (freeStation(who, seat) ?? seat) : was;
+          if (there && there !== was) {
+            const walkS = Math.max(0.6, round(moment.s - ownS));
+            here.set(who, there);
+            stage = stageNow();
+            afterwards.push({
+              at: { beat: moment.after, phrase: phraseOf(raw.say) },
+              word: 0,
+              after: round(moment.offset + walkS),
+              stage: null,
+              effects: [held],
+            });
+          } else effects.push(held);
+        } else if (to && was && to !== was) {
           const walkS = Math.max(1.1, Math.abs(share(to) - share(was)) * 4);
           here.set(who, to);
           stage = stageNow();
@@ -1633,7 +1809,19 @@ export function stageStory(
             stage: null,
             effects: [moveEffect(who, move, aim, moment.s)],
           });
-        } else effects.push(moveEffect(who, move, aim, moment.s));
+        } else
+          effects.push(moveEffect(who, move, aim, upFrom ? ownS : moment.s));
+        if (move === 'stand' || upFrom) down.delete(who);
+        if (upFrom?.on && here.has(who)) {
+          here.set(who, besideOf(upFrom.on, who));
+          afterwards.push({
+            at: { beat: moment.after, phrase: phraseOf(raw.say) },
+            word: 0,
+            after: round(moment.offset + ownS * 0.75),
+            stage: stageNow(),
+            effects: [],
+          });
+        }
         // A feature opened or shut: it swings as their hand does it.
         const feature = aimedFeature(aim);
         if ((doing.id === 'open' || doing.id === 'close') && feature)
@@ -1643,6 +1831,24 @@ export function stageStory(
             feature,
             state: doing.id === 'open' ? 'open' : 'shut',
           });
+      } else if (plays.prop === 'wear' || plays.prop === 'doff') {
+        // Put on or taken off: the thing gone into what they wear, or out
+        // of it into their hand; and what they wear changes as it does.
+        if (raw.prop && handled(raw.prop))
+          handleBeat(raw, raw.prop, who, plays.prop, aim, moment);
+        const change = outfitChange(who, at);
+        if (change)
+          afterwards.push({
+            at: { beat: moment.after, phrase: phraseOf(raw.say) },
+            word: 0,
+            after: round(moment.offset + doing.keyAt * moment.s),
+            stage: null,
+            effects: change,
+          });
+        else if (!raw.prop)
+          effects.push(
+            moveEffect(who, fallbackMove(doing, who), aim, moment.s),
+          );
       } else if (raw.prop && handled(raw.prop))
         handleBeat(raw, raw.prop, who, plays.prop, aim, moment);
       else
@@ -1757,6 +1963,77 @@ export function stageStory(
     }
   }
 
+  /**
+   * Someone down as a beat of theirs comes that needs them up (going
+   * anywhere, a jump, a hug): up first, as long as getting up takes, and
+   * out beside what they were on or in unless they are going anyway. The
+   * beat's own moment, after that: what is left of its time in the quiet.
+   */
+  function standFirst(
+    raw: SheetBeat,
+    at: number,
+    who: string,
+    timed: { after: number; offset: number; s: number; room: number },
+  ): { after: number; offset: number; s: number; room: number } {
+    const was = postures.rises.get(at);
+    if (!was || !here.has(who)) return timed;
+    const now = down.get(who) ?? was;
+    down.delete(who);
+    const own = quietItem(raw).s;
+    const k = timed.s / Math.max(0.01, own + postureSeconds(postures, at));
+    const riseS = round(RISE_S * k);
+    steps.push({
+      at: { beat: timed.after, phrase: phraseOf(raw.say) },
+      word: 0,
+      after: timed.offset,
+      stage: null,
+      effects: [
+        { target: who, part: null, do: 'stand', ms: Math.round(riseS * 1000) },
+      ],
+    });
+    let used = riseS;
+    if (now.on && doingOf(raw.do)?.kind !== 'travel') {
+      here.set(who, besideOf(now.on, who));
+      steps.push({
+        at: { beat: timed.after, phrase: phraseOf(raw.say) },
+        word: 0,
+        after: round(timed.offset + riseS * 0.75),
+        stage: stageNow(),
+        effects: [],
+      });
+      used += round(STEP_OFF_S * 0.5 * k);
+    }
+    return {
+      ...timed,
+      offset: round(timed.offset + used),
+      s: Math.max(0.3, round(timed.s - used)),
+      room: Math.max(0.3, round(timed.room - used)),
+    };
+  }
+
+  /** What someone's clothes do at a beat that changes them: the outfit it leaves them in shown, the one before hidden. */
+  function outfitChange(who: string, at: number): SceneEffect[] | null {
+    const k = outfits.get(who)?.changes.findIndex((c) => c.beat === at) ?? -1;
+    if (k < 0) return null;
+    return [
+      { target: who, part: dressState(k + 1), do: 'show' },
+      ...(k > 0
+        ? [{ target: who, part: dressState(k), do: 'hide' as const }]
+        : []),
+    ];
+  }
+
+  /** Where one getting up off or out of a feature stands: beside it, on the side toward the middle of the stage. */
+  function besideOf(feature: string, who: string): string {
+    const f = features.get(feature);
+    const side: -1 | 1 = f && SPOT_SHARE[f.spot] > 0.5 ? -1 : 1;
+    for (const one of [side, -side as -1 | 1]) {
+      const station = besideStation(feature, one);
+      if (freeStation(who, station) === station) return station;
+    }
+    return freeStation(who, besideStation(feature, side)) ?? here.get(who)!;
+  }
+
   /** Whether the next thing someone does after a beat is to go after a thing: a chase, a fetch. */
   function chasedNext(raw: SheetBeat, by: string, prop: string): boolean {
     const next = sheet.beats
@@ -1831,6 +2108,12 @@ export function stageStory(
       ...(moment.s !== undefined ? { s: moment.s } : {}),
     });
     inFlight.delete(prop);
+    // Put on, it is off the stage, in what they wear; taken off, in hand.
+    if (does === 'wear') {
+      holders.delete(prop);
+      lies.delete(prop);
+    }
+    if (does === 'doff') holders.set(prop, who);
     if (does === 'take' || does === 'catch') holders.set(prop, who);
     if (does === 'put' || does === 'drop' || does === 'kick')
       holders.set(prop, null);

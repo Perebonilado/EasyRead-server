@@ -1329,12 +1329,15 @@ export class SceneProcessor {
       // lantern, shaking), with the signs it shows on them, and with the
       // kit's rig as it is now, so they act. Anyone else, the book's sheet.
       const signs = signsShown(script, thing.id);
+      // In what they wear as it opens (a Studio story's pyjamas), and the
+      // clothes they change into, each shown as its state is.
       const onPage = sheet?.figure
-        ? await figureDrawing(sheet.figure, thing.ref, {
+        ? await figureDrawing(thing.wears ?? sheet.figure, thing.ref, {
             pose: thing.pose,
             holding: thing.holding,
             signs,
             old: oldWorld(story?.bible.world?.era),
+            ...(thing.dress?.length ? { dress: thing.dress } : {}),
           })
         : null;
       const { anchors: pageAnchors, ...posed } = onPage ?? { anchors: null };

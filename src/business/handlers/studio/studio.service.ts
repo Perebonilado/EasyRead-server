@@ -87,8 +87,6 @@ import {
   sceneFingerprint,
 } from './studio-views';
 
-/** A maker's messages to the producer an hour, at most: fair use for a free tool. */
-export const MESSAGES_AN_HOUR = 60;
 /** The longest message the producer reads. */
 const MESSAGE_CHARS = 4000;
 /** A message this long, while the brief is being made, is the maker's own text to make it from. */
@@ -401,18 +399,6 @@ export class StudioService {
 
   // ── The producer ────────────────────────────────────────────────────────
 
-  /** The hour's fair use: a message to the producer, or words for a change, over it is turned away. */
-  private async fairUse(userId: string): Promise<void> {
-    const hourAgo = new Date(this.clock.now().getTime() - 3_600_000);
-    if (
-      (await this.studio.countUserMessagesSince(userId, hourAgo)) >=
-      MESSAGES_AN_HOUR
-    )
-      throw new ValidationError(
-        'That is a lot of messages in an hour. Take a short break and carry on in a few minutes.',
-      );
-  }
-
   /**
    * One turn of the conversation: the maker's message, the producer's
    * reply (streamed as it is written), what it learnt of the brief, and
@@ -437,7 +423,6 @@ export class StudioService {
     const show = await this.requireShow(userId, showId);
     const text = input.message.trim().slice(0, MESSAGE_CHARS + SOURCE_CHARS);
     if (!text) throw new ValidationError('Say what you would like to make');
-    await this.fairUse(userId);
     const episodes = await this.studio.listEpisodes(show.id);
     let episode =
       episodes.find((e) => e.id === input.episodeId) ??
@@ -702,7 +687,6 @@ export class StudioService {
    * and nothing the Studio does not make.
    */
   private async hear(userId: string, words: string): Promise<void> {
-    await this.fairUse(userId);
     const flagged = await this.llm.moderate({ text: words });
     if (flagged.flagged) throw new ValidationError(REFUSAL);
   }
@@ -1163,8 +1147,9 @@ export class StudioService {
 
   /**
    * The film made: each scene that is new, changed or failed, made on
-   * the worker, one at a time for a maker, within the month's allowance.
-   * A note, in plain words, when it cannot be.
+   * the worker. Films are not held back while another is being made: each
+   * waits its turn on the worker and starts by itself. A note, in plain
+   * words, when it cannot be made at all.
    */
   private async makeEpisode(
     userId: string,
@@ -1174,8 +1159,6 @@ export class StudioService {
     const scenes = await this.studio.listScenes(episode.id);
     const blockers = blockersOf(episode, scenes, show.bible, show.brief);
     if (blockers.length) return blockers[0];
-    if ((await this.studio.makingFor(userId)) > 0)
-      return 'Another of your films is being made. This one can be made as soon as it is done.';
     const carried = carriedWears(scenes, show.bible);
     const stale = scenes.filter((s) =>
       needsMaking(s, show.bible, show.brief, carried.get(s.position)),

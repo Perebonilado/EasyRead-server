@@ -10,7 +10,9 @@ export const PLAN_LIMITS = {
     documentsPerMonth: 3,
     studyMinutesPerDay: 20,
     voiceMinutesPerMonth: 15,
-    studioMinutesPerMonth: 3,
+    // Studio film is not capped for now: what is made is still counted
+    // (UsageMetric.STUDIO_SECONDS), to be billed once pricing is settled.
+    studioMinutesPerMonth: null,
     watermarkedExports: true,
     priceUsdMonthly: 0,
     priceUsdYearly: 0,
@@ -20,7 +22,7 @@ export const PLAN_LIMITS = {
     documentsPerMonth: null,
     studyMinutesPerDay: null,
     voiceMinutesPerMonth: 120,
-    studioMinutesPerMonth: 30,
+    studioMinutesPerMonth: null,
     watermarkedExports: false,
     priceUsdMonthly: 14,
     priceUsdYearly: 100,

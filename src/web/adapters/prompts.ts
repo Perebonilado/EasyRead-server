@@ -146,7 +146,7 @@ const MERMAID_TYPES =
  * writer, and the call that turns an older description into the kit's
  * choices. The lists themselves are the schema's.
  */
-const FIGURE_GUIDE = [
+export const FIGURE_GUIDE = [
   'figure is how the person looks, as a drawing kit that draws every',
   'person in one cartoon style needs it, one choice a field: age',
   '(child, teen, adult, elder), build, skin a tone from 1, the lightest,',
@@ -2360,6 +2360,18 @@ export const PROMPTS = {
     'otherwise.',
   ].join(' '),
 
+  /** How big a thing a story names really is: for drawing it among the people at their size. */
+  sceneSize: [
+    'You say how big a thing really is, as it is in the world of the story:',
+    'heightCm is how tall it stands as it usually stands, and lengthCm how',
+    'long it is from end to end, both in centimetres. A key is about 1 tall',
+    'and 6 long; a kite 90 tall and 60 across; a drum 60 tall and 40 across;',
+    'an umbrella 90 long; a bicycle 100 tall and 170 long; a signpost 220',
+    'tall and 80 across; a canoe 50 tall and 450 long; a hut 300 tall and',
+    '400 long. Say the usual size of the usual kind, never a toy or a',
+    'giant one unless its name says so.',
+  ].join(' '),
+
   /** What a story's character is, and a person's figure, from the look kept for them before the kit drew people. */
   sceneFigure: [
     'You turn one character of a story, as a reader of the book described',
@@ -2438,8 +2450,11 @@ export const PROMPTS = {
       'or SMIL (<animate>, <animateTransform>, <animateMotion>). CSS',
       'animates only transform, opacity, fill, stroke and stroke-dashoffset.',
       'Anything that turns or scales gets transform-box: fill-box and a',
-      'transform-origin (center, or the point it turns about). Change a',
-      'path\'s shape only with SMIL <animate attributeName="d">, never CSS.',
+      'transform-origin as a keyword or percentages of its own box (center;',
+      'a lever turning about its left end: 0% 50%), never px or user-unit',
+      "coordinates, which fill-box measures from the part's own corner.",
+      'Change a path\'s shape only with SMIL <animate attributeName="d">,',
+      'never CSS.',
       'Loops last 1.5 to 8 seconds and repeat indefinitely; stagger',
       'repeated things with animation-delay. Nothing blinks or flashes: no',
       'change of brightness or colour faster than once every half second.',
@@ -2499,8 +2514,11 @@ export const PROMPTS = {
       'or SMIL (<animate>, <animateTransform>, <animateMotion>). CSS',
       'animates only transform, opacity, fill, stroke and stroke-dashoffset.',
       'Anything that turns or scales gets transform-box: fill-box and a',
-      'transform-origin (center, or the point it turns about). Change a',
-      'path\'s shape only with SMIL <animate attributeName="d">, never CSS.',
+      'transform-origin as a keyword or percentages of its own box (center;',
+      'a lever turning about its left end: 0% 50%), never px or user-unit',
+      "coordinates, which fill-box measures from the part's own corner.",
+      'Change a path\'s shape only with SMIL <animate attributeName="d">,',
+      'never CSS.',
       'Loops last 1.5 to 8 seconds and repeat indefinitely; stagger',
       'repeated things with animation-delay. Nothing blinks or flashes: no',
       'change of brightness or colour faster than once every half second.',

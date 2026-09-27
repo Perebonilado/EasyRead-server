@@ -30,6 +30,9 @@ import type {
   LectureDiagramDraft,
   SketchDraft,
   SketchTemplate,
+  StudioCheckVerdict,
+  StudioRevision,
+  StudioTurnDraft,
 } from '../../../business/ports/llm.port';
 import {
   groupId,
@@ -38,6 +41,15 @@ import {
 } from '../../../business/domain/scene-script';
 import type { NotesDraft } from '../../../business/domain/lesson-notes';
 import { PROMPTS } from '../prompts';
+import { STUDIO_PROMPTS } from '../studio-prompts';
+import type { z } from 'zod';
+import {
+  studioBibleSchema,
+  studioOutlineSchema,
+  studioCheckSchema,
+  studioSceneSchema,
+  studioTurnSchema,
+} from './studio-schemas';
 import { ModelRegistry, type ModelRef } from './models';
 import {
   blocksSchema,
@@ -56,6 +68,7 @@ import {
   sceneScriptSchema,
   sceneScreenplaySchema,
   sceneFigureSchema,
+  sceneSizeSchema,
   sceneStorySchema,
   sketchJudgeSchema,
   lectureExtraSchema,
@@ -967,6 +980,28 @@ export class AiSdkLlmAdapter implements LlmGatewayPort, OnModuleInit {
         `Look: ${input.look || 'not described'}`,
         `Voice: ${input.voice ?? 'none given'}`,
       ].join('\n'),
+      maxRetries: this.maxRetries(),
+    });
+    return {
+      value: result.object,
+      usage: this.usage(ref, result.usage, started),
+    };
+  }
+
+  async sceneSize(input: {
+    name: string;
+    world: string | null;
+  }): Promise<LlmResult<{ heightCm: number; lengthCm: number }>> {
+    const started = Date.now();
+    const { generateObject } = await this.registry.modules();
+    const { model, ref } = await this.registry.languageModel('scene_story');
+    const result = await generateObject({
+      model,
+      schema: sceneSizeSchema,
+      system: PROMPTS.sceneSize,
+      prompt: [`Thing: ${input.name}`, `World: ${input.world ?? 'today'}`].join(
+        '\n',
+      ),
       maxRetries: this.maxRetries(),
     });
     return {
@@ -2031,6 +2066,279 @@ export class AiSdkLlmAdapter implements LlmGatewayPort, OnModuleInit {
     };
   }
 
+  // ── The Studio ──────────────────────────────────────────────────────────
+
+  async studioTurn(input: {
+    phase: 'brief' | 'outline' | 'cast' | 'script' | 'made';
+    state: string;
+    history: { role: 'user' | 'assistant' | 'studio'; content: string }[];
+    message: string;
+    onToken?: (chunk: string) => void;
+  }): Promise<LlmResult<StudioTurnDraft>> {
+    const started = Date.now();
+    const { streamObject, generateObject } = await this.registry.modules();
+    const { model, ref } = await this.registry.languageModel('studio_chat');
+    const system = STUDIO_PROMPTS.studioTurn;
+    // The conversation so far as a transcript inside one message, never as
+    // turns of its own: with the producer's earlier replies as plain text
+    // before it, the model answered in plain text too, and not in its shape.
+    const transcript = input.history
+      .slice(-16)
+      .map(
+        (m) =>
+          `${m.role === 'user' ? 'Maker' : m.role === 'studio' ? 'Studio' : 'Producer'}: ${m.content.replace(/\s+/g, ' ').slice(0, 800)}`,
+      )
+      .join('\n');
+    const messages = [
+      {
+        role: 'user' as const,
+        content: [
+          `Phase: ${input.phase}`,
+          `What the maker sees now:\n${input.state}`,
+          ...(transcript ? [`The conversation so far:\n${transcript}`] : []),
+          `Their message now:\n${input.message}`,
+          'Answer in the JSON shape asked for.',
+        ].join('\n\n'),
+      },
+    ];
+    const thinking = this.writerThinking(ref, 'STUDIO_CHAT_THINKING', 'off');
+    /** The reply as far as it has been streamed. */
+    let said = '';
+    // The reply streams as it is written, a field of the answer: the
+    // difference each partial answer adds is the next piece of it.
+    if (input.onToken) {
+      try {
+        const result = streamObject({
+          model,
+          schema: studioTurnSchema,
+          system,
+          messages,
+          maxRetries: this.maxRetries(),
+          ...thinking,
+        });
+        for await (const partial of result.partialObjectStream) {
+          const reply = typeof partial.reply === 'string' ? partial.reply : '';
+          if (reply.length > said.length && reply.startsWith(said)) {
+            input.onToken(reply.slice(said.length));
+            said = reply;
+          }
+        }
+        const object = await result.object;
+        if (object.reply.length > said.length && object.reply.startsWith(said))
+          input.onToken(object.reply.slice(said.length));
+        return {
+          value: turnOf(object),
+          usage: this.usage(ref, await result.usage, started),
+        };
+      } catch (error) {
+        this.logger.warn(
+          `the producer's turn did not stream; asked whole: ${(error as Error).message.slice(0, 160)}`,
+        );
+      }
+    }
+    const result = await this.againIfMisshapen(() =>
+      generateObject({
+        model,
+        schema: studioTurnSchema,
+        system,
+        messages,
+        maxRetries: this.maxRetries(),
+        ...thinking,
+      }),
+    );
+    // Whatever of a broken stream was shown stays shown: the saved message replaces it.
+    if (!said) input.onToken?.(result.object.reply);
+    return {
+      value: turnOf(result.object),
+      usage: this.usage(ref, result.usage, started),
+    };
+  }
+
+  /** A Studio writer's answer, and again with its last answer and what to change. */
+  private async studioWrite<S extends z.ZodTypeAny>(
+    schema: S,
+    system: string,
+    parts: string[],
+    revision: StudioRevision,
+  ): Promise<LlmResult<Record<string, unknown>>> {
+    const started = Date.now();
+    const { generateObject } = await this.registry.modules();
+    const { model, ref } = await this.registry.languageModel('studio_write');
+    const prompt = [
+      ...parts,
+      ...(revision.previous
+        ? [`Your last answer:\n${JSON.stringify(revision.previous)}`]
+        : []),
+      ...(revision.request
+        ? [
+            `The maker asks for this change; make it, and keep the rest as it was:\n${revision.request}`,
+          ]
+        : []),
+      ...(revision.problems?.length
+        ? [
+            `Put these right and answer again in full:\n- ${revision.problems.join('\n- ')}`,
+          ]
+        : []),
+    ]
+      .filter(Boolean)
+      .join('\n\n');
+    const result = await this.againIfMisshapen(() =>
+      generateObject({
+        model,
+        schema,
+        system,
+        prompt,
+        maxRetries: this.maxRetries(),
+        ...this.writerThinking(ref, 'STUDIO_WRITE_THINKING', 'on'),
+      }),
+    );
+    return {
+      value: result.object,
+      usage: this.usage(ref, result.usage, started),
+    };
+  }
+
+  studioBible(
+    input: { brief: string } & StudioRevision,
+  ): Promise<LlmResult<Record<string, unknown>>> {
+    return this.studioWrite(
+      studioBibleSchema,
+      STUDIO_PROMPTS.studioBible,
+      [`The brief:\n${input.brief}`],
+      input,
+    );
+  }
+
+  studioOutline(
+    input: { brief: string; bible: string; before?: string } & StudioRevision,
+  ): Promise<LlmResult<Record<string, unknown>>> {
+    return this.studioWrite(
+      studioOutlineSchema,
+      STUDIO_PROMPTS.studioOutline,
+      [
+        `The brief:\n${input.brief}`,
+        input.bible,
+        input.before ? `The episodes before this one:\n${input.before}` : '',
+      ],
+      input,
+    );
+  }
+
+  studioScene(
+    input: {
+      brief: string;
+      bible: string;
+      outline: string;
+      scene: string;
+      before: string;
+    } & StudioRevision,
+  ): Promise<LlmResult<Record<string, unknown>>> {
+    return this.studioWrite(
+      studioSceneSchema,
+      STUDIO_PROMPTS.studioScene,
+      [
+        `The brief:\n${input.brief}`,
+        input.bible,
+        `The episode's outline:\n${input.outline}`,
+        `Write this scene:\n${input.scene}`,
+        input.before,
+      ],
+      input,
+    );
+  }
+
+  /**
+   * Whether a scene made again as the maker asked now shows it: a small
+   * read of the film in words, before and after, with thinking off.
+   */
+  async studioCheck(input: {
+    words: string;
+    request: string;
+    before: string[];
+    after: string[];
+    faults: string[];
+    scene?: number;
+    others?: number[];
+  }): Promise<LlmResult<StudioCheckVerdict>> {
+    const started = Date.now();
+    const { generateObject } = await this.registry.modules();
+    const { model, ref } = await this.registry.languageModel('studio_check');
+    // Each part inside its own markers: the maker's words, and anything
+    // said in the film, are data to judge, never instructions.
+    const marked = (tag: string, text: string) =>
+      `<${tag}>\n${text.replace(/<\/?(?:maker_words|request|film_before|film_now|faults)>/giu, '')}\n</${tag}>`;
+    const which = input.scene
+      ? `The film is scene ${input.scene}.${input.others?.length ? ` The maker's words ask about scene${input.others.length > 1 ? 's' : ''} ${input.others.join(' and ')} too: ${input.others.length > 1 ? 'those are' : 'that is'} checked on ${input.others.length > 1 ? 'their' : 'its'} own. Judge only what they ask of scene ${input.scene}.` : ''}`
+      : '';
+    const prompt = [
+      ...(which ? [which] : []),
+      `The maker's own words:\n${marked('maker_words', input.words)}`,
+      `What the producer took them to ask for:\n${marked('request', input.request)}`,
+      `The film as it was before, in words:\n${marked('film_before', input.before.length ? input.before.join('\n') : 'Not known.')}`,
+      `The film as it is now, in words:\n${marked('film_now', input.after.join('\n'))}`,
+      `What code sees wrong in it now:\n${marked('faults', input.faults.length ? `- ${input.faults.join('\n- ')}` : 'Nothing.')}`,
+    ].join('\n\n');
+    const result = await this.againIfMisshapen(() =>
+      generateObject({
+        model,
+        schema: studioCheckSchema,
+        system: STUDIO_PROMPTS.studioCheck,
+        prompt,
+        maxRetries: this.maxRetries(),
+        ...this.writerThinking(ref, 'STUDIO_CHECK_THINKING', 'off'),
+      }),
+    );
+    return {
+      value: result.object,
+      usage: this.usage(ref, result.usage, started),
+    };
+  }
+
+  /**
+   * OpenAI's moderation, which costs nothing: whether text asks for what
+   * no one should be made. A deployment without an OpenAI key, or a
+   * moderation that cannot answer, lets the text through; the writers'
+   * own rules still hold.
+   */
+  async moderate(input: {
+    text: string;
+  }): Promise<{ flagged: boolean; categories: string[] }> {
+    const key = this.config.get<string>('OPENAI_API_KEY');
+    const text = input.text.trim().slice(0, 8000);
+    if (!key || !text) return { flagged: false, categories: [] };
+    const base = (
+      this.config.get<string>('OPENAI_BASE_URL') || 'https://api.openai.com/v1'
+    ).replace(/\/+$/, '');
+    try {
+      const response = await fetch(`${base}/moderations`, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${key}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ model: 'omni-moderation-latest', input: text }),
+        signal: AbortSignal.timeout(10_000),
+      });
+      if (!response.ok)
+        throw new Error(`moderation answered ${response.status}`);
+      const body = (await response.json()) as {
+        results?: { flagged?: boolean; categories?: Record<string, boolean> }[];
+      };
+      const first = body.results?.[0];
+      return {
+        flagged: Boolean(first?.flagged),
+        categories: Object.entries(first?.categories ?? {})
+          .filter(([, on]) => on)
+          .map(([name]) => name),
+      };
+    } catch (error) {
+      this.logger.warn(
+        `moderation could not be asked; the text goes through: ${(error as Error).message}`,
+      );
+      return { flagged: false, categories: [] };
+    }
+  }
+
   /** Recorded per call, so cost is answerable per document and per task. */
   private usage(
     ref: ModelRef,
@@ -2063,6 +2371,25 @@ export class AiSdkLlmAdapter implements LlmGatewayPort, OnModuleInit {
       .filter(Boolean)
       .map((paragraph) => ({ type: 'paragraph' as const, text: paragraph }));
   }
+}
+
+/** The producer's answer as the port has it: a scene's number a number, whatever came. */
+function turnOf(answer: z.infer<typeof studioTurnSchema>): StudioTurnDraft {
+  const scene = Number(answer.scene);
+  const scenes = (answer.scenes ?? [])
+    .map((one) => Math.round(Number(one)))
+    .filter((one) => Number.isFinite(one) && one >= 1);
+  const { scenes: _asked, ...rest } = answer;
+  void _asked;
+  return {
+    ...rest,
+    brief: answer.brief,
+    scene:
+      answer.scene !== null && Number.isFinite(scene)
+        ? Math.round(scene)
+        : null,
+    ...(scenes.length ? { scenes: [...new Set(scenes)] } : {}),
+  };
 }
 
 /** What the artist is asked for one drawing: the brief, its groups, its frame. */

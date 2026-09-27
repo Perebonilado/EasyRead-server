@@ -1,4 +1,4 @@
-import { directionsIn, type Actor } from './scene-directions';
+import { directionsIn, doingsIn, type Actor } from './scene-directions';
 
 const goatCast: Actor[] = [
   { id: 'musa', names: ['Musa'], gender: 'm' },
@@ -217,6 +217,151 @@ describe('what the narration says people do with things', () => {
     expect(none).toEqual([]);
     expect(acts.map((a) => `${a.who} ${a.do} ${a.toward}`)).toEqual([
       'jesus reach judas',
+    ]);
+  });
+});
+
+describe("one beat's words, read against the list of doings", () => {
+  const maya: Actor[] = [
+    { id: 'maya', names: ['Maya'], gender: 'f' },
+    { id: 'pip', names: ['Pip'], gender: null },
+    { id: 'tobi', names: ['Tobi'], gender: 'm' },
+    { id: 'mama', names: ['Mama'], gender: 'f' },
+  ];
+  /** Each doing as "who do target thing via pace". */
+  const read = (
+    who: string,
+    words: string,
+    also: { lastThing?: 'ball'; recent?: string[] } = {},
+  ) =>
+    doingsIn(words, { actors: maya, who, ...also }).map((d) =>
+      [
+        d.who ?? who,
+        d.do,
+        d.target && `>${d.target}`,
+        d.thing && `+${d.thing}`,
+        d.via && `via ${d.via}`,
+        d.pace,
+        d.away && 'away',
+      ]
+        .filter(Boolean)
+        .join(' '),
+    );
+
+  it('reads every new doing with its doer, target and thing', () => {
+    expect(read('maya', 'Maya throws the ball for Pip.')).toEqual([
+      'maya throw >pip +ball',
+    ]);
+    expect(read('pip', 'Pip bounds after it.', { lastThing: 'ball' })).toEqual([
+      'pip chase >ball +ball run',
+    ]);
+    expect(read('maya', 'Maya throws the ball and Pip catches it.')).toEqual([
+      'maya throw >pip +ball',
+      'pip catch +ball',
+    ]);
+    expect(read('tobi', 'Tobi kicks the ball to Maya.')).toEqual([
+      'tobi kick >maya +ball',
+    ]);
+    expect(read('pip', 'Pip races toward the gate.')).toEqual([
+      'pip run >gate run',
+    ]);
+    expect(read('pip', 'Pip jumps over the fence.')).toEqual([
+      'pip jump >fence',
+    ]);
+    expect(read('maya', 'Maya sits down on the bench.')).toEqual([
+      'maya sit >bench',
+    ]);
+    expect(read('maya', 'Maya lies down.')).toEqual(['maya lie-down']);
+    expect(read('maya', 'Maya falls over.')).toEqual(['maya fall']);
+    expect(read('pip', 'Pip drops the ball and wags his tail.')).toEqual([
+      'pip drop +ball',
+      'pip wag',
+    ]);
+    expect(read('tobi', 'Tobi picks up the ball.')).toEqual([
+      'tobi take +ball',
+    ]);
+    expect(read('tobi', 'Tobi opens the door.')).toEqual(['tobi open >door']);
+    expect(read('mama', 'Mama shuts the gate.')).toEqual(['mama close >gate']);
+    expect(read('pip', "Pip wags his tail and licks Maya's face.")).toEqual([
+      'pip wag',
+      'pip lick >maya',
+    ]);
+    expect(read('pip', "Pip chews Maya's shoe.")).toEqual([
+      'pip chew >maya +shoe',
+    ]);
+    expect(read('pip', 'Pip squeezes under the gate and vanishes.')).toEqual([
+      'pip squeeze via gate',
+    ]);
+    expect(read('pip', 'Pip climbs the tree.')).toEqual(['pip climb >tree']);
+    expect(read('pip', 'Pip hides behind the stall.')).toEqual([
+      'pip hide >stall',
+    ]);
+    expect(read('tobi', 'Tobi looks under a bench.')).toEqual([
+      'tobi crouch >bench',
+    ]);
+  });
+
+  it('goes in and out by the way the words say, at the pace they say', () => {
+    expect(read('maya', 'Maya races out the gate.')).toEqual([
+      'maya leave via gate run',
+    ]);
+    expect(read('maya', 'Maya jumps into the moving danfo.')).toEqual([
+      'maya enter via danfo run',
+    ]);
+    expect(read('pip', 'Pip wriggles free and leaps out the door.')).toEqual([
+      'pip wriggle',
+      'pip leave via door run',
+    ]);
+    expect(
+      read('tobi', 'Tobi chases after her.', { recent: ['maya', 'tobi'] }),
+    ).toEqual(['tobi chase >maya run']);
+    // At a walk only where the words say so; else at the sheet's pace.
+    expect(read('maya', 'Maya walks over to Mama.')).toEqual([
+      'maya walk >mama walk',
+    ]);
+    expect(read('maya', 'Maya goes over to Mama.')).toEqual([
+      'maya walk >mama',
+    ]);
+    expect(read('maya', 'Maya comes in.')).toEqual(['maya enter']);
+    expect(read('maya', 'Maya runs in.')).toEqual(['maya enter run']);
+  });
+
+  it('never makes a word for a thing a doing: a dropped piece, the open door', () => {
+    expect(read('pip', 'Pip takes a dropped piece of bread.')).toEqual([
+      'pip take +bread',
+    ]);
+    expect(read('tobi', 'Tobi points to the open door.')).toEqual([
+      'tobi point >door',
+    ]);
+    expect(read('tobi', 'Tobi leans in close to a tomato crate.')).toEqual([
+      'tobi lean-in >crate',
+    ]);
+    expect(read('maya', 'Maya catches Pip in a big hug.')).toEqual([
+      'maya hug',
+    ]);
+    expect(read('tobi', 'Tobi tries not to laugh.')).toEqual([]);
+  });
+
+  it('looks along the street, never at the ground, and up at the sky', () => {
+    expect(read('mama', 'Mama looks down the street.')).toEqual([
+      'mama look away',
+    ]);
+    expect(read('mama', 'Mama looks up at the sky.')).toEqual([
+      'mama look >@up',
+    ]);
+    expect(read('mama', 'Mama looks down at her feet.')).toEqual([
+      'mama look >@down',
+    ]);
+    expect(read('tobi', 'Tobi spreads out to the left.')).toEqual([
+      'tobi walk >@left',
+    ]);
+    // A page's narration as well: down the street is no look at the ground.
+    const { acts } = directionsIn(
+      ['Mama looks down the street.', 'Mama looks down.'],
+      maya,
+    );
+    expect(acts.map((a) => `${a.who} ${a.do} ${a.toward}`)).toEqual([
+      'mama look @down',
     ]);
   });
 });

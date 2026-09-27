@@ -10,9 +10,12 @@
  * same drawing stands on every page they are on, the same way round
  * beside anyone else, with the face the last page left them with.
  */
+import type { AnyFeatureKind } from './scene-doings';
+import { DRAWN } from './scene-own';
 import { figureOf, type FigureProp, type FigureSpec } from './scene-figure';
 import { iconicOf } from './scene-iconic';
 import { setApart } from './scene-looks';
+import { ACTED_PIECES, featureGroup } from './scene-set-pieces';
 import {
   SCENE_AMBIENCES,
   type CharacterThing,
@@ -198,6 +201,8 @@ export interface StoryCharacter {
   carries?: FigureProp | null;
   /** The figure's fields the text itself says: never changed to set them apart. */
   fromText?: string[] | null;
+  /** Which of their kind's voices is theirs, when someone chose it (the Studio): from 0. */
+  voicePick?: number | null;
 }
 
 /** What a place is: out of doors, a room, or something people ride in (a boat, a cart). */
@@ -257,6 +262,13 @@ export interface StoryPlace {
   front?: string | null;
   /** Worked out from what happens there, not said by the text: general, and shared. */
   inferred?: boolean;
+  /** A Studio set's fixed things its stories act on, and where each stands: the painter draws those the stage does not. */
+  features?: {
+    id: string;
+    name: string;
+    kind: AnyFeatureKind;
+    spot: string;
+  }[];
 }
 
 export interface StoryPage {
@@ -1449,6 +1461,7 @@ export function castStory(
       weather: on?.weather ?? null,
       crowd: crowdOn(bible, page),
       world: bible.world ?? null,
+      ...(here?.kind ? { place: here.kind } : {}),
     },
     backdrop,
     opening: back.length
@@ -1541,6 +1554,12 @@ const worldText = (world: StoryWorld | null | undefined) =>
  * for the story's world. Where people are in it behind its side (a boat,
  * a table, a well), that side is its own group, "front", which the stage
  * draws in front of the people, so they are in the boat and not before it.
+ * The camera is pinned, so a crowd stands in it at the right size: out of
+ * doors the horizon at eye level, about 64% down; in a room the floor
+ * meeting the back wall about 68 to 72% down. And the open ground or
+ * floor is its own group, "ground", where a crowd may stand; a painter
+ * who leaves it out is not asked again, the ground is read from the
+ * colours.
  */
 export function setThing(
   place: StoryPlace,
@@ -1548,6 +1567,43 @@ export function setThing(
   world: StoryWorld | null = null,
 ): DrawingThing {
   const front = place.front && place.stand === 'in' ? place.front : null;
+  // A Studio set out of doors: what a crowd may stand behind (a stall, a
+  // cart), if the place has any, a group of its own. A book's sets are
+  // painted as they always were.
+  const props =
+    place.features !== undefined &&
+    place.kind !== 'indoor' &&
+    place.kind !== 'vessel';
+  // The fixed things its stories act on: the stage draws those people go
+  // through, sit on or stand by; the painter the rest, each a group.
+  // A show's own (a bicycle, a signpost) the artist draws apart, once for
+  // the show, and the stage stands among the people: left out too.
+  const features = place.features ?? [];
+  // One the stage draws is left out, unless the place's look names it
+  // (a lopsided goalpost): then the painter paints it anyway, so it is a
+  // group of its own, which the stage finds and stands its own in for.
+  const named = (f: (typeof features)[number]) =>
+    new RegExp(
+      `\\b${f.name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`,
+      'i',
+    ).test(place.look);
+  const stages = (f: (typeof features)[number]) =>
+    f.kind === DRAWN || (ACTED_PIECES.includes(f.kind) && !named(f));
+  const left = features.filter(stages);
+  const drawn = features.filter((f) => !stages(f));
+  // A Studio room or vessel is painted from inside: its floor and walls,
+  // a vessel's seats and windows; never the street outside it.
+  const inside =
+    place.features !== undefined &&
+    (place.kind === 'indoor' || place.kind === 'vessel');
+  const where = (spot: string) =>
+    ({
+      left: 'at the left',
+      'centre-left': 'left of the middle',
+      centre: 'in the middle',
+      'centre-right': 'right of the middle',
+      right: 'at the right',
+    })[spot] ?? 'at the back';
   return {
     id: place.id,
     kind: 'drawing',
@@ -1555,36 +1611,210 @@ export function setThing(
     brief: [
       `${place.name}, a place in "${bookTitle}"${place.look ? `: ${place.look}` : ''}.`,
       worldText(world),
-      place.kind === 'indoor'
-        ? 'Seen from inside, at eye level, the floor running across the lower part of the picture.'
-        : 'Seen from where a viewer stands, at eye level, the ground running across the lower part of the picture.',
+      inside && place.kind === 'vessel'
+        ? `The inside of ${place.name}, seen from inside it at eye level, as someone riding in it sees it: its floor across the lower part of the picture, its roof or ceiling across the top if it has one, its seats or benches, and its far side with what is outside seen beyond it (through its windows if it has them, the road or the houses going by; over its side if it is open, the water), and its door or opening where it has one. Never ${place.name} seen from the street or from outside. The floor meets its far side about 68 to 72% of the way down.`
+        : inside
+          ? 'A room seen from inside, at eye level: its floor across the lower part of the picture, its back wall with what is on it, and its side walls meeting it at the corners. A room with a floor and walls, never a street or a place out of doors. The floor meets the back wall about 68 to 72% of the way down.'
+          : place.kind === 'indoor'
+            ? 'Seen from inside, at eye level, the floor running across the lower part of the picture: the floor meets the back wall about 68 to 72% of the way down.'
+            : 'Seen from where a viewer stands, at eye level, the ground running across the lower part of the picture: the horizon at eye level, about 64% of the way down, and the far edge of the open ground on it or just below it.',
       SET_STYLE,
+      // A Studio set: no stray strokes (a line on the ground, a string to
+      // nowhere), which read as marks on the film.
+      place.features !== undefined
+        ? 'Every line is the outline of a shape: no loose strokes, and no lines drawn on the ground or across the picture on their own.'
+        : '',
+      `Draw the open ${place.kind === 'indoor' || inside ? 'floor' : 'ground'} people could stand on as its own group with id "ground", with everything that stands on it (stalls, walls, trees, furniture) drawn after it, over it.`,
+      inside && place.kind === 'vessel'
+        ? 'Draw what is seen outside it (the road, the trees and houses going by) as its own group with id "outside", first, behind its walls and windows, across the whole width of the picture, so it can slide past as it goes; and draw its windows and door as frames with nothing filled inside them, no glass, so what is outside shows through.'
+        : '',
       front
         ? `Draw ${front} as its own group with id "front": across the bottom of the picture, from the bottom edge up to about a fifth of its height, where it will stand in front of the people's legs so they are in the ${place.kind === 'vessel' ? place.name : 'place'}, behind it. Everything else of the place is the scene behind.`
         : '',
+      props
+        ? 'If there are any, draw what stands on the ground that someone could stand behind (stalls, carts, counters) together as one group with id "props", drawn after the ground.'
+        : '',
+      left.length
+        ? `Leave out ${left.map((f) => `the ${f.name} (${where(f.spot)})`).join(' and ')}: ${left.length > 1 ? 'they are' : 'it is'} drawn over the set, so keep the ground clear there.`
+        : '',
+      ...drawn.map(
+        (f) =>
+          `Draw the ${f.name}, ${where(f.spot)}, as its own group with id "${featureGroup(f.id)}".`,
+      ),
     ]
       .filter(Boolean)
       .join(' '),
     motion:
       'slow and ambient if anything moves at all: clouds drift, water shimmers, leaves stir',
-    parts: front ? [{ name: 'front', label: false }] : [],
+    parts: [
+      ...(front ? [{ name: 'front', label: false }] : []),
+      // Asked for, never a fault missing: the ground is read without it,
+      // a crowd stands in front of what has no group, and the stage draws
+      // a feature the painting has not got.
+      { name: 'ground', label: false, optional: true },
+      ...(inside && place.kind === 'vessel'
+        ? [{ name: 'outside', label: false, optional: true as const }]
+        : []),
+      ...(props
+        ? [{ name: 'props', label: false, optional: true as const }]
+        : []),
+      ...drawn.map((f) => ({
+        name: featureGroup(f.id),
+        label: false,
+        optional: true as const,
+      })),
+    ],
     states: [],
     shape: 'wide',
     sound: place.sound,
   };
 }
 
-/** How an animal or a creature is drawn to stand beside the people the kit draws. */
+/**
+ * How an animal or a creature is drawn to stand beside the people the kit
+ * draws, and joined like a cut-paper puppet, so code can move its parts
+ * about their joints (scene-sheet-rig) with nothing coming loose.
+ */
 export const CAST_STYLE = [
   'Draw it to stand beside cartoon people drawn in one style: flat colours with no gradients, shading or texture, simple rounded shapes like cut paper, one dark outline (#2d2a32) about three units wide, and big round white eyes with small black dot pupils.',
-  'It faces the viewer, standing, its feet on the bottom edge of the frame.',
+  'Join it like a cut-paper puppet: every part overlaps the body a little where they meet, drawn behind it (the ears behind the head); nothing floats apart; a tail comes from behind the body at the hip.',
 ].join(' ');
+
+/** How an animal stands, and how a creature: an animal as the animal really stands, never upright like a person. */
+const STANCES: Record<'animal' | 'creature', string> = {
+  animal:
+    'It stands naturally on all four legs, as the animal really stands, seen in three-quarter view with its face turned to the viewer: not upright like a person, and with no arms. Its feet are on the bottom edge of the frame.',
+  creature:
+    'It faces the viewer, standing, its feet on the bottom edge of the frame.',
+};
+
+/** The parts each is drawn in: a tail and ears only when it has them. */
+const SHEET_PARTS_BY_KIND: Record<
+  'animal' | 'creature',
+  DrawingThing['parts']
+> = {
+  animal: [
+    { name: 'head', label: false },
+    { name: 'body', label: false },
+    { name: 'legs', label: false },
+    { name: 'tail', label: false, optional: true },
+    { name: 'ears', label: false, optional: true },
+  ],
+  creature: [
+    { name: 'head', label: false },
+    { name: 'body', label: false },
+    { name: 'arms', label: false },
+    { name: 'legs', label: false },
+    { name: 'tail', label: false, optional: true },
+  ],
+};
+
+const OPTIONAL_PARTS: Record<'animal' | 'creature', string> = {
+  animal:
+    'Draw the tail in <g id="tail"> and the ears in <g id="ears">, each ear a group of its own inside it, only if it has them; leave out a group it has no part for.',
+  creature:
+    'Draw a tail in <g id="tail"> only if it has one; leave the group out if not.',
+};
+
+/** Parts that move by themselves, named so that code moves them (scene-sheet-rig's movers). */
+const MOVING_PARTS =
+  'If it has wings, fins, a flame, a glow or leaves, draw each as a group of its own, still, joined to what it grows from, its id saying what it is ("wing-left", "wing-right", "fin", "flame", "glow", "leaves"): the stage moves them.';
 
 const SIZES: Record<StorySize, string> = {
   small: 'It is small: beside a grown-up it would come up to their knee.',
   medium: "It is about as tall as a grown-up's waist.",
   large: 'It is as tall as a grown-up, or taller.',
 };
+
+/**
+ * The canvases a show's own things and features are drawn on, in the
+ * figure kit's units: a grown-up stands 224 tall beside them, so what is
+ * drawn at its true size is measured at it.
+ */
+export const OWN_THING_CANVAS = { w: 240, h: 240 } as const;
+export const OWN_FEATURE_CANVAS = { w: 640, h: 400 } as const;
+
+/** How a show's own is drawn to stand among its people: the kit's hand, and nothing else. */
+const OWN_STYLE = [
+  'Draw it to stand beside cartoon people drawn in one style: flat colours with no gradients, shading or texture, simple rounded shapes like cut paper, and one dark outline (#2d2a32) about three units wide.',
+  'Draw it alone: no people, no faces on it, no words, no ground, shadow or backdrop under it.',
+].join(' ');
+
+/**
+ * A thing of a show's own (a kite, a drum) as the artist is asked to draw
+ * it, once for the show: still, at its true size in the kit's units, and
+ * the part a hand holds it by a group of its own, so code can measure how
+ * big it is and where a hand and a mouth hold it.
+ */
+export function ownThingBrief(
+  thing: { id: string; name: string; look?: string },
+  bookTitle: string,
+  world: StoryWorld | null = null,
+): DrawingThing {
+  // As the words say it looks: "a red kite".
+  const said = thing.look ? `${thing.look} ${thing.name}` : thing.name;
+  return {
+    id: `thing-${thing.id}`,
+    kind: 'drawing',
+    name: thing.name,
+    brief: [
+      `A ${said}, a thing the people of "${bookTitle}" hold, carry and throw: the ${said} alone and whole, seen from the side.`,
+      worldText(world),
+      OWN_STYLE,
+      `The canvas is in the units of the people it is drawn beside: a grown-up is 224 units tall, a child 190, a hand about 20 across. Draw it at its true size in those units, resting on the bottom edge in the middle, and leave the rest of the canvas empty: a key is about 16 long, a cup 30 tall, a ball 26 across, a drum 60 tall, a kite about 90 tall, an umbrella 110 long.`,
+      'Draw the part a hand holds it by (its handle, its string, its strap, or its middle) as its own group with id "grip".',
+    ]
+      .filter(Boolean)
+      .join(' '),
+    motion:
+      'none: draw it still, with no <style> animation and no SMIL; the stage moves it',
+    parts: [{ name: 'grip', label: false }],
+    states: [],
+    shape: 'square',
+    sound: null,
+  };
+}
+
+/**
+ * A feature of a show's own (a bicycle leant on a wall, a signpost, a
+ * canoe) as the artist is asked to draw it, once for the show: still, at
+ * its true size in the kit's units, with what opens, the way through or
+ * under it, and its seat each a group of its own where it has them, so
+ * code can measure how people go through it, sit on it and stand by it.
+ */
+export function ownFeatureBrief(
+  feature: { id: string; name: string; opens: boolean },
+  bookTitle: string,
+  world: StoryWorld | null = null,
+): DrawingThing {
+  return {
+    id: `feature-${feature.id}`,
+    kind: 'drawing',
+    name: feature.name,
+    brief: [
+      `A ${feature.name}, a fixed thing of a place in "${bookTitle}" that its people go to, stand by or use: the ${feature.name} alone and whole, at eye level, as it stands in a scene: side on if it is long (a bicycle, a canoe, a cart), from the front if it is faced (a hut, a stall, a shrine).`,
+      worldText(world),
+      OWN_STYLE,
+      `The canvas is in the units of the people who stand beside it: a grown-up is 224 units tall. Draw it at its true size in those units, standing on the bottom edge in the middle, and leave the rest of the canvas empty: a bicycle is about 110 tall and 180 long, a signpost 230 tall, a canoe 60 tall and 320 long, a hut 280 tall.`,
+      feature.opens
+        ? 'It opens: draw the part that opens (its door, its lid, its flap) shut, as its own group with id "leaf", over a dark way in behind it.'
+        : '',
+      'Only if it has a doorway, an arch or a gap underneath that a person could fit through, draw that way through, down to the ground, as its own group with id "opening". Only if it is made to be sat on (a log, a stool, a sofa, a saddle), draw the top of its seat as its own group with id "seat". Leave out a group it has nothing for.',
+    ]
+      .filter(Boolean)
+      .join(' '),
+    motion:
+      'none: draw it still, with no <style> animation and no SMIL; the stage moves it',
+    parts: [
+      ...(feature.opens ? [{ name: 'leaf', label: false }] : []),
+      { name: 'opening', label: false, optional: true },
+      { name: 'seat', label: false, optional: true },
+    ],
+    states: [],
+    shape: 'wide',
+    sound: null,
+  };
+}
 
 /**
  * A character as the artist is asked to draw them, once for the book: an
@@ -1596,6 +1826,7 @@ export function sheetThing(
   character: StoryCharacter,
   bookTitle: string,
 ): DrawingThing {
+  const kind = character.kind === 'animal' ? 'animal' : 'creature';
   return {
     id: character.id,
     kind: 'drawing',
@@ -1604,14 +1835,19 @@ export function sheetThing(
       `${character.name}, a character in "${bookTitle}"${character.look ? `: ${character.look}` : ''}.`,
       'The whole figure, drawn so the same figure can stand on every page of the story.',
       CAST_STYLE,
+      STANCES[kind],
       character.size ? SIZES[character.size] : '',
       'The face inside the head has no eyes, brows or mouth: each expression group draws the eyes, brows and mouth, all in the same place on the face.',
+      OPTIONAL_PARTS[kind],
+      MOVING_PARTS,
     ]
       .filter(Boolean)
       .join(' '),
+    // Code moves it, about the joints it measures: the artist's own
+    // motion turned a tail about a point off the drawing.
     motion:
-      'breathes slowly: the body rises and falls a little; nothing else moves',
-    parts: SHEET_PARTS.map((name) => ({ name, label: false })),
+      'none: draw it still, with no <style> animation and no SMIL; the stage moves it',
+    parts: SHEET_PARTS_BY_KIND[kind].map((part) => ({ ...part })),
     states: EXPRESSIONS.map((name) => ({
       name,
       look: EXPRESSION_LOOKS[name],

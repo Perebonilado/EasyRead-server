@@ -15,6 +15,7 @@ import type {
   LectureVoiceJob,
   PipelineJob,
   SimplifyJob,
+  StudioJob,
   VisualJobState,
   VisualSceneJob,
 } from '../../business/ports/job-queue.port';
@@ -374,6 +375,31 @@ export class BullmqQueueAdapter implements JobQueuePort, OnModuleDestroy {
           ),
           // The front of the document is voiced first, for the same reason.
           priority: Math.min(job.pageNumber, 2_000_000),
+        },
+      })),
+    );
+  }
+
+  /**
+   * Each piece of Studio work under an id of its own: a scene made again
+   * after a change is new work, never the finished job's echo, which the
+   * queue would drop for the hour it keeps finished ids.
+   */
+  async enqueueStudio(jobs: StudioJob[]): Promise<void> {
+    if (!jobs.length) return;
+    const queue = this.queue(QUEUE.studio);
+    const stamp = Date.now().toString(36);
+    await queue.addBulk(
+      jobs.map((job, i) => ({
+        name: job.kind,
+        data: job,
+        opts: {
+          ...this.options(QUEUE.studio),
+          // A request's own work once however often it is asked: a check
+          // taken up again queues its try again once.
+          jobId: job.ask
+            ? `studio-${job.kind}-${job.sceneId ?? job.sceneIds?.join('-') ?? job.episodeId}-ask-${job.ask.id}-${job.ask.tries}`
+            : `studio-${job.kind}-${job.sceneId ?? job.episodeId}-${stamp}-${i}`,
         },
       })),
     );

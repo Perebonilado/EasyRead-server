@@ -1,4 +1,5 @@
 import {
+  voicedAlike,
   BEFORE_KEY_S,
   DELIVERY,
   IDEA_CHANGE_S,
@@ -14,7 +15,12 @@ import {
   voicedPieces,
 } from './scene-voice';
 import type { StoryBible, StoryCharacter } from './scene-story';
-import { SCENE_DELIVERIES, SCENE_MOODS, quotedSpans } from './scene-script';
+import {
+  SCENE_DELIVERIES,
+  SCENE_MOODS,
+  quotedSpans,
+  type SceneBeat,
+} from './scene-script';
 
 describe('how the voice says each sentence', () => {
   it('gives every tag a pace and a silence inside the bounds', () => {
@@ -271,7 +277,7 @@ describe('a screenplay, as the voice says it', () => {
       { delivery: 'explain', pause: 'short', kind: 'line', holdS: 1 },
       { delivery: 'explain', pause: 'short', kind: 'line', pace: 'quick' },
       { delivery: 'explain', pause: 'short', kind: 'line', pace: 'whisper' },
-      { delivery: 'explain', pause: 'short', kind: 'narration', holdS: 5 },
+      { delivery: 'explain', pause: 'short', kind: 'narration', holdS: 8 },
     ]);
     expect(pieces).toEqual([
       { speed: 0.95, pauseAfter: 0.55 },
@@ -280,8 +286,8 @@ describe('a screenplay, as the voice says it', () => {
       { speed: 1.07, pauseAfter: 0.3 },
       // Before the narrator comes in, a breath more.
       { speed: 0.9, pauseAfter: 0.55 },
-      // No quiet longer than the voice holds.
-      { speed: 0.95, pauseAfter: 3 },
+      // No quiet longer than the voice holds: six seconds under the music.
+      { speed: 0.95, pauseAfter: 6 },
     ]);
   });
 });
@@ -359,5 +365,73 @@ describe('voices beyond the stage', () => {
     ]);
     expect(thought.speed).toBeLessThan(said.speed);
     expect(above.speed).toBeLessThan(said.speed);
+  });
+});
+
+describe('a scene staged again, on the voice it was made with', () => {
+  const beat = (say: string, extra: Partial<SceneBeat> = {}): SceneBeat => ({
+    say,
+    pause: 'short',
+    delivery: 'explain',
+    ...extra,
+  });
+  const script = (beats: SceneBeat[], lead?: number) => ({
+    mood: 'playful' as const,
+    beats,
+    ...(lead ? { lead } : {}),
+    opening: null,
+  });
+
+  it('is voiced alike whatever the stage does with it', () => {
+    const before = script([
+      beat('Mama shuts the gate.', { kind: 'narration' }),
+      beat('Home safe.', { kind: 'line', speaker: 'mama' }),
+    ]);
+    const after = {
+      ...before,
+      beats: before.beats.map((b, i) =>
+        i
+          ? b
+          : {
+              ...b,
+              acts: [
+                { at: 5, who: 'mama', do: 'go' as never, toward: 'f:gate' },
+              ],
+            },
+      ),
+    };
+    expect(voicedAlike(before, after)).toBe(true);
+  });
+
+  it('is not, when a word, a speaker, a quiet after or the lead changes', () => {
+    const before = script([
+      beat('Home safe.', { kind: 'line', speaker: 'mama' }),
+    ]);
+    expect(
+      voicedAlike(
+        before,
+        script([beat('Home safe!', { kind: 'line', speaker: 'mama' })]),
+      ),
+    ).toBe(false);
+    expect(
+      voicedAlike(
+        before,
+        script([beat('Home safe.', { kind: 'line', speaker: 'maya' })]),
+      ),
+    ).toBe(false);
+    expect(
+      voicedAlike(
+        before,
+        script([
+          beat('Home safe.', { kind: 'line', speaker: 'mama', holdS: 1.2 }),
+        ]),
+      ),
+    ).toBe(false);
+    expect(
+      voicedAlike(
+        before,
+        script([beat('Home safe.', { kind: 'line', speaker: 'mama' })], 2),
+      ),
+    ).toBe(false);
   });
 });

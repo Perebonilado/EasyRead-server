@@ -1,7 +1,11 @@
+import { parseDocument } from 'htmlparser2';
+import render from 'dom-serializer';
+import { elements } from './scene-dom';
 import {
   framedBox,
   gateDrawing,
   inspectSvg,
+  mendOrigins,
   numbersSane,
   revealedSvg,
   sanitizeCss,
@@ -294,4 +298,77 @@ describe('a group the artist hid itself', () => {
     );
     expect(revealedSvg(hidden, ['neutral'])).toBe(hidden);
   }, 20_000);
+});
+
+describe('a transform origin read as the drawing coordinates it meant', () => {
+  const rooted = (svg: string) =>
+    elements(parseDocument(svg, { xmlMode: true }).children)[0];
+
+  it('turns a tail about the point in the drawing its author gave, not a point off it', () => {
+    const root = rooted(
+      '<svg viewBox="212.73 224.72 463.25 599.07"><style>#t{animation:wag 1s infinite;transform-origin:545px 560px;transform-box:fill-box}.lever{transform-box:fill-box;transform-origin:0% 50%}.hub{transform-box:fill-box;transform-origin:center}.arm{transform-box:fill-box;transform-origin:left center}</style><g id="t" style="transform-box: fill-box; transform-origin: 310px 340px"/></svg>',
+    );
+    expect(mendOrigins(root)).toBe(2);
+    const svg = render(root, { xmlMode: true });
+    expect(svg).toContain(
+      '#t{animation:wag 1s infinite;transform-origin:545px 560px;transform-box:view-box}',
+    );
+    expect(svg).toContain(
+      'style="transform-box: view-box; transform-origin: 310px 340px"',
+    );
+    // Keywords and percentages are the part's own box, as meant.
+    expect(svg).toContain(
+      '.lever{transform-box:fill-box;transform-origin:0% 50%}',
+    );
+    expect(svg).toContain(
+      '.hub{transform-box:fill-box;transform-origin:center}',
+    );
+    expect(svg).toContain(
+      '.arm{transform-box:fill-box;transform-origin:left center}',
+    );
+  });
+
+  it('leaves a corner, and a point off the drawing, as box offsets', () => {
+    const root = rooted(
+      '<svg viewBox="0 0 100 100"><style>.a{transform-box:fill-box;transform-origin:0 0}.b{transform-box:fill-box;transform-origin:400px 20px}</style></svg>',
+    );
+    expect(mendOrigins(root)).toBe(0);
+  });
+
+  it("leaves a point near the drawing's corner as the offset in a small part it may well be", () => {
+    // A flame 30 by 40, flickering about its foot, in an 800 by 800 drawing.
+    const root = rooted(
+      '<svg viewBox="0 0 800 800"><style>.flame{transform-box:fill-box;transform-origin:15px 40px;animation:f 1s infinite}</style><path class="flame" d="M385 500 Q400 460 415 500 Z"/></svg>',
+    );
+    expect(mendOrigins(root)).toBe(0);
+    expect(render(root, { xmlMode: true })).toContain(
+      'transform-box:fill-box;transform-origin:15px 40px',
+    );
+  });
+
+  it('says so among what the gate mended', () => {
+    const inspected = inspectSvg(
+      '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 800"><style>.w{transform-box:fill-box;transform-origin:400px 300px;animation:s 2s infinite}@keyframes s{50%{transform:rotate(5deg)}}</style><g id="wheel" class="w"><circle cx="400" cy="300" r="80"/></g></svg>',
+      { parts: [{ name: 'wheel', label: false }], states: [], motion: 'turns' },
+    );
+    expect(inspected.mended).toContain(
+      'read 1 transform origin as drawing coordinates',
+    );
+  });
+
+  it('asks for no part drawn only if the thing has one', () => {
+    const inspected = inspectSvg(
+      '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 800"><g id="head"><circle cx="400" cy="300" r="80"/></g></svg>',
+      {
+        parts: [
+          { name: 'head', label: false },
+          { name: 'tail', label: false, optional: true },
+          { name: 'legs', label: false },
+        ],
+        states: [],
+        motion: '',
+      },
+    );
+    expect(inspected.root && inspected.short.missingParts).toEqual(['legs']);
+  });
 });

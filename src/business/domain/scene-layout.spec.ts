@@ -5,18 +5,27 @@ import {
 } from './scene-script';
 import { figureFrame } from './scene-figure';
 import {
+  BACK_DEPTH,
   STAGINGS,
   TALLEST_ADULT,
   captionLines,
   extentOf,
+  layoutStations,
   layoutStep,
   overlaps,
+  placeFeature,
+  restingAt,
+  seatedHeight,
   slotsFor,
   slotsOf,
+  stationScale,
   standTogether,
+  type FeatureAcross,
   type LaidThing,
   type StagingName,
 } from './scene-layout';
+import { ACTED_PIECES, drawPiece } from './scene-set-pieces';
+import { PLAIN_FIGURE, drawFigure } from './scene-figure';
 
 const things = new Map<string, LaidThing>([
   ['a', { kind: 'drawing', aspect: 1.6, caption: 'Kidney' }],
@@ -175,4 +184,293 @@ describe('people standing together', () => {
     standTogether(after, people, show, 'box', true);
     expect(after).toEqual(before);
   });
+});
+
+describe("a Studio scene's stations", () => {
+  const kid: LaidThing = {
+    kind: 'drawing',
+    aspect: 160 / 190,
+    caption: null,
+    stands: { units: 190 },
+  };
+  const grown: LaidThing = {
+    kind: 'drawing',
+    aspect: 160 / 234,
+    caption: null,
+    stands: { units: 234 },
+  };
+  const people = new Map<string, LaidThing>([
+    ['maya', kid],
+    [
+      'pip',
+      { kind: 'drawing', aspect: 1.1, caption: null, stands: { units: 110 } },
+    ],
+    ['mama', grown],
+  ]);
+  const middle = (p: { x: number; w: number }) => p.x + p.w / 2;
+
+  for (const staging of ['box', 'wide'] as StagingName[])
+    it(`keeps each one where they stand until their station changes, at one scale (${staging})`, () => {
+      const scale = stationScale([...people.values()], 3, staging);
+      const gate = { x: STAGINGS[staging].w * 0.88, w: 180 };
+      const steps = layoutStations({
+        steps: [
+          {
+            show: ['maya', 'pip', 'mama'],
+            at: { maya: 'left', pip: 'centre', mama: 'right' },
+          },
+          // Pip runs to the gate: beside it, the side he comes from.
+          {
+            show: ['maya', 'pip', 'mama'],
+            at: { maya: 'left', pip: 'by:gate:-1', mama: 'right' },
+          },
+          // He goes; no one else moves.
+          { show: ['maya', 'mama'], at: { maya: 'left', mama: 'right' } },
+          // Mama comes over beside the gate where no one stands now.
+          { show: ['maya', 'mama'], at: { maya: 'left', mama: 'by:gate:-1' } },
+        ],
+        things: people,
+        staging,
+        scale,
+        features: new Map([['gate', gate]]),
+      });
+      expect(steps[1].maya).toEqual(steps[0].maya);
+      expect(steps[2].maya).toEqual(steps[1].maya);
+      expect(steps[2].mama).toEqual(steps[1].mama);
+      expect(steps[1].mama).toEqual(steps[0].mama);
+      // Beside the gate, on its left, not on it.
+      const pip = steps[1].pip;
+      expect(middle(pip)).toBeLessThan(gate.x - gate.w / 2);
+      expect(middle(pip)).toBeGreaterThan(middle(steps[0].pip));
+      // Everyone at one scale, feet on one ground, all the scene through.
+      const feet = (p: { y: number; h: number }) => p.y + p.h;
+      expect(feet(steps[0].maya)).toBe(feet(steps[0].mama));
+      expect(steps[0].mama.h / 234).toBeCloseTo(steps[0].maya.h / 190, 2);
+      expect(steps[3].mama.h).toBe(steps[0].mama.h);
+      // No one stands off the stage.
+      for (const step of steps)
+        for (const p of Object.values(step)) {
+          expect(middle(p)).toBeGreaterThan(0);
+          expect(middle(p)).toBeLessThan(STAGINGS[staging].w);
+        }
+    });
+
+  it('takes the other side of a feature where someone already stands on the near one', () => {
+    const scale = stationScale([...people.values()], 3, 'wide');
+    const bench = { x: 800, w: 220 };
+    const [step] = layoutStations({
+      steps: [
+        {
+          show: ['maya', 'mama'],
+          at: { maya: 'centre-left', mama: 'by:bench:-1' },
+        },
+      ],
+      things: people,
+      staging: 'wide',
+      scale,
+      features: new Map([['bench', bench]]),
+    });
+    // Maya stands where the bench's left side would put Mama: Mama goes round.
+    expect(middle(step.mama)).toBeGreaterThan(bench.x + bench.w / 2);
+  });
+
+  it('stands one under a feature on its ground, as big as they are there, and one up it where one who climbs it stands', () => {
+    const scale = stationScale([...people.values()], 3, 'wide');
+    // A bench at the back of a bus, and a palm on the right.
+    const bench = { x: 1300, w: 400, way: { y: 675, k: 0.8 } };
+    const palm = {
+      x: 1450,
+      w: 300,
+      way: { y: 770, k: 0.55, perch: 420, upX: 1460 },
+    };
+    const [step] = layoutStations({
+      steps: [
+        {
+          show: ['maya', 'pip', 'mama'],
+          at: { maya: 'up:palm', pip: 'under:bench', mama: 'centre-right' },
+        },
+      ],
+      things: people,
+      staging: 'wide',
+      scale,
+      features: new Map([
+        ['bench', bench],
+        ['palm', palm],
+      ]),
+    });
+    expect(step.pip.y + step.pip.h).toBe(675);
+    expect(middle(step.pip)).toBeCloseTo(1300, 0);
+    expect(step.maya.y + step.maya.h).toBe(420);
+    expect(middle(step.maya)).toBeLessThan(1460);
+    // No one stands before the one under the bench, where they would hide them.
+    expect(
+      Math.abs(middle(step.mama) - middle(step.pip)),
+    ).toBeGreaterThanOrEqual((step.mama.w + step.pip.w / 0.8) * 0.4 - 1);
+  });
+
+  it('draws a palm as a palm, tall, with where one who climbs it stands and where things catch in it', () => {
+    const palm = drawPiece('tree', 'tall palm tree');
+    const tree = drawPiece('tree');
+    expect(palm.svg).not.toBe(tree.svg);
+    expect(-palm.viewBox[1]).toBeGreaterThan(-figureFrame('adult')[1] * 2);
+    expect(palm.perch).toBeGreaterThan(0);
+    expect(palm.crown![1]).toBeLessThan(-palm.perch!);
+    // A gateway stands in its wall, which runs off beyond its frame.
+    expect(drawPiece('gate').svg).toMatch(/x="-264"/);
+  });
+
+  it('draws a gate and a goalpost as they are beside the people: wider than high, a gate lower than a grown-up', () => {
+    const [, , gw, gh] = drawPiece('gate').viewBox;
+    expect(gw / gh).toBeGreaterThan(1.1);
+    expect(gh).toBeLessThan(-figureFrame('adult')[1] * 0.9);
+    const [, , pw, ph] = drawPiece('goalpost').viewBox;
+    expect(pw / ph).toBeGreaterThan(1.5);
+  });
+
+  it('stands a piece the stage draws among the people at their scale, or farther off at the back', () => {
+    const piece = drawPiece('gate');
+    const front = placeFeature({
+      staging: 'wide',
+      spot: 'right',
+      piece,
+      back: false,
+      unit: 2,
+      floor: 844,
+      horizon: 576,
+    });
+    expect(front.y + front.h).toBeGreaterThan(844);
+    expect(front.w).toBeCloseTo(piece.viewBox[2] * 2, 0);
+    expect(front.way).toMatchObject({ y: 844, k: 1 });
+    const back = placeFeature({
+      staging: 'wide',
+      spot: 'back',
+      piece,
+      back: true,
+      unit: 2,
+      floor: 844,
+      horizon: 576,
+    });
+    expect(back.w).toBeCloseTo(front.w * BACK_DEPTH, 0);
+    expect(back.way.y).toBeLessThan(front.way.y);
+    expect(back.way.k).toBeCloseTo(BACK_DEPTH, 2);
+    // Where the painter drew it, as large as it was drawn.
+    const painted = placeFeature({
+      staging: 'wide',
+      spot: 'left',
+      piece,
+      painted: { x: 100, y: 500, w: 150, h: 180 },
+      back: false,
+      unit: 2,
+      floor: 844,
+      horizon: 576,
+    });
+    expect(painted.way.y).toBe(680);
+    expect(middle(painted)).toBeCloseTo(175, 0);
+  });
+});
+
+describe("beds and seats, the set's own", () => {
+  it('draws the bed itself, long enough for a grown-up, its cover apart', () => {
+    expect(ACTED_PIECES).toContain('bed');
+    expect(ACTED_PIECES).toContain('sofa');
+    const bed = drawPiece('bed');
+    expect(bed.svg).toContain('<g id="frame">');
+    expect(bed.svg).toContain('<g id="cover">');
+    expect(bed.cover).toBe('cover');
+    const [, , w] = bed.viewBox;
+    expect(w).toBeGreaterThan(-figureFrame('adult')[1]);
+    expect(bed.lies).toMatchObject({ top: bed.seat });
+    expect(bed.lies!.head).toBeLessThan(bed.lies!.foot);
+    expect(drawPiece('sofa').seat).toBeGreaterThan(0);
+    // A window hangs on the wall, nothing of it down to the floor.
+    expect(drawPiece('window').svg).not.toMatch(/y="-220"/);
+  });
+
+  it('knows how high one the kit draws sits, and the stations on and in a feature', () => {
+    const child = drawFigure({ ...PLAIN_FIGURE, age: 'child' }, 'c');
+    expect(seatedHeight(child.legs!)).toBeCloseTo(16.4, 1);
+    expect(restingAt('in:bed')).toEqual({
+      feature: 'bed',
+      in: true,
+      lie: false,
+    });
+    expect(restingAt('on:sofa:lie')).toEqual({
+      feature: 'sofa',
+      in: false,
+      lie: true,
+    });
+    expect(restingAt('by:bed:1')).toBeNull();
+  });
+
+  for (const staging of ['box', 'wide'] as StagingName[])
+    it(`places a bed's seat and where one lies along it, and sits people there (${staging})`, () => {
+      const piece = drawPiece('bed');
+      const bed = placeFeature({
+        staging,
+        spot: 'centre',
+        piece,
+        back: false,
+        unit: 2.4,
+        floor: STAGINGS[staging].h - 60,
+        horizon: 400,
+      });
+      const feet = STAGINGS[staging].h - 60;
+      expect(bed.seat).toBeCloseTo(feet - piece.seat! * 2.4, 0);
+      expect(bed.lies!.y).toBeCloseTo(bed.seat!, 0);
+      expect(bed.lies!.sits).toBeLessThan(bed.x + bed.w / 2);
+      const kid: LaidThing = {
+        kind: 'drawing',
+        aspect: 160 / 190,
+        caption: null,
+        stands: { units: 190, seated: 16.4, length: 148 },
+      };
+      const grown: LaidThing = {
+        kind: 'drawing',
+        aspect: 160 / 234,
+        caption: null,
+        stands: { units: 234, seated: 30, length: 192 },
+      };
+      const scale = stationScale([kid, grown], 2, staging);
+      const unit = scale.unit!;
+      const across = {
+        x: bed.x + bed.w / 2,
+        w: bed.w,
+        seat: bed.seat,
+        lies: bed.lies,
+      };
+      const bench = {
+        x: STAGINGS[staging].w * 0.2,
+        w: 200,
+        seat: scale.floor - 50 * unit,
+      };
+      const [step, next] = layoutStations({
+        steps: [
+          { show: ['tobi', 'mama'], at: { tobi: 'in:bed', mama: 'on:bench' } },
+          {
+            show: ['tobi', 'mama'],
+            at: { tobi: 'by:bed:1', mama: 'on:bench' },
+          },
+        ],
+        things: new Map([
+          ['tobi', kid],
+          ['mama', grown],
+        ]),
+        staging,
+        scale,
+        features: new Map<string, FeatureAcross>([
+          ['bed', across],
+          ['bench', bench],
+        ]),
+      });
+      // In bed, sat against the pillow end, the hips at the mattress.
+      const hips = (p: { y: number; h: number }, seated: number) =>
+        p.y + p.h - seated * unit;
+      expect(hips(step.tobi, 16.4)).toBeCloseTo(bed.lies!.y, 0);
+      expect(step.tobi.x + step.tobi.w / 2).toBeCloseTo(bed.lies!.sits, 0);
+      // On the bench: the hips at its seat, the feet never under the floor.
+      expect(hips(step.mama, 30)).toBeCloseTo(bench.seat, 0);
+      expect(step.mama.y + step.mama.h).toBeLessThanOrEqual(scale.floor);
+      // Out of bed, beside it, on the ground.
+      expect(next.tobi.y + next.tobi.h).toBe(scale.floor);
+    });
 });

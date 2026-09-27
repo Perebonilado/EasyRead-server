@@ -166,6 +166,8 @@ import { ReaderController } from './web/controllers/reader.controller';
 import { TutorsController } from './web/controllers/tutors.controller';
 import { LectureController } from './web/controllers/lecture.controller';
 import { VisualsController } from './web/controllers/visuals.controller';
+import { StudioController } from './web/controllers/studio.controller';
+import { StudioService } from './business/handlers/studio/studio.service';
 import {
   RequestVisualsHandler,
   SaveVisualPositionHandler,
@@ -395,6 +397,7 @@ const queries = [
     VoiceController,
     LectureController,
     VisualsController,
+    StudioController,
     GuidedController,
     InstitutionsController,
     AdminInstitutionsController,
@@ -408,6 +411,7 @@ const queries = [
   providers: [
     ...handlers,
     ...queries,
+    StudioService,
     { provide: APP_GUARD, useClass: ThrottlerGuard },
     { provide: APP_GUARD, useClass: AuthGuard },
     { provide: APP_FILTER, useClass: DomainExceptionFilter },

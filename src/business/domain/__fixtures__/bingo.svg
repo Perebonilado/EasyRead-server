@@ -1,0 +1,162 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="228.75 255.75 369.5 484.5">
+  <style>
+    @keyframes breathe {
+      0%, 100% { transform: translateY(0px); }
+      50% { transform: translateY(-6px); }
+    }
+    @keyframes tailwag {
+      0%, 100% { transform: rotate(-15deg); }
+      50% { transform: rotate(15deg); }
+    }
+    @keyframes blink {
+      0%, 92%, 100% { transform: scaleY(1); }
+      95% { transform: scaleY(0.1); }
+    }
+    .breathe { animation: breathe 4s ease-in-out infinite; transform-box: fill-box; transform-origin: bottom center; }
+    .tailwag { animation: tailwag 0.8s ease-in-out infinite; transform-box: fill-box; transform-origin: left center; }
+    .blink { animation: blink 4s ease-in-out infinite; transform-box: fill-box; transform-origin: center; }
+  </style>
+
+  <!-- BODY GROUP -->
+  <g id="body" class="breathe">
+    <!-- back legs -->
+    <g id="legs">
+      <rect x="330" y="620" width="40" height="55" rx="8" fill="#C4A265" stroke="#2d2a32" stroke-width="3"/>
+      <rect x="430" y="620" width="40" height="55" rx="8" fill="#C4A265" stroke="#2d2a32" stroke-width="3"/>
+      <!-- front legs -->
+      <rect x="340" y="640" width="36" height="55" rx="8" fill="#C4A265" stroke="#2d2a32" stroke-width="3"/>
+      <rect x="424" y="640" width="36" height="55" rx="8" fill="#C4A265" stroke="#2d2a32" stroke-width="3"/>
+      <!-- front paws white -->
+      <ellipse cx="358" cy="695" rx="22" ry="14" fill="#FFFFFF" stroke="#2d2a32" stroke-width="3"/>
+      <ellipse cx="442" cy="695" rx="22" ry="14" fill="#FFFFFF" stroke="#2d2a32" stroke-width="3"/>
+    </g>
+
+    <!-- body torso -->
+    <ellipse cx="400" cy="580" rx="90" ry="80" fill="#C4A265" stroke="#2d2a32" stroke-width="3"/>
+    <!-- white chest -->
+    <ellipse cx="400" cy="590" rx="55" ry="60" fill="#FFFFFF" stroke="#2d2a32" stroke-width="3"/>
+
+    <!-- tail wagging -->
+    <g class="tailwag">
+      <path d="M 318 580 Q 260 550 280 500 Q 295 520 320 560" fill="#C4A265" stroke="#2d2a32" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+    </g>
+
+    <!-- collar -->
+    <rect x="340" y="490" width="120" height="22" rx="10" fill="#D9577A" stroke="#2d2a32" stroke-width="3"/>
+    <circle cx="400" cy="512" r="8" fill="#F2B33D" stroke="#2d2a32" stroke-width="3"/>
+
+    <!-- arms -->
+    <g id="arms">
+      <rect x="300" y="550" width="30" height="70" rx="10" fill="#C4A265" stroke="#2d2a32" stroke-width="3"/>
+      <rect x="470" y="550" width="30" height="70" rx="10" fill="#C4A265" stroke="#2d2a32" stroke-width="3"/>
+    </g>
+  </g>
+
+  <!-- HEAD GROUP -->
+  <g id="head">
+    <!-- head shape -->
+    <ellipse cx="400" cy="400" rx="85" ry="90" fill="#C4A265" stroke="#2d2a32" stroke-width="3"/>
+    <!-- white face patch -->
+    <ellipse cx="400" cy="430" rx="55" ry="50" fill="#FFFFFF" stroke="#2d2a32" stroke-width="3"/>
+
+    <!-- left ear (floppy, matches body) -->
+    <path d="M 320 340 Q 270 320 260 390 Q 270 440 320 430" fill="#C4A265" stroke="#2d2a32" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+    <!-- right ear (floppy, white-tipped) -->
+    <path d="M 480 340 Q 530 320 540 390 Q 530 440 480 430" fill="#C4A265" stroke="#2d2a32" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+    <!-- white tip on right ear -->
+    <path d="M 500 340 Q 530 330 535 380 Q 530 410 500 410 Q 490 380 500 340 Z" fill="#FFFFFF" stroke="#2d2a32" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+
+    <!-- nose -->
+    <ellipse cx="400" cy="450" rx="14" ry="10" fill="#2d2a32"/>
+
+    <!-- face area has no eyes drawn here: states group draws them -->
+  </g>
+
+  <!-- STATE: NEUTRAL (default visible) -->
+  <g id="neutral">
+    <!-- eyes -->
+    
+    <!-- brows -->
+    <line x1="355" y1="365" x2="385" y2="365" stroke="#2d2a32" stroke-width="4" stroke-linecap="round"/>
+    <line x1="415" y1="365" x2="445" y2="365" stroke="#2d2a32" stroke-width="4" stroke-linecap="round"/>
+    <!-- mouth -->
+    <path d="M 385 475 Q 400 480 415 475" fill="none" stroke="#2d2a32" stroke-width="3" stroke-linecap="round"/>
+  </g>
+
+  <!-- STATE: HAPPY (hidden) -->
+  <g id="happy">
+    <circle cx="370" cy="390" r="18" fill="#FFFFFF" stroke="#2d2a32" stroke-width="3"/>
+    <circle cx="430" cy="390" r="18" fill="#FFFFFF" stroke="#2d2a32" stroke-width="3"/>
+    <circle cx="370" cy="390" r="7" fill="#2d2a32"/>
+    <circle cx="430" cy="390" r="7" fill="#2d2a32"/>
+    <line x1="352" y1="360" x2="388" y2="358" stroke="#2d2a32" stroke-width="4" stroke-linecap="round"/>
+    <line x1="412" y1="358" x2="448" y2="360" stroke="#2d2a32" stroke-width="4" stroke-linecap="round"/>
+    <!-- wide smile -->
+    <path d="M 375 468 Q 400 500 425 468" fill="none" stroke="#2d2a32" stroke-width="3" stroke-linecap="round"/>
+    <path d="M 380 470 Q 400 490 420 470" fill="#D9577A" stroke="#2d2a32" stroke-width="2" stroke-linecap="round"/>
+  </g>
+
+  <!-- STATE: SAD (hidden) -->
+  <g id="sad">
+    <circle cx="370" cy="392" r="18" fill="#FFFFFF" stroke="#2d2a32" stroke-width="3"/>
+    <circle cx="430" cy="392" r="18" fill="#FFFFFF" stroke="#2d2a32" stroke-width="3"/>
+    <circle cx="370" cy="398" r="6" fill="#2d2a32"/>
+    <circle cx="430" cy="398" r="6" fill="#2d2a32"/>
+    <path d="M 352 358 Q 370 348 388 358" fill="none" stroke="#2d2a32" stroke-width="4" stroke-linecap="round"/>
+    <path d="M 412 358 Q 430 348 448 358" fill="none" stroke="#2d2a32" stroke-width="4" stroke-linecap="round"/>
+    <path d="M 380 480 Q 400 465 420 480" fill="none" stroke="#2d2a32" stroke-width="3" stroke-linecap="round"/>
+    <!-- tear -->
+    <circle cx="355" cy="410" r="5" fill="#3D8FD1" stroke="#2d2a32" stroke-width="2"/>
+  </g>
+
+  <!-- STATE: ANGRY (hidden) -->
+  <g id="angry">
+    <circle cx="370" cy="390" r="18" fill="#FFFFFF" stroke="#2d2a32" stroke-width="3"/>
+    <circle cx="430" cy="390" r="18" fill="#FFFFFF" stroke="#2d2a32" stroke-width="3"/>
+    <circle cx="370" cy="390" r="6" fill="#2d2a32"/>
+    <circle cx="430" cy="390" r="6" fill="#2d2a32"/>
+    <line x1="352" y1="370" x2="388" y2="360" stroke="#2d2a32" stroke-width="4" stroke-linecap="round"/>
+    <line x1="412" y1="360" x2="448" y2="370" stroke="#2d2a32" stroke-width="4" stroke-linecap="round"/>
+    <path d="M 380 478 L 420 478" fill="none" stroke="#2d2a32" stroke-width="3" stroke-linecap="round"/>
+  </g>
+
+  <!-- STATE: AFRAID (hidden) -->
+  <g id="afraid">
+    <circle cx="370" cy="388" r="22" fill="#FFFFFF" stroke="#2d2a32" stroke-width="3"/>
+    <circle cx="430" cy="388" r="22" fill="#FFFFFF" stroke="#2d2a32" stroke-width="3"/>
+    <circle cx="370" cy="388" r="7" fill="#2d2a32"/>
+    <circle cx="430" cy="388" r="7" fill="#2d2a32"/>
+    <path d="M 352 355 Q 370 345 388 355" fill="none" stroke="#2d2a32" stroke-width="4" stroke-linecap="round"/>
+    <path d="M 412 355 Q 430 345 448 355" fill="none" stroke="#2d2a32" stroke-width="4" stroke-linecap="round"/>
+    <ellipse cx="400" cy="475" rx="13" ry="10" fill="#2d2a32"/>
+    <ellipse cx="400" cy="475" rx="8" ry="6" fill="#D9577A"/>
+  </g>
+
+  <!-- STATE: SURPRISED (hidden) -->
+  <g id="surprised">
+    <circle cx="370" cy="385" r="24" fill="#FFFFFF" stroke="#2d2a32" stroke-width="3"/>
+    <circle cx="430" cy="385" r="24" fill="#FFFFFF" stroke="#2d2a32" stroke-width="3"/>
+    <circle cx="370" cy="385" r="8" fill="#2d2a32"/>
+    <circle cx="430" cy="385" r="8" fill="#2d2a32"/>
+    <line x1="350" y1="345" x2="388" y2="345" stroke="#2d2a32" stroke-width="4" stroke-linecap="round"/>
+    <line x1="412" y1="345" x2="450" y2="345" stroke="#2d2a32" stroke-width="4" stroke-linecap="round"/>
+    <ellipse cx="400" cy="475" rx="16" ry="14" fill="#2d2a32"/>
+    <ellipse cx="400" cy="475" rx="10" ry="8" fill="#D9577A"/>
+  </g>
+
+  <!-- STATE: THINKING (hidden) -->
+  <g id="thinking">
+    <circle cx="370" cy="388" r="18" fill="#FFFFFF" stroke="#2d2a32" stroke-width="3"/>
+    <circle cx="430" cy="388" r="18" fill="#FFFFFF" stroke="#2d2a32" stroke-width="3"/>
+    <circle cx="375" cy="382" r="6" fill="#2d2a32"/>
+    <circle cx="435" cy="382" r="6" fill="#2d2a32"/>
+    <line x1="352" y1="362" x2="388" y2="362" stroke="#2d2a32" stroke-width="4" stroke-linecap="round"/>
+    <line x1="418" y1="356" x2="448" y2="366" stroke="#2d2a32" stroke-width="4" stroke-linecap="round"/>
+    <path d="M 382 475 L 418 470" fill="none" stroke="#2d2a32" stroke-width="3" stroke-linecap="round"/>
+    <!-- thought bubble -->
+    <circle cx="490" cy="350" r="8" fill="#FFFFFF" stroke="#2d2a32" stroke-width="3"/>
+    <circle cx="515" cy="330" r="10" fill="#FFFFFF" stroke="#2d2a32" stroke-width="3"/>
+    <ellipse cx="545" cy="305" rx="22" ry="18" fill="#FFFFFF" stroke="#2d2a32" stroke-width="3"/>
+  </g>
+
+</svg>

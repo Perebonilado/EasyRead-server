@@ -1,16 +1,25 @@
 import { PLAIN_FIGURE, figureFrame } from './scene-figure';
 import {
+  SET_VERSION,
   SIZE_UNITS,
   castOf,
   figureSheet,
   introCallouts,
   measureSheet,
+  mouthOf,
+  notDrawnYet,
+  setsOf,
   SHEET_VERSION,
+  type CharacterSheet,
+  type SetSheet,
 } from './scene-sheet';
+import type { SceneScript } from './scene-script';
+import { conventionGround } from './scene-ground';
+import * as rig from './scene-sheet-rig';
 import { EXPRESSIONS, sheetThing } from './scene-story';
 import { gateDrawing } from './scene-svg';
 
-/** A figure as the artist might draw it: a blank head, a body, legs, and every face on the head. */
+/** A figure as the artist might draw it: a blank head, a body, legs, and every face on the head, every part joined. */
 function figure(astray: string | null = null): string {
   const faces = EXPRESSIONS.map((name) => {
     const x = name === astray ? 560 : 200;
@@ -18,8 +27,8 @@ function figure(astray: string | null = null): string {
   }).join('');
   return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 600 900">
     <g id="legs"><rect x="150" y="600" width="40" height="250" fill="#3D8FD1"/><rect x="210" y="600" width="40" height="250" fill="#3D8FD1"/></g>
-    <g id="body"><rect x="120" y="300" width="160" height="320" rx="30" fill="#F2B33D"/></g>
-    <g id="arms"><rect x="70" y="320" width="40" height="220" fill="#F2B33D"/><rect x="290" y="320" width="40" height="220" fill="#F2B33D"/></g>
+    <g id="body"><rect x="120" y="270" width="160" height="350" rx="30" fill="#F2B33D"/></g>
+    <g id="arms"><rect x="90" y="320" width="40" height="220" fill="#F2B33D"/><rect x="270" y="320" width="40" height="220" fill="#F2B33D"/></g>
     <g id="head"><circle cx="200" cy="190" r="90" fill="#E9D8B4"/></g>
     ${faces}
   </svg>`;
@@ -51,12 +60,44 @@ describe('a character drawn once for the book', () => {
     expect(body![1]).toBeLessThan(legs![1]);
     expect(sheet.drawing.field).not.toBeNull();
     expect(sheet.version).toBe(SHEET_VERSION);
+    // Its mouth, where what it carries rides: the low middle of its face,
+    // below its eyes and on its head.
+    const mouth = sheet.anchors.mouth!;
+    expect(Math.abs(mouth[0] - 200)).toBeLessThan(2);
+    expect(mouth[1]).toBeGreaterThan(190);
+    expect(mouth[1]).toBeLessThan(280);
+    // Measured again for a sheet kept before mouths were, the same.
+    expect(await mouthOf(sheet.drawing)).toEqual(mouth);
+  }, 20_000);
+
+  it('keeps a figure measured well when looking for what floats fails', async () => {
+    const gated = await gateDrawing(figure(), mira);
+    const failing = jest
+      .spyOn(rig, 'jointNotes')
+      .mockRejectedValueOnce(new Error('the parts came back unmeasured'));
+    try {
+      const { sheet, notes } = await measureSheet(gated.drawing!);
+      expect(failing).toHaveBeenCalled();
+      expect(notes).toEqual([]);
+      expect(sheet.anchors.head).not.toBeNull();
+    } finally {
+      failing.mockRestore();
+    }
   }, 20_000);
 
   it('sends back a figure with a face drawn off the head', async () => {
     const gated = await gateDrawing(figure('angry'), mira);
     const { notes } = await measureSheet(gated.drawing!);
     expect(notes.join(' ')).toContain('The faces angry are not on the head');
+  }, 20_000);
+
+  it('sends back a figure whose head floats above its body', async () => {
+    const floating = figure().replace('cy="190" r="90"', 'cy="150" r="90"');
+    const gated = await gateDrawing(floating, mira);
+    const { notes } = await measureSheet(gated.drawing!);
+    expect(notes.join(' ')).toMatch(
+      /The head floats \d+ units from the body: draw the neck overlapping the body\./,
+    );
   }, 20_000);
 
   it('points what a character is like at their head, then their body, then their legs', () => {
@@ -140,5 +181,139 @@ describe('a person drawn by the kit, once for the book', () => {
   it('stands an animal at its size beside people', () => {
     expect(SIZE_UNITS.small).toBeLessThan(SIZE_UNITS.medium);
     expect(SIZE_UNITS.large).toBeLessThanOrEqual(figureFrame('adult')[3]);
+  });
+});
+
+describe('a book’s sets read back', () => {
+  const drawing = {
+    svg: '<svg viewBox="0 0 1600 900"></svg>',
+    viewBox: [0, 0, 1600, 900] as [number, number, number, number],
+    aspect: 16 / 9,
+    parts: {},
+    labels: {},
+    states: {},
+    moves: false,
+    callouts: [],
+    field: null,
+  };
+
+  it('keeps each set’s ground, and a set kept before it was measured as it is', () => {
+    const ground = conventionGround();
+    const sets = setsOf({
+      market: { version: SET_VERSION, drawing, ground },
+      yard: { version: SET_VERSION, drawing },
+      field: { version: SET_VERSION, drawing, ground: { top: 'flat' } },
+      old: { version: SET_VERSION - 1, drawing },
+    });
+    expect(sets.market.ground).toEqual(ground);
+    // No ground: measured when it is next used, with no painting again.
+    expect(sets.yard).toEqual({ version: SET_VERSION, drawing });
+    expect(sets.field.ground).toBeUndefined();
+    expect(sets.old).toBeUndefined();
+  });
+});
+
+describe('what a scene stands on its stage that is not drawn yet', () => {
+  const person = (id: string, name: string, presence?: 'heard' | 'light') => ({
+    id,
+    name,
+    aliases: [],
+    role: 'main' as const,
+    look: '',
+    traits: [],
+    firstPage: 1,
+    met: 0,
+    voice: null,
+    ...(presence ? { presence } : {}),
+  });
+  const bible = {
+    characters: [
+      person('maya', 'Maya'),
+      person('pip', 'Pip'),
+      person('voice', 'The Voice', 'heard'),
+    ],
+    places: [
+      {
+        id: 'yard',
+        name: 'The Compound',
+        aliases: [],
+        look: '',
+        firstPage: 1,
+        sound: null,
+      },
+    ],
+  };
+  const script = {
+    cast: [
+      { id: 'maya', kind: 'character', ref: 'maya' },
+      { id: 'pip', kind: 'character', ref: 'pip' },
+      { id: 'voice', kind: 'character', ref: 'voice' },
+      { id: 'place-yard', kind: 'place', ref: 'yard' },
+    ],
+    ownThings: [{ id: 'kite', name: 'kite' }],
+    features: [
+      { id: 'gate', name: 'gate', kind: 'gate', spot: 'right', opens: true },
+      { id: 'hut', name: 'hut', kind: 'drawn', spot: 'left', opens: true },
+    ],
+  } as unknown as Pick<SceneScript, 'cast' | 'ownThings' | 'features'>;
+  const sheet = {} as CharacterSheet;
+  const set = {} as SetSheet;
+
+  it('names each character, place and thing of its own not kept, and never a voice', () => {
+    expect(notDrawnYet(script, bible, { maya: sheet }, {}, null)).toEqual([
+      'Pip',
+      'The Compound',
+      'kite',
+      'hut',
+    ]);
+  });
+
+  it('is nothing once all are kept: a gate the stage draws needs no drawing', () => {
+    expect(
+      notDrawnYet(
+        script,
+        bible,
+        { maya: sheet, pip: sheet },
+        { yard: set },
+        {
+          version: 1,
+          things: { kite: {} as never },
+          features: { hut: { opens: true } as never },
+        },
+      ),
+    ).toEqual([]);
+  });
+
+  it('names one kept that the words have since opened, or said a look for: not drawn as they say yet', () => {
+    const looked = {
+      ...script,
+      ownThings: [{ id: 'kite', name: 'kite', look: 'red' }],
+    };
+    expect(
+      notDrawnYet(
+        looked,
+        bible,
+        { maya: sheet, pip: sheet },
+        { yard: set },
+        {
+          version: 1,
+          things: { kite: {} as never },
+          features: { hut: { opens: false } as never },
+        },
+      ),
+    ).toEqual(['kite', 'hut']);
+    expect(
+      notDrawnYet(
+        looked,
+        bible,
+        { maya: sheet, pip: sheet },
+        { yard: set },
+        {
+          version: 1,
+          things: { kite: { look: 'red' } as never },
+          features: { hut: { opens: true } as never },
+        },
+      ),
+    ).toEqual([]);
   });
 });

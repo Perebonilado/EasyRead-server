@@ -219,6 +219,7 @@ export class EntitlementsService implements OnModuleInit {
       studySecondsToday,
       voiceSecondsThisMonth,
       voiceCreditSeconds,
+      studioSecondsThisMonth,
       overrides,
     ] = await Promise.all([
       this.planFor(userId),
@@ -226,6 +227,7 @@ export class EntitlementsService implements OnModuleInit {
       this.usage.get(userId, UsageMetric.STUDY_SECONDS, this.dayKey(userId)),
       this.usage.get(userId, UsageMetric.VOICE_SECONDS, this.monthKey()),
       this.credits.balance(userId),
+      this.usage.get(userId, UsageMetric.STUDIO_SECONDS, this.monthKey()),
       this.overridesFor(userId),
     ]);
 
@@ -236,9 +238,41 @@ export class EntitlementsService implements OnModuleInit {
         studySecondsToday,
         voiceSecondsThisMonth,
         voiceCreditSeconds,
+        studioSecondsThisMonth,
       },
       overrides,
     );
+  }
+
+  // ── The Studio's film ──────────────────────────────────────────────────────
+
+  /** A film's minutes, spent as each scene of it is made. */
+  async recordStudioSeconds(userId: string, seconds: number): Promise<void> {
+    const spend = Math.max(0, Math.round(seconds));
+    if (spend === 0) return;
+    await this.usage.incrementBy(
+      userId,
+      UsageMetric.STUDIO_SECONDS,
+      this.monthKey(),
+      spend,
+    );
+  }
+
+  /** What is left of the month's Studio film, and what was made. */
+  async studioBalance(userId: string): Promise<{
+    remainingSeconds: number | null;
+    allowanceSeconds: number | null;
+    usedThisMonthSeconds: number;
+    watermarked: boolean;
+  }> {
+    const entitlements = await this.forUser(userId);
+    const minutes = entitlements.limits.studioMinutesPerMonth;
+    return {
+      remainingSeconds: entitlements.remainingStudioSeconds(),
+      allowanceSeconds: minutes === null ? null : minutes * 60,
+      usedThisMonthSeconds: entitlements.usage.studioSecondsThisMonth ?? 0,
+      watermarked: entitlements.exportsAreWatermarked(),
+    };
   }
 
   // ── The study clock ────────────────────────────────────────────────────────

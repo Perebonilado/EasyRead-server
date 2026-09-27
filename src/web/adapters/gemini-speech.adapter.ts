@@ -124,23 +124,40 @@ export function withPauses(
   rate: number,
   pieces: { text: string; pauseAfter: number }[],
 ): Int16Array {
+  return pausedRun(samples, rate, pieces).samples;
+}
+
+/**
+ * A run's audio with each sentence's silence as the page asked for it, and
+ * where each quiet between its sentences now lies, in samples: the times
+ * no word can start in.
+ */
+export function pausedRun(
+  samples: Int16Array,
+  rate: number,
+  pieces: { text: string; pauseAfter: number }[],
+): { samples: Int16Array; quiet: [number, number][] } {
   const gaps = sentenceGaps(
     samples,
     rate,
     pieces.map((piece) => piece.text.length),
   );
   const parts: Int16Array[] = [];
+  const quiet: [number, number][] = [];
   let from = 0;
+  let added = 0;
   gaps.forEach((gap, b) => {
     if (!gap) return;
     const wanted = Math.round(pieces[b].pauseAfter * rate);
-    const more = wanted - (gap[1] - gap[0]);
+    const more = Math.max(0, wanted - (gap[1] - gap[0]));
+    quiet.push([gap[0] + added, gap[1] + added + more]);
     if (more <= 0) return;
     const middle = Math.round((gap[0] + gap[1]) / 2);
     parts.push(samples.subarray(from, middle), new Int16Array(more));
     from = middle;
+    added += more;
   });
-  if (!parts.length) return samples;
+  if (!parts.length) return { samples, quiet };
   parts.push(samples.subarray(from));
   const out = new Int16Array(parts.reduce((n, p) => n + p.length, 0));
   let at = 0;
@@ -148,7 +165,7 @@ export function withPauses(
     out.set(part, at);
     at += part.length;
   }
-  return out;
+  return { samples: out, quiet };
 }
 
 /** One sentence as the voice is sent it: its words, a pause after it, and how it goes. */
@@ -348,6 +365,7 @@ export class GeminiSpeechAdapter implements SpeechPort {
     mimeType: string;
     model: string;
     durationMs: number;
+    silencesMs: [number, number][];
     usage?: { tokensIn: number; tokensOut: number };
   }> {
     const key =
@@ -376,6 +394,7 @@ export class GeminiSpeechAdapter implements SpeechPort {
     const spoken: ({
       samples: Int16Array;
       rate: number;
+      quiet: [number, number][];
       usage: { tokensIn: number; tokensOut: number } | null;
     } | null)[] = runs.map(() => null);
     for (let from = 0; from < runs.length; from += AT_ONCE)
@@ -400,26 +419,39 @@ export class GeminiSpeechAdapter implements SpeechPort {
           const pcm = wav ?? readPcm16(bytes, rateOf(found.mimeType) ?? 24000);
           if (!pcm.samples.length)
             throw new Error('The Gemini voice sent silence');
+          // Each sentence's silence, made here: never asked for in words.
+          const paused = pausedRun(
+            pcm.samples,
+            pcm.sampleRate,
+            run.pieces.filter((piece) => piece.text.trim()),
+          );
           spoken[from + j] = {
-            // Each sentence's silence, made here: never asked for in words.
-            samples: withPauses(
-              pcm.samples,
-              pcm.sampleRate,
-              run.pieces.filter((piece) => piece.text.trim()),
-            ),
+            samples: paused.samples,
             rate: pcm.sampleRate,
+            quiet: paused.quiet,
             usage: usageIn(answer),
           };
         }),
       );
+    /** Where the voice is silent, in samples from the start: no word starts in it. */
+    const quiet: [number, number][] = [];
+    let length = 0;
     for (const [k, run] of runs.entries()) {
       const one = spoken[k];
       if (!one) continue;
       rate = one.rate;
       parts.push(one.samples);
+      for (const [a, b] of one.quiet) quiet.push([length + a, length + b]);
+      length += one.samples.length;
+      // The last run's too: the quiet planned after the last line is where
+      // the scene's last moments play, and the film holds on them.
       const pause = run.pieces[run.pieces.length - 1].pauseAfter;
-      if (k < runs.length - 1 && pause > 0)
-        parts.push(new Int16Array(Math.round(pause * rate)));
+      if (pause > 0) {
+        const silence = Math.round(pause * rate);
+        parts.push(new Int16Array(silence));
+        quiet.push([length, length + silence]);
+        length += silence;
+      }
       if (one.usage) {
         tokensIn += one.usage.tokensIn;
         tokensOut += one.usage.tokensOut;
@@ -427,8 +459,15 @@ export class GeminiSpeechAdapter implements SpeechPort {
       }
     }
     // Quiet before the first word, when the page opens on the stage alone.
-    if (lead && lead > 0)
-      parts.unshift(new Int16Array(Math.round(lead * rate)));
+    const before = lead && lead > 0 ? Math.round(lead * rate) : 0;
+    if (before) parts.unshift(new Int16Array(before));
+    const silencesMs = [
+      ...(before ? [[0, before] as [number, number]] : []),
+      ...quiet.map(([a, b]): [number, number] => [a + before, b + before]),
+    ].map(([a, b]): [number, number] => [
+      Math.round((a / rate) * 1000),
+      Math.round((b / rate) * 1000),
+    ]);
     const samples = new Int16Array(parts.reduce((n, p) => n + p.length, 0));
     let at = 0;
     for (const part of parts) {
@@ -440,6 +479,7 @@ export class GeminiSpeechAdapter implements SpeechPort {
       mimeType: 'audio/mpeg',
       model: `gemini:${model}`,
       durationMs: pcmMs({ samples, sampleRate: rate }),
+      silencesMs,
       ...(counted ? { usage: { tokensIn, tokensOut } } : {}),
     };
   }

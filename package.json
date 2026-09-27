@@ -41,6 +41,11 @@
     "doc:reread": "ts-node --transpile-only -r tsconfig-paths/register scripts/reread-document.ts",
     "scene:bench": "ts-node --transpile-only -r tsconfig-paths/register scripts/scene-bench.ts",
     "scene:recast": "ts-node --transpile-only -r tsconfig-paths/register scripts/scene-recast.ts",
+    "studio:rerig": "ts-node --transpile-only -r tsconfig-paths/register scripts/studio-rerig.ts",
+    "studio:remake": "ts-node --transpile-only -r tsconfig-paths/register scripts/studio-remake.ts",
+    "studio:recompose": "ts-node --transpile-only -r tsconfig-paths/register scripts/studio-recompose.ts",
+    "studio:repaint": "ts-node --transpile-only -r tsconfig-paths/register scripts/studio-repaint.ts",
+    "studio:redraw": "ts-node --transpile-only -r tsconfig-paths/register scripts/studio-redraw.ts",
     "scene:notes": "ts-node --transpile-only -r tsconfig-paths/register scripts/scene-notes.ts",
     "figures:sheet": "ts-node --transpile-only -r tsconfig-paths/register scripts/figures-sheet.ts"
   },

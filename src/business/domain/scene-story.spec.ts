@@ -305,14 +305,59 @@ describe("a story's continuity", () => {
     );
     expect(thing.brief).toContain('yellow raincoat');
     expect(thing.brief).toContain('no eyes, brows or mouth');
-    expect(thing.parts.map((p) => p.name)).toEqual([
-      'head',
-      'body',
-      'arms',
-      'legs',
+    expect(thing.parts).toEqual([
+      { name: 'head', label: false },
+      { name: 'body', label: false },
+      { name: 'arms', label: false },
+      { name: 'legs', label: false },
+      { name: 'tail', label: false, optional: true },
     ]);
+    expect(thing.brief).toContain('It faces the viewer, standing');
     expect(thing.states.map((s) => s.name)).toContain('neutral');
     expect(thing.shape).toBe('tall');
+  });
+
+  it('asks for an animal on all fours, jointed like a puppet and drawn still for the stage to move', () => {
+    const dog = sheetThing(
+      {
+        id: 'pip',
+        name: 'Pip',
+        aliases: [],
+        role: 'supporting',
+        look: 'a small brown dog with floppy ears',
+        traits: [],
+        firstPage: 1,
+        met: 1,
+        voice: 'creature',
+        kind: 'animal',
+        size: 'small',
+      },
+      'Maya',
+    );
+    // Head, body, legs, and a tail and ears only if it has them; no arms.
+    expect(dog.parts).toEqual([
+      { name: 'head', label: false },
+      { name: 'body', label: false },
+      { name: 'legs', label: false },
+      { name: 'tail', label: false, optional: true },
+      { name: 'ears', label: false, optional: true },
+    ]);
+    expect(dog.brief).toContain('on all four legs');
+    expect(dog.brief).toContain('three-quarter view');
+    expect(dog.brief).toContain('not upright like a person, and with no arms');
+    expect(dog.brief).not.toContain('It faces the viewer, standing');
+    // Joined, so nothing floats when code moves it.
+    expect(dog.brief).toContain(
+      'every part overlaps the body a little where they meet, drawn behind it',
+    );
+    expect(dog.brief).toContain('nothing floats apart');
+    expect(dog.brief).toContain('a tail comes from behind the body at the hip');
+    expect(dog.brief).toContain('only if it has them');
+    // Drawn still: code moves it, about its joints.
+    expect(dog.motion).toMatch(/^none: draw it still/);
+    expect(dog.motion).toContain('no <style> animation and no SMIL');
+    // The canvas the stage expects for an animal.
+    expect(dog.shape).toBe('square');
   });
 
   it("asks the artist for an animal in the people's style, its size beside them", () => {
@@ -352,6 +397,161 @@ describe("a story's continuity", () => {
     );
     expect(quay.brief).toContain('stone steps');
     expect(quay.brief).toContain(SET_STYLE);
+    // The camera pinned, so a crowd stands in it at the right size; and
+    // the open ground its own group, never a fault left out.
+    expect(quay.brief).toContain('the horizon at eye level, about 64%');
+    expect(quay.brief).toContain('id "ground"');
+    // A book's set is painted as it always was: no group of props asked.
+    expect(quay.brief).not.toContain('id "props"');
+    expect(quay.parts).toEqual([
+      { name: 'ground', label: false, optional: true },
+    ]);
+    const room = setThing(
+      {
+        id: 'kitchen',
+        name: 'The kitchen',
+        aliases: [],
+        look: 'a small kitchen',
+        firstPage: 1,
+        sound: null,
+        kind: 'indoor',
+        stand: 'in',
+        front: 'the table',
+      },
+      'The Lantern',
+    );
+    expect(room.brief).toContain(
+      'the floor meets the back wall about 68 to 72%',
+    );
+    expect(room.parts.map((p) => p.name)).toEqual(['front', 'ground']);
+    // A Studio set's features: the stage draws the gate, so the painter
+    // leaves it out; the well is the painter's, a group of its own. Out of
+    // doors, what a crowd could stand behind is a group of its own, if the
+    // place has any.
+    const yard = setThing(
+      {
+        id: 'yard',
+        name: 'The compound',
+        aliases: [],
+        look: 'a walled compound',
+        firstPage: 1,
+        sound: null,
+        features: [
+          { id: 'gate', name: 'gate', kind: 'gate', spot: 'right' },
+          { id: 'well', name: 'well', kind: 'well', spot: 'back' },
+        ],
+      },
+      'Maya',
+    );
+    expect(yard.brief).toContain('Leave out the gate (at the right)');
+    expect(yard.brief).toContain('If there are any');
+    expect(yard.brief).toContain('id "props"');
+    expect(yard.brief).toContain(
+      'Draw the well, at the back, as its own group with id "f-well"',
+    );
+    expect(yard.parts.map((p) => p.name)).toEqual([
+      'ground',
+      'props',
+      'f-well',
+    ]);
+    // One of the show's own is the artist's, drawn apart and stood among
+    // the people: the painter leaves it out too.
+    const field = setThing(
+      {
+        id: 'field',
+        name: 'The field',
+        aliases: [],
+        look: 'a dusty field',
+        firstPage: 1,
+        sound: null,
+        features: [
+          { id: 'bicycle', name: 'bicycle', kind: 'drawn', spot: 'left' },
+        ],
+      },
+      'Kofi',
+    );
+    expect(field.brief).toContain('Leave out the bicycle (at the left)');
+    expect(field.parts.map((p) => p.name)).not.toContain('f-bicycle');
+    // One the stage draws that the look names is painted anyway: a group
+    // of its own, found and stood in for, never painted twice.
+    const pitch = setThing(
+      {
+        id: 'field',
+        name: 'The open field',
+        aliases: [],
+        look: 'open grass, a lopsided goalpost, palm trees beyond',
+        firstPage: 1,
+        sound: null,
+        features: [
+          { id: 'goalpost', name: 'goalpost', kind: 'goalpost', spot: 'back' },
+        ],
+      },
+      'Maya',
+    );
+    expect(pitch.brief).not.toContain('Leave out the goalpost');
+    expect(pitch.brief).toContain(
+      'Draw the goalpost, at the back, as its own group with id "f-goalpost"',
+    );
+  });
+
+  it("paints a Studio room or vessel from inside: a danfo's seats and windows, the road going by, never the street", () => {
+    const danfo = setThing(
+      {
+        id: 'bus',
+        name: 'The Danfo',
+        aliases: [],
+        look: 'the inside of a yellow danfo minibus',
+        firstPage: 1,
+        sound: 'machine',
+        kind: 'vessel',
+        stand: 'in',
+        front: 'seat back',
+        features: [],
+      },
+      'Maya',
+    );
+    expect(danfo.brief).toContain('seen from inside it at eye level');
+    expect(danfo.brief).toContain('its seats or benches');
+    expect(danfo.brief).toContain('Never The Danfo seen from the street');
+    expect(danfo.brief).not.toContain('the horizon at eye level');
+    expect(danfo.brief).toContain('id "outside"');
+    expect(danfo.parts.map((p) => p.name)).toEqual([
+      'front',
+      'ground',
+      'outside',
+    ]);
+    const room = setThing(
+      {
+        id: 'room',
+        name: "Maya's room",
+        aliases: [],
+        look: 'a small bedroom',
+        firstPage: 1,
+        sound: null,
+        kind: 'indoor',
+        features: [],
+      },
+      'Maya',
+    );
+    expect(room.brief).toContain('A room with a floor and walls');
+    expect(room.brief).not.toContain('id "outside"');
+    // A book's boat is painted as it always was.
+    const boat = setThing(
+      {
+        id: 'boat',
+        name: 'The boat',
+        aliases: [],
+        look: 'a fishing boat',
+        firstPage: 1,
+        sound: 'water',
+        kind: 'vessel',
+        stand: 'in',
+        front: "the boat's side",
+      },
+      'The Lantern',
+    );
+    expect(boat.brief).toContain('the horizon at eye level');
+    expect(boat.brief).not.toContain('seen from inside it');
   });
 
   it('keeps what each character is and how a person looks from where the book first meets them', () => {

@@ -48,6 +48,12 @@ export type LlmTask =
   | 'scene_profile'
   | 'scene_notes'
   | 'scene_story'
+  // The Studio: the producer's side of the conversation, and the writers
+  // of a show's cast, an episode's outline and each scene's sheet.
+  | 'studio_chat'
+  | 'studio_write'
+  // Whether a scene made again as the maker asked now shows what they asked for.
+  | 'studio_check'
   | 'topic_quiz'
   | 'item_write'
   | 'item_verify'
@@ -87,6 +93,50 @@ export interface LlmUsage {
 export interface LlmResult<T> {
   value: T;
   usage: LlmUsage;
+}
+
+/** The producer's turn in the Studio: what to say, and what to do next. */
+export interface StudioTurnDraft {
+  reply: string;
+  choices: string[];
+  /** What the maker's latest message says of the brief: null for what it does not. */
+  brief: Record<string, unknown>;
+  action:
+    'none' | 'outline' | 'approve' | 'cast' | 'scene' | 'make' | 'episode';
+  /** A scene's number, from 1, for a change to it. */
+  scene: number | null;
+  /** For a change to several scenes: each one's number, from 1, the first first. Absent, only `scene`. */
+  scenes?: number[];
+  /** The change asked for, in the maker's words. */
+  request: string | null;
+  /** Of a change to a scene, what the stage cannot show, in a few words: left out of it, and said so. */
+  cannot?: string | null;
+  /** Asked for what the Studio does not make. */
+  refuse: boolean;
+}
+
+/**
+ * What the Studio's check makes of a scene made again as the maker asked:
+ * whether what they asked for now shows in the film, judged by what the
+ * film shows and never by the scene's words.
+ */
+export interface StudioCheckVerdict {
+  resolved: boolean;
+  /** For the writer and for us: which beat, and what still shows. */
+  reason: string;
+  /** One plain sentence for the maker. */
+  tell: string;
+  /** What is still wrong, from the list code sees; "other" for anything else. */
+  faults: string[];
+}
+
+/** What a Studio writer is asked again with: its answer, and what to change or put right. */
+export interface StudioRevision {
+  previous?: unknown;
+  /** The maker's own words for the change. */
+  request?: string;
+  /** What the check found wrong. */
+  problems?: string[];
 }
 
 /** The arc of one topic's lecture, before any of it is written. */
@@ -578,6 +628,18 @@ export interface LlmGatewayPort {
   }): Promise<LlmResult<FigureDraft>>;
 
   /**
+   * How big a thing a story names really is, as it is in the story's
+   * world (a kite, a bicycle, a hut): its height as it usually stands, and
+   * its length, in centimetres. For drawing a show's own among its people
+   * at their scale: an artist draws to fill its canvas, whatever the size.
+   */
+  sceneSize(input: {
+    name: string;
+    /** The story's world, in a few words: "a village in Ghana, today". */
+    world: string | null;
+  }): Promise<LlmResult<{ heightCm: number; lengthCm: number }>>;
+
+  /**
    * One drawing, as SVG markup with its own animation, from its brief.
    * The value is the artist's whole reply; the gate takes the markup out
    * of it. `notes` say what fell short last time.
@@ -656,6 +718,71 @@ export interface LlmGatewayPort {
     previous?: WorkedSolution;
     problems?: string[];
   }): Promise<LlmResult<WorkedSolution>>;
+
+  /**
+   * The producer's turn in the Studio: a reply to the maker, streamed as
+   * it is written, with what it learnt of the brief and the step to take.
+   */
+  studioTurn(input: {
+    phase: 'brief' | 'outline' | 'cast' | 'script' | 'made';
+    /** What the maker can see now, in words: the brief, the outline, the scenes. */
+    state: string;
+    /** The conversation: the maker, the producer, and what the Studio did ('studio'), a line each. */
+    history: { role: 'user' | 'assistant' | 'studio'; content: string }[];
+    message: string;
+    onToken?: (chunk: string) => void;
+  }): Promise<LlmResult<StudioTurnDraft>>;
+
+  /** A show's cast and places, or an explainer's subject and pictures, from its brief. */
+  studioBible(
+    input: { brief: string } & StudioRevision,
+  ): Promise<LlmResult<Record<string, unknown>>>;
+
+  /** An episode's scenes, a line each, before any is written. */
+  studioOutline(
+    input: {
+      brief: string;
+      /** The show's cast and places, or its subject. */
+      bible: string;
+      /** What the episodes before it were. */
+      before?: string;
+    } & StudioRevision,
+  ): Promise<LlmResult<Record<string, unknown>>>;
+
+  /** One story scene's sheet: everything the stage will show, in order. */
+  studioScene(
+    input: {
+      brief: string;
+      bible: string;
+      outline: string;
+      /** Which scene, from 1, and what the outline says of it. */
+      scene: string;
+      /** How the scene before it left the stage. */
+      before: string;
+    } & StudioRevision,
+  ): Promise<LlmResult<Record<string, unknown>>>;
+
+  /**
+   * Whether a scene made again as the maker asked now shows what they
+   * asked for: their words, the producer's reading of them, the film as it
+   * was before and as it is now (each in words, from what it plays), and
+   * the faults code sees in it.
+   */
+  studioCheck(input: {
+    words: string;
+    request: string;
+    before: string[];
+    after: string[];
+    faults: string[];
+    /** Which scene the film is, and the others the maker's words asked about at once: checked on their own, never here. */
+    scene?: number;
+    others?: number[];
+  }): Promise<LlmResult<StudioCheckVerdict>>;
+
+  /** Whether text asks for what no one should be made: flagged, with the categories. */
+  moderate(input: {
+    text: string;
+  }): Promise<{ flagged: boolean; categories: string[] }>;
 
   /** Streams tokens for the answer panel; resolves with the full text. */
   answerHighlight(input: {

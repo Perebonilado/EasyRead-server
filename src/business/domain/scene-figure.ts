@@ -20,7 +20,7 @@
  * stage marks it `talking` its mouth opens and closes. A still (the
  * card, the contact sheet) shows it at rest, eyes open, mouth shut.
  */
-import type { Expression } from './scene-story';
+import type { Expression, StoryWorld } from './scene-story';
 
 export const FIGURE_AGES = ['child', 'teen', 'adult', 'elder'] as const;
 export type FigureAge = (typeof FIGURE_AGES)[number];
@@ -106,6 +106,8 @@ export const TOPS = [
   'agbada',
   // A soldier's plated breastplate over a tunic.
   'armour',
+  // Striped nightclothes, top and trousers alike: for bed.
+  'pyjamas',
 ] as const;
 export type Top = (typeof TOPS)[number];
 
@@ -144,6 +146,8 @@ export const FIGURE_EXTRAS = [
   'sandals',
   // An angel's.
   'wings',
+  // No shoes on: in bed, before they are put on.
+  'bare feet',
 ] as const;
 export type FigureExtra = (typeof FIGURE_EXTRAS)[number];
 
@@ -232,6 +236,15 @@ export const FIGURE_PROPS = [
   'staff',
 ] as const;
 export type FigureProp = (typeof FIGURE_PROPS)[number];
+/**
+ * What stays drawn in a hand wherever a story goes: a staff, an umbrella,
+ * a flag. Anything else a Studio story's people hold is a thing of its
+ * own on the stage (scene-props.ts), to be put down, thrown and caught.
+ */
+export const FIGURE_GEAR = ['flag', 'umbrella', 'staff'] as const;
+export type FigureGear = (typeof FIGURE_GEAR)[number];
+export const isGear = (thing: unknown): thing is FigureGear =>
+  (FIGURE_GEAR as readonly unknown[]).includes(thing);
 
 /** The skin tones, from 1, the lightest, to 10, the deepest. */
 export const SKIN_TONES = 10;
@@ -327,6 +340,8 @@ const SAME: Record<string, string> = {
   babariga: 'agbada',
   armor: 'armour',
   breastplate: 'armour',
+  pajamas: 'pyjamas',
+  pjs: 'pyjamas',
   sarong: 'wrapper',
   lappa: 'wrapper',
   pagne: 'wrapper',
@@ -742,15 +757,15 @@ function mouthShape(name: string, my: number): string {
   }
 }
 
-/** One face over the eyes' whites: the pupils, their lids and brows, and the mouth, at rest and talking. */
-function faceOf(name: Expression, R: Rig, skin: string): string {
+/** One face over the eyes' whites: the pupils, their lids and brows, and the mouth, at rest and talking. `clip` is the eyes' clip's id. */
+function faceOf(name: Expression, R: Rig, skin: string, clip = 'eyes'): string {
   const f = FACES[name];
   const { y, dx, rx, ry } = R.eyes;
   const out: string[] = [];
   // The pupils together, so the eyes can look where the stage says, kept
   // inside the eyes' whites wherever they look; the lids over them.
   out.push(
-    `<g clip-path="url(#eyes)"><g class="pupils">${[-1, 1]
+    `<g clip-path="url(#${clip})"><g class="pupils">${[-1, 1]
       .map(
         (side) =>
           `<circle cx="${r1(side * dx + f.look[0])}" cy="${r1(y + f.look[1])}" r="${f.pupil}" ${flat(FIGURE_INK)}/>`,
@@ -903,6 +918,60 @@ interface Signs {
 }
 
 /**
+ * What floats over someone's head while a sign is on (stars, steam, a Z,
+ * a question mark, a bulb, drops), about the head at (hx, hy), in the
+ * kit's units: drawn apart from the body, so it stays upright over
+ * someone lying down, and can float over anyone the kit did not draw.
+ */
+function airOf(hx: number, hy: number): Partial<Record<FigureSign, string>> {
+  const around = (angle: number, r = 1) => {
+    const a = (angle * Math.PI) / 180;
+    return [hx + Math.cos(a) * 58 * r, hy + Math.sin(a) * 52 * r] as const;
+  };
+  const star = (x: number, y: number, delay: number) => sparkle(x, y, 7, delay);
+  const zed = (x: number, y: number, size: number, delay: number) =>
+    `<path class="rise"${later(delay)} d="M${pt(x, y)} L${pt(x + size, y)} L${pt(x, y + size)} L${pt(x + size, y + size)}" fill="none" stroke="#6a79c9" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>`;
+  const question = (x: number, y: number, delay: number) =>
+    `<g class="tw"${later(delay)}>${line(`M${pt(x - 5, y - 7)} Q${pt(x - 5, y - 14)} ${pt(x + 1, y - 14)} Q${pt(x + 7, y - 14)} ${pt(x + 7, y - 8)} Q${pt(x + 7, y - 3)} ${pt(x + 1, y - 1)} L${pt(x + 1, y + 3)}`, FIGURE_INK, 3.2)}<circle cx="${r1(x + 1)}" cy="${r1(y + 9)}" r="2.2" ${flat(FIGURE_INK)}/></g>`;
+  return {
+    dizzy: [-150, -90, -30]
+      .map((a, k) => star(...around(a), k * 0.35))
+      .join(''),
+    sleeping: [0, 1, 2]
+      .map((k) => zed(hx + 36 + k * 10, hy - 48 - k * 14, 8 + k * 2, k * 0.8))
+      .join(''),
+    headache: [-155, -90, -25]
+      .map((a, k) => bolt(...around(a, 1.02), a, k * 0.3))
+      .join(''),
+    fever: [-18, 0, 18]
+      .map(
+        (x, k) =>
+          `<path class="rise"${later(k * 0.6)} d="M${pt(hx + x, hy - 50)} q5,-4 0,-8 q-5,-4 0,-8 q5,-4 0,-8" fill="none" stroke="${WARM}" stroke-width="3" stroke-linecap="round"/>`,
+      )
+      .join(''),
+    sweating: [-1, 1]
+      .flatMap((side) => [
+        drop(hx + side * 48, hy - 20, side < 0 ? 0 : 0.6),
+        drop(hx + side * 54, hy + 4, side < 0 ? 0.35 : 0.9),
+      ])
+      .join(''),
+    confused: question(hx - 20, hy - 52, 0) + question(hx + 22, hy - 56, 0.5),
+    idea:
+      `<g class="throb"><circle cx="${hx}" cy="${hy - 56}" r="10" ${inked('#ffe16b')}/><rect x="${hx - 5}" y="${hy - 47}" width="10" height="6" rx="2" ${inked('#c9c3ba', 1.8)}/></g>` +
+      [-70, -35, 35, 70]
+        .map((a) => {
+          const r = ((a - 90) * Math.PI) / 180;
+          return line(
+            `M${pt(hx + Math.cos(r) * 14, hy - 56 + Math.sin(r) * 14)} L${pt(hx + Math.cos(r) * 19, hy - 56 + Math.sin(r) * 19)}`,
+            '#e2b75d',
+            2.6,
+          );
+        })
+        .join(''),
+  };
+}
+
+/**
  * Every sign someone can show, drawn where it goes on them: each its own
  * group, hidden until the stage shows it. Those that move do so in their
  * own CSS; what moves the whole body is keyed on a class the stage sets
@@ -916,13 +985,6 @@ function signsOf(p: SignPoints, R: Rig, skin: string): Signs {
   const ey = hy + 3;
   const [, my] = p.mouth;
   const eyes = [-1, 1].map((side) => hx + side * dx);
-  const around = (angle: number, r = 1) => {
-    const a = (angle * Math.PI) / 180;
-    return [hx + Math.cos(a) * 58 * r, hy + Math.sin(a) * 52 * r] as const;
-  };
-  const star = (x: number, y: number, delay: number) => sparkle(x, y, 7, delay);
-  const zed = (x: number, y: number, size: number, delay: number) =>
-    `<path class="rise"${later(delay)} d="M${pt(x, y)} L${pt(x + size, y)} L${pt(x, y + size)} L${pt(x + size, y + size)}" fill="none" stroke="#6a79c9" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>`;
   const puffs = (big: number) =>
     [0, 1, 2]
       .map(
@@ -933,8 +995,6 @@ function signsOf(p: SignPoints, R: Rig, skin: string): Signs {
   const outward = (x: number) => (x < 0 ? -1 : 1);
   const dot = (x: number, y: number) =>
     `<circle cx="${r1(x)}" cy="${r1(y)}" r="2.3" ${flat('#d94b4b')}/>`;
-  const question = (x: number, y: number, delay: number) =>
-    `<g class="tw"${later(delay)}>${line(`M${pt(x - 5, y - 7)} Q${pt(x - 5, y - 14)} ${pt(x + 1, y - 14)} Q${pt(x + 7, y - 14)} ${pt(x + 7, y - 8)} Q${pt(x + 7, y - 3)} ${pt(x + 1, y - 1)} L${pt(x + 1, y + 3)}`, FIGURE_INK, 3.2)}<circle cx="${r1(x + 1)}" cy="${r1(y + 9)}" r="2.2" ${flat(FIGURE_INK)}/></g>`;
   const spiral = (x: number) => {
     const turn: string[] = [];
     for (let k = 0; k <= 26; k += 1) {
@@ -1033,43 +1093,57 @@ function signsOf(p: SignPoints, R: Rig, skin: string): Signs {
     confused: '',
     idea: '',
   };
-  const air: Partial<Record<FigureSign, string>> = {
-    dizzy: [-150, -90, -30]
-      .map((a, k) => star(...around(a), k * 0.35))
-      .join(''),
-    sleeping: [0, 1, 2]
-      .map((k) => zed(hx + 36 + k * 10, hy - 48 - k * 14, 8 + k * 2, k * 0.8))
-      .join(''),
-    headache: [-155, -90, -25]
-      .map((a, k) => bolt(...around(a, 1.02), a, k * 0.3))
-      .join(''),
-    fever: [-18, 0, 18]
-      .map(
-        (x, k) =>
-          `<path class="rise"${later(k * 0.6)} d="M${pt(hx + x, hy - 50)} q5,-4 0,-8 q-5,-4 0,-8 q5,-4 0,-8" fill="none" stroke="${WARM}" stroke-width="3" stroke-linecap="round"/>`,
-      )
-      .join(''),
-    sweating: [-1, 1]
-      .flatMap((side) => [
-        drop(hx + side * 48, hy - 20, side < 0 ? 0 : 0.6),
-        drop(hx + side * 54, hy + 4, side < 0 ? 0.35 : 0.9),
-      ])
-      .join(''),
-    confused: question(hx - 20, hy - 52, 0) + question(hx + 22, hy - 56, 0.5),
-    idea:
-      `<g class="throb"><circle cx="${hx}" cy="${hy - 56}" r="10" ${inked('#ffe16b')}/><rect x="${hx - 5}" y="${hy - 47}" width="10" height="6" rx="2" ${inked('#c9c3ba', 1.8)}/></g>` +
-      [-70, -35, 35, 70]
-        .map((a) => {
-          const r = ((a - 90) * Math.PI) / 180;
-          return line(
-            `M${pt(hx + Math.cos(r) * 14, hy - 56 + Math.sin(r) * 14)} L${pt(hx + Math.cos(r) * 19, hy - 56 + Math.sin(r) * 19)}`,
-            '#e2b75d',
-            2.6,
-          );
-        })
-        .join(''),
-  };
+  const air = airOf(hx, hy);
   return { body, air };
+}
+
+/** The signs that float over the head, and so can float over anyone. */
+export const AIR_SIGNS: readonly FigureSign[] = [
+  'dizzy',
+  'sleeping',
+  'headache',
+  'fever',
+  'sweating',
+  'confused',
+  'idea',
+];
+
+/**
+ * The signs that float over a head, for someone the kit did not draw (an
+ * animal, a creature): each its own group about their head, at the
+ * kit's size on the stage, moving in CSS of its own. `scale` is the
+ * drawing's units to one of the kit's. Only the signs asked for.
+ */
+export function signsOver(
+  head: [number, number],
+  scale: number,
+  signs: readonly FigureSign[],
+  prefix: string,
+): { markup: string; css: string; states: Record<string, string> } {
+  const air = airOf(0, 0);
+  const shown = signs.filter((sign) => AIR_SIGNS.includes(sign) && air[sign]);
+  if (!shown.length) return { markup: '', css: '', states: {} };
+  const own = (markup: string) =>
+    markup.replace(/class="(tw|throb|rise|drip)"/g, 'class="sgn-$1"');
+  const states: Record<string, string> = {};
+  const groups = shown.map((sign) => {
+    const id = `${prefix}-${signId(sign)}`;
+    states[sign] = id;
+    return `<g id="${id}"><g transform="translate(${r1(head[0])} ${r1(head[1])}) scale(${Math.round(scale * 1000) / 1000})">${own(air[sign]!)}</g></g>`;
+  });
+  const moving = MOVES.filter(([, of]) =>
+    of.some((one) => shown.includes(one)),
+  );
+  const css = moving.length
+    ? [
+        `${moving.map(([cls]) => `.sgn-${cls}`).join(',')}{transform-box:fill-box;transform-origin:center}`,
+        ...moving.map(
+          ([cls, , animation, frames]) =>
+            `.sgn-${cls}{animation:${animation}}${frames}`,
+        ),
+      ].join('')
+    : '';
+  return { markup: groups.join(''), css, states };
 }
 
 /** Each sign's whole drawing, on the body and over the head, for someone upright. */
@@ -1643,6 +1717,27 @@ function dressOf(spec: FigureSpec, R: Rig): Dressed {
             .join(''),
       };
     }
+    case 'pyjamas':
+      // Soft stripes down the front and a row of buttons.
+      return {
+        ...plain,
+        details:
+          [-0.62, -0.2, 0.2, 0.62]
+            .map((k) =>
+              line(
+                `M${r1(k * s2)},${sY + 8} L${r1(k * R.halfHem)},${hemY - 2}`,
+                shade(top, 1.3),
+                3,
+              ),
+            )
+            .join('') +
+          [0, 1, 2]
+            .map(
+              (k) =>
+                `<circle cx="0" cy="${r1(sY + 14 + k * ((hemY - sY - 24) / 2))}" r="2.4" ${flat(shade(top, 0.6))}/>`,
+            )
+            .join(''),
+      };
     default:
       return plain;
   }
@@ -2030,6 +2125,8 @@ export interface FigureDrawing {
    * one lying down.
    */
   joints?: Record<'r' | 'l', [Point2, Point2, Point2]>;
+  /** And each leg's hip, knee and foot: the knees bend by them, and the body sinks as far as the legs fold. */
+  legs?: Record<'r' | 'l', [Point2, Point2, Point2]>;
 }
 
 /** How the mouth moves while talking: open and shut, unevenly, as speech does. */
@@ -2059,6 +2156,8 @@ interface Layers {
   legs: string;
   behind: string;
   body: string;
+  /** The body seen from behind: what is worn, with nothing of its front (no collar, no buttons). */
+  bodyBack: string;
   arms: string;
   /** An arm that reaches the face, drawn in front of it: a hand on the head, over the mouth. */
   reach: string;
@@ -2077,6 +2176,8 @@ interface Layers {
   beyond: { left: number; right: number; up: number };
   /** Each arm's shoulder, elbow and hand as drawn: the rig's joints. */
   joints: Record<'r' | 'l', [Point2, Point2, Point2]>;
+  /** Each leg's hip, knee and foot as drawn. */
+  legJoints: Record<'r' | 'l', [Point2, Point2, Point2]>;
 }
 
 /** Whether someone in a pose has a hand free to hold something. */
@@ -2167,29 +2268,50 @@ function layersOf(
     spec.bottom === 'wrapper';
   const trousers = CLOTH[spec.bottomColour];
   const legTop = hemY - 4;
+  // The knee, halfway down: the shin turns about it, so the legs fold and
+  // the body sinks (a crouch, sitting down) with the feet on the ground.
+  const kneeY = r1((legTop - FEET) / 2);
+  const legJoints = {} as Layers['legJoints'];
   for (const s of [-1, 1]) {
     const x = s * 15 - 8;
-    const leg = [
-      `<rect x="${x}" y="${legTop}" width="16" height="${r1(-FEET - legTop)}" ${inked(bare || spec.bottom === 'shorts' ? skin : trousers)}/>`,
-    ];
+    const colour = bare || spec.bottom === 'shorts' ? skin : trousers;
+    // The thigh and the shin, each open at the knee (no outline across
+    // it), over a round knee: standing, one leg as before; bent, the knee
+    // shows where they part.
+    const piece = (open: number, shut: number) =>
+      `<path d="M${x},${r1(open)} V${r1(shut)} H${x + 16} V${r1(open)}" fill="${colour}"/>`;
+    const thigh = [piece(kneeY + 1, legTop)];
     if (!bare && spec.bottom === 'shorts') {
       const cut = hemY + Math.max(8, (-FEET - hemY) * 0.45);
-      leg.push(
+      thigh.push(
         `<rect x="${x - 1}" y="${legTop}" width="18" height="${r1(cut - legTop)}" ${inked(trousers)}/>`,
       );
     }
-    // Sandals: the foot, and straps over it.
-    if (spec.extras.includes('sandals'))
-      leg.push(
-        `<ellipse cx="${s * 17}" cy="-6" rx="15" ry="7" ${inked(skin)}/>`,
-        line(`M${s * 17 - 11},-5 L${s * 17 + 11},-5`, '#6b4a2f', 3),
-        line(`M${s * 17 - 4},-11 L${s * 17 - 4},-1`, '#6b4a2f', 3),
-      );
-    else
-      leg.push(
-        `<ellipse cx="${s * 17}" cy="-6" rx="15" ry="7" ${inked(SHOE)}/>`,
-      );
-    legs.push(`<g class="leg l${s < 0 ? 0 : 1}">${leg.join('')}</g>`);
+    // Sandals: the foot, and straps over it; bare feet, the foot alone.
+    // The foot stays flat on the ground however the leg above it turns.
+    const foot = spec.extras.includes('sandals')
+      ? [
+          `<ellipse cx="${s * 17}" cy="-6" rx="15" ry="7" ${inked(skin)}/>`,
+          line(`M${s * 17 - 11},-5 L${s * 17 + 11},-5`, '#6b4a2f', 3),
+          line(`M${s * 17 - 4},-11 L${s * 17 - 4},-1`, '#6b4a2f', 3),
+        ]
+      : spec.extras.includes('bare feet')
+        ? [`<ellipse cx="${s * 16}" cy="-5" rx="13" ry="6" ${inked(skin)}/>`]
+        : [`<ellipse cx="${s * 17}" cy="-6" rx="15" ry="7" ${inked(SHOE)}/>`];
+    const shin = [
+      piece(kneeY, -FEET),
+      `<g class="foot" style="transform-origin:${s * 15}px ${-FEET}px">${foot.join('')}</g>`,
+    ];
+    // Each leg turns about its hip (a kick, knees apart), and its shin
+    // about the knee.
+    legs.push(
+      `<g class="leg l${s < 0 ? 0 : 1}" style="transform-origin:${s * 15}px ${r1(legTop)}px"><circle cx="${s * 15}" cy="${kneeY}" r="8" fill="${colour}"/><g class="shin" style="transform-origin:${s * 15}px ${kneeY}px">${shin.join('')}</g>${thigh.join('')}</g>`,
+    );
+    legJoints[s > 0 ? 'r' : 'l'] = [
+      [s * 15, r1(legTop)],
+      [s * 15, kneeY],
+      [s * 15, -FEET],
+    ];
   }
   if (
     (spec.bottom === 'skirt' || spec.bottom === 'wrapper') &&
@@ -2199,11 +2321,11 @@ function layersOf(
     // A wrapper falls to the ankles, its end tucked across the front.
     const wrapper = spec.bottom === 'wrapper';
     const down = wrapper ? -FEET - 3 : hemY + Math.max(12, R.legs * 0.5);
-    legs.push(
+    const skirt = [
       `<path d="M${r1(-h2 + 2)},${hemY - 6} L${r1(h2 - 2)},${hemY - 6} L${r1(h2 + 6)},${r1(down)} L${r1(-h2 - 6)},${r1(down)} Z" ${inked(trousers)}/>`,
-    );
+    ];
     if (wrapper)
-      legs.push(
+      skirt.push(
         line(
           `M${r1(h2 - 4)},${hemY - 4} L${r1(-h2 * 0.2)},${r1(down)}`,
           shade(trousers, 0.72),
@@ -2211,12 +2333,20 @@ function layersOf(
         ),
         `<rect x="${r1(-h2 + 2)}" y="${hemY - 6}" width="${r1(h2 * 2 - 4)}" height="6" ${inked(shade(trousers, 0.85), 2)}/>`,
       );
+    // It sinks with the body; one to the ankles is taken up as it does, so
+    // its hem stays off the ground.
+    legs.push(
+      wrapper
+        ? `<g class="skirt wrap" style="transform-origin:0 ${hemY - 6}px;--reach:${r1(down - (hemY - 6))}">${skirt.join('')}</g>`
+        : `<g class="skirt">${skirt.join('')}</g>`,
+    );
   }
 
   // The body: a trapezoid rounded at the shoulders, as long as what is worn.
   const hb = halfAt(bottom);
+  const shape = `<path d="M${r1(-hb)},${r1(bottom)} L${r1(-s2)},${sY + 12} Q${r1(-s2)},${sY} ${r1(-s2 + 12)},${sY} L${r1(s2 - 12)},${sY} Q${r1(s2)},${sY} ${r1(s2)},${sY + 12} L${r1(hb)},${r1(bottom)} Z" ${inked(dressed.fill)}/>`;
   const body = [
-    `<path d="M${r1(-hb)},${r1(bottom)} L${r1(-s2)},${sY + 12} Q${r1(-s2)},${sY} ${r1(-s2 + 12)},${sY} L${r1(s2 - 12)},${sY} Q${r1(s2)},${sY} ${r1(s2)},${sY + 12} L${r1(hb)},${r1(bottom)} Z" ${inked(dressed.fill)}/>`,
+    shape,
     dressed.details,
     extrasOnBody(spec, R),
     dressed.collar,
@@ -2472,6 +2602,7 @@ function layersOf(
     legs: legs.join(''),
     behind: `${backOf(spec, R, bottom, hb)}${packOf(spec, R)}<g class="hd">${hairBehind(spec, R)}</g>`,
     body,
+    bodyBack: shape,
     arms: arms.join(''),
     reach: reach.join(''),
     head: `<g class="hd">${head.join('')}</g>`,
@@ -2502,6 +2633,7 @@ function layersOf(
       up: r1(R.top - FIGURE_FRAME.headroom - beyond.top),
     },
     joints,
+    legJoints,
   };
 }
 
@@ -2678,8 +2810,11 @@ function styleOf(
  * the face turned toward one side. --tilt, --nod: the head tilted (in
  * degrees) and nodded (in units), about the neck. --brow: the brows
  * raised. --ar, --arf, --al, --alf: the right and left arm about the
- * shoulder, and the forearm about the elbow, in degrees. --lean and
- * --flip: the whole figure leant about its feet, and mirrored.
+ * shoulder, and the forearm about the elbow, in degrees. --legr, --legl:
+ * the right and left leg about the hip, in degrees (a kick, knees apart).
+ * --knr, --knl: each shin about its knee, in degrees, the foot kept flat.
+ * --low: the body sunk on its legs, in units (a crouch, sitting down).
+ * --lean and --flip: the whole figure leant about its feet, and mirrored.
  */
 function rigStyle(neck: number): string {
   const head = `transform-box:view-box;transform-origin:0 ${r1(neck)}px`;
@@ -2693,16 +2828,20 @@ function rigStyle(neck: number): string {
     '.arm,.fore{transform-box:view-box}',
     '.ar{transform:rotate(calc(var(--ar,0)*1deg))}.ar .fore{transform:rotate(calc(var(--arf,0)*1deg))}',
     '.al{transform:rotate(calc(var(--al,0)*1deg))}.al .fore{transform:rotate(calc(var(--alf,0)*1deg))}',
+    '.leg{transform-box:view-box}.l1{transform:rotate(calc(var(--legr,0)*1deg))}.l0{transform:rotate(calc(var(--legl,0)*1deg))}',
+    '.shin,.foot,.skirt{transform-box:view-box}.l1 .shin{transform:rotate(calc(var(--knr,0)*1deg))}.l0 .shin{transform:rotate(calc(var(--knl,0)*1deg))}',
+    '.l1 .foot{transform:rotate(calc((var(--legr,0) + var(--knr,0))*-1deg))}.l0 .foot{transform:rotate(calc((var(--legl,0) + var(--knl,0))*-1deg))}',
+    '.leg,.breathe,.skirt{translate:0 calc(var(--low,0)*1px)}.wrap{scale:1 calc(1 - var(--low,0) / var(--reach,100))}',
     '.flip{transform-box:view-box;transform-origin:0 0;transform:scaleX(var(--flip,1)) rotate(calc(var(--lean,0)*1deg))}',
     '.vm{opacity:0}.lipsync .mouth,.lipsync .talk{opacity:0}',
     `${Array.from({ length: MOUTH_SHAPES }, (_, k) => `.lipsync.v${k} .v${k}`).join(',')}{opacity:1}`,
   ].join('');
 }
 
-/** The eyes' whites as a clip: pupils never look out past them. */
-function eyeClip(R: Rig): string {
+/** The eyes' whites as a clip: pupils never look out past them. `id` is the clip's own, unique where many people share a drawing. */
+function eyeClip(R: Rig, id = 'eyes'): string {
   const { y, dx, rx, ry } = R.eyes;
-  return `<defs><clipPath id="eyes">${[-1, 1]
+  return `<defs><clipPath id="${id}">${[-1, 1]
     .map(
       (side) =>
         `<ellipse cx="${side * dx}" cy="${y}" rx="${rx - 1}" ry="${ry - 1}"/>`,
@@ -2895,6 +3034,37 @@ export interface FigureHow {
   signs?: readonly FigureSign[];
   /** A story set before beds had metal frames: a bed is a low wooden pallet with a mat. */
   old?: boolean;
+  /**
+   * The clothes one person changes into later on (a Studio story's "puts
+   * on his uniform"), each a state of its own ("dress-1"): drawn on the
+   * same rig as the clothes they start in, and worn from when the state is
+   * shown, in place of those before it. None for a group, or lying.
+   */
+  dress?: readonly { state: string; spec: FigureSpec }[];
+}
+
+/** The class a figure's clothes are drawn in: 0 what they start in, then each they change into. */
+const dressClass = (k: number) => `dress-${k}`;
+
+/**
+ * The clothes of a figure that changes clothes, as its own CSS shows them:
+ * each later outfit hidden until its state is on, and every outfit before
+ * it hidden once it is.
+ */
+function dressStyle(states: readonly string[]): string {
+  if (!states.length) return '';
+  const later = states.map((_, i) => `.${dressClass(i + 1)}`).join(',');
+  return [
+    `${later}{display:none}`,
+    ...states.map((state, i) => {
+      const k = i + 1;
+      const before = Array.from(
+        { length: k },
+        (_, j) => `.on-${state} .${dressClass(j)}`,
+      ).join(',');
+      return `.on-${state} .${dressClass(k)}{display:inline}${before}{display:none}`;
+    }),
+  ].join('');
 }
 
 /**
@@ -2967,6 +3137,19 @@ export function drawFigure(
   const members = Array.from({ length: n }, (_, i) =>
     layersOf(i === 0 ? spec : companionOf(spec, i, key), posed, holding),
   );
+  // One person who changes clothes: each outfit's clothed layers drawn on
+  // the same rig, the later ones shown as their states are.
+  const changes = n === 1 && !lying ? (how.dress ?? []) : [];
+  const outfits = [
+    members[0],
+    ...changes.map((one) => layersOf(one.spec, posed, holding)),
+  ];
+  const worn = (layer: (l: Layers) => string): string =>
+    changes.length
+      ? outfits
+          .map((l, k) => `<g class="${dressClass(k)}">${layer(l)}</g>`)
+          .join('')
+      : all(layer);
   // The one described stands in the middle of their group.
   const order = members
     .map((layers, i) => ({ layers, i }))
@@ -2989,9 +3172,10 @@ export function drawFigure(
   const wider = (n - 1) * APART;
   // What reaches past the frame widens it on that side, or raises it: a
   // pointing hand, a flag, an umbrella over the head.
-  const left = Math.max(0, ...members.map((l) => l.beyond.left));
-  const right = Math.max(0, ...members.map((l) => l.beyond.right));
-  const up = Math.max(0, ...members.map((l) => l.beyond.up));
+  const reaching = [...members, ...outfits.slice(1)];
+  const left = Math.max(0, ...reaching.map((l) => l.beyond.left));
+  const right = Math.max(0, ...reaching.map((l) => l.beyond.right));
+  const up = Math.max(0, ...reaching.map((l) => l.beyond.up));
   // Lying on the floor, head to the left: the standing figure turned a
   // quarter over, its side on the ground.
   const lies = { x: r1(-R.top / 2), y: -60 };
@@ -3003,26 +3187,27 @@ export function drawFigure(
         r1(frame[2] + wider + left + right),
         r1(frame[3] + up),
       ];
-  const style = styleOf(
-    breathAt,
-    members.map((_, i) => blinkAt(i)),
-    drawn,
-    posed === 'waving',
-    R.sY + 6,
-  );
+  const style =
+    styleOf(
+      breathAt,
+      members.map((_, i) => blinkAt(i)),
+      drawn,
+      posed === 'waving',
+      R.sY + 6,
+    ) + dressStyle(changes.map((one) => one.state));
   const person = [
-    `<g id="legs">${all((l) => l.legs)}</g>`,
+    `<g id="legs">${worn((l) => l.legs)}</g>`,
     `<g class="breathe">`,
-    `<g id="behind">${all((l) => l.behind)}</g>`,
-    `<g id="body">${all((l) => l.body)}</g>`,
-    `<g id="arms">${all((l) => l.arms)}</g>`,
-    `<g id="head">${all((l) => l.head + l.eyes)}</g>`,
+    `<g id="behind">${worn((l) => l.behind)}</g>`,
+    `<g id="body">${worn((l) => l.body)}</g>`,
+    `<g id="arms">${worn((l) => l.arms)}</g>`,
+    `<g id="head">${changes.length ? worn((l) => l.head) + members[0].eyes : all((l) => l.head + l.eyes)}</g>`,
     FACE_NAMES.map(
       (name) => `<g id="${name}">${all((l) => l.faces[name])}</g>`,
     ).join(''),
     `<g id="pain">${all((l) => l.more.pain)}</g>`,
     `<g class="mouths">${all((l) => l.mouths)}</g>`,
-    `<g id="reach">${all((l) => l.reach)}</g>`,
+    `<g id="reach">${worn((l) => l.reach)}</g>`,
     drawn
       .map((name) => `<g id="${signId(name)}">${all((l) => l.signs[name])}</g>`)
       .join(''),
@@ -3031,7 +3216,7 @@ export function drawFigure(
         placeAt(i, layers.blink, ` class="blink b${i}" opacity="0"`),
       )
       .join(''),
-    `<g id="over">${all((l) => l.over)}</g>`,
+    `<g id="over">${worn((l) => l.over)}</g>`,
     `</g>`,
   ].join('');
   const svg = [
@@ -3060,12 +3245,409 @@ export function drawFigure(
     svg,
     viewBox,
     parts: { head: 'head', body: 'body', arms: 'arms', legs: 'legs' },
-    states: statesOf(drawn),
+    states: {
+      ...statesOf(drawn),
+      ...Object.fromEntries(changes.map((one) => [one.state, one.state])),
+    },
     anchors: {
       head: at([0, R.cy]),
       body: at([0, r1((R.sY + R.hemY) / 2)]),
       legs: at([0, r1((R.hemY - FEET) / 2)]),
     },
-    ...(n === 1 && !lying ? { joints: members[0].joints } : {}),
+    ...(n === 1 && !lying
+      ? { joints: members[0].joints, legs: members[0].legJoints }
+      : {}),
   };
+}
+
+// ── Extras ─────────────────────────────────────────────────────────────────
+
+/**
+ * How much of someone in a crowd is drawn, by how tall they stand on the
+ * stage: 0, the kit's own face; 1, dark dots for eyes and no mouth; 2, a
+ * shape with no face and no outline, as someone far off reads.
+ */
+export type ExtraDetail = 0 | 1 | 2;
+/** Which way someone in a crowd faces: toward the viewer, or away. */
+export type ExtraView = 'front' | 'back';
+
+/** Someone in a crowd, drawn by the kit at the rig's origin: their feet at 0. */
+export interface ExtraDrawing {
+  /** Their legs and shoes, each leg its own group. */
+  legs: string;
+  /** Everything above the legs, which breathes: what hangs behind, the body, the arms, the head and the face. */
+  upper: string;
+  /** Their frame, as figureFrame has it, widened for what reaches past it. */
+  viewBox: [number, number, number, number];
+  /** The top of the head (hair and hats aside), the head's middle and the mouth, in the kit's units. */
+  top: number;
+  cy: number;
+  mouthY: number;
+  /** Each arm's shoulder, elbow and hand as drawn: its groups turn about the first two. */
+  joints: Record<'r' | 'l', [Point2, Point2, Point2]>;
+}
+
+/**
+ * The back of a head: hair over all of it but the nape, or what is worn
+ * over it; hats as they are from the front.
+ */
+function backOfHead(spec: FigureSpec, R: Rig, skin: string): string {
+  const { cy } = R;
+  const cover =
+    spec.headwear === 'nemes'
+      ? GOLD
+      : wrapped(spec) || spec.headwear === 'mantle'
+        ? CLOTH[spec.accentColour]
+        : null;
+  const out = [
+    `<ellipse cx="0" cy="${cy}" rx="${HEAD.rx}" ry="${HEAD.ry}" ${inked(cover ?? skin)}/>`,
+  ];
+  if (!cover && spec.hair !== 'bald' && spec.hair !== 'balding')
+    out.push(
+      `<path d="${chord(0, cy, HEAD.rx, HEAD.ry, 0.5)}" ${inked(HAIR[spec.hairColour])}/>`,
+    );
+  if (spec.headwear !== 'headscarf' && spec.headwear !== 'mantle')
+    out.push(headwearOf(spec, R));
+  return `<g class="hd">${out.join('')}</g>`;
+}
+
+/**
+ * Someone in a crowd, drawn by the kit as everyone is, with less of them
+ * the farther off they are (`detail`). Facing the viewer, their eyes and
+ * face at rest (none of the other faces, no mouth shapes, no blink, no
+ * signs); or turned away (`view`), the back of their head and no face.
+ * `id` makes the eyes' clip their own, so many can share one drawing.
+ */
+export function drawExtra(
+  spec: FigureSpec,
+  how: {
+    detail: ExtraDetail;
+    view?: ExtraView;
+    pose?: FigurePose;
+    holding?: FigureProp | null;
+    /** How far the face is turned to one side, -1 to 1, as the stage's --turn. */
+    turn?: number;
+    id: string;
+  },
+): ExtraDrawing {
+  const back = how.view === 'back';
+  // Turned away, they stand with their arms at their sides.
+  const asked = how.pose ?? 'standing';
+  const pose = back || LYING_POSES.includes(asked) ? 'standing' : asked;
+  const holding = back ? null : (how.holding ?? null);
+  const posed = holding && pose === 'standing' ? 'holding' : pose;
+  const L = layersOf(spec, posed, holding);
+  const { R } = L;
+  const skin = SKIN[Math.min(SKIN_TONES, Math.max(1, spec.skin)) - 1];
+  let upper: string;
+  if (back)
+    // From behind, what hangs at the back (long hair, a cloak) is over the body.
+    upper = `${L.bodyBack}${L.arms}${backOfHead(spec, R, skin)}${L.behind}`;
+  else {
+    let face = '';
+    if (how.detail === 0) {
+      const clip = `${how.id}-eyes`;
+      // The face at rest, without the second mouth it speaks with.
+      const rest = faceOf('neutral', R, skin, clip).replace(
+        /<g class="talk" opacity="0">.*?<\/g>/,
+        '',
+      );
+      face = `${eyeClip(R, clip)}${L.eyes}${fm(rest)}`;
+    } else if (how.detail === 1)
+      // Dots for eyes; on dark skin, whites with a dot in each, which a
+      // dark dot on it would not show.
+      face = fm(
+        [-1, 1]
+          .map((side) =>
+            lightness(skin) < DARK_SKIN
+              ? `<ellipse cx="${side * R.eyes.dx}" cy="${R.eyes.y}" rx="7" ry="8" ${flat('#f5f1e8')}/><circle cx="${side * R.eyes.dx}" cy="${R.eyes.y + 1}" r="3.4" ${flat(FIGURE_INK)}/>`
+              : `<ellipse cx="${side * R.eyes.dx}" cy="${R.eyes.y}" rx="6" ry="7" ${flat(FIGURE_INK)}/>`,
+          )
+          .join(''),
+      );
+    // Turned a little to one side: the face and what is over it, as the stage turns it.
+    const turn = r1((how.turn ?? 0) * 7);
+    const turned = (markup: string) =>
+      turn && markup
+        ? `<g transform="translate(${turn} 0)">${markup}</g>`
+        : markup;
+    upper = `${L.behind}${L.body}${L.arms}${L.head}${turned(face)}${L.reach}${how.detail === 2 ? '' : turned(L.over)}`;
+  }
+  let legs = L.legs;
+  // Far off, a shape: no outline anywhere, not even the arms' own.
+  if (how.detail === 2) {
+    const bare = (markup: string) =>
+      markup.replace(
+        new RegExp(`stroke="${FIGURE_INK}"`, 'g'),
+        'stroke="none"',
+      );
+    upper = bare(upper);
+    legs = bare(legs);
+  }
+  const frame = figureFrame(spec.age);
+  const left = Math.max(0, L.beyond.left);
+  const right = Math.max(0, L.beyond.right);
+  const up = Math.max(0, L.beyond.up);
+  return {
+    legs,
+    upper,
+    viewBox: [
+      r1(frame[0] - left),
+      r1(frame[1] - up),
+      r1(frame[2] + left + right),
+      r1(frame[3] + up),
+    ],
+    top: R.top,
+    cy: R.cy,
+    mouthY: R.mouthY,
+    joints: L.joints,
+  };
+}
+
+/** What people wear in a story's world, from the kit's own lists, and the colours they wear it in. */
+interface Wardrobe {
+  tops: readonly Top[];
+  bottoms: readonly Bottom[];
+  headwear: readonly Headwear[];
+  colours: readonly ClothColour[];
+  /** Skin tones, 1 to 10, as most are there. */
+  skins: readonly number[];
+  extras: readonly FigureExtra[];
+}
+
+const EARTHY: readonly ClothColour[] = [
+  'brown',
+  'white',
+  'grey',
+  'navy',
+  'yellow',
+  'red',
+  'green',
+  'brown',
+  'white',
+];
+const BRIGHT: readonly ClothColour[] = CLOTH_COLOURS.filter(
+  (c) => c !== 'black' && c !== 'grey',
+);
+
+/**
+ * The wardrobe for a story's world: the ancient world in robes, tunics
+ * and head cloths; West Africa in kaftans, agbadas, wrappers and geles;
+ * anywhere else in everyday clothes.
+ */
+export function wardrobeOf(world: StoryWorld | null): Wardrobe {
+  const text = world
+    ? [world.era, world.region, world.culture, world.homes, world.landscape]
+        .join(' ')
+        .toLowerCase()
+    : '';
+  if (
+    /\b(?:bc|ad|first century|1st century|ancient|biblical|bible|roman|galilee|judea|judaea|jerusalem|israel|nazareth|egypt|egyptian|pharaoh|babylon|medieval|middle ages)\b/.test(
+      text,
+    )
+  )
+    return {
+      tops: ['robe', 'robe', 'tunic', 'tunic', 'robe', 'apron'],
+      bottoms: ['trousers'],
+      headwear: ['none', 'none', 'headscarf', 'turban', 'mantle', 'headscarf'],
+      colours: EARTHY,
+      skins: [4, 5, 5, 6, 6, 7],
+      extras: ['sandals', 'sandals', 'cloak'],
+    };
+  if (
+    /\b(?:nigeria|nigerian|yoruba|igbo|hausa|ghana|ghanaian|akan|west africa|west african|lagos|accra|ibadan|kano|abuja)\b/.test(
+      text,
+    )
+  )
+    return {
+      tops: [
+        't-shirt',
+        't-shirt',
+        'kaftan',
+        'kaftan',
+        'dress',
+        'shirt and tie',
+        'agbada',
+        'apron',
+        'jacket',
+      ],
+      bottoms: [
+        'trousers',
+        'trousers',
+        'wrapper',
+        'wrapper',
+        'skirt',
+        'shorts',
+      ],
+      headwear: ['none', 'none', 'none', 'gele', 'kufi', 'cap', 'headscarf'],
+      colours: BRIGHT,
+      skins: [6, 7, 8, 8, 9, 9, 10],
+      extras: ['earrings', 'glasses'],
+    };
+  return {
+    tops: [
+      't-shirt',
+      'jumper',
+      'hoodie',
+      'shirt and tie',
+      'jacket',
+      'coat',
+      'dress',
+      'cardigan',
+    ],
+    bottoms: ['trousers', 'trousers', 'shorts', 'skirt'],
+    headwear: ['none', 'none', 'none', 'none', 'cap', 'beanie', 'sun hat'],
+    colours: CLOTH_COLOURS,
+    skins: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10],
+    extras: ['glasses', 'scarf', 'backpack'],
+  };
+}
+
+/** How light a colour looks, 0 (black) to 1 (white). */
+function lightness(hex: string): number {
+  const n = parseInt(hex.slice(1), 16);
+  return (
+    (0.299 * (n >> 16) + 0.587 * ((n >> 8) & 255) + 0.114 * (n & 255)) / 255
+  );
+}
+
+/** Skin this dark, in clothes or a hat this dark, and a head far off is a dark blob: what they wear is at least this light. */
+const DARK_SKIN = 0.3;
+const DARK_CLOTH = 0.35;
+const READS_ON_DARK = 0.45;
+
+/**
+ * An extra's colours where their head reads: someone with dark skin in a
+ * dark top or a dark hat (navy, black) wears one of the world's lighter
+ * colours instead, as the seed picks it, so their head never runs into
+ * what is under and on it. Their skin and hair are as they are; anyone
+ * else is left as they are.
+ */
+export function readable(
+  spec: FigureSpec,
+  colours: readonly ClothColour[],
+  seed: string,
+): FigureSpec {
+  const skin = SKIN[Math.min(SKIN_TONES, Math.max(1, spec.skin)) - 1];
+  if (lightness(skin) >= DARK_SKIN) return spec;
+  const light = colours.filter((c) => lightness(CLOTH[c]) >= READS_ON_DARK);
+  const lighter = (colour: ClothColour, salt: string): ClothColour =>
+    lightness(CLOTH[colour]) >= DARK_CLOTH || !light.length
+      ? colour
+      : light[
+          Math.floor(beatOf(`${seed}:${salt}`) * light.length) % light.length
+        ];
+  return {
+    ...spec,
+    topColour: lighter(spec.topColour, 'top'),
+    ...(spec.headwear !== 'none'
+      ? { accentColour: lighter(spec.accentColour, 'hat') }
+      : {}),
+  };
+}
+
+/** Who in a crowd is how old: mostly grown-ups, a few children, teenagers and elders. */
+const CROWD_AGES: [FigureAge, number][] = [
+  ['child', 0.14],
+  ['teen', 0.1],
+  ['adult', 0.62],
+  ['elder', 0.14],
+];
+
+/**
+ * The `i`th person of a crowd in a story's world, dressed from the kit's
+ * own lists for it: their age, build, skin, hair, clothes and colours
+ * their own, and the same for the same seed every time.
+ */
+export function extraFor(
+  world: StoryWorld | null,
+  seed: string,
+  i: number,
+): FigureSpec {
+  const key = `${seed}:${i}`;
+  const pick = <T>(list: readonly T[], salt: string): T =>
+    list[Math.floor(beatOf(`${key}:${salt}`) * list.length) % list.length];
+  const w = wardrobeOf(world);
+  let a = beatOf(`${key}:age`);
+  let age: FigureAge = 'adult';
+  for (const [one, share] of CROWD_AGES) {
+    if (a < share) {
+      age = one;
+      break;
+    }
+    a -= share;
+  }
+  const grown = age === 'adult' || age === 'elder';
+  // A child in a child's clothes: no agbada, no tie, no apron.
+  const tops = grown
+    ? w.tops
+    : w.tops.filter((t) => !['agbada', 'shirt and tie', 'apron'].includes(t));
+  const top = pick(tops.length ? tops : ['t-shirt' as const], 'top');
+  const headwear = pick(
+    grown ? w.headwear : w.headwear.filter((h) => h !== 'gele'),
+    'headwear',
+  );
+  // One dressed as a woman is dressed so all through, and beardless.
+  const woman =
+    top === 'dress' ||
+    headwear === 'gele' ||
+    headwear === 'headscarf' ||
+    headwear === 'mantle';
+  const hairs: readonly HairStyle[] =
+    age === 'elder'
+      ? ['balding', 'short', 'bun', 'bald', 'curly']
+      : woman
+        ? ['bun', 'braids', 'long', 'bob', 'afro', 'ponytail', 'locs']
+        : age === 'child'
+          ? ['short', 'pigtails', 'curly', 'afro', 'spiky', 'bob']
+          : ['short', 'curly', 'afro', 'locs', 'short', 'bald'];
+  const covered = headwear !== 'none';
+  return readable(
+    {
+      age,
+      build: pick(FIGURE_BUILDS, 'build'),
+      skin: pick(w.skins, 'skin'),
+      // Under a hat, hair that would stand out from under it is left out.
+      hair: pick(
+        covered
+          ? hairs.filter((h) => h !== 'afro' && h !== 'bun' && h !== 'bald')
+          : hairs,
+        'hair',
+      ),
+      hairColour:
+        age === 'elder'
+          ? pick(['grey', 'white'] as const, 'colour')
+          : pick(
+              w.skins[0] >= 6
+                ? (['black', 'black', 'dark brown'] as const)
+                : HAIR_COLOURS.slice(0, 6),
+              'colour',
+            ),
+      facialHair:
+        grown && !woman
+          ? pick(
+              ['none', 'none', 'none', 'moustache', 'beard'] as const,
+              'beard',
+            )
+          : 'none',
+      headwear,
+      top,
+      topColour: pick(w.colours, 'topColour'),
+      bottom:
+        top === 'dress' || top === 'robe' || top === 'agbada'
+          ? 'trousers'
+          : pick(
+              woman ? w.bottoms : w.bottoms.filter((b) => b !== 'skirt'),
+              'bottom',
+            ),
+      bottomColour: pick(
+        ['navy', 'brown', 'grey', 'black', 'teal', 'blue', 'purple'] as const,
+        'bottomColour',
+      ),
+      accentColour: pick(w.colours, 'accent'),
+      extras: beatOf(`${key}:extra`) < 0.2 ? [pick(w.extras, 'extras')] : [],
+    },
+    w.colours,
+    key,
+  );
 }

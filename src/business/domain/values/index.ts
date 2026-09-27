@@ -10,6 +10,9 @@ export const PLAN_LIMITS = {
     documentsPerMonth: 3,
     studyMinutesPerDay: 20,
     voiceMinutesPerMonth: 15,
+    // Studio film is not capped for now: what is made is still counted
+    // (UsageMetric.STUDIO_SECONDS), to be billed once pricing is settled.
+    studioMinutesPerMonth: null,
     watermarkedExports: true,
     priceUsdMonthly: 0,
     priceUsdYearly: 0,
@@ -19,6 +22,7 @@ export const PLAN_LIMITS = {
     documentsPerMonth: null,
     studyMinutesPerDay: null,
     voiceMinutesPerMonth: 120,
+    studioMinutesPerMonth: null,
     watermarkedExports: false,
     priceUsdMonthly: 14,
     priceUsdYearly: 100,
@@ -32,6 +36,8 @@ export interface PlanLimits {
   studyMinutesPerDay: number | null;
   /** The monthly voice allowance; purchased credits sit on top of this. */
   voiceMinutesPerMonth: number | null;
+  /** Minutes of film the Studio makes a month: made scenes, counted as they are made. */
+  studioMinutesPerMonth: number | null;
   watermarkedExports: boolean;
   /** Whole US dollars. Paddle bills in USD everywhere; there is no naira tier. */
   priceUsdMonthly: number;
@@ -51,11 +57,13 @@ export const UNLIMITED_LIMITS: Pick<
   | 'documentsPerMonth'
   | 'studyMinutesPerDay'
   | 'voiceMinutesPerMonth'
+  | 'studioMinutesPerMonth'
   | 'watermarkedExports'
 > = {
   documentsPerMonth: null,
   studyMinutesPerDay: null,
   voiceMinutesPerMonth: null,
+  studioMinutesPerMonth: null,
   watermarkedExports: false,
 };
 
@@ -110,5 +118,7 @@ export const UsageMetric = {
   STUDY_SECONDS: 'study_seconds',
   /** Seconds of live voice, across the tutor and group sessions. */
   VOICE_SECONDS: 'voice_seconds',
+  /** Seconds of film the Studio made, scene by scene. */
+  STUDIO_SECONDS: 'studio_seconds',
 } as const;
 export type UsageMetric = (typeof UsageMetric)[keyof typeof UsageMetric];

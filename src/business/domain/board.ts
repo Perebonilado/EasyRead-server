@@ -3373,6 +3373,8 @@ export function wordTimesFromAligned(
   durationMs: number,
   audioKey: string,
   source: Exclude<WordTimesSource, 'estimate'>,
+  /** How long the audio ends on a quiet it is known to have, with no words in it: a scene's closing pause. */
+  quietEndMs = 0,
 ): WordTimes | null {
   const expected = spoken.match(/\S+/g) ?? [];
   if (!aligned.length || !expected.length) return null;
@@ -3384,7 +3386,9 @@ export function wordTimesFromAligned(
   }
   if (aligned.length < expected.length * 0.9) return null;
   const spoken_end = aligned[aligned.length - 1].endMs;
-  if (Math.abs(spoken_end - durationMs) > Math.max(durationMs * 0.15, 1500)) {
+  // The words end where the voice stops: before the quiet it ends on.
+  const said = durationMs - Math.min(Math.max(0, quietEndMs), durationMs);
+  if (Math.abs(spoken_end - said) > Math.max(said * 0.15, 1500)) {
     return null;
   }
   const words: number[][] = [];

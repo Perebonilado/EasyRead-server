@@ -15,6 +15,7 @@ import {
   type LineFrom,
   type LinePace,
   type SceneMood,
+  type SceneScript,
 } from './scene-script';
 import type { StoryBible, StoryCharacter, StoryVoice } from './scene-story';
 
@@ -58,8 +59,12 @@ export const LINE_PACE_SPEED: Record<LinePace, number> = {
   whisper: 0.9,
   shout: 1.04,
 };
-/** The longest silence a sentence may keep after it, for what happens in it: as long as the voice holds. */
-export const HOLD_LIMIT_S = 3;
+/**
+ * The longest silence a sentence may keep after it, for what happens in
+ * it: a book's screenplay asks three seconds at most; a Studio scene up to
+ * six (a throw, a chase and a pick-up), carried by its music.
+ */
+export const HOLD_LIMIT_S = 6;
 
 /** Each sentence's pace and the silence after it, in seconds. */
 /**
@@ -255,8 +260,15 @@ export function characterVoice(
     (c) => c.voice === character.voice && c.met < character.met,
   ).length;
   const kind = character.voice;
+  // A voice someone chose is theirs; else the next of their kind's.
+  const pick =
+    character.voicePick !== undefined &&
+    character.voicePick !== null &&
+    character.voicePick >= 0
+      ? character.voicePick
+      : before;
   return {
-    voice: palette[before % palette.length],
+    voice: palette[pick % palette.length],
     pace: CHARACTER_PACE[kind],
     style: `as ${character.name}, ${CHARACTER_MANNER[kind] ?? (kind === 'creature' ? 'a creature' : `${/^[aeiou]/.test(kind) ? 'an' : 'a'} ${kind}`)}${character.traits.length ? `, ${character.traits.join(', ')}` : ''}, saying their own line`,
   };
@@ -388,4 +400,37 @@ export function sceneEngine(
   ready: Record<SceneVoiceEngine, boolean>,
 ): SceneVoiceEngine {
   return chosen && ready[chosen] ? chosen : deploymentEngine(named, ready);
+}
+
+/** What of a sentence its voice is made from: its words, who says them and how, and the quiet after. */
+const voicedOf = (beat: SceneBeat) => [
+  beat.say,
+  beat.pause,
+  beat.delivery,
+  beat.kind ?? null,
+  beat.pace ?? null,
+  beat.from ?? null,
+  beat.holdS ?? null,
+  beat.speaker ?? null,
+  beat.lines ?? null,
+];
+
+/**
+ * Whether two scripts are voiced alike: the same sentences said the same
+ * way by the same people, with the same quiet after each and before the
+ * first. A scene staged again that is voiced alike is composed on the
+ * voice it was made with, never voiced again.
+ */
+export function voicedAlike(
+  a: Pick<SceneScript, 'beats' | 'mood' | 'lead' | 'opening'>,
+  b: Pick<SceneScript, 'beats' | 'mood' | 'lead' | 'opening'>,
+): boolean {
+  const said = (script: typeof a) =>
+    JSON.stringify([
+      script.mood,
+      script.lead ?? 0,
+      script.opening?.show.length ? 1 : 0,
+      script.beats.map(voicedOf),
+    ]);
+  return said(a) === said(b);
 }

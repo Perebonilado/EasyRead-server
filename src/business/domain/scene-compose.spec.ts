@@ -1,13 +1,16 @@
 import { PLAIN_FIGURE } from './scene-figure';
 import {
   composeScene,
+  directedShots,
   fillQuiet,
+  quietCuts,
   rhythmOf,
   storyShots,
   fullestStep,
   oneFaceAtATime,
   sidesKept,
   spokenIn,
+  thingDto,
   thumbSvg,
 } from './scene-compose';
 import type { SceneScript } from './scene-script';
@@ -1057,6 +1060,62 @@ describe('what a character says, in a bubble', () => {
     );
   });
 
+  it("plays a Studio film's scene as a clip of the film, holding until all it plans has settled", () => {
+    const made = (film: boolean) =>
+      composeScene({
+        script: {
+          ...talking,
+          steps: [
+            ...talking.steps,
+            // Mira walks off a second after the fox's line.
+            {
+              at: { beat: 3, phrase: 'You are' },
+              word: 0,
+              after: 1,
+              stage: { layout: 'one', show: ['fox'], arrows: [] },
+              effects: [],
+            },
+          ],
+          camera: [{ beat: 3, shot: 'close', on: 'fox', with: null }],
+        },
+        drawings: new Map([
+          ['mira', figure()],
+          ['fox', figure()],
+        ]),
+        beats: beatsSaid,
+        durationMs: 11_000,
+        timing: 'voice',
+        generator: 'scene-2',
+        profile: {
+          kind: 'fiction',
+          tone: 'neutral',
+          story: true,
+          ...(film ? { film } : {}),
+        },
+      }).scene;
+    const film = made(true);
+    expect(film.setting?.film).toBe(true);
+    const last = beatsSaid[beatsSaid.length - 1].endMs;
+    // Mira's walk off starts after the voice has ended, and ends later still.
+    const off = film.steps[film.steps.length - 1].atMs;
+    expect(off).toBeGreaterThan(last);
+    expect(film.settledMs).toBeGreaterThan(off + 1000);
+    expect(film.settledMs).toBeGreaterThan(film.durationMs);
+    // The camera as the sheet says: cut in.
+    const zooms = film.effects.filter((e) => e.do === 'zoom');
+    expect(zooms).toEqual([
+      expect.objectContaining({
+        target: 'fox',
+        shot: { enter: 'cut' },
+        atMs: beatsSaid[3].startMs - 250,
+      }),
+    ]);
+    // A book's page: no film, no settled time.
+    const page = made(false);
+    expect(page.setting?.film).toBeUndefined();
+    expect(page.settledMs).toBeUndefined();
+  });
+
   it('acts what the narration says at the word that says it, and attention on a character as looks', () => {
     const sentence = talking.beats[3].say;
     const at = sentence.indexOf('says');
@@ -1436,7 +1495,7 @@ describe('what a character says, in a bubble', () => {
     expect(played.acting?.mira.mouth ?? []).toEqual([]);
   });
 
-  it("dresses a story's page: its set at full strength, its night and storm, and a crowd that speaks and cheers", () => {
+  it("dresses a story's page: its set at full strength, its night and storm, and a crowd in it that speaks and cheers", () => {
     const line = (
       say: string,
       speaker: string,
@@ -1467,7 +1526,15 @@ describe('what a character says, in a bubble', () => {
             intro: [],
             group: true,
           },
+          {
+            id: 'quay',
+            kind: 'place',
+            ref: 'quay',
+            name: 'The quay',
+            sound: null,
+          },
         ],
+        backdrop: 'quay',
         beats: [
           {
             say: 'A great multitude gathers on the shore.',
@@ -1482,7 +1549,12 @@ describe('what a character says, in a bubble', () => {
           {
             at: { beat: 0, phrase: '' },
             word: 0,
-            stage: { layout: 'row', show: ['mira', 'fox'], arrows: [] },
+            stage: {
+              layout: 'row',
+              show: ['mira', 'fox'],
+              arrows: [],
+              backdrop: 'quay',
+            },
             effects: [],
           },
         ],
@@ -1496,7 +1568,25 @@ describe('what a character says, in a bubble', () => {
       drawings: new Map([
         ['mira', figure()],
         ['fox', figure()],
+        [
+          'quay',
+          drawing({
+            viewBox: [0, 0, 1600, 900],
+            aspect: 16 / 9,
+            parts: {},
+            labels: {},
+            states: {},
+            // Its ground, measured when it was painted: open to 0.64 of the way down.
+            ground: {
+              top: Array.from({ length: 320 }, () => 0.64),
+              horizon: 0.636,
+              haze: '#dfe6ea',
+              source: 'colour',
+            },
+          }),
+        ],
       ]),
+      key: 'books/ember.json',
       beats: [
         beat('A great multitude gathers on the shore.', 0),
         beat('Who goes there?', 3000),
@@ -1510,7 +1600,12 @@ describe('what a character says, in a bubble', () => {
       full: true,
       time: 'night',
       weather: 'storm',
-      crowd: { id: '@crowd', moves: [[5000, 'cheer', 1400]] },
+      crowd: {
+        id: '@crowd',
+        place: 'quay',
+        frame: 'set',
+        moves: [[5000, 'cheer', 1400]],
+      },
     });
     // The crowd is drawn by code, and never stands in a step.
     expect(
@@ -1519,10 +1614,37 @@ describe('what a character says, in a bubble', () => {
     expect(played.steps.every((step) => !step.show.includes('@crowd'))).toBe(
       true,
     );
-    // The crowd's line comes from over the crowd.
+    // Drawn in its set's frame, on its ground: no one's feet above it.
+    const crowd = played.things.find((t) => t.id === '@crowd');
+    expect(crowd?.kind === 'drawing' && crowd.svg).toContain(
+      'viewBox="0 0 1600 900"',
+    );
+    // The crowd's line comes from over the crowd, and from none of the
+    // story's people.
     const shout = played.effects.find((e) => e.target === 'crowd-people');
     expect(shout?.say?.from).toBe('crowd');
-    expect(played.stagings.wide.bubbles![shout!.say!.id]?.from).toBe('crowd');
+    for (const staging of ['box', 'wide'] as const) {
+      const bubble = played.stagings[staging].bubbles![shout!.say!.id]!;
+      expect(bubble.from).toBe('crowd');
+      // By the heads of a group of it, back by the horizon.
+      const [tx, ty] = bubble.tail;
+      expect(ty).toBeGreaterThan(400);
+      expect(ty).toBeLessThan(620);
+      for (const at of Object.values(played.stagings[staging].places[0]))
+        expect(tx < at.x + at.w * 0.2 || tx > at.x + at.w * 0.8).toBe(true);
+    }
+    // The card's still shows the crowd over its set, laid as the set is.
+    const still = thumbSvg(
+      played,
+      new Map([
+        ['quay', Buffer.from('the set')],
+        ['@crowd', Buffer.from('the crowd')],
+      ]),
+    );
+    const set = still.indexOf(Buffer.from('the set').toString('base64'));
+    const people = still.indexOf(Buffer.from('the crowd').toString('base64'));
+    expect(set).toBeGreaterThan(0);
+    expect(people).toBeGreaterThan(set);
     // Mira, met here for the first time, gets a moment of the camera.
     expect(
       played.effects.some(
@@ -1530,6 +1652,123 @@ describe('what a character says, in a bubble', () => {
           e.do === 'zoom' && e.target === 'mira' && e.untilMs !== undefined,
       ),
     ).toBe(true);
+  });
+
+  it('gives the crowd’s words no heads to come from where its place is not behind the stage', () => {
+    const say = 'Hosanna!';
+    const played = composeScene({
+      script: {
+        ...talking,
+        cast: [
+          ...talking.cast,
+          {
+            id: 'crowd-people',
+            kind: 'character',
+            ref: 'the-crowd',
+            name: 'The crowd',
+            state: null,
+            met: 2,
+            intro: [],
+            group: true,
+          },
+          {
+            id: 'quay',
+            kind: 'place',
+            ref: 'quay',
+            name: 'The quay',
+            sound: null,
+          },
+          {
+            id: 'road',
+            kind: 'place',
+            ref: 'road',
+            name: 'The road',
+            sound: null,
+          },
+        ],
+        backdrop: 'quay',
+        beats: [
+          {
+            say: 'A great multitude gathers on the shore.',
+            pause: 'short',
+            delivery: 'explain',
+            kind: 'narration',
+          },
+          {
+            say: 'Mira runs up the road.',
+            pause: 'short',
+            delivery: 'explain',
+            kind: 'narration',
+          },
+          {
+            say,
+            pause: 'short',
+            delivery: 'explain',
+            kind: 'line',
+            speaker: 'crowd-people',
+            lines: [{ span: [0, say.length], speaker: 'crowd-people' }],
+          },
+        ],
+        steps: [
+          {
+            at: { beat: 0, phrase: '' },
+            word: 0,
+            stage: {
+              layout: 'row',
+              show: ['mira', 'fox'],
+              arrows: [],
+              backdrop: 'quay',
+            },
+            effects: [],
+          },
+          {
+            at: { beat: 1, phrase: '' },
+            word: 0,
+            stage: {
+              layout: 'row',
+              show: ['mira'],
+              arrows: [],
+              backdrop: 'road',
+            },
+            effects: [],
+          },
+        ],
+        setting: { time: null, weather: null, crowd: 'many', world: null },
+      },
+      drawings: new Map([
+        ['mira', figure()],
+        ['fox', figure()],
+        ...(['quay', 'road'] as const).map(
+          (id) =>
+            [
+              id,
+              drawing({
+                viewBox: [0, 0, 1600, 900],
+                aspect: 16 / 9,
+                parts: {},
+                labels: {},
+                states: {},
+              }),
+            ] as const,
+        ),
+      ]),
+      key: 'books/ember.json',
+      beats: [
+        beat('A great multitude gathers on the shore.', 0),
+        beat('Mira runs up the road.', 3000),
+        beat(say, 5000),
+      ],
+      durationMs: 7000,
+      timing: 'voice',
+      generator: 'scene-2',
+    }).scene;
+    expect(played.setting?.crowd?.place).toBe('quay');
+    const shout = played.effects.find((e) => e.target === 'crowd-people');
+    for (const staging of ['box', 'wide'] as const) {
+      const bubble = played.stagings[staging].bubbles![shout!.say!.id]!;
+      // On the road the crowd is not seen: its words come from above.
+      expect(bubble.tail[1]).toBeLessThan(0);
+    }
   });
 
   it('walks one over to the other before a hug across the row, and keeps them side by side', () => {
@@ -2043,6 +2282,284 @@ describe("a screenplay's camera", () => {
   });
 });
 
+describe("a sheet's camera, cut as a film is", () => {
+  const person = (id: string) => ({
+    id,
+    kind: 'character' as const,
+    ref: id,
+    name: id,
+    state: null,
+    met: 0,
+    intro: [],
+  });
+  const step = (atMs: number, show: string[]) => ({
+    atMs,
+    layout: 'row' as const,
+    show,
+    arrows: [],
+    enter: {},
+    focus: null,
+  });
+  /** A line said from one time to another, by someone (null: the narrator). */
+  const said = (startMs: number, endMs: number) => ({
+    text: 'Words.',
+    startMs,
+    endMs,
+    words: [] as TimedBeat['words'],
+  });
+  // The Maya film's first scene, as it was voiced: twelve lines, Maya
+  // off after the ninth.
+  const maya = [
+    said(447, 4345),
+    said(5769, 7335),
+    said(7920, 9810),
+    said(10_612, 11_798),
+    said(13_571, 15_438),
+    said(16_428, 18_706),
+    said(19_676, 20_671),
+    said(21_182, 22_120),
+    said(22_859, 23_759),
+    said(25_404, 26_900),
+    said(28_074, 29_880),
+    said(33_019, 34_750),
+  ];
+  const speakers = [
+    null,
+    'maya',
+    'maya',
+    'maya',
+    'maya',
+    'mama',
+    'maya',
+    'maya',
+    'maya',
+    'mama',
+    'mama',
+    null,
+  ];
+  const sheet = (camera: SceneScript['camera']): SceneScript => ({
+    ...script,
+    cast: ['maya', 'pip', 'mama'].map(person),
+    beats: speakers.map((speaker) =>
+      speaker
+        ? {
+            say: 'Words.',
+            pause: 'short' as const,
+            delivery: 'explain' as const,
+            kind: 'line' as const,
+            speaker,
+          }
+        : {
+            say: 'Words.',
+            pause: 'short' as const,
+            delivery: 'explain' as const,
+            kind: 'narration' as const,
+          },
+    ),
+    camera,
+  });
+  const steps = [
+    step(0, ['maya', 'pip', 'mama']),
+    step(11_948, ['maya', 'mama']),
+    step(23_909, ['mama']),
+  ];
+  const close = (beat: number, on: string) => ({
+    beat,
+    shot: 'close' as const,
+    on,
+    with: null,
+  });
+  const wide = (beat: number) => ({
+    beat,
+    shot: 'wide' as const,
+    on: null,
+    with: null,
+  });
+  const shotsOf = (camera: SceneScript['camera'], durationMs = 35_240) =>
+    directedShots(sheet(camera), maya, steps, durationMs);
+  /** Whether a moment falls in someone's words. */
+  const inWords = (t: number) =>
+    maya.some((line) => t > line.startMs && t < line.endMs);
+
+  it('cuts in the quiet before a line, never in anyone’s words', () => {
+    const cuts = quietCuts(maya, 35_240);
+    // A long quiet: a quarter of a second before the line.
+    expect(cuts.before(4)).toBe(13_571 - 250);
+    // A short one: just after the words before it.
+    expect(cuts.before(8)).toBe(22_859 - 250);
+    expect(quietCuts([said(0, 1000), said(1200, 2000)], 3000).before(1)).toBe(
+      1120,
+    );
+    // In the words of a line: the quiet after it.
+    expect(cuts.from(21_371)).toBe(22_609);
+    expect(cuts.from(24_500)).toBe(24_500);
+    const shots = shotsOf([close(4, 'maya'), close(10, 'mama')]);
+    for (const shot of shots) {
+      expect(inWords(shot.atMs)).toBe(false);
+      expect(inWords(shot.untilMs!)).toBe(false);
+      expect(shot.shot).toEqual({ enter: 'cut' });
+    }
+  });
+
+  it('ends a shot held 8 s in the quiet after the line it has reached', () => {
+    // Close on Maya from "Pip! Where are you going?": held 8 s, it would
+    // end at 21 321, in "I have to catch him!" (21 182–22 120). (Maya says
+    // the fifth line here too, so nothing else ends it first.)
+    const all = sheet([close(4, 'maya'), close(10, 'mama')]);
+    const [first, second] = directedShots(
+      {
+        ...all,
+        beats: all.beats.map((b, i) =>
+          i === 5 ? { ...b, speaker: 'maya' } : b,
+        ),
+      },
+      maya,
+      steps,
+      35_240,
+    );
+    expect(first).toMatchObject({ atMs: 13_321, target: 'maya' });
+    expect(first.untilMs).toBeGreaterThan(22_120);
+    expect(first.untilMs).toBeLessThan(22_859);
+    expect(second).toMatchObject({
+      atMs: 27_824,
+      target: 'mama',
+      untilMs: 35_240,
+    });
+  });
+
+  it('makes two in a row on the same one shot, and goes wide where the sheet says', () => {
+    expect(
+      shotsOf([close(1, 'maya'), close(2, 'maya')]).map((s) => [
+        s.atMs,
+        s.untilMs,
+      ]),
+    ).toEqual([[5519, 11_948]]);
+    // Wide at the fourth line: the close shot ends in the quiet before it.
+    const [one, two] = shotsOf([close(1, 'maya'), wide(3), close(5, 'mama')]);
+    expect([one.atMs, one.untilMs]).toEqual([5519, 10_362]);
+    expect(two).toMatchObject({ atMs: 16_178, target: 'mama' });
+  });
+
+  it('ends before the stage changes, in the quiet before the line it changes in', () => {
+    // Pip runs off at 11 948, between two lines: the shot ends there.
+    expect(shotsOf([close(2, 'maya')])[0].untilMs).toBe(11_948);
+    const [shot] = directedShots(
+      sheet([close(2, 'maya')]),
+      maya,
+      [step(0, ['maya', 'pip', 'mama']), step(11_000, ['maya', 'mama'])],
+      35_240,
+    );
+    // In the middle of "Not the gate, Pip!": before it instead.
+    expect(shot.untilMs).toBe(10_362);
+    // A change in the shot's own first line, as its first word is said or
+    // in the middle of it: the shot runs on to the quiet after that line.
+    const after = quietCuts(maya, 35_240).before(5);
+    for (const at of [13_571, 14_571]) {
+      const found = directedShots(
+        sheet([close(4, 'maya')]),
+        maya,
+        [...steps.slice(0, 2), step(at, ['maya']), steps[2]],
+        35_240,
+      );
+      expect(found.map((one) => [one.atMs, one.untilMs])).toEqual([
+        [13_321, after],
+      ]);
+      expect(inWords(after)).toBe(false);
+    }
+  });
+
+  it('changes nothing in the last moments: the last shot holds, and none begins there', () => {
+    // Mama at the last line but one, the narrator's last at the very end.
+    const late = shotsOf([close(10, 'mama'), close(11, 'mama')], 34_900);
+    expect(late.map((s) => [s.atMs, s.untilMs])).toEqual([[27_824, 34_900]]);
+    // A shot asked for in the last second and a half is not taken.
+    expect(
+      directedShots(
+        sheet([close(11, 'mama')]),
+        [...maya.slice(0, 11), said(34_000, 34_700)],
+        steps,
+        35_000,
+      ),
+    ).toEqual([]);
+    // One that would end there runs on to the end.
+    const [held] = directedShots(
+      sheet([close(10, 'mama'), wide(11)]),
+      [...maya.slice(0, 11), said(34_000, 34_700)],
+      steps,
+      35_000,
+    );
+    expect(held.untilMs).toBe(35_000);
+  });
+
+  it('goes back to the whole stage before a line said by anyone it leaves out', () => {
+    // Close on Maya from her fifth line: Mama says the sixth, and is seen.
+    const [shot] = shotsOf([close(4, 'maya')]);
+    expect(shot.untilMs).toBe(quietCuts(maya, 35_240).before(5));
+    // Framed with her, she is seen in it: it holds.
+    const [two] = shotsOf([{ beat: 4, shot: 'two', on: 'maya', with: 'mama' }]);
+    expect(two.untilMs).toBeGreaterThan(19_676);
+  });
+
+  it('hides nothing anyone else does: in once it is done, out before the next', () => {
+    const cuts = quietCuts(maya, 35_240);
+    // Pip goes off as the close on Maya would begin: it comes in after,
+    // in the quiet after her line. (Maya says the sixth line here too.)
+    const all = sheet([close(4, 'maya')]);
+    const [late] = directedShots(
+      {
+        ...all,
+        beats: all.beats.map((b, i) =>
+          i === 5 ? { ...b, speaker: 'maya' } : b,
+        ),
+      },
+      maya,
+      steps,
+      35_240,
+      { doings: [{ who: 'pip', fromMs: 13_000, toMs: 14_200 }] },
+    );
+    expect(late.atMs).toBe(cuts.from(14_200));
+    expect(inWords(late.atMs)).toBe(false);
+    // Mama takes the cup in the quiet after the shot's line: it ends first.
+    const [early] = directedShots(
+      sheet([{ beat: 2, shot: 'close', on: 'maya', with: null }]),
+      maya,
+      [step(0, ['maya', 'pip', 'mama'])],
+      35_240,
+      { doings: [{ who: 'mama', fromMs: 10_000, toMs: 11_000 }] },
+    );
+    expect(early.untilMs).toBe(9900);
+    // A shot on something done in a quiet: from its moment, through the
+    // step it takes, on the one who does it.
+    const momentMs = (b: number, after: number) =>
+      maya[b].endMs + 150 + after * 1000;
+    const [going] = directedShots(
+      sheet([{ beat: 3, after: 0.5, shot: 'close', on: 'maya', with: null }]),
+      maya,
+      [step(0, ['maya', 'pip', 'mama']), step(12_448, ['maya', 'mama'])],
+      35_240,
+      { momentMs },
+    );
+    expect(going).toMatchObject({ atMs: 12_198, target: 'maya' });
+    expect(going.untilMs).toBeGreaterThan(12_448);
+    // One who goes off at it: close as the line before it is said, until
+    // they go.
+    const [off] = directedShots(
+      sheet([{ beat: 3, after: 0.5, shot: 'close', on: 'maya', with: null }]),
+      maya,
+      [step(0, ['maya', 'pip', 'mama']), step(12_448, ['pip', 'mama'])],
+      35_240,
+      { momentMs },
+    );
+    expect(off).toMatchObject({ atMs: cuts.before(3), untilMs: 12_448 });
+  });
+
+  it('frames only who is there, and one alone when the other is not', () => {
+    expect(shotsOf([close(9, 'maya')])).toEqual([]);
+    const [two] = shotsOf([{ beat: 5, shot: 'two', on: 'mama', with: 'pip' }]);
+    expect(two).toMatchObject({ target: 'mama', part: null });
+  });
+});
+
 describe('a quiet stretch filled with what the words bring', () => {
   const step = (atMs: number, show: string[], focus: string | null = null) =>
     ({
@@ -2103,6 +2620,22 @@ describe('a quiet stretch filled with what the words bring', () => {
     expect(effects[0].untilMs! - effects[0].atMs).toBeGreaterThanOrEqual(1500);
   });
 
+  it('leaves the camera alone where a sheet directs it', () => {
+    const effects: Parameters<typeof fillQuiet>[0]['effects'] = [];
+    fillQuiet({
+      steps: [step(0, ['heart', 'lungs'], 'heart')],
+      effects,
+      beats: said({ 16: 'lungs' }),
+      durationMs: 20_000,
+      names: (id) => [id === 'heart' ? 'Heart' : 'Lungs'],
+      parts: () => [],
+      acting: () => false,
+      shots: false,
+    });
+    expect(effects.length).toBeGreaterThan(0);
+    expect(effects.some((e) => e.do === 'zoom')).toBe(false);
+  });
+
   it('keeps its distance from other changes, and changes about every six seconds', () => {
     const { effects, added } = fill([step(0, ['heart', 'lungs'])], {});
     // Twenty quiet seconds: three changes, each clear of the start and end.
@@ -2157,5 +2690,97 @@ describe('the rhythm of a page', () => {
         durationMs: 60_000,
       }),
     ).toEqual({ stillMs: 40_000, perMinute: 3, stagesPerMinute: 2 });
+  });
+});
+
+describe('what a drawing tells the player of itself', () => {
+  const drawn = (extra: Partial<GatedDrawing>): GatedDrawing => ({
+    svg: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 100"/>',
+    viewBox: [0, 0, 200, 100],
+    aspect: 2,
+    parts: {},
+    labels: {},
+    states: {},
+    moves: true,
+    callouts: [],
+    field: null,
+    ...extra,
+  });
+  const pip = {
+    id: 'pip',
+    kind: 'character' as const,
+    ref: 'pip',
+    name: 'Pip',
+    state: null,
+    met: 0,
+    intro: [],
+  };
+
+  it('gives one the artist drew its mouth and its size in the kit’s units, so what it carries rides there', () => {
+    const dto = thingDto(
+      pip,
+      drawn({ mouth: [100, 42], stands: { units: 95 } }),
+      true,
+    );
+    expect(dto).toMatchObject({ mouth: [0.5, 0.42], units: 95 });
+  });
+
+  it('gives the kit’s people neither: their hands hold things', () => {
+    const dto = thingDto(
+      pip,
+      drawn({ mouth: [100, 42], stands: { units: 95 }, acts: true }),
+      true,
+    );
+    expect(dto).not.toHaveProperty('mouth');
+    expect(dto).not.toHaveProperty('units');
+  });
+
+  it('gives one the artist drew its neck, how far its head dips, how low it sinks and which way it faces', () => {
+    const dto = thingDto(
+      pip,
+      drawn({ neck: [140, 50], dip: 16, sinks: 0.18, faces: 1 }),
+      true,
+    );
+    expect(dto).toMatchObject({
+      neck: [0.7, 0.5],
+      dip: 16,
+      sinks: 0.18,
+      faces: 1,
+    });
+    // A neck with no turn proved is no neck.
+    expect(thingDto(pip, drawn({ neck: [140, 50] }), true)).not.toHaveProperty(
+      'neck',
+    );
+  });
+
+  it('gives the kit’s people their legs: the knees bend by them', () => {
+    const dto = thingDto(
+      pip,
+      drawn({
+        acts: true,
+        legs: {
+          r: [
+            [115, 60],
+            [115, 80],
+            [115, 100],
+          ],
+          l: [
+            [85, 60],
+            [85, 80],
+            [85, 100],
+          ],
+        },
+      }),
+      true,
+    );
+    expect(dto).toMatchObject({
+      legs: {
+        r: [
+          [0.575, 0.6],
+          [0.575, 0.8],
+          [0.575, 1],
+        ],
+      },
+    });
   });
 });

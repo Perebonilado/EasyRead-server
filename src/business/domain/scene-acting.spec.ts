@@ -297,3 +297,195 @@ describe('what someone is like, in how they move', () => {
     expect(lookAt(acting.ada.look, 2600)).toBe('kofi');
   });
 });
+
+describe('a listener startled, and moves aimed at a side', () => {
+  const two = (
+    line: SpokenLine,
+    directed: Parameters<typeof actingOf>[0]['directed'] = [],
+    film = true,
+  ) =>
+    actingOf({
+      actors: ['maya', 'mama'],
+      names: new Map([
+        ['maya', ['Maya']],
+        ['mama', ['Mama']],
+      ]),
+      steps: [step(0, ['maya', 'mama'])],
+      lines: [line],
+      narration: [],
+      directed,
+      durationMs: 8000,
+      walks: true,
+      film,
+    });
+  const leans = (acting: ReturnType<typeof two>) =>
+    (acting.mama?.moves ?? []).filter(([, move]) => move === 'lean');
+
+  it('leans back only at a line that startles: shouted, or a cry of alarm, never any "!"', () => {
+    expect(
+      leans(two(said('maya', 'Ready, Pip? Catch the ball!', 1000))),
+    ).toEqual([]);
+    expect(
+      leans(
+        two({ ...said('maya', 'Pip! Come back here!', 1000), pace: 'shout' }),
+      ),
+    ).toHaveLength(1);
+    expect(leans(two(said('maya', 'Look out, the bus!', 1000)))).toHaveLength(
+      1,
+    );
+    expect(leans(two(said('maya', 'Run, Pip, run!', 1000)))).toEqual([]);
+  });
+
+  it('leans back at any "!" on a book\'s page, as it always has', () => {
+    expect(
+      leans(two(said('maya', 'Look what I found!', 1000), [], false)),
+    ).toHaveLength(1);
+  });
+
+  it('points, leans and looks toward a side of the stage, as long as the list says', () => {
+    const acting = two(said('mama', 'Where did she go?', 500), [
+      { atMs: 3000, target: 'maya', other: '@left', do: 'point', ms: 1200 },
+      { atMs: 5000, target: 'maya', other: '@right', do: 'lean-in', ms: 900 },
+    ]);
+    expect(acting.maya.moves).toContainEqual([3000, 'point', 1200, '@left']);
+    expect(acting.maya.moves).toContainEqual([5000, 'lean-in', 900, '@right']);
+    expect(lookAt(acting.maya.look, 3500)).toBe('@left');
+  });
+});
+
+describe("the body's own moves", () => {
+  const acted = (
+    directed: Parameters<typeof actingOf>[0]['directed'],
+    steps = [step(0, ['maya', 'pip']), step(9000, ['maya'])],
+  ) =>
+    actingOf({
+      actors: ['maya', 'pip'],
+      names: new Map([
+        ['maya', ['Maya']],
+        ['pip', ['Pip']],
+      ]),
+      steps,
+      lines: [],
+      narration: [],
+      directed,
+      durationMs: 12_000,
+      walks: true,
+    });
+
+  it('plays a lick toward whom it licks, the eyes on them, as long as the list says', () => {
+    const acting = acted([
+      { atMs: 1000, target: 'pip', other: 'maya', do: 'lick', ms: 900 },
+      { atMs: 3000, target: 'pip', other: null, do: 'wag' },
+    ]);
+    expect(acting.pip.moves).toContainEqual([1000, 'lick', 900, 'maya']);
+    expect(lookAt(acting.pip.look, 1400)).toBe('maya');
+    // A wag toward no one, as long as a wag takes.
+    expect(acting.pip.moves).toContainEqual([3000, 'wag', 1500]);
+  });
+
+  it('keeps someone sitting or lying down until they get up, or go', () => {
+    const acting = acted([
+      { atMs: 500, target: 'maya', other: null, do: 'sit', ms: 1400 },
+      { atMs: 4000, target: 'maya', other: null, do: 'nod', ms: 600 },
+      { atMs: 6000, target: 'maya', other: null, do: 'stand', ms: 1200 },
+      { atMs: 1000, target: 'pip', other: null, do: 'lie', ms: 1600 },
+    ]);
+    // Held through the nod, until she is up at the end of getting up.
+    expect(acting.maya.moves).toContainEqual([500, 'sit', 6700]);
+    // Pip lies there until he goes, at 9s.
+    expect(acting.pip.moves).toContainEqual([1000, 'lie', 8000]);
+  });
+});
+
+describe('lines said after someone gone, or off the stage', () => {
+  const names = new Map([
+    ['maya', ['Maya']],
+    ['mama', ['Mama']],
+    ['pip', ['Pip']],
+    ['tobi', ['Tobi']],
+  ]);
+  const acted = (lines: SpokenLine[], steps: SceneStepDto[]) =>
+    actingOf({
+      actors: ['maya', 'mama', 'pip', 'tobi'],
+      names,
+      steps,
+      lines,
+      narration: [],
+      directed: [],
+      durationMs: 20_000,
+      walks: true,
+      film: true,
+    });
+  /** Pip goes off by the right at 2 s; Maya and Mama stay. */
+  const pipGone = [
+    step(0, ['maya', 'pip', 'mama']),
+    {
+      ...step(2000, ['maya', 'mama']),
+      exit: { pip: { side: 'right' as const } },
+    },
+  ];
+
+  it('calls after someone gone toward the side they went, whoever it is said to', () => {
+    const acting = acted(
+      [{ ...said('maya', 'Pip! Where are you going?', 4000), to: 'mama' }],
+      pipGone,
+    );
+    expect(lookAt(acting.maya.look, 4500)).toBe('@right');
+    expect(acting.maya.moves).toContainEqual(
+      expect.arrayContaining(['gesture', '@right']),
+    );
+  });
+
+  it('says a line to no one toward where someone just went', () => {
+    const acting = acted(
+      [said('mama', 'Wait for me, please!', 4000)],
+      [
+        step(0, ['maya', 'mama']),
+        {
+          ...step(2000, ['mama']),
+          exit: { maya: { side: 'left' as const } },
+        },
+      ],
+    );
+    expect(lookAt(acting.mama.look, 4500)).toBe('@left');
+  });
+
+  it('looks round for someone not here at all', () => {
+    const acting = acted(
+      [said('maya', 'Pip! Pip! Where are you?', 1000)],
+      [step(0, ['maya', 'tobi'])],
+    );
+    const line = said('maya', 'Pip! Pip! Where are you?', 1000);
+    expect(lookAt(acting.maya.look, 1100)).toBe('@left');
+    expect(lookAt(acting.maya.look, line.endMs)).toBe('@right');
+  });
+
+  it('looks round for someone the scene has no part for', () => {
+    const line = said('maya', 'Bingo! Where are you?', 1000);
+    const acting = acted([line], [step(0, ['maya', 'tobi'])]);
+    expect(lookAt(acting.maya.look, 1100)).toBe('@left');
+    expect(lookAt(acting.maya.look, line.endMs)).toBe('@right');
+  });
+
+  it('points "that way": where the next one to go goes', () => {
+    const acting = acted(
+      [
+        {
+          ...said('tobi', 'Pip was here! He went that way!', 1000),
+          to: 'maya',
+        },
+      ],
+      [
+        step(0, ['maya', 'tobi']),
+        {
+          ...step(6000, ['tobi']),
+          exit: { maya: { side: 'left' as const } },
+        },
+      ],
+    );
+    const point = acting.tobi.moves?.find(([, move]) => move === 'point');
+    expect(point?.[3]).toBe('@left');
+    // At "that", the fifth word.
+    expect(point?.[0]).toBe(1000 + 5 * 300);
+  });
+});

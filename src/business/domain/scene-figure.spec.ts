@@ -116,6 +116,14 @@ describe('reading who someone is', () => {
 });
 
 describe('a person drawn by the kit', () => {
+  it('draws bare feet with no shoes on them, and shoes back on without', () => {
+    const shoes = (svg: string) =>
+      [...svg.matchAll(/<ellipse[^>]*fill="#3b3440"/g)].length;
+    const shod = drawFigure(as({}), 'x').svg;
+    const bare = drawFigure(as({ extras: ['bare feet'] }), 'x').svg;
+    expect(shoes(shod) - shoes(bare)).toBe(2);
+  });
+
   it('draws the same person the same way every time', () => {
     const spec = as({ hair: 'braids', headwear: 'crown' });
     expect(drawFigure(spec, 'mira').svg).toBe(drawFigure(spec, 'mira').svg);
@@ -380,7 +388,8 @@ describe('a face nothing covers', () => {
         });
         expect([age, headwear, pained.notes]).toEqual([age, headwear, []]);
       }
-  }, 30_000);
+    // Twelve sheets rendered and measured: slow when the whole suite runs.
+  }, 90_000);
 });
 
 describe('someone doing something', () => {
@@ -570,5 +579,376 @@ describe('a bed as the story’s world has them', () => {
     expect(modern).toContain('#b9c0ca');
     expect(old).not.toContain('#b9c0ca');
     expect(old).toContain('#9a6b3f');
+  });
+});
+
+describe('signs over someone the kit did not draw', () => {
+  it('floats a Z over a sleeping dog, a bulb over an idea, each its own group, only those that float', () => {
+    const { signsOver } =
+      jest.requireActual<typeof import('./scene-figure')>('./scene-figure');
+    const over = signsOver(
+      [200, 120],
+      4,
+      ['sleeping', 'idea', 'tears'],
+      'bingo-sign',
+    );
+    expect(Object.keys(over.states)).toEqual(['sleeping', 'idea']);
+    expect(over.states.sleeping).toBe('bingo-sign-sleeping');
+    expect(over.markup).toContain('id="bingo-sign-sleeping"');
+    expect(over.markup).toContain('translate(200 120) scale(4)');
+    // Its own motion, never the drawing's own classes.
+    expect(over.markup).toContain('class="sgn-rise"');
+    expect(over.css).toContain('.sgn-rise{animation:rise');
+    expect(signsOver([0, 0], 1, ['tears'], 'x').markup).toBe('');
+  });
+});
+
+describe('the kit’s own people, unchanged by the crowd', () => {
+  it('draws everyone it drew before exactly as before, byte for byte', () => {
+    const { createHash } =
+      jest.requireActual<typeof import('node:crypto')>('node:crypto');
+    // A sample of ages, clothes, hats, poses, props, signs, a group, one
+    // lying down and one in bed. The hash is of the kit before extras were
+    // drawn with it: a change to how the story's people look must be meant.
+    const cases: [FigureSpec, string, FigureHow][] = [
+      [PLAIN_FIGURE, 'plain', {}],
+      [
+        as({
+          age: 'child',
+          hair: 'braids',
+          skin: 8,
+          top: 'dress',
+          topColour: 'yellow',
+        }),
+        'maya',
+        { holding: 'ball' },
+      ],
+      [
+        as({
+          age: 'child',
+          hair: 'short',
+          headwear: 'cap',
+          top: 't-shirt',
+          topColour: 'green',
+          bottom: 'shorts',
+        }),
+        'tobi',
+        { holding: 'magnifier' },
+      ],
+      [
+        as({
+          age: 'adult',
+          headwear: 'gele',
+          top: 'kaftan',
+          bottom: 'wrapper',
+          build: 'broad',
+          skin: 9,
+        }),
+        'mama',
+        { pose: 'arms up' },
+      ],
+      [
+        as({
+          age: 'elder',
+          hair: 'balding',
+          hairColour: 'grey',
+          facialHair: 'beard',
+          top: 'agbada',
+          headwear: 'kufi',
+          extras: ['glasses', 'walking stick'],
+        }),
+        'elder',
+        { pose: 'pointing' },
+      ],
+      [
+        as({
+          age: 'teen',
+          hair: 'afro',
+          top: 'hoodie',
+          extras: ['backpack', 'earrings'],
+        }),
+        'teen',
+        { pose: 'waving', signs: ['walking', 'tears'] },
+      ],
+      [
+        as({
+          headwear: 'headscarf',
+          top: 'robe',
+          extras: ['sandals', 'cloak'],
+        }),
+        'robe',
+        { pose: 'hand on mouth', holding: 'staff' },
+      ],
+      [
+        as({ headwear: 'nemes', top: 'tunic', extras: ['wings'] }),
+        'nemes',
+        { pose: 'hands on belly', count: 3 },
+      ],
+      [
+        as({ hair: 'long', headwear: 'mantle', top: 'dress' }),
+        'mantle',
+        { pose: 'lying', signs: ['sleeping'] },
+      ],
+      [
+        as({ hair: 'ponytail', top: 'lab coat', extras: ['stethoscope'] }),
+        'bed',
+        { pose: 'in bed', signs: ['fever'], old: true },
+      ],
+      [
+        as({ headwear: 'crested helmet', top: 'armour' }),
+        'soldier',
+        {
+          pose: 'hand on head',
+          holding: 'umbrella',
+          signs: ['shaking', 'idea'],
+        },
+      ],
+    ];
+    const all = cases.map(([spec, seed, how]) =>
+      JSON.stringify(drawFigure(spec, seed, how)),
+    );
+    // As before, but that each leg now turns about its hip, for a kick,
+    // and bends at a knee (drawn as one leg standing), and what is worn on
+    // the legs sinks with the body.
+    expect(createHash('sha256').update(all.join('\n')).digest('hex')).toBe(
+      '238cca320af61802991e9eed875695c238259a794a87a0b571bec2eb75ca9190',
+    );
+  });
+});
+
+describe('someone in a crowd, drawn by the kit', () => {
+  const { drawExtra, extraFor, readable, wardrobeOf } =
+    jest.requireActual<typeof import('./scene-figure')>('./scene-figure');
+  const spec = as({
+    age: 'adult',
+    hair: 'short',
+    facialHair: 'moustache',
+    extras: ['glasses'],
+    top: 'kaftan',
+  });
+  const markup = (detail: 0 | 1 | 2, view: 'front' | 'back' = 'front') => {
+    const drawn = drawExtra(spec, { detail, view, id: 'cr7' });
+    return `${drawn.legs}${drawn.upper}`;
+  };
+
+  it('draws the kit’s face near, dots for eyes farther, and a shape far off', () => {
+    const near = markup(0);
+    expect(near).toContain('clip-path="url(#cr7-eyes)"');
+    expect(near).toContain('<clipPath id="cr7-eyes">');
+    expect(near).not.toContain('class="talk"');
+    expect(near).not.toContain('class="vm');
+    expect(near).not.toContain('class="blink');
+    const middle = markup(1);
+    expect(middle).not.toContain('clip-path');
+    expect(middle).toMatch(/<ellipse cx="-15.5" cy="[-\d.]+" rx="6" ry="7"/);
+    const far = markup(2);
+    expect(far).not.toContain('class="fm"');
+    expect(far).not.toContain(`stroke="#2d2a32"`);
+    // Its hair and hat still show who they are.
+    expect(far).toContain('class="hd"');
+  });
+
+  it('turns away with the back of the head and no face', () => {
+    const back = markup(1, 'back');
+    expect(back).not.toContain('class="fm"');
+    expect(back).not.toContain('url(#');
+    // A pose that needs the hands is dropped: arms at the sides.
+    const drawn = drawExtra(spec, {
+      detail: 0,
+      view: 'back',
+      pose: 'pointing',
+      holding: 'bag',
+      id: 'cr8',
+    });
+    expect(drawn.joints.r[2][1]).toBeGreaterThan(drawn.cy);
+    // From behind, nothing of the front of what they wear: no hood's
+    // collar, no pocket.
+    const hoodie = as({ age: 'adult', top: 'hoodie' });
+    const [front, behind] = (['front', 'back'] as const).map(
+      (view) => drawExtra(hoodie, { detail: 0, view, id: 'cr6' }).upper,
+    );
+    expect(front).toContain('rx="38" ry="12"');
+    expect(front).toContain('rx="6"');
+    expect(behind).not.toContain('rx="38" ry="12"');
+    expect(behind).not.toMatch(/<rect[^>]*rx="6"/);
+  });
+
+  it('frames them as the kit frames their age, their feet at 0', () => {
+    const drawn = drawExtra(spec, { detail: 1, id: 'cr9' });
+    expect(drawn.viewBox).toEqual(figureFrame('adult'));
+    expect(drawn.top).toBe(rigOf('adult').top);
+  });
+
+  it('dresses a crowd for its world from the kit’s own lists, the same every time', () => {
+    const lagos = {
+      era: 'today',
+      region: 'Lagos, Nigeria',
+      culture: 'Yoruba',
+      landscape: '',
+      homes: '',
+    };
+    const people = Array.from({ length: 40 }, (_, i) =>
+      extraFor(lagos, 'market', i),
+    );
+    expect(people).toEqual(
+      Array.from({ length: 40 }, (_, i) => extraFor(lagos, 'market', i)),
+    );
+    const w = wardrobeOf(lagos);
+    for (const one of people) {
+      expect(TOPS).toContain(one.top);
+      expect(w.tops).toContain(one.top);
+      // Dressed as a woman, beardless; a child in a child's clothes.
+      if (one.top === 'dress' || one.headwear === 'gele')
+        expect(one.facialHair).toBe('none');
+      if (one.age === 'child') expect(one.top).not.toBe('agbada');
+    }
+    expect(new Set(people.map((p) => p.age)).size).toBeGreaterThanOrEqual(3);
+    expect(wardrobeOf(null).tops).not.toContain('agbada');
+  });
+
+  it('never has a dark head run into dark clothes or a dark hat, keeping skin tones as they are', () => {
+    const lagos = {
+      era: 'today',
+      region: 'Lagos, Nigeria',
+      culture: 'Yoruba',
+      landscape: '',
+      homes: '',
+    };
+    const people = Array.from({ length: 200 }, (_, i) =>
+      extraFor(lagos, 'market', i),
+    );
+    const dark = new Set(['navy', 'black']);
+    for (const one of people)
+      if (one.skin >= 9) {
+        expect(dark.has(one.topColour)).toBe(false);
+        if (one.headwear !== 'none')
+          expect(dark.has(one.accentColour)).toBe(false);
+      }
+    // Skin tones kept varied and true: the world's darkest are there.
+    expect(people.some((p) => p.skin === 10)).toBe(true);
+    // Only a dark head is dressed again: lighter skin keeps its navy.
+    const navy = as({ age: 'adult', topColour: 'navy', skin: 10 });
+    expect(readable(navy, ['navy', 'yellow'], 's').topColour).toBe('yellow');
+    expect(
+      readable({ ...navy, skin: 3 }, ['navy', 'yellow'], 's').topColour,
+    ).toBe('navy');
+    // Dots for eyes on dark skin are whites with a dot, so they show.
+    const middle = drawExtra(navy, { detail: 1, id: 'cr5' }).upper;
+    expect(middle).toContain('fill="#f5f1e8"');
+  });
+});
+
+describe('the kit’s legs, bending', () => {
+  it('bends each leg at its knee, the foot kept flat, and says where the joints are', () => {
+    const drawn = drawFigure(PLAIN_FIGURE, 'legs');
+    const { r, l } = drawn.legs!;
+    for (const [hip, knee, foot] of [r, l]) {
+      // Down the leg: the hip, the knee halfway, the foot on the ground.
+      expect(hip[0]).toBe(knee[0]);
+      expect(knee[0]).toBe(foot[0]);
+      expect(hip[1]).toBeLessThan(knee[1]);
+      expect(knee[1]).toBeLessThan(foot[1]);
+      expect(Math.abs(knee[1] - (hip[1] + foot[1]) / 2)).toBeLessThan(0.1);
+    }
+    expect(r[0][0]).toBeGreaterThan(l[0][0]);
+    // The shin turns about the knee inside the leg that turns about the
+    // hip; the foot under it turns back, flat on the ground.
+    expect(drawn.svg).toContain(
+      `<g class="shin" style="transform-origin:${r[1][0]}px ${r[1][1]}px">`,
+    );
+    expect(drawn.svg).toContain(
+      '.l1 .shin{transform:rotate(calc(var(--knr,0)*1deg))}',
+    );
+    expect(drawn.svg).toContain(
+      '.l1 .foot{transform:rotate(calc((var(--legr,0) + var(--knr,0))*-1deg))}',
+    );
+    // The body sinks with the legs, and what is worn on them.
+    expect(drawn.svg).toContain(
+      '.leg,.breathe,.skirt{translate:0 calc(var(--low,0)*1px)}',
+    );
+    // A group, or one lying down, bends no legs.
+    expect(drawFigure(PLAIN_FIGURE, 'g', { count: 2 }).legs).toBeUndefined();
+    expect(
+      drawFigure(PLAIN_FIGURE, 'l', { pose: 'lying' }).legs,
+    ).toBeUndefined();
+  });
+
+  it('takes a wrapper up as the body sinks, so its hem stays off the ground', () => {
+    const drawn = drawFigure(
+      as({ bottom: 'wrapper', top: 'kaftan' }),
+      'wrapped',
+    );
+    expect(drawn.svg).toMatch(
+      /<g class="skirt wrap" style="transform-origin:0 [-\d.]+px;--reach:[\d.]+">/,
+    );
+    expect(drawn.svg).toContain(
+      '.wrap{scale:1 calc(1 - var(--low,0) / var(--reach,100))}',
+    );
+  });
+});
+
+describe('someone who changes clothes', () => {
+  const tobi = as({
+    age: 'child',
+    top: 'pyjamas',
+    topColour: 'red',
+    bottom: 'trousers',
+    bottomColour: 'red',
+  });
+  const dressed = as({
+    age: 'child',
+    top: 'uniform',
+    topColour: 'blue',
+    bottom: 'trousers',
+    bottomColour: 'grey',
+    extras: ['backpack'],
+  });
+  const drawn = drawFigure(tobi, 'tobi', {
+    dress: [{ state: 'dress-1', spec: dressed }],
+  });
+  const root = rootOf(drawn.svg);
+  const within = (id: string) => {
+    const group = byId(root, id)!;
+    return elements(group.children)
+      .map((el) => el.attribs.class)
+      .filter(Boolean);
+  };
+
+  it("draws both outfits on one rig, each in its own class, in the rig's own groups", () => {
+    for (const id of ['legs', 'body', 'arms', 'behind', 'head'])
+      expect(within(id)).toEqual(
+        expect.arrayContaining(['dress-0', 'dress-1']),
+      );
+    // The arms and legs of each turn about the same joints.
+    const arms = render(byId(root, 'arms')!);
+    expect(arms.match(/class="arm ar"/g)?.length).toBe(2);
+    expect(render(byId(root, 'legs')!).match(/class="leg l1"/g)?.length).toBe(
+      2,
+    );
+    // One face, one mouth, one blink: every id once.
+    const ids = [...walk(root)].flatMap((el) =>
+      el.attribs.id ? [el.attribs.id] : [],
+    );
+    expect(new Set(ids).size).toBe(ids.length);
+    expect(drawn.joints).toBeDefined();
+    expect(drawn.legs).toBeDefined();
+  });
+
+  it('shows the later outfit from when its state is on, and the one before no longer', () => {
+    expect(drawn.states['dress-1']).toBe('dress-1');
+    expect(drawn.svg).toContain('.dress-1{display:none}');
+    expect(drawn.svg).toContain(
+      '.on-dress-1 .dress-1{display:inline}.on-dress-1 .dress-0{display:none}',
+    );
+    // Pyjamas are drawn in their red, and the uniform after them in blue.
+    const body = render(byId(root, 'body')!);
+    expect(body.indexOf('#d9534f')).toBeGreaterThanOrEqual(0);
+    expect(body.indexOf('#4a8fd9')).toBeGreaterThan(body.indexOf('#d9534f'));
+  });
+
+  it('draws one who never changes as before', () => {
+    const plain = drawFigure(tobi, 'tobi');
+    expect(plain.svg).not.toContain('dress-');
+    expect(plain.states).not.toHaveProperty('dress-1');
   });
 });

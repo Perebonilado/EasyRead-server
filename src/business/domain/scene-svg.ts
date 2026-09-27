@@ -19,6 +19,8 @@ import { elements, removeNode, textOf, walk } from './scene-dom';
 import { groupId, idKey, type DrawingThing } from './scene-script';
 import { liftCallouts, type Callout, type InkField } from './scene-callouts';
 import { renderSvg, type InkBox } from './scene-raster';
+import type { SetGround } from './scene-ground';
+import type { FigureSpec } from './scene-figure';
 
 /** The canvas the artist is given, by shape. */
 export const CANVAS: Record<DrawingThing['shape'], { w: number; h: number }> = {
@@ -653,6 +655,65 @@ export function namedGroups(
   return { parts, labels, states };
 }
 
+/**
+ * A transform origin in px under `transform-box: fill-box`, read as the
+ * drawing coordinates its author meant. Under fill-box a length counts
+ * from the part's own corner, so `545px 560px` on a tail at (545, 545)
+ * turned it about (1090, 1105), far off the drawing. Under view-box the
+ * same lengths are the drawing's own coordinates. Only a block that sets
+ * both is changed, and only lengths: a keyword or a percentage is the
+ * part's own box, as meant. Returns how many were read so.
+ */
+/** How near the drawing's top or left edge a point may be read as a part's own offset: a share of its size. */
+const NEAR_EDGE = 0.15;
+
+export function mendOrigins(root: Element): number {
+  const [x0, y0, w, h] = viewBoxOf(root) ?? [0, 0, Infinity, Infinity];
+  let mended = 0;
+  const mend = (block: string): string => {
+    if (!/transform-box\s*:\s*fill-box/i.test(block)) return block;
+    const origin = /transform-origin\s*:\s*([^;}]*)/i.exec(block);
+    const lengths = origin?.[1]
+      .trim()
+      .replace(/\s*!important$/i, '')
+      .split(/\s+/);
+    if (
+      !lengths ||
+      lengths.length < 2 ||
+      !lengths.every((one) => /^-?\d*\.?\d+(?:px)?$/i.test(one))
+    )
+      return block;
+    const [x, y] = lengths.map((one) => parseFloat(one));
+    // Only a point well inside the drawing: one off it is no coordinates,
+    // and one near its top or left edge may as well be a point in a small
+    // part's own box (a flame's foot at 15px 40px), as CSS reads it.
+    if (
+      x - x0 < w * NEAR_EDGE ||
+      y - y0 < h * NEAR_EDGE ||
+      x > x0 + w ||
+      y > y0 + h
+    )
+      return block;
+    mended += 1;
+    return block.replace(
+      /(transform-box\s*:\s*)fill-box/i,
+      (_, property: string) => `${property}view-box`,
+    );
+  };
+  for (const node of walk(root)) {
+    if (node.name.toLowerCase() === 'style') {
+      const css = textOf(node);
+      const read = css.replace(
+        /\{([^{}]*)\}/g,
+        (_, block: string) => `{${mend(block)}}`,
+      );
+      if (read !== css) setText(node, read);
+    }
+    if (node.attribs.style) node.attribs.style = mend(node.attribs.style);
+  }
+  return mended;
+}
+
 /** Whether anything in the drawing moves: a keyframes rule in use, or SMIL. */
 export function movesOf(root: Element): boolean {
   let keyframes = false;
@@ -713,6 +774,8 @@ export interface GatedDrawing {
   words?: { size: number };
   /** A character's head, in its own units: where their words come from. */
   head?: [number, number];
+  /** One the artist drew: its mouth, in its own units, where what it carries rides. */
+  mouth?: [number, number];
   /**
    * Someone who stands with people: its frame's height in the figure
    * kit's units, so the stage draws everyone at one scale, on one ground.
@@ -725,6 +788,24 @@ export interface GatedDrawing {
     'r' | 'l',
     [[number, number], [number, number], [number, number]]
   >;
+  /** And each leg's hip, knee and foot, in its own units. */
+  legs?: Record<
+    'r' | 'l',
+    [[number, number], [number, number], [number, number]]
+  >;
+  /** One the artist drew, rigged: where its head turns about, in its own units, and how far at most, in degrees. */
+  neck?: [number, number];
+  dip?: number;
+  /** How far its body sinks on its legs lying down, as a share of its frame's height. */
+  sinks?: number;
+  /** Which way one the artist drew faces as drawn: its head to the left (-1) or right (1); absent, the viewer. */
+  faces?: -1 | 1;
+  /** A set: where its open ground is, measured once, so a crowd stands on it. */
+  ground?: SetGround;
+  /** One person drawn by the kit: what they wear that says who they are, so no one in a crowd wears the same. */
+  wears?: Pick<FigureSpec, 'top' | 'topColour' | 'headwear'>;
+  /** And what they wear, in words: as drawn, then in each outfit they change into ("red pyjamas", "a blue uniform and grey trousers"). */
+  outfits?: string[];
 }
 
 export interface GateResult {
@@ -840,6 +921,11 @@ export function inspectSvg(
       mended: [],
     };
   const mended = sanitizeTree(root).map((what) => `removed ${what}`);
+  const origins = mendOrigins(root);
+  if (origins)
+    mended.push(
+      `read ${origins} transform origin${origins === 1 ? '' : 's'} as drawing coordinates`,
+    );
   if (!options.backdrop && removeBackdrop(root, viewBox))
     mended.push('removed a backdrop');
   const { parts, labels, states } = namedGroups(root, thing);
@@ -872,8 +958,9 @@ export function inspectSvg(
     viewBox,
     mended,
     short: {
+      // A part asked for only if the thing has one (a tail) is no fault missing.
       missingParts: thing.parts
-        .filter((p) => !parts[p.name])
+        .filter((p) => !p.optional && !parts[p.name])
         .map((p) => p.name),
       missingLabels: thing.parts
         .filter((p) => p.label && parts[p.name] && !labels[p.name])
@@ -1036,4 +1123,112 @@ export async function gateDrawing(
     ...judged(short, thing, viewBox[2]),
     mended,
   };
+}
+
+/** A CSS rule of a drawing's own: its selectors, each a list of compounds (".cls", "g", "#id.cls"), and what it sets. */
+interface StyleRule {
+  selectors: string[][];
+  declarations: string;
+}
+
+/** A drawing's own CSS as rules, leaving out @-blocks (keyframes, media) and anything unreadable. */
+function styleRules(css: string): StyleRule[] {
+  const text = css.replace(/\/\*[\s\S]*?\*\//g, '');
+  const rules: StyleRule[] = [];
+  let at = 0;
+  while (at < text.length) {
+    const open = text.indexOf('{', at);
+    if (open < 0) break;
+    const head = text.slice(at, open).trim();
+    let depth = 1;
+    let end = open + 1;
+    for (; end < text.length && depth; end += 1)
+      if (text[end] === '{') depth += 1;
+      else if (text[end] === '}') depth -= 1;
+    const body = text.slice(open + 1, end - 1).trim();
+    at = end;
+    if (!head || head.startsWith('@') || body.includes('{')) continue;
+    const selectors = head
+      .split(',')
+      .map((one) =>
+        one.replace(/[>+~]/g, ' ').trim().split(/\s+/).filter(Boolean),
+      )
+      .filter((compounds) =>
+        compounds.every((c) => /^(?:[a-zA-Z][\w-]*)?(?:[.#][\w-]+)*$/.test(c)),
+      );
+    if (selectors.length) rules.push({ selectors, declarations: body });
+  }
+  return rules;
+}
+
+/** Whether an element is what one compound selector names: "path", ".leaf", "g#tail.dark". */
+function isCompound(node: Element, compound: string): boolean {
+  const tag = /^[a-zA-Z][\w-]*/.exec(compound)?.[0];
+  if (tag && node.name.toLowerCase() !== tag.toLowerCase()) return false;
+  const classes = (node.attribs.class ?? '').split(/\s+/);
+  for (const m of compound.matchAll(/([.#])([\w-]+)/g))
+    if (m[1] === '.' ? !classes.includes(m[2]) : node.attribs.id !== m[2])
+      return false;
+  return true;
+}
+
+/** Whether an element is what a selector names, its ancestors the compounds before. */
+function isSelected(node: Element, compounds: readonly string[]): boolean {
+  if (!isCompound(node, compounds[compounds.length - 1])) return false;
+  let k = compounds.length - 2;
+  for (
+    let at = node.parent as Element | null;
+    at && k >= 0;
+    at = at.parent as Element | null
+  )
+    if (at.attribs && isCompound(at, compounds[k])) k -= 1;
+  return k < 0;
+}
+
+/**
+ * A drawing made still and its own, to be set among others: its CSS set
+ * on each shape it styles and taken out, with its animation; every id
+ * given `prefix`, and every reference to one with it; its classes gone.
+ * So nothing of it reaches another drawing, nor anything of another it.
+ * Changes `root` in place.
+ */
+export function stillTree(root: Element, prefix: string): void {
+  const nodes = [...walk(root)];
+  const rules = nodes
+    .filter((node) => node.name.toLowerCase() === 'style')
+    .flatMap((node) => styleRules(textOf(node)));
+  for (const node of nodes) {
+    const name = node.name.toLowerCase();
+    if (name === 'style' || SMIL.has(name)) {
+      removeNode(node);
+      continue;
+    }
+    const set = rules
+      .filter((rule) => rule.selectors.some((s) => isSelected(node, s)))
+      .map((rule) => rule.declarations);
+    const own = node.attribs.style ?? '';
+    const style = [...set, own]
+      .join(';')
+      .split(';')
+      .map((one) => one.trim())
+      // Still: nothing of its own motion is kept.
+      .filter((one) => one && !/^(?:animation|transition)[\w-]*\s*:/i.test(one))
+      .join(';');
+    if (style) node.attribs.style = style;
+    else delete node.attribs.style;
+    delete node.attribs.class;
+  }
+  const renamed = (id: string) => `${prefix}-${id}`;
+  for (const node of walk(root)) {
+    if (node.attribs.id) node.attribs.id = renamed(node.attribs.id);
+    for (const [key, value] of Object.entries(node.attribs)) {
+      if ((key === 'href' || key === 'xlink:href') && value.startsWith('#'))
+        node.attribs[key] = `#${renamed(value.slice(1))}`;
+      else if (value.includes('url(#'))
+        node.attribs[key] = value.replace(
+          /url\(\s*#([^)\s]+)\s*\)/g,
+          (_, id: string) => `url(#${renamed(id)})`,
+        );
+    }
+  }
 }

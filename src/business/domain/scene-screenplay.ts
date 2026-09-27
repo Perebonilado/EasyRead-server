@@ -29,7 +29,14 @@ import {
   type Actor,
   type PropAction,
 } from './scene-directions';
-import { PROP_KIND, PROP_WORDS, propsIn, type StageProp } from './scene-props';
+import {
+  PAGE_PROPS,
+  PROP_KIND,
+  PROP_WORDS,
+  propsIn,
+  type StageProp,
+} from './scene-props';
+import { isStageProp } from './scene-doings';
 import { faceNamed, faceOfLine } from './scene-feeling';
 import { FIGURE_SIGNS, figureFor, type FigureFace } from './scene-figure';
 import { idKey } from './scene-ids';
@@ -397,8 +404,8 @@ const phraseOf = (text: string) => wordsOf(text).slice(0, 4).join(' ');
  * (a line of the book lost or reworded, a narrator who says too much) is
  * a problem.
  */
-/** The things a stage may hold, as the props module lists them. */
-const STAGE_PROP_ORDER = Object.keys(PROP_WORDS) as StageProp[];
+/** The things a book's page may set on its stage, as the props module lists them. */
+const STAGE_PROP_ORDER: readonly StageProp[] = PAGE_PROPS;
 
 /** How a line said with a feeling lands on the one it is said to. */
 const LANDS: Record<string, FigureFace> = {
@@ -1712,10 +1719,12 @@ export function mendScreenplay(
       });
       if (!beat.business.length) delete beat.business;
     }
-    // Whatever is handled is on the stage, named or not.
+    // Whatever is handled is on the stage, named or not: a book's page
+    // handles only the lists' things.
     for (const beat of beats)
       for (const one of beat.business ?? [])
-        if (!props.includes(one.prop)) props.push(one.prop);
+        if (isStageProp(one.prop) && !props.includes(one.prop))
+          props.push(one.prop);
     if (business.length)
       mended.push(
         `the narration's business acted: ${business

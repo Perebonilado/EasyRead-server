@@ -54,13 +54,24 @@ process.stdin.on('end', () => {
   }
   // Parts of the drawing on their own: where each one's ink is.
   if (request.variants) answer.inks = request.variants.map((svg) => boxOf(svg));
-  // The drawing as a coarse map of where there is ink and where there is room.
-  if (request.grid) {
-    const image = new Resvg(request.grid.svg, { ...options, fitTo: { mode: 'width', value: request.grid.cols } }).render();
+  // A drawing as a map of where there is ink and where there is room.
+  // The pixels are read once: each read of img.pixels copies the buffer.
+  const mapOf = (svg, cols) => {
+    const image = new Resvg(svg, { ...options, fitTo: { mode: 'width', value: cols } }).render();
+    const pixels = image.pixels;
     let bits = '';
-    for (let i = 0; i < image.width * image.height; i += 1) bits += image.pixels[i * 4 + 3] > 24 ? '1' : '0';
-    answer.grid = { cols: image.width, rows: image.height, bits };
-  }
+    for (let i = 0; i < image.width * image.height; i += 1) bits += pixels[i * 4 + 3] > 24 ? '1' : '0';
+    return { cols: image.width, rows: image.height, bits };
+  };
+  if (request.grid) answer.grid = mapOf(request.grid.svg, request.grid.cols);
+  // Several versions of one drawing, each a map at the same size.
+  if (request.masks) answer.masks = request.masks.svgs.map((svg) => mapOf(svg, request.masks.cols));
+  // A set's ground: versions of it in full colour, every pixel's RGBA.
+  if (request.ground)
+    answer.ground = request.ground.svgs.map((svg) => {
+      const image = new Resvg(svg, { ...options, fitTo: { mode: 'width', value: request.ground.cols } }).render();
+      return { cols: image.width, rows: image.height, rgba: Buffer.from(image.pixels).toString('base64') };
+    });
   process.stdout.write(JSON.stringify(answer));
 });
 `;
@@ -91,23 +102,40 @@ export interface InkMap {
   bits: string;
 }
 
+/** A drawing's pixels: red, green, blue and alpha, four bytes each, row by row. */
+export interface Pixels {
+  cols: number;
+  rows: number;
+  rgba: Buffer;
+}
+
 /**
  * Where the ink is, and a PNG `width` pixels across when a width is
  * given. Also, when asked, the ink of each of `variants` (the drawing cut
- * down to one part) and a coarse map of `grid.svg`'s ink `grid.cols`
- * cells across, all in the one child. Rejects when the drawing will not
- * render, whatever the reason: a panic, a parse error, a render that
- * never finishes.
+ * down to one part), a coarse map of `grid.svg`'s ink `grid.cols` cells
+ * across, a map of each of `masks.svgs` at `masks.cols` (versions of
+ * one drawing, so every map is the same size), and every pixel of each
+ * of `ground.svgs` at `ground.cols` (a set, read for where its ground
+ * is), all in the one child.
+ * Rejects when the drawing will not render, whatever the reason: a panic,
+ * a parse error, a render that never finishes.
  */
 export function renderSvg(
   svg: string,
   width?: number,
-  extra: { variants?: string[]; grid?: { svg: string; cols: number } } = {},
+  extra: {
+    variants?: string[];
+    grid?: { svg: string; cols: number };
+    masks?: { svgs: string[]; cols: number };
+    ground?: { svgs: string[]; cols: number };
+  } = {},
 ): Promise<{
   ink: InkBox | null;
   png?: Buffer;
   inks?: (InkBox | null)[];
   grid?: InkMap;
+  masks?: InkMap[];
+  ground?: Pixels[];
 }> {
   return new Promise((resolve, reject) => {
     const child = spawn(process.execPath, ['-e', CHILD], {
@@ -142,12 +170,24 @@ export function renderSvg(
           png?: string;
           inks?: (InkBox | null)[];
           grid?: InkMap;
+          masks?: InkMap[];
+          ground?: { cols: number; rows: number; rgba: string }[];
         };
         resolve({
           ink: answer.ink,
           ...(answer.png ? { png: Buffer.from(answer.png, 'base64') } : {}),
           ...(answer.inks ? { inks: answer.inks } : {}),
           ...(answer.grid ? { grid: answer.grid } : {}),
+          ...(answer.masks ? { masks: answer.masks } : {}),
+          ...(answer.ground
+            ? {
+                ground: answer.ground.map((one) => ({
+                  cols: one.cols,
+                  rows: one.rows,
+                  rgba: Buffer.from(one.rgba, 'base64'),
+                })),
+              }
+            : {}),
         });
       } catch (error) {
         reject(error instanceof Error ? error : new Error(String(error)));
@@ -163,6 +203,22 @@ export function renderSvg(
               grid: {
                 svg: extra.grid.svg,
                 cols: Math.max(4, Math.round(extra.grid.cols)),
+              },
+            }
+          : {}),
+        ...(extra.masks?.svgs.length
+          ? {
+              masks: {
+                svgs: extra.masks.svgs,
+                cols: Math.max(4, Math.round(extra.masks.cols)),
+              },
+            }
+          : {}),
+        ...(extra.ground?.svgs.length
+          ? {
+              ground: {
+                svgs: extra.ground.svgs,
+                cols: Math.max(4, Math.round(extra.ground.cols)),
               },
             }
           : {}),

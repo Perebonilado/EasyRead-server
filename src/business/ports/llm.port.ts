@@ -774,6 +774,9 @@ export interface LlmGatewayPort {
     before: string[];
     after: string[];
     faults: string[];
+    /** Which scene the film is, and the others the maker's words asked about at once: checked on their own, never here. */
+    scene?: number;
+    others?: number[];
   }): Promise<LlmResult<StudioCheckVerdict>>;
 
   /** Whether text asks for what no one should be made: flagged, with the categories. */

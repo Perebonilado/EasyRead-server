@@ -283,20 +283,21 @@ export function outfitsOf(
     }
     // Getting dressed into what they usually wear, already wearing it:
     // before it, what they wore to bed, or under it. Getting dressed out
-    // of bed, into anything: before it, their pyjamas.
+    // of bed, into anything: before it, their pyjamas. Putting shoes on:
+    // before it, their feet bare, whatever else they wear.
+    const wornBy = (beat: SheetBeat) =>
+      wornThing(bible, beat.thing ?? beat.prop, beat.say) ?? {
+        wear: { slot: 'outfit' as const, kit: null },
+        look: null,
+      };
     const first = mine[0].beat;
-    const firstWear = wornThing(
-      bible,
-      first.thing ?? first.prop,
-      first.say,
-    ) ?? {
-      wear: { slot: 'outfit' as const, kit: null },
-      look: null,
-    };
+    const firstWear = wornBy(first);
     const features = bible.sets.find((s) => s.id === sheet.set)?.features ?? [];
     const abed =
       place?.pose === 'in bed' ||
       Boolean(place && openingPosture(place, features)?.in);
+    const onFeet = ({ beat }: { beat: SheetBeat }) =>
+      wornBy(beat).wear.slot === 'feet';
     if (
       !carried &&
       abed &&
@@ -306,21 +307,30 @@ export function outfitsOf(
       opening = undressedFor(usual, true);
     else if (
       first.do === 'dress' &&
+      firstWear.wear.slot !== 'feet' &&
       sameOutfit(opening, usual) &&
       sameOutfit(putOn(opening, usual, firstWear.wear, firstWear.look), usual)
     )
       opening = undressedFor(usual, bedtimeFor(sheet, bible, place));
+    const shoes = mine.find(onFeet);
+    if (shoes?.beat.do === 'dress')
+      opening = takeOff(opening, wornBy(shoes.beat).wear);
     const changes: Outfits['changes'] = [];
     let now = opening;
-    for (const { beat, at } of mine) {
-      const worn = wornThing(bible, beat.thing ?? beat.prop, beat.say) ?? {
-        wear: { slot: 'outfit' as const, kit: null },
-        look: null,
-      };
-      const next =
+    for (const [k, { beat, at }] of mine.entries()) {
+      const worn = wornBy(beat);
+      let next =
         beat.do === 'dress'
           ? putOn(now, usual, worn.wear, worn.look)
-          : takeOff(now, worn.wear);
+          : takeOff(now, worn.wear, usual);
+      // Dressed into their clothes with their shoes still to come: still
+      // in bare feet until they put them on.
+      if (
+        worn.wear.slot !== 'feet' &&
+        now.extras.includes('bare feet') &&
+        mine.slice(k + 1).some((one) => onFeet(one) && one.beat.do === 'dress')
+      )
+        next = takeOff(next, { slot: 'feet', kit: null });
       if (sameOutfit(next, now)) continue;
       now = next;
       changes.push({ beat: at, spec: now });

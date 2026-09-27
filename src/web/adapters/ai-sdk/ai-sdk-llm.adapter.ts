@@ -2257,6 +2257,8 @@ export class AiSdkLlmAdapter implements LlmGatewayPort, OnModuleInit {
     before: string[];
     after: string[];
     faults: string[];
+    scene?: number;
+    others?: number[];
   }): Promise<LlmResult<StudioCheckVerdict>> {
     const started = Date.now();
     const { generateObject } = await this.registry.modules();
@@ -2265,7 +2267,11 @@ export class AiSdkLlmAdapter implements LlmGatewayPort, OnModuleInit {
     // said in the film, are data to judge, never instructions.
     const marked = (tag: string, text: string) =>
       `<${tag}>\n${text.replace(/<\/?(?:maker_words|request|film_before|film_now|faults)>/giu, '')}\n</${tag}>`;
+    const which = input.scene
+      ? `The film is scene ${input.scene}.${input.others?.length ? ` The maker's words ask about scene${input.others.length > 1 ? 's' : ''} ${input.others.join(' and ')} too: ${input.others.length > 1 ? 'those are' : 'that is'} checked on ${input.others.length > 1 ? 'their' : 'its'} own. Judge only what they ask of scene ${input.scene}.` : ''}`
+      : '';
     const prompt = [
+      ...(which ? [which] : []),
       `The maker's own words:\n${marked('maker_words', input.words)}`,
       `What the producer took them to ask for:\n${marked('request', input.request)}`,
       `The film as it was before, in words:\n${marked('film_before', input.before.length ? input.before.join('\n') : 'Not known.')}`,

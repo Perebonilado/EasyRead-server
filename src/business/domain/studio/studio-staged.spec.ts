@@ -162,6 +162,30 @@ describe("Tobi's first scene as it is staged now", () => {
     expect(line).toMatch(/Tobi gets up and stands up on the bed/);
   });
 
+  it('says when he shows he is asleep, and when he no longer does', () => {
+    const asleep = mendSheet(
+      repairSheet(
+        storySheetOf({
+          title: 'Morning',
+          set: 'bedroom',
+          onStage: [{ who: 'tobi', spot: 'centre', pose: 'in bed' }],
+          beats: [
+            { kind: 'reaction', who: 'tobi', sign: 'sleeping' },
+            { kind: 'narration', say: 'The sun comes up over the town.' },
+            { kind: 'line', who: 'tobi', say: 'Is it morning already?' },
+          ],
+        }),
+        bible,
+      ),
+      bible,
+    );
+    const shown = withFound(bible, asleep.sheet.set, asleep);
+    const film = voiced(stageStory(asleep.sheet, shown)).scene;
+    const said = describeStaged(asleep.sheet, film, shown).lines.join('\n');
+    expect(said).toMatch(/Tobi shows asleep: eyes shut, with Zs over the head/);
+    expect(said).toMatch(/Tobi no longer shows asleep/);
+  });
+
   it('says what the words have done with a thing that the film does not show', () => {
     const bare: SceneDto = JSON.parse(JSON.stringify(scene)) as SceneDto;
     for (const prop of bare.props ?? [])

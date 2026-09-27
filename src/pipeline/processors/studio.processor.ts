@@ -1521,6 +1521,11 @@ export class StudioProcessor {
           before: ask.before?.lines ?? [],
           after: after.lines,
           faults: faults.map((f) => `${f.id}: ${f.why}`),
+          // Asked with other scenes at once: judged only for its own part.
+          scene: row.position + 1,
+          ...(ask.of?.length
+            ? { others: ask.of.filter((n) => n !== row.position + 1) }
+            : {}),
         });
         await this.record(episode.id, checked.usage, 'studio_check');
         verdict = checked.value;

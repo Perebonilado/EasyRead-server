@@ -248,7 +248,7 @@ export function honestReply(reply: string, action: string): string {
 }
 
 /** The longest request said back in a reply, in characters. */
-const SAID_BACK = 220;
+const SAID_BACK = 300;
 
 /**
  * What the producer says it will do with a change to scenes, in code's own
@@ -285,7 +285,7 @@ export function sceneReply(input: {
   const request = clipped(input.request);
   parts.push(
     request
-      ? `I'll rewrite ${numbers(input.scenes)}: ${request}.`
+      ? `I'll rewrite ${numbers(input.scenes)}: ${request}${request.endsWith('…') ? '' : '.'}`
       : `I'll rewrite ${numbers(input.scenes)}.`,
   );
   const checked = input.scenes.filter((s) => s.next === 'checked');

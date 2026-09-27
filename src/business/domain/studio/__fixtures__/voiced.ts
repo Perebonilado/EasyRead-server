@@ -10,8 +10,24 @@ import type { SceneScript } from '../../scene-script';
 import type { GatedDrawing } from '../../scene-svg';
 import type { TimedBeat } from '../../scene-timing';
 import { outfitWords } from '../../scene-wear';
+import { FIGURE_SIGNS } from '../../scene-figure';
 
 const WORD_MS = 400;
+
+/** The signs a scene shows on someone: the kit draws those, and no more. */
+const signsOf = (script: SceneScript, id: string): string[] => [
+  ...new Set(
+    script.steps.flatMap((step) =>
+      step.effects.flatMap((e) =>
+        e.target === id &&
+        e.part &&
+        (FIGURE_SIGNS as readonly string[]).includes(e.part)
+          ? [e.part]
+          : [],
+      ),
+    ),
+  ),
+];
 
 /** A person's plain drawing says what they wear, as the kit's does: as they open, then each outfit they change into. */
 const outfitsOf = (thing: SceneScript['cast'][number]): string[] | null =>
@@ -25,6 +41,7 @@ const outfitsOf = (thing: SceneScript['cast'][number]): string[] | null =>
 const figure = (
   rig: boolean,
   outfits: string[] | null = null,
+  signs: readonly string[] = [],
 ): GatedDrawing => ({
   svg: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 600 900"><rect width="10" height="10"/></svg>',
   viewBox: [0, 0, 600, 900],
@@ -41,8 +58,10 @@ const figure = (
       'surprised',
       'thinking',
       'pain',
-      // Each outfit changed into is a state of its own, as the kit draws it.
+      // Each outfit changed into is a state of its own, as the kit draws
+      // it; and each sign the scene shows on them.
       ...(outfits ?? []).slice(1).map((_, k) => `dress-${k + 1}`),
+      ...signs,
     ].map((face) => [face, face]),
   ),
   moves: true,
@@ -82,7 +101,11 @@ export function voiced(
     script.cast.map((thing) => [
       thing.id,
       thing.kind === 'character'
-        ? figure(!artists.includes(thing.id), outfitsOf(thing))
+        ? figure(
+            !artists.includes(thing.id),
+            outfitsOf(thing),
+            signsOf(script, thing.id),
+          )
         : (sets[thing.id] ?? null),
     ]),
   );

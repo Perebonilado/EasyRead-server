@@ -190,6 +190,68 @@ describe('how everyone is as a scene goes on', () => {
   });
 });
 
+describe('what someone going through something shows, and for how long', () => {
+  it('has someone asleep until they wake, and a bulb for an idea only a moment', () => {
+    const { script } = staged(
+      sheetOf(
+        [
+          { who: 'tobi', spot: 'centre', pose: 'in bed' },
+          { who: 'mama', spot: 'left' },
+        ],
+        [
+          { kind: 'reaction', who: 'tobi', sign: 'sleeping' },
+          { kind: 'line', who: 'mama', say: 'Wake up, Tobi!' },
+          { kind: 'reaction', who: 'tobi', sign: 'idea', feeling: 'happy' },
+          { kind: 'line', who: 'tobi', say: 'It is my first day of school!' },
+          { kind: 'line', who: 'mama', say: 'It is, my love. Up you get.' },
+          {
+            kind: 'action',
+            who: 'tobi',
+            do: 'stand-up',
+            target: 'bed',
+            say: 'Tobi gets out of bed.',
+          },
+        ],
+      ),
+    );
+    const changes = script.steps.flatMap((step) =>
+      step.effects
+        .filter(
+          (e) =>
+            e.target === 'tobi' && (e.part === 'sleeping' || e.part === 'idea'),
+        )
+        .map((e) => `${e.do} ${e.part}`),
+    );
+    // Asleep, then an idea in its place, seen a moment and gone: never
+    // asleep again, nor the bulb for the rest of the scene.
+    expect(changes).toEqual([
+      'show sleeping',
+      'hide sleeping',
+      'show idea',
+      'hide idea',
+    ]);
+  });
+
+  it('wakes someone asleep who speaks or gets up, with no sign given', () => {
+    const { script } = staged(
+      sheetOf(
+        [{ who: 'tobi', spot: 'centre', pose: 'in bed' }],
+        [
+          { kind: 'reaction', who: 'tobi', sign: 'sleeping' },
+          { kind: 'narration', say: 'The sun comes up.' },
+          { kind: 'line', who: 'tobi', say: 'Morning already?' },
+        ],
+      ),
+    );
+    const said = script.steps.findIndex((step) =>
+      step.effects.some(
+        (e) => e.target === 'tobi' && e.part === 'sleeping' && e.do === 'hide',
+      ),
+    );
+    expect(said).toBeGreaterThan(0);
+  });
+});
+
 describe('what everyone wears as a scene goes on', () => {
   it('has Tobi, getting dressed out of bed at dawn, in pyjamas until he puts his uniform on', () => {
     const { sheet } = staged(scene1);
@@ -235,6 +297,67 @@ describe('what everyone wears as a scene goes on', () => {
     expect(worn.opening).toMatchObject({ top: 'pyjamas' });
     expect(worn.changes.map((c) => [c.spec.top, c.spec.topColour])).toEqual([
       ['jumper', 'red'],
+    ]);
+  });
+
+  it('keeps bare feet until shoes are put on, whatever is put on before them', () => {
+    const sheet = sheetOf(
+      [{ who: 'tobi', spot: 'centre', pose: 'in bed' }],
+      [
+        {
+          kind: 'action',
+          who: 'tobi',
+          do: 'stand-up',
+          target: 'bed',
+          say: 'Tobi gets out of bed.',
+        },
+        {
+          kind: 'business',
+          who: 'tobi',
+          do: 'dress',
+          thing: 'uniform',
+          say: 'Tobi puts on his uniform.',
+        },
+        {
+          kind: 'business',
+          who: 'tobi',
+          do: 'dress',
+          thing: 'shoes',
+          say: 'Tobi puts on his shoes.',
+        },
+      ],
+    );
+    const { sheet: mended } = staged(sheet);
+    const worn = outfitsOf(mended, bible).get('tobi')!;
+    expect(worn.opening.extras).toContain('bare feet');
+    expect(
+      worn.changes.map((c) => c.spec.extras.includes('bare feet')),
+    ).toEqual([true, false]);
+    expect(worn.changes[0].spec.top).toBe('uniform');
+  });
+
+  it('puts shoes on someone dressed already, never pyjamas', () => {
+    const sheet = sheetOf(
+      [{ who: 'tobi', spot: 'centre', pose: 'sitting', on: 'chair' }],
+      [
+        {
+          kind: 'business',
+          who: 'tobi',
+          do: 'dress',
+          thing: 'shoes',
+          say: 'Tobi puts his shoes on.',
+        },
+      ],
+      { time: 'dawn' },
+    );
+    const { sheet: mended } = staged(sheet);
+    const worn = outfitsOf(mended, bible).get('tobi')!;
+    expect(worn.opening).toEqual({
+      ...bible.characters[0].figure,
+      extras: [...bible.characters[0].figure!.extras, 'bare feet'],
+    });
+    expect(worn.changes.map((c) => c.spec)).toEqual([
+      bible.characters[0].figure,
     ]);
   });
 
@@ -294,6 +417,45 @@ describe('what everyone wears as a scene goes on', () => {
     const worn = outfitsOf(mended.sheet, grown).get('tobi')!;
     // The colour it is drawn in is the colour it is worn in.
     expect(look).toBe(`${worn.changes.at(-1)!.spec.topColour} jumper`);
+  });
+
+  it('draws pyjamas taken off in the colour they were worn', () => {
+    const night = {
+      ...bible,
+      things: [{ id: 'pyjamas', name: 'pyjamas', kind: 'thing' as const }],
+    };
+    const sheet = sheetOf(
+      [{ who: 'tobi', spot: 'centre', pose: 'in bed' }],
+      [
+        {
+          kind: 'action',
+          who: 'tobi',
+          do: 'stand-up',
+          target: 'bed',
+          say: 'Tobi gets out of bed.',
+        },
+        {
+          kind: 'business',
+          who: 'tobi',
+          do: 'undress',
+          thing: 'pyjamas',
+          prop: 'pyjamas',
+          say: 'Tobi takes off his pyjamas.',
+        },
+        {
+          kind: 'business',
+          who: 'tobi',
+          do: 'dress',
+          thing: 'uniform',
+          say: 'Tobi puts on his uniform.',
+        },
+      ],
+    );
+    const mended = mendSheet(sheet, night);
+    const worn = outfitsOf(mended.sheet, night).get('tobi')!;
+    expect(mended.things.find((t) => t.id === 'pyjamas')?.look).toBe(
+      `${worn.opening.topColour} pyjamas`,
+    );
   });
 
   it('puts a coat on over what someone usually wears, in its own colour', () => {
@@ -393,6 +555,17 @@ describe('Tobi in bed, as the stage plays it', () => {
         .flatMap((b) => b.business ?? [])
         .find((b) => b.does === 'wear'),
     ).toMatchObject({ who: 'tobi', prop: 'uniform' });
+  });
+
+  it('changes his clothes in the film just as the uniform goes on, whatever he handled before', () => {
+    const { scene } = voiced(script);
+    const [on] = scene
+      .props!.flatMap((p) => p.does)
+      .filter(([, who, does]) => who === 'tobi' && does === 'wear');
+    const shown = scene.effects.find(
+      (e) => e.target === 'tobi' && e.part === 'dress-1' && e.do === 'show',
+    )!;
+    expect(shown.atMs).toBe(on[0]);
   });
 
   it('never moves the bed, nor anyone still in it, sampled through the film', () => {

@@ -354,6 +354,34 @@ const called = (id: DoingId | null | undefined) =>
     : 'nothing';
 
 /**
+ * The things a sheet names two ways, each shorter name by its fuller one:
+ * "dress" and "party-dress" on one sheet are the one dress. Only a name
+ * that is the fuller one's last word, and only one fuller name for it;
+ * never one of the lists' own things.
+ */
+function sameThings(sheet: StorySheet): Map<string, string> {
+  const named = new Set([
+    ...sheet.props.map((p) => p.prop),
+    ...sheet.beats.flatMap((b) =>
+      [b.prop, b.thing].filter((one): one is string => Boolean(one)),
+    ),
+    ...sheet.onStage.flatMap((p) => (p.holding ? [p.holding] : [])),
+  ]);
+  const fuller = new Map<string, string[]>();
+  for (const full of named) {
+    const last = full.split('-').pop();
+    if (!last || last === full || !named.has(last) || isStageProp(last))
+      continue;
+    fuller.set(last, [...(fuller.get(last) ?? []), full]);
+  }
+  return new Map(
+    [...fuller].flatMap(([short, fulls]): [string, string][] =>
+      fulls.length === 1 ? [[short, fulls[0]]] : [],
+    ),
+  );
+}
+
+/**
  * A story's sheet put right where it can be without changing the story:
  * names made the bible's ids, spots made free, whoever speaks or acts
  * brought on first, a thing taken up before it is used, a line the
@@ -376,6 +404,26 @@ export function mendSheet(
 } {
   const mended: string[] = [];
   const sheet: StorySheet = JSON.parse(JSON.stringify(input)) as StorySheet;
+  // One thing the sheet names two ways ("the red dress", then "the red
+  // party dress"): the one thing, by its fuller name, wherever it is named.
+  const alias = sameThings(sheet);
+  for (const [short, full] of alias) {
+    const as = (id: string | null | undefined) => (id === short ? full : id);
+    sheet.props = sheet.props
+      .map((p) => ({ ...p, prop: as(p.prop)! }))
+      .filter((p, k, all) => all.findIndex((o) => o.prop === p.prop) === k);
+    for (const place of sheet.onStage) {
+      place.holding = as(place.holding) ?? null;
+      if (place.wears)
+        place.wears = [...new Set(place.wears.map((w) => as(w)!))];
+    }
+    for (const beat of sheet.beats) {
+      beat.prop = as(beat.prop) ?? null;
+      if (beat.thing) beat.thing = as(beat.thing) ?? undefined;
+      if (beat.target) beat.target = as(beat.target) ?? undefined;
+    }
+    mended.push(`the ${short} and the ${full} are one thing, the ${full}`);
+  }
   const byId = new Map(bible.characters.map((c) => [c.id, c]));
   const nameOf = (id: string) => byId.get(id)?.name ?? id;
   const inCast = (id: string | null | undefined): id is string =>
@@ -907,7 +955,8 @@ export function mendSheet(
     // words' own new thing ("gets changed into his clothes"), are only
     // what they wear.
     const clothes = id === 'dress' || id === 'undress';
-    let thing = plan.thing;
+    // The words' own name for one thing the sheet names two ways: the one.
+    let thing = plan.thing ? (alias.get(plan.thing) ?? plan.thing) : null;
     // What is drunk is in the cup they hold: "sips his tea", "takes a sip".
     if (id === 'drink' && (!thing || holders.get(thing) !== who)) {
       const cup = [...holders].find(
@@ -2013,18 +2062,37 @@ export function mendSheet(
       },
     ];
   });
-  // A thing of the show's own that is put on, with no colour given it:
-  // the colour it is worn in, so it is drawn as it will be worn.
+  // A thing of the show's own that is put on or taken off, with no colour
+  // given it: the colour it is worn in, so it is drawn as it is worn; their
+  // own uniform with what they wear on their legs with it.
+  const outfits = outfitsOf(sheet, { ...bible, things: ownThings }, before);
   for (const [k, thing] of ownThings.entries()) {
     const wear = wearableOf(thing.name);
     if (!wear?.kit || colourIn(thing.look)) continue;
-    const on = sheet.beats.find(
-      (b) => b.do === 'dress' && (b.thing ?? b.prop) === thing.id,
+    const at = sheet.beats.findIndex(
+      (b) =>
+        (b.do === 'dress' || b.do === 'undress') &&
+        (b.thing ?? b.prop) === thing.id,
     );
+    const on = sheet.beats[at];
     const usual = on?.who ? byId.get(on.who)?.figure : undefined;
-    if (!on || !usual) continue;
-    const worn = putOn(usual, usual, wear, colourBefore(on.say, thing.name));
-    const look = `${wear.slot === 'top' ? worn.topColour : worn.accentColour} ${thing.look ?? thing.name}`;
+    if (!on?.who || !usual) continue;
+    // Put on, as it goes on; taken off, as they had it on until then.
+    const had = outfits.get(on.who);
+    const worn =
+      on.do === 'dress'
+        ? putOn(usual, usual, wear, colourBefore(on.say, thing.name))
+        : had
+          ? ([...had.changes].reverse().find((c) => c.beat < at)?.spec ??
+            had.opening)
+          : usual;
+    const named = thing.look ?? thing.name;
+    const look =
+      wear.slot !== 'top'
+        ? `${worn.accentColour} ${named}`
+        : wear.kit === usual.top && worn.top === usual.top
+          ? `${worn.topColour} ${named} with ${worn.bottomColour} ${worn.bottom}`
+          : `${worn.topColour} ${named}`;
     ownThings[k] = { ...thing, look };
     const was = newThings.findIndex((t) => t.id === thing.id);
     if (was >= 0) newThings[was] = ownThings[k];

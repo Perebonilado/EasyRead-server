@@ -43,6 +43,15 @@ describe("the producer's reply to a change", () => {
     );
   });
 
+  it('says a long request back cut short, and never with a stop after it', () => {
+    const said = sceneReply({
+      scenes: [{ number: 1, next: 'checked' }],
+      request: `Zara ${'wakes up slowly and stretches and '.repeat(12)}smiles`,
+    });
+    expect(said).toMatch(/…\. Then|… Then/);
+    expect(said).not.toMatch(/…\./);
+  });
+
   it('says plainly what the stage cannot show is left out, never promised', () => {
     expect(
       sceneReply({

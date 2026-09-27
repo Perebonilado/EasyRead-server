@@ -18,6 +18,7 @@ import { beatWindows } from './studio-audit';
 import { wornSaidIn } from './studio-check';
 import { namesOf, type StorySheet, type StudioBible } from './studio';
 import { doingOf } from '../scene-doings';
+import { FIGURE_SIGNS } from '../scene-figure';
 import { wearableOf } from '../scene-wear';
 
 /** The faults code can see in a made scene, each by its id. */
@@ -60,6 +61,15 @@ const ON_FEET = new Set([
 const MOVED = 0.02;
 /** Feet higher than this share of the stage above the ground beside a seat or a bed are up on it. */
 const RAISED = 0.03;
+/** Signs the kit shows on someone, in the words a viewer would use. */
+const SIGNS_SEEN: Record<string, string> = {
+  sleeping: 'asleep: eyes shut, with Zs over the head',
+  idea: 'a light bulb over the head, for an idea',
+  confused: 'a question mark over the head',
+  tears: 'tears',
+  dizzy: 'dizzy, stars round the head',
+};
+const SIGNS = new Set<string>(FIGURE_SIGNS);
 /** Two things this close together, in ms, happen at once. */
 const SAME_MOMENT = 200;
 /** What the stage may play a handling as, for what the words have done: a catch of nothing coming is a take. */
@@ -420,6 +430,17 @@ export function describeStaged(
     const k = shown ? Number(shown.part!.slice('dress-'.length)) : 0;
     return person.wears?.[k] ?? null;
   };
+  /** Signs shown and taken off, and those said with a beat: the rest are said on their own. */
+  const signChanges = scene.effects.filter(
+    (e) =>
+      e.part &&
+      SIGNS.has(e.part) &&
+      (e.do === 'show' || e.do === 'hide') &&
+      people.some((p) => p.id === e.target),
+  );
+  const saidSigns = new Set<(typeof signChanges)[number]>();
+  const signSaid = (effect: (typeof signChanges)[number]) =>
+    `${nameOf(effect.target)} ${effect.do === 'show' ? 'shows' : 'no longer shows'} ${SIGNS_SEEN[effect.part!] ?? `"${effect.part}"`}`;
   const lines: string[] = [];
   lines.push(
     `Scene "${sheet.title}", ${set?.name ?? sheet.set}. The set's things: ${
@@ -572,6 +593,12 @@ export function describeStaged(
               : `${nameOf(who)} goes ${whereAt(i, who)}${withIt}`,
           );
       });
+      // What they show they are going through: asleep, an idea.
+      for (const effect of signChanges)
+        if (effect.target === who && inTime(effect.atMs)) {
+          saidSigns.add(effect);
+          note(effect.atMs, signSaid(effect));
+        }
       for (const effect of scene.effects)
         if (
           effect.target === who &&
@@ -652,6 +679,11 @@ export function describeStaged(
     );
     void beat;
   }
+  // A sign that came on or off with no beat of theirs (asleep until they
+  // speak): said at its moment.
+  for (const effect of signChanges)
+    if (!saidSigns.has(effect))
+      lines.push(`At ${at(effect.atMs)}: ${signSaid(effect)}.`);
   // How it ends: who is left where, what lies about, who has what.
   const last = scene.steps.length - 1;
   const end = Math.max(scene.durationMs, scene.settledMs ?? 0);

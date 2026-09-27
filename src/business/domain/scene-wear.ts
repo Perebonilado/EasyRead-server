@@ -198,6 +198,15 @@ export function putOn(
     const top = wear.kit as Top;
     if (top === usual.top && (!colour || colour === usual.topColour))
       return { ...usual };
+    // Pyjamas are top and trousers alike, worn with bare feet.
+    if (top === 'pyjamas') {
+      const worn = undressedFor(usual, true);
+      return {
+        ...worn,
+        headwear: now.headwear,
+        ...(colour ? { topColour: colour, bottomColour: colour } : {}),
+      };
+    }
     return {
       ...now,
       top,
@@ -224,8 +233,24 @@ export function putOn(
   };
 }
 
-/** What someone wears after taking a thing off: a top off leaves a plain t-shirt, a hat off their hair, shoes off their bare feet. */
-export function takeOff(now: FigureSpec, wear: Wearable): FigureSpec {
+/**
+ * What someone wears after taking a thing off: a top off leaves a plain
+ * t-shirt, pyjamas off the t-shirt and what they usually wear on their
+ * legs, a hat off their hair, shoes off their bare feet.
+ */
+export function takeOff(
+  now: FigureSpec,
+  wear: Wearable,
+  usual: FigureSpec | null = null,
+): FigureSpec {
+  if (wear.kit === 'pyjamas' && now.top === 'pyjamas' && usual)
+    return {
+      ...now,
+      top: 't-shirt',
+      topColour: 'white',
+      bottom: usual.bottom,
+      bottomColour: usual.bottomColour,
+    };
   if (wear.slot === 'feet')
     return now.extras.includes('bare feet')
       ? now

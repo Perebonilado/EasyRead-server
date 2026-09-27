@@ -464,6 +464,18 @@ describe('a scene changed as the maker asked, made again and checked', () => {
     ]);
   });
 
+  it('checks each scene asked about at once only for what was asked of it', async () => {
+    const s = studio(shown());
+    s.scenes.set('c1', { ...s.scenes.get('c1')!, status: 'making' });
+    await s.processor.process(
+      job({
+        ask: ask({ of: [1, 3], before: { key: 'before', lines: ['b'] } }),
+      }),
+      context,
+    );
+    expect(s.checks[0]).toMatchObject({ scene: 1, others: [3] });
+  });
+
   it("keeps the Studio's own try again quiet, the undo as the maker left it, and the clothes worn in the sheet", async () => {
     const s = studio(shown());
     const mine = { ...sheet, title: 'As the maker had it' };

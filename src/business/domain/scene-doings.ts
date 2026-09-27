@@ -289,8 +289,8 @@ const BEDS = 'beds?|bunks?|hammocks?|cots?';
 const WHOSE = '(?:(?:the|a|an|his|her|their|its|my|your|our) )?';
 /** A bed or a seat the words name, as someone gets into it, out of it or up in it: its word. */
 export const RESTING_WORDS = new RegExp(`\\b(${RESTS_ON})\\b`, 'iu');
-/** A thing worn, named after a verb: "on his new school uniform". */
-const WORN = `${WHOSE}(?:[\\p{L}-]+ ){0,2}?(?:${WEAR_WORDS})\\b`;
+/** A thing worn, named after a verb: "on his new school uniform", "on the party-dress". */
+const WORN = `${WHOSE}(?:[\\p{L}-]+[ -]){0,2}?(?:${WEAR_WORDS})\\b`;
 
 const doings: Record<DoingId, Omit<Doing, 'id'>> = {
   // ── The body ─────────────────────────────────────────────────────────────

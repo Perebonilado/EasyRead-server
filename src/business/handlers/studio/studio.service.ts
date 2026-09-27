@@ -592,7 +592,13 @@ export class StudioService {
                 cannot
                   ? `${request.replace(/[.!?\s]*$/u, '.')} Leave out ${cannot.replace(/[.!?\s]*$/u, '')}: the stage cannot show it.`
                   : request,
-                { id: mine.id, words: said },
+                {
+                  id: mine.id,
+                  words: said,
+                  ...(asked.length > 1
+                    ? { of: asked.map((one) => one.position + 1) }
+                    : {}),
+                },
               );
               if (one) notes.push(one);
               else
@@ -776,8 +782,8 @@ export class StudioService {
     episode: StudioEpisodeRecord,
     scene: StudioSceneRecord,
     request: string,
-    /** Where the maker asked it and in what words: a made story scene is made again and checked against them. */
-    from?: { id: string; words: string },
+    /** Where the maker asked it and in what words, and every scene they asked about at once: a made story scene is made again and checked against them. */
+    from?: { id: string; words: string; of?: number[] },
   ): Promise<string | null> {
     if (episode.phase !== 'script' && episode.phase !== 'made')
       return 'The scenes are not written yet.';
@@ -800,6 +806,7 @@ export class StudioService {
             words: (from?.words ?? request).slice(0, MESSAGE_CHARS),
             request,
             tries: 1,
+            ...(from?.of ? { of: from.of } : {}),
           }
         : undefined;
     await this.enqueue(show, episode, {

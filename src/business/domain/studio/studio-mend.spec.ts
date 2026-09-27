@@ -80,6 +80,89 @@ describe("the words' idioms, read as what they mean", () => {
   });
 });
 
+describe('one thing by two names', () => {
+  it('has "the red dress" and "the red party dress" on one sheet the one dress', () => {
+    const dressed = bibleOf({
+      ...bible,
+      things: [
+        { id: 'dress', name: 'dress', kind: 'thing', look: 'red' },
+        { id: 'party-dress', name: 'party dress', kind: 'thing', look: 'red' },
+      ],
+    });
+    const sheet = storySheetOf({
+      title: 'Morning',
+      set: 'sitting-room',
+      onStage: [{ who: 'ada', spot: 'left' }],
+      props: [
+        { prop: 'party-dress', near: 'ada' },
+        { prop: 'dress', near: 'ada' },
+      ],
+      beats: [
+        {
+          kind: 'business',
+          who: 'ada',
+          do: 'take',
+          prop: 'dress',
+          thing: 'dress',
+          say: 'Ada takes the red dress from the sofa.',
+        },
+        {
+          kind: 'business',
+          who: 'ada',
+          do: 'take',
+          prop: 'party-dress',
+          thing: 'party-dress',
+          say: 'Ada takes the party-dress.',
+        },
+        {
+          kind: 'business',
+          who: 'ada',
+          do: 'dress',
+          prop: 'party-dress',
+          thing: 'party-dress',
+          say: 'Ada puts on the red party dress.',
+        },
+      ],
+    });
+    const mended = mendSheet(sheet, dressed);
+    expect(mended.sheet.props.map((p) => p.prop)).toEqual(['party-dress']);
+    expect(mended.sheet.beats.map((b) => [b.do, b.thing ?? b.prop])).toEqual([
+      ['take', 'party-dress'],
+      ['dress', 'party-dress'],
+    ]);
+  });
+});
+
+describe('clothes named by their own id', () => {
+  it('reads "puts on the party-dress" as putting it on, never putting it down', () => {
+    const dressed = bibleOf({
+      ...bible,
+      things: [{ id: 'party-dress', name: 'party dress', kind: 'thing' }],
+    });
+    const mended = mendSheet(
+      storySheetOf({
+        title: 'Morning',
+        set: 'sitting-room',
+        onStage: [{ who: 'ada', spot: 'left', holding: 'party-dress' }],
+        beats: [
+          {
+            kind: 'business',
+            who: 'ada',
+            do: 'put',
+            prop: 'party-dress',
+            thing: 'party-dress',
+            say: 'Ada puts on the party-dress.',
+          },
+        ],
+      }),
+      dressed,
+    );
+    expect(mended.sheet.beats.map((b) => [b.do, b.thing])).toEqual([
+      ['dress', 'party-dress'],
+    ]);
+  });
+});
+
 describe('what goes by outside', () => {
   it('never parks a bus in a room it is only seen from', () => {
     const mended = mendSheet(

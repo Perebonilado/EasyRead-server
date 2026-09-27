@@ -1094,9 +1094,22 @@ export function composeScene(input: ComposeInput): {
   // a screenplay shows without words comes in the quiet after its line,
   // or, before the first, in the quiet the page opens with.
   const firstWord = beats[0]?.startMs ?? 0;
+  /**
+   * How much of the quiet after a line the voice left, as a share of what
+   * the script asked: a voice that holds a pause only so long (three
+   * seconds, Kokoro's) has all that happens in the quiet quickened to fit
+   * it, so none of it runs on into the next line.
+   */
+  const quietShare = (beat: number): number => {
+    const asked = script.beats[beat]?.holdS;
+    if (!asked || !beats[beat]) return 1;
+    const next = beats[beat + 1]?.startMs ?? durationMs;
+    const left = (next - beats[beat].endMs) / 1000;
+    return left > 0 && left < asked * QUIET_CUT ? left / asked : 1;
+  };
   const momentMs = (beat: number, after: number) =>
     beat >= 0 && beats[beat]
-      ? beats[beat].endMs + AFTER_WORDS_MS + after * 1000
+      ? beats[beat].endMs + AFTER_WORDS_MS + after * 1000 * quietShare(beat)
       : Math.max(0, firstWord - (script.lead ?? 0) * 1000 + after * 1000);
   const timed = script.steps.map((step) => ({
     step,
@@ -1662,14 +1675,15 @@ export function composeScene(input: ComposeInput): {
         const clip = HANDLING_MS[one.does];
         const key = clip * HANDLING_AT[one.does];
         const start = Math.max(momentMs(one.lead ? -1 : k, one.after), doneAt);
-        at = Math.round(start + key);
+        const quick = one.lead ? 1 : quietShare(k);
+        at = Math.round(start + key * quick);
         // The next may begin once this has changed hands, and as long as
         // its moment in the quiet runs, quickened to fit it: never later.
         doneAt =
           start +
           Math.max(
-            key,
-            Math.min(clip, one.s !== undefined ? one.s * 1000 : clip),
+            key * quick,
+            Math.min(clip, one.s !== undefined ? one.s * 1000 * quick : clip),
           );
       } else {
         const word =
@@ -1760,6 +1774,23 @@ export function composeScene(input: ComposeInput): {
       does,
     };
   });
+  // A change of clothes shows as the thing goes on, or comes off: at its
+  // handling's own moment, which waits on whatever they handled before.
+  for (const effect of effects) {
+    if (!effect.part?.startsWith('dress-')) continue;
+    const on = props
+      .flatMap((prop) => prop.does)
+      .filter(
+        ([at, who, does]) =>
+          who === effect.target &&
+          (does === 'wear' || does === 'doff') &&
+          Math.abs(at - effect.atMs) < DRESSED_NEAR_MS,
+      )
+      .sort(
+        (a, b) => Math.abs(a[0] - effect.atMs) - Math.abs(b[0] - effect.atMs),
+      )[0];
+    if (on) effect.atMs = on[0];
+  }
 
   /** When each one on the stage goes to another station: they are up and walking. */
   const goesAt = (): Map<string, number[]> => {
@@ -3423,6 +3454,10 @@ export function describeStep(step: SceneStep, index: number): string {
 const FILL_EVERY_MS = 6500;
 const FILL_CLEAR_MS = 2500;
 /** How long the camera stays in close on a thing, at most, and at least. */
+/** A quiet the voice left this much shorter than asked, or less, was cut short by it: what happens in it is quickened to fit. */
+const QUIET_CUT = 0.9;
+/** A change of clothes this close to someone putting a thing on or taking it off, in ms, is that handling's. */
+const DRESSED_NEAR_MS = 4000;
 const FILL_SHOT_MS = 3500;
 const FILL_SHOT_LEAST_MS = 1500;
 

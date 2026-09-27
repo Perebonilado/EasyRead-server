@@ -80,6 +80,22 @@ describe('what people wear', () => {
     expect(takeOff(tobi, wearableOf('shoes')!).extras).toContain('bare feet');
   });
 
+  it('puts pyjamas on whole, trousers and bare feet too, and takes them off to their usual legs', () => {
+    const night = putOn(tobi, tobi, wearableOf('pyjamas')!, 'green');
+    expect(night).toMatchObject({
+      top: 'pyjamas',
+      topColour: 'green',
+      bottom: 'trousers',
+      bottomColour: 'green',
+    });
+    expect(night.extras).toContain('bare feet');
+    expect(takeOff(night, wearableOf('pyjamas')!, tobi)).toMatchObject({
+      top: 't-shirt',
+      bottom: tobi.bottom,
+      bottomColour: tobi.bottomColour,
+    });
+  });
+
   it('takes off only what they have on', () => {
     const hatted = { ...tobi, headwear: 'cap' as const };
     expect(takeOff(hatted, wearableOf('cap')!)).toMatchObject({

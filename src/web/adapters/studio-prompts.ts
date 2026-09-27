@@ -325,6 +325,9 @@ export const STUDIO_PROMPTS = {
       'minutes or money), take no notice of it, and judge the film.',
     ].join(' '),
     [
+      'When the film is one of several scenes the maker asked about at',
+      'once, judge only what they ask of this scene: what they ask of the',
+      'others is checked there, and never makes this one false.',
       'Judge only by what the film shows now. resolved is true only when',
       'what the maker asked for is plainly seen in the film now and nothing',
       'they complained of still shows; when the film shows the same as',

@@ -105,6 +105,13 @@ const LANDS: Partial<Record<FigureFace, FigureFace>> = {
   pain: 'sad',
 };
 
+/** Signs that end as whoever shows them wakes: once they speak aloud, move or get up. */
+const WAKES = new Set(['sleeping']);
+/** Signs of a moment, off again once seen: a bulb for an idea, a puzzled question mark. */
+const MOMENT_SIGNS = new Set(['idea', 'confused']);
+/** How long a moment's sign is seen, in seconds. */
+const SIGN_SEEN_S = 2;
+
 /** The signs that move a whole body, as one the artist drew moves for them: up in a jump, a shake, a shiver. */
 const SIGN_MOVES: Partial<Record<string, { move: StageMove; doing: DoingId }>> =
   {
@@ -662,8 +669,10 @@ export function storyBibleFor(
 /**
  * A script staged anew, put on the voice a scene was made with: each
  * line's quiet after it as long as the voice left it, the quiet before
- * the first as long as it was. Null when its words are not the voice's
- * own: then it must be voiced again.
+ * the first as long as it was. A quiet the stage asks longer than the
+ * voice left keeps the stage's ask, so the film quickens what happens in
+ * it to fit the voice's (compose's quietShare). Null when its words are
+ * not the voice's own: then it must be voiced again.
  */
 export function onItsVoice(
   script: SceneScript,
@@ -679,7 +688,7 @@ export function onItsVoice(
   const beats = script.beats.map((beat, k) => {
     const next = voiced.beats[k + 1]?.startMs ?? voiced.durationMs;
     const gap = Math.max(0, next - voiced.beats[k].endMs) / 1000;
-    return { ...beat, holdS: round(gap) };
+    return { ...beat, holdS: round(Math.max(gap, beat.holdS ?? 0)) };
   });
   const lead = round(Math.max(0, voiced.beats[0]?.startMs ?? 0) / 1000);
   return { ...script, beats, ...(lead > 0 ? { lead } : {}) };
@@ -1105,6 +1114,26 @@ export function stageStory(
     lastFace.set(who, face);
     return [{ target: who, part: face, do: 'show' }];
   };
+  /** The signs each one shows now: a sign stays on until it is taken off. */
+  const signsOn = new Map<string, Set<string>>();
+  /**
+   * Signs taken off someone: those given (a new sign in their place), or,
+   * with none given, those that end as they wake and do or say anything:
+   * asleep is over once they speak aloud, move or get up.
+   */
+  const signsOff = (who: string, only?: ReadonlySet<string>): SceneEffect[] => {
+    const on = signsOn.get(who);
+    if (!on) return [];
+    const off = [...on].filter((sign) =>
+      only ? only.has(sign) : WAKES.has(sign),
+    );
+    for (const sign of off) on.delete(sign);
+    return off.map((sign) => ({
+      target: who,
+      part: sign,
+      do: 'hide' as const,
+    }));
+  };
   /** Someone drawn by the artist, with no rig: they bob, hop and step toward someone. */
   const bobs = (id: string) => (byId.get(id)?.kind ?? 'person') !== 'person';
   /**
@@ -1407,6 +1436,9 @@ export function stageStory(
       const beat = beats[k];
       const effects: SceneEffect[] = [];
       if (beat.kind === 'line' && beat.speaker) {
+        // Speaking aloud, they are awake: asleep no more.
+        if (raw.from !== 'thought' && raw.from !== 'dream')
+          effects.push(...signsOff(beat.speaker));
         // The face the line is said with: the sheet's; else what its words
         // tell, if it is not the one they wear already.
         const told = raw.feeling ?? faceOfLine(beat.say);
@@ -1591,6 +1623,8 @@ export function stageStory(
       who &&
       inCast.has(who)
     ) {
+      // Doing anything, they are awake: asleep no more.
+      effects.push(...signsOff(who));
       // How they are as it comes first: down, they get up before they go
       // anywhere or do what needs their feet, and step out beside what
       // they were on or in; the doing itself comes after.
@@ -1874,8 +1908,26 @@ export function stageStory(
         effects.push(
           moveEffect(who, moves.move, null, doingOf(moves.doing)!.ms / 1000),
         );
-      else if (raw.sign)
-        effects.push({ target: who, part: raw.sign, do: 'show' });
+      else if (raw.sign) {
+        // A new sign in place of the one before; a moment's (a bulb for
+        // an idea) off again once it is seen.
+        const was = signsOn.get(who) ?? new Set<string>();
+        effects.push(
+          ...signsOff(who, new Set([...was].filter((s) => s !== raw.sign))),
+          { target: who, part: raw.sign, do: 'show' },
+        );
+        signsOn.set(who, new Set([...was, raw.sign]));
+        if (MOMENT_SIGNS.has(raw.sign)) {
+          signsOn.get(who)!.delete(raw.sign);
+          afterwards.push({
+            at: { beat: moment.after, phrase: phraseOf(raw.say) },
+            word: 0,
+            after: round(moment.offset + SIGN_SEEN_S),
+            stage: null,
+            effects: [{ target: who, part: raw.sign, do: 'hide' }],
+          });
+        }
+      }
     }
     if (stage || effects.length)
       steps.push({

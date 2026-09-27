@@ -95,6 +95,8 @@ export interface StudioAsk {
   request: string;
   /** The first try, or the Studio's one try again. */
   tries: 1 | 2;
+  /** Every scene the maker's words asked about at once, by number: each is checked only for what they ask of it. */
+  of?: number[];
   /** The film as it was before the change, in words from what it plays, and the same without its times. */
   before?: { key: string; lines: string[] } | null;
   /** What the check found still wrong, for the writer's second try. */

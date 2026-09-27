@@ -124,6 +124,9 @@ export const EVENT_LINES = {
   kept: (name: string) => `${name} kept as before`,
   drawFailed: (name: string, again: boolean) =>
     `${name} could not be drawn${again ? ' again' : ''}. Try again in a moment.`,
+  /** An animal the kit draws, whose new look could not be read from what was asked. */
+  unchanged: (name: string) =>
+    `${name}'s new look could not be worked out from that. Say it another way, or try again.`,
   scenes: (count: number) =>
     count === 1 ? 'The scene is written' : `All ${count} scenes written`,
   scene: (position: number, title: string, again: boolean) =>

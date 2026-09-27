@@ -10,6 +10,7 @@
  * same drawing stands on every page they are on, the same way round
  * beside anyone else, with the face the last page left them with.
  */
+import type { AnimalSpec } from './scene-animal';
 import type { AnyFeatureKind } from './scene-doings';
 import { DRAWN } from './scene-own';
 import { figureOf, type FigureProp, type FigureSpec } from './scene-figure';
@@ -207,6 +208,8 @@ export interface StoryCharacter {
   size?: StorySize | null;
   /** A person's look, as the kit draws them: the same on every page. */
   figure?: FigureSpec | null;
+  /** An animal's look, as the kit draws it (scene-animal): the same on every page; absent, the artist draws it. */
+  animal?: AnimalSpec | null;
   /** Whether they are seen or only heard; absent from a book read before it was asked: seen. */
   presence?: StoryPresence | null;
   /** A well-known figure (scene-iconic), drawn as their tradition shows them: its key. */

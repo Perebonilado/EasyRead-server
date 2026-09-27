@@ -4,6 +4,7 @@
  * maker can see. The same words both ways, so the producer never talks of
  * a scene the writer was never told of.
  */
+import { describeAnimal } from '../scene-animal';
 import { describeFigure } from '../scene-figure';
 import { DRAWN } from '../scene-own';
 import { STAGE_NAMES, STAGE_RECIPES, type LearningStage } from '../scene-stage';
@@ -56,7 +57,11 @@ export function describeBible(
       .join('\n');
   const people = bible.characters.map((c) => {
     const looks =
-      c.kind === 'person' && c.figure ? describeFigure(c.figure) : c.look;
+      c.kind === 'person' && c.figure
+        ? describeFigure(c.figure)
+        : c.animal
+          ? describeAnimal(c.animal)
+          : c.look;
     return `- ${c.id}: ${c.name}, ${c.role}, ${c.kind}${c.size ? ` (${c.size})` : ''}; ${c.traits.join(', ') || 'no traits given'}; looks: ${looks}; voice: ${c.voice}${c.carries ? `; carries a ${c.carries}` : ''}`;
   });
   const places = bible.sets.map(

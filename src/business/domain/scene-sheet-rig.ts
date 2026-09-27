@@ -1147,7 +1147,8 @@ const centreOf = (box: InkBox): Point => [
 export async function rigSheet(
   sheet: CharacterSheet,
 ): Promise<{ sheet: CharacterSheet; notes: string[] }> {
-  if (sheet.figure) return { sheet, notes: [] };
+  // A person and an animal the kit drew are rigged by the kit itself.
+  if (sheet.figure || sheet.animal) return { sheet, notes: [] };
   const { drawing } = sheet;
   const root = parse(drawing.svg);
   if (!root) return { sheet, notes: [] };

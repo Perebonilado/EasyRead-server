@@ -12,6 +12,7 @@
  * shows them.
  */
 import { createHash } from 'node:crypto';
+import { SPECIES } from '../scene-animal';
 import type { Cast, CharacterSheet } from '../scene-sheet';
 import {
   namesOf,
@@ -24,10 +25,13 @@ import {
 export interface CastWork {
   /** Characters being drawn: since when, and for a drawing again, the maker's words. */
   drawing: Record<string, { since: number; words?: string }>;
-  /** A new drawing of a character, waiting beside the one they have. */
+  /**
+   * A new drawing of a character, waiting beside the one they have; for
+   * one the animal kit draws, how its look reads in words with it.
+   */
   candidates: Record<
     string,
-    { sheet: CharacterSheet; words: string; at: number }
+    { sheet: CharacterSheet; words: string; at: number; look?: string }
   >;
 }
 
@@ -53,6 +57,7 @@ export function castWorkOf(raw: unknown): CastWork {
         sheet: one.sheet,
         words: one.words,
         at: Number.isFinite(one.at) ? one.at : 0,
+        ...(typeof one.look === 'string' ? { look: one.look } : {}),
       };
   return { drawing, candidates };
 }
@@ -65,13 +70,31 @@ export function castWorkOf(raw: unknown): CastWork {
 export function gesturingIn(cast: Cast): Set<string> {
   return new Set(
     Object.entries(cast)
-      .filter(([, sheet]) => sheet.rig?.arms || sheet.rig?.nods)
+      .filter(
+        ([, sheet]) =>
+          sheet.rig?.arms ||
+          sheet.rig?.nods ||
+          // An animal the kit drew with arms (a monkey) points and waves.
+          (sheet.animal && SPECIES[sheet.animal.species].plan === 'climber'),
+      )
       .map(([id]) => id),
   );
 }
 
-/** Whether the artist draws them: an animal or a creature. A person is the kit's. */
-export const drawnByArtist = (c: Pick<StudioCharacter, 'kind'>) =>
+/**
+ * Whether the artist draws them: an animal the animal kit has no spec
+ * for, or a creature. A person is the figure kit's, and an animal with a
+ * spec the animal kit's.
+ */
+export const drawnByArtist = (c: Pick<StudioCharacter, 'kind' | 'animal'>) =>
+  c.kind !== 'person' && !c.animal;
+
+/**
+ * Whether a change asked of how they look is a new drawing to choose (an
+ * animal, a creature: the kit's new spec, or the artist's new drawing)
+ * rather than their look changed at once (a person's).
+ */
+export const redrawnToChoose = (c: Pick<StudioCharacter, 'kind'>) =>
   c.kind !== 'person';
 
 /** Whether a character is being drawn now. */
@@ -105,10 +128,15 @@ export function withCandidate(
   sheet: CharacterSheet,
   words: string,
   now: number,
+  /** How one the animal kit draws reads in words with it: kept on them when chosen. */
+  look?: string,
 ): CastWork {
   return {
     ...work,
-    candidates: { ...work.candidates, [id]: { sheet, words, at: now } },
+    candidates: {
+      ...work.candidates,
+      [id]: { sheet, words, at: now, ...(look ? { look } : {}) },
+    },
   };
 }
 
@@ -152,11 +180,21 @@ export function chosen(
   const candidate = work.candidates[id];
   if (!candidate || !bible.characters.some((c) => c.id === id)) return null;
   const drawn = drawnStamp(candidate.sheet);
+  // One the animal kit drew is its spec from now on, and its look's words
+  // go with it.
+  const animal = candidate.sheet.animal;
   return {
     bible: {
       ...bible,
       characters: bible.characters.map((c) =>
-        c.id === id ? { ...c, drawn } : c,
+        c.id === id
+          ? {
+              ...c,
+              drawn,
+              ...(animal ? { animal } : {}),
+              ...(animal && candidate.look ? { look: candidate.look } : {}),
+            }
+          : c,
       ),
     },
     cast: { ...cast, [id]: candidate.sheet },
@@ -166,9 +204,40 @@ export function chosen(
 
 /** Whether a character's look changed, so their drawing is forgotten and drawn again. */
 export const lookChanged = (
-  was: Pick<StudioCharacter, 'look' | 'kind' | 'size'>,
-  now: Pick<StudioCharacter, 'look' | 'kind' | 'size'>,
-) => was.look !== now.look || was.kind !== now.kind || was.size !== now.size;
+  was: Pick<StudioCharacter, 'look' | 'kind' | 'size' | 'animal'>,
+  now: Pick<StudioCharacter, 'look' | 'kind' | 'size' | 'animal'>,
+) =>
+  was.look !== now.look ||
+  was.kind !== now.kind ||
+  was.size !== now.size ||
+  JSON.stringify(was.animal ?? null) !== JSON.stringify(now.animal ?? null);
+
+/**
+ * A bible written or changed again, each character drawn as they were:
+ * one the artist drew gains no animal spec (only a kit drawing the maker
+ * chooses gives them one, so nothing switches on its own), and one the
+ * animal kit draws keeps its spec when the writer leaves it out. A new
+ * character is as written.
+ */
+export function keptKits(
+  after: StudioBible,
+  before: StudioBible | null,
+): StudioBible {
+  if (!before) return after;
+  return {
+    ...after,
+    characters: after.characters.map((c) => {
+      const was = before.characters.find((b) => b.id === c.id);
+      if (!was) return c;
+      if (c.kind !== 'animal' || !was.animal) {
+        const { animal: _gone, ...rest } = c;
+        void _gone;
+        return rest;
+      }
+      return c.animal ? c : { ...c, animal: was.animal };
+    }),
+  };
+}
 
 /**
  * A bible written or changed again, keeping which drawing the maker chose

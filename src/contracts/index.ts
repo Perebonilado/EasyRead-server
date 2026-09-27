@@ -2353,6 +2353,8 @@ export interface StudioCharacterDto {
   look: string;
   /** A person's look, as the kit draws them. */
   figure: Record<string, string | number | string[]> | null;
+  /** An animal's look, as the animal kit draws it; absent, the artist draws it. */
+  animal?: StudioAnimalDto;
   size: 'small' | 'medium' | 'large' | null;
   voice: string;
   voicePick: number;
@@ -2364,6 +2366,23 @@ export interface StudioCharacterDto {
   drawingNow?: boolean;
   /** A new drawing of them waiting beside the one they have, and what the maker asked for: it replaces theirs only when chosen. */
   candidate?: { drawing: string; words: string } | null;
+}
+
+/** An animal as the animal kit draws it: its species, build, colours and markings, and what it wears. */
+export interface StudioAnimalDto {
+  species: string;
+  build: 'slim' | 'average' | 'stout';
+  size: 'small' | 'medium' | 'large';
+  coat: string;
+  second: string | null;
+  pattern: string;
+  /** Null: the species' own. */
+  ears: string | null;
+  tail: string | null;
+  mane: string | null;
+  horns: string | null;
+  wear: { neck?: string; back?: string; head?: string; feet?: string };
+  wearColour: string | null;
 }
 
 export interface StudioSetDto {

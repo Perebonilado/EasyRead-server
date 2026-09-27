@@ -43,7 +43,8 @@ import { MADE_WITH } from '../../domain/studio/studio-brand';
 import {
   beingDrawn,
   characterMeant,
-  drawnByArtist,
+  keptKits,
+  redrawnToChoose,
   keptDrawn,
   markDrawing,
   oneLookRequest,
@@ -351,8 +352,10 @@ export class StudioService {
   ): Promise<StudioShowDto> {
     const show = await this.requireShow(userId, id);
     const before = show.bible;
-    // A set's features are the sheets' own: the maker's edit keeps them.
-    const bible = keptFeatures(bibleOf(body), before);
+    // A set's features are the sheets' own: the maker's edit keeps them;
+    // and whoever the artist drew is drawn so until the maker chooses one
+    // of the kit's.
+    const bible = keptKits(keptFeatures(bibleOf(body), before), before);
     if (before) {
       // Anyone the maker did not send keeps their place; ids never change.
       const ids = new Set(bible.characters.map((c) => c.id));
@@ -844,10 +847,11 @@ export class StudioService {
   }
 
   /**
-   * One character drawn again as the maker asks: an animal or a creature
-   * by the artist, from the drawing they have, the new one waiting on
-   * their card to be chosen; a person's look changed by the cast's
-   * writer, theirs alone. A note when it cannot be now.
+   * One character drawn again as the maker asks: an animal the kit draws
+   * as a change to its spec, and any other animal or creature by the
+   * artist from the drawing they have, the new one waiting on their card
+   * to be chosen; a person's look changed by the cast's writer, theirs
+   * alone. A note when it cannot be now.
    */
   private async askRedraw(
     show: StudioShowRecord,
@@ -856,7 +860,7 @@ export class StudioService {
     words: string,
   ): Promise<string | null> {
     if (show.brief.format === 'explainer') return null;
-    if (!drawnByArtist(who))
+    if (!redrawnToChoose(who))
       return this.askCast(show, episode, oneLookRequest(who, words));
     const now = this.clock.now().getTime();
     let busy = false;
@@ -888,13 +892,13 @@ export class StudioService {
     await this.log(show, episode, {
       what: 'asked',
       step: 'cast',
-      line: drawnByArtist(who)
+      line: redrawnToChoose(who)
         ? `Drawing ${who.name} again`
         : `Changing ${who.name}'s look`,
     });
     return {
       note: null,
-      tried: drawnByArtist(who)
+      tried: redrawnToChoose(who)
         ? `I'll draw ${who.name} again as you ask. The new drawing will wait on their card beside the one you have: keep whichever you like.`
         : `I'll change ${who.name}'s look as you ask, and only theirs.`,
     };
@@ -1053,7 +1057,7 @@ export class StudioService {
       await this.log(show, episode, {
         what: 'asked',
         step: 'cast',
-        line: drawnByArtist(one)
+        line: redrawnToChoose(one)
           ? `Drawing ${one.name} again`
           : `Changing ${one.name}'s look`,
       });
@@ -1095,7 +1099,7 @@ export class StudioService {
     await this.log(show, episode, {
       what: 'asked',
       step: 'cast',
-      line: drawnByArtist(who)
+      line: redrawnToChoose(who)
         ? `Drawing ${who.name} again`
         : `Changing ${who.name}'s look`,
     });

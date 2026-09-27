@@ -14,13 +14,14 @@ import {
   beingDrawn,
   castWorkOf,
   chosen,
+  drawnByArtist,
   lookChanged,
   markDrawing,
   toDraw,
   withoutCandidate,
   type CastWork,
 } from '../../domain/studio/studio-drawings';
-import { figurePreview } from '../../domain/studio/studio-looks';
+import { animalPreview, figurePreview } from '../../domain/studio/studio-looks';
 import type { StoragePort } from '../../ports/storage.port';
 import { STORAGE } from '../../ports/tokens';
 
@@ -39,13 +40,14 @@ const preview = (sheet: CharacterSheet, id: string): string =>
 
 /**
  * A show's drawings, as the Studio shows them before and after its film
- * is made: each person drawn by the kit at once from their look, each
- * animal, creature and place once the stage has drawn or painted it. And
- * forgotten when the maker changes how one looks, so it is drawn again.
+ * is made: each person and each animal the kits draw drawn at once from
+ * their look, each other animal, creature and place once the stage has
+ * drawn or painted it. And forgotten when the maker changes how one
+ * looks, so it is drawn again.
  */
 @Injectable()
 export class StudioCastService {
-  /** People drawn lately, by their look: the same look is the same drawing. */
+  /** People and animals drawn by the kits lately, by their look: the same look is the same drawing. */
   private readonly people = new Map<string, string>();
   /** Work on one file, after whatever work on it is under way here. */
   private readonly writing = new Map<string, Promise<unknown>>();
@@ -80,11 +82,13 @@ export class StudioCastService {
     drawing: Set<string>;
   }> {
     const characters = new Map<string, string>();
-    const needsCast = bible.characters.some((c) => c.kind !== 'person');
+    // The artist's drawings are in the cast; the kits' are drawn here. A
+    // new drawing to choose may wait for any but a person.
+    const needsCast = bible.characters.some(drawnByArtist);
     const cast: Cast = needsCast
       ? await this.read(studioCastKey(showId), castOf, {}).catch(() => ({}))
       : {};
-    const work: CastWork = needsCast
+    const work: CastWork = bible.characters.some((c) => c.kind !== 'person')
       ? await this.work(showId).catch(() => NO_WORK)
       : NO_WORK;
     const candidates = new Map<string, { drawing: string; words: string }>();
@@ -99,12 +103,23 @@ export class StudioCastService {
       if (beingDrawn(work, c.id, now)) drawing.add(c.id);
     }
     for (const c of bible.characters) {
-      if (c.kind === 'person' && c.figure) {
-        const key = `${c.id}:${JSON.stringify(c.figure)}`;
-        let svg = this.people.get(key);
+      const kit =
+        c.kind === 'person' && c.figure
+          ? {
+              key: `${c.id}:${JSON.stringify(c.figure)}`,
+              draw: () => figurePreview(c.figure!, c.id),
+            }
+          : c.kind === 'animal' && c.animal
+            ? {
+                key: `${c.id}:animal:${JSON.stringify(c.animal)}`,
+                draw: () => animalPreview(c.animal!, c.id),
+              }
+            : null;
+      if (kit) {
+        let svg = this.people.get(kit.key);
         if (!svg) {
-          svg = figurePreview(c.figure, c.id);
-          this.people.set(key, svg);
+          svg = kit.draw();
+          this.people.set(kit.key, svg);
           if (this.people.size > 400) {
             const oldest = this.people.keys().next();
             if (!oldest.done) this.people.delete(oldest.value);
@@ -164,7 +179,7 @@ export class StudioCastService {
     bible: StudioBible,
     now: number,
   ): Promise<string[]> {
-    if (!bible.characters.some((c) => c.kind !== 'person')) return [];
+    if (!bible.characters.some(drawnByArtist)) return [];
     const cast = await this.cast(showId).catch(() => ({}));
     let ids: string[] = [];
     await this.changeWork(showId, (work) => {

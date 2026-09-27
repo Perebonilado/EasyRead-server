@@ -93,9 +93,12 @@ import {
   type FigureSpec,
   oldWorld,
 } from '../../business/domain/scene-figure';
+import { animalFor, describeAnimal } from '../../business/domain/scene-animal';
 import {
   OWN_VERSION,
   SIZE_UNITS,
+  animalDrawing,
+  animalSheet,
   castOf,
   failedLately,
   figureDrawing,
@@ -367,6 +370,18 @@ export class SceneProcessor {
       this.llm,
       (documentId, task, usage) => this.record(documentId, task, usage),
       this.logger,
+    );
+  }
+
+  /**
+   * Whether a book's animals are drawn by the kit when their species is
+   * one it has (SCENE_ANIMAL_KIT_BOOKS=on): off until wanted, so books are
+   * as they were. A Studio show's animals are the kit's whenever its
+   * writer gives them a spec.
+   */
+  private get bookAnimals(): boolean {
+    return /^(?:on|1|true|yes)$/i.test(
+      this.config.get<string>('SCENE_ANIMAL_KIT_BOOKS')?.trim() ?? '',
     );
   }
 
@@ -1460,6 +1475,13 @@ export class SceneProcessor {
       const signs = signsShown(script, thing.id);
       // In what they wear as it opens (a Studio story's pyjamas), and the
       // clothes they change into, each shown as its state is.
+      // An animal the kit drew, likewise from its spec (the story's, as
+      // it looks now), with the signs the page shows on it: on the artist's
+      // path, as an animal the artist drew plays.
+      const kitAnimal = sheet?.animal
+        ? ((character ? animalFor(character, this.bookAnimals) : null) ??
+          sheet.animal)
+        : null;
       const onPage = sheet?.figure
         ? await figureDrawing(thing.wears ?? sheet.figure, thing.ref, {
             pose: thing.pose,
@@ -1468,7 +1490,9 @@ export class SceneProcessor {
             old: oldWorld(story?.bible.world?.era),
             ...(thing.dress?.length ? { dress: thing.dress } : {}),
           })
-        : null;
+        : kitAnimal
+          ? await animalDrawing(kitAnimal, thing.ref, { signs })
+          : null;
       const { anchors: pageAnchors, ...posed } = onPage ?? { anchors: null };
       let drawing = onPage ? (posed as GatedDrawing) : sheet?.drawing;
       // One the artist drew with no mouth speaks with the kit's, and blinks.
@@ -2179,6 +2203,11 @@ export class SceneProcessor {
         // set apart or a well-known figure's reaches a book drawn before.
         if (kept?.figure)
           return figureSheet(character.figure ?? kept.figure, character.id);
+        // An animal the kit drew, likewise, from its spec: the story's
+        // (the look it has now) over the one kept.
+        const animal = animalFor(character, this.bookAnimals) ?? kept?.animal;
+        if (animal && (kept?.animal || !kept))
+          return animalSheet(animal, character.id);
         // Drawn before code moved what the artist draws: rigged now, with
         // no model asked, and kept so, the same drawing with its parts
         // joined and its motion code's.
@@ -2234,7 +2263,8 @@ export class SceneProcessor {
     character: StoryCharacter,
     who: string,
   ): Promise<CharacterSheet> {
-    if (sheet.figure || sheet.anchors.mouth !== undefined) return sheet;
+    if (sheet.figure || sheet.animal || sheet.anchors.mouth !== undefined)
+      return sheet;
     let mouth: [number, number] | null;
     try {
       mouth = await mouthOf(sheet.drawing);
@@ -2355,6 +2385,15 @@ export class SceneProcessor {
       const sheet = await figureSheet(spec, character.id);
       this.logger.log(
         `${who}: ${character.name} drawn by the kit: ${describeFigure(spec)}`,
+      );
+      return { sheet, others: [] };
+    }
+    // An animal whose species the kit has: drawn by code, no model asked.
+    const animal = animalFor({ ...character, kind }, this.bookAnimals);
+    if (animal) {
+      const sheet = await animalSheet(animal, character.id);
+      this.logger.log(
+        `${who}: ${character.name} drawn by the kit: ${describeAnimal(animal)}`,
       );
       return { sheet, others: [] };
     }

@@ -45,6 +45,19 @@ import {
   SCENE_MUSIC,
 } from '../../../business/domain/scene-script';
 import {
+  ANIMAL_BUILDS,
+  ANIMAL_EARS,
+  ANIMAL_HORNS,
+  ANIMAL_MANES,
+  ANIMAL_PATTERNS,
+  ANIMAL_SIZES,
+  ANIMAL_TAILS,
+  BACK_WEAR,
+  FEET_WEAR,
+  HEAD_WEAR,
+  NECK_WEAR,
+} from '../../../business/domain/scene-animal';
+import {
   PLACE_KINDS,
   PLACE_STANDS,
   STORY_CROWDS,
@@ -134,6 +147,33 @@ const lenientFigure = z.object({
   extras: z.array(z.string()).catch([]),
 });
 
+/**
+ * An animal's look from the animal kit's lists, each field caught as the
+ * species' own when it is not one of them. Its species and colours are
+ * words the domain reads (a puppy is a dog, "gray" is grey).
+ */
+const lenientAnimal = z.object({
+  species: z.string().catch(''),
+  build: z.enum(ANIMAL_BUILDS).catch('average'),
+  size: z.enum(ANIMAL_SIZES).catch('medium'),
+  coat: z.string().catch(''),
+  second: z.string().nullable().catch(null),
+  pattern: z.enum(ANIMAL_PATTERNS).catch('plain'),
+  ears: z.enum(ANIMAL_EARS).nullable().catch(null),
+  tail: z.enum(ANIMAL_TAILS).nullable().catch(null),
+  mane: z.enum(ANIMAL_MANES).nullable().catch(null),
+  horns: z.enum(ANIMAL_HORNS).nullable().catch(null),
+  wear: z
+    .object({
+      neck: z.enum(NECK_WEAR).nullable().catch(null),
+      back: z.enum(BACK_WEAR).nullable().catch(null),
+      head: z.enum(HEAD_WEAR).nullable().catch(null),
+      feet: z.enum(FEET_WEAR).nullable().catch(null),
+    })
+    .catch({ neck: null, back: null, head: null, feet: null }),
+  wearColour: z.enum(CLOTH_COLOURS).nullable().catch(null),
+});
+
 export const studioBibleSchema = z.object({
   characters: z.array(
     z.object({
@@ -143,6 +183,7 @@ export const studioBibleSchema = z.object({
       role: z.enum(STUDIO_ROLES).catch('supporting'),
       look: z.string().catch(''),
       figure: lenientFigure.nullable().catch(null),
+      animal: lenientAnimal.nullable().catch(null),
       size: z.enum(STORY_SIZES).nullable().catch(null),
       voice: z.enum(STUDIO_VOICES as [string, ...string[]]).catch('woman'),
       voicePick: z.number().catch(0),

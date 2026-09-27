@@ -23,7 +23,23 @@ import {
   doingsOfKind,
   type Doer,
 } from '../../business/domain/scene-doings';
-import { FIGURE_SIGNS } from '../../business/domain/scene-figure';
+import {
+  CLOTH_COLOURS,
+  FIGURE_SIGNS,
+} from '../../business/domain/scene-figure';
+import {
+  ANIMAL_COLOURS,
+  ANIMAL_EARS,
+  ANIMAL_HORNS,
+  ANIMAL_MANES,
+  ANIMAL_PATTERNS,
+  ANIMAL_SPECIES,
+  ANIMAL_TAILS,
+  BACK_WEAR,
+  FEET_WEAR,
+  HEAD_WEAR,
+  NECK_WEAR,
+} from '../../business/domain/scene-animal';
 import {
   SCENE_AMBIENCES,
   SCENE_MUSIC,
@@ -32,6 +48,36 @@ import { FIGURE_GUIDE } from './prompts';
 
 const quoted = (list: readonly string[]) =>
   list.map((x) => `"${x}"`).join(', ');
+
+/**
+ * How the cast's writer says an animal the animal kit draws: from its
+ * lists, so every animal whose species it has is drawn by code, the same
+ * in every scene, never drawn freehand.
+ */
+const ANIMAL_GUIDE = [
+  `An animal whose species is one of ${quoted(ANIMAL_SPECIES)} (or one of`,
+  'them by another name: a puppy is a dog, a pony a horse, a hen a',
+  'chicken) is drawn by an animal kit, never freehand: figure is null,',
+  'animal is how it looks from its lists, and look says the same in',
+  'words. animal: species; build "slim", "average" or "stout"; size',
+  '"small", "medium" or "large" for its kind (a puppy or a pony is small);',
+  `coat, its colour, one of ${quoted(ANIMAL_COLOURS)}; second, the colour`,
+  'of its markings or belly, one of those, or null for none; pattern,',
+  `where the second colour goes, one of ${quoted(ANIMAL_PATTERNS)} ("belly"`,
+  'is a paler belly, chest and muzzle, "blaze" a stripe down the face,',
+  '"socks" its feet); ears, tail, mane and horns each null for its',
+  `kind's own, or ears one of ${quoted(ANIMAL_EARS)}, tail one of`,
+  `${quoted(ANIMAL_TAILS)}, mane one of ${quoted(ANIMAL_MANES)}, horns one`,
+  `of ${quoted(ANIMAL_HORNS)}; wear, what it wears where: neck one of`,
+  `${quoted(NECK_WEAR)}, back one of ${quoted(BACK_WEAR)} (a saddle blanket`,
+  `and a saddle go on its back, never round its neck), head one of`,
+  `${quoted(HEAD_WEAR)}, feet one of ${quoted(FEET_WEAR)}, each null when it`,
+  `wears nothing there; wearColour, one of ${quoted(CLOTH_COLOURS)}, or null.`,
+  "size (beside people) is its kind's, as for any animal. Asked to change",
+  'how one looks, change its animal to show it ("give her a red saddle',
+  'blanket": back "saddle blanket", wearColour "red") and its look\'s',
+  'words with it.',
+].join(' ');
 
 /** Who can do which doings, when not everyone can: from the one list. */
 const WHO_CAN = (['person', 'animal'] as Doer[])
@@ -211,12 +257,14 @@ export const STUDIO_PROMPTS = {
       'or "minor". kind is "person" for a human, "animal" for an animal,',
       '"creature" for anything else that talks (a robot, a dragon, a talking',
       'kettle). A person is drawn by a kit: figure is how they look, from its',
-      'lists, and look says the same in words. An animal or a creature is',
-      'drawn by an illustrator in a flat cartoon style: figure is null, look',
-      'says its shape, colours and markings so it is drawn the same every',
-      'time ("a small brown dog with a white patch over one eye"), and size',
-      'is "small", "medium" or "large" beside people.',
+      'lists, and look says the same in words; animal is null.',
       FIGURE_GUIDE,
+      ANIMAL_GUIDE,
+      'Any other animal, and a creature, is drawn by an illustrator in a',
+      'flat cartoon style: figure and animal are null, look says its shape,',
+      'colours and markings so it is drawn the same every time ("a small',
+      'green dragon with orange wings"), and size is "small", "medium" or',
+      '"large" beside people.',
       `voice is the kind of voice they speak in: ${quoted(STUDIO_VOICES)}`,
       '("creature" for an animal or a creature that talks); voicePick 0, 1 or',
       "2 chooses among that kind's voices: give two of one kind different",

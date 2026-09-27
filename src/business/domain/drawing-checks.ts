@@ -9,6 +9,7 @@
 import type { Element } from 'domhandler';
 import { parseDocument } from 'htmlparser2';
 import { byId, elements } from './scene-dom';
+import { animalFace, drawAnimal } from './scene-animal-draw';
 import { SET_UNIT_SHARE, SIZE_UNITS } from './scene-ink';
 import {
   findStrays,
@@ -152,9 +153,17 @@ export async function checkSheet(
   sheet: CharacterSheet,
   options: { unjoined?: string[]; legs?: number | null } = {},
 ): Promise<CodeChecks> {
-  const { drawing } = sheet;
+  // One the animal kit drew is checked as a still shows it, standing: its
+  // other poses are there only for the stage to show.
+  const drawing = sheet.animal
+    ? {
+        ...sheet.drawing,
+        svg: drawAnimal(sheet.animal, 'check', { pose: 'stand' }).svg,
+      }
+    : sheet.drawing;
   const viewBox = drawing.viewBox;
-  const units = SIZE_UNITS[sheet.size ?? 'medium'];
+  // One the animal kit drew stands at its own size; the artist's at its size's.
+  const units = drawing.stands?.units ?? SIZE_UNITS[sheet.size ?? 'medium'];
   const kitPerUnit = units / viewBox[3];
   const states = Object.values(drawing.states);
   const named = [...Object.values(drawing.parts), ...states];
@@ -234,8 +243,11 @@ export async function checkSheet(
     };
   }
 
-  const face = faceFaults(sheet.face ?? null, kitPerUnit);
-  if (sheet.face && headBox && !inside(sheet.face.mouth, headBox, 0.08))
+  // One the animal kit drew: its face as code drew it.
+  const measuredFace =
+    sheet.face ?? (sheet.animal ? animalFace(sheet.animal) : null);
+  const face = faceFaults(measuredFace, kitPerUnit);
+  if (measuredFace && headBox && !inside(measuredFace.mouth, headBox, 0.08))
     face.push("the mouth's mark is not on the head");
   checks.face = { ok: !face.length, notes: face };
   return checks;

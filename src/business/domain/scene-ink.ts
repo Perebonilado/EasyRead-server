@@ -148,6 +148,34 @@ export const SET_UNIT_SHARE = 2.357 / 900;
 
 const r1 = (n: number) => Math.round(n * 10) / 10;
 
+// ── Drawing in the house style ────────────────────────────────────────────
+// What everything code draws (people, animals) is written with: a shape's
+// fill with the kit's outline round it, a shape with none, an ink line,
+// and a colour a little darker or lighter.
+
+/** A shape's fill: its outline is the figure's own, set once on the group round it all. */
+export const inked = (fill: string, width = KIT_LINE) =>
+  width === KIT_LINE
+    ? `fill="${fill}"`
+    : `fill="${fill}" stroke-width="${width}"`;
+/** A shape with no outline: a pupil, a button, a freckle. */
+export const flat = (fill: string) => `fill="${fill}" stroke="none"`;
+/** A line, round at its ends and corners. */
+export const line = (d: string, colour: string, width: number) =>
+  `<path d="${d}" fill="none" stroke="${colour}" stroke-width="${width}" stroke-linecap="round" stroke-linejoin="round"/>`;
+/** A colour darker (k < 1) or lighter (k > 1), for a band, a pocket, a brim. */
+export function shade(hex: string, k = 0.82): string {
+  const n = parseInt(hex.slice(1), 16);
+  const channel = (v: number) =>
+    Math.max(
+      0,
+      Math.min(255, Math.round(k < 1 ? v * k : v + (255 - v) * (k - 1))),
+    );
+  return `#${[n >> 16, (n >> 8) & 255, n & 255]
+    .map((v) => channel(v).toString(16).padStart(2, '0'))
+    .join('')}`;
+}
+
 /**
  * The outline a drawing is drawn with, in its own units, for it to land
  * at the kit's line on the stage: a drawing `drawnTall` units tall shown

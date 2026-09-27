@@ -11,6 +11,7 @@ import {
   type ExplainerSheet,
   type StorySheet,
   type StudioBible,
+  type StudioCharacter,
   type StudioOutline,
 } from '../../business/domain/studio/studio';
 import {
@@ -113,8 +114,15 @@ import {
   doneDrawing,
   gesturingIn,
   keptDrawn,
+  keptKits,
+  oneLookRequest,
   withCandidate,
 } from '../../business/domain/studio/studio-drawings';
+import {
+  describeAnimal,
+  type AnimalSpec,
+} from '../../business/domain/scene-animal';
+import { animalSheet } from '../../business/domain/scene-sheet';
 import type { StudioJobData } from '../queues';
 import { isPermanentFailure, type JobContext } from './base.processor';
 import { SceneProcessor } from './scene.processor';
@@ -654,8 +662,10 @@ export class StudioProcessor {
       );
       if (checkBible(second, story).length <= problems.length) bible = second;
     }
-    // Which drawing the maker chose of anyone still as they were, kept.
-    bible = keptDrawn(bible, before);
+    // Which drawing the maker chose of anyone still as they were, kept;
+    // and whoever the artist drew is drawn so until the maker chooses a
+    // drawing of the kit's for them.
+    bible = keptDrawn(keptKits(bible, before), before);
     await this.studio.updateShow(show.id, { bible });
     if (before) await this.cast.forgetChanged(show.id, before, bible);
     // Every animal and creature not drawn yet (new, or whose look changed)
@@ -804,6 +814,14 @@ export class StudioProcessor {
       );
       return;
     }
+    // An animal: its look changed by the cast's writer as a change to its
+    // spec, the kit drawing it at once. One the artist drew whose species
+    // the kit has is offered as the kit's this way too; for any other, the
+    // artist draws it again.
+    if (who.kind === 'animal') {
+      const done = await this.respec(show, episode, who, words, key);
+      if (done) return;
+    }
     const now = (await this.cast.cast(show.id).catch((): Cast => ({})))[who.id];
     const story = storyBibleFor(bible, [], show.title);
     let sheet: CharacterSheet | null;
@@ -854,6 +872,100 @@ export class StudioProcessor {
       { what: 'cast', step: 'cast', line: EVENT_LINES.redrawn(who.name) },
       key,
     );
+  }
+
+  /**
+   * An animal's look changed as the maker asks, as a change to its spec:
+   * the cast's writer is asked for that one character alone, and the kit's
+   * drawing of what it says waits on their card beside the one they have,
+   * to be chosen as any new drawing is. Whether it was: false when the
+   * writer gave no spec for it (an animal the kit does not draw), so the
+   * artist draws it. A spec that comes back as it was is asked for once
+   * more, told so.
+   */
+  private async respec(
+    show: StudioShowRecord,
+    episode: StudioEpisodeRecord,
+    who: StudioCharacter,
+    words: string,
+    key?: string,
+  ): Promise<boolean> {
+    const bible = show.bible!;
+    const work = await this.cast.work(show.id).catch(() => null);
+    const tried = work?.candidates[who.id]?.sheet.animal ?? null;
+    const ask = async (again: string | null) => {
+      const made = await this.llm.studioBible({
+        brief: describeBrief(show.brief),
+        previous: bible,
+        request: [
+          oneLookRequest(who, words),
+          tried
+            ? `Last time this gave ${describeAnimal(tried)}: give another reading of what they ask.`
+            : '',
+          again ?? '',
+        ]
+          .filter(Boolean)
+          .join(' '),
+      });
+      await this.record(episode.id, made.usage);
+      const written = bibleOf(made.value).characters.find(
+        (c) => c.id === who.id || c.name === who.name,
+      );
+      return written?.kind === 'animal'
+        ? { spec: written.animal ?? null, look: written.look }
+        : { spec: null, look: '' };
+    };
+    const same = (
+      a: AnimalSpec | null | undefined,
+      b: AnimalSpec | null | undefined,
+    ) => JSON.stringify(a ?? null) === JSON.stringify(b ?? null);
+    let got: { spec: AnimalSpec | null; look: string };
+    try {
+      got = await ask(null);
+      if (got.spec && (same(got.spec, who.animal) || same(got.spec, tried)))
+        got = await ask(
+          `That came back as it was: change ${who.name}'s animal so it shows what they ask.`,
+        );
+    } catch (error) {
+      this.logger.warn(
+        `studio ${episode.id}: ${who.name}'s new look could not be asked for: ${(error as Error).message}`,
+      );
+      got = { spec: null, look: '' };
+    }
+    const changed = got.spec && !same(got.spec, who.animal) ? got.spec : null;
+    if (!changed) {
+      // One the artist drew is drawn by the artist again, as before.
+      if (!who.animal) return false;
+      await this.cast.changeWork(show.id, (now) => doneDrawing(now, [who.id]));
+      await this.log(
+        show,
+        episode,
+        { what: 'failed', step: 'cast', line: EVENT_LINES.unchanged(who.name) },
+        key,
+      );
+      return true;
+    }
+    const sheet = await animalSheet(changed, who.id);
+    this.logger.log(
+      `studio ${episode.id}: ${who.name} drawn again by the kit as asked: ${describeAnimal(changed)}`,
+    );
+    await this.cast.changeWork(show.id, (now) =>
+      withCandidate(
+        doneDrawing(now, [who.id]),
+        who.id,
+        sheet,
+        words,
+        Date.now(),
+        got.look || undefined,
+      ),
+    );
+    await this.log(
+      show,
+      episode,
+      { what: 'cast', step: 'cast', line: EVENT_LINES.redrawn(who.name) },
+      key,
+    );
+    return true;
   }
 
   // ── The outline ─────────────────────────────────────────────────────────

@@ -28,6 +28,7 @@ import {
   type FigureSpec,
 } from '../scene-figure';
 import { KIT_FACES } from '../scene-figure';
+import { animalOf, type AnimalSpec } from '../scene-animal';
 import { faceNamed } from '../scene-feeling';
 import {
   ACTION_DOINGS,
@@ -236,7 +237,11 @@ export const WORDS_A_SECOND = 2.4;
 
 // ── The bible ─────────────────────────────────────────────────────────────
 
-/** What a character is: a person the kit draws, or an animal or a creature the artist draws in its style. */
+/**
+ * What a character is: a person the kit draws; an animal, drawn by the
+ * animal kit when its species is one the kit has (its `animal`), else by
+ * the artist in the kit's style; or a creature the artist draws.
+ */
 export const STUDIO_KINDS = ['person', 'animal', 'creature'] as const;
 export type StudioKind = (typeof STUDIO_KINDS)[number];
 
@@ -261,6 +266,11 @@ export interface StudioCharacter {
   look: string;
   /** A person's look, as the kit draws them. */
   figure: FigureSpec | null;
+  /**
+   * An animal's look, as the animal kit draws it (scene-animal): present
+   * when its species is one the kit has. Absent, the artist draws it.
+   */
+  animal?: AnimalSpec;
   /** An animal's or a creature's size beside people. */
   size: StorySize | null;
   voice: StudioVoice;
@@ -557,6 +567,8 @@ export function bibleOf(raw: unknown): StudioBible {
         oneOf(STUDIO_VOICES)(c.voice) ??
         (kind === 'person' ? 'woman' : 'creature');
       const pick = Math.round(Number(c.voicePick));
+      // Only an animal is the animal kit's, and only one of its species.
+      const animal = kind === 'animal' && c.animal ? animalOf(c.animal) : null;
       return [
         {
           id: freeId(studioId(text(c.id, 40) || name), taken),
@@ -565,6 +577,8 @@ export function bibleOf(raw: unknown): StudioBible {
           role: oneOf(STUDIO_ROLES)(c.role) ?? 'supporting',
           look: text(c.look, 300),
           figure: kind === 'person' ? figureFrom(c.figure, voice) : null,
+          // Kept only when there is one, so a character without is as it was.
+          ...(animal ? { animal } : {}),
           size:
             kind === 'person' ? null : (oneOf(STORY_SIZES)(c.size) ?? 'medium'),
           voice,

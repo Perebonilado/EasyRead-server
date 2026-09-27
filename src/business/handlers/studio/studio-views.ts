@@ -113,6 +113,7 @@ export function bibleDto(
       figure: c.figure
         ? (c.figure as unknown as Record<string, string | number | string[]>)
         : null,
+      ...(c.animal ? { animal: c.animal } : {}),
       size: c.size,
       voice: c.voice,
       voicePick: c.voicePick,

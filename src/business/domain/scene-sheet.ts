@@ -8,6 +8,8 @@
 import render from 'dom-serializer';
 import { Element } from 'domhandler';
 import { parseDocument } from 'htmlparser2';
+import { animalOf, type AnimalSpec } from './scene-animal';
+import { drawAnimal, type AnimalHow } from './scene-animal-draw';
 import { isolate, type Callout } from './scene-callouts';
 import { elements, byId, walk } from './scene-dom';
 import {
@@ -68,6 +70,8 @@ export interface CharacterSheet {
   };
   /** A person's look, as the kit drew them. */
   figure?: FigureSpec;
+  /** An animal's look, as the kit drew it (scene-animal): drawn again from it, as a person is from their figure. */
+  animal?: AnimalSpec;
   /** An animal's or a creature's size beside people, as the artist was told. */
   size?: StorySize;
   /** An animal or a creature rigged by code: its joints, and the parts moved in to meet the body. */
@@ -163,6 +167,67 @@ export function lightDrawing(seed: string): GatedDrawing {
     // Their words come from about where a head would be.
     head: [cx, y + h * 0.22],
     stands: { units: h },
+  };
+}
+
+/**
+ * An animal drawn by the kit, made ready for the stage as an animal the
+ * artist drew is: on the artist's path (it never `acts`), with its mouth,
+ * where its head turns and how far, how far it sinks lying down, which
+ * way it faces, a mouth that takes the voice's shapes, a head that nods,
+ * and the kit's units it stands in: its own true size beside people.
+ */
+export async function animalDrawing(
+  spec: AnimalSpec,
+  seed: string,
+  how: AnimalHow = {},
+): Promise<GatedDrawing & { anchors: CharacterSheet['anchors'] }> {
+  const drawn = drawAnimal(spec, seed, how);
+  const measured = await renderSvg(drawn.svg, undefined, {
+    grid: { svg: drawn.svg, cols: 48 },
+  });
+  const [, , w, h] = drawn.viewBox;
+  return {
+    svg: drawn.svg,
+    viewBox: drawn.viewBox,
+    aspect: w / h,
+    parts: drawn.parts,
+    labels: {},
+    states: drawn.states,
+    moves: true,
+    callouts: [],
+    field: measured.grid
+      ? { viewBox: drawn.viewBox, map: measured.grid }
+      : null,
+    head: drawn.anchors.head,
+    mouth: drawn.anchors.mouth,
+    stands: { units: drawn.units },
+    ...(drawn.neck && drawn.dip ? { neck: drawn.neck, dip: drawn.dip } : {}),
+    ...(drawn.sinks ? { sinks: drawn.sinks } : {}),
+    faces: 1,
+    lips: true,
+    ...(drawn.limbs ? { limbs: true as const } : {}),
+    anchors: {
+      head: drawn.anchors.head,
+      body: drawn.anchors.body,
+      legs: drawn.anchors.legs,
+      mouth: drawn.anchors.mouth,
+    },
+  };
+}
+
+/** A story's animal drawn by the kit, once for the whole book or show. */
+export async function animalSheet(
+  spec: AnimalSpec,
+  seed: string,
+): Promise<CharacterSheet> {
+  const { anchors, ...drawing } = await animalDrawing(spec, seed);
+  return {
+    version: SHEET_VERSION,
+    drawing,
+    anchors,
+    animal: spec,
+    size: spec.size,
   };
 }
 
@@ -420,9 +485,13 @@ export function castOf(raw: unknown): Cast {
     if (one?.version === SHEET_VERSION && one.drawing?.svg && one.anchors) {
       // Kept before the gate showed what an artist hid: shown now.
       const d = one.drawing;
+      // An animal the kit drew whose kind cannot be read is drawn again.
+      const animal = one.animal ? animalOf(one.animal) : null;
+      if (one.animal && !animal) continue;
       out[id] = {
         ...(one as CharacterSheet),
         ...(one.figure ? { figure: figureOf(one.figure) } : {}),
+        ...(animal ? { animal } : {}),
         drawing: {
           ...d,
           svg: revealedSvg(d.svg, [

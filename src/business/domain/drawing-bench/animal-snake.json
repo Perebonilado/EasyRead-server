@@ -1,0 +1,10 @@
+{
+  "id": "snake",
+  "kind": "character",
+  "name": "Sid",
+  "book": "Jungle Days",
+  "is": "animal",
+  "size": "medium",
+  "look": "a long green snake with yellow diamonds along his back",
+  "legs": 0
+}

@@ -980,6 +980,18 @@ export const sketchJudgeSchema = z.object({
   wrong: z.string().max(300).nullable(),
 });
 
+/** A drawing on the scorecard: each point 0 to 10, null where it does not apply, and what to change. */
+export const drawingJudgeSchema = z.object({
+  sees: z.string().max(200),
+  recognisable: z.number(),
+  anatomy: z.number(),
+  face: z.number().nullable(),
+  change: z.number().nullable(),
+  same: z.number().nullable(),
+  place: z.number().nullable(),
+  problems: z.array(z.string().max(300)),
+});
+
 /** A short segment around a chapter: its words, its check, or the review. */
 export const lectureExtraSchema = z.object({
   script: z.string().min(1).max(4000),

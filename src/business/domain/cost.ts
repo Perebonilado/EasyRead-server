@@ -16,9 +16,11 @@ const PER_MILLION: Record<
 > = {
   'gpt-4o-mini': { in: 0.15, out: 0.6 },
   'gpt-4o': { in: 2.5, out: 10 },
-  'gpt-4.1-mini': { in: 0.4, out: 1.6 },
+  // The 4.1 models charge a quarter for input served from their cache:
+  // the artist's and the judge's long fixed prompts, after the first call.
+  'gpt-4.1-mini': { in: 0.4, out: 1.6, cached: 0.1 },
   'gpt-4.1-nano': { in: 0.1, out: 0.4 },
-  'gpt-4.1': { in: 2, out: 8 },
+  'gpt-4.1': { in: 2, out: 8, cached: 0.5 },
   'gpt-5-mini': { in: 0.25, out: 2 },
   'gpt-5': { in: 1.25, out: 10 },
   'text-embedding-3-small': { in: 0.02, out: 0 },
@@ -31,6 +33,33 @@ const PER_MILLION: Record<
   'deepseek-flash': { in: 0.3, out: 1.2, cached: 0.006 },
   'deepseek-v4-pro': { in: 1.32, out: 3.96, cached: 0.044 },
 };
+
+/**
+ * Models whose price changes on a day Google has said, per million, from
+ * its price list of September 2026: Gemini 3.8 Flash (the drawing judge,
+ * and a candidate artist) doubles on 1 January 2027. Thinking is billed as
+ * output. `from` is when a rate starts.
+ */
+const DATED: Record<
+  string,
+  { in: number; out: number; cached?: number; from?: string }[]
+> = {
+  'gemini-3.8-flash': [
+    { in: 0.75, out: 3.75, cached: 0.075 },
+    { in: 1.5, out: 7.5, cached: 0.15, from: '2027-01-01' },
+  ],
+};
+
+/** A text model's price on a day: its dated rate then, else its one rate. */
+function priceOf(
+  id: string,
+  at: Date,
+): { in: number; out: number; cached?: number } | undefined {
+  const rates = DATED[id];
+  if (!rates) return PER_MILLION[id];
+  const day = at.toISOString().slice(0, 10);
+  return [...rates].reverse().find((r) => !r.from || r.from <= day);
+}
 
 /**
  * Speech is logged by characters spoken, not tokens. At the rate the voices
@@ -117,6 +146,8 @@ export function costOf(input: {
   tokensOut: number | null;
   /** Of `tokensIn`, those served from the provider's cache. */
   tokensCached?: number | null;
+  /** When the call was made, for a price that changes on a day: now. */
+  at?: Date;
 }): number | null {
   const id = input.model.includes(':')
     ? input.model.slice(input.model.indexOf(':') + 1)
@@ -126,7 +157,7 @@ export function costOf(input: {
       ? null
       : round(input.tokensIn * SPEECH_PER_CHAR);
   }
-  const price = PER_MILLION[id];
+  const price = priceOf(id, input.at ?? new Date());
   if (!price) return null;
   const tokensIn = input.tokensIn ?? 0;
   const tokensOut = input.tokensOut ?? 0;

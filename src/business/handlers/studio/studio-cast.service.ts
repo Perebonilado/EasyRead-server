@@ -1,8 +1,5 @@
 import { Inject, Injectable } from '@nestjs/common';
-import render from 'dom-serializer';
-import { parseDocument } from 'htmlparser2';
 import { NotFoundError } from '../../domain/errors/errors';
-import { byId, elements, removeNode } from '../../domain/scene-dom';
 import {
   castOf,
   setsOf,
@@ -10,7 +7,7 @@ import {
   type CharacterSheet,
   type Sets,
 } from '../../domain/scene-sheet';
-import { withFace } from '../../domain/scene-sheet-face';
+import { faceShown } from '../../domain/scene-sheet-face';
 import type { StudioBible } from '../../domain/studio/studio';
 import {
   NO_WORK,
@@ -36,36 +33,9 @@ export const studioOwnKey = (showId: string) => `studio/${showId}/own.json`;
 export const studioWorkKey = (showId: string) =>
   `studio/${showId}/drawing.json`;
 
-/** A drawing with only the states named kept: a face, no others over it. */
-function withOnly(
-  svg: string,
-  states: Record<string, string>,
-  keep: readonly string[],
-): string {
-  try {
-    const doc = parseDocument(svg, { xmlMode: true });
-    const root = elements(doc.children)[0];
-    for (const [name, id] of Object.entries(states))
-      if (!keep.includes(name)) {
-        const group = byId(root, id);
-        if (group) removeNode(group);
-      }
-    return render(doc, { xmlMode: true });
-  } catch {
-    return svg;
-  }
-}
-
 /** A character as their card shows them: a face or two, with code's mouth where code draws it. */
-function preview(sheet: CharacterSheet, id: string): string {
-  const svg = withOnly(sheet.drawing.svg, sheet.drawing.states, [
-    'happy',
-    'neutral',
-  ]);
-  return sheet.face
-    ? withFace({ ...sheet.drawing, svg }, sheet.face, id).svg
-    : svg;
-}
+const preview = (sheet: CharacterSheet, id: string): string =>
+  faceShown(sheet, id, ['happy', 'neutral']);
 
 /**
  * A show's drawings, as the Studio shows them before and after its film

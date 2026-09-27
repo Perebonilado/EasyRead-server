@@ -40,6 +40,12 @@ import {
   type SceneScriptDraft,
 } from '../../../business/domain/scene-script';
 import type { NotesDraft } from '../../../business/domain/lesson-notes';
+import {
+  EXPECTED,
+  cleanVerdict,
+  type DrawingKind,
+  type DrawingVerdict,
+} from '../../../business/domain/drawing-score';
 import { PROMPTS } from '../prompts';
 import { STUDIO_PROMPTS } from '../studio-prompts';
 import type { z } from 'zod';
@@ -71,6 +77,7 @@ import {
   sceneSizeSchema,
   sceneStorySchema,
   sketchJudgeSchema,
+  drawingJudgeSchema,
   lectureExtraSchema,
   spokenQuizSchema,
   lectureOutlineSchema,
@@ -719,6 +726,58 @@ export class AiSdkLlmAdapter implements LlmGatewayPort, OnModuleInit {
     };
   }
 
+  async drawingJudge(input: {
+    png: Buffer;
+    kind: DrawingKind;
+    brief: string;
+    old?: { png: Buffer; words: string };
+  }): Promise<LlmResult<DrawingVerdict>> {
+    const started = Date.now();
+    const { generateObject } = await this.registry.modules();
+    const { model, ref } = await this.registry.languageModel('drawing_judge');
+    const picture = (png: Buffer) => ({
+      type: 'file' as const,
+      data: png,
+      mediaType: 'image/png',
+    });
+    const words = (text: string) => ({ type: 'text' as const, text });
+    const result = await generateObject({
+      model,
+      schema: drawingJudgeSchema,
+      system: PROMPTS.drawingJudge,
+      temperature: 0,
+      messages: [
+        {
+          role: 'user' as const,
+          content: [
+            ...(input.old
+              ? [
+                  words('The picture before:'),
+                  picture(input.old.png),
+                  words('The picture now, drawn again:'),
+                ]
+              : []),
+            picture(input.png),
+            words(
+              [
+                `What it is: ${EXPECTED[input.kind]}`,
+                `The brief: ${input.brief}`,
+                input.old
+                  ? `The maker asked for this change: "${input.old.words.replace(/"/g, "'")}". Judge change and same.`
+                  : 'It is drawn for the first time: change and same are null.',
+              ].join('\n'),
+            ),
+          ],
+        },
+      ],
+      maxRetries: this.maxRetries(),
+    });
+    return {
+      value: cleanVerdict(result.object),
+      usage: this.usage(ref, result.usage, started),
+    };
+  }
+
   async sceneScript(input: {
     documentTitle: string;
     topicTitle: string;
@@ -1022,20 +1081,43 @@ export class AiSdkLlmAdapter implements LlmGatewayPort, OnModuleInit {
     signal?: AbortSignal;
     backdrop?: boolean;
     reference?: string;
+    purpose?: 'cast';
+    asked?: { line: number; eyes?: number; least?: number };
+    hint?: string;
+    temperature?: number;
+    previous?: string;
   }): Promise<LlmResult<string>> {
     const started = Date.now();
     const { generateText } = await this.registry.modules();
-    const { model, ref } = await this.registry.languageModel('scene_draw');
+    // A show's characters and things, its places, and an explainer's
+    // drawings: each its own artist and its own brief.
+    const task: LlmTask =
+      input.purpose === 'cast'
+        ? 'cast_draw'
+        : input.backdrop
+          ? 'set_paint'
+          : 'scene_draw';
+    const { model, ref } = await this.registry.languageModel(task);
     const thinking =
       this.config.get<string>('SCENE_DRAW_THINKING', 'off') === 'on';
+    // Gemini thinks as it sees fit unless told; its thinking is output.
+    const level = this.config.get<string>('DRAW_THINKING_LEVEL');
     // Free text: an SVG written into a reply is what a model has done a
     // million times; escaped into a JSON field it is not (79c2523).
     const result = await generateText({
       model,
-      system: input.backdrop ? PROMPTS.sceneSet : PROMPTS.sceneDraw,
+      system:
+        input.purpose === 'cast'
+          ? PROMPTS.castDraw
+          : input.backdrop
+            ? PROMPTS.sceneSet
+            : PROMPTS.sceneDraw,
       prompt: drawingRequest(input),
       maxRetries: this.maxRetries(),
-      maxOutputTokens: thinking ? 32_000 : 16_000,
+      maxOutputTokens: thinking || ref.provider === 'google' ? 32_000 : 16_000,
+      ...(input.temperature !== undefined
+        ? { temperature: input.temperature }
+        : {}),
       ...(input.signal ? { abortSignal: input.signal } : {}),
       // Said on every call: the API thinks by default on deepseek-flash,
       // and this provider version only knows its older ids as thinkers.
@@ -1047,7 +1129,17 @@ export class AiSdkLlmAdapter implements LlmGatewayPort, OnModuleInit {
               },
             },
           }
-        : {}),
+        : ref.provider === 'google' &&
+            (level === 'minimal' ||
+              level === 'low' ||
+              level === 'medium' ||
+              level === 'high')
+          ? {
+              providerOptions: {
+                google: { thinkingConfig: { thinkingLevel: level } },
+              },
+            }
+          : {}),
     });
     return {
       value: result.text,
@@ -2406,8 +2498,13 @@ export function drawingRequest(input: {
   backdrop?: boolean;
   /** A character drawn again: how they are drawn now. */
   reference?: string;
+  purpose?: 'cast';
+  asked?: { line: number; eyes?: number; least?: number };
+  hint?: string;
+  previous?: string;
 }): string {
   const { thing, viewBox } = input;
+  const cast = input.purpose === 'cast';
   const id = groupId;
   const parts = thing.parts.map((part) =>
     part.label
@@ -2429,13 +2526,34 @@ export function drawingRequest(input: {
       ? `States, each its own group drawn over the drawing:\n- ${states.join('\n- ')}`
       : '',
     `Moves: ${thing.motion || 'a gentle sway, so it is never still'}`,
-    `viewBox="0 0 ${viewBox.w} ${viewBox.h}" (${thing.shape}). Labels at font-size ${Math.ceil(viewBox.w * 0.042)} or more: the drawing is often shown small.`,
-    `Context: a lesson on "${input.topic}"${input.neighbours.length ? `; on the stage it stands with: ${input.neighbours.join(', ')}` : ''}.`,
+    cast
+      ? `viewBox="0 0 ${viewBox.w} ${viewBox.h}" (${thing.shape}).`
+      : `viewBox="0 0 ${viewBox.w} ${viewBox.h}" (${thing.shape}). Labels at font-size ${Math.ceil(viewBox.w * 0.042)} or more: the drawing is often shown small.`,
+    input.asked
+      ? [
+          `Outline: stroke="#2d2a32" stroke-width="${input.asked.line}" with round joins and caps, on every shape.`,
+          input.asked.least
+            ? `No part narrower than ${input.asked.least} units.`
+            : '',
+          input.asked.eyes && thing.states.length
+            ? `Each eye at least ${input.asked.eyes} units across.`
+            : '',
+        ]
+          .filter(Boolean)
+          .join(' ')
+      : '',
+    input.hint ? `Framing: ${input.hint}.` : '',
+    cast
+      ? `Context: the show "${input.topic}".`
+      : `Context: a lesson on "${input.topic}"${input.neighbours.length ? `; on the stage it stands with: ${input.neighbours.join(', ')}` : ''}.`,
     input.notes?.length
-      ? `Last time this fell short:\n- ${input.notes.join('\n- ')}`
+      ? `${input.previous ? 'What to change' : 'Last time this fell short'}:\n- ${input.notes.join('\n- ')}`
       : '',
     input.reference
       ? `How they are drawn now: the same character, to draw again with the change asked for made plainly, never copied unchanged (its groups as asked above, whatever this one has):\n${input.reference}`
+      : '',
+    input.previous
+      ? `Your drawing before, to revise: keep what is right, change what the notes above say, and reply with the whole drawing again, with the same groups:\n${input.previous}`
       : '',
   ]
     .filter(Boolean)

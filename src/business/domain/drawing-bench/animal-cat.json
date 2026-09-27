@@ -1,0 +1,10 @@
+{
+  "id": "cat",
+  "kind": "character",
+  "name": "Mittens",
+  "book": "Farm Friends",
+  "is": "animal",
+  "size": "small",
+  "look": "a ginger cat with white paws and a long striped tail",
+  "legs": 4
+}

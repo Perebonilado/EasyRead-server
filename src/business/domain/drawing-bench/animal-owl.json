@@ -1,0 +1,10 @@
+{
+  "id": "owl",
+  "kind": "character",
+  "name": "Hoot",
+  "book": "Night in the Woods",
+  "is": "animal",
+  "size": "small",
+  "look": "a wise brown owl with big round eyes and speckled wings",
+  "legs": 2
+}

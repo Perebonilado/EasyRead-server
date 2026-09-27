@@ -1,0 +1,10 @@
+{
+  "id": "mouse",
+  "kind": "character",
+  "name": "Squeak",
+  "book": "Farm Friends",
+  "is": "animal",
+  "size": "small",
+  "look": "a tiny grey mouse with big round ears and a long thin tail",
+  "legs": 4
+}

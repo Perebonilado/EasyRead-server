@@ -1,0 +1,10 @@
+{
+  "id": "sheep",
+  "kind": "character",
+  "name": "Woolly",
+  "book": "Farm Friends",
+  "is": "animal",
+  "size": "medium",
+  "look": "a fluffy white sheep with a black face and black legs",
+  "legs": 4
+}

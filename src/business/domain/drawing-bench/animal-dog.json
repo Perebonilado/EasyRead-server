@@ -1,0 +1,10 @@
+{
+  "id": "dog",
+  "kind": "character",
+  "name": "Pip",
+  "book": "Farm Friends",
+  "is": "animal",
+  "size": "small",
+  "look": "a small scruffy brown dog with floppy ears, a white patch on his chest and a red collar",
+  "legs": 4
+}

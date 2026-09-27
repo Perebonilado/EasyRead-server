@@ -1,0 +1,10 @@
+{
+  "id": "monkey",
+  "kind": "character",
+  "name": "Momo",
+  "book": "Jungle Days",
+  "is": "animal",
+  "size": "medium",
+  "look": "a cheeky brown monkey with a pale face and a long curly tail",
+  "legs": 2
+}

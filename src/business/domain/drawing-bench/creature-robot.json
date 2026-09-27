@@ -1,0 +1,10 @@
+{
+  "id": "robot",
+  "kind": "character",
+  "name": "Bolt",
+  "book": "The Big Adventure",
+  "is": "creature",
+  "size": "medium",
+  "look": "a boxy silver robot with a round head, an antenna, claw hands and a screen on his chest",
+  "legs": 2
+}

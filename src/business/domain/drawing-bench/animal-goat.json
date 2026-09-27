@@ -1,0 +1,10 @@
+{
+  "id": "goat",
+  "kind": "character",
+  "name": "Gruff",
+  "book": "Farm Friends",
+  "is": "animal",
+  "size": "medium",
+  "look": "a white goat with small curved horns and a little beard",
+  "legs": 4
+}

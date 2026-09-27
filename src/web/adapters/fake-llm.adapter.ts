@@ -10,6 +10,10 @@ import { Injectable } from '@nestjs/common';
 import type { DocumentProfileDraft } from '../../business/domain/scene-profile';
 import type { NotesDraft } from '../../business/domain/lesson-notes';
 import type {
+  DrawingKind,
+  DrawingVerdict,
+} from '../../business/domain/drawing-score';
+import type {
   FigureDraft,
   StoryDraft,
 } from '../../business/domain/scene-story';
@@ -517,6 +521,30 @@ export class FakeLlmAdapter implements LlmGatewayPort {
     return Promise.resolve({
       value: { shows: input.png.length > 0, wrong: null },
       usage: this.usage(started, 50, 10),
+    });
+  }
+
+  /** Every drawing right: the fake artist's disc is judged a pass, so nothing is drawn again. */
+  drawingJudge(input: {
+    png: Buffer;
+    kind: DrawingKind;
+    brief: string;
+    old?: { png: Buffer; words: string };
+  }): Promise<LlmResult<DrawingVerdict>> {
+    const started = Date.now();
+    const character = input.kind === 'animal' || input.kind === 'creature';
+    return Promise.resolve({
+      value: {
+        sees: 'a drawing',
+        recognisable: 9,
+        anatomy: 9,
+        face: character ? 9 : null,
+        change: input.old ? 9 : null,
+        same: input.old ? 9 : null,
+        place: input.kind === 'place' ? 9 : null,
+        problems: [],
+      },
+      usage: this.usage(started, 800, 60),
     });
   }
 

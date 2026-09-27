@@ -1,0 +1,10 @@
+{
+  "id": "giraffe",
+  "kind": "character",
+  "name": "Gina",
+  "book": "Jungle Days",
+  "is": "animal",
+  "size": "large",
+  "look": "a tall giraffe with orange-brown patches, a long neck and little horns",
+  "legs": 4
+}

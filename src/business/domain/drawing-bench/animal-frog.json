@@ -1,0 +1,10 @@
+{
+  "id": "frog",
+  "kind": "character",
+  "name": "Freddie",
+  "book": "The Pond",
+  "is": "animal",
+  "size": "small",
+  "look": "a bright green frog with big eyes on top of his head and long back legs",
+  "legs": 4
+}

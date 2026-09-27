@@ -95,7 +95,6 @@ import {
 } from '../../business/domain/scene-figure';
 import {
   OWN_VERSION,
-  SET_VERSION,
   SIZE_UNITS,
   castOf,
   failedLately,
@@ -104,8 +103,6 @@ import {
   lightDrawing,
   measureOwnFeature,
   measureOwnThing,
-  drawnAlike,
-  measureSheet,
   mouthOf,
   notDrawnYet,
   ownSheetsOf,
@@ -122,14 +119,7 @@ import type { OwnPropDrawing } from '../../business/domain/scene-props';
 import type { SetPiece } from '../../business/domain/scene-set-pieces';
 import { RIG_VERSION, rigSheet } from '../../business/domain/scene-sheet-rig';
 import { withMouths } from '../../business/domain/studio/studio-audit';
-import {
-  faceMoved,
-  faceNotes,
-  measureFace,
-  unmarked,
-  withFace,
-  type SheetFace,
-} from '../../business/domain/scene-sheet-face';
+import { withFace } from '../../business/domain/scene-sheet-face';
 import {
   EMPTY_STORY,
   MAX_STORY_PIECES,
@@ -139,15 +129,12 @@ import {
   bibleOf,
   ownFeatureBrief,
   ownThingBrief,
-  SET_CANVAS,
   castKey,
   castStory,
   crowdOn,
   describeStory,
   mergeStory,
-  setThing,
   setsKey,
-  sheetThing,
   standsOnStage,
   STORY_VERSION,
   storyKey,
@@ -221,6 +208,7 @@ import {
 import type { VisualSceneRepository } from '../../business/repositories/visual.repository';
 import type { VisualSceneJobData } from '../queues';
 import { isPermanentFailure, type JobContext } from './base.processor';
+import { DRAW_TRIES, SceneArtist, referenceOf } from './scene-artist';
 import { SceneVoiceService } from '../../business/handlers/admin/scene-voice.service';
 
 /** The most of a page the writer reads. */
@@ -239,8 +227,6 @@ export const THUMB_WIDTH = 480;
 const TERM_LANDS_S = 0.7;
 /** Parts of a chapter read for its notes at once. */
 const NOTES_READERS = 3;
-/** Tries at one drawing: the first, and one more with the gate's notes. */
-const DRAW_TRIES = 2;
 /** A silence ending this close to the end of the audio is the quiet it ends on. */
 const QUIET_END_SLACK_MS = 100;
 /** Stretches of a story read at once. */
@@ -281,22 +267,6 @@ interface Lesson {
 }
 
 /** Each item through `work`, at most `limit` at a time, in order. */
-/** A drawing asked to change that is this alike the one before was copied, not changed. */
-const COPIED = 0.8;
-
-/** The most of a drawing the artist is shown to draw from, in characters. */
-const REFERENCE_CHARS = 24_000;
-
-/**
- * A drawing as the artist is shown it to draw from: as still as it was
- * drawn, with none of the rig's motion (and no mouth, where code draws
- * it). None when it is too long to show.
- */
-export function referenceOf(sheet: CharacterSheet): string | null {
-  const svg = sheet.drawing.svg.replace(/<style[^>]*>[\s\S]*?<\/style>/gi, '');
-  return svg.length <= REFERENCE_CHARS ? svg : null;
-}
-
 async function inBatches<T, R>(
   items: T[],
   limit: number,
@@ -361,6 +331,8 @@ export class SceneProcessor {
   private readonly writing = new Map<string, Promise<unknown>>();
   /** A kept drawing that would not rig, by book and character: not tried again here. */
   private readonly unrigged = new Map<string, string>();
+  /** The artist: every character, place and thing of a show's own the model draws. */
+  private readonly artist: SceneArtist;
 
   constructor(
     @Inject(DOCUMENT_REPOSITORY) private readonly documents: DocumentRepository,
@@ -380,7 +352,13 @@ export class SceneProcessor {
     private readonly config: ConfigService,
     @Inject(STORAGE) private readonly storage: StoragePort,
     @Inject(ALIGNER) private readonly aligner: AlignerPort,
-  ) {}
+  ) {
+    this.artist = new SceneArtist(
+      this.llm,
+      (documentId, task, usage) => this.record(documentId, task, usage),
+      this.logger,
+    );
+  }
 
   async process(job: VisualSceneJobData, context: JobContext): Promise<void> {
     const { documentId, pageNumber, contentVersion } = job;
@@ -928,7 +906,7 @@ export class SceneProcessor {
   ): Promise<SetSheet | null> {
     const place = story.bible.places.find((p) => p.id === placeId);
     if (!place) throw new Error(`No place ${placeId}`);
-    const set = await this.paintSet(
+    const set = await this.artist.paintSet(
       place,
       story.bookTitle,
       documentId,
@@ -2296,14 +2274,14 @@ export class SceneProcessor {
       );
       return sheet;
     }
-    const sheet = await this.drawSheet(
+    const drawn = await this.artist.drawSheet(
       { ...character, kind, size },
       bookTitle,
       documentId,
       who,
       again,
     );
-    return sheet ? { ...sheet, size: size ?? 'medium' } : null;
+    return drawn ? { ...drawn.sheet, size: size ?? 'medium' } : null;
   }
 
   /**
@@ -2358,7 +2336,13 @@ export class SceneProcessor {
         );
         return null;
       }
-      const set = await this.paintSet(place, bookTitle, documentId, who, world);
+      const set = await this.artist.paintSet(
+        place,
+        bookTitle,
+        documentId,
+        who,
+        world,
+      );
       if (!set) return null;
       await keep(set, 'painted');
       return set;
@@ -2451,7 +2435,7 @@ export class SceneProcessor {
         documentId,
         who,
       );
-      const drawn = await this.drawOwnOne(
+      const drawn = await this.artist.drawOwn(
         ownThingBrief(thing, story.bookTitle, story.bible.world ?? null),
         OWN_THING_CANVAS,
         (drawing) => measureOwnThing(drawing, thing.id, size),
@@ -2513,7 +2497,7 @@ export class SceneProcessor {
         documentId,
         who,
       );
-      const piece = await this.drawOwnOne(
+      const piece = await this.artist.drawOwn(
         ownFeatureBrief(feature, story.bookTitle, story.bible.world ?? null),
         OWN_FEATURE_CANVAS,
         (drawing) => measureOwnFeature(drawing, feature.id, size),
@@ -2601,69 +2585,6 @@ export class SceneProcessor {
     }
   }
 
-  /**
-   * One of the show's own, drawn: asked for, gated, measured, and asked
-   * for once more with what fell short; the better kept. Its cost is the
-   * scene's, as every drawing's is.
-   */
-  private async drawOwnOne<T>(
-    thing: DrawingThing,
-    canvas: { w: number; h: number },
-    measure: (drawing: GatedDrawing) => Promise<T>,
-    topic: string,
-    documentId: string | null,
-    who: string,
-    stop?: AbortSignal,
-  ): Promise<T | null> {
-    let best: { value: T; faults: number } | null = null;
-    let notes: string[] | undefined;
-    for (let attempt = 1; attempt <= DRAW_TRIES; attempt += 1) {
-      if (stop?.aborted) break;
-      let reply: string;
-      try {
-        const made = await this.llm.sceneDrawing({
-          thing,
-          viewBox: canvas,
-          topic,
-          neighbours: [],
-          notes,
-        });
-        await this.record(documentId, 'scene_draw', made.usage);
-        reply = made.value;
-      } catch (error) {
-        this.logger.warn(
-          `${who}: the ${thing.name} could not be asked for: ${(error as Error).message}`,
-        );
-        continue;
-      }
-      // Drawn still, as asked: code moves it, so stillness is no fault.
-      const gated = await gateDrawing(reply, { ...thing, motion: '' });
-      if (!gated.drawing) {
-        notes = gated.notes;
-        continue;
-      }
-      let value: T;
-      try {
-        value = await measure(gated.drawing);
-      } catch (error) {
-        notes = [
-          ...gated.notes,
-          `It could not be measured: ${(error as Error).message}.`,
-        ];
-        continue;
-      }
-      const faults = gated.retry ? 1 : 0;
-      if (!best || faults < best.faults) best = { value, faults };
-      if (!faults) break;
-      notes = gated.notes;
-      this.logger.log(
-        `${who}: the ${thing.name} try ${attempt} fell short: ${notes.join(' ')}`,
-      );
-    }
-    if (!best) this.logger.warn(`${who}: the ${thing.name} could not be drawn`);
-    return best?.value ?? null;
-  }
-
   /** The show's own drawings as kept: none yet, or none that can be read, is none; a store that cannot say throws. */
   private async ownAt(key: string): Promise<OwnSheets> {
     let kept: Buffer;
@@ -2719,61 +2640,6 @@ export class SceneProcessor {
     }
   }
 
-  /** A place painted for the book: asked for as a set, gated as one, and asked for once more when it falls short. */
-  private async paintSet(
-    place: StoryPlace,
-    bookTitle: string,
-    documentId: string | null,
-    who: string,
-    world: StoryWorld | null = null,
-  ): Promise<SetSheet | null> {
-    const thing = setThing(place, bookTitle, world);
-    let best: GateResult | null = null;
-    let notes: string[] | undefined;
-    for (let attempt = 1; attempt <= DRAW_TRIES; attempt += 1) {
-      let reply: string;
-      try {
-        const made = await this.llm.sceneDrawing({
-          thing,
-          viewBox: SET_CANVAS,
-          topic: bookTitle,
-          neighbours: [],
-          notes,
-          backdrop: true,
-        });
-        await this.record(documentId, 'scene_draw', made.usage);
-        reply = made.value;
-      } catch (error) {
-        this.logger.warn(
-          `${who}: ${place.name} could not be asked for: ${(error as Error).message}`,
-        );
-        continue;
-      }
-      const gated = await gateDrawing(reply, thing, { backdrop: true });
-      if (gated.drawing && (!best?.drawing || gated.score > best.score))
-        best = gated;
-      if (gated.drawing && !gated.retry) break;
-      notes = gated.notes;
-    }
-    if (!best?.drawing) {
-      this.logger.warn(`${who}: ${place.name} could not be painted`);
-      return null;
-    }
-    this.logger.log(`${who}: ${place.name} painted for the whole book`);
-    // Where its ground is, read once, for the crowds that will stand on it;
-    // kept without it when the render failed, to be measured next time.
-    const ground = await measureGround(best.drawing);
-    if (!ground)
-      this.logger.warn(
-        `${who}: ${place.name}'s ground could not be measured; measured again next time`,
-      );
-    return {
-      version: SET_VERSION,
-      drawing: best.drawing,
-      ...(ground ? { ground } : {}),
-    };
-  }
-
   /**
    * The book's cast as kept: none yet, or none that can be read, is an
    * empty one, whose characters are drawn again; a store that cannot say
@@ -2791,134 +2657,6 @@ export class SceneProcessor {
       return castOf(JSON.parse(kept.toString('utf8')));
     } catch {
       return {};
-    }
-  }
-
-  /**
-   * A character drawn for the book: asked for, gated, measured as a sheet
-   * (every face on the head, every part joined), and asked for once more
-   * with what fell short; the better kept, and rigged by code.
-   */
-  private async drawSheet(
-    character: StoryCharacter,
-    bookTitle: string,
-    documentId: string | null,
-    who: string,
-    /** Drawn again as the maker asks, from how they are drawn now. */
-    again?: { words: string; reference: string | null },
-  ): Promise<CharacterSheet | null> {
-    const asked = sheetThing(character, bookTitle);
-    const thing = again
-      ? {
-          ...asked,
-          brief: `The maker asks for a change to how ${character.name} looks: "${again.words.replace(/"/g, "'")}". Draw them changed so, plainly: the change must show at a glance (asked to be rounder, they are clearly rounder). Keep everything the maker does not ask to change as it is in the drawing they have now. ${asked.brief}`,
-        }
-      : asked;
-    const viewBox = CANVAS[thing.shape];
-    let best: {
-      sheet: CharacterSheet;
-      faults: number;
-      face: SheetFace | null;
-    } | null = null;
-    let notes: string[] | undefined;
-    for (let attempt = 1; attempt <= DRAW_TRIES; attempt += 1) {
-      let reply: string;
-      try {
-        const made = await this.llm.sceneDrawing({
-          thing,
-          viewBox,
-          topic: bookTitle,
-          neighbours: [],
-          notes,
-          ...(again?.reference ? { reference: again.reference } : {}),
-        });
-        await this.record(documentId, 'scene_draw', made.usage);
-        reply = made.value;
-      } catch (error) {
-        this.logger.warn(
-          `${who}: ${character.name} could not be asked for: ${(error as Error).message}`,
-        );
-        continue;
-      }
-      // Drawn still, as asked: code moves it, so stillness is no fault.
-      const gated = await gateDrawing(reply, { ...thing, motion: '' });
-      if (!gated.drawing) {
-        notes = gated.notes;
-        continue;
-      }
-      const measured = await measureSheet(gated.drawing).catch(
-        (error: unknown) => ({
-          sheet: null,
-          notes: [`It could not be measured: ${(error as Error).message}`],
-        }),
-      );
-      // Its face as asked: the mouth's place marked, and no mouth drawn.
-      const faced = measured.sheet
-        ? await measureFace(gated.drawing).catch((error: unknown) => {
-            this.logger.warn(
-              `${who}: ${character.name}'s face could not be measured: ${(error as Error).message}`,
-            );
-            return null;
-          })
-        : null;
-      const short = faced ? faceNotes(faced) : [];
-      // Asked to change, and come back as it was: told so, once.
-      if (
-        again?.reference &&
-        drawnAlike(gated.drawing.svg, again.reference) >= COPIED
-      )
-        short.push(
-          `It came back as it was drawn before: change it as the maker asks ("${again.words.replace(/"/g, "'")}"), moving and reshaping its parts so the change shows at a glance.`,
-        );
-      const faults =
-        (gated.retry ? 1 : 0) + measured.notes.length + short.length;
-      if (measured.sheet && (!best || faults < best.faults))
-        best = { sheet: measured.sheet, faults, face: faced?.face ?? null };
-      if (measured.sheet && !faults) break;
-      notes = [...gated.notes, ...measured.notes, ...short];
-      this.logger.log(
-        `${who}: ${character.name} try ${attempt} fell short: ${notes.join(' ')}`,
-      );
-    }
-    if (!best) {
-      this.logger.warn(`${who}: ${character.name} could not be drawn`);
-      return null;
-    }
-    this.logger.log(`${who}: ${character.name} drawn for the whole book`);
-    // Code draws the mouth where the artist marked it, and the mark goes;
-    // a mouth drawn after all is covered where code draws its own.
-    const face = best.face;
-    if (face && Object.keys(face.covered).length)
-      this.logger.log(
-        `${who}: ${character.name}'s drawn mouth covered on ${Object.keys(face.covered).join(', ')}`,
-      );
-    const faced: CharacterSheet = face
-      ? {
-          ...best.sheet,
-          drawing: unmarked(best.sheet.drawing),
-          anchors: { ...best.sheet.anchors, mouth: face.mouth },
-          face,
-        }
-      : best.sheet;
-    // Its parts joined and moved by code; unrigged, it is rigged when
-    // next read from the cast.
-    try {
-      const rigged = await rigSheet(faced);
-      if (rigged.notes.length)
-        this.logger.log(`${who}: ${character.name}: ${rigged.notes.join(' ')}`);
-      // The face goes where its head was moved in to meet the body.
-      const head = rigged.sheet.rig?.mended.find((m) => m.part === 'head');
-      return rigged.sheet.face && head
-        ? {
-            ...rigged.sheet,
-            face: faceMoved(rigged.sheet.face, [head.dx, head.dy]),
-          }
-        : rigged.sheet;
-    } catch (error) {
-      this.logger.warn(
-        `${who}: ${character.name} could not be rigged: ${(error as Error).message}`,
-      );
-      return faced;
     }
   }
 

@@ -1,0 +1,10 @@
+{
+  "id": "donkey",
+  "kind": "character",
+  "name": "Dusty",
+  "book": "Farm Friends",
+  "is": "animal",
+  "size": "large",
+  "look": "a grey donkey with long ears, a pale muzzle and a short dark mane",
+  "legs": 4
+}

@@ -1,0 +1,10 @@
+{
+  "id": "duck",
+  "kind": "character",
+  "name": "Dot",
+  "book": "Farm Friends",
+  "is": "animal",
+  "size": "small",
+  "look": "a small friendly yellow duck with an orange beak and orange webbed feet",
+  "legs": 2
+}

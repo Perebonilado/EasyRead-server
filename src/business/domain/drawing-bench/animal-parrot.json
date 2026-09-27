@@ -1,0 +1,10 @@
+{
+  "id": "parrot",
+  "kind": "character",
+  "name": "Rio",
+  "book": "Jungle Days",
+  "is": "animal",
+  "size": "small",
+  "look": "a bright green parrot with a red head and a curved yellow beak",
+  "legs": 2
+}

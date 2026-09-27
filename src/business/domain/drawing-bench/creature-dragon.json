@@ -1,0 +1,10 @@
+{
+  "id": "dragon",
+  "kind": "character",
+  "name": "Ember",
+  "book": "The Big Adventure",
+  "is": "creature",
+  "size": "medium",
+  "look": "a small friendly green dragon with little wings, a spiky back and a long tail",
+  "legs": null
+}

@@ -1,0 +1,11 @@
+{
+  "id": "kite",
+  "kind": "thing",
+  "name": "kite",
+  "book": "Windy Day",
+  "look": "red and yellow",
+  "real": {
+    "heightCm": 90,
+    "lengthCm": 60
+  }
+}

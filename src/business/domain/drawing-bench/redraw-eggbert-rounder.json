@@ -1,0 +1,12 @@
+{
+  "id": "eggbert-rounder",
+  "kind": "redraw",
+  "name": "Eggbert",
+  "book": "Clover and Friends",
+  "is": "creature",
+  "size": "small",
+  "legs": 2,
+  "look": "a white egg with a friendly face, little arms and legs and a bow tie",
+  "words": "rounder, with a crack on top",
+  "from": "eggbert.json"
+}

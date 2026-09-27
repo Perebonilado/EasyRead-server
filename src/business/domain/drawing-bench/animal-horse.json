@@ -1,0 +1,10 @@
+{
+  "id": "horse",
+  "kind": "character",
+  "name": "Clover",
+  "book": "Farm Friends",
+  "is": "animal",
+  "size": "large",
+  "look": "a gentle brown horse with a cream blaze down her face and a dark mane and tail",
+  "legs": 4
+}

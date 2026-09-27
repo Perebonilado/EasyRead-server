@@ -6,7 +6,10 @@ import type { LlmTask } from '../../../business/ports/llm.port';
 export const PROVIDERS = ['openai', 'anthropic', 'google', 'deepseek'] as const;
 export type ProviderName = (typeof PROVIDERS)[number];
 
-/** Which env var carries each provider's key. */
+/**
+ * Which env var carries each provider's key. Google's may be given as
+ * GEMINI_API_KEY instead, as the Gemini voice takes it (ALSO_KEY_VAR).
+ */
 const API_KEY_VAR: Record<ProviderName, string> = {
   openai: 'OPENAI_API_KEY',
   anthropic: 'ANTHROPIC_API_KEY',
@@ -14,6 +17,11 @@ const API_KEY_VAR: Record<ProviderName, string> = {
   // Text only: no speech, no embeddings, no vision. Cheap on output and
   // on a repeated prompt prefix, which every writer here has.
   deepseek: 'DEEPSEEK_API_KEY',
+};
+
+/** A second name a provider's key may be set under. */
+const ALSO_KEY_VAR: Partial<Record<ProviderName, string>> = {
+  google: 'GEMINI_API_KEY',
 };
 
 /**
@@ -34,6 +42,9 @@ const TASK_VAR: Record<LlmTask, string> = {
   // cannot, so a deployment points this at a stronger one.
   lecture_sketch: 'AI_MODEL_LECTURE_SKETCH',
   sketch_judge: 'AI_MODEL_SKETCH_JUDGE',
+  // The eyes of the see-and-fix loop and the drawing bench: a picture in,
+  // a scored verdict out, one call a drawing looked at.
+  drawing_judge: 'AI_MODEL_DRAWING_JUDGE',
   ocr_page: 'AI_MODEL_OCR',
   summarize: 'AI_MODEL_SUMMARIZE',
   topics_outline: 'AI_MODEL_TOPICS',
@@ -76,6 +87,10 @@ const TASK_VAR: Record<LlmTask, string> = {
   // design.
   scene_write: 'AI_MODEL_SCENE_WRITE',
   scene_draw: 'AI_MODEL_SCENE_DRAW',
+  // A show's characters and own things, and its places: each drawn once a
+  // show and kept, so a stronger artist than the explainer's is worth it.
+  cast_draw: 'AI_MODEL_CAST_DRAW',
+  set_paint: 'AI_MODEL_SET_PAINT',
   scene_profile: 'AI_MODEL_SCENE_PROFILE',
   scene_notes: 'AI_MODEL_SCENE_NOTES',
   scene_story: 'AI_MODEL_SCENE_STORY',
@@ -131,6 +146,9 @@ const TASK_DEFAULT: Partial<Record<LlmTask, string>> = {
   // The check of a scene made again as asked: a few thousand tokens in, a
   // verdict out, thinking off (STUDIO_CHECK_THINKING).
   studio_check: 'deepseek:deepseek-flash',
+  // A drawing judged from its picture: DeepSeek cannot see, so a small
+  // vision model, about a tenth of a cent a look.
+  drawing_judge: 'openai:gpt-4.1-mini',
 };
 
 const DEFAULT_MODEL = 'openai:gpt-4o-mini';
@@ -261,9 +279,7 @@ export class ModelRegistry {
       required.add(this.refFor(task).provider);
     }
 
-    const missing = [...required].filter(
-      (provider) => !this.config.get(API_KEY_VAR[provider]),
-    );
+    const missing = [...required].filter((provider) => !this.keyOf(provider));
     if (missing.length) {
       throw new Error(
         `Missing API key(s) for configured model provider(s): ${missing
@@ -284,6 +300,16 @@ export class ModelRegistry {
     );
   }
 
+  /** A provider's key, under its own name or the other it may be set under. */
+  private keyOf(name: ProviderName): string | undefined {
+    const also = ALSO_KEY_VAR[name];
+    return (
+      this.config.get<string>(API_KEY_VAR[name])?.trim() ||
+      (also ? this.config.get<string>(also)?.trim() : undefined) ||
+      undefined
+    );
+  }
+
   private defaultSpec(): string {
     return this.config.get<string>('AI_MODEL_DEFAULT') || DEFAULT_MODEL;
   }
@@ -300,7 +326,7 @@ export class ModelRegistry {
     const cached = this.clients.get(name);
     if (cached) return cached as never;
 
-    const apiKey = this.config.get<string>(API_KEY_VAR[name]);
+    const apiKey = this.keyOf(name);
     if (!apiKey) throw new Error(`${API_KEY_VAR[name]} is not set`);
 
     const baseURL =

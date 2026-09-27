@@ -425,6 +425,31 @@ export function faceMoved(face: SheetFace, [dx, dy]: Point): SheetFace {
   };
 }
 
+/**
+ * A character as a still shows them: only the faces named kept (none of
+ * the others drawn over them), with code's mouth and lids where code
+ * draws them. A drawing that cannot be read is shown as it is.
+ */
+export function faceShown(
+  sheet: { drawing: GatedDrawing; face?: SheetFace },
+  seed: string,
+  keep: readonly string[] = ['neutral'],
+): string {
+  let svg = sheet.drawing.svg;
+  const root = parse(svg);
+  if (root) {
+    for (const [name, id] of Object.entries(sheet.drawing.states))
+      if (!keep.includes(name)) {
+        const group = byId(root, id);
+        if (group) removeNode(group);
+      }
+    svg = render(root, { xmlMode: true });
+  }
+  return sheet.face
+    ? withFace({ ...sheet.drawing, svg }, sheet.face, seed).svg
+    : svg;
+}
+
 /** The transforms from the drawing's root down to inside a node: where what is put in it draws. */
 function spaceInside(root: Element, node: Element): Matrix | null {
   const chain: Element[] = [];

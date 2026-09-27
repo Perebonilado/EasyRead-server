@@ -1,0 +1,10 @@
+{
+  "id": "angel",
+  "kind": "character",
+  "name": "Gabriel",
+  "book": "The Star Over Bethlehem",
+  "is": "creature",
+  "size": "medium",
+  "look": "an angel in a long white robe with big feathered wings and a golden halo",
+  "legs": 2
+}

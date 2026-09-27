@@ -21,6 +21,7 @@
  * card, the contact sheet) shows it at rest, eyes open, mouth shut.
  */
 import type { Expression, StoryWorld } from './scene-story';
+import { CLOTH, FIGURE_INK, HAIR, KIT_LINE, SKIN } from './scene-ink';
 
 export const FIGURE_AGES = ['child', 'teen', 'adult', 'elder'] as const;
 export type FigureAge = (typeof FIGURE_AGES)[number];
@@ -486,49 +487,11 @@ export function describeFigure(spec: FigureSpec): string {
 
 // ── The rig ────────────────────────────────────────────────────────────────
 
-export const FIGURE_INK = '#2d2a32';
-const LINE = 2.6;
+export { FIGURE_INK };
+const LINE = KIT_LINE;
 export const MOUTH = '#6b2a2e';
 const SHOE = '#3b3440';
 const GOLD = '#f2c14e';
-
-const SKIN = [
-  '#f9e1cf',
-  '#f1cdb0',
-  '#e6b893',
-  '#d6a07a',
-  '#c28a61',
-  '#a86f49',
-  '#8c5a3b',
-  '#704731',
-  '#553524',
-  '#3f291d',
-];
-const HAIR: Record<HairColour, string> = {
-  black: '#2b2324',
-  'dark brown': '#4a3226',
-  brown: '#7a4f33',
-  auburn: '#9c4a2a',
-  red: '#c65a31',
-  blonde: '#e2b75d',
-  grey: '#a9a6ab',
-  white: '#eeece8',
-};
-const CLOTH: Record<ClothColour, string> = {
-  red: '#d9534f',
-  orange: '#f0924a',
-  yellow: '#f4c95d',
-  green: '#6dbf73',
-  teal: '#3fb0a4',
-  blue: '#4a8fd9',
-  navy: '#34518f',
-  purple: '#8a6bd1',
-  pink: '#ef8fb3',
-  brown: '#9a6b4b',
-  grey: '#8d8f96',
-  white: '#f5f5f2',
-  black: '#3a3740',
-};
 
 /** The body below the head at each age; the head is the same size at all of them. */
 const AGES: Record<

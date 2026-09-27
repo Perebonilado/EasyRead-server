@@ -1,0 +1,10 @@
+{
+  "id": "elephant",
+  "kind": "character",
+  "name": "Ellie",
+  "book": "Jungle Days",
+  "is": "animal",
+  "size": "large",
+  "look": "a grey elephant with big floppy ears, a long trunk and small tusks",
+  "legs": 4
+}

@@ -1,0 +1,10 @@
+{
+  "id": "rabbit",
+  "kind": "character",
+  "name": "Hop",
+  "book": "Farm Friends",
+  "is": "animal",
+  "size": "small",
+  "look": "a white rabbit with long ears, a pink nose and a fluffy tail",
+  "legs": 4
+}

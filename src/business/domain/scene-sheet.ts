@@ -80,16 +80,8 @@ export interface CharacterSheet {
   face?: SheetFace;
 }
 
-/**
- * How tall an animal or a creature stands, in the kit's units, by its
- * size: a grown-up's frame is 234, a child's 190. Larger than life for
- * the small ones, as a cartoon's are: a fox who talks must be seen to.
- */
-export const SIZE_UNITS: Record<StorySize, number> = {
-  small: 95,
-  medium: 130,
-  large: 230,
-};
+/** How tall an animal or a creature stands, in the kit's units, by its size (scene-ink). */
+export { SIZE_UNITS } from './scene-ink';
 
 /**
  * A person drawn by the kit, made ready for the stage the way a drawing

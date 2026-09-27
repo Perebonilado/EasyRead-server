@@ -1,0 +1,11 @@
+{
+  "id": "umbrella",
+  "kind": "thing",
+  "name": "umbrella",
+  "book": "Rainy Day",
+  "look": "open red",
+  "real": {
+    "heightCm": 90,
+    "lengthCm": 100
+  }
+}

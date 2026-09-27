@@ -1,0 +1,10 @@
+{
+  "id": "lion",
+  "kind": "character",
+  "name": "Leo",
+  "book": "Jungle Days",
+  "is": "animal",
+  "size": "large",
+  "look": "a friendly lion with a big shaggy golden mane and a tufted tail",
+  "legs": 4
+}

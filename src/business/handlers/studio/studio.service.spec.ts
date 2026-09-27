@@ -55,6 +55,8 @@ function studioInMemory() {
   const messages: StudioMessageRecord[] = [];
   let ids = 0;
   const repo: Partial<StudioRepository> = {
+    listShows: (userId) =>
+      Promise.resolve([...shows.values()].filter((s) => s.userId === userId)),
     findShow: (id) => Promise.resolve(shows.get(id) ?? null),
     updateShow: (id, patch) => {
       shows.set(id, { ...shows.get(id)!, ...patch });
@@ -98,6 +100,12 @@ function studioInMemory() {
       Promise.resolve(
         [...scenes.values()]
           .filter((s) => s.episodeId === episodeId)
+          .sort((a, b) => a.position - b.position),
+      ),
+    listScenesOf: (episodeIds) =>
+      Promise.resolve(
+        [...scenes.values()]
+          .filter((s) => episodeIds.includes(s.episodeId))
           .sort((a, b) => a.position - b.position),
       ),
     findScene: (id) => Promise.resolve(scenes.get(id) ?? null),
@@ -274,6 +282,7 @@ function studioInMemory() {
     service,
     answer,
     repo,
+    shows,
     episodes,
     scenes,
     messages,
@@ -481,5 +490,138 @@ describe('the Studio records what happens in the thread', () => {
       'say',
     ]);
     expect(done.show.moreMessages).toBe(false);
+  });
+});
+
+describe('the Studio lists the shows', () => {
+  it('says what a show is busy with, and how long its film runs and in how many scenes', async () => {
+    const studio = studioInMemory();
+    const [before] = await studio.service.shows('u1');
+    expect(before).toMatchObject({
+      thumbEpisodeId: null,
+      phase: 'script',
+      busy: null,
+      durationMs: null,
+      scenes: null,
+    });
+
+    studio.episodes.set('e0', {
+      ...studio.episodes.get('e0')!,
+      phase: 'made',
+      busy: 'make',
+      durationMs: 61_000,
+      thumbKey: 'studio/e0/thumb.png',
+    });
+    // One scene made, one not yet: the film has the one.
+    studio.scenes.set('c1', {
+      ...studio.scenes.get('c1')!,
+      sceneKey: 'k1',
+      audioKey: 'a1',
+      durationMs: 61_000,
+    });
+    const [now] = await studio.service.shows('u1');
+    expect(now).toMatchObject({
+      thumbEpisodeId: 'e0',
+      phase: 'made',
+      busy: 'make',
+      durationMs: 61_000,
+      scenes: 1,
+    });
+  });
+
+  it('says the length of the film the player plays: a scene that failed to be made again keeps its file, and is in it', async () => {
+    const studio = studioInMemory();
+    studio.episodes.set('e0', {
+      ...studio.episodes.get('e0')!,
+      phase: 'made',
+      // What the episode was last settled at: the made scenes only.
+      durationMs: 30_000,
+      thumbKey: 'studio/e0/thumb.png',
+    });
+    studio.scenes.set('c1', {
+      ...studio.scenes.get('c1')!,
+      status: 'made',
+      sceneKey: 'k1',
+      audioKey: 'a1',
+      durationMs: 30_000,
+    });
+    studio.scenes.set('c2', {
+      ...studio.scenes.get('c2')!,
+      status: 'failed',
+      sceneKey: 'k2',
+      audioKey: 'a2',
+      durationMs: 25_000,
+    });
+    const [card] = await studio.service.shows('u1');
+    expect(card).toMatchObject({ durationMs: 55_000, scenes: 2 });
+  });
+
+  it('stands for a show by its latest made episode, and says where its latest is', async () => {
+    const studio = studioInMemory();
+    studio.episodes.set('e0', {
+      ...studio.episodes.get('e0')!,
+      phase: 'made',
+      durationMs: 61_000,
+      thumbKey: 'studio/e0/thumb.png',
+    });
+    studio.scenes.set('c1', {
+      ...studio.scenes.get('c1')!,
+      sceneKey: 'k1',
+      audioKey: 'a1',
+      durationMs: 61_000,
+    });
+    studio.episodes.set('e9', {
+      ...studio.episodes.get('e0')!,
+      id: 'e9',
+      number: 2,
+      phase: 'outline',
+      durationMs: null,
+      thumbKey: null,
+    });
+    const [waiting] = await studio.service.shows('u1');
+    expect(waiting).toMatchObject({
+      thumbEpisodeId: 'e0',
+      phase: 'outline',
+      episodes: 2,
+    });
+
+    studio.episodes.set('e9', {
+      ...studio.episodes.get('e9')!,
+      phase: 'made',
+      durationMs: 20_000,
+      thumbKey: 'studio/e9/thumb.png',
+    });
+    studio.scenes.set('c9', {
+      ...studio.scenes.get('c1')!,
+      id: 'c9',
+      episodeId: 'e9',
+      durationMs: 20_000,
+    });
+    const [made] = await studio.service.shows('u1');
+    expect(made).toMatchObject({
+      thumbEpisodeId: 'e9',
+      phase: 'made',
+      durationMs: 20_000,
+      scenes: 1,
+    });
+  });
+
+  it('reads the scenes of every show in one go, however many shows there are', async () => {
+    const studio = studioInMemory();
+    for (const id of ['s2', 's3']) {
+      studio.shows.set(id, { ...studio.shows.get('s1')!, id });
+      studio.episodes.set(`${id}e`, {
+        ...studio.episodes.get('e0')!,
+        id: `${id}e`,
+        showId: id,
+        phase: 'made',
+        thumbKey: `studio/${id}e/thumb.png`,
+      });
+    }
+    const one = jest.spyOn(studio.repo, 'listScenes');
+    const all = jest.spyOn(studio.repo, 'listScenesOf');
+    expect(await studio.service.shows('u1')).toHaveLength(3);
+    expect(one).not.toHaveBeenCalled();
+    expect(all).toHaveBeenCalledTimes(1);
   });
 });

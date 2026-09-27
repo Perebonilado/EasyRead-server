@@ -2566,6 +2566,11 @@ export interface StudioShowCardDto {
   thumbEpisodeId: string | null;
   phase: StudioPhase;
   updatedAt: string;
+  /** What is being written or made in the show now, if anything: the card says so as it goes. */
+  busy?: StudioBusyName | null;
+  /** The film the still stands for: how long its scenes run, and how many there are. */
+  durationMs?: number | null;
+  scenes?: number | null;
 }
 
 /** An episode as a player plays it: its scenes in order, each fetched on its own. */

@@ -168,6 +168,8 @@ export interface StudioRepository {
   /** An episode's scenes replaced: one row a scene of its new outline. */
   replaceScenes(episodeId: string, count: number): Promise<StudioSceneRecord[]>;
   listScenes(episodeId: string): Promise<StudioSceneRecord[]>;
+  /** The scenes of several episodes at once, each episode's in order: one query for a list of shows. */
+  listScenesOf(episodeIds: readonly string[]): Promise<StudioSceneRecord[]>;
   findScene(id: string): Promise<StudioSceneRecord | null>;
   updateScene(
     id: string,

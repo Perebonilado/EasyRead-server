@@ -299,6 +299,20 @@ export class SequelizeStudioRepository implements StudioRepository {
     return rows.map((row) => this.scene(row));
   }
 
+  async listScenesOf(
+    episodeIds: readonly string[],
+  ): Promise<StudioSceneRecord[]> {
+    if (!episodeIds.length) return [];
+    const rows = await this.scenes.findAll({
+      where: { episodeId: { [Op.in]: [...episodeIds] } },
+      order: [
+        ['episodeId', 'ASC'],
+        ['position', 'ASC'],
+      ],
+    });
+    return rows.map((row) => this.scene(row));
+  }
+
   async findScene(id: string): Promise<StudioSceneRecord | null> {
     const row = await this.scenes.findByPk(id);
     return row ? this.scene(row) : null;

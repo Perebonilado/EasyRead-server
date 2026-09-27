@@ -698,8 +698,11 @@ describe('the kit’s own people, unchanged by the crowd', () => {
     const all = cases.map(([spec, seed, how]) =>
       JSON.stringify(drawFigure(spec, seed, how)),
     );
+    // As before, but that each leg now turns about its hip, for a kick,
+    // and bends at a knee (drawn as one leg standing), and what is worn on
+    // the legs sinks with the body.
     expect(createHash('sha256').update(all.join('\n')).digest('hex')).toBe(
-      '338e3b72ea2573a2d3b7a70f648f3a7d64216ca594793b12a3a3a72ae351898c',
+      '238cca320af61802991e9eed875695c238259a794a87a0b571bec2eb75ca9190',
     );
   });
 });
@@ -792,5 +795,54 @@ describe('someone in a crowd, drawn by the kit', () => {
     }
     expect(new Set(people.map((p) => p.age)).size).toBeGreaterThanOrEqual(3);
     expect(wardrobeOf(null).tops).not.toContain('agbada');
+  });
+});
+
+describe('the kit’s legs, bending', () => {
+  it('bends each leg at its knee, the foot kept flat, and says where the joints are', () => {
+    const drawn = drawFigure(PLAIN_FIGURE, 'legs');
+    const { r, l } = drawn.legs!;
+    for (const [hip, knee, foot] of [r, l]) {
+      // Down the leg: the hip, the knee halfway, the foot on the ground.
+      expect(hip[0]).toBe(knee[0]);
+      expect(knee[0]).toBe(foot[0]);
+      expect(hip[1]).toBeLessThan(knee[1]);
+      expect(knee[1]).toBeLessThan(foot[1]);
+      expect(Math.abs(knee[1] - (hip[1] + foot[1]) / 2)).toBeLessThan(0.1);
+    }
+    expect(r[0][0]).toBeGreaterThan(l[0][0]);
+    // The shin turns about the knee inside the leg that turns about the
+    // hip; the foot under it turns back, flat on the ground.
+    expect(drawn.svg).toContain(
+      `<g class="shin" style="transform-origin:${r[1][0]}px ${r[1][1]}px">`,
+    );
+    expect(drawn.svg).toContain(
+      '.l1 .shin{transform:rotate(calc(var(--knr,0)*1deg))}',
+    );
+    expect(drawn.svg).toContain(
+      '.l1 .foot{transform:rotate(calc((var(--legr,0) + var(--knr,0))*-1deg))}',
+    );
+    // The body sinks with the legs, and what is worn on them.
+    expect(drawn.svg).toContain(
+      '.leg,.breathe,.skirt{translate:0 calc(var(--low,0)*1px)}',
+    );
+    // A group, or one lying down, bends no legs.
+    expect(drawFigure(PLAIN_FIGURE, 'g', { count: 2 }).legs).toBeUndefined();
+    expect(
+      drawFigure(PLAIN_FIGURE, 'l', { pose: 'lying' }).legs,
+    ).toBeUndefined();
+  });
+
+  it('takes a wrapper up as the body sinks, so its hem stays off the ground', () => {
+    const drawn = drawFigure(
+      as({ bottom: 'wrapper', top: 'kaftan' }),
+      'wrapped',
+    );
+    expect(drawn.svg).toMatch(
+      /<g class="skirt wrap" style="transform-origin:0 [-\d.]+px;--reach:[\d.]+">/,
+    );
+    expect(drawn.svg).toContain(
+      '.wrap{scale:1 calc(1 - var(--low,0) / var(--reach,100))}',
+    );
   });
 });

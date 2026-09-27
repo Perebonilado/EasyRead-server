@@ -18,19 +18,34 @@
 import { createHash } from 'node:crypto';
 import {
   FIGURE_POSES,
-  FIGURE_PROPS,
   FIGURE_SIGNS,
   PLAIN_FIGURE,
   figureOf,
   type FigureFace,
   type FigurePose,
-  type FigureProp,
   type FigureSign,
   type FigureSpec,
 } from '../scene-figure';
 import { KIT_FACES } from '../scene-figure';
 import { faceNamed } from '../scene-feeling';
-import { PROP_ACTIONS, type PropAction } from '../scene-directions';
+import {
+  ACTION_DOINGS,
+  FEATURE_KINDS,
+  HANDLE_DOINGS,
+  OPENING_FEATURES,
+  PROP_ACTIONS,
+  SIDES,
+  THINGS,
+  TRAVEL_PACES,
+  doingOf,
+  featureIdOf,
+  isDoing,
+  type DoingId,
+  type FeatureKind,
+  type PropAction,
+  type ThingId,
+  type TravelPace,
+} from '../scene-doings';
 import { STAGE_PROPS, type StageProp } from '../scene-props';
 import {
   LINE_FROMS,
@@ -38,7 +53,6 @@ import {
   SCENE_AMBIENCES,
   SCENE_MOODS,
   SCENE_MUSIC,
-  STORY_MOVES,
   type LineFrom,
   type LinePace,
   type SceneAmbience,
@@ -248,8 +262,8 @@ export interface StudioCharacter {
   voicePick: number;
   /** Two or three words each on what they are like: how they move and speak. */
   traits: string[];
-  /** What they carry when a scene gives them nothing else. */
-  carries: FigureProp | null;
+  /** What they carry when a scene gives them nothing else: gear drawn in their hand, or a thing of the stage's. */
+  carries: ThingId | null;
 }
 
 export interface StudioSet {
@@ -263,6 +277,56 @@ export interface StudioSet {
   /** What stands in front of people's legs: a table, a counter, a boat's side; null for nothing. */
   front: string | null;
   sound: SceneAmbience | null;
+  /** The fixed things its stories act on: a gate, a bench, a goalpost. Absent, none yet. */
+  features?: StudioFeature[];
+}
+
+/**
+ * A fixed thing of a set that a story acts on: a gate someone goes out by,
+ * a bench someone looks under, a goalpost someone stands by. Kept on the
+ * set for good once a scene names it, as new places and people are.
+ */
+export interface StudioFeature {
+  /** Its id in every sheet: the word for it, "gate", "danfo". */
+  id: string;
+  name: string;
+  kind: FeatureKind;
+  /** Where it stands, as the viewer sees it: a spot, or at the back. */
+  spot: Spot | 'back';
+  /** Whether it opens and shuts: a gate, a door, a window. */
+  opens: boolean;
+}
+
+/** The most features a set keeps. */
+export const MAX_FEATURES = 8;
+
+/** A set's features made sound: each an id of its own, a kind from the list, a spot. */
+export function featuresOf(raw: unknown): StudioFeature[] {
+  const taken = new Set<string>();
+  return (Array.isArray(raw) ? raw : [])
+    .slice(0, MAX_FEATURES)
+    .flatMap((one: unknown): StudioFeature[] => {
+      if (!one || typeof one !== 'object') return [];
+      const f = one as Record<string, unknown>;
+      const name = text(f.name, 40) || text(f.id, 40);
+      const kind = oneOf(FEATURE_KINDS)(f.kind);
+      if (!name || !kind) return [];
+      const id = featureIdOf(text(f.id, 40) || name);
+      if (!id || taken.has(id)) return [];
+      taken.add(id);
+      return [
+        {
+          id,
+          name,
+          kind,
+          spot: f.spot === 'back' ? 'back' : (oneOf(SPOTS)(f.spot) ?? 'back'),
+          opens:
+            typeof f.opens === 'boolean'
+              ? f.opens
+              : OPENING_FEATURES.includes(kind),
+        },
+      ];
+    });
 }
 
 /** A thing an explainer draws the same way in every scene: the cell, the atom, the heart. */
@@ -371,7 +435,7 @@ export function bibleOf(raw: unknown): StudioBible {
             .map((t) => text(t, 30))
             .filter(Boolean)
             .slice(0, 3),
-          carries: oneOf(FIGURE_PROPS)(c.carries),
+          carries: oneOf(THINGS)(c.carries),
         },
       ];
     });
@@ -383,6 +447,7 @@ export function bibleOf(raw: unknown): StudioBible {
       const s = one as Record<string, unknown>;
       const name = text(s.name, 60);
       if (!name) return [];
+      const features = featuresOf(s.features);
       return [
         {
           id: freeId(studioId(text(s.id, 40) || name, 'place'), places),
@@ -392,6 +457,8 @@ export function bibleOf(raw: unknown): StudioBible {
           stand: oneOf(PLACE_STANDS)(s.stand) ?? 'on',
           front: textOrNull(s.front, 60),
           sound: oneOf(SCENE_AMBIENCES)(s.sound),
+          // Kept only when there are some, so a set without is as it was.
+          ...(features.length ? { features } : {}),
         },
       ];
     });
@@ -516,23 +583,13 @@ export type Spot = (typeof SPOTS)[number];
 export const MOST_ON_STAGE = 4;
 
 /**
- * What someone can be seen doing, besides saying their lines: come on, go
- * off, walk to another spot, reach, point, look, hug, and the rig's moves.
- * Nothing else is ever asked of the stage, so nothing is promised that it
- * cannot show.
+ * What someone can be seen doing, besides saying their lines: the one list
+ * of doings (scene-doings.ts). An action moves the body or goes somewhere;
+ * business handles a thing. Nothing else is ever asked of the stage, and
+ * the stage has something to show for every one.
  */
-export const STUDIO_DOINGS = [
-  'enter',
-  'leave',
-  'walk',
-  'hug',
-  'reach',
-  'point',
-  'look',
-  ...STORY_MOVES,
-  'still',
-] as const;
-export type StudioDoing = (typeof STUDIO_DOINGS)[number];
+export const STUDIO_DOINGS = ACTION_DOINGS;
+export type StudioDoing = DoingId;
 
 /** Every face someone can wear: the story's seven and the kit's own. */
 export const STUDIO_FACES = [...EXPRESSIONS, ...KIT_FACES] as const;
@@ -550,9 +607,11 @@ export type BeatKind = (typeof BEAT_KINDS)[number];
 /**
  * One beat of a scene, flat: every field present, null where its kind
  * does not use it. A line is said by `who` to `to`; a narration by the
- * narrator; an action is `who` doing `do` (toward `to`, or to `spot`);
- * business is `who` doing `do` with `prop` (given `to` someone); a
- * reaction is `who` showing `feeling` (or a `sign`); a pause is quiet.
+ * narrator; an action is `who` doing `do` (toward `target`, or to `spot`,
+ * by `via`, at a `pace`); business is `who` doing `do` with `thing` (given
+ * `to` someone); a reaction is `who` showing `feeling` (or a `sign`); a
+ * pause is quiet. The words of an action or business are what it shows,
+ * and the stage is held to them.
  */
 export interface SheetBeat {
   kind: BeatKind;
@@ -562,12 +621,24 @@ export interface SheetBeat {
   say: string;
   feeling: FigureFace | null;
   sign: FigureSign | null;
-  do: StudioDoing | PropAction | null;
+  do: DoingId | null;
   prop: StageProp | null;
   spot: Spot | null;
   from: LineFrom | null;
-  pace: LinePace | null;
+  /** How a line is said; how someone goes: at a walk, or a run. */
+  pace: LinePace | TravelPace | null;
   seconds: number | null;
+  /**
+   * Toward whom or what: a character's id, a feature's, a thing's, or a
+   * side ("@left", "@right", "@up", "@down"). Absent, toward no one.
+   */
+  target?: string;
+  /** The thing handled or named: a thing on the stage, or one carried. */
+  thing?: ThingId;
+  /** The feature someone goes in or out by: "gate", "door". */
+  via?: string;
+  /** What the writer asked for that is none of the doings, kept as they wrote it. */
+  doSaid?: string;
 }
 
 /** Someone on the stage as a scene opens. */
@@ -576,7 +647,8 @@ export interface SheetPlace {
   spot: Spot;
   pose: FigurePose;
   face: FigureFace;
-  holding: FigureProp | null;
+  /** What they hold as it opens, in a hand or an animal's mouth; null for nothing. */
+  holding: ThingId | null;
 }
 
 /** A thing on the stage to be handled, resting before whom. */
@@ -651,13 +723,28 @@ export function beatOf(raw: unknown): SheetBeat | null {
     return said ? studioId(said) : null;
   };
   const seconds = Number(b.seconds);
-  const doing =
+  const acts = kind === 'action' || kind === 'business';
+  const doing = acts && isDoing(b.do) ? b.do : null;
+  // A doing none of the list is kept as it was written, for the words to
+  // be read by; "still" is no doing at all.
+  const doSaid =
+    acts && !doing && typeof b.do === 'string' ? text(b.do, 40) : '';
+  const aimed = acts ? text(b.target, 40) : '';
+  const target = (SIDES as readonly string[]).includes(aimed)
+    ? aimed
+    : aimed
+      ? studioId(aimed)
+      : '';
+  const thing = acts ? oneOf(THINGS)(b.thing) : null;
+  const via = kind === 'action' ? text(b.via, 40) : '';
+  const prop =
     kind === 'business'
-      ? oneOf(PROP_ACTIONS)(b.do)
-      : kind === 'action'
-        ? oneOf(STUDIO_DOINGS)(b.do)
-        : null;
-  return {
+      ? (oneOf(STAGE_PROPS)(b.prop) ??
+        (thing && (STAGE_PROPS as readonly string[]).includes(thing)
+          ? (thing as StageProp)
+          : null))
+      : null;
+  const out: SheetBeat = {
     kind,
     who: kind === 'narration' || kind === 'pause' ? null : id(b.who),
     to:
@@ -672,15 +759,27 @@ export function beatOf(raw: unknown): SheetBeat | null {
         : null,
     sign: kind === 'reaction' ? oneOf(FIGURE_SIGNS)(b.sign) : null,
     do: doing,
-    prop: kind === 'business' ? oneOf(STAGE_PROPS)(b.prop) : null,
+    prop,
     spot: kind === 'action' ? oneOf(SPOTS)(b.spot) : null,
     from: kind === 'line' ? oneOf(LINE_FROMS)(b.from) : null,
-    pace: kind === 'line' ? oneOf(LINE_PACES)(b.pace) : null,
+    pace:
+      kind === 'line'
+        ? oneOf(LINE_PACES)(b.pace)
+        : kind === 'action'
+          ? oneOf(TRAVEL_PACES)(b.pace)
+          : null,
     seconds:
       (kind === 'pause' || kind === 'action') && Number.isFinite(seconds)
         ? Math.min(4, Math.max(0.4, Math.round(seconds * 10) / 10))
         : null,
   };
+  // What a beat is aimed at, handles and goes by: kept only when said, so
+  // a sheet written before them reads as it was.
+  if (target) out.target = target;
+  if (thing) out.thing = thing;
+  if (via) out.via = featureIdOf(via);
+  if (doSaid) out.doSaid = doSaid;
+  return out;
 }
 
 /** A story's sheet made sound. Ids are lower-cased as ids are; the check says what is still wrong. */
@@ -701,7 +800,7 @@ export function storySheetOf(raw: unknown): StorySheet {
           spot: oneOf(SPOTS)(p.spot) ?? 'centre',
           pose: oneOf(FIGURE_POSES)(p.pose) ?? 'standing',
           face: asFace(p.face) ?? 'neutral',
-          holding: oneOf(FIGURE_PROPS)(p.holding),
+          holding: oneOf(THINGS)(p.holding),
         },
       ];
     });
@@ -874,7 +973,12 @@ export function secondsOf(sheet: SceneSheet): number {
     if (beat.kind === 'line' || beat.kind === 'narration')
       seconds += wordCount(beat.say) / WORDS_A_SECOND + 0.4;
     else if (beat.kind === 'pause') seconds += beat.seconds ?? 1;
-    else seconds += Math.min(3, beat.seconds ?? 1);
+    else if (beat.kind === 'reaction') seconds += 0.6;
+    else
+      seconds += Math.min(
+        3,
+        (doingOf(beat.do)?.ms ?? (beat.seconds ?? 1) * 1000) / 1000,
+      );
   }
   return Math.round(seconds);
 }
@@ -882,8 +986,11 @@ export function secondsOf(sheet: SceneSheet): number {
 /** What someone's face is: one of the kit's, or the nearest. */
 export { asFace };
 
-/** The props a hand can hold, and the ones on a stage to be handled: for the writer's menu. */
-export const HELD_THINGS = FIGURE_PROPS;
+/** What someone may hold (every thing, and the gear drawn in a hand), and the things on a stage to be handled: for the writer's menu. */
+export const HELD_THINGS = THINGS;
 export const STAGE_THINGS = STAGE_PROPS;
-export const PROP_DOINGS = PROP_ACTIONS;
-export type { StageProp, PropAction, StoryMove, FigureSign };
+/** What a business beat may do with a thing: the handling doings. */
+export const PROP_DOINGS = HANDLE_DOINGS;
+/** The handlings a book's page plays, kept for the pages that use them. */
+export const PAGE_PROP_ACTIONS = PROP_ACTIONS;
+export type { StageProp, PropAction, StoryMove, FigureSign, ThingId };

@@ -1,0 +1,291 @@
+{
+ "kind": "story",
+ "title": "Home, Waggy Home",
+ "set": "yard",
+ "time": "day",
+ "weather": "clear",
+ "crowd": "none",
+ "mood": "playful",
+ "music": "playful",
+ "transition": "cut",
+ "onStage": [
+  {
+   "who": "mama",
+   "spot": "left",
+   "pose": "standing",
+   "face": "happy",
+   "holding": null
+  },
+  {
+   "who": "tobi",
+   "spot": "centre-left",
+   "pose": "standing",
+   "face": "happy",
+   "holding": "magnifier"
+  },
+  {
+   "who": "maya",
+   "spot": "centre-right",
+   "pose": "standing",
+   "face": "happy",
+   "holding": null
+  },
+  {
+   "who": "pip",
+   "spot": "right",
+   "pose": "standing",
+   "face": "happy",
+   "holding": "ball"
+  }
+ ],
+ "props": [
+  {
+   "prop": "cup",
+   "near": "mama"
+  }
+ ],
+ "beats": [
+  {
+   "kind": "narration",
+   "who": null,
+   "to": null,
+   "say": "Back at the compound, Mama shuts the gate.",
+   "feeling": null,
+   "sign": null,
+   "do": null,
+   "prop": null,
+   "spot": null,
+   "from": null,
+   "pace": null,
+   "seconds": null
+  },
+  {
+   "kind": "line",
+   "who": "mama",
+   "to": "maya",
+   "say": "Home safe, my brave girl.",
+   "feeling": "happy",
+   "sign": null,
+   "do": null,
+   "prop": null,
+   "spot": null,
+   "from": "here",
+   "pace": "calm",
+   "seconds": null
+  },
+  {
+   "kind": "action",
+   "who": "pip",
+   "to": null,
+   "say": "Pip drops the ball and wags his tail.",
+   "feeling": null,
+   "sign": null,
+   "do": "still",
+   "prop": null,
+   "spot": null,
+   "from": null,
+   "pace": null,
+   "seconds": 1
+  },
+  {
+   "kind": "line",
+   "who": "maya",
+   "to": "pip",
+   "say": "Pip! Don't run off again!",
+   "feeling": "happy",
+   "sign": null,
+   "do": null,
+   "prop": null,
+   "spot": null,
+   "from": "here",
+   "pace": "quick",
+   "seconds": null
+  },
+  {
+   "kind": "line",
+   "who": "tobi",
+   "to": "maya",
+   "say": "He led us all over town!",
+   "feeling": "happy",
+   "sign": null,
+   "do": null,
+   "prop": null,
+   "spot": null,
+   "from": "here",
+   "pace": "quick",
+   "seconds": null
+  },
+  {
+   "kind": "business",
+   "who": "mama",
+   "to": null,
+   "say": "Mama picks up the cup.",
+   "feeling": null,
+   "sign": null,
+   "do": "take",
+   "prop": "cup",
+   "spot": null,
+   "from": null,
+   "pace": null,
+   "seconds": null
+  },
+  {
+   "kind": "business",
+   "who": "mama",
+   "to": "maya",
+   "say": "Mama gives Maya water.",
+   "feeling": null,
+   "sign": null,
+   "do": "give",
+   "prop": "cup",
+   "spot": null,
+   "from": null,
+   "pace": null,
+   "seconds": null
+  },
+  {
+   "kind": "business",
+   "who": "maya",
+   "to": null,
+   "say": "Maya drinks.",
+   "feeling": null,
+   "sign": null,
+   "do": "drink",
+   "prop": "cup",
+   "spot": null,
+   "from": null,
+   "pace": null,
+   "seconds": null
+  },
+  {
+   "kind": "action",
+   "who": "pip",
+   "to": null,
+   "say": "Pip chews Maya's shoe.",
+   "feeling": null,
+   "sign": null,
+   "do": "still",
+   "prop": null,
+   "spot": null,
+   "from": null,
+   "pace": null,
+   "seconds": 1
+  },
+  {
+   "kind": "line",
+   "who": "maya",
+   "to": "pip",
+   "say": "Pip, that's my shoe!",
+   "feeling": "surprised",
+   "sign": null,
+   "do": null,
+   "prop": null,
+   "spot": null,
+   "from": "here",
+   "pace": "shout",
+   "seconds": null
+  },
+  {
+   "kind": "line",
+   "who": "mama",
+   "to": "maya",
+   "say": "Let him. He's home now.",
+   "feeling": "happy",
+   "sign": null,
+   "do": null,
+   "prop": null,
+   "spot": null,
+   "from": "here",
+   "pace": "calm",
+   "seconds": null
+  },
+  {
+   "kind": "action",
+   "who": "tobi",
+   "to": null,
+   "say": "Tobi laughs.",
+   "feeling": null,
+   "sign": null,
+   "do": "laugh",
+   "prop": null,
+   "spot": null,
+   "from": null,
+   "pace": null,
+   "seconds": 0.8
+  },
+  {
+   "kind": "action",
+   "who": "maya",
+   "to": null,
+   "say": "Maya laughs too.",
+   "feeling": null,
+   "sign": null,
+   "do": "laugh",
+   "prop": null,
+   "spot": null,
+   "from": null,
+   "pace": null,
+   "seconds": 0.8
+  },
+  {
+   "kind": "action",
+   "who": "mama",
+   "to": null,
+   "say": "Mama laughs with them.",
+   "feeling": null,
+   "sign": null,
+   "do": "laugh",
+   "prop": null,
+   "spot": null,
+   "from": null,
+   "pace": null,
+   "seconds": 0.8
+  },
+  {
+   "kind": "pause",
+   "who": null,
+   "to": null,
+   "say": "",
+   "feeling": null,
+   "sign": null,
+   "do": null,
+   "prop": null,
+   "spot": null,
+   "from": null,
+   "pace": null,
+   "seconds": 1.5
+  }
+ ],
+ "camera": [
+  {
+   "beat": 0,
+   "shot": "wide",
+   "on": null,
+   "with": null
+  },
+  {
+   "beat": 1,
+   "shot": "close",
+   "on": "mama",
+   "with": null
+  },
+  {
+   "beat": 3,
+   "shot": "close",
+   "on": "maya",
+   "with": null
+  },
+  {
+   "beat": 8,
+   "shot": "close",
+   "on": "pip",
+   "with": null
+  },
+  {
+   "beat": 14,
+   "shot": "wide",
+   "on": null,
+   "with": null
+  }
+ ]
+}

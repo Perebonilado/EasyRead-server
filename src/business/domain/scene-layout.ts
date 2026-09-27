@@ -658,6 +658,306 @@ export function standTogether(
   }
 }
 
+// ── A Studio scene's stations ─────────────────────────────────────────────
+
+/** Where the five spots stand across the stage, as shares of its width. */
+export const STATION_SHARES = {
+  left: 0.12,
+  'centre-left': 0.31,
+  centre: 0.5,
+  'centre-right': 0.69,
+  right: 0.88,
+} as const;
+export type StationShares = Record<keyof typeof STATION_SHARES, number>;
+
+/**
+ * The five spots for a scene whose largest group is `largest`: the two
+ * either side of the middle as far out as a row of that many stands, so
+ * two people talking stand as far apart as they always have, and four
+ * still stand clear of each other.
+ */
+export function stationShares(largest: number): StationShares {
+  const out = largest <= 2 ? 0.244 : largest === 3 ? 0.21 : 0.19;
+  return {
+    ...STATION_SHARES,
+    'centre-left': 0.5 - out,
+    'centre-right': 0.5 + out,
+  };
+}
+
+/** How big a thing at the back of a set is drawn beside the people, and how far back it stands. */
+export const BACK_DEPTH = 0.55;
+
+/** The scale a Studio scene's people stand at, and the ground they stand on. */
+export interface StationScale {
+  /** The stage's units to one of the kit's; null when no one stands with people. */
+  unit: number | null;
+  floor: number;
+  /** The slot someone who does not stand with people is fitted in. */
+  slot: Rect;
+}
+
+/**
+ * The scale a Studio scene's people stand at: as large as its largest
+ * group can stand side by side in a row, never larger than a grown-up at
+ * seven tenths of the stage, and the same from its first step to its
+ * last, so no one grows or shrinks as others come and go.
+ */
+export function stationScale(
+  things: readonly LaidThing[],
+  largest: number,
+  staging: StagingName,
+): StationScale {
+  const area = content(staging);
+  const [slot] = line(area, Math.max(2, largest));
+  const cap = (area.h * TALLEST_ADULT) / figureFrame('adult')[3];
+  const units = things.flatMap((thing) =>
+    thing.kind === 'drawing' && thing.stands?.units
+      ? [fitInSlot(thing, slot).h / thing.stands.units]
+      : [],
+  );
+  return {
+    unit: units.length ? Math.min(cap, ...units) : null,
+    floor: area.y + area.h,
+    slot,
+  };
+}
+
+/** Where a feature stands across a stage: its middle and its width. */
+export interface FeatureAcross {
+  x: number;
+  w: number;
+}
+
+/**
+ * A Studio scene's people, step by step, each at their station: a spot's
+ * own place across the stage, beside a feature ("by:gate:-1", its left),
+ * behind one ("behind:tree"), or a point on the ground ("@0.62"). One scale for everyone, all their
+ * feet on the ground. Someone keeps exactly where they stand until their
+ * station changes, whoever comes or goes; one who comes beside a feature
+ * where someone already stands takes its other side. No one comes to
+ * stand where someone already is, nor in a gateway or a doorway unless
+ * they go by it: the nearest place clear of them instead.
+ */
+export function layoutStations(input: {
+  steps: readonly {
+    show: readonly string[];
+    at?: Readonly<Record<string, string>>;
+  }[];
+  things: ReadonlyMap<string, LaidThing>;
+  staging: StagingName;
+  scale: StationScale;
+  features: ReadonlyMap<string, FeatureAcross>;
+  /** The ways through (a gate, a door) standing on the people's ground, where they stand across it: kept clear of. */
+  pieces?: readonly FeatureAcross[];
+  /** Where the spots stand, as the scene's largest group has them. */
+  shares?: StationShares;
+}): Record<string, Place>[] {
+  const { w: W, margin } = STAGINGS[input.staging];
+  const { unit, floor, slot } = input.scale;
+  const round = (n: number) => Math.round(n * 10) / 10;
+  const sizeOf = (id: string): { w: number; h: number } | null => {
+    const thing = input.things.get(id);
+    if (!thing) return null;
+    if (thing.kind === 'drawing' && thing.stands?.units && unit) {
+      const h = thing.stands.units * unit;
+      return { w: h * (thing.aspect > 0 ? thing.aspect : 1), h };
+    }
+    const fit = fitInSlot(thing, slot);
+    return { w: fit.w, h: fit.h };
+  };
+  const across = (station: string, w: number, flip = false): number => {
+    const shares: Record<string, number> = input.shares ?? STATION_SHARES;
+    let x = W / 2;
+    if (station in shares) x = shares[station] * W;
+    else if (station.startsWith('@')) x = (Number(station.slice(1)) || 0.5) * W;
+    else if (/^(?:behind|under):/.test(station)) {
+      // Behind it or under it: where it stands.
+      const feature = input.features.get(station.replace(/^\w+:/, ''));
+      if (feature) x = feature.x;
+    } else {
+      const by = /^by:(.+):(-1|1)$/.exec(station);
+      const feature = by ? input.features.get(by[1]) : undefined;
+      if (by && feature) {
+        const side = Number(by[2]) * (flip ? -1 : 1);
+        // At its end: over its edge a little, clear of its middle.
+        x = feature.x + side * (feature.w * 0.35 + w * 0.2);
+      }
+    }
+    return Math.min(W - margin - w * 0.3, Math.max(margin + w * 0.3, x));
+  };
+  /** Where each one stands now, and by what station: kept while it is. */
+  const kept = new Map<string, { station: string; x: number }>();
+  return input.steps.map((step) => {
+    const out: Record<string, Place> = {};
+    const placed: { id: string; x: number; w: number }[] = [];
+    // Those who stay put first, then whoever moves, around them.
+    const order = [...step.show].sort(
+      (a, b) =>
+        Number(kept.get(a)?.station !== step.at?.[a]) -
+        Number(kept.get(b)?.station !== step.at?.[b]),
+    );
+    order.forEach((id, i) => {
+      const size = sizeOf(id);
+      if (!size) return;
+      const station =
+        step.at?.[id] ??
+        Object.keys(STATION_SHARES)[
+          Math.min(4, Math.round(((i + 0.5) / order.length) * 4))
+        ];
+      const was = kept.get(id);
+      let x: number;
+      if (was?.station === station) x = was.x;
+      else {
+        x = across(station, size.w);
+        // Going to a feature, or to a thing on the ground, they go there.
+        const byOrBehind = /^(?:by:|behind:|under:|@)/.test(station);
+        // Where someone stands already (behind a feature, no one is
+        // seen), or, at a spot of their own, in a gateway.
+        const hidden = station.startsWith('behind:');
+        const crowded = (at: number) =>
+          (!hidden &&
+            placed.some(
+              (p) => Math.abs(p.x - at) < Math.min(p.w, size.w) * 0.55,
+            )) ||
+          (!byOrBehind &&
+            (input.pieces ?? []).some(
+              (p) => Math.abs(p.x - at) < p.w * 0.4 + size.w * 0.2,
+            ));
+        // Beside a feature where someone stands already: its other side.
+        if (station.startsWith('by:') && crowded(x)) {
+          const other = across(station, size.w, true);
+          if (!crowded(other)) x = other;
+        }
+        // Else the nearest place clear of them all, if there is one.
+        if (crowded(x)) {
+          const least = margin + size.w * 0.3;
+          const most = W - margin - size.w * 0.3;
+          const step = Math.max(8, size.w * 0.2);
+          for (let d = step; d < W; d += step) {
+            const clear = [x - d, x + d].find(
+              (at) => at >= least && at <= most && !crowded(at),
+            );
+            if (clear === undefined) continue;
+            x = clear;
+            break;
+          }
+        }
+      }
+      kept.set(id, { station, x });
+      placed.push({ id, x, w: size.w });
+      out[id] = {
+        x: round(x - size.w / 2),
+        y: round(floor - size.h),
+        w: round(size.w),
+        h: round(size.h),
+      };
+    });
+    for (const id of [...kept.keys()])
+      if (!step.show.includes(id)) kept.delete(id);
+    return out;
+  });
+}
+
+/** A feature as a stage stands it: the box it is drawn in, and where one goes through or by it. */
+export interface FeaturePlace extends Rect {
+  /** Where someone goes in or out by it, or stands at it: the middle of its way, the ground there, and how big they are there beside the people (less than 1 farther back). */
+  way: { x: number; y: number; k: number };
+}
+
+/**
+ * Where a feature of a set stands on a stage. A piece the stage draws
+ * stands on the people's ground at their scale, at its spot (a vehicle,
+ * and anything at the back, farther off: smaller, and higher), or where
+ * the painter drew it, as large as it was drawn there. One only painted
+ * is where the painter drew it.
+ */
+export function placeFeature(input: {
+  staging: StagingName;
+  spot: string;
+  /** The stage's own drawing of it: its frame and its way through, in the kit's units. */
+  piece?: {
+    viewBox: [number, number, number, number];
+    opening?: [number, number, number, number];
+  };
+  /** Where the painter drew it, on this stage. */
+  painted?: Rect | null;
+  /** Stands at the back, farther off than the people. */
+  back: boolean;
+  unit: number;
+  floor: number;
+  /** The set's horizon on this stage. */
+  horizon: number;
+  /** Where the spots stand, as the scene's largest group has them. */
+  shares?: StationShares;
+}): FeaturePlace {
+  const { w: W, margin } = STAGINGS[input.staging];
+  const round = (n: number) => Math.round(n * 10) / 10;
+  const depth = (feet: number) =>
+    Math.min(
+      1,
+      Math.max(0.2, (feet - input.horizon) / (input.floor - input.horizon)),
+    );
+  const shares: Record<string, number> = input.shares ?? STATION_SHARES;
+  const painted = input.painted ?? null;
+  if (!input.piece) {
+    // Only painted: where it is; else, unseen, at its spot.
+    const box = painted ?? {
+      x: (shares[input.spot] ?? 0.5) * W - 40,
+      y: input.floor - 160,
+      w: 80,
+      h: 160,
+    };
+    const feet = box.y + box.h;
+    return {
+      x: round(box.x),
+      y: round(box.y),
+      w: round(box.w),
+      h: round(box.h),
+      way: {
+        x: round(box.x + box.w / 2),
+        y: round(feet),
+        k: Math.round(depth(feet) * 100) / 100,
+      },
+    };
+  }
+  const [vx, vy, vw, vh] = input.piece.viewBox;
+  let u: number;
+  let feet: number;
+  let middle: number;
+  if (painted) {
+    // As large as the painter drew it, where it was drawn.
+    u = painted.h / Math.max(1, -vy) || input.unit;
+    feet = painted.y + painted.h;
+    middle = painted.x + painted.w / 2;
+  } else {
+    const k = input.back ? BACK_DEPTH : 1;
+    u = input.unit * k;
+    feet = input.horizon + k * (input.floor - input.horizon);
+    const w = vw * u;
+    // Something wide keeps its way through on the stage, and the rest of
+    // it runs off the side it stands on.
+    middle = Math.min(
+      W - margin - w * 0.25,
+      Math.max(margin + w * 0.25, (shares[input.spot] ?? 0.5) * W),
+    );
+  }
+  const opening = input.piece.opening;
+  const wayX = opening ? (opening[0] + opening[2]) / 2 : 0;
+  const wayY = opening ? Math.min(0, opening[3]) : 0;
+  return {
+    x: round(middle + vx * u),
+    y: round(feet + vy * u),
+    w: round(vw * u),
+    h: round(vh * u),
+    way: {
+      x: round(middle + wayX * u),
+      y: round(feet + wayY * u),
+      k: Math.round(Math.min(1, u / input.unit) * 100) / 100,
+    },
+  };
+}
+
 /** Whether two rectangles overlap by more than a hair. */
 export function overlaps(a: Rect, b: Rect, slack = 0.5): boolean {
   return (

@@ -103,6 +103,37 @@ describe("a film's scene, settled", () => {
     ).toBe(6000);
   });
 
+  it('waits for someone to be down, sitting or lying, not for as long as they stay so', () => {
+    const sat = (move: 'sit' | 'lie' | 'laugh') =>
+      settledOf(
+        talk({
+          steps: [talk().steps[0]],
+          durationMs: 6000,
+          acting: {
+            maya: { walks: true, moves: [[5800, move, 4000]] },
+            tobi: { walks: true },
+          },
+        }),
+      );
+    expect(sat('sit')).toBe(5800 + 500);
+    expect(sat('lie')).toBe(5800 + 500);
+    expect(sat('laugh')).toBe(9800);
+  });
+
+  it('waits for a thing handled at the end to be done with: the drink after the lips', () => {
+    const cup = {
+      id: 'cup',
+      svg: '',
+      viewBox: [0, 0, 1, 1] as [number, number, number, number],
+      grip: [0, 0] as [number, number],
+      mouth: [0, 0] as [number, number],
+      near: 'maya',
+      does: [[8000, 'maya', 'drink']] as [number, string, 'drink'][],
+    };
+    // Its moment halfway through a drink of 1.8 s: done at 8.9 s.
+    expect(settledOf(talk({ props: [cup] }))).toBe(8900);
+  });
+
   it('counts one who leaves without walking by how long they take to go', () => {
     const still = talk({
       acting: {},

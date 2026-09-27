@@ -127,5 +127,54 @@ describe('where a set’s ground is', () => {
     expect(groundOf({ ...good, top: [2] })).toBeNull();
     expect(groundOf({ ...good, haze: 'blue' })).toBeNull();
     expect(groundOf(null)).toBeNull();
+    // What it measured besides, kept when it can be read; else left off.
+    const cover = good.top.map((): [number, number] => [0.6, 0.7]);
+    const more = {
+      ...good,
+      behind: good.top,
+      cover,
+      boxes: {
+        'f-well': [0.1, 0.5, 0.2, 0.7] as [number, number, number, number],
+      },
+    };
+    expect(groundOf(more)).toEqual(more);
+    expect(groundOf({ ...more, cover: [[3, 4]], boxes: { x: [9] } })).toEqual(
+      good,
+    );
+  });
+
+  it('reads the ground behind the stalls the painter drew apart, and each stall’s counter', async () => {
+    const svg = set(
+      `<g id="ground"><rect y="600" width="1600" height="300" fill="${SAND}"/></g>` +
+        // A stall: posts up from its counter to its awning, all one group.
+        `<g id="props"><rect x="500" y="440" width="300" height="30" fill="#e0463a" ${INK}/>` +
+        `<rect x="505" y="470" width="12" height="130" fill="#7a5238"/>` +
+        `<rect x="783" y="470" width="12" height="130" fill="#7a5238"/>` +
+        `<rect x="500" y="595" width="300" height="67" fill="#c79a6b" ${INK}/></g>` +
+        // A well the painter drew as the feature's own group.
+        `<g id="f-well"><rect x="1200" y="520" width="100" height="90" fill="#c9cdd3" ${INK}/></g>`,
+    );
+    const ground = (await measureGround({
+      svg,
+      parts: { ground: 'ground', props: 'props' },
+    }))!;
+    // In front of the stall, its foot; with it gone, the ground runs on.
+    expect(at(ground, 650)).toBeGreaterThan(655);
+    const behind = (x: number) =>
+      ground.behind![Math.floor((x / 1600) * GROUND_COLS)] * 900;
+    expect(Math.abs(behind(650) - 600)).toBeLessThan(8);
+    // Its counter, where it stands; its post, all the way up to the awning.
+    const cover = (x: number) =>
+      ground.cover![Math.floor((x / 1600) * GROUND_COLS)];
+    expect(cover(650)![0] * 900).toBeCloseTo(595, -1);
+    expect(cover(650)![1] * 900).toBeCloseTo(662, -1);
+    expect(cover(511)![0] * 900).toBeLessThan(480);
+    expect(cover(1000)).toBeNull();
+    // The well's box, as shares of the frame.
+    // The well's box, as shares of the frame, to a column or so.
+    const box = ground.boxes!['f-well'];
+    [1200, 520, 1300, 610].forEach((want, i) =>
+      expect(Math.abs(box[i] * (i % 2 ? 900 : 1600) - want)).toBeLessThan(10),
+    );
   });
 });

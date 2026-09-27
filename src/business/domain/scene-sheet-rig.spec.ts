@@ -14,6 +14,7 @@ import {
 import {
   RIG_VERSION,
   STILL_AT_S,
+  SWINGS,
   holdsTogether,
   restDelay,
   rigSheet,
@@ -205,6 +206,130 @@ describe('Pip, as the artist drew him: a tail that swung off his body', () => {
     expect(svg).toMatch(/class="rig-ear rig-ear-r" style="transform-origin:/);
   });
 
+  it('wags wider on cue, about the same joint, and stays joined', async () => {
+    const { svg } = rigged.sheet.drawing;
+    // How far the stage may wag it (--tail, -1 to 1), proved; its own wag
+    // let go while it does.
+    const most = Number(
+      /\.rig-tail\{transform-box:view-box;rotate:calc\(var\(--tail,0\)\*([\d.]+)deg\)\}/.exec(
+        svg,
+      )![1],
+    );
+    expect(most).toBe(SWINGS.wagAct);
+    expect(most).toBeGreaterThan(SWINGS.wag);
+    expect(svg).toContain('.wagging .rig-tail{animation:none;transform:none}');
+    const about = rigged.sheet.rig!.joints.tail;
+    for (const degrees of [-most, most]) {
+      const relation = await tailOn(svg, PIP_BOX, { degrees, about });
+      expect(relation.gap).toBe(0);
+      expect(relation.seamCells).toBeGreaterThan(0);
+    }
+    // And as the rig proved it: holdsTogether keeps it whole at both ends.
+    const root = parse(svg);
+    stillSheet(root);
+    const tail = byId(root, 'tail')!;
+    const outer = (tail.parent as Element).attribs.class?.includes('rig-mend')
+      ? (tail.parent as Element)
+      : tail;
+    const faces = EXPRESSIONS.map((id) => byId(root, id)).filter(
+      (node): node is Element => Boolean(node),
+    );
+    const head = byId(root, 'head')!;
+    const { amplitudes } = await holdsTogether(root, PIP_BOX, [
+      {
+        part: { keep: [tail], drop: faces },
+        ref: { keep: null, drop: [tail, head, ...faces] },
+        moved: (degrees) =>
+          new Map([[outer, `rotate(${degrees} ${about[0]} ${about[1]})`]]),
+        amplitude: most,
+        both: true,
+      },
+    ]);
+    expect(amplitudes).toEqual([most]);
+  }, 60_000);
+
+  it('dips his head about where it joins him, his faces with it, and it stays joined', async () => {
+    const { svg } = rigged.sheet.drawing;
+    const dip = rigged.sheet.rig!.dip!;
+    expect(dip).toBe(SWINGS.dip);
+    expect(svg).toContain(
+      `.rig-head{transform-box:view-box;rotate:calc(var(--head,0)*${dip}deg)}`,
+    );
+    const [x, y] = rigged.sheet.rig!.joints.head;
+    expect(svg).toContain(
+      `class="rig-head" style="transform-origin:${x}px ${y}px"`,
+    );
+    // Every face turns with the head.
+    const root = parse(svg);
+    for (const face of ['neutral', 'happy', 'sad']) {
+      let turns = false;
+      for (
+        let at = byId(root, face)!.parent as Element | null;
+        at;
+        at = at.parent as Element | null
+      )
+        if (/\brig-head\b/.test(at.attribs?.class ?? '')) turns = true;
+      expect(turns).toBe(true);
+    }
+    // Joined at either end of the dip.
+    const still = parse(svg);
+    stillSheet(still);
+    const head = byId(still, 'head')!;
+    const faces = EXPRESSIONS.map((id) => byId(still, id)).filter(
+      (node): node is Element => Boolean(node),
+    );
+    const tail = byId(still, 'tail')!;
+    for (const degrees of [-dip, dip]) {
+      const part = variant(
+        still,
+        [head],
+        faces,
+        new Map([[head, `rotate(${degrees} ${x} ${y})`]]),
+      );
+      const trunk = variant(still, null, [head, tail, ...faces]);
+      const { masks } = await renderSvg(part, undefined, {
+        masks: { svgs: [part, trunk], cols: 400 },
+      });
+      const relation = relate(masks![0], masks![1], PIP_BOX);
+      expect(relation.gap).toBe(0);
+    }
+  }, 60_000);
+
+  it('sinks on his legs, the legs folding from the ground as far as he comes down', () => {
+    const { svg } = rigged.sheet.drawing;
+    const fold = Number(
+      /\.rig-legs\{transform-box:view-box;scale:1 calc\(1 - var\(--low,0\)\*([\d.]+)\)\}/.exec(
+        svg,
+      )![1],
+    );
+    const sinks = Number(
+      /\.rig-breathe\{translate:calc\(var\(--low,0\)\*0px\) calc\(var\(--low,0\)\*([\d.]+)px\)\}/.exec(
+        svg,
+      )![1],
+    );
+    expect(fold).toBeGreaterThan(0.3);
+    expect(fold).toBeLessThanOrEqual(0.55);
+    // Their tops come down exactly as far as the body: the legs' height
+    // folded by `fold` is how far it sinks.
+    const legsTall = sinks / fold;
+    expect(legsTall).toBeGreaterThan(60);
+    expect(legsTall).toBeLessThan(PIP_BOX[3] / 2);
+    // And they fold about their feet: the foot of their ink, half their
+    // height below their middle.
+    const [, originY] =
+      /class="rig-legs" style="transform-origin:([-\d.]+)px ([-\d.]+)px"/
+        .exec(svg)!
+        .slice(1)
+        .map(Number);
+    expect(
+      Math.abs(originY - (pip.anchors.legs![1] + legsTall / 2)),
+    ).toBeLessThan(8);
+  });
+
+  it('faces the viewer, as he was drawn standing', () => {
+    expect(rigged.sheet.rig!.faces).toBeUndefined();
+  });
+
   it('rigs a rigged sheet again to the same drawing', async () => {
     const again = await rigSheet(rigged.sheet);
     expect(again.sheet.rig?.mended).toEqual([]);
@@ -319,6 +444,36 @@ describe('an animal the artist drew, rigged by code', () => {
     );
     expect(amplitudes).toEqual([12, 6, 0]);
   }, 30_000);
+});
+
+describe('which way an animal on all fours faces', () => {
+  /** A dog seen from the side, its head at one end: at the right, or mirrored. */
+  const dog = (mirror: boolean) => {
+    const at = (x: number) => (mirror ? 800 - x : x);
+    return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 800">
+      <g id="tail"><path d="M${at(240)} 490 Q${at(170)} 430 ${at(140)} 460" ${stroke}/></g>
+      <g id="legs">${[270, 330, 460, 520].map((x) => `<rect x="${Math.min(at(x), at(x + 30))}" y="560" width="30" height="220" fill="#8B5E3C"/>`).join('')}</g>
+      <g id="body"><ellipse cx="${at(400)}" cy="520" rx="170" ry="80" fill="#8B5E3C"/></g>
+      <g id="head"><circle cx="${at(590)}" cy="420" r="80" fill="#A0714F"/></g>
+      <g id="neutral"><circle cx="${at(570)}" cy="410" r="10"/><circle cx="${at(620)}" cy="410" r="10"/></g>
+    </svg>`;
+  };
+
+  it('faces the way its head is, and turns it about its neck', async () => {
+    const right = await rigSheet(
+      sheetOf(dog(false), [0, 0, 800, 800], ANIMAL_PARTS),
+    );
+    const left = await rigSheet(
+      sheetOf(dog(true), [0, 0, 800, 800], ANIMAL_PARTS),
+    );
+    expect(right.sheet.rig!.faces).toBe(1);
+    expect(left.sheet.rig!.faces).toBe(-1);
+    // Its neck is between its head and its body, on the side it faces.
+    expect(right.sheet.rig!.joints.head[0]).toBeGreaterThan(480);
+    expect(left.sheet.rig!.joints.head[0]).toBeLessThan(320);
+    expect(right.sheet.rig!.dip).toBeGreaterThan(0);
+    expect(right.sheet.drawing.svg).toContain('class="rig-head"');
+  }, 60_000);
 });
 
 describe('an animal whose parts are not all where they should be', () => {

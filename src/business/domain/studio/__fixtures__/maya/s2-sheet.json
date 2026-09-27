@@ -1,0 +1,271 @@
+{
+ "kind": "story",
+ "title": "Market Clues",
+ "set": "market",
+ "time": "day",
+ "weather": "clear",
+ "crowd": "many",
+ "mood": "curious",
+ "music": "curious",
+ "transition": "cut",
+ "onStage": [
+  {
+   "who": "maya",
+   "spot": "centre-left",
+   "pose": "standing",
+   "face": "neutral",
+   "holding": null
+  },
+  {
+   "who": "tobi",
+   "spot": "centre-right",
+   "pose": "standing",
+   "face": "neutral",
+   "holding": "magnifier"
+  }
+ ],
+ "props": [
+  {
+   "prop": "fruit",
+   "near": null
+  }
+ ],
+ "beats": [
+  {
+   "kind": "narration",
+   "who": null,
+   "to": null,
+   "say": "Market Road is loud with colours, carts and people.",
+   "feeling": null,
+   "sign": null,
+   "do": null,
+   "prop": null,
+   "spot": null,
+   "from": null,
+   "pace": null,
+   "seconds": null
+  },
+  {
+   "kind": "line",
+   "who": "maya",
+   "to": null,
+   "say": "Pip! Pip! Where are you?",
+   "feeling": "afraid",
+   "sign": null,
+   "do": null,
+   "prop": null,
+   "spot": null,
+   "from": "here",
+   "pace": "shout",
+   "seconds": null
+  },
+  {
+   "kind": "line",
+   "who": "tobi",
+   "to": "maya",
+   "say": "Wait, Maya. I can find clues with my magnifier.",
+   "feeling": null,
+   "sign": null,
+   "do": null,
+   "prop": null,
+   "spot": null,
+   "from": "here",
+   "pace": "calm",
+   "seconds": null
+  },
+  {
+   "kind": "action",
+   "who": "tobi",
+   "to": null,
+   "say": "Tobi leans in close to a tomato crate.",
+   "feeling": null,
+   "sign": null,
+   "do": "lean-in",
+   "prop": null,
+   "spot": null,
+   "from": null,
+   "pace": null,
+   "seconds": 1.2
+  },
+  {
+   "kind": "reaction",
+   "who": "tobi",
+   "to": null,
+   "say": "",
+   "feeling": "surprised",
+   "sign": null,
+   "do": null,
+   "prop": null,
+   "spot": null,
+   "from": null,
+   "pace": null,
+   "seconds": null
+  },
+  {
+   "kind": "line",
+   "who": "tobi",
+   "to": "maya",
+   "say": "A tuft of white fur! Just like Pip!",
+   "feeling": "surprised",
+   "sign": null,
+   "do": null,
+   "prop": null,
+   "spot": null,
+   "from": "here",
+   "pace": "quick",
+   "seconds": null
+  },
+  {
+   "kind": "line",
+   "who": "maya",
+   "to": "tobi",
+   "say": "And a chewed red pepper!",
+   "feeling": "surprised",
+   "sign": null,
+   "do": null,
+   "prop": null,
+   "spot": null,
+   "from": "here",
+   "pace": "quick",
+   "seconds": null
+  },
+  {
+   "kind": "business",
+   "who": "tobi",
+   "to": null,
+   "say": "Tobi picks up the chewed red pepper.",
+   "feeling": null,
+   "sign": null,
+   "do": "take",
+   "prop": "fruit",
+   "spot": null,
+   "from": null,
+   "pace": null,
+   "seconds": null
+  },
+  {
+   "kind": "line",
+   "who": "tobi",
+   "to": "maya",
+   "say": "Pip was here! He went that way!",
+   "feeling": "happy",
+   "sign": null,
+   "do": null,
+   "prop": null,
+   "spot": null,
+   "from": "here",
+   "pace": "quick",
+   "seconds": null
+  },
+  {
+   "kind": "narration",
+   "who": null,
+   "to": null,
+   "say": "A tiny bark sounds from the waiting danfo.",
+   "feeling": null,
+   "sign": null,
+   "do": null,
+   "prop": null,
+   "spot": null,
+   "from": null,
+   "pace": null,
+   "seconds": null
+  },
+  {
+   "kind": "reaction",
+   "who": "maya",
+   "to": null,
+   "say": "",
+   "feeling": "surprised",
+   "sign": null,
+   "do": null,
+   "prop": null,
+   "spot": null,
+   "from": null,
+   "pace": null,
+   "seconds": null
+  },
+  {
+   "kind": "line",
+   "who": "maya",
+   "to": "tobi",
+   "say": "That's Pip! The danfo!",
+   "feeling": "surprised",
+   "sign": null,
+   "do": null,
+   "prop": null,
+   "spot": null,
+   "from": "here",
+   "pace": "shout",
+   "seconds": null
+  },
+  {
+   "kind": "action",
+   "who": "maya",
+   "to": null,
+   "say": "Maya races off toward the danfo.",
+   "feeling": null,
+   "sign": null,
+   "do": "leave",
+   "prop": null,
+   "spot": null,
+   "from": null,
+   "pace": null,
+   "seconds": 1.2
+  },
+  {
+   "kind": "line",
+   "who": "tobi",
+   "to": null,
+   "say": "Hey! Wait for me!",
+   "feeling": "surprised",
+   "sign": null,
+   "do": null,
+   "prop": null,
+   "spot": null,
+   "from": "here",
+   "pace": "shout",
+   "seconds": null
+  },
+  {
+   "kind": "action",
+   "who": "tobi",
+   "to": null,
+   "say": "Tobi chases after her.",
+   "feeling": null,
+   "sign": null,
+   "do": "leave",
+   "prop": null,
+   "spot": null,
+   "from": null,
+   "pace": null,
+   "seconds": 1.2
+  }
+ ],
+ "camera": [
+  {
+   "beat": 3,
+   "shot": "close",
+   "on": "tobi",
+   "with": null
+  },
+  {
+   "beat": 7,
+   "shot": "close",
+   "on": "tobi",
+   "with": null
+  },
+  {
+   "beat": 10,
+   "shot": "close",
+   "on": "maya",
+   "with": null
+  },
+  {
+   "beat": 12,
+   "shot": "wide",
+   "on": null,
+   "with": null
+  }
+ ]
+}

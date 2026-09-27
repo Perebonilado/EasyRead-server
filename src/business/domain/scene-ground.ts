@@ -32,6 +32,20 @@ export interface SetGround {
   haze: string;
   /** How it was found: the painter's own group, its colours, or the convention when neither could be read. */
   source: 'group' | 'colour' | 'convention';
+  /**
+   * With what stands on the ground taken away (the painter's "props":
+   * stalls, carts, counters), the ground's far edge in each column: where
+   * someone may stand behind them. Absent on a set painted without.
+   */
+  behind?: number[];
+  /**
+   * In each column, the lowest run of what stands on the ground (a stall's
+   * counter, and its posts where they come down to it): its top and its
+   * bottom, as shares of the height; null where nothing stands.
+   */
+  cover?: ([number, number] | null)[];
+  /** Each of the painter's groups for a feature of the set ("f-gate"): its ink's box as shares of the frame, x0, y0, x1, y1. */
+  boxes?: Record<string, [number, number, number, number]>;
 }
 
 /** How many columns a set is read in. */
@@ -54,21 +68,48 @@ export function conventionGround(haze = PLAIN_HAZE): SetGround {
   };
 }
 
-/** A kept ground read back: null when it is not one. */
+const share = (v: unknown) => typeof v === 'number' && v >= 0 && v <= 1;
+
+/** A kept ground read back: null when it is not one. What it has besides that cannot be read is left off. */
 export function groundOf(raw: unknown): SetGround | null {
   const one = raw as Partial<SetGround> | null;
   if (
     !one ||
     !Array.isArray(one.top) ||
     !one.top.length ||
-    !one.top.every((v) => typeof v === 'number' && v >= 0 && v <= 1) ||
+    !one.top.every(share) ||
     typeof one.horizon !== 'number' ||
     typeof one.haze !== 'string' ||
     !/^#[0-9a-f]{6}$/i.test(one.haze) ||
     !['group', 'colour', 'convention'].includes(one.source ?? '')
   )
     return null;
-  return one as SetGround;
+  const { behind, cover, boxes, ...ground } = one as SetGround;
+  const covers =
+    Array.isArray(cover) &&
+    cover.length === one.top.length &&
+    cover.every(
+      (c) =>
+        c === null || (Array.isArray(c) && c.length === 2 && c.every(share)),
+    );
+  const boxed =
+    boxes && typeof boxes === 'object'
+      ? Object.fromEntries(
+          Object.entries(boxes).filter(
+            ([, b]) => Array.isArray(b) && b.length === 4 && b.every(share),
+          ),
+        )
+      : {};
+  return {
+    ...ground,
+    ...(Array.isArray(behind) &&
+    behind.length === one.top.length &&
+    behind.every(share) &&
+    covers
+      ? { behind, cover }
+      : {}),
+    ...(Object.keys(boxed).length ? { boxes: boxed } : {}),
+  };
 }
 
 /** The ground's top at a share of the set's width. */
@@ -76,6 +117,18 @@ export function topAt(ground: SetGround, share: number): number {
   const n = ground.top.length;
   const i = Math.min(n - 1, Math.max(0, Math.floor(share * n)));
   return ground.top[i];
+}
+
+/** Behind what stands on the ground, at a share of the set's width: the ground's far edge there, and the run standing on it; null where nothing stands. */
+export function behindAt(
+  ground: SetGround,
+  share: number,
+): { top: number; cover: [number, number] } | null {
+  if (!ground.behind || !ground.cover) return null;
+  const n = ground.behind.length;
+  const i = Math.min(n - 1, Math.max(0, Math.floor(share * n)));
+  const cover = ground.cover[i];
+  return cover ? { top: ground.behind[i], cover } : null;
 }
 
 const hex = (rgb: number[]) =>
@@ -339,6 +392,79 @@ function hazeOf(set: Pixels, horizon: number): string {
   );
 }
 
+/**
+ * In each column of what stands on the ground alone, its lowest run: read
+ * up from its lowest ink while it is inked, small breaks stepped over, as
+ * shares of the height; null where nothing stands. Pure.
+ */
+export function coverFrom(props: Pixels): ([number, number] | null)[] {
+  const { cols, rows, rgba } = props;
+  const inked = (x: number, y: number) => rgba[(y * cols + x) * 4 + 3] > INKED;
+  const gap = Math.max(1, Math.round(rows * STEP_OVER));
+  const out: ([number, number] | null)[] = [];
+  for (let x = 0; x < cols; x += 1) {
+    let bottom = rows - 1;
+    while (bottom >= 0 && !inked(x, bottom)) bottom -= 1;
+    if (bottom < 0) {
+      out.push(null);
+      continue;
+    }
+    let top = bottom;
+    for (;;) {
+      if (top > 0 && inked(x, top - 1)) {
+        top -= 1;
+        continue;
+      }
+      let over = -1;
+      for (let k = 2; k <= gap && top - k >= 0; k += 1)
+        if (inked(x, top - k)) {
+          over = top - k;
+          break;
+        }
+      if (over < 0) break;
+      top = over;
+    }
+    out.push([round3(top / rows), round3((bottom + 1) / rows)]);
+  }
+  return resampledRuns(out, GROUND_COLS);
+}
+
+/** Runs read at another number of columns: the first of those each covers. */
+function resampledRuns<T>(runs: T[], n: number): T[] {
+  if (runs.length === n) return runs;
+  return Array.from(
+    { length: n },
+    (_, i) =>
+      runs[Math.min(runs.length - 1, Math.floor((i * runs.length) / n))],
+  );
+}
+
+/** A group's ink, alone, as a box: shares of the frame, x0, y0, x1, y1; null for none. */
+export function boxFrom(
+  image: Pixels,
+): [number, number, number, number] | null {
+  const { cols, rows, rgba } = image;
+  let x0 = cols;
+  let y0 = rows;
+  let x1 = -1;
+  let y1 = -1;
+  for (let y = 0; y < rows; y += 1)
+    for (let x = 0; x < cols; x += 1) {
+      if (rgba[(y * cols + x) * 4 + 3] <= INKED) continue;
+      x0 = Math.min(x0, x);
+      y0 = Math.min(y0, y);
+      x1 = Math.max(x1, x);
+      y1 = Math.max(y1, y);
+    }
+  if (x1 < 0) return null;
+  return [
+    round3(x0 / cols),
+    round3(y0 / rows),
+    round3((x1 + 1) / cols),
+    round3((y1 + 1) / rows),
+  ];
+}
+
 /** A set's drawing parsed: its root, or null. */
 function rootOf(svg: string): Element | null {
   const doc = parseDocument(svg, { xmlMode: true, recognizeCDATA: true });
@@ -359,12 +485,18 @@ const find = (root: Element, id: string | undefined) =>
  */
 export function groundVersions(
   svg: string,
-  ids: { ground?: string; front?: string },
+  ids: { ground?: string; front?: string; props?: string; features?: string[] },
 ): {
   set: string;
   group: string | null;
   after: string | null;
   front: string | null;
+  /** With what stands on the ground hidden, whole and after the ground; and it alone. */
+  bare: string | null;
+  bareAfter: string | null;
+  props: string | null;
+  /** Each feature's group alone, by its id. */
+  features: Record<string, string>;
 } | null {
   const version = (show: (root: Element) => boolean): string | null => {
     const root = rootOf(svg);
@@ -375,6 +507,12 @@ export function groundVersions(
   const hideFront = (root: Element) => {
     const front = find(root, ids.front);
     if (front) front.attribs.display = 'none';
+  };
+  const hideProps = (root: Element) => {
+    const props = find(root, ids.props);
+    if (!props) return false;
+    props.attribs.display = 'none';
+    return true;
   };
   const set = version((root) => {
     hideFront(root);
@@ -393,11 +531,11 @@ export function groundVersions(
     only(root, [ground]);
     return true;
   });
-  const after = version((root) => {
+  /** What follows the ground, at its level and at every level above it. */
+  const afterGround = (root: Element) => {
     const ground = find(root, ids.ground);
     if (!ground) return false;
     hideFront(root);
-    // What follows the ground, at its level and at every level above it.
     const later: Element[] = [];
     let node: Element | null = ground;
     while (node && node !== root) {
@@ -409,14 +547,37 @@ export function groundVersions(
     }
     only(root, later);
     return true;
-  });
+  };
+  const after = version(afterGround);
   const front = version((root) => {
     const found = find(root, ids.front);
     if (!found) return false;
     only(root, [found]);
     return true;
   });
-  return { set, group, after, front };
+  const bare = version((root) => {
+    hideFront(root);
+    return hideProps(root);
+  });
+  const bareAfter = version((root) => hideProps(root) && afterGround(root));
+  const props = version((root) => {
+    const found = find(root, ids.props);
+    if (!found) return false;
+    only(root, [found]);
+    return true;
+  });
+  const features: Record<string, string> = {};
+  for (const id of ids.features ?? []) {
+    const alone = version((root) => {
+      const found = find(root, id);
+      if (!found) return false;
+      hideFront(root);
+      only(root, [found]);
+      return true;
+    });
+    if (alone) features[id] = alone;
+  }
+  return { set, group, after, front, bare, bareAfter, props, features };
 }
 
 /**
@@ -432,18 +593,32 @@ export async function measureGround(
   },
   render: typeof renderSvg = renderSvg,
 ): Promise<SetGround | null> {
+  const parts = drawing.parts ?? {};
   const ids = {
-    ground: drawing.parts?.ground ?? 'ground',
-    front: drawing.parts?.front,
+    ground: parts.ground ?? 'ground',
+    front: parts.front,
+    props: parts.props ?? 'props',
+    // The painter's groups for the set's features: "f-gate".
+    features: [
+      ...new Set([
+        ...Object.values(parts).filter((id) => id.startsWith('f-')),
+        ...[...drawing.svg.matchAll(/\bid="(f-[\w-]+)"/g)].map((m) => m[1]),
+      ]),
+    ],
   };
   const versions = groundVersions(drawing.svg, ids);
   if (!versions) return conventionGround();
-  const svgs = [
+  const asked = [
     versions.set,
     versions.group,
     versions.after,
     versions.front,
-  ].filter((one): one is string => Boolean(one));
+    versions.bare,
+    versions.bareAfter,
+    versions.props,
+    ...Object.values(versions.features),
+  ];
+  const svgs = asked.filter((one): one is string => Boolean(one));
   let rendered: Pixels[] | undefined;
   try {
     ({ ground: rendered } = await render(versions.set, undefined, {
@@ -455,10 +630,33 @@ export async function measureGround(
   if (!rendered?.length) return null;
   const ground = rendered;
   let k = 1;
-  const next = (asked: string | null) => (asked ? ground[k++] : null);
+  const next = (one: string | null) => (one ? ground[k++] : null);
   const [set] = ground;
   const group = next(versions.group);
   const after = next(versions.after);
   const front = next(versions.front);
-  return groundFrom({ set, group, after, front });
+  const bare = next(versions.bare);
+  const bareAfter = next(versions.bareAfter);
+  const props = next(versions.props);
+  const boxes: NonNullable<SetGround['boxes']> = {};
+  for (const id of Object.keys(versions.features)) {
+    const box = ground[k++] ? boxFrom(ground[k - 1]) : null;
+    if (box) boxes[id] = box;
+  }
+  const read = groundFrom({ set, group, after, front });
+  // Where people may stand behind the stalls: the ground with them gone.
+  const behind =
+    bare && props && read.source !== 'convention'
+      ? groundFrom({ set: bare, group, after: bareAfter, front })
+      : null;
+  return {
+    ...read,
+    ...(behind && behind.source !== 'convention' && props
+      ? {
+          behind: behind.top.map((t, i) => Math.min(t, read.top[i])),
+          cover: coverFrom(props),
+        }
+      : {}),
+    ...(Object.keys(boxes).length ? { boxes } : {}),
+  };
 }

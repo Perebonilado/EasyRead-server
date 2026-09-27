@@ -171,6 +171,87 @@ export function pinSpokenWords(
   return out;
 }
 
+/** How far inside a silence a word must start to be taken out of it. */
+const SILENCE_EDGE_MS = 40;
+
+/** How long a line's last word takes at least, put back before the quiet after it. */
+const LAST_WORD_MS = 150;
+
+/**
+ * Words measured inside a silence the voice made, put where the voice
+ * says them, so no bubble or caption opens before the voice does and no
+ * line runs on into the quiet after it, where what happens then is seen.
+ * A line's last words measured on into the quiet after it (an estimate
+ * spread over it, an aligner that ran long) are said before it, as the
+ * line ends, spaced as they were; a line's first words measured in the
+ * quiet before it (the aligner leaves a word it could not find at no
+ * length there) where the voice speaks again. `lineStarts` are where each
+ * line begins in the spoken text; without them, every word goes on to
+ * where the voice speaks again. Words stay in order.
+ */
+export function outOfSilence(
+  words: SpokenWords,
+  silences: readonly [number, number][],
+  lineStarts: readonly number[] = [],
+): SpokenWords {
+  const out = words.map((w) => [...w]);
+  const inside = (t: number) =>
+    silences.find(
+      ([a, b]) => t > a + SILENCE_EDGE_MS && t < b - SILENCE_EDGE_MS,
+    );
+  const lineOf = (at: number) => {
+    let k = -1;
+    lineStarts.forEach((start, i) => {
+      if (at >= start) k = i;
+    });
+    return k;
+  };
+  for (let i = 1; lineStarts.length && i < out.length;) {
+    const quiet = inside(out[i][2]);
+    const before = out[i - 1];
+    const line = lineOf(out[i][0]);
+    if (
+      !quiet ||
+      lineOf(before[0]) !== line ||
+      before[2] >= quiet[0] + SILENCE_EDGE_MS
+    ) {
+      i += 1;
+      continue;
+    }
+    // Every word of the line from here in the same quiet: spread again
+    // between the last one said before it and where it begins.
+    let j = i;
+    while (
+      j < out.length &&
+      lineOf(out[j][0]) === line &&
+      inside(out[j][2]) === quiet
+    )
+      j += 1;
+    const n = j - i;
+    const end = quiet[0];
+    let from = Math.min(before[3], end);
+    if (end - from < LAST_WORD_MS * n)
+      from = Math.max(before[2] + 1, end - LAST_WORD_MS * n);
+    before[3] = Math.min(before[3], from);
+    for (let k = 0; k < n; k += 1) {
+      out[i + k][2] = Math.round(from + ((end - from) * k) / n);
+      out[i + k][3] = Math.round(from + ((end - from) * (k + 1)) / n);
+    }
+    i = j;
+  }
+  for (const w of out) {
+    const quiet = inside(w[2]);
+    if (!quiet) continue;
+    w[2] = quiet[1];
+    w[3] = Math.max(w[3], w[2]);
+  }
+  for (let i = 1; i < out.length; i += 1) {
+    if (out[i][2] < out[i - 1][2]) out[i][2] = out[i - 1][2];
+    if (out[i][3] < out[i][2]) out[i][3] = out[i][2];
+  }
+  return out;
+}
+
 /** A word the voice spoke, with when, as the voice reported it. */
 export interface VoiceWord {
   text: string;

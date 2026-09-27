@@ -15,29 +15,40 @@
  * acted ("wanted to go home", "did not laugh").
  */
 import { namedIn, quotedSpans, type Speaker } from './scene-dialogue';
-import { PROP_KIND, PROP_WORDS, type StageProp } from './scene-props';
+import {
+  PAGE_PROPS,
+  PROP_KIND,
+  PROP_WORDS,
+  type StageProp,
+} from './scene-props';
+import {
+  DOINGS,
+  PROP_ACTIONS,
+  THING_WORDS,
+  doingOf,
+  featureIdOf,
+  featureKindOf,
+  featuresNamedIn,
+  type DoingId,
+  type NarratedMove,
+  type PropAction,
+  type Side,
+  type ThingId,
+  type TravelPace,
+} from './scene-doings';
 
 /** Someone who may act on a page: their id there, their names, and whether "she" or "he" may mean them. */
 export interface Actor extends Speaker {
   gender?: 'f' | 'm' | null;
 }
 
-/** What the narration may say someone does, acted by the stage. */
-export const NARRATED_MOVES = [
-  'hug',
-  'wave',
-  'nod',
-  'shake',
-  'laugh',
-  'hop',
-  'clap',
-  'sob',
-  'shrug',
-  'point',
-  'reach',
-  'look',
-] as const;
-export type NarratedMove = (typeof NARRATED_MOVES)[number];
+/** What the narration may say someone does, and what people do with things: parts of the one list of doings. */
+export {
+  NARRATED_MOVES,
+  PROP_ACTIONS,
+  type NarratedMove,
+  type PropAction,
+} from './scene-doings';
 
 /** Someone doing something, where the narration says it. */
 export interface NarratedAct {
@@ -49,19 +60,6 @@ export interface NarratedAct {
   /** Toward whom or what: an id on the page, "@up" or "@down" (the sky, the ground), or no one. */
   toward: string | null;
 }
-
-/** What people do with the things on the stage, where the narration says it. */
-export const PROP_ACTIONS = [
-  'take',
-  'raise',
-  'break',
-  'give',
-  'eat',
-  'drink',
-  'dip',
-  'put',
-] as const;
-export type PropAction = (typeof PROP_ACTIONS)[number];
 
 /**
  * Someone handling a thing, where the narration says so: Jesus takes the
@@ -259,6 +257,10 @@ const VERBS: {
   { pattern: LEAVING, does: 'leave', object: 'none' },
 ];
 
+/** Along a way, after "down" or "up": down the street is toward its end, not the ground. */
+const ALONG =
+  /^\s*(?:the|this|that)\s+(?:street|road|path|lane|hill|track|way|corridor|river|valley|line|hall|passage|alley|garden|field|beach|stairs)\b/iu;
+
 /** Words before a verb that say it is not happening: wanted, would, did not. */
 const NOT_DONE =
   /\b(?:to|would|will|could|should|might|must|can|cannot|can't|couldn't|wouldn't|didn't|did not|don't|do not|doesn't|does not|never|not|let's|let us|about to)\s+(?:\p{L}+ly\s+)?$/iu;
@@ -340,11 +342,8 @@ export function directionsIn(
   /** The first prop a text names, and where. */
   const propIn = (text: string): { prop: StageProp; at: number } | null => {
     let best: { prop: StageProp; at: number } | null = null;
-    for (const [prop, words] of Object.entries(PROP_WORDS) as [
-      StageProp,
-      RegExp,
-    ][]) {
-      const m = words.exec(text);
+    for (const prop of PAGE_PROPS) {
+      const m = PROP_WORDS[prop].exec(text);
       if (m && (!best || m.index < best.at)) best = { prop, at: m.index };
     }
     return best;
@@ -534,7 +533,12 @@ export function directionsIn(
         const word = object?.[1] ?? object?.[2];
         if (word) toward = pronounFor(word, who);
       }
-      const looking = /\b(up|down)\b/iu.exec(outside.slice(verb.at, verb.end));
+      // Up at the sky, down at the ground; but down the street is along
+      // it, toward somewhere, never at anyone's feet.
+      const along = ALONG.test(after);
+      const looking = along
+        ? null
+        : /\b(up|down)\b/iu.exec(outside.slice(verb.at, verb.end));
       if (does === 'look') {
         if (!toward && looking)
           toward = looking[1].toLowerCase() === 'up' ? '@up' : '@down';
@@ -548,14 +552,303 @@ export function directionsIn(
     }
     mentionUpTo(Infinity);
     // What the whole sentence names last is what the next "it" is.
-    const named = [...Object.entries(PROP_WORDS)]
-      .map(([prop, words]) => ({
-        prop: prop as StageProp,
-        at: outside.search(new RegExp(words.source, 'giu')),
-      }))
+    const named = PAGE_PROPS.map((prop) => ({
+      prop,
+      at: outside.search(new RegExp(PROP_WORDS[prop].source, 'giu')),
+    }))
       .filter((f) => f.at >= 0)
       .sort((a, b) => b.at - a.at)[0];
     if (named) lastProp = named.prop;
   });
   return { acts, passages, business };
 }
+
+// ── One beat's words, read against the one list of doings ────────────────
+
+/** One thing a beat's words say someone does: the Studio's sheet has the beat, the words say what it is. */
+export interface ReadDoing {
+  do: DoingId;
+  /** Where its verb starts, and ends, in the words. */
+  at: number;
+  end: number;
+  /** Who does it, when the words name someone else just before it ("…and Pip catches it"); null for the beat's own. */
+  who: string | null;
+  /** Toward whom or what: a character's id, a feature's (the word the words use), a thing's, or a side ("@left", "@up"). */
+  target: string | null;
+  /** The thing it is done with. */
+  thing: ThingId | null;
+  /** The feature gone out or in by: "out the gate", "under the fence". */
+  via: string | null;
+  pace: TravelPace | null;
+  /** Toward somewhere off the stage the words do not name: down the street, that way, after them. */
+  away: boolean;
+  /** Its own words: from whoever does it to where the next begins. */
+  words: string;
+}
+
+/** Words before a verb that make it a word for a thing, not something done: "a dropped piece", "the open door". */
+const DETERMINER =
+  /\b(?:a|an|the|his|her|their|its|my|your|our|this|that|some)\s+$/iu;
+/** Words after a travel verb that make a feature the way out or in, not where they go. */
+const BY_WAY =
+  /\b(?:out(?: of| through| under)?|through|under|beneath|between|past|via|in through|into|onto|aboard|over)\s+(?:the |a |an )?$/iu;
+/** Toward somewhere off the stage: along the street, that way, off after them. */
+const AWAY =
+  /\b(?:(?:down|up|along) (?:the|this|that) (?:street|road|path|lane|hill|track|way)|that way|into the distance|after (?:them|him|her|it)|away|off)\b/iu;
+
+/** The first of any of these patterns in a text, and where. */
+function firstOf<T extends string>(
+  text: string,
+  patterns: Record<T, RegExp>,
+): { key: T; at: number; word: string } | null {
+  let best: { key: T; at: number; word: string } | null = null;
+  for (const key of Object.keys(patterns) as T[]) {
+    const m = new RegExp(patterns[key].source, 'iu').exec(text);
+    if (m && (!best || m.index < best.at))
+      best = { key, at: m.index, word: m[0] };
+  }
+  return best;
+}
+
+/**
+ * What one beat's words say is done, in order: every doing of the one
+ * list they name, said of anyone. Whoever does each is the beat's own
+ * doer unless the words name someone else just before it; toward whom or
+ * what, with which thing and by which way is read from the words after
+ * it, up to the next. "It" is the thing last named, "him" and "her" whoever
+ * was named last who could be called so. Nothing wanted or denied is read
+ * ("tries not to laugh"), and a verb used of a thing ("a dropped piece of
+ * bread", "the open door") is not a doing.
+ */
+export function doingsIn(
+  words: string,
+  known: {
+    actors: readonly Actor[];
+    /** Whose beat it is: never their own target. */
+    who?: string | null;
+    /** The thing "it" means, from the beats before. */
+    lastThing?: ThingId | null;
+    /** Who was named before, the latest last: whom "him" and "her" mean. */
+    recent?: readonly string[];
+  },
+): ReadDoing[] {
+  const text = words;
+  const found: { id: DoingId; at: number; end: number; order: number }[] = [];
+  DOINGS.forEach((doing, order) => {
+    for (const m of text.matchAll(new RegExp(doing.words.source, 'giu')))
+      found.push({
+        id: doing.id,
+        at: m.index,
+        end: m.index + m[0].length,
+        order,
+      });
+  });
+  found.sort(
+    (a, b) => a.at - b.at || b.end - b.at - (a.end - a.at) || a.order - b.order,
+  );
+  const verbs = found
+    .filter(
+      (one, i) =>
+        !found.slice(0, i).some((o) => o.at < one.end && one.at < o.end),
+    )
+    .filter(
+      (one) =>
+        !NOT_DONE.test(text.slice(Math.max(0, one.at - 24), one.at)) &&
+        !DETERMINER.test(text.slice(Math.max(0, one.at - 8), one.at)),
+    );
+  const genderOf = new Map(known.actors.map((a) => [a.id, a.gender ?? null]));
+  const recent = [...(known.recent ?? [])];
+  let lastThing = known.lastThing ?? null;
+  // Who does each: someone named right before it, or before "who"; the
+  // beat's own doer is no one else.
+  const subjects = verbs.map((verb, i) => {
+    const from = i > 0 ? verbs[i - 1].end : 0;
+    const before = text.slice(from, verb.at);
+    const named = namedIn(before, known.actors);
+    const last = named[named.length - 1];
+    if (last && ADVERBS.test(before.slice(last.end)))
+      return { id: last.id, start: from + last.at };
+    if (/\bwho\s+(?:\p{L}+ly\s+)?$/iu.test(before)) {
+      const earlier = namedIn(text.slice(0, verb.at), known.actors);
+      return { id: earlier[earlier.length - 1]?.id ?? null, start: verb.at };
+    }
+    return { id: null, start: verb.at };
+  });
+  const out: ReadDoing[] = [];
+  verbs.forEach((verb, i) => {
+    const doing = doingOf(verb.id)!;
+    const from = i > 0 ? verbs[i - 1].end : 0;
+    const next = verbs[i + 1]?.at ?? text.length;
+    const stop = text.slice(verb.end).search(/[.!?;]/u);
+    const upTo = Math.min(next, stop >= 0 ? verb.end + stop : text.length);
+    const after = text.slice(verb.end, upTo);
+    const said = subjects[i].id;
+    const who = said && said !== known.who ? said : null;
+    const doer = who ?? known.who ?? null;
+    for (const n of namedIn(text.slice(from, verb.at), known.actors))
+      if (!recent.includes(n.id)) recent.push(n.id);
+    // Whom: someone named after it, or whose it is ("Maya's shoe"), or
+    // "him" or "her".
+    const whom =
+      namedIn(after, known.actors).find((n) => n.id !== doer) ?? null;
+    const owner = known.actors
+      .map((a) => ({
+        id: a.id,
+        at: a.names
+          .map((name) =>
+            name
+              ? after.search(new RegExp(`\\b${escaped(name)}['’]s\\b`, 'u'))
+              : -1,
+          )
+          .filter((at) => at >= 0)
+          .sort((a, b) => a - b)[0],
+      }))
+      .filter((o) => o.at !== undefined && o.id !== doer)
+      .sort((a, b) => (a.at ?? 0) - (b.at ?? 0))[0];
+    let pronounTo: string | null = null;
+    const pronoun =
+      /\b(him)\b|\b(her)\b(?=\s*(?:$|[,.;!?]|and\b|as\b|in\b|on\b|to\b|with\b|close\b|tight(?:ly)?\b|goodbye\b|back\b|again\b|too\b|gently\b|warmly\b|softly\b|happily\b|down\b))/iu.exec(
+        after,
+      );
+    if (pronoun) {
+      const gender = pronoun[1] ? 'm' : 'f';
+      for (let k = recent.length - 1; k >= 0; k -= 1)
+        if (recent[k] !== doer && genderOf.get(recent[k]) === gender) {
+          pronounTo = recent[k];
+          break;
+        }
+    }
+    const named = featuresNamedIn(after)[0];
+    const feature = named ? { at: named.at, word: named.word } : null;
+    // The thing: named after the verb, or inside its words ("lifts the cup
+    // up"), never the verb itself ("bowls the ball").
+    const own = text
+      .slice(verb.at, upTo)
+      .replace(/^\S+/u, (word) => ' '.repeat(word.length));
+    // A thing's word naming a feature ("a tomato crate") is the feature's.
+    const firstThing = firstOf(own, THING_WORDS);
+    const nextWord = firstThing
+      ? /^\s+([\p{L}-]+)/u.exec(
+          own.slice(firstThing.at + firstThing.word.length),
+        )?.[1]
+      : undefined;
+    const thingNamed = nextWord && featureKindOf(nextWord) ? null : firstThing;
+    const itIs = /^\s*(?:\p{L}+ly\s+)?(?:it|them|one|a piece|a bit)\b/iu.test(
+      after,
+    );
+    const thing: ThingId | null =
+      thingNamed?.key ??
+      (itIs &&
+      (doing.kind === 'handle' || verb.id === 'chase' || verb.id === 'fetch')
+        ? lastThing
+        : null);
+    if (thing) lastThing = thing;
+    // A thing is where a move goes only when the words send it there:
+    // "after it", "at the cup"; never "ball in his mouth".
+    const thingAimed =
+      doing.kind !== 'handle' &&
+      thing &&
+      doing.aims.includes('thing') &&
+      (itIs ||
+        (thingNamed !== null &&
+          thingNamed.at >= verb.end - verb.at &&
+          /^\s*(?:(?:up|down|over|out|back)\s+)?(?:(?:at|to|toward|towards|after|for|into|onto|over|on|under|behind|beside|near|by)\s+)?(?:the|a|an|his|her|their|its|some|that|this)?\s*$/iu.test(
+            own.slice(verb.end - verb.at, thingNamed.at),
+          )));
+    // A side, the sky or the ground.
+    const sideWord =
+      /\b(?:to|toward|towards|on|at|over) the (left|right)\b|\b(left|right)(?:wards?)?\b(?! (?:hand|foot|arm|side of))/iu.exec(
+        after,
+      );
+    const side: Side | null = sideWord
+      ? (sideWord[1] ?? sideWord[2]).toLowerCase() === 'left'
+        ? '@left'
+        : '@right'
+      : /\bup (?:at|to|into|toward|towards) (?:the )?(?:sky|heavens?|stars?|moon|clouds?|ceiling|roof|tree ?tops?)\b|\bskyward/iu.test(
+            after,
+          ) ||
+          (verb.id === 'look' &&
+            /^\s*up\b(?!\s+(?:the|this|that)\s)/iu.test(after))
+        ? '@up'
+        : /\bdown at (?:the )?(?:ground|floor|(?:his|her|their|its) feet)\b|\bat (?:the )?(?:ground|floor)\b/iu.test(
+              after,
+            ) ||
+            (verb.id === 'look' &&
+              /^\s*down\b(?!\s+(?:the|this|that)\s)/iu.test(after))
+          ? '@down'
+          : null;
+    // A feature is the way out or in for someone going ("out the gate",
+    // "under the fence", "into the bus"), else where they go or look.
+    const travel = doing.kind === 'travel';
+    const byWay =
+      feature !== null &&
+      travel &&
+      (verb.id === 'leave' ||
+        verb.id === 'enter' ||
+        verb.id === 'squeeze' ||
+        BY_WAY.test(after.slice(0, feature.at)));
+    const featureId = feature ? featureIdOf(feature.word) : null;
+    const target =
+      (whom ? whom.id : null) ??
+      (owner?.at !== undefined && (!feature || owner.at < feature.at)
+        ? owner.id
+        : null) ??
+      pronounTo ??
+      (featureId && !byWay ? featureId : null) ??
+      side ??
+      (thingAimed ? thing : null);
+    // At a run where the words say so; at a walk where they say that; a
+    // going they say no more of ("goes over", "comes in") at the sheet's.
+    const verbWord = text.slice(verb.at, verb.end);
+    const pace: TravelPace | null = !travel
+      ? null
+      : doing.runs || new RegExp(`^(?:${RUNNING_WORDS})`, 'iu').test(verbWord)
+        ? 'run'
+        : new RegExp(`^(?:${WALKING_WORDS})`, 'iu').test(verbWord)
+          ? 'walk'
+          : null;
+    const upToNext = verbs[i + 1] ? subjects[i + 1].start : upTo;
+    out.push({
+      do: verb.id,
+      at: verb.at,
+      end: verb.end,
+      who,
+      target,
+      thing,
+      via: byWay ? featureId : null,
+      pace,
+      away: !target && !byWay && AWAY.test(after),
+      words: text
+        .slice(subjects[i].start, Math.min(upTo, upToNext))
+        .replace(/[\s,]*(?:and|then|and then)?[\s,]*$/iu, '')
+        .trim(),
+    });
+  });
+  // Going out and vanishing is one going: the squeeze under the gate is
+  // the leaving; one doing the same thing twice is once.
+  return out.filter((one, i) => {
+    const same = (o: ReadDoing) => (o.who ?? '') === (one.who ?? '');
+    if (
+      one.do === 'leave' &&
+      out.some(
+        (o, j) =>
+          j !== i &&
+          same(o) &&
+          (o.do === 'squeeze' || o.do === 'chase') &&
+          !one.via,
+      )
+    )
+      return false;
+    return !out.slice(0, i).some((o) => same(o) && o.do === one.do);
+  });
+}
+
+/** Verbs of going at speed, at the start of a matched going: "races out", "bolts off". */
+const RUNNING_WORDS =
+  'r[au]n|rac|dash|rush|sprint|bolt|dart|zoom|hurr|scamper|scurr|zigzag|bound|gallop|charg|tear|tore|leap|jump|fl(?:y|ies|ew)';
+
+/** Verbs of going at a walk, said so: "walks over", "strolls in". */
+const WALKING_WORDS =
+  'walk|stroll|amble|wander|tiptoe|trudg|plod|strid|strode|march|saunter|creep|crept|shuffl|limp|pac(?:e|es|ed|ing)\\b';
+
+const escaped = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');

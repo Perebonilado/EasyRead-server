@@ -6,6 +6,7 @@ import {
   geminiItems,
   voiceRuns,
   sentenceGaps,
+  pausedRun,
   withPauses,
   generateRequest,
   interactionRequest,
@@ -116,6 +117,17 @@ describe('the Gemini voice', () => {
     ]);
     // The first quiet made up to 0.7 s; the second already long enough.
     expect(paused.length).toBe(4350 + 500);
+    // And where each quiet now lies, for no word to be timed inside it.
+    expect(
+      pausedRun(samples, rate, [
+        { text: 'a'.repeat(10), pauseAfter: 0.7 },
+        { text: 'b'.repeat(20), pauseAfter: 0.1 },
+        { text: 'c'.repeat(10), pauseAfter: 0 },
+      ]).quiet,
+    ).toEqual([
+      [1000, 1700],
+      [3700, 3850],
+    ]);
     expect(withPauses(samples, rate, [{ text: 'x', pauseAfter: 1 }])).toBe(
       samples,
     );

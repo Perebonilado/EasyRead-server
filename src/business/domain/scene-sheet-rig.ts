@@ -36,14 +36,39 @@ import { renderSvg, type InkBox, type InkMap } from './scene-raster';
 import type { CharacterSheet } from './scene-sheet';
 import type { GatedDrawing } from './scene-svg';
 
-/** Rigs made by an older way of making them are made again. */
-export const RIG_VERSION = 3;
+/**
+ * Rigs made by an older way of making them are made again. 4: the head
+ * dips about its joint, the tail wags wide on cue, and the body sinks on
+ * its legs, for the stage to act the words with.
+ */
+export const RIG_VERSION = 4;
 
 /** What the rig found and did: each part's joint, in the drawing's units, and each part moved in to meet the body. */
 export interface SheetRig {
   version: number;
   joints: Record<string, Point>;
   mended: { part: string; dx: number; dy: number }[];
+  /** How far the head turns about its joint, in degrees, proved joined: absent, it keeps still. */
+  dip?: number;
+  /** How far the body sinks on its legs lying down, as a share of the frame's height: absent, it stands. */
+  sinks?: number;
+  /** Which way it faces as drawn: its head to the left (-1) or the right (1) of its body; absent, the viewer. */
+  faces?: -1 | 1;
+}
+
+/** The most the body sinks on its legs, as a share of their height: lying down. */
+const LOW_MOST = 0.55;
+/** A head this far to one side of the body's middle, as a share of the body's width, faces that way. */
+const FACING_SHARE = 0.15;
+
+/** A part drawn inside a group the rig moved it in by before: that group, which moves with it. */
+function mendedOuter(node: Element): Element {
+  const parent = node.parent as Element | null;
+  return parent &&
+    /\brig-mend\b/.test(parent.attribs.class ?? '') &&
+    elements(parent.children).length === 1
+    ? mendedOuter(parent)
+    : node;
 }
 
 /**
@@ -62,6 +87,9 @@ export const SWINGS = {
   wagS: 1.6,
   ear: 4,
   earS: 3.2,
+  /** How far the tail wags on cue (the stage sets how far and how fast), and the head dips. */
+  wagAct: 28,
+  dip: 16,
   /** How the tail shows a feeling: wide and quick, drooping, tucked, stiff and raised. */
   happy: 18,
   happyS: 0.7,
@@ -74,9 +102,9 @@ export const SWINGS = {
 
 const SMIL = new Set(['animate', 'animatetransform', 'animatemotion', 'set']);
 
-/** CSS that moves things: every animation, transition and transform, and where a transform turns. */
+/** CSS that moves things: every animation, transition and transform (and its parts: a turn, a scale, a move), and where a transform turns. */
 const MOTION =
-  /^(?:animation(?:-[a-z-]+)?|transition(?:-[a-z-]+)?|transform|transform-origin|transform-box)$/i;
+  /^(?:animation(?:-[a-z-]+)?|transition(?:-[a-z-]+)?|transform|transform-origin|transform-box|rotate|scale|translate)$/i;
 
 /** Where a drawing defines things rather than drawing them: kept in every version of it. */
 const DEFINITIONS = new Set([
@@ -192,7 +220,7 @@ export function stillSheet(root: Element): string[] {
     if (
       name === 'g' &&
       !node.attribs.id &&
-      /\brig-(?:breathe|tail|ear)\b/.test(node.attribs.class ?? '')
+      /\brig-(?:breathe|tail|ear|head|legs)\b/.test(node.attribs.class ?? '')
     ) {
       unwrap(node);
       removed.add('an old rig');
@@ -792,6 +820,11 @@ export function restDelay(cycle: number): number {
 interface Motion {
   breathe: number;
   wag: number;
+  /** The tail's wag on cue, and the head's dip, each either way: the stage sets how far, -1 to 1. */
+  wagAct?: number;
+  dip?: number;
+  /** How far the legs fold as the body sinks on them, as a share of their height: the stage sets how far, 0 to 1. */
+  low?: number;
   happy: number;
   sad: number;
   afraid: number;
@@ -807,14 +840,25 @@ const swingFrames = (name: string, a: number, b: number) =>
 const liftCss = ([x, y]: Point) =>
   x ? `translate(${r2(x)}px,${r2(y)}px)` : `translateY(${r2(y)}px)`;
 
+/** A move in a group's own units, as CSS's translate takes it, times a variable the stage sets. */
+const byVar = (name: string, [x, y]: Point) =>
+  `calc(var(--${name},0)*${r2(x)}px) calc(var(--${name},0)*${r2(y)}px)`;
+
 /**
  * The rig's CSS: each motion by class, its pivot on the group itself.
  * `lifts`: each breath's rise in the units of the groups that take it,
- * the first by rig-breathe alone, the rest by rig-breathe-1 and on.
+ * the first by rig-breathe alone, the rest by rig-breathe-1 and on;
+ * `lows`, as far as each sinks when the legs fold all they may.
+ *
+ * What the stage acts, it sets on the drawing, -1 to 1 (0 as drawn):
+ * --tail, the tail wagged (its own wag let go while .wagging); --head,
+ * the head turned about its joint; --low, 0 to 1, the body sunk on its
+ * legs, the legs folding under it.
  */
 export function rigCss(
   motion: Motion,
   lifts: Point[] = [[0, -motion.breathe]],
+  lows: Point[] = [],
 ): string {
   const { droop } = motion;
   const tail =
@@ -868,6 +912,22 @@ export function rigCss(
     ),
     motion.ear
       ? `.rig-ear{animation:rig-ear ${SWINGS.earS}s ease-in-out ${restDelay(SWINGS.earS)}s infinite}.rig-ear-r{animation-name:rig-ear-r}${swingFrames('rig-ear', -motion.ear, motion.ear)}${swingFrames('rig-ear-r', motion.ear, -motion.ear)}`
+      : '',
+    // Acted: a wag on cue in place of its own, the head, the body sunk.
+    motion.wagAct
+      ? `.rig-tail{transform-box:view-box;rotate:calc(var(--tail,0)*${r2(motion.wagAct)}deg)}.wagging .rig-tail{animation:none;transform:none}`
+      : '',
+    motion.dip
+      ? `.rig-head{transform-box:view-box;rotate:calc(var(--head,0)*${r2(motion.dip)}deg)}`
+      : '',
+    motion.low && lows.length
+      ? [
+          `.rig-legs{transform-box:view-box;scale:1 calc(1 - var(--low,0)*${r2(motion.low)})}`,
+          ...lows.map(
+            (low, k) =>
+              `.${k ? `rig-breathe-${k}` : 'rig-breathe'}{translate:${byVar('low', low)}}`,
+          ),
+        ].join('')
       : '',
   ].join('');
 }
@@ -929,6 +989,12 @@ export async function rigSheet(
       r1(anchors.head[0] + head.dx),
       r1(anchors.head[1] + head.dy),
     ];
+  // And its mouth, which moved with it.
+  if (head && anchors.mouth)
+    anchors.mouth = [
+      r1(anchors.mouth[0] + head.dx),
+      r1(anchors.mouth[1] + head.dy),
+    ];
 
   // The motions to prove, each about its part's own joint.
   const tail = figure.limbs.find(
@@ -938,6 +1004,9 @@ export async function rigSheet(
     (limb) => limb.kind === 'ear' && joints[limb.name],
   );
   const legs = figure.limbs.find((limb) => limb.kind === 'legs');
+  const neck = figure.limbs.find(
+    (limb) => limb.kind === 'head' && joints[limb.name],
+  );
   const rotate = (limb: Limb) => {
     const pivot = localPoint(root, limb.outer, joints[limb.name]);
     return pivot
@@ -970,12 +1039,27 @@ export async function rigSheet(
     });
     swings.push(
       { name: 'wag', swing: swing(SWINGS.wag, true) },
+      { name: 'wagAct', swing: swing(SWINGS.wagAct, true) },
       { name: 'happy', swing: swing(SWINGS.happy, true) },
       { name: 'sad', swing: swing(droop * SWINGS.sad, false) },
       { name: 'afraid', swing: swing(droop * SWINGS.afraid, false) },
       { name: 'surprised', swing: swing(-droop * SWINGS.surprised, false) },
     );
   }
+  // The head dips about where it joins the body, either way, as far as
+  // it stays joined: to lick, to sniff, to chew.
+  const headTurns = neck ? rotate(neck) : null;
+  if (neck && headTurns)
+    swings.push({
+      name: 'dip',
+      swing: {
+        part: partOf(neck, figure),
+        ref: referenceOf(neck, figure)!,
+        moved: headTurns,
+        amplitude: SWINGS.dip,
+        both: true,
+      },
+    });
   const earTurns = earLimbs.map((ear) => ({ ear, turns: rotate(ear) }));
   for (const { ear, turns } of earTurns)
     if (turns)
@@ -1026,10 +1110,32 @@ export async function rigSheet(
       ? Math.min(...found.map((one) => Math.abs(one.amplitude)))
       : 0;
   };
+  // How far the body may sink on its legs, folding them under it: as far
+  // as its lowest ink stays off the ground, and at most half again of
+  // their height. Joined all the way, since the legs fold as it sinks.
+  const legsOn =
+    legs && joints[legs.name] ? measured.get(legs.name) : undefined;
+  const sink =
+    legsOn?.box && legsOn.restBox
+      ? Math.min(
+          LOW_MOST * legsOn.box.height,
+          legsOn.box.y +
+            legsOn.box.height -
+            (legsOn.restBox.y + legsOn.restBox.height) -
+            0.04 * legsOn.box.height,
+        )
+      : 0;
+  const low =
+    legsOn?.box && sink > 0.08 * legsOn.box.height
+      ? sink / legsOn.box.height
+      : 0;
   const motion: Motion = {
     // No legs to lift off: the body breathes as far as it likes.
     breathe: legs && joints[legs.name] ? amplitude('breathe') : rise,
     wag: amplitude('wag'),
+    wagAct: amplitude('wagAct'),
+    dip: amplitude('dip'),
+    low: r2(low),
     happy: amplitude('happy'),
     sad: amplitude('sad'),
     afraid: amplitude('afraid'),
@@ -1037,9 +1143,21 @@ export async function rigSheet(
     ear: amplitude('ear'),
     droop,
   };
+  // Which way it faces as drawn: its head well to one side of its body.
+  const headOn = neck && measured.get(neck.name);
+  const faces: -1 | 1 | null =
+    headOn?.box &&
+    headOn.restBox &&
+    Math.abs(centreOf(headOn.box)[0] - centreOf(headOn.restBox)[0]) >
+      FACING_SHARE * headOn.restBox.width
+      ? centreOf(headOn.box)[0] > centreOf(headOn.restBox)[0]
+        ? 1
+        : -1
+      : null;
 
   // The rig's groups, round the parts as they are now: a tail and ears
-  // each turning about its joint, and everything above the legs rising.
+  // each turning about its joint, the head about its own, the legs
+  // folding, and everything above the legs rising.
   const tailMoves =
     motion.wag ||
     motion.happy ||
@@ -1047,43 +1165,94 @@ export async function rigSheet(
     motion.afraid ||
     motion.surprised;
   const wrapped = new Map<Element, Element>();
+  const outermost = (node: Element) => wrapped.get(node) ?? node;
   const turnAbout = (limb: Limb, className: string) => {
     const pivot = localPoint(root, limb.outer, joints[limb.name]);
     if (!pivot) return;
     wrapped.set(
       limb.outer,
-      wrap(limb.outer, {
+      wrap(outermost(limb.outer), {
         class: className,
         style: `transform-origin:${r1(pivot[0])}px ${r1(pivot[1])}px`,
       }),
     );
   };
-  if (tail && tailTurns && tailMoves) turnAbout(tail, 'rig-tail');
+  if (tail && tailTurns && (tailMoves || motion.wagAct))
+    turnAbout(tail, 'rig-tail');
   if (motion.ear && figure.head) {
-    const head = measured.get(earLimbs[0]?.name ?? '')?.restBox;
+    const headBox = measured.get(earLimbs[0]?.name ?? '')?.restBox;
     for (const { ear, turns } of earTurns) {
       if (!turns) continue;
-      const right = head ? joints[ear.name][0] > centreOf(head)[0] : false;
+      const right = headBox
+        ? joints[ear.name][0] > centreOf(headBox)[0]
+        : false;
       turnAbout(ear, right ? 'rig-ear rig-ear-r' : 'rig-ear');
     }
   }
-  // Each group rises as far on the screen, in its own units: one drawn
-  // inside a scaled group moves less in them, as the proof moved it.
-  const lifts: Point[] = [];
-  if (motion.breathe)
-    for (const node of lifted) {
-      const move = localMove(root, node, [0, -motion.breathe]);
-      if (!move) continue;
-      const lift: Point = [r2(move[0]), r2(move[1])];
-      let k = lifts.findIndex(
-        (one) => one[0] === lift[0] && one[1] === lift[1],
+  if (motion.dip && neck) {
+    // The head and what sits on it, drawn beside it: its faces, its ears.
+    turnAbout(neck, 'rig-head');
+    const beside = [
+      ...figure.faces.map(mendedOuter),
+      ...ears(figure).map((ear) => ear.outer),
+    ].filter((node) => !holds(neck.node, node) && !holds(node, neck.node));
+    for (const node of new Set(beside)) {
+      const pivot = localPoint(root, node, joints[neck.name]);
+      if (!pivot) continue;
+      wrapped.set(
+        node,
+        wrap(outermost(node), {
+          class: 'rig-head',
+          style: `transform-origin:${r1(pivot[0])}px ${r1(pivot[1])}px`,
+        }),
       );
-      if (k < 0) k = lifts.push(lift) - 1;
-      wrap(wrapped.get(node) ?? node, {
+    }
+  }
+  if (motion.low && legs && legsOn?.box) {
+    // The legs fold from the ground up: shorter, their feet where they stand.
+    const foot = localPoint(root, legs.outer, [
+      legsOn.box.x + legsOn.box.width / 2,
+      legsOn.box.y + legsOn.box.height,
+    ]);
+    if (foot)
+      wrapped.set(
+        legs.outer,
+        wrap(outermost(legs.outer), {
+          class: 'rig-legs',
+          style: `transform-origin:${r1(foot[0])}px ${r1(foot[1])}px`,
+        }),
+      );
+  }
+  // Each group rises (and sinks) as far on the screen, in its own units:
+  // one drawn inside a scaled group moves less in them, as the proof
+  // moved it.
+  const lifts: Point[] = [];
+  const lows: Point[] = [];
+  if (motion.breathe || motion.low)
+    for (const node of lifted) {
+      const unit = localMove(root, node, [0, 1]);
+      if (!unit) continue;
+      const lift: Point = [
+        r2(-unit[0] * motion.breathe),
+        r2(-unit[1] * motion.breathe),
+      ];
+      const sunk: Point = [r2(unit[0] * sink), r2(unit[1] * sink)];
+      let k = lifts.findIndex(
+        (one, i) =>
+          one[0] === lift[0] &&
+          one[1] === lift[1] &&
+          lows[i][0] === sunk[0] &&
+          lows[i][1] === sunk[1],
+      );
+      if (k < 0) {
+        k = lifts.push(lift) - 1;
+        lows.push(sunk);
+      }
+      wrap(outermost(node), {
         class: k ? `rig-breathe rig-breathe-${k}` : 'rig-breathe',
       });
     }
-  const css = rigCss(motion, lifts);
+  const css = rigCss(motion, lifts, lows);
   const style = new Element('style', {});
   setText(style, css);
   style.parent = root;
@@ -1102,7 +1271,16 @@ export async function rigSheet(
           : {}),
       },
       anchors,
-      rig: { version: RIG_VERSION, joints, mended },
+      rig: {
+        version: RIG_VERSION,
+        joints,
+        mended,
+        ...(motion.dip ? { dip: motion.dip } : {}),
+        ...(motion.low && lows.length
+          ? { sinks: Math.round((sink / viewBox[3]) * 1000) / 1000 }
+          : {}),
+        ...(faces ? { faces } : {}),
+      },
     },
     notes,
   };

@@ -5,18 +5,23 @@ import {
 } from './scene-script';
 import { figureFrame } from './scene-figure';
 import {
+  BACK_DEPTH,
   STAGINGS,
   TALLEST_ADULT,
   captionLines,
   extentOf,
+  layoutStations,
   layoutStep,
   overlaps,
+  placeFeature,
   slotsFor,
   slotsOf,
+  stationScale,
   standTogether,
   type LaidThing,
   type StagingName,
 } from './scene-layout';
+import { drawPiece } from './scene-set-pieces';
 
 const things = new Map<string, LaidThing>([
   ['a', { kind: 'drawing', aspect: 1.6, caption: 'Kidney' }],
@@ -174,5 +179,135 @@ describe('people standing together', () => {
     const after = layoutStep('one', show, people, 'box');
     standTogether(after, people, show, 'box', true);
     expect(after).toEqual(before);
+  });
+});
+
+describe("a Studio scene's stations", () => {
+  const kid: LaidThing = {
+    kind: 'drawing',
+    aspect: 160 / 190,
+    caption: null,
+    stands: { units: 190 },
+  };
+  const grown: LaidThing = {
+    kind: 'drawing',
+    aspect: 160 / 234,
+    caption: null,
+    stands: { units: 234 },
+  };
+  const people = new Map<string, LaidThing>([
+    ['maya', kid],
+    [
+      'pip',
+      { kind: 'drawing', aspect: 1.1, caption: null, stands: { units: 110 } },
+    ],
+    ['mama', grown],
+  ]);
+  const middle = (p: { x: number; w: number }) => p.x + p.w / 2;
+
+  for (const staging of ['box', 'wide'] as StagingName[])
+    it(`keeps each one where they stand until their station changes, at one scale (${staging})`, () => {
+      const scale = stationScale([...people.values()], 3, staging);
+      const gate = { x: STAGINGS[staging].w * 0.88, w: 180 };
+      const steps = layoutStations({
+        steps: [
+          {
+            show: ['maya', 'pip', 'mama'],
+            at: { maya: 'left', pip: 'centre', mama: 'right' },
+          },
+          // Pip runs to the gate: beside it, the side he comes from.
+          {
+            show: ['maya', 'pip', 'mama'],
+            at: { maya: 'left', pip: 'by:gate:-1', mama: 'right' },
+          },
+          // He goes; no one else moves.
+          { show: ['maya', 'mama'], at: { maya: 'left', mama: 'right' } },
+          // Mama comes over beside the gate where no one stands now.
+          { show: ['maya', 'mama'], at: { maya: 'left', mama: 'by:gate:-1' } },
+        ],
+        things: people,
+        staging,
+        scale,
+        features: new Map([['gate', gate]]),
+      });
+      expect(steps[1].maya).toEqual(steps[0].maya);
+      expect(steps[2].maya).toEqual(steps[1].maya);
+      expect(steps[2].mama).toEqual(steps[1].mama);
+      expect(steps[1].mama).toEqual(steps[0].mama);
+      // Beside the gate, on its left, not on it.
+      const pip = steps[1].pip;
+      expect(middle(pip)).toBeLessThan(gate.x - gate.w / 2);
+      expect(middle(pip)).toBeGreaterThan(middle(steps[0].pip));
+      // Everyone at one scale, feet on one ground, all the scene through.
+      const feet = (p: { y: number; h: number }) => p.y + p.h;
+      expect(feet(steps[0].maya)).toBe(feet(steps[0].mama));
+      expect(steps[0].mama.h / 234).toBeCloseTo(steps[0].maya.h / 190, 2);
+      expect(steps[3].mama.h).toBe(steps[0].mama.h);
+      // No one stands off the stage.
+      for (const step of steps)
+        for (const p of Object.values(step)) {
+          expect(middle(p)).toBeGreaterThan(0);
+          expect(middle(p)).toBeLessThan(STAGINGS[staging].w);
+        }
+    });
+
+  it('takes the other side of a feature where someone already stands on the near one', () => {
+    const scale = stationScale([...people.values()], 3, 'wide');
+    const bench = { x: 800, w: 220 };
+    const [step] = layoutStations({
+      steps: [
+        {
+          show: ['maya', 'mama'],
+          at: { maya: 'centre-left', mama: 'by:bench:-1' },
+        },
+      ],
+      things: people,
+      staging: 'wide',
+      scale,
+      features: new Map([['bench', bench]]),
+    });
+    // Maya stands where the bench's left side would put Mama: Mama goes round.
+    expect(middle(step.mama)).toBeGreaterThan(bench.x + bench.w / 2);
+  });
+
+  it('stands a piece the stage draws among the people at their scale, or farther off at the back', () => {
+    const piece = drawPiece('gate');
+    const front = placeFeature({
+      staging: 'wide',
+      spot: 'right',
+      piece,
+      back: false,
+      unit: 2,
+      floor: 844,
+      horizon: 576,
+    });
+    expect(front.y + front.h).toBeGreaterThan(844);
+    expect(front.w).toBeCloseTo(piece.viewBox[2] * 2, 0);
+    expect(front.way).toMatchObject({ y: 844, k: 1 });
+    const back = placeFeature({
+      staging: 'wide',
+      spot: 'back',
+      piece,
+      back: true,
+      unit: 2,
+      floor: 844,
+      horizon: 576,
+    });
+    expect(back.w).toBeCloseTo(front.w * BACK_DEPTH, 0);
+    expect(back.way.y).toBeLessThan(front.way.y);
+    expect(back.way.k).toBeCloseTo(BACK_DEPTH, 2);
+    // Where the painter drew it, as large as it was drawn.
+    const painted = placeFeature({
+      staging: 'wide',
+      spot: 'left',
+      piece,
+      painted: { x: 100, y: 500, w: 150, h: 180 },
+      back: false,
+      unit: 2,
+      floor: 844,
+      horizon: 576,
+    });
+    expect(painted.way.y).toBe(680);
+    expect(middle(painted)).toBeCloseTo(175, 0);
   });
 });

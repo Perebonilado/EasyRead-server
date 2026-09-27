@@ -6,6 +6,7 @@ import {
   figureSheet,
   introCallouts,
   measureSheet,
+  mouthOf,
   setsOf,
   SHEET_VERSION,
 } from './scene-sheet';
@@ -55,6 +56,14 @@ describe('a character drawn once for the book', () => {
     expect(body![1]).toBeLessThan(legs![1]);
     expect(sheet.drawing.field).not.toBeNull();
     expect(sheet.version).toBe(SHEET_VERSION);
+    // Its mouth, where what it carries rides: the low middle of its face,
+    // below its eyes and on its head.
+    const mouth = sheet.anchors.mouth!;
+    expect(Math.abs(mouth[0] - 200)).toBeLessThan(2);
+    expect(mouth[1]).toBeGreaterThan(190);
+    expect(mouth[1]).toBeLessThan(280);
+    // Measured again for a sheet kept before mouths were, the same.
+    expect(await mouthOf(sheet.drawing)).toEqual(mouth);
   }, 20_000);
 
   it('keeps a figure measured well when looking for what floats fails', async () => {

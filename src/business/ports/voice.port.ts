@@ -50,6 +50,8 @@ export interface SpeechPort {
     durationMs?: number;
     /** Where each piece starts in the audio, in order, when the voice spoke pieces and measured them. */
     pieceStartsMs?: number[];
+    /** Where the audio is silent, [from, to] in ms, when the voice made the silences itself: no word starts in one. */
+    silencesMs?: [number, number][];
     /** Each word as the voice spoke it, in order, when timestamps were asked for and the voice knows them. */
     words?: { text: string; startMs: number; endMs: number }[];
     /** Tokens in and out, for a voice billed by the token (Gemini); absent otherwise. */

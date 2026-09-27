@@ -1044,8 +1044,25 @@ export type SceneThingDto =
        * and forearm about, so a hand can be put where it means to go.
        */
       joints?: Record<'r' | 'l', [number, number][]>;
+      /**
+       * And each leg's hip, knee and foot as drawn, as shares of its box:
+       * the knees bend by them, so the body sinks as far as the legs fold
+       * (a crouch, sitting down) and the feet stay on the ground.
+       */
+      legs?: Record<'r' | 'l', [number, number][]>;
       /** A story's minor character: a little smaller and quieter than those the story follows. */
       minor?: true;
+      /** One drawn by the artist (an animal): where its mouth is, as shares of its box, so what it carries rides there. */
+      mouth?: [number, number];
+      /** One the artist drew, rigged: where its head turns about (to lick, sniff, chew), as shares of its box, and how far it turns at most, in degrees. */
+      neck?: [number, number];
+      dip?: number;
+      /** How far its body sinks on its legs lying down, as a share of its box's height. */
+      sinks?: number;
+      /** Which way one the artist drew faces as drawn: its head to the left (-1) or right (1); absent, the viewer. It is turned to face where it goes. */
+      faces?: -1 | 1;
+      /** One who stands with people: how tall its frame is in the figure kit's units, so a thing it holds is drawn at the kit's size. */
+      units?: number;
     }
   | { id: string; kind: 'stat'; value: string; caption: string }
   | {
@@ -1071,8 +1088,33 @@ export interface SceneStepDto {
   layout: SceneLayoutName;
   show: string[];
   arrows: SceneArrowDto[];
-  /** How each newcomer arrives; `from` is the thing a growing one comes out of. */
-  enter: Record<string, { how: SceneEnterName; from?: string }>;
+  /**
+   * How each newcomer arrives; `from` is the thing a growing one comes out
+   * of. One who walks on comes from `side` of the stage, or out of the
+   * feature `via` (the gate, the danfo's door).
+   */
+  enter: Record<
+    string,
+    {
+      how: SceneEnterName;
+      from?: string;
+      side?: 'left' | 'right';
+      via?: string;
+    }
+  >;
+  /**
+   * How each one who goes off at this step goes: off by `side`, or out
+   * through the feature `via`, where they are gone; at a run, or bent low
+   * squeezing under it. Absent, off by the nearer side at a walk.
+   */
+  exit?: Record<
+    string,
+    { side: 'left' | 'right'; via?: string; how?: 'walk' | 'run' | 'squeeze' }
+  >;
+  /** Who goes at a run at this step, on, off or across: faster than a walk. */
+  pace?: Record<string, 'run'>;
+  /** Who stands behind a feature at this step, by the feature: it is drawn over them. */
+  behind?: Record<string, string>;
   /** The thing the camera leans toward. */
   focus: string | null;
   /** The scene behind the stage: a place's drawing, by id; absent for none. */
@@ -1154,15 +1196,65 @@ export interface SceneSettingDto {
     /** When they react: the moment, how, and for how long. */
     moves?: [number, 'cheer' | 'gasp', number][];
   };
+  /** A Studio set's fixed things its story acts on: a gate, a bench, a goalpost, a danfo. */
+  features?: SceneFeatureDto[];
+  /** When a feature opens or shuts: the moment, which, and how it is left. */
+  featureStates?: [number, string, 'open' | 'shut'][];
+}
+
+/**
+ * A fixed thing of a Studio set that its story acts on, stood among the
+ * people: drawn by the stage (a gate that swings shut, a bench, a danfo)
+ * behind them, and over them while someone goes through or under it; or
+ * the painter's own, only where it is. Looks, points and leans aimed at it
+ * name it "f:<id>".
+ */
+export interface SceneFeatureDto {
+  id: string;
+  name: string;
+  kind: string;
+  /** The stage's drawing of it, in the figure kit's units; absent for one only painted. */
+  svg?: string;
+  /** The part that opens, by its group's id: turned about its hinge (its width closing toward it), or slid `slide` along. */
+  leaf?: { id: string; hinge: [number, number]; slide?: number };
+  /** Where it stands at each staging: the box its drawing fills. */
+  at: Record<'box' | 'wide', { x: number; y: number; w: number; h: number }>;
+  /** Where one goes in or out by it, or stands at it: the middle of its way, the ground there, and how big someone there is beside the people (less than 1 farther back). */
+  way: Record<'box' | 'wide', { x: number; y: number; k: number }>;
+  /** The painted set's own group for it, hidden while the stage's drawing stands in for it. */
+  painted?: string;
+  /** Open as the scene opens. */
+  open?: true;
 }
 
 /**
  * A move someone makes as they act: a nod, a gesture with the right or
  * left arm, brows up, a lean back, a reach, a point (at someone, or up at
  * the sky), a hug, a wave, a shake of the head, a laugh, a hop for joy, a
- * clap, a sob, a shrug.
+ * clap, a sob, a shrug; and on a Studio story's stage the body's own: a
+ * jump, a crouch, sitting and lying down (held until they get up),
+ * getting up, a fall, a spin, a bow, a kick, and an animal's wag, lick,
+ * chew, sniff, dig, wriggle, bark, roll over and shake.
  */
 export type SceneActingMove =
+  | 'jump'
+  | 'crouch'
+  | 'sit'
+  | 'stand'
+  | 'lie'
+  | 'fall'
+  | 'spin'
+  | 'bow'
+  | 'kick'
+  | 'wag'
+  | 'lick'
+  | 'chew'
+  | 'sniff'
+  | 'dig'
+  | 'wriggle'
+  | 'bark'
+  | 'roll'
+  | 'shake-off'
   | 'nod'
   | 'gesture'
   | 'gesture-left'
@@ -1185,15 +1277,32 @@ export type SceneActingMove =
  * How someone acts on a page: planned by the server from who says what
  * and when, played by the stage on the voice's clock.
  */
-/** What people do with a thing on a story's stage. */
+/**
+ * What people do with a thing on a story's stage: and on a Studio
+ * story's, besides, thrown, caught, dropped, kicked and chewed.
+ */
 export type ScenePropAction =
-  'take' | 'raise' | 'break' | 'give' | 'eat' | 'drink' | 'dip' | 'put';
+  | 'take'
+  | 'raise'
+  | 'break'
+  | 'give'
+  | 'eat'
+  | 'drink'
+  | 'dip'
+  | 'put'
+  | 'throw'
+  | 'catch'
+  | 'drop'
+  | 'kick'
+  | 'chew';
 
 /**
  * A thing on a story's stage that people handle: bread on the table, a
- * cup. Drawn in the figure kit's own units, its base resting on a surface
- * at y = 0; on the table (or the ground) near whoever first handles it,
- * until then and after they put it down.
+ * cup, a ball. Drawn in the figure kit's own units, its base resting on a
+ * surface at y = 0; on the table (or the ground) near whoever first
+ * handles it, until then and after they put it down; or from the start
+ * in someone's hand or mouth. Thrown, dropped or kicked, it flies, and
+ * lands in a hand, a mouth or on the ground, and lies where it lands.
  */
 export interface ScenePropDto {
   id: string;
@@ -1202,11 +1311,30 @@ export interface ScenePropDto {
   /** Where a hand holds it, and the part that goes to the mouth, in its own units. */
   grip: [number, number];
   mouth: [number, number];
+  /** Where an animal's mouth holds it: a ball's middle, a bag's handle; absent, its grip. */
+  bite?: [number, number];
   /** Broken, each hand holds a half: the left half; the right is its mirror. */
   half?: string;
   /** Near whom it rests. */
   near: string | null;
-  /** What is done with it, in order: when, who, what, and to whom it is given. */
+  /** Who holds it as the scene opens, and in what: a hand, or the mouth. Absent, it rests near `near`. */
+  held?: { by: string; in: 'r' | 'l' | 'mouth' };
+  /** Loose, how often it bounces where it lands (a ball twice); absent, it does not. */
+  bounce?: number;
+  /** It rolls on where it lands, and turns over in the air. */
+  rolls?: true;
+  spins?: true;
+  /** Carried hanging at the side, not held up before them: a bag. */
+  hangs?: true;
+  /**
+   * What is done with it, in order: when (its moment: the hand closing,
+   * the release, the landing), who, what, and toward whom or where: given
+   * or thrown to someone, by id; toward a side of the stage, "@left" or
+   * "@right"; onto the ground at a point, as a share of the stage's
+   * width, "@0.82"; or before a feature of the set, "f:gate", wherever
+   * each staging stands it. A catch comes when a thing thrown to someone
+   * reaches them.
+   */
   does: [number, string, ScenePropAction, string?][];
 }
 
@@ -2260,6 +2388,14 @@ export interface StudioBeatDto {
   from: string | null;
   pace: string | null;
   seconds: number | null;
+  /** Toward whom or what: a character, a feature of the set, a thing, or a side ("@left"). */
+  target?: string;
+  /** The thing handled or named. */
+  thing?: string;
+  /** The feature someone goes in or out by. */
+  via?: string;
+  /** What the writer asked for that is none of the doings, as they wrote it. */
+  doSaid?: string;
 }
 
 export interface StudioStorySheetDto {

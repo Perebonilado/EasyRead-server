@@ -34,7 +34,7 @@ import {
   type FigureProp,
   type FigureSpec,
 } from './scene-figure';
-import { topAt, type SetGround } from './scene-ground';
+import { GROUND_COLS, behindAt, topAt, type SetGround } from './scene-ground';
 import type { PlaceKind, StoryWorld } from './scene-story';
 
 /** A share of the depth from the horizon to the story's people's feet past which no one in a crowd stands: they are never more than this share of their size. */
@@ -94,6 +94,12 @@ export interface CrowdInput {
   world: StoryWorld | null;
   /** What the story's people wear: no one in the crowd is dressed as one of them. */
   wearing?: Wearing[];
+  /**
+   * Where the pieces the stage draws over the crowd stand (a danfo, a
+   * crate), in the set's units, in either staging: no one of the crowd
+   * stands anywhere one would cover them.
+   */
+  pieces?: { x0: number; x1: number; y0: number; y1: number }[];
 }
 
 /** What someone wears that says who they are at a glance. */
@@ -131,6 +137,8 @@ export interface Extra {
   walk: number;
   /** How far toward the distance's colour they fade, 0 to 1. */
   haze: number;
+  /** Standing behind what stands on the ground (a stall's counter): only what shows over it is drawn. */
+  behind?: true;
 }
 
 /** The camera the crowd is seen through, in the set's units. */
@@ -150,6 +158,8 @@ export interface CrowdPlan {
   frame: [number, number, number, number];
   /** Where the story's people stand on the whole, across: the crowd leans back away from them. */
   middle: number;
+  /** What stands on the ground, column by column (SetGround.cover): what hides the lower part of those behind it. */
+  cover?: SetGround['cover'];
 }
 
 /** A small, stable number from a seed: the same crowd in every make. */
@@ -394,9 +404,52 @@ export function planCrowd(input: CrowdInput): CrowdPlan {
       most = Math.max(most, groundAt(x + dx) + 3);
     return most;
   };
-  const fits = (spec: FigureSpec, x: number, feet: number, sc: number) => {
+  /**
+   * Behind what stands on the ground there (a stall's counter), across the
+   * whole of where they stand: on the ground behind it, their feet down
+   * behind it, and their head and shoulders over it. Only on a set whose
+   * painter drew what stands on the ground as a group of its own.
+   */
+  const standsBehind = (
+    spec: Pick<FigureSpec, 'age' | 'build'>,
+    x: number,
+    feet: number,
+    sc: number,
+  ) => {
+    if (indoors || !input.ground.behind) return false;
+    const head = feet + rigOf(spec.age, spec.build).top * sc;
+    const tall = feet - head;
+    const half = BODY * sc * 0.3;
+    for (let dx = -half; dx <= half + 0.01; dx += Math.max(2, half / 3)) {
+      const at = behindAt(input.ground, (x + dx - vx) / vw);
+      if (!at) return false;
+      const ground = vy + at.top * vh;
+      const top = vy + at.cover[0] * vh;
+      const bottom = vy + at.cover[1] * vh;
+      if (feet < ground + 2 || feet > bottom - 2) return false;
+      if (feet < top + (bottom - top) * 0.3) return false;
+      if (top - head < tall * 0.35 || top - head > tall * 0.8) return false;
+    }
+    return true;
+  };
+  const fits = (
+    spec: FigureSpec,
+    x: number,
+    feet: number,
+    sc: number,
+    behind = false,
+  ) => {
     if (x - BODY * sc * 0.5 < vx || x + BODY * sc * 0.5 > vx + vw) return false;
-    if (feet < groundUnder(x, sc)) return false;
+    if (behind ? !standsBehind(spec, x, feet, sc) : feet < groundUnder(x, sc))
+      return false;
+    // Drawn over the crowd, a piece of the stage's hides whoever it meets.
+    const body = {
+      x0: x - BODY * sc * 0.4,
+      x1: x + BODY * sc * 0.4,
+      y0: feet + rigOf(spec.age, spec.build).top * sc,
+      y1: feet,
+    };
+    if ((input.pieces ?? []).some((piece) => meets(body, piece))) return false;
     return clearOf(headBox(spec, x, feet, sc), keep);
   };
 
@@ -443,13 +496,23 @@ export function planCrowd(input: CrowdInput): CrowdPlan {
             scaleAt(camera, camera.horizon + asked * depth) *
             (0.62 + 0.25 * beatOf(`${key}:gap`));
         // Where something stands on the ground there (a stall), they stand
-        // in front of it, a little nearer, or not at all.
+        // behind it, where the painter drew it apart and the ground runs on
+        // behind it; else in front of it, a little nearer, or not at all.
         let feet = camera.horizon + asked * depth;
-        for (let k = 0; k < 2; k += 1)
-          feet = Math.max(
+        const behind =
+          ri < 2 &&
+          standsBehind(
+            { age: 'adult', build: 'average' },
+            x,
             feet,
-            groundUnder(x, scaleAt(camera, feet)) + 2 * beatOf(`${key}:y`),
+            scaleAt(camera, feet),
           );
+        if (!behind)
+          for (let k = 0; k < 2; k += 1)
+            feet = Math.max(
+              feet,
+              groundUnder(x, scaleAt(camera, feet)) + 2 * beatOf(`${key}:y`),
+            );
         const r = depthOf(camera, feet);
         if (r > Math.min(deepest, asked + PUSH)) continue;
         const sc = scaleAt(camera, feet);
@@ -467,7 +530,7 @@ export function planCrowd(input: CrowdInput): CrowdPlan {
           k += 1
         )
           spec = extraFor(input.world, `${spot}~${k}`, m);
-        if (!fits(spec, x, feet, sc)) continue;
+        if (!fits(spec, x, feet, sc, behind)) continue;
         const back = beatOf(`${key}:back`) < (r < 0.2 ? 0.3 : 0.15);
         const b = beatOf(`${key}:pose`);
         const pose: FigurePose = back
@@ -506,6 +569,7 @@ export function planCrowd(input: CrowdInput): CrowdPlan {
           walk: 0,
           // Fading with how far off they are: those stepped forward, less.
           haze: r3(Math.max(0.05, row.haze - (r - r0) * 1.2)),
+          ...(behind ? { behind: true as const } : {}),
         });
       }
       if (!members.length) continue;
@@ -528,7 +592,9 @@ export function planCrowd(input: CrowdInput): CrowdPlan {
   });
 
   // A few wander along the stalls, to and fro over ground that is free.
-  const alone = people.filter((p) => depthOf(camera, p.feet) < 0.3 && !p.talks);
+  const alone = people.filter(
+    (p) => depthOf(camera, p.feet) < 0.3 && !p.talks && !p.behind,
+  );
   const wanderers =
     input.size === 'many'
       ? 1 + Math.floor(beatOf(`${seed}:wander`) * 3)
@@ -576,7 +642,37 @@ export function planCrowd(input: CrowdInput): CrowdPlan {
     haze: input.ground.haze,
     frame: input.frame,
     middle: r1(middle),
+    ...(people.some((p) => p.behind) ? { cover: input.ground.cover } : {}),
   };
+}
+
+/**
+ * What of someone behind a stall shows: everything over what stands on
+ * the ground, column by column across them, as a path in the set's units.
+ * Where a post comes down, none of them there.
+ */
+function overCover(
+  plan: CrowdPlan,
+  x0: number,
+  x1: number,
+  feet: number,
+): string {
+  const [vx, vy, vw, vh] = plan.frame;
+  const cover = plan.cover ?? [];
+  const n = cover.length || GROUND_COLS;
+  const from = Math.max(0, Math.floor(((x0 - vx) / vw) * n));
+  const to = Math.min(n - 1, Math.ceil(((x1 - vx) / vw) * n));
+  const points: string[] = [`M${r1(vx + (from / n) * vw)},${r1(vy)}`];
+  for (let i = from; i <= to; i += 1) {
+    const run = cover[i];
+    const y = run ? vy + run[0] * vh : feet + 12;
+    points.push(
+      `L${r1(vx + (i / n) * vw)},${r1(y)}`,
+      `L${r1(vx + ((i + 1) / n) * vw)},${r1(y)}`,
+    );
+  }
+  points.push(`L${r1(vx + ((to + 1) / n) * vw)},${r1(vy)}Z`);
+  return points.join(' ');
 }
 
 /** How far back someone stands: 0 at the horizon, 1 at the story's people's feet. */
@@ -824,6 +920,8 @@ export function drawCrowd(
   const styles: string[] = [IDLE];
   if (moves.length) styles.push(reactionFrames(moves, timing.durationMs));
   const painted: { row: number; markup: string }[] = [];
+  /** Each one behind a stall, cut to what shows over it. */
+  const clips: string[] = [];
   // From the back forward: whoever stands nearer is drawn over.
   const order = plan.people
     .map((p, i) => ({ p, i }))
@@ -919,11 +1017,17 @@ export function drawCrowd(
       open = `<g class="cw" style="${run(`cr-w${n}`)}">`;
       close = '</g>';
       facing += ` class="ct" style="${run(`cr-t${n}`)}"`;
+      // Each leg's step joins the style it has (where it turns at the hip).
       legs = legs
-        .replace('class="leg l0"', `class="leg l0" style="${run(`cr-l${n}0`)}"`)
         .replace(
-          'class="leg l1"',
-          `class="leg l1" style="${run(`cr-l${n}1`)}"`,
+          /class="leg l0"(?: style="([^"]*)")?/,
+          (_, own?: string) =>
+            `class="leg l0" style="${run(`cr-l${n}0`)}${own ? `;${own}` : ''}"`,
+        )
+        .replace(
+          /class="leg l1"(?: style="([^"]*)")?/,
+          (_, own?: string) =>
+            `class="leg l1" style="${run(`cr-l${n}1`)}${own ? `;${own}` : ''}"`,
         );
     }
     const person = [
@@ -940,7 +1044,16 @@ export function drawCrowd(
       close,
       '</svg>',
     ].join('');
-    painted.push({ row: p.row, markup: hazeAll(person, plan.haze, p.haze) });
+    const hazedPerson = hazeAll(person, plan.haze, p.haze);
+    if (p.behind) {
+      clips.push(
+        `<clipPath id="cb${i}" clipPathUnits="userSpaceOnUse"><path d="${overCover(plan, p.x + bx * p.sc, p.x + (bx + bw) * p.sc, p.feet)}"/></clipPath>`,
+      );
+      painted.push({
+        row: p.row,
+        markup: `<g clip-path="url(#cb${i})">${hazedPerson}</g>`,
+      });
+    } else painted.push({ row: p.row, markup: hazedPerson });
   }
   // Each run of one row's people a group of its own.
   const body = painted
@@ -953,7 +1066,7 @@ export function drawCrowd(
     .map((run) => `<g class="row r${run.row}">${run.markup.join('')}</g>`)
     .join('');
   // The page's length, for its reactions' track: everyone's.
-  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="${vx} ${vy} ${vw} ${vh}" style="--d:${Math.round(timing.durationMs)}ms"><style>${styles.join('')}</style>${body}</svg>`;
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="${vx} ${vy} ${vw} ${vh}" style="--d:${Math.round(timing.durationMs)}ms"><style>${styles.join('')}</style>${clips.length ? `<defs>${clips.join('')}</defs>` : ''}${body}</svg>`;
 }
 
 /** Each group of a crowd, where its heads are: from over which the crowd's words come. */

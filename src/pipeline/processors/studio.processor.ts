@@ -19,6 +19,7 @@ import {
   checkSheet,
   describeEnd,
   distinctVoices,
+  endBefore,
   endStateOf,
   errorsIn,
   mendOutline,
@@ -26,9 +27,16 @@ import {
   repairExplainer,
   repairSheet,
   sentBackFor,
+  keptFeatures,
+  withFeatures,
   type EndState,
   type SheetProblem,
 } from '../../business/domain/studio/studio-check';
+import {
+  auditScene,
+  describeAudit,
+} from '../../business/domain/studio/studio-audit';
+import type { SceneDto } from '../../contracts';
 import {
   stageStory,
   storyBibleFor,
@@ -125,13 +133,40 @@ export function studioMakeOf(
     planned: null,
   };
   // Whatever the writer left wrong is put right here, so a scene is
-  // always one the stage can play.
-  const script = story
-    ? stageStory(repairSheet(row.sheet as StorySheet, bible), bible)
+  // always one the stage can play: carrying on from how the scene before
+  // left things, on its set with every feature its words name.
+  const before = endBefore(rows, row.position, bible);
+  const sheet = story
+    ? repairSheet(row.sheet as StorySheet, bible, before)
+    : null;
+  const staged = sheet
+    ? withFeatures(bible, sheet.set, mendSheet(sheet, bible, before).features)
+    : bible;
+  const script = sheet
+    ? stageStory(sheet, staged, { before })
     : checkExplainer(
         repairExplainer(row.sheet as ExplainerSheet, lesson),
         lesson,
       ).script;
+  // Made, each action, thing handled and reaction is looked for in the
+  // film: one that shows nothing is played again by its fallback, and
+  // what does not show as its words say is logged for us, never the maker.
+  const recheck = sheet
+    ? (scene: SceneDto) => {
+        const seen = auditScene(sheet, scene, staged);
+        const unseen = seen.filter((one) => one.verdict === 'unseen');
+        const notes = describeAudit(seen);
+        return {
+          notes: notes.length ? [`audit: ${notes.join('; ')}`] : [],
+          script: unseen.length
+            ? stageStory(sheet, staged, {
+                before,
+                plain: new Set(unseen.map((one) => one.beat)),
+              })
+            : null,
+        };
+      }
+    : undefined;
   // A film's scene: played as a clip of the film, its shots cut.
   const profile: DocumentProfile & { film: true } = {
     film: true,
@@ -177,6 +212,7 @@ export function studioMakeOf(
       : null,
     script,
     kept: new Map(),
+    ...(recheck ? { recheck } : {}),
   };
 }
 
@@ -398,7 +434,11 @@ export class StudioProcessor {
       ...(request && before ? { previous: before, request } : {}),
     });
     await this.record(episode.id, first.usage);
-    let bible = distinctVoices(traditional(bibleOf(first.value), before));
+    // A set's features, once named, are its for good.
+    let bible = keptFeatures(
+      distinctVoices(traditional(bibleOf(first.value), before)),
+      before,
+    );
     const problems = checkBible(bible, story);
     if (problems.length) {
       this.logger.log(
@@ -411,7 +451,10 @@ export class StudioProcessor {
         ...(request ? { request } : {}),
       });
       await this.record(episode.id, again.usage);
-      const second = distinctVoices(traditional(bibleOf(again.value), before));
+      const second = keptFeatures(
+        distinctVoices(traditional(bibleOf(again.value), before)),
+        before,
+      );
       if (checkBible(second, story).length <= problems.length) bible = second;
     }
     await this.studio.updateShow(show.id, { bible });
@@ -584,7 +627,7 @@ export class StudioProcessor {
           k,
           before,
         );
-        before = sheet ? endStateOf(sheet) : null;
+        if (sheet) before = endStateOf(sheet, bible, before);
       }
     }
     await this.log(
@@ -625,8 +668,7 @@ export class StudioProcessor {
         ).title;
       else {
         const rows = await this.studio.listScenes(episode.id);
-        const prev = rows[k - 1]?.sheet;
-        const before = prev?.kind === 'story' ? endStateOf(prev) : null;
+        const before = endBefore(rows, k, bible);
         title = (
           await this.writeStoryScene(
             show,
@@ -695,10 +737,11 @@ export class StudioProcessor {
     });
     await this.record(episode.id, first.usage);
     const judged = (raw: unknown) => {
-      const mended = mendSheet(storySheetOf(raw), bible);
+      const mended = mendSheet(storySheetOf(raw), bible, before);
       return {
         sheet: mended.sheet,
         mended: mended.mended,
+        features: mended.features,
         problems: checkSheet(mended.sheet, bible, planned, before),
       };
     };
@@ -737,6 +780,14 @@ export class StudioProcessor {
       this.logger.log(
         `studio ${episode.id} s${k + 1}: mended: ${best.mended.slice(0, 8).join('; ')}`,
       );
+    // A feature the words name joins its set for good, as new places and
+    // people join the cast: the next scene there has it too.
+    const features = mendSheet(best.sheet, bible, before).features;
+    if (features.length) {
+      const grown = withFeatures(bible, best.sheet.set, features);
+      await this.studio.updateShow(show.id, { bible: grown });
+      bible.sets.splice(0, bible.sets.length, ...grown.sets);
+    }
     await this.studio.updateScene(row.id, {
       sheet: best.sheet,
       sheetHash: sceneFingerprint(best.sheet, bible, show.brief),

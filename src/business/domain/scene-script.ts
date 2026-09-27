@@ -12,6 +12,12 @@
  */
 
 import { MAX_BARS, numbersIn, type ChartSpec } from './scene-chart';
+import type {
+  ActedMove,
+  FeatureKind,
+  StoryMove,
+  ThingAction,
+} from './scene-doings';
 import {
   FIGURE_FACES,
   FIGURE_POSES,
@@ -98,24 +104,11 @@ export const SCENE_EFFECTS = [
 ] as const;
 /** What someone does toward someone else, directed by the writer on a story's page: "ada.kofi", Ada toward Kofi. */
 export const ACTING_EFFECTS = ['look', 'reach', 'hug'] as const;
-/**
- * What a story's people do besides, played by the rig where a screenplay
- * says: a wave, a nod, a shake of the head, a laugh, a hop, a clap, a sob,
- * a shrug, a lean in toward someone.
- */
-export const STORY_MOVES = [
-  'wave',
-  'nod',
-  'shake',
-  'laugh',
-  'hop',
-  'clap',
-  'sob',
-  'shrug',
-  'lean-in',
-] as const;
-export type StoryMove = (typeof STORY_MOVES)[number];
-export type SceneEffectKind = (typeof SCENE_EFFECTS)[number] | StoryMove;
+/** What a story's people do besides, played by the rig: the Studio's list of doings keeps them. */
+export { STORY_MOVES, type StoryMove } from './scene-doings';
+/** And on a Studio story's stage, the body's own moves: a jump, sitting down, a wag. */
+export type SceneEffectKind =
+  (typeof SCENE_EFFECTS)[number] | StoryMove | ActedMove;
 
 /**
  * How a sentence is said. The writer tags each one and code turns the tag
@@ -258,14 +251,27 @@ export interface SceneBeat {
   /**
    * What its narration says people do with the things on the stage, found
    * in its own words: where the verb starts, who, what, with which thing,
-   * and to whom it is given.
+   * and to whom it is given; on a Studio story's stage, thrown, caught,
+   * dropped, kicked or chewed too, and toward whom or where it goes (as
+   * ScenePropDto's `does` says).
    */
   business?: {
     at: number;
     who: string;
-    does: PropAction;
+    does: PropAction | ThingAction;
     prop: StageProp;
     to: string | null;
+    /**
+     * A screenplay's own moment for it instead of a word: this many
+     * seconds into the quiet after the sentence (with `lead`, the quiet
+     * before the first), in the sheet's order with the rest.
+     */
+    after?: number;
+    lead?: true;
+    /** A catch of a thing thrown: this many seconds after the throw's release, as long as it flies. */
+    flies?: number;
+    /** How long its moment in the quiet runs, in seconds: the next is sequenced after no longer than that. */
+    s?: number;
   }[];
   /**
    * On a story's page, written as a screenplay: a line a character says,
@@ -553,6 +559,49 @@ export interface SceneStage {
   leave?: string[];
   /** A cut: a new scene, or to another place of it, even where the place is the same. */
   cut?: true;
+  /**
+   * A Studio scene's people where they stand, each at a station of its
+   * own until a beat moves them: a spot ("centre-left"), beside a feature
+   * of the set on its left or right ("by:gate:-1"), behind one, hidden by
+   * it ("behind:tree"), or a point on the ground as a share of the stage
+   * across ("@0.62").
+   */
+  at?: Record<string, string>;
+  /** How those who go at this step go: at a run; off or on by a side, through a feature, squeezing under it. */
+  going?: Record<string, SceneGoing>;
+}
+
+/** How someone goes on, off or across at a step. */
+export interface SceneGoing {
+  pace?: 'run';
+  side?: '@left' | '@right';
+  /** The feature they go in or out by, by its id. */
+  via?: string;
+  /** Under or through it, bent low: they are gone once past it. */
+  squeeze?: true;
+}
+
+/** A fixed thing of a Studio scene's set, as the stage stands it. */
+export interface SceneFeature {
+  id: string;
+  name: string;
+  kind: FeatureKind;
+  /** Where it stands, as the viewer sees it: a spot, or at the back. */
+  spot: string;
+  opens: boolean;
+  /** Open as the scene opens. */
+  open?: true;
+  /** The painting shows it: its place's look names it. */
+  looked?: true;
+}
+
+/** A feature opening or shutting: at a word of a sentence, or a moment in the quiet after it. */
+export interface SceneFeatureState {
+  beat: number;
+  word?: number;
+  after?: number;
+  feature: string;
+  state: 'open' | 'shut';
 }
 
 export interface SceneEffect {
@@ -561,6 +610,8 @@ export interface SceneEffect {
   /** One of its parts or states, by the name the writer gave it; null for the whole thing. */
   part: string | null;
   do: SceneEffectKind;
+  /** How long a move takes, when a screenplay's list of doings says. */
+  ms?: number;
 }
 
 export interface SceneStep {
@@ -600,6 +651,8 @@ export interface SceneScript {
   props?: StageProp[];
   /** Before whom each thing rests, when a scene says (the Studio's): else before whoever first handles it. */
   propsNear?: Partial<Record<StageProp, string>>;
+  /** Who holds each thing as the scene opens, in a hand or the mouth (the Studio's): the ball in Pip's mouth. */
+  propsHeld?: Partial<Record<StageProp, { by: string; in: 'hand' | 'mouth' }>>;
   /**
    * Where the camera is, from a sentence on, when a scene says (the
    * Studio's): the whole stage, one person close, or two framed together.
@@ -610,7 +663,17 @@ export interface SceneScript {
     shot: 'wide' | 'close' | 'two';
     on: string | null;
     with: string | null;
+    /** On something done in a quiet: this many seconds into the quiet after spoken beat `beat` (-1, the one the scene opens with). */
+    after?: number;
   }[];
+  /**
+   * A Studio story's stage: its people at fixed stations (SceneStage.at),
+   * and its set's features stood among them; a book's page lays its people
+   * out in a row instead.
+   */
+  stations?: true;
+  features?: SceneFeature[];
+  featureStates?: SceneFeatureState[];
   /** A story page's time, weather and crowd, and the story's world: how the stage dresses it. */
   setting?: {
     time: StoryTime | null;

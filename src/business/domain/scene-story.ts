@@ -10,9 +10,11 @@
  * same drawing stands on every page they are on, the same way round
  * beside anyone else, with the face the last page left them with.
  */
+import type { FeatureKind } from './scene-doings';
 import { figureOf, type FigureProp, type FigureSpec } from './scene-figure';
 import { iconicOf } from './scene-iconic';
 import { setApart } from './scene-looks';
+import { ACTED_PIECES, featureGroup } from './scene-set-pieces';
 import {
   SCENE_AMBIENCES,
   type CharacterThing,
@@ -259,6 +261,8 @@ export interface StoryPlace {
   front?: string | null;
   /** Worked out from what happens there, not said by the text: general, and shared. */
   inferred?: boolean;
+  /** A Studio set's fixed things its stories act on, and where each stands: the painter draws those the stage does not. */
+  features?: { id: string; name: string; kind: FeatureKind; spot: string }[];
 }
 
 export interface StoryPage {
@@ -1557,6 +1561,26 @@ export function setThing(
   world: StoryWorld | null = null,
 ): DrawingThing {
   const front = place.front && place.stand === 'in' ? place.front : null;
+  // A Studio set out of doors: what a crowd may stand behind (a stall, a
+  // cart), if the place has any, a group of its own. A book's sets are
+  // painted as they always were.
+  const props =
+    place.features !== undefined &&
+    place.kind !== 'indoor' &&
+    place.kind !== 'vessel';
+  // The fixed things its stories act on: the stage draws those people go
+  // through, sit on or stand by; the painter the rest, each a group.
+  const features = place.features ?? [];
+  const left = features.filter((f) => ACTED_PIECES.includes(f.kind));
+  const drawn = features.filter((f) => !ACTED_PIECES.includes(f.kind));
+  const where = (spot: string) =>
+    ({
+      left: 'at the left',
+      'centre-left': 'left of the middle',
+      centre: 'in the middle',
+      'centre-right': 'right of the middle',
+      right: 'at the right',
+    })[spot] ?? 'at the back';
   return {
     id: place.id,
     kind: 'drawing',
@@ -1572,6 +1596,16 @@ export function setThing(
       front
         ? `Draw ${front} as its own group with id "front": across the bottom of the picture, from the bottom edge up to about a fifth of its height, where it will stand in front of the people's legs so they are in the ${place.kind === 'vessel' ? place.name : 'place'}, behind it. Everything else of the place is the scene behind.`
         : '',
+      props
+        ? 'If there are any, draw what stands on the ground that someone could stand behind (stalls, carts, counters) together as one group with id "props", drawn after the ground.'
+        : '',
+      left.length
+        ? `Leave out ${left.map((f) => `the ${f.name} (${where(f.spot)})`).join(' and ')}: ${left.length > 1 ? 'they are' : 'it is'} drawn over the set, so keep the ground clear there.`
+        : '',
+      ...drawn.map(
+        (f) =>
+          `Draw the ${f.name}, ${where(f.spot)}, as its own group with id "${featureGroup(f.id)}".`,
+      ),
     ]
       .filter(Boolean)
       .join(' '),
@@ -1579,8 +1613,18 @@ export function setThing(
       'slow and ambient if anything moves at all: clouds drift, water shimmers, leaves stir',
     parts: [
       ...(front ? [{ name: 'front', label: false }] : []),
-      // Asked for, never a fault missing: the ground is read without it.
+      // Asked for, never a fault missing: the ground is read without it,
+      // a crowd stands in front of what has no group, and the stage draws
+      // a feature the painting has not got.
       { name: 'ground', label: false, optional: true },
+      ...(props
+        ? [{ name: 'props', label: false, optional: true as const }]
+        : []),
+      ...drawn.map((f) => ({
+        name: featureGroup(f.id),
+        label: false,
+        optional: true as const,
+      })),
     ],
     states: [],
     shape: 'wide',

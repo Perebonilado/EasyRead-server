@@ -774,6 +774,8 @@ export interface GatedDrawing {
   words?: { size: number };
   /** A character's head, in its own units: where their words come from. */
   head?: [number, number];
+  /** One the artist drew: its mouth, in its own units, where what it carries rides. */
+  mouth?: [number, number];
   /**
    * Someone who stands with people: its frame's height in the figure
    * kit's units, so the stage draws everyone at one scale, on one ground.
@@ -786,6 +788,18 @@ export interface GatedDrawing {
     'r' | 'l',
     [[number, number], [number, number], [number, number]]
   >;
+  /** And each leg's hip, knee and foot, in its own units. */
+  legs?: Record<
+    'r' | 'l',
+    [[number, number], [number, number], [number, number]]
+  >;
+  /** One the artist drew, rigged: where its head turns about, in its own units, and how far at most, in degrees. */
+  neck?: [number, number];
+  dip?: number;
+  /** How far its body sinks on its legs lying down, as a share of its frame's height. */
+  sinks?: number;
+  /** Which way one the artist drew faces as drawn: its head to the left (-1) or right (1); absent, the viewer. */
+  faces?: -1 | 1;
   /** A set: where its open ground is, measured once, so a crowd stands on it. */
   ground?: SetGround;
   /** One person drawn by the kit: what they wear that says who they are, so no one in a crowd wears the same. */

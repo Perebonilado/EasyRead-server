@@ -60,7 +60,16 @@ export function describeBible(
   });
   const places = bible.sets.map(
     (s) =>
-      `- ${s.id}: ${s.name}, ${s.kind}${s.front ? `, people stand behind the ${s.front}` : ''}: ${s.look}`,
+      `- ${s.id}: ${s.name}, ${s.kind}${s.front ? `, people stand behind the ${s.front}` : ''}: ${s.look}${
+        s.features?.length
+          ? ` Features (by id): ${s.features
+              .map(
+                (f) =>
+                  `${f.id} (a ${f.kind}${f.spot === 'back' ? ', at the back' : `, on the ${f.spot}`}${f.opens ? ', opens and shuts' : ''})`,
+              )
+              .join(', ')}.`
+          : ''
+      }`,
   );
   const world = bible.world
     ? `The world: ${[bible.world.era, bible.world.region, bible.world.culture].filter(Boolean).join('; ')}`

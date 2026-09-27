@@ -232,6 +232,15 @@ export const FIGURE_PROPS = [
   'staff',
 ] as const;
 export type FigureProp = (typeof FIGURE_PROPS)[number];
+/**
+ * What stays drawn in a hand wherever a story goes: a staff, an umbrella,
+ * a flag. Anything else a Studio story's people hold is a thing of its
+ * own on the stage (scene-props.ts), to be put down, thrown and caught.
+ */
+export const FIGURE_GEAR = ['flag', 'umbrella', 'staff'] as const;
+export type FigureGear = (typeof FIGURE_GEAR)[number];
+export const isGear = (thing: unknown): thing is FigureGear =>
+  (FIGURE_GEAR as readonly unknown[]).includes(thing);
 
 /** The skin tones, from 1, the lightest, to 10, the deepest. */
 export const SKIN_TONES = 10;
@@ -2089,6 +2098,8 @@ export interface FigureDrawing {
    * one lying down.
    */
   joints?: Record<'r' | 'l', [Point2, Point2, Point2]>;
+  /** And each leg's hip, knee and foot: the knees bend by them, and the body sinks as far as the legs fold. */
+  legs?: Record<'r' | 'l', [Point2, Point2, Point2]>;
 }
 
 /** How the mouth moves while talking: open and shut, unevenly, as speech does. */
@@ -2138,6 +2149,8 @@ interface Layers {
   beyond: { left: number; right: number; up: number };
   /** Each arm's shoulder, elbow and hand as drawn: the rig's joints. */
   joints: Record<'r' | 'l', [Point2, Point2, Point2]>;
+  /** Each leg's hip, knee and foot as drawn. */
+  legJoints: Record<'r' | 'l', [Point2, Point2, Point2]>;
 }
 
 /** Whether someone in a pose has a hand free to hold something. */
@@ -2228,29 +2241,48 @@ function layersOf(
     spec.bottom === 'wrapper';
   const trousers = CLOTH[spec.bottomColour];
   const legTop = hemY - 4;
+  // The knee, halfway down: the shin turns about it, so the legs fold and
+  // the body sinks (a crouch, sitting down) with the feet on the ground.
+  const kneeY = r1((legTop - FEET) / 2);
+  const legJoints = {} as Layers['legJoints'];
   for (const s of [-1, 1]) {
     const x = s * 15 - 8;
-    const leg = [
-      `<rect x="${x}" y="${legTop}" width="16" height="${r1(-FEET - legTop)}" ${inked(bare || spec.bottom === 'shorts' ? skin : trousers)}/>`,
-    ];
+    const colour = bare || spec.bottom === 'shorts' ? skin : trousers;
+    // The thigh and the shin, each open at the knee (no outline across
+    // it), over a round knee: standing, one leg as before; bent, the knee
+    // shows where they part.
+    const piece = (open: number, shut: number) =>
+      `<path d="M${x},${r1(open)} V${r1(shut)} H${x + 16} V${r1(open)}" fill="${colour}"/>`;
+    const thigh = [piece(kneeY + 1, legTop)];
     if (!bare && spec.bottom === 'shorts') {
       const cut = hemY + Math.max(8, (-FEET - hemY) * 0.45);
-      leg.push(
+      thigh.push(
         `<rect x="${x - 1}" y="${legTop}" width="18" height="${r1(cut - legTop)}" ${inked(trousers)}/>`,
       );
     }
-    // Sandals: the foot, and straps over it.
-    if (spec.extras.includes('sandals'))
-      leg.push(
-        `<ellipse cx="${s * 17}" cy="-6" rx="15" ry="7" ${inked(skin)}/>`,
-        line(`M${s * 17 - 11},-5 L${s * 17 + 11},-5`, '#6b4a2f', 3),
-        line(`M${s * 17 - 4},-11 L${s * 17 - 4},-1`, '#6b4a2f', 3),
-      );
-    else
-      leg.push(
-        `<ellipse cx="${s * 17}" cy="-6" rx="15" ry="7" ${inked(SHOE)}/>`,
-      );
-    legs.push(`<g class="leg l${s < 0 ? 0 : 1}">${leg.join('')}</g>`);
+    // Sandals: the foot, and straps over it. The foot stays flat on the
+    // ground however the leg above it turns.
+    const foot = spec.extras.includes('sandals')
+      ? [
+          `<ellipse cx="${s * 17}" cy="-6" rx="15" ry="7" ${inked(skin)}/>`,
+          line(`M${s * 17 - 11},-5 L${s * 17 + 11},-5`, '#6b4a2f', 3),
+          line(`M${s * 17 - 4},-11 L${s * 17 - 4},-1`, '#6b4a2f', 3),
+        ]
+      : [`<ellipse cx="${s * 17}" cy="-6" rx="15" ry="7" ${inked(SHOE)}/>`];
+    const shin = [
+      piece(kneeY, -FEET),
+      `<g class="foot" style="transform-origin:${s * 15}px ${-FEET}px">${foot.join('')}</g>`,
+    ];
+    // Each leg turns about its hip (a kick, knees apart), and its shin
+    // about the knee.
+    legs.push(
+      `<g class="leg l${s < 0 ? 0 : 1}" style="transform-origin:${s * 15}px ${r1(legTop)}px"><circle cx="${s * 15}" cy="${kneeY}" r="8" fill="${colour}"/><g class="shin" style="transform-origin:${s * 15}px ${kneeY}px">${shin.join('')}</g>${thigh.join('')}</g>`,
+    );
+    legJoints[s > 0 ? 'r' : 'l'] = [
+      [s * 15, r1(legTop)],
+      [s * 15, kneeY],
+      [s * 15, -FEET],
+    ];
   }
   if (
     (spec.bottom === 'skirt' || spec.bottom === 'wrapper') &&
@@ -2260,11 +2292,11 @@ function layersOf(
     // A wrapper falls to the ankles, its end tucked across the front.
     const wrapper = spec.bottom === 'wrapper';
     const down = wrapper ? -FEET - 3 : hemY + Math.max(12, R.legs * 0.5);
-    legs.push(
+    const skirt = [
       `<path d="M${r1(-h2 + 2)},${hemY - 6} L${r1(h2 - 2)},${hemY - 6} L${r1(h2 + 6)},${r1(down)} L${r1(-h2 - 6)},${r1(down)} Z" ${inked(trousers)}/>`,
-    );
+    ];
     if (wrapper)
-      legs.push(
+      skirt.push(
         line(
           `M${r1(h2 - 4)},${hemY - 4} L${r1(-h2 * 0.2)},${r1(down)}`,
           shade(trousers, 0.72),
@@ -2272,6 +2304,13 @@ function layersOf(
         ),
         `<rect x="${r1(-h2 + 2)}" y="${hemY - 6}" width="${r1(h2 * 2 - 4)}" height="6" ${inked(shade(trousers, 0.85), 2)}/>`,
       );
+    // It sinks with the body; one to the ankles is taken up as it does, so
+    // its hem stays off the ground.
+    legs.push(
+      wrapper
+        ? `<g class="skirt wrap" style="transform-origin:0 ${hemY - 6}px;--reach:${r1(down - (hemY - 6))}">${skirt.join('')}</g>`
+        : `<g class="skirt">${skirt.join('')}</g>`,
+    );
   }
 
   // The body: a trapezoid rounded at the shoulders, as long as what is worn.
@@ -2565,6 +2604,7 @@ function layersOf(
       up: r1(R.top - FIGURE_FRAME.headroom - beyond.top),
     },
     joints,
+    legJoints,
   };
 }
 
@@ -2741,8 +2781,11 @@ function styleOf(
  * the face turned toward one side. --tilt, --nod: the head tilted (in
  * degrees) and nodded (in units), about the neck. --brow: the brows
  * raised. --ar, --arf, --al, --alf: the right and left arm about the
- * shoulder, and the forearm about the elbow, in degrees. --lean and
- * --flip: the whole figure leant about its feet, and mirrored.
+ * shoulder, and the forearm about the elbow, in degrees. --legr, --legl:
+ * the right and left leg about the hip, in degrees (a kick, knees apart).
+ * --knr, --knl: each shin about its knee, in degrees, the foot kept flat.
+ * --low: the body sunk on its legs, in units (a crouch, sitting down).
+ * --lean and --flip: the whole figure leant about its feet, and mirrored.
  */
 function rigStyle(neck: number): string {
   const head = `transform-box:view-box;transform-origin:0 ${r1(neck)}px`;
@@ -2756,6 +2799,10 @@ function rigStyle(neck: number): string {
     '.arm,.fore{transform-box:view-box}',
     '.ar{transform:rotate(calc(var(--ar,0)*1deg))}.ar .fore{transform:rotate(calc(var(--arf,0)*1deg))}',
     '.al{transform:rotate(calc(var(--al,0)*1deg))}.al .fore{transform:rotate(calc(var(--alf,0)*1deg))}',
+    '.leg{transform-box:view-box}.l1{transform:rotate(calc(var(--legr,0)*1deg))}.l0{transform:rotate(calc(var(--legl,0)*1deg))}',
+    '.shin,.foot,.skirt{transform-box:view-box}.l1 .shin{transform:rotate(calc(var(--knr,0)*1deg))}.l0 .shin{transform:rotate(calc(var(--knl,0)*1deg))}',
+    '.l1 .foot{transform:rotate(calc((var(--legr,0) + var(--knr,0))*-1deg))}.l0 .foot{transform:rotate(calc((var(--legl,0) + var(--knl,0))*-1deg))}',
+    '.leg,.breathe,.skirt{translate:0 calc(var(--low,0)*1px)}.wrap{scale:1 calc(1 - var(--low,0) / var(--reach,100))}',
     '.flip{transform-box:view-box;transform-origin:0 0;transform:scaleX(var(--flip,1)) rotate(calc(var(--lean,0)*1deg))}',
     '.vm{opacity:0}.lipsync .mouth,.lipsync .talk{opacity:0}',
     `${Array.from({ length: MOUTH_SHAPES }, (_, k) => `.lipsync.v${k} .v${k}`).join(',')}{opacity:1}`,
@@ -3129,7 +3176,9 @@ export function drawFigure(
       body: at([0, r1((R.sY + R.hemY) / 2)]),
       legs: at([0, r1((R.hemY - FEET) / 2)]),
     },
-    ...(n === 1 && !lying ? { joints: members[0].joints } : {}),
+    ...(n === 1 && !lying
+      ? { joints: members[0].joints, legs: members[0].legJoints }
+      : {}),
   };
 }
 

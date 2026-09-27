@@ -1,0 +1,162 @@
+{
+ "characters": [
+  {
+   "id": "maya",
+   "name": "Maya",
+   "kind": "person",
+   "role": "main",
+   "look": "a slim 8-year-old girl with deep brown skin, black hair in two tight braids, a yellow t-shirt, blue shorts and red sandals, an orange bead bracelet on one wrist",
+   "figure": {
+    "age": "child",
+    "build": "slim",
+    "skin": 7,
+    "hair": "braids",
+    "hairColour": "black",
+    "facialHair": "none",
+    "headwear": "none",
+    "top": "t-shirt",
+    "topColour": "yellow",
+    "bottom": "shorts",
+    "bottomColour": "blue",
+    "accentColour": "orange",
+    "extras": []
+   },
+   "size": null,
+   "voice": "girl",
+   "voicePick": 0,
+   "traits": [
+    "brave",
+    "quick",
+    "never gives up"
+   ],
+   "carries": "ball"
+  },
+  {
+   "id": "pip",
+   "name": "Pip",
+   "kind": "animal",
+   "role": "main",
+   "look": "a small brown puppy with a white patch over one eye, floppy ears, a red collar and a tail that never stops wagging",
+   "figure": null,
+   "size": "small",
+   "voice": "creature",
+   "voicePick": 0,
+   "traits": [
+    "curious",
+    "dashy",
+    "chews everything"
+   ],
+   "carries": null
+  },
+  {
+   "id": "tobi",
+   "name": "Tobi",
+   "kind": "person",
+   "role": "supporting",
+   "look": "a sturdy 9-year-old boy with deep brown skin, short black hair under a blue cap, a green t-shirt, grey shorts and a whistle on a cord round his neck",
+   "figure": {
+    "age": "child",
+    "build": "average",
+    "skin": 9,
+    "hair": "short",
+    "hairColour": "black",
+    "facialHair": "none",
+    "headwear": "cap",
+    "top": "t-shirt",
+    "topColour": "green",
+    "bottom": "shorts",
+    "bottomColour": "grey",
+    "accentColour": "blue",
+    "extras": []
+   },
+   "size": null,
+   "voice": "boy",
+   "voicePick": 1,
+   "traits": [
+    "cheerful",
+    "loud",
+    "helpful"
+   ],
+   "carries": "magnifier"
+  },
+  {
+   "id": "mama",
+   "name": "Mama Nkechi",
+   "kind": "person",
+   "role": "minor",
+   "look": "a broad market woman in her fifties with deep brown skin, a tall orange head tie over her hair, a purple kaftan, a brown wrapper and a cloth bag of peppers over one shoulder",
+   "figure": {
+    "age": "adult",
+    "build": "broad",
+    "skin": 9,
+    "hair": "short",
+    "hairColour": "black",
+    "facialHair": "none",
+    "headwear": "gele",
+    "top": "kaftan",
+    "topColour": "purple",
+    "bottom": "wrapper",
+    "bottomColour": "brown",
+    "accentColour": "orange",
+    "extras": []
+   },
+   "size": null,
+   "voice": "woman",
+   "voicePick": 2,
+   "traits": [
+    "brisk",
+    "kind",
+    "knows every dog on the street"
+   ],
+   "carries": "bag"
+  }
+ ],
+ "sets": [
+  {
+   "id": "yard",
+   "name": "The Compound",
+   "look": "a small walled compound in a Lagos neighbourhood: a red-roofed bungalow, a mango tree with a tyre swing, a blue bucket and a metal bowl by the step, clothes drying on a line",
+   "kind": "outdoor",
+   "stand": "on",
+   "front": null,
+   "sound": null
+  },
+  {
+   "id": "market",
+   "name": "The Market Road",
+   "look": "a busy open-air market beside a Lagos road: stalls of tomatoes, peppers and yams under striped umbrellas, cardboard boxes stacked on the kerb, a yellow danfo bus waiting beyond",
+   "kind": "outdoor",
+   "stand": "on",
+   "front": "stall counter",
+   "sound": "machine"
+  },
+  {
+   "id": "bus",
+   "name": "The Danfo",
+   "look": "the inside of a yellow danfo minibus: worn brown bench seats, a beaded cover on the steering wheel, stickers on the glass, the road sliding past the open door",
+   "kind": "vessel",
+   "stand": "in",
+   "front": "seat back",
+   "sound": "machine"
+  },
+  {
+   "id": "field",
+   "name": "The Open Field",
+   "look": "a patch of open grass at the end of the street: a low concrete wall, a lopsided goalpost, tall grass at the edges and palm trees against the sky beyond",
+   "kind": "outdoor",
+   "stand": "on",
+   "front": null,
+   "sound": "wind"
+  }
+ ],
+ "world": {
+  "era": "today",
+  "region": "Lagos, Nigeria",
+  "culture": "a Yoruba family in a busy city neighbourhood",
+  "landscape": "flat sandy streets, low bungalows with walled compounds, mango trees, a crowded market road",
+  "homes": "a small bungalow with a walled compound, a mango tree and a tyre swing"
+ },
+ "subject": "",
+ "maths": false,
+ "pictures": []
+}

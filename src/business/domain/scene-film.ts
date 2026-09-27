@@ -10,6 +10,7 @@ import type {
   ScenePlaceDto,
   SceneStepDto,
 } from '../../contracts';
+import { HELD_IN_MS, HELD_MOVES, doingOf } from './scene-doings';
 
 /** The player's timings, in milliseconds. */
 const MOVE_MS = 700;
@@ -18,6 +19,7 @@ const EXIT_MS = 380;
 const STAGGER_MS = 180;
 const CLEAR_FIRST_MS = 190;
 const POINT_MS = 1700;
+const SWING_MS = 300;
 const PULSE_MS = 700;
 /** A walk across the whole stage, and the shortest and longest walk. */
 const WALK_STAGE_MS = 4000;
@@ -29,6 +31,9 @@ const walkMs = (dx: number, W: number) =>
     WALK_MAX_MS,
     Math.max(WALK_MIN_MS, (Math.abs(dx) / W) * WALK_STAGE_MS),
   );
+/** A run is this much quicker than a walk; and going in at a feature, this long to be gone there. */
+const RUN_PACE = 2.2;
+const VANISH_MS = 260;
 
 /** Who comes on at step `k`, and who goes. */
 const newcomersAt = (steps: readonly SceneStepDto[], k: number) =>
@@ -67,6 +72,7 @@ export function settledOf(
     | 'acting'
     | 'setting'
     | 'stagings'
+    | 'props'
   >,
 ): number {
   const { steps, stagings } = scene;
@@ -74,22 +80,58 @@ export function settledOf(
   const beats = scene.beats;
   let at = beats.length ? beats[beats.length - 1].endMs : scene.durationMs;
   const walks = (id: string) => scene.acting?.[id]?.walks === true;
-  /** Where someone just off the stage stands: off the nearer side. */
-  const offside = (place: ScenePlaceDto) =>
-    place.x + place.w / 2 < W / 2 ? -place.w * 1.02 : W + place.w * 0.02;
+  /** Where someone just off the stage stands: off the side given, else the nearer. */
+  const offside = (place: ScenePlaceDto, side?: 'left' | 'right') =>
+    (side ? side === 'left' : place.x + place.w / 2 < W / 2)
+      ? -place.w * 1.02
+      : W + place.w * 0.02;
+  const pace = (step: SceneStepDto, id: string) =>
+    step.pace?.[id] === 'run' || step.exit?.[id]?.how === 'run' ? RUN_PACE : 1;
+  /** A feature's way at the wide staging, and whether one going by it goes in there. */
+  const wayOf = (via: string | undefined, how?: string) => {
+    const feature = via
+      ? scene.setting?.features?.find((f) => f.id === via)
+      : undefined;
+    if (!feature) return null;
+    const way = feature.way.wide;
+    const goesIn =
+      how === 'squeeze' ||
+      feature.kind === 'door' ||
+      feature.kind === 'vehicle' ||
+      feature.kind === 'window' ||
+      way.k < 0.99;
+    return { way, goesIn };
+  };
   steps.forEach((step, k) => {
     at = Math.max(at, step.atMs);
     for (const id of newcomersAt(steps, k)) {
       const place = places[k]?.[id];
       const start = entryStart(steps, k, id);
-      if (place && walks(id) && step.enter[id]?.how !== 'fade')
-        at = Math.max(at, start + walkMs(place.x - offside(place), W));
+      const entry = step.enter[id];
+      const by = wayOf(entry?.via);
+      const from = by
+        ? by.way.x - (place?.w ?? 0) / 2
+        : place
+          ? offside(place, entry?.side)
+          : 0;
+      if (place && walks(id) && entry?.how !== 'fade')
+        at = Math.max(at, start + walkMs(place.x - from, W) / pace(step, id));
       else at = Math.max(at, start + ENTER_MS);
     }
     for (const id of leaversAt(steps, k)) {
       const place = places[k - 1]?.[id];
+      const exit = step.exit?.[id];
+      const by = wayOf(exit?.via, exit?.how);
       if (place && walks(id) && !step.cut)
-        at = Math.max(at, step.atMs + walkMs(offside(place) - place.x, W));
+        at = Math.max(
+          at,
+          step.atMs +
+            (by?.goesIn
+              ? walkMs(by.way.x - place.w / 2 - place.x, W) / pace(step, id) +
+                VANISH_MS
+              : walkMs(offside(place, exit?.side) - place.x, W) /
+                pace(step, id)),
+        );
       else at = Math.max(at, step.atMs + EXIT_MS);
     }
     if (k > 0)
@@ -101,16 +143,34 @@ export function settledOf(
           at,
           step.atMs +
             (walks(id) && Math.abs(to.x - from.x) > W * 0.02
-              ? walkMs(to.x - from.x, W)
+              ? walkMs(to.x - from.x, W) / pace(step, id)
               : MOVE_MS),
         );
       }
   });
+  // Sitting or lying down is done once they are down: held there after,
+  // it is no reason to wait.
   for (const acting of Object.values(scene.acting ?? {}))
-    for (const [start, , ms] of acting.moves ?? [])
-      at = Math.max(at, start + ms);
+    for (const [start, move, ms] of acting.moves ?? [])
+      at = Math.max(
+        at,
+        start +
+          ((HELD_MOVES as readonly string[]).includes(move)
+            ? Math.min(ms, HELD_IN_MS)
+            : ms),
+      );
   for (const [start, , ms] of scene.setting?.crowd?.moves ?? [])
     at = Math.max(at, start + ms);
+  // A gate swinging shut is seen to the end of its swing.
+  for (const [start] of scene.setting?.featureStates ?? [])
+    at = Math.max(at, start + SWING_MS);
+  // A thing handled is done once its clip is: the drink after the moment
+  // the cup reaches the lips.
+  for (const prop of scene.props ?? [])
+    for (const [moment, , does] of prop.does) {
+      const doing = doingOf(does);
+      if (doing) at = Math.max(at, moment + doing.ms * (1 - doing.keyAt));
+    }
   for (const effect of scene.effects) {
     if (effect.do === 'zoom') continue;
     const span = effect.say

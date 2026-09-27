@@ -401,6 +401,8 @@ describe("a story's continuity", () => {
     // the open ground its own group, never a fault left out.
     expect(quay.brief).toContain('the horizon at eye level, about 64%');
     expect(quay.brief).toContain('id "ground"');
+    // A book's set is painted as it always was: no group of props asked.
+    expect(quay.brief).not.toContain('id "props"');
     expect(quay.parts).toEqual([
       { name: 'ground', label: false, optional: true },
     ]);
@@ -422,6 +424,36 @@ describe("a story's continuity", () => {
       'the floor meets the back wall about 68 to 72%',
     );
     expect(room.parts.map((p) => p.name)).toEqual(['front', 'ground']);
+    // A Studio set's features: the stage draws the gate, so the painter
+    // leaves it out; the well is the painter's, a group of its own. Out of
+    // doors, what a crowd could stand behind is a group of its own, if the
+    // place has any.
+    const yard = setThing(
+      {
+        id: 'yard',
+        name: 'The compound',
+        aliases: [],
+        look: 'a walled compound',
+        firstPage: 1,
+        sound: null,
+        features: [
+          { id: 'gate', name: 'gate', kind: 'gate', spot: 'right' },
+          { id: 'well', name: 'well', kind: 'well', spot: 'back' },
+        ],
+      },
+      'Maya',
+    );
+    expect(yard.brief).toContain('Leave out the gate (at the right)');
+    expect(yard.brief).toContain('If there are any');
+    expect(yard.brief).toContain('id "props"');
+    expect(yard.brief).toContain(
+      'Draw the well, at the back, as its own group with id "f-well"',
+    );
+    expect(yard.parts.map((p) => p.name)).toEqual([
+      'ground',
+      'props',
+      'f-well',
+    ]);
   });
 
   it('keeps what each character is and how a person looks from where the book first meets them', () => {

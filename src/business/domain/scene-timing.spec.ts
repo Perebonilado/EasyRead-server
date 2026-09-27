@@ -2,6 +2,7 @@ import { spokenForm } from './spoken';
 import {
   anchorMs,
   estimateSpokenWords,
+  outOfSilence,
   pinSpokenWords,
   quietGaps,
   sceneSpoken,
@@ -110,5 +111,47 @@ describe('the scene on the audio', () => {
   it('keeps changes apart and finds the long quiet stretches', () => {
     expect(spaced([0, 100, 200, 2000], 10_000)).toEqual([0, 450, 900, 2000]);
     expect(quietGaps([0, 1000, 9000], 10_000)).toEqual([[1000, 9000]]);
+  });
+});
+
+describe('words the voice never said in a silence', () => {
+  it('moves a word measured in a silence the voice made to where it speaks again', () => {
+    // "Go, Pip, go!": the aligner left "Go," at no length in the quiet
+    // after the line before; the voice speaks again at 8.91 s.
+    const words = [
+      [0, 3, 7920, 7920],
+      [4, 8, 8908, 9230],
+      [9, 12, 9445, 9810],
+    ];
+    expect(outOfSilence(words, [[7350, 8910]])).toEqual([
+      [0, 3, 8910, 8910],
+      [4, 8, 8910, 9230],
+      [9, 12, 9445, 9810],
+    ]);
+    // A word at a silence's very edge stays where it was.
+    expect(outOfSilence([[0, 3, 7360, 7600]], [[7350, 8910]])).toEqual([
+      [0, 3, 7360, 7600],
+    ]);
+  });
+
+  it("says a line's last words before the quiet after it, never on into it", () => {
+    // "He led us all over town!" then "Pip!": an estimate spread "over
+    // town!" over the 6 s quiet after it; "Pip!" was put in it too.
+    const words = [
+      [0, 2, 1000, 1200],
+      [3, 6, 1250, 1500],
+      [7, 9, 1550, 1800],
+      [10, 13, 1850, 2100],
+      [14, 18, 4000, 5500],
+      [19, 24, 6000, 7400],
+      [25, 29, 7500, 7700],
+    ];
+    const out = outOfSilence(words, [[2150, 8200]], [0, 25]);
+    // The line ends as its voice does, before the quiet, in order.
+    expect(out[4][2]).toBeGreaterThanOrEqual(out[3][2]);
+    expect(out[5][3]).toBeLessThanOrEqual(2150);
+    expect(out[4][2]).toBeLessThan(out[5][2]);
+    // The next line's first word, where the voice speaks again.
+    expect(out[6][2]).toBe(8200);
   });
 });

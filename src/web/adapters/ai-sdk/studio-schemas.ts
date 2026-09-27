@@ -9,7 +9,6 @@ import {
   SHOTS,
   SPOTS,
   STUDIO_AUDIENCES,
-  STUDIO_DOINGS,
   STUDIO_FACES,
   STUDIO_FORMATS,
   STUDIO_KINDS,
@@ -18,7 +17,12 @@ import {
   STUDIO_VOICES,
   TRANSITIONS,
 } from '../../../business/domain/studio/studio';
-import { PROP_ACTIONS } from '../../../business/domain/scene-directions';
+import {
+  DOING_IDS,
+  FEATURE_KINDS,
+  THINGS,
+  TRAVEL_PACES,
+} from '../../../business/domain/scene-doings';
 import { STAGE_PROPS } from '../../../business/domain/scene-props';
 import {
   BOTTOMS,
@@ -27,7 +31,6 @@ import {
   FIGURE_AGES,
   FIGURE_BUILDS,
   FIGURE_POSES,
-  FIGURE_PROPS,
   FIGURE_SIGNS,
   HAIR_COLOURS,
   HAIR_STYLES,
@@ -126,7 +129,10 @@ export const studioBibleSchema = z.object({
       voice: z.enum(STUDIO_VOICES as [string, ...string[]]).catch('woman'),
       voicePick: z.number().catch(0),
       traits: z.array(z.string()).catch([]),
-      carries: z.enum(FIGURE_PROPS).nullable().catch(null),
+      carries: z
+        .enum(THINGS as [string, ...string[]])
+        .nullable()
+        .catch(null),
     }),
   ),
   sets: z.array(
@@ -138,6 +144,17 @@ export const studioBibleSchema = z.object({
       stand: z.enum(PLACE_STANDS).catch('on'),
       front: z.string().nullable().catch(null),
       sound: z.enum(SCENE_AMBIENCES).nullable().catch(null),
+      features: z
+        .array(
+          z.object({
+            id: z.string(),
+            name: z.string(),
+            kind: z.enum(FEATURE_KINDS).catch('wall'),
+            spot: z.enum([...SPOTS, 'back']).catch('back'),
+            opens: z.boolean().catch(false),
+          }),
+        )
+        .catch([]),
     }),
   ),
   world: z
@@ -187,7 +204,10 @@ export const studioSceneSchema = z.object({
       spot: z.enum(SPOTS).catch('centre'),
       pose: z.enum(FIGURE_POSES).catch('standing'),
       face: z.enum(STUDIO_FACES).catch('neutral'),
-      holding: z.enum(FIGURE_PROPS).nullable().catch(null),
+      holding: z
+        .enum(THINGS as [string, ...string[]])
+        .nullable()
+        .catch(null),
     }),
   ),
   props: z.array(
@@ -205,14 +225,25 @@ export const studioSceneSchema = z.object({
       say: z.string().catch(''),
       feeling: z.enum(STUDIO_FACES).nullable().catch(null),
       sign: z.enum(FIGURE_SIGNS).nullable().catch(null),
+      // A doing none of the list is kept as written, for the domain to
+      // read its words: never lost as nothing.
       do: z
-        .enum([...STUDIO_DOINGS, ...PROP_ACTIONS])
+        .union([z.enum(DOING_IDS), z.string()])
         .nullable()
         .catch(null),
+      target: z.string().nullable().catch(null),
+      thing: z
+        .enum(THINGS as [string, ...string[]])
+        .nullable()
+        .catch(null),
+      via: z.string().nullable().catch(null),
       prop: z.enum(STAGE_PROPS).nullable().catch(null),
       spot: z.enum(SPOTS).nullable().catch(null),
       from: z.enum(LINE_FROMS).nullable().catch(null),
-      pace: z.enum(LINE_PACES).nullable().catch(null),
+      pace: z
+        .enum([...LINE_PACES, ...TRAVEL_PACES])
+        .nullable()
+        .catch(null),
       seconds: z.number().nullable().catch(null),
     }),
   ),

@@ -228,6 +228,27 @@ describe('a crowd seen through one camera', () => {
     );
   });
 
+  it('stands no one where a piece the stage draws over the crowd would hide them', () => {
+    const danfo = { x0: 0, x1: 700, y0: 380, y1: 640 };
+    const around = planCrowd(market({ pieces: [danfo] }));
+    expect(around.people.length).toBeGreaterThan(0);
+    for (const p of around.people) {
+      const R = rigOf(p.spec.age, p.spec.build);
+      const body = {
+        x0: p.x - 30 * p.sc,
+        x1: p.x + 30 * p.sc,
+        y0: p.feet + R.top * p.sc,
+        y1: p.feet,
+      };
+      const meets =
+        body.x0 < danfo.x1 &&
+        danfo.x0 < body.x1 &&
+        body.y0 < danfo.y1 &&
+        danfo.y0 < body.y1;
+      expect(meets).toBe(false);
+    }
+  });
+
   it('keeps the horizon near the leads’ eye line, and a room’s at it', () => {
     const high = planCrowd(market({ ground: ground(0.4) }));
     // A child's eye line: 105 of the kit's units over their feet.
@@ -347,6 +368,66 @@ describe('a crowd on the set’s own ground', () => {
     expect(
       plan.people.some((p) => p.x > 540 && p.x < 800 && p.feet >= 665),
     ).toBe(true);
+  });
+
+  it('stands a busy market behind its stalls when the painter drew them apart, feet hidden and heads over the counters', () => {
+    // Three stalls, their counters from 595 to 662; with them taken away
+    // the ground runs on behind them to its far edge at 600.
+    const stalls: [number, number][] = [
+      [140, 420],
+      [520, 820],
+      [1000, 1300],
+    ];
+    const column = (i: number) => ((i + 0.5) / 320) * 1600;
+    const onStall = (i: number) =>
+      stalls.some(([a, b]) => column(i) >= a && column(i) <= b);
+    const props: SetGround = {
+      top: Array.from({ length: 320 }, (_, i) =>
+        onStall(i) ? 662 / 900 : 600 / 900,
+      ),
+      horizon: 596 / 900,
+      haze: '#dfe6ea',
+      source: 'group',
+      behind: Array.from({ length: 320 }, () => 600 / 900),
+      cover: Array.from({ length: 320 }, (_, i): [number, number] | null =>
+        onStall(i) ? [595 / 900, 662 / 900] : null,
+      ),
+    };
+    const bare: SetGround = { ...props };
+    delete bare.behind;
+    delete bare.cover;
+    const without = planCrowd(market({ ground: bare }));
+    const plan = planCrowd(market({ ground: props }));
+    const behind = plan.people.filter((p) => p.behind);
+    // Busier than with nowhere to stand but in front of the stalls.
+    expect(behind.length).toBeGreaterThanOrEqual(4);
+    expect(plan.people.length).toBeGreaterThan(without.people.length);
+    for (const p of behind) {
+      // Only the far and middle rows, on the ground behind a counter, their
+      // feet down behind it and their head over it.
+      expect(p.row).toBeLessThan(2);
+      const head = p.feet + rigOf(p.spec.age, p.spec.build).top * p.sc;
+      for (let dx = -0.3 * 96 * p.sc; dx <= 0.3 * 96 * p.sc; dx += 2) {
+        const i = Math.floor(((p.x + dx) / 1600) * 320);
+        expect(props.cover![i]).not.toBeNull();
+        expect(p.feet).toBeGreaterThan(595);
+        expect(p.feet).toBeLessThan(662);
+        expect(p.feet).toBeGreaterThanOrEqual(600);
+      }
+      expect(head).toBeLessThan(595);
+      expect(p.walk).toBe(0);
+    }
+    // Everyone else as before: never on a counter.
+    for (const p of plan.people.filter((one) => !one.behind))
+      for (let dx = -0.3 * 96 * p.sc; dx <= 0.3 * 96 * p.sc; dx += 2)
+        expect(p.feet).toBeGreaterThanOrEqual(
+          topAt(props, (p.x + dx) / 1600) * 900 + 3 - 1e-6,
+        );
+    // Drawn cut off at the counter's top, so the stall stands before them.
+    const svg = drawCrowd(plan, { durationMs: 10_000 });
+    expect(svg.match(/<clipPath id="cb\d+"/g)).toHaveLength(behind.length);
+    expect(svg).toMatch(/<g clip-path="url\(#cb\d+\)">/);
+    expect(svg).toMatch(/L\d+(?:\.\d)?,595\b/);
   });
 
   it('stands no one where the ground cannot be read but the lower third', () => {

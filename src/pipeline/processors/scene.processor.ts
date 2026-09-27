@@ -51,10 +51,13 @@ import {
   composeScene,
   crowdShown,
   describeStep,
+  featureStill,
+  featureSvgAt,
   fullestStep,
   hiddenAt,
   rhythmOf,
   thumbSvg,
+  withoutStandIns,
 } from '../../business/domain/scene-compose';
 import {
   conventionGround,
@@ -98,6 +101,7 @@ import {
   figureSheet,
   lightDrawing,
   measureSheet,
+  mouthOf,
   setsOf,
   type Cast,
   type CharacterSheet,
@@ -147,9 +151,11 @@ import {
   spokenWordsFromVoice,
   timeBeats,
   type SpokenWords,
+  outOfSilence,
   type TimedBeat,
 } from '../../business/domain/scene-timing';
 import {
+  HOLD_LIMIT_S,
   characterVoice,
   deliveryPieces,
   sentenceStarts,
@@ -210,6 +216,8 @@ const TERM_LANDS_S = 0.7;
 const NOTES_READERS = 3;
 /** Tries at one drawing: the first, and one more with the gate's notes. */
 const DRAW_TRIES = 2;
+/** A silence ending this close to the end of the audio is the quiet it ends on. */
+const QUIET_END_SLACK_MS = 100;
 /** Stretches of a story read at once. */
 const STORY_READERS = 4;
 /** The most stretches (about 20 pages each) a story read the old way is read again in, unasked. */
@@ -579,6 +587,15 @@ export class SceneProcessor {
     /** What SCENE_KEEP_PARTS names the page's parts file. */
     keepAs?: string;
     step?: (step: 'drawing' | 'voicing' | 'composing') => Promise<void>;
+    /**
+     * A look at the scene as composed (the Studio's check that every beat
+     * shows): what it found, for the log, and a script to compose again
+     * from the same drawings and voice, or null when it is sound.
+     */
+    recheck?: (scene: SceneDto) => {
+      notes: string[];
+      script: SceneScript | null;
+    };
   }): Promise<
     | { fit: 'poor'; reason: string }
     | {
@@ -632,7 +649,7 @@ export class SceneProcessor {
     const carried = carryOver(truly.script, input.lesson?.ending ?? null);
     if (carried.mended.length)
       this.logger.log(`${who}: ${carried.mended.slice(0, 4).join('; ')}`);
-    const script = carried.script;
+    let script = carried.script;
     if (script.fit === 'poor')
       return {
         fit: 'poor',
@@ -667,9 +684,10 @@ export class SceneProcessor {
         who,
         story,
         // The voice waits while a "previously" brings the last page back,
-        // and while what happens before the first word happens.
+        // and while what happens before the first word happens: a film's
+        // opening as long as its quiet may be, under its music.
         Math.min(
-          3,
+          (input.profile as { film?: boolean }).film ? HOLD_LIMIT_S : 3,
           (script.opening?.show.length ? OPENING_LEAD_S : 0) +
             (script.lead ?? 0),
         ),
@@ -690,17 +708,28 @@ export class SceneProcessor {
     const voice = spoken.value;
 
     await input.step?.('composing');
-    const { scene, filled, audit } = composeScene({
-      script,
-      drawings,
-      beats: voice.beats,
-      durationMs: voice.durationMs,
-      timing: voice.timing,
-      generator: SCENE_GENERATOR_VERSION,
-      profile: input.profile,
-      // The book's or the show's own: each place keeps its regulars.
-      key: story?.setsKey ?? null,
-    });
+    const compose = (from: SceneScript) =>
+      composeScene({
+        script: from,
+        drawings,
+        beats: voice.beats,
+        durationMs: voice.durationMs,
+        timing: voice.timing,
+        generator: SCENE_GENERATOR_VERSION,
+        profile: input.profile,
+        // The book's or the show's own: each place keeps its regulars.
+        key: story?.setsKey ?? null,
+      });
+    let composed = compose(script);
+    // Looked at as made: anything it asks to play again is composed again
+    // on the same drawings and voice, its words and quiet unchanged.
+    const again = input.recheck?.(composed.scene);
+    for (const note of again?.notes ?? []) this.logger.log(`${who}: ${note}`);
+    if (again?.script) {
+      script = again.script;
+      composed = compose(script);
+    }
+    const { scene, filled, audit } = composed;
     // For working on the layout without the models: everything compose
     // was given, kept where SCENE_KEEP_PARTS says (scripts/scene-recompose).
     const keep = this.config.get<string>('SCENE_KEEP_PARTS')?.trim();
@@ -1111,6 +1140,22 @@ export class SceneProcessor {
               ...((pageAnchors ?? sheet.anchors).head
                 ? { head: (pageAnchors ?? sheet.anchors).head! }
                 : {}),
+              // What one the artist drew carries rides at its mouth.
+              ...(!onPage && sheet.anchors.mouth
+                ? { mouth: sheet.anchors.mouth }
+                : {}),
+              // Where its rig turns its head, and which way it faces as
+              // drawn: the stage dips the head, and turns it to face
+              // where it goes.
+              ...(!onPage && sheet.rig?.dip && sheet.rig.joints.head
+                ? { neck: sheet.rig.joints.head, dip: sheet.rig.dip }
+                : {}),
+              ...(!onPage && sheet.rig?.sinks
+                ? { sinks: sheet.rig.sinks }
+                : {}),
+              ...(!onPage && sheet.rig?.faces
+                ? { faces: sheet.rig.faces }
+                : {}),
               // A person stands at the kit's scale, in the frame they are
               // drawn in on the page; an animal or a creature at its size
               // beside them.
@@ -1407,6 +1452,13 @@ export class SceneProcessor {
           mimeType: result.mimeType,
           text: spoken.text,
         });
+        // The quiet the voice ends on (a scene's last moments play in
+        // it): no words are there, and the words end before it.
+        const quietEnd = (result.silencesMs ?? []).reduce(
+          (most, [a, b]) =>
+            b >= durationMs - QUIET_END_SLACK_MS ? Math.max(most, b - a) : most,
+          0,
+        );
         const times = aligned
           ? wordTimesFromAligned(
               aligned.words,
@@ -1414,6 +1466,7 @@ export class SceneProcessor {
               durationMs,
               audioKey,
               `echogarden-${aligned.engine}`,
+              quietEnd,
             )
           : null;
         if (times) {
@@ -1438,6 +1491,10 @@ export class SceneProcessor {
       durationMs,
       pieceStartsMs: starts,
     });
+    // A word measured in a silence the voice made is where the voice
+    // speaks again: a line's bubble opens as its voice does.
+    if (timing !== 'voice' && result.silencesMs?.length)
+      words = outOfSilence(words, result.silencesMs, spoken.starts);
     return {
       beats: timeBeats(script.beats, forms, words),
       durationMs,
@@ -1466,13 +1523,29 @@ export class SceneProcessor {
         pngs.set(
           scenery.id,
           await rasterise(
-            scenery.svg,
+            withoutStandIns(scene, scenery.svg),
             Math.round(scene.stagings.box.w * scale),
           ),
         );
       } catch {
         // A still with no scene behind it.
       }
+    // The set's features the stage draws, as open as they are then.
+    for (const feature of scene.setting?.features ?? []) {
+      const svg = featureSvgAt(scene, feature, until);
+      if (!svg) continue;
+      try {
+        pngs.set(
+          featureStill(feature.id),
+          await rasterise(
+            svg,
+            Math.max(48, Math.round(feature.at.box.w * scale * 2)),
+          ),
+        );
+      } catch {
+        // Left out of the still; the video has it.
+      }
+    }
     // Its crowd, at the set's size, laid over it as the set is.
     const crowd = crowdShown(scene, index)
       ? scene.things.find((t) => t.id === CROWD_ID)
@@ -1732,8 +1805,13 @@ export class SceneProcessor {
         // no model asked, and kept so, the same drawing with its parts
         // joined and its motion code's.
         if (kept && kept.rig?.version !== RIG_VERSION)
-          return this.rigKept(key, kept, character, who);
-        if (kept) return kept;
+          return this.mouthed(
+            key,
+            await this.rigKept(key, kept, character, who),
+            character,
+            who,
+          );
+        if (kept) return this.mouthed(key, kept, character, who);
       } catch (error) {
         this.logger.warn(
           `${who}: the cast could not be read: ${(error as Error).message}`,
@@ -1763,6 +1841,46 @@ export class SceneProcessor {
       );
       return sheet;
     });
+  }
+
+  /**
+   * A kept sheet the artist drew, with its mouth measured if it was kept
+   * before mouths were (where what it carries rides), and kept so. The
+   * sheet as it was when it cannot be measured.
+   */
+  private async mouthed(
+    key: string,
+    sheet: CharacterSheet,
+    character: StoryCharacter,
+    who: string,
+  ): Promise<CharacterSheet> {
+    if (sheet.figure || sheet.anchors.mouth !== undefined) return sheet;
+    let mouth: [number, number] | null;
+    try {
+      mouth = await mouthOf(sheet.drawing);
+    } catch (error) {
+      this.logger.warn(
+        `${who}: ${character.name}'s mouth could not be measured: ${(error as Error).message}`,
+      );
+      return sheet;
+    }
+    const measured = { ...sheet, anchors: { ...sheet.anchors, mouth } };
+    await this.inTurn(key, async () => {
+      const cast = await this.castAt(key);
+      // Only over the drawing it measured.
+      if (cast[character.id]?.drawing.svg !== sheet.drawing.svg) return;
+      cast[character.id] = measured;
+      await this.storage.put({
+        key,
+        body: Buffer.from(JSON.stringify(cast)),
+        mimeType: 'application/json',
+      });
+    }).catch((error: unknown) =>
+      this.logger.warn(
+        `${who}: ${character.name}'s mouth was measured but not kept: ${(error as Error).message}`,
+      ),
+    );
+    return measured;
   }
 
   /**

@@ -594,6 +594,34 @@ describe('word times', () => {
       ),
     ).toBeNull();
   });
+
+  it('takes times that end before a quiet the audio is known to end on', () => {
+    const words = aligned();
+    // A scene's closing pause, voiced as silence: longer than the check
+    // allows of an ending, and no fault of the words.
+    const said = words[words.length - 1].endMs;
+    const quiet = Math.max(said * 0.2, 4470);
+    const durationMs = said + quiet;
+    expect(
+      wordTimesFromAligned(
+        words,
+        SPOKEN,
+        durationMs,
+        'k',
+        'echogarden-whisper',
+      ),
+    ).toBeNull();
+    expect(
+      wordTimesFromAligned(
+        words,
+        SPOKEN,
+        durationMs,
+        'k',
+        'echogarden-whisper',
+        quiet,
+      ),
+    ).not.toBeNull();
+  });
 });
 
 describe('the timer', () => {

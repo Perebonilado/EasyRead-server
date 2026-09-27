@@ -29,9 +29,12 @@ import {
 import {
   checkExplainer,
   checkSheet,
-  endStateOf,
+  endBefore,
   mendOutline,
   mendSheet,
+  keptFeatures,
+  withFeatures,
+  pickedBeats,
   type SheetProblem,
 } from '../../domain/studio/studio-check';
 import { MADE_WITH } from '../../domain/studio/studio-brand';
@@ -304,7 +307,8 @@ export class StudioService {
   ): Promise<StudioShowDto> {
     const show = await this.requireShow(userId, id);
     const before = show.bible;
-    const bible = bibleOf(body);
+    // A set's features are the sheets' own: the maker's edit keeps them.
+    const bible = keptFeatures(bibleOf(body), before);
     if (before) {
       // Anyone the maker did not send keeps their place; ids never change.
       const ids = new Set(bible.characters.map((c) => c.id));
@@ -870,12 +874,18 @@ export class StudioService {
     let problems: SheetProblem[];
     if (scene.sheet.kind === 'story') {
       if (!bible) throw new ValidationError('The show has no cast yet');
-      const before = await this.endBefore(episode.id, scene.position);
-      const mended = mendSheet(
-        storySheetOf({ ...(body as object), kind: 'story' }),
-        bible,
-      );
+      const before = await this.endBefore(episode.id, scene.position, bible);
+      // A move picked by hand becomes its words, which the stage is held
+      // to: a beat whose move changed and whose words did not says it now.
+      const edited = storySheetOf({ ...(body as object), kind: 'story' });
+      edited.beats = pickedBeats(scene.sheet.beats, edited.beats, bible);
+      const mended = mendSheet(edited, bible, before);
       next = mended.sheet;
+      // A feature the words now name joins its set, as a writer's would.
+      if (mended.features.length)
+        await this.studio.updateShow(show.id, {
+          bible: withFeatures(bible, next.set, mended.features),
+        });
       problems = checkSheet(next, bible, planned?.seconds ?? null, before);
     } else {
       next = mendExplainerLines(scene.sheet, body);
@@ -919,7 +929,7 @@ export class StudioService {
               sheet,
               show.bible,
               planned?.seconds ?? null,
-              await this.endBefore(episode.id, scene.position),
+              await this.endBefore(episode.id, scene.position, show.bible),
             )
           : []
         : checkExplainer(sheet, {
@@ -945,12 +955,15 @@ export class StudioService {
     return sceneDto(now, episode, show.bible, show.brief);
   }
 
-  /** How the scene before one left the stage: what it carries on from. */
-  private async endBefore(episodeId: string, position: number) {
-    if (position <= 0) return null;
+  /** How the scenes before one left the stage: what it carries on from. */
+  private async endBefore(
+    episodeId: string,
+    position: number,
+    bible: StudioBible | null,
+  ) {
+    if (position <= 0 || !bible) return null;
     const scenes = await this.studio.listScenes(episodeId);
-    const prev = scenes.find((s) => s.position === position - 1)?.sheet;
-    return prev?.kind === 'story' ? endStateOf(prev) : null;
+    return endBefore(scenes, position, bible);
   }
 
   /** A scene added after another, written from what the maker asks it to be. */

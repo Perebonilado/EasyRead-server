@@ -47,9 +47,13 @@ export function sceneFingerprint(
     ...sheet.onStage.map((p) => p.who),
     ...sheet.beats.flatMap((b) => (b.who ? [b.who] : [])),
   ]);
+  // A set's features are the sheets' own to name: one joining the set
+  // later changes no scene that does not name it.
+  const set = (bible?.sets ?? []).find((s) => s.id === sheet.set) ?? null;
+  const plain = set ? { ...set, features: undefined } : null;
   return sheetHash(sheet, {
     characters: (bible?.characters ?? []).filter((c) => who.has(c.id)),
-    set: (bible?.sets ?? []).find((s) => s.id === sheet.set) ?? null,
+    set: plain,
     world: bible?.world ?? null,
   });
 }

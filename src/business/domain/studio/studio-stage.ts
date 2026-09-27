@@ -3,22 +3,49 @@
  * and nothing else. Who is on the stage is who the sheet has there, in the
  * order of their spots, left to right; who says a line is who the sheet
  * says; each action, reaction and thing handled comes where the sheet has
- * it, in the quiet after the line before it. Nothing is guessed from the
- * words, as a book's page must be: the sheet already said it all.
+ * it, at its own moment in the quiet after the line before it, one after
+ * another in the sheet's order, each as long as the list of doings says
+ * it takes. Nothing is guessed from the words, as a book's page must be:
+ * the sheet already said it all.
+ *
+ * Every doing has something the stage plays for it: its own move where
+ * the stage has one, else the nearest it has, never nothing. Where it is
+ * aimed comes from its target (someone, a feature of the set, a side),
+ * never from words like "down" in its description.
  *
  * The one thing read from the words is what the narrator says someone
  * does ("Mama waved"), acted as it is said, so that a gesture the
  * narration tells is seen; and only by someone on the stage.
  */
 import { faceOfLine } from '../scene-feeling';
-import { directionsIn, type Actor } from '../scene-directions';
+import { directionsIn, doingsIn, type Actor } from '../scene-directions';
+import {
+  FEATURE_WORDS,
+  aimedFeature,
+  bobbingMove,
+  doingOf,
+  fallbackFor,
+  featureAim,
+  featureIdOf,
+  featureStatesIn,
+  isStageProp,
+  type Doing,
+  type DoingId,
+  type FeatureKind,
+  type StageMove,
+  type ThingAction,
+  type ThingId,
+} from '../scene-doings';
+import { STATION_SHARES } from '../scene-layout';
 import { genderOf } from '../scene-script';
-import { PROP_KIND } from '../scene-props';
+import { PROP_KIND, type StageProp } from '../scene-props';
 import {
   fitLayout,
   type SceneBeat,
   type SceneEffect,
-  type SceneEffectKind,
+  type SceneFeature,
+  type SceneFeatureState,
+  type SceneGoing,
   type SceneScript,
   type SceneStage,
   type SceneStep,
@@ -30,29 +57,27 @@ import {
   type StoryCharacter,
   type StoryPlace,
 } from '../scene-story';
-import type { FigureFace } from '../scene-figure';
+import { isGear, type FigureFace } from '../scene-figure';
 import {
   SPOTS,
   type SheetBeat,
   type Spot,
   type StorySheet,
   type StudioBible,
+  type StudioCharacter,
+  type StudioFeature,
 } from './studio';
 
-/** An action's quiet, at least and at most; and a run of them after one sentence at most. */
-const HOLD_LEAST_S = 0.6;
-const RUN_MOST_S = 3;
-/** Seconds of quiet each kind of moment takes, unless the sheet says. */
-const HOLD_S: Partial<Record<string, number>> = {
-  enter: 1.4,
-  leave: 1.4,
-  walk: 1.2,
-  hug: 1.6,
-  reach: 1,
-  still: 1,
-};
-/** Room after a sentence for what is done with a thing in it. */
-const BUSINESS_S = 0.7;
+/**
+ * The most a quiet between two lines holds, in seconds: a throw, a chase
+ * and a pick-up under the music. Longer, and the writer is asked to break
+ * it with a line; the stage quickens what is there to fit.
+ */
+export const QUIET_MOST_S = 6;
+/** A face changing: how long it holds the eye before what comes next. */
+const REACTION_S = 0.6;
+/** What comes after someone else's doing starts this long after its moment. */
+const AFTER_MOMENT_S = 0.15;
 /** How a line said with a feeling lands on the one it is said to. */
 const LANDS: Partial<Record<FigureFace, FigureFace>> = {
   angry: 'afraid',
@@ -62,9 +87,355 @@ const LANDS: Partial<Record<FigureFace, FigureFace>> = {
   pain: 'sad',
 };
 
+/** The signs that move a whole body, as one the artist drew moves for them: up in a jump, a shake, a shiver. */
+const SIGN_MOVES: Partial<Record<string, { move: StageMove; doing: DoingId }>> =
+  {
+    jumping: { move: 'jump', doing: 'jump' },
+    shaking: { move: 'shake-off', doing: 'shake-off' },
+    shivering: { move: 'wriggle', doing: 'wriggle' },
+  };
+
 const phraseOf = (text: string) =>
   text.split(/\s+/).filter(Boolean).slice(0, 4).join(' ');
 const round = (n: number) => Math.round(n * 100) / 100;
+
+/** One thing done in a quiet between lines, as its timing sees it. */
+export interface QuietItem {
+  who: string | null;
+  /** A thing handled: the next one handled waits until it has changed hands. */
+  handles: boolean;
+  /** A pause: nothing starts until it is over, and it starts when all before it are. */
+  pause: boolean;
+  /** How long it takes, and how short it may be made, in seconds. */
+  s: number;
+  leastS: number;
+  /** How far into it its moment comes. */
+  keyAt: number;
+}
+
+/** A beat of the sheet that is not spoken, as the quiet's timing sees it. */
+export function quietItem(beat: SheetBeat): QuietItem {
+  if (beat.kind === 'pause') {
+    const s = beat.seconds ?? 1;
+    return { who: null, handles: false, pause: true, s, leastS: s, keyAt: 1 };
+  }
+  if (beat.kind === 'reaction')
+    return {
+      who: beat.who,
+      handles: false,
+      pause: false,
+      s: REACTION_S,
+      leastS: 0.4,
+      keyAt: 0.5,
+    };
+  const doing = doingOf(beat.do) ?? doingOf('nod')!;
+  // Across the stage to where the check measured: as long as the walk
+  // across takes (coming on and going off, as long as the list says).
+  if ('step' in doing.plays && doing.plays.step === 'walk' && beat.seconds)
+    return {
+      who: beat.who,
+      handles: false,
+      pause: false,
+      s: Math.max(doing.leastMs / 1000, beat.seconds),
+      leastS: doing.leastMs / 1000,
+      keyAt: doing.keyAt,
+    };
+  // A throw to someone runs on until it is caught: as long as it flies at
+  // most, and the catch's own end.
+  const caught =
+    beat.do === 'throw' && beat.to
+      ? FLIES_MOST_S + CATCH_AFTER_S - (1 - doing.keyAt) * (doing.ms / 1000)
+      : 0;
+  return {
+    who: beat.who,
+    handles: beat.kind === 'business',
+    pause: false,
+    s: doing.ms / 1000 + Math.max(0, caught),
+    leastS: doing.leastMs / 1000 + Math.max(0, caught),
+    keyAt: (doing.keyAt * doing.ms) / (doing.ms + Math.max(0, caught) * 1000),
+  };
+}
+
+/** How long a thing thrown flies, in seconds, by how many spots it goes across: from the release to the catch. */
+export const fliesS = (spots: number) =>
+  Math.round((0.45 + 0.13 * Math.min(4, Math.max(1, spots))) * 100) / 100;
+/** The longest a throw across the stage flies; and a catch's end, after it arrives. */
+const FLIES_MOST_S = fliesS(4);
+const CATCH_AFTER_S = 0.4;
+
+/** Where a spot is across the stage, as a share of its width: where a thing thrown there lands. */
+const SPOT_SHARE: Record<Spot | 'back', number> = {
+  ...STATION_SHARES,
+  back: 0.5,
+};
+/** A point on the ground, as a stage's own `does` names it: "@0.88". */
+const groundAt = (share: number) =>
+  `@${Math.round(Math.min(0.96, Math.max(0.04, share)) * 100) / 100}`;
+/** How far past someone a thing thrown for them to fetch lands, as a share of the stage. */
+const THROWN_PAST = 0.16;
+/** How far beside a feature someone stands by it, as a share of the stage. */
+const BESIDE = 0.1;
+
+/**
+ * Where a station is across the stage, as a share of its width: a spot's
+ * own; beside a feature, a little to its left or right; behind one, its
+ * own; a point on the ground, its own.
+ */
+export function stationShare(
+  station: string,
+  features: ReadonlyMap<string, Pick<StudioFeature, 'spot'>>,
+): number {
+  if (station in SPOT_SHARE) return SPOT_SHARE[station as Spot];
+  if (station.startsWith('@')) return Number(station.slice(1)) || 0.5;
+  const behind = /^(?:behind|under):(.+)$/.exec(station);
+  const hiding = behind ? features.get(behind[1]) : undefined;
+  if (hiding) return SPOT_SHARE[hiding.spot];
+  const by = /^by:(.+):(-1|1)$/.exec(station);
+  const feature = by ? features.get(by[1]) : undefined;
+  return feature
+    ? SPOT_SHARE[feature.spot] + Number(by![2]) * BESIDE
+    : SPOT_SHARE.centre;
+}
+
+/** A station beside a feature: on its left (-1) or its right (1). */
+export const besideStation = (feature: string, side: -1 | 1) =>
+  `by:${feature}:${side}`;
+/** A station behind a feature: hidden by it, where it stands. */
+export const behindStation = (feature: string) => `behind:${feature}`;
+/** A station under a feature (a bench, a table): where it stands, seen. */
+export const underStation = (feature: string) => `under:${feature}`;
+
+/** Words that find someone somewhere: by it, under it, behind it. */
+const PLACED_BY: Record<string, 'by' | 'under' | 'behind'> = {
+  by: 'by',
+  beside: 'by',
+  'next to': 'by',
+  near: 'by',
+  under: 'under',
+  underneath: 'under',
+  beneath: 'under',
+  behind: 'behind',
+};
+/** Words before a place that name no one: "There! Under the bench!" */
+const NO_ONE_NAMED =
+  /^[\s,!]*(?:(?:there|here|oh|over there|quick)[\s,!]*)*$/iu;
+
+/**
+ * Where the lines and the narration find someone on the stage, by a
+ * feature of the set, under or behind it: "There he is, by the goalpost!",
+ * "There! Under the bench!", "Maya waits by the gate." Whom: someone named
+ * before it, else "he" or "she" said of whoever was named last, else, with
+ * no one named at all, whoever was being looked for: named last, and not
+ * the one saying it or the one it is said to. Each one's first only.
+ */
+export function placementsOf(
+  sheet: StorySheet,
+  bible: StudioBible,
+  features: readonly StudioFeature[],
+): {
+  who: string;
+  feature: string;
+  how: 'by' | 'under' | 'behind';
+  beat: number;
+}[] {
+  const actors = bible.characters.map((c) => ({
+    id: c.id,
+    names: [...new Set([c.name, c.name.split(/\s+/)[0]])],
+    gender: genderOf(c.voice),
+  }));
+  const gender = new Map(actors.map((a) => [a.id, a.gender]));
+  const recent: string[] = [];
+  const mention = (id: string | null | undefined) => {
+    if (!id || !gender.has(id)) return;
+    const i = recent.indexOf(id);
+    if (i >= 0) recent.splice(i, 1);
+    recent.push(id);
+  };
+  const namedIn = (text: string) =>
+    actors
+      .flatMap((a) =>
+        a.names.map((name) => ({
+          id: a.id,
+          at: text.search(new RegExp(`\\b${escapedWord(name)}\\b`, 'u')),
+        })),
+      )
+      .filter((one) => one.at >= 0)
+      .sort((a, b) => a.at - b.at);
+  const out: ReturnType<typeof placementsOf> = [];
+  sheet.beats.forEach((beat, at) => {
+    if ((beat.kind === 'line' || beat.kind === 'narration') && beat.say.trim())
+      for (const feature of features) {
+        const word = `(?:${FEATURE_WORDS[feature.kind].source}|${escapedWord(feature.name)})`;
+        const m = new RegExp(
+          `\\b(next to|by|beside|near|under|underneath|beneath|behind)\\s+(?:the|a|an|that|this|his|her|their|its)\\s+(?:[\\p{L}-]+\\s+)?${word}`,
+          'iu',
+        ).exec(beat.say);
+        if (!m) continue;
+        const sentence = beat.say.slice(0, m.index).search(/[^.!?]*$/u);
+        const before = beat.say.slice(sentence, m.index);
+        const named = namedIn(before);
+        let who: string | null = named[named.length - 1]?.id ?? null;
+        if (!who) {
+          const said = /\b(he|she|it)\b/iu.exec(before)?.[1]?.toLowerCase();
+          const others = [...recent]
+            .reverse()
+            .filter((id) => id !== beat.who && id !== beat.to);
+          const wanted = said === 'he' ? 'm' : said === 'she' ? 'f' : null;
+          who = said
+            ? (others.find((id) => wanted && gender.get(id) === wanted) ??
+              others.find((id) => gender.get(id) === null) ??
+              null)
+            : NO_ONE_NAMED.test(before)
+              ? (others[0] ?? null)
+              : null;
+        }
+        if (who && who !== beat.who && !out.some((o) => o.who === who))
+          out.push({
+            who,
+            feature: feature.id,
+            how: PLACED_BY[m[1].toLowerCase()] ?? 'by',
+            beat: at,
+          });
+      }
+    mention(beat.who);
+    for (const one of namedIn(beat.say)) mention(one.id);
+    if (beat.kind === 'action' || beat.kind === 'business') {
+      mention(beat.target);
+      mention(beat.to);
+    }
+  });
+  return out;
+}
+
+const escapedWord = (text: string) =>
+  text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+/**
+ * The side of the stage someone goes off by through a feature: the side
+ * it stands on; one at the back in the middle, by the side they are on.
+ */
+export function featureSide(
+  feature: Pick<StudioFeature, 'spot'>,
+  from: number,
+): '@left' | '@right' {
+  const at = SPOT_SHARE[feature.spot];
+  if (Math.abs(at - 0.5) > 0.01) return at < 0.5 ? '@left' : '@right';
+  return from < 0.5 ? '@left' : '@right';
+}
+
+/**
+ * What someone who comes on holds: what the scenes before left them with
+ * if they were in one, else, new to the episode, what they always carry.
+ */
+export function comesWith(
+  character: StudioCharacter | undefined,
+  before:
+    | { cast?: string[]; held?: { who: string; thing: ThingId }[] }
+    | null
+    | undefined,
+): ThingId[] {
+  if (!character) return [];
+  if (before?.cast?.includes(character.id))
+    return (before.held ?? [])
+      .filter((h) => h.who === character.id)
+      .map((h) => h.thing);
+  return character.carries ? [character.carries] : [];
+}
+
+/**
+ * When each thing in a quiet starts, in seconds into it, and how long the
+ * quiet runs. One after another in the sheet's order: what someone else
+ * does next begins at the moment of the one before (the release of a
+ * throw, the chase after it), what the same one does next, and a thing
+ * handled next, only once the one before is done; a pause waits for all.
+ * A quiet longer than `most` is quickened to fit, none shorter than it
+ * may be; `asked` is how long it would have run.
+ */
+export function timeQuiet(
+  items: readonly QuietItem[],
+  most = QUIET_MOST_S,
+): { starts: number[]; lengths: number[]; total: number; asked: number } {
+  const starts: number[] = [];
+  const endOf = new Map<string, number>();
+  let handled = 0;
+  let allDone = 0;
+  items.forEach((item, i) => {
+    const prev = items[i - 1];
+    let at = 0;
+    if (prev) {
+      const prevAt = starts[i - 1];
+      if (prev.pause || item.pause) at = allDone;
+      else if (item.handles && prev.handles) at = prevAt + prev.s;
+      else if (item.who && item.who === prev.who) at = prevAt + prev.s;
+      else at = prevAt + prev.s * prev.keyAt + AFTER_MOMENT_S;
+    }
+    if (item.who) at = Math.max(at, endOf.get(item.who) ?? 0);
+    if (item.handles) at = Math.max(at, handled);
+    starts.push(at);
+    const end = at + item.s;
+    if (item.who) endOf.set(item.who, end);
+    if (item.handles) handled = end;
+    allDone = Math.max(allDone, end);
+  });
+  const asked = allDone;
+  if (asked <= most)
+    return {
+      starts: starts.map(round),
+      lengths: items.map((item) => item.s),
+      total: round(asked),
+      asked: round(asked),
+    };
+  const fit = most / asked;
+  const lengths = items.map((item) => Math.max(item.leastS, item.s * fit));
+  const quick = starts.map((at) => at * fit);
+  const total = Math.min(
+    most,
+    Math.max(...quick.map((at, k) => at + lengths[k])),
+  );
+  return {
+    starts: quick.map(round),
+    lengths: lengths.map(round),
+    total: round(total),
+    asked: round(asked),
+  };
+}
+
+/** Each sheet beat that is not spoken, grouped by the spoken beat before it (-1 for before the first). */
+export function quietRuns(sheet: StorySheet): Map<number, number[]> {
+  const runs = new Map<number, number[]>();
+  let spoken = -1;
+  sheet.beats.forEach((beat, at) => {
+    if (beat.kind === 'line' || beat.kind === 'narration') {
+      if (beat.say.trim()) spoken += 1;
+      return;
+    }
+    runs.set(spoken, [...(runs.get(spoken) ?? []), at]);
+  });
+  return runs;
+}
+
+/**
+ * The side of the stage someone goes off by: the nearer, as they stand
+ * now, left to right; the middle one goes right. Through a feature, the
+ * side it stands on.
+ */
+export function exitSideOf(
+  here: ReadonlyMap<string, string>,
+  who: string,
+  features: ReadonlyMap<string, Pick<StudioFeature, 'spot'>> = new Map(),
+  via?: string | null,
+): '@left' | '@right' {
+  const through = via ? features.get(via) : undefined;
+  if (through)
+    return featureSide(
+      through,
+      stationShare(here.get(who) ?? 'centre', features),
+    );
+  const order = inSpotOrder(here, features);
+  const k = order.indexOf(who);
+  if (k < 0) return '@right';
+  return (k + 0.5) / order.length < 0.5 ? '@left' : '@right';
+}
 
 /** The place thing's id: never the same as a character's. */
 export const placeThingId = (set: string) => `place-${set}`;
@@ -102,7 +473,8 @@ export function storyBibleFor(
     size: c.size,
     figure: c.figure,
     presence: 'seen',
-    carries: c.carries,
+    // Only gear is drawn in a hand for good; the rest are things of their own.
+    carries: isGear(c.carries) ? c.carries : null,
     voicePick: c.voicePick,
   }));
   const places: StoryPlace[] = bible.sets.map((s) => ({
@@ -115,6 +487,13 @@ export function storyBibleFor(
     kind: s.kind,
     stand: s.stand,
     front: s.front,
+    // A Studio set's, even none: the painter is asked for its own groups.
+    features: (s.features ?? []).map((f) => ({
+      id: f.id,
+      name: f.name,
+      kind: f.kind,
+      spot: f.spot,
+    })),
   }));
   return {
     characters,
@@ -137,21 +516,91 @@ export function storyBibleFor(
   };
 }
 
-/** Whoever the sheet has on the stage, left to right by their spots. */
-function inSpotOrder(here: ReadonlyMap<string, Spot>): string[] {
+/** Whoever the sheet has on the stage, left to right by where they stand. */
+function inSpotOrder(
+  here: ReadonlyMap<string, string>,
+  features: ReadonlyMap<string, Pick<StudioFeature, 'spot'>> = new Map(),
+): string[] {
   return [...here]
-    .sort((a, b) => SPOTS.indexOf(a[1]) - SPOTS.indexOf(b[1]))
+    .sort((a, b) => stationShare(a[1], features) - stationShare(b[1], features))
     .map(([id]) => id);
 }
 
 /**
- * A story's sheet, checked and mended, as the stage's script. `bible` is
- * the show's; the sheet's people and set are its own.
+ * A set's features as a scene's stage has them: whether each is open as
+ * the scene opens, and when it opens or shuts, from what the narration
+ * says of it ("the gate swings shut", "the open door"). The first thing
+ * said of one says how it stood before: shut before it swings open.
  */
-export function stageStory(sheet: StorySheet, bible: StudioBible): SceneScript {
+export function featureStatesOf(
+  sheet: StorySheet,
+  features: readonly StudioFeature[],
+): { open: Set<string>; changes: SceneFeatureState[] } {
+  const open = new Set<string>();
+  const changes: SceneFeatureState[] = [];
+  const known = new Set<string>();
+  const byWord = (word: string, kind: FeatureKind) =>
+    features.find((f) => f.id === featureIdOf(word)) ??
+    (features.filter((f) => f.kind === kind).length === 1
+      ? features.find((f) => f.kind === kind)
+      : undefined);
+  let spoken = -1;
+  for (const beat of sheet.beats) {
+    if (beat.kind !== 'line' && beat.kind !== 'narration') continue;
+    if (!beat.say.trim()) continue;
+    spoken += 1;
+    if (beat.kind !== 'narration') continue;
+    const say = beat.say.trim();
+    for (const one of featureStatesIn(say)) {
+      const feature = byWord(one.word, one.kind);
+      if (!feature?.opens) continue;
+      if (!known.has(feature.id)) {
+        known.add(feature.id);
+        const was = one.still
+          ? one.state
+          : one.state === 'open'
+            ? 'shut'
+            : 'open';
+        if (was === 'open') open.add(feature.id);
+      }
+      if (one.still) continue;
+      changes.push({
+        beat: spoken,
+        word: say.slice(0, one.at).split(/\s+/).filter(Boolean).length,
+        feature: feature.id,
+        state: one.state,
+      });
+    }
+  }
+  return { open, changes };
+}
+
+/**
+ * A story's sheet, checked and mended, as the stage's script. `bible` is
+ * the show's; the sheet's people and set are its own. `plain` names beats
+ * to play by their fallback alone: a beat a made scene showed nothing for.
+ */
+export function stageStory(
+  sheet: StorySheet,
+  bible: StudioBible,
+  options: {
+    plain?: ReadonlySet<number>;
+    /** How the scene before left things: what someone who comes on later still holds. */
+    before?: {
+      cast?: string[];
+      held?: { who: string; thing: ThingId }[];
+    } | null;
+  } = {},
+): SceneScript {
   const byId = new Map(bible.characters.map((c) => [c.id, c]));
   const place = bible.sets.find((s) => s.id === sheet.set) ?? null;
   const placeId = place ? placeThingId(place.id) : null;
+  const features = new Map((place?.features ?? []).map((f) => [f.id, f]));
+  /** Whether the set's painting shows a feature: its look names it. */
+  const inLook = (f: StudioFeature) =>
+    Boolean(place?.look) &&
+    (FEATURE_WORDS[f.kind].test(place!.look) ||
+      place!.look.toLowerCase().includes(f.name.toLowerCase()));
 
   // Everyone the scene has a part for: on the stage as it opens, coming
   // on, doing or saying anything, or a voice from off it.
@@ -159,6 +608,9 @@ export function stageStory(sheet: StorySheet, bible: StudioBible): SceneScript {
   for (const beat of sheet.beats)
     if (beat.who && byId.has(beat.who)) parts.add(beat.who);
   const opening = new Map(sheet.onStage.map((p) => [p.who, p]));
+  /** Who holds each thing as the scene opens, or brings it on: a thing of its own, apart from them. */
+  const startsHeld = new Map<StageProp, string>();
+  const resting = new Set(sheet.props.map((p) => p.prop));
   const cast: SceneThing[] = [];
   if (place && placeId)
     cast.push({
@@ -172,6 +624,28 @@ export function stageStory(sheet: StorySheet, bible: StudioBible): SceneScript {
     const c = byId.get(id);
     if (!c) continue;
     const at = opening.get(id);
+    // What they hold is what the sheet says: empty hands are empty.
+    // Someone who comes on later holds what the scenes before left them
+    // with, and only someone new to the episode what they always carry.
+    const holds = at
+      ? at.holding
+        ? [at.holding]
+        : []
+      : comesWith(c, options.before);
+    // Gear is drawn in the hand; anything else is a thing of its own, in
+    // their hand or mouth until they let it go, unless the stage has it.
+    const holding = holds.find(isGear) ?? null;
+    for (const thing of holds)
+      if (
+        isStageProp(thing) &&
+        !startsHeld.has(thing) &&
+        !(resting.has(thing) && !at)
+      )
+        startsHeld.set(thing, id);
+    // Holding a thing of its own, they stand as anyone does: the stage
+    // puts their hand to it, and lets it fall when they let it go.
+    const pose =
+      at?.pose === 'holding' && !holding ? 'standing' : (at?.pose ?? null);
     cast.push({
       id,
       kind: 'character',
@@ -182,86 +656,174 @@ export function stageStory(sheet: StorySheet, bible: StudioBible): SceneScript {
       met: 0,
       intro: [],
       traits: c.traits,
-      ...(at && at.pose !== 'standing' ? { pose: at.pose } : {}),
-      ...((at?.holding ?? c.carries)
-        ? { holding: (at?.holding ?? c.carries)! }
-        : {}),
+      ...(pose && pose !== 'standing' ? { pose } : {}),
+      ...(holding ? { holding } : {}),
       ...(c.role === 'minor' ? { minor: true as const } : {}),
     });
   }
   const inCast = new Set(cast.map((t) => t.id));
+  /** The cast by the names the words call them. */
+  const called: Actor[] = [...inCast].flatMap((id) => {
+    const c = byId.get(id);
+    return c
+      ? [
+          {
+            id,
+            names: [...new Set([c.name, c.name.split(/\s+/)[0]])],
+            gender: genderOf(c.voice),
+          },
+        ]
+      : [];
+  });
 
   // The beats: lines and narration spoken; everything else a moment in
   // the quiet after the sentence before it, or before the first.
   const beats: SceneBeat[] = [];
-  /** Each sheet beat's spoken beat, and each other one's moment. */
+  /** Each sheet beat's spoken beat. */
   const spokenAt = new Map<number, number>();
-  const runs = new Map<number, { at: number; hold: number }[]>();
   sheet.beats.forEach((raw, at) => {
-    if (raw.kind === 'line' || raw.kind === 'narration') {
-      if (!raw.say.trim()) return;
-      const beat: SceneBeat = {
-        say: raw.say.trim(),
-        pause: 'short',
-        delivery: 'explain',
-        kind: raw.kind === 'line' ? 'line' : 'narration',
-      };
-      if (raw.kind === 'line' && raw.who && inCast.has(raw.who)) {
-        beat.speaker = raw.who;
-        beat.lines = [{ span: [0, beat.say.length], speaker: raw.who }];
-        if (raw.to && raw.to !== raw.who && inCast.has(raw.to))
-          beat.to = raw.to;
-        if (raw.from && raw.from !== 'here') beat.from = raw.from;
-        if (raw.pace) beat.pace = raw.pace;
-      } else if (raw.kind === 'line') {
-        // No one of the cast to say it: the narrator, as a quotation.
-        beat.kind = 'narration';
-        beat.say = `"${beat.say}"`;
-      }
-      if (!beats.length) beat.music = sheet.music;
-      spokenAt.set(at, beats.length);
-      beats.push(beat);
-      return;
+    if (raw.kind !== 'line' && raw.kind !== 'narration') return;
+    if (!raw.say.trim()) return;
+    const beat: SceneBeat = {
+      say: raw.say.trim(),
+      pause: 'short',
+      delivery: 'explain',
+      kind: raw.kind === 'line' ? 'line' : 'narration',
+    };
+    if (raw.kind === 'line' && raw.who && inCast.has(raw.who)) {
+      beat.speaker = raw.who;
+      beat.lines = [{ span: [0, beat.say.length], speaker: raw.who }];
+      if (raw.to && raw.to !== raw.who && inCast.has(raw.to)) beat.to = raw.to;
+      if (raw.from && raw.from !== 'here') beat.from = raw.from;
+      if (raw.pace && raw.pace !== 'walk' && raw.pace !== 'run')
+        beat.pace = raw.pace;
+    } else if (raw.kind === 'line') {
+      // No one of the cast to say it: the narrator, as a quotation.
+      beat.kind = 'narration';
+      beat.say = `"${beat.say}"`;
     }
-    const after = beats.length - 1;
-    const hold =
-      raw.kind === 'pause'
-        ? (raw.seconds ?? 1)
-        : raw.kind === 'business'
-          ? BUSINESS_S
-          : raw.kind === 'reaction'
-            ? 0.6
-            : Math.max(HOLD_LEAST_S, raw.seconds ?? HOLD_S[raw.do ?? ''] ?? 1);
-    runs.set(after, [...(runs.get(after) ?? []), { at, hold }]);
+    if (!beats.length) beat.music = sheet.music;
+    spokenAt.set(at, beats.length);
+    beats.push(beat);
   });
-  /** Each moment: after which spoken beat, and how far into the quiet. */
-  const moments = new Map<number, { after: number; offset: number }>();
+  /** Each moment: after which spoken beat, how far into the quiet, and for how long, in seconds. */
+  const moments = new Map<
+    number,
+    { after: number; offset: number; s: number }
+  >();
   let lead = 0;
-  for (const [after, run] of runs) {
-    const asked = run.reduce((n, one) => n + one.hold, 0);
-    const fit = asked > RUN_MOST_S ? RUN_MOST_S / asked : 1;
-    let offset = 0;
-    for (const one of run) {
-      moments.set(one.at, { after, offset: round(offset) });
-      offset += one.hold * fit;
-    }
-    const total = round(Math.min(RUN_MOST_S, asked));
-    if (after >= 0) beats[after].holdS = total;
-    else lead = total;
+  for (const [after, run] of quietRuns(sheet)) {
+    const timed = timeQuiet(run.map((at) => quietItem(sheet.beats[at])));
+    run.forEach((at, k) =>
+      moments.set(at, {
+        after,
+        offset: timed.starts[k],
+        s: timed.lengths[k],
+      }),
+    );
+    if (after >= 0) beats[after].holdS = timed.total;
+    else lead = timed.total;
   }
 
-  // The stage, step by step.
-  const here = new Map<string, Spot>(sheet.onStage.map((p) => [p.who, p.spot]));
+  // The stage, step by step: everyone at a station of their own, kept
+  // until a beat moves them.
+  const here = new Map<string, string>(
+    sheet.onStage.map((p) => [p.who, p.spot]),
+  );
+  /** The station by a feature, under it or behind it, for one standing at `from`. */
+  const stationAt = (
+    how: 'by' | 'under' | 'behind',
+    feature: StudioFeature,
+    from: string,
+  ): string =>
+    how === 'under'
+      ? underStation(feature.id)
+      : how === 'behind'
+        ? behindStation(feature.id)
+        : besideStation(
+            feature.id,
+            stationShare(from, features) < SPOT_SHARE[feature.spot] ? -1 : 1,
+          );
+  // Where the words find someone: there from the first if they go nowhere
+  // before it; else where they went last with nowhere named; else they go
+  // there as it is said.
+  const goesTo = new Map<number, string>();
+  const findsThere = new Map<number, { who: string; station: string }[]>();
+  for (const one of placementsOf(sheet, bible, [...features.values()])) {
+    const feature = features.get(one.feature)!;
+    const travels = sheet.beats
+      .slice(0, one.beat)
+      .map((b, at) => ({ b, at }))
+      .filter(
+        ({ b }) =>
+          b.kind === 'action' &&
+          b.who === one.who &&
+          doingOf(b.do)?.kind === 'travel',
+      );
+    const opens = here.get(one.who);
+    if (opens && !travels.length)
+      here.set(one.who, stationAt(one.how, feature, opens));
+    else {
+      const last = travels[travels.length - 1];
+      if (
+        last &&
+        !last.b.target &&
+        last.b.do !== 'enter' &&
+        last.b.do !== 'leave' &&
+        last.b.do !== 'squeeze'
+      )
+        goesTo.set(last.at, stationAt(one.how, feature, 'centre'));
+      else
+        findsThere.set(one.beat, [
+          ...(findsThere.get(one.beat) ?? []),
+          { who: one.who, station: stationAt(one.how, feature, 'centre') },
+        ]);
+    }
+  }
+  /** The way each one came in, by a feature or a side: whoever comes in after them comes the same way. */
+  const cameBy = new Map<
+    string,
+    { via: string | null; side: '@left' | '@right' }
+  >();
+  /** The side each one who left went off by: where a look after them goes. */
+  const wentOff = new Map<string, '@left' | '@right'>();
+  /** Who holds each thing on the stage, as the sheet has it so far. */
+  const holders = new Map<string, string | null>([
+    ...sheet.props.map((p): [string, string | null] => [p.prop, null]),
+    ...startsHeld,
+  ]);
+  /** Where each thing let go of came down, as a share of the stage across: where one goes after it. */
+  const lies = new Map<string, number>();
+  /** Each thing thrown to someone, and when: a catch the sheet has next is that one. */
+  const inFlight = new Map<string, string>();
+  const share = (station: string) => stationShare(station, features);
   const stageNow = (extra: Partial<SceneStage> = {}): SceneStage => {
-    const show = inSpotOrder(here).filter((id) => inCast.has(id));
+    const show = inSpotOrder(here, features).filter((id) => inCast.has(id));
     return {
       layout: show.length
         ? fitLayout(show.length > 1 ? 'row' : 'one', show.length)
         : 'one',
       show,
       arrows: [],
+      at: Object.fromEntries(show.map((id) => [id, here.get(id)!])),
       ...extra,
     };
+  };
+  // Whether each feature is open as the scene opens, and when the
+  // narration has one open or shut.
+  const states = featureStatesOf(sheet, [...features.values()]);
+  const featureStates: SceneFeatureState[] = [...states.changes];
+  /** Whether a feature is open in the quiet after a spoken beat, as the scene has it by then. */
+  const openAfter = (id: string, beat: number) => {
+    let open = states.open.has(id);
+    const inTurn = [...featureStates].sort(
+      (a, b) =>
+        a.beat - b.beat ||
+        (a.after === undefined ? 0 : 1) - (b.after === undefined ? 0 : 1),
+    );
+    for (const one of inTurn)
+      if (one.feature === id && one.beat <= beat) open = one.state === 'open';
+    return open;
   };
   const steps: SceneStep[] = [];
   const opensQuiet = lead > 0;
@@ -279,24 +841,171 @@ export function stageStory(sheet: StorySheet, bible: StudioBible): SceneScript {
     lastFace.set(who, face);
     return [{ target: who, part: face, do: 'show' }];
   };
-  const moveEffect = (raw: SheetBeat): SceneEffect[] => {
-    if (!raw.who || !raw.do || !here.has(raw.who)) return [];
-    if (['enter', 'leave', 'walk', 'still'].includes(raw.do)) return [];
-    const up = /\b(?:up|sky|stars?|moon|heavens?)\b/iu.test(raw.say);
-    const down = /\b(?:down|ground|floor)\b/iu.test(raw.say);
-    const toward =
-      raw.to && raw.to !== raw.who && (here.has(raw.to) || raw.to === '@up')
-        ? raw.to
-        : raw.do === 'look' || raw.do === 'point'
-          ? up
-            ? '@up'
-            : down
-              ? '@down'
-              : null
-          : null;
-    if ((raw.do === 'hug' || raw.do === 'reach') && !toward) return [];
-    if (raw.do === 'look' && !toward) return [];
-    return [{ target: raw.who, part: toward, do: raw.do as SceneEffectKind }];
+  /** Someone drawn by the artist, with no rig: they bob, hop and step toward someone. */
+  const bobs = (id: string) => (byId.get(id)?.kind ?? 'person') !== 'person';
+  // An animal lying down as the scene opens lies there from its first
+  // frame, sunk on its legs, until the sheet has it get up: a person is
+  // drawn lying by the kit.
+  for (const p of sheet.onStage)
+    if (
+      bobs(p.who) &&
+      inCast.has(p.who) &&
+      (p.pose === 'lying' || p.pose === 'in bed')
+    )
+      steps[0].effects.push({ target: p.who, part: null, do: 'lie' });
+  /** The spot nearest a share of the stage across. */
+  const spotNear = (at: number) =>
+    SPOTS.reduce((best, spot) =>
+      Math.abs(SPOT_SHARE[spot] - at) < Math.abs(SPOT_SHARE[best] - at)
+        ? spot
+        : best,
+    );
+  /**
+   * Where a doing is aimed: someone on the stage; a feature of the set, by
+   * where it stands ("f:gate"); a side ("@left", "@up"): someone gone by
+   * the side they went; a thing by whoever holds it.
+   */
+  const aimOf = (raw: SheetBeat, who: string, doing: Doing): string | null => {
+    const target =
+      raw.target ??
+      (raw.to && doing.aims.includes('character') ? raw.to : null);
+    if (!target || target === who) return null;
+    if (target.startsWith('@')) return target;
+    if (inCast.has(target))
+      return here.has(target) ? target : (wentOff.get(target) ?? null);
+    if (features.has(target)) return featureAim(target);
+    const holder = holders.get(target);
+    if (holder && holder !== who && here.has(holder)) return holder;
+    return null;
+  };
+  /**
+   * A station asked for, if no one else stands there; else the free spot
+   * nearest it, so no two ever stand in one place. Null for none free.
+   */
+  const freeStation = (who: string, asked: string): string | null => {
+    const taken = new Set(
+      [...here].filter(([id]) => id !== who).map(([, s]) => s),
+    );
+    if (!taken.has(asked)) return asked;
+    const from = share(asked);
+    return (
+      SPOTS.filter((spot) => !taken.has(spot)).sort(
+        (a, b) =>
+          Math.abs(SPOT_SHARE[a] - from) - Math.abs(SPOT_SHARE[b] - from),
+      )[0] ?? null
+    );
+  };
+  /**
+   * Where to go: the spot the sheet gives; beside a feature, on the side
+   * they come from; beside someone; where a thing let go of came down; or
+   * away to one side. Null for nowhere free.
+   */
+  const travelTo = (
+    who: string,
+    aim: string | null,
+    raw: SheetBeat,
+    far: boolean,
+  ): string | null => {
+    if (raw.spot) return freeStation(who, raw.spot);
+    const taken = new Set(
+      [...here].filter(([id]) => id !== who).map(([, s]) => s),
+    );
+    const mine = share(here.get(who) ?? 'centre');
+    const free = (station: string) => !taken.has(station);
+    const feature = raw.target ? features.get(raw.target) : undefined;
+    if (feature) {
+      // Hiding: behind it, where it stands, drawn over them.
+      if (raw.do === 'hide') {
+        const behind = behindStation(feature.id);
+        return free(behind) ? behind : null;
+      }
+      const side: -1 | 1 = mine < SPOT_SHARE[feature.spot] ? -1 : 1;
+      for (const s of [side, -side as -1 | 1]) {
+        const station = besideStation(feature.id, s);
+        if (free(station)) return station;
+      }
+      return null;
+    }
+    // After a thing: to whoever has it, or to where it came down.
+    const thing = raw.target ?? raw.thing ?? null;
+    if (thing && !inCast.has(thing) && !here.has(aim ?? '')) {
+      const at = lies.get(thing);
+      if (at !== undefined && holders.get(thing) === null) {
+        const station = groundAt(at);
+        return free(station) ? station : null;
+      }
+    }
+    const k = SPOTS.indexOf(spotNear(mine));
+    const spotFree = (n: number) =>
+      n >= 0 && n < SPOTS.length && free(SPOTS[n]);
+    if (aim && here.has(aim)) {
+      const theirs = share(here.get(aim)!);
+      const j = SPOTS.indexOf(spotNear(theirs));
+      const near = theirs > mine ? j - 1 : j + 1;
+      if (spotFree(near) && SPOTS[near] !== here.get(who)) return SPOTS[near];
+      const far2 = theirs > mine ? j + 1 : j - 1;
+      return spotFree(far2) ? SPOTS[far2] : null;
+    }
+    const way = aim === '@left' ? -1 : aim === '@right' ? 1 : 0;
+    if (!way) return null;
+    let found: Spot | null = null;
+    for (let n = k + way; n >= 0 && n < SPOTS.length; n += way) {
+      if (!spotFree(n)) break;
+      found = SPOTS[n];
+      if (!far) break;
+    }
+    return found;
+  };
+  /** A move played on someone: the one it names, or, on a drawing with no rig, the nearest it shows. */
+  const moveEffect = (
+    who: string,
+    move: StageMove,
+    aim: string | null,
+    s: number,
+  ): SceneEffect => {
+    const toward = aim && here.has(aim) ? aim : null;
+    let what: StageMove = move;
+    let part: string | null = aim;
+    // A hug is for someone there, a reach for someone or a feature of the
+    // set (a gate's latch); else it is a point at where they are, or went.
+    if (
+      (what === 'hug' || what === 'reach') &&
+      !toward &&
+      !(what === 'reach' && aimedFeature(aim))
+    )
+      what = 'point';
+    // A look at nothing named: a look round.
+    if (what === 'look' && !aim) what = 'shake';
+    // A point always goes somewhere: at nothing named, out toward the
+    // middle of the stage.
+    if (what === 'point' && !aim)
+      part = share(here.get(who) ?? 'centre') < 0.5 ? '@right' : '@left';
+    if (bobs(who)) what = bobbingMove(what, Boolean(toward));
+    return {
+      target: who,
+      part,
+      do: what,
+      ms: Math.round(s * 1000),
+    };
+  };
+  /**
+   * The move a doing falls back to, played where the stage could not show
+   * it as it is: along its fallbacks to the first that is a move. A nod
+   * is too small on a drawing with no rig: it hops.
+   */
+  const fallbackMove = (doing: Doing, who: string): StageMove => {
+    let move: StageMove = 'nod';
+    let at: Doing | undefined = doingOf(doing.fallback ?? 'nod');
+    for (let n = 0; at && n < 6; n += 1) {
+      if ('move' in at.plays) {
+        move = at.plays.move;
+        break;
+      }
+      at = doingOf(
+        at.fallback ?? fallbackFor(at.id, bobs(who) ? 'animal' : 'person'),
+      );
+    }
+    return bobs(who) && move === 'nod' ? 'hop' : move;
   };
 
   sheet.beats.forEach((raw, at) => {
@@ -311,13 +1020,74 @@ export function stageStory(sheet: StorySheet, bible: StudioBible): SceneScript {
         if (told && told !== lastFace.get(beat.speaker))
           effects.push(...faceEffect(beat.speaker, told));
       }
-      if (effects.length)
+      // Found there as it is said: they go there as it begins.
+      const found = (findsThere.get(at) ?? []).filter(
+        (one) => here.has(one.who) && here.get(one.who) !== one.station,
+      );
+      for (const one of found)
+        here.set(one.who, freeStation(one.who, one.station) ?? one.station);
+      // A gate someone opens or shuts as the narration says: they go to
+      // it as it begins, and their hand does it at its word; or, gone
+      // there, as they get there, as it ends.
+      const hands: SceneEffect[] = [];
+      let walked = false;
+      if (beat.kind === 'narration')
+        for (const one of doingsIn(beat.say, { actors: called })) {
+          const feature = one.target
+            ? (features.get(featureIdOf(one.target)) ??
+              [...features.values()].find((f) =>
+                FEATURE_WORDS[f.kind].test(one.target!),
+              ))
+            : undefined;
+          if (
+            (one.do !== 'open' && one.do !== 'close') ||
+            !one.who ||
+            !here.has(one.who) ||
+            !feature
+          )
+            continue;
+          const station = here.get(one.who)!;
+          if (!station.startsWith(`by:${feature.id}:`)) {
+            here.set(
+              one.who,
+              freeStation(one.who, stationAt('by', feature, station)) ??
+                station,
+            );
+            found.push({ who: one.who, station: here.get(one.who)! });
+            walked = true;
+            for (const change of featureStates)
+              if (
+                change.beat === k &&
+                change.feature === feature.id &&
+                change.after === undefined
+              ) {
+                delete change.word;
+                change.after = 0;
+              }
+          }
+          hands.push(moveEffect(one.who, 'reach', featureAim(feature.id), 0.9));
+        }
+      if (effects.length || found.length)
         steps.push({
           at: { beat: k, phrase: phraseOf(beat.say) },
           word: 0,
-          stage: null,
+          stage: found.length ? stageNow() : null,
           effects,
         });
+      if (hands.length) {
+        const words = beat.say.split(/\s+/).filter(Boolean);
+        const said = featureStatesIn(beat.say)[0];
+        const word = said
+          ? beat.say.slice(0, said.at).split(/\s+/).filter(Boolean).length
+          : 0;
+        steps.push({
+          at: { beat: k, phrase: words.slice(word, word + 3).join(' ') },
+          word: walked ? 0 : word,
+          ...(walked ? { after: 0 } : {}),
+          stage: null,
+          effects: hands,
+        });
+      }
       // How it lands on the one it is said to, as it ends: unless the sheet
       // has them react next.
       const next = sheet.beats[at + 1];
@@ -339,35 +1109,175 @@ export function stageStory(sheet: StorySheet, bible: StudioBible): SceneScript {
     if (!moment) return;
     const effects: SceneEffect[] = [];
     let stage: SceneStage | null = null;
-    if (raw.kind === 'action' && raw.who && inCast.has(raw.who)) {
-      if (raw.do === 'enter' && !here.has(raw.who)) {
-        here.set(raw.who, raw.spot ?? 'centre');
-        stage = stageNow({ arrive: [raw.who] });
-      } else if (raw.do === 'leave' && here.has(raw.who)) {
-        here.delete(raw.who);
-        stage = stageNow({ leave: [raw.who] });
-      } else if (raw.do === 'walk' && raw.spot && here.has(raw.who)) {
-        here.set(raw.who, raw.spot);
-        stage = stageNow();
-      } else effects.push(...moveEffect(raw));
+    const who = raw.who;
+    if (
+      (raw.kind === 'action' || raw.kind === 'business') &&
+      who &&
+      inCast.has(who)
+    ) {
+      const doing = doingOf(raw.do) ?? doingOf('nod')!;
+      const aim = aimOf(raw, who, doing);
+      const plays = doing.plays;
+      const plain = options.plain?.has(at) ?? false;
+      if ('step' in plays) {
+        // Going after someone who has gone is going off after them.
+        const after =
+          doing.id === 'chase' &&
+          raw.target &&
+          inCast.has(raw.target) &&
+          !here.has(raw.target);
+        const how = after ? 'leave' : plays.step;
+        // The feature they go in or out by: the one the sheet says, or
+        // the one squeezed under.
+        // After someone who came in: the way they came.
+        const leader =
+          how === 'enter' && raw.target ? cameBy.get(raw.target) : undefined;
+        const via =
+          (raw.via && features.has(raw.via) ? raw.via : null) ??
+          (doing.id === 'squeeze' && raw.target && features.has(raw.target)
+            ? raw.target
+            : null) ??
+          leader?.via ??
+          null;
+        const run =
+          raw.pace === 'run' || (Boolean(doing.runs) && raw.pace !== 'walk');
+        const going: SceneGoing = {
+          ...(run ? { pace: 'run' as const } : {}),
+          ...(via ? { via } : {}),
+          ...(doing.id === 'squeeze' && via ? { squeeze: true as const } : {}),
+          ...(leader && !via ? { side: leader.side } : {}),
+        };
+        /** A way through that is shut is opened as they go, unless they squeeze under it. */
+        const opensFor = (id: string) => {
+          if (!features.get(id)?.opens || going.squeeze) return;
+          if (openAfter(id, moment.after)) return;
+          featureStates.push({
+            beat: moment.after,
+            after: moment.offset,
+            feature: id,
+            state: 'open',
+          });
+        };
+        if (how === 'enter' && !here.has(who)) {
+          const by = via ? features.get(via) : undefined;
+          here.set(
+            who,
+            freeStation(
+              who,
+              raw.spot ??
+                (by
+                  ? besideStation(by.id, SPOT_SHARE[by.spot] < 0.5 ? 1 : -1)
+                  : 'centre'),
+            ) ?? 'centre',
+          );
+          if (via) opensFor(via);
+          const by2 = via ? features.get(via) : undefined;
+          cameBy.set(who, {
+            via,
+            side:
+              going.side ??
+              (by2
+                ? featureSide(by2, share(here.get(who)!))
+                : share(here.get(who)!) < 0.5
+                  ? '@left'
+                  : '@right'),
+          });
+          stage = stageNow({
+            arrive: [who],
+            ...(Object.keys(going).length ? { going: { [who]: going } } : {}),
+          });
+        } else if (how === 'leave' && here.has(who)) {
+          // What they hold goes with them; through a feature, off by the
+          // side it stands on, and whoever goes by it after them too; after
+          // someone gone, off the side they went.
+          const side =
+            !via && (raw.target === '@left' || raw.target === '@right')
+              ? raw.target
+              : after && raw.target && !via
+                ? (wentOff.get(raw.target) ??
+                  exitSideOf(here, who, features, via))
+                : exitSideOf(here, who, features, via);
+          wentOff.set(who, side);
+          here.delete(who);
+          if (via) opensFor(via);
+          stage = stageNow({
+            leave: [who],
+            going: { [who]: { ...going, side } },
+          });
+        } else if (how === 'walk' && here.has(who)) {
+          const was = here.get(who);
+          // Where the words find them later, if nowhere is named now.
+          const later = goesTo.get(at);
+          const to = later
+            ? freeStation(who, later)
+            : travelTo(who, aim, raw, Boolean(doing.runs));
+          // Somewhere else: they go there, and stay. Nowhere to go, a step
+          // toward where they would, played as a move.
+          if (to && to !== was) {
+            here.set(who, to);
+            stage = stageNow(
+              run ? { going: { [who]: { pace: 'run' as const } } } : {},
+            );
+            // Chased to where it lies: taken up there, in a hand or a mouth.
+            const after = raw.target ?? raw.thing ?? null;
+            if (
+              doing.id === 'chase' &&
+              after &&
+              isStageProp(after) &&
+              holders.get(after) === null &&
+              lies.has(after)
+            )
+              handle(after, who, 'take', null, {
+                after: moment.after,
+                offset: round(moment.offset + moment.s * 0.9),
+              });
+          } else
+            effects.push(
+              moveEffect(who, bobs(who) ? 'hop' : 'lean-in', aim, moment.s),
+            );
+        }
+        if (plain && here.has(who))
+          effects.push(
+            moveEffect(who, fallbackMove(doing, who), aim, moment.s),
+          );
+      } else if ('move' in plays || plain) {
+        const move =
+          plain || !('move' in plays) ? fallbackMove(doing, who) : plays.move;
+        effects.push(moveEffect(who, move, aim, moment.s));
+        // A feature opened or shut: it swings as their hand does it.
+        const feature = aimedFeature(aim);
+        if ((doing.id === 'open' || doing.id === 'close') && feature)
+          featureStates.push({
+            beat: moment.after,
+            after: round(moment.offset + doing.keyAt * moment.s),
+            feature,
+            state: doing.id === 'open' ? 'open' : 'shut',
+          });
+      } else if (raw.prop && isStageProp(raw.prop))
+        handleBeat(raw, raw.prop, who, plays.prop, aim, moment);
+      else
+        // Nothing to hand: a kick at the air, a chew on nothing; else the
+        // move it falls back to.
+        effects.push(
+          moveEffect(
+            who,
+            doing.bare ?? fallbackMove(doing, who),
+            aim,
+            moment.s,
+          ),
+        );
     }
-    if (raw.kind === 'reaction' && raw.who && here.has(raw.who)) {
-      if (raw.feeling) effects.push(...faceEffect(raw.who, raw.feeling));
-      if (raw.sign)
-        effects.push({ target: raw.who, part: raw.sign, do: 'show' });
-    }
-    if (raw.kind === 'business' && raw.who && raw.prop && raw.do) {
-      // Done at the end of the sentence before, as a book's page has it;
-      // before any, as the first one begins.
-      const onto = beats[Math.max(0, moment.after)];
-      if (onto)
-        (onto.business ??= []).push({
-          at: moment.after >= 0 ? onto.say.length : 0,
-          who: raw.who,
-          does: raw.do as NonNullable<SceneBeat['business']>[number]['does'],
-          prop: raw.prop,
-          to: raw.do === 'give' && raw.to ? raw.to : null,
-        });
+    if (raw.kind === 'reaction' && who && here.has(who)) {
+      if (raw.feeling) effects.push(...faceEffect(who, raw.feeling));
+      // A sign that moves the whole body, on one the artist drew (who has
+      // no such sign drawn): the move it is, as long as that move takes.
+      const moves = raw.sign && bobs(who) ? SIGN_MOVES[raw.sign] : undefined;
+      if (moves)
+        effects.push(
+          moveEffect(who, moves.move, null, doingOf(moves.doing)!.ms / 1000),
+        );
+      else if (raw.sign)
+        effects.push({ target: who, part: raw.sign, do: 'show' });
     }
     if (stage || effects.length)
       steps.push({
@@ -378,6 +1288,154 @@ export function stageStory(sheet: StorySheet, bible: StudioBible): SceneScript {
         effects,
       });
   });
+
+  /**
+   * A business beat, as what is done with its thing: given to whom it
+   * says; thrown or kicked to someone, toward a side, a feature of the set
+   * or on ahead; a thing thrown to someone caught as it reaches them, in a
+   * hand or a mouth. Food chewed is eaten, a bite at a time; a catch of
+   * nothing coming is a pick-up.
+   */
+  function handleBeat(
+    raw: SheetBeat,
+    prop: StageProp,
+    who: string,
+    asked: ThingAction,
+    aim: string | null,
+    moment: { after: number; offset: number; s: number },
+  ): void {
+    let does = asked;
+    if (
+      does === 'chew' &&
+      PROP_KIND[prop] === 'food' &&
+      holders.get(prop) === who
+    )
+      does = 'eat';
+    if (does === 'catch') {
+      // Thrown to them: the throw's own catch has it.
+      if (inFlight.get(prop) === who) return;
+      if (holders.get(prop) === null) does = 'take';
+    }
+    let to: string | null = null;
+    if (does === 'give') to = raw.to ?? (aim && here.has(aim) ? aim : null);
+    if (does === 'throw' || does === 'kick') to = whereTo(raw, who);
+    // Thrown for someone who goes after it next: past them, onto the
+    // ground, for them to run to and take up.
+    if (does === 'throw' && to && here.has(to) && chasedNext(raw, to, prop)) {
+      const mine = share(here.get(who) ?? 'centre');
+      const theirs = share(here.get(to)!);
+      const way = theirs >= mine ? 1 : -1;
+      // Past them where there is room; else, at the stage's edge or a
+      // feature in the way (a gateway, a bench), short of them, so they
+      // are seen to run to it either way.
+      const clear = (at: number) =>
+        at > 0.06 &&
+        at < 0.94 &&
+        ![...features.values()].some(
+          (f) =>
+            f.spot !== 'back' &&
+            Math.abs(SPOT_SHARE[f.spot] - at) < THROWN_PAST * 0.75,
+        );
+      const past = theirs + way * THROWN_PAST;
+      to = groundAt(clear(past) ? past : theirs - way * THROWN_PAST);
+    }
+    handle(prop, who, does, to, moment);
+    if (does === 'throw' && to && here.has(to)) {
+      // How many spots apart they stand.
+      const across = Math.round(
+        Math.abs(share(here.get(to)!) - share(here.get(who) ?? 'centre')) /
+          (SPOT_SHARE['centre-left'] - SPOT_SHARE.left),
+      );
+      handle(prop, to, 'catch', who, moment, fliesS(across));
+      inFlight.set(prop, to);
+    }
+  }
+
+  /** Whether the next thing someone does after a beat is to go after a thing: a chase, a fetch. */
+  function chasedNext(raw: SheetBeat, by: string, prop: StageProp): boolean {
+    const next = sheet.beats
+      .slice(sheet.beats.indexOf(raw) + 1)
+      .find(
+        (b) => b.who === by && (b.kind === 'action' || b.kind === 'business'),
+      );
+    return Boolean(
+      next &&
+      (next.do === 'chase' || next.do === 'fetch') &&
+      (next.target === prop || next.thing === prop),
+    );
+  }
+
+  /**
+   * Where a thing thrown or kicked goes: to someone on the stage; toward
+   * the side someone gone went, or a side the sheet says; to a feature of
+   * the set, on the ground before it; else on ahead, toward the middle.
+   */
+  function whereTo(raw: SheetBeat, who: string): string {
+    const aimed = raw.to ?? raw.target ?? null;
+    if (aimed?.startsWith('@'))
+      return aimed === '@left' || aimed === '@right' ? aimed : groundAhead(who);
+    if (aimed && inCast.has(aimed))
+      return here.has(aimed) ? aimed : (wentOff.get(aimed) ?? groundAhead(who));
+    // To a feature: on the ground before it, wherever the stage stands it.
+    if (aimed && features.has(aimed)) return featureAim(aimed);
+    return groundAhead(who);
+  }
+  /** The ground a little way ahead of someone, toward the middle of the stage. */
+  function groundAhead(who: string): string {
+    const from = share(here.get(who) ?? 'centre');
+    return groundAt(from + (from <= 0.5 ? 0.3 : -0.3));
+  }
+  /** Where something aimed at comes down, as a share of the stage across; null for someone. */
+  function landsAt(to: string | null, who: string): number | null {
+    if (!to) return share(here.get(who) ?? 'centre');
+    const feature = aimedFeature(to);
+    if (feature) return SPOT_SHARE[features.get(feature)?.spot ?? 'back'];
+    if (to === '@left') return 0.05;
+    if (to === '@right') return 0.95;
+    if (to.startsWith('@')) return Number(to.slice(1)) || null;
+    return null;
+  }
+
+  /** A thing handled at its own moment in the quiet, in the sheet's order. */
+  function handle(
+    prop: StageProp,
+    who: string,
+    does: ThingAction,
+    to: string | null,
+    moment: { after: number; offset: number; s?: number },
+    flies?: number,
+  ): void {
+    const onto = beats[Math.max(0, moment.after)];
+    if (!onto) return;
+    (onto.business ??= []).push({
+      at: moment.after >= 0 ? onto.say.length : 0,
+      who,
+      does,
+      prop,
+      to:
+        does === 'give' ||
+        does === 'throw' ||
+        does === 'kick' ||
+        does === 'catch'
+          ? to
+          : null,
+      after: moment.offset,
+      ...(moment.after < 0 ? { lead: true as const } : {}),
+      ...(flies !== undefined ? { flies } : {}),
+      ...(moment.s !== undefined ? { s: moment.s } : {}),
+    });
+    inFlight.delete(prop);
+    if (does === 'take' || does === 'catch') holders.set(prop, who);
+    if (does === 'put' || does === 'drop' || does === 'kick')
+      holders.set(prop, null);
+    if (does === 'give' && to) holders.set(prop, to);
+    if (does === 'throw') holders.set(prop, to && here.has(to) ? to : null);
+    // Let go of, it lies where it comes down: where one goes after it.
+    if (holders.get(prop) === null && does !== 'take' && does !== 'catch') {
+      const at = landsAt(does === 'put' || does === 'drop' ? null : to, who);
+      if (at !== null) lies.set(prop, at);
+    }
+  }
 
   // What the narrator says someone on the stage does, acted as it is said.
   const actors: Actor[] = cast.flatMap((thing) => {
@@ -393,7 +1451,15 @@ export function stageStory(sheet: StorySheet, bible: StudioBible): SceneScript {
         ]
       : [];
   });
-  const props = sheet.props.map((p) => p.prop);
+  // Every thing on the stage: resting as it opens, or in someone's hand
+  // or mouth; and any the sheet handles that it did not list.
+  const props = [
+    ...new Set<StageProp>([
+      ...sheet.props.map((p) => p.prop),
+      ...startsHeld.keys(),
+      ...beats.flatMap((b) => (b.business ?? []).map((one) => one.prop)),
+    ]),
+  ];
   if (actors.length) {
     const { acts, business } = directionsIn(
       beats.map((beat) => (beat.kind === 'line' ? '' : beat.say)),
@@ -414,12 +1480,10 @@ export function stageStory(sheet: StorySheet, bible: StudioBible): SceneScript {
       done.add(key);
       (beats[beat].business ??= []).push(one);
     }
-    for (const beat of beats)
-      if (beat.business) beat.business.sort((a, b) => a.at - b.at);
   }
 
-  // The camera, on the sheet's spoken beats: a shot at an action is the
-  // next line's.
+  // The camera, on the sheet's spoken beats; a shot at an action, a thing
+  // handled or a face, at its own moment in the quiet.
   const spokenFrom = (at: number) => {
     for (let i = at; i < sheet.beats.length; i += 1) {
       const k = spokenAt.get(i);
@@ -429,17 +1493,35 @@ export function stageStory(sheet: StorySheet, bible: StudioBible): SceneScript {
   };
   const camera = sheet.camera
     .filter((shot) => shot.shot === 'wide' || (shot.on && inCast.has(shot.on)))
-    .map((shot) => ({
-      beat: spokenFrom(shot.beat),
-      shot: shot.shot,
-      on: shot.on,
-      with: shot.with && inCast.has(shot.with) ? shot.with : null,
-    }));
+    .map((shot) => {
+      const moment = moments.get(shot.beat);
+      return {
+        ...(moment
+          ? { beat: moment.after, after: moment.offset }
+          : { beat: spokenFrom(shot.beat) }),
+        shot: shot.shot,
+        on: shot.on,
+        with: shot.with && inCast.has(shot.with) ? shot.with : null,
+      };
+    });
 
   const propsNear = Object.fromEntries(
     sheet.props.flatMap((p) =>
       p.near && inCast.has(p.near) ? [[p.prop, p.near]] : [],
     ),
+  );
+  // In a hand, or an animal's mouth.
+  const propsHeld = Object.fromEntries(
+    [...startsHeld].map(([prop, by]) => [
+      prop,
+      {
+        by,
+        in:
+          byId.get(by)?.kind === 'person'
+            ? ('hand' as const)
+            : ('mouth' as const),
+      },
+    ]),
   );
   return {
     fit: 'good',
@@ -453,7 +1535,25 @@ export function stageStory(sheet: StorySheet, bible: StudioBible): SceneScript {
     ...(lead > 0 ? { lead } : {}),
     ...(props.length ? { props } : {}),
     ...(Object.keys(propsNear).length ? { propsNear } : {}),
+    ...(Object.keys(propsHeld).length ? { propsHeld } : {}),
     ...(camera.some((shot) => shot.shot !== 'wide') ? { camera } : {}),
+    // Everyone at a station of their own; the set's features among them,
+    // each as the scene finds it, opened and shut when it says.
+    stations: true,
+    ...(features.size
+      ? {
+          features: [...features.values()].map((f): SceneFeature => ({
+            id: f.id,
+            name: f.name,
+            kind: f.kind,
+            spot: f.spot,
+            opens: f.opens,
+            ...(states.open.has(f.id) ? { open: true as const } : {}),
+            ...(inLook(f) ? { looked: true as const } : {}),
+          })),
+        }
+      : {}),
+    ...(featureStates.length ? { featureStates } : {}),
     setting: {
       time: sheet.time,
       weather: sheet.weather,

@@ -20,6 +20,12 @@ import type {
   SceneStepDto,
 } from '../../contracts';
 import type { NarratedMove } from './scene-directions';
+import {
+  ACTED_MOVES,
+  HELD_MOVES,
+  aimedFeature,
+  type ActedMove,
+} from './scene-doings';
 
 /** A line as it is said: who says it, when, and each word's time. */
 export interface SpokenLine {
@@ -35,6 +41,8 @@ export interface SpokenLine {
   from?: 'off' | 'above' | 'phone' | 'letter' | 'thought' | 'dream' | 'crowd';
   /** The side of the stage an off-stage voice is on. */
   side?: -1 | 1;
+  /** Shouted, whispered: a shout can startle whoever hears it. */
+  pace?: 'calm' | 'quick' | 'slow' | 'whisper' | 'shout';
   startMs: number;
   endMs: number;
   words: { text: string; startMs: number; endMs: number }[];
@@ -49,7 +57,45 @@ export interface DirectedMove {
   atMs: number;
   target: string;
   other: string | null;
-  do: NarratedMove | 'attend' | 'lean-in';
+  do: NarratedMove | 'attend' | 'lean-in' | ActedMove;
+  /** How long it takes, when a screenplay's list of doings says; else as long as the move does. */
+  ms?: number;
+}
+
+/**
+ * A line that startles whoever hears it. In a film, whose lines are said
+ * as the sheet says: shouted and ending on a "!", or a cry of alarm
+ * ("Look out!", "Stop!"); not every "!": "Catch the ball!" said happily
+ * makes no one jump. On a book's page, any line ending on a "!".
+ */
+const ALARM =
+  /\b(?:look out|watch out|careful|stop|help|no|danger|fire|get back|get down|hurry)\b[^.?]*!["'”’]?\s*$/iu;
+export const startles = (
+  line: Pick<SpokenLine, 'pace'>,
+  said: string,
+  film = false,
+) =>
+  /!["'”’]?\s*$/u.test(said) &&
+  (!film || line.pace === 'shout' || ALARM.test(said));
+
+/** Words that point off the stage: "He went that way!" */
+const THAT_WAY = /\b(?:that way|this way|over there|out there|down there)\b/iu;
+/** How long a point off the stage at "that way" is held. */
+const POINT_OFF_MS = 1400;
+/** Someone gone off this lately is who a line said to no one is said after. */
+const GONE_LATELY_MS = 12_000;
+
+/** The word a place in a line's words falls in, counting them as said, one space apart. */
+function wordAt(
+  words: SpokenLine['words'],
+  at: number,
+): SpokenLine['words'][number] {
+  let from = 0;
+  for (const word of words) {
+    if (at < from + word.text.length + 1) return word;
+    from += word.text.length + 1;
+  }
+  return words[words.length - 1];
 }
 
 /** Frames of the mouth's shapes a second. */
@@ -101,6 +147,58 @@ const MOVE_MS: Record<
   sob: 2600,
   shrug: 1200,
 };
+
+/** How long each of the body's own moves takes, when nothing says. */
+const ACTED_MS: Record<ActedMove, number> = {
+  jump: 1100,
+  crouch: 1400,
+  sit: 1400,
+  stand: 1200,
+  lie: 1600,
+  fall: 1200,
+  spin: 1200,
+  bow: 1200,
+  kick: 1100,
+  wag: 1500,
+  lick: 1200,
+  chew: 1600,
+  sniff: 1200,
+  dig: 1600,
+  wriggle: 1200,
+  bark: 1000,
+  roll: 1400,
+  'shake-off': 1200,
+};
+
+/** The body's own moves done toward someone or something, whom the eyes go to while they do it. */
+const EYES_ON: readonly ActedMove[] = [
+  'jump',
+  'crouch',
+  'bow',
+  'kick',
+  'lick',
+  'chew',
+  'sniff',
+  'dig',
+  'bark',
+];
+
+/** What ends sitting or lying down: getting up, or any move that cannot be made sitting. */
+const ENDS_HOLD = new Set<string>([
+  'stand',
+  'jump',
+  'sit',
+  'lie',
+  'fall',
+  'spin',
+  'roll',
+  'bow',
+  'kick',
+  'dig',
+  'shake-off',
+  'hop',
+  'hug',
+]);
 
 /** A small, stable number from a name: the same choice in every make. */
 function beatOf(seed: string): number {
@@ -265,6 +363,10 @@ export function actingOf(input: {
   traits?: ReadonlyMap<string, readonly string[]>;
   /** Who the book meets for the first time on this page. */
   firsts?: ReadonlySet<string>;
+  /** A film's: only a shout or a cry of alarm startles, not any "!". */
+  film?: boolean;
+  /** When each one goes somewhere else on the stage: a step, which no one takes sitting. */
+  goes?: ReadonlyMap<string, readonly number[]>;
 }): Record<string, SceneActingDto> {
   const { steps, lines, durationMs } = input;
   const actors = new Set(input.actors);
@@ -309,6 +411,34 @@ export function actingOf(input: {
       );
   };
 
+  /** Who went off, when and by which side: where a call after them goes. */
+  const wentOff = new Map<string, { at: number; side: '@left' | '@right' }>();
+  for (const step of steps)
+    for (const [id, exit] of Object.entries(step.exit ?? {}))
+      wentOff.set(id, {
+        at: step.atMs,
+        side: exit.side === 'left' ? '@left' : '@right',
+      });
+  /** The side someone went off by, if they had gone by `t`. */
+  const sideWent = (id: string, t: number) => {
+    const gone = wentOff.get(id);
+    return gone && gone.at <= t ? gone.side : undefined;
+  };
+  /** The side the next to go after `t` goes off by. */
+  const nextGone = (t: number) =>
+    [...wentOff.values()]
+      .filter((one) => one.at > t)
+      .sort((a, b) => a.at - b.at)[0]?.side;
+  /** Away from whom they tell, across the stage. */
+  const awayFrom = (
+    id: string,
+    them: string | null,
+    t: number,
+  ): '@left' | '@right' => {
+    const show = stepAt(steps, t)?.show ?? [];
+    return them && show.indexOf(them) > show.indexOf(id) ? '@left' : '@right';
+  };
+
   // Lines: the speaker looks at whom they talk to, the rest at them.
   // Whom they talk to: whoever the line calls by name ("Tell us a story,
   // Nana"), else whom they answer, else whom they spoke to last, going
@@ -336,16 +466,16 @@ export function actingOf(input: {
           line.from === 'crowd'
             ? null
             : line.from === 'above'
-            ? '@up'
-            : line.from === 'off' || (!holder && line.from === 'phone')
-              ? (line.side ?? 1) < 0
-                ? '@left'
-                : '@right'
-              : one === holder
-                ? line.from === 'letter'
-                  ? '@down'
-                  : null
-                : holder;
+              ? '@up'
+              : line.from === 'off' || (!holder && line.from === 'phone')
+                ? (line.side ?? 1) < 0
+                  ? '@left'
+                  : '@right'
+                : one === holder
+                  ? line.from === 'letter'
+                    ? '@down'
+                    : null
+                  : holder;
         gaze(one, {
           from: from + 150 + k * 110,
           to: to + 600,
@@ -397,13 +527,67 @@ export function actingOf(input: {
           ? last
           : (others(speaker, from)[0] ?? null));
     if (answering) spokeTo.set(speaker, answering);
-    gaze(speaker, {
-      from: from - 250,
-      to: to + 300,
-      target: answering,
-      turn: answering ? 0.5 : 0,
-      rank: RANK.speak,
-    });
+    // Called after someone gone ("Pip! Where are you going?"), or said
+    // with no one to answer just after someone went: toward the side they
+    // went. Called for someone not here at all: a look round for them.
+    const first = line.words[0]?.text ?? '';
+    const calledOff = /[!,]["'”’]?$/u.test(first)
+      ? [...input.names].find(
+          ([id, names]) =>
+            id !== speaker &&
+            !on(id, from) &&
+            names.some(
+              (name) =>
+                name.split(/\s+/)[0] === first.replace(/[^\p{L}'-]/gu, ''),
+            ),
+        )?.[0]
+      : undefined;
+    const lastGone = [...wentOff]
+      .filter(
+        ([id, { at }]) =>
+          id !== speaker && at <= from && from - at < GONE_LATELY_MS,
+      )
+      .sort((a, b) => b[1].at - a[1].at)[0];
+    const after = calledOff ?? (!answering ? lastGone?.[0] : undefined);
+    const offSide = after ? sideWent(after, from) : undefined;
+    // Called by a name none here has, asking where they are ("Pip! Pip!
+    // Where are you?"): someone not in the scene at all.
+    const callsFor =
+      /^\p{Lu}[\p{L}'-]*[!,]["'”’]?$/u.test(first) &&
+      /\bwhere\b/iu.test(line.words.map((w) => w.text).join(' ')) &&
+      ![...input.names].some(
+        ([id, names]) =>
+          on(id, from) &&
+          names.some(
+            (name) =>
+              name.split(/\s+/)[0] === first.replace(/[^\p{L}'-]/gu, ''),
+          ),
+      );
+    const lookRound = (Boolean(after) && !offSide) || (!after && callsFor);
+    if (lookRound) {
+      const mid = (from + to) / 2;
+      gaze(speaker, {
+        from: from - 250,
+        to: mid,
+        target: '@left',
+        turn: 0.5,
+        rank: RANK.speak,
+      });
+      gaze(speaker, {
+        from: mid,
+        to: to + 300,
+        target: '@right',
+        turn: 0.5,
+        rank: RANK.speak,
+      });
+    } else
+      gaze(speaker, {
+        from: from - 250,
+        to: to + 300,
+        target: offSide ?? answering,
+        turn: offSide ? 0.6 : answering ? 0.5 : 0,
+        rank: RANK.speak,
+      });
     others(speaker, from).forEach((listener, k) =>
       gaze(listener, {
         from: from + 150 + k * 90,
@@ -419,6 +603,25 @@ export function actingOf(input: {
     ]);
     const words = line.words;
     const said = words.map((w) => w.text).join(' ');
+    // "That way!": a point off the stage, where someone went or is going,
+    // else away from whom they tell, the eyes after it.
+    const thatWay = THAT_WAY.exec(said);
+    if (thatWay) {
+      const side =
+        offSide ??
+        lastGone?.[1].side ??
+        nextGone(from) ??
+        awayFrom(speaker, answering, from);
+      const word = wordAt(words, thatWay.index);
+      move(speaker, word.startMs, 'point', POINT_OFF_MS, side);
+      gaze(speaker, {
+        from: word.startMs,
+        to: word.startMs + POINT_OFF_MS + 200,
+        target: side,
+        turn: 0.6,
+        rank: RANK.directed,
+      });
+    }
     // A gesture as a line starts: the hand opens toward whom they answer,
     // or, with no one to face, the arms in turn. A lively one gestures on
     // a short line too, and quicker; a calm one on every other long one.
@@ -426,13 +629,19 @@ export function actingOf(input: {
     const fewest = style.energy > 1.1 ? 3 : style.energy < 0.9 ? 6 : 4;
     const nth = spokenBy.get(speaker) ?? 0;
     spokenBy.set(speaker, nth + 1);
-    if (words.length >= fewest && !(style.energy < 0.9 && nth % 2 === 1))
+    const toward = offSide ?? answering ?? undefined;
+    if (
+      !thatWay &&
+      !lookRound &&
+      words.length >= fewest &&
+      !(style.energy < 0.9 && nth % 2 === 1)
+    )
       move(
         speaker,
         from + 120,
-        answering || i % 2 === 0 ? 'gesture' : 'gesture-left',
+        toward || i % 2 === 0 ? 'gesture' : 'gesture-left',
         Math.min(1500, Math.max(800, (to - from) * 0.6)) / style.energy,
-        answering ?? undefined,
+        toward,
       );
     // A nod on the stressed word: before a ! or ., else the longest.
     if (words.length >= 2) {
@@ -454,7 +663,8 @@ export function actingOf(input: {
     if (listeners.length) {
       const one =
         listeners[Math.floor(beatOf(`${speaker}:${i}`) * listeners.length)];
-      if (/!["'”’]?\s*$/.test(said)) move(one, to + 100, 'lean', 800, speaker);
+      if (startles(line, said, input.film))
+        move(one, to + 100, 'lean', 800, speaker);
       else if (/[.]["'”’]?\s*$/.test(said) && beatOf(`nod:${i}`) < 0.7)
         move(one, to + 150, 'nod', 500);
     }
@@ -496,9 +706,13 @@ export function actingOf(input: {
   // What the writer or the narration asked for, where it asked.
   for (const one of input.directed) {
     const { atMs: at, target: who, other } = one;
+    /** A side of the stage: a voice off it, someone gone off it, a feature at it. */
+    const side = other === '@left' || other === '@right' ? other : undefined;
     /** Someone real to turn to: another on the stage, not the sky. */
     const them =
       other && !other.startsWith('@') && on(other, at) ? other : null;
+    /** A feature of the set, where it stands: turned to as to someone. */
+    const feature = aimedFeature(other) ? other : null;
     const look = (
       id: string,
       target: string | null,
@@ -507,53 +721,104 @@ export function actingOf(input: {
     ) => gaze(id, { from: at, to: at + ms, target, turn, rank: RANK.directed });
     switch (one.do) {
       case 'look':
-        if (other) look(who, them ?? other, 2500, them ? 0.5 : 0);
+        if (other)
+          look(
+            who,
+            them ?? other,
+            one.ms ?? 2500,
+            them || feature ? 0.5 : side ? 0.6 : 0,
+          );
         break;
       case 'attend':
         for (const watcher of others(who, at)) look(watcher, who, 1600, 0.35);
         break;
-      case 'hug':
+      case 'hug': {
         if (!them) break;
-        move(who, at, 'hug', 2200, them);
-        move(them, at + 120, 'hug', 2100, who);
-        look(who, them, 2200, 0.6);
+        const ms = one.ms ?? 2200;
+        move(who, at, 'hug', ms, them);
+        move(them, at + 120, 'hug', ms - 100, who);
+        look(who, them, ms, 0.6);
         gaze(them, {
           from: at,
-          to: at + 2200,
+          to: at + ms,
           target: who,
           turn: 0.6,
           rank: RANK.directed,
         });
         break;
+      }
       case 'reach':
-      case 'point':
-        if (other?.startsWith('@')) {
-          move(who, at, 'point-up', 1700);
-          look(who, other, 1900, 0);
+      case 'point': {
+        const ms = one.ms ?? (one.do === 'point' ? 1700 : 1400);
+        if (side) {
+          // Out to one side of the stage: the arm that way, the eyes after it.
+          move(who, at, 'point', ms, side);
+          look(who, side, ms + 200, 0.6);
+        } else if (other?.startsWith('@')) {
+          move(who, at, 'point-up', ms);
+          look(who, other, ms + 200, 0);
         } else if (them || other) {
+          move(who, at, one.do, ms, them ?? other!);
+          look(who, them ?? other, ms + 100, 0.4);
+        }
+        break;
+      }
+      case 'wave': {
+        const toward = them ?? feature ?? side;
+        move(who, at, 'wave', one.ms ?? 1900, toward);
+        if (toward) look(who, toward, (one.ms ?? 1900) + 100, 0.4);
+        break;
+      }
+      case 'nod':
+        move(who, at, 'nod', one.ms ?? 600);
+        break;
+
+      case 'lean-in': {
+        const toward = them ?? feature ?? side;
+        move(who, at, 'lean-in', one.ms ?? 1500, toward);
+        if (toward) look(who, toward, one.ms ?? 1500, 0.4);
+        break;
+      }
+      default:
+        if ((ACTED_MOVES as readonly string[]).includes(one.do)) {
+          // The body's own: toward whom or what it is done, the eyes on
+          // it while it is (a lick, a sniff, a bow).
+          const acted = one.do as ActedMove;
+          const toward = them ?? feature ?? side;
+          const ms = one.ms ?? ACTED_MS[acted];
+          move(who, at, acted, ms, toward ?? undefined);
+          if (toward && EYES_ON.includes(acted))
+            look(who, toward, ms + 100, 0.5);
+        } else
           move(
             who,
             at,
             one.do,
-            one.do === 'point' ? 1700 : 1400,
-            them ?? other!,
+            one.ms ?? MOVE_MS[one.do as keyof typeof MOVE_MS],
           );
-          look(who, them ?? other, 1800, 0.4);
-        }
-        break;
-      case 'wave':
-        move(who, at, 'wave', 1900, them ?? undefined);
-        if (them) look(who, them, 2000, 0.4);
-        break;
-      case 'nod':
-        move(who, at, 'nod', 600);
-        break;
-      case 'lean-in':
-        move(who, at, 'lean-in', 1500, them ?? undefined);
-        break;
-      default:
-        move(who, at, one.do, MOVE_MS[one.do]);
     }
+  }
+
+  // Sitting or lying down, they stay so until they get up (or make a move
+  // that cannot be made sitting), go somewhere else on the stage, or go:
+  // held until then, and up again as they rise.
+  for (const [id, list] of moves) {
+    list.sort((a, b) => a[0] - b[0]);
+    list.forEach((one, k) => {
+      if (!(HELD_MOVES as readonly string[]).includes(one[1])) return;
+      const next = list.slice(k + 1).find((later) => ENDS_HOLD.has(later[1]));
+      const gone =
+        (onStage.get(id) ?? []).find(
+          ([a, b]) => a <= one[0] && one[0] < b,
+        )?.[1] ?? durationMs;
+      const walks = input.goes?.get(id)?.find((at) => at > one[0]);
+      const until = Math.min(
+        next ? next[0] + (next[1] === 'stand' ? next[2] : 0) : Infinity,
+        walks ?? Infinity,
+        gone,
+      );
+      one[2] = Math.max(one[2], Math.round(until - one[0]));
+    });
   }
 
   // Met for the first time: a move that says what they are like, a

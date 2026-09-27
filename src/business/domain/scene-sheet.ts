@@ -32,8 +32,17 @@ export type Point = [number, number];
 export interface CharacterSheet {
   version: number;
   drawing: GatedDrawing;
-  /** Where each is, in the drawing's own units. */
-  anchors: { head: Point | null; body: Point | null; legs: Point | null };
+  /**
+   * Where each is, in the drawing's own units; and, for one the artist
+   * drew, its mouth: where what it carries rides. Absent on a sheet kept
+   * before it was measured, measured when next used.
+   */
+  anchors: {
+    head: Point | null;
+    body: Point | null;
+    legs: Point | null;
+    mouth?: Point | null;
+  };
   /** A person's look, as the kit drew them. */
   figure?: FigureSpec;
   /** An animal's or a creature's size beside people, as the artist was told. */
@@ -86,6 +95,7 @@ export async function figureDrawing(
     acts: true,
     anchors: drawn.anchors,
     ...(drawn.joints ? { joints: drawn.joints } : {}),
+    ...(drawn.legs ? { legs: drawn.legs } : {}),
     wears: {
       top: spec.top,
       topColour: spec.topColour,
@@ -150,6 +160,15 @@ const centre = (box: InkBox): Point => [
   Math.round((box.x + box.width / 2) * 10) / 10,
   Math.round((box.y + box.height / 2) * 10) / 10,
 ];
+
+/** A mouth: the low middle of the face it is drawn in. */
+const lowMiddle = (face: InkBox | null): Point | null =>
+  face && face.width > 0 && face.height > 0
+    ? [
+        Math.round((face.x + face.width / 2) * 10) / 10,
+        Math.round((face.y + face.height * 0.85) * 10) / 10,
+      ]
+    : null;
 
 const overlap = (a: InkBox, b: InkBox) =>
   a.x < b.x + b.width &&
@@ -216,10 +235,34 @@ export async function measureSheet(
           ? { viewBox: drawing.viewBox, map: measured.grid }
           : drawing.field,
       },
-      anchors: { head: at('head'), body: at('body'), legs: at('legs') },
+      anchors: {
+        head: at('head'),
+        body: at('body'),
+        legs: at('legs'),
+        mouth: lowMiddle(box('neutral')),
+      },
     },
     notes,
   };
+}
+
+/**
+ * Where a drawing's mouth is: the low middle of its neutral face, or
+ * null when it has none to measure. For a sheet kept before mouths were
+ * measured.
+ */
+export async function mouthOf(drawing: GatedDrawing): Promise<Point | null> {
+  const id = drawing.states.neutral ?? drawing.parts.neutral;
+  const doc = parseDocument(drawing.svg, { xmlMode: true });
+  const root = elements(doc.children).find(
+    (node) => node.name.toLowerCase() === 'svg',
+  );
+  const face = id && root ? isolate(root, id) : null;
+  if (!face) return null;
+  const measured = await renderSvg(drawing.svg, undefined, {
+    variants: [face],
+  });
+  return lowMiddle(measured.inks?.[0] ?? null);
 }
 
 /**

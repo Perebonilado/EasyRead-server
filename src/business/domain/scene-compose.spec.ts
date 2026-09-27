@@ -10,6 +10,7 @@ import {
   oneFaceAtATime,
   sidesKept,
   spokenIn,
+  thingDto,
   thumbSvg,
 } from './scene-compose';
 import type { SceneScript } from './scene-script';
@@ -2402,8 +2403,20 @@ describe("a sheet's camera, cut as a film is", () => {
 
   it('ends a shot held 8 s in the quiet after the line it has reached', () => {
     // Close on Maya from "Pip! Where are you going?": held 8 s, it would
-    // end at 21 321, in "I have to catch him!" (21 182–22 120).
-    const [first, second] = shotsOf([close(4, 'maya'), close(10, 'mama')]);
+    // end at 21 321, in "I have to catch him!" (21 182–22 120). (Maya says
+    // the fifth line here too, so nothing else ends it first.)
+    const all = sheet([close(4, 'maya'), close(10, 'mama')]);
+    const [first, second] = directedShots(
+      {
+        ...all,
+        beats: all.beats.map((b, i) =>
+          i === 5 ? { ...b, speaker: 'maya' } : b,
+        ),
+      },
+      maya,
+      steps,
+      35_240,
+    );
     expect(first).toMatchObject({ atMs: 13_321, target: 'maya' });
     expect(first.untilMs).toBeGreaterThan(22_120);
     expect(first.untilMs).toBeLessThan(22_859);
@@ -2476,6 +2489,68 @@ describe("a sheet's camera, cut as a film is", () => {
       35_000,
     );
     expect(held.untilMs).toBe(35_000);
+  });
+
+  it('goes back to the whole stage before a line said by anyone it leaves out', () => {
+    // Close on Maya from her fifth line: Mama says the sixth, and is seen.
+    const [shot] = shotsOf([close(4, 'maya')]);
+    expect(shot.untilMs).toBe(quietCuts(maya, 35_240).before(5));
+    // Framed with her, she is seen in it: it holds.
+    const [two] = shotsOf([{ beat: 4, shot: 'two', on: 'maya', with: 'mama' }]);
+    expect(two.untilMs).toBeGreaterThan(19_676);
+  });
+
+  it('hides nothing anyone else does: in once it is done, out before the next', () => {
+    const cuts = quietCuts(maya, 35_240);
+    // Pip goes off as the close on Maya would begin: it comes in after,
+    // in the quiet after her line. (Maya says the sixth line here too.)
+    const all = sheet([close(4, 'maya')]);
+    const [late] = directedShots(
+      {
+        ...all,
+        beats: all.beats.map((b, i) =>
+          i === 5 ? { ...b, speaker: 'maya' } : b,
+        ),
+      },
+      maya,
+      steps,
+      35_240,
+      { doings: [{ who: 'pip', fromMs: 13_000, toMs: 14_200 }] },
+    );
+    expect(late.atMs).toBe(cuts.from(14_200));
+    expect(inWords(late.atMs)).toBe(false);
+    // Mama takes the cup in the quiet after the shot's line: it ends first.
+    const [early] = directedShots(
+      sheet([{ beat: 2, shot: 'close', on: 'maya', with: null }]),
+      maya,
+      [step(0, ['maya', 'pip', 'mama'])],
+      35_240,
+      { doings: [{ who: 'mama', fromMs: 10_000, toMs: 11_000 }] },
+    );
+    expect(early.untilMs).toBe(9900);
+    // A shot on something done in a quiet: from its moment, through the
+    // step it takes, on the one who does it.
+    const momentMs = (b: number, after: number) =>
+      maya[b].endMs + 150 + after * 1000;
+    const [going] = directedShots(
+      sheet([{ beat: 3, after: 0.5, shot: 'close', on: 'maya', with: null }]),
+      maya,
+      [step(0, ['maya', 'pip', 'mama']), step(12_448, ['maya', 'mama'])],
+      35_240,
+      { momentMs },
+    );
+    expect(going).toMatchObject({ atMs: 12_198, target: 'maya' });
+    expect(going.untilMs).toBeGreaterThan(12_448);
+    // One who goes off at it: close as the line before it is said, until
+    // they go.
+    const [off] = directedShots(
+      sheet([{ beat: 3, after: 0.5, shot: 'close', on: 'maya', with: null }]),
+      maya,
+      [step(0, ['maya', 'pip', 'mama']), step(12_448, ['pip', 'mama'])],
+      35_240,
+      { momentMs },
+    );
+    expect(off).toMatchObject({ atMs: cuts.before(3), untilMs: 12_448 });
   });
 
   it('frames only who is there, and one alone when the other is not', () => {
@@ -2615,5 +2690,97 @@ describe('the rhythm of a page', () => {
         durationMs: 60_000,
       }),
     ).toEqual({ stillMs: 40_000, perMinute: 3, stagesPerMinute: 2 });
+  });
+});
+
+describe('what a drawing tells the player of itself', () => {
+  const drawn = (extra: Partial<GatedDrawing>): GatedDrawing => ({
+    svg: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 100"/>',
+    viewBox: [0, 0, 200, 100],
+    aspect: 2,
+    parts: {},
+    labels: {},
+    states: {},
+    moves: true,
+    callouts: [],
+    field: null,
+    ...extra,
+  });
+  const pip = {
+    id: 'pip',
+    kind: 'character' as const,
+    ref: 'pip',
+    name: 'Pip',
+    state: null,
+    met: 0,
+    intro: [],
+  };
+
+  it('gives one the artist drew its mouth and its size in the kit’s units, so what it carries rides there', () => {
+    const dto = thingDto(
+      pip,
+      drawn({ mouth: [100, 42], stands: { units: 95 } }),
+      true,
+    );
+    expect(dto).toMatchObject({ mouth: [0.5, 0.42], units: 95 });
+  });
+
+  it('gives the kit’s people neither: their hands hold things', () => {
+    const dto = thingDto(
+      pip,
+      drawn({ mouth: [100, 42], stands: { units: 95 }, acts: true }),
+      true,
+    );
+    expect(dto).not.toHaveProperty('mouth');
+    expect(dto).not.toHaveProperty('units');
+  });
+
+  it('gives one the artist drew its neck, how far its head dips, how low it sinks and which way it faces', () => {
+    const dto = thingDto(
+      pip,
+      drawn({ neck: [140, 50], dip: 16, sinks: 0.18, faces: 1 }),
+      true,
+    );
+    expect(dto).toMatchObject({
+      neck: [0.7, 0.5],
+      dip: 16,
+      sinks: 0.18,
+      faces: 1,
+    });
+    // A neck with no turn proved is no neck.
+    expect(thingDto(pip, drawn({ neck: [140, 50] }), true)).not.toHaveProperty(
+      'neck',
+    );
+  });
+
+  it('gives the kit’s people their legs: the knees bend by them', () => {
+    const dto = thingDto(
+      pip,
+      drawn({
+        acts: true,
+        legs: {
+          r: [
+            [115, 60],
+            [115, 80],
+            [115, 100],
+          ],
+          l: [
+            [85, 60],
+            [85, 80],
+            [85, 100],
+          ],
+        },
+      }),
+      true,
+    );
+    expect(dto).toMatchObject({
+      legs: {
+        r: [
+          [0.575, 0.6],
+          [0.575, 0.8],
+          [0.575, 1],
+        ],
+      },
+    });
   });
 });

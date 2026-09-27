@@ -14,7 +14,10 @@ import type {
 } from '../../business/repositories/studio.repository';
 import type { StudioJobData } from '../queues';
 import type { SceneProcessor } from './scene.processor';
-import { StudioProcessor } from './studio.processor';
+import { StudioProcessor, studioMakeOf } from './studio.processor';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
+import type { SceneDto } from '../../contracts';
 
 /**
  * What the thread gets from the Studio's work: one line when a job's
@@ -376,5 +379,95 @@ describe('the Studio at work, as the thread records it', () => {
     );
     expect(studio.episodes.get('e1')?.busy).toBeNull();
     expect(studio.queued).toHaveLength(1);
+  });
+});
+
+describe('a Studio scene as it is made', () => {
+  const maya = (file: string): unknown =>
+    JSON.parse(
+      readFileSync(
+        join(__dirname, '../../business/domain/studio/__fixtures__/maya', file),
+        'utf8',
+      ),
+    );
+  const show: StudioShowRecord = {
+    id: 's1',
+    userId: 'u1',
+    title: 'Maya and the Missing Pup',
+    format: 'story',
+    brief,
+    bible: bibleOf(maya('bible.json')),
+    createdAt: at,
+    updatedAt: at,
+  };
+  const episode = {
+    id: 'e1',
+    showId: 's1',
+    userId: 'u1',
+    number: 1,
+    title: 'Maya and the Missing Pup',
+    logline: null,
+    phase: 'made',
+    busy: null,
+    error: null,
+    outline: null,
+    shareToken: null,
+    durationMs: null,
+    thumbKey: null,
+    createdAt: at,
+    updatedAt: at,
+  } as StudioEpisodeRecord;
+  const rows = [4, 5].map(
+    (n, k) =>
+      ({
+        id: `c${n}`,
+        episodeId: 'e1',
+        position: k,
+        sheet: storySheetOf(maya(`s${n}-sheet.json`)),
+        status: 'made',
+      }) as StudioSceneRecord,
+  );
+
+  it('carries on from the scene before, and plays again by its fallback a beat the film showed nothing for', () => {
+    const made = studioMakeOf(show, episode, rows[1], rows, show.bible!);
+    // Pip still has the ball from the field, in his mouth: a thing of its
+    // own, never drawn into him.
+    const pip = made.script?.cast.find((t) => t.id === 'pip') as {
+      holding?: string;
+    };
+    expect(pip.holding).toBeUndefined();
+    expect(made.script?.propsHeld?.ball).toEqual({ by: 'pip', in: 'mouth' });
+    // The film made before these words won shows Pip doing nothing where
+    // he drops the ball: that beat is played again, and logged for us.
+    const again = made.recheck!(maya('s5-made.json') as SceneDto);
+    expect(again.script).not.toBeNull();
+    expect(again.notes.join(' ')).toMatch(/pip drop: unseen/);
+    expect(again.script?.beats.map((b) => b.say)).toEqual(
+      made.script?.beats.map((b) => b.say),
+    );
+  });
+
+  it('brings someone on holding what the scene before left them with, not what they always carry', () => {
+    const [s2, s3] = [2, 3].map(
+      (n, k) =>
+        ({
+          id: `c${n}`,
+          episodeId: 'e1',
+          position: k,
+          sheet: storySheetOf(maya(`s${n}-sheet.json`)),
+          status: 'made',
+        }) as StudioSceneRecord,
+    );
+    const made = studioMakeOf(show, episode, s3, [s2, s3], show.bible!);
+    // Maya always carries a ball, but left the market with nothing.
+    const cast = (id: string) =>
+      made.script?.cast.find((t) => t.id === id) as { holding?: string };
+    expect(cast('maya').holding).toBeUndefined();
+    expect(made.script?.propsHeld?.ball).toBeUndefined();
+    // Tobi comes on with his magnifier, a thing of its own in his hand.
+    expect(made.script?.propsHeld?.magnifier).toEqual({
+      by: 'tobi',
+      in: 'hand',
+    });
   });
 });

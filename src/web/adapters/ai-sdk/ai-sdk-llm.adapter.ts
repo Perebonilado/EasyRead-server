@@ -1021,6 +1021,7 @@ export class AiSdkLlmAdapter implements LlmGatewayPort, OnModuleInit {
     notes?: string[];
     signal?: AbortSignal;
     backdrop?: boolean;
+    reference?: string;
   }): Promise<LlmResult<string>> {
     const started = Date.now();
     const { generateText } = await this.registry.modules();
@@ -2403,6 +2404,8 @@ export function drawingRequest(input: {
   neighbours: string[];
   notes?: string[];
   backdrop?: boolean;
+  /** A character drawn again: how they are drawn now. */
+  reference?: string;
 }): string {
   const { thing, viewBox } = input;
   const id = groupId;
@@ -2430,6 +2433,9 @@ export function drawingRequest(input: {
     `Context: a lesson on "${input.topic}"${input.neighbours.length ? `; on the stage it stands with: ${input.neighbours.join(', ')}` : ''}.`,
     input.notes?.length
       ? `Last time this fell short:\n- ${input.notes.join('\n- ')}`
+      : '',
+    input.reference
+      ? `How they are drawn now, to draw them again from (the same character, changed only as asked; its groups as asked above):\n${input.reference}`
       : '',
   ]
     .filter(Boolean)

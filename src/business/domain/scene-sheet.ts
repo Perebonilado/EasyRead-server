@@ -30,6 +30,7 @@ import {
 import type { OwnPropDrawing, PropSize } from './scene-props';
 import { renderSvg, type InkBox, type InkMap } from './scene-raster';
 import type { SetPiece } from './scene-set-pieces';
+import type { SheetFace } from './scene-sheet-face';
 import { jointNotes, type SheetRig } from './scene-sheet-rig';
 import { DRAWN } from './scene-own';
 import type { SceneScript } from './scene-script';
@@ -71,6 +72,12 @@ export interface CharacterSheet {
   size?: StorySize;
   /** An animal or a creature rigged by code: its joints, and the parts moved in to meet the body. */
   rig?: SheetRig;
+  /**
+   * One the artist drew with no mouth, to the brief that asks for it: where
+   * code draws the kit's mouths and lids, measured. Absent on a sheet drawn
+   * before, whose faces draw their own mouths.
+   */
+  face?: SheetFace;
 }
 
 /**

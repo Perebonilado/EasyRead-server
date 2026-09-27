@@ -275,7 +275,18 @@ export const lectureVoiceJobId = (
 
 /** A piece of the Studio's work on one episode. */
 export interface StudioJobData {
-  kind: 'bible' | 'outline' | 'script' | 'scene' | 'prepare' | 'make';
+  kind:
+    | 'bible'
+    | 'outline'
+    | 'script'
+    | 'scene'
+    | 'prepare'
+    | 'make'
+    | 'draw'
+    | 'redraw';
+  /** For 'draw': the characters the artist draws at the cast step; for 'redraw', the one drawn again as the maker asks. */
+  characterIds?: string[];
+  characterId?: string;
   showId: string;
   episodeId: string;
   /** Whose it is: the plan's allowance is theirs. */

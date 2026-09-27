@@ -96,7 +96,12 @@ export function briefDto(brief: StudioBrief): StudioBriefDto {
 
 export function bibleDto(
   bible: StudioBible,
-  drawings: { characters: Map<string, string>; sets: Map<string, string> },
+  drawings: {
+    characters: Map<string, string>;
+    sets: Map<string, string>;
+    candidates?: Map<string, { drawing: string; words: string }>;
+    drawing?: Set<string>;
+  },
 ): StudioBibleDto {
   return {
     characters: bible.characters.map((c) => ({
@@ -114,6 +119,10 @@ export function bibleDto(
       traits: c.traits,
       carries: c.carries,
       drawing: drawings.characters.get(c.id) ?? null,
+      ...(drawings.drawing?.has(c.id) ? { drawingNow: true } : {}),
+      ...(drawings.candidates?.has(c.id)
+        ? { candidate: drawings.candidates.get(c.id)! }
+        : {}),
     })),
     sets: bible.sets.map((s) => ({
       ...s,

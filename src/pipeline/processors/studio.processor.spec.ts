@@ -22,6 +22,16 @@ import {
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { SceneDto } from '../../contracts';
+import { NotFoundError } from '../../business/domain/errors/errors';
+import {
+  SHEET_VERSION,
+  type CharacterSheet,
+} from '../../business/domain/scene-sheet';
+import {
+  StudioCastService,
+  studioCastKey,
+} from '../../business/handlers/studio/studio-cast.service';
+import { markDrawing } from '../../business/domain/studio/studio-drawings';
 
 /**
  * What the thread gets from the Studio's work: one line when a job's
@@ -654,5 +664,281 @@ describe('an episode as its scenes leave it', () => {
     const settled = settledEpisode([row('failed', null, 1)]);
     expect(Object.keys(settled)).toEqual(['error']);
     expect(settled.error).toMatch(/could not be made/);
+  });
+});
+
+describe('the cast drawn by the artist, at the cast step and again as asked', () => {
+  const drawn = (svg: string): CharacterSheet => ({
+    version: SHEET_VERSION,
+    drawing: {
+      svg,
+      viewBox: [0, 0, 100, 100],
+      aspect: 1,
+      parts: {},
+      labels: {},
+      states: {},
+      moves: true,
+      callouts: [],
+      field: null,
+    },
+    anchors: { head: null, body: null, legs: null },
+  });
+  const humptyBible = bibleOf({
+    characters: [
+      { name: 'Humpty', id: 'humpty', kind: 'creature', look: 'an egg' },
+      {
+        name: 'Horse',
+        id: 'horse',
+        kind: 'animal',
+        look: 'a brown horse',
+        voicePick: 1,
+      },
+      { name: 'Tobi', voice: 'boy', figure: { age: 'child' } },
+    ],
+    sets: [{ name: 'The Wall', id: 'wall' }],
+  });
+
+  function artist() {
+    const files = new Map<string, Buffer>();
+    const storage = {
+      get: (key: string) =>
+        files.has(key)
+          ? Promise.resolve(files.get(key)!)
+          : Promise.reject(new NotFoundError('File')),
+      put: ({ key, body }: { key: string; body: Buffer }) => {
+        files.set(key, body);
+        return Promise.resolve({ key, size: body.length });
+      },
+    };
+    const cast = new StudioCastService(storage as never);
+    const keptAt = (key: string): Record<string, CharacterSheet> =>
+      files.has(key)
+        ? (JSON.parse(files.get(key)!.toString()) as Record<
+            string,
+            CharacterSheet
+          >)
+        : {};
+    const messages: StudioMessageRecord[] = [];
+    const asked: {
+      id: string;
+      words: string;
+      now: CharacterSheet | null;
+    }[] = [];
+    const prepared: { characters: Set<string>; places: Set<string> }[] = [];
+    const bible: { current: typeof humptyBible } = { current: humptyBible };
+    let answer: CharacterSheet | null = drawn('<svg><circle r="2"/></svg>');
+    const show = (): StudioShowRecord => ({
+      id: 's1',
+      userId: 'u1',
+      title: "Humpty's Big Wobble",
+      format: 'story',
+      brief,
+      bible: bible.current,
+      createdAt: at,
+      updatedAt: at,
+    });
+    const episode: StudioEpisodeRecord = {
+      id: 'e1',
+      showId: 's1',
+      userId: 'u1',
+      number: 1,
+      title: 'Wobble',
+      logline: null,
+      phase: 'cast',
+      busy: null,
+      error: null,
+      outline: null,
+      shareToken: null,
+      durationMs: null,
+      thumbKey: null,
+      createdAt: at,
+      updatedAt: at,
+    };
+    const queued: StudioJobData[] = [];
+    const processor = new StudioProcessor(
+      {
+        findShow: () => Promise.resolve(show()),
+        findEpisode: () => Promise.resolve(episode),
+        updateShow: (_: string, patch: { bible?: typeof humptyBible }) => {
+          if (patch.bible) bible.current = patch.bible;
+          return Promise.resolve();
+        },
+        updateEpisode: () => Promise.resolve(),
+        listEpisodes: () => Promise.resolve([episode]),
+        listScenes: () => Promise.resolve([]),
+        addMessage: (input: StudioMessageRecord) => {
+          const there = input.id && messages.find((m) => m.id === input.id);
+          if (there) return Promise.resolve(there);
+          const message = { ...input, id: input.id ?? `m${messages.length}` };
+          messages.push(message);
+          return Promise.resolve(message);
+        },
+        listMessages: () => Promise.resolve([...messages]),
+      } as unknown as StudioRepository,
+      {
+        studioBible: () =>
+          Promise.resolve({
+            value: {
+              ...humptyBible,
+              characters: humptyBible.characters.map((c) =>
+                c.id === 'horse' ? { ...c, look: 'a white horse' } : c,
+              ),
+            },
+            usage: { model: 'm', tokensIn: 1, tokensOut: 1, latencyMs: 1 },
+          }),
+      } as unknown as LlmGatewayPort,
+      { record: () => Promise.resolve() },
+      storage as never,
+      {
+        drawCandidate: (
+          _story: unknown,
+          id: string,
+          words: string,
+          now: CharacterSheet | null,
+        ) => {
+          asked.push({ id, words, now });
+          return Promise.resolve(answer);
+        },
+        keepSheet: (key: string, id: string, sheet: CharacterSheet) => {
+          files.set(
+            key,
+            Buffer.from(JSON.stringify({ ...keptAt(key), [id]: sheet })),
+          );
+          return Promise.resolve();
+        },
+        prepareStory: (
+          story: { castKey: string },
+          _documentId: string,
+          _who: string,
+          only: { characters: Set<string>; places: Set<string> },
+        ) => {
+          prepared.push(only);
+          const kept = keptAt(story.castKey);
+          for (const id of only.characters)
+            kept[id] = drawn(`<svg><rect id="${id}"/></svg>`);
+          files.set(story.castKey, Buffer.from(JSON.stringify(kept)));
+          return Promise.resolve();
+        },
+      } as unknown as SceneProcessor,
+      {} as never,
+      cast,
+      {
+        enqueueStudio: (jobs: StudioJobData[]) => {
+          queued.push(...jobs);
+          return Promise.resolve();
+        },
+      } as never,
+    );
+    const lines = () => messages.map((m) => m.content);
+    return {
+      processor,
+      cast,
+      files,
+      asked,
+      prepared,
+      queued,
+      lines,
+      bible,
+      setAnswer: (next: CharacterSheet | null) => {
+        answer = next;
+      },
+    };
+  }
+  const cast = (files: Map<string, Buffer>) =>
+    JSON.parse(files.get(studioCastKey('s1'))?.toString() ?? '{}') as Record<
+      string,
+      CharacterSheet
+    >;
+
+  it('draws the animals and creatures asked for, before any film, and says who is drawn', async () => {
+    const studio = artist();
+    await studio.cast.changeWork('s1', (work) =>
+      markDrawing(work, ['humpty', 'horse'], Date.now()),
+    );
+    await studio.processor.process(
+      job({ kind: 'draw', characterIds: ['humpty', 'horse'] }),
+      last('d1'),
+    );
+    expect(studio.prepared).toEqual([
+      { characters: new Set(['humpty', 'horse']), places: new Set() },
+    ]);
+    expect(Object.keys(cast(studio.files)).sort()).toEqual(['horse', 'humpty']);
+    expect((await studio.cast.work('s1')).drawing).toEqual({});
+    expect(studio.lines()).toEqual(['Humpty and Horse drawn — have a look']);
+  });
+
+  it('draws only the one character asked for again, from the drawing they have, and keeps it waiting beside it', async () => {
+    const studio = artist();
+    const old = drawn('<svg><circle r="1"/></svg>');
+    studio.files.set(
+      studioCastKey('s1'),
+      Buffer.from(JSON.stringify({ humpty: old, horse: old })),
+    );
+    await studio.cast.changeWork('s1', (work) =>
+      markDrawing(work, ['humpty'], Date.now(), 'rounder, a crack on top'),
+    );
+    await studio.processor.process(
+      job({
+        kind: 'redraw',
+        characterId: 'humpty',
+        request: 'rounder, a crack on top',
+      }),
+      last('r1'),
+    );
+    expect(studio.asked).toEqual([
+      { id: 'humpty', words: 'rounder, a crack on top', now: old },
+    ]);
+    // The drawing they have is untouched; the new one waits to be chosen.
+    expect(cast(studio.files).humpty.drawing.svg).toContain('r="1"');
+    const work = await studio.cast.work('s1');
+    expect(Object.keys(work.candidates)).toEqual(['humpty']);
+    expect(work.candidates.humpty.words).toBe('rounder, a crack on top');
+    expect(work.drawing).toEqual({});
+    expect(studio.lines()).toEqual(['Humpty redrawn — have a look']);
+    expect(studio.lines().join(' ')).not.toContain('Cast changed');
+  });
+
+  it('says so when no new drawing came, and stops showing them as being drawn', async () => {
+    const studio = artist();
+    studio.files.set(
+      studioCastKey('s1'),
+      Buffer.from(
+        JSON.stringify({ humpty: drawn('<svg><circle r="1"/></svg>') }),
+      ),
+    );
+    await studio.cast.changeWork('s1', (work) =>
+      markDrawing(work, ['humpty'], Date.now(), 'rounder'),
+    );
+    studio.setAnswer(null);
+    await studio.processor.process(
+      job({ kind: 'redraw', characterId: 'humpty', request: 'rounder' }),
+      last('r2'),
+    );
+    expect(studio.lines()).toEqual([
+      'Humpty could not be drawn again. Try again in a moment.',
+    ]);
+    expect(await studio.cast.work('s1')).toEqual({
+      drawing: {},
+      candidates: {},
+    });
+  });
+
+  it('says what a change to the whole cast changed, and draws anyone whose look changed', async () => {
+    const studio = artist();
+    const old = drawn('<svg><circle r="1"/></svg>');
+    studio.files.set(
+      studioCastKey('s1'),
+      Buffer.from(JSON.stringify({ humpty: old, horse: old })),
+    );
+    await studio.processor.process(
+      job({ kind: 'bible', request: 'make the horse white' }),
+      last('b1'),
+    );
+    expect(studio.lines()).toEqual(["Cast changed: Horse's look"]);
+    // The horse's drawing is forgotten and drawn again; Humpty's is kept.
+    expect(Object.keys(cast(studio.files))).toEqual(['humpty']);
+    expect(studio.queued).toEqual([
+      expect.objectContaining({ kind: 'draw', characterIds: ['horse'] }),
+    ]);
   });
 });

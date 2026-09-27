@@ -2103,3 +2103,41 @@ describe('where the words put people and things', () => {
     expect(sheet.beats[reach].target).toBe('pip');
   });
 });
+
+describe('one the artist drew whose rig turns its arms and nods', () => {
+  const eggBible = bibleOf({
+    characters: [
+      { name: 'Humpty', id: 'humpty', kind: 'creature', look: 'an egg' },
+      { name: 'Tobi', voice: 'boy', figure: { age: 'child' } },
+    ],
+    sets: [{ name: 'The Wall', id: 'wall' }],
+  });
+  const waving = storySheetOf({
+    title: 'Hello',
+    set: 'wall',
+    onStage: [
+      { who: 'humpty', spot: 'left' },
+      { who: 'tobi', spot: 'right' },
+    ],
+    beats: [
+      { kind: 'line', who: 'tobi', say: 'Hello, Humpty!' },
+      { kind: 'action', who: 'humpty', do: 'wave', say: 'Humpty waves.' },
+      { kind: 'line', who: 'humpty', say: 'Hello, Tobi!' },
+    ],
+  });
+  const movesOf = (script: ReturnType<typeof stageStory>, who: string) =>
+    script.steps.flatMap((step) =>
+      step.effects.filter((e) => e.target === who).map((e) => e.do),
+    );
+
+  it('waves as people do, where one with no such rig hops', () => {
+    const { sheet } = mendSheet(waving, eggBible);
+    expect(movesOf(stageStory(sheet, eggBible), 'humpty')).toContain('hop');
+    const acted = movesOf(
+      stageStory(sheet, eggBible, { gestures: new Set(['humpty']) }),
+      'humpty',
+    );
+    expect(acted).toContain('wave');
+    expect(acted).not.toContain('hop');
+  });
+});

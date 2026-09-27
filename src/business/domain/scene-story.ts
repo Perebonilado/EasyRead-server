@@ -48,6 +48,20 @@ export const EXPRESSION_LOOKS: Record<Expression, string> = {
     'eyes glancing up to one side, one brow raised, a small sideways mouth',
 };
 
+/**
+ * How each face's eyes and brows look, for the artist drawing a character
+ * whose mouth code draws (scene-sheet-face): the mouth is left out.
+ */
+export const EXPRESSION_EYES: Record<Expression, string> = {
+  neutral: 'calm open eyes, level brows',
+  happy: 'bright eyes, raised brows',
+  sad: 'eyes looking down, brows raised in the middle',
+  angry: 'narrowed eyes, brows pulled down to the middle',
+  afraid: 'wide eyes, brows raised and drawn together',
+  surprised: 'round wide eyes, high brows',
+  thinking: 'eyes glancing up to one side, one brow raised',
+};
+
 /** A character's parts, as every sheet names them. */
 export const SHEET_PARTS = ['head', 'body', 'arms', 'legs'] as const;
 
@@ -1709,6 +1723,18 @@ const SHEET_PARTS_BY_KIND: Record<
   ],
 };
 
+/** Each arm and leg a group of its own, so the stage can point, wave and step with them. */
+const LIMBS: Record<'animal' | 'creature', string> = {
+  animal:
+    'Inside <g id="legs">, draw each leg as a group of its own ("leg-1", "leg-2", …), its top overlapping the body.',
+  creature:
+    'Inside <g id="arms">, draw each arm as a group of its own, <g id="arm-left"> and <g id="arm-right">, each overlapping the body at its shoulder; inside <g id="legs">, each leg as a group of its own ("leg-left", "leg-right"), its top overlapping the body. A creature with no arms or legs leaves those groups out.',
+};
+
+/** The face: the eyes and brows the artist's, the mouth code's, at the place the artist marks. */
+const FACE_BRIEF =
+  'The face inside the head has no eyes, brows or mouth: each expression group draws only the eyes and brows, all in the same place on the face. Draw no mouth anywhere: the stage draws it. Mark where the mouth goes with <g id="mouth-at"> holding one small circle (r 4) at the middle of the mouth\'s place, below the eyes.';
+
 const OPTIONAL_PARTS: Record<'animal' | 'creature', string> = {
   animal:
     'Draw the tail in <g id="tail"> and the ears in <g id="ears">, each ear a group of its own inside it, only if it has them; leave out a group it has no part for.',
@@ -1837,7 +1863,8 @@ export function sheetThing(
       CAST_STYLE,
       STANCES[kind],
       character.size ? SIZES[character.size] : '',
-      'The face inside the head has no eyes, brows or mouth: each expression group draws the eyes, brows and mouth, all in the same place on the face.',
+      FACE_BRIEF,
+      LIMBS[kind],
       OPTIONAL_PARTS[kind],
       MOVING_PARTS,
     ]
@@ -1847,10 +1874,13 @@ export function sheetThing(
     // motion turned a tail about a point off the drawing.
     motion:
       'none: draw it still, with no <style> animation and no SMIL; the stage moves it',
-    parts: SHEET_PARTS_BY_KIND[kind].map((part) => ({ ...part })),
+    parts: [
+      ...SHEET_PARTS_BY_KIND[kind].map((part) => ({ ...part })),
+      { name: 'mouth-at', label: false, optional: true },
+    ],
     states: EXPRESSIONS.map((name) => ({
       name,
-      look: EXPRESSION_LOOKS[name],
+      look: EXPRESSION_EYES[name],
     })),
     // An animal on all fours needs the room across; a creature stands up.
     shape: character.kind === 'animal' ? 'square' : 'tall',

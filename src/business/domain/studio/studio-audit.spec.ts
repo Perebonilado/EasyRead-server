@@ -2,7 +2,12 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { SceneDto } from '../../../contracts';
 import { bibleOf, storySheetOf, type StudioBible } from './studio';
-import { auditScene, describeAudit } from './studio-audit';
+import {
+  auditScene,
+  describeAudit,
+  silentLines,
+  withMouths,
+} from './studio-audit';
 import {
   endStateOf,
   mendSheet,
@@ -163,5 +168,50 @@ describe('a made scene, looked at beat by beat', () => {
     expect(
       auditScene(fixed, scene, bible).find((one) => one.beat === lick)?.verdict,
     ).not.toBe('unseen');
+  });
+});
+
+describe('every line said on the stage moves its speaker’s mouth', () => {
+  // Made with its mouths left out (the fixture is trimmed of them), as a
+  // scene whose planning missed a speaker would be.
+  const scene = made(1);
+  const lines = scene.effects.filter((e) => e.do === 'say' && !e.say?.from);
+
+  it('finds each line whose speaker’s mouth does not move, kit or artist', () => {
+    const silent = silentLines(scene);
+    expect(silent.length).toBe(lines.length);
+    expect(new Set(silent.map((one) => one.who))).toEqual(
+      new Set(['maya', 'mama']),
+    );
+  });
+
+  it('gives each its mouth from its words as the voice says them, and leaves the rest as it was', () => {
+    const { scene: mended, mended: notes } = withMouths(scene);
+    expect(notes).toHaveLength(lines.length);
+    expect(silentLines(mended)).toEqual([]);
+    const first = lines[0];
+    const plan = mended.acting![first.target].mouth!;
+    // From the line's first word, a digit a frame, opening and shutting.
+    const word = scene.beats.find(
+      (beat) =>
+        beat.endMs > first.atMs && beat.startMs < first.say!.saidUntilMs!,
+    )!.words[0];
+    expect(plan[0][0]).toBe(Math.round(word[2]));
+    expect(plan[0][1]).toMatch(/^[0-5]+$/);
+    expect(plan[0][1]).toMatch(/[1-5]/);
+    // What else they do is kept.
+    expect(mended.acting!.maya.look).toEqual(scene.acting!.maya.look);
+    // Put right once is right: nothing more to do.
+    expect(withMouths(mended).mended).toEqual([]);
+  });
+
+  it('leaves out a voice from elsewhere, and whoever is off the stage', () => {
+    const off: SceneDto = {
+      ...scene,
+      effects: scene.effects.map((e) =>
+        e === lines[0] ? { ...e, say: { ...e.say!, from: 'off' as const } } : e,
+      ),
+    };
+    expect(silentLines(off).length).toBe(lines.length - 1);
   });
 });

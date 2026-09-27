@@ -54,7 +54,12 @@ import {
   stageStory,
   storyBibleFor,
 } from '../../business/domain/studio/studio-stage';
-import { setsOf, type Sets } from '../../business/domain/scene-sheet';
+import {
+  setsOf,
+  type Cast,
+  type CharacterSheet,
+  type Sets,
+} from '../../business/domain/scene-sheet';
 import {
   describeBible,
   describeBrief,
@@ -103,6 +108,12 @@ import {
   studioSetsKey,
 } from '../../business/handlers/studio/studio-cast.service';
 import { DRAWN } from '../../business/domain/scene-own';
+import {
+  castLine,
+  doneDrawing,
+  keptDrawn,
+  withCandidate,
+} from '../../business/domain/studio/studio-drawings';
 import type { StudioJobData } from '../queues';
 import { isPermanentFailure, type JobContext } from './base.processor';
 import { SceneProcessor } from './scene.processor';
@@ -154,6 +165,8 @@ export function studioMakeOf(
   bible: StudioBible,
   /** The show's sets as painted, where they are: its features stand where they are painted. */
   sets: Sets | null = null,
+  /** Those the artist drew whose rigs turn their arms and nod: they gesture as people do. */
+  gestures: ReadonlySet<string> = new Set(),
 ): Omit<Parameters<SceneProcessor['make']>[0], 'base' | 'who'> {
   const story = row.sheet?.kind === 'story';
   const stage = show.brief.audience
@@ -178,7 +191,7 @@ export function studioMakeOf(
     ? withFound(bible, sheet.set, mendSheet(sheet, bible, before))
     : bible;
   const script = sheet
-    ? stageStory(sheet, staged, { before, painted })
+    ? stageStory(sheet, staged, { before, painted, gestures })
     : checkExplainer(
         repairExplainer(row.sheet as ExplainerSheet, lesson),
         lesson,
@@ -213,6 +226,7 @@ export function studioMakeOf(
               ? stageStory(sheet, staged, {
                   before,
                   painted,
+                  gestures,
                   plain: new Set(unseen.map((one) => one.beat)),
                   ...(rise.size ? { rise } : {}),
                 })
@@ -425,10 +439,45 @@ export class StudioProcessor {
           context,
           job.ask,
         );
+      else if (job.kind === 'draw')
+        await this.drawCast(show, episode, job.characterIds ?? [], key);
+      else if (job.kind === 'redraw' && job.characterId)
+        await this.redraw(
+          show,
+          episode,
+          job.characterId,
+          job.request ?? '',
+          key,
+        );
     } catch (error) {
       const message = (error as Error).message;
       this.logger.warn(`${who}: ${message}`);
       const last = context.isFinalAttempt || isPermanentFailure(error);
+      // Drawing the cast holds nothing else up: it is simply not drawing.
+      if (job.kind === 'draw' || job.kind === 'redraw') {
+        if (!last) throw error;
+        const ids =
+          job.kind === 'draw' ? (job.characterIds ?? []) : [job.characterId!];
+        await this.cast
+          .changeWork(show.id, (work) => doneDrawing(work, ids))
+          .catch(() => undefined);
+        if (job.kind === 'redraw') {
+          const name =
+            show.bible?.characters.find((c) => c.id === job.characterId)
+              ?.name ?? 'They';
+          await this.log(
+            show,
+            episode,
+            {
+              what: 'failed',
+              step: 'cast',
+              line: EVENT_LINES.drawFailed(name, true),
+            },
+            failed,
+          );
+        }
+        return;
+      }
       if (job.kind === 'make' && job.sceneId) {
         if (!last) throw error;
         await this.studio.updateScene(job.sceneId, {
@@ -604,8 +653,13 @@ export class StudioProcessor {
       );
       if (checkBible(second, story).length <= problems.length) bible = second;
     }
+    // Which drawing the maker chose of anyone still as they were, kept.
+    bible = keptDrawn(bible, before);
     await this.studio.updateShow(show.id, { bible });
     if (before) await this.cast.forgetChanged(show.id, before, bible);
+    // Every animal and creature not drawn yet (new, or whose look changed)
+    // drawn now, so the maker meets them before any film is made.
+    if (story) await this.drawLater({ ...show, bible }, episode);
     // A scene made where something is gone now shows it until it is made
     // again: so said of it, for the film to be made again.
     if (gone.length && before) {
@@ -632,7 +686,8 @@ export class StudioProcessor {
         {
           what: 'cast',
           step: 'cast',
-          line: EVENT_LINES.cast(bible.characters.length, bible.sets.length),
+          // What changed, said: never a count of who is there.
+          line: castLine(before, bible),
         },
         key,
       );
@@ -642,6 +697,162 @@ export class StudioProcessor {
       `studio ${episode.id}: cast of ${bible.characters.map((c) => c.name).join(', ') || 'no one'}; places ${bible.sets.map((s) => s.name).join(', ') || 'none'}`,
     );
     return bible;
+  }
+
+  /** The cast's animals and creatures with no drawing, set drawing on their own: never in the way of the cast. */
+  private async drawLater(
+    show: StudioShowRecord,
+    episode: StudioEpisodeRecord,
+  ): Promise<void> {
+    if (!show.bible) return;
+    try {
+      const ids = await this.cast.markToDraw(show.id, show.bible, Date.now());
+      if (ids.length)
+        await this.queue.enqueueStudio([
+          {
+            kind: 'draw',
+            showId: show.id,
+            episodeId: episode.id,
+            userId: show.userId,
+            characterIds: ids,
+          },
+        ]);
+    } catch (error) {
+      this.logger.warn(
+        `studio ${episode.id}: the cast could not be set drawing: ${(error as Error).message}`,
+      );
+    }
+  }
+
+  /**
+   * The cast's animals and creatures drawn at the cast step, each as the
+   * make step would draw them and kept for it: the maker meets them on
+   * their cards before any film is made.
+   */
+  private async drawCast(
+    show: StudioShowRecord,
+    episode: StudioEpisodeRecord,
+    ids: string[],
+    key?: string,
+  ): Promise<void> {
+    const bible = show.bible;
+    if (!bible || !ids.length) return;
+    const wanted = new Set(
+      ids.filter((id) => bible.characters.some((c) => c.id === id)),
+    );
+    try {
+      await this.scenes.prepareStory(
+        {
+          bible: storyBibleFor(bible, [], show.title),
+          page: 1,
+          castKey: studioCastKey(show.id),
+          setsKey: studioSetsKey(show.id),
+          bookTitle: show.title,
+        },
+        episode.id,
+        `studio ${episode.id} (cast)`,
+        { characters: wanted, places: new Set() },
+      );
+    } finally {
+      await this.cast.changeWork(show.id, (work) => doneDrawing(work, ids));
+    }
+    const cast = await this.cast.cast(show.id).catch(() => ({}));
+    const drawn = bible.characters
+      .filter((c) => wanted.has(c.id) && c.id in cast)
+      .map((c) => c.name);
+    const not = bible.characters
+      .filter((c) => wanted.has(c.id) && !(c.id in cast))
+      .map((c) => c.name);
+    if (drawn.length)
+      await this.log(
+        show,
+        episode,
+        { what: 'cast', step: 'cast', line: EVENT_LINES.drawn(drawn) },
+        key,
+      );
+    for (const name of not)
+      await this.log(
+        show,
+        episode,
+        {
+          what: 'failed',
+          step: 'cast',
+          line: `${name} could not be drawn yet: they are drawn when the film is made, or ask for them again.`,
+        },
+        key && `${key}:${name}`,
+      );
+  }
+
+  /**
+   * One character drawn again as the maker asked, from the drawing they
+   * have: the new drawing kept beside it for the maker to choose, never in
+   * its place. One never drawn before is simply drawn, for their card.
+   */
+  private async redraw(
+    show: StudioShowRecord,
+    episode: StudioEpisodeRecord,
+    characterId: string,
+    words: string,
+    key?: string,
+  ): Promise<void> {
+    const bible = show.bible;
+    const who = bible?.characters.find((c) => c.id === characterId);
+    if (!bible || !who) {
+      await this.cast.changeWork(show.id, (work) =>
+        doneDrawing(work, [characterId]),
+      );
+      return;
+    }
+    const now = (await this.cast.cast(show.id).catch((): Cast => ({})))[who.id];
+    const story = storyBibleFor(bible, [], show.title);
+    let sheet: CharacterSheet | null;
+    try {
+      sheet = await this.scenes.drawCandidate(
+        { bible: story, bookTitle: show.title },
+        who.id,
+        words,
+        now ?? null,
+        episode.id,
+        `studio ${episode.id} (redraw ${who.id})`,
+      );
+    } finally {
+      await this.cast.changeWork(show.id, (work) =>
+        doneDrawing(work, [who.id]),
+      );
+    }
+    if (!sheet) {
+      await this.log(
+        show,
+        episode,
+        {
+          what: 'failed',
+          step: 'cast',
+          line: EVENT_LINES.drawFailed(who.name, Boolean(now)),
+        },
+        key,
+      );
+      return;
+    }
+    if (!now) {
+      // Never drawn: this is their drawing, as the make step's would be.
+      await this.scenes.keepSheet(studioCastKey(show.id), who.id, sheet);
+      await this.log(
+        show,
+        episode,
+        { what: 'cast', step: 'cast', line: EVENT_LINES.drawn([who.name]) },
+        key,
+      );
+      return;
+    }
+    await this.cast.changeWork(show.id, (work) =>
+      withCandidate(work, who.id, sheet, words, Date.now()),
+    );
+    await this.log(
+      show,
+      episode,
+      { what: 'cast', step: 'cast', line: EVENT_LINES.redrawn(who.name) },
+      key,
+    );
   }
 
   // ── The outline ─────────────────────────────────────────────────────────
@@ -1354,6 +1565,21 @@ export class StudioProcessor {
     );
   }
 
+  /** Those of the show's cast the artist drew whose rigs turn their arms and nod: none when the cast cannot be read. */
+  private async gesturing(showId: string): Promise<Set<string>> {
+    let cast: Cast = {};
+    try {
+      cast = await this.cast.cast(showId);
+    } catch {
+      // None known: everyone the artist drew bobs, as before.
+    }
+    return new Set(
+      Object.entries(cast)
+        .filter(([, sheet]) => sheet.rig?.arms || sheet.rig?.nods)
+        .map(([id]) => id),
+    );
+  }
+
   /** The show's sets as painted: none yet, or none that can be read, is none. */
   private async paintedSets(showId: string): Promise<Sets | null> {
     try {
@@ -1402,6 +1628,7 @@ export class StudioProcessor {
       rows,
       bible,
       await this.paintedSets(show.id),
+      await this.gesturing(show.id),
     );
     const base = `studio/${show.id}/${episode.id}/${row.id}-${fingerprint.slice(0, 8)}-${Date.now().toString(36)}`;
     // The Studio's own try again, its words as voiced: staged again on the

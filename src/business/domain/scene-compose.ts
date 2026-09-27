@@ -343,6 +343,10 @@ export function thingDto(
       : {}),
     ...(drawing.sinks && !drawing.acts ? { sinks: drawing.sinks } : {}),
     ...(drawing.faces && !drawing.acts ? { faces: drawing.faces } : {}),
+    // Its mouth code's, and its arms and nod the rig's: acted as the kit's.
+    ...(drawing.lips && !drawing.acts ? { lips: true as const } : {}),
+    ...(drawing.limbs && !drawing.acts ? { limbs: true as const } : {}),
+    ...(drawing.onePiece && !drawing.acts ? { onePiece: true as const } : {}),
     ...(drawing.stands && !drawing.acts ? { units: drawing.stands.units } : {}),
     // What a person the kit drew wears, in words: as drawn, and each
     // outfit they change into, as the film shows them.

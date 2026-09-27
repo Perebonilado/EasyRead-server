@@ -24,6 +24,7 @@ import {
   storySheetOf,
   type SceneSheet,
   type StudioBible,
+  type StudioCharacter,
   type StudioOutline,
 } from '../../domain/studio/studio';
 import {
@@ -39,6 +40,16 @@ import {
   type SheetProblem,
 } from '../../domain/studio/studio-check';
 import { MADE_WITH } from '../../domain/studio/studio-brand';
+import {
+  beingDrawn,
+  characterMeant,
+  drawnByArtist,
+  keptDrawn,
+  markDrawing,
+  oneLookRequest,
+  oneRedrawn,
+  withoutCandidate,
+} from '../../domain/studio/studio-drawings';
 import { joinOf } from '../../domain/studio/studio-edit';
 import { storyBibleFor } from '../../domain/studio/studio-stage';
 import {
@@ -219,7 +230,14 @@ export class StudioService {
     ]);
     const messages = thread.slice(-THREAD);
     const bible = show.bible
-      ? bibleDto(show.bible, await this.cast.drawings(show.id, show.bible))
+      ? bibleDto(
+          show.bible,
+          await this.cast.drawings(
+            show.id,
+            show.bible,
+            this.clock.now().getTime(),
+          ),
+        )
       : null;
     return {
       id: show.id,
@@ -347,8 +365,11 @@ export class StudioService {
       bible.pictures = bible.pictures.length ? bible.pictures : before.pictures;
       await this.cast.forgetChanged(show.id, before, bible);
     }
-    await this.studio.updateShow(show.id, { bible });
-    return this.showDto({ ...show, bible });
+    const kept = keptDrawn(bible, before);
+    await this.studio.updateShow(show.id, { bible: kept });
+    // Anyone whose look changed is drawn again now, for their card.
+    await this.drawCast({ ...show, bible: kept });
+    return this.showDto({ ...show, bible: kept });
   }
 
   /**
@@ -544,9 +565,37 @@ export class StudioService {
           case 'approve':
             note = await this.approveEpisode(show, episode);
             break;
-          case 'cast':
-            note = await this.askCast(show, episode, draft.request ?? said);
+          case 'cast': {
+            // A change to one character's look is that character drawn
+            // again, never the whole cast written again.
+            const request = draft.request ?? said;
+            const one = show.bible ? oneRedrawn(request, show.bible) : null;
+            if (one) {
+              ({ note, tried } = await this.redrawAsked(
+                show,
+                episode,
+                one,
+                request,
+              ));
+              break;
+            }
+            note = await this.askCast(show, episode, request);
             break;
+          }
+          case 'redraw': {
+            const who = characterMeant(draft.character, show.bible);
+            if (!who) {
+              note = 'Which character should I draw again? Tell me their name.';
+              break;
+            }
+            ({ note, tried } = await this.redrawAsked(
+              show,
+              episode,
+              who,
+              draft.request ?? said,
+            ));
+            break;
+          }
           case 'scene': {
             // Each scene asked for is its own change, at most three at once;
             // one that was made is made again and checked, as the maker's
@@ -765,6 +814,92 @@ export class StudioService {
     return null;
   }
 
+  /**
+   * Every animal and creature of a story's cast with no drawing yet drawn
+   * now, off the request path: the maker meets them on their cards before
+   * any film is made, and the film then uses them.
+   */
+  private async drawCast(
+    show: StudioShowRecord,
+    episode?: StudioEpisodeRecord,
+  ): Promise<void> {
+    if (show.brief.format === 'explainer' || !show.bible) return;
+    try {
+      const ids = await this.cast.markToDraw(
+        show.id,
+        show.bible,
+        this.clock.now().getTime(),
+      );
+      if (!ids.length) return;
+      const at =
+        episode ?? (await this.studio.listEpisodes(show.id)).at(-1) ?? null;
+      if (!at) return;
+      await this.enqueue(show, at, { kind: 'draw', characterIds: ids });
+    } catch (error) {
+      // Never in the way of what was asked: they are drawn with the film.
+      this.logger.warn(
+        `studio ${show.id}: the cast could not be set drawing: ${(error as Error).message}`,
+      );
+    }
+  }
+
+  /**
+   * One character drawn again as the maker asks: an animal or a creature
+   * by the artist, from the drawing they have, the new one waiting on
+   * their card to be chosen; a person's look changed by the cast's
+   * writer, theirs alone. A note when it cannot be now.
+   */
+  private async askRedraw(
+    show: StudioShowRecord,
+    episode: StudioEpisodeRecord,
+    who: StudioCharacter,
+    words: string,
+  ): Promise<string | null> {
+    if (show.brief.format === 'explainer') return null;
+    if (!drawnByArtist(who))
+      return this.askCast(show, episode, oneLookRequest(who, words));
+    const now = this.clock.now().getTime();
+    let busy = false;
+    await this.cast.changeWork(show.id, (work) => {
+      busy = beingDrawn(work, who.id, now);
+      return busy
+        ? work
+        : withoutCandidate(markDrawing(work, [who.id], now, words), who.id);
+    });
+    if (busy)
+      return `${who.name} is being drawn right now; ask again once they are done.`;
+    await this.enqueue(show, episode, {
+      kind: 'redraw',
+      characterId: who.id,
+      request: words,
+    });
+    return null;
+  }
+
+  /** One character drawn again from the chat: what was set going, in code's words, or why not. */
+  private async redrawAsked(
+    show: StudioShowRecord,
+    episode: StudioEpisodeRecord,
+    who: StudioCharacter,
+    words: string,
+  ): Promise<{ note: string | null; tried: string | null }> {
+    const note = await this.askRedraw(show, episode, who, words);
+    if (note) return { note, tried: null };
+    await this.log(show, episode, {
+      what: 'asked',
+      step: 'cast',
+      line: drawnByArtist(who)
+        ? `Drawing ${who.name} again`
+        : `Changing ${who.name}'s look`,
+    });
+    return {
+      note: null,
+      tried: drawnByArtist(who)
+        ? `I'll draw ${who.name} again as you ask. The new drawing will wait on their card beside the one you have: keep whichever you like.`
+        : `I'll change ${who.name}'s look as you ask, and only theirs.`,
+    };
+  }
+
   private async askScene(
     show: StudioShowRecord,
     episode: StudioEpisodeRecord,
@@ -815,6 +950,8 @@ export class StudioService {
     const story = show.brief.format !== 'explainer';
     if (episode.phase === 'outline' && story) {
       await this.studio.updateEpisode(episode.id, { phase: 'cast' });
+      // Anyone the artist draws not drawn yet is drawn now, to meet.
+      await this.drawCast(show, episode);
       return null;
     }
     if (episode.phase === 'outline' || episode.phase === 'cast') {
@@ -907,6 +1044,21 @@ export class StudioService {
     if (show.id !== showId) throw new NotFoundError('Episode');
     const words = request.trim().slice(0, MESSAGE_CHARS);
     if (words) await this.hear(userId, words);
+    // "Redraw Humpty": Humpty drawn again, not the whole cast written again.
+    const one = show.bible && words ? oneRedrawn(words, show.bible) : null;
+    if (one) {
+      const redrawn = await this.askRedraw(show, episode, one, words);
+      if (redrawn) throw new ValidationError(redrawn);
+      await this.heard(show, episode, 'Cast', words);
+      await this.log(show, episode, {
+        what: 'asked',
+        step: 'cast',
+        line: drawnByArtist(one)
+          ? `Drawing ${one.name} again`
+          : `Changing ${one.name}'s look`,
+      });
+      return this.episode(userId, episodeId);
+    }
     const note = await this.askCast(show, episode, words);
     if (note) throw new ValidationError(note);
     if (show.brief.format !== 'explainer') {
@@ -918,6 +1070,105 @@ export class StudioService {
       });
     }
     return this.episode(userId, episodeId);
+  }
+
+  /**
+   * One character drawn again as the maker asks, from their card or a
+   * change pointed at them: the new drawing waits on the card to be
+   * chosen. A person's look is changed at once, as by the look editor.
+   */
+  async redrawCharacter(
+    userId: string,
+    episodeId: string,
+    characterId: string,
+    request: string,
+  ): Promise<StudioEpisodeDto> {
+    const { show, episode } = await this.requireEpisode(userId, episodeId);
+    const who = show.bible?.characters.find((c) => c.id === characterId);
+    if (!who) throw new NotFoundError('Character');
+    const words = request.trim().slice(0, MESSAGE_CHARS);
+    if (!words) throw new ValidationError('Say how they should look');
+    await this.hear(userId, words);
+    const note = await this.askRedraw(show, episode, who, words);
+    if (note) throw new ValidationError(note);
+    await this.heard(show, episode, who.name, words);
+    await this.log(show, episode, {
+      what: 'asked',
+      step: 'cast',
+      line: drawnByArtist(who)
+        ? `Drawing ${who.name} again`
+        : `Changing ${who.name}'s look`,
+    });
+    return this.episode(userId, episodeId);
+  }
+
+  /** Every animal and creature of the cast with no drawing yet, drawn now. */
+  async drawMissing(userId: string, showId: string): Promise<StudioShowDto> {
+    const show = await this.requireShow(userId, showId);
+    await this.drawCast(show);
+    return this.showDto(show);
+  }
+
+  /**
+   * The maker's choice between a character's drawing and the new one
+   * waiting beside it: the new one used (and the scenes that show them,
+   * and only those, made again with it), drawn once more from the same
+   * words, or let go.
+   */
+  async chooseDrawing(
+    userId: string,
+    showId: string,
+    characterId: string,
+    choice: 'use' | 'again' | 'keep',
+  ): Promise<StudioShowDto> {
+    const show = await this.requireShow(userId, showId);
+    const who = show.bible?.characters.find((c) => c.id === characterId);
+    if (!show.bible || !who) throw new NotFoundError('Character');
+    const episodes = await this.studio.listEpisodes(show.id);
+    const episode = episodes[episodes.length - 1];
+    if (!episode) throw new NotFoundError('Episode');
+    if (choice === 'use') {
+      const bible = await this.cast.choose(show.id, show.bible, who.id);
+      if (!bible)
+        throw new ValidationError(`There is no new drawing of ${who.name}.`);
+      await this.studio.updateShow(show.id, { bible });
+      // The made scenes that show them: each made again with the new one.
+      const shows = (sheet: SceneSheet | null) =>
+        sheet?.kind === 'story' &&
+        (sheet.onStage.some((p) => p.who === who.id) ||
+          sheet.beats.some((b) => b.who === who.id));
+      const scenes = (
+        await this.studio.listScenesOf(episodes.map((e) => e.id))
+      ).filter((row) => row.sceneKey && shows(row.sheet)).length;
+      await this.log(show, episode, {
+        what: 'edited',
+        step: 'cast',
+        line: EVENT_LINES.chosen(who.name, scenes),
+      });
+      return this.showDto({ ...show, bible });
+    }
+    if (choice === 'keep') {
+      if (!(await this.cast.discard(show.id, who.id)))
+        throw new ValidationError(`There is no new drawing of ${who.name}.`);
+      await this.log(show, episode, {
+        what: 'edited',
+        step: 'cast',
+        line: EVENT_LINES.kept(who.name),
+      });
+      return this.showDto(show);
+    }
+    const work = await this.cast.work(show.id);
+    const words = work.candidates[who.id]?.words;
+    if (!words)
+      throw new ValidationError(`There is no new drawing of ${who.name}.`);
+    const note = await this.askRedraw(show, episode, who, words);
+    if (note) throw new ValidationError(note);
+    await this.log(show, episode, {
+      what: 'asked',
+      step: 'cast',
+      line: `Drawing ${who.name} again`,
+    });
+    return this.showDto(show);
   }
 
   async rewriteScene(

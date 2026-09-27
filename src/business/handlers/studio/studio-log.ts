@@ -112,8 +112,18 @@ export async function logEvent(
 export const EVENT_LINES = {
   outline: (outline: StudioOutline, again: boolean) =>
     `${again ? 'Outline written again' : 'Outline written'}: “${outline.title}”, ${scenesOf(outline.scenes.length)}, about ${clockOf(outline.scenes.reduce((n, s) => n + s.seconds, 0))}`,
-  cast: (characters: number, places: number) =>
-    `Cast changed: ${characters} character${characters === 1 ? '' : 's'}, ${places} place${places === 1 ? '' : 's'}`,
+  /** Characters the artist drew at the cast step, before any film. */
+  drawn: (names: readonly string[]) =>
+    `${names.length > 1 ? `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}` : (names[0] ?? 'The cast')} drawn — have a look`,
+  /** One character drawn again as the maker asked: waiting beside the one they have. */
+  redrawn: (name: string) => `${name} redrawn — have a look`,
+  /** The new drawing chosen: the scenes that show them, to make again. */
+  chosen: (name: string, scenes: number) =>
+    `${name}'s new drawing is in${scenes ? `: ${scenes} made scene${scenes === 1 ? '' : 's'} with ${name} to make again` : ''}`,
+  /** The new drawing let go: as they were. */
+  kept: (name: string) => `${name} kept as before`,
+  drawFailed: (name: string, again: boolean) =>
+    `${name} could not be drawn${again ? ' again' : ''}. Try again in a moment.`,
   scenes: (count: number) =>
     count === 1 ? 'The scene is written' : `All ${count} scenes written`,
   scene: (position: number, title: string, again: boolean) =>

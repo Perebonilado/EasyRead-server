@@ -1061,6 +1061,12 @@ export type SceneThingDto =
       sinks?: number;
       /** Which way one the artist drew faces as drawn: its head to the left (-1) or right (1); absent, the viewer. It is turned to face where it goes. */
       faces?: -1 | 1;
+      /** One the artist drew whose mouth code drew: the stage moves it by the voice's mouth shapes as a kit figure's (lipsync, v0 to v5, talking), and it does not bob as it speaks. */
+      lips?: true;
+      /** One the artist drew whose rig turns its arms (--ar, --al, degrees as the kit's) and nods its head (--nod), each as far as its sheet proved. */
+      limbs?: true;
+      /** One the artist drew in one piece, with nothing to move but the whole: it squashes and stretches as it speaks, and leans and hops for a gesture. */
+      onePiece?: true;
       /** One who stands with people: how tall its frame is in the figure kit's units, so a thing it holds is drawn at the kit's size. */
       units?: number;
       /** A person the kit drew in a pose for the whole scene, not standing: in bed (the bed part of the drawing), or lying. Absent, standing. */
@@ -2354,6 +2360,10 @@ export interface StudioCharacterDto {
   carries: string | null;
   /** How they are drawn: an SVG, for a person now; for anyone else once they have been drawn. */
   drawing: string | null;
+  /** One the artist draws, being drawn now: for the first time, or again as the maker asked. */
+  drawingNow?: boolean;
+  /** A new drawing of them waiting beside the one they have, and what the maker asked for: it replaces theirs only when chosen. */
+  candidate?: { drawing: string; words: string } | null;
 }
 
 export interface StudioSetDto {

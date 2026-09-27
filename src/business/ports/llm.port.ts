@@ -102,7 +102,16 @@ export interface StudioTurnDraft {
   /** What the maker's latest message says of the brief: null for what it does not. */
   brief: Record<string, unknown>;
   action:
-    'none' | 'outline' | 'approve' | 'cast' | 'scene' | 'make' | 'episode';
+    | 'none'
+    | 'outline'
+    | 'approve'
+    | 'cast'
+    | 'redraw'
+    | 'scene'
+    | 'make'
+    | 'episode';
+  /** For "redraw": the one character whose look is to change, by name or id. */
+  character?: string | null;
   /** A scene's number, from 1, for a change to it. */
   scene: number | null;
   /** For a change to several scenes: each one's number, from 1, the first first. Absent, only `scene`. */
@@ -659,6 +668,8 @@ export interface LlmGatewayPort {
     signal?: AbortSignal;
     /** A story's place, painted as the scene behind the stage. */
     backdrop?: boolean;
+    /** A character drawn again: how they are drawn now, as SVG, to draw from. */
+    reference?: string;
   }): Promise<LlmResult<string>>;
 
   lectureSketch(input: {

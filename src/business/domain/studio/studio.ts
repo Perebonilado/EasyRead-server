@@ -270,6 +270,12 @@ export interface StudioCharacter {
   traits: string[];
   /** What they carry when a scene gives them nothing else: gear drawn in their hand, or a thing of the stage's. */
   carries: ThingId | null;
+  /**
+   * One the artist drew: which drawing of theirs the maker chose, when
+   * they chose a new one. Scenes that show them are made again with it;
+   * absent until then.
+   */
+  drawn?: string;
 }
 
 export interface StudioSet {
@@ -569,6 +575,9 @@ export function bibleOf(raw: unknown): StudioBible {
             .filter(Boolean)
             .slice(0, 3),
           carries: oneOf(THINGS)(c.carries),
+          ...(typeof c.drawn === 'string' && /^[a-f0-9]{6,32}$/.test(c.drawn)
+            ? { drawn: c.drawn }
+            : {}),
         },
       ];
     });

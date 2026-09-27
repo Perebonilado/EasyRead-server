@@ -120,6 +120,15 @@ import { DRAWN } from '../../business/domain/scene-own';
 import type { OwnPropDrawing } from '../../business/domain/scene-props';
 import type { SetPiece } from '../../business/domain/scene-set-pieces';
 import { RIG_VERSION, rigSheet } from '../../business/domain/scene-sheet-rig';
+import { withMouths } from '../../business/domain/studio/studio-audit';
+import {
+  faceMoved,
+  faceNotes,
+  measureFace,
+  unmarked,
+  withFace,
+  type SheetFace,
+} from '../../business/domain/scene-sheet-face';
 import {
   EMPTY_STORY,
   MAX_STORY_PIECES,
@@ -271,6 +280,19 @@ interface Lesson {
 }
 
 /** Each item through `work`, at most `limit` at a time, in order. */
+/** The most of a drawing the artist is shown to draw from, in characters. */
+const REFERENCE_CHARS = 24_000;
+
+/**
+ * A drawing as the artist is shown it to draw from: as still as it was
+ * drawn, with none of the rig's motion (and no mouth, where code draws
+ * it). None when it is too long to show.
+ */
+export function referenceOf(sheet: CharacterSheet): string | null {
+  const svg = sheet.drawing.svg.replace(/<style[^>]*>[\s\S]*?<\/style>/gi, '');
+  return svg.length <= REFERENCE_CHARS ? svg : null;
+}
+
 async function inBatches<T, R>(
   items: T[],
   limit: number,
@@ -758,7 +780,10 @@ export class SceneProcessor {
       };
       composed = compose(script);
     }
-    const { scene, filled, audit } = composed;
+    const { filled, audit } = composed;
+    // Every line said on the stage moves its speaker's mouth.
+    const { scene, mended: mouths } = withMouths(composed.scene);
+    for (const note of mouths) this.logger.log(`${who}: ${note}`);
     await this.keepParts(input.keepAs ?? 'page', who, {
       script,
       drawings: [...drawings],
@@ -878,12 +903,11 @@ export class SceneProcessor {
       key: story.setsKey,
     });
     this.logAudit(who, composed.audit);
-    const { sceneKey, thumbKey } = await this.store(
-      input.base,
-      composed.scene,
-      who,
-    );
-    return { scene: composed.scene, sceneKey, thumbKey, script };
+    // Every line said on the stage moves its speaker's mouth.
+    const { scene, mended: mouths } = withMouths(composed.scene);
+    for (const note of mouths) this.logger.log(`${who}: ${note}`);
+    const { sceneKey, thumbKey } = await this.store(input.base, scene, who);
+    return { scene, sceneKey, thumbKey, script };
   }
 
   /**
@@ -953,6 +977,48 @@ export class SceneProcessor {
       });
     });
     return sheet;
+  }
+
+  /**
+   * A character the artist drew, drawn again as the maker asks, from the
+   * drawing they have now: gated, joined, given its face and rigged as
+   * any is, and kept by no one here. The maker sees it beside the one
+   * they have, and keeps whichever they like. Null when none came through.
+   */
+  async drawCandidate(
+    story: Pick<PageStory, 'bible' | 'bookTitle'>,
+    characterId: string,
+    words: string,
+    /** How they are drawn now, for the artist to draw from; null when they were never drawn. */
+    now: CharacterSheet | null,
+    documentId: string | null,
+    who: string,
+  ): Promise<CharacterSheet | null> {
+    const character = story.bible.characters.find((c) => c.id === characterId);
+    if (!character) throw new Error(`No character ${characterId}`);
+    if (!character.kind || character.kind === 'person')
+      throw new Error(`${character.name} is drawn by the kit, not the artist`);
+    return this.drawCharacter(character, story.bookTitle, documentId, who, {
+      words,
+      reference: now ? referenceOf(now) : null,
+    });
+  }
+
+  /** A character's sheet kept in a book's or a show's cast, in place of any before it. */
+  async keepSheet(
+    key: string,
+    characterId: string,
+    sheet: CharacterSheet,
+  ): Promise<void> {
+    await this.inTurn(key, async () => {
+      const cast = await this.castAt(key);
+      cast[characterId] = sheet;
+      await this.storage.put({
+        key,
+        body: Buffer.from(JSON.stringify(cast)),
+        mimeType: 'application/json',
+      });
+    });
   }
 
   /**
@@ -1342,6 +1408,9 @@ export class SceneProcessor {
         : null;
       const { anchors: pageAnchors, ...posed } = onPage ?? { anchors: null };
       let drawing = onPage ? (posed as GatedDrawing) : sheet?.drawing;
+      // One the artist drew with no mouth speaks with the kit's, and blinks.
+      if (!onPage && drawing && sheet?.face)
+        drawing = withFace(drawing, sheet.face, thing.ref);
       // Someone the artist drew (a dog, a dragon) shows the signs the page
       // gives them as the kit's people do: a Z over the head asleep, a
       // bulb for an idea, a question mark puzzled.
@@ -1392,6 +1461,15 @@ export class SceneProcessor {
                 : {}),
               ...(!onPage && sheet.rig?.faces
                 ? { faces: sheet.rig.faces }
+                : {}),
+              // Its mouth code's, moving with the voice; its arms and its
+              // nod acted as the kit's are; or, in one piece, all of it.
+              ...(!onPage && sheet.face ? { lips: true as const } : {}),
+              ...(!onPage && (sheet.rig?.arms || sheet.rig?.nods)
+                ? { limbs: true as const }
+                : {}),
+              ...(!onPage && sheet.rig?.onePiece
+                ? { onePiece: true as const }
                 : {}),
               // A person stands at the kit's scale, in the frame they are
               // drawn in on the page; an animal or a creature at its size
@@ -2176,6 +2254,8 @@ export class SceneProcessor {
     bookTitle: string,
     documentId: string | null,
     who: string,
+    /** Drawn again as the maker asks, from how they are drawn now. */
+    again?: { words: string; reference: string | null },
   ): Promise<CharacterSheet | null> {
     let kind: StoryKind | null = character.kind ?? null;
     let size: StorySize | null = character.size ?? null;
@@ -2217,6 +2297,7 @@ export class SceneProcessor {
       bookTitle,
       documentId,
       who,
+      again,
     );
     return sheet ? { ...sheet, size: size ?? 'medium' } : null;
   }
@@ -2719,10 +2800,22 @@ export class SceneProcessor {
     bookTitle: string,
     documentId: string | null,
     who: string,
+    /** Drawn again as the maker asks, from how they are drawn now. */
+    again?: { words: string; reference: string | null },
   ): Promise<CharacterSheet | null> {
-    const thing = sheetThing(character, bookTitle);
+    const asked = sheetThing(character, bookTitle);
+    const thing = again
+      ? {
+          ...asked,
+          brief: `${asked.brief} Draw them again as the maker asks: "${again.words.replace(/"/g, "'")}". Keep everything the maker does not ask to change as it is in the drawing they have now.`,
+        }
+      : asked;
     const viewBox = CANVAS[thing.shape];
-    let best: { sheet: CharacterSheet; faults: number } | null = null;
+    let best: {
+      sheet: CharacterSheet;
+      faults: number;
+      face: SheetFace | null;
+    } | null = null;
     let notes: string[] | undefined;
     for (let attempt = 1; attempt <= DRAW_TRIES; attempt += 1) {
       let reply: string;
@@ -2733,6 +2826,7 @@ export class SceneProcessor {
           topic: bookTitle,
           neighbours: [],
           notes,
+          ...(again?.reference ? { reference: again.reference } : {}),
         });
         await this.record(documentId, 'scene_draw', made.usage);
         reply = made.value;
@@ -2754,11 +2848,22 @@ export class SceneProcessor {
           notes: [`It could not be measured: ${(error as Error).message}`],
         }),
       );
-      const faults = (gated.retry ? 1 : 0) + measured.notes.length;
+      // Its face as asked: the mouth's place marked, and no mouth drawn.
+      const faced = measured.sheet
+        ? await measureFace(gated.drawing).catch((error: unknown) => {
+            this.logger.warn(
+              `${who}: ${character.name}'s face could not be measured: ${(error as Error).message}`,
+            );
+            return null;
+          })
+        : null;
+      const short = faced ? faceNotes(faced) : [];
+      const faults =
+        (gated.retry ? 1 : 0) + measured.notes.length + short.length;
       if (measured.sheet && (!best || faults < best.faults))
-        best = { sheet: measured.sheet, faults };
+        best = { sheet: measured.sheet, faults, face: faced?.face ?? null };
       if (measured.sheet && !faults) break;
-      notes = [...gated.notes, ...measured.notes];
+      notes = [...gated.notes, ...measured.notes, ...short];
       this.logger.log(
         `${who}: ${character.name} try ${attempt} fell short: ${notes.join(' ')}`,
       );
@@ -2768,18 +2873,40 @@ export class SceneProcessor {
       return null;
     }
     this.logger.log(`${who}: ${character.name} drawn for the whole book`);
+    // Code draws the mouth where the artist marked it, and the mark goes;
+    // a mouth drawn after all is covered where code draws its own.
+    const face = best.face;
+    if (face && Object.keys(face.covered).length)
+      this.logger.log(
+        `${who}: ${character.name}'s drawn mouth covered on ${Object.keys(face.covered).join(', ')}`,
+      );
+    const faced: CharacterSheet = face
+      ? {
+          ...best.sheet,
+          drawing: unmarked(best.sheet.drawing),
+          anchors: { ...best.sheet.anchors, mouth: face.mouth },
+          face,
+        }
+      : best.sheet;
     // Its parts joined and moved by code; unrigged, it is rigged when
     // next read from the cast.
     try {
-      const rigged = await rigSheet(best.sheet);
+      const rigged = await rigSheet(faced);
       if (rigged.notes.length)
         this.logger.log(`${who}: ${character.name}: ${rigged.notes.join(' ')}`);
-      return rigged.sheet;
+      // The face goes where its head was moved in to meet the body.
+      const head = rigged.sheet.rig?.mended.find((m) => m.part === 'head');
+      return rigged.sheet.face && head
+        ? {
+            ...rigged.sheet,
+            face: faceMoved(rigged.sheet.face, [head.dx, head.dy]),
+          }
+        : rigged.sheet;
     } catch (error) {
       this.logger.warn(
         `${who}: ${character.name} could not be rigged: ${(error as Error).message}`,
       );
-      return best.sheet;
+      return faced;
     }
   }
 

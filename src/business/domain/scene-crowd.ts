@@ -796,13 +796,17 @@ function asideFrames(
 ): string {
   const frames = ['0%{transform:none}'];
   for (const one of asides) {
+    // Within the page's length: a walk that runs on past its words is
+    // made way for until they end, never at a time past its end.
+    if (one.at >= total) continue;
+    const until = Math.min(one.until, total);
     const move = `transform:translate(${one.dx}px,${one.dy}px) rotate(${one.lean}deg)`;
-    const settle = Math.min(one.until - 1, one.at + 350);
-    const back = Math.max(settle + 1, one.until - 350);
+    const settle = Math.max(one.at, Math.min(until - 1, one.at + 350));
+    const back = Math.min(until, Math.max(settle + 1, until - 350));
     frames.push(
       `${pc(one.at, total)}{transform:none}`,
       `${pc(settle, total)},${pc(back, total)}{${move}}`,
-      `${pc(one.until, total)}{transform:none}`,
+      `${pc(until, total)}{transform:none}`,
     );
   }
   return `@keyframes cr-by${n}{${[...frames, '100%{transform:none}'].join('')}}`;

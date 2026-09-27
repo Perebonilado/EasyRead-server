@@ -1,7 +1,9 @@
 import {
+  failedLately,
   measureOwnFeature,
   measureOwnThing,
   ownSheetsOf,
+  OWN_RETRY_MS,
   OWN_VERSION,
 } from './scene-sheet';
 import { ownFeatureBrief, ownThingBrief } from './scene-story';
@@ -242,5 +244,30 @@ describe("a show's own drawings as kept", () => {
     });
     expect(Object.keys(kept.things)).toEqual(['kite']);
     expect(Object.keys(kept.features)).toEqual(['hut']);
+  });
+
+  it('keeps when one could not be drawn, and how big it is, so it is not asked for again soon', () => {
+    const kept = ownSheetsOf({
+      version: OWN_VERSION,
+      things: {},
+      features: {},
+      failed: { 'thing:drum': 1_000, 'thing:bad': 'soon' },
+      sizes: { 'thing:drum': { heightCm: 60, lengthCm: 40 }, 'thing:bad': {} },
+    });
+    expect(kept.failed).toEqual({ 'thing:drum': 1_000 });
+    expect(kept.sizes).toEqual({
+      'thing:drum': { heightCm: 60, lengthCm: 40 },
+    });
+    expect(failedLately(kept, 'thing:drum', 1_000 + OWN_RETRY_MS - 1)).toBe(
+      true,
+    );
+    expect(failedLately(kept, 'thing:drum', 1_000 + OWN_RETRY_MS)).toBe(false);
+    expect(failedLately(kept, 'thing:kite', 1_000)).toBe(false);
+  });
+
+  it('asks for a thing as the words say it looks', () => {
+    expect(
+      ownThingBrief({ id: 'kite', name: 'kite', look: 'red' }, 'Kofi').brief,
+    ).toMatch(/^A red kite, .*the red kite alone/);
   });
 });

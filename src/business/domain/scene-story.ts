@@ -1747,16 +1747,18 @@ const OWN_STYLE = [
  * big it is and where a hand and a mouth hold it.
  */
 export function ownThingBrief(
-  thing: { id: string; name: string },
+  thing: { id: string; name: string; look?: string },
   bookTitle: string,
   world: StoryWorld | null = null,
 ): DrawingThing {
+  // As the words say it looks: "a red kite".
+  const said = thing.look ? `${thing.look} ${thing.name}` : thing.name;
   return {
     id: `thing-${thing.id}`,
     kind: 'drawing',
     name: thing.name,
     brief: [
-      `A ${thing.name}, a thing the people of "${bookTitle}" hold, carry and throw: the ${thing.name} alone and whole, seen from the side.`,
+      `A ${said}, a thing the people of "${bookTitle}" hold, carry and throw: the ${said} alone and whole, seen from the side.`,
       worldText(world),
       OWN_STYLE,
       `The canvas is in the units of the people it is drawn beside: a grown-up is 224 units tall, a child 190, a hand about 20 across. Draw it at its true size in those units, resting on the bottom edge in the middle, and leave the rest of the canvas empty: a key is about 16 long, a cup 30 tall, a ball 26 across, a drum 60 tall, a kite about 90 tall, an umbrella 110 long.`,

@@ -82,9 +82,10 @@ export function ownNamedIn(
   return best;
 }
 
+/** Words that come before a thing, but for someone's: "the", "his". */
+const DETERMINERS = 'the|a|an|his|her|their|its|my|your|our|this|that|some';
 /** Words that come before a thing: "the", "his", "Maya's". */
-export const OWN_DETERMINER =
-  "(?:the|a|an|his|her|their|its|my|your|our|this|that|some|\\p{Lu}\\p{L}*['’]s)";
+export const OWN_DETERMINER = `(?:${DETERMINERS}|\\p{Lu}\\p{L}*['’]s)`;
 
 /** Words after a thing's name that end it: a preposition, a joining word, an adverb, a stop. */
 const ENDS =
@@ -114,7 +115,10 @@ const NEVER = new Set(
     'thumb thumbs wing wings beak horn horns ' +
     'photo photograph picture selfie shower swim ride trip drive dive ' +
     'tantrum fit party fuss game match wink punch yawn tear tears promise ' +
-    'number five ten'
+    'number five ten pace speed subject courage trouble luck ' +
+    'doctor nurse driver conductor king queen prince princess farmer ' +
+    'trader seller vendor police policeman officer chief guard soldier ' +
+    'donkey monkey lion rabbit frog camel elephant snake'
   ).split(' '),
 );
 
@@ -128,6 +132,15 @@ const LIKE = new Set(
   ).split(' '),
 );
 
+/** Words for what a thing looks like, said before its name: its colour, what it is made of, its size. */
+const LOOKS = new Set(
+  (
+    'red blue green yellow orange pink purple black white brown grey gray ' +
+    'golden silver striped spotted wooden paper plastic metal cloth shiny ' +
+    'bright big small tiny huge long short tall round old broken'
+  ).split(' '),
+);
+
 /** Words that are never part of a thing's name: pronouns, verbs that help, and the like ("the time we get there"). */
 const NOT_A_NAME = new Set(
   (
@@ -135,7 +148,7 @@ const NOT_A_NAME = new Set(
     'do does did has have had will would can could shall should may might ' +
     'must not no so very also just then there here this that these those ' +
     'what which who whom whose where when why how all any each every some ' +
-    'many much more most few two three of'
+    'many much more most few two three of other others'
   ).split(' '),
 );
 
@@ -149,7 +162,7 @@ const NOT_A_FEATURE = new Set(
     'city forest woods wood jungle beach park garden field yard compound ' +
     'playground street road lane path track distance dark darkness light ' +
     'shade shadow shadows sunshine world stage scene rules corner inside ' +
-    'outside country land hill hills mountain valley'
+    'outside country land hill hills mountain valley toilet'
   ).split(' '),
 );
 
@@ -176,6 +189,55 @@ export function nounAt(text: string): { word: string; at: number } | null {
   )
     return null;
   return { word, at: m.index + m[0].length - m[2].length };
+}
+
+/**
+ * A name as the noun it is, without the words before it that say which
+ * one or what it is like: "a long stick" is a stick, "his red kite" a
+ * kite, "the old water pump" a water pump. Empty for a name that is no
+ * noun ("the big one", "his hand").
+ */
+export function nounOf(name: string): string {
+  const words = name.toLowerCase().trim().split(/\s+/u).filter(Boolean);
+  const determiner = new RegExp(`^(?:${DETERMINERS}|\\p{L}+['’]s)$`, 'u');
+  while (
+    words.length > 1 &&
+    (determiner.test(words[0]) ||
+      LIKE.has(words[0]) ||
+      NOT_A_NAME.has(words[0]))
+  )
+    words.shift();
+  const last = words[words.length - 1] ?? '';
+  return !last ||
+    NEVER.has(last) ||
+    NEVER.has(singularOf(last)) ||
+    LIKE.has(last) ||
+    NOT_A_NAME.has(last)
+    ? ''
+    : words.join(' ');
+}
+
+/**
+ * The words said before a thing's name that say what it looks like, as
+ * the words of a scene say it most: "red" for "Kofi raises his red kite".
+ * Empty for none.
+ */
+export function looksOf(name: string, text: string): string {
+  const said = new Map<string, number>();
+  const words = ownWords(name);
+  const before = new RegExp(
+    `\\b((?:[\\p{L}-]+\\s+){1,2})(?=${words.source})`,
+    'giu',
+  );
+  for (const m of text.matchAll(before)) {
+    const looks = m[1]
+      .toLowerCase()
+      .split(/\s+/u)
+      .filter((w) => LOOKS.has(w))
+      .join(' ');
+    if (looks) said.set(looks, (said.get(looks) ?? 0) + 1);
+  }
+  return [...said].sort((a, b) => b[1] - a[1])[0]?.[0] ?? '';
 }
 
 /** Whether a word may name a feature: nothing of the body, of people, of places or of the weather. */

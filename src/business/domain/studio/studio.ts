@@ -32,6 +32,7 @@ import { faceNamed } from '../scene-feeling';
 import {
   ACTION_DOINGS,
   FEATURE_KINDS,
+  FEATURE_WORDS,
   HANDLE_DOINGS,
   OPENING_FEATURES,
   PROP_ACTIONS,
@@ -45,11 +46,12 @@ import {
   isThingWord,
   type AnyFeatureKind,
   type DoingId,
+  type FeatureKind,
   type PropAction,
   type ThingId,
   type TravelPace,
 } from '../scene-doings';
-import { DRAWN, mayBeFeature, mayBeThing, ownIdOf } from '../scene-own';
+import { DRAWN, mayBeFeature, mayBeThing, nounOf, ownIdOf } from '../scene-own';
 import { PROP_KIND, STAGE_PROPS, type StageProp } from '../scene-props';
 import {
   LINE_FROMS,
@@ -307,25 +309,63 @@ export interface StudioFeature {
 /** The most features a set keeps. */
 export const MAX_FEATURES = 8;
 
-/** A set's features made sound: each an id of its own, a kind from the list (or the artist's), a spot. */
-export function featuresOf(raw: unknown): StudioFeature[] {
+/** The list's kind a name is, when its last word or two say so: "a wooden gate", "the goal post"; never "a bus stop". */
+function kindNamed(noun: string): FeatureKind | null {
+  return (
+    FEATURE_KINDS.find((kind) => {
+      const m = FEATURE_WORDS[kind].exec(noun);
+      return m !== null && m.index + m[0].length === noun.length;
+    }) ?? null
+  );
+}
+
+/**
+ * A set's features made sound: each an id of its own, a kind from the
+ * list (or the artist's), a spot. `others` are the show's characters and
+ * its own things, by id and name: never a feature.
+ */
+export function featuresOf(
+  raw: unknown,
+  others: readonly string[] = [],
+): StudioFeature[] {
   const taken = new Set<string>();
+  const notOne = new Set(others.map(ownIdOf));
   return (Array.isArray(raw) ? raw : [])
-    .slice(0, MAX_FEATURES)
     .flatMap((one: unknown): StudioFeature[] => {
       if (!one || typeof one !== 'object') return [];
       const f = one as Record<string, unknown>;
-      const name = text(f.name, 40) || text(f.id, 40);
-      // A kind none of the list's is the artist's to draw, if its name
-      // could be one: never a place, the ground or the weather.
+      const said = text(f.name, 40) || text(f.id, 40);
+      // "a long stick" is a stick: its name without the words before it.
+      const noun = nounOf(said);
+      const last = noun.split(/\s+/).pop() ?? '';
+      // A kind none of the list's is the list's own when its name says so
+      // ("a wooden gate"), else the artist's to draw if its name could be
+      // one: never a thing handled or carried, one of the cast, a place,
+      // the ground or the weather.
+      const listed = oneOf(FEATURE_KINDS)(f.kind);
       const kind: AnyFeatureKind | null =
-        oneOf(FEATURE_KINDS)(f.kind) ??
-        (name && mayBeFeature(name.split(/\s+/).pop() ?? '') ? DRAWN : null);
-      if (!name || !kind) return [];
+        listed ??
+        kindNamed(noun) ??
+        (noun &&
+        mayBeFeature(last) &&
+        !isThingWord(noun) &&
+        !isThingWord(last) &&
+        !isGear(last) &&
+        ![said, noun, text(f.id, 40)].some((w) => notOne.has(ownIdOf(w)))
+          ? DRAWN
+          : null);
+      if (!said || !kind) return [];
+      const name = kind === DRAWN ? noun : said;
       const id =
         kind === DRAWN
-          ? ownIdOf(text(f.id, 40) || name)
-          : featureIdOf(text(f.id, 40) || name);
+          ? ownIdOf(text(f.id, 40) || noun)
+          : featureIdOf(text(f.id, 40) || said);
+      // Nor known by a thing's id or someone's, which aims at them would find first.
+      if (
+        kind === DRAWN &&
+        (isStageProp(id) || isThingWord(id) || notOne.has(id))
+      )
+        return [];
       if (!id || taken.has(id)) return [];
       taken.add(id);
       return [
@@ -334,13 +374,16 @@ export function featuresOf(raw: unknown): StudioFeature[] {
           name,
           kind,
           spot: f.spot === 'back' ? 'back' : (oneOf(SPOTS)(f.spot) ?? 'back'),
+          // One the list's by its name opens as its kind does, unless said to.
           opens:
-            typeof f.opens === 'boolean'
+            typeof f.opens === 'boolean' &&
+            (f.opens || listed || kind === DRAWN)
               ? f.opens
               : kind !== DRAWN && OPENING_FEATURES.includes(kind),
         },
       ];
-    });
+    })
+    .slice(0, MAX_FEATURES);
 }
 
 /**
@@ -355,6 +398,8 @@ export interface StudioThing {
   name: string;
   /** Eaten, drunk from, or neither: what may be done with it. */
   kind: 'food' | 'drink' | 'thing';
+  /** What it looks like, as the words say it before its name: "red". Absent, nothing said. */
+  look?: string;
 }
 
 /** The most things of its own a show keeps. */
@@ -372,11 +417,13 @@ export function thingsOf(raw: unknown): StudioThing[] {
       const id = ownIdOf(text(t.id, 40) || name);
       if (!name || !id || taken.has(id) || isThingWord(id)) return [];
       taken.add(id);
+      const look = text(t.look, 40);
       return [
         {
           id,
           name,
           kind: t.kind === 'food' || t.kind === 'drink' ? t.kind : 'thing',
+          ...(look ? { look } : {}),
         },
       ];
     });
@@ -509,6 +556,7 @@ export function bibleOf(raw: unknown): StudioBible {
         },
       ];
     });
+  const things = thingsOf(said.things);
   const places = new Set<string>();
   const sets = (Array.isArray(said.sets) ? said.sets : [])
     .slice(0, MAX_SETS)
@@ -517,7 +565,10 @@ export function bibleOf(raw: unknown): StudioBible {
       const s = one as Record<string, unknown>;
       const name = text(s.name, 60);
       if (!name) return [];
-      const features = featuresOf(s.features);
+      const features = featuresOf(s.features, [
+        ...characters.flatMap((c) => [c.id, c.name, c.name.split(/\s+/)[0]]),
+        ...things.map((t) => t.id),
+      ]);
       return [
         {
           id: freeId(studioId(text(s.id, 40) || name, 'place'), places),
@@ -546,7 +597,6 @@ export function bibleOf(raw: unknown): StudioBible {
           return Object.values(out).some(Boolean) ? out : null;
         })()
       : null;
-  const things = thingsOf(said.things);
   return {
     characters,
     sets,
@@ -801,7 +851,8 @@ export function thingNamed(value: unknown): string | null {
     said.split(/\s+/).length > 3
   )
     return null;
-  const id = ownIdOf(said);
+  // "a red kite" is a kite: the colour is the words', and the drawing's.
+  const id = ownIdOf(nounOf(said));
   return id && mayBeThing(id.split('-').pop() ?? '') ? id : null;
 }
 

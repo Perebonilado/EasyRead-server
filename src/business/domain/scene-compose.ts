@@ -2575,7 +2575,9 @@ export function composeScene(input: ComposeInput): {
       svg: drawCrowd(crowdDrawn, {
         moves: crowdMoves(),
         durationMs,
-        asides: asideOf(crowdDrawn, goingBy(), walkEase),
+        // Made way for as a film walks them, on its one, wide staging: a
+        // book's page is played boxed too, where no one would go by.
+        ...(film ? { asides: asideOf(crowdDrawn, goingBy(), walkEase) } : {}),
       }),
       aspect: vw / vh,
       caption: null,

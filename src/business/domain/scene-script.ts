@@ -657,7 +657,7 @@ export interface SceneScript {
   /** Who holds each thing as the scene opens, in a hand or the mouth (the Studio's): the ball in Pip's mouth. */
   propsHeld?: Partial<Record<string, { by: string; in: 'hand' | 'mouth' }>>;
   /** A Studio show's own things among `props`, which the artist draws once for the show: each by its id and name. */
-  ownThings?: { id: string; name: string }[];
+  ownThings?: { id: string; name: string; look?: string }[];
   /**
    * A Studio show's own things and features as the artist drew them and
    * code measured them, by id: put in before the scene is composed. One

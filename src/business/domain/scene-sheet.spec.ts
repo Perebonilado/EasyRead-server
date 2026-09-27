@@ -278,7 +278,40 @@ describe('what a scene stands on its stage that is not drawn yet', () => {
         {
           version: 1,
           things: { kite: {} as never },
-          features: { hut: {} as never },
+          features: { hut: { opens: true } as never },
+        },
+      ),
+    ).toEqual([]);
+  });
+
+  it('names one kept that the words have since opened, or said a look for: not drawn as they say yet', () => {
+    const looked = {
+      ...script,
+      ownThings: [{ id: 'kite', name: 'kite', look: 'red' }],
+    };
+    expect(
+      notDrawnYet(
+        looked,
+        bible,
+        { maya: sheet, pip: sheet },
+        { yard: set },
+        {
+          version: 1,
+          things: { kite: {} as never },
+          features: { hut: { opens: false } as never },
+        },
+      ),
+    ).toEqual(['kite', 'hut']);
+    expect(
+      notDrawnYet(
+        looked,
+        bible,
+        { maya: sheet, pip: sheet },
+        { yard: set },
+        {
+          version: 1,
+          things: { kite: { look: 'red' } as never },
+          features: { hut: { opens: true } as never },
         },
       ),
     ).toEqual([]);

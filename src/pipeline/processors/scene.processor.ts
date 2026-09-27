@@ -98,6 +98,7 @@ import {
   SET_VERSION,
   SIZE_UNITS,
   castOf,
+  failedLately,
   figureDrawing,
   figureSheet,
   lightDrawing,
@@ -693,7 +694,7 @@ export class SceneProcessor {
           story,
           carried.reuse,
         ),
-        this.drawOwn(script, story, documentId, who),
+        this.drawOwn(script, story, documentId, who, stop.signal),
       ]).then(async ([made, own]) => {
         // The show's own, as drawn: the stage holds and stands them.
         if (own) script = { ...script, drawn: own };
@@ -2281,13 +2282,15 @@ export class SceneProcessor {
    * drawn once for the show and kept: null for a scene with none, and for
    * a book's page, which has none. One that cannot be drawn is left out,
    * and the stage stands something in for it (a parcel, something under a
-   * cloth); it is drawn again for the next scene.
+   * cloth); it is drawn again for a scene made a while later. Nothing more
+   * is asked for once `stop` says so.
    */
   private async drawOwn(
     script: SceneScript,
     story: PageStory | null,
     documentId: string | null,
     who: string,
+    stop?: AbortSignal,
   ): Promise<NonNullable<SceneScript['drawn']> | null> {
     const key = story?.ownKey;
     const things = script.ownThings ?? [];
@@ -2305,6 +2308,7 @@ export class SceneProcessor {
           story,
           documentId,
           who,
+          stop,
         );
         if (drawn) out.things[thing.id] = drawn;
       }),
@@ -2315,6 +2319,7 @@ export class SceneProcessor {
           story,
           documentId,
           who,
+          stop,
         );
         if (drawn) out.features[feature.id] = drawn;
       }),
@@ -2324,27 +2329,40 @@ export class SceneProcessor {
 
   /**
    * A thing of the show's own (a kite, a drum) for the whole show: kept,
-   * or drawn once by the artist, measured, and kept. Null when no drawing
-   * comes through.
+   * or drawn once by the artist, measured, and kept. One the words have
+   * since said a look for ("red") is drawn again so. Null when no drawing
+   * comes through and none is kept.
    */
   private ownThingFor(
     key: string,
-    thing: { id: string; name: string },
+    thing: { id: string; name: string; look?: string },
     story: Pick<PageStory, 'bookTitle' | 'bible'>,
     documentId: string | null,
     who: string,
+    stop?: AbortSignal,
   ): Promise<OwnPropDrawing | null> {
     return this.once(`${key}#thing:${thing.id}`, async () => {
+      const mark = `thing:${thing.id}`;
+      let own: OwnSheets;
       try {
-        const kept = (await this.ownAt(key)).things[thing.id];
-        if (kept) return kept;
+        own = await this.ownAt(key);
       } catch (error) {
         this.logger.warn(
           `${who}: the show's own could not be read: ${(error as Error).message}`,
         );
         return null;
       }
-      const size = await this.sizeOf(thing.name, story, documentId, who);
+      const kept = own.things[thing.id];
+      if (kept && (kept.look ?? '') === (thing.look ?? '')) return kept;
+      if (stop?.aborted || failedLately(own, mark)) return kept ?? null;
+      const size = await this.ownSize(
+        own,
+        mark,
+        thing.name,
+        story,
+        documentId,
+        who,
+      );
       const drawn = await this.drawOwnOne(
         ownThingBrief(thing, story.bookTitle, story.bible.world ?? null),
         OWN_THING_CANVAS,
@@ -2352,13 +2370,19 @@ export class SceneProcessor {
         story.bookTitle,
         documentId,
         who,
+        stop,
       );
-      if (!drawn) return null;
+      if (!drawn) {
+        await this.ownFailed(key, who, thing.name, mark, size, stop);
+        return kept ?? null;
+      }
+      if (thing.look) drawn.look = thing.look;
       this.logger.log(
         `${who}: the ${thing.name} drawn for the whole show, ${drawn.size} (${Math.round(-drawn.viewBox[1])} tall)${drawn.loose.hangs ? ', hanging from its grip' : ''}${drawn.loose.rolls ? ', rolling' : ''}`,
       );
       await this.keepOwn(key, who, thing.name, (own) => {
         own.things[thing.id] = drawn;
+        delete own.failed?.[mark];
       });
       return drawn;
     });
@@ -2368,7 +2392,7 @@ export class SceneProcessor {
    * A feature of the show's own (a bicycle, a signpost) for the whole
    * show: kept, or drawn once by the artist, measured, and kept. One the
    * words have since opened, drawn when nothing opened, is drawn again
-   * with what opens. Null when no drawing comes through.
+   * with what opens. Null when no drawing comes through and none is kept.
    */
   private ownFeatureFor(
     key: string,
@@ -2376,18 +2400,31 @@ export class SceneProcessor {
     story: Pick<PageStory, 'bookTitle' | 'bible'>,
     documentId: string | null,
     who: string,
+    stop?: AbortSignal,
   ): Promise<SetPiece | null> {
     return this.once(`${key}#feature:${feature.id}`, async () => {
+      const mark = `feature:${feature.id}`;
+      let own: OwnSheets;
       try {
-        const kept = (await this.ownAt(key)).features[feature.id];
-        if (kept && (kept.opens || !feature.opens)) return kept.piece;
+        own = await this.ownAt(key);
       } catch (error) {
         this.logger.warn(
           `${who}: the show's own could not be read: ${(error as Error).message}`,
         );
         return null;
       }
-      const size = await this.sizeOf(feature.name, story, documentId, who);
+      const kept = own.features[feature.id];
+      if (kept && (kept.opens || !feature.opens)) return kept.piece;
+      // Not drawn again: the one kept, which does not open, is better than none.
+      if (stop?.aborted || failedLately(own, mark)) return kept?.piece ?? null;
+      const size = await this.ownSize(
+        own,
+        mark,
+        feature.name,
+        story,
+        documentId,
+        who,
+      );
       const piece = await this.drawOwnOne(
         ownFeatureBrief(feature, story.bookTitle, story.bible.world ?? null),
         OWN_FEATURE_CANVAS,
@@ -2395,15 +2432,54 @@ export class SceneProcessor {
         story.bookTitle,
         documentId,
         who,
+        stop,
       );
-      if (!piece) return null;
+      if (!piece) {
+        await this.ownFailed(key, who, feature.name, mark, size, stop);
+        return kept?.piece ?? null;
+      }
       this.logger.log(
         `${who}: the ${feature.name} drawn for the whole show, ${Math.round(piece.viewBox[2])} by ${Math.round(-piece.viewBox[1])}${piece.leaf ? ', opening' : ''}${piece.seat ? `, a seat ${piece.seat} high` : ''}${piece.opening ? ', a way through' : ''}${piece.front ? ', before the people' : ''}`,
       );
       await this.keepOwn(key, who, feature.name, (own) => {
         own.features[feature.id] = { piece, opens: feature.opens };
+        delete own.failed?.[mark];
       });
       return piece;
+    });
+  }
+
+  /** How big one of the show's own really is: as asked before, kept, or asked now. */
+  private async ownSize(
+    own: OwnSheets,
+    mark: string,
+    name: string,
+    story: Pick<PageStory, 'bible'>,
+    documentId: string | null,
+    who: string,
+  ): Promise<RealSize | null> {
+    const asked = own.sizes?.[mark];
+    return asked ?? (await this.sizeOf(name, story, documentId, who));
+  }
+
+  /**
+   * One of the show's own that could not be drawn, marked so: scenes made
+   * soon after stand something in for it without asking again. Its size,
+   * if it was asked, is kept for when it is. Nothing is marked for a make
+   * stopped on the way.
+   */
+  private async ownFailed(
+    key: string,
+    who: string,
+    name: string,
+    mark: string,
+    size: RealSize | null,
+    stop?: AbortSignal,
+  ): Promise<void> {
+    if (stop?.aborted) return;
+    await this.keepOwn(key, who, name, (own) => {
+      own.failed = { ...own.failed, [mark]: Date.now() };
+      if (size) own.sizes = { ...own.sizes, [mark]: size };
     });
   }
 
@@ -2449,10 +2525,12 @@ export class SceneProcessor {
     topic: string,
     documentId: string | null,
     who: string,
+    stop?: AbortSignal,
   ): Promise<T | null> {
     let best: { value: T; faults: number } | null = null;
     let notes: string[] | undefined;
     for (let attempt = 1; attempt <= DRAW_TRIES; attempt += 1) {
+      if (stop?.aborted) break;
       let reply: string;
       try {
         const made = await this.llm.sceneDrawing({

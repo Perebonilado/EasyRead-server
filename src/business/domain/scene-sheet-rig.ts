@@ -1448,13 +1448,15 @@ export async function rigSheet(
       Math.min(moving.get(one.motion) ?? Infinity, amplitude),
     );
   });
-  for (const one of movers) {
-    if (!moving.has(one.motion)) continue;
+  movers.forEach((one, i) => {
+    // One proved to come off, or leave the frame, even at a small swing
+    // stays still: its kind moves only as far as those that may.
+    if (!Math.abs(moverAmplitudes[i] ?? 0) && one.motion !== 'pulse') return;
     wrap(outermost(one.limb.outer), {
       class: `rig-${one.motion}${one.motion === 'flap' && one.right ? ' rig-flap-r' : ''}`,
       style: `transform-origin:${one.pivot[0]}px ${one.pivot[1]}px`,
     });
-  }
+  });
   const css = rigCss(motion, lifts, lows) + moverCss(moving);
   const style = new Element('style', {});
   setText(style, css);

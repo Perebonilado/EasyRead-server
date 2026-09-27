@@ -38,7 +38,9 @@ import {
 import { isGear } from '../scene-figure';
 import {
   DRAWN,
+  looksOf,
   mayBeThing,
+  nounOf,
   ownIdOf,
   ownWords,
   type OwnWord,
@@ -325,6 +327,13 @@ export function mendSheet(
       : (ownThings.find((t) => t.id === prop)?.kind ?? 'thing');
   /** Everything the words of the scene say. */
   const allWords = input.beats.map((b) => b.say).join(' ');
+  // One the show has with no look yet looks as these words say: "his red kite".
+  for (const [k, thing] of ownThings.entries()) {
+    const look = thing.look ? '' : looksOf(thing.name, allWords);
+    if (!look) continue;
+    ownThings[k] = { ...thing, look };
+    newThings.push(ownThings[k]);
+  }
   /**
    * A thing no list has, the show's own from now on: never one of the
    * cast, gear, a feature, or a word for the body, people or a place.
@@ -333,9 +342,15 @@ export function mendSheet(
     word: string,
     kind: StudioThing['kind'] = 'thing',
   ): string | null => {
-    const id = ownIdOf(word);
+    // "his red kite" is a kite; "the paper kite" the show's kite, if it has one.
+    const noun = nounOf(word);
+    const id = ownIdOf(noun);
     if (!id) return null;
-    if (isStageProp(id) || ownThings.some((t) => t.id === id)) return id;
+    const last = id.split('-').pop() ?? '';
+    const same = ownThings.find((t) => t.id === id || t.id === last);
+    if (same) return same.id;
+    if (isStageProp(id)) return id;
+    if (isStageProp(last)) return last;
     const named = (name: string) => ownIdOf(name) === id;
     if (
       isGear(id) ||
@@ -348,7 +363,9 @@ export function mendSheet(
       features.some((f) => f.id === id)
     )
       return null;
-    const made: StudioThing = { id, name: id.replace(/-/g, ' '), kind };
+    const name = id.replace(/-/g, ' ');
+    const look = looksOf(name, `${word} ${allWords}`);
+    const made: StudioThing = { id, name, kind, ...(look ? { look } : {}) };
     ownThings.push(made);
     newThings.push(made);
     mended.push(`the ${made.name} is the show's own, drawn for it`);
@@ -366,12 +383,11 @@ export function mendSheet(
   const features: StudioFeature[] = [...(set?.features ?? [])];
   const found: StudioFeature[] = [];
   /** A thing the sheet names that no list has, the show's own if the scene's words name it too; else nothing. */
-  const ownIfNamed = (word: string): string | null =>
-    handled(word)
-      ? word
-      : ownWords(word).test(allWords)
-        ? ownThing(word)
-        : null;
+  const ownIfNamed = (word: string): string | null => {
+    if (handled(word)) return word;
+    const noun = nounOf(word);
+    return noun && ownWords(noun).test(allWords) ? ownThing(word) : null;
+  };
   // A vessel (a bus, a boat) holds a few people besides the story's, never a crowd.
   if (sheet.crowd === 'many' && set?.kind === 'vessel') {
     sheet.crowd = 'few';
@@ -1694,14 +1710,19 @@ export function withFeatures(
   };
 }
 
-/** The bible with the things of its own a scene's words named added, for good. */
+/** The bible with the things of its own a scene's words named added, for good, and how one with no look yet looks. */
 export function withThings(
   bible: StudioBible,
   things: readonly StudioThing[],
 ): StudioBible {
   const own = bible.things ?? [];
   const more = things.filter((t) => !own.some((o) => o.id === t.id));
-  return more.length ? { ...bible, things: [...own, ...more] } : bible;
+  const looked = own.map(
+    (o) => (!o.look && things.find((t) => t.id === o.id && t.look)) || o,
+  );
+  return more.length || looked.some((o, k) => o !== own[k])
+    ? { ...bible, things: [...looked, ...more] }
+    : bible;
 }
 
 /**

@@ -344,6 +344,201 @@ describe("a show's own things: named by the words, drawn once, handled like any"
   });
 });
 
+describe("what is never a show's own, and one thing named two ways", () => {
+  it("keeps a thing, gear or one of the cast off a set's features, and a listed kind the list's", () => {
+    const raw = bibleOf({
+      characters: [
+        { name: 'Kofi', kind: 'person', voice: 'boy' },
+        { name: 'Zuri', kind: 'animal', look: 'a small brown dog' },
+      ],
+      things: [{ name: 'kite' }],
+      sets: [
+        {
+          name: 'Beach',
+          kind: 'outdoor',
+          features: [
+            { id: 'stick', name: 'a long stick', kind: 'prop', spot: 'left' },
+            { id: 'pole', name: 'a long stick', kind: 'prop', spot: 'left' },
+            { id: 'umbrella', name: 'umbrella', kind: 'thing' },
+            { id: 'zuri', name: 'Zuri', kind: 'dog' },
+            { id: 'kofi', name: 'Kofi', kind: 'person' },
+            { id: 'kite', name: 'a big red kite', kind: 'thing' },
+            {
+              id: 'gate',
+              name: 'gate',
+              kind: 'entrance',
+              spot: 'left',
+              opens: false,
+            },
+            { name: 'wooden bench', kind: 'seat', spot: 'right' },
+            { id: 'sign', name: 'the old signpost', kind: 'sign' },
+            { name: 'bus stop', kind: 'stop' },
+          ],
+        },
+      ],
+    });
+    expect(
+      raw.sets[0].features?.map((f) => [f.id, f.name, f.kind, f.opens]),
+    ).toEqual([
+      ['gate', 'gate', 'gate', true],
+      ['wooden-bench', 'wooden bench', 'bench', false],
+      ['sign', 'signpost', 'drawn', false],
+      ['bus-stop', 'bus stop', 'drawn', false],
+    ]);
+  });
+
+  it('never takes an idiom, a person by their work, an animal or "the others" for a thing or a feature', () => {
+    const sheet = sheetOf([
+      { kind: 'line', who: 'ama', say: 'We are late for the doctor!' },
+      {
+        kind: 'action',
+        who: 'kofi',
+        do: 'take',
+        say: 'Kofi picks up the pace.',
+      },
+      {
+        kind: 'action',
+        who: 'ama',
+        do: 'walk',
+        say: 'Ama runs to the driver.',
+      },
+      {
+        kind: 'action',
+        who: 'kofi',
+        do: 'drop',
+        say: 'Kofi drops the subject.',
+      },
+      {
+        kind: 'action',
+        who: 'kofi',
+        do: 'walk',
+        say: 'Kofi walks to the donkey.',
+      },
+      {
+        kind: 'action',
+        who: 'ama',
+        do: 'lean',
+        say: 'Ama leans back against the others.',
+      },
+      { kind: 'line', who: 'kofi', say: 'Fine.' },
+    ]);
+    const { things, features } = mendSheet(sheet, bible);
+    expect(things).toEqual([]);
+    expect(features).toEqual([]);
+  });
+
+  it('knows a described thing by its noun, as one thing, and keeps how the words say it looks', () => {
+    const sheet = sheetOf(
+      [
+        { kind: 'narration', say: 'Kofi has a red kite.' },
+        {
+          kind: 'business',
+          who: 'kofi',
+          do: 'raise',
+          say: 'Kofi flies his kite.',
+        },
+        {
+          kind: 'business',
+          who: 'kofi',
+          do: 'throw',
+          say: 'Kofi throws the kite to Ama.',
+        },
+        { kind: 'line', who: 'ama', say: 'Got it!' },
+      ],
+      {
+        onStage: [
+          { who: 'kofi', spot: 'centre-left', holding: 'red kite' },
+          { who: 'ama', spot: 'centre-right' },
+        ],
+      },
+    );
+    const mended = mendSheet(sheet, bible);
+    expect(mended.things).toEqual([
+      { id: 'kite', name: 'kite', kind: 'thing', look: 'red' },
+    ]);
+    expect(mended.sheet.onStage[0].holding).toBe('kite');
+    const grown = withFound(bible, mended.sheet.set, mended);
+    const script = stageStory(mended.sheet, grown);
+    expect(script.props).toEqual(['kite']);
+    expect(script.ownThings).toEqual([
+      { id: 'kite', name: 'kite', look: 'red' },
+    ]);
+    // A kite the show has, with no look yet, takes the look a later scene says.
+    const plain = withFound(bible, 'field', {
+      features: [],
+      things: [{ id: 'kite', name: 'kite', kind: 'thing' }],
+    });
+    const later = mendSheet(sheet, plain);
+    expect(withFound(plain, 'field', later).things).toEqual([
+      { id: 'kite', name: 'kite', kind: 'thing', look: 'red' },
+    ]);
+  });
+
+  it('goes after a thing where it is, not to a feature that shares its word', () => {
+    const grandma = bibleOf({
+      characters: [
+        { name: 'Grandma', kind: 'person', voice: 'old woman' },
+        { name: 'Zuri', kind: 'animal', look: 'a small brown dog' },
+      ],
+      sets: [{ name: 'Beach', kind: 'outdoor' }],
+    });
+    // A feature kept before features were checked, known by a thing's word.
+    const stored = {
+      ...grandma,
+      sets: [
+        {
+          ...grandma.sets[0],
+          features: [
+            {
+              id: 'stick',
+              name: 'stick',
+              kind: 'drawn' as const,
+              spot: 'left' as const,
+              opens: false,
+            },
+          ],
+        },
+      ],
+    };
+    const sheet = storySheetOf({
+      title: 'Fetch',
+      set: 'beach',
+      onStage: [
+        { who: 'grandma', spot: 'centre-right' },
+        { who: 'zuri', spot: 'centre' },
+      ],
+      props: [{ prop: 'stick', near: 'grandma' }],
+      beats: [
+        {
+          kind: 'business',
+          who: 'grandma',
+          do: 'take',
+          say: 'Grandma takes the stick.',
+        },
+        {
+          kind: 'business',
+          who: 'grandma',
+          do: 'throw',
+          target: '@right',
+          say: 'Grandma throws the stick down the beach.',
+        },
+        {
+          kind: 'action',
+          who: 'zuri',
+          do: 'chase',
+          target: 'stick',
+          say: 'Zuri races after the stick.',
+        },
+        { kind: 'line', who: 'grandma', say: 'Good girl!' },
+      ],
+    });
+    const mended = mendSheet(sheet, stored);
+    const script = stageStory(mended.sheet, withFound(stored, 'beach', mended));
+    const chase = script.steps.find((s) => s.at.phrase.startsWith('Zuri'));
+    expect(chase?.stage?.at?.zuri).not.toMatch(/stick/);
+  });
+});
+
 describe('old shows, written before a show had things of its own', () => {
   const maya = (file: string): unknown =>
     JSON.parse(

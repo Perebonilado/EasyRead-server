@@ -429,6 +429,29 @@ describe('a crowd making way', () => {
     expect(svg).not.toContain('cr-by1');
   });
 
+  it('makes way within the page when a walk runs on past its words', () => {
+    const [near] = asideOf(plan, [across], (p) => p);
+    // The page ends while they are still going by: made way for to its
+    // end, every keyframe within it, so none is thrown away.
+    const svg = drawCrowd(plan, {
+      durationMs: near[0].at + 200,
+      asides: [near, []],
+    });
+    const frames = /@keyframes cr-by0\{(.*?)\}\}/.exec(svg)?.[1] ?? '';
+    const times = [...frames.matchAll(/([\d.]+)%/g)].map((m) => Number(m[1]));
+    expect(times.length).toBeGreaterThan(3);
+    expect(Math.max(...times)).toBeLessThanOrEqual(100);
+    expect(frames).toContain('translate(');
+    // One that begins after the page has ended is none.
+    const late = drawCrowd(plan, {
+      durationMs: near[0].at - 1,
+      asides: [near, []],
+    });
+    expect(/@keyframes cr-by0\{(.*?)\}\}/.exec(late)?.[1]).not.toContain(
+      'translate(',
+    );
+  });
+
   it('makes way for one coming out from the back, at their own depth', () => {
     const [, far] = asideOf(
       plan,

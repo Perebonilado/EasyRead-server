@@ -687,7 +687,21 @@ export interface OwnSheets {
   version: number;
   things: Record<string, OwnPropDrawing>;
   features: Record<string, { piece: SetPiece; opens: boolean }>;
+  /** When each that could not be drawn last failed, by "thing:kite" or "feature:signpost". */
+  failed?: Record<string, number>;
+  /** How big each really is, as asked once, by the same: for drawing it again. */
+  sizes?: Record<string, RealSize>;
 }
+
+/** How long one of a show's own that could not be drawn is left before it is asked for again. */
+export const OWN_RETRY_MS = 30 * 60_000;
+
+/** Whether one of a show's own could not be drawn a short while ago: something stands in for it, and nothing is asked. */
+export const failedLately = (
+  own: OwnSheets,
+  mark: string,
+  now = Date.now(),
+): boolean => now - (own.failed?.[mark] ?? -Infinity) < OWN_RETRY_MS;
 
 /** Own things and features drawn by an older way of drawing them are drawn again. */
 export const OWN_VERSION = 1;
@@ -704,6 +718,10 @@ export function ownSheetsOf(raw: unknown): OwnSheets {
   for (const [id, feature] of Object.entries(said.features ?? {}))
     if (feature?.piece?.svg && feature.piece.viewBox?.length === 4)
       out.features[id] = feature;
+  for (const [mark, at] of Object.entries(said.failed ?? {}))
+    if (Number.isFinite(at)) out.failed = { ...out.failed, [mark]: at };
+  for (const [mark, size] of Object.entries(said.sizes ?? {}))
+    if (sane(size)) out.sizes = { ...out.sizes, [mark]: size };
   return out;
 }
 
@@ -737,10 +755,17 @@ export function notDrawnYet(
       if (place && !sets[place.id]) missing.push(place.name);
     }
   }
-  for (const thing of script.ownThings ?? [])
-    if (!own?.things[thing.id]) missing.push(thing.name);
-  for (const feature of script.features ?? [])
-    if (feature.kind === DRAWN && !own?.features[feature.id])
+  // One kept that the words have since said a look for, or opened, is
+  // drawn again: not yet as they say it.
+  for (const thing of script.ownThings ?? []) {
+    const kept = own?.things[thing.id];
+    if (!kept || (kept.look ?? '') !== (thing.look ?? ''))
+      missing.push(thing.name);
+  }
+  for (const feature of script.features ?? []) {
+    const kept = own?.features[feature.id];
+    if (feature.kind === DRAWN && (!kept || (feature.opens && !kept.opens)))
       missing.push(feature.name);
+  }
   return missing;
 }

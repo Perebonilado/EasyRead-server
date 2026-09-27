@@ -898,6 +898,9 @@ export function stageStory(
    * where it stands ("f:gate"); a side ("@left", "@up"): someone gone by
    * the side they went; a thing by whoever holds it.
    */
+  /** Whether a thing is on the stage to be handled: held, or set out or let go of. */
+  const onStage = (thing: string) =>
+    handled(thing) && (holders.has(thing) || lies.has(thing));
   const aimOf = (raw: SheetBeat, who: string, doing: Doing): string | null => {
     const target =
       raw.target ??
@@ -906,7 +909,8 @@ export function stageStory(
     if (target.startsWith('@')) return target;
     if (inCast.has(target))
       return here.has(target) ? target : (wentOff.get(target) ?? null);
-    if (features.has(target)) return featureAim(target);
+    // A thing on the stage is where it is, before a feature of its word.
+    if (features.has(target) && !onStage(target)) return featureAim(target);
     const holder = holders.get(target);
     if (holder && holder !== who && here.has(holder)) return holder;
     return null;
@@ -945,7 +949,8 @@ export function stageStory(
     );
     const mine = share(here.get(who) ?? 'centre');
     const free = (station: string) => !taken.has(station);
-    const feature = raw.target ? features.get(raw.target) : undefined;
+    const feature =
+      raw.target && !onStage(raw.target) ? features.get(raw.target) : undefined;
     if (feature) {
       // Hiding: behind it, where it stands, drawn over them.
       if (raw.do === 'hide') {
@@ -1568,7 +1573,11 @@ export function stageStory(
       ? {
           ownThings: own.things
             .filter((t) => props.includes(t.id))
-            .map((t) => ({ id: t.id, name: t.name })),
+            .map((t) => ({
+              id: t.id,
+              name: t.name,
+              ...(t.look ? { look: t.look } : {}),
+            })),
         }
       : {}),
     ...(Object.keys(propsNear).length ? { propsNear } : {}),

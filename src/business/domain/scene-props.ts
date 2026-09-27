@@ -211,6 +211,8 @@ export interface PropDrawing {
 export interface OwnPropDrawing extends PropDrawing {
   size: PropSize;
   loose: PropLoose;
+  /** What it was drawn to look like, when the words said: "red". */
+  look?: string;
 }
 
 const LINE = 2.6;

@@ -1,6 +1,6 @@
 import { newFeaturesIn, newThingIn, featuresNamedIn } from './scene-doings';
 import { doingsIn, type Actor } from './scene-directions';
-import { nounAt, ownIdOf, ownWords } from './scene-own';
+import { looksOf, nounAt, nounOf, ownIdOf, ownWords } from './scene-own';
 
 const kofi: Actor[] = [
   { id: 'kofi', names: ['Kofi'], gender: 'm' },
@@ -117,6 +117,14 @@ describe("a show's own things and features, found in its words", () => {
       'They sit on the grass under the sun.',
       'Ama hides behind her hands.',
       'Kofi walks down the road with his friend.',
+      'Maya picks up the pace.',
+      'Kofi drops the subject.',
+      'Ama runs to the driver.',
+      'Maya runs to the doctor.',
+      'Kofi hides behind the conductor.',
+      'Ama walks to the donkey.',
+      'Kofi leans back against the others.',
+      'Kofi goes to the toilet.',
     ];
     for (const text of junk) {
       expect([text, newFeaturesIn(text, ['Kofi', 'Ama'])]).toEqual([text, []]);
@@ -129,5 +137,18 @@ describe("a show's own things and features, found in its words", () => {
     }
     expect(newThingIn(' her hand gently')).toBeNull();
     expect(newThingIn(' a look at the map', ['map'])).toBeNull();
+  });
+
+  it('knows a name by its noun, and how the words say it looks', () => {
+    expect(nounOf('a long stick')).toBe('stick');
+    expect(nounOf('His red kite')).toBe('kite');
+    expect(nounOf("Maya's old water pump")).toBe('water pump');
+    expect(nounOf('signpost')).toBe('signpost');
+    expect(nounOf('the big one')).toBe('');
+    expect(nounOf('the others')).toBe('');
+    expect(
+      looksOf('kite', 'Kofi raises his red kite. The red kite flies. A kite!'),
+    ).toBe('red');
+    expect(looksOf('kite', 'Kofi flies his kite.')).toBe('');
   });
 });

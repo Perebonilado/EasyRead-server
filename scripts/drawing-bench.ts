@@ -11,7 +11,7 @@
  *        [--model provider:id] [--judge provider:id] [--see-with provider:id]
  *        [--takes n] [--revisions n] [--no-see] [--concurrency 6]
  *   npm run drawing:bench -- --mark <dir> <id> ok|not ["note"]
- *   npm run drawing:bench -- --sheet <dir> [--against <report.json> | baseline]
+ *   npm run drawing:bench -- --sheet <dir> [--report <report-x.json>] [--against <report.json> | baseline]
  *   npm run drawing:bench -- --rejudge <dir> --judge provider:id
  *
  * Writes <dir>/report.json, <dir>/index.html (the contact sheet), and
@@ -632,7 +632,7 @@ async function sheetPng(report: BenchReport, out: string): Promise<Buffer> {
     const x = 20 + (k % COLS) * CELL_W;
     const y = 90 + Math.floor(k / COLS) * CELL_H;
     texts.push(
-      `<text x="${x}" y="${y + 18}" font-size="15" font-weight="700" fill="${one.passes ? '#3b8a3f' : '#c0392b'}">${esc(one.name)} (${esc(one.id)}) ${one.score}/10${one.passes ? ', passes' : ''}${one.styleOk ? '' : ' · style fails'}</text>`,
+      `<text x="${x}" y="${y + 18}" font-size="15" font-weight="700" fill="${one.passes ? '#3b8a3f' : '#c0392b'}">${esc(one.name)} (${esc(one.id)}) ${one.drawn ? `${one.score}/10${one.passes ? ', passes' : ''}${one.styleOk ? '' : ' · style fails'}` : 'nothing came through'}</text>`,
     );
     const pics = [one.files.before, one.files.card, one.files.stage].filter(
       (file): file is string => Boolean(file) && existsSync(join(out, file!)),
@@ -780,12 +780,28 @@ async function main(): Promise<void> {
   }
   const sheetAt = flag('--sheet');
   if (sheetAt) {
+    // Another report of the run (one judged again) draws its own pages.
+    const named = flag('--report');
     const kept = JSON.parse(
-      readFileSync(join(sheetAt, 'report.json'), 'utf8'),
+      readFileSync(join(sheetAt, named ?? 'report.json'), 'utf8'),
     ) as BenchReport;
     // Summed up again, as runs are summed up now.
     const report = { ...kept, summary: summarise(kept.entries) };
-    await writePages(report, sheetAt, againstOf(flag('--against')));
+    const against = againstOf(flag('--against'));
+    if (named) {
+      const stem = named.replace(/\.json$/, '').replace(/^report-?/, '');
+      writeFileSync(
+        join(sheetAt, `index-${stem}.html`),
+        contactSheetHtml(report, { against, marks: readMarks(sheetAt) }),
+      );
+      writeFileSync(
+        join(sheetAt, `sheet-${stem}.png`),
+        await sheetPng(report, sheetAt),
+      );
+      console.log(`→ ${join(sheetAt, `sheet-${stem}.png`)}`);
+      return;
+    }
+    await writePages(report, sheetAt, against);
     console.log(`→ ${join(sheetAt, 'index.html')}`);
     return;
   }

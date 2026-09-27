@@ -371,15 +371,13 @@ The bench measures the real cost per drawing for each candidate model before the
 
 ---
 
-## 13. Decisions for Richard
+## 13. Decisions (Richard, 2026-09-27: "implement from start to finish", taking the recommendations)
 
-1. **Kit first?** Recommended, since it matches the figure-kit look.
-2. **The drawing model:** allow a stronger (costlier) model for what the kits cannot draw, chosen by the bench?
-3. **Species first:** the list in B1 (pets, farm, common wild, common birds).
-4. **Three options per new drawn character**, or one?
-5. **Books too?** Should Visualize's story pages use the animal kit for known species, or stay as they are for now?
-
----
+1. **Kit first:** yes. Animals and creatures the kits can draw are drawn by code.
+2. **The drawing model:** a stronger model may be used for what the kits cannot draw, chosen by the bench (best score per cent spent).
+3. **Species first:** the list in B1.
+4. **Three options** per new drawn character (kit characters show their one instant version).
+5. **Books:** Visualize's story pages stay as they are for now; the animal kit is behind a flag for books, off.
 
 ## 14. Status
 

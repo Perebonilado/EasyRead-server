@@ -38,9 +38,11 @@ import {
 } from '../../business/domain/studio/studio-audit';
 import type { SceneDto } from '../../contracts';
 import {
+  paintedAt,
   stageStory,
   storyBibleFor,
 } from '../../business/domain/studio/studio-stage';
+import { setsOf, type Sets } from '../../business/domain/scene-sheet';
 import {
   describeBible,
   describeBrief,
@@ -122,6 +124,8 @@ export function studioMakeOf(
   row: StudioSceneRecord,
   rows: StudioSceneRecord[],
   bible: StudioBible,
+  /** The show's sets as painted, where they are: its features stand where they are painted. */
+  sets: Sets | null = null,
 ): Omit<Parameters<SceneProcessor['make']>[0], 'base' | 'who'> {
   const story = row.sheet?.kind === 'story';
   const stage = show.brief.audience
@@ -141,11 +145,12 @@ export function studioMakeOf(
   const sheet = story
     ? repairSheet(row.sheet as StorySheet, bible, before)
     : null;
+  const painted = sheet ? paintedAt(sets?.[sheet.set]) : {};
   const staged = sheet
     ? withFound(bible, sheet.set, mendSheet(sheet, bible, before))
     : bible;
   const script = sheet
-    ? stageStory(sheet, staged, { before })
+    ? stageStory(sheet, staged, { before, painted })
     : checkExplainer(
         repairExplainer(row.sheet as ExplainerSheet, lesson),
         lesson,
@@ -163,6 +168,7 @@ export function studioMakeOf(
           script: unseen.length
             ? stageStory(sheet, staged, {
                 before,
+                painted,
                 plain: new Set(unseen.map((one) => one.beat)),
               })
             : null,
@@ -1025,6 +1031,16 @@ export class StudioProcessor {
     );
   }
 
+  /** The show's sets as painted: none yet, or none that can be read, is none. */
+  private async paintedSets(showId: string): Promise<Sets | null> {
+    try {
+      const kept = await this.storage.get(studioSetsKey(showId));
+      return setsOf(JSON.parse(kept.toString('utf8')));
+    } catch {
+      return null;
+    }
+  }
+
   /**
    * One scene made into film: its sheet staged exactly, drawn, voiced and
    * composed by the stage a book's pages are made on, and stored beside
@@ -1049,7 +1065,14 @@ export class StudioProcessor {
       error: null,
     });
     const made = await this.scenes.make({
-      ...studioMakeOf(show, episode, row, rows, bible),
+      ...studioMakeOf(
+        show,
+        episode,
+        row,
+        rows,
+        bible,
+        await this.paintedSets(show.id),
+      ),
       base: `studio/${show.id}/${episode.id}/${row.id}-${fingerprint.slice(0, 8)}-${Date.now().toString(36)}`,
       who,
       keepAs: `studio-${row.id}`,

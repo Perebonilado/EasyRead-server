@@ -1229,10 +1229,14 @@ export interface SceneFeatureDto {
   painted?: string;
   /** Open as the scene opens. */
   open?: true;
+  /** Open only a little as the scene opens: "open a crack". */
+  ajar?: true;
   /** It stands low before the people by it, drawn over them: a show's own canoe, a drum. */
   front?: true;
   /** Someone going by it goes in and is gone, as at a door: a show's own that opens (a hut). */
   enters?: true;
+  /** Where something caught up in it rests, at each staging: a kite in a palm's crown. Absent, nothing is. */
+  up?: Record<'box' | 'wide', { x: number; y: number }>;
 }
 
 /**
@@ -1327,6 +1331,10 @@ export interface ScenePropDto {
   near: string | null;
   /** Who holds it as the scene opens, and in what: a hand, or the mouth. Absent, it rests near `near`. */
   held?: { by: string; in: 'r' | 'l' | 'mouth' };
+  /** Caught up in a feature of the set as the scene opens, by its id: the kite in the palm. */
+  in?: string;
+  /** It flies on a string once raised: a kite, a balloon. */
+  flies?: true;
   /** Loose, how often it bounces where it lands (a ball twice); absent, it does not. */
   bounce?: number;
   /** It rolls on where it lands, and turns over in the air. */

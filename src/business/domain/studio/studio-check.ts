@@ -73,10 +73,12 @@ import {
   type StorySheet,
   handledOn,
   kindOn,
+  namesOf,
 } from './studio';
 import { joinsSeconds } from './studio-edit';
 import {
   QUIET_MOST_S,
+  caughtUpIn,
   comesWith,
   exitSideOf,
   placementsOf,
@@ -119,6 +121,8 @@ export interface EndState {
     holder: string | null;
     gone: boolean;
     at?: Spot;
+    /** Caught up in a feature of the set, by its id: the kite in the palm. */
+    in?: string;
   }[];
   /** What each one carries on into the next scene: the ball in Pip's mouth. */
   held?: { who: string; thing: string }[];
@@ -371,6 +375,11 @@ export function mendSheet(
     mended.push(`the ${made.name} is the show's own, drawn for it`);
     return id;
   };
+  /** The words a thing is called by: the list's, or the show's own name for it. */
+  const thingWordsOf = (thing: string): RegExp =>
+    isStageProp(thing)
+      ? THING_WORDS[thing]
+      : ownWords(ownThings.find((t) => t.id === thing)?.name ?? thing);
   /** The show's own things and features, as the words reader knows them. */
   const ownKnown = () => ({
     things: ownThings,
@@ -447,6 +456,24 @@ export function mendSheet(
     if (theirs && !theirs.holding) theirs.holding = place.holding;
     place.holding = null;
   }
+  // What the scene before left caught up in a feature of this set (the
+  // kite in the palm) is there still, in no one's hand.
+  const upIn = new Map<string, string>([
+    ...(before?.set === sheet.set ? before.props : []).flatMap(
+      (p): [string, string][] =>
+        p.in && features.some((f) => f.id === p.in) ? [[p.prop, p.in]] : [],
+    ),
+    ...sheet.props.flatMap((p): [string, string][] =>
+      p.in && features.some((f) => f.id === p.in) ? [[p.prop, p.in]] : [],
+    ),
+  ]);
+  for (const place of opening)
+    if (place.holding && upIn.has(place.holding)) {
+      mended.push(
+        `${nameOf(place.who)} does not hold the ${place.holding}: it is caught up in the ${upIn.get(place.holding)}`,
+      );
+      place.holding = null;
+    }
   sheet.onStage = opening;
 
   // The things on the stage: each once, and none resting on the ground
@@ -472,6 +499,10 @@ export function mendSheet(
     }
     props.set(one.prop, characterId(one.near, bible) ?? null);
   }
+  for (const thing of upIn.keys())
+    if (!props.has(thing)) props.set(thing, null);
+  /** What is caught up in a feature as the scene opens. */
+  const opens = new Map(upIn);
 
   const here = new Map<string, Spot>(opening.map((p) => [p.who, p.spot]));
   /** Who holds each thing on the stage now, in a hand or a mouth; null, it lies on the ground. Someone gone keeps what they took. */
@@ -482,7 +513,7 @@ export function mendSheet(
     if (handled(place.holding)) holders.set(place.holding, place.who);
   const actors: Actor[] = bible.characters.map((c) => ({
     id: c.id,
-    names: [...new Set([c.name, c.name.split(/\s+/)[0]])],
+    names: namesOf(c),
     gender: genderOf(c.voice),
   }));
   /** Who was named or spoke, the latest last: whom "him" and "her" mean. */
@@ -500,6 +531,8 @@ export function mendSheet(
   /** The feature each one who went went out by. */
   const wentVia = new Map<string, string>();
   let wentOff: '@left' | '@right' | null = null;
+  /** The last to go off. */
+  let lastGone: string | null = null;
   const out: SheetBeat[] = [];
   /** Where each beat of the sheet as written is now. */
   const where: number[] = [];
@@ -806,15 +839,30 @@ export function mendSheet(
     if (doing.kind === 'travel') {
       // At the pace the words or the sheet say; else as the doing goes.
       const pace = plan.pace ?? (doing.runs ? 'run' : 'walk');
-      // Going after someone gone, or after something not here: going off.
+      // After them, with the thing they carry ("runs after them with the
+      // stick"): after whoever went, not after it.
+      if (
+        id === 'chase' &&
+        target &&
+        holders.get(target) === who &&
+        /\bafter (?:them|him|her|everyone|the others)\b/iu.test(kept)
+      )
+        target = null;
+      // Going after someone gone, or after something not here: going off;
+      // with no one named, after the last to go, the way they went. Whom
+      // they follow is set down, for the stage to send them the way it
+      // sent them.
+      let follows: string | null = null;
       if (
         id === 'chase' &&
         (!target || (person(target) && !here.has(target)))
       ) {
+        const after = target ?? lastGone;
         // After them: out the way they went, by the feature or the side.
-        if (person(target) && !here.has(target)) {
-          via ??= wentVia.get(target) ?? null;
-          target = via ? null : (wentBy.get(target) ?? null);
+        if (person(after) && !here.has(after)) {
+          via ??= wentVia.get(after) ?? null;
+          target = via ? null : (wentBy.get(after) ?? null);
+          follows = after;
         }
         id = 'leave';
       }
@@ -873,13 +921,18 @@ export function mendSheet(
                 through,
               );
         wentBy.set(who, wentOff);
+        lastGone = who;
         if (through) wentVia.set(who, through);
         // What they hold goes with them.
         here.delete(who);
         make('action', {
           do: id,
           ...(via ? { via } : {}),
-          ...(target && !person(target) ? { target } : {}),
+          ...(follows
+            ? { target: follows }
+            : target && !person(target)
+              ? { target }
+              : {}),
           ...(pace === 'run' ? { pace } : {}),
         });
         return;
@@ -913,8 +966,15 @@ export function mendSheet(
       make('action', {
         do: id,
         spot,
-        // As long as the walk across takes, where it is known.
-        seconds: from && spot ? walkSeconds(from, spot, pace) : null,
+        // As long as the walk across takes, where it is known; a run with
+        // nowhere new to go, as long as a run out and back takes.
+        seconds:
+          from && spot
+            ? walkSeconds(from, spot, pace)
+            : pace === 'run' &&
+                (!target || target === '@left' || target === '@right')
+              ? 2 * walkSeconds('left', 'centre-right', 'run')
+              : null,
         ...(target ? { target } : {}),
         ...(thing ? { thing } : {}),
         ...(pace ? { pace } : {}),
@@ -1038,6 +1098,17 @@ export function mendSheet(
     if (id === 'break' && prop !== 'bread')
       return fall(`only bread is broken on the stage, not the ${prop}`);
     const holder = holders.get(prop) ?? null;
+    // Caught up in a feature, it is in no one's hand to let go of.
+    if (
+      (id === 'drop' || id === 'put' || id === 'throw') &&
+      holder !== who &&
+      upIn.has(prop)
+    ) {
+      mended.push(
+        `beat ${n}: the ${prop} is caught up in the ${upIn.get(prop)}, not in ${nameOf(who)}'s hand`,
+      );
+      return;
+    }
     /** An animal carries one thing, in its mouth: what it has is dropped first. */
     const mouthFree = (by: string) => {
       if (byId.get(by)?.kind !== 'animal') return;
@@ -1111,7 +1182,10 @@ export function mendSheet(
       }
       if (to) target = to;
     }
-    if (id === 'take' || id === 'catch') holders.set(prop, who);
+    if (id === 'take' || id === 'catch') {
+      holders.set(prop, who);
+      upIn.delete(prop);
+    }
     if (id === 'put' || id === 'drop' || id === 'kick') holders.set(prop, null);
     if (id === 'put' || id === 'drop') {
       const spot = here.get(who);
@@ -1362,6 +1436,17 @@ export function mendSheet(
     const beat: SheetBeat = { ...raw };
     beat.who = characterId(beat.who, bible) ?? beat.who;
     beat.to = characterId(beat.to, bible) ?? beat.to;
+    // What the words send up into a feature, or find caught there, is in
+    // no one's hand from then on.
+    if (beat.kind === 'line' || beat.kind === 'narration')
+      for (const one of caughtUpIn(
+        beat.say,
+        [...holders.keys()].map((id) => ({ id, words: thingWordsOf(id) })),
+        features,
+      )) {
+        holders.set(one.thing, null);
+        upIn.set(one.thing, one.feature);
+      }
     if (beat.kind === 'line') {
       if (beat.who && NARRATOR.test(beat.who)) {
         mended.push(`beat ${at + 1}: the narrator's words are narration`);
@@ -1553,7 +1638,11 @@ export function mendSheet(
     out.push(tidy(beat));
   });
   sheet.beats = out;
-  sheet.props = [...props].map(([prop, near]) => ({ prop, near }));
+  sheet.props = [...props].map(([prop, near]) => {
+    // Caught up in a feature as it opens: as the scene before left it.
+    const up = opens.get(prop);
+    return up ? { prop, near: null, in: up } : { prop, near };
+  });
 
   // The camera where the sheet put it, only on who is there when it is.
   const present = presenceByBeat(sheet);
@@ -2107,7 +2196,33 @@ export function endStateOf(
     else if (p.holding) gear.set(p.who, p.holding);
   const gone = new Set<string>();
   const character = (id: string) => bible?.characters.find((c) => c.id === id);
+  // What the words send up into a feature of the set, or find caught
+  // there: in no one's hand, up there.
+  const setFeatures =
+    bible?.sets.find((s) => s.id === sheet.set)?.features ?? [];
+  const upIn = new Map<string, string>(
+    sheet.props.flatMap((p): [string, string][] =>
+      p.in ? [[p.prop, p.in]] : [],
+    ),
+  );
+  const wordsOf = (thing: string): RegExp =>
+    isStageProp(thing)
+      ? THING_WORDS[thing]
+      : ownWords(bible?.things?.find((t) => t.id === thing)?.name ?? thing);
   for (const beat of sheet.beats) {
+    if (
+      (beat.kind === 'narration' || beat.kind === 'line') &&
+      setFeatures.length
+    )
+      for (const one of caughtUpIn(
+        beat.say,
+        [...holders.keys()].map((id) => ({ id, words: wordsOf(id) })),
+        setFeatures,
+      )) {
+        holders.set(one.thing, null);
+        upIn.set(one.thing, one.feature);
+        lies.delete(one.thing);
+      }
     if (beat.kind === 'action' && beat.who) {
       if (beat.do === 'enter') {
         here.set(beat.who, beat.spot ?? 'centre');
@@ -2125,6 +2240,7 @@ export function endStateOf(
         id ? (here.get(id) ?? null) : null;
       if (beat.do === 'take' || beat.do === 'catch') {
         holders.set(prop, beat.who);
+        upIn.delete(prop);
         // An animal carries one thing.
         if (character(beat.who)?.kind === 'animal')
           for (const [other, by] of holders)
@@ -2172,7 +2288,11 @@ export function endStateOf(
       prop,
       holder,
       gone: gone.has(prop),
-      ...(holder === null ? onGround(prop) : {}),
+      ...(holder === null
+        ? upIn.has(prop)
+          ? { in: upIn.get(prop)! }
+          : onGround(prop)
+        : {}),
     })),
     held: [
       ...[...holders].flatMap(([thing, who]) =>

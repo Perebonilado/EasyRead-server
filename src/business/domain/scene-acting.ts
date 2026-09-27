@@ -53,6 +53,15 @@ export interface SpokenLine {
  * a moment, toward someone or something ("@up", the sky; "@down", the
  * ground), or no one. "attend": everyone else looks at them.
  */
+/** Moves the writer asks for that the arms do: a line's gesture leaves them be. */
+const ARMS_DO: ReadonlySet<string> = new Set([
+  'point',
+  'reach',
+  'wave',
+  'hug',
+  'clap',
+]);
+
 export interface DirectedMove {
   atMs: number;
   target: string;
@@ -630,9 +639,18 @@ export function actingOf(input: {
     const nth = spokenBy.get(speaker) ?? 0;
     spokenBy.set(speaker, nth + 1);
     const toward = offSide ?? answering ?? undefined;
+    // None while their arms do what the writer asked: a point, a reach.
+    const armsBusy = input.directed.some(
+      (one) =>
+        one.target === speaker &&
+        ARMS_DO.has(one.do) &&
+        one.atMs < to &&
+        one.atMs + (one.ms ?? 1200) > from,
+    );
     if (
       !thatWay &&
       !lookRound &&
+      !armsBusy &&
       words.length >= fewest &&
       !(style.energy < 0.9 && nth % 2 === 1)
     )

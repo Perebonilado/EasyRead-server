@@ -1496,6 +1496,10 @@ describe("the set's features, and everyone at a station of their own", () => {
     const read = (text: string) =>
       featureStatesIn(text).map((one) => [one.word, one.state, one.still]);
     expect(read('The gate is open a crack.')).toEqual([['gate', 'open', true]]);
+    // Only a little, which the stage shows so.
+    expect(featureStatesIn('The gate is open a crack.')[0].ajar).toBe(true);
+    expect(featureStatesIn('The door is slightly open.')[0].ajar).toBe(true);
+    expect(featureStatesIn('The gate is open.')[0].ajar).toBeUndefined();
     expect(read('The gate swings shut behind her.')).toEqual([
       ['gate', 'shut', false],
     ]);

@@ -240,6 +240,7 @@ export function walksOf(
   const goesIn = (f: NonNullable<ReturnType<typeof feature>>, how?: string) =>
     how === 'squeeze' ||
     f.enters === true ||
+    f.kind === 'gate' ||
     f.kind === 'door' ||
     f.kind === 'vehicle' ||
     f.kind === 'window' ||

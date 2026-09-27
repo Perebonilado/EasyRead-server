@@ -594,6 +594,8 @@ export interface SceneFeature {
   opens: boolean;
   /** Open as the scene opens. */
   open?: true;
+  /** Open only a little as it opens: "open a crack". */
+  ajar?: true;
   /** The painting shows it: its place's look names it. */
   looked?: true;
 }
@@ -654,6 +656,8 @@ export interface SceneScript {
   props?: string[];
   /** Before whom each thing rests, when a scene says (the Studio's): else before whoever first handles it. */
   propsNear?: Partial<Record<string, string>>;
+  /** The feature each thing is caught up in as the scene opens, by its id (the Studio's): the kite in the palm. */
+  propsIn?: Partial<Record<string, string>>;
   /** Who holds each thing as the scene opens, in a hand or the mouth (the Studio's): the ball in Pip's mouth. */
   propsHeld?: Partial<Record<string, { by: string; in: 'hand' | 'mouth' }>>;
   /** A Studio show's own things among `props`, which the artist draws once for the show: each by its id and name. */

@@ -6,6 +6,7 @@ import type { StudioBible } from '../src/business/domain/studio/studio';
 import { foundIn } from '../src/business/domain/studio/studio-check';
 import { storyBibleFor } from '../src/business/domain/studio/studio-stage';
 import type { StoragePort } from '../src/business/ports/storage.port';
+import { setsOf, type Sets } from '../src/business/domain/scene-sheet';
 import type {
   StudioEpisodeRecord,
   StudioRepository,
@@ -18,6 +19,7 @@ import {
   studioSetsKey,
 } from '../src/business/handlers/studio/studio-cast.service';
 import type { PageStory } from '../src/pipeline/processors/scene.processor';
+import type { SceneScript } from '../src/business/domain/scene-script';
 
 /**
  * A show, its episodes and every scene of them, and its bible as its
@@ -62,6 +64,39 @@ export async function showStory(
       bookTitle: show.title,
     },
   };
+}
+
+/** A show's sets as painted, where its features are painted: none yet, or none that can be read, is none. */
+export async function paintedSets(
+  storage: StoragePort,
+  showId: string,
+): Promise<Sets | null> {
+  try {
+    const kept = await storage.get(studioSetsKey(showId));
+    return setsOf(JSON.parse(kept.toString('utf8')));
+  } catch {
+    return null;
+  }
+}
+
+/** A script staged now, with the quiets after its words (and before the first) as the voice it is put on has them. */
+export function onItsQuiets(
+  script: SceneScript,
+  voiced: Pick<SceneScript, 'beats' | 'lead'>,
+): SceneScript {
+  const out: SceneScript = {
+    ...script,
+    beats: script.beats.map((beat, k) => {
+      const one = { ...beat };
+      const held = voiced.beats[k]?.holdS;
+      if (held === undefined) delete one.holdS;
+      else one.holdS = held;
+      return one;
+    }),
+  };
+  if (voiced.lead) out.lead = voiced.lead;
+  else delete out.lead;
+  return out;
 }
 
 /** A copy of a stored file kept beside it before it is written over, named for when: the copy's key. */

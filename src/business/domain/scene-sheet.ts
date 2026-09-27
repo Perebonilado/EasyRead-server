@@ -759,7 +759,7 @@ export function notDrawnYet(
   // drawn again: not yet as they say it.
   for (const thing of script.ownThings ?? []) {
     const kept = own?.things[thing.id];
-    if (!kept || (kept.look ?? '') !== (thing.look ?? ''))
+    if (!kept || (thing.look && kept.look !== thing.look))
       missing.push(thing.name);
   }
   for (const feature of script.features ?? []) {

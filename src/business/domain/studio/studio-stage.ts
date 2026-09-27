@@ -20,6 +20,7 @@
 import { faceOfLine } from '../scene-feeling';
 import { directionsIn, doingsIn, type Actor } from '../scene-directions';
 import {
+  THING_WORDS,
   aimedFeature,
   bobbingMove,
   doingOf,
@@ -38,7 +39,7 @@ import {
 import { STATION_SHARES } from '../scene-layout';
 import { genderOf } from '../scene-script';
 import { PROP_KIND } from '../scene-props';
-import { DRAWN } from '../scene-own';
+import { DRAWN, ownWords } from '../scene-own';
 import {
   fitLayout,
   type SceneBeat,
@@ -61,6 +62,7 @@ import { isGear, type FigureFace } from '../scene-figure';
 import {
   SPOTS,
   type SheetBeat,
+  type SheetShot,
   type Spot,
   type StorySheet,
   type StudioBible,
@@ -68,6 +70,7 @@ import {
   type StudioFeature,
   handledOn,
   kindOn,
+  namesOf,
 } from './studio';
 
 /**
@@ -172,6 +175,42 @@ const SPOT_SHARE: Record<Spot | 'back', number> = {
   ...STATION_SHARES,
   back: 0.5,
 };
+/** The spot nearest a share of the stage across. */
+const nearestSpot = (share: number): Spot =>
+  SPOTS.reduce((best, spot) =>
+    Math.abs(SPOT_SHARE[spot] - share) < Math.abs(SPOT_SHARE[best] - share)
+      ? spot
+      : best,
+  );
+
+/**
+ * Where a set's painting shows each feature it has, as a share of the
+ * stage across: the middle of the painter's group for it ("f-goalpost"),
+ * found by its own name or as the gate matched it. None for a set not
+ * painted, or painted with none.
+ */
+export function paintedAt(
+  set:
+    | {
+        drawing: { parts?: Readonly<Record<string, string>> };
+        ground?: {
+          boxes?: Readonly<Record<string, [number, number, number, number]>>;
+        };
+      }
+    | null
+    | undefined,
+): Record<string, number> {
+  const boxes = set?.ground?.boxes ?? {};
+  const out: Record<string, number> = {};
+  const middle = (box: [number, number, number, number]) =>
+    Math.round(((box[0] + box[2]) / 2) * 1000) / 1000;
+  for (const [group, box] of Object.entries(boxes))
+    if (group.startsWith('f-')) out[group.slice(2)] = middle(box);
+  for (const [part, found] of Object.entries(set?.drawing.parts ?? {}))
+    if (part.startsWith('f-') && boxes[found])
+      out[part.slice(2)] = middle(boxes[found]);
+  return out;
+}
 /** A point on the ground, as a stage's own `does` names it: "@0.88". */
 const groundAt = (share: number) =>
   `@${Math.round(Math.min(0.96, Math.max(0.04, share)) * 100) / 100}`;
@@ -179,6 +218,16 @@ const groundAt = (share: number) =>
 const THROWN_PAST = 0.16;
 /** How far beside a feature someone stands by it, as a share of the stage. */
 const BESIDE = 0.1;
+/** Nearer than this across the stage, going there is going nowhere to see. */
+const NEAR = 0.11;
+/** How far across the stage a runner goes in a second, as a share of it (the stage's walk across in four, quickened 2.2 times). */
+const RUN_SHARE_S = 2.2 / 4;
+/** The longest a run out and back takes. */
+const OUT_MOST_S = 3;
+/** What is done touching someone: done beside them. */
+const TOUCHES: ReadonlySet<DoingId> = new Set(['hug', 'lick', 'sniff']);
+/** Farther apart than this across the stage, two are not beside each other. */
+const ONE_SPOT = 0.2;
 
 /**
  * Where a station is across the stage, as a share of its width: a spot's
@@ -191,7 +240,7 @@ export function stationShare(
 ): number {
   if (station in SPOT_SHARE) return SPOT_SHARE[station as Spot];
   if (station.startsWith('@')) return Number(station.slice(1)) || 0.5;
-  const behind = /^(?:behind|under):(.+)$/.exec(station);
+  const behind = /^(?:behind|under|up):(.+)$/.exec(station);
   const hiding = behind ? features.get(behind[1]) : undefined;
   if (hiding) return SPOT_SHARE[hiding.spot];
   const by = /^by:(.+):(-1|1)$/.exec(station);
@@ -208,6 +257,42 @@ export const besideStation = (feature: string, side: -1 | 1) =>
 export const behindStation = (feature: string) => `behind:${feature}`;
 /** A station under a feature (a bench, a table): where it stands, seen. */
 export const underStation = (feature: string) => `under:${feature}`;
+/** A station up a feature: up a tree, on a wall, where one who climbs it stands. */
+export const upStation = (feature: string) => `up:${feature}`;
+
+/** The words for a feature: its kind's or its name's, its name, and its id ("the palm" for the tall palm tree). */
+const featureWordsIn = (feature: StudioFeature) =>
+  `(?:${featureWordsOf(feature).source}|${escapedWord(feature.name)}|${escapedWord(feature.id.replace(/-/g, ' '))})`;
+
+/**
+ * Where some words send a thing up into a feature, or find it caught up
+ * there, first first: "a gust whips the kite into the palm", "my kite is
+ * stuck in the tree", "the ball lands on top of the wall". `things` by
+ * their ids and their words.
+ */
+export function caughtUpIn(
+  text: string,
+  things: readonly { id: string; words: RegExp }[],
+  features: readonly StudioFeature[],
+): { thing: string; feature: string; at: number }[] {
+  const out: { thing: string; feature: string; at: number }[] = [];
+  for (const thing of things) {
+    const named = new RegExp(thing.words.source, 'giu');
+    for (const m of text.matchAll(named)) {
+      const rest = text.slice(m.index + m[0].length);
+      const clause = rest.slice(0, Math.max(0, rest.search(/[.!?;]|$/u)));
+      for (const feature of features) {
+        const up = new RegExp(
+          `^(?:\\s+(?!and\\b|but\\b)[\\p{L}'’-]+){0,4}?\\s+(?:(?:stuck|caught|tangled|lodged|hangs?|hanging|hung|lands?|landed|perched)\\s+)?(?:up\\s+)?(?:into|in|onto|on top of|up)\\s+(?:the|a|an|that|this|its|his|her|their|my|your|our)\\s+(?:[\\p{L}-]+\\s+){0,2}?${featureWordsIn(feature)}\\b`,
+          'iu',
+        ).exec(clause);
+        if (up && !out.some((one) => one.thing === thing.id))
+          out.push({ thing: thing.id, feature: feature.id, at: m.index });
+      }
+    }
+  }
+  return out.sort((a, b) => a.at - b.at);
+}
 
 /** Words that find someone somewhere: by it, under it, behind it. */
 const PLACED_BY: Record<string, 'by' | 'under' | 'behind'> = {
@@ -244,7 +329,7 @@ export function placementsOf(
 }[] {
   const actors = bible.characters.map((c) => ({
     id: c.id,
-    names: [...new Set([c.name, c.name.split(/\s+/)[0]])],
+    names: namesOf(c),
     gender: genderOf(c.voice),
   }));
   const gender = new Map(actors.map((a) => [a.id, a.gender]));
@@ -559,8 +644,9 @@ function inSpotOrder(
 export function featureStatesOf(
   sheet: StorySheet,
   features: readonly StudioFeature[],
-): { open: Set<string>; changes: SceneFeatureState[] } {
+): { open: Set<string>; ajar: Set<string>; changes: SceneFeatureState[] } {
   const open = new Set<string>();
+  const ajar = new Set<string>();
   const changes: SceneFeatureState[] = [];
   const known = new Set<string>();
   const byWord = (word: string, kind: AnyFeatureKind) =>
@@ -587,6 +673,7 @@ export function featureStatesOf(
             ? 'shut'
             : 'open';
         if (was === 'open') open.add(feature.id);
+        if (one.still && one.ajar) ajar.add(feature.id);
       }
       if (one.still) continue;
       changes.push({
@@ -597,7 +684,7 @@ export function featureStatesOf(
       });
     }
   }
-  return { open, changes };
+  return { open, ajar, changes };
 }
 
 /**
@@ -615,12 +702,27 @@ export function stageStory(
       cast?: string[];
       held?: { who: string; thing: string }[];
     } | null;
+    /** Where the set's painting shows each feature it has, as a share of the stage across (paintedAt). */
+    painted?: Readonly<Record<string, number>>;
   } = {},
 ): SceneScript {
   const byId = new Map(bible.characters.map((c) => [c.id, c]));
   const place = bible.sets.find((s) => s.id === sheet.set) ?? null;
   const placeId = place ? placeThingId(place.id) : null;
-  const features = new Map((place?.features ?? []).map((f) => [f.id, f]));
+  // One the painting shows stands where it is painted, as the stage
+  // reckons who goes where and how far: a goalpost painted on the right
+  // is on the right, wherever the set's list says it stands.
+  const painted = options.painted ?? {};
+  const features = new Map(
+    (place?.features ?? []).map((f) => [
+      f.id,
+      painted[f.id] !== undefined
+        ? { ...f, spot: nearestSpot(painted[f.id]) }
+        : f,
+    ]),
+  );
+  /** Each feature as the set keeps it: where the list says it stands. */
+  const kept = new Map((place?.features ?? []).map((f) => [f.id, f]));
   /** A thing handled apart from anyone (one of the lists', or the show's own), and what it is. */
   const handled = handledOn(bible);
   const kindOf = kindOn(bible);
@@ -696,13 +798,24 @@ export function stageStory(
   }
   const inCast = new Set(cast.map((t) => t.id));
   /** The cast by the names the words call them. */
+  /** Whether someone is named in some words only as whose a thing is: "with Maya's ball". */
+  const whoseOnly = (id: string, text: string) => {
+    const names = called.find((a) => a.id === id)?.names ?? [];
+    return (
+      names.length > 0 &&
+      names.every(
+        (name) =>
+          !new RegExp(`\\b${escapedWord(name)}\\b(?!['’]s)`, 'u').test(text),
+      )
+    );
+  };
   const called: Actor[] = [...inCast].flatMap((id) => {
     const c = byId.get(id);
     return c
       ? [
           {
             id,
-            names: [...new Set([c.name, c.name.split(/\s+/)[0]])],
+            names: namesOf(c),
             gender: genderOf(c.voice),
           },
         ]
@@ -739,10 +852,14 @@ export function stageStory(
     spokenAt.set(at, beats.length);
     beats.push(beat);
   });
-  /** Each moment: after which spoken beat, how far into the quiet, and for how long, in seconds. */
+  /**
+   * Each moment: after which spoken beat, how far into the quiet, and for
+   * how long, in seconds; and how long until the next begins, or the quiet
+   * ends: the room it has.
+   */
   const moments = new Map<
     number,
-    { after: number; offset: number; s: number }
+    { after: number; offset: number; s: number; room: number }
   >();
   let lead = 0;
   for (const [after, run] of quietRuns(sheet)) {
@@ -752,6 +869,10 @@ export function stageStory(
         after,
         offset: timed.starts[k],
         s: timed.lengths[k],
+        room: Math.max(
+          timed.lengths[k],
+          (timed.starts[k + 1] ?? timed.total) - timed.starts[k],
+        ),
       }),
     );
     if (after >= 0) beats[after].holdS = timed.total;
@@ -782,7 +903,10 @@ export function stageStory(
   // there as it is said.
   const goesTo = new Map<number, string>();
   const findsThere = new Map<number, { who: string; station: string }[]>();
+  /** Whom each line or narration finds somewhere, by the beat: whoever says it points them out. */
+  const pointedOut = new Map<number, string[]>();
   for (const one of placementsOf(sheet, bible, [...features.values()])) {
+    pointedOut.set(one.beat, [...(pointedOut.get(one.beat) ?? []), one.who]);
     const feature = features.get(one.feature)!;
     const travels = sheet.beats
       .slice(0, one.beat)
@@ -827,6 +951,12 @@ export function stageStory(
   ]);
   /** Where each thing let go of came down, as a share of the stage across: where one goes after it. */
   const lies = new Map<string, number>();
+  /** Each thing caught up in a feature (a kite in the palm), by the feature: as the scene before left it, or as the words send it there. */
+  const upIn = new Map<string, string>(
+    sheet.props.flatMap((p): [string, string][] =>
+      p.in && features.has(p.in) ? [[p.prop, p.in]] : [],
+    ),
+  );
   /** Each thing thrown to someone, and when: a catch the sheet has next is that one. */
   const inFlight = new Map<string, string>();
   const share = (station: string) => stationShare(station, features);
@@ -886,13 +1016,17 @@ export function stageStory(
       (p.pose === 'lying' || p.pose === 'in bed')
     )
       steps[0].effects.push({ target: p.who, part: null, do: 'lie' });
-  /** The spot nearest a share of the stage across. */
-  const spotNear = (at: number) =>
-    SPOTS.reduce((best, spot) =>
-      Math.abs(SPOT_SHARE[spot] - at) < Math.abs(SPOT_SHARE[best] - at)
-        ? spot
-        : best,
-    );
+  // One found under something (a bench, a table) is low there: an animal
+  // lies, a person sits, so they fit under it.
+  const lowUnder = (who: string): SceneEffect => ({
+    target: who,
+    part: null,
+    do: bobs(who) ? 'lie' : 'sit',
+  });
+  for (const [who, station] of here)
+    if (station.startsWith('under:') && inCast.has(who))
+      steps[0].effects.push(lowUnder(who));
+  const spotNear = nearestSpot;
   /**
    * Where a doing is aimed: someone on the stage; a feature of the set, by
    * where it stands ("f:gate"); a side ("@left", "@up"): someone gone by
@@ -901,6 +1035,11 @@ export function stageStory(
   /** Whether a thing is on the stage to be handled: held, or set out or let go of. */
   const onStage = (thing: string) =>
     handled(thing) && (holders.has(thing) || lies.has(thing));
+  /** The words a thing on the stage is called by: the list's, or the show's own name for it. */
+  const thingWords = (thing: string): RegExp =>
+    isStageProp(thing)
+      ? THING_WORDS[thing]
+      : ownWords(own.things.find((t) => t.id === thing)?.name ?? thing);
   const aimOf = (raw: SheetBeat, who: string, doing: Doing): string | null => {
     const target =
       raw.target ??
@@ -939,24 +1078,54 @@ export function stageStory(
    */
   const travelTo = (
     who: string,
-    aim: string | null,
+    asked: string | null,
     raw: SheetBeat,
     far: boolean,
   ): string | null => {
-    if (raw.spot) return freeStation(who, raw.spot);
+    // Going to a thing set out before someone is going to them.
+    const after = raw.target ?? raw.thing ?? null;
+    const setOut =
+      after && handled(after) && holders.get(after) === null && !lies.has(after)
+        ? sheet.props.find((p) => p.prop === after)?.near
+        : null;
+    const aim =
+      setOut &&
+      setOut !== who &&
+      here.has(setOut) &&
+      !(asked && here.has(asked))
+        ? setOut
+        : asked;
+    // Going to someone on the stage, or to a thing lying there, is going
+    // to them or it, wherever the sheet thought they stood: the words may
+    // have found them somewhere since.
+    const lying =
+      after !== null && holders.get(after) === null && lies.has(after);
+    // To a thing caught up in a feature: up it already, there; else by it.
+    const upThere =
+      after && holders.get(after) === null ? upIn.get(after) : undefined;
+    if (raw.spot && !(aim && here.has(aim)) && !lying && !upThere)
+      return freeStation(who, raw.spot);
     const taken = new Set(
       [...here].filter(([id]) => id !== who).map(([, s]) => s),
     );
     const mine = share(here.get(who) ?? 'centre');
     const free = (station: string) => !taken.has(station);
     const feature =
-      raw.target && !onStage(raw.target) ? features.get(raw.target) : undefined;
+      raw.target && !onStage(raw.target)
+        ? features.get(raw.target)
+        : upThere
+          ? features.get(upThere)
+          : undefined;
     if (feature) {
       // Hiding: behind it, where it stands, drawn over them.
       if (raw.do === 'hide') {
         const behind = behindStation(feature.id);
         return free(behind) ? behind : null;
       }
+      // Climbing it, or up it already: up it.
+      const up = upStation(feature.id);
+      if (raw.do === 'climb' || here.get(who) === up)
+        return free(up) ? up : null;
       const side: -1 | 1 = mine < SPOT_SHARE[feature.spot] ? -1 : 1;
       for (const s of [side, -side as -1 | 1]) {
         const station = besideStation(feature.id, s);
@@ -977,12 +1146,29 @@ export function stageStory(
     const spotFree = (n: number) =>
       n >= 0 && n < SPOTS.length && free(SPOTS[n]);
     if (aim && here.has(aim)) {
+      // Someone under or behind a feature (a bench, a tree): beside it, on
+      // the side they come from, so they are right there.
+      const at = /^(?:behind|under):([^:]+)/.exec(here.get(aim)!);
+      const by = at ? features.get(at[1]) : undefined;
+      if (by) {
+        const side: -1 | 1 = mine < SPOT_SHARE[by.spot] ? -1 : 1;
+        for (const s of [side, -side as -1 | 1]) {
+          const station = besideStation(by.id, s);
+          if (free(station) && station !== here.get(who)) return station;
+        }
+      }
+      // Else the free spot nearest them on this side (theirs, where they
+      // stand by a feature, not at it); else, with someone between, just
+      // this side of them, on the ground: never on past them.
       const theirs = share(here.get(aim)!);
       const j = SPOTS.indexOf(spotNear(theirs));
-      const near = theirs > mine ? j - 1 : j + 1;
-      if (spotFree(near) && SPOTS[near] !== here.get(who)) return SPOTS[near];
-      const far2 = theirs > mine ? j + 1 : j - 1;
-      return spotFree(far2) ? SPOTS[far2] : null;
+      const back = theirs > mine ? -1 : 1;
+      const first = here.get(aim) === SPOTS[j] ? j + back : j;
+      for (let n = first; n >= 0 && n < SPOTS.length && n !== k; n += back)
+        if (spotFree(n)) return SPOTS[n];
+      const close = theirs + back * BESIDE * 1.2;
+      if (Math.abs(close - mine) > NEAR) return groundAt(close);
+      return raw.spot ? freeStation(who, raw.spot) : null;
     }
     const way = aim === '@left' ? -1 : aim === '@right' ? 1 : 0;
     if (!way) return null;
@@ -993,6 +1179,38 @@ export function stageStory(
       if (!far) break;
     }
     return found;
+  };
+  /**
+   * Where someone runs out to and back from when a run takes them nowhere
+   * new ("Kofi runs along the sand", "Pip darts away" to where he is): the
+   * free spot farthest from them on the side asked, else on the side with
+   * more room. Null when none is free.
+   */
+  const outAndBack = (
+    who: string,
+    aim: string | null,
+    reach: number,
+  ): Spot | null => {
+    const mine = share(here.get(who) ?? 'centre');
+    const taken = new Set(
+      [...here].filter(([id]) => id !== who).map(([, s]) => share(s)),
+    );
+    const free = SPOTS.filter(
+      (spot) =>
+        Math.abs(SPOT_SHARE[spot] - mine) >= NEAR * 1.5 &&
+        Math.abs(SPOT_SHARE[spot] - mine) <= Math.max(reach, NEAR * 1.8) &&
+        ![...taken].some((at) => Math.abs(at - SPOT_SHARE[spot]) < NEAR),
+    );
+    const way =
+      aim === '@left' ? -1 : aim === '@right' ? 1 : mine > 0.5 ? -1 : 1;
+    const along = (w: number) =>
+      free
+        .filter((spot) => (SPOT_SHARE[spot] - mine) * w > 0)
+        .sort(
+          (a, b) =>
+            Math.abs(SPOT_SHARE[b] - mine) - Math.abs(SPOT_SHARE[a] - mine),
+        )[0];
+    return along(way) ?? along(-way) ?? null;
   };
   /** A move played on someone: the one it names, or, on a drawing with no rig, the nearest it shows. */
   const moveEffect = (
@@ -1057,13 +1275,23 @@ export function stageStory(
         const told = raw.feeling ?? faceOfLine(beat.say);
         if (told && told !== lastFace.get(beat.speaker))
           effects.push(...faceEffect(beat.speaker, told));
+        // "There he is, by the goalpost!": pointed out as it is said.
+        for (const found of pointedOut.get(at) ?? [])
+          if (found !== beat.speaker && here.has(found))
+            effects.push(moveEffect(beat.speaker, 'point', found, 1.2));
       }
       // Found there as it is said: they go there as it begins.
+      // One by the feature already, on either side of it, stays.
+      const byIt = (station: string | undefined, one: string) =>
+        station?.replace(/:-?1$/, '') === one.replace(/:-?1$/, '');
       const found = (findsThere.get(at) ?? []).filter(
-        (one) => here.has(one.who) && here.get(one.who) !== one.station,
+        (one) => here.has(one.who) && !byIt(here.get(one.who), one.station),
       );
-      for (const one of found)
+      for (const one of found) {
         here.set(one.who, freeStation(one.who, one.station) ?? one.station);
+        if (here.get(one.who)!.startsWith('under:'))
+          effects.push(lowUnder(one.who));
+      }
       // A gate someone opens or shuts as the narration says: they go to
       // it as it begins, and their hand does it at its word; or, gone
       // there, as they get there, as it ends.
@@ -1112,6 +1340,53 @@ export function stageStory(
           stage: found.length ? stageNow() : null,
           effects,
         });
+      // Someone the narrator says runs or walks about with nowhere named
+      // ("Pip zigzags through the tall grass"): out and back as it is said.
+      const about: SceneStep[] = [];
+      if (beat.kind === 'narration')
+        for (const one of doingsIn(beat.say, { actors: called, ...own })) {
+          const by = one.who;
+          if (
+            !by ||
+            !here.has(by) ||
+            (one.do !== 'run' && one.do !== 'walk') ||
+            one.via ||
+            one.away ||
+            about.some((step) => step.stage?.going?.[by]) ||
+            (one.target && !whoseOnly(one.target, beat.say))
+          )
+            continue;
+          const back = here.get(by)!;
+          const out = outAndBack(by, null, 0.5);
+          if (!out) continue;
+          const word = beat.say
+            .slice(0, one.at)
+            .split(/\s+/)
+            .filter(Boolean).length;
+          const going = { [by]: { pace: 'run' as const } };
+          here.set(by, out);
+          about.push({
+            at: {
+              beat: k,
+              phrase: beat.say
+                .split(/\s+/)
+                .filter(Boolean)
+                .slice(word, word + 3)
+                .join(' '),
+            },
+            word,
+            stage: stageNow({ going }),
+            effects: [],
+          });
+          here.set(by, back);
+          about.push({
+            at: { beat: k, phrase: '' },
+            word: 0,
+            after: 0,
+            stage: stageNow({ going }),
+            effects: [],
+          });
+        }
       if (hands.length) {
         const words = beat.say.split(/\s+/).filter(Boolean);
         const said = featureStatesIn(beat.say)[0];
@@ -1125,6 +1400,29 @@ export function stageStory(
           stage: null,
           effects: hands,
         });
+      }
+      steps.push(...about);
+      // A thing the words send up into a feature ("a gust whips the kite
+      // into the palm"), or find caught there: out of the hand that holds
+      // it at those words, up into it, and caught there.
+      for (const one of caughtUpIn(
+        beat.say,
+        [...holders.keys()].map((id) => ({ id, words: thingWords(id) })),
+        [...features.values()],
+      )) {
+        const by = holders.get(one.thing);
+        if (upIn.get(one.thing) === one.feature || !by || !here.has(by))
+          continue;
+        (beat.business ??= []).push({
+          at: one.at,
+          who: by,
+          does: 'throw',
+          prop: one.thing,
+          to: upStation(one.feature),
+        });
+        holders.set(one.thing, null);
+        upIn.set(one.thing, one.feature);
+        lies.delete(one.thing);
       }
       // How it lands on the one it is said to, as it ends: unless the sheet
       // has them react next.
@@ -1147,6 +1445,8 @@ export function stageStory(
     if (!moment) return;
     const effects: SceneEffect[] = [];
     let stage: SceneStage | null = null;
+    /** What happens later in the same moment: coming back from a run out. */
+    const afterwards: SceneStep[] = [];
     const who = raw.who;
     if (
       (raw.kind === 'action' || raw.kind === 'business') &&
@@ -1158,9 +1458,10 @@ export function stageStory(
       const plays = doing.plays;
       const plain = options.plain?.has(at) ?? false;
       if ('step' in plays) {
-        // Going after someone who has gone is going off after them.
+        // Going after someone who has gone is going off after them; and
+        // going off after them, the way they went.
         const after =
-          doing.id === 'chase' &&
+          (doing.id === 'chase' || doing.id === 'leave') &&
           raw.target &&
           inCast.has(raw.target) &&
           !here.has(raw.target);
@@ -1249,9 +1550,33 @@ export function stageStory(
           const to = later
             ? freeStation(who, later)
             : travelTo(who, aim, raw, Boolean(doing.runs));
-          // Somewhere else: they go there, and stay. Nowhere to go, a step
-          // toward where they would, played as a move.
-          if (to && to !== was) {
+          // Somewhere else: they go there, and stay. Nowhere else to be, or
+          // where they are already: out and back, so their going is seen;
+          // and with nowhere free at all, a step toward it, played as a move.
+          const there = to ?? was ?? null;
+          // Half its room out, and half back, at a run.
+          const half = Math.min(OUT_MOST_S, moment.room) / 2;
+          const out =
+            run &&
+            there &&
+            !(aim && here.has(aim)) &&
+            (!to || Math.abs(share(to) - share(was ?? to)) < NEAR)
+              ? outAndBack(who, aim, half * RUN_SHARE_S)
+              : null;
+          if (out && there) {
+            here.set(who, out);
+            stage = stageNow({ going: { [who]: { pace: 'run' as const } } });
+            here.set(who, there);
+            afterwards.push({
+              at: { beat: moment.after, phrase: phraseOf(raw.say) },
+              word: 0,
+              after: round(moment.offset + half),
+              stage: stageNow(
+                run ? { going: { [who]: { pace: 'run' as const } } } : {},
+              ),
+              effects: [],
+            });
+          } else if (to && to !== was) {
             here.set(who, to);
             stage = stageNow(
               run ? { going: { [who]: { pace: 'run' as const } } } : {},
@@ -1281,7 +1606,34 @@ export function stageStory(
       } else if ('move' in plays || plain) {
         const move =
           plain || !('move' in plays) ? fallbackMove(doing, who) : plays.move;
-        effects.push(moveEffect(who, move, aim, moment.s));
+        // What touches someone (a hug, a lick) is done beside them: whoever
+        // does it comes up to them first, and does it once there, as the
+        // room allows.
+        const was = here.get(who);
+        const to =
+          TOUCHES.has(doing.id) &&
+          !plain &&
+          aim &&
+          here.has(aim) &&
+          was &&
+          Math.abs(share(was) - share(here.get(aim)!)) > ONE_SPOT
+            ? travelTo(who, aim, { ...raw, spot: null }, false)
+            : null;
+        if (to && was && to !== was) {
+          const walkS = Math.max(1.1, Math.abs(share(to) - share(was)) * 4);
+          here.set(who, to);
+          stage = stageNow();
+          afterwards.push({
+            at: { beat: moment.after, phrase: phraseOf(raw.say) },
+            word: 0,
+            after: round(
+              moment.offset +
+                Math.min(walkS, Math.max(0, moment.room - moment.s)),
+            ),
+            stage: null,
+            effects: [moveEffect(who, move, aim, moment.s)],
+          });
+        } else effects.push(moveEffect(who, move, aim, moment.s));
         // A feature opened or shut: it swings as their hand does it.
         const feature = aimedFeature(aim);
         if ((doing.id === 'open' || doing.id === 'close') && feature)
@@ -1325,6 +1677,7 @@ export function stageStory(
         stage,
         effects,
       });
+    steps.push(...afterwards);
   });
 
   /**
@@ -1343,8 +1696,26 @@ export function stageStory(
     moment: { after: number; offset: number; s: number },
   ): void {
     let does = asked;
+    // Caught up in a feature, it is in no one's hand to let go of.
+    if (
+      (does === 'drop' || does === 'put' || does === 'throw') &&
+      holders.get(prop) !== who &&
+      upIn.has(prop)
+    )
+      return;
     if (does === 'chew' && kindOf(prop) === 'food' && holders.get(prop) === who)
       does = 'eat';
+    // Dropped down to someone ("drops the kite down to Grandma"): let go
+    // for them to catch, as a throw to them is.
+    const down = raw.to ?? raw.target;
+    if (
+      does === 'drop' &&
+      down &&
+      down !== who &&
+      inCast.has(down) &&
+      here.has(down)
+    )
+      does = 'throw';
     if (does === 'catch') {
       // Thrown to them: the throw's own catch has it.
       if (inFlight.get(prop) === who) return;
@@ -1374,6 +1745,7 @@ export function stageStory(
       to = groundAt(clear(past) ? past : theirs - way * THROWN_PAST);
     }
     handle(prop, who, does, to, moment);
+    if (does === 'take' || does === 'catch') upIn.delete(prop);
     if (does === 'throw' && to && here.has(to)) {
       // How many spots apart they stand.
       const across = Math.round(
@@ -1479,7 +1851,7 @@ export function stageStory(
       ? [
           {
             id: thing.id,
-            names: [c.name, c.name.split(/\s+/)[0]],
+            names: namesOf(c),
             gender: genderOf(c.voice),
           },
         ]
@@ -1525,7 +1897,7 @@ export function stageStory(
     }
     return Math.max(0, beats.length - 1);
   };
-  const camera = sheet.camera
+  const camera = openedOut(sheet, called)
     .filter((shot) => shot.shot === 'wide' || (shot.on && inCast.has(shot.on)))
     .map((shot) => {
       const moment = moments.get(shot.beat);
@@ -1542,6 +1914,12 @@ export function stageStory(
   const propsNear = Object.fromEntries(
     sheet.props.flatMap((p) =>
       p.near && inCast.has(p.near) ? [[p.prop, p.near]] : [],
+    ),
+  );
+  // Caught up in a feature as it opens: the kite in the palm.
+  const propsIn = Object.fromEntries(
+    sheet.props.flatMap((p) =>
+      p.in && features.has(p.in) ? [[p.prop, p.in]] : [],
     ),
   );
   // In a hand, or an animal's mouth.
@@ -1582,6 +1960,7 @@ export function stageStory(
       : {}),
     ...(Object.keys(propsNear).length ? { propsNear } : {}),
     ...(Object.keys(propsHeld).length ? { propsHeld } : {}),
+    ...(Object.keys(propsIn).length ? { propsIn } : {}),
     ...(camera.some((shot) => shot.shot !== 'wide') ? { camera } : {}),
     // Everyone at a station of their own; the set's features among them,
     // each as the scene finds it, opened and shut when it says.
@@ -1592,9 +1971,10 @@ export function stageStory(
             id: f.id,
             name: f.name,
             kind: f.kind,
-            spot: f.spot,
+            spot: kept.get(f.id)?.spot ?? f.spot,
             opens: f.opens,
             ...(states.open.has(f.id) ? { open: true as const } : {}),
+            ...(states.ajar.has(f.id) ? { ajar: true as const } : {}),
             ...(inLook(f) ? { looked: true as const } : {}),
           })),
         }
@@ -1609,6 +1989,45 @@ export function stageStory(
       ...(place ? { place: place.kind } : {}),
     },
   };
+}
+
+/**
+ * The sheet's shots, and the whole stage again wherever what happens is
+ * not in the shot on: the narrator telling of anything but those in it
+ * ("A tiny bark sounds from the danfo"), or a face made by someone it
+ * leaves out. The next shot the sheet asks for comes in as it asks.
+ */
+export function openedOut(
+  sheet: Pick<StorySheet, 'beats' | 'camera'>,
+  actors: readonly Actor[],
+): SheetShot[] {
+  const asked = [...sheet.camera].sort((a, b) => a.beat - b.beat);
+  const out: SheetShot[] = [];
+  let on: SheetShot | null = null;
+  sheet.beats.forEach((beat, at) => {
+    for (const shot of asked.filter((s) => s.beat === at)) {
+      out.push(shot);
+      on = shot;
+    }
+    if (!on || on.shot === 'wide') return;
+    const framed = new Set([on.on, on.with].filter(Boolean));
+    const named = actors
+      .filter((a) =>
+        a.names.some((name) =>
+          new RegExp(`\\b${escapedWord(name)}\\b`, 'u').test(beat.say),
+        ),
+      )
+      .map((a) => a.id);
+    const away =
+      (beat.kind === 'narration' &&
+        beat.say.trim() !== '' &&
+        (!named.length || named.some((id) => !framed.has(id)))) ||
+      (beat.kind === 'reaction' && beat.who !== null && !framed.has(beat.who));
+    if (!away) return;
+    on = { beat: at, shot: 'wide', on: null, with: null };
+    out.push(on);
+  });
+  return out;
 }
 
 /** Whether a thing on a scene is eaten or drunk: for the writer's menu. */

@@ -71,6 +71,7 @@ import {
   StudioProcessor,
   studioMakeOf,
 } from '../src/pipeline/processors/studio.processor';
+import { paintedSets } from './studio-show';
 
 @Module({
   imports: [ConfigModule.forRoot({ isGlobal: true }), CoreModule],
@@ -414,7 +415,14 @@ async function main(): Promise<void> {
       process.env.SCENE_KEEP_PARTS = dir;
       const started = Date.now();
       const made = await scenes.make({
-        ...studioMakeOf(show, episode, row, rows, bible),
+        ...studioMakeOf(
+          show,
+          episode,
+          row,
+          rows,
+          bible,
+          await paintedSets(storage, show.id),
+        ),
         base: `studio-remake/${episode.id}/${row.id}-${Date.now().toString(36)}`,
         who: `studio ${episode.id} s${n} (remake)`,
         keepAs: 'scene',

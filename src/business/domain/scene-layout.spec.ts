@@ -270,6 +270,51 @@ describe("a Studio scene's stations", () => {
     expect(middle(step.mama)).toBeGreaterThan(bench.x + bench.w / 2);
   });
 
+  it('stands one under a feature on its ground, as big as they are there, and one up it where one who climbs it stands', () => {
+    const scale = stationScale([...people.values()], 3, 'wide');
+    // A bench at the back of a bus, and a palm on the right.
+    const bench = { x: 1300, w: 400, way: { y: 675, k: 0.8 } };
+    const palm = {
+      x: 1450,
+      w: 300,
+      way: { y: 770, k: 0.55, perch: 420, upX: 1460 },
+    };
+    const [step] = layoutStations({
+      steps: [
+        {
+          show: ['maya', 'pip', 'mama'],
+          at: { maya: 'up:palm', pip: 'under:bench', mama: 'centre-right' },
+        },
+      ],
+      things: people,
+      staging: 'wide',
+      scale,
+      features: new Map([
+        ['bench', bench],
+        ['palm', palm],
+      ]),
+    });
+    expect(step.pip.y + step.pip.h).toBe(675);
+    expect(middle(step.pip)).toBeCloseTo(1300, 0);
+    expect(step.maya.y + step.maya.h).toBe(420);
+    expect(middle(step.maya)).toBeLessThan(1460);
+    // No one stands before the one under the bench, where they would hide them.
+    expect(
+      Math.abs(middle(step.mama) - middle(step.pip)),
+    ).toBeGreaterThanOrEqual((step.mama.w + step.pip.w / 0.8) * 0.4 - 1);
+  });
+
+  it('draws a palm as a palm, tall, with where one who climbs it stands and where things catch in it', () => {
+    const palm = drawPiece('tree', 'tall palm tree');
+    const tree = drawPiece('tree');
+    expect(palm.svg).not.toBe(tree.svg);
+    expect(-palm.viewBox[1]).toBeGreaterThan(-figureFrame('adult')[1] * 2);
+    expect(palm.perch).toBeGreaterThan(0);
+    expect(palm.crown![1]).toBeLessThan(-palm.perch!);
+    // A gateway stands in its wall, which runs off beyond its frame.
+    expect(drawPiece('gate').svg).toMatch(/x="-264"/);
+  });
+
   it('draws a gate and a goalpost as they are beside the people: wider than high, a gate lower than a grown-up', () => {
     const [, , gw, gh] = drawPiece('gate').viewBox;
     expect(gw / gh).toBeGreaterThan(1.1);

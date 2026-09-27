@@ -2353,7 +2353,7 @@ export class SceneProcessor {
         return null;
       }
       const kept = own.things[thing.id];
-      if (kept && (kept.look ?? '') === (thing.look ?? '')) return kept;
+      if (kept && (!thing.look || kept.look === thing.look)) return kept;
       if (stop?.aborted || failedLately(own, mark)) return kept ?? null;
       const size = await this.ownSize(
         own,

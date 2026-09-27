@@ -493,6 +493,22 @@ export function studioId(name: string, fallback = 'someone'): string {
   return id || fallback;
 }
 
+/**
+ * The names the words may call a character by: their name, its first
+ * word, and their id as a word ("Grandma", for the grandmother whose id is
+ * grandma).
+ */
+export function namesOf(c: Pick<StudioCharacter, 'id' | 'name'>): string[] {
+  const id = c.id.replace(/-\d+$/, '').replace(/-/g, ' ');
+  return [
+    ...new Set([
+      c.name,
+      c.name.split(/\s+/)[0],
+      `${id.charAt(0).toUpperCase()}${id.slice(1)}`,
+    ]),
+  ];
+}
+
 /** An id not yet taken: `id`, else `id-2`, `id-3`… */
 function freeId(id: string, taken: Set<string>): string {
   let out = id;
@@ -779,6 +795,8 @@ export interface SheetPlace {
 export interface SheetProp {
   prop: string;
   near: string | null;
+  /** Caught up in a feature of the set, by its id, as the scene before left it: the kite in the palm. */
+  in?: string;
 }
 
 export const SHOTS = ['wide', 'close', 'two'] as const;
@@ -955,7 +973,10 @@ export function storySheetOf(raw: unknown): StorySheet {
       const p = one as Record<string, unknown>;
       const named = thingNamed(p.prop);
       const prop = named && !isGear(named) ? named : null;
-      return prop ? [{ prop, near: id(p.near) || null }] : [];
+      const up = id(p.in);
+      return prop
+        ? [{ prop, near: id(p.near) || null, ...(up ? { in: up } : {}) }]
+        : [];
     });
   const beats = (Array.isArray(said.beats) ? said.beats : [])
     .slice(0, MAX_BEATS)

@@ -53,7 +53,9 @@ import {
   settledEpisode,
   studioMakeOf,
 } from '../src/pipeline/processors/studio.processor';
-import { showStory } from './studio-show';
+import type { StoragePort } from '../src/business/ports/storage.port';
+import { STORAGE } from '../src/business/ports/tokens';
+import { onItsQuiets, paintedSets, showStory } from './studio-show';
 
 /** What the processor keeps when SCENE_KEEP_PARTS is set. */
 interface Parts {
@@ -199,8 +201,18 @@ async function stored(
     // Staged by the stage as it is now, where its words are as voiced, on
     // the show as its scenes find it: every feature their words name.
     const { bible } = await showStory(studio, show.id);
-    const made = studioMakeOf({ ...show, bible }, episode, row, rows, bible);
-    const alike = made.script ? voicedAlike(parts.script, made.script) : false;
+    const made = studioMakeOf(
+      { ...show, bible },
+      episode,
+      row,
+      rows,
+      bible,
+      await paintedSets(app.get<StoragePort>(STORAGE), show.id),
+    );
+    // Its words as voiced: staged as the stage is now, on the voice's own
+    // quiets, however long the stage would ask for them now.
+    const onVoice = made.script ? onItsQuiets(made.script, parts.script) : null;
+    const alike = onVoice ? voicedAlike(parts.script, onVoice) : false;
     if (!alike)
       console.warn(
         `scene ${row.position + 1}: its words are not as voiced now; staged as it was kept`,
@@ -212,7 +224,7 @@ async function stored(
     process.env.SCENE_KEEP_PARTS = out;
     const who = `studio ${episode.id} s${row.position + 1} (recompose)`;
     const again = await scenes.recompose({
-      script: alike ? made.script! : parts.script,
+      script: alike ? onVoice! : parts.script,
       kept: new Map(parts.drawings),
       beats: parts.beats,
       durationMs: parts.durationMs,

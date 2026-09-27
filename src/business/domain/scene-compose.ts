@@ -585,6 +585,9 @@ const SHOT_LEAST_MS = 1200;
 const SHOT_APART_MS = 5000;
 /** Two framed together this long at most: then the whole stage again. */
 const TWO_SHOT_MOST_MS = 9000;
+/** Things that fly on a string once raised. */
+const FLIES = /\b(?:kites?|balloons?)\b/iu;
+
 /** How long the camera stays on someone the book meets for the first time. */
 const FIRST_SHOT_MS = 2200;
 /** Faces the camera moves in on. */
@@ -1239,13 +1242,13 @@ export function composeScene(input: ComposeInput): {
       const going = step.stage.going ?? {};
       const exit: NonNullable<SceneStepDto['exit']> = {};
       const pace: NonNullable<SceneStepDto['pace']> = {};
-      // Who stands behind a feature, hidden by it.
+      // Who stands behind a feature, hidden by it, or under one: it is
+      // drawn over them.
       const behind: NonNullable<SceneStepDto['behind']> = Object.fromEntries(
-        Object.entries(step.stage.at ?? {}).flatMap(([id, station]) =>
-          station.startsWith('behind:')
-            ? [[id, station.slice('behind:'.length)]]
-            : [],
-        ),
+        Object.entries(step.stage.at ?? {}).flatMap(([id, station]) => {
+          const at = /^(?:behind|under):(.+)$/.exec(station);
+          return at ? [[id, at[1]]] : [];
+        }),
       );
       for (const [id, how] of Object.entries(going)) {
         if (how.pace === 'run') pace[id] = 'run';
@@ -1623,6 +1626,17 @@ export function composeScene(input: ComposeInput): {
       handled.set(one.prop, list);
     }
   });
+  /** The features something is caught up in: a kite in a palm. */
+  const upIn = new Set<string>([
+    ...Object.values(script.propsIn ?? {}).flatMap((id) => (id ? [id] : [])),
+    ...[...handled.values()]
+      .flat()
+      .flatMap((one) =>
+        typeof one[3] === 'string' && one[3].startsWith('up:')
+          ? [one[3].slice(3)]
+          : [],
+      ),
+  ]);
   /** The hands each one holds something in as it opens: a second thing is in the other. */
   const handsFull = new Map<string, Set<'r' | 'l'>>();
   /** The hand a thing is held in as it opens: a bag hangs from the left, the rest the right, a hand full the other. */
@@ -1652,6 +1666,14 @@ export function composeScene(input: ComposeInput): {
       bite: drawn.bite,
       ...(drawn.half ? { half: drawn.half } : {}),
       near: script.propsNear?.[prop] ?? does[0]?.[1] ?? null,
+      // Caught up in a feature from the start: the kite in the palm.
+      ...(script.propsIn?.[prop] ? { in: script.propsIn[prop] } : {}),
+      // A kite flies on its string once raised.
+      ...(FLIES.test(
+        script.ownThings?.find((one) => one.id === prop)?.name ?? prop,
+      )
+        ? { flies: true as const }
+        : {}),
       // In a hand from the start, or a mouth.
       ...(held
         ? {
@@ -1789,6 +1811,10 @@ export function composeScene(input: ComposeInput): {
       };
       const way = (staging: StagingName) =>
         featurePlaces[staging].get(feature.id)?.way ?? { x: 0, y: 0, k: 1 };
+      const up = (staging: StagingName) => {
+        const f = featurePlaces[staging].get(feature.id)?.up;
+        return f ? { x: f.x, y: f.y } : { x: 0, y: 0 };
+      };
       return {
         id: feature.id,
         name: feature.name,
@@ -1803,8 +1829,13 @@ export function composeScene(input: ComposeInput): {
           : {}),
         at: { box: at('box'), wide: at('wide') },
         way: { box: way('box'), wide: way('wide') },
+        // Up in it, where something caught there rests: only where something is.
+        ...(upIn.has(feature.id)
+          ? { up: { box: up('box'), wide: up('wide') } }
+          : {}),
         ...(piece && group ? { painted: group } : {}),
         ...(feature.open ? { open: true as const } : {}),
+        ...(feature.open && feature.ajar ? { ajar: true as const } : {}),
       };
     });
   /** When each feature opens or shuts: at its word, or its moment in a quiet. */
@@ -2125,7 +2156,7 @@ export function composeScene(input: ComposeInput): {
         ? null
         : feature.kind === DRAWN
           ? (script.drawn?.features?.[feature.id] ?? coveredPiece())
-          : drawPiece(feature.kind),
+          : drawPiece(feature.kind, feature.name),
       group: box ? found : null,
       box: box ?? null,
     };
@@ -2197,6 +2228,10 @@ export function composeScene(input: ComposeInput): {
               ...placed.way,
               x: Math.round((placed.way.x + shift) * 10) / 10,
             },
+            up: {
+              ...placed.up,
+              x: Math.round((placed.up.x + shift) * 10) / 10,
+            },
           };
         taken.push([placed.x, placed.x + placed.w]);
       }
@@ -2234,7 +2269,14 @@ export function composeScene(input: ComposeInput): {
         staging,
         scale,
         features: new Map(
-          [...placed].map(([id, f]) => [id, { x: f.x + f.w / 2, w: f.w }]),
+          [...placed].map(([id, f]) => [
+            id,
+            {
+              x: f.x + f.w / 2,
+              w: f.w,
+              way: { y: f.way.y, k: f.way.k, perch: f.up.perch, upX: f.up.x },
+            },
+          ]),
         ),
         // The ways through the stage stands on the people's ground: no
         // one at a spot stands in the gateway or the doorway.

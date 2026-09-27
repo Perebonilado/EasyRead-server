@@ -36,6 +36,10 @@ export interface SetPiece {
   front?: true;
   /** Someone going by it goes in and is gone, as at a door: one of a show's own that opens. */
   enters?: true;
+  /** How high one who climbs it stands: up a tree, on a wall, on the steps. */
+  perch?: number;
+  /** Where a thing caught up in it rests: a kite in a tree's crown. */
+  crown?: [number, number];
 }
 
 /**
@@ -121,8 +125,52 @@ const bars = (x0: number, x1: number, y0: number, y1: number, n: number) =>
     );
   }).join('');
 
-/** A set piece of a kind, drawn. */
-export function drawPiece(kind: FeatureKind): SetPiece {
+/** A palm's frond from its crown, out to one side and drooping: `dx` across, `dy` down at its tip. */
+const frond = (dx: number, dy: number, colour: string) =>
+  `<path d="M28,-424 Q${r1(28 + dx * 0.45)},${r1(-470 + dy * 0.2)} ${r1(28 + dx)},${r1(-424 + dy)} Q${r1(28 + dx * 0.5)},${r1(-438 + dy * 0.3)} 28,-412 Z" ${fill(colour)}/>`;
+
+/** A set piece of a kind, drawn; a tree as its name says (a palm). */
+export function drawPiece(kind: FeatureKind, name = ''): SetPiece {
+  if (kind === 'tree' && /\b(?:palms?|coconut|date palm)\b/iu.test(name))
+    // A tall palm, as on a beach: its trunk ringed and leaning a little,
+    // its fronds and coconuts at the top, about two and a half grown-ups
+    // tall.
+    return {
+      ...framed(
+        shadow(46) +
+          `<path d="M-18,0 Q-8,-230 20,-420 L38,-416 Q16,-228 16,0 Z" ${fill(WOOD)}/>` +
+          line(
+            [60, 120, 180, 240, 300, 360]
+              .map((y) => {
+                const x = -1 + (y / 420) * 28;
+                return `M${r1(x - 14)},${-y} L${r1(x + 13)},${-y - 5}`;
+              })
+              .join(' '),
+            WOOD_DARK,
+            2.4,
+          ) +
+          frond(-170, 70, LEAF_DARK) +
+          frond(180, 80, LEAF_DARK) +
+          frond(-120, 130, LEAF) +
+          frond(140, 140, LEAF) +
+          frond(-60, -50, LEAF) +
+          frond(90, -40, LEAF) +
+          [
+            [20, -404],
+            [38, -400],
+            [28, -390],
+          ]
+            .map(
+              ([x, y]) =>
+                `<circle cx="${x}" cy="${y}" r="10" ${fill(WOOD_DARK)}/>`,
+            )
+            .join(''),
+        [-150, -490, 368, 496],
+      ),
+      // A child up it reaches the kite caught in its crown.
+      perch: 270,
+      crown: [28, -430],
+    };
   switch (kind) {
     case 'gate': {
       // A compound's metal gate between two concrete posts, wider than it
@@ -138,9 +186,22 @@ export function drawPiece(kind: FeatureKind): SetPiece {
         bars(-66, 66, -118, -22, 7) +
         rect(56, -92, 14, 10, YELLOW) +
         `</g>`;
+      // The compound's wall runs off each side of it, beyond its frame, so
+      // it is a gateway in a wall, never a gate on its own; going through
+      // it is going out.
+      const wall = (x: number) =>
+        rect(x, -112, 170, 112, CONCRETE, 0) +
+        rect(x - 4, -120, 178, 10, '#c2b397') +
+        line(
+          `M${x},-74 L${x + 170},-74 M${x},-38 L${x + 170},-38 M${x + 60},-112 L${x + 60},-74 M${x + 120},-74 L${x + 120},-38 M${x + 40},-38 L${x + 40},0`,
+          '#a99a80',
+          2,
+        );
       return {
         ...framed(
-          shadow(90) +
+          wall(-264) +
+            wall(94) +
+            shadow(90) +
             leaf +
             rect(-94, -146, 18, 146, CONCRETE) +
             rect(76, -146, 18, 146, CONCRETE) +
@@ -262,6 +323,8 @@ export function drawPiece(kind: FeatureKind): SetPiece {
             `<circle cx="42" cy="-192" r="46" ${fill(LEAF)}/>`,
           [-112, -336, 224, 342],
         ),
+        perch: 150,
+        crown: [0, -250],
       };
     case 'goalpost': {
       // Two white posts and a bar, half again as wide as they are high as
@@ -297,6 +360,7 @@ export function drawPiece(kind: FeatureKind): SetPiece {
             ),
           [-130, -106, 260, 106],
         ),
+        perch: 106,
       };
     case 'fence': {
       const pickets = Array.from({ length: 9 }, (_, i) => {
@@ -385,6 +449,7 @@ export function drawPiece(kind: FeatureKind): SetPiece {
           [-64, -66, 128, 66],
         ),
         seat: 44,
+        perch: 66,
       };
     case 'swing':
       return {

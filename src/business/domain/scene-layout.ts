@@ -727,6 +727,8 @@ export function stationScale(
 export interface FeatureAcross {
   x: number;
   w: number;
+  /** Its own ground, and how big someone is there beside the people: where one under or behind it stands; and where one up it stands, across and their feet's y. */
+  way?: { y: number; k: number; perch?: number; upX?: number };
 }
 
 /**
@@ -771,8 +773,8 @@ export function layoutStations(input: {
     let x = W / 2;
     if (station in shares) x = shares[station] * W;
     else if (station.startsWith('@')) x = (Number(station.slice(1)) || 0.5) * W;
-    else if (/^(?:behind|under):/.test(station)) {
-      // Behind it or under it: where it stands.
+    else if (/^(?:behind|under|up):/.test(station)) {
+      // Behind it, under it or up it: where it stands.
       const feature = input.features.get(station.replace(/^\w+:/, ''));
       if (feature) x = feature.x;
     } else {
@@ -790,7 +792,7 @@ export function layoutStations(input: {
   const kept = new Map<string, { station: string; x: number }>();
   return input.steps.map((step) => {
     const out: Record<string, Place> = {};
-    const placed: { id: string; x: number; w: number }[] = [];
+    const placed: { id: string; x: number; w: number; low?: boolean }[] = [];
     // Those who stay put first, then whoever moves, around them.
     const order = [...step.show].sort(
       (a, b) =>
@@ -811,14 +813,17 @@ export function layoutStations(input: {
       else {
         x = across(station, size.w);
         // Going to a feature, or to a thing on the ground, they go there.
-        const byOrBehind = /^(?:by:|behind:|under:|@)/.test(station);
-        // Where someone stands already (behind a feature, no one is
-        // seen), or, at a spot of their own, in a gateway.
-        const hidden = station.startsWith('behind:');
+        const byOrBehind = /^(?:by:|behind:|under:|up:|@)/.test(station);
+        // Where someone stands already (behind a feature or under it, at
+        // its own depth, no one is in the way), or, at a spot of their
+        // own, in a gateway; or before one under a feature, who is seen.
+        const hidden = /^(?:behind|under|up):/.test(station);
         const crowded = (at: number) =>
           (!hidden &&
             placed.some(
-              (p) => Math.abs(p.x - at) < Math.min(p.w, size.w) * 0.55,
+              (p) =>
+                Math.abs(p.x - at) <
+                (p.low ? (p.w + size.w) * 0.4 : Math.min(p.w, size.w) * 0.55),
             )) ||
           (!byOrBehind &&
             (input.pieces ?? []).some(
@@ -845,12 +850,20 @@ export function layoutStations(input: {
         }
       }
       kept.set(id, { station, x });
-      placed.push({ id, x, w: size.w });
+      // Under or behind a feature: on its ground, as big as they are there;
+      // up it, where one who climbs it stands, beside where things catch.
+      const at = /^(?:behind|under|up):(.+)$/.exec(station);
+      const way = at ? input.features.get(at[1])?.way : undefined;
+      const up = station.startsWith('up:') && way?.perch !== undefined;
+      const k = way?.k ?? 1;
+      const low = Boolean(at) && station.startsWith('under:');
+      if (up && way?.upX !== undefined) x = way.upX - size.w * 0.3;
+      placed.push({ id, x, w: size.w * k, ...(low ? { low } : {}) });
       out[id] = {
-        x: round(x - size.w / 2),
-        y: round(floor - size.h),
-        w: round(size.w),
-        h: round(size.h),
+        x: round(x - (size.w * k) / 2),
+        y: round((up ? way.perch! : (way?.y ?? floor)) - size.h * k),
+        w: round(size.w * k),
+        h: round(size.h * k),
       };
     });
     for (const id of [...kept.keys()])
@@ -863,6 +876,8 @@ export function layoutStations(input: {
 export interface FeaturePlace extends Rect {
   /** Where someone goes in or out by it, or stands at it: the middle of its way, the ground there, and how big they are there beside the people (less than 1 farther back). */
   way: { x: number; y: number; k: number };
+  /** Up in it: where a thing caught up in it rests (a kite in a tree's crown), and how high one who climbs it stands, their feet's y. */
+  up: { x: number; y: number; perch: number };
 }
 
 /**
@@ -879,6 +894,8 @@ export function placeFeature(input: {
   piece?: {
     viewBox: [number, number, number, number];
     opening?: [number, number, number, number];
+    perch?: number;
+    crown?: [number, number];
   };
   /** Where the painter drew it, on this stage. */
   painted?: Rect | null;
@@ -919,16 +936,31 @@ export function placeFeature(input: {
         y: round(feet),
         k: Math.round(depth(feet) * 100) / 100,
       },
+      // Up in what is painted: high in its upper part.
+      up: {
+        x: round(box.x + box.w / 2),
+        y: round(box.y + box.h * 0.25),
+        perch: round(box.y + box.h * 0.45),
+      },
     };
   }
   const [vx, vy, vw, vh] = input.piece.viewBox;
   let u: number;
   let feet: number;
   let middle: number;
-  if (painted) {
+  // Painted far smaller than it stands among the people (a tall palm
+  // painted small on the horizon): stood at the back, where it was
+  // painted across, as big as it is there.
+  const painter = painted ? painted.h / Math.max(1, -vy) : 0;
+  const small = painted !== null && painter < input.unit * BACK_DEPTH * 0.8;
+  if (painted && !small) {
     // As large as the painter drew it, where it was drawn.
-    u = painted.h / Math.max(1, -vy) || input.unit;
+    u = painter || input.unit;
     feet = painted.y + painted.h;
+    middle = painted.x + painted.w / 2;
+  } else if (painted) {
+    u = input.unit * BACK_DEPTH;
+    feet = input.horizon + BACK_DEPTH * (input.floor - input.horizon);
     middle = painted.x + painted.w / 2;
   } else {
     const k = input.back ? BACK_DEPTH : 1;
@@ -945,6 +977,9 @@ export function placeFeature(input: {
   const opening = input.piece.opening;
   const wayX = opening ? (opening[0] + opening[2]) / 2 : 0;
   const wayY = opening ? Math.min(0, opening[3]) : 0;
+  // Up in it: its own crown and perch; else high in its upper part.
+  const crown = input.piece.crown ?? [vx + vw / 2, vy + vh * 0.25];
+  const perch = input.piece.perch ?? -vy * 0.55;
   return {
     x: round(middle + vx * u),
     y: round(feet + vy * u),
@@ -954,6 +989,11 @@ export function placeFeature(input: {
       x: round(middle + wayX * u),
       y: round(feet + wayY * u),
       k: Math.round(Math.min(1, u / input.unit) * 100) / 100,
+    },
+    up: {
+      x: round(middle + crown[0] * u),
+      y: round(feet + crown[1] * u),
+      perch: round(feet - perch * u),
     },
   };
 }

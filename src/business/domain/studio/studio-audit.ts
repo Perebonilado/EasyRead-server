@@ -26,7 +26,7 @@ import {
 } from '../scene-doings';
 import { DRAWN } from '../scene-own';
 import { genderOf } from '../scene-script';
-import type { StorySheet, StudioBible } from './studio';
+import { namesOf, type StorySheet, type StudioBible } from './studio';
 
 export interface BeatSeen {
   /** The beat, by its place in the sheet. */
@@ -96,7 +96,7 @@ export function auditScene(
 ): BeatSeen[] {
   const actors: Actor[] = (bible?.characters ?? []).map((c) => ({
     id: c.id,
-    names: [...new Set([c.name, c.name.split(/\s+/)[0]])],
+    names: namesOf(c),
     gender: genderOf(c.voice),
   }));
   const bobs = (id: string) => {

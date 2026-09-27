@@ -804,7 +804,7 @@ const doings: Record<DoingId, Omit<Doing, 'id'>> = {
     aims: ['thing'],
     aimed: false,
     words:
-      /\b(?:t(?:ake|akes|ook|aking)(?! (?:a (?:seat|breath|look|step|bow)|his|her|their|off|part|turns?|care|place))|pick(?:s|ed|ing)? up|pick(?:s|ed)? (?:it|them|\p{L}+) up|grab(?:s|bed|bing)?|lift(?:s|ed|ing)?(?! (?:it |them |the \p{L}+ )?up)|snatch(?:es|ed|ing)?|seiz(?:e|es|ed|ing)|scoop(?:s|ed|ing)? up)\b/iu,
+      /\b(?:t(?:ake|akes|ook|aking)(?! (?:a (?:seat|breath|look|step|bow)|his|her|their|off|part|turns?|care|place))|pick(?:s|ed|ing)? up|pick(?:s|ed)? (?:it|them|\p{L}+) up|grab(?:s|bed|bing)?|lift(?:s|ed|ing)?(?! (?:it |them |the \p{L}+ )?up)|snatch(?:es|ed|ing)?|seiz(?:e|es|ed|ing)|scoop(?:s|ed|ing)? up|(?:pull|tug)(?:s|ed|ing)? (?:the|a|an|his|her|their|its|my|your|our)\s+(?:\p{L}+\s+){0,2}?(?:free|loose|out|down)\b|fre(?:es|ed|eing)(?= (?:the|a|an|his|her|their|its|my|your|our) )|unhook(?:s|ed)?|untangl(?:e|es|ed))\b/iu,
     ms: 1100,
     leastMs: 650,
     keyAt: 0.5,
@@ -1277,6 +1277,8 @@ export function featureStatesIn(
   state: 'open' | 'shut';
   /** How it stands, not a change. */
   still: boolean;
+  /** Open only a little: "open a crack", "ajar". */
+  ajar?: true;
   /** Where in the text the words that say it are. */
   at: number;
 }[] {
@@ -1297,7 +1299,7 @@ export function featureStatesIn(
     ).exec(before);
     // "the gate is open", "the gate swings shut", "the door opens".
     const stands = new RegExp(
-      `^\\s+(?:${STANDS})\\s+(?:wide\\s+|half\\s+|still\\s+|now\\s+)?(${OPEN}|${SHUT})\\b`,
+      `^\\s+(?:${STANDS})\\s+(?:wide\\s+|half\\s+|still\\s+|now\\s+|slightly\\s+|just\\s+)?(${OPEN}|${SHUT})\\b`,
       'iu',
     ).exec(after);
     const goes = new RegExp(
@@ -1314,15 +1316,25 @@ export function featureStatesIn(
         still: false,
         at: base + goes.index + goes[0].length - w.length,
       });
-    } else if (stands)
+    } else if (stands) {
+      // Open only a little: "open a crack", "ajar", "slightly open".
+      const little =
+        /^ajar$/iu.test(stands[1]) ||
+        /\b(?:slightly|just|half)\s+\S+$/iu.test(stands[0]) ||
+        /^\s*(?:a\s+(?:crack|little|bit|touch)|slightly|just a little)\b/iu.test(
+          after.slice(stands.index + stands[0].length),
+        );
       found.push({
         kind: named.kind,
         word: named.word,
         state: stateOf(stands[1]),
         still: true,
         at: named.at,
+        ...(little && stateOf(stands[1]) === 'open'
+          ? { ajar: true as const }
+          : {}),
       });
-    else if (done)
+    } else if (done)
       found.push({
         kind: named.kind,
         word: named.word,

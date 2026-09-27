@@ -128,13 +128,14 @@ const TASK_DEFAULT: Partial<Record<LlmTask, string>> = {
   // seconds at most on the page tried). Thinking: SCENE_WRITE_THINKING.
   scene_write: 'deepseek:deepseek-flash',
   scene_draw: 'deepseek:deepseek-flash',
-  // A show's characters, own things and places, chosen by the drawing
-  // bench's bake-off (2026-09-27; twenty briefs, one blind draw each,
-  // judged by Gemini 3.8 Flash): median 6.67 at 1.2 cents and 11 s a
-  // drawing, thinking low (DRAW_THINKING_LEVEL), against DeepSeek Flash's
-  // 4.33, gpt-4.1's 3.9 and gpt-4.1-mini's 3.33. Needs Google's key.
-  cast_draw: 'google:gemini-3.8-flash',
-  set_paint: 'google:gemini-3.8-flash',
+  // A show's characters, own things and places on DeepSeek, Richard's
+  // choice (2026-09-27): Google for the voice only. The drawing bench's
+  // bake-off scored Gemini 3.8 Flash higher (median 6.67 against DeepSeek
+  // Flash's 4.33, one blind draw each, at 1.2 cents against 0.26): set
+  // AI_MODEL_CAST_DRAW and AI_MODEL_SET_PAINT to google:gemini-3.8-flash
+  // to draw on it. The see-and-fix loop and three takes apply either way.
+  cast_draw: 'deepseek:deepseek-flash',
+  set_paint: 'deepseek:deepseek-flash',
   // What a document is: one small call a document.
   scene_profile: 'openai:gpt-4.1-mini',
   // A chapter's teacher's notes: one careful read a chapter, before any
@@ -154,23 +155,18 @@ const TASK_DEFAULT: Partial<Record<LlmTask, string>> = {
   // verdict out, thinking off (STUDIO_CHECK_THINKING).
   studio_check: 'deepseek:deepseek-flash',
   // A drawing judged from its picture: DeepSeek cannot see. Gemini 3.8
-  // Flash named every flaw Richard found in Clover, Dot and Eggbert (a
-  // blanket drawn as a scarf, a beak beside the face, a face on the belly),
-  // where gpt-4.1-mini passed Eggbert: about 0.4 cents a look.
+  // Flash, Richard's choice (2026-09-27; never gpt-4.1): it named every
+  // flaw he found in Clover, Dot and Eggbert (a blanket drawn as a scarf, a
+  // beak beside the face, a face on the belly), at about 0.4 cents a look.
   drawing_judge: 'google:gemini-3.8-flash',
 };
 
 /**
- * Where a task goes when its own default's provider has no key in this
- * deployment: the drawings default to Gemini, and one without Google's key
- * draws on DeepSeek and judges on gpt-4.1 rather than failing to start.
- * A model set in the task's own variable is always used as it is.
+ * Tasks a deployment may go without. With no key for its provider the
+ * process still starts: a drawing is then checked by code alone, not
+ * judged from its picture.
  */
-const TASK_STANDBY: Partial<Record<LlmTask, string>> = {
-  cast_draw: 'deepseek:deepseek-flash',
-  set_paint: 'deepseek:deepseek-flash',
-  drawing_judge: 'openai:gpt-4.1',
-};
+const OPTIONAL_TASKS = new Set<LlmTask>(['drawing_judge']);
 
 const DEFAULT_MODEL = 'openai:gpt-4o-mini';
 const DEFAULT_EMBED_MODEL = 'openai:text-embedding-3-small';
@@ -250,18 +246,10 @@ export class ModelRegistry {
   }
 
   refFor(task: LlmTask): ModelRef {
-    const chosen = this.config.get<string>(TASK_VAR[task]);
-    if (chosen) return parseModelRef(chosen);
-    const own = TASK_DEFAULT[task];
-    if (own) {
-      const ref = parseModelRef(own);
-      const standby = TASK_STANDBY[task];
-      return standby && !this.keyOf(ref.provider)
-        ? parseModelRef(standby)
-        : ref;
-    }
+    const fallback =
+      task === 'embed' ? this.defaultEmbedSpec() : this.defaultSpec();
     return parseModelRef(
-      task === 'embed' ? this.defaultEmbedSpec() : this.defaultSpec(),
+      this.config.get<string>(TASK_VAR[task]) || TASK_DEFAULT[task] || fallback,
     );
   }
 
@@ -305,7 +293,14 @@ export class ModelRegistry {
   assertConfigured(): void {
     const required = new Set<ProviderName>();
     for (const task of Object.keys(TASK_VAR) as LlmTask[]) {
-      required.add(this.refFor(task).provider);
+      const { provider } = this.refFor(task);
+      if (OPTIONAL_TASKS.has(task) && !this.keyOf(provider)) {
+        this.logger.warn(
+          `${task}: no ${API_KEY_VAR[provider]}, so it is skipped: drawings are checked by code alone`,
+        );
+        continue;
+      }
+      required.add(provider);
     }
 
     const missing = [...required].filter((provider) => !this.keyOf(provider));

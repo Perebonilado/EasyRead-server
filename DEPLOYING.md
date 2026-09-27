@@ -119,17 +119,16 @@ drawer's default names DeepSeek whatever `AI_MODEL_DEFAULT` says, so
 boot check stops a process with a named provider and no key.
 
 A show's characters, its own things and its places (the Studio, and a
-book's story pages) are drawn by Gemini (`AI_MODEL_CAST_DRAW`,
-`AI_MODEL_SET_PAINT`, default `google:gemini-3.8-flash`, thinking low:
-`DRAW_THINKING_LEVEL`), each drawn in takes side by side, judged from its
-picture by a model that can see (`AI_MODEL_DRAWING_JUDGE`, the same
-Gemini) and revised; explainer drawings stay on DeepSeek. Set
-**`GOOGLE_GENERATIVE_AI_API_KEY` (or `GEMINI_API_KEY`) on both the API
-and the worker** for that. Without Google's key they do not fail to
-start: drawing falls back to DeepSeek and judging to `openai:gpt-4.1`
-(`TASK_STANDBY` in `models.ts`), unless one of the three variables names
-a provider, which is then used as it is. A drawing Gemini refuses (its
-credit spent, a rate limit) is drawn by DeepSeek instead. `npm run drawing:bench` draws the
+book's story pages) are drawn by DeepSeek (`AI_MODEL_CAST_DRAW`,
+`AI_MODEL_SET_PAINT`, default `deepseek:deepseek-flash`), each drawn in
+takes side by side, judged from its picture by Gemini
+(`AI_MODEL_DRAWING_JUDGE`, default `google:gemini-3.8-flash`) and revised;
+explainer drawings stay on DeepSeek. Google is otherwise only the voice's
+(Richard's choice, 2026-09-27; never gpt-4.1). Set
+**`GOOGLE_GENERATIVE_AI_API_KEY` (or `GEMINI_API_KEY`) on both the API and
+the worker**: without it they still start, but the voice cannot be Gemini
+and drawings are checked by code alone, not judged from their pictures.
+`npm run drawing:bench` draws the
 bench's forty-two briefs through the same path and scores them against
 the kept baseline (`src/business/domain/drawing-bench/baseline.json`).
 

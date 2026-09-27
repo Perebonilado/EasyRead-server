@@ -1,5 +1,10 @@
 import { bibleOf, storySheetOf, type StorySheet } from './studio';
-import { linesKept, mendSheet, sentBackFor } from './studio-check';
+import {
+  keptFeatures,
+  linesKept,
+  mendSheet,
+  sentBackFor,
+} from './studio-check';
 
 /**
  * The writer's slips put right without a word to the maker: an idiom read
@@ -160,6 +165,21 @@ describe('clothes named by their own id', () => {
     expect(mended.sheet.beats.map((b) => [b.do, b.thing])).toEqual([
       ['dress', 'party-dress'],
     ]);
+  });
+});
+
+describe("a set's thing the maker asks to be rid of", () => {
+  it('is gone from the set for good, and every other kept', () => {
+    const rewritten = {
+      ...bible,
+      sets: bible.sets.map((set) => ({ ...set, features: undefined })),
+    };
+    const kept = keptFeatures(rewritten, bible, ['sofa']);
+    const room = kept.sets.find((set) => set.id === 'sitting-room')!;
+    expect(room.features?.map((f) => f.id)).toEqual(['window', 'door']);
+    expect(
+      keptFeatures(rewritten, bible).sets[0].features?.map((f) => f.id),
+    ).toEqual(['sofa', 'window', 'door']);
   });
 });
 

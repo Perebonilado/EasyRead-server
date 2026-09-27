@@ -642,7 +642,11 @@ export class StudioService {
       // is never said to have changed anything.
       content:
         [tried, note].filter(Boolean).join(' ') ||
-        honestReply(draft.reply, draft.refuse ? 'none' : draft.action),
+        honestReply(
+          draft.reply,
+          draft.refuse ? 'none' : draft.action,
+          scenes.some((s) => s.sceneKey),
+        ),
       meta: {
         choices: note
           ? []

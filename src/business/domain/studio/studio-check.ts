@@ -2325,14 +2325,17 @@ export function foundIn(
 /**
  * A bible written again with every feature its sets had kept, and every
  * thing of its own: a feature, once a set's, is its for good, and a thing
- * once the show's, whatever the writer left out.
+ * once the show's, whatever the writer left out; but for a feature the
+ * maker asked to be rid of.
  */
 export function keptFeatures(
   bible: StudioBible,
   before: StudioBible | null,
+  /** The features the maker asked to be rid of, by id: gone from every set. */
+  gone: readonly string[] = [],
 ): StudioBible {
   if (!before) return bible;
-  return withThings(
+  const kept = withThings(
     before.sets.reduce(
       (out, was) =>
         was.features?.length ? withFeatures(out, was.id, was.features) : out,
@@ -2340,6 +2343,16 @@ export function keptFeatures(
     ),
     before.things ?? [],
   );
+  if (!gone.length) return kept;
+  return {
+    ...kept,
+    sets: kept.sets.map((set) => {
+      const features = (set.features ?? []).filter((f) => !gone.includes(f.id));
+      return features.length === (set.features ?? []).length
+        ? set
+        : { ...set, features };
+    }),
+  };
 }
 
 /** Who is on the stage as each beat plays, by id. */

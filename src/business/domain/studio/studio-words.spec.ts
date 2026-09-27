@@ -64,6 +64,25 @@ describe("the producer's reply to a change", () => {
     );
   });
 
+  it('never promises a check of the film made again or of a change to the cast', () => {
+    expect(
+      honestReply(
+        "Making the film again now — I'll take the teapot out, then check it.",
+        'make',
+        true,
+      ),
+    ).toBe("Making the film again now — I'll take the teapot out.");
+    expect(
+      honestReply(
+        "I'll take the teapot out of the kitchen, then make it again and check it.",
+        'cast',
+        true,
+      ),
+    ).toBe(
+      "I'll take the teapot out of the kitchen. The scenes made before show it once the film is made again.",
+    );
+  });
+
   it('never says something changed when nothing was set going', () => {
     expect(honestReply("All fixed! I've updated scene 1.", 'none')).toBe(
       "Nothing has changed yet. Tell me what you'd like changed.",

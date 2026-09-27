@@ -33,6 +33,8 @@ export const STAGED_FAULTS = [
   'held-too-big',
   // A feature twice: in the set, and in someone's drawing.
   'double-feature',
+  // What the maker asked to be rid of, still in the film.
+  'still-there',
 ] as const;
 export type StagedFaultId = (typeof STAGED_FAULTS)[number];
 
@@ -442,13 +444,29 @@ export function describeStaged(
   const signSaid = (effect: (typeof signChanges)[number]) =>
     `${nameOf(effect.target)} ${effect.do === 'show' ? 'shows' : 'no longer shows'} ${SIGNS_SEEN[effect.part!] ?? `"${effect.part}"`}`;
   const lines: string[] = [];
+  // How tall each of the set's things stands beside the people.
+  const tallest = Math.max(
+    0,
+    ...people.map((p) => Math.max(0, ...places.map((at) => at[p.id]?.h ?? 0))),
+  );
+  const sized = (f: (typeof features)[number]) => {
+    const h = f.at.wide.h;
+    const x = (f.at.wide.x + f.at.wide.w / 2) / W;
+    const where =
+      x < 0.2 ? 'on the left' : x > 0.8 ? 'on the right' : 'in the middle';
+    return tallest && h > tallest * 0.9
+      ? `, ${where}, as tall as the people or taller`
+      : tallest && h < tallest * 0.3
+        ? `, ${where}, small`
+        : `, ${where}`;
+  };
   lines.push(
     `Scene "${sheet.title}", ${set?.name ?? sheet.set}. The set's things: ${
       features.length
         ? features
             .map(
               (f) =>
-                `the ${f.name} (${f.svg ? 'drawn by the stage' : 'painted'})`,
+                `the ${f.name} (${f.svg ? 'drawn by the stage' : 'painted'}${sized(f)})`,
             )
             .join(', ')
         : 'none'
@@ -721,7 +739,60 @@ const CONCERNS: Record<StagedFaultId, RegExp> = {
     /\b(?:wear(?:s|ing)?|dress(?:ed|es)?|clothes|uniforms?|coats?|put(?:s|ting)? on|carr(?:y|ies|ying)|follow(?:s|ed|ing)?|holding)\b/iu,
   'held-too-big': /\b(?:big|bigger|huge|size|giant|tall(?:er)?)\b/iu,
   'double-feature': /\b(?:two beds?|beds?|twice|double)\b/iu,
+  // Found from the maker's own words: always what they asked about.
+  'still-there': /[\s\S]*/u,
 };
+
+/** Words that ask for something to be taken away. */
+const RID_OF =
+  /\b(?:get(?:s|ting)? rid of|rid of|remove[sd]?|removing|take (?:it |them )?(?:away|out)|takes? away|delete|lose|no more|without|gone|disappear)\b/iu;
+
+/**
+ * What of a scene's words asks to be taken away, among things by their
+ * ids and names: the teapot in "get rid of the giant teapot". Nothing,
+ * unless the words ask for something to go.
+ */
+export function askedGone(
+  words: string,
+  among: readonly { id: string; name: string }[],
+): string[] {
+  if (!RID_OF.test(words)) return [];
+  const said = words.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, ' ');
+  return among
+    .filter((one) =>
+      [one.name, one.id.replace(/-/g, ' ')].some(
+        (name) =>
+          name.trim() &&
+          new RegExp(
+            `\\b${name
+              .toLowerCase()
+              .replace(/[^\p{L}\p{N}]+/gu, ' ')
+              .trim()}s?\\b`,
+            'u',
+          ).test(said),
+      ),
+    )
+    .map((one) => one.id);
+}
+
+/**
+ * What the maker asked to be rid of that the film still has: a feature of
+ * its set (a thing of the story's own may go and come back as the words
+ * have it; the set's stand all through). Code sees it; no one's word
+ * outweighs it.
+ */
+export function stillThere(words: string, scene: SceneDto): StagedFault[] {
+  const features = (scene.setting?.features ?? []).map((f) => ({
+    id: f.id,
+    name: f.name,
+  }));
+  return askedGone(words, features).map((id) => ({
+    id: 'still-there' as const,
+    beat: null,
+    who: '',
+    why: `the ${features.find((one) => one.id === id)?.name ?? id} the maker asked to be rid of is still in the film`,
+  }));
+}
 
 /** Whether a fault code sees is what a maker's words ask about. */
 export function concerns(fault: StagedFault, words: string): boolean {

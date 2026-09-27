@@ -4,7 +4,13 @@ import type { SceneDto } from '../../../contracts';
 import { bibleOf, storySheetOf } from './studio';
 import { mendSheet, repairSheet, withFound } from './studio-check';
 import { stageStory } from './studio-stage';
-import { concerns, describeStaged, stagedFaults } from './studio-staged';
+import {
+  askedGone,
+  concerns,
+  describeStaged,
+  stagedFaults,
+  stillThere,
+} from './studio-staged';
 import { voiced } from './__fixtures__/voiced';
 
 /**
@@ -184,6 +190,22 @@ describe("Tobi's first scene as it is staged now", () => {
     const said = describeStaged(asleep.sheet, film, shown).lines.join('\n');
     expect(said).toMatch(/Tobi shows asleep: eyes shut, with Zs over the head/);
     expect(said).toMatch(/Tobi no longer shows asleep/);
+  });
+
+  it("sees what the maker asked to be rid of still in the film, and how big the set's things stand", () => {
+    const words = 'Please get rid of the chair, it is in the way.';
+    expect(stillThere(words, scene).map((f) => [f.id, f.why])).toEqual([
+      [
+        'still-there',
+        'the chair the maker asked to be rid of is still in the film',
+      ],
+    ]);
+    expect(stillThere('Make the chair red.', scene)).toEqual([]);
+    expect(askedGone(words, [{ id: 'teapot', name: 'teapot' }])).toEqual([]);
+    const said = describeStaged(mended.sheet, scene, show).lines[0];
+    expect(said).toMatch(
+      /the bed \(drawn by the stage, (?:on the left|in the middle|on the right)/,
+    );
   });
 
   it('says what the words have done with a thing that the film does not show', () => {

@@ -41,9 +41,11 @@ import {
   describeAudit,
 } from '../../business/domain/studio/studio-audit';
 import {
+  askedGone,
   concerns,
   describeStaged,
   stagedFaults,
+  stillThere,
 } from '../../business/domain/studio/studio-staged';
 import type { SceneDto } from '../../contracts';
 import {
@@ -569,10 +571,19 @@ export class StudioProcessor {
       ...(request && before ? { previous: before, request } : {}),
     });
     await this.record(episode.id, first.usage);
-    // A set's features, once named, are its for good.
+    // A set's features, once named, are its for good: but for one the
+    // maker asks to be rid of ("get rid of the teapot").
+    const gone =
+      request && before
+        ? askedGone(
+            request,
+            before.sets.flatMap((set) => set.features ?? []),
+          )
+        : [];
     let bible = keptFeatures(
       distinctVoices(traditional(bibleOf(first.value), before)),
       before,
+      gone,
     );
     const problems = checkBible(bible, story);
     if (problems.length) {
@@ -589,11 +600,31 @@ export class StudioProcessor {
       const second = keptFeatures(
         distinctVoices(traditional(bibleOf(again.value), before)),
         before,
+        gone,
       );
       if (checkBible(second, story).length <= problems.length) bible = second;
     }
     await this.studio.updateShow(show.id, { bible });
     if (before) await this.cast.forgetChanged(show.id, before, bible);
+    // A scene made where something is gone now shows it until it is made
+    // again: so said of it, for the film to be made again.
+    if (gone.length && before) {
+      const places = new Set(
+        before.sets
+          .filter((set) =>
+            (set.features ?? []).some((f) => gone.includes(f.id)),
+          )
+          .map((set) => set.id),
+      );
+      for (const one of await this.studio.listEpisodes(show.id))
+        for (const row of await this.studio.listScenes(one.id))
+          if (
+            row.sheet?.kind === 'story' &&
+            places.has(row.sheet.set) &&
+            row.madeHash
+          )
+            await this.studio.updateScene(row.id, { madeHash: null });
+    }
     if (request && release) {
       await this.log(
         show,
@@ -1498,7 +1529,12 @@ export class StudioProcessor {
     const sheet = repairSheet(row.sheet, bible, before);
     const staged = withFound(bible, sheet.set, mendSheet(sheet, bible, before));
     const after = describeStaged(sheet, scene, staged);
-    const faults = stagedFaults(sheet, scene, staged);
+    // What code sees wrong, and what the maker asked to be rid of that is
+    // still there.
+    const faults = [
+      ...stagedFaults(sheet, scene, staged),
+      ...stillThere(`${ask.words} ${ask.request}`, scene),
+    ];
     const line = (came: 'shown' | 'not yet' | 'unchecked', tell = '') => ({
       what: 'checked' as const,
       step: 'made' as const,

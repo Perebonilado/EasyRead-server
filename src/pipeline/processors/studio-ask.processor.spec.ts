@@ -591,6 +591,44 @@ describe('a scene changed as the maker asked, made again and checked', () => {
     ]);
   });
 
+  it("takes a set's thing away when the maker asks the place to be rid of it, and has its scenes made again", async () => {
+    const s = studio(shown());
+    let saved: Partial<StudioShowRecord> = {};
+    const inner = s.processor as unknown as {
+      studio: StudioRepository;
+      cast: object;
+      llm: object;
+    };
+    Object.assign(inner.studio, {
+      updateShow: (_: string, patch: Partial<StudioShowRecord>) => {
+        saved = patch;
+        return Promise.resolve();
+      },
+    });
+    inner.cast = { forgetChanged: () => Promise.resolve() };
+    Object.assign(inner.llm, {
+      // The writer's cast as it was, its places with no features named.
+      studioBible: () =>
+        Promise.resolve({
+          value: {
+            ...(tobi('bible.json') as Record<string, unknown>),
+            sets: bible.sets.map((set) => ({ ...set, features: [] })),
+          },
+          usage: { model: 'm', tokensIn: 1, tokensOut: 1, latencyMs: 1 },
+        }),
+    });
+    s.scenes.set('c1', { ...s.scenes.get('c1')!, status: 'made' });
+    await s.processor.process(
+      job({ kind: 'bible', request: 'Get rid of the chair in the bedroom.' }),
+      context,
+    );
+    const room = saved.bible!.sets.find((set) => set.id === 'bedroom')!;
+    expect(room.features?.map((f) => f.id)).not.toContain('chair');
+    expect(room.features?.map((f) => f.id)).toContain('bed');
+    // Made with the chair: to be made again.
+    expect(s.scenes.get('c1')?.madeHash).toBeNull();
+  });
+
   it("holds a fault code sees in what the maker asked about over the check's word", async () => {
     const s = studio(shown('all good'));
     // The film as made before: the bed still in Tobi's drawing.

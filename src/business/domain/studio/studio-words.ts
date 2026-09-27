@@ -231,20 +231,44 @@ const CLAIMS_CHANGED = new RegExp(
   'giu',
 );
 
+/** A promise to check what is made: only a scene changed as asked is checked, never the film made again or a change to the cast. */
+const PROMISES_CHECK =
+  /,?\s*(?:and|then)\s+(?:I['’]ll\s+|I will\s+|we['’]ll\s+)?(?:check|re-?check|look over)\s+(?:it|them|that|the (?:film|scene|scenes))(?:\s+again)?/giu;
+
+/** A promise to make something again, which a change to the cast never does by itself. */
+const PROMISES_MAKE =
+  /,?\s*(?:and|then)\s+(?:I['’]ll\s+|I will\s+|we['’]ll\s+)?(?:re-?make|make)\s+(?:it|them|the (?:film|scene|scenes))\s+again/giu;
+
 /**
  * The producer's reply as the maker gets it, when it sets nothing going
- * or sets work going that is not a scene's (an outline, the film): a
- * sentence that says it changed something itself is left out, and with
- * nothing left, it says plainly that nothing has changed. A change to a
- * scene is said in code's own words instead (sceneReply).
+ * or sets work going that is not a scene's (an outline, the cast, the
+ * film): with nothing set going, a sentence that says it changed
+ * something itself is left out, and with nothing left, it says plainly
+ * that nothing has changed; work set going is never promised a check,
+ * which only a scene changed as asked gets; and a change to the cast or
+ * the places, with scenes made, says those show it once made again. A
+ * change to a scene is said in code's own words instead (sceneReply).
  */
-export function honestReply(reply: string, action: string): string {
-  if (action !== 'none') return reply;
-  const out = reply
-    .replace(CLAIMS_CHANGED, '')
-    .replace(/\s{2,}/gu, ' ')
-    .trim();
-  return out || "Nothing has changed yet. Tell me what you'd like changed.";
+export function honestReply(
+  reply: string,
+  action: string,
+  /** Whether any scene of the episode was made. */
+  made = false,
+): string {
+  if (action === 'none') {
+    const out = reply
+      .replace(CLAIMS_CHANGED, '')
+      .replace(/\s{2,}/gu, ' ')
+      .trim();
+    return out || "Nothing has changed yet. Tell me what you'd like changed.";
+  }
+  let out = reply.replace(PROMISES_CHECK, '');
+  // A change to the cast or the places makes nothing again by itself.
+  if (action === 'cast') out = out.replace(PROMISES_MAKE, '');
+  out = out.replace(/\s{2,}/gu, ' ').trim();
+  return action === 'cast' && made && !/\bmade again\b/iu.test(out)
+    ? `${out} The scenes made before show it once the film is made again.`
+    : out;
 }
 
 /** The longest request said back in a reply, in characters. */

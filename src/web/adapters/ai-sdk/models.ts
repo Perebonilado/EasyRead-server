@@ -160,6 +160,18 @@ const TASK_DEFAULT: Partial<Record<LlmTask, string>> = {
   drawing_judge: 'google:gemini-3.8-flash',
 };
 
+/**
+ * Where a task goes when its own default's provider has no key in this
+ * deployment: the drawings default to Gemini, and one without Google's key
+ * draws on DeepSeek and judges on gpt-4.1 rather than failing to start.
+ * A model set in the task's own variable is always used as it is.
+ */
+const TASK_STANDBY: Partial<Record<LlmTask, string>> = {
+  cast_draw: 'deepseek:deepseek-flash',
+  set_paint: 'deepseek:deepseek-flash',
+  drawing_judge: 'openai:gpt-4.1',
+};
+
 const DEFAULT_MODEL = 'openai:gpt-4o-mini';
 const DEFAULT_EMBED_MODEL = 'openai:text-embedding-3-small';
 
@@ -238,10 +250,18 @@ export class ModelRegistry {
   }
 
   refFor(task: LlmTask): ModelRef {
-    const fallback =
-      task === 'embed' ? this.defaultEmbedSpec() : this.defaultSpec();
+    const chosen = this.config.get<string>(TASK_VAR[task]);
+    if (chosen) return parseModelRef(chosen);
+    const own = TASK_DEFAULT[task];
+    if (own) {
+      const ref = parseModelRef(own);
+      const standby = TASK_STANDBY[task];
+      return standby && !this.keyOf(ref.provider)
+        ? parseModelRef(standby)
+        : ref;
+    }
     return parseModelRef(
-      this.config.get<string>(TASK_VAR[task]) || TASK_DEFAULT[task] || fallback,
+      task === 'embed' ? this.defaultEmbedSpec() : this.defaultSpec(),
     );
   }
 

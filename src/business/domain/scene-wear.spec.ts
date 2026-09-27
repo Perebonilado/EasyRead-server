@@ -1,6 +1,7 @@
 import { PLAIN_FIGURE, type FigureSpec } from './scene-figure';
 import { noTallerThan, CARRIED_CLOTHES } from './scene-props';
 import {
+  colourBefore,
   colourIn,
   isWearable,
   outfitWords,
@@ -40,7 +41,9 @@ describe('what people wear', () => {
     // Wrapped round someone, a blanket is worn as a cloak.
     expect(wearableOf('blanket')).toEqual({ slot: 'extras', kit: 'cloak' });
     expect(wearableOf('school clothes')).toEqual({ slot: 'outfit', kit: null });
-    expect(wearableOf('shoes')).toEqual({ slot: 'none', kit: null });
+    expect(wearableOf('shoes')).toEqual({ slot: 'feet', kit: null });
+    expect(wearableOf('school shoes')).toEqual({ slot: 'feet', kit: null });
+    expect(wearableOf('gloves')).toEqual({ slot: 'none', kit: null });
     expect(wearableOf('cup')).toBeNull();
     expect(wearableOf('bag')).toBeNull();
     expect(isWearable('uniform')).toBe(true);
@@ -54,7 +57,7 @@ describe('what people wear', () => {
       topColour: 'red',
       bottom: 'trousers',
       bottomColour: 'red',
-      extras: [],
+      extras: ['bare feet'],
     });
     // Putting on his own uniform: dressed as he always is, backpack and all.
     expect(putOn(pyjamas, tobi, wearableOf('uniform')!)).toEqual(tobi);
@@ -69,8 +72,12 @@ describe('what people wear', () => {
       headwear: 'sun hat',
       accentColour: 'green',
     });
-    // Shoes change nothing the kit draws.
+    // Shoes on bare feet: shod, as he usually is; on shod feet, nothing.
+    expect(
+      putOn({ ...tobi, extras: ['bare feet'] }, tobi, wearableOf('shoes')!),
+    ).toEqual({ ...tobi, extras: [] });
     expect(putOn(tobi, tobi, wearableOf('shoes')!)).toEqual(tobi);
+    expect(takeOff(tobi, wearableOf('shoes')!).extras).toContain('bare feet');
   });
 
   it('takes off only what they have on', () => {
@@ -85,11 +92,26 @@ describe('what people wear', () => {
     expect(takeOff(tobi, wearableOf('hat')!)).toEqual(tobi);
   });
 
+  it('reads the colour said just before the word for a thing worn', () => {
+    expect(colourBefore('Mama puts on her red coat.', 'coat')).toBe('red');
+    expect(
+      colourBefore(
+        'Tobi takes off his red pyjamas and puts on his uniform.',
+        'uniform',
+      ),
+    ).toBeNull();
+    expect(colourBefore('Ada pulls on her pink jumper', 'school-jumper')).toBe(
+      'pink',
+    );
+  });
+
   it('says what someone wears, and whether two are dressed alike', () => {
     expect(outfitWords(tobi)).toBe(
-      'a blue uniform and grey trousers, with backpack',
+      'a blue uniform and grey trousers, with a backpack',
     );
-    expect(outfitWords(undressedFor(tobi, true))).toBe('red pyjamas');
+    expect(outfitWords(undressedFor(tobi, true))).toBe(
+      'red pyjamas, with bare feet',
+    );
     expect(sameOutfit(tobi, { ...tobi, extras: ['backpack'] })).toBe(true);
     expect(sameOutfit(tobi, undressedFor(tobi, false))).toBe(false);
     expect(colourIn('his bright red coat')).toBe('red');

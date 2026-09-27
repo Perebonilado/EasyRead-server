@@ -63,7 +63,7 @@ import { isGear, type FigureFace, type FigureSpec } from '../scene-figure';
 import { sameOutfit } from '../scene-wear';
 import {
   RISE_S,
-  STEP_OFF_S,
+  STEP_DOWN_S,
   outfitsOf,
   postureSeconds,
   posturesOf,
@@ -1812,12 +1812,14 @@ export function stageStory(
         } else
           effects.push(moveEffect(who, move, aim, upFrom ? ownS : moment.s));
         if (move === 'stand' || upFrom) down.delete(who);
+        // Out of bed, or up off a seat: stepping down out beside it just as
+        // they start to get up, never standing up on it first.
         if (upFrom?.on && here.has(who)) {
           here.set(who, besideOf(upFrom.on, who));
           afterwards.push({
             at: { beat: moment.after, phrase: phraseOf(raw.say) },
             word: 0,
-            after: round(moment.offset + ownS * 0.75),
+            after: round(moment.offset + stepDownLead(ownS)),
             stage: stageNow(),
             effects: [],
           });
@@ -1965,9 +1967,11 @@ export function stageStory(
 
   /**
    * Someone down as a beat of theirs comes that needs them up (going
-   * anywhere, a jump, a hug): up first, as long as getting up takes, and
-   * out beside what they were on or in unless they are going anyway. The
-   * beat's own moment, after that: what is left of its time in the quiet.
+   * anywhere, a jump, a hug): up first, as long as getting up takes. Off a
+   * seat or out of a bed, they step down out beside it as they get up, so
+   * they are never seen standing up on it or walking along it, and go on
+   * from there. The beat's own moment, after that: what is left of its
+   * time in the quiet.
    */
   function standFirst(
     raw: SheetBeat,
@@ -1991,24 +1995,39 @@ export function stageStory(
         { target: who, part: null, do: 'stand', ms: Math.round(riseS * 1000) },
       ],
     });
-    let used = riseS;
-    if (now.on && doingOf(raw.do)?.kind !== 'travel') {
-      here.set(who, besideOf(now.on, who));
-      steps.push({
-        at: { beat: timed.after, phrase: phraseOf(raw.say) },
-        word: 0,
-        after: round(timed.offset + riseS * 0.75),
-        stage: stageNow(),
-        effects: [],
-      });
-      used += round(STEP_OFF_S * 0.5 * k);
+    if (!now.on) return after(riseS);
+    // Stepping down beside it just as they start to rise: their feet come
+    // down to the ground as they come up, and they go on from there once
+    // the step is done.
+    here.set(who, besideOf(now.on, who));
+    const lead = stepDownLead(riseS);
+    steps.push({
+      at: { beat: timed.after, phrase: phraseOf(raw.say) },
+      word: 0,
+      after: round(timed.offset + lead),
+      stage: stageNow(),
+      effects: [],
+    });
+    return after(
+      Math.min(
+        Math.max(0.3, timed.s - 0.3),
+        Math.max(riseS, round(lead + STEP_DOWN_S)),
+      ),
+    );
+    /** The beat's own moment, after what getting up used of it. */
+    function after(used: number) {
+      return {
+        ...timed,
+        offset: round(timed.offset + used),
+        s: Math.max(0.3, round(timed.s - used)),
+        room: Math.max(0.3, round(timed.room - used)),
+      };
     }
-    return {
-      ...timed,
-      offset: round(timed.offset + used),
-      s: Math.max(0.3, round(timed.s - used)),
-      room: Math.max(0.3, round(timed.room - used)),
-    };
+  }
+
+  /** How far into getting up someone steps down off what they were on: just after they start, so they are never stood up on it. */
+  function stepDownLead(riseS: number): number {
+    return round(Math.min(0.3, riseS * 0.25));
   }
 
   /** What someone's clothes do at a beat that changes them: the outfit it leaves them in shown, the one before hidden. */

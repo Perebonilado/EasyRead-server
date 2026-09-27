@@ -18,6 +18,7 @@ import {
   type FigureSpec,
 } from './scene-figure';
 import { groundOf, type SetGround } from './scene-ground';
+import { outfitWords } from './scene-wear';
 import {
   IDENTITY,
   apply,
@@ -122,6 +123,9 @@ export async function figureDrawing(
       topColour: spec.topColour,
       headwear: spec.headwear,
     },
+    outfits: [spec, ...(how.dress ?? []).map((one) => one.spec)].map(
+      outfitWords,
+    ),
   };
 }
 

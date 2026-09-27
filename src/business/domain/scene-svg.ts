@@ -804,6 +804,8 @@ export interface GatedDrawing {
   ground?: SetGround;
   /** One person drawn by the kit: what they wear that says who they are, so no one in a crowd wears the same. */
   wears?: Pick<FigureSpec, 'top' | 'topColour' | 'headwear'>;
+  /** And what they wear, in words: as drawn, then in each outfit they change into ("red pyjamas", "a blue uniform and grey trousers"). */
+  outfits?: string[];
 }
 
 export interface GateResult {

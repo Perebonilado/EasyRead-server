@@ -146,6 +146,8 @@ export const FIGURE_EXTRAS = [
   'sandals',
   // An angel's.
   'wings',
+  // No shoes on: in bed, before they are put on.
+  'bare feet',
 ] as const;
 export type FigureExtra = (typeof FIGURE_EXTRAS)[number];
 
@@ -2285,15 +2287,17 @@ function layersOf(
         `<rect x="${x - 1}" y="${legTop}" width="18" height="${r1(cut - legTop)}" ${inked(trousers)}/>`,
       );
     }
-    // Sandals: the foot, and straps over it. The foot stays flat on the
-    // ground however the leg above it turns.
+    // Sandals: the foot, and straps over it; bare feet, the foot alone.
+    // The foot stays flat on the ground however the leg above it turns.
     const foot = spec.extras.includes('sandals')
       ? [
           `<ellipse cx="${s * 17}" cy="-6" rx="15" ry="7" ${inked(skin)}/>`,
           line(`M${s * 17 - 11},-5 L${s * 17 + 11},-5`, '#6b4a2f', 3),
           line(`M${s * 17 - 4},-11 L${s * 17 - 4},-1`, '#6b4a2f', 3),
         ]
-      : [`<ellipse cx="${s * 17}" cy="-6" rx="15" ry="7" ${inked(SHOE)}/>`];
+      : spec.extras.includes('bare feet')
+        ? [`<ellipse cx="${s * 16}" cy="-5" rx="13" ry="6" ${inked(skin)}/>`]
+        : [`<ellipse cx="${s * 17}" cy="-6" rx="15" ry="7" ${inked(SHOE)}/>`];
     const shin = [
       piece(kneeY, -FEET),
       `<g class="foot" style="transform-origin:${s * 15}px ${-FEET}px">${foot.join('')}</g>`,

@@ -606,6 +606,10 @@ export interface ReadDoing {
 /** Words before a verb that make it a word for a thing, not something done: "a dropped piece", "the open door". */
 const DETERMINER =
   /\b(?:a|an|the|his|her|their|its|my|your|our|this|that|some)\s+$/iu;
+/** Taking one of a doing is doing it: "takes a sip", "takes a quick look"; never "takes a dropped piece". */
+const TAKES_ONE = /\bt(?:ake|akes|ook|aking)\s+an?\s+(?:\p{L}+\s+){0,2}$/iu;
+const TAKEN =
+  /^(?:sip|swig|gulp|slurp|bite|nibble|look|glance|peek|bow|step|leap|spin|twirl|nap)$/iu;
 /** Words after a travel verb that make a feature the way out or in, not where they go. */
 const BY_WAY =
   /\b(?:out(?: of| through| under)?|through|under|beneath|between|past|via|in through|into|onto|aboard|over)\s+(?:the |a |an )?$/iu;
@@ -682,7 +686,9 @@ export function doingsIn(
     .filter(
       (one) =>
         !NOT_DONE.test(text.slice(Math.max(0, one.at - 24), one.at)) &&
-        !DETERMINER.test(text.slice(Math.max(0, one.at - 8), one.at)),
+        (!DETERMINER.test(text.slice(Math.max(0, one.at - 8), one.at)) ||
+          (TAKEN.test(text.slice(one.at, one.end)) &&
+            TAKES_ONE.test(text.slice(Math.max(0, one.at - 32), one.at)))),
     );
   const genderOf = new Map(known.actors.map((a) => [a.id, a.gender ?? null]));
   const recent = [...(known.recent ?? [])];

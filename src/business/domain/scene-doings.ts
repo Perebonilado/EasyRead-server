@@ -852,7 +852,7 @@ const doings: Record<DoingId, Omit<Doing, 'id'>> = {
     aims: ['thing'],
     aimed: false,
     words:
-      /\b(?:t(?:ake|akes|ook|aking)(?! (?:a (?:seat|breath|look|step|bow)|his|her|their|off|part|turns?|care|place))|pick(?:s|ed|ing)? up|pick(?:s|ed)? (?:it|them|\p{L}+) up|grab(?:s|bed|bing)?|lift(?:s|ed|ing)?(?! (?:it |them |the \p{L}+ )?up)|snatch(?:es|ed|ing)?|seiz(?:e|es|ed|ing)|scoop(?:s|ed|ing)? up|(?:pull|tug)(?:s|ed|ing)? (?:the|a|an|his|her|their|its|my|your|our)\s+(?:\p{L}+\s+){0,2}?(?:free|loose|out|down)\b|fre(?:es|ed|eing)(?= (?:the|a|an|his|her|their|its|my|your|our) )|unhook(?:s|ed)?|untangl(?:e|es|ed))\b/iu,
+      /\b(?:t(?:ake|akes|ook|aking)(?! (?:an? (?:\p{L}+ ){0,2}?(?:seat|breath|breather|look|glance|peek|step|bow|sip|swig|gulp|slurp|bite|mouthful|nap|rest|break|moment|turn|walk|stroll|stand|stab|guess|chance|shower|bath)s?\b|his|her|their|off|part|turns?|care|place))|pick(?:s|ed|ing)? up|pick(?:s|ed)? (?:it|them|\p{L}+) up|grab(?:s|bed|bing)?|lift(?:s|ed|ing)?(?! (?:it |them |the \p{L}+ )?up)|snatch(?:es|ed|ing)?|seiz(?:e|es|ed|ing)|scoop(?:s|ed|ing)? up|(?:pull|tug)(?:s|ed|ing)? (?:the|a|an|his|her|their|its|my|your|our)\s+(?:\p{L}+\s+){0,2}?(?:free|loose|out|down)\b|fre(?:es|ed|eing)(?= (?:the|a|an|his|her|their|its|my|your|our) )|unhook(?:s|ed)?|untangl(?:e|es|ed))\b/iu,
     ms: 1100,
     leastMs: 650,
     keyAt: 0.5,

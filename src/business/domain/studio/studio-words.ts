@@ -218,38 +218,127 @@ export function describeScene(
 }
 
 /**
- * A sentence of the producer's that says a change is done, or happening
- * now: "I'm changing that now.", "Fixed!", "Trimming scene 2 now."
+ * A sentence of the producer's that says it changed something itself,
+ * when it set nothing going: "I've updated scene 1.", "All fixed!". The
+ * producer changes nothing by itself; a line from the Studio says what
+ * came of a change.
  */
-const CLAIMS_DONE = new RegExp(
+const CLAIMS_CHANGED = new RegExp(
   [
-    "[^.!?]*\\b(?:i['’]m|i am|we['’]re|we are|i['’]ve|i have|we['’]ve|we have|it['’]s|that['’]s|this is|it is|all|scene \\d+ is|they['’]re)\\s+(?:now\\s+|just\\s+|already\\s+|all\\s+)?(?:changing|fixing|fixed|changed|sorted|sorting|updating|updated|rewriting|rewritten|redoing|redone|done|making\\s+(?:that|the|this|those|it)\\s+changes?)\\b[^.!?]*[.!?]*",
-    '(?<=^|[.!?]\\s*)\\s*(?:all\\s+)?(?:done|fixed|sorted)\\s*[.!]+',
-    '[^.!?]*\\b[a-z]+ing\\b[^.!?]*\\bnow\\s*[.!]+',
+    "[^.!?]*\\b(?:i['’]ve|i have|we['’]ve|we have|i|we)\\s+(?:now\\s+|just\\s+|already\\s+|also\\s+)?(?:changed|fixed|updated|rewritten|rewrote|redone|redid|sorted|removed|added|made\\s+(?:that|the|this|those|it)\\s+changes?)\\b[^.!?]*[.!?]*",
+    '(?<=^|[.!?]\\s*)\\s*(?:all\\s+)?(?:done|fixed|sorted|changed)\\s*[.!]+',
   ].join('|'),
   'giu',
 );
 
 /**
- * The producer's reply as the maker gets it when it changes a scene: a
- * sentence that says the change is done, or happening now, is said as
- * what it is, a try ("I'll try that and check it.", where the scene was
- * made and so is made again and checked); once, however many such
- * sentences there were. Any other reply is as it was.
+ * The producer's reply as the maker gets it, when it sets nothing going
+ * or sets work going that is not a scene's (an outline, the film): a
+ * sentence that says it changed something itself is left out, and with
+ * nothing left, it says plainly that nothing has changed. A change to a
+ * scene is said in code's own words instead (sceneReply).
  */
-export function honestReply(
-  reply: string,
-  action: string,
-  /** Whether what is changed is made again and checked: a scene that was made. */
-  checked = true,
-): string {
-  if (action !== 'scene') return reply;
-  let said = false;
-  const out = reply.replace(CLAIMS_DONE, (sentence) => {
-    const lead = /^\s*/u.exec(sentence)?.[0] ?? '';
-    if (said) return '';
-    said = true;
-    return `${lead}${checked ? "I'll try that and check it." : "I'll try that."}`;
-  });
-  return out.replace(/\s{2,}/gu, ' ').trim();
+export function honestReply(reply: string, action: string): string {
+  if (action !== 'none') return reply;
+  const out = reply
+    .replace(CLAIMS_CHANGED, '')
+    .replace(/\s{2,}/gu, ' ')
+    .trim();
+  return out || "Nothing has changed yet. Tell me what you'd like changed.";
+}
+
+/** The longest request said back in a reply, in characters. */
+const SAID_BACK = 220;
+
+/**
+ * What the producer says it will do with a change to scenes, in code's own
+ * words, never taken from the producer's: what it will try, and what then
+ * comes of each scene. A story's scene that was made is made again and
+ * checked; an explainer's is shown once it is made again; one not made
+ * yet, once the film is made. What the stage cannot show is said to be
+ * left out, never promised. Never "done": a line from the Studio says what
+ * came of it once it is checked.
+ */
+export function sceneReply(input: {
+  scenes: readonly {
+    number: number;
+    next: 'checked' | 'remade' | 'film';
+  }[];
+  request: string;
+  /** What of it the stage cannot show, in a few words: left out. */
+  cannot?: string | null;
+}): string {
+  const numbers = (list: readonly { number: number }[]) => {
+    const n = list.map((s) => String(s.number));
+    return `scene${n.length > 1 ? 's' : ''} ${n.length > 1 ? `${n.slice(0, -1).join(', ')} and ${n[n.length - 1]}` : n[0]}`;
+  };
+  const clipped = (text: string) => {
+    const said = text.trim().replace(/[.!?\s]+$/u, '');
+    if (said.length <= SAID_BACK) return said;
+    const cut = said.slice(0, SAID_BACK);
+    return `${cut.slice(0, Math.max(cut.lastIndexOf(' '), SAID_BACK / 2))}…`;
+  };
+  const cannot = input.cannot?.trim().replace(/[.!?\s]+$/u, '');
+  const parts: string[] = [];
+  if (cannot)
+    parts.push(`The stage can't show ${cannot}, so I'll leave that out.`);
+  const request = clipped(input.request);
+  parts.push(
+    request
+      ? `I'll rewrite ${numbers(input.scenes)}: ${request}.`
+      : `I'll rewrite ${numbers(input.scenes)}.`,
+  );
+  const checked = input.scenes.filter((s) => s.next === 'checked');
+  const remade = input.scenes.filter((s) => s.next === 'remade');
+  const film = input.scenes.filter((s) => s.next === 'film');
+  const all = input.scenes.length;
+  const one = (n: number, it: string, them: string) => (n > 1 ? them : it);
+  const then: string[] = [];
+  if (checked.length)
+    then.push(
+      checked.length === all
+        ? `Then I'll make ${one(all, 'it', 'them')} again and check ${one(all, 'it', 'them')}`
+        : `Then I'll make ${numbers(checked)} again and check ${one(checked.length, 'it', 'them')}`,
+    );
+  if (remade.length)
+    then.push(
+      remade.length === all
+        ? `${one(all, 'It shows', 'They show')} in the film once ${one(all, "it's", "they're")} made again`
+        : `${numbers(remade)} ${one(remade.length, 'shows', 'show')} once made again`,
+    );
+  if (film.length)
+    then.push(
+      film.length === all
+        ? `${one(all, 'It shows', 'They show')} once the film is made`
+        : `${numbers(film)} ${one(film.length, 'shows', 'show')} once the film is made`,
+    );
+  const next = then.join('; ');
+  parts.push(`${next.charAt(0).toUpperCase()}${next.slice(1)}.`);
+  return parts.join(' ');
+}
+
+/** The longest a check's word to the maker runs, in characters. */
+const TOLD_MOST = 200;
+
+/**
+ * What a check tells the maker, made safe to say: one or two plain
+ * sentences at most, and nothing about their film minutes, credit, money
+ * or refunds, which a check has no say in (words asking for that are the
+ * maker's, not the film's). Empty when nothing safe is left.
+ */
+export function tellOf(tell: string | null | undefined): string {
+  const said = (tell ?? '').replace(/\s+/gu, ' ').trim();
+  if (
+    !said ||
+    /\b(?:refund\w*|credit\w*|allowance|minutes? (?:this|a|per) month|free of charge|money|paid|payment|charge[ds]?|instructions?|system prompt|developer)\b/iu.test(
+      said,
+    )
+  )
+    return '';
+  if (said.length <= TOLD_MOST) return said;
+  const cut = said.slice(0, TOLD_MOST);
+  const end = Math.max(cut.lastIndexOf('. '), cut.lastIndexOf('! '));
+  return end > TOLD_MOST / 3
+    ? cut.slice(0, end + 1)
+    : `${cut.slice(0, cut.lastIndexOf(' '))}…`;
 }

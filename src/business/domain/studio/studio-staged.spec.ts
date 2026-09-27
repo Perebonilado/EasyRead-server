@@ -129,16 +129,46 @@ describe("Tobi's first scene as it is staged now", () => {
       };
     }
 
-  it("says he opens in the set's bed under its cover, gets up and out beside it", () => {
+  it("says he opens in the set's bed under its cover, in his pyjamas, gets up and down beside it", () => {
     const said = describeStaged(mended.sheet, scene, show).lines;
-    expect(said).toContain('Tobi: drawn standing, rigged.');
+    expect(said).toContainEqual(
+      expect.stringMatching(
+        /^Tobi: drawn standing, rigged; as it opens, wears red pyjamas, with bare feet; changes clothes at /,
+      ),
+    );
     const up = said.find((line) => line.includes('gets out of bed himself'))!;
     expect(up).toMatch(
-      /: Tobi opens in the bed, sitting up under its cover; Tobi gets up; Tobi is out of the bed, beside it\.$/,
+      /: Tobi opens in the bed, sitting up under its cover, in red pyjamas, with bare feet; Tobi gets up; Tobi is out of the bed, down beside it\.$/,
     );
+    // What he is dressed in, as the film draws it.
     const dressed = said.find((line) => line.includes('spins round'))!;
-    expect(dressed).toMatch(/Tobi takes the uniform; Tobi puts on the uniform/);
+    expect(dressed).toMatch(
+      /Tobi takes the uniform; Tobi is now dressed in a blue uniform and grey trousers, with a backpack; Tobi puts on the uniform/,
+    );
     expect(said.at(-1)).toMatch(/Tobi wears the uniform/);
+  });
+
+  it('says so when he stands up on the bed before he gets down, by where his feet are', () => {
+    // As a film made before was: his feet up on the mattress as he stands,
+    // and down beside it only once he is up.
+    const high: SceneDto = JSON.parse(JSON.stringify(scene)) as SceneDto;
+    const [at, , ms] = high.acting!.tobi.moves!.find(
+      ([, move]) => move === 'stand',
+    )!;
+    high.steps[1].atMs = at + ms + 400;
+    high.stagings.wide.places[0].tobi.y -= high.stagings.wide.h * 0.2;
+    const said = describeStaged(mended.sheet, high, show).lines;
+    const line = said.find((one) => one.includes('gets out of bed himself'))!;
+    expect(line).toMatch(/Tobi gets up and stands up on the bed/);
+  });
+
+  it('says what the words have done with a thing that the film does not show', () => {
+    const bare: SceneDto = JSON.parse(JSON.stringify(scene)) as SceneDto;
+    for (const prop of bare.props ?? [])
+      prop.does = prop.does.filter(([, , does]) => does !== 'give');
+    const said = describeStaged(mended.sheet, bare, show).lines;
+    const line = said.find((one) => one.includes('Mama gives Tobi'))!;
+    expect(line).toMatch(/Mama is not seen to give anything, as the words say/);
   });
 
   it('sees nothing wrong with the bed or the uniform', () => {

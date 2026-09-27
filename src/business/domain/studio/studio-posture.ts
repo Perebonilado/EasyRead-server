@@ -13,6 +13,7 @@
 import { NEEDS_FEET, doingOf } from '../scene-doings';
 import type { FigureSpec } from '../scene-figure';
 import {
+  colourBefore,
   putOn,
   sameOutfit,
   takeOff,
@@ -53,6 +54,8 @@ export function stationOf(posture: Posture): string | null {
 /** How long getting up takes, and stepping out beside what they were on, in seconds. */
 export const RISE_S = (doingOf('stand-up')?.ms ?? 1200) / 1000;
 export const STEP_OFF_S = 0.9;
+/** Stepping down beside a bed or a seat is a walk, and the player's shortest walk takes this long. */
+export const STEP_DOWN_S = 1.1;
 /** How long going over to a seat or a bed to sit or lie on it takes, about. */
 export const GO_TO_SEAT_S = 1.2;
 
@@ -207,15 +210,25 @@ export interface Outfits {
   changes: { beat: number; spec: FigureSpec }[];
 }
 
-/** A thing worn, by its id: the show's own by its name and its look; one of the lists' by its word. */
+/**
+ * A thing worn, by its id: the show's own by its name and its look; one of
+ * the lists' by its word, in the colour the words that put it on give it
+ * ("puts on her red coat").
+ */
 function wornThing(
   bible: Pick<StudioBible, 'things'>,
   thing: string | null | undefined,
+  said = '',
 ): { wear: Wearable; look: string | null } | null {
   if (!thing) return null;
   const own = bible.things?.find((t) => t.id === thing);
   const wear = wearableOf(own?.name ?? thing) ?? wearableOf(thing);
-  return wear ? { wear, look: own?.look ?? null } : null;
+  return wear
+    ? {
+        wear,
+        look: own?.look ?? colourBefore(said, own?.name ?? thing) ?? null,
+      }
+    : null;
 }
 
 /** Whether a scene is at bedtime: someone in bed or lying down as it opens, at night or at dawn, or in a bedroom. */
@@ -236,7 +249,8 @@ function bedtimeFor(
  * sheet says they wear besides; and after each beat that puts a thing on
  * or takes one off, what that leaves them in. Someone who gets dressed
  * into what they usually wear opens in what they wore before it: pyjamas
- * at bedtime, else a plain t-shirt.
+ * at bedtime, else a plain t-shirt. Someone in bed as it opens who gets
+ * dressed at all, into anything, is in their pyjamas until they do.
  */
 export function outfitsOf(
   sheet: Pick<StorySheet, 'onStage' | 'beats' | 'time' | 'set'>,
@@ -268,13 +282,29 @@ export function outfitsOf(
       continue;
     }
     // Getting dressed into what they usually wear, already wearing it:
-    // before it, what they wore to bed, or under it.
+    // before it, what they wore to bed, or under it. Getting dressed out
+    // of bed, into anything: before it, their pyjamas.
     const first = mine[0].beat;
-    const firstWear = wornThing(bible, first.thing ?? first.prop) ?? {
+    const firstWear = wornThing(
+      bible,
+      first.thing ?? first.prop,
+      first.say,
+    ) ?? {
       wear: { slot: 'outfit' as const, kit: null },
       look: null,
     };
+    const features = bible.sets.find((s) => s.id === sheet.set)?.features ?? [];
+    const abed =
+      place?.pose === 'in bed' ||
+      Boolean(place && openingPosture(place, features)?.in);
     if (
+      !carried &&
+      abed &&
+      mine.some(({ beat }) => beat.do === 'dress') &&
+      !(place?.wears ?? []).length
+    )
+      opening = undressedFor(usual, true);
+    else if (
       first.do === 'dress' &&
       sameOutfit(opening, usual) &&
       sameOutfit(putOn(opening, usual, firstWear.wear, firstWear.look), usual)
@@ -283,7 +313,7 @@ export function outfitsOf(
     const changes: Outfits['changes'] = [];
     let now = opening;
     for (const { beat, at } of mine) {
-      const worn = wornThing(bible, beat.thing ?? beat.prop) ?? {
+      const worn = wornThing(bible, beat.thing ?? beat.prop, beat.say) ?? {
         wear: { slot: 'outfit' as const, kit: null },
         look: null,
       };

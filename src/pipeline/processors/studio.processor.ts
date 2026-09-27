@@ -30,6 +30,7 @@ import {
   repairSheet,
   sentBackFor,
   keptFeatures,
+  linesKept,
   wearFrom,
   withFound,
   type EndState,
@@ -59,6 +60,7 @@ import {
   describeOutline,
   describeOutlineScene,
   describeScene,
+  tellOf,
 } from '../../business/domain/studio/studio-words';
 import { EntitlementsService } from '../../business/handlers/documents/entitlements.service';
 import { iconicOf } from '../../business/domain/scene-iconic';
@@ -106,6 +108,13 @@ import { SceneProcessor } from './scene.processor';
 /** Explainer scenes written at once: each is its own lesson page. */
 const WRITERS = 3;
 
+/** What the thread records of a maker's request, for one scene of it and one try: each scene asked for its own. */
+const askKey = (ask: StudioAsk, sceneId: string) =>
+  `ask:${ask.id}:${sceneId}:${ask.tries}`;
+
+/** What a check that could not show what was asked says of the film, when it had no words of its own. */
+const STILL_SHOWS = 'the film still shows what it did before';
+
 /** Work that did not go through, as the thread says it: where, and what to do. */
 const FAILED: Record<
   'bible' | 'outline' | 'script' | 'scene',
@@ -143,8 +152,6 @@ export function studioMakeOf(
   bible: StudioBible,
   /** The show's sets as painted, where they are: its features stand where they are painted. */
   sets: Sets | null = null,
-  /** What a check of it made as asked found, for the stage to put right: clothes someone wears from the start. */
-  remedy: StudioAsk['remedy'] | null = null,
 ): Omit<Parameters<SceneProcessor['make']>[0], 'base' | 'who'> {
   const story = row.sheet?.kind === 'story';
   const stage = show.brief.audience
@@ -161,13 +168,9 @@ export function studioMakeOf(
   // always one the stage can play: carrying on from how the scene before
   // left things, on its set with every feature its words name.
   const before = endBefore(rows, row.position, bible);
-  const repaired = story
+  const sheet = story
     ? repairSheet(row.sheet as StorySheet, bible, before)
     : null;
-  const sheet =
-    repaired && remedy?.wear?.length
-      ? repairSheet(wearFrom(repaired, remedy.wear), bible, before)
-      : repaired;
   const painted = sheet ? paintedAt(sets?.[sheet.set]) : {};
   const staged = sheet
     ? withFound(bible, sheet.set, mendSheet(sheet, bible, before))
@@ -469,6 +472,43 @@ export class StudioProcessor {
         return;
       }
       if (!last) throw error;
+      // The Studio's own try again at a maker's change that could not be
+      // written: the film made on the first try stands, and what its check
+      // found is what the maker is told. Never a failure of theirs.
+      if (job.kind === 'scene' && job.sceneId && job.ask?.tries === 2) {
+        const row = await this.studio.findScene(job.sceneId);
+        await this.studio.updateScene(job.sceneId, {
+          status: row?.sceneKey ? 'made' : 'ready',
+          step: null,
+          error: null,
+        });
+        await this.log(
+          show,
+          episode,
+          {
+            what: 'checked',
+            step: 'made',
+            sceneId: job.sceneId,
+            line: EVENT_LINES.checked(
+              row?.position ?? 0,
+              'not yet',
+              job.ask.tell || STILL_SHOWS,
+            ),
+          },
+          askKey(job.ask, job.sceneId),
+          {
+            words: job.ask.words,
+            request: job.ask.request,
+            reason: `written again, could not be: ${message}`,
+            before: job.ask.before?.lines ?? [],
+            after: [],
+            faults: [],
+            tries: job.ask.tries,
+          },
+        );
+        await this.settle(show, episode, true);
+        return;
+      }
       if (job.kind !== 'make') {
         const row = job.sceneId
           ? await this.studio.findScene(job.sceneId)
@@ -787,35 +827,55 @@ export class StudioProcessor {
       else {
         const rows = await this.studio.listScenes(episode.id);
         const before = endBefore(rows, k, bible);
-        title = (
-          await this.writeStoryScene(
-            show,
-            episode,
-            outline,
-            bible,
-            row,
-            k,
-            before,
-            told,
-          )
-        )?.title;
+        const again = ask?.tries === 2;
+        const sheet = await this.writeStoryScene(
+          show,
+          episode,
+          outline,
+          bible,
+          row,
+          k,
+          before,
+          told,
+          again,
+        );
+        title = sheet?.title;
+        // What the check found carried that the words have worn (the
+        // uniform in a hand as he spins round in it): worn from the start,
+        // in the sheet itself, so every later scene and make has it too.
+        const wear = ask?.remedy?.wear ?? [];
+        if (sheet && wear.length) {
+          const worn = wearFrom(sheet, wear);
+          await this.studio.updateScene(row.id, {
+            sheet: worn,
+            sheetHash: sceneFingerprint(
+              worn,
+              bible,
+              show.brief,
+              before?.wears ?? [],
+            ),
+          });
+        }
       }
-      // A scene added has no sheet before this one: it is written, not written again.
-      await this.log(
-        show,
-        episode,
-        {
-          what: 'scene',
-          step: 'script',
-          sceneId: row.id,
-          line: EVENT_LINES.scene(
-            k,
-            title ?? outline.scenes[k]?.title ?? `Scene ${k + 1}`,
-            Boolean(row.sheet),
-          ),
-        },
-        key,
-      );
+      // A scene added has no sheet before this one: it is written, not
+      // written again. The Studio's own try again is quiet: what came of
+      // it is the check's to say.
+      if (ask?.tries !== 2)
+        await this.log(
+          show,
+          episode,
+          {
+            what: 'scene',
+            step: 'script',
+            sceneId: row.id,
+            line: EVENT_LINES.scene(
+              k,
+              title ?? outline.scenes[k]?.title ?? `Scene ${k + 1}`,
+              Boolean(row.sheet),
+            ),
+          },
+          key,
+        );
       // Made before: made again at once, and checked.
       if (asked && row.sceneKey)
         await this.remakeAsked(show, episode, row, asked);
@@ -870,12 +930,18 @@ export class StudioProcessor {
   ): Promise<void> {
     const fresh = await this.studio.findScene(row.id);
     if (!fresh?.sheet) return;
-    // The Studio's own try again that wrote nothing new: nothing to make.
+    // The Studio's own try again that wrote nothing new: nothing to make,
+    // and the film as made is this sheet's still. What the first try's
+    // check told the maker is what still shows.
     if (
       ask.tries === 2 &&
-      !ask.remedy?.wear?.length &&
       JSON.stringify(fresh.sheet) === JSON.stringify(row.sheet)
     ) {
+      await this.studio.updateScene(row.id, {
+        status: 'made',
+        step: null,
+        error: null,
+      });
       await this.log(
         show,
         episode,
@@ -886,13 +952,10 @@ export class StudioProcessor {
           line: EVENT_LINES.checked(
             row.position,
             'not yet',
-            ask.problems?.[0]?.replace(
-              /^The film as made still does not do what the maker asked: /u,
-              '',
-            ) ?? '',
+            ask.tell || STILL_SHOWS,
           ),
         },
-        `ask:${ask.id}:${ask.tries}`,
+        askKey(ask, row.id),
         {
           words: ask.words,
           request: ask.request,
@@ -903,6 +966,7 @@ export class StudioProcessor {
           tries: ask.tries,
         },
       );
+      await this.settle(show, episode, true);
       return;
     }
     if (!ask.free)
@@ -920,7 +984,7 @@ export class StudioProcessor {
             sceneId: row.id,
             line: `Scene ${row.position + 1} is written again; there is no film left this month to make it again.`,
           },
-          `ask:${ask.id}:${ask.tries}:allowance`,
+          `${askKey(ask, row.id)}:allowance`,
         );
         return;
       }
@@ -929,17 +993,19 @@ export class StudioProcessor {
       step: null,
       error: null,
     });
-    await this.log(
-      show,
-      episode,
-      {
-        what: 'make',
-        step: 'made',
-        sceneId: row.id,
-        line: EVENT_LINES.remake(row.position),
-      },
-      `ask:${ask.id}:${ask.tries}:make`,
-    );
+    // Made again to check it: said once, on the maker's own try.
+    if (ask.tries !== 2)
+      await this.log(
+        show,
+        episode,
+        {
+          what: 'make',
+          step: 'made',
+          sceneId: row.id,
+          line: EVENT_LINES.remake(row.position),
+        },
+        `${askKey(ask, row.id)}:make`,
+      );
     await this.queue.enqueueStudio([
       {
         kind: 'prepare',
@@ -965,8 +1031,17 @@ export class StudioProcessor {
     k: number,
     before: EndState | null,
     request?: string,
+    /** The Studio's own try again at a maker's change: the sheet from before their change is kept for undo. */
+    again = false,
   ): Promise<StorySheet | null> {
-    const planned = outline.scenes[k]?.seconds ?? null;
+    const old = row.sheet?.kind === 'story' ? row.sheet : null;
+    // Written again as asked: as long as it was, at the least, so what the
+    // maker did not ask to change is not cut to fit the outline's plan.
+    const outlined = outline.scenes[k]?.seconds ?? null;
+    const planned =
+      request && old && outlined !== null
+        ? Math.max(outlined, secondsOf(old))
+        : outlined;
     const ask = {
       brief: describeBrief(show.brief),
       bible: describeBible(bible, true),
@@ -976,7 +1051,6 @@ export class StudioProcessor {
         : `Scene ${k + 1}: the scene the maker asked for.`,
       before: describeEnd(before, bible),
     };
-    const old = row.sheet?.kind === 'story' ? row.sheet : null;
     const first = await this.llm.studioScene({
       ...ask,
       ...(request && old ? { previous: old, request } : {}),
@@ -988,13 +1062,17 @@ export class StudioProcessor {
         sheet: mended.sheet,
         mended: mended.mended,
         features: mended.features,
-        // Held to the show as the words grew it: a thing they named is there.
-        problems: checkSheet(
-          mended.sheet,
-          withFound(bible, mended.sheet.set, mended),
-          planned,
-          before,
-        ),
+        // Held to the show as the words grew it: a thing they named is
+        // there; and, written again as asked, to the lines it had.
+        problems: [
+          ...checkSheet(
+            mended.sheet,
+            withFound(bible, mended.sheet.set, mended),
+            planned,
+            before,
+          ),
+          ...(request && old ? linesKept(old, mended.sheet, request) : []),
+        ],
       };
     };
     let best = judged(first.value);
@@ -1056,7 +1134,7 @@ export class StudioProcessor {
         before?.wears ?? [],
       ),
       problems: best.problems,
-      ...(request && old ? { previousSheet: old } : {}),
+      ...(request && old && !again ? { previousSheet: old } : {}),
       status: 'ready',
       error: null,
     });
@@ -1293,7 +1371,6 @@ export class StudioProcessor {
       rows,
       bible,
       await this.paintedSets(show.id),
-      ask?.remedy ?? null,
     );
     const base = `studio/${show.id}/${episode.id}/${row.id}-${fingerprint.slice(0, 8)}-${Date.now().toString(36)}`;
     // The Studio's own try again, its words as voiced: staged again on the
@@ -1361,16 +1438,40 @@ export class StudioProcessor {
     this.logger.log(
       `${who}: made "${scene.title}" in ${Math.round(voice.durationMs / 1000)}s of film, ${scene.steps.length} stage changes, ${scene.effects.length} effects${context.attemptsMade > 1 ? ` (try ${context.attemptsMade})` : ''}`,
     );
+    // The film is made and spent: the check of it, however it goes, never
+    // makes it again, nor spends it twice.
     if (ask)
-      await this.checkAsk(
-        show,
-        episode,
-        (await this.studio.findScene(row.id)) ?? row,
-        scene,
-        ask,
-        bible,
-      );
-    await this.settle(show, episode, Boolean(ask));
+      try {
+        await this.checkAsk(
+          show,
+          episode,
+          (await this.studio.findScene(row.id)) ?? row,
+          scene,
+          ask,
+          bible,
+        );
+      } catch (error) {
+        this.logger.warn(
+          `${who}: the ask could not be checked: ${(error as Error).message}`,
+        );
+        await this.log(
+          show,
+          episode,
+          {
+            what: 'checked',
+            step: 'made',
+            sceneId: row.id,
+            line: EVENT_LINES.checked(row.position, 'unchecked'),
+          },
+          askKey(ask, row.id),
+        );
+        await this.studio
+          .updateScene(row.id, { status: 'made', step: null, error: null })
+          .catch(() => undefined);
+      }
+    await this.settle(show, episode, Boolean(ask)).catch((error: Error) =>
+      this.logger.warn(`${who}: not settled: ${error.message}`),
+    );
   }
 
   /**
@@ -1391,7 +1492,7 @@ export class StudioProcessor {
   ): Promise<void> {
     if (row.sheet?.kind !== 'story') return;
     const who = `studio ${episode.id} s${row.position + 1}`;
-    const key = `ask:${ask.id}:${ask.tries}`;
+    const key = askKey(ask, row.id);
     const rows = await this.studio.listScenes(episode.id);
     const before = endBefore(rows, row.position, bible);
     const sheet = repairSheet(row.sheet, bible, before);
@@ -1435,8 +1536,10 @@ export class StudioProcessor {
     const asked = faults.filter((f) =>
       concerns(f, `${ask.words} ${ask.request}`),
     );
+    // What the check tells the maker: plain words about the film, no more.
+    const tell = tellOf(verdict.tell);
     if (verdict.resolved && !asked.length) {
-      await this.log(show, episode, line('shown', verdict.tell), key);
+      await this.log(show, episode, line('shown', tell), key);
       return;
     }
     const reason =
@@ -1455,6 +1558,7 @@ export class StudioProcessor {
         ...ask,
         tries: 2,
         free: true,
+        ...(tell ? { tell } : {}),
         problems: [
           `The film as made still does not do what the maker asked: ${reason}`,
           `What the film shows now:\n${after.lines.join('\n')}`,
@@ -1481,7 +1585,7 @@ export class StudioProcessor {
     await this.log(
       show,
       episode,
-      line('not yet', verdict.tell || asked[0]?.why || ''),
+      line('not yet', tell || ask.tell || STILL_SHOWS),
       key,
       {
         words: ask.words,

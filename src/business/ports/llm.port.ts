@@ -109,6 +109,8 @@ export interface StudioTurnDraft {
   scenes?: number[];
   /** The change asked for, in the maker's words. */
   request: string | null;
+  /** Of a change to a scene, what the stage cannot show, in a few words: left out of it, and said so. */
+  cannot?: string | null;
   /** Asked for what the Studio does not make. */
   refuse: boolean;
 }

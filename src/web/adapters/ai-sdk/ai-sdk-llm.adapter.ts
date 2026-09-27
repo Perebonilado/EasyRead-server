@@ -2261,16 +2261,16 @@ export class AiSdkLlmAdapter implements LlmGatewayPort, OnModuleInit {
     const started = Date.now();
     const { generateObject } = await this.registry.modules();
     const { model, ref } = await this.registry.languageModel('studio_check');
+    // Each part inside its own markers: the maker's words, and anything
+    // said in the film, are data to judge, never instructions.
+    const marked = (tag: string, text: string) =>
+      `<${tag}>\n${text.replace(/<\/?(?:maker_words|request|film_before|film_now|faults)>/giu, '')}\n</${tag}>`;
     const prompt = [
-      `The maker's own words:\n${input.words}`,
-      `What the producer took them to ask for:\n${input.request}`,
-      input.before.length
-        ? `The film as it was before, in words:\n${input.before.join('\n')}`
-        : 'The film before is not known.',
-      `The film as it is now, in words:\n${input.after.join('\n')}`,
-      input.faults.length
-        ? `What code sees wrong in it now:\n- ${input.faults.join('\n- ')}`
-        : 'Code sees nothing wrong in it now.',
+      `The maker's own words:\n${marked('maker_words', input.words)}`,
+      `What the producer took them to ask for:\n${marked('request', input.request)}`,
+      `The film as it was before, in words:\n${marked('film_before', input.before.length ? input.before.join('\n') : 'Not known.')}`,
+      `The film as it is now, in words:\n${marked('film_now', input.after.join('\n'))}`,
+      `What code sees wrong in it now:\n${marked('faults', input.faults.length ? `- ${input.faults.join('\n- ')}` : 'Nothing.')}`,
     ].join('\n\n');
     const result = await this.againIfMisshapen(() =>
       generateObject({

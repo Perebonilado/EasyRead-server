@@ -9,10 +9,23 @@ import { composeScene } from '../../scene-compose';
 import type { SceneScript } from '../../scene-script';
 import type { GatedDrawing } from '../../scene-svg';
 import type { TimedBeat } from '../../scene-timing';
+import { outfitWords } from '../../scene-wear';
 
 const WORD_MS = 400;
 
-const figure = (rig: boolean): GatedDrawing => ({
+/** A person's plain drawing says what they wear, as the kit's does: as they open, then each outfit they change into. */
+const outfitsOf = (thing: SceneScript['cast'][number]): string[] | null =>
+  thing.kind === 'character' && (thing.wears || thing.dress?.length)
+    ? [
+        thing.wears ? outfitWords(thing.wears) : 'their usual clothes',
+        ...(thing.dress ?? []).map((one) => outfitWords(one.spec)),
+      ]
+    : null;
+
+const figure = (
+  rig: boolean,
+  outfits: string[] | null = null,
+): GatedDrawing => ({
   svg: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 600 900"><rect width="10" height="10"/></svg>',
   viewBox: [0, 0, 600, 900],
   aspect: 0.6,
@@ -28,12 +41,15 @@ const figure = (rig: boolean): GatedDrawing => ({
       'surprised',
       'thinking',
       'pain',
+      // Each outfit changed into is a state of its own, as the kit draws it.
+      ...(outfits ?? []).slice(1).map((_, k) => `dress-${k + 1}`),
     ].map((face) => [face, face]),
   ),
   moves: true,
   callouts: [],
   field: null,
   ...(rig ? { acts: true } : {}),
+  ...(rig && outfits ? { outfits } : {}),
 });
 
 /** The scene as made, and when each spoken beat was said. */
@@ -66,7 +82,7 @@ export function voiced(
     script.cast.map((thing) => [
       thing.id,
       thing.kind === 'character'
-        ? figure(!artists.includes(thing.id))
+        ? figure(!artists.includes(thing.id), outfitsOf(thing))
         : (sets[thing.id] ?? null),
     ]),
   );

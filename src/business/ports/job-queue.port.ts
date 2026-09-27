@@ -99,7 +99,9 @@ export interface StudioAsk {
   before?: { key: string; lines: string[] } | null;
   /** What the check found still wrong, for the writer's second try. */
   problems?: string[];
-  /** What the stage does besides, for what the check found: clothes someone wears from the start. */
+  /** What the first try's check told the maker the film shows: said again if the second try changes nothing. */
+  tell?: string;
+  /** What the second try's sheet has besides, for what the check found: clothes someone wears from the start. */
   remedy?: { wear?: { who: string; thing: string }[] };
   /** Made again without spending the maker's film: the Studio's own try again. */
   free?: boolean;

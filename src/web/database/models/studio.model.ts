@@ -1,4 +1,4 @@
-import { Column, DataType, Table } from 'sequelize-typescript';
+import { Column, CreatedAt, DataType, Table } from 'sequelize-typescript';
 import { BaseModel } from './base';
 
 /** A show made in the Studio: its brief and its bible, as JSON. */
@@ -136,6 +136,10 @@ export class StudioMessageModel extends BaseModel {
   @Column({ type: DataType.TEXT, allowNull: true })
   declare meta: string | null;
 
+  // Kept to the millisecond (0057), so what is said in the same second
+  // reads in the order it came.
+  @CreatedAt
+  @Column({ type: DataType.DATE(3) })
   declare createdAt: Date;
   declare updatedAt: Date;
 }

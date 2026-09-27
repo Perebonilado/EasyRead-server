@@ -330,8 +330,10 @@ describe('a scene changed as the maker asked, made again and checked', () => {
       words: ask().words,
       before: before.lines,
     });
-    expect((s.checks[0] as { after: string[] }).after).toContain(
-      'Tobi: drawn standing, rigged.',
+    expect((s.checks[0] as { after: string[] }).after).toContainEqual(
+      expect.stringMatching(
+        /^Tobi: drawn standing, rigged; as it opens, wears red pyjamas, with bare feet/,
+      ),
     );
     expect(s.queued).toEqual([]);
     // The first try is the maker's own make: spent as a make is.
@@ -439,6 +441,142 @@ describe('a scene changed as the maker asked, made again and checked', () => {
       },
     ]);
     expect(s.checks).toEqual([]);
+  });
+
+  it('records what came of each scene when one message asks for several', async () => {
+    const s = studio(shown());
+    s.scenes.set('c2', {
+      ...s.scenes.get('c1')!,
+      id: 'c2',
+      position: 1,
+      status: 'making',
+    });
+    s.scenes.set('c1', { ...s.scenes.get('c1')!, status: 'making' });
+    const before = { key: 'before', lines: ['b'] };
+    await s.processor.process(job({ ask: ask({ before }) }), context);
+    await s.processor.process(
+      job({ sceneId: 'c2', ask: ask({ before }) }),
+      context,
+    );
+    expect(s.events().map((e) => e.line)).toEqual([
+      'Scene 1 made again and checked: Tobi now climbs out of bed and the bed stays put.',
+      'Scene 2 made again and checked: Tobi now climbs out of bed and the bed stays put.',
+    ]);
+  });
+
+  it("keeps the Studio's own try again quiet, the undo as the maker left it, and the clothes worn in the sheet", async () => {
+    const s = studio(shown());
+    const mine = { ...sheet, title: 'As the maker had it' };
+    s.scenes.set('c1', { ...s.scenes.get('c1')!, previousSheet: mine });
+    await s.processor.process(
+      job({
+        kind: 'scene',
+        request: ask().request,
+        ask: ask({
+          tries: 2,
+          free: true,
+          before: { key: 'before', lines: ['b'] },
+          remedy: { wear: [{ who: 'tobi', thing: 'uniform' }] },
+        }),
+      }),
+      context,
+    );
+    // No "written again", no "making again": the check says what came of it.
+    expect(s.events()).toEqual([]);
+    const row = s.scenes.get('c1')!;
+    expect(row.previousSheet).toBe(mine);
+    expect(
+      row.sheet?.kind === 'story' &&
+        row.sheet.onStage.find((p) => p.who === 'tobi')?.wears,
+    ).toEqual(['uniform']);
+    expect(s.queued).toMatchObject([{ kind: 'prepare', sceneIds: ['c1'] }]);
+  });
+
+  it('says what the first check found, and settles the film, when the try again writes the same scene', async () => {
+    const s = studio(shown());
+    const again = ask({
+      tries: 2,
+      free: true,
+      tell: 'Tobi still stands up on the bed',
+      before: { key: 'before', lines: ['b'] },
+    });
+    // Written once as the try again writes it; then written the same.
+    await s.processor.process(
+      job({ kind: 'scene', request: again.request, ask: again }),
+      context,
+    );
+    s.scenes.set('c1', { ...s.scenes.get('c1')!, status: 'writing' });
+    s.queued.length = 0;
+    await s.processor.process(
+      job({ kind: 'scene', request: again.request, ask: again }),
+      context,
+    );
+    expect(s.queued).toEqual([]);
+    expect(s.scenes.get('c1')?.status).toBe('made');
+    expect(s.events().map((e) => e.line)).toEqual([
+      "Scene 1 made again, but I couldn't change this yet: Tobi still stands up on the bed. I've passed it on to be fixed.",
+    ]);
+    // The film's length counts the scene, as made.
+    expect(s.episodes.get('e1')?.busy).toBeNull();
+    expect(s.episodes.get('e1')?.durationMs).toBe(madeBefore.durationMs);
+  });
+
+  it('never makes or spends a scene twice when its check cannot be recorded', async () => {
+    const s = studio(notYet());
+    Object.assign((s.processor as unknown as { queue: object }).queue, {
+      enqueueStudio: () => Promise.reject(new Error('Redis is away')),
+    });
+    s.scenes.set('c1', { ...s.scenes.get('c1')!, status: 'making' });
+    await expect(
+      s.processor.process(
+        job({ ask: ask({ before: { key: 'before', lines: ['b'] } }) }),
+        { ...context, isFinalAttempt: false },
+      ),
+    ).resolves.toBeUndefined();
+    expect(s.spent).toHaveLength(1);
+    expect(s.scenes.get('c1')?.status).toBe('made');
+    expect(s.events().map((e) => e.line)).toEqual([
+      "Scene 1 made again. I couldn't check it this time: have a look.",
+    ]);
+  });
+
+  it('says what the first check found, never a failure, when the try again cannot be written', async () => {
+    const s = studio(shown());
+    Object.assign((s.processor as unknown as { llm: object }).llm, {
+      studioScene: () => Promise.reject(new Error('The writer is away')),
+    });
+    await s.processor.process(
+      job({
+        kind: 'scene',
+        request: ask().request,
+        ask: ask({
+          tries: 2,
+          free: true,
+          tell: 'Tobi still stands up on the bed',
+          before: { key: 'before', lines: ['b'] },
+        }),
+      }),
+      context,
+    );
+    expect(s.events().map((e) => e.line)).toEqual([
+      "Scene 1 made again, but I couldn't change this yet: Tobi still stands up on the bed. I've passed it on to be fixed.",
+    ]);
+    expect(s.scenes.get('c1')?.status).toBe('made');
+    expect(s.episodes.get('e1')).toMatchObject({ busy: null, error: null });
+  });
+
+  it('never tells the maker what a check was told to say about their minutes', async () => {
+    const s = studio(
+      shown('All fixed, and your film minutes this month are refunded'),
+    );
+    s.scenes.set('c1', { ...s.scenes.get('c1')!, status: 'making' });
+    await s.processor.process(
+      job({ ask: ask({ before: { key: 'before', lines: ['b'] } }) }),
+      context,
+    );
+    expect(s.events().map((e) => e.line)).toEqual([
+      'Scene 1 made again and checked.',
+    ]);
   });
 
   it("holds a fault code sees in what the maker asked about over the check's word", async () => {

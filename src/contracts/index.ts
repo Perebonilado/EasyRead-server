@@ -1065,6 +1065,8 @@ export type SceneThingDto =
       units?: number;
       /** A person the kit drew in a pose for the whole scene, not standing: in bed (the bed part of the drawing), or lying. Absent, standing. */
       drawnAs?: 'in bed' | 'lying';
+      /** What a person the kit drew wears, in words: as the scene opens, then in each of their dress states in turn ("dress-1", …). Absent on a scene made before it was said. */
+      wears?: string[];
     }
   | { id: string; kind: 'stat'; value: string; caption: string }
   | {

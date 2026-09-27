@@ -44,6 +44,7 @@ import { storyBibleFor } from '../../domain/studio/studio-stage';
 import {
   describeForProducer,
   honestReply,
+  sceneReply,
 } from '../../domain/studio/studio-words';
 import type { ClockPort } from '../../ports/clock.port';
 import type {
@@ -542,6 +543,8 @@ export class StudioService {
     }
 
     let note: string | null = null;
+    /** What was set going on scenes, said in code's own words. */
+    let tried: string | null = null;
     try {
       if (!draft.refuse)
         switch (draft.action) {
@@ -572,6 +575,12 @@ export class StudioService {
               break;
             }
             const notes: string[] = [];
+            const set: Parameters<typeof sceneReply>[0]['scenes'][number][] =
+              [];
+            // What the stage cannot show is left out of what is written,
+            // and said so: never promised.
+            const cannot = draft.cannot?.trim() || null;
+            const request = draft.request ?? said;
             for (const scene of asked) {
               // As the one before left it: writing a scene already.
               const now =
@@ -580,11 +589,26 @@ export class StudioService {
                 show,
                 now,
                 scene,
-                draft.request ?? said,
+                cannot
+                  ? `${request.replace(/[.!?\s]*$/u, '.')} Leave out ${cannot.replace(/[.!?\s]*$/u, '')}: the stage cannot show it.`
+                  : request,
                 { id: mine.id, words: said },
               );
               if (one) notes.push(one);
+              else
+                set.push({
+                  number: scene.position + 1,
+                  // A made story scene is made again and checked; a made
+                  // explainer's shows once made again; the rest once made.
+                  next: !scene.sceneKey
+                    ? 'film'
+                    : scene.sheet?.kind === 'story'
+                      ? 'checked'
+                      : 'remade',
+                });
             }
+            if (set.length)
+              tried = sceneReply({ scenes: set, request, cannot });
             note = notes.length ? notes.join(' ') : null;
             break;
           }
@@ -607,14 +631,12 @@ export class StudioService {
       showId: show.id,
       episodeId: episode.id,
       role: 'assistant',
-      // A change set going is a try, checked where it is made again: never done yet.
+      // A change to a scene set going is said in code's own words: a try,
+      // checked where it is made again, never done yet. Nothing set going
+      // is never said to have changed anything.
       content:
-        note ??
-        honestReply(
-          draft.reply,
-          draft.refuse ? 'none' : draft.action,
-          scenes.some((s) => s.sceneKey),
-        ),
+        [tried, note].filter(Boolean).join(' ') ||
+        honestReply(draft.reply, draft.refuse ? 'none' : draft.action),
       meta: {
         choices: note
           ? []

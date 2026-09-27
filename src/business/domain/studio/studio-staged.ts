@@ -58,6 +58,20 @@ const ON_FEET = new Set([
 ]);
 /** A place change smaller than this share of the stage is none. */
 const MOVED = 0.02;
+/** Feet higher than this share of the stage above the ground beside a seat or a bed are up on it. */
+const RAISED = 0.03;
+/** Two things this close together, in ms, happen at once. */
+const SAME_MOMENT = 200;
+/** What the stage may play a handling as, for what the words have done: a catch of nothing coming is a take. */
+const PLAYED_AS: Record<string, string[]> = {
+  take: ['take', 'catch'],
+  catch: ['catch', 'take'],
+  drop: ['drop', 'throw', 'put'],
+  throw: ['throw', 'drop'],
+  put: ['put', 'drop'],
+  chew: ['chew', 'eat'],
+  eat: ['eat', 'chew'],
+};
 
 /** A moment as a clock reads it, to a tenth: 0:04.2. */
 const at = (ms: number) => {
@@ -354,6 +368,58 @@ export function describeStaged(
             ? 'right of the middle'
             : 'on the right';
   };
+  const H = scene.stagings.wide.h;
+  /**
+   * The seat or bed someone stands up on at a step, by where their feet
+   * are: over it, and above the ground beside it. Null for anyone on the
+   * ground.
+   */
+  const upOn = (k: number, who: string): string | null => {
+    const place = places[k]?.[who];
+    if (!place) return null;
+    const x = place.x + place.w / 2;
+    const feet = place.y + place.h;
+    return (
+      features.find(
+        (f) =>
+          (f.seat || f.lies) &&
+          x > f.at.wide.x &&
+          x < f.at.wide.x + f.at.wide.w &&
+          f.way.wide.y - feet > H * RAISED,
+      )?.name ?? null
+    );
+  };
+  /** The step on at a moment. */
+  const stepAt = (t: number) =>
+    Math.max(
+      0,
+      scene.steps.findLastIndex((step) => step.atMs <= t),
+    );
+  /** Whether someone was up before a moment: stood up since they last sat or lay down, and not only as it comes. */
+  const stoodBy = (who: string, t: number): boolean =>
+    (scene.acting?.[who]?.moves ?? [])
+      .filter(
+        ([when, move]) =>
+          when < t - SAME_MOMENT &&
+          (move === 'stand' || move === 'sit' || move === 'lie'),
+      )
+      .sort((a, b) => a[0] - b[0])
+      .pop()?.[1] === 'stand';
+  /** What someone wears at a moment, in words: as drawn, or in the outfit last shown. */
+  const wornAt = (person: Drawing, t: number): string | null => {
+    const shown = scene.effects
+      .filter(
+        (e) =>
+          e.target === person.id &&
+          e.do === 'show' &&
+          e.part?.startsWith('dress-') &&
+          e.atMs <= t,
+      )
+      .sort((a, b) => a.atMs - b.atMs)
+      .pop();
+    const k = shown ? Number(shown.part!.slice('dress-'.length)) : 0;
+    return person.wears?.[k] ?? null;
+  };
   const lines: string[] = [];
   lines.push(
     `Scene "${sheet.title}", ${set?.name ?? sheet.set}. The set's things: ${
@@ -375,6 +441,7 @@ export function describeStaged(
         e.do === 'show' &&
         e.part?.startsWith('dress-'),
     );
+    const wears = person.wears?.[0];
     lines.push(
       `${nameOf(person.id)}: ${
         how === 'in bed'
@@ -384,7 +451,7 @@ export function describeStaged(
             : person.rig
               ? 'drawn standing, rigged'
               : 'drawn by the artist'
-      }${dresses.length ? `; changes clothes at ${dresses.map((e) => at(e.atMs)).join(', ')}` : ''}.`,
+      }${wears ? `; as it opens, wears ${wears}` : ''}${dresses.length ? `; changes clothes at ${dresses.map((e) => at(e.atMs)).join(', ')}` : ''}.`,
     );
   }
   for (const prop of scene.props ?? []) {
@@ -443,6 +510,27 @@ export function describeStaged(
       const withIt = baked
         ? `; the ${drawnAs(person) === 'in bed' ? 'bed' : 'floor'} moves with them`
         : '';
+      // What they do first, then where it takes them: said in that order
+      // when both come at once.
+      for (const [t, move, ms] of scene.acting?.[who]?.moves ?? []) {
+        if (!inTime(t) || LINE_MOVES.has(move)) continue;
+        // Up, and where they are as they are: stood up on what they sat
+        // on, or down on the ground.
+        const stoodOn =
+          move === 'stand' ? upOn(stepAt(t + (ms ?? 0) * 0.6), who) : null;
+        note(
+          t,
+          move === 'stand'
+            ? stoodOn
+              ? `${nameOf(who)} gets up and stands up on the ${stoodOn}`
+              : `${nameOf(who)} gets up${withIt}`
+            : move === 'sit'
+              ? `${nameOf(who)} sits down`
+              : move === 'lie'
+                ? `${nameOf(who)} lies down`
+                : `${nameOf(who)} makes the move "${move}"${ON_FEET.has(move) ? withIt : ''}`,
+        );
+      }
       scene.steps.forEach((step, i) => {
         if (!i || !inTime(step.atMs)) return;
         const was = scene.steps[i - 1].show.includes(who);
@@ -460,41 +548,43 @@ export function describeStaged(
           );
         const inBed = step.abed?.[who];
         const wasInBed = scene.steps[i - 1].abed?.[who];
+        // Out of a bed, or on from one, as their feet are: down on the
+        // ground beside it, or still up on it.
+        const up = upOn(i, who);
+        const from = upOn(i - 1, who);
+        const a = places[i - 1]?.[who];
+        const b = places[i]?.[who];
+        const moved = a && b && Math.abs(a.x - b.x) > W * MOVED;
         if (inBed && !wasInBed)
           note(step.atMs, `${nameOf(who)} gets into the ${inBed}`);
         else if (!inBed && wasInBed && was && is)
           note(
             step.atMs,
-            `${nameOf(who)} is out of the ${wasInBed}, beside it`,
+            up
+              ? `${nameOf(who)} is out from under the ${wasInBed}'s cover, still up on the ${up}`
+              : `${nameOf(who)} is out of the ${wasInBed}, down beside it`,
           );
-        else if (was && is) {
-          const a = places[i - 1]?.[who];
-          const b = places[i]?.[who];
-          if (a && b && Math.abs(a.x - b.x) > W * MOVED)
-            note(step.atMs, `${nameOf(who)} goes ${whereAt(i, who)}${withIt}`);
-        }
+        else if (was && is && moved)
+          note(
+            step.atMs,
+            from && stoodBy(who, step.atMs)
+              ? `${nameOf(who)} walks along the top of the ${from} and on ${whereAt(i, who)}`
+              : `${nameOf(who)} goes ${whereAt(i, who)}${withIt}`,
+          );
       });
-      for (const [t, move] of scene.acting?.[who]?.moves ?? []) {
-        if (!inTime(t) || LINE_MOVES.has(move)) continue;
-        note(
-          t,
-          move === 'stand'
-            ? `${nameOf(who)} gets up${withIt}`
-            : move === 'sit'
-              ? `${nameOf(who)} sits down`
-              : move === 'lie'
-                ? `${nameOf(who)} lies down`
-                : `${nameOf(who)} makes the move "${move}"${ON_FEET.has(move) ? withIt : ''}`,
-        );
-      }
       for (const effect of scene.effects)
         if (
           effect.target === who &&
           effect.do === 'show' &&
           effect.part?.startsWith('dress-') &&
           inTime(effect.atMs)
-        )
-          note(effect.atMs, `${nameOf(who)} is now dressed in other clothes`);
+        ) {
+          const now = wornAt(person, effect.atMs);
+          note(
+            effect.atMs,
+            `${nameOf(who)} is now dressed in ${now ?? 'other clothes'}`,
+          );
+        }
     }
     for (const prop of scene.props ?? [])
       for (const [t, who, does, to] of prop.does)
@@ -519,11 +609,38 @@ export function describeStaged(
             t <= (scene.steps[0]?.atMs ?? 0) + 700,
         );
         const bed = scene.steps[0]?.abed?.[person.id];
+        const wears = person.wears?.[0];
         if (held)
           seen.unshift(
-            `${nameOf(person.id)} opens ${bed ? `in the ${bed}, ${held[1] === 'sit' ? 'sitting up' : 'lying'} under its cover` : held[1] === 'sit' ? 'sitting' : 'lying down'}`,
+            `${nameOf(person.id)} opens ${bed ? `in the ${bed}, ${held[1] === 'sit' ? 'sitting up' : 'lying'} under its cover` : held[1] === 'sit' ? 'sitting' : 'lying down'}${wears ? `, in ${wears}` : ''}`,
           );
       }
+    // What the words have someone do with a thing (hand it over, put it
+    // on) that the film does not show at all: said so, so it is not taken
+    // for seen.
+    for (const i of group) {
+      const one = sheet.beats[i];
+      const plays = doingOf(one.do)?.plays;
+      if (!one.who || !plays || !('prop' in plays)) continue;
+      const as = PLAYED_AS[plays.prop] ?? [plays.prop];
+      const done =
+        (scene.props ?? []).some((prop) =>
+          prop.does.some(
+            ([t, by, does]) => inTime(t) && by === one.who && as.includes(does),
+          ),
+        ) ||
+        ((plays.prop === 'wear' || plays.prop === 'doff') &&
+          scene.effects.some(
+            (e) =>
+              e.target === one.who &&
+              e.part?.startsWith('dress-') &&
+              inTime(e.atMs),
+          ));
+      if (!done)
+        seen.push(
+          `${nameOf(one.who)} is not seen to ${one.do?.replace(/-/g, ' ')} anything, as the words say`,
+        );
+    }
     const named = group
       .map((i) => {
         const one = sheet.beats[i];

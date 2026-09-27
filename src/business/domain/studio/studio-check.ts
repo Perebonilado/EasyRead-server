@@ -38,6 +38,8 @@ import {
 import { isGear, type FigureSpec } from '../scene-figure';
 import {
   WEAR_WORDS,
+  colourBefore,
+  colourIn,
   outfitWords,
   putOn,
   sameOutfit,
@@ -112,7 +114,8 @@ export interface SheetProblem {
     | 'quiet'
     | 'empty'
     | 'continuity'
-    | 'storyboard';
+    | 'storyboard'
+    | 'kept';
   /** In plain words, for the writer. */
   message: string;
   /** The beat it is about, from 0; null for the whole scene. */
@@ -291,12 +294,18 @@ const WORN_SAID = new RegExp(
 );
 
 /** What the words say is worn, by whom and where: each thing worn they name, and the word before it that says whose. */
-export function wornSaidIn(
-  text: string,
-): { at: number; thing: string; whose: string | null; wearing: boolean }[] {
+export function wornSaidIn(text: string): {
+  at: number;
+  thing: string;
+  /** The words for it as said, its colour with it: "red coat". */
+  said: string;
+  whose: string | null;
+  wearing: boolean;
+}[] {
   const out: {
     at: number;
     thing: string;
+    said: string;
     whose: string | null;
     wearing: boolean;
   }[] = [];
@@ -315,6 +324,7 @@ export function wornSaidIn(
     out.push({
       at: m.index,
       thing: said.split(/\s+/).pop() ?? said,
+      said,
       whose: m.groups?.whose?.toLowerCase() ?? null,
       wearing: m.groups?.how !== 'in',
     });
@@ -535,7 +545,13 @@ export function mendSheet(
     if (!held || isGear(held)) continue;
     const name = ownThings.find((t) => t.id === held)?.name ?? held;
     const wear = wearableOf(name);
-    if (!wear || wear.slot === 'none' || wear.slot === 'outfit') continue;
+    if (
+      !wear ||
+      wear.slot === 'none' ||
+      wear.slot === 'outfit' ||
+      wear.slot === 'feet'
+    )
+      continue;
     const said = wornInWords.some((w) => wearableOf(w.thing)?.kit === wear.kit);
     const putsOn = sheet.beats.some(
       (b) =>
@@ -670,11 +686,17 @@ export function mendSheet(
         ? DRAWN
         : null);
     if (!kind) return null;
+    // Nor a vehicle in a room, unless the room is where it is kept (a
+    // garage with its car): the bus that goes by outside is not in it.
     if (
       set &&
       (set.id === word ||
         studioId(set.name).split('-').includes(word) ||
-        (kind === 'vehicle' && set.kind === 'vessel'))
+        (kind === 'vehicle' && set.kind === 'vessel') ||
+        (kind === 'vehicle' &&
+          set.kind === 'indoor' &&
+          !features.some((f) => f.id === word) &&
+          !new RegExp(`\\b${word}`, 'iu').test(`${set.name} ${set.look}`)))
     )
       return null;
     const own =
@@ -886,6 +908,13 @@ export function mendSheet(
     // what they wear.
     const clothes = id === 'dress' || id === 'undress';
     let thing = plan.thing;
+    // What is drunk is in the cup they hold: "sips his tea", "takes a sip".
+    if (id === 'drink' && (!thing || holders.get(thing) !== who)) {
+      const cup = [...holders].find(
+        ([one, by]) => by === who && kindOf(one) === 'drink',
+      )?.[0];
+      if (cup) thing = cup;
+    }
     let wornOnly: string | null = null;
     if (
       clothes &&
@@ -893,6 +922,7 @@ export function mendSheet(
       !handled(thing) &&
       (plan.fresh?.thing !== thing ||
         wearableOf(thing)?.slot === 'outfit' ||
+        wearableOf(thing)?.slot === 'feet' ||
         wearableOf(thing)?.slot === 'none')
     ) {
       wornOnly = thing;
@@ -1164,14 +1194,14 @@ export function mendSheet(
         return fall(`the ${named} is nothing to wear`);
       if (!prop) {
         make('business', { do: id, ...(wornOnly ? { thing: wornOnly } : {}) });
-        changeClothes(who, id as 'dress' | 'undress', wornOnly);
+        changeClothes(who, id as 'dress' | 'undress', wornOnly, kept);
         return;
       }
       if (id === 'undress') {
         make('business', { do: id, prop, thing: prop });
         holders.set(prop, who);
         restsBy.delete(prop);
-        changeClothes(who, id, prop);
+        changeClothes(who, id, prop, kept);
         lastThing = prop;
         return;
       }
@@ -1312,7 +1342,7 @@ export function mendSheet(
     if (id === 'dress') {
       holders.delete(prop);
       restsBy.delete(prop);
-      changeClothes(who, id, prop);
+      changeClothes(who, id, prop, kept);
     }
     make('business', {
       do: id,
@@ -1638,7 +1668,9 @@ export function mendSheet(
     const now = dressed.get(who);
     const wear = wearOf(thing);
     if (!now || !wear) return true;
-    if (now.undressed) return wear.slot === 'none';
+    // Not dressed yet, in bed: in their pyjamas and bare feet, and no more.
+    if (now.undressed) return wear.slot === 'none' || wear.kit === 'pyjamas';
+    if (wear.slot === 'feet') return !now.spec.extras.includes('bare feet');
     if (wear.slot === 'top') return now.spec.top === wear.kit;
     if (wear.slot === 'headwear') return now.spec.headwear === wear.kit;
     if (wear.slot === 'extras')
@@ -1650,15 +1682,18 @@ export function mendSheet(
     who: string,
     id: 'dress' | 'undress',
     thing: string | null,
+    said = '',
   ) => {
     const now = dressed.get(who);
     const usual = byId.get(who)?.figure;
     if (!now || !usual) return;
     const wear = wearOf(thing) ?? { slot: 'outfit' as const, kit: null };
+    const own = ownThings.find((t) => t.id === thing);
+    const look = own?.look ?? colourBefore(said, own?.name ?? thing);
     dressed.set(who, {
       spec:
         id === 'dress'
-          ? putOn(now.undressed ? usual : now.spec, usual, wear)
+          ? putOn(now.undressed ? usual : now.spec, usual, wear, look)
           : takeOff(now.spec, wear),
       undressed: false,
     });
@@ -1723,7 +1758,7 @@ export function mendSheet(
               ? 'his'
               : 'their';
         mended.push(
-          `beat ${at + 1}: ${nameOf(who)} puts on the ${worn.thing} first, as the words have them in it`,
+          `beat ${at + 1}: ${nameOf(who)} puts on the ${worn.said} first, as the words have them in it`,
         );
         const plan = {
           do: 'dress' as const,
@@ -1742,7 +1777,7 @@ export function mendSheet(
           { ...blankBeat('business'), who },
           plan,
           at,
-          `${nameOf(who)} puts on ${whose} ${worn.thing}.`,
+          `${nameOf(who)} puts on ${whose} ${worn.said}.`,
         );
       }
     // What the words send up into a feature, or find caught there, is in
@@ -1978,6 +2013,23 @@ export function mendSheet(
       },
     ];
   });
+  // A thing of the show's own that is put on, with no colour given it:
+  // the colour it is worn in, so it is drawn as it will be worn.
+  for (const [k, thing] of ownThings.entries()) {
+    const wear = wearableOf(thing.name);
+    if (!wear?.kit || colourIn(thing.look)) continue;
+    const on = sheet.beats.find(
+      (b) => b.do === 'dress' && (b.thing ?? b.prop) === thing.id,
+    );
+    const usual = on?.who ? byId.get(on.who)?.figure : undefined;
+    if (!on || !usual) continue;
+    const worn = putOn(usual, usual, wear, colourBefore(on.say, thing.name));
+    const look = `${wear.slot === 'top' ? worn.topColour : worn.accentColour} ${thing.look ?? thing.name}`;
+    ownThings[k] = { ...thing, look };
+    const was = newThings.findIndex((t) => t.id === thing.id);
+    if (was >= 0) newThings[was] = ownThings[k];
+    else newThings.push(ownThings[k]);
+  }
   return { sheet, mended, features: found, things: newThings };
 }
 
@@ -2155,8 +2207,15 @@ export function withThings(
 ): StudioBible {
   const own = bible.things ?? [];
   const more = things.filter((t) => !own.some((o) => o.id === t.id));
+  // A look found where it had none, or the one it had with its colour.
   const looked = own.map(
-    (o) => (!o.look && things.find((t) => t.id === o.id && t.look)) || o,
+    (o) =>
+      things.find(
+        (t) =>
+          t.id === o.id &&
+          t.look &&
+          (!o.look || (t.look !== o.look && t.look.endsWith(o.look))),
+      ) || o,
   );
   return more.length || looked.some((o, k) => o !== own[k])
     ? { ...bible, things: [...looked, ...more] }
@@ -2721,16 +2780,14 @@ export function carriedWears(
 ): Map<number, NonNullable<EndState['wears']>> {
   const out = new Map<number, NonNullable<EndState['wears']>>();
   if (!bible) return out;
+  // What the sheets as written have put on or taken off, not what their
+  // words say someone has on: a scene made before clothes were put on at
+  // all keeps the fingerprint it was made with.
   const changes = scenes.some(
     (scene) =>
       scene.sheet?.kind === 'story' &&
       (scene.sheet.onStage.some((p) => p.wears?.length) ||
-        scene.sheet.beats.some(
-          (b) =>
-            b.do === 'dress' ||
-            b.do === 'undress' ||
-            wornSaidIn(b.say).length > 0,
-        )),
+        scene.sheet.beats.some((b) => b.do === 'dress' || b.do === 'undress')),
   );
   if (!changes) return out;
   let end: EndState | null = null;
@@ -3191,7 +3248,8 @@ export const errorsIn = (problems: readonly SheetProblem[]) =>
 
 /**
  * What a written scene goes back to its writer for, once: whatever keeps
- * it from being made, and a length or a still picture that does not.
+ * it from being made, a length or a still picture that does not, and the
+ * lines a scene written again as asked lost that no one asked to lose.
  */
 export const sentBackFor = (problems: readonly SheetProblem[]) =>
   problems.filter(
@@ -3199,5 +3257,56 @@ export const sentBackFor = (problems: readonly SheetProblem[]) =>
       p.level === 'error' ||
       p.rule === 'length' ||
       p.rule === 'quiet' ||
-      p.rule === 'storyboard',
+      p.rule === 'storyboard' ||
+      p.rule === 'kept',
   );
+
+/** A line's words as compared: its letters and numbers only. */
+const wordsOf = (text: string) =>
+  text
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}]+/gu, ' ')
+    .trim();
+
+/**
+ * The lines and narration a scene written again as asked lost, that the
+ * request does not name: a change to how Tobi gets out of bed is no
+ * reason to lose "I couldn't sleep" or the goodbye at the door. Said to
+ * the writer to put back, unless the request asks for them to go.
+ */
+export function linesKept(
+  before: StorySheet,
+  after: StorySheet,
+  request: string,
+): SheetProblem[] {
+  const now = new Set(
+    after.beats
+      .filter((b) => b.kind === 'line' || b.kind === 'narration')
+      .map((b) => wordsOf(b.say)),
+  );
+  const asked = wordsOf(request);
+  // The request asks for lines to go, or for it to be shorter: none is kept to.
+  if (
+    /\b(?:cut|shorter|shorten|trim|remove|drop|delete|lose|fewer|less)\b/u.test(
+      asked,
+    )
+  )
+    return [];
+  const lost = before.beats.filter((b) => {
+    if (b.kind !== 'line' && b.kind !== 'narration') return false;
+    const said = wordsOf(b.say);
+    return said && !now.has(said) && !asked.includes(said);
+  });
+  if (!lost.length) return [];
+  return [
+    {
+      rule: 'kept',
+      level: 'warning',
+      beat: null,
+      message: `These lines were in the scene before and are gone, though the maker asked only for this: "${request.slice(0, 300)}". Put each back where it was, word for word: ${lost
+        .slice(0, 12)
+        .map((b) => `${b.who ?? 'narrator'}: "${b.say}"`)
+        .join('; ')}.`,
+    },
+  ];
+}

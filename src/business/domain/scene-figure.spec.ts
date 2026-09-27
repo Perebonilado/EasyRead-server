@@ -116,6 +116,14 @@ describe('reading who someone is', () => {
 });
 
 describe('a person drawn by the kit', () => {
+  it('draws bare feet with no shoes on them, and shoes back on without', () => {
+    const shoes = (svg: string) =>
+      [...svg.matchAll(/<ellipse[^>]*fill="#3b3440"/g)].length;
+    const shod = drawFigure(as({}), 'x').svg;
+    const bare = drawFigure(as({ extras: ['bare feet'] }), 'x').svg;
+    expect(shoes(shod) - shoes(bare)).toBe(2);
+  });
+
   it('draws the same person the same way every time', () => {
     const spec = as({ hair: 'braids', headwear: 'crown' });
     expect(drawFigure(spec, 'mira').svg).toBe(drawFigure(spec, 'mira').svg);

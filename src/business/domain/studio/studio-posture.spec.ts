@@ -194,11 +194,106 @@ describe('what everyone wears as a scene goes on', () => {
   it('has Tobi, getting dressed out of bed at dawn, in pyjamas until he puts his uniform on', () => {
     const { sheet } = staged(scene1);
     const worn = outfitsOf(sheet, bible).get('tobi')!;
-    expect(worn.opening).toMatchObject({ top: 'pyjamas', extras: [] });
+    expect(worn.opening).toMatchObject({
+      top: 'pyjamas',
+      extras: ['bare feet'],
+    });
     const at = sheet.beats.findIndex((b) => b.do === 'dress');
     expect(worn.changes).toEqual([
       { beat: at, spec: bible.characters[0].figure },
     ]);
+  });
+
+  it('has someone in bed who gets dressed into anything in their pyjamas until they do, never twice', () => {
+    // "Tobi is snuggled up in bed in his pyjamas": in them already.
+    const sheet = sheetOf(
+      [{ who: 'tobi', spot: 'centre', pose: 'in bed' }],
+      [
+        {
+          kind: 'narration',
+          say: 'Tobi is snuggled up in bed in his pyjamas.',
+        },
+        {
+          kind: 'action',
+          who: 'tobi',
+          do: 'stand-up',
+          target: 'bed',
+          say: 'Tobi gets out of bed.',
+        },
+        {
+          kind: 'business',
+          who: 'tobi',
+          do: 'dress',
+          thing: 'jumper',
+          say: 'Tobi puts on his red jumper.',
+        },
+      ],
+    );
+    const { sheet: mended } = staged(sheet);
+    expect(mended.beats.filter((b) => b.do === 'dress')).toHaveLength(1);
+    const worn = outfitsOf(mended, bible).get('tobi')!;
+    expect(worn.opening).toMatchObject({ top: 'pyjamas' });
+    expect(worn.changes.map((c) => [c.spec.top, c.spec.topColour])).toEqual([
+      ['jumper', 'red'],
+    ]);
+  });
+
+  it('keeps the colour the words give clothes someone has on, put on for them', () => {
+    const sheet = sheetOf(
+      [
+        { who: 'tobi', spot: 'left' },
+        { who: 'mama', spot: 'right' },
+      ],
+      [
+        { kind: 'narration', say: 'Mama is wearing her pink coat.' },
+        { kind: 'line', who: 'mama', say: 'Off we go!' },
+      ],
+    );
+    const { sheet: mended } = staged(sheet);
+    expect(mended.beats.find((b) => b.do === 'dress')).toMatchObject({
+      who: 'mama',
+      say: 'Mama puts on her pink coat.',
+    });
+    const worn = outfitsOf(mended, bible).get('mama')!;
+    expect(worn.changes.at(-1)!.spec).toMatchObject({
+      top: 'coat',
+      topColour: 'pink',
+    });
+  });
+
+  it("draws a thing of the show's own that is put on in the colour it is worn in", () => {
+    const jumper = {
+      ...bible,
+      things: [{ id: 'jumper', name: 'jumper', kind: 'thing' as const }],
+    };
+    const sheet = sheetOf(
+      [{ who: 'tobi', spot: 'centre' }],
+      [
+        {
+          kind: 'business',
+          who: 'tobi',
+          do: 'take',
+          thing: 'jumper',
+          prop: 'jumper',
+          say: 'Tobi picks up his jumper.',
+        },
+        {
+          kind: 'business',
+          who: 'tobi',
+          do: 'dress',
+          thing: 'jumper',
+          prop: 'jumper',
+          say: 'Tobi puts on his jumper.',
+        },
+      ],
+      { props: [{ prop: 'jumper', near: 'tobi' }] },
+    );
+    const mended = mendSheet(sheet, jumper);
+    const look = mended.things.find((t) => t.id === 'jumper')?.look;
+    const grown = withFound(jumper, 'bedroom', mended);
+    const worn = outfitsOf(mended.sheet, grown).get('tobi')!;
+    // The colour it is drawn in is the colour it is worn in.
+    expect(look).toBe(`${worn.changes.at(-1)!.spec.topColour} jumper`);
   });
 
   it('puts a coat on over what someone usually wears, in its own colour', () => {
@@ -246,7 +341,7 @@ describe('Tobi in bed, as the stage plays it', () => {
     });
   });
 
-  it("has him in the set's bed, held sitting up, until he gets out beside it", () => {
+  it("has him in the set's bed, held sitting up, and steps him down beside it as he gets up", () => {
     expect(script.steps[0].stage?.at?.tobi).toBe('in:bed');
     expect(script.steps[0].effects).toContainEqual({
       target: 'tobi',
@@ -261,10 +356,13 @@ describe('Tobi in bed, as the stage plays it', () => {
     );
     expect(stand).toBeGreaterThan(0);
     expect(out).toBeGreaterThan(stand);
-    // Out of it after getting up, in the same quiet.
-    expect(script.steps[out].after!).toBeGreaterThan(
-      script.steps[stand].after!,
-    );
+    // Down beside it just as he starts to rise, in the same quiet: never
+    // stood up on the bed first.
+    const rise = script.steps[stand].effects.find((e) => e.do === 'stand')!;
+    const lead = script.steps[out].after! - script.steps[stand].after!;
+    expect(lead).toBeGreaterThan(0);
+    expect(lead).toBeLessThanOrEqual(0.3);
+    expect(lead * 1000).toBeLessThan((rise.ms ?? 0) * 0.5);
     expect(stationsOf(script, 'tobi').slice(0, 2)).toEqual([
       'in:bed',
       'by:bed:1',
@@ -279,7 +377,7 @@ describe('Tobi in bed, as the stage plays it', () => {
     });
     expect(sheet.beats[at - 2]).toMatchObject({ do: 'take', thing: 'uniform' });
     expect(mendSheet(scene1, bible).mended.join(' ')).toMatch(
-      /Tobi puts on the uniform first/,
+      /Tobi puts on the new uniform first/,
     );
     void mended;
     // The uniform goes into his clothes as he puts it on: shown at its moment.
@@ -313,14 +411,14 @@ describe('Tobi in bed, as the stage plays it', () => {
         const was = places[k - 1][who];
         const now = places[k][who];
         if (!was || !now || Math.abs(was.x - now.x) < 1) continue;
-        // Whoever was in a bed or on a seat moved only once up.
+        // Whoever was in a bed or on a seat moved only as they got up.
         const from =
           script.steps.filter((step) => step.stage)[k - 1]?.stage?.at?.[who] ??
           '';
         if (!/^(?:in|on):/.test(from)) continue;
         expect(
           moves.some(
-            ([at, move]) => move === 'stand' && at < scene.steps[k].atMs,
+            ([at, move]) => move === 'stand' && at <= scene.steps[k].atMs,
           ),
         ).toBe(true);
       }
@@ -353,6 +451,14 @@ describe('getting up first, sitting down where the words say', () => {
     expect(stand.after).toBe(0);
     expect(leave.after!).toBeGreaterThanOrEqual(1.1);
     expect(script.beats[0].holdS!).toBeGreaterThan(leave.after!);
+    // Down beside the bed as he rises, and off from there: never along
+    // the top of it from where he sat.
+    const down = script.steps.find(
+      (s) => s.stage?.at?.tobi?.startsWith('by:bed:') && !s.stage.leave,
+    )!;
+    expect(down.after!).toBeGreaterThan(0);
+    expect(down.after!).toBeLessThanOrEqual(0.3);
+    expect(leave.after!).toBeCloseTo(down.after! + 1.1, 5);
   });
 
   it('walks someone to a seat to sit on it, and to a sofa to lie along it', () => {

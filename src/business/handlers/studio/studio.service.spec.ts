@@ -662,8 +662,44 @@ describe('a change asked for a scene', () => {
     expect(studio.jobs[1].ask!.id).toBe(
       studio.messages.find((m) => m.role === 'user')!.id,
     );
-    // Never "done" before it is: a try, checked.
-    expect(done.message.content).toBe("Got it. I'll try that and check it.");
+    // Never "done" before it is, whatever the producer said: a try, said
+    // in the Studio's own words, checked where it was made.
+    expect(done.message.content).toBe(
+      "I'll rewrite scenes 2 and 1: Tobi gets out of bed himself. Then I'll make scene 1 again and check it; scene 2 shows once the film is made.",
+    );
+  });
+
+  it('leaves out what the stage cannot show, and says so, never promising it', async () => {
+    const studio = studioInMemory();
+    studio.scenes.set('c1', {
+      ...studio.scenes.get('c1')!,
+      sceneKey: 'k1',
+      audioKey: 'a1',
+      status: 'made',
+    });
+    Object.assign(studio.answer, {
+      reply: "Nice touch! I'll have her ride out and the bus drive past.",
+      action: 'scene',
+      scene: 1,
+      request: 'Ada runs out of the door with her scooter',
+      cannot: 'riding a scooter, or a bus going past the window',
+    });
+    const done = await studio.service.turn(
+      'u1',
+      's1',
+      {
+        episodeId: 'e0',
+        message:
+          'can Ada ride her scooter out of the door, and the bus drive past the window?',
+      },
+      () => undefined,
+    );
+    expect(studio.jobs[0].request).toBe(
+      'Ada runs out of the door with her scooter. Leave out riding a scooter, or a bus going past the window: the stage cannot show it.',
+    );
+    expect(done.message.content).toBe(
+      "The stage can't show riding a scooter, or a bus going past the window, so I'll leave that out. I'll rewrite scene 1: Ada runs out of the door with her scooter. Then I'll make it again and check it.",
+    );
   });
 
   it('asks which scene when a number is none of them', async () => {

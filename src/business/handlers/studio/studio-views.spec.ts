@@ -305,4 +305,30 @@ describe('clothes carried from one scene into the next', () => {
     expect(needsMaking(row, coatBible, brief)).toBe(false);
     expect(needsMaking(row, coatBible, brief, carried)).toBe(true);
   });
+
+  it('leaves a film made before clothes were put on as it was: words that someone wears something change nothing', () => {
+    // An old episode: no one puts anything on; the words only say it.
+    const said = storySheetOf({
+      ...withCoat,
+      onStage: [{ who: 'mama', spot: 'centre' }],
+      beats: [
+        { kind: 'narration', say: 'Mama is wearing her red coat.' },
+        { kind: 'line', who: 'mama', say: 'It is cold out.' },
+      ],
+    });
+    const rows = [
+      { position: 0, sheet: said },
+      { position: 1, sheet: next },
+    ];
+    expect(carriedWears(rows, coatBible).size).toBe(0);
+    const row = {
+      sheet: next,
+      status: 'made',
+      sceneKey: 'k',
+      madeHash: sceneFingerprint(next, coatBible, brief),
+    } as StudioSceneRecord;
+    expect(
+      needsMaking(row, coatBible, brief, carriedWears(rows, coatBible).get(1)),
+    ).toBe(false);
+  });
 });

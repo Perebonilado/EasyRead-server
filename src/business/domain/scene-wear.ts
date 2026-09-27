@@ -21,8 +21,9 @@ import {
   type Top,
 } from './scene-figure';
 
-/** Where on someone the kit draws a thing worn: their top, their head, an extra; their whole usual outfit; or nowhere it shows (shoes, socks). */
-export type WearSlot = 'top' | 'headwear' | 'extras' | 'outfit' | 'none';
+/** Where on someone the kit draws a thing worn: their top, their head, an extra; their whole usual outfit; their feet (shoes on, or bare); or nowhere it shows (a watch, gloves). */
+export type WearSlot =
+  'top' | 'headwear' | 'extras' | 'outfit' | 'feet' | 'none';
 
 export interface Wearable {
   slot: WearSlot;
@@ -99,7 +100,12 @@ const WEARABLES: { words: string; wear: Wearable }[] = [
   },
   {
     words:
-      'shoes?|boots?|trainers?|slippers?|wellies|wellingtons?|socks?|gloves?|mittens?|ties?|belts?|watch(?:es)?|necklaces?|bracelets?|masks?',
+      '(?:school )?shoes?|boots?|trainers?|sneakers?|slippers?|wellies|wellingtons?|socks?',
+    wear: { slot: 'feet', kit: null },
+  },
+  {
+    words:
+      'gloves?|mittens?|ties?|belts?|watch(?:es)?|necklaces?|bracelets?|masks?',
     wear: { slot: 'none', kit: null },
   },
 ];
@@ -153,6 +159,24 @@ export function colourIn(text: string | null | undefined): ClothColour | null {
 }
 
 /**
+ * The colour some words give a thing worn, said just before the word for
+ * it: "puts on her red coat" is red, whatever else is said in them.
+ */
+export function colourBefore(
+  text: string | null | undefined,
+  word: string | null | undefined,
+): ClothColour | null {
+  const noun = (word ?? '')
+    .toLowerCase()
+    .split(/[^a-z]+/u)
+    .filter(Boolean)
+    .pop();
+  if (!text || !noun) return null;
+  const said = new RegExp(`((?:[a-z-]+\\s+){0,3})${noun}\\b`, 'iu').exec(text);
+  return said ? colourIn(said[1]) : null;
+}
+
+/**
  * What someone wears after putting a thing on: its drawing in its slot,
  * in the colour its look says, else the colour they usually wear there,
  * else their accent colour. Putting on what their usual outfit has (their
@@ -166,6 +190,9 @@ export function putOn(
 ): FigureSpec {
   const colour = colourIn(look);
   if (wear.slot === 'outfit') return { ...usual };
+  // Shoes on: their feet as they usually are.
+  if (wear.slot === 'feet')
+    return { ...now, extras: now.extras.filter((e) => e !== 'bare feet') };
   if (wear.slot === 'none' || !wear.kit) return now;
   if (wear.slot === 'top') {
     const top = wear.kit as Top;
@@ -197,8 +224,20 @@ export function putOn(
   };
 }
 
-/** What someone wears after taking a thing off: a top off leaves a plain t-shirt, a hat off their hair. */
+/** What someone wears after taking a thing off: a top off leaves a plain t-shirt, a hat off their hair, shoes off their bare feet. */
 export function takeOff(now: FigureSpec, wear: Wearable): FigureSpec {
+  if (wear.slot === 'feet')
+    return now.extras.includes('bare feet')
+      ? now
+      : {
+          ...now,
+          extras: [
+            ...now.extras
+              .filter((e) => e !== 'sandals')
+              .slice(-(MAX_EXTRAS - 1)),
+            'bare feet',
+          ],
+        };
   if (wear.slot === 'top' && now.top === wear.kit)
     return { ...now, top: 't-shirt' };
   if (wear.slot === 'headwear' && now.headwear === wear.kit)
@@ -210,8 +249,8 @@ export function takeOff(now: FigureSpec, wear: Wearable): FigureSpec {
 
 /**
  * What someone wears before they get dressed into their usual clothes:
- * pyjamas in bed, at night or at dawn, or in a bedroom; else a plain
- * t-shirt. Nothing carried or worn besides.
+ * pyjamas and bare feet in bed, at night or at dawn, or in a bedroom;
+ * else a plain t-shirt. Nothing carried or worn besides.
  */
 export function undressedFor(usual: FigureSpec, bedtime: boolean): FigureSpec {
   const colour: ClothColour =
@@ -224,7 +263,7 @@ export function undressedFor(usual: FigureSpec, bedtime: boolean): FigureSpec {
         topColour: colour,
         bottom: 'trousers',
         bottomColour: colour,
-        extras: usual.extras.filter((e) => e === 'glasses'),
+        extras: [...usual.extras.filter((e) => e === 'glasses'), 'bare feet'],
       }
     : {
         ...usual,
@@ -261,7 +300,7 @@ export function outfitWords(spec: FigureSpec): string {
       : ` and ${spec.bottomColour} ${spec.bottom}`;
   const hat = spec.headwear === 'none' ? '' : `, a ${spec.headwear}`;
   const extras = spec.extras.length
-    ? `, with ${spec.extras.join(' and ')}`
+    ? `, with ${spec.extras.map((e) => (/(?:s|feet)$/u.test(e) ? e : `a ${e}`)).join(' and ')}`
     : '';
   return `${top}${legs}${hat}${extras}`;
 }

@@ -101,6 +101,8 @@ export const studioTurnSchema = z.object({
     .nullable()
     .catch(null),
   request: z.string().nullable().catch(null),
+  // What of a change to a scene the stage cannot show, left out of it.
+  cannot: z.string().nullable().catch(null),
   refuse: z.boolean().catch(false),
 });
 

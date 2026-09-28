@@ -1,5 +1,7 @@
 # The Studio's world: physics, micro-interactions and 3D scenery
 
+> **2026-09-28: Track B (3D scenery) is replaced by `studio-scenery-plan.md` (layered 2D scenery).** Track A (physics) stands.
+
 A technical plan, 2026-09-28. It covers two tracks that ship together:
 
 - **Track A, physics and micro-interactions.** Bodies with weight, parts that swing, walks that plant their feet, action moves with a wind-up and a landing, and a world that reacts to the people in it.

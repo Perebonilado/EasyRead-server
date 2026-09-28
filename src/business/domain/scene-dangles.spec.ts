@@ -12,10 +12,13 @@ import {
 } from './scene-creature';
 import { drawCreature } from './scene-creature-draw';
 import {
+  ANIMAL_SWING,
   DANGLE_FEEL,
+  PERSON_SWING,
   cutChain,
   dangleCss,
   posedDangles,
+  strideLength,
   swapRigGroups,
 } from './scene-dangles';
 import { byId, elements, removeNode } from './scene-dom';
@@ -197,10 +200,42 @@ describe('a person on rig 2', () => {
       expect(ids(drawn.svg).filter((one) => ids(other).includes(one))).toEqual([
         'eyes',
       ]);
-      // A stride, 0.55 of the leg from hip to ground.
+      // A stride: as far as the legs carry them swung 24 degrees either
+      // way, each foot planted.
       expect(drawn.stride!.gait).toBe('walk');
       expect(drawn.stride!.length).toBeGreaterThan(10);
+      // Each part says which way it hangs from its root.
+      for (const one of drawn.dangles!)
+        expect(Math.hypot(...one.dir)).toBeCloseTo(1, 2);
     });
+  });
+
+  it('walks as the player walks them: no loop of its own steps the legs or bobs the body', () => {
+    for (const spec of swingers) {
+      const two = drawFigure(spec, 'x', { rig: 2 }).svg;
+      expect(two).not.toContain('@keyframes step');
+      expect(two).not.toContain('.on-walking .leg');
+      expect(two).not.toContain('@keyframes bob');
+      // Still the rig's legs, knees and sink, which the player sets.
+      expect(two).toContain('.l1{transform:rotate(calc(var(--legr,0)*1deg))}');
+      const one = drawFigure(spec, 'x').svg;
+      expect(one).toContain('.on-walking .leg{animation:step');
+    }
+    const walker = drawFigure(swingers[0], 'x', {
+      rig: 2,
+      signs: ['walking'],
+    }).svg;
+    expect(walker).not.toContain('@keyframes step');
+  });
+
+  it('strides as far as the legs carry them, each foot planted', () => {
+    // An adult's legs, hip to ankle: 38 + 4 units.
+    const drawn = drawFigure(PLAIN_FIGURE, 'x', { rig: 2 });
+    expect(drawn.stride!.length).toBeCloseTo(
+      Math.round(strideLength(42, PERSON_SWING) * 10) / 10,
+      5,
+    );
+    expect(strideLength(50, 24)).toBeCloseTo(4 * 50 * Math.sin(0.4189), 2);
   });
 
   it('stands exactly as rig 1 draws them, at rest', async () => {
@@ -273,6 +308,45 @@ describe('an animal and a creature on rig 2', () => {
     expect(bug.svg).toContain(
       '.dg-tail-0{rotate:calc(var(--dg-tail-0,0)*1deg)}',
     );
+  });
+
+  it('goes as the player walks it: its legs, bob, waddle, hop and slither by variables, no loops', () => {
+    for (const species of ANIMAL_SPECIES) {
+      const one = drawAnimal(plainAnimal(species), species);
+      const two = drawAnimal(plainAnimal(species), species, { rig: 2 });
+      expect(two.svg).not.toContain('@keyframes step');
+      expect(two.svg).not.toContain('.on-walking .a-gait');
+      expect(two.svg).not.toContain('.on-walking .rig-leg');
+      expect(two.svg).toContain('translate:0 calc(var(--gait-y,0)*-1px)');
+      if (two.joints.legs.length) {
+        expect(two.svg).toContain(
+          '.rig-leg-a{rotate:calc(var(--step-a,0)*1deg)}',
+        );
+        expect(two.svg).toContain(
+          '.rig-leg-b{rotate:calc(var(--step-b,0)*1deg)}',
+        );
+      }
+      // Rig 1 as it was.
+      expect(one.svg).toContain('.on-walking');
+      expect(one.svg).not.toContain('--step-a');
+      // A stride its legs carry it, each foot planted, by how it goes.
+      const legs = two.joints.legs.map((leg) =>
+        Math.hypot(leg.foot[0] - leg.hip[0], leg.foot[1] - leg.hip[1]),
+      );
+      if (legs.length && two.stride!.gait === 'walk')
+        expect(two.stride!.length).toBeCloseTo(
+          strideLength(
+            legs.reduce((a, b) => a + b, 0) / legs.length,
+            ANIMAL_SWING,
+          ),
+          0,
+        );
+    }
+    const snake = drawAnimal(plainAnimal('snake'), 'sss', { rig: 2 });
+    if (snake.stride!.gait === 'slither')
+      expect(snake.svg).toContain('skewX(calc(var(--gait-k,0)*1deg))');
+    const boo = drawCreature(plainCreature('ghost'), 'boo', { rig: 2 });
+    expect(boo.svg).toContain('@keyframes float');
   });
 
   it('cuts every pose’s tail as its standing one, and keeps its frame', () => {

@@ -134,7 +134,7 @@ describe('a set built as layers', () => {
     // Each drawn at the set's width × 900, in the kit's line.
     for (const layer of layered.layers)
       expect(layer.svg).toMatch(
-        new RegExp(`^<svg[^>]*viewBox="0 0 ${SET_W} ${SET_H}"><g stroke=`),
+        new RegExp(`^<svg[^>]*viewBox="0 0 ${SET_W} ${SET_H}"[^>]*><g stroke=`),
       );
     expect(layered.width).toBe(SET_W);
     // The floor's things stand where the front row does, among the people.
@@ -143,6 +143,28 @@ describe('a set built as layers', () => {
     for (const layer of layered.layers)
       for (const m of layer.svg.matchAll(/<g transform="translate\([^"]+"/g))
         expect(svg).toContain(m[0]);
+  });
+
+  it('keeps what answers the world tagged on the layers, each grass tuft on one layer only', () => {
+    const where = place({ name: 'the park', look: 'a green park' });
+    const layout = layoutOf({ ...MARKET, ground: 'grass' }, where);
+    const { svg, layered } = buildSet(layout, where);
+    const all = layered.layers.map((one) => one.svg).join('');
+    for (const layer of layered.layers)
+      expect(layer.svg).toMatch(
+        new RegExp(
+          `^<svg[^>]* data-place="outdoor" data-ground="grass" data-floor="[\\d.]+" data-layer="${layer.id}">`,
+        ),
+      );
+    const tags = (text: string, what: RegExp) =>
+      [...text.matchAll(what)].map((m) => m[0]).sort();
+    // Every thing that sways, hangs or flaps, and every roost, as in the picture.
+    const placedTags =
+      / data-react="[^"]+" data-kind="(?!grass)[^"]+"[^>]*| data-roost="[^"]+"/g;
+    expect(tags(all, placedTags)).toEqual(tags(svg, placedTags));
+    const tufts = / data-kind="grass"[^>]*/g;
+    expect(tags(all, tufts)).toEqual(tags(svg, tufts));
+    expect(tags(svg, tufts).length).toBeGreaterThan(0);
   });
 
   it('reads the new rows, where the action is, and what is scattered, leniently', () => {

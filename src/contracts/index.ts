@@ -1061,6 +1061,12 @@ export interface SceneDangleDto {
   segments: number;
   /** From its root to its tip, in viewBox units. */
   length: number;
+  /**
+   * Which way it goes from its root to its tip as drawn: a unit vector in
+   * viewBox units, y down (absent on a drawing made before it was said:
+   * hanging straight down). How a push or the wind turns it.
+   */
+  dir?: [number, number];
   /** Each segment's spring: its natural frequency, radians a second. */
   stiff: number;
   /** And its damping ratio: below 1 it overshoots and swings back. */

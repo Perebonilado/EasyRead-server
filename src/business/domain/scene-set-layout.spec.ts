@@ -329,6 +329,62 @@ describe('a place built from its layout', () => {
     expect(drawing.parts.front).toBeTruthy();
   });
 
+  it('tags what answers the world for the stage: plants, things that hang, curtains, flags, places birds sit, and the ground', () => {
+    const park = buildSet(
+      layoutOf(
+        {
+          ground: 'grass',
+          items: [
+            { kind: 'bush', x: 0.2, row: 'middle', scale: 1, colour: null },
+            { kind: 'house', x: 0.8, row: 'back', scale: 1, colour: null },
+            { kind: 'lamp', x: 0.7, row: 'middle', scale: 1, colour: null },
+            { kind: 'palm', x: 0.06, row: 'front', scale: 1, colour: null },
+          ],
+        },
+        place(),
+      ),
+      place(),
+    ).svg;
+    expect(park).toMatch(
+      /^<svg [^>]*data-place="outdoor" data-ground="grass" data-floor="576"/,
+    );
+    expect(park).toMatch(
+      /data-react="sway" data-kind="bush" data-x="0\.2" data-row="(?:middle|back)" data-len="92" data-roost="0 -92"/,
+    );
+    expect(park).toMatch(
+      /data-kind="house" data-x="[\d.]+" data-row="back" data-roost="/,
+    );
+    expect(park).toMatch(/data-react="hang" data-kind="lamp"/);
+    // A palm's fronds turn at the top of its trunk; grass tufts at their roots.
+    expect(park).toMatch(
+      /data-kind="palm"[^>]*>[\s\S]*?<g data-seg="0" data-pivot="28 -420">/,
+    );
+    expect(park).toMatch(
+      /<g data-react="sway" data-kind="grass" data-x="[\d.]+" data-row="\w+" data-len="[\d.]+" data-pivot="[\d.]+ [\d.]+">/,
+    );
+    const room = place({ kind: 'indoor', name: 'the room' });
+    const indoors = buildSet(
+      layoutOf(
+        {
+          ground: 'wood',
+          items: [
+            { kind: 'curtains', x: 0.5, row: 'back', scale: 1, colour: null },
+            { kind: 'bunting', x: 0.3, row: 'back', scale: 1, colour: null },
+            { kind: 'bookshelf', x: 0.9, row: 'back', scale: 1, colour: null },
+          ],
+        },
+        room,
+      ),
+      room,
+    ).svg;
+    expect(indoors).toMatch(
+      /data-react="curtain" data-kind="curtains" data-x="0\.5\d*" data-row="wall"/,
+    );
+    expect((indoors.match(/data-seg="\d+"/g) ?? []).length).toBe(2 + 9);
+    // What neither moves nor is sat on is as it was.
+    expect(indoors).not.toMatch(/data-kind="bookshelf"/);
+  });
+
   it('builds the same place the same way every time', () => {
     const layout = plainLayout(place());
     expect(buildSet(layout, place()).svg).toBe(buildSet(layout, place()).svg);

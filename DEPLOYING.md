@@ -128,6 +128,12 @@ explainer drawings stay on DeepSeek. Google is otherwise only the voice's
 **`GOOGLE_GENERATIVE_AI_API_KEY` (or `GEMINI_API_KEY`) on both the API and
 the worker**: without it they still start, but the voice cannot be Gemini
 and drawings are checked by code alone, not judged from their pictures.
+The Gemini API voices only 100 requests a day, even paid (Tier 1): set
+**`GOOGLE_CLOUD_TTS_API_KEY`** on the worker (a Cloud console key, its
+project with the Cloud Text-to-Speech API enabled and billing on, the key
+restricted to that API) and, once the day is spent, the same voices speak
+through Cloud Text-to-Speech's Gemini-TTS (`GOOGLE_CLOUD_TTS_MODEL`,
+default `gemini-3.1-flash-tts-preview`) instead of a film failing.
 `npm run drawing:bench` draws the
 bench's forty-two briefs through the same path and scores them against
 the kept baseline (`src/business/domain/drawing-bench/baseline.json`).

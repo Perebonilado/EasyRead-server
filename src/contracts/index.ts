@@ -37,7 +37,30 @@ export type Block = {
  * its units. Every line was checked by code before it was kept.
  */
 /** Visualize's voice engines, as the admin page offers them. */
-export type SceneVoiceEngineDto = 'gemini' | 'kokoro' | 'openai';
+export type SceneVoiceEngineDto = 'gemini' | 'kokoro' | 'openai' | 'elevenlabs';
+
+/** Who may be given a voice of their own: the narrator, and each kind of character. */
+export type VoiceRoleDto =
+  | 'narrator'
+  | 'girl'
+  | 'boy'
+  | 'woman'
+  | 'man'
+  | 'old woman'
+  | 'old man'
+  | 'creature'
+  | 'divine'
+  | 'crowd';
+
+/** A voice ElevenLabs offers, as the admin page lists it. */
+export interface VoiceOptionDto {
+  id: string;
+  name: string;
+  /** Its own words for itself, and its gender, age and accent. */
+  description: string;
+  /** A sample of it to play, where ElevenLabs has one. */
+  previewUrl: string | null;
+}
 
 /** Which engine voices Visualize, and which could. */
 export interface SceneVoiceStatusDto {
@@ -55,6 +78,22 @@ export interface SceneVoiceStatusDto {
     model: string;
     voice: string;
   }[];
+  /**
+   * The voices the narrator and each kind of character speak in, on an
+   * engine with a list to choose from (ElevenLabs); null where there is
+   * none set up.
+   */
+  cast: {
+    engine: 'elevenlabs';
+    roles: {
+      value: VoiceRoleDto;
+      label: string;
+      /** The admin's voice; null keeps the default. */
+      chosen: string | null;
+      /** The voice it speaks in when none is chosen. */
+      default: string;
+    }[];
+  } | null;
   changedAt: string | null;
 }
 

@@ -17,7 +17,12 @@ import {
   type SceneMood,
   type SceneScript,
 } from './scene-script';
-import type { StoryBible, StoryCharacter, StoryVoice } from './scene-story';
+import {
+  STORY_VOICES,
+  type StoryBible,
+  type StoryCharacter,
+  type StoryVoice,
+} from './scene-story';
 
 /** The pace and the silence after a sentence, by how it is said. */
 export const DELIVERY: Record<SceneDelivery, { speed: number; pause: number }> =
@@ -176,9 +181,48 @@ export function voiceStyle(
 export const voiceSlug = (voice: string) =>
   voice.toLowerCase().replace(/[^a-z0-9_]+/g, '+');
 
+/**
+ * ElevenLabs' premade voices, by the name ElevenLabs gives them: in every
+ * account, their ids fixed, so a character keeps theirs from episode to
+ * episode. None is a child's or an old woman's (ElevenLabs makes no child
+ * voices): the youngest and the most mature stand in, and the admin page
+ * sets any voice the account has in their place.
+ */
+export const ELEVENLABS_PREMADE = {
+  George: 'JBFqnCBsd6RMkjVDRZzb', // warm, captivating storyteller, British
+  Alice: 'Xb7hH8MSUJpSbSDYk0k2', // clear, engaging educator, British
+  Lily: 'pFZP5JQG7iQjIQuC4Bku', // velvety, British
+  Matilda: 'XrExE9yKIg1WjnnlVkGX', // knowledgeable, alto
+  Bella: 'hpp4J3VqNfWAUOO0d1Us', // bright, warm
+  Sarah: 'EXAVITQu4vr4xnSDxMaL', // young, reassuring
+  Laura: 'FGY2WhTYpPnrIDTdsKH5', // young, quirky enthusiast
+  Jessica: 'cgSgspJ2msm6clMCkdW9', // young, playful, bright
+  Liam: 'TX3LPaxmHKxFdv7VOQHJ', // young, energetic
+  Will: 'bIHbv24MWmeRgasZH58o', // young, relaxed optimist
+  Charlie: 'IKne3meq5aSn9XLyUdCD', // young, energetic, Australian
+  Eric: 'cjVigY5qzO86Huf0OWal', // smooth tenor
+  Chris: 'iP95p4xoKVk53GoZ742B', // charming, down to earth
+  Roger: 'CwhRBWXzGAHq8TQ4Fs17', // laid back, resonant
+  Harry: 'SOYHLrjzK2X1ezoPC6cr', // fierce warrior
+  Callum: 'N2lVS1w4EtoT3dr4eOWO', // husky trickster
+  River: 'SAz9YHcvj6GT2YYXdXww', // relaxed, neutral
+  Brian: 'nPczCjzI2devNBz1zQrb', // deep, resonant, comforting
+  Daniel: 'onwK4e9ZLuTAKqWW03F9', // steady broadcaster, British
+  Bill: 'pqHfZKP75CvOlQylNhV4', // wise, mature, old
+} as const;
+
+/** The narrator's voice on ElevenLabs when none is set: George, a storyteller. */
+export const ELEVENLABS_NARRATOR = ELEVENLABS_PREMADE.George;
+
+const el = (...names: (keyof typeof ELEVENLABS_PREMADE)[]) =>
+  names.map((name) => ELEVENLABS_PREMADE[name]);
+
+/** The engines whose characters have voices of their own. */
+export type CastEngine = 'kokoro' | 'gemini' | 'elevenlabs';
+
 /** The voices a story's characters speak in, by engine and by kind: never the narrator's own. */
 export const CHARACTER_VOICES: Record<
-  'kokoro' | 'gemini',
+  CastEngine,
   Record<StoryVoice, string[]>
 > = {
   kokoro: {
@@ -205,7 +249,36 @@ export const CHARACTER_VOICES: Record<
     divine: ['Algieba', 'Sadaltager', 'Achird'],
     crowd: ['Zephyr', 'Autonoe', 'Pulcherrima'],
   },
+  // Voice ids: ElevenLabs has no blends, so God's is the deepest and
+  // calmest, and a crowd's the plainest.
+  elevenlabs: {
+    girl: el('Jessica', 'Laura', 'Sarah'),
+    boy: el('Liam', 'Will', 'Charlie'),
+    woman: el('Matilda', 'Bella', 'Alice'),
+    man: el('Eric', 'Chris', 'Harry'),
+    'old woman': el('Lily', 'Alice', 'Matilda'),
+    'old man': el('Bill', 'Daniel', 'Roger'),
+    creature: el('Callum', 'Harry', 'River'),
+    divine: el('Brian', 'Daniel', 'Bill'),
+    crowd: el('River', 'Roger', 'Chris'),
+  },
 };
+
+/**
+ * Who the admin may give a voice of their own on an engine with a list to
+ * choose from (ElevenLabs): the narrator, and each kind of character.
+ */
+export const VOICE_ROLES = ['narrator', ...STORY_VOICES] as const;
+export type VoiceRole = (typeof VOICE_ROLES)[number];
+/** The admin's voices by role, where chosen; the rest keep the palette's. */
+export type VoiceCast = Partial<Record<VoiceRole, string>>;
+
+export const isVoiceRole = (value: unknown): value is VoiceRole =>
+  VOICE_ROLES.includes(value as VoiceRole);
+
+/** An ElevenLabs voice id as the admin may set one: letters and digits only. */
+export const isElevenLabsVoiceId = (value: unknown): value is string =>
+  typeof value === 'string' && /^[A-Za-z0-9]{12,40}$/.test(value);
 
 /** How quickly each kind speaks, against the sentence's own pace. */
 export const CHARACTER_PACE: Record<StoryVoice, number> = {
@@ -244,17 +317,23 @@ export interface Speaker {
 export function characterVoice(
   bible: StoryBible,
   character: StoryCharacter,
-  engine: 'kokoro' | 'gemini' | null,
+  engine: CastEngine | null,
   narrator: string,
+  /** The admin's voice for a kind, first of its kind's; the rest follow. */
+  chosen: VoiceCast = {},
 ): Speaker | null {
   // Someone the text's tradition never draws is never voiced either: the
   // narrator says their words.
   if (!engine || !character.voice || character.presence === 'light')
     return null;
   const own = new Set(narrator.toLowerCase().split(','));
-  const palette = CHARACTER_VOICES[engine][character.voice].filter(
-    (voice) => !own.has(voice.toLowerCase()),
-  );
+  const first = chosen[character.voice];
+  const palette = [
+    ...new Set([
+      ...(first ? [first] : []),
+      ...CHARACTER_VOICES[engine][character.voice],
+    ]),
+  ].filter((voice) => !own.has(voice.toLowerCase()));
   if (!palette.length) return null;
   const before = bible.characters.filter(
     (c) => c.voice === character.voice && c.met < character.met,
@@ -371,9 +450,14 @@ export function sentenceStarts(
 
 /**
  * Visualize's voice engines: Google's Gemini, our own Kokoro server on
- * Railway, or OpenAI's. The admin picks one while the app runs.
+ * Railway, OpenAI's, or ElevenLabs'. The admin picks one while the app runs.
  */
-export const SCENE_VOICE_ENGINES = ['gemini', 'kokoro', 'openai'] as const;
+export const SCENE_VOICE_ENGINES = [
+  'gemini',
+  'kokoro',
+  'openai',
+  'elevenlabs',
+] as const;
 export type SceneVoiceEngine = (typeof SCENE_VOICE_ENGINES)[number];
 
 export const isSceneVoiceEngine = (value: unknown): value is SceneVoiceEngine =>

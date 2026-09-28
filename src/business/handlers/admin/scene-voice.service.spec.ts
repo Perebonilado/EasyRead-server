@@ -1,6 +1,12 @@
 import type { ConfigService } from '@nestjs/config';
 import { ValidationError } from '../../domain/errors/errors';
-import { deploymentEngine, sceneEngine } from '../../domain/scene-voice';
+import {
+  CHARACTER_VOICES,
+  ELEVENLABS_NARRATOR,
+  ELEVENLABS_PREMADE,
+  deploymentEngine,
+  sceneEngine,
+} from '../../domain/scene-voice';
 import type { SpeechPort } from '../../ports/voice.port';
 import type {
   AppSettingsRecord,
@@ -15,6 +21,17 @@ const voices = (kokoro = true): SceneVoices => ({
   gemini: speech('gemini-3.8-flash-tts', 'Sulafat'),
   kokoro: kokoro ? speech('kokoro-82m', 'am_puck') : null,
   openai: speech('gpt-4o-mini-tts', 'alloy'),
+  elevenlabs: Object.assign(speech('eleven_v3', ELEVENLABS_NARRATOR), {
+    catalogue: () =>
+      Promise.resolve([
+        {
+          id: 'Voice0000000Bella',
+          name: 'Bella',
+          description: '',
+          previewUrl: null,
+        },
+      ]),
+  }),
 });
 
 const config = (values: Record<string, string>) =>
@@ -24,6 +41,7 @@ const config = (values: Record<string, string>) =>
 function store(): AppSettingsRepository & { reads: number } {
   let record: AppSettingsRecord = {
     sceneVoice: null,
+    voiceCast: {},
     worker: null,
     changedBy: null,
     changedAt: null,
@@ -49,7 +67,7 @@ function store(): AppSettingsRepository & { reads: number } {
 const clock = (at: { ms: number }) => ({ now: () => new Date(at.ms) });
 
 describe('which engine voices Visualize', () => {
-  const all = { gemini: true, kokoro: true, openai: true };
+  const all = { gemini: true, kokoro: true, openai: true, elevenlabs: true };
 
   it('takes the deployment’s own when nothing is chosen: its named engine when ready, else our server, else OpenAI', () => {
     expect(deploymentEngine('gemini', all)).toBe('gemini');
@@ -99,6 +117,7 @@ describe('the admin’s voice setting', () => {
       ['gemini', true],
       ['kokoro', true],
       ['openai', true],
+      ['elevenlabs', false],
     ]);
     now = await service.current();
     // SCENE_VOICE names a Gemini voice: our server speaks in its own.
@@ -168,5 +187,97 @@ describe('the admin’s voice setting', () => {
     at.ms = 10_500;
     await service.current();
     expect(settings.reads).toBe(2);
+  });
+
+  it('offers ElevenLabs once its key is set, and speaks in the narrator and the voices the admin chose for it', async () => {
+    const service = new SceneVoiceService(
+      voices(),
+      store(),
+      clock({ ms: 0 }),
+      config({ ...keys, ELEVENLABS_API_KEY: 'e' }),
+    );
+    let status = await service.choose('elevenlabs', 'admin-1');
+    expect(status.current).toBe('elevenlabs');
+    expect(status.cast?.roles.map((r) => r.value)).toEqual([
+      'narrator',
+      'girl',
+      'boy',
+      'woman',
+      'man',
+      'old woman',
+      'old man',
+      'creature',
+      'divine',
+      'crowd',
+    ]);
+    expect(status.cast?.roles[0]).toMatchObject({
+      chosen: null,
+      default: ELEVENLABS_NARRATOR,
+    });
+    // SCENE_VOICE names a Gemini voice: ElevenLabs speaks in its own.
+    let now = await service.current();
+    expect([now.engine, now.voice, now.cast]).toEqual([
+      'elevenlabs',
+      ELEVENLABS_NARRATOR,
+      {},
+    ]);
+    status = await service.chooseCast(
+      'narrator',
+      ELEVENLABS_PREMADE.Daniel,
+      'a',
+    );
+    status = await service.chooseCast('man', ELEVENLABS_PREMADE.Harry, 'a');
+    expect(status.cast?.roles.find((r) => r.value === 'man')).toMatchObject({
+      chosen: ELEVENLABS_PREMADE.Harry,
+    });
+    expect(status.cast?.roles.find((r) => r.value === 'woman')?.default).toBe(
+      CHARACTER_VOICES.elevenlabs.woman[0],
+    );
+    now = await service.current();
+    expect(now.voice).toBe(ELEVENLABS_PREMADE.Daniel);
+    expect(now.cast).toEqual({
+      narrator: ELEVENLABS_PREMADE.Daniel,
+      man: ELEVENLABS_PREMADE.Harry,
+    });
+    // Back to the default.
+    status = await service.chooseCast('man', null, 'a');
+    expect((await service.current()).cast).toEqual({
+      narrator: ELEVENLABS_PREMADE.Daniel,
+    });
+    await expect(
+      service.chooseCast('girl', 'not a voice!', 'a'),
+    ).rejects.toBeInstanceOf(ValidationError);
+    expect((await service.voiceOptions()).map((v) => v.name)).toEqual([
+      'Bella',
+    ]);
+  });
+
+  it('keeps the admin’s voices to ElevenLabs: another engine speaks in its own', async () => {
+    const settings = store();
+    const service = new SceneVoiceService(
+      voices(),
+      settings,
+      clock({ ms: 0 }),
+      config({ ...keys, ELEVENLABS_API_KEY: 'e' }),
+    );
+    await service.chooseCast('narrator', ELEVENLABS_PREMADE.Daniel, 'a');
+    const now = await service.current();
+    expect([now.engine, now.voice, now.cast]).toEqual(['gemini', 'Kore', {}]);
+  });
+
+  it('will not list or pick ElevenLabs without its key', async () => {
+    const service = new SceneVoiceService(
+      voices(),
+      store(),
+      clock({ ms: 0 }),
+      config(keys),
+    );
+    await expect(service.choose('elevenlabs', 'a')).rejects.toThrow(
+      'ElevenLabs is not set up',
+    );
+    await expect(service.voiceOptions()).rejects.toBeInstanceOf(
+      ValidationError,
+    );
+    expect((await service.status()).cast).toBeNull();
   });
 });

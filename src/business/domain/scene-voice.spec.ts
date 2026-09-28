@@ -7,6 +7,9 @@ import {
   SLOWEST,
   SPEED_RANGE,
   TURN_S,
+  CHARACTER_VOICES,
+  ELEVENLABS_NARRATOR,
+  ELEVENLABS_PREMADE,
   characterVoice,
   deliveryPieces,
   sentenceStarts,
@@ -139,6 +142,35 @@ describe("a story's characters, in their own voices", () => {
     // No kind of voice, or a voice with no palette: the narrator says it.
     expect(characterVoice(bible, at('crowd'), 'kokoro', 'am_puck')).toBeNull();
     expect(characterVoice(bible, at('mira'), null, 'alloy')).toBeNull();
+  });
+
+  it('casts ElevenLabs voices by kind, the same every episode, and the admin’s voice first of its kind', () => {
+    const { Jessica, Laura, Bill, Callum, Sarah } = ELEVENLABS_PREMADE;
+    const cast = (id: string, chosen = {}) =>
+      characterVoice(bible, at(id), 'elevenlabs', ELEVENLABS_NARRATOR, chosen)
+        ?.voice;
+    expect([cast('mira'), cast('lily'), cast('tobi'), cast('ember')]).toEqual([
+      Jessica,
+      Laura,
+      Bill,
+      Callum,
+    ]);
+    // Asked again, the same.
+    expect(cast('lily')).toBe(Laura);
+    // The admin's girl is the first girl's; the palette's follow.
+    expect([
+      cast('mira', { girl: Sarah }),
+      cast('lily', { girl: Sarah }),
+    ]).toEqual([Sarah, Jessica]);
+    // Never the narrator's own voice.
+    expect(
+      characterVoice(bible, at('tobi'), 'elevenlabs', Bill)?.voice,
+    ).not.toBe(Bill);
+    // Every kind has three voices to choose from, none the narrator's.
+    for (const voices of Object.values(CHARACTER_VOICES.elevenlabs)) {
+      expect(new Set(voices).size).toBeGreaterThanOrEqual(3);
+      expect(voices).not.toContain(ELEVENLABS_NARRATOR);
+    }
   });
 
   it("parts a sentence at its quotation: the quoted words theirs, the rest the narrator's", () => {

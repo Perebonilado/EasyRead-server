@@ -4,6 +4,7 @@ import type { SceneDto, SceneTiming } from '../../contracts';
 import { wordTimesFromAligned } from '../../business/domain/board';
 import {
   catalogueSpeechCost,
+  characterSpeechCost,
   geminiSpeechCost,
 } from '../../business/domain/cost';
 import { NotFoundError } from '../../business/domain/errors/errors';
@@ -83,6 +84,7 @@ import {
   type PlaceThing,
   type DrawingThing,
   type LineFrom,
+  type LinePace,
   type SceneScript,
   type SceneScriptDraft,
 } from '../../business/domain/scene-script';
@@ -253,6 +255,12 @@ const QUIET_END_SLACK_MS = 100;
 const STORY_READERS = 4;
 /** The most stretches (about 20 pages each) a story read the old way is read again in, unasked. */
 const REREAD_MOST_STRETCHES = 6;
+/** A line's pace that is a tone of voice, not a speed: for a voice that takes tags (ElevenLabs). */
+const TONE_OF: Partial<Record<LinePace, 'whisper' | 'shout'>> = {
+  whisper: 'whisper',
+  shout: 'shout',
+};
+
 /** How a line from somewhere else is said, for a voice that takes direction. */
 const FROM_STYLE: Partial<Record<LineFrom, string>> = {
   thought: 'thinking it quietly to themselves, not aloud',
@@ -1738,14 +1746,22 @@ export class SceneProcessor {
     const pausesS = delivered.map((piece) => piece.pauseAfter);
     const spoken = sceneSpoken(forms);
     // Whichever engine the admin has Visualize speak in now.
-    const { speech, voice } = await this.voices.current();
+    const {
+      speech,
+      voice,
+      engine: speaking,
+      cast,
+    } = await this.voices.current();
     const { model } = speech.label();
     // A story's characters say their own lines, in voices of their own.
-    const engine = model.startsWith('gemini')
-      ? 'gemini'
-      : model.startsWith('kokoro')
-        ? 'kokoro'
-        : null;
+    const engine =
+      speaking === 'elevenlabs'
+        ? 'elevenlabs'
+        : model.startsWith('gemini')
+          ? 'gemini'
+          : model.startsWith('kokoro')
+            ? 'kokoro'
+            : null;
     // Each line a character says, in their own voice: its place in the
     // spoken text is its quote's, the i-th quote of the sentence there.
     /** The voice a character in the cast speaks in: none for someone the story does not name. */
@@ -1756,7 +1772,7 @@ export class SceneProcessor {
           ? story.bible.characters.find((c) => c.id === thing.ref)
           : undefined;
       return story && character
-        ? characterVoice(story.bible, character, engine, voice)
+        ? characterVoice(story.bible, character, engine, voice, cast)
         : null;
     };
     const lines = script.beats.map((beat, k) => {
@@ -1796,18 +1812,29 @@ export class SceneProcessor {
       ),
       lines,
     });
+    /** A screenplay line whispered or shouted in its speaker's voice, for a voice that takes it as a tag. */
+    const toneOf = (piece: (typeof pieces)[number]) => {
+      const beat = script.beats[piece.beat];
+      return piece.voice && beat?.kind === 'line'
+        ? TONE_OF[beat.pace ?? 'calm']
+        : undefined;
+    };
     const result = await speech.synthesize({
       text: spoken.text,
       voice,
       speed: 1,
       timestamps: true,
-      pieces: pieces.map((piece) => ({
-        text: piece.text,
-        speed: piece.speed,
-        pauseAfter: piece.pauseAfter,
-        ...(piece.style ? { style: piece.style } : {}),
-        ...(piece.voice ? { voice: piece.voice } : {}),
-      })),
+      pieces: pieces.map((piece) => {
+        const tone = toneOf(piece);
+        return {
+          text: piece.text,
+          speed: piece.speed,
+          pauseAfter: piece.pauseAfter,
+          ...(piece.style ? { style: piece.style } : {}),
+          ...(piece.voice ? { voice: piece.voice } : {}),
+          ...(tone ? { tone } : {}),
+        };
+      }),
       ...(leadS > 0 ? { lead: leadS } : {}),
     });
     const voices = new Set(pieces.map((p) => p.voice).filter(Boolean));
@@ -1858,7 +1885,17 @@ export class SceneProcessor {
                   this.config.get<string>('MODAL_USD_PER_AUDIO_HOUR', '0'),
                 ),
               )
-            : null,
+            : result.model.startsWith('elevenlabs:')
+              ? characterSpeechCost(
+                  result.characters ?? spoken.text.length,
+                  Number(
+                    this.config.get<string>(
+                      'ELEVENLABS_USD_PER_1K_CHARS',
+                      '0.1',
+                    ),
+                  ),
+                )
+              : null,
     });
 
     let words: SpokenWords | null = null;

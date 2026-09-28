@@ -1,11 +1,17 @@
 import { Inject, Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import type { SceneVoiceStatusDto } from '../../../contracts';
+import type { SceneVoiceStatusDto, VoiceOptionDto } from '../../../contracts';
 import {
+  CHARACTER_VOICES,
+  ELEVENLABS_NARRATOR,
   SCENE_VOICE_ENGINES,
+  VOICE_ROLES,
   deploymentEngine,
+  isElevenLabsVoiceId,
   sceneEngine,
   type SceneVoiceEngine,
+  type VoiceCast,
+  type VoiceRole,
 } from '../../domain/scene-voice';
 import { ValidationError } from '../../domain/errors/errors';
 import type { ClockPort } from '../../ports/clock.port';
@@ -28,6 +34,21 @@ const LABEL: Record<SceneVoiceEngine, string> = {
   gemini: 'Gemini (Google)',
   kokoro: 'Our server (Kokoro)',
   openai: 'OpenAI',
+  elevenlabs: 'ElevenLabs',
+};
+
+/** Each role as the admin page names it. */
+const ROLE_LABEL: Record<VoiceRole, string> = {
+  narrator: 'Narrator',
+  girl: 'Girl',
+  boy: 'Boy',
+  woman: 'Woman',
+  man: 'Man',
+  'old woman': 'Old woman',
+  'old man': 'Old man',
+  creature: 'Creature',
+  divine: 'Voice from above',
+  crowd: 'Crowd',
 };
 
 /**
@@ -58,6 +79,7 @@ export class SceneVoiceService {
         (set('GEMINI_API_KEY') || set('GOOGLE_GENERATIVE_AI_API_KEY')),
       kokoro: Boolean(this.voices.kokoro),
       openai: Boolean(this.voices.openai) && set('OPENAI_API_KEY'),
+      elevenlabs: Boolean(this.voices.elevenlabs) && set('ELEVENLABS_API_KEY'),
     };
   }
 
@@ -70,19 +92,26 @@ export class SceneVoiceService {
     engine: SceneVoiceEngine;
     speech: SpeechPort;
     voice: string;
+    /** The admin's voices for the narrator and each kind of character, on this engine. */
+    cast: VoiceCast;
   }> {
     const ready = this.ready();
     const named = this.config.get<string>('SCENE_VOICE_ENGINE');
-    const engine = sceneEngine((await this.record()).sceneVoice, named, ready);
+    const record = await this.record();
+    const engine = sceneEngine(record.sceneVoice, named, ready);
     const speech = this.voices[engine] ?? this.voices.openai;
     if (!speech) throw new Error('No voice is set up for Visualize');
     const own = engine === deploymentEngine(named, ready);
+    const cast =
+      engine === 'elevenlabs' ? (record.voiceCast.elevenlabs ?? {}) : {};
     return {
       engine,
       speech,
       voice:
+        cast.narrator ||
         (own && this.config.get<string>('SCENE_VOICE')?.trim()) ||
         speech.label().voice,
+      cast,
     };
   }
 
@@ -137,13 +166,80 @@ export class SceneVoiceService {
         return {
           value: engine,
           label: LABEL[engine],
-          ready: ready[engine],
+          // A worker that said before ElevenLabs was an engine has not said it.
+          ready: Boolean(ready[engine]),
           model: label?.model ?? '',
           voice: label?.voice ?? '',
         };
       }),
+      cast:
+        ready.elevenlabs === true
+          ? {
+              engine: 'elevenlabs',
+              roles: this.cast(
+                record.voiceCast.elevenlabs ?? {},
+                labels.elevenlabs?.voice || ELEVENLABS_NARRATOR,
+              ),
+            }
+          : null,
       changedAt: record.changedAt?.toISOString() ?? null,
     };
+  }
+
+  /** Each role's voice on ElevenLabs: the admin's, and the default under it (the narrator's own, or the first of the kind's). */
+  private cast(
+    chosen: VoiceCast,
+    narrator: string,
+  ): NonNullable<SceneVoiceStatusDto['cast']>['roles'] {
+    const speaks = chosen.narrator ?? narrator;
+    return VOICE_ROLES.map((role) => ({
+      value: role,
+      label: ROLE_LABEL[role],
+      chosen: chosen[role] ?? null,
+      default:
+        role === 'narrator'
+          ? narrator
+          : (CHARACTER_VOICES.elevenlabs[role].find(
+              (voice) => voice !== speaks,
+            ) ?? CHARACTER_VOICES.elevenlabs[role][0]),
+    }));
+  }
+
+  /** The voices ElevenLabs offers this account, for the admin to choose from. */
+  async voiceOptions(): Promise<VoiceOptionDto[]> {
+    const speech = this.voices.elevenlabs;
+    if (!this.ready().elevenlabs || !speech?.catalogue)
+      throw new ValidationError(
+        'ElevenLabs is not set up on this server (ELEVENLABS_API_KEY)',
+      );
+    return speech.catalogue();
+  }
+
+  /**
+   * The admin's voice for the narrator or a kind of character on
+   * ElevenLabs; null goes back to the default. A character keeps the
+   * voice of their kind they have (the first, or the one chosen for them)
+   * from episode to episode while this stays as it is.
+   */
+  async chooseCast(
+    role: VoiceRole,
+    voice: string | null,
+    changedBy: string,
+  ): Promise<SceneVoiceStatusDto> {
+    if (voice !== null && !isElevenLabsVoiceId(voice))
+      throw new ValidationError('That is not an ElevenLabs voice');
+    const cast: VoiceCast = {
+      ...((await this.record()).voiceCast.elevenlabs ?? {}),
+    };
+    if (voice) cast[role] = voice;
+    else delete cast[role];
+    const record = await this.settings.set(
+      { voiceCast: { elevenlabs: cast } },
+      changedBy,
+      this.clock.now(),
+    );
+    this.cached = { record, at: this.clock.now().getTime() };
+    return this.status();
   }
 
   /** The admin's choice; null goes back to the deployment's own. */

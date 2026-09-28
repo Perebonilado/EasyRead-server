@@ -330,6 +330,15 @@ export interface StudioFeature {
   opens: boolean;
 }
 
+/** The kinds the stage draws as one particular thing, whatever they are called. */
+const ONE_LOOK = new Set<FeatureKind>([
+  'vehicle',
+  'stall',
+  'goalpost',
+  'swing',
+  'well',
+]);
+
 /** The most features a set keeps. */
 export const MAX_FEATURES = 8;
 
@@ -366,7 +375,14 @@ export function featuresOf(
       // ("a wooden gate"), else the artist's to draw if its name could be
       // one: never a thing handled or carried, one of the cast, a place,
       // the ground or the weather.
-      const listed = oneOf(FEATURE_KINDS)(f.kind);
+      // A kind the stage draws as one thing (a vehicle is a danfo, a stall
+      // a market stall) only when its name says so: "the half-built ark"
+      // put down as a vehicle is the artist's to draw, never a bus.
+      const given = oneOf(FEATURE_KINDS)(f.kind);
+      const listed =
+        given && (!ONE_LOOK.has(given) || FEATURE_WORDS[given].test(noun))
+          ? given
+          : null;
       const kind: AnyFeatureKind | null =
         listed ??
         kindNamed(noun) ??

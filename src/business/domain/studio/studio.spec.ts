@@ -3,6 +3,7 @@ import {
   briefMissing,
   briefOf,
   explainerSheetOf,
+  featuresOf,
   outlineOf,
   secondsOf,
   storySheetOf,
@@ -2175,5 +2176,29 @@ describe('one the artist drew whose rig turns its arms and nods', () => {
     );
     expect(acted).toContain('wave');
     expect(acted).not.toContain('hop');
+  });
+});
+
+describe('a set feature the stage draws as one thing', () => {
+  it('is that thing only when its name says so: an ark is never a danfo', () => {
+    const kinds = Object.fromEntries(
+      featuresOf([
+        {
+          id: 'ark',
+          name: 'the half-built ark',
+          kind: 'vehicle',
+          spot: 'back',
+        },
+        { id: 'danfo', name: 'the danfo', kind: 'vehicle', spot: 'left' },
+        { id: 'canoe', name: 'a canoe', kind: 'vehicle', spot: 'right' },
+        { id: 'gate', name: 'the front entrance', kind: 'gate', spot: 'left' },
+      ]).map((f) => [f.id, f.kind]),
+    );
+    expect(kinds).toEqual({
+      ark: 'drawn',
+      danfo: 'vehicle',
+      canoe: 'drawn',
+      gate: 'gate',
+    });
   });
 });

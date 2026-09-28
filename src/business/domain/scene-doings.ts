@@ -1256,8 +1256,10 @@ export const FEATURE_WORDS: Record<FeatureKind, RegExp> = {
   fence: /\bfences?\b/iu,
   stall: /\b(?:stalls?|kiosks?)\b/iu,
   crate: /\b(?:crates?|boxes|barrels?)\b/iu,
+  // A road vehicle: the stage draws a danfo. A boat, a cart or a train is
+  // drawn by the artist, as one of the show's own.
   vehicle:
-    /\b(?:danfo|buses|bus|minibus|cars?|vans?|trucks?|lorr(?:y|ies)|taxis?|carts?|boats?|canoes?|train)\b/iu,
+    /\b(?:danfo|buses|bus|minibus|cars?|vans?|trucks?|lorr(?:y|ies)|taxis?)\b/iu,
   window: /\bwindows?\b/iu,
   steps: /\b(?:steps|stairs|staircase|ladder)\b/iu,
   swing: /\b(?:swings?|tyre swing)\b/iu,

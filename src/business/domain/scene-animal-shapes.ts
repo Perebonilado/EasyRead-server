@@ -144,6 +144,203 @@ export function placed(markup: string, by: P, about?: P, deg = 0): string {
 }
 
 /**
+ * Points along a smooth closed outline, as `blob` draws it: to find how
+ * low or how far it really goes, its curves bulging past the points it
+ * passes through.
+ */
+export function blobSamples(points: P[], tension = 1, steps = 8): P[] {
+  const n = points.length;
+  if (n < 3) return points;
+  const at = (i: number) => points[(i + n) % n];
+  const k = tension / 6;
+  const out: P[] = [];
+  for (let i = 0; i < n; i += 1) {
+    const [p0, p1, p2, p3] = [at(i - 1), at(i), at(i + 1), at(i + 2)];
+    const c1: P = [p1[0] + (p2[0] - p0[0]) * k, p1[1] + (p2[1] - p0[1]) * k];
+    const c2: P = [p2[0] - (p3[0] - p1[0]) * k, p2[1] - (p3[1] - p1[1]) * k];
+    for (let j = 0; j < steps; j += 1) {
+      const t = j / steps;
+      const u = 1 - t;
+      const w = [u * u * u, 3 * u * u * t, 3 * u * t * t, t * t * t];
+      out.push([
+        w[0] * p1[0] + w[1] * c1[0] + w[2] * c2[0] + w[3] * p2[0],
+        w[0] * p1[1] + w[1] * c1[1] + w[2] * c2[1] + w[3] * p2[1],
+      ]);
+    }
+  }
+  return out;
+}
+
+/** An SVG transform, as its six numbers: x' = a x + c y + e, y' = b x + d y + f. */
+type Matrix = [number, number, number, number, number, number];
+const SAME: Matrix = [1, 0, 0, 1, 0, 0];
+const times = (m: Matrix, n: Matrix): Matrix => [
+  m[0] * n[0] + m[2] * n[1],
+  m[1] * n[0] + m[3] * n[1],
+  m[0] * n[2] + m[2] * n[3],
+  m[1] * n[2] + m[3] * n[3],
+  m[0] * n[4] + m[2] * n[5] + m[4],
+  m[1] * n[4] + m[3] * n[5] + m[5],
+];
+const apply = (m: Matrix, [x, y]: P): P => [
+  m[0] * x + m[2] * y + m[4],
+  m[1] * x + m[3] * y + m[5],
+];
+
+/** A transform attribute's translates and rotates (all the kit writes), as one matrix. */
+function matrixOf(transform: string): Matrix {
+  let m = SAME;
+  for (const [, name, args] of transform.matchAll(/(\w+)\(([^)]*)\)/g)) {
+    const n = args
+      .split(/[\s,]+/)
+      .filter(Boolean)
+      .map(Number);
+    if (name === 'translate') m = times(m, [1, 0, 0, 1, n[0], n[1] ?? 0]);
+    else if (name === 'rotate') {
+      const a = n[0] * RAD;
+      const [cx, cy] = [n[1] ?? 0, n[2] ?? 0];
+      const [c, s] = [Math.cos(a), Math.sin(a)];
+      m = times(m, [c, s, -s, c, cx - c * cx + s * cy, cy - s * cx - c * cy]);
+    } else if (name === 'scale') m = times(m, [n[0], 0, 0, n[1] ?? n[0], 0, 0]);
+  }
+  return m;
+}
+
+/** A path's points: every point its commands name (a curve keeps within its own). */
+function pathPoints(d: string): P[] {
+  const tokens = d.match(/[A-Za-z]|-?(?:\d+\.?\d*|\.\d+)(?:e-?\d+)?/g) ?? [];
+  const out: P[] = [];
+  let at: P = [0, 0];
+  let command = 'M';
+  for (let i = 0; i < tokens.length;) {
+    if (/[A-Za-z]/.test(tokens[i])) {
+      command = tokens[i];
+      i += 1;
+      if (command === 'Z' || command === 'z') continue;
+    }
+    const take = (k: number) => tokens.slice(i, i + k).map(Number);
+    const upper = command.toUpperCase();
+    const relative = command !== upper;
+    const point = (x: number, y: number): P =>
+      relative ? [at[0] + x, at[1] + y] : [x, y];
+    if (upper === 'H' || upper === 'V') {
+      const [v] = take(1);
+      i += 1;
+      at =
+        upper === 'H'
+          ? [relative ? at[0] + v : v, at[1]]
+          : [at[0], relative ? at[1] + v : v];
+      out.push(at);
+    } else if (upper === 'A') {
+      const [rx, ry, , , , x, y] = take(7);
+      i += 7;
+      const end = point(x, y);
+      const r = Math.max(rx, ry);
+      out.push(at, end, add(end, [r, r]), add(end, [-r, -r]));
+      out.push(add(at, [r, r]), add(at, [-r, -r]));
+      at = end;
+    } else {
+      const k = upper === 'C' ? 6 : upper === 'S' || upper === 'Q' ? 4 : 2;
+      const n = take(k);
+      i += k;
+      const pts: P[] = [];
+      for (let j = 0; j + 1 < n.length; j += 2) pts.push(point(n[j], n[j + 1]));
+      // A curve by points along it, not its handles, which reach past it.
+      const from = at;
+      const along = (t: number): P => {
+        const u = 1 - t;
+        if (pts.length === 3) {
+          const [c1, c2, end] = pts;
+          const w = [u * u * u, 3 * u * u * t, 3 * u * t * t, t * t * t];
+          return [
+            w[0] * from[0] + w[1] * c1[0] + w[2] * c2[0] + w[3] * end[0],
+            w[0] * from[1] + w[1] * c1[1] + w[2] * c2[1] + w[3] * end[1],
+          ];
+        }
+        const [c, end] = pts;
+        return [
+          u * u * from[0] + 2 * u * t * c[0] + t * t * end[0],
+          u * u * from[1] + 2 * u * t * c[1] + t * t * end[1],
+        ];
+      };
+      if (
+        (upper === 'C' && pts.length === 3) ||
+        (upper === 'Q' && pts.length === 2)
+      )
+        for (let t = 1; t <= 8; t += 1) out.push(along(t / 8));
+      else out.push(...pts);
+      if (pts.length) at = pts[pts.length - 1];
+      if (upper === 'M') command = relative ? 'l' : 'L';
+    }
+    if (!tokens.length || i >= tokens.length) break;
+  }
+  return out;
+}
+
+/**
+ * Every point a drawing's markup reaches, near enough: each path's points,
+ * each circle's and ellipse's edges, each widened by half its line, and
+ * moved as its groups move it. What is clipped, and what is only defined,
+ * is left out. To find how far a part goes when it turns, or a pose goes.
+ */
+export function reachOf(markup: string, line = KIT_LINE): P[] {
+  const out: P[] = [];
+  const stack: { m: Matrix; width: number; skip: boolean }[] = [
+    { m: SAME, width: line, skip: false },
+  ];
+  for (const [tag, closing, name, attrs, ends] of markup.matchAll(
+    /<(\/?)([a-zA-Z]+)((?:[^>"]|"[^"]*")*?)(\/?)>/g,
+  )) {
+    void tag;
+    const top = stack[stack.length - 1];
+    const group = name === 'g' || name === 'defs' || name === 'clipPath';
+    if (closing) {
+      if (group && stack.length > 1) stack.pop();
+      continue;
+    }
+    const attr = (key: string) =>
+      new RegExp(`(?:^|\\s)${key}="([^"]*)"`).exec(attrs)?.[1];
+    const own = attr('transform');
+    const m = own ? times(top.m, matrixOf(own)) : top.m;
+    const width = Number(attr('stroke-width') ?? top.width);
+    const unseen = attr('stroke') === 'none';
+    if (group) {
+      if (!ends)
+        stack.push({
+          m,
+          width,
+          skip: top.skip || name !== 'g' || attr('clip-path') !== undefined,
+        });
+      continue;
+    }
+    if (top.skip) continue;
+    const pad = unseen ? 0 : width / 2;
+    let points: P[] = [];
+    if (name === 'path') points = pathPoints(attr('d') ?? '');
+    else if (name === 'circle' || name === 'ellipse') {
+      const c: P = [Number(attr('cx') ?? 0), Number(attr('cy') ?? 0)];
+      const rx = Number(attr('rx') ?? attr('r') ?? 0);
+      const ry = Number(attr('ry') ?? attr('r') ?? 0);
+      points = ellipsePoints(c, rx, ry, 0, 24);
+    } else if (name === 'rect') {
+      const [x, y] = [Number(attr('x') ?? 0), Number(attr('y') ?? 0)];
+      const [w, h] = [Number(attr('width') ?? 0), Number(attr('height') ?? 0)];
+      points = [
+        [x, y],
+        [x + w, y],
+        [x + w, y + h],
+        [x, y + h],
+      ];
+    }
+    for (const p of points)
+      for (const q of pad ? ellipsePoints(p, pad, pad, 0, 8) : [p])
+        if (Number.isFinite(q[0]) && Number.isFinite(q[1]))
+          out.push(apply(m, q));
+  }
+  return out;
+}
+
+/**
  * A shape round a line through points, as wide as `w0` at its start and
  * `w1` at its end, rounded at the end: a trunk, a tail lying on the ground,
  * a neck. Its start is left open-ended, to sit inside what it grows from.

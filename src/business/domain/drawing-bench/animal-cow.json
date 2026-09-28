@@ -6,5 +6,16 @@
   "is": "animal",
   "size": "large",
   "look": "a black and white cow with a pink nose and a bell on a strap round her neck",
-  "legs": 4
+  "legs": 4,
+  "drawer": "kit",
+  "animal": {
+    "species": "cow",
+    "coat": "white",
+    "second": "black",
+    "pattern": "patches",
+    "wear": {
+      "neck": "bell"
+    },
+    "wearColour": "brown"
+  }
 }

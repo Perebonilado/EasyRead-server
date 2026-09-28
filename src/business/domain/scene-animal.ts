@@ -453,6 +453,8 @@ const SAME: Record<string, readonly string[]> = {
   piebald: ['patches'],
   spot: ['spots'],
   spotted: ['spots'],
+  speckled: ['spots'],
+  speckles: ['spots'],
   dotted: ['spots'],
   striped: ['stripes'],
   stripe: ['stripes'],
@@ -461,6 +463,7 @@ const SAME: Record<string, readonly string[]> = {
   stockings: ['socks'],
   'white feet': ['socks'],
   star: ['blaze'],
+  head: ['blaze'],
   'white face': ['blaze'],
   underside: ['belly'],
   chest: ['belly'],
@@ -657,9 +660,15 @@ export function describeAnimal(spec: AnimalSpec): string {
   const own = featuresOf(spec);
   const size = spec.size === 'medium' ? '' : `${spec.size} `;
   const build = spec.build === 'average' ? '' : `${spec.build} `;
+  // On a bird, a blaze is its head and spots are speckles.
+  const bird = p.plan === 'bird';
   const marks =
     spec.second && spec.pattern !== 'plain'
-      ? PATTERN_WORDS[spec.pattern](spec.second)
+      ? bird && spec.pattern === 'blaze'
+        ? `a ${spec.second} head`
+        : bird && spec.pattern === 'spots'
+          ? `${spec.second} speckles`
+          : PATTERN_WORDS[spec.pattern](spec.second)
       : '';
   const parts = [
     marks,
@@ -705,7 +714,7 @@ export const animalTall = (spec: AnimalSpec): number =>
 /** Every word of the lists that says where a second colour goes, in the words people write it. */
 const PATTERN_SAID: [RegExp, AnimalPattern][] = [
   [/\b(?:patch|patches|patchy|pinto|piebald)\b/, 'patches'],
-  [/\b(?:spot|spots|spotted|dots|dotted)\b/, 'spots'],
+  [/\b(?:spot|spots|spotted|dots|dotted|speckled|speckles)\b/, 'spots'],
   [/\b(?:stripe|stripes|striped)\b/, 'stripes'],
   [/\b(?:sock|socks|stockings|feet|paws)\b/, 'socks'],
   [/\b(?:blaze|star)\b/, 'blaze'],

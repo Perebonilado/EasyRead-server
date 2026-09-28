@@ -698,8 +698,13 @@ describe('the cast drawn by the artist, at the cast step and again as asked', ()
     sets: [{ name: 'The Wall', id: 'wall' }],
   });
 
-  function artist() {
+  function artist(
+    start: typeof humptyBible = humptyBible,
+    /** What the cast's writer answers, from the bible and the request it is given. */
+    writes?: (given: typeof humptyBible, request: string) => unknown,
+  ) {
     const files = new Map<string, Buffer>();
+    const requests: string[] = [];
     const storage = {
       get: (key: string) =>
         files.has(key)
@@ -725,7 +730,7 @@ describe('the cast drawn by the artist, at the cast step and again as asked', ()
       now: CharacterSheet | null;
     }[] = [];
     const prepared: { characters: Set<string>; places: Set<string> }[] = [];
-    const bible: { current: typeof humptyBible } = { current: humptyBible };
+    const bible: { current: typeof humptyBible } = { current: start };
     let answer: CharacterSheet | null = drawn('<svg><circle r="2"/></svg>');
     const show = (): StudioShowRecord => ({
       id: 's1',
@@ -776,16 +781,23 @@ describe('the cast drawn by the artist, at the cast step and again as asked', ()
         listMessages: () => Promise.resolve([...messages]),
       } as unknown as StudioRepository,
       {
-        studioBible: () =>
-          Promise.resolve({
-            value: {
-              ...humptyBible,
-              characters: humptyBible.characters.map((c) =>
-                c.id === 'horse' ? { ...c, look: 'a white horse' } : c,
-              ),
-            },
+        studioBible: (input: {
+          previous?: typeof humptyBible;
+          request?: string;
+        }) => {
+          requests.push(input.request ?? '');
+          return Promise.resolve({
+            value: writes
+              ? writes(input.previous ?? bible.current, input.request ?? '')
+              : {
+                  ...humptyBible,
+                  characters: humptyBible.characters.map((c) =>
+                    c.id === 'horse' ? { ...c, look: 'a white horse' } : c,
+                  ),
+                },
             usage: { model: 'm', tokensIn: 1, tokensOut: 1, latencyMs: 1 },
-          }),
+          });
+        },
       } as unknown as LlmGatewayPort,
       { record: () => Promise.resolve() },
       storage as never,
@@ -839,6 +851,7 @@ describe('the cast drawn by the artist, at the cast step and again as asked', ()
       queued,
       lines,
       bible,
+      requests,
       setAnswer: (next: CharacterSheet | null) => {
         answer = next;
       },
@@ -896,6 +909,134 @@ describe('the cast drawn by the artist, at the cast step and again as asked', ()
     expect(work.drawing).toEqual({});
     expect(studio.lines()).toEqual(['Humpty redrawn — have a look']);
     expect(studio.lines().join(' ')).not.toContain('Cast changed');
+  });
+
+  /** Clover, drawn by the animal kit: a chestnut horse. */
+  const cloverBible = bibleOf({
+    characters: [
+      {
+        name: 'Clover',
+        id: 'clover',
+        kind: 'animal',
+        look: 'a gentle chestnut horse',
+        animal: { species: 'horse' },
+      },
+      { name: 'Tobi', voice: 'boy', figure: { age: 'child' } },
+    ],
+    sets: [{ name: 'The Field', id: 'field' }],
+  });
+  /** A writer that gives Clover a red saddle blanket, in her spec and in words. */
+  const blanketed = (given: typeof humptyBible) => ({
+    ...given,
+    characters: given.characters.map((c) =>
+      c.id === 'clover'
+        ? {
+            ...c,
+            look: 'a gentle chestnut horse with a red saddle blanket',
+            animal: {
+              ...c.animal,
+              wear: { back: 'saddle blanket' },
+              wearColour: 'red',
+            },
+          }
+        : c,
+    ),
+  });
+
+  it('draws an animal the kit draws again as its spec changed by the cast’s writer, waiting to be chosen', async () => {
+    const studio = artist(cloverBible, blanketed);
+    await studio.cast.changeWork('s1', (work) =>
+      markDrawing(
+        work,
+        ['clover'],
+        Date.now(),
+        'give her a red saddle blanket',
+      ),
+    );
+    await studio.processor.process(
+      job({
+        kind: 'redraw',
+        characterId: 'clover',
+        request: 'give her a red saddle blanket',
+      }),
+      last('k1'),
+    );
+    // The writer is asked for her alone; no artist is asked at all.
+    expect(studio.requests).toHaveLength(1);
+    expect(studio.requests[0]).toContain(
+      "Change only Clover's look, as the maker asks: give her a red saddle blanket.",
+    );
+    expect(studio.asked).toEqual([]);
+    const work = await studio.cast.work('s1');
+    const waiting = work.candidates.clover;
+    expect(waiting.sheet.animal).toMatchObject({
+      species: 'horse',
+      wear: { back: 'saddle blanket' },
+      wearColour: 'red',
+    });
+    expect(waiting.look).toBe(
+      'a gentle chestnut horse with a red saddle blanket',
+    );
+    expect(waiting.sheet.drawing.svg).toContain('#d9534f');
+    expect(waiting.words).toBe('give her a red saddle blanket');
+    expect(work.drawing).toEqual({});
+    expect(studio.lines()).toEqual(['Clover redrawn — have a look']);
+    // Her spec in the bible is as it was until the maker chooses.
+    expect(studio.bible.current.characters[0].animal?.wear).toEqual({});
+  });
+
+  it('asks once more when the writer changes nothing, and says so if it still does not', async () => {
+    const studio = artist(cloverBible, (given) => given);
+    await studio.cast.changeWork('s1', (work) =>
+      markDrawing(work, ['clover'], Date.now(), 'make her happier'),
+    );
+    await studio.processor.process(
+      job({
+        kind: 'redraw',
+        characterId: 'clover',
+        request: 'make her happier',
+      }),
+      last('k2'),
+    );
+    expect(studio.requests).toHaveLength(2);
+    expect(studio.requests[1]).toContain('That came back as it was');
+    expect(studio.asked).toEqual([]);
+    expect(await studio.cast.work('s1')).toEqual({
+      drawing: {},
+      candidates: {},
+    });
+    expect(studio.lines()).toEqual([
+      "Clover's new look could not be worked out from that. Say it another way, or try again.",
+    ]);
+  });
+
+  it('offers an animal the artist drew as the kit’s, when the writer gives it a spec', async () => {
+    const studio = artist(humptyBible, (given) => ({
+      ...given,
+      characters: given.characters.map((c) =>
+        c.id === 'horse'
+          ? { ...c, animal: { species: 'horse', coat: 'white' } }
+          : c,
+      ),
+    }));
+    studio.files.set(
+      studioCastKey('s1'),
+      Buffer.from(
+        JSON.stringify({ horse: drawn('<svg><circle r="1"/></svg>') }),
+      ),
+    );
+    await studio.processor.process(
+      job({ kind: 'redraw', characterId: 'horse', request: 'make him white' }),
+      last('k3'),
+    );
+    expect(studio.asked).toEqual([]);
+    const waiting = (await studio.cast.work('s1')).candidates.horse;
+    expect(waiting.sheet.animal).toMatchObject({
+      species: 'horse',
+      coat: 'white',
+    });
+    // The artist's drawing stays theirs until the maker chooses.
+    expect(cast(studio.files).horse.drawing.svg).toContain('r="1"');
   });
 
   it('says so when no new drawing came, and stops showing them as being drawn', async () => {

@@ -5,9 +5,12 @@
  * together on a set as the stage stands them.
  *
  *   npm run figures:sheet -- [out dir]
+ *   npm run figures:sheet -- --animals [out dir]
  *
  * Writes figures.png, a still, and figures.html, where everyone breathes
- * and blinks, and talks while "talking" is ticked.
+ * and blinks, and talks while "talking" is ticked. With --animals, the
+ * animal kit's sheet instead (scripts/animals-sheet): animals.png and
+ * animals.html.
  */
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -37,9 +40,12 @@ import {
   type FigureSpec,
 } from '../src/business/domain/scene-figure';
 import { rasterise } from '../src/business/domain/scene-raster';
+import { writeAnimalsSheet } from './animals-sheet';
 import { EXPRESSIONS } from '../src/business/domain/scene-story';
 
-const out = process.argv[2] ?? '.';
+const args = process.argv.slice(2);
+const animals = args.includes('--animals');
+const out = args.find((arg) => !arg.startsWith('--')) ?? '.';
 /** Stage units a kit unit is drawn at on the sheet. */
 const SCALE = 0.72;
 const CELL = 128;
@@ -621,8 +627,10 @@ still.push('</g></svg>');
 y += setH + 30;
 
 mkdirSync(out, { recursive: true });
+if (animals) void writeAnimalsSheet(out);
 const sheet = `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${y}" viewBox="0 0 ${width} ${y}" font-family="Helvetica, Arial, sans-serif"><rect width="100%" height="100%" fill="#fbf8f2"/>${still.join('')}</svg>`;
 void (async () => {
+  if (animals) return;
   writeFileSync(join(out, 'figures.png'), await rasterise(sheet, width));
   writeFileSync(
     join(out, 'figures.html'),

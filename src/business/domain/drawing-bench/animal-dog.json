@@ -6,5 +6,18 @@
   "is": "animal",
   "size": "small",
   "look": "a small scruffy brown dog with floppy ears, a white patch on his chest and a red collar",
-  "legs": 4
+  "legs": 4,
+  "drawer": "kit",
+  "animal": {
+    "species": "dog",
+    "size": "small",
+    "coat": "brown",
+    "second": "white",
+    "pattern": "belly",
+    "ears": "floppy",
+    "wear": {
+      "neck": "collar"
+    },
+    "wearColour": "red"
+  }
 }

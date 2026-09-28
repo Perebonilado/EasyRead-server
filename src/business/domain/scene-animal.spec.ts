@@ -1,3 +1,4 @@
+import render from 'dom-serializer';
 import { parseDocument } from 'htmlparser2';
 import type { Element } from 'domhandler';
 import {
@@ -14,6 +15,7 @@ import {
   type AnimalSpec,
 } from './scene-animal';
 import { ANIMAL_POSES, animalFace, drawAnimal } from './scene-animal-draw';
+import { blobSamples, reachOf } from './scene-animal-shapes';
 import { checkSheet, codeNotes } from './drawing-checks';
 import { elements, walk } from './scene-dom';
 import { FIGURE_FACES } from './scene-figure';
@@ -24,6 +26,70 @@ import { holdsTogether, type Swing } from './scene-sheet-rig';
 
 const parse = (svg: string) =>
   elements(parseDocument(svg, { xmlMode: true }).children)[0];
+
+/** A part's markup inside its groups' moves and line widths, as it is drawn. */
+function inPlace(node: Element): string {
+  let markup = render(node, { xmlMode: true });
+  for (
+    let up = node.parent as Element | null;
+    up && up.name;
+    up = up.parent as Element | null
+  ) {
+    const move = up.attribs.transform;
+    const width = up.attribs['stroke-width'];
+    if (move || width)
+      markup = `<g${move ? ` transform="${move}"` : ''}${width ? ` stroke-width="${width}"` : ''}>${markup}</g>`;
+  }
+  return markup;
+}
+
+/** How wide and how tall a set of points goes. */
+const extent = (points: [number, number][]) => {
+  const xs = points.map((p) => p[0]);
+  const ys = points.map((p) => p[1]);
+  return [Math.max(...xs) - Math.min(...xs), Math.max(...ys) - Math.min(...ys)];
+};
+
+describe('how far a drawing reaches', () => {
+  it('finds a shape’s edge and its line, moved as its groups move it', () => {
+    const [x0, x1, y0, y1] = (() => {
+      const pts = reachOf(
+        '<g transform="translate(10 0)"><circle cx="0" cy="0" r="4" stroke-width="2"/></g>',
+      );
+      const xs = pts.map((p) => p[0]);
+      const ys = pts.map((p) => p[1]);
+      return [
+        Math.min(...xs),
+        Math.max(...xs),
+        Math.min(...ys),
+        Math.max(...ys),
+      ];
+    })();
+    expect(x0).toBeCloseTo(5, 1);
+    expect(x1).toBeCloseTo(15, 1);
+    expect(y0).toBeCloseTo(-5, 1);
+    expect(y1).toBeCloseTo(5, 1);
+    // Turned a quarter about the origin, a line along x reaches down y.
+    const turned = reachOf(
+      '<g transform="rotate(90)"><path d="M0 0 L10 0"/></g>',
+      0,
+    );
+    expect(Math.max(...turned.map((p) => p[1]))).toBeCloseTo(10, 5);
+    // What is only defined, or clipped away, is not reached.
+    expect(reachOf('<defs><circle r="50"/></defs>')).toEqual([]);
+  });
+
+  it('follows a smooth outline past the points it passes through', () => {
+    const square: [number, number][] = [
+      [0, 0],
+      [10, 0],
+      [10, 10],
+      [0, 10],
+    ];
+    const low = Math.max(...blobSamples(square).map((p) => p[1]));
+    expect(low).toBeGreaterThan(10);
+  });
+});
 
 describe('an animal, as a writer or the maker says it', () => {
   it('reads a spec, each value one of the lists, other words for them taken', () => {
@@ -252,15 +318,62 @@ describe('every species, drawn by the kit', () => {
         expect(still.svg).not.toMatch(/class="a-pose [^"]*" opacity="0"/);
       }
       // The stage's drawing: every pose it has, standing shown, the rest
-      // hidden until the body sinks; a fish swims in one.
+      // hidden until the body sinks; a fish swims in one, and a rabbit or
+      // a frog sits as it stands.
       expect(stage.svg).toMatch(/class="a-pose a-stand">/);
       expect(stage.svg).not.toMatch(/class="a-pose a-stand" opacity/);
       const poses = stage.svg.match(/class="a-pose /g) ?? [];
-      if (species === 'fish') expect(poses).toHaveLength(1);
+      if (species === 'fish' || SPECIES[species].plan === 'hopper')
+        expect(poses).toHaveLength(1);
       else {
         expect(poses.length).toBeGreaterThan(1);
         expect(stage.svg).toContain('--a-lie:clamp(0,(var(--low,0)');
       }
+    },
+  );
+
+  it.each(ANIMAL_SPECIES)(
+    '%s stands, sits, lies and curls up on the ground, not in it',
+    (species) => {
+      for (const pose of ANIMAL_POSES) {
+        const { svg } = drawAnimal(plainAnimal(species), species, { pose });
+        // All of it but its shadow, whose middle is the ground's.
+        const drawn = svg
+          .replace(/<style>[\s\S]*?<\/style>/, '')
+          .replace(/<ellipse cx="0" cy="-0.6"[^>]*\/>/, '');
+        const lowest = Math.max(...reachOf(drawn).map((p) => p[1]));
+        // Its outline's bottom half a line below the ground at most, and
+        // a unit's slack for a curve's bulge.
+        expect(lowest).toBeLessThanOrEqual(KIT_LINE / 2 + 1);
+      }
+    },
+  );
+
+  it.each(ANIMAL_SPECIES)(
+    '%s talks with a mouth that reads on the stage',
+    (species) => {
+      const drawn = drawAnimal(plainAnimal(species), species, {
+        pose: 'stand',
+      });
+      const root = parse(drawn.svg);
+      const shape = (k: number) =>
+        extent(
+          reachOf(
+            inPlace(
+              [...walk(root)].find(
+                (node) => node.attribs.class === `vm v${k}`,
+              )!,
+            ),
+            0,
+          ),
+        );
+      // Open, at least twice the kit's line across and nearly as tall:
+      // on a card, a mouth and not a speck.
+      const [w, h] = shape(2);
+      expect(w).toBeGreaterThanOrEqual(KIT_LINE * 2.5);
+      expect(h).toBeGreaterThanOrEqual(KIT_LINE * 1.75);
+      // Open taller than shut.
+      expect(h).toBeGreaterThan(shape(0)[1]);
     },
   );
 
@@ -413,12 +526,26 @@ describe("the drawing checks' scorecard", () => {
     'snake',
     'monkey',
     'crocodile',
+    'rabbit',
+    'frog',
+    'mouse',
+    'owl',
+    'elephant',
   ] as const)(
-    '%s passes every point code checks',
+    '%s passes every point code checks, standing on its feet',
     async (species) => {
       const spec: AnimalSpec = plainAnimal(species);
       const sheet = await animalSheet(spec, species);
-      const checks = await checkSheet(sheet, { unjoined: [] });
+      // As the bench's briefs have them: a bird and a monkey on two, a
+      // fish and a snake on none, the rest on four.
+      const plan = SPECIES[species].plan;
+      const legs =
+        plan === 'bird' || plan === 'climber'
+          ? 2
+          : plan === 'fish' || species === 'snake'
+            ? null
+            : 4;
+      const checks = await checkSheet(sheet, { unjoined: [], legs });
       expect(codeNotes(checks)).toEqual([]);
     },
     60_000,

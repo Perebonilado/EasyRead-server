@@ -419,7 +419,36 @@ The bench measures the real cost per drawing for each candidate model before the
     - Judged again by gpt-4.1, a judge the loop never saw: baseline median 6.84 (0% pass) → 9.33 (86% pass). Both redraws show the asked change (change 10, same character 9). Only the umbrella is below its baseline, and it was never drawn.
     - Gemini, stricter, scored Clover's blanket 7 for the change: it shows, but it is not yet at the pass mark. Its last round was cut by the credits.
   - **Still to do:** top up Gemini's prepaid credits, then run the cut briefs again: `npm run drawing:bench -- --only beach,forest,market,drum,kite,umbrella,uniform,clover-blanket,eggbert-rounder --judge google:gemini-3.8-flash --against baseline`. Richard's marks go on the contact sheet with `--mark`.
-- [ ] Phase B: animal kit and look editor
+- [ ] Phase B: animal kit and look editor (built and tested; the bench's pass mark, Richard's sign-off and the showcase redraws are still to come)
+  - **What was built (2026-09-27 and 28):**
+    - B1: `AnimalSpec` in `scene-animal.ts`, read like a person's figure: every field falls back to something plain, and other words are taken through a synonym table. `describeAnimal` gives the card's words. On a bird, "blaze" is its head ("a green parrot with a red head") and "spots" are speckles on its wings; the writer's prompt says so.
+    - B2: 33 species over six body plans, in the kit's own line and palette, standing at their true size beside people. A small animal's head, eyes and beak shrink less than its body (`headScale`), as a young animal's do, so its face still shows round the kit's eyes. People's byte lock holds.
+    - B3: the kit's eyes, brows, lids and faces on every head. Mouths that talk: the kit's six shapes on a muzzle, a two-part beak that opens at its hinge (a duck's bill is broad and round at its end), and a fish's lips. The mouths were made larger so they read at card size (muzzles, and the rabbit's, monkey's and snake's), and beaks open wider. A test holds every species to an open mouth at least 2½ lines across and 1¾ lines tall.
+    - B4: the artist rig's groups and pivots, `rig: false`, and gaits. Standing, sitting, lying down and curled up are drawn as groups the stage shows as the body sinks. A rabbit and a frog sit as they stand, and a fish swims in its one pose. A still made on the server shows only the standing pose: the pose switching sits in `@supports`, which the renderer skips. `reachOf` and `blobSamples` (`scene-animal-shapes.ts`) find how far a drawing really reaches, curves and lines included. They settle every pose on the ground and in its frame (nothing more than a unit into the ground, now tested for every species and pose), and they raise a roosting bird's tail. Worn things round the neck sit just below the head, clear of it. Sheep have legs and ears in their face's colour. Elephants' tusks sit behind the trunk. Curly tails open into a curl. Hind feet and front paws stand apart, so the feet check counts them.
+    - B5: `StudioCharacter.animal`, the writer's lenient schema and prompt, `drawnByArtist`, previews, the cast service and redraws as a spec change waiting to be chosen. Books are unchanged (`SCENE_ANIMAL_KIT_BOOKS`, off).
+    - B6: the client's animal section on the cast card (client commit `ae9b2b8`), and `kit.ts` mirrors the lists plus 'bare feet'.
+    - B7: tests for every species: it draws whole, stays in the house style and under 56 KB, and draws every pose and face. It flips, stays joined at every swing, stands on the ground, and talks legibly. The scorecard's code checks, the feet check included, pass for 12 species. The contact sheet is `npm run figures:sheet -- --animals <dir>`. The bench's briefs carry a spec and `drawer: kit`, and `--drawer artist` measures the artist on the same briefs.
+  - **Bench**, on the 22 animal briefs and Clover's blanket, judged by Gemini 3.8 Flash:
+
+    | Run | Median | Mean | Pass | Code checks | Cost and time |
+    |---|---|---|---|---|---|
+    | Baseline (the old artist) | 4.00 | 3.87 | 0/23 | — | — |
+    | Phase A's artist | 7.67 | 7.67 | 9/23 | — | about 10.8¢ and 61 s a drawing |
+    | The kit, first full run | 7.33 | 7.29 | 5/23 | 91% | 0¢, instant |
+    | **The kit, second full run** | **7.67** | **7.41** | **6/23** | **100%** | **0¢, instant** |
+
+    - In the second run the judge named 22 of 23 species. It called the duck "a yellow cartoon bird"; after the bill was rounded and the eyes set apart, it called it "a yellow duckling" (7).
+    - Kit animals score about as well as Phase A's artist, for nothing and at once. Few pass, because Gemini's pass mark is 8 on every point.
+    - Single briefs after the second run: the turtle now passes (8.33). The rabbit and the mouse are still weak (5), and the parrot moves between 5.3 and 6.7 from run to run.
+    - An earlier kit run was judged by gpt-4.1. It is not counted here, and gpt-4.1 is not used.
+  - **What the judge still asks for:**
+    - The kit's big outlined eyes. On a small head the judge calls them "a mask" or "goggles". This is the house style's eye; whether small animals should have a finer one is Richard's call.
+    - Four legs for animals the kit draws differently: the monkey stands upright, the rabbit sits, and the mouse's legs are short.
+    - Marks the spec has no word for: a cat's striped tail, a scruffy coat.
+  - **Still to do:**
+    - Richard's look at the contact sheet.
+    - The bench's "every animal passes".
+    - The showcase: Pip, Bingo, Zuri and Clover redrawn through the approve flow, and the Maya and Kofi films remade. These run on Richard's shows, so they wait for him. The contact sheet shows each of them as the kit would draw them.
 - [ ] Phase C: creature kit
 - [ ] Phase D: places from layouts; clothes at rest
 - [ ] Phase E: three options, choosing in chat, thumbs down

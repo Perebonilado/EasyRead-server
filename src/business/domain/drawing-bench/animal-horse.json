@@ -6,5 +6,13 @@
   "is": "animal",
   "size": "large",
   "look": "a gentle brown horse with a cream blaze down her face and a dark mane and tail",
-  "legs": 4
+  "legs": 4,
+  "drawer": "kit",
+  "animal": {
+    "species": "horse",
+    "coat": "brown",
+    "second": "cream",
+    "pattern": "blaze",
+    "mane": "long"
+  }
 }

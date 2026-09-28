@@ -37,6 +37,8 @@ import {
   limbFill,
   limbInk,
   mul,
+  blobSamples,
+  reachOf,
   path,
   pivoted,
   placed,
@@ -373,8 +375,8 @@ const QUADS: Partial<Record<AnimalSpecies, QuadShape>> = {
     eye: 0.45,
     eyeAt: [0.05, -0.2],
     ear: 1,
-    tail: 12,
-    tailW: 3.4,
+    tail: 16,
+    tailW: 2.8,
     dip: 25,
   }),
   lion: Q({
@@ -553,7 +555,7 @@ const QUADS: Partial<Record<AnimalSpecies, QuadShape>> = {
     dip: 38,
   }),
   mouse: Q({
-    leg: 5,
+    leg: 6.5,
     len: 26,
     depth: 16,
     build: 'round',
@@ -562,13 +564,15 @@ const QUADS: Partial<Record<AnimalSpecies, QuadShape>> = {
     foot: 'paw',
     hock: 1,
     neck: { len: 2, angle: 40, w: 10 },
-    head: { r: 10, long: 1.1, angle: 8 },
+    head: { r: 11.5, long: 1.1, angle: 8 },
     muzzle: { kind: 'snout', len: 9, w: 7 },
-    eye: 0.27,
-    eyeAt: [0.02, -0.15],
-    ear: 1.15,
+    eye: 0.25,
+    eyeAt: [0.02, -0.12],
+    // Apart, not run together into a mask on its small head.
+    eyeDx: 20,
+    ear: 1.2,
     tail: 26,
-    tailW: 2,
+    tailW: 1.4,
     dip: 20,
   }),
   lizard: Q({
@@ -627,6 +631,7 @@ const QUADS: Partial<Record<AnimalSpecies, QuadShape>> = {
     muzzle: { kind: 'beaky', len: 0, w: 0 },
     eye: 0.27,
     eyeAt: [0.05, -0.2],
+    eyeDx: 20,
     ear: 0,
     tail: 6,
     tailW: 4,
@@ -637,8 +642,17 @@ const QUADS: Partial<Record<AnimalSpecies, QuadShape>> = {
 /** How slim or stout it is: its body's depth, and its legs' width. */
 const BUILD_GIRTH = { slim: 0.88, average: 1, stout: 1.14 } as const;
 
-/** A shape scaled to a size: every length by `k`, the body's depth and the legs' width by its build. */
+/**
+ * How much a head is scaled for an animal scaled by `k`: a small one's
+ * head (a puppy's, a duckling's) shrinks less than its body, as a young
+ * animal's does, so the kit's eyes and their line still leave its face
+ * showing round them; a large one's grows with it.
+ */
+export const headScale = (k: number): number => (k < 1 ? k ** 0.4 : k);
+
+/** A shape scaled to a size: every length by `k`, the body's depth and the legs' width by its build, the head by `headScale`. */
 function sized(shape: QuadShape, k: number, girth: number): QuadShape {
+  const kh = headScale(k);
   return {
     ...shape,
     leg: shape.leg * k,
@@ -653,13 +667,13 @@ function sized(shape: QuadShape, k: number, girth: number): QuadShape {
       angle: shape.neck.angle,
       w: shape.neck.w * k * Math.sqrt(girth),
     },
-    head: { ...shape.head, r: shape.head.r * k },
+    head: { ...shape.head, r: shape.head.r * kh },
     muzzle: {
       ...shape.muzzle,
-      len: shape.muzzle.len * k,
-      w: shape.muzzle.w * k,
+      len: shape.muzzle.len * kh,
+      w: shape.muzzle.w * kh,
     },
-    eye: shape.eye * k,
+    eye: shape.eye * kh,
     tail: shape.tail * k,
     tailW: shape.tailW * k,
   };
@@ -717,45 +731,53 @@ function quadFrame(s: QuadShape): QuadFrame {
         : s.foot === 'claw'
           ? -1.5
           : -s.footW * 0.52;
-  const far = s.legW * 0.5;
   const legs: QuadFrame['legs'] = [];
   for (const near of [false, true]) {
-    const dx = near ? 0 : far;
     const dy = near ? 0 : -1.8;
     if (s.sprawl) {
       // Out to the side and down: the elbow above the body's line.
       const out = near ? 1 : -0.6;
       for (const front of [true, false]) {
-        const x = (front ? xf : xh) + dx;
+        const x = (front ? xf : xh) + (near ? 0 : s.legW * 0.5);
         legs.push({
           near,
           front,
           joints: [
             [x, hipY + D * 0.1],
-            [x + (front ? 3 : -3) * out, yb + 2 + dy * 0.5],
+            // The elbow out and down, its round bend kept off the ground.
+            [
+              x + (front ? 3 : -3) * out,
+              Math.min(yb + 2 + dy * 0.5, -(s.legW / 2 + LINE / 2) + dy),
+            ],
             [x + (front ? 5 : -2), -(s.footW / 2 + LINE) + dy],
           ],
         });
       }
       continue;
     }
+    // Seen a little from the front: the far legs a stride from the near,
+    // the front one ahead and the hind one behind, so all four show.
+    const fx = near ? 0 : s.legW * 0.9;
+    const hx = near ? 0 : -s.legW * 0.65;
+    // Every bend above the foot, however short the leg (a turtle's).
+    const bend = (y: number) => Math.min(y, footY + dy - s.footW * 0.5);
     legs.push({
       near,
       front: true,
       joints: [
-        [xf + dx, hipY],
-        [xf + dx + 1, yb + L * 0.52 + dy * 0.5],
-        [xf + dx, footY + dy],
+        [xf + fx * 0.4, hipY],
+        [xf + fx * 0.75 + 1, bend(yb + L * 0.52 + dy * 0.5)],
+        [xf + fx, footY + dy],
       ],
     });
     legs.push({
       near,
       front: false,
       joints: [
-        [xh + dx, hipY],
-        [xh + dx + s.hock * 0.6, yb + L * 0.3],
-        [xh + dx - s.hock, -L * 0.3 + dy * 0.5],
-        [xh + dx - s.hock * 0.5, footY + dy],
+        [xh + hx * 0.4, hipY],
+        [xh + hx * 0.7 + s.hock * 0.6, bend(yb + L * 0.3)],
+        [xh + hx - s.hock, bend(-L * 0.3 + dy * 0.5)],
+        [xh + hx - s.hock * 0.5, footY + dy],
       ],
     });
   }
@@ -835,6 +857,14 @@ const alongHead = (s: QuadShape, at: P, along: number, across: number): P =>
   );
 
 /** An ear, by its kind, from its base: behind the head, or before it. */
+/** A sheep's face, ears and legs: its second colour, else dark grey; its wool is only on its body. */
+const sheepFace = (look: Look): string | null =>
+  look.spec.species === 'sheep'
+    ? look.spec.second
+      ? look.second
+      : '#5f5d66'
+    : null;
+
 function earOf(
   kind: AnimalEars,
   base: P,
@@ -843,7 +873,14 @@ function earOf(
   look: Look,
   near: boolean,
 ): string {
-  const colour = near ? look.coat : look.far;
+  const bare = sheepFace(look);
+  const colour = bare
+    ? near
+      ? bare
+      : shade(bare, 0.85)
+    : near
+      ? look.coat
+      : look.far;
   switch (kind) {
     case 'pointed': {
       const tip = polar(base, size * 1.25, 90 + lean);
@@ -926,17 +963,24 @@ function tailOf(s: QuadShape, look: Look, base: P, lying = false): string {
   const species = look.spec.species;
   const equine =
     species === 'horse' || species === 'donkey' || species === 'zebra';
+  // None of it goes into the ground: sitting or lying, what would rests on
+  // it. An outline's points kept `half` above it, a line's by half its width.
+  const above = (pts: P[], half = 1): P[] =>
+    pts.map(([x, y]): P => [x, Math.min(y, -half)]);
+  const thick = w / 2 + LINE / 2;
   switch (look.tail) {
     case 'none':
       return '';
     case 'short':
       return path(
-        blob([
-          add(base, [2, 2]),
-          add(base, [-len * 0.5, -len * 0.55]),
-          add(base, [-len * 0.95, -len * 0.4]),
-          add(base, [-len * 0.6, len * 0.2]),
-        ]),
+        blob(
+          above([
+            add(base, [2, 2]),
+            add(base, [-len * 0.5, -len * 0.55]),
+            add(base, [-len * 0.95, -len * 0.4]),
+            add(base, [-len * 0.6, len * 0.2]),
+          ]),
+        ),
         inked(
           species === 'deer' || species === 'rabbit' ? look.second : look.coat,
         ),
@@ -946,21 +990,22 @@ function tailOf(s: QuadShape, look: Look, base: P, lying = false): string {
         base,
         lying ? [-len * 0.9, len * 0.5] : [-len * 0.8, len * 0.45],
       );
-      const pts: P[] = [
+      const pts: P[] = above([
         add(base, [3, -w * 0.2]),
         add(base, [-len * 0.35, -w * 0.55]),
         add(lerp(base, tip, 0.7), [0, -w * 0.62]),
         tip,
         add(lerp(base, tip, 0.72), [w * 0.2, w * 0.55]),
         add(base, [-len * 0.2, w * 0.45]),
-      ];
-      const tipPart = [lerp(pts[2], tip, 0.35), tip, lerp(pts[4], tip, 0.3)];
+      ]);
+      const end = pts[3];
+      const tipPart = [lerp(pts[2], end, 0.35), end, lerp(pts[4], end, 0.3)];
       return (
         path(blob(pts, 0.9), inked(look.coat)) +
         (look.spec.second
           ? path(
               blob(
-                [...tipPart, lerp(lerp(pts[2], pts[4], 0.5), tip, 0.45)],
+                [...tipPart, lerp(lerp(pts[2], pts[4], 0.5), end, 0.45)],
                 0.9,
               ),
               flat(look.second),
@@ -969,7 +1014,8 @@ function tailOf(s: QuadShape, look: Look, base: P, lying = false): string {
       );
     }
     case 'curly': {
-      const r = len * 0.22;
+      // A curl open enough to read as one, not a knot as thick as it is wide.
+      const r = Math.max(len * 0.22, (w + LINE) * 1.25);
       const c = add(base, [-r * 1.6, -r * 0.4]);
       const spiral: P[] = [base];
       for (let k = 0; k <= 10; k += 1) {
@@ -977,7 +1023,7 @@ function tailOf(s: QuadShape, look: Look, base: P, lying = false): string {
         const rr = r * (1 - k * 0.06);
         spiral.push([c[0] - Math.cos(a) * rr, c[1] - Math.sin(a) * rr]);
       }
-      return limb(curve(spiral), look.coat, w);
+      return limb(curve(above(spiral, thick)), look.coat, w);
     }
     case 'tufted': {
       const end = add(
@@ -996,8 +1042,8 @@ function tailOf(s: QuadShape, look: Look, base: P, lying = false): string {
         6,
       ).map((p, i) => (i % 2 ? lerp(p, end, 0.25) : p));
       return (
-        limb(curve([base, mid, end]), look.coat, w) +
-        path(blob(tuft, 0.9), inked(look.hair))
+        limb(curve(above([base, mid, end], thick)), look.coat, w) +
+        path(blob(above(tuft), 0.9), inked(look.hair))
       );
     }
     default: {
@@ -1015,14 +1061,14 @@ function tailOf(s: QuadShape, look: Look, base: P, lying = false): string {
           add(end, [w * 0.8, -w * 0.2]),
           add(lerp(base, end, 0.5), [w * 0.6, 0]),
         ];
-        return path(blob(pts, 0.9), inked(look.hair));
+        return path(blob(above(pts), 0.9), inked(look.hair));
       }
       if (s.build === 'low') {
         const pts: P[] = [
           add(base, [3, 0]),
           add(base, [-len * 0.3, s.depth * 0.3]),
           add(base, [-len * 0.65, s.depth * 0.6]),
-          [base[0] - len, -w * 0.2],
+          [base[0] - len, -(w * 0.16 + 0.3)],
         ];
         return path(tapered(pts, w * 1.35, w * 0.32), inked(look.coat));
       }
@@ -1047,7 +1093,7 @@ function tailOf(s: QuadShape, look: Look, base: P, lying = false): string {
               add(base, [-len * 0.45, -len * 0.7]),
               add(base, [-len * 0.3, -len]),
             ];
-      return limb(curve(pts), look.coat, w);
+      return limb(curve(above(pts, thick)), look.coat, w);
     }
   }
 }
@@ -1116,8 +1162,19 @@ function legOf(
   flatDown = false,
 ): string {
   const upper = poly(joints.slice(0, 2));
-  const rest = poly(joints.slice(1));
   const foot = joints[joints.length - 1];
+  const knee = joints[joints.length - 2];
+  // A leg standing on the ground ends where its round end stays inside
+  // the foot, not showing under it: drawn up the leg from the foot by as
+  // much as it would go past the ground.
+  const ended = (w: number): P => {
+    const over = foot[1] + w / 2 + LINE / 2;
+    const [dx, dy] = sub(foot, knee);
+    return over > 0 && dy > Math.hypot(dx, dy) * 0.5
+      ? sub(foot, mul([dx, dy], Math.min(0.8, over / dy)))
+      : foot;
+  };
+  const rest = poly([...joints.slice(1, -1), ended(s.footW)]);
   const boot = look.spec.wear.feet === 'boots';
   return [
     limbInk(upper, s.legW),
@@ -1125,7 +1182,7 @@ function legOf(
     limbFill(rest, lower, s.footW),
     boot
       ? limb(
-          poly([lerp(joints[joints.length - 2], foot, 0.55), foot]),
+          poly([lerp(knee, foot, 0.55), ended(s.footW * 1.12)]),
           look.wear,
           s.footW * 1.12,
         ) +
@@ -1455,7 +1512,9 @@ function shellOf(outline: P[], look: Look): string {
   ]
     .map(([x, y]) =>
       path(
-        blob(ellipsePoints([x, y], w * 0.11, h * 0.16, 0, 6)),
+        `M${ellipsePoints([x, y], w * 0.12, h * 0.17, 0, 6)
+          .map(pt)
+          .join(' L')} Z`,
         `fill="${shade(shell, 1.18)}" stroke-width="1.8"`,
       ),
     )
@@ -1585,8 +1644,78 @@ function hornsOf(s: QuadShape, look: Look, head: P, near: boolean): string {
   }
 }
 
-/** What is worn round the neck: a collar and its tag, a bow, a scarf, a bell. */
-function neckWear(look: Look, at: P, w: number, deg: number): string {
+/** Whether a point is inside an outline (its points, taken as a polygon). */
+function inside(p: P, outline: P[]): boolean {
+  let within = false;
+  for (let i = 0, j = outline.length - 1; i < outline.length; j = i, i += 1) {
+    const [xi, yi] = outline[i];
+    const [xj, yj] = outline[j];
+    if (
+      yi > p[1] !== yj > p[1] &&
+      p[0] < ((xj - xi) * (p[1] - yi)) / (yj - yi) + xi
+    )
+      within = !within;
+  }
+  return within;
+}
+
+/** A collar's front, from its middle: what hangs from it hangs here. */
+const throatOf = (at: P, w: number, deg: number): P =>
+  polar(at, w * 0.5, deg - 90);
+
+/** The way a neck points, from the body up to the head, as `polar` takes it. */
+const upNeck = (body: P, head: P) =>
+  (Math.atan2(body[1] - head[1], head[0] - body[0]) * 180) / Math.PI;
+
+/**
+ * What is worn round the neck, drawn first in the head's group: over the
+ * body, under the head, turning with it. It goes from inside the head on
+ * down the neck (from `head` towards `body`) to the first place where its
+ * middle and its front, where a tag or a bell hangs, are both clear of the
+ * head's outline, and a little beyond: just below the head, where it shows.
+ */
+function neckWearBelow(
+  look: Look,
+  outline: P[],
+  head: P,
+  body: P,
+  w: number,
+  r: number,
+): string {
+  const worn = look.spec.wear.neck;
+  if (!worn) return '';
+  const deg = upNeck(body, head);
+  const [dx, dy] = sub(body, head);
+  const len = Math.hypot(dx, dy) || 1;
+  const along: P = [dx / len, dy / len];
+  const past = Math.max(1.8, w * 0.1);
+  // A bow must show its wings either side of its knot, not just the knot.
+  const wide = worn === 'bow' ? bowWing(r) * 0.75 : 0;
+  for (let t = 0; t < 400; t += 0.5) {
+    const at = add(head, mul(along, t));
+    const front = throatOf(at, w, deg);
+    const clear = [at, front, add(front, [-wide, 0]), add(front, [wide, 0])];
+    if (clear.every((p) => !inside(p, outline)))
+      return neckWear(look, add(at, mul(along, past)), w, deg, r);
+  }
+  return '';
+}
+
+/** A bow's wing, by the head it is under. */
+const bowWing = (r: number) => Math.max(7, r * 0.5);
+
+/**
+ * What is worn round the neck: a collar and its tag, a bow, a scarf, a
+ * bell. Round a neck `w` wide; what hangs from it sized by the head (its
+ * radius `r`), and never so small that its outline hides its colour.
+ */
+function neckWear(
+  look: Look,
+  at: P,
+  w: number,
+  deg: number,
+  r: number,
+): string {
   const worn = look.spec.wear.neck;
   if (!worn) return '';
   const colour = look.wear;
@@ -1596,61 +1725,66 @@ function neckWear(look: Look, at: P, w: number, deg: number): string {
     const mid = polar(at, w * 0.12, deg + 180);
     return limb(curve([a, mid, b]), colour, width);
   };
-  const low = polar(at, w * 0.5, deg - 90);
+  const low = throatOf(at, w, deg);
+  const big = Math.max(w, 16);
   switch (worn) {
     case 'bow': {
       const c = low;
-      const wing = w * 0.34;
+      const wing = bowWing(r);
       return (
         path(
           blob(
-            [c, add(c, [-wing, -wing * 0.6]), add(c, [-wing, wing * 0.6])],
+            [c, add(c, [-wing, -wing * 0.7]), add(c, [-wing, wing * 0.7])],
             0.4,
           ),
           inked(colour),
         ) +
         path(
           blob(
-            [c, add(c, [wing, -wing * 0.6]), add(c, [wing, wing * 0.6])],
+            [c, add(c, [wing, -wing * 0.7]), add(c, [wing, wing * 0.7])],
             0.4,
           ),
           inked(colour),
         ) +
-        circle(c, wing * 0.28, inked(shade(colour, 0.8)))
+        circle(c, Math.max(2.4, wing * 0.28), inked(shade(colour, 0.8)))
       );
     }
     case 'scarf': {
       const hang: P[] = [
         add(low, [-2, 0]),
-        add(low, [-w * 0.1, w * 0.4]),
-        add(low, [-w * 0.3, w * 0.7]),
+        add(low, [-big * 0.1, big * 0.4]),
+        add(low, [-big * 0.3, big * 0.7]),
       ];
       return (
         band(Math.max(5, w * 0.24)) +
         limb(curve(hang), colour, Math.max(4.5, w * 0.2))
       );
     }
-    case 'bell':
+    case 'bell': {
+      const bell = Math.max(6, r * 0.5);
       return (
         band(Math.max(3.4, w * 0.13)) +
         path(
           blob(
             [
               add(low, [0, -1]),
-              add(low, [w * 0.18, w * 0.22]),
-              add(low, [0, w * 0.3]),
-              add(low, [-w * 0.18, w * 0.22]),
+              add(low, [bell * 0.62, bell * 0.8]),
+              add(low, [0, bell * 1.05]),
+              add(low, [-bell * 0.62, bell * 0.8]),
             ],
             0.9,
           ),
           inked(GOLD),
         )
       );
-    default:
+    }
+    default: {
+      const tag = Math.max(2.6, r * 0.16);
       return (
         band(Math.max(3.4, w * 0.14)) +
-        circle(add(low, [0, w * 0.1]), Math.max(2.2, w * 0.1), inked(GOLD, 1.8))
+        circle(add(low, [0, tag * 0.8]), tag, inked(GOLD, 1.8))
       );
+    }
   }
 }
 
@@ -1747,15 +1881,17 @@ function quadPoses(
     lying: false,
   };
   const out: Partial<Record<AnimalPose, Posed>> = { stand };
-  const L = s.leg;
-  const B = s.len;
-  const D = s.depth;
   // A leg folded along the ground: its middle as high as it is thick, so
   // it lies on the ground and not through it.
   const lowY = -(s.footW / 2 + LINE);
   // Lying down: the body lowered onto the ground, the front legs forward
-  // along it, the hind legs folded under.
-  const drop = L - 1.5;
+  // along it, the hind legs folded under. Its lowest, as its outline
+  // curves (or its wool's bumps), just on the ground.
+  const lowest =
+    s.build === 'wool'
+      ? Math.max(...f.body.map((p) => p[1])) + s.depth * 0.16
+      : Math.max(...blobSamples(f.body).map((p) => p[1]));
+  const drop = -lowest;
   const lieLegs: QuadFrame['legs'] = f.legs.map((one) => {
     const [hip] = one.joints;
     const h: P = [hip[0], hip[1] + drop];
@@ -1779,16 +1915,21 @@ function quadPoses(
   // Sitting: the rump down to the ground about the shoulders, the chest up;
   // the front legs straight, the hind legs folded along the ground.
   const shoulder: P = f.legs.find((one) => one.near && one.front)!.joints[0];
-  const rump: P = [-B / 2 + D * 0.3, -L - D * 0.02];
+  // Turned down about the shoulders until the rump, as its outline curves,
+  // just touches the ground.
+  const outline = blobSamples(f.body);
   let deg = 0;
   for (let k = 0; k < 60; k += 1) {
-    const at = turn(rump, shoulder, -deg);
-    if (at[1] >= -2) break;
+    const low = Math.max(...outline.map((p) => turn(p, shoulder, -deg)[1]));
+    if (low >= -LINE / 2) break;
     deg += 1;
   }
   const sitLegs: QuadFrame['legs'] = f.legs.map((one) => {
     if (one.front) return one;
-    const hip = turn(one.joints[0], shoulder, -deg);
+    // The haunch on the ground, not in it: its hip no lower than the
+    // thigh is thick (the body over it hides the difference).
+    const turned = turn(one.joints[0], shoulder, -deg);
+    const hip: P = [turned[0], Math.min(turned[1], -(s.legW / 2 + LINE / 2))];
     const knee: P = [hip[0] + s.leg * 0.45, -(s.legW / 2 + LINE)];
     return { ...one, joints: [hip, knee, [knee[0] + s.footW * 0.9, lowY]] };
   });
@@ -1815,9 +1956,19 @@ function quadruped(spec: AnimalSpec, look: Look): Built {
   const long = s.head.long > 1.3;
   const poses = quadPoses(s, f, SITS.has(spec.species));
 
-  // ── The head, drawn once: ears behind, its shape and muzzle, ears before.
+  // ── The head, drawn once: what is worn round the neck and the ears
+  // behind, its shape and muzzle, ears before.
   const headPts = headOutline(s, H);
-  const behind: string[] = [];
+  const behind: string[] = [
+    neckWearBelow(
+      look,
+      headPts,
+      n1,
+      n0,
+      Math.min(s.neck.w * (long ? 0.7 : 0.95), r * 1.2),
+      r,
+    ),
+  ];
   const before: string[] = [];
   const earSize = r * 0.6 * s.ear;
   const ears: P[] = [];
@@ -1884,9 +2035,11 @@ function quadruped(spec: AnimalSpec, look: Look): Built {
     const farBase = long
       ? onHead(s, H, -0.02, -0.98)
       : add(H, [r * 0.28, -r * 0.88]);
+    // A cow's, a goat's and a sheep's ears stick out to the side.
     const sideways =
-      look.ears === 'pointed' &&
-      (spec.species === 'cow' || spec.species === 'goat');
+      (look.ears === 'pointed' &&
+        (spec.species === 'cow' || spec.species === 'goat')) ||
+      spec.species === 'sheep';
     const lean = sideways
       ? 62
       : look.ears === 'floppy'
@@ -1957,9 +2110,7 @@ function quadruped(spec: AnimalSpec, look: Look): Built {
     );
   }
   if (spec.species === 'sheep')
-    headShape.push(
-      path(blob(headPts), inked(look.spec.second ? look.second : '#5f5d66')),
-    );
+    headShape.push(path(blob(headPts), inked(sheepFace(look)!)));
   if (
     spec.species === 'tiger' ||
     (spec.species === 'zebra' && look.pattern === 'stripes')
@@ -2029,13 +2180,6 @@ function quadruped(spec: AnimalSpec, look: Look): Built {
     s.neck.len > 3
       ? `<clipPath id="${look.id}-neck"><path d="${blob(neckPts, 0.9)}"/></clipPath>`
       : '';
-  const collarAt = long ? lerp(n0, n1, 0.82) : lerp(n0, n1, 0.7);
-  const collar = neckWear(
-    look,
-    collarAt,
-    neckW * (long ? 0.7 : 0.95),
-    s.neck.angle,
-  );
 
   // A horse's forelock, and what is worn on the head.
   if (
@@ -2086,9 +2230,14 @@ function quadruped(spec: AnimalSpec, look: Look): Built {
       const step = one.near === one.front ? 'a' : 'b';
       return pivoted(`rig-leg rig-leg-${step}`, one.joints[0], markup);
     };
-    const legsBehind = far.map((one) => legGroup(one, look.far)).join('');
-    const legsBefore = near.map((one) => legGroup(one, look.coat)).join('');
-    const tail = tailOf(s, look, place(f.tail), how.lying && pose !== 'sit');
+    const bare = sheepFace(look);
+    const legsBehind = far
+      .map((one) => legGroup(one, bare ? shade(bare, 0.85) : look.far))
+      .join('');
+    const legsBefore = near
+      .map((one) => legGroup(one, bare ?? look.coat))
+      .join('');
+    const tail = tailOf(s, look, place(f.tail), how.lying);
     const tailPart = tail ? pivoted('rig-tail', place(f.tail), tail) : '';
     const clipId = `${look.id}-body-${pose}`;
     const marks = markings(s, look, body, clipId);
@@ -2099,18 +2248,19 @@ function quadruped(spec: AnimalSpec, look: Look): Built {
           ? path(blob(body), inked(look.coat)) + shellOf(body, look)
           : path(blob(body), inked(look.coat));
     const dressed = backWear(s, look, body);
+    // Lying, the head a little lower on its neck, and lower again curled
+    // up (a long neck bends less); a long neck turns with it, so the head
+    // stays on it.
+    const lower =
+      pose === 'curl' ? (s.neck.len > 30 ? 12 : 22) : pose === 'lie' ? 6 : 0;
     const neckPart = neckMarkup
       ? placed(
-          pivoted('rig-head', n0, neckMarkup + collar),
+          placed(pivoted('rig-head', n0, neckMarkup), [0, 0], n0, lower),
           how.by,
           how.about,
           how.deg,
         )
       : '';
-    const shortCollar =
-      !neckMarkup && collar
-        ? placed(pivoted('rig-head', n0, collar), how.by, how.about, how.deg)
-        : '';
     // The tail and the neck behind everything; the legs, far then near,
     // all in one group; the body over their tops.
     posed[pose] = [
@@ -2119,16 +2269,13 @@ function quadruped(spec: AnimalSpec, look: Look): Built {
         : '',
       `<g class="rig-breathe">${tailPart}${neckPart}</g>`,
       `<g id="${pose === 'stand' ? 'legs' : `legs-${pose}`}" class="rig-legs">${legsBehind}${legsBefore}</g>`,
-      `<g class="rig-breathe" id="${pose === 'stand' ? 'body' : `body-${pose}`}">${bodyShape}${marks.markup}${dressed}${shortCollar}</g>`,
+      `<g class="rig-breathe" id="${pose === 'stand' ? 'body' : `body-${pose}`}">${bodyShape}${marks.markup}${dressed}</g>`,
     ].join('');
     const neckNow = place(n0);
     // Sitting, the head stays up and looks ahead, whatever the body does.
     headAt[pose] = {
       by: sub(neckNow, n0),
-      turn:
-        pose === 'sit'
-          ? how.deg * 0.25
-          : how.deg + (pose === 'curl' ? 22 : pose === 'lie' ? 6 : 0),
+      turn: pose === 'sit' ? how.deg * 0.25 : how.deg + lower,
     };
   }
   // Curled up, the head down on its paws.
@@ -2247,7 +2394,9 @@ function muzzleOf(
 ): { markup: string; mouth: Built['mouth'] } {
   const r = s.head.r;
   const m = s.muzzle;
-  const ms = s.eye * 0.95;
+  // A mouth a little larger than the face's own scale: a muzzle is seen
+  // small on the stage, and its talking must read.
+  const ms = s.eye * 1.25;
   switch (m.kind) {
     case 'snout': {
       const at = add(H, [r * 0.62 + m.len * 0.3, r * 0.38]);
@@ -2339,7 +2488,8 @@ function muzzleOf(
         add(root, [r * 0.62, r * 1.85]),
         add(root, [r * 0.82, r * 1.72]),
       ];
-      // The far tusk behind the trunk, the near one before it.
+      // Both tusks behind the trunk, from either side of its root, their
+      // tips curving out past it: none crosses it.
       const tusk = (i: number) => {
         const out = i ? 1.12 : 0.95;
         return limb(
@@ -2364,9 +2514,9 @@ function muzzleOf(
         .join('');
       const markup =
         tusk(0) +
+        tusk(1) +
         path(tapered(pts, m.w * 1.25, m.w * 0.62), inked(look.coat)) +
-        wrinkles +
-        tusk(1);
+        wrinkles;
       return {
         markup,
         mouth: {
@@ -2459,7 +2609,7 @@ function muzzleOf(
         markup: muzzleShape + nostril + beard,
         mouth: {
           at: onHead(s, H, d + 0.42 * sm, 0.62 * sm),
-          s: s.eye * 0.82,
+          s: s.eye * 1.4,
           kind: 'muzzle',
           wide: 1,
         },
@@ -2490,12 +2640,12 @@ interface BirdShape {
 
 const BIRDS: Partial<Record<AnimalSpecies, BirdShape>> = {
   chicken: {
-    leg: 9,
+    leg: 12,
     body: { w: 30, h: 24, tilt: 14 },
-    head: { r: 9.5, at: [11, -34] },
-    beak: { len: 8.5, upper: 4.6, lower: 3.4, down: 12, kind: 'small' },
-    eye: 0.28,
-    eyeAt: [0.05, -0.1],
+    head: { r: 10.5, at: [11, -38] },
+    beak: { len: 9.5, upper: 5.2, lower: 4, down: 12, kind: 'small' },
+    eye: 0.26,
+    eyeAt: [0.05, -0.04],
     feet: 'toes',
     tail: 13,
     top: 'comb',
@@ -2503,13 +2653,14 @@ const BIRDS: Partial<Record<AnimalSpecies, BirdShape>> = {
     dip: 35,
   },
   duck: {
-    leg: 5,
+    leg: 8,
     body: { w: 30, h: 19, tilt: -4 },
-    head: { r: 9, at: [11, -29] },
+    head: { r: 10.5, at: [11, -34] },
     neck: { len: 7, angle: 70, w: 9 },
-    beak: { len: 13, upper: 5, lower: 3.6, down: 6, kind: 'flat' },
-    eye: 0.26,
-    eyeAt: [0, -0.12],
+    // A bill: shorter and broader than a goose's, round at its end.
+    beak: { len: 10.5, upper: 6, lower: 4.4, down: 6, kind: 'flat' },
+    eye: 0.24,
+    eyeAt: [0, -0.06],
     feet: 'webbed',
     tail: 8,
     gait: 'waddle',
@@ -2518,11 +2669,11 @@ const BIRDS: Partial<Record<AnimalSpecies, BirdShape>> = {
   goose: {
     leg: 9,
     body: { w: 42, h: 27, tilt: -2 },
-    head: { r: 9.5, at: [22, -58] },
+    head: { r: 10.5, at: [22, -59] },
     neck: { len: 26, angle: 76, w: 10 },
-    beak: { len: 14, upper: 5.4, lower: 3.8, down: 10, kind: 'flat' },
-    eye: 0.27,
-    eyeAt: [0, -0.12],
+    beak: { len: 14, upper: 6, lower: 4.6, down: 10, kind: 'flat' },
+    eye: 0.25,
+    eyeAt: [0, -0.06],
     feet: 'webbed',
     tail: 9,
     gait: 'waddle',
@@ -2532,7 +2683,7 @@ const BIRDS: Partial<Record<AnimalSpecies, BirdShape>> = {
     leg: 4,
     body: { w: 33, h: 27, tilt: -84 },
     head: { r: 13.5, at: [2, -38] },
-    beak: { len: 7.5, upper: 5.2, lower: 2.8, down: 72, kind: 'hooked' },
+    beak: { len: 7.5, upper: 5.6, lower: 3.6, down: 74, kind: 'hooked' },
     eye: 0.36,
     eyeAt: [0, -0.02],
     feet: 'toes',
@@ -2545,9 +2696,9 @@ const BIRDS: Partial<Record<AnimalSpecies, BirdShape>> = {
     leg: 5,
     body: { w: 32, h: 21, tilt: -66 },
     head: { r: 10.5, at: [7, -38] },
-    beak: { len: 10, upper: 7.5, lower: 3.8, down: 40, kind: 'hooked' },
-    eye: 0.28,
-    eyeAt: [-0.05, -0.12],
+    beak: { len: 10, upper: 7.4, lower: 4.4, down: 40, kind: 'hooked' },
+    eye: 0.27,
+    eyeAt: [-0.1, -0.1],
     feet: 'toes',
     tail: 22,
     top: 'crest',
@@ -2558,7 +2709,7 @@ const BIRDS: Partial<Record<AnimalSpecies, BirdShape>> = {
     leg: 7,
     body: { w: 46, h: 31, tilt: -76 },
     head: { r: 13, at: [9, -60] },
-    beak: { len: 13, upper: 7, lower: 4, down: 28, kind: 'hooked' },
+    beak: { len: 14, upper: 7.5, lower: 4.8, down: 28, kind: 'hooked' },
     eye: 0.33,
     eyeAt: [-0.08, -0.14],
     feet: 'toes',
@@ -2569,9 +2720,9 @@ const BIRDS: Partial<Record<AnimalSpecies, BirdShape>> = {
   pigeon: {
     leg: 5,
     body: { w: 22, h: 16, tilt: 6 },
-    head: { r: 7, at: [8, -23] },
-    beak: { len: 6.5, upper: 3.2, lower: 2.6, down: 12, kind: 'small' },
-    eye: 0.21,
+    head: { r: 8, at: [8, -24] },
+    beak: { len: 7.5, upper: 3.8, lower: 3.2, down: 12, kind: 'small' },
+    eye: 0.2,
     eyeAt: [0, -0.1],
     feet: 'toes',
     tail: 9,
@@ -2597,8 +2748,10 @@ function bird(spec: AnimalSpec, look: Look): Built {
       // An egg: fuller at the breast.
       i === 0 || i === 1 || i === 9 ? lerp(B, p, 1.04) : p,
   );
-  const r = base.head.r * k;
-  const H: P = mul(base.head.at, k);
+  // A small bird's head, eyes and beak a little larger for its body.
+  const kh = headScale(k);
+  const r = base.head.r * kh;
+  const H: P = add(mul(base.head.at, k), [0, -(kh - k) * base.head.r * 0.5]);
   const species = spec.species;
   const beakColour =
     species === 'duck' || species === 'goose'
@@ -2606,7 +2759,7 @@ function bird(spec: AnimalSpec, look: Look): Built {
       : species === 'eagle' || species === 'chicken'
         ? ANIMAL_PAINT.yellow
         : species === 'parrot'
-          ? '#3a3740'
+          ? '#f3e4b0'
           : species === 'owl'
             ? '#8d8f96'
             : '#5f5d66';
@@ -2653,10 +2806,11 @@ function bird(spec: AnimalSpec, look: Look): Built {
   const tailBase = turn([B[0] - bw * 0.42, B[1]], B, base.body.tilt);
   const tl = base.tail * k;
   const hanging = species === 'parrot' || species === 'eagle';
-  // A hanging tail ends above the ground: as long as there is room below it.
+  // A hanging tail ends above the ground: as long as there is room below
+  // it, its round end and all.
   const hangs = Math.min(
     tl,
-    (-tailBase[1] - 2) / Math.sin((70 * Math.PI) / 180),
+    (-tailBase[1] - 2 - tl * 0.25) / Math.sin((70 * Math.PI) / 180),
   );
   const tailFeathers = hanging
     ? path(
@@ -2709,8 +2863,9 @@ function bird(spec: AnimalSpec, look: Look): Built {
           inked(shade(coat, 0.9)),
         );
   // The wing folded on its side, about its shoulder.
+  // An upright bird's (an owl's) a little lower, clear of its beak.
   const shoulder = turn(
-    [B[0] + bw * 0.14, B[1] - bh * 0.22],
+    [B[0] + bw * (base.front ? 0.04 : 0.14), B[1] - bh * 0.22],
     B,
     base.body.tilt,
   );
@@ -2729,10 +2884,28 @@ function bird(spec: AnimalSpec, look: Look): Built {
     species === 'parrot' && look.spec.second
       ? shade(coat, 0.8)
       : shade(coat, 0.88);
+  // Spots on a bird are speckles on its wing.
+  const speckles =
+    look.pattern === 'spots' && look.spec.second
+      ? [0.3, 0.5, 0.7, 0.42, 0.62]
+          .map((t, i) =>
+            ellipse(
+              add(
+                lerp(shoulder, wingTip, t),
+                turn([0, bh * (i < 3 ? 0.08 : 0.17)], [0, 0], base.body.tilt),
+              ),
+              Math.max(1.1, bw * 0.035),
+              Math.max(0.8, bh * 0.03),
+              flat(look.second),
+              base.body.tilt,
+            ),
+          )
+          .join('')
+      : '';
   const wing = pivoted(
     'rig-flap',
     shoulder,
-    path(blob(wingPts, 0.9), inked(wingColour)),
+    path(blob(wingPts, 0.9), inked(wingColour)) + speckles,
   );
   const belly =
     look.pattern === 'belly' || species === 'owl'
@@ -2757,14 +2930,15 @@ function bird(spec: AnimalSpec, look: Look): Built {
     : null;
   const pivot: P = neck ? neck.n0 : add(H, [-r * 0.2, r * 0.9]);
   // The head: its shape, a comb, tufts or a crest, and the upper half of its beak.
+  // A hooked beak set into the face, not hung off the cheek.
   const hinge: P = base.front
-    ? add(H, [0, r * 0.2])
-    : add(H, [r * 0.78, r * 0.18]);
+    ? add(H, [0, r * 0.12])
+    : add(H, [r * (base.beak.kind === 'hooked' ? 0.66 : 0.78), r * 0.18]);
   const beak: Beak = {
     ...base.beak,
-    len: base.beak.len * k,
-    upper: base.beak.upper * k,
-    lower: base.beak.lower * k,
+    len: base.beak.len * kh,
+    upper: base.beak.upper * kh,
+    lower: base.beak.lower * kh,
     hinge,
     colour: beakColour,
   };
@@ -2809,18 +2983,26 @@ function bird(spec: AnimalSpec, look: Look): Built {
     );
     headParts.push(...comb);
   }
+  // On a bird, a blaze is its head in the second colour: a red-headed
+  // parrot.
+  const headColour =
+    look.pattern === 'blaze' && look.spec.second
+      ? look.second
+      : species === 'eagle'
+        ? '#f7f4ee'
+        : coat;
   const headShape = base.front
-    ? ellipse(H, r * 1.12, r, inked(coat))
-    : path(
-        blob(ellipsePoints(H, r * 1.02, r * 0.96, 0, 8)),
-        inked(species === 'eagle' ? '#f7f4ee' : coat),
-      );
+    ? ellipse(H, r * 1.12, r, inked(headColour))
+    : path(blob(ellipsePoints(H, r * 1.02, r * 0.96, 0, 8)), inked(headColour));
+  // An owl's face disc, flat on its head with no line of its own: an
+  // outline so near the head's would run into it, a dark ring round the
+  // face.
   const faceDisc = base.front
     ? ellipse(
-        add(H, [0, r * 0.08]),
-        r * 0.95,
-        r * 0.72,
-        inked(look.spec.second ? look.second : shade(coat, 1.3)),
+        add(H, [0, r * 0.1]),
+        r * 0.9,
+        r * 0.7,
+        flat(look.spec.second ? look.second : shade(coat, 1.3)),
       )
     : '';
   const wattle =
@@ -2839,18 +3021,44 @@ function bird(spec: AnimalSpec, look: Look): Built {
     upperBeak(beak),
     headWear(look, add(H, [-r * 0.1, -r * 0.95]), r * 1.1),
   );
-  const neckWorn = neckWear(look, add(pivot, [r * 0.1, -r * 0.3]), r * 1.2, 80);
+  // What is worn round the neck, just below the head, first in its group.
+  headParts.unshift(
+    neckWearBelow(
+      look,
+      ellipsePoints(H, r * (base.front ? 1.12 : 1.02), r, 0, 16),
+      H,
+      pivot,
+      r * 1.2,
+      r,
+    ),
+  );
   // Each pose: standing, and roosting low (sitting, lying, curled up).
   const poses: Partial<Record<AnimalPose, string>> = {};
   const headAt: Built['headAt'] = {};
+  // Roosting low, its tail swung up off the ground as far as it must be.
+  const tailReach = reachOf(tailFeathers);
+  const tailUp = (drop: number) => {
+    for (let deg = 0; deg < 90; deg += 5)
+      if (
+        Math.max(...tailReach.map((p) => turn(p, tailBase, deg)[1])) + drop <=
+        LINE / 2
+      )
+        return deg;
+    return 90;
+  };
+  // Roosting, its body lowered until its lowest (the wing's, if lower) is
+  // on the ground.
+  const roost =
+    LINE / 2 - Math.max(...reachOf(bodyMarkup + wing).map((p) => p[1]));
   for (const pose of ['stand', 'lie'] as AnimalPose[]) {
-    const drop = pose === 'stand' ? 0 : L - 1;
+    const drop = pose === 'stand' ? 0 : roost;
     const by: P = [0, drop];
+    const tail = pivoted('rig-tail', tailBase, tailFeathers);
     const markup = [
       `<g id="${pose === 'stand' ? 'legs' : 'legs-lie'}" class="rig-legs">${legsFor(pose)}</g>`,
       placed(
-        `<g class="rig-breathe">${pivoted('rig-tail', tailBase, tailFeathers)}${neck ? pivoted('rig-head', neck.n0, neck.markup) : ''}</g>` +
-          `<g class="rig-breathe" id="${pose === 'stand' ? 'body' : 'body-lie'}">${bodyMarkup}${wing}${neckWorn}</g>`,
+        `<g class="rig-breathe">${placed(tail, [0, 0], tailBase, tailUp(drop))}${neck ? pivoted('rig-head', neck.n0, neck.markup) : ''}</g>` +
+          `<g class="rig-breathe" id="${pose === 'stand' ? 'body' : 'body-lie'}">${bodyMarkup}${wing}</g>`,
         by,
       ),
     ].join('');
@@ -2862,7 +3070,7 @@ function bird(spec: AnimalSpec, look: Look): Built {
   headAt.sit = headAt.lie;
   const face: Built['face'] = {
     at: add(H, [r * base.eyeAt[0], r * base.eyeAt[1]]),
-    s: base.eye * k,
+    s: base.eye * kh,
     skin: base.front
       ? look.spec.second
         ? look.second
@@ -2870,8 +3078,9 @@ function bird(spec: AnimalSpec, look: Look): Built {
       : species === 'eagle'
         ? '#f7f4ee'
         : coat,
-    eyeLine: eyeLineOf(base.eye * k),
-    dx: base.front ? 16 : 13.5,
+    eyeLine: eyeLineOf(base.eye * kh),
+    // Apart, not run together into a mask on a small head.
+    dx: base.front ? 16 : 19,
   };
   const allX = [
     ...bodyPts.map((p) => p[0]),
@@ -2886,7 +3095,7 @@ function bird(spec: AnimalSpec, look: Look): Built {
     neck: pivot,
     dip: base.dip,
     face,
-    mouth: { at: hinge, s: base.eye * k, kind: 'beak', wide: 1, beak },
+    mouth: { at: hinge, s: base.eye * kh, kind: 'beak', wide: 1, beak },
     bounds: {
       left: Math.min(...allX) - 3,
       right: Math.max(...allX) + 3,
@@ -2917,26 +3126,37 @@ function bird(spec: AnimalSpec, look: Look): Built {
   };
 }
 
+/**
+ * A beak's outline: a little finer than the kit's line (within the slack
+ * the house style allows it), so a small beak shows its colour and is not
+ * all ink.
+ */
+export const BEAK_LINE = 2.2;
+
 /** The upper half of a beak, over which the lower opens. */
+
 export function upperBeak(b: Beak): string {
   const { hinge: h, len, upper } = b;
   const tip = polar(h, len, -b.down);
   const back = polar(h, upper, 90 - b.down);
   switch (b.kind) {
     case 'flat':
+      // A bill: broad, and round at its end, not a point (whose lines
+      // would meet in a dark tip).
       return path(
         blob(
           [
             add(back, [-1, 0]),
             add(lerp(back, tip, 0.6), [0, -upper * 0.2]),
-            add(tip, [0, -upper * 0.1]),
-            polar(tip, upper * 0.4, -90 - b.down),
+            polar(tip, upper * 0.3, 90 - b.down),
+            polar(tip, upper * 0.3, -b.down),
+            polar(tip, upper * 0.45, -90 - b.down),
             lerp(h, tip, 0.5),
             h,
           ],
           0.7,
         ),
-        inked(b.colour),
+        inked(b.colour, BEAK_LINE),
       );
     case 'hooked':
       return path(
@@ -2951,12 +3171,12 @@ export function upperBeak(b: Beak): string {
           ],
           0.75,
         ),
-        inked(b.colour),
+        inked(b.colour, BEAK_LINE),
       );
     default:
       return path(
         `M${pt(back)} Q${pt(polar(lerp(back, tip, 0.5), upper * 0.3, 90 - b.down))} ${pt(tip)} L${pt(h)} Z`,
-        inked(b.colour),
+        inked(b.colour, BEAK_LINE),
       );
   }
 }
@@ -2980,26 +3200,32 @@ function fish(spec: AnimalSpec, look: Look): Built {
     add(B, [w * 0.34, h * 0.4]),
   ];
   const tailBase = add(B, [-w * 0.44, 0]);
+  // Its fins long and flowing: the tail's two lobes, the fin along its back.
   const tail = path(
     blob(
       [
         add(tailBase, [4, 0]),
-        add(tailBase, [-w * 0.34, -h * 0.5]),
-        add(tailBase, [-w * 0.24, 0]),
-        add(tailBase, [-w * 0.34, h * 0.5]),
+        add(tailBase, [-w * 0.2, -h * 0.42]),
+        add(tailBase, [-w * 0.46, -h * 0.62]),
+        add(tailBase, [-w * 0.36, -h * 0.1]),
+        add(tailBase, [-w * 0.3, 0]),
+        add(tailBase, [-w * 0.36, h * 0.1]),
+        add(tailBase, [-w * 0.46, h * 0.62]),
+        add(tailBase, [-w * 0.2, h * 0.42]),
       ],
-      0.7,
+      0.75,
     ),
     inked(shade(look.coat, 0.88)),
   );
   const dorsal = path(
     blob(
       [
-        add(B, [w * 0.12, -h * 0.44]),
-        add(B, [-w * 0.05, -h * 0.82]),
-        add(B, [-w * 0.24, -h * 0.4]),
+        add(B, [w * 0.2, -h * 0.44]),
+        add(B, [w * 0.02, -h * 0.9]),
+        add(B, [-w * 0.3, -h * 0.84]),
+        add(B, [-w * 0.34, -h * 0.34]),
       ],
-      0.7,
+      0.8,
     ),
     inked(shade(look.coat, 0.88)),
   );
@@ -3011,8 +3237,9 @@ function fish(spec: AnimalSpec, look: Look): Built {
       blob(
         [
           finAt,
-          add(finAt, [-w * 0.2, h * 0.08]),
-          add(finAt, [-w * 0.1, h * 0.3]),
+          add(finAt, [-w * 0.3, h * 0.05]),
+          add(finAt, [-w * 0.28, h * 0.32]),
+          add(finAt, [-w * 0.08, h * 0.26]),
         ],
         0.7,
       ),
@@ -3055,9 +3282,10 @@ function fish(spec: AnimalSpec, look: Look): Built {
       eyeLine: eyeLineOf(0.32 * k),
       dx: 13,
     },
+    // Its lips on its front, big enough to read talking.
     mouth: {
-      at: add(B, [w * 0.47, h * 0.1]),
-      s: 0.2 * k,
+      at: add(B, [w * 0.4, h * 0.12]),
+      s: 0.46 * k,
       kind: 'fish',
       wide: 1,
     },
@@ -3084,8 +3312,10 @@ function snake(spec: AnimalSpec, look: Look): Built {
   const t = 9 * k * g;
   const coil = (cx: number, cy: number, rx: number, ry: number) =>
     ellipse([cx, cy], rx, ry, inked(look.coat));
+  // Its lowest coil's bottom on the ground.
+  const low = -t * 0.95;
   const lowCoils = [
-    coil(0, -t * 0.9, 26 * k, t * 0.95),
+    coil(0, low, 26 * k, t * 0.95),
     coil(-2 * k, -t * 2.2, 20 * k, t * 0.95),
   ];
   const H: P = [16 * k, -36 * k];
@@ -3103,7 +3333,7 @@ function snake(spec: AnimalSpec, look: Look): Built {
           .map(
             (x, i) =>
               path(
-                `M${pt([x * k, -t * 0.9 - 3])} l3,3 l-3,3 l-3,-3 Z`,
+                `M${pt([x * k, low - 3])} l3,3 l-3,3 l-3,-3 Z`,
                 flat(look.second),
               ) +
               (i < 3
@@ -3136,12 +3366,14 @@ function snake(spec: AnimalSpec, look: Look): Built {
   const stand =
     `<g id="legs"></g><g class="rig-breathe">${tail}</g>` +
     `<g class="rig-breathe" id="body">${lowCoils.join('')}<g clip-path="url(#${clip})">${spots}</g>${pivoted('rig-head', neckPts[0], neck)}</g>`;
+  // Stretched out along the ground, lying on it and not in it.
+  const onGround = -(t / 2 + LINE / 2);
   const lying = `<g id="legs-lie"></g><g class="rig-breathe">${limb(
     curve([
-      [-40 * k, -t * 0.55],
-      [-20 * k, -t * 0.7],
-      [0, -t * 0.55],
-      [H[0] - 8 * k, -t * 0.6],
+      [-40 * k, onGround],
+      [-20 * k, onGround - t * 0.15],
+      [0, onGround],
+      [H[0] - 8 * k, onGround - t * 0.05],
     ]),
     look.coat,
     t,
@@ -3149,7 +3381,7 @@ function snake(spec: AnimalSpec, look: Look): Built {
   return {
     plan: 'long',
     poses: {
-      stand: `<defs><clipPath id="${clip}">${ellipse([0, -t * 0.9], 26 * k, t * 0.95, '')}${ellipse([-2 * k, -t * 2.2], 20 * k, t * 0.95, '')}</clipPath></defs>${stand}`,
+      stand: `<defs><clipPath id="${clip}">${ellipse([0, low], 26 * k, t * 0.95, '')}${ellipse([-2 * k, -t * 2.2], 20 * k, t * 0.95, '')}</clipPath></defs>${stand}`,
       lie: lying,
     },
     headAt: {
@@ -3169,7 +3401,7 @@ function snake(spec: AnimalSpec, look: Look): Built {
     },
     mouth: {
       at: add(H, [r * 0.7, r * 0.45]),
-      s: 0.2 * k,
+      s: 0.28 * k,
       kind: 'muzzle',
       wide: 1.4,
     },
@@ -3209,32 +3441,45 @@ function hopper(spec: AnimalSpec, look: Look): Built {
     const B: P = [0, -12 * k * g];
     const body = blob(ellipsePoints(B, 17 * k, 11 * k * g, -12, 8));
     const thigh = ellipse(
-      add(B, [-9 * k, 3 * k]),
-      9 * k,
+      add(B, [-8 * k, 3 * k]),
+      11 * k,
       6.5 * k,
       inked(shade(coat, 0.9)),
-      -25,
+      -30,
     );
-    const foot = ellipse(
-      [-4 * k, -2 * k],
-      8 * k,
-      2.6 * k,
+    const foot = path(
+      blob(
+        // Its sole flat on the ground, its toes forward.
+        [
+          [-13 * k, -3.6 * k],
+          [2 * k, -3.8 * k],
+          [6.5 * k, -1.4 * k],
+          [2 * k, -0.3],
+          [-13 * k, -0.3],
+        ] as P[],
+        0.8,
+      ),
       inked(shade(coat, 0.9)),
     );
     const arm =
-      limb(poly([add(B, [8 * k, 2 * k]), [11 * k, -2 * k]]), coat, 3.6 * k) +
-      ellipse([12.5 * k, -1.6 * k], 3.2 * k, 1.8 * k, inked(coat));
-    hips = [add(B, [-9 * k, 3 * k]), add(B, [8 * k, 2 * k])];
+      limb(
+        poly([add(B, [9 * k, 2 * k]), [13 * k, -(1.8 * k + LINE / 2)]]),
+        coat,
+        3.6 * k,
+      ) + ellipse([14.5 * k, -1.8 * k], 3.2 * k, 1.8 * k, inked(coat));
+    hips = [add(B, [-9 * k, 3 * k]), add(B, [9 * k, 2 * k])];
     H = add(B, [9 * k, -8 * k]);
     r = 10 * k;
     const belly =
       look.pattern === 'belly'
-        ? `<g clip-path="url(#${look.id}-frog)">${ellipse(add(B, [4 * k, 8 * k]), 14 * k, 7 * k, flat(look.second))}</g>`
+        ? `<g clip-path="url(#${look.id}-frog)">${ellipse(add(B, [4 * k, 6.5 * k]), 14 * k, 6 * k, flat(look.second))}</g>`
         : '';
+    // Its body, then its legs over it: a frog's thigh lies along its side
+    // and its hand is flat on the ground before it.
     parts.push(
       `<defs><clipPath id="${look.id}-frog"><path d="${body}"/></clipPath></defs>`,
-      `<g id="legs" class="rig-legs">${pivoted('rig-leg rig-leg-a', hips[0], thigh + foot)}</g>`,
-      `<g class="rig-breathe" id="body">${path(body, inked(coat))}${belly}${pivoted('rig-leg rig-leg-b', hips[1], arm)}</g>`,
+      `<g class="rig-breathe" id="body">${path(body, inked(coat))}${belly}</g>`,
+      `<g id="legs" class="rig-legs">${pivoted('rig-leg rig-leg-a', hips[0], thigh + foot)}${pivoted('rig-leg rig-leg-b', hips[1], arm)}</g>`,
     );
     // Eyes on top of the head, on their bumps.
     for (const side of [-1, 1])
@@ -3277,25 +3522,28 @@ function hopper(spec: AnimalSpec, look: Look): Built {
       add(B, [-6 * k, -12 * k]),
     ]);
     const haunch = ellipse(
-      add(B, [-5 * k, 7 * k]),
+      add(B, [-5 * k, 6 * k]),
       10 * k,
       8.5 * k,
       inked(coat),
       -10,
     );
-    const foot = ellipse([-2 * k, -2.4 * k], 10 * k, 3 * k, inked(coat));
-    const paws = [add(B, [8 * k, 2 * k]), add(B, [5 * k, 3 * k])].map((p, i) =>
-      pivoted(
-        `rig-leg rig-leg-${i ? 'a' : 'b'}`,
-        p,
-        limb(
-          poly([p, [p[0] + 1 * k, -2.4 * k]]),
-          i ? shade(coat, 0.85) : coat,
-          3.6 * k,
+    // The long hind foot flat on the ground, and the front paws down
+    // before it, apart from it.
+    const foot = ellipse([-7.5 * k, -3 * k], 8 * k, 3 * k, inked(coat));
+    const paws = [add(B, [12.5 * k, 1 * k]), add(B, [10 * k, 3 * k])].map(
+      (p, i) =>
+        pivoted(
+          `rig-leg rig-leg-${i ? 'a' : 'b'}`,
+          p,
+          limb(
+            poly([p, [p[0] + 1 * k, -(1.8 * k + LINE / 2)]]),
+            i ? shade(coat, 0.85) : coat,
+            3.6 * k,
+          ),
         ),
-      ),
     );
-    hips = [add(B, [-5 * k, 7 * k]), add(B, [8 * k, 2 * k])];
+    hips = [add(B, [-5 * k, 7 * k]), add(B, [12.5 * k, 1 * k])];
     tailAt = add(B, [-14 * k, 6 * k]);
     const tail =
       look.tail === 'none'
@@ -3309,36 +3557,40 @@ function hopper(spec: AnimalSpec, look: Look): Built {
               inked(look.spec.second ? look.second : '#f7f4ee'),
             ),
           );
-    H = add(B, [5 * k, -20 * k]);
-    r = 10 * k;
+    H = add(B, [5 * k, -21 * k]);
+    // A head big enough that the kit's eyes leave its face round them.
+    r = 11.5 * k;
     const belly =
       look.pattern === 'belly'
         ? `<g clip-path="url(#${look.id}-rabbit)">${ellipse(add(B, [8 * k, 5 * k]), 7 * k, 10 * k, flat(look.second))}</g>`
         : '';
     parts.push(
       `<defs><clipPath id="${look.id}-rabbit"><path d="${body}"/></clipPath></defs>`,
-      `<g id="legs" class="rig-legs">${paws[1]}</g>`,
       `<g class="rig-breathe">${tail}</g>`,
-      `<g class="rig-breathe" id="body">${path(body, inked(coat))}${belly}${haunch}${foot}</g>`,
+      `<g id="legs" class="rig-legs">${paws[1]}${foot}</g>`,
+      `<g class="rig-breathe" id="body">${path(body, inked(coat))}${belly}${haunch}</g>`,
       `<g class="rig-legs">${paws[0]}</g>`,
     );
     const earKind = look.ears ?? 'long';
+    // Ears standing up behind the head; a lop's near ear hangs over it.
+    const over: string[] = [];
     for (const [dx, lean, near] of [
       [-3.5, 12, true],
       [3, -6, false],
     ] as [number, number, boolean][]) {
       const at = add(H, [dx * k, -r * 0.75]);
       ears.push(at);
-      headParts.push(
+      (near && earKind === 'floppy' ? over : headParts).push(
         pivoted(
           near ? 'rig-ear' : 'rig-ear rig-ear-r',
           at,
-          earOf(earKind, at, 6.2 * k, lean, look, near),
+          earOf(earKind, at, 8.5 * k, lean, look, near),
         ),
       );
     }
     headParts.push(
       path(blob(ellipsePoints(H, r * 1.05, r, 0, 8)), inked(coat)),
+      ...over,
     );
     const lobe = 3 * k;
     const m = add(H, [r * 0.3, r * 0.42]);
@@ -3351,30 +3603,41 @@ function hopper(spec: AnimalSpec, look: Look): Built {
       ),
     );
     face = {
-      at: add(H, [r * 0.12, -r * 0.12]),
-      s: 0.27 * k,
+      at: add(H, [r * 0.12, -r * 0.16]),
+      s: 0.24 * k,
       skin: coat,
-      eyeLine: eyeLineOf(0.27 * k),
-      dx: 14,
+      eyeLine: eyeLineOf(0.24 * k),
+      // Apart, not run together into a mask.
+      dx: 21,
     };
     mouth = {
       at: add(m, [0, lobe * 1.2]),
-      s: 0.17 * k,
+      s: 0.26 * k,
       kind: 'muzzle',
       wide: 1,
     };
     neck = add(H, [-r * 0.2, r * 0.9]);
   }
   headParts.push(headWear(look, add(H, [0, -r * (frog ? 1.1 : 0.95)]), r));
+  // What is worn round the neck, just below the head, first in its group.
+  headParts.unshift(
+    neckWearBelow(
+      look,
+      frog
+        ? ellipsePoints(add(H, [2 * k, 0]), r * 1.1, r * 0.72, 0, 16)
+        : ellipsePoints(H, r * 1.05, r, 0, 16),
+      H,
+      neck,
+      r * (frog ? 1.2 : 1),
+      r,
+    ),
+  );
+  // It sits as it stands: a rabbit, a frog, told to lie down, sits.
   const stand = parts.join('');
-  const flatBy: P = [0, 4 * k];
   return {
     plan: 'hopper',
-    poses: {
-      stand,
-      lie: placed(stand.replace(/id="(legs|body)"/g, 'id="$1-lie"'), [0, 0]),
-    },
-    headAt: { stand: { by: [0, 0], turn: 0 }, lie: { by: flatBy, turn: 8 } },
+    poses: { stand },
+    headAt: { stand: { by: [0, 0], turn: 0 } },
     head: headParts.join(''),
     neck,
     dip: 20,
@@ -3396,7 +3659,7 @@ function hopper(spec: AnimalSpec, look: Look): Built {
     arms: [],
     wings: [],
     gait: 'hop',
-    sink: flatBy[1],
+    sink: 0,
   };
 }
 
@@ -3412,17 +3675,22 @@ function climber(spec: AnimalSpec, look: Look): Built {
   const hipL: P = add(B, [-5 * k, 13 * k]);
   const hipR: P = add(B, [5 * k, 13 * k]);
   const legW = 6.5 * k;
+  // Each leg ends inside its foot, and the foot's bottom is on the ground.
   const legOfMonkey = (hip: P, near: boolean, step: 'a' | 'b') =>
     pivoted(
       `rig-leg rig-leg-${step}`,
       hip,
       limb(
-        poly([hip, add(hip, [2 * k, legLen * 0.55]), [hip[0] + 1 * k, -2 * k]]),
+        poly([
+          hip,
+          add(hip, [2 * k, legLen * 0.55]),
+          [hip[0] + 1 * k, -(legW / 2 + LINE / 2)],
+        ]),
         near ? coat : look.far,
         legW,
       ) +
         ellipse(
-          [hip[0] + 3.5 * k, -2 * k],
+          [hip[0] + 3.5 * k, -2.4 * k],
           5 * k,
           2.4 * k,
           inked(near ? face : shade(face, 0.85)),
@@ -3478,15 +3746,15 @@ function climber(spec: AnimalSpec, look: Look): Built {
     `<defs><clipPath id="${look.id}-monkey"><path d="${blob(bodyPts)}"/></clipPath></defs>`,
     `<g class="rig-breathe">${tail}${armOf(shoulderL, 'l', false)}</g>`,
     `<g id="legs" class="rig-legs">${legOfMonkey(hipL, false, 'b')}${legOfMonkey(hipR, true, 'a')}</g>`,
-    `<g class="rig-breathe" id="body">${path(blob(bodyPts), inked(coat))}${belly}${neckWear(look, add(H, [0, r * 0.95]), r * 0.8, 90)}</g>`,
+    `<g class="rig-breathe" id="body">${path(blob(bodyPts), inked(coat))}${belly}</g>`,
     `<g class="rig-breathe">${armOf(shoulderR, 'r', true)}</g>`,
   ].join('');
   // Sitting: on the ground, its legs out before it.
   const seat = legLen - 2;
   const sit = [
     `<g class="rig-breathe">${placed(tail, [0, seat])}${placed(armOf(shoulderL, 'l', false), [0, seat])}</g>`,
-    `<g id="legs-sit" class="rig-legs">${[hipL, hipR].map((hip, i) => limb(poly([add(hip, [0, seat]), [hip[0] + 12 * k, -3 * k]]), i ? coat : look.far, legW) + ellipse([hip[0] + 14 * k, -3.5 * k], 2.6 * k, 4.4 * k, inked(face))).join('')}</g>`,
-    `<g class="rig-breathe" id="body-sit">${placed(path(blob(bodyPts), inked(coat)) + belly + neckWear(look, add(H, [0, r * 0.95]), r * 0.8, 90), [0, seat])}</g>`,
+    `<g id="legs-sit" class="rig-legs">${[hipL, hipR].map((hip, i) => limb(poly([add(hip, [0, seat]), [hip[0] + 12 * k, -(legW / 2 + LINE / 2)]]), i ? coat : look.far, legW) + ellipse([hip[0] + 14 * k, -4.4 * k], 2.6 * k, 4.4 * k, inked(face))).join('')}</g>`,
+    `<g class="rig-breathe" id="body-sit">${placed(path(blob(bodyPts), inked(coat)) + belly, [0, seat])}</g>`,
     `<g class="rig-breathe">${placed(armOf(shoulderR, 'r', true), [0, seat])}</g>`,
   ].join('');
   // The head: round ears on its sides, its pale face, its muzzle.
@@ -3495,6 +3763,14 @@ function climber(spec: AnimalSpec, look: Look): Built {
     add(H, [r * 0.8, -r * 0.1]),
   ];
   const headParts = [
+    neckWearBelow(
+      look,
+      ellipsePoints(H, r, r * 0.95, 0, 16),
+      H,
+      add(H, [0, r * 2]),
+      r * 0.8,
+      r,
+    ),
     pivoted(
       'rig-ear',
       ears[0],
@@ -3511,12 +3787,12 @@ function climber(spec: AnimalSpec, look: Look): Built {
     path(
       blob(
         [
-          add(H, [-r * 0.62, -r * 0.35]),
-          add(H, [0, -r * 0.62]),
-          add(H, [r * 0.72, -r * 0.3]),
-          add(H, [r * 0.7, r * 0.45]),
-          add(H, [0, r * 0.82]),
-          add(H, [-r * 0.6, r * 0.4]),
+          add(H, [-r * 0.7, -r * 0.4]),
+          add(H, [0, -r * 0.68]),
+          add(H, [r * 0.78, -r * 0.34]),
+          add(H, [r * 0.74, r * 0.45]),
+          add(H, [0, r * 0.84]),
+          add(H, [-r * 0.66, r * 0.42]),
         ],
         0.9,
       ),
@@ -3544,16 +3820,18 @@ function climber(spec: AnimalSpec, look: Look): Built {
     head: headParts.join(''),
     neck: add(H, [0, r * 0.9]),
     dip: 22,
+    // Eyes a little smaller than its pale face, so the face shows round
+    // them.
     face: {
-      at: add(H, [r * 0.05, -r * 0.12]),
-      s: 0.34 * k,
+      at: add(H, [r * 0.05, -r * 0.14]),
+      s: 0.28 * k,
       skin: face,
-      eyeLine: eyeLineOf(0.34 * k),
+      eyeLine: eyeLineOf(0.28 * k),
       dx: 14.5,
     },
     mouth: {
       at: add(H, [r * 0.1, r * 0.55]),
-      s: 0.22 * k,
+      s: 0.3 * k,
       kind: 'muzzle',
       wide: 1,
     },

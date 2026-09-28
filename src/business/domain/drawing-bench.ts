@@ -32,12 +32,24 @@ interface FixtureBase {
   /** The show it is drawn for: the artist is told its title. */
   book: string;
   /**
-   * What draws it: the artist by default; a later kit's name (an animal
-   * or a creature drawn by code) once one can, so the same brief measures
-   * the kit against the artist.
+   * What draws it: the artist by default; a kit's name (`kit`, an animal
+   * drawn by code) once one can, so the same brief measures the kit
+   * against the artist.
    */
   drawer?: string;
 }
+
+/** What draws a brief: the artist, or the animal kit from the spec a writer would give it. */
+export const drawerOf = (
+  fixture: DrawingFixture,
+  /** A run's own choice, over the brief's: `--drawer artist`. */
+  said?: string,
+): 'artist' | 'kit' =>
+  (said ?? fixture.drawer) === 'kit' &&
+  (fixture.kind === 'character' || fixture.kind === 'redraw') &&
+  fixture.animal
+    ? 'kit'
+    : 'artist';
 
 /** An animal or a creature, drawn for the first time. */
 export interface CharacterFixture extends FixtureBase {
@@ -47,6 +59,8 @@ export interface CharacterFixture extends FixtureBase {
   look: string;
   /** How many feet stand on the ground; null when it may stand either way. */
   legs: number | null;
+  /** Its spec for the animal kit, as the cast's writer would give it for its look. */
+  animal?: Record<string, unknown>;
 }
 
 /** A thing of the show's own that people hold, carry or wear. */
@@ -85,6 +99,9 @@ export interface RedrawFixture extends FixtureBase {
   words: string;
   /** The sheet they have now, in the bench's `old` folder. */
   from: string;
+  /** Its spec for the animal kit before the change, and the change to it a writer would make for the words. */
+  animal?: Record<string, unknown>;
+  change?: Record<string, unknown>;
 }
 
 export type DrawingFixture =

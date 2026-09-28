@@ -25,6 +25,7 @@ import {
   type EndState,
 } from './studio-check';
 import { JOIN_SECONDS, joinOf, joinsSeconds, type Join } from './studio-edit';
+import { describeBible } from './studio-words';
 import {
   fliesS,
   placeThingId,
@@ -152,6 +153,41 @@ describe('the Studio: a scene decided before it is drawn', () => {
     expect(checkBible(twins, true).join(' ')).toMatch(/same voice/);
     expect(checkBible(distinctVoices(twins), true).join(' ')).not.toMatch(
       /same voice/,
+    );
+  });
+
+  it('keeps an animal the kit draws as its spec, and no spec for anyone else', () => {
+    const cast = bibleOf({
+      characters: [
+        {
+          name: 'Clover',
+          kind: 'animal',
+          look: 'a chestnut horse',
+          animal: {
+            species: 'pony',
+            coat: 'chestnut',
+            wear: { back: 'saddle blanket' },
+          },
+        },
+        // Not a species the kit has: the artist draws it.
+        { name: 'Sparky', kind: 'animal', animal: { species: 'dragon' } },
+        // Only an animal has one.
+        { name: 'Eggbert', kind: 'creature', animal: { species: 'dog' } },
+        { name: 'Tobi', voice: 'boy', figure: { age: 'child' } },
+      ],
+    });
+    const [clover, sparky, eggbert, tobi] = cast.characters;
+    expect(clover.animal).toMatchObject({
+      species: 'horse',
+      coat: 'chestnut',
+      wear: { back: 'saddle blanket' },
+      wearColour: 'red',
+    });
+    // None given is none kept, so a character from before is as it was
+    // (and so is every fingerprint of a scene that shows them).
+    for (const c of [sparky, eggbert, tobi]) expect('animal' in c).toBe(false);
+    expect(describeBible(cast, true)).toContain(
+      'looks: a chestnut horse with a white blaze, pointed ears, a long tail and a long mane, wearing a red saddle blanket',
     );
   });
 

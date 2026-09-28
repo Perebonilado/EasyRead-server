@@ -6,5 +6,12 @@
   "is": "animal",
   "size": "large",
   "look": "a tall giraffe with orange-brown patches, a long neck and little horns",
-  "legs": 4
+  "legs": 4,
+  "drawer": "kit",
+  "animal": {
+    "species": "giraffe",
+    "coat": "golden",
+    "second": "chestnut",
+    "pattern": "patches"
+  }
 }

@@ -6,5 +6,10 @@
   "is": "animal",
   "size": "large",
   "look": "a grey elephant with big floppy ears, a long trunk and small tusks",
-  "legs": 4
+  "legs": 4,
+  "drawer": "kit",
+  "animal": {
+    "species": "elephant",
+    "coat": "grey"
+  }
 }

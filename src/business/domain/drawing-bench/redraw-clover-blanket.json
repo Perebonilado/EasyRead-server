@@ -8,5 +8,19 @@
   "legs": 4,
   "look": "a gentle brown horse with a white blaze, a dark mane and tail",
   "words": "a red saddle blanket on her back",
-  "from": "clover.json"
+  "from": "clover.json",
+  "drawer": "kit",
+  "animal": {
+    "species": "horse",
+    "coat": "brown",
+    "second": "white",
+    "pattern": "blaze",
+    "mane": "long"
+  },
+  "change": {
+    "wear": {
+      "back": "saddle blanket"
+    },
+    "wearColour": "red"
+  }
 }

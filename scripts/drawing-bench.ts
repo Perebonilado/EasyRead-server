@@ -10,6 +10,7 @@
  *        [--against <report.json> | --against baseline] [--write-baseline]
  *        [--model provider:id] [--judge provider:id] [--see-with provider:id]
  *        [--takes n] [--revisions n] [--no-see] [--concurrency 6]
+ *        [--drawer artist|kit]
  *   npm run drawing:bench -- --mark <dir> <id> ok|not ["note"]
  *   npm run drawing:bench -- --sheet <dir> [--report <report-x.json>] [--against <report.json> | baseline]
  *   npm run drawing:bench -- --rejudge <dir> --judge provider:id
@@ -27,6 +28,10 @@
  * priced as the ledger prices it (cost.ts); the bench's own judging is
  * not counted in a drawing's cost. --mark keeps Richard's word on one
  * drawing beside the report (marks.json) and writes the page again.
+ * A brief whose `drawer` is `kit` is drawn by the animal kit from its
+ * spec (a redraw from its spec changed as a writer would change it), with
+ * no model at all; --drawer artist draws every brief by the artist again,
+ * to measure the one against the other.
  */
 import 'dotenv/config';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
@@ -46,6 +51,7 @@ import { costOf } from '../src/business/domain/cost';
 import {
   DRAWING_OLD_DIR,
   baselineReport,
+  drawerOf,
   contactSheetHtml,
   loadDrawingFixtures,
   readDrawingBaseline,
@@ -72,6 +78,7 @@ import {
   type DrawingKind,
   type DrawingVerdict,
 } from '../src/business/domain/drawing-score';
+import { animalOf, type AnimalSpec } from '../src/business/domain/scene-animal';
 import { byId, elements, removeNode } from '../src/business/domain/scene-dom';
 import { PLAIN_FIGURE, drawFigure } from '../src/business/domain/scene-figure';
 import {
@@ -81,6 +88,7 @@ import {
 } from '../src/business/domain/scene-ink';
 import { rasterise } from '../src/business/domain/scene-raster';
 import {
+  animalSheet,
   measureOwnFeature,
   measureOwnThing,
   ownFeatureScale,
@@ -263,7 +271,35 @@ function placeOf(
   };
 }
 
-function oldSheet(fixture: Extract<DrawingFixture, { kind: 'redraw' }>) {
+/** The run's own drawer, over each brief's: `--drawer artist`. */
+const DRAWER = flag('--drawer');
+
+/** A brief's spec for the animal kit, as its writer would give it; for a redraw, before or after the change. */
+function specOf(
+  fixture: Extract<DrawingFixture, { kind: 'character' | 'redraw' }>,
+  changed = false,
+): AnimalSpec {
+  const before = fixture.animal ?? {};
+  const change =
+    changed && fixture.kind === 'redraw' ? (fixture.change ?? {}) : {};
+  const spec = animalOf({
+    ...before,
+    ...change,
+    wear: {
+      ...((before.wear as object | undefined) ?? {}),
+      ...((change.wear as object | undefined) ?? {}),
+    },
+  });
+  if (!spec) throw new Error(`${fixture.id} has no animal the kit draws`);
+  return spec;
+}
+
+/** The drawing a redraw starts from: the artist's kept sheet, or the kit's drawing of its spec. */
+async function oldSheet(
+  fixture: Extract<DrawingFixture, { kind: 'redraw' }>,
+): Promise<CharacterSheet> {
+  if (drawerOf(fixture, DRAWER) === 'kit')
+    return animalSheet(specOf(fixture), fixture.id);
   return JSON.parse(
     readFileSync(join(DRAWING_OLD_DIR, fixture.from), 'utf8'),
   ) as CharacterSheet;
@@ -300,6 +336,19 @@ async function drawFixture(
   options: ArtistOptions,
 ): Promise<Drawn | null> {
   const who = `bench ${fixture.id}`;
+  // The animal kit: code, from the spec, no model asked.
+  if (
+    (fixture.kind === 'character' || fixture.kind === 'redraw') &&
+    drawerOf(fixture, DRAWER) === 'kit'
+  )
+    return {
+      kind: 'sheet',
+      sheet: await animalSheet(
+        specOf(fixture, fixture.kind === 'redraw'),
+        fixture.id,
+      ),
+      unjoined: [],
+    };
   switch (fixture.kind) {
     case 'character': {
       const drawn = await artist.drawSheet(
@@ -319,7 +368,7 @@ async function drawFixture(
         : null;
     }
     case 'redraw': {
-      const before = oldSheet(fixture);
+      const before = await oldSheet(fixture);
       const drawn = await artist.drawSheet(
         characterOf(fixture),
         fixture.book,
@@ -400,8 +449,14 @@ async function picturesOf(
 ): Promise<{ svg: string; card: Buffer; judge: Buffer; stage: Buffer }> {
   if (drawn.kind === 'sheet') {
     const svg = faceShown(drawn.sheet, fixture.id);
-    const units = SIZE_UNITS[drawn.sheet.size ?? 'medium'];
+    // One the kit drew stands at its own size, its feet on its frame's foot.
+    const units =
+      drawn.sheet.drawing.stands?.units ??
+      SIZE_UNITS[drawn.sheet.size ?? 'medium'];
     const [, , , h] = drawn.sheet.drawing.viewBox;
+    const feet = drawn.sheet.animal
+      ? 1 - KIT_LINE / 2 / h
+      : 1 - Math.min(0.1, 14 / h);
     const [card, judge, stage] = await Promise.all([
       rasterise(svg, CARD_PX),
       rasterise(svg, JUDGE_PX),
@@ -409,7 +464,7 @@ async function picturesOf(
         { svg, viewBox: drawn.sheet.drawing.viewBox },
         units,
         // Its feet at the bottom of its ink: the gate's frame leaves a little room below.
-        { share: 1 - Math.min(0.1, 14 / h) },
+        { share: feet },
       ),
     ]);
     return { svg: drawn.sheet.drawing.svg, card, judge, stage };
@@ -518,7 +573,7 @@ async function runOne(
       ) * 1e6,
     ) / 1e6;
   if (fixture.kind === 'redraw') {
-    const before = oldSheet(fixture);
+    const before = await oldSheet(fixture);
     writeFileSync(
       join(dir, 'before.png'),
       await rasterise(faceShown(before, fixture.id), CARD_PX),
@@ -565,7 +620,7 @@ async function runOne(
       fixture.kind === 'redraw'
         ? {
             png: await rasterise(
-              faceShown(oldSheet(fixture), fixture.id),
+              faceShown(await oldSheet(fixture), fixture.id),
               JUDGE_PX,
             ),
             words: fixture.words,
@@ -854,6 +909,7 @@ async function main(): Promise<void> {
         options.see === false
           ? 'blind'
           : (seeWith ?? env.AI_MODEL_DRAWING_JUDGE ?? 'drawing_judge default'),
+      drawer: DRAWER ?? 'each brief’s own',
       takes: options.takes ?? 'a show’s',
       revisions: options.revisions ?? 'a show’s',
       briefs: fixtures.length,

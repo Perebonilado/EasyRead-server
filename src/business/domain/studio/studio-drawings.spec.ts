@@ -1,4 +1,9 @@
-import { SHEET_VERSION, type CharacterSheet } from '../scene-sheet';
+import { plainAnimal } from '../scene-animal';
+import {
+  SHEET_VERSION,
+  animalSheet,
+  type CharacterSheet,
+} from '../scene-sheet';
 import { sceneFingerprint } from '../../handlers/studio/studio-views';
 import { bibleOf, briefOf, storySheetOf } from './studio';
 import {
@@ -10,13 +15,17 @@ import {
   characterMeant,
   chosen,
   doneDrawing,
+  drawnByArtist,
   drawnStamp,
   gesturingIn,
   keptDrawn,
+  keptKits,
+  lookChanged,
   markDrawing,
   named,
   oneLookRequest,
   oneRedrawn,
+  redrawnToChoose,
   toDraw,
   withCandidate,
   withoutCandidate,
@@ -268,5 +277,105 @@ describe('who gestures on the stage', () => {
       kingsman: sheet('<svg/>'),
     };
     expect([...gesturingIn(cast)].sort()).toEqual(['horse', 'humpty']);
+  });
+});
+
+describe('an animal the kit draws', () => {
+  const kit = bibleOf({
+    characters: [
+      {
+        name: 'Clover',
+        id: 'clover',
+        kind: 'animal',
+        look: 'a chestnut horse',
+        animal: { species: 'horse' },
+      },
+      { name: 'Pip', id: 'pip', kind: 'animal', look: 'a small brown dog' },
+      { name: 'Eggbert', id: 'eggbert', kind: 'creature', look: 'an egg' },
+    ],
+  });
+  const clover = kit.characters[0];
+  const pip = kit.characters[1];
+
+  it('is drawn by code, not the artist; any other animal and a creature are the artist’s', () => {
+    expect(drawnByArtist(clover)).toBe(false);
+    expect(drawnByArtist(pip)).toBe(true);
+    expect(drawnByArtist(kit.characters[2])).toBe(true);
+    // At the cast step only the artist's are drawn.
+    expect(toDraw(kit, {}, NO_WORK, T)).toEqual(['pip', 'eggbert']);
+    // A change asked of any but a person's look is a new drawing to choose.
+    expect(redrawnToChoose(clover)).toBe(true);
+    expect(redrawnToChoose(pip)).toBe(true);
+  });
+
+  it('has its look changed when its spec changes', () => {
+    const blanket = {
+      ...clover,
+      animal: { ...clover.animal!, wear: { back: 'saddle blanket' as const } },
+    };
+    expect(lookChanged(clover, blanket)).toBe(true);
+    expect(lookChanged(clover, { ...clover })).toBe(false);
+  });
+
+  it('keeps whom the artist drew so when the cast is written again, and the kit’s spec when the writer leaves it out', () => {
+    const rewritten = bibleOf({
+      characters: [
+        // The writer left Clover's spec out, and gave Pip one.
+        { ...clover, animal: undefined },
+        { ...pip, animal: { species: 'dog', coat: 'brown' } },
+        kit.characters[2],
+        // Someone new, with a spec of their own.
+        { name: 'Dot', id: 'dot', kind: 'animal', animal: { species: 'duck' } },
+      ],
+    });
+    const kept = keptKits(rewritten, kit).characters;
+    expect(kept.find((c) => c.id === 'clover')!.animal).toEqual(clover.animal);
+    expect(kept.find((c) => c.id === 'pip')!.animal).toBeUndefined();
+    expect(kept.find((c) => c.id === 'dot')!.animal?.species).toBe('duck');
+    // A first cast is as written.
+    expect(keptKits(rewritten, null)).toBe(rewritten);
+  });
+
+  it('once its new drawing is chosen, has the new spec and its words, the artist’s no more', async () => {
+    const spec = {
+      ...clover.animal!,
+      wear: { back: 'saddle blanket' as const },
+      wearColour: 'red' as const,
+    };
+    const drawnAgain = await animalSheet(spec, 'clover');
+    const waiting = withCandidate(
+      NO_WORK,
+      'clover',
+      drawnAgain,
+      'give her a red saddle blanket',
+      T,
+      'a chestnut horse with a red saddle blanket',
+    );
+    const picked = chosen(kit, {}, waiting, 'clover')!;
+    const now = picked.bible.characters.find((c) => c.id === 'clover')!;
+    expect(now.animal).toEqual(spec);
+    expect(now.look).toBe('a chestnut horse with a red saddle blanket');
+    expect(picked.cast.clover).toBe(drawnAgain);
+    // A kit drawing chosen for one the artist drew makes it the kit's.
+    const pipAsKit = withCandidate(
+      NO_WORK,
+      'pip',
+      await animalSheet({ ...clover.animal!, species: 'dog' }, 'pip'),
+      'draw him with the kit',
+      T,
+    );
+    const pipNow = chosen(kit, {}, pipAsKit, 'pip')!.bible.characters.find(
+      (c) => c.id === 'pip',
+    )!;
+    expect(drawnByArtist(pipNow)).toBe(false);
+    expect(pipNow.look).toBe('a small brown dog');
+  });
+
+  it('gestures with its arms when it has them: a monkey', async () => {
+    const cast = {
+      momo: await animalSheet(plainAnimal('monkey'), 'momo'),
+      clover: await animalSheet(plainAnimal('horse'), 'clover'),
+    };
+    expect([...gesturingIn(cast)]).toEqual(['momo']);
   });
 });

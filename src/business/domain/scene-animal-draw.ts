@@ -42,6 +42,7 @@ import type { SheetFace } from './scene-sheet-face';
 import { animalTall, type AnimalSpec } from './scene-animal';
 import {
   ANIMAL_POSES,
+  BEAK_LINE,
   LINE,
   buildAnimal,
   lookOf,
@@ -57,6 +58,8 @@ import {
   pt,
   r1,
   r2,
+  reachOf,
+  turn,
   type P,
 } from './scene-animal-shapes';
 
@@ -150,7 +153,7 @@ const SWING = {
 } as const;
 
 /** How wide each of the six mouth shapes opens a beak, degrees: shut, a little, open, wide, round, lip on teeth. */
-const BEAK_SHAPES = [0, 7, 22, 17, 14, 5];
+const BEAK_SHAPES = [0, 12, 34, 27, 22, 8];
 /** How far a face's own mouth opens a beak, by the kit's mouth's name. */
 const BEAK_REST: Record<string, number> = {
   flat: 0,
@@ -158,15 +161,15 @@ const BEAK_REST: Record<string, number> = {
   frown: 0,
   side: 0,
   grit: 0,
-  small: 8,
-  grin: 10,
-  glum: 5,
-  aside: 7,
-  wobble: 11,
-  oh: 14,
-  o: 20,
-  gasp: 22,
-  shout: 26,
+  small: 10,
+  grin: 14,
+  glum: 7,
+  aside: 9,
+  wobble: 15,
+  oh: 20,
+  o: 28,
+  gasp: 32,
+  shout: 38,
 };
 /** How round a fish's lips are, by the kit's mouth's name: its width and height in the face's units. */
 const FISH_REST: Record<string, [number, number]> = {
@@ -209,15 +212,16 @@ function lowerBeak(b: Beak, deg: number): string {
           [
             h,
             lerp(h, tip, 0.5),
-            add(tip, [0, 0.4]),
-            polar(tip, lower * 0.5, -90 - down),
+            polar(tip, lower * 0.1, 90 - down),
+            polar(tip, lower * 0.35, -down),
+            polar(tip, lower * 0.6, -90 - down),
             under,
             polar(h, lower * 0.8, -90 - down),
           ],
           0.7,
         )
       : blob([h, tip, under, polar(h, lower * 0.9, -90 - down)], 0.55);
-  return `${gap}<path d="${shape}" ${inked(b.colour)}/>`;
+  return `${gap}<path d="${shape}" ${inked(b.colour, BEAK_LINE)}/>`;
 }
 
 /** A fish's lips: a round mouth, as wide and as open as a shape says, in the face's units about the mouth. */
@@ -226,6 +230,103 @@ const fishLips = ([w, h]: [number, number]) =>
 
 /** Every face of the kit an animal can wear: the story's seven and the kit's own. */
 const FACES = FIGURE_FACES;
+
+/** A path's points made `kx` times as wide: its x's, and an arc's width. */
+function widenPath(d: string, kx: number): string {
+  let command = 'M';
+  let at = 0;
+  return d.replace(
+    /[A-Za-z]|-?(?:\d+\.?\d*|\.\d+)(?:e-?\d+)?/g,
+    (token: string) => {
+      if (/[A-Za-z]/.test(token)) {
+        command = token.toUpperCase();
+        at = 0;
+        return token;
+      }
+      const i = at;
+      at += 1;
+      const wide =
+        command === 'H' ||
+        (command === 'A'
+          ? i % 7 === 0 || i % 7 === 5
+          : command !== 'V' && i % 2 === 0);
+      return wide ? String(r2(Number(token) * kx)) : token;
+    },
+  );
+}
+
+/**
+ * A mouth made `kx` times as wide by its own points, not by a transform:
+ * so its lines stay as heavy as the kit's all round, where a stretched
+ * group would thicken its sides.
+ */
+function widened(markup: string, kx: number): string {
+  if (kx === 1) return markup;
+  const x = (v: string) => String(r2(Number(v) * kx));
+  return markup.replace(
+    /<(path|ellipse|rect|circle)\b([^>]*?)(\/?)>/g,
+    (_, name: string, attrs: string, end: string) => {
+      const keys =
+        name === 'path' ? [] : name === 'rect' ? ['x', 'width'] : ['cx', 'rx'];
+      let out = attrs.replace(
+        /(\s)(\w+)="([^"]*)"/g,
+        (whole: string, space: string, key: string, value: string) =>
+          key === 'd'
+            ? `${space}d="${widenPath(value, kx)}"`
+            : keys.includes(key)
+              ? `${space}${key}="${x(value)}"`
+              : whole,
+      );
+      // A circle widened is an ellipse.
+      if (name === 'circle')
+        out = out.replace(
+          /(\s)r="([^"]*)"/,
+          (_w, space: string, r: string) => `${space}rx="${x(r)}" ry="${r}"`,
+        );
+      return `<${name === 'circle' ? 'ellipse' : name}${out}${end}>`;
+    },
+  );
+}
+
+/**
+ * An animal settled on its ground and in its frame. In no pose does its
+ * head go into the ground: lying down, a trunk or a scarf that would is
+ * held that much higher. And its frame holds every pose, not standing
+ * alone, so a head that swings forward curled up stays in it.
+ */
+function settled(built: Built, headMarkup: string): Built {
+  const head = reachOf(headMarkup);
+  const xs = [built.bounds.left, built.bounds.right];
+  const ys = [built.bounds.top];
+  const headAt: Built['headAt'] = {};
+  for (const pose of ANIMAL_POSES) {
+    const markup = built.poses[pose];
+    if (!markup) continue;
+    const at = built.headAt[pose] ?? { by: [0, 0] as P, turn: 0 };
+    const moved = head.map((p) =>
+      add(built.neck && at.turn ? turn(p, built.neck, at.turn) : p, at.by),
+    );
+    const lift = head.length
+      ? Math.max(0, Math.max(...moved.map((p) => p[1])) - LINE / 2)
+      : 0;
+    headAt[pose] = lift
+      ? { by: [at.by[0], r1(at.by[1] - lift)], turn: at.turn }
+      : at;
+    for (const [x, y] of [...reachOf(markup), ...moved]) {
+      xs.push(x);
+      ys.push(y - lift);
+    }
+  }
+  return {
+    ...built,
+    headAt,
+    bounds: {
+      left: Math.min(...xs),
+      right: Math.max(...xs),
+      top: Math.min(...ys),
+    },
+  };
+}
 
 /**
  * An animal drawn from its spec. `seed` (its id) sets when it blinks and
@@ -239,18 +340,19 @@ export function drawAnimal(
   const key = seed || JSON.stringify(spec);
   const id = `a${Math.floor(beatOf(`${key}:id`) * 1e6).toString(36)}`;
   const look = lookOf(spec, id);
-  const built = buildAnimal(spec, look);
+  let built = buildAnimal(spec, look);
   const beat = beatOf(key);
   const poses = ANIMAL_POSES.filter((pose) => built.poses[pose]);
-  const shown: AnimalPose[] = how.pose
-    ? [
-        built.poses[how.pose]
-          ? how.pose
-          : how.pose === 'curl' && built.poses.lie
-            ? 'lie'
-            : 'stand',
-      ]
-    : poses;
+  // A pose it has not got is the one the stage shows for it: lying down
+  // for sitting (a horse lies down when told to sit) or curled up, else
+  // standing.
+  const standIn = (pose: AnimalPose): AnimalPose =>
+    built.poses[pose]
+      ? pose
+      : (pose === 'sit' || pose === 'curl') && built.poses.lie
+        ? 'lie'
+        : 'stand';
+  const shown: AnimalPose[] = how.pose ? [standIn(how.pose)] : poses;
   const signs = how.signs ?? [];
 
   // ── The face, the kit's, in its own units about its middle.
@@ -284,7 +386,7 @@ export function drawAnimal(
   const atMouth = (markup: string, className = '') =>
     mouth.kind === 'beak'
       ? `<g${className ? ` class="${className}"` : ''}>${markup}</g>`
-      : `<g${className ? ` class="${className}"` : ''} transform="translate(${r1(mouth.at[0])} ${r1(mouth.at[1])}) scale(${r2(ms * mouth.wide)} ${r2(ms)})" stroke-width="${r2(mouthLine / ms)}">${markup}</g>`;
+      : `<g${className ? ` class="${className}"` : ''} transform="translate(${r1(mouth.at[0])} ${r1(mouth.at[1])}) scale(${r2(ms)})" stroke-width="${r2(mouthLine / ms)}">${widened(markup, mouth.wide)}</g>`;
   const mouthOf = (name: string): string => {
     if (mouth.kind === 'beak')
       return lowerBeak(mouth.beak!, BEAK_REST[name] ?? 0);
@@ -347,6 +449,21 @@ export function drawAnimal(
     return { gid, air, onFace };
   });
 
+  // ── The head, whole: its shape, its eyes, every face and mouth it has.
+  const headGroup = [
+    built.head,
+    whites,
+    faces,
+    lipShapes,
+    `<g class="blink" opacity="0">${lids()}</g>`,
+    ...signGroups
+      .filter((one) => one.onFace)
+      .map((one) => `<g id="${one.gid}-face">${one.onFace}</g>`),
+  ].join('');
+  // Settled on its ground and in its frame, by all of its head: a mouth
+  // opened wide keeps out of the ground too.
+  built = settled(built, headGroup);
+
   // ── The poses: each its own group, all but standing hidden in a still.
   const neck = built.neck;
   const headAt = (pose: AnimalPose) =>
@@ -365,16 +482,6 @@ export function drawAnimal(
         `<g class="a-pose a-${pose}"${onePose || pose === 'stand' ? '' : ' opacity="0"'}>${pose === 'stand' ? built.poses[pose] : ownIds(built.poses[pose]!, pose)}</g>`,
     )
     .join('');
-  const headGroup = [
-    built.head,
-    whites,
-    faces,
-    lipShapes,
-    `<g class="blink" opacity="0">${lids()}</g>`,
-    ...signGroups
-      .filter((one) => one.onFace)
-      .map((one) => `<g id="${one.gid}-face">${one.onFace}</g>`),
-  ].join('');
   // A sign's state is one group: its face part, and what floats over it.
   const signMarkup = signGroups
     .map((one) => `<g id="${one.gid}">${one.air}</g>`)
@@ -549,7 +656,11 @@ function animalCss(
   const has = (pose: AnimalPose) => poses.includes(pose);
   if (!still && poses.length > 1) {
     const sit = has('sit') ? 'var(--a-sit)' : 'var(--a-lie)';
+    // Only where custom properties are known (a browser): a renderer that
+    // does not know them (a still made on the server) shows each pose as
+    // drawn, standing, the rest hidden by their own opacity.
     out.push(
+      '@supports (opacity:var(--a)){',
       `.a-root{--a-sit:clamp(0,(var(--low,0) - ${SIT_FROM})*25,1);--a-lie:clamp(0,(var(--low,0) - ${has('sit') ? LIE_FROM : SIT_FROM})*25,1)}`,
       `.a-stand{opacity:calc(1 - ${sit})}`,
       has('sit') ? '.a-sit{opacity:calc(var(--a-sit) - var(--a-lie))}' : '',
@@ -557,6 +668,7 @@ function animalCss(
       has('curl')
         ? `.a-curl{opacity:0}.on-a-sleeping .a-lie{opacity:0}.on-a-sleeping .a-curl{opacity:var(--a-lie)}`
         : '',
+      '}',
     );
     // Standing, the body sinks a little on its legs (a crouch, a dig).
     const hip = built.legs.length

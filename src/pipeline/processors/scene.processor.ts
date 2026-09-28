@@ -129,6 +129,7 @@ import {
   type SetSheet,
   type Sets,
 } from '../../business/domain/scene-sheet';
+import { DANGLE_RIG } from '../../business/domain/scene-dangles';
 import { DRAWN } from '../../business/domain/scene-own';
 import type { OwnPropDrawing } from '../../business/domain/scene-props';
 import type { SetPiece } from '../../business/domain/scene-set-pieces';
@@ -1460,6 +1461,8 @@ export class SceneProcessor {
           signs: signsShown(script, thing.id),
           faces: facesShown(script, thing.id),
           old: oldWorld(story?.bible.world?.era),
+          // Drawn new for the page, with what swings: rig 2.
+          rig: DANGLE_RIG,
         }).catch((error: unknown) => {
           this.logger.warn(
             `${who}: "${thing.id}" (a person) is set as a card: ${(error as Error).message}`,
@@ -1519,11 +1522,22 @@ export class SceneProcessor {
             faces,
             old: oldWorld(story?.bible.world?.era),
             ...(thing.dress?.length ? { dress: thing.dress } : {}),
+            // Drawn new for the page, with what swings: rig 2. A sheet
+            // the book keeps is as it was drawn.
+            rig: DANGLE_RIG,
           })
         : kitAnimal
-          ? await animalDrawing(kitAnimal, thing.ref, { signs, faces })
+          ? await animalDrawing(kitAnimal, thing.ref, {
+              signs,
+              faces,
+              rig: DANGLE_RIG,
+            })
           : kitCreature
-            ? await creatureDrawing(kitCreature, thing.ref, { signs, faces })
+            ? await creatureDrawing(kitCreature, thing.ref, {
+                signs,
+                faces,
+                rig: DANGLE_RIG,
+              })
             : null;
       const { anchors: pageAnchors, ...posed } = onPage ?? { anchors: null };
       let drawing = onPage ? (posed as GatedDrawing) : sheet?.drawing;

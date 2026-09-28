@@ -25,6 +25,7 @@ import {
 } from './scene-animal';
 import { CLOTH, KIT_EXTRAS, flat, inked, line, shade } from './scene-ink';
 import { FIGURE_INK } from './scene-ink';
+import { DANGLE_FEEL, cutChain, dangleOf, type Dangle } from './scene-dangles';
 import {
   add,
   blob,
@@ -117,6 +118,8 @@ export interface Built {
   gait: Gait;
   /** How far its head drops lying down, in its units: the stage lowers what it carries by as much. */
   sink: number;
+  /** On rig 2, what its plan cut into chains as it drew it (a mane), each as it stands. */
+  dangles?: Dangle[];
 }
 
 /** An animal's colours and what it has, as drawn. */
@@ -144,6 +147,8 @@ export interface Look {
   wear: string;
   /** Unique to this drawing: its clip paths' ids. */
   id: string;
+  /** On rig 2, what swings is cut into chains as it is drawn (a mane). */
+  rig?: 2;
 }
 
 export const LINE = 2.6;
@@ -1547,7 +1552,14 @@ function shellOf(outline: P[], look: Look): string {
 }
 
 /** A mane: along a long neck's top (a horse's, a zebra's), or round the head (a lion's, behind it). */
-function maneOnNeck(s: QuadShape, look: Look, n0: P, n1: P): string {
+function maneOnNeck(
+  s: QuadShape,
+  look: Look,
+  n0: P,
+  n1: P,
+  /** On rig 2, where its chain's dangle is kept. */
+  found?: Dangle[],
+): string {
   if (look.mane === 'none') return '';
   const w0 = s.neck.w;
   const w1 = s.head.long > 1.3 ? w0 * 0.62 : w0 * 0.8;
@@ -1570,7 +1582,24 @@ function maneOnNeck(s: QuadShape, look: Look, n0: P, n1: P): string {
     along(0.55, -3 * k),
   ];
   const mane = path(blob(pts, 0.8), inked(look.hair));
-  if (look.spec.species !== 'zebra') return mane;
+  // On rig 2, two segments along the crest from the withers, its base
+  // kept where it grows.
+  const swing = (markup: string) => {
+    if (look.rig !== 2 || !found) return markup;
+    const made = cutChain({
+      id: 'mane',
+      markup,
+      root: along(0.02, 0),
+      tip: along(1.06, 0),
+      segments: 2,
+      clip: `${look.id}-dg-mane`,
+      pinned: true,
+      limit: DANGLE_FEEL.mane.limit,
+    });
+    found.push(dangleOf('mane', made, 'mane'));
+    return made.markup;
+  };
+  if (look.spec.species !== 'zebra') return swing(mane);
   // A zebra's mane stands up, striped.
   const stripes = [0.2, 0.45, 0.7, 0.92]
     .map((t) =>
@@ -1581,7 +1610,7 @@ function maneOnNeck(s: QuadShape, look: Look, n0: P, n1: P): string {
       ),
     )
     .join('');
-  return mane + stripes;
+  return swing(mane + stripes);
 }
 
 /** Horns, by their kind, on top of the head: a pair of small ones, curled ones, antlers, a giraffe's knobs. */
@@ -2149,6 +2178,7 @@ function quadruped(spec: AnimalSpec, look: Look): Built {
   // A long neck, drawn behind the body and turning with the head.
   const neckW = s.neck.w;
   const neckPts = neckOutline(n0, n1, neckW, long ? neckW * 0.62 : neckW * 0.8);
+  const manes: Dangle[] = [];
   const neckMarkup =
     s.neck.len > 3
       ? path(blob(neckPts, 0.9), inked(look.coat)) +
@@ -2187,7 +2217,7 @@ function quadruped(spec: AnimalSpec, look: Look): Built {
         (look.pattern === 'stripes'
           ? `<g clip-path="url(#${look.id}-neck)">${[0.15, 0.38, 0.6, 0.82].map((t) => line(poly([polar(lerp(n0, n1, t), neckW, s.neck.angle + 100), polar(lerp(n0, n1, t), neckW, s.neck.angle - 80)]), look.second, Math.max(3, neckW * 0.14))).join('')}</g>`
           : '') +
-        maneOnNeck(s, look, n0, n1)
+        maneOnNeck(s, look, n0, n1, manes)
       : '';
   const neckDefs =
     s.neck.len > 3
@@ -2351,6 +2381,7 @@ function quadruped(spec: AnimalSpec, look: Look): Built {
     wings: [],
     gait: 'walk',
     sink: poses.lie?.by[1] ?? 0,
+    ...(manes.length ? { dangles: manes } : {}),
   };
 }
 

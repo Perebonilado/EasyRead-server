@@ -21,6 +21,8 @@ import { liftCallouts, type Callout, type InkField } from './scene-callouts';
 import { renderSvg, type InkBox } from './scene-raster';
 import type { SetGround } from './scene-ground';
 import type { FigureSpec } from './scene-figure';
+import type { Dangle } from './scene-dangles';
+import type { Gait } from './scene-animal-body';
 
 /** The canvas the artist is given, by shape. */
 export const CANVAS: Record<DrawingThing['shape'], { w: number; h: number }> = {
@@ -812,6 +814,12 @@ export interface GatedDrawing {
   wears?: Pick<FigureSpec, 'top' | 'topColour' | 'headwear'>;
   /** And what they wear, in words: as drawn, then in each outfit they change into ("red pyjamas", "a blue uniform and grey trousers"). */
   outfits?: string[];
+  /** Drawn by a kit with rig 2 (studio-world-plan §4.6): what swings is drawn as chains. Absent, rig 1. */
+  rigVersion?: 2;
+  /** On rig 2, each part that swings (scene-dangles), its root in its own units. */
+  dangles?: Dangle[];
+  /** On rig 2, one who walks: how far one full stride carries them, in its own units, and how they go. */
+  stride?: { length: number; gait: Gait };
 }
 
 export interface GateResult {

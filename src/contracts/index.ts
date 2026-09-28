@@ -1047,6 +1047,36 @@ export type SceneAmbienceName =
   | 'machine'
   | 'clock';
 
+/**
+ * One part of a kit drawing that swings (rig 2), as the player springs it.
+ * Its segments are groups of classes `dg-<id>-0` (at the root) to
+ * `dg-<id>-<segments - 1>`, each nested in the one before and turning
+ * about its own joint (written in the drawing) by the CSS variable
+ * `--dg-<id>-<k>`, in degrees; unset, 0, as drawn.
+ */
+export interface SceneDangleDto {
+  id: string;
+  /** Where its first segment turns, in the drawing's own viewBox units (not shares of its box). */
+  root: [number, number];
+  segments: number;
+  /** From its root to its tip, in viewBox units. */
+  length: number;
+  /** Each segment's spring: its natural frequency, radians a second. */
+  stiff: number;
+  /** And its damping ratio: below 1 it overshoots and swings back. */
+  damp: number;
+  /** The angle each segment rests at, degrees (0: as drawn). */
+  rest: number;
+  /** How far each segment turns from rest at most, degrees. */
+  limit: number;
+  /** How much the wind moves it, 0 to 1. */
+  wind: number;
+}
+
+/** How a kit drawing goes when it goes somewhere. */
+export type SceneGait =
+  'walk' | 'waddle' | 'hop' | 'swim' | 'slither' | 'float';
+
 /** One thing that can stand on the stage. */
 export type SceneThingDto =
   | {
@@ -1120,6 +1150,16 @@ export type SceneThingDto =
       drawnAs?: 'in bed' | 'lying';
       /** What a person the kit drew wears, in words: as the scene opens, then in each of their dress states in turn ("dress-1", …). Absent on a scene made before it was said. */
       wears?: string[];
+      /**
+       * Drawn by a kit (people, animals, creatures) with rig 2: what swings
+       * is drawn as chains of segments the player turns by `--dg-<id>-<k>`
+       * (degrees, 0 at rest). Absent, rig 1: an older drawing, as it was.
+       */
+      rigVersion?: 2;
+      /** On rig 2, each part that swings: hair behind, a cloak or cape, a scarf's end, a ribbon, wings, a tail, ears, a mane. */
+      dangles?: SceneDangleDto[];
+      /** On rig 2, one who walks: how far one full stride (both feet) carries them, in the drawing's viewBox units, and how they go. */
+      stride?: { length: number; gait: SceneGait };
     }
   | { id: string; kind: 'stat'; value: string; caption: string }
   | {

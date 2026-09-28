@@ -1082,6 +1082,12 @@ function drawGround(
       const y = top + 20 + random() * (SET_H - top - 30);
       return draw(x, y);
     }).join('');
+  /** A tuft of grass, which bends as someone brushes by it (studio-world-plan §5.1). */
+  const tuft = (x: number, y: number) =>
+    `<g${worldAttributes({ as: 'sway', len: r1(16 / scaleAtFeet('outdoor', y)) }, 'grass', x, rowAt('outdoor', y), [x, y])}>${flatShape(
+      `M${r1(x - 10)},${r1(y)} L${r1(x - 4)},${r1(y - 14)} L${r1(x)},${r1(y - 4)} L${r1(x + 5)},${r1(y - 16)} L${r1(x + 10)},${r1(y)} Z`,
+      darker,
+    )}</g>`;
   switch (layout.ground) {
     case 'path': {
       // A path of earth winding from the front, wide, to the far edge, narrow.
@@ -1091,21 +1097,11 @@ function drawGround(
         `M${r1(mid - 24)},${r1(far)} Q${r1(mid - 120)},${r1(top + (SET_H - top) * 0.45)} ${r1(mid - 420)},${SET_H + 20} L${r1(mid + 420)},${SET_H + 20} Q${r1(mid + 120)},${r1(top + (SET_H - top) * 0.45)} ${r1(mid + 24)},${r1(far)} Z`,
         SET_COLOURS.earth,
       );
-      out += marks(16, (x, y) =>
-        flatShape(
-          `M${r1(x - 10)},${r1(y)} L${r1(x - 4)},${r1(y - 14)} L${r1(x)},${r1(y - 4)} L${r1(x + 5)},${r1(y - 16)} L${r1(x + 10)},${r1(y)} Z`,
-          darker,
-        ),
-      );
+      out += marks(16, tuft);
       break;
     }
     case 'grass':
-      out += marks(22, (x, y) =>
-        flatShape(
-          `M${r1(x - 10)},${r1(y)} L${r1(x - 4)},${r1(y - 14)} L${r1(x)},${r1(y - 4)} L${r1(x + 5)},${r1(y - 16)} L${r1(x + 10)},${r1(y)} Z`,
-          darker,
-        ),
-      );
+      out += marks(22, tuft);
       break;
     case 'sand':
     case 'dirt':
@@ -1227,6 +1223,46 @@ function innerOf(piece: SetPiece): string {
   return open >= 0 && close > open ? piece.svg.slice(open + 1, close) : '';
 }
 
+/** The row nearest where feet at y stand. */
+function rowAt(kind: PlaceKind, y: number): SetRow {
+  return SET_ROWS.reduce((best, row) =>
+    Math.abs(rowFeet(kind, row) - y) < Math.abs(rowFeet(kind, best) - y)
+      ? row
+      : best,
+  );
+}
+
+/**
+ * What the stage needs to know of a thing in a set to make it answer the
+ * world (studio-world-plan §5), as data attributes on its group: how it
+ * moves (`data-react`: a plant sways, a lamp or a bucket hangs, a curtain
+ * billows, a flag or an awning flaps), what it is, where it stands (its
+ * middle as a share of the width, its row), how long it is in the kit's
+ * units, where birds may sit on it (its own units), and the point it
+ * turns about when that is not its own origin. Nothing for one that
+ * neither moves nor is sat on, so its bytes are as they were.
+ */
+function worldAttributes(
+  reacts: SetPiece['reacts'],
+  kind: string | undefined,
+  x: number,
+  row: SetRow | 'wall' | 'flat',
+  pivot?: [number, number],
+  roosts?: SetPiece['roosts'],
+): string {
+  if (!reacts && !roosts?.length) return '';
+  return (
+    (reacts ? ` data-react="${reacts.as}"` : '') +
+    (kind ? ` data-kind="${kind}"` : '') +
+    ` data-x="${Math.round((x / SET_W) * 1000) / 1000}" data-row="${row}"` +
+    (reacts ? ` data-len="${reacts.len}"` : '') +
+    (pivot ? ` data-pivot="${r1(pivot[0])} ${r1(pivot[1])}"` : '') +
+    (roosts?.length
+      ? ` data-roost="${roosts.map(([rx, ry]) => `${rx} ${ry}`).join(';')}"`
+      : '')
+  );
+}
+
 /** A piece at a point of the set, its feet there, `s` of the set's units to one of the kit's. */
 function placed(
   piece: SetPiece,
@@ -1238,6 +1274,8 @@ function placed(
     id?: string;
     lives?: 'sway' | 'flicker';
     own?: boolean;
+    /** What it is and its row, for the stage to make it answer the world. */
+    world?: { kind?: string; row: SetRow | 'wall' | 'flat' };
   } = {},
 ): string {
   const inner = innerOf(piece);
@@ -1249,7 +1287,17 @@ function placed(
   const body = options.lives
     ? `<g class="${options.lives}">${inner}</g>`
     : inner;
-  return `<g${options.id ? ` id="${options.id}"` : ''} transform="translate(${r1(x)} ${r1(y)}) scale(${Math.round(s * flip * 1000) / 1000} ${Math.round(s * 1000) / 1000})"${stroke}>${body}</g>`;
+  const world = options.world
+    ? worldAttributes(
+        piece.reacts,
+        options.world.kind,
+        x,
+        options.world.row,
+        undefined,
+        piece.roosts,
+      )
+    : '';
+  return `<g${options.id ? ` id="${options.id}"` : ''} transform="translate(${r1(x)} ${r1(y)}) scale(${Math.round(s * flip * 1000) / 1000} ${Math.round(s * 1000) / 1000})"${stroke}${world}>${body}</g>`;
 }
 
 /** Whether a colour is too pale to show on a white awning. */
@@ -1699,6 +1747,7 @@ export function buildSet(
       const top = kind === 'vessel' ? floor - 230 : floor;
       placings.push({
         piece,
+        kind: item.kind,
         x: item.x * SET_W,
         y: top - high * s,
         s,
@@ -1803,6 +1852,7 @@ export function buildSet(
     parts[id] = id;
     placings.push({
       piece: drawPiece(feature.kind, feature.name),
+      kind: feature.kind,
       x: (SPOT_AT[feature.spot] ?? 0.5) * SET_W,
       y,
       s: scaleAtFeet(kind, y),
@@ -1843,6 +1893,10 @@ export function buildSet(
       ...(one.id ? { id: one.id } : {}),
       ...(one.lives ? { lives: one.lives } : {}),
       ...(one.own ? { own: true } : {}),
+      world: {
+        ...(one.kind ? { kind: one.kind } : {}),
+        row: one.band,
+      },
     });
   out.push(...placings.filter((one) => one.hang).map(drawnAt));
   // The ground or floor, with what lies flat on it: exactly what people stand on.
@@ -1887,8 +1941,12 @@ export function buildSet(
     parts.front = 'front';
   }
 
+  // What the stage needs to know of the place to make it answer the
+  // world: what kind of place, what people walk on, and where the open
+  // ground meets what stands behind it (studio-world-plan §5).
+  const world = ` data-place="${kind}" data-ground="${layout.ground}" data-floor="${r1(floor)}"`;
   const svg =
-    `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${SET_W} ${SET_H}">` +
+    `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${SET_W} ${SET_H}"${world}>` +
     `<g stroke="${FIGURE_INK}" stroke-width="${INK_W}" stroke-linejoin="round" stroke-linecap="round">${out.join('')}</g></svg>`;
   return { svg, parts };
 }

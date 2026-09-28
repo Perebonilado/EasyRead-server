@@ -48,7 +48,26 @@ export interface SetPiece {
   lies?: { top: number; head: number; foot: number; sits: number };
   /** The group that covers whoever is in it, drawn over them while they are: a bed's duvet. */
   cover?: string;
+  /**
+   * How it answers the world (studio-world-plan §5): a crown that bends as
+   * someone brushes past, a bucket that swings, an awning that flaps; and
+   * how long it is, in the kit's units, for how quickly it swings. Its
+   * parts that move on their own are groups `data-seg` about `data-pivot`.
+   */
+  reacts?: { as: 'sway' | 'hang' | 'curtain' | 'flag'; len: number };
+  /** Where birds may sit on it, in its own units. */
+  roosts?: [number, number][];
 }
+
+/**
+ * Part of a piece that moves on its own as the world touches it: the
+ * stage turns it about its pivot (its own units) by the group's order `k`.
+ */
+export const segment = (
+  k: number,
+  [px, py]: [number, number],
+  markup: string,
+) => `<g data-seg="${k}" data-pivot="${px} ${py}">${markup}</g>`;
 
 /**
  * The pieces people act on, which the stage always draws itself, in
@@ -159,27 +178,38 @@ export function drawPiece(kind: FeatureKind, name = ''): SetPiece {
             WOOD_DARK,
             2.4,
           ) +
-          frond(-170, 70, LEAF_DARK) +
-          frond(180, 80, LEAF_DARK) +
-          frond(-120, 130, LEAF) +
-          frond(140, 140, LEAF) +
-          frond(-60, -50, LEAF) +
-          frond(90, -40, LEAF) +
-          [
-            [20, -404],
-            [38, -400],
-            [28, -390],
-          ]
-            .map(
-              ([x, y]) =>
-                `<circle cx="${x}" cy="${y}" r="10" ${fill(WOOD_DARK)}/>`,
-            )
-            .join(''),
+          // Its fronds and coconuts one part, turning at the top of the trunk.
+          segment(
+            0,
+            [28, -420],
+            frond(-170, 70, LEAF_DARK) +
+              frond(180, 80, LEAF_DARK) +
+              frond(-120, 130, LEAF) +
+              frond(140, 140, LEAF) +
+              frond(-60, -50, LEAF) +
+              frond(90, -40, LEAF) +
+              [
+                [20, -404],
+                [38, -400],
+                [28, -390],
+              ]
+                .map(
+                  ([x, y]) =>
+                    `<circle cx="${x}" cy="${y}" r="10" ${fill(WOOD_DARK)}/>`,
+                )
+                .join(''),
+          ),
         [-150, -490, 368, 496],
       ),
       // A child up it reaches the kite caught in its crown.
       perch: 270,
       crown: [28, -430],
+      reacts: { as: 'sway', len: 490 },
+      roosts: [
+        [-40, -458],
+        [28, -470],
+        [96, -452],
+      ],
     };
   switch (kind) {
     case 'gate': {
@@ -364,15 +394,26 @@ export function drawPiece(kind: FeatureKind, name = ''): SetPiece {
             line('M0,-130 L-44,-176', FIGURE_INK, 13) +
             line('M0,-130 L-44,-176', WOOD, 8) +
             rect(-17, -170, 34, 170, WOOD, 4) +
-            `<circle cx="-54" cy="-214" r="58" ${fill(LEAF_DARK)}/>` +
-            `<circle cx="54" cy="-210" r="60" ${fill(LEAF_DARK)}/>` +
-            `<circle cx="0" cy="-262" r="74" ${fill(LEAF)}/>` +
-            `<circle cx="-40" cy="-196" r="48" ${fill(LEAF)}/>` +
-            `<circle cx="42" cy="-192" r="46" ${fill(LEAF)}/>`,
+            // Its crown one part, turning at the top of the trunk.
+            segment(
+              0,
+              [0, -170],
+              `<circle cx="-54" cy="-214" r="58" ${fill(LEAF_DARK)}/>` +
+                `<circle cx="54" cy="-210" r="60" ${fill(LEAF_DARK)}/>` +
+                `<circle cx="0" cy="-262" r="74" ${fill(LEAF)}/>` +
+                `<circle cx="-40" cy="-196" r="48" ${fill(LEAF)}/>` +
+                `<circle cx="42" cy="-192" r="46" ${fill(LEAF)}/>`,
+            ),
           [-112, -336, 224, 342],
         ),
         perch: 150,
         crown: [0, -250],
+        reacts: { as: 'sway', len: 336 },
+        roosts: [
+          [-50, -300],
+          [0, -336],
+          [50, -296],
+        ],
       };
     case 'goalpost': {
       // Two white posts and a bar, half again as wide as they are high as
@@ -409,6 +450,11 @@ export function drawPiece(kind: FeatureKind, name = ''): SetPiece {
           [-130, -106, 260, 106],
         ),
         perch: 106,
+        roosts: [
+          [-80, -106],
+          [0, -106],
+          [80, -106],
+        ],
       };
     case 'fence': {
       const pickets = Array.from({ length: 9 }, (_, i) => {
@@ -422,6 +468,10 @@ export function drawPiece(kind: FeatureKind, name = ''): SetPiece {
             pickets,
           [-126, -104, 252, 104],
         ),
+        roosts: [
+          [-56, -104],
+          [56, -104],
+        ],
       };
     }
     case 'stall':
@@ -430,11 +480,16 @@ export function drawPiece(kind: FeatureKind, name = ''): SetPiece {
           shadow(96) +
             rect(-84, -196, 8, 196, WOOD_DARK) +
             rect(76, -196, 8, 196, WOOD_DARK) +
-            `<path d="M-104,-172 L-92,-208 L92,-208 L104,-172 Z" ${fill(WHITE)}/>` +
-            line(
-              'M-60,-208 L-68,-172 M-20,-208 L-22,-172 M20,-208 L22,-172 M60,-208 L68,-172',
-              RED,
-              10,
+            // Its awning, flapping in the wind from its back edge.
+            segment(
+              0,
+              [0, -208],
+              `<path d="M-104,-172 L-92,-208 L92,-208 L104,-172 Z" ${fill(WHITE)}/>` +
+                line(
+                  'M-60,-208 L-68,-172 M-20,-208 L-22,-172 M20,-208 L22,-172 M60,-208 L68,-172',
+                  RED,
+                  10,
+                ),
             ) +
             rect(-90, -76, 180, 76, PLANK, 3) +
             rect(-96, -84, 192, 12, WOOD) +
@@ -444,6 +499,7 @@ export function drawPiece(kind: FeatureKind, name = ''): SetPiece {
           [-104, -208, 208, 214],
         ),
         opening: [-76, -196, 76, -84],
+        reacts: { as: 'flag', len: 36 },
       };
     case 'crate':
       return {
@@ -506,11 +562,18 @@ export function drawPiece(kind: FeatureKind, name = ''): SetPiece {
             line('M-92,0 L-70,-204 M92,0 L70,-204', FIGURE_INK, 10) +
             line('M-92,0 L-70,-204 M92,0 L70,-204', WOOD, 5.2) +
             rect(-84, -212, 168, 12, WOOD_DARK) +
-            line('M-26,-200 L-26,-60 M26,-200 L26,-60', FIGURE_INK, 2.4) +
-            rect(-38, -62, 76, 10, PLANK, 3),
+            // Its ropes and seat, swinging from the bar.
+            segment(
+              0,
+              [0, -200],
+              line('M-26,-200 L-26,-60 M26,-200 L26,-60', FIGURE_INK, 2.4) +
+                rect(-38, -62, 76, 10, PLANK, 3),
+            ),
           [-96, -212, 192, 212],
         ),
         seat: 56,
+        reacts: { as: 'hang', len: 140 },
+        roosts: [[0, -212]],
       };
     case 'well':
       return {
@@ -521,10 +584,17 @@ export function drawPiece(kind: FeatureKind, name = ''): SetPiece {
             `<path d="M-66,-146 L0,-186 L66,-146 Z" ${fill('#b0553a')}/>` +
             rect(-54, -72, 108, 72, STONE, 4) +
             `<ellipse cx="0" cy="-72" rx="54" ry="10" ${fill('#a9adb4')}/>` +
-            line('M0,-146 L0,-110', FIGURE_INK, 2) +
-            rect(-10, -112, 20, 18, WOOD, 3),
+            // Its bucket on its rope, swinging from the beam.
+            segment(
+              0,
+              [0, -146],
+              line('M0,-146 L0,-110', FIGURE_INK, 2) +
+                rect(-10, -112, 20, 18, WOOD, 3),
+            ),
           [-66, -186, 132, 186],
         ),
+        reacts: { as: 'hang', len: 36 },
+        roosts: [[0, -186]],
       };
   }
 }

@@ -37,6 +37,11 @@ export interface Dangle {
   segments: number;
   /** From its root to its tip, in the drawing's units. */
   length: number;
+  /**
+   * Which way it goes from its root to its tip as drawn, a unit vector in
+   * the drawing's units (y down): how a push or the wind turns it.
+   */
+  dir: [number, number];
   /** The spring's natural frequency, in radians a second: higher, stiffer. */
   stiff: number;
   /** The spring's damping ratio: below 1 it overshoots and swings back. */
@@ -75,15 +80,33 @@ export const DANGLE_FEEL = {
 } as const satisfies Record<string, DangleFeel>;
 export type DangleKind = keyof typeof DANGLE_FEEL;
 
+/** How far a person's legs swing either way about the hip as they walk, degrees (§4.2); an animal's, a kit animal's or creature's. */
+export const PERSON_SWING = 24;
+export const ANIMAL_SWING = 22;
+
+/**
+ * How far one full stride (both feet) carries a walker whose legs, `leg`
+ * from hip to ground, swing `swing` degrees either way about the hip
+ * (studio-world-plan §4.2): each foot stays where it lands while the body
+ * passes over it, so a step is the chord the foot sweeps, 2·leg·sin(swing),
+ * and a stride two steps. The player sets the legs' pace by it, so feet
+ * never slide.
+ */
+export const strideLength = (leg: number, swing: number): number =>
+  4 * leg * Math.sin((swing * Math.PI) / 180);
+
 /** A part cut into a chain, and what the player needs of it. */
 export interface Chain {
   markup: string;
   root: P;
   segments: number;
   length: number;
+  /** From its root toward its tip, a unit vector. */
+  dir: P;
 }
 
 const dot = (a: P, b: P) => a[0] * b[0] + a[1] * b[1];
+const r3 = (n: number) => Math.round(n * 1000) / 1000 || 0;
 /** Far enough past any drawing that a band reaches right across it. */
 const BIG = 5000;
 
@@ -137,6 +160,7 @@ export function cutChain(o: {
       root,
       segments: 1,
       length: r1(length),
+      dir: [0, 1],
     };
   const u: P = [axis[0] / length, axis[1] / length];
   const v: P = [-u[1], u[0]];
@@ -246,6 +270,7 @@ export function cutChain(o: {
     root: [r1(root[0]), r1(root[1])],
     segments: n,
     length: r1(length),
+    dir: [r3(u[0]), r3(u[1])],
   };
 }
 
@@ -266,7 +291,7 @@ function inkApart(markup: string): [string, string] {
 /** A chain's dangle, as the player springs it: where it turns, and how, by its kind. */
 export const dangleOf = (
   id: string,
-  chain: Pick<Chain, 'root' | 'segments' | 'length'>,
+  chain: Pick<Chain, 'root' | 'segments' | 'length' | 'dir'>,
   kind: DangleKind,
   by: P = [0, 0],
 ): Dangle => ({
@@ -274,6 +299,7 @@ export const dangleOf = (
   root: [r1(chain.root[0] + by[0]), r1(chain.root[1] + by[1])],
   segments: chain.segments,
   length: chain.length,
+  dir: [chain.dir[0], chain.dir[1]],
   ...DANGLE_FEEL[kind],
 });
 

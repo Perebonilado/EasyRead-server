@@ -37,6 +37,8 @@ import {
   cutChain,
   dangleCss,
   dangleOf,
+  PERSON_SWING,
+  strideLength,
   uniqueDangles,
   type Dangle,
   type DangleKind,
@@ -3123,7 +3125,15 @@ function styleOf(
   waves = false,
   /** Where the head turns about: the neck, in the kit's units. */
   neck = 0,
+  /**
+   * Made with rig 2: its walk is the player's (studio-world-plan §4.2),
+   * the legs swung and the body bobbed by the rig's variables as far as
+   * it goes, so no loop of its own steps them.
+   */
+  rig2 = false,
 ): string {
+  const acts = (one: FigureSign) =>
+    rig2 && one === 'walking' ? '' : (ACTS[one] ?? '');
   const moving = MOVES.filter(([, of]) =>
     of.some((one) => signs.includes(one)),
   );
@@ -3153,9 +3163,9 @@ function styleOf(
     signs.some((one) => ACTS[one]?.includes('.whole'))
       ? '.whole{transform-box:view-box;transform-origin:0 0}'
       : '',
-    ...signs.map((one) => ACTS[one] ?? ''),
+    ...signs.map(acts),
     // Anyone may walk on and off, whatever their signs.
-    signs.includes('walking') ? '' : (ACTS.walking ?? ''),
+    signs.includes('walking') ? '' : acts('walking'),
     rigStyle(neck),
   ].join('');
 }
@@ -3360,7 +3370,7 @@ function drawInBed(
   ];
   const svg = [
     `<svg xmlns="http://www.w3.org/2000/svg" viewBox="${[fx, fy, fw, fh].join(' ')}">`,
-    `<style>${styleOf(r1(beatOf(key) * 4.6), [r1(0.3 + beatOf(key) * 2.4)], drawn, false, R.sY + 6)}${shutStyle(faces)}${clip ? dangleCss(layers.dangles) : ''}</style>`,
+    `<style>${styleOf(r1(beatOf(key) * 4.6), [r1(0.3 + beatOf(key) * 2.4)], drawn, false, R.sY + 6, Boolean(clip))}${shutStyle(faces)}${clip ? dangleCss(layers.dangles) : ''}</style>`,
     eyeClip(R),
     `<ellipse cx="0" cy="0" rx="${w}" ry="8" fill="#1d1a22" fill-opacity="0.16"/>`,
     `<g stroke="${FIGURE_INK}" stroke-width="${LINE}" stroke-linejoin="round">`,
@@ -3620,6 +3630,7 @@ export function drawFigure(
       drawn,
       posed === 'waving',
       R.sY + 6,
+      Boolean(clip),
     ) +
     dressStyle(changes.map((one) => one.state)) +
     shutStyle(faces) +
@@ -3690,7 +3701,10 @@ export function drawFigure(
       ? { joints: members[0].joints, legs: members[0].legJoints }
       : {}),
     // On rig 2: what swings, turned with them lying down; and standing,
-    // their stride (§4.2), 0.55 of the leg from hip to ground.
+    // their stride (§4.2): as far as their legs carry them swung 24
+    // degrees either way about the hip, each foot planted where it lands
+    // (the leg from the hip to the ankle, about which the foot is kept
+    // flat).
     ...(clip
       ? {
           rig: 2 as const,
@@ -3699,6 +3713,10 @@ export function drawFigure(
                 dangles: dangles.map((one) => ({
                   ...one,
                   root: at(one.root),
+                  // Lying, turned with them: (x, y) goes to (y, -x).
+                  ...(lying
+                    ? { dir: [one.dir[1], -one.dir[0] || 0] as Point2 }
+                    : {}),
                 })),
               }
             : {}),
@@ -3706,7 +3724,7 @@ export function drawFigure(
             ? {}
             : {
                 stride: {
-                  length: r1(0.55 * (FEET + R.legs + 4)),
+                  length: r1(strideLength(R.legs + 4, PERSON_SWING)),
                   gait: 'walk' as const,
                 },
               }),

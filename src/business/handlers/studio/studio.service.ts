@@ -112,6 +112,23 @@ const LOOKING_AT: Partial<Record<EpisodePhase, string>> = {
   script: 'the scenes',
   made: 'the film',
 };
+/**
+ * Whether the moderation's verdict on a maker's words shuts the door.
+ * Plain "violence" alone does not: a giant felled by a stone, a wolf at
+ * the door, a battle in a history lesson are the stories told to every
+ * child, and the moderation flags them all. The producer takes those,
+ * told without gore (its safety rule). Anything graphic, sexual, hateful
+ * or self-harming, or a flag with no category named, does.
+ */
+export function refusesWords(verdict: {
+  flagged: boolean;
+  categories: string[];
+}): boolean {
+  if (!verdict.flagged) return false;
+  if (!verdict.categories.length) return true;
+  return verdict.categories.some((category) => category !== 'violence');
+}
+
 /** What the producer says to what the Studio does not make. */
 const REFUSAL =
   "That's not something the Studio can make. It makes stories and lessons that are safe for everyone: try a different idea, and I'll help you shape it.";
@@ -460,7 +477,7 @@ export class StudioService {
       content: text,
     });
     const flagged = await this.llm.moderate({ text });
-    if (flagged.flagged) {
+    if (refusesWords(flagged)) {
       this.logger.warn(
         `studio ${show.id}: a message was flagged (${flagged.categories.join(', ')})`,
       );
@@ -740,7 +757,7 @@ export class StudioService {
    */
   private async hear(userId: string, words: string): Promise<void> {
     const flagged = await this.llm.moderate({ text: words });
-    if (flagged.flagged) throw new ValidationError(REFUSAL);
+    if (refusesWords(flagged)) throw new ValidationError(REFUSAL);
   }
 
   /**

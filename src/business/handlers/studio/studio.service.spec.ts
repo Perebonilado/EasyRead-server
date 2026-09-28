@@ -19,7 +19,7 @@ import type {
 import type { SceneVoiceService } from '../admin/scene-voice.service';
 import type { EntitlementsService } from '../documents/entitlements.service';
 import { StudioCastService, studioCastKey } from './studio-cast.service';
-import { StudioService } from './studio.service';
+import { StudioService, refusesWords } from './studio.service';
 import { sceneFingerprint } from './studio-views';
 
 const brief = briefOf({
@@ -1002,5 +1002,27 @@ describe('the cast drawn at the cast step, and one character drawn again', () =>
     await expect(
       studio.service.chooseDrawing('u1', 's1', 'bingo', 'use'),
     ).rejects.toThrow('There is no new drawing of Bingo.');
+  });
+});
+
+describe('refusesWords', () => {
+  it('lets a classic story with a fight in it through to the producer', () => {
+    expect(refusesWords({ flagged: true, categories: ['violence'] })).toBe(
+      false,
+    );
+  });
+
+  it('refuses anything graphic, sexual, hateful or self-harming', () => {
+    for (const category of ['violence/graphic', 'sexual', 'hate', 'self-harm'])
+      expect(
+        refusesWords({ flagged: true, categories: ['violence', category] }),
+      ).toBe(true);
+  });
+
+  it('refuses a flag that names nothing, and passes what is not flagged', () => {
+    expect(refusesWords({ flagged: true, categories: [] })).toBe(true);
+    expect(refusesWords({ flagged: false, categories: ['violence'] })).toBe(
+      false,
+    );
   });
 });

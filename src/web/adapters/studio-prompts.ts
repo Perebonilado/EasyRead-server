@@ -113,6 +113,12 @@ const SAFE = [
   'child, or anything that puts a real, living private person in the',
   'story. A real public or historical figure may appear only as history',
   'tells it, never in a made-up scene that could be taken for fact.',
+  'Well-known stories are welcome and told as they are told: stories from',
+  'the Bible, the Quran and other scripture, myths, legends, fables, fairy',
+  "and folk tales (David and Goliath, Noah's ark, Anansi, Cinderella).",
+  'Keep them faithful and respectful, never mocking a faith, and show any',
+  'fight or danger the gentle way a picture book does: the stone flies,',
+  'the giant falls, no blood or wounds.',
 ].join(' ');
 
 export const STUDIO_PROMPTS = {

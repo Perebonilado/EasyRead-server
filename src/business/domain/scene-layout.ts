@@ -56,6 +56,8 @@ export interface Place extends Rect {
   room?: Rect;
   /** A drawing's labels, set beside it at this step. */
   labels?: LabelPlace[];
+  /** A Studio story's person: how far back they stand on the floor, 0 its back to 1 its front. */
+  d?: number;
   /** Where its labels go: the room kept for them when it was fitted. Not sent to the player. */
   labelsAt?: LabelMode;
   /** The size its labels are set at, when not the room's: a passage's notes, never larger than its words. Not sent to the player. */
@@ -693,6 +695,69 @@ export function stationShares(largest: number): StationShares {
 /** How big a thing at the back of a set is drawn beside the people, and how far back it stands. */
 export const BACK_DEPTH = 0.55;
 
+/**
+ * The floor's depth (studio-scenery-plan §4): d 0 is its back, just in
+ * front of the stage's row; 1 its front edge, near the camera; 0.5 where
+ * people have always stood. How big someone is at each, beside the
+ * people at 0.5: the pinhole's own scale, as the set's feet go down it.
+ */
+export const FLOOR_BACK_K = 0.7;
+export const FLOOR_FRONT_K = 1.15;
+/** Depth words (§4.1): "in front" and "near the camera"; "at the back", "far off", "across the yard"; and otherwise. */
+export const DEPTH_FRONT = 0.85;
+export const DEPTH_BACK = 0.15;
+export const DEPTH_MIDDLE = 0.5;
+
+/** The depth someone as big as `k` beside the people at 0.5 stands at, held to the floor. */
+export function depthOfK(k: number): number {
+  const d =
+    k <= 1
+      ? ((k - FLOOR_BACK_K) / (1 - FLOOR_BACK_K)) * 0.5
+      : 0.5 + ((k - 1) / (FLOOR_FRONT_K - 1)) * 0.5;
+  return Math.round(Math.min(1, Math.max(0, d)) * 100) / 100;
+}
+
+/**
+ * The floor of a stage at depth d: where the feet stand, and how big
+ * someone is there beside the people at 0.5 (the set's pinhole,
+ * scaleAtFeet: size grows as the feet come down from the eye line). The
+ * floor's back-to-front lerp by d, in two stretches either side of
+ * `floor`, where people have always stood; `eye` is the camera's eye
+ * line, and the front edge is kept above `bottom`.
+ */
+export function floorAt(
+  d: number,
+  floor: number,
+  eye: number,
+  bottom: number,
+): { feet: number; k: number } {
+  const depth = Math.max(1, floor - eye);
+  const front = Math.max(floor, Math.min(bottom, eye + FLOOR_FRONT_K * depth));
+  const back = eye + FLOOR_BACK_K * depth;
+  const at = Math.min(1, Math.max(0, d));
+  const feet =
+    at <= 0.5
+      ? back + (floor - back) * (at / 0.5)
+      : floor + (front - floor) * ((at - 0.5) / 0.5);
+  return {
+    feet: Math.round(feet * 10) / 10,
+    k: Math.round(((feet - eye) / depth) * 1000) / 1000,
+  };
+}
+
+/**
+ * How someone at each place of a group stands in depth when nothing says
+ * (studio-scenery-plan §4.1): one or two (a conversation) at the depth
+ * people have always stood; three with the middle one a step back; four
+ * or more across the floor's depth as well as its width, nearer and
+ * farther by turns.
+ */
+export function spreadDepth(i: number, n: number): number {
+  if (n <= 2) return DEPTH_MIDDLE;
+  if (n === 3) return i === 1 ? 0.38 : DEPTH_MIDDLE;
+  return [0.62, 0.3, 0.58, 0.34, 0.66, 0.28][i % 6];
+}
+
 /** The scale a Studio scene's people stand at, and the ground they stand on. */
 export interface StationScale {
   /** The stage's units to one of the kit's; null when no one stands with people. */
@@ -783,6 +848,8 @@ export function layoutStations(input: {
   steps: readonly {
     show: readonly string[];
     at?: Readonly<Record<string, string>>;
+    /** How far back each stands where the words or the sheet say (0 back to 1 front); the rest as the stager spreads them. */
+    depth?: Readonly<Record<string, number>>;
   }[];
   things: ReadonlyMap<string, LaidThing>;
   staging: StagingName;
@@ -792,9 +859,12 @@ export function layoutStations(input: {
   pieces?: readonly FeatureAcross[];
   /** Where the spots stand, as the scene's largest group has them. */
   shares?: StationShares;
+  /** The floor's depth: the camera's eye line on this stage, and how low the floor's front edge may come. Absent, everyone on one line, as before. */
+  floor?: { eye: number; bottom: number };
 }): Record<string, Place>[] {
   const { w: W, margin } = STAGINGS[input.staging];
   const { unit, floor, slot } = input.scale;
+  const depthed = input.floor;
   const round = (n: number) => Math.round(n * 10) / 10;
   /** How one the kit draws sits and lies, in its units. */
   const standsOf = (id: string) => {
@@ -837,8 +907,11 @@ export function layoutStations(input: {
     }
     return Math.min(W - margin - w * 0.3, Math.max(margin + w * 0.3, x));
   };
-  /** Where each one stands now, and by what station: kept while it is. */
-  const kept = new Map<string, { station: string; x: number }>();
+  /** Where each one stands now, and by what station, at what depth: kept while it is. */
+  const kept = new Map<
+    string,
+    { station: string; x: number; d?: number; asked?: number }
+  >();
   return input.steps.map((step) => {
     const out: Record<string, Place> = {};
     const placed: { id: string; x: number; w: number; low?: boolean }[] = [];
@@ -857,8 +930,9 @@ export function layoutStations(input: {
           Math.min(4, Math.round(((i + 0.5) / order.length) * 4))
         ];
       const was = kept.get(id);
+      const asked = step.depth?.[id];
       let x: number;
-      if (was?.station === station) x = was.x;
+      if (was?.station === station && was.asked === asked) x = was.x;
       else {
         x = across(station, size.w);
         // Going to a feature, or to a thing on the ground, they go there.
@@ -901,17 +975,39 @@ export function layoutStations(input: {
           }
         }
       }
-      kept.set(id, { station, x });
       // Under or behind a feature: on its ground, as big as they are there;
       // up it, where one who climbs it stands, beside where things catch.
-      const at = /^(?:behind|under|up|on|in):([^:]+)/.exec(station);
+      // On a floor with depth, beside one too: at its own depth.
+      const at = depthed
+        ? /^(?:behind|under|up|on|in|by):([^:]+)/.exec(station)
+        : /^(?:behind|under|up|on|in):([^:]+)/.exec(station);
       const feature = at ? input.features.get(at[1]) : undefined;
       const way = feature?.way;
       const up = station.startsWith('up:') && way?.perch !== undefined;
-      const k = way?.k ?? 1;
+      // Anywhere else, at the depth asked, or kept, or as the stager
+      // spreads the group across the floor.
+      const d =
+        depthed && !way
+          ? (asked ??
+            (was?.station === station && was.asked === asked
+              ? was.d
+              : undefined) ??
+            spreadDepth(step.show.indexOf(id), step.show.length))
+          : undefined;
+      const onFloor =
+        depthed && d !== undefined
+          ? floorAt(d, floor, depthed.eye, depthed.bottom)
+          : null;
+      kept.set(id, {
+        station,
+        x,
+        ...(d !== undefined ? { d } : {}),
+        ...(asked !== undefined ? { asked } : {}),
+      });
+      const k = way?.k ?? onFloor?.k ?? 1;
       const low = Boolean(at) && station.startsWith('under:');
       if (up && way?.upX !== undefined) x = way.upX - size.w * 0.3;
-      let feet = up ? way.perch! : (way?.y ?? floor);
+      let feet = up ? way.perch! : (way?.y ?? onFloor?.feet ?? floor);
       // On a seat or in a bed: their hips where it is sat on, their legs
       // hanging before it (or under its cover); lying, along it from its
       // foot end, their head at its head.
@@ -945,6 +1041,7 @@ export function layoutStations(input: {
         y: round(feet - size.h * k),
         w: round(size.w * k),
         h: round(size.h * k),
+        ...(depthed ? { d: d ?? depthOfK(k) } : {}),
       };
     });
     for (const id of [...kept.keys()])
@@ -955,6 +1052,8 @@ export function layoutStations(input: {
 
 /** A feature as a stage stands it: the box it is drawn in, and where one goes through or by it. */
 export interface FeaturePlace extends Rect {
+  /** Where its feet stand: the people nearer the camera are drawn over it, those farther off under it. */
+  feet: number;
   /** Where someone goes in or out by it, or stands at it: the middle of its way, the ground there, and how big they are there beside the people (less than 1 farther back). */
   way: { x: number; y: number; k: number };
   /** Up in it: where a thing caught up in it rests (a kite in a tree's crown), and how high one who climbs it stands, their feet's y. */
@@ -1023,6 +1122,7 @@ export function placeFeature(input: {
       y: round(box.y),
       w: round(box.w),
       h: round(box.h),
+      feet: round(feet),
       way: {
         x: round(box.x + box.w / 2),
         y: round(feet),
@@ -1080,6 +1180,7 @@ export function placeFeature(input: {
     y: round(feet + vy * u),
     w: round(vw * u),
     h: round(vh * u),
+    feet: round(feet),
     way: {
       x: round(middle + wayX * u),
       y: round(feet + wayY * u),

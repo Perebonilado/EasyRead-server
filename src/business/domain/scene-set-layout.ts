@@ -52,7 +52,7 @@ import {
   setLine,
   shade,
 } from './scene-ink';
-import { STATION_SHARES } from './scene-layout';
+import { FLOOR_BACK_K, FLOOR_FRONT_K, STATION_SHARES } from './scene-layout';
 import type { PlaceKind, StoryPlace, StoryWorld } from './scene-story';
 
 // ── What a layout says ────────────────────────────────────────────────────
@@ -95,7 +95,43 @@ export const SET_VESSELS = ['bus', 'train', 'plane', 'boat'] as const;
 export type SetVessel = (typeof SET_VESSELS)[number];
 /** How far back a thing stands: against the back, between, or near (at the sides only). */
 export const SET_ROWS = ['back', 'middle', 'front'] as const;
-export type SetRow = (typeof SET_ROWS)[number];
+/**
+ * And the rows a layered set adds (studio-scenery-plan §3.1): far off on
+ * the horizon (a pyramid, a skyline's tower), and nearer than the people,
+ * between them and the camera (a fence post, a table's edge, a plant),
+ * low or at the sides.
+ */
+export const LAYER_ROWS = ['far', ...SET_ROWS, 'foreground'] as const;
+export type SetRow = (typeof LAYER_ROWS)[number];
+
+/**
+ * What a layout may scatter about the back and the edges of the ground
+ * to make a place busy (studio-scenery-plan §5.3): those of the plan's
+ * list the kit already draws. The rest (poles and wires, bins, laundry
+ * lines, generators, parked cars and okadas, water drums, bicycles,
+ * street signs, hydrants, clay pots, woodpiles) wait for their pieces.
+ */
+export const CLUTTER_KINDS = [
+  'chair',
+  'plant',
+  'bench',
+  'basket',
+  'cart',
+] as const;
+export type ClutterKind = (typeof CLUTTER_KINDS)[number];
+/** The most kinds of clutter a set scatters, and foreground things it places. */
+export const MAX_CLUTTER = 6;
+export const MAX_FOREGROUND = 4;
+/** How wide a set is drawn, in frames: one, or wider for a camera that pans (L4). */
+export const SET_WIDTHS = [1, 1.5, 2] as const;
+export type SetWidth = (typeof SET_WIDTHS)[number];
+
+/** Where a place's action happens: across, the feature it is at, and in the painter's words. */
+export interface SetFocal {
+  x: number;
+  feature?: string;
+  words: string;
+}
 
 /** What a layout may place: a piece the stage also draws, a piece of scenery, or a palm. */
 export type SetItemKind = FeatureKind | SceneryKind | 'palm';
@@ -140,6 +176,12 @@ export interface SetLayout {
   vesselColour: string | null;
   items: SetItem[];
   own: SetOwnItem[];
+  /** Where the action happens: kept clear of clutter, and what the wide shot centres on (L4). Absent on a layout written before. */
+  focal?: SetFocal;
+  /** What is scattered about the back and the edges, by code. Absent or empty, nothing. */
+  clutter?: ClutterKind[];
+  /** How wide the set is, in frames; absent, one. Drawn one frame wide until the camera pans (L4). */
+  width?: SetWidth;
 }
 
 /** The most things a set places, and the most the artist draws for it. */
@@ -238,6 +280,9 @@ const ITEM_WORDS: Record<string, SetItemKind> = {
   'pot plant': 'plant',
   'potted plant': 'plant',
   houseplant: 'plant',
+  plants: 'plant',
+  'potted plants': 'plant',
+  'plastic chair': 'chair',
   'toy box': 'toybox',
   'toy chest': 'toybox',
   chest: 'toybox',
@@ -254,6 +299,7 @@ const ITEM_WORDS: Record<string, SetItemKind> = {
   'mud hut': 'hut',
   huts: 'hut',
   handcart: 'cart',
+  carts: 'cart',
   barrow: 'cart',
   wheelbarrow: 'cart',
   hedge: 'bush',
@@ -455,6 +501,8 @@ const share = (said: unknown, otherwise = 0.5): number => {
 
 const rowOf = (said: unknown): SetRow => {
   const word = typeof said === 'string' ? said.toLowerCase() : '';
+  if (/foreground|camera|nearest|closest/u.test(word)) return 'foreground';
+  if (/\bfar\b|horizon|distan/u.test(word)) return 'far';
   if (/front|near|fore/u.test(word)) return 'front';
   if (/mid|between|centre|center/u.test(word)) return 'middle';
   if (typeof said === 'number')
@@ -544,7 +592,9 @@ export function plainLayout(
  */
 export function layoutOf(
   raw: unknown,
-  place: Pick<StoryPlace, 'kind' | 'name' | 'look'>,
+  place: Pick<StoryPlace, 'kind' | 'name' | 'look'> & {
+    features?: StoryPlace['features'];
+  },
 ): SetLayout {
   const plain = plainLayout(place);
   if (!raw || typeof raw !== 'object') return plain;
@@ -562,6 +612,12 @@ export function layoutOf(
     // asks to be drawn apart ("own") is drawn by the artist.
     if (!kindOf) continue;
     if (items.length >= MAX_SET_ITEMS) continue;
+    // A few things before the camera at most: the rest nearer than none.
+    if (
+      row === 'foreground' &&
+      items.filter((one) => one.row === 'foreground').length >= MAX_FOREGROUND
+    )
+      continue;
     const scale =
       typeof item.scale === 'number' && Number.isFinite(item.scale)
         ? item.scale
@@ -587,6 +643,20 @@ export function layoutOf(
   const ground = pick(SET_GROUNDS, GROUND_WORDS, said.ground) ?? plain.ground;
   const vessel =
     kind === 'vessel' ? (vesselOf(said.vessel) ?? plain.vessel ?? 'bus') : null;
+  const focal = focalOf(said.focal, place);
+  const clutter = [
+    ...new Set(
+      (Array.isArray(said.clutter) ? said.clutter : []).flatMap(
+        (one): ClutterKind[] => {
+          const kindOf = CLUTTER_KINDS.find((k) => k === itemKindOf(one));
+          return kindOf ? [kindOf] : [];
+        },
+      ),
+    ),
+  ].slice(0, MAX_CLUTTER);
+  const wide =
+    typeof said.width === 'string' ? parseFloat(said.width) : said.width;
+  const width = SET_WIDTHS.find((w) => w === wide);
   return {
     sky: pick(SET_SKIES, {}, said.sky) ?? 'day',
     weather:
@@ -613,6 +683,34 @@ export function layoutOf(
       : null,
     items,
     own,
+    ...(focal ? { focal } : {}),
+    ...(clutter.length ? { clutter } : {}),
+    ...(width !== undefined && width !== 1 ? { width } : {}),
+  };
+}
+
+/** Where the painter says the action happens: across, at a feature of the place, in their words; null for nothing sound. */
+function focalOf(
+  said: unknown,
+  place: Pick<StoryPlace, 'kind' | 'name' | 'look'> & {
+    features?: StoryPlace['features'];
+  },
+): SetFocal | null {
+  if (!said || typeof said !== 'object') return null;
+  const focal = said as Record<string, unknown>;
+  const words =
+    typeof focal.words === 'string'
+      ? focal.words.replace(/\s+/g, ' ').trim().slice(0, 80)
+      : '';
+  const id = typeof focal.feature === 'string' ? focal.feature.trim() : '';
+  const feature = (place.features ?? []).find(
+    (f) => f.id === id || f.name.toLowerCase() === id.toLowerCase(),
+  );
+  if (focal.x === undefined && !feature && !words) return null;
+  return {
+    x: share(focal.x, feature ? (SPOT_AT[feature.spot] ?? 0.5) : 0.5),
+    ...(feature ? { feature: feature.id } : {}),
+    words,
   };
 }
 
@@ -717,9 +815,11 @@ const EYE: Record<PlaceKind, number> = {
   vessel: FEET - 200 * UNIT - 0.05 * SET_H,
 };
 
-/** Where a row's feet stand, down the set. */
+/** Where a row's feet stand, down the set: far off on the horizon; before the camera, under the frame's foot. */
 export function rowFeet(kind: PlaceKind, row: SetRow): number {
   const floor = FLOOR_LINE[kind];
+  if (row === 'far') return floor + 3;
+  if (row === 'foreground') return SET_H + 60;
   const k =
     kind === 'outdoor'
       ? { back: 0.32, middle: 0.62, front: 1 }
@@ -1671,16 +1771,93 @@ function spreadOut(placings: Placing[]): void {
   }
 }
 
-/** A set built from its layout: its SVG, and its groups by their names. */
+/** The layers of a layered set, back to front (studio-scenery-plan §2). */
+export const SET_LAYER_IDS = [
+  'sky',
+  'far',
+  'back',
+  'ground',
+  'stage',
+  'floor',
+  'foreground',
+] as const;
+export type SetLayerId = (typeof SET_LAYER_IDS)[number];
+/**
+ * How each layer follows the camera, its depth factor f: a pan of Δx
+ * moves it f·Δx and a zoom of s scales it 1 + (s − 1)·f. 1 is the
+ * people's own plane; less is farther off, more is nearer the camera. The
+ * foreground's is its own, 1.2 to 1.55 by how near its things are.
+ */
+export const LAYER_DEPTH: Record<SetLayerId, number> = {
+  sky: 0.03,
+  far: 0.2,
+  back: 0.45,
+  ground: 0.72,
+  stage: 0.78,
+  floor: 1,
+  foreground: 1.2,
+};
+export const FOREGROUND_DEPTH: readonly [number, number] = [1.2, 1.55];
+
+/** One flat layer of a set: which, how it follows the camera, and its drawing at the set's width × 900. */
+export interface SetLayer {
+  id: SetLayerId;
+  depth: number;
+  svg: string;
+  /** On the floor with the people (its things stand among them): where their feet are, in the set's units, for the order they are drawn in. */
+  feet?: number;
+}
+
+/** The floor people stand on, in the set's units: its back and front edges, and the eye line its pinhole scales by (scaleAtFeet). */
+export interface SetFloor {
+  back: number;
+  front: number;
+  eye: number;
+}
+
+/** A set as layers (studio-scenery-plan §3.2): the layers, its width, its floor, and each thing before the camera, by its group. */
+export interface SetLayering {
+  layers: SetLayer[];
+  /** In the set's units: 1600, or wider for a camera that pans (L4). */
+  width: number;
+  floor: SetFloor;
+  fore: { id: string; box: [number, number, number, number] }[];
+}
+
+/** A set built from its layout: its SVG, its groups by their names, and its layers. */
 export interface BuiltSet {
   svg: string;
   parts: Record<string, string>;
+  layered: SetLayering;
 }
+
+/** The floor of a place of this kind, in the set's units (studio-scenery-plan §4.2): from where people stand farthest off to the front edge. */
+export function floorOf(kind: PlaceKind): SetFloor {
+  const eye = EYE[kind];
+  const at = (k: number) => Math.round((eye + k * (FEET - eye)) * 10) / 10;
+  return {
+    back: at(FLOOR_BACK_K),
+    front: Math.min(SET_H - 8, at(FLOOR_FRONT_K)),
+    eye: Math.round(eye * 10) / 10,
+  };
+}
+
+/** A layer's own drawing, in the set's frame and the kit's line. */
+const layerSvg = (inner: string, world = '') =>
+  `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${SET_W} ${SET_H}"${world}>` +
+  `<g stroke="${FIGURE_INK}" stroke-width="${INK_W}" stroke-linejoin="round" stroke-linecap="round">${inner}</g></svg>`;
 
 /**
  * A place drawn from its layout, at 1600 × 900. `own` are the drawings
  * the artist made of the things the list has no piece for, by their
  * names; one missing is left out.
+ *
+ * Drawn twice from the same pieces: flat, as one picture (for a book, an
+ * older player, and the stills), and as the layers the player moves at
+ * their own depths (studio-scenery-plan §2). A layout written before the
+ * layers (back, middle and front rows) is drawn flat exactly as it always
+ * was; its back row is the back layer, its middle row the stage, and its
+ * front row stands on the floor with the people.
  */
 export function buildSet(
   layout: SetLayout,
@@ -1694,28 +1871,59 @@ export function buildSet(
   const { staged, drawn } = featuresOf(place);
   const parts: Record<string, string> = { ground: 'ground' };
   const out: string[] = [];
+  const layers: Record<SetLayerId, string[]> = {
+    sky: [],
+    far: [],
+    back: [],
+    ground: [],
+    stage: [],
+    floor: [],
+    foreground: [],
+  };
   const SIDE = 110;
   const DROP = 70;
+  /** The ground's own colour, far off: what shows wherever the layers part as the camera moves. */
+  const groundColour =
+    layout.groundColour ??
+    (kind === 'vessel' && layout.vessel !== 'boat' && layout.ground === 'stone'
+      ? VESSEL_FLOOR
+      : layout.weather === 'snow' && layout.ground === 'grass'
+        ? GROUND.snow
+        : GROUND[layout.ground]);
+  const underlay = flatRect(
+    -20,
+    floor - 2,
+    SET_W + 40,
+    SET_H - floor + 22,
+    groundColour,
+  );
 
   // Behind everything: the sky and what stands behind the ground, a
   // room's walls, or what a vessel's windows look out on and its side.
   if (kind === 'outdoor') {
-    out.push(`<g id="sky">${drawSky(layout, floor, random)}</g>`);
+    const sky = `<g id="sky">${drawSky(layout, floor, random)}</g>`;
+    out.push(sky);
+    layers.sky.push(sky, underlay);
     const back = drawBackdrop(layout, floor, random);
-    if (back) out.push(`<g id="backdrop">${back}</g>`);
+    if (back) {
+      out.push(`<g id="backdrop">${back}</g>`);
+      layers.far.push(underlay, `<g id="backdrop">${back}</g>`);
+    }
   } else if (kind === 'indoor') {
     // Walls a little paler than their colour, so the people stand out.
-    out.push(
-      `<g id="walls">${drawRoom(layout.walls ? shade(layout.walls, 1.4) : SET_COLOURS.walls, floor, SIDE, DROP)}</g>`,
-    );
+    const walls = `<g id="walls">${drawRoom(layout.walls ? shade(layout.walls, 1.4) : SET_COLOURS.walls, floor, SIDE, DROP)}</g>`;
+    out.push(walls);
+    layers.back.push(walls);
   } else {
     const vessel = layout.vessel ?? 'bus';
     const look = VESSEL_LOOK[vessel];
-    out.push(`<g id="outside">${drawOutside(vessel, floor, random)}</g>`);
+    const outside = `<g id="outside">${drawOutside(vessel, floor, random)}</g>`;
+    out.push(outside);
+    layers.far.push(outside);
     parts.outside = 'outside';
-    out.push(
-      `<g id="side">${drawVesselSide(vessel, layout.vesselColour ?? look.colour, layout.walls ? shade(layout.walls, 1.4) : look.walls, floor)}</g>`,
-    );
+    const side = `<g id="side">${drawVesselSide(vessel, layout.vesselColour ?? look.colour, layout.walls ? shade(layout.walls, 1.4) : look.walls, floor)}</g>`;
+    out.push(side);
+    layers.back.push(side);
   }
 
   // Where the things stand: their rows, their scale, and out of the way
@@ -1731,7 +1939,7 @@ export function buildSet(
       item.kind === 'stall' ||
       item.kind === 'crate' ||
       item.kind === 'table');
-  for (let item of layout.items) {
+  for (let item of [...layout.items, ...clutterOf(layout, place)]) {
     // A window or a door is a room's, on its wall; a vessel has its own.
     if ((item.kind === 'window' || item.kind === 'door') && kind !== 'indoor')
       continue;
@@ -1758,11 +1966,14 @@ export function buildSet(
     }
     const isFlat = (FLAT as readonly string[]).includes(item.kind);
     // In a vessel its aisle is open: what stands is along its far side.
+    // Far off is out of doors only: in a room, it is against its wall.
     let row: SetRow = isFlat
       ? 'middle'
       : kind === 'vessel' && item.row === 'middle'
         ? 'back'
-        : item.row;
+        : kind !== 'outdoor' && item.row === 'far'
+          ? 'back'
+          : item.row;
     let x = item.x;
     const s0 = scaleAtFeet(kind, rowFeet(kind, row)) * item.scale;
     const half = (vw * s0) / 2 / SET_W;
@@ -1788,17 +1999,28 @@ export function buildSet(
     // Clear of what the stage draws itself, nearer than the back.
     if (
       !isFlat &&
-      row !== 'back' &&
+      (row === 'middle' || row === 'front') &&
       clear.some((c) => Math.abs(c - x) < 0.1 + half)
     )
       row = 'back';
     const y = rowFeet(kind, row);
+    let s = scaleAtFeet(kind, y) * item.scale;
+    // Before the camera, low or at the sides (§8.4): at most the bottom
+    // three tenths of the frame, else in its outer eighth.
+    if (row === 'foreground' && x > 0.12 && x < 0.88) {
+      const low = SET_H * 0.7;
+      const fits = (y - low) / Math.max(1, -vy);
+      if (y + vy * s < low) {
+        if (fits >= s * 0.6) s = fits;
+        else x = x < 0.5 ? 0.05 : 0.95;
+      }
+    }
     placings.push({
       piece,
       kind: item.kind,
       x: x * SET_W,
       y,
-      s: scaleAtFeet(kind, y) * item.scale,
+      s,
       band: isFlat ? 'flat' : row,
       ...(item.flip ? { flip: true } : {}),
       ...(piece.lives ? { lives: piece.lives } : {}),
@@ -1809,7 +2031,10 @@ export function buildSet(
   for (const item of layout.own) {
     const piece = own[item.name];
     if (!piece) continue;
-    const row: SetRow = item.row === 'front' ? 'back' : item.row;
+    const row: SetRow =
+      item.row === 'front' || item.row === 'foreground' || item.row === 'far'
+        ? 'back'
+        : item.row;
     const y = rowFeet(kind, row);
     const s = scaleAtFeet(kind, y);
     let x = item.x;
@@ -1898,7 +2123,16 @@ export function buildSet(
         row: one.band,
       },
     });
-  out.push(...placings.filter((one) => one.hang).map(drawnAt));
+  // Far off on the horizon, before the ground's far edge.
+  const far = placings
+    .filter((one) => one.band === 'far')
+    .sort((a, b) => a.y - b.y)
+    .map(drawnAt);
+  out.push(...far);
+  layers.far.push(...far);
+  const hanging = placings.filter((one) => one.hang).map(drawnAt);
+  out.push(...hanging);
+  layers.back.push(...hanging);
   // The ground or floor, with what lies flat on it: exactly what people stand on.
   const floorLayout =
     kind === 'vessel' &&
@@ -1913,32 +2147,71 @@ export function buildSet(
       : kind === 'indoor'
         ? drawFloor(layout, floor, SIDE, DROP)
         : drawFloor(floorLayout, floor, -20, 0);
-  out.push(
-    `<g id="ground">${ground}${placings
-      .filter((one) => one.band === 'flat')
-      .map(drawnAt)
-      .join('')}</g>`,
+  const flats = placings
+    .filter((one) => one.band === 'flat')
+    .map(drawnAt)
+    .join('');
+  out.push(`<g id="ground">${ground}${flats}</g>`);
+  // As layers, the ground is cut where the back row stands: its far part
+  // lies under the back row, in the back layer, so the ground nearer the
+  // camera never covers their feet as the layers part; and it runs on a
+  // little under the ground's near part, so no seam opens between them.
+  const seam = rowFeet(kind, 'back') + 8;
+  // Each tuft of grass answers the world on the one layer it is seen on.
+  layers.back.push(`<g>${tuftsWhere(ground, (y) => y < seam)}</g>`);
+  layers.ground.push(
+    `<defs><clipPath id="near-ground"><rect x="-20" y="${r1(seam)}" width="${SET_W + 40}" height="${r1(SET_H - seam + 40)}"/></clipPath></defs>` +
+      `<g clip-path="url(#near-ground)"><g id="ground">${tuftsWhere(ground, (y) => y >= seam)}${flats}</g></g>`,
   );
 
   // Back to front; what someone could stand behind together, as "props".
   const standing = placings
-    .filter((one) => !one.hang && one.band !== 'flat')
+    .filter(
+      (one) =>
+        !one.hang &&
+        one.band !== 'flat' &&
+        one.band !== 'far' &&
+        one.band !== 'foreground',
+    )
     .sort((a, b) => a.y - b.y);
   const props = standing.filter((one) => one.counter);
   const rest = standing.filter((one) => !one.counter);
-  out.push(...rest.filter((one) => one.band === 'back').map(drawnAt));
+  const backRow = rest.filter((one) => one.band === 'back').map(drawnAt);
+  out.push(...backRow);
+  layers.back.push(...backRow);
   if (props.length) {
-    out.push(`<g id="props">${props.map(drawnAt).join('')}</g>`);
+    const group = `<g id="props">${props.map(drawnAt).join('')}</g>`;
+    out.push(group);
+    layers.stage.push(group);
     parts.props = 'props';
   }
-  out.push(...rest.filter((one) => one.band !== 'back').map(drawnAt));
+  for (const one of rest.filter((one) => one.band !== 'back')) {
+    const drawnOne = drawnAt(one);
+    out.push(drawnOne);
+    // On the floor among the people, with its contact shadow, as theirs.
+    if (one.band === 'front') layers.floor.push(contactShadow(one), drawnOne);
+    else layers.stage.push(drawnOne);
+  }
 
-  // Before the people's legs, where they are in it.
+  // Before the people's legs, where they are in it: over them, as the
+  // stage draws it from the flat picture (it moves with them).
   if (place.front && place.stand === 'in') {
     out.push(
       `<g id="front">${drawFront(place.front, layout.vesselColour)}</g>`,
     );
     parts.front = 'front';
+  }
+
+  // Before the camera: each its own group, so one can be faded while a
+  // face behind it speaks.
+  const fore = placings
+    .filter((one) => one.band === 'foreground')
+    .sort((a, b) => a.y - b.y || a.x - b.x)
+    .map((one, k) => ({ one, id: `fg-${k + 1}` }));
+  for (const { one, id } of fore) {
+    const drawnOne = drawnAt({ ...one, id });
+    out.push(drawnOne);
+    layers.foreground.push(drawnOne);
   }
 
   // What the stage needs to know of the place to make it answer the
@@ -1948,5 +2221,114 @@ export function buildSet(
   const svg =
     `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${SET_W} ${SET_H}"${world}>` +
     `<g stroke="${FIGURE_INK}" stroke-width="${INK_W}" stroke-linejoin="round" stroke-linecap="round">${out.join('')}</g></svg>`;
-  return { svg, parts };
+  // Nearer, the larger its things are drawn.
+  const nearness = fore.length
+    ? Math.min(
+        1,
+        Math.max(
+          0,
+          (fore.reduce(
+            (sum, { one }) => sum + one.s / scaleAtFeet(kind, one.y),
+            0,
+          ) /
+            fore.length -
+            0.6) /
+            0.9,
+        ),
+      )
+    : 0;
+  const depthOf = (id: SetLayerId) =>
+    id === 'foreground'
+      ? Math.round(
+          (FOREGROUND_DEPTH[0] +
+            (FOREGROUND_DEPTH[1] - FOREGROUND_DEPTH[0]) * nearness) *
+            100,
+        ) / 100
+      : LAYER_DEPTH[id];
+  return {
+    svg,
+    parts,
+    layered: {
+      layers: SET_LAYER_IDS.flatMap((id): SetLayer[] =>
+        layers[id].length || id === 'ground'
+          ? [
+              {
+                id,
+                depth: depthOf(id),
+                // Each says what place it is of, as the flat one does, and
+                // which layer it is, for the stage's world to answer in it.
+                svg: layerSvg(
+                  layers[id].join(''),
+                  `${world} data-layer="${id}"`,
+                ),
+                ...(id === 'floor' ? { feet: rowFeet(kind, 'front') } : {}),
+              },
+            ]
+          : [],
+      ),
+      width: SET_W,
+      floor: floorOf(kind),
+      fore: fore.map(({ one, id }) => {
+        const [a, b] = reachOf(one);
+        const [, vy, , vh] = one.piece.viewBox;
+        return {
+          id,
+          box: [r1(a), r1(one.y + vy * one.s), r1(b - a), r1(vh * one.s)] as [
+            number,
+            number,
+            number,
+            number,
+          ],
+        };
+      }),
+    },
+  };
+}
+
+/**
+ * The ground with only the tufts of grass whose roots `keep` tagged to
+ * answer the world: the rest drawn as they are, untagged, so a tuft cut
+ * out of a layer's sight never sways unseen.
+ */
+function tuftsWhere(ground: string, keep: (y: number) => boolean): string {
+  return ground.replace(
+    /<g data-react="[^"]*" data-kind="grass"[^>]*? data-pivot="([-\d.]+) ([-\d.]+)"[^>]*>/gu,
+    (tag, _x: string, y: string) => (keep(Number(y)) ? tag : '<g>'),
+  );
+}
+
+/** The flat shadow a thing on the floor casts where it stands: one tone, the ink's at 18% (studio-scenery-plan §4.2). */
+function contactShadow(one: Placing): string {
+  const [a, b] = reachOf(one);
+  const rx = Math.max(8, (b - a) * 0.36);
+  return `<ellipse cx="${r1((a + b) / 2)}" cy="${r1(one.y)}" rx="${r1(rx)}" ry="${r1(rx * 0.14)}" fill="${FIGURE_INK}" fill-opacity="0.18" stroke="none"/>`;
+}
+
+/**
+ * What a layout scatters about its place (studio-scenery-plan §5.3), by
+ * code and seeded so it is the same every time: every other kind along
+ * the back, clear of where the action is; the rest at the edges of the
+ * ground, where no one stands.
+ */
+function clutterOf(layout: SetLayout, place: StoryPlace): SetItem[] {
+  if (!layout.clutter?.length) return [];
+  const random = seeded(`${place.id}:${place.name}:clutter`);
+  const focal = layout.focal?.x ?? 0.5;
+  return layout.clutter.map((kind, k): SetItem => {
+    const edge = k % 2 === 1;
+    let x = 0.5;
+    if (edge) x = k % 4 === 1 ? 0.03 + random() * 0.06 : 0.91 + random() * 0.06;
+    else
+      for (let tries = 0; tries < 12; tries += 1) {
+        x = 0.05 + random() * 0.9;
+        if (Math.abs(x - focal) >= 0.2) break;
+      }
+    return {
+      kind,
+      x: Math.round(x * 1000) / 1000,
+      row: edge ? 'middle' : 'back',
+      scale: Math.round((0.8 + random() * 0.2) * 100) / 100,
+      colour: null,
+    };
+  });
 }

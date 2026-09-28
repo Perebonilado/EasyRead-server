@@ -133,6 +133,7 @@ import { DANGLE_RIG } from '../../business/domain/scene-dangles';
 import { DRAWN } from '../../business/domain/scene-own';
 import type { OwnPropDrawing } from '../../business/domain/scene-props';
 import type { SetPiece } from '../../business/domain/scene-set-pieces';
+import { buildSet } from '../../business/domain/scene-set-layout';
 import { RIG_VERSION, rigSheet } from '../../business/domain/scene-sheet-rig';
 import { withMouths } from '../../business/domain/studio/studio-audit';
 import { withFace } from '../../business/domain/scene-sheet-face';
@@ -350,6 +351,24 @@ type WriteAsk = Omit<
   Parameters<LlmGatewayPort['sceneScript']>[0],
   'previous' | 'problems'
 >;
+
+/**
+ * A set built by code before it was kept as layers, as layers too: built
+ * again from its own layout, with nothing asked of a model, when nothing
+ * in it was drawn apart by the artist (whose drawings are not kept with
+ * it). Its flat picture stays as it was kept.
+ */
+function withLayers(
+  set: SetSheet | undefined,
+  place: StoryPlace,
+): SetSheet | undefined {
+  if (!set || set.layered || !set.layout || set.layout.own.length) return set;
+  try {
+    return { ...set, layered: buildSet(set.layout, place).layered };
+  } catch {
+    return set;
+  }
+}
 
 @Injectable()
 export class SceneProcessor {
@@ -817,6 +836,7 @@ export class SceneProcessor {
       key: story?.setsKey ?? null,
     });
     this.logAudit(who, audit);
+    for (const note of composed.staging) this.logger.log(`${who}: ${note}`);
     const { sceneKey, thumbKey } = await this.store(base, scene, who);
     return {
       fit: 'good',
@@ -926,6 +946,7 @@ export class SceneProcessor {
       key: story.setsKey,
     });
     this.logAudit(who, composed.audit);
+    for (const note of composed.staging) this.logger.log(`${who}: ${note}`);
     // Every line said on the stage moves its speaker's mouth.
     const { scene, mended: mouths } = withMouths(composed.scene);
     for (const note of mouths) this.logger.log(`${who}: ${note}`);
@@ -1631,7 +1652,11 @@ export class SceneProcessor {
       out.set(
         thing.id,
         set
-          ? { ...set.drawing, ...(set.ground ? { ground: set.ground } : {}) }
+          ? {
+              ...set.drawing,
+              ...(set.ground ? { ground: set.ground } : {}),
+              ...(set.layered ? { layered: set.layered } : {}),
+            }
           : null,
       );
     });
@@ -2546,7 +2571,7 @@ export class SceneProcessor {
           ),
         );
       try {
-        const kept = (await this.setsAt(key))[place.id];
+        const kept = withLayers((await this.setsAt(key))[place.id], place);
         if (kept?.ground) return kept;
         if (kept) {
           // Kept before its ground was measured: measured now, once, and

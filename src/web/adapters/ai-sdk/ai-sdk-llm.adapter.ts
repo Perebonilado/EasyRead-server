@@ -78,6 +78,7 @@ import {
   sceneStorySchema,
   sketchJudgeSchema,
   drawingJudgeSchema,
+  setLayoutSchema,
   lectureExtraSchema,
   spokenQuizSchema,
   lectureOutlineSchema,
@@ -1167,6 +1168,45 @@ export class AiSdkLlmAdapter implements LlmGatewayPort, OnModuleInit {
     }
     return {
       value: result.text,
+      usage: this.usage(ref, result.usage, started),
+    };
+  }
+
+  async setLayout(input: {
+    brief: string;
+    notes?: string[];
+    previous?: string;
+    temperature?: number;
+    hint?: string;
+  }): Promise<LlmResult<Record<string, unknown>>> {
+    const started = Date.now();
+    const { generateObject } = await this.registry.modules();
+    const { model, ref } = await this.registry.languageModel('set_paint');
+    const prompt = [
+      input.brief,
+      ...(input.hint ? [`Lay it out ${input.hint}.`] : []),
+      ...(input.previous ? [`Your layout before:\n${input.previous}`] : []),
+      ...(input.notes?.length
+        ? [
+            `${input.previous ? 'Change it so' : 'Mind these'}:\n- ${input.notes.join('\n- ')}`,
+          ]
+        : []),
+    ].join('\n\n');
+    const result = await this.againIfMisshapen(() =>
+      generateObject({
+        model,
+        schema: setLayoutSchema,
+        system: PROMPTS.setLayout,
+        prompt,
+        maxRetries: this.maxRetries(),
+        ...(input.temperature !== undefined
+          ? { temperature: input.temperature }
+          : {}),
+        ...this.writerThinking(ref, 'SET_LAYOUT_THINKING', 'off'),
+      }),
+    );
+    return {
+      value: result.object,
       usage: this.usage(ref, result.usage, started),
     };
   }

@@ -1,7 +1,10 @@
 import type { DrawingVerdict } from '../../business/domain/drawing-score';
 import { styleReport } from '../../business/domain/scene-polish';
 import type { LlmGatewayPort, LlmUsage } from '../../business/ports/llm.port';
-import type { StoryCharacter } from '../../business/domain/scene-story';
+import type {
+  StoryCharacter,
+  StoryPlace,
+} from '../../business/domain/scene-story';
 import {
   SceneArtist,
   TAKE_TEMPERATURE,
@@ -283,5 +286,88 @@ describe('a new character, drawn three ways at once', () => {
       /The change the maker asked for does not show yet: "a red collar"/,
     );
     expect(again!.others).toEqual([]);
+  }, 120_000);
+});
+
+describe('a place built from its layout', () => {
+  const bedroom: StoryPlace = {
+    id: 'bedroom',
+    name: "Tobi's bedroom",
+    aliases: [],
+    look: 'a bedroom with a bed and a rug',
+    firstPage: 1,
+    sound: null,
+    kind: 'indoor',
+    stand: 'on',
+    front: null,
+    features: [],
+  };
+
+  /** A stub painter who lays out a room, and a judge who scores in turn. */
+  function painter(scores: number[], layouts: unknown[]) {
+    const built = stub(scores);
+    const laid: Parameters<LlmGatewayPort['setLayout']>[0][] = [];
+    (built.artist as unknown as { llm: { setLayout: unknown } }).llm.setLayout =
+      (input: Parameters<LlmGatewayPort['setLayout']>[0]) => {
+        laid.push(input);
+        return Promise.resolve({
+          value: layouts[Math.min(laid.length - 1, layouts.length - 1)],
+          usage: usage('test:painter'),
+        });
+      };
+    return { ...built, laid };
+  }
+
+  const room = {
+    ground: 'wood',
+    walls: 'cream',
+    items: [
+      { kind: 'bed', x: 0.2, row: 'back', scale: 1, colour: null },
+      { kind: 'rug', x: 0.5, row: 'middle', scale: 1, colour: 'pink' },
+    ],
+    own: [],
+  };
+
+  it('asks a Studio set’s painter for a layout, builds it by code, reads its ground from its own group, and keeps the layout', async () => {
+    const { artist, laid, asked, recorded } = painter([9], [room]);
+    const set = await artist.paintSet(bedroom, 'Tobi', null, 'test', null, {
+      takes: 1,
+    });
+    expect(set).not.toBeNull();
+    expect(asked).toHaveLength(0);
+    expect(laid).toHaveLength(1);
+    expect(laid[0].brief).toContain("Tobi's bedroom");
+    expect(set!.layout?.items.map((one) => one.kind)).toEqual(['bed', 'rug']);
+    expect(set!.ground?.source).toBe('group');
+    expect(set!.drawing.parts.ground).toBe('ground');
+    expect(recorded).toEqual(['set_paint', 'drawing_judge']);
+  }, 120_000);
+
+  it('sends its own layout back with the notes when it falls short, and keeps the best', async () => {
+    const empty = { ground: 'wood', items: [], own: [] };
+    const { artist, laid } = painter([5, 9], [empty, room]);
+    const set = await artist.paintSet(bedroom, 'Tobi', null, 'test', null, {
+      takes: 1,
+    });
+    expect(laid).toHaveLength(2);
+    expect(JSON.parse(laid[1].previous!)).toMatchObject({ items: [] });
+    expect(laid[1].notes?.join(' ')).toMatch(/nothing was placed/);
+    expect(set!.layout?.items).toHaveLength(2);
+  }, 120_000);
+
+  it('still paints a book’s place whole, and a Studio set whole when asked', async () => {
+    const { artist, laid } = painter([9], [room]);
+    const { features: _none, ...book } = bedroom;
+    void _none;
+    await artist.paintSet(book, 'Tobi', null, 'test', null, {
+      takes: 1,
+      see: false,
+    });
+    await artist.paintSet(bedroom, 'Tobi', null, 'test', null, {
+      takes: 1,
+      see: false,
+      painter: 'artist',
+    });
+    expect(laid).toHaveLength(0);
   }, 120_000);
 });

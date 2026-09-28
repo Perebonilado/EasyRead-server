@@ -4,5 +4,6 @@
   "name": "the bus",
   "book": "Tobi and Friends",
   "place": "vessel",
-  "look": "the inside of a yellow city bus with rows of seats, windows along the side and hand straps"
+  "look": "the inside of a yellow city bus with rows of seats, windows along the side and hand straps",
+  "drawer": "kit"
 }

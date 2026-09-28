@@ -47,10 +47,20 @@ import { rasterise, type InkBox } from '../../business/domain/scene-raster';
 import {
   SET_VERSION,
   drawnAlike,
+  measureOwnFeature,
   measureSheet,
+  ownFeatureScale,
   type CharacterSheet,
   type SetSheet,
 } from '../../business/domain/scene-sheet';
+import {
+  buildSet,
+  describeLayout,
+  layoutBrief,
+  layoutOf,
+  type SetLayout,
+} from '../../business/domain/scene-set-layout';
+import type { SetPiece } from '../../business/domain/scene-set-pieces';
 import { rigSheet } from '../../business/domain/scene-sheet-rig';
 import {
   MOUTH_MARK,
@@ -62,7 +72,9 @@ import {
   type SheetFace,
 } from '../../business/domain/scene-sheet-face';
 import {
+  OWN_FEATURE_CANVAS,
   SET_CANVAS,
+  ownFeatureBrief,
   setThing,
   sheetThing,
   type PlaceKind,
@@ -119,6 +131,12 @@ export const FRAMINGS: Record<
   ],
 };
 
+/** How each take of a place's layout is asked for: plainly, and full of what makes it that place. */
+export const LAYOUT_HINTS = [
+  'plainly, with the things it must have',
+  'as a picture-book illustrator would, full of the things that make it that place',
+];
+
 /**
  * A drawing as the artist is shown it to draw from: as still as it was
  * drawn, with none of the rig's motion (and no mouth, where code draws
@@ -167,6 +185,12 @@ export interface ArtistOptions {
   see?: boolean;
   /** Revisions after a take's first drawing, at most. */
   revisions?: number;
+  /**
+   * How a place is made: built by code from a layout the painter writes
+   * (studio-drawings-plan §7, D1), or painted whole by the artist. A
+   * Studio set is built, a book's page painted, unless this says.
+   */
+  painter?: 'layout' | 'artist';
 }
 
 /** A character drawn, rigged, what the rig could not join, and the other takes' best. */
@@ -477,6 +501,10 @@ export class SceneArtist {
     world: StoryWorld | null = null,
     options: ArtistOptions = {},
   ): Promise<SetSheet | null> {
+    const painter =
+      options.painter ?? (place.features !== undefined ? 'layout' : 'artist');
+    if (painter === 'layout')
+      return this.buildSet(place, bookTitle, documentId, who, world, options);
     const thing = setThing(place, bookTitle, world);
     const takes = Math.max(1, options.takes ?? TAKES.set);
     const see = options.see ?? true;
@@ -565,6 +593,153 @@ export class SceneArtist {
       version: SET_VERSION,
       drawing,
       ...(ground ? { ground } : {}),
+    };
+  }
+
+  /**
+   * A place built by code from its layout (studio-drawings-plan §7, D1):
+   * the painter writes what it has and where (scene-set-layout), code
+   * draws it in the kit's hand, gated as a set, its ground read exactly
+   * from its own group, and judged from its picture; a take that falls
+   * short goes back to the painter with its own layout and the notes.
+   * What the kit has no piece for is drawn once by the artist, as one of
+   * the show's own features, and placed like a piece. The best is kept,
+   * with its layout, so it can be built again.
+   */
+  private async buildSet(
+    place: StoryPlace,
+    bookTitle: string,
+    documentId: string | null,
+    who: string,
+    world: StoryWorld | null,
+    options: ArtistOptions,
+  ): Promise<SetSheet | null> {
+    const thing = setThing(place, bookTitle, world);
+    const brief = layoutBrief(place, bookTitle, world);
+    const takes = Math.max(1, options.takes ?? TAKES.set);
+    const see = options.see ?? true;
+    const revisions = Math.max(0, options.revisions ?? REVISIONS);
+    const [low, high] = HORIZON[place.kind ?? 'outdoor'];
+    // Each thing the kit has no piece for, drawn once however many takes
+    // and rounds ask for it.
+    const drawnOwn = new Map<string, Promise<SetPiece | null>>();
+    const ownPiece = (name: string): Promise<SetPiece | null> => {
+      const key = name.toLowerCase();
+      let got = drawnOwn.get(key);
+      if (!got) {
+        const id = `set-${key.replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'thing'}`;
+        got = this.drawOwn(
+          ownFeatureBrief({ id, name, opens: false }, bookTitle, world),
+          OWN_FEATURE_CANVAS,
+          (drawing) => measureOwnFeature(drawing, id, null),
+          bookTitle,
+          documentId,
+          `${who}: ${place.name}`,
+          undefined,
+          {
+            takes: 1,
+            see,
+            revisions: Math.min(1, revisions),
+            line: (ink) => KIT_LINE / ownFeatureScale(ink, null),
+            about: { kind: 'feature', brief: `a ${name}` },
+          },
+        ).catch(() => null);
+        drawnOwn.set(key, got);
+      }
+      return got;
+    };
+    type Built = {
+      drawing: GatedDrawing;
+      ground: SetGround | null;
+      layout: SetLayout;
+    };
+    const make = async (
+      reply: string,
+    ): Promise<Round<Built> | { notes: string[] }> => {
+      let raw: unknown;
+      try {
+        raw = JSON.parse(reply);
+      } catch {
+        return {
+          notes: ['Answer with the layout in the JSON shape asked for.'],
+        };
+      }
+      const layout = layoutOf(raw, place);
+      const own: Record<string, SetPiece> = {};
+      for (const item of layout.own) {
+        const piece = await ownPiece(item.name);
+        if (piece) own[item.name] = piece;
+      }
+      const built = buildSet(layout, place, own);
+      const gated = await gateDrawing(built.svg, thing, { backdrop: true });
+      if (!gated.drawing)
+        return { notes: [`It could not be built: ${gated.notes.join(' ')}`] };
+      const drawing = gated.drawing;
+      const ground = await measureGround(drawing);
+      const faults: string[] = [];
+      if (!layout.items.length && !layout.own.length)
+        faults.push(
+          `Place the things that make it ${place.name}: nothing was placed.`,
+        );
+      if (ground && ground.source === 'convention')
+        faults.push('Its ground could not be read: give it a ground.');
+      else if (ground && (ground.horizon < low || ground.horizon > high))
+        faults.push(
+          `Its open ground reaches ${Math.round(ground.horizon * 100)}% of the way down before something stands on it: move the things at the back of it farther back or to the sides.`,
+        );
+      return {
+        value: { drawing, ground, layout },
+        // What goes back to be revised is the layout itself.
+        svg: JSON.stringify(raw),
+        faults,
+        png: see ? await this.picture(drawing.svg, JUDGE_SET_PX) : null,
+      };
+    };
+    const about = {
+      kind: 'place' as const,
+      brief: `${place.name}${place.look ? `: ${place.look}` : ''}`,
+    };
+    const results = await Promise.all(
+      Array.from({ length: takes }, (_, k) =>
+        this.take<Built>(
+          `${who}: ${place.name}${takes > 1 ? ` (take ${k + 1})` : ''}`,
+          async ({ notes, previous }) => {
+            const made = await this.llm.setLayout({
+              brief,
+              notes,
+              ...(takes > 1 && LAYOUT_HINTS[k]
+                ? { hint: LAYOUT_HINTS[k] }
+                : {}),
+              ...(takes > 1 ? { temperature: TAKE_TEMPERATURE } : {}),
+              ...(previous ? { previous } : {}),
+            });
+            await this.record(documentId, 'set_paint', made.usage);
+            return JSON.stringify(made.value);
+          },
+          make,
+          see ? (png) => this.judge(png, about, documentId, who) : null,
+          revisions,
+        ),
+      ),
+    );
+    const best = ranked(results)[0];
+    if (!best) {
+      this.logger.warn(`${who}: ${place.name} could not be built`);
+      return null;
+    }
+    const { drawing, ground, layout } = best.value;
+    this.logger.log(
+      `${who}: ${place.name} built from its layout (${describeLayout(layout)})${best.verdict ? `, judged ${best.score}: ${best.verdict.sees}` : ''}`,
+    );
+    if (!ground)
+      this.logger.warn(
+        `${who}: ${place.name}'s ground could not be measured; measured again next time`,
+      );
+    return {
+      version: SET_VERSION,
+      drawing,
+      ...(ground ? { ground } : {}),
+      layout,
     };
   }
 

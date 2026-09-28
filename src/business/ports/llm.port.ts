@@ -710,6 +710,21 @@ export interface LlmGatewayPort {
     previous?: string;
   }): Promise<LlmResult<string>>;
 
+  /**
+   * A place's layout, not its painting: its sky, its ground, what stands
+   * behind, and each thing placed, as words code reads leniently and
+   * draws (scene-set-layout), on the set painter's task (set_paint).
+   * `previous` is its own layout before, as JSON, to revise as the notes
+   * say.
+   */
+  setLayout(input: {
+    brief: string;
+    notes?: string[];
+    previous?: string;
+    temperature?: number;
+    hint?: string;
+  }): Promise<LlmResult<Record<string, unknown>>>;
+
   lectureSketch(input: {
     topicTitle: string;
     shows: string;

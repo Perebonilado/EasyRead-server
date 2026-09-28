@@ -4,5 +4,6 @@
   "name": "the classroom",
   "book": "Tobi and Friends",
   "place": "indoor",
-  "look": "a primary school classroom with a whiteboard, desks and a bookshelf"
+  "look": "a primary school classroom with a whiteboard, desks and a bookshelf",
+  "drawer": "kit"
 }

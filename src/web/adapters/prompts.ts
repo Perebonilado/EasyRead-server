@@ -1,4 +1,13 @@
 import { houseSamples, paletteWords } from '../../business/domain/scene-house';
+import {
+  MAX_SET_ITEMS,
+  SET_BACKDROPS,
+  SET_GROUNDS,
+  SET_ITEM_KINDS,
+  SET_SKIES,
+  SET_VESSELS,
+  SET_WEATHERS,
+} from '../../business/domain/scene-set-layout';
 
 /**
  * Prompts, kept in one file and versioned with the code.
@@ -2619,6 +2628,58 @@ export const PROMPTS = {
       'xmlns="http://www.w3.org/2000/svg" and the viewBox given, nothing',
       'before or after it. Keep it compact: no comments or metadata, and',
       'coordinates with at most one decimal place.',
+    ].join(' '),
+  ].join('\n\n'),
+
+  setLayout: [
+    [
+      'You are the set designer for an animated story. You lay out one',
+      'place at a time: not a drawing, but what it has and where, which',
+      "code then draws in the style of the story's cartoon people. The",
+      'place is shown behind the characters, who stand in the middle of',
+      'its open ground, near the front.',
+    ].join(' '),
+    [
+      `Answer in JSON. "sky": one of ${SET_SKIES.join(', ')}, day unless the`,
+      'place is only ever seen at another time (the stage lights each page',
+      'for its own time); "weather": one',
+      `of ${SET_WEATHERS.join(', ')} (rain and wind are the stage's own);`,
+      `"ground": what people stand on, one of ${SET_GROUNDS.join(', ')};`,
+      '"groundColour": a colour word or null for its usual; "backdrop":',
+      'out of doors, what stands behind the open ground, one of',
+      `${SET_BACKDROPS.join(', ')}; "walls": a room's or a vessel's inside`,
+      'colour, a word, or null; "vessel": inside a vessel, one of',
+      `${SET_VESSELS.join(', ')}, else null; "vesselColour": its colour`,
+      '(a yellow bus: yellow), or null.',
+    ].join(' '),
+    [
+      `"items": up to ${MAX_SET_ITEMS} things placed, each`,
+      '{ "kind", "x", "row", "scale", "colour" }. "kind" is one of:',
+      `${SET_ITEM_KINDS.join(', ')}. "x" is where its middle stands, 0 at`,
+      'the left edge to 1 at the right. "row" is "back" (against the back',
+      'wall, or the far edge of the open ground), "middle" or "front" (the',
+      'front only for a tall thing at a side, a tree or a palm framing the',
+      'picture). "scale" is 0.6 to',
+      '1.5, 1 for its usual size. "colour" is a colour word or null.',
+      'Things that hang on a wall (shelf, whiteboard, blackboard,',
+      'noticeboard, curtains, picture, clock, bunting) go on the back wall',
+      'of a room; a window with curtains is "curtains". A rug lies on the',
+      'floor. "palm" is a palm tree.',
+    ].join(' '),
+    [
+      '"own": up to two things the place must have that no kind above is,',
+      'each { "name", "x", "row" } ("a totem pole", "a fountain"): they are',
+      'drawn apart. Leave it empty when the kinds above will do.',
+    ].join(' '),
+    [
+      'Make the place recognisable at a glance with the things that make it',
+      'that place (a classroom its board, desks and shelves; a bedroom its',
+      'bed, its window and its rug; a market its stalls and baskets; a',
+      'beach the sea, the sand, a palm). Four to ten things is usually',
+      'right. Keep the middle of the ground open, where the characters',
+      'stand: tall things at the back or at the sides. Spread them across',
+      'the width, not all on one side, and never two in the same spot.',
+      'Draw no people, animals, words or signs.',
     ].join(' '),
   ].join('\n\n'),
 

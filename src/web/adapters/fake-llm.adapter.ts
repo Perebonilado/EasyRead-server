@@ -987,6 +987,45 @@ export class FakeLlmAdapter implements LlmGatewayPort {
     });
   }
 
+  /** A plain layout: a bed, a window and a rug, or a tree and a bush; code draws it. */
+  setLayout(input: {
+    brief: string;
+  }): Promise<LlmResult<Record<string, unknown>>> {
+    const started = Date.now();
+    const room = /\ba room\b/iu.test(input.brief);
+    return Promise.resolve({
+      value: room
+        ? {
+            ground: 'wood',
+            walls: 'cream',
+            items: [
+              { kind: 'bed', x: 0.2, row: 'back', scale: 1, colour: null },
+              {
+                kind: 'curtains',
+                x: 0.55,
+                row: 'back',
+                scale: 1,
+                colour: 'red',
+              },
+              { kind: 'rug', x: 0.5, row: 'middle', scale: 1, colour: 'pink' },
+            ],
+            own: [],
+          }
+        : {
+            sky: 'day',
+            weather: 'clear',
+            ground: 'grass',
+            backdrop: 'hills',
+            items: [
+              { kind: 'tree', x: 0.1, row: 'middle', scale: 1, colour: null },
+              { kind: 'bush', x: 0.8, row: 'back', scale: 1, colour: null },
+            ],
+            own: [],
+          },
+      usage: this.usage(started, 300, 120),
+    });
+  }
+
   lectureSketch(input: {
     topicTitle: string;
     shows: string;

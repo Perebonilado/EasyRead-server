@@ -934,6 +934,8 @@ export class SceneProcessor {
     placeId: string,
     documentId: string | null,
     who: string,
+    /** How it is made: a Studio set is built from a layout (D1) unless this says the artist paints it whole. */
+    painter?: 'layout' | 'artist',
   ): Promise<SetSheet | null> {
     const place = story.bible.places.find((p) => p.id === placeId);
     if (!place) throw new Error(`No place ${placeId}`);
@@ -943,6 +945,7 @@ export class SceneProcessor {
       documentId,
       who,
       story.bible.world ?? null,
+      painter ? { painter } : {},
     );
     if (!set) return null;
     await this.inTurn(story.setsKey, async () => {

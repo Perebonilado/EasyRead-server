@@ -32,6 +32,7 @@ import {
   type Matrix,
 } from './scene-joints';
 import type { OwnPropDrawing, PropSize } from './scene-props';
+import type { SetLayout } from './scene-set-layout';
 import { renderSvg, type InkBox, type InkMap } from './scene-raster';
 import type { SetPiece } from './scene-set-pieces';
 import type { SheetFace } from './scene-sheet-face';
@@ -521,6 +522,8 @@ export interface SetSheet {
   drawing: GatedDrawing;
   /** Where its open ground is, measured once from the painting; absent on a set kept before, measured when next used. */
   ground?: SetGround;
+  /** What it was built from, when code drew it from the painter's layout (scene-set-layout); absent on one painted whole. */
+  layout?: SetLayout;
 }
 
 /** A book's places as painted, by their id in the story. */

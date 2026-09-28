@@ -1338,6 +1338,13 @@ export type ScenePropAction =
  * in someone's hand or mouth. Thrown, dropped or kicked, it flies, and
  * lands in a hand, a mouth or on the ground, and lies where it lands.
  */
+/** One of a thing's looks at rest: its drawing and frame in its own units, and the point that stands where it rests. */
+export interface ScenePropRestDto {
+  svg: string;
+  viewBox: [number, number, number, number];
+  anchor: [number, number];
+}
+
 export interface ScenePropDto {
   id: string;
   svg: string;
@@ -1349,6 +1356,13 @@ export interface ScenePropDto {
   bite?: [number, number];
   /** Broken, each hand holds a half: the left half; the right is its mirror. */
   half?: string;
+  /**
+   * Clothes' looks when set down, neither worn nor held: folded (on the
+   * floor, a table, or where they fell) and, in a room, on a hanger on
+   * the wall. Each in its own units, `anchor` the point that stands where
+   * it rests. Absent for anything not worn: it rests as it is drawn.
+   */
+  rest?: { folded: ScenePropRestDto; hung?: ScenePropRestDto };
   /** Near whom it rests. */
   near: string | null;
   /** Who holds it as the scene opens, and in what: a hand, or the mouth. Absent, it rests near `near`. */

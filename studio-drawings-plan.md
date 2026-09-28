@@ -471,5 +471,37 @@ The bench measures the real cost per drawing for each candidate model before the
   - **Still to do:**
     - Richard's look at the contact sheet.
     - Humpty and Eggbert redrawn through the approve flow on Richard's shows, and Humpty's film remade. These run on his shows, so they wait for him.
-- [ ] Phase D: places from layouts; clothes at rest
+- [ ] Phase D: places from layouts; clothes at rest (built and tested; Richard's sign-off and repaints of his shows' sets are still to come)
+  - **What was built (2026-09-28):**
+    - D1, the layout: `scene-set-layout.ts`. The painter (`set_paint`, DeepSeek) now writes a layout, not SVG, through a new port method `setLayout` (`PROMPTS.setLayout`, a lenient `setLayoutSchema`). A layout has a sky (day, dawn, dusk, night), weather (clear, cloudy, snow), a ground (grass, path, sand, road, dirt, red earth, paving, snow, wood, tiles, carpet, stone), a backdrop out of doors (hills, mountains, trees, sea, city, village, fields, dunes), walls, a vessel and its colour, and up to 14 things placed, each with a kind, a share across, a row (back, middle, front), a scale and a colour. `layoutOf` reads it leniently: synonyms for things, grounds and colours, and the place's plain layout for anything it cannot read. A kind the kit has no piece for is left out.
+    - D1, the pieces: `scene-set-scenery.ts` adds 35 code-drawn pieces in the kit's line: desk, bookshelf, shelf, whiteboard, blackboard, noticeboard, wardrobe, rug, lamp, curtains, picture, clock, bunting, plant, toy box, fireplace, counter, cupboard, house, hut, cart, bush, rock, flowers, fern, mushroom, lamppost, basket, sack, parasol, boat, pine, hill, sandcastle, and a bus's seats. They sit beside `drawPiece`'s own pieces and a palm, which a layout also places. `drawPiece` is unchanged: its pieces hash as before.
+    - D1, the building: `buildSet` draws the whole set at 1600 × 900. Out of doors it draws the sky, the backdrop on the far edge of the ground, and the ground. A room gets its back wall, side walls, skirting and floor; what hangs is on the wall, and a rug is in the floor. Vessels come from templates. A bus has its far side with windows onto the `outside` group (sky, hills, houses and trees, the road, across the whole width to slide past), seats, poles, straps, a door and its floor; there are also a train, a plane and an open boat deck.
+    - D1, where things go: things stand in three rows, at the scale people stand at there (the crowd's camera; out of doors a little above the horizon, so far things read). The front row only frames, with one tall thing at each side's edge. Nothing tall stands in the middle, and what stands between covers at most two fifths of the width. Things clear the spots of the features the stage draws, spread apart in their row, and a chair turns to its desk. The outline is the kit's 2.6 at stage size everywhere.
+    - D1, groups: `ground`, `front` (a boat's side, a table, a wall), `outside`, `props` (stalls, carts, baskets, sacks, counters out of doors) and `f-<id>` for the features the set draws are exact. `measureGround` reads the ground from its own group.
+    - D1, what the kit cannot draw: up to two things the painter names in `own` are drawn once by the artist as one of the show's own features (`ownFeatureBrief`) and placed like a piece. What code draws already (walls, sky, a bus's windows, seats and straps) and generic names are not drawn.
+    - D1, see and fix: `SceneArtist.paintSet` builds a Studio set this way (`buildSet`). Two layouts are asked for side by side, each built, gated as a set, its ground read, judged from its picture, and sent back with its own layout (`previous`) and the notes. The best is kept with its layout (`SetSheet.layout`). A book's page is still painted whole, and `painter: 'artist'` paints a Studio set whole.
+    - D1, old shows: existing sets are kept. `studio:repaint` now builds the new version from a layout (or `--artist` paints it whole), after keeping a copy.
+    - D2: `scene-rest.ts` gives a show's own worn thing (a uniform, a coat, a dress, a jumper, a shirt, a scarf, a cloak, clothes) two looks drawn by code, in its own colours. The colours come from its words (the jumper over the shirt: "white shirt and navy jumper"), else from its drawing. Folded, it is one piece or a pile of two. In a room or vessel it also hangs on a hanger from a peg on the wall. The DTO carries `rest: { folded, hung? }` in both contract files. The client (commit `88c7533`) shows it whenever the thing rests: hung where it was set, and folded where it fell or on a table. Held or flying, it is drawn as the artist drew it. The standing uniform is gone. Show-owned things are still drawn by Phase A's style, polish and judge.
+    - Tests: every scenery piece stands on its ground in the kit's ink. The following build clean, in the house style, with their ground read from its group and every code check passing: every backdrop and ground out of doors, three floors, every vessel, a boat's side in front, a feature's own group with its box, and the props. The middle stays open, sets are deterministic, and the artist asks, revises and keeps the layout. Clothes at rest are covered in the domain, in the composed scene and in the client's motion layer. Animals, creatures, people and `drawPiece` hash as before.
+    - Bench: the place briefs carry `drawer: kit` (the layout path; `--drawer artist` paints them whole), and there is a new brief, `uniform-at-rest`, for clothes at rest.
+  - **Bench**, the six places and the uniform at rest, judged by Gemini 3.8 Flash (the artist and the layout on DeepSeek):
+
+    | Run | Median | Mean | Pass | Code checks | Cost and time |
+    |---|---|---|---|---|---|
+    | Baseline (the old artist; the uniform as drawn) | 4.67 | 4.86 | 0/7 | — | — |
+    | Before: today's artist paints each set whole (see and fix) | 7 | 6.81 | 2/7 | 100% | 4.81¢ and 48 s a drawing |
+    | **After: a layout, drawn by code** | **9** | **8.86** | **7/7** | **100%** | **1.64¢ and 19 s a drawing** |
+
+    - After, each: bus 9.67 ("a yellow bus with blue seats, windows showing countryside"), classroom 9.33, forest 9, uniform at rest 9 ("folded and hanging school uniforms"), beach 8.67, bedroom 8.33, market 8.
+    - An earlier after-run, before the far things out of doors were drawn larger, scored median 8 and passed 5 of 7.
+    - The judge's scores move by about a point from run to run.
+  - **What the judge still asks for:**
+    - Stalls that differ more.
+    - Taller forest trees.
+    - A palm in front shows mostly its trunk.
+    - The forest brief's book is "Night in the Woods", so the painter chose night.
+  - **Still to do:**
+    - Richard's look at the contact sheet.
+    - Repaints of his shows' sets (`studio:repaint`), which wait for him.
+    - The "bus reads as a bus inside" and "the uniform folds" parts of done-when are met on the bench.
 - [ ] Phase E: three options, choosing in chat, thumbs down

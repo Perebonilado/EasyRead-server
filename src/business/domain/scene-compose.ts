@@ -76,6 +76,7 @@ import {
   type SceneThing,
 } from './scene-script';
 import { paletteOf, placeMusic } from './scene-music';
+import { restLooksOf } from './scene-rest';
 import {
   CARRIED_CLOTHES,
   PROP_LOOSE,
@@ -1737,6 +1738,17 @@ export function composeScene(input: ComposeInput): {
     const kept = script.drawn?.things?.[prop];
     const own =
       kept && wearableOf(prop) ? noTallerThan(kept, CARRIED_CLOTHES) : kept;
+    // Clothes set down lie folded, or hang on a peg in a room, never stand
+    // up as though someone were in them (studio-drawings-plan §7, D2).
+    const ownThing = script.ownThings?.find((one) => one.id === prop);
+    const rest = own
+      ? restLooksOf(
+          { name: ownThing?.name ?? prop, look: ownThing?.look ?? own.look },
+          kept ?? null,
+          script.setting?.place === 'indoor' ||
+            script.setting?.place === 'vessel',
+        )
+      : null;
     const drawn = own ?? drawProp(isStageProp(prop) ? prop : 'box');
     const loose: PropLoose =
       own?.loose ?? (isStageProp(prop) ? PROP_LOOSE[prop] : PROP_LOOSE.box);
@@ -1750,6 +1762,7 @@ export function composeScene(input: ComposeInput): {
       mouth: drawn.mouth,
       bite: drawn.bite,
       ...(drawn.half ? { half: drawn.half } : {}),
+      ...(rest ? { rest } : {}),
       near: script.propsNear?.[prop] ?? does[0]?.[1] ?? null,
       // Caught up in a feature from the start: the kite in the palm.
       ...(script.propsIn?.[prop] ? { in: script.propsIn[prop] } : {}),

@@ -102,6 +102,7 @@ import {
   type SetSheet,
 } from '../src/business/domain/scene-sheet';
 import { faceShown } from '../src/business/domain/scene-sheet-face';
+import { restLooksOf } from '../src/business/domain/scene-rest';
 import type { SetPiece } from '../src/business/domain/scene-set-pieces';
 import type { OwnPropDrawing } from '../src/business/domain/scene-props';
 import {
@@ -327,6 +328,48 @@ async function oldSheet(
   ) as CharacterSheet;
 }
 
+/**
+ * Clothes at rest as the kit draws them, one picture: folded on the
+ * floor at the left, on its hanger from a peg on the wall at the right,
+ * in the kit's units on one ground at y = 0.
+ */
+function restPiece(fixture: Extract<DrawingFixture, { kind: 'thing' }>): {
+  svg: string;
+  viewBox: [number, number, number, number];
+} {
+  const looks = restLooksOf(
+    { name: fixture.name, look: fixture.look ?? null },
+    null,
+    true,
+  );
+  if (!looks) throw new Error(`${fixture.id} is nothing worn`);
+  const shown = [looks.folded, looks.hung].filter(
+    (one): one is NonNullable<typeof one> => Boolean(one),
+  );
+  let x = 0;
+  let top = 0;
+  const groups = shown.map((one) => {
+    const [vx, vy, vw] = one.viewBox;
+    const inner = one.svg
+      .replace(/^<svg\b[^>]*>/u, '')
+      .replace(/<\/svg>\s*$/u, '');
+    const at = x - vx;
+    x += vw + 24;
+    top = Math.min(top, vy);
+    return `<g transform="translate(${at} 0)">${inner}</g>`;
+  });
+  const viewBox: [number, number, number, number] = [
+    0,
+    Math.floor(top),
+    Math.ceil(x - 24),
+    Math.ceil(-top + 6),
+  ];
+  return {
+    svg: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="${viewBox.join(' ')}">${groups.join('')}</svg>`,
+    viewBox,
+  };
+}
+
 /** What the judge is told a brief is. */
 function judged(fixture: DrawingFixture): {
   kind: DrawingKind;
@@ -342,7 +385,7 @@ function judged(fixture: DrawingFixture): {
     case 'thing':
       return {
         kind: 'thing',
-        brief: `a ${fixture.look ? `${fixture.look} ` : ''}${fixture.name}`,
+        brief: `a ${fixture.look ? `${fixture.look} ` : ''}${fixture.name}${fixture.rest && drawerOf(fixture, DRAWER) === 'kit' ? ', set down and not worn: on the left folded on the floor, on the right on a hanger from a peg on the wall' : ''}`,
       };
     case 'feature':
       return { kind: 'feature', brief: `a ${fixture.name}` };
@@ -369,6 +412,9 @@ async function drawFixture(
       sheet: await kitSheet(fixture, fixture.kind === 'redraw'),
       unjoined: [],
     };
+  // Clothes at rest: code's two looks, side by side.
+  if (fixture.kind === 'thing' && drawerOf(fixture, DRAWER) === 'kit')
+    return { kind: 'own', piece: restPiece(fixture) };
   switch (fixture.kind) {
     case 'character': {
       const drawn = await artist.drawSheet(
@@ -455,7 +501,11 @@ async function drawFixture(
         null,
         who,
         fixture.world ?? null,
-        options,
+        {
+          ...options,
+          // Built by code from the painter's layout, or painted whole.
+          painter: drawerOf(fixture, DRAWER) === 'kit' ? 'layout' : 'artist',
+        },
       );
       return set ? { kind: 'set', set } : null;
     }

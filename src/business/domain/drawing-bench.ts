@@ -46,8 +46,11 @@ export const drawerOf = (
   said?: string,
 ): 'artist' | 'kit' =>
   (said ?? fixture.drawer) === 'kit' &&
-  (fixture.kind === 'character' || fixture.kind === 'redraw') &&
-  (fixture.animal || fixture.creature)
+  (((fixture.kind === 'character' || fixture.kind === 'redraw') &&
+    (fixture.animal || fixture.creature)) ||
+    // A place built by code from the painter's layout; clothes at rest.
+    fixture.kind === 'place' ||
+    (fixture.kind === 'thing' && fixture.rest))
     ? 'kit'
     : 'artist';
 
@@ -71,6 +74,8 @@ export interface ThingFixture extends FixtureBase {
   look?: string;
   /** How big it really is: what the show would ask. */
   real: RealSize | null;
+  /** Clothes set down: the kit draws its looks at rest, folded and on a hanger (studio-drawings-plan §7, D2). */
+  rest?: boolean;
 }
 
 /** A fixed thing of the show's own that people stand by or use. */

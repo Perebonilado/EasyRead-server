@@ -980,6 +980,42 @@ export const sketchJudgeSchema = z.object({
   wrong: z.string().max(300).nullable(),
 });
 
+/**
+ * A place's layout, as the set designer writes it: words for each field,
+ * which the domain reads leniently (scene-set-layout's layoutOf), so a
+ * word it does not know falls back to the place's plain one.
+ */
+export const setLayoutSchema = z.object({
+  sky: z.string().nullable().catch(null),
+  weather: z.string().nullable().catch(null),
+  ground: z.string().nullable().catch(null),
+  groundColour: z.string().nullable().catch(null),
+  backdrop: z.string().nullable().catch(null),
+  walls: z.string().nullable().catch(null),
+  vessel: z.string().nullable().catch(null),
+  vesselColour: z.string().nullable().catch(null),
+  items: z
+    .array(
+      z.object({
+        kind: z.string().catch(''),
+        x: z.number().catch(0.5),
+        row: z.string().catch('back'),
+        scale: z.number().catch(1),
+        colour: z.string().nullable().catch(null),
+      }),
+    )
+    .catch([]),
+  own: z
+    .array(
+      z.object({
+        name: z.string().catch(''),
+        x: z.number().catch(0.5),
+        row: z.string().catch('back'),
+      }),
+    )
+    .catch([]),
+});
+
 /** A drawing on the scorecard: each point 0 to 10, null where it does not apply, and what to change. */
 export const drawingJudgeSchema = z.object({
   sees: z.string().max(200),

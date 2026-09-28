@@ -732,6 +732,8 @@ export function describeLayout(layout: SetLayout): string {
 
 /** Where the stage's spots stand across the set, by their names. */
 const SPOT_AT: Record<string, number> = { ...STATION_SHARES, back: 0.5 };
+/** How near across (a share of the set) a painter's thing is to the stage's own piece of its kind to be that piece again. */
+const STAGED_NEAR = 0.2;
 
 /** The story's world, as the painter is told it. */
 const worldText = (world: StoryWorld | null | undefined) =>
@@ -1940,6 +1942,17 @@ export function buildSet(
       item.kind === 'crate' ||
       item.kind === 'table');
   for (let item of [...layout.items, ...clutterOf(layout, place)]) {
+    // One the stage draws itself, placed again by the painter where it
+    // stands (the yard's gate, told to leave it out): drawn once, the
+    // stage's, never a second behind it.
+    if (
+      staged.some(
+        (f) =>
+          f.kind === item.kind &&
+          Math.abs((SPOT_AT[f.spot] ?? 0.5) - item.x) < STAGED_NEAR,
+      )
+    )
+      continue;
     // A window or a door is a room's, on its wall; a vessel has its own.
     if ((item.kind === 'window' || item.kind === 'door') && kind !== 'indoor')
       continue;

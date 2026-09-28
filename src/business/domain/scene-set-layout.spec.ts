@@ -312,6 +312,33 @@ describe('a place built from its layout', () => {
     expect(set.svg).toContain(CLOTH.blue);
   });
 
+  it('draws a piece the stage draws itself once: the painter’s own of it, where it stands, is left out', () => {
+    const yard = place({
+      look: 'a sandy compound yard',
+      features: [{ id: 'gate', name: 'gate', kind: 'gate', spot: 'left' }],
+    });
+    const at = (x: number) =>
+      layoutOf(
+        {
+          items: [
+            { kind: 'house', x: 0.7, row: 'back', scale: 1, colour: null },
+            { kind: 'gate', x, row: 'back', scale: 1, colour: null },
+          ],
+        },
+        yard,
+      );
+    const none = layoutOf(
+      {
+        items: [{ kind: 'house', x: 0.7, row: 'back', scale: 1, colour: null }],
+      },
+      yard,
+    );
+    // Painted again where the stage's gate stands: not drawn at all.
+    expect(buildSet(at(0.15), yard).svg).toBe(buildSet(none, yard).svg);
+    // A gate of its own far across the yard is the painter's to draw.
+    expect(buildSet(at(0.9), yard).svg).not.toBe(buildSet(none, yard).svg);
+  });
+
   it('stands a boat’s side before the people’s legs where they are in it', async () => {
     const canoe = place({
       kind: 'vessel',

@@ -38,7 +38,12 @@ import {
   type StageMove,
   type ThingAction,
 } from '../scene-doings';
-import { STATION_SHARES } from '../scene-layout';
+import {
+  DEPTH_BACK,
+  DEPTH_FRONT,
+  DEPTH_MIDDLE,
+  STATION_SHARES,
+} from '../scene-layout';
 import { genderOf } from '../scene-script';
 import { PROP_KIND } from '../scene-props';
 import { DRAWN, ownWords } from '../scene-own';
@@ -302,6 +307,39 @@ export function stationShare(
     ? SPOT_SHARE[feature.spot] + Number(by![2]) * BESIDE
     : SPOT_SHARE.centre;
 }
+
+/** How far back a sheet's depth word stands someone (studio-scenery-plan §4.1). */
+export const SHEET_DEPTH: Record<'back' | 'middle' | 'front', number> = {
+  back: DEPTH_BACK,
+  middle: DEPTH_MIDDLE,
+  front: DEPTH_FRONT,
+};
+
+/**
+ * How far back some words send someone on the floor: "in front", "to the
+ * front", "near the camera" to its front; "at the back", "far off",
+ * "across the yard" to its back. Null where they say neither: the stager
+ * decides.
+ */
+export function depthSaid(words: string): number | null {
+  if (
+    /\b(?:in front|to the front|up front|near(?:er)? the camera|toward(?:s)? the camera|closer to us)\b/iu.test(
+      words,
+    )
+  )
+    return SHEET_DEPTH.front;
+  if (
+    /\b(?:(?:at|to|toward|towards|into) the (?:very )?back|far off|far away|in the distance|across the (?:yard|road|street|room|field|compound|square|market|courtyard|garden|playground))\b/iu.test(
+      words,
+    )
+  )
+    return SHEET_DEPTH.back;
+  return null;
+}
+
+/** A station on the open floor, at a depth of its own: a spot, or a point on the ground. */
+const openFloor = (station: string) =>
+  station in SPOT_SHARE || station.startsWith('@');
 
 /** A station beside a feature: on its left (-1) or its right (1). */
 export const besideStation = (feature: string, side: -1 | 1) =>
@@ -1067,6 +1105,12 @@ export function stageStory(
   );
   /** How each one is down now: sitting or lying, and where. */
   const down = new Map<string, Posture>(postures.opening);
+  /** How far back each stands where the sheet or the words say: the rest as the stager spreads them. */
+  const deep = new Map<string, number>(
+    sheet.onStage.flatMap((p): [string, number][] =>
+      p.depth ? [[p.who, SHEET_DEPTH[p.depth]]] : [],
+    ),
+  );
   /** The station by a feature, under it or behind it, for one standing at `from`. */
   const stationAt = (
     how: 'by' | 'under' | 'behind',
@@ -1145,6 +1189,13 @@ export function stageStory(
   const share = (station: string) => stationShare(station, features);
   const stageNow = (extra: Partial<SceneStage> = {}): SceneStage => {
     const show = inSpotOrder(here, features).filter((id) => inCast.has(id));
+    // Depth said only counts on the open floor: at a feature, its own.
+    const depth = Object.fromEntries(
+      show.flatMap((id): [string, number][] => {
+        const d = deep.get(id);
+        return d !== undefined && openFloor(here.get(id)!) ? [[id, d]] : [];
+      }),
+    );
     return {
       layout: show.length
         ? fitLayout(show.length > 1 ? 'row' : 'one', show.length)
@@ -1152,6 +1203,7 @@ export function stageStory(
       show,
       arrows: [],
       at: Object.fromEntries(show.map((id) => [id, here.get(id)!])),
+      ...(Object.keys(depth).length ? { depth } : {}),
       ...extra,
     };
   };
@@ -1508,6 +1560,13 @@ export function stageStory(
   };
 
   sheet.beats.forEach((raw, at) => {
+    // Going somewhere, as far back as the words say, or as the stager
+    // spreads them there.
+    if (raw.who && doingOf(raw.do)?.kind === 'travel') {
+      const said = depthSaid(`${raw.say} ${raw.doSaid ?? ''}`);
+      if (said === null) deep.delete(raw.who);
+      else deep.set(raw.who, said);
+    }
     const k = spokenAt.get(at);
     if (k !== undefined) {
       const beat = beats[k];

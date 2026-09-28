@@ -1014,6 +1014,15 @@ export const setLayoutSchema = z.object({
       }),
     )
     .catch([]),
+  focal: z
+    .object({
+      x: z.number().catch(0.5),
+      feature: z.string().nullable().catch(null),
+      words: z.string().catch(''),
+    })
+    .nullable()
+    .catch(null),
+  clutter: z.array(z.string()).catch([]),
 });
 
 /** A drawing on the scorecard: each point 0 to 10, null where it does not apply, and what to change. */

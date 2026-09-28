@@ -1073,6 +1073,16 @@ export interface SceneDangleDto {
   wind: number;
 }
 
+/** One layer of a story's place: sky, far, back, ground, stage, floor or foreground. */
+export interface SceneSetLayerDto {
+  id: string;
+  /** How it follows the camera: 1 the people's own plane, less farther off, more nearer the camera. */
+  depth: number;
+  svg: string;
+  /** On the floor with the people: where its things' feet stand, in the set's units. */
+  feet?: number;
+}
+
 /** How a kit drawing goes when it goes somewhere. */
 export type SceneGait =
   'walk' | 'waddle' | 'hop' | 'swim' | 'slither' | 'float';
@@ -1111,6 +1121,17 @@ export type SceneThingDto =
       source?: 'math' | 'plot' | 'quote' | 'timeline' | 'chart';
       /** A story's place: the scene behind the stage, never in a slot. */
       backdrop?: true;
+      /**
+       * A story's place built by code, as layers at their depths, back to
+       * front (studio-scenery-plan §2): each drawn at the set's width × 900
+       * and moved by the camera as far as its depth says (a pan of Δx moves
+       * it depth·Δx; a zoom of s scales it 1 + (s − 1)·depth). "floor" stands
+       * among the people, drawn in the order of their feet (`feet`, in the
+       * set's units). Absent, the player splits `svg` by its groups.
+       */
+      layers?: SceneSetLayerDto[];
+      /** How wide the set is drawn, in its units: 1600, or wider for a camera that pans. */
+      setWidth?: number;
       /** Drawn by the figure kit: it moves its eyes, face, head, arms and mouth as it acts. */
       rig?: true;
       /** Where its head is, as shares of its box across and down: where it looks from. */
@@ -1303,6 +1324,8 @@ export interface SceneSettingDto {
   moving?: true;
   /** When a feature opens or shuts: the moment, which, and how it is left. */
   featureStates?: [number, string, 'open' | 'shut'][];
+  /** A thing before the camera faded to 40% while a face behind it speaks: from, to, and its group in the set's foreground layer. */
+  fades?: [number, number, string][];
 }
 
 /**
@@ -1322,6 +1345,8 @@ export interface SceneFeatureDto {
   leaf?: { id: string; hinge: [number, number]; slide?: number };
   /** Where it stands at each staging: the box its drawing fills. */
   at: Record<'box' | 'wide', { x: number; y: number; w: number; h: number }>;
+  /** Where its feet stand at each staging: the people nearer the camera than that are drawn over it, and those farther off under it. Absent, at the foot of its box. */
+  feet?: Record<'box' | 'wide', number>;
   /** Where one goes in or out by it, or stands at it: the middle of its way, the ground there, and how big someone there is beside the people (less than 1 farther back). */
   way: Record<'box' | 'wide', { x: number; y: number; k: number }>;
   /** The painted set's own group for it, hidden while the stage's drawing stands in for it. */
@@ -1531,6 +1556,8 @@ export interface ScenePlaceDto {
   caption?: { x: number; y: number; w: number; size: number; lines: string[] };
   /** A drawing's labels at this step, set beside it by the stage. */
   labels?: SceneLabelDto[];
+  /** A Studio story's person: how far back they stand on the floor, 0 at its back to 1 at its front, 0.5 where people have always stood. Absent, 0.5. */
+  d?: number;
 }
 
 /** One label set by the stage: its words' box, which edge they hang from, and its leader to the part. */

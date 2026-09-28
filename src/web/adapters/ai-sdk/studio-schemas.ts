@@ -6,6 +6,7 @@
 import { z } from 'zod';
 import {
   BEAT_KINDS,
+  SHEET_DEPTHS,
   SHOTS,
   SPOTS,
   STUDIO_AUDIENCES,
@@ -325,6 +326,8 @@ export const studioSceneSchema = z.object({
         .catch(null),
       // What they have on as it opens besides their usual clothes.
       wears: z.array(z.string()).nullable().catch(null),
+      // How far back they stand, where it matters; the stage spreads the rest.
+      depth: z.enum(SHEET_DEPTHS).nullable().catch(null),
     }),
   ),
   props: z.array(

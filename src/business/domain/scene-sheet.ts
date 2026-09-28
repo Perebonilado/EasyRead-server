@@ -32,7 +32,7 @@ import {
   type Matrix,
 } from './scene-joints';
 import type { OwnPropDrawing, PropSize } from './scene-props';
-import type { SetLayout } from './scene-set-layout';
+import type { SetLayering, SetLayout } from './scene-set-layout';
 import { renderSvg, type InkBox, type InkMap } from './scene-raster';
 import type { SetPiece } from './scene-set-pieces';
 import type { SheetFace } from './scene-sheet-face';
@@ -543,6 +543,8 @@ export interface SetSheet {
   ground?: SetGround;
   /** What it was built from, when code drew it from the painter's layout (scene-set-layout); absent on one painted whole. */
   layout?: SetLayout;
+  /** The same set as layers at their depths, for the player to move apart (studio-scenery-plan §3.2); absent on a set built before, split by the player. */
+  layered?: SetLayering;
 }
 
 /** A book's places as painted, by their id in the story. */

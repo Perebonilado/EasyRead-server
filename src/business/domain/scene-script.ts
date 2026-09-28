@@ -594,6 +594,12 @@ export interface SceneStage {
    * across ("@0.62").
    */
   at?: Record<string, string>;
+  /**
+   * How far back some of them stand on the floor, where the sheet or the
+   * words say (studio-scenery-plan §4.1): 0 its back to 1 its front. The
+   * rest stand at a feature's own depth, or as the stager spreads them.
+   */
+  depth?: Record<string, number>;
   /** How those who go at this step go: at a run; off or on by a side, through a feature, squeezing under it. */
   going?: Record<string, SceneGoing>;
 }

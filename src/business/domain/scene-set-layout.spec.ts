@@ -111,7 +111,8 @@ describe('a layout as the painter writes it, read', () => {
       vessel: null,
     });
     expect(layout.items).toEqual([
-      { kind: 'palm', x: 0.12, row: 'front', scale: 1.5, colour: null },
+      // "foreground" is a row of its own now: nearer the camera than the people.
+      { kind: 'palm', x: 0.12, row: 'foreground', scale: 1.5, colour: null },
       {
         kind: 'bookshelf',
         x: 0.5,
@@ -125,7 +126,7 @@ describe('a layout as the painter writes it, read', () => {
       'a totem pole',
       'a fountain',
     ]);
-    expect(describeLayout(layout)).toContain('palm (front, 12%)');
+    expect(describeLayout(layout)).toContain('palm (foreground, 12%)');
   });
 
   it('falls back to the place’s plain one for what it cannot read', () => {

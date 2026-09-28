@@ -37,7 +37,11 @@ export type Block = {
  * its units. Every line was checked by code before it was kept.
  */
 /** Visualize's voice engines, as the admin page offers them. */
-export type SceneVoiceEngineDto = 'gemini' | 'kokoro' | 'openai' | 'elevenlabs';
+export type SceneVoiceEngineDto =
+  'gemini' | 'kokoro' | 'openai' | 'elevenlabs' | 'cartesia';
+
+/** The engines with a list of voices to choose from. */
+export type ListedVoiceEngineDto = 'elevenlabs' | 'cartesia';
 
 /** Who may be given a voice of their own: the narrator, and each kind of character. */
 export type VoiceRoleDto =
@@ -52,13 +56,17 @@ export type VoiceRoleDto =
   | 'divine'
   | 'crowd';
 
-/** A voice ElevenLabs offers, as the admin page lists it. */
+/** A voice ElevenLabs or Cartesia offers, as the admin page lists it. */
 export interface VoiceOptionDto {
   id: string;
   name: string;
   /** Its own words for itself, and its gender, age and accent. */
   description: string;
-  /** A sample of it to play, where ElevenLabs has one. */
+  /**
+   * A sample of it to play, where the engine has one: a URL anyone may
+   * play (ElevenLabs'), or a path on this API, starting with `/`, fetched
+   * signed in (Cartesia's samples ask for the key, so the server fetches them).
+   */
   previewUrl: string | null;
 }
 
@@ -80,11 +88,11 @@ export interface SceneVoiceStatusDto {
   }[];
   /**
    * The voices the narrator and each kind of character speak in, on an
-   * engine with a list to choose from (ElevenLabs); null where there is
-   * none set up.
+   * engine with a list to choose from (ElevenLabs, Cartesia): the one
+   * speaking, else the first set up; null where there is none set up.
    */
   cast: {
-    engine: 'elevenlabs';
+    engine: ListedVoiceEngineDto;
     roles: {
       value: VoiceRoleDto;
       label: string;

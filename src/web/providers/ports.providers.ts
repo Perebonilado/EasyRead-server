@@ -31,6 +31,7 @@ import { DriveStorageAdapter } from '../adapters/drive-storage.adapter';
 import { FakeLlmAdapter } from '../adapters/fake-llm.adapter';
 import { GeminiSpeechAdapter } from '../adapters/gemini-speech.adapter';
 import { ElevenLabsSceneSpeechAdapter } from '../adapters/elevenlabs-scene-speech.adapter';
+import { CartesiaSceneSpeechAdapter } from '../adapters/cartesia-scene-speech.adapter';
 import { FakePaymentsAdapter } from '../adapters/fake-payments.adapter';
 import { StripePaymentsAdapter } from '../adapters/stripe-payments.adapter';
 import { GoogleDriveClient } from '../adapters/google-drive.client';
@@ -124,7 +125,8 @@ export const portProviders: Provider[] = [
   // page, per page, with no redeploy. Our own server is the upload voice's
   // very adapter, so the two share its limit on requests in flight; it is
   // null when KOKORO_TTS_URL is not set. ElevenLabs speaks once
-  // ELEVENLABS_API_KEY is set. Lectures never come here.
+  // ELEVENLABS_API_KEY is set, Cartesia once CARTESIA_API_KEY is. Lectures
+  // never come here.
   {
     provide: SCENE_VOICES,
     inject: [ConfigService, SPEECH, UPLOAD_SPEECH],
@@ -137,6 +139,7 @@ export const portProviders: Provider[] = [
       kokoro: config.get<string>('KOKORO_TTS_URL') ? upload : null,
       openai,
       elevenlabs: new ElevenLabsSceneSpeechAdapter(config),
+      cartesia: new CartesiaSceneSpeechAdapter(config),
     }),
   },
   // Word timing for the lecture board: the script aligned to its audio.

@@ -10,7 +10,8 @@ export class AppSettingsModel extends BaseModel {
 
   /**
    * The admin's voices for the narrator and each kind of character, by
-   * engine, as JSON ({"elevenlabs":{"narrator":"<voice id>","man":"…"}});
+   * engine, as JSON ({"elevenlabs":{"narrator":"<voice id>","man":"…"},
+   * "cartesia":{"narrator":"<voice uuid>"}});
    * null keeps every engine's own.
    */
   @Column({ type: DataType.TEXT, allowNull: true })

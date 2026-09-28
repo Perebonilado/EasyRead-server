@@ -7,11 +7,15 @@ import {
   SLOWEST,
   SPEED_RANGE,
   TURN_S,
+  CARTESIA_LIBRARY,
+  CARTESIA_NARRATOR,
   CHARACTER_VOICES,
   ELEVENLABS_NARRATOR,
   ELEVENLABS_PREMADE,
   characterVoice,
   deliveryPieces,
+  isCartesiaVoiceId,
+  isElevenLabsVoiceId,
   sentenceStarts,
   voiceSlug,
   voiceStyle,
@@ -171,6 +175,35 @@ describe("a story's characters, in their own voices", () => {
       expect(new Set(voices).size).toBeGreaterThanOrEqual(3);
       expect(voices).not.toContain(ELEVENLABS_NARRATOR);
     }
+  });
+
+  it('casts Cartesia voices by kind from its library, the same every episode, and the admin’s voice first of its kind', () => {
+    const { Daisy, Dottie, Griffin, Elias, Lulu } = CARTESIA_LIBRARY;
+    const cast = (id: string, chosen = {}) =>
+      characterVoice(bible, at(id), 'cartesia', CARTESIA_NARRATOR, chosen)
+        ?.voice;
+    expect([cast('mira'), cast('lily'), cast('tobi'), cast('ember')]).toEqual([
+      Daisy,
+      Dottie,
+      Griffin,
+      Elias,
+    ]);
+    expect(cast('lily')).toBe(Dottie);
+    expect([
+      cast('mira', { girl: Lulu }),
+      cast('lily', { girl: Lulu }),
+    ]).toEqual([Lulu, Daisy]);
+    expect(
+      characterVoice(bible, at('tobi'), 'cartesia', Griffin)?.voice,
+    ).not.toBe(Griffin);
+    for (const voices of Object.values(CHARACTER_VOICES.cartesia)) {
+      expect(new Set(voices).size).toBeGreaterThanOrEqual(3);
+      expect(voices).not.toContain(CARTESIA_NARRATOR);
+      expect(voices.every(isCartesiaVoiceId)).toBe(true);
+    }
+    // Each engine's ids are its own.
+    expect(isCartesiaVoiceId(ELEVENLABS_NARRATOR)).toBe(false);
+    expect(isElevenLabsVoiceId(CARTESIA_NARRATOR)).toBe(false);
   });
 
   it("parts a sentence at its quotation: the quoted words theirs, the rest the narrator's", () => {

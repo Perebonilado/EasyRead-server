@@ -88,7 +88,8 @@ export function catalogueSpeechCost(
 
 /**
  * A voice billed by the character (ElevenLabs: $0.10 a thousand on Eleven
- * v3, pay as you go or on a plan, September 2026), at its rate.
+ * v3, pay as you go or on a plan, September 2026; Cartesia: a credit a
+ * character, $0.05 a thousand on Pro), at its rate.
  */
 export function characterSpeechCost(
   characters: number,

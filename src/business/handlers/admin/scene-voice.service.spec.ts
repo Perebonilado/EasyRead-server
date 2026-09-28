@@ -1,6 +1,8 @@
 import type { ConfigService } from '@nestjs/config';
 import { ValidationError } from '../../domain/errors/errors';
 import {
+  CARTESIA_LIBRARY,
+  CARTESIA_NARRATOR,
   CHARACTER_VOICES,
   ELEVENLABS_NARRATOR,
   ELEVENLABS_PREMADE,
@@ -32,6 +34,19 @@ const voices = (kokoro = true): SceneVoices => ({
         },
       ]),
   }),
+  cartesia: Object.assign(speech('sonic-3.6', CARTESIA_NARRATOR), {
+    catalogue: () =>
+      Promise.resolve([
+        {
+          id: CARTESIA_LIBRARY.Lauren,
+          name: 'Lauren',
+          description: 'feminine',
+          previewUrl: 'https://api.cartesia.ai/voices/katie/preview',
+        },
+      ]),
+    preview: (id: string) =>
+      Promise.resolve({ audio: Buffer.from(id), mimeType: 'audio/wav' }),
+  }),
 });
 
 const config = (values: Record<string, string>) =>
@@ -53,7 +68,14 @@ function store(): AppSettingsRepository & { reads: number } {
       return Promise.resolve(record);
     },
     set(patch, changedBy, now) {
-      record = { ...record, ...patch, changedBy, changedAt: now };
+      // Each engine's voices kept apart, as the table keeps them.
+      record = {
+        ...record,
+        ...patch,
+        voiceCast: { ...record.voiceCast, ...patch.voiceCast },
+        changedBy,
+        changedAt: now,
+      };
       return Promise.resolve(record);
     },
     announce(worker) {
@@ -67,7 +89,13 @@ function store(): AppSettingsRepository & { reads: number } {
 const clock = (at: { ms: number }) => ({ now: () => new Date(at.ms) });
 
 describe('which engine voices Visualize', () => {
-  const all = { gemini: true, kokoro: true, openai: true, elevenlabs: true };
+  const all = {
+    gemini: true,
+    kokoro: true,
+    openai: true,
+    elevenlabs: true,
+    cartesia: true,
+  };
 
   it('takes the deployment’s own when nothing is chosen: its named engine when ready, else our server, else OpenAI', () => {
     expect(deploymentEngine('gemini', all)).toBe('gemini');
@@ -118,6 +146,7 @@ describe('the admin’s voice setting', () => {
       ['kokoro', true],
       ['openai', true],
       ['elevenlabs', false],
+      ['cartesia', false],
     ]);
     now = await service.current();
     // SCENE_VOICE names a Gemini voice: our server speaks in its own.
@@ -263,6 +292,96 @@ describe('the admin’s voice setting', () => {
     await service.chooseCast('narrator', ELEVENLABS_PREMADE.Daniel, 'a');
     const now = await service.current();
     expect([now.engine, now.voice, now.cast]).toEqual(['gemini', 'Kore', {}]);
+  });
+
+  it('offers Cartesia once its key is set, keeps its voices apart from ElevenLabs’, and fetches its samples', async () => {
+    const service = new SceneVoiceService(
+      voices(),
+      store(),
+      clock({ ms: 0 }),
+      config({ ...keys, ELEVENLABS_API_KEY: 'e', CARTESIA_API_KEY: 'c' }),
+    );
+    await service.chooseCast('narrator', ELEVENLABS_PREMADE.Daniel, 'a');
+    let status = await service.choose('cartesia', 'admin-1');
+    expect(status.current).toBe('cartesia');
+    expect(status.options.find((o) => o.value === 'cartesia')).toMatchObject({
+      label: 'Cartesia',
+      ready: true,
+      model: 'sonic-3.6',
+    });
+    // The voices of the engine speaking.
+    expect(status.cast?.engine).toBe('cartesia');
+    expect(status.cast?.roles[0]).toMatchObject({
+      chosen: null,
+      default: CARTESIA_NARRATOR,
+    });
+    expect(status.cast?.roles.find((r) => r.value === 'girl')?.default).toBe(
+      CHARACTER_VOICES.cartesia.girl[0],
+    );
+    let now = await service.current();
+    expect([now.engine, now.voice, now.cast]).toEqual([
+      'cartesia',
+      CARTESIA_NARRATOR,
+      {},
+    ]);
+    // An ElevenLabs id is no Cartesia voice.
+    await expect(
+      service.chooseCast('man', ELEVENLABS_PREMADE.Harry, 'a', 'cartesia'),
+    ).rejects.toThrow('not a Cartesia voice');
+    status = await service.chooseCast(
+      'narrator',
+      CARTESIA_LIBRARY.Lauren,
+      'a',
+      'cartesia',
+    );
+    status = await service.chooseCast(
+      'old man',
+      CARTESIA_LIBRARY.Griffin,
+      'a',
+      'cartesia',
+    );
+    now = await service.current();
+    expect(now.voice).toBe(CARTESIA_LIBRARY.Lauren);
+    expect(now.cast).toEqual({
+      narrator: CARTESIA_LIBRARY.Lauren,
+      'old man': CARTESIA_LIBRARY.Griffin,
+    });
+    // ElevenLabs' choices are still there, its own.
+    await service.choose('elevenlabs', 'admin-1');
+    now = await service.current();
+    expect([now.engine, now.voice, now.cast]).toEqual([
+      'elevenlabs',
+      ELEVENLABS_PREMADE.Daniel,
+      { narrator: ELEVENLABS_PREMADE.Daniel },
+    ]);
+    status = await service.status();
+    expect(status.cast?.engine).toBe('elevenlabs');
+    expect((await service.voiceOptions('cartesia')).map((v) => v.name)).toEqual(
+      ['Lauren'],
+    );
+    const sample = await service.voicePreview(
+      'cartesia',
+      CARTESIA_LIBRARY.Lauren,
+    );
+    expect(sample.mimeType).toBe('audio/wav');
+    await expect(
+      service.voicePreview('cartesia', '../../etc'),
+    ).rejects.toBeInstanceOf(ValidationError);
+  });
+
+  it('will not list or pick Cartesia without its key', async () => {
+    const service = new SceneVoiceService(
+      voices(),
+      store(),
+      clock({ ms: 0 }),
+      config(keys),
+    );
+    await expect(service.choose('cartesia', 'a')).rejects.toThrow(
+      'Cartesia is not set up',
+    );
+    await expect(service.voiceOptions('cartesia')).rejects.toThrow(
+      'CARTESIA_API_KEY',
+    );
   });
 
   it('will not list or pick ElevenLabs without its key', async () => {

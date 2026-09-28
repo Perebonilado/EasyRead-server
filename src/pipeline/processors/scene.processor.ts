@@ -255,7 +255,7 @@ const QUIET_END_SLACK_MS = 100;
 const STORY_READERS = 4;
 /** The most stretches (about 20 pages each) a story read the old way is read again in, unasked. */
 const REREAD_MOST_STRETCHES = 6;
-/** A line's pace that is a tone of voice, not a speed: for a voice that takes tags (ElevenLabs). */
+/** A line's pace that is a tone of voice, not a speed: for a voice that takes tags (ElevenLabs) or a volume (Cartesia). */
 const TONE_OF: Partial<Record<LinePace, 'whisper' | 'shout'>> = {
   whisper: 'whisper',
   shout: 'shout',
@@ -1755,8 +1755,8 @@ export class SceneProcessor {
     const { model } = speech.label();
     // A story's characters say their own lines, in voices of their own.
     const engine =
-      speaking === 'elevenlabs'
-        ? 'elevenlabs'
+      speaking === 'elevenlabs' || speaking === 'cartesia'
+        ? speaking
         : model.startsWith('gemini')
           ? 'gemini'
           : model.startsWith('kokoro')
@@ -1895,7 +1895,17 @@ export class SceneProcessor {
                     ),
                   ),
                 )
-              : null,
+              : result.model.startsWith('cartesia:')
+                ? characterSpeechCost(
+                    result.characters ?? spoken.text.length,
+                    Number(
+                      this.config.get<string>(
+                        'CARTESIA_USD_PER_1K_CHARS',
+                        '0.05',
+                      ),
+                    ),
+                  )
+                : null,
     });
 
     let words: SpokenWords | null = null;

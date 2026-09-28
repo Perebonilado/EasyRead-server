@@ -217,8 +217,57 @@ export const ELEVENLABS_NARRATOR = ELEVENLABS_PREMADE.George;
 const el = (...names: (keyof typeof ELEVENLABS_PREMADE)[]) =>
   names.map((name) => ELEVENLABS_PREMADE[name]);
 
+/**
+ * Cartesia's own voices, by the name its library gives them now, and their
+ * ids: in every account, fixed, so a character keeps theirs from episode
+ * to episode (Cartesia renames voices now and then; the id stays). Its
+ * library has children's voices, old people's, and characters for
+ * creatures and a voice from above; Tessa, Maya, Dana, Marian, Leo, Kyle
+ * and Gavin are the voices Cartesia names as its most emotive. Checked
+ * against the library on 2026-09-28; the admin page sets any voice the
+ * account has in their place.
+ */
+export const CARTESIA_LIBRARY = {
+  Clyde: '98a34ef2-2140-4c28-9c71-663dc4dd7022', // gentle, measured, warm storyteller: the narrator
+  Daisy: '32b3f3c5-7171-46aa-abe7-b598964aa793', // a very young girl
+  Dottie: 'e3827ec5-697a-4b7c-9704-1a23041bbc51', // a very young girl, earnest
+  Lulu: 'e13cae5c-ec59-4f71-b0a6-266df3c9bb8e', // a young girl, squeaky
+  Child: '2ee87190-8f84-4925-97da-e52547f9462c', // a child
+  Zeke: 'e00d0e4c-a5c8-443f-a8a3-473eb9a62355', // high, young male
+  Casper: '4f7f1324-1853-48a6-b294-4e78e8036a83', // wistful, young male
+  Tessa: '6ccbfb76-1fc6-48f7-b71d-91ac6298247b', // warm, emotive
+  Maya: 'cbaf8084-f009-4838-a096-07ee2e6612b1', // clear, emotive
+  Lauren: 'a33f7a4c-100f-41cf-a1fd-5822e8fc253f', // expressive storyteller
+  Dana: 'cc00e582-ed66-4004-8336-0175b85c85f6', // calm, emotive
+  Leo: '0834f3df-e650-4766-a20c-5a93a43aa6e3', // warm, emotive
+  Kyle: 'c961b81c-a935-4c17-bfb3-ba2239de8c2f', // warm, emotive
+  Clint: 'db69127a-dbaf-4fa9-b425-2fe67680c348', // raspy, rugged, for acting
+  Gavin: 'f4a3a8e4-694c-4c45-9ca0-27caf97901b5', // relaxed, emotive
+  Edith: 'c8605446-247c-4d39-acd4-8f4c28aa363c', // elderly, wise
+  Marge: 'a2364c9d-1fe3-4553-9eff-100c4fe5ffc8', // wise, mature, storyteller
+  Marian: '26403c37-80c1-4a1a-8692-540551ca2ae5', // mature, calm, emotive
+  Griffin: 'c99d36f3-5ffd-4253-803a-535c1bc9c306', // elderly, British
+  Trevor: 'c45bc5ec-dc68-4feb-8829-6e6b2748095d', // deep, elderly
+  Alaric: '87748186-23bb-4158-a1eb-332911b0b708', // wistful, wise, elderly
+  Elias: '6a176356-ada1-4b48-b2ae-3a3fdd485680', // deep, for game characters
+  Thistle: 'fb26447f-308b-471e-8b00-8e9f04284eb5', // whimsical troublemaker
+  Matt: 'bfd3644b-d561-4b1c-a01f-d9af98cb67c0', // high, silly
+  Caspian: 'd7862948-75c3-4c7c-ae28-2959fe166f49', // echoing, mystical, gravitas
+  James: '42b39f37-515f-4eee-8546-73e841679c1d', // very deep, authoritative
+  Sterling: 'b134c304-d095-4d2b-a77a-914f5e8e84e7', // deep, commanding, dignified
+  Grant: 'd46abd1d-2d02-43e8-819f-51fb652c1c61', // plain, clear
+  Ruth: '11af83e2-23eb-452f-956e-7fee218ccb5c', // plain, firm
+  Jace: '6776173b-fd72-460d-89b3-d85812ee518d', // plain, easy-going
+} as const;
+
+/** The narrator's voice on Cartesia when none is set: Clyde, a storyteller. */
+export const CARTESIA_NARRATOR = CARTESIA_LIBRARY.Clyde;
+
+const ca = (...names: (keyof typeof CARTESIA_LIBRARY)[]) =>
+  names.map((name) => CARTESIA_LIBRARY[name]);
+
 /** The engines whose characters have voices of their own. */
-export type CastEngine = 'kokoro' | 'gemini' | 'elevenlabs';
+export type CastEngine = 'kokoro' | 'gemini' | 'elevenlabs' | 'cartesia';
 
 /** The voices a story's characters speak in, by engine and by kind: never the narrator's own. */
 export const CHARACTER_VOICES: Record<
@@ -262,7 +311,30 @@ export const CHARACTER_VOICES: Record<
     divine: el('Brian', 'Daniel', 'Bill'),
     crowd: el('River', 'Roger', 'Chris'),
   },
+  // Voice ids from Cartesia's library: no blends either, so God's is the
+  // echoing, mystical one and the deepest, and a crowd's the plainest.
+  cartesia: {
+    girl: ca('Daisy', 'Dottie', 'Lulu'),
+    boy: ca('Child', 'Zeke', 'Casper'),
+    woman: ca('Tessa', 'Maya', 'Lauren', 'Dana'),
+    man: ca('Leo', 'Clint', 'Kyle', 'Gavin'),
+    'old woman': ca('Edith', 'Marge', 'Marian'),
+    'old man': ca('Griffin', 'Trevor', 'Alaric'),
+    creature: ca('Elias', 'Thistle', 'Matt'),
+    divine: ca('Caspian', 'James', 'Sterling'),
+    crowd: ca('Grant', 'Ruth', 'Jace'),
+  },
 };
+
+/**
+ * The engines with a list of voices to choose from (ElevenLabs', Cartesia's):
+ * the admin page gives the narrator and each kind of character one of them.
+ */
+export const LISTED_ENGINES = ['elevenlabs', 'cartesia'] as const;
+export type ListedEngine = (typeof LISTED_ENGINES)[number];
+
+export const isListedEngine = (value: unknown): value is ListedEngine =>
+  LISTED_ENGINES.includes(value as ListedEngine);
 
 /**
  * Who the admin may give a voice of their own on an engine with a list to
@@ -279,6 +351,15 @@ export const isVoiceRole = (value: unknown): value is VoiceRole =>
 /** An ElevenLabs voice id as the admin may set one: letters and digits only. */
 export const isElevenLabsVoiceId = (value: unknown): value is string =>
   typeof value === 'string' && /^[A-Za-z0-9]{12,40}$/.test(value);
+
+/** A Cartesia voice id as the admin may set one: a UUID. */
+export const isCartesiaVoiceId = (value: unknown): value is string =>
+  typeof value === 'string' &&
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value);
+
+/** Whether a value could be one of an engine's voice ids. */
+export const isVoiceIdOf = (engine: ListedEngine, value: unknown): boolean =>
+  engine === 'cartesia' ? isCartesiaVoiceId(value) : isElevenLabsVoiceId(value);
 
 /** How quickly each kind speaks, against the sentence's own pace. */
 export const CHARACTER_PACE: Record<StoryVoice, number> = {
@@ -450,13 +531,15 @@ export function sentenceStarts(
 
 /**
  * Visualize's voice engines: Google's Gemini, our own Kokoro server on
- * Railway, OpenAI's, or ElevenLabs'. The admin picks one while the app runs.
+ * Railway, OpenAI's, ElevenLabs' or Cartesia's. The admin picks one while
+ * the app runs.
  */
 export const SCENE_VOICE_ENGINES = [
   'gemini',
   'kokoro',
   'openai',
   'elevenlabs',
+  'cartesia',
 ] as const;
 export type SceneVoiceEngine = (typeof SCENE_VOICE_ENGINES)[number];
 

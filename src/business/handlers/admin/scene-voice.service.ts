@@ -2,13 +2,16 @@ import { Inject, Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import type { SceneVoiceStatusDto, VoiceOptionDto } from '../../../contracts';
 import {
+  CARTESIA_NARRATOR,
   CHARACTER_VOICES,
   ELEVENLABS_NARRATOR,
   SCENE_VOICE_ENGINES,
   VOICE_ROLES,
   deploymentEngine,
-  isElevenLabsVoiceId,
+  isListedEngine,
+  isVoiceIdOf,
   sceneEngine,
+  type ListedEngine,
   type SceneVoiceEngine,
   type VoiceCast,
   type VoiceRole,
@@ -35,6 +38,19 @@ const LABEL: Record<SceneVoiceEngine, string> = {
   kokoro: 'Our server (Kokoro)',
   openai: 'OpenAI',
   elevenlabs: 'ElevenLabs',
+  cartesia: 'Cartesia',
+};
+
+/** Each listed engine's narrator when the deployment names none. */
+const NARRATOR: Record<ListedEngine, string> = {
+  elevenlabs: ELEVENLABS_NARRATOR,
+  cartesia: CARTESIA_NARRATOR,
+};
+
+/** Each listed engine's key, as the admin is told it is missing. */
+const KEY: Record<ListedEngine, string> = {
+  elevenlabs: 'ELEVENLABS_API_KEY',
+  cartesia: 'CARTESIA_API_KEY',
 };
 
 /** Each role as the admin page names it. */
@@ -80,6 +96,7 @@ export class SceneVoiceService {
       kokoro: Boolean(this.voices.kokoro),
       openai: Boolean(this.voices.openai) && set('OPENAI_API_KEY'),
       elevenlabs: Boolean(this.voices.elevenlabs) && set('ELEVENLABS_API_KEY'),
+      cartesia: Boolean(this.voices.cartesia) && set('CARTESIA_API_KEY'),
     };
   }
 
@@ -102,8 +119,7 @@ export class SceneVoiceService {
     const speech = this.voices[engine] ?? this.voices.openai;
     if (!speech) throw new Error('No voice is set up for Visualize');
     const own = engine === deploymentEngine(named, ready);
-    const cast =
-      engine === 'elevenlabs' ? (record.voiceCast.elevenlabs ?? {}) : {};
+    const cast = isListedEngine(engine) ? (record.voiceCast[engine] ?? {}) : {};
     return {
       engine,
       speech,
@@ -154,40 +170,52 @@ export class SceneVoiceService {
   async status(): Promise<SceneVoiceStatusDto> {
     const record = await this.record();
     const { ready, deployment, labels } = await this.worker();
+    const current =
+      record.sceneVoice && ready[record.sceneVoice]
+        ? record.sceneVoice
+        : deployment;
+    // The voices of the engine speaking, when it has a list; else of the
+    // first with a list that is set up.
+    const listed: ListedEngine | null =
+      isListedEngine(current) && ready[current] === true
+        ? current
+        : ready.elevenlabs === true
+          ? 'elevenlabs'
+          : ready.cartesia === true
+            ? 'cartesia'
+            : null;
     return {
       chosen: record.sceneVoice,
-      current:
-        record.sceneVoice && ready[record.sceneVoice]
-          ? record.sceneVoice
-          : deployment,
+      current,
       deployment,
       options: SCENE_VOICE_ENGINES.map((engine) => {
         const label = labels[engine];
         return {
           value: engine,
           label: LABEL[engine],
-          // A worker that said before ElevenLabs was an engine has not said it.
+          // A worker that said before an engine was one has not said it.
           ready: Boolean(ready[engine]),
           model: label?.model ?? '',
           voice: label?.voice ?? '',
         };
       }),
-      cast:
-        ready.elevenlabs === true
-          ? {
-              engine: 'elevenlabs',
-              roles: this.cast(
-                record.voiceCast.elevenlabs ?? {},
-                labels.elevenlabs?.voice || ELEVENLABS_NARRATOR,
-              ),
-            }
-          : null,
+      cast: listed
+        ? {
+            engine: listed,
+            roles: this.cast(
+              listed,
+              record.voiceCast[listed] ?? {},
+              labels[listed]?.voice || NARRATOR[listed],
+            ),
+          }
+        : null,
       changedAt: record.changedAt?.toISOString() ?? null,
     };
   }
 
-  /** Each role's voice on ElevenLabs: the admin's, and the default under it (the narrator's own, or the first of the kind's). */
+  /** Each role's voice on an engine with a list: the admin's, and the default under it (the narrator's own, or the first of the kind's). */
   private cast(
+    engine: ListedEngine,
     chosen: VoiceCast,
     narrator: string,
   ): NonNullable<SceneVoiceStatusDto['cast']>['roles'] {
@@ -199,42 +227,66 @@ export class SceneVoiceService {
       default:
         role === 'narrator'
           ? narrator
-          : (CHARACTER_VOICES.elevenlabs[role].find(
-              (voice) => voice !== speaks,
-            ) ?? CHARACTER_VOICES.elevenlabs[role][0]),
+          : (CHARACTER_VOICES[engine][role].find((voice) => voice !== speaks) ??
+            CHARACTER_VOICES[engine][role][0]),
     }));
   }
 
-  /** The voices ElevenLabs offers this account, for the admin to choose from. */
-  async voiceOptions(): Promise<VoiceOptionDto[]> {
-    const speech = this.voices.elevenlabs;
-    if (!this.ready().elevenlabs || !speech?.catalogue)
+  /** An engine with a list, set up here, and its voice. */
+  private listed(engine: ListedEngine): SpeechPort {
+    const speech = this.voices[engine];
+    if (!this.ready()[engine] || !speech)
       throw new ValidationError(
-        'ElevenLabs is not set up on this server (ELEVENLABS_API_KEY)',
+        `${LABEL[engine]} is not set up on this server (${KEY[engine]})`,
       );
+    return speech;
+  }
+
+  /** The voices an engine offers this account (ElevenLabs', Cartesia's), for the admin to choose from. */
+  async voiceOptions(
+    engine: ListedEngine = 'elevenlabs',
+  ): Promise<VoiceOptionDto[]> {
+    const speech = this.listed(engine);
+    if (!speech.catalogue)
+      throw new ValidationError(`${LABEL[engine]} has no list of voices`);
     return speech.catalogue();
   }
 
+  /** A voice's sample, fetched here for an engine whose samples ask for the key (Cartesia). */
+  async voicePreview(
+    engine: ListedEngine,
+    voice: string,
+  ): Promise<{ audio: Buffer; mimeType: string }> {
+    if (!isVoiceIdOf(engine, voice))
+      throw new ValidationError(`That is not a ${LABEL[engine]} voice`);
+    const speech = this.listed(engine);
+    if (!speech.preview)
+      throw new ValidationError(`${LABEL[engine]} has no samples to fetch`);
+    return speech.preview(voice);
+  }
+
   /**
-   * The admin's voice for the narrator or a kind of character on
-   * ElevenLabs; null goes back to the default. A character keeps the
-   * voice of their kind they have (the first, or the one chosen for them)
-   * from episode to episode while this stays as it is.
+   * The admin's voice for the narrator or a kind of character on an
+   * engine with a list (ElevenLabs, Cartesia); null goes back to the
+   * default. A character keeps the voice of their kind they have (the
+   * first, or the one chosen for them) from episode to episode while this
+   * stays as it is. Each engine's voices are kept apart.
    */
   async chooseCast(
     role: VoiceRole,
     voice: string | null,
     changedBy: string,
+    engine: ListedEngine = 'elevenlabs',
   ): Promise<SceneVoiceStatusDto> {
-    if (voice !== null && !isElevenLabsVoiceId(voice))
-      throw new ValidationError('That is not an ElevenLabs voice');
+    if (voice !== null && !isVoiceIdOf(engine, voice))
+      throw new ValidationError(`That is not a ${LABEL[engine]} voice`);
     const cast: VoiceCast = {
-      ...((await this.record()).voiceCast.elevenlabs ?? {}),
+      ...((await this.record()).voiceCast[engine] ?? {}),
     };
     if (voice) cast[role] = voice;
     else delete cast[role];
     const record = await this.settings.set(
-      { voiceCast: { elevenlabs: cast } },
+      { voiceCast: { [engine]: cast } },
       changedBy,
       this.clock.now(),
     );

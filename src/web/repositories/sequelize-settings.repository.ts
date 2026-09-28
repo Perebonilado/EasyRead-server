@@ -1,8 +1,9 @@
 import { Injectable } from '@nestjs/common';
 import { InjectModel } from '@nestjs/sequelize';
 import {
-  isElevenLabsVoiceId,
+  LISTED_ENGINES,
   isSceneVoiceEngine,
+  isVoiceIdOf,
   isVoiceRole,
   type VoiceCast,
 } from '../../business/domain/scene-voice';
@@ -25,18 +26,40 @@ function workerVoices(kept: string | null): WorkerVoices | null {
   }
 }
 
-/** The admin's voices as kept; only a role and a voice id that could be one are read back. */
+/**
+ * The admin's voices as kept, by engine; only an engine with a list, a
+ * role and a voice id that could be that engine's are read back.
+ */
 export function voiceCast(kept: string | null): AppSettingsRecord['voiceCast'] {
   if (!kept) return {};
   try {
-    const read = JSON.parse(kept) as { elevenlabs?: Record<string, unknown> };
-    const cast: VoiceCast = {};
-    for (const [role, voice] of Object.entries(read?.elevenlabs ?? {}))
-      if (isVoiceRole(role) && isElevenLabsVoiceId(voice)) cast[role] = voice;
-    return Object.keys(cast).length ? { elevenlabs: cast } : {};
+    const read = JSON.parse(kept) as Record<string, Record<string, unknown>>;
+    const out: AppSettingsRecord['voiceCast'] = {};
+    for (const engine of LISTED_ENGINES) {
+      const cast: VoiceCast = {};
+      for (const [role, voice] of Object.entries(read?.[engine] ?? {}))
+        if (isVoiceRole(role) && isVoiceIdOf(engine, voice))
+          cast[role] = voice as string;
+      if (Object.keys(cast).length) out[engine] = cast;
+    }
+    return out;
   } catch {
     return {};
   }
+}
+
+/**
+ * The admin's voices with a patch laid over them: each engine the patch
+ * names is replaced, the others kept as they are. Null when none is left.
+ */
+export function castAfter(
+  kept: string | null,
+  patch: AppSettingsRecord['voiceCast'],
+): string | null {
+  const merged = { ...voiceCast(kept), ...patch };
+  for (const engine of LISTED_ENGINES)
+    if (!Object.keys(merged[engine] ?? {}).length) delete merged[engine];
+  return Object.keys(merged).length ? JSON.stringify(merged) : null;
 }
 
 @Injectable()
@@ -95,11 +118,7 @@ export class SequelizeAppSettingsRepository implements AppSettingsRepository {
         ? { sceneVoice: patch.sceneVoice ?? null }
         : {}),
       ...(patch.voiceCast
-        ? {
-            voiceCast: Object.keys(patch.voiceCast.elevenlabs ?? {}).length
-              ? JSON.stringify(patch.voiceCast)
-              : null,
-          }
+        ? { voiceCast: castAfter(row.voiceCast, patch.voiceCast) }
         : {}),
       changedBy,
       changedAt: now,

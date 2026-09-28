@@ -154,6 +154,26 @@ shares it, and a 429 waits and asks again), `ELEVENLABS_STABILITY`
 ledger). Migration `0058` adds `app_settings.voice_cast` for the admin's
 voices: run `npm run migrate` (the API's pre-deploy command) before the
 new code reads the row.
+
+**Cartesia** voices them too: set **`CARTESIA_API_KEY` on the worker and
+the API**, restart the worker so it says it can, and pick Cartesia on the
+admin page (or `SCENE_VOICE_ENGINE=cartesia`). A page is a request per run
+of one speaker said one way on Sonic 3.6 (`/tts/sse` with word timestamps,
+so no aligner); the direction goes as the request's emotion (`calm`,
+`angry`, `confident`…) and volume (a shout louder, a whisper quieter) and
+each sentence's pace as its speed, never as words; the silences are made
+here. Characters are cast by kind from Cartesia's library (children's
+voices, old people's, characters for creatures, an echoing one from
+above), the same every episode, narrator Clyde; the admin page's
+**Voices** sets the narrator and each kind from the account's English
+voices, with a play button (the server fetches Cartesia's samples, which
+ask for the key). Each engine's choices are kept apart in
+`app_settings.voice_cast`: no new migration. Optional:
+`CARTESIA_CONCURRENCY` (default 2, the free plan's; set your plan's: Pro 3,
+Startup 5, Scale 15; every scene the worker makes shares it, and a 429 or
+5xx waits and asks again), `CARTESIA_NARRATOR_VOICE`,
+`CARTESIA_SCENE_MODEL` (default `sonic-3.6`), `CARTESIA_USD_PER_1K_CHARS`
+(default 0.05, for the ledger).
 `npm run drawing:bench` draws the
 bench's forty-two briefs through the same path and scores them against
 the kept baseline (`src/business/domain/drawing-bench/baseline.json`).

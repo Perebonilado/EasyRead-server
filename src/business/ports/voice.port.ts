@@ -30,7 +30,7 @@ export interface SpeechPort {
       style?: string;
       /** Another voice for this piece than the page's: a story's character. Ignored by a voice that has one only. */
       voice?: string;
-      /** How loud a line is said, for a voice that takes it as a tag (ElevenLabs); the rest go by speed and style. */
+      /** How loud a line is said, for a voice that takes it as a tag (ElevenLabs) or a volume (Cartesia); the rest go by speed and style. */
       tone?: 'whisper' | 'shout';
     }[];
     /** Seconds of silence before the first word; the times it reports count from the true start. */
@@ -58,7 +58,7 @@ export interface SpeechPort {
     words?: { text: string; startMs: number; endMs: number }[];
     /** Tokens in and out, for a voice billed by the token (Gemini); absent otherwise. */
     usage?: { tokensIn: number; tokensOut: number };
-    /** Characters billed, for a voice billed by the character (ElevenLabs); absent otherwise. */
+    /** Characters billed, for a voice billed by the character (ElevenLabs, Cartesia); absent otherwise. */
     characters?: number;
   }>;
   /** What goes into a file's name so audio from one voice never overwrites another's. */
@@ -75,6 +75,11 @@ export interface SpeechPort {
    * character's from it.
    */
   catalogue?(): Promise<VoiceOption[]>;
+  /**
+   * A voice's sample, fetched by the server, for a voice whose samples ask
+   * for the key (Cartesia): the admin page plays it from here.
+   */
+  preview?(voiceId: string): Promise<{ audio: Buffer; mimeType: string }>;
 }
 
 /** A voice a service offers, as the admin page lists it. */

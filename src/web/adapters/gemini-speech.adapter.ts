@@ -27,6 +27,37 @@ const CLOUD_TEXT_BYTES = 3_500;
 /** How long the Gemini API is left alone once its day is spent. */
 const CAPPED_MS = 60 * 60_000;
 
+/**
+ * The Gemini API's voice allows ten requests a minute on Tier 1: every
+ * adapter in the process shares one count, so scenes made side by side
+ * wait their turn rather than being turned away.
+ */
+const sentAt: number[] = [];
+async function paced(perMinute: number): Promise<void> {
+  for (;;) {
+    const now = Date.now();
+    while (sentAt.length && now - sentAt[0] >= 60_000) sentAt.shift();
+    if (sentAt.length < perMinute) {
+      sentAt.push(now);
+      return;
+    }
+    await new Promise((resolve) =>
+      setTimeout(resolve, 60_000 - (now - sentAt[0]) + 250),
+    );
+  }
+}
+
+/** How long Google says to wait ("Please retry in 29s"), in ms, when it says. */
+export function retryAfterMs(reason: string): number | null {
+  const match = /retry in (\d+(?:\.\d+)?)\s*s/i.exec(reason);
+  return match ? Math.round(Number(match[1]) * 1000) + 500 : null;
+}
+
+/** Whether Cloud turned words away as against its usage guidelines. */
+export function guidelineRefusal(message: string): boolean {
+  return /usage guidelines|violates/i.test(message);
+}
+
 /** Whether Google's words say the day's quota is spent, not just a burst. */
 export function dailyCap(reason: string): boolean {
   return /per day|requests per day|\bRPD\b|daily/i.test(reason);
@@ -379,7 +410,7 @@ export function rateOf(mimeType: string): number | null {
 export class GeminiSpeechAdapter implements SpeechPort {
   private readonly logger = new Logger(GeminiSpeechAdapter.name);
   /** A rate limit or a 5xx is worth two more tries; a refusal is not. */
-  private static readonly ATTEMPTS = 3;
+  private static readonly ATTEMPTS = 5;
   /** A page is well under a minute of work for the voice. */
   private static readonly REQUEST_MS = 3 * 60_000;
   /** Until when the Gemini API's day is spent, so Cloud speaks at once. */
@@ -571,13 +602,16 @@ export class GeminiSpeechAdapter implements SpeechPort {
         : interactionRequest(model, voice, items);
     let answer: unknown;
     try {
-      answer = await this.attempts(url, { 'x-goog-api-key': key }, body);
+      answer = await this.attempts(url, { 'x-goog-api-key': key }, body, true);
     } catch (error) {
       const spent = (error as { daily?: boolean }).daily === true;
-      if (!spent || !cloudReady) throw error;
-      this.cappedUntil = Date.now() + CAPPED_MS;
+      const busy = (error as { busy?: boolean }).busy === true;
+      if ((!spent && !busy) || !cloudReady) throw error;
+      this.cappedUntil = Date.now() + (spent ? CAPPED_MS : 2 * 60_000);
       this.logger.warn(
-        "The Gemini voice's day is spent: Cloud Text-to-Speech speaks in the same voices for the next hour",
+        spent
+          ? "The Gemini voice's day is spent: Cloud Text-to-Speech speaks in the same voices for the next hour"
+          : 'The Gemini voice is still busy after waiting: Cloud Text-to-Speech speaks in the same voices for two minutes',
       );
       return {
         pcm: await this.cloud(voice, items),
@@ -648,6 +682,50 @@ export class GeminiSpeechAdapter implements SpeechPort {
     };
   }
 
+  /**
+   * One Cloud request's audio. Cloud's filter turns away harmless words
+   * now and then (a children's counting story): then it is asked again
+   * without the direction, then a sentence at a time without it, so only
+   * a sentence it still refuses fails the scene.
+   */
+  private async cloudSay(
+    body: Record<string, unknown>,
+  ): Promise<{ samples: Int16Array; sampleRate: number }[]> {
+    const say = async (one: Record<string, unknown>) => {
+      const answer = (await this.attempts(
+        CLOUD_TTS,
+        await this.cloudHeaders(),
+        one,
+      )) as { audioContent?: string };
+      if (!answer?.audioContent)
+        throw new Error('Cloud Text-to-Speech sent no audio');
+      const bytes = Buffer.from(answer.audioContent, 'base64');
+      return readWav(bytes) ?? readPcm16(bytes, 24000);
+    };
+    const input = body.input as { text: string; prompt?: string };
+    try {
+      return [await say(body)];
+    } catch (error) {
+      if (!guidelineRefusal((error as Error).message)) throw error;
+    }
+    this.logger.warn(
+      `Cloud Text-to-Speech turned away "${input.text.slice(0, 120)}" (${input.prompt ?? 'no direction'}): asked again plainly`,
+    );
+    const plain = { ...body, input: { text: input.text } };
+    try {
+      return [await say(plain)];
+    } catch (error) {
+      if (!guidelineRefusal((error as Error).message)) throw error;
+    }
+    const sentences = input.text.match(/[^.!?]+[.!?]*["'”’)]*\s*/g) ?? [
+      input.text,
+    ];
+    const out: { samples: Int16Array; sampleRate: number }[] = [];
+    for (const sentence of sentences.map((one) => one.trim()).filter(Boolean))
+      out.push(await say({ ...body, input: { text: sentence } }));
+    return out;
+  }
+
   /** A run spoken by Cloud Text-to-Speech, its requests joined in order. */
   private async cloud(
     voice: string,
@@ -656,16 +734,10 @@ export class GeminiSpeechAdapter implements SpeechPort {
     const parts: Int16Array[] = [];
     let sampleRate = 24000;
     for (const body of cloudRequests(this.cloudModel(), voice, items)) {
-      const headers = await this.cloudHeaders();
-      const answer = (await this.attempts(CLOUD_TTS, headers, body)) as {
-        audioContent?: string;
-      };
-      if (!answer?.audioContent)
-        throw new Error('Cloud Text-to-Speech sent no audio');
-      const bytes = Buffer.from(answer.audioContent, 'base64');
-      const pcm = readWav(bytes) ?? readPcm16(bytes, 24000);
-      sampleRate = pcm.sampleRate;
-      parts.push(pcm.samples);
+      for (const pcm of await this.cloudSay(body)) {
+        sampleRate = pcm.sampleRate;
+        parts.push(pcm.samples);
+      }
     }
     const samples = new Int16Array(parts.reduce((n, p) => n + p.length, 0));
     let at = 0;
@@ -685,6 +757,7 @@ export class GeminiSpeechAdapter implements SpeechPort {
     url: string,
     auth: Record<string, string>,
     body: Record<string, unknown>,
+    gemini = false,
   ): Promise<unknown> {
     let lastError: Error | null = null;
     for (
@@ -694,6 +767,10 @@ export class GeminiSpeechAdapter implements SpeechPort {
     ) {
       let wait = 2_000 * attempt * attempt;
       try {
+        if (gemini)
+          await paced(
+            Number(this.config.get<string>('GEMINI_TTS_PER_MINUTE')) || 9,
+          );
         const response = await this.send(url, {
           method: 'POST',
           headers: {
@@ -721,7 +798,11 @@ export class GeminiSpeechAdapter implements SpeechPort {
           const after = Number(response.headers.get('retry-after'));
           if (Number.isFinite(after) && after > 0)
             wait = Math.min(60_000, after * 1000);
-          throw new Error(`The Gemini voice is rate limited: ${reason}`);
+          wait = Math.min(65_000, retryAfterMs(reason) ?? wait);
+          throw Object.assign(
+            new Error(`The Gemini voice is rate limited: ${reason}`),
+            { busy: true },
+          );
         }
         if (response.status >= 400 && response.status < 500)
           throw refused(

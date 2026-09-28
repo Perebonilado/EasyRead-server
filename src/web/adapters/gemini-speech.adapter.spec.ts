@@ -15,10 +15,15 @@ import {
   cloudRequests,
   dailyCap,
   serviceAccountJson,
+  retryAfterMs,
+  guidelineRefusal,
 } from './gemini-speech.adapter';
 
+// Paced at the limit Google sets only where a test says so.
 const config = (values: Record<string, string>) =>
-  ({ get: (key: string) => values[key] }) as unknown as ConfigService;
+  ({
+    get: (key: string) => ({ GEMINI_TTS_PER_MINUTE: '10000', ...values })[key],
+  }) as unknown as ConfigService;
 
 const wav = (seconds: number) =>
   writeWav({
@@ -406,5 +411,52 @@ describe('the Gemini voice', () => {
     const json = '{"type":"service_account","project_id":"p"}';
     expect(serviceAccountJson(json)).toBe(json);
     expect(serviceAccountJson(Buffer.from(json).toString('base64'))).toBe(json);
+  });
+
+  it('waits as long as Google says, and knows a refusal of the words', () => {
+    expect(retryAfterMs('Please retry in 29s or upgrade')).toBe(29_500);
+    expect(retryAfterMs('slow down')).toBeNull();
+    expect(
+      guidelineRefusal(
+        "the input text or prompt violates Vertex AI's usage guidelines",
+      ),
+    ).toBe(true);
+  });
+
+  it('asks Cloud again plainly when its filter turns the words away', async () => {
+    const asked: Record<string, unknown>[] = [];
+    const adapter = new GeminiSpeechAdapter(
+      config({ GEMINI_API_KEY: 'k', GOOGLE_CLOUD_TTS_API_KEY: 'c' }),
+      (samples) => Promise.resolve(Buffer.from(`mp3:${samples.length}`)),
+      (url: unknown, init?: RequestInit) => {
+        if (!String(url).includes('texttospeech'))
+          return Promise.resolve(
+            reply(429, { error: { message: '100 requests per day' } }),
+          );
+        const body = JSON.parse(init?.body as string) as {
+          input: { prompt?: string };
+        };
+        asked.push(body);
+        return Promise.resolve(
+          body.input.prompt
+            ? reply(400, {
+                error: {
+                  message:
+                    "the input text or prompt violates Vertex AI's usage guidelines",
+                },
+              })
+            : reply(200, { audioContent: wav(1).toString('base64') }),
+        );
+      },
+    );
+    const said = await adapter.synthesize({
+      text: 'x',
+      pieces: [{ text: 'One, two, three.', pauseAfter: 0, style: 'counting' }],
+    });
+    expect(said.durationMs).toBe(1000);
+    expect(asked.map((one) => one.input)).toEqual([
+      { text: 'One, two, three.', prompt: 'counting' },
+      { text: 'One, two, three.' },
+    ]);
   });
 });

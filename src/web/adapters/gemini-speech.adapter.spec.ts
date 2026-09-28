@@ -14,6 +14,7 @@ import {
   usageIn,
   cloudRequests,
   dailyCap,
+  serviceAccountJson,
 } from './gemini-speech.adapter';
 
 const config = (values: Record<string, string>) =>
@@ -399,5 +400,11 @@ describe('the Gemini voice', () => {
       { text: 'Three!', prompt: 'shouting' },
       { text: 'Four.' },
     ]);
+  });
+
+  it('reads a service account given as JSON or as base64', () => {
+    const json = '{"type":"service_account","project_id":"p"}';
+    expect(serviceAccountJson(json)).toBe(json);
+    expect(serviceAccountJson(Buffer.from(json).toString('base64'))).toBe(json);
   });
 });

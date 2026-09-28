@@ -609,8 +609,8 @@ export class GeminiSpeechAdapter implements SpeechPort {
   /**
    * How Cloud Text-to-Speech is signed in to. Its Gemini voices take no
    * API key (it answers "API keys are not supported"): a service account
-   * of the project (GOOGLE_CLOUD_TTS_CREDENTIALS, its JSON key file's path
-   * or the JSON itself), its token kept until it runs out, billed to its
+   * of the project (GOOGLE_CLOUD_TTS_CREDENTIALS: its JSON key in base64,
+   * the JSON itself, or its file's path), its token kept until it runs out, billed to its
    * own project. A key is used only where Cloud still takes one.
    */
   private async cloudHeaders(): Promise<Record<string, string>> {
@@ -622,9 +622,11 @@ export class GeminiSpeechAdapter implements SpeechPort {
       return key ? { 'x-goog-api-key': key } : {};
     }
     if (!this.signer) {
-      const account = JSON.parse(
-        given.startsWith('{') ? given : readFileSync(given, 'utf8'),
-      ) as { client_email: string; private_key: string; project_id: string };
+      const account = JSON.parse(serviceAccountJson(given)) as {
+        client_email: string;
+        private_key: string;
+        project_id: string;
+      };
       this.signer = {
         project: account.project_id,
         jwt: new JWT({
@@ -742,6 +744,20 @@ export class GeminiSpeechAdapter implements SpeechPort {
     }
     throw lastError ?? new Error('The Gemini voice did not answer');
   }
+}
+
+/**
+ * A service account's JSON key as the setting gives it: the JSON itself,
+ * the JSON in base64 (one line, kept in the env like any secret), or the
+ * path of its file.
+ */
+export function serviceAccountJson(given: string): string {
+  if (given.startsWith('{')) return given;
+  if (/^[A-Za-z0-9+/=_-]+$/.test(given) && !given.endsWith('.json')) {
+    const decoded = Buffer.from(given, 'base64').toString('utf8').trim();
+    if (decoded.startsWith('{')) return decoded;
+  }
+  return readFileSync(given, 'utf8');
 }
 
 /** Google's own words for what was wrong, out of its JSON envelope when it sent one. */

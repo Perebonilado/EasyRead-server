@@ -27,7 +27,7 @@ import {
   type FigureSign,
   type FigureSpec,
 } from '../scene-figure';
-import { KIT_FACES } from '../scene-figure';
+import { ASKED_FACES, KIT_FACES } from '../scene-figure';
 import { animalOf, type AnimalSpec } from '../scene-animal';
 import { creatureOf, type CreatureSpec } from '../scene-creature';
 import { faceNamed } from '../scene-feeling';
@@ -768,8 +768,12 @@ export const MOST_ON_STAGE = 4;
 export const STUDIO_DOINGS = ACTION_DOINGS;
 export type StudioDoing = DoingId;
 
-/** Every face someone can wear: the story's seven and the kit's own. */
-export const STUDIO_FACES = [...EXPRESSIONS, ...KIT_FACES] as const;
+/** Every face someone can wear: the story's seven, the kit's own, and eyes closed (drawn when a scene shows it). */
+export const STUDIO_FACES = [
+  ...EXPRESSIONS,
+  ...KIT_FACES,
+  ...ASKED_FACES,
+] as const;
 
 export const BEAT_KINDS = [
   'line',

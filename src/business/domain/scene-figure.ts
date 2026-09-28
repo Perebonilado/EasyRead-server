@@ -225,8 +225,35 @@ export const signId = (sign: string) => sign.replace(/\s+/g, '-');
 /** Faces only the kit draws, besides the story's seven: worn one at a time with them. */
 export const KIT_FACES = ['pain'] as const;
 export type KitFace = (typeof KIT_FACES)[number];
+/**
+ * Faces the kit draws only on a page that shows them (FigureHow.faces,
+ * AnimalHow.faces), so everyone drawn before is drawn as before. Eyes
+ * closed: the lids shut, the brows at rest, the mouth calm, and no Zs;
+ * someone knocked out, fainted, resting, praying, pretending to sleep, a
+ * giant felled. Gentle, never gory. The mouth still talks, and no blink
+ * opens the eyes while it is worn.
+ */
+export const ASKED_FACES = ['eyes closed'] as const;
+export type AskedFace = (typeof ASKED_FACES)[number];
 /** Every face someone drawn by the kit can wear. */
-export type FigureFace = Expression | KitFace;
+export type FigureFace = Expression | KitFace | AskedFace;
+/** The faces the kit always draws: the story's seven and its own. */
+export type DrawnFace = Expression | KitFace;
+/** Whether a face is one the kit draws only when a page shows it. */
+export const isAskedFace = (face: unknown): face is AskedFace =>
+  (ASKED_FACES as readonly unknown[]).includes(face);
+/** The group a face is drawn in: "eyes closed" in "eyes-closed". */
+export const faceId = (face: string) => face.replace(/\s+/g, '-');
+/** The asked faces to draw, of those a page shows: in the list's order. */
+export function facesFor(asked: readonly string[] = []): AskedFace[] {
+  return ASKED_FACES.filter((face) => asked.includes(face));
+}
+/** While the eyes are closed no blink opens them: the CSS for the asked faces drawn. */
+export function shutStyle(faces: readonly AskedFace[]): string {
+  return faces.includes('eyes closed')
+    ? `.on-${faceId('eyes closed')} .blink{display:none}`
+    : '';
+}
 
 /** What someone can hold in their hand. */
 export const FIGURE_PROPS = [
@@ -680,10 +707,12 @@ export const FACE_MOUTHS: Record<Expression, { mouth: string; talk: string }> =
   ) as Record<Expression, { mouth: string; talk: string }>;
 
 const FACE_NAMES = Object.keys(FACES) as Expression[];
-/** Every face a person or a character drawn by the kit can wear: the story's seven, in its order, and the kit's own. */
-export const FIGURE_FACES: readonly FigureFace[] = [
-  ...FACE_NAMES,
-  ...KIT_FACES,
+/** Every face a person or a character drawn by the kit has drawn: the story's seven, in its order, and the kit's own. */
+export const FIGURE_FACES: readonly DrawnFace[] = [...FACE_NAMES, ...KIT_FACES];
+/** Every face anyone the kit draws can be asked to wear: those always drawn, then those drawn when a page shows them. */
+export const EVERY_FACE: readonly FigureFace[] = [
+  ...FIGURE_FACES,
+  ...ASKED_FACES,
 ];
 
 /**
@@ -1226,6 +1255,66 @@ export function painEyes(R: FaceRig, skin: string, k = 1): string {
     )
     .join('');
   return eyes + `<g class="brows">${brows}</g>`;
+}
+
+/** The eyes-closed face: lids shut as a blink shuts them, brows at rest, the calm face's mouth at rest and talking. */
+function closedFace(R: Rig, skin: string): string {
+  return (
+    closedEyes(R, skin) +
+    `<g class="mouth">${mouthShape(FACES.neutral.mouth, R.mouthY)}</g>` +
+    `<g class="talk" opacity="0">${mouthShape(FACES.neutral.talk, R.mouthY)}</g>`
+  );
+}
+
+/** Eyes closed: the lids shut, and the brows at rest over them. */
+function closedEyes(R: FaceRig, skin: string): string {
+  return shutEyes(R, skin) + calmBrows(R);
+}
+
+/**
+ * Eyes shut and calm: each eye's white under the skin, its outline too
+ * (`pad` past it, half its line and a little), and the lid a soft curve
+ * down, as a blink draws it. `k` weighs the lid's line.
+ */
+export function shutEyes(
+  R: Pick<FaceRig, 'eyes'>,
+  skin: string,
+  k = 1,
+  pad = LINE / 2 + 0.7,
+): string {
+  const { y, dx, rx, ry } = R.eyes;
+  const w = k === 1 ? 3 : Math.round(3 * k * 100) / 100;
+  const p = Math.round(pad * 100) / 100;
+  return [-1, 1]
+    .map((side) => {
+      const ex = side * dx;
+      return (
+        `<ellipse cx="${ex}" cy="${y}" rx="${rx + p}" ry="${ry + p}" ${flat(skin)}/>` +
+        line(
+          `M${pt(ex - 11, y + 1)} Q${pt(ex, y + 7)} ${pt(ex + 11, y + 1)}`,
+          FIGURE_INK,
+          w,
+        )
+      );
+    })
+    .join('');
+}
+
+/** Brows at rest: level, a little low over closed eyes. `k` weighs the lines, as faceEyes' brows. */
+export function calmBrows(R: FaceRig, k = 1): string {
+  const { y, dx, ry } = R.eyes;
+  const by = y - ry - 3;
+  const brows = [-1, 1]
+    .map((side) => {
+      const ex = side * dx;
+      return line(
+        `M${pt(ex + side * 11, by + 1)} L${pt(ex - side * 8, by)}`,
+        FIGURE_INK,
+        k === 1 ? 3.4 : Math.round(3.4 * k * 100) / 100,
+      );
+    })
+    .join('');
+  return `<g class="brows">${brows}</g>`;
 }
 
 // ── Hair and headwear ──────────────────────────────────────────────────────
@@ -2207,6 +2296,8 @@ interface Layers {
   faces: Record<Expression, string>;
   /** The kit's own faces. */
   more: Record<KitFace, string>;
+  /** The faces drawn only when a page shows them. */
+  asked: Record<AskedFace, string>;
   /** The mouth's shapes while speaking, shared by every face. */
   mouths: string;
   signs: Record<FigureSign, string>;
@@ -2651,6 +2742,7 @@ function layersOf(
       FACE_NAMES.map((name) => [name, fm(faceOf(name, R, skin))]),
     ) as Record<Expression, string>,
     more: { pain: fm(painFace(R, skin)) },
+    asked: { 'eyes closed': fm(closedFace(R, skin)) },
     mouths: fm(mouthsOf(R)),
     // Lying down, what floats over the head is turned back upright
     // about it, so steam rises and a question mark reads.
@@ -2899,11 +2991,15 @@ export function eyeClipPath(R: FaceRig, id = 'eyes'): string {
     .join('')}</clipPath>`;
 }
 
-/** Every state a figure has, by name to the id of its group: the faces, the kit's faces, and the signs drawn. */
-function statesOf(signs: readonly FigureSign[]): Record<string, string> {
+/** Every state a figure has, by name to the id of its group: the faces, the kit's faces, those asked for, and the signs drawn. */
+function statesOf(
+  signs: readonly FigureSign[],
+  faces: readonly AskedFace[] = [],
+): Record<string, string> {
   return Object.fromEntries(
     [
       ...FIGURE_FACES.map((name) => [name, name]),
+      ...faces.map((name) => [name, faceId(name)]),
       ...signs.map((name) => [name, signId(name)]),
     ].map(([name, id]): [string, string] => [name, id]),
   );
@@ -2938,6 +3034,8 @@ function drawInBed(
   asked?: readonly FigureSign[],
   /** Before beds had metal frames: a low wooden pallet and a woven mat. */
   old = false,
+  /** The faces drawn only when asked for: eyes closed. */
+  faces: readonly AskedFace[] = [],
 ): FigureDrawing {
   const layers = layersOf(spec);
   const { R } = layers;
@@ -3038,7 +3136,7 @@ function drawInBed(
   ];
   const svg = [
     `<svg xmlns="http://www.w3.org/2000/svg" viewBox="${[fx, fy, fw, fh].join(' ')}">`,
-    `<style>${styleOf(r1(beatOf(key) * 4.6), [r1(0.3 + beatOf(key) * 2.4)], drawn, false, R.sY + 6)}</style>`,
+    `<style>${styleOf(r1(beatOf(key) * 4.6), [r1(0.3 + beatOf(key) * 2.4)], drawn, false, R.sY + 6)}${shutStyle(faces)}</style>`,
     eyeClip(R),
     `<ellipse cx="0" cy="0" rx="${w}" ry="8" fill="#1d1a22" fill-opacity="0.16"/>`,
     `<g stroke="${FIGURE_INK}" stroke-width="${LINE}" stroke-linejoin="round">`,
@@ -3052,6 +3150,9 @@ function drawInBed(
       (name) => `<g id="${name}">${moved(layers.faces[name])}</g>`,
     ).join(''),
     `<g id="pain">${moved(layers.more.pain)}</g>`,
+    faces
+      .map((name) => `<g id="${faceId(name)}">${moved(layers.asked[name])}</g>`)
+      .join(''),
     `<g class="mouths">${moved(layers.mouths)}</g>`,
     drawn.map((name) => `<g id="${signId(name)}">${signs[name]}</g>`).join(''),
     `<g class="blink b0" opacity="0">${moved(layers.blink)}</g>`,
@@ -3064,7 +3165,7 @@ function drawInBed(
     svg,
     viewBox: [fx, fy, fw, fh],
     parts: { head: 'head', body: 'body', arms: 'arms', legs: 'legs' },
-    states: statesOf(drawn),
+    states: statesOf(drawn, faces),
     anchors: {
       head: [hx, hy],
       body: [hx + 90, top - 12],
@@ -3082,6 +3183,8 @@ export interface FigureHow {
   holding?: FigureProp | null;
   /** The signs drawn, ready to be shown: only those the page shows, so a figure carries no more than it needs. */
   signs?: readonly FigureSign[];
+  /** The faces drawn only when a page shows them (ASKED_FACES): eyes closed. */
+  faces?: readonly string[];
   /** A story set before beds had metal frames: a bed is a low wooden pallet with a mat. */
   old?: boolean;
   /**
@@ -3175,7 +3278,8 @@ export function drawFigure(
 ): FigureDrawing {
   const key = seed || JSON.stringify(spec);
   const pose = how.pose ?? 'standing';
-  if (pose === 'in bed') return drawInBed(spec, key, how.signs, how.old);
+  const faces = facesFor(how.faces);
+  if (pose === 'in bed') return drawInBed(spec, key, how.signs, how.old, faces);
   const lying = pose === 'lying';
   const n = lying
     ? 1
@@ -3244,7 +3348,9 @@ export function drawFigure(
       drawn,
       posed === 'waving',
       R.sY + 6,
-    ) + dressStyle(changes.map((one) => one.state));
+    ) +
+    dressStyle(changes.map((one) => one.state)) +
+    shutStyle(faces);
   const person = [
     `<g id="legs">${worn((l) => l.legs)}</g>`,
     `<g class="breathe">`,
@@ -3256,6 +3362,9 @@ export function drawFigure(
       (name) => `<g id="${name}">${all((l) => l.faces[name])}</g>`,
     ).join(''),
     `<g id="pain">${all((l) => l.more.pain)}</g>`,
+    faces
+      .map((name) => `<g id="${faceId(name)}">${all((l) => l.asked[name])}</g>`)
+      .join(''),
     `<g class="mouths">${all((l) => l.mouths)}</g>`,
     `<g id="reach">${worn((l) => l.reach)}</g>`,
     drawn
@@ -3296,7 +3405,7 @@ export function drawFigure(
     viewBox,
     parts: { head: 'head', body: 'body', arms: 'arms', legs: 'legs' },
     states: {
-      ...statesOf(drawn),
+      ...statesOf(drawn, faces),
       ...Object.fromEntries(changes.map((one) => [one.state, one.state])),
     },
     anchors: {

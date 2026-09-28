@@ -12,7 +12,16 @@ import { drawAnimal } from '../scene-animal-draw';
 import type { CreatureSpec } from '../scene-creature';
 import { drawCreature } from '../scene-creature-draw';
 import { byId, elements, removeNode } from '../scene-dom';
-import { drawFigure, type FigureFace, type FigureSpec } from '../scene-figure';
+import {
+  drawFigure,
+  isAskedFace,
+  type FigureFace,
+  type FigureSpec,
+} from '../scene-figure';
+
+/** What to draw for a face: one drawn only when asked for is asked for. */
+const asking = (face: FigureFace) =>
+  isAskedFace(face) ? { faces: [face] } : {};
 
 /** A drawing with only one of its states on: `face`. */
 function wearing(
@@ -35,7 +44,7 @@ export function animalPreview(
   seed: string,
   face: FigureFace = 'happy',
 ): string {
-  return wearing(drawAnimal(spec, seed), face);
+  return wearing(drawAnimal(spec, seed, asking(face)), face);
 }
 
 /** A creature drawn by the kit with only `face` on. */
@@ -44,7 +53,7 @@ export function creaturePreview(
   seed: string,
   face: FigureFace = 'happy',
 ): string {
-  return wearing(drawCreature(spec, seed), face);
+  return wearing(drawCreature(spec, seed, asking(face)), face);
 }
 
 /** A person drawn by the kit with only `face` on. */
@@ -53,5 +62,5 @@ export function figurePreview(
   seed: string,
   face: FigureFace = 'happy',
 ): string {
-  return wearing(drawFigure(spec, seed), face);
+  return wearing(drawFigure(spec, seed, asking(face)), face);
 }

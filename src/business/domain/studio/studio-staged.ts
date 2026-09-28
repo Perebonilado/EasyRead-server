@@ -72,6 +72,16 @@ const SIGNS_SEEN: Record<string, string> = {
   dizzy: 'dizzy, stars round the head',
 };
 const SIGNS = new Set<string>(FIGURE_SIGNS);
+/** Faces a viewer names apart from a feeling, as they see them come and go. */
+const FACES_SEEN = new Map<string, { on: string; off: string }>([
+  [
+    'eyes closed',
+    {
+      on: 'has their eyes closed: shut and calm, no Zs',
+      off: 'opens their eyes',
+    },
+  ],
+]);
 /** Two things this close together, in ms, happen at once. */
 const SAME_MOMENT = 200;
 /** What the stage may play a handling as, for what the words have done: a catch of nothing coming is a take. */
@@ -432,17 +442,21 @@ export function describeStaged(
     const k = shown ? Number(shown.part!.slice('dress-'.length)) : 0;
     return person.wears?.[k] ?? null;
   };
-  /** Signs shown and taken off, and those said with a beat: the rest are said on their own. */
+  /** Signs shown and taken off (and eyes closed and opened), and those said with a beat: the rest are said on their own. */
   const signChanges = scene.effects.filter(
     (e) =>
       e.part &&
-      SIGNS.has(e.part) &&
+      (SIGNS.has(e.part) || FACES_SEEN.has(e.part)) &&
       (e.do === 'show' || e.do === 'hide') &&
       people.some((p) => p.id === e.target),
   );
   const saidSigns = new Set<(typeof signChanges)[number]>();
-  const signSaid = (effect: (typeof signChanges)[number]) =>
-    `${nameOf(effect.target)} ${effect.do === 'show' ? 'shows' : 'no longer shows'} ${SIGNS_SEEN[effect.part!] ?? `"${effect.part}"`}`;
+  const signSaid = (effect: (typeof signChanges)[number]) => {
+    const face = FACES_SEEN.get(effect.part!);
+    return face
+      ? `${nameOf(effect.target)} ${effect.do === 'show' ? face.on : face.off}`
+      : `${nameOf(effect.target)} ${effect.do === 'show' ? 'shows' : 'no longer shows'} ${SIGNS_SEEN[effect.part!] ?? `"${effect.part}"`}`;
+  };
   const lines: string[] = [];
   // How tall each of the set's things stands beside the people.
   const tallest = Math.max(

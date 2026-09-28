@@ -19,7 +19,7 @@ import type {
   ThingAction,
 } from './scene-doings';
 import {
-  FIGURE_FACES,
+  EVERY_FACE,
   FIGURE_POSES,
   FIGURE_PROPS,
   FIGURE_SIGNS,
@@ -28,8 +28,10 @@ import {
   MOST_TOGETHER,
   ON_FOOT,
   canHold,
+  facesFor,
   figureFor,
   figureOf,
+  type AskedFace,
   type FigureFace,
   type FigurePose,
   type FigureProp,
@@ -515,8 +517,8 @@ export function stateNames(thing: SceneThing): string[] {
   return [];
 }
 
-/** Every face a person or a character can wear: the story's seven and the kit's own. */
-export const FACES = FIGURE_FACES;
+/** Every face a person or a character can wear: the story's seven, the kit's own, and those drawn when a page shows them. */
+export const FACES = EVERY_FACE;
 export const isFace = (value: unknown): value is FigureFace =>
   (FACES as readonly unknown[]).includes(value);
 
@@ -540,6 +542,25 @@ export function signsShown(script: SceneScript, id: string): FigureSign[] {
     ),
   );
   return FIGURE_SIGNS.filter((sign) => first.includes(sign) || shown.has(sign));
+}
+
+/**
+ * The faces the kit draws only when asked (eyes closed) that a person or
+ * a character wears on a page: the one they come on with, and those an
+ * effect shows. Only these are drawn, so everyone else is drawn as before.
+ */
+export function facesShown(script: SceneScript, id: string): AskedFace[] {
+  const thing = script.cast.find((one) => one.id === id);
+  const worn = new Set<string>(
+    (thing?.kind === 'person' || thing?.kind === 'character') && thing.state
+      ? [thing.state]
+      : [],
+  );
+  for (const step of script.steps)
+    for (const effect of step.effects)
+      if (effect.target === id && effect.do === 'show' && effect.part)
+        worn.add(effect.part);
+  return facesFor([...worn]);
 }
 
 export interface SceneArrow {

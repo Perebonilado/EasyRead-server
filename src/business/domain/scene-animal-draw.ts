@@ -26,15 +26,20 @@ import {
   airOver,
   beatOf,
   blinkOf,
+  calmBrows,
   eyeClipPath,
   faceEyes,
+  faceId,
+  facesFor,
   keyframes,
   mouthShape,
   mouthShapes,
   painEyes,
+  shutEyes,
+  shutStyle,
   signId,
+  type DrawnFace,
   type FaceRig,
-  type FigureFace,
   type FigureSign,
 } from './scene-figure';
 import { FIGURE_INK, flat, inked, line } from './scene-ink';
@@ -86,6 +91,8 @@ export function animalFace(spec: AnimalSpec, seed = ''): SheetFace {
 export interface AnimalHow {
   /** The signs drawn, ready to be shown: only those the page shows. */
   signs?: readonly FigureSign[];
+  /** The faces drawn only when a page shows them (ASKED_FACES): eyes closed. */
+  faces?: readonly string[];
   /**
    * One pose alone, as a still shows it (a contact sheet, a card): the
    * head carried where the pose puts it by the drawing itself. Absent,
@@ -377,6 +384,7 @@ export function drawBuilt(
         : 'stand';
   const shown: AnimalPose[] = how.pose ? [standIn(how.pose)] : poses;
   const signs = how.signs ?? [];
+  const asked = facesFor(how.faces);
 
   // ── The face, the kit's, in its own units about its middle.
   const { face, mouth } = built;
@@ -431,7 +439,7 @@ export function drawBuilt(
       : mouth.kind === 'fish'
         ? FISH_SHAPES.map(fishLips)
         : mouthShapes(0, mouthK);
-  const pairEyes = (name: FigureFace) =>
+  const pairEyes = (name: DrawnFace) =>
     name === 'pain'
       ? painEyes(rig, face.skin, browK)
       : faceEyes(name, rig, face.skin, clip, browK);
@@ -441,7 +449,7 @@ export function drawBuilt(
     eyes: { ...rig.eyes, dx: ONE_BROWS_DX },
     mouthY: 22,
   };
-  const oneEye = (name: FigureFace, clipId: string, brows: boolean) => {
+  const oneEye = (name: DrawnFace, clipId: string, brows: boolean) => {
     const eye =
       name === 'pain'
         ? `<ellipse cx="0" cy="0" rx="${EYE.rx + 0.8}" ry="${EYE.ry + 0.8}" ${flat(face.skin)}/>${line('M-10,-5 L0,2 L10,-5', FIGURE_INK, r2(3.4 * browK))}`
@@ -456,13 +464,13 @@ export function drawBuilt(
       )
     );
   };
-  const eyesOf = (name: FigureFace): string =>
+  const eyesOf = (name: DrawnFace): string =>
     count === 1
       ? oneEye(name, clip, true)
       : count === 3
         ? pairEyes(name) + third(oneEye(name, `${clip}3`, false))
         : pairEyes(name);
-  const faces = FACES.map((name: FigureFace) => {
+  const faces = FACES.map((name: DrawnFace) => {
     const eyes = eyesOf(name);
     const mouths =
       name === 'pain' ? { mouth: 'grit', talk: 'shout' } : FACE_MOUTHS[name];
@@ -489,11 +497,35 @@ export function drawBuilt(
         markup,
     );
   const blinkAt = r1(0.3 + beatOf(`${key}:blink`) * 2.4);
+  // Eyes closed: every eye shut, its outline under the skin too, brows at
+  // rest over the pair (over one eye, as a pair's meet over it), and the
+  // calm face's mouth.
+  const pad = face.eyeLine / s / 2 + 0.7;
+  const shut =
+    shutEyes(rig, face.skin, lidK, pad) +
+    (count === 3
+      ? third(
+          shutEyes(
+            oneRig,
+            face.skin,
+            r2(lidK / THIRD.k),
+            face.eyeLine / s / THIRD.k / 2 + 0.7,
+          ),
+        )
+      : '') +
+    calmBrows(count === 1 ? browsRig : rig, browK);
+  const closed = asked
+    .map(
+      (name) =>
+        `<g id="${faceId(name)}">${inFace(shut)}${atMouth(mouthOf(FACE_MOUTHS.neutral.mouth), 'mouth')}${atMouth(mouthOf(FACE_MOUTHS.neutral.talk), 'talk" opacity="0')}</g>`,
+    )
+    .join('');
 
   // ── Signs: what floats over its head, and what shows on its face.
-  const states: Record<string, string> = Object.fromEntries(
-    FACES.map((name) => [name, name]),
-  );
+  const states: Record<string, string> = Object.fromEntries([
+    ...FACES.map((name): [string, string] => [name, name]),
+    ...asked.map((name): [string, string] => [name, faceId(name)]),
+  ]);
   const signGroups = signs.map((sign) => {
     const gid = `a-${signId(sign)}`;
     states[sign] = gid;
@@ -526,6 +558,7 @@ export function drawBuilt(
     built.head,
     whites,
     faces,
+    closed,
     lipShapes,
     `<g class="blink" opacity="0">${lids()}</g>`,
     // What goes over the eyes (a creature's glasses).
@@ -578,7 +611,7 @@ export function drawBuilt(
   const shadowW = Math.max(10, (built.bounds.right - built.bounds.left) * 0.38);
   const svg = [
     `<svg xmlns="http://www.w3.org/2000/svg" viewBox="${viewBox.join(' ')}">`,
-    `<style>${animalCss(built, poses, how.pose ?? null, signs, beat, blinkAt, id)}</style>`,
+    `<style>${animalCss(built, poses, how.pose ?? null, signs, beat, blinkAt, id)}${shutStyle(asked)}</style>`,
     `<defs>${eyeClipPath(rig, clip)}${count === 3 ? eyeClipPath(oneRig, `${clip}3`) : ''}</defs>`,
     `<ellipse cx="0" cy="-0.6" rx="${r1(shadowW)}" ry="${r1(Math.min(2, shadowW * 0.1))}" fill="#1d1a22" fill-opacity="0.16"/>`,
     `<g class="a-root" stroke="${FIGURE_INK}" stroke-width="${LINE}" stroke-linejoin="round" stroke-linecap="round">`,

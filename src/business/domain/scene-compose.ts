@@ -446,8 +446,11 @@ export function sidesKept(
 /** How long before a character comes on their first face is put on: the player fades a state in over 320ms. */
 const FACE_EARLY_MS = 400;
 
-/** A face a drawing does not have, as the nearest one it does: an animal the artist drew has no face of pain. */
-const NEAREST_FACE: Record<string, string> = { pain: 'afraid' };
+/** A face a drawing does not have, as the nearest one it does: an animal the artist drew has no face of pain, nor its eyes closed. */
+const NEAREST_FACE: Record<string, string> = {
+  pain: 'afraid',
+  'eyes closed': 'neutral',
+};
 
 /**
  * A character wears one face at a time: a face shown takes the place of

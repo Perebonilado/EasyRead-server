@@ -655,7 +655,12 @@ export function storyBibleFor(
       summary: sheet.title,
       present: sheet.onStage.map((p) => ({
         id: p.who,
-        mood: p.face === 'pain' ? 'sad' : p.face,
+        mood:
+          p.face === 'pain'
+            ? 'sad'
+            : p.face === 'eyes closed'
+              ? 'neutral'
+              : p.face,
       })),
       place: sheet.set || null,
       time: sheet.time,

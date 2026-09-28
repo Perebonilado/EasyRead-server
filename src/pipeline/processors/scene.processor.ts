@@ -75,6 +75,7 @@ import {
   type MendedScript,
   sendBack,
   quotedSpans,
+  facesShown,
   signsShown,
   wordsOf,
   type CharacterThing,
@@ -1449,6 +1450,7 @@ export class SceneProcessor {
           pose: thing.pose,
           holding: thing.holding,
           signs: signsShown(script, thing.id),
+          faces: facesShown(script, thing.id),
           old: oldWorld(story?.bible.world?.era),
         }).catch((error: unknown) => {
           this.logger.warn(
@@ -1486,6 +1488,8 @@ export class SceneProcessor {
       // lantern, shaking), with the signs it shows on them, and with the
       // kit's rig as it is now, so they act. Anyone else, the book's sheet.
       const signs = signsShown(script, thing.id);
+      // And the faces drawn only when shown: eyes closed.
+      const faces = facesShown(script, thing.id);
       // In what they wear as it opens (a Studio story's pyjamas), and the
       // clothes they change into, each shown as its state is.
       // An animal the kit drew, likewise from its spec (the story's, as
@@ -1504,13 +1508,14 @@ export class SceneProcessor {
             pose: thing.pose,
             holding: thing.holding,
             signs,
+            faces,
             old: oldWorld(story?.bible.world?.era),
             ...(thing.dress?.length ? { dress: thing.dress } : {}),
           })
         : kitAnimal
-          ? await animalDrawing(kitAnimal, thing.ref, { signs })
+          ? await animalDrawing(kitAnimal, thing.ref, { signs, faces })
           : kitCreature
-            ? await creatureDrawing(kitCreature, thing.ref, { signs })
+            ? await creatureDrawing(kitCreature, thing.ref, { signs, faces })
             : null;
       const { anchors: pageAnchors, ...posed } = onPage ?? { anchors: null };
       let drawing = onPage ? (posed as GatedDrawing) : sheet?.drawing;

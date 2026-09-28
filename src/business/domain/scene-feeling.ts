@@ -74,10 +74,32 @@ const NEAREST: Record<string, FigureFace> = {
   confused: 'thinking',
   doubtful: 'thinking',
   calm: 'neutral',
+  // Still, the eyes shut and calm: never gory.
+  'eyes closed': 'eyes closed',
+  'closed eyes': 'eyes closed',
+  'eyes shut': 'eyes closed',
+  unconscious: 'eyes closed',
+  'knocked out': 'eyes closed',
+  fainted: 'eyes closed',
+  resting: 'eyes closed',
+  praying: 'eyes closed',
 };
 
 /** A feeling the writer named, as one of the kit's faces; null when it is none. */
 export function faceNamed(state: string | null | undefined): FigureFace | null {
   const word = (state ?? '').trim().toLowerCase();
   return NEAREST[word] ?? null;
+}
+
+/**
+ * Words that say someone's eyes are shut and calm, as the face "eyes
+ * closed" shows them: knocked out, fainted, out cold, lying still,
+ * pretending to sleep, felled. Never Zs: asleep is the sign "sleeping".
+ */
+const EYES_CLOSED_WORDS =
+  /\b(?:eyes? (?:(?:are|is|were|was|now|still|tightly|gently) )*(?:closed|shut)|(?:clos|shut)(?:es|ed|ing|s)? (?:his|her|their|its|my|your|both) eyes|closed eyes|knocked (?:out|senseless|unconscious)|unconscious|faint(?:s|ed|ing)|(?:passes|passed|passing) out|out cold|(?:lies|lay|laid|lying) (?:quite |very |perfectly )?still|pretend(?:s|ed|ing)? to (?:sleep|be asleep|be dead)|play(?:s|ed|ing)? dead|(?:falls?|fell|lies|lay|lying|drops?|dropped) (?:down )?dead|(?:as if|like) (?:he|she|they|it) (?:is|was|were) dead|lifeless)\b/iu;
+
+/** Whether words say someone's eyes are shut and calm: the face "eyes closed". */
+export function eyesClosedIn(say: string): boolean {
+  return EYES_CLOSED_WORDS.test(say);
 }

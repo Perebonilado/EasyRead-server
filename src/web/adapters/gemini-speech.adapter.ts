@@ -2,6 +2,8 @@ import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import type { SpeechPort } from '../../business/ports/voice.port';
 import { pcmMs, readPcm16, readWav } from '../../business/domain/wav';
+import { readFileSync } from 'fs';
+import { JWT } from 'google-auth-library';
 import { encodeMp3 } from './audio/mp3';
 
 /** The Gemini API's home. */
@@ -382,6 +384,8 @@ export class GeminiSpeechAdapter implements SpeechPort {
   private static readonly REQUEST_MS = 3 * 60_000;
   /** Until when the Gemini API's day is spent, so Cloud speaks at once. */
   private cappedUntil = 0;
+  /** Cloud's service account, signed in once. */
+  private signer: { jwt: JWT; project: string } | null = null;
 
   constructor(
     private readonly config: ConfigService,
@@ -542,7 +546,7 @@ export class GeminiSpeechAdapter implements SpeechPort {
   /**
    * One run of one voice, as 16-bit samples: from the Gemini API, or from
    * Cloud Text-to-Speech in the same voice once the Gemini API's day is
-   * spent and a Cloud key is set. A film is never stopped by the cap.
+   * spent and Cloud is set up. A film is never stopped by the cap.
    */
   private async voiceRun(
     model: string,
@@ -554,12 +558,10 @@ export class GeminiSpeechAdapter implements SpeechPort {
     usage: { tokensIn: number; tokensOut: number } | null;
     cloud: boolean;
   }> {
-    const cloudKey = this.config
-      .get<string>('GOOGLE_CLOUD_TTS_API_KEY')
-      ?.trim();
-    if (cloudKey && Date.now() < this.cappedUntil)
+    const cloudReady = this.cloudReady();
+    if (cloudReady && Date.now() < this.cappedUntil)
       return {
-        pcm: await this.cloud(voice, items, cloudKey),
+        pcm: await this.cloud(voice, items),
         usage: null,
         cloud: true,
       };
@@ -569,16 +571,16 @@ export class GeminiSpeechAdapter implements SpeechPort {
         : interactionRequest(model, voice, items);
     let answer: unknown;
     try {
-      answer = await this.attempts(url, key, body);
+      answer = await this.attempts(url, { 'x-goog-api-key': key }, body);
     } catch (error) {
       const spent = (error as { daily?: boolean }).daily === true;
-      if (!spent || !cloudKey) throw error;
+      if (!spent || !cloudReady) throw error;
       this.cappedUntil = Date.now() + CAPPED_MS;
       this.logger.warn(
         "The Gemini voice's day is spent: Cloud Text-to-Speech speaks in the same voices for the next hour",
       );
       return {
-        pcm: await this.cloud(voice, items, cloudKey),
+        pcm: await this.cloud(voice, items),
         usage: null,
         cloud: true,
       };
@@ -596,16 +598,64 @@ export class GeminiSpeechAdapter implements SpeechPort {
     };
   }
 
+  /** Whether Cloud Text-to-Speech can be asked: a service account, or a key. */
+  private cloudReady(): boolean {
+    return Boolean(
+      this.config.get<string>('GOOGLE_CLOUD_TTS_CREDENTIALS')?.trim() ||
+      this.config.get<string>('GOOGLE_CLOUD_TTS_API_KEY')?.trim(),
+    );
+  }
+
+  /**
+   * How Cloud Text-to-Speech is signed in to. Its Gemini voices take no
+   * API key (it answers "API keys are not supported"): a service account
+   * of the project (GOOGLE_CLOUD_TTS_CREDENTIALS, its JSON key file's path
+   * or the JSON itself), its token kept until it runs out, billed to its
+   * own project. A key is used only where Cloud still takes one.
+   */
+  private async cloudHeaders(): Promise<Record<string, string>> {
+    const given = this.config
+      .get<string>('GOOGLE_CLOUD_TTS_CREDENTIALS')
+      ?.trim();
+    if (!given) {
+      const key = this.config.get<string>('GOOGLE_CLOUD_TTS_API_KEY')?.trim();
+      return key ? { 'x-goog-api-key': key } : {};
+    }
+    if (!this.signer) {
+      const account = JSON.parse(
+        given.startsWith('{') ? given : readFileSync(given, 'utf8'),
+      ) as { client_email: string; private_key: string; project_id: string };
+      this.signer = {
+        project: account.project_id,
+        jwt: new JWT({
+          email: account.client_email,
+          key: account.private_key,
+          scopes: ['https://www.googleapis.com/auth/cloud-platform'],
+        }),
+      };
+    }
+    const { token } = await this.signer.jwt.getAccessToken();
+    if (!token)
+      throw refused(
+        401,
+        'Cloud Text-to-Speech gave the service account no token',
+      );
+    return {
+      authorization: `Bearer ${token}`,
+      'x-goog-user-project': this.signer.project,
+    };
+  }
+
   /** A run spoken by Cloud Text-to-Speech, its requests joined in order. */
   private async cloud(
     voice: string,
     items: GeminiItem[],
-    key: string,
   ): Promise<{ samples: Int16Array; sampleRate: number }> {
     const parts: Int16Array[] = [];
     let sampleRate = 24000;
     for (const body of cloudRequests(this.cloudModel(), voice, items)) {
-      const answer = (await this.attempts(CLOUD_TTS, key, body)) as {
+      const headers = await this.cloudHeaders();
+      const answer = (await this.attempts(CLOUD_TTS, headers, body)) as {
         audioContent?: string;
       };
       if (!answer?.audioContent)
@@ -631,7 +681,7 @@ export class GeminiSpeechAdapter implements SpeechPort {
    */
   private async attempts(
     url: string,
-    key: string,
+    auth: Record<string, string>,
     body: Record<string, unknown>,
   ): Promise<unknown> {
     let lastError: Error | null = null;
@@ -646,7 +696,7 @@ export class GeminiSpeechAdapter implements SpeechPort {
           method: 'POST',
           headers: {
             'content-type': 'application/json',
-            'x-goog-api-key': key,
+            ...auth,
           },
           body: JSON.stringify(body),
           signal: AbortSignal.timeout(GeminiSpeechAdapter.REQUEST_MS),

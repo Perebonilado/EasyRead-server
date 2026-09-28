@@ -76,6 +76,13 @@ describe('the action moves, in words', () => {
     expect(read('maya', 'Maya runs as fast as she can to the gate.')).toEqual([
       'run-fast >gate',
     ]);
+    // A burst into a run, and running fast, are sprints too.
+    expect(
+      read('maya', 'Maya bursts into a fast run toward the gate.'),
+    ).toEqual(['run-fast >gate']);
+    expect(read('maya', 'Maya runs fast to the gate.')).toEqual([
+      'run-fast >gate',
+    ]);
     // Everyday moves stay as they were.
     expect(read('maya', 'Maya jumps up and down for joy.')).toEqual(['hop']);
     expect(read('maya', 'Maya jumps over the fence.')).toEqual(['jump >fence']);

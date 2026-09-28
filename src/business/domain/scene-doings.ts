@@ -1158,7 +1158,7 @@ const doings: Record<DoingId, Omit<Doing, 'id' | 'idealMs' | 'phases'>> = {
     aims: ['character', 'feature', 'thing', 'side'],
     aimed: false,
     words:
-      /\b(?:sprint(?:s|ed|ing)?|(?:r[au]n(?:s|ning)?|rac(?:e|es|ed|ing)|dash(?:es|ed|ing)?|bolt(?:s|ed|ing)?|tear(?:s|ing)?|tore) (?:off |away |over |across )?(?:as fast as (?:he|she|they|it) (?:can|could)|at full (?:speed|tilt|pelt)|flat out|like the wind|for (?:his|her|their|its) li(?:fe|ves))|(?:takes?|took) off at a sprint|breaks? into a sprint|broke into a sprint)\b/iu,
+      /\b(?:sprint(?:s|ed|ing)?|(?:r[au]n(?:s|ning)?|rac(?:e|es|ed|ing)|dash(?:es|ed|ing)?|bolt(?:s|ed|ing)?|tear(?:s|ing)?|tore) (?:off |away |over |across )?(?:as fast as (?:he|she|they|it) (?:can|could)|at full (?:speed|tilt|pelt)|flat out|like the wind|for (?:his|her|their|its) li(?:fe|ves))|r[au]n(?:s|ning)? (?:off |away )?(?:really |very |so )?fast|(?:takes?|took) off at a sprint|(?:breaks?|broke|bursts?|burst|bursting) into a (?:fast |flat-out |full )?(?:sprint|run|dash))\b/iu,
     ms: 1400,
     leastMs: 860,
     keyAt: 0.7,

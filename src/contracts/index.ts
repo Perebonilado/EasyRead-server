@@ -1348,6 +1348,13 @@ export interface SceneFeatureDto {
   seat?: Record<'box' | 'wide', number>;
   /** Where one lying on it lies, at each staging: along its top (y), from its foot to its head (x). */
   lies?: Record<'box' | 'wide', { y: number; foot: number; head: number }>;
+  /**
+   * Where one who climbs it or leaps up onto it stands, at each staging:
+   * `y` their feet's, and `x` beside where things catch, one standing there
+   * with their middle three tenths of their width short of it (the stage's
+   * "up:<id>" station). Absent, no one stands up it: a gate, a bench.
+   */
+  perch?: Record<'box' | 'wide', { x: number; y: number }>;
 }
 
 /**
@@ -1357,7 +1364,10 @@ export interface SceneFeatureDto {
  * clap, a sob, a shrug; and on a Studio story's stage the body's own: a
  * jump, a crouch, sitting and lying down (held until they get up),
  * getting up, a fall, a spin, a bow, a kick, and an animal's wag, lick,
- * chew, sniff, dig, wriggle, bark, roll over and shake.
+ * chew, sniff, dig, wriggle, bark, roll over and shake; and the action
+ * moves: a leap (onto a feature: "f:wall"), a landing, a burst into a
+ * sprint, a dodge, a punch that never lands (whoever it is at staggers),
+ * a hard fall, getting up off the ground, and a hero's pose.
  */
 export type SceneActingMove =
   | 'jump'
@@ -1394,7 +1404,17 @@ export type SceneActingMove =
   | 'clap'
   | 'sob'
   | 'shrug'
-  | 'lean-in';
+  | 'lean-in'
+  // The action moves (studio-world-plan §4.5): each a clip the player
+  // plays with a wind-up, the act, a follow-through and a settle.
+  | 'leap'
+  | 'land'
+  | 'run-fast'
+  | 'dodge'
+  | 'punch'
+  | 'fall-hard'
+  | 'get-up'
+  | 'hero';
 
 /**
  * How someone acts on a page: planned by the server from who says what

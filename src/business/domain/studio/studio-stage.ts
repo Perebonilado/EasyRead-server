@@ -39,6 +39,8 @@ import {
   type ThingAction,
 } from '../scene-doings';
 import { STATION_SHARES } from '../scene-layout';
+import { perchOf } from '../scene-set-pieces';
+import { RUN_PACE, WALK_MIN_MS, WALK_STAGE_MS } from '../scene-film';
 import { genderOf } from '../scene-script';
 import { PROP_KIND } from '../scene-props';
 import { DRAWN, ownWords } from '../scene-own';
@@ -273,10 +275,14 @@ const THROWN_PAST = 0.16;
 const BESIDE = 0.1;
 /** Nearer than this across the stage, going there is going nowhere to see. */
 const NEAR = 0.11;
-/** How far across the stage a runner goes in a second, as a share of it (the stage's walk across in four, quickened 2.2 times). */
-const RUN_SHARE_S = 2.2 / 4;
+/** How far across the stage a runner goes in a second, as a share of it (the stage's walk across, WALK_STAGE_MS, quickened RUN_PACE times). */
+const RUN_SHARE_S = RUN_PACE / (WALK_STAGE_MS / 1000);
 /** The longest a run out and back takes. */
 const OUT_MOST_S = 3;
+/** How far a leap with nowhere named carries someone, as a share of the stage: its clip's 1.2 heights of a grown-up. */
+const LEAP_SHARE = 0.22;
+/** Getting up off the ground after a hard fall takes at least this long: its clip's phases at their least. */
+const GET_UP_LEAST_S = 0.96;
 /** What is done touching someone: done beside them. */
 const TOUCHES: ReadonlySet<DoingId> = new Set(['hug', 'lick', 'sniff']);
 /** Farther apart than this across the stage, two are not beside each other. */
@@ -1852,6 +1858,9 @@ export function stageStory(
               moveEffect(who, bobs(who) ? 'hop' : 'lean-in', aim, moment.s),
             );
         }
+        // A move over the going itself: a sprint's lean and pumping arms.
+        if (doing.with && !plain && here.has(who))
+          effects.push(moveEffect(who, doing.with, aim, moment.s));
         if (plain && here.has(who))
           effects.push(
             moveEffect(who, fallbackMove(doing, who), aim, moment.s),
@@ -1884,7 +1893,22 @@ export function stageStory(
           Math.abs(share(was) - share(here.get(aim)!)) > ONE_SPOT
             ? travelTo(who, aim, { ...raw, spot: null }, false)
             : null;
-        if (downTo && (move === 'sit' || move === 'lie')) {
+        // A leap (a landing) carries them: up onto the feature it is at,
+        // where one stands up it (a wall's top); beside it; beside whom it
+        // is at; else on ahead. Their place changes as the move begins,
+        // and the stage flies them there along its arc.
+        const carried =
+          !plain &&
+          doing.carries &&
+          'move' in doing.plays &&
+          move === doing.plays.move
+            ? carriedTo(who, doing.id, aim)
+            : null;
+        if (carried && carried !== was) {
+          here.set(who, carried);
+          stage = stageNow();
+          effects.push(moveEffect(who, move, aim, moment.s));
+        } else if (downTo && (move === 'sit' || move === 'lie')) {
           const lies = move === 'lie' && headLeft(downTo.on);
           const held: SceneEffect = {
             ...heldDown(who, downTo, move),
@@ -1907,7 +1931,10 @@ export function stageStory(
             });
           } else effects.push(held);
         } else if (to && was && to !== was) {
-          const walkS = Math.max(1.1, Math.abs(share(to) - share(was)) * 4);
+          const walkS = Math.max(
+            WALK_MIN_MS / 1000,
+            (Math.abs(share(to) - share(was)) * WALK_STAGE_MS) / 1000,
+          );
           here.set(who, to);
           stage = stageNow();
           afterwards.push({
@@ -2121,7 +2148,21 @@ export function stageStory(
       after: timed.offset,
       stage: null,
       effects: [
-        { target: who, part: null, do: 'stand', ms: Math.round(riseS * 1000) },
+        // Up off the ground after a hard fall, from where it left them;
+        // else up as from anything.
+        now.fell
+          ? {
+              target: who,
+              part: null,
+              do: 'get-up',
+              ms: Math.round(Math.max(riseS, GET_UP_LEAST_S) * 1000),
+            }
+          : {
+              target: who,
+              part: null,
+              do: 'stand',
+              ms: Math.round(riseS * 1000),
+            },
       ],
     });
     if (!now.on) return after(riseS);
@@ -2152,6 +2193,51 @@ export function stageStory(
         room: Math.max(0.3, round(timed.room - used)),
       };
     }
+  }
+
+  /**
+   * Where a move that carries them takes someone (a leap, a landing): up
+   * onto the feature it is at, where one stands up it; else beside it, on
+   * the side they come from; beside whom it is at; a leap with nowhere
+   * named, on ahead toward the middle of the stage. A landing from up on a
+   * feature, down beside it. Null where it takes them nowhere new.
+   */
+  function carriedTo(
+    who: string,
+    id: DoingId,
+    aim: string | null,
+  ): string | null {
+    const was = here.get(who);
+    if (!was) return null;
+    if (id === 'land') {
+      const up = /^up:(.+)$/.exec(was);
+      return up ? besideOf(up[1], who) : null;
+    }
+    const feature = aimedFeature(aim);
+    const f = feature ? features.get(feature) : undefined;
+    if (f) {
+      if (perchOf(f.kind, f.name) !== undefined) {
+        const up = upStation(f.id);
+        return freeStation(who, up) === up ? up : null;
+      }
+      const side: -1 | 1 = share(was) < SPOT_SHARE[f.spot] ? -1 : 1;
+      for (const s of [side, -side as -1 | 1]) {
+        const station = besideStation(f.id, s);
+        if (freeStation(who, station) === station) return station;
+      }
+      return null;
+    }
+    if (aim && here.has(aim)) {
+      const theirs = share(here.get(aim)!);
+      const mine = share(was);
+      const close = theirs + (mine < theirs ? -1 : 1) * BESIDE * 1.2;
+      return Math.abs(close - mine) > NEAR ? groundAt(close) : null;
+    }
+    const mine = share(was);
+    const dir =
+      aim === '@left' ? -1 : aim === '@right' ? 1 : mine < 0.5 ? 1 : -1;
+    const to = Math.min(0.9, Math.max(0.1, mine + dir * LEAP_SHARE));
+    return Math.abs(to - mine) > NEAR ? freeStation(who, groundAt(to)) : null;
   }
 
   /** How far into getting up someone steps down off what they were on: just after they start, so they are never stood up on it. */

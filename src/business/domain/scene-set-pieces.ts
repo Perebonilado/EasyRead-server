@@ -92,6 +92,23 @@ export const ACTED_PIECES: readonly FeatureKind[] = [
   'swing',
 ];
 
+/**
+ * The pieces one may stand up on, climbing or leaping (studio-world-plan
+ * §4.5): each drawn with its `perch`, how high one up it stands (a wall's
+ * 106, the steps' 66, a tree's 150, a palm's 270).
+ */
+export const PERCHED_KINDS: ReadonlySet<string> = new Set<FeatureKind>([
+  'wall',
+  'steps',
+  'tree',
+]);
+
+/** How high one stands up a feature of a kind, in the kit's units; undefined for one no one stands up. */
+export const perchOf = (kind: string, name = ''): number | undefined =>
+  PERCHED_KINDS.has(kind)
+    ? drawPiece(kind as FeatureKind, name).perch
+    : undefined;
+
 /** A painted set's group for a feature, by its id: "f-gate". */
 export const featureGroup = (id: string) => `f-${id}`;
 

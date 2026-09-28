@@ -80,8 +80,13 @@ export const DANGLE_FEEL = {
 } as const satisfies Record<string, DangleFeel>;
 export type DangleKind = keyof typeof DANGLE_FEEL;
 
-/** How far a person's legs swing either way about the hip as they walk, degrees (§4.2); an animal's, a kit animal's or creature's. */
-export const PERSON_SWING = 24;
+/**
+ * How far a person's legs swing either way about the hip as they walk,
+ * degrees (§4.2), as the client's stride.ts has it: the kit's legs are
+ * short, so a walk reaches as far as a planted leg allows (34, from 24)
+ * rather than patter. An animal's, a kit animal's or creature's.
+ */
+export const PERSON_SWING = 34;
 export const ANIMAL_SWING = 22;
 
 /**

@@ -100,6 +100,7 @@ import { FIGURE_FRAME, figureFrame } from './scene-figure';
 import { DRAWN } from './scene-own';
 import {
   ACTED_PIECES,
+  PERCHED_KINDS,
   coveredPiece,
   drawPiece,
   featureGroup,
@@ -1427,8 +1428,11 @@ export function composeScene(input: ComposeInput): {
       before = step.stage.show;
     }
     step.effects.forEach((effect, i) => {
+      // What is done once the stage has changed waits for it; a move that
+      // is the change (a leap up onto the wall carries them there) is at it.
+      const carries = Boolean(doingOf(effect.do)?.carries);
       const at = Math.round(
-        atMs + (step.stage ? 350 : 0) + i * EFFECT_STAGGER_MS,
+        atMs + (step.stage && !carries ? 350 : 0) + i * EFFECT_STAGGER_MS,
       );
       // A character's words come from the sentence's own lines, below.
       if (effect.do === 'say') return;
@@ -1995,6 +1999,15 @@ export function composeScene(input: ComposeInput): {
         const f = featurePlaces[staging].get(feature.id)?.up;
         return f ? { x: f.x, y: f.y } : { x: 0, y: 0 };
       };
+      // Up it, where one who climbs or leaps onto it stands (the "up:"
+      // station): a wall's top, the steps', a tree's branch.
+      const perch = (staging: StagingName) => {
+        const f = featurePlaces[staging].get(feature.id)?.up;
+        return f ? { x: f.x, y: f.perch } : { x: 0, y: 0 };
+      };
+      const perched = piece
+        ? piece.perch !== undefined
+        : PERCHED_KINDS.has(feature.kind);
       return {
         id: feature.id,
         name: feature.name,
@@ -2012,6 +2025,9 @@ export function composeScene(input: ComposeInput): {
         // Up in it, where something caught there rests: only where something is.
         ...(upIn.has(feature.id)
           ? { up: { box: up('box'), wide: up('wide') } }
+          : {}),
+        ...(perched
+          ? { perch: { box: perch('box'), wide: perch('wide') } }
           : {}),
         ...(piece && group ? { painted: group } : {}),
         ...(feature.open ? { open: true as const } : {}),

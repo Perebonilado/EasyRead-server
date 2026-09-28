@@ -58,6 +58,13 @@ const ON_FEET = new Set([
   'fall',
   'kick',
   'bow',
+  'leap',
+  'land',
+  'run-fast',
+  'dodge',
+  'punch',
+  'fall-hard',
+  'hero',
 ]);
 /** A place change smaller than this share of the stage is none. */
 const MOVED = 0.02;

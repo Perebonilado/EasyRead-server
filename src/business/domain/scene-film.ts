@@ -21,10 +21,15 @@ const CLEAR_FIRST_MS = 190;
 const POINT_MS = 1700;
 const SWING_MS = 300;
 const PULSE_MS = 700;
-/** A walk across the whole stage, and the shortest and longest walk. */
-const WALK_STAGE_MS = 4000;
-const WALK_MIN_MS = 1100;
-const WALK_MAX_MS = 3400;
+/**
+ * A walk across the whole stage, and the shortest and longest walk: the
+ * client's timeline.ts keeps the same. Slowed from 4 s a stage (and the
+ * kit's planted stride lengthened: scene-dangles' PERSON_SWING), so a
+ * grown-up walks about two strides a second, not four.
+ */
+export const WALK_STAGE_MS = 5200;
+export const WALK_MIN_MS = 1300;
+export const WALK_MAX_MS = 4400;
 
 const walkMs = (dx: number, W: number) =>
   Math.min(
@@ -32,7 +37,7 @@ const walkMs = (dx: number, W: number) =>
     Math.max(WALK_MIN_MS, (Math.abs(dx) / W) * WALK_STAGE_MS),
   );
 /** A run is this much quicker than a walk; and going in at a feature, this long to be gone there. */
-const RUN_PACE = 2.2;
+export const RUN_PACE = 2.2;
 
 /** How much quicker than a walk someone goes at a step: at a run, hurried, or at a walk. */
 const paceAt = (step: SceneStepDto, id: string) =>
@@ -300,6 +305,8 @@ export function walksOf(
 
 /** How much longer than the time it has a walk may take before its walker hurries. */
 const HURRY_SLACK_MS = 150;
+/** A move that carries someone (a leap) begins this near the step that moves them: the player flies them there (its FLIGHT_SLACK_MS). */
+const CARRIED_SLACK_MS = 250;
 /** Hurried more than this, a walk is a run. */
 const HURRY_MOST = 1.35;
 /** How far a walk may set off before its step, into the end of the line before it, rather than be hurried: by one not speaking then. */
@@ -346,6 +353,12 @@ export function hurried(
             ? Math.min(ms, HELD_IN_MS)
             : ms),
       );
+  /** Whether a move of someone's that carries them (a leap, a landing) begins as a step does: the step is the move's, not a walk. */
+  const carried = (id: string, at: number) =>
+    (scene.acting?.[id]?.moves ?? []).some(
+      ([start, move]) =>
+        doingOf(move)?.carries && Math.abs(start - at) <= CARRIED_SLACK_MS,
+    );
   /** When someone is speaking, from and to: as their mouth moves. */
   const says = (id: string): [number, number][] =>
     (scene.acting?.[id]?.mouth ?? []).map(([start, shapes]) => [
@@ -366,13 +379,14 @@ export function hurried(
       return;
     }
     const prev = out[k - 1];
-    /** Whoever walks to a new place at this step, at a walk. */
+    /** Whoever walks to a new place at this step, at a walk: not one a move of theirs carries there (a leap onto the wall), which keeps its time. */
     const walkers = step.show.filter(
       (id) =>
         paceAt(step, id) <= 1 &&
         walks(id) &&
         steps[k - 1].show.includes(id) &&
-        moved(id, k),
+        moved(id, k) &&
+        !carried(id, step.atMs),
     );
     /** The next time each is moved or goes, or does anything, after the step. */
     const nextOf = (id: string, at: number) => {

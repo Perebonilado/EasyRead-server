@@ -77,7 +77,8 @@ describe('the face "eyes closed" for the Studio', () => {
       { kind: 'narration', say: 'The valley goes quiet.' },
     ]);
     const k = sheet.beats.findIndex(
-      (b) => b.who === 'goliath' && b.do === 'fall',
+      // "Falls to the ground": a hard fall, down until they get up.
+      (b) => b.who === 'goliath' && b.do === 'fall-hard',
     );
     expect(k).toBeGreaterThan(-1);
     expect(sheet.beats[k + 1]).toMatchObject({
@@ -174,7 +175,7 @@ describe('the eyes closed on the stage, and in what the film shows', () => {
 
   it('shows it after the fall, and keeps it on while David speaks', () => {
     const fall = film.acting?.goliath?.moves?.find(
-      ([, move]) => move === 'fall',
+      ([, move]) => move === 'fall-hard',
     );
     const closed = film.effects.find(
       (e) => e.target === 'goliath' && e.part === CLOSED && e.do === 'show',

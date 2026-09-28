@@ -17,10 +17,17 @@ import type { SceneDto } from '../../../contracts';
 import { MOUTH_FPS, mouthOf } from '../scene-acting';
 import { doingsIn, type Actor } from '../scene-directions';
 import {
+  ACTION_MOVES,
+  BIG_MOVES,
   BOBBING_MOVES,
+  MOVE_LANDS,
+  MOVE_PHASES,
+  aimedFeature,
   bobbingMove,
   doingOf,
   featureKindOf,
+  movePhasesMs,
+  type ActionMove,
   type Doing,
   type DoingId,
   type StageMove,
@@ -452,4 +459,213 @@ export function withMouths(scene: SceneDto): {
     );
   }
   return { scene: { ...scene, acting }, mended };
+}
+
+// ── The action moves, as the film plays them (studio-world-plan §4.5) ─────
+
+/** Something wrong with how an action move plays. */
+export interface MoveFault {
+  /**
+   * `squeezed`: a phase played shorter than its least; `not-landed`: the
+   * feet not down where it lands (a leap onto a wall that never gets
+   * there, a landing while still aloft or sat); `passes-through`: someone
+   * goes through someone else at their depth, or a punch so close it would
+   * touch; `too-many`: more big moves than a scene should have.
+   */
+  id: 'squeezed' | 'not-landed' | 'passes-through' | 'too-many';
+  who: string | null;
+  move: string | null;
+  atMs: number | null;
+  why: string;
+}
+
+/** A scene has at most this many big moves, unless it is all action: more is a warning. */
+export const BIG_MOVES_MOST = 2;
+/** A move whose step's change of place begins this near it is what carries them there (the player's FLIGHT_SLACK_MS). */
+const CARRIED_SLACK_MS = 250;
+/** Two whose feet are this near up and down the stage stand at one depth, as a share of its height. */
+const SAME_DEPTH = 0.05;
+/** How much two boxes at one depth may overlap, as a share of the narrower's width, before one is in the other. */
+const OVERLAP_MOST = 0.35;
+/** How far apart a punch keeps its puncher from whom it is at, middle to middle, in the puncher's widths (the player's PUNCH_CLEAR). */
+const PUNCH_CLEAR = 0.95;
+
+type Box = { x: number; y: number; w: number; h: number };
+
+/**
+ * How each action move of a made scene plays: every phase at no less than
+ * its least (a move cut short by the next of the same person's, by the
+ * scene's end, or given too little time is squeezed); the feet down where
+ * it lands (on a feature's perch for a leap at it, with no walk or sit in
+ * the way); no one passing through anyone else at their depth, and no
+ * punch near enough to touch; and no more than two big moves in the scene.
+ */
+export function auditMoves(scene: SceneDto): MoveFault[] {
+  const out: MoveFault[] = [];
+  const space = scene.stagings.wide;
+  const places = space?.places ?? [];
+  const H = space?.h ?? 900;
+  const end = Math.max(scene.durationMs, scene.settledMs ?? 0);
+  const stepAt = (t: number) =>
+    scene.steps.reduce((k, step, i) => (step.atMs <= t ? i : k), 0);
+  const features = scene.setting?.features ?? [];
+  const bottom = (b: Box) => b.y + b.h;
+  let big = 0;
+  for (const [who, acting] of Object.entries(scene.acting ?? {})) {
+    const moves = [...(acting.moves ?? [])].sort((a, b) => a[0] - b[0]);
+    moves.forEach(([at, move, ms, toward], i) => {
+      if (!(ACTION_MOVES as readonly string[]).includes(move)) return;
+      const name = move as ActionMove;
+      if (BIG_MOVES.has(name)) big += 1;
+      // As long as it plays: to its end, or the next move of theirs, or
+      // the scene's end, whichever comes first.
+      const next = moves.slice(i + 1).find(([t]) => t > at)?.[0] ?? Infinity;
+      const played = Math.max(0, Math.min(at + ms, next, end) - at);
+      const phases = movePhasesMs(name, played);
+      for (const [phase, [least]] of Object.entries(MOVE_PHASES[name]) as [
+        keyof typeof phases,
+        [number, number],
+      ][])
+        if (phases[phase] < least - 1)
+          out.push({
+            id: 'squeezed',
+            who,
+            move,
+            atMs: at,
+            why: `its ${phase} plays ${Math.round(phases[phase])} ms of its least ${least}`,
+          });
+      // Where their place changes as it begins: the stage carries them.
+      const k0 = stepAt(at);
+      const carriedAt = scene.steps.findIndex(
+        (step, k) =>
+          k > 0 &&
+          Math.abs(step.atMs - at) <= CARRIED_SLACK_MS &&
+          places[k - 1]?.[who] &&
+          places[k]?.[who] &&
+          (Math.abs(places[k - 1][who].x - places[k][who].x) > 0.5 ||
+            Math.abs(bottom(places[k - 1][who]) - bottom(places[k][who])) >
+              0.5),
+      );
+      const from = places[carriedAt > 0 ? carriedAt - 1 : k0]?.[who];
+      const to = places[carriedAt > 0 ? carriedAt : k0]?.[who];
+      // The feet down where it lands.
+      const lands = MOVE_LANDS[name];
+      if (lands) {
+        const p = movePhasesMs(name, ms);
+        const names = ['windUp', 'act', 'follow', 'settle'] as const;
+        let t = at;
+        for (const one of names) {
+          if (one === lands.phase) {
+            t += p[one] * lands.at;
+            break;
+          }
+          t += p[one];
+        }
+        const landing = places[stepAt(t)]?.[who];
+        const aimed = aimedFeature(toward);
+        const feature = aimed ? features.find((f) => f.id === aimed) : null;
+        // Onto a feature one stands up: its perch, to the unit.
+        if (name === 'leap' && feature?.perch) {
+          const perch = feature.perch.wide;
+          if (!landing || Math.abs(bottom(landing) - perch.y) > 1)
+            out.push({
+              id: 'not-landed',
+              who,
+              move,
+              atMs: Math.round(t),
+              why: `not on the ${feature.id}'s perch (feet at ${landing ? Math.round(bottom(landing)) : 'nowhere'}, the perch at ${Math.round(perch.y)})`,
+            });
+        }
+        // Moved somewhere else before they land: by a walk, not the move.
+        const moved = scene.steps.some(
+          (step, k) =>
+            k > 0 &&
+            k !== carriedAt &&
+            step.atMs > at &&
+            step.atMs < t &&
+            places[k - 1]?.[who] &&
+            places[k]?.[who] &&
+            Math.abs(places[k - 1][who].x - places[k][who].x) > 0.5,
+        );
+        // Still aloft in another move, or sat or lying down, as they land.
+        const busy = moves.some(
+          ([t0, other, ms0], j) =>
+            j !== i &&
+            t0 < t &&
+            t0 + ms0 > t &&
+            (other === 'sit' ||
+              other === 'lie' ||
+              ((other === 'jump' || other === 'leap' || other === 'land') &&
+                t0 > at)),
+        );
+        if (moved || busy)
+          out.push({
+            id: 'not-landed',
+            who,
+            move,
+            atMs: Math.round(t),
+            why: moved
+              ? 'walked somewhere else before landing'
+              : 'still aloft or sat down as it lands',
+          });
+      }
+      // No one gone through: where it lands, and on the way along the
+      // ground (a sprint), no one else at their depth in the way.
+      if (from && to) {
+        const k = carriedAt > 0 ? carriedAt : k0;
+        for (const [other, box] of Object.entries(places[k] ?? {})) {
+          if (other === who || !scene.steps[k]?.show.includes(other)) continue;
+          const thing = scene.things.find((x) => x.id === other);
+          if (thing?.kind !== 'drawing' || thing.backdrop) continue;
+          if (Math.abs(bottom(box) - bottom(to)) > SAME_DEPTH * H) continue;
+          const overlap =
+            Math.min(to.x + to.w, box.x + box.w) - Math.max(to.x, box.x);
+          const between =
+            name === 'run-fast' &&
+            Math.min(from.x, to.x) < box.x + box.w / 2 &&
+            box.x + box.w / 2 < Math.max(from.x, to.x);
+          if (overlap > OVERLAP_MOST * Math.min(to.w, box.w) || between)
+            out.push({
+              id: 'passes-through',
+              who,
+              move,
+              atMs: at,
+              why: between
+                ? `runs through ${other}`
+                : `lands in ${other}'s place`,
+            });
+        }
+      }
+      // A punch keeps its distance: never near enough to touch.
+      if (name === 'punch' && toward && places[k0]?.[toward] && to) {
+        const them = places[k0][toward];
+        const gap = Math.abs(them.x + them.w / 2 - (to.x + to.w / 2));
+        if (gap < PUNCH_CLEAR * to.w)
+          out.push({
+            id: 'passes-through',
+            who,
+            move,
+            atMs: at,
+            why: `a punch at ${toward} from ${Math.round(gap)} units: near enough to touch`,
+          });
+      }
+    });
+  }
+  if (big > BIG_MOVES_MOST)
+    out.push({
+      id: 'too-many',
+      who: null,
+      move: null,
+      atMs: null,
+      why: `${big} big moves; one or two a scene, unless it is all action`,
+    });
+  return out;
+}
+
+/** The move audit in a line for our logs. */
+export function describeMoves(faults: readonly MoveFault[]): string[] {
+  return faults.map(
+    (f) =>
+      `${f.id}${f.who ? ` ${f.who}` : ''}${f.move ? ` ${f.move}` : ''}${f.atMs !== null ? ` @${f.atMs}` : ''}: ${f.why}`,
+  );
 }

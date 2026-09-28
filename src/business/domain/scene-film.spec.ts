@@ -68,8 +68,8 @@ const talk = (more: Partial<Settling> = {}): Settling => ({
 describe("a film's scene, settled", () => {
   it('holds until whoever walks off is off: past the voice, when it stopped short', () => {
     // Tobi, right of centre, walks off the right side: 504 of 1600, a
-    // walk of 1.26 s from 6.2 s.
-    expect(settledOf(talk())).toBe(6200 + 1260);
+    // walk of 1.64 s (5.2 s a stage) from 6.2 s.
+    expect(settledOf(talk())).toBe(6200 + 1638);
   });
 
   it('waits for the last acting move, cheer and bubble, and is never before the last word', () => {
@@ -77,12 +77,12 @@ describe("a film's scene, settled", () => {
       settledOf(
         talk({
           acting: {
-            maya: { walks: true, moves: [[6000, 'laugh', 1500]] },
+            maya: { walks: true, moves: [[6500, 'laugh', 1500]] },
             tobi: { walks: true },
           },
         }),
       ),
-    ).toBe(7500);
+    ).toBe(8000);
     expect(
       settledOf(
         talk({
@@ -174,9 +174,10 @@ describe('a walk in time for what comes next', () => {
   });
 
   it('hurries one who would take the cup before reaching it, briskly or at a run', () => {
-    // The walk takes 2.75 s; the hand goes to the cup at 2.85 s. She sets
-    // off as soon as the step before has settled (0.7 s), then goes briskly.
-    const brisk = hurried(fetch(3400))[1];
+    // The walk takes 3.58 s (5.2 s a stage); the hand goes to the cup at
+    // 3.54 s. She sets off as soon as the step before has settled (0.7 s),
+    // then goes briskly.
+    const brisk = hurried(fetch(4090))[1];
     expect(brisk.atMs).toBe(700);
     expect(brisk.pace).toBeUndefined();
     expect(brisk.hurry?.mama).toBeGreaterThan(1);
@@ -216,39 +217,39 @@ describe('a walk in time for what comes next', () => {
   ];
 
   it('sets a walk off early, into the end of the line before, rather than hurry it', () => {
-    // The walk takes 2.75 s; from 4 s, her hand would reach the cup 0.6 s
+    // The walk takes 3.58 s; from 4 s, her hand would reach the cup 0.6 s
     // too soon. Maya says the line: Mama sets off 0.6 s into its end, at
     // her own pace.
-    const early = hurried(afterLine(6000, { maya: says(2000, 4000) }))[1];
+    const early = hurried(afterLine(6825, { maya: says(2000, 4000) }))[1];
     expect(early.atMs).toBe(3400);
     expect(early.hurry).toBeUndefined();
     expect(early.pace).toBeUndefined();
     // Never more than a second early: given less, she hurries the rest.
-    const soon = hurried(afterLine(5000))[1];
+    const soon = hurried(afterLine(5643))[1];
     expect(soon.atMs).toBe(3000);
     expect(soon.hurry?.mama).toBeGreaterThan(1);
   });
 
   it('never sets a walk off while its walker is still speaking, and runs past a third quicker', () => {
     // Mama says the line herself, to 3.8 s: she sets off only then.
-    const after = hurried(afterLine(6000, { mama: says(2000, 3800) }))[1];
+    const after = hurried(afterLine(6705, { mama: says(2000, 3800) }))[1];
     expect(after.atMs).toBe(3800);
     expect(after.hurry?.mama).toBeCloseTo(1.18, 2);
     // Speaking to the step, she cannot go early; half as quick again is a run.
-    const run = hurried(afterLine(5683, { mama: says(2000, 4000) }))[1];
+    const run = hurried(afterLine(6233, { mama: says(2000, 4000) }))[1];
     expect(run.atMs).toBe(4000);
     expect(run.pace).toEqual({ mama: 'run' });
   });
 
   it('settles a hurried walk as sooner done', () => {
     const scene = {
-      ...fetch(3400),
+      ...fetch(4090),
       props: [],
       beats: [line(0, 500)],
       durationMs: 1000,
       effects: [],
     };
-    const steps = hurried(fetch(3400));
+    const steps = hurried(fetch(4090));
     expect(settledOf({ ...scene, steps })).toBeLessThan(settledOf(scene));
   });
 });

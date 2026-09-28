@@ -2355,6 +2355,8 @@ export interface StudioCharacterDto {
   figure: Record<string, string | number | string[]> | null;
   /** An animal's look, as the animal kit draws it; absent, the artist draws it. */
   animal?: StudioAnimalDto;
+  /** A creature's look, as the creature kit draws it; absent, the artist draws it. */
+  creature?: StudioCreatureDto;
   size: 'small' | 'medium' | 'large' | null;
   voice: string;
   voicePick: number;
@@ -2382,6 +2384,29 @@ export interface StudioAnimalDto {
   mane: string | null;
   horns: string | null;
   wear: { neck?: string; back?: string; head?: string; feet?: string };
+  wearColour: string | null;
+}
+
+/** A creature as the creature kit draws it: its body, colours and texture, its face, limbs, wings and tail, and what it wears. */
+export interface StudioCreatureDto {
+  body: string;
+  build: 'slim' | 'average' | 'stout';
+  size: 'small' | 'medium' | 'large';
+  bodyColour: string;
+  texture: string;
+  /** Null: the kit's own for its texture. */
+  textureColour: string | null;
+  eyes: 1 | 2 | 3;
+  nose: string;
+  head: string;
+  top: string;
+  arms: string;
+  legs: string;
+  /** Null: its body's, or ink for sticks. */
+  limbColour: string | null;
+  wings: string;
+  tail: string;
+  wear: { neck?: string; body?: string; face?: string };
   wearColour: string | null;
 }
 

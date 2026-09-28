@@ -6,5 +6,13 @@
   "is": "creature",
   "size": "small",
   "look": "a small white friendly ghost with a wavy bottom edge, floating",
-  "legs": 0
+  "legs": 0,
+  "drawer": "kit",
+  "creature": {
+    "body": "ghost",
+    "size": "small",
+    "bodyColour": "white",
+    "arms": "none",
+    "legs": "none"
+  }
 }

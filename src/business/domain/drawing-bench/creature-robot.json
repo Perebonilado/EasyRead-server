@@ -6,5 +6,15 @@
   "is": "creature",
   "size": "medium",
   "look": "a boxy silver robot with a round head, an antenna, claw hands and a screen on his chest",
-  "legs": 2
+  "legs": 2,
+  "drawer": "kit",
+  "creature": {
+    "body": "box",
+    "bodyColour": "silver",
+    "texture": "rivets",
+    "head": "round",
+    "top": "antennae",
+    "arms": "kit",
+    "legs": "kit"
+  }
 }

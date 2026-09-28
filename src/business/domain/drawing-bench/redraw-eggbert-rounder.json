@@ -8,5 +8,21 @@
   "legs": 2,
   "look": "a white egg with a friendly face, little arms and legs and a bow tie",
   "words": "rounder, with a crack on top",
-  "from": "eggbert.json"
+  "from": "eggbert.json",
+  "drawer": "kit",
+  "creature": {
+    "body": "egg",
+    "size": "small",
+    "bodyColour": "white",
+    "arms": "stick",
+    "legs": "stick",
+    "wear": {
+      "neck": "bow tie"
+    },
+    "wearColour": "red"
+  },
+  "change": {
+    "build": "stout",
+    "texture": "crack"
+  }
 }

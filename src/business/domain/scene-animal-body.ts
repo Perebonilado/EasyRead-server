@@ -54,8 +54,8 @@ import {
 export const ANIMAL_POSES = ['stand', 'sit', 'lie', 'curl'] as const;
 export type AnimalPose = (typeof ANIMAL_POSES)[number];
 
-/** How it goes when it goes somewhere: steps, waddles, hops, swims or slithers. */
-export type Gait = 'walk' | 'waddle' | 'hop' | 'swim' | 'slither';
+/** How it goes when it goes somewhere: steps, waddles, hops, swims or slithers; a creature may float. */
+export type Gait = 'walk' | 'waddle' | 'hop' | 'swim' | 'slither' | 'float';
 
 /** How its mouth is drawn: the kit's on a muzzle, a beak that opens, a fish's lips. */
 export type MouthKind = 'muzzle' | 'beak' | 'fish';
@@ -82,12 +82,25 @@ export interface Built {
   headAt: Partial<Record<AnimalPose, { by: P; turn: number }>>;
   /** The head: behind its shape (a far ear, a mane), its shape and muzzle, and before it (a near ear, a hat). */
   head: string;
+  /** What is drawn over its eyes, on its head: a creature's glasses. */
+  over?: string;
   /** Where the head turns about; null when it keeps still (a fish's). */
   neck: P | null;
   /** How far the head dips either way, in degrees. */
   dip: number;
-  /** The kit's face on it: its middle, its scale, the colour of the face round the eyes, and the eyes' outline. */
-  face: { at: P; s: number; skin: string; eyeLine: number; dx: number };
+  /**
+   * The kit's face on it: its middle, its scale, the colour of the face
+   * round the eyes, and the eyes' outline; how many eyes (two, unless a
+   * creature has one or three).
+   */
+  face: {
+    at: P;
+    s: number;
+    skin: string;
+    eyeLine: number;
+    dx: number;
+    count?: 1 | 2 | 3;
+  };
   /** Its mouth: where, how large, and how drawn. */
   mouth: { at: P; s: number; kind: MouthKind; wide: number; beak?: Beak };
   /** How far it reaches each way as it stands, and its top: its frame. */

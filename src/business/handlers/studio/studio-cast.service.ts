@@ -21,7 +21,11 @@ import {
   withoutCandidate,
   type CastWork,
 } from '../../domain/studio/studio-drawings';
-import { animalPreview, figurePreview } from '../../domain/studio/studio-looks';
+import {
+  animalPreview,
+  creaturePreview,
+  figurePreview,
+} from '../../domain/studio/studio-looks';
 import type { StoragePort } from '../../ports/storage.port';
 import { STORAGE } from '../../ports/tokens';
 
@@ -114,7 +118,12 @@ export class StudioCastService {
                 key: `${c.id}:animal:${JSON.stringify(c.animal)}`,
                 draw: () => animalPreview(c.animal!, c.id),
               }
-            : null;
+            : c.kind === 'creature' && c.creature
+              ? {
+                  key: `${c.id}:creature:${JSON.stringify(c.creature)}`,
+                  draw: () => creaturePreview(c.creature!, c.id),
+                }
+              : null;
       if (kit) {
         let svg = this.people.get(kit.key);
         if (!svg) {

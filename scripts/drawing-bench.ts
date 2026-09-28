@@ -28,10 +28,10 @@
  * priced as the ledger prices it (cost.ts); the bench's own judging is
  * not counted in a drawing's cost. --mark keeps Richard's word on one
  * drawing beside the report (marks.json) and writes the page again.
- * A brief whose `drawer` is `kit` is drawn by the animal kit from its
- * spec (a redraw from its spec changed as a writer would change it), with
- * no model at all; --drawer artist draws every brief by the artist again,
- * to measure the one against the other.
+ * A brief whose `drawer` is `kit` is drawn by the animal kit or the
+ * creature kit from its spec (a redraw from its spec changed as a writer
+ * would change it), with no model at all; --drawer artist draws every
+ * brief by the artist again, to measure the one against the other.
  */
 import 'dotenv/config';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
@@ -79,6 +79,10 @@ import {
   type DrawingVerdict,
 } from '../src/business/domain/drawing-score';
 import { animalOf, type AnimalSpec } from '../src/business/domain/scene-animal';
+import {
+  creatureOf,
+  type CreatureSpec,
+} from '../src/business/domain/scene-creature';
 import { byId, elements, removeNode } from '../src/business/domain/scene-dom';
 import { PLAIN_FIGURE, drawFigure } from '../src/business/domain/scene-figure';
 import {
@@ -89,6 +93,7 @@ import {
 import { rasterise } from '../src/business/domain/scene-raster';
 import {
   animalSheet,
+  creatureSheet,
   measureOwnFeature,
   measureOwnThing,
   ownFeatureScale,
@@ -274,32 +279,49 @@ function placeOf(
 /** The run's own drawer, over each brief's: `--drawer artist`. */
 const DRAWER = flag('--drawer');
 
-/** A brief's spec for the animal kit, as its writer would give it; for a redraw, before or after the change. */
+/** A brief's spec for a kit, as its writer would give it; for a redraw, before or after the change. */
 function specOf(
   fixture: Extract<DrawingFixture, { kind: 'character' | 'redraw' }>,
   changed = false,
-): AnimalSpec {
-  const before = fixture.animal ?? {};
+): { animal: AnimalSpec } | { creature: CreatureSpec } {
+  const before = fixture.animal ?? fixture.creature ?? {};
   const change =
     changed && fixture.kind === 'redraw' ? (fixture.change ?? {}) : {};
-  const spec = animalOf({
+  const said = {
     ...before,
     ...change,
     wear: {
       ...((before.wear as object | undefined) ?? {}),
       ...((change.wear as object | undefined) ?? {}),
     },
-  });
-  if (!spec) throw new Error(`${fixture.id} has no animal the kit draws`);
-  return spec;
+  };
+  if (fixture.creature) {
+    const creature = creatureOf(said);
+    if (!creature)
+      throw new Error(`${fixture.id} has no creature the kit draws`);
+    return { creature };
+  }
+  const animal = animalOf(said);
+  if (!animal) throw new Error(`${fixture.id} has no animal the kit draws`);
+  return { animal };
 }
+
+/** A kit's drawing of a brief's spec. */
+const kitSheet = (
+  fixture: Extract<DrawingFixture, { kind: 'character' | 'redraw' }>,
+  changed = false,
+): Promise<CharacterSheet> => {
+  const spec = specOf(fixture, changed);
+  return 'creature' in spec
+    ? creatureSheet(spec.creature, fixture.id)
+    : animalSheet(spec.animal, fixture.id);
+};
 
 /** The drawing a redraw starts from: the artist's kept sheet, or the kit's drawing of its spec. */
 async function oldSheet(
   fixture: Extract<DrawingFixture, { kind: 'redraw' }>,
 ): Promise<CharacterSheet> {
-  if (drawerOf(fixture, DRAWER) === 'kit')
-    return animalSheet(specOf(fixture), fixture.id);
+  if (drawerOf(fixture, DRAWER) === 'kit') return kitSheet(fixture);
   return JSON.parse(
     readFileSync(join(DRAWING_OLD_DIR, fixture.from), 'utf8'),
   ) as CharacterSheet;
@@ -336,17 +358,15 @@ async function drawFixture(
   options: ArtistOptions,
 ): Promise<Drawn | null> {
   const who = `bench ${fixture.id}`;
-  // The animal kit: code, from the spec, no model asked.
+  // A kit (the animal kit, the creature kit): code, from the spec, no
+  // model asked.
   if (
     (fixture.kind === 'character' || fixture.kind === 'redraw') &&
     drawerOf(fixture, DRAWER) === 'kit'
   )
     return {
       kind: 'sheet',
-      sheet: await animalSheet(
-        specOf(fixture, fixture.kind === 'redraw'),
-        fixture.id,
-      ),
+      sheet: await kitSheet(fixture, fixture.kind === 'redraw'),
       unjoined: [],
     };
   switch (fixture.kind) {
@@ -454,9 +474,10 @@ async function picturesOf(
       drawn.sheet.drawing.stands?.units ??
       SIZE_UNITS[drawn.sheet.size ?? 'medium'];
     const [, , , h] = drawn.sheet.drawing.viewBox;
-    const feet = drawn.sheet.animal
-      ? 1 - KIT_LINE / 2 / h
-      : 1 - Math.min(0.1, 14 / h);
+    const feet =
+      drawn.sheet.animal || drawn.sheet.creature
+        ? 1 - KIT_LINE / 2 / h
+        : 1 - Math.min(0.1, 14 / h);
     const [card, judge, stage] = await Promise.all([
       rasterise(svg, CARD_PX),
       rasterise(svg, JUDGE_PX),

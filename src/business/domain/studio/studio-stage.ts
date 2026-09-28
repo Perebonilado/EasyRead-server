@@ -623,6 +623,7 @@ export function storyBibleFor(
     size: c.size,
     figure: c.figure,
     ...(c.animal ? { animal: c.animal } : {}),
+    ...(c.creature ? { creature: c.creature } : {}),
     presence: 'seen',
     // Only gear is drawn in a hand for good; the rest are things of their own.
     carries: isGear(c.carries) ? c.carries : null,

@@ -74,8 +74,10 @@ export function gesturingIn(cast: Cast): Set<string> {
         ([, sheet]) =>
           sheet.rig?.arms ||
           sheet.rig?.nods ||
-          // An animal the kit drew with arms (a monkey) points and waves.
-          (sheet.animal && SPECIES[sheet.animal.species].plan === 'climber'),
+          // An animal the kit drew with arms (a monkey) points and waves,
+          // and so does a creature the kit drew with arms.
+          (sheet.animal && SPECIES[sheet.animal.species].plan === 'climber') ||
+          (sheet.creature && sheet.creature.arms !== 'none'),
       )
       .map(([id]) => id),
   );
@@ -83,11 +85,13 @@ export function gesturingIn(cast: Cast): Set<string> {
 
 /**
  * Whether the artist draws them: an animal the animal kit has no spec
- * for, or a creature. A person is the figure kit's, and an animal with a
- * spec the animal kit's.
+ * for, or a creature the creature kit has none for. A person is the
+ * figure kit's, an animal with a spec the animal kit's, and a creature
+ * with one the creature kit's.
  */
-export const drawnByArtist = (c: Pick<StudioCharacter, 'kind' | 'animal'>) =>
-  c.kind !== 'person' && !c.animal;
+export const drawnByArtist = (
+  c: Pick<StudioCharacter, 'kind' | 'animal' | 'creature'>,
+) => c.kind !== 'person' && !c.animal && !c.creature;
 
 /**
  * Whether a change asked of how they look is a new drawing to choose (an
@@ -180,9 +184,10 @@ export function chosen(
   const candidate = work.candidates[id];
   if (!candidate || !bible.characters.some((c) => c.id === id)) return null;
   const drawn = drawnStamp(candidate.sheet);
-  // One the animal kit drew is its spec from now on, and its look's words
-  // go with it.
+  // One a kit drew (an animal, a creature) is its spec from now on, and
+  // its look's words go with it.
   const animal = candidate.sheet.animal;
+  const creature = candidate.sheet.creature;
   return {
     bible: {
       ...bible,
@@ -192,7 +197,10 @@ export function chosen(
               ...c,
               drawn,
               ...(animal ? { animal } : {}),
-              ...(animal && candidate.look ? { look: candidate.look } : {}),
+              ...(creature ? { creature, size: creature.size } : {}),
+              ...((animal || creature) && candidate.look
+                ? { look: candidate.look }
+                : {}),
             }
           : c,
       ),
@@ -204,20 +212,21 @@ export function chosen(
 
 /** Whether a character's look changed, so their drawing is forgotten and drawn again. */
 export const lookChanged = (
-  was: Pick<StudioCharacter, 'look' | 'kind' | 'size' | 'animal'>,
-  now: Pick<StudioCharacter, 'look' | 'kind' | 'size' | 'animal'>,
+  was: Pick<StudioCharacter, 'look' | 'kind' | 'size' | 'animal' | 'creature'>,
+  now: Pick<StudioCharacter, 'look' | 'kind' | 'size' | 'animal' | 'creature'>,
 ) =>
   was.look !== now.look ||
   was.kind !== now.kind ||
   was.size !== now.size ||
-  JSON.stringify(was.animal ?? null) !== JSON.stringify(now.animal ?? null);
+  JSON.stringify(was.animal ?? null) !== JSON.stringify(now.animal ?? null) ||
+  JSON.stringify(was.creature ?? null) !== JSON.stringify(now.creature ?? null);
 
 /**
  * A bible written or changed again, each character drawn as they were:
- * one the artist drew gains no animal spec (only a kit drawing the maker
- * chooses gives them one, so nothing switches on its own), and one the
- * animal kit draws keeps its spec when the writer leaves it out. A new
- * character is as written.
+ * one the artist drew gains no animal or creature spec (only a kit
+ * drawing the maker chooses gives them one, so nothing switches on its
+ * own), and one a kit draws keeps its spec when the writer leaves it out.
+ * A new character is as written.
  */
 export function keptKits(
   after: StudioBible,
@@ -229,12 +238,19 @@ export function keptKits(
     characters: after.characters.map((c) => {
       const was = before.characters.find((b) => b.id === c.id);
       if (!was) return c;
+      let out: StudioCharacter = c;
       if (c.kind !== 'animal' || !was.animal) {
-        const { animal: _gone, ...rest } = c;
+        const { animal: _gone, ...rest } = out;
         void _gone;
-        return rest;
-      }
-      return c.animal ? c : { ...c, animal: was.animal };
+        out = rest;
+      } else if (!c.animal) out = { ...out, animal: was.animal };
+      if (c.kind !== 'creature' || !was.creature) {
+        const { creature: _gone, ...rest } = out;
+        void _gone;
+        out = rest;
+      } else if (!c.creature)
+        out = { ...out, creature: was.creature, size: was.creature.size };
+      return out;
     }),
   };
 }

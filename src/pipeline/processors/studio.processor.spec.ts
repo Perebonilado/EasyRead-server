@@ -1039,6 +1039,51 @@ describe('the cast drawn by the artist, at the cast step and again as asked', ()
     expect(cast(studio.files).horse.drawing.svg).toContain('r="1"');
   });
 
+  it('offers a creature the artist drew as the creature kit’s, when the writer gives it a spec', async () => {
+    const studio = artist(humptyBible, (given) => ({
+      ...given,
+      characters: given.characters.map((c) =>
+        c.id === 'humpty'
+          ? {
+              ...c,
+              look: 'a round white egg with a crack on top',
+              creature: {
+                body: 'egg',
+                build: 'stout',
+                bodyColour: 'white',
+                texture: 'crack',
+              },
+            }
+          : c,
+      ),
+    }));
+    studio.files.set(
+      studioCastKey('s1'),
+      Buffer.from(
+        JSON.stringify({ humpty: drawn('<svg><circle r="1"/></svg>') }),
+      ),
+    );
+    await studio.processor.process(
+      job({
+        kind: 'redraw',
+        characterId: 'humpty',
+        request: 'rounder, a crack on top',
+      }),
+      last('k4'),
+    );
+    // No artist asked: the kit drew what the writer said.
+    expect(studio.asked).toEqual([]);
+    const waiting = (await studio.cast.work('s1')).candidates.humpty;
+    expect(waiting.sheet.creature).toMatchObject({
+      body: 'egg',
+      build: 'stout',
+      texture: 'crack',
+    });
+    expect(waiting.look).toBe('a round white egg with a crack on top');
+    // The artist's drawing stays his until the maker chooses.
+    expect(cast(studio.files).humpty.drawing.svg).toContain('r="1"');
+  });
+
   it('says so when no new drawing came, and stops showing them as being drawn', async () => {
     const studio = artist();
     studio.files.set(

@@ -126,6 +126,14 @@ export interface AnimalDrawing {
 
 /** The kit's eyes on an animal: at the kit's size in the face's own units, set on the head by `face`. */
 const EYE = { rx: 15, ry: 16.5 };
+/** A third eye (a creature's): how far over the pair's middle, and how large, in the face's units. */
+const THIRD = { y: -34, k: 0.72 };
+/** One eye's brows: set as a pair's would be this far apart, so they meet over it. */
+const ONE_BROWS_DX = 9.5;
+const BROWS = /<g class="brows">[\s\S]*?<\/g>/;
+const withoutBrows = (markup: string) => markup.replace(BROWS, '');
+const browsOf = (markup: string) => BROWS.exec(markup)?.[0] ?? '';
+
 /** How far a pose's weight goes from sitting to lying as the body sinks: past these, each is shown. */
 const SIT_FROM = 0.3;
 const LIE_FROM = 0.72;
@@ -340,7 +348,22 @@ export function drawAnimal(
   const key = seed || JSON.stringify(spec);
   const id = `a${Math.floor(beatOf(`${key}:id`) * 1e6).toString(36)}`;
   const look = lookOf(spec, id);
-  let built = buildAnimal(spec, look);
+  return drawBuilt(buildAnimal(spec, look), key, id, how);
+}
+
+/**
+ * A body a kit's plan built (an animal's, or a creature's: scene-creature)
+ * drawn whole: the kit's eyes and feelings on its head, its mouths, its
+ * signs, every pose, and the CSS that moves it. `key` sets its beat (when
+ * it blinks and breathes), `id` its clip paths' ids.
+ */
+export function drawBuilt(
+  from: Built,
+  key: string,
+  id: string,
+  how: AnimalHow = {},
+): AnimalDrawing {
+  let built = from;
   const beat = beatOf(key);
   const poses = ANIMAL_POSES.filter((pose) => built.poses[pose]);
   // A pose it has not got is the one the stage shows for it: lying down
@@ -358,10 +381,14 @@ export function drawAnimal(
   // ── The face, the kit's, in its own units about its middle.
   const { face, mouth } = built;
   const s = face.s;
+  // Two eyes, as every animal has; a creature may have one, or three.
+  const count = face.count ?? 2;
   const rig: FaceRig = {
-    eyes: { y: 0, dx: face.dx, rx: EYE.rx, ry: EYE.ry },
+    eyes: { y: 0, dx: count === 1 ? 0 : face.dx, rx: EYE.rx, ry: EYE.ry },
     mouthY: 22,
   };
+  // One eye alone, in the pair's middle: a third's, or a one-eyed face's.
+  const oneRig: FaceRig = { eyes: { ...rig.eyes, dx: 0 }, mouthY: 22 };
   const faceAt = `translate(${r1(face.at[0])} ${r1(face.at[1])}) scale(${Math.round(s * 1000) / 1000})`;
   const inFace = (markup: string) =>
     `<g transform="${faceAt}" stroke-width="${r2(face.eyeLine / s)}">${markup}</g>`;
@@ -370,13 +397,18 @@ export function drawAnimal(
   const browK = Math.round(((face.eyeLine + 0.2) / (3.4 * s)) * 100) / 100;
   const lidK = Math.round((Math.min(2.4, face.eyeLine) / (3 * s)) * 100) / 100;
   const clip = `${id}-eyes`;
+  // A third eye over the pair, smaller, its lines as heavy as theirs.
+  const third = (markup: string) =>
+    `<g transform="translate(0 ${THIRD.y}) scale(${THIRD.k})" stroke-width="${r2(face.eyeLine / s / THIRD.k)}">${markup}</g>`;
+  const white = (dx: number) =>
+    `<ellipse cx="${dx}" cy="0" rx="${EYE.rx}" ry="${EYE.ry}" ${inked('#ffffff')}/>`;
+  const pairWhites = [-1, 1].map((side) => white(side * face.dx)).join('');
   const whites = inFace(
-    [-1, 1]
-      .map(
-        (side) =>
-          `<ellipse cx="${side * face.dx}" cy="0" rx="${EYE.rx}" ry="${EYE.ry}" ${inked('#ffffff')}/>`,
-      )
-      .join(''),
+    count === 1
+      ? white(0)
+      : count === 3
+        ? pairWhites + third(white(0))
+        : pairWhites,
   );
   // The mouth, at its own place: the kit's on a muzzle, scaled, its lines
   // as heavy as the kit's; a beak's lower half; a fish's lips.
@@ -399,11 +431,39 @@ export function drawAnimal(
       : mouth.kind === 'fish'
         ? FISH_SHAPES.map(fishLips)
         : mouthShapes(0, mouthK);
-  const faces = FACES.map((name: FigureFace) => {
-    const eyes =
+  const pairEyes = (name: FigureFace) =>
+    name === 'pain'
+      ? painEyes(rig, face.skin, browK)
+      : faceEyes(name, rig, face.skin, clip, browK);
+  // One eye: its lids and pupil, under brows that meet over it as a
+  // pair's would; squeezed shut in pain.
+  const browsRig: FaceRig = {
+    eyes: { ...rig.eyes, dx: ONE_BROWS_DX },
+    mouthY: 22,
+  };
+  const oneEye = (name: FigureFace, clipId: string, brows: boolean) => {
+    const eye =
       name === 'pain'
-        ? painEyes(rig, face.skin, browK)
-        : faceEyes(name, rig, face.skin, clip, browK);
+        ? `<ellipse cx="0" cy="0" rx="${EYE.rx + 0.8}" ry="${EYE.ry + 0.8}" ${flat(face.skin)}/>${line('M-10,-5 L0,2 L10,-5', FIGURE_INK, r2(3.4 * browK))}`
+        : withoutBrows(faceEyes(name, oneRig, face.skin, clipId, browK));
+    if (!brows) return eye;
+    return (
+      eye +
+      browsOf(
+        name === 'pain'
+          ? painEyes(browsRig, face.skin, browK)
+          : faceEyes(name, browsRig, face.skin, clipId, browK),
+      )
+    );
+  };
+  const eyesOf = (name: FigureFace): string =>
+    count === 1
+      ? oneEye(name, clip, true)
+      : count === 3
+        ? pairEyes(name) + third(oneEye(name, `${clip}3`, false))
+        : pairEyes(name);
+  const faces = FACES.map((name: FigureFace) => {
+    const eyes = eyesOf(name);
     const mouths =
       name === 'pain' ? { mouth: 'grit', talk: 'shout' } : FACE_MOUTHS[name];
     return `<g id="${name}">${inFace(eyes)}${atMouth(mouthOf(mouths.mouth), 'mouth')}${atMouth(mouthOf(mouths.talk), 'talk" opacity="0')}</g>`;
@@ -414,7 +474,19 @@ export function drawAnimal(
   );
   const lids = (markup = '') =>
     inFace(
-      blinkOf({ eyes: rig.eyes, cy: -3 }, face.skin, 0, -3, lidK) + markup,
+      blinkOf({ eyes: rig.eyes, cy: -3 }, face.skin, 0, -3, lidK) +
+        (count === 3
+          ? third(
+              blinkOf(
+                { eyes: oneRig.eyes, cy: -3 },
+                face.skin,
+                0,
+                -3,
+                r2(lidK / THIRD.k),
+              ),
+            )
+          : '') +
+        markup,
     );
   const blinkAt = r1(0.3 + beatOf(`${key}:blink`) * 2.4);
 
@@ -456,6 +528,8 @@ export function drawAnimal(
     faces,
     lipShapes,
     `<g class="blink" opacity="0">${lids()}</g>`,
+    // What goes over the eyes (a creature's glasses).
+    built.over ?? '',
     ...signGroups
       .filter((one) => one.onFace)
       .map((one) => `<g id="${one.gid}-face">${one.onFace}</g>`),
@@ -505,7 +579,7 @@ export function drawAnimal(
   const svg = [
     `<svg xmlns="http://www.w3.org/2000/svg" viewBox="${viewBox.join(' ')}">`,
     `<style>${animalCss(built, poses, how.pose ?? null, signs, beat, blinkAt, id)}</style>`,
-    `<defs>${eyeClipPath(rig, clip)}</defs>`,
+    `<defs>${eyeClipPath(rig, clip)}${count === 3 ? eyeClipPath(oneRig, `${clip}3`) : ''}</defs>`,
     `<ellipse cx="0" cy="-0.6" rx="${r1(shadowW)}" ry="${r1(Math.min(2, shadowW * 0.1))}" fill="#1d1a22" fill-opacity="0.16"/>`,
     `<g class="a-root" stroke="${FIGURE_INK}" stroke-width="${LINE}" stroke-linejoin="round" stroke-linecap="round">`,
     `<g class="whole"><g class="a-gait">`,
@@ -517,15 +591,22 @@ export function drawAnimal(
     `</svg>`,
   ].join('');
   // Where the eyes are on the stage, each a box in the drawing's units.
-  const eyes = [-1, 1].map((side) => {
-    const cx = face.at[0] + side * face.dx * s;
+  const eyeBox = (dx: number, dy = 0, k = 1) => {
+    const cx = face.at[0] + dx * s;
     return {
-      x: r1(cx - EYE.rx * s),
-      y: r1(face.at[1] - EYE.ry * s),
-      width: r1(EYE.rx * 2 * s),
-      height: r1(EYE.ry * 2 * s),
+      x: r1(cx - EYE.rx * k * s),
+      y: r1(face.at[1] + dy * s - EYE.ry * k * s),
+      width: r1(EYE.rx * 2 * k * s),
+      height: r1(EYE.ry * 2 * k * s),
     };
-  });
+  };
+  const eyes =
+    count === 1
+      ? [eyeBox(0)]
+      : [
+          ...[-1, 1].map((side) => eyeBox(side * face.dx)),
+          ...(count === 3 ? [eyeBox(0, THIRD.y, THIRD.k)] : []),
+        ];
   const mouthAt: P =
     mouth.kind === 'beak'
       ? polar(mouth.beak!.hinge, mouth.beak!.len * 0.55, -mouth.beak!.down)
@@ -742,6 +823,13 @@ function animalCss(
     case 'swim':
       out.push(
         '.on-walking .rig-tail{animation:a-wag .45s ease-in-out infinite}.on-walking .a-gait{animation:bob .9s ease-in-out infinite}@keyframes bob{0%,100%{transform:translateY(0)}50%{transform:translateY(-2.5px)}}',
+      );
+      break;
+    case 'float':
+      // Floating: a slow rise and fall always, drifting as it goes.
+      out.push(
+        `.a-gait{animation:float 2.6s ease-in-out -${r1(beat * 2.6)}s infinite}@keyframes float{0%,100%{transform:translateY(0)}50%{transform:translateY(-3px)}}`,
+        '.on-walking .a-gait{animation-duration:1.3s}',
       );
       break;
     case 'slither':

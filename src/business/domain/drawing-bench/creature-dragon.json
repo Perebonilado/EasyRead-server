@@ -6,5 +6,20 @@
   "is": "creature",
   "size": "medium",
   "look": "a small friendly green dragon with little wings, a spiky back and a long tail",
-  "legs": null
+  "legs": null,
+  "drawer": "kit",
+  "creature": {
+    "body": "pear",
+    "size": "small",
+    "bodyColour": "green",
+    "texture": "belly",
+    "textureColour": "yellow",
+    "head": "round",
+    "nose": "snout",
+    "top": "spikes",
+    "arms": "kit",
+    "legs": "feet",
+    "wings": "bat",
+    "tail": "spiked"
+  }
 }

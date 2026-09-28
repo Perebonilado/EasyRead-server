@@ -449,6 +449,27 @@ The bench measures the real cost per drawing for each candidate model before the
     - Richard's look at the contact sheet.
     - The bench's "every animal passes".
     - The showcase: Pip, Bingo, Zuri and Clover redrawn through the approve flow, and the Maya and Kofi films remade. These run on Richard's shows, so they wait for him. The contact sheet shows each of them as the kit would draw them.
-- [ ] Phase C: creature kit
+- [ ] Phase C: creature kit (built and tested; Richard's sign-off, and Humpty's and Eggbert's redraws on his shows, are still to come)
+  - **What was built (2026-09-28):**
+    - C1: `CreatureSpec` in `scene-creature.ts`, read like an animal's: every field falls back to the body's plain own, and other words are taken through a synonym table ("boxy" is a box, "gray" grey). Beyond the plan's list it has a `build`, a `size` (it stands at its own size beside people: 82, 120 or 186 kit units), a `nose` (button, snout, carrot, beak), a `head` apart from the body (round or box, for a robot, a snowman, a dragon), a `limbColour` (a snowman's brown twigs), the bodies `stack` (a snowman) and `ghost`, the textures `belly` and `buttons`, and `spikes` on top. `describeCreature` gives the card's words.
+    - The drawing (`scene-creature-body.ts`, `scene-creature-draw.ts`): thirteen bodies, facing the viewer, in the kit's line and palette. The animal kit's drawing was split so both kits share it (`drawBuilt`): the kit's eyes (one, two or three: one eye under one pair of brows, a third over the pair), feelings, blinks, signs, the kit's six mouth shapes, poses and motion. Animals' drawings are byte for byte as before (checked by hash over every species, pose, sign and wear), and people's byte lock holds.
+    - Face placement is code's: the eyes in the upper third of the body (or on the head), as far apart as it is wide there, the mouth below them and still on the head. A crack is a jagged ink line with a thin darker inner edge, across the crown, clipped to the body; the face sits a little lower to make room for it. Textures are clipped to the body and kept off the face.
+    - Arms (`stick`, `kit`, `tentacles`, `wings`) turn about their shoulders as `rig-arm-r` and `rig-arm-l`, as the kit's people's do (`--ar`, `--al`); a box's arms end in claws, a snowman's twigs stick out and up. Legs (`stick`, `kit`, `feet`) step in turn; a creature on stick or kit legs sits as its body sinks. One with no arms and no head of its own is `onePiece` (it leans and hops); a head apart nods about its neck; a ghost, a cloud and one on a tail float. It stays on the artist's path (`rig: false`), with no `faces`, so the stage never mirrors it.
+    - C2: `StudioCharacter.creature`, the writer's lenient schema and prompt (an angel is a person with wings; a mermaid or a centaur keeps `look` words for the artist), `drawnByArtist`, `keptKits`, `lookChanged`, `chosen`, `gesturingIn`, previews, the cast service, the scene processor's three paths, and redraws as a spec change waiting to be chosen (`respec` serves animals and creatures). Books are unchanged: their creatures have no spec.
+    - The look editor (client commit `bfeeb2c`): a creature section on the cast card (body, size, build, colour, texture and its colour, eyes, nose, head, top, arms, legs, limbs' colour, wings, tail, what it wears where and its colour); `kit.ts` mirrors the lists.
+    - C3: tests for every body and the bench's cast: it draws whole, in the house style, under 64 KB, on the ground in every pose, talks legibly, stays joined at every swing, and passes every code check (seven creatures). Contact sheet: `npm run figures:sheet -- --creatures <dir>`. The bench's creature briefs carry a spec and `drawer: kit`; Eggbert's redraw is his spec made `stout` with a `crack`.
+  - **Bench**, the seven creature briefs (the angel is a person with wings, so it stays with the artist's briefs), judged by Gemini 3.8 Flash:
+
+    | Run | Median | Mean | Pass | Code checks | Cost and time |
+    |---|---|---|---|---|---|
+    | Baseline (the old artist) | 5.67 | 5.75 | 0/7 | — | — |
+    | The kit, first full run | 8.33 | 8.52 | 4/7 | 100% | 0¢, instant |
+    | **The kit, second full run** | **9** | **8.95** | **6/7** | **100%** | **0¢, instant** |
+
+    - Between the runs: a robot's claws, a larger carrot clear of the snowman's mouth, larger heads (and faces on them), a crack across the crown.
+    - Eggbert's redraw scores 7 on every point with no fault named; the judge sees "a round egg-man with a crack on his head". Whether the crack should be bolder is Richard's call.
+  - **Still to do:**
+    - Richard's look at the contact sheet.
+    - Humpty and Eggbert redrawn through the approve flow on Richard's shows, and Humpty's film remade. These run on his shows, so they wait for him.
 - [ ] Phase D: places from layouts; clothes at rest
 - [ ] Phase E: three options, choosing in chat, thumbs down

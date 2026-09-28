@@ -6,5 +6,18 @@
   "is": "creature",
   "size": "medium",
   "look": "a big white egg with a friendly face, thin arms and legs, a red bow tie and a belt",
-  "legs": 2
+  "legs": 2,
+  "drawer": "kit",
+  "creature": {
+    "body": "egg",
+    "bodyColour": "white",
+    "eyes": 2,
+    "arms": "stick",
+    "legs": "stick",
+    "wear": {
+      "neck": "bow tie",
+      "body": "belt"
+    },
+    "wearColour": "red"
+  }
 }

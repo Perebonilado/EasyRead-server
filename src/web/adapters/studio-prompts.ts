@@ -41,6 +41,21 @@ import {
   NECK_WEAR,
 } from '../../business/domain/scene-animal';
 import {
+  CREATURE_ARMS,
+  CREATURE_BODIES,
+  CREATURE_BODY_WEAR,
+  CREATURE_COLOURS,
+  CREATURE_FACE_WEAR,
+  CREATURE_HEADS,
+  CREATURE_LEGS,
+  CREATURE_NECK_WEAR,
+  CREATURE_NOSES,
+  CREATURE_TAILS,
+  CREATURE_TEXTURES,
+  CREATURE_TOPS,
+  CREATURE_WINGS,
+} from '../../business/domain/scene-creature';
+import {
   SCENE_AMBIENCES,
   SCENE_MUSIC,
 } from '../../business/domain/scene-script';
@@ -78,6 +93,47 @@ const ANIMAL_GUIDE = [
   'how one looks, change its animal to show it ("give her a red saddle',
   'blanket": back "saddle blanket", wearColour "red") and its look\'s',
   'words with it.',
+].join(' ');
+
+/**
+ * How the cast's writer says a creature the creature kit draws: from its
+ * lists, so a made-up creature that fits them (an egg with a face, a
+ * snowman, a robot, a ghost, a dragon, a monster) is drawn by code, the
+ * same in every scene, never drawn freehand.
+ */
+const CREATURE_GUIDE = [
+  'A creature that fits the creature kit is drawn by it, never freehand:',
+  'figure and animal are null, creature is how it looks from its lists,',
+  'and look says the same in words. It faces the viewer, its face on its',
+  'body (or on its head, when it has one apart). creature: body, its',
+  `shape, one of ${quoted(CREATURE_BODIES)} ("egg" for Humpty Dumpty or a`,
+  'talking egg, "stack" a snowman\'s balls, "box" a robot\'s, "ghost" a',
+  'sheet ghost, "ball" a round monster, "pear" or "bean" a dragon\'s or a',
+  'monster\'s); build "slim", "average" or "stout"; size "small", "medium"',
+  `or "large" beside people; bodyColour one of ${quoted(CREATURE_COLOURS)};`,
+  `texture one of ${quoted(CREATURE_TEXTURES)} ("crack" an egg's crack,`,
+  '"rivets" a robot\'s panel and rivets, "belly" a paler belly, "buttons"',
+  "a snowman's coal) and textureColour one of the colours or null for the",
+  `kit's own; eyes 1, 2 or 3; nose one of ${quoted(CREATURE_NOSES)}`,
+  '("snout" a dragon\'s, "carrot" a snowman\'s); head one of',
+  `${quoted(CREATURE_HEADS)} ("none": its face is on its body, as an`,
+  'egg\'s or a monster\'s; "round" or "box" a head of its own, a robot\'s,',
+  `a snowman's, a dragon's); top, what is on top, one of ${quoted(CREATURE_TOPS)};`,
+  `arms one of ${quoted(CREATURE_ARMS)} ("stick" thin arms with round`,
+  'hands, "kit" arms like a person\'s); legs one of',
+  `${quoted(CREATURE_LEGS)} ("feet" short legs, just feet; "tail" it floats`,
+  'on a wisp; "none" it sits on the ground, or a ghost floats); limbColour',
+  'one of the colours or null (a snowman\'s twig arms are "brown"); wings',
+  `one of ${quoted(CREATURE_WINGS)}; tail one of ${quoted(CREATURE_TAILS)};`,
+  `wear, what it wears where: neck one of ${quoted(CREATURE_NECK_WEAR)}, body`,
+  `one of ${quoted(CREATURE_BODY_WEAR)}, face one of ${quoted(CREATURE_FACE_WEAR)},`,
+  `each null when it wears nothing there; wearColour one of ${quoted(CLOTH_COLOURS)},`,
+  "or null (a top hat's band is in it too). An angel, or anyone else",
+  'who is a person with wings, is a person with the extra "wings", not a',
+  'creature. A creature that does not fit these (a mermaid, a centaur, a',
+  'talking kettle) has creature null. Asked to change how one looks,',
+  'change its creature to show it ("rounder, with a crack on top": build',
+  '"stout", texture "crack") and its look\'s words with it.',
 ].join(' ');
 
 /** Who can do which doings, when not everyone can: from the one list. */
@@ -264,13 +320,15 @@ export const STUDIO_PROMPTS = {
       'or "minor". kind is "person" for a human, "animal" for an animal,',
       '"creature" for anything else that talks (a robot, a dragon, a talking',
       'kettle). A person is drawn by a kit: figure is how they look, from its',
-      'lists, and look says the same in words; animal is null.',
+      'lists, and look says the same in words; animal and creature are null.',
       FIGURE_GUIDE,
       ANIMAL_GUIDE,
-      'Any other animal, and a creature, is drawn by an illustrator in a',
-      'flat cartoon style: figure and animal are null, look says its shape,',
-      'colours and markings so it is drawn the same every time ("a small',
-      'green dragon with orange wings"), and size is "small", "medium" or',
+      CREATURE_GUIDE,
+      'Any other animal, and a creature the creature kit cannot draw, is',
+      'drawn by an illustrator in a flat cartoon style: figure, animal and',
+      'creature are null, look says its shape, colours and markings so it',
+      'is drawn the same every time ("a mermaid with a green tail and long',
+      'red hair"), and size is "small", "medium" or',
       '"large" beside people.',
       `voice is the kind of voice they speak in: ${quoted(STUDIO_VOICES)}`,
       '("creature" for an animal or a creature that talks); voicePick 0, 1 or',

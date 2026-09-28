@@ -5,6 +5,7 @@
  * a scene the writer was never told of.
  */
 import { describeAnimal } from '../scene-animal';
+import { describeCreature } from '../scene-creature';
 import { describeFigure } from '../scene-figure';
 import { DRAWN } from '../scene-own';
 import { STAGE_NAMES, STAGE_RECIPES, type LearningStage } from '../scene-stage';
@@ -61,7 +62,9 @@ export function describeBible(
         ? describeFigure(c.figure)
         : c.animal
           ? describeAnimal(c.animal)
-          : c.look;
+          : c.creature
+            ? describeCreature(c.creature)
+            : c.look;
     return `- ${c.id}: ${c.name}, ${c.role}, ${c.kind}${c.size ? ` (${c.size})` : ''}; ${c.traits.join(', ') || 'no traits given'}; looks: ${looks}; voice: ${c.voice}${c.carries ? `; carries a ${c.carries}` : ''}`;
   });
   const places = bible.sets.map(

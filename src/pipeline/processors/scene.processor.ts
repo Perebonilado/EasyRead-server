@@ -95,11 +95,17 @@ import {
 } from '../../business/domain/scene-figure';
 import { animalFor, describeAnimal } from '../../business/domain/scene-animal';
 import {
+  creatureFor,
+  describeCreature,
+} from '../../business/domain/scene-creature';
+import {
   OWN_VERSION,
   SIZE_UNITS,
   animalDrawing,
   animalSheet,
   castOf,
+  creatureDrawing,
+  creatureSheet,
   failedLately,
   figureDrawing,
   figureSheet,
@@ -1482,6 +1488,10 @@ export class SceneProcessor {
         ? ((character ? animalFor(character, this.bookAnimals) : null) ??
           sheet.animal)
         : null;
+      // And a creature the kit drew, from its spec.
+      const kitCreature = sheet?.creature
+        ? ((character ? creatureFor(character) : null) ?? sheet.creature)
+        : null;
       const onPage = sheet?.figure
         ? await figureDrawing(thing.wears ?? sheet.figure, thing.ref, {
             pose: thing.pose,
@@ -1492,7 +1502,9 @@ export class SceneProcessor {
           })
         : kitAnimal
           ? await animalDrawing(kitAnimal, thing.ref, { signs })
-          : null;
+          : kitCreature
+            ? await creatureDrawing(kitCreature, thing.ref, { signs })
+            : null;
       const { anchors: pageAnchors, ...posed } = onPage ?? { anchors: null };
       let drawing = onPage ? (posed as GatedDrawing) : sheet?.drawing;
       // One the artist drew with no mouth speaks with the kit's, and blinks.
@@ -2208,6 +2220,10 @@ export class SceneProcessor {
         const animal = animalFor(character, this.bookAnimals) ?? kept?.animal;
         if (animal && (kept?.animal || !kept))
           return animalSheet(animal, character.id);
+        // And a creature the kit drew.
+        const creature = creatureFor(character) ?? kept?.creature;
+        if (creature && (kept?.creature || !kept))
+          return creatureSheet(creature, character.id);
         // Drawn before code moved what the artist draws: rigged now, with
         // no model asked, and kept so, the same drawing with its parts
         // joined and its motion code's.
@@ -2263,7 +2279,12 @@ export class SceneProcessor {
     character: StoryCharacter,
     who: string,
   ): Promise<CharacterSheet> {
-    if (sheet.figure || sheet.animal || sheet.anchors.mouth !== undefined)
+    if (
+      sheet.figure ||
+      sheet.animal ||
+      sheet.creature ||
+      sheet.anchors.mouth !== undefined
+    )
       return sheet;
     let mouth: [number, number] | null;
     try {
@@ -2394,6 +2415,15 @@ export class SceneProcessor {
       const sheet = await animalSheet(animal, character.id);
       this.logger.log(
         `${who}: ${character.name} drawn by the kit: ${describeAnimal(animal)}`,
+      );
+      return { sheet, others: [] };
+    }
+    // A creature the writer gave a spec: drawn by code, no model asked.
+    const creature = kind === 'creature' ? creatureFor(character) : null;
+    if (creature) {
+      const sheet = await creatureSheet(creature, character.id);
+      this.logger.log(
+        `${who}: ${character.name} drawn by the kit: ${describeCreature(creature)}`,
       );
       return { sheet, others: [] };
     }

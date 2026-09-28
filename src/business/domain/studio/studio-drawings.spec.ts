@@ -1,7 +1,9 @@
 import { plainAnimal } from '../scene-animal';
+import { plainCreature } from '../scene-creature';
 import {
   SHEET_VERSION,
   animalSheet,
+  creatureSheet,
   type CharacterSheet,
 } from '../scene-sheet';
 import { sceneFingerprint } from '../../handlers/studio/studio-views';
@@ -377,5 +379,99 @@ describe('an animal the kit draws', () => {
       clover: await animalSheet(plainAnimal('horse'), 'clover'),
     };
     expect([...gesturingIn(cast)]).toEqual(['momo']);
+  });
+});
+
+describe('a creature the kit draws', () => {
+  const kit = bibleOf({
+    characters: [
+      {
+        name: 'Eggbert',
+        id: 'eggbert',
+        kind: 'creature',
+        look: 'a white egg with a bow tie',
+        size: 'large',
+        creature: {
+          body: 'egg',
+          size: 'small',
+          bodyColour: 'white',
+          wear: { neck: 'bow tie' },
+        },
+      },
+      { name: 'Marina', id: 'marina', kind: 'creature', look: 'a mermaid' },
+      // Only a creature has one.
+      {
+        name: 'Pip',
+        id: 'pip',
+        kind: 'animal',
+        look: 'a dog',
+        creature: { body: 'egg' },
+      },
+    ],
+  });
+  const [eggbert, marina, pip] = kit.characters;
+
+  it('is drawn by code, not the artist, at its own size; one that does not fit is the artist’s', () => {
+    expect(eggbert.creature?.body).toBe('egg');
+    expect(eggbert.size).toBe('small');
+    expect('creature' in marina).toBe(false);
+    expect('creature' in pip).toBe(false);
+    expect(drawnByArtist(eggbert)).toBe(false);
+    expect(drawnByArtist(marina)).toBe(true);
+    expect(toDraw(kit, {}, NO_WORK, T)).toEqual(['marina', 'pip']);
+    expect(redrawnToChoose(eggbert)).toBe(true);
+    expect(lookChanged(eggbert, { ...eggbert })).toBe(false);
+    expect(
+      lookChanged(eggbert, {
+        ...eggbert,
+        creature: { ...eggbert.creature!, texture: 'crack' },
+      }),
+    ).toBe(true);
+  });
+
+  it('keeps its spec when the writer leaves it out, and gives none to whom the artist drew', () => {
+    const rewritten = bibleOf({
+      characters: [
+        { ...eggbert, creature: undefined },
+        { ...marina, creature: { body: 'drop' } },
+        pip,
+      ],
+    });
+    const kept = keptKits(rewritten, kit).characters;
+    expect(kept[0].creature).toEqual(eggbert.creature);
+    expect(kept[0].size).toBe('small');
+    expect(kept[1].creature).toBeUndefined();
+  });
+
+  it('once its new drawing is chosen, has the new spec and its words; it gestures with its arms', async () => {
+    const spec = {
+      ...eggbert.creature!,
+      build: 'stout' as const,
+      texture: 'crack' as const,
+    };
+    const drawnAgain = await creatureSheet(spec, 'eggbert');
+    const waiting = withCandidate(
+      NO_WORK,
+      'eggbert',
+      drawnAgain,
+      'rounder, with a crack on top',
+      T,
+      'a round white egg with a crack on top and a bow tie',
+    );
+    const picked = chosen(kit, {}, waiting, 'eggbert')!;
+    const now = picked.bible.characters.find((c) => c.id === 'eggbert')!;
+    expect(now.creature).toEqual(spec);
+    expect(now.look).toBe(
+      'a round white egg with a crack on top and a bow tie',
+    );
+    expect(picked.cast.eggbert).toBe(drawnAgain);
+    const cast = {
+      eggbert: drawnAgain,
+      boo: await creatureSheet(
+        { ...plainCreature('ghost'), arms: 'none' },
+        'boo',
+      ),
+    };
+    expect([...gesturingIn(cast)]).toEqual(['eggbert']);
   });
 });

@@ -6,11 +6,13 @@
  *
  *   npm run figures:sheet -- [out dir]
  *   npm run figures:sheet -- --animals [out dir]
+ *   npm run figures:sheet -- --creatures [out dir]
  *
  * Writes figures.png, a still, and figures.html, where everyone breathes
  * and blinks, and talks while "talking" is ticked. With --animals, the
  * animal kit's sheet instead (scripts/animals-sheet): animals.png and
- * animals.html.
+ * animals.html; with --creatures, the creature kit's (scripts/creatures-sheet):
+ * creatures.png and creatures.html.
  */
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -41,10 +43,12 @@ import {
 } from '../src/business/domain/scene-figure';
 import { rasterise } from '../src/business/domain/scene-raster';
 import { writeAnimalsSheet } from './animals-sheet';
+import { writeCreaturesSheet } from './creatures-sheet';
 import { EXPRESSIONS } from '../src/business/domain/scene-story';
 
 const args = process.argv.slice(2);
 const animals = args.includes('--animals');
+const creatures = args.includes('--creatures');
 const out = args.find((arg) => !arg.startsWith('--')) ?? '.';
 /** Stage units a kit unit is drawn at on the sheet. */
 const SCALE = 0.72;
@@ -628,9 +632,10 @@ y += setH + 30;
 
 mkdirSync(out, { recursive: true });
 if (animals) void writeAnimalsSheet(out);
+if (creatures) void writeCreaturesSheet(out);
 const sheet = `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${y}" viewBox="0 0 ${width} ${y}" font-family="Helvetica, Arial, sans-serif"><rect width="100%" height="100%" fill="#fbf8f2"/>${still.join('')}</svg>`;
 void (async () => {
-  if (animals) return;
+  if (animals || creatures) return;
   writeFileSync(join(out, 'figures.png'), await rasterise(sheet, width));
   writeFileSync(
     join(out, 'figures.html'),

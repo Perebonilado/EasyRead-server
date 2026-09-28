@@ -122,7 +122,14 @@ import {
   describeAnimal,
   type AnimalSpec,
 } from '../../business/domain/scene-animal';
-import { animalSheet } from '../../business/domain/scene-sheet';
+import {
+  describeCreature,
+  type CreatureSpec,
+} from '../../business/domain/scene-creature';
+import { animalSheet, creatureSheet } from '../../business/domain/scene-sheet';
+
+/** A kit's spec for a character: an animal's, or a creature's. */
+type KitSpec = AnimalSpec | CreatureSpec;
 import type { StudioJobData } from '../queues';
 import { isPermanentFailure, type JobContext } from './base.processor';
 import { SceneProcessor } from './scene.processor';
@@ -818,7 +825,8 @@ export class StudioProcessor {
     // spec, the kit drawing it at once. One the artist drew whose species
     // the kit has is offered as the kit's this way too; for any other, the
     // artist draws it again.
-    if (who.kind === 'animal') {
+    // A creature likewise, by the creature kit.
+    if (who.kind === 'animal' || who.kind === 'creature') {
       const done = await this.respec(show, episode, who, words, key);
       if (done) return;
     }
@@ -875,13 +883,13 @@ export class StudioProcessor {
   }
 
   /**
-   * An animal's look changed as the maker asks, as a change to its spec:
-   * the cast's writer is asked for that one character alone, and the kit's
-   * drawing of what it says waits on their card beside the one they have,
-   * to be chosen as any new drawing is. Whether it was: false when the
-   * writer gave no spec for it (an animal the kit does not draw), so the
-   * artist draws it. A spec that comes back as it was is asked for once
-   * more, told so.
+   * An animal's or a creature's look changed as the maker asks, as a
+   * change to its spec: the cast's writer is asked for that one character
+   * alone, and the kit's drawing of what it says waits on their card
+   * beside the one they have, to be chosen as any new drawing is. Whether
+   * it was: false when the writer gave no spec for it (one the kits do not
+   * draw), so the artist draws it. A spec that comes back as it was is
+   * asked for once more, told so.
    */
   private async respec(
     show: StudioShowRecord,
@@ -891,8 +899,17 @@ export class StudioProcessor {
     key?: string,
   ): Promise<boolean> {
     const bible = show.bible!;
+    // Which kit: the animal kit's spec, or the creature kit's.
+    const creature = who.kind === 'creature';
+    const specOf = (
+      one: { animal?: AnimalSpec; creature?: CreatureSpec } | null | undefined,
+    ): KitSpec | null => (creature ? one?.creature : one?.animal) ?? null;
+    const describe = (spec: KitSpec) =>
+      creature
+        ? describeCreature(spec as CreatureSpec)
+        : describeAnimal(spec as AnimalSpec);
     const work = await this.cast.work(show.id).catch(() => null);
-    const tried = work?.candidates[who.id]?.sheet.animal ?? null;
+    const tried = specOf(work?.candidates[who.id]?.sheet);
     const ask = async (again: string | null) => {
       const made = await this.llm.studioBible({
         brief: describeBrief(show.brief),
@@ -900,7 +917,7 @@ export class StudioProcessor {
         request: [
           oneLookRequest(who, words),
           tried
-            ? `Last time this gave ${describeAnimal(tried)}: give another reading of what they ask.`
+            ? `Last time this gave ${describe(tried)}: give another reading of what they ask.`
             : '',
           again ?? '',
         ]
@@ -911,20 +928,19 @@ export class StudioProcessor {
       const written = bibleOf(made.value).characters.find(
         (c) => c.id === who.id || c.name === who.name,
       );
-      return written?.kind === 'animal'
-        ? { spec: written.animal ?? null, look: written.look }
+      return written?.kind === who.kind
+        ? { spec: specOf(written), look: written.look }
         : { spec: null, look: '' };
     };
-    const same = (
-      a: AnimalSpec | null | undefined,
-      b: AnimalSpec | null | undefined,
-    ) => JSON.stringify(a ?? null) === JSON.stringify(b ?? null);
-    let got: { spec: AnimalSpec | null; look: string };
+    const same = (a: KitSpec | null, b: KitSpec | null) =>
+      JSON.stringify(a ?? null) === JSON.stringify(b ?? null);
+    const now = specOf(who);
+    let got: { spec: KitSpec | null; look: string };
     try {
       got = await ask(null);
-      if (got.spec && (same(got.spec, who.animal) || same(got.spec, tried)))
+      if (got.spec && (same(got.spec, now) || same(got.spec, tried)))
         got = await ask(
-          `That came back as it was: change ${who.name}'s animal so it shows what they ask.`,
+          `That came back as it was: change ${who.name}'s ${creature ? 'creature' : 'animal'} so it shows what they ask.`,
         );
     } catch (error) {
       this.logger.warn(
@@ -932,11 +948,13 @@ export class StudioProcessor {
       );
       got = { spec: null, look: '' };
     }
-    const changed = got.spec && !same(got.spec, who.animal) ? got.spec : null;
+    const changed = got.spec && !same(got.spec, now) ? got.spec : null;
     if (!changed) {
       // One the artist drew is drawn by the artist again, as before.
-      if (!who.animal) return false;
-      await this.cast.changeWork(show.id, (now) => doneDrawing(now, [who.id]));
+      if (!now) return false;
+      await this.cast.changeWork(show.id, (work) =>
+        doneDrawing(work, [who.id]),
+      );
       await this.log(
         show,
         episode,
@@ -945,13 +963,15 @@ export class StudioProcessor {
       );
       return true;
     }
-    const sheet = await animalSheet(changed, who.id);
+    const sheet = creature
+      ? await creatureSheet(changed as CreatureSpec, who.id)
+      : await animalSheet(changed as AnimalSpec, who.id);
     this.logger.log(
-      `studio ${episode.id}: ${who.name} drawn again by the kit as asked: ${describeAnimal(changed)}`,
+      `studio ${episode.id}: ${who.name} drawn again by the kit as asked: ${describe(changed)}`,
     );
-    await this.cast.changeWork(show.id, (now) =>
+    await this.cast.changeWork(show.id, (work) =>
       withCandidate(
-        doneDrawing(now, [who.id]),
+        doneDrawing(work, [who.id]),
         who.id,
         sheet,
         words,

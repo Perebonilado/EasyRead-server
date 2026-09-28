@@ -1,6 +1,7 @@
 /**
  * How the Studio shows a show's people and animals before any film is
- * made: a person as the kit draws them, an animal as the animal kit does,
+ * made: a person as the kit draws them, an animal as the animal kit does
+ * and a creature as the creature kit does,
  * wearing one face, as the stage would show them standing still. Drawn by
  * code in a moment, so a look changed on the cast card is seen at once.
  */
@@ -8,6 +9,8 @@ import render from 'dom-serializer';
 import { parseDocument } from 'htmlparser2';
 import type { AnimalSpec } from '../scene-animal';
 import { drawAnimal } from '../scene-animal-draw';
+import type { CreatureSpec } from '../scene-creature';
+import { drawCreature } from '../scene-creature-draw';
 import { byId, elements, removeNode } from '../scene-dom';
 import { drawFigure, type FigureFace, type FigureSpec } from '../scene-figure';
 
@@ -33,6 +36,15 @@ export function animalPreview(
   face: FigureFace = 'happy',
 ): string {
   return wearing(drawAnimal(spec, seed), face);
+}
+
+/** A creature drawn by the kit with only `face` on. */
+export function creaturePreview(
+  spec: CreatureSpec,
+  seed: string,
+  face: FigureFace = 'happy',
+): string {
+  return wearing(drawCreature(spec, seed), face);
 }
 
 /** A person drawn by the kit with only `face` on. */

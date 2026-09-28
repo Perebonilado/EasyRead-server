@@ -800,6 +800,12 @@ export interface GatedDrawing {
   sinks?: number;
   /** Which way one the artist drew faces as drawn: its head to the left (-1) or right (1); absent, the viewer. */
   faces?: -1 | 1;
+  /** One the artist drew whose mouth code draws: it takes the voice's mouth shapes, and blinks, as the kit's people do. */
+  lips?: true;
+  /** One the artist drew whose rig turns its arms and nods its head as the stage acts them (--ar, --al, --nod). */
+  limbs?: true;
+  /** One the artist drew in one piece: it squashes, stretches, leans and hops instead. */
+  onePiece?: true;
   /** A set: where its open ground is, measured once, so a crowd stands on it. */
   ground?: SetGround;
   /** One person drawn by the kit: what they wear that says who they are, so no one in a crowd wears the same. */

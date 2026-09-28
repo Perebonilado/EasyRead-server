@@ -1,0 +1,16 @@
+{
+  "id": "turtle",
+  "kind": "character",
+  "name": "Shelly",
+  "book": "The Pond",
+  "is": "animal",
+  "size": "small",
+  "look": "a slow green turtle with a brown domed shell of hexagon plates",
+  "legs": 4,
+  "drawer": "kit",
+  "animal": {
+    "species": "turtle",
+    "coat": "green",
+    "second": "brown"
+  }
+}

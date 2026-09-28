@@ -1,0 +1,17 @@
+{
+  "id": "fish",
+  "kind": "character",
+  "name": "Bubbles",
+  "book": "Under the Sea",
+  "is": "animal",
+  "size": "small",
+  "look": "a round orange fish with white stripes and flowing fins",
+  "legs": 0,
+  "drawer": "kit",
+  "animal": {
+    "species": "fish",
+    "coat": "orange",
+    "second": "white",
+    "pattern": "stripes"
+  }
+}

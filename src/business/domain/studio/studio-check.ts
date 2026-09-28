@@ -15,7 +15,7 @@
  * words, which goes back to the writer once; the maker never sees it.
  */
 import { narratorsLine, lineOf } from '../scene-screenplay';
-import { faceNamed } from '../scene-feeling';
+import { eyesClosedIn, faceNamed } from '../scene-feeling';
 import { PROP_KIND, PROP_WORDS, STAGE_PROPS } from '../scene-props';
 import { doingsIn, type Actor, type ReadDoing } from '../scene-directions';
 import { STATION_SHARES } from '../scene-layout';
@@ -1755,6 +1755,26 @@ export function mendSheet(
     return own?.id ?? null;
   };
 
+  /**
+   * Someone's eyes closed after a beat whose words close them ("Goliath
+   * falls, knocked out"): shut and calm as they lie there, a reaction of
+   * their own, unless a face or a sign of theirs comes next.
+   */
+  const closeEyes = (who: string | null | undefined, at: number): void => {
+    if (!inCast(who) || !here.has(who)) return;
+    const next = sheet.beats[at + 1];
+    if (
+      next?.kind === 'reaction' &&
+      characterId(next.who, bible) === who &&
+      (next.feeling || next.sign)
+    )
+      return;
+    out.push(tidy({ ...blankBeat('reaction'), who, feeling: 'eyes closed' }));
+    mended.push(
+      `beat ${at + 1}: ${nameOf(who)}'s eyes close, as the words say`,
+    );
+  };
+
   sheet.beats.forEach((raw, at) => {
     where[at] = out.length;
     const beat: SheetBeat = { ...raw };
@@ -1983,6 +2003,26 @@ export function mendSheet(
         away: false,
         words: beat.say,
       };
+      // No doing, but the eyes closed ("lies still, eyes closed"): a
+      // reaction, their eyes shut, never a nod.
+      if (
+        !plans.length &&
+        !beat.do &&
+        eyesClosedIn(`${beat.doSaid ?? ''} ${beat.say}`)
+      ) {
+        mended.push(
+          `beat ${at + 1}: "${beat.say || beat.doSaid}" is ${nameOf(beat.who)}'s eyes closed, a reaction`,
+        );
+        out.push(
+          tidy({
+            ...blankBeat('reaction'),
+            who: beat.who,
+            say: beat.say,
+            feeling: 'eyes closed',
+          }),
+        );
+        return;
+      }
       if (!plans.length) {
         if (!beat.do)
           mended.push(
@@ -2024,10 +2064,16 @@ export function mendSheet(
         if (merged.thing && handled(merged.thing)) lastThing = merged.thing;
       });
       placedBy(beat);
+      // Down with their eyes closed ("Goliath falls, knocked out"): one
+      // falling or lying down, whose eyes the words shut.
+      const down = plans.filter((p) => p.do === 'fall' || p.do === 'lie-down');
+      if (down.length === 1 && eyesClosedIn(beat.say))
+        closeEyes(down[0].who ?? beat.who, at);
       return;
     }
     if (beat.kind === 'reaction' && beat.who && !beat.feeling && !beat.sign)
-      beat.feeling = faceNamed(beat.say) ?? null;
+      beat.feeling =
+        faceNamed(beat.say) ?? (eyesClosedIn(beat.say) ? 'eyes closed' : null);
     out.push(tidy(beat));
   });
   sheet.beats = out;

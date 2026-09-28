@@ -10,6 +10,10 @@ import { Injectable } from '@nestjs/common';
 import type { DocumentProfileDraft } from '../../business/domain/scene-profile';
 import type { NotesDraft } from '../../business/domain/lesson-notes';
 import type {
+  DrawingKind,
+  DrawingVerdict,
+} from '../../business/domain/drawing-score';
+import type {
   FigureDraft,
   StoryDraft,
 } from '../../business/domain/scene-story';
@@ -520,6 +524,30 @@ export class FakeLlmAdapter implements LlmGatewayPort {
     });
   }
 
+  /** Every drawing right: the fake artist's disc is judged a pass, so nothing is drawn again. */
+  drawingJudge(input: {
+    png: Buffer;
+    kind: DrawingKind;
+    brief: string;
+    old?: { png: Buffer; words: string };
+  }): Promise<LlmResult<DrawingVerdict>> {
+    const started = Date.now();
+    const character = input.kind === 'animal' || input.kind === 'creature';
+    return Promise.resolve({
+      value: {
+        sees: 'a drawing',
+        recognisable: 9,
+        anatomy: 9,
+        face: character ? 9 : null,
+        change: input.old ? 9 : null,
+        same: input.old ? 9 : null,
+        place: input.kind === 'place' ? 9 : null,
+        problems: [],
+      },
+      usage: this.usage(started, 800, 60),
+    });
+  }
+
   /**
    * The page's own sentences as the narration, one drawing and one word on
    * the stage: enough for the whole scene pipeline to run with no key.
@@ -956,6 +984,45 @@ export class FakeLlmAdapter implements LlmGatewayPort {
     return Promise.resolve({
       value: svg,
       usage: this.usage(started, 400, 300),
+    });
+  }
+
+  /** A plain layout: a bed, a window and a rug, or a tree and a bush; code draws it. */
+  setLayout(input: {
+    brief: string;
+  }): Promise<LlmResult<Record<string, unknown>>> {
+    const started = Date.now();
+    const room = /\ba room\b/iu.test(input.brief);
+    return Promise.resolve({
+      value: room
+        ? {
+            ground: 'wood',
+            walls: 'cream',
+            items: [
+              { kind: 'bed', x: 0.2, row: 'back', scale: 1, colour: null },
+              {
+                kind: 'curtains',
+                x: 0.55,
+                row: 'back',
+                scale: 1,
+                colour: 'red',
+              },
+              { kind: 'rug', x: 0.5, row: 'middle', scale: 1, colour: 'pink' },
+            ],
+            own: [],
+          }
+        : {
+            sky: 'day',
+            weather: 'clear',
+            ground: 'grass',
+            backdrop: 'hills',
+            items: [
+              { kind: 'tree', x: 0.1, row: 'middle', scale: 1, colour: null },
+              { kind: 'bush', x: 0.8, row: 'back', scale: 1, colour: null },
+            ],
+            own: [],
+          },
+      usage: this.usage(started, 300, 120),
     });
   }
 
@@ -1721,8 +1788,13 @@ export class FakeLlmAdapter implements LlmGatewayPort {
     const yes = /\b(?:yes|go|ok|okay|sure|write it|looks good|make it)\b/.test(
       said,
     );
-    const action: StudioTurnDraft['action'] =
-      input.phase === 'brief'
+    // New drawings waiting, and one chosen in words: which is the Studio's to read.
+    const choosing =
+      /New drawings waiting/.test(input.state) &&
+      /\b(?:use|pick|choose|like|keep|prefer)\b/.test(said);
+    const action: StudioTurnDraft['action'] = choosing
+      ? 'choose'
+      : input.phase === 'brief'
         ? yes
           ? 'outline'
           : 'none'

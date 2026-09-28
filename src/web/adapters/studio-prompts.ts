@@ -23,7 +23,38 @@ import {
   doingsOfKind,
   type Doer,
 } from '../../business/domain/scene-doings';
-import { FIGURE_SIGNS } from '../../business/domain/scene-figure';
+import {
+  CLOTH_COLOURS,
+  FIGURE_SIGNS,
+} from '../../business/domain/scene-figure';
+import {
+  ANIMAL_COLOURS,
+  ANIMAL_EARS,
+  ANIMAL_HORNS,
+  ANIMAL_MANES,
+  ANIMAL_PATTERNS,
+  ANIMAL_SPECIES,
+  ANIMAL_TAILS,
+  BACK_WEAR,
+  FEET_WEAR,
+  HEAD_WEAR,
+  NECK_WEAR,
+} from '../../business/domain/scene-animal';
+import {
+  CREATURE_ARMS,
+  CREATURE_BODIES,
+  CREATURE_BODY_WEAR,
+  CREATURE_COLOURS,
+  CREATURE_FACE_WEAR,
+  CREATURE_HEADS,
+  CREATURE_LEGS,
+  CREATURE_NECK_WEAR,
+  CREATURE_NOSES,
+  CREATURE_TAILS,
+  CREATURE_TEXTURES,
+  CREATURE_TOPS,
+  CREATURE_WINGS,
+} from '../../business/domain/scene-creature';
 import {
   SCENE_AMBIENCES,
   SCENE_MUSIC,
@@ -32,6 +63,78 @@ import { FIGURE_GUIDE } from './prompts';
 
 const quoted = (list: readonly string[]) =>
   list.map((x) => `"${x}"`).join(', ');
+
+/**
+ * How the cast's writer says an animal the animal kit draws: from its
+ * lists, so every animal whose species it has is drawn by code, the same
+ * in every scene, never drawn freehand.
+ */
+const ANIMAL_GUIDE = [
+  `An animal whose species is one of ${quoted(ANIMAL_SPECIES)} (or one of`,
+  'them by another name: a puppy is a dog, a pony a horse, a hen a',
+  'chicken) is drawn by an animal kit, never freehand: figure is null,',
+  'animal is how it looks from its lists, and look says the same in',
+  'words. animal: species; build "slim", "average" or "stout"; size',
+  '"small", "medium" or "large" for its kind (a puppy or a pony is small);',
+  `coat, its colour, one of ${quoted(ANIMAL_COLOURS)}; second, the colour`,
+  'of its markings or belly, one of those, or null for none; pattern,',
+  `where the second colour goes, one of ${quoted(ANIMAL_PATTERNS)} ("belly"`,
+  'is a paler belly, chest and muzzle, "blaze" a stripe down the face,',
+  '"socks" its feet; on a bird, "blaze" is its head and "spots" speckles',
+  'on its wings); ears, tail, mane and horns each null for its',
+  `kind's own, or ears one of ${quoted(ANIMAL_EARS)}, tail one of`,
+  `${quoted(ANIMAL_TAILS)}, mane one of ${quoted(ANIMAL_MANES)}, horns one`,
+  `of ${quoted(ANIMAL_HORNS)}; wear, what it wears where: neck one of`,
+  `${quoted(NECK_WEAR)}, back one of ${quoted(BACK_WEAR)} (a saddle blanket`,
+  `and a saddle go on its back, never round its neck), head one of`,
+  `${quoted(HEAD_WEAR)}, feet one of ${quoted(FEET_WEAR)}, each null when it`,
+  `wears nothing there; wearColour, one of ${quoted(CLOTH_COLOURS)}, or null.`,
+  "size (beside people) is its kind's, as for any animal. Asked to change",
+  'how one looks, change its animal to show it ("give her a red saddle',
+  'blanket": back "saddle blanket", wearColour "red") and its look\'s',
+  'words with it.',
+].join(' ');
+
+/**
+ * How the cast's writer says a creature the creature kit draws: from its
+ * lists, so a made-up creature that fits them (an egg with a face, a
+ * snowman, a robot, a ghost, a dragon, a monster) is drawn by code, the
+ * same in every scene, never drawn freehand.
+ */
+const CREATURE_GUIDE = [
+  'A creature that fits the creature kit is drawn by it, never freehand:',
+  'figure and animal are null, creature is how it looks from its lists,',
+  'and look says the same in words. It faces the viewer, its face on its',
+  'body (or on its head, when it has one apart). creature: body, its',
+  `shape, one of ${quoted(CREATURE_BODIES)} ("egg" for Humpty Dumpty or a`,
+  'talking egg, "stack" a snowman\'s balls, "box" a robot\'s, "ghost" a',
+  'sheet ghost, "ball" a round monster, "pear" or "bean" a dragon\'s or a',
+  'monster\'s); build "slim", "average" or "stout"; size "small", "medium"',
+  `or "large" beside people; bodyColour one of ${quoted(CREATURE_COLOURS)};`,
+  `texture one of ${quoted(CREATURE_TEXTURES)} ("crack" an egg's crack,`,
+  '"rivets" a robot\'s panel and rivets, "belly" a paler belly, "buttons"',
+  "a snowman's coal) and textureColour one of the colours or null for the",
+  `kit's own; eyes 1, 2 or 3; nose one of ${quoted(CREATURE_NOSES)}`,
+  '("snout" a dragon\'s, "carrot" a snowman\'s); head one of',
+  `${quoted(CREATURE_HEADS)} ("none": its face is on its body, as an`,
+  'egg\'s or a monster\'s; "round" or "box" a head of its own, a robot\'s,',
+  `a snowman's, a dragon's); top, what is on top, one of ${quoted(CREATURE_TOPS)};`,
+  `arms one of ${quoted(CREATURE_ARMS)} ("stick" thin arms with round`,
+  'hands, "kit" arms like a person\'s); legs one of',
+  `${quoted(CREATURE_LEGS)} ("feet" short legs, just feet; "tail" it floats`,
+  'on a wisp; "none" it sits on the ground, or a ghost floats); limbColour',
+  'one of the colours or null (a snowman\'s twig arms are "brown"); wings',
+  `one of ${quoted(CREATURE_WINGS)}; tail one of ${quoted(CREATURE_TAILS)};`,
+  `wear, what it wears where: neck one of ${quoted(CREATURE_NECK_WEAR)}, body`,
+  `one of ${quoted(CREATURE_BODY_WEAR)}, face one of ${quoted(CREATURE_FACE_WEAR)},`,
+  `each null when it wears nothing there; wearColour one of ${quoted(CLOTH_COLOURS)},`,
+  "or null (a top hat's band is in it too). An angel, or anyone else",
+  'who is a person with wings, is a person with the extra "wings", not a',
+  'creature. A creature that does not fit these (a mermaid, a centaur, a',
+  'talking kettle) has creature null. Asked to change how one looks,',
+  'change its creature to show it ("rounder, with a crack on top": build',
+  '"stout", texture "crack") and its look\'s words with it.',
+].join(' ');
 
 /** Who can do which doings, when not everyone can: from the one list. */
 const WHO_CAN = (['person', 'animal'] as Doer[])
@@ -67,6 +170,12 @@ const SAFE = [
   'child, or anything that puts a real, living private person in the',
   'story. A real public or historical figure may appear only as history',
   'tells it, never in a made-up scene that could be taken for fact.',
+  'Well-known stories are welcome and told as they are told: stories from',
+  'the Bible, the Quran and other scripture, myths, legends, fables, fairy',
+  "and folk tales (David and Goliath, Noah's ark, Anansi, Cinderella).",
+  'Keep them faithful and respectful, never mocking a faith, and show any',
+  'fight or danger the gentle way a picture book does: the stone flies,',
+  'the giant falls, no blood or wounds.',
 ].join(' ');
 
 export const STUDIO_PROMPTS = {
@@ -113,8 +222,20 @@ export const STUDIO_PROMPTS = {
       'own words ("make the ending funnier", "add a scene where Bingo finds',
       'a bone"). Happy with it: action "approve".',
       '"cast" (a story): they see the characters, drawn, and the places. A',
-      'change to anyone or anywhere is action "cast" with request (a new',
-      'character, a different look, a new place). Happy: action "approve".',
+      'request about one character\'s look ("redraw the egg", "make the',
+      'horse browner", "give Pip a red collar") is action "redraw", character',
+      'their name, request the change in their words, at any phase: only that',
+      'character is drawn again, and up to three new drawings wait on their',
+      'card and in the conversation for the maker to choose from. It is never',
+      '"cast", and never the whole cast written again. When new drawings of',
+      'someone are waiting (the state lists them, numbered), the maker',
+      'choosing one ("use the second one", "I like the first") is action',
+      '"choose", character their name, pick its number; keeping the drawing',
+      'they have ("keep the old one") is "choose" with pick 0; "none of',
+      'these" or "try again" is "redraw" with request what they asked before',
+      'or their new words. Any other change to anyone or anywhere is action "cast"',
+      'with request (a new character, a new place, a voice, what someone is',
+      'like). Happy: action "approve".',
       'What belongs to a place and stands in every scene there (its',
       'furniture, a teapot or a tree its set has) is changed or taken away',
       'by changing the place: action "cast", whatever the phase. A change to',
@@ -141,7 +262,8 @@ export const STUDIO_PROMPTS = {
       'and kick; get into bed and out of it, sit on chairs, benches and',
       'sofas and lie on beds and sofas (the furniture stays where it is);',
       'put clothes on and take them off; hold, throw and hand things over;',
-      'and show faces and signs (Zs asleep, a bulb for an idea, tears); an',
+      'and show faces and signs (Zs asleep, eyes closed and still, a bulb',
+      'for an idea, tears); an',
       'animal wags, licks, sniffs, chews, digs, barks, rolls over, shakes',
       'itself, sits and lies down, and carries things in its mouth. Never',
       'promise more than that: nobody rides, drives or flies anything, and',
@@ -176,8 +298,10 @@ export const STUDIO_PROMPTS = {
       'the next step as a button; never offer the go-ahead as a choice',
       '(no "Yes", "Looks good", "Make it", "Go ahead"). Empty when nothing',
       'is asked. scene is null except with "scene"; scenes is null unless',
-      'a change is to several scenes. request is null except with',
-      '"outline", "cast", "scene" and "episode".',
+      'a change is to several scenes; character is null except with',
+      '"redraw" and "choose"; pick is null except with "choose". request is',
+      'null except with "outline", "cast", "redraw",',
+      '"scene" and "episode".',
     ].join(' '),
     [
       SAFE,
@@ -204,12 +328,16 @@ export const STUDIO_PROMPTS = {
       'or "minor". kind is "person" for a human, "animal" for an animal,',
       '"creature" for anything else that talks (a robot, a dragon, a talking',
       'kettle). A person is drawn by a kit: figure is how they look, from its',
-      'lists, and look says the same in words. An animal or a creature is',
-      'drawn by an illustrator in a flat cartoon style: figure is null, look',
-      'says its shape, colours and markings so it is drawn the same every',
-      'time ("a small brown dog with a white patch over one eye"), and size',
-      'is "small", "medium" or "large" beside people.',
+      'lists, and look says the same in words; animal and creature are null.',
       FIGURE_GUIDE,
+      ANIMAL_GUIDE,
+      CREATURE_GUIDE,
+      'Any other animal, and a creature the creature kit cannot draw, is',
+      'drawn by an illustrator in a flat cartoon style: figure, animal and',
+      'creature are null, look says its shape, colours and markings so it',
+      'is drawn the same every time ("a mermaid with a green tail and long',
+      'red hair"), and size is "small", "medium" or',
+      '"large" beside people.',
       `voice is the kind of voice they speak in: ${quoted(STUDIO_VOICES)}`,
       '("creature" for an animal or a creature that talks); voicePick 0, 1 or',
       "2 chooses among that kind's voices: give two of one kind different",
@@ -395,7 +523,9 @@ export const STUDIO_PROMPTS = {
       "the seats are the set's, never part of anyone. wears is what they",
       'have on as the scene opens besides their usual clothes (a coat the',
       'scene before gave them), or null; face how they look as it opens (one of',
-      `${quoted(STUDIO_FACES)}); holding one of ${quoted(HELD_THINGS)}, or`,
+      `${quoted(STUDIO_FACES)}; "eyes closed" for someone found knocked out,`,
+      'fainted or resting); holding one of',
+      `${quoted(HELD_THINGS)}, or`,
       'any other thing the story needs in a word or two, or null (an animal',
       'holds it in its mouth; null is empty hands, whatever they usually',
       'carry).',
@@ -455,6 +585,13 @@ export const STUDIO_PROMPTS = {
       'seconds: leave null; the stage times each move itself.',
       '"reaction": who shows feeling (a face) or sign',
       `(${quoted(FIGURE_SIGNS)}), without a word: the one a line lands on.`,
+      'The face "eyes closed" is the eyes shut and calm, with no Zs:',
+      'someone knocked out, fainted, resting, praying or pretending to',
+      'sleep, a giant felled. It is gentle, never gory; asleep is the sign',
+      '"sleeping". Someone struck down lies down first ("lie-down"), then',
+      'a reaction with feeling "eyes closed"; it stays until another face',
+      'or a line of theirs changes it (a prayer said with eyes closed has',
+      'feeling "eyes closed").',
       '"pause": seconds (0.4 to 4) of quiet.',
     ].join(' '),
     [

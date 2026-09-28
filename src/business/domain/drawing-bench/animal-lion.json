@@ -1,0 +1,19 @@
+{
+  "id": "lion",
+  "kind": "character",
+  "name": "Leo",
+  "book": "Jungle Days",
+  "is": "animal",
+  "size": "large",
+  "look": "a friendly lion with a big shaggy golden mane and a tufted tail",
+  "legs": 4,
+  "drawer": "kit",
+  "animal": {
+    "species": "lion",
+    "coat": "golden",
+    "second": "cream",
+    "pattern": "belly",
+    "mane": "long",
+    "tail": "tufted"
+  }
+}

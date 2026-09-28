@@ -1,0 +1,9 @@
+{
+  "id": "beach",
+  "kind": "place",
+  "name": "the beach",
+  "book": "Tobi and Friends",
+  "place": "outdoor",
+  "look": "a sunny beach with soft sand, a blue sea and a palm tree",
+  "drawer": "kit"
+}

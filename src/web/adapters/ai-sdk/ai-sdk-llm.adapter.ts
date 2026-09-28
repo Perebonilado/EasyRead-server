@@ -13,7 +13,7 @@ import type {
   FigureDraft,
   StoryDraft,
 } from '../../../business/domain/scene-story';
-import type { LanguageModelUsage } from 'ai';
+import type { LanguageModel, LanguageModelUsage } from 'ai';
 import type { Block, RecapBody, TopicPreviewBody } from '../../../contracts';
 import type {
   GeneratedItem,
@@ -40,6 +40,12 @@ import {
   type SceneScriptDraft,
 } from '../../../business/domain/scene-script';
 import type { NotesDraft } from '../../../business/domain/lesson-notes';
+import {
+  EXPECTED,
+  cleanVerdict,
+  type DrawingKind,
+  type DrawingVerdict,
+} from '../../../business/domain/drawing-score';
 import { PROMPTS } from '../prompts';
 import { STUDIO_PROMPTS } from '../studio-prompts';
 import type { z } from 'zod';
@@ -71,6 +77,8 @@ import {
   sceneSizeSchema,
   sceneStorySchema,
   sketchJudgeSchema,
+  drawingJudgeSchema,
+  setLayoutSchema,
   lectureExtraSchema,
   spokenQuizSchema,
   lectureOutlineSchema,
@@ -719,6 +727,58 @@ export class AiSdkLlmAdapter implements LlmGatewayPort, OnModuleInit {
     };
   }
 
+  async drawingJudge(input: {
+    png: Buffer;
+    kind: DrawingKind;
+    brief: string;
+    old?: { png: Buffer; words: string };
+  }): Promise<LlmResult<DrawingVerdict>> {
+    const started = Date.now();
+    const { generateObject } = await this.registry.modules();
+    const { model, ref } = await this.registry.languageModel('drawing_judge');
+    const picture = (png: Buffer) => ({
+      type: 'file' as const,
+      data: png,
+      mediaType: 'image/png',
+    });
+    const words = (text: string) => ({ type: 'text' as const, text });
+    const result = await generateObject({
+      model,
+      schema: drawingJudgeSchema,
+      system: PROMPTS.drawingJudge,
+      temperature: 0,
+      messages: [
+        {
+          role: 'user' as const,
+          content: [
+            ...(input.old
+              ? [
+                  words('The picture before:'),
+                  picture(input.old.png),
+                  words('The picture now, drawn again:'),
+                ]
+              : []),
+            picture(input.png),
+            words(
+              [
+                `What it is: ${EXPECTED[input.kind]}`,
+                `The brief: ${input.brief}`,
+                input.old
+                  ? `The maker asked for this change: "${input.old.words.replace(/"/g, "'")}". Judge change and same.`
+                  : 'It is drawn for the first time: change and same are null.',
+              ].join('\n'),
+            ),
+          ],
+        },
+      ],
+      maxRetries: this.maxRetries(),
+    });
+    return {
+      value: cleanVerdict(result.object),
+      usage: this.usage(ref, result.usage, started),
+    };
+  }
+
   async sceneScript(input: {
     documentTitle: string;
     topicTitle: string;
@@ -1021,35 +1081,132 @@ export class AiSdkLlmAdapter implements LlmGatewayPort, OnModuleInit {
     notes?: string[];
     signal?: AbortSignal;
     backdrop?: boolean;
+    reference?: string;
+    purpose?: 'cast';
+    asked?: { line: number; eyes?: number; least?: number };
+    hint?: string;
+    temperature?: number;
+    previous?: string;
   }): Promise<LlmResult<string>> {
     const started = Date.now();
     const { generateText } = await this.registry.modules();
-    const { model, ref } = await this.registry.languageModel('scene_draw');
+    // A show's characters and things, its places, and an explainer's
+    // drawings: each its own artist and its own brief.
+    const task: LlmTask =
+      input.purpose === 'cast'
+        ? 'cast_draw'
+        : input.backdrop
+          ? 'set_paint'
+          : 'scene_draw';
     const thinking =
       this.config.get<string>('SCENE_DRAW_THINKING', 'off') === 'on';
-    // Free text: an SVG written into a reply is what a model has done a
-    // million times; escaped into a JSON field it is not (79c2523).
-    const result = await generateText({
-      model,
-      system: input.backdrop ? PROMPTS.sceneSet : PROMPTS.sceneDraw,
-      prompt: drawingRequest(input),
-      maxRetries: this.maxRetries(),
-      maxOutputTokens: thinking ? 32_000 : 16_000,
-      ...(input.signal ? { abortSignal: input.signal } : {}),
-      // Said on every call: the API thinks by default on deepseek-flash,
-      // and this provider version only knows its older ids as thinkers.
-      ...(ref.provider === 'deepseek'
-        ? {
-            providerOptions: {
-              deepseek: {
-                thinking: { type: thinking ? 'enabled' : 'disabled' },
+    // Gemini draws nearly as well thinking a little as thinking at length,
+    // at a sixth of the cost and the time (the drawing bench, 2026-09-27):
+    // low unless DRAW_THINKING_LEVEL says otherwise ("auto": as it sees fit).
+    const level = this.config.get<string>('DRAW_THINKING_LEVEL') || 'low';
+    const draw = (model: LanguageModel, ref: ModelRef) =>
+      // Free text: an SVG written into a reply is what a model has done a
+      // million times; escaped into a JSON field it is not (79c2523).
+      generateText({
+        model,
+        system:
+          input.purpose === 'cast'
+            ? PROMPTS.castDraw
+            : input.backdrop
+              ? PROMPTS.sceneSet
+              : PROMPTS.sceneDraw,
+        prompt: drawingRequest(input),
+        maxRetries: this.maxRetries(),
+        maxOutputTokens:
+          thinking || ref.provider === 'google' ? 32_000 : 16_000,
+        ...(input.temperature !== undefined
+          ? { temperature: input.temperature }
+          : {}),
+        ...(input.signal ? { abortSignal: input.signal } : {}),
+        // Said on every call: the API thinks by default on deepseek-flash,
+        // and this provider version only knows its older ids as thinkers.
+        ...(ref.provider === 'deepseek'
+          ? {
+              providerOptions: {
+                deepseek: {
+                  thinking: { type: thinking ? 'enabled' : 'disabled' },
+                },
               },
-            },
-          }
-        : {}),
-    });
+            }
+          : ref.provider === 'google' &&
+              (level === 'minimal' ||
+                level === 'low' ||
+                level === 'medium' ||
+                level === 'high')
+            ? {
+                providerOptions: {
+                  google: { thinkingConfig: { thinkingLevel: level } },
+                },
+              }
+            : {}),
+      });
+    let { model, ref } = await this.registry.languageModel(task);
+    let result: Awaited<ReturnType<typeof draw>>;
+    try {
+      result = await draw(model, ref);
+    } catch (error) {
+      // A show's artist refused for want of credit or quota draws with the
+      // explainer's artist instead: a drawing is better made by another
+      // hand than not made at all. Anything else is the call's own failure.
+      if (task === 'scene_draw' || !refusedForCredit(error)) throw error;
+      const instead = await this.registry.languageModel('scene_draw');
+      if (
+        `${instead.ref.provider}:${instead.ref.modelId}` ===
+        `${ref.provider}:${ref.modelId}`
+      )
+        throw error;
+      this.logger.warn(
+        `${task} on ${ref.provider}:${ref.modelId} was refused (${(error as Error).message.slice(0, 120)}); drawn on ${instead.ref.provider}:${instead.ref.modelId} instead`,
+      );
+      ({ model, ref } = instead);
+      result = await draw(model, ref);
+    }
     return {
       value: result.text,
+      usage: this.usage(ref, result.usage, started),
+    };
+  }
+
+  async setLayout(input: {
+    brief: string;
+    notes?: string[];
+    previous?: string;
+    temperature?: number;
+    hint?: string;
+  }): Promise<LlmResult<Record<string, unknown>>> {
+    const started = Date.now();
+    const { generateObject } = await this.registry.modules();
+    const { model, ref } = await this.registry.languageModel('set_paint');
+    const prompt = [
+      input.brief,
+      ...(input.hint ? [`Lay it out ${input.hint}.`] : []),
+      ...(input.previous ? [`Your layout before:\n${input.previous}`] : []),
+      ...(input.notes?.length
+        ? [
+            `${input.previous ? 'Change it so' : 'Mind these'}:\n- ${input.notes.join('\n- ')}`,
+          ]
+        : []),
+    ].join('\n\n');
+    const result = await this.againIfMisshapen(() =>
+      generateObject({
+        model,
+        schema: setLayoutSchema,
+        system: PROMPTS.setLayout,
+        prompt,
+        maxRetries: this.maxRetries(),
+        ...(input.temperature !== undefined
+          ? { temperature: input.temperature }
+          : {}),
+        ...this.writerThinking(ref, 'SET_LAYOUT_THINKING', 'off'),
+      }),
+    );
+    return {
+      value: result.object,
       usage: this.usage(ref, result.usage, started),
     };
   }
@@ -2379,11 +2536,16 @@ function turnOf(answer: z.infer<typeof studioTurnSchema>): StudioTurnDraft {
   const scenes = (answer.scenes ?? [])
     .map((one) => Math.round(Number(one)))
     .filter((one) => Number.isFinite(one) && one >= 1);
-  const { scenes: _asked, ...rest } = answer;
+  const { scenes: _asked, pick: _pick, ...rest } = answer;
   void _asked;
+  void _pick;
+  const pick = Math.round(Number(answer.pick));
   return {
     ...rest,
     brief: answer.brief,
+    ...(answer.pick !== null && Number.isFinite(pick) && pick >= 0 && pick <= 3
+      ? { pick }
+      : {}),
     scene:
       answer.scene !== null && Number.isFinite(scene)
         ? Math.round(scene)
@@ -2393,6 +2555,30 @@ function turnOf(answer: z.infer<typeof studioTurnSchema>): StudioTurnDraft {
 }
 
 /** What the artist is asked for one drawing: the brief, its groups, its frame. */
+/**
+ * Whether a call was refused for want of credit or quota (a prepaid
+ * balance spent, a daily limit reached), rather than failing on its own:
+ * another provider may still answer it.
+ */
+export function refusedForCredit(error: unknown): boolean {
+  // After its own retries the SDK says so, with the last refusal inside.
+  const last = (error as { lastError?: unknown }).lastError;
+  if (last && refusedForCredit(last)) return true;
+  const status =
+    (error as { statusCode?: number; status?: number }).statusCode ??
+    (error as { status?: number }).status;
+  const said = `${(error as Error).message ?? ''} ${
+    (error as { responseBody?: string }).responseBody ?? ''
+  }`;
+  return (
+    status === 402 ||
+    status === 429 ||
+    /\b(?:credits?|quota|billing|prepay\w*|RESOURCE_EXHAUSTED|insufficient[_ ]balance)\b/i.test(
+      said,
+    )
+  );
+}
+
 export function drawingRequest(input: {
   thing: Pick<
     DrawingThing,
@@ -2403,8 +2589,15 @@ export function drawingRequest(input: {
   neighbours: string[];
   notes?: string[];
   backdrop?: boolean;
+  /** A character drawn again: how they are drawn now. */
+  reference?: string;
+  purpose?: 'cast';
+  asked?: { line: number; eyes?: number; least?: number };
+  hint?: string;
+  previous?: string;
 }): string {
   const { thing, viewBox } = input;
+  const cast = input.purpose === 'cast';
   const id = groupId;
   const parts = thing.parts.map((part) =>
     part.label
@@ -2426,10 +2619,34 @@ export function drawingRequest(input: {
       ? `States, each its own group drawn over the drawing:\n- ${states.join('\n- ')}`
       : '',
     `Moves: ${thing.motion || 'a gentle sway, so it is never still'}`,
-    `viewBox="0 0 ${viewBox.w} ${viewBox.h}" (${thing.shape}). Labels at font-size ${Math.ceil(viewBox.w * 0.042)} or more: the drawing is often shown small.`,
-    `Context: a lesson on "${input.topic}"${input.neighbours.length ? `; on the stage it stands with: ${input.neighbours.join(', ')}` : ''}.`,
+    cast
+      ? `viewBox="0 0 ${viewBox.w} ${viewBox.h}" (${thing.shape}).`
+      : `viewBox="0 0 ${viewBox.w} ${viewBox.h}" (${thing.shape}). Labels at font-size ${Math.ceil(viewBox.w * 0.042)} or more: the drawing is often shown small.`,
+    input.asked
+      ? [
+          `Outline: stroke="#2d2a32" stroke-width="${input.asked.line}" with round joins and caps, on every shape.`,
+          input.asked.least
+            ? `No part narrower than ${input.asked.least} units.`
+            : '',
+          input.asked.eyes && thing.states.length
+            ? `Each eye at least ${input.asked.eyes} units across.`
+            : '',
+        ]
+          .filter(Boolean)
+          .join(' ')
+      : '',
+    input.hint ? `Framing: ${input.hint}.` : '',
+    cast
+      ? `Context: the show "${input.topic}".`
+      : `Context: a lesson on "${input.topic}"${input.neighbours.length ? `; on the stage it stands with: ${input.neighbours.join(', ')}` : ''}.`,
     input.notes?.length
-      ? `Last time this fell short:\n- ${input.notes.join('\n- ')}`
+      ? `${input.previous ? 'What to change' : 'Last time this fell short'}:\n- ${input.notes.join('\n- ')}`
+      : '',
+    input.reference
+      ? `How they are drawn now: the same character, to draw again with the change asked for made plainly, never copied unchanged (its groups as asked above, whatever this one has):\n${input.reference}`
+      : '',
+    input.previous
+      ? `Your drawing before, to revise: keep what is right, change what the notes above say, and reply with the whole drawing again, with the same groups:\n${input.previous}`
       : '',
   ]
     .filter(Boolean)

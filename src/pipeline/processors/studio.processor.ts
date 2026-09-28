@@ -11,6 +11,7 @@ import {
   type ExplainerSheet,
   type StorySheet,
   type StudioBible,
+  type StudioCharacter,
   type StudioOutline,
 } from '../../business/domain/studio/studio';
 import {
@@ -54,7 +55,12 @@ import {
   stageStory,
   storyBibleFor,
 } from '../../business/domain/studio/studio-stage';
-import { setsOf, type Sets } from '../../business/domain/scene-sheet';
+import {
+  setsOf,
+  type Cast,
+  type CharacterSheet,
+  type Sets,
+} from '../../business/domain/scene-sheet';
 import {
   describeBible,
   describeBrief,
@@ -103,6 +109,37 @@ import {
   studioSetsKey,
 } from '../../business/handlers/studio/studio-cast.service';
 import { DRAWN } from '../../business/domain/scene-own';
+import {
+  castLine,
+  doneDrawing,
+  gesturingIn,
+  keptDrawn,
+  keptKits,
+  oneLookRequest,
+  withOptions,
+} from '../../business/domain/studio/studio-drawings';
+import {
+  WAYS_OF,
+  lookOf,
+  readingsOf,
+} from '../../business/domain/studio/studio-options';
+import {
+  describeFigure,
+  type FigureSpec,
+} from '../../business/domain/scene-figure';
+import { TAKES } from './scene-artist';
+import {
+  describeAnimal,
+  type AnimalSpec,
+} from '../../business/domain/scene-animal';
+import {
+  describeCreature,
+  type CreatureSpec,
+} from '../../business/domain/scene-creature';
+import { animalSheet, creatureSheet } from '../../business/domain/scene-sheet';
+
+/** A kit's spec for a character: a person's, an animal's, or a creature's. */
+type KitSpec = FigureSpec | AnimalSpec | CreatureSpec;
 import type { StudioJobData } from '../queues';
 import { isPermanentFailure, type JobContext } from './base.processor';
 import { SceneProcessor } from './scene.processor';
@@ -154,6 +191,8 @@ export function studioMakeOf(
   bible: StudioBible,
   /** The show's sets as painted, where they are: its features stand where they are painted. */
   sets: Sets | null = null,
+  /** Those the artist drew whose rigs turn their arms and nod: they gesture as people do. */
+  gestures: ReadonlySet<string> = new Set(),
 ): Omit<Parameters<SceneProcessor['make']>[0], 'base' | 'who'> {
   const story = row.sheet?.kind === 'story';
   const stage = show.brief.audience
@@ -178,7 +217,7 @@ export function studioMakeOf(
     ? withFound(bible, sheet.set, mendSheet(sheet, bible, before))
     : bible;
   const script = sheet
-    ? stageStory(sheet, staged, { before, painted })
+    ? stageStory(sheet, staged, { before, painted, gestures })
     : checkExplainer(
         repairExplainer(row.sheet as ExplainerSheet, lesson),
         lesson,
@@ -213,6 +252,7 @@ export function studioMakeOf(
               ? stageStory(sheet, staged, {
                   before,
                   painted,
+                  gestures,
                   plain: new Set(unseen.map((one) => one.beat)),
                   ...(rise.size ? { rise } : {}),
                 })
@@ -425,10 +465,45 @@ export class StudioProcessor {
           context,
           job.ask,
         );
+      else if (job.kind === 'draw')
+        await this.drawCast(show, episode, job.characterIds ?? [], key);
+      else if (job.kind === 'redraw' && job.characterId)
+        await this.redraw(
+          show,
+          episode,
+          job.characterId,
+          job.request ?? '',
+          key,
+        );
     } catch (error) {
       const message = (error as Error).message;
       this.logger.warn(`${who}: ${message}`);
       const last = context.isFinalAttempt || isPermanentFailure(error);
+      // Drawing the cast holds nothing else up: it is simply not drawing.
+      if (job.kind === 'draw' || job.kind === 'redraw') {
+        if (!last) throw error;
+        const ids =
+          job.kind === 'draw' ? (job.characterIds ?? []) : [job.characterId!];
+        await this.cast
+          .changeWork(show.id, (work) => doneDrawing(work, ids))
+          .catch(() => undefined);
+        if (job.kind === 'redraw') {
+          const name =
+            show.bible?.characters.find((c) => c.id === job.characterId)
+              ?.name ?? 'They';
+          await this.log(
+            show,
+            episode,
+            {
+              what: 'failed',
+              step: 'cast',
+              line: EVENT_LINES.drawFailed(name, true),
+            },
+            failed,
+          );
+        }
+        return;
+      }
       if (job.kind === 'make' && job.sceneId) {
         if (!last) throw error;
         await this.studio.updateScene(job.sceneId, {
@@ -604,8 +679,15 @@ export class StudioProcessor {
       );
       if (checkBible(second, story).length <= problems.length) bible = second;
     }
+    // Which drawing the maker chose of anyone still as they were, kept;
+    // and whoever the artist drew is drawn so until the maker chooses a
+    // drawing of the kit's for them.
+    bible = keptDrawn(keptKits(bible, before), before);
     await this.studio.updateShow(show.id, { bible });
     if (before) await this.cast.forgetChanged(show.id, before, bible);
+    // Every animal and creature not drawn yet (new, or whose look changed)
+    // drawn now, so the maker meets them before any film is made.
+    if (story) await this.drawLater({ ...show, bible }, episode);
     // A scene made where something is gone now shows it until it is made
     // again: so said of it, for the film to be made again.
     if (gone.length && before) {
@@ -632,7 +714,8 @@ export class StudioProcessor {
         {
           what: 'cast',
           step: 'cast',
-          line: EVENT_LINES.cast(bible.characters.length, bible.sets.length),
+          // What changed, said: never a count of who is there.
+          line: castLine(before, bible),
         },
         key,
       );
@@ -642,6 +725,386 @@ export class StudioProcessor {
       `studio ${episode.id}: cast of ${bible.characters.map((c) => c.name).join(', ') || 'no one'}; places ${bible.sets.map((s) => s.name).join(', ') || 'none'}`,
     );
     return bible;
+  }
+
+  /** The cast's animals and creatures with no drawing, set drawing on their own: never in the way of the cast. */
+  private async drawLater(
+    show: StudioShowRecord,
+    episode: StudioEpisodeRecord,
+  ): Promise<void> {
+    if (!show.bible) return;
+    try {
+      const ids = await this.cast.markToDraw(show.id, show.bible, Date.now());
+      if (ids.length)
+        await this.queue.enqueueStudio([
+          {
+            kind: 'draw',
+            showId: show.id,
+            episodeId: episode.id,
+            userId: show.userId,
+            characterIds: ids,
+          },
+        ]);
+    } catch (error) {
+      this.logger.warn(
+        `studio ${episode.id}: the cast could not be set drawing: ${(error as Error).message}`,
+      );
+    }
+  }
+
+  /**
+   * The cast's animals and creatures drawn at the cast step, each as the
+   * make step would draw them and kept for it: the maker meets them on
+   * their cards before any film is made.
+   */
+  private async drawCast(
+    show: StudioShowRecord,
+    episode: StudioEpisodeRecord,
+    ids: string[],
+    key?: string,
+  ): Promise<void> {
+    const bible = show.bible;
+    if (!bible || !ids.length) return;
+    const wanted = new Set(
+      ids.filter((id) => bible.characters.some((c) => c.id === id)),
+    );
+    try {
+      await this.scenes.prepareStory(
+        {
+          bible: storyBibleFor(bible, [], show.title),
+          page: 1,
+          castKey: studioCastKey(show.id),
+          setsKey: studioSetsKey(show.id),
+          bookTitle: show.title,
+        },
+        episode.id,
+        `studio ${episode.id} (cast)`,
+        { characters: wanted, places: new Set() },
+      );
+    } finally {
+      await this.cast.changeWork(show.id, (work) => doneDrawing(work, ids));
+    }
+    const cast: Cast = await this.cast.cast(show.id).catch(() => ({}));
+    // Each drawn in takes side by side: the best is in use, and the other
+    // takes wait beside it, to choose instead (three to choose from).
+    const offered: StudioCharacter[] = [];
+    for (const c of bible.characters) {
+      if (!wanted.has(c.id) || !cast[c.id]) continue;
+      const others = await this.cast.otherTakes(show.id, c.id);
+      if (!others.length) continue;
+      await this.cast.changeWork(show.id, (work) =>
+        withOptions(
+          work,
+          c.id,
+          [cast[c.id], ...others].map((sheet) => ({ sheet })),
+          '',
+          Date.now(),
+          true,
+        ),
+      );
+      offered.push(c);
+    }
+    const drawn = bible.characters
+      .filter((c) => wanted.has(c.id) && c.id in cast && !offered.includes(c))
+      .map((c) => c.name);
+    const not = bible.characters
+      .filter((c) => wanted.has(c.id) && !(c.id in cast))
+      .map((c) => c.name);
+    if (drawn.length)
+      await this.log(
+        show,
+        episode,
+        { what: 'cast', step: 'cast', line: EVENT_LINES.drawn(drawn) },
+        key,
+      );
+    for (const c of offered) {
+      const ways =
+        (await this.cast.work(show.id)).candidates[c.id]?.options.length ?? 1;
+      await this.log(
+        show,
+        episode,
+        {
+          what: 'cast',
+          step: 'cast',
+          characterId: c.id,
+          line: EVENT_LINES.takes(c.name, ways),
+        },
+        key && `${key}:takes:${c.id}`,
+      );
+    }
+    for (const name of not)
+      await this.log(
+        show,
+        episode,
+        {
+          what: 'failed',
+          step: 'cast',
+          line: `${name} could not be drawn yet: they are drawn when the film is made, or ask for them again.`,
+        },
+        key && `${key}:${name}`,
+      );
+  }
+
+  /**
+   * One character drawn again as the maker asked, from the drawing they
+   * have: the new drawings (up to three, the artist's takes side by side)
+   * kept beside it for the maker to choose from, never in its place. One
+   * never drawn before is simply drawn, for their card, its other takes
+   * offered beside it.
+   */
+  private async redraw(
+    show: StudioShowRecord,
+    episode: StudioEpisodeRecord,
+    characterId: string,
+    words: string,
+    key?: string,
+  ): Promise<void> {
+    const bible = show.bible;
+    const who = bible?.characters.find((c) => c.id === characterId);
+    if (!bible || !who) {
+      await this.cast.changeWork(show.id, (work) =>
+        doneDrawing(work, [characterId]),
+      );
+      return;
+    }
+    // A person, an animal or a creature the kits draw: its look changed by
+    // the cast's writer as a change to its spec, the kit drawing it (and
+    // two other readings of the words) at once. One the artist drew whose
+    // species the kit has is offered as the kit's this way too; for any
+    // other, the artist draws it again.
+    const done = await this.respec(show, episode, who, words, key);
+    if (done) return;
+    const now = (await this.cast.cast(show.id).catch((): Cast => ({})))[who.id];
+    const story = storyBibleFor(bible, [], show.title);
+    let sheets: CharacterSheet[];
+    try {
+      // Three takes side by side, as a new character's: three to choose from.
+      sheets = await this.scenes.drawCandidates(
+        { bible: story, bookTitle: show.title },
+        who.id,
+        words,
+        now ?? null,
+        episode.id,
+        `studio ${episode.id} (redraw ${who.id})`,
+        { takes: TAKES.character },
+      );
+    } finally {
+      await this.cast.changeWork(show.id, (work) =>
+        doneDrawing(work, [who.id]),
+      );
+    }
+    if (!sheets.length) {
+      await this.log(
+        show,
+        episode,
+        {
+          what: 'failed',
+          step: 'cast',
+          line: EVENT_LINES.drawFailed(who.name, Boolean(now)),
+        },
+        key,
+      );
+      return;
+    }
+    if (!now) {
+      // Never drawn: the best is their drawing, as the make step's would
+      // be, and the other takes wait beside it.
+      await this.scenes.keepSheet(studioCastKey(show.id), who.id, sheets[0]);
+      const work = await this.cast.changeWork(show.id, (work) =>
+        withOptions(
+          work,
+          who.id,
+          sheets.map((sheet) => ({ sheet })),
+          '',
+          Date.now(),
+          true,
+        ),
+      );
+      const ways = work.candidates[who.id]?.options.length ?? 1;
+      await this.log(
+        show,
+        episode,
+        ways > 1
+          ? {
+              what: 'cast',
+              step: 'cast',
+              characterId: who.id,
+              line: EVENT_LINES.takes(who.name, ways),
+            }
+          : { what: 'cast', step: 'cast', line: EVENT_LINES.drawn([who.name]) },
+        key,
+      );
+      return;
+    }
+    const work = await this.cast.changeWork(show.id, (work) =>
+      withOptions(
+        work,
+        who.id,
+        sheets.map((sheet) => ({ sheet })),
+        words,
+        Date.now(),
+      ),
+    );
+    await this.log(
+      show,
+      episode,
+      {
+        what: 'cast',
+        step: 'cast',
+        characterId: who.id,
+        line: EVENT_LINES.redrawn(
+          who.name,
+          work.candidates[who.id]?.options.length ?? 1,
+        ),
+      },
+      key,
+    );
+  }
+
+  /**
+   * A person's, an animal's or a creature's look changed as the maker
+   * asks, as a change to its spec: the cast's writer is asked for that one
+   * character alone, and the kit's drawing of what it says waits on their
+   * card beside the one they have, with up to two other readings of the
+   * same words (studio-options), to be chosen from as any new drawings
+   * are. Whether it was: false when the writer gave no spec for it (an
+   * animal or a creature the kits do not draw), so the artist draws it. A
+   * spec that comes back as it was is asked for once more, told so.
+   */
+  private async respec(
+    show: StudioShowRecord,
+    episode: StudioEpisodeRecord,
+    who: StudioCharacter,
+    words: string,
+    key?: string,
+  ): Promise<boolean> {
+    const bible = show.bible!;
+    const kind = who.kind;
+    // Which kit: the figure kit's spec, the animal kit's, or the creature kit's.
+    const specOf = (
+      one:
+        | {
+            animal?: AnimalSpec | null;
+            creature?: CreatureSpec | null;
+            figure?: FigureSpec | null;
+          }
+        | null
+        | undefined,
+    ): KitSpec | null =>
+      (kind === 'person'
+        ? one?.figure
+        : kind === 'creature'
+          ? one?.creature
+          : one?.animal) ?? null;
+    const describe = (spec: KitSpec) =>
+      kind === 'person'
+        ? describeFigure(spec as FigureSpec)
+        : kind === 'creature'
+          ? describeCreature(spec as CreatureSpec)
+          : describeAnimal(spec as AnimalSpec);
+    const work = await this.cast.work(show.id).catch(() => null);
+    const last = work?.candidates[who.id]?.options[0];
+    const tried = specOf(
+      last?.sheet ?? (last ? { figure: last.figure } : null),
+    );
+    const ask = async (again: string | null) => {
+      const made = await this.llm.studioBible({
+        brief: describeBrief(show.brief),
+        previous: bible,
+        request: [
+          oneLookRequest(who, words),
+          tried
+            ? `Last time this gave ${describe(tried)}: give another reading of what they ask.`
+            : '',
+          again ?? '',
+        ]
+          .filter(Boolean)
+          .join(' '),
+      });
+      await this.record(episode.id, made.usage);
+      const written = bibleOf(made.value).characters.find(
+        (c) => c.id === who.id || c.name === who.name,
+      );
+      return written?.kind === who.kind
+        ? { spec: specOf(written), look: written.look }
+        : { spec: null, look: '' };
+    };
+    const same = (a: KitSpec | null, b: KitSpec | null) =>
+      JSON.stringify(a ?? null) === JSON.stringify(b ?? null);
+    const now = specOf(who);
+    let got: { spec: KitSpec | null; look: string };
+    try {
+      got = await ask(null);
+      if (got.spec && (same(got.spec, now) || same(got.spec, tried)))
+        got = await ask(
+          `That came back as it was: change ${who.name}'s ${kind === 'person' ? 'figure' : kind} so it shows what they ask.`,
+        );
+    } catch (error) {
+      this.logger.warn(
+        `studio ${episode.id}: ${who.name}'s new look could not be asked for: ${(error as Error).message}`,
+      );
+      got = { spec: null, look: '' };
+    }
+    const changed = got.spec && !same(got.spec, now) ? got.spec : null;
+    if (!changed) {
+      // One the artist drew is drawn by the artist again, as before.
+      if (!now) return false;
+      await this.cast.changeWork(show.id, (work) =>
+        doneDrawing(work, [who.id]),
+      );
+      await this.log(
+        show,
+        episode,
+        { what: 'failed', step: 'cast', line: EVENT_LINES.unchanged(who.name) },
+        key,
+      );
+      return true;
+    }
+    // The writer's reading, and up to two others of the same words.
+    const ways = WAYS_OF[kind];
+    const readings = readingsOf<KitSpec>(now, changed, ways, words);
+    const options = await Promise.all(
+      readings.map(async (spec, k) => {
+        const look =
+          k === 0
+            ? got.look || undefined
+            : lookOf(got.look || who.look, changed, spec, ways, describe);
+        if (kind === 'person')
+          return { figure: spec as FigureSpec, ...(look ? { look } : {}) };
+        const sheet =
+          kind === 'creature'
+            ? await creatureSheet(spec as CreatureSpec, who.id)
+            : await animalSheet(spec as AnimalSpec, who.id);
+        return { sheet, ...(look ? { look } : {}) };
+      }),
+    );
+    this.logger.log(
+      `studio ${episode.id}: ${who.name} drawn again by the kit as asked, ${options.length} way${options.length === 1 ? '' : 's'}: ${readings.map(describe).join(' | ')}`,
+    );
+    const kept = await this.cast.changeWork(show.id, (work) =>
+      withOptions(
+        doneDrawing(work, [who.id]),
+        who.id,
+        options,
+        words,
+        Date.now(),
+      ),
+    );
+    await this.log(
+      show,
+      episode,
+      {
+        what: 'cast',
+        step: 'cast',
+        characterId: who.id,
+        line: EVENT_LINES.redrawn(
+          who.name,
+          kept.candidates[who.id]?.options.length ?? 1,
+        ),
+      },
+      key,
+    );
+    return true;
   }
 
   // ── The outline ─────────────────────────────────────────────────────────
@@ -1354,6 +1817,17 @@ export class StudioProcessor {
     );
   }
 
+  /** Those of the show's cast the artist drew whose rigs turn their arms and nod: none when the cast cannot be read. */
+  private async gesturing(showId: string): Promise<Set<string>> {
+    let cast: Cast = {};
+    try {
+      cast = await this.cast.cast(showId);
+    } catch {
+      // None known: everyone the artist drew bobs, as before.
+    }
+    return gesturingIn(cast);
+  }
+
   /** The show's sets as painted: none yet, or none that can be read, is none. */
   private async paintedSets(showId: string): Promise<Sets | null> {
     try {
@@ -1402,6 +1876,7 @@ export class StudioProcessor {
       rows,
       bible,
       await this.paintedSets(show.id),
+      await this.gesturing(show.id),
     );
     const base = `studio/${show.id}/${episode.id}/${row.id}-${fingerprint.slice(0, 8)}-${Date.now().toString(36)}`;
     // The Studio's own try again, its words as voiced: staged again on the

@@ -1,0 +1,26 @@
+{
+  "id": "snowman",
+  "kind": "character",
+  "name": "Frosty",
+  "book": "Winter Wonder",
+  "is": "creature",
+  "size": "medium",
+  "look": "a snowman made of three snowballs with a carrot nose, a black hat and a red scarf",
+  "legs": 0,
+  "drawer": "kit",
+  "creature": {
+    "body": "stack",
+    "bodyColour": "white",
+    "texture": "buttons",
+    "head": "round",
+    "nose": "carrot",
+    "top": "hat",
+    "arms": "stick",
+    "limbColour": "brown",
+    "legs": "none",
+    "wear": {
+      "neck": "scarf"
+    },
+    "wearColour": "red"
+  }
+}

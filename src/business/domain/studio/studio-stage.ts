@@ -622,6 +622,8 @@ export function storyBibleFor(
     kind: c.kind,
     size: c.size,
     figure: c.figure,
+    ...(c.animal ? { animal: c.animal } : {}),
+    ...(c.creature ? { creature: c.creature } : {}),
     presence: 'seen',
     // Only gear is drawn in a hand for good; the rest are things of their own.
     carries: isGear(c.carries) ? c.carries : null,
@@ -653,7 +655,12 @@ export function storyBibleFor(
       summary: sheet.title,
       present: sheet.onStage.map((p) => ({
         id: p.who,
-        mood: p.face === 'pain' ? 'sad' : p.face,
+        mood:
+          p.face === 'pain'
+            ? 'sad'
+            : p.face === 'eyes closed'
+              ? 'neutral'
+              : p.face,
       })),
       place: sheet.set || null,
       time: sheet.time,
@@ -759,6 +766,15 @@ export function featureStatesOf(
   return { open, ajar, changes };
 }
 
+/** The moves a rig that turns arms and nods a head plays as people do. */
+const ARM_MOVES: ReadonlySet<StageMove> = new Set<StageMove>([
+  'point',
+  'wave',
+  'clap',
+  'shrug',
+  'nod',
+]);
+
 /**
  * A story's sheet, checked and mended, as the stage's script. `bible` is
  * the show's; the sheet's people and set are its own. `plain` names beats
@@ -779,6 +795,8 @@ export function stageStory(
     painted?: Readonly<Record<string, number>>;
     /** Beats whose doer gets up first whatever the sheet has them do: where a made scene showed someone moving while they were down. */
     rise?: ReadonlySet<number>;
+    /** Those the artist drew whose rigs turn their arms and nod their heads: they point, wave and nod as people do. */
+    gestures?: ReadonlySet<string>;
   } = {},
 ): SceneScript {
   const byId = new Map(bible.characters.map((c) => [c.id, c]));
@@ -1136,6 +1154,9 @@ export function stageStory(
   };
   /** Someone drawn by the artist, with no rig: they bob, hop and step toward someone. */
   const bobs = (id: string) => (byId.get(id)?.kind ?? 'person') !== 'person';
+  /** One the artist drew whose rig acts people's gestures: a point, a wave, a nod are theirs too. */
+  const gestures = (id: string, move: StageMove) =>
+    Boolean(options.gestures?.has(id)) && ARM_MOVES.has(move);
   /**
    * Sitting or lying down, held until they get up: an animal lies (it
    * sits only when told to), a person as they are; lying along a bed or a
@@ -1402,7 +1423,8 @@ export function stageStory(
     // middle of the stage.
     if (what === 'point' && !aim)
       part = share(here.get(who) ?? 'centre') < 0.5 ? '@right' : '@left';
-    if (bobs(who)) what = bobbingMove(what, Boolean(toward));
+    if (bobs(who) && !gestures(who, what))
+      what = bobbingMove(what, Boolean(toward));
     return {
       target: who,
       part,
@@ -1427,7 +1449,7 @@ export function stageStory(
         at.fallback ?? fallbackFor(at.id, bobs(who) ? 'animal' : 'person'),
       );
     }
-    return bobs(who) && move === 'nod' ? 'hop' : move;
+    return bobs(who) && move === 'nod' && !gestures(who, move) ? 'hop' : move;
   };
 
   sheet.beats.forEach((raw, at) => {

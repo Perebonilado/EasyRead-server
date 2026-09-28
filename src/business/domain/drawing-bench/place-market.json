@@ -1,0 +1,16 @@
+{
+  "id": "market",
+  "kind": "place",
+  "name": "the market",
+  "book": "Tobi and Friends",
+  "place": "outdoor",
+  "look": "a busy open-air market with fruit stalls under striped awnings and baskets of vegetables",
+  "world": {
+    "era": "today",
+    "region": "a town in south-west Nigeria",
+    "culture": "Yoruba",
+    "landscape": "red earth roads and palm trees",
+    "homes": "houses with corrugated roofs"
+  },
+  "drawer": "kit"
+}

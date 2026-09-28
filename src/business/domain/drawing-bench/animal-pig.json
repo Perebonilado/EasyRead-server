@@ -1,0 +1,16 @@
+{
+  "id": "pig",
+  "kind": "character",
+  "name": "Pinky",
+  "book": "Farm Friends",
+  "is": "animal",
+  "size": "medium",
+  "look": "a round pink pig with a curly tail and a flat snout",
+  "legs": 4,
+  "drawer": "kit",
+  "animal": {
+    "species": "pig",
+    "coat": "pink",
+    "tail": "curly"
+  }
+}

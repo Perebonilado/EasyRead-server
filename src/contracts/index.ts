@@ -1061,6 +1061,12 @@ export type SceneThingDto =
       sinks?: number;
       /** Which way one the artist drew faces as drawn: its head to the left (-1) or right (1); absent, the viewer. It is turned to face where it goes. */
       faces?: -1 | 1;
+      /** One the artist drew whose mouth code drew: the stage moves it by the voice's mouth shapes as a kit figure's (lipsync, v0 to v5, talking), and it does not bob as it speaks. */
+      lips?: true;
+      /** One the artist drew whose rig turns its arms (--ar, --al, degrees as the kit's) and nods its head (--nod), each as far as its sheet proved. */
+      limbs?: true;
+      /** One the artist drew in one piece, with nothing to move but the whole: it squashes and stretches as it speaks, and leans and hops for a gesture. */
+      onePiece?: true;
       /** One who stands with people: how tall its frame is in the figure kit's units, so a thing it holds is drawn at the kit's size. */
       units?: number;
       /** A person the kit drew in a pose for the whole scene, not standing: in bed (the bed part of the drawing), or lying. Absent, standing. */
@@ -1332,6 +1338,13 @@ export type ScenePropAction =
  * in someone's hand or mouth. Thrown, dropped or kicked, it flies, and
  * lands in a hand, a mouth or on the ground, and lies where it lands.
  */
+/** One of a thing's looks at rest: its drawing and frame in its own units, and the point that stands where it rests. */
+export interface ScenePropRestDto {
+  svg: string;
+  viewBox: [number, number, number, number];
+  anchor: [number, number];
+}
+
 export interface ScenePropDto {
   id: string;
   svg: string;
@@ -1343,6 +1356,13 @@ export interface ScenePropDto {
   bite?: [number, number];
   /** Broken, each hand holds a half: the left half; the right is its mirror. */
   half?: string;
+  /**
+   * Clothes' looks when set down, neither worn nor held: folded (on the
+   * floor, a table, or where they fell) and, in a room, on a hanger on
+   * the wall. Each in its own units, `anchor` the point that stands where
+   * it rests. Absent for anything not worn: it rests as it is drawn.
+   */
+  rest?: { folded: ScenePropRestDto; hung?: ScenePropRestDto };
   /** Near whom it rests. */
   near: string | null;
   /** Who holds it as the scene opens, and in what: a hand, or the mouth. Absent, it rests near `near`. */
@@ -2347,6 +2367,10 @@ export interface StudioCharacterDto {
   look: string;
   /** A person's look, as the kit draws them. */
   figure: Record<string, string | number | string[]> | null;
+  /** An animal's look, as the animal kit draws it; absent, the artist draws it. */
+  animal?: StudioAnimalDto;
+  /** A creature's look, as the creature kit draws it; absent, the artist draws it. */
+  creature?: StudioCreatureDto;
   size: 'small' | 'medium' | 'large' | null;
   voice: string;
   voicePick: number;
@@ -2354,6 +2378,63 @@ export interface StudioCharacterDto {
   carries: string | null;
   /** How they are drawn: an SVG, for a person now; for anyone else once they have been drawn. */
   drawing: string | null;
+  /** One the artist draws, being drawn now: for the first time, or again as the maker asked. */
+  drawingNow?: boolean;
+  /**
+   * New drawings of them waiting beside the one they have, up to three,
+   * the likeliest first, and what the maker asked for: one replaces
+   * theirs only when chosen. `first`: a first drawing's takes, the first
+   * the one they have now.
+   */
+  candidates?: StudioOptionsDto | null;
+}
+
+/** New drawings of a character to choose from. */
+export interface StudioOptionsDto {
+  /** What the maker asked for; empty for a first drawing's takes. */
+  words: string;
+  first?: boolean;
+  options: { id: string; drawing: string }[];
+}
+
+/** An animal as the animal kit draws it: its species, build, colours and markings, and what it wears. */
+export interface StudioAnimalDto {
+  species: string;
+  build: 'slim' | 'average' | 'stout';
+  size: 'small' | 'medium' | 'large';
+  coat: string;
+  second: string | null;
+  pattern: string;
+  /** Null: the species' own. */
+  ears: string | null;
+  tail: string | null;
+  mane: string | null;
+  horns: string | null;
+  wear: { neck?: string; back?: string; head?: string; feet?: string };
+  wearColour: string | null;
+}
+
+/** A creature as the creature kit draws it: its body, colours and texture, its face, limbs, wings and tail, and what it wears. */
+export interface StudioCreatureDto {
+  body: string;
+  build: 'slim' | 'average' | 'stout';
+  size: 'small' | 'medium' | 'large';
+  bodyColour: string;
+  texture: string;
+  /** Null: the kit's own for its texture. */
+  textureColour: string | null;
+  eyes: 1 | 2 | 3;
+  nose: string;
+  head: string;
+  top: string;
+  arms: string;
+  legs: string;
+  /** Null: its body's, or ink for sticks. */
+  limbColour: string | null;
+  wings: string;
+  tail: string;
+  wear: { neck?: string; body?: string; face?: string };
+  wearColour: string | null;
 }
 
 export interface StudioSetDto {
@@ -2537,6 +2618,8 @@ export interface StudioEventDto {
   /** The step it belongs to: where its card opens the panel. */
   step: StudioPhase;
   sceneId?: string;
+  /** The character it is about: their new drawings, to choose from in the thread while they wait. */
+  characterId?: string;
   /** Which writing of it this is, from 1: the outline's, the cast's or a scene's. */
   version?: number;
   /** What happened, in a line. */

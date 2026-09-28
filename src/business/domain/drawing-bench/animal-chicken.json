@@ -1,0 +1,15 @@
+{
+  "id": "chicken",
+  "kind": "character",
+  "name": "Henny",
+  "book": "Farm Friends",
+  "is": "animal",
+  "size": "small",
+  "look": "a brown hen with a red comb and yellow legs",
+  "legs": 2,
+  "drawer": "kit",
+  "animal": {
+    "species": "chicken",
+    "coat": "brown"
+  }
+}

@@ -4,6 +4,8 @@
  * maker can see. The same words both ways, so the producer never talks of
  * a scene the writer was never told of.
  */
+import { describeAnimal } from '../scene-animal';
+import { describeCreature } from '../scene-creature';
 import { describeFigure } from '../scene-figure';
 import { DRAWN } from '../scene-own';
 import { STAGE_NAMES, STAGE_RECIPES, type LearningStage } from '../scene-stage';
@@ -56,7 +58,13 @@ export function describeBible(
       .join('\n');
   const people = bible.characters.map((c) => {
     const looks =
-      c.kind === 'person' && c.figure ? describeFigure(c.figure) : c.look;
+      c.kind === 'person' && c.figure
+        ? describeFigure(c.figure)
+        : c.animal
+          ? describeAnimal(c.animal)
+          : c.creature
+            ? describeCreature(c.creature)
+            : c.look;
     return `- ${c.id}: ${c.name}, ${c.role}, ${c.kind}${c.size ? ` (${c.size})` : ''}; ${c.traits.join(', ') || 'no traits given'}; looks: ${looks}; voice: ${c.voice}${c.carries ? `; carries a ${c.carries}` : ''}`;
   });
   const places = bible.sets.map(
@@ -146,6 +154,8 @@ export function describeForProducer(input: {
   episode: number;
   /** What the maker is looking at in the panel as they write: "scene 3 ("The ball")", "the cast". */
   looking?: string | null;
+  /** New drawings of characters waiting to be chosen from: whose, how many, and what was asked. */
+  waiting?: { name: string; options: number; words: string }[];
 }): string {
   const story = input.brief.format !== 'explainer';
   const missing = briefMissing(input.brief);
@@ -167,6 +177,15 @@ export function describeForProducer(input: {
           const state = input.states?.[k];
           return `${sheet ? describeSheet(sheet, k) : `Scene ${k + 1}: being written`}${state ? ` [${state}]` : ''}`;
         })
+        .join('\n')}`,
+    );
+  if (input.waiting?.length)
+    parts.push(
+      `New drawings waiting to be chosen from (on their cards and in the conversation):\n${input.waiting
+        .map(
+          (one) =>
+            `${one.name}: ${one.options === 1 ? 'drawing 1' : `drawings 1 to ${one.options}`}${one.words ? `, drawn again for "${one.words.slice(0, 120)}"` : ', other ways to draw them for the first time (drawing 1 is the one they have)'}`,
+        )
         .join('\n')}`,
     );
   if (input.looking)

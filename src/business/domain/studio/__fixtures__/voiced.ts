@@ -6,11 +6,11 @@
  */
 import type { SceneDto } from '../../../../contracts';
 import { composeScene } from '../../scene-compose';
-import type { SceneScript } from '../../scene-script';
+import { facesShown, type SceneScript } from '../../scene-script';
 import type { GatedDrawing } from '../../scene-svg';
 import type { TimedBeat } from '../../scene-timing';
 import { outfitWords } from '../../scene-wear';
-import { FIGURE_SIGNS } from '../../scene-figure';
+import { FIGURE_SIGNS, faceId } from '../../scene-figure';
 
 const WORD_MS = 400;
 
@@ -42,6 +42,8 @@ const figure = (
   rig: boolean,
   outfits: string[] | null = null,
   signs: readonly string[] = [],
+  /** The faces the kit draws only when shown (eyes closed), as it names their groups. */
+  asked: readonly string[] = [],
 ): GatedDrawing => ({
   svg: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 600 900"><rect width="10" height="10"/></svg>',
   viewBox: [0, 0, 600, 900],
@@ -62,7 +64,9 @@ const figure = (
       // it; and each sign the scene shows on them.
       ...(outfits ?? []).slice(1).map((_, k) => `dress-${k + 1}`),
       ...signs,
-    ].map((face) => [face, face]),
+    ]
+      .map((face): [string, string] => [face, face])
+      .concat(asked.map((face): [string, string] => [face, faceId(face)])),
   ),
   moves: true,
   callouts: [],
@@ -105,6 +109,7 @@ export function voiced(
             !artists.includes(thing.id),
             outfitsOf(thing),
             signsOf(script, thing.id),
+            artists.includes(thing.id) ? [] : facesShown(script, thing.id),
           )
         : (sets[thing.id] ?? null),
     ]),

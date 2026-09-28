@@ -94,6 +94,8 @@ export interface StudioEventRecord {
     | 'checked';
   step: EpisodePhase;
   sceneId?: string;
+  /** The character it is about: new drawings of them to choose from, in the thread. */
+  characterId?: string;
   version?: number;
   line: string;
 }

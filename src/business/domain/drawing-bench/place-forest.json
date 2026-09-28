@@ -1,0 +1,9 @@
+{
+  "id": "forest",
+  "kind": "place",
+  "name": "the forest",
+  "book": "Night in the Woods",
+  "place": "outdoor",
+  "look": "a green forest path between tall trees with ferns and mushrooms",
+  "drawer": "kit"
+}

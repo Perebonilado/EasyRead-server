@@ -111,7 +111,18 @@ export interface StudioAsk {
 
 /** A piece of the Studio's work on one episode. */
 export interface StudioJob {
-  kind: 'bible' | 'outline' | 'script' | 'scene' | 'prepare' | 'make';
+  kind:
+    | 'bible'
+    | 'outline'
+    | 'script'
+    | 'scene'
+    | 'prepare'
+    | 'make'
+    | 'draw'
+    | 'redraw';
+  /** For 'draw': the characters the artist draws at the cast step; for 'redraw', the one drawn again as the maker asks. */
+  characterIds?: string[];
+  characterId?: string;
   showId: string;
   episodeId: string;
   userId: string;

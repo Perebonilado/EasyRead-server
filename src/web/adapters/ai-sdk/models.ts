@@ -6,7 +6,10 @@ import type { LlmTask } from '../../../business/ports/llm.port';
 export const PROVIDERS = ['openai', 'anthropic', 'google', 'deepseek'] as const;
 export type ProviderName = (typeof PROVIDERS)[number];
 
-/** Which env var carries each provider's key. */
+/**
+ * Which env var carries each provider's key. Google's may be given as
+ * GEMINI_API_KEY instead, as the Gemini voice takes it (ALSO_KEY_VAR).
+ */
 const API_KEY_VAR: Record<ProviderName, string> = {
   openai: 'OPENAI_API_KEY',
   anthropic: 'ANTHROPIC_API_KEY',
@@ -14,6 +17,11 @@ const API_KEY_VAR: Record<ProviderName, string> = {
   // Text only: no speech, no embeddings, no vision. Cheap on output and
   // on a repeated prompt prefix, which every writer here has.
   deepseek: 'DEEPSEEK_API_KEY',
+};
+
+/** A second name a provider's key may be set under. */
+const ALSO_KEY_VAR: Partial<Record<ProviderName, string>> = {
+  google: 'GEMINI_API_KEY',
 };
 
 /**
@@ -34,6 +42,9 @@ const TASK_VAR: Record<LlmTask, string> = {
   // cannot, so a deployment points this at a stronger one.
   lecture_sketch: 'AI_MODEL_LECTURE_SKETCH',
   sketch_judge: 'AI_MODEL_SKETCH_JUDGE',
+  // The eyes of the see-and-fix loop and the drawing bench: a picture in,
+  // a scored verdict out, one call a drawing looked at.
+  drawing_judge: 'AI_MODEL_DRAWING_JUDGE',
   ocr_page: 'AI_MODEL_OCR',
   summarize: 'AI_MODEL_SUMMARIZE',
   topics_outline: 'AI_MODEL_TOPICS',
@@ -76,6 +87,10 @@ const TASK_VAR: Record<LlmTask, string> = {
   // design.
   scene_write: 'AI_MODEL_SCENE_WRITE',
   scene_draw: 'AI_MODEL_SCENE_DRAW',
+  // A show's characters and own things, and its places: each drawn once a
+  // show and kept, so a stronger artist than the explainer's is worth it.
+  cast_draw: 'AI_MODEL_CAST_DRAW',
+  set_paint: 'AI_MODEL_SET_PAINT',
   scene_profile: 'AI_MODEL_SCENE_PROFILE',
   scene_notes: 'AI_MODEL_SCENE_NOTES',
   scene_story: 'AI_MODEL_SCENE_STORY',
@@ -113,6 +128,14 @@ const TASK_DEFAULT: Partial<Record<LlmTask, string>> = {
   // seconds at most on the page tried). Thinking: SCENE_WRITE_THINKING.
   scene_write: 'deepseek:deepseek-flash',
   scene_draw: 'deepseek:deepseek-flash',
+  // A show's characters, own things and places on DeepSeek, Richard's
+  // choice (2026-09-27): Google for the voice only. The drawing bench's
+  // bake-off scored Gemini 3.8 Flash higher (median 6.67 against DeepSeek
+  // Flash's 4.33, one blind draw each, at 1.2 cents against 0.26): set
+  // AI_MODEL_CAST_DRAW and AI_MODEL_SET_PAINT to google:gemini-3.8-flash
+  // to draw on it. The see-and-fix loop and three takes apply either way.
+  cast_draw: 'deepseek:deepseek-flash',
+  set_paint: 'deepseek:deepseek-flash',
   // What a document is: one small call a document.
   scene_profile: 'openai:gpt-4.1-mini',
   // A chapter's teacher's notes: one careful read a chapter, before any
@@ -131,7 +154,19 @@ const TASK_DEFAULT: Partial<Record<LlmTask, string>> = {
   // The check of a scene made again as asked: a few thousand tokens in, a
   // verdict out, thinking off (STUDIO_CHECK_THINKING).
   studio_check: 'deepseek:deepseek-flash',
+  // A drawing judged from its picture: DeepSeek cannot see. Gemini 3.8
+  // Flash, Richard's choice (2026-09-27; never gpt-4.1): it named every
+  // flaw he found in Clover, Dot and Eggbert (a blanket drawn as a scarf, a
+  // beak beside the face, a face on the belly), at about 0.4 cents a look.
+  drawing_judge: 'google:gemini-3.8-flash',
 };
+
+/**
+ * Tasks a deployment may go without. With no key for its provider the
+ * process still starts: a drawing is then checked by code alone, not
+ * judged from its picture.
+ */
+const OPTIONAL_TASKS = new Set<LlmTask>(['drawing_judge']);
 
 const DEFAULT_MODEL = 'openai:gpt-4o-mini';
 const DEFAULT_EMBED_MODEL = 'openai:text-embedding-3-small';
@@ -258,12 +293,17 @@ export class ModelRegistry {
   assertConfigured(): void {
     const required = new Set<ProviderName>();
     for (const task of Object.keys(TASK_VAR) as LlmTask[]) {
-      required.add(this.refFor(task).provider);
+      const { provider } = this.refFor(task);
+      if (OPTIONAL_TASKS.has(task) && !this.keyOf(provider)) {
+        this.logger.warn(
+          `${task}: no ${API_KEY_VAR[provider]}, so it is skipped: drawings are checked by code alone`,
+        );
+        continue;
+      }
+      required.add(provider);
     }
 
-    const missing = [...required].filter(
-      (provider) => !this.config.get(API_KEY_VAR[provider]),
-    );
+    const missing = [...required].filter((provider) => !this.keyOf(provider));
     if (missing.length) {
       throw new Error(
         `Missing API key(s) for configured model provider(s): ${missing
@@ -284,6 +324,16 @@ export class ModelRegistry {
     );
   }
 
+  /** A provider's key, under its own name or the other it may be set under. */
+  private keyOf(name: ProviderName): string | undefined {
+    const also = ALSO_KEY_VAR[name];
+    return (
+      this.config.get<string>(API_KEY_VAR[name])?.trim() ||
+      (also ? this.config.get<string>(also)?.trim() : undefined) ||
+      undefined
+    );
+  }
+
   private defaultSpec(): string {
     return this.config.get<string>('AI_MODEL_DEFAULT') || DEFAULT_MODEL;
   }
@@ -300,7 +350,7 @@ export class ModelRegistry {
     const cached = this.clients.get(name);
     if (cached) return cached as never;
 
-    const apiKey = this.config.get<string>(API_KEY_VAR[name]);
+    const apiKey = this.keyOf(name);
     if (!apiKey) throw new Error(`${API_KEY_VAR[name]} is not set`);
 
     const baseURL =

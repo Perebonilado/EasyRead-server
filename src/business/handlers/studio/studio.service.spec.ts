@@ -4,7 +4,17 @@ import {
   outlineOf,
   storySheetOf,
 } from '../../domain/studio/studio';
-import { ValidationError } from '../../domain/errors/errors';
+import { NotFoundError, ValidationError } from '../../domain/errors/errors';
+import { SHEET_VERSION, type CharacterSheet } from '../../domain/scene-sheet';
+import {
+  drawnStamp,
+  withCandidate,
+  withOptions,
+} from '../../domain/studio/studio-drawings';
+import {
+  FAILURES_PREFIX,
+  type DrawingFailure,
+} from '../../domain/drawing-failures';
 import type { JobQueuePort, StudioJob } from '../../ports/job-queue.port';
 import type { LlmGatewayPort } from '../../ports/llm.port';
 import type {
@@ -16,8 +26,9 @@ import type {
 } from '../../repositories/studio.repository';
 import type { SceneVoiceService } from '../admin/scene-voice.service';
 import type { EntitlementsService } from '../documents/entitlements.service';
-import type { StudioCastService } from './studio-cast.service';
-import { StudioService } from './studio.service';
+import { StudioCastService, studioCastKey } from './studio-cast.service';
+import { StudioService, refusesWords } from './studio.service';
+import { sceneFingerprint } from './studio-views';
 
 const brief = briefOf({
   format: 'story',
@@ -258,14 +269,28 @@ function studioInMemory() {
         watermarked: false,
       }),
   } as unknown as EntitlementsService;
-  const cast = {
-    drawings: () => Promise.resolve({ characters: new Map(), sets: new Map() }),
-  } as unknown as StudioCastService;
+  // The show's drawings in a store in memory, as the Studio keeps them.
+  const files = new Map<string, Buffer>();
+  const storage = {
+    get: (key: string) =>
+      files.has(key)
+        ? Promise.resolve(files.get(key)!)
+        : Promise.reject(new NotFoundError('File')),
+    put: ({ key, body }: { key: string; body: Buffer }) => {
+      files.set(key, body);
+      return Promise.resolve({ key, size: body.length });
+    },
+    delete: (key: string) => {
+      files.delete(key);
+      return Promise.resolve();
+    },
+  };
+  const cast = new StudioCastService(storage as never);
   const service = new StudioService(
     repo as StudioRepository,
     llm,
     queue,
-    { delete: () => Promise.resolve() } as never,
+    storage as never,
     { now: () => at },
     { record: () => Promise.resolve() },
     entitlements,
@@ -280,6 +305,8 @@ function studioInMemory() {
     messages.filter((m) => m.role === 'user').map((m) => m.content);
   return {
     service,
+    cast,
+    files,
     answer,
     repo,
     shows,
@@ -720,5 +747,441 @@ describe('a change asked for a scene', () => {
       'Which scene should I change? Tell me its number.',
     );
     expect(studio.jobs).toEqual([]);
+  });
+});
+
+/** A drawing kept for a character, as the artist's are. */
+const drawnSheet = (svg: string): CharacterSheet => ({
+  version: SHEET_VERSION,
+  drawing: {
+    svg,
+    viewBox: [0, 0, 100, 100],
+    aspect: 1,
+    parts: {},
+    labels: {},
+    states: {},
+    moves: true,
+    callouts: [],
+    field: null,
+  },
+  anchors: { head: null, body: null, legs: null },
+});
+
+describe('the cast drawn at the cast step, and one character drawn again', () => {
+  /** The show with Bingo, a dog the artist draws, beside Tobi, whom the kit draws. */
+  function withBingo() {
+    const studio = studioInMemory();
+    const show = studio.shows.get('s1')!;
+    studio.shows.set('s1', {
+      ...show,
+      bible: bibleOf({
+        characters: [
+          { name: 'Tobi', voice: 'boy', figure: { age: 'child' } },
+          { name: 'Bingo', kind: 'animal', voice: 'creature', look: 'a dog' },
+        ],
+        sets: [{ name: 'Market' }],
+      }),
+    });
+    return studio;
+  }
+
+  it('draws the animals and creatures as the outline is approved, and shows them being drawn', async () => {
+    const studio = withBingo();
+    studio.episodes.set('e0', {
+      ...studio.episodes.get('e0')!,
+      phase: 'outline',
+    });
+    await studio.service.approve('u1', 'e0');
+    expect(studio.jobs).toEqual([
+      expect.objectContaining({ kind: 'draw', characterIds: ['bingo'] }),
+    ]);
+    const show = await studio.service.show('u1', 's1');
+    const bingo = show.bible!.characters.find((c) => c.id === 'bingo')!;
+    expect(bingo.drawingNow).toBe(true);
+    expect(
+      show.bible!.characters.find((c) => c.id === 'tobi')!.drawingNow,
+    ).toBeUndefined();
+    // Asked again while being drawn: not drawn twice.
+    await studio.service.drawMissing('u1', 's1');
+    expect(studio.jobs).toHaveLength(1);
+  });
+
+  it('draws only the one character a change asks to be drawn again, never the whole cast', async () => {
+    const studio = withBingo();
+    await studio.service.rewriteCast(
+      'u1',
+      's1',
+      'e0',
+      'redraw Bingo, rounder with a red collar',
+    );
+    expect(studio.jobs).toEqual([
+      expect.objectContaining({
+        kind: 'redraw',
+        characterId: 'bingo',
+        request: 'redraw Bingo, rounder with a red collar',
+      }),
+    ]);
+    // Nothing else is held up: the cast is not being written.
+    expect(studio.episodes.get('e0')!.busy).toBeNull();
+    expect(studio.events()).toEqual([
+      expect.objectContaining({
+        what: 'asked',
+        step: 'cast',
+        line: 'Drawing Bingo again',
+      }),
+    ]);
+    expect(studio.said()).toEqual([
+      'Cast: redraw Bingo, rounder with a red collar',
+    ]);
+  });
+
+  it('draws one character again from their card, or as the producer maps the words to them', async () => {
+    const studio = withBingo();
+    await studio.service.redrawCharacter('u1', 'e0', 'bingo', 'with spots');
+    expect(studio.jobs.at(-1)).toMatchObject({
+      kind: 'redraw',
+      characterId: 'bingo',
+      request: 'with spots',
+    });
+    expect(studio.said().at(-1)).toBe('Bingo: with spots');
+    // Being drawn now: asked again, said so.
+    await expect(
+      studio.service.redrawCharacter('u1', 'e0', 'bingo', 'bigger'),
+    ).rejects.toThrow('Bingo is being drawn right now');
+
+    const chat = withBingo();
+    Object.assign(chat.answer, {
+      action: 'redraw',
+      character: 'Bingo',
+      request: 'make the dog rounder',
+      reply: 'Done! Bingo is rounder now.',
+    });
+    const { message } = await chat.service.turn(
+      'u1',
+      's1',
+      { message: 'make the dog rounder' },
+      () => undefined,
+    );
+    expect(chat.jobs).toEqual([
+      expect.objectContaining({ kind: 'redraw', characterId: 'bingo' }),
+    ]);
+    // Said in code's words: a try, waiting to be chosen, never done.
+    expect(message.content).toBe(
+      "I'll draw Bingo again as you ask. The new drawings will wait here and on their card beside the one you have: pick one, or keep theirs.",
+    );
+    // And a "cast" the producer set for it is a drawing again all the same.
+    const cast = withBingo();
+    Object.assign(cast.answer, { action: 'cast', request: 'redraw Bingo' });
+    await cast.service.turn(
+      'u1',
+      's1',
+      { message: 'redraw Bingo' },
+      () => undefined,
+    );
+    expect(cast.jobs.map((j) => j.kind)).toEqual(['redraw']);
+  });
+
+  it('draws a person again as new drawings to choose from, as anyone else (Phase E)', async () => {
+    const studio = withBingo();
+    await studio.service.redrawCharacter('u1', 'e0', 'tobi', 'a red cap');
+    expect(studio.jobs).toEqual([
+      expect.objectContaining({
+        kind: 'redraw',
+        characterId: 'tobi',
+        request: 'a red cap',
+      }),
+    ]);
+    expect(studio.events().at(-1)?.line).toBe('Drawing Tobi again');
+  });
+
+  it('shows a new drawing beside the one they have; only choosing it replaces it, and only their scenes are made again', async () => {
+    const studio = withBingo();
+    const old = drawnSheet('<svg><circle r="1"/></svg>');
+    const rounder = drawnSheet('<svg><circle r="2"/></svg>');
+    studio.files.set(
+      studioCastKey('s1'),
+      Buffer.from(JSON.stringify({ bingo: old })),
+    );
+    await studio.cast.changeWork('s1', (work) =>
+      withCandidate(work, 'bingo', rounder, 'rounder', Date.now()),
+    );
+    // Scene 1 shows Tobi alone; scene 2 shows Bingo; both made as they are.
+    const withDog = storySheetOf({
+      title: 'Home',
+      set: 'market',
+      onStage: [
+        { who: 'tobi', spot: 'left' },
+        { who: 'bingo', spot: 'right' },
+      ],
+      beats: [{ kind: 'line', who: 'tobi', say: 'There you are.' }],
+    });
+    studio.scenes.set('c2', { ...studio.scenes.get('c2')!, sheet: withDog });
+    const shown = await studio.service.show('u1', 's1');
+    const bingo = shown.bible!.characters.find((c) => c.id === 'bingo')!;
+    expect(bingo.drawing).toContain('r="1"');
+    expect(bingo.candidates?.options[0].drawing).toContain('r="2"');
+    expect(bingo.candidates?.words).toBe('rounder');
+    for (const id of ['c1', 'c2']) {
+      const row = studio.scenes.get(id)!;
+      studio.scenes.set(id, {
+        ...row,
+        sceneKey: `k-${id}`,
+        madeHash: sceneFingerprint(
+          row.sheet!,
+          studio.shows.get('s1')!.bible,
+          brief,
+        ),
+      });
+    }
+    expect(
+      (await studio.service.episode('u1', 'e0')).scenes.map((s) => s.stale),
+    ).toEqual([false, false]);
+
+    const after = await studio.service.chooseDrawing(
+      'u1',
+      's1',
+      'bingo',
+      'use',
+    );
+    const now = after.bible!.characters.find((c) => c.id === 'bingo')!;
+    expect(now.drawing).toContain('r="2"');
+    expect(now.candidates).toBeUndefined();
+    expect(
+      (
+        JSON.parse(studio.files.get(studioCastKey('s1'))!.toString()) as Record<
+          string,
+          CharacterSheet
+        >
+      ).bingo.drawing.svg,
+    ).toContain('r="2"');
+    // Only the scene with Bingo in it is to make again.
+    expect(
+      (await studio.service.episode('u1', 'e0')).scenes.map((s) => s.stale),
+    ).toEqual([false, true]);
+    expect(studio.events().at(-1)).toMatchObject({
+      what: 'edited',
+      step: 'cast',
+      line: "Bingo's new drawing is in: 1 made scene with Bingo to make again",
+    });
+  });
+
+  it('lets a new drawing go, keeping the one they have, or draws another from the same words', async () => {
+    const studio = withBingo();
+    const old = drawnSheet('<svg><circle r="1"/></svg>');
+    studio.files.set(
+      studioCastKey('s1'),
+      Buffer.from(JSON.stringify({ bingo: old })),
+    );
+    const waiting = () =>
+      studio.cast.changeWork('s1', (work) =>
+        withCandidate(
+          work,
+          'bingo',
+          drawnSheet('<svg><circle r="3"/></svg>'),
+          'with spots',
+          Date.now(),
+        ),
+      );
+    await waiting();
+    const kept = await studio.service.chooseDrawing(
+      'u1',
+      's1',
+      'bingo',
+      'keep',
+    );
+    const bingo = kept.bible!.characters.find((c) => c.id === 'bingo')!;
+    expect(bingo.candidates).toBeUndefined();
+    expect(bingo.drawing).toContain('r="1"');
+    expect(studio.events().at(-1)?.line).toBe('Bingo kept as before');
+    expect(bingo).not.toHaveProperty('drawn');
+
+    await waiting();
+    await studio.service.chooseDrawing('u1', 's1', 'bingo', 'again');
+    expect(studio.jobs.at(-1)).toMatchObject({
+      kind: 'redraw',
+      characterId: 'bingo',
+      request: 'with spots',
+    });
+    const again = await studio.service.show('u1', 's1');
+    expect(
+      again.bible!.characters.find((c) => c.id === 'bingo')!.drawingNow,
+    ).toBe(true);
+    // Nothing waiting: nothing to choose.
+    await expect(
+      studio.service.chooseDrawing('u1', 's1', 'bingo', 'use'),
+    ).rejects.toThrow('There is no new drawing of Bingo.');
+  });
+
+  /** Bingo drawn, and three new drawings of him waiting. */
+  async function withThree() {
+    const studio = withBingo();
+    studio.files.set(
+      studioCastKey('s1'),
+      Buffer.from(
+        JSON.stringify({ bingo: drawnSheet('<svg><circle r="1"/></svg>') }),
+      ),
+    );
+    const three = [2, 3, 4].map((r) =>
+      drawnSheet(`<svg><circle r="${r}"/></svg>`),
+    );
+    await studio.cast.changeWork('s1', (work) =>
+      withOptions(
+        work,
+        'bingo',
+        three.map((sheet) => ({ sheet })),
+        'with spots',
+        Date.now(),
+      ),
+    );
+    return { studio, three };
+  }
+
+  it('shows three new drawings side by side, and uses the one chosen by its id', async () => {
+    const { studio, three } = await withThree();
+    const shown = await studio.service.show('u1', 's1');
+    const waiting = shown.bible!.characters.find(
+      (c) => c.id === 'bingo',
+    )!.candidates!;
+    expect(waiting.words).toBe('with spots');
+    expect(waiting.options.map((o) => o.id)).toEqual(three.map(drawnStamp));
+    expect(waiting.options[1].drawing).toContain('r="3"');
+    const after = await studio.service.chooseDrawing(
+      'u1',
+      's1',
+      'bingo',
+      'use',
+      waiting.options[1].id,
+    );
+    const bingo = after.bible!.characters.find((c) => c.id === 'bingo')!;
+    expect(bingo.drawing).toContain('r="3"');
+    expect(bingo.candidates).toBeUndefined();
+    // One that is not there is said so, and nothing changes.
+    const again = await withThree();
+    await expect(
+      again.studio.service.chooseDrawing('u1', 's1', 'bingo', 'use', 'nope'),
+    ).rejects.toThrow('There is no drawing nope of Bingo.');
+  });
+
+  it('chooses in the chat: "use the third one" is the third, and the producer is told what waits', async () => {
+    const { studio } = await withThree();
+    Object.assign(studio.answer, {
+      reply: 'Great choice!',
+      action: 'choose',
+      character: null,
+    });
+    const turn = await studio.service.turn(
+      'u1',
+      's1',
+      { message: 'use the third one' },
+      () => undefined,
+    );
+    expect(studio.heard.at(-1)!.state).toContain(
+      'New drawings waiting to be chosen from',
+    );
+    expect(studio.heard.at(-1)!.state).toContain(
+      'Bingo: drawings 1 to 3, drawn again for "with spots"',
+    );
+    const bingo = turn.show.bible!.characters.find((c) => c.id === 'bingo')!;
+    expect(bingo.drawing).toContain('r="4"');
+    expect(turn.message.content).toBe('Using the third drawing of Bingo.');
+    expect(studio.events().at(-1)?.line).toBe("Bingo's new drawing is in");
+    // "Keep the old one": let go, as the card's button does.
+    const kept = await withThree();
+    Object.assign(kept.studio.answer, {
+      action: 'choose',
+      character: 'Bingo',
+      pick: 0,
+    });
+    const done = await kept.studio.service.turn(
+      'u1',
+      's1',
+      { message: 'keep the old one' },
+      () => undefined,
+    );
+    const still = done.show.bible!.characters.find((c) => c.id === 'bingo')!;
+    expect(still.drawing).toContain('r="1"');
+    expect(still.candidates).toBeUndefined();
+    expect(done.message.content).toBe('Keeping Bingo as they are.');
+  });
+
+  it('keeps a drawing marked not right for the bench, with its brief and the note, and draws them again as the note says', async () => {
+    const { studio, three } = await withThree();
+    await studio.service.notRight('u1', 's1', 'bingo', {
+      options: [drawnStamp(three[0])],
+      note: '  his ears are far too big  ',
+    });
+    const kept = [...studio.files.keys()].filter((key) =>
+      key.startsWith(FAILURES_PREFIX),
+    );
+    expect(kept).toHaveLength(1);
+    const failure = JSON.parse(
+      studio.files.get(kept[0])!.toString(),
+    ) as DrawingFailure;
+    expect(failure).toMatchObject({
+      characterId: 'bingo',
+      name: 'Bingo',
+      kind: 'animal',
+      look: 'a dog',
+      note: 'his ears are far too big',
+      asked: 'with spots',
+      which: 'offered',
+      drawer: 'artist',
+    });
+    expect(failure.sheet?.drawing.svg).toContain('r="2"');
+    expect(failure.svg).toContain('r="2"');
+    expect(studio.jobs.at(-1)).toMatchObject({
+      kind: 'redraw',
+      characterId: 'bingo',
+      request: 'his ears are far too big',
+    });
+    expect(studio.events().at(-1)?.line).toBe(
+      'Not right: drawing Bingo again — “his ears are far too big”',
+    );
+  });
+
+  it('keeps the drawing a person has when it is marked not right, and draws them again another way', async () => {
+    const studio = withBingo();
+    await studio.service.notRight('u1', 's1', 'tobi', {});
+    const key = [...studio.files.keys()].find((one) =>
+      one.startsWith(FAILURES_PREFIX),
+    )!;
+    const failure = JSON.parse(
+      studio.files.get(key)!.toString(),
+    ) as DrawingFailure;
+    expect(failure).toMatchObject({
+      kind: 'person',
+      which: 'theirs',
+      drawer: 'kit',
+      note: null,
+    });
+    expect(failure.figure?.age).toBe('child');
+    expect(failure.svg).toContain('<svg');
+    expect(studio.jobs.at(-1)).toMatchObject({
+      kind: 'redraw',
+      characterId: 'tobi',
+      request: 'Draw Tobi again, another way, as their look says.',
+    });
+  });
+});
+
+describe('refusesWords', () => {
+  it('lets a classic story with a fight in it through to the producer', () => {
+    expect(refusesWords({ flagged: true, categories: ['violence'] })).toBe(
+      false,
+    );
+  });
+
+  it('refuses anything graphic, sexual, hateful or self-harming', () => {
+    for (const category of ['violence/graphic', 'sexual', 'hate', 'self-harm'])
+      expect(
+        refusesWords({ flagged: true, categories: ['violence', category] }),
+      ).toBe(true);
+  });
+
+  it('refuses a flag that names nothing, and passes what is not flagged', () => {
+    expect(refusesWords({ flagged: true, categories: [] })).toBe(true);
+    expect(refusesWords({ flagged: false, categories: ['violence'] })).toBe(
+      false,
+    );
   });
 });

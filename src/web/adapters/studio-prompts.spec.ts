@@ -16,6 +16,17 @@ describe("the producer's instructions", () => {
   });
 });
 
+describe('a request about one character’s look', () => {
+  it('is that character drawn again, never the whole cast written again', () => {
+    const turn = STUDIO_PROMPTS.studioTurn;
+    expect(turn).toMatch(
+      /request about one character's look[^]*is action "redraw", character[^]*their name/,
+    );
+    expect(turn).toContain('It is never "cast", and never the whole cast');
+    expect(turn).toContain('character is null except with');
+  });
+});
+
 describe('what the producer may say of a change', () => {
   it('says what it will try and that it will be checked, never that it is done', () => {
     const turn = STUDIO_PROMPTS.studioTurn;

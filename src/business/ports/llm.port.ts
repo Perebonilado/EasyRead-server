@@ -9,6 +9,7 @@ import type {
   TopicPreviewBody,
 } from '../../contracts';
 import type { DrawingThing, SceneScriptDraft } from '../domain/scene-script';
+import type { DrawingKind, DrawingVerdict } from '../domain/drawing-score';
 import type { WorkedSolution } from '../domain/maths-work';
 
 export type LlmTask =
@@ -36,6 +37,9 @@ export type LlmTask =
   | 'lecture_diagram'
   | 'lecture_sketch'
   | 'sketch_judge'
+  // A drawing the model made, judged against its brief by a vision model:
+  // the see-and-fix loop's eyes, and the drawing bench's.
+  | 'drawing_judge'
   | 'learn_outline'
   | 'learn_write'
   | 'visualize_query'
@@ -45,6 +49,10 @@ export type LlmTask =
   // and the artist (each drawing, as animated SVG).
   | 'scene_write'
   | 'scene_draw'
+  // A show's characters and its own things, in the house style of the
+  // people code draws; and its places, painted as the scene behind them.
+  | 'cast_draw'
+  | 'set_paint'
   | 'scene_profile'
   | 'scene_notes'
   | 'scene_story'
@@ -102,7 +110,19 @@ export interface StudioTurnDraft {
   /** What the maker's latest message says of the brief: null for what it does not. */
   brief: Record<string, unknown>;
   action:
-    'none' | 'outline' | 'approve' | 'cast' | 'scene' | 'make' | 'episode';
+    | 'none'
+    | 'outline'
+    | 'approve'
+    | 'cast'
+    | 'redraw'
+    | 'choose'
+    | 'scene'
+    | 'make'
+    | 'episode';
+  /** For "redraw": the one character whose look is to change, by name or id; for "choose", whose new drawing is chosen. */
+  character?: string | null;
+  /** For "choose": which of the new drawings waiting, from 1; 0 to keep the one they have. */
+  pick?: number | null;
   /** A scene's number, from 1, for a change to it. */
   scene: number | null;
   /** For a change to several scenes: each one's number, from 1, the first first. Absent, only `scene`. */
@@ -524,6 +544,21 @@ export interface LlmGatewayPort {
   }): Promise<LlmResult<{ shows: boolean; wrong: string | null }>>;
 
   /**
+   * A drawing judged against its brief by a vision model, on the
+   * scorecard (drawing-score): what it shows, each point 0 to 10, and
+   * what to change, as instructions to the artist. With `old`, a drawing
+   * made again: the one before and the maker's words, for whether the
+   * change shows and whether it is still the same character.
+   */
+  drawingJudge(input: {
+    png: Buffer;
+    kind: DrawingKind;
+    /** What it should be, in words: its name and its look. */
+    brief: string;
+    old?: { png: Buffer; words: string };
+  }): Promise<LlmResult<DrawingVerdict>>;
+
+  /**
    * One page as an animated explainer: the narration, the cast of things
    * it needs drawn, and the storyboard of what stands on the stage and
    * when, written together. With `previous` and `problems`, the same page
@@ -659,7 +694,39 @@ export interface LlmGatewayPort {
     signal?: AbortSignal;
     /** A story's place, painted as the scene behind the stage. */
     backdrop?: boolean;
+    /** A character drawn again: how they are drawn now, as SVG, to draw from. */
+    reference?: string;
+    /**
+     * What it is drawn for: 'cast' is a show's character or thing of its
+     * own, in the house style of the people code draws (cast_draw);
+     * otherwise an explainer's drawing (scene_draw), or with `backdrop` a
+     * place (set_paint).
+     */
+    purpose?: 'cast';
+    /** The outline asked for on this canvas, and how small eyes and parts may be: the kit's line on the stage. */
+    asked?: { line: number; eyes?: number; least?: number };
+    /** How to frame it, when several are drawn side by side: "side view, facing right". */
+    hint?: string;
+    /** How freely it is drawn: drawings made side by side differ. */
+    temperature?: number;
+    /** Its own drawing before, as SVG, to revise as the notes say rather than start again. */
+    previous?: string;
   }): Promise<LlmResult<string>>;
+
+  /**
+   * A place's layout, not its painting: its sky, its ground, what stands
+   * behind, and each thing placed, as words code reads leniently and
+   * draws (scene-set-layout), on the set painter's task (set_paint).
+   * `previous` is its own layout before, as JSON, to revise as the notes
+   * say.
+   */
+  setLayout(input: {
+    brief: string;
+    notes?: string[];
+    previous?: string;
+    temperature?: number;
+    hint?: string;
+  }): Promise<LlmResult<Record<string, unknown>>>;
 
   lectureSketch(input: {
     topicTitle: string;

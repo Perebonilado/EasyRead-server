@@ -1,0 +1,11 @@
+{
+  "id": "bicycle",
+  "kind": "feature",
+  "name": "bicycle",
+  "book": "Tobi Rides",
+  "opens": false,
+  "real": {
+    "heightCm": 100,
+    "lengthCm": 170
+  }
+}

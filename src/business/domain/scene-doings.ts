@@ -1047,8 +1047,9 @@ const doings: Record<DoingId, Omit<Doing, 'id'>> = {
     thing: null,
     aims: ['feature'],
     aimed: true,
+    // Never someone's eyes ("closes his eyes", "eyes closed"): a face.
     words:
-      /\b(?:clos(?:e|es|ed|ing)(?! (?:to|by|behind|beside|in|up to|together|enough)\b)|shut(?:s|ting)?|lock(?:s|ed|ing)?|slam(?:s|med|ming)?|latch(?:es|ed|ing)?)\b/iu,
+      /(?<!\beyes? (?:(?:are|is|were|was|now|still|tightly|gently|firmly) )*)\b(?:clos(?:e|es|ed|ing)(?! (?:to|by|behind|beside|in|up to|together|enough)\b)|shut(?:s|ting)?|lock(?:s|ed|ing)?|slam(?:s|med|ming)?|latch(?:es|ed|ing)?)\b(?! (?:(?:his|her|their|its|my|your|our|both) )?eyes?\b)/iu,
     ms: 1200,
     leastMs: 700,
     keyAt: 0.5,

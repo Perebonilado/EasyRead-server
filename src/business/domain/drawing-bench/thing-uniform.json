@@ -1,0 +1,11 @@
+{
+  "id": "uniform",
+  "kind": "thing",
+  "name": "school uniform",
+  "book": "First Day at School",
+  "look": "white shirt and navy blue jumper",
+  "real": {
+    "heightCm": 60,
+    "lengthCm": 50
+  }
+}

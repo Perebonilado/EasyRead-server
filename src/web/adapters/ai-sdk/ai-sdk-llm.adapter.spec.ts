@@ -29,9 +29,12 @@ function mockProvider(): Promise<{
   url: string;
   calls: Recorded[];
   reply: (body: unknown) => void;
+  /** Models the stand-in refuses, as a provider out of credit does. */
+  refused: Set<string>;
   server: Server;
 }> {
   const calls: Recorded[] = [];
+  const refused = new Set<string>();
   let nextContent = '';
 
   const server = createServer((req, res) => {
@@ -44,6 +47,19 @@ function mockProvider(): Promise<{
         body,
         auth: req.headers.authorization,
       });
+
+      if (refused.has(body.model)) {
+        res.writeHead(429, { 'Content-Type': 'application/json' });
+        res.end(
+          JSON.stringify({
+            error: {
+              message: 'Your prepayment credits are depleted.',
+              type: 'insufficient_quota',
+            },
+          }),
+        );
+        return;
+      }
 
       if (req.url?.includes('/embeddings')) {
         const values = body.input ?? [];
@@ -130,6 +146,7 @@ function mockProvider(): Promise<{
           nextContent =
             typeof value === 'string' ? value : JSON.stringify(value);
         },
+        refused,
         server,
       });
     });
@@ -196,6 +213,7 @@ describe('AiSdkLlmAdapter', () => {
 
   beforeEach(() => {
     mock.calls.length = 0;
+    mock.refused.clear();
     adapter = configure();
   });
 
@@ -507,6 +525,152 @@ describe('AiSdkLlmAdapter', () => {
     expect(mock.calls[0].body.model).toBe('gpt-4o-mini');
   });
 
+  it('draws a show’s character with its own artist in the house style, a place with the painter, and a lesson’s picture as before', async () => {
+    adapter = configure({
+      AI_MODEL_CAST_DRAW: 'openai:gpt-4.1',
+      AI_MODEL_SET_PAINT: 'openai:gpt-4.1-mini',
+      AI_MODEL_SCENE_DRAW: 'openai:gpt-4o',
+    });
+    mock.reply(
+      '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 800"/>',
+    );
+    const thing = {
+      name: 'Clover',
+      brief: 'Clover, a brown horse',
+      motion: 'none',
+      parts: [{ name: 'head', label: false }],
+      states: [{ name: 'neutral', look: 'calm' }],
+      shape: 'square' as const,
+    };
+    await adapter.sceneDrawing({
+      thing,
+      viewBox: { w: 800, h: 800 },
+      topic: 'Farm Friends',
+      neighbours: [],
+      purpose: 'cast',
+      asked: { line: 16, eyes: 92, least: 64 },
+      hint: 'side view, facing right',
+      temperature: 0.8,
+      notes: ['Draw her side-on'],
+      previous: '<svg>her before</svg>',
+    });
+    await adapter.sceneDrawing({
+      thing: { ...thing, name: 'the stable', states: [], shape: 'wide' },
+      viewBox: { w: 1600, h: 900 },
+      topic: 'Farm Friends',
+      neighbours: [],
+      backdrop: true,
+      asked: { line: 6.1 },
+    });
+    await adapter.sceneDrawing({
+      thing: { ...thing, name: 'a kidney', states: [] },
+      viewBox: { w: 800, h: 800 },
+      topic: 'The kidney',
+      neighbours: [],
+    });
+    const [cast, set, lesson] = mock.calls.map(
+      (call) => call.body as unknown as Record<string, unknown>,
+    );
+    const said = (body: Record<string, unknown>) => JSON.stringify(body);
+    expect(cast.model).toBe('gpt-4.1');
+    expect(cast.temperature).toBe(0.8);
+    expect(said(cast)).toContain(
+      'the character artist for an animated picture-book show',
+    );
+    expect(said(cast)).toContain('stroke-width=\\"16\\"');
+    expect(said(cast)).toContain('Each eye at least 92 units across.');
+    expect(said(cast)).toContain('Framing: side view, facing right.');
+    expect(said(cast)).toContain('What to change:\\n- Draw her side-on');
+    expect(said(cast)).toContain('<svg>her before</svg>');
+    expect(said(cast)).toContain('Context: the show \\"Farm Friends\\".');
+    expect(said(cast)).not.toContain('Labels at font-size');
+    expect(set.model).toBe('gpt-4.1-mini');
+    expect(said(set)).toContain('the set painter for an animated story');
+    expect(said(set)).toContain('stroke-width=\\"6.1\\"');
+    expect(lesson.model).toBe('gpt-4o');
+    expect(said(lesson)).toContain(
+      'the illustrator for an animated explainer video',
+    );
+    expect(lesson.temperature).toBeUndefined();
+  });
+
+  it('draws with the explainer’s artist when a show’s artist is refused for want of credit, and only then', async () => {
+    adapter = configure({
+      AI_MODEL_CAST_DRAW: 'openai:gpt-4.1',
+      AI_MODEL_SCENE_DRAW: 'openai:gpt-4o',
+    });
+    mock.refused.add('gpt-4.1');
+    mock.reply(
+      '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 800"/>',
+    );
+    const thing = {
+      name: 'Clover',
+      brief: 'Clover, a brown horse',
+      motion: 'none',
+      parts: [],
+      states: [],
+      shape: 'square' as const,
+    };
+    const drawn = await adapter.sceneDrawing({
+      thing,
+      viewBox: { w: 800, h: 800 },
+      topic: 'Farm Friends',
+      neighbours: [],
+      purpose: 'cast',
+    });
+    expect(mock.calls.map((call) => call.body.model)).toEqual([
+      'gpt-4.1',
+      'gpt-4o',
+    ]);
+    // Priced as what drew it.
+    expect(drawn.usage.model).toBe('openai:gpt-4o');
+    // An explainer's own artist refused has no one to stand in.
+    mock.calls.length = 0;
+    mock.refused.add('gpt-4o');
+    await expect(
+      adapter.sceneDrawing({
+        thing,
+        viewBox: { w: 800, h: 800 },
+        topic: 'The kidney',
+        neighbours: [],
+      }),
+    ).rejects.toThrow(/credits/);
+    expect(mock.calls).toHaveLength(1);
+  });
+
+  it('judges a drawing from its picture, the one before beside it, and keeps its numbers to the scale', async () => {
+    adapter = configure({ AI_MODEL_DRAWING_JUDGE: 'openai:gpt-4.1-mini' });
+    mock.reply({
+      sees: 'a horse with a scarf',
+      recognisable: 12,
+      anatomy: 4,
+      face: 7,
+      change: 3,
+      same: 9,
+      place: null,
+      problems: ['Put the blanket across her back'],
+    });
+    const judged = await adapter.drawingJudge({
+      png: Buffer.from('after'),
+      kind: 'animal',
+      brief: 'Clover: a brown horse',
+      old: { png: Buffer.from('before'), words: 'a red saddle blanket' },
+    });
+    expect(judged.value.recognisable).toBe(10);
+    expect(judged.value.change).toBe(3);
+    expect(judged.value.problems).toEqual(['Put the blanket across her back']);
+    expect(judged.usage.model).toBe('openai:gpt-4.1-mini');
+    const body = JSON.stringify(mock.calls[0].body);
+    expect(body).toContain(
+      `data:image/png;base64,${Buffer.from('before').toString('base64')}`,
+    );
+    expect(body).toContain(
+      `data:image/png;base64,${Buffer.from('after').toString('base64')}`,
+    );
+    expect(body).toContain('The maker asked for this change');
+    expect(body).toContain('art director of an animated picture-book show');
+  });
+
   it('refuses to boot when a configured provider has no key', () => {
     const adapterWithoutKey = new AiSdkLlmAdapter({
       get: (key: string, fallback?: string) =>
@@ -514,6 +678,19 @@ describe('AiSdkLlmAdapter', () => {
     } as unknown as ConfigService);
 
     expect(() => adapterWithoutKey.onModuleInit()).toThrow(/ANTHROPIC_API_KEY/);
+  });
+
+  it('takes Google’s key under the name the Gemini voice uses', () => {
+    const env: Record<string, string> = {
+      AI_MODEL_DEFAULT: 'google:gemini-3.8-flash',
+      GEMINI_API_KEY: 'a-key',
+      OPENAI_API_KEY: 'x',
+      DEEPSEEK_API_KEY: 'x',
+    };
+    const adapterWithGemini = new AiSdkLlmAdapter({
+      get: (key: string, fallback?: string) => env[key] ?? fallback,
+    } as unknown as ConfigService);
+    expect(() => adapterWithGemini.onModuleInit()).not.toThrow();
   });
 
   it('writes the segments around a chapter from the plan alone, pitched to the learner', async () => {

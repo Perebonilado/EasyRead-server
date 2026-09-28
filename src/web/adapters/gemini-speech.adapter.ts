@@ -2,6 +2,8 @@ import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import type { SpeechPort } from '../../business/ports/voice.port';
 import { pcmMs, readPcm16, readWav } from '../../business/domain/wav';
+import { readFileSync } from 'fs';
+import { JWT } from 'google-auth-library';
 import { encodeMp3 } from './audio/mp3';
 
 /** The Gemini API's home. */
@@ -10,6 +12,58 @@ const BASE = 'https://generativelanguage.googleapis.com/v1beta';
 export const GEMINI_TTS_DEFAULT_MODEL = 'gemini-3.8-flash-tts';
 /** "Warm", of the thirty; the line-up (scripts/scene-voices.ts) is for choosing another. */
 export const GEMINI_TTS_DEFAULT_VOICE = 'Sulafat';
+
+/**
+ * The same Gemini voices sold through Cloud Text-to-Speech: no daily cap
+ * (the Gemini API allows a hundred lines a day, even paid), billed to the
+ * project's Cloud billing. Used when the Gemini API's day is spent, and
+ * only with GOOGLE_CLOUD_TTS_API_KEY set.
+ */
+const CLOUD_TTS = 'https://texttospeech.googleapis.com/v1/text:synthesize';
+/** Cloud's newest Gemini voice model. */
+export const CLOUD_TTS_DEFAULT_MODEL = 'gemini-3.1-flash-tts-preview';
+/** Cloud takes at most 4,000 bytes of words a request: kept well under. */
+const CLOUD_TEXT_BYTES = 3_500;
+/** How long the Gemini API is left alone once its day is spent. */
+const CAPPED_MS = 60 * 60_000;
+
+/** Whether Google's words say the day's quota is spent, not just a burst. */
+export function dailyCap(reason: string): boolean {
+  return /per day|requests per day|\bRPD\b|daily/i.test(reason);
+}
+
+/**
+ * A run as Cloud Text-to-Speech is asked for it: Cloud takes one
+ * direction a request, so each stretch of sentences directed alike is a
+ * request of its own, split again where its words would pass Cloud's size.
+ */
+export function cloudRequests(
+  model: string,
+  voice: string,
+  items: GeminiItem[],
+): Record<string, unknown>[] {
+  const groups: { style: string | null; texts: string[]; bytes: number }[] = [];
+  for (const item of items) {
+    const bytes = Buffer.byteLength(item.text) + 1;
+    const last = groups[groups.length - 1];
+    if (
+      last &&
+      last.style === item.style &&
+      last.bytes + bytes <= CLOUD_TEXT_BYTES
+    ) {
+      last.texts.push(item.text);
+      last.bytes += bytes;
+    } else groups.push({ style: item.style, texts: [item.text], bytes });
+  }
+  return groups.map((group) => ({
+    input: {
+      text: group.texts.join(' '),
+      ...(group.style ? { prompt: group.style } : {}),
+    },
+    voice: { languageCode: 'en-us', name: voice, model_name: model },
+    audioConfig: { audioEncoding: 'LINEAR16', sampleRateHertz: 24000 },
+  }));
+}
 
 /** A sentence as the port hands it over; Gemini is directed by `style` and ignores `speed`. */
 type Piece = {
@@ -328,6 +382,10 @@ export class GeminiSpeechAdapter implements SpeechPort {
   private static readonly ATTEMPTS = 3;
   /** A page is well under a minute of work for the voice. */
   private static readonly REQUEST_MS = 3 * 60_000;
+  /** Until when the Gemini API's day is spent, so Cloud speaks at once. */
+  private cappedUntil = 0;
+  /** Cloud's service account, signed in once. */
+  private signer: { jwt: JWT; project: string } | null = null;
 
   constructor(
     private readonly config: ConfigService,
@@ -390,6 +448,7 @@ export class GeminiSpeechAdapter implements SpeechPort {
     let tokensIn = 0;
     let tokensOut = 0;
     let counted = false;
+    let byCloud = false;
     // A few runs at once, joined in order with the silence each asked for.
     const spoken: ({
       samples: Int16Array;
@@ -403,20 +462,13 @@ export class GeminiSpeechAdapter implements SpeechPort {
           const items = geminiItems(run.pieces);
           if (!items.length) return;
           const who = run.voice?.trim() || speaker;
-          const { url, body } =
-            this.config.get<string>('GEMINI_TTS_API') === 'generate'
-              ? generateRequest(model, who, items)
-              : interactionRequest(model, who, items);
-          const answer = await this.attempts(url, key, body);
-          const found = audioIn(answer);
-          if (!found) throw new Error('The Gemini voice sent no audio');
-          const bytes = Buffer.from(found.data, 'base64');
-          const wav = readWav(bytes);
-          if (!wav && /wav/i.test(found.mimeType))
-            throw new Error(
-              'The Gemini voice sent audio that is not 16-bit PCM',
-            );
-          const pcm = wav ?? readPcm16(bytes, rateOf(found.mimeType) ?? 24000);
+          const { pcm, usage, cloud } = await this.voiceRun(
+            model,
+            who,
+            items,
+            key,
+          );
+          if (cloud) byCloud = true;
           if (!pcm.samples.length)
             throw new Error('The Gemini voice sent silence');
           // Each sentence's silence, made here: never asked for in words.
@@ -429,7 +481,7 @@ export class GeminiSpeechAdapter implements SpeechPort {
             samples: paused.samples,
             rate: pcm.sampleRate,
             quiet: paused.quiet,
-            usage: usageIn(answer),
+            usage,
           };
         }),
       );
@@ -477,11 +529,151 @@ export class GeminiSpeechAdapter implements SpeechPort {
     return {
       audio: await this.encode(samples, rate),
       mimeType: 'audio/mpeg',
-      model: `gemini:${model}`,
+      model: byCloud ? `gemini:${this.cloudModel()}` : `gemini:${model}`,
       durationMs: pcmMs({ samples, sampleRate: rate }),
       silencesMs,
       ...(counted ? { usage: { tokensIn, tokensOut } } : {}),
     };
+  }
+
+  private cloudModel(): string {
+    return (
+      this.config.get<string>('GOOGLE_CLOUD_TTS_MODEL')?.trim() ||
+      CLOUD_TTS_DEFAULT_MODEL
+    );
+  }
+
+  /**
+   * One run of one voice, as 16-bit samples: from the Gemini API, or from
+   * Cloud Text-to-Speech in the same voice once the Gemini API's day is
+   * spent and Cloud is set up. A film is never stopped by the cap.
+   */
+  private async voiceRun(
+    model: string,
+    voice: string,
+    items: GeminiItem[],
+    key: string,
+  ): Promise<{
+    pcm: { samples: Int16Array; sampleRate: number };
+    usage: { tokensIn: number; tokensOut: number } | null;
+    cloud: boolean;
+  }> {
+    const cloudReady = this.cloudReady();
+    if (cloudReady && Date.now() < this.cappedUntil)
+      return {
+        pcm: await this.cloud(voice, items),
+        usage: null,
+        cloud: true,
+      };
+    const { url, body } =
+      this.config.get<string>('GEMINI_TTS_API') === 'generate'
+        ? generateRequest(model, voice, items)
+        : interactionRequest(model, voice, items);
+    let answer: unknown;
+    try {
+      answer = await this.attempts(url, { 'x-goog-api-key': key }, body);
+    } catch (error) {
+      const spent = (error as { daily?: boolean }).daily === true;
+      if (!spent || !cloudReady) throw error;
+      this.cappedUntil = Date.now() + CAPPED_MS;
+      this.logger.warn(
+        "The Gemini voice's day is spent: Cloud Text-to-Speech speaks in the same voices for the next hour",
+      );
+      return {
+        pcm: await this.cloud(voice, items),
+        usage: null,
+        cloud: true,
+      };
+    }
+    const found = audioIn(answer);
+    if (!found) throw new Error('The Gemini voice sent no audio');
+    const bytes = Buffer.from(found.data, 'base64');
+    const wav = readWav(bytes);
+    if (!wav && /wav/i.test(found.mimeType))
+      throw new Error('The Gemini voice sent audio that is not 16-bit PCM');
+    return {
+      pcm: wav ?? readPcm16(bytes, rateOf(found.mimeType) ?? 24000),
+      usage: usageIn(answer),
+      cloud: false,
+    };
+  }
+
+  /** Whether Cloud Text-to-Speech can be asked: a service account, or a key. */
+  private cloudReady(): boolean {
+    return Boolean(
+      this.config.get<string>('GOOGLE_CLOUD_TTS_CREDENTIALS')?.trim() ||
+      this.config.get<string>('GOOGLE_CLOUD_TTS_API_KEY')?.trim(),
+    );
+  }
+
+  /**
+   * How Cloud Text-to-Speech is signed in to. Its Gemini voices take no
+   * API key (it answers "API keys are not supported"): a service account
+   * of the project (GOOGLE_CLOUD_TTS_CREDENTIALS: its JSON key in base64,
+   * the JSON itself, or its file's path), its token kept until it runs out, billed to its
+   * own project. A key is used only where Cloud still takes one.
+   */
+  private async cloudHeaders(): Promise<Record<string, string>> {
+    const given = this.config
+      .get<string>('GOOGLE_CLOUD_TTS_CREDENTIALS')
+      ?.trim();
+    if (!given) {
+      const key = this.config.get<string>('GOOGLE_CLOUD_TTS_API_KEY')?.trim();
+      return key ? { 'x-goog-api-key': key } : {};
+    }
+    if (!this.signer) {
+      const account = JSON.parse(serviceAccountJson(given)) as {
+        client_email: string;
+        private_key: string;
+        project_id: string;
+      };
+      this.signer = {
+        project: account.project_id,
+        jwt: new JWT({
+          email: account.client_email,
+          key: account.private_key,
+          scopes: ['https://www.googleapis.com/auth/cloud-platform'],
+        }),
+      };
+    }
+    const { token } = await this.signer.jwt.getAccessToken();
+    if (!token)
+      throw refused(
+        401,
+        'Cloud Text-to-Speech gave the service account no token',
+      );
+    return {
+      authorization: `Bearer ${token}`,
+      'x-goog-user-project': this.signer.project,
+    };
+  }
+
+  /** A run spoken by Cloud Text-to-Speech, its requests joined in order. */
+  private async cloud(
+    voice: string,
+    items: GeminiItem[],
+  ): Promise<{ samples: Int16Array; sampleRate: number }> {
+    const parts: Int16Array[] = [];
+    let sampleRate = 24000;
+    for (const body of cloudRequests(this.cloudModel(), voice, items)) {
+      const headers = await this.cloudHeaders();
+      const answer = (await this.attempts(CLOUD_TTS, headers, body)) as {
+        audioContent?: string;
+      };
+      if (!answer?.audioContent)
+        throw new Error('Cloud Text-to-Speech sent no audio');
+      const bytes = Buffer.from(answer.audioContent, 'base64');
+      const pcm = readWav(bytes) ?? readPcm16(bytes, 24000);
+      sampleRate = pcm.sampleRate;
+      parts.push(pcm.samples);
+    }
+    const samples = new Int16Array(parts.reduce((n, p) => n + p.length, 0));
+    let at = 0;
+    for (const part of parts) {
+      samples.set(part, at);
+      at += part.length;
+    }
+    return { samples, sampleRate };
   }
 
   /**
@@ -491,7 +683,7 @@ export class GeminiSpeechAdapter implements SpeechPort {
    */
   private async attempts(
     url: string,
-    key: string,
+    auth: Record<string, string>,
     body: Record<string, unknown>,
   ): Promise<unknown> {
     let lastError: Error | null = null;
@@ -506,7 +698,7 @@ export class GeminiSpeechAdapter implements SpeechPort {
           method: 'POST',
           headers: {
             'content-type': 'application/json',
-            'x-goog-api-key': key,
+            ...auth,
           },
           body: JSON.stringify(body),
           signal: AbortSignal.timeout(GeminiSpeechAdapter.REQUEST_MS),
@@ -517,6 +709,12 @@ export class GeminiSpeechAdapter implements SpeechPort {
           throw refused(
             response.status,
             `The Gemini voice refused our key: ${reason}`,
+          );
+        if (response.status === 429 && dailyCap(reason))
+          // The day's quota: waiting a minute will not bring it back.
+          throw Object.assign(
+            new Error(`The Gemini voice is rate limited: ${reason}`),
+            { daily: true },
           );
         if (response.status === 429) {
           // Google says how long to wait, sometimes; never more than a minute.
@@ -535,7 +733,8 @@ export class GeminiSpeechAdapter implements SpeechPort {
         );
       } catch (error) {
         lastError = named(error);
-        if (isRefusal(lastError)) throw lastError;
+        if (isRefusal(lastError) || (lastError as { daily?: boolean }).daily)
+          throw lastError;
         this.logger.warn(
           `attempt ${attempt} of ${GeminiSpeechAdapter.ATTEMPTS} failed: ${lastError.message}`,
         );
@@ -545,6 +744,20 @@ export class GeminiSpeechAdapter implements SpeechPort {
     }
     throw lastError ?? new Error('The Gemini voice did not answer');
   }
+}
+
+/**
+ * A service account's JSON key as the setting gives it: the JSON itself,
+ * the JSON in base64 (one line, kept in the env like any secret), or the
+ * path of its file.
+ */
+export function serviceAccountJson(given: string): string {
+  if (given.startsWith('{')) return given;
+  if (/^[A-Za-z0-9+/=_-]+$/.test(given) && !given.endsWith('.json')) {
+    const decoded = Buffer.from(given, 'base64').toString('utf8').trim();
+    if (decoded.startsWith('{')) return decoded;
+  }
+  return readFileSync(given, 'utf8');
 }
 
 /** Google's own words for what was wrong, out of its JSON envelope when it sent one. */

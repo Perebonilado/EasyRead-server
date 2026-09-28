@@ -45,6 +45,34 @@ import {
   SCENE_MUSIC,
 } from '../../../business/domain/scene-script';
 import {
+  ANIMAL_BUILDS,
+  ANIMAL_EARS,
+  ANIMAL_HORNS,
+  ANIMAL_MANES,
+  ANIMAL_PATTERNS,
+  ANIMAL_SIZES,
+  ANIMAL_TAILS,
+  BACK_WEAR,
+  FEET_WEAR,
+  HEAD_WEAR,
+  NECK_WEAR,
+} from '../../../business/domain/scene-animal';
+import {
+  CREATURE_ARMS,
+  CREATURE_BODY_WEAR,
+  CREATURE_BUILDS,
+  CREATURE_FACE_WEAR,
+  CREATURE_HEADS,
+  CREATURE_LEGS,
+  CREATURE_NECK_WEAR,
+  CREATURE_NOSES,
+  CREATURE_SIZES,
+  CREATURE_TAILS,
+  CREATURE_TEXTURES,
+  CREATURE_TOPS,
+  CREATURE_WINGS,
+} from '../../../business/domain/scene-creature';
+import {
   PLACE_KINDS,
   PLACE_STANDS,
   STORY_CROWDS,
@@ -58,6 +86,8 @@ export const STUDIO_ACTIONS = [
   'outline',
   'approve',
   'cast',
+  'redraw',
+  'choose',
   'scene',
   'make',
   'episode',
@@ -101,6 +131,11 @@ export const studioTurnSchema = z.object({
     .nullable()
     .catch(null),
   request: z.string().nullable().catch(null),
+  // The one character a "redraw" changes the look of, by name; or whose
+  // new drawing a "choose" chooses.
+  character: z.string().nullable().catch(null),
+  // Which of the new drawings waiting a "choose" chooses, from 1; 0 keeps theirs.
+  pick: z.union([z.number(), z.string()]).nullable().catch(null),
   // What of a change to a scene the stage cannot show, left out of it.
   cannot: z.string().nullable().catch(null),
   refuse: z.boolean().catch(false),
@@ -131,6 +166,64 @@ const lenientFigure = z.object({
   extras: z.array(z.string()).catch([]),
 });
 
+/**
+ * An animal's look from the animal kit's lists, each field caught as the
+ * species' own when it is not one of them. Its species and colours are
+ * words the domain reads (a puppy is a dog, "gray" is grey).
+ */
+const lenientAnimal = z.object({
+  species: z.string().catch(''),
+  build: z.enum(ANIMAL_BUILDS).catch('average'),
+  size: z.enum(ANIMAL_SIZES).catch('medium'),
+  coat: z.string().catch(''),
+  second: z.string().nullable().catch(null),
+  pattern: z.enum(ANIMAL_PATTERNS).catch('plain'),
+  ears: z.enum(ANIMAL_EARS).nullable().catch(null),
+  tail: z.enum(ANIMAL_TAILS).nullable().catch(null),
+  mane: z.enum(ANIMAL_MANES).nullable().catch(null),
+  horns: z.enum(ANIMAL_HORNS).nullable().catch(null),
+  wear: z
+    .object({
+      neck: z.enum(NECK_WEAR).nullable().catch(null),
+      back: z.enum(BACK_WEAR).nullable().catch(null),
+      head: z.enum(HEAD_WEAR).nullable().catch(null),
+      feet: z.enum(FEET_WEAR).nullable().catch(null),
+    })
+    .catch({ neck: null, back: null, head: null, feet: null }),
+  wearColour: z.enum(CLOTH_COLOURS).nullable().catch(null),
+});
+
+/**
+ * A creature's look from the creature kit's lists, each field caught as
+ * the plain one when it is not one of them. Its body and colours are
+ * words the domain reads ("boxy" is a box, "gray" is grey).
+ */
+const lenientCreature = z.object({
+  body: z.string().catch(''),
+  build: z.enum(CREATURE_BUILDS).catch('average'),
+  size: z.enum(CREATURE_SIZES).catch('medium'),
+  bodyColour: z.string().catch(''),
+  texture: z.enum(CREATURE_TEXTURES).catch('none'),
+  textureColour: z.string().nullable().catch(null),
+  eyes: z.number().catch(2),
+  nose: z.enum(CREATURE_NOSES).catch('none'),
+  head: z.enum(CREATURE_HEADS).catch('none'),
+  top: z.enum(CREATURE_TOPS).catch('none'),
+  arms: z.enum(CREATURE_ARMS).catch('stick'),
+  legs: z.enum(CREATURE_LEGS).catch('stick'),
+  limbColour: z.string().nullable().catch(null),
+  wings: z.enum(CREATURE_WINGS).catch('none'),
+  tail: z.enum(CREATURE_TAILS).catch('none'),
+  wear: z
+    .object({
+      neck: z.enum(CREATURE_NECK_WEAR).nullable().catch(null),
+      body: z.enum(CREATURE_BODY_WEAR).nullable().catch(null),
+      face: z.enum(CREATURE_FACE_WEAR).nullable().catch(null),
+    })
+    .catch({ neck: null, body: null, face: null }),
+  wearColour: z.enum(CLOTH_COLOURS).nullable().catch(null),
+});
+
 export const studioBibleSchema = z.object({
   characters: z.array(
     z.object({
@@ -140,6 +233,8 @@ export const studioBibleSchema = z.object({
       role: z.enum(STUDIO_ROLES).catch('supporting'),
       look: z.string().catch(''),
       figure: lenientFigure.nullable().catch(null),
+      animal: lenientAnimal.nullable().catch(null),
+      creature: lenientCreature.nullable().catch(null),
       size: z.enum(STORY_SIZES).nullable().catch(null),
       voice: z.enum(STUDIO_VOICES as [string, ...string[]]).catch('woman'),
       voicePick: z.number().catch(0),

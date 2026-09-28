@@ -27,7 +27,9 @@ import {
   type FigureSign,
   type FigureSpec,
 } from '../scene-figure';
-import { KIT_FACES } from '../scene-figure';
+import { ASKED_FACES, KIT_FACES } from '../scene-figure';
+import { animalOf, type AnimalSpec } from '../scene-animal';
+import { creatureOf, type CreatureSpec } from '../scene-creature';
 import { faceNamed } from '../scene-feeling';
 import {
   ACTION_DOINGS,
@@ -236,7 +238,13 @@ export const WORDS_A_SECOND = 2.4;
 
 // ── The bible ─────────────────────────────────────────────────────────────
 
-/** What a character is: a person the kit draws, or an animal or a creature the artist draws in its style. */
+/**
+ * What a character is: a person the kit draws; an animal, drawn by the
+ * animal kit when its species is one the kit has (its `animal`), else by
+ * the artist in the kit's style; or a creature, drawn by the creature
+ * kit when its body is one the kit has (its `creature`), else by the
+ * artist.
+ */
 export const STUDIO_KINDS = ['person', 'animal', 'creature'] as const;
 export type StudioKind = (typeof STUDIO_KINDS)[number];
 
@@ -261,6 +269,16 @@ export interface StudioCharacter {
   look: string;
   /** A person's look, as the kit draws them. */
   figure: FigureSpec | null;
+  /**
+   * An animal's look, as the animal kit draws it (scene-animal): present
+   * when its species is one the kit has. Absent, the artist draws it.
+   */
+  animal?: AnimalSpec;
+  /**
+   * A creature's look, as the creature kit draws it (scene-creature):
+   * present when it fits the kit's bodies. Absent, the artist draws it.
+   */
+  creature?: CreatureSpec;
   /** An animal's or a creature's size beside people. */
   size: StorySize | null;
   voice: StudioVoice;
@@ -270,6 +288,12 @@ export interface StudioCharacter {
   traits: string[];
   /** What they carry when a scene gives them nothing else: gear drawn in their hand, or a thing of the stage's. */
   carries: ThingId | null;
+  /**
+   * One the artist drew: which drawing of theirs the maker chose, when
+   * they chose a new one. Scenes that show them are made again with it;
+   * absent until then.
+   */
+  drawn?: string;
 }
 
 export interface StudioSet {
@@ -551,6 +575,11 @@ export function bibleOf(raw: unknown): StudioBible {
         oneOf(STUDIO_VOICES)(c.voice) ??
         (kind === 'person' ? 'woman' : 'creature');
       const pick = Math.round(Number(c.voicePick));
+      // Only an animal is the animal kit's, and only one of its species.
+      const animal = kind === 'animal' && c.animal ? animalOf(c.animal) : null;
+      // And only a creature the creature kit's, when its body is the kit's.
+      const creature =
+        kind === 'creature' && c.creature ? creatureOf(c.creature) : null;
       return [
         {
           id: freeId(studioId(text(c.id, 40) || name), taken),
@@ -559,8 +588,14 @@ export function bibleOf(raw: unknown): StudioBible {
           role: oneOf(STUDIO_ROLES)(c.role) ?? 'supporting',
           look: text(c.look, 300),
           figure: kind === 'person' ? figureFrom(c.figure, voice) : null,
+          // Kept only when there is one, so a character without is as it was.
+          ...(animal ? { animal } : {}),
+          ...(creature ? { creature } : {}),
+          // A creature the kit draws stands at its spec's size.
           size:
-            kind === 'person' ? null : (oneOf(STORY_SIZES)(c.size) ?? 'medium'),
+            kind === 'person'
+              ? null
+              : (creature?.size ?? oneOf(STORY_SIZES)(c.size) ?? 'medium'),
           voice,
           voicePick:
             Number.isFinite(pick) && pick >= 0 ? pick % VOICE_PICKS : 0,
@@ -569,6 +604,9 @@ export function bibleOf(raw: unknown): StudioBible {
             .filter(Boolean)
             .slice(0, 3),
           carries: oneOf(THINGS)(c.carries),
+          ...(typeof c.drawn === 'string' && /^[a-f0-9]{6,32}$/.test(c.drawn)
+            ? { drawn: c.drawn }
+            : {}),
         },
       ];
     });
@@ -730,8 +768,12 @@ export const MOST_ON_STAGE = 4;
 export const STUDIO_DOINGS = ACTION_DOINGS;
 export type StudioDoing = DoingId;
 
-/** Every face someone can wear: the story's seven and the kit's own. */
-export const STUDIO_FACES = [...EXPRESSIONS, ...KIT_FACES] as const;
+/** Every face someone can wear: the story's seven, the kit's own, and eyes closed (drawn when a scene shows it). */
+export const STUDIO_FACES = [
+  ...EXPRESSIONS,
+  ...KIT_FACES,
+  ...ASKED_FACES,
+] as const;
 
 export const BEAT_KINDS = [
   'line',

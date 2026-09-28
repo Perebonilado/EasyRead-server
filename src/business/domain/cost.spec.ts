@@ -60,6 +60,24 @@ describe('the cost of a call', () => {
     ).toBeNull();
   });
 
+  it('prices Gemini 3.8 Flash at its rate for the day, doubling in 2027', () => {
+    const call = {
+      task: 'drawing_judge',
+      model: 'google:gemini-3.8-flash',
+      tokensIn: 1_000_000,
+      tokensOut: 1_000_000,
+    };
+    expect(costOf({ ...call, at: new Date('2026-09-27') })).toBe(4.5);
+    expect(costOf({ ...call, at: new Date('2027-01-01') })).toBe(9);
+    expect(
+      costOf({
+        ...call,
+        tokensCached: 1_000_000,
+        at: new Date('2026-09-27'),
+      }),
+    ).toBe(3.825);
+  });
+
   it('prices input the provider served from its cache at the cache rate', () => {
     // The artist's fixed prompt, a million tokens of it from the cache.
     expect(
@@ -83,12 +101,22 @@ describe('the cost of a call', () => {
     expect(
       costOf({
         task: 'scene_write',
+        model: 'openai:gpt-4o',
+        tokensIn: 1_000_000,
+        tokensOut: 0,
+        tokensCached: 500_000,
+      }),
+    ).toBe(2.5);
+    // gpt-4.1 charges a quarter for what its cache served.
+    expect(
+      costOf({
+        task: 'cast_draw',
         model: 'openai:gpt-4.1',
         tokensIn: 1_000_000,
         tokensOut: 0,
         tokensCached: 500_000,
       }),
-    ).toBe(2);
+    ).toBe(1.25);
   });
 });
 

@@ -56,6 +56,14 @@ export interface SheetRig {
   sinks?: number;
   /** Which way it faces as drawn: its head to the left (-1) or the right (1) of its body; absent, the viewer. */
   faces?: -1 | 1;
+  /** How far each side's arm turns about its shoulder, degrees, as the viewer sees the sides: absent, the arms keep still. */
+  arms?: { r?: number; l?: number };
+  /** Its legs step as it walks. */
+  steps?: true;
+  /** Its head nods, squashed toward its neck. */
+  nods?: true;
+  /** Drawn in one piece, with no arms, legs or tail to move: it squashes, stretches, leans and hops instead. */
+  onePiece?: true;
 }
 
 /** The most the body sinks on its legs, as a share of their height: lying down. */
@@ -111,6 +119,13 @@ export const SWINGS = {
   rustleS: 1.1,
   pulse: 0.06,
   pulseS: 2.2,
+  /** How far an arm turns about its shoulder, either way, to point, wave and reach (the kit's own arms go as far). */
+  arm: 110,
+  /** How far a leg swings about its hip as it steps, either way, and one step's time (two of the walk's bounds). */
+  step: 22,
+  stepS: 0.92,
+  /** How far the head squashes toward its neck in a nod, as a share of its height. */
+  nod: 0.08,
 } as const;
 
 /** How a part that lived by its own motion moves, found by its name. */
@@ -268,7 +283,7 @@ export function stillSheet(root: Element): string[] {
     if (
       name === 'g' &&
       !node.attribs.id &&
-      /\brig-(?:breathe|tail|ear|head|legs|flicker|flap|pulse|swish|rustle)\b/.test(
+      /\brig-(?:breathe|tail|ear|head|legs|leg|arm|flicker|flap|pulse|swish|rustle)\b/.test(
         node.attribs.class ?? '',
       )
     ) {
@@ -298,7 +313,16 @@ export function stillSheet(root: Element): string[] {
 interface Limb {
   /** Its name in the rig: head, legs, arms, tail, ears, or an ear's own id; or a part that moves by its name, by its own. */
   name: string;
-  kind: 'head' | 'legs' | 'arms' | 'tail' | 'ear' | 'ears' | 'mover';
+  kind:
+    | 'head'
+    | 'legs'
+    | 'arms'
+    | 'arm'
+    | 'leg'
+    | 'tail'
+    | 'ear'
+    | 'ears'
+    | 'mover';
   /** How a part found by its name moves. */
   motion?: Mover;
   node: Element;
@@ -312,6 +336,12 @@ interface Figure {
   faces: Element[];
   limbs: Limb[];
 }
+
+/** An arm or a leg of its own, by its id: "arm-left", "right-arm", "leg-2". */
+const ARM_ID =
+  /^(?:arms?[-_\s]?(?:l|r|left|right|\d)|(?:left|right)[-_\s]?arms?)$/i;
+const LEG_ID =
+  /^(?:legs?[-_\s]?(?:l|r|left|right|front|back|\d)(?:[-_\s]?(?:l|r|left|right|\d))?|(?:left|right|front|back)[-_\s]?legs?)$/i;
 
 const EAR_ID =
   /^(?:ears?[-_\s]?(?:l|r|left|right|\d)|(?:left|right)[-_\s]?ears?)$/i;
@@ -419,6 +449,8 @@ const r4 = (n: number) => Math.round(n * 10000) / 10000;
 function figureOf(
   root: Element,
   drawing: Pick<GatedDrawing, 'parts' | 'states'>,
+  /** Each arm and leg found as a part of its own, so arms point and wave and legs step: a sheet drawn to the brief that asks for them. */
+  apart = false,
 ): Figure {
   const part = (name: string) => {
     const id = drawing.parts[name];
@@ -459,7 +491,35 @@ function figureOf(
   };
   add('head', 'head', head);
   add('legs', 'legs', part('legs'));
-  add('arms', 'arms', part('arms'));
+  // Each arm and leg of its own, in a group inside the arms or the legs,
+  // or anywhere by its name: each turns about its own joint.
+  const each = (group: Element | null, named: RegExp): Element[] => {
+    const inside = group
+      ? elements(group.children).filter(
+          (node) => node.name.toLowerCase() === 'g' && hasInk(node),
+        )
+      : [];
+    const found =
+      inside.length >= 2
+        ? inside
+        : [...walk(root)].filter(
+            (node) => named.test(node.attribs.id ?? '') && hasInk(node),
+          );
+    return found.filter(
+      (one) => !found.some((other) => other !== one && holds(other, one)),
+    );
+  };
+  const arms = apart ? each(part('arms'), ARM_ID) : [];
+  if (arms.length >= 2)
+    arms.forEach((arm, i) => add(arm.attribs.id || `arm-${i + 1}`, 'arm', arm));
+  else add('arms', 'arms', part('arms'));
+  if (apart) {
+    const legs = each(part('legs'), LEG_ID);
+    if (legs.length >= 2)
+      legs.forEach((leg, i) =>
+        add(leg.attribs.id || `leg-${i + 1}`, 'leg', leg),
+      );
+  }
   add('tail', 'tail', tail);
   if (head) {
     // Ears each in a group of their own turn about their own joints; ears
@@ -540,7 +600,12 @@ const partOf = (limb: Limb, figure: Figure) => ({
   keep: [limb.node],
   drop: [
     ...figure.faces,
-    ...figure.limbs.filter((one) => one !== limb).map((one) => one.node),
+    ...figure.limbs
+      // The legs keep each leg of their own.
+      .filter(
+        (one) => one !== limb && !(limb.kind === 'legs' && one.kind === 'leg'),
+      )
+      .map((one) => one.node),
   ],
 });
 
@@ -686,7 +751,10 @@ export function floatNote(kind: Limb['kind'], gap: number): string {
     case 'legs':
       return `The legs float ${units} units from the body: draw their tops overlapping the body, behind it.`;
     case 'arms':
-      return `The arms float ${units} units from the body: draw them overlapping the body at the shoulders.`;
+    case 'arm':
+      return `The ${kind === 'arm' ? 'arm' : 'arms'} float${kind === 'arm' ? 's' : ''} ${units} units from the body: draw ${kind === 'arm' ? 'it' : 'them'} overlapping the body at the shoulder.`;
+    case 'leg':
+      return `A leg floats ${units} units from the body: draw its top overlapping the body, behind it.`;
     case 'head':
       return `The head floats ${units} units from the body: draw the neck overlapping the body.`;
     default:
@@ -710,7 +778,9 @@ export async function jointNotes(drawing: GatedDrawing): Promise<string[]> {
   const root = parse(drawing.svg);
   if (!root) return [];
   stillSheet(root);
-  const figure = figureOf(root, drawing);
+  // One drawn to the brief that marks its mouth's place (scene-sheet-face's
+  // MOUTH_MARK) has each arm and leg its own: each must meet the body.
+  const figure = figureOf(root, drawing, Boolean(drawing.parts['mouth-at']));
   const measured = await measure(root, figure, drawing.viewBox);
   return figure.limbs.flatMap((limb) => {
     const one = measured.get(limb.name);
@@ -783,6 +853,7 @@ function mend(root: Element, figure: Figure, limb: Limb, move: Point): boolean {
     joins &&
     limb.kind !== 'head' &&
     limb.kind !== 'arms' &&
+    limb.kind !== 'arm' &&
     !holds(limb.outer, joins)
   ) {
     const parent = limb.outer.parent as Element;
@@ -1076,13 +1147,18 @@ const centreOf = (box: InkBox): Point => [
 export async function rigSheet(
   sheet: CharacterSheet,
 ): Promise<{ sheet: CharacterSheet; notes: string[] }> {
-  if (sheet.figure) return { sheet, notes: [] };
+  // A person, an animal and a creature a kit drew are rigged by the kit itself.
+  if (sheet.figure || sheet.animal || sheet.creature)
+    return { sheet, notes: [] };
   const { drawing } = sheet;
   const root = parse(drawing.svg);
   if (!root) return { sheet, notes: [] };
   const viewBox = drawing.viewBox;
   stillSheet(root);
-  const figure = figureOf(root, drawing);
+  // A sheet drawn with a face code gives a mouth to (scene-sheet-face) was
+  // drawn to the brief that asks for each arm and leg on its own.
+  const gestures = Boolean(sheet.face);
+  const figure = figureOf(root, drawing, gestures);
   let measured = await measure(root, figure, viewBox);
   const notes: string[] = [];
   const mended: SheetRig['mended'] = [];
@@ -1093,6 +1169,7 @@ export async function rigSheet(
     if (
       !one?.box ||
       limb.kind === 'legs' ||
+      limb.kind === 'leg' ||
       limb.kind === 'mover' ||
       joined(one.relation, viewBox)
     )
@@ -1278,14 +1355,29 @@ export async function rigSheet(
       },
     ];
   });
+  // Each arm and leg of its own about its joint, and the head's nod: on a
+  // sheet drawn for them, each as far as it stays joined at both ends.
+  const gestureSwings = gestures
+    ? gestureSwingsOf(root, figure, joints, measured, headTurns && neck)
+    : [];
   const still = render(root, { xmlMode: true, selfClosingTags: true });
   const proved = await holdsTogether(
     root,
     viewBox,
-    [...swings.map((one) => one.swing), ...movers.map((one) => one.swing)],
+    [
+      ...swings.map((one) => one.swing),
+      ...movers.map((one) => one.swing),
+      ...gestureSwings.map((one) => one.swing),
+    ],
     still,
   );
-  const moverAmplitudes = proved.amplitudes.slice(swings.length);
+  const moverAmplitudes = proved.amplitudes.slice(
+    swings.length,
+    swings.length + movers.length,
+  );
+  const gestureAmplitudes = proved.amplitudes.slice(
+    swings.length + movers.length,
+  );
   const amplitude = (name: keyof Motion) => {
     const found = swings
       .map((one, i) => ({ name: one.name, amplitude: proved.amplitudes[i] }))
@@ -1393,6 +1485,14 @@ export async function rigSheet(
       );
     }
   }
+  // Each arm about its shoulder, each leg about its hip, as far as the
+  // least of its side's (or of them all) stayed joined.
+  const gesture = gestureWraps(
+    gestureSwings,
+    gestureAmplitudes,
+    (limb, className) => turnAbout(limb, className),
+    measured,
+  );
   if (motion.low && legs && legsOn?.box) {
     // The legs fold from the ground up: shorter, their feet where they stand.
     const foot = localPoint(root, legs.outer, [
@@ -1457,7 +1557,10 @@ export async function rigSheet(
       style: `transform-origin:${one.pivot[0]}px ${one.pivot[1]}px`,
     });
   });
-  const css = rigCss(motion, lifts, lows) + moverCss(moving);
+  const css =
+    rigCss(motion, lifts, lows) +
+    moverCss(moving) +
+    gestureCss(gesture, motion.dip ? gesture.nod : 0);
   const style = new Element('style', {});
   setText(style, css);
   style.parent = root;
@@ -1487,8 +1590,169 @@ export async function rigSheet(
           ? { sinks: Math.round((sink / viewBox[3]) * 1000) / 1000 }
           : {}),
         ...(faces ? { faces } : {}),
+        ...(gesture.arms.r || gesture.arms.l ? { arms: gesture.arms } : {}),
+        ...(gesture.step ? { steps: true as const } : {}),
+        ...(motion.dip && gesture.nod ? { nods: true as const } : {}),
+        // Nothing to move but the whole of it: it squashes, stretches,
+        // leans and hops instead.
+        ...(gestures &&
+        !figure.limbs.some((limb) =>
+          ['arms', 'arm', 'legs', 'leg', 'tail'].includes(limb.kind),
+        )
+          ? { onePiece: true as const }
+          : {}),
       },
     },
     notes,
   };
+}
+
+/** A gesture to prove: an arm, a leg, or the head's nod, and where it turns. */
+interface GestureSwing {
+  limb: Limb;
+  kind: 'arm' | 'leg' | 'nod';
+  /** Which side of the body an arm is on, as the viewer sees it: its CSS variable is --ar or --al. */
+  side: 'r' | 'l';
+  swing: Swing;
+}
+
+/**
+ * The gestures a sheet drawn for them proves: each arm turned about its
+ * shoulder and each leg about its hip, either way, and the head squashed
+ * toward its neck in a nod, each against what it joins.
+ */
+function gestureSwingsOf(
+  root: Element,
+  figure: Figure,
+  joints: Record<string, Point>,
+  measured: Map<string, Measured>,
+  neck: Limb | null | undefined | false,
+): GestureSwing[] {
+  const out: GestureSwing[] = [];
+  for (const limb of figure.limbs) {
+    if (limb.kind !== 'arm' && limb.kind !== 'leg') continue;
+    const joint = joints[limb.name];
+    const pivot = joint && localPoint(root, limb.outer, joint);
+    const ref = referenceOf(limb, figure);
+    const one = measured.get(limb.name);
+    if (!pivot || !ref) continue;
+    const middle = one?.restBox ? centreOf(one.restBox)[0] : joint[0];
+    out.push({
+      limb,
+      kind: limb.kind,
+      side: joint[0] >= middle ? 'r' : 'l',
+      swing: {
+        part: partOf(limb, figure),
+        ref,
+        moved: (degrees) =>
+          new Map([
+            [
+              limb.outer,
+              `rotate(${r2(degrees)} ${r1(pivot[0])} ${r1(pivot[1])})`,
+            ],
+          ]),
+        amplitude: limb.kind === 'arm' ? SWINGS.arm : SWINGS.step,
+        both: true,
+      },
+    });
+  }
+  if (neck && joints[neck.name]) {
+    const pivot = localPoint(root, neck.outer, joints[neck.name]);
+    const ref = referenceOf(neck, figure);
+    if (pivot && ref)
+      out.push({
+        limb: neck,
+        kind: 'nod',
+        side: 'r',
+        swing: {
+          part: partOf(neck, figure),
+          ref,
+          moved: (amount) =>
+            new Map([
+              [
+                neck.outer,
+                `translate(${r1(pivot[0])} ${r1(pivot[1])}) scale(1 ${r4(1 - amount)}) translate(${r1(-pivot[0])} ${r1(-pivot[1])})`,
+              ],
+            ]),
+          amplitude: SWINGS.nod,
+          both: false,
+        },
+      });
+  }
+  return out;
+}
+
+/** What the gestures came to: how far each side's arms turn, how far the legs step, and the nod. */
+export interface GestureMotion {
+  arms: { r?: number; l?: number };
+  step: number;
+  nod: number;
+}
+
+/**
+ * The rig's groups round each arm and leg that may move, and how far:
+ * each side's arms as far as the least of them, the legs as far as the
+ * least, alternate legs a step apart. `turn` puts the group round a part.
+ */
+function gestureWraps(
+  swings: GestureSwing[],
+  amplitudes: number[],
+  turn: (limb: Limb, className: string) => void,
+  measured: Map<string, Measured>,
+): GestureMotion {
+  const out: GestureMotion = { arms: {}, step: 0, nod: 0 };
+  const least = (kind: GestureSwing['kind'], side?: 'r' | 'l') => {
+    const found = swings
+      .map((one, i) => ({ one, amplitude: Math.abs(amplitudes[i] ?? 0) }))
+      .filter(({ one }) => one.kind === kind && (!side || one.side === side));
+    return found.length ? Math.min(...found.map((f) => f.amplitude)) : 0;
+  };
+  for (const side of ['r', 'l'] as const) {
+    const amplitude = least('arm', side);
+    if (amplitude) out.arms[side] = r2(amplitude);
+  }
+  out.step = r2(least('leg'));
+  out.nod = r4(least('nod'));
+  for (const one of swings)
+    if (one.kind === 'arm' && out.arms[one.side])
+      turn(one.limb, `rig-arm rig-arm-${one.side}`);
+  if (out.step) {
+    const legs = swings
+      .filter((one) => one.kind === 'leg')
+      .sort(
+        (a, b) =>
+          (measured.get(a.limb.name)?.box?.x ?? 0) -
+          (measured.get(b.limb.name)?.box?.x ?? 0),
+      );
+    legs.forEach((one, k) =>
+      turn(one.limb, `rig-leg rig-leg-${k % 2 ? 'b' : 'a'}`),
+    );
+  }
+  return out;
+}
+
+/**
+ * The gestures' CSS. What the stage acts, it sets on the drawing as it
+ * does on the kit's people: --ar and --al, each side's arm turned about
+ * its shoulder, degrees, held to as far as it was proved; --nod, 0 to 7,
+ * the head squashed toward its neck. While it walks, the legs step.
+ */
+export function gestureCss(motion: GestureMotion, nod: number): string {
+  const arm = (side: 'r' | 'l') => {
+    const most = motion.arms[side];
+    return most
+      ? `.rig-arm-${side}{rotate:calc(clamp(${-most}, var(--a${side},0), ${most})*1deg)}`
+      : '';
+  };
+  return [
+    motion.arms.r || motion.arms.l ? '.rig-arm{transform-box:view-box}' : '',
+    arm('r'),
+    arm('l'),
+    motion.step
+      ? `.rig-leg{transform-box:view-box}.on-walking .rig-leg-a{animation:rig-step ${SWINGS.stepS}s ease-in-out infinite}.on-walking .rig-leg-b{animation:rig-step ${SWINGS.stepS}s ease-in-out ${-SWINGS.stepS / 2}s infinite}${swingFrames('rig-step', -motion.step, motion.step)}`
+      : '',
+    nod
+      ? `.rig-head{scale:1 calc(1 - clamp(0, var(--nod,0), 7)*${r4(nod / 7)})}`
+      : '',
+  ].join('');
 }

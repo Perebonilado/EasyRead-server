@@ -12,6 +12,9 @@ import {
   interactionRequest,
   rateOf,
   usageIn,
+  cloudRequests,
+  dailyCap,
+  serviceAccountJson,
 } from './gemini-speech.adapter';
 
 const config = (values: Record<string, string>) =>
@@ -320,5 +323,88 @@ describe('the Gemini voice', () => {
     await expect(adapter.synthesize({ text: 'Hello.' })).rejects.toMatchObject({
       status: 401,
     });
+  });
+
+  it('speaks through Cloud in the same voice once the day is spent, and stays there', async () => {
+    const asked: { url: string; body: Record<string, unknown> }[] = [];
+    const spent = reply(429, {
+      error: {
+        message:
+          'Rate limit exceeded for model gemini-3.8-flash-tts (limit: 100 requests per day on Tier 1).',
+      },
+    });
+    const adapter = new GeminiSpeechAdapter(
+      config({ GEMINI_API_KEY: 'k', GOOGLE_CLOUD_TTS_API_KEY: 'c' }),
+      (samples) => Promise.resolve(Buffer.from(`mp3:${samples.length}`)),
+      (url: unknown, init?: RequestInit) => {
+        asked.push({
+          url: String(url),
+          body: JSON.parse(init?.body as string) as Record<string, unknown>,
+        });
+        return Promise.resolve(
+          String(url).includes('texttospeech')
+            ? reply(200, { audioContent: wav(1).toString('base64') })
+            : spent.clone(),
+        );
+      },
+    );
+    const said = await adapter.synthesize({
+      text: 'x',
+      pieces: [{ text: 'Five smooth stones.', pauseAfter: 0, voice: 'Puck' }],
+    });
+    expect(said.durationMs).toBe(1000);
+    expect(said.model).toBe('gemini:gemini-3.1-flash-tts-preview');
+    // Gemini once, never again that hour; Cloud in Puck's voice.
+    expect(asked.map((one) => one.url.includes('texttospeech'))).toEqual([
+      false,
+      true,
+    ]);
+    expect(asked[1].body).toMatchObject({
+      input: { text: 'Five smooth stones.' },
+      voice: { name: 'Puck', model_name: 'gemini-3.1-flash-tts-preview' },
+    });
+    await adapter.synthesize({ text: 'The giant falls.' });
+    expect(asked).toHaveLength(3);
+    expect(asked[2].url).toContain('texttospeech');
+  });
+
+  it('gives up at once on a spent day when there is no Cloud key', async () => {
+    let calls = 0;
+    const adapter = new GeminiSpeechAdapter(
+      config({ GEMINI_API_KEY: 'k' }),
+      () => Promise.resolve(Buffer.from('mp3')),
+      () => {
+        calls += 1;
+        return Promise.resolve(
+          reply(429, { error: { message: '100 requests per day' } }),
+        );
+      },
+    );
+    await expect(adapter.synthesize({ text: 'Hello.' })).rejects.toThrow(
+      'requests per day',
+    );
+    expect(calls).toBe(1);
+  });
+
+  it('asks Cloud once for each stretch directed alike', () => {
+    expect(dailyCap('limit: 100 requests per day on Tier 1')).toBe(true);
+    expect(dailyCap('slow down')).toBe(false);
+    const asks = cloudRequests('m', 'Kore', [
+      { text: 'One.', style: 'softly' },
+      { text: 'Two.', style: 'softly' },
+      { text: 'Three!', style: 'shouting' },
+      { text: 'Four.', style: null },
+    ]);
+    expect(asks.map((one) => one.input)).toEqual([
+      { text: 'One. Two.', prompt: 'softly' },
+      { text: 'Three!', prompt: 'shouting' },
+      { text: 'Four.' },
+    ]);
+  });
+
+  it('reads a service account given as JSON or as base64', () => {
+    const json = '{"type":"service_account","project_id":"p"}';
+    expect(serviceAccountJson(json)).toBe(json);
+    expect(serviceAccountJson(Buffer.from(json).toString('base64'))).toBe(json);
   });
 });

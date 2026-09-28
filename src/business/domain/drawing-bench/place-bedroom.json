@@ -1,0 +1,9 @@
+{
+  "id": "bedroom",
+  "kind": "place",
+  "name": "Tobi's bedroom",
+  "book": "Tobi and Friends",
+  "place": "indoor",
+  "look": "a child's bedroom with a bed, a window with curtains, a toy box and a rug",
+  "drawer": "kit"
+}

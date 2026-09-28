@@ -167,6 +167,39 @@ describe("a show's own things: named by the words, drawn once, handled like any"
     expect(standIn?.svg).toContain('<svg');
   });
 
+  it('sets clothes down folded, or on a hanger in a room, and anything else as it is drawn', () => {
+    const script = stageStory(
+      mendSheet(flies, bible).sheet,
+      withFound(bible, 'field', mendSheet(flies, bible)),
+    );
+    const kite = voiced({
+      ...script,
+      drawn: { things: { kite: KITE } },
+    }).scene.props?.find((p) => p.id === 'kite');
+    expect(kite?.rest).toBeUndefined();
+    // The same thing were it a uniform: folded out of doors, hung in a room.
+    const asUniform = (place: 'outdoor' | 'indoor') =>
+      voiced({
+        ...script,
+        ownThings: [
+          {
+            id: 'kite',
+            name: 'school uniform',
+            look: 'white shirt and navy jumper',
+          },
+        ],
+        setting: { ...script.setting!, place },
+        drawn: { things: { kite: KITE } },
+      }).scene.props?.find((p) => p.id === 'kite');
+    const outside = asUniform('outdoor');
+    expect(outside?.rest?.folded.svg).toContain('#34518f');
+    expect(outside?.rest?.hung).toBeUndefined();
+    const inside = asUniform('indoor');
+    expect(inside?.rest?.hung?.anchor).toEqual([0, 0]);
+    // Held or thrown, it is drawn as the artist drew it.
+    expect(inside?.svg).toBe(KITE.svg);
+  });
+
   it('adds a bicycle leant against a wall to the set, for good, for the artist to draw', () => {
     const sheet = sheetOf([
       { kind: 'line', who: 'ama', say: 'I will leave it here.' },

@@ -311,7 +311,15 @@ describe("a story's continuity", () => {
       { name: 'arms', label: false },
       { name: 'legs', label: false },
       { name: 'tail', label: false, optional: true },
+      { name: 'mouth-at', label: false, optional: true },
     ]);
+    // The mouth is code's, at the place the artist marks; each arm its own.
+    expect(thing.brief).toContain('Draw no mouth anywhere');
+    expect(thing.brief).toContain('<g id="mouth-at">');
+    expect(thing.brief).toContain('<g id="arm-left">');
+    expect(thing.states.find((s) => s.name === 'happy')?.look).not.toMatch(
+      /mouth|smile/,
+    );
     expect(thing.brief).toContain('It faces the viewer, standing');
     expect(thing.states.map((s) => s.name)).toContain('neutral');
     expect(thing.shape).toBe('tall');
@@ -341,6 +349,7 @@ describe("a story's continuity", () => {
       { name: 'legs', label: false },
       { name: 'tail', label: false, optional: true },
       { name: 'ears', label: false, optional: true },
+      { name: 'mouth-at', label: false, optional: true },
     ]);
     expect(dog.brief).toContain('on all four legs');
     expect(dog.brief).toContain('three-quarter view');

@@ -1,0 +1,17 @@
+{
+  "id": "owl",
+  "kind": "character",
+  "name": "Hoot",
+  "book": "Night in the Woods",
+  "is": "animal",
+  "size": "small",
+  "look": "a wise brown owl with big round eyes and speckled wings",
+  "legs": 2,
+  "drawer": "kit",
+  "animal": {
+    "species": "owl",
+    "coat": "brown",
+    "second": "cream",
+    "pattern": "spots"
+  }
+}

@@ -118,6 +118,27 @@ drawer's default names DeepSeek whatever `AI_MODEL_DEFAULT` says, so
 **`DEEPSEEK_API_KEY` must be set on both the API and the worker**: the
 boot check stops a process with a named provider and no key.
 
+A show's characters, its own things and its places (the Studio, and a
+book's story pages) are drawn by DeepSeek (`AI_MODEL_CAST_DRAW`,
+`AI_MODEL_SET_PAINT`, default `deepseek:deepseek-flash`), each drawn in
+takes side by side, judged from its picture by Gemini
+(`AI_MODEL_DRAWING_JUDGE`, default `google:gemini-3.8-flash`) and revised;
+explainer drawings stay on DeepSeek. Google is otherwise only the voice's
+(Richard's choice, 2026-09-27; never gpt-4.1). Set
+**`GOOGLE_GENERATIVE_AI_API_KEY` (or `GEMINI_API_KEY`) on both the API and
+the worker**: without it they still start, but the voice cannot be Gemini
+and drawings are checked by code alone, not judged from their pictures.
+The Gemini API voices only 100 requests a day, even paid (Tier 1): set
+**`GOOGLE_CLOUD_TTS_CREDENTIALS`** on the worker (a service account of a
+project with the Cloud Text-to-Speech API enabled and billing on, role
+Service Usage Consumer: its JSON key file's path, or the JSON itself;
+Cloud's Gemini voices refuse API keys) and, once the day is spent, the same voices speak
+through Cloud Text-to-Speech's Gemini-TTS (`GOOGLE_CLOUD_TTS_MODEL`,
+default `gemini-3.1-flash-tts-preview`) instead of a film failing.
+`npm run drawing:bench` draws the
+bench's forty-two briefs through the same path and scores them against
+the kept baseline (`src/business/domain/drawing-bench/baseline.json`).
+
 The Voice service reports when it spoke each word when asked, takes a
 voice of its own for any piece of a page (a story's character saying
 their line), and a `lead` of quiet before the first word (`/health` says

@@ -12,7 +12,8 @@
  * against the show's first episode. Scenes made before keep the drawing
  * they were made with until they are composed again
  * (scripts/studio-recompose --store). With --out, the drawing is written
- * there too, as character.svg and character.png, for looking at.
+ * there too, as character.svg and character.png (its neutral face alone,
+ * with code's mouth), for looking at.
  */
 import 'reflect-metadata';
 import { mkdirSync, writeFileSync } from 'node:fs';
@@ -22,6 +23,7 @@ import { ConfigModule } from '@nestjs/config';
 import { NestFactory } from '@nestjs/core';
 import { CoreModule } from '../src/core.module';
 import { rasterise } from '../src/business/domain/scene-raster';
+import { faceShown } from '../src/business/domain/scene-sheet-face';
 import type { StoragePort } from '../src/business/ports/storage.port';
 import { STORAGE } from '../src/business/ports/tokens';
 import type { StudioRepository } from '../src/business/repositories/studio.repository';
@@ -89,9 +91,10 @@ async function main(): Promise<void> {
     if (out) {
       mkdirSync(out, { recursive: true });
       writeFileSync(join(out, 'character.svg'), drawing.svg);
+      // As a still shows them: the neutral face alone, with code's mouth.
       writeFileSync(
         join(out, 'character.png'),
-        await rasterise(drawing.svg, 600),
+        await rasterise(faceShown(sheet, characterId), 600),
       );
       console.log(`→ ${join(out, 'character.png')}`);
     }

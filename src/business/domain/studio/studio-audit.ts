@@ -14,6 +14,7 @@
  * is listed too.
  */
 import type { SceneDto } from '../../../contracts';
+import { MOUTH_FPS, mouthOf } from '../scene-acting';
 import { doingsIn, type Actor } from '../scene-directions';
 import {
   BOBBING_MOVES,
@@ -130,9 +131,12 @@ export function auditScene(
     names: namesOf(c),
     gender: genderOf(c.voice),
   }));
+  // One whose rig acts people's gestures (limbs) shows them as people do.
   const bobs = (id: string) => {
     const thing = scene.things.find((t) => t.id === id);
-    return thing?.kind === 'drawing' ? thing.rig !== true : false;
+    return thing?.kind === 'drawing'
+      ? thing.rig !== true && !thing.limbs
+      : false;
   };
   const W = scene.stagings.wide.w;
   const places = scene.stagings.wide.places;
@@ -346,4 +350,106 @@ export function describeAudit(seen: readonly BeatSeen[]): string[] {
       (one) =>
         `b${one.beat} ${one.who} ${one.expects.join('+')}: ${one.verdict}${one.seen.length ? ` (shows ${one.seen.join(', ')})` : ''}${one.missing.length ? `; no ${one.missing.join(', ')}` : ''}`,
     );
+}
+
+/** A line said on the stage whose speaker's mouth does not move while it is said. */
+export interface SilentLine {
+  who: string;
+  fromMs: number;
+  untilMs: number;
+}
+
+/** A mouth plan's shapes open at some frame: shut all through is no movement. */
+const OPENS = /[1-5]/;
+
+/**
+ * Every line said by someone on the stage while their mouth does not move:
+ * no mouth planned for them in its time, and nothing else to move it (a
+ * figure the kit drew, or one the artist drew whose mouth is code's, moves
+ * its own while it is marked talking; one that draws its own mouths only
+ * bobs by the plan). Voices from elsewhere move no mouth, and are left out.
+ */
+export function silentLines(scene: SceneDto): SilentLine[] {
+  const out: SilentLine[] = [];
+  for (const effect of scene.effects) {
+    const say = effect.say;
+    if (effect.do !== 'say' || !say || say.from) continue;
+    const who = effect.target;
+    const thing = scene.things.find((t) => t.id === who);
+    if (thing?.kind !== 'drawing' || thing.backdrop) continue;
+    const fromMs = effect.atMs;
+    const untilMs = say.saidUntilMs ?? say.untilMs;
+    // Only while they stand on the stage.
+    const step = [...scene.steps].reverse().find((one) => one.atMs <= fromMs);
+    if (step && !step.show.includes(who)) continue;
+    const planned = (scene.acting?.[who]?.mouth ?? []).some(
+      ([start, shapes]) =>
+        start < untilMs &&
+        start + (shapes.length * 1000) / MOUTH_FPS > fromMs &&
+        OPENS.test(shapes),
+    );
+    if (!planned) out.push({ who, fromMs, untilMs });
+  }
+  return out;
+}
+
+/**
+ * A scene whose every line said on the stage moves its speaker's mouth:
+ * each silent one given its mouth, shape by shape from its words as the
+ * voice says them, as every line's is planned (actingOf). What was put
+ * right, for our log; the scene as it was when nothing needed it.
+ */
+export function withMouths(scene: SceneDto): {
+  scene: SceneDto;
+  mended: string[];
+} {
+  const silent = silentLines(scene);
+  if (!silent.length) return { scene, mended: [] };
+  const acting = { ...(scene.acting ?? {}) };
+  const mended: string[] = [];
+  for (const line of silent) {
+    // The words the voice says in the line's time.
+    const words = scene.beats.flatMap((beat) =>
+      beat.words
+        .filter(([, , start, end]) => start < line.untilMs && end > line.fromMs)
+        .map(([from, to, startMs, endMs]) => ({
+          text: beat.text.slice(from, to),
+          startMs,
+          endMs,
+        })),
+    );
+    const shapes = words.length
+      ? mouthOf({
+          speaker: line.who,
+          startMs: words[0].startMs,
+          endMs: words[words.length - 1].endMs,
+          words,
+        })
+      : '';
+    const start = Math.round(words[0]?.startMs ?? line.fromMs);
+    // No words to read: open and shut, as the kit's mouth does talking.
+    const said =
+      shapes && OPENS.test(shapes)
+        ? shapes
+        : Array.from(
+            {
+              length: Math.max(
+                3,
+                Math.round(((line.untilMs - line.fromMs) * MOUTH_FPS) / 1000),
+              ),
+            },
+            (_, f) => '1220'[f % 4],
+          ).join('');
+    const own = acting[line.who] ?? {};
+    acting[line.who] = {
+      ...own,
+      mouth: [...(own.mouth ?? []), [start, said] as [number, string]].sort(
+        (a, b) => a[0] - b[0],
+      ),
+    };
+    mended.push(
+      `${line.who} speaks at ${start}ms with no mouth moving: given one`,
+    );
+  }
+  return { scene: { ...scene, acting }, mended };
 }

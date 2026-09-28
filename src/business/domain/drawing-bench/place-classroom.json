@@ -1,0 +1,9 @@
+{
+  "id": "classroom",
+  "kind": "place",
+  "name": "the classroom",
+  "book": "Tobi and Friends",
+  "place": "indoor",
+  "look": "a primary school classroom with a whiteboard, desks and a bookshelf",
+  "drawer": "kit"
+}

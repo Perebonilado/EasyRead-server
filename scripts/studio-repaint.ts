@@ -1,10 +1,12 @@
 /**
- * One set of a Studio show painted again with the painter's brief as it
- * is now (a room or a vessel from inside, what a crowd stands behind and
- * the features the look names each a group of its own), its ground and
- * groups measured, and kept in place of the painting before:
+ * One set of a Studio show made again as sets are made now, its ground and
+ * groups measured, and kept in place of the one before: built by code from
+ * a layout the painter writes (studio-drawings-plan §7, D1), or with
+ * --artist painted whole by the artist with the painter's brief as it is
+ * now (a room or a vessel from inside, what a crowd stands behind and the
+ * features the look names each a group of its own):
  *
- *   npm run studio:repaint -- <showId> <setId> [--out <dir>]
+ *   npm run studio:repaint -- <showId> <setId> [--out <dir>] [--artist]
  *
  * The show's sets are copied beside themselves first (sets.json.<when>.bak),
  * so the painting before can be put back. The set's features are as the
@@ -46,7 +48,9 @@ async function main(): Promise<void> {
   const outAt = args.indexOf('--out');
   const out = outAt >= 0 ? args[outAt + 1] : undefined;
   if (!showId || !setId) {
-    console.error('npm run studio:repaint -- <showId> <setId> [--out <dir>]');
+    console.error(
+      'npm run studio:repaint -- <showId> <setId> [--out <dir>] [--artist]',
+    );
     process.exit(2);
   }
   const app = await NestFactory.createApplicationContext(StudioRepaintModule, {
@@ -70,6 +74,7 @@ async function main(): Promise<void> {
         setId,
         episodes[0]?.id ?? null,
         `studio ${show.id} ${setId} (repaint)`,
+        args.includes('--artist') ? 'artist' : 'layout',
       );
     if (!set) {
       console.warn(

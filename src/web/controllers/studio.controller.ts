@@ -17,6 +17,8 @@ import { createHash } from 'node:crypto';
 import type { Request, Response } from 'express';
 import { Type } from 'class-transformer';
 import {
+  ArrayMaxSize,
+  IsArray,
   IsBoolean,
   IsIn,
   IsInt,
@@ -103,6 +105,32 @@ class AddSceneDto {
   request!: string;
 }
 
+/** The maker's choice between a character's drawing and the new ones: which, by its id. */
+class ChoiceDto {
+  @IsIn(['use', 'again', 'keep'])
+  choice!: 'use' | 'again' | 'keep';
+
+  @IsOptional()
+  @IsString()
+  @Length(1, 40)
+  option?: string;
+}
+
+/** A drawing the maker says is not right: which of those offered (none, the one they have), and why. */
+class NotRightDto {
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(3)
+  @IsString({ each: true })
+  @Length(1, 40, { each: true })
+  options?: string[];
+
+  @IsOptional()
+  @IsString()
+  @Length(0, 500)
+  note?: string;
+}
+
 class AnyDto {
   @IsOptional()
   @IsObject()
@@ -176,6 +204,47 @@ export class StudioController {
     @Body() body: AnyDto,
   ): Promise<StudioShowDto> {
     return this.studio.updateBible(userId, id, body.body ?? {});
+  }
+
+  /** Every animal and creature of the cast not drawn yet, drawn now. */
+  @Post('shows/:id/cast/draw')
+  drawCast(
+    @CurrentUser('id') userId: string,
+    @Param('id') id: string,
+  ): Promise<StudioShowDto> {
+    return this.studio.drawMissing(userId, id);
+  }
+
+  /** A character's new drawing used, drawn once more, or let go. */
+  @Post('shows/:id/characters/:characterId/drawing')
+  chooseDrawing(
+    @CurrentUser('id') userId: string,
+    @Param('id') id: string,
+    @Param('characterId') characterId: string,
+    @Body() body: ChoiceDto,
+  ): Promise<StudioShowDto> {
+    return this.studio.chooseDrawing(
+      userId,
+      id,
+      characterId,
+      body.choice,
+      body.option,
+    );
+  }
+
+  /** A drawing marked not right: kept for the drawing bench, and drawn again. */
+  @Post('shows/:id/characters/:characterId/not-right')
+  @Throttle({ default: { limit: 20, ttl: 60_000 } })
+  notRight(
+    @CurrentUser('id') userId: string,
+    @Param('id') id: string,
+    @Param('characterId') characterId: string,
+    @Body() body: NotRightDto,
+  ): Promise<StudioShowDto> {
+    return this.studio.notRight(userId, id, characterId, {
+      options: body.options,
+      note: body.note ?? null,
+    });
   }
 
   /** A character's voice, a line of it. */
@@ -301,6 +370,22 @@ export class StudioController {
       .then((episode) =>
         this.studio.rewriteCast(userId, episode.showId, id, body.request ?? ''),
       );
+  }
+
+  /** One character drawn again as the maker asks: the new drawing waits on their card. */
+  @Post('episodes/:id/characters/:characterId/redraw')
+  redraw(
+    @CurrentUser('id') userId: string,
+    @Param('id') id: string,
+    @Param('characterId') characterId: string,
+    @Body() body: RequestDto,
+  ): Promise<StudioEpisodeDto> {
+    return this.studio.redrawCharacter(
+      userId,
+      id,
+      characterId,
+      body.request ?? '',
+    );
   }
 
   @Post('episodes/:id/approve')

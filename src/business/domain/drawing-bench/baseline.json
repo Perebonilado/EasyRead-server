@@ -1,0 +1,255 @@
+{
+  "at": "2026-09-27T20:17:32.204Z",
+  "label": "Baseline: today's pipeline (DeepSeek Flash, one prompt for all, no polish, no judge in the loop)",
+  "setup": {
+    "draw": "each task’s own",
+    "judge": "google:gemini-3.8-flash",
+    "briefs": 42
+  },
+  "summary": {
+    "count": 42,
+    "drawn": 42,
+    "median": 4.47,
+    "mean": 4.56,
+    "passes": 0,
+    "codePasses": 0.02,
+    "stylePasses": 0.02,
+    "gradients": 0,
+    "costPerDrawing": 0.00479,
+    "msPerDrawing": 14342,
+    "byKind": {
+      "character": {
+        "count": 29,
+        "median": 4.33
+      },
+      "feature": {
+        "count": 1,
+        "median": 3
+      },
+      "place": {
+        "count": 6,
+        "median": 4.67
+      },
+      "redraw": {
+        "count": 2,
+        "median": 4.1
+      },
+      "thing": {
+        "count": 4,
+        "median": 7
+      }
+    }
+  },
+  "scores": {
+    "cat": {
+      "score": 4,
+      "passes": false,
+      "styleOk": false
+    },
+    "chicken": {
+      "score": 4,
+      "passes": false,
+      "styleOk": false
+    },
+    "cow": {
+      "score": 5.67,
+      "passes": false,
+      "styleOk": true
+    },
+    "dog": {
+      "score": 2.67,
+      "passes": false,
+      "styleOk": false
+    },
+    "donkey": {
+      "score": 2.33,
+      "passes": false,
+      "styleOk": false
+    },
+    "duck": {
+      "score": 3,
+      "passes": false,
+      "styleOk": false
+    },
+    "elephant": {
+      "score": 5,
+      "passes": false,
+      "styleOk": false
+    },
+    "fish": {
+      "score": 4.67,
+      "passes": false,
+      "styleOk": false
+    },
+    "frog": {
+      "score": 5.33,
+      "passes": false,
+      "styleOk": false
+    },
+    "giraffe": {
+      "score": 3.33,
+      "passes": false,
+      "styleOk": false
+    },
+    "goat": {
+      "score": 3.33,
+      "passes": false,
+      "styleOk": false
+    },
+    "horse": {
+      "score": 3.33,
+      "passes": false,
+      "styleOk": false
+    },
+    "lion": {
+      "score": 3.67,
+      "passes": false,
+      "styleOk": false
+    },
+    "monkey": {
+      "score": 4.33,
+      "passes": false,
+      "styleOk": false
+    },
+    "mouse": {
+      "score": 4.67,
+      "passes": false,
+      "styleOk": false
+    },
+    "owl": {
+      "score": 2.67,
+      "passes": false,
+      "styleOk": false
+    },
+    "parrot": {
+      "score": 2.33,
+      "passes": false,
+      "styleOk": false
+    },
+    "pig": {
+      "score": 4,
+      "passes": false,
+      "styleOk": false
+    },
+    "rabbit": {
+      "score": 4.33,
+      "passes": false,
+      "styleOk": false
+    },
+    "sheep": {
+      "score": 5.33,
+      "passes": false,
+      "styleOk": false
+    },
+    "snake": {
+      "score": 2.33,
+      "passes": false,
+      "styleOk": false
+    },
+    "turtle": {
+      "score": 5,
+      "passes": false,
+      "styleOk": false
+    },
+    "angel": {
+      "score": 6.67,
+      "passes": false,
+      "styleOk": false
+    },
+    "dragon": {
+      "score": 7.33,
+      "passes": false,
+      "styleOk": false
+    },
+    "egg-man": {
+      "score": 5.67,
+      "passes": false,
+      "styleOk": false
+    },
+    "ghost": {
+      "score": 3.33,
+      "passes": false,
+      "styleOk": false
+    },
+    "monster": {
+      "score": 5.33,
+      "passes": false,
+      "styleOk": false
+    },
+    "robot": {
+      "score": 7.33,
+      "passes": false,
+      "styleOk": false
+    },
+    "snowman": {
+      "score": 6.67,
+      "passes": false,
+      "styleOk": false
+    },
+    "bicycle": {
+      "score": 3,
+      "passes": false,
+      "styleOk": false
+    },
+    "beach": {
+      "score": 5,
+      "passes": false,
+      "styleOk": false
+    },
+    "bedroom": {
+      "score": 7.67,
+      "passes": false,
+      "styleOk": false
+    },
+    "bus": {
+      "score": 4.67,
+      "passes": false,
+      "styleOk": false
+    },
+    "classroom": {
+      "score": 3.67,
+      "passes": false,
+      "styleOk": false
+    },
+    "forest": {
+      "score": 2.33,
+      "passes": false,
+      "styleOk": false
+    },
+    "market": {
+      "score": 4.67,
+      "passes": false,
+      "styleOk": false
+    },
+    "clover-blanket": {
+      "score": 3.6,
+      "passes": false,
+      "styleOk": false
+    },
+    "eggbert-rounder": {
+      "score": 4.6,
+      "passes": false,
+      "styleOk": false
+    },
+    "drum": {
+      "score": 2,
+      "passes": false,
+      "styleOk": false
+    },
+    "kite": {
+      "score": 8.5,
+      "passes": false,
+      "styleOk": false
+    },
+    "umbrella": {
+      "score": 8,
+      "passes": false,
+      "styleOk": false
+    },
+    "uniform": {
+      "score": 6,
+      "passes": false,
+      "styleOk": false
+    }
+  }
+}

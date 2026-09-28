@@ -1,0 +1,11 @@
+{
+  "id": "drum",
+  "kind": "thing",
+  "name": "drum",
+  "book": "The Village Band",
+  "look": "wooden, with a skin top tied with rope",
+  "real": {
+    "heightCm": 50,
+    "lengthCm": 35
+  }
+}

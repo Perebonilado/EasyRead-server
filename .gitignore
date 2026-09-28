@@ -67,3 +67,6 @@ drawings/
 
 # Pages made by npm run scene:page, for looking at
 /scene-out
+
+# Google service account keys
+easiread-voice.json

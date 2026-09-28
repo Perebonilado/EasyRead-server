@@ -76,6 +76,7 @@ import {
   type SceneThing,
 } from './scene-script';
 import { paletteOf, placeMusic } from './scene-music';
+import { restLooksOf } from './scene-rest';
 import {
   CARRIED_CLOTHES,
   PROP_LOOSE,
@@ -343,6 +344,10 @@ export function thingDto(
       : {}),
     ...(drawing.sinks && !drawing.acts ? { sinks: drawing.sinks } : {}),
     ...(drawing.faces && !drawing.acts ? { faces: drawing.faces } : {}),
+    // Its mouth code's, and its arms and nod the rig's: acted as the kit's.
+    ...(drawing.lips && !drawing.acts ? { lips: true as const } : {}),
+    ...(drawing.limbs && !drawing.acts ? { limbs: true as const } : {}),
+    ...(drawing.onePiece && !drawing.acts ? { onePiece: true as const } : {}),
     ...(drawing.stands && !drawing.acts ? { units: drawing.stands.units } : {}),
     // What a person the kit drew wears, in words: as drawn, and each
     // outfit they change into, as the film shows them.
@@ -441,8 +446,11 @@ export function sidesKept(
 /** How long before a character comes on their first face is put on: the player fades a state in over 320ms. */
 const FACE_EARLY_MS = 400;
 
-/** A face a drawing does not have, as the nearest one it does: an animal the artist drew has no face of pain. */
-const NEAREST_FACE: Record<string, string> = { pain: 'afraid' };
+/** A face a drawing does not have, as the nearest one it does: an animal the artist drew has no face of pain, nor its eyes closed. */
+const NEAREST_FACE: Record<string, string> = {
+  pain: 'afraid',
+  'eyes closed': 'neutral',
+};
 
 /**
  * A character wears one face at a time: a face shown takes the place of
@@ -1733,6 +1741,17 @@ export function composeScene(input: ComposeInput): {
     const kept = script.drawn?.things?.[prop];
     const own =
       kept && wearableOf(prop) ? noTallerThan(kept, CARRIED_CLOTHES) : kept;
+    // Clothes set down lie folded, or hang on a peg in a room, never stand
+    // up as though someone were in them (studio-drawings-plan §7, D2).
+    const ownThing = script.ownThings?.find((one) => one.id === prop);
+    const rest = own
+      ? restLooksOf(
+          { name: ownThing?.name ?? prop, look: ownThing?.look ?? own.look },
+          kept ?? null,
+          script.setting?.place === 'indoor' ||
+            script.setting?.place === 'vessel',
+        )
+      : null;
     const drawn = own ?? drawProp(isStageProp(prop) ? prop : 'box');
     const loose: PropLoose =
       own?.loose ?? (isStageProp(prop) ? PROP_LOOSE[prop] : PROP_LOOSE.box);
@@ -1746,6 +1765,7 @@ export function composeScene(input: ComposeInput): {
       mouth: drawn.mouth,
       bite: drawn.bite,
       ...(drawn.half ? { half: drawn.half } : {}),
+      ...(rest ? { rest } : {}),
       near: script.propsNear?.[prop] ?? does[0]?.[1] ?? null,
       // Caught up in a feature from the start: the kite in the palm.
       ...(script.propsIn?.[prop] ? { in: script.propsIn[prop] } : {}),

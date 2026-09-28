@@ -22,6 +22,17 @@ import {
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { SceneDto } from '../../contracts';
+import { NotFoundError } from '../../business/domain/errors/errors';
+import {
+  SHEET_VERSION,
+  optionsKey,
+  type CharacterSheet,
+} from '../../business/domain/scene-sheet';
+import {
+  StudioCastService,
+  studioCastKey,
+} from '../../business/handlers/studio/studio-cast.service';
+import { markDrawing } from '../../business/domain/studio/studio-drawings';
 
 /**
  * What the thread gets from the Studio's work: one line when a job's
@@ -654,5 +665,589 @@ describe('an episode as its scenes leave it', () => {
     const settled = settledEpisode([row('failed', null, 1)]);
     expect(Object.keys(settled)).toEqual(['error']);
     expect(settled.error).toMatch(/could not be made/);
+  });
+});
+
+describe('the cast drawn by the artist, at the cast step and again as asked', () => {
+  const drawn = (svg: string): CharacterSheet => ({
+    version: SHEET_VERSION,
+    drawing: {
+      svg,
+      viewBox: [0, 0, 100, 100],
+      aspect: 1,
+      parts: {},
+      labels: {},
+      states: {},
+      moves: true,
+      callouts: [],
+      field: null,
+    },
+    anchors: { head: null, body: null, legs: null },
+  });
+  const humptyBible = bibleOf({
+    characters: [
+      { name: 'Humpty', id: 'humpty', kind: 'creature', look: 'an egg' },
+      {
+        name: 'Horse',
+        id: 'horse',
+        kind: 'animal',
+        look: 'a brown horse',
+        voicePick: 1,
+      },
+      { name: 'Tobi', voice: 'boy', figure: { age: 'child' } },
+    ],
+    sets: [{ name: 'The Wall', id: 'wall' }],
+  });
+
+  function artist(
+    start: typeof humptyBible = humptyBible,
+    /** What the cast's writer answers, from the bible and the request it is given. */
+    writes?: (given: typeof humptyBible, request: string) => unknown,
+  ) {
+    const files = new Map<string, Buffer>();
+    const requests: string[] = [];
+    const storage = {
+      get: (key: string) =>
+        files.has(key)
+          ? Promise.resolve(files.get(key)!)
+          : Promise.reject(new NotFoundError('File')),
+      put: ({ key, body }: { key: string; body: Buffer }) => {
+        files.set(key, body);
+        return Promise.resolve({ key, size: body.length });
+      },
+    };
+    const cast = new StudioCastService(storage as never);
+    const keptAt = (key: string): Record<string, CharacterSheet> =>
+      files.has(key)
+        ? (JSON.parse(files.get(key)!.toString()) as Record<
+            string,
+            CharacterSheet
+          >)
+        : {};
+    const messages: StudioMessageRecord[] = [];
+    const asked: {
+      id: string;
+      words: string;
+      now: CharacterSheet | null;
+    }[] = [];
+    const prepared: { characters: Set<string>; places: Set<string> }[] = [];
+    const bible: { current: typeof humptyBible } = { current: start };
+    let answer: CharacterSheet | null = drawn('<svg><circle r="2"/></svg>');
+    /** Every take's best, when the artist drew more than one. */
+    let answers: CharacterSheet[] | null = null;
+    const takes: (number | undefined)[] = [];
+    const show = (): StudioShowRecord => ({
+      id: 's1',
+      userId: 'u1',
+      title: "Humpty's Big Wobble",
+      format: 'story',
+      brief,
+      bible: bible.current,
+      createdAt: at,
+      updatedAt: at,
+    });
+    const episode: StudioEpisodeRecord = {
+      id: 'e1',
+      showId: 's1',
+      userId: 'u1',
+      number: 1,
+      title: 'Wobble',
+      logline: null,
+      phase: 'cast',
+      busy: null,
+      error: null,
+      outline: null,
+      shareToken: null,
+      durationMs: null,
+      thumbKey: null,
+      createdAt: at,
+      updatedAt: at,
+    };
+    const queued: StudioJobData[] = [];
+    const processor = new StudioProcessor(
+      {
+        findShow: () => Promise.resolve(show()),
+        findEpisode: () => Promise.resolve(episode),
+        updateShow: (_: string, patch: { bible?: typeof humptyBible }) => {
+          if (patch.bible) bible.current = patch.bible;
+          return Promise.resolve();
+        },
+        updateEpisode: () => Promise.resolve(),
+        listEpisodes: () => Promise.resolve([episode]),
+        listScenes: () => Promise.resolve([]),
+        addMessage: (input: StudioMessageRecord) => {
+          const there = input.id && messages.find((m) => m.id === input.id);
+          if (there) return Promise.resolve(there);
+          const message = { ...input, id: input.id ?? `m${messages.length}` };
+          messages.push(message);
+          return Promise.resolve(message);
+        },
+        listMessages: () => Promise.resolve([...messages]),
+      } as unknown as StudioRepository,
+      {
+        studioBible: (input: {
+          previous?: typeof humptyBible;
+          request?: string;
+        }) => {
+          requests.push(input.request ?? '');
+          return Promise.resolve({
+            value: writes
+              ? writes(input.previous ?? bible.current, input.request ?? '')
+              : {
+                  ...humptyBible,
+                  characters: humptyBible.characters.map((c) =>
+                    c.id === 'horse' ? { ...c, look: 'a white horse' } : c,
+                  ),
+                },
+            usage: { model: 'm', tokensIn: 1, tokensOut: 1, latencyMs: 1 },
+          });
+        },
+      } as unknown as LlmGatewayPort,
+      { record: () => Promise.resolve() },
+      storage as never,
+      {
+        drawCandidates: (
+          _story: unknown,
+          id: string,
+          words: string,
+          now: CharacterSheet | null,
+          _documentId: string,
+          _who: string,
+          options?: { takes?: number },
+        ) => {
+          asked.push({ id, words, now });
+          takes.push(options?.takes);
+          return Promise.resolve(answers ?? (answer ? [answer] : []));
+        },
+        keepSheet: (key: string, id: string, sheet: CharacterSheet) => {
+          files.set(
+            key,
+            Buffer.from(JSON.stringify({ ...keptAt(key), [id]: sheet })),
+          );
+          return Promise.resolve();
+        },
+        prepareStory: (
+          story: { castKey: string },
+          _documentId: string,
+          _who: string,
+          only: { characters: Set<string>; places: Set<string> },
+        ) => {
+          prepared.push(only);
+          const kept = keptAt(story.castKey);
+          for (const id of only.characters)
+            kept[id] = drawn(`<svg><rect id="${id}"/></svg>`);
+          files.set(story.castKey, Buffer.from(JSON.stringify(kept)));
+          return Promise.resolve();
+        },
+      } as unknown as SceneProcessor,
+      {} as never,
+      cast,
+      {
+        enqueueStudio: (jobs: StudioJobData[]) => {
+          queued.push(...jobs);
+          return Promise.resolve();
+        },
+      } as never,
+    );
+    const lines = () => messages.map((m) => m.content);
+    return {
+      processor,
+      cast,
+      files,
+      asked,
+      prepared,
+      queued,
+      lines,
+      bible,
+      requests,
+      takes,
+      setAnswer: (next: CharacterSheet | null) => {
+        answer = next;
+      },
+      setAnswers: (next: CharacterSheet[]) => {
+        answers = next;
+      },
+    };
+  }
+  const cast = (files: Map<string, Buffer>) =>
+    JSON.parse(files.get(studioCastKey('s1'))?.toString() ?? '{}') as Record<
+      string,
+      CharacterSheet
+    >;
+
+  it('draws the animals and creatures asked for, before any film, and says who is drawn', async () => {
+    const studio = artist();
+    await studio.cast.changeWork('s1', (work) =>
+      markDrawing(work, ['humpty', 'horse'], Date.now()),
+    );
+    await studio.processor.process(
+      job({ kind: 'draw', characterIds: ['humpty', 'horse'] }),
+      last('d1'),
+    );
+    expect(studio.prepared).toEqual([
+      { characters: new Set(['humpty', 'horse']), places: new Set() },
+    ]);
+    expect(Object.keys(cast(studio.files)).sort()).toEqual(['horse', 'humpty']);
+    expect((await studio.cast.work('s1')).drawing).toEqual({});
+    expect(studio.lines()).toEqual(['Humpty and Horse drawn — have a look']);
+  });
+
+  it('draws only the one character asked for again, from the drawing they have, and keeps it waiting beside it', async () => {
+    const studio = artist();
+    const old = drawn('<svg><circle r="1"/></svg>');
+    studio.files.set(
+      studioCastKey('s1'),
+      Buffer.from(JSON.stringify({ humpty: old, horse: old })),
+    );
+    await studio.cast.changeWork('s1', (work) =>
+      markDrawing(work, ['humpty'], Date.now(), 'rounder, a crack on top'),
+    );
+    await studio.processor.process(
+      job({
+        kind: 'redraw',
+        characterId: 'humpty',
+        request: 'rounder, a crack on top',
+      }),
+      last('r1'),
+    );
+    expect(studio.asked).toEqual([
+      { id: 'humpty', words: 'rounder, a crack on top', now: old },
+    ]);
+    // The drawing they have is untouched; the new one waits to be chosen.
+    expect(cast(studio.files).humpty.drawing.svg).toContain('r="1"');
+    const work = await studio.cast.work('s1');
+    expect(Object.keys(work.candidates)).toEqual(['humpty']);
+    expect(work.candidates.humpty.words).toBe('rounder, a crack on top');
+    expect(work.drawing).toEqual({});
+    expect(studio.lines()).toEqual(['Humpty redrawn — have a look']);
+    expect(studio.lines().join(' ')).not.toContain('Cast changed');
+  });
+
+  it('draws a character again three ways, the artist’s takes, and says so', async () => {
+    const studio = artist();
+    const old = drawn('<svg><circle r="1"/></svg>');
+    studio.files.set(
+      studioCastKey('s1'),
+      Buffer.from(JSON.stringify({ humpty: old })),
+    );
+    studio.setAnswers(
+      [2, 3, 4].map((r) => drawn(`<svg><circle r="${r}"/></svg>`)),
+    );
+    await studio.processor.process(
+      job({ kind: 'redraw', characterId: 'humpty', request: 'rounder' }),
+      last('r3'),
+    );
+    // Three takes side by side, as a new character's.
+    expect(studio.takes).toEqual([3]);
+    const waiting = (await studio.cast.work('s1')).candidates.humpty;
+    expect(waiting.options.map((o) => o.sheet!.drawing.svg)).toEqual([
+      '<svg><circle r="2"/></svg>',
+      '<svg><circle r="3"/></svg>',
+      '<svg><circle r="4"/></svg>',
+    ]);
+    expect(studio.lines()).toEqual(['Humpty redrawn three ways — pick one']);
+    // The thread's line names him, so it can show the three to choose from.
+    expect(
+      (await studio.cast.work('s1')).candidates.humpty.first,
+    ).toBeUndefined();
+  });
+
+  it('offers a first drawing’s other takes beside it, the best in use', async () => {
+    const studio = artist();
+    studio.files.set(
+      optionsKey(studioCastKey('s1')),
+      Buffer.from(
+        JSON.stringify({
+          humpty: [5, 6].map((r) => drawn(`<svg><circle r="${r}"/></svg>`)),
+        }),
+      ),
+    );
+    await studio.cast.changeWork('s1', (work) =>
+      markDrawing(work, ['humpty', 'horse'], Date.now()),
+    );
+    await studio.processor.process(
+      job({ kind: 'draw', characterIds: ['humpty', 'horse'] }),
+      last('d2'),
+    );
+    const waiting = (await studio.cast.work('s1')).candidates.humpty;
+    expect(waiting.first).toBe(true);
+    expect(waiting.words).toBe('');
+    expect(waiting.options.map((o) => o.sheet!.drawing.svg)).toEqual([
+      '<svg><rect id="humpty"/></svg>',
+      '<svg><circle r="5"/></svg>',
+      '<svg><circle r="6"/></svg>',
+    ]);
+    expect(studio.lines()).toEqual([
+      'Horse drawn — have a look',
+      'Humpty drawn three ways — the first is in use, or pick another',
+    ]);
+  });
+
+  it('draws a person again as the kit’s readings of the words: the writer’s, and the nearest others', async () => {
+    const studio = artist(humptyBible, (given) => ({
+      ...given,
+      characters: given.characters.map((c) =>
+        c.id === 'tobi'
+          ? {
+              ...c,
+              look: 'a boy with dark brown curly hair',
+              figure: { ...c.figure, hairColour: 'dark brown', hair: 'curly' },
+            }
+          : c,
+      ),
+    }));
+    await studio.processor.process(
+      job({
+        kind: 'redraw',
+        characterId: 'tobi',
+        request: 'darker, wavier hair',
+      }),
+      last('p1'),
+    );
+    expect(studio.asked).toEqual([]);
+    const waiting = (await studio.cast.work('s1')).candidates.tobi;
+    const figures = waiting.options.map((o) => o.figure!);
+    expect(figures).toHaveLength(3);
+    expect(figures[0]).toMatchObject({
+      hairColour: 'dark brown',
+      hair: 'curly',
+    });
+    // Another reading of each field the change touched, one field each:
+    // the nearest shade of dark brown, and another style the words left open.
+    expect(figures[1]).toMatchObject({ hairColour: 'black', hair: 'curly' });
+    expect(figures[2].hairColour).toBe('dark brown');
+    expect(figures[2].hair).toBe('afro');
+    expect(waiting.options.every((o) => !o.sheet)).toBe(true);
+    expect(waiting.options[0].look).toBe('a boy with dark brown curly hair');
+    expect(waiting.options[1].look).toBe('a boy with black curly hair');
+    expect(studio.lines()).toEqual(['Tobi redrawn three ways — pick one']);
+    // Theirs is as it was until the maker chooses.
+    expect(studio.bible.current.characters[2].figure?.hair).toBe('short');
+  });
+
+  /** Clover, drawn by the animal kit: a chestnut horse. */
+  const cloverBible = bibleOf({
+    characters: [
+      {
+        name: 'Clover',
+        id: 'clover',
+        kind: 'animal',
+        look: 'a gentle chestnut horse',
+        animal: { species: 'horse' },
+      },
+      { name: 'Tobi', voice: 'boy', figure: { age: 'child' } },
+    ],
+    sets: [{ name: 'The Field', id: 'field' }],
+  });
+  /** A writer that gives Clover a red saddle blanket, in her spec and in words. */
+  const blanketed = (given: typeof humptyBible) => ({
+    ...given,
+    characters: given.characters.map((c) =>
+      c.id === 'clover'
+        ? {
+            ...c,
+            look: 'a gentle chestnut horse with a red saddle blanket',
+            animal: {
+              ...c.animal,
+              wear: { back: 'saddle blanket' },
+              wearColour: 'red',
+            },
+          }
+        : c,
+    ),
+  });
+
+  it('draws an animal the kit draws again as its spec changed by the cast’s writer, waiting to be chosen', async () => {
+    const studio = artist(cloverBible, blanketed);
+    await studio.cast.changeWork('s1', (work) =>
+      markDrawing(
+        work,
+        ['clover'],
+        Date.now(),
+        'give her a red saddle blanket',
+      ),
+    );
+    await studio.processor.process(
+      job({
+        kind: 'redraw',
+        characterId: 'clover',
+        request: 'give her a red saddle blanket',
+      }),
+      last('k1'),
+    );
+    // The writer is asked for her alone; no artist is asked at all.
+    expect(studio.requests).toHaveLength(1);
+    expect(studio.requests[0]).toContain(
+      "Change only Clover's look, as the maker asks: give her a red saddle blanket.",
+    );
+    expect(studio.asked).toEqual([]);
+    const work = await studio.cast.work('s1');
+    const waiting = work.candidates.clover;
+    // What she asks for is named ("a red saddle blanket"), and red has no
+    // near shade: one reading, the writer's.
+    expect(waiting.options).toHaveLength(1);
+    expect(waiting.options[0].sheet!.animal).toMatchObject({
+      species: 'horse',
+      wear: { back: 'saddle blanket' },
+      wearColour: 'red',
+    });
+    expect(waiting.options[0].look).toBe(
+      'a gentle chestnut horse with a red saddle blanket',
+    );
+    expect(waiting.options[0].sheet!.drawing.svg).toContain('#d9534f');
+    expect(waiting.words).toBe('give her a red saddle blanket');
+    expect(work.drawing).toEqual({});
+    expect(studio.lines()).toEqual(['Clover redrawn — have a look']);
+    // Her spec in the bible is as it was until the maker chooses.
+    expect(studio.bible.current.characters[0].animal?.wear).toEqual({});
+  });
+
+  it('asks once more when the writer changes nothing, and says so if it still does not', async () => {
+    const studio = artist(cloverBible, (given) => given);
+    await studio.cast.changeWork('s1', (work) =>
+      markDrawing(work, ['clover'], Date.now(), 'make her happier'),
+    );
+    await studio.processor.process(
+      job({
+        kind: 'redraw',
+        characterId: 'clover',
+        request: 'make her happier',
+      }),
+      last('k2'),
+    );
+    expect(studio.requests).toHaveLength(2);
+    expect(studio.requests[1]).toContain('That came back as it was');
+    expect(studio.asked).toEqual([]);
+    expect(await studio.cast.work('s1')).toEqual({
+      drawing: {},
+      candidates: {},
+    });
+    expect(studio.lines()).toEqual([
+      "Clover's new look could not be worked out from that. Say it another way, or try again.",
+    ]);
+  });
+
+  it('offers an animal the artist drew as the kit’s, when the writer gives it a spec', async () => {
+    const studio = artist(humptyBible, (given) => ({
+      ...given,
+      characters: given.characters.map((c) =>
+        c.id === 'horse'
+          ? { ...c, animal: { species: 'horse', coat: 'white' } }
+          : c,
+      ),
+    }));
+    studio.files.set(
+      studioCastKey('s1'),
+      Buffer.from(
+        JSON.stringify({ horse: drawn('<svg><circle r="1"/></svg>') }),
+      ),
+    );
+    await studio.processor.process(
+      job({ kind: 'redraw', characterId: 'horse', request: 'make him white' }),
+      last('k3'),
+    );
+    expect(studio.asked).toEqual([]);
+    const waiting = (await studio.cast.work('s1')).candidates.horse;
+    expect(waiting.options[0].sheet!.animal).toMatchObject({
+      species: 'horse',
+      coat: 'white',
+    });
+    // The artist's drawing stays theirs until the maker chooses.
+    expect(cast(studio.files).horse.drawing.svg).toContain('r="1"');
+  });
+
+  it('offers a creature the artist drew as the creature kit’s, when the writer gives it a spec', async () => {
+    const studio = artist(humptyBible, (given) => ({
+      ...given,
+      characters: given.characters.map((c) =>
+        c.id === 'humpty'
+          ? {
+              ...c,
+              look: 'a round white egg with a crack on top',
+              creature: {
+                body: 'egg',
+                build: 'stout',
+                bodyColour: 'white',
+                texture: 'crack',
+              },
+            }
+          : c,
+      ),
+    }));
+    studio.files.set(
+      studioCastKey('s1'),
+      Buffer.from(
+        JSON.stringify({ humpty: drawn('<svg><circle r="1"/></svg>') }),
+      ),
+    );
+    await studio.processor.process(
+      job({
+        kind: 'redraw',
+        characterId: 'humpty',
+        request: 'rounder, a crack on top',
+      }),
+      last('k4'),
+    );
+    // No artist asked: the kit drew what the writer said.
+    expect(studio.asked).toEqual([]);
+    const waiting = (await studio.cast.work('s1')).candidates.humpty;
+    expect(waiting.options[0].sheet!.creature).toMatchObject({
+      body: 'egg',
+      build: 'stout',
+      texture: 'crack',
+    });
+    expect(waiting.options[0].look).toBe(
+      'a round white egg with a crack on top',
+    );
+    // A spec new to him: only its colours read another way (white, cream, silver).
+    expect(
+      waiting.options.map((one) => one.sheet!.creature!.bodyColour),
+    ).toEqual(['white', 'cream', 'silver']);
+    // The artist's drawing stays his until the maker chooses.
+    expect(cast(studio.files).humpty.drawing.svg).toContain('r="1"');
+  });
+
+  it('says so when no new drawing came, and stops showing them as being drawn', async () => {
+    const studio = artist();
+    studio.files.set(
+      studioCastKey('s1'),
+      Buffer.from(
+        JSON.stringify({ humpty: drawn('<svg><circle r="1"/></svg>') }),
+      ),
+    );
+    await studio.cast.changeWork('s1', (work) =>
+      markDrawing(work, ['humpty'], Date.now(), 'rounder'),
+    );
+    studio.setAnswer(null);
+    await studio.processor.process(
+      job({ kind: 'redraw', characterId: 'humpty', request: 'rounder' }),
+      last('r2'),
+    );
+    expect(studio.lines()).toEqual([
+      'Humpty could not be drawn again. Try again in a moment.',
+    ]);
+    expect(await studio.cast.work('s1')).toEqual({
+      drawing: {},
+      candidates: {},
+    });
+  });
+
+  it('says what a change to the whole cast changed, and draws anyone whose look changed', async () => {
+    const studio = artist();
+    const old = drawn('<svg><circle r="1"/></svg>');
+    studio.files.set(
+      studioCastKey('s1'),
+      Buffer.from(JSON.stringify({ humpty: old, horse: old })),
+    );
+    await studio.processor.process(
+      job({ kind: 'bible', request: 'make the horse white' }),
+      last('b1'),
+    );
+    expect(studio.lines()).toEqual(["Cast changed: Horse's look"]);
+    // The horse's drawing is forgotten and drawn again; Humpty's is kept.
+    expect(Object.keys(cast(studio.files))).toEqual(['humpty']);
+    expect(studio.queued).toEqual([
+      expect.objectContaining({ kind: 'draw', characterIds: ['horse'] }),
+    ]);
   });
 });

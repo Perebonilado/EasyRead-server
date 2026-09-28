@@ -10,6 +10,8 @@
  * same drawing stands on every page they are on, the same way round
  * beside anyone else, with the face the last page left them with.
  */
+import type { AnimalSpec } from './scene-animal';
+import type { CreatureSpec } from './scene-creature';
 import type { AnyFeatureKind } from './scene-doings';
 import { DRAWN } from './scene-own';
 import { figureOf, type FigureProp, type FigureSpec } from './scene-figure';
@@ -46,6 +48,20 @@ export const EXPRESSION_LOOKS: Record<Expression, string> = {
   surprised: 'round wide eyes, high brows, a round open mouth',
   thinking:
     'eyes glancing up to one side, one brow raised, a small sideways mouth',
+};
+
+/**
+ * How each face's eyes and brows look, for the artist drawing a character
+ * whose mouth code draws (scene-sheet-face): the mouth is left out.
+ */
+export const EXPRESSION_EYES: Record<Expression, string> = {
+  neutral: 'calm open eyes, level brows',
+  happy: 'bright eyes, raised brows',
+  sad: 'eyes looking down, brows raised in the middle',
+  angry: 'narrowed eyes, brows pulled down to the middle',
+  afraid: 'wide eyes, brows raised and drawn together',
+  surprised: 'round wide eyes, high brows',
+  thinking: 'eyes glancing up to one side, one brow raised',
 };
 
 /** A character's parts, as every sheet names them. */
@@ -193,6 +209,10 @@ export interface StoryCharacter {
   size?: StorySize | null;
   /** A person's look, as the kit draws them: the same on every page. */
   figure?: FigureSpec | null;
+  /** An animal's look, as the kit draws it (scene-animal): the same on every page; absent, the artist draws it. */
+  animal?: AnimalSpec | null;
+  /** A creature's look, as the creature kit draws it (scene-creature): the same on every page; absent, the artist draws it. */
+  creature?: CreatureSpec | null;
   /** Whether they are seen or only heard; absent from a book read before it was asked: seen. */
   presence?: StoryPresence | null;
   /** A well-known figure (scene-iconic), drawn as their tradition shows them: its key. */
@@ -1536,7 +1556,7 @@ export function whereaboutsOn(
  * down, where they stand.
  */
 export const SET_STYLE = [
-  'Paint it to go with cartoon people drawn in front of it: flat colours with no gradients, shading or texture, simple rounded shapes like cut paper, and one dark outline (#2d2a32) about three units wide.',
+  'Paint it to go with cartoon people drawn in front of it: flat colours with no gradients, shading or texture, simple rounded shapes like cut paper, and one dark outline (#2d2a32) at the width asked for.',
   "Make the place recognisable at a glance, with the things that make it that place (a boat's mast and nets, the stalls of a market, the houses of a village), a full, finished scene from edge to edge.",
   'Keep its colours a little softer than the people, so they stand out in front of it.',
   'The ground is flat and open across the lower third of the picture, with nothing tall in the middle of it, where people will stand.',
@@ -1676,7 +1696,7 @@ export function setThing(
  * about their joints (scene-sheet-rig) with nothing coming loose.
  */
 export const CAST_STYLE = [
-  'Draw it to stand beside cartoon people drawn in one style: flat colours with no gradients, shading or texture, simple rounded shapes like cut paper, one dark outline (#2d2a32) about three units wide, and big round white eyes with small black dot pupils.',
+  'Draw it to stand beside cartoon people drawn in one style: flat colours with no gradients, shading or texture, simple rounded shapes like cut paper, one dark outline (#2d2a32) at the width asked for, and big round white eyes with small black dot pupils.',
   'Join it like a cut-paper puppet: every part overlaps the body a little where they meet, drawn behind it (the ears behind the head); nothing floats apart; a tail comes from behind the body at the hip.',
 ].join(' ');
 
@@ -1709,6 +1729,18 @@ const SHEET_PARTS_BY_KIND: Record<
   ],
 };
 
+/** Each arm and leg a group of its own, so the stage can point, wave and step with them. */
+const LIMBS: Record<'animal' | 'creature', string> = {
+  animal:
+    'Inside <g id="legs">, draw each leg as a group of its own ("leg-1", "leg-2", …), its top overlapping the body.',
+  creature:
+    'Inside <g id="arms">, draw each arm as a group of its own, <g id="arm-left"> and <g id="arm-right">, each overlapping the body at its shoulder; inside <g id="legs">, each leg as a group of its own ("leg-left", "leg-right"), its top overlapping the body. A creature with no arms or legs leaves those groups out.',
+};
+
+/** The face: the eyes and brows the artist's, the mouth code's, at the place the artist marks. */
+const FACE_BRIEF =
+  'The face inside the head has no eyes, brows or mouth: each expression group draws only the eyes and brows, all in the same place on the face. Draw no mouth anywhere: the stage draws it. Mark where the mouth goes with <g id="mouth-at"> holding one small circle (r 4) at the middle of the mouth\'s place: below the eyes, or on a muzzle or a beak where it would open.';
+
 const OPTIONAL_PARTS: Record<'animal' | 'creature', string> = {
   animal:
     'Draw the tail in <g id="tail"> and the ears in <g id="ears">, each ear a group of its own inside it, only if it has them; leave out a group it has no part for.',
@@ -1736,7 +1768,7 @@ export const OWN_FEATURE_CANVAS = { w: 640, h: 400 } as const;
 
 /** How a show's own is drawn to stand among its people: the kit's hand, and nothing else. */
 const OWN_STYLE = [
-  'Draw it to stand beside cartoon people drawn in one style: flat colours with no gradients, shading or texture, simple rounded shapes like cut paper, and one dark outline (#2d2a32) about three units wide.',
+  'Draw it to stand beside cartoon people drawn in one style: flat colours with no gradients, shading or texture, simple rounded shapes like cut paper, and one dark outline (#2d2a32) at the width asked for.',
   'Draw it alone: no people, no faces on it, no words, no ground, shadow or backdrop under it.',
 ].join(' ');
 
@@ -1837,7 +1869,8 @@ export function sheetThing(
       CAST_STYLE,
       STANCES[kind],
       character.size ? SIZES[character.size] : '',
-      'The face inside the head has no eyes, brows or mouth: each expression group draws the eyes, brows and mouth, all in the same place on the face.',
+      FACE_BRIEF,
+      LIMBS[kind],
       OPTIONAL_PARTS[kind],
       MOVING_PARTS,
     ]
@@ -1847,10 +1880,13 @@ export function sheetThing(
     // motion turned a tail about a point off the drawing.
     motion:
       'none: draw it still, with no <style> animation and no SMIL; the stage moves it',
-    parts: SHEET_PARTS_BY_KIND[kind].map((part) => ({ ...part })),
+    parts: [
+      ...SHEET_PARTS_BY_KIND[kind].map((part) => ({ ...part })),
+      { name: 'mouth-at', label: false, optional: true },
+    ],
     states: EXPRESSIONS.map((name) => ({
       name,
-      look: EXPRESSION_LOOKS[name],
+      look: EXPRESSION_EYES[name],
     })),
     // An animal on all fours needs the room across; a creature stands up.
     shape: character.kind === 'animal' ? 'square' : 'tall',

@@ -107,6 +107,9 @@ import {
 } from './scene-set-pieces';
 import type { DocumentProfile } from './scene-profile';
 import {
+  WALK_MAX_MS,
+  WALK_MIN_MS,
+  WALK_STAGE_MS,
   againstScenery,
   hurried,
   settledOf,
@@ -3110,6 +3113,12 @@ export function composeScene(input: ComposeInput): {
       generator: input.generator,
       title: script.title,
       durationMs,
+      // The pace its walks were timed at, for the player to walk them so.
+      walk: {
+        stageMs: WALK_STAGE_MS,
+        minMs: WALK_MIN_MS,
+        maxMs: WALK_MAX_MS,
+      },
       timing: input.timing,
       ...(input.profile?.stage ? { stage: input.profile.stage } : {}),
       ...(Object.keys(acting).length ? { acting } : {}),

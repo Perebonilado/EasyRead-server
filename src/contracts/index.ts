@@ -1593,6 +1593,12 @@ export interface SceneDto {
   durationMs: number;
   /** When everything the scene plans has finished: its last line, its last walk and move. Can be after `durationMs`, where the voice has ended; absent on an older scene, and on a book's page. */
   settledMs?: number;
+  /**
+   * How long a walker takes to cross the whole stage, and the least and
+   * most a walk takes, in ms, as this scene was timed. Absent on a scene
+   * made before walks were slowed: 4000, 1100 and 3400.
+   */
+  walk?: { stageMs: number; minMs: number; maxMs: number };
   timing: SceneTiming;
   /** Whom the document is taught for, read from it; absent when it could not be told, or on an older page. */
   stage?: 'early' | 'middle' | 'higher' | 'professional';

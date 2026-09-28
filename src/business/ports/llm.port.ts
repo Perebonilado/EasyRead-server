@@ -115,11 +115,14 @@ export interface StudioTurnDraft {
     | 'approve'
     | 'cast'
     | 'redraw'
+    | 'choose'
     | 'scene'
     | 'make'
     | 'episode';
-  /** For "redraw": the one character whose look is to change, by name or id. */
+  /** For "redraw": the one character whose look is to change, by name or id; for "choose", whose new drawing is chosen. */
   character?: string | null;
+  /** For "choose": which of the new drawings waiting, from 1; 0 to keep the one they have. */
+  pick?: number | null;
   /** A scene's number, from 1, for a change to it. */
   scene: number | null;
   /** For a change to several scenes: each one's number, from 1, the first first. Absent, only `scene`. */

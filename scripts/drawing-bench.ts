@@ -14,6 +14,7 @@
  *   npm run drawing:bench -- --mark <dir> <id> ok|not ["note"]
  *   npm run drawing:bench -- --sheet <dir> [--report <report-x.json>] [--against <report.json> | baseline]
  *   npm run drawing:bench -- --rejudge <dir> --judge provider:id
+ *   npm run drawing:bench -- --from-failures [<dir>]
  *
  * Writes <dir>/report.json, <dir>/index.html (the contact sheet), and
  * <dir>/sheet.png (every drawing in one picture), with each brief's
@@ -32,9 +33,19 @@
  * creature kit from its spec (a redraw from its spec changed as a writer
  * would change it), with no model at all; --drawer artist draws every
  * brief by the artist again, to measure the one against the other.
+ * --from-failures turns each drawing a maker marked "Not right" (kept in
+ * <STORAGE_ROOT>/drawing-bench/failures/, or <dir>) into a brief here, and
+ * the drawing it starts from into `old/`, each once (studio-drawings-plan
+ * §8): the next run measures it, until it is fixed for good.
  */
 import 'dotenv/config';
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import {
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  readdirSync,
+  writeFileSync,
+} from 'node:fs';
 import { join, resolve } from 'node:path';
 import { ConfigService } from '@nestjs/config';
 import render from 'dom-serializer';
@@ -49,6 +60,12 @@ import {
 import type { LlmUsage } from '../src/business/ports/llm.port';
 import { costOf } from '../src/business/domain/cost';
 import {
+  FAILURES_PREFIX,
+  fixtureOfFailure,
+  type DrawingFailure,
+} from '../src/business/domain/drawing-failures';
+import {
+  DRAWING_BENCH_DIR,
   DRAWING_OLD_DIR,
   baselineReport,
   drawerOf,
@@ -881,7 +898,58 @@ async function rejudge(dir: string, model: string | undefined): Promise<void> {
   );
 }
 
+/**
+ * Each drawing a maker marked "Not right" made a brief of the bench, and
+ * the drawing a redraw starts from kept beside the others: those made
+ * before are left as they are.
+ */
+function fromFailures(dir: string): void {
+  if (!existsSync(dir)) {
+    console.log(`No failures kept yet (${dir}).`);
+    return;
+  }
+  let made = 0;
+  for (const file of readdirSync(dir)
+    .filter((f) => f.endsWith('.json'))
+    .sort()) {
+    const failure = JSON.parse(
+      readFileSync(join(dir, file), 'utf8'),
+    ) as DrawingFailure;
+    const turned = fixtureOfFailure(failure);
+    if ('skipped' in turned) {
+      console.log(`${file}: skipped, ${turned.skipped}`);
+      continue;
+    }
+    const at = join(DRAWING_BENCH_DIR, `${turned.fixture.id}.json`);
+    if (existsSync(at)) continue;
+    writeFileSync(at, `${JSON.stringify(turned.fixture, null, 2)}\n`);
+    if (turned.old && turned.fixture.kind === 'redraw')
+      writeFileSync(
+        join(DRAWING_OLD_DIR, turned.fixture.from),
+        JSON.stringify(turned.old),
+      );
+    made++;
+    console.log(
+      `${turned.fixture.id}: ${turned.fixture.kind}${failure.note ? ` ("${failure.note}")` : ''}`,
+    );
+  }
+  console.log(
+    `${made} new brief${made === 1 ? '' : 's'} → ${DRAWING_BENCH_DIR}`,
+  );
+}
+
 async function main(): Promise<void> {
+  if (args.includes('--from-failures')) {
+    const said = flag('--from-failures');
+    fromFailures(
+      resolve(
+        said && !said.startsWith('--')
+          ? said
+          : join(process.env.STORAGE_ROOT ?? 'storage', FAILURES_PREFIX),
+      ),
+    );
+    return;
+  }
   const markAt = flag('--mark');
   if (markAt) {
     const at = args.indexOf('--mark');

@@ -1054,8 +1054,10 @@ export class SceneProcessor {
 
   /**
    * A character's other drawings, the takes not chosen, kept beside the
-   * cast (cast-options.json beside cast.json) to be offered later; none
-   * kept is none written. What cannot be kept is only logged.
+   * cast (cast-options.json beside cast.json) to be offered later: none
+   * kept lets go of any kept for an earlier drawing of them, so another
+   * drawing's takes are never offered beside this one. What cannot be
+   * kept is only logged.
    */
   private async keepOthers(
     castKey: string,
@@ -1063,7 +1065,6 @@ export class SceneProcessor {
     others: CharacterSheet[],
     who: string,
   ): Promise<void> {
-    if (!others.length) return;
     const key = optionsKey(castKey);
     await this.inTurn(key, async () => {
       let kept: Record<string, CharacterSheet[]> = {};
@@ -1078,7 +1079,10 @@ export class SceneProcessor {
         )
           throw error;
       }
-      kept[characterId] = others;
+      if (!others.length) {
+        if (!(characterId in kept)) return;
+        delete kept[characterId];
+      } else kept[characterId] = others;
       await this.storage.put({
         key,
         body: Buffer.from(JSON.stringify(kept)),

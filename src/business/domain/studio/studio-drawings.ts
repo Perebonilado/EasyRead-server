@@ -13,7 +13,9 @@
  */
 import { createHash } from 'node:crypto';
 import { SPECIES } from '../scene-animal';
+import type { FigureSpec } from '../scene-figure';
 import type { Cast, CharacterSheet } from '../scene-sheet';
+import { MAX_OPTIONS } from './studio-options';
 import {
   namesOf,
   type StudioBible,
@@ -21,18 +23,37 @@ import {
   type StudioSet,
 } from './studio';
 
+/**
+ * One of the new drawings of a character offered to choose from: its own
+ * id (the same drawing, the same id), and how it is drawn: the artist's
+ * sheet, or a kit's (an animal's, a creature's), or for a person the
+ * figure the kit draws them from. For one a kit draws, how its look reads
+ * in words goes with it, kept on them when chosen.
+ */
+export interface DrawingOption {
+  id: string;
+  sheet?: CharacterSheet;
+  figure?: FigureSpec;
+  look?: string;
+}
+
+/** New drawings of a character waiting beside the one they have, and what they were drawn for. */
+export interface Waiting {
+  /** What the maker asked for; empty for a first drawing's other takes. */
+  words: string;
+  at: number;
+  /** A first drawing's takes: the first is the one they have now. */
+  first?: boolean;
+  /** Up to MAX_OPTIONS, the likeliest first. */
+  options: DrawingOption[];
+}
+
 /** What is being drawn now, and what waits for the maker to choose, by character. */
 export interface CastWork {
   /** Characters being drawn: since when, and for a drawing again, the maker's words. */
   drawing: Record<string, { since: number; words?: string }>;
-  /**
-   * A new drawing of a character, waiting beside the one they have; for
-   * one the animal kit draws, how its look reads in words with it.
-   */
-  candidates: Record<
-    string,
-    { sheet: CharacterSheet; words: string; at: number; look?: string }
-  >;
+  /** New drawings of a character, up to three, waiting beside the one they have. */
+  candidates: Record<string, Waiting>;
 }
 
 export const NO_WORK: CastWork = { drawing: {}, candidates: {} };
@@ -40,7 +61,45 @@ export const NO_WORK: CastWork = { drawing: {}, candidates: {} };
 /** Drawing that has not finished in this long went wrong somewhere: it is drawing no more. */
 export const DRAWING_MS = 20 * 60_000;
 
-/** Kept work read back: whatever cannot be read is none. */
+/** A drawing's own mark: the same drawing, the same mark. */
+export const drawnStamp = (sheet: CharacterSheet) =>
+  createHash('sha256').update(sheet.drawing.svg).digest('hex').slice(0, 12);
+
+/** A figure's own mark, as a drawing's: the same figure, the same mark. */
+export const figureStamp = (figure: FigureSpec) =>
+  createHash('sha256')
+    .update(JSON.stringify(figure))
+    .digest('hex')
+    .slice(0, 12);
+
+/** An option as kept: its drawing or its figure, and its id; null for one with neither. */
+function optionOf(raw: unknown): DrawingOption | null {
+  const said = raw && typeof raw === 'object' ? (raw as DrawingOption) : null;
+  const sheet = said?.sheet?.drawing?.svg ? said.sheet : undefined;
+  const figure =
+    said?.figure && typeof said.figure === 'object' ? said.figure : undefined;
+  if (!sheet && !figure) return null;
+  return {
+    id: sheet ? drawnStamp(sheet) : figureStamp(figure!),
+    ...(sheet ? { sheet } : {}),
+    ...(figure && !sheet ? { figure } : {}),
+    ...(typeof said?.look === 'string' ? { look: said.look } : {}),
+  };
+}
+
+/** Options each once, by id, at most MAX_OPTIONS. */
+function distinct(options: (DrawingOption | null)[]): DrawingOption[] {
+  const seen = new Set<string>();
+  return options
+    .filter((one): one is DrawingOption => {
+      if (!one || seen.has(one.id)) return false;
+      seen.add(one.id);
+      return true;
+    })
+    .slice(0, MAX_OPTIONS);
+}
+
+/** Kept work read back: whatever cannot be read is none. One new drawing kept before there were three is one option. */
 export function castWorkOf(raw: unknown): CastWork {
   const said = raw && typeof raw === 'object' ? (raw as Partial<CastWork>) : {};
   const drawing: CastWork['drawing'] = {};
@@ -51,14 +110,22 @@ export function castWorkOf(raw: unknown): CastWork {
         ...(typeof one.words === 'string' ? { words: one.words } : {}),
       };
   const candidates: CastWork['candidates'] = {};
-  for (const [id, one] of Object.entries(said.candidates ?? {}))
-    if (one?.sheet?.drawing?.svg && typeof one.words === 'string')
-      candidates[id] = {
-        sheet: one.sheet,
-        words: one.words,
-        at: Number.isFinite(one.at) ? one.at : 0,
-        ...(typeof one.look === 'string' ? { look: one.look } : {}),
-      };
+  for (const [id, raw1] of Object.entries(said.candidates ?? {})) {
+    const one = raw1 as Partial<Waiting> & { sheet?: unknown; look?: unknown };
+    if (!one || typeof one.words !== 'string') continue;
+    const options = distinct(
+      Array.isArray(one.options)
+        ? one.options.map(optionOf)
+        : [optionOf({ sheet: one.sheet, look: one.look })],
+    );
+    if (!options.length) continue;
+    candidates[id] = {
+      words: one.words,
+      at: Number.isFinite(one.at) ? one.at! : 0,
+      ...(one.first === true ? { first: true } : {}),
+      options,
+    };
+  }
   return { drawing, candidates };
 }
 
@@ -94,12 +161,13 @@ export const drawnByArtist = (
 ) => c.kind !== 'person' && !c.animal && !c.creature;
 
 /**
- * Whether a change asked of how they look is a new drawing to choose (an
- * animal, a creature: the kit's new spec, or the artist's new drawing)
- * rather than their look changed at once (a person's).
+ * Whether a change asked of how they look is new drawings to choose from
+ * rather than their look changed at once: for everyone, now that a
+ * person's comes as the kit's readings of the words too (Phase E). Only
+ * their look changed by hand on their card is at once.
  */
 export const redrawnToChoose = (c: Pick<StudioCharacter, 'kind'>) =>
-  c.kind !== 'person';
+  Boolean(c.kind);
 
 /** Whether a character is being drawn now. */
 export const beingDrawn = (work: CastWork, id: string, now: number) =>
@@ -125,7 +193,32 @@ export function doneDrawing(work: CastWork, ids: readonly string[]): CastWork {
   return { ...work, drawing };
 }
 
-/** Work with a new drawing of a character waiting to be chosen (in place of any before it). */
+/**
+ * Work with new drawings of a character waiting to be chosen from (in
+ * place of any before them), the likeliest first: each once, at most
+ * MAX_OPTIONS. None is no change.
+ */
+export function withOptions(
+  work: CastWork,
+  id: string,
+  options: Omit<DrawingOption, 'id'>[],
+  words: string,
+  now: number,
+  /** A first drawing's other takes, the one they have first. */
+  first = false,
+): CastWork {
+  const kept = distinct(options.map(optionOf));
+  if (!kept.length) return work;
+  return {
+    ...work,
+    candidates: {
+      ...work.candidates,
+      [id]: { words, at: now, ...(first ? { first } : {}), options: kept },
+    },
+  };
+}
+
+/** Work with one new drawing of a character waiting to be chosen (in place of any before it). */
 export function withCandidate(
   work: CastWork,
   id: string,
@@ -135,13 +228,13 @@ export function withCandidate(
   /** How one the animal kit draws reads in words with it: kept on them when chosen. */
   look?: string,
 ): CastWork {
-  return {
-    ...work,
-    candidates: {
-      ...work.candidates,
-      [id]: { sheet, words, at: now, ...(look ? { look } : {}) },
-    },
-  };
+  return withOptions(
+    work,
+    id,
+    [{ sheet, ...(look ? { look } : {}) }],
+    words,
+    now,
+  );
 }
 
 /** Work with a character's waiting drawing gone. */
@@ -166,28 +259,45 @@ export function toDraw(
     .map((c) => c.id);
 }
 
-/** A drawing's own mark: the same drawing, the same mark. */
-export const drawnStamp = (sheet: CharacterSheet) =>
-  createHash('sha256').update(sheet.drawing.svg).digest('hex').slice(0, 12);
+/**
+ * The option a choice means: by its id; by its number, from 1, as the
+ * maker says it ("the second one"); the first when neither is said. Null
+ * when there is none such.
+ */
+export function optionMeant(
+  waiting: Waiting | undefined,
+  said?: string | number | null,
+): DrawingOption | null {
+  if (!waiting) return null;
+  if (said === undefined || said === null || said === '')
+    return waiting.options[0] ?? null;
+  if (typeof said === 'number')
+    return waiting.options[Math.round(said) - 1] ?? null;
+  return waiting.options.find((one) => one.id === said) ?? null;
+}
 
 /**
- * A new drawing chosen: the cast with it in place of the one before, and
- * the bible marking the character with it, so every scene that shows them
- * (and none other) is made again.
+ * A new drawing chosen, one of those waiting (the first unless another is
+ * said): the cast with it in place of the one before, and the bible
+ * marking the character with it, so every scene that shows them (and none
+ * other) is made again. A person's is their figure, drawn by the kit.
  */
 export function chosen(
   bible: StudioBible,
   cast: Cast,
   work: CastWork,
   id: string,
+  option?: string | number | null,
 ): { bible: StudioBible; cast: Cast; work: CastWork } | null {
-  const candidate = work.candidates[id];
-  if (!candidate || !bible.characters.some((c) => c.id === id)) return null;
-  const drawn = drawnStamp(candidate.sheet);
-  // One a kit drew (an animal, a creature) is its spec from now on, and
-  // its look's words go with it.
-  const animal = candidate.sheet.animal;
-  const creature = candidate.sheet.creature;
+  const picked = optionMeant(work.candidates[id], option);
+  if (!picked || !bible.characters.some((c) => c.id === id)) return null;
+  const sheet = picked.sheet;
+  // One a kit drew (an animal, a creature, a person) is its spec from now
+  // on, and its look's words go with it.
+  const animal = sheet?.animal;
+  const creature = sheet?.creature;
+  const figure = !sheet ? picked.figure : undefined;
+  const kit = Boolean(animal || creature || figure);
   return {
     bible: {
       ...bible,
@@ -195,27 +305,69 @@ export function chosen(
         c.id === id
           ? {
               ...c,
-              drawn,
+              ...(sheet ? { drawn: drawnStamp(sheet) } : {}),
               ...(animal ? { animal } : {}),
               ...(creature ? { creature, size: creature.size } : {}),
-              ...((animal || creature) && candidate.look
-                ? { look: candidate.look }
-                : {}),
+              ...(figure ? { figure } : {}),
+              ...(kit && picked.look ? { look: picked.look } : {}),
             }
           : c,
       ),
     },
-    cast: { ...cast, [id]: candidate.sheet },
+    cast: sheet ? { ...cast, [id]: sheet } : cast,
     work: withoutCandidate(work, id),
   };
 }
 
+/** Ordinal words, as the maker may say which drawing: "the second one", "number 3". */
+const ORDINALS: [RegExp, number][] = [
+  [/\b(?:first|1st|one|number\s*1|no\.?\s*1|#1|left(?:most)?)\b/i, 1],
+  [/\b(?:second|2nd|two|number\s*2|no\.?\s*2|#2|middle)\b/i, 2],
+  [/\b(?:third|3rd|three|number\s*3|no\.?\s*3|#3|right(?:most)?|last)\b/i, 3],
+];
+/** Keeping the one they have, in so many words. */
+const KEEP_THEIRS =
+  /\b(?:keep|stay\s+with|stick\s+with)\b.{0,24}\b(?:old|original|current|one\s+(?:they|he|she|it)\s+(?:have|has|had)|as\s+(?:they|he|she|it)\s+(?:are|is|were|was))\b|\bnone\s+of\s+(?:them|these|those)\b.{0,12}\bkeep\b/i;
+
+/**
+ * Which of the drawings waiting the maker's words choose: its number,
+ * from 1; 0 for keeping the one they have; null when they do not say.
+ * "Use the second one" is 2, "I like the last" 3, "keep the old one" 0.
+ */
+export function pickOf(words: string): number | null {
+  if (KEEP_THEIRS.test(words)) return 0;
+  // "one" alone names no drawing: "use this one", "the second one".
+  const said = words.replace(/\b(?:this|that|the|which)\s+one\b/gi, ' ');
+  const found = ORDINALS.filter(([pattern]) => pattern.test(said));
+  if (found.length === 1) return found[0][1];
+  // "The second one" said with "one" left: the named ordinal wins.
+  const named = found.filter(([, n]) => n !== 1);
+  return named.length === 1 ? named[0][1] : null;
+}
+
+/** What a character is drawn again for when no one said: another way. */
+export const anotherWay = (who: Pick<StudioCharacter, 'name'>) =>
+  `Draw ${who.name} again, another way, as their look says.`;
+
+/** Whether an option is the drawing they have now: choosing it changes nothing. */
+export const isTheirs = (
+  option: DrawingOption,
+  character: Pick<StudioCharacter, 'drawn' | 'figure'>,
+) =>
+  option.sheet
+    ? Boolean(character.drawn) && drawnStamp(option.sheet) === character.drawn
+    : Boolean(option.figure && character.figure) &&
+      figureStamp(option.figure!) === figureStamp(character.figure!);
+
 /** Whether a character's look changed, so their drawing is forgotten and drawn again. */
 export const lookChanged = (
-  was: Pick<StudioCharacter, 'look' | 'kind' | 'size' | 'animal' | 'creature'>,
-  now: Pick<StudioCharacter, 'look' | 'kind' | 'size' | 'animal' | 'creature'>,
+  was: Pick<StudioCharacter, 'look' | 'kind' | 'size' | 'animal' | 'creature'> &
+    Partial<Pick<StudioCharacter, 'figure'>>,
+  now: Pick<StudioCharacter, 'look' | 'kind' | 'size' | 'animal' | 'creature'> &
+    Partial<Pick<StudioCharacter, 'figure'>>,
 ) =>
   was.look !== now.look ||
+  JSON.stringify(was.figure ?? null) !== JSON.stringify(now.figure ?? null) ||
   was.kind !== now.kind ||
   was.size !== now.size ||
   JSON.stringify(was.animal ?? null) !== JSON.stringify(now.animal ?? null) ||

@@ -1788,8 +1788,13 @@ export class FakeLlmAdapter implements LlmGatewayPort {
     const yes = /\b(?:yes|go|ok|okay|sure|write it|looks good|make it)\b/.test(
       said,
     );
-    const action: StudioTurnDraft['action'] =
-      input.phase === 'brief'
+    // New drawings waiting, and one chosen in words: which is the Studio's to read.
+    const choosing =
+      /New drawings waiting/.test(input.state) &&
+      /\b(?:use|pick|choose|like|keep|prefer)\b/.test(said);
+    const action: StudioTurnDraft['action'] = choosing
+      ? 'choose'
+      : input.phase === 'brief'
         ? yes
           ? 'outline'
           : 'none'

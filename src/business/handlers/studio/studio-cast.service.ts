@@ -1,25 +1,30 @@
 import { Inject, Injectable } from '@nestjs/common';
+import { createHash } from 'node:crypto';
 import { NotFoundError } from '../../domain/errors/errors';
+import { failureKey, type DrawingFailure } from '../../domain/drawing-failures';
 import {
   castOf,
+  optionsKey,
   setsOf,
   type Cast,
   type CharacterSheet,
   type Sets,
 } from '../../domain/scene-sheet';
 import { faceShown } from '../../domain/scene-sheet-face';
-import type { StudioBible } from '../../domain/studio/studio';
+import type { StudioBible, StudioCharacter } from '../../domain/studio/studio';
 import {
   NO_WORK,
   beingDrawn,
   castWorkOf,
   chosen,
   drawnByArtist,
+  drawnStamp,
   lookChanged,
   markDrawing,
   toDraw,
   withoutCandidate,
   type CastWork,
+  type DrawingOption,
 } from '../../domain/studio/studio-drawings';
 import {
   animalPreview,
@@ -41,6 +46,21 @@ export const studioWorkKey = (showId: string) =>
 /** A character as their card shows them: a face or two, with code's mouth where code draws it. */
 const preview = (sheet: CharacterSheet, id: string): string =>
   faceShown(sheet, id, ['happy', 'neutral']);
+
+/** One of the new drawings offered, as its card shows it: the sheet's faces, or a person's figure drawn by the kit. */
+export const optionPreview = (option: DrawingOption, id: string): string =>
+  option.sheet
+    ? preview(option.sheet, id)
+    : option.figure
+      ? figurePreview(option.figure, id)
+      : '';
+
+/** New drawings waiting for a character, as their card shows them. */
+export interface WaitingView {
+  words: string;
+  first?: boolean;
+  options: { id: string; drawing: string }[];
+}
 
 /**
  * A show's drawings, as the Studio shows them before and after its film
@@ -80,29 +100,32 @@ export class StudioCastService {
   ): Promise<{
     characters: Map<string, string>;
     sets: Map<string, string>;
-    /** New drawings waiting to be chosen: each as its card shows it, and what the maker asked. */
-    candidates: Map<string, { drawing: string; words: string }>;
+    /** New drawings waiting to be chosen, up to three: each as its card shows it, and what the maker asked. */
+    candidates: Map<string, WaitingView>;
     /** Those being drawn now. */
     drawing: Set<string>;
   }> {
     const characters = new Map<string, string>();
-    // The artist's drawings are in the cast; the kits' are drawn here. A
-    // new drawing to choose may wait for any but a person.
+    // The artist's drawings are in the cast; the kits' are drawn here. New
+    // drawings to choose from may wait for anyone.
     const needsCast = bible.characters.some(drawnByArtist);
     const cast: Cast = needsCast
       ? await this.read(studioCastKey(showId), castOf, {}).catch(() => ({}))
       : {};
-    const work: CastWork = bible.characters.some((c) => c.kind !== 'person')
+    const work: CastWork = bible.characters.length
       ? await this.work(showId).catch(() => NO_WORK)
       : NO_WORK;
-    const candidates = new Map<string, { drawing: string; words: string }>();
+    const candidates = new Map<string, WaitingView>();
     const drawing = new Set<string>();
     for (const c of bible.characters) {
       const waiting = work.candidates[c.id];
       if (waiting)
         candidates.set(c.id, {
-          drawing: preview(waiting.sheet, c.id),
           words: waiting.words,
+          ...(waiting.first ? { first: true } : {}),
+          options: waiting.options
+            .map((one) => ({ id: one.id, drawing: optionPreview(one, c.id) }))
+            .filter((one) => one.drawing),
         });
       if (beingDrawn(work, c.id, now)) drawing.add(c.id);
     }
@@ -199,21 +222,24 @@ export class StudioCastService {
   }
 
   /**
-   * A character's new drawing chosen: kept in the cast in place of the one
+   * One of a character's new drawings chosen (the first unless another is
+   * said, by its id or its number): kept in the cast in place of the one
    * before, and the bible marking them with it. Null when there is none
-   * waiting.
+   * such waiting.
    */
   async choose(
     showId: string,
     bible: StudioBible,
     characterId: string,
+    option?: string | number | null,
   ): Promise<StudioBible | null> {
     return this.inTurn(studioCastKey(showId), async () => {
       const work = await this.work(showId);
       const cast = await this.cast(showId).catch(() => ({}));
-      const picked = chosen(bible, cast, work, characterId);
+      const picked = chosen(bible, cast, work, characterId, option);
       if (!picked) return null;
-      await this.write(studioCastKey(showId), picked.cast);
+      if (picked.cast !== cast)
+        await this.write(studioCastKey(showId), picked.cast);
       await this.changeWork(showId, (now) =>
         withoutCandidate(now, characterId),
       );
@@ -229,6 +255,79 @@ export class StudioCastService {
       return withoutCandidate(work, characterId);
     });
     return had;
+  }
+
+  /**
+   * A character's other takes when the artist first drew them, the ones
+   * not chosen (cast-options.json beside the cast): none for one it did
+   * not draw that way.
+   */
+  async otherTakes(
+    showId: string,
+    characterId: string,
+  ): Promise<CharacterSheet[]> {
+    const none: Record<string, unknown> = {};
+    const kept = await this.read(
+      optionsKey(studioCastKey(showId)),
+      (raw) =>
+        raw && typeof raw === 'object'
+          ? (raw as Record<string, unknown>)
+          : none,
+      none,
+    ).catch(() => none);
+    const takes = kept[characterId];
+    return Array.isArray(takes)
+      ? (takes as CharacterSheet[]).filter((one) => one?.drawing?.svg)
+      : [];
+  }
+
+  /**
+   * The drawing a character has now, as their card shows it: the kit's of
+   * their spec, or the artist's sheet; its own mark. Null when they have
+   * none yet.
+   */
+  async theirs(
+    showId: string,
+    who: StudioCharacter,
+  ): Promise<{
+    drawer: 'artist' | 'kit';
+    svg: string;
+    sheet?: CharacterSheet;
+    stamp: string;
+  } | null> {
+    const kit =
+      who.kind === 'person' && who.figure
+        ? { svg: figurePreview(who.figure, who.id), spec: who.figure }
+        : who.kind === 'animal' && who.animal
+          ? { svg: animalPreview(who.animal, who.id), spec: who.animal }
+          : who.kind === 'creature' && who.creature
+            ? { svg: creaturePreview(who.creature, who.id), spec: who.creature }
+            : null;
+    if (kit)
+      return {
+        drawer: 'kit',
+        svg: kit.svg,
+        stamp: createHash('sha256')
+          .update(JSON.stringify(kit.spec))
+          .digest('hex')
+          .slice(0, 12),
+      };
+    const sheet = (await this.cast(showId).catch((): Cast => ({})))[who.id];
+    return sheet?.drawing?.svg
+      ? {
+          drawer: 'artist',
+          svg: preview(sheet, who.id),
+          sheet,
+          stamp: drawnStamp(sheet),
+        }
+      : null;
+  }
+
+  /** A drawing the maker said was not right, kept in the failures folder for the bench: where. */
+  async keepFailure(failure: DrawingFailure): Promise<string> {
+    const key = failureKey(failure);
+    await this.write(key, failure);
+    return key;
   }
 
   private async write(key: string, value: unknown): Promise<void> {

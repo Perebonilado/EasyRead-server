@@ -154,6 +154,8 @@ export function describeForProducer(input: {
   episode: number;
   /** What the maker is looking at in the panel as they write: "scene 3 ("The ball")", "the cast". */
   looking?: string | null;
+  /** New drawings of characters waiting to be chosen from: whose, how many, and what was asked. */
+  waiting?: { name: string; options: number; words: string }[];
 }): string {
   const story = input.brief.format !== 'explainer';
   const missing = briefMissing(input.brief);
@@ -175,6 +177,15 @@ export function describeForProducer(input: {
           const state = input.states?.[k];
           return `${sheet ? describeSheet(sheet, k) : `Scene ${k + 1}: being written`}${state ? ` [${state}]` : ''}`;
         })
+        .join('\n')}`,
+    );
+  if (input.waiting?.length)
+    parts.push(
+      `New drawings waiting to be chosen from (on their cards and in the conversation):\n${input.waiting
+        .map(
+          (one) =>
+            `${one.name}: ${one.options === 1 ? 'drawing 1' : `drawings 1 to ${one.options}`}${one.words ? `, drawn again for "${one.words.slice(0, 120)}"` : ', other ways to draw them for the first time (drawing 1 is the one they have)'}`,
+        )
         .join('\n')}`,
     );
   if (input.looking)

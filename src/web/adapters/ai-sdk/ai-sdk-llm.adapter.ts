@@ -2536,11 +2536,16 @@ function turnOf(answer: z.infer<typeof studioTurnSchema>): StudioTurnDraft {
   const scenes = (answer.scenes ?? [])
     .map((one) => Math.round(Number(one)))
     .filter((one) => Number.isFinite(one) && one >= 1);
-  const { scenes: _asked, ...rest } = answer;
+  const { scenes: _asked, pick: _pick, ...rest } = answer;
   void _asked;
+  void _pick;
+  const pick = Math.round(Number(answer.pick));
   return {
     ...rest,
     brief: answer.brief,
+    ...(answer.pick !== null && Number.isFinite(pick) && pick >= 0 && pick <= 3
+      ? { pick }
+      : {}),
     scene:
       answer.scene !== null && Number.isFinite(scene)
         ? Math.round(scene)

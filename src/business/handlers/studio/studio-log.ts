@@ -108,6 +108,9 @@ export async function logEvent(
   });
 }
 
+/** How many ways something was drawn, in words. */
+const WAYS: Record<number, string> = { 2: 'two ways', 3: 'three ways' };
+
 /** The lines events say, in the maker's words. */
 export const EVENT_LINES = {
   outline: (outline: StudioOutline, again: boolean) =>
@@ -116,7 +119,16 @@ export const EVENT_LINES = {
   drawn: (names: readonly string[]) =>
     `${names.length > 1 ? `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}` : (names[0] ?? 'The cast')} drawn — have a look`,
   /** One character drawn again as the maker asked: waiting beside the one they have. */
-  redrawn: (name: string) => `${name} redrawn — have a look`,
+  redrawn: (name: string, ways = 1) =>
+    ways > 1
+      ? `${name} redrawn ${WAYS[ways] ?? `${ways} ways`} — pick one`
+      : `${name} redrawn — have a look`,
+  /** A character the artist drew for the first time, in takes side by side: the best in use, the others to choose instead. */
+  takes: (name: string, ways: number) =>
+    `${name} drawn ${WAYS[ways] ?? `${ways} ways`} — the first is in use, or pick another`,
+  /** A drawing the maker said was not right: kept for the bench, and drawn again. */
+  notRight: (name: string, note: string | null) =>
+    `Not right: drawing ${name} again${note ? ` — “${note.length > 80 ? `${note.slice(0, 79)}…` : note}”` : ''}`,
   /** The new drawing chosen: the scenes that show them, to make again. */
   chosen: (name: string, scenes: number) =>
     `${name}'s new drawing is in${scenes ? `: ${scenes} made scene${scenes === 1 ? '' : 's'} with ${name} to make again` : ''}`,

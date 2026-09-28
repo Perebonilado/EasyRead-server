@@ -29,7 +29,12 @@ import {
   oneRedrawn,
   redrawnToChoose,
   toDraw,
+  anotherWay,
+  isTheirs,
+  optionMeant,
+  pickOf,
   withCandidate,
+  withOptions,
   withoutCandidate,
 } from './studio-drawings';
 
@@ -79,9 +84,47 @@ describe('what of a cast is being drawn, and what waits to be chosen', () => {
       }),
     ).toEqual({
       drawing: { humpty: { since: T, words: 'rounder' } },
+      // One new drawing kept before there were three is one option.
       candidates: {
-        humpty: { sheet: sheet('<svg/>'), words: 'rounder', at: T },
+        humpty: {
+          words: 'rounder',
+          at: T,
+          options: [
+            { id: drawnStamp(sheet('<svg/>')), sheet: sheet('<svg/>') },
+          ],
+        },
       },
+    });
+  });
+
+  it('reads back up to three options each once, with their ids, and a first drawing’s takes', () => {
+    const a = sheet('<svg><circle r="1"/></svg>');
+    const b = sheet('<svg><circle r="2"/></svg>');
+    const kept = castWorkOf({
+      drawing: {},
+      candidates: {
+        horse: {
+          words: '',
+          at: T,
+          first: true,
+          options: [
+            { sheet: a },
+            { sheet: a },
+            { sheet: b, look: 'a brown horse' },
+            { sheet: {} },
+            { figure: null },
+          ],
+        },
+      },
+    });
+    expect(kept.candidates.horse).toEqual({
+      words: '',
+      at: T,
+      first: true,
+      options: [
+        { id: drawnStamp(a), sheet: a },
+        { id: drawnStamp(b), sheet: b, look: 'a brown horse' },
+      ],
     });
   });
 
@@ -114,7 +157,7 @@ describe('a new drawing of one character, and the maker’s choice', () => {
   const waiting = withCandidate(NO_WORK, 'humpty', rounder, 'rounder', T);
 
   it('waits beside the drawing they have: the cast is not touched', () => {
-    expect(waiting.candidates.humpty.sheet).toBe(rounder);
+    expect(waiting.candidates.humpty.options[0].sheet).toBe(rounder);
     expect(withoutCandidate(waiting, 'humpty').candidates).toEqual({});
     // Nothing waiting, nothing to let go.
     expect(withoutCandidate(NO_WORK, 'humpty')).toBe(NO_WORK);
@@ -473,5 +516,78 @@ describe('a creature the kit draws', () => {
       ),
     };
     expect([...gesturingIn(cast)]).toEqual(['eggbert']);
+  });
+});
+
+describe('three to choose from (Phase E)', () => {
+  const a = sheet('<svg><circle r="1"/></svg>');
+  const b = sheet('<svg><circle r="2"/></svg>');
+  const c = sheet('<svg><circle r="3"/></svg>');
+  const d = sheet('<svg><circle r="4"/></svg>');
+  const three = withOptions(
+    NO_WORK,
+    'humpty',
+    [{ sheet: a }, { sheet: b }, { sheet: b }, { sheet: c }, { sheet: d }],
+    'rounder',
+    T,
+  );
+
+  it('keeps each drawing once, at most three, each with its own id', () => {
+    const waiting = three.candidates.humpty;
+    expect(waiting.options.map((o) => o.id)).toEqual([a, b, c].map(drawnStamp));
+    // None is no change.
+    expect(withOptions(NO_WORK, 'humpty', [], 'x', T)).toBe(NO_WORK);
+  });
+
+  it('uses the one chosen, by its id or its number; the first when none is said', () => {
+    const cast = { humpty: a };
+    expect(
+      chosen(bible, cast, three, 'humpty', drawnStamp(c))!.cast.humpty,
+    ).toBe(c);
+    expect(chosen(bible, cast, three, 'humpty', 2)!.cast.humpty).toBe(b);
+    expect(chosen(bible, cast, three, 'humpty')!.cast.humpty).toBe(a);
+    expect(chosen(bible, cast, three, 'humpty', 4)).toBeNull();
+    expect(chosen(bible, cast, three, 'humpty', 'nope')).toBeNull();
+    expect(optionMeant(undefined, 1)).toBeNull();
+  });
+
+  it('gives a person the figure chosen, and their look, with no drawing kept', () => {
+    const tobi = bible.characters.find((one) => one.kind === 'person')!;
+    const figure = { ...tobi.figure!, hairColour: 'black' as const };
+    const waiting = withOptions(
+      NO_WORK,
+      tobi.id,
+      [{ figure, look: 'a boy with black hair' }],
+      'black hair',
+      T,
+    );
+    const picked = chosen(bible, {}, waiting, tobi.id)!;
+    const now = picked.bible.characters.find((one) => one.id === tobi.id)!;
+    expect(now.figure).toEqual(figure);
+    expect(now.look).toBe('a boy with black hair');
+    expect(now.drawn).toBeUndefined();
+    expect(picked.cast).toEqual({});
+    // Their look changed: every scene with them is made again.
+    expect(lookChanged(tobi, now)).toBe(true);
+    expect(isTheirs(waiting.candidates[tobi.id].options[0], now)).toBe(true);
+    expect(isTheirs(waiting.candidates[tobi.id].options[0], tobi)).toBe(false);
+  });
+
+  it('knows which one the maker’s words choose', () => {
+    expect(pickOf('use the second one')).toBe(2);
+    expect(pickOf('I like the first one best')).toBe(1);
+    expect(pickOf('the last one, please')).toBe(3);
+    expect(pickOf('number 3')).toBe(3);
+    expect(pickOf('the middle one')).toBe(2);
+    expect(pickOf('keep the old one')).toBe(0);
+    expect(pickOf('none of them, keep him as he is')).toBe(0);
+    expect(pickOf('use this one')).toBeNull();
+    expect(pickOf('make him taller')).toBeNull();
+  });
+
+  it('draws someone again another way when no one said how', () => {
+    expect(anotherWay({ name: 'Pip' })).toBe(
+      'Draw Pip again, another way, as their look says.',
+    );
   });
 });

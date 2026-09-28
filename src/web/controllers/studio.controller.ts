@@ -17,6 +17,8 @@ import { createHash } from 'node:crypto';
 import type { Request, Response } from 'express';
 import { Type } from 'class-transformer';
 import {
+  ArrayMaxSize,
+  IsArray,
   IsBoolean,
   IsIn,
   IsInt,
@@ -103,10 +105,30 @@ class AddSceneDto {
   request!: string;
 }
 
-/** The maker's choice between a character's drawing and a new one. */
+/** The maker's choice between a character's drawing and the new ones: which, by its id. */
 class ChoiceDto {
   @IsIn(['use', 'again', 'keep'])
   choice!: 'use' | 'again' | 'keep';
+
+  @IsOptional()
+  @IsString()
+  @Length(1, 40)
+  option?: string;
+}
+
+/** A drawing the maker says is not right: which of those offered (none, the one they have), and why. */
+class NotRightDto {
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(3)
+  @IsString({ each: true })
+  @Length(1, 40, { each: true })
+  options?: string[];
+
+  @IsOptional()
+  @IsString()
+  @Length(0, 500)
+  note?: string;
 }
 
 class AnyDto {
@@ -201,7 +223,28 @@ export class StudioController {
     @Param('characterId') characterId: string,
     @Body() body: ChoiceDto,
   ): Promise<StudioShowDto> {
-    return this.studio.chooseDrawing(userId, id, characterId, body.choice);
+    return this.studio.chooseDrawing(
+      userId,
+      id,
+      characterId,
+      body.choice,
+      body.option,
+    );
+  }
+
+  /** A drawing marked not right: kept for the drawing bench, and drawn again. */
+  @Post('shows/:id/characters/:characterId/not-right')
+  @Throttle({ default: { limit: 20, ttl: 60_000 } })
+  notRight(
+    @CurrentUser('id') userId: string,
+    @Param('id') id: string,
+    @Param('characterId') characterId: string,
+    @Body() body: NotRightDto,
+  ): Promise<StudioShowDto> {
+    return this.studio.notRight(userId, id, characterId, {
+      options: body.options,
+      note: body.note ?? null,
+    });
   }
 
   /** A character's voice, a line of it. */

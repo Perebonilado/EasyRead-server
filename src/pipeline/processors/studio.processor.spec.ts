@@ -25,6 +25,7 @@ import type { SceneDto } from '../../contracts';
 import { NotFoundError } from '../../business/domain/errors/errors';
 import {
   SHEET_VERSION,
+  optionsKey,
   type CharacterSheet,
 } from '../../business/domain/scene-sheet';
 import {
@@ -732,6 +733,9 @@ describe('the cast drawn by the artist, at the cast step and again as asked', ()
     const prepared: { characters: Set<string>; places: Set<string> }[] = [];
     const bible: { current: typeof humptyBible } = { current: start };
     let answer: CharacterSheet | null = drawn('<svg><circle r="2"/></svg>');
+    /** Every take's best, when the artist drew more than one. */
+    let answers: CharacterSheet[] | null = null;
+    const takes: (number | undefined)[] = [];
     const show = (): StudioShowRecord => ({
       id: 's1',
       userId: 'u1',
@@ -802,14 +806,18 @@ describe('the cast drawn by the artist, at the cast step and again as asked', ()
       { record: () => Promise.resolve() },
       storage as never,
       {
-        drawCandidate: (
+        drawCandidates: (
           _story: unknown,
           id: string,
           words: string,
           now: CharacterSheet | null,
+          _documentId: string,
+          _who: string,
+          options?: { takes?: number },
         ) => {
           asked.push({ id, words, now });
-          return Promise.resolve(answer);
+          takes.push(options?.takes);
+          return Promise.resolve(answers ?? (answer ? [answer] : []));
         },
         keepSheet: (key: string, id: string, sheet: CharacterSheet) => {
           files.set(
@@ -852,8 +860,12 @@ describe('the cast drawn by the artist, at the cast step and again as asked', ()
       lines,
       bible,
       requests,
+      takes,
       setAnswer: (next: CharacterSheet | null) => {
         answer = next;
+      },
+      setAnswers: (next: CharacterSheet[]) => {
+        answers = next;
       },
     };
   }
@@ -909,6 +921,108 @@ describe('the cast drawn by the artist, at the cast step and again as asked', ()
     expect(work.drawing).toEqual({});
     expect(studio.lines()).toEqual(['Humpty redrawn — have a look']);
     expect(studio.lines().join(' ')).not.toContain('Cast changed');
+  });
+
+  it('draws a character again three ways, the artist’s takes, and says so', async () => {
+    const studio = artist();
+    const old = drawn('<svg><circle r="1"/></svg>');
+    studio.files.set(
+      studioCastKey('s1'),
+      Buffer.from(JSON.stringify({ humpty: old })),
+    );
+    studio.setAnswers(
+      [2, 3, 4].map((r) => drawn(`<svg><circle r="${r}"/></svg>`)),
+    );
+    await studio.processor.process(
+      job({ kind: 'redraw', characterId: 'humpty', request: 'rounder' }),
+      last('r3'),
+    );
+    // Three takes side by side, as a new character's.
+    expect(studio.takes).toEqual([3]);
+    const waiting = (await studio.cast.work('s1')).candidates.humpty;
+    expect(waiting.options.map((o) => o.sheet!.drawing.svg)).toEqual([
+      '<svg><circle r="2"/></svg>',
+      '<svg><circle r="3"/></svg>',
+      '<svg><circle r="4"/></svg>',
+    ]);
+    expect(studio.lines()).toEqual(['Humpty redrawn three ways — pick one']);
+    // The thread's line names him, so it can show the three to choose from.
+    expect(
+      (await studio.cast.work('s1')).candidates.humpty.first,
+    ).toBeUndefined();
+  });
+
+  it('offers a first drawing’s other takes beside it, the best in use', async () => {
+    const studio = artist();
+    studio.files.set(
+      optionsKey(studioCastKey('s1')),
+      Buffer.from(
+        JSON.stringify({
+          humpty: [5, 6].map((r) => drawn(`<svg><circle r="${r}"/></svg>`)),
+        }),
+      ),
+    );
+    await studio.cast.changeWork('s1', (work) =>
+      markDrawing(work, ['humpty', 'horse'], Date.now()),
+    );
+    await studio.processor.process(
+      job({ kind: 'draw', characterIds: ['humpty', 'horse'] }),
+      last('d2'),
+    );
+    const waiting = (await studio.cast.work('s1')).candidates.humpty;
+    expect(waiting.first).toBe(true);
+    expect(waiting.words).toBe('');
+    expect(waiting.options.map((o) => o.sheet!.drawing.svg)).toEqual([
+      '<svg><rect id="humpty"/></svg>',
+      '<svg><circle r="5"/></svg>',
+      '<svg><circle r="6"/></svg>',
+    ]);
+    expect(studio.lines()).toEqual([
+      'Horse drawn — have a look',
+      'Humpty drawn three ways — the first is in use, or pick another',
+    ]);
+  });
+
+  it('draws a person again as the kit’s readings of the words: the writer’s, and the nearest others', async () => {
+    const studio = artist(humptyBible, (given) => ({
+      ...given,
+      characters: given.characters.map((c) =>
+        c.id === 'tobi'
+          ? {
+              ...c,
+              look: 'a boy with dark brown curly hair',
+              figure: { ...c.figure, hairColour: 'dark brown', hair: 'curly' },
+            }
+          : c,
+      ),
+    }));
+    await studio.processor.process(
+      job({
+        kind: 'redraw',
+        characterId: 'tobi',
+        request: 'darker, wavier hair',
+      }),
+      last('p1'),
+    );
+    expect(studio.asked).toEqual([]);
+    const waiting = (await studio.cast.work('s1')).candidates.tobi;
+    const figures = waiting.options.map((o) => o.figure!);
+    expect(figures).toHaveLength(3);
+    expect(figures[0]).toMatchObject({
+      hairColour: 'dark brown',
+      hair: 'curly',
+    });
+    // Another reading of each field the change touched, one field each:
+    // the nearest shade of dark brown, and another style the words left open.
+    expect(figures[1]).toMatchObject({ hairColour: 'black', hair: 'curly' });
+    expect(figures[2].hairColour).toBe('dark brown');
+    expect(figures[2].hair).toBe('afro');
+    expect(waiting.options.every((o) => !o.sheet)).toBe(true);
+    expect(waiting.options[0].look).toBe('a boy with dark brown curly hair');
+    expect(waiting.options[1].look).toBe('a boy with black curly hair');
+    expect(studio.lines()).toEqual(['Tobi redrawn three ways — pick one']);
+    // Theirs is as it was until the maker chooses.
+    expect(studio.bible.current.characters[2].figure?.hair).toBe('short');
   });
 
   /** Clover, drawn by the animal kit: a chestnut horse. */
@@ -969,15 +1083,18 @@ describe('the cast drawn by the artist, at the cast step and again as asked', ()
     expect(studio.asked).toEqual([]);
     const work = await studio.cast.work('s1');
     const waiting = work.candidates.clover;
-    expect(waiting.sheet.animal).toMatchObject({
+    // What she asks for is named ("a red saddle blanket"), and red has no
+    // near shade: one reading, the writer's.
+    expect(waiting.options).toHaveLength(1);
+    expect(waiting.options[0].sheet!.animal).toMatchObject({
       species: 'horse',
       wear: { back: 'saddle blanket' },
       wearColour: 'red',
     });
-    expect(waiting.look).toBe(
+    expect(waiting.options[0].look).toBe(
       'a gentle chestnut horse with a red saddle blanket',
     );
-    expect(waiting.sheet.drawing.svg).toContain('#d9534f');
+    expect(waiting.options[0].sheet!.drawing.svg).toContain('#d9534f');
     expect(waiting.words).toBe('give her a red saddle blanket');
     expect(work.drawing).toEqual({});
     expect(studio.lines()).toEqual(['Clover redrawn — have a look']);
@@ -1031,7 +1148,7 @@ describe('the cast drawn by the artist, at the cast step and again as asked', ()
     );
     expect(studio.asked).toEqual([]);
     const waiting = (await studio.cast.work('s1')).candidates.horse;
-    expect(waiting.sheet.animal).toMatchObject({
+    expect(waiting.options[0].sheet!.animal).toMatchObject({
       species: 'horse',
       coat: 'white',
     });
@@ -1074,12 +1191,18 @@ describe('the cast drawn by the artist, at the cast step and again as asked', ()
     // No artist asked: the kit drew what the writer said.
     expect(studio.asked).toEqual([]);
     const waiting = (await studio.cast.work('s1')).candidates.humpty;
-    expect(waiting.sheet.creature).toMatchObject({
+    expect(waiting.options[0].sheet!.creature).toMatchObject({
       body: 'egg',
       build: 'stout',
       texture: 'crack',
     });
-    expect(waiting.look).toBe('a round white egg with a crack on top');
+    expect(waiting.options[0].look).toBe(
+      'a round white egg with a crack on top',
+    );
+    // A spec new to him: only its colours read another way (white, cream, silver).
+    expect(
+      waiting.options.map((one) => one.sheet!.creature!.bodyColour),
+    ).toEqual(['white', 'cream', 'silver']);
     // The artist's drawing stays his until the maker chooses.
     expect(cast(studio.files).humpty.drawing.svg).toContain('r="1"');
   });

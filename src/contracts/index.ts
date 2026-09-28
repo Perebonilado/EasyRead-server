@@ -2380,8 +2380,21 @@ export interface StudioCharacterDto {
   drawing: string | null;
   /** One the artist draws, being drawn now: for the first time, or again as the maker asked. */
   drawingNow?: boolean;
-  /** A new drawing of them waiting beside the one they have, and what the maker asked for: it replaces theirs only when chosen. */
-  candidate?: { drawing: string; words: string } | null;
+  /**
+   * New drawings of them waiting beside the one they have, up to three,
+   * the likeliest first, and what the maker asked for: one replaces
+   * theirs only when chosen. `first`: a first drawing's takes, the first
+   * the one they have now.
+   */
+  candidates?: StudioOptionsDto | null;
+}
+
+/** New drawings of a character to choose from. */
+export interface StudioOptionsDto {
+  /** What the maker asked for; empty for a first drawing's takes. */
+  words: string;
+  first?: boolean;
+  options: { id: string; drawing: string }[];
 }
 
 /** An animal as the animal kit draws it: its species, build, colours and markings, and what it wears. */
@@ -2605,6 +2618,8 @@ export interface StudioEventDto {
   /** The step it belongs to: where its card opens the panel. */
   step: StudioPhase;
   sceneId?: string;
+  /** The character it is about: their new drawings, to choose from in the thread while they wait. */
+  characterId?: string;
   /** Which writing of it this is, from 1: the outline's, the cast's or a scene's. */
   version?: number;
   /** What happened, in a line. */

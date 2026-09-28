@@ -116,8 +116,18 @@ import {
   keptDrawn,
   keptKits,
   oneLookRequest,
-  withCandidate,
+  withOptions,
 } from '../../business/domain/studio/studio-drawings';
+import {
+  WAYS_OF,
+  lookOf,
+  readingsOf,
+} from '../../business/domain/studio/studio-options';
+import {
+  describeFigure,
+  type FigureSpec,
+} from '../../business/domain/scene-figure';
+import { TAKES } from './scene-artist';
 import {
   describeAnimal,
   type AnimalSpec,
@@ -128,8 +138,8 @@ import {
 } from '../../business/domain/scene-creature';
 import { animalSheet, creatureSheet } from '../../business/domain/scene-sheet';
 
-/** A kit's spec for a character: an animal's, or a creature's. */
-type KitSpec = AnimalSpec | CreatureSpec;
+/** A kit's spec for a character: a person's, an animal's, or a creature's. */
+type KitSpec = FigureSpec | AnimalSpec | CreatureSpec;
 import type { StudioJobData } from '../queues';
 import { isPermanentFailure, type JobContext } from './base.processor';
 import { SceneProcessor } from './scene.processor';
@@ -774,9 +784,28 @@ export class StudioProcessor {
     } finally {
       await this.cast.changeWork(show.id, (work) => doneDrawing(work, ids));
     }
-    const cast = await this.cast.cast(show.id).catch(() => ({}));
+    const cast: Cast = await this.cast.cast(show.id).catch(() => ({}));
+    // Each drawn in takes side by side: the best is in use, and the other
+    // takes wait beside it, to choose instead (three to choose from).
+    const offered: StudioCharacter[] = [];
+    for (const c of bible.characters) {
+      if (!wanted.has(c.id) || !cast[c.id]) continue;
+      const others = await this.cast.otherTakes(show.id, c.id);
+      if (!others.length) continue;
+      await this.cast.changeWork(show.id, (work) =>
+        withOptions(
+          work,
+          c.id,
+          [cast[c.id], ...others].map((sheet) => ({ sheet })),
+          '',
+          Date.now(),
+          true,
+        ),
+      );
+      offered.push(c);
+    }
     const drawn = bible.characters
-      .filter((c) => wanted.has(c.id) && c.id in cast)
+      .filter((c) => wanted.has(c.id) && c.id in cast && !offered.includes(c))
       .map((c) => c.name);
     const not = bible.characters
       .filter((c) => wanted.has(c.id) && !(c.id in cast))
@@ -788,6 +817,21 @@ export class StudioProcessor {
         { what: 'cast', step: 'cast', line: EVENT_LINES.drawn(drawn) },
         key,
       );
+    for (const c of offered) {
+      const ways =
+        (await this.cast.work(show.id)).candidates[c.id]?.options.length ?? 1;
+      await this.log(
+        show,
+        episode,
+        {
+          what: 'cast',
+          step: 'cast',
+          characterId: c.id,
+          line: EVENT_LINES.takes(c.name, ways),
+        },
+        key && `${key}:takes:${c.id}`,
+      );
+    }
     for (const name of not)
       await this.log(
         show,
@@ -803,8 +847,10 @@ export class StudioProcessor {
 
   /**
    * One character drawn again as the maker asked, from the drawing they
-   * have: the new drawing kept beside it for the maker to choose, never in
-   * its place. One never drawn before is simply drawn, for their card.
+   * have: the new drawings (up to three, the artist's takes side by side)
+   * kept beside it for the maker to choose from, never in its place. One
+   * never drawn before is simply drawn, for their card, its other takes
+   * offered beside it.
    */
   private async redraw(
     show: StudioShowRecord,
@@ -821,33 +867,33 @@ export class StudioProcessor {
       );
       return;
     }
-    // An animal: its look changed by the cast's writer as a change to its
-    // spec, the kit drawing it at once. One the artist drew whose species
-    // the kit has is offered as the kit's this way too; for any other, the
-    // artist draws it again.
-    // A creature likewise, by the creature kit.
-    if (who.kind === 'animal' || who.kind === 'creature') {
-      const done = await this.respec(show, episode, who, words, key);
-      if (done) return;
-    }
+    // A person, an animal or a creature the kits draw: its look changed by
+    // the cast's writer as a change to its spec, the kit drawing it (and
+    // two other readings of the words) at once. One the artist drew whose
+    // species the kit has is offered as the kit's this way too; for any
+    // other, the artist draws it again.
+    const done = await this.respec(show, episode, who, words, key);
+    if (done) return;
     const now = (await this.cast.cast(show.id).catch((): Cast => ({})))[who.id];
     const story = storyBibleFor(bible, [], show.title);
-    let sheet: CharacterSheet | null;
+    let sheets: CharacterSheet[];
     try {
-      sheet = await this.scenes.drawCandidate(
+      // Three takes side by side, as a new character's: three to choose from.
+      sheets = await this.scenes.drawCandidates(
         { bible: story, bookTitle: show.title },
         who.id,
         words,
         now ?? null,
         episode.id,
         `studio ${episode.id} (redraw ${who.id})`,
+        { takes: TAKES.character },
       );
     } finally {
       await this.cast.changeWork(show.id, (work) =>
         doneDrawing(work, [who.id]),
       );
     }
-    if (!sheet) {
+    if (!sheets.length) {
       await this.log(
         show,
         episode,
@@ -861,35 +907,69 @@ export class StudioProcessor {
       return;
     }
     if (!now) {
-      // Never drawn: this is their drawing, as the make step's would be.
-      await this.scenes.keepSheet(studioCastKey(show.id), who.id, sheet);
+      // Never drawn: the best is their drawing, as the make step's would
+      // be, and the other takes wait beside it.
+      await this.scenes.keepSheet(studioCastKey(show.id), who.id, sheets[0]);
+      const work = await this.cast.changeWork(show.id, (work) =>
+        withOptions(
+          work,
+          who.id,
+          sheets.map((sheet) => ({ sheet })),
+          '',
+          Date.now(),
+          true,
+        ),
+      );
+      const ways = work.candidates[who.id]?.options.length ?? 1;
       await this.log(
         show,
         episode,
-        { what: 'cast', step: 'cast', line: EVENT_LINES.drawn([who.name]) },
+        ways > 1
+          ? {
+              what: 'cast',
+              step: 'cast',
+              characterId: who.id,
+              line: EVENT_LINES.takes(who.name, ways),
+            }
+          : { what: 'cast', step: 'cast', line: EVENT_LINES.drawn([who.name]) },
         key,
       );
       return;
     }
-    await this.cast.changeWork(show.id, (work) =>
-      withCandidate(work, who.id, sheet, words, Date.now()),
+    const work = await this.cast.changeWork(show.id, (work) =>
+      withOptions(
+        work,
+        who.id,
+        sheets.map((sheet) => ({ sheet })),
+        words,
+        Date.now(),
+      ),
     );
     await this.log(
       show,
       episode,
-      { what: 'cast', step: 'cast', line: EVENT_LINES.redrawn(who.name) },
+      {
+        what: 'cast',
+        step: 'cast',
+        characterId: who.id,
+        line: EVENT_LINES.redrawn(
+          who.name,
+          work.candidates[who.id]?.options.length ?? 1,
+        ),
+      },
       key,
     );
   }
 
   /**
-   * An animal's or a creature's look changed as the maker asks, as a
-   * change to its spec: the cast's writer is asked for that one character
-   * alone, and the kit's drawing of what it says waits on their card
-   * beside the one they have, to be chosen as any new drawing is. Whether
-   * it was: false when the writer gave no spec for it (one the kits do not
-   * draw), so the artist draws it. A spec that comes back as it was is
-   * asked for once more, told so.
+   * A person's, an animal's or a creature's look changed as the maker
+   * asks, as a change to its spec: the cast's writer is asked for that one
+   * character alone, and the kit's drawing of what it says waits on their
+   * card beside the one they have, with up to two other readings of the
+   * same words (studio-options), to be chosen from as any new drawings
+   * are. Whether it was: false when the writer gave no spec for it (an
+   * animal or a creature the kits do not draw), so the artist draws it. A
+   * spec that comes back as it was is asked for once more, told so.
    */
   private async respec(
     show: StudioShowRecord,
@@ -899,17 +979,34 @@ export class StudioProcessor {
     key?: string,
   ): Promise<boolean> {
     const bible = show.bible!;
-    // Which kit: the animal kit's spec, or the creature kit's.
-    const creature = who.kind === 'creature';
+    const kind = who.kind;
+    // Which kit: the figure kit's spec, the animal kit's, or the creature kit's.
     const specOf = (
-      one: { animal?: AnimalSpec; creature?: CreatureSpec } | null | undefined,
-    ): KitSpec | null => (creature ? one?.creature : one?.animal) ?? null;
+      one:
+        | {
+            animal?: AnimalSpec | null;
+            creature?: CreatureSpec | null;
+            figure?: FigureSpec | null;
+          }
+        | null
+        | undefined,
+    ): KitSpec | null =>
+      (kind === 'person'
+        ? one?.figure
+        : kind === 'creature'
+          ? one?.creature
+          : one?.animal) ?? null;
     const describe = (spec: KitSpec) =>
-      creature
-        ? describeCreature(spec as CreatureSpec)
-        : describeAnimal(spec as AnimalSpec);
+      kind === 'person'
+        ? describeFigure(spec as FigureSpec)
+        : kind === 'creature'
+          ? describeCreature(spec as CreatureSpec)
+          : describeAnimal(spec as AnimalSpec);
     const work = await this.cast.work(show.id).catch(() => null);
-    const tried = specOf(work?.candidates[who.id]?.sheet);
+    const last = work?.candidates[who.id]?.options[0];
+    const tried = specOf(
+      last?.sheet ?? (last ? { figure: last.figure } : null),
+    );
     const ask = async (again: string | null) => {
       const made = await this.llm.studioBible({
         brief: describeBrief(show.brief),
@@ -940,7 +1037,7 @@ export class StudioProcessor {
       got = await ask(null);
       if (got.spec && (same(got.spec, now) || same(got.spec, tried)))
         got = await ask(
-          `That came back as it was: change ${who.name}'s ${creature ? 'creature' : 'animal'} so it shows what they ask.`,
+          `That came back as it was: change ${who.name}'s ${kind === 'person' ? 'figure' : kind} so it shows what they ask.`,
         );
     } catch (error) {
       this.logger.warn(
@@ -963,26 +1060,48 @@ export class StudioProcessor {
       );
       return true;
     }
-    const sheet = creature
-      ? await creatureSheet(changed as CreatureSpec, who.id)
-      : await animalSheet(changed as AnimalSpec, who.id);
-    this.logger.log(
-      `studio ${episode.id}: ${who.name} drawn again by the kit as asked: ${describe(changed)}`,
+    // The writer's reading, and up to two others of the same words.
+    const ways = WAYS_OF[kind];
+    const readings = readingsOf<KitSpec>(now, changed, ways, words);
+    const options = await Promise.all(
+      readings.map(async (spec, k) => {
+        const look =
+          k === 0
+            ? got.look || undefined
+            : lookOf(got.look || who.look, changed, spec, ways, describe);
+        if (kind === 'person')
+          return { figure: spec as FigureSpec, ...(look ? { look } : {}) };
+        const sheet =
+          kind === 'creature'
+            ? await creatureSheet(spec as CreatureSpec, who.id)
+            : await animalSheet(spec as AnimalSpec, who.id);
+        return { sheet, ...(look ? { look } : {}) };
+      }),
     );
-    await this.cast.changeWork(show.id, (work) =>
-      withCandidate(
+    this.logger.log(
+      `studio ${episode.id}: ${who.name} drawn again by the kit as asked, ${options.length} way${options.length === 1 ? '' : 's'}: ${readings.map(describe).join(' | ')}`,
+    );
+    const kept = await this.cast.changeWork(show.id, (work) =>
+      withOptions(
         doneDrawing(work, [who.id]),
         who.id,
-        sheet,
+        options,
         words,
         Date.now(),
-        got.look || undefined,
       ),
     );
     await this.log(
       show,
       episode,
-      { what: 'cast', step: 'cast', line: EVENT_LINES.redrawn(who.name) },
+      {
+        what: 'cast',
+        step: 'cast',
+        characterId: who.id,
+        line: EVENT_LINES.redrawn(
+          who.name,
+          kept.candidates[who.id]?.options.length ?? 1,
+        ),
+      },
       key,
     );
     return true;

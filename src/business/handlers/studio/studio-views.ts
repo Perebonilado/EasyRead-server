@@ -99,7 +99,14 @@ export function bibleDto(
   drawings: {
     characters: Map<string, string>;
     sets: Map<string, string>;
-    candidates?: Map<string, { drawing: string; words: string }>;
+    candidates?: Map<
+      string,
+      {
+        words: string;
+        first?: boolean;
+        options: { id: string; drawing: string }[];
+      }
+    >;
     drawing?: Set<string>;
   },
 ): StudioBibleDto {
@@ -122,8 +129,8 @@ export function bibleDto(
       carries: c.carries,
       drawing: drawings.characters.get(c.id) ?? null,
       ...(drawings.drawing?.has(c.id) ? { drawingNow: true } : {}),
-      ...(drawings.candidates?.has(c.id)
-        ? { candidate: drawings.candidates.get(c.id)! }
+      ...(drawings.candidates?.get(c.id)?.options.length
+        ? { candidates: drawings.candidates.get(c.id)! }
         : {}),
     })),
     sets: bible.sets.map((s) => ({
@@ -303,6 +310,7 @@ export function messageDto(message: StudioMessageRecord): StudioMessageDto {
           what: event.what,
           step: event.step,
           ...(event.sceneId ? { sceneId: event.sceneId } : {}),
+          ...(event.characterId ? { characterId: event.characterId } : {}),
           ...(event.version ? { version: event.version } : {}),
           line: event.line,
         }

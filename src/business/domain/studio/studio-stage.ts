@@ -25,6 +25,7 @@ import {
   aimedFeature,
   bobbingMove,
   doingOf,
+  isAction,
   fallbackFor,
   featureAim,
   featureIdOf,
@@ -85,11 +86,17 @@ import {
 } from './studio';
 
 /**
- * The most a quiet between two lines holds, in seconds: a throw, a chase
- * and a pick-up under the music. Longer, and the writer is asked to break
- * it with a line; the stage quickens what is there to fit.
+ * The most a quiet between two lines holds, in seconds: pauses, looks,
+ * nods and going about under the music. Longer, and the writer is asked
+ * to break it with a line; the stage quickens what is there to fit.
  */
 export const QUIET_MOST_S = 6;
+/**
+ * The most a quiet with an action in it holds (a throw, a jump, a fall, a
+ * thing handled): held longer, up to this, rather than the action rushed,
+ * its wind-up and settle lost. Longer, and the writer is asked to break it.
+ */
+export const ACTION_MOST_S = 10;
 /** A face changing: how long it holds the eye before what comes next. */
 const REACTION_S = 0.6;
 /** What comes after someone else's doing starts this long after its moment. */
@@ -136,6 +143,10 @@ export interface QuietItem {
   leastS: number;
   /** How far into it its moment comes. */
   keyAt: number;
+  /** An action (DoingPhases' moves, a thing handled): the quiet is held longer for it rather than quicken it (ACTION_MOST_S). */
+  acts?: boolean;
+  /** How long it runs on after its doer's own part, in seconds: a throw's flight and catch. */
+  tailS?: number;
 }
 
 /**
@@ -181,19 +192,27 @@ function ownItem(beat: SheetBeat): QuietItem {
       leastS: doing.leastMs / 1000,
       keyAt: doing.keyAt,
     };
+  // As long as it takes given its time: an action wound up and settled.
+  const own = doing.idealMs / 1000;
   // A throw to someone runs on until it is caught: as long as it flies at
   // most, and the catch's own end.
-  const caught =
-    beat.do === 'throw' && beat.to
-      ? FLIES_MOST_S + CATCH_AFTER_S - (1 - doing.keyAt) * (doing.ms / 1000)
-      : 0;
+  const caught = round(
+    Math.max(
+      0,
+      beat.do === 'throw' && beat.to
+        ? FLIES_MOST_S + CATCH_AFTER_S - (1 - doing.keyAt) * own
+        : 0,
+    ),
+  );
   return {
     who: beat.who,
     handles: beat.kind === 'business',
     pause: false,
-    s: doing.ms / 1000 + Math.max(0, caught),
-    leastS: doing.leastMs / 1000 + Math.max(0, caught),
-    keyAt: (doing.keyAt * doing.ms) / (doing.ms + Math.max(0, caught) * 1000),
+    s: round(own + caught),
+    leastS: round(doing.leastMs / 1000 + caught),
+    keyAt: (doing.keyAt * own) / (own + caught),
+    ...(isAction(doing) ? { acts: true } : {}),
+    ...(caught > 0 ? { tailS: caught } : {}),
   };
 }
 
@@ -479,44 +498,80 @@ export function comesWith(
  * throw, the chase after it), what the same one does next, and a thing
  * handled next, only once the one before is done; a pause waits for all.
  * A quiet longer than `most` is quickened to fit, none shorter than it
- * may be; `asked` is how long it would have run.
+ * may be; but one with an action in it quickens the rest first, and is
+ * then held longer, up to ACTION_MOST_S, rather than the action rushed.
+ * `asked` is how long it would have run; `limit` is the most it may.
  */
 export function timeQuiet(
   items: readonly QuietItem[],
   most = QUIET_MOST_S,
-): { starts: number[]; lengths: number[]; total: number; asked: number } {
+): {
+  starts: number[];
+  lengths: number[];
+  total: number;
+  asked: number;
+  limit: number;
+} {
   const asked = inTurn(
     items,
     items.map((item) => item.s),
   );
+  const acts = items.some((item) => item.acts);
+  const limit = acts ? Math.max(most, ACTION_MOST_S) : most;
+  const done = (lengths: readonly number[], total: number) => ({
+    starts: inTurn(items, lengths).starts.map(round),
+    lengths: lengths.map(round),
+    total: round(total),
+    asked: round(asked.end),
+    limit,
+  });
   if (asked.end <= most)
-    return {
-      starts: asked.starts.map(round),
-      lengths: items.map((item) => item.s),
-      total: round(asked.end),
-      asked: round(asked.end),
-    };
+    return done(
+      items.map((item) => item.s),
+      asked.end,
+    );
   // Quickened as little as fits, each in turn after the one it waits for
   // as quickened, from the moment the quiet's first begins: none runs on
   // past the quiet where they may all fit. The quiet itself is as long as
   // a quiet may be.
-  const room = most - QUIET_STARTS_S;
-  let fit = items.map((item) => item.leastS);
-  let [low, high] = [0, 1];
-  for (let n = 0; n < 14; n += 1) {
-    const share = (low + high) / 2;
-    const lengths = items.map((item) => Math.max(item.leastS, item.s * share));
-    if (inTurn(items, lengths).end <= room) {
-      low = share;
-      fit = lengths;
-    } else high = share;
-  }
-  return {
-    starts: inTurn(items, fit).starts.map(round),
-    lengths: fit.map(round),
-    total: most,
-    asked: round(asked.end),
+  const quickened = (room: number, quickens: (item: QuietItem) => boolean) => {
+    let fit: number[] | null = null;
+    let [low, high] = [0, 1];
+    for (let n = 0; n < 14; n += 1) {
+      const share = (low + high) / 2;
+      const lengths = items.map((item) =>
+        quickens(item) ? Math.max(item.leastS, item.s * share) : item.s,
+      );
+      if (inTurn(items, lengths).end <= room) {
+        low = share;
+        fit = lengths;
+      } else high = share;
+    }
+    return fit;
   };
+  const everything = () => true;
+  if (!acts)
+    return done(
+      quickened(most - QUIET_STARTS_S, everything) ??
+        items.map((item) => item.leastS),
+      most,
+    );
+  // An action keeps its time: what else there is quickened first, to fit
+  // the quiet as it would be.
+  const gestures = (item: QuietItem) => !item.acts;
+  const inQuiet = quickened(most - QUIET_STARTS_S, gestures);
+  if (inQuiet) return done(inQuiet, most);
+  // Still too long: held longer for the actions, as long as they take,
+  // the rest as quick as they may be; and at the most, the actions
+  // quickened too, to fit it.
+  const rest = items.map((item) => (item.acts ? item.s : item.leastS));
+  const held = inTurn(items, rest).end;
+  if (held <= limit - QUIET_STARTS_S) return done(rest, Math.max(most, held));
+  return done(
+    quickened(limit - QUIET_STARTS_S, everything) ??
+      items.map((item) => item.leastS),
+    limit,
+  );
 }
 
 /** When each thing in a quiet starts, as long as each is given, one after another as timeQuiet has them; and when all are done. */

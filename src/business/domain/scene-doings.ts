@@ -254,6 +254,15 @@ export interface Doing {
   /** How long it takes, and how short it may be made when a quiet is full. */
   ms: number;
   leastMs: number;
+  /**
+   * How long it takes given all the time it wants: a throw wound up and
+   * settled after, a jump crouched into and landed; never less than `ms`.
+   * A quiet between lines gives an action this long, and is held longer
+   * for it rather than quicken it (studio-stage's timeQuiet).
+   */
+  idealMs: number;
+  /** For a move with a wind-up and a settle, how its time is shared between them: its moment (`keyAt`) at the end of `act`. */
+  phases?: DoingPhases;
   /** How far into it its moment comes: the hand closing, the release, the landing. */
   keyAt: number;
   /** What is done instead by someone who cannot, or with nothing to do it with. */
@@ -264,6 +273,19 @@ export interface Doing {
   bare?: StageMove;
   /** Going at a run: a race, a chase. */
   runs?: true;
+}
+
+/**
+ * How a move's time is shared, as parts of 1: winding up (a crouch, the
+ * arm back), the act itself (the spring, the swing to the release), its
+ * follow-through (in the air, the arm on through), and settling (landed,
+ * the arm down, still again). The wind-up and the act end at its moment.
+ */
+export interface DoingPhases {
+  windUp: number;
+  act: number;
+  follow: number;
+  settle: number;
 }
 
 const ALL: readonly Doer[] = ['person', 'animal', 'creature'];
@@ -292,7 +314,7 @@ export const RESTING_WORDS = new RegExp(`\\b(${RESTS_ON})\\b`, 'iu');
 /** A thing worn, named after a verb: "on his new school uniform", "on the party-dress". */
 const WORN = `${WHOSE}(?:[\\p{L}-]+[ -]){0,2}?(?:${WEAR_WORDS})\\b`;
 
-const doings: Record<DoingId, Omit<Doing, 'id'>> = {
+const doings: Record<DoingId, Omit<Doing, 'id' | 'idealMs' | 'phases'>> = {
   // ── The body ─────────────────────────────────────────────────────────────
   wave: {
     kind: 'body',
@@ -1110,11 +1132,99 @@ const doings: Record<DoingId, Omit<Doing, 'id'>> = {
 export const actionDoing = (action: ThingAction): DoingId =>
   action === 'wear' ? 'dress' : action === 'doff' ? 'undress' : action;
 
+/**
+ * How long an action takes given its time, where that is longer than
+ * `ms`: the moves with a wind-up and a settle (a throw, a kick, a jump, a
+ * fall, sitting and lying down), which a quiet gives this long. Every
+ * other doing's is its `ms`: a small gesture (a nod, a look) is as quick
+ * as it always was.
+ */
+const IDEAL_MS: Partial<Record<DoingId, number>> = {
+  hop: 1300,
+  hug: 2400,
+  jump: 1600,
+  crouch: 1600,
+  sit: 1800,
+  'lie-down': 2100,
+  fall: 1800,
+  spin: 1500,
+  bow: 1500,
+  'roll-over': 1800,
+  throw: 1800,
+  catch: 1200,
+  kick: 1500,
+};
+
+/** Each move's phases (DoingPhases): its wind-up and its act end at its `keyAt`. */
+const PHASES: Partial<Record<DoingId, DoingPhases>> = {
+  // A crouch, up at the moment, in the air, and landed.
+  hop: { windUp: 0.2, act: 0.1, follow: 0.4, settle: 0.3 },
+  jump: { windUp: 0.3, act: 0.15, follow: 0.3, settle: 0.25 },
+  // Arms out and in, held, and let go.
+  hug: { windUp: 0.25, act: 0.15, follow: 0.35, settle: 0.25 },
+  crouch: { windUp: 0.15, act: 0.25, follow: 0.35, settle: 0.25 },
+  // A look down at it, the weight back, down on it, and settled there.
+  sit: { windUp: 0.25, act: 0.35, follow: 0.15, settle: 0.25 },
+  'lie-down': { windUp: 0.25, act: 0.35, follow: 0.15, settle: 0.25 },
+  // A stagger, the drop, a bounce on the ground, and still.
+  fall: { windUp: 0.25, act: 0.25, follow: 0.2, settle: 0.3 },
+  spin: { windUp: 0.2, act: 0.3, follow: 0.25, settle: 0.25 },
+  bow: { windUp: 0.2, act: 0.3, follow: 0.25, settle: 0.25 },
+  'roll-over': { windUp: 0.2, act: 0.3, follow: 0.25, settle: 0.25 },
+  // The arm (the leg) back, swung through to the release, on through, and down.
+  throw: { windUp: 0.3, act: 0.15, follow: 0.3, settle: 0.25 },
+  kick: { windUp: 0.3, act: 0.15, follow: 0.3, settle: 0.25 },
+  // Hands out to it, closing on it as it comes, drawn in, and held.
+  catch: { windUp: 0.3, act: 0.3, follow: 0.2, settle: 0.2 },
+};
+
 /** Every doing, in the list's order. */
 export const DOINGS: readonly Doing[] = DOING_IDS.map((id) => ({
   id,
   ...doings[id],
+  idealMs: Math.max(doings[id].ms, IDEAL_MS[id] ?? doings[id].ms),
+  ...(PHASES[id] ? { phases: PHASES[id] } : {}),
 }));
+
+/**
+ * The small gestures: a nod, a look, a point, a wave, a laugh. A quiet of
+ * nothing more is quickened to fit as it always was; one with any other
+ * move of the body, or a thing handled, is held longer for it instead.
+ */
+const GESTURES: ReadonlySet<DoingId> = new Set<DoingId>([
+  'wave',
+  'nod',
+  'shake',
+  'laugh',
+  'clap',
+  'sob',
+  'shrug',
+  'lean-in',
+  'look',
+  'point',
+  'reach',
+  'wag',
+  'lick',
+  'sniff',
+  'bark-bounce',
+  'wriggle',
+]);
+
+/** Whether a doing is an action a quiet waits for (a move of the whole body, a thing handled), not a small gesture, nor going somewhere. */
+export const isAction = (doing: Doing): boolean =>
+  doing.kind === 'handle' || (doing.kind === 'body' && !GESTURES.has(doing.id));
+
+/** How long each of a move's phases runs, in ms, when it is given `ms`; null for a doing with none. */
+export function phasesMs(doing: Doing, ms: number): DoingPhases | null {
+  const p = doing.phases;
+  if (!p) return null;
+  return {
+    windUp: Math.round(ms * p.windUp),
+    act: Math.round(ms * p.act),
+    follow: Math.round(ms * p.follow),
+    settle: Math.round(ms * p.settle),
+  };
+}
 
 const BY_ID = new Map<string, Doing>(DOINGS.map((d) => [d.id, d]));
 

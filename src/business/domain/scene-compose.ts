@@ -87,6 +87,7 @@ import {
 import { wearableOf } from './scene-wear';
 import {
   ACTED_MOVES,
+  DOINGS,
   HELD_MOVES,
   THING_ACTIONS,
   actionDoing,
@@ -221,10 +222,22 @@ export function spokenIn(sentence: string): string | null {
 /** Two things one person does with things are at least this far apart: a take, then a break. */
 const BUSINESS_APART_MS = 650;
 
-/** How long each handling of a thing takes on the stage, and how far into it the thing changes hands: as the list of doings has it. */
+/** How long each handling of a thing takes on the stage, given its time, and how far into it the thing changes hands: as the list of doings has it. */
 const HANDLING_MS = Object.fromEntries(
-  THING_ACTIONS.map((id) => [id, doingOf(actionDoing(id))!.ms]),
+  THING_ACTIONS.map((id) => [id, doingOf(actionDoing(id))!.idealMs]),
 ) as Record<ThingAction, number>;
+/** And the least each may be quickened to. */
+const HANDLING_LEAST_MS = Object.fromEntries(
+  THING_ACTIONS.map((id) => [id, doingOf(actionDoing(id))!.leastMs]),
+) as Record<ThingAction, number>;
+/** The least a move played by the body may be quickened to, by the move: the quickest of the doings it plays. */
+const MOVE_LEAST_MS = new Map<string, number>();
+for (const doing of DOINGS)
+  if ('move' in doing.plays)
+    MOVE_LEAST_MS.set(
+      doing.plays.move,
+      Math.min(MOVE_LEAST_MS.get(doing.plays.move) ?? Infinity, doing.leastMs),
+    );
 const HANDLING_AT = Object.fromEntries(
   THING_ACTIONS.map((id) => [id, doingOf(actionDoing(id))!.keyAt]),
 ) as Record<ThingAction, number>;
@@ -353,6 +366,14 @@ export function thingDto(
     // outfit they change into, as the film shows them.
     ...(drawing.acts && drawing.outfits?.length
       ? { wears: drawing.outfits }
+      : {}),
+    // Drawn by a kit with rig 2: what swings, and how far a stride goes.
+    ...(drawing.rigVersion === 2
+      ? {
+          rigVersion: 2 as const,
+          ...(drawing.dangles?.length ? { dangles: drawing.dangles } : {}),
+          ...(drawing.stride ? { stride: drawing.stride } : {}),
+        }
       : {}),
     // A person the kit drew in bed or lying for the whole scene: so said.
     ...(drawing.acts &&
@@ -1103,17 +1124,52 @@ export function composeScene(input: ComposeInput): {
   // or, before the first, in the quiet the page opens with.
   const firstWord = beats[0]?.startMs ?? 0;
   /**
+   * The least share each quiet may be quickened to: none of what is done
+   * in it made quicker than it may be (a doing's leastMs), as the stage
+   * gave each its time.
+   */
+  const leastShares = new Map<number, number>();
+  const leastOf = (beat: number, share: number) =>
+    leastShares.set(
+      beat,
+      Math.max(leastShares.get(beat) ?? 0, Math.min(1, share)),
+    );
+  for (const step of script.steps)
+    if (step.after !== undefined && step.at.beat >= 0)
+      for (const effect of step.effects) {
+        const least = MOVE_LEAST_MS.get(effect.do);
+        if (least && effect.ms) leastOf(step.at.beat, least / effect.ms);
+      }
+  script.beats.forEach((beat, k) => {
+    for (const one of beat.business ?? [])
+      if (one.after !== undefined && !one.lead)
+        leastOf(
+          k,
+          HANDLING_LEAST_MS[one.does] /
+            Math.min(
+              HANDLING_MS[one.does],
+              one.s !== undefined ? one.s * 1000 : Infinity,
+            ),
+        );
+  });
+  /**
    * How much of the quiet after a line the voice left, as a share of what
    * the script asked: a voice that holds a pause only so long (three
    * seconds, Kokoro's) has all that happens in the quiet quickened to fit
-   * it, so none of it runs on into the next line.
+   * it. What is done in it runs on into the next line's first moments
+   * (QUIET_OVERLAP_MS) before it is quickened, and is never quickened past
+   * the least it may take: past that, it runs on further.
    */
   const quietShare = (beat: number): number => {
     const asked = script.beats[beat]?.holdS;
     if (!asked || !beats[beat]) return 1;
     const next = beats[beat + 1]?.startMs ?? durationMs;
     const left = (next - beats[beat].endMs) / 1000;
-    return left > 0 && left < asked * QUIET_CUT ? left / asked : 1;
+    if (!(left > 0 && left < asked * QUIET_CUT)) return 1;
+    return Math.max(
+      leastShares.get(beat) ?? 0,
+      Math.min(1, (left + QUIET_OVERLAP_MS / 1000) / asked),
+    );
   };
   const momentMs = (beat: number, after: number) =>
     beat >= 0 && beats[beat]
@@ -3476,6 +3532,8 @@ const FILL_CLEAR_MS = 2500;
 /** How long the camera stays in close on a thing, at most, and at least. */
 /** A quiet the voice left this much shorter than asked, or less, was cut short by it: what happens in it is quickened to fit. */
 const QUIET_CUT = 0.9;
+/** What is done in a quiet the voice cut short may run on this far into the next line, in ms, before it is quickened: an overlap reads as natural. */
+const QUIET_OVERLAP_MS = 300;
 /** A change of clothes this close to someone putting a thing on or taking it off, in ms, is that handling's. */
 const DRESSED_NEAR_MS = 4000;
 const FILL_SHOT_MS = 3500;

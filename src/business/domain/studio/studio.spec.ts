@@ -28,9 +28,12 @@ import {
 import { JOIN_SECONDS, joinOf, joinsSeconds, type Join } from './studio-edit';
 import { describeBible } from './studio-words';
 import {
+  ACTION_MOST_S,
+  QUIET_MOST_S,
   fliesS,
   placeThingId,
   quietItem,
+  quietRuns,
   stageStory,
   storyBibleFor,
   timeQuiet,
@@ -42,7 +45,8 @@ import {
   withFeatures,
   wordsFor,
 } from './studio-check';
-import { DOINGS, doingOf, featureStatesIn } from '../scene-doings';
+import { DOINGS, doingOf, featureStatesIn, phasesMs } from '../scene-doings';
+import { HOLD_LIMIT_S } from '../scene-voice';
 import {
   featureStill,
   featureSvgAt,
@@ -1155,6 +1159,134 @@ describe('the quiet between lines', () => {
     ).toContain('quiet');
     expect(quietItem(sheet.beats[1])).toMatchObject({ s: 2.6, who: 'tobi' });
   });
+
+  const action = (who: string, s: number, keyAt = 0.5) => ({
+    ...item(who, s, keyAt),
+    acts: true,
+  });
+
+  it('holds a quiet with an action in it longer rather than rush the action, the gestures quickened first', () => {
+    // Maya nods, throws, looks round, jumps, falls and looks again, one
+    // after another: 9.2 s asked.
+    const items = [
+      item('maya', 1),
+      action('maya', 1.8, 0.45),
+      item('maya', 1.5),
+      action('maya', 1.6, 0.45),
+      action('maya', 1.8),
+      item('maya', 1.5),
+    ];
+    const { lengths, total, asked, limit } = timeQuiet(items);
+    expect(asked).toBe(9.2);
+    expect(limit).toBe(ACTION_MOST_S);
+    // Every action as long as it takes; every gesture as quick as it may
+    // be; and the quiet as long as that.
+    expect(lengths).toEqual([0.5, 1.8, 0.75, 1.6, 1.8, 0.75]);
+    expect(total).toBe(7.2);
+    // Only a little over six: the gestures quickened to fit, the actions kept.
+    const some = timeQuiet([...items.slice(0, 4), item('maya', 1)]);
+    expect(some.asked).toBe(6.9);
+    expect(some.total).toBe(QUIET_MOST_S);
+    expect(some.lengths[1]).toBe(1.8);
+    expect(some.lengths[3]).toBe(1.6);
+    expect(some.lengths[0]).toBeLessThan(1);
+    expect(some.lengths[0]).toBeGreaterThan(0.5);
+  });
+
+  it('quickens even the actions past ten seconds, and never a quiet of pauses past six', () => {
+    const long = Array.from({ length: 8 }, () => action('tobi', 1.5));
+    const { total, lengths, limit } = timeQuiet(long);
+    expect(limit).toBe(ACTION_MOST_S);
+    expect(total).toBe(ACTION_MOST_S);
+    expect(lengths.every((s) => s < 1.5 && s >= 0.75)).toBe(true);
+    const pauses = Array.from({ length: 4 }, () => ({
+      who: null,
+      s: 2,
+      leastS: 2,
+      keyAt: 1,
+      handles: false,
+      pause: true,
+    }));
+    expect(timeQuiet(pauses)).toMatchObject({ total: QUIET_MOST_S, limit: 6 });
+    // The voice keeps the longest quiet a stage asks.
+    expect(HOLD_LIMIT_S).toBe(ACTION_MOST_S);
+  });
+
+  it("gives Maya's throw its wind-up and settle in a crowded quiet, and the voice the room for it", () => {
+    const sheet = repairSheet(
+      storySheetOf({
+        ...(maya('s1-sheet.json') as object),
+        onStage: [
+          { who: 'maya', spot: 'left', holding: 'ball' },
+          { who: 'tobi', spot: 'centre' },
+          { who: 'pip', spot: 'right' },
+        ],
+        props: [],
+        beats: [
+          { kind: 'line', who: 'maya', say: 'Catch, Tobi!' },
+          {
+            kind: 'business',
+            who: 'maya',
+            say: 'Maya throws the ball to Tobi.',
+          },
+          { kind: 'business', who: 'tobi', say: 'Tobi kicks the ball.' },
+          { kind: 'action', who: 'pip', say: 'Pip chases the ball.' },
+          { kind: 'business', who: 'pip', say: 'Pip picks up the ball.' },
+          { kind: 'action', who: 'maya', say: 'Maya jumps for joy.' },
+          { kind: 'action', who: 'tobi', say: 'Tobi falls over.' },
+          { kind: 'action', who: 'maya', say: 'Maya laughs.' },
+          { kind: 'action', who: 'tobi', say: 'Tobi gets up.' },
+          { kind: 'action', who: 'pip', say: 'Pip wags his tail.' },
+          { kind: 'line', who: 'tobi', say: 'Good dog, Pip!' },
+        ],
+      }),
+      mayaBible,
+    );
+    expect(sheet.beats[1]).toMatchObject({ do: 'throw', to: 'tobi' });
+    const [[, run]] = [...quietRuns(sheet)];
+    const items = run.map((at) => quietItem(sheet.beats[at]));
+    const timed = timeQuiet(items);
+    const thrower = items[0];
+    const throwIt = doingOf('throw')!;
+    /** The throw's own time, as the quiet gives it: the rest is its flight and catch. */
+    const own = (length: number) =>
+      phasesMs(throwIt, (length - (thrower.tailS ?? 0)) * 1000)!;
+    // Nine things with no one speaking: more than a quiet of gestures
+    // may hold. Quickened to fit six seconds, as a quiet was before, the
+    // throw's settle was rushed.
+    expect(timed.asked).toBeGreaterThan(QUIET_MOST_S);
+    const rushed = timeQuiet(items.map((one) => ({ ...one, acts: false })));
+    expect(rushed.total).toBe(QUIET_MOST_S);
+    expect(own(rushed.lengths[0]).settle).toBeLessThan(300);
+    // Now it has all its time: wound up a quarter of a second and more,
+    // settled for longer; and the quiet is held for it, within ten seconds.
+    expect(timed.lengths[0]).toBe(thrower.s);
+    expect(own(timed.lengths[0]).windUp).toBeGreaterThanOrEqual(250);
+    expect(own(timed.lengths[0]).settle).toBeGreaterThanOrEqual(300);
+    expect(timed.total).toBeGreaterThan(QUIET_MOST_S);
+    expect(timed.total).toBeLessThanOrEqual(ACTION_MOST_S);
+    // The line before leaves that long for it, and the check lets it be.
+    const script = stageStory(sheet, mayaBible);
+    expect(script.beats[0].holdS).toBe(timed.total);
+    expect(
+      script.beats[0].business?.find((one) => one.does === 'throw')?.s,
+    ).toBe(thrower.s);
+    expect(checkSheet(sheet, mayaBible).map((p) => p.rule)).not.toContain(
+      'quiet',
+    );
+    // And as voiced, the throw lets go only once its wind-up has had its time.
+    const { scene, beats } = voiced(script, ['pip']);
+    const [thrown] = scene.props?.find((p) => p.id === 'ball')?.does ?? [];
+    expect(thrown[0] - beats[0].endMs).toBeGreaterThanOrEqual(
+      own(thrower.s).windUp,
+    );
+    // A voice that holds a pause only three seconds (Kokoro's): the stage
+    // already quickened the looks and the wag as far as they may be, so
+    // nothing is quickened more; it runs on into the next line instead.
+    const cut = voiced(script, ['pip'], {}, { 0: 3000 });
+    const [release] = cut.scene.props?.find((p) => p.id === 'ball')?.does ?? [];
+    expect(release[0] - cut.beats[0].endMs).toBe(thrown[0] - beats[0].endMs);
+  });
 });
 
 describe('a move picked by hand', () => {
@@ -1256,9 +1388,45 @@ describe('things apart from the people who hold them', () => {
     expect(takeIt[0]).toBeGreaterThan(scene.steps[ran].atMs);
     // Let go after "Catch the ball!", its wind-up starting only then.
     const line = beats.find((b) => b.text === 'Ready, Pip? Catch the ball!')!;
-    expect(throwIt[0] - 1400 * 0.45).toBeGreaterThanOrEqual(line.endMs);
+    const thrown = doingOf('throw')!;
+    expect(throwIt[0] - thrown.idealMs * thrown.keyAt).toBeGreaterThanOrEqual(
+      line.endMs,
+    );
     // Pip is drawn by the artist: he takes it up with his mouth.
     expect(scene.things.find((t) => t.id === 'pip')).not.toHaveProperty('rig');
+  });
+
+  it('runs a quiet the voice cut short on into the next line a little, and quickens the rest no further than its doings may be', () => {
+    const [s1] = episode();
+    const k = s1.script.beats.findIndex(
+      (b) => b.say === 'Ready, Pip? Catch the ball!',
+    );
+    const hold = s1.script.beats[k].holdS!;
+    const throwIt = doingOf('throw')!;
+    /** How far the quiet after the line was quickened, voiced leaving `gap` s of it: by when the throw lets go, 0.15 s after the line. */
+    const quick = (gap: number) => {
+      const { scene, beats } = voiced(
+        s1.script,
+        ['pip'],
+        {},
+        {
+          [k]: gap * 1000,
+        },
+      );
+      const [release] = scene.props?.find((p) => p.id === 'ball')?.does ?? [];
+      return (
+        (release[0] - beats[k].endMs - 150) / (throwIt.idealMs * throwIt.keyAt)
+      );
+    };
+    // Nearly all of it: as asked.
+    expect(quick(hold * 0.95)).toBeCloseTo(1, 2);
+    // Half a second less: it runs on 0.3 s into the next line, and is
+    // quickened only for the rest.
+    expect(quick(hold - 0.5)).toBeCloseTo((hold - 0.2) / hold, 2);
+    // Half a second in all: quickened only as far as Pip's pick-up may be.
+    const take = doingOf('take')!;
+    expect(0.8 / hold).toBeLessThan(take.leastMs / take.ms);
+    expect(quick(0.5)).toBeCloseTo(take.leastMs / take.ms, 2);
   });
 
   it('has a thing thrown to someone who does not go after it caught as it arrives', () => {

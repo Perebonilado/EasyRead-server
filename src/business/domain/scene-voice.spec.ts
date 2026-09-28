@@ -343,6 +343,7 @@ describe('a screenplay, as the voice says it', () => {
       { delivery: 'explain', pause: 'short', kind: 'line', pace: 'quick' },
       { delivery: 'explain', pause: 'short', kind: 'line', pace: 'whisper' },
       { delivery: 'explain', pause: 'short', kind: 'narration', holdS: 8 },
+      { delivery: 'explain', pause: 'short', kind: 'narration', holdS: 12 },
     ]);
     expect(pieces).toEqual([
       { speed: 0.95, pauseAfter: 0.55 },
@@ -351,8 +352,10 @@ describe('a screenplay, as the voice says it', () => {
       { speed: 1.07, pauseAfter: 0.3 },
       // Before the narrator comes in, a breath more.
       { speed: 0.9, pauseAfter: 0.55 },
-      // No quiet longer than the voice holds: six seconds under the music.
-      { speed: 0.95, pauseAfter: 6 },
+      // An action's quiet held as long as it asks, under the music.
+      { speed: 0.95, pauseAfter: 8 },
+      // No quiet longer than the voice holds: ten seconds.
+      { speed: 0.95, pauseAfter: 10 },
     ]);
   });
 });

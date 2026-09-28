@@ -89,7 +89,6 @@ import {
 } from './studio';
 import { joinsSeconds } from './studio-edit';
 import {
-  QUIET_MOST_S,
   caughtUpIn,
   comesWith,
   exitSideOf,
@@ -2667,13 +2666,16 @@ export function checkSheet(
       'No one says anything in this scene: only the narrator speaks.',
     );
   // A quiet that holds more than the music carries: sent back once, to be
-  // broken with a line; the stage quickens it to fit meanwhile.
+  // broken with a line; the stage quickens it to fit meanwhile. One with
+  // an action in it may hold longer (ACTION_MOST_S).
   for (const [after, run] of quietRuns(sheet)) {
-    const { asked } = timeQuiet(run.map((at) => quietItem(sheet.beats[at])));
-    if (asked > QUIET_MOST_S + 0.05)
+    const { asked, limit } = timeQuiet(
+      run.map((at) => quietItem(sheet.beats[at])),
+    );
+    if (asked > limit + 0.05)
       warn(
         'quiet',
-        `Beats ${run[0] + 1} to ${run[run.length - 1] + 1} are ${Math.round(asked * 10) / 10} seconds of action with no one speaking${after < 0 ? ' before the first line' : ''}; ${QUIET_MOST_S} at most: break it with a line.`,
+        `Beats ${run[0] + 1} to ${run[run.length - 1] + 1} are ${Math.round(asked * 10) / 10} seconds of action with no one speaking${after < 0 ? ' before the first line' : ''}; ${limit} at most: break it with a line.`,
         run[0],
       );
   }

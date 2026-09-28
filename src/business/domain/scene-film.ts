@@ -174,7 +174,7 @@ export function settledOf(
   for (const prop of scene.props ?? [])
     for (const [moment, , does] of prop.does) {
       const doing = doingOf(actionDoing(does));
-      if (doing) at = Math.max(at, moment + doing.ms * (1 - doing.keyAt));
+      if (doing) at = Math.max(at, moment + doing.idealMs * (1 - doing.keyAt));
     }
   for (const effect of scene.effects) {
     if (effect.do === 'zoom') continue;
@@ -301,15 +301,21 @@ export function walksOf(
 /** How much longer than the time it has a walk may take before its walker hurries. */
 const HURRY_SLACK_MS = 150;
 /** Hurried more than this, a walk is a run. */
-const HURRY_MOST = 1.7;
+const HURRY_MOST = 1.35;
+/** How far a walk may set off before its step, into the end of the line before it, rather than be hurried: by one not speaking then. */
+const EARLY_MOST_MS = 1000;
+/** Mouth shapes a second, as the acting sends them. */
+const MOUTH_RATE = 30;
 
 /**
  * Who hurries at each step, as the player plays it on the wide stage: one
  * who walks to a new place when the next thing they do (a thing reached
  * for, a move, their next walk or going off) comes sooner than the walk
- * there takes goes briskly, as much quicker as it needs, or at a run, so
- * no one takes up a cup before they reach it, nor sets off again before
- * they arrive. Steps no one need hurry at are as they were.
+ * there takes sets off earlier, into the end of the line before, when
+ * they are not the one saying it and nothing else changes at the step;
+ * and, still short of time, goes briskly, as much quicker as it needs, or
+ * at a run, so no one takes up a cup before they reach it, nor sets off
+ * again before they arrive. Steps no one need hurry at are as they were.
  */
 export function hurried(
   scene: Pick<SceneDto, 'steps' | 'stagings' | 'acting' | 'props'>,
@@ -317,63 +323,140 @@ export function hurried(
   const { steps } = scene;
   const { w: W, places } = scene.stagings.wide;
   const walks = (id: string) => scene.acting?.[id]?.walks === true;
-  /** When each one begins each thing they do: a hand going to a thing, a move. */
-  const doings = new Map<string, number[]>();
-  const begins = (id: string, at: number) =>
-    doings.set(id, [...(doings.get(id) ?? []), at]);
+  /** When each one begins each thing they do (a hand going to a thing, a move), and when it is done. */
+  const doings = new Map<string, [number, number][]>();
+  const begins = (id: string, at: number, end: number) =>
+    doings.set(id, [...(doings.get(id) ?? []), [at, end]]);
   for (const prop of scene.props ?? [])
     for (const [moment, who, does] of prop.does) {
       const doing = doingOf(actionDoing(does));
-      begins(who, moment - (doing ? doing.ms * doing.keyAt : 0));
+      begins(
+        who,
+        moment - (doing ? doing.idealMs * doing.keyAt : 0),
+        moment + (doing ? doing.idealMs * (1 - doing.keyAt) : 0),
+      );
     }
   for (const [id, acting] of Object.entries(scene.acting ?? {}))
-    for (const [start] of acting.moves ?? []) begins(id, start);
-  return steps.map((step, k) => {
-    if (!k) return step;
-    let pace = step.pace;
-    let hurry = step.hurry;
-    for (const id of step.show) {
-      const from = places[k - 1]?.[id];
+    for (const [start, move, ms] of acting.moves ?? [])
+      begins(
+        id,
+        start,
+        start +
+          ((HELD_MOVES as readonly string[]).includes(move)
+            ? Math.min(ms, HELD_IN_MS)
+            : ms),
+      );
+  /** When someone is speaking, from and to: as their mouth moves. */
+  const says = (id: string): [number, number][] =>
+    (scene.acting?.[id]?.mouth ?? []).map(([start, shapes]) => [
+      start,
+      start + (shapes.length * 1000) / MOUTH_RATE,
+    ]);
+  const moved = (id: string, k: number) => {
+    const from = places[k - 1]?.[id];
+    const to = places[k]?.[id];
+    return Boolean(from && to && Math.abs(to.x - from.x) > W * 0.02);
+  };
+  /** When each one who walked arrives, as the steps are timed so far. */
+  const arrives = new Map<string, number>();
+  const out: SceneStepDto[] = [];
+  steps.forEach((step, k) => {
+    if (!k) {
+      out.push(step);
+      return;
+    }
+    const prev = out[k - 1];
+    /** Whoever walks to a new place at this step, at a walk. */
+    const walkers = step.show.filter(
+      (id) =>
+        paceAt(step, id) <= 1 &&
+        walks(id) &&
+        steps[k - 1].show.includes(id) &&
+        moved(id, k),
+    );
+    /** The next time each is moved or goes, or does anything, after the step. */
+    const nextOf = (id: string, at: number) => {
       const to = places[k]?.[id];
-      if (
-        paceAt(step, id) > 1 ||
-        !walks(id) ||
-        !steps[k - 1].show.includes(id) ||
-        !from ||
-        !to ||
-        Math.abs(to.x - from.x) <= W * 0.02
-      )
-        continue;
-      // The next time they are moved or go, and anything they do before.
       let next = Infinity;
       for (let j = k + 1; j < steps.length; j += 1) {
         const there = places[j]?.[id];
         if (
           !steps[j].show.includes(id) ||
           !there ||
+          !to ||
           Math.abs(there.x - to.x) > W * 0.02
         ) {
           next = steps[j].atMs;
           break;
         }
       }
-      for (const at of doings.get(id) ?? [])
-        if (at > step.atMs && at < next) next = at;
+      for (const [begin] of doings.get(id) ?? [])
+        if (begin > at && begin < next) next = begin;
+      return next;
+    };
+    const walkOf = (id: string) =>
+      walkMs(places[k][id].x - places[k - 1][id].x, W);
+    // Set off sooner, into the end of the line before: when those who
+    // walk are all that changes at the step, and none of them is speaking,
+    // doing anything else, or still on their way from before.
+    let atMs = step.atMs;
+    const short = Math.max(
+      0,
+      ...walkers.map(
+        (id) => walkOf(id) - (nextOf(id, atMs) - atMs + HURRY_SLACK_MS),
+      ),
+    );
+    const onlyWalks =
+      walkers.length > 0 &&
+      !step.cut &&
+      step.layout === prev.layout &&
+      step.backdrop === prev.backdrop &&
+      newcomersAt(steps, k).length === 0 &&
+      leaversAt(steps, k).length === 0 &&
+      step.show.every((id) => walkers.includes(id) || !moved(id, k));
+    if (short > 0 && onlyWalks) {
+      let earliest = Math.max(prev.atMs + MOVE_MS, step.atMs - EARLY_MOST_MS);
+      for (const id of walkers) {
+        earliest = Math.max(earliest, arrives.get(id) ?? -Infinity);
+        for (const [from, to] of [...(doings.get(id) ?? []), ...says(id)])
+          if (from < step.atMs && to > earliest)
+            earliest = Math.max(earliest, to);
+      }
+      atMs = Math.round(
+        step.atMs - Math.max(0, Math.min(short, step.atMs - earliest)),
+      );
+    }
+    let pace = step.pace;
+    let hurry = step.hurry;
+    for (const id of step.show) {
+      if (
+        paceAt(step, id) > 1 ||
+        !walks(id) ||
+        !steps[k - 1].show.includes(id) ||
+        !moved(id, k)
+      )
+        continue;
       const quicker =
-        walkMs(to.x - from.x, W) /
-        Math.max(1, next - step.atMs + HURRY_SLACK_MS);
+        walkOf(id) / Math.max(1, nextOf(id, atMs) - atMs + HURRY_SLACK_MS);
       if (quicker > HURRY_MOST) pace = { ...pace, [id]: 'run' };
       else if (quicker > 1)
         hurry = { ...hurry, [id]: Math.ceil(quicker * 100) / 100 };
     }
-    return pace === step.pace && hurry === step.hurry
-      ? step
-      : {
-          ...step,
-          ...(pace ? { pace } : {}),
-          ...(hurry ? { hurry } : {}),
-        };
+    const timed =
+      pace === step.pace && hurry === step.hurry && atMs === step.atMs
+        ? step
+        : {
+            ...step,
+            atMs,
+            ...(pace ? { pace } : {}),
+            ...(hurry ? { hurry } : {}),
+          };
+    for (const id of step.show)
+      if (walks(id) && steps[k - 1].show.includes(id) && moved(id, k))
+        arrives.set(id, atMs + walkOf(id) / paceAt(timed, id));
+    out.push(timed);
   });
+  return out;
 }
 
 // ── Shots ──────────────────────────────────────────────────────────────────

@@ -84,6 +84,8 @@ export function voiced(
   sets: Readonly<Record<string, GatedDrawing>> = {},
   /** The quiet the voice left after a beat, in ms, by its index, where it left other than asked: a voice that holds a pause only so long. */
   gaps: Readonly<Record<number, number>> = {},
+  /** Drawn to the kit's scale, a grown-up 234 of its units tall: the stage spaces them in metres (scene-spacing). */
+  how: { stands?: boolean } = {},
 ): { scene: SceneDto; beats: TimedBeat[] } {
   let t = (script.lead ?? 0) * 1000 + 300;
   const beats: TimedBeat[] = script.beats.map((beat, k) => {
@@ -107,12 +109,17 @@ export function voiced(
     script.cast.map((thing) => [
       thing.id,
       thing.kind === 'character'
-        ? figure(
-            !artists.includes(thing.id),
-            outfitsOf(thing),
-            signsOf(script, thing.id),
-            artists.includes(thing.id) ? [] : facesShown(script, thing.id),
-          )
+        ? {
+            ...figure(
+              !artists.includes(thing.id),
+              outfitsOf(thing),
+              signsOf(script, thing.id),
+              artists.includes(thing.id) ? [] : facesShown(script, thing.id),
+            ),
+            ...(how.stands
+              ? { aspect: 160 / 234, stands: { units: 234 } }
+              : {}),
+          }
         : (sets[thing.id] ?? null),
     ]),
   );

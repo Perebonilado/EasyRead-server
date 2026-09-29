@@ -118,9 +118,16 @@ import {
   coveredPiece,
   drawPiece,
   setLiveryOf,
+  setOutdoorOf,
   setPackOf,
   featureGroup,
 } from './scene-set-pieces';
+import {
+  describeSpacing,
+  spacingFaults,
+  type NearPair,
+  type NearWhy,
+} from './scene-spacing';
 import type { DocumentProfile } from './scene-profile';
 import {
   WALK_MAX_MS,
@@ -1405,6 +1412,8 @@ export function composeScene(input: ComposeInput): {
   const stationsAt: Record<string, string>[] = [];
   /** And how far back each stands where it is said (SceneStage.depth), each step's beside its stations. */
   const depthsAt: Record<string, number>[] = [];
+  /** Whom each one who goes somewhere at a step goes over to (SceneGoing.toward). */
+  const towardAt: Record<string, string>[] = [];
   const effects: SceneEffectDto[] = [];
   /** What the writer asked someone to do toward someone: acted, below. */
   const directed: DirectedMove[] = [];
@@ -1497,6 +1506,7 @@ export function composeScene(input: ComposeInput): {
     });
     stationsAt.push({});
     depthsAt.push({});
+    towardAt.push({});
     before = stage.show;
     focus = stage.show[0] ?? null;
     charactersSeen = stage.show.some(
@@ -1641,6 +1651,13 @@ export function composeScene(input: ComposeInput): {
       });
       stationsAt.push({ ...(step.stage.at ?? {}) });
       depthsAt.push({ ...(step.stage.depth ?? {}) });
+      towardAt.push(
+        Object.fromEntries(
+          Object.entries(step.stage.going ?? {}).flatMap(([id, g]) =>
+            g.toward ? [[id, g.toward]] : [],
+          ),
+        ),
+      );
       before = step.stage.show;
     }
     step.effects.forEach((effect, i) => {
@@ -1725,6 +1742,7 @@ export function composeScene(input: ComposeInput): {
           });
           stationsAt.push({ ...(stationsAt[stationsAt.length - 1] ?? {}) });
           depthsAt.push({ ...(depthsAt[depthsAt.length - 1] ?? {}) });
+          towardAt.push({});
           delete steps[steps.length - 1].cut;
           before = show;
         }
@@ -2633,6 +2651,14 @@ export function composeScene(input: ComposeInput): {
       ),
     ),
   );
+  /** Out of doors, a door is a building's: its front drawn round it, at the back of the ground, never standing in the road. */
+  const outdoor =
+    script.setting?.place === 'outdoor' ||
+    (!script.setting?.place && setOutdoorOf(setDrawing));
+  const atBack = (feature: { spot: string; kind: string }) =>
+    feature.spot === 'back' ||
+    feature.kind === 'vehicle' ||
+    (outdoor && feature.kind === 'door');
   const setFeatures = (script.features ?? []).map((feature) => {
     // The painter's group for it: asked for, or drawn unasked.
     const group = featureGroup(feature.id);
@@ -2661,11 +2687,30 @@ export function composeScene(input: ComposeInput): {
           : drawPiece(feature.kind, feature.name, {
               pack: setPackOf(setDrawing),
               livery: setLiveryOf(setDrawing),
+              outdoor,
             }),
       group: box ? found : null,
       box: box ?? null,
     };
   });
+  /**
+   * Where people stand by a feature, across: its middle and width, or
+   * where it has a part they stand by (a building's doorway), that part.
+   */
+  const standOf = (
+    id: string,
+    f: { x: number; w: number },
+  ): { x: number; w: number } => {
+    const piece = setFeatures.find((one) => one.feature.id === id)?.piece;
+    const stand = piece?.stand;
+    if (!piece || !stand) return { x: f.x + f.w / 2, w: f.w };
+    const [vx, , vw] = piece.viewBox;
+    const u = f.w / vw;
+    return {
+      x: f.x + ((stand[0] + stand[1]) / 2 - vx) * u,
+      w: (stand[1] - stand[0]) * u,
+    };
+  };
   /** Each feature's kind, by its id. */
   const kindOf = new Map<string, string>(
     setFeatures.map(({ feature }) => [feature.id, feature.kind]),
@@ -2699,8 +2744,7 @@ export function composeScene(input: ComposeInput): {
             vy + one.box[3] * vh,
           )
         : [0, 0];
-      const back =
-        one.feature.spot === 'back' || one.feature.kind === 'vehicle';
+      const back = atBack(one.feature);
       let placed = placeFeature({
         staging,
         spot: one.feature.spot,
@@ -2769,6 +2813,47 @@ export function composeScene(input: ComposeInput): {
   const floors: Partial<
     Record<StagingName, { floor: number; eye: number; bottom: number }>
   > = {};
+  /**
+   * Who are to be near whom at each step, and why (scene-spacing): who
+   * talk (a line, to whom it is said, else the one who spoke before), who
+   * go over to someone, who hand a thing over, who hug or reach for
+   * someone. The stage spaces everyone by these, in metres.
+   */
+  const nearAt: NearPair[][] = steps.map((step, k) => {
+    const from = step.atMs;
+    const to = steps[k + 1]?.atMs ?? durationMs;
+    const on = new Set(step.show);
+    const out: NearPair[] = [];
+    const add = (
+      a: string | null | undefined,
+      b: string | null | undefined,
+      why: NearWhy,
+    ) => {
+      if (!a || !b || a === b || !on.has(a) || !on.has(b)) return;
+      if (out.some((p) => (p.a === a && p.b === b) || (p.a === b && p.b === a)))
+        return;
+      out.push({ a, b, why });
+    };
+    const inStep = (t: number) => t >= from && t < to;
+    let before: string | null = null;
+    for (const line of spoken) {
+      if (line.startMs >= to) break;
+      if (inStep(line.startMs) && !line.from)
+        add(line.speaker, line.to ?? before, 'talk');
+      if (!line.from) before = line.speaker;
+    }
+    for (const [id, whom] of Object.entries(towardAt[k] ?? {}))
+      add(id, whom, 'toward');
+    for (const does of handled.values())
+      for (const [t, who, action, whom] of does)
+        if (action === 'give' && inStep(t)) add(who, whom, 'reach');
+    for (const [id, acted] of Object.entries(acting))
+      for (const [t, move, , whom] of acted.moves ?? [])
+        if (inStep(t) && typeof whom === 'string')
+          if (move === 'hug') add(id, whom, 'touch');
+          else if (move === 'reach') add(id, whom, 'reach');
+    return out;
+  });
   /** Every step of a staging laid out: each thing in its slot, and people standing together. */
   const layoutsOf = (staging: StagingName): Record<string, Place>[] => {
     const lookup = new Map(
@@ -2797,6 +2882,7 @@ export function composeScene(input: ComposeInput): {
       };
       floors[staging] = floorNow;
       return layoutStations({
+        near: nearAt,
         shares: stationShares(largest),
         steps: steps.map((step, k) => ({
           show: step.show,
@@ -2813,8 +2899,7 @@ export function composeScene(input: ComposeInput): {
           [...placed].map(([id, f]) => [
             id,
             {
-              x: f.x + f.w / 2,
-              w: f.w,
+              ...standOf(id, f),
               way: {
                 y: f.way.y,
                 k: f.way.k,
@@ -2840,7 +2925,7 @@ export function composeScene(input: ComposeInput): {
           const f = placed.get(feature.id);
           return piece &&
             f &&
-            feature.spot !== 'back' &&
+            !atBack(feature) &&
             (feature.kind === 'gate' ||
               feature.kind === 'door' ||
               (feature.kind === DRAWN && piece.enters))
@@ -3177,6 +3262,8 @@ export function composeScene(input: ComposeInput): {
         );
       },
       small: (id) => (units(id) ?? Infinity) < SMALL_STANDING,
+      // A bird or a kitten is never cheated near the camera, giant.
+      tiny: (id) => (units(id) ?? Infinity) < SMALL_STANDING / 2,
       addressed,
       ...(script.energy ? { energy: script.energy } : {}),
       heroes: Object.entries(acting).flatMap(([who, one]) =>
@@ -3234,8 +3321,8 @@ export function composeScene(input: ComposeInput): {
             {
               ground: f.feet,
               perch: f.up.perch,
-              x: f.x,
-              w: f.w,
+              x: standOf(id, f).x - standOf(id, f).w / 2,
+              w: standOf(id, f).w,
               ...(SOLID_BESIDE.has(kindOf.get(id) ?? '')
                 ? { solid: true }
                 : {}),
@@ -3962,6 +4049,15 @@ export function composeScene(input: ComposeInput): {
   composed.scene = withInteractions(composed.scene, interactions);
   // Up the stairs on their treads, never floating (scene-grounding).
   composed.staging.push(...climbsGrounded(composed.scene));
+  // How far apart people stand, as made: in each other's bodies, or
+  // talking too far apart or too close (scene-spacing), said.
+  if (stationed)
+    composed.staging.push(
+      ...describeSpacing(
+        spacingFaults(composed.scene),
+        (id) => nameOf(castById.get(id)) ?? id,
+      ),
+    );
   // A film's walks as long as the time they have, hurried where they are
   // not; and when all it plans has finished, which may be after its
   // voice: the film's edit holds on it until then.

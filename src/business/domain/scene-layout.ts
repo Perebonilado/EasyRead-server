@@ -19,6 +19,12 @@ import {
   type LabelPlace,
 } from './scene-labels';
 import { figureFrame } from './scene-figure';
+import {
+  KIT_PER_METRE,
+  spaceOut,
+  type NearPair,
+  type Spaced,
+} from './scene-spacing';
 import type { SceneLayout } from './scene-script';
 
 export const STAGINGS = {
@@ -899,6 +905,13 @@ export function layoutStations(input: {
   shares?: StationShares;
   /** The floor's depth: the camera's eye line on this stage, and how low the floor's front edge may come. Absent, everyone on one line, as before. */
   floor?: { eye: number; bottom: number };
+  /**
+   * Who are to be near whom at each step, and why (scene-spacing): two
+   * talking, one gone over to another, a thing handed over, a hug. With
+   * a scale, everyone is spaced as people stand: these near, no one in
+   * anyone's body.
+   */
+  near?: readonly (readonly NearPair[])[];
 }): Record<string, Place>[] {
   const { w: W, margin } = STAGINGS[input.staging];
   const { unit, floor, slot } = input.scale;
@@ -957,9 +970,13 @@ export function layoutStations(input: {
     string,
     { station: string; x: number; d?: number; asked?: number }
   >();
-  return input.steps.map((step) => {
+  return input.steps.map((step, stepAt) => {
     const out: Record<string, Place> = {};
     const placed: { id: string; x: number; w: number; low?: boolean }[] = [];
+    /** Where each stood the step before, for the side they keep when stepped apart. */
+    const before = new Map([...kept].map(([id, one]) => [id, one]));
+    /** Each one's body as spaceOut moves it, and the part of them to move with it. */
+    const bodies: (Spaced & { place: Place; size: { w: number } })[] = [];
     // Those who stay put first, then whoever moves, around them.
     const order = [...step.show].sort(
       (a, b) =>
@@ -1117,7 +1134,48 @@ export function layoutStations(input: {
         h: round(size.h * k),
         ...(depthed ? { d: d ?? depthOfK(k) } : {}),
       };
+      // Their body, for spacing: lying along a seat or a bed, as long as
+      // they lie; free to step only at a spot of their own or a point.
+      if (unit && depthed) {
+        const lying = rests?.lie && feature?.lies;
+        const was = before.get(id);
+        bodies.push({
+          id,
+          x: lying ? (feature.lies!.head + x) / 2 : x,
+          half: lying
+            ? Math.abs(x - feature.lies!.head) / 2
+            : size.w * k * BODY_HALF,
+          d: d ?? depthOfK(k),
+          perM: unit * k * KIT_PER_METRE,
+          free:
+            (station in (input.shares ?? STATION_SHARES) ||
+              station.startsWith('@')) &&
+            !rests,
+          ...(was && was.station !== station ? { was: was.x } : {}),
+          place: out[id],
+          size: { w: size.w * k },
+        });
+      }
     });
+    // Everyone spaced as people stand (scene-spacing): who talk, go over
+    // or hand over near, no one in anyone's body.
+    if (bodies.length > 1) {
+      const widest = Math.max(...bodies.map((b) => b.size.w));
+      const spaced = spaceOut(bodies, input.near?.[stepAt] ?? [], {
+        least: margin + widest * 0.3,
+        most: W - margin - widest * 0.3,
+      });
+      for (const body of bodies) {
+        const to = spaced.get(body.id);
+        if (to === undefined || Math.abs(to - body.x) < 0.5) continue;
+        const shift = to - body.x;
+        body.place.x = round(body.place.x + shift);
+        const one = kept.get(body.id);
+        if (one) one.x = round(one.x + shift);
+        const at = placed.find((p) => p.id === body.id);
+        if (at) at.x += shift;
+      }
+    }
     for (const id of [...kept.keys()])
       if (!step.show.includes(id)) kept.delete(id);
     return out;

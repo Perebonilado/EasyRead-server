@@ -34,6 +34,7 @@ import {
   type SetRoom,
   type View,
 } from './scene-film';
+import { BODY_SHARE, SAME_ROW_D } from './scene-spacing';
 
 /**
  * A view the camera takes, and whom its shot cheats near the camera (over
@@ -367,8 +368,12 @@ export function keepFacesSeen(input: FacesInput): FacesMended {
   const runOf = (k: number, id: string) => runIn(places, steps.length, k, id);
   const move = (run: readonly number[], id: string, to: StandingPlace) =>
     moveIn(places, run, id, to);
+  const showAt = (j: number) => steps[j]?.show ?? [];
+  // A step that would put them in someone's body is never taken.
   const nudges = (k: number, id: string, away: number) =>
-    nudgesIn(places[k][id], W, away, input.open(k, id), input.atDepth);
+    nudgesIn(places[k][id], W, away, input.open(k, id), input.atDepth).filter(
+      (nudge) => !bumpsInto(places, showAt, runOf(k, id), id, nudge.to),
+    );
 
   /**
    * What the camera shows through a stretch of a step: a shot that holds
@@ -460,6 +465,8 @@ export function keepFacesSeen(input: FacesInput): FacesMended {
       ) {
         const nearer = input.atDepth(at, d);
         if (!nearer) break;
+        // Never nearer into someone's body.
+        if (bumpsInto(places, showAt, run, moment.who, nearer)) break;
         back?.();
         back = move(run, moment.who, nearer);
         tries += 1;
@@ -585,6 +592,43 @@ function runIn(
   while (from > 0 && same(from - 1)) from -= 1;
   while (to < count - 1 && same(to + 1)) to += 1;
   return Array.from({ length: to - from + 1 }, (_, n) => from + n);
+}
+
+/**
+ * Who someone at `to` would stand in the body of, over a run of steps: a
+ * person in one row with them, their bodies meeting (scene-spacing). A
+ * nudge that brings in someone new is not taken: a face is never made
+ * seen by standing in another's body.
+ */
+function bodiesMet(
+  places: Record<string, StandingPlace>[],
+  show: (j: number) => readonly string[],
+  run: readonly number[],
+  id: string,
+  to: StandingPlace,
+): Set<string> {
+  const out = new Set<string>();
+  for (const j of run)
+    for (const other of show(j)) {
+      const p = places[j]?.[other];
+      if (other === id || !p) continue;
+      if (Math.abs((p.d ?? 0.5) - (to.d ?? 0.5)) >= SAME_ROW_D) continue;
+      const apart = Math.abs(p.x + p.w / 2 - (to.x + to.w / 2));
+      if (apart < (p.w + to.w) * BODY_SHARE * 0.95) out.add(other);
+    }
+  return out;
+}
+
+/** Whether a nudge over a run brings someone into another's body who was not before. */
+function bumpsInto(
+  places: Record<string, StandingPlace>[],
+  show: (j: number) => readonly string[],
+  run: readonly number[],
+  id: string,
+  to: StandingPlace,
+): boolean {
+  const now = bodiesMet(places, show, run, id, places[run[0]]?.[id] ?? to);
+  return [...bodiesMet(places, show, run, id, to)].some((o) => !now.has(o));
 }
 
 /** Someone's place over a run of steps, set to `to`; the places they had, to put back. */
@@ -1070,6 +1114,9 @@ export function keepInClearView(input: ClearInput): ClearMended {
         0,
         input.open(k, who),
         input.atDepth,
+      ).filter(
+        (one) =>
+          !bumpsInto(places, (j) => steps[j]?.show ?? [], run, who, one.to),
       )) {
         const was = run.map((j) => facesHiddenAt(j));
         const back = moveIn(places, run, who, nudge.to);

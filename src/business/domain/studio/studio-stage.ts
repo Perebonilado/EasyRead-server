@@ -1564,7 +1564,14 @@ export function stageStory(
       const theirs = share(here.get(aim)!);
       const j = SPOTS.indexOf(spotNear(theirs));
       const back = theirs > mine ? -1 : 1;
-      const first = here.get(aim) === SPOTS[j] ? j + back : j;
+      // The spot nearest them is theirs when they stand on it or near it,
+      // or past them: the first spot to stop at is this side of them,
+      // clear of where they stand, never on them.
+      const first =
+        here.get(aim) === SPOTS[j] ||
+        (SPOT_SHARE[SPOTS[j]] - theirs) * back < BESIDE
+          ? j + back
+          : j;
       for (let n = first; n >= 0 && n < SPOTS.length && n !== k; n += back)
         if (spotFree(n)) return SPOTS[n];
       const close = theirs + back * BESIDE * 1.2;
@@ -2014,8 +2021,19 @@ export function stageStory(
             });
           } else if (to && to !== was) {
             here.set(who, to);
+            // Over to someone: they stop beside them, near enough to talk.
+            const toward = aim && here.has(aim) && aim !== who ? aim : null;
             stage = stageNow(
-              run ? { going: { [who]: { pace: 'run' as const } } } : {},
+              run || toward
+                ? {
+                    going: {
+                      [who]: {
+                        ...(run ? { pace: 'run' as const } : {}),
+                        ...(toward ? { toward } : {}),
+                      },
+                    },
+                  }
+                : {},
             );
             // Chased to where it lies: taken up there, in a hand or a mouth.
             const after = raw.target ?? raw.thing ?? null;

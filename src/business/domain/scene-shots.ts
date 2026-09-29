@@ -87,6 +87,8 @@ export interface GrammarInput {
   standing: (id: string, t: number) => boolean;
   /** Whether someone is small: a child's height or less, an animal. */
   small: (id: string) => boolean;
+  /** Whether someone is tiny beside people (a bird, a kitten): never cheated near the camera and big. Absent, no one. */
+  tiny?: (id: string) => boolean;
   /** Whether the scene is about the crowd before the camera. */
   addressed: boolean;
   /** Each hero's pose: who, when it begins, and how long it is. */
@@ -224,7 +226,8 @@ export function grammarCamera(input: GrammarInput): SceneCameraAsk[] {
         if (
           on.length >= 3 &&
           line.beat !== first &&
-          input.standing(line.speaker, line.startMs)
+          input.standing(line.speaker, line.startMs) &&
+          !input.tiny?.(line.speaker)
         )
           plan.set(line.beat, {
             beat: line.beat,

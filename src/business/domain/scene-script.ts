@@ -647,6 +647,8 @@ export interface SceneGoing {
   squeeze?: true;
   /** Gone through it by an interaction of theirs (a door's go-through): it carries them, not a walk to its way. */
   through?: true;
+  /** Whom they go over to, by id: they stop beside them, near enough to talk, never on them (scene-spacing). */
+  toward?: string;
 }
 
 /** A fixed thing of a Studio scene's set, as the stage stands it. */

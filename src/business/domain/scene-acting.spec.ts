@@ -318,8 +318,11 @@ describe('a listener startled, and moves aimed at a side', () => {
       walks: true,
       film,
     });
+  // Leant back, or, at a warning in a film, flinching (scene-performance).
   const leans = (acting: ReturnType<typeof two>) =>
-    (acting.mama?.moves ?? []).filter(([, move]) => move === 'lean');
+    (acting.mama?.moves ?? []).filter(
+      ([, move]) => move === 'lean' || move === 'flinch',
+    );
 
   it('leans back only at a line that startles: shouted, or a cry of alarm, never any "!"', () => {
     expect(

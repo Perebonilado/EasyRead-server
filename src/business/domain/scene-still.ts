@@ -200,7 +200,9 @@ const AT_REST: StillPose = { ar: 0, arf: 0, al: 0, alf: 0 };
 /**
  * How someone the kit draws holds their arms at `t`, from the moves they
  * are making then, at their fullest (the player's actBody): a point, a
- * wave, a reach, a hug, a clap, a hop for joy, a hand opened out. At rest
+ * wave, a reach, a hug, a clap, a hop for joy, a hand opened out; a line's
+ * acting (scene-performance): a raised palm, a wagging finger, a fist,
+ * hands clasped, a hand on the chest, a shrug, a flinch, a take. At rest
  * otherwise.
  */
 export function stillPose(scene: SceneDto, id: string, t: number): StillPose {
@@ -236,6 +238,36 @@ export function stillPose(scene: SceneDto, id: string, t: number): StillPose {
     } else if (move === 'hop') {
       pose.ar -= 115;
       pose.al += 115;
+    } else if (move === 'palm-out') {
+      pose.ar -= 58;
+      pose.arf -= 62;
+    } else if (move === 'wag-finger') {
+      pose.ar -= 62;
+      pose.arf -= 70;
+    } else if (move === 'fist') {
+      pose.ar -= 42;
+      pose.arf -= 92;
+    } else if (move === 'plead') {
+      pose.ar -= 16;
+      pose.arf += 92;
+      pose.al += 16;
+      pose.alf -= 92;
+    } else if (move === 'hand-chest') {
+      pose.ar -= 8;
+      pose.arf += 84;
+    } else if (move === 'flinch') {
+      pose.ar -= 20;
+      pose.arf += 40;
+      pose.al += 20;
+      pose.alf -= 40;
+    } else if (move === 'take') {
+      pose.ar -= 30;
+      pose.al += 30;
+    } else if (move === 'shrug') {
+      pose.ar -= 26;
+      pose.arf -= 34;
+      pose.al += 26;
+      pose.alf += 34;
     }
   }
   return pose;

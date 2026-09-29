@@ -25,10 +25,16 @@ import type {
 } from '../../contracts';
 import type { SetLayering } from './scene-set-layout';
 import { actingOf, type DirectedMove, type SpokenLine } from './scene-acting';
+import {
+  feltEffects,
+  grammarRead,
+  nameableThings,
+  type FeltFace,
+} from './scene-performance';
 import { withViews } from './scene-views';
 import { guessAffordances } from './scene-affordances';
 import { withInteractions, type TimedInteraction } from './scene-interact';
-import { grammarCamera, keepTheLine } from './scene-shots';
+import { PHYSICAL_MOVES, grammarCamera, keepTheLine } from './scene-shots';
 import {
   crowdHeads,
   asideOf,
@@ -2110,6 +2116,8 @@ export function composeScene(input: ComposeInput): {
   };
   // How each character acts, planned from who says what and when: where
   // they look, their mouths, their gestures, and what the writer asked.
+  // A film's listeners react with a face too (scene-performance).
+  const felt: FeltFace[] = [];
   const acting = actingOf({
     actors: script.cast
       .filter(
@@ -2160,7 +2168,21 @@ export function composeScene(input: ComposeInput): {
     ),
     goes: goesAt(),
     film,
+    ...(film ? { things: nameableThings(script), felt } : {}),
   });
+  const reacted = feltEffects(
+    effects,
+    felt,
+    new Set<string>(FACES),
+    (id, f) => {
+      const drawing = byId.get(id);
+      return drawing?.kind === 'drawing' && f in drawing.states;
+    },
+  );
+  if (reacted.length) {
+    effects.push(...reacted);
+    effects.sort((a, b) => a.atMs - b.atMs);
+  }
   /**
    * When the crowd reacts: it cheers when a group's line is a shout or the
    * words say it cheers, and gasps when they say it marvels or is afraid.
@@ -3153,6 +3175,8 @@ export function composeScene(input: ComposeInput): {
           toCrowd:
             (to?.kind === 'character' && to.group === true) ||
             crowdAddressed([{ kind: 'line', say: beat.say }]),
+          // What it does (scene-performance): the camera's own choices.
+          ...grammarRead(beat.say),
         },
       ];
     });
@@ -3196,10 +3220,11 @@ export function composeScene(input: ComposeInput): {
           layer.svg.includes('data-audience="rows"'),
         ),
     });
-    // A big action move is seen on the whole stage: no shot hides it.
+    // A big action move, and physical comedy, are seen on the whole stage:
+    // no shot hides them.
     const big: Doing[] = Object.values(acting).flatMap((one) =>
       (one.moves ?? []).flatMap(([at, move, ms]) =>
-        BIG_MOVES.has(move) && move !== 'hero'
+        (BIG_MOVES.has(move) || PHYSICAL_MOVES.has(move)) && move !== 'hero'
           ? [{ who: '@wide', fromMs: at, toMs: at + ms }]
           : [],
       ),

@@ -1721,6 +1721,20 @@ export type SceneActingMove =
   | 'sob'
   | 'shrug'
   | 'lean-in'
+  // Acting a line (scene-performance): a raised palm (no, stop), hands
+  // clasped (please), a fist, a wagging finger (a warning), a hand on the
+  // chest (me, sorry); a small step in or back, held and then taken back;
+  // a listener's flinch and take; a small lean in before speaking.
+  | 'palm-out'
+  | 'plead'
+  | 'fist'
+  | 'wag-finger'
+  | 'hand-chest'
+  | 'step-in'
+  | 'step-back'
+  | 'flinch'
+  | 'take'
+  | 'ready'
   // The action moves (studio-world-plan §4.5): each a clip the player
   // plays with a wind-up, the act, a follow-through and a settle.
   | 'leap'

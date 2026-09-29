@@ -22,6 +22,8 @@ import type {
 } from '../../contracts';
 import { actingOf, type DirectedMove, type SpokenLine } from './scene-acting';
 import { withViews } from './scene-views';
+import { guessAffordances } from './scene-affordances';
+import { withInteractions, type TimedInteraction } from './scene-interact';
 import {
   crowdHeads,
   asideOf,
@@ -49,7 +51,7 @@ import {
   type Ink,
   type Words,
 } from './scene-labels';
-import { keepGrounded } from './scene-grounding';
+import { climbsGrounded, keepGrounded } from './scene-grounding';
 import {
   SOLID_BESIDE,
   STAGINGS,
@@ -1262,6 +1264,21 @@ export function composeScene(input: ComposeInput): {
   );
   let k = 0;
   for (const t of timed) if (t.step.stage) t.atMs = stageTimes[k++];
+  // What someone does with a thing of the set, from its step's moment: one
+  // that carries them (through a door, up the stairs) at its change of
+  // place; timed into its steps once the scene is made (scene-interact).
+  const interactions: TimedInteraction[] = timed.flatMap((t) =>
+    (t.step.interact ?? []).map((one) => ({
+      who: one.who,
+      does: one.does,
+      feature: one.feature,
+      atMs: Math.round(t.atMs),
+      ms: Math.round(one.s * 1000),
+      ...(one.side ? { side: one.side } : {}),
+      ...(one.part ? { part: one.part } : {}),
+      ...(one.to ? { to: one.to } : {}),
+    })),
+  );
 
   const steps: SceneStepDto[] = [];
   /** A Studio scene's stations at each step: where each one stands (SceneStage.at). */
@@ -1473,11 +1490,13 @@ export function composeScene(input: ComposeInput): {
           exit[id] = {
             side: how.side === '@left' ? 'left' : 'right',
             ...(how.via ? { via: how.via } : {}),
-            ...(how.squeeze
-              ? { how: 'squeeze' as const }
-              : how.pace === 'run'
-                ? { how: 'run' as const }
-                : {}),
+            ...(how.through
+              ? { how: 'through' as const }
+              : how.squeeze
+                ? { how: 'squeeze' as const }
+                : how.pace === 'run'
+                  ? { how: 'run' as const }
+                  : {}),
           };
         else if (enter[id] && how.via)
           enter[id] = { ...enter[id], via: how.via };
@@ -2104,6 +2123,11 @@ export function composeScene(input: ComposeInput): {
               ...(piece.leaf ? { leaf: piece.leaf } : {}),
               ...(piece.front ? { front: true as const } : {}),
               ...(piece.enters ? { enters: true as const } : {}),
+              // What it offers the people who use it: its own, or, one of
+              // the show's own, guessed from what it is.
+              ...((piece.affordances ?? guessAffordances(piece))
+                ? { affordances: piece.affordances ?? guessAffordances(piece)! }
+                : {}),
             }
           : {}),
         at: { box: at('box'), wide: at('wide') },
@@ -2658,6 +2682,10 @@ export function composeScene(input: ComposeInput): {
                 perch: f.up.perch,
                 upX: f.up.x,
                 ground: f.feet,
+                ...(setFeatures.find((one) => one.feature.id === id)?.piece
+                  ?.upMiddle
+                  ? { upMiddle: true }
+                  : {}),
               },
               ...(f.seat !== undefined ? { seat: f.seat } : {}),
               ...(f.lies ? { lies: f.lies } : {}),
@@ -3624,6 +3652,11 @@ export function composeScene(input: ComposeInput): {
     audit: { box: box.audit, wide: wide.audit },
     staging: facesSeen.notes,
   };
+  // What people do with the set's things, timed into their steps: the
+  // doors swung with them, the lights switched (studio-interactions-plan).
+  composed.scene = withInteractions(composed.scene, interactions);
+  // Up the stairs on their treads, never floating (scene-grounding).
+  composed.staging.push(...climbsGrounded(composed.scene));
   // A film's walks as long as the time they have, hurried where they are
   // not; and when all it plans has finished, which may be after its
   // voice: the film's edit holds on it until then.

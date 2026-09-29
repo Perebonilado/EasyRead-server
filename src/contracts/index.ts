@@ -1211,6 +1211,8 @@ export type SceneThingDto =
       dangles?: SceneDangleDto[];
       /** On rig 2, one who walks: how far one full stride (both feet) carries them, in the drawing's viewBox units, and how they go. */
       stride?: { length: number; gait: SceneGait };
+      /** What it offers the people who use it (a show's own feature, guessed from its kind): absent, nothing. */
+      affordances?: SceneAffordancesDto;
     }
   | { id: string; kind: 'stat'; value: string; caption: string }
   | {
@@ -1257,7 +1259,12 @@ export interface SceneStepDto {
    */
   exit?: Record<
     string,
-    { side: 'left' | 'right'; via?: string; how?: 'walk' | 'run' | 'squeeze' }
+    {
+      side: 'left' | 'right';
+      via?: string;
+      /** "through": gone in through the feature already, as their interaction played it (a door's go-through): no walk to it. */
+      how?: 'walk' | 'run' | 'squeeze' | 'through';
+    }
   >;
   /** Who goes at a run at this step, on, off or across: faster than a walk. */
   pace?: Record<string, 'run'>;
@@ -1363,6 +1370,8 @@ export interface SceneSettingDto {
    * shot's length, as a film cheats a near thing out of the frame).
    */
   fades?: [number, number, string, number?][];
+  /** A room's lights switched on or off: when, and how. Before the first, the other way (off before one switched on). */
+  lights?: [number, 'on' | 'off'][];
 }
 
 /**
@@ -1411,6 +1420,146 @@ export interface SceneFeatureDto {
    * "up:<id>" station). Absent, no one stands up it: a gate, a bench.
    */
   perch?: Record<'box' | 'wide', { x: number; y: number }>;
+  /**
+   * What it offers the people who use it (studio-interactions-plan §1.1),
+   * in its drawing's own units (its svg's viewBox): its handles, the line
+   * one goes in over, its seats, what one grips, its steps and rungs, what
+   * is laid over whoever uses it (a doorway's near post, a table's front),
+   * where one leans on it, what one presses or turns, and what slides.
+   * Absent, nothing: it is only looked at, stood by or gone through.
+   */
+  affordances?: SceneAffordancesDto;
+}
+
+/** A point in a thing's own drawing, in its viewBox's units, y down. */
+export type ScenePoint = [number, number];
+
+/** How one sits on a seat: on a chair, at a table (the chair pulled out and tucked in), on a bench, a sofa, a bed's edge, a step. */
+export type SceneSeatPose =
+  'chair' | 'table' | 'bench' | 'sofa' | 'bed' | 'step';
+
+/**
+ * A group of a thing's drawing laid over whoever uses it: a doorway's near
+ * post as they step through it, a table's front over the legs of one sat
+ * at it, a vehicle's window they are seen through.
+ */
+export type SceneMaskId = 'body-front' | 'window' | 'frame-near';
+
+/** What a small operate point is: a light switch, a tap, a doorbell, a door's face to knock on. */
+export type SceneOperate = 'switch' | 'tap' | 'bell' | 'knock';
+
+/**
+ * What a thing offers the people who use it, in its drawing's own units:
+ * the points a hand, a hip or a foot goes to, and the groups of its
+ * drawing that move or are laid over them. Drawn by code, so exact.
+ */
+export interface SceneAffordancesDto {
+  /** A knob, a latch, a drawer's pull: on its outside, or its inside. */
+  handles?: { id: string; at: ScenePoint; side: 'in' | 'out' }[];
+  /** A doorway: the line one goes in over; behind the wall ("behind"), or on to another set. */
+  threshold?: { line: [ScenePoint, ScenePoint]; inside: 'behind' | 'next-set' };
+  /** Where one sits: the hips, the feet, the hands (a table's top), and how. */
+  seats?: {
+    id: string;
+    hip: ScenePoint;
+    feet: ScenePoint[];
+    hands?: ScenePoint[];
+    pose: SceneSeatPose;
+  }[];
+  /** What a hand holds: a chair's back, handlebars, a rail. */
+  grips?: { id: string; at: ScenePoint }[];
+  /** A bicycle's (studio-interactions-plan I3): feet follow the crank. */
+  pedals?: { crank: ScenePoint; radius: number };
+  /** Turning with the distance gone (I3). */
+  wheels?: { at: ScenePoint; r: number }[];
+  /** What is laid over whoever uses it, by the group of the drawing. */
+  masks?: { id: SceneMaskId; group: string }[];
+  /** Each step's tread, where a foot lands, bottom first. */
+  steps?: ScenePoint[];
+  /** Each rung, bottom first. */
+  rungs?: ScenePoint[];
+  /** Where one gets on (I4). */
+  mount?: { side: -1 | 1; at: ScenePoint };
+  /** Where one leans on it: the hip against it and the hand on it, for each side. */
+  leans?: { hip: ScenePoint; hand: ScenePoint }[];
+  /** A switch, a tap, a bell, a door's face to knock on. */
+  operates?: { id: string; at: ScenePoint; does: SceneOperate }[];
+  /** A group that slides when used, and how far: a chair pulled out, a drawer. */
+  slides?: { group: string; by: ScenePoint }[];
+  /** A doorway's dark inside, behind its leaf: one going in is gone into it. */
+  dark?: string;
+  /** The side one who uses it stands: its handle's; -1 its left, 1 its right. */
+  side?: -1 | 1;
+}
+
+/**
+ * What someone does with a thing of the set, in its timed steps
+ * (studio-interactions-plan §1.3): through a door, knocking, sitting at a
+ * table, leaning on a counter, up the stairs, a switch, a tap, a bell.
+ */
+export type SceneInteraction =
+  | 'go-through'
+  | 'come-through'
+  | 'knock'
+  | 'open'
+  | 'close'
+  | 'sit-at'
+  | 'stand-from'
+  | 'lean-on'
+  | 'climb-stairs'
+  | 'climb-ladder'
+  | 'switch-on'
+  | 'switch-off'
+  | 'turn-on-tap'
+  | 'ring-bell';
+
+/** One step of an interaction, as the player plays it. */
+export type SceneInteractStep =
+  | 'reach'
+  | 'open'
+  | 'through'
+  | 'gone'
+  | 'close'
+  | 'out'
+  | 'walk'
+  | 'knock'
+  | 'wait'
+  | 'pull'
+  | 'let-go'
+  | 'sit'
+  | 'tuck'
+  | 'push'
+  | 'rise'
+  | 'lean'
+  | 'hold'
+  | 'off'
+  | 'climb'
+  | 'flick'
+  | 'back'
+  | 'turn'
+  | 'water'
+  | 'press';
+
+/**
+ * One interaction, timed: when it begins, what, with which feature, and
+ * its steps in turn (each begins at its own moment and takes its time).
+ * The player plays it purely in t: hands to the points the feature
+ * offers, the feature's parts moved, what is laid over them, and, where
+ * it carries them (through a door, up the stairs), their place.
+ */
+export interface SceneInteractDto {
+  at: number;
+  does: SceneInteraction;
+  feature: string;
+  steps: [SceneInteractStep, number, number][];
+  /** The hand it is done with (the frame's: 'r' the viewer's right); absent, the one nearer. */
+  hand?: 'r' | 'l';
+  /** Which side of the feature they stand: -1 its left, 1 its right. */
+  side?: -1 | 1;
+  /** A part of it that moves, by its group: the drawer pulled out, not the door. */
+  part?: string;
+  /** Going through: gone behind the wall, or on to another set (the next scene opens with them coming in). */
+  to?: 'behind' | 'next-set';
 }
 
 /**
@@ -1581,6 +1730,8 @@ export interface SceneActingDto {
    * the front all along.
    */
   view?: [number, SceneView, 1 | -1][];
+  /** What they do with the set's things, in timed steps (studio-interactions-plan §1.3): through a door, sat at a table, up the stairs. */
+  interact?: SceneInteractDto[];
 }
 
 /** A view of someone drawn from every side, as the camera sees them. */

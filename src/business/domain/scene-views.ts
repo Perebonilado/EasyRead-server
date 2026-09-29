@@ -193,10 +193,19 @@ export function viewsOf(
       times.add(at);
       times.add(at + ms);
     }
+    // What they do with a thing of the set, step by step.
+    const interacts = mine.interact ?? [];
+    for (const one of interacts)
+      for (const [, at, ms] of one.steps) {
+        times.add(at);
+        times.add(at + ms);
+      }
     for (const step of scene.steps) times.add(step.atMs);
     const facingAt = (t: number): number => {
       const walk = walkOf(id, t);
       const speaking = speech.some(([a, b]) => a - 200 <= t && t < b + 200);
+      const using = interactFacing(id, t);
+      if (using !== null) return speaking ? speakerFacing(using) : using;
       if (walk) {
         const along = walkFacing(walk.start, walk.end, W);
         return speaking ? speakerFacing(along) : along;
@@ -222,6 +231,55 @@ export function viewsOf(
       }
       return speaking ? speakerFacing(facing) : facing;
     };
+    /**
+     * Which way someone faces while they use a thing of the set
+     * (studio-interactions-plan §2.1): away into a doorway going in, out of
+     * it coming out; turned to a door, a switch or a tap they use at its
+     * face (from behind, three-quarter), to a counter they lean on; along
+     * a flight of stairs seen from the side, away up steps or a ladder seen
+     * from the front; sat at a table, to the camera. Null when they use
+     * nothing then.
+     */
+    function interactFacing(who: string, t: number): number | null {
+      for (const one of interacts) {
+        const step = one.steps.find(([, at, ms]) => t >= at && t < at + ms);
+        if (!step) continue;
+        const [name] = step;
+        const f = scene.setting?.features?.find((x) => x.id === one.feature);
+        const me = placeOf(who, t) ?? placeOf(who, one.at - 1);
+        const toward =
+          f && me
+            ? Math.sign(f.at.wide.x + f.at.wide.w / 2 - (me.x + me.w / 2)) || 1
+            : 1;
+        switch (one.does) {
+          case 'go-through':
+            return name === 'through' || name === 'gone' || name === 'close'
+              ? 180
+              : toward * 50;
+          case 'come-through':
+            return 0;
+          case 'climb-stairs':
+          case 'climb-ladder': {
+            // Along a flight seen from the side, the way it rises.
+            const rises = f?.affordances?.steps;
+            const across =
+              rises && rises.length > 1
+                ? Math.sign(rises[rises.length - 1][0] - rises[0][0])
+                : 0;
+            return across ? across * 90 : 180;
+          }
+          case 'sit-at':
+          case 'stand-from':
+            return 0;
+          case 'lean-on':
+            return toward * 50;
+          default:
+            // At its face: turned to it, three-quarter from behind.
+            return name === 'wait' ? toward * 50 : toward * 135;
+        }
+      }
+      return null;
+    }
     const keys: [number, SceneView, 1 | -1][] = [];
     for (const t of [...times].filter((t) => t >= 0).sort((a, b) => a - b)) {
       // Just after the moment, so a walk that starts then is walking.

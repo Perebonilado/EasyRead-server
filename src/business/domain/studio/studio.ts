@@ -328,6 +328,12 @@ export interface StudioFeature {
   spot: Spot | 'back';
   /** Whether it opens and shuts: a gate, a door, a window. */
   opens: boolean;
+  /**
+   * The same door seen from its other side, on another set
+   * (studio-interactions-plan §2.1): one who goes through it at the end of
+   * a scene there comes in through this one as the next scene here opens.
+   */
+  link?: { set: string; feature: string };
 }
 
 /** The kinds the stage draws as one particular thing, whatever they are called. */
@@ -351,6 +357,18 @@ function kindNamed(noun: string): FeatureKind | null {
     }) ?? null
   );
 }
+
+/** A feature's link to the same door on another set, when it is a sound one. */
+const linkOf = (raw: unknown): StudioFeature['link'] | null => {
+  if (!raw || typeof raw !== 'object') return null;
+  const { set, feature } = raw as Record<string, unknown>;
+  return typeof set === 'string' &&
+    typeof feature === 'string' &&
+    set &&
+    feature
+    ? { set: set.slice(0, 60), feature: feature.slice(0, 60) }
+    : null;
+};
 
 /**
  * A set's features made sound: each an id of its own, a kind from the
@@ -420,6 +438,7 @@ export function featuresOf(
             (f.opens || listed || kind === DRAWN)
               ? f.opens
               : kind !== DRAWN && OPENING_FEATURES.includes(kind),
+          ...(linkOf(f.link) ? { link: linkOf(f.link)! } : {}),
         },
       ];
     })

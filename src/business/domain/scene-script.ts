@@ -11,6 +11,7 @@
  * counted, so no miscount can move a picture off its words.
  */
 
+import type { SceneInteraction } from '../../contracts';
 import { MAX_BARS, numbersIn, type ChartSpec } from './scene-chart';
 import type {
   ActedMove,
@@ -612,6 +613,8 @@ export interface SceneGoing {
   via?: string;
   /** Under or through it, bent low: they are gone once past it. */
   squeeze?: true;
+  /** Gone through it by an interaction of theirs (a door's go-through): it carries them, not a walk to its way. */
+  through?: true;
 }
 
 /** A fixed thing of a Studio scene's set, as the stage stands it. */
@@ -664,6 +667,25 @@ export interface SceneStep {
   /** Null: the stage stays as it is and only the effects happen. */
   stage: SceneStage | null;
   effects: SceneEffect[];
+  /**
+   * What someone does with a thing of the set from this step's moment
+   * (studio-interactions-plan §1.3): timed into its steps by compose
+   * (scene-interact). One that carries them (through a door, up the
+   * stairs) is this step's change of place.
+   */
+  interact?: SceneStepInteraction[];
+}
+
+/** An interaction as the stager asks it: who, what, with which feature, and how long it has. */
+export interface SceneStepInteraction {
+  who: string;
+  does: SceneInteraction;
+  feature: string;
+  /** How long it has, in seconds. */
+  s: number;
+  side?: -1 | 1;
+  part?: string;
+  to?: 'behind' | 'next-set';
 }
 
 export interface SceneScript {

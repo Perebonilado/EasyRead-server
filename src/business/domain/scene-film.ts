@@ -66,7 +66,7 @@ export function walkLength(
 }
 
 /** How long a walk between two places takes, at a walk: by its true length on the floor. */
-const walkBetween = (
+export const walkBetween = (
   from: Pick<ScenePlaceDto, 'x' | 'w' | 'h'>,
   to: Pick<ScenePlaceDto, 'x' | 'w' | 'h'>,
   W: number,
@@ -80,6 +80,13 @@ const paceAt = (step: SceneStepDto, id: string) =>
     ? RUN_PACE
     : Math.min(RUN_PACE, Math.max(1, step.hurry?.[id] ?? 1));
 const VANISH_MS = 260;
+/** The interactions that carry someone to their step's new place, or on or off the stage (scene-interact's CARRIES): the player moves them, not a walk. */
+const CARRIES_AT: ReadonlySet<string> = new Set([
+  'go-through',
+  'come-through',
+  'climb-stairs',
+  'climb-ladder',
+]);
 
 /** Who comes on at step `k`, and who goes. */
 const newcomersAt = (steps: readonly SceneStepDto[], k: number) =>
@@ -147,9 +154,15 @@ export function settledOf(
       way.k < 0.99;
     return { way, goesIn };
   };
+  /** Whether someone's interaction carries them at a step's moment (through a door, up the stairs): it, not a walk, moves them. */
+  const carriedBy = (id: string, t: number) =>
+    (scene.acting?.[id]?.interact ?? []).some(
+      (one) => CARRIES_AT.has(one.does) && Math.abs(one.at - t) <= 60,
+    );
   steps.forEach((step, k) => {
     at = Math.max(at, step.atMs);
     for (const id of newcomersAt(steps, k)) {
+      if (carriedBy(id, step.atMs)) continue;
       const place = places[k]?.[id];
       const start = entryStart(steps, k, id);
       const entry = step.enter[id];
@@ -181,6 +194,7 @@ export function settledOf(
     for (const id of leaversAt(steps, k)) {
       const place = places[k - 1]?.[id];
       const exit = step.exit?.[id];
+      if (exit?.how === 'through' || carriedBy(id, step.atMs)) continue;
       const by = wayOf(exit?.via, exit?.how);
       if (place && walks(id) && !step.cut)
         at = Math.max(
@@ -208,6 +222,7 @@ export function settledOf(
         const from = places[k - 1]?.[id];
         const to = places[k]?.[id];
         if (!from || !to || !steps[k - 1].show.includes(id)) continue;
+        if (carriedBy(id, step.atMs)) continue;
         at = Math.max(
           at,
           step.atMs +
@@ -230,6 +245,11 @@ export function settledOf(
       );
   for (const [start, , ms] of scene.setting?.crowd?.moves ?? [])
     at = Math.max(at, start + ms);
+  // What someone does with a thing of the set, to its last step; and a
+  // light switched, a door swung by it, seen.
+  for (const acting of Object.values(scene.acting ?? {}))
+    for (const one of acting.interact ?? [])
+      for (const [, start, ms] of one.steps) at = Math.max(at, start + ms);
   // A gate swinging shut is seen to the end of its swing.
   for (const [start] of scene.setting?.featureStates ?? [])
     at = Math.max(at, start + SWING_MS);
@@ -324,11 +344,16 @@ export function walksOf(
       start,
       end,
     });
+  /** Whether someone's interaction carries them at a step's moment (through a door, up the stairs): no walk of the step's. */
+  const carriedBy = (id: string, t: number) =>
+    (scene.acting?.[id]?.interact ?? []).some(
+      (one) => CARRIES_AT.has(one.does) && Math.abs(one.at - t) <= 60,
+    );
   steps.forEach((step, k) => {
     const prev = steps[k - 1];
     for (const id of step.show) {
       const at = places[k]?.[id];
-      if (!at || !walks(id)) continue;
+      if (!at || !walks(id) || carriedBy(id, step.atMs)) continue;
       if (prev?.show.includes(id)) {
         const was = places[k - 1]?.[id];
         if (was && walkLength(was, at, W) > W * 0.02)
@@ -350,6 +375,7 @@ export function walksOf(
       const at = places[k - 1]?.[id];
       if (step.show.includes(id) || !at || !walks(id)) continue;
       const exit = step.exit?.[id];
+      if (exit?.how === 'through' || carriedBy(id, step.atMs)) continue;
       const by = feature(exit?.via);
       const left = exit ? exit.side === 'left' : at.x + at.w / 2 < W / 2;
       const off =
@@ -412,11 +438,23 @@ export function hurried(
             ? Math.min(ms, HELD_IN_MS)
             : ms),
       );
+  // What they do with a thing of the set: they are there before it begins.
+  for (const [id, acting] of Object.entries(scene.acting ?? {}))
+    for (const one of acting.interact ?? [])
+      begins(
+        id,
+        one.at,
+        one.steps.reduce((end, [, at, ms]) => Math.max(end, at + ms), one.at),
+      );
   /** Whether a move of someone's that carries them (a leap, a landing) begins as a step does: the step is the move's, not a walk. */
   const carried = (id: string, at: number) =>
     (scene.acting?.[id]?.moves ?? []).some(
       ([start, move]) =>
         doingOf(move)?.carries && Math.abs(start - at) <= CARRIED_SLACK_MS,
+    ) ||
+    (scene.acting?.[id]?.interact ?? []).some(
+      (one) =>
+        CARRIES_AT.has(one.does) && Math.abs(one.at - at) <= CARRIED_SLACK_MS,
     );
   /** When someone is speaking, from and to: as their mouth moves. */
   const says = (id: string): [number, number][] =>
@@ -506,7 +544,8 @@ export function hurried(
         paceAt(step, id) > 1 ||
         !walks(id) ||
         !steps[k - 1].show.includes(id) ||
-        !moved(id, k)
+        !moved(id, k) ||
+        carried(id, step.atMs)
       )
         continue;
       const quicker =

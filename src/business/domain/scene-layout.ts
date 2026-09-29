@@ -813,6 +813,8 @@ export interface FeatureAcross {
     k: number;
     perch?: number;
     upX?: number;
+    /** One up it stands in the middle of where things catch (a landing, a rung), not beside it: stairs, a ladder. */
+    upMiddle?: boolean;
     /**
      * The ground it stands on, where its feet are: where one beside it,
      * behind it or under it stands. Its way may be above it (a danfo's
@@ -1062,7 +1064,8 @@ export function layoutStations(input: {
         ...(asked !== undefined ? { asked } : {}),
       });
       const low = Boolean(at) && station.startsWith('under:');
-      if (up && way?.upX !== undefined) x = way.upX - size.w * 0.3;
+      if (up && way?.upX !== undefined)
+        x = way.upX - (way.upMiddle ? 0 : size.w * 0.3);
       // Beside it, behind it or under it: on the ground it stands on (not
       // up at its way, a danfo's sill), behind it a step back of it; on a
       // floor with depth, as big as the floor makes them there, as anyone

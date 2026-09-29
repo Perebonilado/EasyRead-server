@@ -11,6 +11,7 @@
  * them up, and each thing they put on or take off.
  */
 import { NEEDS_FEET, doingOf } from '../scene-doings';
+import { USES } from '../scene-interact';
 import type { FigureSpec } from '../scene-figure';
 import {
   colourBefore,
@@ -43,7 +44,16 @@ export interface Posture {
 
 /** The kinds of feature sat and lain on: a bed is got into, the rest sat on. */
 const BEDS = new Set(['bed']);
-const SEATS = new Set(['bench', 'chair', 'sofa', 'steps', 'swing', 'bed']);
+const SEATS = new Set([
+  'bench',
+  'chair',
+  'sofa',
+  'steps',
+  'swing',
+  'bed',
+  // Sat at, on its own chair (studio-interactions-plan I2).
+  'table',
+]);
 /** Lain along: a bed, a sofa, a bench. */
 const LAIN_ON = new Set(['bed', 'sofa', 'bench']);
 
@@ -186,8 +196,11 @@ export function posturesOf(
     if (!now) return;
     // Going anywhere, or a move that needs their feet: up first.
     const move = 'move' in doing.plays ? doing.plays.move : null;
+    // Or something done standing at a thing of the set: a knock at the
+    // door, a lean on the counter, a switch.
     if (
       doing.kind === 'travel' ||
+      USES[doing.id] !== undefined ||
       (move && move !== 'sit' && move !== 'lie' && NEEDS_FEET.has(move))
     ) {
       rises.set(at, now);

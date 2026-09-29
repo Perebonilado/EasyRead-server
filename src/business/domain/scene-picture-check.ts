@@ -15,6 +15,7 @@ import type { SceneDto } from '../../contracts';
 import { FEATURE_WORDS, type FeatureKind } from './scene-doings';
 import { fullestStep } from './scene-compose';
 import { stepAtMoment } from './scene-still';
+import { interactClaims } from './scene-interact';
 
 /** A moment of a scene to look at: when, and why that one. */
 export interface PictureMoment {
@@ -119,6 +120,12 @@ export interface PictureClaims {
   things: string[];
   /** What the change the maker asked for should show, when this moment is its. */
   asked: string | null;
+  /**
+   * What the people are doing with the place's things then, and how those
+   * things stand (studio-interactions-plan §2.6): "the door is open", "Ada
+   * is sitting at the table". Absent where nothing is used.
+   */
+  doing?: string[];
 }
 
 /**
@@ -142,7 +149,8 @@ export function pictureClaims(
   const things = (scene.setting?.features ?? [])
     .filter((f) => f.svg && f.at.wide.w > 0)
     .map((f) => f.name);
-  return { onStage, things, asked };
+  const doing = interactClaims(scene, t, (id) => byId.get(id)?.name ?? id);
+  return { onStage, things, asked, ...(doing.length ? { doing } : {}) };
 }
 
 /** The claims as the judge reads them. */
@@ -156,6 +164,7 @@ export function claimsText(claims: PictureClaims, why: string): string {
     claims.things.length
       ? `The things of the place, each drawn as what it is named: ${claims.things.map((name) => `"${name}"`).join(', ')}.`
       : 'No named things of the place.',
+    claims.doing?.length ? `Seen now: ${claims.doing.join('; ')}.` : '',
     claims.asked
       ? `The maker asked for this change, which should show now: ${claims.asked}`
       : '',

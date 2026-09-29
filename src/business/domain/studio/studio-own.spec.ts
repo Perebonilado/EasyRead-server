@@ -267,7 +267,7 @@ describe("a show's own things: named by the words, drawn once, handled like any"
         kind: 'business',
         who: 'ama',
         do: 'open',
-        say: 'Ama opens the cupboard.',
+        say: 'Ama opens the wardrobe.',
       },
       { kind: 'line', who: 'ama', say: 'I win!' },
     ]);
@@ -275,11 +275,11 @@ describe("a show's own things: named by the words, drawn once, handled like any"
     expect(features.map((f) => [f.id, f.kind, f.opens])).toEqual([
       ['signpost', 'drawn', false],
       ['log', 'drawn', false],
-      ['cupboard', 'drawn', true],
+      ['wardrobe', 'drawn', true],
     ]);
     // Far enough from Kofi that his run to it is seen, where no one stands.
     expect(features[0].spot).toBe('right');
-    // On the stage: he goes to it, she sits by the log, and the cupboard
+    // On the stage: he goes to it, she sits by the log, and the wardrobe
     // swings open at her hand, as a gate does.
     const grown = withFound(bible, 'field', { features, things: [] });
     const script = stageStory(mended, grown);
@@ -294,11 +294,11 @@ describe("a show's own things: named by the words, drawn once, handled like any"
           e.target === 'ama' ? [`${e.do} ${e.part}`] : [],
         ),
       ),
-    ).toEqual(['sit f:log', 'point f:cupboard']);
+    ).toEqual(['sit f:log', 'point f:wardrobe']);
     // Each stands clear of the others, not one on another.
     expect(new Set(features.map((f) => f.spot)).size).toBe(3);
     expect(script.featureStates?.map((f) => [f.feature, f.state])).toEqual([
-      ['cupboard', 'open'],
+      ['wardrobe', 'open'],
     ]);
     // And hidden behind one, drawn over them while they are.
     const hides = stageStory(
@@ -327,7 +327,7 @@ describe("a show's own things: named by the words, drawn once, handled like any"
     ).toEqual([
       ['kofi', 'run', 'signpost'],
       ['ama', 'sit', 'log'],
-      ['ama', 'open', 'cupboard'],
+      ['ama', 'open', 'wardrobe'],
     ]);
   });
 

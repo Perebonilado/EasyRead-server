@@ -821,6 +821,13 @@ export interface GatedDrawing {
   rigVersion?: 2 | 3;
   /** On rig 3 (studio-views-plan §1.2), each view's group, front first: the person drawn from every side. */
   views?: string[];
+  /** On rig 3, each view's arms (shoulder, elbow, hand), in its own units, as `joints` is the front's. */
+  viewJoints?: Partial<
+    Record<
+      'front' | '3q' | 'profile' | 'back3q' | 'back',
+      Record<'r' | 'l', [[number, number], [number, number], [number, number]]>
+    >
+  >;
   /** On rig 2, each part that swings (scene-dangles), its root in its own units. */
   dangles?: Dangle[];
   /** On rig 2, one who walks: how far one full stride carries them, in its own units, and how they go. */

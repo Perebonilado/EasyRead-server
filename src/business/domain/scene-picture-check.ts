@@ -14,7 +14,7 @@
 import type { SceneDto } from '../../contracts';
 import { FEATURE_WORDS, type FeatureKind } from './scene-doings';
 import { fullestStep } from './scene-compose';
-import { stepAtMoment } from './scene-still';
+import { shotAtMoment, stepAtMoment } from './scene-still';
 
 /** A moment of a scene to look at: when, and why that one. */
 export interface PictureMoment {
@@ -39,6 +39,24 @@ export function pictureMoments(
   scene: SceneDto,
   asked: readonly number[] = [],
 ): PictureMoment[] {
+  // The shot grammar's shots (studio-views-plan §3): the first over a
+  // shoulder, the first in deep staging and the first over the crowd,
+  // each in its middle, where people are seen from another side.
+  const grammar = (['ots', 'deep', 'crowd', 'profile'] as const).flatMap(
+    (kind) => {
+      const shot = scene.effects.find(
+        (e) => e.do === 'zoom' && e.shot?.kind === kind && e.untilMs,
+      );
+      return shot
+        ? [
+            {
+              t: (shot.atMs + (shot.untilMs ?? shot.atMs)) / 2,
+              why: SHOT_WHY[kind],
+            },
+          ]
+        : [];
+    },
+  );
   const end = Math.max(0, (scene.settledMs ?? scene.durationMs) - 100);
   const k = fullestStep(scene);
   const from = scene.steps[k]?.atMs ?? 0;
@@ -58,6 +76,7 @@ export function pictureMoments(
       why:
         asked.length > 1 ? `the asked change (${i + 1})` : 'the asked change',
     })),
+    ...grammar.slice(0, 2),
     { t: end, why: 'the last frame' },
   ];
   const out: PictureMoment[] = [];
@@ -68,6 +87,14 @@ export function pictureMoments(
   }
   return out.sort((a, b) => a.t - b.t);
 }
+
+/** Why a still of each of the shot grammar's shots is looked at. */
+const SHOT_WHY = {
+  ots: 'an over-the-shoulder shot',
+  deep: 'a deep-staged shot',
+  crowd: 'a shot over the crowd',
+  profile: 'a profile two-shot',
+} as const;
 
 /** Words too common to tell one line from another. */
 const COMMON = new Set(
@@ -119,6 +146,8 @@ export interface PictureClaims {
   things: string[];
   /** What the change the maker asked for should show, when this moment is its. */
   asked: string | null;
+  /** How the shot then frames them, when it is one of the shot grammar's (studio-views-plan §3). */
+  shot?: string;
 }
 
 /**
@@ -142,7 +171,25 @@ export function pictureClaims(
   const things = (scene.setting?.features ?? [])
     .filter((f) => f.svg && f.at.wide.w > 0)
     .map((f) => f.name);
-  return { onStage, things, asked };
+  const shot = shotAtMoment(scene, t);
+  const name = (id: string | null) =>
+    (id ? byId.get(id)?.name : null) ?? 'someone';
+  const framing =
+    shot?.shot?.kind === 'ots'
+      ? `It is an over-the-shoulder shot: ${name(shot.part)} is near the camera, seen from behind at the frame's edge, big, cropped and a little soft; ${name(shot.target)} faces us past them.`
+      : shot?.shot?.kind === 'deep'
+        ? `It is a deep-staged shot: ${name(shot.target)} is near the camera, big and partly off the frame's edge; the others are behind at their places.`
+        : shot?.shot?.kind === 'crowd'
+          ? `It is a shot over the heads of the people watching onto ${name(shot.target)}.`
+          : shot?.shot?.kind === 'profile'
+            ? `It is a profile two-shot: ${name(shot.target)} and ${name(shot.part)} face each other, each seen from the side.`
+            : null;
+  return {
+    onStage,
+    things,
+    asked,
+    ...(framing ? { shot: framing } : {}),
+  };
 }
 
 /** The claims as the judge reads them. */
@@ -150,8 +197,11 @@ export function claimsText(claims: PictureClaims, why: string): string {
   return [
     `This still is ${why} of the scene.`,
     `On the stage, each seen whole and big enough to know: ${claims.onStage.length ? claims.onStage.join('; ') : 'no one'}.`,
+    claims.shot ?? '',
     claims.onStage.length
-      ? 'Each stands on the ground at their own level (or sits or stands on what holds them), never floating; and each is in clear view, not hidden or mostly covered by things of the place.'
+      ? claims.shot
+        ? 'Each stands on the ground at their own level (or sits or stands on what holds them), never floating; and each but the one near the camera is in clear view, not hidden or mostly covered by things of the place.'
+        : 'Each stands on the ground at their own level (or sits or stands on what holds them), never floating; and each is in clear view, not hidden or mostly covered by things of the place.'
       : '',
     claims.things.length
       ? `The things of the place, each drawn as what it is named: ${claims.things.map((name) => `"${name}"`).join(', ')}.`

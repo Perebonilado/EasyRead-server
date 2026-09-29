@@ -301,6 +301,36 @@ export interface SceneBeat {
   energy?: 'high';
 }
 
+/**
+ * A shot a scene asks for from a sentence on (the Studio's): the whole
+ * stage, one person close, two framed together; and the shot grammar
+ * (studio-views-plan §3): over the shoulder of `with` onto `on` ("ots"),
+ * the two face to face in profile ("profile"), `on` near the camera with
+ * the others behind ("deep"), over the crowd onto `on` ("crowd"), one
+ * seen from low ("low", a hero) or from high ("high", small or sad).
+ */
+export interface SceneCameraAsk {
+  beat: number;
+  shot:
+    | 'wide'
+    | 'close'
+    | 'two'
+    | 'ots'
+    | 'profile'
+    | 'low'
+    | 'high'
+    | 'deep'
+    | 'crowd';
+  on: string | null;
+  with: string | null;
+  /** On something done in a quiet: this many seconds into the quiet after spoken beat `beat` (-1, the one the scene opens with). */
+  after?: number;
+  /** Code's own choice at a moment of its own, in the scene's time (a hero's pose): instead of `beat`'s quiet. */
+  atMs?: number;
+  /** Code's own: a close seen from high or low. */
+  angle?: 'low' | 'high';
+}
+
 export interface DrawingThing {
   id: string;
   kind: 'drawing';
@@ -707,14 +737,7 @@ export interface SceneScript {
    * Studio's): the whole stage, one person close, or two framed together.
    * Absent, the camera is cut as a film cuts it (storyShots).
    */
-  camera?: {
-    beat: number;
-    shot: 'wide' | 'close' | 'two';
-    on: string | null;
-    with: string | null;
-    /** On something done in a quiet: this many seconds into the quiet after spoken beat `beat` (-1, the one the scene opens with). */
-    after?: number;
-  }[];
+  camera?: SceneCameraAsk[];
   /**
    * A Studio story's stage: its people at fixed stations (SceneStage.at),
    * and its set's features stood among them; a book's page lays its people

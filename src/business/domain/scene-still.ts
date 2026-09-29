@@ -32,12 +32,17 @@ import {
   FRAME_H,
   FRAME_W,
   PARALLAX,
+  angleLayer,
+  anglePeople,
   floorFactor,
+  nearOf,
   roomOf,
   viewOf,
   type SetRoom,
   type View,
 } from './scene-film';
+import { viewOnly } from './scene-figure-views';
+import type { SceneEffectDto, SceneView } from '../../contracts';
 
 export { FLOOR_BACK_F, FLOOR_FRONT_F, floorFactor };
 
@@ -136,16 +141,48 @@ export function viewAtMoment(scene: SceneDto, t: number, room: SetRoom): View {
   const { w: W, h: H, places } = scene.stagings.wide;
   const k = stepAtMoment(scene, t);
   const step = scene.steps[k];
-  const shot = scene.effects.find(
-    (e) =>
-      e.do === 'zoom' &&
-      e.atMs <= t &&
-      t <
-        (e.untilMs ??
-          scene.steps.find((s) => s.atMs > e.atMs)?.atMs ??
-          Infinity),
+  return viewOf(
+    shotAtMoment(scene, t),
+    step?.show ?? [],
+    places[k] ?? {},
+    W,
+    H,
+    room,
   );
-  return viewOf(shot ?? null, step?.show ?? [], places[k] ?? {}, W, H, room);
+}
+
+/** The shot on at `t`, if any: a zoom held until its end. */
+export function shotAtMoment(
+  scene: SceneDto,
+  t: number,
+): SceneEffectDto | null {
+  return (
+    scene.effects.find(
+      (e) =>
+        e.do === 'zoom' &&
+        e.atMs <= t &&
+        t <
+          (e.untilMs ??
+            scene.steps.find((s) => s.atMs > e.atMs)?.atMs ??
+            Infinity),
+    ) ?? null
+  );
+}
+
+/**
+ * The view of someone drawn from every side at `t` (studio-views-plan
+ * §2): their view timeline's key then, and whether it is mirrored (facing
+ * left). The front, unmirrored, for anyone else. A still shows the view
+ * a turn is going to, not the steps of it.
+ */
+export function viewInStill(
+  scene: Pick<SceneDto, 'acting'>,
+  id: string,
+  t: number,
+): { view: SceneView; mirror: 1 | -1 } {
+  let key: [number, SceneView, 1 | -1] | undefined;
+  for (const one of scene.acting?.[id]?.view ?? []) if (one[0] <= t) key = one;
+  return key ? { view: key[1], mirror: key[2] } : { view: 'front', mirror: 1 };
 }
 
 /** A person the kit draws, posed: each arm, and each forearm, turned by so many degrees about its shoulder and elbow. */
@@ -229,6 +266,9 @@ export function posedRig(svg: string, pose: StillPose): string {
   return posedDangles(turned, 0);
 }
 
+/** The views other than the front, whose groups' ids end in their name. */
+const SIDE_VIEWS = ['3q', 'profile', 'back3q', 'back'] as const;
+
 /** How long a thing of the set takes to fade, as the player fades it: its FORE_FADE_MS. */
 const FADE_MS = 240;
 /** How faint a fade without a level leaves it: the player's FORE_FADED. */
@@ -277,6 +317,12 @@ export interface StillPart {
   depth: number;
   /** On the floor: where its feet are, in stage units, for the order it is drawn in. */
   feet?: number;
+  /** Drawn the other way round: someone facing left, as their view has them. */
+  mirror?: true;
+  /** A little soft: someone cheated near the camera, over whose shoulder the shot looks. */
+  soft?: true;
+  /** A person drawn from every side: the view the still shows. */
+  view?: SceneView;
 }
 
 export interface StillPlan {
@@ -319,6 +365,24 @@ export function stillPlan(
   const room = roomOf(drawnSet ?? null, W, H);
   const view = viewAtMoment(scene, t, room);
   const camera = at.camera ?? stillCamera(view, W, H, room.span);
+  // The shot's grammar (studio-views-plan §3): whom it cheats near the
+  // camera, and a low or high angle.
+  const shot = shotAtMoment(scene, t);
+  const near = nearOf(shot, step?.show ?? [], places[k] ?? {}, W, H, room);
+  const angle = shot?.shot?.angle;
+  /** A layer's window under a low or high angle: scaled about the frame's top or bottom, the farther off the more. */
+  const tilted = (window: Box, depth: number): Box => {
+    const { k: g, pivot } = angleLayer(angle, depth);
+    if (g === 1) return window;
+    const w = window.w / g;
+    const h = window.h / g;
+    return {
+      x: window.x + (window.w - w) / 2,
+      y: pivot === 0 ? window.y : window.y + window.h - h,
+      w,
+      h,
+    };
+  };
   // The set covers the stage: its units to the stage's.
   const unit = Math.max(W / FRAME_W, H / FRAME_H);
   const left = (W - FRAME_W * unit) / 2;
@@ -344,7 +408,9 @@ export function stillPlan(
       const svg = windowed(
         withoutStandIns(scene, layer.svg),
         toSet(
-          layerWindow(camera, layer.id === 'floor' ? 1 : layer.depth, W, H),
+          layer.id === 'floor' || layer.depth > 1
+            ? layerWindow(camera, layer.id === 'floor' ? 1 : layer.depth, W, H)
+            : tilted(layerWindow(camera, layer.depth, W, H), layer.depth),
         ),
       );
       const part: StillPart = {
@@ -383,7 +449,10 @@ export function stillPlan(
     behind.push({
       key: 'crowd',
       kind: 'crowd',
-      svg: windowed(crowd.svg, toSet(layerWindow(camera, GROUND_DEPTH, W, H))),
+      svg: windowed(
+        crowd.svg,
+        toSet(tilted(layerWindow(camera, GROUND_DEPTH, W, H), GROUND_DEPTH)),
+      ),
       box: frame,
       width,
       depth: GROUND_DEPTH,
@@ -410,28 +479,64 @@ export function stillPlan(
   const shows: string[] = [];
   for (const id of step?.show ?? []) {
     const thing = scene.things.find((one) => one.id === id);
-    const place: ScenePlaceDto | undefined = at.places?.[id] ?? places[k]?.[id];
+    const cheated = near?.id === id ? near.place : null;
+    const place: ScenePlaceDto | undefined =
+      cheated ?? at.places?.[id] ?? places[k]?.[id];
     if (thing?.kind !== 'drawing' || !place || thing.backdrop) continue;
-    if (place.w > W * 0.6) continue;
+    if (place.w > W * 0.6 && !cheated) continue;
     shows.push(id);
-    const hidden = hiddenAt(scene, thing, t);
+    // Drawn from every side, a state is hidden in every view: its groups
+    // are the front's ids with the view after them.
+    const sided = thing.rigVersion === 3 && (thing.views?.length ?? 0) > 1;
+    const hidden = hiddenAt(scene, thing, t).flatMap((h) =>
+      sided ? [h, ...SIDE_VIEWS.map((view) => `${h}--${view}`)] : [h],
+    );
     const hide = hidden.length
       ? `<style>${hidden.map((h) => `[id="${h.replace(/"/g, '')}"]`).join(',')}{display:none}</style>`
       : '';
     let svg = hide
       ? thing.svg.replace(/(<svg\b[^>]*>)/i, `$1${hide}`)
       : thing.svg;
-    if (thing.rig) svg = posedRig(svg, stillPose(scene, id, t));
+    // Drawn from every side: the view they are in then, the other way
+    // round facing left (their arms as the frame has them, mirrored).
+    const seen = sided ? viewInStill(scene, id, t) : null;
+    if (seen) svg = viewOnly(svg, seen.view);
+    const mirrored = seen?.mirror === -1;
+    if (thing.rig) {
+      const pose = stillPose(scene, id, t);
+      svg = posedRig(
+        svg,
+        mirrored
+          ? { ar: -pose.al, arf: -pose.alf, al: -pose.ar, alf: -pose.arf }
+          : pose,
+      );
+    }
     const feet = place.y + place.h;
-    const f = floorFactor(feet, floor);
+    // One cheated near the camera stands where the shot puts them, before
+    // the floor: moved as the people are.
+    const f = cheated ? 1 : floorFactor(feet, floor);
+    const grown = anglePeople(angle);
+    const box = onScreen(camera, f, place);
     onFloor.push({
       key: `thing:${id}`,
       kind: 'thing',
       svg,
-      box: onScreen(camera, f, place),
+      box:
+        grown === 1
+          ? box
+          : {
+              x: box.x + (box.w * (1 - grown)) / 2,
+              y: box.y + box.h * (1 - grown),
+              w: box.w * grown,
+              h: box.h * grown,
+            },
       width: Math.max(48, Math.round(place.w * camera.s * scale * 2)),
       depth: f,
-      feet,
+      // Cheated near the camera: before everyone.
+      feet: cheated ? H * 4 : feet,
+      ...(mirrored ? { mirror: true as const } : {}),
+      ...(cheated && near?.soft ? { soft: true as const } : {}),
+      ...(seen ? { view: seen.view } : {}),
     });
   }
   // Back to front by their feet, as the player draws them: a feature the
@@ -456,6 +561,8 @@ export function stillPlan(
 
 /** The still's paper, under everything: the stage's ground. */
 const PAPER = '#FBF7EF';
+/** How soft one cheated near the camera is, in the stage's units (the player's NEAR_SOFT_PX). */
+const SOFT_PX = 2.5;
 
 /** A still as one SVG from its parts' PNGs (by key): each laid where the plan puts it. A part with no PNG is left out. */
 export function stillSvg(
@@ -473,11 +580,19 @@ export function stillSvg(
       part.kind === 'layer' || part.kind === 'crowd' || part.kind === 'feature'
         ? ' preserveAspectRatio="none"'
         : ' preserveAspectRatio="xMidYMax meet"';
+    // Facing left: drawn the other way round about the middle of its box.
+    const turned = part.mirror
+      ? ` transform="translate(${r2(2 * x + w)} 0) scale(-1 1)"`
+      : '';
+    const soft = part.soft ? ' filter="url(#still-soft)"' : '';
     return [
-      `<image x="${r2(x)}" y="${r2(y)}" width="${r2(w)}" height="${r2(h)}"${fit} href="data:image/png;base64,${png.toString('base64')}"/>`,
+      `<image x="${r2(x)}" y="${r2(y)}" width="${r2(w)}" height="${r2(h)}"${fit}${turned}${soft} href="data:image/png;base64,${png.toString('base64')}"/>`,
     ];
   });
-  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${plan.W} ${plan.H}"><rect width="${plan.W}" height="${plan.H}" fill="${PAPER}"/>${images.join('')}</svg>`;
+  const defs = plan.parts.some((part) => part.soft)
+    ? `<defs><filter id="still-soft" x="-5%" y="-5%" width="110%" height="110%"><feGaussianBlur stdDeviation="${r2(SOFT_PX * (plan.W / 1600))}"/></filter></defs>`
+    : '';
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${plan.W} ${plan.H}">${defs}<rect width="${plan.W}" height="${plan.H}" fill="${PAPER}"/>${images.join('')}</svg>`;
 }
 
 /**

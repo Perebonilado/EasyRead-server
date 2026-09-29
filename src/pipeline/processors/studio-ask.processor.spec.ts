@@ -695,8 +695,10 @@ describe('a made scene’s pictures, looked at (studio-scenery-plan §8.6)', () 
         ask: { tries: 2, free: true, picture: true },
       },
     ]);
-    expect(s.queued[0].ask?.problems?.[0]).toContain(
-      'In the fullest moment: The bed is drawn as a bus.',
+    // Said once, of the first still it was seen in: the film cuts over
+    // the shoulder now (studio-views-plan §3), which comes first.
+    expect(s.queued[0].ask?.problems?.[0]).toMatch(
+      /In (?:the fullest moment|an over-the-shoulder shot): The bed is drawn as a bus\./,
     );
     expect(s.scenes.get('c1')?.status).toBe('writing');
     expect(s.events()).toEqual([]);

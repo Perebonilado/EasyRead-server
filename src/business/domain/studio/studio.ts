@@ -878,10 +878,26 @@ export interface SheetProp {
   in?: string;
 }
 
-export const SHOTS = ['wide', 'close', 'two'] as const;
+/**
+ * The writer's shots: the whole stage, one close, two together; and hints
+ * the shot grammar takes (studio-views-plan §3.2): over the shoulder of
+ * `with` onto `on` ("ots"), the two face to face in profile ("profile"),
+ * `on` seen from low (a hero) or from high (small or sad).
+ */
+export const SHOTS = [
+  'wide',
+  'close',
+  'two',
+  'ots',
+  'profile',
+  'low',
+  'high',
+] as const;
 export type Shot = (typeof SHOTS)[number];
+/** The shots framed on two: `with` is kept for them. */
+export const TWO_SHOTS: ReadonlySet<Shot> = new Set(['two', 'ots', 'profile']);
 
-/** Where the camera is from a beat on: the whole stage, one person close, or two framed together. */
+/** Where the camera is from a beat on: the whole stage, one person close, two framed together, or one of the grammar's hints. */
 export interface SheetShot {
   beat: number;
   shot: Shot;

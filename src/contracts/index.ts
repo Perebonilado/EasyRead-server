@@ -1207,6 +1207,15 @@ export type SceneThingDto =
        * so a face or a sign is shown in all of them at once.
        */
       views?: string[];
+      /**
+       * On rig 3, each view's arms as drawn (shoulder, elbow and hand, as
+       * shares of its box), as `joints` is the front's: so a hand is aimed
+       * (a reach, a point, a hug, a thing handled) from where the arm is
+       * in the view that shows. Facing left, mirrored. Absent, the front's.
+       */
+      viewJoints?: Partial<
+        Record<SceneView, Record<'r' | 'l', [number, number][]>>
+      >;
       /** On rig 2, each part that swings: hair behind, a cloak or cape, a scarf's end, a ribbon, wings, a tail, ears, a mane. */
       dangles?: SceneDangleDto[];
       /** On rig 2, one who walks: how far one full stride (both feet) carries them, in the drawing's viewBox units, and how they go. */
@@ -1288,8 +1297,30 @@ export interface SceneEffectDto {
   filler?: boolean;
   /** A shot of the camera on a story's page: held until then, then back to the whole stage. Absent, a zoom holds until the stage next changes. */
   untilMs?: number;
-  /** How a shot of the camera comes in: by a cut, or by a move from where the camera was. Absent, as the player plays the page (a film's cut, a book's move). */
-  shot?: { enter: 'cut' | 'move' };
+  /**
+   * How a shot of the camera comes in: by a cut, or by a move from where
+   * the camera was. Absent, as the player plays the page (a film's cut, a
+   * book's move). And its grammar (studio-views-plan §3), on today's
+   * front-on sets:
+   *
+   *  - `kind`: "ots", over the shoulder of `part` (the listener, cheated
+   *    near the camera, big, at the frame's edge, seen from behind and a
+   *    little soft) onto `target` speaking, turned three-quarter to us;
+   *    "profile", the two face to face, both in profile (a two-shot);
+   *    "deep", `target` cheated near and big, partly off the frame's edge,
+   *    the others behind at their places; "crowd", over the people
+   *    watching before the camera onto `target`, who speaks to them (they
+   *    are not cheated out of it). Absent, a close or a two-shot.
+   *  - `angle`: "low", the camera low looking up (a hero, a big entrance);
+   *    "high", high looking down (on someone small or sad): on a flat set
+   *    a cheat, the horizon down or up and the people a little larger or
+   *    smaller.
+   */
+  shot?: {
+    enter: 'cut' | 'move';
+    kind?: SceneShotKind;
+    angle?: SceneShotAngle;
+  };
   /** How the camera moves in a shot (studio-scenery-plan §6.2): "push", in harder on a feeling. The player tracks walkers and pans a wide set by its own rules. */
   pan?: 'track' | 'pan' | 'push';
   /**
@@ -1585,6 +1616,11 @@ export interface SceneActingDto {
 
 /** A view of someone drawn from every side, as the camera sees them. */
 export type SceneView = 'front' | '3q' | 'profile' | 'back3q' | 'back';
+
+/** A shot's grammar on a front-on set (studio-views-plan §3.1): over the shoulder, a profile two-shot, deep staging, over the crowd. */
+export type SceneShotKind = 'ots' | 'profile' | 'deep' | 'crowd';
+/** A camera low looking up, or high looking down (studio-views-plan §4.4). */
+export type SceneShotAngle = 'low' | 'high';
 
 /** A speech bubble as the stage sets it: its box, its words, and the point its tail reaches toward. */
 export interface SceneBubbleDto {

@@ -354,12 +354,18 @@ export function withoutAudience(svg: string): string {
  */
 export function audienceOutOfShots(
   rows: readonly string[],
-  shots: readonly { atMs: number; untilMs?: number; do: string }[],
+  shots: readonly {
+    atMs: number;
+    untilMs?: number;
+    do: string;
+    shot?: { kind?: string };
+  }[],
   steps: readonly { atMs: number }[],
   durationMs: number,
 ): [number, number, string, number][] {
+  // Over the crowd onto the one they watch, they are the shot's own.
   return shots
-    .filter((shot) => shot.do === 'zoom')
+    .filter((shot) => shot.do === 'zoom' && shot.shot?.kind !== 'crowd')
     .flatMap((shot) => {
       const end =
         shot.untilMs ??

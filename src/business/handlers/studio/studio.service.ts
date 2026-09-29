@@ -1,4 +1,4 @@
-import { keptPersonas } from '../../domain/studio/studio-story';
+import { isStoryChange, keptPersonas } from '../../domain/studio/studio-story';
 import { narratorRuleOf } from '../../domain/studio/studio-narrator';
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import { randomBytes, randomUUID } from 'node:crypto';
@@ -598,11 +598,15 @@ export class StudioService {
       if (!draft.refuse)
         switch (draft.action) {
           case 'outline':
+            // A change to the story itself (the plot, who someone is, the
+            // ending) develops the story again, as its card does; one to
+            // the scenes alone changes the outline, the story kept.
             note = await this.askOutline(
               show,
               episode,
               draft.request,
               briefChanged,
+              draft.story ?? isStoryChange(draft.request),
             );
             break;
           case 'approve':

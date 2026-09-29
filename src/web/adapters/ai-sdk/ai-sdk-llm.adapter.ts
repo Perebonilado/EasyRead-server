@@ -56,6 +56,7 @@ import {
   studioCharactersSchema,
   studioBeatsSchema,
   studioScenePlanSchema,
+  studioTableReadSchema,
   studioCheckSchema,
   studioSceneSchema,
   studioTurnSchema,
@@ -2498,6 +2499,48 @@ export class AiSdkLlmAdapter implements LlmGatewayPort, OnModuleInit {
       ],
       input,
     );
+  }
+
+  /**
+   * The table read (S4): the whole script read against the rubric by the
+   * check model (DeepSeek), thinking on unless STUDIO_TABLEREAD_THINKING
+   * says off. One call a round.
+   */
+  async studioTableRead(input: {
+    brief: string;
+    bible: string;
+    story: string;
+    narrator: string;
+    script: string;
+    code: string;
+  }): Promise<LlmResult<Record<string, unknown>>> {
+    const started = Date.now();
+    const { generateObject } = await this.registry.modules();
+    const { model, ref } = await this.registry.languageModel('studio_check');
+    const prompt = [
+      `The brief:\n${input.brief}`,
+      input.bible,
+      input.story,
+      input.narrator,
+      `The script:\n<script>\n${input.script.replace(/<\/?script>/giu, '')}\n</script>`,
+      `What code found across the script:\n${input.code}`,
+    ]
+      .filter(Boolean)
+      .join('\n\n');
+    const result = await this.againIfMisshapen(() =>
+      generateObject({
+        model,
+        schema: studioTableReadSchema,
+        system: STUDIO_PROMPTS.studioTableRead,
+        prompt,
+        maxRetries: this.maxRetries(),
+        ...this.writerThinking(ref, 'STUDIO_TABLEREAD_THINKING', 'on'),
+      }),
+    );
+    return {
+      value: result.object,
+      usage: this.usage(ref, result.usage, started),
+    };
   }
 
   /**

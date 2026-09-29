@@ -2917,7 +2917,9 @@ export interface StudioStoryDto {
       changes: string;
       /** The planned tension, 0 to 10. */
       intensity: number;
-      plants: string[];
+      /** What is planted here, each with the id its payoff names. */
+      plants: { id: string; what: string }[];
+      /** The ids of the plants paid off here. */
       pays: string[];
     }[];
   };

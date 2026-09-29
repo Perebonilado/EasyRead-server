@@ -6,7 +6,6 @@ import {
   explainerSheetOf,
   outlineOf,
   secondsOf,
-  storySheetOf,
   WORDS_A_SECOND,
   type ExplainerSheet,
   type StorySheet,
@@ -19,8 +18,6 @@ import {
   checkBible,
   checkExplainer,
   checkOutline,
-  checkSheet,
-  describeEnd,
   distinctVoices,
   endBefore,
   endStateOf,
@@ -31,7 +28,6 @@ import {
   repairSheet,
   sentBackFor,
   keptFeatures,
-  linesKept,
   wearFrom,
   withFound,
   type EndState,
@@ -42,13 +38,17 @@ import {
   type NarratorRule,
 } from '../../business/domain/studio/studio-narrator';
 import {
-  describePlannedScene,
   describeStory,
   keptPersonas,
   withPersonas,
   type StudioStory,
 } from '../../business/domain/studio/studio-story';
 import { developStory } from '../../business/handlers/studio/studio-develop';
+import {
+  worse,
+  writeStorySheet,
+} from '../../business/handlers/studio/studio-scenes';
+import { tableRead } from '../../business/handlers/studio/studio-tableread';
 import {
   energyOf,
   leanedMusic,
@@ -85,8 +85,6 @@ import {
   describeBible,
   describeBrief,
   describeEarlier,
-  describeOutline,
-  describeOutlineScene,
   describeScene,
   tellOf,
 } from '../../business/domain/studio/studio-words';
@@ -402,21 +400,6 @@ export function settledEpisode(
   };
 }
 
-/**
- * A scene's plan, for its writer (studio-story-plan §1.4, the start of
- * S3): its purpose, conflict, turn, shift and the moment, found by its
- * title so a scene moved or cut by hand finds its own; empty for none.
- */
-function planOf(outline: StudioOutline, k: number): string {
-  const scene = outline.scenes[k];
-  const plan = outline.story?.plan.scenes;
-  if (!scene || !plan) return '';
-  const own =
-    plan.find((one) => one.title === scene.title) ??
-    (plan.length === outline.scenes.length ? plan[k] : undefined);
-  return own ? describePlannedScene(own) : '';
-}
-
 /** An outline without its story, as its writer is shown it again. */
 function outlineOnly(outline: StudioOutline | null): StudioOutline | null {
   if (!outline) return null;
@@ -425,18 +408,6 @@ function outlineOnly(outline: StudioOutline | null): StudioOutline | null {
     logline: outline.logline,
     scenes: outline.scenes,
   };
-}
-
-/**
- * Whether one set of problems is worse than another: more that keep a
- * scene from being made, then more of anything sent back. Below zero,
- * better; zero, as good.
- */
-function worse(a: readonly SheetProblem[], b: readonly SheetProblem[]): number {
-  return (
-    errorsIn(a).length - errorsIn(b).length ||
-    sentBackFor(a).length - sentBackFor(b).length
-  );
 }
 
 /**
@@ -1460,6 +1431,7 @@ export class StudioProcessor {
       });
     else {
       let before: EndState | null = null;
+      const sheets: (StorySheet | null)[] = [];
       for (const [k, row] of rows.entries()) {
         const sheet = await this.writeStoryScene(
           show,
@@ -1470,8 +1442,13 @@ export class StudioProcessor {
           k,
           before,
         );
+        sheets.push(sheet);
         if (sheet) before = endStateOf(sheet, bible, before);
       }
+      // The table read (S4): the whole script read before it is ready,
+      // and its weakest scenes written again, quietly.
+      if (sheets.every((one): one is StorySheet => one !== null))
+        await this.readScript(show, episode, outline, bible, rows, sheets);
     }
     await this.log(
       show,
@@ -1480,6 +1457,65 @@ export class StudioProcessor {
       key,
     );
     await this.studio.updateEpisode(episode.id, { busy: null, error: null });
+  }
+
+  /**
+   * The table read of a story's script (studio-tableread): scored against
+   * the rubric, and below the bar its failing scenes written again, the
+   * best-read script kept. Silent to the maker; its score is logged,
+   * "story: table read 7.8". A read that cannot run leaves the script as
+   * it was written.
+   */
+  private async readScript(
+    show: StudioShowRecord,
+    episode: StudioEpisodeRecord,
+    outline: StudioOutline,
+    bible: StudioBible,
+    rows: StudioSceneRecord[],
+    sheets: StorySheet[],
+  ): Promise<void> {
+    const who = `studio ${episode.id}: story`;
+    try {
+      const result = await tableRead(this.llm, {
+        brief: show.brief,
+        bible,
+        outline,
+        sheets,
+        record: (usage, task) => this.record(episode.id, usage, task),
+        log: (line) => this.logger.log(`${who}: ${line}`),
+      });
+      const first = result.rounds[0].read;
+      const kept = result.rounds[result.best].read;
+      const again = result.rounds.flatMap((r) => r.rewritten).length;
+      this.logger.log(
+        `${who}: table read ${kept.overall}${result.rounds.length > 1 ? ` (first read ${first.overall}; ${again} scene rewrites in ${result.rounds.length - 1} round${result.rounds.length > 2 ? 's' : ''}; read ${result.best + 1} kept)` : ''}${kept.verdict ? `: ${kept.verdict}` : ''}`,
+      );
+      if (!result.changed.size) return;
+      const grown =
+        JSON.stringify([result.bible.sets, result.bible.things]) !==
+        JSON.stringify([bible.sets, bible.things]);
+      if (grown) await this.studio.updateShow(show.id, { bible: result.bible });
+      let before: EndState | null = null;
+      for (const [k, sheet] of result.sheets.entries()) {
+        const problems = result.changed.get(k);
+        if (problems && rows[k])
+          await this.studio.updateScene(rows[k].id, {
+            sheet,
+            sheetHash: sceneFingerprint(
+              sheet,
+              result.bible,
+              show.brief,
+              before?.wears ?? [],
+            ),
+            problems,
+          });
+        before = endStateOf(sheet, result.bible, before);
+      }
+    } catch (error) {
+      this.logger.warn(
+        `${who}: the table read could not run (${(error as Error).message}); the script stands as written`,
+      );
+    }
   }
 
   /**
@@ -1756,84 +1792,18 @@ export class StudioProcessor {
       request && old && outlined !== null
         ? Math.max(outlined, secondsOf(old))
         : outlined;
-    const narrator = narratorRuleOf(show.brief, bible);
-    const ask = {
-      brief: describeBrief(show.brief),
-      bible: describeBible(bible, true),
-      outline: describeOutline(outline, true),
-      scene: outline.scenes[k]
-        ? [describeOutlineScene(outline.scenes[k], k, true), planOf(outline, k)]
-            .filter(Boolean)
-            .join('\n')
-        : `Scene ${k + 1}: the scene the maker asked for.`,
-      before: describeEnd(before, bible),
-    };
-    const first = await this.llm.studioScene({
-      ...ask,
-      ...(request && old ? { previous: old, request } : {}),
+    const best = await writeStorySheet(this.llm, {
+      brief: show.brief,
+      bible,
+      outline,
+      k,
+      before,
+      planned,
+      old,
+      ...(request ? { request } : {}),
+      record: (usage) => this.record(episode.id, usage),
+      log: (line) => this.logger.log(`studio ${episode.id} s${k + 1}: ${line}`),
     });
-    await this.record(episode.id, first.usage);
-    const judged = (raw: unknown) => {
-      const mended = mendSheet(storySheetOf(raw), bible, before);
-      return {
-        sheet: mended.sheet,
-        mended: mended.mended,
-        features: mended.features,
-        // Held to the show as the words grew it: a thing they named is
-        // there; and, written again as asked, to the lines it had.
-        problems: [
-          ...checkSheet(
-            mended.sheet,
-            withFound(bible, mended.sheet.set, mended),
-            planned,
-            before,
-            narrator,
-          ),
-          ...(request && old ? linesKept(old, mended.sheet, request) : []),
-        ],
-      };
-    };
-    let best = judged(first.value);
-    const reasons = sentBackFor(best.problems);
-    if (reasons.length) {
-      this.logger.log(
-        `studio ${episode.id} s${k + 1}: goes back: ${reasons.map((p) => p.message).join(' ')}`,
-      );
-      const again = await this.llm.studioScene({
-        ...ask,
-        previous: first.value,
-        problems: reasons.map((p) => p.message),
-        ...(request ? { request } : {}),
-      });
-      await this.record(episode.id, again.usage);
-      const second = judged(again.value);
-      if (worse(second.problems, best.problems) <= 0) best = second;
-    }
-    // What the writer still got wrong is put right here, not handed to
-    // the maker: the scene is always one the stage can play.
-    if (errorsIn(best.problems).length) {
-      this.logger.log(
-        `studio ${episode.id} s${k + 1}: repaired: ${errorsIn(best.problems)
-          .map((p) => p.message)
-          .join(' ')}`,
-      );
-      const sheet = repairSheet(best.sheet, bible, before, narrator);
-      best = {
-        ...best,
-        sheet,
-        problems: checkSheet(
-          sheet,
-          withFound(bible, sheet.set, mendSheet(sheet, bible, before)),
-          planned,
-          before,
-          narrator,
-        ),
-      };
-    }
-    if (best.mended.length)
-      this.logger.log(
-        `studio ${episode.id} s${k + 1}: mended: ${best.mended.slice(0, 8).join('; ')}`,
-      );
     // A feature the words name joins its set for good, and a thing of the
     // show's own the show, as new places and people join the cast: the
     // next scene has them too.

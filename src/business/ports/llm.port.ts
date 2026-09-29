@@ -129,6 +129,13 @@ export interface StudioTurnDraft {
   scenes?: number[];
   /** The change asked for, in the maker's words. */
   request: string | null;
+  /**
+   * For "outline": the change is to the story itself (the plot, who
+   * someone is, the ending, the stakes), so the story is developed again
+   * with it; false for a change to the scenes alone. Absent or null, code
+   * tells from the request's words (isStoryChange).
+   */
+  story?: boolean | null;
   /** Of a change to a scene, what the stage cannot show, in a few words: left out of it, and said so. */
   cannot?: string | null;
   /** Asked for what the Studio does not make. */
@@ -868,6 +875,26 @@ export interface LlmGatewayPort {
       before: string;
     } & StudioRevision,
   ): Promise<LlmResult<Record<string, unknown>>>;
+
+  /**
+   * The table read (studio-story-plan §1.6, S4): a critic reads the whole
+   * script, the brief, the story and everyone's sheet, and scores it
+   * against the rubric, with notes for each scene (studio_check, thinking
+   * on). Its answer is made sound by tableReadOf.
+   */
+  studioTableRead(input: {
+    brief: string;
+    /** The cast and places, with everyone's sheet. */
+    bible: string;
+    /** The premise, the beats and the scene plan, in words. */
+    story: string;
+    /** The narrator's rule, in words. */
+    narrator: string;
+    /** Every scene as a screenplay, beats numbered. */
+    script: string;
+    /** What code found across the script, scene by scene. */
+    code: string;
+  }): Promise<LlmResult<Record<string, unknown>>>;
 
   /**
    * Whether a scene made again as the maker asked now shows what they

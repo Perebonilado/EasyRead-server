@@ -2,6 +2,7 @@
  * Every method implements the async LlmGatewayPort with a synchronous body;
  * that is the whole point of a deterministic offline stand-in. */
 import { dialogueOf } from '../../business/domain/scene-dialogue';
+import { RUBRIC_KEYS } from '../../business/domain/studio/studio-script';
 import type { ScreenplayDraft } from '../../business/domain/scene-screenplay';
 import type { WorkedSolution } from '../../business/domain/maths-work';
 import { levelIn } from '../../business/domain/scene-stage';
@@ -2149,6 +2150,32 @@ export class FakeLlmAdapter implements LlmGatewayPort {
       },
       usage: this.usage(started, input.scene.length / 4, 200),
     };
+  }
+
+  /**
+   * The table read, offline: every scene read and passed, a little over
+   * the bar, so nothing is written again without the network.
+   */
+  async studioTableRead(input: {
+    script: string;
+  }): Promise<LlmResult<Record<string, unknown>>> {
+    const started = Date.now();
+    const count = (input.script.match(/^SCENE \d+:/gmu) ?? []).length;
+    const scores = Object.fromEntries(RUBRIC_KEYS.map((key) => [key, 7.5]));
+    return Promise.resolve({
+      value: {
+        scores,
+        overall: 7.5,
+        scenes: Array.from({ length: count }, (_, k) => ({
+          scene: k + 1,
+          score: 7.5,
+          notes: [],
+        })),
+        voice: [],
+        verdict: 'A clear little story that works.',
+      },
+      usage: this.usage(started, input.script.length / 4, 200),
+    });
   }
 
   /**

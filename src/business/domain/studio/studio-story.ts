@@ -367,9 +367,44 @@ export interface StoryBeat {
   changes: string;
   /** The planned tension, 0 to 10. */
   intensity: number;
-  /** What is planted here, to pay off later; and what pays off here, planted before. */
-  plants: string[];
+  /** What is planted here, to pay off later, each with an id its payoff names. */
+  plants: Plant[];
+  /** What pays off here, planted before: the plants' ids. */
   pays: string[];
+}
+
+/** A thing planted to pay off later: a slippery banana, a secret, a skill. */
+export interface Plant {
+  /** Short and stable: "spare-key". What pays it off names it. */
+  id: string;
+  /** In a few words. */
+  what: string;
+}
+
+/** An id from words: "Bea's magnifier" is "bea-s-magnifier". */
+export const slugOf = (said: string): string =>
+  said
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}]+/gu, '-')
+    .replace(/^-+|-+$/gu, '')
+    .slice(0, 40);
+
+/** A beat's plants made sound: each with an id, from its words where none was given; older ones were words only. */
+function plantsOf(raw: unknown): Plant[] {
+  const out: Plant[] = [];
+  for (const one of (Array.isArray(raw) ? raw : []).slice(0, 4)) {
+    const said =
+      typeof one === 'string'
+        ? { what: one }
+        : one && typeof one === 'object'
+          ? (one as Record<string, unknown>)
+          : null;
+    if (!said) continue;
+    const what = text(said.what, 60) || text(said.id, 60);
+    const id = slugOf(text(said.id, 40) || what);
+    if (id && !out.some((p) => p.id === id)) out.push({ id, what: what || id });
+  }
+  return out;
 }
 
 export interface BeatSheet {
@@ -399,7 +434,7 @@ export function beatSheetOf(raw: unknown, template: StoryTemplate): BeatSheet {
           intensity: Number.isFinite(n)
             ? Math.max(0, Math.min(10, Math.round(n)))
             : 5,
-          plants: words(b.plants, 4, 60),
+          plants: plantsOf(b.plants),
           pays: words(b.pays, 4, 60),
         },
       ];
@@ -415,11 +450,24 @@ const lastOf = (beats: readonly StoryBeat[], ...roles: BeatRole[]) => {
   return -1;
 };
 
-/** Where the story peaks: its climax, or a short film's twist. */
+/**
+ * Where the story peaks: its climax; a short film with none peaks at its
+ * twist or its payoff, whichever is higher (in a minute, the payoff is
+ * often the biggest moment, and the twist just before it).
+ */
 export function peakOf(sheet: BeatSheet): number {
   const climax = lastOf(sheet.beats, 'climax');
   if (climax >= 0) return climax;
-  return sheet.template === 'short' ? lastOf(sheet.beats, 'twist') : -1;
+  if (sheet.template !== 'short') return -1;
+  let best = -1;
+  sheet.beats.forEach((b, k) => {
+    if (
+      (b.role === 'twist' || b.role === 'payoff') &&
+      (best < 0 || b.intensity > sheet.beats[best].intensity)
+    )
+      best = k;
+  });
+  return best;
 }
 
 /** The beat sheet's structure against its template: the beats it must have, in order. */
@@ -472,29 +520,39 @@ export function checkStructure(sheet: BeatSheet): string[] {
 /**
  * The tension curve's shape (§1.3): it starts lower and rises; with room
  * for it, a dip for relief between the rising beats; the low point
- * before the climax; the climax its peak, nothing before it as high; and
- * after it, it falls into the resolution. A flat curve, or one that peaks
- * too early, goes back.
+ * before the climax; the climax its peak, nothing before it as high and
+ * nothing after it higher; and after it, it falls into the resolution. A
+ * flat curve, or one that peaks too early or too late, goes back, each
+ * message naming the beats it is about.
  */
 export function checkCurve(sheet: BeatSheet): string[] {
   const out: string[] = [];
   const { beats } = sheet;
   if (beats.length < 3) return out;
   const at = beats.map((b) => b.intensity);
+  const curve = at.join(', ');
   const peak = peakOf(sheet);
   const top = Math.max(...at);
   if (top - Math.min(...at) < 4)
     out.push(
-      `The tension is flat (${at.join(', ')}): start lower, rise with each attempt, peak at the climax.`,
+      `The tension is flat (${curve}): start lower, rise with each attempt, peak at the climax.`,
     );
   if (peak < 0) return out;
-  if (at[peak] < top || at.slice(0, peak).some((n) => n >= at[peak]))
+  const named = (k: number) => `beat ${k + 1} (${beats[k].role}, ${at[k]})`;
+  const it = beats[peak].role;
+  const early = at.slice(0, peak).findIndex((n) => n >= at[peak]);
+  if (early >= 0)
     out.push(
-      `The tension peaks too early (${at.join(', ')}): the ${beats[peak].role} is the highest, nothing before it as high.`,
+      `The tension peaks too early (${curve}): ${named(early)} is as high as the ${it}, ${named(peak)}. Keep every beat before the ${it} lower than it.`,
+    );
+  const late = at.findIndex((n, k) => k > peak && n > at[peak]);
+  if (late >= 0)
+    out.push(
+      `The tension peaks after the ${it} (${curve}): ${named(late)} is higher than the ${it}, ${named(peak)}. The ${it} is the highest; after it, it falls.`,
     );
   if (at[0] >= at[peak] - 3)
     out.push(
-      'The tension starts too high: begin calmer, so it has somewhere to go.',
+      `The tension starts too high (${curve}): begin calmer, so it has somewhere to go.`,
     );
   if (sheet.template !== 'short') {
     // Between the inciting incident and the climax: a dip for relief.
@@ -503,19 +561,19 @@ export function checkCurve(sheet: BeatSheet): string[] {
     const dips = rising.some((n, k) => k > 0 && n < rising[k - 1]);
     if (!dips)
       out.push(
-        'Put a relief beat (a joke, a warm moment) between the rising beats: a dip in the tension before it climbs again.',
+        `Put a relief beat (a joke, a warm moment) between the rising beats (${curve}): a dip in the tension before it climbs again.`,
       );
     // It rises: the stretch before the climax higher than the start.
     const half = Math.ceil(rising.length / 2);
-    const early = rising.slice(0, half);
-    const late = rising.slice(half);
+    const first = rising.slice(0, half);
+    const second = rising.slice(half);
     if (
-      late.length &&
-      Math.max(...late) <= Math.max(...early) &&
+      second.length &&
+      Math.max(...second) <= Math.max(...first) &&
       rising.length >= 3
     )
       out.push(
-        'The tension does not rise: each attempt harder, or costing more.',
+        `The tension does not rise before the ${it} (${curve}): each attempt harder, or costing more.`,
       );
     // The low point before the climax: the moment it cannot get worse.
     const low = lastOf(beats, 'low', 'turn');
@@ -524,8 +582,10 @@ export function checkCurve(sheet: BeatSheet): string[] {
   }
   // After the peak, it falls.
   const after = at.slice(peak + 1);
-  if (after.length && after[after.length - 1] > at[peak] - 3)
-    out.push('After the climax, let the tension fall into the resolution.');
+  if (late < 0 && after.length && after[after.length - 1] > at[peak] - 3)
+    out.push(
+      `After the ${it}, let the tension fall into the resolution (${curve}): end at ${Math.max(0, at[peak] - 3)} or lower.`,
+    );
   return out;
 }
 
@@ -537,29 +597,238 @@ const thingKey = (thing: string) =>
     .replace(/[^\p{L}\p{N} ]+/gu, '')
     .trim();
 
-/** Setups and payoffs (§1.3): everything planted pays off later; everything paid off was planted before. */
-export function checkSetups(sheet: BeatSheet): string[] {
-  const out: string[] = [];
-  const planted = new Map<string, number>();
-  const paid = new Map<string, number>();
-  sheet.beats.forEach((beat, k) => {
-    for (const one of beat.plants)
-      if (!planted.has(thingKey(one))) planted.set(thingKey(one), k);
-    for (const one of beat.pays) paid.set(thingKey(one), k);
-  });
-  for (const [thing, k] of planted) {
-    const when = paid.get(thing);
-    if (when === undefined)
-      out.push(`"${thing}" is planted in beat ${k + 1} but never pays off.`);
-    else if (when <= k)
-      out.push(
-        `"${thing}" pays off in beat ${when + 1}, before it is planted.`,
-      );
+// ── Words alike ───────────────────────────────────────────────────────────
+
+/** Words that say nothing of what a thing is. */
+const STOP = new Set(
+  (
+    'a an the and or but of to in on at for with by from into onto over under up out off ' +
+    'his her their its our my your they them he she we you i me him us it this that these those ' +
+    'is are was were be been being has have had do does did not no so as than then very just ' +
+    'all some one any who what when where how which there here now again too also only still ' +
+    'about after before'
+  ).split(' '),
+);
+
+/**
+ * A word's stem, lightly, for comparing: "counting", "counts" and
+ * "counted" are "count"; "hummed" is "hum"; "whispers" is "whisper".
+ */
+export function stemOf(word: string): string {
+  let w = word.toLowerCase().replace(/['’]s$/u, '');
+  const cut = (end: string, keep = '') => {
+    if (w.length > end.length + 2 && w.endsWith(end)) {
+      w = w.slice(0, -end.length) + keep;
+      return true;
+    }
+    return false;
+  };
+  if (
+    cut('ies', 'y') ||
+    (/(?:x|ch|sh|ss)es$/u.test(w) && cut('es')) ||
+    cut('ing') ||
+    cut('ed') ||
+    cut('ly') ||
+    (!w.endsWith('ss') && cut('s'))
+  ) {
+    // "runn" is "run", "humm" is "hum"; "roll" and "miss" stay.
+    if (/([b-df-hj-np-tv-z])\1$/u.test(w) && !/(?:ll|ss|zz|ff)$/u.test(w))
+      w = w.slice(0, -1);
   }
-  for (const [thing, k] of paid)
-    if (!planted.has(thing))
-      out.push(`"${thing}" pays off in beat ${k + 1} but was never planted.`);
-  if (sheet.template !== 'short' && !planted.size)
+  return w;
+}
+
+/** A text's words that say what it is about, stemmed: never its little words, nor the names given. */
+export function stemsOf(
+  said: string,
+  names: ReadonlySet<string> = new Set(),
+): string[] {
+  return [
+    ...new Set(
+      said
+        .toLowerCase()
+        .replace(/['’]s\b/gu, '')
+        .split(/[^\p{L}\p{N}]+/u)
+        .filter((w) => w.length > 1 && !STOP.has(w))
+        .map(stemOf)
+        .filter((w) => w && !names.has(w)),
+    ),
+  ];
+}
+
+/** Two stems alike: the same, or one the start of the other ("team", "teamwork"). */
+const alike = (a: string, b: string) =>
+  a === b ||
+  (Math.min(a.length, b.length) >= 4 && (a.startsWith(b) || b.startsWith(a)));
+
+/** How much of `a` is in `b`: the share of its stems found there, 0 to 1. */
+export function covered(a: readonly string[], b: readonly string[]): number {
+  if (!a.length) return 0;
+  return a.filter((x) => b.some((y) => alike(x, y))).length / a.length;
+}
+
+// ── Setups and payoffs ────────────────────────────────────────────────────
+
+/**
+ * What the story already carries through every beat: the characters'
+ * habits, traits and ways of speaking, and a comedy's running gag. These
+ * run; they need no payoff. And the characters' names, which say nothing
+ * of what a thing is ("Pip's soft please" is a soft please).
+ */
+export interface StoryContext {
+  traits?: readonly string[];
+  names?: readonly string[];
+}
+
+/** The context of a cast and a premise: everyone's traits, habits and voice, the running gag, and their names. */
+export function contextOf(
+  bible: Pick<StudioBible, 'characters'>,
+  premise?: Pick<Premise, 'gag'> | null,
+): StoryContext {
+  return {
+    traits: [
+      ...bible.characters.flatMap((c) => [
+        ...c.traits,
+        ...(c.persona
+          ? [...c.persona.personality, ...c.persona.habits, c.persona.voice]
+          : []),
+      ]),
+      ...(premise?.gag ? [premise.gag] : []),
+    ],
+    names: bible.characters.flatMap((c) => [c.id, c.name]),
+  };
+}
+
+/** How alike a thing's words are to another's, either way round, 0 to 1. */
+const likeness = (a: readonly string[], b: readonly string[]) =>
+  Math.max(covered(a, b), covered(b, a));
+
+/** A plant as tracked through the beats: where it is planted, where it pays off, and whether it simply runs. */
+export interface TrackedPlant {
+  plant: Plant;
+  /** The beat it is planted in, from 0. */
+  at: number;
+  /** Its words, stemmed, names left out. */
+  stems: string[];
+  /** Its id's words alone, stemmed: the short name the writers use for it ("bell" for Momo's red collar bell). */
+  idStems: string[];
+  /** The beats that name it in their pays, from 0. */
+  paid: number[];
+  /** The later beats whose own words carry it out, though their pays do not name it. */
+  shown: number[];
+  /** A character's habit or the running gag: carried through, needing no payoff. */
+  running: boolean;
+}
+
+/**
+ * Setups and payoffs, tracked (§1.3). A payoff names its plant's id; one
+ * that names none (an older sheet, or a slip) is matched by its words,
+ * stems and all, so "pips soft please" is paid by "whispers please help".
+ * A plant a later beat's own words carry out is shown there; a payoff an
+ * earlier beat's words set up was planted. A character's habit or a
+ * running gag is carried through the story, never a plant to pay off.
+ */
+export function trackSetups(
+  sheet: BeatSheet,
+  context: StoryContext = {},
+): {
+  plants: TrackedPlant[];
+  /** Payoffs of what was never planted, by what they said and their beat. */
+  unplanted: { said: string; at: number }[];
+} {
+  const names = new Set((context.names ?? []).flatMap((n) => stemsOf(n)));
+  const stems = (said: string) => stemsOf(said, names);
+  const traits = (context.traits ?? []).map(stems);
+  /** A habit or a gag, carried through: it needs no payoff. */
+  const running = (said: string) => {
+    const s = stems(said);
+    // All of a short one's words, two of three of a longer one's: a
+    // "wind-up star" is not the habit of tucking a star under a scarf.
+    return s.length > 0 && traits.some((t) => covered(s, t) >= 0.66);
+  };
+  const beatWords = sheet.beats.map((b) => stems(`${b.what} ${b.changes}`));
+  const plants: TrackedPlant[] = [];
+  sheet.beats.forEach((beat, k) => {
+    for (const plant of beat.plants)
+      if (!plants.some((p) => p.plant.id === plant.id)) {
+        const s = stems(`${plant.what} ${plant.id.replace(/-/gu, ' ')}`);
+        plants.push({
+          plant,
+          at: k,
+          stems: s,
+          idStems: stems(plant.id.replace(/-/gu, ' ')),
+          paid: [],
+          shown: s.length
+            ? beatWords
+                .map((w, j) => (j > k && covered(s, w) >= 0.5 ? j : -1))
+                .filter((j) => j >= 0)
+            : [],
+          running: running(plant.what),
+        });
+      }
+  });
+  const unplanted: { said: string; at: number }[] = [];
+  sheet.beats.forEach((beat, k) => {
+    for (const said of beat.pays) {
+      const found = plantNamed(said, plants, stems);
+      if (found) {
+        found.paid.push(k);
+        continue;
+      }
+      if (running(said)) continue;
+      // Set up in an earlier beat's own words, though not listed as a plant.
+      const s = stems(said);
+      if (s.length && beatWords.slice(0, k).some((w) => covered(s, w) >= 0.5))
+        continue;
+      unplanted.push({ said, at: k });
+    }
+  });
+  return { plants, unplanted };
+}
+
+/** The plant a payoff names: by its id, else the most like it in words (half its words at least). */
+function plantNamed(
+  said: string,
+  plants: TrackedPlant[],
+  stems: (said: string) => string[],
+): TrackedPlant | null {
+  const id = slugOf(said);
+  const exact = plants.find((p) => p.plant.id === id);
+  if (exact) return exact;
+  const s = stems(said);
+  let best: TrackedPlant | null = null;
+  let score = 0;
+  for (const p of plants) {
+    const like = likeness(s, p.stems);
+    if (like >= 0.5 && like > score) {
+      best = p;
+      score = like;
+    }
+  }
+  return best;
+}
+
+/** Setups and payoffs (§1.3): everything planted pays off later; everything paid off was planted before. */
+export function checkSetups(
+  sheet: BeatSheet,
+  context: StoryContext = {},
+): string[] {
+  const out: string[] = [];
+  const { plants, unplanted } = trackSetups(sheet, context);
+  for (const { said, at } of unplanted)
+    out.push(
+      `"${said}" pays off in beat ${at + 1} but was never planted: plant it in an earlier beat (with an id its payoff names), or pay off something that was.`,
+    );
+  const real = plants.filter((p) => !p.running);
+  for (const { plant, at, paid, shown } of real) {
+    if (paid.some((k) => k > at) || shown.length) continue;
+    out.push(
+      paid.length
+        ? `"${plant.what}" (${plant.id}) pays off in beat ${paid[0] + 1}, no later than it is planted (beat ${at + 1}): pay it off in a later beat.`
+        : `"${plant.what}" (${plant.id}) is planted in beat ${at + 1} but never pays off: pay it off in a later beat, naming "${plant.id}" in its pays, or leave it out.`,
+    );
+  }
+  if (sheet.template !== 'short' && !real.length)
     out.push(
       'Plant something early (a skill, a secret, a thing) that pays off later.',
     );
@@ -567,10 +836,13 @@ export function checkSetups(sheet: BeatSheet): string[] {
 }
 
 /** Everything code sees wrong in a beat sheet. */
-export const checkBeats = (sheet: BeatSheet): string[] => [
+export const checkBeats = (
+  sheet: BeatSheet,
+  context: StoryContext = {},
+): string[] => [
   ...checkStructure(sheet),
   ...checkCurve(sheet),
-  ...checkSetups(sheet),
+  ...checkSetups(sheet, context),
 ];
 
 // ── The scene plan ────────────────────────────────────────────────────────
@@ -723,6 +995,25 @@ export function storyOf(raw: unknown): StudioStory | null {
   return { premise, beats: sheet, plan };
 }
 
+// ── A change asked of the story ───────────────────────────────────────────
+
+/** Words that ask for a change to the story itself, not to the scenes alone. */
+const STORY_WORDS =
+  /\b(?:story|plot|twist|ending|stakes|tension|suspense|villain|rival|hero|heroine|funnier|jokes?|gag|heart|sadder|happier|scarier|moral|lesson|theme|personality|motivation|arc|secret|flaw|fear|conflict|climax|genre|relationship|mystery|clue)\b/iu;
+/** Words that ask only for the scenes: how many, their order, their length. */
+const SCENE_WORDS =
+  /\b(?:(?:add|cut|remove|drop|merge|split|move|swap|shorten|lengthen)\b[^.!?]*\bscenes?\b|scenes?\b[^.!?]*\b(?:shorter|longer|order|fewer|more)\b|(?:fewer|more) scenes)/iu;
+
+/**
+ * Whether a change asked of the outline is a change to the story itself
+ * (the plot, who someone is, the ending), for when the producer did not
+ * say: then the story is developed again with it, not the outline alone.
+ */
+export function isStoryChange(request: string | null | undefined): boolean {
+  if (!request) return false;
+  return STORY_WORDS.test(request) && !SCENE_WORDS.test(request);
+}
+
 // ── In words, for the writers ─────────────────────────────────────────────
 
 /** A character's sheet in a few lines, for the writers. */
@@ -774,7 +1065,7 @@ export function describeBeats(sheet: BeatSheet): string {
   return sheet.beats
     .map(
       (b, k) =>
-        `${k}. [${b.role}, intensity ${b.intensity}] ${b.what}${b.wants ? ` Wants: ${b.wants}.` : ''}${b.stops ? ` Stopped by: ${b.stops}.` : ''}${b.changes ? ` Changes: ${b.changes}.` : ''}${b.plants.length ? ` Plants: ${b.plants.join(', ')}.` : ''}${b.pays.length ? ` Pays off: ${b.pays.join(', ')}.` : ''}`,
+        `${k}. [${b.role}, intensity ${b.intensity}] ${b.what}${b.wants ? ` Wants: ${b.wants}.` : ''}${b.stops ? ` Stopped by: ${b.stops}.` : ''}${b.changes ? ` Changes: ${b.changes}.` : ''}${b.plants.length ? ` Plants: ${b.plants.map((p) => `${p.what} [${p.id}]`).join(', ')}.` : ''}${b.pays.length ? ` Pays off: ${b.pays.join(', ')}.` : ''}`,
     )
     .join('\n');
 }
@@ -789,6 +1080,39 @@ export function describePlannedScene(scene: PlannedScene): string {
       : '',
     scene.shift ? `Its feeling shifts: ${scene.shift}` : '',
     scene.moment ? `The moment to land: ${scene.moment}` : '',
+  ]
+    .filter(Boolean)
+    .join('\n');
+}
+
+/**
+ * The beats one scene plays, for its writer (S3): what happens in each,
+ * how tense it is, and what it plants and pays off, each payoff with
+ * where it was planted; and the running gag, to come back.
+ */
+export function describeSceneBeats(
+  story: StudioStory,
+  scene: PlannedScene,
+): string {
+  const beats = scene.beats.filter(
+    (k) => k >= 0 && k < story.beats.beats.length,
+  );
+  if (!beats.length)
+    return story.premise.gag ? `The running gag: ${story.premise.gag}` : '';
+  const planted = new Map<string, Plant>();
+  for (const b of story.beats.beats)
+    for (const p of b.plants) planted.set(p.id, p);
+  const lines = beats.map((k) => {
+    const b = story.beats.beats[k];
+    const pays = b.pays.map((id) => planted.get(id)?.what ?? id);
+    return `- ${b.role}, tension ${b.intensity} of 10: ${b.what}${b.plants.length ? ` Plant here, so it is seen or heard: ${b.plants.map((p) => p.what).join('; ')}.` : ''}${pays.length ? ` Pay off here, planted before: ${pays.join('; ')}.` : ''}`;
+  });
+  return [
+    'The beats it plays:',
+    ...lines,
+    story.premise.gag
+      ? `The running gag (bring it back where it fits): ${story.premise.gag}`
+      : '',
   ]
     .filter(Boolean)
     .join('\n');

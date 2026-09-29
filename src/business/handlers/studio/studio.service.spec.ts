@@ -1185,3 +1185,62 @@ describe('refusesWords', () => {
     );
   });
 });
+
+describe('the producer asks for a change to the story itself (story plan S3)', () => {
+  /** What the producer sets going for the maker's words, at the outline. */
+  async function asked(answer: Record<string, unknown>, message: string) {
+    const studio = studioInMemory();
+    studio.episodes.set('e0', {
+      ...studio.episodes.get('e0')!,
+      phase: 'outline',
+    });
+    Object.assign(studio.answer, {
+      reply: 'I will change that.',
+      action: 'outline',
+      request: message,
+      ...answer,
+    });
+    await studio.service.turn(
+      'u1',
+      's1',
+      { episodeId: 'e0', message },
+      () => undefined,
+    );
+    return studio.jobs;
+  }
+
+  it('develops the story again for a change to it, as its card does', async () => {
+    expect(
+      await asked({ story: true }, 'give the grandmother a secret'),
+    ).toEqual([
+      expect.objectContaining({
+        kind: 'outline',
+        request: 'give the grandmother a secret',
+        story: true,
+      }),
+    ]);
+  });
+
+  it('tells a change to the story from its words when the producer does not say', async () => {
+    expect(await asked({ story: null }, 'make the ending funnier')).toEqual([
+      expect.objectContaining({ kind: 'outline', story: true }),
+    ]);
+  });
+
+  it('keeps the story for a change to the scenes alone', async () => {
+    const jobs = await asked(
+      { story: false },
+      'add a scene where Bingo finds a bone',
+    );
+    expect(jobs).toEqual([
+      expect.objectContaining({
+        kind: 'outline',
+        request: 'add a scene where Bingo finds a bone',
+      }),
+    ]);
+    expect(jobs[0].story).toBeUndefined();
+    expect(
+      (await asked({ story: null }, 'cut the second scene'))[0].story,
+    ).toBeUndefined();
+  });
+});

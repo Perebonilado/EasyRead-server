@@ -17,6 +17,7 @@ import {
   checkPersonas,
   checkPlan,
   checkPremise,
+  contextOf,
   describeBeats,
   describePremise,
   outlineFromPlan,
@@ -190,7 +191,8 @@ export async function developStory(
         ...revise(previous?.beats, again),
       }),
     (raw) => beatSheetOf(raw, template),
-    checkBeats,
+    // Everyone's habits and the running gag run through; they need no payoff.
+    (sheet) => checkBeats(sheet, contextOf(bible, premise.value)),
     record,
     reports,
   );

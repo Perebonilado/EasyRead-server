@@ -33,6 +33,10 @@ import {
 import { STAGE_PROPS } from '../../../business/domain/scene-props';
 import { BEAT_ROLES } from '../../../business/domain/studio/studio-story';
 import {
+  RUBRIC_KEYS,
+  type RubricKey,
+} from '../../../business/domain/studio/studio-script';
+import {
   BOTTOMS,
   CLOTH_COLOURS,
   FACIAL_HAIR,
@@ -151,6 +155,8 @@ export const studioTurnSchema = z.object({
     .nullable()
     .catch(null),
   request: z.string().nullable().catch(null),
+  // An "outline" change to the story itself: developed again with it.
+  story: z.boolean().nullable().catch(null),
   // The one character a "redraw" changes the look of, by name; or whose
   // new drawing a "choose" chooses.
   character: z.string().nullable().catch(null),
@@ -159,6 +165,34 @@ export const studioTurnSchema = z.object({
   // What of a change to a scene the stage cannot show, left out of it.
   cannot: z.string().nullable().catch(null),
   refuse: z.boolean().catch(false),
+});
+
+/** The table read: the rubric's scores, the overall, notes scene by scene, and lines anyone could say. */
+export const studioTableReadSchema = z.object({
+  scores: z.object(
+    Object.fromEntries(
+      RUBRIC_KEYS.map((key) => [key, z.number().nullable().catch(null)]),
+    ) as Record<RubricKey, z.ZodCatch<z.ZodNullable<z.ZodNumber>>>,
+  ),
+  overall: z.number(),
+  scenes: z.array(
+    z.object({
+      scene: z.number(),
+      score: z.number(),
+      notes: z.array(z.string()).catch([]),
+    }),
+  ),
+  voice: z
+    .array(
+      z.object({
+        scene: z.number(),
+        who: z.string(),
+        line: z.string(),
+        why: z.string().catch(''),
+      }),
+    )
+    .catch([]),
+  verdict: z.string().catch(''),
 });
 
 /** Whether a scene made again as asked shows it: the check's verdict. */
@@ -370,7 +404,8 @@ export const studioBeatsSchema = z.object({
       stops: z.string(),
       changes: z.string(),
       intensity: z.number(),
-      plants: z.array(z.string()).catch([]),
+      // Each plant with a short id; a payoff names the ids it pays.
+      plants: z.array(z.object({ id: z.string(), what: z.string() })).catch([]),
       pays: z.array(z.string()).catch([]),
     }),
   ),

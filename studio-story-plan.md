@@ -73,6 +73,23 @@ Code chooses a structure template by length; the writer fills it.
 | **2–5 min** | a three-act shape: setup, inciting incident, rising action with 2–3 escalating attempts, midpoint turn, low point, climax driven by the hero's own choice, resolution, button |
 
 - Every beat names **who wants what**, **what stops them** and **what changes**.
+- **A tension curve is planned, not hoped for.** Every beat gets a planned intensity from 0 to 10. Code checks the shape against the template for the length and genre:
+  - it starts lower, rises with each attempt, and has a dip for relief or comedy;
+  - it has a low point before the climax, peaks at the climax, and falls into the resolution.
+  - A flat curve, or one that peaks too early, goes back to the writer.
+- **Tension tools the writer is asked to use:**
+  - a ticking clock ("before the bus leaves");
+  - rising stakes (it's no longer just the dog, now it's the dog *and* Mum's cake);
+  - dramatic irony (we know what the hero doesn't);
+  - a false victory before the low point;
+  - a cliffhanger at the end of act one;
+  - the "it can't get worse… it gets worse" beat.
+- **Relief beats** (a joke, a warm moment) are placed on purpose between rising beats, so tension has something to push against.
+- **The whole film supports the curve,** not just the words (§3F):
+  - the camera tightens and cuts faster as the curve rises;
+  - the music builds, drops to silence right before the peak, then releases;
+  - the sound thins to one heartbeat, a clock or wind in the quiet before the climax;
+  - faces hold longer on the low point.
 - **Setups and payoffs are tracked:** anything planted (a slippery banana, a secret, a skill) must pay off later, and every payoff must be planted earlier.
 
 ### 1.4 Scene plan
@@ -286,6 +303,59 @@ New **genres** join the brief, each with its own structure emphasis, humour dens
 
 ---
 
+## 3F. It looks like a real production
+
+Every film is packaged like a show, and paced to the tension curve.
+
+### Opening
+- **Cold open (optional, on by default for comedy and adventure):** a 5–15 second teaser scene that hooks before the titles. A joke, a mystery or a problem in the first seconds.
+- **Title sequence:**
+  - the **show's title** animated in the style preset (a picture-book page turn, a bold cartoon pop, a sitcom's simple card over the main set);
+  - the **show theme** (a short tune built from the main character's motif, §3D), the same every episode, so it's recognisable;
+  - main characters introduced in a quick montage: each in a signature pose with their name, taken from their personality (the fidgeter fidgets).
+  - Length scales with the film: 3–4 s for a 1-minute film, 8–12 s for 5 minutes. It can be skipped when rewatching.
+- **Episode title card** (series): "Episode 3: The Big Race", with a sting.
+- **"Previously on…"** (series, optional): a 6–10 second recap cut from real frames of earlier episodes, voiced by the narrator or a character.
+
+### Inside the film
+- **Act breaks with purpose:**
+  - a sting and a hold on the cliffhanger face;
+  - a stylised transition into the next act (an iris-out, a wipe, a page turn, matching the style preset).
+- **Transitions with character:** beyond cut, dissolve and dip, the style preset brings its own (a sitcom's quick bumper shot of the house, an adventure's whip-pan, a picture book's page turn). Used sparingly, at real shifts of place or time.
+- **Montage:** "they practise all week" becomes 4–6 quick shots with music, a real film device, built from the beat sheet's time jumps.
+- **Establishing shots:** a new place opens with a wide of the place (the L4 pan) plus its ambience before the first line, so viewers are oriented.
+
+### Ending
+- **Button:** the last laugh or warm beat before the end.
+- **End credits:**
+  - the show title, then **"Starring"** with each character in a pose and their name, and the voice engine and voice where relevant;
+  - "Written and made with EasiRead Studio" on free plans;
+  - over the theme, as a warm or upbeat reprise depending on the ending.
+- **Post-credits sting (optional, comedy):** one last tiny gag.
+- **"Next time…" teaser (series, optional):** a line and one frame from the next episode's premise.
+
+### Pacing to the curve
+- **Cutting rate follows tension:** calm scenes hold shots longer, and rising action cuts faster. The climax uses the tightest shots and the quickest cuts that the minimum shot time allows.
+- **Silence before the peak:** music drops out, the ambience thins, and one sound carries the moment: a heartbeat, a clock, or wind.
+- **Release:** after the climax, a wide shot, the theme swells, and the characters breathe (the physics weight settle).
+
+### Checks
+- The table-read rubric gains "does it open with a hook", "is there a clear build to the climax", "is there a low point", and "does it end with a button".
+- **Code checks the structure:**
+  - the opening sequence and credits exist;
+  - the curve is shaped right;
+  - the cut rate rises into the climax;
+  - there's silence before the peak.
+- The picture check confirms the title card and credits render.
+
+### Maker controls
+- Show intro: full, short or none.
+- Credits: on or off.
+- "Previously on" and "Next time": on or off.
+- All default to on for series, and to short for one-off films.
+
+---
+
 ## 4. Where it lands
 
 **Server:**
@@ -328,6 +398,7 @@ New **genres** join the brief, each with its own structure emphasis, humour dens
 | **S9 Genres** | Comedy, romance, dark comedy and satire (adults), mystery, adventure, drama, spooky; SAFE rules per audience and genre | ~1–2 days |
 | **S10 Music scoring** | Character themes, love and tension themes, hits on action, build and drop-outs, genre palettes, ducking | 2–3 days |
 | **S11 Sound** | Recorded library with variations, ambience per place, body foley, panning and room sound, a proper mix, AI sound for rare effects | 2–3 days (the library download needs your OK) |
+| **S12 Production polish** | Cold opens, animated title sequences with a show theme and character intros, episode cards, "Previously on", act-break stings and styled transitions, montages, end credits with the cast, post-credits gags, "Next time"; cutting, music and sound paced to the tension curve | 2–3 days |
 
 - S1–S4 change what stories *are*. S5–S6 change how they *play*.
 - A **story bench** (like the drawing bench) runs 10 fixed briefs through the pipeline and scores them with the table-read rubric, so every change can be measured.

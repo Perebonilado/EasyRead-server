@@ -22,6 +22,16 @@
  *  - A big action move, and anyone coming on: the whole stage, as the
  *    camera's shots are cut round them (directedShots' doings).
  *
+ * Where the place has another side (studio-views-plan §4.2, V3), a
+ * conversation is real shot and reverse shot: over the shoulder of the
+ * one listening from the front onto whoever spoke first in it, and onto
+ * the other from the place's other side, over the first one's shoulder,
+ * the camera turned round; the two keep their sides of the frame either
+ * way (the 180° rule). In a scene about the crowd before the camera, a
+ * second line to them in a row is seen the other way, from behind whoever
+ * speaks onto the crowd facing us. A place with no other side (one
+ * painted whole) keeps every shot from the front.
+ *
  * The cut rules (a shot at least SHOT_LEAST_MS, no jump cut, a cut in the
  * quiet before a line) are directedShots' and withoutJumps'. And the 180°
  * rule: the two of a conversation keep their sides of the frame from one
@@ -85,6 +95,10 @@ export interface GrammarInput {
   W: number;
   /** The writer's own asks. */
   asked: readonly SceneCameraAsk[];
+  /** Whether the place has another side to cut to (a set built with its reverse). Absent, it has none. */
+  reverse?: boolean;
+  /** And whether the people watching are seen on it, facing the camera: a crowd's view the other way. */
+  reverseCrowd?: boolean;
   /**
    * The camera's energy for the maker's style and pace (studio-style.ts):
    * `cut` how long it holds, as a share of the usual (above 1 slower, below
@@ -148,7 +162,25 @@ export function grammarCamera(input: GrammarInput): SceneCameraAsk[] {
   });
   /** Said to the crowd before the camera, in a scene about them: over the crowd onto who says it. */
   const toCrowd = (line: GrammarLine) => line.toCrowd && input.addressed;
+  /** Lines said to the crowd one after another by each: every second one seen the other way, onto them. */
+  let crowdRun: { who: string; n: number } | null = null;
+  const crowdShot = (line: GrammarLine): SceneCameraAsk => {
+    crowdRun =
+      crowdRun?.who === line.speaker
+        ? { who: line.speaker, n: crowdRun.n + 1 }
+        : { who: line.speaker, n: 1 };
+    return {
+      beat: line.beat,
+      shot: 'crowd',
+      on: line.speaker,
+      with: null,
+      ...(input.reverseCrowd && crowdRun.n % 2 === 0
+        ? { reverse: true as const }
+        : {}),
+    };
+  };
   for (const run of runs) {
+    crowdRun = null;
     // The two who say most of it to each other.
     const count = new Map<string, number>();
     for (const line of run)
@@ -167,13 +199,7 @@ export function grammarCamera(input: GrammarInput): SceneCameraAsk[] {
       for (const line of run) {
         if (line.beat === first) continue;
         const on = input.onAt(line.startMs);
-        if (toCrowd(line))
-          plan.set(line.beat, {
-            beat: line.beat,
-            shot: 'crowd',
-            on: line.speaker,
-            with: null,
-          });
+        if (toCrowd(line)) plan.set(line.beat, crowdShot(line));
         else if (line.strong && on.length >= 2 && mayClose(line))
           plan.set(line.beat, closeOn(line));
       }
@@ -184,17 +210,13 @@ export function grammarCamera(input: GrammarInput): SceneCameraAsk[] {
         ? said[Math.floor(said.length / 2)]
         : null;
     let n = 0;
+    /** Whoever the first shot over a shoulder is on: seen from the front; the other from the place's other side. */
+    let front: string | null = null;
     for (const line of run) {
       const other = line.speaker === a ? b : a;
       const on = input.onAt(line.startMs);
       if (toCrowd(line)) {
-        if (line.beat !== first)
-          plan.set(line.beat, {
-            beat: line.beat,
-            shot: 'crowd',
-            on: line.speaker,
-            with: null,
-          });
+        if (line.beat !== first) plan.set(line.beat, crowdShot(line));
         continue;
       }
       if (!pair.has(line.speaker)) {
@@ -239,11 +261,15 @@ export function grammarCamera(input: GrammarInput): SceneCameraAsk[] {
         continue;
       }
       if (!on.includes(other)) continue;
+      front ??= line.speaker;
       plan.set(line.beat, {
         beat: line.beat,
         shot: 'ots',
         on: line.speaker,
         with: other,
+        ...(input.reverse && line.speaker !== front
+          ? { reverse: true as const }
+          : {}),
       });
     }
   }
@@ -345,6 +371,9 @@ function walkedAcross(
  * sides of the frame from the last shot of them, with no whole stage
  * between and neither seen walking across the other, is not taken: the
  * whole stage is seen instead, and the line may be crossed after it.
+ * A shot from the place's other side (§4.2) has the two the other way
+ * about, but over a shoulder, from either side, the two keep the sides
+ * they have from the front: shot and reverse shot keep the line.
  * The rest as they were, copies.
  */
 export function keepTheLine(
@@ -371,7 +400,11 @@ export function keepTheLine(
       const pa = placeAt(a, shot.atMs + 1);
       const pb = placeAt(b, shot.atMs + 1);
       if (pa && pb) {
-        const side = Math.sign(middle(pa) - middle(pb)) || 1;
+        // Turned round, a shot of two has them the other way about, but
+        // over a shoulder, where the two keep their sides from the front.
+        const turned =
+          shot.shot?.reverse === true && shot.shot.kind !== 'ots' ? -1 : 1;
+        const side = (Math.sign(middle(pa) - middle(pb)) || 1) * turned;
         const was = sides.get(key(a, b));
         const mine = a < b ? side : -side;
         if (

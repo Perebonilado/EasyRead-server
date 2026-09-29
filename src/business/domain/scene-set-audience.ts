@@ -210,6 +210,61 @@ export function drawAudience(input: AudienceInput): Audience {
   };
 }
 
+/**
+ * The people watching seen from the stage, on the place's other side
+ * (studio-views-plan §4.2): the same crowd, turned to face the camera,
+ * standing in a row or two across the back of the floor (the nearer row
+ * larger and lower), each drawn whole at the size the floor makes them
+ * there (`feet` and `unit`, farther row first), spaced across as before
+ * (or at the sides only), the middle kept clearest. Grouped as the rows
+ * before the camera are (`data-audience="rows"`), so a scene not about
+ * them leaves them out alike. Empty with none.
+ */
+export function drawFacingAudience(
+  input: AudienceInput & {
+    feet: readonly [number, number];
+    unit: readonly [number, number];
+  },
+): string {
+  const { W } = input;
+  const markup: string[] = [];
+  let n = 0;
+  for (let row = 0; row < input.rows; row += 1) {
+    // The farther row when there are two; else the one row where the nearer would be.
+    const at = input.rows === 2 ? row : 1;
+    const s = input.unit[at];
+    // Standing whole, spaced wider than heads and shoulders before the camera.
+    const step = SHOULDERS * s * SPACING * 1.7;
+    const offset = row % 2 ? step / 2 : 0;
+    for (let x = step * 0.3 + offset; x < W - step * 0.3; x += step) {
+      const share = x / W;
+      if (input.spread === 'sides' && share > 0.3 && share < 0.7) continue;
+      if (Math.abs(share - (1 - input.focal)) < 0.08) continue;
+      if (n >= AUDIENCE_MOST) break;
+      const i = n;
+      n += 1;
+      let spec = extraFor(input.world, `${input.seed}:audience`, i);
+      if (input.children && spec.age !== 'child')
+        spec = {
+          ...spec,
+          age: beatOf(`${input.seed}:${i}:teen`) < 0.2 ? 'teen' : 'child',
+        };
+      const id = `rv-au-${i + 1}`;
+      const drawn = drawExtra(spec, { detail: 1, id });
+      const [bx, by, bw, bh] = drawn.viewBox;
+      const jitter = (beatOf(`${input.seed}:${i}:x`) - 0.5) * step * 0.2;
+      const feet = input.feet[at];
+      const width = r1(setLine(input.H) / s);
+      markup.push(
+        `<g id="${id}" data-audience="${row}">` +
+          `<svg x="${r1(x + jitter + bx * s)}" y="${r1(feet + by * s)}" width="${r1(bw * s)}" height="${r1(bh * s)}" viewBox="${bx} ${by} ${bw} ${bh}" overflow="visible">` +
+          `<g stroke="${FIGURE_INK}" stroke-width="${width}" stroke-linejoin="round">${drawn.legs}${drawn.upper}</g></svg></g>`,
+      );
+    }
+  }
+  return markup.length ? `<g data-audience="rows">${markup.join('')}</g>` : '';
+}
+
 /** A turn of the heads toward whoever speaks: from, to, and where they stand across, in the set's units. */
 export type AudienceTurn = [number, number, number];
 

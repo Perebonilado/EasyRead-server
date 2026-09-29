@@ -43,21 +43,27 @@ export function pictureMoments(
   // The shot grammar's shots (studio-views-plan §3): the first over a
   // shoulder, the first in deep staging and the first over the crowd,
   // each in its middle, where people are seen from another side.
-  const grammar = (['ots', 'deep', 'crowd', 'profile'] as const).flatMap(
-    (kind) => {
-      const shot = scene.effects.find(
-        (e) => e.do === 'zoom' && e.shot?.kind === kind && e.untilMs,
-      );
-      return shot
-        ? [
-            {
-              t: (shot.atMs + (shot.untilMs ?? shot.atMs)) / 2,
-              why: SHOT_WHY[kind],
-            },
-          ]
-        : [];
-    },
-  );
+  const grammar = (
+    ['reverse', 'ots', 'deep', 'crowd', 'profile'] as const
+  ).flatMap((kind) => {
+    const shot = scene.effects.find(
+      (e) =>
+        e.do === 'zoom' &&
+        e.untilMs &&
+        // The first from the place's other side (§4.2), then the first of each kind from the front.
+        (kind === 'reverse'
+          ? e.shot?.reverse === true
+          : e.shot?.kind === kind && !e.shot.reverse),
+    );
+    return shot
+      ? [
+          {
+            t: (shot.atMs + (shot.untilMs ?? shot.atMs)) / 2,
+            why: SHOT_WHY[kind],
+          },
+        ]
+      : [];
+  });
   const end = Math.max(0, (scene.settledMs ?? scene.durationMs) - 100);
   const k = fullestStep(scene);
   const from = scene.steps[k]?.atMs ?? 0;
@@ -91,6 +97,7 @@ export function pictureMoments(
 
 /** Why a still of each of the shot grammar's shots is looked at. */
 const SHOT_WHY = {
+  reverse: "a shot from the place's other side",
   ots: 'an over-the-shoulder shot',
   deep: 'a deep-staged shot',
   crowd: 'a shot over the crowd',
@@ -182,16 +189,21 @@ export function pictureClaims(
   const shot = shotAtMoment(scene, t);
   const name = (id: string | null) =>
     (id ? byId.get(id)?.name : null) ?? 'someone';
+  const turned = shot?.shot?.reverse === true;
   const framing =
-    shot?.shot?.kind === 'ots'
-      ? `It is an over-the-shoulder shot: ${name(shot.part)} is near the camera, seen from behind at the frame's edge, big, cropped and a little soft; ${name(shot.target)} faces us past them.`
-      : shot?.shot?.kind === 'deep'
-        ? `It is a deep-staged shot: ${name(shot.target)} is near the camera, big and partly off the frame's edge; the others are behind at their places.`
-        : shot?.shot?.kind === 'crowd'
-          ? `It is a shot over the heads of the people watching onto ${name(shot.target)}.`
-          : shot?.shot?.kind === 'profile'
-            ? `It is a profile two-shot: ${name(shot.target)} and ${name(shot.part)} face each other, each seen from the side.`
-            : null;
+    turned && shot?.shot?.kind === 'crowd'
+      ? `It is taken the other way, from behind ${name(shot.target)}, onto the people watching, who face the camera.`
+      : turned && shot?.shot?.kind === 'ots'
+        ? `It is a reverse shot, taken from the place's other side (its other wall, or the other side of the street): ${name(shot.part)} is near the camera, seen from behind at the frame's edge, big, cropped and a little soft; ${name(shot.target)} faces us past them.`
+        : shot?.shot?.kind === 'ots'
+          ? `It is an over-the-shoulder shot: ${name(shot.part)} is near the camera, seen from behind at the frame's edge, big, cropped and a little soft; ${name(shot.target)} faces us past them.`
+          : shot?.shot?.kind === 'deep'
+            ? `It is a deep-staged shot: ${name(shot.target)} is near the camera, big and partly off the frame's edge; the others are behind at their places.`
+            : shot?.shot?.kind === 'crowd'
+              ? `It is a shot over the heads of the people watching onto ${name(shot.target)}.`
+              : shot?.shot?.kind === 'profile'
+                ? `It is a profile two-shot: ${name(shot.target)} and ${name(shot.part)} face each other, each seen from the side.`
+                : null;
   return {
     onStage,
     things,

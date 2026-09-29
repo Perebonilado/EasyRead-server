@@ -138,7 +138,7 @@ import { VIEW_RIG } from '../../business/domain/scene-figure-views';
 import { DRAWN } from '../../business/domain/scene-own';
 import type { OwnPropDrawing } from '../../business/domain/scene-props';
 import type { SetPiece } from '../../business/domain/scene-set-pieces';
-import { buildSet } from '../../business/domain/scene-set-layout';
+import { buildSet, reverseSet } from '../../business/domain/scene-set-layout';
 import { RIG_VERSION, rigSheet } from '../../business/domain/scene-sheet-rig';
 import { withMouths } from '../../business/domain/studio/studio-audit';
 import { withFace } from '../../business/domain/scene-sheet-face';
@@ -363,13 +363,24 @@ type WriteAsk = Omit<
  * A set built by code before it was kept as layers, as layers too: built
  * again from its own layout, with nothing asked of a model, when nothing
  * in it was drawn apart by the artist (whose drawings are not kept with
- * it). Its flat picture stays as it was kept.
+ * it). Its flat picture stays as it was kept. And one kept as layers
+ * before it had another side is given one from its layout, likewise
+ * (studio-views-plan §4.2), what the artist drew for it left out; a set
+ * painted whole has no layout, and no other side.
  */
 function withLayers(
   set: SetSheet | undefined,
   place: StoryPlace,
 ): SetSheet | undefined {
-  if (!set || set.layered || !set.layout || set.layout.own.length) return set;
+  if (!set || !set.layout) return set;
+  if (set.layered) {
+    if (set.layered.reverse) return set;
+    const reverse = reverseSet(set.layout, place);
+    return reverse
+      ? { ...set, layered: { ...set.layered, reverse: reverse.layered } }
+      : set;
+  }
+  if (set.layout.own.length) return set;
   try {
     return { ...set, layered: buildSet(set.layout, place).layered };
   } catch {

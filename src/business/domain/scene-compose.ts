@@ -16,12 +16,14 @@ import type {
   ScenePlaceDto,
   ScenePropDto,
   SceneStepDto,
+  SceneSetReverseDto,
   SceneSettingDto,
   SceneShotAngle,
   SceneShotKind,
   SceneThingDto,
   SceneTiming,
 } from '../../contracts';
+import type { SetLayering } from './scene-set-layout';
 import { actingOf, type DirectedMove, type SpokenLine } from './scene-acting';
 import { withViews } from './scene-views';
 import { guessAffordances } from './scene-affordances';
@@ -281,6 +283,18 @@ const shareOf = (
   Math.round(((y - viewBox[1]) / viewBox[3]) * 1000) / 1000,
 ];
 
+/** A set's other side as the player takes it: its layers, width, where its action is, and its floor (studio-views-plan §4.2). */
+function reverseDto(
+  reverse: NonNullable<SetLayering['reverse']>,
+): SceneSetReverseDto {
+  return {
+    layers: reverse.layers.map((layer) => ({ ...layer })),
+    setWidth: reverse.width,
+    ...(reverse.focal !== undefined ? { focal: reverse.focal } : {}),
+    floor: [reverse.floor.back, reverse.floor.front],
+  };
+}
+
 /**
  * The thing as the client gets it: its drawing, or a card with its name
  * when the drawing failed. On a story's page nothing is labelled: no
@@ -355,6 +369,10 @@ export function thingDto(
             number,
             number,
           ],
+          // Its other side, for a shot from there (studio-views-plan §4.2).
+          ...(drawing.layered.reverse?.layers.length
+            ? { reverse: reverseDto(drawing.layered.reverse) }
+            : {}),
         }
       : {}),
     ...(drawing.callouts.length && !story
@@ -914,6 +932,8 @@ interface Framed {
   with: string | null;
   kind?: SceneShotKind;
   angle?: SceneShotAngle;
+  /** From the place's other side (studio-views-plan §4.2). */
+  reverse?: true;
 }
 
 /**
@@ -931,11 +951,22 @@ function framedAs(ask: SceneCameraAsk, on: readonly string[]): Framed {
     case 'ots':
     case 'profile':
       return other
-        ? { on: one, with: other, kind: ask.shot }
+        ? {
+            on: one,
+            with: other,
+            kind: ask.shot,
+            ...(ask.reverse && ask.shot === 'ots' ? { reverse: true } : {}),
+          }
         : { on: one, with: null };
     case 'deep':
-    case 'crowd':
       return { on: one, with: null, kind: ask.shot };
+    case 'crowd':
+      return {
+        on: one,
+        with: null,
+        kind: ask.shot,
+        ...(ask.reverse ? { reverse: true } : {}),
+      };
     case 'low':
     case 'high':
       return { on: one, with: null, angle: ask.shot };
@@ -953,7 +984,8 @@ const same = (a: SceneEffectDto, b: SceneEffectDto) =>
   a.target === b.target &&
   a.part === b.part &&
   (a.shot?.kind ?? null) === (b.shot?.kind ?? null) &&
-  (a.shot?.angle ?? null) === (b.shot?.angle ?? null);
+  (a.shot?.angle ?? null) === (b.shot?.angle ?? null) &&
+  (a.shot?.reverse ?? false) === (b.shot?.reverse ?? false);
 
 /**
  * The camera as a scene says it (the Studio's sheets), cut as a film is:
@@ -1105,6 +1137,7 @@ export function directedShots(
         enter: 'cut',
         ...(shot.kind ? { kind: shot.kind } : {}),
         ...(shot.angle ? { angle: shot.angle } : {}),
+        ...(shot.reverse ? { reverse: true as const } : {}),
       },
     };
     // The same framing again at once: one shot.
@@ -2571,6 +2604,21 @@ export function composeScene(input: ComposeInput): {
       W,
       H,
     );
+  /**
+   * The set's other side (studio-views-plan §4.2), where it has one on the
+   * same floor as its front (so everyone stands on the ground from either
+   * side): null for a set painted whole, or one built before it.
+   */
+  const reverseSide = (() => {
+    const layered = setDrawing?.layered;
+    const other = layered?.reverse;
+    return layered &&
+      other?.layers.length &&
+      other.floor.back === layered.floor.back &&
+      other.floor.front === layered.floor.front
+      ? other
+      : null;
+  })();
   const setFrame: [number, number, number, number] = setDrawing?.viewBox ?? [
     0, 0, 1600, 900,
   ];
@@ -2911,6 +2959,37 @@ export function composeScene(input: ComposeInput): {
             return { id, box: { x: x0, y: y0, w: x1 - x0, h: y1 - y0 } };
           }),
         foreDepth,
+        // The set's other side, for the shots taken from there: its things
+        // before the camera and on its floor, on the stage (§4.2 of the
+        // views plan).
+        ...(reverseSide
+          ? {
+              reverse: {
+                fore: reverseSide.fore.map(({ id, box }) => {
+                  const [x0, y0] = on.toStage(box[0], box[1]);
+                  const [x1, y1] = on.toStage(box[0] + box[2], box[1] + box[3]);
+                  return { id, box: { x: x0, y: y0, w: x1 - x0, h: y1 - y0 } };
+                }),
+                foreDepth:
+                  reverseSide.layers.find((layer) => layer.id === 'foreground')
+                    ?.depth ?? foreDepth,
+                floorThings: (reverseSide.floorThings ?? []).map(
+                  ({ id, box, feet }) => {
+                    const [x0, y0] = on.toStage(box[0], box[1]);
+                    const [x1, y1] = on.toStage(
+                      box[0] + box[2],
+                      box[1] + box[3],
+                    );
+                    return {
+                      id,
+                      box: { x: x0, y: y0, w: x1 - x0, h: y1 - y0 },
+                      feet: on.toStage(0, feet)[1],
+                    };
+                  },
+                ),
+              },
+            }
+          : {}),
         open,
         // Too small to see, one beside a feature may step nearer too.
         nearer: (k, id) =>
@@ -3103,6 +3182,15 @@ export function composeScene(input: ComposeInput): {
       ),
       W: STAGINGS.wide.w,
       asked: script.camera ?? [],
+      // Shot and reverse shot where the place has another side, on the
+      // same floor (studio-views-plan §4.2); the crowd's view the other way
+      // where the people watching are seen on it.
+      reverse: reverseSide !== null,
+      reverseCrowd:
+        reverseSide !== null &&
+        reverseSide.layers.some((layer) =>
+          layer.svg.includes('data-audience="rows"'),
+        ),
     });
     // A big action move is seen on the whole stage: no shot hides it.
     const big: Doing[] = Object.values(acting).flatMap((one) =>
@@ -3735,6 +3823,12 @@ export function composeScene(input: ComposeInput): {
             layer.svg.includes('data-audience="rows"'),
         )
       : undefined;
+  // Nor, in a scene not about them, are they seen facing the camera from
+  // the place's other side.
+  if (!addressed && setDto?.kind === 'drawing')
+    for (const layer of setDto.reverse?.layers ?? [])
+      if (layer.svg.includes('data-audience="rows"'))
+        layer.svg = withoutAudience(layer.svg);
   if (watching && !addressed) watching.svg = withoutAudience(watching.svg);
   else if (watching) {
     // Seen only in the wide shot, as the crowd sees the one they watch:

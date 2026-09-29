@@ -330,6 +330,8 @@ export interface SceneCameraAsk {
   atMs?: number;
   /** Code's own: a close seen from high or low. */
   angle?: 'low' | 'high';
+  /** Code's own (studio-views-plan §4.2): taken from the place's other side, on its reverse. */
+  reverse?: true;
 }
 
 export interface DrawingThing {

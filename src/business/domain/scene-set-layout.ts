@@ -65,7 +65,13 @@ import {
   type LandmarkKind,
   type LandmarkParams,
 } from './scene-set-landmarks';
-import { audienceFor, drawAudience } from './scene-set-audience';
+import {
+  audienceFor,
+  drawAudience,
+  drawFacingAudience,
+} from './scene-set-audience';
+import { backOf } from './scene-set-backs';
+import { MAX_REVERSE, REVERSE_ROW, reverseLayoutOf } from './scene-set-reverse';
 import { FAR_K, FAR_MOST, checkSizes, realScaleOf } from './scene-set-sizes';
 import {
   NEUTRAL_PACKS,
@@ -212,6 +218,8 @@ export interface SetItem {
   colour: string | null;
   /** Turned the other way. */
   flip?: boolean;
+  /** Seen from behind, on a place's other side (studio-views-plan §4.2): its back where it has one of its own (scene-set-backs). */
+  back?: true;
 }
 
 /** A thing the list has no piece for: drawn by code from a landmark's builder where it names one (`build`), else by the artist as one of the show's own. */
@@ -221,6 +229,8 @@ export interface SetOwnItem {
   row: SetRow;
   /** Its landmark's builder and its parameters, clamped (scene-set-landmarks). */
   build?: { kind: LandmarkKind; params: LandmarkParams };
+  /** Mirrored: seen from the place's other side. */
+  flip?: true;
 }
 
 export interface SetLayout {
@@ -252,6 +262,14 @@ export interface SetLayout {
   style?: StylePackId;
   /** Rows of people watching before the camera (§5.5): a class, a congregation, a stand; absent for none. */
   audience?: 1 | 2;
+  /**
+   * What is on the place's other side, seen by a camera turned round
+   * (studio-views-plan §4.2): a room's fourth wall (its door, a window,
+   * shelves, a picture), the other side of the street or the clearing.
+   * Each placed as a thing at the back, `x` across as seen from there.
+   * Absent, code fills it from the place's kind and style pack.
+   */
+  reverse?: SetItem[];
 }
 
 /** The most things a set places, and the most the artist draws for it. */
@@ -801,15 +819,29 @@ export function layoutOf(
   const kind = place.kind ?? 'outdoor';
   const items: SetItem[] = [];
   const own: SetOwnItem[] = [];
+  const reverse: SetItem[] = [];
   for (const one of Array.isArray(said.items) ? said.items : []) {
     if (!one || typeof one !== 'object') continue;
     const item = one as Record<string, unknown>;
     const kindOf = itemKindOf(item.kind) ?? itemKindOf(item.name);
     const x = share(item.x);
-    const row = rowOf(item.row);
     // A kind the kit has no piece for is left out: only what the painter
     // asks to be drawn apart ("own") is drawn by the artist.
     if (!kindOf) continue;
+    // What is on the place's other side (§4.2 of the views plan): its own
+    // row, a few things at its back.
+    if (typeof item.row === 'string' && REVERSE_ROW.test(item.row)) {
+      if (reverse.length < MAX_REVERSE)
+        reverse.push({
+          kind: kindOf,
+          x,
+          row: 'back',
+          scale: 1,
+          colour: setColourOf(item.colour),
+        });
+      continue;
+    }
+    const row = rowOf(item.row);
     if (items.length >= MAX_SET_ITEMS) continue;
     // A few things before the camera at most: the rest nearer than none.
     if (
@@ -943,6 +975,7 @@ export function layoutOf(
     ...(width !== undefined && width !== 1 ? { width } : {}),
     ...(style ? { style } : {}),
     ...(style && audience ? { audience } : {}),
+    ...(reverse.length ? { reverse } : {}),
   };
 }
 
@@ -1138,6 +1171,16 @@ export const SET_H = 900;
 let drawW: number = SET_W;
 /** The ink the set being built is drawn in, as a share of its usual (a show's style, SetLook). */
 let inkK = 1;
+/**
+ * Which side of its place the set being built is (studio-views-plan
+ * §4.2): its front, or its other side, whose things before the camera and
+ * on the floor are named apart ("rv-fg-1") so each is faded on its own,
+ * a vessel's other side has no door, and the people watching face the
+ * camera from across the floor.
+ */
+let sideNow: 'front' | 'reverse' = 'front';
+/** What a thing's group is called on the side being built. */
+const sideId = (id: string) => (sideNow === 'reverse' ? `rv-${id}` : id);
 /** The set's own outline: the kit's line where its people stand. */
 const INK_W = setLine(SET_H);
 /** Where the story's people stand, and how many of the set's units a kit unit is there (scene-crowd's own). */
@@ -2099,7 +2142,22 @@ function pieceOf(
   seed = 0,
   pack: StylePack | null = null,
   key = '',
+  /** Seen from behind: its back where it has one of its own, else as it is. */
+  back = false,
 ): SceneryPiece {
+  if (back) {
+    const front = pieceOf(kind, colour, seed, pack, key);
+    const behind = backOf(
+      kind,
+      pack && colour ? packColour(pack, colour) : colour,
+    );
+    if (!behind) return front;
+    // Nothing of its front on it answers the world from behind.
+    const { reacts, roosts, ...rest } = front;
+    void reacts;
+    void roosts;
+    return { ...rest, svg: behind.svg, viewBox: behind.viewBox };
+  }
   if (pack && isBuildingKind(kind))
     return drawBuilding(kind, pack, key, colour ?? undefined);
   if (pack && colour && (isKitKind(kind) || isLandmarkKind(kind)))
@@ -2231,6 +2289,8 @@ function drawVesselSide(
   colour: string,
   walls: string,
   floor: number,
+  /** Its other side, seen from across the aisle: windows all along, no door. */
+  other = false,
 ): string {
   if (vessel === 'boat') {
     // An open deck: its far rail, the sea beyond it, and a mast.
@@ -2254,7 +2314,7 @@ function drawVesselSide(
   const sill = floor - (vessel === 'plane' ? 250 : 210);
   const glassTop = ceiling + 40;
   // The windows, and the door at the right with its glass.
-  const doorX = vessel === 'plane' ? null : SET_W - 250;
+  const doorX = vessel === 'plane' || other ? null : SET_W - 250;
   const holes: string[] = [];
   const frames: string[] = [];
   if (vessel === 'plane') {
@@ -2268,7 +2328,7 @@ function drawVesselSide(
     }
   } else {
     const right = (doorX ?? SET_W) - 40;
-    const n = vessel === 'train' ? 3 : 4;
+    const n = (vessel === 'train' ? 3 : 4) + (doorX === null ? 1 : 0);
     const gap = 44;
     const w = (right - 40 - gap * (n - 1)) / n;
     for (let k = 0; k < n; k += 1) {
@@ -2553,6 +2613,14 @@ export interface SetLayering {
     box: [number, number, number, number];
     feet: number;
   }[];
+  /**
+   * The place's other side, as layers too (studio-views-plan §4.2): what a
+   * camera turned round sees, from the same layout (scene-set-reverse),
+   * its things before the camera and on the floor named "rv-…". Absent on
+   * a set built before it, which is given one from its layout when it is
+   * next used, or on one painted whole, which has none.
+   */
+  reverse?: Omit<SetLayering, 'reverse'>;
 }
 
 /**
@@ -2652,6 +2720,57 @@ export function buildSet(
   /** A Studio show's animation style: its tint and its ink. Absent, the house look. */
   look: SetLook | null = null,
 ): BuiltSet {
+  const front = buildSide(layout, place, own, world, look, 'front');
+  const reverse = reverseSet(layout, place, own, world, look);
+  return reverse
+    ? {
+        ...front,
+        layered: { ...front.layered, reverse: reverse.layered },
+        notes: [
+          ...front.notes,
+          ...reverse.notes.map((note) => `other side: ${note}`),
+        ],
+      }
+    : front;
+}
+
+/**
+ * A place's other side as layers (studio-views-plan §4.2): built from its
+ * own layout turned round (scene-set-reverse), what the artist drew
+ * mirrored, with nothing asked of a model. Null where it cannot be built.
+ */
+export function reverseSet(
+  layout: SetLayout,
+  place: StoryPlace,
+  own: Record<string, SetPiece> = {},
+  world: StoryWorld | null = null,
+  look: SetLook | null = null,
+): { layered: Omit<SetLayering, 'reverse'>; notes: string[] } | null {
+  try {
+    const turned = reverseLayoutOf(renamedIn(layout), place);
+    const built = buildSide(
+      turned.layout,
+      turned.place,
+      own,
+      world,
+      look,
+      'reverse',
+    );
+    return { layered: built.layered, notes: built.notes };
+  } catch {
+    return null;
+  }
+}
+
+/** One side of a place drawn from its layout: buildSet's, the set's front or its other side. */
+function buildSide(
+  layout: SetLayout,
+  place: StoryPlace,
+  own: Record<string, SetPiece>,
+  world: StoryWorld | null,
+  look: SetLook | null,
+  side: 'front' | 'reverse',
+): BuiltSet {
   // As wide as its layout says (a vessel one frame, whatever it says): what
   // spans the whole set drawn that wide, and the frame its middle.
   const across =
@@ -2660,6 +2779,7 @@ export function buildSet(
       : Math.round(SET_W * (layout.width ?? 1));
   drawW = across;
   inkK = look?.ink ?? 1;
+  sideNow = side;
   try {
     return buildSetAt(
       renamedIn(layout),
@@ -2672,6 +2792,7 @@ export function buildSet(
   } finally {
     drawW = SET_W;
     inkK = 1;
+    sideNow = 'front';
   }
 }
 
@@ -2776,7 +2897,7 @@ function buildSetAt(
     out.push(outside);
     layers.far.push(outside);
     parts.outside = 'outside';
-    const side = `<g id="side">${drawVesselSide(vessel, layout.vesselColour ?? look.colour, layout.walls ? shade(layout.walls, 1.4) : look.walls, floor)}</g>`;
+    const side = `<g id="side">${drawVesselSide(vessel, layout.vesselColour ?? look.colour, layout.walls ? shade(layout.walls, 1.4) : look.walls, floor, sideNow === 'reverse')}</g>`;
     out.push(side);
     layers.back.push(side);
   }
@@ -2829,7 +2950,14 @@ function buildSetAt(
     if ((item.kind === 'window' || item.kind === 'door') && kind !== 'indoor')
       continue;
     if (item.kind === 'window') item = { ...item, kind: 'curtains' };
-    const piece = pieceOf(item.kind, item.colour, placings.length, pack, key);
+    const piece = pieceOf(
+      item.kind,
+      item.colour,
+      placings.length,
+      pack,
+      key,
+      item.back === true,
+    );
     const [, vy, vw] = piece.viewBox;
     if ((HANGING as readonly string[]).includes(item.kind)) {
       // Only on a wall: on the back wall, at the back row's scale, its
@@ -3001,6 +3129,7 @@ function buildSetAt(
         band: 'far',
         own: true,
         free: true,
+        ...(item.flip ? { flip: true } : {}),
       });
       continue;
     }
@@ -3022,6 +3151,7 @@ function buildSetAt(
       band: row,
       own: true,
       ...(pack ? { free: true } : {}),
+      ...(item.flip ? { flip: true } : {}),
     });
   }
   // A vessel's seats along its far side, unless the layout placed its own.
@@ -3277,7 +3407,7 @@ function buildSetAt(
     // On the floor among the people, with its contact shadow, as theirs.
     if (one.band === 'front' && pack) {
       // Each its own group, in a style pack: one can be faded.
-      const id = `fl-${onFloor.length + 1}`;
+      const id = sideId(`fl-${onFloor.length + 1}`);
       onFloor.push({ id, one });
       layers.floor.push(`<g id="${id}">${contactShadow(one)}${drawnOne}</g>`);
     } else if (one.band === 'front')
@@ -3299,15 +3429,41 @@ function buildSetAt(
   const fore = placings
     .filter((one) => one.band === 'foreground')
     .sort((a, b) => a.y - b.y || a.x - b.x)
-    .map((one, k) => ({ one, id: `fg-${k + 1}` }));
+    .map((one, k) => ({ one, id: sideId(`fg-${k + 1}`) }));
   for (const { one, id } of fore) {
     const drawnOne = drawnAt({ ...one, id });
     out.push(drawnOne);
     layers.foreground.push(drawnOne);
   }
-  // And the people watching, their backs to the camera (§5.5).
+  // And the people watching, their backs to the camera (§5.5); on the
+  // place's other side, facing it from across the floor, at its back.
   let watching: SetLayering['fore'] = [];
-  if (pack && layout.audience) {
+  if (pack && layout.audience && sideNow === 'reverse') {
+    const words = `${place.name} ${place.look}`;
+    // Their feet across the back of the floor, the nearer row a step forward.
+    const back = rowFeet(kind, 'back');
+    const rows: [number, number] = [
+      back,
+      back + (rowFeet(kind, 'middle') - back) * 0.35,
+    ];
+    const facing = drawFacingAudience({
+      rows: layout.audience,
+      spread: audienceFor(words)?.spread ?? 'full',
+      seed: `${place.id}:${place.name}`,
+      world: story && worldWords(story).trim() ? story : PACK_WORLD[pack.id],
+      kind,
+      focal: layout.focal?.x ?? 0.5,
+      children: /\b(?:class ?rooms?|school|lessons?|pupils|children)\b/iu.test(
+        words,
+      ),
+      W: SET_W,
+      H: SET_H,
+      feet: rows,
+      unit: [scaleAtFeet(kind, rows[0]), scaleAtFeet(kind, rows[1])],
+    });
+    // Among the things standing on the ground, behind the story's people.
+    if (facing) layers.stage.push(facing);
+  } else if (pack && layout.audience) {
     const words = `${place.name} ${place.look}`;
     const audience = drawAudience({
       rows: layout.audience,

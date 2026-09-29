@@ -1095,6 +1095,18 @@ export interface SceneSetLayerDto {
   feet?: number;
 }
 
+/**
+ * A place's other side, as the camera sees it turned round (yaw 180):
+ * its layers back to front, as a set's; how wide it is drawn; where its
+ * action is (the set's focal, mirrored); and its floor, the set's own.
+ */
+export interface SceneSetReverseDto {
+  layers: SceneSetLayerDto[];
+  setWidth?: number;
+  focal?: number;
+  floor?: [number, number];
+}
+
 /** How a kit drawing goes when it goes somewhere. */
 export type SceneGait =
   'walk' | 'waddle' | 'hop' | 'swim' | 'slither' | 'float';
@@ -1153,6 +1165,16 @@ export type SceneThingDto =
       focal?: number;
       /** The floor people stand on, in the set's units: the y of its back and front edges. What stands on it follows the camera by its depth (0.8 at the back to 1.05 at the front). */
       floor?: [number, number];
+      /**
+       * The place's other side (studio-views-plan §4.2), for a reverse
+       * shot: a room's fourth wall, the other side of the street or the
+       * clearing, a vessel's other side; its floor and the things on it
+       * the same, mirrored, seen from behind. Drawn at the set's width,
+       * its layers as `layers`; what stands at x across the set's frame
+       * stands at 1600 − x across its own. Absent on a set with no other
+       * side (one painted whole): no reverse shot is taken there.
+       */
+      reverse?: SceneSetReverseDto;
       /** Drawn by the figure kit: it moves its eyes, face, head, arms and mouth as it acts. */
       rig?: true;
       /** Where its head is, as shares of its box across and down: where it looks from. */
@@ -1322,11 +1344,19 @@ export interface SceneEffectDto {
    *    "high", high looking down (on someone small or sad): on a flat set
    *    a cheat, the horizon down or up and the people a little larger or
    *    smaller.
+   *  - `reverse` (studio-views-plan §4.2): taken from the other side of
+   *    the place, turned round (yaw 180), on the set's reverse layers: x
+   *    on the stage is reflected (a place at x, w stands at W − x − w)
+   *    and the views are as a camera turned round sees them. Over the
+   *    shoulder, the two keep the sides of the frame they had from the
+   *    front (the 180° rule): the one near at the edge the other was at.
+   *    Only where the set has a reverse. Coming to or from it is a cut.
    */
   shot?: {
     enter: 'cut' | 'move';
     kind?: SceneShotKind;
     angle?: SceneShotAngle;
+    reverse?: true;
   };
   /** How the camera moves in a shot (studio-scenery-plan §6.2): "push", in harder on a feeling. The player tracks walkers and pans a wide set by its own rules. */
   pan?: 'track' | 'pan' | 'push';

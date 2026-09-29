@@ -32,14 +32,19 @@ import type {
 import {
   NO_ROOM,
   WALK_DEPTH,
+  isReverse,
   nearOf,
+  pairSide,
+  reflectPlace,
   roomOf,
   walksOf,
   type StageWalk,
 } from './scene-film';
 
-/** The camera's yaw on every shot today: straight on (§3 brings others). */
+/** The camera's yaw straight on, from the front. */
 export const FRONT_ON = 0;
+/** And turned round, from the place's other side (a reverse shot, §4.2). */
+export const TURNED_ROUND = 180;
 /** The views in turn from the front round to the back. */
 export const VIEW_ORDER: readonly SceneView[] = [
   'front',
@@ -119,9 +124,11 @@ export function facingToward(
   return side * Math.min(geometric, 50);
 }
 
-/** A facing someone speaking may show: never their back. */
-const speakerFacing = (facing: number) =>
-  Math.abs(facing) > 112 ? Math.sign(facing) * 60 : facing;
+/** A facing someone speaking may show a camera turned `yaw`: never their back. */
+const speakerFacing = (facing: number, yaw = FRONT_ON) => {
+  const off = ((((facing - yaw) % 360) + 540) % 360) - 180;
+  return Math.abs(off) > 112 ? yaw + (Math.sign(off) || 1) * 60 : facing;
+};
 
 /** How far round the camera is over someone's shoulder (studio-views-plan §3.1): the one it looks at three-quarter to us, the one near from behind. */
 export const OTS_YAW = 45;
@@ -140,6 +147,32 @@ export function shotFacing(
   places: Record<string, Pick<ScenePlaceDto, 'x' | 'w'>>,
 ): { yaw: number; facing: Record<string, number> } | null {
   const kind = shot.shot?.kind;
+  if (isReverse(shot)) {
+    // Over the crowd the other way: from behind the one speaking to them.
+    if (kind === 'crowd')
+      return { yaw: TURNED_ROUND, facing: { [shot.target]: 0 } };
+    if (
+      kind === 'ots' &&
+      shot.part &&
+      places[shot.target] &&
+      places[shot.part]
+    ) {
+      // Over the other's shoulder from the place's other side, the two on
+      // the sides of the frame they have from the front (§3.3): the one it
+      // is on three-quarter to us, the one near three-quarter from behind.
+      const dir = pairSide(shot, places);
+      return {
+        yaw: TURNED_ROUND - OTS_YAW * dir,
+        facing: { [shot.target]: 90 * dir, [shot.part]: -90 * dir },
+      };
+    }
+    // Any other shot turned round: each faces as from the front, seen from behind it.
+    const front = shotFacing(
+      { ...shot, shot: { enter: 'cut', ...(kind ? { kind } : {}) } },
+      places,
+    );
+    return front ? { ...front, yaw: front.yaw + TURNED_ROUND } : null;
+  }
   if ((kind !== 'ots' && kind !== 'profile') || !shot.part) return null;
   const one = places[shot.target];
   const two = places[shot.part];
@@ -211,8 +244,12 @@ export function viewsOf(
       wide.h,
       room,
     );
-    return near?.id === id ? near.place : null;
+    if (near?.id !== id) return null;
+    // Turned round, where the front would have them, as everyone else here is.
+    return isReverse(shot) ? reflectPlace(near.place, wide.w) : near.place;
   };
+  /** The camera's yaw at a moment: turned round in a shot from the place's other side. */
+  const yawAt = (t: number) => (isReverse(shotAt(t)) ? TURNED_ROUND : FRONT_ON);
   /** Where someone is at `t`, on the wide stage: cheated near the camera for a shot, along a walk, else where their step has them. */
   const placeOf = (id: string, t: number): ScenePlaceDto | null => {
     const cheated = nearAt(id, t);
@@ -284,8 +321,11 @@ export function viewsOf(
       const k = stepAt(t);
       if (!shot || k < 0 || walkOf(id, t)) return null;
       if (shot.shot?.kind === 'crowd' && shot.target === id)
-        // Over the crowd: they speak to them, to us.
-        return { yaw: 0, facing: 0 };
+        // Over the crowd: they speak to them, to us; the other way, seen
+        // from behind as they do.
+        return isReverse(shot)
+          ? { yaw: TURNED_ROUND, facing: 0 }
+          : { yaw: 0, facing: 0 };
       const turned = shotFacing(shot, wide.places[k] ?? {});
       const facing = turned?.facing[id];
       return turned && facing !== undefined
@@ -296,10 +336,11 @@ export function viewsOf(
       const walk = walkOf(id, t);
       const speaking = speech.some(([a, b]) => a - 200 <= t && t < b + 200);
       const using = interactFacing(id, t);
-      if (using !== null) return speaking ? speakerFacing(using) : using;
+      const yaw = yawAt(t);
+      if (using !== null) return speaking ? speakerFacing(using, yaw) : using;
       if (walk) {
         const along = walkFacing(walk.start, walk.end, W);
-        return speaking ? speakerFacing(along) : along;
+        return speaking ? speakerFacing(along, yaw) : along;
       }
       const me = placeOf(id, t);
       if (!me) return 0;
@@ -320,7 +361,7 @@ export function viewsOf(
           facing = facingToward(dx, dz, turn, close);
         }
       }
-      return speaking ? speakerFacing(facing) : facing;
+      return speaking ? speakerFacing(facing, yaw) : facing;
     };
     /**
      * Which way someone faces while they use a thing of the set
@@ -378,12 +419,14 @@ export function viewsOf(
       // Using a thing of the set, they face as its interaction has them,
       // whatever the shot would turn them to; its camera's yaw still counts.
       const using = interactFacing(id, t + 1);
+      // From the place's other side, the camera is turned round: whoever
+      // faces the front camera shows their back.
       const { view, mirror } =
         using !== null
-          ? viewAt(facingAt(t + 1), shot?.yaw ?? 0)
+          ? viewAt(facingAt(t + 1), shot?.yaw ?? yawAt(t + 1))
           : shot
             ? viewAt(shot.facing, shot.yaw)
-            : viewAt(facingAt(t + 1));
+            : viewAt(facingAt(t + 1), yawAt(t + 1));
       const last = keys[keys.length - 1];
       // The front is the same either way round.
       const m: 1 | -1 = view === 'front' ? 1 : mirror;

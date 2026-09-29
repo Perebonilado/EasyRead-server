@@ -35,7 +35,10 @@ import {
   angleLayer,
   anglePeople,
   floorFactor,
+  isReverse,
   nearOf,
+  reflectPlace,
+  reflectRoom,
   roomOf,
   viewOf,
   type SetRoom,
@@ -364,10 +367,17 @@ export function stillPlan(
   const drawnSet = set?.kind === 'drawing' ? set : undefined;
   const room = roomOf(drawnSet ?? null, W, H);
   const view = viewAtMoment(scene, t, room);
-  const camera = at.camera ?? stillCamera(view, W, H, room.span);
   // The shot's grammar (studio-views-plan §3): whom it cheats near the
-  // camera, and a low or high angle.
+  // camera, and a low or high angle; and from the place's other side
+  // (§4.2), its reverse layers, the stage reflected.
   const shot = shotAtMoment(scene, t);
+  const turned = isReverse(shot) && Boolean(drawnSet?.reverse?.layers.length);
+  const camera =
+    at.camera ??
+    stillCamera(view, W, H, turned ? reflectRoom(room, W).span : room.span);
+  /** Where a place on the stage is in the picture: reflected, turned round. */
+  const side = <T extends Box>(box: T): T =>
+    turned ? reflectPlace(box, W) : box;
   const near = nearOf(shot, step?.show ?? [], places[k] ?? {}, W, H, room);
   const angle = shot?.shot?.angle;
   /** A layer's window under a low or high angle: scaled about the frame's top or bottom, the farther off the more. */
@@ -401,9 +411,12 @@ export function stillPlan(
   const onFloor: StillPart[] = [];
   const before: StillPart[] = [];
   if (drawnSet) {
-    const layers: SceneSetLayerDto[] = drawnSet.layers?.length
-      ? drawnSet.layers
-      : [{ id: 'flat', depth: PARALLAX, svg: drawnSet.svg }];
+    const layers: SceneSetLayerDto[] =
+      turned && drawnSet.reverse
+        ? drawnSet.reverse.layers
+        : drawnSet.layers?.length
+          ? drawnSet.layers
+          : [{ id: 'flat', depth: PARALLAX, svg: drawnSet.svg }];
     for (const layer of layers) {
       const svg = windowed(
         withoutStandIns(scene, layer.svg),
@@ -441,10 +454,12 @@ export function stillPlan(
       else behind.push(part);
     }
   }
-  // Its crowd, in its set's frame, on its ground.
-  const crowd = crowdShown(scene, k)
-    ? scene.things.find((one) => one.id === CROWD_ID)
-    : undefined;
+  // Its crowd, in its set's frame, on its ground (the front's only: from
+  // the other side, the player leaves it out too).
+  const crowd =
+    crowdShown(scene, k) && !turned
+      ? scene.things.find((one) => one.id === CROWD_ID)
+      : undefined;
   if (crowd?.kind === 'drawing')
     behind.push({
       key: 'crowd',
@@ -461,7 +476,7 @@ export function stillPlan(
   // The features the stage draws, as open as they are then.
   for (const feature of scene.setting?.features ?? []) {
     const svg = featureSvgAt(scene, feature, t);
-    const at = feature.at.wide;
+    const at = side(feature.at.wide);
     if (!svg || at.w <= 0 || at.h <= 0) continue;
     const feet = feature.feet?.wide ?? at.y + at.h;
     const f = floorFactor(feet, floor);
@@ -473,6 +488,8 @@ export function stillPlan(
       width: Math.max(48, Math.round(at.w * camera.s * scale * 2)),
       depth: f,
       feet,
+      // From the other side, seen the other way round.
+      ...(turned ? { mirror: true as const } : {}),
     });
   }
   // The people, posed as they are then, their hidden parts hidden.
@@ -480,8 +497,8 @@ export function stillPlan(
   for (const id of step?.show ?? []) {
     const thing = scene.things.find((one) => one.id === id);
     const cheated = near?.id === id ? near.place : null;
-    const place: ScenePlaceDto | undefined =
-      cheated ?? at.places?.[id] ?? places[k]?.[id];
+    const stood = at.places?.[id] ?? places[k]?.[id];
+    const place: ScenePlaceDto | undefined = cheated ?? (stood && side(stood));
     if (thing?.kind !== 'drawing' || !place || thing.backdrop) continue;
     if (place.w > W * 0.6 && !cheated) continue;
     shows.push(id);
@@ -501,7 +518,8 @@ export function stillPlan(
     // round facing left (their arms as the frame has them, mirrored).
     const seen = sided ? viewInStill(scene, id, t) : null;
     if (seen) svg = viewOnly(svg, seen.view);
-    const mirrored = seen?.mirror === -1;
+    // One with no views, from the other side, is seen the other way round.
+    const mirrored = seen ? seen.mirror === -1 : turned;
     if (thing.rig) {
       const pose = stillPose(scene, id, t);
       svg = posedRig(

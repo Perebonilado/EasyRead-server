@@ -682,6 +682,19 @@ export function viewOf(
   H: number,
   room: SetRoom = NO_ROOM,
 ): View {
+  // From the place's other side: the stage reflected, the room too.
+  if (shot && isReverse(shot)) {
+    const turned = reflectPlaces(places, W);
+    const other = reflectRoom(room, W);
+    const kind = shot.shot?.kind;
+    const one = show.includes(shot.target) ? turned[shot.target] : undefined;
+    const two =
+      shot.part && show.includes(shot.part) ? turned[shot.part] : undefined;
+    if (kind === 'ots' && one && two)
+      return otsView(one, two, W, H, other.span, pairSide(shot, places));
+    if (kind === 'crowd' && one) return crowdReverseView(one, W, H, other.span);
+    return viewOf(frontOf(shot), show, turned, W, H, other);
+  }
   const wide = wideView(show, places, W, H, room);
   const placed = (id: string | null) =>
     id && show.includes(id) ? places[id] : undefined;
@@ -786,15 +799,20 @@ const faceIn = (p: Pick<ScenePlaceDto, 'x' | 'y' | 'w' | 'h'>) => ({
   h: p.h * 0.2,
 });
 
-/** Over the shoulder of `near` onto `one`: where the camera looks. */
+/**
+ * Over the shoulder of `near` onto `one`: where the camera looks. `dir`
+ * is the side of the frame the one it is on is at from the one near (1:
+ * to the right), where the two keep the sides they had elsewhere (a
+ * reverse shot, §4.2); absent, from where they stand.
+ */
 export function otsView(
   one: ScenePlaceDto,
   near: ScenePlaceDto,
   W: number,
   H: number,
   span: readonly [number, number] = [0, 0],
+  dir: -1 | 1 = (Math.sign(middleOf(one) - middleOf(near)) || 1) as -1 | 1,
 ): View {
-  const dir = Math.sign(middleOf(one) - middleOf(near)) || 1;
   const s = Math.min(
     OTS_MOST,
     Math.max(OTS_LEAST, (OTS_FILL * H) / (one.h * 0.62)),
@@ -805,6 +823,89 @@ export function otsView(
       x: middleOf(one) - (dir * OTS_OFFSET * W) / s,
       y: one.y + one.h * 0.3,
     },
+    W,
+    H,
+    span,
+  );
+}
+
+// ── The reverse (studio-views-plan §4.2) ───────────────────────────────────
+
+/** Whether a shot is taken from the place's other side, the camera turned round. */
+export const isReverse = (shot: ShotLike | null | undefined): boolean =>
+  shot?.shot?.reverse === true;
+
+/** A shot as the front would take it: the same, not turned round. */
+function frontOf(shot: ShotLike): ShotLike {
+  if (!shot.shot) return shot;
+  const { reverse, ...rest } = shot.shot;
+  void reverse;
+  return { ...shot, shot: rest };
+}
+
+/** A place on the stage as a camera turned round sees it: across the other way (W − x − w), at the same depth. */
+export function reflectPlace<T extends Pick<ScenePlaceDto, 'x' | 'w'>>(
+  place: T,
+  W: number,
+): T {
+  return { ...place, x: Math.round((W - place.x - place.w) * 10) / 10 };
+}
+
+/** Every place of a step reflected so. */
+export function reflectPlaces<T extends Pick<ScenePlaceDto, 'x' | 'w'>>(
+  places: Record<string, T>,
+  W: number,
+): Record<string, T> {
+  return Object.fromEntries(
+    Object.entries(places).map(([id, p]) => [id, reflectPlace(p, W)]),
+  );
+}
+
+/** The room a set wider than the frame gives its camera, seen from its other side: its edges swapped, where its action is across the other way. */
+export function reflectRoom(room: SetRoom, W: number): SetRoom {
+  return {
+    span: [room.span[1], room.span[0]],
+    focal: room.focal === null ? null : W - room.focal,
+  };
+}
+
+/**
+ * The side of the frame a shot of two keeps the one it is on at, from the
+ * other (1: to the right), as they stand seen from the front: over the
+ * shoulder from either side of the place, the two keep the sides they
+ * have from the front (the 180° rule, §3.3). A cartoon's cheat: turned
+ * round, the camera stands on the same side of the line between them.
+ */
+export function pairSide(
+  shot: ShotLike,
+  places: Record<string, Pick<ScenePlaceDto, 'x' | 'w'>>,
+): -1 | 1 {
+  const one = places[shot.target];
+  const two = shot.part ? places[shot.part] : undefined;
+  if (!one || !two) return 1;
+  return (Math.sign(middleOf(one) - middleOf(two)) || 1) as -1 | 1;
+}
+
+/** From the stage onto the people watching, across the floor, on the other side: this close, and this far down the frame. */
+export const CROWD_REVERSE_SCALE = 1.2;
+export const CROWD_REVERSE_Y = 0.44;
+
+/**
+ * The crowd's view the other way (§4.2): from behind `one`, who speaks to
+ * them, onto the people watching across the floor, facing us. Where the
+ * camera looks, on the stage reflected.
+ */
+export function crowdReverseView(
+  one: ScenePlaceDto,
+  W: number,
+  H: number,
+  span: readonly [number, number] = [0, 0],
+): View {
+  const s = CROWD_REVERSE_SCALE;
+  // A little off the middle, away from the one it looks past.
+  const away = middleOf(one) <= W / 2 ? 1 : -1;
+  return settle(
+    { s, x: W / 2 + (away * 0.1 * W) / s, y: H * CROWD_REVERSE_Y },
     W,
     H,
     span,
@@ -956,11 +1057,49 @@ export function nearOf(
   room: SetRoom = NO_ROOM,
 ): { id: string; place: ScenePlaceDto; view: View; soft: boolean } | null {
   const kind = shot?.shot?.kind;
-  if (!shot || (kind !== 'ots' && kind !== 'deep')) return null;
+  if (
+    !shot ||
+    (kind !== 'ots' &&
+      kind !== 'deep' &&
+      !(kind === 'crowd' && isReverse(shot)))
+  )
+    return null;
   const placed = (id: string | null) =>
     id && show.includes(id) ? places[id] : undefined;
   const one = placed(shot.target);
   if (!one) return null;
+  if (isReverse(shot)) {
+    // From the other side: where the stage reflected stands them; over a
+    // shoulder, the one near at the edge they were at from the front.
+    const turned = reflectPlaces(places, W);
+    const other = reflectRoom(room, W);
+    const it = turned[shot.target];
+    if (kind === 'ots') {
+      const near =
+        shot.part && show.includes(shot.part) ? turned[shot.part] : undefined;
+      if (!near || !shot.part) return null;
+      const dir = pairSide(shot, places);
+      const view = otsView(it, near, W, H, other.span, dir);
+      return {
+        id: shot.part,
+        place: nearPlace(near, view, -dir as -1 | 1, [it], W, H),
+        view,
+        soft: true,
+      };
+    }
+    if (kind === 'crowd') {
+      // The one speaking to them, near, from behind, at their own side.
+      const view = crowdReverseView(it, W, H, other.span);
+      const side: -1 | 1 = middleOf(it) <= W / 2 ? -1 : 1;
+      return {
+        id: shot.target,
+        place: nearPlace(it, view, side, [], W, H),
+        view,
+        soft: false,
+      };
+    }
+    return nearOf(frontOf(shot), show, turned, W, H, other);
+  }
   if (kind === 'ots') {
     const near = placed(shot.part);
     if (!near || !shot.part) return null;
@@ -993,12 +1132,18 @@ export function nearOf(
   };
 }
 
-/** What a shot cheats near the camera, as a key: two shots that cheat differently are always a cut apart. */
+/**
+ * What a shot cheats near the camera, and from which side of the place it
+ * is taken, as a key: two shots that cheat differently, or one from each
+ * side, are always a cut apart.
+ */
 const cheatKey = (shot: ShotLike | null) => {
   const kind = shot?.shot?.kind;
-  return shot && (kind === 'ots' || kind === 'deep')
-    ? `${kind}:${shot.target}:${shot.part ?? ''}`
-    : '';
+  const cheat =
+    shot && (kind === 'ots' || kind === 'deep')
+      ? `${kind}:${shot.target}:${shot.part ?? ''}`
+      : '';
+  return isReverse(shot) ? `${cheat}|reverse` : cheat;
 };
 
 /**

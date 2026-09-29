@@ -12,6 +12,7 @@ import {
   SET_WEATHERS,
 } from '../../business/domain/scene-set-layout';
 import { landmarkBrief } from '../../business/domain/scene-set-landmarks';
+import { MAX_REVERSE } from '../../business/domain/scene-set-reverse';
 import { STYLE_PACK_IDS } from '../../business/domain/scene-style-packs';
 
 /**
@@ -2674,7 +2675,12 @@ export const PROMPTS = {
       'Things that hang on a wall (shelf, whiteboard, blackboard,',
       'noticeboard, curtains, picture, clock, bunting) go on the back wall',
       'of a room; a window with curtains is "curtains". A rug lies on the',
-      'floor. "palm" is a palm tree.',
+      'floor. "palm" is a palm tree. A row may also be "reverse": what is',
+      'behind the camera, seen when it turns round for a reverse shot (a',
+      "room's fourth wall: its door, a window, shelves, a picture; out of",
+      'doors the other side of the street or the clearing, its buildings or',
+      `trees), "x" as seen from there; at most ${MAX_REVERSE}, or none and code`,
+      'fills it from the place.',
     ].join(' '),
     [
       '"focal": where the action happens, { "x", "feature", "words" }: x',

@@ -48,7 +48,9 @@ import {
   type Ink,
   type Words,
 } from './scene-labels';
+import { keepGrounded } from './scene-grounding';
 import {
+  SOLID_BESIDE,
   STAGINGS,
   STATION_SHARES,
   extentOf,
@@ -123,7 +125,7 @@ import {
   type StageWalk,
 } from './scene-film';
 import type { GatedDrawing } from './scene-svg';
-import { keepFacesSeen } from './scene-faces-seen';
+import { keepFacesSeen, keepInClearView } from './scene-faces-seen';
 import { audienceAlive, type AudienceTurn } from './scene-set-audience';
 import { anchorMs, quietGaps, spaced, type TimedBeat } from './scene-timing';
 import { numberWords } from './spoken';
@@ -490,6 +492,9 @@ export function sidesKept(
 
 /** How long before a character comes on their first face is put on: the player fades a state in over 320ms. */
 const FACE_EARLY_MS = 400;
+
+/** Shorter than this, in the kit's units, one is small: judged by how much of them is seen (the stager's SMALL_UNITS). */
+const SMALL_STANDING = 150;
 
 /** A face a drawing does not have, as the nearest one it does: an animal the artist drew has no face of pain, nor its eyes closed. */
 const NEAREST_FACE: Record<string, string> = {
@@ -2483,6 +2488,10 @@ export function composeScene(input: ComposeInput): {
       box: box ?? null,
     };
   });
+  /** Each feature's kind, by its id. */
+  const kindOf = new Map<string, string>(
+    setFeatures.map(({ feature }) => [feature.id, feature.kind]),
+  );
   /** Each feature where it stands at a staging, once the people's scale is known. */
   const featurePlaces: Record<StagingName, Map<string, FeaturePlace>> = {
     box: new Map(),
@@ -2496,9 +2505,6 @@ export function composeScene(input: ComposeInput): {
     const stage = STAGINGS[staging];
     const on = setFrameOn(setFrame, stage);
     const [, vy, , vh] = setFrame;
-    const horizon = setDrawing?.ground
-      ? on.toStage(0, vy + setDrawing.ground.horizon * vh)[1]
-      : stage.h * 0.64;
     const out = new Map<string, FeaturePlace>();
     /** Where the pieces stood so far stand across the stage: the next keeps clear of them. */
     const taken: [number, number][] = [];
@@ -2526,7 +2532,9 @@ export function composeScene(input: ComposeInput): {
         back,
         unit,
         floor,
-        horizon: Math.min(horizon, floor - 60),
+        // On a floor with depth, by its pinhole's eye line, as its people
+        // stand: one as big as a piece at its feet is the piece's size.
+        horizon: floorEye(staging, floor),
       });
       // Two pieces the stage stands at one spot stand side by side: the
       // later toward the middle of the stage, clear of the first.
@@ -2629,9 +2637,18 @@ export function composeScene(input: ComposeInput): {
             {
               x: f.x + f.w / 2,
               w: f.w,
-              way: { y: f.way.y, k: f.way.k, perch: f.up.perch, upX: f.up.x },
+              way: {
+                y: f.way.y,
+                k: f.way.k,
+                perch: f.up.perch,
+                upX: f.up.x,
+                ground: f.feet,
+              },
               ...(f.seat !== undefined ? { seat: f.seat } : {}),
               ...(f.lies ? { lies: f.lies } : {}),
+              ...(SOLID_BESIDE.has(kindOf.get(id) ?? '')
+                ? { solid: true }
+                : {}),
             },
           ]),
         ),
@@ -2689,7 +2706,7 @@ export function composeScene(input: ComposeInput): {
    * fades from its wide staging, the one it plays at.
    */
   const facesKept = (): {
-    fades: [number, number, string][];
+    fades: [number, number, string, number?][];
     notes: string[];
   } => {
     const lines = script.beats.flatMap((beat, i) =>
@@ -2704,6 +2721,8 @@ export function composeScene(input: ComposeInput): {
         : [],
     );
     const shots = effects.filter((effect) => effect.do === 'zoom');
+    /** The shots the clear-view rule may drop: those left are taken. */
+    const clearShots = [...shots];
     const layered = setDrawing?.layered;
     const foreDepth =
       layered?.layers.find((layer) => layer.id === 'foreground')?.depth ?? 1.2;
@@ -2717,14 +2736,14 @@ export function composeScene(input: ComposeInput): {
     const hiding = (k: number, id: string) =>
       /^(?:behind|under|in):/.test(stationsAt[k]?.[id] ?? '');
     const out = {
-      fades: [] as [number, number, string][],
+      fades: [] as [number, number, string, number?][],
       notes: [] as string[],
     };
     for (const staging of ['box', 'wide'] as const) {
       const stage = STAGINGS[staging];
       const on = setFrameOn(setFrame, stage);
       const floor = floors[staging];
-      const mended = keepFacesSeen({
+      const faces: Parameters<typeof keepFacesSeen>[0] = {
         W: stage.w,
         H: stage.h,
         // On a wide set, the wide shot is where the action is (§6.3).
@@ -2790,19 +2809,96 @@ export function composeScene(input: ComposeInput): {
         },
         name: (id) => nameOf(castById.get(id)) ?? id,
         durationMs,
-      });
+      };
+      const mended = keepFacesSeen(faces);
       // A film plays wide: what it says is its wide staging's.
       if (staging === 'wide' || !film) {
         out.fades.push(...mended.fades);
         if (staging === 'wide') out.notes.push(...mended.notes);
+        // And everyone who matters in clear view, in every shot: no thing
+        // of the place over them (the clear-view rule).
+        const drawnAs = (id: string) => {
+          const dto = byId.get(id);
+          return dto?.kind === 'drawing' ? dto : undefined;
+        };
+        const units = (id: string) => geometry.get(id)?.stands?.units;
+        const setFloor = layered?.floor;
+        const clear = keepInClearView({
+          ...faces,
+          // The people watching before the camera stand low enough to be
+          // seen over, and are never faded: one they hide steps aside.
+          keep: (id) => id.startsWith('fg-au'),
+          shots: clearShots,
+          fades: mended.fades,
+          floorThings: (layered?.floorThings ?? []).map(({ id, box, feet }) => {
+            const [x0, y0] = on.toStage(box[0], box[1]);
+            const [x1, y1] = on.toStage(box[0] + box[2], box[1] + box[3]);
+            return {
+              id,
+              box: { x: x0, y: y0, w: x1 - x0, h: y1 - y0 },
+              feet: on.toStage(0, feet)[1],
+            };
+          }),
+          floor: setFloor
+            ? [
+                on.toStage(0, setFloor.back)[1],
+                on.toStage(0, setFloor.front)[1],
+              ]
+            : null,
+          animal: (id) => {
+            const dto = drawnAs(id);
+            return Boolean(dto && !dto.rig && units(id) !== undefined);
+          },
+          small: (id) => (units(id) ?? Infinity) < SMALL_STANDING,
+          face: (id) => drawnAs(id)?.rig === true,
+        });
+        out.fades.push(...clear.fades);
+        if (staging === 'wide') out.notes.push(...clear.notes);
       }
     }
+    // A shot that could not be taken clear is not taken.
+    for (let i = effects.length - 1; i >= 0; i -= 1)
+      if (effects[i].do === 'zoom' && !clearShots.includes(effects[i]))
+        effects.splice(i, 1);
     return out;
   };
   const layouts = { box: layoutsOf('box'), wide: layoutsOf('wide') };
   // Every speaker's face seen as they speak, in every shot: mended where
   // it is hidden, and said.
   const facesSeen = stationed ? facesKept() : { fades: [], notes: [] };
+  // Everyone on the ground at every step, whatever moved them (scene-
+  // grounding): put right silently, and said.
+  if (stationed)
+    for (const staging of ['box', 'wide'] as const) {
+      const floor = floors[staging];
+      if (!floor) continue;
+      const notes = keepGrounded({
+        staging,
+        H: STAGINGS[staging].h,
+        steps,
+        places: layouts[staging],
+        stations: stationsAt,
+        stands: (id) => geometry.get(id)?.stands !== undefined,
+        features: new Map(
+          [...featurePlaces[staging]].map(([id, f]) => [
+            id,
+            {
+              ground: f.feet,
+              perch: f.up.perch,
+              x: f.x,
+              w: f.w,
+              ...(SOLID_BESIDE.has(kindOf.get(id) ?? '')
+                ? { solid: true }
+                : {}),
+            },
+          ]),
+        ),
+        floor,
+        name: (id) => nameOf(castById.get(id)) ?? id,
+      });
+      // A film plays wide: its notes are its wide staging's.
+      if (staging === 'wide' || !film) facesSeen.notes.push(...notes);
+    }
   // A thing thrown or kicked to a feature comes down on the ground before
   // it, wherever each staging stands it: the player finds it there. One
   // the stage has not got goes on ahead, toward the middle.

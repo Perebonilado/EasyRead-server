@@ -4,7 +4,9 @@
  * `vehicle` kind, so the stage draws it as its danfo bus. Built by code
  * with no model asked: the yard in the biblical-village pack, one and a
  * half frames wide, with Noah and his son Shem drawn by the figure kit
- * and standing on its floor near and far. For the picture check's tests,
+ * and standing on its floor near and far, each where the stage's own
+ * stations put them (their feet on the floor at their depth, their box
+ * their drawing's shape), and the ark where the stage stands a vehicle. For the picture check's tests,
  * and for one real look by the judge.
  */
 import type {
@@ -13,6 +15,14 @@ import type {
   SceneThingDto,
 } from '../../../../contracts';
 import { PLAIN_FIGURE, drawFigure } from '../../scene-figure';
+import {
+  STAGINGS,
+  SOLID_BESIDE,
+  layoutStations,
+  placeFeature,
+  stationScale,
+  type LaidThing,
+} from '../../scene-layout';
 import { floorOf, buildSet, layoutOf } from '../../scene-set-layout';
 import { drawPiece } from '../../scene-set-pieces';
 import type { StoryPlace } from '../../scene-story';
@@ -62,11 +72,27 @@ const faces = (states: Record<string, string>) =>
     name === 'neutral' ? [] : [id],
   );
 
+/** Where each stands at each step: a station, and how far back where the floor is open. */
+export type NoahStep = {
+  atMs: number;
+  at: Record<string, string>;
+  depth?: Record<string, number>;
+};
+
+/** The yard's first step: Noah near the ark, Shem across the yard at the back. */
+export const NOAH_FIRST: NoahStep = {
+  atMs: 0,
+  at: { noah: '@0.45', shem: '@0.2' },
+  depth: { noah: 0.62, shem: 0.2 },
+};
+
 /**
  * The yard's scene: Noah by the ark, pointing at it, and Shem across the
- * yard at the back; one step, eight seconds, a film's.
+ * yard at the back; one step, eight seconds, a film's. `more`: steps
+ * after the first, as the stage stations them (Shem going to the ark:
+ * "by:ark:1").
  */
-export function noahScene(): SceneDto {
+export function noahScene(more: readonly NoahStep[] = []): SceneDto {
   const layout = layoutOf(
     {
       sky: 'day',
@@ -101,21 +127,89 @@ export function noahScene(): SceneDto {
     'noah',
   );
   const shem = drawFigure({ ...PLAIN_FIGURE, age: 'teen' }, 'shem');
+  const aspectOf = (box: [number, number, number, number]) => box[2] / box[3];
+  const people = new Map<string, LaidThing>([
+    [
+      'noah',
+      {
+        kind: 'drawing',
+        aspect: aspectOf(noah.viewBox),
+        caption: null,
+        stands: { units: noah.viewBox[3] },
+      },
+    ],
+    [
+      'shem',
+      {
+        kind: 'drawing',
+        aspect: aspectOf(shem.viewBox),
+        caption: null,
+        stands: { units: shem.viewBox[3] },
+      },
+    ],
+  ]);
+  // The people's scale and floor, as the stage has them on its wide stage:
+  // the floor's depth by the set's own eye line.
+  const scale = stationScale([...people.values()], 2, 'wide');
+  const unit = scale.unit!;
+  const eye = floor.eye;
+  const bottom = STAGINGS.wide.h - 12;
+  // The ark where the stage stands a vehicle: at the back, at the right.
   const ark = drawPiece('vehicle', 'the half-built ark');
-  // The ark stands at the right, on the floor's back; its box from its frame.
-  const [vx, vy, vw, vh] = ark.viewBox;
-  const arkScale = 0.9;
-  const arkFeet = floor.back + 40;
-  const arkBox = {
-    x: 1100 + vx * arkScale,
-    y: arkFeet + vy * arkScale,
-    w: vw * arkScale,
-    h: vh * arkScale,
-  };
-  const places: Record<string, ScenePlaceDto> = {
-    noah: { x: 820, y: 400, w: 190, h: 430, d: 0.62 },
-    shem: { x: 330, y: 470, w: 130, h: 300, d: 0.2 },
-  };
+  const arkAt = placeFeature({
+    staging: 'wide',
+    spot: 'right',
+    piece: ark,
+    back: true,
+    unit,
+    floor: scale.floor,
+    horizon: eye,
+  });
+  const arkBox = { x: arkAt.x, y: arkAt.y, w: arkAt.w, h: arkAt.h };
+  const steps = [NOAH_FIRST, ...more];
+  const laid = layoutStations({
+    steps: steps.map((step) => ({
+      show: ['noah', 'shem'],
+      at: step.at,
+      ...(step.depth ? { depth: step.depth } : {}),
+    })),
+    things: people,
+    staging: 'wide',
+    scale,
+    floor: { eye, bottom },
+    features: new Map([
+      [
+        'ark',
+        {
+          x: arkAt.x + arkAt.w / 2,
+          w: arkAt.w,
+          way: {
+            y: arkAt.way.y,
+            k: arkAt.way.k,
+            perch: arkAt.up.perch,
+            upX: arkAt.up.x,
+            ground: arkAt.feet,
+          },
+          ...(SOLID_BESIDE.has('vehicle') ? { solid: true } : {}),
+        },
+      ],
+    ]),
+  });
+  const placesAt = laid.map(
+    (step) =>
+      Object.fromEntries(
+        Object.entries(step).map(([id, p]) => [
+          id,
+          {
+            x: p.x,
+            y: p.y,
+            w: p.w,
+            h: p.h,
+            ...(p.d !== undefined ? { d: p.d } : {}),
+          },
+        ]),
+      ) as Record<string, ScenePlaceDto>,
+  );
   const beats = [
     {
       text: 'Noah points at the ark he is building.',
@@ -130,11 +224,12 @@ export function noahScene(): SceneDto {
       words: [],
     },
   ];
+  const durationMs = Math.max(8000, ...more.map((s) => s.atMs + 4000));
   return {
     version: 1,
     title: 'The ark yard',
-    durationMs: 8000,
-    settledMs: 7000,
+    durationMs,
+    settledMs: durationMs - 1000,
     beats,
     things: [
       drawing('place-ark-yard', set.svg, {
@@ -148,45 +243,42 @@ export function noahScene(): SceneDto {
       }),
       drawing('noah', noah.svg, {
         rig: true,
-        aspect: 190 / 430,
+        aspect: aspectOf(noah.viewBox),
         states: noah.states,
         hidden: faces(noah.states),
       }),
       drawing('shem', shem.svg, {
         rig: true,
-        aspect: 130 / 300,
+        aspect: aspectOf(shem.viewBox),
         states: shem.states,
         hidden: faces(shem.states),
       }),
     ],
-    steps: [
-      {
-        atMs: 0,
-        layout: 'free',
-        show: ['place-ark-yard', 'noah', 'shem'],
-        arrows: [],
-        enter: {},
-        focus: 'noah',
-        backdrop: 'place-ark-yard',
-      },
-    ],
+    steps: steps.map((step) => ({
+      atMs: step.atMs,
+      layout: 'free',
+      show: ['place-ark-yard', 'noah', 'shem'],
+      arrows: [],
+      enter: {},
+      focus: 'noah',
+      backdrop: 'place-ark-yard',
+    })),
     effects: [],
     stagings: {
-      box: { w: 1600, h: 900, places: [places], bubbles: {} },
+      box: { w: 1600, h: 900, places: placesAt, bubbles: {} },
       wide: {
         w: 1600,
         h: 900,
-        places: [
-          {
-            ...places,
-            'place-ark-yard': { x: 0, y: 0, w: 1600, h: 900 },
-          },
-        ],
+        places: placesAt.map((places) => ({
+          ...places,
+          'place-ark-yard': { x: 0, y: 0, w: 1600, h: 900 },
+        })),
         bubbles: {},
       },
     },
     acting: {
       noah: { moves: [[600, 'point', 2600, 'f:ark']] },
+      ...(more.length ? { shem: { walks: true } } : {}),
     },
     setting: {
       full: true,
@@ -197,12 +289,10 @@ export function noahScene(): SceneDto {
           name: 'the half-built ark',
           kind: 'vehicle',
           svg: ark.svg,
+          ...(ark.leaf ? { leaf: ark.leaf } : {}),
           at: { box: arkBox, wide: arkBox },
-          feet: { box: arkFeet, wide: arkFeet },
-          way: {
-            box: { x: 1100, y: arkFeet, k: 1 },
-            wide: { x: 1100, y: arkFeet, k: 1 },
-          },
+          feet: { box: arkAt.feet, wide: arkAt.feet },
+          way: { box: arkAt.way, wide: arkAt.way },
         },
       ],
     },

@@ -1341,8 +1341,13 @@ export interface SceneSettingDto {
   moving?: true;
   /** When a feature opens or shuts: the moment, which, and how it is left. */
   featureStates?: [number, string, 'open' | 'shut'][];
-  /** A thing before the camera faded to 40% while a face behind it speaks: from, to, and its group in the set's foreground layer. */
-  fades?: [number, number, string][];
+  /**
+   * A thing of the set faded while it would hide someone who matters:
+   * from, to, its group in the set's foreground or floor layer, and how
+   * faint (absent, 40%, as while a face behind it speaks; 0, gone for a
+   * shot's length, as a film cheats a near thing out of the frame).
+   */
+  fades?: [number, number, string, number?][];
 }
 
 /**

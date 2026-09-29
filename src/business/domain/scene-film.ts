@@ -683,6 +683,26 @@ export function viewOf(
   );
 }
 
+/** How the things on the floor follow the camera, by how far back they stand: the player's FLOOR_BACK_F and FLOOR_FRONT_F. */
+export const FLOOR_BACK_F = 0.8;
+export const FLOOR_FRONT_F = 1.05;
+
+/**
+ * The depth factor of what stands with its feet at `feet` on a floor from
+ * `back` to `front`: the people's own (1) with none. Everything standing
+ * on the floor with its feet at one depth (a person, a feature the stage
+ * draws, a thing of the floor's layer) has the one factor, so moves
+ * together as the camera pans and pushes.
+ */
+export function floorFactor(
+  feet: number,
+  floor: readonly [number, number] | null | undefined,
+): number {
+  if (!floor || floor[1] - floor[0] < 1) return 1;
+  const d = Math.min(1, Math.max(0, (feet - floor[0]) / (floor[1] - floor[0])));
+  return FLOOR_BACK_F + (FLOOR_FRONT_F - FLOOR_BACK_F) * d;
+}
+
 /** How much less the scenery moves than the stage in front of it as the camera moves: the player's PARALLAX. */
 export const PARALLAX = 0.4;
 

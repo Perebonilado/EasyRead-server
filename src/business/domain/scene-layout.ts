@@ -746,6 +746,16 @@ export function floorAt(
 }
 
 /**
+ * How big someone with their feet at `feet` is beside the people where
+ * they have always stood (`floor`), by the set's pinhole about its eye
+ * line: floorAt's own k, for feet anywhere on the ground, the floor's
+ * back and beyond it too.
+ */
+export function pinholeK(feet: number, floor: number, eye: number): number {
+  return Math.round(((feet - eye) / Math.max(1, floor - eye)) * 1000) / 1000;
+}
+
+/**
  * How someone at each place of a group stands in depth when nothing says
  * (studio-scenery-plan §4.1): one or two (a conversation) at the depth
  * people have always stood; three with the middle one a step back; four
@@ -798,12 +808,38 @@ export interface FeatureAcross {
   x: number;
   w: number;
   /** Its own ground, and how big someone is there beside the people: where one under or behind it stands; and where one up it stands, across and their feet's y. */
-  way?: { y: number; k: number; perch?: number; upX?: number };
+  way?: {
+    y: number;
+    k: number;
+    perch?: number;
+    upX?: number;
+    /**
+     * The ground it stands on, where its feet are: where one beside it,
+     * behind it or under it stands. Its way may be above it (a danfo's
+     * door sill, a stall's counter), where one goes in, not where one
+     * stands. Absent, its way's y.
+     */
+    ground?: number;
+  };
   /** The y of its seat, for one who sits on it. */
   seat?: number;
   /** Where one lies along it: its top's y, its head end and its foot end across, and where one sitting up in it sits across. */
   lies?: { y: number; head: number; foot: number; sits: number };
+  /** A body one stands beside, not before (a danfo, a stall, a well, a crate): one by it stands clear of it, at its side. */
+  solid?: boolean;
 }
+
+/** The kinds of feature one by it stands clear of, at its side: its body is solid to the ground, and wide. */
+export const SOLID_BESIDE: ReadonlySet<string> = new Set([
+  'vehicle',
+  'stall',
+  'well',
+  'crate',
+]);
+/** How far one behind a feature stands back of its ground, as a share of the stage's height: behind it, never beside it. */
+export const BEHIND_BACK = 0.03;
+/** How much of their width either side of someone's middle their body fills: the kit's shoulders and hem. */
+export const BODY_HALF = 0.28;
 
 /**
  * How far the player sinks the kit's hips sitting down, as a share of the
@@ -901,8 +937,15 @@ export function layoutStations(input: {
       const feature = by ? input.features.get(by[1]) : undefined;
       if (by && feature) {
         const side = Number(by[2]) * (flip ? -1 : 1);
-        // At its end: over its edge a little, clear of its middle.
-        x = feature.x + side * (feature.w * 0.35 + w * 0.2);
+        // At its end: over its edge a little, clear of its middle; by a
+        // solid body (a danfo), at its side, their body clear of it.
+        const reach = feature.solid
+          ? Math.max(
+              feature.w * 0.35 + w * 0.2,
+              feature.w / 2 + w * (BODY_HALF - 0.02),
+            )
+          : feature.w * 0.35 + w * 0.2;
+        x = feature.x + side * reach;
       }
     }
     return Math.min(W - margin - w * 0.3, Math.max(margin + w * 0.3, x));
@@ -954,7 +997,21 @@ export function layoutStations(input: {
           (!byOrBehind &&
             (input.pieces ?? []).some(
               (p) => Math.abs(p.x - at) < p.w * 0.4 + size.w * 0.2,
-            ));
+            )) ||
+          overBody(at);
+        // Beside a solid body (a danfo), never over it: held to the stage's
+        // edge, its far side may be on it.
+        const beside = /^by:([^:]+)/.exec(station)?.[1];
+        const body = beside ? input.features.get(beside) : undefined;
+        function overBody(at: number): boolean {
+          if (!body?.solid) return false;
+          const half = size!.w * BODY_HALF;
+          return (
+            Math.min(at + half, body.x + body.w / 2) -
+              Math.max(at - half, body.x - body.w / 2) >
+            size!.w * 0.08
+          );
+        }
         // Beside a feature where someone stands already: its other side.
         if (station.startsWith('by:') && crowded(x)) {
           const other = across(station, size.w, true);
@@ -1004,10 +1061,24 @@ export function layoutStations(input: {
         ...(d !== undefined ? { d } : {}),
         ...(asked !== undefined ? { asked } : {}),
       });
-      const k = way?.k ?? onFloor?.k ?? 1;
       const low = Boolean(at) && station.startsWith('under:');
       if (up && way?.upX !== undefined) x = way.upX - size.w * 0.3;
-      let feet = up ? way.perch! : (way?.y ?? onFloor?.feet ?? floor);
+      // Beside it, behind it or under it: on the ground it stands on (not
+      // up at its way, a danfo's sill), behind it a step back of it; on a
+      // floor with depth, as big as the floor makes them there, as anyone
+      // walking there is.
+      const beside = way && !up && /^(?:by|behind|under):/.test(station);
+      const ground = beside
+        ? (way.ground ?? way.y) -
+          (station.startsWith('behind:') && way.ground !== undefined
+            ? STAGINGS[input.staging].h * BEHIND_BACK
+            : 0)
+        : undefined;
+      const k =
+        ground !== undefined && depthed && way?.ground !== undefined
+          ? pinholeK(ground, floor, depthed.eye)
+          : (way?.k ?? onFloor?.k ?? 1);
+      let feet = up ? way.perch! : (ground ?? way?.y ?? onFloor?.feet ?? floor);
       // On a seat or in a bed: their hips where it is sat on, their legs
       // hanging before it (or under its cover); lying, along it from its
       // foot end, their head at its head.

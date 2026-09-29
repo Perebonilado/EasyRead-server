@@ -2374,6 +2374,31 @@ function covered(placings: Placing[]): number {
  * a little, and each kept within the frame by at least half of itself:
  * two shelves at the same spot of the wall hang side by side.
  */
+/**
+ * How far into the frame from its edge what stands before the camera may
+ * reach, as a share of it: the people's spots begin a little farther in
+ * (the stage's left, 0.12), so nothing before the camera stands across
+ * them in the wide shot.
+ */
+export const FORE_EDGE = 0.07;
+
+/**
+ * What stands before the camera kept to the frame's edges (clear view):
+ * each moved out, the way it is nearer, until it reaches no farther in
+ * than FORE_EDGE of the frame, however it was spread; the rest of it
+ * past the edge, cut by the frame.
+ */
+function keepForeToEdges(placings: Placing[]): void {
+  for (const one of placings) {
+    if (one.band !== 'foreground') continue;
+    const [a, b] = reachOf(one);
+    const left = (a + b) / 2 < SET_W / 2;
+    if (left && b > FORE_EDGE * SET_W) one.x -= b - FORE_EDGE * SET_W;
+    else if (!left && a < (1 - FORE_EDGE) * SET_W)
+      one.x += (1 - FORE_EDGE) * SET_W - a;
+  }
+}
+
 function spreadOut(placings: Placing[], margin = 0): void {
   const bands = new Map<string, Placing[]>();
   for (const one of placings) {
@@ -2470,6 +2495,12 @@ export interface SetLayering {
   focal?: number;
   floor: SetFloor;
   fore: { id: string; box: [number, number, number, number] }[];
+  /** Each thing on the floor among the people (the floor layer's), by its group: its box and where its feet are. Absent on a set built before, or with none. */
+  floorThings?: {
+    id: string;
+    box: [number, number, number, number];
+    feet: number;
+  }[];
 }
 
 /** A set built from its layout: its SVG, its groups by their names, and its layers. */
@@ -2807,8 +2838,11 @@ function buildSetAt(
     // frame as it is: a palm its real height there would be all trunk.
     const here = row === 'front' && !item.edge ? 1 : real;
     let s = scaleAtFeet(kind, y) * item.scale * here;
-    // Before the camera, low or at the sides (§8.4): at most the bottom
-    // three tenths of the frame, else in its outer eighth.
+    // Before the camera, low and at the sides (§8.4): at most the bottom
+    // three tenths of the frame, and never across the floor where people
+    // stand (a push grows it fastest, over them): at its edge, as a film
+    // frames a shot with something near (keepForeToEdges, after the rest
+    // are spread out).
     if (row === 'foreground' && x > 0.12 && x < 0.88) {
       const low = SET_H * 0.7;
       const fits = (y - low) / Math.max(1, -vy);
@@ -2816,6 +2850,7 @@ function buildSetAt(
         if (fits >= s * 0.6) s = fits;
         else x = x < 0.5 ? 0.05 : 0.95;
       }
+      if (pack) x = x < 0.5 ? 0.05 : 0.95;
     }
     placings.push({
       piece,
@@ -2939,6 +2974,8 @@ function buildSetAt(
   // In a style pack, what code scatters finds its own room after (below),
   // and never pushes what the painter placed into where the action is.
   spreadOut(pack ? placings.filter((one) => !one.clutter) : placings, margin);
+  // A layout in a style pack; one written before is drawn as it was.
+  if (pack) keepForeToEdges(placings);
   if (pack) {
     // Clutter never where the action is (§5.3): moved out to its nearer
     // side, and on past whatever it would then stand on; left out when
@@ -3122,11 +3159,19 @@ function buildSetAt(
     layers.stage.push(group);
     parts.props = 'props';
   }
+  /** The things on the floor among the people, each its own group: one can be faded while it would hide someone. */
+  const onFloor: { id: string; one: Placing }[] = [];
   for (const one of rest.filter((one) => one.band !== 'back')) {
     const drawnOne = drawnAt(one);
     out.push(drawnOne);
     // On the floor among the people, with its contact shadow, as theirs.
-    if (one.band === 'front') layers.floor.push(contactShadow(one), drawnOne);
+    if (one.band === 'front' && pack) {
+      // Each its own group, in a style pack: one can be faded.
+      const id = `fl-${onFloor.length + 1}`;
+      onFloor.push({ id, one });
+      layers.floor.push(`<g id="${id}">${contactShadow(one)}${drawnOne}</g>`);
+    } else if (one.band === 'front')
+      layers.floor.push(contactShadow(one), drawnOne);
     else layers.stage.push(drawnOne);
   }
 
@@ -3268,6 +3313,24 @@ function buildSetAt(
         }),
         ...watching,
       ],
+      ...(onFloor.length
+        ? {
+            floorThings: onFloor.map(({ id, one }) => {
+              const [a, b] = reachOf(one);
+              const [, vy, , vh] = one.piece.viewBox;
+              return {
+                id,
+                box: [
+                  r1(a),
+                  r1(one.y + vy * one.s),
+                  r1(b - a),
+                  r1(vh * one.s),
+                ] as [number, number, number, number],
+                feet: r1(one.y),
+              };
+            }),
+          }
+        : {}),
     },
     notes,
     placed: placings.map((one) => {

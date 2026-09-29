@@ -224,6 +224,8 @@ export function drawFacingAudience(
   input: AudienceInput & {
     feet: readonly [number, number];
     unit: readonly [number, number];
+    /** Spans across (in the set's units) where things stand on the floor before them: none stands there. */
+    clear?: readonly (readonly [number, number])[];
   },
 ): string {
   const { W } = input;
@@ -231,8 +233,8 @@ export function drawFacingAudience(
   let n = 0;
   for (let row = 0; row < input.rows; row += 1) {
     // The farther row when there are two; else the one row where the nearer would be.
-    const at = input.rows === 2 ? row : 1;
-    const s = input.unit[at];
+    const inRow = input.rows === 2 ? row : 1;
+    const s = input.unit[inRow];
     // Standing whole, spaced wider than heads and shoulders before the camera.
     const step = SHOULDERS * s * SPACING * 1.7;
     const offset = row % 2 ? step / 2 : 0;
@@ -240,6 +242,11 @@ export function drawFacingAudience(
       const share = x / W;
       if (input.spread === 'sides' && share > 0.3 && share < 0.7) continue;
       if (Math.abs(share - (1 - input.focal)) < 0.08) continue;
+      // Not behind or on a desk or a bench: on the open floor.
+      const half = (SHOULDERS / 2) * s * 1.15;
+      const at = x + (beatOf(`${input.seed}:${n}:x`) - 0.5) * step * 0.2;
+      if ((input.clear ?? []).some(([a, b]) => at + half > a && at - half < b))
+        continue;
       if (n >= AUDIENCE_MOST) break;
       const i = n;
       n += 1;
@@ -252,12 +259,11 @@ export function drawFacingAudience(
       const id = `rv-au-${i + 1}`;
       const drawn = drawExtra(spec, { detail: 1, id });
       const [bx, by, bw, bh] = drawn.viewBox;
-      const jitter = (beatOf(`${input.seed}:${i}:x`) - 0.5) * step * 0.2;
-      const feet = input.feet[at];
+      const feet = input.feet[inRow];
       const width = r1(setLine(input.H) / s);
       markup.push(
         `<g id="${id}" data-audience="${row}">` +
-          `<svg x="${r1(x + jitter + bx * s)}" y="${r1(feet + by * s)}" width="${r1(bw * s)}" height="${r1(bh * s)}" viewBox="${bx} ${by} ${bw} ${bh}" overflow="visible">` +
+          `<svg x="${r1(at + bx * s)}" y="${r1(feet + by * s)}" width="${r1(bw * s)}" height="${r1(bh * s)}" viewBox="${bx} ${by} ${bw} ${bh}" overflow="visible">` +
           `<g stroke="${FIGURE_INK}" stroke-width="${width}" stroke-linejoin="round">${drawn.legs}${drawn.upper}</g></svg></g>`,
       );
     }

@@ -3415,6 +3415,9 @@ function buildSetAt(
   // Before the whole ground, in a style pack out of doors: on the stage's layer.
   if (horizon) layers.stage.push(...backRow);
   else layers.back.push(...backRow);
+  // Where the people watching go on the other side: behind all that
+  // stands on the floor before them.
+  const watchersAt = layers.stage.length;
   if (props.length) {
     const group = `<g id="props">${props.map(drawnAt).join('')}</g>`;
     out.push(group);
@@ -3482,9 +3485,13 @@ function buildSetAt(
       H: SET_H,
       feet: rows,
       unit: [scaleAtFeet(kind, rows[0]), scaleAtFeet(kind, rows[1])],
+      // Clear of what stands on the floor (a desk, a bench), so none of
+      // them stands on it or seems to.
+      clear: standing.filter((one) => one.band !== 'back').map(reachOf),
     });
-    // Among the things standing on the ground, behind the story's people.
-    if (facing) layers.stage.push(facing);
+    // Among the things standing on the ground, behind the story's people
+    // and behind what stands on the floor nearer the camera than they do.
+    if (facing) layers.stage.splice(watchersAt, 0, facing);
   } else if (pack && layout.audience) {
     const words = `${place.name} ${place.look}`;
     const audience = drawAudience({

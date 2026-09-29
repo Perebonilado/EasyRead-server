@@ -198,7 +198,10 @@ describe('a layout written before the style packs', () => {
         const layout = { ...parsed };
         delete layout.width;
         const built = buildSet(layout, where);
-        return [name, [hash(built.svg), hash(JSON.stringify(built.layered))]];
+        // The front as it was; its other side is new (studio-views-plan V3).
+        const { reverse, ...front } = built.layered;
+        void reverse;
+        return [name, [hash(built.svg), hash(JSON.stringify(front))]];
       }),
     );
     expect(got).toEqual(GOLDEN);

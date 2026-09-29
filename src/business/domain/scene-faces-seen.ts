@@ -26,7 +26,9 @@ import type { SceneEffectDto } from '../../contracts';
 import {
   NO_ROOM,
   floorFactor,
+  isReverse,
   nearOf,
+  reflectPlace,
   viewOf,
   wideView,
   type SetRoom,
@@ -39,7 +41,11 @@ import {
  * they stand for it. That one is the shot's own, never judged in it; they
  * stand before everyone else in it.
  */
-type Framed = View & { near?: { id: string; place: Box } };
+type Framed = View & {
+  near?: { id: string; place: Box };
+  /** Taken from the place's other side (studio-views-plan §4.2): the stage reflected, the other side's things. */
+  reverse?: true;
+};
 
 /** A shot's view, with whom it cheats near the camera. */
 function framedBy(
@@ -52,7 +58,42 @@ function framedBy(
 ): Framed {
   const view = viewOf(shot, show, places, W, H, room);
   const near = nearOf(shot, show, places, W, H, room);
-  return near ? { ...view, near: { id: near.id, place: near.place } } : view;
+  return {
+    ...view,
+    ...(near ? { near: { id: near.id, place: near.place } } : {}),
+    ...(isReverse(shot) ? { reverse: true as const } : {}),
+  };
+}
+
+/** The set's other side as the checks judge a shot from there: its things before the camera and on its floor, on the stage (as the front's are given). */
+export interface ReverseSide {
+  fore: readonly { id: string; box: Box }[];
+  foreDepth: number;
+  floorThings?: readonly { id: string; box: Box; feet: number }[];
+}
+
+/**
+ * What a view shows, from the front or the place's other side: where
+ * someone at `box` on the stage is in it (reflected, turned round), the
+ * room its camera pans in, and the set's things before the camera and on
+ * its floor.
+ */
+function sideIn(
+  view: Framed,
+  W: number,
+  room: SetRoom,
+  front: ReverseSide,
+  reverse: ReverseSide | undefined,
+) {
+  const turned = view.reverse === true;
+  return {
+    at: <T extends Box>(box: T): T => (turned ? reflectPlace(box, W) : box),
+    span: (turned ? [room.span[1], room.span[0]] : room.span) as readonly [
+      number,
+      number,
+    ],
+    set: turned ? (reverse ?? { fore: [], foreDepth: front.foreDepth }) : front,
+  };
 }
 
 export interface Box {
@@ -190,6 +231,8 @@ export interface FacesInput {
   durationMs: number;
   /** On a set wider than the frame, the room its camera pans in: the wide shot is on where the action is (scene-film's wideView). */
   room?: SetRoom;
+  /** The set's other side, for a shot taken from there (studio-views-plan §4.2): its things, on the stage. Absent, none. */
+  reverse?: ReverseSide;
 }
 
 /** What was mended: things before the camera faded while a line is said, and the notes. */
@@ -218,9 +261,13 @@ export function keepFacesSeen(input: FacesInput): FacesMended {
       )
       .map((shot) => framedBy(shot, steps[k].show, places[k], W, H, room)),
   ];
-  /** Where someone stands in a view: cheated near the camera, or at their place. */
+  const front: ReverseSide = { fore: input.fore, foreDepth: input.foreDepth };
+  const side = (view: Framed) => sideIn(view, W, room, front, input.reverse);
+  /** Where someone stands in a view: cheated near the camera, or at their place (reflected, turned round). */
   const placeIn = (k: number, id: string, view: Framed) =>
-    view.near?.id === id ? view.near.place : places[k][id];
+    view.near?.id === id
+      ? view.near.place
+      : places[k][id] && side(view).at(places[k][id]);
   /** Who and what covers someone's face at a step, in one view, with what is faded left out. */
   const covers = (
     k: number,
@@ -230,8 +277,9 @@ export function keepFacesSeen(input: FacesInput): FacesMended {
   ): { id: string; kind: 'person' | 'feature' | 'fore'; share: number }[] => {
     // The one a shot cheats near the camera is its own: not judged in it.
     if (view.near?.id === who) return [];
-    const me = places[k][who];
-    const face = onScreen(faceOf(me), view, 1, W, H, room.span);
+    const { at, span, set } = side(view);
+    const me = placeIn(k, who, view);
+    const face = onScreen(faceOf(me), view, 1, W, H, span);
     const out: {
       id: string;
       kind: 'person' | 'feature' | 'fore';
@@ -249,7 +297,7 @@ export function keepFacesSeen(input: FacesInput): FacesMended {
       out.push({
         id,
         kind: 'person',
-        share: covered(face, [onScreen(body, view, 1, W, H, room.span)]),
+        share: covered(face, [onScreen(body, view, 1, W, H, span)]),
       });
     }
     for (const f of input.features)
@@ -257,15 +305,15 @@ export function keepFacesSeen(input: FacesInput): FacesMended {
         out.push({
           id: f.id,
           kind: 'feature',
-          share: covered(face, [onScreen(f.box, view, 1, W, H, room.span)]),
+          share: covered(face, [onScreen(at(f.box), view, 1, W, H, span)]),
         });
-    for (const f of input.fore)
+    for (const f of set.fore)
       if (!faded.has(f.id))
         out.push({
           id: f.id,
           kind: 'fore',
           share: covered(face, [
-            onScreen(f.box, view, input.foreDepth, W, H, room.span),
+            onScreen(f.box, view, set.foreDepth, W, H, span),
           ]),
         });
     return out.filter((one) => one.share > 0);
@@ -280,8 +328,9 @@ export function keepFacesSeen(input: FacesInput): FacesMended {
     Math.max(
       0,
       ...views.map((view) => {
-        const me = places[k][who];
-        const face = onScreen(faceOf(me), view, 1, W, H, room.span);
+        const { at, span, set } = side(view);
+        const me = placeIn(k, who, view);
+        const face = onScreen(faceOf(me), view, 1, W, H, span);
         const boxes = covers(k, who, view, faded).map((one) => {
           if (one.kind === 'person') {
             const o = placeIn(k, one.id, view);
@@ -291,25 +340,25 @@ export function keepFacesSeen(input: FacesInput): FacesMended {
               1,
               W,
               H,
-              room.span,
+              span,
             );
           }
           if (one.kind === 'feature')
             return onScreen(
-              input.features.find((f) => f.id === one.id)!.box,
+              at(input.features.find((f) => f.id === one.id)!.box),
               view,
               1,
               W,
               H,
-              room.span,
+              span,
             );
           return onScreen(
-            input.fore.find((f) => f.id === one.id)!.box,
+            set.fore.find((f) => f.id === one.id)!.box,
             view,
-            input.foreDepth,
+            set.foreDepth,
             W,
             H,
-            room.span,
+            span,
           );
         });
         return covered(face, boxes);
@@ -339,7 +388,14 @@ export function keepFacesSeen(input: FacesInput): FacesMended {
   /** How much of the frame's height someone fills at a step, at the least over what the camera shows; null where they are out of it. */
   const heightSeen = (k: number, who: string, views: readonly Framed[]) => {
     const seen = views.flatMap((view) => {
-      const box = onScreen(placeIn(k, who, view), view, 1, W, H, room.span);
+      const box = onScreen(
+        placeIn(k, who, view),
+        view,
+        1,
+        W,
+        H,
+        side(view).span,
+      );
       const middle = box.x + box.w / 2;
       return middle >= 0 && middle <= W && box.y < H ? [box.h / H] : [];
     });
@@ -698,10 +754,23 @@ export function keepInClearView(input: ClearInput): ClearMended {
     steps.find((s) => s.atMs > shot.atMs)?.atMs ??
     input.durationMs;
   const depthOf = (feet: number) => floorFactor(feet, input.floor);
-  /** What may be cheated out of a shot: every thing before the camera or on the floor. */
+  const front: ReverseSide = {
+    fore: input.fore,
+    foreDepth: input.foreDepth,
+    ...(input.floorThings ? { floorThings: input.floorThings } : {}),
+  };
+  const side = (view: Framed) => sideIn(view, W, room, front, input.reverse);
+  /** Where someone stands in a view: cheated near the camera, or at their place (reflected, turned round). */
+  const placeIn = (k: number, id: string, view: Framed) =>
+    view.near?.id === id
+      ? view.near.place
+      : places[k][id] && side(view).at(places[k][id]);
+  /** What may be cheated out of a shot: every thing before the camera or on the floor, on either side. */
   const fadeable = new Set([
     ...input.fore.map((f) => f.id),
     ...(input.floorThings ?? []).map((f) => f.id),
+    ...(input.reverse?.fore ?? []).map((f) => f.id),
+    ...(input.reverse?.floorThings ?? []).map((f) => f.id),
   ]);
   /** What may be faded in the wide shot: the people watching are kept there. */
   const fadeableWide = new Set([...fadeable].filter((id) => !input.keep?.(id)));
@@ -751,23 +820,24 @@ export function keepInClearView(input: ClearInput): ClearMended {
     from: number,
     to: number,
   ) => {
+    const { at, span, set } = side(seen.view);
     const me = places[k][who];
     const feet = me.y + me.h;
     const [a, b] = seen.shot
       ? [Math.max(from, seen.shot.atMs), Math.min(to, shotEnd(seen.shot))]
       : [from, to];
     const out: { id: string; box: Box; fades: boolean }[] = [];
-    for (const f of input.fore)
+    for (const f of set.fore)
       if (!fadedOver(f.id, a, b))
         out.push({
           id: f.id,
-          box: onScreen(f.box, seen.view, input.foreDepth, W, H, room.span),
+          box: onScreen(f.box, seen.view, set.foreDepth, W, H, span),
           fades: true,
         });
     // A thing of the floor layer stands tall at the frame's edge (a palm,
     // a lamppost): its trunk or post, its middle two fifths, is what
     // stands before anyone; its crown is over their heads.
-    for (const f of input.floorThings ?? [])
+    for (const f of set.floorThings ?? [])
       if (f.feet > feet + tie && !fadedOver(f.id, a, b))
         out.push({
           id: f.id,
@@ -777,7 +847,7 @@ export function keepInClearView(input: ClearInput): ClearMended {
             depthOf(f.feet),
             W,
             H,
-            room.span,
+            span,
           ),
           fades: true,
         });
@@ -785,7 +855,7 @@ export function keepInClearView(input: ClearInput): ClearMended {
       if (f.feet > feet + tie)
         out.push({
           id: f.id,
-          box: onScreen(f.box, seen.view, depthOf(f.feet), W, H, room.span),
+          box: onScreen(at(f.box), seen.view, depthOf(f.feet), W, H, span),
           fades: false,
         });
     // Whom the shot cheats near the camera, before everyone: their body.
@@ -793,7 +863,7 @@ export function keepInClearView(input: ClearInput): ClearMended {
     if (near && near.id !== who)
       out.push({
         id: near.id,
-        box: onScreen(bodyOf(near.place), seen.view, 1, W, H, room.span),
+        box: onScreen(bodyOf(near.place), seen.view, 1, W, H, span),
         fades: false,
       });
     return out;
@@ -809,8 +879,15 @@ export function keepInClearView(input: ClearInput): ClearMended {
     // The one the shot cheats near the camera is its own: not judged in it.
     if (seen.view.near?.id === who)
       return { face: 0, body: 0, whole: 0, by: [] };
-    const me = places[k][who];
-    const at = onScreen(me, seen.view, depthOf(me.y + me.h), W, H, room.span);
+    const me = placeIn(k, who, seen.view);
+    const at = onScreen(
+      me,
+      seen.view,
+      depthOf(me.y + me.h),
+      W,
+      H,
+      side(seen.view).span,
+    );
     const things = nearer(k, who, seen, from, to);
     const boxes = things.map((t) => t.box);
     const whole = wholeOf(at);
@@ -880,28 +957,42 @@ export function keepInClearView(input: ClearInput): ClearMended {
   const facesHiddenAt = (j: number): number => {
     const from = steps[j].atMs;
     const to = stepEnd(j);
-    const views = [
+    const views: Framed[] = [
       wideView(steps[j].show, places[j], W, H, room),
       { s: 1, x: W / 2, y: H / 2 },
       ...input.shots
         .filter((shot) => shot.atMs < to && shotEnd(shot) > from)
-        .map((shot) => viewOf(shot, steps[j].show, places[j], W, H, room)),
+        .map((shot) => {
+          const view: Framed = viewOf(
+            shot,
+            steps[j].show,
+            places[j],
+            W,
+            H,
+            room,
+          );
+          return isReverse(shot) ? { ...view, reverse: true as const } : view;
+        }),
     ];
     let n = 0;
     for (const id of steps[j].show) {
-      const me = places[j][id];
-      if (!me || !input.face(id)) continue;
+      if (!places[j][id] || !input.face(id)) continue;
       for (const other of steps[j].show) {
-        const o = places[j][other];
-        if (other === id || !o || o.y + o.h <= me.y + me.h + tie) continue;
-        const body = { x: o.x + o.w * 0.15, y: o.y, w: o.w * 0.7, h: o.h };
+        const o0 = places[j][other];
+        const me0 = places[j][id];
+        if (other === id || !o0 || o0.y + o0.h <= me0.y + me0.h + tie) continue;
         if (
-          views.some(
-            (view) =>
-              covered(faceOf(onScreen(me, view, 1, W, H, room.span)), [
-                onScreen(body, view, 1, W, H, room.span),
-              ]) > FACE_CLEAR,
-          )
+          views.some((view) => {
+            const { at, span } = side(view);
+            const me = at(me0);
+            const o = at(o0);
+            const body = { x: o.x + o.w * 0.15, y: o.y, w: o.w * 0.7, h: o.h };
+            return (
+              covered(faceOf(onScreen(me, view, 1, W, H, span)), [
+                onScreen(body, view, 1, W, H, span),
+              ]) > FACE_CLEAR
+            );
+          })
         )
           n += 1;
       }

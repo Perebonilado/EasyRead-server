@@ -172,6 +172,120 @@ The personality sheet reaches the stage, not just the words:
 
 ---
 
+## 3A. Subtle interactions: the small stuff between people
+
+Most of a real film's life is in small moments between characters. The stager gets a vocabulary of **micro-interactions**. The writer can name them, and the stager also adds them by itself from the relationships and the moment.
+
+| Kind | Examples |
+|---|---|
+| **Gaze** | meet eyes then look away (shy, guilty), hold a look too long (romance, challenge), glance at someone mid-line (a secret between two), side-eye, eye-roll, looking to a third person for help |
+| **Touch** | hand on a shoulder, a pat on the back, holding hands, a nudge with an elbow, a high five, fixing someone's collar, wiping a tear, a hug with its own shape (quick, clinging, awkward one-armed, bear hug) |
+| **Distance** | step closer (warmth, threat), lean in to whisper, step back (fear, hurt), turn away (sulking), stand shoulder to shoulder (together against something), mirror each other's pose (rapport) |
+| **Sharing** | hand someone a thing and hold on a moment too long, share food, put something down between them |
+| **Timing** | a beat of silence before a reply, an interrupted line, both speaking at once, a reaction before the other finishes, a "take" (a look to the other or to camera after a joke) |
+| **Small tells** | fidgeting, swallowing, a nervous laugh, rubbing the back of the neck, crossing arms, tapping a foot, hiding behind something |
+
+- **How they're built:** most use existing pieces (arm IK for touch, planted walks for distance, views for turning away, springs for weight). New pieces: two-person holds (holding hands, a hug with both bodies posed together), and gaze aimed at another character's eyes rather than their centre.
+- **Checks:** the audit confirms they're seen. Clear view protects both faces in a two-person moment.
+
+---
+
+## 3B. Much better faces and reactions
+
+Today a face is one of about nine fixed drawings (neutral, happy, sad, angry, afraid, surprised, thinking, pain, eyes closed), swapped behind a blink. That's why reactions feel blunt. The fix is to **build faces from parts that move**, like real cartoon rigs:
+
+- **Face channels,** each sprung like the body:
+  - brows: each brow's height and angle, plus a middle pinch;
+  - eyelids: upper and lower, for squints and half-closed eyes;
+  - pupils: size and where they look, for wide-eyed or tiny pupils;
+  - mouth: width, curve, open, skew (a smirk), a pout, teeth, tongue;
+  - cheeks: a blush;
+  - head: tilt;
+  - cartoon marks: a sweat drop, tears, an anger vein, a sparkle, hearts, stars, spiral eyes, a gloom cloud. Some of these already exist as signs.
+- **Expressions become recipes** over those channels, so they can **mix and vary in strength**:
+  - smirk, skeptical raised brow, eye-roll, suppressed laugh, embarrassed, love-struck, disgusted, bored, sly;
+  - guilty, proud, worried smile, fake smile, deadpan, horrified, stunned, tearful pride, jealousy.
+  - "70% happy + 30% embarrassed" is a real face.
+- **Transitions are motion, not swaps.** Brows rise before the eyes widen, and a smile spreads over 200 ms.
+- **Faces come from the words and the subtext.** The writer gives each line its said emotion *and* its felt emotion (says "fine", face hurt). Listeners get a reaction track: what they feel hearing it, when it lands, and how big.
+- **Beats in a face:**
+  - a double-take (a neutral glance, a beat, a shocked return look);
+  - a slow burn (anger building over a line);
+  - a held reaction for comedy;
+  - a blink on a thought change;
+  - eye darts while lying.
+- **Style:** the house look stays (big round eyes, simple mouth). The parts are drawn by code in the figure kit, per view (V1's front, 3q and profile), and for animals and creatures too.
+- **Byte lock:** a new rig version, so old drawings are untouched.
+
+---
+
+## 3C. More kinds of stories
+
+New **genres** join the brief, each with its own structure emphasis, humour density, faces, music and sound palette:
+
+| Genre | What it brings | Guardrails |
+|---|---|---|
+| **Comedy** | setups and punchlines, the rule of three, running gags, slapstick through the physics and action moves, comic timing held by the stager | — |
+| **Romance** | the meet-cute, the misunderstanding, the almost-moment, gazes held, blushes, hand-holding, a first dance | Age-appropriate by audience: crushes and friendship for children, sweet romance for teens, grown-up romance for adults. **Never sexual** (the SAFE rule). |
+| **Dark comedy and satire** (the South Park register) | irony, absurd escalation, deadpan reactions to terrible events, morbid jokes, social satire, cheerful music against grim moments | **Adults only** (and teens with the "mild" setting). Targets are situations, institutions and types, not real private people. The existing rule on real public figures stays. No hate, no sexual content, no encouraging self-harm. Slapstick consequences stay cartoonish. Optional **strong language**, adults only, off by default, bleeped unless turned on. |
+| **Mystery** | clue plan, red herring, reveal, the "aha" face | — |
+| **Adventure / action** | escalating set pieces, the action moves, chase tracking | cartoon peril only for young audiences |
+| **Drama** | quiet scenes, long looks, silence, a turn of heart | gentle for children |
+| **Spooky** | creaks, shadows, jump-scare-lite with a laugh after | mild for children |
+| **Musical moments** | a character sings a short song | see §3D |
+
+- The **SAFE rule** is updated per audience and genre. The producer won't unlock dark comedy or strong language for child audiences, whatever the maker asks.
+- Genre choices are logged, so we can see what makers ask for.
+
+---
+
+## 3D. Music scoring
+
+**Today:** each episode has one continuous score from our own composer (`score.ts` / `conductor.ts`). It has 7 moods (calm, curious, bright, playful, motion, solemn, tense), recorded instruments (VSCO / Pixabay samples), and handovers at scene joins. It follows scene mood, not story moments.
+
+**Upgrade: scored to the story like a film:**
+- **A theme per main character** (a short motif), varied by mood: heroic when they win, minor key when they're sad, played on a toy piano when they're small and scared.
+- **Love theme and tension theme** for romance and conflict.
+- **Hits synced to action** ("mickey-mousing" for cartoon comedy): a pluck on a tiptoe, a timpani on a fall, a slide whistle on a leap, a sting on a reveal. These come from the world-event list, which already has lands, footfalls and turns.
+- **Build and release:**
+  - rising layers into the climax;
+  - a drop-out to silence for the dramatic beat;
+  - a swell on the resolution;
+  - a button sting on the last joke.
+- **Genre palettes:**
+  - sitcom stings and bass for the sitcom style;
+  - strings and piano for romance;
+  - ironic cheerful music under grim moments for dark comedy;
+  - an orchestral swell for adventure;
+  - pizzicato for sneaking.
+- **Ducking:** music dips under every line and rises in wordless action. The mix is already per clip.
+- **Songs (later):** short sung lines for musical moments. Some voice engines can sing a little (ElevenLabs v3). Otherwise a melody under spoken rhyme.
+- **New instruments:** licensed like the current ones (CC0 or approved sources only; downloads need your OK, as agreed).
+
+---
+
+## 3E. Much better sound
+
+**Today:** most sound effects are synthesised in the browser (pops, swishes, bounces, footsteps, creaks, the recent rustles and splashes). They're light, but thin and "beepy".
+
+**Upgrade:**
+- **A recorded sound library.** CC0 or approved sources (Freesound CC0, Sonniss GDC bundles, BBC excluded as agreed), each sound in 3–5 variations so nothing repeats identically:
+  - footsteps per surface and shoe;
+  - cloth rustle on movement;
+  - doors per type (wood, metal gate, sliding);
+  - vehicles, animals, props, impacts, whooshes;
+  - cartoon classics: boing, slide whistle, zip, honk, splat.
+- **Ambience beds per place:** market chatter, city traffic, birdsong, classroom murmur, a kitchen hum, wind, waves and rain. Picked from the place's kind and style pack, and layered under the scene.
+- **Foley from the body:**
+  - every step, sit, stand, hand touch and cloth move gets a small sound, from the world-event list;
+  - sounds follow the character's weight (a giant thuds, a child pats) and the surface.
+- **Space:** sounds are panned by where they are on screen and softened with distance (depth `d`). Indoors gets a small room reverb, outdoors is dry.
+- **The mix:** dialogue first, music ducks, effects balanced. Loudness is normalised per film.
+- **AI sound for rare things:** when the library has nothing, an AI sound-effect generator (e.g. ElevenLabs sound effects) makes one, which is kept in the library for reuse. That costs cents per new sound.
+- **The picture check listens too** (later): a missing or wrong sound is harder to check, so the audit confirms every event had its sound.
+
+---
+
 ## 4. Where it lands
 
 **Server:**
@@ -209,6 +323,11 @@ The personality sheet reaches the stage, not just the words:
 | **S4 Table read** | Automatic critique and targeted rewrites before anything is drawn; a quality score per film in the logs | ~1 day |
 | **S5 Performance from personality** | Characters' habits, in-character reactions, relationship-driven blocking, voice direction from the sheet | ~1–2 days |
 | **S6 Style presets tuned** | Picture book, bold cartoon, sitcom, adventure and cosy looks tuned on the benches with you | ~1 day + review |
+| **S7 Faces rebuilt** | Faces from moving parts: smirks, eye-rolls, blushes, double-takes, slow burns, said vs felt emotion, listener reactions | 2–3 days + your review |
+| **S8 Subtle interactions** | Gazes, touches, distance, holding hands, hugs of different kinds, silences, interruptions, small tells | ~2 days |
+| **S9 Genres** | Comedy, romance, dark comedy and satire (adults), mystery, adventure, drama, spooky; SAFE rules per audience and genre | ~1–2 days |
+| **S10 Music scoring** | Character themes, love and tension themes, hits on action, build and drop-outs, genre palettes, ducking | 2–3 days |
+| **S11 Sound** | Recorded library with variations, ambience per place, body foley, panning and room sound, a proper mix, AI sound for rare effects | 2–3 days (the library download needs your OK) |
 
 - S1–S4 change what stories *are*. S5–S6 change how they *play*.
 - A **story bench** (like the drawing bench) runs 10 fixed briefs through the pipeline and scores them with the table-read rubric, so every change can be measured.

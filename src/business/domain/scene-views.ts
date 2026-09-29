@@ -130,6 +130,17 @@ const speakerFacing = (facing: number, yaw = FRONT_ON) => {
   return Math.abs(off) > 112 ? yaw + (Math.sign(off) || 1) * 60 : facing;
 };
 
+/** The most a listener on the whole stage turns from the camera: three-quarter, their face seen. */
+export const LISTEN_OPEN = 60;
+
+/** A facing turned no further from a camera turned `yaw` than three-quarter: a listener cheated open to it. */
+export const cheatOpen = (facing: number, yaw = FRONT_ON) => {
+  const off = ((((facing - yaw) % 360) + 540) % 360) - 180;
+  return Math.abs(off) > LISTEN_OPEN
+    ? yaw + (Math.sign(off) || 1) * LISTEN_OPEN
+    : facing;
+};
+
 /** How far round the camera is over someone's shoulder (studio-views-plan §3.1): the one it looks at three-quarter to us, the one near from behind. */
 export const OTS_YAW = 45;
 
@@ -277,6 +288,12 @@ export function viewsOf(
     );
     return feature ? { ...feature.at.wide } : null;
   };
+  /** Whether someone speaks at a moment: their mouth moving, a moment either side. */
+  const speakingAt = (who: string, t: number) =>
+    (acting[who]?.mouth ?? []).some(
+      ([at, shapes]) =>
+        at - 200 <= t && t < at + (shapes.length * 1000) / MOUTH_FPS + 200,
+    );
   for (const thing of viewed) {
     const id = thing.id;
     const mine = acting[id] ?? {};
@@ -294,6 +311,13 @@ export function viewsOf(
       times.add(Math.round(a - 200));
       times.add(Math.round(b + 200));
     }
+    // As anyone else starts or stops speaking: a listener turns in to them.
+    for (const [who, one] of Object.entries(acting))
+      if (who !== id)
+        for (const [at, shapes] of one.mouth ?? []) {
+          times.add(Math.round(at - 200));
+          times.add(Math.round(at + (shapes.length * 1000) / MOUTH_FPS + 200));
+        }
     for (const w of myWalks) {
       times.add(Math.round(w.from));
       times.add(Math.round(w.to));
@@ -359,6 +383,11 @@ export function viewsOf(
           const dz = (depthOf(them) - depthOf(me)) * W * 0.5;
           const close = Math.abs(dx) < (me.w + them.w) * 0.75;
           facing = facingToward(dx, dz, turn, close);
+          // Listening to someone behind them, on the whole stage: turned in
+          // three-quarter, their face to us, as a film cheats it, never
+          // their back (a shot of their own turns them as it frames them).
+          if (!speaking && !hugging && !shotAt(t) && speakingAt(target, t))
+            facing = cheatOpen(facing, yaw);
         }
       }
       return speaking ? speakerFacing(facing, yaw) : facing;

@@ -19,6 +19,7 @@
  */
 import type { SceneDto } from '../../../contracts';
 import { faceOfLine } from '../scene-feeling';
+import { faceOfAim, readLine } from '../scene-performance';
 import { directionsIn, doingsIn, type Actor } from '../scene-directions';
 import {
   THING_WORDS,
@@ -307,6 +308,12 @@ const TOUCHES: ReadonlySet<DoingId> = new Set(['hug', 'lick', 'sniff']);
 const ONE_SPOT = 0.2;
 /** How long coming in through a door takes, the door swung open from inside and a step out of the dark, about (compose times it). */
 const COME_THROUGH_S = 2.2;
+/**
+ * A new place is seen whole before anyone speaks (studio-screenwriting
+ * K1): this long a quiet on the whole stage, and its sounds, before a
+ * first line, when the scene before was somewhere else (or there was none).
+ */
+export const ESTABLISH_S = 1.8;
 /** The chair pulled out and tucked in, sitting at a table; pushed back and tucked in, getting up from it. */
 const TABLE_SIT_EXTRA_S = 0.95;
 const TABLE_RISE_EXTRA_S = 0.6;
@@ -1311,6 +1318,13 @@ export function stageStory(
       here.delete(went.who);
     }
   if (comesThrough.size) lead = Math.max(lead, COME_THROUGH_S);
+  // Somewhere new, opening on a line: the place first, whole, a moment.
+  if (
+    options.before !== undefined &&
+    (options.before?.set ?? null) !== sheet.set &&
+    sheet.beats[0]?.kind === 'line'
+  )
+    lead = Math.max(lead, ESTABLISH_S);
   const steps: SceneStep[] = [];
   const opensQuiet = lead > 0;
   steps.push({
@@ -1696,8 +1710,12 @@ export function stageStory(
         if (raw.from !== 'thought' && raw.from !== 'dream')
           effects.push(...signsOff(beat.speaker));
         // The face the line is said with: the sheet's; else what its words
-        // tell, if it is not the one they wear already.
-        const told = raw.feeling ?? faceOfLine(beat.say);
+        // tell, or what it does (scene-performance), if it is not the one
+        // they wear already.
+        const told =
+          raw.feeling ??
+          faceOfLine(beat.say) ??
+          faceOfAim(readLine(beat.say.split(/\s+/)).aim);
         if (told && told !== lastFace.get(beat.speaker))
           effects.push(...faceEffect(beat.speaker, told));
         // "There he is, by the goalpost!": pointed out as it is said.

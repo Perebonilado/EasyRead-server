@@ -46,6 +46,7 @@ import type {
   SceneView,
 } from '../../contracts';
 import type { SceneCameraAsk } from './scene-script';
+import type { LineAim } from './scene-performance';
 
 /** More lines than this between the same two, one after another, is a conversation. */
 export const CONVERSATION_LINES = 3;
@@ -59,6 +60,32 @@ export const CLOSE_APART_MS = 5000;
 export const HOLD_TWO_LINES = 1.3;
 /** Below this push, the camera does not go in close on a strong line: a style with little camera movement (a sitcom's). */
 export const CLOSE_PUSH = 0.5;
+/** Two reaction shots at least this far apart (K8): an argument's lines may each have one, not every line of a chat. */
+export const REACTION_APART_MS = 2500;
+/** What a line does that makes it an argument: two of these between the same two, and three lines, is a conversation cut shot and reverse shot. */
+const ARGUES: ReadonlySet<string> = new Set([
+  'accuses',
+  'refuses',
+  'threatens',
+  'warns',
+]);
+/**
+ * The moves of physical comedy, and of anyone coming a cropper: seen on
+ * the whole stage, as a big action move is (no shot hides them).
+ */
+export const PHYSICAL_MOVES: ReadonlySet<string> = new Set([
+  'fall',
+  'fall-hard',
+  'jump',
+  'spin',
+  'roll',
+  'kick',
+  'dodge',
+]);
+/** A joke's or a tease's line is framed with whom it is said to, so their reaction is seen. */
+const FUNNY: ReadonlySet<string> = new Set(['jokes', 'teases']);
+/** A line that shows a feeling or tells something new: close on whoever says it. */
+const TELLING: ReadonlySet<string> = new Set(['reveals', 'confesses']);
 
 /** A line said on the stage, as the grammar reads it. */
 export interface GrammarLine {
@@ -75,6 +102,12 @@ export interface GrammarLine {
   sad: boolean;
   /** Said to the crowd before the camera, or to everyone. */
   toCrowd: boolean;
+  /** What it does to whom it is said to (scene-performance), where read. */
+  aim?: LineAim;
+  /** It lands (a punchline, a threat, an accusation, a reveal): whom it is said to is seen taking it (K8). */
+  lands?: boolean;
+  /** It says what the speaker wants (K2). */
+  want?: boolean;
 }
 
 export interface GrammarInput {
@@ -97,6 +130,8 @@ export interface GrammarInput {
   W: number;
   /** The writer's own asks. */
   asked: readonly SceneCameraAsk[];
+  /** The film's hero, where known: the first close-up is theirs, on the line that says what they want (K2). */
+  hero?: string | null;
   /** Whether the place has another side to cut to (a set built with its reverse). Absent, it has none. */
   reverse?: boolean;
   /** And whether the people watching are seen on it, facing the camera: a crowd's view the other way. */
@@ -139,6 +174,19 @@ export function grammarCamera(input: GrammarInput): SceneCameraAsk[] {
     return true;
   };
   const first = lines[0]?.beat;
+  /** Said strongly, or showing a feeling or telling something new. */
+  const strongly = (line: GrammarLine) =>
+    line.strong || TELLING.has(line.aim ?? '');
+  /** Whom a line is said to, on the stage: whom the sheet says, else whoever answers it. */
+  const hearerOf = (line: GrammarLine): string | null => {
+    const on = input.onAt(line.startMs);
+    if (line.to && line.to !== line.speaker && on.includes(line.to))
+      return line.to;
+    const next = lines.find((one) => one.beat > line.beat);
+    return next && next.speaker !== line.speaker && on.includes(next.speaker)
+      ? next.speaker
+      : null;
+  };
   /** Runs of lines one straight after the other (no narration between). */
   const runs: GrammarLine[][] = [];
   for (const line of lines) {
@@ -193,16 +241,29 @@ export function grammarCamera(input: GrammarInput): SceneCameraAsk[] {
       .map(([id]) => id);
     const pair = new Set([a, b].filter(Boolean));
     const said = run.filter((line) => pair.has(line.speaker) && !toCrowd(line));
+    // An argument is cut up sooner: three lines between the two, two of
+    // them an accusation, a refusal, a threat or a warning.
+    const argues =
+      said.filter((line) => ARGUES.has(line.aim ?? '')).length >= 2 &&
+      said.length >= Math.min(3, conversation + 1);
     const talk =
       pair.size === 2 &&
-      said.length > conversation &&
+      (said.length > conversation || argues) &&
       said.every((line) => input.onAt(line.startMs).includes(line.speaker));
     if (!talk) {
       for (const line of run) {
         if (line.beat === first) continue;
         const on = input.onAt(line.startMs);
+        const hearer = hearerOf(line);
         if (toCrowd(line)) plan.set(line.beat, crowdShot(line));
-        else if (line.strong && on.length >= 2 && mayClose(line))
+        else if (FUNNY.has(line.aim ?? '') && hearer)
+          plan.set(line.beat, {
+            beat: line.beat,
+            shot: 'two',
+            on: line.speaker,
+            with: hearer,
+          });
+        else if (strongly(line) && on.length >= 2 && mayClose(line))
           plan.set(line.beat, closeOn(line));
       }
       continue;
@@ -254,8 +315,18 @@ export function grammarCamera(input: GrammarInput): SceneCameraAsk[] {
           });
         continue;
       }
-      if (line.strong && mayClose(line)) {
+      if (strongly(line) && mayClose(line)) {
         plan.set(line.beat, closeOn(line));
+        continue;
+      }
+      // A joke or a tease with whom it is said to, so their face is seen.
+      if (FUNNY.has(line.aim ?? '') && on.includes(other)) {
+        plan.set(line.beat, {
+          beat: line.beat,
+          shot: 'two',
+          on: line.speaker,
+          with: other,
+        });
         continue;
       }
       // A slow style holds each shot over two lines of it.
@@ -276,13 +347,66 @@ export function grammarCamera(input: GrammarInput): SceneCameraAsk[] {
       });
     }
   }
+  // The hero's first close-up, on the line that says what they want (K2).
+  const want = lines.find(
+    (line) =>
+      line.want &&
+      line.beat !== first &&
+      !toCrowd(line) &&
+      (!input.hero || line.speaker === input.hero),
+  );
+  if (want && push >= CLOSE_PUSH) plan.set(want.beat, closeOn(want));
   // The writer's own, each on its own line; code's everywhere else, and
   // the whole stage again on the next line code has no shot for.
   const asked = [...input.asked];
   const owned = new Set(
     asked.filter((one) => one.after === undefined).map((one) => one.beat),
   );
-  const out: SceneCameraAsk[] = [...asked];
+  // A line that lands, seen on whom it is said to as it ends (K8): a
+  // reaction shot, held into their answer when they answer it.
+  const reactions: SceneCameraAsk[] = [];
+  let lastReaction = -Infinity;
+  for (const line of lines) {
+    if (!line.lands || toCrowd(line) || owned.has(line.beat)) continue;
+    const hearer = hearerOf(line);
+    const next = lines.find((one) => one.beat > line.beat);
+    if (
+      !hearer ||
+      line.startMs - lastReaction < REACTION_APART_MS * cut ||
+      push < CLOSE_PUSH ||
+      (next && owned.has(next.beat)) ||
+      asked.some((one) => one.beat === line.beat && one.after !== undefined)
+    )
+      continue;
+    lastReaction = line.startMs;
+    reactions.push({
+      beat: line.beat,
+      shot: 'close',
+      on: hearer,
+      with: null,
+      after: 0,
+    });
+    if (next?.beat === line.beat + 1 && next.speaker === hearer) {
+      plan.delete(next.beat);
+      held.add(next.beat);
+    }
+  }
+  const out: SceneCameraAsk[] = [...asked, ...reactions];
+  // After a reaction shot, and the answer it holds into: the whole stage
+  // again where code has nothing else to say.
+  for (const one of reactions) {
+    const after = lines.filter((line) => line.beat > one.beat);
+    const answer = after[0];
+    const then =
+      answer && held.has(answer.beat) ? after[1]?.beat : answer?.beat;
+    if (
+      then !== undefined &&
+      !plan.has(then) &&
+      !owned.has(then) &&
+      !held.has(then)
+    )
+      out.push({ beat: then, shot: 'wide', on: null, with: null });
+  }
   const planned = [...plan.values()]
     .filter((one) => !owned.has(one.beat))
     .sort((x, y) => x.beat - y.beat);

@@ -1659,6 +1659,8 @@ interface ViewLayers {
   /** Clip paths this view draws with: the eyes', half a mouth's, the jaw's. */
   defs: string;
   dangles: Dangle[];
+  /** Each arm's shoulder, elbow and hand as this view draws them: its joints. */
+  joints: Record<'r' | 'l', [Point2, Point2, Point2]>;
 }
 
 /** One person in one view (not the front's, which is rig 2's): every layer the rig's tree has. */
@@ -2124,6 +2126,19 @@ function viewLayers(
     over: (over.length ? fm(over.join('')) : '') + headed.over,
     defs: defs.join(''),
     dangles: chains.dangles,
+    joints: Object.fromEntries(
+      plans.map((plan): ['r' | 'l', [Point2, Point2, Point2]] => [
+        plan.s > 0 ? 'r' : 'l',
+        [
+          plan.S,
+          plan.E ?? [
+            r1((plan.S[0] + plan.H[0]) / 2),
+            r1((plan.S[1] + plan.H[1]) / 2),
+          ],
+          plan.H,
+        ],
+      ]),
+    ) as Record<'r' | 'l', [Point2, Point2, Point2]>,
   };
 }
 
@@ -2188,6 +2203,10 @@ export function drawnInViews(
   const others = FIGURE_VIEWS.filter((v) => v !== 'front');
   const defs: string[] = [];
   const perView = new Map<FigureView, Dangle[]>();
+  /** Each view's arms, as the front's joints are: so a hand is aimed from where it is in the view that shows. */
+  const viewJoints: Partial<
+    Record<FigureView, Record<'r' | 'l', [Point2, Point2, Point2]>>
+  > = front.joints ? { front: front.joints } : {};
   const groups = others.map((view) => {
     const sfx = viewSuffix(view);
     const code = VIEW_CODE[view];
@@ -2201,6 +2220,7 @@ export function drawnInViews(
       ),
     );
     for (const l of layers) defs.push(l.defs);
+    viewJoints[view] = layers[0].joints;
     perView.set(
       view,
       layers.flatMap((l) => l.dangles),
@@ -2280,6 +2300,7 @@ export function drawnInViews(
     svg,
     rig: VIEW_RIG,
     views: FIGURE_VIEWS.map(viewGroupId),
+    ...(front.joints ? { viewJoints } : {}),
     ...(all.size ? { dangles: [...all.values()] } : {}),
   };
 }

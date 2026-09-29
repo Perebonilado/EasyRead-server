@@ -26,11 +26,34 @@ import type { SceneEffectDto } from '../../contracts';
 import {
   NO_ROOM,
   floorFactor,
+  nearOf,
   viewOf,
   wideView,
   type SetRoom,
   type View,
 } from './scene-film';
+
+/**
+ * A view the camera takes, and whom its shot cheats near the camera (over
+ * whose shoulder it looks, or who stands near in deep staging): where
+ * they stand for it. That one is the shot's own, never judged in it; they
+ * stand before everyone else in it.
+ */
+type Framed = View & { near?: { id: string; place: Box } };
+
+/** A shot's view, with whom it cheats near the camera. */
+function framedBy(
+  shot: SceneEffectDto,
+  show: readonly string[],
+  places: Record<string, Box>,
+  W: number,
+  H: number,
+  room: SetRoom,
+): Framed {
+  const view = viewOf(shot, show, places, W, H, room);
+  const near = nearOf(shot, show, places, W, H, room);
+  return near ? { ...view, near: { id: near.id, place: near.place } } : view;
+}
 
 export interface Box {
   x: number;
@@ -187,21 +210,26 @@ export function keepFacesSeen(input: FacesInput): FacesMended {
   const feetOf = (p: Box) => p.y + p.h;
   const stepEnd = (k: number) => steps[k + 1]?.atMs ?? input.durationMs;
   /** The views the camera takes on a stretch of a step: the whole stage, and each shot then. */
-  const viewsAt = (k: number, from: number, to: number): View[] => [
+  const viewsAt = (k: number, from: number, to: number): Framed[] => [
     wideView(steps[k].show, places[k], W, H, room),
     ...input.shots
       .filter(
         (shot) => shot.atMs < to && (shot.untilMs ?? input.durationMs) > from,
       )
-      .map((shot) => viewOf(shot, steps[k].show, places[k], W, H, room)),
+      .map((shot) => framedBy(shot, steps[k].show, places[k], W, H, room)),
   ];
+  /** Where someone stands in a view: cheated near the camera, or at their place. */
+  const placeIn = (k: number, id: string, view: Framed) =>
+    view.near?.id === id ? view.near.place : places[k][id];
   /** Who and what covers someone's face at a step, in one view, with what is faded left out. */
   const covers = (
     k: number,
     who: string,
-    view: View,
+    view: Framed,
     faded: ReadonlySet<string>,
   ): { id: string; kind: 'person' | 'feature' | 'fore'; share: number }[] => {
+    // The one a shot cheats near the camera is its own: not judged in it.
+    if (view.near?.id === who) return [];
     const me = places[k][who];
     const face = onScreen(faceOf(me), view, 1, W, H, room.span);
     const out: {
@@ -210,7 +238,7 @@ export function keepFacesSeen(input: FacesInput): FacesMended {
       share: number;
     }[] = [];
     for (const id of steps[k].show) {
-      const other = places[k][id];
+      const other = placeIn(k, id, view);
       if (id === who || !other || feetOf(other) <= feetOf(me) + tie) continue;
       const body = {
         x: other.x + other.w * 0.15,
@@ -246,7 +274,7 @@ export function keepFacesSeen(input: FacesInput): FacesMended {
   const hidden = (
     k: number,
     who: string,
-    views: readonly View[],
+    views: readonly Framed[],
     faded: ReadonlySet<string>,
   ): number =>
     Math.max(
@@ -256,7 +284,7 @@ export function keepFacesSeen(input: FacesInput): FacesMended {
         const face = onScreen(faceOf(me), view, 1, W, H, room.span);
         const boxes = covers(k, who, view, faded).map((one) => {
           if (one.kind === 'person') {
-            const o = places[k][one.id];
+            const o = placeIn(k, one.id, view);
             return onScreen(
               { x: o.x + o.w * 0.15, y: o.y, w: o.w * 0.7, h: o.h },
               view,
@@ -297,7 +325,7 @@ export function keepFacesSeen(input: FacesInput): FacesMended {
    * What the camera shows through a stretch of a step: a shot that holds
    * the whole of it alone; else the whole stage, and each shot then.
    */
-  const shownAt = (k: number, from: number, to: number): View[] => {
+  const shownAt = (k: number, from: number, to: number): Framed[] => {
     const shots = input.shots.filter(
       (shot) => shot.atMs < to && (shot.untilMs ?? input.durationMs) > from,
     );
@@ -305,13 +333,13 @@ export function keepFacesSeen(input: FacesInput): FacesMended {
       (shot) => shot.atMs <= from && (shot.untilMs ?? input.durationMs) >= to,
     );
     return (whole ? [whole] : shots)
-      .map((shot) => viewOf(shot, steps[k].show, places[k], W, H, room))
+      .map((shot) => framedBy(shot, steps[k].show, places[k], W, H, room))
       .concat(whole ? [] : [wideView(steps[k].show, places[k], W, H, room)]);
   };
   /** How much of the frame's height someone fills at a step, at the least over what the camera shows; null where they are out of it. */
-  const heightSeen = (k: number, who: string, views: readonly View[]) => {
+  const heightSeen = (k: number, who: string, views: readonly Framed[]) => {
     const seen = views.flatMap((view) => {
-      const box = onScreen(places[k][who], view, 1, W, H, room.span);
+      const box = onScreen(placeIn(k, who, view), view, 1, W, H, room.span);
       const middle = box.x + box.w / 2;
       return middle >= 0 && middle <= W && box.y < H ? [box.h / H] : [];
     });
@@ -643,7 +671,7 @@ export interface ClearMended {
 
 /** A view the camera takes, and the shot it is (null: the wide shot). */
 interface Seen {
-  view: View;
+  view: Framed;
   shot: SceneEffectDto | null;
 }
 
@@ -701,7 +729,7 @@ export function keepInClearView(input: ClearInput): ClearMended {
           { view: { ...wide, s: wide.s * PUSHED_LEAST }, shot: null },
         ];
     for (const shot of on) {
-      const view = viewOf(shot, steps[k].show, places[k], W, H, room);
+      const view = framedBy(shot, steps[k].show, places[k], W, H, room);
       out.push(
         { view, shot },
         {
@@ -760,6 +788,14 @@ export function keepInClearView(input: ClearInput): ClearMended {
           box: onScreen(f.box, seen.view, depthOf(f.feet), W, H, room.span),
           fades: false,
         });
+    // Whom the shot cheats near the camera, before everyone: their body.
+    const near = seen.view.near;
+    if (near && near.id !== who)
+      out.push({
+        id: near.id,
+        box: onScreen(bodyOf(near.place), seen.view, 1, W, H, room.span),
+        fades: false,
+      });
     return out;
   };
   /** How much of someone the things nearer cover in one view. */
@@ -770,6 +806,9 @@ export function keepInClearView(input: ClearInput): ClearMended {
     from: number,
     to: number,
   ): Cover & { by: { id: string; fades: boolean; share: number }[] } => {
+    // The one the shot cheats near the camera is its own: not judged in it.
+    if (seen.view.near?.id === who)
+      return { face: 0, body: 0, whole: 0, by: [] };
     const me = places[k][who];
     const at = onScreen(me, seen.view, depthOf(me.y + me.h), W, H, room.span);
     const things = nearer(k, who, seen, from, to);
@@ -913,6 +952,9 @@ export function keepInClearView(input: ClearInput): ClearMended {
         for (const one of c.by) {
           if (!one.fades || !fadeable.has(one.id) || one.share < CROSSES)
             continue;
+          // Over the crowd, the people watching are the shot's own: kept.
+          if (input.keep?.(one.id) && seen.shot.shot?.kind === 'crowd')
+            continue;
           const span: [number, number] = [
             Math.round(seen.shot.atMs),
             Math.round(shotEnd(seen.shot)),
@@ -1031,28 +1073,35 @@ export function fitCheatsToShots(
   shots: readonly SceneEffectDto[],
   steps: readonly { atMs: number }[],
   durationMs: number,
+  /** A thing a shot keeps, never cheated out of it: the people watching, over whom a crowd's shot looks. */
+  keeps: (id: string, shot: SceneEffectDto) => boolean = () => false,
 ): [number, number, string, number?][] {
-  const spans = shots
-    .map((shot): [number, number] => [
-      shot.atMs,
-      shot.untilMs ?? steps.find((s) => s.atMs > shot.atMs)?.atMs ?? durationMs,
-    ])
-    .sort((a, b) => a[0] - b[0]);
-  // The shots one straight after another as one stretch.
-  const joined: [number, number][] = [];
-  for (const [a, b] of spans) {
-    const last = joined[joined.length - 1];
-    if (last && a <= last[1]) last[1] = Math.max(last[1], b);
-    else joined.push([a, b]);
-  }
+  const endOf = (shot: SceneEffectDto) =>
+    shot.untilMs ?? steps.find((s) => s.atMs > shot.atMs)?.atMs ?? durationMs;
+  /** The shots one straight after another as one stretch, but those keeping `id`. */
+  const stretches = (id: string): [number, number][] => {
+    const spans = shots
+      .filter((shot) => !keeps(id, shot))
+      .map((shot): [number, number] => [shot.atMs, endOf(shot)])
+      .sort((a, b) => a[0] - b[0]);
+    const joined: [number, number][] = [];
+    for (const [a, b] of spans) {
+      const last = joined[joined.length - 1];
+      if (last && a <= last[1]) last[1] = Math.max(last[1], b);
+      else joined.push([a, b]);
+    }
+    return joined;
+  };
   return fades.flatMap((fade): [number, number, string, number?][] => {
     if (fade[3] !== 0) return [fade];
-    return joined.flatMap(([a, b]): [number, number, string, number?][] => {
-      const from = Math.max(fade[0], a);
-      const to = Math.min(fade[1], b);
-      return to - from >= 1
-        ? [[Math.round(from), Math.round(to), fade[2], 0]]
-        : [];
-    });
+    return stretches(fade[2]).flatMap(
+      ([a, b]): [number, number, string, number?][] => {
+        const from = Math.max(fade[0], a);
+        const to = Math.min(fade[1], b);
+        return to - from >= 1
+          ? [[Math.round(from), Math.round(to), fade[2], 0]]
+          : [];
+      },
+    );
   });
 }

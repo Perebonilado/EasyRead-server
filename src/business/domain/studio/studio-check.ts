@@ -71,6 +71,7 @@ import {
   LINE_WORDS,
   MOST_ON_STAGE,
   SPOTS,
+  TWO_SHOTS,
   secondsOf,
   studioId,
   WORDS_A_SECOND,
@@ -2206,7 +2207,7 @@ export function mendSheet(
         ...shot,
         beat,
         on: shot.shot === 'wide' ? null : on,
-        with: shot.shot === 'two' && also && there.has(also) ? also : null,
+        with: TWO_SHOTS.has(shot.shot) && also && there.has(also) ? also : null,
       },
     ];
   });

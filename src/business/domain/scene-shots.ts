@@ -1,0 +1,429 @@
+/**
+ * The shot grammar (studio-views-plan §3.2, §3.3): which shot a Studio
+ * film's scene takes at each line, chosen by code, on today's front-on
+ * sets, the writer's own asks and hints kept.
+ *
+ *  - The scene opens on the master (the whole stage): no shot of code's
+ *    on its first line.
+ *  - A real conversation (more than three lines between the same two, one
+ *    after the other) opens on the master, or where the two stand near
+ *    each other, a profile two-shot of them face to face; then cuts over
+ *    the shoulder of whoever listens onto whoever speaks, line by line, a
+ *    long one breathing once in its middle on the profile two-shot. Fewer
+ *    lines than that are no conversation, and are not cut up.
+ *  - A line said into a conversation by a third, on their feet, to those
+ *    talking: deep staging, the third near the camera and big, partly off
+ *    the frame, the two behind at their places.
+ *  - A line said strongly (a whisper, a shout, a strong face): close on
+ *    who says it; seen from high when they are sad or small.
+ *  - A line said to the crowd before the camera, in a scene about them:
+ *    over the crowd onto who says it.
+ *  - A hero's pose: seen from low, whole.
+ *  - A big action move, and anyone coming on: the whole stage, as the
+ *    camera's shots are cut round them (directedShots' doings).
+ *
+ * The cut rules (a shot at least SHOT_LEAST_MS, no jump cut, a cut in the
+ * quiet before a line) are directedShots' and withoutJumps'. And the 180°
+ * rule: the two of a conversation keep their sides of the frame from one
+ * shot of them to the next; the line is crossed only after the whole
+ * stage has been seen, or as one of them walks across the other on it.
+ */
+import type {
+  SceneDto,
+  SceneEffectDto,
+  ScenePlaceDto,
+  SceneStepDto,
+  SceneView,
+} from '../../contracts';
+import type { SceneCameraAsk } from './scene-script';
+
+/** More lines than this between the same two, one after another, is a conversation. */
+export const CONVERSATION_LINES = 3;
+/** A conversation this long breathes once in its middle on the profile two-shot. */
+export const LONG_CONVERSATION = 7;
+/** Two nearer each other than this, a share of the stage's width between their middles, are framed face to face in profile. */
+export const PROFILE_NEAR = 0.5;
+
+/** A line said on the stage, as the grammar reads it. */
+export interface GrammarLine {
+  /** Its index among the scene's beats. */
+  beat: number;
+  speaker: string;
+  /** Whom it is said to, when the sheet says. */
+  to: string | null;
+  startMs: number;
+  endMs: number;
+  /** Said strongly: a whisper, a shout, a strong face. */
+  strong: boolean;
+  /** Said sad (a sad face, a sob). */
+  sad: boolean;
+  /** Said to the crowd before the camera, or to everyone. */
+  toCrowd: boolean;
+}
+
+export interface GrammarInput {
+  lines: readonly GrammarLine[];
+  /** Who is on the stage at a moment: people, not things. */
+  onAt: (t: number) => readonly string[];
+  /** Where someone stands at a moment, on the wide stage. */
+  placeAt: (id: string, t: number) => ScenePlaceDto | null;
+  /** Whether someone is on their feet at a moment, on the open floor: not sat or lying down, not behind or under a thing. */
+  standing: (id: string, t: number) => boolean;
+  /** Whether someone is small: a child's height or less, an animal. */
+  small: (id: string) => boolean;
+  /** Whether the scene is about the crowd before the camera. */
+  addressed: boolean;
+  /** Each hero's pose: who, when it begins, and how long it is. */
+  heroes: readonly { who: string; atMs: number; ms: number }[];
+  /** The stage's width. */
+  W: number;
+  /** The writer's own asks. */
+  asked: readonly SceneCameraAsk[];
+}
+
+const middle = (p: Pick<ScenePlaceDto, 'x' | 'w'>) => p.x + p.w / 2;
+
+/**
+ * The camera a Studio film's scene takes, as the module says: the
+ * writer's asks, each on its own line, and code's own on every other
+ * line; code's shot given up for the whole stage on the next line it has
+ * nothing to say of. In the order they come.
+ */
+export function grammarCamera(input: GrammarInput): SceneCameraAsk[] {
+  const { lines, W } = input;
+  const plan = new Map<number, SceneCameraAsk>();
+  const first = lines[0]?.beat;
+  /** Runs of lines one straight after the other (no narration between). */
+  const runs: GrammarLine[][] = [];
+  for (const line of lines) {
+    const run = runs[runs.length - 1];
+    const last = run?.[run.length - 1];
+    if (run && last && line.beat === last.beat + 1) run.push(line);
+    else runs.push([line]);
+  }
+  const near = (a: string, b: string, t: number) => {
+    const pa = input.placeAt(a, t);
+    const pb = input.placeAt(b, t);
+    return Boolean(
+      pa && pb && Math.abs(middle(pa) - middle(pb)) < PROFILE_NEAR * W,
+    );
+  };
+  /** Close on someone who says a line strongly: from high when sad or small. */
+  const closeOn = (line: GrammarLine): SceneCameraAsk => ({
+    beat: line.beat,
+    shot: 'close',
+    on: line.speaker,
+    with: null,
+    ...(line.sad || input.small(line.speaker) ? { angle: 'high' } : {}),
+  });
+  /** Said to the crowd before the camera, in a scene about them: over the crowd onto who says it. */
+  const toCrowd = (line: GrammarLine) => line.toCrowd && input.addressed;
+  for (const run of runs) {
+    // The two who say most of it to each other.
+    const count = new Map<string, number>();
+    for (const line of run)
+      if (!toCrowd(line))
+        count.set(line.speaker, (count.get(line.speaker) ?? 0) + 1);
+    const [a, b] = [...count.entries()]
+      .sort((x, y) => y[1] - x[1])
+      .map(([id]) => id);
+    const pair = new Set([a, b].filter(Boolean));
+    const said = run.filter((line) => pair.has(line.speaker) && !toCrowd(line));
+    const talk =
+      pair.size === 2 &&
+      said.length > CONVERSATION_LINES &&
+      said.every((line) => input.onAt(line.startMs).includes(line.speaker));
+    if (!talk) {
+      for (const line of run) {
+        if (line.beat === first) continue;
+        const on = input.onAt(line.startMs);
+        if (toCrowd(line))
+          plan.set(line.beat, {
+            beat: line.beat,
+            shot: 'crowd',
+            on: line.speaker,
+            with: null,
+          });
+        else if (line.strong && on.length >= 2)
+          plan.set(line.beat, closeOn(line));
+      }
+      continue;
+    }
+    const middleLine =
+      said.length >= LONG_CONVERSATION
+        ? said[Math.floor(said.length / 2)]
+        : null;
+    let n = 0;
+    for (const line of run) {
+      const other = line.speaker === a ? b : a;
+      const on = input.onAt(line.startMs);
+      if (toCrowd(line)) {
+        if (line.beat !== first)
+          plan.set(line.beat, {
+            beat: line.beat,
+            shot: 'crowd',
+            on: line.speaker,
+            with: null,
+          });
+        continue;
+      }
+      if (!pair.has(line.speaker)) {
+        // A third says something into it, on their feet, to the two.
+        if (
+          on.length >= 3 &&
+          line.beat !== first &&
+          input.standing(line.speaker, line.startMs)
+        )
+          plan.set(line.beat, {
+            beat: line.beat,
+            shot: 'deep',
+            on: line.speaker,
+            with: null,
+          });
+        continue;
+      }
+      n += 1;
+      if (line.beat === first) continue;
+      const faceToFace =
+        near(line.speaker, other, line.startMs) &&
+        input.standing(line.speaker, line.startMs) &&
+        input.standing(other, line.startMs);
+      if (n === 1 || line === middleLine) {
+        // Opening it, or breathing in its middle: the two face to face.
+        if (faceToFace)
+          plan.set(line.beat, {
+            beat: line.beat,
+            shot: 'profile',
+            on: line.speaker,
+            with: other,
+          });
+        continue;
+      }
+      if (line.strong) {
+        plan.set(line.beat, closeOn(line));
+        continue;
+      }
+      if (!on.includes(other)) continue;
+      plan.set(line.beat, {
+        beat: line.beat,
+        shot: 'ots',
+        on: line.speaker,
+        with: other,
+      });
+    }
+  }
+  // The writer's own, each on its own line; code's everywhere else, and
+  // the whole stage again on the next line code has no shot for.
+  const asked = [...input.asked];
+  const owned = new Set(
+    asked.filter((one) => one.after === undefined).map((one) => one.beat),
+  );
+  const out: SceneCameraAsk[] = [...asked];
+  const planned = [...plan.values()]
+    .filter((one) => !owned.has(one.beat))
+    .sort((x, y) => x.beat - y.beat);
+  const beats = lines.map((line) => line.beat);
+  for (const one of planned) {
+    out.push(one);
+    const next = beats.find((beat) => beat > one.beat);
+    if (next !== undefined && !plan.has(next) && !owned.has(next))
+      out.push({ beat: next, shot: 'wide', on: null, with: null });
+  }
+  // A hero's pose, seen from low: from its moment, and the whole stage
+  // again once it is struck.
+  for (const hero of input.heroes)
+    out.push(
+      { beat: -1, shot: 'low', on: hero.who, with: null, atMs: hero.atMs },
+      {
+        beat: -1,
+        shot: 'wide',
+        on: null,
+        with: null,
+        atMs: hero.atMs + hero.ms,
+      },
+    );
+  return out.sort(
+    (x, y) =>
+      (x.atMs !== undefined ? 1 : 0) - (y.atMs !== undefined ? 1 : 0) ||
+      x.beat - y.beat ||
+      (x.after ?? -1) - (y.after ?? -1),
+  );
+}
+
+// ── The 180° rule ───────────────────────────────────────────────────────────
+
+/** Whom a shot has in it, two by two: the pair it frames, where it frames two. */
+function pairOf(shot: SceneEffectDto): [string, string] | null {
+  if (!shot.part) return null;
+  return [shot.target, shot.part];
+}
+
+/** The step a moment falls in. */
+const stepIndex = (steps: readonly Pick<SceneStepDto, 'atMs'>[], t: number) => {
+  let k = 0;
+  steps.forEach((step, i) => {
+    if (step.atMs <= t) k = i;
+  });
+  return k;
+};
+
+/** Someone walking on the wide stage, as scene-film's walksOf has them. */
+export interface WalkSeen {
+  id: string;
+  from: number;
+  to: number;
+  start: Pick<ScenePlaceDto, 'x' | 'w'>;
+  end: Pick<ScenePlaceDto, 'x' | 'w'>;
+}
+
+/**
+ * Whether one of a pair walks across the other between two moments, on
+ * the stage: from one side of them to the other.
+ */
+function walkedAcross(
+  pair: readonly [string, string],
+  from: number,
+  to: number,
+  walks: readonly WalkSeen[],
+  placeAt: (id: string, t: number) => Pick<ScenePlaceDto, 'x' | 'w'> | null,
+): boolean {
+  return walks.some((walk) => {
+    if (!pair.includes(walk.id) || walk.to <= from || walk.from >= to)
+      return false;
+    const other = pair[0] === walk.id ? pair[1] : pair[0];
+    const them = placeAt(other, walk.from) ?? placeAt(other, walk.to);
+    if (!them) return false;
+    const was = Math.sign(middle(walk.start) - middle(them));
+    const now = Math.sign(middle(walk.end) - middle(them));
+    return was !== 0 && now !== 0 && was !== now;
+  });
+}
+
+/**
+ * The shots of a film's scene kept to the 180° rule (§3.3): a shot of two
+ * (a two-shot, over the shoulder, in profile) that has them on the other
+ * sides of the frame from the last shot of them, with no whole stage
+ * between and neither seen walking across the other, is not taken: the
+ * whole stage is seen instead, and the line may be crossed after it.
+ * The rest as they were, copies.
+ */
+export function keepTheLine(
+  shots: readonly SceneEffectDto[],
+  steps: readonly Pick<SceneStepDto, 'atMs' | 'show'>[],
+  places: readonly Record<string, ScenePlaceDto>[],
+  walks: readonly WalkSeen[] = [],
+): SceneEffectDto[] {
+  const placeAt = (id: string, t: number) => {
+    const k = stepIndex(steps, t);
+    return steps[k]?.show.includes(id) ? (places[k]?.[id] ?? null) : null;
+  };
+  /** The side of the frame each of a pair was last seen on, since the whole stage. */
+  const sides = new Map<string, { side: number; at: number }>();
+  const key = (a: string, b: string) => [a, b].sort().join('|');
+  const out: SceneEffectDto[] = [];
+  let lastEnd = -Infinity;
+  for (const shot of [...shots].sort((a, b) => a.atMs - b.atMs)) {
+    // The whole stage between: the line starts afresh.
+    if (shot.atMs > lastEnd + 1) sides.clear();
+    const pair = pairOf(shot);
+    if (pair) {
+      const [a, b] = pair;
+      const pa = placeAt(a, shot.atMs + 1);
+      const pb = placeAt(b, shot.atMs + 1);
+      if (pa && pb) {
+        const side = Math.sign(middle(pa) - middle(pb)) || 1;
+        const was = sides.get(key(a, b));
+        const mine = a < b ? side : -side;
+        if (
+          was &&
+          was.side !== mine &&
+          !walkedAcross(pair, was.at, shot.atMs, walks, placeAt)
+        )
+          // Across the line with no whole stage between: not taken.
+          continue;
+        sides.set(key(a, b), { side: mine, at: shot.atMs });
+      }
+    }
+    out.push({ ...shot });
+    lastEnd = Math.max(lastEnd, shot.untilMs ?? shot.atMs);
+  }
+  return out;
+}
+
+/** Someone's screen direction at a moment, from their view: 1 looking to the frame's right, -1 to its left, 0 to us. */
+export function screenDirection(
+  view: readonly [number, SceneView, 1 | -1][] | undefined,
+  t: number,
+): number {
+  let key: [number, SceneView, 1 | -1] | undefined;
+  for (const one of view ?? []) if (one[0] <= t) key = one;
+  if (!key || key[1] === 'front' || key[1] === 'back') return 0;
+  return key[2];
+}
+
+/** A cut that flips someone's screen direction across the line. */
+export interface LineCrossing {
+  atMs: number;
+  who: string;
+  /** Whom they look at across the line. */
+  toward: string;
+  was: number;
+  now: number;
+}
+
+/**
+ * The cuts in a made scene that cross the line (§3.3): from one shot of
+ * two (a two-shot, over the shoulder, in profile) to the next of the same
+ * two, with no whole stage between, one of them looks to the other side
+ * of the frame (as their views have them) and neither was seen walking
+ * across the other. Someone who turns to a third between is no crossing:
+ * the line is the two's. None in a scene kept to the rule.
+ */
+export function lineCrossings(
+  scene: Pick<SceneDto, 'effects' | 'acting' | 'steps' | 'stagings'>,
+  walks: readonly WalkSeen[] = [],
+): LineCrossing[] {
+  const shots = scene.effects
+    .filter((e) => e.do === 'zoom')
+    .sort((a, b) => a.atMs - b.atMs);
+  const places = scene.stagings.wide.places;
+  const placeAt = (id: string, t: number) => {
+    const k = stepIndex(scene.steps, t);
+    return scene.steps[k]?.show.includes(id) ? (places[k]?.[id] ?? null) : null;
+  };
+  const mid = (s: SceneEffectDto) =>
+    (s.atMs + (s.untilMs ?? s.atMs + 1000)) / 2;
+  /** How each of a pair last looked toward the other, since the whole stage was seen. */
+  const seen = new Map<string, { at: number; dirs: Record<string, number> }>();
+  const out: LineCrossing[] = [];
+  let lastEnd = -Infinity;
+  for (const shot of shots) {
+    if (shot.atMs > lastEnd + 1) seen.clear();
+    lastEnd = Math.max(lastEnd, shot.untilMs ?? shot.atMs);
+    const pair = pairOf(shot);
+    if (!pair) continue;
+    const key = [...pair].sort().join('|');
+    const dirs = Object.fromEntries(
+      pair.map((who) => [
+        who,
+        screenDirection(scene.acting?.[who]?.view, mid(shot)),
+      ]),
+    );
+    const was = seen.get(key);
+    if (was && !walkedAcross(pair, was.at, shot.atMs, walks, placeAt))
+      for (const who of pair) {
+        const before = was.dirs[who];
+        const now = dirs[who];
+        if (before && now && before !== now)
+          out.push({
+            atMs: shot.atMs,
+            who,
+            toward: who === pair[0] ? pair[1] : pair[0],
+            was: before,
+            now,
+          });
+      }
+    seen.set(key, { at: shot.atMs, dirs });
+  }
+  return out;
+}

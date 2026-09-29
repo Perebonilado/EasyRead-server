@@ -17,6 +17,8 @@ import type {
   ScenePropDto,
   SceneStepDto,
   SceneSettingDto,
+  SceneShotAngle,
+  SceneShotKind,
   SceneThingDto,
   SceneTiming,
 } from '../../contracts';
@@ -24,6 +26,7 @@ import { actingOf, type DirectedMove, type SpokenLine } from './scene-acting';
 import { withViews } from './scene-views';
 import { guessAffordances } from './scene-affordances';
 import { withInteractions, type TimedInteraction } from './scene-interact';
+import { grammarCamera, keepTheLine } from './scene-shots';
 import {
   crowdHeads,
   asideOf,
@@ -78,6 +81,7 @@ import {
   isCodeThing,
   quotedSpans,
   type CharacterThing,
+  type SceneCameraAsk,
   type SceneScript,
   type SceneStep,
   type SceneThing,
@@ -94,6 +98,7 @@ import {
 import { wearableOf } from './scene-wear';
 import {
   ACTED_MOVES,
+  BIG_MOVES,
   DOINGS,
   HELD_MOVES,
   THING_ACTIONS,
@@ -415,6 +420,21 @@ export function thingDto(
           ...(drawing.stride ? { stride: drawing.stride } : {}),
           ...(drawing.rigVersion === 3 && drawing.views?.length
             ? { views: drawing.views }
+            : {}),
+          // And each view's arms, as shares of the box, as `joints` is
+          // the front's: a hand aimed from where it is in the view shown.
+          ...(drawing.rigVersion === 3 && drawing.acts && drawing.viewJoints
+            ? {
+                viewJoints: Object.fromEntries(
+                  Object.entries(drawing.viewJoints).map(([view, arms]) => [
+                    view,
+                    {
+                      r: arms.r.map((p) => shareOf(drawing.viewBox, p)),
+                      l: arms.l.map((p) => shareOf(drawing.viewBox, p)),
+                    },
+                  ]),
+                ),
+              }
             : {}),
         }
       : {}),
@@ -883,6 +903,53 @@ export interface Doing {
   toMs: number;
 }
 
+/** A shot as the camera takes it: on whom, with whom, and its grammar. */
+interface Framed {
+  on: string;
+  with: string | null;
+  kind?: SceneShotKind;
+  angle?: SceneShotAngle;
+}
+
+/**
+ * A shot asked for, framed on who is there (`on`, the stage then): a
+ * two-shot, over the shoulder or in profile only with the other there
+ * (else one alone, close); a low or high angle on one alone.
+ */
+function framedAs(ask: SceneCameraAsk, on: readonly string[]): Framed {
+  const other =
+    ask.with && ask.with !== ask.on && on.includes(ask.with) ? ask.with : null;
+  const one = ask.on!;
+  switch (ask.shot) {
+    case 'two':
+      return { on: one, with: other };
+    case 'ots':
+    case 'profile':
+      return other
+        ? { on: one, with: other, kind: ask.shot }
+        : { on: one, with: null };
+    case 'deep':
+    case 'crowd':
+      return { on: one, with: null, kind: ask.shot };
+    case 'low':
+    case 'high':
+      return { on: one, with: null, angle: ask.shot };
+    default:
+      return {
+        on: one,
+        with: null,
+        ...(ask.angle ? { angle: ask.angle } : {}),
+      };
+  }
+}
+
+/** Whether two shots frame the same, grammar and all. */
+const same = (a: SceneEffectDto, b: SceneEffectDto) =>
+  a.target === b.target &&
+  a.part === b.part &&
+  (a.shot?.kind ?? null) === (b.shot?.kind ?? null) &&
+  (a.shot?.angle ?? null) === (b.shot?.angle ?? null);
+
 /**
  * The camera as a scene says it (the Studio's sheets), cut as a film is:
  * the whole stage, one person close, or two framed together, each from
@@ -927,16 +994,29 @@ export function directedShots(
     at: number;
     /** From a moment in a quiet: the stage may change at it, as its doing does. */
     moment: boolean;
-    shot: { on: string; with: string | null } | null;
+    shot: Framed | null;
   }[] = [];
-  for (const shot of [...(script.camera ?? [])].sort(
+  const asks = [...(script.camera ?? [])].sort(
     (a, b) => a.beat - b.beat || (a.after ?? -1) - (b.after ?? -1),
-  )) {
+  );
+  // Code's own at moments of its own (a hero's pose) among the rest, in
+  // the order they come.
+  const timeOf = (one: SceneCameraAsk) =>
+    one.atMs ??
+    (one.after !== undefined && options.momentMs
+      ? options.momentMs(one.beat, one.after)
+      : (beats[Math.max(0, Math.min(one.beat, beats.length - 1))]?.startMs ??
+        0));
+  if (asks.some((one) => one.atMs !== undefined))
+    asks.sort((a, b) => timeOf(a) - timeOf(b));
+  for (const shot of asks) {
     const b = Math.max(0, Math.min(shot.beat, beats.length - 1));
     const moment =
-      shot.after !== undefined && options.momentMs
-        ? options.momentMs(shot.beat, shot.after)
-        : null;
+      shot.atMs !== undefined
+        ? shot.atMs
+        : shot.after !== undefined && options.momentMs
+          ? options.momentMs(shot.beat, shot.after)
+          : null;
     // One who goes off at the moment is seen close as the line before it
     // is said, until they go.
     const leaving =
@@ -959,16 +1039,7 @@ export function directedShots(
     const on = stageAt(moment !== null ? moment - 1 : beats[b].startMs + 50);
     const framed =
       shot.shot !== 'wide' && shot.on && on.includes(shot.on)
-        ? {
-            on: shot.on,
-            with:
-              shot.shot === 'two' &&
-              shot.with &&
-              shot.with !== shot.on &&
-              on.includes(shot.with)
-                ? shot.with
-                : null,
-          }
+        ? framedAs(shot, on)
         : null;
     if (wanted[wanted.length - 1]?.at === at) wanted.pop();
     wanted.push({ at, moment: moment !== null && !leaving, shot: framed });
@@ -976,7 +1047,9 @@ export function directedShots(
   const shots: SceneEffectDto[] = [];
   wanted.forEach(({ at: asked, moment, shot }, i) => {
     if (!shot) return;
-    const framed = (who: string) => who === shot.on || who === shot.with;
+    // Deep staging has everyone on the stage in it.
+    const framed = (who: string) =>
+      shot.kind === 'deep' || who === shot.on || who === shot.with;
     const others = (options.doings ?? []).filter((one) => !framed(one.who));
     // Something being done by someone else as it would begin: once it is,
     // unless it is all but done.
@@ -1017,27 +1090,25 @@ export function directedShots(
     until = Math.round(until);
     if (until <= at) return;
     const last = shots[shots.length - 1];
-    // The same framing again at once: one shot.
-    if (
-      last &&
-      last.untilMs === at &&
-      last.target === shot.on &&
-      last.part === shot.with
-    ) {
-      last.untilMs = until;
-      return;
-    }
-    shots.push({
+    const effect: SceneEffectDto = {
       atMs: at,
       target: shot.on,
       part: shot.with,
       do: 'zoom',
       untilMs: until,
-      shot: { enter: 'cut' },
-    });
+      shot: {
+        enter: 'cut',
+        ...(shot.kind ? { kind: shot.kind } : {}),
+        ...(shot.angle ? { angle: shot.angle } : {}),
+      },
+    };
+    // The same framing again at once: one shot.
+    if (last && last.untilMs === at && same(last, effect)) {
+      last.untilMs = until;
+      return;
+    }
+    shots.push(effect);
   });
-  const same = (a: SceneEffectDto, b: SceneEffectDto) =>
-    a.target === b.target && a.part === b.part;
   // A shot too short to take in is none: what was on before holds through it.
   for (let i = shots.length - 1; i >= 0; i -= 1) {
     const shot = shots[i];
@@ -1157,7 +1228,16 @@ export function composeScene(input: ComposeInput): {
   const { script, beats, durationMs } = input;
   /** A Studio film's scene; and one whose camera its sheet directs. */
   const film = input.profile?.film === true;
-  const cameraDirected = Boolean(script.camera?.length);
+  /**
+   * A Studio film's story, its people at their stations and saying lines:
+   * code picks its shots by the shot grammar (scene-shots), the writer's
+   * asks among them, once everyone's place is known (below).
+   */
+  const grammar =
+    film &&
+    script.stations === true &&
+    script.beats.some((beat) => beat.kind === 'line');
+  const cameraDirected = Boolean(script.camera?.length) || grammar;
   // A story's page: its characters and places are the story's own.
   const story = script.cast.some(
     (thing) => thing.kind === 'character' || thing.kind === 'place',
@@ -2278,14 +2358,14 @@ export function composeScene(input: ComposeInput): {
   // A screenplay's camera: the whole stage as it opens and while the
   // narrator speaks; on two who trade lines while others stand by; close
   // on a whisper, a shout or a strong face.
-  if (cameraDirected)
+  if (cameraDirected && !grammar)
     effects.push(
       ...directedShots(script, beats, steps, durationMs, {
         momentMs,
         doings: doingsSeen(),
       }),
     );
-  else if (script.beats.some((beat) => beat.kind))
+  else if (!grammar && script.beats.some((beat) => beat.kind))
     effects.push(...storyShots(script, beats, steps, effects, durationMs));
   /** The step a moment falls in. */
   const stepOf = (t: number) => {
@@ -2925,6 +3005,113 @@ export function composeScene(input: ComposeInput): {
     }),
   );
   const layouts = { box: layoutsOf('box'), wide: layoutsOf('wide') };
+  // A Studio film's shots, by the shot grammar (studio-views-plan §3.2):
+  // where everyone stands on the wide stage, as the film plays it.
+  if (grammar) {
+    const stepAt = (t: number) => {
+      let k = 0;
+      steps.forEach((step, i) => {
+        if (step.atMs <= t) k = i;
+      });
+      return k;
+    };
+    const person = (id: string) => {
+      const thing = castById.get(id);
+      return thing?.kind === 'character' || thing?.kind === 'person';
+    };
+    const onAt = (t: number) => steps[stepAt(t)]?.show.filter(person) ?? [];
+    const placeAt = (id: string, t: number) => {
+      const k = stepAt(t);
+      return steps[k]?.show.includes(id)
+        ? (layouts.wide[k]?.[id] ?? null)
+        : null;
+    };
+    const movesOf = (id: string) => acting[id]?.moves ?? [];
+    const faceAt = (id: string, t: number) =>
+      [...effects]
+        .reverse()
+        .find(
+          (e) =>
+            e.target === id &&
+            e.do === 'show' &&
+            e.atMs <= t &&
+            e.part !== null &&
+            (FACES as readonly string[]).includes(e.part),
+        )?.part ?? null;
+    const lines = script.beats.flatMap((beat, i) => {
+      const t = beats[i];
+      if (beat.kind !== 'line' || !beat.speaker || beat.from || !t) return [];
+      const face = faceAt(beat.speaker, t.startMs + 400);
+      const to = beat.to ? castById.get(beat.to) : undefined;
+      const sobs = movesOf(beat.speaker).some(
+        ([at, move, ms]) =>
+          move === 'sob' && at < t.endMs && at + ms > t.startMs,
+      );
+      return [
+        {
+          beat: i,
+          speaker: beat.speaker,
+          to: beat.to ?? null,
+          startMs: t.startMs,
+          endMs: t.endMs,
+          strong:
+            beat.pace === 'whisper' ||
+            beat.pace === 'shout' ||
+            STRONG_FACES.has(face ?? '') ||
+            sobs,
+          sad: face === 'sad' || sobs,
+          toCrowd:
+            (to?.kind === 'character' && to.group === true) ||
+            crowdAddressed([{ kind: 'line', say: beat.say }]),
+        },
+      ];
+    });
+    const units = (id: string) => geometry.get(id)?.stands?.units;
+    const camera = grammarCamera({
+      lines,
+      onAt,
+      placeAt,
+      standing: (id, t) => {
+        const k = stepAt(t);
+        if (/^(?:behind|under|in|on|up):/.test(stationsAt[k]?.[id] ?? ''))
+          return false;
+        return !movesOf(id).some(
+          ([at, move, ms]) =>
+            (HELD_MOVES as readonly string[]).includes(move) &&
+            at <= t &&
+            // Held there until they next get up.
+            !movesOf(id).some(
+              ([up, again]) => again === 'stand' && up > at && up <= t,
+            ) &&
+            ms > 0,
+        );
+      },
+      small: (id) => (units(id) ?? Infinity) < SMALL_STANDING,
+      addressed,
+      heroes: Object.entries(acting).flatMap(([who, one]) =>
+        (one.moves ?? []).flatMap(([at, move, ms]) =>
+          move === 'hero' ? [{ who, atMs: at, ms }] : [],
+        ),
+      ),
+      W: STAGINGS.wide.w,
+      asked: script.camera ?? [],
+    });
+    // A big action move is seen on the whole stage: no shot hides it.
+    const big: Doing[] = Object.values(acting).flatMap((one) =>
+      (one.moves ?? []).flatMap(([at, move, ms]) =>
+        BIG_MOVES.has(move) && move !== 'hero'
+          ? [{ who: '@wide', fromMs: at, toMs: at + ms }]
+          : [],
+      ),
+    );
+    effects.push(
+      ...directedShots({ ...script, camera }, beats, steps, durationMs, {
+        momentMs,
+        doings: [...doingsSeen(), ...big],
+      }),
+    );
+    effects.sort((a, b) => a.atMs - b.atMs);
+  }
   // Every speaker's face seen as they speak, in every shot: mended where
   // it is hidden, and said.
   const facesSeen = stationed ? facesKept() : { fades: [], notes: [] };
@@ -3485,10 +3672,11 @@ export function composeScene(input: ComposeInput): {
       props,
       setting: { features: featuresDto() },
     };
-    const kept = withoutJumps(
+    const walked = walksOf({ ...paced, steps: film ? hurried(paced) : steps });
+    const jumpless = withoutJumps(
       shotsBesideWalks(
         effects.filter((e) => e.do === 'zoom'),
-        walksOf({ ...paced, steps: film ? hurried(paced) : steps }),
+        walked,
         STAGINGS.wide.w,
       ),
       steps,
@@ -3500,6 +3688,12 @@ export function composeScene(input: ComposeInput): {
       },
       durationMs,
     );
+    // And the 180° rule (studio-views-plan §3.3): a shot of two on the
+    // other sides of the frame from the last, with no whole stage between
+    // and no one seen crossing, is not taken.
+    const kept = grammar
+      ? keepTheLine(jumpless, steps, wide.places, walked)
+      : jumpless;
     effects.splice(
       0,
       effects.length,
@@ -3514,6 +3708,8 @@ export function composeScene(input: ComposeInput): {
       effects.filter((e) => e.do === 'zoom'),
       steps,
       durationMs,
+      // Over the crowd, the people watching are the shot's own.
+      (id, shot) => id.startsWith('fg-au') && shot.shot?.kind === 'crowd',
     );
   }
   // A crowd before the camera in the set (studio-scenery-plan §5.5),

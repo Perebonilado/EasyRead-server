@@ -25,6 +25,11 @@
  * show's own features (ownFeatureBrief), and placed like a piece.
  */
 import {
+  drawVehicleKit,
+  vehicleLiveryOf,
+  type VehicleLivery,
+} from './scene-vehicles';
+import {
   ACTED_PIECES,
   drawPiece,
   featureGroup,
@@ -270,6 +275,8 @@ export interface SetLayout {
    * Absent, code fills it from the place's kind and style pack.
    */
   reverse?: SetItem[];
+  /** A city's look for its buses and cabs, where the story names the city (London's red buses and black cabs); absent, its pack's. */
+  livery?: VehicleLivery;
 }
 
 /** The most things a set places, and the most the artist draws for it. */
@@ -931,6 +938,10 @@ export function layoutOf(
           ? 0
           : null;
   const watching = style ? audienceFor(placeWords) : null;
+  // A named city's buses and cabs: only where the story's words say it.
+  const livery = vehicleLiveryOf(
+    `${world ? worldWords(world) : ''} ${placeWords}`,
+  );
   const audience =
     rowsSaid !== null
       ? rowsSaid >= 2
@@ -976,6 +987,7 @@ export function layoutOf(
     ...(style ? { style } : {}),
     ...(style && audience ? { audience } : {}),
     ...(reverse.length ? { reverse } : {}),
+    ...(livery ? { livery } : {}),
   };
 }
 
@@ -2144,7 +2156,13 @@ function pieceOf(
   key = '',
   /** Seen from behind: its back where it has one of its own, else as it is. */
   back = false,
+  livery: VehicleLivery | null = null,
 ): SceneryPiece {
+  // A named city's own bus and cab (London's red double-decker).
+  if (livery && !colour && (kind === 'bus' || kind === 'taxi')) {
+    const drawn = drawVehicleKit(kind, { livery, plain: true });
+    return { svg: drawn.svg, viewBox: drawn.viewBox };
+  }
   if (back) {
     const front = pieceOf(kind, colour, seed, pack, key);
     const behind = backOf(
@@ -2957,6 +2975,7 @@ function buildSetAt(
       pack,
       key,
       item.back === true,
+      layout.livery ?? null,
     );
     const [, vy, vw] = piece.viewBox;
     if ((HANGING as readonly string[]).includes(item.kind)) {
@@ -3187,7 +3206,10 @@ function buildSetAt(
     const id = featureGroup(feature.id);
     parts[id] = id;
     placings.push({
-      piece: drawPiece(feature.kind, feature.name, { pack: layout.style }),
+      piece: drawPiece(feature.kind, feature.name, {
+        pack: layout.style,
+        livery: layout.livery ?? null,
+      }),
       kind: feature.kind,
       x: (SPOT_AT[feature.spot] ?? 0.5) * SET_W,
       y,
@@ -3494,7 +3516,8 @@ function buildSetAt(
     ` data-place="${kind}" data-ground="${layout.ground}" data-floor="${r1(floor)}"` +
     (pack
       ? ` data-style="${pack.id}" data-ambient="${pack.ambient.join(' ')}"`
-      : '');
+      : '') +
+    (layout.livery ? ` data-livery="${layout.livery}"` : '');
   const svg =
     `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${SET_W} ${SET_H}"${world}>` +
     `<g stroke="${FIGURE_INK}" stroke-width="${INK_W}" stroke-linejoin="round" stroke-linecap="round">${out.join('')}</g></svg>`;
@@ -3533,7 +3556,7 @@ function buildSetAt(
             svg: layerSvg(
               layers[id].join(''),
               pack
-                ? ` data-place="${kind}" data-ground="${layout.ground}" data-floor="${r1(floor)}" data-layer="${id}" data-style="${pack.id}"`
+                ? ` data-place="${kind}" data-ground="${layout.ground}" data-floor="${r1(floor)}" data-layer="${id}" data-style="${pack.id}"${layout.livery ? ` data-livery="${layout.livery}"` : ''}`
                 : `${world} data-layer="${id}"`,
             ),
             ...(id === 'floor' ? { feet: rowFeet(kind, 'front') } : {}),

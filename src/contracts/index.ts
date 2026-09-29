@@ -1433,7 +1433,18 @@ export interface SceneSettingDto {
   fades?: [number, number, string, number?][];
   /** A room's lights switched on or off: when, and how. Before the first, the other way (off before one switched on). */
   lights?: [number, 'on' | 'off'][];
+  /**
+   * Things of the set that move through it (studio-interactions-plan
+   * §2.4): from when, which (a feature's id, or a thing's), from where
+   * to where, how long, and how it sets off and arrives. Where it is is
+   * an offset from where the stage stands it, [x, y] in its own drawing's
+   * units; played purely in t, as a walk is, and held at the last `to`.
+   */
+  moves?: [number, string, ScenePoint, ScenePoint, number, SceneEase][];
 }
+
+/** How a move sets off and arrives: evenly, easing in (setting off), easing out (arriving), or both. */
+export type SceneEase = 'linear' | 'in' | 'out' | 'in-out';
 
 /**
  * A fixed thing of a Studio set that its story acts on, stood among the
@@ -1490,14 +1501,53 @@ export interface SceneFeatureDto {
    * Absent, nothing: it is only looked at, stood by or gone through.
    */
   affordances?: SceneAffordancesDto;
+  /** A vehicle of the kit (studio-interactions-plan I3): what it is, how it is seen, and how it rides. Absent, it is not one. */
+  vehicle?: SceneVehicleDto;
+}
+
+/** A vehicle seen from the side (its main view), three-quarter on, from the front or from behind. */
+export type SceneVehicleView = 'side' | '3q' | 'front' | 'back';
+
+/**
+ * A vehicle of the kit as the stage moves it (studio-interactions-plan
+ * I3): its drawing's wheels (groups `data-wheel="cx cy r"`, `data-spin`
+ * their sense) turn by the distance it goes; its body (the group `bob`)
+ * rises and falls on its springs, `bob` units at most once every
+ * `bobEvery` units gone; one on the water rocks as time goes instead;
+ * its headlights (the group `lights`) show at night.
+ */
+export interface SceneVehicleDto {
+  kind: string;
+  view: SceneVehicleView;
+  /** 1 facing right, as drawn; -1 mirrored. */
+  facing: 1 | -1;
+  bob: number;
+  bobEvery: number;
+  water?: true;
 }
 
 /** A point in a thing's own drawing, in its viewBox's units, y down. */
 export type ScenePoint = [number, number];
 
-/** How one sits on a seat: on a chair, at a table (the chair pulled out and tucked in), on a bench, a sofa, a bed's edge, a step. */
+/**
+ * How one sits on a seat: on a chair, at a table (the chair pulled out
+ * and tucked in), on a bench, a sofa, a bed's edge, a step; and in a
+ * vehicle (studio-interactions-plan I3): driving (hands on the wheel),
+ * astride (a bicycle, a motorbike, a horse), a passenger, rowing or
+ * paddling, standing (a chariot).
+ */
 export type SceneSeatPose =
-  'chair' | 'table' | 'bench' | 'sofa' | 'bed' | 'step';
+  | 'chair'
+  | 'table'
+  | 'bench'
+  | 'sofa'
+  | 'bed'
+  | 'step'
+  | 'drive'
+  | 'ride'
+  | 'passenger'
+  | 'row'
+  | 'stand';
 
 /**
  * A group of a thing's drawing laid over whoever uses it: a doorway's near
@@ -1529,8 +1579,8 @@ export interface SceneAffordancesDto {
   }[];
   /** What a hand holds: a chair's back, handlebars, a rail. */
   grips?: { id: string; at: ScenePoint }[];
-  /** A bicycle's (studio-interactions-plan I3): feet follow the crank. */
-  pedals?: { crank: ScenePoint; radius: number };
+  /** A bicycle's (studio-interactions-plan I3): feet follow the crank, which turns once for `gear` turns of the wheels. */
+  pedals?: { crank: ScenePoint; radius: number; gear?: number };
   /** Turning with the distance gone (I3). */
   wheels?: { at: ScenePoint; r: number }[];
   /** What is laid over whoever uses it, by the group of the drawing. */
@@ -1793,6 +1843,13 @@ export interface SceneActingDto {
   view?: [number, SceneView, 1 | -1][];
   /** What they do with the set's things, in timed steps (studio-interactions-plan §1.3): through a door, sat at a table, up the stairs. */
   interact?: SceneInteractDto[];
+  /**
+   * Riding along (studio-interactions-plan §1.2): from when `who` (this
+   * one) is attached to a thing (a vehicle, a ridden animal), at which of
+   * its seats; null lets go. While attached, they are where the seat is,
+   * moving with the thing.
+   */
+  attach?: [number, string, string, string | null][];
 }
 
 /** A view of someone drawn from every side, as the camera sees them. */

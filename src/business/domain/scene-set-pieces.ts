@@ -14,11 +14,19 @@
  * the rest (a tree, a stall, a well) as groups of their own; whatever the
  * painting has not got is drawn here, so nothing a sheet names is missing.
  */
-import type { SceneAffordancesDto } from '../../contracts';
+import type { SceneAffordancesDto, SceneVehicleDto } from '../../contracts';
 import type { FeatureKind } from './scene-doings';
 import { FIGURE_INK } from './scene-figure';
-import { CLOTH } from './scene-ink';
 import { STYLE_PACKS, type StylePackId } from './scene-style-packs';
+import {
+  colourNamed,
+  drawVehicleKit,
+  vehicleKitKindOf,
+  type VehicleKitKind,
+  type VehicleLivery,
+} from './scene-vehicles';
+
+export { colourNamed };
 
 /**
  * How a piece is drawn beyond its kind and name: the style pack of the
@@ -28,6 +36,8 @@ import { STYLE_PACKS, type StylePackId } from './scene-style-packs';
 export interface PieceLook {
   pack?: StylePackId | null;
   colour?: string | null;
+  /** A city's look for its buses and cabs, where the story names the city (London's red buses). */
+  livery?: VehicleLivery | null;
 }
 
 /** A set piece as the stage gets it. */
@@ -79,6 +89,8 @@ export interface SetPiece {
   affordances?: SceneAffordancesDto;
   /** One up it stands in the middle of where things catch (its landing, a rung), not beside it: stairs, a ladder. */
   upMiddle?: true;
+  /** A vehicle of the kit (scene-vehicles): what it is, its view, how it rides. */
+  vehicle?: SceneVehicleDto;
 }
 
 /**
@@ -208,7 +220,7 @@ const bars = (x0: number, x1: number, y0: number, y1: number, n: number) =>
 const frond = (dx: number, dy: number, colour: string) =>
   `<path d="M28,-424 Q${r1(28 + dx * 0.45)},${r1(-470 + dy * 0.2)} ${r1(28 + dx)},${r1(-424 + dy)} Q${r1(28 + dx * 0.5)},${r1(-438 + dy * 0.3)} 28,-412 Z" ${fill(colour)}/>`;
 
-/** The road vehicles the stage draws a feature of kind "vehicle" as, by what its name calls it. */
+/** The road vehicles the stage draws a feature of kind "vehicle" as, by what its name calls it: the kit (scene-vehicles) draws these and more. */
 export const VEHICLE_KINDS = [
   'car',
   'taxi',
@@ -217,74 +229,18 @@ export const VEHICLE_KINDS = [
   'bus',
   'danfo',
 ] as const;
-export type VehicleKind = (typeof VEHICLE_KINDS)[number];
+export type VehicleKind = VehicleKitKind;
 
 /**
- * Which road vehicle a name says: a taxi, a van, a truck, a bus or a car
- * by its own word, and a danfo only by its name or as a West African
- * town's bus. A name with none of the words is a plain car.
+ * Which vehicle a name says: a taxi, a van, a truck, a bus, a bicycle, a
+ * canoe, a donkey cart by its own word, and a danfo only by its name or
+ * as a West African town's bus. A name with none of the words is its
+ * place's first vehicle (a car; an ancient place's cart), or a car.
  */
-export function vehicleKindOf(
+export const vehicleKindOf = (
   name: string,
   pack: StylePackId | null = null,
-): VehicleKind {
-  if (/\bdanfos?\b/iu.test(name)) return 'danfo';
-  if (/\b(?:taxis?|cabs?)\b/iu.test(name)) return 'taxi';
-  if (/\b(?:trucks?|lorr(?:y|ies))\b/iu.test(name)) return 'truck';
-  if (/\bvans?\b/iu.test(name)) return 'van';
-  if (/\b(?:bus|buses|minibus(?:es)?|coach(?:es)?)\b/iu.test(name))
-    return pack === 'west-african-town' ? 'danfo' : 'bus';
-  return 'car';
-}
-
-/** A colour a name says, of the kit's: "the red bus" is red; null for none. */
-const NAMED_COLOURS: [RegExp, string][] = [
-  [/\bred\b/iu, CLOTH.red],
-  [/\borange\b/iu, CLOTH.orange],
-  [/\b(?:yellow|golden)\b/iu, CLOTH.yellow],
-  [/\b(?:green|lime)\b/iu, CLOTH.green],
-  [/\b(?:teal|turquoise)\b/iu, CLOTH.teal],
-  [/\bnavy\b/iu, CLOTH.navy],
-  [/\bblue\b/iu, CLOTH.blue],
-  [/\b(?:purple|violet)\b/iu, CLOTH.purple],
-  [/\bpink\b/iu, CLOTH.pink],
-  [/\bbrown\b/iu, CLOTH.brown],
-  [/\b(?:grey|gray|silver)\b/iu, CLOTH.grey],
-  [/\bwhite\b/iu, CLOTH.white],
-  [/\bblack\b/iu, CLOTH.black],
-];
-export const colourNamed = (name: string): string | null =>
-  NAMED_COLOURS.find(([words]) => words.test(name))?.[1] ?? null;
-
-/** A road vehicle's colour when nothing names one: a danfo's yellow, a taxi's, else plain. */
-const VEHICLE_COLOUR: Record<VehicleKind, string> = {
-  car: CLOTH.red,
-  taxi: CLOTH.yellow,
-  van: CLOTH.white,
-  truck: CLOTH.green,
-  bus: CLOTH.blue,
-  danfo: '#f2c14e',
-};
-
-/**
- * A road vehicle's colour: as given, else as its name says, else (but
- * for a danfo's and a taxi's own) one of its place's pack's colours,
- * chosen by its name, else its kind's plain one.
- */
-function vehicleColour(
-  kind: VehicleKind,
-  name: string,
-  look: PieceLook,
-): string {
-  const given = look.colour ?? colourNamed(name);
-  if (given) return given;
-  if (kind === 'danfo' || kind === 'taxi' || !look.pack)
-    return VEHICLE_COLOUR[kind];
-  const colours = STYLE_PACKS[look.pack].palette.awnings;
-  let h = 0;
-  for (const ch of `${kind}:${name}`) h = (h * 31 + ch.charCodeAt(0)) >>> 0;
-  return colours[h % colours.length] ?? VEHICLE_COLOUR[kind];
-}
+): VehicleKitKind => vehicleKitKindOf(name, pack);
 
 /** The pack a set was built in, as its drawing (or its first layer) is marked; null for none. */
 export function setPackOf(
@@ -298,6 +254,19 @@ export function setPackOf(
     `${drawing.svg ?? ''} ${drawing.layered?.layers?.[0]?.svg ?? ''}`,
   )?.[1];
   return marked && marked in STYLE_PACKS ? (marked as StylePackId) : null;
+}
+
+/** The city look a set was built with, as its drawing is marked (London's buses); null for none. */
+export function setLiveryOf(
+  drawing:
+    | { svg?: string; layered?: { layers?: { svg: string }[] } | null }
+    | null
+    | undefined,
+): VehicleLivery | null {
+  const marked = /data-livery="([a-z-]+)"/u.exec(
+    `${drawing?.svg ?? ''} ${drawing?.layered?.layers?.[0]?.svg ?? ''}`,
+  )?.[1];
+  return marked === 'london' || marked === 'new-york' ? marked : null;
 }
 
 /** A set piece of a kind, drawn; a tree as its name says (a palm), a road vehicle as its name says (a bus, a car), and a gate and a wall as its place has them. */
@@ -731,8 +700,21 @@ export function drawPiece(
         ),
       };
     case 'vehicle': {
-      const vehicle = vehicleKindOf(name, look.pack ?? null);
-      return drawVehicle(vehicle, vehicleColour(vehicle, name, look));
+      // Drawn by the vehicle kit, from the side, as its place has it.
+      const kit = drawVehicleKit(vehicleKindOf(name, look.pack ?? null), {
+        name,
+        pack: look.pack ?? null,
+        colour: look.colour ?? null,
+        livery: look.livery ?? null,
+      });
+      return {
+        svg: kit.svg,
+        viewBox: kit.viewBox,
+        ...(kit.leaf ? { leaf: kit.leaf } : {}),
+        ...(kit.opening ? { opening: kit.opening } : {}),
+        affordances: kit.affordances,
+        vehicle: kit.vehicle,
+      };
     }
     case 'steps':
       return {
@@ -1169,160 +1151,6 @@ function drawWall(pack: StylePackId | null): SetPiece {
       [80, -106],
     ],
   };
-}
-
-// ── Road vehicles ─────────────────────────────────────────────────────────
-
-/** A wheel, side on. */
-const wheelAt = (x: number, r: number) =>
-  `<circle cx="${x}" cy="${-r}" r="${r}" ${fill(DARK)}/><circle cx="${x}" cy="${-r}" r="${r1(r * 0.42)}" ${fill(STONE)}/>`;
-
-/**
- * A road vehicle side on, facing right, in its colour: its body, its
- * windows, its wheels, and the door people get in and out by, which
- * swings open about its front edge (a car's, a truck's cab) or slides
- * back (a van's, a bus's, a danfo's), its gap the way in.
- */
-function drawVehicle(kind: VehicleKind, colour: string): SetPiece {
-  const ground = (rx: number) =>
-    `<ellipse cx="0" cy="0" rx="${rx}" ry="8" ${flat('#1d1a22')} fill-opacity="0.12"/>`;
-  switch (kind) {
-    case 'danfo':
-      // A danfo: a yellow minibus side on, its black stripe and windows,
-      // and its side door, which slides back to let people in and out.
-      return {
-        ...framed(
-          ground(220) +
-            `<path d="M-236,-34 L-236,-168 Q-236,-200 -204,-200 L176,-200 Q214,-200 226,-160 L240,-110 L240,-34 Z" ${fill(colour)}/>` +
-            rect(-236, -104, 476, 12, DARK, 0) +
-            [-214, -150, -86]
-              .map((x) => rect(x, -186, 54, 52, GLASS, 4))
-              .join('') +
-            `<path d="M130,-186 L180,-186 Q206,-186 214,-160 L222,-134 L130,-134 Z" ${fill(GLASS)}/>` +
-            rect(4, -190, 108, 156, DARK, 3) +
-            `<g id="leaf">` +
-            rect(4, -190, 108, 156, colour, 3) +
-            rect(14, -182, 88, 46, GLASS, 4) +
-            rect(4, -104, 108, 12, DARK, 0) +
-            rect(88, -86, 16, 6, WHITE) +
-            `</g>` +
-            [-150, 160]
-              .map(
-                (x) =>
-                  `<circle cx="${x}" cy="-30" r="32" ${fill(DARK)}/><circle cx="${x}" cy="-30" r="13" ${fill(STONE)}/>`,
-              )
-              .join(''),
-          [-240, -200, 480, 202],
-        ),
-        leaf: { id: 'leaf', hinge: [4, -112], slide: -100 },
-        opening: [4, -190, 112, -34],
-      };
-    case 'bus':
-      // A bus: a long plain body, a row of windows, a pale band, and its
-      // door near the front, which slides back.
-      return {
-        ...framed(
-          ground(240) +
-            `<path d="M-260,-36 L-260,-196 Q-260,-214 -242,-214 L222,-214 Q246,-214 250,-190 L258,-112 L258,-36 Z" ${fill(colour)}/>` +
-            rect(-260, -104, 518, 10, WHITE, 0) +
-            [-240, -170, -100, -30, 40]
-              .map((x) => rect(x, -196, 58, 56, GLASS, 4))
-              .join('') +
-            `<path d="M204,-196 L232,-196 Q242,-196 244,-184 L250,-128 L204,-128 Z" ${fill(GLASS)}/>` +
-            rect(118, -200, 76, 164, DARK, 3) +
-            `<g id="leaf">` +
-            rect(118, -200, 76, 164, colour, 3) +
-            rect(124, -192, 30, 88, GLASS, 3) +
-            rect(158, -192, 30, 88, GLASS, 3) +
-            `</g>` +
-            wheelAt(-176, 34) +
-            wheelAt(176, 34),
-          [-260, -214, 518, 216],
-        ),
-        leaf: { id: 'leaf', hinge: [118, -118], slide: -80 },
-        opening: [118, -200, 194, -36],
-      };
-    case 'van':
-      // A van: a tall box of a body, its windscreen sloped, its side
-      // door sliding back.
-      return {
-        ...framed(
-          ground(210) +
-            `<path d="M-220,-38 L-220,-194 Q-220,-206 -208,-206 L150,-206 Q174,-206 186,-178 L212,-122 L220,-110 L220,-38 Z" ${fill(colour)}/>` +
-            rect(-200, -190, 70, 50, GLASS, 4) +
-            `<path d="M150,-190 L172,-190 L198,-128 L150,-128 Z" ${fill(GLASS)}/>` +
-            rect(-20, -196, 124, 158, DARK, 3) +
-            `<g id="leaf">` +
-            rect(-20, -196, 124, 158, colour, 3) +
-            rect(-10, -188, 104, 46, GLASS, 4) +
-            rect(76, -110, 16, 6, DARK) +
-            `</g>` +
-            wheelAt(-150, 32) +
-            wheelAt(150, 32),
-          [-220, -206, 440, 208],
-        ),
-        leaf: { id: 'leaf', hinge: [-20, -118], slide: -110 },
-        opening: [-20, -196, 104, -38],
-      };
-    case 'truck':
-      // A truck: its cargo box behind, its cab in front, and the cab's
-      // door hinged at its front edge.
-      return {
-        ...framed(
-          ground(236) +
-            rect(-250, -52, 480, 14, DARK, 2) +
-            rect(-250, -232, 316, 182, WHITE, 4) +
-            line('M-250,-196 L66,-196 M-250,-90 L66,-90', '#d6d4ce', 3) +
-            `<path d="M80,-44 L80,-196 Q80,-208 92,-208 L168,-208 Q188,-208 198,-186 L224,-122 L230,-110 L230,-44 Z" ${fill(colour)}/>` +
-            `<path d="M184,-194 L196,-194 L220,-130 L184,-130 Z" ${fill(GLASS)}/>` +
-            rect(92, -196, 84, 150, DARK, 3) +
-            `<g id="leaf">` +
-            rect(92, -196, 84, 150, colour, 3) +
-            rect(100, -188, 68, 56, GLASS, 4) +
-            rect(100, -110, 16, 6, DARK) +
-            `</g>` +
-            wheelAt(-190, 32) +
-            wheelAt(-122, 32) +
-            wheelAt(170, 32),
-          [-250, -232, 480, 234],
-        ),
-        leaf: { id: 'leaf', hinge: [176, -120] },
-        opening: [92, -196, 176, -46],
-      };
-    case 'car':
-    case 'taxi': {
-      // A car: its body, its cabin and windows, its door hinged at its
-      // front edge; a taxi with its sign on the roof.
-      const sign =
-        kind === 'taxi'
-          ? rect(-18, -188, 60, 22, WHITE, 4) + rect(-10, -182, 44, 8, DARK, 2)
-          : '';
-      return {
-        ...framed(
-          ground(200) +
-            sign +
-            `<path d="M-210,-40 L-210,-92 Q-206,-106 -188,-108 L-122,-112 L-82,-160 Q-76,-168 -64,-168 L70,-168 Q84,-168 92,-160 L136,-114 L194,-106 Q214,-102 216,-86 L216,-40 Z" ${fill(colour)}/>` +
-            `<path d="M-112,-114 L-76,-156 L-10,-156 L-10,-114 Z" ${fill(GLASS)}/>` +
-            rect(-2, -160, 116, 118, DARK, 3) +
-            `<g id="leaf">` +
-            rect(-2, -160, 116, 118, colour, 3) +
-            `<path d="M6,-114 L6,-152 L68,-152 L108,-114 Z" ${fill(GLASS)}/>` +
-            rect(12, -100, 18, 6, DARK) +
-            `</g>` +
-            wheelAt(-138, 32) +
-            wheelAt(146, 32),
-          [
-            -216,
-            kind === 'taxi' ? -190 : -168,
-            432,
-            kind === 'taxi' ? 192 : 170,
-          ],
-        ),
-        leaf: { id: 'leaf', hinge: [114, -100] },
-        opening: [-2, -160, 114, -42],
-      };
-    }
-  }
 }
 
 /** Whether the stage draws a feature itself: always one people act on; any other, where the painting has not got it. */

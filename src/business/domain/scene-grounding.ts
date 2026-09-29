@@ -35,6 +35,7 @@ import {
   restingAt,
   type Place,
 } from './scene-layout';
+import type { SceneSettingDto } from '../../contracts';
 import { interactFaults } from './scene-interact';
 
 /** A feature as the ground check needs it: the ground it stands on, where one up it stands, and its box across. */
@@ -207,4 +208,27 @@ export function keepGrounded(input: GroundInput): string[] {
     }
   });
   return notes;
+}
+
+/**
+ * Things that move through the set keep to the ground (studio-interactions-
+ * plan §2.4): a vehicle on wheels, a cart, a boat on the water goes along
+ * it, never up off it, so a move's rise is taken out of those, put right
+ * silently and said, as a "staging: floating" note. What flies (a kite, a
+ * bird) is left as it is.
+ */
+export function groundMoves(
+  moves: NonNullable<SceneSettingDto['moves']>,
+  onGround: (id: string) => boolean,
+): { moves: NonNullable<SceneSettingDto['moves']>; notes: string[] } {
+  const notes: string[] = [];
+  const out = moves.map((move) => {
+    const [at, id, from, to, ms, ease] = move;
+    if (!onGround(id) || (from[1] === 0 && to[1] === 0)) return move;
+    notes.push(
+      `staging: floating ${id} moving at ${at} ms: kept on the ground (it rose ${Math.round(Math.max(Math.abs(from[1]), Math.abs(to[1])))})`,
+    );
+    return [at, id, [from[0], 0], [to[0], 0], ms, ease] as typeof move;
+  });
+  return { moves: out, notes };
 }

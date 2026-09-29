@@ -148,16 +148,8 @@ describe('the market close-up', () => {
     const scene = { setting: { fades } } as unknown as SceneDto;
     for (const t of [0, 500, 5600])
       for (const f of marketFore(set)) expect(fadeAt(scene, f.id, t)).toBe(1);
-    // The people watching are cheated out of the shots they cross, and
-    // never faded in the wide shot.
-    const au = fades.filter(([, , id]) => id.startsWith('fg-au'));
-    expect(au.length).toBeGreaterThan(0);
-    for (const [from, to] of au)
-      expect(
-        input.shots.some(
-          (s) => s.atMs <= from && to <= (s.untilMs ?? input.durationMs),
-        ),
-      ).toBe(true);
+    // A market has no one before the camera watching: nothing to cheat.
+    expect(marketFore(set).some((f) => f.id.startsWith('fg-au'))).toBe(false);
     // In the close shot, what crosses Kofi is gone.
     expect(
       fades.some(([from, , , level]) => from === 1000 && level === 0),

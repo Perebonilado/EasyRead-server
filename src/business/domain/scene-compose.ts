@@ -130,7 +130,13 @@ import {
   keepFacesSeen,
   keepInClearView,
 } from './scene-faces-seen';
-import { audienceAlive, type AudienceTurn } from './scene-set-audience';
+import {
+  audienceAlive,
+  audienceOutOfShots,
+  crowdAddressed,
+  withoutAudience,
+  type AudienceTurn,
+} from './scene-set-audience';
 import { anchorMs, quietGaps, spaced, type TimedBeat } from './scene-timing';
 import { numberWords } from './spoken';
 
@@ -2776,11 +2782,14 @@ export function composeScene(input: ComposeInput): {
               ]
             : [];
         }),
-        fore: (layered?.fore ?? []).map(({ id, box }) => {
-          const [x0, y0] = on.toStage(box[0], box[1]);
-          const [x1, y1] = on.toStage(box[0] + box[2], box[1] + box[3]);
-          return { id, box: { x: x0, y: y0, w: x1 - x0, h: y1 - y0 } };
-        }),
+        // The people watching before the camera only in a scene about them.
+        fore: (layered?.fore ?? [])
+          .filter(({ id }) => addressed || !id.startsWith('fg-au'))
+          .map(({ id, box }) => {
+            const [x0, y0] = on.toStage(box[0], box[1]);
+            const [x1, y1] = on.toStage(box[0] + box[2], box[1] + box[3]);
+            return { id, box: { x: x0, y: y0, w: x1 - x0, h: y1 - y0 } };
+          }),
         foreDepth,
         open,
         // Too small to see, one beside a feature may step nearer too.
@@ -2866,6 +2875,22 @@ export function composeScene(input: ComposeInput): {
         effects.splice(i, 1);
     return out;
   };
+  /**
+   * Whether this scene is about the crowd before the camera (someone speaks
+   * to them, or they watch the main action): only then are its rows there,
+   * and then only in the wide shot. People talking among themselves have
+   * no one before the camera watching them.
+   */
+  const addressed = crowdAddressed(
+    script.beats.map((beat) => {
+      const to = beat.to ? castById.get(beat.to) : undefined;
+      return {
+        ...(beat.kind ? { kind: beat.kind } : {}),
+        say: beat.say,
+        toCrowd: to?.kind === 'character' && to.group === true,
+      };
+    }),
+  );
   const layouts = { box: layoutsOf('box'), wide: layoutsOf('wide') };
   // Every speaker's face seen as they speak, in every shot: mended where
   // it is hidden, and said.
@@ -3470,7 +3495,21 @@ export function composeScene(input: ComposeInput): {
             layer.svg.includes('data-audience="rows"'),
         )
       : undefined;
-  if (watching) {
+  if (watching && !addressed) watching.svg = withoutAudience(watching.svg);
+  else if (watching) {
+    // Seen only in the wide shot, as the crowd sees the one they watch:
+    // out of every close, two and pushed shot on someone, eased, for its
+    // length.
+    facesSeen.fades.push(
+      ...audienceOutOfShots(
+        (setDrawing?.layered?.fore ?? [])
+          .map(({ id }) => id)
+          .filter((id) => id.startsWith('fg-au')),
+        effects,
+        steps,
+        durationMs,
+      ),
+    );
     const on = setFrameOn(setFrame, STAGINGS.wide);
     const turns = script.beats.flatMap((beat, i): AudienceTurn[] => {
       const t = beats[i];

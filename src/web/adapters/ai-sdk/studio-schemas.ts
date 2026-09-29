@@ -31,6 +31,7 @@ import {
   TRAVEL_PACES,
 } from '../../../business/domain/scene-doings';
 import { STAGE_PROPS } from '../../../business/domain/scene-props';
+import { BEAT_ROLES } from '../../../business/domain/studio/studio-story';
 import {
   BOTTOMS,
   CLOTH_COLOURS,
@@ -319,6 +320,77 @@ export const studioOutlineSchema = z.object({
       seconds: z.number(),
       teach: z.string().nullable(),
       points: z.array(z.string()),
+    }),
+  ),
+});
+
+/** Story development: the premise (studio-story.ts). */
+export const studioPremiseSchema = z.object({
+  title: z.string(),
+  logline: z.string(),
+  theme: z.string(),
+  hook: z.string(),
+  genre: z.enum(STUDIO_GENRES).catch('comedy'),
+  ending: z.enum(STUDIO_ENDINGS).catch('happy'),
+  stakes: z.string(),
+  tools: z.array(z.string()).catch([]),
+  gag: z.string().nullable().catch(null),
+  clues: z.array(z.string()).catch([]),
+});
+
+/** Story development: each character's personality, by id. */
+export const studioCharactersSchema = z.object({
+  characters: z.array(
+    z.object({
+      id: z.string(),
+      want: z.string(),
+      need: z.string(),
+      flaw: z.string(),
+      fear: z.string(),
+      personality: z.array(z.string()),
+      voice: z.string(),
+      habits: z.array(z.string()),
+      relationships: z
+        .array(
+          z.object({ with: z.string(), is: z.string(), tension: z.string() }),
+        )
+        .catch([]),
+      arc: z.object({ from: z.string(), to: z.string() }),
+    }),
+  ),
+});
+
+/** Story development: the beat sheet, each beat with its planned intensity. */
+export const studioBeatsSchema = z.object({
+  beats: z.array(
+    z.object({
+      role: z.enum(BEAT_ROLES).catch('attempt'),
+      what: z.string(),
+      wants: z.string(),
+      stops: z.string(),
+      changes: z.string(),
+      intensity: z.number(),
+      plants: z.array(z.string()).catch([]),
+      pays: z.array(z.string()).catch([]),
+    }),
+  ),
+});
+
+/** Story development: the scene plan, which the outline is built from. */
+export const studioScenePlanSchema = z.object({
+  scenes: z.array(
+    z.object({
+      title: z.string(),
+      beats: z.array(z.number()).catch([]),
+      purpose: z.string(),
+      conflict: z.string(),
+      turn: z.string(),
+      shift: z.string(),
+      moment: z.string(),
+      set: z.string().nullable(),
+      cast: z.array(z.string()),
+      seconds: z.number(),
+      summary: z.string(),
     }),
   ),
 });

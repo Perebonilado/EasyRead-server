@@ -11,6 +11,7 @@ import type {
   StudioEpisodeDto,
   StudioExplainerSheetDto,
   StudioMessageDto,
+  StudioOutlineDto,
   StudioSceneDto,
   StudioSheetDto,
 } from '../../../contracts';
@@ -23,6 +24,7 @@ import {
   type SceneSheet,
   type StudioBible,
   type StudioBrief,
+  type StudioOutline,
 } from '../../domain/studio/studio';
 import { carriedWears, checkExplainer } from '../../domain/studio/studio-check';
 import type { SceneThing } from '../../domain/scene-script';
@@ -60,7 +62,15 @@ export function sceneFingerprint(
   const plain = set ? { ...set, features: undefined } : null;
   const worn = carried.filter((w) => who.has(w.who));
   return sheetHash(sheet, {
-    characters: (bible?.characters ?? []).filter((c) => who.has(c.id)),
+    // Who they are inside (a persona) changes what is written, never what
+    // a written scene shows: a scene is not made again for it.
+    characters: (bible?.characters ?? [])
+      .filter((c) => who.has(c.id))
+      .map((c) => {
+        const plain = { ...c };
+        delete plain.persona;
+        return plain;
+      }),
     set: plain,
     world: bible?.world ?? null,
     ...(worn.length ? { worn } : {}),
@@ -131,6 +141,7 @@ export function bibleDto(
       voicePick: c.voicePick,
       traits: c.traits,
       carries: c.carries,
+      ...(c.persona ? { persona: c.persona } : {}),
       drawing: drawings.characters.get(c.id) ?? null,
       ...(drawings.drawing?.has(c.id) ? { drawingNow: true } : {}),
       ...(drawings.candidates?.get(c.id)?.options.length
@@ -269,6 +280,15 @@ export function blockersOf(
   return out;
 }
 
+/** An outline as the maker sees it: its scenes; its story is its own step's. */
+function outlineDto(outline: StudioOutline): StudioOutlineDto {
+  return {
+    title: outline.title,
+    logline: outline.logline,
+    scenes: outline.scenes,
+  };
+}
+
 export function episodeDto(
   episode: StudioEpisodeRecord,
   scenes: StudioSceneRecord[],
@@ -288,7 +308,8 @@ export function episodeDto(
     phase: episode.phase,
     busy: episode.busy,
     error: episode.error,
-    outline: episode.outline,
+    outline: episode.outline ? outlineDto(episode.outline) : null,
+    story: episode.outline?.story ?? null,
     scenes: dtos,
     durationMs: episode.durationMs,
     shareToken: episode.shareToken,

@@ -297,6 +297,8 @@ export interface StudioJobData {
   sceneIds?: string[];
   /** The maker's own words for what to change. */
   request?: string;
+  /** For 'outline': the request is for the story itself (the Story step), developed again before the outline. */
+  story?: boolean;
   /** A maker's request for a change to a made scene: written, made again and checked. */
   ask?: StudioAsk;
 }

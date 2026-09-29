@@ -2527,8 +2527,11 @@ export type AnswerItemResponse = {
 // each episode's scenes, decided in full before anything is drawn.
 
 export type StudioFormatName = 'story' | 'explainer';
-export type StudioPhase = 'brief' | 'outline' | 'cast' | 'script' | 'made';
-export type StudioBusyName = 'bible' | 'outline' | 'script' | 'scene' | 'make';
+/** "story" is a step of its own the maker sees (the Story card), between the brief and the outline: events belong to it; an episode's phase is never it. */
+export type StudioPhase =
+  'brief' | 'story' | 'outline' | 'cast' | 'script' | 'made';
+export type StudioBusyName =
+  'bible' | 'story' | 'outline' | 'script' | 'scene' | 'make';
 export type StudioSceneStatusName =
   'writing' | 'ready' | 'making' | 'made' | 'failed';
 
@@ -2581,6 +2584,8 @@ export interface StudioCharacterDto {
   voicePick: number;
   traits: string[];
   carries: string | null;
+  /** Who they are, once a story is developed with them: want, need, flaw, fear, traits, voice, habits, relationships, arc. */
+  persona?: StudioPersonaDto;
   /** How they are drawn: an SVG, for a person now; for anyone else once they have been drawn. */
   drawing: string | null;
   /** One the artist draws, being drawn now: for the first time, or again as the maker asked. */
@@ -2687,6 +2692,65 @@ export interface StudioOutlineDto {
   scenes: StudioOutlineSceneDto[];
 }
 
+/** A character's personality (story plan §1.2). */
+export interface StudioPersonaDto {
+  want: string;
+  need: string;
+  flaw: string;
+  fear: string;
+  personality: string[];
+  /** How they talk. */
+  voice: string;
+  habits: string[];
+  relationships: { with: string; is: string; tension: string }[];
+  arc: { from: string; to: string };
+}
+
+/** An episode's story as developed (story plan §1.1–1.4): the premise, the beats, the scene plan. */
+export interface StudioStoryDto {
+  premise: {
+    title: string;
+    logline: string;
+    theme: string;
+    hook: string;
+    genre: StudioGenreName;
+    ending: 'happy' | 'bittersweet' | 'twist' | 'open' | 'moral';
+    stakes: string;
+    tools: string[];
+    gag?: string;
+    clues?: string[];
+  };
+  beats: {
+    template: 'short' | 'medium' | 'long';
+    beats: {
+      role: string;
+      what: string;
+      wants: string;
+      stops: string;
+      changes: string;
+      /** The planned tension, 0 to 10. */
+      intensity: number;
+      plants: string[];
+      pays: string[];
+    }[];
+  };
+  plan: {
+    scenes: {
+      title: string;
+      beats: number[];
+      purpose: string;
+      conflict: string;
+      turn: string;
+      shift: string;
+      moment: string;
+      set: string | null;
+      cast: string[];
+      seconds: number;
+      summary: string;
+    }[];
+  };
+}
+
 export interface StudioProblemDto {
   rule: string;
   message: string;
@@ -2786,6 +2850,8 @@ export interface StudioEpisodeDto {
   busy: StudioBusyName | null;
   error: string | null;
   outline: StudioOutlineDto | null;
+  /** The story the outline was built from (a story's, once developed); null before, and for an explainer. */
+  story: StudioStoryDto | null;
   scenes: StudioSceneDto[];
   durationMs: number | null;
   shareToken: string | null;
@@ -2803,6 +2869,8 @@ export interface StudioEpisodeDto {
  * or work that did not go through.
  */
 export type StudioEventName =
+  /** The story developed (the Story card): premise, characters, beats, scene plan. */
+  | 'story'
   | 'outline'
   | 'cast'
   | 'scenes'

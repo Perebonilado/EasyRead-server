@@ -73,6 +73,66 @@ const outline = {
     },
   ],
 };
+/** The story "Lost" is built from: a premise, Tobi's sheet, five beats and two scenes. */
+const premise = {
+  title: 'Lost',
+  logline:
+    'Tobi wants to find his dog before the market closes, but every stall he asks sends him the wrong way.',
+  theme: 'asking for help',
+  hook: 'An empty lead.',
+  genre: 'comedy',
+  ending: 'happy',
+  stakes: 'his dog, alone at closing time',
+  tools: ['ticking clock'],
+  gag: 'everyone points a different way',
+  clues: [],
+};
+const persona = {
+  id: 'tobi',
+  want: 'to find his dog',
+  need: 'to ask for help',
+  flaw: 'too proud to ask',
+  fear: 'being laughed at',
+  personality: ['counts everything', 'hums when nervous'],
+  voice: 'short sentences',
+  habits: ['tugs his cap'],
+  relationships: [],
+  arc: { from: 'alone', to: 'asking' },
+};
+const beat = (
+  role: string,
+  intensity: number,
+  plants: string[] = [],
+  pays: string[] = [],
+) => ({
+  role,
+  what: `The ${role}.`,
+  wants: 'Tobi wants his dog',
+  stops: 'the crowd',
+  changes: 'it changes',
+  intensity,
+  plants,
+  pays,
+});
+const beats = [
+  beat('setup', 2, ['whistle']),
+  beat('problem', 5),
+  beat('attempt', 6),
+  beat('twist', 8),
+  beat('payoff', 3, [], ['whistle']),
+];
+const plan = {
+  scenes: outline.scenes.map((scene, k) => ({
+    ...scene,
+    beats: k ? [3, 4] : [0, 1, 2],
+    purpose: 'moves it on',
+    conflict: 'Tobi against the crowd',
+    turn: k ? 'the dog is found' : 'the dog is gone',
+    shift: 'calm to panic',
+    moment: 'the empty lead',
+  })),
+};
+
 const sheet = storySheetOf({
   title: 'Market',
   set: 'market',
@@ -184,13 +244,20 @@ function worker() {
   };
   // What happens while the outline is being written: nothing, unless a test says.
   const meanwhile = { outline: () => undefined as void };
+  const usage = { model: 'm', tokensIn: 1, tokensOut: 1, latencyMs: 1 };
   const llm = {
     studioOutline: () => {
       meanwhile.outline();
-      return Promise.resolve({
-        value: outline,
-        usage: { model: 'm', tokensIn: 1, tokensOut: 1, latencyMs: 1 },
-      });
+      return Promise.resolve({ value: outline, usage });
+    },
+    // A story developed in steps, its outline built from the plan: "Lost".
+    studioPremise: () => Promise.resolve({ value: premise, usage }),
+    studioCharacters: () =>
+      Promise.resolve({ value: { characters: [persona] }, usage }),
+    studioBeats: () => Promise.resolve({ value: { beats }, usage }),
+    studioScenePlan: () => {
+      meanwhile.outline();
+      return Promise.resolve({ value: plan, usage });
     },
   } as unknown as LlmGatewayPort;
   const queued: StudioJobData[] = [];
@@ -351,12 +418,18 @@ describe('the Studio at work, as the thread records it', () => {
     await studio.processor.process(write, last('j9'));
     await studio.processor.process(write, last('j9'));
     expect(studio.events()).toEqual([
+      { what: 'story', sceneId: undefined, line: 'Story developed: “Lost”' },
       {
         what: 'outline',
         sceneId: undefined,
         line: 'Outline written: “Lost”, 2 scenes, about 1:00',
       },
     ]);
+    // Built from its story, which it keeps; Tobi is who he is now.
+    const written = studio.episodes.get('e1')!.outline!;
+    expect(written.story?.premise.title).toBe('Lost');
+    expect(written.story?.plan.scenes[1].turn).toBe('the dog is found');
+    expect(written.scenes.map((s) => s.title)).toEqual(['Market', 'Home']);
   });
 
   it('writes the outline again when the brief changed while it was being written', async () => {
@@ -383,9 +456,12 @@ describe('the Studio at work, as the thread records it', () => {
       }),
     ]);
     expect(studio.events().map((e) => e.line)).toEqual([
+      'Story developed: “Lost”',
       'Outline written: “Lost”, 2 scenes, about 1:00',
       'Writing the outline again with what the brief says now',
     ]);
+    // A story's is developed again with it.
+    expect(studio.queued[0]).toMatchObject({ story: true });
     // Written again with it, and nothing more changed: done.
     studio.meanwhile.outline = () => undefined;
     await studio.processor.process(

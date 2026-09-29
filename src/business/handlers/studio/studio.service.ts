@@ -1,3 +1,4 @@
+import { keptPersonas } from '../../domain/studio/studio-story';
 import { narratorRuleOf } from '../../domain/studio/studio-narrator';
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import { randomBytes, randomUUID } from 'node:crypto';
@@ -117,7 +118,8 @@ const SOURCE_AT = 900;
 /** The latest of a show's thread sent with it; earlier ones are asked for a page at a time. */
 const THREAD = 80;
 /** What the maker is looking at, in the producer's words. */
-const LOOKING_AT: Partial<Record<EpisodePhase, string>> = {
+const LOOKING_AT: Partial<Record<EpisodePhase | 'story', string>> = {
+  story: 'the story (its premise, characters and beats)',
   outline: 'the outline',
   cast: 'the cast',
   script: 'the scenes',
@@ -388,7 +390,10 @@ export class StudioService {
     // A set's features are the sheets' own: the maker's edit keeps them;
     // and whoever the artist drew is drawn so until the maker chooses one
     // of the kit's.
-    const bible = keptKits(keptFeatures(bibleOf(body), before), before);
+    const bible = keptPersonas(
+      keptKits(keptFeatures(bibleOf(body), before), before),
+      before,
+    );
     if (before) {
       // Anyone the maker did not send keeps their place; ids never change.
       const ids = new Set(bible.characters.map((c) => c.id));
@@ -781,7 +786,7 @@ export class StudioService {
       : undefined;
     if (scene)
       return `scene ${scene.position + 1}${scene.sheet ? ` ("${scene.sheet.title}")` : ''}`;
-    return LOOKING_AT[focus?.step as EpisodePhase] ?? null;
+    return LOOKING_AT[focus?.step as EpisodePhase | 'story'] ?? null;
   }
 
   /**
@@ -858,6 +863,8 @@ export class StudioService {
     episode: StudioEpisodeRecord,
     request: string | null,
     briefChanged = false,
+    /** The request is for the story itself: developed again, then the outline built from it. */
+    story = false,
   ): Promise<string | null> {
     if (episode.phase === 'script' || episode.phase === 'made')
       return 'The scenes are written now: tell me which scene to change, and how.';
@@ -871,6 +878,7 @@ export class StudioService {
     await this.enqueue(show, episode, {
       kind: 'outline',
       ...(request && episode.outline ? { request } : {}),
+      ...(story && show.brief.format !== 'explainer' ? { story: true } : {}),
     });
     return null;
   }
@@ -1078,6 +1086,32 @@ export class StudioService {
     return this.episode(userId, episodeId);
   }
 
+  /**
+   * The story changed as the maker asks on its card (the Story step): it
+   * is developed again, the change made and the rest kept, and the
+   * outline built from it again.
+   */
+  async rewriteStory(
+    userId: string,
+    episodeId: string,
+    request: string | null,
+  ): Promise<StudioEpisodeDto> {
+    const { show, episode } = await this.requireEpisode(userId, episodeId);
+    if (show.brief.format === 'explainer')
+      throw new ValidationError('An explainer has no story to change.');
+    const words = request?.trim().slice(0, MESSAGE_CHARS) || null;
+    if (words) await this.hear(userId, words);
+    const note = await this.askOutline(show, episode, words, false, true);
+    if (note) throw new ValidationError(note);
+    if (words) await this.heard(show, episode, 'Story', words);
+    await this.log(show, episode, {
+      what: 'asked',
+      step: 'story',
+      line: 'Developing the story again',
+    });
+    return this.episode(userId, episodeId);
+  }
+
   /** The outline changed by hand: scenes reordered, cut, reworded. */
   async editOutline(
     userId: string,
@@ -1091,9 +1125,15 @@ export class StudioService {
       );
     if (episode.busy)
       throw new ValidationError('One moment: I am still working on it.');
-    const outline: StudioOutline = show.bible
+    const edited: StudioOutline = show.bible
       ? mendOutline(outlineOf(body), show.bible)
       : outlineOf(body);
+    // Its story is its own step's, never the hand edit's: kept as it was.
+    const { story: _sent, ...plain } = edited;
+    void _sent;
+    const outline: StudioOutline = episode.outline?.story
+      ? { ...plain, story: episode.outline.story }
+      : plain;
     if (!outline.scenes.length)
       throw new ValidationError('Keep at least one scene.');
     await this.studio.updateEpisode(episode.id, {

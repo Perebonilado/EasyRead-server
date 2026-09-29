@@ -136,6 +136,8 @@ export interface StudioJob {
   /** For 'prepare': the scenes to make once the cast and the places are drawn. */
   sceneIds?: string[];
   request?: string;
+  /** For 'outline': the request is for the story itself (the Story step), developed again before the outline. */
+  story?: boolean;
   /** A maker's request for a change to a made scene: written, made again and checked. */
   ask?: StudioAsk;
 }

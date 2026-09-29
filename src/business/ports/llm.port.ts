@@ -827,6 +827,35 @@ export interface LlmGatewayPort {
     } & StudioRevision,
   ): Promise<LlmResult<Record<string, unknown>>>;
 
+  /**
+   * Story development (studio-story-plan §1, S2), each step with thinking:
+   * the premise; each character's personality; the beat sheet for the
+   * film's length; and the scene plan the outline is built from. Each is
+   * given the brief, the cast and places, and the steps before it.
+   */
+  studioPremise(
+    input: {
+      brief: string;
+      bible: string;
+      before?: string;
+    } & StudioRevision,
+  ): Promise<LlmResult<Record<string, unknown>>>;
+  studioCharacters(
+    input: { brief: string; bible: string; story: string } & StudioRevision,
+  ): Promise<LlmResult<Record<string, unknown>>>;
+  studioBeats(
+    input: {
+      brief: string;
+      bible: string;
+      story: string;
+      /** The structure its length takes, in words. */
+      structure: string;
+    } & StudioRevision,
+  ): Promise<LlmResult<Record<string, unknown>>>;
+  studioScenePlan(
+    input: { brief: string; bible: string; story: string } & StudioRevision,
+  ): Promise<LlmResult<Record<string, unknown>>>;
+
   /** One story scene's sheet: everything the stage will show, in order. */
   studioScene(
     input: {

@@ -17,6 +17,12 @@
  */
 import { createHash } from 'node:crypto';
 import {
+  personaOf,
+  storyOf,
+  type Persona,
+  type StudioStory,
+} from './studio-story';
+import {
   FIGURE_POSES,
   FIGURE_SIGNS,
   PLAIN_FIGURE,
@@ -417,6 +423,13 @@ export interface StudioCharacter {
    * absent until then.
    */
   drawn?: string;
+  /**
+   * Who they are (studio-story-plan §1.2): want, need, flaw, fear,
+   * specific traits, how they talk, their habits, relationships and arc.
+   * Kept for the show, so every episode keeps it. Absent until a story
+   * is developed with them.
+   */
+  persona?: Persona;
 }
 
 export interface StudioSet {
@@ -756,6 +769,7 @@ export function bibleOf(raw: unknown): StudioBible {
           ...(typeof c.drawn === 'string' && /^[a-f0-9]{6,32}$/.test(c.drawn)
             ? { drawn: c.drawn }
             : {}),
+          ...(personaOf(c.persona) ? { persona: personaOf(c.persona)! } : {}),
         },
       ];
     });
@@ -844,6 +858,12 @@ export interface StudioOutline {
   /** The episode in a sentence. */
   logline: string;
   scenes: OutlineScene[];
+  /**
+   * The story it was built from (studio-story.ts): the premise, the beat
+   * sheet and the scene plan. Kept with the outline; absent for an
+   * explainer, and for an outline written before story development.
+   */
+  story?: StudioStory;
 }
 
 export const MAX_SCENES = 12;
@@ -853,7 +873,9 @@ export const SCENE_SECONDS = [10, 90] as const;
 export function outlineOf(raw: unknown): StudioOutline {
   const said =
     raw && typeof raw === 'object' ? (raw as Record<string, unknown>) : {};
+  const story = storyOf(said.story);
   return {
+    ...(story ? { story } : {}),
     title: text(said.title, 80) || 'Untitled',
     logline: text(said.logline, 300),
     scenes: (Array.isArray(said.scenes) ? said.scenes : [])

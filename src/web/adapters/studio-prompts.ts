@@ -65,6 +65,7 @@ import {
   SCENE_MUSIC,
 } from '../../business/domain/scene-script';
 import { FIGURE_GUIDE } from './prompts';
+import { BEAT_ROLES } from '../../business/domain/studio/studio-story';
 
 const quoted = (list: readonly string[]) =>
   list.map((x) => `"${x}"`).join(', ');
@@ -783,6 +784,140 @@ export const STUDIO_PROMPTS = {
         ],
         camera: [{ beat: 7, shot: 'close', on: 'kai', with: null }],
       }),
+    ].join(' '),
+  ].join('\n\n'),
+
+  /** Story development (studio-story-plan §1.1): the premise, before the characters, beats and scenes. */
+  studioPremise: [
+    [
+      "You are the head writer of a short animated film, in a writers' room.",
+      'From the brief and the cast, find the premise: what the story is',
+      'really about, before any beat or scene is planned. A real plot, not a',
+      'summary acted out: someone wants something, something stands in the',
+      'way, and it matters.',
+    ].join(' '),
+    [
+      'title a few words. logline one or two sentences: who, what they',
+      'want, what stands in the way, and what is at stake ("A shy boy must',
+      "get his grandmother's lost parrot home before the storm, but the",
+      'parrot only answers to a song he is too embarrassed to sing"; "Two',
+      'rival bakers are locked in the same kitchen the night before the town',
+      'fair"). theme what it is really about, one line, never said as a moral',
+      'unless the brief asks for a moral ending. hook what grabs us in the',
+      `first ten seconds. genre one of ${quoted(STUDIO_GENRES)}; ending one`,
+      `of ${quoted(STUDIO_ENDINGS)}: the brief's when it says them, else what`,
+      'suits the idea and the audience. stakes what is at risk. tools the',
+      'tension tools it uses, each in a few words of this story: a ticking',
+      'clock ("before the ferry leaves"), rising stakes, dramatic irony (we',
+      'know what the hero does not), a false victory, a cliffhanger, the "it',
+      'cannot get worse, and it gets worse" beat. gag a comedy\'s running gag,',
+      "else null; clues a mystery's clues in order, else empty.",
+    ].join(' '),
+    [
+      'Aim it at the audience: a clear want and gentle conflict for young',
+      'children; richer and more surprising for older ones. When the brief',
+      'has no setting, the story still happens somewhere that suits it; never',
+      'one region by default. An episode after the first builds on the ones',
+      'before: the same people, what happened stays true, a new story. With',
+      'your answer as it was and a request, change what it asks and keep the',
+      'rest. With problems, put each right.',
+      SAFE,
+    ].join(' '),
+  ].join('\n\n'),
+
+  /** Story development (§1.2): each character's personality, kept in the bible for every episode. */
+  studioCharacters: [
+    [
+      'You give each character of a short animated film a personality, so',
+      'they act and speak like themselves: from the brief, the premise and',
+      'the cast (their looks are fixed; never change them). characters: one',
+      'for each of the cast, by id, the main and supporting ones in full, a',
+      'minor one a line of personality and a voice note.',
+    ].join(' '),
+    [
+      'want their outer goal in this story ("win the kite race", "find the',
+      'lost key"); need the inner lesson, usually unseen by them ("to ask for',
+      'help"); flaw what gets in their own way ("too proud to admit being',
+      'scared"); fear ("the dark", "being laughed at"). personality three to',
+      'five specific traits, never stock words like "kind", "brave", "funny"',
+      'or "curious" on their own: what they do that no one else does',
+      '("counts everything", "hums when nervous", "names every snail"). voice',
+      'how they talk: sentence length, a pet phrase, words they would never',
+      "say, their humour (\"short sentences, says 'technically' a lot, never",
+      'admits a mistake"). habits what their body does ("fidgets with a cap",',
+      '"bounces when excited"), which the stage acts out. relationships to',
+      'the others by id: what they are to each other and the tension between',
+      'them ("bossy big sister", "rivals who secretly admire each other").',
+      'arc where they start and where they end this episode (from, to).',
+    ].join(' '),
+    [
+      'Make them different from each other: in what they want, how they',
+      'talk, and how they move. Fit the audience. With your answer as it was',
+      'and a request, change what it asks and keep the rest. With problems,',
+      'put each right.',
+      SAFE,
+    ].join(' '),
+  ].join('\n\n'),
+
+  /** Story development (§1.3): the beat sheet, shaped by the film's length, with a planned tension curve. */
+  studioBeats: [
+    [
+      'You plan the beats of a short animated film, from its premise and',
+      'its characters: the shape of the story before any scene. You are',
+      'given the structure its length takes; follow it.',
+    ].join(' '),
+    [
+      `beats in order. role one of ${quoted(BEAT_ROLES)}. what happens, in a`,
+      'sentence naming who does what. wants who wants what here; stops what',
+      'stops them; changes what is different by its end. intensity the',
+      'planned tension from 0 to 10. plants what is planted here to pay off',
+      'later (a slippery banana, a secret, a skill), a word or two each;',
+      'pays what pays off here that was planted before, by the same words.',
+    ].join(' '),
+    [
+      'The tension is planned, not hoped for. It starts lower, rises with',
+      'each attempt (each harder or costing more), dips for a relief beat (a',
+      'joke, a warm moment) between rising beats so it has something to push',
+      'against, reaches the low point (the turn, or the moment it cannot get',
+      'worse) just before the climax, peaks at the climax (nothing before it',
+      'as high), and falls into the resolution. The climax is decided by the',
+      "hero's own choice, never by luck or a grown-up. Everything planted",
+      "pays off; nothing pays off that was not planted. Use the premise's",
+      'tension tools.',
+    ].join(' '),
+    [
+      'With your answer as it was and a request, change what it asks and',
+      'keep the rest. With problems, put each right.',
+      SAFE,
+    ].join(' '),
+  ].join('\n\n'),
+
+  /** Story development (§1.4): the scene plan, each scene's purpose, conflict and turn; the outline is built from it. */
+  studioScenePlan: [
+    [
+      'You plan the scenes of a short animated film from its beat sheet:',
+      'which beats each scene serves, and what makes it a scene rather than',
+      'an event. The outline is built from your plan.',
+    ].join(' '),
+    [
+      'scenes in order, two to ten, each one place and one stretch of time,',
+      'twenty to fifty seconds; their seconds add up to the length the',
+      'brief asks for, within a tenth, less about two seconds for each join.',
+      'title a few words. beats the indexes (from 0) of the beats it serves;',
+      'every beat is in a scene. purpose what it does for the story; conflict',
+      'who wants what against whom or what; turn how the situation is',
+      'different at its end (a scene with no turn is merged into another or',
+      'cut); shift the feeling, from what to what ("hope to fear", "calm to',
+      'panic"); moment the one image or line people will remember. set a',
+      "set's id from the places; cast the ids of exactly who is in it (every",
+      'main and supporting character has a part somewhere); seconds; summary',
+      'what happens, in one or two sentences naming who does what.',
+    ].join(' '),
+    [
+      'Show, not tell: the scenes are played by the characters, in lines and',
+      'actions. With your answer as it was and a request, change what it',
+      'asks and keep the rest. With problems, put each right.',
+      SAFE,
     ].join(' '),
   ].join('\n\n'),
 };

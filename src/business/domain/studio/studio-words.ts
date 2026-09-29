@@ -11,6 +11,7 @@ import { DRAWN } from '../scene-own';
 import { STAGE_NAMES, STAGE_RECIPES, type LearningStage } from '../scene-stage';
 import { WORDS_A_SECOND } from './studio';
 import { narratorWords } from './studio-narrator';
+import { describePersona } from './studio-story';
 import { controlWords, safetyWords } from './studio-style';
 import {
   AUDIENCE_STAGE,
@@ -67,6 +68,7 @@ export function describeBible(
     ]
       .filter(Boolean)
       .join('\n');
+  const names = new Map(bible.characters.map((c) => [c.id, c.name]));
   const people = bible.characters.map((c) => {
     const looks =
       c.kind === 'person' && c.figure
@@ -76,7 +78,9 @@ export function describeBible(
           : c.creature
             ? describeCreature(c.creature)
             : c.look;
-    return `- ${c.id}: ${c.name}, ${c.role}, ${c.kind}${c.size ? ` (${c.size})` : ''}; ${c.traits.join(', ') || 'no traits given'}; looks: ${looks}; voice: ${c.voice}${c.carries ? `; carries a ${c.carries}` : ''}`;
+    // Who they are, where a story was developed with them: their sheet.
+    const persona = describePersona(c, names);
+    return `- ${c.id}: ${c.name}, ${c.role}, ${c.kind}${c.size ? ` (${c.size})` : ''}; ${c.traits.join(', ') || 'no traits given'}; looks: ${looks}; voice: ${c.voice}${c.carries ? `; carries a ${c.carries}` : ''}${persona ? `\n  who they are: ${persona}` : ''}`;
   });
   const places = bible.sets.map(
     (s) =>
@@ -177,6 +181,10 @@ export function describeForProducer(input: {
       ? `Still missing: ${missing.join(', ')}.`
       : 'The brief is complete.',
   ];
+  if (input.outline?.story && input.phase !== 'brief')
+    parts.push(
+      `The story: ${input.outline.story.premise.logline}${input.outline.story.premise.theme ? ` (really about ${input.outline.story.premise.theme})` : ''}`,
+    );
   if (input.outline && input.phase !== 'brief')
     parts.push(`The outline:\n${describeOutline(input.outline, story)}`);
   if (input.bible && story && input.phase === 'cast')

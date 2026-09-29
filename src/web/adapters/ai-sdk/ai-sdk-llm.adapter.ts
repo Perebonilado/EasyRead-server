@@ -52,6 +52,10 @@ import type { z } from 'zod';
 import {
   studioBibleSchema,
   studioOutlineSchema,
+  studioPremiseSchema,
+  studioCharactersSchema,
+  studioBeatsSchema,
+  studioScenePlanSchema,
   studioCheckSchema,
   studioSceneSchema,
   studioTurnSchema,
@@ -2411,6 +2415,64 @@ export class AiSdkLlmAdapter implements LlmGatewayPort, OnModuleInit {
         input.bible,
         input.before ? `The episodes before this one:\n${input.before}` : '',
       ],
+      input,
+    );
+  }
+
+  studioPremise(
+    input: { brief: string; bible: string; before?: string } & StudioRevision,
+  ): Promise<LlmResult<Record<string, unknown>>> {
+    return this.studioWrite(
+      studioPremiseSchema,
+      STUDIO_PROMPTS.studioPremise,
+      [
+        `The brief:\n${input.brief}`,
+        input.bible,
+        input.before ? `The episodes before this one:\n${input.before}` : '',
+      ],
+      input,
+    );
+  }
+
+  studioCharacters(
+    input: { brief: string; bible: string; story: string } & StudioRevision,
+  ): Promise<LlmResult<Record<string, unknown>>> {
+    return this.studioWrite(
+      studioCharactersSchema,
+      STUDIO_PROMPTS.studioCharacters,
+      [`The brief:\n${input.brief}`, input.bible, input.story],
+      input,
+    );
+  }
+
+  studioBeats(
+    input: {
+      brief: string;
+      bible: string;
+      story: string;
+      structure: string;
+    } & StudioRevision,
+  ): Promise<LlmResult<Record<string, unknown>>> {
+    return this.studioWrite(
+      studioBeatsSchema,
+      STUDIO_PROMPTS.studioBeats,
+      [
+        `The brief:\n${input.brief}`,
+        input.bible,
+        input.story,
+        `The structure for its length:\n${input.structure}`,
+      ],
+      input,
+    );
+  }
+
+  studioScenePlan(
+    input: { brief: string; bible: string; story: string } & StudioRevision,
+  ): Promise<LlmResult<Record<string, unknown>>> {
+    return this.studioWrite(
+      studioScenePlanSchema,
+      STUDIO_PROMPTS.studioScenePlan,
+      [`The brief:\n${input.brief}`, input.bible, input.story],
       input,
     );
   }

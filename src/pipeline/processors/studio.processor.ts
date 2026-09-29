@@ -42,6 +42,14 @@ import {
   type NarratorRule,
 } from '../../business/domain/studio/studio-narrator';
 import {
+  describePlannedScene,
+  describeStory,
+  keptPersonas,
+  withPersonas,
+  type StudioStory,
+} from '../../business/domain/studio/studio-story';
+import { developStory } from '../../business/handlers/studio/studio-develop';
+import {
   energyOf,
   leanedMusic,
   setLookOf,
@@ -395,6 +403,31 @@ export function settledEpisode(
 }
 
 /**
+ * A scene's plan, for its writer (studio-story-plan §1.4, the start of
+ * S3): its purpose, conflict, turn, shift and the moment, found by its
+ * title so a scene moved or cut by hand finds its own; empty for none.
+ */
+function planOf(outline: StudioOutline, k: number): string {
+  const scene = outline.scenes[k];
+  const plan = outline.story?.plan.scenes;
+  if (!scene || !plan) return '';
+  const own =
+    plan.find((one) => one.title === scene.title) ??
+    (plan.length === outline.scenes.length ? plan[k] : undefined);
+  return own ? describePlannedScene(own) : '';
+}
+
+/** An outline without its story, as its writer is shown it again. */
+function outlineOnly(outline: StudioOutline | null): StudioOutline | null {
+  if (!outline) return null;
+  return {
+    title: outline.title,
+    logline: outline.logline,
+    scenes: outline.scenes,
+  };
+}
+
+/**
  * Whether one set of problems is worse than another: more that keep a
  * scene from being made, then more of anything sent back. Below zero,
  * better; zero, as good.
@@ -489,7 +522,13 @@ export class StudioProcessor {
       if (job.kind === 'bible')
         await this.writeBible(show, episode, job.request, true, key);
       else if (job.kind === 'outline')
-        await this.writeOutline(show, episode, job.request, key);
+        await this.writeOutline(
+          show,
+          episode,
+          job.request,
+          key,
+          job.story === true,
+        );
       else if (job.kind === 'script')
         await this.writeScript(show, episode, key);
       else if (job.kind === 'scene' && job.sceneId)
@@ -743,7 +782,7 @@ export class StudioProcessor {
     // Which drawing the maker chose of anyone still as they were, kept;
     // and whoever the artist drew is drawn so until the maker chooses a
     // drawing of the kit's for them.
-    bible = keptDrawn(keptKits(bible, before), before);
+    bible = keptPersonas(keptDrawn(keptKits(bible, before), before), before);
     await this.studio.updateShow(show.id, { bible });
     if (before) await this.cast.forgetChanged(show.id, before, bible);
     // Every animal and creature not drawn yet (new, or whose look changed)
@@ -1175,6 +1214,8 @@ export class StudioProcessor {
     episode: StudioEpisodeRecord,
     request?: string,
     key?: string,
+    /** The request is for the story itself (the Story step): it is developed again. */
+    storyAsked = false,
   ): Promise<void> {
     const story = show.brief.format !== 'explainer';
     // A new episode of a story may go somewhere new, or meet someone new:
@@ -1199,9 +1240,37 @@ export class StudioProcessor {
     };
     const minutes = show.brief.minutes ?? 1;
     const revising = Boolean(request && episode.outline);
+    // A story's outline is built from its story, developed in steps first
+    // (studio-story-plan §1): a first outline, one written afresh, and a
+    // change asked of the story itself. A change asked of the outline
+    // alone changes the outline, the story kept.
+    const develop = story && (storyAsked || !request || !episode.outline);
+    const kept = episode.outline?.story ?? null;
+    if (develop) {
+      const developed = await this.developStory(
+        show,
+        episode,
+        bible,
+        ask.before,
+        request,
+        storyAsked ? kept : null,
+        key,
+      );
+      await this.finishOutline(
+        show,
+        episode,
+        developed.outline,
+        developed.problems,
+        Boolean(request && episode.outline),
+        key,
+      );
+      return;
+    }
     const first = await this.llm.studioOutline({
       ...ask,
-      ...(revising ? { previous: episode.outline, request } : {}),
+      // The story it keeps to, where it has one.
+      ...(kept ? { bible: `${ask.bible}\n\n${describeStory(kept)}` } : {}),
+      ...(revising ? { previous: outlineOnly(episode.outline), request } : {}),
       ...(!revising && request ? { request } : {}),
     });
     await this.record(episode.id, first.usage);
@@ -1234,6 +1303,88 @@ export class StudioProcessor {
       );
       if (left.length <= problems.length) [outline, problems] = [second, left];
     }
+    if (kept) outline = { ...outline, story: kept };
+    await this.finishOutline(show, episode, outline, problems, revising, key);
+  }
+
+  // ── The story ───────────────────────────────────────────────────────────
+
+  /**
+   * A story developed in steps (studio-story-plan §1.1–1.4, studio-develop):
+   * the premise, the characters' personalities (kept in the bible with
+   * their looks as they were), the beat sheet for the film's length, and
+   * the scene plan the outline is built from. With `previous` and a
+   * request, the story is changed as asked and the rest kept.
+   */
+  private async developStory(
+    show: StudioShowRecord,
+    episode: StudioEpisodeRecord,
+    given: StudioBible,
+    before: string | undefined,
+    request: string | undefined,
+    previous: StudioStory | null,
+    key?: string,
+  ): Promise<{ outline: StudioOutline; problems: string[] }> {
+    const who = `studio ${episode.id}: story`;
+    await this.studio.updateEpisode(episode.id, { busy: 'story' });
+    const developed = await developStory(this.llm, {
+      brief: show.brief,
+      briefWords: describeBrief(show.brief),
+      bible: given,
+      ...(before ? { before } : {}),
+      ...(request ? { request } : {}),
+      previous,
+      first: episode.number === 1,
+      record: (usage) => this.record(episode.id, usage),
+      onStep: (report) => {
+        if (report.first.length)
+          this.logger.log(
+            `${who} ${report.step} went back: ${report.first.join(' ')}`,
+          );
+      },
+    });
+    // Who everyone is, kept on the show as it is now (a drawing chosen
+    // meanwhile stays).
+    const now = (await this.studio.findShow(show.id))?.bible ?? given;
+    await this.studio.updateShow(show.id, {
+      bible: withPersonas(now, developed.personas),
+    });
+    const { story } = developed;
+    this.logger.log(
+      `${who}: "${story.premise.title}", ${story.beats.template}, ${story.beats.beats.length} beats (tension ${story.beats.beats.map((b) => b.intensity).join(' ')}), ${story.plan.scenes.length} scenes${developed.problems.length ? `; left: ${developed.problems.join(' ')}` : ''}`,
+    );
+    await this.log(
+      show,
+      episode,
+      {
+        what: 'story',
+        step: 'story',
+        line: `Story ${previous ? 'changed' : 'developed'}: “${story.premise.title}”`,
+      },
+      key && `${key}:story`,
+    );
+    await this.studio.updateEpisode(episode.id, { busy: 'outline' });
+    // What the outline's own check finds is the outline's to say.
+    const outlineProblems = checkOutline(
+      developed.outline,
+      developed.bible,
+      show.brief.minutes ?? 1,
+      true,
+      episode.number === 1,
+    );
+    return { outline: developed.outline, problems: outlineProblems };
+  }
+
+  /** An outline written: said in the thread, kept on the episode, and written again if the brief moved meanwhile. */
+  private async finishOutline(
+    show: StudioShowRecord,
+    episode: StudioEpisodeRecord,
+    outline: StudioOutline,
+    problems: string[],
+    revising: boolean,
+    key?: string,
+  ): Promise<void> {
+    const story = show.brief.format !== 'explainer';
     if (!outline.scenes.length) throw new Error('The outline came back empty');
     await this.log(
       show,
@@ -1266,6 +1417,8 @@ export class StudioProcessor {
           episodeId: episode.id,
           userId: show.userId,
           request: 'Take in what the brief says now.',
+          // A story's is developed again with it.
+          ...(story && outline.story ? { story: true } : {}),
         },
       ]);
       await this.log(
@@ -1609,7 +1762,9 @@ export class StudioProcessor {
       bible: describeBible(bible, true),
       outline: describeOutline(outline, true),
       scene: outline.scenes[k]
-        ? describeOutlineScene(outline.scenes[k], k, true)
+        ? [describeOutlineScene(outline.scenes[k], k, true), planOf(outline, k)]
+            .filter(Boolean)
+            .join('\n')
         : `Scene ${k + 1}: the scene the maker asked for.`,
       before: describeEnd(before, bible),
     };

@@ -49,7 +49,8 @@
     "scene:notes": "ts-node --transpile-only -r tsconfig-paths/register scripts/scene-notes.ts",
     "figures:sheet": "ts-node --transpile-only -r tsconfig-paths/register scripts/figures-sheet.ts",
     "drawing:bench": "ts-node --transpile-only -r tsconfig-paths/register scripts/drawing-bench.ts",
-    "set:bench": "ts-node --transpile-only -r tsconfig-paths/register scripts/set-bench.ts"
+    "set:bench": "ts-node --transpile-only -r tsconfig-paths/register scripts/set-bench.ts",
+    "story:bench": "ts-node --transpile-only -r tsconfig-paths/register scripts/story-bench.ts"
   },
   "dependencies": {
     "@ai-sdk/anthropic": "^4.0.38",

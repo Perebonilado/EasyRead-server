@@ -21,8 +21,9 @@ export const EPISODE_PHASES = [
 ] as const;
 export type EpisodePhase = (typeof EPISODE_PHASES)[number];
 
-/** What an episode is busy with: writing its cast, its outline or its scenes, or making the film. */
-export type EpisodeBusy = 'bible' | 'outline' | 'script' | 'scene' | 'make';
+/** What an episode is busy with: writing its cast, developing its story, its outline or its scenes, or making the film. */
+export type EpisodeBusy =
+  'bible' | 'story' | 'outline' | 'script' | 'scene' | 'make';
 
 /** A scene: being written, written and checked, being made, made, or failed. */
 export type StudioSceneStatus =
@@ -79,6 +80,7 @@ export interface StudioSceneRecord {
 /** Something the Studio recorded in the thread: what happened, and the step it belongs to. */
 export interface StudioEventRecord {
   what:
+    | 'story'
     | 'outline'
     | 'cast'
     | 'scenes'
@@ -92,7 +94,8 @@ export interface StudioEventRecord {
     | 'episode'
     | 'failed'
     | 'checked';
-  step: EpisodePhase;
+  /** The step it belongs to: a phase, or the story's own step (the Story card), which no episode's phase is. */
+  step: EpisodePhase | 'story';
   sceneId?: string;
   /** The character it is about: new drawings of them to choose from, in the thread. */
   characterId?: string;

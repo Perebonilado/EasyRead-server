@@ -47,7 +47,7 @@ import { Public } from '../security/public.decorator';
 
 /** What the maker is looking at in the panel as they write. */
 class FocusDto {
-  @IsIn(['brief', 'outline', 'cast', 'script', 'made'])
+  @IsIn(['brief', 'story', 'outline', 'cast', 'script', 'made'])
   step!: string;
 
   @IsOptional()
@@ -348,6 +348,16 @@ export class StudioController {
     @Body() body: RequestDto,
   ): Promise<StudioEpisodeDto> {
     return this.studio.rewriteOutline(userId, id, body.request ?? null);
+  }
+
+  /** The story (the Story step) changed as asked: developed again, and the outline built from it. */
+  @Post('episodes/:id/story')
+  rewriteStory(
+    @CurrentUser('id') userId: string,
+    @Param('id') id: string,
+    @Body() body: RequestDto,
+  ): Promise<StudioEpisodeDto> {
+    return this.studio.rewriteStory(userId, id, body.request ?? null);
   }
 
   @Patch('episodes/:id/outline')

@@ -1957,6 +1957,131 @@ export class FakeLlmAdapter implements LlmGatewayPort {
     };
   }
 
+  /** Story development, faked: Ada and Kofi's kite, in two scenes in the yard. */
+  async studioPremise(input: {
+    brief: string;
+  }): Promise<LlmResult<Record<string, unknown>>> {
+    const started = Date.now();
+    return {
+      value: {
+        title: 'Ada and Kofi',
+        logline:
+          'Ada wants to fly the kite she built before the wind drops, but Kofi has tied it to the tree as a joke and cannot untie his own knot.',
+        theme: 'a joke is only funny if everyone is laughing',
+        hook: 'A kite tugs at a string that goes nowhere.',
+        genre: 'comedy',
+        ending: 'happy',
+        stakes: 'the last good wind of the day',
+        tools: ['ticking clock: the wind is dropping', 'it gets worse'],
+        gag: 'Kofi says every knot is his best knot',
+        clues: [],
+      },
+      usage: this.usage(started, input.brief.length / 4, 120),
+    };
+  }
+
+  async studioCharacters(input: {
+    brief: string;
+  }): Promise<LlmResult<Record<string, unknown>>> {
+    const started = Date.now();
+    const sheet = (id: string, want: string, flaw: string, other: string) => ({
+      id,
+      want,
+      need: 'to laugh at themselves',
+      flaw,
+      fear: 'being left out',
+      personality: ['counts everything twice', 'hums when thinking'],
+      voice: 'short sentences, a pet phrase: "watch this"',
+      habits: ['taps a foot'],
+      relationships: [
+        { with: other, is: 'best friends', tension: 'who is in charge' },
+      ],
+      arc: { from: 'proud', to: 'laughing along' },
+    });
+    return {
+      value: {
+        characters: [
+          sheet(
+            'ada',
+            'to fly her kite',
+            'never admits she needs help',
+            'kofi',
+          ),
+          sheet('kofi', 'to make Ada laugh', 'takes jokes too far', 'ada'),
+        ],
+      },
+      usage: this.usage(started, input.brief.length / 4, 160),
+    };
+  }
+
+  async studioBeats(input: {
+    brief: string;
+  }): Promise<LlmResult<Record<string, unknown>>> {
+    const started = Date.now();
+    const beat = (
+      role: string,
+      what: string,
+      intensity: number,
+      plants: string[] = [],
+      pays: string[] = [],
+    ) => ({
+      role,
+      what,
+      wants: 'Ada wants to fly the kite',
+      stops: 'the knot',
+      changes: 'things get harder',
+      intensity,
+      plants,
+      pays,
+    });
+    return {
+      value: {
+        beats: [
+          beat('setup', 'Ada shows Kofi her kite.', 2, ['knot']),
+          beat('problem', 'The kite is tied to the tree.', 5),
+          beat('attempt', 'They pull and the knot tightens.', 6),
+          beat('twist', 'Kofi admits he tied it.', 8),
+          beat(
+            'payoff',
+            'Ada unties it with one tug and they fly it.',
+            3,
+            [],
+            ['knot'],
+          ),
+        ],
+      },
+      usage: this.usage(started, input.brief.length / 4, 160),
+    };
+  }
+
+  async studioScenePlan(input: {
+    brief: string;
+  }): Promise<LlmResult<Record<string, unknown>>> {
+    const started = Date.now();
+    const scene = (n: number, beats: number[], turn: string) => ({
+      title: `Scene ${n}`,
+      beats,
+      purpose: 'moves the story on',
+      conflict: 'Ada wants to fly the kite; the knot will not give',
+      turn,
+      shift: 'hope to worry',
+      moment: 'the kite tugging at the tree',
+      set: 'yard',
+      cast: ['ada', 'kofi'],
+      seconds: 30,
+      summary: `Ada and Kofi play, part ${n}.`,
+    });
+    return {
+      value: {
+        scenes: [
+          scene(1, [0, 1, 2], 'the knot is tighter than ever'),
+          scene(2, [3, 4], 'the kite flies'),
+        ],
+      },
+      usage: this.usage(started, input.brief.length / 4, 160),
+    };
+  }
+
   async studioScene(input: {
     scene: string;
   }): Promise<LlmResult<Record<string, unknown>>> {

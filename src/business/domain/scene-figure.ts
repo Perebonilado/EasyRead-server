@@ -32,8 +32,10 @@ import {
   line,
   shade,
 } from './scene-ink';
+import { VIEW_RIG, drawnInViews } from './scene-figure-views';
 import {
   DANGLE_FEEL,
+  DANGLE_RIG,
   cutChain,
   dangleCss,
   dangleOf,
@@ -546,10 +548,10 @@ export function describeFigure(spec: FigureSpec): string {
 // ── The rig ────────────────────────────────────────────────────────────────
 
 export { FIGURE_INK };
-const LINE = KIT_LINE;
+export const LINE = KIT_LINE;
 export const MOUTH = '#6b2a2e';
-const SHOE = '#3b3440';
-const GOLD = '#f2c14e';
+export const SHOE = '#3b3440';
+export const GOLD = '#f2c14e';
 
 /** The body below the head at each age; the head is the same size at all of them. */
 const AGES: Record<
@@ -566,9 +568,9 @@ const BUILDS: Record<FigureBuild, number> = {
   average: 1,
   broad: 1.12,
 };
-const HEAD = { rx: 46, ry: 40 };
+export const HEAD = { rx: 46, ry: 40 };
 /** How far the shoes lift the legs off the ground. */
-const FEET = 8;
+export const FEET = 8;
 /** The frame: as wide for everyone, with room above the head for a hat or an afro and below the shoes for the shadow. */
 export const FIGURE_FRAME = { halfWidth: 80, headroom: 32, below: 10 } as const;
 
@@ -594,7 +596,7 @@ export function rigOf(age: FigureAge, build: FigureBuild = 'average') {
     mouthY: cy + 25,
   };
 }
-type Rig = ReturnType<typeof rigOf>;
+export type Rig = ReturnType<typeof rigOf>;
 
 /** The frame an age is drawn in: every figure of it the same, so the stage scales them alike. */
 export function figureFrame(age: FigureAge): [number, number, number, number] {
@@ -608,8 +610,8 @@ export function figureFrame(age: FigureAge): [number, number, number, number] {
   ];
 }
 
-const r1 = (n: number) => Math.round(n * 10) / 10;
-const pt = (x: number, y: number) => `${r1(x)},${r1(y)}`;
+export const r1 = (n: number) => Math.round(n * 10) / 10;
+export const pt = (x: number, y: number) => `${r1(x)},${r1(y)}`;
 
 /**
  * The part of an ellipse above (or below) a line, as a path: a lid over an
@@ -650,7 +652,7 @@ export function beatOf(seed: string): number {
 
 // ── Faces ──────────────────────────────────────────────────────────────────
 
-interface Face {
+export interface Face {
   /** Where the pupils look, from the eye's middle. */
   look: [number, number];
   pupil: number;
@@ -667,7 +669,7 @@ interface Face {
 }
 
 /** The seven faces, drawn from lids, pupils, brows and a mouth: the story's own, in its order. */
-const FACES: Record<Expression, Face> = {
+export const FACES: Record<Expression, Face> = {
   neutral: { look: [0, 2], pupil: 3.4, mouth: 'flat', talk: 'small' },
   happy: {
     look: [0, 0],
@@ -727,7 +729,7 @@ export const FACE_MOUTHS: Record<Expression, { mouth: string; talk: string }> =
     ]),
   ) as Record<Expression, { mouth: string; talk: string }>;
 
-const FACE_NAMES = Object.keys(FACES) as Expression[];
+export const FACE_NAMES = Object.keys(FACES) as Expression[];
 /** Every face a person or a character drawn by the kit has drawn: the story's seven, in its order, and the kit's own. */
 export const FIGURE_FACES: readonly DrawnFace[] = [...FACE_NAMES, ...KIT_FACES];
 /** Every face anyone the kit draws can be asked to wear: those always drawn, then those drawn when a page shows them. */
@@ -794,7 +796,12 @@ export interface FaceRig {
 }
 
 /** One face over the eyes' whites: the pupils, their lids and brows, and the mouth, at rest and talking. `clip` is the eyes' clip's id. */
-function faceOf(name: Expression, R: Rig, skin: string, clip = 'eyes'): string {
+export function faceOf(
+  name: Expression,
+  R: Rig,
+  skin: string,
+  clip = 'eyes',
+): string {
   const f = FACES[name];
   return (
     faceEyes(name, R, skin, clip) +
@@ -876,7 +883,7 @@ export function mouthShapes(my: number, k = 1): string[] {
     `<rect x="-10" y="${my - 2}" width="20" height="7" rx="3.5" ${inked(MOUTH)}/><rect x="-7.5" y="${my - 2}" width="15" height="3.4" rx="1" ${flat('#ffffff')}/>`,
   ];
 }
-function mouthsOf(R: Rig): string {
+export function mouthsOf(R: Rig): string {
   return mouthShapes(R.mouthY)
     .map((shape, k) => `<g class="vm v${k}">${shape}</g>`)
     .join('');
@@ -914,7 +921,7 @@ export function blinkOf(
 // ── Signs: what someone is going through ──────────────────────────────────
 
 /** Where signs go on someone: their head's middle, their mouth, chest, belly, hands and feet, and beside them. */
-interface SignPoints {
+export interface SignPoints {
   head: [number, number];
   mouth: [number, number];
   chest: [number, number];
@@ -976,10 +983,10 @@ function shake(x: number, y: number, dir: number): string {
 }
 
 /** What sits on the face: it turns, tilts and nods with it (the rig's `.fm`). */
-const fm = (markup: string) => `<g class="fm">${markup}</g>`;
+export const fm = (markup: string) => `<g class="fm">${markup}</g>`;
 
 /** Each sign's drawing: what sits on the body, and what floats over the head, upright however the body lies. */
-interface Signs {
+export interface Signs {
   body: Record<FigureSign, string>;
   air: Partial<Record<FigureSign, string>>;
 }
@@ -990,7 +997,10 @@ interface Signs {
  * kit's units: drawn apart from the body, so it stays upright over
  * someone lying down, and can float over anyone the kit did not draw.
  */
-function airOf(hx: number, hy: number): Partial<Record<FigureSign, string>> {
+export function airOf(
+  hx: number,
+  hy: number,
+): Partial<Record<FigureSign, string>> {
   const around = (angle: number, r = 1) => {
     const a = (angle * Math.PI) / 180;
     return [hx + Math.cos(a) * 58 * r, hy + Math.sin(a) * 52 * r] as const;
@@ -1046,7 +1056,7 @@ function airOf(hx: number, hy: number): Partial<Record<FigureSign, string>> {
  * steam, a Z, a question mark, a bulb) is drawn apart, so it can stay
  * upright over someone lying down.
  */
-function signsOf(p: SignPoints, R: Rig, skin: string): Signs {
+export function signsOf(p: SignPoints, R: Rig, skin: string): Signs {
   const [hx, hy] = p.head;
   const { dx, rx, ry } = R.eyes;
   const ey = hy + 3;
@@ -1231,14 +1241,14 @@ export function airCss(signs: readonly FigureSign[]): string {
 }
 
 /** Each sign's whole drawing, on the body and over the head, for someone upright. */
-function upright({ body, air }: Signs): Record<FigureSign, string> {
+export function upright({ body, air }: Signs): Record<FigureSign, string> {
   return Object.fromEntries(
     FIGURE_SIGNS.map((name) => [name, body[name] + (air[name] ?? '')]),
   ) as Record<FigureSign, string>;
 }
 
 /** The pain face: eyes squeezed shut, brows pinched, teeth gritted. */
-function painFace(R: Rig, skin: string): string {
+export function painFace(R: Rig, skin: string): string {
   const my = R.mouthY;
   return (
     painEyes(R, skin) +
@@ -1279,7 +1289,7 @@ export function painEyes(R: FaceRig, skin: string, k = 1): string {
 }
 
 /** The eyes-closed face: lids shut as a blink shuts them, brows at rest, the calm face's mouth at rest and talking. */
-function closedFace(R: Rig, skin: string): string {
+export function closedFace(R: Rig, skin: string): string {
   return (
     closedEyes(R, skin) +
     `<g class="mouth">${mouthShape(FACES.neutral.mouth, R.mouthY)}</g>` +
@@ -1341,7 +1351,7 @@ export function calmBrows(R: FaceRig, k = 1): string {
 // ── Hair and headwear ──────────────────────────────────────────────────────
 
 /** Whether a hat hides every hair. */
-const wrapped = (spec: FigureSpec) =>
+export const wrapped = (spec: FigureSpec) =>
   spec.headwear === 'headscarf' ||
   spec.headwear === 'turban' ||
   spec.headwear === 'mantle' ||
@@ -1353,7 +1363,7 @@ const wrapped = (spec: FigureSpec) =>
  * the prefix its clip paths' ids take, unique in the drawing, and each
  * part cut into a chain. Absent, a drawing is made as rig 1 draws it.
  */
-interface Chains {
+export interface Chains {
   clip: string;
   dangles: Dangle[];
 }
@@ -1363,7 +1373,7 @@ interface Chains {
  * `segments` from `root` toward `tip`, and its dangle kept. `pinned`: what
  * lies behind the root stays on the head or the shoulders.
  */
-function swung(
+export function swung(
   chains: Chains | undefined,
   id: string,
   kind: DangleKind,
@@ -1389,7 +1399,7 @@ function swung(
 }
 
 /** Hair behind the head: what shows past it, over the shoulders or above. */
-function hairBehind(spec: FigureSpec, R: Rig, chains?: Chains): string {
+export function hairBehind(spec: FigureSpec, R: Rig, chains?: Chains): string {
   if (wrapped(spec)) return '';
   const c = HAIR[spec.hairColour];
   const { cy } = R;
@@ -1525,7 +1535,7 @@ function hairBehind(spec: FigureSpec, R: Rig, chains?: Chains): string {
 }
 
 /** A ribbon's two ends, hanging from its bow at the side of the head, behind it. */
-function ribbonEnds(spec: FigureSpec, R: Rig, chains?: Chains): string {
+export function ribbonEnds(spec: FigureSpec, R: Rig, chains?: Chains): string {
   if (!spec.extras.includes('ribbon')) return '';
   const { cy } = R;
   const c = CLOTH[spec.accentColour];
@@ -1542,7 +1552,7 @@ function ribbonEnds(spec: FigureSpec, R: Rig, chains?: Chains): string {
 }
 
 /** A ribbon's bow, on the side of the head over the hair. */
-function ribbonBow(spec: FigureSpec, R: Rig): string {
+export function ribbonBow(spec: FigureSpec, R: Rig): string {
   if (!spec.extras.includes('ribbon')) return '';
   const { cy } = R;
   const c = CLOTH[spec.accentColour];
@@ -1554,7 +1564,11 @@ function ribbonBow(spec: FigureSpec, R: Rig): string {
 }
 
 /** A headscarf's end: knotted below the ear and hanging over the shoulder, in front. */
-function headscarfTail(spec: FigureSpec, R: Rig, chains?: Chains): string {
+export function headscarfTail(
+  spec: FigureSpec,
+  R: Rig,
+  chains?: Chains,
+): string {
   if (!spec.extras.includes('headscarf tail')) return '';
   const { cy, sY } = R;
   const c = CLOTH[spec.accentColour];
@@ -1577,7 +1591,7 @@ function headscarfTail(spec: FigureSpec, R: Rig, chains?: Chains): string {
  * The hair over the head: over the top, down the temples to the ears, and
  * a fringe that stops above the brows.
  */
-function hairOver(spec: FigureSpec, R: Rig): string {
+export function hairOver(spec: FigureSpec, R: Rig): string {
   if (spec.hair === 'bald' || spec.hair === 'balding' || wrapped(spec))
     return '';
   const c = HAIR[spec.hairColour];
@@ -1611,7 +1625,7 @@ function hairOver(spec: FigureSpec, R: Rig): string {
 }
 
 /** What is worn on the head. None of it comes down past the brows' band. */
-function headwearOf(spec: FigureSpec, R: Rig): string {
+export function headwearOf(spec: FigureSpec, R: Rig): string {
   const { cy } = R;
   const c = CLOTH[spec.accentColour];
   switch (spec.headwear) {
@@ -1722,7 +1736,7 @@ function headwearOf(spec: FigureSpec, R: Rig): string {
 
 // ── Clothes ────────────────────────────────────────────────────────────────
 
-interface Dressed {
+export interface Dressed {
   /** The body's fill. */
   fill: string;
   /** How far down the garment reaches, from the hem's line; and how much wider it flares. */
@@ -1736,7 +1750,7 @@ interface Dressed {
   collar: string;
 }
 
-function dressOf(spec: FigureSpec, R: Rig): Dressed {
+export function dressOf(spec: FigureSpec, R: Rig): Dressed {
   const top = CLOTH[spec.topColour];
   const accent = CLOTH[spec.accentColour];
   const white = CLOTH.white;
@@ -2025,14 +2039,14 @@ function dressOf(spec: FigureSpec, R: Rig): Dressed {
 }
 
 /** How far past the frame's sides an angel's wings reach. */
-const WING_SPAN = 118;
+export const WING_SPAN = 118;
 
 /**
  * What hangs or spreads behind the body: a cloak from the shoulders, a
  * mantle's fall from the head, an angel's wings. Drawn first, so the
  * body stands in front of it.
  */
-function backOf(
+export function backOf(
   spec: FigureSpec,
   R: Rig,
   bottom: number,
@@ -2109,14 +2123,18 @@ function backOf(
 }
 
 /** A backpack's pack, showing past the shoulders behind the body. */
-function packOf(spec: FigureSpec, R: Rig): string {
+export function packOf(spec: FigureSpec, R: Rig): string {
   if (!spec.extras.includes('backpack')) return '';
   const c = shade(CLOTH[spec.accentColour], 0.85);
   return `<rect x="${r1(-R.halfShoulder - 7)}" y="${R.sY + 2}" width="${r1(R.halfShoulder * 2 + 14)}" height="${r1((R.hemY - R.sY) * 0.72)}" rx="10" ${inked(c)}/>`;
 }
 
 /** What someone carries or wears besides: drawn on the body, below the chin. */
-function extrasOnBody(spec: FigureSpec, R: Rig, chains?: Chains): string {
+export function extrasOnBody(
+  spec: FigureSpec,
+  R: Rig,
+  chains?: Chains,
+): string {
   const { sY, halfShoulder: s2 } = R;
   const accent = CLOTH[spec.accentColour];
   const out: string[] = [];
@@ -2187,7 +2205,7 @@ function extrasOnBody(spec: FigureSpec, R: Rig, chains?: Chains): string {
  * And how much larger than life it is drawn, as a cartoon draws what
  * matters: beside a head this big, a cup the size of a hand is lost.
  */
-const GRIPS: Record<
+export const GRIPS: Record<
   FigureProp,
   { grip: 'up' | 'high' | 'down'; size: number }
 > = {
@@ -2206,7 +2224,7 @@ const GRIPS: Record<
   letter: { grip: 'up', size: 1.35 },
   staff: { grip: 'high', size: 1 },
 };
-const WOOD = '#8a5a3b';
+export const WOOD = '#8a5a3b';
 const STEEL = '#c9cdd3';
 
 /**
@@ -2215,7 +2233,7 @@ const STEEL = '#c9cdd3';
  * above the hand the top of the head is, for a pole to clear it. With
  * how far it reaches out from the hand, and up.
  */
-function propOf(
+export function propOf(
   prop: FigureProp,
   accent: string,
   up: number,
@@ -2466,8 +2484,10 @@ export interface FigureDrawing {
   joints?: Record<'r' | 'l', [Point2, Point2, Point2]>;
   /** And each leg's hip, knee and foot: the knees bend by them, and the body sinks as far as the legs fold. */
   legs?: Record<'r' | 'l', [Point2, Point2, Point2]>;
-  /** Made with rig 2 (studio-world-plan §4.6): what swings is drawn as chains. Absent, rig 1. */
-  rig?: 2;
+  /** Made with rig 2 (studio-world-plan §4.6): what swings is drawn as chains; with rig 3, from every side as well (studio-views-plan §1.2). Absent, rig 1. */
+  rig?: 2 | 3;
+  /** On rig 3, each view's group, front first: the stage shows one at a time. */
+  views?: string[];
   /** On rig 2, each part that swings, its root in the frame's units. */
   dangles?: Dangle[];
   /** On rig 2, one who walks: how far one full stride (both feet) carries them, in the frame's units, and how they go. */
@@ -2497,7 +2517,7 @@ export function keyframes(name: string, shown: boolean): string {
 }
 
 /** What one person is drawn from, layer by layer, at the rig's origin. */
-interface Layers {
+export interface Layers {
   R: Rig;
   legs: string;
   behind: string;
@@ -2536,7 +2556,10 @@ export function canHold(pose: FigurePose): boolean {
 }
 
 /** Which hand holds a prop in a pose: the right, the left when the right is busy, none when both are. */
-function holderOf(pose: FigurePose, holding: FigureProp | null): -1 | 0 | 1 {
+export function holderOf(
+  pose: FigurePose,
+  holding: FigureProp | null,
+): -1 | 0 | 1 {
   if (!holding) return 0;
   switch (pose) {
     case 'standing':
@@ -2552,10 +2575,10 @@ function holderOf(pose: FigurePose, holding: FigureProp | null): -1 | 0 | 1 {
   }
 }
 
-type Point2 = [number, number];
+export type Point2 = [number, number];
 
 /** A point a share of the way along a line through points, and the line between two shares of it. */
-function alongOf(joints: Point2[]) {
+export function alongOf(joints: Point2[]) {
   const lengths = joints
     .slice(1)
     .map((p, i) => Math.hypot(p[0] - joints[i][0], p[1] - joints[i][1]));
@@ -2585,7 +2608,7 @@ function alongOf(joints: Point2[]) {
   return { at, stretch };
 }
 
-function layersOf(
+export function layersOf(
   spec: FigureSpec,
   pose: FigurePose = 'standing',
   holding: FigureProp | null = null,
@@ -3004,7 +3027,11 @@ const APART = 118;
  * near the described one, their own accent colour), the same every time.
  * Their extras are the described one's alone.
  */
-function companionOf(spec: FigureSpec, i: number, seed: string): FigureSpec {
+export function companionOf(
+  spec: FigureSpec,
+  i: number,
+  seed: string,
+): FigureSpec {
   const pick = <T>(list: readonly T[], salt: string): T =>
     list[
       Math.floor(beatOf(`${seed}:${i}:${salt}`) * list.length) % list.length
@@ -3118,7 +3145,7 @@ export const BLINK_FRAMES =
  * beat, a mouth that moves while talking, a wave; and for each sign
  * drawn, how its marks and the body move while it is on.
  */
-function styleOf(
+export function styleOf(
   breathAt: number,
   blinks: number[],
   signs: readonly FigureSign[],
@@ -3208,7 +3235,7 @@ function rigStyle(neck: number): string {
 }
 
 /** The eyes' whites as a clip: pupils never look out past them. `id` is the clip's own, unique where many people share a drawing. */
-function eyeClip(R: Rig, id = 'eyes'): string {
+export function eyeClip(R: Rig, id = 'eyes'): string {
   return `<defs>${eyeClipPath(R, id)}</defs>`;
 }
 
@@ -3224,7 +3251,7 @@ export function eyeClipPath(R: FaceRig, id = 'eyes'): string {
 }
 
 /** Every state a figure has, by name to the id of its group: the faces, the kit's faces, those asked for, and the signs drawn. */
-function statesOf(
+export function statesOf(
   signs: readonly FigureSign[],
   faces: readonly AskedFace[] = [],
 ): Record<string, string> {
@@ -3238,7 +3265,7 @@ function statesOf(
 }
 
 /** The signs to draw for someone in a pose: those asked for, in the list's order; none that needs their feet when they are lying down. */
-function signsFor(
+export function signsFor(
   pose: FigurePose,
   asked: readonly FigureSign[] = [],
 ): FigureSign[] {
@@ -3451,11 +3478,11 @@ export interface FigureHow {
    * ribbon, a headscarf's end, wings) drawn as chains the player turns by
    * `--dg-<id>-<k>`, and its dangles and stride said.
    */
-  rig?: RigVersion;
+  rig?: RigVersion | typeof VIEW_RIG;
 }
 
 /** The class a figure's clothes are drawn in: 0 what they start in, then each they change into. */
-const dressClass = (k: number) => `dress-${k}`;
+export const dressClass = (k: number) => `dress-${k}`;
 
 /**
  * The clothes of a figure that changes clothes, as its own CSS shows them:
@@ -3534,6 +3561,13 @@ export function drawFigure(
   seed = '',
   how: FigureHow = {},
 ): FigureDrawing {
+  // On rig 3, one person standing is drawn from every side (a group, or
+  // someone lying down or in bed, as on rig 2).
+  if (how.rig === VIEW_RIG)
+    return (
+      drawnInViews(spec, seed, how) ??
+      drawFigure(spec, seed, { ...how, rig: DANGLE_RIG })
+    );
   const key = seed || JSON.stringify(spec);
   const pose = how.pose ?? 'standing';
   const faces = facesFor(how.faces);

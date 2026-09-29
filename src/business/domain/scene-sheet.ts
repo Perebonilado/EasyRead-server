@@ -138,17 +138,21 @@ export async function figureDrawing(
   };
 }
 
-/** What a kit drawing made with rig 2 says of itself: its rig, what swings, its stride. */
+/** What a kit drawing made with rig 2 or 3 says of itself: its rig, what swings, its stride, and on rig 3 its views. */
 const rigged = (drawn: {
-  rig?: 2;
+  rig?: 2 | 3;
   dangles?: GatedDrawing['dangles'];
   stride?: GatedDrawing['stride'];
-}): Pick<GatedDrawing, 'rigVersion' | 'dangles' | 'stride'> =>
-  drawn.rig === 2
+  views?: string[];
+}): Pick<GatedDrawing, 'rigVersion' | 'dangles' | 'stride' | 'views'> =>
+  drawn.rig === 2 || drawn.rig === 3
     ? {
-        rigVersion: 2,
+        rigVersion: drawn.rig,
         ...(drawn.dangles?.length ? { dangles: drawn.dangles } : {}),
         ...(drawn.stride ? { stride: drawn.stride } : {}),
+        ...(drawn.rig === 3 && drawn.views?.length
+          ? { views: drawn.views }
+          : {}),
       }
     : {};
 

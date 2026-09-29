@@ -132,6 +132,7 @@ import {
   type Sets,
 } from '../../business/domain/scene-sheet';
 import { DANGLE_RIG } from '../../business/domain/scene-dangles';
+import { VIEW_RIG } from '../../business/domain/scene-figure-views';
 import { DRAWN } from '../../business/domain/scene-own';
 import type { OwnPropDrawing } from '../../business/domain/scene-props';
 import type { SetPiece } from '../../business/domain/scene-set-pieces';
@@ -1484,8 +1485,8 @@ export class SceneProcessor {
           signs: signsShown(script, thing.id),
           faces: facesShown(script, thing.id),
           old: oldWorld(story?.bible.world?.era),
-          // Drawn new for the page, with what swings: rig 2.
-          rig: DANGLE_RIG,
+          // Drawn new for the page, with what swings and from every side: rig 3.
+          rig: VIEW_RIG,
         }).catch((error: unknown) => {
           this.logger.warn(
             `${who}: "${thing.id}" (a person) is set as a card: ${(error as Error).message}`,
@@ -1545,9 +1546,9 @@ export class SceneProcessor {
             faces,
             old: oldWorld(story?.bible.world?.era),
             ...(thing.dress?.length ? { dress: thing.dress } : {}),
-            // Drawn new for the page, with what swings: rig 2. A sheet
-            // the book keeps is as it was drawn.
-            rig: DANGLE_RIG,
+            // Drawn new for the page, with what swings and from every
+            // side: rig 3. A sheet the book keeps is as it was drawn.
+            rig: VIEW_RIG,
           })
         : kitAnimal
           ? await animalDrawing(kitAnimal, thing.ref, {

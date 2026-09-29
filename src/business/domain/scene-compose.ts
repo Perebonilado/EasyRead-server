@@ -21,6 +21,7 @@ import type {
   SceneTiming,
 } from '../../contracts';
 import { actingOf, type DirectedMove, type SpokenLine } from './scene-acting';
+import { withViews } from './scene-views';
 import {
   crowdHeads,
   asideOf,
@@ -391,12 +392,16 @@ export function thingDto(
     ...(drawing.acts && drawing.outfits?.length
       ? { wears: drawing.outfits }
       : {}),
-    // Drawn by a kit with rig 2: what swings, and how far a stride goes.
-    ...(drawing.rigVersion === 2
+    // Drawn by a kit with rig 2: what swings, and how far a stride goes;
+    // with rig 3, from every side too, and its views.
+    ...(drawing.rigVersion === 2 || drawing.rigVersion === 3
       ? {
-          rigVersion: 2 as const,
+          rigVersion: drawing.rigVersion,
           ...(drawing.dangles?.length ? { dangles: drawing.dangles } : {}),
           ...(drawing.stride ? { stride: drawing.stride } : {}),
+          ...(drawing.rigVersion === 3 && drawing.views?.length
+            ? { views: drawing.views }
+            : {}),
         }
       : {}),
     // A person the kit drew in bed or lying for the whole scene: so said.
@@ -3480,6 +3485,9 @@ export function composeScene(input: ComposeInput): {
     composed.scene.steps = hurried(composed.scene);
     composed.scene.settledMs = settledOf(composed.scene);
   }
+  // Which view of each one drawn from every side the camera sees, and
+  // when (studio-views-plan §2): from where they walk and whom they face.
+  composed.scene = withViews(composed.scene);
   return composed;
 }
 

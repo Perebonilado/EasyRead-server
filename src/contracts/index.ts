@@ -1077,6 +1077,12 @@ export interface SceneDangleDto {
   limit: number;
   /** How much the wind moves it, 0 to 1. */
   wind: number;
+  /**
+   * On a person drawn from every side (rig 3): where its root is and which
+   * way it hangs in each view it is seen in, by the view's name ("front",
+   * "3q", "profile", "back3q", "back"). The same springs swing it in each.
+   */
+  views?: Record<string, { root: [number, number]; dir: [number, number] }>;
 }
 
 /** One layer of a story's place: sky, far, back, ground, stage, floor or foreground. */
@@ -1191,7 +1197,16 @@ export type SceneThingDto =
        * is drawn as chains of segments the player turns by `--dg-<id>-<k>`
        * (degrees, 0 at rest). Absent, rig 1: an older drawing, as it was.
        */
-      rigVersion?: 2;
+      rigVersion?: 2 | 3;
+      /**
+       * On rig 3 (studio-views-plan §1.2), a person drawn from every side:
+       * the ids of the view groups, front first ("view-front", "view-3q",
+       * "view-profile", "view-back3q", "view-back"). The player shows one
+       * at a time by a class on the drawing ("vw-3q"; none, the front);
+       * each view's groups are the front's ids with "--<view>" after them,
+       * so a face or a sign is shown in all of them at once.
+       */
+      views?: string[];
       /** On rig 2, each part that swings: hair behind, a cloak or cape, a scarf's end, a ribbon, wings, a tail, ears, a mane. */
       dangles?: SceneDangleDto[];
       /** On rig 2, one who walks: how far one full stride (both feet) carries them, in the drawing's viewBox units, and how they go. */
@@ -1555,7 +1570,16 @@ export interface SceneActingDto {
   walks?: true;
   /** How big their moves are, from what they are like: a shy one's smaller, a bold one's bigger; absent, as drawn. */
   size?: number;
+  /**
+   * One drawn from every side (rig 3): which view shows from each moment
+   * on, and whether it is mirrored (-1, facing left) or not (1). Absent,
+   * the front all along.
+   */
+  view?: [number, SceneView, 1 | -1][];
 }
+
+/** A view of someone drawn from every side, as the camera sees them. */
+export type SceneView = 'front' | '3q' | 'profile' | 'back3q' | 'back';
 
 /** A speech bubble as the stage sets it: its box, its words, and the point its tail reaches toward. */
 export interface SceneBubbleDto {

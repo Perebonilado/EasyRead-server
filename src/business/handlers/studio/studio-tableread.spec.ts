@@ -62,6 +62,7 @@ const raw = (title: string, say: string) => ({
       say,
       feeling: 'happy',
       from: 'here',
+      aim: 'teases',
     },
     {
       kind: 'line',
@@ -70,6 +71,7 @@ const raw = (title: string, say: string) => ({
       say: 'Mine will be taller by Friday, you watch.',
       feeling: 'happy',
       from: 'here',
+      aim: 'teases',
     },
   ],
   camera: [],

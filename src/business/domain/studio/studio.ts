@@ -976,6 +976,50 @@ export const BEAT_KINDS = [
 export type BeatKind = (typeof BEAT_KINDS)[number];
 
 /**
+ * What a line does to the one it is said to (studio-screenwriting W2,
+ * McKee's "dialogue is action"): every line is a move to change the
+ * other person. A line that only reports what the viewer can see has no
+ * aim. The acting reads it too: a threat is played as one.
+ */
+export const LINE_AIMS = [
+  'asks',
+  'begs',
+  'pleads',
+  'orders',
+  'refuses',
+  'warns',
+  'threatens',
+  'bargains',
+  'teases',
+  'jokes',
+  'accuses',
+  'comforts',
+  'confesses',
+  'dodges',
+  'lies',
+  'reveals',
+  'praises',
+] as const;
+export type LineAim = (typeof LINE_AIMS)[number];
+
+/** A line's aim as a writer said it: one of the list, or its plain verb ("ask", "threat"); null for none. */
+export function aimOf(value: unknown): LineAim | null {
+  if (typeof value !== 'string') return null;
+  const said = value
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z]/gu, '');
+  if (!said) return null;
+  if ((LINE_AIMS as readonly string[]).includes(said)) return said as LineAim;
+  const found = LINE_AIMS.find(
+    (aim) =>
+      aim.replace(/e?s$/u, '') === said.replace(/(?:e?s|ing|ed)$/u, '') ||
+      said.startsWith(aim.replace(/e?s$/u, '')),
+  );
+  return found ?? null;
+}
+
+/**
  * One beat of a scene, flat: every field present, null where its kind
  * does not use it. A line is said by `who` to `to`; a narration by the
  * narrator; an action is `who` doing `do` (toward `target`, or to `spot`,
@@ -1011,6 +1055,8 @@ export interface SheetBeat {
   via?: string;
   /** What the writer asked for that is none of the doings, kept as they wrote it. */
   doSaid?: string;
+  /** A line's aim: what it does to the one it is said to (a threat, a bargain). Absent on a sheet written before aims, and on any other kind. */
+  aim?: LineAim;
 }
 
 /**
@@ -1100,6 +1146,18 @@ export interface StorySheet {
   props: SheetProp[];
   beats: SheetBeat[];
   camera: SheetShot[];
+  /**
+   * Notes for the camera, as data (studio-screenwriting K5): a thing the
+   * story plants, handled on screen at this beat, wants a close shot of
+   * it (an insert) so the viewer notices it. Absent, none.
+   */
+  inserts?: SheetInsert[];
+}
+
+/** An insert shot asked for: the thing, at the beat that handles it (from 0). */
+export interface SheetInsert {
+  beat: number;
+  thing: string;
 }
 
 /** An explainer's scene: the narration and the storyboard, as the lesson writer writes a page. */
@@ -1210,6 +1268,8 @@ export function beatOf(raw: unknown): SheetBeat | null {
   if (thing) out.thing = thing;
   if (via) out.via = featureIdOf(via);
   if (doSaid) out.doSaid = doSaid;
+  const aim = kind === 'line' ? aimOf(b.aim) : null;
+  if (aim) out.aim = aim;
   return out;
 }
 
@@ -1280,6 +1340,17 @@ export function storySheetOf(raw: unknown): StorySheet {
       return [{ beat, shot, on: id(s.on) || null, with: id(s.with) || null }];
     })
     .sort((a, b) => a.beat - b.beat);
+  const inserts = (Array.isArray(said.inserts) ? said.inserts : [])
+    .slice(0, 6)
+    .flatMap((one: unknown): SheetInsert[] => {
+      if (!one || typeof one !== 'object') return [];
+      const s = one as Record<string, unknown>;
+      const beat = Math.round(Number(s.beat));
+      const thing = text(s.thing, 40);
+      return thing && Number.isFinite(beat) && beat >= 0 && beat < beats.length
+        ? [{ beat, thing }]
+        : [];
+    });
   return {
     kind: 'story',
     title: text(said.title, 80) || 'A scene',
@@ -1294,6 +1365,7 @@ export function storySheetOf(raw: unknown): StorySheet {
     props,
     beats,
     camera,
+    ...(inserts.length ? { inserts } : {}),
   };
 }
 

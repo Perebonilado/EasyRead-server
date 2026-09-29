@@ -6,6 +6,7 @@
 import { z } from 'zod';
 import {
   BEAT_KINDS,
+  LINE_AIMS,
   NARRATOR_MODES,
   STUDIO_ENDINGS,
   STUDIO_GENRES,
@@ -206,6 +207,27 @@ export const studioColdReadSchema = z.object({
   clock: z.string().catch(''),
   confused: z.array(z.string()).catch([]),
   sure: z.number().catch(0),
+  // Who is who: each person seen, and what they are to the hero.
+  people: z
+    .array(z.object({ who: z.string(), is: z.string().catch('') }))
+    .catch([]),
+  // Anything impossible seen, and its rules as understood.
+  impossible: z.string().catch(''),
+});
+
+/** The retelling: the whole film as a first-time viewer retells it, scene by scene with its join. */
+export const studioRetellSchema = z.object({
+  scenes: z
+    .array(
+      z.object({
+        scene: z.number(),
+        link: z.string().catch('and then'),
+        what: z.string().catch(''),
+      }),
+    )
+    .catch([]),
+  finally: z.string().catch(''),
+  about: z.string().catch(''),
 });
 
 /** Whether a scene made again as asked shows it: the check's verdict. */
@@ -383,6 +405,18 @@ export const studioPremiseSchema = z.object({
   tools: z.array(z.string()).catch([]),
   gag: z.string().nullable().catch(null),
   clues: z.array(z.string()).catch([]),
+  hero: z.string().catch(''),
+  want: z.string().catch(''),
+  obstacle: z.string().catch(''),
+  clock: z.string().nullable().catch(null),
+  normalDay: z.string().catch(''),
+  whyToday: z.string().catch(''),
+  whyCare: z.string().catch(''),
+  oddity: z
+    .object({ what: z.string(), rule: z.string().catch('') })
+    .nullable()
+    .catch(null),
+  spine: z.array(z.string()).catch([]),
 });
 
 /** Story development: each character's personality, by id. */
@@ -420,6 +454,8 @@ export const studioBeatsSchema = z.object({
       // Each plant with a short id; a payoff names the ids it pays.
       plants: z.array(z.object({ id: z.string(), what: z.string() })).catch([]),
       pays: z.array(z.string()).catch([]),
+      // How it follows the beat before: "therefore" or "but"; null for the first.
+      link: z.string().nullable().catch(null),
     }),
   ),
 });
@@ -439,6 +475,24 @@ export const studioScenePlanSchema = z.object({
       cast: z.array(z.string()),
       seconds: z.number(),
       summary: z.string(),
+      // Scene 1: how each part of the setup reaches the viewer.
+      setup: z
+        .array(
+          z.object({
+            part: z.string(),
+            how: z.string().catch('line'),
+            by: z.string().nullable().catch(null),
+            to: z.string().nullable().catch(null),
+            what: z.string().catch(''),
+          }),
+        )
+        .catch([]),
+      value: z
+        .object({ name: z.string(), from: z.string(), to: z.string() })
+        .nullable()
+        .catch(null),
+      start: z.string().catch(''),
+      link: z.string().nullable().catch(null),
     }),
   ),
 });
@@ -505,6 +559,8 @@ export const studioSceneSchema = z.object({
         .catch(null),
       spot: z.enum(SPOTS).nullable().catch(null),
       from: z.enum(LINE_FROMS).nullable().catch(null),
+      // A line's aim: what it does to the one it is said to.
+      aim: z.enum(LINE_AIMS).nullable().catch(null),
       pace: z
         .enum([...LINE_PACES, ...TRAVEL_PACES])
         .nullable()

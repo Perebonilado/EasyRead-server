@@ -8,9 +8,9 @@
 import render from 'dom-serializer';
 import { Element } from 'domhandler';
 import { parseDocument } from 'htmlparser2';
-import { animalOf, type AnimalSpec } from './scene-animal';
+import { animalFor, animalOf, type AnimalSpec } from './scene-animal';
 import { drawAnimal, type AnimalHow } from './scene-animal-draw';
-import { creatureOf, type CreatureSpec } from './scene-creature';
+import { creatureFor, creatureOf, type CreatureSpec } from './scene-creature';
 import { drawCreature } from './scene-creature-draw';
 import { isolate, type Callout } from './scene-callouts';
 import { elements, byId, walk } from './scene-dom';
@@ -987,6 +987,55 @@ export function ownSheetsOf(raw: unknown): OwnSheets {
     if (Number.isFinite(at)) out.failed = { ...out.failed, [mark]: at };
   for (const [mark, size] of Object.entries(said.sizes ?? {}))
     if (sane(size)) out.sizes = { ...out.sizes, [mark]: size };
+  return out;
+}
+
+/**
+ * Whether code draws a character, with no model asked: a person by the
+ * figure kit (from their figure, or one for their voice), an animal whose
+ * spec the animal kit has, a creature with a creature kit spec. Anyone
+ * else is the artist's, or of a kind not known yet.
+ */
+export function drawnByCode(
+  character: {
+    kind?: string | null;
+    animal?: AnimalSpec | null;
+    creature?: CreatureSpec | null;
+    look?: string | null;
+  },
+  /** Whether a book's animals are the kit's by their words (SCENE_ANIMAL_KIT_BOOKS). */
+  books = false,
+): boolean {
+  if (character.kind === 'person') return true;
+  if (animalFor(character, books)) return true;
+  return character.kind === 'creature' && creatureFor(character) !== null;
+}
+
+/**
+ * Those of a script's characters missing from the cast whom code can
+ * draw: drawn and added to the cast rather than the scene failing for
+ * them (a pigeon from the animal kit the cast never kept).
+ */
+export function missingByCode(
+  script: Pick<SceneScript, 'cast'>,
+  bible: Pick<StoryBible, 'characters'>,
+  cast: Cast,
+  books = false,
+): StoryBible['characters'] {
+  const out: StoryBible['characters'] = [];
+  for (const thing of script.cast) {
+    if (thing.kind !== 'character') continue;
+    const character = bible.characters.find((c) => c.id === thing.ref);
+    if (
+      character &&
+      standsOnStage(character) &&
+      character.presence !== 'light' &&
+      !cast[character.id] &&
+      drawnByCode(character, books) &&
+      !out.includes(character)
+    )
+      out.push(character);
+  }
   return out;
 }
 

@@ -157,9 +157,12 @@ function worker(reads: (() => Promise<unknown>)[]) {
     studioScene: (input: { problems?: string[] }) => {
       written.push(input);
       const sheet = tobi('s1-sheet.json') as { title: string };
-      // Written again with its notes: its title says so.
+      // Written again with its notes (and kept so when it goes back for
+      // its lines): its title says so.
       return Promise.resolve({
-        value: input.problems?.some((p) => p.startsWith('Beat 2'))
+        value: input.problems?.some(
+          (p) => p.startsWith('Beat 2') || p.startsWith('Keep what the notes'),
+        )
           ? { ...sheet, title: 'Up Before the Alarm, Again' }
           : sheet,
         usage,
@@ -244,8 +247,12 @@ describe('the table read, as the worker writes a script', () => {
     ]);
     await s.processor.process(job, context);
     expect(s.reads()).toBe(2);
-    // The failing scene only, with its notes.
-    const again = s.written.filter((w) => w.problems?.length);
+    // The failing scene only, with its notes. (Tobi's sheet was written
+    // before lines had aims, so each first write also goes back once for them.)
+    const again = s.written.filter((w) =>
+      w.problems?.some((p) => p.startsWith('Beat 2: Mama')),
+    );
+    expect(again).toHaveLength(1);
     expect(again[0].problems?.[0]).toBe(
       'Beat 2: Mama says she is proud; show it: a hug.',
     );

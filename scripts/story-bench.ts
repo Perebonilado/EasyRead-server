@@ -52,6 +52,7 @@ import {
   belowBar,
   describeRead,
   scriptInWords,
+  type Retell,
   type TableRead,
 } from '../src/business/domain/studio/studio-script';
 import { costOf } from '../src/business/domain/cost';
@@ -242,6 +243,14 @@ async function main(): Promise<void> {
     first: [] as number[],
     kept: [] as number[],
     items: {} as Record<string, number[]>,
+    /** Clarity at the first read and as kept. */
+    clarityFirst: [] as number[],
+    clarityKept: [] as number[],
+    /** Films whose clarity sentence matches the premise (T1), as kept. */
+    sentence: 0,
+    /** Report and aim flags on the first script (W2–W4), and "and then" joins. */
+    flags: [] as number[],
+    andThen: [] as number[],
   };
   /** The best script of the run, for reading. */
   let bestScript: { id: string; overall: number } | null = null;
@@ -259,11 +268,9 @@ async function main(): Promise<void> {
       totals.briefs += 1;
       const started = Date.now();
       const brief = briefOf(raw);
+      let spent = 0;
       const record = (usage: LlmUsage, task = 'studio_write') => {
-        totals.calls += 1;
-        totals.tokensIn += usage.tokensIn;
-        totals.tokensOut += usage.tokensOut;
-        totals.dollars +=
+        const dollars =
           costOf({
             task,
             model: usage.model,
@@ -271,6 +278,11 @@ async function main(): Promise<void> {
             tokensOut: usage.tokensOut,
             tokensCached: usage.tokensCached ?? null,
           }) ?? 0;
+        totals.calls += 1;
+        totals.tokensIn += usage.tokensIn;
+        totals.tokensOut += usage.tokensOut;
+        totals.dollars += dollars;
+        spent += dollars;
       };
       say(
         `━━ ${id} ━━ ${brief.genre ?? 'genre left to us'}, ${brief.minutes} min, for ${brief.audience}${brief.setting ? `, ${brief.setting}` : ', no setting given'}`,
@@ -292,6 +304,9 @@ async function main(): Promise<void> {
         const { story } = developed;
         say(`premise: "${story.premise.title}" — ${story.premise.logline}`);
         say(`theme: ${story.premise.theme} · hook: ${story.premise.hook}`);
+        say(
+          `hero ${story.premise.hero}; wants ${story.premise.want}; in the way: ${story.premise.obstacle}; clock: ${story.premise.clock || 'none'}${story.premise.oddity ? `; oddity: ${story.premise.oddity.what} (${story.premise.oddity.rule})` : ''}`,
+        );
         for (const c of developed.bible.characters) {
           const p = c.persona;
           if (!p) continue;
@@ -317,6 +332,7 @@ async function main(): Promise<void> {
         const beatsLeft = checkBeats(
           story.beats,
           contextOf(developed.bible, story.premise),
+          story.premise,
         );
         say(
           `final: ${developed.problems.length ? `${developed.problems.length} left: ${developed.problems.join(' ')}` : 'every check passes'}${beatsLeft.length ? '' : ' (structure, curve, setups ok)'}`,
@@ -361,6 +377,21 @@ async function main(): Promise<void> {
           const first = result.rounds[0].read;
           const kept = result.rounds[result.best].read;
           totals.read += 1;
+          if (first.scores.clarity !== undefined)
+            totals.clarityFirst.push(first.scores.clarity);
+          if (kept.scores.clarity !== undefined)
+            totals.clarityKept.push(kept.scores.clarity);
+          if (kept.viewer && !kept.misses.length) totals.sentence += 1;
+          totals.flags.push(
+            result.rounds[0].code.filter(
+              (n) => n.kind === 'telling' || n.kind === 'aim',
+            ).length,
+          );
+          totals.andThen.push(
+            result.rounds[result.best].retell?.scenes.filter(
+              (x) => x.link === 'and then',
+            ).length ?? 0,
+          );
           totals.first.push(first.overall);
           totals.kept.push(kept.overall);
           if (!belowBar(first).length) totals.passFirst += 1;
@@ -376,6 +407,10 @@ async function main(): Promise<void> {
             `table read: first ${first.overall}${result.rounds.length > 1 ? `, kept ${kept.overall} (read ${result.best + 1} of ${result.rounds.length})` : ''}; ${belowBar(kept).length ? `below the bar: ${belowBar(kept).join(', ')}` : 'clears the bar'}`,
           );
           say(`verdict: ${kept.verdict}`);
+          if (kept.viewer)
+            say(
+              `cold read as kept: ${kept.viewer.sentence || kept.viewer.about}${kept.misses.length ? ` [misses: ${kept.misses.join('; ')}]` : ''}`,
+            );
           if (!bestScript || kept.overall > bestScript.overall)
             bestScript = { id, overall: kept.overall };
           script = {
@@ -391,10 +426,21 @@ async function main(): Promise<void> {
           if (out)
             writeFileSync(
               join(out, `${id}.script.txt`),
-              scriptText(id, brief, developed, result.sheets, grown, kept),
+              scriptText(
+                id,
+                brief,
+                developed,
+                result.sheets,
+                grown,
+                kept,
+                result.rounds[result.best].retell ?? null,
+                spent,
+              ),
             );
         }
-        say(`(${Math.round((Date.now() - started) / 1000)}s)`);
+        say(
+          `(${Math.round((Date.now() - started) / 1000)}s, about $${spent.toFixed(3)})`,
+        );
         say();
         if (!developed.problems.length) totals.clean += 1;
         if (out)
@@ -448,6 +494,9 @@ async function main(): Promise<void> {
         `table read: ${totals.passFirst} of ${totals.read} clear the bar at the first read, ${totals.passKept} as kept; overall mean ${mean(totals.first)} first, ${mean(totals.kept)} kept (first ${totals.first.join(' ')}; kept ${totals.kept.join(' ')}).`,
       );
       say(
+        `clarity: mean ${mean(totals.clarityFirst)} first, ${mean(totals.clarityKept)} kept (kept ${totals.clarityKept.join(' ')}); the viewer's sentence matches the premise in ${totals.sentence} of ${totals.read}; report and aim flags on the first script ${totals.flags.join(' ')}; "and then" joins as kept ${totals.andThen.join(' ')}.`,
+      );
+      say(
         `items as kept (mean): ${Object.entries(totals.items)
           .map(([key, xs]) => `${key} ${mean(xs)}`)
           .join(', ')}`,
@@ -469,15 +518,38 @@ function scriptText(
   sheets: StorySheet[],
   bible: StudioBible,
   read: TableRead,
+  retell: Retell | null,
+  spent: number,
 ): string {
   const { story } = developed;
+  const p = story.premise;
+  const first = story.plan.scenes[0];
   return [
-    `${story.premise.title}  (${id})`,
-    `${brief.genre ?? 'genre left to us'}, ${brief.minutes} min, for ${brief.audience}${brief.setting ? `, ${brief.setting}` : ''}${brief.narrator ? `; narrator ${brief.narrator}` : ''}`,
+    `${p.title}  (${id})`,
+    `${brief.genre ?? 'genre left to us'}, ${brief.minutes} min, for ${brief.audience}${brief.setting ? `, ${brief.setting}` : ''}${brief.narrator ? `; narrator ${brief.narrator}` : '; narrator left to us'}`,
     '',
-    `Logline: ${story.premise.logline}`,
-    `Theme: ${story.premise.theme}`,
-    `Hook: ${story.premise.hook}`,
+    `Logline: ${p.logline}`,
+    `Theme: ${p.theme}`,
+    `Hook: ${p.hook}`,
+    `Hero: ${p.hero}. Wants: ${p.want}. In the way: ${p.obstacle}. Stakes: ${p.stakes}. Clock: ${p.clock || 'none'}.`,
+    `An ordinary day: ${p.normalDay}. Why today: ${p.whyToday}. Why we care: ${p.whyCare}.`,
+    p.oddity
+      ? `The one impossible thing: ${p.oddity.what}. Its rule: ${p.oddity.rule}.`
+      : 'Nothing impossible.',
+    'Spine:',
+    ...p.spine.map((line) => `  ${line}`),
+    '',
+    ...(first?.setup.length
+      ? [
+          'Scene 1 sets up:',
+          ...first.setup.map(
+            (x) =>
+              `  ${x.part}: ${x.how}${x.how === 'line' ? ` (${x.by} to ${x.to})` : ''}: ${x.what}`,
+          ),
+          '',
+        ]
+      : []),
+    `Scenes: ${story.plan.scenes.map((x, k) => `${k ? `${x.link ?? 'and then'} ` : ''}${x.title}${x.value ? ` [${x.value.name} ${x.value.from}→${x.value.to}]` : ''}`).join(' / ')}`,
     '',
     'Who they are:',
     ...bible.characters.map(
@@ -491,6 +563,42 @@ function scriptText(
     '',
     `Table read: ${describeRead(read)}`,
     `Verdict: ${read.verdict}`,
+    ...(read.viewer
+      ? [
+          '',
+          'A first-time viewer, after scene 1:',
+          `  ${read.viewer.sentence || read.viewer.about}`,
+          ...(read.viewer.people.length
+            ? [
+                `  Who is who: ${read.viewer.people.map((x) => `${x.who}: ${x.is}`).join('; ')}`,
+              ]
+            : []),
+          ...(read.viewer.impossible
+            ? [`  Impossible: ${read.viewer.impossible}`]
+            : []),
+          ...(read.viewer.confused.length
+            ? [`  Confused by: ${read.viewer.confused.join('; ')}`]
+            : []),
+          ...(read.misses.length || read.unsure.length
+            ? [
+                `  Against the premise: ${[...read.misses, ...read.unsure].join('; ')}`,
+              ]
+            : ['  Matches the premise.']),
+        ]
+      : []),
+    ...(retell
+      ? [
+          '',
+          'The whole film, retold by a first-time viewer:',
+          ...retell.scenes.map(
+            (x) =>
+              `  ${x.scene + 1}. ${x.link ? `${x.link.toUpperCase()}: ` : ''}${x.what}`,
+          ),
+          `  Until finally: ${retell.finally}`,
+        ]
+      : []),
+    '',
+    `Cost: about $${spent.toFixed(3)}`,
     '',
   ].join('\n');
 }

@@ -59,6 +59,13 @@ const beat = (
   intensity,
   plants,
   pays,
+  // Each beat after the first follows by therefore or but (B1).
+  link:
+    role === 'setup'
+      ? null
+      : ['inciting', 'problem', 'turn', 'twist'].includes(role)
+        ? 'but'
+        : 'therefore',
 });
 
 /** A two-minute story, shaped as it should be. */

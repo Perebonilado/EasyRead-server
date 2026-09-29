@@ -27,7 +27,15 @@ import {
   type SheetProblem,
 } from '../../domain/studio/studio-check';
 import { narratorRuleOf } from '../../domain/studio/studio-narrator';
-import { FIRST_SCENE_RULE } from '../../domain/studio/studio-script';
+import {
+  FIRST_SCENE_RULE,
+  checkOpening,
+  insertsFor,
+  lintLines,
+  lintTelling,
+  minutesOf,
+  plantsOfScene,
+} from '../../domain/studio/studio-script';
 import {
   describePlannedScene,
   describeSceneBeats,
@@ -75,6 +83,35 @@ export interface WrittenSheet {
   problems: SheetProblem[];
   /** What code mended of what was sent, for the log. */
   mended: string[];
+  /** What the screenwriting checks still find in its lines (aims, reports, the opening), for the log and the table read. */
+  craft: string[];
+}
+
+/**
+ * The screenwriting checks of one scene as written, each a note for its
+ * writer: every line an aim and someone to say it to, no reports of the
+ * picture, no "as you know", no feelings said outright, no hello to open
+ * on; in a comedy a take after a joke; and in scene 1, the setup landed
+ * in time (checkOpening).
+ */
+export function craftOf(
+  sheet: StorySheet,
+  bible: StudioBible,
+  outline: StudioOutline,
+  k: number,
+): string[] {
+  const story = outline.story ?? null;
+  const minutes = minutesOf(outline);
+  return [
+    ...(k === 0 && story ? checkOpening(sheet, story, bible, minutes) : []),
+    ...lintTelling([sheet], bible).map((n) => n.message),
+    ...lintLines([sheet], bible, {
+      genre: story?.premise.genre ?? null,
+      ending: story?.premise.ending ?? null,
+      minutes,
+      from: k,
+    }).map((n) => n.message),
+  ];
 }
 
 /**
@@ -130,11 +167,16 @@ export async function writeStorySheet(
     ...(notes ? { previous: old, problems: notes } : {}),
   });
   await record(first.usage);
+  // The things this scene plants, for the camera's inserts.
+  const plants = outline.story
+    ? plantsOfScene(outline.story, outline, bible, k)
+    : [];
   const judged = (raw: unknown) => {
     const mended = mendSheet(storySheetOf(raw), bible, before);
     return {
       sheet: mended.sheet,
       mended: mended.mended,
+      craft: craftOf(mended.sheet, bible, outline, k),
       // Held to the show as the words grew it: a thing they named is
       // there; and, written again as asked, to the lines it had.
       problems: [
@@ -151,13 +193,16 @@ export async function writeStorySheet(
   };
   let best = judged(first.value);
   const reasons = sentBackFor(best.problems);
-  if (reasons.length) {
-    log(`goes back: ${reasons.map((p) => p.message).join(' ')}`);
+  if (reasons.length || best.craft.length) {
+    log(
+      `goes back: ${[...reasons.map((p) => p.message), ...best.craft].join(' ')}`,
+    );
     const again = await llm.studioScene({
       ...ask,
       previous: first.value,
       problems: [
         ...reasons.map((p) => p.message),
+        ...best.craft,
         // The story's notes stay put right as the staging is.
         ...(notes
           ? ['Keep what the notes before asked for: only the above changes.']
@@ -167,7 +212,13 @@ export async function writeStorySheet(
     });
     await record(again.usage);
     const second = judged(again.value);
-    if (worse(second.problems, best.problems) <= 0) best = second;
+    // What the stage can play first; then the lines that do more.
+    const staged = worse(second.problems, best.problems);
+    if (
+      staged < 0 ||
+      (staged === 0 && second.craft.length <= best.craft.length)
+    )
+      best = second;
   }
   // What the writer still got wrong is put right here, not handed to the
   // maker: the scene is always one the stage can play.
@@ -191,5 +242,9 @@ export async function writeStorySheet(
     };
   }
   if (best.mended.length) log(`mended: ${best.mended.slice(0, 8).join('; ')}`);
+  if (best.craft.length) log(`craft still: ${best.craft.join(' ')}`);
+  // A thing planted here, handled on screen: a close shot of it asked for (data only).
+  const inserts = insertsFor(best.sheet, plants, bible);
+  if (inserts.length) best = { ...best, sheet: { ...best.sheet, inserts } };
   return best;
 }

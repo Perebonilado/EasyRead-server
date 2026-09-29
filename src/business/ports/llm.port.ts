@@ -913,6 +913,19 @@ export interface LlmGatewayPort {
   }): Promise<LlmResult<Record<string, unknown>>>;
 
   /**
+   * The retelling (the table read's T2): a first-time viewer watches the
+   * whole film as it shows it and retells it as a story spine, joining
+   * each scene to the one before with "therefore", "but" or "and then"
+   * (studio_check, thinking off). Made sound by retellOf.
+   */
+  studioRetell(input: {
+    /** Only what a viewer knows before it starts: the kind of film, and for whom. */
+    kind: string;
+    /** The whole film as seen and heard (filmAsSeen). */
+    film: string;
+  }): Promise<LlmResult<Record<string, unknown>>>;
+
+  /**
    * Whether a scene made again as the maker asked now shows what they
    * asked for: their words, the producer's reading of them, the film as it
    * was before and as it is now (each in words, from what it plays), and

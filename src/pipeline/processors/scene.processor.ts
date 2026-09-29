@@ -123,6 +123,7 @@ import {
   optionsKey,
   ownFeatureScale,
   ownThingScale,
+  missingByCode,
   notDrawnYet,
   ownSheetsOf,
   setsOf,
@@ -899,11 +900,27 @@ export class SceneProcessor {
     script: SceneScript;
   }> {
     const { story, who } = input;
-    const [cast, sets, own] = await Promise.all([
+    const [kept, sets, own] = await Promise.all([
       this.castAt(story.castKey),
       this.setsAt(story.setsKey),
       story.ownKey ? this.ownAt(story.ownKey) : null,
     ]);
+    // Whoever code can draw and the cast has not kept (an animal of the
+    // kit's, drawn before kit drawings were kept) is drawn and kept now,
+    // rather than the scene failing for them.
+    const heal = missingByCode(
+      input.script,
+      story.bible,
+      kept,
+      this.bookAnimals,
+    );
+    if (heal.length)
+      await Promise.all(
+        heal.map((c) =>
+          this.sheetFor(story.castKey, c, story.bookTitle, null, who),
+        ),
+      );
+    const cast = heal.length ? await this.castAt(story.castKey) : kept;
     let script = input.script;
     const reuse = new Map(
       [...input.kept].flatMap(([id, drawing]): [string, GatedDrawing][] =>
@@ -2361,13 +2378,21 @@ export class SceneProcessor {
           return figureSheet(character.figure ?? kept.figure, character.id);
         // An animal the kit drew, likewise, from its spec: the story's
         // (the look it has now) over the one kept.
+        // One the kit draws that the cast has not kept yet is kept now, as a
+        // person is, so a scene composed again from the cast finds them.
         const animal = animalFor(character, this.bookAnimals) ?? kept?.animal;
-        if (animal && (kept?.animal || !kept))
-          return animalSheet(animal, character.id);
+        if (animal && (kept?.animal || !kept)) {
+          const sheet = await animalSheet(animal, character.id);
+          if (!kept) await this.keepKitSheet(key, character, sheet, who);
+          return sheet;
+        }
         // And a creature the kit drew.
         const creature = creatureFor(character) ?? kept?.creature;
-        if (creature && (kept?.creature || !kept))
-          return creatureSheet(creature, character.id);
+        if (creature && (kept?.creature || !kept)) {
+          const sheet = await creatureSheet(creature, character.id);
+          if (!kept) await this.keepKitSheet(key, character, sheet, who);
+          return sheet;
+        }
         // Drawn before code moved what the artist draws: rigged now, with
         // no model asked, and kept so, the same drawing with its parts
         // joined and its motion code's.
@@ -2410,6 +2435,34 @@ export class SceneProcessor {
       await this.keepOthers(key, character.id, drawn.others, who);
       return sheet;
     });
+  }
+
+  /**
+   * A sheet the kit drew, kept in the cast where the cast has none for
+   * them yet (never over one kept meanwhile). What cannot be kept is only
+   * logged: the scene has its drawing either way.
+   */
+  private async keepKitSheet(
+    key: string,
+    character: StoryCharacter,
+    sheet: CharacterSheet,
+    who: string,
+  ): Promise<void> {
+    await this.inTurn(key, async () => {
+      const cast = await this.castAt(key);
+      if (cast[character.id]) return;
+      cast[character.id] = sheet;
+      await this.storage.put({
+        key,
+        body: Buffer.from(JSON.stringify(cast)),
+        mimeType: 'application/json',
+      });
+      this.logger.log(`${who}: ${character.name} drawn by the kit and kept`);
+    }).catch((error: unknown) =>
+      this.logger.warn(
+        `${who}: ${character.name} was drawn but not kept: ${(error as Error).message}`,
+      ),
+    );
   }
 
   /**

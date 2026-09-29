@@ -1976,6 +1976,22 @@ export class FakeLlmAdapter implements LlmGatewayPort {
         tools: ['ticking clock: the wind is dropping', 'it gets worse'],
         gag: 'Kofi says every knot is his best knot',
         clues: [],
+        hero: 'ada',
+        want: 'to fly the kite she built',
+        obstacle: "Kofi's knot on the tree",
+        clock: 'before the wind drops at sunset',
+        normalDay: 'Ada flies a kite in the yard every windy afternoon',
+        whyToday: 'today Kofi tied her new kite to the tree as a joke',
+        whyCare: 'she built the kite herself from old newspaper',
+        oddity: null,
+        spine: [
+          'Once upon a time there was a girl called Ada who built kites.',
+          'Every day she flew one in the yard.',
+          'Until one day Kofi tied her new kite to the tree as a joke.',
+          'Because of that they pulled, and the knot only got tighter.',
+          'Until finally Kofi owned up and Ada untied it with one tug.',
+          'Ever since then Kofi asks before he ties anything.',
+        ],
       },
       usage: this.usage(started, input.brief.length / 4, 120),
     };
@@ -2034,14 +2050,24 @@ export class FakeLlmAdapter implements LlmGatewayPort {
       intensity,
       plants,
       pays,
+      link:
+        role === 'setup'
+          ? null
+          : /problem|twist/u.test(role)
+            ? 'but'
+            : 'therefore',
     });
     return {
       value: {
         beats: [
           beat('setup', 'Ada shows Kofi her kite.', 2, ['knot']),
           beat('problem', 'The kite is tied to the tree.', 5),
-          beat('attempt', 'They pull and the knot tightens.', 6),
-          beat('twist', 'Kofi admits he tied it.', 8),
+          beat(
+            'attempt',
+            'They pull, the knot tightens, and Kofi says it is his best knot.',
+            6,
+          ),
+          beat('twist', 'Kofi admits he tied it with his best knot.', 8),
           beat(
             'payoff',
             'Ada unties it with one tug and they fly it.',
@@ -2071,6 +2097,49 @@ export class FakeLlmAdapter implements LlmGatewayPort {
       cast: ['ada', 'kofi'],
       seconds: 30,
       summary: `Ada and Kofi play, part ${n}.`,
+      setup:
+        n === 1
+          ? [
+              {
+                part: 'want',
+                how: 'line',
+                by: 'ada',
+                to: 'kofi',
+                what: 'my kite is stuck',
+              },
+              {
+                part: 'obstacle',
+                how: 'thing',
+                by: '',
+                to: '',
+                what: "Kofi's knot on the tree",
+              },
+              {
+                part: 'stakes',
+                how: 'line',
+                by: 'ada',
+                to: 'kofi',
+                what: 'the last wind of the day',
+              },
+              {
+                part: 'clock',
+                how: 'line',
+                by: 'ada',
+                to: 'kofi',
+                what: 'before the wind drops',
+              },
+            ]
+          : [],
+      value: {
+        name: 'flying',
+        from: n === 1 ? '+' : '-',
+        to: n === 1 ? '-' : '+',
+      },
+      start:
+        n === 1
+          ? 'Ada tugs at the kite string tied to the tree'
+          : 'Kofi picks at his own knot',
+      link: n === 1 ? null : 'but',
     });
     return {
       value: {
@@ -2087,11 +2156,18 @@ export class FakeLlmAdapter implements LlmGatewayPort {
     scene: string;
   }): Promise<LlmResult<Record<string, unknown>>> {
     const started = Date.now();
-    const line = (who: string, to: string, say: string, feeling: string) => ({
+    const line = (
+      who: string,
+      to: string,
+      say: string,
+      feeling: string,
+      aim: string,
+    ) => ({
       kind: 'line',
       who,
       to,
       say,
+      aim,
       feeling,
       sign: null,
       do: null,
@@ -2143,8 +2219,20 @@ export class FakeLlmAdapter implements LlmGatewayPort {
             pace: null,
             seconds: null,
           },
-          line('ada', 'kofi', 'Kofi, come and see this!', 'happy'),
-          line('kofi', 'ada', 'What is it?', 'thinking'),
+          line(
+            'ada',
+            'kofi',
+            'Kofi, my kite is stuck in your knot, and the last wind of the day drops at sunset!',
+            'angry',
+            'accuses',
+          ),
+          line(
+            'kofi',
+            'ada',
+            'Best knot I ever tied. Want me to untie it?',
+            'happy',
+            'teases',
+          ),
         ],
         camera: [],
       },
@@ -2200,6 +2288,29 @@ export class FakeLlmAdapter implements LlmGatewayPort {
         clock: '',
         confused: [],
         sure: 8,
+        people: [],
+        impossible: '',
+      },
+      usage: this.usage(started, input.film.length / 4, 120),
+    });
+  }
+
+  /** The retelling, offline: each scene joined to the one before by "therefore". */
+  async studioRetell(input: {
+    kind: string;
+    film: string;
+  }): Promise<LlmResult<Record<string, unknown>>> {
+    const started = Date.now();
+    const count = (input.film.match(/^SCENE \d+\./gmu) ?? []).length;
+    return Promise.resolve({
+      value: {
+        scenes: Array.from({ length: count }, (_, k) => ({
+          scene: k + 1,
+          link: k ? 'therefore' : '',
+          what: `Scene ${k + 1} happens.`,
+        })),
+        finally: '',
+        about: 'a short story',
       },
       usage: this.usage(started, input.film.length / 4, 120),
     });

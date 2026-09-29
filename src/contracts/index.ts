@@ -3007,6 +3007,19 @@ export interface StudioStoryDto {
     tools: string[];
     gag?: string;
     clues?: string[];
+    /** Whose story it is (a main character's id), what they want, what is in the way, and by when; absent on a story developed before them. */
+    hero?: string;
+    want?: string;
+    obstacle?: string;
+    clock?: string;
+    /** The hero's ordinary day, why the story starts today, and why we are on their side. */
+    normalDay?: string;
+    whyToday?: string;
+    whyCare?: string;
+    /** The one impossible thing in its world, and its rule; null for none. */
+    oddity?: { what: string; rule: string } | null;
+    /** The story spine: "Once upon a time", "Every day", "Until one day", "Because of that", "Until finally", "Ever since then". */
+    spine?: string[];
   };
   beats: {
     template: 'short' | 'medium' | 'long';
@@ -3022,6 +3035,8 @@ export interface StudioStoryDto {
       plants: { id: string; what: string }[];
       /** The ids of the plants paid off here. */
       pays: string[];
+      /** How it follows the beat before; null for the first. */
+      link?: StudioLinkName | null;
     }[];
   };
   plan: {
@@ -3037,9 +3052,50 @@ export interface StudioStoryDto {
       cast: string[];
       seconds: number;
       summary: string;
+      /** Scene 1: how each part of the setup reaches the viewer (a line, an action or a thing, never the narrator). */
+      setup?: {
+        part: 'want' | 'obstacle' | 'stakes' | 'clock' | 'oddity';
+        how: 'line' | 'action' | 'thing' | 'narration';
+        by: string;
+        to: string;
+        what: string;
+      }[];
+      /** What is at stake in it, flipping from + to - or back. */
+      value?: { name: string; from: '+' | '-'; to: '+' | '-' } | null;
+      /** Its first moment, already inside the trouble. */
+      start?: string;
+      /** How it follows the scene before; null for the first. */
+      link?: StudioLinkName | null;
     }[];
   };
 }
+
+/** How a beat or a scene follows the one before. */
+export type StudioLinkName = 'therefore' | 'but';
+
+/**
+ * What a line does to the one it is said to (studio-screenwriting W2):
+ * every line a move to change the other person. For the acting too: a
+ * threat played as one, a joke with its take.
+ */
+export type StudioLineAimName =
+  | 'asks'
+  | 'begs'
+  | 'pleads'
+  | 'orders'
+  | 'refuses'
+  | 'warns'
+  | 'threatens'
+  | 'bargains'
+  | 'teases'
+  | 'jokes'
+  | 'accuses'
+  | 'comforts'
+  | 'confesses'
+  | 'dodges'
+  | 'lies'
+  | 'reveals'
+  | 'praises';
 
 export interface StudioProblemDto {
   rule: string;
@@ -3070,6 +3126,8 @@ export interface StudioBeatDto {
   via?: string;
   /** What the writer asked for that is none of the doings, as they wrote it. */
   doSaid?: string;
+  /** A line's aim: what it does to the one it is said to. Absent on other beats and on sheets written before aims. */
+  aim?: StudioLineAimName;
 }
 
 export interface StudioStorySheetDto {
@@ -3097,6 +3155,8 @@ export interface StudioStorySheetDto {
     on: string | null;
     with: string | null;
   }[];
+  /** Close shots asked for, as data: a planted thing, at the beat (from 0) that handles it. Absent, none. */
+  inserts?: { beat: number; thing: string }[];
 }
 
 /** An explainer's scene as its card shows it: each sentence, and what comes on the stage with it. */

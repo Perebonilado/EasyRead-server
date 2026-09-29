@@ -14,6 +14,7 @@ import {
   TEMPLATES,
   beatSheetOf,
   checkBeats,
+  checkCastForPremise,
   checkPersonas,
   checkPlan,
   checkPremise,
@@ -146,7 +147,7 @@ export async function developStory(
         ...revise(previous?.premise, again),
       }),
     (raw) => premiseOf(raw, input.brief),
-    checkPremise,
+    (value) => checkPremise(value, input.bible),
     record,
     reports,
   );
@@ -165,7 +166,10 @@ export async function developStory(
         ...revise(had.length ? { characters: had } : undefined, again),
       }),
     (raw) => personasOf(raw, input.bible),
-    (personas) => checkPersonas(input.bible, personas),
+    (personas) => [
+      ...checkPersonas(input.bible, personas),
+      ...checkCastForPremise(premise.value, input.bible, personas),
+    ],
     record,
     reports,
   );
@@ -192,7 +196,8 @@ export async function developStory(
       }),
     (raw) => beatSheetOf(raw, template),
     // Everyone's habits and the running gag run through; they need no payoff.
-    (sheet) => checkBeats(sheet, contextOf(bible, premise.value)),
+    (sheet) =>
+      checkBeats(sheet, contextOf(bible, premise.value), premise.value),
     record,
     reports,
   );
@@ -212,7 +217,11 @@ export async function developStory(
       }),
     scenePlanOf,
     (plan) => [
-      ...checkPlan(plan, beats.value),
+      ...checkPlan(plan, beats.value, {
+        premise: premise.value,
+        minutes,
+        bible,
+      }),
       ...checkOutline(
         outlineOfPlan(plan),
         bible,

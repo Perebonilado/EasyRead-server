@@ -45,12 +45,16 @@ import {
   describeNotes,
   describeRead,
   filmAsSeen,
+  judgeColdRead,
   notesFor,
+  retellNotes,
+  retellOf,
   scenesToRewrite,
   scriptInWords,
   tableReadOf,
   unclear,
   type ColdRead,
+  type Retell,
   type ScriptNote,
   type TableRead,
 } from '../../domain/studio/studio-script';
@@ -66,6 +70,8 @@ export interface ReadRound {
   sheets: StorySheet[];
   /** The scenes written again after this read, from 0; empty when none. */
   rewritten: number[];
+  /** The whole film as a first-time viewer retold it; null where no one did. */
+  retell?: Retell | null;
 }
 
 export interface TableReadResult {
@@ -106,7 +112,7 @@ function endsOf(
  */
 export async function tableRead(
   llm: Pick<LlmGatewayPort, 'studioTableRead' | 'studioScene'> &
-    Partial<Pick<LlmGatewayPort, 'studioColdRead'>>,
+    Partial<Pick<LlmGatewayPort, 'studioColdRead' | 'studioRetell'>>,
   input: {
     brief: StudioBrief;
     bible: StudioBible;
@@ -145,12 +151,39 @@ export async function tableRead(
     }
   };
 
+  /** The whole film retold by a first-time viewer as a story spine, each join "therefore", "but" or "and then" (T2); null where it cannot be asked. */
+  const retold = async (sheets: StorySheet[]): Promise<Retell | null> => {
+    if (!llm.studioRetell || sheets.length < 2) return null;
+    try {
+      const result = await llm.studioRetell({
+        kind: `A short animated film${brief.audience ? ` for ${brief.audience}` : ''}${brief.tone ? `, ${brief.tone}` : ''}.`,
+        film: filmAsSeen(sheets, bible, sheets.length - 1),
+      });
+      await record(result.usage, 'studio_check');
+      return retellOf(result.value, sheets.length);
+    } catch (error) {
+      log(`the retelling could not run (${(error as Error).message})`);
+      return null;
+    }
+  };
+
   const readOnce = async (sheets: StorySheet[]) => {
-    const code = checkScript(story, sheets, outline, bible);
-    const viewer = await coldRead(sheets);
+    const [viewer, retell] = await Promise.all([
+      coldRead(sheets),
+      retold(sheets),
+    ]);
+    const judged = judgeColdRead(viewer, story?.premise, bible);
+    const code = [
+      ...checkScript(story, sheets, outline, bible),
+      ...retellNotes(retell, story, outline, bible),
+    ];
     if (viewer)
       log(
-        `cold read of scene 1 (sure ${viewer.sure}): ${viewer.about}${viewer.confused.length ? `; confused by: ${viewer.confused.join('; ')}` : ''}`,
+        `cold read of scene 1 (sure ${viewer.sure}): ${viewer.about}${viewer.confused.length ? `; confused by: ${viewer.confused.join('; ')}` : ''}${judged.misses.length ? `; against the story: ${judged.misses.join('; ')}` : ''}${judged.unsure.length ? `; unsure: ${judged.unsure.join('; ')}` : ''}`,
+      );
+    if (retell)
+      log(
+        `retold: ${retell.scenes.map((s) => `${s.link ? `${s.link} ` : ''}${s.what}`).join(' / ')}`,
       );
     const result = await llm.studioTableRead({
       brief: describeBrief(brief),
@@ -161,10 +194,25 @@ export async function tableRead(
         'Narrator: none. A pure film: the characters carry every scene in what they say and do.',
       script: scriptInWords(sheets, bible, outline),
       code: describeNotes(code),
-      ...(viewer ? { viewer: describeColdRead(viewer) } : {}),
+      ...(viewer
+        ? {
+            viewer: [
+              describeColdRead(viewer),
+              ...(judged.misses.length || judged.unsure.length
+                ? [
+                    `Against the premise, code found the viewer got wrong: ${[...judged.misses, ...judged.unsure].join('; ')}.`,
+                  ]
+                : []),
+            ].join('\n'),
+          }
+        : {}),
     });
     await record(result.usage, 'studio_check');
-    return { read: tableReadOf(result.value, sheets.length, viewer), code };
+    return {
+      read: tableReadOf(result.value, sheets.length, viewer, judged),
+      code,
+      retell,
+    };
   };
 
   /** The scenes asked for written again with their notes; the rest kept, and mended where the scene before now ends differently. */
@@ -238,8 +286,8 @@ export async function tableRead(
   let sheets = input.sheets;
   let changed = new Map<number, SheetProblem[]>();
   for (let r = 0; ; r += 1) {
-    const { read, code } = await readOnce(sheets);
-    rounds.push({ read, code, sheets, rewritten: [] });
+    const { read, code, retell } = await readOnce(sheets);
+    rounds.push({ read, code, sheets, rewritten: [], retell });
     changedBy.push(changed);
     biblesBy.push(bible);
     const bar = belowBar(read);
@@ -247,7 +295,7 @@ export async function tableRead(
       `table read${r ? ` again (${r})` : ''} ${describeRead(read)}${bar.length ? `; below the bar: ${bar.join(', ')}` : ''}`,
     );
     if (!bar.length || r >= most || input.rewrite === false) break;
-    const targets = scenesToRewrite(read);
+    const targets = scenesToRewrite(read, code);
     if (!targets.length) break;
     rounds[r].rewritten = targets;
     log(`writing again: scene ${targets.map((k) => k + 1).join(', ')}`);

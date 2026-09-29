@@ -58,6 +58,7 @@ import {
   studioScenePlanSchema,
   studioTableReadSchema,
   studioColdReadSchema,
+  studioRetellSchema,
   studioCheckSchema,
   studioSceneSchema,
   studioTurnSchema,
@@ -2565,6 +2566,37 @@ export class AiSdkLlmAdapter implements LlmGatewayPort, OnModuleInit {
         model,
         schema: studioColdReadSchema,
         system: STUDIO_PROMPTS.studioColdRead,
+        prompt: [
+          input.kind,
+          `What you saw and heard:\n<film>\n${input.film.replace(/<\/?film>/giu, '')}\n</film>`,
+        ].join('\n\n'),
+        maxRetries: this.maxRetries(),
+        ...this.writerThinking(ref, 'STUDIO_COLDREAD_THINKING', 'off'),
+      }),
+    );
+    return {
+      value: result.object,
+      usage: this.usage(ref, result.usage, started),
+    };
+  }
+
+  /**
+   * The retelling: a first-time viewer's spine of the whole film, as it
+   * shows it, by the check model (DeepSeek) with thinking off unless
+   * STUDIO_COLDREAD_THINKING says on. One small call a table read.
+   */
+  async studioRetell(input: {
+    kind: string;
+    film: string;
+  }): Promise<LlmResult<Record<string, unknown>>> {
+    const started = Date.now();
+    const { generateObject } = await this.registry.modules();
+    const { model, ref } = await this.registry.languageModel('studio_check');
+    const result = await this.againIfMisshapen(() =>
+      generateObject({
+        model,
+        schema: studioRetellSchema,
+        system: STUDIO_PROMPTS.studioRetell,
         prompt: [
           input.kind,
           `What you saw and heard:\n<film>\n${input.film.replace(/<\/?film>/giu, '')}\n</film>`,

@@ -22,21 +22,27 @@
  * Nothing of it is said to the maker.
  */
 import type {
+  LineAim,
   SheetBeat,
+  SheetInsert,
   StorySheet,
   StudioBible,
   StudioCharacter,
   StudioOutline,
 } from './studio';
-import { namesOf } from './studio';
+import { namesOf, thingNamed } from './studio';
 import {
   contextOf,
   covered,
   stemOf,
   stemsOf,
   trackSetups,
+  type Premise,
   type Persona,
+  type SetupPart,
+  type StoryLink,
   type StudioStory,
+  type TrackedPlant,
 } from './studio-story';
 import { looksOf } from './studio-words';
 
@@ -120,6 +126,16 @@ export const RUBRIC = [
     test: 'a moment it seems lost (or, in a very short film, a clear moment of doubt) before the climax',
   },
   {
+    key: 'today',
+    name: 'Why today',
+    test: "the viewer can tell why today is different from the hero's ordinary day: the ordinary day is seen, then it breaks",
+  },
+  {
+    key: 'care',
+    name: 'We care',
+    test: "something in the first scene puts us on the hero's side: something they do, a small kindness, a small unfairness done to them",
+  },
+  {
     key: 'button',
     name: 'A button',
     test: 'it ends on a button: a last laugh or a warm beat, not a summary or a moral said out loud (unless the maker asked for a moral)',
@@ -168,6 +184,10 @@ export interface TableRead {
   verdict: string;
   /** What a first-time viewer made of the first scene, as the film shows it; null where no one watched. */
   viewer: ColdRead | null;
+  /** What code found the viewer got wrong against the premise (the clarity sentence, T1): any one puts the film below the clarity floor. */
+  misses: string[];
+  /** What else they could not tell (who someone is, the clock, the impossible thing's rule): counted with their own confusions. */
+  unsure: string[];
 }
 
 /**
@@ -191,6 +211,10 @@ export interface ColdRead {
   confused: string[];
   /** How sure they are of what it is about, 0 to 10. */
   sure: number;
+  /** Who is who (T3): each person they saw, and what they are to the hero, or "could not tell". */
+  people: { who: string; is: string }[];
+  /** Anything impossible they saw, and its rules as they understood them (T4); empty for nothing. */
+  impossible: string;
 }
 
 const score = (value: unknown): number | null => {
@@ -221,6 +245,15 @@ export function coldReadOf(raw: unknown): ColdRead | null {
       .filter(Boolean)
       .slice(0, 6),
     sure: score(r.sure) ?? 0,
+    people: (Array.isArray(r.people) ? r.people : [])
+      .flatMap((one: unknown) => {
+        if (!one || typeof one !== 'object') return [];
+        const p = one as Record<string, unknown>;
+        const who = said(p.who, 120);
+        return who ? [{ who, is: said(p.is, 200) }] : [];
+      })
+      .slice(0, 8),
+    impossible: said(r.impossible, 300),
   };
 }
 
@@ -235,8 +268,199 @@ export function describeColdRead(viewer: ColdRead): string {
     `At stake: ${viewer.stakes || 'could not tell'}`,
     `By when: ${viewer.clock || 'no clock seen'}`,
     `Confused by: ${viewer.confused.join('; ') || 'nothing'}`,
+    ...(viewer.people.length
+      ? [
+          `Who is who: ${viewer.people.map((p) => `${p.who}: ${p.is || 'could not tell'}`).join('; ')}`,
+        ]
+      : []),
+    ...(viewer.impossible ? [`Anything impossible: ${viewer.impossible}`] : []),
     `How sure (0 to 10): ${viewer.sure}`,
   ].join('\n');
+}
+
+/** A slot the viewer left open. */
+const COULD_NOT =
+  /could ?n[o']?t tell|cannot tell|can['’]t tell|not sure|unclear|unknown|don['’]?t know|no idea|nothing|^none\b|^n\/a$|^-$/iu;
+const couldNot = (said: string) => !said.trim() || COULD_NOT.test(said.trim());
+/** A name as a whole word in some words. */
+const wordIn = (name: string, said: string) =>
+  new RegExp(`\\b${name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'iu').test(
+    said,
+  );
+
+/**
+ * The clarity sentence checked by code against the premise (T1, T3, T4):
+ * whose story the viewer took it for, what they said the hero wants and
+ * what is in the way. Any of those wrong is a miss, and the film is
+ * unclear whatever the model scored. What else they could not tell (who
+ * someone is to the hero, the clock, the impossible thing's rule) is
+ * unsure: counted with their own confusions. Nothing for a premise
+ * developed before it had its parts.
+ */
+export function judgeColdRead(
+  viewer: ColdRead | null,
+  premise: Premise | null | undefined,
+  bible: Pick<StudioBible, 'characters'>,
+): { misses: string[]; unsure: string[] } {
+  const misses: string[] = [];
+  const unsure: string[] = [];
+  if (!viewer || !premise || (!premise.want && !premise.obstacle))
+    return { misses, unsure };
+  const names = new Set(
+    bible.characters.flatMap((c) => [c.id, ...stemsOf(c.name)]),
+  );
+  const st = (said: string) => stemsOf(said, names);
+  const hero = bible.characters.find((c) => c.id === premise.hero);
+  if (hero) {
+    const named = namesOf(hero).some((n) => wordIn(n, viewer.who));
+    const others = bible.characters.filter(
+      (c) => c.id !== hero.id && namesOf(c).some((n) => wordIn(n, viewer.who)),
+    );
+    if (couldNot(viewer.who))
+      misses.push(
+        `they could not tell whose story it is (it is ${hero.name}'s)`,
+      );
+    else if (!named && others.length)
+      misses.push(
+        `they took it for ${others[0].name}'s story ("${viewer.who}"), not ${hero.name}'s`,
+      );
+  }
+  if (premise.want) {
+    const got =
+      !couldNot(viewer.wants) &&
+      (covered(st(premise.want), st(`${viewer.wants} ${viewer.sentence}`)) >=
+        0.3 ||
+        covered(st(viewer.wants), st(`${premise.want} ${premise.logline}`)) >=
+          0.4);
+    if (!got)
+      misses.push(
+        `they said the hero wants "${viewer.wants || 'could not tell'}"; the story's want is "${premise.want}"`,
+      );
+  }
+  if (premise.obstacle) {
+    const got =
+      !couldNot(viewer.obstacle) &&
+      (covered(
+        st(premise.obstacle),
+        st(`${viewer.obstacle} ${viewer.sentence}`),
+      ) >= 0.3 ||
+        covered(
+          st(viewer.obstacle),
+          st(`${premise.obstacle} ${premise.logline}`),
+        ) >= 0.3);
+    if (!got)
+      misses.push(
+        `they said what is in the way is "${viewer.obstacle || 'could not tell'}"; it is "${premise.obstacle}"`,
+      );
+  }
+  if (premise.clock && couldNot(viewer.clock))
+    unsure.push(`saw no deadline (the story's clock: ${premise.clock})`);
+  if (premise.oddity) {
+    const rule = st(`${premise.oddity.what} ${premise.oddity.rule}`);
+    const theirs = st(viewer.impossible);
+    if (
+      couldNot(viewer.impossible) ||
+      Math.max(covered(theirs, rule), covered(rule, theirs)) < 0.25
+    )
+      unsure.push(
+        `did not get the impossible thing and its rule (${premise.oddity.what}: ${premise.oddity.rule})`,
+      );
+  }
+  for (const p of viewer.people)
+    if (couldNot(p.is))
+      unsure.push(`could not tell who ${p.who} is to the hero`);
+  return { misses, unsure };
+}
+
+// ── The whole film, retold (T2) ────────────────────────────────────────────
+
+/** How a first-time viewer joined one scene to the next, retelling the film. */
+export type RetellLink = StoryLink | 'and then';
+
+/** A first-time viewer's retelling of the whole film as a story spine, with the join between each scene. */
+export interface Retell {
+  /** Each scene in a sentence, with how it follows the one before (the first's link is null). */
+  scenes: { scene: number; link: RetellLink | null; what: string }[];
+  /** "Until finally…": the climax as they saw it. */
+  finally: string;
+  /** What the film was about, in a sentence. */
+  about: string;
+}
+
+/** A retelling made sound for a film of `count` scenes; null for nothing usable. */
+export function retellOf(raw: unknown, count: number): Retell | null {
+  if (!raw || typeof raw !== 'object') return null;
+  const r = raw as Record<string, unknown>;
+  const scenes = (Array.isArray(r.scenes) ? r.scenes : [])
+    .flatMap((one: unknown) => {
+      if (!one || typeof one !== 'object') return [];
+      const s = one as Record<string, unknown>;
+      const k = Math.round(Number(s.scene)) - 1;
+      if (!Number.isFinite(k) || k < 0 || k >= count) return [];
+      const link =
+        typeof s.link === 'string' ? s.link.trim().toLowerCase() : '';
+      return [
+        {
+          scene: k,
+          link:
+            k === 0
+              ? null
+              : link.startsWith('therefore') || link === 'so'
+                ? ('therefore' as const)
+                : link.startsWith('but')
+                  ? ('but' as const)
+                  : ('and then' as const),
+          what: said(s.what, 300),
+        },
+      ];
+    })
+    .slice(0, count);
+  if (!scenes.length) return null;
+  return { scenes, finally: said(r.finally, 300), about: said(r.about, 300) };
+}
+
+/**
+ * What the retelling says to the writers (T2): each join the viewer could
+ * only make with "and then" is a note on the later scene; an "Until
+ * finally" that is not the planned climax is a note on the climax's scene.
+ */
+export function retellNotes(
+  retell: Retell | null,
+  story: StudioStory | null | undefined,
+  outline: StudioOutline,
+  bible: Pick<StudioBible, 'characters'>,
+): ScriptNote[] {
+  if (!retell) return [];
+  const out: ScriptNote[] = [];
+  for (const one of retell.scenes)
+    if (one.link === 'and then')
+      out.push({
+        scene: one.scene,
+        kind: 'retell',
+        message: `A first-time viewer, retelling the whole film, could only join scene ${one.scene} to scene ${one.scene + 1} with "and then": they could not see why this scene follows. Make it happen because of the scene before (therefore) or against it (but), in what is said and done on screen.`,
+      });
+  if (story && retell.finally) {
+    const climax = story.beats.beats.findIndex((b) => b.role === 'climax');
+    const serves = sceneOfBeats(story, outline);
+    const k = climax >= 0 ? serves[climax] : -1;
+    if (k >= 0) {
+      const names = new Set(
+        bible.characters.flatMap((c) => [c.id, ...stemsOf(c.name)]),
+      );
+      const planned = stemsOf(story.beats.beats[climax].what, names);
+      const seen = stemsOf(retell.finally, names);
+      if (
+        planned.length >= 3 &&
+        Math.max(covered(planned, seen), covered(seen, planned)) < 0.2
+      )
+        out.push({
+          scene: k,
+          kind: 'retell',
+          message: `A first-time viewer took the climax to be "${retell.finally}", not what was planned (${story.beats.beats[climax].what.replace(/[.!]+$/u, '')}): make the climax the biggest moment on screen, decided by what the hero does.`,
+        });
+    }
+  }
+  return out;
 }
 
 /**
@@ -250,6 +474,7 @@ export function tableReadOf(
   raw: unknown,
   count: number,
   viewer: ColdRead | null = null,
+  judged: { misses: string[]; unsure: string[] } = { misses: [], unsure: [] },
 ): TableRead {
   const read =
     raw && typeof raw === 'object' ? (raw as Record<string, unknown>) : {};
@@ -267,9 +492,12 @@ export function tableReadOf(
   // whatever the score.
   if (
     viewer &&
-    viewer.confused.length >= CONFUSED_MOST &&
+    viewer.confused.length + judged.unsure.length >= CONFUSED_MOST &&
     scores.clarity !== undefined
   )
+    scores.clarity = Math.min(scores.clarity, BAR.clarity - 1);
+  // The clarity sentence wrong against the premise: not clear, whatever the score.
+  if (viewer && judged.misses.length && scores.clarity !== undefined)
     scores.clarity = Math.min(scores.clarity, BAR.clarity - 1);
   const items = Object.values(scores);
   const mean = items.length
@@ -318,6 +546,8 @@ export function tableReadOf(
     voice,
     verdict: said(read.verdict, 600),
     viewer,
+    misses: judged.misses,
+    unsure: judged.unsure,
   };
 }
 
@@ -343,7 +573,10 @@ export function belowBar(read: TableRead): string[] {
  * when the button does; else the lowest with notes. At most half of them
  * (at least one), so a round stays cheap and the script stays itself.
  */
-export function scenesToRewrite(read: TableRead): number[] {
+export function scenesToRewrite(
+  read: TableRead,
+  code: readonly ScriptNote[] = [],
+): number[] {
   const count = read.scenes.length;
   if (!count) return [];
   const most = Math.max(1, Math.ceil(count / 2));
@@ -356,6 +589,10 @@ export function scenesToRewrite(read: TableRead): number[] {
   if (unclear(read) || failing('hook') || failing('want')) chosen.add(0);
   if (failing('button')) chosen.add(count - 1);
   for (const k of low) if (chosen.size < most) chosen.add(k);
+  // A scene a first-time viewer could not see follow from the one before.
+  for (const n of code)
+    if ((n.kind === 'retell' || n.kind === 'opening') && chosen.size < most)
+      chosen.add(n.scene);
   if (!chosen.size) {
     const noted = [...read.scenes]
       .filter(
@@ -391,6 +628,7 @@ function beatWords(
     case 'line': {
       const how = [
         beat.to ? `to ${name(beat.to)}` : '',
+        beat.aim ? `aim: ${beat.aim}` : '',
         beat.feeling && beat.feeling !== 'neutral' ? beat.feeling : '',
         beat.pace && beat.pace !== 'calm' ? beat.pace : '',
         beat.from && beat.from !== 'here' ? beat.from : '',
@@ -572,7 +810,16 @@ function planned(outline: StudioOutline, k: number) {
 export interface ScriptNote {
   /** Which scene, from 0. */
   scene: number;
-  kind: 'voice' | 'telling' | 'plant' | 'turn';
+  kind:
+    | 'voice'
+    | 'telling'
+    | 'plant'
+    | 'turn'
+    | 'aim'
+    | 'lint'
+    | 'comedy'
+    | 'opening'
+    | 'retell';
   message: string;
 }
 
@@ -1165,6 +1412,475 @@ export function checkTurnsShown(
   return out;
 }
 
+// ── Lines that do things (W2–W11, C4) ─────────────────────────────────────
+
+/** The deadline said as a move between people: a threat, a warning, a bargain, an order, a plea. */
+const CLOCK_AIMS: ReadonlySet<LineAim> = new Set<LineAim>([
+  'warns',
+  'threatens',
+  'bargains',
+  'orders',
+  'pleads',
+  'begs',
+]);
+/** "As you know, Bob": telling someone what they already know (W5). */
+const AS_YOU_KNOW =
+  /\b(?:as you know|as you well know|like i (?:told|said)|as i (?:said|told)|you know (?:that )?i\b|remember (?:that|when) we|you already know)\b/iu;
+/** A feeling said outright (W6). */
+const STATED_FEELING =
+  /\bi(?:['’]m| am| feel)(?: so| really| very| a bit| just| kind of)? (?:sad|angry|mad|scared|afraid|nervous|jealous|happy|upset|worried|lonely|embarrassed|hurt|frustrated|terrified|anxious|heartbroken)\b/iu;
+/** A scene opening on a hello (W7). */
+const GREETING =
+  /^(?:hi|hello|hey|good (?:morning|afternoon|evening)|howdy|greetings)\b/iu;
+/** Remarking on how absurd it all is, which breaks a comedy's spell (W9). */
+const ABSURD_REMARK =
+  /\b(?:this is (?:so |completely |totally |just )?(?:crazy|insane|ridiculous|absurd|weird|nuts|bananas|madness)|what is (?:even )?happening|what['’]s (?:even )?happening|are you kidding|this can(?:not|['’]t) be (?:real|happening))\b/iu;
+/** A summary or a lesson at the end, not a button (W10). */
+const LESSON =
+  /\b(?:learned|learnt|the lesson|from now on|and that['’]?s why|the moral)\b/iu;
+
+/** How many people may speak in a film this long (C4): two or three under two minutes, four under five. */
+export const facesFor = (minutes: number | null | undefined): number =>
+  (minutes ?? 1) <= 2 ? 3 : (minutes ?? 1) <= 5 ? 4 : 6;
+
+const wordCount = (said: string) => said.split(/\s+/u).filter(Boolean).length;
+
+/**
+ * The lint of lines as moves (W2–W11, C4), each a note for its scene:
+ * - every line has an aim from the list, and is said to someone when
+ *   anyone else is there;
+ * - the same aim three times running from one speaker is flagged;
+ * - the deadline, the first time it is said, is a threat, a warning or a
+ *   bargain between people;
+ * - no "as you know", no feelings said outright, no scene opening on a
+ *   hello, no more than one line over twenty words a scene, no speaker
+ *   with three lines running;
+ * - in a comedy, a take (a reaction or a pause) after a joke, and nobody
+ *   remarking on how absurd it is;
+ * - the last line is a button, never a lesson (unless the ending is a moral);
+ * - no more speaking faces than a film this long can teach.
+ */
+export function lintLines(
+  sheets: readonly StorySheet[],
+  bible: Pick<StudioBible, 'characters'>,
+  opts: {
+    genre?: string | null;
+    ending?: string | null;
+    minutes?: number | null;
+    /** Which scene the first sheet is, from 0: a scene checked alone. */
+    from?: number;
+  } = {},
+): ScriptNote[] {
+  const nameOf = (id: string | null) =>
+    bible.characters.find((c) => c.id === id)?.name ?? id ?? 'someone';
+  const funny = opts.genre === 'comedy' || opts.genre === 'dark-comedy';
+  const base = opts.from ?? 0;
+  const out: ScriptNote[] = [];
+  let clockSaid = false;
+  const speakers: string[] = [];
+  sheets.forEach((sheet, i) => {
+    const k = base + i;
+    const note = (kind: ScriptNote['kind'], message: string) =>
+      out.push({ scene: k, kind, message });
+    const here = new Set(sheet.onStage.map((p) => p.who));
+    const aimless: string[] = [];
+    const toNoOne: string[] = [];
+    const long: string[] = [];
+    const aims = new Map<string, LineAim[]>();
+    let repeated = false;
+    let runFlagged = false;
+    let firstLine = true;
+    sheet.beats.forEach((beat, j) => {
+      if (beat.kind === 'action' && beat.who) {
+        if (beat.do === 'enter') here.add(beat.who);
+        if (beat.do === 'leave' || beat.do === 'go-through')
+          here.delete(beat.who);
+      }
+      if (beat.kind !== 'line' || !beat.who) return;
+      const from = beat.from ?? 'here';
+      const at = `beat ${j + 1}: "${beat.say}"`;
+      // W7: a scene that opens on a hello.
+      if (firstLine && j <= 1 && GREETING.test(beat.say.trim()))
+        note(
+          'lint',
+          `Beat ${j + 1}: the scene opens on a hello ("${beat.say}"): enter late. Start inside the trouble and cut the greetings.`,
+        );
+      firstLine = false;
+      if (
+        (from === 'here' || from === 'off' || from === 'phone') &&
+        !speakers.includes(beat.who)
+      ) {
+        speakers.push(beat.who);
+        if (speakers.length === facesFor(opts.minutes) + 1)
+          note(
+            'lint',
+            `${nameOf(beat.who)} is the ${speakers.length}th person to speak: a film this short has room for ${facesFor(opts.minutes)} speaking faces at most. Give their line to someone we know, or let them only be seen.`,
+          );
+      }
+      // W2: an aim, from the list.
+      if (!beat.aim && from !== 'letter') aimless.push(at);
+      if (beat.aim) {
+        const had = aims.get(beat.who) ?? [];
+        had.push(beat.aim);
+        aims.set(beat.who, had);
+        if (
+          !repeated &&
+          had.length >= 3 &&
+          had.slice(-3).every((a) => a === beat.aim)
+        ) {
+          repeated = true;
+          note(
+            'aim',
+            `${nameOf(beat.who)} ${beat.aim} three times running (to beat ${j + 1}): change the move (a threat becomes a bargain, a question a dare), so the scene goes somewhere.`,
+          );
+        }
+      }
+      // Said to someone when anyone else is there.
+      const others = [...here].filter((id) => id !== beat.who);
+      if (from === 'here' && !beat.to && others.length) toNoOne.push(at);
+      // W4: the deadline, the first time, as a move between people.
+      if (CLOCK_TIME.test(beat.say) && from !== 'letter') {
+        if (!clockSaid && beat.aim && !CLOCK_AIMS.has(beat.aim))
+          note(
+            'aim',
+            `Beat ${j + 1}: the deadline is first said as "${beat.say}" (${beat.aim}): say it once as a threat, a warning or a bargain between people, with its reason ("by noon, or the order goes to the shop across the road").`,
+          );
+        clockSaid = true;
+      }
+      // W5: as you know.
+      if (AS_YOU_KNOW.test(beat.say))
+        note(
+          'lint',
+          `Beat ${j + 1}: "${beat.say}" tells ${beat.to ? nameOf(beat.to) : 'someone'} what they already know: give it to someone who does not know it, turn it into a fight, or let a thing on screen show it.`,
+        );
+      // W6: a feeling said outright.
+      const lastScene = k === base + sheets.length - 1;
+      if (
+        from !== 'thought' &&
+        STATED_FEELING.test(beat.say) &&
+        !(opts.ending === 'moral' && lastScene)
+      )
+        note(
+          'lint',
+          `Beat ${j + 1}: "${beat.say}" says the feeling outright: show it in what ${nameOf(beat.who)} does (a hand that will not let go, a step back), and let the line say something else.`,
+        );
+      // W11: long lines, and speeches.
+      if (wordCount(beat.say) > 20) long.push(at);
+      const prev = sheet.beats.slice(Math.max(0, j - 2), j);
+      if (
+        !runFlagged &&
+        prev.length === 2 &&
+        prev.every((b) => b.kind === 'line' && b.who === beat.who)
+      ) {
+        runFlagged = true;
+        note(
+          'lint',
+          `Beats ${j - 1} to ${j + 1}: ${nameOf(beat.who)} has three lines running: break it with a reaction, an interruption or an answer.`,
+        );
+      }
+      if (funny) {
+        // W9: deadpan.
+        if (ABSURD_REMARK.test(beat.say))
+          note(
+            'comedy',
+            `Beat ${j + 1}: "${beat.say}" remarks on how strange it is, which breaks the spell: in a comedy everyone takes it dead seriously and chases their goal.`,
+          );
+        // W8: the take after a joke.
+        if (beat.aim === 'jokes') {
+          const next = sheet.beats.slice(j + 1, j + 3);
+          if (
+            next.length &&
+            !next.some((b) => b.kind === 'reaction' || b.kind === 'pause')
+          )
+            note(
+              'comedy',
+              `Beat ${j + 1}: the joke "${beat.say}" has no take: put a pause or a reaction (the listener's look) right after it, before the next line.`,
+            );
+        }
+      }
+    });
+    if (aimless.length)
+      note(
+        'aim',
+        `Lines with no aim: ${aimless.slice(0, 4).join('; ')}. Every line does something to the one it is said to: asks, refuses, warns, bargains, teases, accuses, pleads, lies. Give each an aim, or cut it and let the picture carry it.`,
+      );
+    if (toNoOne.length)
+      note(
+        'aim',
+        `Lines said to no one while others are there: ${toNoOne.slice(0, 4).join('; ')}. Say each to someone (to), so it does something to them.`,
+      );
+    if (long.length > 1)
+      note(
+        'lint',
+        `${long.length} lines over twenty words (${long.slice(0, 3).join('; ')}): one a scene at most. Cut them down, or break them with a reaction.`,
+      );
+  });
+  // W10: the button.
+  const last = sheets[sheets.length - 1];
+  const lastLine = last
+    ? [...last.beats]
+        .reverse()
+        .find((b) => b.kind === 'line' || b.kind === 'narration')
+    : undefined;
+  if (
+    lastLine &&
+    opts.ending !== 'moral' &&
+    LESSON.test(lastLine.say) &&
+    opts.from === undefined
+  )
+    out.push({
+      scene: sheets.length - 1,
+      kind: 'comedy',
+      message: `The film ends on a summary ("${lastLine.say}"): end on a button instead, a laugh, a warm look or a callback, never a lesson.`,
+    });
+  return out;
+}
+
+/** When each part of the setup should have landed in scene 1, in seconds, for a film this long (the first-minute template). */
+export function openingBy(
+  minutes: number | null | undefined,
+): Record<SetupPart, number> {
+  const m = minutes ?? 1;
+  return m <= 1
+    ? { want: 15, obstacle: 15, stakes: 20, clock: 20, oddity: 25 }
+    : m <= 3
+      ? { want: 25, obstacle: 25, stakes: 30, clock: 30, oddity: 40 }
+      : { want: 45, obstacle: 45, stakes: 60, clock: 60, oddity: 75 };
+}
+
+/** About how long a beat plays, for timing an opening: lines at 2.5 words a second, a move about 3 s. */
+export function beatSeconds(beat: SheetBeat): number {
+  switch (beat.kind) {
+    case 'line':
+    case 'narration':
+      return Math.max(1, wordCount(beat.say) / 2.5);
+    case 'action':
+    case 'business':
+      return 3;
+    case 'reaction':
+      return 1;
+    default:
+      return beat.seconds ?? 1;
+  }
+}
+
+const PART_WORDS: Record<SetupPart, string> = {
+  want: 'what the hero wants',
+  obstacle: 'what stands in their way',
+  stakes: 'what they lose if they fail',
+  clock: 'by when',
+  oddity: 'the one impossible thing working, with its rule',
+};
+
+/**
+ * The opening, timed (W1, S1): scene 1 walked with a running clock (lines
+ * at 2.5 words a second, moves about 3 s, pauses their own), and what is
+ * said or handled by each point collected. The want, what is in the way,
+ * the stakes, the clock and the impossible thing each land by their time
+ * (by 25 s, 30 s and 40 s in a film of one to three minutes), in the
+ * premise's words or the plan's for them. Each that does not is a note
+ * for scene 1. Nothing for a premise developed before it had its parts.
+ */
+export function checkOpening(
+  sheet: StorySheet,
+  story: StudioStory | null | undefined,
+  bible: Pick<StudioBible, 'characters'>,
+  minutes: number | null | undefined,
+): string[] {
+  const premise = story?.premise;
+  if (!premise || (!premise.want && !premise.obstacle)) return [];
+  const names = new Set(
+    bible.characters.flatMap((c) => [c.id, ...stemsOf(c.name)]),
+  );
+  const st = (said: string) => stemsOf(said, names);
+  const plan = story.plan.scenes[0];
+  const by = openingBy(minutes);
+  // What is seen from the start: the things on the stage, and in hands.
+  const opening = st(
+    [
+      ...sheet.props.map((p) => p.prop),
+      ...sheet.onStage.map((p) => p.holding ?? ''),
+    ].join(' '),
+  );
+  const timeline: {
+    at: number;
+    kind: SheetBeat['kind'];
+    who: string | null;
+    stems: string[];
+    clock: boolean;
+  }[] = [];
+  let t = 0;
+  for (const beat of sheet.beats) {
+    const words = [
+      beat.say,
+      beat.thing ?? '',
+      beat.prop ?? '',
+      beat.doSaid ?? '',
+    ].join(' ');
+    timeline.push({
+      at: t,
+      kind: beat.kind,
+      who: beat.who,
+      stems: st(words),
+      clock:
+        (beat.kind === 'line' || beat.kind === 'business') &&
+        CLOCK_TIME.test(beat.say),
+    });
+    t += beatSeconds(beat);
+  }
+  /** What is said or shown by a time: everything, or only a kind of beat by someone (the plan's line, or its action). */
+  const heardBy = (
+    seconds: number,
+    only?: { kinds: SheetBeat['kind'][]; by: string },
+  ) => {
+    const upTo = timeline.filter(
+      (b) =>
+        b.at < seconds &&
+        (!only ||
+          (only.kinds.includes(b.kind) && (!only.by || b.who === only.by))),
+    );
+    return {
+      stems: [...(only ? [] : opening), ...upTo.flatMap((b) => b.stems)],
+      clock: upTo.some((b) => b.clock),
+    };
+  };
+  const parts: { part: SetupPart; words: string }[] = [
+    { part: 'want', words: premise.want },
+    { part: 'obstacle', words: premise.obstacle },
+    { part: 'stakes', words: premise.stakes },
+    { part: 'clock', words: premise.clock },
+    {
+      part: 'oddity',
+      words: premise.oddity
+        ? `${premise.oddity.what} ${premise.oddity.rule}`
+        : '',
+    },
+  ];
+  const out: string[] = [];
+  for (const { part, words } of parts) {
+    if (!words) continue;
+    const piece = plan?.setup.find((p) => p.part === part);
+    const heard = heardBy(by[part]);
+    // The plan's own means: its line said by whom it names, its action
+    // done by them, its thing anywhere on screen.
+    const means = piece?.what
+      ? piece.how === 'line'
+        ? heardBy(by[part], { kinds: ['line'], by: piece.by })
+        : piece.how === 'action'
+          ? heardBy(by[part], { kinds: ['action', 'business'], by: piece.by })
+          : heard
+      : null;
+    const got =
+      covered(st(words), heard.stems) >= 0.3 ||
+      (means && piece ? covered(st(piece.what), means.stems) >= 0.5 : false) ||
+      (part === 'clock' && heard.clock);
+    if (got) continue;
+    const how = piece
+      ? piece.how === 'line'
+        ? `as the plan has it, a line from ${piece.by} to ${piece.to}: "${piece.what}"`
+        : piece.how === 'action'
+          ? `as the plan has it, an action: ${piece.what}`
+          : `as the plan has it, a thing on screen: ${piece.what}`
+      : 'as a line said to someone, an action or a thing on screen';
+    out.push(
+      `By about ${by[part]} seconds into scene 1, nothing said or shown gives ${PART_WORDS[part]} (${words.replace(/[.!]+$/u, '')}). Land it before then, ${how}; never by a narrator.`,
+    );
+  }
+  return out;
+}
+
+/** The plants a scene sets up, from the beats it serves: the real ones, never a habit or the running gag. */
+export function plantsOfScene(
+  story: StudioStory,
+  outline: StudioOutline,
+  bible: Pick<StudioBible, 'characters'>,
+  k: number,
+): TrackedPlant[] {
+  const context = contextOf(bible, story.premise);
+  const serves = sceneOfBeats(story, outline);
+  return trackSetups(story.beats, context).plants.filter(
+    (p) => !p.running && p.stems.length && serves[p.at] === k,
+  );
+}
+
+/** Whether a plant is a thing that can be handled (a spoon, a key ring), not a skill or a secret. */
+const isThing = (plant: TrackedPlant) =>
+  Boolean(
+    thingNamed(plant.plant.what) ??
+    thingNamed(plant.plant.id.replace(/-/gu, ' ')),
+  );
+
+/** The beat that handles a planted thing on screen (business with it as its thing), from 0; -1 for none. */
+function handledAt(
+  sheet: StorySheet,
+  plant: TrackedPlant,
+  names: ReadonlySet<string>,
+): number {
+  return sheet.beats.findIndex((b) => {
+    if (b.kind !== 'business') return false;
+    const handled = stemsOf(`${b.thing ?? ''} ${b.prop ?? ''} ${b.say}`, names);
+    return (
+      covered(plant.idStems, handled) >= 0.5 ||
+      covered(plant.stems, handled) >= 0.5
+    );
+  });
+}
+
+/**
+ * Planted things handled on screen (K5): a thing a scene plants is taken,
+ * given or used as business in it, so the viewer sees it before it
+ * matters. Each that is only talked about is a note.
+ */
+export function checkPlantsHandled(
+  story: StudioStory,
+  sheets: readonly StorySheet[],
+  outline: StudioOutline,
+  bible: Pick<StudioBible, 'characters'>,
+): ScriptNote[] {
+  const names = new Set(
+    bible.characters.flatMap((c) => [c.id, ...stemsOf(c.name)]),
+  );
+  const out: ScriptNote[] = [];
+  sheets.forEach((sheet, k) => {
+    for (const plant of plantsOfScene(story, outline, bible, k))
+      if (isThing(plant) && handledAt(sheet, plant, names) < 0)
+        out.push({
+          scene: k,
+          kind: 'plant',
+          message: `"${plant.plant.what}" is planted here for later: let someone handle it on screen (a business beat with it as the thing: take, give, use, put), so the viewer sees it before it matters.`,
+        });
+  });
+  return out;
+}
+
+/**
+ * The inserts a scene's sheet asks the camera for (K5), as data: each
+ * planted thing it handles, at the first beat that handles it.
+ */
+export function insertsFor(
+  sheet: StorySheet,
+  plants: readonly TrackedPlant[],
+  bible: Pick<StudioBible, 'characters'>,
+): SheetInsert[] {
+  const names = new Set(
+    bible.characters.flatMap((c) => [c.id, ...stemsOf(c.name)]),
+  );
+  const out: SheetInsert[] = [];
+  for (const plant of plants) {
+    if (!isThing(plant)) continue;
+    const at = handledAt(sheet, plant, names);
+    if (at < 0) continue;
+    const beat = sheet.beats[at];
+    const thing = beat.thing ?? beat.prop ?? plant.plant.id;
+    if (!out.some((one) => one.beat === at)) out.push({ beat: at, thing });
+  }
+  return out.sort((a, b) => a.beat - b.beat);
+}
+
+/** A film's length in minutes, from its outline's seconds. */
+export const minutesOf = (outline: StudioOutline): number =>
+  outline.scenes.reduce((n, s) => n + (s.seconds ?? 0), 0) / 60;
+
 /** Everything code sees across a story's script, scene by scene. */
 export function checkScript(
   story: StudioStory | null | undefined,
@@ -1172,12 +1888,26 @@ export function checkScript(
   outline: StudioOutline,
   bible: StudioBible,
 ): ScriptNote[] {
+  const minutes = minutesOf(outline);
+  const opening =
+    sheets[0] && story ? checkOpening(sheets[0], story, bible, minutes) : [];
   return [
     ...lintVoices(sheets, bible),
     ...lintTelling(sheets, bible),
+    ...lintLines(sheets, bible, {
+      genre: story?.premise.genre ?? null,
+      ending: story?.premise.ending ?? null,
+      minutes,
+    }),
+    ...opening.map((message) => ({
+      scene: 0,
+      kind: 'opening' as const,
+      message,
+    })),
     ...(story
       ? [
           ...checkPlantsShown(story, sheets, outline, bible),
+          ...checkPlantsHandled(story, sheets, outline, bible),
           ...checkTurnsShown(story, sheets, outline, bible),
         ]
       : []),
@@ -1185,8 +1915,17 @@ export function checkScript(
 }
 
 /** What the first scene's writer is told when a first-time viewer could not follow it. */
-function clarityNotes(viewer: ColdRead | null): string[] {
+function clarityNotes(
+  viewer: ColdRead | null,
+  misses: readonly string[] = [],
+  unsure: readonly string[] = [],
+): string[] {
   return [
+    ...(misses.length || unsure.length
+      ? [
+          `Against the story, the first-time viewer got it wrong: ${[...misses, ...unsure].join('; ')}. Make each of these plain in what is said and done in this scene.`,
+        ]
+      : []),
     ...(viewer
       ? [
           `A first-time viewer, seeing and hearing only this scene, thought it was about: "${viewer.about}"${viewer.sentence ? `; in one sentence: "${viewer.sentence}"` : ''}; wants: "${viewer.wants || 'could not tell'}"; at stake: "${viewer.stakes || 'could not tell'}"; by when: "${viewer.clock || 'no clock seen'}"${viewer.confused.length ? `; confused by: ${viewer.confused.join('; ')}` : ''}.`,
@@ -1202,6 +1941,7 @@ function clarityNotes(viewer: ColdRead | null): string[] {
  */
 export const FIRST_SCENE_RULE = [
   'This is the first scene: by its end a first-time viewer, who sees and hears only the film, can finish the sentence "[who] wants [a thing we can see] because [what it means to them], but [what is in the way], by [when] or else [what they lose]".',
+  "Open on the place and the hero doing their everyday thing, in a way that makes us care; then the problem arrives, as an action or a line said to them by someone with a reason; then the hero shows or says what they must get, and the obstacle is seen. Follow the plan's setup: each part by the line, the action or the thing it names.",
   'By about twenty seconds in (thirty in a film of two minutes or more), someone has said or shown what the hero wants, what stops them and by when: through lines that do something to someone (a threat, a bargain, an accusation), or through actions and things. Never through a narrator, and never a line describing what we can see.',
   'Say the deadline once, as a threat, a promise or a bargain between people, with its reason ("by midnight, or the lock is changed"); after that it is felt through things and pressure (a clock face, a phone buzzing, a glance), never announced.',
   'A fact comes out when someone uses it to get what they want, never as an explanation, and never told to someone who already knows it ("as you know").',
@@ -1247,7 +1987,9 @@ export function notesFor(
           `"${v.line}" could be anyone's line${v.why ? ` (${v.why})` : ''}: say it as ${v.who || 'its speaker'} would${voiceOf(v.who)}.`,
       ),
     ...code.filter((n) => n.scene === k).map((n) => n.message),
-    ...(k === 0 && unclear(read) ? clarityNotes(read.viewer) : []),
+    ...(k === 0 && unclear(read)
+      ? clarityNotes(read.viewer, read.misses, read.unsure)
+      : []),
     ...(k === 0 && (read.scores.hook ?? 10) < BAR.item
       ? [
           'Open with a hook: a joke, a mystery or a problem in the first seconds.',
@@ -1256,5 +1998,5 @@ export function notesFor(
     ...(k === count - 1 && (read.scores.button ?? 10) < BAR.item
       ? ['End on a button: a last laugh or a warm beat, never a summary.']
       : []),
-  ].slice(0, 10);
+  ].slice(0, 14);
 }

@@ -25,6 +25,11 @@
  * show's own features (ownFeatureBrief), and placed like a piece.
  */
 import {
+  drawVehicleKit,
+  vehicleLiveryOf,
+  type VehicleLivery,
+} from './scene-vehicles';
+import {
   ACTED_PIECES,
   drawPiece,
   featureGroup,
@@ -252,6 +257,8 @@ export interface SetLayout {
   style?: StylePackId;
   /** Rows of people watching before the camera (§5.5): a class, a congregation, a stand; absent for none. */
   audience?: 1 | 2;
+  /** A city's look for its buses and cabs, where the story names the city (London's red buses and black cabs); absent, its pack's. */
+  livery?: VehicleLivery;
 }
 
 /** The most things a set places, and the most the artist draws for it. */
@@ -899,6 +906,10 @@ export function layoutOf(
           ? 0
           : null;
   const watching = style ? audienceFor(placeWords) : null;
+  // A named city's buses and cabs: only where the story's words say it.
+  const livery = vehicleLiveryOf(
+    `${world ? worldWords(world) : ''} ${placeWords}`,
+  );
   const audience =
     rowsSaid !== null
       ? rowsSaid >= 2
@@ -943,6 +954,7 @@ export function layoutOf(
     ...(width !== undefined && width !== 1 ? { width } : {}),
     ...(style ? { style } : {}),
     ...(style && audience ? { audience } : {}),
+    ...(livery ? { livery } : {}),
   };
 }
 
@@ -2099,7 +2111,13 @@ function pieceOf(
   seed = 0,
   pack: StylePack | null = null,
   key = '',
+  livery: VehicleLivery | null = null,
 ): SceneryPiece {
+  // A named city's own bus and cab (London's red double-decker).
+  if (livery && !colour && (kind === 'bus' || kind === 'taxi')) {
+    const drawn = drawVehicleKit(kind, { livery, plain: true });
+    return { svg: drawn.svg, viewBox: drawn.viewBox };
+  }
   if (pack && isBuildingKind(kind))
     return drawBuilding(kind, pack, key, colour ?? undefined);
   if (pack && colour && (isKitKind(kind) || isLandmarkKind(kind)))
@@ -2829,7 +2847,14 @@ function buildSetAt(
     if ((item.kind === 'window' || item.kind === 'door') && kind !== 'indoor')
       continue;
     if (item.kind === 'window') item = { ...item, kind: 'curtains' };
-    const piece = pieceOf(item.kind, item.colour, placings.length, pack, key);
+    const piece = pieceOf(
+      item.kind,
+      item.colour,
+      placings.length,
+      pack,
+      key,
+      layout.livery ?? null,
+    );
     const [, vy, vw] = piece.viewBox;
     if ((HANGING as readonly string[]).includes(item.kind)) {
       // Only on a wall: on the back wall, at the back row's scale, its
@@ -3057,7 +3082,10 @@ function buildSetAt(
     const id = featureGroup(feature.id);
     parts[id] = id;
     placings.push({
-      piece: drawPiece(feature.kind, feature.name, { pack: layout.style }),
+      piece: drawPiece(feature.kind, feature.name, {
+        pack: layout.style,
+        livery: layout.livery ?? null,
+      }),
       kind: feature.kind,
       x: (SPOT_AT[feature.spot] ?? 0.5) * SET_W,
       y,
@@ -3338,7 +3366,8 @@ function buildSetAt(
     ` data-place="${kind}" data-ground="${layout.ground}" data-floor="${r1(floor)}"` +
     (pack
       ? ` data-style="${pack.id}" data-ambient="${pack.ambient.join(' ')}"`
-      : '');
+      : '') +
+    (layout.livery ? ` data-livery="${layout.livery}"` : '');
   const svg =
     `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${SET_W} ${SET_H}"${world}>` +
     `<g stroke="${FIGURE_INK}" stroke-width="${INK_W}" stroke-linejoin="round" stroke-linecap="round">${out.join('')}</g></svg>`;
@@ -3377,7 +3406,7 @@ function buildSetAt(
             svg: layerSvg(
               layers[id].join(''),
               pack
-                ? ` data-place="${kind}" data-ground="${layout.ground}" data-floor="${r1(floor)}" data-layer="${id}" data-style="${pack.id}"`
+                ? ` data-place="${kind}" data-ground="${layout.ground}" data-floor="${r1(floor)}" data-layer="${id}" data-style="${pack.id}"${layout.livery ? ` data-livery="${layout.livery}"` : ''}`
                 : `${world} data-layer="${id}"`,
             ),
             ...(id === 'floor' ? { feet: rowFeet(kind, 'front') } : {}),

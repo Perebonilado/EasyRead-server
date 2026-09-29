@@ -115,6 +115,7 @@ import {
   PERCHED_KINDS,
   coveredPiece,
   drawPiece,
+  setLiveryOf,
   setPackOf,
   featureGroup,
 } from './scene-set-pieces';
@@ -2206,6 +2207,8 @@ export function composeScene(input: ComposeInput): {
           ? {
               svg: piece.svg,
               ...(piece.leaf ? { leaf: piece.leaf } : {}),
+              // A vehicle of the kit: its wheels, its springs, its lights.
+              ...(piece.vehicle ? { vehicle: piece.vehicle } : {}),
               ...(piece.front ? { front: true as const } : {}),
               ...(piece.enters ? { enters: true as const } : {}),
               // What it offers the people who use it: its own, or, one of
@@ -2609,6 +2612,7 @@ export function composeScene(input: ComposeInput): {
           ? (script.drawn?.features?.[feature.id] ?? coveredPiece())
           : drawPiece(feature.kind, feature.name, {
               pack: setPackOf(setDrawing),
+              livery: setLiveryOf(setDrawing),
             }),
       group: box ? found : null,
       box: box ?? null,

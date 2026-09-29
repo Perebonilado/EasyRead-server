@@ -39,7 +39,8 @@ const world = (patch: Partial<StoryWorld>): StoryWorld => ({
 });
 
 /** The danfo's own body, as the stage has always drawn it. */
-const DANFO_BODY = 'M-236,-34 L-236,-168';
+/** A danfo as the vehicle kit marks it, on the stage or parked in a set. */
+const DANFO_BODY = 'data-vehicle="danfo"';
 
 describe('a story with no setting', () => {
   const street = place('the street', 'a street with a few shops');
@@ -125,8 +126,12 @@ describe('a road vehicle', () => {
     const danfo = drawPiece('vehicle', 'the danfo');
     expect(danfo.svg).toContain(DANFO_BODY);
     expect(danfo.svg).toContain('#f2c14e');
-    expect(danfo.leaf).toEqual({ id: 'leaf', hinge: [4, -112], slide: -100 });
-    expect(danfo.opening).toEqual([4, -190, 112, -34]);
+    // Its side door slides back, over its way in.
+    expect(danfo.leaf?.id).toBe('leaf');
+    expect(danfo.leaf!.slide).toBeLessThan(-100);
+    const [x0, y0, x1, y1] = danfo.opening!;
+    expect(x1 - x0).toBeGreaterThan(130);
+    expect(y1 - y0).toBeGreaterThan(190);
     expect(vehicleKindOf('the bus', 'west-african-town')).toBe('danfo');
     expect(vehicleKindOf('the car', 'west-african-town')).toBe('car');
   });

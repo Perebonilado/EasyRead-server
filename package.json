@@ -50,6 +50,7 @@
     "figures:sheet": "ts-node --transpile-only -r tsconfig-paths/register scripts/figures-sheet.ts",
     "drawing:bench": "ts-node --transpile-only -r tsconfig-paths/register scripts/drawing-bench.ts",
     "set:bench": "ts-node --transpile-only -r tsconfig-paths/register scripts/set-bench.ts",
+    "vehicle:bench": "ts-node --transpile-only -r tsconfig-paths/register scripts/vehicle-bench.ts",
     "story:bench": "ts-node --transpile-only -r tsconfig-paths/register scripts/story-bench.ts"
   },
   "dependencies": {

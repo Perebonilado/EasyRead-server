@@ -648,6 +648,70 @@ describe('no face hidden on the fixtures', () => {
     }
   });
 
+  it('keeps every speaker’s face seen with two rows of people watching before the camera (L3)', async () => {
+    const bible = bibleOf(fixture('maya', 'bible.json'));
+    const sheet = (n: number) =>
+      storySheetOf(fixture('maya', `s${n}-sheet.json`));
+    let show: StudioBible = bible;
+    let before: EndState | null = null;
+    const places = storyBibleFor(
+      bible,
+      [1, 2, 3, 4, 5].map(sheet),
+      'Maya',
+    ).places;
+    let watched = 0;
+    let alive = 0;
+    for (let n = 1; n <= 5; n += 1) {
+      show = withFeatures(
+        show,
+        sheet(n).set,
+        mendSheet(sheet(n), show, before).features,
+      );
+      const fixed = repairSheet(sheet(n), show, before);
+      const where =
+        storyBibleFor(show, [fixed], 'Maya').places.find(
+          (p) => p.id === fixed.set,
+        ) ?? places.find((p) => p.id === fixed.set)!;
+      // Every place in its style pack, with a crowd before the camera.
+      const set = await layeredSet(
+        {
+          ...(where.id === 'market' ? MARKET : {}),
+          style: 'west-african-town',
+          audience: 2,
+        },
+        where,
+      );
+      const rows =
+        set.layered?.fore.filter((f) => f.id.startsWith('fg-au-')) ?? [];
+      expect(rows.length).toBeGreaterThan(0);
+      watched += 1;
+      const script = stageStory(fixed, show, { before });
+      const { scene } = withMouths(
+        voiced(script, ['pip'], { [placeThingId(where.id)]: set }).scene,
+      );
+      expect({ scene: n, hidden: hiddenFaces(scene, set) }).toEqual({
+        scene: n,
+        hidden: [],
+      });
+      // Alive for the scene: their heads turn to whoever speaks.
+      const thing = scene.things.find((t) => t.id === placeThingId(where.id));
+      const fore =
+        thing?.kind === 'drawing'
+          ? thing.layers?.find((layer) => layer.id === 'foreground')
+          : undefined;
+      if (fore && /@keyframes au-q\d/.test(fore.svg)) alive += 1;
+      // Seen without fading anyone of them: they stand low enough.
+      expect(
+        (scene.setting?.fades ?? []).filter(([, , id]) =>
+          id.startsWith('fg-au-'),
+        ),
+      ).toEqual([]);
+      before = endStateOf(fixed, show, before);
+    }
+    expect(watched).toBe(5);
+    expect(alive).toBeGreaterThan(0);
+  });
+
   it("keeps Tobi's face seen in his bedroom", async () => {
     const bible = bibleOf(fixture('tobi', 'bible.json'));
     const sheet = storySheetOf(fixture('tobi', 's1-sheet.json'));

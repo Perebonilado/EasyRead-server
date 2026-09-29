@@ -11,6 +11,8 @@ import {
   SET_VESSELS,
   SET_WEATHERS,
 } from '../../business/domain/scene-set-layout';
+import { landmarkBrief } from '../../business/domain/scene-set-landmarks';
+import { STYLE_PACK_IDS } from '../../business/domain/scene-style-packs';
 
 /**
  * Prompts, kept in one file and versioned with the code.
@@ -2679,15 +2681,36 @@ export const PROMPTS = {
       'any, else null, and words a few words ("in front of the head table",',
       '"at the ark\'s ramp"). Keep it clear: nothing tall stands there.',
       `"clutter": up to ${MAX_CLUTTER} of ${CLUTTER_KINDS.join(', ')}, the`,
-      'small things that make a place busy and lived in (a market its',
-      'baskets and carts, a yard its plastic chairs and potted plants):',
-      'code scatters them along the back and the edges, never where the',
-      'action is. Empty for a bare place.',
+      'small things that make a place busy and lived in (a Lagos street its',
+      'poles and wires, plastic chairs, water drums and okadas; a market its',
+      'baskets and carts; a city street its bins and hydrants): code',
+      'scatters them along the back and the edges, never where the action',
+      'is. Empty for a bare place.',
+    ].join(' '),
+    [
+      '"style": the look of its era and region, one of',
+      `${STYLE_PACK_IDS.join(', ')}: the brief says which when the story's`,
+      'world decides it; else choose. It decides what its buildings are made',
+      'of, its clutter and its colours. Its buildings are kinds above (house,',
+      'shop, church, mosque, classroom, compound, tenement, temple, mud brick',
+      'house, brownstone, skyscraper, kiosk, zinc roof house, barn): code',
+      "builds each from its style's walls, roofs and windows, no two alike.",
+      'Put buildings at the back, where they stand on the far edge of the',
+      'ground; a skyline or pyramids "far".',
+    ].join(' '),
+    [
+      '"audience": 1 or 2 rows of people watching with their backs to the',
+      'camera, low before it (a class before its teacher, a congregation, a',
+      'stand at a match, the guests at a wedding), else 0. Code adds them',
+      'where the place says so; say 0 for a quiet scene.',
     ].join(' '),
     [
       '"own": up to two things the place must have that no kind above is,',
-      'each { "name", "x", "row" } ("a totem pole", "a fountain"): they are',
-      'drawn apart. Leave it empty when the kinds above will do.',
+      'each { "name", "x", "row", "build" } ("a totem pole", "a fountain"):',
+      'they are drawn apart. When it is a landmark code builds, "build" is',
+      '{ "kind", "params" } with one of these builders and the parameters',
+      `you need (code clamps them; the rest take their usual): ${landmarkBrief()}.`,
+      'Else "build" is null. Leave "own" empty when the kinds above will do.',
     ].join(' '),
     [
       'Make the place recognisable at a glance with the things that make it',
@@ -2697,7 +2720,8 @@ export const PROMPTS = {
       'right. Keep the middle of the ground open, where the characters',
       'stand: tall things at the back or at the sides. Spread them across',
       'the width, not all on one side, and never two in the same spot.',
-      'Draw no people, animals, words or signs.',
+      'Draw no people, animals or words: a street sign or a signboard is',
+      'its shape only.',
     ].join(' '),
   ].join('\n\n'),
 

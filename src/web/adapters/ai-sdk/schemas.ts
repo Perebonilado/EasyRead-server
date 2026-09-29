@@ -1011,9 +1011,26 @@ export const setLayoutSchema = z.object({
         name: z.string().catch(''),
         x: z.number().catch(0.5),
         row: z.string().catch('back'),
+        /** A landmark code builds: its builder and its parameters, which code clamps. */
+        build: z
+          .object({
+            kind: z.string().catch(''),
+            params: z
+              .record(
+                z.string(),
+                z.union([z.number(), z.boolean(), z.string()]),
+              )
+              .catch({}),
+          })
+          .nullable()
+          .catch(null),
       }),
     )
     .catch([]),
+  /** The era and region's style pack, one of STYLE_PACK_IDS. */
+  style: z.string().nullable().catch(null),
+  /** Rows of people watching before the camera: 0, 1 or 2. */
+  audience: z.number().nullable().catch(null),
   focal: z
     .object({
       x: z.number().catch(0.5),

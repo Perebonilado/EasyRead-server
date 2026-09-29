@@ -1136,8 +1136,17 @@ export type SceneThingDto =
        * set's units). Absent, the player splits `svg` by its groups.
        */
       layers?: SceneSetLayerDto[];
-      /** How wide the set is drawn, in its units: 1600, or wider for a camera that pans. */
+      /**
+       * How wide the set is drawn, in its units: 1600, or wider for a
+       * camera that pans (1.5 or 2 times). The frame the stagings are laid
+       * out in is its middle 1600: the layers' viewBox is that frame, and
+       * what runs past it either side is drawn outside it, for a pan.
+       */
       setWidth?: number;
+      /** Where the action is on a wide set, as a share of the frame across: the wide shot centres on it, and a scene's opening pan ends there. */
+      focal?: number;
+      /** The floor people stand on, in the set's units: the y of its back and front edges. What stands on it follows the camera by its depth (0.8 at the back to 1.05 at the front). */
+      floor?: [number, number];
       /** Drawn by the figure kit: it moves its eyes, face, head, arms and mouth as it acts. */
       rig?: true;
       /** Where its head is, as shares of its box across and down: where it looks from. */
@@ -1266,6 +1275,8 @@ export interface SceneEffectDto {
   untilMs?: number;
   /** How a shot of the camera comes in: by a cut, or by a move from where the camera was. Absent, as the player plays the page (a film's cut, a book's move). */
   shot?: { enter: 'cut' | 'move' };
+  /** How the camera moves in a shot (studio-scenery-plan §6.2): "push", in harder on a feeling. The player tracks walkers and pans a wide set by its own rules. */
+  pan?: 'track' | 'pan' | 'push';
   /**
    * A character speaking: their words, in a bubble at their head until
    * `untilMs`; their mouth moves until `saidUntilMs`, when the voice has

@@ -67,7 +67,13 @@ import {
   type StoryCharacter,
   type StoryPlace,
 } from '../scene-story';
-import { isGear, type FigureFace, type FigureSpec } from '../scene-figure';
+import {
+  figureFrame,
+  isGear,
+  type FigureFace,
+  type FigureSpec,
+} from '../scene-figure';
+import { SIZE_UNITS } from '../scene-ink';
 import { sameOutfit } from '../scene-wear';
 import {
   RISE_S,
@@ -320,6 +326,31 @@ export const SHEET_DEPTH: Record<'back' | 'middle' | 'front', number> = {
   middle: DEPTH_MIDDLE,
   front: DEPTH_FRONT,
 };
+
+/**
+ * How tall someone may stand, in the kit's units, and still be small: a
+ * small animal (95) or a middling one, a goat or a big dog (130), at
+ * under two thirds of a grown-up (234). A child (190) is four fifths of a
+ * grown-up, and is seen well anywhere on the floor.
+ */
+export const SMALL_UNITS = 150;
+/**
+ * How far forward a small one stands while they matter, where nothing
+ * says how far back: a step in front of where people have always stood
+ * (0.5), so they are drawn a little larger than the people with them and
+ * are never lost at the back; short of the front edge (0.85), where the
+ * things before the camera stand and a close shot would cut their feet.
+ */
+export const SMALL_DEPTH = 0.65;
+
+/** How tall someone stands, in the kit's units: a person as their age is drawn, an animal or a creature by its size. */
+export function standingUnits(
+  one: Pick<StudioCharacter, 'kind' | 'figure' | 'size'>,
+): number {
+  return one.kind === 'person'
+    ? figureFrame(one.figure?.age ?? 'adult')[3]
+    : SIZE_UNITS[one.size ?? 'medium'];
+}
 
 /**
  * How far back some words send someone on the floor: "in front", "to the
@@ -1565,7 +1596,13 @@ export function stageStory(
     return bobs(who) && move === 'nod' && !gestures(who, move) ? 'hop' : move;
   };
 
+  /** The sheet's beat each step was made at: -1 for those before its first. */
+  const stepBeat: number[] = [];
+  const markSteps = (at: number) => {
+    while (stepBeat.length < steps.length) stepBeat.push(at);
+  };
   sheet.beats.forEach((raw, at) => {
+    markSteps(at - 1);
     // Going somewhere, as far back as the words say, or as the stager
     // spreads them there.
     if (raw.who && doingOf(raw.do)?.kind === 'travel') {
@@ -2102,6 +2139,77 @@ export function stageStory(
       });
     steps.push(...afterwards);
   });
+  markSteps(sheet.beats.length - 1);
+  forwardTheSmall();
+
+  /**
+   * A small one (a puppy, a kitten: shorter than SMALL_UNITS) stands
+   * forward on the open floor, at SMALL_DEPTH, all the while they stand
+   * in one place, where in that time they act, speak, someone acts or
+   * speaks to them, or the words find them there: so they are seen, not
+   * lost small at the back. Kept for the whole of their stay there, so
+   * they do not slide forward and back between beats. Where the sheet or
+   * the words say how far back they stand, that stands; by a feature,
+   * they stand at its own depth, as everyone does.
+   */
+  function forwardTheSmall(): void {
+    /** Whether a beat is about someone: theirs, to them, at them, or with their name in its words. */
+    const matters = (id: string, at: number) => {
+      const beat = sheet.beats[at];
+      const one = byId.get(id);
+      return (
+        beat !== undefined &&
+        (beat.who === id ||
+          beat.to === id ||
+          beat.target === id ||
+          (pointedOut.get(at) ?? []).includes(id) ||
+          (one !== undefined &&
+            namesOf(one).some((name) =>
+              new RegExp(`\\b${escapedWord(name)}\\b`, 'u').test(beat.say),
+            )))
+      );
+    };
+    const small = [...inCast].filter((id) => {
+      const one = byId.get(id);
+      return one !== undefined && standingUnits(one) < SMALL_UNITS;
+    });
+    for (const id of small) {
+      // Their stays, in turn: the steps they stand at one station through.
+      const stays: { station: string; steps: number[] }[] = [];
+      steps.forEach((step, k) => {
+        const station = step.stage?.show.includes(id)
+          ? step.stage.at?.[id]
+          : undefined;
+        if (!step.stage) {
+          stays[stays.length - 1]?.steps.push(k);
+          return;
+        }
+        const last = stays[stays.length - 1];
+        if (station === undefined) stays.push({ station: '', steps: [k] });
+        else if (last?.station === station) last.steps.push(k);
+        else stays.push({ station, steps: [k] });
+      });
+      stays.forEach((stay, n) => {
+        if (!stay.station || !openFloor(stay.station)) return;
+        const staged = stay.steps.filter((k) => steps[k].stage);
+        if (staged.some((k) => steps[k].stage!.depth?.[id] !== undefined))
+          return;
+        const from = Math.max(0, stepBeat[stay.steps[0]]);
+        const next = stays[n + 1]?.steps[0];
+        const to =
+          next === undefined ? sheet.beats.length - 1 : stepBeat[next] - 1;
+        let seen = false;
+        for (let at = from; at <= Math.max(from, to) && !seen; at += 1)
+          seen = matters(id, at);
+        if (!seen) return;
+        for (const k of staged)
+          steps[k].stage!.depth = {
+            ...steps[k].stage!.depth,
+            [id]: SMALL_DEPTH,
+          };
+      });
+    }
+  }
 
   /**
    * A business beat, as what is done with its thing: given to whom it

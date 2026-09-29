@@ -1054,6 +1054,16 @@ export const drawingJudgeSchema = z.object({
   problems: z.array(z.string().max(300)),
 });
 
+/** A made scene's stills, each judged against what its sheet says is there. */
+export const pictureCheckSchema = z.object({
+  stills: z.array(
+    z.object({
+      matches: z.boolean(),
+      wrong: z.array(z.string().max(300)).catch([]),
+    }),
+  ),
+});
+
 /** A short segment around a chapter: its words, its check, or the review. */
 export const lectureExtraSchema = z.object({
   script: z.string().min(1).max(4000),

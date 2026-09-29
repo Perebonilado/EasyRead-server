@@ -652,3 +652,103 @@ describe('a scene changed as the maker asked, made again and checked', () => {
     expect(s.queued[0]).toMatchObject({ kind: 'scene', ask: { tries: 2 } });
   });
 });
+
+describe('a made scene’s pictures, looked at (studio-scenery-plan §8.6)', () => {
+  /** The judge, mocked: each still it is shown, what it says of it. */
+  const judging = (s: ReturnType<typeof studio>, wrong: string[]) => {
+    const looked: { png: Buffer; claims: string }[][] = [];
+    Object.assign((s.processor as unknown as { llm: object }).llm, {
+      pictureCheck: (input: { stills: { png: Buffer; claims: string }[] }) => {
+        looked.push(input.stills);
+        return Promise.resolve({
+          value: {
+            stills: input.stills.map(() => ({ matches: !wrong.length, wrong })),
+          },
+          usage: { model: 'm', tokensIn: 1, tokensOut: 1, latencyMs: 1 },
+        });
+      },
+    });
+    return looked;
+  };
+
+  it('writes a scene again once, free and quietly, where its pictures do not show what the sheet says', async () => {
+    const s = studio(shown());
+    const looked = judging(s, ['The bed is drawn as a bus.']);
+    s.scenes.set('c1', { ...s.scenes.get('c1')!, status: 'making' });
+    await s.processor.process(job({}), context);
+    // Two to four stills, each with what the sheet says is in it.
+    expect(looked).toHaveLength(1);
+    expect(looked[0].length).toBeGreaterThanOrEqual(2);
+    expect(looked[0].length).toBeLessThanOrEqual(4);
+    for (const still of looked[0])
+      expect(still.png.subarray(1, 4).toString()).toBe('PNG');
+    // Tobi is on the stage in them, until he goes.
+    expect(
+      looked[0].some((still) =>
+        /On the stage, each seen whole[^\n]*Tobi/.test(still.claims),
+      ),
+    ).toBe(true);
+    expect(s.queued).toMatchObject([
+      {
+        kind: 'scene',
+        sceneId: 'c1',
+        ask: { tries: 2, free: true, picture: true },
+      },
+    ]);
+    expect(s.queued[0].ask?.problems?.[0]).toContain(
+      'In the fullest moment: The bed is drawn as a bus.',
+    );
+    expect(s.scenes.get('c1')?.status).toBe('writing');
+    expect(s.events()).toEqual([]);
+  }, 120_000);
+
+  it('makes nothing again where they do, nor where the judge cannot be asked', async () => {
+    const s = studio(shown());
+    judging(s, []);
+    s.scenes.set('c1', { ...s.scenes.get('c1')!, status: 'making' });
+    await s.processor.process(job({}), context);
+    expect(s.queued).toEqual([]);
+    const away = studio(shown());
+    Object.assign((away.processor as unknown as { llm: object }).llm, {
+      pictureCheck: () => Promise.reject(new Error('no key for google')),
+    });
+    away.scenes.set('c1', { ...away.scenes.get('c1')!, status: 'making' });
+    await away.processor.process(job({}), context);
+    expect(away.queued).toEqual([]);
+    expect(away.scenes.get('c1')?.status).toBe('made');
+  }, 120_000);
+
+  it('takes a maker’s change’s one try again for both, and never tries a third time', async () => {
+    const s = studio(notYet());
+    judging(s, ['Tobi is too small to see.']);
+    s.scenes.set('c1', { ...s.scenes.get('c1')!, status: 'making' });
+    await s.processor.process(
+      job({ ask: ask({ before: { key: 'before', lines: ['b'] } }) }),
+      context,
+    );
+    expect(s.queued).toHaveLength(1);
+    expect(s.queued[0].ask).toMatchObject({ tries: 2, free: true });
+    expect(s.queued[0].ask?.picture).toBeUndefined();
+    expect(s.queued[0].ask?.problems?.join('\n')).toContain(
+      'Tobi is too small to see.',
+    );
+    // The Studio's own try again at its pictures: looked at, never tried again.
+    const again = studio(shown());
+    judging(again, ['Tobi is too small to see.']);
+    again.scenes.set('c1', { ...again.scenes.get('c1')!, status: 'making' });
+    await again.processor.process(
+      job({
+        ask: ask({
+          tries: 2,
+          free: true,
+          picture: true,
+          words: '',
+          request: 'x',
+        }),
+      }),
+      context,
+    );
+    expect(again.queued).toEqual([]);
+    expect(again.checks).toEqual([]);
+  }, 120_000);
+});

@@ -119,6 +119,7 @@ import {
   walkEase,
   walksOf,
   withoutJumps,
+  roomOf,
   type StageWalk,
 } from './scene-film';
 import type { GatedDrawing } from './scene-svg';
@@ -325,6 +326,14 @@ export function thingDto(
       ? {
           layers: drawing.layered.layers.map((layer) => ({ ...layer })),
           setWidth: drawing.layered.width,
+          // Where the action is on a wide set, and its floor: the camera's (§6).
+          ...(drawing.layered.focal !== undefined
+            ? { focal: drawing.layered.focal }
+            : {}),
+          floor: [drawing.layered.floor.back, drawing.layered.floor.front] as [
+            number,
+            number,
+          ],
         }
       : {}),
     ...(drawing.callouts.length && !story
@@ -1034,6 +1043,33 @@ export function directedShots(
     .map((shot) =>
       shot.untilMs! > tail ? { ...shot, untilMs: durationMs } : shot,
     );
+}
+
+/** The moves that are a feeling: the camera pushes in on them (studio-scenery-plan §6.2). */
+export const FEELING_MOVES: ReadonlySet<string> = new Set(['sob', 'hug']);
+
+/**
+ * Close shots on a feeling, pushed in harder (studio-scenery-plan §6.2):
+ * one whose person sobs or hugs while it is on says so (`pan: "push"`),
+ * and the player pushes in on it more than on any other shot, the layers
+ * parting as it does. Copies; the rest as they were.
+ */
+export function pushedOnFeeling(
+  shots: readonly SceneEffectDto[],
+  acting: Readonly<
+    Record<string, { moves?: [number, string, number, string?][] }>
+  >,
+): SceneEffectDto[] {
+  return shots.map((shot) => {
+    const until = shot.untilMs ?? shot.atMs;
+    const felt = [shot.target, shot.part].some((who) =>
+      (who ? (acting[who]?.moves ?? []) : []).some(
+        ([at, move, ms]) =>
+          FEELING_MOVES.has(move) && at < until && at + ms > shot.atMs,
+      ),
+    );
+    return felt ? { ...shot, pan: 'push' as const } : { ...shot };
+  });
 }
 
 /**
@@ -2392,6 +2428,20 @@ export function composeScene(input: ComposeInput): {
   // it stands at each staging, among the people at their scale.
   const setId = painted(script.backdrop);
   const setDrawing = setId ? drawings.get(setId) : null;
+  /** The room the set gives the camera to pan in on a stage W × H: none on a set one frame wide. */
+  const setRoomFor = (W: number, H: number) =>
+    roomOf(
+      setDrawing?.layered
+        ? {
+            setWidth: setDrawing.layered.width,
+            ...(setDrawing.layered.focal !== undefined
+              ? { focal: setDrawing.layered.focal }
+              : {}),
+          }
+        : null,
+      W,
+      H,
+    );
   const setFrame: [number, number, number, number] = setDrawing?.viewBox ?? [
     0, 0, 1600, 900,
   ];
@@ -2677,9 +2727,18 @@ export function composeScene(input: ComposeInput): {
       const mended = keepFacesSeen({
         W: stage.w,
         H: stage.h,
+        // On a wide set, the wide shot is where the action is (§6.3).
+        room: setRoomFor(stage.w, stage.h),
         steps,
         places: layouts[staging],
         lines,
+        // What each one does, toward whom: they matter then, and are seen.
+        acts: directed.map((move) => ({
+          who: move.target,
+          toward: move.other,
+          startMs: move.atMs,
+          endMs: move.atMs + (move.ms ?? 1000),
+        })),
         shots,
         features: setFeatures.flatMap(({ feature, piece }) => {
           const f = featurePlaces[staging].get(feature.id);
@@ -2701,12 +2760,22 @@ export function composeScene(input: ComposeInput): {
         }),
         foreDepth,
         open,
+        // Too small to see, one beside a feature may step nearer too.
+        nearer: (k, id) =>
+          open(k, id) || (stationsAt[k]?.[id] ?? '').startsWith('by:'),
         hiding,
         atDepth: (place, d) => {
           if (!floor || place.d === undefined) return null;
           const was = floorAt(place.d, floor.floor, floor.eye, floor.bottom);
           const now = floorAt(d, floor.floor, floor.eye, floor.bottom);
-          const k = now.k / Math.max(0.01, was.k);
+          // One by a feature stands on its own ground, maybe back of the
+          // floor: as big as they are there, from where their feet are.
+          const feet = place.y + place.h;
+          const wasK =
+            Math.abs(feet - was.feet) > 1
+              ? (feet - floor.eye) / Math.max(1, floor.floor - floor.eye)
+              : was.k;
+          const k = now.k / Math.max(0.01, wasK);
           const round = (n: number) => Math.round(n * 10) / 10;
           const w = place.w * k;
           const h = place.h * k;
@@ -3265,15 +3334,21 @@ export function composeScene(input: ComposeInput): {
         STAGINGS.wide.w,
       ),
       steps,
-      { ...STAGINGS.wide, places: wide.places },
+      {
+        ...STAGINGS.wide,
+        places: wide.places,
+        // On a wide set, the wide shot is where the action is (§6.3).
+        room: setRoomFor(STAGINGS.wide.w, STAGINGS.wide.h),
+      },
       durationMs,
     );
     effects.splice(
       0,
       effects.length,
-      ...[...effects.filter((e) => e.do !== 'zoom'), ...kept].sort(
-        (a, b) => a.atMs - b.atMs,
-      ),
+      ...[
+        ...effects.filter((e) => e.do !== 'zoom'),
+        ...pushedOnFeeling(kept, acting),
+      ].sort((a, b) => a.atMs - b.atMs),
     );
   }
   // A crowd before the camera in the set (studio-scenery-plan §5.5),

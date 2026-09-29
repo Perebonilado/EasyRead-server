@@ -107,6 +107,12 @@ export interface StudioAsk {
   remedy?: { wear?: { who: string; thing: string }[] };
   /** Made again without spending the maker's film: the Studio's own try again. */
   free?: boolean;
+  /**
+   * The Studio's own try again at what its picture check found wrong
+   * (studio-scenery-plan §8.6), not at a maker's words: quiet in the
+   * thread, and not checked as a maker's ask is.
+   */
+  picture?: true;
 }
 
 /** A piece of the Studio's work on one episode. */

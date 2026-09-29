@@ -548,6 +548,17 @@ export class FakeLlmAdapter implements LlmGatewayPort {
     });
   }
 
+  /** Every still as the sheet says: the fake film is never made again. */
+  pictureCheck(input: {
+    stills: { png: Buffer; claims: string }[];
+  }): Promise<LlmResult<{ stills: { matches: boolean; wrong: string[] }[] }>> {
+    const started = Date.now();
+    return Promise.resolve({
+      value: { stills: input.stills.map(() => ({ matches: true, wrong: [] })) },
+      usage: this.usage(started, 800 * input.stills.length, 40),
+    });
+  }
+
   /**
    * The page's own sentences as the narration, one drawing and one word on
    * the stage: enough for the whole scene pipeline to run with no key.

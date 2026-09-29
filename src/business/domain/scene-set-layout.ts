@@ -841,7 +841,10 @@ export function layoutOf(
   ].slice(0, MAX_CLUTTER);
   const wide =
     typeof said.width === 'string' ? parseFloat(said.width) : said.width;
-  const width = SET_WIDTHS.find((w) => w === wide);
+  // A Studio set is as wide as its camera needs, unless the painter says.
+  const width =
+    SET_WIDTHS.find((w) => w === wide) ??
+    (place.features !== undefined ? widthFor(place) : undefined);
   const placeWords = `${place.name} ${place.look}`;
   const style =
     world === undefined
@@ -899,6 +902,30 @@ export function layoutOf(
     ...(style ? { style } : {}),
     ...(style && audience ? { audience } : {}),
   };
+}
+
+/** A big room, where people cross the floor: a hall, a church, a market. */
+const BIG_ROOM =
+  /\b(?:halls?|church(?:es)?|temples?|mosques?|synagogues?|markets?|stadiums?|gym(?:nasium)?s?|warehouses?|palaces?|court(?:room)?s?|theatres?|theaters?|auditoriums?|stations?|barns?|throne ?rooms?|ballrooms?|cathedrals?|arenas?)\b/iu;
+/** A place people go a long way across: a road, a field, a shore. */
+const LONG_WAY =
+  /\b(?:roads?|streets?|paths?|tracks?|fields?|beach(?:es)?|shores?|rivers?|riverbanks?|bridges?|highways?|trails?|deserts?|squares?|parks?|pitch(?:es)?|playgrounds?|meadows?|valleys?|plains?|farms?|lanes?|avenues?|harbou?rs?|docks?|camps?)\b/iu;
+
+/**
+ * How wide a Studio place is drawn, in frames, where its painter does not
+ * say (studio-scenery-plan §3.1): a vessel and a small room one frame,
+ * as the camera has no room to pan in them; a big room one and a half;
+ * out of doors one and a half, and two where people go a long way across
+ * it (a road, a field, a shore), so a walk can be followed.
+ */
+export function widthFor(
+  place: Pick<StoryPlace, 'name' | 'look' | 'kind'>,
+): SetWidth {
+  const kind = place.kind ?? 'outdoor';
+  const words = `${place.name} ${place.look}`;
+  if (kind === 'vessel') return 1;
+  if (kind === 'indoor') return BIG_ROOM.test(words) ? 1.5 : 1;
+  return LONG_WAY.test(words) ? 2 : 1.5;
 }
 
 /** A thing's landmark builder: as the painter named it, its parameters clamped; else as its name says; null for none. */
@@ -1051,6 +1078,14 @@ export function layoutBrief(
 
 export const SET_W = 1600;
 export const SET_H = 900;
+/**
+ * How wide what spans the whole set (its sky, what stands behind the
+ * ground, the ground, a room's walls) is drawn while a set is built: the
+ * frame's 1600, or the set's own width where it is wider (buildSet sets
+ * it, and puts it back). It is drawn from 0 across and moved back by the
+ * margin, so the frame the stagings are laid out in is its middle.
+ */
+let drawW: number = SET_W;
 /** The set's own outline: the kit's line where its people stand. */
 const INK_W = setLine(SET_H);
 /** Where the story's people stand, and how many of the set's units a kit unit is there (scene-crowd's own). */
@@ -1179,12 +1214,12 @@ function drawSky(
       : pack && layout.sky === 'day'
         ? pack.light.day
         : SKY[layout.sky];
-  let out = flatRect(-10, -10, SET_W + 20, top + 20, sky);
+  let out = flatRect(-10, -10, drawW + 20, top + 20, sky);
   if (layout.sky === 'night') {
     const stars = Array.from(
       { length: 26 },
       () =>
-        `<circle cx="${r1(random() * SET_W)}" cy="${r1(random() * top * 0.8)}" r="${r1(2 + random() * 2.5)}" ${flatFill('#fff6d8')}/>`,
+        `<circle cx="${r1(random() * drawW)}" cy="${r1(random() * top * 0.8)}" r="${r1(2 + random() * 2.5)}" ${flatFill('#fff6d8')}/>`,
     ).join('');
     out += `<g class="twinkle">${stars}</g>` + circle(1240, 150, 46, '#f6ecc4');
   } else if (layout.weather === 'clear') {
@@ -1200,7 +1235,7 @@ function drawSky(
     const n = layout.weather === 'cloudy' ? 5 : 3;
     const clouds = Array.from({ length: n }, (_, k) =>
       cloud(
-        ((k + 0.3 + random() * 0.4) / n) * SET_W,
+        ((k + 0.3 + random() * 0.4) / n) * drawW,
         90 + random() * Math.max(40, top * 0.3),
         0.7 + random() * 0.5,
         layout.weather === 'cloudy' ? '#f2f4f6' : '#ffffff',
@@ -1220,14 +1255,14 @@ function rolling(
   colour: string,
 ): string {
   let d = `M-20,${r1(base)} L-20,${r1(base - high * 0.6)}`;
-  const step = (SET_W + 40) / bumps;
+  const step = (drawW + 40) / bumps;
   for (let i = 0; i < bumps; i += 1) {
     const x0 = -20 + i * step;
     const peak = base - high * (0.55 + random() * 0.45);
     const end = base - high * (0.45 + random() * 0.3);
     d += ` Q${r1(x0 + step / 2)},${r1(peak - high * 0.3)} ${r1(x0 + step)},${r1(end)}`;
   }
-  d += ` L${SET_W + 20},${r1(base)} Z`;
+  d += ` L${drawW + 20},${r1(base)} Z`;
   return shape(d, colour);
 }
 
@@ -1253,7 +1288,7 @@ function drawBackdrop(
           return flatRect(
             -10,
             y0,
-            SET_W + 20,
+            drawW + 20,
             40,
             k % 2 ? '#c4e2a6' : '#d9e9b0',
           );
@@ -1262,12 +1297,12 @@ function drawBackdrop(
       const hedges = Array.from(
         { length: 7 },
         (_, k) =>
-          `<ellipse cx="${r1((k + 0.5) * (SET_W / 7))}" cy="${r1(base - 112)}" rx="${r1(60 + random() * 30)}" ry="16" ${fill(SET_COLOURS.leaves)}/>`,
+          `<ellipse cx="${r1((k + 0.5) * (drawW / 7))}" cy="${r1(base - 112)}" rx="${r1(60 + random() * 30)}" ry="16" ${fill(SET_COLOURS.leaves)}/>`,
       ).join('');
       return (
         rolling(base - 100, 90, 3, random, '#cfe7b8') +
         shape(
-          `M-20,${base} L-20,${r1(base - 112)} L${SET_W + 20},${r1(base - 112)} L${SET_W + 20},${base} Z`,
+          `M-20,${base} L-20,${r1(base - 112)} L${drawW + 20},${r1(base - 112)} L${drawW + 20},${base} Z`,
           '#d9e9b0',
         ) +
         bands +
@@ -1283,7 +1318,7 @@ function drawBackdrop(
       let out = '';
       const n = 4;
       for (let k = 0; k < n; k += 1) {
-        const cx = ((k + 0.5) / n) * SET_W + (random() - 0.5) * 120;
+        const cx = ((k + 0.5) / n) * drawW + (random() - 0.5) * 120;
         const h = 240 + random() * 120;
         const w = 300 + random() * 120;
         out +=
@@ -1302,18 +1337,18 @@ function drawBackdrop(
     }
     case 'trees': {
       let out = shape(
-        `M-20,${base} L-20,${r1(base - 90)} L${SET_W + 20},${r1(base - 90)} L${SET_W + 20},${base} Z`,
+        `M-20,${base} L-20,${r1(base - 90)} L${drawW + 20},${r1(base - 90)} L${drawW + 20},${base} Z`,
         '#557f31',
       );
       const n = 12;
       for (let k = 0; k < n; k += 1) {
-        const cx = (k / (n - 1)) * SET_W + (random() - 0.5) * 60;
+        const cx = (k / (n - 1)) * drawW + (random() - 0.5) * 60;
         const r = 70 + random() * 40;
         const cy = base - 90 - r * 0.6 - random() * 50;
         out += circle(cx, cy, r, k % 2 ? '#6a9c3e' : SET_COLOURS.leaves);
       }
       for (let k = 0; k < n - 1; k += 1) {
-        const cx = ((k + 0.5) / (n - 1)) * SET_W;
+        const cx = ((k + 0.5) / (n - 1)) * drawW;
         out += circle(
           cx,
           base - 60 - random() * 30,
@@ -1335,7 +1370,7 @@ function drawBackdrop(
       }).join('');
       return (
         shape(
-          `M-20,${base} L-20,${top} L${SET_W + 20},${top} L${SET_W + 20},${base} Z`,
+          `M-20,${base} L-20,${top} L${drawW + 20},${top} L${drawW + 20},${base} Z`,
           SET_COLOURS.water,
         ) + `<g class="ripple">${waves}</g>`
       );
@@ -1345,7 +1380,7 @@ function drawBackdrop(
       let x = -20;
       const walls = ['#efe3cf', '#d8cbb3', '#c9c3ba', '#e6d3a8', '#cfd8e2'];
       let k = 0;
-      while (x < SET_W + 20) {
+      while (x < drawW + 20) {
         const w = 110 + random() * 90;
         const h = 180 + random() * 190;
         const colour = walls[k % walls.length];
@@ -1378,7 +1413,7 @@ function drawBackdrop(
       const n = 7;
       const houses = Array.from({ length: n }, (_, k) => ({
         k,
-        cx: ((k + 0.5) / n) * SET_W + (random() - 0.5) * 90,
+        cx: ((k + 0.5) / n) * drawW + (random() - 0.5) * 90,
         // Some nearer, some farther: never one flat row.
         back: Math.round(random() * 3) * 16,
         k2: random(),
@@ -1469,7 +1504,7 @@ function packBackdrop(
       at.forEach((x, k) => {
         const B = [300, 420, 220][k];
         const H = B * 0.6;
-        const cx = x * SET_W;
+        const cx = x * drawW;
         const apex = cx + B * 0.08;
         out +=
           shape(
@@ -1490,7 +1525,7 @@ function packBackdrop(
     case 'palms': {
       let out = rolling(base, 50, 5, random, tinted(pack, SET_COLOURS.hills));
       for (let k = 0; k < 11; k += 1) {
-        const x = ((k + 0.3 + random() * 0.4) / 11) * SET_W;
+        const x = ((k + 0.3 + random() * 0.4) / 11) * drawW;
         out += palm(x, 110 + random() * 80);
       }
       return out;
@@ -1507,7 +1542,7 @@ function packBackdrop(
       );
       let x = -30;
       let k = 0;
-      while (x < SET_W + 30) {
+      while (x < drawW + 30) {
         const w = 90 + random() * 90;
         const h = (lagos ? 60 : 50) + random() * (lagos ? 90 : 70);
         const b = base - (k % 3) * 6;
@@ -1535,17 +1570,17 @@ function packBackdrop(
         // A mast over the town, and a palm or two.
         out +=
           line(
-            `M${r1(SET_W * 0.72)},${r1(base - 60)} L${r1(SET_W * 0.72)},${r1(base - 300)}`,
+            `M${r1(drawW * 0.72)},${r1(base - 60)} L${r1(drawW * 0.72)},${r1(base - 300)}`,
             FIGURE_INK,
             4,
           ) +
           line(
-            `M${r1(SET_W * 0.72 - 20)},${r1(base - 250)} L${r1(SET_W * 0.72 + 20)},${r1(base - 250)} M${r1(SET_W * 0.72 - 14)},${r1(base - 200)} L${r1(SET_W * 0.72 + 14)},${r1(base - 200)}`,
+            `M${r1(drawW * 0.72 - 20)},${r1(base - 250)} L${r1(drawW * 0.72 + 20)},${r1(base - 250)} M${r1(drawW * 0.72 - 14)},${r1(base - 200)} L${r1(drawW * 0.72 + 14)},${r1(base - 200)}`,
             FIGURE_INK,
             3,
           ) +
-          palm(SET_W * 0.3, 190) +
-          palm(SET_W * 0.9, 160);
+          palm(drawW * 0.3, 190) +
+          palm(drawW * 0.9, 160);
       return out;
     }
     case 'olive hills': {
@@ -1553,7 +1588,7 @@ function packBackdrop(
         rolling(base, 190, 4, random, tinted(pack, '#d7e2b0')) +
         rolling(base, 110, 5, random, tinted(pack, SET_COLOURS.hills));
       for (let k = 0; k < 14; k += 1) {
-        const x = random() * SET_W;
+        const x = random() * drawW;
         const y = base - 20 - random() * 90;
         out +=
           flatRect(x - 3, y - 6, 6, 14, SET_COLOURS.wood) +
@@ -1571,7 +1606,7 @@ function packBackdrop(
         KIT_EXTRAS.concrete,
         COATS.cream,
       ];
-      while (x < SET_W + 20) {
+      while (x < drawW + 20) {
         const w = 70 + random() * 90;
         const h = 170 + random() * 290;
         const face = tinted(pack, faces[Math.floor(random() * faces.length)]);
@@ -1613,13 +1648,13 @@ function drawGround(
       ? GROUND.snow
       : GROUND[layout.ground]);
   let out = shape(
-    `M-20,${r1(top)} L${SET_W + 20},${r1(top)} L${SET_W + 20},${SET_H + 20} L-20,${SET_H + 20} Z`,
+    `M-20,${r1(top)} L${drawW + 20},${r1(top)} L${drawW + 20},${SET_H + 20} L-20,${SET_H + 20} Z`,
     colour,
   );
   const darker = shade(colour, 0.9);
   const marks = (n: number, draw: (x: number, y: number) => string) =>
     Array.from({ length: n }, () => {
-      const x = random() * SET_W;
+      const x = random() * drawW;
       const y = top + 20 + random() * (SET_H - top - 30);
       return draw(x, y);
     }).join('');
@@ -1632,7 +1667,7 @@ function drawGround(
   switch (layout.ground) {
     case 'path': {
       // A path of earth winding from the front, wide, to the far edge, narrow.
-      const mid = SET_W * (0.42 + random() * 0.16);
+      const mid = drawW * (0.42 + random() * 0.16);
       const far = top + 2;
       out += flatShape(
         `M${r1(mid - 24)},${r1(far)} Q${r1(mid - 120)},${r1(top + (SET_H - top) * 0.45)} ${r1(mid - 420)},${SET_H + 20} L${r1(mid + 420)},${SET_H + 20} Q${r1(mid + 120)},${r1(top + (SET_H - top) * 0.45)} ${r1(mid + 24)},${r1(far)} Z`,
@@ -1658,8 +1693,8 @@ function drawGround(
       // The road across the back, the pavement people stand on before it.
       const kerb = top + (SET_H - top) * 0.36;
       out +=
-        flatRect(-10, kerb, SET_W + 20, SET_H - kerb + 10, GROUND.paving) +
-        flatRect(-10, kerb - 8, SET_W + 20, 12, '#c2b397') +
+        flatRect(-10, kerb, drawW + 20, SET_H - kerb + 10, GROUND.paving) +
+        flatRect(-10, kerb - 8, drawW + 20, 12, '#c2b397') +
         Array.from({ length: 9 }, (_, k) =>
           flatRect(
             k * 190 + 30,
@@ -1678,7 +1713,7 @@ function drawGround(
         flatRect(
           -10,
           top + 40 + r * ((SET_H - top) / 5),
-          SET_W + 20,
+          drawW + 20,
           5,
           darker,
         ),
@@ -1714,13 +1749,13 @@ function drawGroundL3(
     );
   const D = SET_H - top;
   let out = shape(
-    `M-20,${r1(top)} L${SET_W + 20},${r1(top)} L${SET_W + 20},${SET_H + 20} L-20,${SET_H + 20} Z`,
+    `M-20,${r1(top)} L${drawW + 20},${r1(top)} L${drawW + 20},${SET_H + 20} L-20,${SET_H + 20} Z`,
     colour,
   );
   // Nearer to farther, the colour shifts toward the haze.
   [0.05, 0.1, 0.16].forEach((k, i) => {
     const h = D * [0.34, 0.2, 0.09][i];
-    out += flatRect(-20, top, SET_W + 40, h, mix(colour, pack.light.haze, k));
+    out += flatRect(-20, top, drawW + 40, h, mix(colour, pack.light.haze, k));
   });
   const darker = shade(colour, 0.9);
   const unit = scaleAtFeet('outdoor', FEET);
@@ -1734,7 +1769,7 @@ function drawGroundL3(
   ) =>
     Array.from({ length: n }, () => {
       const y = depth();
-      const x = random() * SET_W;
+      const x = random() * drawW;
       return draw(x, y, near(y));
     }).join('');
   const tuft = (x: number, y: number, k: number) =>
@@ -1748,14 +1783,14 @@ function drawGroundL3(
     const bottom = SET_H + 20;
     const t = (bottom - top) / (bottom - eye);
     const runs: string[] = [];
-    for (let x0 = -SET_W; x0 <= SET_W * 2; x0 += across) {
-      const x1 = x0 + (SET_W / 2 - x0) * t;
+    for (let x0 = -drawW; x0 <= drawW * 2; x0 += across) {
+      const x1 = x0 + (drawW / 2 - x0) * t;
       runs.push(`M${r1(x0)},${bottom} L${r1(x1)},${r1(top)}`);
     }
     for (let k = 1; k < 40; k += 1) {
       const y = eye + (bottom - eye) / (1 + deep * k);
       if (y <= top + 4) break;
-      runs.push(`M-20,${r1(y)} L${SET_W + 20},${r1(y)}`);
+      runs.push(`M-20,${r1(y)} L${drawW + 20},${r1(y)}`);
     }
     return `<path d="${runs.join(' ')}" fill="none" stroke="${tone}" stroke-width="2"/>`;
   };
@@ -1767,7 +1802,7 @@ function drawGroundL3(
     case 'dirt':
     case 'red earth': {
       // A way worn across it, wide near and narrow far, and a few stones.
-      const mid = SET_W * (0.4 + random() * 0.2);
+      const mid = drawW * (0.4 + random() * 0.2);
       out += flatShape(
         `M${r1(mid - 20)},${r1(top + 2)} Q${r1(mid - 110)},${r1(top + D * 0.45)} ${r1(mid - 380)},${SET_H + 20} L${r1(mid + 380)},${SET_H + 20} Q${r1(mid + 110)},${r1(top + D * 0.45)} ${r1(mid + 20)},${r1(top + 2)} Z`,
         layout.ground === 'path' ? SET_COLOURS.earth : shade(colour, 1.12),
@@ -1799,11 +1834,11 @@ function drawGroundL3(
         flatRect(
           -10,
           kerb,
-          SET_W + 20,
+          drawW + 20,
           SET_H - kerb + 10,
           packColour(pack, GROUND.paving),
         ) +
-        flatRect(-10, kerb - 8, SET_W + 20, 12, '#c2b397') +
+        flatRect(-10, kerb - 8, drawW + 20, 12, '#c2b397') +
         Array.from({ length: 12 }, (_, k) =>
           flatRect(k * 136 + 10, kerb - 8, 4, 12, shade('#c2b397', 0.85)),
         ).join('') +
@@ -1821,7 +1856,7 @@ function drawGroundL3(
         `<path d="M${r1(x)},${r1(y)} l${r1(12 * k)},${r1(5 * k)} l${r1(-6 * k)},${r1(7 * k)} l${r1(14 * k)},${r1(4 * k)}" fill="none" stroke="${shade(GROUND.paving, 0.8)}" stroke-width="${r1(2.4 * k)}" stroke-linecap="round"/>`;
       out += marks(7, (x, y, k) => (y > kerb + 8 ? crack(x, y, k) : ''));
       out += Array.from({ length: 3 }, () => {
-        const x = random() * SET_W;
+        const x = random() * drawW;
         const y = top + 6 + random() * (kerb - top - 20);
         return crack(x, y, near(y));
       }).join('');
@@ -1851,7 +1886,7 @@ function drawFloor(
   drop: number,
 ): string {
   const colour = layout.groundColour ?? GROUND[layout.ground];
-  const d = `M${side},${r1(top)} L${SET_W - side},${r1(top)} L${SET_W + 20},${r1(top + drop)} L${SET_W + 20},${SET_H + 20} L-20,${SET_H + 20} L-20,${r1(top + drop)} Z`;
+  const d = `M${side},${r1(top)} L${drawW - side},${r1(top)} L${drawW + 20},${r1(top + drop)} L${drawW + 20},${SET_H + 20} L-20,${SET_H + 20} L-20,${r1(top + drop)} Z`;
   let out = shape(d, colour);
   const darker = shade(colour, 0.9);
   // Where the floor starts across at a depth: it runs under the side walls' feet.
@@ -1863,7 +1898,7 @@ function drawFloor(
       const y = top + 26 + k * k * 7 + k * 26;
       const x = from(y + 4);
       return y < SET_H
-        ? flatRect(x, y, SET_W - x * 2, 4 + k * 0.6, darker)
+        ? flatRect(x, y, drawW - x * 2, 4 + k * 0.6, darker)
         : '';
     }).join('');
   else if (layout.ground === 'tiles') {
@@ -1873,7 +1908,7 @@ function drawFloor(
         if (!((r + c) % 2)) return '';
         const y = top + 20 + r * band;
         const x0 = Math.max(c * 160, from(y + band));
-        const x1 = Math.min((c + 1) * 160, SET_W - from(y + band));
+        const x1 = Math.min((c + 1) * 160, drawW - from(y + band));
         return x1 > x0
           ? flatRect(x0, y, x1 - x0, band, shade(colour, 0.95))
           : '';
@@ -1892,16 +1927,16 @@ function drawRoom(
 ): string {
   const sideColour = shade(walls, 0.9);
   return (
-    flatRect(-10, -10, SET_W + 20, top + 20, walls) +
+    flatRect(-10, -10, drawW + 20, top + 20, walls) +
     shape(
       `M-20,-20 L${side},-20 L${side},${r1(top)} L-20,${r1(top + drop)} Z`,
       sideColour,
     ) +
     shape(
-      `M${SET_W + 20},-20 L${SET_W - side},-20 L${SET_W - side},${r1(top)} L${SET_W + 20},${r1(top + drop)} Z`,
+      `M${drawW + 20},-20 L${drawW - side},-20 L${drawW - side},${r1(top)} L${drawW + 20},${r1(top + drop)} Z`,
       sideColour,
     ) +
-    rect(side, top - 16, SET_W - side * 2, 16, shade(walls, 0.82))
+    rect(side, top - 16, drawW - side * 2, 16, shade(walls, 0.82))
   );
 }
 
@@ -2339,7 +2374,7 @@ function covered(placings: Placing[]): number {
  * a little, and each kept within the frame by at least half of itself:
  * two shelves at the same spot of the wall hang side by side.
  */
-function spreadOut(placings: Placing[]): void {
+function spreadOut(placings: Placing[], margin = 0): void {
   const bands = new Map<string, Placing[]>();
   for (const one of placings) {
     if (one.band === 'flat') continue;
@@ -2350,8 +2385,8 @@ function spreadOut(placings: Placing[]): void {
   const within = (one: Placing) => {
     const [a, b] = reachOf(one);
     const w = b - a;
-    if (a < -w * 0.35) one.x += -w * 0.35 - a;
-    if (b > SET_W + w * 0.35) one.x -= b - SET_W - w * 0.35;
+    if (a < -margin - w * 0.35) one.x += -margin - w * 0.35 - a;
+    if (b > SET_W + margin + w * 0.35) one.x -= b - SET_W - margin - w * 0.35;
   };
   for (const list of bands.values()) {
     for (const one of list) if (!one.fixed) within(one);
@@ -2429,8 +2464,10 @@ export interface SetFloor {
 /** A set as layers (studio-scenery-plan §3.2): the layers, its width, its floor, and each thing before the camera, by its group. */
 export interface SetLayering {
   layers: SetLayer[];
-  /** In the set's units: 1600, or wider for a camera that pans (L4). */
+  /** In the set's units: 1600, or wider for a camera that pans (L4), the frame its middle 1600. */
   width: number;
+  /** Where the action is, as a share of the frame across: what the wide shot centres on (§6.3). Absent, the middle. */
+  focal?: number;
   floor: SetFloor;
   fore: { id: string; box: [number, number, number, number] }[];
 }
@@ -2503,7 +2540,31 @@ export function buildSet(
   place: StoryPlace,
   own: Record<string, SetPiece> = {},
 ): BuiltSet {
+  // As wide as its layout says (a vessel one frame, whatever it says): what
+  // spans the whole set drawn that wide, and the frame its middle.
+  const across =
+    (place.kind ?? 'outdoor') === 'vessel'
+      ? SET_W
+      : Math.round(SET_W * (layout.width ?? 1));
+  drawW = across;
+  try {
+    return buildSetAt(layout, place, own, (across - SET_W) / 2);
+  } finally {
+    drawW = SET_W;
+  }
+}
+
+/** A set built with `margin` of it either side of the frame: what spans it drawn `drawW` wide, moved back by the margin. */
+function buildSetAt(
+  layout: SetLayout,
+  place: StoryPlace,
+  own: Record<string, SetPiece>,
+  margin: number,
+): BuiltSet {
   const kind: PlaceKind = place.kind ?? 'outdoor';
+  /** What spans the whole set, drawn from 0 across, moved back so the frame is its middle. */
+  const whole = (inner: string) =>
+    margin ? `<g transform="translate(${-margin} 0)">${inner}</g>` : inner;
   const random = seeded(`${place.id}:${place.name}`);
   const floor = FLOOR_LINE[kind];
   const studio = place.features !== undefined;
@@ -2538,9 +2599,9 @@ export function buildSet(
       ? packColour(pack, plainGround)
       : plainGround;
   const underlay = flatRect(
-    -20,
+    -20 - margin,
     floor - 2,
-    SET_W + 40,
+    SET_W + 40 + margin * 2,
     SET_H - floor + 22,
     groundColour,
   );
@@ -2548,7 +2609,7 @@ export function buildSet(
   // Behind everything: the sky and what stands behind the ground, a
   // room's walls, or what a vessel's windows look out on and its side.
   if (kind === 'outdoor') {
-    const sky = `<g id="sky">${drawSky(layout, floor, random, pack)}</g>`;
+    const sky = `<g id="sky">${whole(drawSky(layout, floor, random, pack))}</g>`;
     out.push(sky);
     layers.sky.push(sky, underlay);
     const own = pack?.backdropFor[layout.backdrop];
@@ -2556,14 +2617,15 @@ export function buildSet(
       own && (SET_BACKDROPS as readonly string[]).includes(own)
         ? (own as SetBackdrop)
         : layout.backdrop;
-    const back = drawBackdrop(layout, floor, random, pack, backdrop);
+    const drawnBack = drawBackdrop(layout, floor, random, pack, backdrop);
+    const back = drawnBack && whole(drawnBack);
     if (back) {
       out.push(`<g id="backdrop">${back}</g>`);
       layers.far.push(underlay, `<g id="backdrop">${back}</g>`);
     }
   } else if (kind === 'indoor') {
     // Walls a little paler than their colour, so the people stand out.
-    const walls = `<g id="walls">${drawRoom(layout.walls ? shade(layout.walls, 1.4) : SET_COLOURS.walls, floor, SIDE, DROP)}</g>`;
+    const walls = `<g id="walls">${whole(drawRoom(layout.walls ? shade(layout.walls, 1.4) : SET_COLOURS.walls, floor, SIDE, DROP))}</g>`;
     out.push(walls);
     layers.back.push(walls);
   } else {
@@ -2605,7 +2667,10 @@ export function buildSet(
   const scattered: Scattered[] = pack
     ? clutterOfPack(layout, place, pack, clear)
     : clutterOf(layout, place);
-  for (let item of [...layout.items, ...scattered] as Scattered[]) {
+  // On a set wider than the frame, what stands along the back past its
+  // edges, so a pan finds a street going on, not an empty ground.
+  const beyond = margin ? marginItems(layout, place, pack, margin) : [];
+  for (let item of [...layout.items, ...scattered, ...beyond] as Scattered[]) {
     const key = `${place.id}:${place.name}:${item.kind}:${n}`;
     n += 1;
     // One the stage draws itself, placed again by the painter where it
@@ -2873,7 +2938,7 @@ export function buildSet(
   }
   // In a style pack, what code scatters finds its own room after (below),
   // and never pushes what the painter placed into where the action is.
-  spreadOut(pack ? placings.filter((one) => !one.clutter) : placings);
+  spreadOut(pack ? placings.filter((one) => !one.clutter) : placings, margin);
   if (pack) {
     // Clutter never where the action is (§5.3): moved out to its nearer
     // side, and on past whatever it would then stand on; left out when
@@ -3002,14 +3067,15 @@ export function buildSet(
     layout.ground === 'stone'
       ? { ...layout, groundColour: VESSEL_FLOOR }
       : layout;
-  const ground =
+  const ground = whole(
     kind === 'outdoor'
       ? pack
         ? drawGroundL3(layout, floor, random, pack)
         : drawGround(layout, floor, random)
       : kind === 'indoor'
         ? drawFloor(layout, floor, SIDE, DROP)
-        : drawFloor(floorLayout, floor, -20, 0);
+        : drawFloor(floorLayout, floor, -20, 0),
+  );
   const flats = placings
     .filter((one) => one.band === 'flat')
     .map(drawnAt)
@@ -3027,7 +3093,7 @@ export function buildSet(
     // Each tuft of grass answers the world on the one layer it is seen on.
     layers.back.push(`<g>${tuftsWhere(ground, (y) => y < seam)}</g>`);
     layers.ground.push(
-      `<defs><clipPath id="near-ground"><rect x="-20" y="${r1(seam)}" width="${SET_W + 40}" height="${r1(SET_H - seam + 40)}"/></clipPath></defs>` +
+      `<defs><clipPath id="near-ground"><rect x="${-20 - margin}" y="${r1(seam)}" width="${SET_W + 40 + margin * 2}" height="${r1(SET_H - seam + 40)}"/></clipPath></defs>` +
         `<g clip-path="url(#near-ground)"><g id="ground">${tuftsWhere(ground, (y) => y >= seam)}${flats}</g></g>`,
     );
   }
@@ -3182,7 +3248,9 @@ export function buildSet(
     parts,
     layered: {
       layers: layerList,
-      width: SET_W,
+      width: SET_W + margin * 2,
+      // Where the wide shot centres: only a set wider than the frame pans to it.
+      ...(layout.focal && margin ? { focal: layout.focal.x } : {}),
       floor: floorOf(kind),
       fore: [
         ...fore.map(({ one, id }) => {
@@ -3453,6 +3521,96 @@ function clutterOfPack(
       });
     }
   }
+  return out;
+}
+
+/** How far apart, as a share of the frame, what stands along the back past a wide set's edges is. */
+const MARGIN_EVERY = 0.17;
+
+/**
+ * What stands along the back of a wide set past the frame's edges
+ * (studio-scenery-plan §6.1), so a pan finds the place going on: more of
+ * what the painter stood at the back (two in three), else its pack's own
+ * buildings and scenery, and a little of its clutter; a tree out of
+ * doors, a plant in a room, where there is nothing else to draw on.
+ * Shares of the frame, below 0 on the left and past 1 on the right;
+ * seeded, so the same every time.
+ */
+function marginItems(
+  layout: SetLayout,
+  place: StoryPlace,
+  pack: StylePack | null,
+  margin: number,
+): Scattered[] {
+  const random = seeded(`${place.id}:${place.name}:beyond`);
+  const side = margin / SET_W;
+  const outdoor = (place.kind ?? 'outdoor') === 'outdoor';
+  const painted = layout.items
+    .filter(
+      (one) =>
+        (one.row === 'back' || one.row === 'far') &&
+        !(HANGING as readonly string[]).includes(one.kind) &&
+        one.kind !== 'window' &&
+        one.kind !== 'door' &&
+        !(FLAT as readonly string[]).includes(one.kind) &&
+        !(FEATURE_KINDS as readonly string[]).includes(one.kind),
+    )
+    .map((one) => one.kind);
+  const packs = pack
+    ? [...(outdoor ? pack.buildings : []), ...pack.scenery].flatMap(
+        (one): SetItemKind[] => {
+          const kind = itemKindOf(one);
+          return kind &&
+            !(FEATURE_KINDS as readonly string[]).includes(kind) &&
+            !(HANGING as readonly string[]).includes(kind) &&
+            !(FLAT as readonly string[]).includes(kind)
+            ? [kind]
+            : [];
+        },
+      )
+    : [];
+  const fallback: SetItemKind[] = (
+    outdoor ? ['tree', 'bush'] : ['plant']
+  ).flatMap((one) => {
+    const kind = itemKindOf(one);
+    return kind ? [kind] : [];
+  });
+  const out: Scattered[] = [];
+  const n = Math.max(1, Math.round(side / MARGIN_EVERY));
+  for (const dir of [-1, 1])
+    for (let j = 0; j < n; j += 1) {
+      const pool =
+        painted.length && (random() < 0.67 || !packs.length)
+          ? painted
+          : packs.length
+            ? packs
+            : fallback;
+      if (!pool.length) continue;
+      const kind = pool[Math.floor(random() * pool.length)];
+      const at = ((j + 0.5 + (random() - 0.5) * 0.5) / n) * side;
+      out.push({
+        kind,
+        x: Math.round((dir < 0 ? -at : 1 + at) * 1000) / 1000,
+        row: 'back',
+        scale: Math.round((0.9 + random() * 0.2) * 100) / 100,
+        colour: null,
+        ...(random() < 0.5 ? { flip: true } : {}),
+      });
+    }
+  // And a little of its clutter, one each side, where it scatters some.
+  const clutter = layout.clutter ?? [];
+  if (pack && clutter.length)
+    for (const dir of [-1, 1]) {
+      const kind = clutter[Math.floor(random() * clutter.length)];
+      const at = (0.3 + random() * 0.5) * side;
+      out.push({
+        kind,
+        x: Math.round((dir < 0 ? -at : 1 + at) * 1000) / 1000,
+        row: 'back',
+        scale: 1,
+        colour: null,
+      });
+    }
   return out;
 }
 

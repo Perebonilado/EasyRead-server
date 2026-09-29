@@ -69,6 +69,8 @@ import {
   type ScreenplayDraft,
 } from '../../business/domain/scene-screenplay';
 import { rasterise } from '../../business/domain/scene-raster';
+import { pictureMoments } from '../../business/domain/scene-picture-check';
+import { renderStill } from '../../business/domain/scene-still';
 import {
   SCENE_GENERATOR_VERSION,
   isCodeThing,
@@ -2018,9 +2020,24 @@ export class SceneProcessor {
   /**
    * The card's still: the fullest step of the box staging, each drawing
    * rendered alone, with what it hides until later hidden, so no two
-   * drawings' ids or styles ever share a document.
+   * drawings' ids or styles ever share a document. A film's scene is a
+   * still of its film instead (scene-still).
    */
   private async thumb(scene: Parameters<typeof thumbSvg>[0]): Promise<Buffer> {
+    // A film's scene: a still of the film at its fullest moment, its set's
+    // layers where the camera has them then and its people at their
+    // depths (studio-scenery-plan §8.6); as below where that fails.
+    if (scene.setting?.film)
+      try {
+        const fullest = pictureMoments(scene).find(
+          (moment) => moment.why === 'the fullest moment',
+        );
+        if (fullest)
+          return (await renderStill(scene, fullest.t, rasterise, THUMB_WIDTH))
+            .png;
+      } catch {
+        // The card's still as a book's page has it.
+      }
     const index = fullestStep(scene);
     const step = scene.steps[index];
     const pngs = new Map<string, Buffer>();

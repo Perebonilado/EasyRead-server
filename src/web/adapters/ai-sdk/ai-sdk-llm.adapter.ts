@@ -78,6 +78,7 @@ import {
   sceneStorySchema,
   sketchJudgeSchema,
   drawingJudgeSchema,
+  pictureCheckSchema,
   setLayoutSchema,
   lectureExtraSchema,
   spokenQuizSchema,
@@ -775,6 +776,39 @@ export class AiSdkLlmAdapter implements LlmGatewayPort, OnModuleInit {
     });
     return {
       value: cleanVerdict(result.object),
+      usage: this.usage(ref, result.usage, started),
+    };
+  }
+
+  async pictureCheck(input: {
+    stills: { png: Buffer; claims: string }[];
+  }): Promise<LlmResult<{ stills: { matches: boolean; wrong: string[] }[] }>> {
+    const started = Date.now();
+    const { generateObject } = await this.registry.modules();
+    // The drawing judge's model: it sees (DeepSeek cannot).
+    const { model, ref } = await this.registry.languageModel('drawing_judge');
+    const result = await generateObject({
+      model,
+      schema: pictureCheckSchema,
+      system: PROMPTS.pictureCheck,
+      temperature: 0,
+      messages: [
+        {
+          role: 'user' as const,
+          content: input.stills.flatMap((still, i) => [
+            { type: 'text' as const, text: `Still ${i + 1}:` },
+            { type: 'file' as const, data: still.png, mediaType: 'image/png' },
+            { type: 'text' as const, text: still.claims },
+          ]),
+        },
+      ],
+      maxRetries: this.maxRetries(),
+    });
+    const stills = input.stills.map(
+      (_, i) => result.object.stills[i] ?? { matches: true, wrong: [] },
+    );
+    return {
+      value: { stills },
       usage: this.usage(ref, result.usage, started),
     };
   }

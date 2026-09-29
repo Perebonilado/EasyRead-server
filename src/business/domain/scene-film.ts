@@ -545,16 +545,88 @@ export interface View {
 export const CUT_SCALE = 1.25;
 export const CUT_CENTRE = 0.2;
 
-/** A view kept inside the stage. */
-function settle(view: View, W: number, H: number): View {
+/**
+ * A set wider than the frame, as the camera may pan across it (studio-
+ * scenery-plan §6): how far past the frame it runs, left and right, and
+ * where the action is, in the stage's units. A set one frame wide has no
+ * room, and its camera never pans. The player's setSpanOf.
+ */
+export interface SetRoom {
+  span: [number, number];
+  focal: number | null;
+}
+export const NO_ROOM: SetRoom = { span: [0, 0], focal: null };
+/** The frame a set is laid out in, in its units: its middle, on a wider one. */
+export const FRAME_W = 1600;
+export const FRAME_H = 900;
+
+/** The room a set of `setWidth` (its focal a share of the frame) gives a camera on a stage W × H, the set covering the stage. */
+export function roomOf(
+  set: { setWidth?: number; focal?: number } | null | undefined,
+  W: number,
+  H: number,
+): SetRoom {
+  const k = Math.max(W / FRAME_W, H / FRAME_H);
+  const left = (W - FRAME_W * k) / 2;
+  const focal =
+    set?.focal !== undefined ? left + set.focal * FRAME_W * k : null;
+  if (!set?.setWidth || set.setWidth <= FRAME_W + 1)
+    return { span: [0, 0], focal };
+  const side = ((set.setWidth - FRAME_W) / 2) * k - left;
+  return { span: [side, side], focal };
+}
+
+/**
+ * A view kept inside the set: never wider than the frame, never past the
+ * set's edge. On a set one frame wide, inside the stage.
+ */
+function settle(
+  view: View,
+  W: number,
+  H: number,
+  span: readonly [number, number] = [0, 0],
+): View {
   const s = Math.max(1, view.s);
   const hw = W / (2 * s);
   const hh = H / (2 * s);
   return {
     s,
-    x: Math.min(W - hw, Math.max(hw, view.x)),
+    x: Math.min(W + span[1] - hw, Math.max(hw - span[0], view.x)),
     y: Math.min(H - hh, Math.max(hh, view.y)),
   };
+}
+
+/** The most room kept between the people and the frame's edge in the wide shot, as a share of the frame. */
+export const WIDE_ROOM = 0.04;
+
+/**
+ * The wide shot on a set wider than the frame (§6.3): centred on where
+ * the action is, as far as that keeps everyone on the stage in it with a
+ * little room; centred on them where they will not all fit. On a set one
+ * frame wide, the whole stage. The player's wideX.
+ */
+export function wideView(
+  show: readonly string[],
+  places: Record<string, ScenePlaceDto>,
+  W: number,
+  H: number,
+  room: SetRoom = NO_ROOM,
+): View {
+  const [L, R] = room.span;
+  if (L <= 0 && R <= 0) return { s: 1, x: W / 2, y: H / 2 };
+  const people = show.flatMap((id) => {
+    const p = places[id];
+    return p && !id.startsWith('@') && p.w <= W * 0.6 ? [p] : [];
+  });
+  const want = room.focal ?? W / 2;
+  let x = want;
+  if (people.length) {
+    const m = W * WIDE_ROOM;
+    const lo = Math.max(...people.map((p) => p.x + p.w)) + m - W / 2;
+    const hi = Math.min(...people.map((p) => p.x)) - m + W / 2;
+    x = lo > hi ? (lo + hi) / 2 : Math.min(hi, Math.max(lo, want));
+  }
+  return settle({ s: 1, x, y: H / 2 }, W, H, room.span);
 }
 
 /**
@@ -569,8 +641,9 @@ export function viewOf(
   places: Record<string, ScenePlaceDto>,
   W: number,
   H: number,
+  room: SetRoom = NO_ROOM,
 ): View {
-  const wide = { s: 1, x: W / 2, y: H / 2 };
+  const wide = wideView(show, places, W, H, room);
   const placed = (id: string | null) =>
     id && show.includes(id) ? places[id] : undefined;
   const one = shot ? placed(shot.target) : undefined;
@@ -592,6 +665,7 @@ export function viewOf(
       },
       W,
       H,
+      room.span,
     );
   }
   return settle(
@@ -605,6 +679,7 @@ export function viewOf(
     },
     W,
     H,
+    room.span,
   );
 }
 
@@ -654,17 +729,23 @@ export function apart(a: View, b: View, W: number, H: number): boolean {
 export function withoutJumps(
   shots: readonly SceneEffectDto[],
   steps: readonly SceneStepDto[],
-  wide: { w: number; h: number; places: Record<string, ScenePlaceDto>[] },
+  wide: {
+    w: number;
+    h: number;
+    places: Record<string, ScenePlaceDto>[];
+    /** On a set wider than the frame, the room its camera pans in: the wide shot is on where the action is. */
+    room?: SetRoom;
+  },
   durationMs: number,
 ): SceneEffectDto[] {
-  const { w: W, h: H, places } = wide;
+  const { w: W, h: H, places, room = NO_ROOM } = wide;
   /** Where a shot (null: the whole stage) looks at `t`. */
   const view = (shot: SceneEffectDto | null, t: number) => {
     let k = 0;
     steps.forEach((step, i) => {
       if (step.atMs <= t) k = i;
     });
-    return viewOf(shot, steps[k]?.show ?? [], places[k] ?? {}, W, H);
+    return viewOf(shot, steps[k]?.show ?? [], places[k] ?? {}, W, H, room);
   };
   const endOf = (shot: SceneEffectDto) => shot.untilMs ?? durationMs;
   /** Whether a shot going back to the whole stage at its end is a real cut. */

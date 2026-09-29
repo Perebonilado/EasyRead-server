@@ -139,12 +139,26 @@ import {
   type CreatureSpec,
 } from '../../business/domain/scene-creature';
 import { animalSheet, creatureSheet } from '../../business/domain/scene-sheet';
+import {
+  askedMoments,
+  claimsText,
+  namedAsDrawn,
+  pictureClaims,
+  pictureMoments,
+  pictureProblems,
+  type PictureVerdict,
+} from '../../business/domain/scene-picture-check';
+import { rasterise } from '../../business/domain/scene-raster';
+import { renderStill } from '../../business/domain/scene-still';
 
 /** A kit's spec for a character: a person's, an animal's, or a creature's. */
 type KitSpec = FigureSpec | AnimalSpec | CreatureSpec;
 import type { StudioJobData } from '../queues';
 import { isPermanentFailure, type JobContext } from './base.processor';
 import { SceneProcessor } from './scene.processor';
+
+/** How wide a still the picture check looks at is: enough to tell a bus from an ark, at about 0.4 cents a look. */
+const STILL_PX = 960;
 
 /** Explainer scenes written at once: each is its own lesson page. */
 const WRITERS = 3;
@@ -565,6 +579,14 @@ export class StudioProcessor {
           step: null,
           error: null,
         });
+        // The picture check's own try again: the film made first stands, quietly.
+        if (job.ask.picture) {
+          this.logger.log(
+            `studio ${episode.id}: picture: could not be written again (${message}); the film stands`,
+          );
+          await this.settle(show, episode, true);
+          return;
+        }
         await this.log(
           show,
           episode,
@@ -1950,17 +1972,32 @@ export class StudioProcessor {
     this.logger.log(
       `${who}: made "${scene.title}" in ${Math.round(voice.durationMs / 1000)}s of film, ${scene.steps.length} stage changes, ${scene.effects.length} effects${context.attemptsMade > 1 ? ` (try ${context.attemptsMade})` : ''}`,
     );
+    // Its pictures looked at beside what its sheet says (studio-scenery-
+    // plan §8.6): what is wrong is written again once, free.
+    const pictures = await this.lookAtPictures(
+      episode,
+      row,
+      scene,
+      bible,
+      ask,
+      who,
+    ).catch((error: Error) => {
+      this.logger.log(`${who}: picture: not looked at (${error.message})`);
+      return [] as string[];
+    });
     // The film is made and spent: the check of it, however it goes, never
     // makes it again, nor spends it twice.
-    if (ask)
+    let again = false;
+    if (ask && !ask.picture)
       try {
-        await this.checkAsk(
+        again = await this.checkAsk(
           show,
           episode,
           (await this.studio.findScene(row.id)) ?? row,
           scene,
           ask,
           bible,
+          pictures,
         );
       } catch (error) {
         this.logger.warn(
@@ -1981,6 +2018,9 @@ export class StudioProcessor {
           .updateScene(row.id, { status: 'made', step: null, error: null })
           .catch(() => undefined);
       }
+    // Its one free try again, where nothing else has taken it.
+    if (!again && pictures.length && (ask?.tries ?? 1) === 1)
+      await this.againForPictures(show, episode, row, pictures, who);
     await this.settle(show, episode, Boolean(ask)).catch((error: Error) =>
       this.logger.warn(`${who}: not settled: ${error.message}`),
     );
@@ -2001,8 +2041,10 @@ export class StudioProcessor {
     scene: SceneDto,
     ask: StudioAsk,
     bible: StudioBible,
-  ): Promise<void> {
-    if (row.sheet?.kind !== 'story') return;
+    /** What the picture check found wrong: told the writer too, if it writes again. */
+    pictures: readonly string[] = [],
+  ): Promise<boolean> {
+    if (row.sheet?.kind !== 'story') return false;
     const who = `studio ${episode.id} s${row.position + 1}`;
     const key = askKey(ask, row.id);
     const rows = await this.studio.listScenes(episode.id);
@@ -2051,7 +2093,7 @@ export class StudioProcessor {
           `${who}: the ask could not be checked: ${(error as Error).message}`,
         );
         await this.log(show, episode, line('unchecked'), key);
-        return;
+        return false;
       }
     // What code sees that is what the maker asked about outweighs the
     // check's word for it.
@@ -2062,7 +2104,7 @@ export class StudioProcessor {
     const tell = tellOf(verdict.tell);
     if (verdict.resolved && !asked.length) {
       await this.log(show, episode, line('shown', tell), key);
-      return;
+      return false;
     }
     const reason =
       verdict.reason || asked[0]?.why || 'the film shows what it did before';
@@ -2085,6 +2127,11 @@ export class StudioProcessor {
           `The film as made still does not do what the maker asked: ${reason}`,
           `What the film shows now:\n${after.lines.join('\n')}`,
           'Keep every line and every word of narration exactly as it is; change only the staging: onStage pose, on and wears, the doings that change them (stand-up, sit, lie-down, dress, undress), and what is held.',
+          ...(pictures.length
+            ? [
+                `What its pictures show wrong:\n${pictures.map((p) => `- ${p}`).join('\n')}`,
+              ]
+            : []),
         ],
         ...(wear.length ? { remedy: { wear } } : {}),
       };
@@ -2101,7 +2148,7 @@ export class StudioProcessor {
           ask: again,
         },
       ]);
-      return;
+      return true;
     }
     this.logger.warn(`${who}: ask not resolved: ${reason}`);
     await this.log(
@@ -2119,6 +2166,127 @@ export class StudioProcessor {
         tries: ask.tries,
       },
     );
+    return false;
+  }
+
+  /**
+   * A made story scene looked at as the viewer sees it (studio-scenery-plan
+   * §8.6): two to four stills of its film (the fullest moment, each moment
+   * an asked change is seen, its last frame) rendered from its layers, its
+   * people at their depths and the camera then, and set beside what its
+   * sheet says is there for the drawing judge to look at; and what code
+   * sees wrong in its things for itself. The problems found, for the
+   * writer; none when it all matches. With no judge to ask (no key, no
+   * credit) only code's, quietly. Each said as a "picture:" line.
+   */
+  private async lookAtPictures(
+    episode: StudioEpisodeRecord,
+    row: StudioSceneRecord,
+    scene: SceneDto,
+    bible: StudioBible,
+    ask: StudioAsk | undefined,
+    who: string,
+  ): Promise<string[]> {
+    if (row.sheet?.kind !== 'story' || !scene.setting?.film) return [];
+    const cast = bible.characters.map((one) => ({
+      id: one.id,
+      name: one.name,
+      look: one.look,
+    }));
+    const request = ask && !ask.picture ? ask.request || ask.words : null;
+    const moments = pictureMoments(
+      scene,
+      request ? askedMoments(scene, request) : [],
+    );
+    const code = namedAsDrawn(scene);
+    let looked: { why: string; verdict: PictureVerdict }[] = [];
+    // A gateway with no judge at all: code's own look is all there is.
+    if (typeof this.llm.pictureCheck !== 'function') {
+      this.logger.log(
+        `${who}: picture: no judge to look; ${code.length ? `wrong: ${code.join(' | ')}` : 'code sees nothing wrong'}`,
+      );
+      return code;
+    }
+    try {
+      const stills: { png: Buffer; claims: string; why: string }[] = [];
+      for (const moment of moments) {
+        const { png } = await renderStill(scene, moment.t, rasterise, STILL_PX);
+        const claims = pictureClaims(
+          scene,
+          moment.t,
+          cast,
+          moment.why.startsWith('the asked') ? request : null,
+        );
+        stills.push({
+          png,
+          claims: claimsText(claims, moment.why),
+          why: moment.why,
+        });
+      }
+      const judged = await this.llm.pictureCheck({
+        stills: stills.map(({ png, claims }) => ({ png, claims })),
+      });
+      await this.record(episode.id, judged.usage, 'drawing_judge');
+      looked = stills.map((still, i) => ({
+        why: still.why,
+        verdict: judged.value.stills[i] ?? { matches: true, wrong: [] },
+      }));
+    } catch (error) {
+      // No judge to ask: code's own look is all there is.
+      this.logger.log(
+        `${who}: picture: not looked at by the judge (${(error as Error).message.slice(0, 160)})`,
+      );
+    }
+    const problems = pictureProblems(code, looked);
+    this.logger.log(
+      `${who}: picture: ${looked.length} of ${moments.length} stills looked at (${moments.map((m) => `${m.why} at ${m.t}ms`).join(', ')}); ${problems.length ? `wrong: ${problems.join(' | ')}` : 'as the sheet says'}`,
+    );
+    return problems;
+  }
+
+  /**
+   * A scene whose pictures do not show what its sheet says, written again
+   * once, free and quietly (studio-scenery-plan §8.6): its words kept, its
+   * staging changed for what the check found; made again on its own
+   * voice, nothing spent.
+   */
+  private async againForPictures(
+    show: StudioShowRecord,
+    episode: StudioEpisodeRecord,
+    row: StudioSceneRecord,
+    problems: readonly string[],
+    who: string,
+  ): Promise<void> {
+    this.logger.log(
+      `${who}: picture: written again, free, for what it shows wrong`,
+    );
+    const request =
+      'Make the film show what the sheet says: every named thing drawn as what it is, everyone on the stage seen whole and big enough to know.';
+    const again: StudioAsk = {
+      id: `picture-${row.id}-${Date.now().toString(36)}`,
+      words: '',
+      request,
+      tries: 2,
+      free: true,
+      picture: true,
+      problems: [
+        `The film as made does not show what the sheet says. What its pictures show wrong:\n${problems.map((p) => `- ${p}`).join('\n')}`,
+        'Keep every line and every word of narration exactly as it is; change only the staging (where people stand, near or far, and what is held) and what each thing of the place is called and is, so each is drawn as what it is.',
+      ],
+    };
+    await this.studio.updateScene(row.id, { status: 'writing', error: null });
+    await this.studio.updateEpisode(episode.id, { busy: 'scene' });
+    await this.queue.enqueueStudio([
+      {
+        kind: 'scene',
+        showId: show.id,
+        episodeId: episode.id,
+        userId: show.userId,
+        sceneId: row.id,
+        request,
+        ask: again,
+      },
+    ]);
   }
 
   /**

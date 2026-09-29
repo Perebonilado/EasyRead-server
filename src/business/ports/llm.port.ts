@@ -559,6 +559,17 @@ export interface LlmGatewayPort {
   }): Promise<LlmResult<DrawingVerdict>>;
 
   /**
+   * A made scene's stills looked at beside what its sheet says is there
+   * (studio-scenery-plan §8.6), by the drawing judge's vision model: who is
+   * on the stage, what each thing of the place is, and what a change the
+   * maker asked should show. Whether each still matches, and what is
+   * wrong where it does not.
+   */
+  pictureCheck(input: {
+    stills: { png: Buffer; claims: string }[];
+  }): Promise<LlmResult<{ stills: { matches: boolean; wrong: string[] }[] }>>;
+
+  /**
    * One page as an animated explainer: the narration, the cast of things
    * it needs drawn, and the storyboard of what stands on the stage and
    * when, written together. With `previous` and `problems`, the same page

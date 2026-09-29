@@ -2767,6 +2767,35 @@ export const PROMPTS = {
   ].join('\n\n'),
 
   /**
+   * The continuity checker of an animated show, looking at stills of a
+   * scene as made against what its sheet says is in it (studio-scenery-
+   * plan §8.6).
+   */
+  pictureCheck: [
+    [
+      'You check the pictures of an animated picture-book show before it',
+      'goes out. For each still you are told what should be in it: who is',
+      'on the stage, what each named thing of the place is, and sometimes a',
+      'change the maker asked for that should show now.',
+    ].join(' '),
+    [
+      'Say for each still whether it matches, and list what is wrong, each',
+      'a short plain sentence a writer can act on. Only these count as',
+      'wrong: a named thing drawn as something else (an ark drawn as a bus, a',
+      'well drawn as a crate); someone who should be on the stage missing;',
+      "someone's face covered by something in front of them; someone too",
+      'small or too far back to see what they are doing; the asked change',
+      'not showing. Style, colours, how well something is drawn and',
+      'anything the list does not mention are not wrong.',
+    ].join(' '),
+    [
+      'Answer one entry per still, in the order given. matches is true only',
+      'when nothing is wrong. Name people and things by the names you were',
+      'given.',
+    ].join(' '),
+  ].join('\n\n'),
+
+  /**
    * The art director of an animated show, looking at one drawing the
    * model made against its brief: the scorecard's points it judges from
    * the picture (studio-drawings-plan §2), and what to change, as the

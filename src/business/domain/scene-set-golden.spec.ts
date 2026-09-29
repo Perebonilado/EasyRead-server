@@ -190,7 +190,11 @@ const GOLDEN: Record<string, [string, string]> = {
 describe('a layout written before the style packs', () => {
   it('is drawn byte for byte as it was, flat and as layers', () => {
     const got = Object.fromEntries(
-      cases().map(([name, layout, where]) => {
+      cases().map(([name, parsed, where]) => {
+        // As it was kept: a layout written before the camera panned (L4)
+        // says no width, and is drawn one frame wide.
+        const layout = { ...parsed };
+        delete layout.width;
         const built = buildSet(layout, where);
         return [name, [hash(built.svg), hash(JSON.stringify(built.layered))]];
       }),

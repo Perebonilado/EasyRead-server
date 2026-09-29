@@ -344,7 +344,11 @@ describe('a set in a style pack', () => {
     const layers = Object.fromEntries(
       one.built.layered.layers.map((l) => [l.id, l.svg]),
     );
-    const brownstones = one.built.placed.filter((p) => p.kind === 'brownstone');
+    // In the frame, the two the painter placed; past its edges, more of
+    // the street for the camera to pan across (L4).
+    const brownstones = one.built.placed.filter(
+      (p) => p.kind === 'brownstone' && p.x >= 0 && p.x <= SET_W,
+    );
     expect(brownstones).toHaveLength(2);
     for (const b of brownstones) expect(b.band).toBe('horizon');
     expect(layers.back).toContain('data-kind="brownstone"');

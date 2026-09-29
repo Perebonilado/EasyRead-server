@@ -35,6 +35,7 @@ import {
   restingAt,
   type Place,
 } from './scene-layout';
+import { interactFaults } from './scene-interact';
 
 /** A feature as the ground check needs it: the ground it stands on, where one up it stands, and its box across. */
 export interface GroundFeature {
@@ -62,6 +63,21 @@ export interface GroundInput {
   /** The floor: where people have always stood, the eye line, and its front edge's lowest. */
   floor: { floor: number; eye: number; bottom: number };
   name: (id: string) => string;
+}
+
+/**
+ * Everyone climbing a flight of stairs, steps or a ladder has their feet on
+ * its treads or rungs, one after another, and stands where one up it stands
+ * at the top (studio-interactions-plan §2.6): as "staging: floating" notes
+ * for any that does not.
+ */
+export function climbsGrounded(
+  scene: Parameters<typeof interactFaults>[0],
+  name: (id: string) => string = (id) => id,
+): string[] {
+  return interactFaults(scene)
+    .filter((fault) => fault.id === 'off-steps')
+    .map((fault) => `floating: ${name(fault.who)} ${fault.why}`);
 }
 
 /** Feet within this many of the stage's units of a surface are on it. */

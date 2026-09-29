@@ -13,6 +13,7 @@
  * shorter lists (STORY_MOVES, NARRATED_MOVES, PROP_ACTIONS), kept here as
  * parts of this one.
  */
+import type { SceneInteraction } from '../../contracts';
 import { FIGURE_GEAR, type FigureGear } from './scene-figure';
 import {
   DRAWN,
@@ -322,10 +323,15 @@ export const NEEDS_FEET: ReadonlySet<string> = new Set<string>([
 export type StageMove =
   StoryMove | 'look' | 'point' | 'reach' | 'hug' | ActedMove;
 
-/** How the stage plays a doing now. */
+/**
+ * How the stage plays a doing now: a step (on, off, across), a move of
+ * the body, or a thing handled; and, done with a thing of the set, the
+ * interaction that plays it in its timed steps (studio-interactions-plan
+ * §1.3), over the step or the move, which is what it falls back to.
+ */
 export type Played =
-  | { step: 'enter' | 'leave' | 'walk' }
-  | { move: StageMove }
+  | { step: 'enter' | 'leave' | 'walk'; interact?: SceneInteraction }
+  | { move: StageMove; interact?: SceneInteraction }
   | { prop: ThingAction };
 
 export const DOING_IDS = [
@@ -378,6 +384,10 @@ export const DOING_IDS = [
   'squeeze',
   'hide',
   'run-fast',
+  // Using the set's things (studio-interactions-plan I1, I2).
+  'go-through',
+  'climb-stairs',
+  'lean-on',
   // Handling things.
   'take',
   'put',
@@ -397,6 +407,12 @@ export const DOING_IDS = [
   'use',
   'dress',
   'undress',
+  // Operating the set's things.
+  'knock',
+  'ring-bell',
+  'switch-on',
+  'switch-off',
+  'turn-on-tap',
 ] as const;
 export type DoingId = (typeof DOING_IDS)[number];
 
@@ -483,6 +499,14 @@ const WHOSE = '(?:(?:the|a|an|his|her|their|its|my|your|our) )?';
 export const RESTING_WORDS = new RegExp(`\\b(${RESTS_ON})\\b`, 'iu');
 /** A thing worn, named after a verb: "on his new school uniform", "on the party-dress". */
 const WORN = `${WHOSE}(?:[\\p{L}-]+[ -]){0,2}?(?:${WEAR_WORDS})\\b`;
+/** A doorway or a gateway, named: "the front door", "the old gate". */
+const DOORWAY = `${WHOSE}(?:[\\p{L}-]+ )?(?:doors?|doorways?|gates?|gateways?)\\b`;
+/** Stairs, steps or a ladder, named: "the stairs", "the wooden ladder". */
+const FLIGHT = `${WHOSE}(?:[\\p{L}-]+ )?(?:stairs|staircases?|stairways?|steps|ladders?)\\b`;
+/** A light or a lamp, named: "the light", "the kitchen light". */
+const LIGHT = `${WHOSE}(?:[\\p{L}-]+ )?(?:lights?|lamps?)\\b`;
+/** A tap, named: "the tap", "the kitchen tap", "the water". */
+const TAP = `${WHOSE}(?:[\\p{L}-]+ )?(?:taps?|faucets?|water)\\b`;
 
 const doings: Record<DoingId, Omit<Doing, 'id' | 'idealMs' | 'phases'>> = {
   // ── The body ─────────────────────────────────────────────────────────────
@@ -1167,6 +1191,60 @@ const doings: Record<DoingId, Omit<Doing, 'id' | 'idealMs' | 'phases'>> = {
     runs: true,
     with: 'run-fast',
   },
+  // Through a door or a gate (studio-interactions-plan §2.1): to its handle
+  // side, the hand on the handle as it swings open, a step through behind
+  // its near post, and gone into the dark beyond; or, at a scene's end, on
+  // into the next, where they come in through the same door.
+  'go-through': {
+    kind: 'travel',
+    by: ALL,
+    thing: null,
+    aims: ['feature'],
+    aimed: true,
+    words: new RegExp(
+      `\\b(?:${GOING}|${RUNNING}|comes?|came|coming)(?:\\s+\\p{L}+ly)?\\s+(?:back\\s+)?(?:out\\s+through|in\\s+through|back\\s+through|through)\\s+${DOORWAY}`,
+      'iu',
+    ),
+    // Over to the door (a short walk), and all its steps want.
+    ms: 4300,
+    leastMs: 2600,
+    keyAt: 0.6,
+    fallback: 'leave',
+    plays: { step: 'leave', interact: 'go-through' },
+  },
+  // Up the stairs, the steps or a ladder: a foot on each tread or rung in
+  // turn, the body rising along them, a hand on the rail or the rungs.
+  'climb-stairs': {
+    kind: 'travel',
+    by: ALL,
+    thing: null,
+    aims: ['feature'],
+    aimed: true,
+    words: new RegExp(
+      `\\b(?:(?:climb(?:s|ed|ing)?|clamber(?:s|ed|ing)?|${GOING}|${RUNNING}|trudg(?:e|es|ed|ing)|stomp(?:s|ed|ing)?)\\s+(?:all\\s+the\\s+way\\s+)?up\\s+${FLIGHT}|climb(?:s|ed|ing)?\\s+${FLIGHT}|(?:goes|go|going|went|runs?|ran|hurr(?:y|ies|ied)|heads?|headed|climbs?|climbed|creeps?|crept|tiptoes?|tiptoed)\\s+upstairs)`,
+      'iu',
+    ),
+    ms: 3400,
+    leastMs: 2000,
+    keyAt: 0.7,
+    fallback: 'climb',
+    plays: { step: 'walk', interact: 'climb-stairs' },
+  },
+  // Against a wall or a counter: a hip against it and a hand on it, easy.
+  'lean-on': {
+    kind: 'body',
+    by: HANDS,
+    thing: null,
+    aims: ['feature'],
+    aimed: true,
+    words:
+      /\blean(?:s|ed|t|ing)?\s+(?:back\s+)?(?:on|against|up against)\s+(?:the|a|an|his|her|their|its|my|your|our)\s+(?:[\p{L}-]+\s+)?(?:counters?|worktops?|walls?|tables?|fences?|doors?|doorways?|gates?|stalls?|sinks?|railings?|rails?|posts?|trees?|benches|bench|desks?|windowsills?|windows?|cupboards?|pillars?|lamp ?posts?)\b/iu,
+    ms: 2200,
+    leastMs: 1100,
+    keyAt: 0.3,
+    fallback: 'lean-in',
+    plays: { move: 'lean-in', interact: 'lean-on' },
+  },
 
   // ── Handling things ──────────────────────────────────────────────────────
   take: {
@@ -1428,6 +1506,91 @@ const doings: Record<DoingId, Omit<Doing, 'id' | 'idealMs' | 'phases'>> = {
     fallback: 'nod',
     plays: { prop: 'doff' },
   },
+
+  // ── Operating the set's things (studio-interactions-plan I1, I2) ────────
+  // A knock at a door or a gate: the knuckles to its face two or three
+  // times, and a wait; whoever is inside may open it.
+  knock: {
+    kind: 'handle',
+    by: HANDS,
+    thing: null,
+    aims: ['feature'],
+    aimed: true,
+    // On a door, a gate or a window, or said alone ("Ada knocks twice."):
+    // never knocking something over, or someone down.
+    words:
+      /\b(?:(?:knock(?:s|ed|ing)?|rap(?:s|ped|ping)?)(?:\s+(?:loudly|softly|gently|hard|twice|three times|again))?(?=\s+(?:on|at)\s+(?:the|a|an|his|her|their|its|my|your|our)\s+(?:[\p{L}-]+\s+)?(?:doors?|gates?|windows?)\b|\s*(?:[.!?,;]|$))|(?:bang(?:s|ed|ing)?|hammer(?:s|ed|ing)?)(?=\s+(?:on|at)\s+(?:the|a|an|his|her|their|its|my|your|our)\s+(?:[\p{L}-]+\s+)?(?:doors?|gates?)\b))/iu,
+    ms: 2400,
+    leastMs: 1350,
+    keyAt: 0.35,
+    fallback: 'reach',
+    plays: { move: 'reach', interact: 'knock' },
+  },
+  // A doorbell pressed: it rings.
+  'ring-bell': {
+    kind: 'handle',
+    by: HANDS,
+    thing: null,
+    aims: ['feature'],
+    aimed: true,
+    words:
+      /\b(?:ring(?:s|ing)?|rang|press(?:es|ed|ing)?|push(?:es|ed|ing)?|buzz(?:es|ed|ing)?)\s+(?:the|a|an|his|her|their|its|my|your|our)\s+(?:[\p{L}-]+\s+)?(?:door ?bell|bell|buzzer)s?\b/iu,
+    ms: 1800,
+    leastMs: 1000,
+    keyAt: 0.35,
+    fallback: 'reach',
+    plays: { move: 'reach', interact: 'ring-bell' },
+  },
+  // A light switched on: the room brightens as it is flicked.
+  'switch-on': {
+    kind: 'handle',
+    by: HANDS,
+    thing: null,
+    aims: ['feature'],
+    aimed: false,
+    words: new RegExp(
+      `\\b(?:(?:switch(?:es|ed|ing)?|turn(?:s|ed|ing)?|flick(?:s|ed|ing)?|put(?:s|ting)?|click(?:s|ed|ing)?)\\s+on\\s+${LIGHT}|(?:switch(?:es|ed|ing)?|turn(?:s|ed|ing)?|flick(?:s|ed|ing)?|put(?:s|ting)?)\\s+${LIGHT}\\s+on\\b|flick(?:s|ed|ing)?\\s+${WHOSE}(?:light\\s+)?switch\\b)`,
+      'iu',
+    ),
+    ms: 1300,
+    leastMs: 700,
+    keyAt: 0.45,
+    fallback: 'reach',
+    plays: { move: 'reach', interact: 'switch-on' },
+  },
+  'switch-off': {
+    kind: 'handle',
+    by: HANDS,
+    thing: null,
+    aims: ['feature'],
+    aimed: false,
+    words: new RegExp(
+      `\\b(?:(?:switch(?:es|ed|ing)?|turn(?:s|ed|ing)?|flick(?:s|ed|ing)?|put(?:s|ting)?|click(?:s|ed|ing)?)\\s+off\\s+${LIGHT}|(?:switch(?:es|ed|ing)?|turn(?:s|ed|ing)?|flick(?:s|ed|ing)?|put(?:s|ting)?)\\s+${LIGHT}\\s+off\\b)`,
+      'iu',
+    ),
+    ms: 1300,
+    leastMs: 700,
+    keyAt: 0.45,
+    fallback: 'reach',
+    plays: { move: 'reach', interact: 'switch-off' },
+  },
+  // A tap turned on: water runs from it, then drips.
+  'turn-on-tap': {
+    kind: 'handle',
+    by: HANDS,
+    thing: null,
+    aims: ['feature'],
+    aimed: false,
+    words: new RegExp(
+      `\\b(?:(?:turn(?:s|ed|ing)?|run(?:s|ning)?|ran|open(?:s|ed|ing)?)\\s+on\\s+${TAP}|(?:turn(?:s|ed|ing)?|open(?:s|ed|ing)?)\\s+${TAP}\\s+on\\b|wash(?:es|ed|ing)?\\s+(?:his|her|their|its|my|your|our)\\s+(?:hands|face)\\b)`,
+      'iu',
+    ),
+    ms: 2400,
+    leastMs: 1300,
+    keyAt: 0.3,
+    fallback: 'reach',
+    plays: { move: 'reach', interact: 'turn-on-tap' },
+  },
 };
 
 /** The doing that plays a handling of a thing: its own id, but for putting on and taking off. */
@@ -1464,6 +1627,15 @@ const IDEAL_MS: Partial<Record<DoingId, number>> = {
   throw: 1800,
   catch: 1200,
   kick: 1500,
+  // Using the set's things: all their steps want (scene-interact).
+  'go-through': 4800,
+  'climb-stairs': 4200,
+  'lean-on': 2800,
+  knock: 3000,
+  'ring-bell': 2200,
+  'switch-on': 1500,
+  'switch-off': 1500,
+  'turn-on-tap': 3000,
 };
 
 /** An action move's phases as shares of all it wants, from its clip. */
@@ -1686,6 +1858,13 @@ export const FEATURE_KINDS = [
   'steps',
   'swing',
   'well',
+  // Used by the people at them (studio-interactions-plan I2).
+  'stairs',
+  'ladder',
+  'counter',
+  'cupboard',
+  'switch',
+  'sink',
 ] as const;
 export type FeatureKind = (typeof FEATURE_KINDS)[number];
 
@@ -1712,9 +1891,16 @@ export const FEATURE_WORDS: Record<FeatureKind, RegExp> = {
   vehicle:
     /\b(?:buses|bus|minibus|cars?|vans?|trucks?|lorr(?:y|ies)|taxis?|danfo)\b/iu,
   window: /\bwindows?\b/iu,
-  steps: /\b(?:steps|stairs|staircase|ladder)\b/iu,
+  steps: /\bsteps\b/iu,
   swing: /\b(?:swings?|tyre swing)\b/iu,
   well: /\bwells?\b/iu,
+  stairs: /\b(?:stairs|staircases?|stairways?)\b/iu,
+  ladder: /\bladders?\b/iu,
+  counter: /\b(?:counters?|worktops?)\b/iu,
+  cupboard: /\b(?:cupboards?|cabinets?|drawers?|dressers?)\b/iu,
+  switch: /\b(?:light ?switch(?:es)?|switch(?:es)?)\b/iu,
+  // Never a tap on the shoulder: a sink's tap.
+  sink: /\b(?:sinks?|basins?|faucets?|taps?(?!\s+(?:on|at)\b))\b/iu,
 };
 
 /** A feature of the set as a look, a point or a throw is aimed at it: "f:gate". */
@@ -1729,6 +1915,7 @@ export const OPENING_FEATURES: readonly FeatureKind[] = [
   'door',
   'window',
   'vehicle',
+  'cupboard',
 ];
 
 /** A feature's kind: one of the list's, or one of a show's own, which the artist draws. */
@@ -2052,7 +2239,8 @@ export function featureIdOf(word: string): string {
   const w = word.toLowerCase().trim().replace(/\s+/g, '-');
   if (/^(?:buses|bus|minibus)$/.test(w)) return 'bus';
   if (/^goal-?posts?$|^goals?$/.test(w)) return 'goalpost';
-  if (/^(?:steps|stairs|staircase)$/.test(w)) return 'steps';
+  if (w === 'steps') return 'steps';
+  if (/^(?:stairs|staircases?|stairways?)$/.test(w)) return 'stairs';
   if (/^(?:mango-tree|palm-tree)$/.test(w)) return 'tree';
   if (w === 'tyre-swing') return 'swing';
   if (/^(?:couch(?:es)?|settees?)$/.test(w)) return 'sofa';

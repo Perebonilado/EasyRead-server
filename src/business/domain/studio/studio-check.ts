@@ -24,6 +24,7 @@ import { eyesClosedIn, faceNamed } from '../scene-feeling';
 import { PROP_KIND, PROP_WORDS, STAGE_PROPS } from '../scene-props';
 import { doingsIn, type Actor, type ReadDoing } from '../scene-directions';
 import { STATION_SHARES } from '../scene-layout';
+import { USES } from '../scene-interact';
 import {
   OPENING_FEATURES,
   THING_WORDS,
@@ -75,6 +76,7 @@ import {
   LINE_WORDS,
   MOST_ON_STAGE,
   SPOTS,
+  TWO_SHOTS,
   secondsOf,
   studioId,
   WORDS_A_SECOND,
@@ -153,6 +155,12 @@ export interface EndState {
   cast?: string[];
   /** What each one wears as it ends, where that is not their usual look: the next scene opens with them in it. */
   wears?: { who: string; figure: FigureSpec }[];
+  /**
+   * Who went through a door of the set as their last going, and which
+   * (studio-interactions-plan §2.1): the next scene, on another set, opens
+   * with them coming in through the same door's other side.
+   */
+  wentThrough?: { who: string; feature: string }[];
 }
 
 /** A story's scene may run this much longer, or shorter, than its outline said before it goes back. */
@@ -845,6 +853,37 @@ export function mendSheet(
     return made.id;
   };
 
+  // Who went through a door as the scene before ended, on another set,
+  // and is here as this one opens: they come in through this set's door,
+  // the same door seen from its other side (studio-interactions-plan
+  // §2.1). One the set has not got is put on it, for good, and linked.
+  if (before?.wentThrough?.length && before.set && before.set !== sheet.set)
+    for (const went of before.wentThrough) {
+      if (!sheet.onStage.some((p) => characterId(p.who, bible) === went.who))
+        continue;
+      const linked = features.find(
+        (f) => f.link?.set === before.set && f.link.feature === went.feature,
+      );
+      if (linked) continue;
+      const door =
+        features.find((f) => f.kind === 'door' && !f.link) ??
+        (featureFor('door', went.who, 'way')
+          ? features.find((f) => f.kind === 'door' && !f.link)
+          : undefined);
+      if (!door) continue;
+      const now: StudioFeature = {
+        ...door,
+        link: { set: before.set, feature: went.feature },
+      };
+      features[features.indexOf(door)] = now;
+      const k = found.indexOf(door);
+      if (k >= 0) found[k] = now;
+      else found.push(now);
+      mended.push(
+        `the ${door.name} is the ${went.feature} of the ${before.set}, seen from its other side: ${nameOf(went.who)} comes in through it`,
+      );
+    }
+
   /** Words that are never a new feature: the show's own things and features, and its people's names. */
   const knownWords = () => [
     ...ownThings.map((t) => t.name),
@@ -977,6 +1016,45 @@ export function mendSheet(
       featureKindOf(plan.via) === 'vehicle'
     )
       via = features.find((f) => f.opens)?.id ?? null;
+    // Done with a thing of the set the words name none of ("switches on
+    // the light", "washes her hands", "rings the doorbell", "goes
+    // upstairs"): the set's own of its kinds, else one put on the set for
+    // good (studio-interactions-plan §2.5).
+    const uses = USES[id];
+    if (uses) {
+      const usable = (f: string | null) =>
+        f !== null &&
+        features.some((one) => one.id === f && uses.kinds.includes(one.kind));
+      // Done with a thing of the set the words name, whatever it is (leaning
+      // on a tree): that one.
+      const named = (f: string | null) =>
+        f !== null && features.some((one) => one.id === f);
+      if (!usable(via) && !usable(target) && !named(target) && !named(via)) {
+        const wanted =
+          id === 'climb-stairs' && /\bladders?\b/iu.test(kept)
+            ? 'ladder'
+            : id === 'climb-stairs' && /\bsteps\b/iu.test(kept)
+              ? 'steps'
+              : uses.adds;
+        const made =
+          features.find(
+            (f) =>
+              uses.kinds.includes(f.kind) &&
+              (wanted === uses.adds || f.kind === wanted),
+          )?.id ?? featureFor(wanted, who, id === 'go-through' ? 'way' : 'to');
+        if (!made) {
+          const instead = doingOf(id)?.fallback ?? 'nod';
+          mended.push(
+            `beat ${n}: nothing to ${called(id)}; ${called(instead)} instead`,
+          );
+          return act(beat, { ...plan, do: instead }, at, kept);
+        }
+        if (id === 'go-through') via = made;
+        else target = made;
+      }
+      if (id === 'go-through' && !via && usable(target)) via = target;
+      if (id === 'go-through') target = null;
+    }
     // A thing no list has, done with as only a thing is ("flies his
     // kite"), or named so by the sheet and the words: the show's own.
     // Clothes put on or taken off that are not on the stage, and not the
@@ -1101,7 +1179,7 @@ export function mendSheet(
           return;
         }
       }
-      if (id === 'leave' || id === 'squeeze') {
+      if (id === 'leave' || id === 'squeeze' || id === 'go-through') {
         if (!here.has(who)) {
           mended.push(`beat ${n}: ${nameOf(who)} is not there to leave`);
           return;
@@ -2134,7 +2212,7 @@ export function mendSheet(
         ...shot,
         beat,
         on: shot.shot === 'wide' ? null : on,
-        with: shot.shot === 'two' && also && there.has(also) ? also : null,
+        with: TWO_SHOTS.has(shot.shot) && also && there.has(also) ? also : null,
       },
     ];
   });
@@ -2279,6 +2357,29 @@ export function wordsFor(beat: SheetBeat, bible: StudioBible): string {
   // Dressed or undressed with nothing named: into or out of their clothes.
   if ((id === 'dress' || id === 'undress') && !thing)
     return `${nameOf(beat.who)} gets ${id === 'dress' ? 'dressed' : 'undressed'}.`;
+  // What is done with a thing of the set, said as it is done with it.
+  const used = beat.via ?? aim;
+  const usedName =
+    used && !used.startsWith('@') ? used.replace(/-/g, ' ') : null;
+  switch (id) {
+    case 'go-through':
+      return `${nameOf(beat.who)} walks through the ${usedName ?? 'door'}.`;
+    case 'climb-stairs':
+      return `${nameOf(beat.who)} climbs up the ${usedName && /\b(?:stairs|steps|ladder)\b/u.test(usedName) ? usedName : 'stairs'}.`;
+    case 'lean-on':
+      return `${nameOf(beat.who)} leans on the ${usedName ?? 'counter'}.`;
+    case 'knock':
+      return `${nameOf(beat.who)} knocks on the ${usedName ?? 'door'}.`;
+    case 'ring-bell':
+      return `${nameOf(beat.who)} rings the doorbell.`;
+    case 'switch-on':
+    case 'switch-off':
+      return `${nameOf(beat.who)} switches ${id === 'switch-on' ? 'on' : 'off'} the light.`;
+    case 'turn-on-tap':
+      return `${nameOf(beat.who)} turns on the tap.`;
+    default:
+      break;
+  }
   const parts = [nameOf(beat.who), verb];
   const handles = doingOf(id)?.kind === 'handle';
   if (handles && thing && id !== 'open' && id !== 'close')
@@ -2336,12 +2437,25 @@ export function withFeatures(
       if (s.id !== setId) return s;
       const own = s.features ?? [];
       const more = features.filter((f) => !own.some((o) => o.id === f.id));
-      // One of the show's own the words have since opened opens for good.
-      const opened = own.map((o) =>
-        !o.opens && features.some((f) => f.id === o.id && f.opens)
-          ? { ...o, opens: true }
-          : o,
-      );
+      // One of the show's own the words have since opened opens for good;
+      // a door since found to be the same door as one on another set, so.
+      const opened = own.map((o) => {
+        const found = features.find((f) => f.id === o.id);
+        const opens = !o.opens && Boolean(found?.opens);
+        const link =
+          found?.link &&
+          (found.link.set !== o.link?.set ||
+            found.link.feature !== o.link?.feature)
+            ? found.link
+            : null;
+        return opens || link
+          ? {
+              ...o,
+              ...(opens ? { opens: true } : {}),
+              ...(link ? { link } : {}),
+            }
+          : o;
+      });
       const changed = opened.some((o, k) => o !== own[k]);
       return more.length || changed
         ? { ...s, features: [...opened, ...more] }
@@ -2778,6 +2892,8 @@ export function endStateOf(
     if (handled(p.holding)) holders.set(p.holding, p.who);
     else if (p.holding) gear.set(p.who, p.holding);
   const gone = new Set<string>();
+  /** The door each one went through as their last going. */
+  const wentThrough = new Map<string, string>();
   const character = (id: string) => bible?.characters.find((c) => c.id === id);
   // What the words send up into a feature of the set, or find caught
   // there: in no one's hand, up there.
@@ -2815,6 +2931,13 @@ export function endStateOf(
       } else if (beat.spot && doingOf(beat.do)?.kind === 'travel')
         here.set(beat.who, beat.spot);
       if (beat.do === 'leave' || beat.do === 'squeeze') here.delete(beat.who);
+      if (beat.do === 'enter' || beat.do === 'leave' || beat.do === 'squeeze')
+        wentThrough.delete(beat.who);
+      if (beat.do === 'go-through') {
+        here.delete(beat.who);
+        const door = beat.via ?? beat.target;
+        if (door) wentThrough.set(beat.who, door);
+      }
     }
     if (beat.kind === 'business' && beat.who && beat.prop) {
       const prop = beat.prop;
@@ -2895,6 +3018,14 @@ export function endStateOf(
     ],
     // Everyone seen so far: what they hold next is what they were left with.
     cast: [...new Set([...(before?.cast ?? []), ...cast])],
+    ...(wentThrough.size
+      ? {
+          wentThrough: [...wentThrough].map(([who, feature]) => ({
+            who,
+            feature,
+          })),
+        }
+      : {}),
     // What each one wears, where it is not their usual look: this scene's
     // for those in it, the scene before's for the rest.
     ...(() => {

@@ -196,9 +196,9 @@ export interface SetFocal {
 /** What a layout may place: a piece the stage also draws, a piece of scenery, or a palm. */
 export type SetItemKind = FeatureKind | SceneryKind | 'palm';
 export const SET_ITEM_KINDS: readonly SetItemKind[] = [
-  ...FEATURE_KINDS,
-  ...SCENERY_KINDS,
-  'palm',
+  // Once each: a counter and a cupboard are both the stage's (used by the
+  // people at them) and scenery (painted as they are).
+  ...new Set<SetItemKind>([...FEATURE_KINDS, ...SCENERY_KINDS, 'palm']),
 ];
 
 export interface SetItem {

@@ -144,7 +144,11 @@ const rigged = (drawn: {
   dangles?: GatedDrawing['dangles'];
   stride?: GatedDrawing['stride'];
   views?: string[];
-}): Pick<GatedDrawing, 'rigVersion' | 'dangles' | 'stride' | 'views'> =>
+  viewJoints?: GatedDrawing['viewJoints'];
+}): Pick<
+  GatedDrawing,
+  'rigVersion' | 'dangles' | 'stride' | 'views' | 'viewJoints'
+> =>
   drawn.rig === 2 || drawn.rig === 3
     ? {
         rigVersion: drawn.rig,
@@ -152,6 +156,9 @@ const rigged = (drawn: {
         ...(drawn.stride ? { stride: drawn.stride } : {}),
         ...(drawn.rig === 3 && drawn.views?.length
           ? { views: drawn.views }
+          : {}),
+        ...(drawn.rig === 3 && drawn.viewJoints
+          ? { viewJoints: drawn.viewJoints }
           : {}),
       }
     : {};

@@ -66,7 +66,7 @@ export function walkLength(
 }
 
 /** How long a walk between two places takes, at a walk: by its true length on the floor. */
-const walkBetween = (
+export const walkBetween = (
   from: Pick<ScenePlaceDto, 'x' | 'w' | 'h'>,
   to: Pick<ScenePlaceDto, 'x' | 'w' | 'h'>,
   W: number,
@@ -80,6 +80,13 @@ const paceAt = (step: SceneStepDto, id: string) =>
     ? RUN_PACE
     : Math.min(RUN_PACE, Math.max(1, step.hurry?.[id] ?? 1));
 const VANISH_MS = 260;
+/** The interactions that carry someone to their step's new place, or on or off the stage (scene-interact's CARRIES): the player moves them, not a walk. */
+const CARRIES_AT: ReadonlySet<string> = new Set([
+  'go-through',
+  'come-through',
+  'climb-stairs',
+  'climb-ladder',
+]);
 
 /** Who comes on at step `k`, and who goes. */
 const newcomersAt = (steps: readonly SceneStepDto[], k: number) =>
@@ -147,9 +154,15 @@ export function settledOf(
       way.k < 0.99;
     return { way, goesIn };
   };
+  /** Whether someone's interaction carries them at a step's moment (through a door, up the stairs): it, not a walk, moves them. */
+  const carriedBy = (id: string, t: number) =>
+    (scene.acting?.[id]?.interact ?? []).some(
+      (one) => CARRIES_AT.has(one.does) && Math.abs(one.at - t) <= 60,
+    );
   steps.forEach((step, k) => {
     at = Math.max(at, step.atMs);
     for (const id of newcomersAt(steps, k)) {
+      if (carriedBy(id, step.atMs)) continue;
       const place = places[k]?.[id];
       const start = entryStart(steps, k, id);
       const entry = step.enter[id];
@@ -181,6 +194,7 @@ export function settledOf(
     for (const id of leaversAt(steps, k)) {
       const place = places[k - 1]?.[id];
       const exit = step.exit?.[id];
+      if (exit?.how === 'through' || carriedBy(id, step.atMs)) continue;
       const by = wayOf(exit?.via, exit?.how);
       if (place && walks(id) && !step.cut)
         at = Math.max(
@@ -208,6 +222,7 @@ export function settledOf(
         const from = places[k - 1]?.[id];
         const to = places[k]?.[id];
         if (!from || !to || !steps[k - 1].show.includes(id)) continue;
+        if (carriedBy(id, step.atMs)) continue;
         at = Math.max(
           at,
           step.atMs +
@@ -230,6 +245,11 @@ export function settledOf(
       );
   for (const [start, , ms] of scene.setting?.crowd?.moves ?? [])
     at = Math.max(at, start + ms);
+  // What someone does with a thing of the set, to its last step; and a
+  // light switched, a door swung by it, seen.
+  for (const acting of Object.values(scene.acting ?? {}))
+    for (const one of acting.interact ?? [])
+      for (const [, start, ms] of one.steps) at = Math.max(at, start + ms);
   // A gate swinging shut is seen to the end of its swing.
   for (const [start] of scene.setting?.featureStates ?? [])
     at = Math.max(at, start + SWING_MS);
@@ -324,11 +344,16 @@ export function walksOf(
       start,
       end,
     });
+  /** Whether someone's interaction carries them at a step's moment (through a door, up the stairs): no walk of the step's. */
+  const carriedBy = (id: string, t: number) =>
+    (scene.acting?.[id]?.interact ?? []).some(
+      (one) => CARRIES_AT.has(one.does) && Math.abs(one.at - t) <= 60,
+    );
   steps.forEach((step, k) => {
     const prev = steps[k - 1];
     for (const id of step.show) {
       const at = places[k]?.[id];
-      if (!at || !walks(id)) continue;
+      if (!at || !walks(id) || carriedBy(id, step.atMs)) continue;
       if (prev?.show.includes(id)) {
         const was = places[k - 1]?.[id];
         if (was && walkLength(was, at, W) > W * 0.02)
@@ -350,6 +375,7 @@ export function walksOf(
       const at = places[k - 1]?.[id];
       if (step.show.includes(id) || !at || !walks(id)) continue;
       const exit = step.exit?.[id];
+      if (exit?.how === 'through' || carriedBy(id, step.atMs)) continue;
       const by = feature(exit?.via);
       const left = exit ? exit.side === 'left' : at.x + at.w / 2 < W / 2;
       const off =
@@ -412,11 +438,23 @@ export function hurried(
             ? Math.min(ms, HELD_IN_MS)
             : ms),
       );
+  // What they do with a thing of the set: they are there before it begins.
+  for (const [id, acting] of Object.entries(scene.acting ?? {}))
+    for (const one of acting.interact ?? [])
+      begins(
+        id,
+        one.at,
+        one.steps.reduce((end, [, at, ms]) => Math.max(end, at + ms), one.at),
+      );
   /** Whether a move of someone's that carries them (a leap, a landing) begins as a step does: the step is the move's, not a walk. */
   const carried = (id: string, at: number) =>
     (scene.acting?.[id]?.moves ?? []).some(
       ([start, move]) =>
         doingOf(move)?.carries && Math.abs(start - at) <= CARRIED_SLACK_MS,
+    ) ||
+    (scene.acting?.[id]?.interact ?? []).some(
+      (one) =>
+        CARRIES_AT.has(one.does) && Math.abs(one.at - at) <= CARRIED_SLACK_MS,
     );
   /** When someone is speaking, from and to: as their mouth moves. */
   const says = (id: string): [number, number][] =>
@@ -506,7 +544,8 @@ export function hurried(
         paceAt(step, id) > 1 ||
         !walks(id) ||
         !steps[k - 1].show.includes(id) ||
-        !moved(id, k)
+        !moved(id, k) ||
+        carried(id, step.atMs)
       )
         continue;
       const quicker =
@@ -636,7 +675,7 @@ export function wideView(
  * neighbour from being cut in half, which this leaves out.
  */
 export function viewOf(
-  shot: Pick<SceneEffectDto, 'target' | 'part'> | null,
+  shot: ShotLike | null,
   show: readonly string[],
   places: Record<string, ScenePlaceDto>,
   W: number,
@@ -649,6 +688,15 @@ export function viewOf(
   const one = shot ? placed(shot.target) : undefined;
   if (!shot || !one) return wide;
   const two = placed(shot.part);
+  const kind = shot.shot?.kind;
+  if (kind === 'ots' && two) return otsView(one, two, W, H, room.span);
+  if (kind === 'crowd') return crowdView(one, W, H, room.span);
+  if (kind === 'deep') {
+    const deep = deepView(shot.target, show, places, W, H, room.span);
+    if (deep) return deep.view;
+  }
+  if (!kind && !two && shot.shot?.angle === 'low')
+    return lowView(one, W, H, room.span);
   if (two) {
     const x0 = Math.min(one.x, two.x);
     const y0 = Math.min(one.y, two.y);
@@ -682,6 +730,327 @@ export function viewOf(
     room.span,
   );
 }
+
+// ── The shot grammar (studio-views-plan §3) ────────────────────────────────
+
+/** What frames a shot: whom it is on, with whom, and its grammar. */
+export type ShotLike = Pick<SceneEffectDto, 'target' | 'part'> &
+  Partial<Pick<SceneEffectDto, 'shot'>>;
+
+/**
+ * Over the shoulder (the player's own, shots.ts): the one speaking is
+ * framed from the chest up, their top three fifths filling OTS_FILL of the
+ * frame's height (no nearer than OTS_LEAST, no closer than OTS_MOST), and
+ * OTS_OFFSET of the frame's width off its middle, away from the one near.
+ */
+export const OTS_FILL = 0.62;
+export const OTS_LEAST = 1.3;
+export const OTS_MOST = 2.2;
+export const OTS_OFFSET = 0.16;
+/**
+ * The one near the camera in a shot over their shoulder, on the screen:
+ * this tall (a share of the frame's height, so cropped at its foot), their
+ * middle this far in from the frame's edge (a share of its width) and the
+ * top of their box this far down; and at least this far clear of the face
+ * of whoever the shot is on, stepping further off the frame's edge for it,
+ * at most until NEAR_OFF_MOST of them is off it.
+ */
+export const NEAR_TALL = 1.3;
+export const NEAR_EDGE = 0.06;
+export const NEAR_TOP = 0.1;
+export const NEAR_CLEAR = 0.02;
+export const NEAR_OFF_MOST = 0.6;
+/** How far into the floor the one near the camera stands: before its front edge (studio-views-plan §3.1, d > 1). */
+export const NEAR_D = 1.2;
+/**
+ * Deep staging (Richard's kitchen): the one near the camera this tall on
+ * the screen, their middle this far in from the frame's edge; the others
+ * behind at their places, framed together at most this close, their
+ * middle this share of the frame off its middle, away from the one near.
+ */
+export const DEEP_TALL = 0.95;
+export const DEEP_EDGE = 0.1;
+export const DEEP_TOP = 0.1;
+export const DEEP_MOST = 1.25;
+export const DEEP_OFFSET = 0.14;
+/** Over the crowd: this close, the one speaking with the top of their head this far down the frame, the rows before the camera below them. */
+export const CROWD_SCALE = 1.35;
+export const CROWD_HEAD = 0.28;
+
+const middleOf = (p: Pick<ScenePlaceDto, 'x' | 'w'>) => p.x + p.w / 2;
+/** Someone's face in their box: the kit's head, high in the middle (scene-faces-seen's faceOf). */
+const faceIn = (p: Pick<ScenePlaceDto, 'x' | 'y' | 'w' | 'h'>) => ({
+  x: p.x + p.w * 0.3,
+  y: p.y + p.h * 0.03,
+  w: p.w * 0.4,
+  h: p.h * 0.2,
+});
+
+/** Over the shoulder of `near` onto `one`: where the camera looks. */
+export function otsView(
+  one: ScenePlaceDto,
+  near: ScenePlaceDto,
+  W: number,
+  H: number,
+  span: readonly [number, number] = [0, 0],
+): View {
+  const dir = Math.sign(middleOf(one) - middleOf(near)) || 1;
+  const s = Math.min(
+    OTS_MOST,
+    Math.max(OTS_LEAST, (OTS_FILL * H) / (one.h * 0.62)),
+  );
+  return settle(
+    {
+      s,
+      x: middleOf(one) - (dir * OTS_OFFSET * W) / s,
+      y: one.y + one.h * 0.3,
+    },
+    W,
+    H,
+    span,
+  );
+}
+
+/** Over the crowd onto `one`, who speaks to them: where the camera looks. */
+export function crowdView(
+  one: ScenePlaceDto,
+  W: number,
+  H: number,
+  span: readonly [number, number] = [0, 0],
+): View {
+  const s = Math.max(1, Math.min(CROWD_SCALE, (0.8 * W) / one.w));
+  return settle(
+    { s, x: middleOf(one), y: one.y + ((0.5 - CROWD_HEAD) * H) / s },
+    W,
+    H,
+    span,
+  );
+}
+
+/** A low angle on one alone frames them whole, at most this close. */
+export const LOW_MOST = 1.6;
+
+/** A low angle on `one` alone (a hero): them whole, their feet low in the frame. */
+export function lowView(
+  one: ScenePlaceDto,
+  W: number,
+  H: number,
+  span: readonly [number, number] = [0, 0],
+): View {
+  const s = Math.max(
+    1,
+    Math.min(LOW_MOST, (0.86 * H) / (one.h * 1.08), (0.7 * W) / one.w),
+  );
+  return settle({ s, x: middleOf(one), y: one.y + one.h * 0.48 }, W, H, span);
+}
+
+/** The people on the stage who are not `id`: not the set, not a crowd. */
+const othersThan = (
+  id: string,
+  show: readonly string[],
+  places: Record<string, ScenePlaceDto>,
+  W: number,
+) =>
+  show.flatMap((other) => {
+    const p = places[other];
+    return other !== id && p && !other.startsWith('@') && p.w <= W * 0.6
+      ? [p]
+      : [];
+  });
+
+/**
+ * Deep staging on `id`, near the camera: where the camera looks (on the
+ * others, behind), and the side of the frame the one near is at. Null
+ * with no one else on the stage.
+ */
+export function deepView(
+  id: string,
+  show: readonly string[],
+  places: Record<string, ScenePlaceDto>,
+  W: number,
+  H: number,
+  span: readonly [number, number] = [0, 0],
+): { view: View; side: -1 | 1 } | null {
+  const near = places[id];
+  const others = othersThan(id, show, places, W);
+  if (!near || !others.length) return null;
+  const mean = others.reduce((sum, p) => sum + middleOf(p), 0) / others.length;
+  const side: -1 | 1 = middleOf(near) > mean ? 1 : -1;
+  const x0 = Math.min(...others.map((p) => p.x));
+  const x1 = Math.max(...others.map((p) => p.x + p.w));
+  const y0 = Math.min(...others.map((p) => p.y));
+  const y1 = Math.max(...others.map((p) => p.y + p.h * 0.75));
+  const s = Math.max(
+    1,
+    Math.min(DEEP_MOST, (0.62 * W) / (x1 - x0), (0.8 * H) / (y1 - y0)),
+  );
+  return {
+    view: settle(
+      { s, x: (x0 + x1) / 2 + (side * DEEP_OFFSET * W) / s, y: (y0 + y1) / 2 },
+      W,
+      H,
+      span,
+    ),
+    side,
+  };
+}
+
+/**
+ * Where someone cheated near the camera stands on the stage for a shot
+ * on `view`: `tall` of the frame's height on the screen, the top of their
+ * box `top` of it down, their middle `edge` of its width in from the edge
+ * at `side`, as far further off the frame as keeps each face in `clear`
+ * seen (at most NEAR_OFF_MOST of them off it); before the floor's front
+ * (NEAR_D). Their box keeps its shape.
+ */
+export function nearPlace(
+  near: Pick<ScenePlaceDto, 'w' | 'h'>,
+  view: View,
+  side: -1 | 1,
+  clear: readonly Pick<ScenePlaceDto, 'x' | 'y' | 'w' | 'h'>[],
+  W: number,
+  H: number,
+  o: { tall: number; edge: number; top: number } = {
+    tall: NEAR_TALL,
+    edge: NEAR_EDGE,
+    top: NEAR_TOP,
+  },
+): ScenePlaceDto {
+  const s = Math.max(1, view.s);
+  const hs = o.tall * H;
+  const ws = (hs * near.w) / Math.max(1, near.h);
+  // Its body, as the faces check takes one: its middle seven tenths.
+  const body = ws * 0.35;
+  let cx = side < 0 ? o.edge * W : W - o.edge * W;
+  for (const one of clear) {
+    const face = faceIn(one);
+    const fx0 = W / 2 + s * (face.x - view.x);
+    const fx1 = fx0 + s * face.w;
+    if (side < 0) cx = Math.min(cx, fx0 - body - NEAR_CLEAR * W);
+    else cx = Math.max(cx, fx1 + body + NEAR_CLEAR * W);
+  }
+  const most = ws * (NEAR_OFF_MOST - 0.5);
+  cx = side < 0 ? Math.max(cx, -most) : Math.min(cx, W + most);
+  const r = (n: number) => Math.round(n * 10) / 10;
+  return {
+    x: r(view.x + (cx - ws / 2 - W / 2) / s),
+    y: r(view.y + (o.top * H - H / 2) / s),
+    w: r(ws / s),
+    h: r(hs / s),
+    d: NEAR_D,
+  };
+}
+
+/**
+ * Whom a shot cheats near the camera, and where they stand for it: the
+ * one over whose shoulder it looks (ots, a little soft), or the one near
+ * in deep staging (sharp: they speak). Null for any other shot, or one
+ * whose people are not there.
+ */
+export function nearOf(
+  shot: ShotLike | null,
+  show: readonly string[],
+  places: Record<string, ScenePlaceDto>,
+  W: number,
+  H: number,
+  room: SetRoom = NO_ROOM,
+): { id: string; place: ScenePlaceDto; view: View; soft: boolean } | null {
+  const kind = shot?.shot?.kind;
+  if (!shot || (kind !== 'ots' && kind !== 'deep')) return null;
+  const placed = (id: string | null) =>
+    id && show.includes(id) ? places[id] : undefined;
+  const one = placed(shot.target);
+  if (!one) return null;
+  if (kind === 'ots') {
+    const near = placed(shot.part);
+    if (!near || !shot.part) return null;
+    const view = otsView(one, near, W, H, room.span);
+    const side: -1 | 1 = middleOf(one) >= middleOf(near) ? -1 : 1;
+    return {
+      id: shot.part,
+      place: nearPlace(near, view, side, [one], W, H),
+      view,
+      // Over the shoulder of one listening: a little soft.
+      soft: true,
+    };
+  }
+  const deep = deepView(shot.target, show, places, W, H, room.span);
+  if (!deep) return null;
+  return {
+    id: shot.target,
+    place: nearPlace(
+      one,
+      deep.view,
+      deep.side,
+      othersThan(shot.target, show, places, W),
+      W,
+      H,
+      { tall: DEEP_TALL, edge: DEEP_EDGE, top: DEEP_TOP },
+    ),
+    view: deep.view,
+    // Near in deep staging, and speaking: sharp.
+    soft: false,
+  };
+}
+
+/** What a shot cheats near the camera, as a key: two shots that cheat differently are always a cut apart. */
+const cheatKey = (shot: ShotLike | null) => {
+  const kind = shot?.shot?.kind;
+  return shot && (kind === 'ots' || kind === 'deep')
+    ? `${kind}:${shot.target}:${shot.part ?? ''}`
+    : '';
+};
+
+/**
+ * Whether a cut from one shot to the next is a real cut: the pictures
+ * apart enough (apart), or one cheating someone near the camera that the
+ * other does not (over one shoulder and then the other: the one near
+ * changes sides, whatever the camera's move).
+ */
+export function shotsApart(
+  a: ShotLike | null,
+  b: ShotLike | null,
+  va: View,
+  vb: View,
+  W: number,
+  H: number,
+): boolean {
+  return cheatKey(a) !== cheatKey(b) || apart(va, vb, W, H);
+}
+
+/**
+ * Low and high angles on a flat set (studio-views-plan §4.4), a cheat:
+ * the horizon moves ANGLE_TILT of the frame's height, down for a camera
+ * low looking up, up for one high looking down, by each layer behind the
+ * people scaled about the frame's top (low) or bottom (high), the farther
+ * off the more, none from TILT_TO on; and the people are ANGLE_PEOPLE
+ * larger (low) or smaller (high), about their feet. The player's own.
+ */
+export const ANGLE_TILT = 0.08;
+export const ANGLE_PEOPLE = 0.06;
+export const TILT_TO = 0.8;
+/** Where the horizon is, as a share of the frame's height from its pivot: the tilt's scale is set so it moves ANGLE_TILT. */
+const HORIZON_FROM_PIVOT = 0.5;
+
+/** How much of the tilt a layer at `depth` takes: all of it far off, none from TILT_TO on. */
+export const tiltOf = (depth: number): number =>
+  Math.max(0, 1 - depth / TILT_TO);
+
+/** A layer's scale under a low or high angle, and about which edge of the frame (0 the top, 1 the bottom). */
+export function angleLayer(
+  angle: 'low' | 'high' | undefined,
+  depth: number,
+): { k: number; pivot: 0 | 1 } {
+  if (!angle) return { k: 1, pivot: 0 };
+  return {
+    k: 1 + (ANGLE_TILT / HORIZON_FROM_PIVOT) * tiltOf(depth),
+    pivot: angle === 'low' ? 0 : 1,
+  };
+}
+
+/** How much larger the people are under an angle, about their feet. */
+export const anglePeople = (angle: 'low' | 'high' | undefined): number =>
+  angle === 'low' ? 1 + ANGLE_PEOPLE : angle === 'high' ? 1 - ANGLE_PEOPLE : 1;
 
 /** How the things on the floor follow the camera, by how far back they stand: the player's FLOOR_BACK_F and FLOOR_FRONT_F. */
 export const FLOOR_BACK_F = 0.8;
@@ -770,7 +1139,14 @@ export function withoutJumps(
   const endOf = (shot: SceneEffectDto) => shot.untilMs ?? durationMs;
   /** Whether a shot going back to the whole stage at its end is a real cut. */
   const leaves = (shot: SceneEffectDto) =>
-    apart(view(shot, endOf(shot) - 1), view(null, endOf(shot)), W, H);
+    shotsApart(
+      shot,
+      null,
+      view(shot, endOf(shot) - 1),
+      view(null, endOf(shot)),
+      W,
+      H,
+    );
   const kept: SceneEffectDto[] = [];
   for (const shot of [...shots].sort((a, b) => a.atMs - b.atMs)) {
     const t = shot.atMs;
@@ -781,7 +1157,8 @@ export function withoutJumps(
       last.untilMs = t;
       now = last;
     }
-    if (apart(view(now, t), view(shot, t), W, H)) kept.push({ ...shot });
+    if (shotsApart(now, shot, view(now, t), view(shot, t), W, H))
+      kept.push({ ...shot });
     else if (now) now.untilMs = Math.max(endOf(now), endOf(shot));
   }
   const last = kept[kept.length - 1];

@@ -23,8 +23,20 @@
  * glance does not turn the body round). Pure: the same scene gives the
  * same views.
  */
-import type { SceneDto, ScenePlaceDto, SceneView } from '../../contracts';
-import { WALK_DEPTH, walksOf, type StageWalk } from './scene-film';
+import type {
+  SceneDto,
+  SceneEffectDto,
+  ScenePlaceDto,
+  SceneView,
+} from '../../contracts';
+import {
+  NO_ROOM,
+  WALK_DEPTH,
+  nearOf,
+  roomOf,
+  walksOf,
+  type StageWalk,
+} from './scene-film';
 
 /** The camera's yaw on every shot today: straight on (§3 brings others). */
 export const FRONT_ON = 0;
@@ -111,6 +123,35 @@ export function facingToward(
 const speakerFacing = (facing: number) =>
   Math.abs(facing) > 112 ? Math.sign(facing) * 60 : facing;
 
+/** How far round the camera is over someone's shoulder (studio-views-plan §3.1): the one it looks at three-quarter to us, the one near from behind. */
+export const OTS_YAW = 45;
+
+/**
+ * How a shot turns the two it is of (§3.1, §4): over the shoulder of
+ * `part` onto `target`, the camera `OTS_YAW` round toward the one near, so
+ * the one it is on is three-quarter to us and the one near three-quarter
+ * from behind; in profile, the two face to face across the frame, the
+ * camera straight on. Each faces the other on the floor (90 to the side
+ * they are on), so each keeps the side of the frame they look to (the
+ * 180° rule, §3.3). Null for any other shot.
+ */
+export function shotFacing(
+  shot: Pick<SceneEffectDto, 'target' | 'part' | 'shot'>,
+  places: Record<string, Pick<ScenePlaceDto, 'x' | 'w'>>,
+): { yaw: number; facing: Record<string, number> } | null {
+  const kind = shot.shot?.kind;
+  if ((kind !== 'ots' && kind !== 'profile') || !shot.part) return null;
+  const one = places[shot.target];
+  const two = places[shot.part];
+  if (!one || !two) return null;
+  // Where the one it is on is, from the other: 1 to the right.
+  const dir = Math.sign(one.x + one.w / 2 - (two.x + two.w / 2)) || 1;
+  return {
+    yaw: kind === 'ots' ? -OTS_YAW * dir : 0,
+    facing: { [shot.target]: -90 * dir, [shot.part]: 90 * dir },
+  };
+}
+
 /**
  * The views of everyone drawn from every side in a scene, by id: each a
  * timeline [atMs, view, mirror], from its first moment. Only those whose
@@ -120,7 +161,8 @@ export function viewsOf(
   scene: Pick<
     SceneDto,
     'things' | 'steps' | 'stagings' | 'acting' | 'setting' | 'durationMs'
-  >,
+  > &
+    Partial<Pick<SceneDto, 'effects'>>,
 ): Record<string, [number, SceneView, 1 | -1][]> {
   const out: Record<string, [number, SceneView, 1 | -1][]> = {};
   const acting = scene.acting ?? {};
@@ -143,8 +185,38 @@ export function viewsOf(
   };
   const walkOf = (id: string, t: number): StageWalk | undefined =>
     walks.find((w) => w.id === id && w.from <= t && t < w.to);
-  /** Where someone is at `t`, on the wide stage: along a walk, else where their step has them. */
+  // The camera's shots (§3): which is on at a moment, and whom it cheats
+  // near the camera, where.
+  const set = scene.things.find(
+    (thing) =>
+      thing.kind === 'drawing' &&
+      thing.backdrop &&
+      scene.steps.some((step) => step.backdrop === thing.id),
+  );
+  const room = set?.kind === 'drawing' ? roomOf(set, wide.w, wide.h) : NO_ROOM;
+  const shots = (scene.effects ?? [])
+    .filter((e) => e.do === 'zoom' && e.untilMs !== undefined)
+    .sort((a, b) => a.atMs - b.atMs);
+  const shotAt = (t: number) =>
+    shots.find((shot) => shot.atMs <= t && t < (shot.untilMs ?? shot.atMs));
+  const nearAt = (id: string, t: number): ScenePlaceDto | null => {
+    const shot = shotAt(t);
+    const k = stepAt(t);
+    if (!shot || k < 0) return null;
+    const near = nearOf(
+      shot,
+      scene.steps[k].show,
+      wide.places[k] ?? {},
+      wide.w,
+      wide.h,
+      room,
+    );
+    return near?.id === id ? near.place : null;
+  };
+  /** Where someone is at `t`, on the wide stage: cheated near the camera for a shot, along a walk, else where their step has them. */
   const placeOf = (id: string, t: number): ScenePlaceDto | null => {
+    const cheated = nearAt(id, t);
+    if (cheated) return cheated;
     const walk = walkOf(id, t);
     if (walk) {
       const p = (t - walk.from) / Math.max(1, walk.to - walk.from);
@@ -193,10 +265,38 @@ export function viewsOf(
       times.add(at);
       times.add(at + ms);
     }
+    // What they do with a thing of the set, step by step.
+    const interacts = mine.interact ?? [];
+    for (const one of interacts)
+      for (const [, at, ms] of one.steps) {
+        times.add(at);
+        times.add(at + ms);
+      }
     for (const step of scene.steps) times.add(step.atMs);
+    // As a shot begins and ends: it may turn them for the camera.
+    for (const shot of shots) {
+      times.add(Math.round(shot.atMs));
+      times.add(Math.round(shot.untilMs ?? shot.atMs));
+    }
+    /** How the shot on at `t` turns them: its camera's yaw, and their facing in it. */
+    const inShot = (t: number): { yaw: number; facing: number } | null => {
+      const shot = shotAt(t);
+      const k = stepAt(t);
+      if (!shot || k < 0 || walkOf(id, t)) return null;
+      if (shot.shot?.kind === 'crowd' && shot.target === id)
+        // Over the crowd: they speak to them, to us.
+        return { yaw: 0, facing: 0 };
+      const turned = shotFacing(shot, wide.places[k] ?? {});
+      const facing = turned?.facing[id];
+      return turned && facing !== undefined
+        ? { yaw: turned.yaw, facing }
+        : null;
+    };
     const facingAt = (t: number): number => {
       const walk = walkOf(id, t);
       const speaking = speech.some(([a, b]) => a - 200 <= t && t < b + 200);
+      const using = interactFacing(id, t);
+      if (using !== null) return speaking ? speakerFacing(using) : using;
       if (walk) {
         const along = walkFacing(walk.start, walk.end, W);
         return speaking ? speakerFacing(along) : along;
@@ -222,10 +322,68 @@ export function viewsOf(
       }
       return speaking ? speakerFacing(facing) : facing;
     };
+    /**
+     * Which way someone faces while they use a thing of the set
+     * (studio-interactions-plan §2.1): away into a doorway going in, out of
+     * it coming out; turned to a door, a switch or a tap they use at its
+     * face (from behind, three-quarter), to a counter they lean on; along
+     * a flight of stairs seen from the side, away up steps or a ladder seen
+     * from the front; sat at a table, to the camera. Null when they use
+     * nothing then.
+     */
+    function interactFacing(who: string, t: number): number | null {
+      for (const one of interacts) {
+        const step = one.steps.find(([, at, ms]) => t >= at && t < at + ms);
+        if (!step) continue;
+        const [name] = step;
+        const f = scene.setting?.features?.find((x) => x.id === one.feature);
+        const me = placeOf(who, t) ?? placeOf(who, one.at - 1);
+        const toward =
+          f && me
+            ? Math.sign(f.at.wide.x + f.at.wide.w / 2 - (me.x + me.w / 2)) || 1
+            : 1;
+        switch (one.does) {
+          case 'go-through':
+            return name === 'through' || name === 'gone' || name === 'close'
+              ? 180
+              : toward * 50;
+          case 'come-through':
+            return 0;
+          case 'climb-stairs':
+          case 'climb-ladder': {
+            // Along a flight seen from the side, the way it rises.
+            const rises = f?.affordances?.steps;
+            const across =
+              rises && rises.length > 1
+                ? Math.sign(rises[rises.length - 1][0] - rises[0][0])
+                : 0;
+            return across ? across * 90 : 180;
+          }
+          case 'sit-at':
+          case 'stand-from':
+            return 0;
+          case 'lean-on':
+            return toward * 50;
+          default:
+            // At its face: turned to it, three-quarter from behind.
+            return name === 'wait' ? toward * 50 : toward * 135;
+        }
+      }
+      return null;
+    }
     const keys: [number, SceneView, 1 | -1][] = [];
     for (const t of [...times].filter((t) => t >= 0).sort((a, b) => a - b)) {
       // Just after the moment, so a walk that starts then is walking.
-      const { view, mirror } = viewAt(facingAt(t + 1));
+      const shot = inShot(t + 1);
+      // Using a thing of the set, they face as its interaction has them,
+      // whatever the shot would turn them to; its camera's yaw still counts.
+      const using = interactFacing(id, t + 1);
+      const { view, mirror } =
+        using !== null
+          ? viewAt(facingAt(t + 1), shot?.yaw ?? 0)
+          : shot
+            ? viewAt(shot.facing, shot.yaw)
+            : viewAt(facingAt(t + 1));
       const last = keys[keys.length - 1];
       // The front is the same either way round.
       const m: 1 | -1 = view === 'front' ? 1 : mirror;

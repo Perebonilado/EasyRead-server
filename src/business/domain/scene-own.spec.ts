@@ -78,8 +78,8 @@ describe("a show's own things and features, found in its words", () => {
     expect(read('ama', 'Ama sits on the log.')).toEqual([
       'ama sit >log new feature log',
     ]);
-    expect(read('ama', 'Ama opens the cupboard.')).toEqual([
-      'ama open >cupboard new feature cupboard',
+    expect(read('ama', 'Ama opens the wardrobe.')).toEqual([
+      'ama open >wardrobe new feature wardrobe',
     ]);
     expect(
       read('kofi', 'Kofi hides behind the signpost.', {

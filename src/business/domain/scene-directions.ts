@@ -43,6 +43,14 @@ import { WEAR_WORDS } from './scene-wear';
 
 /** Doings done in or on a bed or a seat, named in their own words: "climbs into bed", "sits up in bed". */
 const IN_OR_ON: ReadonlySet<DoingId> = new Set(['stand-up', 'lie-down', 'sit']);
+/** Doings whose own words name the thing of the set they are done with: "through the door", "up the stairs", "on the tap". */
+const NAMES_ITS_FEATURE: ReadonlySet<DoingId> = new Set([
+  'go-through',
+  'climb-stairs',
+  'knock',
+  'turn-on-tap',
+  'lean-on',
+]);
 /** A thing worn, named in a doing's own words: "puts his coat on". */
 const WORN_IN = new RegExp(`\\b(?:${WEAR_WORDS})\\b`, 'iu');
 
@@ -760,6 +768,15 @@ export function doingsIn(
       const rests = RESTING_WORDS.exec(text.slice(verb.at, verb.end));
       if (rests) feature = { at: -1, word: rests[1] };
     }
+    // A thing of the set named in the doing's own words ("walks through
+    // the door", "climbs the stairs", "turns on the tap"): where it is done.
+    if (!feature && NAMES_ITS_FEATURE.has(verb.id)) {
+      const inside = featuresNamedIn(
+        text.slice(verb.at, verb.end),
+        ownFeatures,
+      )[0];
+      if (inside) feature = { at: 0, word: inside.word };
+    }
     // The thing: named after the verb, or inside its words ("lifts the cup
     // up"), never the verb itself ("bowls the ball").
     const own = text
@@ -872,6 +889,7 @@ export function doingsIn(
       (verb.id === 'leave' ||
         verb.id === 'enter' ||
         verb.id === 'squeeze' ||
+        verb.id === 'go-through' ||
         BY_WAY.test(after.slice(0, feature.at)));
     const featureId = feature ? featureIdOf(feature.word) : null;
     const target =

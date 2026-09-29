@@ -11,6 +11,7 @@
  * counted, so no miscount can move a picture off its words.
  */
 
+import type { SceneInteraction } from '../../contracts';
 import { MAX_BARS, numbersIn, type ChartSpec } from './scene-chart';
 import type {
   ActedMove,
@@ -299,6 +300,36 @@ export interface SceneBeat {
   music?: SceneMusic;
   /** The music runs high from here: a chase, a rush, danger close. */
   energy?: 'high';
+}
+
+/**
+ * A shot a scene asks for from a sentence on (the Studio's): the whole
+ * stage, one person close, two framed together; and the shot grammar
+ * (studio-views-plan §3): over the shoulder of `with` onto `on` ("ots"),
+ * the two face to face in profile ("profile"), `on` near the camera with
+ * the others behind ("deep"), over the crowd onto `on` ("crowd"), one
+ * seen from low ("low", a hero) or from high ("high", small or sad).
+ */
+export interface SceneCameraAsk {
+  beat: number;
+  shot:
+    | 'wide'
+    | 'close'
+    | 'two'
+    | 'ots'
+    | 'profile'
+    | 'low'
+    | 'high'
+    | 'deep'
+    | 'crowd';
+  on: string | null;
+  with: string | null;
+  /** On something done in a quiet: this many seconds into the quiet after spoken beat `beat` (-1, the one the scene opens with). */
+  after?: number;
+  /** Code's own choice at a moment of its own, in the scene's time (a hero's pose): instead of `beat`'s quiet. */
+  atMs?: number;
+  /** Code's own: a close seen from high or low. */
+  angle?: 'low' | 'high';
 }
 
 export interface DrawingThing {
@@ -612,6 +643,8 @@ export interface SceneGoing {
   via?: string;
   /** Under or through it, bent low: they are gone once past it. */
   squeeze?: true;
+  /** Gone through it by an interaction of theirs (a door's go-through): it carries them, not a walk to its way. */
+  through?: true;
 }
 
 /** A fixed thing of a Studio scene's set, as the stage stands it. */
@@ -664,6 +697,25 @@ export interface SceneStep {
   /** Null: the stage stays as it is and only the effects happen. */
   stage: SceneStage | null;
   effects: SceneEffect[];
+  /**
+   * What someone does with a thing of the set from this step's moment
+   * (studio-interactions-plan §1.3): timed into its steps by compose
+   * (scene-interact). One that carries them (through a door, up the
+   * stairs) is this step's change of place.
+   */
+  interact?: SceneStepInteraction[];
+}
+
+/** An interaction as the stager asks it: who, what, with which feature, and how long it has. */
+export interface SceneStepInteraction {
+  who: string;
+  does: SceneInteraction;
+  feature: string;
+  /** How long it has, in seconds. */
+  s: number;
+  side?: -1 | 1;
+  part?: string;
+  to?: 'behind' | 'next-set';
 }
 
 export interface SceneScript {
@@ -707,14 +759,7 @@ export interface SceneScript {
    * Studio's): the whole stage, one person close, or two framed together.
    * Absent, the camera is cut as a film cuts it (storyShots).
    */
-  camera?: {
-    beat: number;
-    shot: 'wide' | 'close' | 'two';
-    on: string | null;
-    with: string | null;
-    /** On something done in a quiet: this many seconds into the quiet after spoken beat `beat` (-1, the one the scene opens with). */
-    after?: number;
-  }[];
+  camera?: SceneCameraAsk[];
   /**
    * A Studio story's stage: its people at fixed stations (SceneStage.at),
    * and its set's features stood among them; a book's page lays its people

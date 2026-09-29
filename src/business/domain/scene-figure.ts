@@ -2488,6 +2488,13 @@ export interface FigureDrawing {
   rig?: 2 | 3;
   /** On rig 3, each view's group, front first: the stage shows one at a time. */
   views?: string[];
+  /** On rig 3, each view's arms as it draws them (the front's are `joints`): a hand is aimed from where it is in the view that shows. */
+  viewJoints?: Partial<
+    Record<
+      'front' | '3q' | 'profile' | 'back3q' | 'back',
+      Record<'r' | 'l', [Point2, Point2, Point2]>
+    >
+  >;
   /** On rig 2, each part that swings, its root in the frame's units. */
   dangles?: Dangle[];
   /** On rig 2, one who walks: how far one full stride (both feet) carries them, in the frame's units, and how they go. */

@@ -10,6 +10,8 @@ import { describeFigure } from '../scene-figure';
 import { DRAWN } from '../scene-own';
 import { STAGE_NAMES, STAGE_RECIPES, type LearningStage } from '../scene-stage';
 import { WORDS_A_SECOND } from './studio';
+import { narratorWords } from './studio-narrator';
+import { controlWords, safetyWords } from './studio-style';
 import {
   AUDIENCE_STAGE,
   briefMissing,
@@ -33,6 +35,15 @@ export function describeBrief(brief: StudioBrief): string {
   if (brief.setting) lines.push(`Setting: ${brief.setting}`);
   if (brief.characters) lines.push(`Characters: ${brief.characters}`);
   if (brief.include) lines.push(`To include: ${brief.include}`);
+  // The maker's own controls, where they chose them; and what is safe for
+  // this audience and genre.
+  if (brief.format !== 'explainer') {
+    const narrator = narratorWords(brief);
+    if (narrator) lines.push(narrator);
+    lines.push(...controlWords(brief));
+    const safe = safetyWords(brief);
+    if (safe) lines.push(`Safety: ${safe}`);
+  }
   if (brief.source)
     lines.push(`The maker's own text, to make it from:\n${brief.source}`);
   return lines.join('\n');

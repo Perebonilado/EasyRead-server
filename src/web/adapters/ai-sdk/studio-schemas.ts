@@ -6,6 +6,11 @@
 import { z } from 'zod';
 import {
   BEAT_KINDS,
+  NARRATOR_MODES,
+  STUDIO_ENDINGS,
+  STUDIO_GENRES,
+  STUDIO_PACES,
+  STUDIO_STYLES,
   SHEET_DEPTHS,
   SHOTS,
   SPOTS,
@@ -113,6 +118,13 @@ export const studioTurnSchema = z.object({
       setting: z.string().nullable().catch(null),
       characters: z.string().nullable().catch(null),
       include: z.string().nullable().catch(null),
+      // The maker's own choices, null unless they said them.
+      narrator: z.enum(NARRATOR_MODES).nullable().catch(null),
+      narratorCharacter: z.string().nullable().catch(null),
+      genre: z.enum(STUDIO_GENRES).nullable().catch(null),
+      ending: z.enum(STUDIO_ENDINGS).nullable().catch(null),
+      pace: z.enum(STUDIO_PACES).nullable().catch(null),
+      style: z.enum(STUDIO_STYLES).nullable().catch(null),
     })
     .catch({
       format: null,
@@ -123,6 +135,12 @@ export const studioTurnSchema = z.object({
       setting: null,
       characters: null,
       include: null,
+      narrator: null,
+      narratorCharacter: null,
+      genre: null,
+      ending: null,
+      pace: null,
+      style: null,
     }),
   action: z.enum(STUDIO_ACTIONS).catch('none'),
   scene: z.union([z.number(), z.string()]).nullable().catch(null),

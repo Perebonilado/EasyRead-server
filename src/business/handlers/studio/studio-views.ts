@@ -15,6 +15,7 @@ import type {
   StudioSheetDto,
 } from '../../../contracts';
 import {
+  BRIEF_CONTROLS,
   briefMissing,
   secondsOf,
   sheetHash,
@@ -91,6 +92,9 @@ export function briefDto(brief: StudioBrief): StudioBriefDto {
     characters: brief.characters,
     include: brief.include,
     sourceChars: brief.source?.length ?? 0,
+    ...Object.fromEntries(
+      BRIEF_CONTROLS.flatMap((key) => (brief[key] ? [[key, brief[key]]] : [])),
+    ),
   };
 }
 

@@ -115,6 +115,73 @@ export type StudioTone = (typeof STUDIO_TONES)[number];
 /** How long an episode may be, in minutes. */
 export const EPISODE_MINUTES = [0.5, 5] as const;
 
+/**
+ * Who tells a story (studio-story-plan §2): no one (a pure film, carried
+ * by lines and action), lightly (a line to open or close a scene, and to
+ * bridge between them), a storyteller throughout, or one of the cast
+ * telling it in their own voice.
+ */
+export const NARRATOR_MODES = [
+  'none',
+  'light',
+  'storyteller',
+  'character',
+] as const;
+export type NarratorMode = (typeof NARRATOR_MODES)[number];
+
+/** What kind of story it is (§2, §3C). */
+export const STUDIO_GENRES = [
+  'comedy',
+  'adventure',
+  'mystery',
+  'drama',
+  'fable',
+  'slice-of-life',
+  'romance',
+  'dark-comedy',
+  'spooky',
+] as const;
+export type StudioGenre = (typeof STUDIO_GENRES)[number];
+
+/** How it ends. */
+export const STUDIO_ENDINGS = [
+  'happy',
+  'bittersweet',
+  'twist',
+  'open',
+  'moral',
+] as const;
+export type StudioEnding = (typeof STUDIO_ENDINGS)[number];
+
+/** How fast it goes: its scenes, its cuts, its jokes. */
+export const STUDIO_PACES = ['gentle', 'lively', 'snappy'] as const;
+export type StudioPace = (typeof STUDIO_PACES)[number];
+
+/** How it looks and moves: the animation style presets (§2.1, studio-style.ts). */
+export const STUDIO_STYLES = [
+  'picture-book',
+  'bold-cartoon',
+  'sitcom',
+  'adventure',
+  'cosy',
+] as const;
+export type StudioStyle = (typeof STUDIO_STYLES)[number];
+
+/**
+ * The genres for an audience (§3C): dark comedy is for adults, and for
+ * teens kept mild; never for children, whatever is asked. Anything else
+ * suits everyone, told for their age.
+ */
+export function genreFor(
+  genre: StudioGenre | null | undefined,
+  audience: StudioAudience | null,
+): StudioGenre | null {
+  if (!genre) return null;
+  if (genre === 'dark-comedy' && audience !== 'adults' && audience !== 'teens')
+    return 'comedy';
+  return genre;
+}
+
 export interface StudioBrief {
   format: StudioFormat | null;
   /** What it is about, in the maker's own words. */
@@ -131,7 +198,28 @@ export interface StudioBrief {
   include: string | null;
   /** Text they gave to make it from: notes, a syllabus, a story. */
   source: string | null;
+  /**
+   * The maker's own controls (studio-story-plan §2), each absent until
+   * they choose, when sensible ones follow from the idea and the audience.
+   */
+  narrator?: NarratorMode;
+  /** In "character" mode, who of the cast tells it: their name, or id once known. */
+  narratorCharacter?: string;
+  genre?: StudioGenre;
+  ending?: StudioEnding;
+  pace?: StudioPace;
+  style?: StudioStyle;
 }
+
+/** The maker's controls of a brief, each present only when chosen. */
+export const BRIEF_CONTROLS = [
+  'narrator',
+  'narratorCharacter',
+  'genre',
+  'ending',
+  'pace',
+  'style',
+] as const;
 
 export const EMPTY_BRIEF: StudioBrief = {
   format: null,
@@ -177,7 +265,7 @@ export function briefOf(
     raw && typeof raw === 'object' ? (raw as Record<string, unknown>) : {};
   const has = (key: string) => said[key] !== undefined && said[key] !== null;
   const minutes = Number(said.minutes);
-  return {
+  const out: StudioBrief = {
     format: has('format')
       ? (oneOf(STUDIO_FORMATS)(said.format) ?? base.format)
       : base.format,
@@ -203,6 +291,40 @@ export function briefOf(
       : base.characters,
     include: has('include') ? textOrNull(said.include, 600) : base.include,
     source: has('source') ? textOrNull(said.source, SOURCE_CHARS) : base.source,
+  };
+  // The controls: each as said, else as it was; absent until chosen.
+  const narrator = has('narrator')
+    ? (oneOf(NARRATOR_MODES)(said.narrator) ?? base.narrator)
+    : base.narrator;
+  const narratorCharacter =
+    narrator === 'character'
+      ? has('narratorCharacter')
+        ? text(said.narratorCharacter, 40) || base.narratorCharacter
+        : base.narratorCharacter
+      : undefined;
+  const genre = genreFor(
+    has('genre')
+      ? (oneOf(STUDIO_GENRES)(said.genre) ?? base.genre)
+      : base.genre,
+    out.audience,
+  );
+  const ending = has('ending')
+    ? (oneOf(STUDIO_ENDINGS)(said.ending) ?? base.ending)
+    : base.ending;
+  const pace = has('pace')
+    ? (oneOf(STUDIO_PACES)(said.pace) ?? base.pace)
+    : base.pace;
+  const style = has('style')
+    ? (oneOf(STUDIO_STYLES)(said.style) ?? base.style)
+    : base.style;
+  return {
+    ...out,
+    ...(narrator ? { narrator } : {}),
+    ...(narratorCharacter ? { narratorCharacter } : {}),
+    ...(genre ? { genre } : {}),
+    ...(ending ? { ending } : {}),
+    ...(pace ? { pace } : {}),
+    ...(style ? { style } : {}),
   };
 }
 

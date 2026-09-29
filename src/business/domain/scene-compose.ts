@@ -782,7 +782,11 @@ export function storyShots(
       beat.pace === 'whisper' ||
       beat.pace === 'shout' ||
       STRONG_FACES.has(faceAt(speaker, at + 400) ?? '');
-    if (strong && on.length >= 2 && at - lastClose >= SHOT_APART_MS) {
+    if (
+      strong &&
+      on.length >= 2 &&
+      at - lastClose >= SHOT_APART_MS * (script.energy?.cut ?? 1)
+    ) {
       const from = Math.max(0, at - 200);
       const until = Math.min(end + 500, changeAfter(at));
       if (until - from >= SHOT_LEAST_MS) {
@@ -3480,7 +3484,10 @@ export function composeScene(input: ComposeInput): {
       effects.length,
       ...[
         ...effects.filter((e) => e.do !== 'zoom'),
-        ...pushedOnFeeling(kept, acting),
+        // A style with little camera movement (a sitcom's) never pushes in.
+        ...((script.energy?.push ?? 1) >= 0.5
+          ? pushedOnFeeling(kept, acting)
+          : kept),
       ].sort((a, b) => a.atMs - b.atMs),
     );
     // What was cheated out of a shot, out of the shots as now taken.

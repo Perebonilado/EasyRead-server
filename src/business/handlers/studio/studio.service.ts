@@ -1,3 +1,4 @@
+import { narratorRuleOf } from '../../domain/studio/studio-narrator';
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import { randomBytes, randomUUID } from 'node:crypto';
 import type {
@@ -17,6 +18,7 @@ import {
   SOURCE_CHARS,
   bibleOf,
   briefMissing,
+  BRIEF_CONTROLS,
   briefOf,
   mendExplainerLines,
   outlineOf,
@@ -362,6 +364,11 @@ export class StudioService {
     for (const key of ['setting', 'characters', 'include', 'source'] as const)
       if (key in patch && (patch[key] === null || patch[key] === ''))
         brief[key] = null;
+    // A control set back to "leave it to us" is chosen by the Studio again.
+    for (const key of BRIEF_CONTROLS)
+      if (key in patch && (patch[key] === null || patch[key] === ''))
+        delete brief[key];
+    if (brief.narrator !== 'character') delete brief.narratorCharacter;
     await this.studio.updateShow(show.id, { brief, format: brief.format });
     return this.showDto({ ...show, brief, format: brief.format });
   }
@@ -1437,7 +1444,13 @@ export class StudioService {
       const grown = withFound(bible, next.set, mended);
       if (grown !== bible)
         await this.studio.updateShow(show.id, { bible: grown });
-      problems = checkSheet(next, grown, planned?.seconds ?? null, before);
+      problems = checkSheet(
+        next,
+        grown,
+        planned?.seconds ?? null,
+        before,
+        narratorRuleOf(show.brief, grown),
+      );
     } else {
       next = mendExplainerLines(scene.sheet, body);
       problems = checkExplainer(next, {
@@ -1488,6 +1501,7 @@ export class StudioService {
               show.bible,
               planned?.seconds ?? null,
               await this.endBefore(episode.id, scene.position, show.bible),
+              narratorRuleOf(show.brief, show.bible),
             )
           : []
         : checkExplainer(sheet, {

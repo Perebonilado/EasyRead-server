@@ -732,6 +732,17 @@ export interface SceneScript {
     /** The page's place: out of doors, a room or a vessel, which the crowd stands in accordingly; absent, out of doors. */
     place?: PlaceKind | null;
   };
+  /**
+   * A Studio story told by one of its cast (studio-story-plan §2): their
+   * id, whose voice says the narration. Absent, the narrator's own.
+   */
+  narrator?: string;
+  /**
+   * The camera's energy for the maker's style and pace (studio-style.ts):
+   * how long it waits to go in close again, as a share of its usual, and
+   * how much it pushes in on a feeling (0 never). Absent, as usual.
+   */
+  energy?: { cut: number; push: number };
 }
 
 /**

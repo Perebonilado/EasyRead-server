@@ -60,6 +60,7 @@ import {
   layoutOf,
   type SetLayering,
   type SetLayout,
+  type SetLook,
 } from '../../business/domain/scene-set-layout';
 import type { SetPiece } from '../../business/domain/scene-set-pieces';
 import { rigSheet } from '../../business/domain/scene-sheet-rig';
@@ -192,6 +193,8 @@ export interface ArtistOptions {
    * Studio set is built, a book's page painted, unless this says.
    */
   painter?: 'layout' | 'artist';
+  /** A Studio show's animation style on a set it builds: a tint over its palette, and its ink. */
+  look?: SetLook;
 }
 
 /** A character drawn, rigged, what the rig could not join, and the other takes' best. */
@@ -675,7 +678,7 @@ export class SceneArtist {
         const piece = await ownPiece(item.name);
         if (piece) own[item.name] = piece;
       }
-      const built = buildSet(layout, place, own, world);
+      const built = buildSet(layout, place, own, world, options.look ?? null);
       for (const note of built.notes)
         this.logger.log(`${who}: ${place.name}: ${note}`);
       const gated = await gateDrawing(built.svg, thing, { backdrop: true });

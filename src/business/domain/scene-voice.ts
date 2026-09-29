@@ -436,6 +436,21 @@ export function characterVoice(
   };
 }
 
+/**
+ * One of the cast telling the story (a Studio show's "character"
+ * narrator): their own voice, at their pace, directed as telling it in
+ * the first person. Null when they have no voice of their own: the
+ * narrator's own says it.
+ */
+export function narratingSpeaker(speaker: Speaker | null): Speaker | null {
+  return speaker
+    ? {
+        ...speaker,
+        style: `${speaker.style.replace(/, saying their own line$/u, '')}, telling the story in their own words`,
+      }
+    : null;
+}
+
 /** A breath between the narrator and a character within one sentence. */
 export const TURN_S = 0.12;
 
@@ -591,8 +606,8 @@ const voicedOf = (beat: SceneBeat) => [
  * voice it was made with, never voiced again.
  */
 export function voicedAlike(
-  a: Pick<SceneScript, 'beats' | 'mood' | 'lead' | 'opening'>,
-  b: Pick<SceneScript, 'beats' | 'mood' | 'lead' | 'opening'>,
+  a: Pick<SceneScript, 'beats' | 'mood' | 'lead' | 'opening' | 'narrator'>,
+  b: Pick<SceneScript, 'beats' | 'mood' | 'lead' | 'opening' | 'narrator'>,
 ): boolean {
   const said = (script: typeof a) =>
     JSON.stringify([
@@ -600,6 +615,8 @@ export function voicedAlike(
       script.lead ?? 0,
       script.opening?.show.length ? 1 : 0,
       script.beats.map(voicedOf),
+      // Who tells it: the narrator's own voice, or one of the cast's.
+      ...(script.narrator ? [script.narrator] : []),
     ]);
   return said(a) === said(b);
 }

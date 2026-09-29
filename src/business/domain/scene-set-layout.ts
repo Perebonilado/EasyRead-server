@@ -1136,6 +1136,8 @@ export const SET_H = 900;
  * margin, so the frame the stagings are laid out in is its middle.
  */
 let drawW: number = SET_W;
+/** The ink the set being built is drawn in, as a share of its usual (a show's style, SetLook). */
+let inkK = 1;
 /** The set's own outline: the kit's line where its people stand. */
 const INK_W = setLine(SET_H);
 /** Where the story's people stand, and how many of the set's units a kit unit is there (scene-crowd's own). */
@@ -2062,7 +2064,7 @@ function placed(
   // The kit's outline wherever it stands; one the artist drew keeps its own.
   const stroke = options.own
     ? ''
-    : ` stroke="${FIGURE_INK}" stroke-width="${Math.round((INK_W / s) * 100) / 100}" stroke-linejoin="round"`;
+    : ` stroke="${FIGURE_INK}" stroke-width="${Math.round(((INK_W * inkK) / s) * 100) / 100}" stroke-linejoin="round"`;
   const body = options.lives
     ? `<g class="${options.lives}">${inner}</g>`
     : inner;
@@ -2553,6 +2555,31 @@ export interface SetLayering {
   }[];
 }
 
+/**
+ * How a Studio show's animation style draws its sets (studio-style.ts): a
+ * colour their pack's palette leans toward, how far, and their ink as a
+ * share of its usual weight.
+ */
+export interface SetLook {
+  tint: string;
+  tintK: number;
+  ink: number;
+}
+
+/** A pack as a style draws it: its palette's tint leaned toward the style's. */
+function lookedPack(pack: StylePack, look: SetLook | null): StylePack {
+  if (!look || look.tintK <= 0) return pack;
+  const k = pack.palette.tintK + look.tintK;
+  return {
+    ...pack,
+    palette: {
+      ...pack.palette,
+      tint: mix(pack.palette.tint, look.tint, look.tintK / k),
+      tintK: Math.round(k * 1000) / 1000,
+    },
+  };
+}
+
 /** A set built from its layout: its SVG, its groups by their names, and its layers. */
 export interface BuiltSet {
   svg: string;
@@ -2622,6 +2649,8 @@ export function buildSet(
   own: Record<string, SetPiece> = {},
   /** The story's world: the people watching are dressed for it. Absent, as the pack's. */
   world: StoryWorld | null = null,
+  /** A Studio show's animation style: its tint and its ink. Absent, the house look. */
+  look: SetLook | null = null,
 ): BuiltSet {
   // As wide as its layout says (a vessel one frame, whatever it says): what
   // spans the whole set drawn that wide, and the frame its middle.
@@ -2630,6 +2659,7 @@ export function buildSet(
       ? SET_W
       : Math.round(SET_W * (layout.width ?? 1));
   drawW = across;
+  inkK = look?.ink ?? 1;
   try {
     return buildSetAt(
       renamedIn(layout),
@@ -2637,9 +2667,11 @@ export function buildSet(
       own,
       (across - SET_W) / 2,
       world,
+      look,
     );
   } finally {
     drawW = SET_W;
+    inkK = 1;
   }
 }
 
@@ -2666,6 +2698,7 @@ function buildSetAt(
   own: Record<string, SetPiece>,
   margin: number,
   story: StoryWorld | null,
+  look: SetLook | null,
 ): BuiltSet {
   const kind: PlaceKind = place.kind ?? 'outdoor';
   /** What spans the whole set, drawn from 0 across, moved back so the frame is its middle. */
@@ -2675,7 +2708,9 @@ function buildSetAt(
   const floor = FLOOR_LINE[kind];
   const studio = place.features !== undefined;
   const { staged, drawn } = featuresOf(place);
-  const pack = layout.style ? STYLE_PACKS[layout.style] : null;
+  const pack = layout.style
+    ? lookedPack(STYLE_PACKS[layout.style], look)
+    : null;
   /** Out of doors in a style pack: its back row on the ground's far edge, and its ground whole. */
   const horizon = pack !== null && kind === 'outdoor';
   const notes: string[] = [];

@@ -2543,7 +2543,26 @@ export interface StudioBriefDto {
   include: string | null;
   /** How much of their own text the maker gave, in characters; 0 for none. */
   sourceChars: number;
+  /** The maker's own controls (a story's), each absent until chosen: sensible ones follow from the idea and the audience. */
+  narrator?: 'none' | 'light' | 'storyteller' | 'character';
+  /** In "character" mode, who of the cast tells it. */
+  narratorCharacter?: string;
+  genre?: StudioGenreName;
+  ending?: 'happy' | 'bittersweet' | 'twist' | 'open' | 'moral';
+  pace?: 'gentle' | 'lively' | 'snappy';
+  style?: 'picture-book' | 'bold-cartoon' | 'sitcom' | 'adventure' | 'cosy';
 }
+
+export type StudioGenreName =
+  | 'comedy'
+  | 'adventure'
+  | 'mystery'
+  | 'drama'
+  | 'fable'
+  | 'slice-of-life'
+  | 'romance'
+  | 'dark-comedy'
+  | 'spooky';
 
 export interface StudioCharacterDto {
   id: string;

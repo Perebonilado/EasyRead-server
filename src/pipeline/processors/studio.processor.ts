@@ -38,6 +38,16 @@ import {
   type SheetProblem,
 } from '../../business/domain/studio/studio-check';
 import {
+  narratorRuleOf,
+  type NarratorRule,
+} from '../../business/domain/studio/studio-narrator';
+import {
+  energyOf,
+  leanedMusic,
+  setLookOf,
+} from '../../business/domain/studio/studio-style';
+import type { SceneScript } from '../../business/domain/scene-script';
+import {
   auditMoves,
   auditScene,
   describeAudit,
@@ -225,15 +235,35 @@ export function studioMakeOf(
   // always one the stage can play: carrying on from how the scene before
   // left things, on its set with every feature its words name.
   const before = endBefore(rows, row.position, bible);
+  const narrator = narratorRuleOf(show.brief, bible);
   const sheet = story
-    ? repairSheet(row.sheet as StorySheet, bible, before)
+    ? repairSheet(row.sheet as StorySheet, bible, before, narrator)
     : null;
   const painted = sheet ? paintedAt(sets?.[sheet.set]) : {};
+  // The maker's controls on the film: one of the cast telling it says the
+  // narration in their voice; the style and the pace set the camera's
+  // energy; the style leans the music.
+  const energy = energyOf(show.brief);
+  const styled = (staged: SceneScript): SceneScript => ({
+    ...staged,
+    beats: show.brief.style
+      ? staged.beats.map((beat) =>
+          beat.music
+            ? { ...beat, music: leanedMusic(beat.music, show.brief.style) }
+            : beat,
+        )
+      : staged.beats,
+    ...(narrator?.mode === 'character' && narrator.character
+      ? { narrator: narrator.character }
+      : {}),
+    ...(energy ? { energy: { cut: energy.cut, push: energy.push } } : {}),
+  });
+  const look = story ? setLookOf(show.brief) : null;
   const staged = sheet
     ? withFound(bible, sheet.set, mendSheet(sheet, bible, before))
     : bible;
   const script = sheet
-    ? stageStory(sheet, staged, { before, painted, gestures })
+    ? styled(stageStory(sheet, staged, { before, painted, gestures }))
     : checkExplainer(
         repairExplainer(row.sheet as ExplainerSheet, lesson),
         lesson,
@@ -269,13 +299,15 @@ export function studioMakeOf(
           ],
           script:
             unseen.length || rise.size
-              ? stageStory(sheet, staged, {
-                  before,
-                  painted,
-                  gestures,
-                  plain: new Set(unseen.map((one) => one.beat)),
-                  ...(rise.size ? { rise } : {}),
-                })
+              ? styled(
+                  stageStory(sheet, staged, {
+                    before,
+                    painted,
+                    gestures,
+                    plain: new Set(unseen.map((one) => one.beat)),
+                    ...(rise.size ? { rise } : {}),
+                  }),
+                )
               : null,
         };
       }
@@ -322,6 +354,7 @@ export function studioMakeOf(
           setsKey: studioSetsKey(show.id),
           ownKey: studioOwnKey(show.id),
           bookTitle: show.title,
+          ...(look ? { look } : {}),
         }
       : null,
     script,
@@ -1318,7 +1351,12 @@ export class StudioProcessor {
     // The film as it was, in words from what it plays.
     const film =
       ask && row.sceneKey && row.sheet?.kind === 'story'
-        ? await this.filmInWords(row, bible, episode.id)
+        ? await this.filmInWords(
+            row,
+            bible,
+            episode.id,
+            narratorRuleOf(show.brief, bible),
+          )
         : null;
     const asked: StudioAsk | undefined = ask
       ? { ...ask, before: ask.before ?? film }
@@ -1417,13 +1455,14 @@ export class StudioProcessor {
     row: StudioSceneRecord,
     bible: StudioBible,
     episodeId: string,
+    narrator: NarratorRule | null = null,
   ): Promise<{ key: string; lines: string[] } | null> {
     if (!row.sceneKey || row.sheet?.kind !== 'story') return null;
     const scene = await this.storedScene(row.sceneKey);
     if (!scene) return null;
     const rows = await this.studio.listScenes(episodeId);
     const before = endBefore(rows, row.position, bible);
-    const sheet = repairSheet(row.sheet, bible, before);
+    const sheet = repairSheet(row.sheet, bible, before, narrator);
     const staged = withFound(bible, sheet.set, mendSheet(sheet, bible, before));
     return describeStaged(sheet, scene, staged);
   }
@@ -1564,6 +1603,7 @@ export class StudioProcessor {
       request && old && outlined !== null
         ? Math.max(outlined, secondsOf(old))
         : outlined;
+    const narrator = narratorRuleOf(show.brief, bible);
     const ask = {
       brief: describeBrief(show.brief),
       bible: describeBible(bible, true),
@@ -1592,6 +1632,7 @@ export class StudioProcessor {
             withFound(bible, mended.sheet.set, mended),
             planned,
             before,
+            narrator,
           ),
           ...(request && old ? linesKept(old, mended.sheet, request) : []),
         ],
@@ -1621,7 +1662,7 @@ export class StudioProcessor {
           .map((p) => p.message)
           .join(' ')}`,
       );
-      const sheet = repairSheet(best.sheet, bible, before);
+      const sheet = repairSheet(best.sheet, bible, before, narrator);
       best = {
         ...best,
         sheet,
@@ -1630,6 +1671,7 @@ export class StudioProcessor {
           withFound(bible, sheet.set, mendSheet(sheet, bible, before)),
           planned,
           before,
+          narrator,
         ),
       };
     }
@@ -2049,7 +2091,12 @@ export class StudioProcessor {
     const key = askKey(ask, row.id);
     const rows = await this.studio.listScenes(episode.id);
     const before = endBefore(rows, row.position, bible);
-    const sheet = repairSheet(row.sheet, bible, before);
+    const sheet = repairSheet(
+      row.sheet,
+      bible,
+      before,
+      narratorRuleOf(show.brief, bible),
+    );
     const staged = withFound(bible, sheet.set, mendSheet(sheet, bible, before));
     const after = describeStaged(sheet, scene, staged);
     // What code sees wrong, and what the maker asked to be rid of that is

@@ -1,3 +1,4 @@
+import type { SetLook } from '../../business/domain/scene-set-layout';
 import { ConfigService } from '@nestjs/config';
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import type { SceneDto, SceneTiming } from '../../contracts';
@@ -190,6 +191,7 @@ import {
 import {
   HOLD_LIMIT_S,
   characterVoice,
+  narratingSpeaker,
   deliveryPieces,
   sentenceStarts,
   voiceSlug,
@@ -289,6 +291,8 @@ export interface PageStory {
    * artist, are kept (a kite, a signpost). A book's pages have none.
    */
   ownKey?: string;
+  /** A Studio show's animation style on its sets: a tint over their palette, and their ink (studio-style.ts). */
+  look?: SetLook;
 }
 
 /** An explainer page's part of its chapter's teacher's notes, and how the page before it ended. */
@@ -1650,6 +1654,7 @@ export class SceneProcessor {
               documentId,
               who,
               story.bible.world ?? null,
+              story.look ?? null,
             )
           : null;
       out.set(
@@ -1817,7 +1822,19 @@ export class SceneProcessor {
         ? characterVoice(story.bible, character, engine, voice, cast)
         : null;
     };
+    // One of the cast telling it: the narration in their voice, whole.
+    const teller =
+      story && script.narrator
+        ? narratingSpeaker(voiceOf(script.narrator))
+        : null;
     const lines = script.beats.map((beat, k) => {
+      if (teller && beat.kind === 'narration' && !beat.lines?.length)
+        return [
+          {
+            span: [0, forms[k].text.length] as [number, number],
+            speaker: teller,
+          },
+        ];
       if (!story || !beat.lines?.length) return [];
       // A screenplay's line is all theirs: the whole sentence in their voice.
       if (beat.kind === 'line') {
@@ -2572,6 +2589,7 @@ export class SceneProcessor {
     documentId: string | null,
     who: string,
     world: StoryWorld | null = null,
+    look: SetLook | null = null,
   ): Promise<SetSheet | null> {
     return this.once(`${key}#${place.id}`, async () => {
       const keep = (set: SetSheet, what: string) =>
@@ -2618,6 +2636,7 @@ export class SceneProcessor {
         documentId,
         who,
         world,
+        look ? { look } : {},
       );
       if (!set) return null;
       await keep(set, 'painted');
@@ -2985,6 +3004,7 @@ export class SceneProcessor {
           documentId,
           who,
           story.bible.world ?? null,
+          story.look ?? null,
         ),
       ),
       ...(story.ownKey

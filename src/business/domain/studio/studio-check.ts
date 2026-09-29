@@ -15,6 +15,11 @@
  * words, which goes back to the writer once; the maker never sees it.
  */
 import { narratorsLine, lineOf } from '../scene-screenplay';
+import {
+  narrationKept,
+  narrationProblems,
+  type NarratorRule,
+} from './studio-narrator';
 import { eyesClosedIn, faceNamed } from '../scene-feeling';
 import { PROP_KIND, PROP_WORDS, STAGE_PROPS } from '../scene-props';
 import { doingsIn, type Actor, type ReadDoing } from '../scene-directions';
@@ -2457,6 +2462,8 @@ export function checkSheet(
   bible: StudioBible,
   planned: number | null = null,
   before: EndState | null = null,
+  /** The maker's narrator, when they set one: its share of the words, and where it may speak. */
+  narrator: NarratorRule | null = null,
 ): SheetProblem[] {
   const problems: SheetProblem[] = [];
   const error = (
@@ -2736,6 +2743,7 @@ export function checkSheet(
         `The scene before left ${gone.map(nameOf).join(' and ')} here; they are gone as this one opens.`,
       );
   }
+  problems.push(...narrationProblems(sheet, bible, narrator));
   return problems;
 }
 
@@ -3287,8 +3295,10 @@ export function repairSheet(
   input: StorySheet,
   bible: StudioBible,
   before: EndState | null = null,
+  /** The maker's narrator: narration past it made what it shows, else cut. */
+  narrator: NarratorRule | null = null,
 ): StorySheet {
-  return repairedWith(input, bible, before).sheet;
+  return repairedWith(input, bible, before, narrator).sheet;
 }
 
 /**
@@ -3300,15 +3310,16 @@ export function repairedWith(
   input: StorySheet,
   given: StudioBible,
   before: EndState | null = null,
+  narrator: NarratorRule | null = null,
 ): { sheet: StorySheet; bible: StudioBible } {
-  const first = mendSheet(input, given, before);
+  const first = mendSheet(narrationKept(input, given, narrator), given, before);
   const bible = withFound(given, first.sheet.set, first);
   let sheet = first.sheet;
   const cast = new Set(bible.characters.map((c) => c.id));
   /** Beats already played as a nod once: still wrong, they cannot be seen at all. */
   const nodded = new Set<string>();
   for (let round = 0; round < 6; round += 1) {
-    const errors = errorsIn(checkSheet(sheet, bible, null, before));
+    const errors = errorsIn(checkSheet(sheet, bible, null, before, narrator));
     if (!errors.length) break;
     const next = JSON.parse(JSON.stringify(sheet)) as StorySheet;
     if (!bible.sets.some((s) => s.id === next.set) && bible.sets[0])

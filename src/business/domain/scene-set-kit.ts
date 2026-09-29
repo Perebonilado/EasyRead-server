@@ -1,12 +1,12 @@
 /**
  * The scenery pieces L3 adds (studio-scenery-plan §5.3, §5.7): the
  * clutter that makes a place busy and lived in (poles and wires, bins,
- * plastic chairs, a laundry line, a generator, a parked car, an okada,
+ * plastic chairs, a laundry line, a generator, a parked car, a motorbike,
  * water drums, a bicycle, a street sign, a hydrant, clay pots, a
  * woodpile), and the pieces the packs need: an ancient riverside's
  * obelisk, temple columns, reeds and palm grove; a city's subway
- * entrance, streetlamp, taxi and hot-dog cart; a Lagos street's umbrella
- * stall, a danfo parked, a gutter bridge.
+ * entrance, streetlamp, taxi, bus and hot-dog cart; a West African
+ * street's umbrella stall, a danfo parked, a gutter bridge.
  *
  * Each is drawn at its real size in the kit's units (a metre is about
  * 132), so it stands true beside the people wherever it is placed. Signs
@@ -39,7 +39,7 @@ export const KIT_KINDS = [
   'laundry line',
   'generator',
   'parked car',
-  'okada',
+  'motorbike',
   'water drum',
   'bicycle',
   'street sign',
@@ -55,8 +55,9 @@ export const KIT_KINDS = [
   'subway entrance',
   'streetlamp',
   'taxi',
+  'bus',
   'hot dog cart',
-  // A Lagos street's.
+  // A West African street's.
   'umbrella stall',
   'danfo',
   'gutter bridge',
@@ -304,7 +305,7 @@ export function drawKit(kind: KitKind, colour?: string): SceneryPiece {
         m(4.4),
         m(1.65),
       ]);
-    case 'okada': {
+    case 'motorbike': {
       // A motorbike on its stand: two wheels, its frame and tank, its
       // seat, its handlebars and its lamp.
       const c = colour ?? CLOTH.red;
@@ -774,6 +775,28 @@ export function drawKit(kind: KitKind, colour?: string): SceneryPiece {
         reacts: { as: 'flag', len: 70 },
         counter: true,
       };
+    }
+    case 'bus': {
+      // A bus parked, side on: a plain body in one colour, a row of
+      // windows, its door, and two wheels.
+      const L = m(2.9);
+      const c = colour ?? CLOTH.blue;
+      const top = -m(2.2);
+      return framed(
+        shadowOf(L * 0.9) +
+          rect(-L, top, 2 * L, -top - m(0.35), c, 14) +
+          [0, 1, 2, 3, 4]
+            .map((k) =>
+              rect(-L + 30 + k * m(0.95), top + 24, m(0.8), m(0.62), GLASS, 4),
+            )
+            .join('') +
+          rect(L - m(0.9), top + 24, m(0.62), -top - m(0.75), GLASS, 4) +
+          flatRect(-L, -m(0.8), 2 * L, 12, CLOTH.white) +
+          rect(L - 20, -m(0.9), 20, 16, GOLD, 4) +
+          wheel(-L + m(0.9), m(0.4)) +
+          wheel(L - m(1.2), m(0.4)),
+        [-L, top, 2 * L, -top],
+      );
     }
     case 'danfo': {
       // A danfo parked: the yellow minibus with its black stripes, its

@@ -681,7 +681,7 @@ export interface LlmGatewayPort {
    */
   sceneSize(input: {
     name: string;
-    /** The story's world, in a few words: "a village in Ghana, today". */
+    /** The story's world, in a few words: "a mountain village, today". */
     world: string | null;
   }): Promise<LlmResult<{ heightCm: number; lengthCm: number }>>;
 

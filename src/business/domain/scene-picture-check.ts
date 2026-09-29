@@ -182,7 +182,7 @@ const OTHER_THINGS =
  * What code sees wrong in a scene's things before any picture is looked
  * at: a thing of the place the stage draws as one of its kinds, named in
  * the story as something that kind is not ("the half-built ark" drawn as
- * the stage's vehicle, a danfo). Each as a problem for the writer.
+ * the stage's road vehicle). Each as a problem for the writer.
  */
 export function namedAsDrawn(scene: SceneDto): string[] {
   const out: string[] = [];
@@ -198,7 +198,7 @@ export function namedAsDrawn(scene: SceneDto): string[] {
     if (!other) continue;
     const drawn =
       kind === 'vehicle'
-        ? 'a road vehicle (the stage draws a danfo bus)'
+        ? 'a road vehicle (the stage draws a car, a van, a bus or a truck)'
         : `a ${kind}`;
     out.push(
       `"${feature.name}" is drawn as ${drawn}, not as ${/^[aeiou]/iu.test(other) ? 'an' : 'a'} ${other.replace(/s$/u, '')}: the picture shows the wrong thing.`,

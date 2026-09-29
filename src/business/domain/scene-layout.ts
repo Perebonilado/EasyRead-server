@@ -815,7 +815,7 @@ export interface FeatureAcross {
     upX?: number;
     /**
      * The ground it stands on, where its feet are: where one beside it,
-     * behind it or under it stands. Its way may be above it (a danfo's
+     * behind it or under it stands. Its way may be above it (a bus's
      * door sill, a stall's counter), where one goes in, not where one
      * stands. Absent, its way's y.
      */
@@ -825,7 +825,7 @@ export interface FeatureAcross {
   seat?: number;
   /** Where one lies along it: its top's y, its head end and its foot end across, and where one sitting up in it sits across. */
   lies?: { y: number; head: number; foot: number; sits: number };
-  /** A body one stands beside, not before (a danfo, a stall, a well, a crate): one by it stands clear of it, at its side. */
+  /** A body one stands beside, not before (a bus, a stall, a well, a crate): one by it stands clear of it, at its side. */
   solid?: boolean;
 }
 
@@ -938,7 +938,7 @@ export function layoutStations(input: {
       if (by && feature) {
         const side = Number(by[2]) * (flip ? -1 : 1);
         // At its end: over its edge a little, clear of its middle; by a
-        // solid body (a danfo), at its side, their body clear of it.
+        // solid body (a bus), at its side, their body clear of it.
         const reach = feature.solid
           ? Math.max(
               feature.w * 0.35 + w * 0.2,
@@ -999,7 +999,7 @@ export function layoutStations(input: {
               (p) => Math.abs(p.x - at) < p.w * 0.4 + size.w * 0.2,
             )) ||
           overBody(at);
-        // Beside a solid body (a danfo), never over it: held to the stage's
+        // Beside a solid body (a bus), never over it: held to the stage's
         // edge, its far side may be on it.
         const beside = /^by:([^:]+)/.exec(station)?.[1];
         const body = beside ? input.features.get(beside) : undefined;
@@ -1064,7 +1064,7 @@ export function layoutStations(input: {
       const low = Boolean(at) && station.startsWith('under:');
       if (up && way?.upX !== undefined) x = way.upX - size.w * 0.3;
       // Beside it, behind it or under it: on the ground it stands on (not
-      // up at its way, a danfo's sill), behind it a step back of it; on a
+      // up at its way, a bus's sill), behind it a step back of it; on a
       // floor with depth, as big as the floor makes them there, as anyone
       // walking there is.
       const beside = way && !up && /^(?:by|behind|under):/.test(station);

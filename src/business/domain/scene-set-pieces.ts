@@ -2,7 +2,7 @@
  * The fixed things of a set that a story acts on, drawn by code in the
  * figure kit's hand: a gate that swings shut, a door someone goes out by,
  * a bench someone sits on or looks under, a goalpost someone stands by, a
- * danfo someone jumps into. Drawn at the kit's own size (a grown person is
+ * bus or a car someone gets into. Drawn at the kit's own size (a grown person is
  * about 192 tall), standing on the ground at y = 0, their middle at x = 0,
  * so the stage stands them among the people at the people's own scale.
  *
@@ -16,6 +16,18 @@
  */
 import type { FeatureKind } from './scene-doings';
 import { FIGURE_INK } from './scene-figure';
+import { CLOTH } from './scene-ink';
+import { STYLE_PACKS, type StylePackId } from './scene-style-packs';
+
+/**
+ * How a piece is drawn beyond its kind and name: the style pack of the
+ * place it stands in (a gate, a wall and a road vehicle are drawn as that
+ * place has them), and its own colour where one is given.
+ */
+export interface PieceLook {
+  pack?: StylePackId | null;
+  colour?: string | null;
+}
 
 /** A set piece as the stage gets it. */
 export interface SetPiece {
@@ -175,8 +187,104 @@ const bars = (x0: number, x1: number, y0: number, y1: number, n: number) =>
 const frond = (dx: number, dy: number, colour: string) =>
   `<path d="M28,-424 Q${r1(28 + dx * 0.45)},${r1(-470 + dy * 0.2)} ${r1(28 + dx)},${r1(-424 + dy)} Q${r1(28 + dx * 0.5)},${r1(-438 + dy * 0.3)} 28,-412 Z" ${fill(colour)}/>`;
 
-/** A set piece of a kind, drawn; a tree as its name says (a palm). */
-export function drawPiece(kind: FeatureKind, name = ''): SetPiece {
+/** The road vehicles the stage draws a feature of kind "vehicle" as, by what its name calls it. */
+export const VEHICLE_KINDS = [
+  'car',
+  'taxi',
+  'van',
+  'truck',
+  'bus',
+  'danfo',
+] as const;
+export type VehicleKind = (typeof VEHICLE_KINDS)[number];
+
+/**
+ * Which road vehicle a name says: a taxi, a van, a truck, a bus or a car
+ * by its own word, and a danfo only by its name or as a West African
+ * town's bus. A name with none of the words is a plain car.
+ */
+export function vehicleKindOf(
+  name: string,
+  pack: StylePackId | null = null,
+): VehicleKind {
+  if (/\bdanfos?\b/iu.test(name)) return 'danfo';
+  if (/\b(?:taxis?|cabs?)\b/iu.test(name)) return 'taxi';
+  if (/\b(?:trucks?|lorr(?:y|ies))\b/iu.test(name)) return 'truck';
+  if (/\bvans?\b/iu.test(name)) return 'van';
+  if (/\b(?:bus|buses|minibus(?:es)?|coach(?:es)?)\b/iu.test(name))
+    return pack === 'west-african-town' ? 'danfo' : 'bus';
+  return 'car';
+}
+
+/** A colour a name says, of the kit's: "the red bus" is red; null for none. */
+const NAMED_COLOURS: [RegExp, string][] = [
+  [/\bred\b/iu, CLOTH.red],
+  [/\borange\b/iu, CLOTH.orange],
+  [/\b(?:yellow|golden)\b/iu, CLOTH.yellow],
+  [/\b(?:green|lime)\b/iu, CLOTH.green],
+  [/\b(?:teal|turquoise)\b/iu, CLOTH.teal],
+  [/\bnavy\b/iu, CLOTH.navy],
+  [/\bblue\b/iu, CLOTH.blue],
+  [/\b(?:purple|violet)\b/iu, CLOTH.purple],
+  [/\bpink\b/iu, CLOTH.pink],
+  [/\bbrown\b/iu, CLOTH.brown],
+  [/\b(?:grey|gray|silver)\b/iu, CLOTH.grey],
+  [/\bwhite\b/iu, CLOTH.white],
+  [/\bblack\b/iu, CLOTH.black],
+];
+export const colourNamed = (name: string): string | null =>
+  NAMED_COLOURS.find(([words]) => words.test(name))?.[1] ?? null;
+
+/** A road vehicle's colour when nothing names one: a danfo's yellow, a taxi's, else plain. */
+const VEHICLE_COLOUR: Record<VehicleKind, string> = {
+  car: CLOTH.red,
+  taxi: CLOTH.yellow,
+  van: CLOTH.white,
+  truck: CLOTH.green,
+  bus: CLOTH.blue,
+  danfo: '#f2c14e',
+};
+
+/**
+ * A road vehicle's colour: as given, else as its name says, else (but
+ * for a danfo's and a taxi's own) one of its place's pack's colours,
+ * chosen by its name, else its kind's plain one.
+ */
+function vehicleColour(
+  kind: VehicleKind,
+  name: string,
+  look: PieceLook,
+): string {
+  const given = look.colour ?? colourNamed(name);
+  if (given) return given;
+  if (kind === 'danfo' || kind === 'taxi' || !look.pack)
+    return VEHICLE_COLOUR[kind];
+  const colours = STYLE_PACKS[look.pack].palette.awnings;
+  let h = 0;
+  for (const ch of `${kind}:${name}`) h = (h * 31 + ch.charCodeAt(0)) >>> 0;
+  return colours[h % colours.length] ?? VEHICLE_COLOUR[kind];
+}
+
+/** The pack a set was built in, as its drawing (or its first layer) is marked; null for none. */
+export function setPackOf(
+  drawing:
+    | { svg?: string; layered?: { layers?: { svg: string }[] } | null }
+    | null
+    | undefined,
+): StylePackId | null {
+  if (!drawing) return null;
+  const marked = /data-style="([a-z-]+)"/u.exec(
+    `${drawing.svg ?? ''} ${drawing.layered?.layers?.[0]?.svg ?? ''}`,
+  )?.[1];
+  return marked && marked in STYLE_PACKS ? (marked as StylePackId) : null;
+}
+
+/** A set piece of a kind, drawn; a tree as its name says (a palm), a road vehicle as its name says (a bus, a car), and a gate and a wall as its place has them. */
+export function drawPiece(
+  kind: FeatureKind,
+  name = '',
+  look: PieceLook = {},
+): SetPiece {
   if (kind === 'tree' && /\b(?:palms?|coconut|date palm)\b/iu.test(name))
     // A tall palm, as on a beach: its trunk ringed and leaning a little,
     // its fronds and coconuts at the top, about two and a half grown-ups
@@ -229,47 +337,8 @@ export function drawPiece(kind: FeatureKind, name = ''): SetPiece {
       ],
     };
   switch (kind) {
-    case 'gate': {
-      // A compound's metal gate between two concrete posts, wider than it
-      // is high and about a grown-up's shoulder high, as such gates are:
-      // its leaf hinged on the left post, a latch on the right.
-      const leaf =
-        `<g id="leaf">` +
-        rect(-76, -128, 152, 10, METAL) +
-        rect(-76, -22, 152, 10, METAL) +
-        rect(-76, -128, 10, 116, METAL) +
-        rect(66, -128, 10, 116, METAL) +
-        rect(-76, -76, 152, 8, METAL) +
-        bars(-66, 66, -118, -22, 7) +
-        rect(56, -92, 14, 10, YELLOW) +
-        `</g>`;
-      // The compound's wall runs off each side of it, beyond its frame, so
-      // it is a gateway in a wall, never a gate on its own; going through
-      // it is going out.
-      const wall = (x: number) =>
-        rect(x, -112, 170, 112, CONCRETE, 0) +
-        rect(x - 4, -120, 178, 10, '#c2b397') +
-        line(
-          `M${x},-74 L${x + 170},-74 M${x},-38 L${x + 170},-38 M${x + 60},-112 L${x + 60},-74 M${x + 120},-74 L${x + 120},-38 M${x + 40},-38 L${x + 40},0`,
-          '#a99a80',
-          2,
-        );
-      return {
-        ...framed(
-          wall(-264) +
-            wall(94) +
-            shadow(90) +
-            leaf +
-            rect(-94, -146, 18, 146, CONCRETE) +
-            rect(76, -146, 18, 146, CONCRETE) +
-            rect(-98, -154, 26, 10, CONCRETE) +
-            rect(72, -154, 26, 10, CONCRETE),
-          [-98, -154, 196, 160],
-        ),
-        leaf: { id: 'leaf', hinge: [-76, -70] },
-        opening: [-76, -128, 76, 0],
-      };
-    }
+    case 'gate':
+      return drawGate(look.pack ?? null);
     case 'door': {
       // A doorway in a stretch of wall: the dark room beyond, the door
       // hinged on its left.
@@ -455,24 +524,7 @@ export function drawPiece(kind: FeatureKind, name = ''): SetPiece {
       };
     }
     case 'wall':
-      return {
-        ...framed(
-          rect(-124, -96, 248, 96, CONCRETE, 0) +
-            rect(-130, -106, 260, 12, '#c2b397') +
-            line(
-              'M-124,-64 L124,-64 M-124,-32 L124,-32 M-60,-94 L-60,-64 M40,-94 L40,-64 M-10,-64 L-10,-32 M90,-64 L90,-32 M-80,-32 L-80,0 M30,-32 L30,0',
-              '#a99a80',
-              2,
-            ),
-          [-130, -106, 260, 106],
-        ),
-        perch: 106,
-        roosts: [
-          [-80, -106],
-          [0, -106],
-          [80, -106],
-        ],
-      };
+      return drawWall(look.pack ?? null);
     case 'fence': {
       const pickets = Array.from({ length: 9 }, (_, i) => {
         const x = -112 + i * 28;
@@ -531,35 +583,8 @@ export function drawPiece(kind: FeatureKind, name = ''): SetPiece {
         ),
       };
     case 'vehicle': {
-      // A danfo: a yellow minibus side on, its black stripe and windows,
-      // and its side door, which slides back to let people in and out.
-      return {
-        ...framed(
-          `<ellipse cx="0" cy="0" rx="220" ry="8" ${flat('#1d1a22')} fill-opacity="0.12"/>` +
-            `<path d="M-236,-34 L-236,-168 Q-236,-200 -204,-200 L176,-200 Q214,-200 226,-160 L240,-110 L240,-34 Z" ${fill(YELLOW)}/>` +
-            rect(-236, -104, 476, 12, DARK, 0) +
-            [-214, -150, -86]
-              .map((x) => rect(x, -186, 54, 52, GLASS, 4))
-              .join('') +
-            `<path d="M130,-186 L180,-186 Q206,-186 214,-160 L222,-134 L130,-134 Z" ${fill(GLASS)}/>` +
-            rect(4, -190, 108, 156, DARK, 3) +
-            `<g id="leaf">` +
-            rect(4, -190, 108, 156, YELLOW, 3) +
-            rect(14, -182, 88, 46, GLASS, 4) +
-            rect(4, -104, 108, 12, DARK, 0) +
-            rect(88, -86, 16, 6, WHITE) +
-            `</g>` +
-            [-150, 160]
-              .map(
-                (x) =>
-                  `<circle cx="${x}" cy="-30" r="32" ${fill(DARK)}/><circle cx="${x}" cy="-30" r="13" ${fill(STONE)}/>`,
-              )
-              .join(''),
-          [-240, -200, 480, 202],
-        ),
-        leaf: { id: 'leaf', hinge: [4, -112], slide: -100 },
-        opening: [4, -190, 112, -34],
-      };
+      const vehicle = vehicleKindOf(name, look.pack ?? null);
+      return drawVehicle(vehicle, vehicleColour(vehicle, name, look));
     }
     case 'steps':
       return {
@@ -613,6 +638,333 @@ export function drawPiece(kind: FeatureKind, name = ''): SetPiece {
         reacts: { as: 'hang', len: 36 },
         roosts: [[0, -186]],
       };
+  }
+}
+
+// ── Gates and walls as their place has them ───────────────────────────────
+
+/** How a place's gates and walls are built: a compound's concrete, a town's brick or plaster, a farm's timber, an old town's stone. */
+type Build = 'compound' | 'town' | 'rural' | 'stone';
+const buildOf = (pack: StylePackId | null): Build =>
+  pack === 'west-african-town'
+    ? 'compound'
+    : pack === 'village-farm' || pack === 'nature'
+      ? 'rural'
+      : pack === 'ancient-near-east' || pack === 'biblical-village'
+        ? 'stone'
+        : 'town';
+
+const BRICK = '#b8674f';
+const BRICK_LINE = '#94503d';
+const PLASTER = '#e8dcc6';
+const STONE_WALL = '#cbbf9f';
+
+/** A stretch of wall `w` wide from x, `h` high, as its place builds one. */
+function wallRun(x: number, w: number, h: number, build: Build): string {
+  if (build === 'rural') {
+    // A timber rail fence: posts and two rails.
+    const n = Math.max(2, Math.round(w / 56));
+    const posts = Array.from({ length: n }, (_, i) =>
+      rect(x + (i * (w - 10)) / (n - 1), -h + 10, 10, h - 10, WOOD_DARK, 1),
+    ).join('');
+    return (
+      posts +
+      rect(x, -h + 22, w, 9, WOOD, 1) +
+      rect(x, -h * 0.45, w, 9, WOOD, 1)
+    );
+  }
+  const colour =
+    build === 'compound' ? CONCRETE : build === 'stone' ? STONE_WALL : BRICK;
+  const joints =
+    build === 'compound'
+      ? `M${x},-74 L${x + w},-74 M${x},-38 L${x + w},-38 M${x + 60},-112 L${x + 60},-74 M${x + 120},-74 L${x + 120},-38 M${x + 40},-38 L${x + 40},0`
+      : build === 'town'
+        ? Array.from({ length: Math.floor(h / 18) }, (_, row) => {
+            const y = -h + 12 + row * 18;
+            const off = row % 2 ? 22 : 0;
+            const verticals = Array.from(
+              { length: Math.floor((w - off) / 44) },
+              (_, k) =>
+                `M${r1(x + off + k * 44)},${r1(y)} L${r1(x + off + k * 44)},${r1(y + 18)}`,
+            ).join(' ');
+            return `M${x},${r1(y)} L${x + w},${r1(y)} ${verticals}`;
+          }).join(' ')
+        : `M${x},${-Math.round(h * 0.66)} L${x + w},${-Math.round(h * 0.66)} M${x},${-Math.round(h * 0.33)} L${x + w},${-Math.round(h * 0.33)} M${x + Math.round(w * 0.35)},${-h + 8} L${x + Math.round(w * 0.35)},${-Math.round(h * 0.66)} M${x + Math.round(w * 0.7)},${-Math.round(h * 0.66)} L${x + Math.round(w * 0.7)},${-Math.round(h * 0.33)} M${x + Math.round(w * 0.24)},${-Math.round(h * 0.33)} L${x + Math.round(w * 0.24)},0`;
+  return (
+    rect(x, -h + 8, w, h - 8, colour, 0) +
+    rect(x - 4, -h, w + 8, 10, build === 'town' ? PLASTER : '#c2b397') +
+    line(
+      joints,
+      build === 'town' ? BRICK_LINE : '#a99a80',
+      build === 'town' ? 1.6 : 2,
+    )
+  );
+}
+
+/**
+ * A gate in its wall, as its place has one, its wall running off each
+ * side beyond its frame, so it is a gateway, never a gate on its own:
+ * going through it is going out. A West African compound's metal gate
+ * between concrete posts; a town's garden gate between brick piers; a
+ * farm's timber gate in a rail fence; an old town's wooden gate in a
+ * stone wall. Its leaf is hinged on the left post, a latch on the right.
+ */
+function drawGate(pack: StylePackId | null): SetPiece {
+  const build = buildOf(pack);
+  if (build === 'compound') {
+    // A compound's metal gate between two concrete posts, wider than it
+    // is high and about a grown-up's shoulder high, as such gates are.
+    const leaf =
+      `<g id="leaf">` +
+      rect(-76, -128, 152, 10, METAL) +
+      rect(-76, -22, 152, 10, METAL) +
+      rect(-76, -128, 10, 116, METAL) +
+      rect(66, -128, 10, 116, METAL) +
+      rect(-76, -76, 152, 8, METAL) +
+      bars(-66, 66, -118, -22, 7) +
+      rect(56, -92, 14, 10, YELLOW) +
+      `</g>`;
+    return {
+      ...framed(
+        wallRun(-264, 170, 120, build) +
+          wallRun(94, 170, 120, build) +
+          shadow(90) +
+          leaf +
+          rect(-94, -146, 18, 146, CONCRETE) +
+          rect(76, -146, 18, 146, CONCRETE) +
+          rect(-98, -154, 26, 10, CONCRETE) +
+          rect(72, -154, 26, 10, CONCRETE),
+        [-98, -154, 196, 160],
+      ),
+      leaf: { id: 'leaf', hinge: [-76, -70] },
+      opening: [-76, -128, 76, 0],
+    };
+  }
+  const post =
+    build === 'rural' ? WOOD_DARK : build === 'stone' ? STONE_WALL : BRICK;
+  const cap =
+    build === 'rural' ? WOOD : build === 'stone' ? '#b9ad8c' : PLASTER;
+  const leafColour =
+    build === 'town' ? WHITE : build === 'stone' ? WOOD : PLANK;
+  // A town's picket gate; a farm's five-bar gate with its brace; an old
+  // town's gate of planks.
+  const body =
+    build === 'town'
+      ? Array.from({ length: 7 }, (_, i) => {
+          const x = -70 + i * 22;
+          return `<path d="M${x - 8},-16 L${x - 8},-104 L${x},-116 L${x + 8},-104 L${x + 8},-16 Z" ${fill(leafColour)}/>`;
+        }).join('') +
+        rect(-76, -92, 152, 9, leafColour, 2) +
+        rect(-76, -40, 152, 9, leafColour, 2)
+      : build === 'rural'
+        ? [-118, -94, -70, -46, -22]
+            .map((y) => rect(-76, y, 152, 9, leafColour, 2))
+            .join('') +
+          rect(-76, -122, 12, 110, leafColour, 2) +
+          rect(64, -122, 12, 110, leafColour, 2) +
+          line('M-66,-18 L66,-116', FIGURE_INK, 11) +
+          line('M-66,-18 L66,-116', leafColour, 7)
+        : Array.from({ length: 6 }, (_, i) =>
+            rect(-76 + i * 25.4, -126, 25.4, 112, leafColour, 1),
+          ).join('') +
+          rect(-76, -104, 152, 10, WOOD_DARK, 1) +
+          rect(-76, -44, 152, 10, WOOD_DARK, 1);
+  const leaf = `<g id="leaf">` + body + rect(58, -84, 12, 10, METAL) + `</g>`;
+  return {
+    ...framed(
+      wallRun(-264, 170, build === 'rural' ? 110 : 112, build) +
+        wallRun(94, 170, build === 'rural' ? 110 : 112, build) +
+        shadow(90) +
+        leaf +
+        rect(-94, -146, 18, 146, post) +
+        rect(76, -146, 18, 146, post) +
+        rect(-98, -154, 26, 10, cap) +
+        rect(72, -154, 26, 10, cap),
+      [-98, -154, 196, 160],
+    ),
+    leaf: { id: 'leaf', hinge: [-76, -70] },
+    opening: [-76, -128, 76, 0],
+  };
+}
+
+/** A stretch of wall as its place builds one, to stand by or climb up on. */
+function drawWall(pack: StylePackId | null): SetPiece {
+  const build = buildOf(pack);
+  // A farm's wall is a dry stone wall, never its rail fence: one climbs up on it.
+  const as = build === 'rural' ? 'stone' : build;
+  return {
+    ...framed(
+      as === 'compound'
+        ? rect(-124, -96, 248, 96, CONCRETE, 0) +
+            rect(-130, -106, 260, 12, '#c2b397') +
+            line(
+              'M-124,-64 L124,-64 M-124,-32 L124,-32 M-60,-94 L-60,-64 M40,-94 L40,-64 M-10,-64 L-10,-32 M90,-64 L90,-32 M-80,-32 L-80,0 M30,-32 L30,0',
+              '#a99a80',
+              2,
+            )
+        : wallRun(-124, 248, 106, as),
+      [-130, -106, 260, 106],
+    ),
+    perch: 106,
+    roosts: [
+      [-80, -106],
+      [0, -106],
+      [80, -106],
+    ],
+  };
+}
+
+// ── Road vehicles ─────────────────────────────────────────────────────────
+
+/** A wheel, side on. */
+const wheelAt = (x: number, r: number) =>
+  `<circle cx="${x}" cy="${-r}" r="${r}" ${fill(DARK)}/><circle cx="${x}" cy="${-r}" r="${r1(r * 0.42)}" ${fill(STONE)}/>`;
+
+/**
+ * A road vehicle side on, facing right, in its colour: its body, its
+ * windows, its wheels, and the door people get in and out by, which
+ * swings open about its front edge (a car's, a truck's cab) or slides
+ * back (a van's, a bus's, a danfo's), its gap the way in.
+ */
+function drawVehicle(kind: VehicleKind, colour: string): SetPiece {
+  const ground = (rx: number) =>
+    `<ellipse cx="0" cy="0" rx="${rx}" ry="8" ${flat('#1d1a22')} fill-opacity="0.12"/>`;
+  switch (kind) {
+    case 'danfo':
+      // A danfo: a yellow minibus side on, its black stripe and windows,
+      // and its side door, which slides back to let people in and out.
+      return {
+        ...framed(
+          ground(220) +
+            `<path d="M-236,-34 L-236,-168 Q-236,-200 -204,-200 L176,-200 Q214,-200 226,-160 L240,-110 L240,-34 Z" ${fill(colour)}/>` +
+            rect(-236, -104, 476, 12, DARK, 0) +
+            [-214, -150, -86]
+              .map((x) => rect(x, -186, 54, 52, GLASS, 4))
+              .join('') +
+            `<path d="M130,-186 L180,-186 Q206,-186 214,-160 L222,-134 L130,-134 Z" ${fill(GLASS)}/>` +
+            rect(4, -190, 108, 156, DARK, 3) +
+            `<g id="leaf">` +
+            rect(4, -190, 108, 156, colour, 3) +
+            rect(14, -182, 88, 46, GLASS, 4) +
+            rect(4, -104, 108, 12, DARK, 0) +
+            rect(88, -86, 16, 6, WHITE) +
+            `</g>` +
+            [-150, 160]
+              .map(
+                (x) =>
+                  `<circle cx="${x}" cy="-30" r="32" ${fill(DARK)}/><circle cx="${x}" cy="-30" r="13" ${fill(STONE)}/>`,
+              )
+              .join(''),
+          [-240, -200, 480, 202],
+        ),
+        leaf: { id: 'leaf', hinge: [4, -112], slide: -100 },
+        opening: [4, -190, 112, -34],
+      };
+    case 'bus':
+      // A bus: a long plain body, a row of windows, a pale band, and its
+      // door near the front, which slides back.
+      return {
+        ...framed(
+          ground(240) +
+            `<path d="M-260,-36 L-260,-196 Q-260,-214 -242,-214 L222,-214 Q246,-214 250,-190 L258,-112 L258,-36 Z" ${fill(colour)}/>` +
+            rect(-260, -104, 518, 10, WHITE, 0) +
+            [-240, -170, -100, -30, 40]
+              .map((x) => rect(x, -196, 58, 56, GLASS, 4))
+              .join('') +
+            `<path d="M204,-196 L232,-196 Q242,-196 244,-184 L250,-128 L204,-128 Z" ${fill(GLASS)}/>` +
+            rect(118, -200, 76, 164, DARK, 3) +
+            `<g id="leaf">` +
+            rect(118, -200, 76, 164, colour, 3) +
+            rect(124, -192, 30, 88, GLASS, 3) +
+            rect(158, -192, 30, 88, GLASS, 3) +
+            `</g>` +
+            wheelAt(-176, 34) +
+            wheelAt(176, 34),
+          [-260, -214, 518, 216],
+        ),
+        leaf: { id: 'leaf', hinge: [118, -118], slide: -80 },
+        opening: [118, -200, 194, -36],
+      };
+    case 'van':
+      // A van: a tall box of a body, its windscreen sloped, its side
+      // door sliding back.
+      return {
+        ...framed(
+          ground(210) +
+            `<path d="M-220,-38 L-220,-194 Q-220,-206 -208,-206 L150,-206 Q174,-206 186,-178 L212,-122 L220,-110 L220,-38 Z" ${fill(colour)}/>` +
+            rect(-200, -190, 70, 50, GLASS, 4) +
+            `<path d="M150,-190 L172,-190 L198,-128 L150,-128 Z" ${fill(GLASS)}/>` +
+            rect(-20, -196, 124, 158, DARK, 3) +
+            `<g id="leaf">` +
+            rect(-20, -196, 124, 158, colour, 3) +
+            rect(-10, -188, 104, 46, GLASS, 4) +
+            rect(76, -110, 16, 6, DARK) +
+            `</g>` +
+            wheelAt(-150, 32) +
+            wheelAt(150, 32),
+          [-220, -206, 440, 208],
+        ),
+        leaf: { id: 'leaf', hinge: [-20, -118], slide: -110 },
+        opening: [-20, -196, 104, -38],
+      };
+    case 'truck':
+      // A truck: its cargo box behind, its cab in front, and the cab's
+      // door hinged at its front edge.
+      return {
+        ...framed(
+          ground(236) +
+            rect(-250, -52, 480, 14, DARK, 2) +
+            rect(-250, -232, 316, 182, WHITE, 4) +
+            line('M-250,-196 L66,-196 M-250,-90 L66,-90', '#d6d4ce', 3) +
+            `<path d="M80,-44 L80,-196 Q80,-208 92,-208 L168,-208 Q188,-208 198,-186 L224,-122 L230,-110 L230,-44 Z" ${fill(colour)}/>` +
+            `<path d="M184,-194 L196,-194 L220,-130 L184,-130 Z" ${fill(GLASS)}/>` +
+            rect(92, -196, 84, 150, DARK, 3) +
+            `<g id="leaf">` +
+            rect(92, -196, 84, 150, colour, 3) +
+            rect(100, -188, 68, 56, GLASS, 4) +
+            rect(100, -110, 16, 6, DARK) +
+            `</g>` +
+            wheelAt(-190, 32) +
+            wheelAt(-122, 32) +
+            wheelAt(170, 32),
+          [-250, -232, 480, 234],
+        ),
+        leaf: { id: 'leaf', hinge: [176, -120] },
+        opening: [92, -196, 176, -46],
+      };
+    case 'car':
+    case 'taxi': {
+      // A car: its body, its cabin and windows, its door hinged at its
+      // front edge; a taxi with its sign on the roof.
+      const sign =
+        kind === 'taxi'
+          ? rect(-18, -188, 60, 22, WHITE, 4) + rect(-10, -182, 44, 8, DARK, 2)
+          : '';
+      return {
+        ...framed(
+          ground(200) +
+            sign +
+            `<path d="M-210,-40 L-210,-92 Q-206,-106 -188,-108 L-122,-112 L-82,-160 Q-76,-168 -64,-168 L70,-168 Q84,-168 92,-160 L136,-114 L194,-106 Q214,-102 216,-86 L216,-40 Z" ${fill(colour)}/>` +
+            `<path d="M-112,-114 L-76,-156 L-10,-156 L-10,-114 Z" ${fill(GLASS)}/>` +
+            rect(-2, -160, 116, 118, DARK, 3) +
+            `<g id="leaf">` +
+            rect(-2, -160, 116, 118, colour, 3) +
+            `<path d="M6,-114 L6,-152 L68,-152 L108,-114 Z" ${fill(GLASS)}/>` +
+            rect(12, -100, 18, 6, DARK) +
+            `</g>` +
+            wheelAt(-138, 32) +
+            wheelAt(146, 32),
+          [
+            -216,
+            kind === 'taxi' ? -190 : -168,
+            432,
+            kind === 'taxi' ? 192 : 170,
+          ],
+        ),
+        leaf: { id: 'leaf', hinge: [114, -100] },
+        opening: [-2, -160, 114, -42],
+      };
+    }
   }
 }
 

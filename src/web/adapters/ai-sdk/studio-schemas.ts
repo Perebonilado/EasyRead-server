@@ -150,11 +150,15 @@ export const studioCheckSchema = z.object({
   faults: z.array(z.string()).catch([]),
 });
 
-/** A person's look from the kit's lists, each field caught as the plain choice when it is not one of them. */
+/**
+ * A person's look from the kit's lists, each field caught as the plain
+ * choice when it is not one of them; a skin that is none caught as 0, for
+ * the domain to choose by who they are (never one skin for everyone).
+ */
 const lenientFigure = z.object({
   age: z.enum(FIGURE_AGES).catch('adult'),
   build: z.enum(FIGURE_BUILDS).catch('average'),
-  skin: z.number().catch(4),
+  skin: z.number().catch(0),
   hair: z.enum(HAIR_STYLES).catch('short'),
   hairColour: z.enum(HAIR_COLOURS).catch('brown'),
   facialHair: z.enum(FACIAL_HAIR).catch('none'),

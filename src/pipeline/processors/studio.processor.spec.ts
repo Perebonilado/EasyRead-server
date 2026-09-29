@@ -694,7 +694,11 @@ describe('the cast drawn by the artist, at the cast step and again as asked', ()
         look: 'a brown horse',
         voicePick: 1,
       },
-      { name: 'Tobi', voice: 'boy', figure: { age: 'child' } },
+      {
+        name: 'Tobi',
+        voice: 'boy',
+        figure: { age: 'child', hair: 'short', hairColour: 'brown' },
+      },
     ],
     sets: [{ name: 'The Wall', id: 'wall' }],
   });

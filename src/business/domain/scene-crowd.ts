@@ -95,7 +95,7 @@ export interface CrowdInput {
   /** What the story's people wear: no one in the crowd is dressed as one of them. */
   wearing?: Wearing[];
   /**
-   * Where the pieces the stage draws over the crowd stand (a danfo, a
+   * Where the pieces the stage draws over the crowd stand (a bus, a
    * crate), in the set's units, in either staging: no one of the crowd
    * stands anywhere one would cover them.
    */

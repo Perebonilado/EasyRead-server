@@ -92,6 +92,7 @@ import {
 } from '../../business/domain/scene-script';
 import {
   PLAIN_FIGURE,
+  figureFor,
   describeFigure,
   figureOf,
   signsOver,
@@ -319,19 +320,18 @@ async function inBatches<T, R>(
   return out;
 }
 
-/** A person no model could describe: plainly dressed, as old as their voice. */
-function figureByVoice(voice: StoryCharacter['voice']): FigureSpec {
+/** A person no model could describe: plainly dressed, as old as their voice, their skin and hair chosen by who they are. */
+function figureByVoice(
+  voice: StoryCharacter['voice'],
+  seed: string,
+): FigureSpec {
   const age =
     voice === 'girl' || voice === 'boy'
       ? 'child'
       : voice === 'old woman' || voice === 'old man'
         ? 'elder'
         : 'adult';
-  return {
-    ...PLAIN_FIGURE,
-    age,
-    hairColour: age === 'elder' ? 'grey' : PLAIN_FIGURE.hairColour,
-  };
+  return figureFor(seed, { age, top: PLAIN_FIGURE.top });
 }
 
 /**
@@ -2518,7 +2518,7 @@ export class SceneProcessor {
       }
     }
     if (kind === 'person') {
-      const spec = figure ?? figureByVoice(character.voice);
+      const spec = figure ?? figureByVoice(character.voice, character.id);
       const sheet = await figureSheet(spec, character.id);
       this.logger.log(
         `${who}: ${character.name} drawn by the kit: ${describeFigure(spec)}`,

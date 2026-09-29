@@ -20,6 +20,7 @@ import {
   FIGURE_POSES,
   FIGURE_SIGNS,
   PLAIN_FIGURE,
+  figureFor,
   figureOf,
   isGear,
   type FigureFace,
@@ -122,7 +123,7 @@ export interface StudioBrief {
   /** How long an episode runs. */
   minutes: number | null;
   tone: StudioTone | null;
-  /** A story's where and when: "a busy market in Lagos, today". */
+  /** A story's where and when: "a harbour town, today", "a castle long ago". */
   setting: string | null;
   /** A story's people, as the maker said them. */
   characters: string | null;
@@ -319,7 +320,7 @@ export interface StudioSet {
  * scene names it, as new places and people are.
  */
 export interface StudioFeature {
-  /** Its id in every sheet: the word for it, "gate", "danfo". */
+  /** Its id in every sheet: the word for it, "gate", "bus". */
   id: string;
   name: string;
   /** One of the list's kinds, or "drawn": one of the show's own, which the artist draws. */
@@ -375,9 +376,9 @@ export function featuresOf(
       // ("a wooden gate"), else the artist's to draw if its name could be
       // one: never a thing handled or carried, one of the cast, a place,
       // the ground or the weather.
-      // A kind the stage draws as one thing (a vehicle is a danfo, a stall
-      // a market stall) only when its name says so: "the half-built ark"
-      // put down as a vehicle is the artist's to draw, never a bus.
+      // A kind the stage draws as one thing (a vehicle is a road vehicle,
+      // a stall a market stall) only when its name says so: "the half-built
+      // ark" put down as a vehicle is the artist's to draw, never a bus.
       const given = oneOf(FEATURE_KINDS)(f.kind);
       const listed =
         given && (!ONE_LOOK.has(given) || FEATURE_WORDS[given].test(noun))
@@ -557,21 +558,30 @@ function freeId(id: string, taken: Set<string>): string {
   return out;
 }
 
-/** A person's figure as sent, made sound by the kit; plain when nothing usable came. */
-function figureFrom(raw: unknown, voice: StudioVoice): FigureSpec {
+/**
+ * A person's figure as sent, made sound by the kit. What it does not say
+ * (their skin, their hair, their top when nothing usable came) is chosen
+ * by their id, so no two plain people look alike and no one skin is
+ * everyone's by default.
+ */
+function figureFrom(
+  raw: unknown,
+  voice: StudioVoice,
+  seed: string,
+): FigureSpec {
   const age =
     voice === 'girl' || voice === 'boy'
       ? 'child'
       : voice === 'old woman' || voice === 'old man'
         ? 'elder'
         : 'adult';
-  if (!raw || typeof raw !== 'object')
-    return {
-      ...PLAIN_FIGURE,
-      age,
-      hair: voice === 'girl' || voice === 'woman' ? 'long' : PLAIN_FIGURE.hair,
-    };
-  return figureOf({ age, ...(raw as Record<string, unknown>) });
+  const plain = figureFor(seed, {
+    age,
+    top: PLAIN_FIGURE.top,
+    ...(voice === 'girl' || voice === 'woman' ? { hair: 'long' as const } : {}),
+  });
+  if (!raw || typeof raw !== 'object') return plain;
+  return figureOf({ age, ...(raw as Record<string, unknown>) }, plain);
 }
 
 /** A bible made sound: ids unique and kept, every character a voice, every person a figure. */
@@ -596,14 +606,15 @@ export function bibleOf(raw: unknown): StudioBible {
       // And only a creature the creature kit's, when its body is the kit's.
       const creature =
         kind === 'creature' && c.creature ? creatureOf(c.creature) : null;
+      const id = freeId(studioId(text(c.id, 40) || name), taken);
       return [
         {
-          id: freeId(studioId(text(c.id, 40) || name), taken),
+          id,
           name,
           kind,
           role: oneOf(STUDIO_ROLES)(c.role) ?? 'supporting',
           look: text(c.look, 300),
-          figure: kind === 'person' ? figureFrom(c.figure, voice) : null,
+          figure: kind === 'person' ? figureFrom(c.figure, voice, id) : null,
           // Kept only when there is one, so a character without is as it was.
           ...(animal ? { animal } : {}),
           ...(creature ? { creature } : {}),

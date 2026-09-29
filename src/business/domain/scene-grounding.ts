@@ -7,7 +7,7 @@
  *
  * - the floor at their depth, where floorAt puts the feet of one at d;
  * - the ground a feature stands on, beside it or under it (behind it a
- *   step back of that), never up at its way (a danfo's door sill, a
+ *   step back of that), never up at its way (a bus's door sill, a
  *   stall's counter), which is where one goes in;
  * - up a feature where one who climbs it stands (its perch);
  * - on a seat or a bed, as the stations lay them (left as they are).
@@ -19,7 +19,7 @@
  * so long as both ends are the floor's size for where they stand. That
  * is looked at too.
  *
- * And one beside a solid body (a danfo, a stall) stands at its side at its
+ * And one beside a solid body (a bus, a stall) stands at its side at its
  * depth, their body clear of it, unless they go in.
  *
  * Whatever is found wrong is put right silently: the feet stood on the

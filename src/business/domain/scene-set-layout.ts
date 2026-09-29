@@ -68,13 +68,16 @@ import {
 import { audienceFor, drawAudience } from './scene-set-audience';
 import { FAR_K, FAR_MOST, checkSizes, realScaleOf } from './scene-set-sizes';
 import {
+  NEUTRAL_PACKS,
   STYLE_PACKS,
   STYLE_PACK_IDS,
   isBuildingKind,
   mix,
   packColour,
   packOfWorld,
+  plainPack,
   styleOf,
+  worldWords,
   type StylePack,
   type StylePackId,
 } from './scene-style-packs';
@@ -140,8 +143,9 @@ export type SetRow = (typeof LAYER_ROWS)[number];
  * to make a place busy (studio-scenery-plan §5.3): chairs, potted plants,
  * benches, baskets and carts, and what L3 adds (scene-set-kit): poles and
  * wires, bins, plastic chairs, laundry lines, generators, parked cars and
- * okadas, water drums, bicycles, street signs, hydrants, clay pots,
- * woodpiles.
+ * motorbikes, water drums, bicycles, street signs, hydrants, clay pots,
+ * woodpiles. A set in a style pack scatters only its pack's own and the
+ * few every place has (CLUTTER_EVERYWHERE).
  */
 export const CLUTTER_KINDS = [
   'chair',
@@ -155,7 +159,7 @@ export const CLUTTER_KINDS = [
   'laundry line',
   'generator',
   'parked car',
-  'okada',
+  'motorbike',
   'water drum',
   'bicycle',
   'street sign',
@@ -164,6 +168,17 @@ export const CLUTTER_KINDS = [
   'woodpile',
 ] as const;
 export type ClutterKind = (typeof CLUTTER_KINDS)[number];
+/** The clutter any place may have, whatever its pack: the rest is its pack's own. */
+export const CLUTTER_EVERYWHERE: readonly ClutterKind[] = [
+  'chair',
+  'plant',
+  'bench',
+  'basket',
+  'bin',
+  'bicycle',
+];
+/** Kinds a layout written before may name, by what they are called now. */
+const RENAMED: Readonly<Record<string, string>> = { okada: 'motorbike' };
 /** The most kinds of clutter a set scatters, and foreground things it places. */
 export const MAX_CLUTTER = 6;
 export const MAX_FOREGROUND = 4;
@@ -463,9 +478,12 @@ const ITEM_WORDS: Record<string, SetItemKind> = {
   car: 'parked car',
   cars: 'parked car',
   'parked cars': 'parked car',
-  motorbike: 'okada',
-  motorcycle: 'okada',
-  okadas: 'okada',
+  motorcycle: 'motorbike',
+  motorbikes: 'motorbike',
+  motorcycles: 'motorbike',
+  scooter: 'motorbike',
+  okada: 'motorbike',
+  okadas: 'motorbike',
   'water drums': 'water drum',
   bike: 'bicycle',
   bicycles: 'bicycle',
@@ -508,7 +526,10 @@ const ITEM_WORDS: Record<string, SetItemKind> = {
   'market umbrella': 'umbrella stall',
   'umbrella stand': 'umbrella stall',
   danfos: 'danfo',
-  minibus: 'danfo',
+  minibus: 'bus',
+  minibuses: 'bus',
+  buses: 'bus',
+  coach: 'bus',
   gutter: 'gutter bridge',
   drain: 'gutter bridge',
   pyramids: 'pyramid',
@@ -607,7 +628,7 @@ const BACKDROP_WORDS: Record<string, SetBackdrop> = {
   olives: 'olive hills',
   'olive trees': 'olive hills',
   'olive grove': 'olive hills',
-  roofs: 'rooftops',
+  roofs: 'city',
   'zinc roofs': 'rooftops',
   skyscrapers: 'skyline',
   towers: 'skyline',
@@ -829,16 +850,6 @@ export function layoutOf(
   const vessel =
     kind === 'vessel' ? (vesselOf(said.vessel) ?? plain.vessel ?? 'bus') : null;
   const focal = focalOf(said.focal, place);
-  const clutter = [
-    ...new Set(
-      (Array.isArray(said.clutter) ? said.clutter : []).flatMap(
-        (one): ClutterKind[] => {
-          const kindOf = CLUTTER_KINDS.find((k) => k === itemKindOf(one));
-          return kindOf ? [kindOf] : [];
-        },
-      ),
-    ),
-  ].slice(0, MAX_CLUTTER);
   const wide =
     typeof said.width === 'string' ? parseFloat(said.width) : said.width;
   // A Studio set is as wide as its camera needs, unless the painter says.
@@ -846,13 +857,39 @@ export function layoutOf(
     SET_WIDTHS.find((w) => w === wide) ??
     (place.features !== undefined ? widthFor(place) : undefined);
   const placeWords = `${place.name} ${place.look}`;
+  // The story's world first, then the place's own words, then what the
+  // painter chose (with no world, only a pack of no one region), then the
+  // plainest that fits: never one region's by default.
+  const painted = styleOf(said.style);
   const style =
     world === undefined
-      ? styleOf(said.style)
+      ? painted
       : (packOfWorld(world) ??
-        styleOf(said.style) ??
         packOfWorld(null, placeWords) ??
-        'nature');
+        (painted && (hasWorld(world) || NEUTRAL_PACKS.includes(painted))
+          ? painted
+          : null) ??
+        plainPack(world, placeWords));
+  // What it scatters: in a pack, only the pack's own and what any place
+  // has (a street of one region never scatters another's).
+  const allowed = style
+    ? new Set<string>([...STYLE_PACKS[style].clutter, ...CLUTTER_EVERYWHERE])
+    : null;
+  const clutter = [
+    ...new Set(
+      (Array.isArray(said.clutter) ? said.clutter : []).flatMap(
+        (one): ClutterKind[] => {
+          const kindOf = CLUTTER_KINDS.find((k) => k === itemKindOf(one));
+          return kindOf && (!allowed || allowed.has(kindOf)) ? [kindOf] : [];
+        },
+      ),
+    ),
+  ].slice(0, MAX_CLUTTER);
+  const backdropSaid =
+    pick(SET_BACKDROPS, BACKDROP_WORDS, said.backdrop) ?? plain.backdrop;
+  // A danfo is a West African town's bus: anywhere else, a bus.
+  if (style && style !== 'west-african-town')
+    for (const one of items) if (one.kind === 'danfo') one.kind = 'bus';
   const rowsSaid =
     typeof said.audience === 'number'
       ? said.audience
@@ -886,9 +923,14 @@ export function layoutOf(
     ground,
     groundColour: setColourOf(said.groundColour),
     backdrop:
-      kind === 'outdoor'
-        ? (pick(SET_BACKDROPS, BACKDROP_WORDS, said.backdrop) ?? plain.backdrop)
-        : 'none',
+      kind !== 'outdoor'
+        ? 'none'
+        : // Zinc rooftops are a West African town's own: elsewhere, a town.
+          backdropSaid === 'rooftops' &&
+            style &&
+            !STYLE_PACKS[style].backdrops.includes('rooftops')
+          ? 'city'
+          : backdropSaid,
     walls: kind === 'outdoor' ? null : setColourOf(said.walls),
     vessel,
     vesselColour: vessel
@@ -1001,6 +1043,11 @@ const SPOT_AT: Record<string, number> = { ...STATION_SHARES, back: 0.5 };
 /** How near across (a share of the set) a painter's thing is to the stage's own piece of its kind to be that piece again. */
 const STAGED_NEAR = 0.2;
 
+/** Whether a story's world says anything at all. */
+function hasWorld(world: StoryWorld | null | undefined): boolean {
+  return Boolean(world && worldWords(world).trim());
+}
+
 /** The story's world, as the painter is told it. */
 const worldText = (world: StoryWorld | null | undefined) =>
   world
@@ -1018,7 +1065,10 @@ function packText(world: StoryWorld | null | undefined): string {
     const pack = STYLE_PACKS[id];
     return `Its look is the "${id}" style (${pack.words}): answer "style": "${id}". Its buildings are ${pack.buildings.join(', ')}; its scenery ${pack.scenery.join(', ')}; its clutter ${pack.clutter.join(', ')}.`;
   }
-  return `Choose its look as "style", one of: ${STYLE_PACK_IDS.map((one) => `"${one}" (${STYLE_PACKS[one].words})`).join('; ')}.`;
+  // With no world, only the packs of no one region: nothing says where
+  // it is, so it is nowhere in particular.
+  const offered = hasWorld(world) ? STYLE_PACK_IDS : NEUTRAL_PACKS;
+  return `Choose its look as "style", the one nearest the place's own words, one of: ${offered.map((one) => `"${one}" (${STYLE_PACKS[one].words})`).join('; ')}.`;
 }
 
 /** The features of a place the stage draws itself, and those the set draws, by the brief's own rule (setThing). */
@@ -2055,7 +2105,7 @@ function pieceOf(
   if (kind === 'palm')
     return { ...drawPiece('tree', 'palm tree'), lives: 'sway' };
   if (isSceneryKind(kind)) return drawScenery(kind, colour ?? undefined);
-  const piece = drawPiece(kind);
+  const piece = drawPiece(kind, '', { pack: pack?.id ?? null, colour });
   if (kind === 'stall') {
     // Each stall its own: its awning's stripes in its colour, and its
     // wares of several kinds.
@@ -2088,7 +2138,7 @@ const VESSEL_LOOK: Record<
   SetVessel,
   { colour: string; seats: string; walls: string }
 > = {
-  bus: { colour: CLOTH.yellow, seats: CLOTH.blue, walls: PAPER },
+  bus: { colour: CLOTH.blue, seats: CLOTH.red, walls: PAPER },
   train: { colour: CLOTH.teal, seats: CLOTH.red, walls: PAPER },
   plane: { colour: '#e7ecf2', seats: CLOTH.navy, walls: '#eef1f5' },
   boat: { colour: SET_COLOURS.wood, seats: CLOTH.blue, walls: PAPER },
@@ -2570,6 +2620,8 @@ export function buildSet(
   layout: SetLayout,
   place: StoryPlace,
   own: Record<string, SetPiece> = {},
+  /** The story's world: the people watching are dressed for it. Absent, as the pack's. */
+  world: StoryWorld | null = null,
 ): BuiltSet {
   // As wide as its layout says (a vessel one frame, whatever it says): what
   // spans the whole set drawn that wide, and the frame its middle.
@@ -2579,10 +2631,32 @@ export function buildSet(
       : Math.round(SET_W * (layout.width ?? 1));
   drawW = across;
   try {
-    return buildSetAt(layout, place, own, (across - SET_W) / 2);
+    return buildSetAt(
+      renamedIn(layout),
+      place,
+      own,
+      (across - SET_W) / 2,
+      world,
+    );
   } finally {
     drawW = SET_W;
   }
+}
+
+/** A layout written before a kind was renamed (an okada, now a motorbike), read as it is called now. */
+function renamedIn(layout: SetLayout): SetLayout {
+  const now = <T extends string>(kind: T): T => (RENAMED[kind] ?? kind) as T;
+  const clutter = layout.clutter?.map(now);
+  if (
+    !layout.items.some((one) => RENAMED[one.kind]) &&
+    !layout.clutter?.some((one) => RENAMED[one])
+  )
+    return layout;
+  return {
+    ...layout,
+    items: layout.items.map((one) => ({ ...one, kind: now(one.kind) })),
+    ...(clutter ? { clutter } : {}),
+  };
 }
 
 /** A set built with `margin` of it either side of the frame: what spans it drawn `drawW` wide, moved back by the margin. */
@@ -2591,6 +2665,7 @@ function buildSetAt(
   place: StoryPlace,
   own: Record<string, SetPiece>,
   margin: number,
+  story: StoryWorld | null,
 ): BuiltSet {
   const kind: PlaceKind = place.kind ?? 'outdoor';
   /** What spans the whole set, drawn from 0 across, moved back so the frame is its middle. */
@@ -2947,7 +3022,7 @@ function buildSetAt(
     const id = featureGroup(feature.id);
     parts[id] = id;
     placings.push({
-      piece: drawPiece(feature.kind, feature.name),
+      piece: drawPiece(feature.kind, feature.name, { pack: layout.style }),
       kind: feature.kind,
       x: (SPOT_AT[feature.spot] ?? 0.5) * SET_W,
       y,
@@ -3203,7 +3278,7 @@ function buildSetAt(
       rows: layout.audience,
       spread: audienceFor(words)?.spread ?? 'full',
       seed: `${place.id}:${place.name}`,
-      world: PACK_WORLD[pack.id],
+      world: story && worldWords(story).trim() ? story : PACK_WORLD[pack.id],
       kind,
       focal: layout.focal?.x ?? 0.5,
       children: /\b(?:class ?rooms?|school|lessons?|pupils|children)\b/iu.test(
@@ -3448,6 +3523,7 @@ const AT_HORIZON: ReadonlySet<string> = new Set([
   'parked car',
   'danfo',
   'taxi',
+  'bus',
   'obelisk',
   'columns',
   'pyramid',
@@ -3481,12 +3557,15 @@ const CLUTTER_COLOURS: Readonly<Record<string, readonly string[]>> = {
   'plastic chair': [CLOTH.white, CLOTH.red, CLOTH.blue, CLOTH.green],
   'water drum': [CLOTH.blue, CLOTH.blue, CLOTH.black],
   'parked car': [CLOTH.blue, CLOTH.red, CLOTH.white, CLOTH.grey, CLOTH.green],
-  okada: [CLOTH.red, CLOTH.black, CLOTH.blue],
+  motorbike: [CLOTH.red, CLOTH.black, CLOTH.blue],
   bicycle: [CLOTH.teal, CLOTH.red, CLOTH.yellow],
   bin: [KIT_EXTRAS['dark leaf'], CLOTH.grey, CLOTH.blue],
 };
 
-/** Who the people watching are dressed as, by their pack: the figure kit's wardrobe for its world. */
+/**
+ * Who the people watching are dressed as, by their pack, where the story
+ * gives no world of its own: the figure kit's wardrobe for the pack's.
+ */
 const PACK_WORLD: Record<StylePackId, StoryWorld> = {
   'ancient-near-east': {
     era: 'ancient, BC',
@@ -3512,6 +3591,13 @@ const PACK_WORLD: Record<StylePackId, StoryWorld> = {
   'western-city': {
     era: 'today',
     region: 'a city',
+    culture: '',
+    landscape: '',
+    homes: '',
+  },
+  'modern-town': {
+    era: 'today',
+    region: 'a town',
     culture: '',
     landscape: '',
     homes: '',

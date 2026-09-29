@@ -108,6 +108,7 @@ import {
   PERCHED_KINDS,
   coveredPiece,
   drawPiece,
+  setPackOf,
   featureGroup,
 } from './scene-set-pieces';
 import type { DocumentProfile } from './scene-profile';
@@ -2498,7 +2499,9 @@ export function composeScene(input: ComposeInput): {
         ? null
         : feature.kind === DRAWN
           ? (script.drawn?.features?.[feature.id] ?? coveredPiece())
-          : drawPiece(feature.kind, feature.name),
+          : drawPiece(feature.kind, feature.name, {
+              pack: setPackOf(setDrawing),
+            }),
       group: box ? found : null,
       box: box ?? null,
     };

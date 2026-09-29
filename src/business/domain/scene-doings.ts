@@ -1689,7 +1689,7 @@ export const FEATURE_KINDS = [
 ] as const;
 export type FeatureKind = (typeof FEATURE_KINDS)[number];
 
-/** Each feature by the words for it; the word found is its id ("danfo", "gate"). */
+/** Each feature by the words for it; the word found is its id ("bus", "gate"). */
 export const FEATURE_WORDS: Record<FeatureKind, RegExp> = {
   gate: /\b(?:gates?|gateway)\b/iu,
   door: /\b(?:doors?|doorway)\b/iu,
@@ -1706,10 +1706,11 @@ export const FEATURE_WORDS: Record<FeatureKind, RegExp> = {
   fence: /\bfences?\b/iu,
   stall: /\b(?:stalls?|kiosks?)\b/iu,
   crate: /\b(?:crates?|boxes|barrels?)\b/iu,
-  // A road vehicle: the stage draws a danfo. A boat, a cart or a train is
-  // drawn by the artist, as one of the show's own.
+  // A road vehicle: the stage draws it as its name says (a bus, a car, a
+  // van, a taxi, a truck; a danfo by its own name). A boat, a cart or a
+  // train is drawn by the artist, as one of the show's own.
   vehicle:
-    /\b(?:danfo|buses|bus|minibus|cars?|vans?|trucks?|lorr(?:y|ies)|taxis?)\b/iu,
+    /\b(?:buses|bus|minibus|cars?|vans?|trucks?|lorr(?:y|ies)|taxis?|danfo)\b/iu,
   window: /\bwindows?\b/iu,
   steps: /\b(?:steps|stairs|staircase|ladder)\b/iu,
   swing: /\b(?:swings?|tyre swing)\b/iu,
@@ -1743,7 +1744,7 @@ export const featureWordsOf = (feature: {
 /**
  * The features a text names, first first: a word for one after "the", "a"
  * or "his" and at most one word more ("the open door", "a tomato crate"),
- * never a likeness ("faster than a danfo") or a verb ("the gate swings").
+ * never a likeness ("faster than a bus") or a verb ("the gate swings").
  * `own` are a show's own features, known by their names.
  */
 export function featuresNamedIn(

@@ -148,8 +148,34 @@ describe('the Studio: a scene decided before it is drawn', () => {
     expect(bible.characters[2].figure).toBeNull();
     const twins = bibleOf({
       characters: [
-        { name: 'Ada', voice: 'girl', figure: { age: 'child', hair: 'afro' } },
-        { name: 'Ada', voice: 'girl', figure: { age: 'child', hair: 'afro' } },
+        {
+          name: 'Ada',
+          voice: 'girl',
+          figure: {
+            age: 'child',
+            hair: 'afro',
+            skin: 5,
+            hairColour: 'black',
+            topColour: 'green',
+            bottomColour: 'navy',
+            accentColour: 'red',
+            build: 'average',
+          },
+        },
+        {
+          name: 'Ada',
+          voice: 'girl',
+          figure: {
+            age: 'child',
+            hair: 'afro',
+            skin: 5,
+            hairColour: 'black',
+            topColour: 'green',
+            bottomColour: 'navy',
+            accentColour: 'red',
+            build: 'average',
+          },
+        },
       ],
       sets: [{ name: 'School' }],
     });

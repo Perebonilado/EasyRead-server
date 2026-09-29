@@ -675,7 +675,7 @@ export class SceneArtist {
         const piece = await ownPiece(item.name);
         if (piece) own[item.name] = piece;
       }
-      const built = buildSet(layout, place, own);
+      const built = buildSet(layout, place, own, world);
       for (const note of built.notes)
         this.logger.log(`${who}: ${place.name}: ${note}`);
       const gated = await gateDrawing(built.svg, thing, { backdrop: true });

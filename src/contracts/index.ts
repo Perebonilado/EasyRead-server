@@ -1239,7 +1239,7 @@ export interface SceneStepDto {
   /**
    * How each newcomer arrives; `from` is the thing a growing one comes out
    * of. One who walks on comes from `side` of the stage, or out of the
-   * feature `via` (the gate, the danfo's door).
+   * feature `via` (the gate, the bus's door).
    */
   enter: Record<
     string,
@@ -1350,9 +1350,9 @@ export interface SceneSettingDto {
     /** When they react: the moment, how, and for how long. */
     moves?: [number, 'cheer' | 'gasp', number][];
   };
-  /** A Studio set's fixed things its story acts on: a gate, a bench, a goalpost, a danfo. */
+  /** A Studio set's fixed things its story acts on: a gate, a bench, a goalpost, a bus. */
   features?: SceneFeatureDto[];
-  /** The place its people ride in is on the move (a danfo on the road): the stage rattles it gently, and what is outside it slides past. */
+  /** The place its people ride in is on the move (a bus on the road): the stage rattles it gently, and what is outside it slides past. */
   moving?: true;
   /** When a feature opens or shuts: the moment, which, and how it is left. */
   featureStates?: [number, string, 'open' | 'shut'][];
@@ -1367,7 +1367,7 @@ export interface SceneSettingDto {
 
 /**
  * A fixed thing of a Studio set that its story acts on, stood among the
- * people: drawn by the stage (a gate that swings shut, a bench, a danfo)
+ * people: drawn by the stage (a gate that swings shut, a bench, a bus)
  * behind them, and over them while someone goes through or under it; or
  * the painter's own, only where it is. Looks, points and leans aimed at it
  * name it "f:<id>".

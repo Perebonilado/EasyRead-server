@@ -25,6 +25,7 @@
 import type { SceneEffectDto } from '../../contracts';
 import {
   NO_ROOM,
+  floorFactor,
   viewOf,
   wideView,
   type SetRoom,
@@ -286,71 +287,11 @@ export function keepFacesSeen(input: FacesInput): FacesMended {
         return covered(face, boxes);
       }),
     );
-  /** The steps either side of k where someone stands just where they do at k: moved, they move together. */
-  const runOf = (k: number, id: string): number[] => {
-    const same = (j: number) => {
-      const a = places[j]?.[id];
-      const b = places[k][id];
-      return (
-        a !== undefined &&
-        a.x === b.x &&
-        a.y === b.y &&
-        a.w === b.w &&
-        a.h === b.h
-      );
-    };
-    let from = k;
-    let to = k;
-    while (from > 0 && same(from - 1)) from -= 1;
-    while (to < steps.length - 1 && same(to + 1)) to += 1;
-    return Array.from({ length: to - from + 1 }, (_, n) => from + n);
-  };
-  /** Someone's place over a run of steps, set to `to`; the places they had, to put back. */
-  const move = (run: readonly number[], id: string, to: StandingPlace) => {
-    const was = run.map((j) => places[j][id]);
-    for (const j of run) places[j][id] = { ...to };
-    return () => run.forEach((j, n) => (places[j][id] = was[n]));
-  };
-  /**
-   * The places someone may step to, keeping the spot they stand at: a
-   * step aside (a twentieth of the stage), then nearer or farther off (a
-   * tenth of the floor); then two such steps, then three aside, the
-   * smallest first.
-   */
-  const nudges = (
-    k: number,
-    id: string,
-    away: number,
-  ): { to: StandingPlace; how: string }[] => {
-    const at = places[k][id];
-    const out: { to: StandingPlace; how: string }[] = [];
-    const round = (n: number) => Math.round(n * 10) / 10;
-    const aside = (n: number) => {
-      for (const side of away ? [away] : [1, -1]) {
-        const x = at.x + side * n * W * NUDGE_X;
-        if (x >= -at.w * 0.2 && x + at.w * 0.8 <= W)
-          out.push({
-            to: { ...at, x: round(x) },
-            how: `steps ${side > 0 ? 'right' : 'left'}`,
-          });
-      }
-    };
-    const deeper = (n: number) => {
-      if (!input.open(k, id) || at.d === undefined) return;
-      for (const dd of away ? [-NUDGE_D] : [NUDGE_D, -NUDGE_D]) {
-        const d = Math.round((at.d + n * dd) * 100) / 100;
-        if (d < 0 || d > 1) continue;
-        const to = input.atDepth(at, d);
-        if (to) out.push({ to, how: `steps ${dd > 0 ? 'nearer' : 'back'}` });
-      }
-    };
-    aside(1);
-    deeper(1);
-    aside(2);
-    deeper(2);
-    aside(3);
-    return out;
-  };
+  const runOf = (k: number, id: string) => runIn(places, steps.length, k, id);
+  const move = (run: readonly number[], id: string, to: StandingPlace) =>
+    moveIn(places, run, id, to);
+  const nudges = (k: number, id: string, away: number) =>
+    nudgesIn(places[k][id], W, away, input.open(k, id), input.atDepth);
 
   /**
    * What the camera shows through a stretch of a step: a shot that holds
@@ -535,4 +476,583 @@ export function keepFacesSeen(input: FacesInput): FacesMended {
     else merged.push([...fade]);
   }
   return { fades: merged.sort((a, b) => a[0] - b[0]), notes };
+}
+
+/** The steps either side of k where someone stands just where they do at k: moved, they move together. */
+function runIn(
+  places: Record<string, StandingPlace>[],
+  count: number,
+  k: number,
+  id: string,
+): number[] {
+  const same = (j: number) => {
+    const a = places[j]?.[id];
+    const b = places[k][id];
+    return (
+      a !== undefined &&
+      a.x === b.x &&
+      a.y === b.y &&
+      a.w === b.w &&
+      a.h === b.h
+    );
+  };
+  let from = k;
+  let to = k;
+  while (from > 0 && same(from - 1)) from -= 1;
+  while (to < count - 1 && same(to + 1)) to += 1;
+  return Array.from({ length: to - from + 1 }, (_, n) => from + n);
+}
+
+/** Someone's place over a run of steps, set to `to`; the places they had, to put back. */
+function moveIn(
+  places: Record<string, StandingPlace>[],
+  run: readonly number[],
+  id: string,
+  to: StandingPlace,
+): () => void {
+  const was = run.map((j) => places[j][id]);
+  for (const j of run) places[j][id] = { ...to };
+  return () => run.forEach((j, n) => (places[j][id] = was[n]));
+}
+
+/**
+ * The places someone may step to, keeping the spot they stand at: a
+ * step aside (a twentieth of the stage), then nearer or farther off (a
+ * tenth of the floor, on the open floor); then two such steps, then three
+ * aside, the smallest first. `away`: only that way aside, and only back.
+ */
+function nudgesIn(
+  at: StandingPlace,
+  W: number,
+  away: number,
+  open: boolean,
+  atDepth: (place: StandingPlace, d: number) => StandingPlace | null,
+): { to: StandingPlace; how: string }[] {
+  const out: { to: StandingPlace; how: string }[] = [];
+  const round = (n: number) => Math.round(n * 10) / 10;
+  const aside = (n: number) => {
+    for (const side of away ? [away] : [1, -1]) {
+      const x = at.x + side * n * W * NUDGE_X;
+      if (x >= -at.w * 0.2 && x + at.w * 0.8 <= W)
+        out.push({
+          to: { ...at, x: round(x) },
+          how: `steps ${side > 0 ? 'right' : 'left'}`,
+        });
+    }
+  };
+  const deeper = (n: number) => {
+    if (!open || at.d === undefined) return;
+    for (const dd of away ? [-NUDGE_D] : [NUDGE_D, -NUDGE_D]) {
+      const d = Math.round((at.d + n * dd) * 100) / 100;
+      if (d < 0 || d > 1) continue;
+      const to = atDepth(at, d);
+      if (to) out.push({ to, how: `steps ${dd > 0 ? 'nearer' : 'back'}` });
+    }
+  };
+  aside(1);
+  deeper(1);
+  aside(2);
+  deeper(2);
+  aside(3);
+  return out;
+}
+
+// ── Clear view ────────────────────────────────────────────────────────────
+
+/**
+ * Everyone who matters in clear view (the clear-view rule): at every
+ * moment the camera takes, wide, close, two and pushed in, no thing of
+ * the place hides them, only people may stand before people. Who matters:
+ * whoever speaks, acts or is acted toward then, and every animal on the
+ * stage all the while it is there. Their face is at most FACE_CLEAR
+ * covered; their body at most BODY_CLEAR; a small one (a dog, a kitten)
+ * or an animal at least 1 − SMALL_CLEAR seen.
+ *
+ * What covers them is what stands nearer the camera: the set's things
+ * before the camera (its foreground layer, at its depth), the things of
+ * its floor layer and the features the stage draws whose feet are nearer
+ * than theirs, each moved by the camera as far as its depth on the floor
+ * says (floorFactor), as the player moves it.
+ *
+ * Mended as films do, quietly, in this order: in a close, two or pushed
+ * shot, the near things that cross them fade out for the shot's length
+ * (a quick ease, never a pop: the player's own fade), and come back as
+ * it ends; else they step aside, or nearer or farther off, as the faces'
+ * check steps them; else the shot does not push in, and else it is not
+ * taken (the wide shot instead). In the wide shot, whose things are kept
+ * clear of the people where the set is built (keepForeToEdges), a step
+ * aside, and last a fade to FADED while they matter. Each mend said, as
+ * a "staging: hidden" note.
+ */
+export const FACE_CLEAR = 0.1;
+export const BODY_CLEAR = 0.35;
+export const SMALL_CLEAR = 0.3;
+/** How much further in than its framing the player's camera may be at its fullest, a shot that pushes and any other: its slow push, the lean toward whoever speaks and a feeling's push, all at once. */
+export const PUSHED_MOST = 1.07 * 1.03 * 1.06;
+export const PUSHED_LEAST = 1.025 * 1.03 * 1.06;
+/** Two fades of one thing nearer than this are one: it would only come back to go again. */
+export const FADE_GAP_MS = 500;
+/** A near thing crossing this much of someone in a shot is cheated out of it. */
+export const CROSSES = 0.05;
+
+/** Where someone's body is in their box: the kit's shoulders to its feet, its middle three fifths across. */
+export const bodyOf = (p: Box): Box => ({
+  x: p.x + p.w * 0.2,
+  y: p.y + p.h * 0.12,
+  w: p.w * 0.6,
+  h: p.h * 0.86,
+});
+/** A small one's or an animal's whole, but for the frame's edges. */
+export const wholeOf = (p: Box): Box => ({
+  x: p.x + p.w * 0.1,
+  y: p.y + p.h * 0.1,
+  w: p.w * 0.8,
+  h: p.h * 0.88,
+});
+
+export interface ClearInput extends Omit<
+  FacesInput,
+  'fore' | 'foreDepth' | 'features' | 'shots'
+> {
+  /** The camera's close and two shots: one that cannot be taken clear is taken out of this list. */
+  shots: SceneEffectDto[];
+  features: readonly { id: string; box: Box; feet: number }[];
+  fore: readonly { id: string; box: Box }[];
+  foreDepth: number;
+  /** The things of the set's floor layer, by their groups: each box, and where its feet are. */
+  floorThings?: readonly { id: string; box: Box; feet: number }[];
+  /** The floor, its back and front edges on the stage: what stands on it moves by its depth there. Absent, as the people. */
+  floor?: readonly [number, number] | null;
+  /** An animal (or a creature): protected all the while it is on the stage. */
+  animal: (id: string) => boolean;
+  /** Small: judged by how much of it is seen. */
+  small: (id: string) => boolean;
+  /** Whether someone has a face the kit draws (a person). */
+  face: (id: string) => boolean;
+  /** A thing before the camera never faded in the wide shot (the people watching): there the one it hides steps aside instead; in any other shot it is cheated out like the rest. */
+  keep?: (id: string) => boolean;
+  /** Fades already planned (a face's): kept, and judged with. */
+  fades?: readonly [number, number, string, number?][];
+}
+
+export interface ClearMended {
+  /** From, to, the group, how faint (0: gone). */
+  fades: [number, number, string, number][];
+  notes: string[];
+}
+
+/** A view the camera takes, and the shot it is (null: the wide shot). */
+interface Seen {
+  view: View;
+  shot: SceneEffectDto | null;
+}
+
+/** How much of someone is covered at worst: their face, their body, and (small) the whole of them, 0 to 1 each. */
+export interface Cover {
+  face: number;
+  body: number;
+  whole: number;
+}
+
+/**
+ * Everyone who matters in clear view, as the section says: the places
+ * mended in place, the shots that cannot be taken clear taken out of
+ * `shots` (or their push dropped), the fades and the notes returned.
+ */
+export function keepInClearView(input: ClearInput): ClearMended {
+  const { W, H, steps, places, room = NO_ROOM } = input;
+  const tie = H * DEPTH_TIE;
+  const notes: string[] = [];
+  const fades: [number, number, string, number][] = [];
+  const stepEnd = (k: number) => steps[k + 1]?.atMs ?? input.durationMs;
+  const shotEnd = (shot: SceneEffectDto) =>
+    shot.untilMs ??
+    steps.find((s) => s.atMs > shot.atMs)?.atMs ??
+    input.durationMs;
+  const depthOf = (feet: number) => floorFactor(feet, input.floor);
+  /** What may be cheated out of a shot: every thing before the camera or on the floor. */
+  const fadeable = new Set([
+    ...input.fore.map((f) => f.id),
+    ...(input.floorThings ?? []).map((f) => f.id),
+  ]);
+  /** What may be faded in the wide shot: the people watching are kept there. */
+  const fadeableWide = new Set([...fadeable].filter((id) => !input.keep?.(id)));
+  /** Whether a group is faded out over the whole of from..to. */
+  const fadedOver = (id: string, from: number, to: number) =>
+    [...(input.fades ?? []), ...fades].some(
+      ([a, b, which, level]) =>
+        which === id && a <= from && b >= to && (level ?? FADED) <= FADED,
+    );
+  /**
+   * The views the camera takes over from..to at step k: each shot on then,
+   * framed and at its fullest push; and the wide shot, unless a shot holds
+   * the whole stretch.
+   */
+  const viewsAt = (k: number, from: number, to: number): Seen[] => {
+    const wide = wideView(steps[k].show, places[k], W, H, room);
+    const on = input.shots.filter(
+      (shot) => shot.atMs < to && shotEnd(shot) > from,
+    );
+    const whole = on.some((shot) => shot.atMs <= from && shotEnd(shot) >= to);
+    const out: Seen[] = whole
+      ? []
+      : [
+          { view: wide, shot: null },
+          { view: { ...wide, s: wide.s * PUSHED_LEAST }, shot: null },
+        ];
+    for (const shot of on) {
+      const view = viewOf(shot, steps[k].show, places[k], W, H, room);
+      out.push(
+        { view, shot },
+        {
+          view: {
+            ...view,
+            s: view.s * (shot.pan === 'push' ? PUSHED_MOST : PUSHED_LEAST),
+          },
+          shot,
+        },
+      );
+    }
+    return out;
+  };
+  /** What stands nearer than someone at step k, as the camera on `seen` shows it: each thing, its box on the screen, and whether it can fade. */
+  const nearer = (
+    k: number,
+    who: string,
+    seen: Seen,
+    from: number,
+    to: number,
+  ) => {
+    const me = places[k][who];
+    const feet = me.y + me.h;
+    const [a, b] = seen.shot
+      ? [Math.max(from, seen.shot.atMs), Math.min(to, shotEnd(seen.shot))]
+      : [from, to];
+    const out: { id: string; box: Box; fades: boolean }[] = [];
+    for (const f of input.fore)
+      if (!fadedOver(f.id, a, b))
+        out.push({
+          id: f.id,
+          box: onScreen(f.box, seen.view, input.foreDepth, W, H, room.span),
+          fades: true,
+        });
+    // A thing of the floor layer stands tall at the frame's edge (a palm,
+    // a lamppost): its trunk or post, its middle two fifths, is what
+    // stands before anyone; its crown is over their heads.
+    for (const f of input.floorThings ?? [])
+      if (f.feet > feet + tie && !fadedOver(f.id, a, b))
+        out.push({
+          id: f.id,
+          box: onScreen(
+            { ...f.box, x: f.box.x + f.box.w * 0.3, w: f.box.w * 0.4 },
+            seen.view,
+            depthOf(f.feet),
+            W,
+            H,
+            room.span,
+          ),
+          fades: true,
+        });
+    for (const f of input.features)
+      if (f.feet > feet + tie)
+        out.push({
+          id: f.id,
+          box: onScreen(f.box, seen.view, depthOf(f.feet), W, H, room.span),
+          fades: false,
+        });
+    return out;
+  };
+  /** How much of someone the things nearer cover in one view. */
+  const coverIn = (
+    k: number,
+    who: string,
+    seen: Seen,
+    from: number,
+    to: number,
+  ): Cover & { by: { id: string; fades: boolean; share: number }[] } => {
+    const me = places[k][who];
+    const at = onScreen(me, seen.view, depthOf(me.y + me.h), W, H, room.span);
+    const things = nearer(k, who, seen, from, to);
+    const boxes = things.map((t) => t.box);
+    const whole = wholeOf(at);
+    return {
+      face: input.face(who) ? covered(faceOf(at), boxes) : 0,
+      body: covered(bodyOf(at), boxes),
+      whole: covered(whole, boxes),
+      by: things.flatMap((t) => {
+        const share = covered(whole, [t.box]);
+        return share > 0 ? [{ ...t, share }] : [];
+      }),
+    };
+  };
+  const tooHidden = (who: string, c: Cover) =>
+    c.face > FACE_CLEAR ||
+    (input.small(who) || input.animal(who)
+      ? c.whole > SMALL_CLEAR
+      : c.body > BODY_CLEAR);
+  const say = (c: Cover) =>
+    `face ${Math.round(c.face * 100)}%, body ${Math.round(c.body * 100)}%, whole ${Math.round(c.whole * 100)}% covered`;
+  /** The views someone is too hidden in over a stretch, with how. */
+  const hiddenIn = (k: number, who: string, from: number, to: number) =>
+    viewsAt(k, from, to).flatMap((seen) => {
+      const c = coverIn(k, who, seen, from, to);
+      return tooHidden(who, c) ? [{ seen, c }] : [];
+    });
+
+  // Who matters, and when: each line, each act and whoever it is toward;
+  // and each animal all the while it is on the stage.
+  const moments = [
+    ...input.lines.map((line) => ({ ...line, how: 'as they spoke' })),
+    ...(input.acts ?? []).flatMap((act) => [
+      {
+        who: act.who,
+        startMs: act.startMs,
+        endMs: act.endMs,
+        how: 'as they acted',
+      },
+      ...(act.toward && act.toward !== act.who
+        ? [
+            {
+              who: act.toward,
+              startMs: act.startMs,
+              endMs: act.endMs,
+              how: 'as someone acted toward them',
+            },
+          ]
+        : []),
+    ]),
+    ...steps.flatMap((step, k) =>
+      step.show
+        .filter((id) => input.animal(id))
+        .map((id) => ({
+          who: id,
+          startMs: step.atMs,
+          endMs: stepEnd(k),
+          how: 'while on the stage',
+        })),
+    ),
+  ].sort((a, b) => a.startMs - b.startMs);
+
+  /**
+   * How many faces are hidden by those standing nearer at step j, in the
+   * wide shot or any shot then: a step aside that hides one more (theirs
+   * or anyone's) is no step.
+   */
+  const facesHiddenAt = (j: number): number => {
+    const from = steps[j].atMs;
+    const to = stepEnd(j);
+    const views = [
+      wideView(steps[j].show, places[j], W, H, room),
+      { s: 1, x: W / 2, y: H / 2 },
+      ...input.shots
+        .filter((shot) => shot.atMs < to && shotEnd(shot) > from)
+        .map((shot) => viewOf(shot, steps[j].show, places[j], W, H, room)),
+    ];
+    let n = 0;
+    for (const id of steps[j].show) {
+      const me = places[j][id];
+      if (!me || !input.face(id)) continue;
+      for (const other of steps[j].show) {
+        const o = places[j][other];
+        if (other === id || !o || o.y + o.h <= me.y + me.h + tie) continue;
+        const body = { x: o.x + o.w * 0.15, y: o.y, w: o.w * 0.7, h: o.h };
+        if (
+          views.some(
+            (view) =>
+              covered(faceOf(onScreen(me, view, 1, W, H, room.span)), [
+                onScreen(body, view, 1, W, H, room.span),
+              ]) > FACE_CLEAR,
+          )
+        )
+          n += 1;
+      }
+    }
+    return n;
+  };
+  /** A stretch cut where a shot begins or ends: each piece in one shot, or in the wide shot, throughout. */
+  const piecesOf = (from: number, to: number): [number, number][] => {
+    const cuts = [
+      ...new Set([
+        from,
+        ...input.shots.flatMap((shot) => [shot.atMs, shotEnd(shot)]),
+        to,
+      ]),
+    ]
+      .filter((t) => t >= from && t <= to)
+      .sort((a, b) => a - b);
+    return cuts
+      .slice(1)
+      .flatMap((t, i): [number, number][] =>
+        t - cuts[i] >= 1 ? [[cuts[i], t]] : [],
+      );
+  };
+  for (const moment of moments)
+    steps.forEach((step, k) => {
+      const who = moment.who;
+      if (!places[k]?.[who] || !step.show.includes(who)) return;
+      if (input.hiding(k, who)) return;
+      for (const [from, to] of piecesOf(
+        Math.max(moment.startMs, step.atMs),
+        Math.min(moment.endMs, stepEnd(k)),
+      ))
+        mend(k, who, from, to, moment.how);
+    });
+  /** Someone who matters over from..to at step k kept in clear view, as the section says. */
+  function mend(k: number, who: string, from: number, to: number, how: string) {
+    {
+      const moment = { how };
+      const name = input.name(who);
+      // 1. In a close, two or pushed shot, a near thing that crosses them
+      // fades for the shot's length, as a film cheats it out of the frame,
+      // hidden or not yet.
+      const faded: string[] = [];
+      let crossed: Cover | null = null;
+      for (const seen of viewsAt(k, from, to)) {
+        if (!seen.shot) continue;
+        const c = coverIn(k, who, seen, from, to);
+        for (const one of c.by) {
+          if (!one.fades || !fadeable.has(one.id) || one.share < CROSSES)
+            continue;
+          const span: [number, number] = [
+            Math.round(seen.shot.atMs),
+            Math.round(shotEnd(seen.shot)),
+          ];
+          if (fadedOver(one.id, span[0], span[1])) continue;
+          crossed ??= c;
+          fades.push([span[0], span[1], one.id, 0]);
+          faded.push(one.id);
+        }
+      }
+      if (crossed)
+        notes.push(
+          `staging: hidden ${name} ${moment.how} (${say(crossed)}); ${[...new Set(faded)].join(', ')} faded for the shot`,
+        );
+      let bad = hiddenIn(k, who, from, to);
+      if (!bad.length) return;
+      // 2. They step aside, or nearer or farther off.
+      const run = runIn(places, steps.length, k, who);
+      for (const nudge of nudgesIn(
+        places[k][who],
+        W,
+        0,
+        input.open(k, who),
+        input.atDepth,
+      )) {
+        const was = run.map((j) => facesHiddenAt(j));
+        const back = moveIn(places, run, who, nudge.to);
+        if (
+          !hiddenIn(k, who, from, to).length &&
+          run.every((j, n) => facesHiddenAt(j) <= was[n])
+        ) {
+          notes.push(
+            `staging: hidden ${name} ${moment.how} (${say(bad[0].c)}); ${name} ${nudge.how}`,
+          );
+          return;
+        }
+        back();
+      }
+      // 3. The camera: a shot that pushes does not, and then one that
+      // still hides them is not taken.
+      for (const { seen } of bad) {
+        const shot = seen.shot;
+        if (!shot || !input.shots.includes(shot)) continue;
+        if (shot.pan === 'push') {
+          delete shot.pan;
+          if (
+            !hiddenIn(k, who, from, to).some((one) => one.seen.shot === shot)
+          ) {
+            notes.push(
+              `staging: hidden ${name} ${moment.how} in a shot that pushed in; it does not push`,
+            );
+            continue;
+          }
+        }
+        input.shots.splice(input.shots.indexOf(shot), 1);
+        // What was cheated out of it comes back: the wide shot keeps it.
+        for (let i = fades.length - 1; i >= 0; i -= 1)
+          if (
+            fades[i][3] === 0 &&
+            fades[i][0] === Math.round(shot.atMs) &&
+            fades[i][1] === Math.round(shotEnd(shot))
+          )
+            fades.splice(i, 1);
+        notes.push(
+          `staging: hidden ${name} ${moment.how} in a shot at ${Math.round(shot.atMs)} ms; the wide shot instead`,
+        );
+      }
+      bad = hiddenIn(k, who, from, to);
+      if (!bad.length) return;
+      // 4. The wide shot: what can fade, faded while they matter.
+      const last: string[] = [];
+      for (const { seen } of bad)
+        for (const one of coverIn(k, who, seen, from, to).by)
+          if (one.fades && fadeableWide.has(one.id) && !last.includes(one.id)) {
+            fades.push([Math.round(from), Math.round(to), one.id, FADED]);
+            last.push(one.id);
+          }
+      bad = hiddenIn(k, who, from, to);
+      notes.push(
+        last.length
+          ? `staging: hidden ${name} ${moment.how}; ${last.join(', ')} faded while they do${bad.length ? `, and still ${say(bad[0].c)}` : ''}`
+          : `staging: hidden ${name} ${moment.how}, and stays so (${say(bad[0].c)})`,
+      );
+    }
+  }
+  // One fade a stretch: those of one thing at one level that meet are
+  // one, and those too near to come back between (two shots a moment
+  // apart): it is not seen to flicker.
+  const merged: [number, number, string, number][] = [];
+  for (const fade of [...fades].sort(
+    (a, b) => a[2].localeCompare(b[2]) || a[3] - b[3] || a[0] - b[0],
+  )) {
+    const last = merged[merged.length - 1];
+    if (
+      last &&
+      last[2] === fade[2] &&
+      last[3] === fade[3] &&
+      // The people watching are kept in the wide shot, however short.
+      fade[0] <= last[1] + (input.keep?.(fade[2]) ? 0 : FADE_GAP_MS)
+    )
+      last[1] = Math.max(last[1], fade[1]);
+    else merged.push([...fade]);
+  }
+  return { fades: merged.sort((a, b) => a[0] - b[0]), notes };
+}
+
+/**
+ * The fades that cheat a thing out of a shot (level 0) fitted to the
+ * shots as they are finally taken (after jump cuts are joined and walks
+ * given room): each kept only where a shot is on, cut where one ends, and
+ * gone with a shot not taken; so nothing is cheated out of the wide shot.
+ * Every other fade as it was.
+ */
+export function fitCheatsToShots(
+  fades: readonly [number, number, string, number?][],
+  shots: readonly SceneEffectDto[],
+  steps: readonly { atMs: number }[],
+  durationMs: number,
+): [number, number, string, number?][] {
+  const spans = shots
+    .map((shot): [number, number] => [
+      shot.atMs,
+      shot.untilMs ?? steps.find((s) => s.atMs > shot.atMs)?.atMs ?? durationMs,
+    ])
+    .sort((a, b) => a[0] - b[0]);
+  // The shots one straight after another as one stretch.
+  const joined: [number, number][] = [];
+  for (const [a, b] of spans) {
+    const last = joined[joined.length - 1];
+    if (last && a <= last[1]) last[1] = Math.max(last[1], b);
+    else joined.push([a, b]);
+  }
+  return fades.flatMap((fade): [number, number, string, number?][] => {
+    if (fade[3] !== 0) return [fade];
+    return joined.flatMap(([a, b]): [number, number, string, number?][] => {
+      const from = Math.max(fade[0], a);
+      const to = Math.min(fade[1], b);
+      return to - from >= 1
+        ? [[Math.round(from), Math.round(to), fade[2], 0]]
+        : [];
+    });
+  });
 }

@@ -6,7 +6,8 @@
  * each thing of the place is, and what the change asked should show. A
  * vision model says whether each still matches, and what is wrong where
  * it does not (an ark drawn as a bus, someone missing, a face covered,
- * someone too small to see). Code says what it can see for itself first:
+ * someone too small to see, someone floating off the level they stand
+ * on, someone hidden behind things of the place). Code says what it can see for itself first:
  * a thing of the place named as one thing and drawn by the stage as
  * another. What is wrong goes back to the writer once, free, as problems.
  */
@@ -149,6 +150,9 @@ export function claimsText(claims: PictureClaims, why: string): string {
   return [
     `This still is ${why} of the scene.`,
     `On the stage, each seen whole and big enough to know: ${claims.onStage.length ? claims.onStage.join('; ') : 'no one'}.`,
+    claims.onStage.length
+      ? 'Each stands on the ground at their own level (or sits or stands on what holds them), never floating; and each is in clear view, not hidden or mostly covered by things of the place.'
+      : '',
     claims.things.length
       ? `The things of the place, each drawn as what it is named: ${claims.things.map((name) => `"${name}"`).join(', ')}.`
       : 'No named things of the place.',

@@ -762,7 +762,7 @@ describe('no face hidden on the fixtures', () => {
     }
   });
 
-  it('keeps every speaker’s face seen with two rows of people watching before the camera (L3)', async () => {
+  it('keeps the people watching out of a scene not about them, though its place has two rows of them (L3)', async () => {
     const bible = bibleOf(fixture('maya', 'bible.json'));
     const sheet = (n: number) =>
       storySheetOf(fixture('maya', `s${n}-sheet.json`));
@@ -774,7 +774,6 @@ describe('no face hidden on the fixtures', () => {
       'Maya',
     ).places;
     let watched = 0;
-    let alive = 0;
     for (let n = 1; n <= 5; n += 1) {
       show = withFeatures(
         show,
@@ -803,27 +802,37 @@ describe('no face hidden on the fixtures', () => {
       const { scene } = withMouths(
         voiced(script, ['pip'], { [placeThingId(where.id)]: set }).scene,
       );
-      expect({ scene: n, hidden: hiddenFaces(scene, set) }).toEqual({
-        scene: n,
-        hidden: [],
-      });
-      // Alive for the scene: their heads turn to whoever speaks.
+      // Not a scene about them (Maya and her friends talk among
+      // themselves): the people watching are not before the camera at all,
+      // in any shot, and hide no one.
       const thing = scene.things.find((t) => t.id === placeThingId(where.id));
       const fore =
         thing?.kind === 'drawing'
           ? thing.layers?.find((layer) => layer.id === 'foreground')
           : undefined;
-      if (fore && /@keyframes au-q\d/.test(fore.svg)) alive += 1;
-      // Seen without fading anyone of them: they stand low enough.
+      expect({
+        scene: n,
+        rows: Boolean(fore?.svg.includes('data-audience')),
+      }).toEqual({ scene: n, rows: false });
       expect(
         (scene.setting?.fades ?? []).filter(([, , id]) =>
           id.startsWith('fg-au-'),
         ),
       ).toEqual([]);
+      const shown = set.layered && {
+        ...set,
+        layered: {
+          ...set.layered,
+          fore: set.layered.fore.filter((f) => !f.id.startsWith('fg-au-')),
+        },
+      };
+      expect({ scene: n, hidden: hiddenFaces(scene, shown ?? set) }).toEqual({
+        scene: n,
+        hidden: [],
+      });
       before = endStateOf(fixed, show, before);
     }
     expect(watched).toBe(5);
-    expect(alive).toBeGreaterThan(0);
   });
 
   it("keeps Tobi's face seen in his bedroom", async () => {

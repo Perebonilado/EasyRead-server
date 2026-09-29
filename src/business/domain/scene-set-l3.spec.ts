@@ -433,14 +433,11 @@ describe('a crowd before the camera', () => {
     expect(foreground.svg).toContain('id="fg-au-1"');
     // On its layer only: the flat picture's ground is read without it.
     expect(classroom.built.svg).not.toContain('data-audience');
-    // A market's shoppers stand at its sides only; a farm has none.
-    const market = bench.find((b) => b.id === 'lagos-market')!;
-    for (const { box } of market.built.layered.fore.filter((f) =>
-      f.id.startsWith('fg-au-'),
-    )) {
-      const middle = (box[0] + box[2] / 2) / SET_W;
-      expect(middle < 0.35 || middle > 0.65).toBe(true);
-    }
+    // A market has none (its shoppers are about the story's people, not
+    // watching them), nor a farm.
+    expect(
+      bench.find((b) => b.id === 'lagos-market')!.layout.audience,
+    ).toBeUndefined();
     expect(bench.find((b) => b.id === 'farm')!.layout.audience).toBeUndefined();
   });
 

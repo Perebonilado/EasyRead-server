@@ -215,11 +215,13 @@ describe('a still of the film, from its layers', () => {
     expect(keys.indexOf('thing:shem')).toBeLessThan(keys.indexOf('thing:noah'));
     expect(keys).toContain('feature:ark');
     expect(plan.shows).toEqual(['noah', 'shem']);
-    // The wide shot on where the action is (the ark, at 62% across): panned
-    // right, Shem at the back left still in the frame.
-    expect(plan.view.x).toBeCloseTo(0.62 * 1600, 5);
-    expect(plan.camera.px).toBeCloseTo(0.62 * 1600 - 800, 5);
-    expect(330 - plan.camera.px).toBeGreaterThan(0.04 * 1600 - 1e-6);
+    // The wide shot toward where the action is (the ark, at 62% across):
+    // panned right, as far as keeps Shem at the back left in the frame.
+    const at = scene.stagings.wide.places[0];
+    expect(plan.view.x).toBeGreaterThan(800);
+    expect(plan.view.x).toBeLessThanOrEqual(0.62 * 1600 + 1e-6);
+    expect(plan.camera.px).toBeCloseTo(plan.view.x - 800, 5);
+    expect(at.shem.x - plan.camera.px).toBeGreaterThan(0.04 * 1600 - 1e-6);
     // Each layer's window moved by its depth's share of the pan.
     const sky = layerWindow(plan.camera, 0.03, 1600, 900);
     const ground = layerWindow(plan.camera, 0.72, 1600, 900);
@@ -235,8 +237,8 @@ describe('a still of the film, from its layers', () => {
     expect(shem.depth).toBeLessThan(noah.depth);
     expect(shem.depth).toBeGreaterThanOrEqual(FLOOR_BACK_F);
     expect(noah.depth).toBeLessThanOrEqual(FLOOR_FRONT_F);
-    expect(shem.box.x).toBeCloseTo(330 - plan.camera.px * shem.depth, 5);
-    expect(noah.box.x).toBeCloseTo(820 - plan.camera.px * noah.depth, 5);
+    expect(shem.box.x).toBeCloseTo(at.shem.x - plan.camera.px * shem.depth, 5);
+    expect(noah.box.x).toBeCloseTo(at.noah.x - plan.camera.px * noah.depth, 5);
     // Noah points as he does then: his arm turned in the drawing itself.
     expect(noah.svg).toMatch(/data-rig="arm ar" transform="rotate\(-84 /);
     // Laid out as one picture, each part its own image.

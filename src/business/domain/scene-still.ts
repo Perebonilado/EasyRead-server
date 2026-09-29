@@ -17,6 +17,7 @@ import type {
   ScenePlaceDto,
   SceneSetLayerDto,
 } from '../../contracts';
+import { DEPTH_TIE } from './scene-faces-seen';
 import {
   CROWD_ID,
   crowdShown,
@@ -26,14 +27,19 @@ import {
 } from './scene-compose';
 import { posedDangles } from './scene-dangles';
 import {
+  FLOOR_BACK_F,
+  FLOOR_FRONT_F,
   FRAME_H,
   FRAME_W,
   PARALLAX,
+  floorFactor,
   roomOf,
   viewOf,
   type SetRoom,
   type View,
 } from './scene-film';
+
+export { FLOOR_BACK_F, FLOOR_FRONT_F, floorFactor };
 
 export interface Box {
   x: number;
@@ -42,9 +48,6 @@ export interface Box {
   h: number;
 }
 
-/** How the things on the floor follow the camera, by how far back they stand: the player's FLOOR_BACK_F and FLOOR_FRONT_F. */
-export const FLOOR_BACK_F = 0.8;
-export const FLOOR_FRONT_F = 1.05;
 /** The ground's own depth: a crowd in its set stands on it. */
 const GROUND_DEPTH = 0.72;
 
@@ -112,16 +115,6 @@ export function layerWindow(
     w: W / s,
     h: H / s,
   };
-}
-
-/** The depth factor of what stands with its feet at `feet` on a floor from `back` to `front`: the people's own (1) with none. */
-export function floorFactor(
-  feet: number,
-  floor: readonly [number, number] | null,
-): number {
-  if (!floor || floor[1] - floor[0] < 1) return 1;
-  const d = Math.min(1, Math.max(0, (feet - floor[0]) / (floor[1] - floor[0])));
-  return FLOOR_BACK_F + (FLOOR_FRONT_F - FLOOR_BACK_F) * d;
 }
 
 /** The step drawn at `t`: in a film, the first before it begins. */
@@ -236,6 +229,36 @@ export function posedRig(svg: string, pose: StillPose): string {
   return posedDangles(turned, 0);
 }
 
+/** How long a thing of the set takes to fade, as the player fades it: its FORE_FADE_MS. */
+const FADE_MS = 240;
+/** How faint a fade without a level leaves it: the player's FORE_FADED. */
+const FADED_TO = 0.4;
+
+/** How strongly a group of the set is drawn at `t`: faded as the scene's fades say, as the player fades it. */
+export function fadeAt(scene: SceneDto, id: string, t: number): number {
+  let out = 1;
+  for (const [from, to, which, level] of scene.setting?.fades ?? []) {
+    if (which !== id) continue;
+    const k = Math.min(
+      Math.max(0, Math.min(1, (t - from + FADE_MS) / FADE_MS)),
+      Math.max(0, Math.min(1, (to + FADE_MS - t) / FADE_MS)),
+    );
+    out = Math.min(out, 1 - (1 - (level ?? FADED_TO)) * k);
+  }
+  return out;
+}
+
+/** A layer's drawing with its groups faded as they are at `t`. */
+function fadedLayer(scene: SceneDto, svg: string, t: number): string {
+  const rules = [...new Set((scene.setting?.fades ?? []).map((f) => f[2]))]
+    .map((id) => [id, fadeAt(scene, id, t)] as const)
+    .filter(([id, k]) => k < 0.999 && svg.includes(`id="${id}"`))
+    .map(([id, k]) => `[id="${id.replace(/"/g, '')}"]{opacity:${r2(k)}}`);
+  return rules.length
+    ? svg.replace(/(<svg\b[^>]*>)/i, `$1<style>${rules.join('')}</style>`)
+    : svg;
+}
+
 /** A drawing's viewBox set to a window of it. */
 const windowed = (svg: string, box: Box) =>
   svg.replace(
@@ -327,7 +350,7 @@ export function stillPlan(
       const part: StillPart = {
         key: `layer:${layer.id}`,
         kind: 'layer',
-        svg,
+        svg: fadedLayer(scene, svg, t),
         box: frame,
         width,
         depth: layer.depth,
@@ -337,9 +360,13 @@ export function stillPlan(
         const f = floorFactor(feet, floor);
         onFloor.push({
           ...part,
-          svg: windowed(
-            withoutStandIns(scene, layer.svg),
-            toSet(layerWindow(camera, f, W, H)),
+          svg: fadedLayer(
+            scene,
+            windowed(
+              withoutStandIns(scene, layer.svg),
+              toSet(layerWindow(camera, f, W, H)),
+            ),
+            t,
           ),
           depth: f,
           feet,
@@ -407,7 +434,13 @@ export function stillPlan(
       feet,
     });
   }
-  onFloor.sort((a, b) => (a.feet ?? 0) - (b.feet ?? 0));
+  // Back to front by their feet, as the player draws them: a feature the
+  // stage draws is over only those farther off than it by more than a
+  // tie (someone beside it stands before it).
+  const tie = H * DEPTH_TIE;
+  const orderOf = (part: StillPart) =>
+    (part.feet ?? 0) - (part.kind === 'feature' ? tie + 0.01 : 0);
+  onFloor.sort((a, b) => orderOf(a) - orderOf(b));
   before.sort((a, b) => a.depth - b.depth);
   return {
     W,
@@ -433,10 +466,13 @@ export function stillSvg(
     const png = pngs.get(part.key);
     if (!png) return [];
     const { x, y, w, h } = part.box;
+    // Someone stands on the foot of their box, where the floor, their
+    // shadow and the order they are drawn in have their feet, whatever
+    // the box's shape: never lifted into its middle.
     const fit =
       part.kind === 'layer' || part.kind === 'crowd' || part.kind === 'feature'
         ? ' preserveAspectRatio="none"'
-        : '';
+        : ' preserveAspectRatio="xMidYMax meet"';
     return [
       `<image x="${r2(x)}" y="${r2(y)}" width="${r2(w)}" height="${r2(h)}"${fit} href="data:image/png;base64,${png.toString('base64')}"/>`,
     ];

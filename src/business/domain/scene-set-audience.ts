@@ -3,7 +3,7 @@
  * heads and shoulders of the people watching, in a row or two nearer the
  * camera than the story's own people, cut by the frame's foot: a class
  * before its teacher, a congregation, a stadium's stand, the people at a
- * wedding, a market's shoppers at its sides. Drawn by the figure kit (its
+ * wedding. Drawn by the figure kit (its
  * people turned away) once for a place, on its foreground layer, each
  * one a group of their own, so the faces-visible check (scene-faces-
  * seen) can fade one who would hide a face as it speaks.
@@ -40,10 +40,14 @@ const AUDIENCE_PLACES: [RegExp, 1 | 2, 'full' | 'sides'][] = [
     2,
     'full',
   ],
-  [/\b(?:market|bazaar|marketplace)\b/iu, 1, 'sides'],
 ];
 
-/** How a place has a crowd before the camera, by its words; null for none. */
+/**
+ * How a place has a crowd before the camera, by its words; null for none.
+ * A market has none: its shoppers are about the story's people, not before
+ * the camera watching them. A place drawn with them shows them only in a
+ * scene about them (crowdAddressed).
+ */
 export function audienceFor(
   words: string,
 ): { rows: 1 | 2; spread: 'full' | 'sides' } | null {
@@ -283,4 +287,89 @@ export function audienceAlive(
       '<g data-audience="rows"><style>',
       `<g data-audience="rows"><style>${styles.join('')}`,
     );
+}
+
+/** A line or a narration of a scene, as crowdAddressed reads it. */
+export interface AddressedBeat {
+  kind?: 'line' | 'narration';
+  say: string;
+  /** A line said to a crowd or a group (by the cast's word), not to one person. */
+  toCrowd?: boolean;
+}
+
+/** Words that name the people watching: the class, the congregation, everyone. */
+const WATCHERS =
+  '(?:the (?:whole )?(?:class|pupils|students|children|congregation|church|audience|crowd|people|guests|fans|spectators|villagers|townspeople|onlookers)|everyone|everybody|all of them|the room)';
+/** Narration of someone speaking to the people watching, or of them watching the main action. */
+const ADDRESS_SAID = new RegExp(
+  [
+    `\\b(?:address(?:es|ed|ing)?|speaks? to|spoke to|talks? to|calls? out to|announc(?:es|ed|ing) to|teach(?:es|ing)?|preach(?:es|ed|ing)? to|sings? to|performs? for|turns? to)\\s+${WATCHERS}`,
+    `\\b(?:preach(?:es|ed|ing)?|gives? (?:a|his|her|the) (?:sermon|speech|lesson|talk)|makes? (?:a|his|her|the) speech|delivers? (?:a|his|her|the) (?:sermon|speech)|begins? (?:the|a|his|her) (?:lesson|sermon|speech))\\b`,
+    `\\b${WATCHERS}\\s+(?:watch(?:es|ed)?|cheer(?:s|ed)?|clap(?:s|ped)?|applaud(?:s|ed)?|listen(?:s|ed)?|gasp(?:s|ed)?|roar(?:s|ed)?|sing(?:s)? along|laugh(?:s|ed)?)\\b`,
+  ].join('|'),
+  'iu',
+);
+/** A line that opens by calling the people watching: "Good morning, class!", "Everyone, listen." */
+const ADDRESS_CALLED =
+  /^\W*(?:(?:good (?:morning|afternoon|evening)|hello|welcome|listen(?: up)?|attention|quiet(?: please)?|now|right|okay|ok|dear)[\s,!]+)?(?:class|everyone|everybody|children|boys and girls|church|brothers and sisters|ladies and gentlemen|friends|people|all of you)\b[\s,!.?]/iu;
+
+/**
+ * Whether a scene is about the crowd before the camera, so its rows show:
+ * someone speaks to them (a line to the crowd, one that calls the class or
+ * everyone, narration that someone addresses them, teaches or preaches
+ * to them, a sermon or a speech), or they watch the main action (the
+ * crowd cheers, the class listens). Otherwise they are not there: people
+ * talking among themselves in a market or a classroom have no one before
+ * the camera watching them.
+ */
+export function crowdAddressed(beats: readonly AddressedBeat[]): boolean {
+  return beats.some(
+    (beat) =>
+      beat.toCrowd === true ||
+      ADDRESS_SAID.test(beat.say) ||
+      (beat.kind === 'line' && ADDRESS_CALLED.test(beat.say)),
+  );
+}
+
+/** A layer's drawing without its crowd before the camera: for a scene not about them. */
+export function withoutAudience(svg: string): string {
+  const start = svg.indexOf('<g data-audience="rows">');
+  if (start < 0) return svg;
+  const tags = /<g\b[^>]*?(\/?)>|<\/g>/g;
+  tags.lastIndex = start;
+  let depth = 0;
+  for (let m = tags.exec(svg); m; m = tags.exec(svg)) {
+    if (m[0] === '</g>') depth -= 1;
+    else if (!m[1]) depth += 1;
+    if (depth === 0) return svg.slice(0, start) + svg.slice(tags.lastIndex);
+  }
+  return svg;
+}
+
+/**
+ * The people watching, in a scene about them, seen only as the crowd sees
+ * the one they watch, in the wide shot: out of every close, two and pushed
+ * shot on someone for the shot's length (0: gone), eased out and back by
+ * the player, never popped. Their groups by id.
+ */
+export function audienceOutOfShots(
+  rows: readonly string[],
+  shots: readonly { atMs: number; untilMs?: number; do: string }[],
+  steps: readonly { atMs: number }[],
+  durationMs: number,
+): [number, number, string, number][] {
+  return shots
+    .filter((shot) => shot.do === 'zoom')
+    .flatMap((shot) => {
+      const end =
+        shot.untilMs ??
+        steps.find((one) => one.atMs > shot.atMs)?.atMs ??
+        durationMs;
+      return rows.map((id): [number, number, string, number] => [
+        Math.round(shot.atMs),
+        Math.round(end),
+        id,
+        0,
+      ]);
+    });
 }

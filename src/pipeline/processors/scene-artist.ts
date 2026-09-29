@@ -666,13 +666,18 @@ export class SceneArtist {
           notes: ['Answer with the layout in the JSON shape asked for.'],
         };
       }
-      const layout = layoutOf(raw, place);
+      // In the style pack the story's world says, where it says one.
+      const layout = layoutOf(raw, place, world);
       const own: Record<string, SetPiece> = {};
       for (const item of layout.own) {
+        // A landmark code builds from its parameters needs no artist.
+        if (item.build) continue;
         const piece = await ownPiece(item.name);
         if (piece) own[item.name] = piece;
       }
       const built = buildSet(layout, place, own);
+      for (const note of built.notes)
+        this.logger.log(`${who}: ${place.name}: ${note}`);
       const gated = await gateDrawing(built.svg, thing, { backdrop: true });
       if (!gated.drawing)
         return { notes: [`It could not be built: ${gated.notes.join(' ')}`] };

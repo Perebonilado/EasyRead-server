@@ -123,6 +123,7 @@ import {
 } from './scene-film';
 import type { GatedDrawing } from './scene-svg';
 import { keepFacesSeen } from './scene-faces-seen';
+import { audienceAlive, type AudienceTurn } from './scene-set-audience';
 import { anchorMs, quietGaps, spaced, type TimedBeat } from './scene-timing';
 import { numberWords } from './spoken';
 
@@ -1970,9 +1971,11 @@ export function composeScene(input: ComposeInput): {
    * When the crowd reacts: it cheers when a group's line is a shout or the
    * words say it cheers, and gasps when they say it marvels or is afraid.
    */
-  const crowdMoves = (): [number, 'cheer' | 'gasp', number][] => {
+  const crowdMoves = (
+    watching = false,
+  ): [number, 'cheer' | 'gasp', number][] => {
     const moves: [number, 'cheer' | 'gasp', number][] = [];
-    if (crowd)
+    if (crowd || watching)
       script.beats.forEach((beat, k) => {
         const t = beats[k];
         if (!t) return;
@@ -3272,6 +3275,39 @@ export function composeScene(input: ComposeInput): {
         (a, b) => a.atMs - b.atMs,
       ),
     );
+  }
+  // A crowd before the camera in the set (studio-scenery-plan §5.5),
+  // alive for this scene: turning their heads to whoever speaks now and
+  // then, and cheering with the crowd, on the voice's clock.
+  const setDto = setId ? byId.get(setId) : undefined;
+  const watching =
+    setDto?.kind === 'drawing'
+      ? setDto.layers?.find(
+          (layer) =>
+            layer.id === 'foreground' &&
+            layer.svg.includes('data-audience="rows"'),
+        )
+      : undefined;
+  if (watching) {
+    const on = setFrameOn(setFrame, STAGINGS.wide);
+    const turns = script.beats.flatMap((beat, i): AudienceTurn[] => {
+      const t = beats[i];
+      if (beat.kind !== 'line' || !beat.speaker || beat.from || !t) return [];
+      const k = steps.reduce(
+        (at, step, j) => (step.atMs <= t.startMs ? j : at),
+        0,
+      );
+      const place = layouts.wide[k]?.[beat.speaker];
+      if (!place) return [];
+      const [x] = on.toSet(place.x + place.w / 2, place.y + place.h);
+      return [[Math.round(t.startMs), Math.round(t.endMs), Math.round(x)]];
+    });
+    watching.svg = audienceAlive(watching.svg, {
+      moves: crowdMoves(true),
+      turns,
+      durationMs,
+      W: setFrame[2],
+    });
   }
   const setting = story ? settingOf() : null;
 

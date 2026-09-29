@@ -16,6 +16,14 @@
  */
 import { FIGURE_INK, SET_COLOURS, KIT_EXTRAS, CLOTH, COATS } from './scene-ink';
 import { segment, type SetPiece } from './scene-set-pieces';
+import { drawBuilding } from './scene-set-buildings';
+import { KIT_FLAT, KIT_KINDS, drawKit, isKitKind } from './scene-set-kit';
+import { drawLandmark } from './scene-set-landmarks';
+import {
+  BUILDING_KINDS,
+  STYLE_PACKS,
+  isBuildingKind,
+} from './scene-style-packs';
 
 /** The scenery code draws, by name. */
 export const SCENERY_KINDS = [
@@ -57,6 +65,13 @@ export const SCENERY_KINDS = [
   'sandcastle',
   // A vessel's.
   'seats',
+  // Buildings assembled from parts, in a place's style pack (L3).
+  ...BUILDING_KINDS.filter((kind) => kind !== 'house'),
+  // What L3 adds: clutter, and the packs' own pieces.
+  ...KIT_KINDS,
+  // Landmarks a layout may place as they usually are (scene-set-landmarks).
+  'pyramid',
+  'tent',
 ] as const;
 export type SceneryKind = (typeof SCENERY_KINDS)[number];
 
@@ -86,12 +101,15 @@ export const HANGING: readonly SceneryKind[] = [
   'clock',
   'bunting',
 ];
-export const FLAT: readonly SceneryKind[] = ['rug'];
+export const FLAT: readonly SceneryKind[] = ['rug', ...KIT_FLAT];
 export const COUNTERS: readonly SceneryKind[] = [
   'counter',
   'cart',
   'basket',
   'sack',
+  'kiosk',
+  'umbrella stall',
+  'hot dog cart',
 ];
 
 const LINE = 2.6;
@@ -823,5 +841,14 @@ export function drawScenery(kind: SceneryKind, colour?: string): SceneryPiece {
         seat: 46,
       };
     }
+    case 'pyramid':
+    case 'tent':
+      return drawLandmark(kind, {}, colour);
+    default:
+      if (isKitKind(kind)) return drawKit(kind, colour);
+      // A building out of any pack: the village's, as plain as any.
+      if (isBuildingKind(kind))
+        return drawBuilding(kind, STYLE_PACKS['village-farm'], kind, colour);
+      throw new Error(`No scenery of the kind ${String(kind)}`);
   }
 }

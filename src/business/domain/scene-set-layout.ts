@@ -54,6 +54,30 @@ import {
 } from './scene-ink';
 import { FLOOR_BACK_K, FLOOR_FRONT_K, STATION_SHARES } from './scene-layout';
 import type { PlaceKind, StoryPlace, StoryWorld } from './scene-story';
+import { drawBuilding } from './scene-set-buildings';
+import { isKitKind } from './scene-set-kit';
+import {
+  LANDMARKS,
+  clampParams,
+  drawLandmark,
+  isLandmarkKind,
+  landmarkOfName,
+  type LandmarkKind,
+  type LandmarkParams,
+} from './scene-set-landmarks';
+import { audienceFor, drawAudience } from './scene-set-audience';
+import { FAR_K, FAR_MOST, checkSizes, realScaleOf } from './scene-set-sizes';
+import {
+  STYLE_PACKS,
+  STYLE_PACK_IDS,
+  isBuildingKind,
+  mix,
+  packColour,
+  packOfWorld,
+  styleOf,
+  type StylePack,
+  type StylePackId,
+} from './scene-style-packs';
 
 // ── What a layout says ────────────────────────────────────────────────────
 
@@ -88,6 +112,13 @@ export const SET_BACKDROPS = [
   'fields',
   'dunes',
   'none',
+  // The style packs' own (studio-scenery-plan §5.1).
+  'pyramids',
+  'palms',
+  'mud town',
+  'olive hills',
+  'rooftops',
+  'skyline',
 ] as const;
 export type SetBackdrop = (typeof SET_BACKDROPS)[number];
 /** What a vessel is, seen from inside. */
@@ -106,10 +137,11 @@ export type SetRow = (typeof LAYER_ROWS)[number];
 
 /**
  * What a layout may scatter about the back and the edges of the ground
- * to make a place busy (studio-scenery-plan §5.3): those of the plan's
- * list the kit already draws. The rest (poles and wires, bins, laundry
- * lines, generators, parked cars and okadas, water drums, bicycles,
- * street signs, hydrants, clay pots, woodpiles) wait for their pieces.
+ * to make a place busy (studio-scenery-plan §5.3): chairs, potted plants,
+ * benches, baskets and carts, and what L3 adds (scene-set-kit): poles and
+ * wires, bins, plastic chairs, laundry lines, generators, parked cars and
+ * okadas, water drums, bicycles, street signs, hydrants, clay pots,
+ * woodpiles.
  */
 export const CLUTTER_KINDS = [
   'chair',
@@ -117,6 +149,19 @@ export const CLUTTER_KINDS = [
   'bench',
   'basket',
   'cart',
+  'poles',
+  'bin',
+  'plastic chair',
+  'laundry line',
+  'generator',
+  'parked car',
+  'okada',
+  'water drum',
+  'bicycle',
+  'street sign',
+  'hydrant',
+  'clay pots',
+  'woodpile',
 ] as const;
 export type ClutterKind = (typeof CLUTTER_KINDS)[number];
 /** The most kinds of clutter a set scatters, and foreground things it places. */
@@ -154,11 +199,13 @@ export interface SetItem {
   flip?: boolean;
 }
 
-/** A thing the list has no piece for, drawn by the artist as one of the show's own. */
+/** A thing the list has no piece for: drawn by code from a landmark's builder where it names one (`build`), else by the artist as one of the show's own. */
 export interface SetOwnItem {
   name: string;
   x: number;
   row: SetRow;
+  /** Its landmark's builder and its parameters, clamped (scene-set-landmarks). */
+  build?: { kind: LandmarkKind; params: LandmarkParams };
 }
 
 export interface SetLayout {
@@ -182,6 +229,14 @@ export interface SetLayout {
   clutter?: ClutterKind[];
   /** How wide the set is, in frames; absent, one. Drawn one frame wide until the camera pans (L4). */
   width?: SetWidth;
+  /**
+   * Its era and region's style pack (studio-scenery-plan §5.1): what its
+   * buildings are made of, its clutter, its colours and light. Absent on
+   * a layout written before the packs, which is drawn as it always was.
+   */
+  style?: StylePackId;
+  /** Rows of people watching before the camera (§5.5): a class, a congregation, a stand; absent for none. */
+  audience?: 1 | 2;
 }
 
 /** The most things a set places, and the most the artist draws for it. */
@@ -282,7 +337,8 @@ const ITEM_WORDS: Record<string, SetItemKind> = {
   houseplant: 'plant',
   plants: 'plant',
   'potted plants': 'plant',
-  'plastic chair': 'chair',
+  'plastic chair': 'plastic chair',
+  'plastic chairs': 'plastic chair',
   'toy box': 'toybox',
   'toy chest': 'toybox',
   chest: 'toybox',
@@ -348,7 +404,6 @@ const ITEM_WORDS: Record<string, SetItemKind> = {
   couch: 'sofa',
   settee: 'sofa',
   benches: 'bench',
-  kiosk: 'stall',
   stalls: 'stall',
   'market stall': 'stall',
   'fruit stall': 'stall',
@@ -361,6 +416,103 @@ const ITEM_WORDS: Record<string, SetItemKind> = {
   playground: 'swing',
   goal: 'goalpost',
   'goal post': 'goalpost',
+  // The buildings code assembles, and what L3 adds (studio-scenery-plan §5).
+  shops: 'shop',
+  store: 'shop',
+  'corner shop': 'shop',
+  kiosks: 'kiosk',
+  'news stand': 'kiosk',
+  newsstand: 'kiosk',
+  chapel: 'church',
+  cathedral: 'church',
+  school: 'classroom',
+  'school building': 'classroom',
+  'mud house': 'mud brick house',
+  'mud houses': 'mud brick house',
+  'mud brick houses': 'mud brick house',
+  'adobe house': 'mud brick house',
+  'apartment block': 'tenement',
+  apartments: 'tenement',
+  'block of flats': 'tenement',
+  flats: 'tenement',
+  brownstones: 'brownstone',
+  'office tower': 'skyscraper',
+  skyscrapers: 'skyscraper',
+  'zinc house': 'zinc roof house',
+  'zinc roofed house': 'zinc roof house',
+  shack: 'zinc roof house',
+  'electric pole': 'poles',
+  'electricity pole': 'poles',
+  'electricity poles': 'poles',
+  'power lines': 'poles',
+  'power line': 'poles',
+  'telegraph pole': 'poles',
+  wires: 'poles',
+  'poles and wires': 'poles',
+  bins: 'bin',
+  dustbin: 'bin',
+  'trash can': 'bin',
+  'rubbish bin': 'bin',
+  'garbage can': 'bin',
+  'washing line': 'laundry line',
+  clothesline: 'laundry line',
+  'clothes line': 'laundry line',
+  washing: 'laundry line',
+  laundry: 'laundry line',
+  generators: 'generator',
+  car: 'parked car',
+  cars: 'parked car',
+  'parked cars': 'parked car',
+  motorbike: 'okada',
+  motorcycle: 'okada',
+  okadas: 'okada',
+  'water drums': 'water drum',
+  bike: 'bicycle',
+  bicycles: 'bicycle',
+  'street signs': 'street sign',
+  'road sign': 'street sign',
+  signpost: 'street sign',
+  'fire hydrant': 'hydrant',
+  hydrants: 'hydrant',
+  pots: 'clay pots',
+  'clay pot': 'clay pots',
+  jars: 'clay pots',
+  'water jars': 'clay pots',
+  'water jar': 'clay pots',
+  amphora: 'clay pots',
+  firewood: 'woodpile',
+  logs: 'woodpile',
+  'wood pile': 'woodpile',
+  obelisks: 'obelisk',
+  pillars: 'columns',
+  'temple columns': 'columns',
+  column: 'columns',
+  bulrushes: 'reeds',
+  rushes: 'reeds',
+  papyrus: 'reeds',
+  reed: 'reeds',
+  'palm trees': 'palm grove',
+  palms: 'palm grove',
+  'date palms': 'palm grove',
+  oasis: 'palm grove',
+  'subway station': 'subway entrance',
+  'metro entrance': 'subway entrance',
+  'street lamp post': 'streetlamp',
+  'street lamps': 'streetlamp',
+  cab: 'taxi',
+  'yellow cab': 'taxi',
+  taxis: 'taxi',
+  'hot dog stand': 'hot dog cart',
+  'hotdog cart': 'hot dog cart',
+  'food cart': 'hot dog cart',
+  'market umbrella': 'umbrella stall',
+  'umbrella stand': 'umbrella stall',
+  danfos: 'danfo',
+  minibus: 'danfo',
+  gutter: 'gutter bridge',
+  drain: 'gutter bridge',
+  pyramids: 'pyramid',
+  tents: 'tent',
 };
 
 /** A thing's kind by its word; null for one the list has no piece for. */
@@ -444,6 +596,21 @@ const BACKDROP_WORDS: Record<string, SetBackdrop> = {
   farmland: 'fields',
   desert: 'dunes',
   sky: 'none',
+  pyramid: 'pyramids',
+  egypt: 'pyramids',
+  palm: 'palms',
+  oasis: 'palms',
+  'palm trees': 'palms',
+  'mud brick': 'mud town',
+  'mud houses': 'mud town',
+  'old town': 'mud town',
+  olives: 'olive hills',
+  'olive trees': 'olive hills',
+  'olive grove': 'olive hills',
+  roofs: 'rooftops',
+  'zinc roofs': 'rooftops',
+  skyscrapers: 'skyline',
+  towers: 'skyline',
 };
 
 const VESSEL_WORDS: [RegExp, SetVessel][] = [
@@ -588,13 +755,24 @@ export function plainLayout(
  * A layout as the painter wrote it, made sound: every field one the kit
  * draws (a word it knows for it, else the place's plain one), each thing
  * placed on the width, in a row, at a scale it may be; a thing the list
- * has no piece for kept by its name for the artist, at most two.
+ * has no piece for kept by its name for the artist, at most two, or for
+ * the landmark builder its name or the painter's `build` names, its
+ * parameters clamped.
+ *
+ * Given the story's `world` (as the artist gives it; null for a book with
+ * none), the layout is one of the style packs' (studio-scenery-plan
+ * §5.1): its pack chosen by code from the world where the world decides
+ * it, else the painter's `style`, else the place's own words, else
+ * nature's; and a place people watch in (a classroom, a church, a
+ * market) has its rows of them before the camera. Read without a world
+ * (a layout from before the packs), it has neither.
  */
 export function layoutOf(
   raw: unknown,
   place: Pick<StoryPlace, 'kind' | 'name' | 'look'> & {
     features?: StoryPlace['features'];
   },
+  world?: StoryWorld | null,
 ): SetLayout {
   const plain = plainLayout(place);
   if (!raw || typeof raw !== 'object') return plain;
@@ -636,9 +814,16 @@ export function layoutOf(
       continue;
     const item = one as Record<string, unknown>;
     const name = typeof item.name === 'string' ? item.name.trim() : '';
-    if (!name || name.length > 60 || drawnAlready(name, kind)) continue;
+    const build = buildOf(item.build, name);
+    if (!name || name.length > 60 || (!build && drawnAlready(name, kind)))
+      continue;
     if (own.some((o) => o.name.toLowerCase() === name.toLowerCase())) continue;
-    own.push({ name, x: share(item.x), row: rowOf(item.row) });
+    own.push({
+      name,
+      x: share(item.x),
+      row: rowOf(item.row),
+      ...(build ? { build } : {}),
+    });
   }
   const ground = pick(SET_GROUNDS, GROUND_WORDS, said.ground) ?? plain.ground;
   const vessel =
@@ -657,6 +842,31 @@ export function layoutOf(
   const wide =
     typeof said.width === 'string' ? parseFloat(said.width) : said.width;
   const width = SET_WIDTHS.find((w) => w === wide);
+  const placeWords = `${place.name} ${place.look}`;
+  const style =
+    world === undefined
+      ? styleOf(said.style)
+      : (packOfWorld(world) ??
+        styleOf(said.style) ??
+        packOfWorld(null, placeWords) ??
+        'nature');
+  const rowsSaid =
+    typeof said.audience === 'number'
+      ? said.audience
+      : said.audience === true
+        ? 1
+        : said.audience === false
+          ? 0
+          : null;
+  const watching = style ? audienceFor(placeWords) : null;
+  const audience =
+    rowsSaid !== null
+      ? rowsSaid >= 2
+        ? 2
+        : rowsSaid >= 1
+          ? 1
+          : null
+      : (watching?.rows ?? null);
   return {
     sky: pick(SET_SKIES, {}, said.sky) ?? 'day',
     weather:
@@ -686,7 +896,36 @@ export function layoutOf(
     ...(focal ? { focal } : {}),
     ...(clutter.length ? { clutter } : {}),
     ...(width !== undefined && width !== 1 ? { width } : {}),
+    ...(style ? { style } : {}),
+    ...(style && audience ? { audience } : {}),
   };
+}
+
+/** A thing's landmark builder: as the painter named it, its parameters clamped; else as its name says; null for none. */
+function buildOf(said: unknown, name: string): SetOwnItem['build'] | null {
+  if (said && typeof said === 'object') {
+    const build = said as Record<string, unknown>;
+    const kind =
+      typeof build.kind === 'string' ? build.kind.toLowerCase().trim() : '';
+    if (isLandmarkKind(kind)) {
+      // What its name says, under what the painter said.
+      const named = landmarkOfName(name);
+      const params =
+        named?.kind === kind
+          ? Object.fromEntries(
+              Object.entries(named.params).filter(
+                ([key, value]) => value !== clampParams(kind, {})[key],
+              ),
+            )
+          : {};
+      const given =
+        build.params && typeof build.params === 'object'
+          ? (build.params as Record<string, unknown>)
+          : {};
+      return { kind, params: clampParams(kind, { ...params, ...given }) };
+    }
+  }
+  return landmarkOfName(name);
 }
 
 /** Where the painter says the action happens: across, at a feature of the place, in their words; null for nothing sound. */
@@ -738,8 +977,22 @@ const STAGED_NEAR = 0.2;
 /** The story's world, as the painter is told it. */
 const worldText = (world: StoryWorld | null | undefined) =>
   world
-    ? `The story happens in ${[world.region, world.era].filter(Boolean).join(', ')}${world.landscape ? `: ${world.landscape}` : ''}${world.homes ? `; ${world.homes}` : ''}.`
+    ? `The story happens in ${[world.region, world.era].filter(Boolean).join(', ')}${world.culture ? `, among ${world.culture}` : ''}${world.landscape ? `: ${world.landscape}` : ''}${world.homes ? `; ${world.homes}` : ''}.`
     : '';
+
+/**
+ * The style pack in the painter's brief: the one code chose from the
+ * story's world, with what it offers; else every pack, for the painter to
+ * choose one as "style".
+ */
+function packText(world: StoryWorld | null | undefined): string {
+  const id = packOfWorld(world);
+  if (id) {
+    const pack = STYLE_PACKS[id];
+    return `Its look is the "${id}" style (${pack.words}): answer "style": "${id}". Its buildings are ${pack.buildings.join(', ')}; its scenery ${pack.scenery.join(', ')}; its clutter ${pack.clutter.join(', ')}.`;
+  }
+  return `Choose its look as "style", one of: ${STYLE_PACK_IDS.map((one) => `"${one}" (${STYLE_PACKS[one].words})`).join('; ')}.`;
+}
 
 /** The features of a place the stage draws itself, and those the set draws, by the brief's own rule (setThing). */
 export function featuresOf(place: StoryPlace): {
@@ -777,6 +1030,7 @@ export function layoutBrief(
   return [
     `Place: ${place.name}, in "${bookTitle}"${place.look ? `: ${place.look}` : ''}.`,
     worldText(world),
+    packText(world),
     kind === 'vessel'
       ? `It is the inside of a vessel, seen from inside at eye level: say which (${SET_VESSELS.join(', ')}) as "vessel", and its colour as "vesselColour". Code draws its far side, its windows with what goes by outside, its seats along it, its poles and hand straps, its door and its floor: place only what else is in it, if anything, and nothing in "own" that code draws.`
       : kind === 'indoor'
@@ -861,6 +1115,8 @@ const flatRect = (
   `<rect x="${r1(x)}" y="${r1(y)}" width="${r1(w)}" height="${r1(h)}"${round ? ` rx="${round}"` : ''} ${flatFill(colour)}/>`;
 const circle = (x: number, y: number, r: number, colour: string) =>
   `<circle cx="${r1(x)}" cy="${r1(y)}" r="${r1(r)}" ${fill(colour)}/>`;
+const line = (d: string, colour: string, width: number) =>
+  `<path d="${d}" fill="none" stroke="${colour}" stroke-width="${width}" stroke-linecap="round" stroke-linejoin="round"/>`;
 
 /** A seeded run of numbers, so a place is drawn the same way every time. */
 function seeded(seed: string): () => number {
@@ -911,11 +1167,18 @@ const cloud = (x: number, y: number, k: number, colour = '#ffffff') =>
   );
 
 /** The sky, over the whole frame: its colour, its sun or moon and stars, its clouds, drifting. */
-function drawSky(layout: SetLayout, top: number, random: () => number): string {
+function drawSky(
+  layout: SetLayout,
+  top: number,
+  random: () => number,
+  pack: StylePack | null = null,
+): string {
   const sky =
     layout.weather === 'cloudy' && layout.sky === 'day'
       ? '#dde5ea'
-      : SKY[layout.sky];
+      : pack && layout.sky === 'day'
+        ? pack.light.day
+        : SKY[layout.sky];
   let out = flatRect(-10, -10, SET_W + 20, top + 20, sky);
   if (layout.sky === 'night') {
     const stars = Array.from(
@@ -930,7 +1193,7 @@ function drawSky(layout: SetLayout, top: number, random: () => number): string {
       low ? 1320 : 1340,
       low ? top - 70 : 150,
       low ? 70 : 58,
-      low ? '#f5b36b' : GOLD,
+      low ? '#f5b36b' : (pack?.light.sun ?? GOLD),
     );
   }
   if (layout.sky !== 'night') {
@@ -973,9 +1236,11 @@ function drawBackdrop(
   layout: SetLayout,
   base: number,
   random: () => number,
+  pack: StylePack | null = null,
+  backdrop: SetBackdrop = layout.backdrop,
 ): string {
   const snow = layout.weather === 'snow';
-  switch (layout.backdrop) {
+  switch (backdrop) {
     case 'hills':
       return (
         rolling(base, 200, 4, random, snow ? '#e8eef2' : '#cfe7b8') +
@@ -1159,6 +1424,180 @@ function drawBackdrop(
     }
     case 'none':
       return '';
+    default:
+      return packBackdrop(backdrop, base, random, pack);
+  }
+}
+
+/** A pack's colour, or the house's where a set has no pack. */
+const tinted = (pack: StylePack | null, hex: string) =>
+  pack ? packColour(pack, hex) : hex;
+
+/**
+ * The style packs' backdrops, standing on the far edge of the ground:
+ * pyramids beyond dunes, a line of palms, a town of flat-roofed mud
+ * houses, hills of olive trees, a Lagos town's zinc rooftops and water
+ * tanks, a city's skyline.
+ */
+function packBackdrop(
+  backdrop: SetBackdrop,
+  base: number,
+  random: () => number,
+  pack: StylePack | null,
+): string {
+  const walls = pack?.palette.walls ?? [SET_COLOURS.walls, '#e6d3a8'];
+  const pick = (list: readonly string[]) =>
+    tinted(pack, list[Math.floor(random() * list.length) % list.length]);
+  const palm = (x: number, h: number) =>
+    shape(
+      `M${r1(x - 5)},${r1(base)} Q${r1(x + 4)},${r1(base - h * 0.5)} ${r1(x + 8)},${r1(base - h)} L${r1(x + 14)},${r1(base - h)} Q${r1(x + 10)},${r1(base - h * 0.5)} ${r1(x + 5)},${r1(base)} Z`,
+      SET_COLOURS.wood,
+    ) +
+    [-1, 1, -0.5, 0.5]
+      .map((k) =>
+        shape(
+          `M${r1(x + 11)},${r1(base - h)} Q${r1(x + 11 + k * 30)},${r1(base - h - 22)} ${r1(x + 11 + k * 58)},${r1(base - h + 14 + Math.abs(k) * 6)} Q${r1(x + 11 + k * 26)},${r1(base - h - 6)} ${r1(x + 11)},${r1(base - h + 6)} Z`,
+          Math.abs(k) === 1 ? KIT_EXTRAS['dark leaf'] : SET_COLOURS.leaves,
+        ),
+      )
+      .join('');
+  switch (backdrop) {
+    case 'pyramids': {
+      const sand = tinted(pack, '#efd8a4');
+      let out = '';
+      const at = [0.18 + random() * 0.06, 0.45 + random() * 0.06, 0.76];
+      at.forEach((x, k) => {
+        const B = [300, 420, 220][k];
+        const H = B * 0.6;
+        const cx = x * SET_W;
+        const apex = cx + B * 0.08;
+        out +=
+          shape(
+            `M${r1(cx - B / 2)},${r1(base)} L${r1(apex)},${r1(base - H)} L${r1(apex)},${r1(base)} Z`,
+            sand,
+          ) +
+          shape(
+            `M${r1(apex)},${r1(base - H)} L${r1(cx + B / 2)},${r1(base)} L${r1(apex)},${r1(base)} Z`,
+            shade(sand, 0.86),
+          );
+      });
+      return (
+        out +
+        rolling(base, 70, 4, random, tinted(pack, '#f0d7a0')) +
+        rolling(base, 36, 5, random, tinted(pack, '#f5e2b8'))
+      );
+    }
+    case 'palms': {
+      let out = rolling(base, 50, 5, random, tinted(pack, SET_COLOURS.hills));
+      for (let k = 0; k < 11; k += 1) {
+        const x = ((k + 0.3 + random() * 0.4) / 11) * SET_W;
+        out += palm(x, 110 + random() * 80);
+      }
+      return out;
+    }
+    case 'mud town':
+    case 'rooftops': {
+      const lagos = backdrop === 'rooftops';
+      let out = rolling(
+        base - 20,
+        70,
+        4,
+        random,
+        tinted(pack, lagos ? SET_COLOURS.hills : '#e6d9b6'),
+      );
+      let x = -30;
+      let k = 0;
+      while (x < SET_W + 30) {
+        const w = 90 + random() * 90;
+        const h = (lagos ? 60 : 50) + random() * (lagos ? 90 : 70);
+        const b = base - (k % 3) * 6;
+        const wall = pick(
+          lagos ? walls : ['#e6d3a8', '#dcc190', COATS.tan, COATS.cream],
+        );
+        out += rect(x, b - h, w, h + 8, wall);
+        if (lagos && random() < 0.65)
+          // A zinc roof, low, its sheets in lines, rusted here and there.
+          out += shape(
+            `M${r1(x - 8)},${r1(b - h + 4)} L${r1(x + w * 0.2)},${r1(b - h - 22)} L${r1(x + w * 0.8)},${r1(b - h - 22)} L${r1(x + w + 8)},${r1(b - h + 4)} Z`,
+            random() < 0.3 ? COATS.chestnut : KIT_EXTRAS.steel,
+          );
+        else out += flatRect(x - 4, b - h - 8, w + 8, 10, shade(wall, 0.86));
+        out +=
+          flatRect(x + w * 0.2, b - h * 0.55, 14, 18, DARK) +
+          flatRect(x + w * 0.62, b - h * 0.55, 14, 18, DARK);
+        if (lagos && random() < 0.35)
+          out += rect(x + w * 0.55, b - h - 44, 22, 26, CLOTH.black, 4);
+        if (!lagos && random() < 0.3) out += palm(x + w + 6, h + 60);
+        x += w - 4;
+        k += 1;
+      }
+      if (lagos)
+        // A mast over the town, and a palm or two.
+        out +=
+          line(
+            `M${r1(SET_W * 0.72)},${r1(base - 60)} L${r1(SET_W * 0.72)},${r1(base - 300)}`,
+            FIGURE_INK,
+            4,
+          ) +
+          line(
+            `M${r1(SET_W * 0.72 - 20)},${r1(base - 250)} L${r1(SET_W * 0.72 + 20)},${r1(base - 250)} M${r1(SET_W * 0.72 - 14)},${r1(base - 200)} L${r1(SET_W * 0.72 + 14)},${r1(base - 200)}`,
+            FIGURE_INK,
+            3,
+          ) +
+          palm(SET_W * 0.3, 190) +
+          palm(SET_W * 0.9, 160);
+      return out;
+    }
+    case 'olive hills': {
+      let out =
+        rolling(base, 190, 4, random, tinted(pack, '#d7e2b0')) +
+        rolling(base, 110, 5, random, tinted(pack, SET_COLOURS.hills));
+      for (let k = 0; k < 14; k += 1) {
+        const x = random() * SET_W;
+        const y = base - 20 - random() * 90;
+        out +=
+          flatRect(x - 3, y - 6, 6, 14, SET_COLOURS.wood) +
+          `<ellipse cx="${r1(x)}" cy="${r1(y - 14)}" rx="${r1(16 + random() * 8)}" ry="12" ${fill('#8fa86a')}/>`;
+      }
+      return out;
+    }
+    case 'skyline': {
+      let out = '';
+      let x = -20;
+      const faces = [
+        KIT_EXTRAS.glass,
+        SET_COLOURS.stone,
+        '#b9d3e2',
+        KIT_EXTRAS.concrete,
+        COATS.cream,
+      ];
+      while (x < SET_W + 20) {
+        const w = 70 + random() * 90;
+        const h = 170 + random() * 290;
+        const face = tinted(pack, faces[Math.floor(random() * faces.length)]);
+        out += rect(x, base - h, w, h + 10, face);
+        // Its windows as strips, and a spire now and then.
+        const strips = Math.max(2, Math.floor(w / 26));
+        for (let c = 0; c < strips; c += 1)
+          out += flatRect(
+            x + 8 + c * ((w - 16) / strips),
+            base - h + 16,
+            (w - 16) / strips - 8,
+            h - 30,
+            shade(face, 0.9),
+          );
+        if (random() < 0.2)
+          out += line(
+            `M${r1(x + w / 2)},${r1(base - h)} L${r1(x + w / 2)},${r1(base - h - 60)}`,
+            FIGURE_INK,
+            3,
+          );
+        x += w + 4;
+      }
+      return out;
+    }
+    default:
+      return '';
   }
 }
 
@@ -1244,6 +1683,159 @@ function drawGround(
           darker,
         ),
       ).join('');
+      break;
+    default:
+      break;
+  }
+  return out;
+}
+
+/**
+ * The open ground of a set in a style pack (studio-scenery-plan §5.4):
+ * its colour a little paler toward the far edge, in flat bands; and its
+ * own marks, few, smaller and fewer the farther off they are: grass
+ * tufts (each answering the world as it is brushed), a dirt path, sand's
+ * ripples, a road's cracks and kerb, paving's slabs and a deck's planks
+ * running to the distance.
+ */
+function drawGroundL3(
+  layout: SetLayout,
+  top: number,
+  random: () => number,
+  pack: StylePack,
+): string {
+  const colour =
+    layout.groundColour ??
+    packColour(
+      pack,
+      layout.weather === 'snow' && layout.ground === 'grass'
+        ? GROUND.snow
+        : GROUND[layout.ground],
+    );
+  const D = SET_H - top;
+  let out = shape(
+    `M-20,${r1(top)} L${SET_W + 20},${r1(top)} L${SET_W + 20},${SET_H + 20} L-20,${SET_H + 20} Z`,
+    colour,
+  );
+  // Nearer to farther, the colour shifts toward the haze.
+  [0.05, 0.1, 0.16].forEach((k, i) => {
+    const h = D * [0.34, 0.2, 0.09][i];
+    out += flatRect(-20, top, SET_W + 40, h, mix(colour, pack.light.haze, k));
+  });
+  const darker = shade(colour, 0.9);
+  const unit = scaleAtFeet('outdoor', FEET);
+  /** A depth down the ground, more of them near than far. */
+  const depth = () => top + 10 + D * (0.06 + 0.94 * Math.sqrt(random()));
+  /** How big a mark is where it lies, against one where the people stand. */
+  const near = (y: number) => Math.max(0.2, scaleAtFeet('outdoor', y) / unit);
+  const marks = (
+    n: number,
+    draw: (x: number, y: number, k: number) => string,
+  ) =>
+    Array.from({ length: n }, () => {
+      const y = depth();
+      const x = random() * SET_W;
+      return draw(x, y, near(y));
+    }).join('');
+  const tuft = (x: number, y: number, k: number) =>
+    `<g${worldAttributes({ as: 'sway', len: r1((16 * k) / scaleAtFeet('outdoor', y)) }, 'grass', x, rowAt('outdoor', y), [x, y])}>${flatShape(
+      `M${r1(x - 10 * k)},${r1(y)} L${r1(x - 4 * k)},${r1(y - 14 * k)} L${r1(x)},${r1(y - 4 * k)} L${r1(x + 5 * k)},${r1(y - 16 * k)} L${r1(x + 10 * k)},${r1(y)} Z`,
+      darker,
+    )}</g>`;
+  /** Lines running from the front to the far edge, toward the eye's point, and across at depths as far apart as the ground is deep. */
+  const toDistance = (across: number, deep: number, tone: string) => {
+    const eye = EYE.outdoor;
+    const bottom = SET_H + 20;
+    const t = (bottom - top) / (bottom - eye);
+    const runs: string[] = [];
+    for (let x0 = -SET_W; x0 <= SET_W * 2; x0 += across) {
+      const x1 = x0 + (SET_W / 2 - x0) * t;
+      runs.push(`M${r1(x0)},${bottom} L${r1(x1)},${r1(top)}`);
+    }
+    for (let k = 1; k < 40; k += 1) {
+      const y = eye + (bottom - eye) / (1 + deep * k);
+      if (y <= top + 4) break;
+      runs.push(`M-20,${r1(y)} L${SET_W + 20},${r1(y)}`);
+    }
+    return `<path d="${runs.join(' ')}" fill="none" stroke="${tone}" stroke-width="2"/>`;
+  };
+  switch (layout.ground) {
+    case 'grass':
+      out += marks(24, tuft);
+      break;
+    case 'path':
+    case 'dirt':
+    case 'red earth': {
+      // A way worn across it, wide near and narrow far, and a few stones.
+      const mid = SET_W * (0.4 + random() * 0.2);
+      out += flatShape(
+        `M${r1(mid - 20)},${r1(top + 2)} Q${r1(mid - 110)},${r1(top + D * 0.45)} ${r1(mid - 380)},${SET_H + 20} L${r1(mid + 380)},${SET_H + 20} Q${r1(mid + 110)},${r1(top + D * 0.45)} ${r1(mid + 20)},${r1(top + 2)} Z`,
+        layout.ground === 'path' ? SET_COLOURS.earth : shade(colour, 1.12),
+      );
+      out +=
+        layout.ground === 'path'
+          ? marks(14, tuft)
+          : marks(
+              12,
+              (x, y, k) =>
+                `<ellipse cx="${r1(x)}" cy="${r1(y)}" rx="${r1(8 * k)}" ry="${r1(3.5 * k)}" ${flatFill(darker)}/>`,
+            );
+      break;
+    }
+    case 'sand':
+    case 'snow':
+      // Ripples on the sand, soft drifts in the snow: short curves.
+      out += marks(
+        16,
+        (x, y, k) =>
+          `<path d="M${r1(x - 30 * k)},${r1(y)} Q${r1(x)},${r1(y - 7 * k)} ${r1(x + 30 * k)},${r1(y)}" fill="none" stroke="${darker}" stroke-width="${r1(3 * k)}" stroke-linecap="round"/>`,
+      );
+      break;
+    case 'road': {
+      // The road across the back and the pavement before it, its kerb, the
+      // lane's marks, and a crack or two in each.
+      const kerb = top + D * 0.36;
+      out +=
+        flatRect(
+          -10,
+          kerb,
+          SET_W + 20,
+          SET_H - kerb + 10,
+          packColour(pack, GROUND.paving),
+        ) +
+        flatRect(-10, kerb - 8, SET_W + 20, 12, '#c2b397') +
+        Array.from({ length: 12 }, (_, k) =>
+          flatRect(k * 136 + 10, kerb - 8, 4, 12, shade('#c2b397', 0.85)),
+        ).join('') +
+        Array.from({ length: 9 }, (_, k) =>
+          flatRect(
+            k * 190 + 30,
+            top + (kerb - top) * 0.45,
+            100,
+            10,
+            '#f3f1ec',
+            3,
+          ),
+        ).join('');
+      const crack = (x: number, y: number, k: number) =>
+        `<path d="M${r1(x)},${r1(y)} l${r1(12 * k)},${r1(5 * k)} l${r1(-6 * k)},${r1(7 * k)} l${r1(14 * k)},${r1(4 * k)}" fill="none" stroke="${shade(GROUND.paving, 0.8)}" stroke-width="${r1(2.4 * k)}" stroke-linecap="round"/>`;
+      out += marks(7, (x, y, k) => (y > kerb + 8 ? crack(x, y, k) : ''));
+      out += Array.from({ length: 3 }, () => {
+        const x = random() * SET_W;
+        const y = top + 6 + random() * (kerb - top - 20);
+        return crack(x, y, near(y));
+      }).join('');
+      break;
+    }
+    case 'paving':
+    case 'stone':
+      out += toDistance(220, 0.55, shade(colour, 0.94));
+      break;
+    case 'wood':
+      out += toDistance(90, 0.9, shade(colour, 0.85));
+      break;
+    case 'tiles':
+      out += toDistance(160, 0.5, shade(colour, 0.94));
       break;
     default:
       break;
@@ -1348,7 +1940,7 @@ function worldAttributes(
   reacts: SetPiece['reacts'],
   kind: string | undefined,
   x: number,
-  row: SetRow | 'wall' | 'flat',
+  row: SetRow | 'wall' | 'flat' | 'horizon',
   pivot?: [number, number],
   roosts?: SetPiece['roosts'],
 ): string {
@@ -1377,7 +1969,7 @@ function placed(
     lives?: 'sway' | 'flicker';
     own?: boolean;
     /** What it is and its row, for the stage to make it answer the world. */
-    world?: { kind?: string; row: SetRow | 'wall' | 'flat' };
+    world?: { kind?: string; row: SetRow | 'wall' | 'flat' | 'horizon' };
   } = {},
 ): string {
   const inner = innerOf(piece);
@@ -1408,12 +2000,23 @@ const pale = (hex: string): boolean => {
   return ((n >> 16) + ((n >> 8) & 255) + (n & 255)) / 765 > 0.82;
 };
 
-/** A layout's thing, drawn: the stage's own pieces as the stage draws them, and a palm as a tree named so. */
+/**
+ * A layout's thing, drawn: the stage's own pieces as the stage draws
+ * them, and a palm as a tree named so. In a style pack, a building is
+ * assembled from the pack's parts by its own seed (`key`), and what has a
+ * colour of its own takes the pack's tint.
+ */
 function pieceOf(
   kind: SetItemKind,
   colour: string | null,
   seed = 0,
+  pack: StylePack | null = null,
+  key = '',
 ): SceneryPiece {
+  if (pack && isBuildingKind(kind))
+    return drawBuilding(kind, pack, key, colour ?? undefined);
+  if (pack && colour && (isKitKind(kind) || isLandmarkKind(kind)))
+    colour = packColour(pack, colour);
   if (kind === 'palm')
     return { ...drawPiece('tree', 'palm tree'), lives: 'sway' };
   if (isSceneryKind(kind)) return drawScenery(kind, colour ?? undefined);
@@ -1683,14 +2286,14 @@ function drawFront(words: string, colour: string | null): string {
 /** A thing about to be drawn: where, how big, in which band of the set. */
 interface Placing {
   piece: SetPiece;
-  /** What it is, when the layout placed it. */
-  kind?: SetItemKind;
+  /** What it is, when the layout placed it (a kind of its list, or a landmark's builder). */
+  kind?: string;
   /** Its middle across, and its feet, in the set's units. */
   x: number;
   y: number;
   s: number;
-  /** Its row, the wall it hangs on, or the floor it lies on: what it keeps apart from. */
-  band: SetRow | 'wall' | 'flat';
+  /** Its row, the wall it hangs on, the floor it lies on, or (in a style pack) the far edge of the ground: what it keeps apart from. */
+  band: SetRow | 'wall' | 'flat' | 'horizon';
   hang?: boolean;
   flip?: boolean;
   id?: string;
@@ -1699,6 +2302,12 @@ interface Placing {
   own?: boolean;
   /** Where it stands is fixed: a feature at its spot, a vessel's seats. The rest move aside. */
   fixed?: boolean;
+  /** Scattered by code, kept clear of where the action is. */
+  clutter?: boolean;
+  /** How much it was scaled to its real height (studio-scenery-plan §5.8); 1 for one drawn true. */
+  real?: number;
+  /** Sized to the frame, not to life (a landmark), or far off: its size is not checked. */
+  free?: boolean;
 }
 
 /** A placing's reach across, in the set's units. */
@@ -1831,6 +2440,25 @@ export interface BuiltSet {
   svg: string;
   parts: Record<string, string>;
   layered: SetLayering;
+  /** What code did to make it sound, and what it wanted in the kit, for the log. */
+  notes: string[];
+  /** Each thing placed: what, where its feet are, its scale and reach, its row; for the checks. */
+  placed: PlacedPiece[];
+}
+
+/** A thing as it was placed in a set, in the set's units. */
+export interface PlacedPiece {
+  kind?: string;
+  x: number;
+  y: number;
+  s: number;
+  band: string;
+  /** Its box: left, top, width, height. */
+  box: [number, number, number, number];
+  /** How much it was scaled to its real height; its scale per metre is s over this. */
+  real: number;
+  clutter?: boolean;
+  free?: boolean;
 }
 
 /** The floor of a place of this kind, in the set's units (studio-scenery-plan §4.2): from where people stand farthest off to the front edge. */
@@ -1860,6 +2488,15 @@ const layerSvg = (inner: string, world = '') =>
  * layers (back, middle and front rows) is drawn flat exactly as it always
  * was; its back row is the back layer, its middle row the stage, and its
  * front row stands on the floor with the people.
+ *
+ * A layout in a style pack (L3, §5) is drawn richer: its buildings from
+ * the pack's parts, its clutter scattered clear of where the action is,
+ * its ground textured, every piece its real height for where it stands
+ * (and none larger per metre than what stands before it), its landmarks
+ * built from their parameters, and a crowd before the camera where
+ * people watch. Out of doors, what stands at the back stands on the far
+ * edge of the ground, on the back layer, and the ground is one layer
+ * whole: no seam can open between them as the layers part.
  */
 export function buildSet(
   layout: SetLayout,
@@ -1871,6 +2508,10 @@ export function buildSet(
   const floor = FLOOR_LINE[kind];
   const studio = place.features !== undefined;
   const { staged, drawn } = featuresOf(place);
+  const pack = layout.style ? STYLE_PACKS[layout.style] : null;
+  /** Out of doors in a style pack: its back row on the ground's far edge, and its ground whole. */
+  const horizon = pack !== null && kind === 'outdoor';
+  const notes: string[] = [];
   const parts: Record<string, string> = { ground: 'ground' };
   const out: string[] = [];
   const layers: Record<SetLayerId, string[]> = {
@@ -1885,13 +2526,17 @@ export function buildSet(
   const SIDE = 110;
   const DROP = 70;
   /** The ground's own colour, far off: what shows wherever the layers part as the camera moves. */
-  const groundColour =
+  const plainGround =
     layout.groundColour ??
     (kind === 'vessel' && layout.vessel !== 'boat' && layout.ground === 'stone'
       ? VESSEL_FLOOR
       : layout.weather === 'snow' && layout.ground === 'grass'
         ? GROUND.snow
         : GROUND[layout.ground]);
+  const groundColour =
+    horizon && !layout.groundColour
+      ? packColour(pack, plainGround)
+      : plainGround;
   const underlay = flatRect(
     -20,
     floor - 2,
@@ -1903,10 +2548,15 @@ export function buildSet(
   // Behind everything: the sky and what stands behind the ground, a
   // room's walls, or what a vessel's windows look out on and its side.
   if (kind === 'outdoor') {
-    const sky = `<g id="sky">${drawSky(layout, floor, random)}</g>`;
+    const sky = `<g id="sky">${drawSky(layout, floor, random, pack)}</g>`;
     out.push(sky);
     layers.sky.push(sky, underlay);
-    const back = drawBackdrop(layout, floor, random);
+    const own = pack?.backdropFor[layout.backdrop];
+    const backdrop =
+      own && (SET_BACKDROPS as readonly string[]).includes(own)
+        ? (own as SetBackdrop)
+        : layout.backdrop;
+    const back = drawBackdrop(layout, floor, random, pack, backdrop);
     if (back) {
       out.push(`<g id="backdrop">${back}</g>`);
       layers.far.push(underlay, `<g id="backdrop">${back}</g>`);
@@ -1941,7 +2591,23 @@ export function buildSet(
       item.kind === 'stall' ||
       item.kind === 'crate' ||
       item.kind === 'table');
-  for (let item of [...layout.items, ...clutterOf(layout, place)]) {
+  /** Where something stands on the far edge of the ground, and how big it is there. */
+  const atEdge = floor + 2;
+  const farOff = (piece: SetPiece, k: number): { y: number; s: number } => {
+    const y = rowFeet(kind, 'far');
+    const tall = Math.max(1, -piece.viewBox[1]);
+    return {
+      y,
+      s: Math.min(scaleAtFeet(kind, y) * FAR_K * k, (FAR_MOST * SET_H) / tall),
+    };
+  };
+  let n = 0;
+  const scattered: Scattered[] = pack
+    ? clutterOfPack(layout, place, pack, clear)
+    : clutterOf(layout, place);
+  for (let item of [...layout.items, ...scattered] as Scattered[]) {
+    const key = `${place.id}:${place.name}:${item.kind}:${n}`;
+    n += 1;
     // One the stage draws itself, placed again by the painter where it
     // stands (the yard's gate, told to leave it out): drawn once, the
     // stage's, never a second behind it.
@@ -1957,7 +2623,7 @@ export function buildSet(
     if ((item.kind === 'window' || item.kind === 'door') && kind !== 'indoor')
       continue;
     if (item.kind === 'window') item = { ...item, kind: 'curtains' };
-    const piece = pieceOf(item.kind, item.colour, placings.length);
+    const piece = pieceOf(item.kind, item.colour, placings.length, pack, key);
     const [, vy, vw] = piece.viewBox;
     if ((HANGING as readonly string[]).includes(item.kind)) {
       // Only on a wall: on the back wall, at the back row's scale, its
@@ -1978,6 +2644,15 @@ export function buildSet(
       continue;
     }
     const isFlat = (FLAT as readonly string[]).includes(item.kind);
+    /** In a style pack, its real height for where it stands (§5.8). */
+    const real =
+      pack && !isFlat && !isBuildingKind(item.kind)
+        ? realScaleOf(item.kind, -vy)
+        : 1;
+    const also = {
+      ...(item.clutter ? { clutter: true } : {}),
+      ...(pack ? { real } : {}),
+    };
     // In a vessel its aisle is open: what stands is along its far side.
     // Far off is out of doors only: in a room, it is against its wall.
     let row: SetRow = isFlat
@@ -1987,13 +2662,49 @@ export function buildSet(
         : kind !== 'outdoor' && item.row === 'far'
           ? 'back'
           : item.row;
+    // Far off, in a style pack: a share of the frame, not a size.
+    if (pack && row === 'far') {
+      const { y, s } = farOff(piece, item.scale * real);
+      placings.push({
+        piece,
+        kind: item.kind,
+        x: item.x * SET_W,
+        y,
+        s,
+        band: 'far',
+        free: true,
+        ...(item.flip ? { flip: true } : {}),
+        ...(piece.lives ? { lives: piece.lives } : {}),
+        ...also,
+      });
+      continue;
+    }
+    // At the back out of doors, a tall thing stands on the far edge of the
+    // ground; the rest at the back of the ground before it.
+    const toEdge = () =>
+      placings.push({
+        piece,
+        kind: item.kind,
+        x: item.x * SET_W,
+        y: atEdge,
+        s: scaleAtFeet(kind, atEdge) * HORIZON_K * item.scale * real,
+        band: 'horizon',
+        ...(item.flip ? { flip: true } : {}),
+        ...(piece.lives ? { lives: piece.lives } : {}),
+        ...(counts(item) ? { counter: true } : {}),
+        ...also,
+      });
+    if (horizon && !isFlat && row === 'back' && AT_HORIZON.has(item.kind)) {
+      toEdge();
+      continue;
+    }
     let x = item.x;
-    const s0 = scaleAtFeet(kind, rowFeet(kind, row)) * item.scale;
+    const s0 = scaleAtFeet(kind, rowFeet(kind, row)) * item.scale * real;
     const half = (vw * s0) / 2 / SET_W;
     const tall = (-vy * s0) / SET_H;
     // The front row frames the picture: only something tall, one at each
     // side at its very edge; anything else stands farther back.
-    if (!isFlat && row === 'front') {
+    if (!isFlat && row === 'front' && !item.edge) {
       const side = x < 0.5 ? 'left' : 'right';
       if (tall < 0.4 || framed.has(side)) row = 'middle';
       else {
@@ -2012,12 +2723,25 @@ export function buildSet(
     // Clear of what the stage draws itself, nearer than the back.
     if (
       !isFlat &&
+      !item.edge &&
       (row === 'middle' || row === 'front') &&
       clear.some((c) => Math.abs(c - x) < 0.1 + half)
-    )
+    ) {
+      if (horizon && AT_HORIZON.has(item.kind)) {
+        toEdge();
+        continue;
+      }
       row = 'back';
-    const y = rowFeet(kind, row);
-    let s = scaleAtFeet(kind, y) * item.scale;
+    }
+    // Clutter at an edge of the floor stands between the middle and the front, low.
+    const y = item.edge
+      ? rowFeet(kind, 'middle') +
+        (rowFeet(kind, 'front') - rowFeet(kind, 'middle')) * EDGE_NEARER
+      : rowFeet(kind, row);
+    // What frames the picture at its sides is the kit's size, cut by the
+    // frame as it is: a palm its real height there would be all trunk.
+    const here = row === 'front' && !item.edge ? 1 : real;
+    let s = scaleAtFeet(kind, y) * item.scale * here;
     // Before the camera, low or at the sides (§8.4): at most the bottom
     // three tenths of the frame, else in its outer eighth.
     if (row === 'foreground' && x > 0.12 && x < 0.88) {
@@ -2038,12 +2762,38 @@ export function buildSet(
       ...(item.flip ? { flip: true } : {}),
       ...(piece.lives ? { lives: piece.lives } : {}),
       ...(counts(item) ? { counter: true } : {}),
+      ...also,
+      ...(pack ? { real: here } : {}),
+      ...(pack && row === 'foreground' ? { free: true } : {}),
     });
   }
-  // The things the artist drew, where the layout put them.
+  // The things the artist drew, where the layout put them; and the
+  // landmarks code builds from their parameters.
   for (const item of layout.own) {
+    if (item.build) {
+      const landmark = landmarkPlacing(item.build, item, kind, horizon, floor);
+      placings.push(landmark);
+      continue;
+    }
     const piece = own[item.name];
     if (!piece) continue;
+    if (pack)
+      notes.push(
+        `wanted in the kit: ${item.name} (drawn by the artist this time)`,
+      );
+    if (pack && item.row === 'far' && kind === 'outdoor') {
+      const { y, s } = farOff(piece, 1);
+      placings.push({
+        piece,
+        x: item.x * SET_W,
+        y,
+        s,
+        band: 'far',
+        own: true,
+        free: true,
+      });
+      continue;
+    }
     const row: SetRow =
       item.row === 'front' || item.row === 'foreground' || item.row === 'far'
         ? 'back'
@@ -2054,7 +2804,15 @@ export function buildSet(
     const half = (piece.viewBox[2] * s) / 2 / SET_W;
     if (row === 'middle' && x > 0.3 - half && x < 0.7 + half)
       x = x < 0.5 ? 0.16 : 0.84;
-    placings.push({ piece, x: x * SET_W, y, s, band: row, own: true });
+    placings.push({
+      piece,
+      x: x * SET_W,
+      y,
+      s,
+      band: row,
+      own: true,
+      ...(pack ? { free: true } : {}),
+    });
   }
   // A vessel's seats along its far side, unless the layout placed its own.
   if (
@@ -2097,6 +2855,7 @@ export function buildSet(
       band: row,
       id,
       fixed: true,
+      ...(pack ? { real: 1 } : {}),
     });
   }
   // The middle of the ground kept open: what stands between covers at
@@ -2112,7 +2871,89 @@ export function buildSet(
     one.y = rowFeet(kind, 'back');
     one.s = scaleAtFeet(kind, one.y) * k;
   }
-  spreadOut(placings);
+  // In a style pack, what code scatters finds its own room after (below),
+  // and never pushes what the painter placed into where the action is.
+  spreadOut(pack ? placings.filter((one) => !one.clutter) : placings);
+  if (pack) {
+    // Clutter never where the action is (§5.3): moved out to its nearer
+    // side, and on past whatever it would then stand on; left out when
+    // that is off the set.
+    const focal = layout.focal?.x ?? 0.5;
+    const lo = (focal - FOCAL_HALF) * SET_W;
+    const hi = (focal + FOCAL_HALF) * SET_W;
+    const settled = placings.filter((p) => !p.clutter);
+    const scatter = placings
+      .filter((p) => p.clutter)
+      .sort(
+        (a, b) => Math.abs(a.x - focal * SET_W) - Math.abs(b.x - focal * SET_W),
+      );
+    const dropped = new Set<Placing>();
+    for (const one of scatter) {
+      const [a0, b0] = reachOf(one);
+      let way = 0;
+      if (b0 > lo && a0 < hi) {
+        const left = one.x - (b0 - lo);
+        const right = one.x + (hi - a0);
+        way =
+          Math.abs(left - one.x) <= Math.abs(right - one.x) && left > 0
+            ? -1
+            : 1;
+        one.x = way < 0 ? left : right;
+      }
+      // Past what it would overlap in its own band, the same way; else the
+      // other way, while that keeps it out of where the action is.
+      way ||= one.x < focal * SET_W ? -1 : 1;
+      const from = one.x;
+      const clearWay = (dir: number): boolean => {
+        one.x = from;
+        for (let pass = 0; pass < 12; pass += 1) {
+          const [a, b] = reachOf(one);
+          if (b > lo && a < hi) return false;
+          // It may stand at the foot of what the painter placed, as a drum
+          // by a kiosk; never on more of the clutter than half of it; on
+          // the far edge, a pole before a house as it would.
+          const hit =
+            one.band === 'horizon'
+              ? undefined
+              : settled.find((other) => {
+                  if (other.band !== one.band || !other.clutter) return false;
+                  const [c, d] = reachOf(other);
+                  return (
+                    Math.min(b, d) - Math.max(a, c) >
+                    Math.min(b - a, d - c) * 0.45
+                  );
+                });
+          if (!hit) return one.x >= 0 && one.x <= SET_W;
+          const [c, d] = reachOf(hit);
+          one.x += dir < 0 ? c - b : d - a;
+        }
+        return false;
+      };
+      if (clearWay(way) || clearWay(-way)) settled.push(one);
+      else dropped.add(one);
+    }
+    for (let k = placings.length - 1; k >= 0; k -= 1)
+      if (dropped.has(placings[k])) placings.splice(k, 1);
+    // Nothing larger, metre for metre, than what stands before it (§8.1).
+    const sized = placings.map((one) => ({
+      y: one.y,
+      perMetre: one.s / (one.real ?? 1),
+      free:
+        one.free ||
+        one.hang === true ||
+        one.band === 'flat' ||
+        one.band === 'far' ||
+        one.band === 'wall' ||
+        one.real === undefined,
+    }));
+    for (const { index, perMetre } of checkSizes(sized)) {
+      const one = placings[index];
+      one.s = perMetre * (one.real ?? 1);
+      notes.push(
+        `size: the ${one.kind ?? 'thing'} at ${Math.round((one.x / SET_W) * 100)}% made no larger, metre for metre, than what stands before it`,
+      );
+    }
+  }
   // A chair beside a desk or a table faces it.
   for (const chair of placings.filter((one) => one.kind === 'chair')) {
     const near = placings
@@ -2146,6 +2987,13 @@ export function buildSet(
   const hanging = placings.filter((one) => one.hang).map(drawnAt);
   out.push(...hanging);
   layers.back.push(...hanging);
+  // On the far edge of the ground, its feet under the ground's edge.
+  const onEdge = placings
+    .filter((one) => one.band === 'horizon')
+    .sort((a, b) => a.y - b.y)
+    .map(drawnAt);
+  out.push(...onEdge);
+  layers.back.push(...onEdge);
   // The ground or floor, with what lies flat on it: exactly what people stand on.
   const floorLayout =
     kind === 'vessel' &&
@@ -2156,7 +3004,9 @@ export function buildSet(
       : layout;
   const ground =
     kind === 'outdoor'
-      ? drawGround(layout, floor, random)
+      ? pack
+        ? drawGroundL3(layout, floor, random, pack)
+        : drawGround(layout, floor, random)
       : kind === 'indoor'
         ? drawFloor(layout, floor, SIDE, DROP)
         : drawFloor(floorLayout, floor, -20, 0);
@@ -2165,17 +3015,22 @@ export function buildSet(
     .map(drawnAt)
     .join('');
   out.push(`<g id="ground">${ground}${flats}</g>`);
-  // As layers, the ground is cut where the back row stands: its far part
-  // lies under the back row, in the back layer, so the ground nearer the
-  // camera never covers their feet as the layers part; and it runs on a
-  // little under the ground's near part, so no seam opens between them.
-  const seam = rowFeet(kind, 'back') + 8;
-  // Each tuft of grass answers the world on the one layer it is seen on.
-  layers.back.push(`<g>${tuftsWhere(ground, (y) => y < seam)}</g>`);
-  layers.ground.push(
-    `<defs><clipPath id="near-ground"><rect x="-20" y="${r1(seam)}" width="${SET_W + 40}" height="${r1(SET_H - seam + 40)}"/></clipPath></defs>` +
-      `<g clip-path="url(#near-ground)"><g id="ground">${tuftsWhere(ground, (y) => y >= seam)}${flats}</g></g>`,
-  );
+  if (horizon)
+    // One layer, whole: what stands at the back stands on its far edge.
+    layers.ground.push(`<g id="ground">${ground}${flats}</g>`);
+  else {
+    // As layers, the ground is cut where the back row stands: its far part
+    // lies under the back row, in the back layer, so the ground nearer the
+    // camera never covers their feet as the layers part; and it runs on a
+    // little under the ground's near part, so no seam opens between them.
+    const seam = rowFeet(kind, 'back') + 8;
+    // Each tuft of grass answers the world on the one layer it is seen on.
+    layers.back.push(`<g>${tuftsWhere(ground, (y) => y < seam)}</g>`);
+    layers.ground.push(
+      `<defs><clipPath id="near-ground"><rect x="-20" y="${r1(seam)}" width="${SET_W + 40}" height="${r1(SET_H - seam + 40)}"/></clipPath></defs>` +
+        `<g clip-path="url(#near-ground)"><g id="ground">${tuftsWhere(ground, (y) => y >= seam)}${flats}</g></g>`,
+    );
+  }
 
   // Back to front; what someone could stand behind together, as "props".
   const standing = placings
@@ -2184,6 +3039,7 @@ export function buildSet(
         !one.hang &&
         one.band !== 'flat' &&
         one.band !== 'far' &&
+        one.band !== 'horizon' &&
         one.band !== 'foreground',
     )
     .sort((a, b) => a.y - b.y);
@@ -2191,7 +3047,9 @@ export function buildSet(
   const rest = standing.filter((one) => !one.counter);
   const backRow = rest.filter((one) => one.band === 'back').map(drawnAt);
   out.push(...backRow);
-  layers.back.push(...backRow);
+  // Before the whole ground, in a style pack out of doors: on the stage's layer.
+  if (horizon) layers.stage.push(...backRow);
+  else layers.back.push(...backRow);
   if (props.length) {
     const group = `<g id="props">${props.map(drawnAt).join('')}</g>`;
     out.push(group);
@@ -2226,11 +3084,40 @@ export function buildSet(
     out.push(drawnOne);
     layers.foreground.push(drawnOne);
   }
+  // And the people watching, their backs to the camera (§5.5).
+  let watching: SetLayering['fore'] = [];
+  if (pack && layout.audience) {
+    const words = `${place.name} ${place.look}`;
+    const audience = drawAudience({
+      rows: layout.audience,
+      spread: audienceFor(words)?.spread ?? 'full',
+      seed: `${place.id}:${place.name}`,
+      world: PACK_WORLD[pack.id],
+      kind,
+      focal: layout.focal?.x ?? 0.5,
+      children: /\b(?:class ?rooms?|school|lessons?|pupils|children)\b/iu.test(
+        words,
+      ),
+      W: SET_W,
+      H: SET_H,
+    });
+    // On its layer only: the flat picture's ground is read by what stands
+    // on it (measureGround), and rows of heads across its foot are none of it.
+    if (audience.markup) {
+      layers.foreground.push(audience.markup);
+      watching = audience.fore;
+    }
+  }
 
   // What the stage needs to know of the place to make it answer the
   // world: what kind of place, what people walk on, and where the open
-  // ground meets what stands behind it (studio-world-plan §5).
-  const world = ` data-place="${kind}" data-ground="${layout.ground}" data-floor="${r1(floor)}"`;
+  // ground meets what stands behind it (studio-world-plan §5); in a
+  // style pack, which, and the life about it.
+  const world =
+    ` data-place="${kind}" data-ground="${layout.ground}" data-floor="${r1(floor)}"` +
+    (pack
+      ? ` data-style="${pack.id}" data-ambient="${pack.ambient.join(' ')}"`
+      : '');
   const svg =
     `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${SET_W} ${SET_H}"${world}>` +
     `<g stroke="${FIGURE_INK}" stroke-width="${INK_W}" stroke-linejoin="round" stroke-linecap="round">${out.join('')}</g></svg>`;
@@ -2258,43 +3145,122 @@ export function buildSet(
             100,
         ) / 100
       : LAYER_DEPTH[id];
+  const layerList = SET_LAYER_IDS.flatMap((id): SetLayer[] =>
+    layers[id].length || id === 'ground'
+      ? [
+          {
+            id,
+            depth: depthOf(id),
+            // Each says what place it is of, as the flat one does, and
+            // which layer it is, for the stage's world to answer in it.
+            svg: layerSvg(
+              layers[id].join(''),
+              pack
+                ? ` data-place="${kind}" data-ground="${layout.ground}" data-floor="${r1(floor)}" data-layer="${id}" data-style="${pack.id}"`
+                : `${world} data-layer="${id}"`,
+            ),
+            ...(id === 'floor' ? { feet: rowFeet(kind, 'front') } : {}),
+          },
+        ]
+      : [],
+  );
+  if (pack) {
+    // The budget for what does not move (studio-scenery-plan §7.3).
+    const elements = layerList
+      .filter((one) => one.id !== 'floor')
+      .reduce(
+        (sum, one) => sum + (one.svg.match(/<[a-zA-Z]/g) ?? []).length,
+        0,
+      );
+    if (elements > ELEMENT_BUDGET)
+      notes.push(
+        `budget: ${elements} shapes on the layers that do not move, over ${ELEMENT_BUDGET}: the player flattens them`,
+      );
+  }
   return {
     svg,
     parts,
     layered: {
-      layers: SET_LAYER_IDS.flatMap((id): SetLayer[] =>
-        layers[id].length || id === 'ground'
-          ? [
-              {
-                id,
-                depth: depthOf(id),
-                // Each says what place it is of, as the flat one does, and
-                // which layer it is, for the stage's world to answer in it.
-                svg: layerSvg(
-                  layers[id].join(''),
-                  `${world} data-layer="${id}"`,
-                ),
-                ...(id === 'floor' ? { feet: rowFeet(kind, 'front') } : {}),
-              },
-            ]
-          : [],
-      ),
+      layers: layerList,
       width: SET_W,
       floor: floorOf(kind),
-      fore: fore.map(({ one, id }) => {
-        const [a, b] = reachOf(one);
-        const [, vy, , vh] = one.piece.viewBox;
-        return {
-          id,
-          box: [r1(a), r1(one.y + vy * one.s), r1(b - a), r1(vh * one.s)] as [
-            number,
-            number,
-            number,
-            number,
-          ],
-        };
-      }),
+      fore: [
+        ...fore.map(({ one, id }) => {
+          const [a, b] = reachOf(one);
+          const [, vy, , vh] = one.piece.viewBox;
+          return {
+            id,
+            box: [r1(a), r1(one.y + vy * one.s), r1(b - a), r1(vh * one.s)] as [
+              number,
+              number,
+              number,
+              number,
+            ],
+          };
+        }),
+        ...watching,
+      ],
     },
+    notes,
+    placed: placings.map((one) => {
+      const [a, b] = reachOf(one);
+      const [, vy, , vh] = one.piece.viewBox;
+      return {
+        ...(one.kind ? { kind: one.kind } : {}),
+        x: r1(one.x),
+        y: r1(one.y),
+        s: Math.round(one.s * 1000) / 1000,
+        band: one.band,
+        box: [r1(a), r1(one.y + vy * one.s), r1(b - a), r1(vh * one.s)],
+        real: one.real ?? 1,
+        ...(one.clutter ? { clutter: true } : {}),
+        ...(one.free ? { free: true } : {}),
+      };
+    }),
+  };
+}
+
+/** A landmark built from its parameters, where its layout put it: sized to the frame, its top within it. */
+function landmarkPlacing(
+  build: NonNullable<SetOwnItem['build']>,
+  item: SetOwnItem,
+  kind: PlaceKind,
+  horizon: boolean,
+  floor: number,
+): Placing {
+  const piece = drawLandmark(build.kind, build.params);
+  const spec = LANDMARKS[build.kind];
+  const size = Number(build.params.size);
+  let row: SetRow =
+    item.row === 'front' || item.row === 'foreground' ? 'middle' : item.row;
+  if (kind !== 'outdoor' && row === 'far') row = 'back';
+  const onEdge = horizon && row === 'back';
+  const y =
+    row === 'far'
+      ? rowFeet(kind, 'far')
+      : onEdge
+        ? floor + 2
+        : rowFeet(kind, row);
+  const [, vy, vw, vh] = piece.viewBox;
+  let s = spec.span === 'w' ? (size * SET_W) / vw : (size * SET_H) / vh;
+  if (row === 'far') s *= 0.6;
+  // Never much above the frame's top: what would not fit is made smaller.
+  const room = y - SET_H * 0.04;
+  if (-vy * s > room) s = room / -vy;
+  let x = item.x;
+  const half = (vw * s) / 2 / SET_W;
+  if (row === 'middle' && x > 0.3 - half && x < 0.7 + half)
+    x = x < 0.5 ? Math.max(half, 0.16) : Math.min(1 - half, 0.84);
+  return {
+    piece,
+    kind: build.kind,
+    x: x * SET_W,
+    y,
+    s,
+    band: row === 'far' ? 'far' : onEdge ? 'horizon' : row,
+    fixed: true,
+    free: true,
+    ...(piece.lives ? { lives: piece.lives } : {}),
   };
 }
 
@@ -2315,6 +3281,179 @@ function contactShadow(one: Placing): string {
   const [a, b] = reachOf(one);
   const rx = Math.max(8, (b - a) * 0.36);
   return `<ellipse cx="${r1((a + b) / 2)}" cy="${r1(one.y)}" rx="${r1(rx)}" ry="${r1(rx * 0.14)}" fill="${FIGURE_INK}" fill-opacity="0.18" stroke="none"/>`;
+}
+
+/** A thing a layout places, or code scatters: scattered, and at an edge of the floor. */
+type Scattered = SetItem & { clutter?: boolean; edge?: boolean };
+
+/**
+ * What stands on the far edge of the ground when it is placed at the back
+ * out of doors, in a style pack: buildings, trees, poles and wires,
+ * lamps, parked vehicles, monuments (studio-scenery-plan §2's back
+ * layer).
+ */
+const AT_HORIZON: ReadonlySet<string> = new Set([
+  'house',
+  'shop',
+  'church',
+  'mosque',
+  'classroom',
+  'compound',
+  'tenement',
+  'temple',
+  'mud brick house',
+  'brownstone',
+  'skyscraper',
+  'zinc roof house',
+  'barn',
+  'hut',
+  'tree',
+  'palm',
+  'pine',
+  'palm grove',
+  'poles',
+  'lamppost',
+  'streetlamp',
+  'parked car',
+  'danfo',
+  'taxi',
+  'obelisk',
+  'columns',
+  'pyramid',
+  'tent',
+]);
+/**
+ * How much smaller than the pinhole says what stands on the far edge of
+ * the ground is drawn: that edge is farther off than the ground's own
+ * lines make it, as a cartoon's street is, so a row of houses is a
+ * street behind the people, not a wall over them. Everything there is
+ * drawn at it alike, so their sizes agree among themselves.
+ */
+export const HORIZON_K = 0.5;
+/** How much nearer than the middle row clutter at an edge of the floor stands, as a share of the way to the front. */
+const EDGE_NEARER = 0.3;
+/** Half the width of where the action is, as a share: no clutter within it. */
+export const FOCAL_HALF = 0.13;
+/** The most shapes on a set's layers that do not move (studio-scenery-plan §7.3). */
+export const ELEMENT_BUDGET = 3000;
+/** The most things code scatters about a place. */
+const MOST_SCATTERED = 14;
+/** Clutter too big to have many of. */
+const BIG_CLUTTER: ReadonlySet<string> = new Set([
+  'parked car',
+  'laundry line',
+  'generator',
+  'poles',
+]);
+/** The colours some clutter comes in, one each. */
+const CLUTTER_COLOURS: Readonly<Record<string, readonly string[]>> = {
+  'plastic chair': [CLOTH.white, CLOTH.red, CLOTH.blue, CLOTH.green],
+  'water drum': [CLOTH.blue, CLOTH.blue, CLOTH.black],
+  'parked car': [CLOTH.blue, CLOTH.red, CLOTH.white, CLOTH.grey, CLOTH.green],
+  okada: [CLOTH.red, CLOTH.black, CLOTH.blue],
+  bicycle: [CLOTH.teal, CLOTH.red, CLOTH.yellow],
+  bin: [KIT_EXTRAS['dark leaf'], CLOTH.grey, CLOTH.blue],
+};
+
+/** Who the people watching are dressed as, by their pack: the figure kit's wardrobe for its world. */
+const PACK_WORLD: Record<StylePackId, StoryWorld> = {
+  'ancient-near-east': {
+    era: 'ancient, BC',
+    region: 'Egypt',
+    culture: '',
+    landscape: '',
+    homes: '',
+  },
+  'biblical-village': {
+    era: 'first century',
+    region: 'Galilee',
+    culture: '',
+    landscape: '',
+    homes: '',
+  },
+  'west-african-town': {
+    era: 'today',
+    region: 'Lagos, Nigeria',
+    culture: 'Yoruba',
+    landscape: '',
+    homes: '',
+  },
+  'western-city': {
+    era: 'today',
+    region: 'a city',
+    culture: '',
+    landscape: '',
+    homes: '',
+  },
+  'village-farm': {
+    era: 'today',
+    region: 'a village',
+    culture: '',
+    landscape: '',
+    homes: '',
+  },
+  nature: { era: 'today', region: '', culture: '', landscape: '', homes: '' },
+};
+
+/**
+ * What a layout in a style pack scatters (studio-scenery-plan §5.3): as
+ * many of each kind as its pack is busy (a Lagos street three, a farm
+ * two), fewer of the big ones; two in three along the back, clear of
+ * where the action is and of what the stage draws itself, the rest at
+ * the edges of the floor, where no one stands. Seeded, so the same every
+ * time; its colours its own.
+ */
+function clutterOfPack(
+  layout: SetLayout,
+  place: StoryPlace,
+  pack: StylePack,
+  clear: readonly number[],
+): Scattered[] {
+  if (!layout.clutter?.length) return [];
+  const random = seeded(`${place.id}:${place.name}:clutter`);
+  const focal = layout.focal?.x ?? 0.5;
+  const out: Scattered[] = [];
+  let slot = 0;
+  let side = 0;
+  for (const kind of layout.clutter) {
+    const count = Math.min(BIG_CLUTTER.has(kind) ? 2 : 3, pack.density);
+    for (let j = 0; j < count && out.length < MOST_SCATTERED; j += 1) {
+      const edge =
+        !AT_HORIZON.has(kind) &&
+        !BIG_CLUTTER.has(kind) &&
+        kind !== 'street sign' &&
+        slot % 3 === 2;
+      slot += 1;
+      let x = 0.5;
+      if (edge) {
+        x = side % 2 ? 0.88 + random() * 0.09 : 0.03 + random() * 0.09;
+        side += 1;
+      } else
+        for (let tries = 0; tries < 16; tries += 1) {
+          x = 0.04 + random() * 0.92;
+          if (
+            Math.abs(x - focal) >= FOCAL_HALF + 0.07 &&
+            clear.every((c) => Math.abs(c - x) >= 0.1)
+          )
+            break;
+        }
+      const colours = CLUTTER_COLOURS[kind];
+      const colour = colours
+        ? colours[Math.floor(random() * colours.length)]
+        : null;
+      out.push({
+        kind,
+        x: Math.round(x * 1000) / 1000,
+        row: edge ? 'middle' : 'back',
+        scale: Math.round((0.9 + random() * 0.15) * 100) / 100,
+        colour,
+        clutter: true,
+        ...(edge ? { edge: true } : {}),
+        ...(random() < 0.4 ? { flip: true } : {}),
+      });
+    }
+  }
+  return out;
 }
 
 /**

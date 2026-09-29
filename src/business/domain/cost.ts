@@ -87,6 +87,19 @@ export function catalogueSpeechCost(
 }
 
 /**
+ * A voice billed by the character (ElevenLabs: $0.10 a thousand on Eleven
+ * v3, pay as you go or on a plan, September 2026; Cartesia: a credit a
+ * character, $0.05 a thousand on Pro), at its rate.
+ */
+export function characterSpeechCost(
+  characters: number,
+  usdPer1kChars: number,
+): number {
+  if (!(characters > 0) || !(usdPer1kChars >= 0)) return 0;
+  return Math.round((characters / 1000) * usdPer1kChars * 1e6) / 1e6;
+}
+
+/**
  * Gemini's voices, by the token: text in, audio out, per million, from
  * Google's price list of September 2026. Audio is 25 tokens a second, so
  * 3.8 Flash comes to $0.0135 a minute. Google has said 3.8's prices

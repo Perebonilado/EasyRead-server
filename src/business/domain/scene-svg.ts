@@ -20,7 +20,10 @@ import { groupId, idKey, type DrawingThing } from './scene-script';
 import { liftCallouts, type Callout, type InkField } from './scene-callouts';
 import { renderSvg, type InkBox } from './scene-raster';
 import type { SetGround } from './scene-ground';
+import type { SetLayering } from './scene-set-layout';
 import type { FigureSpec } from './scene-figure';
+import type { Dangle } from './scene-dangles';
+import type { Gait } from './scene-animal-body';
 
 /** The canvas the artist is given, by shape. */
 export const CANVAS: Record<DrawingThing['shape'], { w: number; h: number }> = {
@@ -808,10 +811,18 @@ export interface GatedDrawing {
   onePiece?: true;
   /** A set: where its open ground is, measured once, so a crowd stands on it. */
   ground?: SetGround;
+  /** A set built by code: the same set as layers at their depths, its floor, and what stands before the camera (studio-scenery-plan §3.2). */
+  layered?: SetLayering;
   /** One person drawn by the kit: what they wear that says who they are, so no one in a crowd wears the same. */
   wears?: Pick<FigureSpec, 'top' | 'topColour' | 'headwear'>;
   /** And what they wear, in words: as drawn, then in each outfit they change into ("red pyjamas", "a blue uniform and grey trousers"). */
   outfits?: string[];
+  /** Drawn by a kit with rig 2 (studio-world-plan §4.6): what swings is drawn as chains. Absent, rig 1. */
+  rigVersion?: 2;
+  /** On rig 2, each part that swings (scene-dangles), its root in its own units. */
+  dangles?: Dangle[];
+  /** On rig 2, one who walks: how far one full stride carries them, in its own units, and how they go. */
+  stride?: { length: number; gait: Gait };
 }
 
 export interface GateResult {

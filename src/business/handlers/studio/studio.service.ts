@@ -413,7 +413,7 @@ export class StudioService {
     const show = await this.requireShow(userId, id);
     const character = show.bible?.characters.find((c) => c.id === characterId);
     if (!show.bible || !character) throw new NotFoundError('Character');
-    const { engine, speech, voice } = await this.voices.current();
+    const { engine, speech, voice, cast } = await this.voices.current();
     const story = storyBibleFor(show.bible, [], show.title);
     const own = story.characters.find((c) => c.id === character.id)!;
     const speaker = characterVoice(
@@ -421,6 +421,7 @@ export class StudioService {
       own,
       engine === 'openai' ? null : engine,
       voice,
+      cast,
     );
     const name = speaker?.voice ?? voice;
     const key = `studio/${show.id}/voices/${character.id}-${engine}-${name.replace(/[^a-z0-9_]+/gi, '+')}.mp3`;

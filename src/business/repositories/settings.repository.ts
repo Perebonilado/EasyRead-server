@@ -1,4 +1,8 @@
-import type { SceneVoiceEngine } from '../domain/scene-voice';
+import type {
+  ListedEngine,
+  SceneVoiceEngine,
+  VoiceCast,
+} from '../domain/scene-voice';
 
 /**
  * The voices the worker can speak with, as it said when it last started:
@@ -15,6 +19,8 @@ export interface WorkerVoices {
 export interface AppSettingsRecord {
   /** Visualize's voice, as the admin chose it; null for the deployment's own. */
   sceneVoice: SceneVoiceEngine | null;
+  /** The admin's voices for the narrator and each kind of character, by engine: ElevenLabs' and Cartesia's. */
+  voiceCast: Partial<Record<ListedEngine, VoiceCast>>;
   /** Null until a worker has started since there were settings. */
   worker: WorkerVoices | null;
   changedBy: string | null;
@@ -25,7 +31,10 @@ export interface AppSettingsRecord {
 export interface AppSettingsRepository {
   get(): Promise<AppSettingsRecord>;
   set(
-    patch: { sceneVoice?: SceneVoiceEngine | null },
+    patch: {
+      sceneVoice?: SceneVoiceEngine | null;
+      voiceCast?: AppSettingsRecord['voiceCast'];
+    },
     changedBy: string,
     now: Date,
   ): Promise<AppSettingsRecord>;

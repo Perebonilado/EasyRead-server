@@ -137,8 +137,154 @@ export const ACTED_MOVES = [
   'bark',
   'roll',
   'shake-off',
+  // The action moves (studio-world-plan §4.5), each a clip the player
+  // plays (the client's src/lib/scene/moves): a leap (onto a feature), a
+  // landing, a burst into a sprint, a dodge, a punch that never lands, a
+  // hard fall, getting up off the ground, a hero's pose.
+  'leap',
+  'land',
+  'run-fast',
+  'dodge',
+  'punch',
+  'fall-hard',
+  'get-up',
+  'hero',
 ] as const;
 export type ActedMove = (typeof ACTED_MOVES)[number];
+
+/** The action moves the player plays from a clip of its own, by name: the jump rebuilt, and the eight new. */
+export const ACTION_MOVES = [
+  'jump',
+  'leap',
+  'land',
+  'run-fast',
+  'dodge',
+  'punch',
+  'fall-hard',
+  'get-up',
+  'hero',
+] as const satisfies readonly ActedMove[];
+export type ActionMove = (typeof ACTION_MOVES)[number];
+
+/** The big moves: a scene has one or two of them, unless its maker asks for action. The jump and getting up are everyday. */
+export const BIG_MOVES: ReadonlySet<string> = new Set<ActionMove>([
+  'leap',
+  'land',
+  'run-fast',
+  'dodge',
+  'punch',
+  'fall-hard',
+  'hero',
+]);
+
+/**
+ * Each action move's phases as the player's clip has them (the client's
+ * src/lib/scene/moves/clips.ts, kept the same here): the least each may
+ * take and all it wants, in ms. A move given less than all their least
+ * has its phases squeezed, which the audit catches.
+ */
+export const MOVE_PHASES: Record<
+  ActionMove,
+  Record<keyof DoingPhases, [minMs: number, idealMs: number]>
+> = {
+  jump: {
+    windUp: [220, 360],
+    act: [110, 160],
+    follow: [320, 460],
+    settle: [200, 420],
+  },
+  leap: {
+    windUp: [260, 420],
+    act: [130, 200],
+    follow: [360, 560],
+    settle: [260, 520],
+  },
+  land: {
+    windUp: [80, 140],
+    act: [160, 240],
+    follow: [200, 360],
+    settle: [260, 460],
+  },
+  'run-fast': {
+    windUp: [140, 220],
+    act: [160, 260],
+    follow: [300, 700],
+    settle: [260, 420],
+  },
+  dodge: {
+    windUp: [100, 160],
+    act: [140, 220],
+    follow: [200, 360],
+    settle: [220, 360],
+  },
+  punch: {
+    windUp: [180, 300],
+    act: [90, 130],
+    follow: [150, 240],
+    settle: [240, 430],
+  },
+  'fall-hard': {
+    windUp: [160, 260],
+    act: [220, 320],
+    follow: [220, 380],
+    settle: [300, 540],
+  },
+  'get-up': {
+    windUp: [220, 340],
+    act: [300, 440],
+    follow: [240, 380],
+    settle: [200, 340],
+  },
+  hero: {
+    windUp: [180, 280],
+    act: [220, 320],
+    follow: [400, 900],
+    settle: [240, 400],
+  },
+};
+
+/**
+ * When each landing of a move comes, and whether it is a landing from the
+ * air (the feet down after a flight) or a step: as a share of one of its
+ * phases, as the client's clip has it.
+ */
+export const MOVE_LANDS: Partial<
+  Record<ActionMove, { phase: keyof DoingPhases; at: number }>
+> = {
+  jump: { phase: 'follow', at: 1 },
+  leap: { phase: 'follow', at: 1 },
+  land: { phase: 'act', at: 0.25 },
+};
+
+/** The phases of a move given `ms`, as the player shares them: all it wants and any more held in its settle; less, each between its least and all it wants alike; less than all their least, each squeezed alike. */
+export function movePhasesMs(
+  move: ActionMove,
+  ms: number,
+): Record<keyof DoingPhases, number> {
+  const phases = MOVE_PHASES[move];
+  const names = ['windUp', 'act', 'follow', 'settle'] as const;
+  const least = names.reduce((n, p) => n + phases[p][0], 0);
+  const ideal = names.reduce((n, p) => n + phases[p][1], 0);
+  const out = {} as Record<keyof DoingPhases, number>;
+  for (const p of names) {
+    const [lo, hi] = phases[p];
+    out[p] =
+      ms >= ideal
+        ? p === 'settle'
+          ? hi + (ms - ideal)
+          : hi
+        : ms >= least
+          ? lo + ((hi - lo) * (ms - least)) / Math.max(1, ideal - least)
+          : (lo * Math.max(0, ms)) / Math.max(1, least);
+  }
+  return out;
+}
+
+/** The least a move may take, and all it wants. */
+export const moveLeastMs = (move: ActionMove) =>
+  Object.values(MOVE_PHASES[move]).reduce((n, [lo]) => n + lo, 0);
+export const moveIdealMs = (move: ActionMove) =>
+  Object.values(MOVE_PHASES[move]).reduce((n, [, hi]) => n + hi, 0);
 
 /** The acted moves someone keeps to once in them, until they get up: sitting, lying down. */
 export const HELD_MOVES: readonly ActedMove[] = ['sit', 'lie'];
@@ -152,6 +298,13 @@ export const HELD_IN_MS = 500;
 export const NEEDS_FEET: ReadonlySet<string> = new Set<string>([
   'stand',
   'jump',
+  'leap',
+  'land',
+  'run-fast',
+  'dodge',
+  'punch',
+  'fall-hard',
+  'hero',
   'sit',
   'lie',
   'fall',
@@ -206,6 +359,14 @@ export const DOING_IDS = [
   'shake-off',
   'dig',
   'wriggle',
+  // The action moves.
+  'leap',
+  'land',
+  'dodge',
+  'punch',
+  'fall-hard',
+  'get-up',
+  'hero',
   // Going somewhere.
   'enter',
   'leave',
@@ -216,6 +377,7 @@ export const DOING_IDS = [
   'climb',
   'squeeze',
   'hide',
+  'run-fast',
   // Handling things.
   'take',
   'put',
@@ -254,6 +416,15 @@ export interface Doing {
   /** How long it takes, and how short it may be made when a quiet is full. */
   ms: number;
   leastMs: number;
+  /**
+   * How long it takes given all the time it wants: a throw wound up and
+   * settled after, a jump crouched into and landed; never less than `ms`.
+   * A quiet between lines gives an action this long, and is held longer
+   * for it rather than quicken it (studio-stage's timeQuiet).
+   */
+  idealMs: number;
+  /** For a move with a wind-up and a settle, how its time is shared between them: its moment (`keyAt`) at the end of `act`. */
+  phases?: DoingPhases;
   /** How far into it its moment comes: the hand closing, the release, the landing. */
   keyAt: number;
   /** What is done instead by someone who cannot, or with nothing to do it with. */
@@ -264,6 +435,27 @@ export interface Doing {
   bare?: StageMove;
   /** Going at a run: a race, a chase. */
   runs?: true;
+  /** A move played over the going itself: a sprint's lean and pumping arms. */
+  with?: StageMove;
+  /**
+   * The move carries whoever makes it somewhere (a leap): up onto the
+   * feature it is at, where one stands up it; beside it; beside whom it is
+   * at; else on ahead, as far as it goes.
+   */
+  carries?: true;
+}
+
+/**
+ * How a move's time is shared, as parts of 1: winding up (a crouch, the
+ * arm back), the act itself (the spring, the swing to the release), its
+ * follow-through (in the air, the arm on through), and settling (landed,
+ * the arm down, still again). The wind-up and the act end at its moment.
+ */
+export interface DoingPhases {
+  windUp: number;
+  act: number;
+  follow: number;
+  settle: number;
 }
 
 const ALL: readonly Doer[] = ['person', 'animal', 'creature'];
@@ -292,7 +484,7 @@ export const RESTING_WORDS = new RegExp(`\\b(${RESTS_ON})\\b`, 'iu');
 /** A thing worn, named after a verb: "on his new school uniform", "on the party-dress". */
 const WORN = `${WHOSE}(?:[\\p{L}-]+[ -]){0,2}?(?:${WEAR_WORDS})\\b`;
 
-const doings: Record<DoingId, Omit<Doing, 'id'>> = {
+const doings: Record<DoingId, Omit<Doing, 'id' | 'idealMs' | 'phases'>> = {
   // ── The body ─────────────────────────────────────────────────────────────
   wave: {
     kind: 'body',
@@ -478,10 +670,12 @@ const doings: Record<DoingId, Omit<Doing, 'id'>> = {
     thing: null,
     aims: ['feature', 'thing', 'character'],
     aimed: false,
+    // Leaping is the leap's own (across, onto something).
     words:
-      /\b(?:jump(?:s|ed|ing)?|leap(?:s|t|ed|ing)?|spring(?:s|ing)?|sprang|vault(?:s|ed|ing)?|pounc(?:e|es|ed|ing))\b/iu,
+      /\b(?:jump(?:s|ed|ing)?|spring(?:s|ing)?|sprang|pounc(?:e|es|ed|ing))\b/iu,
     ms: 1100,
-    leastMs: 700,
+    // As short as its clip's phases may be (MOVE_PHASES).
+    leastMs: 850,
     keyAt: 0.45,
     fallback: 'hop',
     plays: { move: 'jump' },
@@ -493,7 +687,7 @@ const doings: Record<DoingId, Omit<Doing, 'id'>> = {
     aims: ['feature', 'thing', 'character', 'side'],
     aimed: false,
     words:
-      /\b(?:crouch(?:es|ed|ing)?|duck(?:s|ed|ing)?|kneel(?:s|ing)?|knelt|squat(?:s|ted|ting)?|bend(?:s|ing)? (?:down|low|over)|bent (?:down|low|over)|stoop(?:s|ed|ing)?|(?:look(?:s|ed|ing)?|peer(?:s|ed|ing)?|search(?:es|ed|ing)?|check(?:s|ed|ing)?) (?:under|beneath|behind|inside))\b/iu,
+      /\b(?:crouch(?:es|ed|ing)?|duck(?:s|ed|ing)? (?:down|low)|kneel(?:s|ing)?|knelt|squat(?:s|ted|ting)?|bend(?:s|ing)? (?:down|low|over)|bent (?:down|low|over)|stoop(?:s|ed|ing)?|(?:look(?:s|ed|ing)?|peer(?:s|ed|ing)?|search(?:es|ed|ing)?|check(?:s|ed|ing)?) (?:under|beneath|behind|inside))\b/iu,
     ms: 1400,
     leastMs: 800,
     keyAt: 0.4,
@@ -705,6 +899,118 @@ const doings: Record<DoingId, Omit<Doing, 'id'>> = {
     plays: { move: 'wriggle' },
   },
 
+  // ── The action moves (studio-world-plan §4.5) ─────────────────────────
+  // Each a clip the player plays with a wind-up, the act, a follow-through
+  // and a settle (MOVE_PHASES): its least all its phases' least.
+  leap: {
+    kind: 'body',
+    by: ALL,
+    thing: null,
+    aims: ['feature', 'character', 'side'],
+    aimed: false,
+    // Across and up, onto something: "springs onto the wall", "leaps over
+    // the puddle", "leaps". Up and down on the spot is a hop; out of bed,
+    // getting up; off something, a landing.
+    words:
+      /\b(?:(?:leap(?:s|t|ed|ing)?|spring(?:s|ing)?|sprang|sprung|vault(?:s|ed|ing)?|bound(?:s|ed|ing)?) (?:right |straight )?(?:up )?(?:onto|on to|on top of|up onto|up on|over|across|up into|into the (?:air|branches))|jump(?:s|ed|ing)? (?:right |straight )?(?:up )?(?:onto|on to|on top of|up onto|up on|up into)|leap(?:s|t|ed|ing)?)\b/iu,
+    ms: 1500,
+    leastMs: 1010,
+    keyAt: 0.36,
+    fallback: 'jump',
+    plays: { move: 'leap' },
+    carries: true,
+  },
+  land: {
+    kind: 'body',
+    by: ALL,
+    thing: null,
+    aims: ['feature', 'side'],
+    aimed: false,
+    // Down off something, or onto their feet: "jumps down off the wall",
+    // "lands on her feet", "drops down".
+    words:
+      /\b(?:lands? (?:on (?:(?:his|her|their|its) feet|all fours|both feet)|with a (?:thud|bump|thump|crash))|landed (?:on (?:(?:his|her|their|its) feet|all fours|both feet)|with a (?:thud|bump|thump|crash))|touch(?:es|ed)? down|(?:jump|leap|hop|spring|drop)(?:s|ed|t|ped|ing)? (?:back )?down(?: off| from)?|(?:jump|leap|hop|spring)(?:s|ed|t|ped|ing)? (?:down )?(?:off|from) (?:the|a|an|his|her|its|their))\b/iu,
+    ms: 1000,
+    leastMs: 700,
+    keyAt: 0.17,
+    fallback: 'crouch',
+    plays: { move: 'land' },
+    carries: true,
+  },
+  dodge: {
+    kind: 'body',
+    by: ALL,
+    thing: null,
+    aims: ['character', 'thing', 'side'],
+    aimed: false,
+    words:
+      /\b(?:dodg(?:e|es|ed|ing)|duck(?:s|ed|ing)?|sidestep(?:s|ped|ping)?|swerv(?:e|es|ed|ing)|(?:jump|leap)(?:s|t|ed|ing)? (?:out of the way|aside|clear))\b/iu,
+    ms: 900,
+    leastMs: 660,
+    keyAt: 0.27,
+    fallback: 'crouch',
+    plays: { move: 'dodge' },
+  },
+  // Gentle: a punch never lands (the one it is at staggers back from it).
+  punch: {
+    kind: 'body',
+    by: HANDS,
+    thing: null,
+    aims: ['character', 'side'],
+    aimed: false,
+    words:
+      /\b(?:throw(?:s|ing)? a punch|threw a punch|swing(?:s|ing)? a punch|swung a punch|(?:takes?|took) a swing|punch(?:es|ed|ing)?(?! the air)|jab(?:s|bed|bing)?)\b/iu,
+    ms: 1000,
+    leastMs: 660,
+    keyAt: 0.39,
+    fallback: 'lean-in',
+    plays: { move: 'punch' },
+  },
+  'fall-hard': {
+    kind: 'body',
+    by: ALL,
+    thing: null,
+    aims: ['character', 'side'],
+    aimed: false,
+    words:
+      /\b(?:(?:fall(?:s|ing)?|fell|crash(?:es|ed|ing)?|tumbl(?:e|es|ed|ing)|topple(?:s|d)?|toppling) (?:down )?(?:hard|flat|heavily|backwards|over backwards|to the ground|flat on (?:his|her|their|its) (?:back|face|bottom))|(?:is|was|gets?|got) knocked (?:down|over|flat)|(?:goes|go|went|going) (?:flying|sprawling)|sprawl(?:s|ed|ing)?)\b/iu,
+    ms: 1300,
+    leastMs: 900,
+    keyAt: 0.39,
+    fallback: 'fall',
+    plays: { move: 'fall-hard' },
+  },
+  'get-up': {
+    kind: 'body',
+    by: ALL,
+    thing: null,
+    aims: [],
+    aimed: false,
+    // Up off the ground after a fall ("gets up" just after a hard fall is
+    // this one too: the mender's).
+    words:
+      /\b(?:picks? (?:him|her|them|it)sel(?:f|ves) up|picked (?:him|her|them|it)sel(?:f|ves) up|(?:gets?|got|getting|scrambles?|scrambled|climbs?|climbed|pulls?|pulled|staggers?|staggered) (?:back )?(?:up )?(?:off|from) the (?:ground|floor|grass|mud|dirt|sand)|dust(?:s|ed)? (?:him|her|them|it)sel(?:f|ves) off|(?:gets?|got) back (?:up|on (?:his|her|their|its) feet))\b/iu,
+    ms: 1300,
+    leastMs: 960,
+    keyAt: 0.6,
+    fallback: 'stand-up',
+    plays: { move: 'get-up' },
+  },
+  hero: {
+    kind: 'body',
+    by: ALL,
+    thing: null,
+    aims: [],
+    aimed: false,
+    words:
+      /\b(?:strik(?:e|es|ing) an? (?:[\p{L}-]+ )?pose|struck an? (?:[\p{L}-]+ )?pose|pos(?:e|es|ed|ing) (?:like a hero|heroically|proudly|triumphantly)|(?:puts?|put|with) (?:his|her|their|its) hands on (?:his|her|their|its) hips|punch(?:es|ed|ing)? the air|fists? (?:raised )?(?:high )?in the air)\b/iu,
+    ms: 1600,
+    leastMs: 1040,
+    keyAt: 0.28,
+    fallback: 'hop',
+    plays: { move: 'hero' },
+  },
+
   // ── Going somewhere ──────────────────────────────────────────────────────
   enter: {
     kind: 'travel',
@@ -761,7 +1067,7 @@ const doings: Record<DoingId, Omit<Doing, 'id'>> = {
     aims: ['character', 'feature', 'thing', 'side'],
     aimed: false,
     words:
-      /\b(?:r[au]n(?:s|ning)?|rac(?:e|es|ed|ing)|dash(?:es|ed|ing)?|rush(?:es|ed|ing)?|sprint(?:s|ed|ing)?|bolt(?:s|ed|ing)?|dart(?:s|ed|ing)?|zoom(?:s|ed|ing)?|hurr(?:y|ies|ied|ying)|scamper(?:s|ed|ing)?|scurr(?:y|ies|ied|ying)|zigzag(?:s|ged|ging)?|bound(?:s|ed|ing)?|gallop(?:s|ed|ing)?|charg(?:e|es|ed|ing)|tear(?:s|ing)? (?:across|round|around|about)|tore (?:across|round|around|about))\b/iu,
+      /\b(?:r[au]n(?:s|ning)?|rac(?:e|es|ed|ing)|dash(?:es|ed|ing)?|rush(?:es|ed|ing)?|bolt(?:s|ed|ing)?|dart(?:s|ed|ing)?|zoom(?:s|ed|ing)?|hurr(?:y|ies|ied|ying)|scamper(?:s|ed|ing)?|scurr(?:y|ies|ied|ying)|zigzag(?:s|ged|ging)?|bound(?:s|ed|ing)?|gallop(?:s|ed|ing)?|charg(?:e|es|ed|ing)|tear(?:s|ing)? (?:across|round|around|about)|tore (?:across|round|around|about))\b/iu,
     ms: 1000,
     leastMs: 600,
     keyAt: 0.7,
@@ -842,6 +1148,24 @@ const doings: Record<DoingId, Omit<Doing, 'id'>> = {
     keyAt: 0.7,
     fallback: 'crouch',
     plays: { step: 'walk' },
+  },
+  // A run as fast as they can: off at a sprint, leant into it, arms going,
+  // and a skid to stop (the run-fast move over the run).
+  'run-fast': {
+    kind: 'travel',
+    by: ALL,
+    thing: null,
+    aims: ['character', 'feature', 'thing', 'side'],
+    aimed: false,
+    words:
+      /\b(?:sprint(?:s|ed|ing)?|(?:r[au]n(?:s|ning)?|rac(?:e|es|ed|ing)|dash(?:es|ed|ing)?|bolt(?:s|ed|ing)?|tear(?:s|ing)?|tore) (?:off |away |over |across )?(?:as fast as (?:he|she|they|it) (?:can|could)|at full (?:speed|tilt|pelt)|flat out|like the wind|for (?:his|her|their|its) li(?:fe|ves))|r[au]n(?:s|ning)? (?:off |away )?(?:really |very |so )?fast|(?:takes?|took) off at a sprint|(?:breaks?|broke|bursts?|burst|bursting) into a (?:fast |flat-out |full )?(?:sprint|run|dash))\b/iu,
+    ms: 1400,
+    leastMs: 860,
+    keyAt: 0.7,
+    fallback: 'run',
+    plays: { step: 'walk' },
+    runs: true,
+    with: 'run-fast',
   },
 
   // ── Handling things ──────────────────────────────────────────────────────
@@ -1110,11 +1434,137 @@ const doings: Record<DoingId, Omit<Doing, 'id'>> = {
 export const actionDoing = (action: ThingAction): DoingId =>
   action === 'wear' ? 'dress' : action === 'doff' ? 'undress' : action;
 
+/**
+ * How long an action takes given its time, where that is longer than
+ * `ms`: the moves with a wind-up and a settle (a throw, a kick, a jump, a
+ * fall, sitting and lying down), which a quiet gives this long. Every
+ * other doing's is its `ms`: a small gesture (a nod, a look) is as quick
+ * as it always was.
+ */
+const IDEAL_MS: Partial<Record<DoingId, number>> = {
+  hop: 1300,
+  hug: 2400,
+  jump: 1600,
+  // The action moves: all their clip's phases want (MOVE_PHASES).
+  leap: moveIdealMs('leap'),
+  land: moveIdealMs('land'),
+  dodge: moveIdealMs('dodge'),
+  punch: moveIdealMs('punch'),
+  'fall-hard': moveIdealMs('fall-hard'),
+  'get-up': moveIdealMs('get-up'),
+  hero: moveIdealMs('hero'),
+  'run-fast': moveIdealMs('run-fast'),
+  crouch: 1600,
+  sit: 1800,
+  'lie-down': 2100,
+  fall: 1800,
+  spin: 1500,
+  bow: 1500,
+  'roll-over': 1800,
+  throw: 1800,
+  catch: 1200,
+  kick: 1500,
+};
+
+/** An action move's phases as shares of all it wants, from its clip. */
+function sharesOf(move: ActionMove): DoingPhases {
+  const p = MOVE_PHASES[move];
+  const all = moveIdealMs(move);
+  const share = (n: number) => n / all;
+  return {
+    windUp: share(p.windUp[1]),
+    act: share(p.act[1]),
+    follow: share(p.follow[1]),
+    settle: share(p.settle[1]),
+  };
+}
+
+/** Each move's phases (DoingPhases): its wind-up and its act end at its `keyAt`. */
+const PHASES: Partial<Record<DoingId, DoingPhases>> = {
+  // A crouch, up at the moment, in the air, and landed.
+  hop: { windUp: 0.2, act: 0.1, follow: 0.4, settle: 0.3 },
+  // The action moves, as their clips share them (MOVE_PHASES).
+  jump: sharesOf('jump'),
+  leap: sharesOf('leap'),
+  land: sharesOf('land'),
+  dodge: sharesOf('dodge'),
+  punch: sharesOf('punch'),
+  'fall-hard': sharesOf('fall-hard'),
+  'get-up': sharesOf('get-up'),
+  hero: sharesOf('hero'),
+  'run-fast': sharesOf('run-fast'),
+  // Arms out and in, held, and let go.
+  hug: { windUp: 0.25, act: 0.15, follow: 0.35, settle: 0.25 },
+  crouch: { windUp: 0.15, act: 0.25, follow: 0.35, settle: 0.25 },
+  // A look down at it, the weight back, down on it, and settled there.
+  sit: { windUp: 0.25, act: 0.35, follow: 0.15, settle: 0.25 },
+  'lie-down': { windUp: 0.25, act: 0.35, follow: 0.15, settle: 0.25 },
+  // A stagger, the drop, a bounce on the ground, and still.
+  fall: { windUp: 0.25, act: 0.25, follow: 0.2, settle: 0.3 },
+  spin: { windUp: 0.2, act: 0.3, follow: 0.25, settle: 0.25 },
+  bow: { windUp: 0.2, act: 0.3, follow: 0.25, settle: 0.25 },
+  'roll-over': { windUp: 0.2, act: 0.3, follow: 0.25, settle: 0.25 },
+  // The arm (the leg) back, swung through to the release, on through, and down.
+  throw: { windUp: 0.3, act: 0.15, follow: 0.3, settle: 0.25 },
+  kick: { windUp: 0.3, act: 0.15, follow: 0.3, settle: 0.25 },
+  // Hands out to it, closing on it as it comes, drawn in, and held.
+  catch: { windUp: 0.3, act: 0.3, follow: 0.2, settle: 0.2 },
+};
+
 /** Every doing, in the list's order. */
-export const DOINGS: readonly Doing[] = DOING_IDS.map((id) => ({
-  id,
-  ...doings[id],
-}));
+export const DOINGS: readonly Doing[] = DOING_IDS.map((id) => {
+  const phases = PHASES[id];
+  // An action move's moment is where its clip's act ends: its release, its
+  // push off the ground, its blow.
+  const clip = (ACTION_MOVES as readonly string[]).includes(id);
+  return {
+    id,
+    ...doings[id],
+    ...(clip && phases ? { keyAt: phases.windUp + phases.act } : {}),
+    idealMs: Math.max(doings[id].ms, IDEAL_MS[id] ?? doings[id].ms),
+    ...(phases ? { phases } : {}),
+  };
+});
+
+/**
+ * The small gestures: a nod, a look, a point, a wave, a laugh. A quiet of
+ * nothing more is quickened to fit as it always was; one with any other
+ * move of the body, or a thing handled, is held longer for it instead.
+ */
+const GESTURES: ReadonlySet<DoingId> = new Set<DoingId>([
+  'wave',
+  'nod',
+  'shake',
+  'laugh',
+  'clap',
+  'sob',
+  'shrug',
+  'lean-in',
+  'look',
+  'point',
+  'reach',
+  'wag',
+  'lick',
+  'sniff',
+  'bark-bounce',
+  'wriggle',
+]);
+
+/** Whether a doing is an action a quiet waits for (a move of the whole body, a thing handled), not a small gesture, nor going somewhere. */
+export const isAction = (doing: Doing): boolean =>
+  doing.kind === 'handle' || (doing.kind === 'body' && !GESTURES.has(doing.id));
+
+/** How long each of a move's phases runs, in ms, when it is given `ms`; null for a doing with none. */
+export function phasesMs(doing: Doing, ms: number): DoingPhases | null {
+  const p = doing.phases;
+  if (!p) return null;
+  return {
+    windUp: Math.round(ms * p.windUp),
+    act: Math.round(ms * p.act),
+    follow: Math.round(ms * p.follow),
+    settle: Math.round(ms * p.settle),
+  };
+}
 
 const BY_ID = new Map<string, Doing>(DOINGS.map((d) => [d.id, d]));
 
@@ -1256,8 +1706,10 @@ export const FEATURE_WORDS: Record<FeatureKind, RegExp> = {
   fence: /\bfences?\b/iu,
   stall: /\b(?:stalls?|kiosks?)\b/iu,
   crate: /\b(?:crates?|boxes|barrels?)\b/iu,
+  // A road vehicle: the stage draws a danfo. A boat, a cart or a train is
+  // drawn by the artist, as one of the show's own.
   vehicle:
-    /\b(?:danfo|buses|bus|minibus|cars?|vans?|trucks?|lorr(?:y|ies)|taxis?|carts?|boats?|canoes?|train)\b/iu,
+    /\b(?:danfo|buses|bus|minibus|cars?|vans?|trucks?|lorr(?:y|ies)|taxis?)\b/iu,
   window: /\bwindows?\b/iu,
   steps: /\b(?:steps|stairs|staircase|ladder)\b/iu,
   swing: /\b(?:swings?|tyre swing)\b/iu,

@@ -7,8 +7,15 @@ import {
   SLOWEST,
   SPEED_RANGE,
   TURN_S,
+  CARTESIA_LIBRARY,
+  CARTESIA_NARRATOR,
+  CHARACTER_VOICES,
+  ELEVENLABS_NARRATOR,
+  ELEVENLABS_PREMADE,
   characterVoice,
   deliveryPieces,
+  isCartesiaVoiceId,
+  isElevenLabsVoiceId,
   sentenceStarts,
   voiceSlug,
   voiceStyle,
@@ -139,6 +146,64 @@ describe("a story's characters, in their own voices", () => {
     // No kind of voice, or a voice with no palette: the narrator says it.
     expect(characterVoice(bible, at('crowd'), 'kokoro', 'am_puck')).toBeNull();
     expect(characterVoice(bible, at('mira'), null, 'alloy')).toBeNull();
+  });
+
+  it('casts ElevenLabs voices by kind, the same every episode, and the admin’s voice first of its kind', () => {
+    const { Jessica, Laura, Bill, Callum, Sarah } = ELEVENLABS_PREMADE;
+    const cast = (id: string, chosen = {}) =>
+      characterVoice(bible, at(id), 'elevenlabs', ELEVENLABS_NARRATOR, chosen)
+        ?.voice;
+    expect([cast('mira'), cast('lily'), cast('tobi'), cast('ember')]).toEqual([
+      Jessica,
+      Laura,
+      Bill,
+      Callum,
+    ]);
+    // Asked again, the same.
+    expect(cast('lily')).toBe(Laura);
+    // The admin's girl is the first girl's; the palette's follow.
+    expect([
+      cast('mira', { girl: Sarah }),
+      cast('lily', { girl: Sarah }),
+    ]).toEqual([Sarah, Jessica]);
+    // Never the narrator's own voice.
+    expect(
+      characterVoice(bible, at('tobi'), 'elevenlabs', Bill)?.voice,
+    ).not.toBe(Bill);
+    // Every kind has three voices to choose from, none the narrator's.
+    for (const voices of Object.values(CHARACTER_VOICES.elevenlabs)) {
+      expect(new Set(voices).size).toBeGreaterThanOrEqual(3);
+      expect(voices).not.toContain(ELEVENLABS_NARRATOR);
+    }
+  });
+
+  it('casts Cartesia voices by kind from its library, the same every episode, and the admin’s voice first of its kind', () => {
+    const { Daisy, Dottie, Griffin, Elias, Lulu } = CARTESIA_LIBRARY;
+    const cast = (id: string, chosen = {}) =>
+      characterVoice(bible, at(id), 'cartesia', CARTESIA_NARRATOR, chosen)
+        ?.voice;
+    expect([cast('mira'), cast('lily'), cast('tobi'), cast('ember')]).toEqual([
+      Daisy,
+      Dottie,
+      Griffin,
+      Elias,
+    ]);
+    expect(cast('lily')).toBe(Dottie);
+    expect([
+      cast('mira', { girl: Lulu }),
+      cast('lily', { girl: Lulu }),
+    ]).toEqual([Lulu, Daisy]);
+    expect(
+      characterVoice(bible, at('tobi'), 'cartesia', Griffin)?.voice,
+    ).not.toBe(Griffin);
+    for (const voices of Object.values(CHARACTER_VOICES.cartesia)) {
+      expect(new Set(voices).size).toBeGreaterThanOrEqual(3);
+      expect(voices).not.toContain(CARTESIA_NARRATOR);
+      expect(voices.every(isCartesiaVoiceId)).toBe(true);
+    }
+    // Each engine's ids are its own.
+    expect(isCartesiaVoiceId(ELEVENLABS_NARRATOR)).toBe(false);
+    expect(isElevenLabsVoiceId(CARTESIA_NARRATOR)).toBe(false);
   });
 
   it("parts a sentence at its quotation: the quoted words theirs, the rest the narrator's", () => {
@@ -278,6 +343,7 @@ describe('a screenplay, as the voice says it', () => {
       { delivery: 'explain', pause: 'short', kind: 'line', pace: 'quick' },
       { delivery: 'explain', pause: 'short', kind: 'line', pace: 'whisper' },
       { delivery: 'explain', pause: 'short', kind: 'narration', holdS: 8 },
+      { delivery: 'explain', pause: 'short', kind: 'narration', holdS: 12 },
     ]);
     expect(pieces).toEqual([
       { speed: 0.95, pauseAfter: 0.55 },
@@ -286,8 +352,10 @@ describe('a screenplay, as the voice says it', () => {
       { speed: 1.07, pauseAfter: 0.3 },
       // Before the narrator comes in, a breath more.
       { speed: 0.9, pauseAfter: 0.55 },
-      // No quiet longer than the voice holds: six seconds under the music.
-      { speed: 0.95, pauseAfter: 6 },
+      // An action's quiet held as long as it asks, under the music.
+      { speed: 0.95, pauseAfter: 8 },
+      // No quiet longer than the voice holds: ten seconds.
+      { speed: 0.95, pauseAfter: 10 },
     ]);
   });
 });

@@ -32,7 +32,7 @@ import {
   type Matrix,
 } from './scene-joints';
 import type { OwnPropDrawing, PropSize } from './scene-props';
-import type { SetLayout } from './scene-set-layout';
+import type { SetLayering, SetLayout } from './scene-set-layout';
 import { renderSvg, type InkBox, type InkMap } from './scene-raster';
 import type { SetPiece } from './scene-set-pieces';
 import type { SheetFace } from './scene-sheet-face';
@@ -134,8 +134,23 @@ export async function figureDrawing(
     outfits: [spec, ...(how.dress ?? []).map((one) => one.spec)].map(
       outfitWords,
     ),
+    ...rigged(drawn),
   };
 }
+
+/** What a kit drawing made with rig 2 says of itself: its rig, what swings, its stride. */
+const rigged = (drawn: {
+  rig?: 2;
+  dangles?: GatedDrawing['dangles'];
+  stride?: GatedDrawing['stride'];
+}): Pick<GatedDrawing, 'rigVersion' | 'dangles' | 'stride'> =>
+  drawn.rig === 2
+    ? {
+        rigVersion: 2,
+        ...(drawn.dangles?.length ? { dangles: drawn.dangles } : {}),
+        ...(drawn.stride ? { stride: drawn.stride } : {}),
+      }
+    : {};
 
 /**
  * Someone the text's own tradition never draws, as the stage shows them:
@@ -212,6 +227,7 @@ export async function animalDrawing(
     faces: 1,
     lips: true,
     ...(drawn.limbs ? { limbs: true as const } : {}),
+    ...rigged(drawn),
     anchors: {
       head: drawn.anchors.head,
       body: drawn.anchors.body,
@@ -259,6 +275,7 @@ export async function creatureDrawing(
     // Facing the viewer: no `faces`, so the stage never mirrors it.
     lips: true,
     ...(drawn.limbs ? { limbs: true as const } : { onePiece: true as const }),
+    ...rigged(drawn),
     anchors: {
       head: drawn.anchors.head,
       body: drawn.anchors.body,
@@ -302,8 +319,10 @@ export async function animalSheet(
 export async function figureSheet(
   spec: FigureSpec,
   seed: string,
+  /** The rig it is made with: a book's kept sheet, rig 1 unless asked. */
+  how: Pick<FigureHow, 'rig'> = {},
 ): Promise<CharacterSheet> {
-  const { anchors, ...drawing } = await figureDrawing(spec, seed);
+  const { anchors, ...drawing } = await figureDrawing(spec, seed, how);
   return { version: SHEET_VERSION, drawing, anchors, figure: spec };
 }
 
@@ -524,6 +543,8 @@ export interface SetSheet {
   ground?: SetGround;
   /** What it was built from, when code drew it from the painter's layout (scene-set-layout); absent on one painted whole. */
   layout?: SetLayout;
+  /** The same set as layers at their depths, for the player to move apart (studio-scenery-plan §3.2); absent on a set built before, split by the player. */
+  layered?: SetLayering;
 }
 
 /** A book's places as painted, by their id in the story. */

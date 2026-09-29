@@ -111,7 +111,8 @@ describe('a layout as the painter writes it, read', () => {
       vessel: null,
     });
     expect(layout.items).toEqual([
-      { kind: 'palm', x: 0.12, row: 'front', scale: 1.5, colour: null },
+      // "foreground" is a row of its own now: nearer the camera than the people.
+      { kind: 'palm', x: 0.12, row: 'foreground', scale: 1.5, colour: null },
       {
         kind: 'bookshelf',
         x: 0.5,
@@ -125,7 +126,7 @@ describe('a layout as the painter writes it, read', () => {
       'a totem pole',
       'a fountain',
     ]);
-    expect(describeLayout(layout)).toContain('palm (front, 12%)');
+    expect(describeLayout(layout)).toContain('palm (foreground, 12%)');
   });
 
   it('falls back to the place’s plain one for what it cannot read', () => {
@@ -311,6 +312,33 @@ describe('a place built from its layout', () => {
     expect(set.svg).toContain(CLOTH.blue);
   });
 
+  it('draws a piece the stage draws itself once: the painter’s own of it, where it stands, is left out', () => {
+    const yard = place({
+      look: 'a sandy compound yard',
+      features: [{ id: 'gate', name: 'gate', kind: 'gate', spot: 'left' }],
+    });
+    const at = (x: number) =>
+      layoutOf(
+        {
+          items: [
+            { kind: 'house', x: 0.7, row: 'back', scale: 1, colour: null },
+            { kind: 'gate', x, row: 'back', scale: 1, colour: null },
+          ],
+        },
+        yard,
+      );
+    const none = layoutOf(
+      {
+        items: [{ kind: 'house', x: 0.7, row: 'back', scale: 1, colour: null }],
+      },
+      yard,
+    );
+    // Painted again where the stage's gate stands: not drawn at all.
+    expect(buildSet(at(0.15), yard).svg).toBe(buildSet(none, yard).svg);
+    // A gate of its own far across the yard is the painter's to draw.
+    expect(buildSet(at(0.9), yard).svg).not.toBe(buildSet(none, yard).svg);
+  });
+
   it('stands a boat’s side before the people’s legs where they are in it', async () => {
     const canoe = place({
       kind: 'vessel',
@@ -326,6 +354,62 @@ describe('a place built from its layout', () => {
     expect(failing(checks)).toEqual([]);
     expect(set.parts.front).toBe('front');
     expect(drawing.parts.front).toBeTruthy();
+  });
+
+  it('tags what answers the world for the stage: plants, things that hang, curtains, flags, places birds sit, and the ground', () => {
+    const park = buildSet(
+      layoutOf(
+        {
+          ground: 'grass',
+          items: [
+            { kind: 'bush', x: 0.2, row: 'middle', scale: 1, colour: null },
+            { kind: 'house', x: 0.8, row: 'back', scale: 1, colour: null },
+            { kind: 'lamp', x: 0.7, row: 'middle', scale: 1, colour: null },
+            { kind: 'palm', x: 0.06, row: 'front', scale: 1, colour: null },
+          ],
+        },
+        place(),
+      ),
+      place(),
+    ).svg;
+    expect(park).toMatch(
+      /^<svg [^>]*data-place="outdoor" data-ground="grass" data-floor="576"/,
+    );
+    expect(park).toMatch(
+      /data-react="sway" data-kind="bush" data-x="0\.2" data-row="(?:middle|back)" data-len="92" data-roost="0 -92"/,
+    );
+    expect(park).toMatch(
+      /data-kind="house" data-x="[\d.]+" data-row="back" data-roost="/,
+    );
+    expect(park).toMatch(/data-react="hang" data-kind="lamp"/);
+    // A palm's fronds turn at the top of its trunk; grass tufts at their roots.
+    expect(park).toMatch(
+      /data-kind="palm"[^>]*>[\s\S]*?<g data-seg="0" data-pivot="28 -420">/,
+    );
+    expect(park).toMatch(
+      /<g data-react="sway" data-kind="grass" data-x="[\d.]+" data-row="\w+" data-len="[\d.]+" data-pivot="[\d.]+ [\d.]+">/,
+    );
+    const room = place({ kind: 'indoor', name: 'the room' });
+    const indoors = buildSet(
+      layoutOf(
+        {
+          ground: 'wood',
+          items: [
+            { kind: 'curtains', x: 0.5, row: 'back', scale: 1, colour: null },
+            { kind: 'bunting', x: 0.3, row: 'back', scale: 1, colour: null },
+            { kind: 'bookshelf', x: 0.9, row: 'back', scale: 1, colour: null },
+          ],
+        },
+        room,
+      ),
+      room,
+    ).svg;
+    expect(indoors).toMatch(
+      /data-react="curtain" data-kind="curtains" data-x="0\.5\d*" data-row="wall"/,
+    );
+    expect((indoors.match(/data-seg="\d+"/g) ?? []).length).toBe(2 + 9);
+    // What neither moves nor is sat on is as it was.
+    expect(indoors).not.toMatch(/data-kind="bookshelf"/);
   });
 
   it('builds the same place the same way every time', () => {

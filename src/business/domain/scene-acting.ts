@@ -25,6 +25,7 @@ import {
   HELD_MOVES,
   NEEDS_FEET,
   aimedFeature,
+  moveIdealMs,
   type ActedMove,
 } from './scene-doings';
 
@@ -178,11 +179,23 @@ const ACTED_MS: Record<ActedMove, number> = {
   bark: 1000,
   roll: 1400,
   'shake-off': 1200,
+  // The action moves: all their clip wants (scene-doings' MOVE_PHASES).
+  leap: moveIdealMs('leap'),
+  land: moveIdealMs('land'),
+  'run-fast': moveIdealMs('run-fast'),
+  dodge: moveIdealMs('dodge'),
+  punch: moveIdealMs('punch'),
+  'fall-hard': moveIdealMs('fall-hard'),
+  'get-up': moveIdealMs('get-up'),
+  hero: moveIdealMs('hero'),
 };
 
 /** The body's own moves done toward someone or something, whom the eyes go to while they do it. */
 const EYES_ON: readonly ActedMove[] = [
   'jump',
+  'leap',
+  'dodge',
+  'punch',
   'crouch',
   'bow',
   'kick',

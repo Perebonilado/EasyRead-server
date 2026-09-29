@@ -82,13 +82,15 @@ export function voiced(
   artists: readonly string[] = [],
   /** A place's painted set, by its thing's id; absent, none is painted. */
   sets: Readonly<Record<string, GatedDrawing>> = {},
+  /** The quiet the voice left after a beat, in ms, by its index, where it left other than asked: a voice that holds a pause only so long. */
+  gaps: Readonly<Record<number, number>> = {},
 ): { scene: SceneDto; beats: TimedBeat[] } {
   let t = (script.lead ?? 0) * 1000 + 300;
-  const beats: TimedBeat[] = script.beats.map((beat) => {
+  const beats: TimedBeat[] = script.beats.map((beat, k) => {
     const words = [...beat.say.matchAll(/\S+/g)];
     const start = t;
     const end = start + words.length * WORD_MS;
-    t = end + Math.max(300, (beat.holdS ?? 0) * 1000);
+    t = end + (gaps[k] ?? Math.max(300, (beat.holdS ?? 0) * 1000));
     return {
       text: beat.say,
       startMs: start,

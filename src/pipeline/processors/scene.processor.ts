@@ -4,6 +4,7 @@ import type { SceneDto, SceneTiming } from '../../contracts';
 import { wordTimesFromAligned } from '../../business/domain/board';
 import {
   catalogueSpeechCost,
+  characterSpeechCost,
   geminiSpeechCost,
 } from '../../business/domain/cost';
 import { NotFoundError } from '../../business/domain/errors/errors';
@@ -83,6 +84,7 @@ import {
   type PlaceThing,
   type DrawingThing,
   type LineFrom,
+  type LinePace,
   type SceneScript,
   type SceneScriptDraft,
 } from '../../business/domain/scene-script';
@@ -127,9 +129,11 @@ import {
   type SetSheet,
   type Sets,
 } from '../../business/domain/scene-sheet';
+import { DANGLE_RIG } from '../../business/domain/scene-dangles';
 import { DRAWN } from '../../business/domain/scene-own';
 import type { OwnPropDrawing } from '../../business/domain/scene-props';
 import type { SetPiece } from '../../business/domain/scene-set-pieces';
+import { buildSet } from '../../business/domain/scene-set-layout';
 import { RIG_VERSION, rigSheet } from '../../business/domain/scene-sheet-rig';
 import { withMouths } from '../../business/domain/studio/studio-audit';
 import { withFace } from '../../business/domain/scene-sheet-face';
@@ -253,6 +257,12 @@ const QUIET_END_SLACK_MS = 100;
 const STORY_READERS = 4;
 /** The most stretches (about 20 pages each) a story read the old way is read again in, unasked. */
 const REREAD_MOST_STRETCHES = 6;
+/** A line's pace that is a tone of voice, not a speed: for a voice that takes tags (ElevenLabs) or a volume (Cartesia). */
+const TONE_OF: Partial<Record<LinePace, 'whisper' | 'shout'>> = {
+  whisper: 'whisper',
+  shout: 'shout',
+};
+
 /** How a line from somewhere else is said, for a voice that takes direction. */
 const FROM_STYLE: Partial<Record<LineFrom, string>> = {
   thought: 'thinking it quietly to themselves, not aloud',
@@ -341,6 +351,24 @@ type WriteAsk = Omit<
   Parameters<LlmGatewayPort['sceneScript']>[0],
   'previous' | 'problems'
 >;
+
+/**
+ * A set built by code before it was kept as layers, as layers too: built
+ * again from its own layout, with nothing asked of a model, when nothing
+ * in it was drawn apart by the artist (whose drawings are not kept with
+ * it). Its flat picture stays as it was kept.
+ */
+function withLayers(
+  set: SetSheet | undefined,
+  place: StoryPlace,
+): SetSheet | undefined {
+  if (!set || set.layered || !set.layout || set.layout.own.length) return set;
+  try {
+    return { ...set, layered: buildSet(set.layout, place).layered };
+  } catch {
+    return set;
+  }
+}
 
 @Injectable()
 export class SceneProcessor {
@@ -808,6 +836,7 @@ export class SceneProcessor {
       key: story?.setsKey ?? null,
     });
     this.logAudit(who, audit);
+    for (const note of composed.staging) this.logger.log(`${who}: ${note}`);
     const { sceneKey, thumbKey } = await this.store(base, scene, who);
     return {
       fit: 'good',
@@ -917,6 +946,7 @@ export class SceneProcessor {
       key: story.setsKey,
     });
     this.logAudit(who, composed.audit);
+    for (const note of composed.staging) this.logger.log(`${who}: ${note}`);
     // Every line said on the stage moves its speaker's mouth.
     const { scene, mended: mouths } = withMouths(composed.scene);
     for (const note of mouths) this.logger.log(`${who}: ${note}`);
@@ -1452,6 +1482,8 @@ export class SceneProcessor {
           signs: signsShown(script, thing.id),
           faces: facesShown(script, thing.id),
           old: oldWorld(story?.bible.world?.era),
+          // Drawn new for the page, with what swings: rig 2.
+          rig: DANGLE_RIG,
         }).catch((error: unknown) => {
           this.logger.warn(
             `${who}: "${thing.id}" (a person) is set as a card: ${(error as Error).message}`,
@@ -1511,11 +1543,22 @@ export class SceneProcessor {
             faces,
             old: oldWorld(story?.bible.world?.era),
             ...(thing.dress?.length ? { dress: thing.dress } : {}),
+            // Drawn new for the page, with what swings: rig 2. A sheet
+            // the book keeps is as it was drawn.
+            rig: DANGLE_RIG,
           })
         : kitAnimal
-          ? await animalDrawing(kitAnimal, thing.ref, { signs, faces })
+          ? await animalDrawing(kitAnimal, thing.ref, {
+              signs,
+              faces,
+              rig: DANGLE_RIG,
+            })
           : kitCreature
-            ? await creatureDrawing(kitCreature, thing.ref, { signs, faces })
+            ? await creatureDrawing(kitCreature, thing.ref, {
+                signs,
+                faces,
+                rig: DANGLE_RIG,
+              })
             : null;
       const { anchors: pageAnchors, ...posed } = onPage ?? { anchors: null };
       let drawing = onPage ? (posed as GatedDrawing) : sheet?.drawing;
@@ -1609,7 +1652,11 @@ export class SceneProcessor {
       out.set(
         thing.id,
         set
-          ? { ...set.drawing, ...(set.ground ? { ground: set.ground } : {}) }
+          ? {
+              ...set.drawing,
+              ...(set.ground ? { ground: set.ground } : {}),
+              ...(set.layered ? { layered: set.layered } : {}),
+            }
           : null,
       );
     });
@@ -1738,14 +1785,22 @@ export class SceneProcessor {
     const pausesS = delivered.map((piece) => piece.pauseAfter);
     const spoken = sceneSpoken(forms);
     // Whichever engine the admin has Visualize speak in now.
-    const { speech, voice } = await this.voices.current();
+    const {
+      speech,
+      voice,
+      engine: speaking,
+      cast,
+    } = await this.voices.current();
     const { model } = speech.label();
     // A story's characters say their own lines, in voices of their own.
-    const engine = model.startsWith('gemini')
-      ? 'gemini'
-      : model.startsWith('kokoro')
-        ? 'kokoro'
-        : null;
+    const engine =
+      speaking === 'elevenlabs' || speaking === 'cartesia'
+        ? speaking
+        : model.startsWith('gemini')
+          ? 'gemini'
+          : model.startsWith('kokoro')
+            ? 'kokoro'
+            : null;
     // Each line a character says, in their own voice: its place in the
     // spoken text is its quote's, the i-th quote of the sentence there.
     /** The voice a character in the cast speaks in: none for someone the story does not name. */
@@ -1756,7 +1811,7 @@ export class SceneProcessor {
           ? story.bible.characters.find((c) => c.id === thing.ref)
           : undefined;
       return story && character
-        ? characterVoice(story.bible, character, engine, voice)
+        ? characterVoice(story.bible, character, engine, voice, cast)
         : null;
     };
     const lines = script.beats.map((beat, k) => {
@@ -1796,18 +1851,29 @@ export class SceneProcessor {
       ),
       lines,
     });
+    /** A screenplay line whispered or shouted in its speaker's voice, for a voice that takes it as a tag. */
+    const toneOf = (piece: (typeof pieces)[number]) => {
+      const beat = script.beats[piece.beat];
+      return piece.voice && beat?.kind === 'line'
+        ? TONE_OF[beat.pace ?? 'calm']
+        : undefined;
+    };
     const result = await speech.synthesize({
       text: spoken.text,
       voice,
       speed: 1,
       timestamps: true,
-      pieces: pieces.map((piece) => ({
-        text: piece.text,
-        speed: piece.speed,
-        pauseAfter: piece.pauseAfter,
-        ...(piece.style ? { style: piece.style } : {}),
-        ...(piece.voice ? { voice: piece.voice } : {}),
-      })),
+      pieces: pieces.map((piece) => {
+        const tone = toneOf(piece);
+        return {
+          text: piece.text,
+          speed: piece.speed,
+          pauseAfter: piece.pauseAfter,
+          ...(piece.style ? { style: piece.style } : {}),
+          ...(piece.voice ? { voice: piece.voice } : {}),
+          ...(tone ? { tone } : {}),
+        };
+      }),
       ...(leadS > 0 ? { lead: leadS } : {}),
     });
     const voices = new Set(pieces.map((p) => p.voice).filter(Boolean));
@@ -1858,7 +1924,27 @@ export class SceneProcessor {
                   this.config.get<string>('MODAL_USD_PER_AUDIO_HOUR', '0'),
                 ),
               )
-            : null,
+            : result.model.startsWith('elevenlabs:')
+              ? characterSpeechCost(
+                  result.characters ?? spoken.text.length,
+                  Number(
+                    this.config.get<string>(
+                      'ELEVENLABS_USD_PER_1K_CHARS',
+                      '0.1',
+                    ),
+                  ),
+                )
+              : result.model.startsWith('cartesia:')
+                ? characterSpeechCost(
+                    result.characters ?? spoken.text.length,
+                    Number(
+                      this.config.get<string>(
+                        'CARTESIA_USD_PER_1K_CHARS',
+                        '0.05',
+                      ),
+                    ),
+                  )
+                : null,
     });
 
     let words: SpokenWords | null = null;
@@ -2485,7 +2571,7 @@ export class SceneProcessor {
           ),
         );
       try {
-        const kept = (await this.setsAt(key))[place.id];
+        const kept = withLayers((await this.setsAt(key))[place.id], place);
         if (kept?.ground) return kept;
         if (kept) {
           // Kept before its ground was measured: measured now, once, and

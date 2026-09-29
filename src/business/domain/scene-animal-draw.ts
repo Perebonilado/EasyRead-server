@@ -43,6 +43,17 @@ import {
   type FigureSign,
 } from './scene-figure';
 import { FIGURE_INK, flat, inked, line } from './scene-ink';
+import {
+  ANIMAL_SWING,
+  DANGLE_FEEL,
+  cutChain,
+  dangleCss,
+  dangleOf,
+  strideLength,
+  swapRigGroups,
+  type Dangle,
+  type RigVersion,
+} from './scene-dangles';
 import type { SheetFace } from './scene-sheet-face';
 import { animalTall, type AnimalSpec } from './scene-animal';
 import {
@@ -54,6 +65,7 @@ import {
   type AnimalPose,
   type Beak,
   type Built,
+  type Gait,
 } from './scene-animal-body';
 import {
   add,
@@ -99,6 +111,12 @@ export interface AnimalHow {
    * every pose, the stage showing each as the body sinks.
    */
   pose?: AnimalPose;
+  /**
+   * The rig it is made with (studio-world-plan §4.6): 1, as ever, byte for
+   * byte; 2, its tail, ears and mane cut into chains the player turns by
+   * `--dg-<id>-<k>`, and its dangles and stride said.
+   */
+  rig?: RigVersion;
 }
 
 /** An animal as the kit draws it, in its own units: the kit's. */
@@ -129,6 +147,91 @@ export interface AnimalDrawing {
   };
   /** Where its eyes are, each a box, as the stage shows them: for the face's check. */
   eyes: { x: number; y: number; width: number; height: number }[];
+  /** Made with rig 2: its tail, ears and mane drawn as chains. Absent, rig 1. */
+  rig?: 2;
+  /** On rig 2, each part that swings, its root in the frame's units as it stands. */
+  dangles?: Dangle[];
+  /** On rig 2: how far one full stride carries it, in the frame's units, and how it goes. */
+  stride?: { length: number; gait: Gait };
+}
+
+/** How far a stride goes for its legs, by how it goes: a waddle short, a hop long. */
+const GAIT_STRIDE: Record<Gait, number> = {
+  walk: 1,
+  waddle: 0.6,
+  hop: 1.5,
+  swim: 1.2,
+  slither: 0.8,
+  float: 1,
+};
+
+/**
+ * A body with its tails and ears cut into chains (rig 2), and a mane its
+ * plan cut already: each tail and each ear, found by its rig group, cut at
+ * joints code sets along it (a stub one segment, a tail three or four, a
+ * long ear two, a short one one), each pose's tail with as many segments
+ * as standing's. Its dangles are as it stands.
+ */
+function segmented(
+  built: Built,
+  head: string,
+  id: string,
+): { built: Built; head: string; dangles: Dangle[] } {
+  const dangles: Dangle[] = [...(built.dangles ?? [])];
+  const counts = new Map<string, number>();
+  const order = [
+    'stand',
+    ...ANIMAL_POSES.filter((pose) => pose !== 'stand'),
+  ] as AnimalPose[];
+  const poses: Built['poses'] = {};
+  // Ears on the head; on a creature with no head apart, on its body.
+  const ear = (name: string, inner: string, pivot: P, segments?: number) => {
+    const made = cutChain({
+      id: name,
+      markup: inner,
+      root: pivot,
+      segments,
+      most: 2,
+      stub: 1.4,
+      clip: `${id}-dg-${name}`,
+      limit: DANGLE_FEEL.longEar.limit,
+    });
+    if (!counts.has(name)) {
+      counts.set(name, made.segments);
+      dangles.push(dangleOf(name, made, made.segments > 1 ? 'longEar' : 'ear'));
+    }
+    return made.markup;
+  };
+  let onHead = 0;
+  const ears = swapRigGroups(head, 'rig-ear', (inner, pivot, _, n) => {
+    onHead = n + 1;
+    return ear(`ear-${n}`, inner, pivot);
+  });
+  for (const pose of order) {
+    const markup = built.poses[pose];
+    if (markup === undefined) continue;
+    const tailed = swapRigGroups(markup, 'rig-tail', (inner, pivot, _, n) => {
+      const name = n ? `tail-${n + 1}` : 'tail';
+      const made = cutChain({
+        id: name,
+        markup: inner,
+        root: pivot,
+        segments: counts.get(name),
+        clip: `${id}-dg-${name}`,
+        limit: DANGLE_FEEL.tail.limit,
+      });
+      if (!counts.has(name)) {
+        counts.set(name, made.segments);
+        dangles.push(dangleOf(name, made, 'tail'));
+      }
+      return made.markup;
+    });
+    poses[pose] = swapRigGroups(tailed, 'rig-ear', (inner, pivot, _, n) => {
+      const name = `ear-${onHead + n}`;
+      return ear(name, inner, pivot, counts.get(name));
+    });
+  }
+  return { built: { ...built, poses }, head: ears, dangles };
 }
 
 /** The kit's eyes on an animal: at the kit's size in the face's own units, set on the head by `face`. */
@@ -355,6 +458,8 @@ export function drawAnimal(
   const key = seed || JSON.stringify(spec);
   const id = `a${Math.floor(beatOf(`${key}:id`) * 1e6).toString(36)}`;
   const look = lookOf(spec, id);
+  // On rig 2, its plan cuts its mane into a chain as it draws it.
+  if (how.rig === 2) look.rig = 2;
   return drawBuilt(buildAnimal(spec, look), key, id, how);
 }
 
@@ -554,7 +659,7 @@ export function drawBuilt(
   });
 
   // ── The head, whole: its shape, its eyes, every face and mouth it has.
-  const headGroup = [
+  let headGroup = [
     built.head,
     whites,
     faces,
@@ -570,6 +675,11 @@ export function drawBuilt(
   // Settled on its ground and in its frame, by all of its head: a mouth
   // opened wide keeps out of the ground too.
   built = settled(built, headGroup);
+  // On rig 2, its tail, ears and mane cut into chains: after it is
+  // settled, so its frame is as it was.
+  let dangles: Dangle[] = [];
+  if (how.rig === 2)
+    ({ built, head: headGroup, dangles } = segmented(built, headGroup, id));
 
   // ── The poses: each its own group, all but standing hidden in a still.
   const neck = built.neck;
@@ -611,7 +721,7 @@ export function drawBuilt(
   const shadowW = Math.max(10, (built.bounds.right - built.bounds.left) * 0.38);
   const svg = [
     `<svg xmlns="http://www.w3.org/2000/svg" viewBox="${viewBox.join(' ')}">`,
-    `<style>${animalCss(built, poses, how.pose ?? null, signs, beat, blinkAt, id)}${shutStyle(asked)}</style>`,
+    `<style>${animalCss(built, poses, how.pose ?? null, signs, beat, blinkAt, id, how.rig === 2)}${shutStyle(asked)}${how.rig === 2 ? dangleCss(dangles) : ''}</style>`,
     `<defs>${eyeClipPath(rig, clip)}${count === 3 ? eyeClipPath(oneRig, `${clip}3`) : ''}</defs>`,
     `<ellipse cx="0" cy="-0.6" rx="${r1(shadowW)}" ry="${r1(Math.min(2, shadowW * 0.1))}" fill="#1d1a22" fill-opacity="0.16"/>`,
     `<g class="a-root" stroke="${FIGURE_INK}" stroke-width="${LINE}" stroke-linejoin="round" stroke-linecap="round">`,
@@ -671,6 +781,31 @@ export function drawBuilt(
       wings: built.wings,
     },
     eyes,
+    ...(how.rig === 2
+      ? {
+          rig: 2 as const,
+          ...(dangles.length ? { dangles } : {}),
+          stride: strideOf(built),
+        }
+      : {}),
+  };
+}
+
+/**
+ * How far one full stride carries it (studio-world-plan §4.2): as far as
+ * its legs, hip to foot, carry it swung as far as they step, each foot
+ * planted, by how it goes; one with no legs, by its length.
+ */
+function strideOf(built: Built): { length: number; gait: Gait } {
+  const legs = built.legs.map((one) =>
+    Math.hypot(one.foot[0] - one.hip[0], one.foot[1] - one.hip[1]),
+  );
+  const leg = legs.length
+    ? legs.reduce((a, b) => a + b, 0) / legs.length
+    : (built.bounds.right - built.bounds.left) * 0.45;
+  return {
+    length: r1(strideLength(leg, ANIMAL_SWING) * GAIT_STRIDE[built.gait]),
+    gait: built.gait,
   };
 }
 
@@ -701,6 +836,25 @@ function linear(terms: [string, number][], unit: string): string {
 }
 
 /**
+ * How a body on rig 2 goes, as the player sets it: its legs about their
+ * hips by --step-a and --step-b, degrees (each pair of legs that step
+ * together, a quadruped's diagonals); the whole of it up by --gait-y
+ * units and rocked by --gait-r degrees about its feet (a bob, a waddle,
+ * a hop); a slither skewed by --gait-k degrees. At 0 every one, as drawn.
+ */
+function gaitCss(built: Built): string {
+  const out: string[] = [];
+  if (built.legs.length)
+    out.push(
+      '.rig-leg{transform-box:view-box}.rig-leg-a{rotate:calc(var(--step-a,0)*1deg)}.rig-leg-b{rotate:calc(var(--step-b,0)*1deg)}',
+    );
+  out.push(
+    `.a-gait{transform-box:view-box;transform-origin:0 0;translate:0 calc(var(--gait-y,0)*-1px);rotate:calc(var(--gait-r,0)*1deg)${built.gait === 'slither' ? ';transform:skewX(calc(var(--gait-k,0)*1deg))' : ''}}`,
+  );
+  return out.join('');
+}
+
+/**
  * The animal's own motion: a breath, a blink on its own beat, a mouth that
  * talks and takes the voice's shapes, a tail that wags and shows how it
  * feels, twitching ears, a head that dips and nods, legs that step as it
@@ -715,6 +869,14 @@ function animalCss(
   beat: number,
   blinkAt: number,
   id: string,
+  /**
+   * Made with rig 2: it goes as the player walks it (studio-world-plan
+   * §4.2), its legs stepped by --step-a and --step-b (degrees about each
+   * hip) and its body by --gait-y (units up and down), --gait-r (degrees
+   * rocked) and --gait-k (degrees skewed, a slither), each set by how far
+   * it has gone, so no loop of its own steps it.
+   */
+  rig2 = false,
 ): string {
   const out: string[] = [];
   const rest = (cycle: number) => {
@@ -833,15 +995,28 @@ function animalCss(
         )}}`,
       );
   }
-  // Going somewhere: legs that step, a bob; a waddle, a hop, a swish, a sway.
-  const step =
-    built.gait === 'waddle' ? 14 : built.gait === 'hop' ? 0 : SWING.step;
+  // Going somewhere: legs that step, a bob; a waddle, a hop, a swish, a
+  // sway. On rig 2, the player's, by how far it has gone.
+  if (rig2) out.push(gaitCss(built));
+  const step = rig2
+    ? 0
+    : built.gait === 'waddle'
+      ? 14
+      : built.gait === 'hop'
+        ? 0
+        : SWING.step;
   if (step && built.legs.length)
     out.push(
       `.rig-leg{transform-box:view-box}.on-walking .rig-leg-a{animation:step ${SWING.stepS}s ease-in-out infinite}.on-walking .rig-leg-b{animation:step ${SWING.stepS}s ease-in-out ${-SWING.stepS / 2}s infinite}`,
       swing('step', -step, step),
     );
-  switch (built.gait) {
+  switch (rig2 ? null : built.gait) {
+    case null:
+      if (built.gait === 'float')
+        out.push(
+          `.a-gait{animation:float 2.6s ease-in-out -${r1(beat * 2.6)}s infinite}@keyframes float{0%,100%{transform:translateY(0)}50%{transform:translateY(-3px)}}`,
+        );
+      break;
     case 'waddle':
       out.push(
         '.on-walking .a-gait{transform-box:view-box;transform-origin:0 0;animation:a-waddle .46s ease-in-out infinite}',

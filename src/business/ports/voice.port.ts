@@ -30,6 +30,8 @@ export interface SpeechPort {
       style?: string;
       /** Another voice for this piece than the page's: a story's character. Ignored by a voice that has one only. */
       voice?: string;
+      /** How loud a line is said, for a voice that takes it as a tag (ElevenLabs) or a volume (Cartesia); the rest go by speed and style. */
+      tone?: 'whisper' | 'shout';
     }[];
     /** Seconds of silence before the first word; the times it reports count from the true start. */
     lead?: number;
@@ -56,6 +58,8 @@ export interface SpeechPort {
     words?: { text: string; startMs: number; endMs: number }[];
     /** Tokens in and out, for a voice billed by the token (Gemini); absent otherwise. */
     usage?: { tokensIn: number; tokensOut: number };
+    /** Characters billed, for a voice billed by the character (ElevenLabs, Cartesia); absent otherwise. */
+    characters?: number;
   }>;
   /** What goes into a file's name so audio from one voice never overwrites another's. */
   label(): { model: string; voice: string };
@@ -65,6 +69,27 @@ export interface SpeechPort {
    * voice that is always on need not answer at all.
    */
   ready?(): Promise<boolean>;
+  /**
+   * The voices there are to choose from, for a voice with a list of its
+   * own (ElevenLabs): the admin page sets the narrator's and each kind of
+   * character's from it.
+   */
+  catalogue?(): Promise<VoiceOption[]>;
+  /**
+   * A voice's sample, fetched by the server, for a voice whose samples ask
+   * for the key (Cartesia): the admin page plays it from here.
+   */
+  preview?(voiceId: string): Promise<{ audio: Buffer; mimeType: string }>;
+}
+
+/** A voice a service offers, as the admin page lists it. */
+export interface VoiceOption {
+  id: string;
+  name: string;
+  /** Its own words for itself, and its labels: gender, age, accent. */
+  description: string;
+  /** A sample of it, where the service has one to play. */
+  previewUrl: string | null;
 }
 
 /**

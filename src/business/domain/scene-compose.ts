@@ -50,7 +50,9 @@ import {
 } from './scene-labels';
 import {
   STAGINGS,
+  STATION_SHARES,
   extentOf,
+  floorAt,
   layoutStations,
   restingAt,
   seatedHeight,
@@ -87,6 +89,7 @@ import {
 import { wearableOf } from './scene-wear';
 import {
   ACTED_MOVES,
+  DOINGS,
   HELD_MOVES,
   THING_ACTIONS,
   actionDoing,
@@ -99,12 +102,16 @@ import { FIGURE_FRAME, figureFrame } from './scene-figure';
 import { DRAWN } from './scene-own';
 import {
   ACTED_PIECES,
+  PERCHED_KINDS,
   coveredPiece,
   drawPiece,
   featureGroup,
 } from './scene-set-pieces';
 import type { DocumentProfile } from './scene-profile';
 import {
+  WALK_MAX_MS,
+  WALK_MIN_MS,
+  WALK_STAGE_MS,
   againstScenery,
   hurried,
   settledOf,
@@ -115,6 +122,7 @@ import {
   type StageWalk,
 } from './scene-film';
 import type { GatedDrawing } from './scene-svg';
+import { keepFacesSeen } from './scene-faces-seen';
 import { anchorMs, quietGaps, spaced, type TimedBeat } from './scene-timing';
 import { numberWords } from './spoken';
 
@@ -221,10 +229,22 @@ export function spokenIn(sentence: string): string | null {
 /** Two things one person does with things are at least this far apart: a take, then a break. */
 const BUSINESS_APART_MS = 650;
 
-/** How long each handling of a thing takes on the stage, and how far into it the thing changes hands: as the list of doings has it. */
+/** How long each handling of a thing takes on the stage, given its time, and how far into it the thing changes hands: as the list of doings has it. */
 const HANDLING_MS = Object.fromEntries(
-  THING_ACTIONS.map((id) => [id, doingOf(actionDoing(id))!.ms]),
+  THING_ACTIONS.map((id) => [id, doingOf(actionDoing(id))!.idealMs]),
 ) as Record<ThingAction, number>;
+/** And the least each may be quickened to. */
+const HANDLING_LEAST_MS = Object.fromEntries(
+  THING_ACTIONS.map((id) => [id, doingOf(actionDoing(id))!.leastMs]),
+) as Record<ThingAction, number>;
+/** The least a move played by the body may be quickened to, by the move: the quickest of the doings it plays. */
+const MOVE_LEAST_MS = new Map<string, number>();
+for (const doing of DOINGS)
+  if ('move' in doing.plays)
+    MOVE_LEAST_MS.set(
+      doing.plays.move,
+      Math.min(MOVE_LEAST_MS.get(doing.plays.move) ?? Infinity, doing.leastMs),
+    );
 const HANDLING_AT = Object.fromEntries(
   THING_ACTIONS.map((id) => [id, doingOf(actionDoing(id))!.keyAt]),
 ) as Record<ThingAction, number>;
@@ -299,6 +319,13 @@ export function thingDto(
     ...(thing.kind === 'place'
       ? { backdrop: true as const, caption: null }
       : {}),
+    // Built by code: as layers too, for the player to move apart.
+    ...(thing.kind === 'place' && drawing.layered?.layers.length
+      ? {
+          layers: drawing.layered.layers.map((layer) => ({ ...layer })),
+          setWidth: drawing.layered.width,
+        }
+      : {}),
     ...(drawing.callouts.length && !story
       ? {
           callouts: Object.fromEntries(
@@ -353,6 +380,14 @@ export function thingDto(
     // outfit they change into, as the film shows them.
     ...(drawing.acts && drawing.outfits?.length
       ? { wears: drawing.outfits }
+      : {}),
+    // Drawn by a kit with rig 2: what swings, and how far a stride goes.
+    ...(drawing.rigVersion === 2
+      ? {
+          rigVersion: 2 as const,
+          ...(drawing.dangles?.length ? { dangles: drawing.dangles } : {}),
+          ...(drawing.stride ? { stride: drawing.stride } : {}),
+        }
       : {}),
     // A person the kit drew in bed or lying for the whole scene: so said.
     ...(drawing.acts &&
@@ -1057,6 +1092,8 @@ export function composeScene(input: ComposeInput): {
   filled: number;
   /** What the frame audit found wrong, per staging, per step. */
   audit: Record<StagingName, Collision[][]>;
+  /** What was mended so every speaker's face is seen ("staging: …"). */
+  staging: string[];
 } {
   const { script, beats, durationMs } = input;
   /** A Studio film's scene; and one whose camera its sheet directs. */
@@ -1103,17 +1140,52 @@ export function composeScene(input: ComposeInput): {
   // or, before the first, in the quiet the page opens with.
   const firstWord = beats[0]?.startMs ?? 0;
   /**
+   * The least share each quiet may be quickened to: none of what is done
+   * in it made quicker than it may be (a doing's leastMs), as the stage
+   * gave each its time.
+   */
+  const leastShares = new Map<number, number>();
+  const leastOf = (beat: number, share: number) =>
+    leastShares.set(
+      beat,
+      Math.max(leastShares.get(beat) ?? 0, Math.min(1, share)),
+    );
+  for (const step of script.steps)
+    if (step.after !== undefined && step.at.beat >= 0)
+      for (const effect of step.effects) {
+        const least = MOVE_LEAST_MS.get(effect.do);
+        if (least && effect.ms) leastOf(step.at.beat, least / effect.ms);
+      }
+  script.beats.forEach((beat, k) => {
+    for (const one of beat.business ?? [])
+      if (one.after !== undefined && !one.lead)
+        leastOf(
+          k,
+          HANDLING_LEAST_MS[one.does] /
+            Math.min(
+              HANDLING_MS[one.does],
+              one.s !== undefined ? one.s * 1000 : Infinity,
+            ),
+        );
+  });
+  /**
    * How much of the quiet after a line the voice left, as a share of what
    * the script asked: a voice that holds a pause only so long (three
    * seconds, Kokoro's) has all that happens in the quiet quickened to fit
-   * it, so none of it runs on into the next line.
+   * it. What is done in it runs on into the next line's first moments
+   * (QUIET_OVERLAP_MS) before it is quickened, and is never quickened past
+   * the least it may take: past that, it runs on further.
    */
   const quietShare = (beat: number): number => {
     const asked = script.beats[beat]?.holdS;
     if (!asked || !beats[beat]) return 1;
     const next = beats[beat + 1]?.startMs ?? durationMs;
     const left = (next - beats[beat].endMs) / 1000;
-    return left > 0 && left < asked * QUIET_CUT ? left / asked : 1;
+    if (!(left > 0 && left < asked * QUIET_CUT)) return 1;
+    return Math.max(
+      leastShares.get(beat) ?? 0,
+      Math.min(1, (left + QUIET_OVERLAP_MS / 1000) / asked),
+    );
   };
   const momentMs = (beat: number, after: number) =>
     beat >= 0 && beats[beat]
@@ -1138,6 +1210,8 @@ export function composeScene(input: ComposeInput): {
   /** A Studio scene's stations at each step: where each one stands (SceneStage.at). */
   const stationed = script.stations === true;
   const stationsAt: Record<string, string>[] = [];
+  /** And how far back each stands where it is said (SceneStage.depth), each step's beside its stations. */
+  const depthsAt: Record<string, number>[] = [];
   const effects: SceneEffectDto[] = [];
   /** What the writer asked someone to do toward someone: acted, below. */
   const directed: DirectedMove[] = [];
@@ -1189,8 +1263,10 @@ export function composeScene(input: ComposeInput): {
   let backdrop = painted(script.backdrop);
   const same = (a: SceneStepDto, stage: NonNullable<SceneStep['stage']>) =>
     (!stationed ||
-      JSON.stringify(stationsAt[steps.indexOf(a)] ?? {}) ===
-        JSON.stringify(stage.at ?? {})) &&
+      (JSON.stringify(stationsAt[steps.indexOf(a)] ?? {}) ===
+        JSON.stringify(stage.at ?? {}) &&
+        JSON.stringify(depthsAt[steps.indexOf(a)] ?? {}) ===
+          JSON.stringify(stage.depth ?? {}))) &&
     !stage.going &&
     (a.backdrop ?? null) === (painted(stage.backdrop) ?? backdrop) &&
     a.layout === stage.layout &&
@@ -1227,6 +1303,7 @@ export function composeScene(input: ComposeInput): {
       ...(there ? { backdrop: there } : {}),
     });
     stationsAt.push({});
+    depthsAt.push({});
     before = stage.show;
     focus = stage.show[0] ?? null;
     charactersSeen = stage.show.some(
@@ -1368,11 +1445,15 @@ export function composeScene(input: ComposeInput): {
         ...(Object.keys(abed).length ? { abed } : {}),
       });
       stationsAt.push({ ...(step.stage.at ?? {}) });
+      depthsAt.push({ ...(step.stage.depth ?? {}) });
       before = step.stage.show;
     }
     step.effects.forEach((effect, i) => {
+      // What is done once the stage has changed waits for it; a move that
+      // is the change (a leap up onto the wall carries them there) is at it.
+      const carries = Boolean(doingOf(effect.do)?.carries);
       const at = Math.round(
-        atMs + (step.stage ? 350 : 0) + i * EFFECT_STAGGER_MS,
+        atMs + (step.stage && !carries ? 350 : 0) + i * EFFECT_STAGGER_MS,
       );
       // A character's words come from the sentence's own lines, below.
       if (effect.do === 'say') return;
@@ -1448,6 +1529,7 @@ export function composeScene(input: ComposeInput): {
             focus: effect.target,
           });
           stationsAt.push({ ...(stationsAt[stationsAt.length - 1] ?? {}) });
+          depthsAt.push({ ...(depthsAt[depthsAt.length - 1] ?? {}) });
           delete steps[steps.length - 1].cut;
           before = show;
         }
@@ -1820,7 +1902,12 @@ export function composeScene(input: ComposeInput): {
       for (const id of step.show) {
         const was = stationsAt[k - 1]?.[id];
         const now = stationsAt[k]?.[id];
-        if (!steps[k - 1].show.includes(id) || !was || was === now) continue;
+        if (
+          !steps[k - 1].show.includes(id) ||
+          !was ||
+          (was === now && depthsAt[k - 1]?.[id] === depthsAt[k]?.[id])
+        )
+          continue;
         out.set(id, [...(out.get(id) ?? []), step.atMs]);
       }
     });
@@ -1939,6 +2026,15 @@ export function composeScene(input: ComposeInput): {
         const f = featurePlaces[staging].get(feature.id)?.up;
         return f ? { x: f.x, y: f.y } : { x: 0, y: 0 };
       };
+      // Up it, where one who climbs or leaps onto it stands (the "up:"
+      // station): a wall's top, the steps', a tree's branch.
+      const perch = (staging: StagingName) => {
+        const f = featurePlaces[staging].get(feature.id)?.up;
+        return f ? { x: f.x, y: f.perch } : { x: 0, y: 0 };
+      };
+      const perched = piece
+        ? piece.perch !== undefined
+        : PERCHED_KINDS.has(feature.kind);
       return {
         id: feature.id,
         name: feature.name,
@@ -1952,10 +2048,22 @@ export function composeScene(input: ComposeInput): {
             }
           : {}),
         at: { box: at('box'), wide: at('wide') },
+        // Where it stands on the floor: who is nearer is drawn over it.
+        ...(featurePlaces.wide.has(feature.id)
+          ? {
+              feet: {
+                box: featurePlaces.box.get(feature.id)?.feet ?? 0,
+                wide: featurePlaces.wide.get(feature.id)?.feet ?? 0,
+              },
+            }
+          : {}),
         way: { box: way('box'), wide: way('wide') },
         // Up in it, where something caught there rests: only where something is.
         ...(upIn.has(feature.id)
           ? { up: { box: up('box'), wide: up('wide') } }
+          : {}),
+        ...(perched
+          ? { perch: { box: perch('box'), wide: perch('wide') } }
           : {}),
         ...(piece && group ? { painted: group } : {}),
         ...(feature.open ? { open: true as const } : {}),
@@ -2016,6 +2124,7 @@ export function composeScene(input: ComposeInput): {
       ...(moving ? { moving: true as const } : {}),
       ...(setFeatures.length ? { features: featuresDto() } : {}),
       ...(featureStates.length ? { featureStates } : {}),
+      ...(facesSeen.fades.length ? { fades: facesSeen.fades } : {}),
       ...(crowdDrawn
         ? {
             crowd: {
@@ -2072,7 +2181,9 @@ export function composeScene(input: ComposeInput): {
           (id) =>
             !was.includes(id) ||
             !step.show.includes(id) ||
-            (stationsAt[k]?.[id] ?? null) !== (stationsAt[k - 1]?.[id] ?? null),
+            (stationsAt[k]?.[id] ?? null) !==
+              (stationsAt[k - 1]?.[id] ?? null) ||
+            (depthsAt[k]?.[id] ?? null) !== (depthsAt[k - 1]?.[id] ?? null),
         )
         .map((who) => ({
           who,
@@ -2399,6 +2510,26 @@ export function composeScene(input: ComposeInput): {
     featurePlaces[staging] = out;
     return out;
   };
+  /**
+   * The camera's eye line on a stage, which the floor's depth scales by: a
+   * set built as layers knows its own (the set's pinhole, scaleAtFeet);
+   * else its horizon, as the features stand by (placeFeature).
+   */
+  const floorEye = (staging: StagingName, floor: number): number => {
+    const stage = STAGINGS[staging];
+    const on = setFrameOn(setFrame, stage);
+    const [, vy, , vh] = setFrame;
+    const own = setDrawing?.layered?.floor.eye;
+    const horizon = setDrawing?.ground
+      ? on.toStage(0, vy + setDrawing.ground.horizon * vh)[1]
+      : stage.h * 0.64;
+    const eye = own !== undefined ? on.toStage(0, own)[1] : horizon;
+    return Math.min(eye, floor - 60);
+  };
+  /** Each staging's floor as its people were stood on it: where they have always stood, its eye line and its front edge's lowest. */
+  const floors: Partial<
+    Record<StagingName, { floor: number; eye: number; bottom: number }>
+  > = {};
   /** Every step of a staging laid out: each thing in its slot, and people standing together. */
   const layoutsOf = (staging: StagingName): Record<string, Place>[] => {
     const lookup = new Map(
@@ -2418,12 +2549,24 @@ export function composeScene(input: ComposeInput): {
       // The set's features where they stand in every scene there; its
       // people's spots spread for how many stand at once.
       const placed = placeFeatures(staging, unit, scale.floor);
+      // The floor's depth: its eye line as the set's pinhole has it (a set
+      // built as layers), else its horizon, as its features stand by.
+      const floorNow = {
+        floor: scale.floor,
+        eye: floorEye(staging, scale.floor),
+        bottom: STAGINGS[staging].h - 12,
+      };
+      floors[staging] = floorNow;
       return layoutStations({
         shares: stationShares(largest),
         steps: steps.map((step, k) => ({
           show: step.show,
           at: stationsAt[k],
+          ...(depthsAt[k] && Object.keys(depthsAt[k]).length
+            ? { depth: depthsAt[k] }
+            : {}),
         })),
+        floor: { eye: floorNow.eye, bottom: floorNow.bottom },
         things: lookup,
         staging,
         scale,
@@ -2487,7 +2630,107 @@ export function composeScene(input: ComposeInput): {
       return laidOut;
     });
   };
+  /**
+   * A Studio scene's faces kept in view (scene-faces-seen): each staging's
+   * places mended where a speaker's face is hidden; a film's notes and
+   * fades from its wide staging, the one it plays at.
+   */
+  const facesKept = (): {
+    fades: [number, number, string][];
+    notes: string[];
+  } => {
+    const lines = script.beats.flatMap((beat, i) =>
+      beat.kind === 'line' && beat.speaker && !beat.from && beats[i]
+        ? [
+            {
+              who: beat.speaker,
+              startMs: beats[i].startMs,
+              endMs: beats[i].endMs,
+            },
+          ]
+        : [],
+    );
+    const shots = effects.filter((effect) => effect.do === 'zoom');
+    const layered = setDrawing?.layered;
+    const foreDepth =
+      layered?.layers.find((layer) => layer.id === 'foreground')?.depth ?? 1.2;
+    const open = (k: number, id: string) => {
+      const station = stationsAt[k]?.[id];
+      return (
+        station !== undefined &&
+        (station in STATION_SHARES || station.startsWith('@'))
+      );
+    };
+    const hiding = (k: number, id: string) =>
+      /^(?:behind|under|in):/.test(stationsAt[k]?.[id] ?? '');
+    const out = {
+      fades: [] as [number, number, string][],
+      notes: [] as string[],
+    };
+    for (const staging of ['box', 'wide'] as const) {
+      const stage = STAGINGS[staging];
+      const on = setFrameOn(setFrame, stage);
+      const floor = floors[staging];
+      const mended = keepFacesSeen({
+        W: stage.w,
+        H: stage.h,
+        steps,
+        places: layouts[staging],
+        lines,
+        shots,
+        features: setFeatures.flatMap(({ feature, piece }) => {
+          const f = featurePlaces[staging].get(feature.id);
+          return piece && f
+            ? [
+                {
+                  id: feature.id,
+                  box: { x: f.x, y: f.y, w: f.w, h: f.h },
+                  // One low before the people by it is over everyone.
+                  feet: piece.front ? stage.h * 2 : f.feet,
+                },
+              ]
+            : [];
+        }),
+        fore: (layered?.fore ?? []).map(({ id, box }) => {
+          const [x0, y0] = on.toStage(box[0], box[1]);
+          const [x1, y1] = on.toStage(box[0] + box[2], box[1] + box[3]);
+          return { id, box: { x: x0, y: y0, w: x1 - x0, h: y1 - y0 } };
+        }),
+        foreDepth,
+        open,
+        hiding,
+        atDepth: (place, d) => {
+          if (!floor || place.d === undefined) return null;
+          const was = floorAt(place.d, floor.floor, floor.eye, floor.bottom);
+          const now = floorAt(d, floor.floor, floor.eye, floor.bottom);
+          const k = now.k / Math.max(0.01, was.k);
+          const round = (n: number) => Math.round(n * 10) / 10;
+          const w = place.w * k;
+          const h = place.h * k;
+          return {
+            ...place,
+            x: round(place.x + place.w / 2 - w / 2),
+            y: round(now.feet - h),
+            w: round(w),
+            h: round(h),
+            d,
+          };
+        },
+        name: (id) => nameOf(castById.get(id)) ?? id,
+        durationMs,
+      });
+      // A film plays wide: what it says is its wide staging's.
+      if (staging === 'wide' || !film) {
+        out.fades.push(...mended.fades);
+        if (staging === 'wide') out.notes.push(...mended.notes);
+      }
+    }
+    return out;
+  };
   const layouts = { box: layoutsOf('box'), wide: layoutsOf('wide') };
+  // Every speaker's face seen as they speak, in every shot: mended where
+  // it is hidden, and said.
+  const facesSeen = stationed ? facesKept() : { fades: [], notes: [] };
   // A thing thrown or kicked to a feature comes down on the ground before
   // it, wherever each staging stands it: the player finds it there. One
   // the stage has not got goes on ahead, toward the middle.
@@ -3038,6 +3281,12 @@ export function composeScene(input: ComposeInput): {
       generator: input.generator,
       title: script.title,
       durationMs,
+      // The pace its walks were timed at, for the player to walk them so.
+      walk: {
+        stageMs: WALK_STAGE_MS,
+        minMs: WALK_MIN_MS,
+        maxMs: WALK_MAX_MS,
+      },
       timing: input.timing,
       ...(input.profile?.stage ? { stage: input.profile.stage } : {}),
       ...(Object.keys(acting).length ? { acting } : {}),
@@ -3111,6 +3360,7 @@ export function composeScene(input: ComposeInput): {
     },
     filled,
     audit: { box: box.audit, wide: wide.audit },
+    staging: facesSeen.notes,
   };
   // A film's walks as long as the time they have, hurried where they are
   // not; and when all it plans has finished, which may be after its
@@ -3476,6 +3726,8 @@ const FILL_CLEAR_MS = 2500;
 /** How long the camera stays in close on a thing, at most, and at least. */
 /** A quiet the voice left this much shorter than asked, or less, was cut short by it: what happens in it is quickened to fit. */
 const QUIET_CUT = 0.9;
+/** What is done in a quiet the voice cut short may run on this far into the next line, in ms, before it is quickened: an overlap reads as natural. */
+const QUIET_OVERLAP_MS = 300;
 /** A change of clothes this close to someone putting a thing on or taking it off, in ms, is that handling's. */
 const DRESSED_NEAR_MS = 4000;
 const FILL_SHOT_MS = 3500;

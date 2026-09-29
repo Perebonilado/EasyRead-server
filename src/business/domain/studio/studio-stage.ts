@@ -25,6 +25,7 @@ import {
   aimedFeature,
   bobbingMove,
   doingOf,
+  isAction,
   fallbackFor,
   featureAim,
   featureIdOf,
@@ -37,7 +38,14 @@ import {
   type StageMove,
   type ThingAction,
 } from '../scene-doings';
-import { STATION_SHARES } from '../scene-layout';
+import {
+  DEPTH_BACK,
+  DEPTH_FRONT,
+  DEPTH_MIDDLE,
+  STATION_SHARES,
+} from '../scene-layout';
+import { perchOf } from '../scene-set-pieces';
+import { RUN_PACE, WALK_MIN_MS, WALK_STAGE_MS } from '../scene-film';
 import { genderOf } from '../scene-script';
 import { PROP_KIND } from '../scene-props';
 import { DRAWN, ownWords } from '../scene-own';
@@ -85,11 +93,17 @@ import {
 } from './studio';
 
 /**
- * The most a quiet between two lines holds, in seconds: a throw, a chase
- * and a pick-up under the music. Longer, and the writer is asked to break
- * it with a line; the stage quickens what is there to fit.
+ * The most a quiet between two lines holds, in seconds: pauses, looks,
+ * nods and going about under the music. Longer, and the writer is asked
+ * to break it with a line; the stage quickens what is there to fit.
  */
 export const QUIET_MOST_S = 6;
+/**
+ * The most a quiet with an action in it holds (a throw, a jump, a fall, a
+ * thing handled): held longer, up to this, rather than the action rushed,
+ * its wind-up and settle lost. Longer, and the writer is asked to break it.
+ */
+export const ACTION_MOST_S = 10;
 /** A face changing: how long it holds the eye before what comes next. */
 const REACTION_S = 0.6;
 /** What comes after someone else's doing starts this long after its moment. */
@@ -136,6 +150,10 @@ export interface QuietItem {
   leastS: number;
   /** How far into it its moment comes. */
   keyAt: number;
+  /** An action (DoingPhases' moves, a thing handled): the quiet is held longer for it rather than quicken it (ACTION_MOST_S). */
+  acts?: boolean;
+  /** How long it runs on after its doer's own part, in seconds: a throw's flight and catch. */
+  tailS?: number;
 }
 
 /**
@@ -181,19 +199,27 @@ function ownItem(beat: SheetBeat): QuietItem {
       leastS: doing.leastMs / 1000,
       keyAt: doing.keyAt,
     };
+  // As long as it takes given its time: an action wound up and settled.
+  const own = doing.idealMs / 1000;
   // A throw to someone runs on until it is caught: as long as it flies at
   // most, and the catch's own end.
-  const caught =
-    beat.do === 'throw' && beat.to
-      ? FLIES_MOST_S + CATCH_AFTER_S - (1 - doing.keyAt) * (doing.ms / 1000)
-      : 0;
+  const caught = round(
+    Math.max(
+      0,
+      beat.do === 'throw' && beat.to
+        ? FLIES_MOST_S + CATCH_AFTER_S - (1 - doing.keyAt) * own
+        : 0,
+    ),
+  );
   return {
     who: beat.who,
     handles: beat.kind === 'business',
     pause: false,
-    s: doing.ms / 1000 + Math.max(0, caught),
-    leastS: doing.leastMs / 1000 + Math.max(0, caught),
-    keyAt: (doing.keyAt * doing.ms) / (doing.ms + Math.max(0, caught) * 1000),
+    s: round(own + caught),
+    leastS: round(doing.leastMs / 1000 + caught),
+    keyAt: (doing.keyAt * own) / (own + caught),
+    ...(isAction(doing) ? { acts: true } : {}),
+    ...(caught > 0 ? { tailS: caught } : {}),
   };
 }
 
@@ -254,10 +280,14 @@ const THROWN_PAST = 0.16;
 const BESIDE = 0.1;
 /** Nearer than this across the stage, going there is going nowhere to see. */
 const NEAR = 0.11;
-/** How far across the stage a runner goes in a second, as a share of it (the stage's walk across in four, quickened 2.2 times). */
-const RUN_SHARE_S = 2.2 / 4;
+/** How far across the stage a runner goes in a second, as a share of it (the stage's walk across, WALK_STAGE_MS, quickened RUN_PACE times). */
+const RUN_SHARE_S = RUN_PACE / (WALK_STAGE_MS / 1000);
 /** The longest a run out and back takes. */
 const OUT_MOST_S = 3;
+/** How far a leap with nowhere named carries someone, as a share of the stage: its clip's 1.2 heights of a grown-up. */
+const LEAP_SHARE = 0.22;
+/** Getting up off the ground after a hard fall takes at least this long: its clip's phases at their least. */
+const GET_UP_LEAST_S = 0.96;
 /** What is done touching someone: done beside them. */
 const TOUCHES: ReadonlySet<DoingId> = new Set(['hug', 'lick', 'sniff']);
 /** Farther apart than this across the stage, two are not beside each other. */
@@ -283,6 +313,39 @@ export function stationShare(
     ? SPOT_SHARE[feature.spot] + Number(by![2]) * BESIDE
     : SPOT_SHARE.centre;
 }
+
+/** How far back a sheet's depth word stands someone (studio-scenery-plan §4.1). */
+export const SHEET_DEPTH: Record<'back' | 'middle' | 'front', number> = {
+  back: DEPTH_BACK,
+  middle: DEPTH_MIDDLE,
+  front: DEPTH_FRONT,
+};
+
+/**
+ * How far back some words send someone on the floor: "in front", "to the
+ * front", "near the camera" to its front; "at the back", "far off",
+ * "across the yard" to its back. Null where they say neither: the stager
+ * decides.
+ */
+export function depthSaid(words: string): number | null {
+  if (
+    /\b(?:in front|to the front|up front|near(?:er)? the camera|toward(?:s)? the camera|closer to us)\b/iu.test(
+      words,
+    )
+  )
+    return SHEET_DEPTH.front;
+  if (
+    /\b(?:(?:at|to|toward|towards|into) the (?:very )?back|far off|far away|in the distance|across the (?:yard|road|street|room|field|compound|square|market|courtyard|garden|playground))\b/iu.test(
+      words,
+    )
+  )
+    return SHEET_DEPTH.back;
+  return null;
+}
+
+/** A station on the open floor, at a depth of its own: a spot, or a point on the ground. */
+const openFloor = (station: string) =>
+  station in SPOT_SHARE || station.startsWith('@');
 
 /** A station beside a feature: on its left (-1) or its right (1). */
 export const besideStation = (feature: string, side: -1 | 1) =>
@@ -479,44 +542,80 @@ export function comesWith(
  * throw, the chase after it), what the same one does next, and a thing
  * handled next, only once the one before is done; a pause waits for all.
  * A quiet longer than `most` is quickened to fit, none shorter than it
- * may be; `asked` is how long it would have run.
+ * may be; but one with an action in it quickens the rest first, and is
+ * then held longer, up to ACTION_MOST_S, rather than the action rushed.
+ * `asked` is how long it would have run; `limit` is the most it may.
  */
 export function timeQuiet(
   items: readonly QuietItem[],
   most = QUIET_MOST_S,
-): { starts: number[]; lengths: number[]; total: number; asked: number } {
+): {
+  starts: number[];
+  lengths: number[];
+  total: number;
+  asked: number;
+  limit: number;
+} {
   const asked = inTurn(
     items,
     items.map((item) => item.s),
   );
+  const acts = items.some((item) => item.acts);
+  const limit = acts ? Math.max(most, ACTION_MOST_S) : most;
+  const done = (lengths: readonly number[], total: number) => ({
+    starts: inTurn(items, lengths).starts.map(round),
+    lengths: lengths.map(round),
+    total: round(total),
+    asked: round(asked.end),
+    limit,
+  });
   if (asked.end <= most)
-    return {
-      starts: asked.starts.map(round),
-      lengths: items.map((item) => item.s),
-      total: round(asked.end),
-      asked: round(asked.end),
-    };
+    return done(
+      items.map((item) => item.s),
+      asked.end,
+    );
   // Quickened as little as fits, each in turn after the one it waits for
   // as quickened, from the moment the quiet's first begins: none runs on
   // past the quiet where they may all fit. The quiet itself is as long as
   // a quiet may be.
-  const room = most - QUIET_STARTS_S;
-  let fit = items.map((item) => item.leastS);
-  let [low, high] = [0, 1];
-  for (let n = 0; n < 14; n += 1) {
-    const share = (low + high) / 2;
-    const lengths = items.map((item) => Math.max(item.leastS, item.s * share));
-    if (inTurn(items, lengths).end <= room) {
-      low = share;
-      fit = lengths;
-    } else high = share;
-  }
-  return {
-    starts: inTurn(items, fit).starts.map(round),
-    lengths: fit.map(round),
-    total: most,
-    asked: round(asked.end),
+  const quickened = (room: number, quickens: (item: QuietItem) => boolean) => {
+    let fit: number[] | null = null;
+    let [low, high] = [0, 1];
+    for (let n = 0; n < 14; n += 1) {
+      const share = (low + high) / 2;
+      const lengths = items.map((item) =>
+        quickens(item) ? Math.max(item.leastS, item.s * share) : item.s,
+      );
+      if (inTurn(items, lengths).end <= room) {
+        low = share;
+        fit = lengths;
+      } else high = share;
+    }
+    return fit;
   };
+  const everything = () => true;
+  if (!acts)
+    return done(
+      quickened(most - QUIET_STARTS_S, everything) ??
+        items.map((item) => item.leastS),
+      most,
+    );
+  // An action keeps its time: what else there is quickened first, to fit
+  // the quiet as it would be.
+  const gestures = (item: QuietItem) => !item.acts;
+  const inQuiet = quickened(most - QUIET_STARTS_S, gestures);
+  if (inQuiet) return done(inQuiet, most);
+  // Still too long: held longer for the actions, as long as they take,
+  // the rest as quick as they may be; and at the most, the actions
+  // quickened too, to fit it.
+  const rest = items.map((item) => (item.acts ? item.s : item.leastS));
+  const held = inTurn(items, rest).end;
+  if (held <= limit - QUIET_STARTS_S) return done(rest, Math.max(most, held));
+  return done(
+    quickened(limit - QUIET_STARTS_S, everything) ??
+      items.map((item) => item.leastS),
+    limit,
+  );
 }
 
 /** When each thing in a quiet starts, as long as each is given, one after another as timeQuiet has them; and when all are done. */
@@ -1012,6 +1111,12 @@ export function stageStory(
   );
   /** How each one is down now: sitting or lying, and where. */
   const down = new Map<string, Posture>(postures.opening);
+  /** How far back each stands where the sheet or the words say: the rest as the stager spreads them. */
+  const deep = new Map<string, number>(
+    sheet.onStage.flatMap((p): [string, number][] =>
+      p.depth ? [[p.who, SHEET_DEPTH[p.depth]]] : [],
+    ),
+  );
   /** The station by a feature, under it or behind it, for one standing at `from`. */
   const stationAt = (
     how: 'by' | 'under' | 'behind',
@@ -1090,6 +1195,13 @@ export function stageStory(
   const share = (station: string) => stationShare(station, features);
   const stageNow = (extra: Partial<SceneStage> = {}): SceneStage => {
     const show = inSpotOrder(here, features).filter((id) => inCast.has(id));
+    // Depth said only counts on the open floor: at a feature, its own.
+    const depth = Object.fromEntries(
+      show.flatMap((id): [string, number][] => {
+        const d = deep.get(id);
+        return d !== undefined && openFloor(here.get(id)!) ? [[id, d]] : [];
+      }),
+    );
     return {
       layout: show.length
         ? fitLayout(show.length > 1 ? 'row' : 'one', show.length)
@@ -1097,6 +1209,7 @@ export function stageStory(
       show,
       arrows: [],
       at: Object.fromEntries(show.map((id) => [id, here.get(id)!])),
+      ...(Object.keys(depth).length ? { depth } : {}),
       ...extra,
     };
   };
@@ -1453,6 +1566,13 @@ export function stageStory(
   };
 
   sheet.beats.forEach((raw, at) => {
+    // Going somewhere, as far back as the words say, or as the stager
+    // spreads them there.
+    if (raw.who && doingOf(raw.do)?.kind === 'travel') {
+      const said = depthSaid(`${raw.say} ${raw.doSaid ?? ''}`);
+      if (said === null) deep.delete(raw.who);
+      else deep.set(raw.who, said);
+    }
     const k = spokenAt.get(at);
     if (k !== undefined) {
       const beat = beats[k];
@@ -1797,6 +1917,9 @@ export function stageStory(
               moveEffect(who, bobs(who) ? 'hop' : 'lean-in', aim, moment.s),
             );
         }
+        // A move over the going itself: a sprint's lean and pumping arms.
+        if (doing.with && !plain && here.has(who))
+          effects.push(moveEffect(who, doing.with, aim, moment.s));
         if (plain && here.has(who))
           effects.push(
             moveEffect(who, fallbackMove(doing, who), aim, moment.s),
@@ -1829,7 +1952,22 @@ export function stageStory(
           Math.abs(share(was) - share(here.get(aim)!)) > ONE_SPOT
             ? travelTo(who, aim, { ...raw, spot: null }, false)
             : null;
-        if (downTo && (move === 'sit' || move === 'lie')) {
+        // A leap (a landing) carries them: up onto the feature it is at,
+        // where one stands up it (a wall's top); beside it; beside whom it
+        // is at; else on ahead. Their place changes as the move begins,
+        // and the stage flies them there along its arc.
+        const carried =
+          !plain &&
+          doing.carries &&
+          'move' in doing.plays &&
+          move === doing.plays.move
+            ? carriedTo(who, doing.id, aim)
+            : null;
+        if (carried && carried !== was) {
+          here.set(who, carried);
+          stage = stageNow();
+          effects.push(moveEffect(who, move, aim, moment.s));
+        } else if (downTo && (move === 'sit' || move === 'lie')) {
           const lies = move === 'lie' && headLeft(downTo.on);
           const held: SceneEffect = {
             ...heldDown(who, downTo, move),
@@ -1852,7 +1990,10 @@ export function stageStory(
             });
           } else effects.push(held);
         } else if (to && was && to !== was) {
-          const walkS = Math.max(1.1, Math.abs(share(to) - share(was)) * 4);
+          const walkS = Math.max(
+            WALK_MIN_MS / 1000,
+            (Math.abs(share(to) - share(was)) * WALK_STAGE_MS) / 1000,
+          );
           here.set(who, to);
           stage = stageNow();
           afterwards.push({
@@ -2066,7 +2207,21 @@ export function stageStory(
       after: timed.offset,
       stage: null,
       effects: [
-        { target: who, part: null, do: 'stand', ms: Math.round(riseS * 1000) },
+        // Up off the ground after a hard fall, from where it left them;
+        // else up as from anything.
+        now.fell
+          ? {
+              target: who,
+              part: null,
+              do: 'get-up',
+              ms: Math.round(Math.max(riseS, GET_UP_LEAST_S) * 1000),
+            }
+          : {
+              target: who,
+              part: null,
+              do: 'stand',
+              ms: Math.round(riseS * 1000),
+            },
       ],
     });
     if (!now.on) return after(riseS);
@@ -2097,6 +2252,51 @@ export function stageStory(
         room: Math.max(0.3, round(timed.room - used)),
       };
     }
+  }
+
+  /**
+   * Where a move that carries them takes someone (a leap, a landing): up
+   * onto the feature it is at, where one stands up it; else beside it, on
+   * the side they come from; beside whom it is at; a leap with nowhere
+   * named, on ahead toward the middle of the stage. A landing from up on a
+   * feature, down beside it. Null where it takes them nowhere new.
+   */
+  function carriedTo(
+    who: string,
+    id: DoingId,
+    aim: string | null,
+  ): string | null {
+    const was = here.get(who);
+    if (!was) return null;
+    if (id === 'land') {
+      const up = /^up:(.+)$/.exec(was);
+      return up ? besideOf(up[1], who) : null;
+    }
+    const feature = aimedFeature(aim);
+    const f = feature ? features.get(feature) : undefined;
+    if (f) {
+      if (perchOf(f.kind, f.name) !== undefined) {
+        const up = upStation(f.id);
+        return freeStation(who, up) === up ? up : null;
+      }
+      const side: -1 | 1 = share(was) < SPOT_SHARE[f.spot] ? -1 : 1;
+      for (const s of [side, -side as -1 | 1]) {
+        const station = besideStation(f.id, s);
+        if (freeStation(who, station) === station) return station;
+      }
+      return null;
+    }
+    if (aim && here.has(aim)) {
+      const theirs = share(here.get(aim)!);
+      const mine = share(was);
+      const close = theirs + (mine < theirs ? -1 : 1) * BESIDE * 1.2;
+      return Math.abs(close - mine) > NEAR ? groundAt(close) : null;
+    }
+    const mine = share(was);
+    const dir =
+      aim === '@left' ? -1 : aim === '@right' ? 1 : mine < 0.5 ? 1 : -1;
+    const to = Math.min(0.9, Math.max(0.1, mine + dir * LEAP_SHARE));
+    return Math.abs(to - mine) > NEAR ? freeStation(who, groundAt(to)) : null;
   }
 
   /** How far into getting up someone steps down off what they were on: just after they start, so they are never stood up on it. */

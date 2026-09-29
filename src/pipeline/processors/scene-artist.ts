@@ -58,6 +58,7 @@ import {
   describeLayout,
   layoutBrief,
   layoutOf,
+  type SetLayering,
   type SetLayout,
 } from '../../business/domain/scene-set-layout';
 import type { SetPiece } from '../../business/domain/scene-set-pieces';
@@ -652,6 +653,7 @@ export class SceneArtist {
       drawing: GatedDrawing;
       ground: SetGround | null;
       layout: SetLayout;
+      layered: SetLayering;
     };
     const make = async (
       reply: string,
@@ -688,7 +690,7 @@ export class SceneArtist {
           `Its open ground reaches ${Math.round(ground.horizon * 100)}% of the way down before something stands on it: move the things at the back of it farther back or to the sides.`,
         );
       return {
-        value: { drawing, ground, layout },
+        value: { drawing, ground, layout, layered: built.layered },
         // What goes back to be revised is the layout itself.
         svg: JSON.stringify(raw),
         faults,
@@ -727,7 +729,7 @@ export class SceneArtist {
       this.logger.warn(`${who}: ${place.name} could not be built`);
       return null;
     }
-    const { drawing, ground, layout } = best.value;
+    const { drawing, ground, layout, layered } = best.value;
     this.logger.log(
       `${who}: ${place.name} built from its layout (${describeLayout(layout)})${best.verdict ? `, judged ${best.score}: ${best.verdict.sees}` : ''}`,
     );
@@ -740,6 +742,7 @@ export class SceneArtist {
       drawing,
       ...(ground ? { ground } : {}),
       layout,
+      layered,
     };
   }
 

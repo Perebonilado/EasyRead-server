@@ -330,6 +330,15 @@ export interface StudioFeature {
   opens: boolean;
 }
 
+/** The kinds the stage draws as one particular thing, whatever they are called. */
+const ONE_LOOK = new Set<FeatureKind>([
+  'vehicle',
+  'stall',
+  'goalpost',
+  'swing',
+  'well',
+]);
+
 /** The most features a set keeps. */
 export const MAX_FEATURES = 8;
 
@@ -366,7 +375,14 @@ export function featuresOf(
       // ("a wooden gate"), else the artist's to draw if its name could be
       // one: never a thing handled or carried, one of the cast, a place,
       // the ground or the weather.
-      const listed = oneOf(FEATURE_KINDS)(f.kind);
+      // A kind the stage draws as one thing (a vehicle is a danfo, a stall
+      // a market stall) only when its name says so: "the half-built ark"
+      // put down as a vehicle is the artist's to draw, never a bus.
+      const given = oneOf(FEATURE_KINDS)(f.kind);
+      const listed =
+        given && (!ONE_LOOK.has(given) || FEATURE_WORDS[given].test(noun))
+          ? given
+          : null;
       const kind: AnyFeatureKind | null =
         listed ??
         kindNamed(noun) ??
@@ -846,7 +862,13 @@ export interface SheetPlace {
   on?: string;
   /** Things they wear as it opens besides their usual clothes, by the things' ids: the coat the scene before left them holding. */
   wears?: string[];
+  /** How far back they stand as it opens, where it matters (studio-scenery-plan §4.1): absent, as the stager spreads them. */
+  depth?: SheetDepth;
 }
+
+/** How far back someone stands on the floor, in a sheet's words. */
+export const SHEET_DEPTHS = ['back', 'middle', 'front'] as const;
+export type SheetDepth = (typeof SHEET_DEPTHS)[number];
 
 /** A thing on the stage to be handled (one of the lists', or the show's own), resting before whom. */
 export interface SheetProp {
@@ -1022,6 +1044,7 @@ export function storySheetOf(raw: unknown): StorySheet {
       const who = id(p.who);
       if (!who) return [];
       const on = id(p.on);
+      const depth = oneOf(SHEET_DEPTHS)(p.depth);
       const wears = (Array.isArray(p.wears) ? p.wears : [])
         .map(thingNamed)
         .filter((w): w is string => Boolean(w))
@@ -1036,6 +1059,7 @@ export function storySheetOf(raw: unknown): StorySheet {
           // Where they sit or lie, and what they wear: kept only when said.
           ...(on ? { on: featureIdOf(on) } : {}),
           ...(wears.length ? { wears } : {}),
+          ...(depth ? { depth } : {}),
         },
       ];
     });

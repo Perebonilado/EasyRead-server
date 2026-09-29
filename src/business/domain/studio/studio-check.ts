@@ -89,7 +89,12 @@ import {
 } from './studio';
 import { joinsSeconds } from './studio-edit';
 import {
-  QUIET_MOST_S,
+  RUN_PACE,
+  WALK_MAX_MS,
+  WALK_MIN_MS,
+  WALK_STAGE_MS,
+} from '../scene-film';
+import {
   caughtUpIn,
   comesWith,
   exitSideOf,
@@ -334,8 +339,8 @@ export function wornSaidIn(text: string): {
 
 /**
  * How long a walk from one spot to another takes on the stage, in seconds:
- * a walker crosses the whole stage in four, within the player's bounds
- * (WALK_MIN_MS, WALK_MAX_MS); a runner in less.
+ * as the player walks it (scene-film's WALK_STAGE_MS a stage, within
+ * WALK_MIN_MS and WALK_MAX_MS); a runner in less.
  */
 export function walkSeconds(
   from: Spot,
@@ -343,8 +348,11 @@ export function walkSeconds(
   pace: 'walk' | 'run' | null,
 ): number {
   const across = Math.abs(STATION_SHARES[to] - STATION_SHARES[from]);
-  const s = Math.min(3.4, Math.max(1.1, across * 4));
-  return Math.round((pace === 'run' ? s / 2.2 : s) * 10) / 10;
+  const s = Math.min(
+    WALK_MAX_MS / 1000,
+    Math.max(WALK_MIN_MS / 1000, (across * WALK_STAGE_MS) / 1000),
+  );
+  return Math.round((pace === 'run' ? s / RUN_PACE : s) * 10) / 10;
 }
 
 /** A doing, as the one list has it, in a few words for what was done: "a throw". */
@@ -898,6 +906,8 @@ export function mendSheet(
       here.set(one.who, feature.spot);
   }
 
+  /** Who is down on the ground after a hard fall, until they get up. */
+  const fell = new Set<string>();
   /** One doing, from the words or the sheet, made one the stage can play, and set down. */
   const act = (
     beat: SheetBeat,
@@ -917,6 +927,19 @@ export function mendSheet(
       );
       id = instead;
     }
+    // Getting up just after a hard fall is up off the ground ("falls hard
+    // ... gets up"), as the get-up move does it.
+    if (id === 'stand-up' && fell.has(who)) {
+      mended.push(`beat ${n}: ${nameOf(who)} gets up off the ground`);
+      id = 'get-up';
+    }
+    if (id === 'fall-hard') fell.add(who);
+    else if (
+      id === 'get-up' ||
+      id === 'stand-up' ||
+      doingOf(id)?.kind === 'travel'
+    )
+      fell.delete(who);
     let target: string | null = plan.target;
     const opensIt = id === 'open' || id === 'close';
     if (target && !target.startsWith('@')) {
@@ -2066,7 +2089,9 @@ export function mendSheet(
       placedBy(beat);
       // Down with their eyes closed ("Goliath falls, knocked out"): one
       // falling or lying down, whose eyes the words shut.
-      const down = plans.filter((p) => p.do === 'fall' || p.do === 'lie-down');
+      const down = plans.filter(
+        (p) => p.do === 'fall' || p.do === 'fall-hard' || p.do === 'lie-down',
+      );
       if (down.length === 1 && eyesClosedIn(beat.say))
         closeEyes(down[0].who ?? beat.who, at);
       return;
@@ -2209,6 +2234,12 @@ const SAID: Partial<Record<DoingId, string>> = {
   fall: 'falls over',
   dress: 'puts on',
   undress: 'takes off',
+  leap: 'springs onto',
+  land: 'jumps down off',
+  'run-fast': 'runs as fast as they can to',
+  'fall-hard': 'falls hard',
+  'get-up': 'gets up off the ground',
+  hero: 'strikes a pose',
 };
 
 /** A going said at a run. */
@@ -2667,13 +2698,16 @@ export function checkSheet(
       'No one says anything in this scene: only the narrator speaks.',
     );
   // A quiet that holds more than the music carries: sent back once, to be
-  // broken with a line; the stage quickens it to fit meanwhile.
+  // broken with a line; the stage quickens it to fit meanwhile. One with
+  // an action in it may hold longer (ACTION_MOST_S).
   for (const [after, run] of quietRuns(sheet)) {
-    const { asked } = timeQuiet(run.map((at) => quietItem(sheet.beats[at])));
-    if (asked > QUIET_MOST_S + 0.05)
+    const { asked, limit } = timeQuiet(
+      run.map((at) => quietItem(sheet.beats[at])),
+    );
+    if (asked > limit + 0.05)
       warn(
         'quiet',
-        `Beats ${run[0] + 1} to ${run[run.length - 1] + 1} are ${Math.round(asked * 10) / 10} seconds of action with no one speaking${after < 0 ? ' before the first line' : ''}; ${QUIET_MOST_S} at most: break it with a line.`,
+        `Beats ${run[0] + 1} to ${run[run.length - 1] + 1} are ${Math.round(asked * 10) / 10} seconds of action with no one speaking${after < 0 ? ' before the first line' : ''}; ${limit} at most: break it with a line.`,
         run[0],
       );
   }

@@ -37,6 +37,8 @@ export interface Posture {
   on: string | null;
   /** In it, under its cover: a bed. */
   in: boolean;
+  /** Down on the ground from a hard fall: they get up off it as from one (the get-up move). */
+  fell?: true;
 }
 
 /** The kinds of feature sat and lain on: a bed is got into, the rest sat on. */
@@ -142,9 +144,14 @@ export function posturesOf(
     const now = down.get(who) ?? null;
     const doing = doingOf(beat.do);
     if (!doing) return;
-    if (doing.id === 'stand-up') {
+    if (doing.id === 'stand-up' || doing.id === 'get-up') {
       if (now) standsFrom.set(at, now);
       down.delete(who);
+      return;
+    }
+    // Down on the ground after a hard fall, until they get up.
+    if (doing.id === 'fall-hard') {
+      down.set(who, { how: 'lie', on: null, in: false, fell: true });
       return;
     }
     if (doing.id === 'sit' || doing.id === 'lie-down') {

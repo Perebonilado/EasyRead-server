@@ -32,6 +32,18 @@ import {
   line,
   shade,
 } from './scene-ink';
+import {
+  DANGLE_FEEL,
+  cutChain,
+  dangleCss,
+  dangleOf,
+  PERSON_SWING,
+  strideLength,
+  uniqueDangles,
+  type Dangle,
+  type DangleKind,
+  type RigVersion,
+} from './scene-dangles';
 
 export const FIGURE_AGES = ['child', 'teen', 'adult', 'elder'] as const;
 export type FigureAge = (typeof FIGURE_AGES)[number];
@@ -152,13 +164,19 @@ export const FIGURE_EXTRAS = [
   'stethoscope',
   'bow tie',
   'earrings',
-  // A cloak or cape from the shoulders, in the accent colour.
+  // A long cloak from the shoulders to the calves, in the accent colour.
   'cloak',
   'sandals',
   // An angel's.
   'wings',
   // No shoes on: in bed, before they are put on.
   'bare feet',
+  // A short cape from the shoulders to the hips, apart from the long cloak.
+  'cape',
+  // A bow in the hair, its two ends hanging behind.
+  'ribbon',
+  // A headscarf's end, tied below the ear and hanging over the shoulder.
+  'headscarf tail',
 ] as const;
 export type FigureExtra = (typeof FIGURE_EXTRAS)[number];
 
@@ -383,7 +401,10 @@ const SAME: Record<string, string> = {
   sarong: 'wrapper',
   lappa: 'wrapper',
   pagne: 'wrapper',
-  cape: 'cloak',
+  'hair ribbon': 'ribbon',
+  'hair bow': 'ribbon',
+  'scarf tail': 'headscarf tail',
+  'headscarf end': 'headscarf tail',
   mantle: 'mantle',
   crook: 'staff',
   "shepherd's staff": 'staff',
@@ -1327,8 +1348,48 @@ const wrapped = (spec: FigureSpec) =>
   spec.headwear === 'gele' ||
   spec.headwear === 'nemes';
 
+/**
+ * Where a drawing made with rig 2 collects its dangles as it draws them:
+ * the prefix its clip paths' ids take, unique in the drawing, and each
+ * part cut into a chain. Absent, a drawing is made as rig 1 draws it.
+ */
+interface Chains {
+  clip: string;
+  dangles: Dangle[];
+}
+
+/**
+ * A part that swings: as drawn, on rig 1; on rig 2, cut into a chain of
+ * `segments` from `root` toward `tip`, and its dangle kept. `pinned`: what
+ * lies behind the root stays on the head or the shoulders.
+ */
+function swung(
+  chains: Chains | undefined,
+  id: string,
+  kind: DangleKind,
+  markup: string,
+  root: Point2,
+  tip: Point2 | undefined,
+  segments: number,
+  pinned = true,
+): string {
+  if (!chains || !markup) return markup;
+  const made = cutChain({
+    id,
+    markup,
+    root,
+    tip,
+    segments,
+    clip: `${chains.clip}-${id}`,
+    pinned,
+    limit: DANGLE_FEEL[kind].limit,
+  });
+  chains.dangles.push(dangleOf(id, made, kind));
+  return made.markup;
+}
+
 /** Hair behind the head: what shows past it, over the shoulders or above. */
-function hairBehind(spec: FigureSpec, R: Rig): string {
+function hairBehind(spec: FigureSpec, R: Rig, chains?: Chains): string {
   if (wrapped(spec)) return '';
   const c = HAIR[spec.hairColour];
   const { cy } = R;
@@ -1337,15 +1398,30 @@ function hairBehind(spec: FigureSpec, R: Rig): string {
     case 'afro':
       return `<ellipse cx="0" cy="${cy - 10}" rx="64" ry="56" ${inked(c)}/>`;
     case 'long':
-      return `<path d="M-52,${cy - 18} L-52,${cy + 44} Q-52,${cy + 60} -36,${cy + 60} L36,${cy + 60} Q52,${cy + 60} 52,${cy + 44} L52,${cy - 18} Z" ${inked(c)}/>`;
+      return swung(
+        chains,
+        'hair',
+        'hair',
+        `<path d="M-52,${cy - 18} L-52,${cy + 44} Q-52,${cy + 60} -36,${cy + 60} L36,${cy + 60} Q52,${cy + 60} 52,${cy + 44} L52,${cy - 18} Z" ${inked(c)}/>`,
+        [0, cy + 26],
+        [0, cy + 60],
+        2,
+      );
     case 'bob':
       return `<path d="M-52,${cy - 18} L-52,${cy + 22} Q-52,${cy + 32} -42,${cy + 32} L42,${cy + 32} Q52,${cy + 32} 52,${cy + 22} L52,${cy - 18} Z" ${inked(c)}/>`;
     case 'pigtails':
       return (
         [-1, 1]
-          .map(
-            (s) =>
+          .map((s) =>
+            swung(
+              chains,
+              s < 0 ? 'pig-l' : 'pig-r',
+              'pigtail',
               `<ellipse cx="${s * 53}" cy="${cy + 6}" rx="13" ry="21" transform="rotate(${s * -18} ${s * 53} ${cy + 6})" ${inked(c)}/>`,
+              [s * 45, cy - 10],
+              [s * 59.5, cy + 26],
+              2,
+            ),
           )
           .join('') +
         [-1, 1]
@@ -1356,7 +1432,15 @@ function hairBehind(spec: FigureSpec, R: Rig): string {
           .join('')
       );
     case 'ponytail':
-      return `<ellipse cx="50" cy="${cy + 8}" rx="13" ry="26" transform="rotate(-18 50 ${cy + 8})" ${inked(c)}/><circle cx="44" cy="${cy - 12}" r="5" ${inked(accent)}/>`;
+      return `${swung(
+        chains,
+        'pony',
+        'ponytail',
+        `<ellipse cx="50" cy="${cy + 8}" rx="13" ry="26" transform="rotate(-18 50 ${cy + 8})" ${inked(c)}/>`,
+        [44, cy - 12],
+        [58, cy + 32.7],
+        3,
+      )}<circle cx="44" cy="${cy - 12}" r="5" ${inked(accent)}/>`;
     case 'bun':
       return `<circle cx="0" cy="${cy - 44}" r="15" ${inked(c)}/>`;
     case 'balding':
@@ -1368,29 +1452,49 @@ function hairBehind(spec: FigureSpec, R: Rig): string {
         .join('');
     case 'braids': {
       // Two plaits, each a run of beads hanging past the shoulders.
+      const bead = (s: number, k: number) =>
+        `<ellipse cx="${s * (48 - k)}" cy="${cy + 6 + k * 12}" rx="8" ry="7.5" ${inked(c)}/>`;
+      const tie = (s: number) =>
+        `<circle cx="${s * 44}" cy="${cy + 64}" r="4" ${inked(accent)}/>`;
+      // On rig 2, each plait and its tie a chain of its own.
+      if (chains)
+        return [-1, 1]
+          .map((s) =>
+            swung(
+              chains,
+              s < 0 ? 'braid-l' : 'braid-r',
+              'braid',
+              [0, 1, 2, 3, 4].map((k) => bead(s, k)).join('') + tie(s),
+              [s * 48, cy - 1.5],
+              [s * 44, cy + 68],
+              2,
+            ),
+          )
+          .join('');
       const beads: string[] = [];
       for (const s of [-1, 1])
-        for (let k = 0; k < 5; k += 1)
-          beads.push(
-            `<ellipse cx="${s * (48 - k)}" cy="${cy + 6 + k * 12}" rx="8" ry="7.5" ${inked(c)}/>`,
-          );
-      return (
-        beads.join('') +
-        [-1, 1]
-          .map(
-            (s) =>
-              `<circle cx="${s * 44}" cy="${cy + 64}" r="4" ${inked(accent)}/>`,
-          )
-          .join('')
-      );
+        for (let k = 0; k < 5; k += 1) beads.push(bead(s, k));
+      return beads.join('') + [-1, 1].map(tie).join('');
     }
     case 'locs': {
-      const strands: string[] = [];
-      for (const x of [-50, -40, 40, 50])
-        strands.push(
-          `<rect x="${x - 5}" y="${cy - 20}" width="10" height="${x < 0 ? 70 : 66}" rx="5" ${inked(c)}/>`,
-        );
-      return strands.join('');
+      const strand = (x: number) =>
+        `<rect x="${x - 5}" y="${cy - 20}" width="10" height="${x < 0 ? 70 : 66}" rx="5" ${inked(c)}/>`;
+      return [
+        [-50, -40],
+        [40, 50],
+      ]
+        .map((xs) =>
+          swung(
+            chains,
+            xs[0] < 0 ? 'locs-l' : 'locs-r',
+            'locs',
+            xs.map(strand).join(''),
+            [Math.sign(xs[0]) * 45, cy],
+            [Math.sign(xs[0]) * 45, cy + 48],
+            2,
+          ),
+        )
+        .join('');
     }
     case 'curly': {
       const bumps: string[] = [];
@@ -1418,6 +1522,55 @@ function hairBehind(spec: FigureSpec, R: Rig): string {
     default:
       return '';
   }
+}
+
+/** A ribbon's two ends, hanging from its bow at the side of the head, behind it. */
+function ribbonEnds(spec: FigureSpec, R: Rig, chains?: Chains): string {
+  if (!spec.extras.includes('ribbon')) return '';
+  const { cy } = R;
+  const c = CLOTH[spec.accentColour];
+  return swung(
+    chains,
+    'ribbon',
+    'ribbon',
+    `<path d="M46,${cy - 18} L54,${cy - 18} L68,${cy + 28} L63,${cy + 25} L60,${cy + 31} Z" ${inked(shade(c, 0.85))}/>` +
+      `<path d="M42,${cy - 18} L50,${cy - 18} L56,${cy + 36} L51,${cy + 32} L47,${cy + 37} Z" ${inked(c)}/>`,
+    [48, cy - 18],
+    [60, cy + 34],
+    2,
+  );
+}
+
+/** A ribbon's bow, on the side of the head over the hair. */
+function ribbonBow(spec: FigureSpec, R: Rig): string {
+  if (!spec.extras.includes('ribbon')) return '';
+  const { cy } = R;
+  const c = CLOTH[spec.accentColour];
+  return (
+    `<path d="M44,${cy - 22} L31,${cy - 33} L33,${cy - 11} Z" ${inked(c)}/>` +
+    `<path d="M44,${cy - 22} L57,${cy - 33} L55,${cy - 11} Z" ${inked(c)}/>` +
+    `<circle cx="44" cy="${cy - 22}" r="4.5" ${inked(shade(c, 0.85))}/>`
+  );
+}
+
+/** A headscarf's end: knotted below the ear and hanging over the shoulder, in front. */
+function headscarfTail(spec: FigureSpec, R: Rig, chains?: Chains): string {
+  if (!spec.extras.includes('headscarf tail')) return '';
+  const { cy, sY } = R;
+  const c = CLOTH[spec.accentColour];
+  return (
+    swung(
+      chains,
+      'headscarf',
+      'headscarf',
+      `<path d="M34,${cy + 34} L47,${cy + 32} L58,${sY + 50} L52,${sY + 45} L47,${sY + 52} Z" ${inked(c)}/>` +
+        line(`M41,${cy + 38} L50,${sY + 44}`, shade(c, 0.78), 2.2),
+      [40, cy + 34],
+      [53, sY + 51],
+      2,
+    ) +
+    `<ellipse cx="40" cy="${cy + 33}" rx="8" ry="6.5" ${inked(shade(c, 0.9))}/>`
+  );
 }
 
 /**
@@ -1884,6 +2037,7 @@ function backOf(
   R: Rig,
   bottom: number,
   halfBottom: number,
+  chains?: Chains,
 ): string {
   const out: string[] = [];
   const { sY, cy, halfShoulder: s2 } = R;
@@ -1891,14 +2045,26 @@ function backOf(
   if (spec.extras.includes('wings'))
     for (const s of [-1, 1]) {
       const tip = s * WING_SPAN;
+      // On rig 2 each wing turns whole about where it grows.
       out.push(
-        `<path d="M${s * 14},${sY + 14} Q${s * 60},${sY - 70} ${tip},${sY - 44} Q${s * 104},${sY + 4} ${s * 96},${sY + 22} Q${s * 84},${sY + 52} ${s * 70},${sY + 58} Q${s * 50},${sY + 70} ${s * 22},${sY + 50} Z" ${inked('#fbfbf6')}/>`,
-        ...[0, 1, 2].map((k) =>
-          line(
-            `M${s * (30 + k * 8)},${sY + 36 - k * 4} Q${s * (60 + k * 10)},${sY + 20 - k * 16} ${s * (86 + k * 8)},${sY - 6 - k * 14}`,
-            '#d7d5cc',
-            2.4,
-          ),
+        swung(
+          chains,
+          s < 0 ? 'wing-l' : 'wing-r',
+          'wing',
+          [
+            `<path d="M${s * 14},${sY + 14} Q${s * 60},${sY - 70} ${tip},${sY - 44} Q${s * 104},${sY + 4} ${s * 96},${sY + 22} Q${s * 84},${sY + 52} ${s * 70},${sY + 58} Q${s * 50},${sY + 70} ${s * 22},${sY + 50} Z" ${inked('#fbfbf6')}/>`,
+            ...[0, 1, 2].map((k) =>
+              line(
+                `M${s * (30 + k * 8)},${sY + 36 - k * 4} Q${s * (60 + k * 10)},${sY + 20 - k * 16} ${s * (86 + k * 8)},${sY - 6 - k * 14}`,
+                '#d7d5cc',
+                2.4,
+              ),
+            ),
+          ].join(''),
+          [s * 14, sY + 14],
+          undefined,
+          1,
+          false,
         ),
       );
     }
@@ -1906,8 +2072,33 @@ function backOf(
     // A cape from the shoulders to the calves, flaring past the arms.
     const down = r1(Math.max(bottom + 6, -FEET - 16));
     const half = r1(halfBottom + 30);
+    // On rig 2, three panels: the yoke, the middle and the hem.
     out.push(
-      `<path d="M${r1(-s2 - 2)},${sY + 6} Q${r1(-s2 - 6)},${sY} ${r1(-s2 + 10)},${sY - 2} L${r1(s2 - 10)},${sY - 2} Q${r1(s2 + 6)},${sY} ${r1(s2 + 2)},${sY + 6} L${half},${down} Q0,${r1(down + 8)} ${-half},${down} Z" ${inked(shade(accent, 0.9))}/>`,
+      swung(
+        chains,
+        'cloak',
+        'cloak',
+        `<path d="M${r1(-s2 - 2)},${sY + 6} Q${r1(-s2 - 6)},${sY} ${r1(-s2 + 10)},${sY - 2} L${r1(s2 - 10)},${sY - 2} Q${r1(s2 + 6)},${sY} ${r1(s2 + 2)},${sY + 6} L${half},${down} Q0,${r1(down + 8)} ${-half},${down} Z" ${inked(shade(accent, 0.9))}/>`,
+        [0, sY],
+        [0, down],
+        3,
+      ),
+    );
+  }
+  if (spec.extras.includes('cape')) {
+    // A cape: from the shoulders to the hips, flaring a little past the arms.
+    const down = r1(R.hemY + 12);
+    const half = r1(halfBottom + 16);
+    out.push(
+      swung(
+        chains,
+        'cape',
+        'cape',
+        `<path d="M${r1(-s2 - 2)},${sY + 6} Q${r1(-s2 - 6)},${sY} ${r1(-s2 + 10)},${sY - 2} L${r1(s2 - 10)},${sY - 2} Q${r1(s2 + 6)},${sY} ${r1(s2 + 2)},${sY + 6} L${half},${down} Q0,${r1(down + 6)} ${-half},${down} Z" ${inked(shade(accent, 0.9))}/>`,
+        [0, sY],
+        [0, down],
+        3,
+      ),
     );
   }
   if (spec.headwear === 'mantle')
@@ -1925,7 +2116,7 @@ function packOf(spec: FigureSpec, R: Rig): string {
 }
 
 /** What someone carries or wears besides: drawn on the body, below the chin. */
-function extrasOnBody(spec: FigureSpec, R: Rig): string {
+function extrasOnBody(spec: FigureSpec, R: Rig, chains?: Chains): string {
   const { sY, halfShoulder: s2 } = R;
   const accent = CLOTH[spec.accentColour];
   const out: string[] = [];
@@ -1947,7 +2138,17 @@ function extrasOnBody(spec: FigureSpec, R: Rig): string {
   if (spec.extras.includes('scarf'))
     out.push(
       `<path d="M-30,${sY + 8} Q0,${sY + 18} 30,${sY + 8} L30,${sY + 18} Q0,${sY + 28} -30,${sY + 18} Z" ${inked(accent)}/>` +
-        `<path d="M12,${sY + 20} L24,${sY + 20} L22,${sY + 48} L10,${sY + 48} Z" ${inked(accent)}/>`,
+        // Its end, two segments on rig 2.
+        swung(
+          chains,
+          'scarf',
+          'scarf',
+          `<path d="M12,${sY + 20} L24,${sY + 20} L22,${sY + 48} L10,${sY + 48} Z" ${inked(accent)}/>`,
+          [18, sY + 20],
+          [16, sY + 48],
+          2,
+          false,
+        ),
     );
   if (spec.extras.includes('cloak'))
     // Its fronts over the shoulders, fastened below the chin.
@@ -1958,6 +2159,16 @@ function extrasOnBody(spec: FigureSpec, R: Rig): string {
             `<path d="M${s * 6},${sY + 12} Q${s * (s2 - 2)},${sY - 2} ${s * (s2 + 1)},${sY + 10} L${s * (s2 - 1)},${sY + 44} Q${s * (s2 - 8)},${sY + 30} ${s * 6},${sY + 18} Z" ${inked(accent)}/>`,
         )
         .join('') + `<circle cx="0" cy="${sY + 16}" r="5" ${inked(GOLD, 2)}/>`,
+    );
+  if (spec.extras.includes('cape'))
+    // Its short fronts over the shoulders, tied at the neck.
+    out.push(
+      [-1, 1]
+        .map(
+          (s) =>
+            `<path d="M${s * 6},${sY + 10} Q${s * (s2 - 4)},${sY - 2} ${s * (s2 + 1)},${sY + 8} L${s * (s2 - 2)},${sY + 22} Q${s * (s2 - 10)},${sY + 14} ${s * 6},${sY + 16} Z" ${inked(accent)}/>`,
+        )
+        .join('') + `<circle cx="0" cy="${sY + 13}" r="4" ${inked(GOLD, 2)}/>`,
     );
   if (spec.extras.includes('bow tie'))
     out.push(
@@ -2255,6 +2466,12 @@ export interface FigureDrawing {
   joints?: Record<'r' | 'l', [Point2, Point2, Point2]>;
   /** And each leg's hip, knee and foot: the knees bend by them, and the body sinks as far as the legs fold. */
   legs?: Record<'r' | 'l', [Point2, Point2, Point2]>;
+  /** Made with rig 2 (studio-world-plan §4.6): what swings is drawn as chains. Absent, rig 1. */
+  rig?: 2;
+  /** On rig 2, each part that swings, its root in the frame's units. */
+  dangles?: Dangle[];
+  /** On rig 2, one who walks: how far one full stride (both feet) carries them, in the frame's units, and how they go. */
+  stride?: { length: number; gait: 'walk' };
 }
 
 /** How the mouth moves while talking: open and shut, unevenly, as speech does. */
@@ -2309,6 +2526,8 @@ interface Layers {
   joints: Record<'r' | 'l', [Point2, Point2, Point2]>;
   /** Each leg's hip, knee and foot as drawn. */
   legJoints: Record<'r' | 'l', [Point2, Point2, Point2]>;
+  /** On rig 2, what swings, each with its root in the kit's units; none on rig 1. */
+  dangles: Dangle[];
 }
 
 /** Whether someone in a pose has a hand free to hold something. */
@@ -2370,7 +2589,10 @@ function layersOf(
   spec: FigureSpec,
   pose: FigurePose = 'standing',
   holding: FigureProp | null = null,
+  /** On rig 2, the prefix of this one's clip paths' ids: what swings is drawn as chains. */
+  clip?: string,
 ): Layers {
+  const chains: Chains | undefined = clip ? { clip, dangles: [] } : undefined;
   const R = rigOf(spec.age, spec.build);
   const skin = SKIN[Math.min(SKIN_TONES, Math.max(1, spec.skin)) - 1];
   const hairColour = HAIR[spec.hairColour];
@@ -2479,7 +2701,7 @@ function layersOf(
   const body = [
     shape,
     dressed.details,
-    extrasOnBody(spec, R),
+    extrasOnBody(spec, R, chains),
     dressed.collar,
   ].join('');
 
@@ -2682,6 +2904,7 @@ function layersOf(
       `<path d="${chord(0, cy + 3, 47, 44, 0.3, 0, 'bottom')}" ${inked(hairColour)}/>`,
     );
   head.push(hairOver(spec, R), headwearOf(spec, R));
+  head.push(ribbonBow(spec, R), headscarfTail(spec, R, chains));
   // The eyes' whites, the same under every face: they turn with it.
   const whites = [-1, 1]
     .map(
@@ -2731,7 +2954,7 @@ function layersOf(
   return {
     R,
     legs: legs.join(''),
-    behind: `${backOf(spec, R, bottom, hb)}${packOf(spec, R)}<g class="hd">${hairBehind(spec, R)}</g>`,
+    behind: `${backOf(spec, R, bottom, hb, chains)}${packOf(spec, R)}<g class="hd">${hairBehind(spec, R, chains)}${ribbonEnds(spec, R, chains)}</g>`,
     body,
     bodyBack: shape,
     arms: arms.join(''),
@@ -2766,6 +2989,7 @@ function layersOf(
     },
     joints,
     legJoints,
+    dangles: chains?.dangles ?? [],
   };
 }
 
@@ -2901,7 +3125,15 @@ function styleOf(
   waves = false,
   /** Where the head turns about: the neck, in the kit's units. */
   neck = 0,
+  /**
+   * Made with rig 2: its walk is the player's (studio-world-plan §4.2),
+   * the legs swung and the body bobbed by the rig's variables as far as
+   * it goes, so no loop of its own steps them.
+   */
+  rig2 = false,
 ): string {
+  const acts = (one: FigureSign) =>
+    rig2 && one === 'walking' ? '' : (ACTS[one] ?? '');
   const moving = MOVES.filter(([, of]) =>
     of.some((one) => signs.includes(one)),
   );
@@ -2931,9 +3163,9 @@ function styleOf(
     signs.some((one) => ACTS[one]?.includes('.whole'))
       ? '.whole{transform-box:view-box;transform-origin:0 0}'
       : '',
-    ...signs.map((one) => ACTS[one] ?? ''),
+    ...signs.map(acts),
     // Anyone may walk on and off, whatever their signs.
-    signs.includes('walking') ? '' : (ACTS.walking ?? ''),
+    signs.includes('walking') ? '' : acts('walking'),
     rigStyle(neck),
   ].join('');
 }
@@ -3036,8 +3268,10 @@ function drawInBed(
   old = false,
   /** The faces drawn only when asked for: eyes closed. */
   faces: readonly AskedFace[] = [],
+  /** On rig 2, the prefix of its clip paths' ids: what swings is drawn as chains. */
+  clip?: string,
 ): FigureDrawing {
-  const layers = layersOf(spec);
+  const layers = layersOf(spec, 'standing', null, clip);
   const { R } = layers;
   const skin = SKIN[Math.min(SKIN_TONES, Math.max(1, spec.skin)) - 1];
   const top = BED.top;
@@ -3136,7 +3370,7 @@ function drawInBed(
   ];
   const svg = [
     `<svg xmlns="http://www.w3.org/2000/svg" viewBox="${[fx, fy, fw, fh].join(' ')}">`,
-    `<style>${styleOf(r1(beatOf(key) * 4.6), [r1(0.3 + beatOf(key) * 2.4)], drawn, false, R.sY + 6)}${shutStyle(faces)}</style>`,
+    `<style>${styleOf(r1(beatOf(key) * 4.6), [r1(0.3 + beatOf(key) * 2.4)], drawn, false, R.sY + 6, Boolean(clip))}${shutStyle(faces)}${clip ? dangleCss(layers.dangles) : ''}</style>`,
     eyeClip(R),
     `<ellipse cx="0" cy="0" rx="${w}" ry="8" fill="#1d1a22" fill-opacity="0.16"/>`,
     `<g stroke="${FIGURE_INK}" stroke-width="${LINE}" stroke-linejoin="round">`,
@@ -3171,6 +3405,23 @@ function drawInBed(
       body: [hx + 90, top - 12],
       legs: [hx + 150, top + 20],
     },
+    // On rig 2, what swings, moved to the pillows with the head.
+    ...(clip
+      ? {
+          rig: 2 as const,
+          ...(layers.dangles.length
+            ? {
+                dangles: layers.dangles.map((one) => ({
+                  ...one,
+                  root: [
+                    r1(one.root[0] + hx),
+                    r1(one.root[1] + hy - R.cy),
+                  ] as Point2,
+                })),
+              }
+            : {}),
+        }
+      : {}),
   };
 }
 
@@ -3194,6 +3445,13 @@ export interface FigureHow {
    * shown, in place of those before it. None for a group, or lying.
    */
   dress?: readonly { state: string; spec: FigureSpec }[];
+  /**
+   * The rig it is made with (studio-world-plan §4.6): 1, as ever, byte for
+   * byte; 2, what swings (hair behind, a cloak or cape, a scarf's end, a
+   * ribbon, a headscarf's end, wings) drawn as chains the player turns by
+   * `--dg-<id>-<k>`, and its dangles and stride said.
+   */
+  rig?: RigVersion;
 }
 
 /** The class a figure's clothes are drawn in: 0 what they start in, then each they change into. */
@@ -3279,7 +3537,13 @@ export function drawFigure(
   const key = seed || JSON.stringify(spec);
   const pose = how.pose ?? 'standing';
   const faces = facesFor(how.faces);
-  if (pose === 'in bed') return drawInBed(spec, key, how.signs, how.old, faces);
+  // On rig 2, its clip paths' ids its own, so no two drawings' meet.
+  const clip =
+    how.rig === 2
+      ? `f${Math.floor(beatOf(`${key}:id`) * 1e6).toString(36)}`
+      : undefined;
+  if (pose === 'in bed')
+    return drawInBed(spec, key, how.signs, how.old, faces, clip);
   const lying = pose === 'lying';
   const n = lying
     ? 1
@@ -3289,14 +3553,21 @@ export function drawFigure(
   const posed = holding && pose === 'standing' ? 'holding' : pose;
   const drawn = signsFor(pose, how.signs);
   const members = Array.from({ length: n }, (_, i) =>
-    layersOf(i === 0 ? spec : companionOf(spec, i, key), posed, holding),
+    layersOf(
+      i === 0 ? spec : companionOf(spec, i, key),
+      posed,
+      holding,
+      clip && `${clip}-${i}`,
+    ),
   );
   // One person who changes clothes: each outfit's clothed layers drawn on
   // the same rig, the later ones shown as their states are.
   const changes = n === 1 && !lying ? (how.dress ?? []) : [];
   const outfits = [
     members[0],
-    ...changes.map((one) => layersOf(one.spec, posed, holding)),
+    ...changes.map((one, k) =>
+      layersOf(one.spec, posed, holding, clip && `${clip}-o${k + 1}`),
+    ),
   ];
   const worn = (layer: (l: Layers) => string): string =>
     changes.length
@@ -3341,6 +3612,17 @@ export function drawFigure(
         r1(frame[2] + wider + left + right),
         r1(frame[3] + up),
       ];
+  // On rig 2, what swings, each once: the one described's, then the
+  // rest of their group's and their later outfits', where each stands.
+  const dangles = uniqueDangles([
+    ...order.flatMap(({ layers, i }) =>
+      layers.dangles.map((one) => ({
+        ...one,
+        root: [r1(one.root[0] + x(i)), one.root[1]] as Point2,
+      })),
+    ),
+    ...outfits.slice(1).flatMap((l) => l.dangles),
+  ]);
   const style =
     styleOf(
       breathAt,
@@ -3348,9 +3630,11 @@ export function drawFigure(
       drawn,
       posed === 'waving',
       R.sY + 6,
+      Boolean(clip),
     ) +
     dressStyle(changes.map((one) => one.state)) +
-    shutStyle(faces);
+    shutStyle(faces) +
+    (clip ? dangleCss(dangles) : '');
   const person = [
     `<g id="legs">${worn((l) => l.legs)}</g>`,
     `<g class="breathe">`,
@@ -3415,6 +3699,36 @@ export function drawFigure(
     },
     ...(n === 1 && !lying
       ? { joints: members[0].joints, legs: members[0].legJoints }
+      : {}),
+    // On rig 2: what swings, turned with them lying down; and standing,
+    // their stride (§4.2): as far as their legs carry them swung 24
+    // degrees either way about the hip, each foot planted where it lands
+    // (the leg from the hip to the ankle, about which the foot is kept
+    // flat).
+    ...(clip
+      ? {
+          rig: 2 as const,
+          ...(dangles.length
+            ? {
+                dangles: dangles.map((one) => ({
+                  ...one,
+                  root: at(one.root),
+                  // Lying, turned with them: (x, y) goes to (y, -x).
+                  ...(lying
+                    ? { dir: [one.dir[1], -one.dir[0] || 0] as Point2 }
+                    : {}),
+                })),
+              }
+            : {}),
+          ...(lying
+            ? {}
+            : {
+                stride: {
+                  length: r1(strideLength(R.legs + 4, PERSON_SWING)),
+                  gait: 'walk' as const,
+                },
+              }),
+        }
       : {}),
   };
 }

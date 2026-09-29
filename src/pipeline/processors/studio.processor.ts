@@ -38,8 +38,10 @@ import {
   type SheetProblem,
 } from '../../business/domain/studio/studio-check';
 import {
+  auditMoves,
   auditScene,
   describeAudit,
+  describeMoves,
 } from '../../business/domain/studio/studio-audit';
 import {
   askedGone,
@@ -232,6 +234,9 @@ export function studioMakeOf(
         const seen = auditScene(sheet, scene, staged);
         const unseen = seen.filter((one) => one.verdict === 'unseen');
         const notes = describeAudit(seen);
+        // How its action moves play: each phase its least, the feet down
+        // where it lands, no one through anyone; logged for us.
+        const moveNotes = describeMoves(auditMoves(scene));
         const faults = stagedFaults(sheet, scene, staged);
         const rise = new Set(
           faults.flatMap((f) =>
@@ -241,6 +246,7 @@ export function studioMakeOf(
         return {
           notes: [
             ...(notes.length ? [`audit: ${notes.join('; ')}`] : []),
+            ...(moveNotes.length ? [`moves: ${moveNotes.join('; ')}`] : []),
             ...(faults.length
               ? [
                   `staging: ${faults.map((f) => `${f.id}${f.beat !== null ? ` b${f.beat}` : ''} ${f.why}`).join('; ')}`,

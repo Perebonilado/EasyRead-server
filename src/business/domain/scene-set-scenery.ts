@@ -15,7 +15,7 @@
  * floor; one that lies on the floor (a rug) is flat, and is floor.
  */
 import { FIGURE_INK, SET_COLOURS, KIT_EXTRAS, CLOTH, COATS } from './scene-ink';
-import type { SetPiece } from './scene-set-pieces';
+import { segment, type SetPiece } from './scene-set-pieces';
 
 /** The scenery code draws, by name. */
 export const SCENERY_KINDS = [
@@ -345,16 +345,24 @@ export function drawScenery(kind: SceneryKind, colour?: string): SceneryPiece {
       };
     }
     case 'lamp':
-      return framed(
-        SHADOW(24) +
-          `<ellipse cx="0" cy="-5" rx="22" ry="6" ${fill(DARK)}/>` +
-          rect(-3, -142, 6, 138, DARK, 1) +
-          shape(
-            'M-26,-136 L-16,-172 L16,-172 L26,-136 Z',
-            colour ?? CLOTH.yellow,
-          ),
-        [-26, -172, 52, 172],
-      );
+      // Its shade wobbles on its pole when the room is bumped.
+      return {
+        ...framed(
+          SHADOW(24) +
+            `<ellipse cx="0" cy="-5" rx="22" ry="6" ${fill(DARK)}/>` +
+            rect(-3, -142, 6, 138, DARK, 1) +
+            segment(
+              0,
+              [0, -142],
+              shape(
+                'M-26,-136 L-16,-172 L16,-172 L26,-136 Z',
+                colour ?? CLOTH.yellow,
+              ),
+            ),
+          [-26, -172, 52, 172],
+        ),
+        reacts: { as: 'hang', len: 30 },
+      };
     case 'curtains': {
       // A window on the wall with its curtains drawn back and its rail.
       const c = colour ?? CLOTH.red;
@@ -369,18 +377,28 @@ export function drawScenery(kind: SceneryKind, colour?: string): SceneryPiece {
             circle(24, -82, 10, GOLD) +
             line('M0,-104 L0,-16 M-48,-60 L48,-60', FIGURE_INK, 3) +
             rect(-60, -12, 120, 10, PLANK, 2) +
-            shape(
-              'M-74,-118 L-44,-118 Q-40,-66 -50,-40 Q-44,-24 -40,-4 L-74,-4 Z',
-              c,
+            // Each curtain hangs from the rail, and billows on a draught.
+            segment(
+              0,
+              [-59, -118],
+              shape(
+                'M-74,-118 L-44,-118 Q-40,-66 -50,-40 Q-44,-24 -40,-4 L-74,-4 Z',
+                c,
+              ),
             ) +
-            shape(
-              'M74,-118 L44,-118 Q40,-66 50,-40 Q44,-24 40,-4 L74,-4 Z',
-              c,
+            segment(
+              1,
+              [59, -118],
+              shape(
+                'M74,-118 L44,-118 Q40,-66 50,-40 Q44,-24 40,-4 L74,-4 Z',
+                c,
+              ),
             ) +
             rect(-82, -124, 164, 8, WOOD_DARK, 4),
           [-82, -124, 164, 124],
         ),
         hangs: 84,
+        reacts: { as: 'curtain', len: 114 },
       };
     }
     case 'picture':
@@ -412,9 +430,14 @@ export function drawScenery(kind: SceneryKind, colour?: string): SceneryPiece {
       const flags = Array.from({ length: 9 }, (_, k) => {
         const x = -128 + k * 32;
         const y = -38 + Math.sin((k / 8) * Math.PI) * 16;
-        return shape(
-          `M${r1(x - 11)},${r1(y)} L${r1(x + 11)},${r1(y + 1)} L${r1(x)},${r1(y + 26)} Z`,
-          BOOKS[k % BOOKS.length],
+        // Each flag its own, turning where it hangs on the string.
+        return segment(
+          k,
+          [x, r1(y)],
+          shape(
+            `M${r1(x - 11)},${r1(y)} L${r1(x + 11)},${r1(y + 1)} L${r1(x)},${r1(y + 26)} Z`,
+            BOOKS[k % BOOKS.length],
+          ),
         );
       }).join('');
       return {
@@ -423,6 +446,7 @@ export function drawScenery(kind: SceneryKind, colour?: string): SceneryPiece {
           [-148, -48, 296, 48],
         ),
         hangs: 262,
+        reacts: { as: 'flag', len: 26 },
       };
     }
     case 'plant':
@@ -431,11 +455,17 @@ export function drawScenery(kind: SceneryKind, colour?: string): SceneryPiece {
           SHADOW(22) +
             shape('M-20,-36 L20,-36 L15,0 L-15,0 Z', colour ?? ROOF) +
             rect(-23, -42, 46, 8, ROOF, 2) +
-            shape('M0,-42 Q-34,-70 -30,-96 Q-8,-80 0,-42 Z', LEAF) +
-            shape('M0,-42 Q30,-74 26,-100 Q6,-80 0,-42 Z', LEAF_DARK) +
-            shape('M0,-42 Q-8,-90 4,-114 Q12,-88 0,-42 Z', LEAF),
+            // Its leaves bend from the pot as someone brushes by.
+            segment(
+              0,
+              [0, -42],
+              shape('M0,-42 Q-34,-70 -30,-96 Q-8,-80 0,-42 Z', LEAF) +
+                shape('M0,-42 Q30,-74 26,-100 Q6,-80 0,-42 Z', LEAF_DARK) +
+                shape('M0,-42 Q-8,-90 4,-114 Q12,-88 0,-42 Z', LEAF),
+            ),
           [-32, -114, 64, 114],
         ),
+        reacts: { as: 'sway', len: 114 },
       };
     case 'toybox': {
       const c = colour ?? CLOTH.teal;
@@ -494,36 +524,50 @@ export function drawScenery(kind: SceneryKind, colour?: string): SceneryPiece {
     case 'house': {
       // A house: its walls, its roof, a door and two windows.
       const walls = colour ?? WALLS;
-      return framed(
-        SHADOW(118) +
-          rect(-104, -168, 208, 168, walls, 2) +
-          shape('M-124,-160 L0,-252 L124,-160 Z', ROOF) +
-          rect(-22, -86, 44, 86, WOOD, 2) +
-          circle(12, -42, 3.5, GOLD) +
-          rect(-84, -132, 44, 40, GLASS, 2) +
-          rect(40, -132, 44, 40, GLASS, 2) +
-          line(
-            'M-62,-132 L-62,-92 M-84,-112 L-40,-112 M62,-132 L62,-92 M40,-112 L84,-112',
-            FIGURE_INK,
-            2.4,
-          ),
-        [-124, -252, 248, 252],
-      );
+      return {
+        ...framed(
+          SHADOW(118) +
+            rect(-104, -168, 208, 168, walls, 2) +
+            shape('M-124,-160 L0,-252 L124,-160 Z', ROOF) +
+            rect(-22, -86, 44, 86, WOOD, 2) +
+            circle(12, -42, 3.5, GOLD) +
+            rect(-84, -132, 44, 40, GLASS, 2) +
+            rect(40, -132, 44, 40, GLASS, 2) +
+            line(
+              'M-62,-132 L-62,-92 M-84,-112 L-40,-112 M62,-132 L62,-92 M40,-112 L84,-112',
+              FIGURE_INK,
+              2.4,
+            ),
+          [-124, -252, 248, 252],
+        ),
+        roosts: [
+          [-48, -216],
+          [0, -252],
+          [48, -216],
+        ],
+      };
     }
     case 'hut':
       // A round hut: walls of earth and a thatched roof.
-      return framed(
-        SHADOW(100) +
-          rect(-86, -110, 172, 110, colour ?? EARTH, 6) +
-          shape('M-24,0 L-24,-58 Q0,-78 24,-58 L24,0 Z', DARK) +
-          shape('M-112,-96 L0,-208 L112,-96 Q0,-80 -112,-96 Z', STRAW) +
-          line(
-            'M-70,-110 L-20,-178 M-30,-102 L0,-196 M30,-102 L14,-190 M70,-110 L30,-170',
-            STRAW_DARK,
-            3,
-          ),
-        [-112, -208, 224, 208],
-      );
+      return {
+        ...framed(
+          SHADOW(100) +
+            rect(-86, -110, 172, 110, colour ?? EARTH, 6) +
+            shape('M-24,0 L-24,-58 Q0,-78 24,-58 L24,0 Z', DARK) +
+            shape('M-112,-96 L0,-208 L112,-96 Q0,-80 -112,-96 Z', STRAW) +
+            line(
+              'M-70,-110 L-20,-178 M-30,-102 L0,-196 M30,-102 L14,-190 M70,-110 L30,-170',
+              STRAW_DARK,
+              3,
+            ),
+          [-112, -208, 224, 208],
+        ),
+        roosts: [
+          [-40, -168],
+          [0, -208],
+          [40, -168],
+        ],
+      };
     case 'cart': {
       // A hand cart piled with fruit, its two wheels and its handles.
       const wheel = (x: number) =>
@@ -573,6 +617,8 @@ export function drawScenery(kind: SceneryKind, colour?: string): SceneryPiece {
           [-66, -92, 132, 92],
         ),
         lives: 'sway',
+        reacts: { as: 'sway', len: 92 },
+        roosts: [[0, -92]],
       };
     case 'rock':
       return framed(
@@ -586,25 +632,28 @@ export function drawScenery(kind: SceneryKind, colour?: string): SceneryPiece {
       );
     case 'flowers': {
       const c = colour ?? CLOTH.pink;
-      return framed(
-        [-26, -8, 10, 28]
-          .map(
-            (x, k) =>
-              line(
-                `M${x},0 L${x + (k % 2 ? 3 : -3)},${-22 - (k % 2) * 8}`,
-                LEAF_DEEP,
-                2.6,
-              ) +
-              circle(
-                x + (k % 2 ? 3 : -3),
-                -26 - (k % 2) * 8,
-                7,
-                k % 2 ? GOLD : c,
-              ),
-          )
-          .join('') + shape('M-36,0 Q0,-14 36,0 Z', LEAF),
-        [-36, -42, 72, 42],
-      );
+      return {
+        ...framed(
+          [-26, -8, 10, 28]
+            .map(
+              (x, k) =>
+                line(
+                  `M${x},0 L${x + (k % 2 ? 3 : -3)},${-22 - (k % 2) * 8}`,
+                  LEAF_DEEP,
+                  2.6,
+                ) +
+                circle(
+                  x + (k % 2 ? 3 : -3),
+                  -26 - (k % 2) * 8,
+                  7,
+                  k % 2 ? GOLD : c,
+                ),
+            )
+            .join('') + shape('M-36,0 Q0,-14 36,0 Z', LEAF),
+          [-36, -42, 72, 42],
+        ),
+        reacts: { as: 'sway', len: 42 },
+      };
     }
     case 'fern':
       return {
@@ -623,6 +672,7 @@ export function drawScenery(kind: SceneryKind, colour?: string): SceneryPiece {
           [-52, -58, 104, 58],
         ),
         lives: 'sway',
+        reacts: { as: 'sway', len: 58 },
       };
     case 'mushroom':
       return framed(
@@ -632,14 +682,17 @@ export function drawScenery(kind: SceneryKind, colour?: string): SceneryPiece {
         [-26, -48, 52, 48],
       );
     case 'lamppost':
-      return framed(
-        SHADOW(22) +
-          rect(-14, -16, 28, 16, colour ?? DARK, 3) +
-          rect(-5, -276, 10, 262, colour ?? DARK, 2) +
-          shape('M-20,-276 L20,-276 L14,-306 L-14,-306 Z', GOLD) +
-          shape('M-24,-306 L24,-306 L0,-326 Z', colour ?? DARK),
-        [-24, -326, 48, 326],
-      );
+      return {
+        ...framed(
+          SHADOW(22) +
+            rect(-14, -16, 28, 16, colour ?? DARK, 3) +
+            rect(-5, -276, 10, 262, colour ?? DARK, 2) +
+            shape('M-20,-276 L20,-276 L14,-306 L-14,-306 Z', GOLD) +
+            shape('M-24,-306 L24,-306 L0,-326 Z', colour ?? DARK),
+          [-24, -326, 48, 326],
+        ),
+        roosts: [[0, -326]],
+      };
     case 'basket':
       return {
         ...framed(
@@ -685,15 +738,23 @@ export function drawScenery(kind: SceneryKind, colour?: string): SceneryPiece {
           ),
         )
         .join('');
-      return framed(
-        SHADOW(40) +
-          line('M0,0 L4,-176', FIGURE_INK, 9) +
-          line('M0,0 L4,-176', PAPER, 4) +
-          shape('M-104,-150 Q2,-238 106,-150 Q2,-166 -104,-150 Z', c) +
-          segments +
-          circle(2, -200, 6, c),
-        [-104, -226, 210, 226],
-      );
+      return {
+        ...framed(
+          SHADOW(40) +
+            line('M0,0 L4,-176', FIGURE_INK, 9) +
+            line('M0,0 L4,-176', PAPER, 4) +
+            // Its canopy, lifting and flapping on the wind about its pole.
+            segment(
+              0,
+              [4, -176],
+              shape('M-104,-150 Q2,-238 106,-150 Q2,-166 -104,-150 Z', c) +
+                segments +
+                circle(2, -200, 6, c),
+            ),
+          [-104, -226, 210, 226],
+        ),
+        reacts: { as: 'flag', len: 60 },
+      };
     }
     case 'boat':
       // A rowing boat drawn up on the shore.
@@ -714,12 +775,19 @@ export function drawScenery(kind: SceneryKind, colour?: string): SceneryPiece {
         ...framed(
           SHADOW(56) +
             rect(-12, -64, 24, 64, WOOD, 2) +
-            shape('M-80,-54 L0,-170 L80,-54 Z', LEAF_DARK) +
-            shape('M-66,-130 L0,-240 L66,-130 Z', colour ?? LEAF) +
-            shape('M-50,-200 L0,-296 L50,-200 Z', LEAF_DARK),
+            // Its crown, turning at the top of the trunk.
+            segment(
+              0,
+              [0, -64],
+              shape('M-80,-54 L0,-170 L80,-54 Z', LEAF_DARK) +
+                shape('M-66,-130 L0,-240 L66,-130 Z', colour ?? LEAF) +
+                shape('M-50,-200 L0,-296 L50,-200 Z', LEAF_DARK),
+            ),
           [-80, -296, 160, 296],
         ),
         lives: 'sway',
+        reacts: { as: 'sway', len: 296 },
+        roosts: [[0, -292]],
       };
     case 'hill':
       return framed(

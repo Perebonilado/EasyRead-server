@@ -135,6 +135,45 @@ Service Usage Consumer: its JSON key file's path, or the JSON itself;
 Cloud's Gemini voices refuse API keys) and, once the day is spent, the same voices speak
 through Cloud Text-to-Speech's Gemini-TTS (`GOOGLE_CLOUD_TTS_MODEL`,
 default `gemini-3.1-flash-tts-preview`) instead of a film failing.
+
+**ElevenLabs** voices Visualize and the Studio's films too, without
+Google's daily cap: set **`ELEVENLABS_API_KEY` on the worker and the API**
+(the tutors already use it), restart the worker so it says it can, and
+pick ElevenLabs on the admin page (or `SCENE_VOICE_ENGINE=elevenlabs`). A
+page is one Text to Dialogue request on Eleven v3 (`with-timestamps`, so no
+aligner), a line per sentence in its speaker's voice, its direction as an
+audio tag (`[calm]`, `[whispers]`, `[shouting]`), never words. Characters
+are cast by kind from ElevenLabs' premade voices, the same every episode;
+the admin page's **Voices** sets the narrator and the first voice of each
+kind from the account's list (any voice added to the account from the
+Voice Library shows there). Optional: `ELEVENLABS_NARRATOR_VOICE` (default
+George, `JBFqnCBsd6RMkjVDRZzb`), `ELEVENLABS_CONCURRENCY` (default: what
+ElevenLabs says, three at once pay as you go; every scene the worker makes
+shares it, and a 429 waits and asks again), `ELEVENLABS_STABILITY`
+(default 0.5), `ELEVENLABS_USD_PER_1K_CHARS` (default 0.1, for the
+ledger). Migration `0058` adds `app_settings.voice_cast` for the admin's
+voices: run `npm run migrate` (the API's pre-deploy command) before the
+new code reads the row.
+
+**Cartesia** voices them too: set **`CARTESIA_API_KEY` on the worker and
+the API**, restart the worker so it says it can, and pick Cartesia on the
+admin page (or `SCENE_VOICE_ENGINE=cartesia`). A page is a request per run
+of one speaker said one way on Sonic 3.6 (`/tts/sse` with word timestamps,
+so no aligner); the direction goes as the request's emotion (`calm`,
+`angry`, `confident`…) and volume (a shout louder, a whisper quieter) and
+each sentence's pace as its speed, never as words; the silences are made
+here. Characters are cast by kind from Cartesia's library (children's
+voices, old people's, characters for creatures, an echoing one from
+above), the same every episode, narrator Clyde; the admin page's
+**Voices** sets the narrator and each kind from the account's English
+voices, with a play button (the server fetches Cartesia's samples, which
+ask for the key). Each engine's choices are kept apart in
+`app_settings.voice_cast`: no new migration. Optional:
+`CARTESIA_CONCURRENCY` (default 2, the free plan's; set your plan's: Pro 3,
+Startup 5, Scale 15; every scene the worker makes shares it, and a 429 or
+5xx waits and asks again), `CARTESIA_NARRATOR_VOICE`,
+`CARTESIA_SCENE_MODEL` (default `sonic-3.6`), `CARTESIA_USD_PER_1K_CHARS`
+(default 0.05, for the ledger).
 `npm run drawing:bench` draws the
 bench's forty-two briefs through the same path and scores them against
 the kept baseline (`src/business/domain/drawing-bench/baseline.json`).

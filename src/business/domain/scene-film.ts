@@ -21,18 +21,58 @@ const CLEAR_FIRST_MS = 190;
 const POINT_MS = 1700;
 const SWING_MS = 300;
 const PULSE_MS = 700;
-/** A walk across the whole stage, and the shortest and longest walk. */
-const WALK_STAGE_MS = 4000;
-const WALK_MIN_MS = 1100;
-const WALK_MAX_MS = 3400;
+/**
+ * A walk across the whole stage, and the shortest and longest walk: the
+ * client's timeline.ts keeps the same. Slowed from 4 s a stage (and the
+ * kit's planted stride lengthened: scene-dangles' PERSON_SWING), so a
+ * grown-up walks about two strides a second, not four.
+ */
+export const WALK_STAGE_MS = 5200;
+export const WALK_MIN_MS = 1300;
+export const WALK_MAX_MS = 4400;
 
 const walkMs = (dx: number, W: number) =>
   Math.min(
     WALK_MAX_MS,
     Math.max(WALK_MIN_MS, (Math.abs(dx) / W) * WALK_STAGE_MS),
   );
+
+/**
+ * How far into the floor a change of size is, in widths of the stage per
+ * size's worth of change (studio-scenery-plan §4.3): the camera's lens
+ * about as long as the stage is wide, so walking from the floor's back to
+ * its front is about half a crossing. The client's WALK_DEPTH.
+ */
+export const WALK_DEPTH = 1;
+
+/**
+ * How far a walk goes on the floor, in the stage's units where the walker
+ * is: across, and nearer or farther off, by how much bigger or smaller
+ * they get (the client's walkLength). Between two places of one size, as
+ * far as across.
+ */
+export function walkLength(
+  from: Pick<ScenePlaceDto, 'x' | 'w' | 'h'>,
+  to: Pick<ScenePlaceDto, 'x' | 'w' | 'h'>,
+  W: number,
+): number {
+  const across = to.x + to.w / 2 - (from.x + from.w / 2);
+  const mean = (from.h + to.h) / 2;
+  const into =
+    mean > 0 && Math.abs(to.h - from.h) > mean * 0.005
+      ? (W * WALK_DEPTH * Math.abs(to.h - from.h)) / mean
+      : 0;
+  return into ? Math.hypot(across, into) : Math.abs(to.x - from.x);
+}
+
+/** How long a walk between two places takes, at a walk: by its true length on the floor. */
+const walkBetween = (
+  from: Pick<ScenePlaceDto, 'x' | 'w' | 'h'>,
+  to: Pick<ScenePlaceDto, 'x' | 'w' | 'h'>,
+  W: number,
+) => walkMs(walkLength(from, to, W), W);
 /** A run is this much quicker than a walk; and going in at a feature, this long to be gone there. */
-const RUN_PACE = 2.2;
+export const RUN_PACE = 2.2;
 
 /** How much quicker than a walk someone goes at a step: at a run, hurried, or at a walk. */
 const paceAt = (step: SceneStepDto, id: string) =>
@@ -120,7 +160,22 @@ export function settledOf(
           ? offside(place, entry?.side)
           : 0;
       if (place && walks(id) && entry?.how !== 'fade')
-        at = Math.max(at, start + walkMs(place.x - from, W) / pace(step, id));
+        at = Math.max(
+          at,
+          start +
+            walkBetween(
+              by
+                ? {
+                    x: by.way.x - (place.w * by.way.k) / 2,
+                    w: place.w * by.way.k,
+                    h: place.h * by.way.k,
+                  }
+                : { ...place, x: from },
+              place,
+              W,
+            ) /
+              pace(step, id),
+        );
       else at = Math.max(at, start + ENTER_MS);
     }
     for (const id of leaversAt(steps, k)) {
@@ -132,7 +187,16 @@ export function settledOf(
           at,
           step.atMs +
             (by?.goesIn
-              ? walkMs(by.way.x - place.w / 2 - place.x, W) / pace(step, id) +
+              ? walkBetween(
+                  place,
+                  {
+                    x: by.way.x - (place.w * by.way.k) / 2,
+                    w: place.w * by.way.k,
+                    h: place.h * by.way.k,
+                  },
+                  W,
+                ) /
+                  pace(step, id) +
                 VANISH_MS
               : walkMs(offside(place, exit?.side) - place.x, W) /
                 pace(step, id)),
@@ -147,8 +211,8 @@ export function settledOf(
         at = Math.max(
           at,
           step.atMs +
-            (walks(id) && Math.abs(to.x - from.x) > W * 0.02
-              ? walkMs(to.x - from.x, W) / pace(step, id)
+            (walks(id) && walkLength(from, to, W) > W * 0.02
+              ? walkBetween(from, to, W) / pace(step, id)
               : MOVE_MS),
         );
       }
@@ -174,7 +238,7 @@ export function settledOf(
   for (const prop of scene.props ?? [])
     for (const [moment, , does] of prop.does) {
       const doing = doingOf(actionDoing(does));
-      if (doing) at = Math.max(at, moment + doing.ms * (1 - doing.keyAt));
+      if (doing) at = Math.max(at, moment + doing.idealMs * (1 - doing.keyAt));
     }
   for (const effect of scene.effects) {
     if (effect.do === 'zoom') continue;
@@ -256,7 +320,7 @@ export function walksOf(
     out.push({
       id,
       from,
-      to: from + walkMs(end.x - start.x, W) / pace,
+      to: from + walkBetween(start, end, W) / pace,
       start,
       end,
     });
@@ -267,7 +331,7 @@ export function walksOf(
       if (!at || !walks(id)) continue;
       if (prev?.show.includes(id)) {
         const was = places[k - 1]?.[id];
-        if (was && Math.abs(at.x - was.x) > W * 0.02)
+        if (was && walkLength(was, at, W) > W * 0.02)
           walk(id, step.atMs, was, at, paceAt(step, id));
       } else if (k && step.enter[id]?.how !== 'fade') {
         const entry = step.enter[id];
@@ -300,16 +364,24 @@ export function walksOf(
 
 /** How much longer than the time it has a walk may take before its walker hurries. */
 const HURRY_SLACK_MS = 150;
+/** A move that carries someone (a leap) begins this near the step that moves them: the player flies them there (its FLIGHT_SLACK_MS). */
+const CARRIED_SLACK_MS = 250;
 /** Hurried more than this, a walk is a run. */
-const HURRY_MOST = 1.7;
+const HURRY_MOST = 1.35;
+/** How far a walk may set off before its step, into the end of the line before it, rather than be hurried: by one not speaking then. */
+const EARLY_MOST_MS = 1000;
+/** Mouth shapes a second, as the acting sends them. */
+const MOUTH_RATE = 30;
 
 /**
  * Who hurries at each step, as the player plays it on the wide stage: one
  * who walks to a new place when the next thing they do (a thing reached
  * for, a move, their next walk or going off) comes sooner than the walk
- * there takes goes briskly, as much quicker as it needs, or at a run, so
- * no one takes up a cup before they reach it, nor sets off again before
- * they arrive. Steps no one need hurry at are as they were.
+ * there takes sets off earlier, into the end of the line before, when
+ * they are not the one saying it and nothing else changes at the step;
+ * and, still short of time, goes briskly, as much quicker as it needs, or
+ * at a run, so no one takes up a cup before they reach it, nor sets off
+ * again before they arrive. Steps no one need hurry at are as they were.
  */
 export function hurried(
   scene: Pick<SceneDto, 'steps' | 'stagings' | 'acting' | 'props'>,
@@ -317,63 +389,147 @@ export function hurried(
   const { steps } = scene;
   const { w: W, places } = scene.stagings.wide;
   const walks = (id: string) => scene.acting?.[id]?.walks === true;
-  /** When each one begins each thing they do: a hand going to a thing, a move. */
-  const doings = new Map<string, number[]>();
-  const begins = (id: string, at: number) =>
-    doings.set(id, [...(doings.get(id) ?? []), at]);
+  /** When each one begins each thing they do (a hand going to a thing, a move), and when it is done. */
+  const doings = new Map<string, [number, number][]>();
+  const begins = (id: string, at: number, end: number) =>
+    doings.set(id, [...(doings.get(id) ?? []), [at, end]]);
   for (const prop of scene.props ?? [])
     for (const [moment, who, does] of prop.does) {
       const doing = doingOf(actionDoing(does));
-      begins(who, moment - (doing ? doing.ms * doing.keyAt : 0));
+      begins(
+        who,
+        moment - (doing ? doing.idealMs * doing.keyAt : 0),
+        moment + (doing ? doing.idealMs * (1 - doing.keyAt) : 0),
+      );
     }
   for (const [id, acting] of Object.entries(scene.acting ?? {}))
-    for (const [start] of acting.moves ?? []) begins(id, start);
-  return steps.map((step, k) => {
-    if (!k) return step;
-    let pace = step.pace;
-    let hurry = step.hurry;
-    for (const id of step.show) {
-      const from = places[k - 1]?.[id];
+    for (const [start, move, ms] of acting.moves ?? [])
+      begins(
+        id,
+        start,
+        start +
+          ((HELD_MOVES as readonly string[]).includes(move)
+            ? Math.min(ms, HELD_IN_MS)
+            : ms),
+      );
+  /** Whether a move of someone's that carries them (a leap, a landing) begins as a step does: the step is the move's, not a walk. */
+  const carried = (id: string, at: number) =>
+    (scene.acting?.[id]?.moves ?? []).some(
+      ([start, move]) =>
+        doingOf(move)?.carries && Math.abs(start - at) <= CARRIED_SLACK_MS,
+    );
+  /** When someone is speaking, from and to: as their mouth moves. */
+  const says = (id: string): [number, number][] =>
+    (scene.acting?.[id]?.mouth ?? []).map(([start, shapes]) => [
+      start,
+      start + (shapes.length * 1000) / MOUTH_RATE,
+    ]);
+  const moved = (id: string, k: number) => {
+    const from = places[k - 1]?.[id];
+    const to = places[k]?.[id];
+    return Boolean(from && to && walkLength(from, to, W) > W * 0.02);
+  };
+  /** When each one who walked arrives, as the steps are timed so far. */
+  const arrives = new Map<string, number>();
+  const out: SceneStepDto[] = [];
+  steps.forEach((step, k) => {
+    if (!k) {
+      out.push(step);
+      return;
+    }
+    const prev = out[k - 1];
+    /** Whoever walks to a new place at this step, at a walk: not one a move of theirs carries there (a leap onto the wall), which keeps its time. */
+    const walkers = step.show.filter(
+      (id) =>
+        paceAt(step, id) <= 1 &&
+        walks(id) &&
+        steps[k - 1].show.includes(id) &&
+        moved(id, k) &&
+        !carried(id, step.atMs),
+    );
+    /** The next time each is moved or goes, or does anything, after the step. */
+    const nextOf = (id: string, at: number) => {
       const to = places[k]?.[id];
-      if (
-        paceAt(step, id) > 1 ||
-        !walks(id) ||
-        !steps[k - 1].show.includes(id) ||
-        !from ||
-        !to ||
-        Math.abs(to.x - from.x) <= W * 0.02
-      )
-        continue;
-      // The next time they are moved or go, and anything they do before.
       let next = Infinity;
       for (let j = k + 1; j < steps.length; j += 1) {
         const there = places[j]?.[id];
         if (
           !steps[j].show.includes(id) ||
           !there ||
-          Math.abs(there.x - to.x) > W * 0.02
+          !to ||
+          walkLength(to, there, W) > W * 0.02
         ) {
           next = steps[j].atMs;
           break;
         }
       }
-      for (const at of doings.get(id) ?? [])
-        if (at > step.atMs && at < next) next = at;
+      for (const [begin] of doings.get(id) ?? [])
+        if (begin > at && begin < next) next = begin;
+      return next;
+    };
+    const walkOf = (id: string) =>
+      walkBetween(places[k - 1][id], places[k][id], W);
+    // Set off sooner, into the end of the line before: when those who
+    // walk are all that changes at the step, and none of them is speaking,
+    // doing anything else, or still on their way from before.
+    let atMs = step.atMs;
+    const short = Math.max(
+      0,
+      ...walkers.map(
+        (id) => walkOf(id) - (nextOf(id, atMs) - atMs + HURRY_SLACK_MS),
+      ),
+    );
+    const onlyWalks =
+      walkers.length > 0 &&
+      !step.cut &&
+      step.layout === prev.layout &&
+      step.backdrop === prev.backdrop &&
+      newcomersAt(steps, k).length === 0 &&
+      leaversAt(steps, k).length === 0 &&
+      step.show.every((id) => walkers.includes(id) || !moved(id, k));
+    if (short > 0 && onlyWalks) {
+      let earliest = Math.max(prev.atMs + MOVE_MS, step.atMs - EARLY_MOST_MS);
+      for (const id of walkers) {
+        earliest = Math.max(earliest, arrives.get(id) ?? -Infinity);
+        for (const [from, to] of [...(doings.get(id) ?? []), ...says(id)])
+          if (from < step.atMs && to > earliest)
+            earliest = Math.max(earliest, to);
+      }
+      atMs = Math.round(
+        step.atMs - Math.max(0, Math.min(short, step.atMs - earliest)),
+      );
+    }
+    let pace = step.pace;
+    let hurry = step.hurry;
+    for (const id of step.show) {
+      if (
+        paceAt(step, id) > 1 ||
+        !walks(id) ||
+        !steps[k - 1].show.includes(id) ||
+        !moved(id, k)
+      )
+        continue;
       const quicker =
-        walkMs(to.x - from.x, W) /
-        Math.max(1, next - step.atMs + HURRY_SLACK_MS);
+        walkOf(id) / Math.max(1, nextOf(id, atMs) - atMs + HURRY_SLACK_MS);
       if (quicker > HURRY_MOST) pace = { ...pace, [id]: 'run' };
       else if (quicker > 1)
         hurry = { ...hurry, [id]: Math.ceil(quicker * 100) / 100 };
     }
-    return pace === step.pace && hurry === step.hurry
-      ? step
-      : {
-          ...step,
-          ...(pace ? { pace } : {}),
-          ...(hurry ? { hurry } : {}),
-        };
+    const timed =
+      pace === step.pace && hurry === step.hurry && atMs === step.atMs
+        ? step
+        : {
+            ...step,
+            atMs,
+            ...(pace ? { pace } : {}),
+            ...(hurry ? { hurry } : {}),
+          };
+    for (const id of step.show)
+      if (walks(id) && steps[k - 1].show.includes(id) && moved(id, k))
+        arrives.set(id, atMs + walkOf(id) / paceAt(timed, id));
+    out.push(timed);
   });
+  return out;
 }
 
 // ── Shots ──────────────────────────────────────────────────────────────────

@@ -37,7 +37,38 @@ export type Block = {
  * its units. Every line was checked by code before it was kept.
  */
 /** Visualize's voice engines, as the admin page offers them. */
-export type SceneVoiceEngineDto = 'gemini' | 'kokoro' | 'openai';
+export type SceneVoiceEngineDto =
+  'gemini' | 'kokoro' | 'openai' | 'elevenlabs' | 'cartesia';
+
+/** The engines with a list of voices to choose from. */
+export type ListedVoiceEngineDto = 'elevenlabs' | 'cartesia';
+
+/** Who may be given a voice of their own: the narrator, and each kind of character. */
+export type VoiceRoleDto =
+  | 'narrator'
+  | 'girl'
+  | 'boy'
+  | 'woman'
+  | 'man'
+  | 'old woman'
+  | 'old man'
+  | 'creature'
+  | 'divine'
+  | 'crowd';
+
+/** A voice ElevenLabs or Cartesia offers, as the admin page lists it. */
+export interface VoiceOptionDto {
+  id: string;
+  name: string;
+  /** Its own words for itself, and its gender, age and accent. */
+  description: string;
+  /**
+   * A sample of it to play, where the engine has one: a URL anyone may
+   * play (ElevenLabs'), or a path on this API, starting with `/`, fetched
+   * signed in (Cartesia's samples ask for the key, so the server fetches them).
+   */
+  previewUrl: string | null;
+}
 
 /** Which engine voices Visualize, and which could. */
 export interface SceneVoiceStatusDto {
@@ -55,6 +86,22 @@ export interface SceneVoiceStatusDto {
     model: string;
     voice: string;
   }[];
+  /**
+   * The voices the narrator and each kind of character speak in, on an
+   * engine with a list to choose from (ElevenLabs, Cartesia): the one
+   * speaking, else the first set up; null where there is none set up.
+   */
+  cast: {
+    engine: ListedVoiceEngineDto;
+    roles: {
+      value: VoiceRoleDto;
+      label: string;
+      /** The admin's voice; null keeps the default. */
+      chosen: string | null;
+      /** The voice it speaks in when none is chosen. */
+      default: string;
+    }[];
+  } | null;
   changedAt: string | null;
 }
 
@@ -1000,6 +1047,52 @@ export type SceneAmbienceName =
   | 'machine'
   | 'clock';
 
+/**
+ * One part of a kit drawing that swings (rig 2), as the player springs it.
+ * Its segments are groups of classes `dg-<id>-0` (at the root) to
+ * `dg-<id>-<segments - 1>`, each nested in the one before and turning
+ * about its own joint (written in the drawing) by the CSS variable
+ * `--dg-<id>-<k>`, in degrees; unset, 0, as drawn.
+ */
+export interface SceneDangleDto {
+  id: string;
+  /** Where its first segment turns, in the drawing's own viewBox units (not shares of its box). */
+  root: [number, number];
+  segments: number;
+  /** From its root to its tip, in viewBox units. */
+  length: number;
+  /**
+   * Which way it goes from its root to its tip as drawn: a unit vector in
+   * viewBox units, y down (absent on a drawing made before it was said:
+   * hanging straight down). How a push or the wind turns it.
+   */
+  dir?: [number, number];
+  /** Each segment's spring: its natural frequency, radians a second. */
+  stiff: number;
+  /** And its damping ratio: below 1 it overshoots and swings back. */
+  damp: number;
+  /** The angle each segment rests at, degrees (0: as drawn). */
+  rest: number;
+  /** How far each segment turns from rest at most, degrees. */
+  limit: number;
+  /** How much the wind moves it, 0 to 1. */
+  wind: number;
+}
+
+/** One layer of a story's place: sky, far, back, ground, stage, floor or foreground. */
+export interface SceneSetLayerDto {
+  id: string;
+  /** How it follows the camera: 1 the people's own plane, less farther off, more nearer the camera. */
+  depth: number;
+  svg: string;
+  /** On the floor with the people: where its things' feet stand, in the set's units. */
+  feet?: number;
+}
+
+/** How a kit drawing goes when it goes somewhere. */
+export type SceneGait =
+  'walk' | 'waddle' | 'hop' | 'swim' | 'slither' | 'float';
+
 /** One thing that can stand on the stage. */
 export type SceneThingDto =
   | {
@@ -1034,6 +1127,17 @@ export type SceneThingDto =
       source?: 'math' | 'plot' | 'quote' | 'timeline' | 'chart';
       /** A story's place: the scene behind the stage, never in a slot. */
       backdrop?: true;
+      /**
+       * A story's place built by code, as layers at their depths, back to
+       * front (studio-scenery-plan §2): each drawn at the set's width × 900
+       * and moved by the camera as far as its depth says (a pan of Δx moves
+       * it depth·Δx; a zoom of s scales it 1 + (s − 1)·depth). "floor" stands
+       * among the people, drawn in the order of their feet (`feet`, in the
+       * set's units). Absent, the player splits `svg` by its groups.
+       */
+      layers?: SceneSetLayerDto[];
+      /** How wide the set is drawn, in its units: 1600, or wider for a camera that pans. */
+      setWidth?: number;
       /** Drawn by the figure kit: it moves its eyes, face, head, arms and mouth as it acts. */
       rig?: true;
       /** Where its head is, as shares of its box across and down: where it looks from. */
@@ -1073,6 +1177,16 @@ export type SceneThingDto =
       drawnAs?: 'in bed' | 'lying';
       /** What a person the kit drew wears, in words: as the scene opens, then in each of their dress states in turn ("dress-1", …). Absent on a scene made before it was said. */
       wears?: string[];
+      /**
+       * Drawn by a kit (people, animals, creatures) with rig 2: what swings
+       * is drawn as chains of segments the player turns by `--dg-<id>-<k>`
+       * (degrees, 0 at rest). Absent, rig 1: an older drawing, as it was.
+       */
+      rigVersion?: 2;
+      /** On rig 2, each part that swings: hair behind, a cloak or cape, a scarf's end, a ribbon, wings, a tail, ears, a mane. */
+      dangles?: SceneDangleDto[];
+      /** On rig 2, one who walks: how far one full stride (both feet) carries them, in the drawing's viewBox units, and how they go. */
+      stride?: { length: number; gait: SceneGait };
     }
   | { id: string; kind: 'stat'; value: string; caption: string }
   | {
@@ -1216,6 +1330,8 @@ export interface SceneSettingDto {
   moving?: true;
   /** When a feature opens or shuts: the moment, which, and how it is left. */
   featureStates?: [number, string, 'open' | 'shut'][];
+  /** A thing before the camera faded to 40% while a face behind it speaks: from, to, and its group in the set's foreground layer. */
+  fades?: [number, number, string][];
 }
 
 /**
@@ -1235,6 +1351,8 @@ export interface SceneFeatureDto {
   leaf?: { id: string; hinge: [number, number]; slide?: number };
   /** Where it stands at each staging: the box its drawing fills. */
   at: Record<'box' | 'wide', { x: number; y: number; w: number; h: number }>;
+  /** Where its feet stand at each staging: the people nearer the camera than that are drawn over it, and those farther off under it. Absent, at the foot of its box. */
+  feet?: Record<'box' | 'wide', number>;
   /** Where one goes in or out by it, or stands at it: the middle of its way, the ground there, and how big someone there is beside the people (less than 1 farther back). */
   way: Record<'box' | 'wide', { x: number; y: number; k: number }>;
   /** The painted set's own group for it, hidden while the stage's drawing stands in for it. */
@@ -1255,6 +1373,13 @@ export interface SceneFeatureDto {
   seat?: Record<'box' | 'wide', number>;
   /** Where one lying on it lies, at each staging: along its top (y), from its foot to its head (x). */
   lies?: Record<'box' | 'wide', { y: number; foot: number; head: number }>;
+  /**
+   * Where one who climbs it or leaps up onto it stands, at each staging:
+   * `y` their feet's, and `x` beside where things catch, one standing there
+   * with their middle three tenths of their width short of it (the stage's
+   * "up:<id>" station). Absent, no one stands up it: a gate, a bench.
+   */
+  perch?: Record<'box' | 'wide', { x: number; y: number }>;
 }
 
 /**
@@ -1264,7 +1389,10 @@ export interface SceneFeatureDto {
  * clap, a sob, a shrug; and on a Studio story's stage the body's own: a
  * jump, a crouch, sitting and lying down (held until they get up),
  * getting up, a fall, a spin, a bow, a kick, and an animal's wag, lick,
- * chew, sniff, dig, wriggle, bark, roll over and shake.
+ * chew, sniff, dig, wriggle, bark, roll over and shake; and the action
+ * moves: a leap (onto a feature: "f:wall"), a landing, a burst into a
+ * sprint, a dodge, a punch that never lands (whoever it is at staggers),
+ * a hard fall, getting up off the ground, and a hero's pose.
  */
 export type SceneActingMove =
   | 'jump'
@@ -1301,7 +1429,17 @@ export type SceneActingMove =
   | 'clap'
   | 'sob'
   | 'shrug'
-  | 'lean-in';
+  | 'lean-in'
+  // The action moves (studio-world-plan §4.5): each a clip the player
+  // plays with a wind-up, the act, a follow-through and a settle.
+  | 'leap'
+  | 'land'
+  | 'run-fast'
+  | 'dodge'
+  | 'punch'
+  | 'fall-hard'
+  | 'get-up'
+  | 'hero';
 
 /**
  * How someone acts on a page: planned by the server from who says what
@@ -1444,6 +1582,8 @@ export interface ScenePlaceDto {
   caption?: { x: number; y: number; w: number; size: number; lines: string[] };
   /** A drawing's labels at this step, set beside it by the stage. */
   labels?: SceneLabelDto[];
+  /** A Studio story's person: how far back they stand on the floor, 0 at its back to 1 at its front, 0.5 where people have always stood. Absent, 0.5. */
+  d?: number;
 }
 
 /** One label set by the stage: its words' box, which edge they hang from, and its leader to the part. */
@@ -1480,6 +1620,12 @@ export interface SceneDto {
   durationMs: number;
   /** When everything the scene plans has finished: its last line, its last walk and move. Can be after `durationMs`, where the voice has ended; absent on an older scene, and on a book's page. */
   settledMs?: number;
+  /**
+   * How long a walker takes to cross the whole stage, and the least and
+   * most a walk takes, in ms, as this scene was timed. Absent on a scene
+   * made before walks were slowed: 4000, 1100 and 3400.
+   */
+  walk?: { stageMs: number; minMs: number; maxMs: number };
   timing: SceneTiming;
   /** Whom the document is taught for, read from it; absent when it could not be told, or on an older page. */
   stage?: 'early' | 'middle' | 'higher' | 'professional';

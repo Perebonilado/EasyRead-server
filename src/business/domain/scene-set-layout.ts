@@ -3201,7 +3201,9 @@ function buildSetAt(
   // look names), each its own group, where it stands.
   for (const feature of drawn) {
     if (feature.kind === DRAWN) continue;
-    const row: SetRow = feature.spot === 'back' ? 'back' : 'middle';
+    // Out of doors a door is a building's front, at the back of the ground.
+    const front = kind === 'outdoor' && feature.kind === 'door';
+    const row: SetRow = feature.spot === 'back' || front ? 'back' : 'middle';
     const y = rowFeet(kind, row);
     const id = featureGroup(feature.id);
     parts[id] = id;
@@ -3209,6 +3211,7 @@ function buildSetAt(
       piece: drawPiece(feature.kind, feature.name, {
         pack: layout.style,
         livery: layout.livery ?? null,
+        outdoor: kind === 'outdoor',
       }),
       kind: feature.kind,
       x: (SPOT_AT[feature.spot] ?? 0.5) * SET_W,

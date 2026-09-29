@@ -38,6 +38,8 @@ export interface PieceLook {
   colour?: string | null;
   /** A city's look for its buses and cabs, where the story names the city (London's red buses). */
   livery?: VehicleLivery | null;
+  /** It stands out of doors: a door there is a building's, drawn in its front. */
+  outdoor?: boolean;
 }
 
 /** A set piece as the stage gets it. */
@@ -91,6 +93,12 @@ export interface SetPiece {
   upMiddle?: true;
   /** A vehicle of the kit (scene-vehicles): what it is, its view, how it rides. */
   vehicle?: SceneVehicleDto;
+  /**
+   * The part of it people stand by and go through, across, in its own
+   * units, where that is less than the whole: the doorway of a building's
+   * front. Absent, all of it.
+   */
+  stand?: [number, number];
 }
 
 /**
@@ -269,6 +277,18 @@ export function setLiveryOf(
   return marked === 'london' || marked === 'new-york' ? marked : null;
 }
 
+/** Whether a set's drawing is of a place out of doors (its data-place mark). */
+export function setOutdoorOf(
+  drawing:
+    | { svg?: string; layered?: { layers?: { svg: string }[] } | null }
+    | null
+    | undefined,
+): boolean {
+  return /data-place="outdoor"/u.test(
+    `${drawing?.svg ?? ''} ${drawing?.layered?.layers?.[0]?.svg ?? ''}`,
+  );
+}
+
 /** A set piece of a kind, drawn; a tree as its name says (a palm), a road vehicle as its name says (a bus, a car), and a gate and a wall as its place has them. */
 export function drawPiece(
   kind: FeatureKind,
@@ -330,6 +350,8 @@ export function drawPiece(
     case 'gate':
       return drawGate(look.pack ?? null);
     case 'door': {
+      // Out of doors, a door is a building's: never on its own.
+      if (look.outdoor) return drawBuildingDoor(look.pack ?? null);
       // A doorway in a stretch of wall: the dark room beyond, the door
       // hinged on its left, its knob on its right, and a bell beside it.
       // The wall and the doorframe are one group, the near frame: laid
@@ -1123,6 +1145,154 @@ function drawGate(pack: StylePackId | null): SetPiece {
     leaf: { id: 'leaf', hinge: [-76, -70] },
     opening: [-76, -128, 76, 0],
     affordances: GATE_AFFORDANCES([64, -79]),
+  };
+}
+
+/** The door's own parts, the same in a room's wall and a building's front: the dark beyond, and its leaf. */
+const DOOR_DARK = `<g id="dark">` + rect(-48, -204, 96, 204, DARK, 0) + `</g>`;
+const doorLeaf = (colour: string) =>
+  `<g id="leaf">` +
+  rect(-48, -204, 96, 204, colour, 0) +
+  rect(-36, -190, 72, 80, PLANK, 3) +
+  rect(-36, -98, 72, 84, PLANK, 3) +
+  `<circle cx="32" cy="-100" r="5" ${fill(YELLOW)}/>` +
+  `</g>`;
+/** A door's affordances, in a room's wall or a building's front: its knob both sides, the threshold, the near frame, a knock and a bell. */
+const DOOR_AFFORDANCES: SceneAffordancesDto = {
+  handles: [
+    { id: 'knob', at: [32, -100], side: 'out' },
+    { id: 'knob-in', at: [32, -100], side: 'in' },
+  ],
+  threshold: {
+    line: [
+      [-48, 0],
+      [48, 0],
+    ],
+    inside: 'behind',
+  },
+  masks: [{ id: 'frame-near', group: 'frame' }],
+  dark: 'dark',
+  operates: [
+    { id: 'knock', at: [16, -128], does: 'knock' },
+    { id: 'bell', at: [66.5, -126], does: 'bell' },
+  ],
+  side: 1,
+};
+
+/** Half a building front's width, and its height, in the kit's units: about four metres by four and a half, two storeys. */
+const FRONT_HALF = 220;
+const FRONT_TALL = 500;
+
+/** The joints of a wall's face within a box: a town's brick courses, an old town's stone blocks, a farm's boards. */
+function faceJoints(
+  [x0, y0, x1, y1]: [number, number, number, number],
+  build: Build,
+): string {
+  if (build === 'rural') {
+    const out: string[] = [];
+    for (let x = x0 + 28; x < x1; x += 28)
+      out.push(`M${r1(x)},${r1(y0)} L${r1(x)},${r1(y1)}`);
+    return out.join(' ');
+  }
+  const course = build === 'town' ? 18 : build === 'stone' ? 40 : 60;
+  const brick = build === 'town' ? 44 : build === 'stone' ? 70 : 120;
+  const out: string[] = [];
+  for (let row = 0, y = y1 - course; y > y0; row += 1, y -= course) {
+    out.push(`M${r1(x0)},${r1(y)} L${r1(x1)},${r1(y)}`);
+    const off = row % 2 ? brick / 2 : 0;
+    for (let x = x0 + off + brick; x < x1; x += brick)
+      out.push(`M${r1(x)},${r1(y)} L${r1(x)},${r1(Math.min(y1, y + course))}`);
+  }
+  return out.join(' ');
+}
+
+/** A window of a building's front: its surround, its glass and its sill. */
+const frontWindow = (
+  x: number,
+  y: number,
+  w: number,
+  h: number,
+  trim: string,
+) =>
+  rect(x - 6, y - 6, w + 12, h + 12, trim, 2) +
+  rect(x, y, w, h, GLASS, 0) +
+  line(`M${r1(x + w / 2)},${r1(y)} L${r1(x + w / 2)},${r1(y + h)}`, trim, 5) +
+  rect(x - 10, y + h + 4, w + 20, 9, trim, 2);
+
+/**
+ * A door out of doors, as the way into a building (never a door on its
+ * own in a street): the building's front drawn round it, two storeys, as
+ * its place builds one (a town's brick with plaster trim, a compound's
+ * plastered block, a farm's boards, an old town's stone), with windows
+ * beside it and above it, and its door in the doorway as a room's is,
+ * the same leaf, knob, threshold, knock and bell. The whole front is the
+ * near frame: one going in passes behind it, into the building. People
+ * stand by its doorway, not by the whole front (stand).
+ */
+function drawBuildingDoor(pack: StylePackId | null): SetPiece {
+  const build = buildOf(pack);
+  const wall =
+    build === 'compound'
+      ? PLASTER
+      : build === 'stone'
+        ? STONE_WALL
+        : build === 'rural'
+          ? PLANK
+          : BRICK;
+  const joint =
+    build === 'town' ? BRICK_LINE : build === 'rural' ? WOOD_DARK : '#a99a80';
+  const trim =
+    build === 'rural' ? WOOD_DARK : build === 'town' ? PLASTER : '#c2b397';
+  const H = FRONT_HALF;
+  const T = FRONT_TALL;
+  // The front with its doorway cut out, so the door and the dark show.
+  const face =
+    `<path d="M${-H},${-T} L${H},${-T} L${H},0 L56,0 L56,-212 L-56,-212 L-56,0 L${-H},0 Z" ${fill(wall)}/>` +
+    line(
+      [
+        faceJoints([-H, -T + 16, -60, 0], build),
+        faceJoints([60, -T + 16, H, 0], build),
+        faceJoints([-60, -T + 16, 60, -250], build),
+      ].join(' '),
+      joint,
+      1.6,
+    );
+  const storey = -270;
+  const windows =
+    frontWindow(-176, -186, 76, 96, trim) +
+    frontWindow(100, -186, 76, 96, trim) +
+    [-170, -38, 94].map((x) => frontWindow(x, -438, 76, 110, trim)).join('');
+  return {
+    ...framed(
+      shadow(H - 10) +
+        DOOR_DARK +
+        doorLeaf(WOOD) +
+        `<g id="frame">` +
+        face +
+        // A band between the storeys and a cornice along the top.
+        rect(-H, storey, 2 * H, 10, trim, 1) +
+        rect(-H - 8, -T - 14, 2 * H + 16, 18, trim, 2) +
+        windows +
+        // The doorway's surround, lintel, and its bell.
+        rect(-86, -244, 172, 12, trim) +
+        rect(-56, -212, 8, 212, WOOD_DARK, 0) +
+        rect(48, -212, 8, 212, WOOD_DARK, 0) +
+        rect(-56, -212, 112, 10, WOOD_DARK) +
+        rect(61, -133, 11, 14, WHITE, 2) +
+        `<circle cx="66.5" cy="-126" r="3.2" ${fill(STONE)}/>` +
+        // A step before it, the pavement's edge of the building.
+        rect(-70, -8, 140, 8, '#b9b2a4', 1) +
+        `</g>`,
+      [-H - 8, -T - 14, 2 * H + 16, T + 14],
+    ),
+    leaf: { id: 'leaf', hinge: [-48, -102] },
+    opening: [-48, -204, 48, 0],
+    affordances: DOOR_AFFORDANCES,
+    stand: [-86, 86],
+    roosts: [
+      [-H + 20, -T - 14],
+      [H - 20, -T - 14],
+    ],
   };
 }
 

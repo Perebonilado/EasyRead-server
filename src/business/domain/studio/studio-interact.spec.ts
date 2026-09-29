@@ -13,6 +13,7 @@ import {
   stepSpan,
 } from '../scene-interact';
 import { pictureClaims } from '../scene-picture-check';
+import { drawPiece } from '../scene-set-pieces';
 import type { SceneDto, SceneInteractDto } from '../../../contracts';
 
 /** "Ada's first day": a girl and her grandfather, a hall and the street outside it. */
@@ -214,6 +215,65 @@ describe('through a door (studio-interactions-plan I1)', () => {
     expect(stepSpan(comes, 'out')![1]).toBeLessThanOrEqual(
       outside.scene.beats[0].startMs + 400,
     );
+  });
+
+  it("out of doors, the door is a building's: its front drawn round it at the back of the street, never a door on its own", () => {
+    const end = endStateOf(walksOut.sheet, walksOut.bible);
+    const outside = made(
+      sheetOf(
+        'street',
+        [{ kind: 'line', who: 'ada', say: 'Bye, Grandpa!' }],
+        [{ who: 'ada', spot: 'centre' }],
+      ),
+      walksOut.bible,
+      end,
+    );
+    const street = outside.scene.setting!.features!.find(
+      (f) => f.id === 'door',
+    )!;
+    const hall = walksOut.scene.setting!.features!.find(
+      (f) => f.id === 'door',
+    )!;
+    const ada = outside.scene.stagings.wide.places.flatMap((p) =>
+      p.ada ? [p.ada] : [],
+    )[0];
+    // A building's front: though farther off, far wider and taller than
+    // the hall's door, which is only a doorway in its wall.
+    expect(street.at.wide.w).toBeGreaterThan(hall.at.wide.w * 1.4);
+    expect(street.at.wide.h).toBeGreaterThan(hall.at.wide.h * 1.1);
+    expect(street.at.wide.w).toBeGreaterThan(ada.w);
+    // At the back of the street, farther off than the people.
+    expect(street.feet!.wide).toBeLessThan(ada.y + ada.h - 20);
+    // She comes out of it at its doorway, the building round her.
+    const [comes] = interactsOf(outside.scene, 'ada');
+    expect(comes.does).toBe('come-through');
+    expect(interactFaults(outside.scene)).toEqual([]);
+    expect(street.way.wide.x).toBeGreaterThan(
+      street.at.wide.x + street.at.wide.w * 0.3,
+    );
+    expect(street.way.wide.x).toBeLessThan(
+      street.at.wide.x + street.at.wide.w * 0.7,
+    );
+  });
+
+  it('a gate stands in its wall, never alone', () => {
+    const gate = drawPiece('gate', 'gate', { pack: 'western-city' });
+    const [, , vw] = gate.viewBox;
+    // Wall runs off both sides of its posts.
+    const runs = [...gate.svg.matchAll(/<rect x="(-?[\d.]+)"/gu)].map((m) =>
+      Number(m[1]),
+    );
+    expect(Math.min(...runs)).toBeLessThan(-vw / 2 - 100);
+    expect(Math.max(...runs)).toBeGreaterThan(vw / 2 - 20);
+    // And a door out of doors is a building's, its doorway where people stand.
+    const front = drawPiece('door', 'front door', {
+      pack: 'western-city',
+      outdoor: true,
+    });
+    expect(front.stand).toEqual([-86, 86]);
+    expect(front.viewBox[2]).toBeGreaterThan(400);
+    expect(front.affordances).toEqual(drawPiece('door', 'door').affordances);
+    expect(drawPiece('door', 'door').stand).toBeUndefined();
   });
 
   it('knocks: the hand to the door, knocks, and a wait', () => {

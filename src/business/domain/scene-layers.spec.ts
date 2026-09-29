@@ -814,10 +814,24 @@ describe('no face hidden on the fixtures', () => {
           ? thing.layers?.find((layer) => layer.id === 'foreground')
           : undefined;
       if (fore && /@keyframes au-q\d/.test(fore.svg)) alive += 1;
-      // Seen without fading anyone of them: they stand low enough.
+      // Never faded in the wide shot, where they stand low enough: only
+      // cheated out of a close, two or pushed shot, for its length.
+      const shotSpans = scene.effects
+        .filter((e) => e.do === 'zoom')
+        .map((e) => [
+          e.atMs,
+          e.untilMs ??
+            scene.steps.find((s) => s.atMs > e.atMs)?.atMs ??
+            scene.durationMs,
+        ]);
       expect(
-        (scene.setting?.fades ?? []).filter(([, , id]) =>
-          id.startsWith('fg-au-'),
+        (scene.setting?.fades ?? []).filter(
+          ([from, to, id]) =>
+            id.startsWith('fg-au-') &&
+            // Within the shots, one straight after another as one.
+            !Array.from({ length: Math.ceil((to - from) / 50) + 1 }, (_, i) =>
+              Math.min(to - 1, from + i * 50),
+            ).every((t) => shotSpans.some(([a, b]) => a <= t && t < b)),
         ),
       ).toEqual([]);
       before = endStateOf(fixed, show, before);

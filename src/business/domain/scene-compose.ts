@@ -125,7 +125,11 @@ import {
   type StageWalk,
 } from './scene-film';
 import type { GatedDrawing } from './scene-svg';
-import { keepFacesSeen, keepInClearView } from './scene-faces-seen';
+import {
+  fitCheatsToShots,
+  keepFacesSeen,
+  keepInClearView,
+} from './scene-faces-seen';
 import { audienceAlive, type AudienceTurn } from './scene-set-audience';
 import { anchorMs, quietGaps, spaced, type TimedBeat } from './scene-timing';
 import { numberWords } from './spoken';
@@ -3445,6 +3449,13 @@ export function composeScene(input: ComposeInput): {
         ...effects.filter((e) => e.do !== 'zoom'),
         ...pushedOnFeeling(kept, acting),
       ].sort((a, b) => a.atMs - b.atMs),
+    );
+    // What was cheated out of a shot, out of the shots as now taken.
+    facesSeen.fades = fitCheatsToShots(
+      facesSeen.fades,
+      effects.filter((e) => e.do === 'zoom'),
+      steps,
+      durationMs,
     );
   }
   // A crowd before the camera in the set (studio-scenery-plan §5.5),

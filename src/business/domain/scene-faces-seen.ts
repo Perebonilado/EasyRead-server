@@ -629,7 +629,7 @@ export interface ClearInput extends Omit<
   small: (id: string) => boolean;
   /** Whether someone has a face the kit draws (a person). */
   face: (id: string) => boolean;
-  /** A thing before the camera never faded (the people watching, who stand low enough): the one it hides steps aside instead. */
+  /** A thing before the camera never faded in the wide shot (the people watching): there the one it hides steps aside instead; in any other shot it is cheated out like the rest. */
   keep?: (id: string) => boolean;
   /** Fades already planned (a face's): kept, and judged with. */
   fades?: readonly [number, number, string, number?][];
@@ -670,12 +670,13 @@ export function keepInClearView(input: ClearInput): ClearMended {
     steps.find((s) => s.atMs > shot.atMs)?.atMs ??
     input.durationMs;
   const depthOf = (feet: number) => floorFactor(feet, input.floor);
-  const fadeable = new Set(
-    [
-      ...input.fore.map((f) => f.id),
-      ...(input.floorThings ?? []).map((f) => f.id),
-    ].filter((id) => !input.keep?.(id)),
-  );
+  /** What may be cheated out of a shot: every thing before the camera or on the floor. */
+  const fadeable = new Set([
+    ...input.fore.map((f) => f.id),
+    ...(input.floorThings ?? []).map((f) => f.id),
+  ]);
+  /** What may be faded in the wide shot: the people watching are kept there. */
+  const fadeableWide = new Set([...fadeable].filter((id) => !input.keep?.(id)));
   /** Whether a group is faded out over the whole of from..to. */
   const fadedOver = (id: string, from: number, to: number) =>
     [...(input.fades ?? []), ...fades].some(
@@ -967,6 +968,14 @@ export function keepInClearView(input: ClearInput): ClearMended {
           }
         }
         input.shots.splice(input.shots.indexOf(shot), 1);
+        // What was cheated out of it comes back: the wide shot keeps it.
+        for (let i = fades.length - 1; i >= 0; i -= 1)
+          if (
+            fades[i][3] === 0 &&
+            fades[i][0] === Math.round(shot.atMs) &&
+            fades[i][1] === Math.round(shotEnd(shot))
+          )
+            fades.splice(i, 1);
         notes.push(
           `staging: hidden ${name} ${moment.how} in a shot at ${Math.round(shot.atMs)} ms; the wide shot instead`,
         );
@@ -977,7 +986,7 @@ export function keepInClearView(input: ClearInput): ClearMended {
       const last: string[] = [];
       for (const { seen } of bad)
         for (const one of coverIn(k, who, seen, from, to).by)
-          if (one.fades && fadeable.has(one.id) && !last.includes(one.id)) {
+          if (one.fades && fadeableWide.has(one.id) && !last.includes(one.id)) {
             fades.push([Math.round(from), Math.round(to), one.id, FADED]);
             last.push(one.id);
           }
@@ -1001,10 +1010,49 @@ export function keepInClearView(input: ClearInput): ClearMended {
       last &&
       last[2] === fade[2] &&
       last[3] === fade[3] &&
-      fade[0] <= last[1] + FADE_GAP_MS
+      // The people watching are kept in the wide shot, however short.
+      fade[0] <= last[1] + (input.keep?.(fade[2]) ? 0 : FADE_GAP_MS)
     )
       last[1] = Math.max(last[1], fade[1]);
     else merged.push([...fade]);
   }
   return { fades: merged.sort((a, b) => a[0] - b[0]), notes };
+}
+
+/**
+ * The fades that cheat a thing out of a shot (level 0) fitted to the
+ * shots as they are finally taken (after jump cuts are joined and walks
+ * given room): each kept only where a shot is on, cut where one ends, and
+ * gone with a shot not taken; so nothing is cheated out of the wide shot.
+ * Every other fade as it was.
+ */
+export function fitCheatsToShots(
+  fades: readonly [number, number, string, number?][],
+  shots: readonly SceneEffectDto[],
+  steps: readonly { atMs: number }[],
+  durationMs: number,
+): [number, number, string, number?][] {
+  const spans = shots
+    .map((shot): [number, number] => [
+      shot.atMs,
+      shot.untilMs ?? steps.find((s) => s.atMs > shot.atMs)?.atMs ?? durationMs,
+    ])
+    .sort((a, b) => a[0] - b[0]);
+  // The shots one straight after another as one stretch.
+  const joined: [number, number][] = [];
+  for (const [a, b] of spans) {
+    const last = joined[joined.length - 1];
+    if (last && a <= last[1]) last[1] = Math.max(last[1], b);
+    else joined.push([a, b]);
+  }
+  return fades.flatMap((fade): [number, number, string, number?][] => {
+    if (fade[3] !== 0) return [fade];
+    return joined.flatMap(([a, b]): [number, number, string, number?][] => {
+      const from = Math.max(fade[0], a);
+      const to = Math.min(fade[1], b);
+      return to - from >= 1
+        ? [[Math.round(from), Math.round(to), fade[2], 0]]
+        : [];
+    });
+  });
 }

@@ -195,6 +195,19 @@ export const studioTableReadSchema = z.object({
   verdict: z.string().catch(''),
 });
 
+/** The cold read: what a first-time viewer made of the opening. */
+export const studioColdReadSchema = z.object({
+  about: z.string().catch(''),
+  sentence: z.string().catch(''),
+  who: z.string().catch(''),
+  wants: z.string().catch(''),
+  obstacle: z.string().catch(''),
+  stakes: z.string().catch(''),
+  clock: z.string().catch(''),
+  confused: z.array(z.string()).catch([]),
+  sure: z.number().catch(0),
+});
+
 /** Whether a scene made again as asked shows it: the check's verdict. */
 export const studioCheckSchema = z.object({
   resolved: z.boolean().catch(false),

@@ -81,8 +81,11 @@ const usage = {
   tokensOut: 10,
   latencyMs: 1,
 };
-const scores = (n: number) =>
-  Object.fromEntries(RUBRIC_KEYS.map((k) => [k, n]));
+/** Every item at n; clarity clear unless a test says otherwise. */
+const scores = (n: number) => ({
+  ...Object.fromEntries(RUBRIC_KEYS.map((k) => [k, n])),
+  clarity: 8,
+});
 
 /** The critic's reads in turn, and a writer that marks each scene it writes again. */
 function llmWith(
@@ -178,7 +181,7 @@ describe('the table read', () => {
     );
     expect([...result.changed.keys()]).toEqual([1]);
     expect(logged[0]).toMatch(
-      /^table read 5\.8 \(want 6, .*; below the bar: overall 5\.8/,
+      /^table read 5\.8 \(clarity 8, want 6, .*; below the bar: overall 5\.8/,
     );
   });
 
@@ -259,5 +262,49 @@ describe('the table read', () => {
     });
     expect(calls.scenes.length).toBeGreaterThan(0);
     expect(result.rounds[1].sheets[1]).toBe(sheets[1]);
+  });
+
+  it('never passes a film a first-time viewer cannot follow: scene 1 is written again with what they missed', async () => {
+    const { llm, calls } = llmWith([
+      // A high read that loses the viewer, then one they can follow.
+      { scores: { ...scores(8), clarity: 3 }, overall: 8.4, scenes: [] },
+      { scores: { ...scores(7.5), clarity: 8 }, overall: 7.6, scenes: [] },
+    ]);
+    const watched: string[] = [];
+    const viewer = {
+      ...llm,
+      studioColdRead: (input: { film: string }) => {
+        watched.push(input.film);
+        return Promise.resolve({
+          value:
+            watched.length === 1
+              ? {
+                  about: 'two children in a garden',
+                  confused: ['what they are racing for'],
+                  sure: 3,
+                }
+              : { about: 'a sunflower race by Friday', sure: 8 },
+          usage,
+        });
+      },
+    } as unknown as LlmGatewayPort;
+    const sheets = await written();
+    const result = await tableRead(viewer, { brief, bible, outline, sheets });
+    // The viewer saw only scene 1, as the film shows it.
+    expect(watched[0]).toContain('SCENE 1.');
+    expect(watched[0]).not.toContain('SCENE 2.');
+    expect(watched[0]).not.toContain('"Planting"');
+    expect(watched[0]).not.toContain('sunflower');
+    // Capped at its clarity, the first read is below the bar.
+    expect(result.rounds[0].read.overall).toBe(3);
+    expect(result.rounds[0].rewritten).toContain(0);
+    const first = calls.scenes.find((c) => /Planting/.test(c.scene));
+    expect(first?.problems?.join(' ')).toMatch(
+      /confused by: what they are racing for/,
+    );
+    expect(first?.problems?.join(' ')).toMatch(/This is the first scene/);
+    // The read the viewer can follow is kept.
+    expect(result.best).toBe(1);
+    expect(result.rounds[1].read.scores.clarity).toBe(8);
   });
 });

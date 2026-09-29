@@ -21,6 +21,7 @@ import {
   type SceneSheet,
   type StudioBible,
   type StudioBrief,
+  type StudioCharacter,
   type StudioOutline,
 } from './studio';
 
@@ -50,6 +51,19 @@ export function describeBrief(brief: StudioBrief): string {
   return lines.join('\n');
 }
 
+/** How a character looks, in words: as the kit draws them, else as the bible says. */
+export function looksOf(
+  c: Pick<StudioCharacter, 'kind' | 'figure' | 'animal' | 'creature' | 'look'>,
+): string {
+  return c.kind === 'person' && c.figure
+    ? describeFigure(c.figure)
+    : c.animal
+      ? describeAnimal(c.animal)
+      : c.creature
+        ? describeCreature(c.creature)
+        : c.look;
+}
+
 /** The cast and the places, with their ids, or an explainer's subject and pictures. */
 export function describeBible(
   bible: StudioBible | null,
@@ -70,14 +84,7 @@ export function describeBible(
       .join('\n');
   const names = new Map(bible.characters.map((c) => [c.id, c.name]));
   const people = bible.characters.map((c) => {
-    const looks =
-      c.kind === 'person' && c.figure
-        ? describeFigure(c.figure)
-        : c.animal
-          ? describeAnimal(c.animal)
-          : c.creature
-            ? describeCreature(c.creature)
-            : c.look;
+    const looks = looksOf(c);
     // Who they are, where a story was developed with them: their sheet.
     const persona = describePersona(c, names);
     return `- ${c.id}: ${c.name}, ${c.role}, ${c.kind}${c.size ? ` (${c.size})` : ''}; ${c.traits.join(', ') || 'no traits given'}; looks: ${looks}; voice: ${c.voice}${c.carries ? `; carries a ${c.carries}` : ''}${persona ? `\n  who they are: ${persona}` : ''}`;

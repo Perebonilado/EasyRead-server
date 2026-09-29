@@ -27,6 +27,7 @@ import {
   type SheetProblem,
 } from '../../domain/studio/studio-check';
 import { narratorRuleOf } from '../../domain/studio/studio-narrator';
+import { FIRST_SCENE_RULE } from '../../domain/studio/studio-script';
 import {
   describePlannedScene,
   describeSceneBeats,
@@ -111,7 +112,12 @@ export async function writeStorySheet(
     bible: describeBible(bible, true),
     outline: describeOutline(outline, true),
     scene: outline.scenes[k]
-      ? [describeOutlineScene(outline.scenes[k], k, true), planOf(outline, k)]
+      ? [
+          describeOutlineScene(outline.scenes[k], k, true),
+          planOf(outline, k),
+          // The film's first scene sets the story up where it is seen.
+          k === 0 ? FIRST_SCENE_RULE : '',
+        ]
           .filter(Boolean)
           .join('\n')
       : `Scene ${k + 1}: the scene the maker asked for.`,

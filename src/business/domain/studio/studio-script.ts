@@ -3,18 +3,23 @@
  * S4): what code sees across the scenes once they are written, and the
  * table read, a critic's read of the whole script against a rubric.
  *
- * Code checks three things the scene checks cannot, each a note for the
+ * Code checks four things the scene checks cannot, each a note for the
  * scene it is about:
  * - voice: lines any character could have said (stock lines, a pet
  *   phrase in the wrong mouth, a speaker who never sounds like their
  *   sheet, a long line from someone who talks in short ones);
+ * - telling: lines that narrate what the viewer sees ("Unlocked.",
+ *   "Door's locked.", "I'm opening the box"), the narrator by another name;
  * - plants: what the beat sheet plants and pays off is in the words of
  *   the scenes that serve those beats;
  * - turns: each scene's planned turn shows in what is said and done.
  *
  * The table read scores the rubric from 0 to 10 with notes for each
  * scene; below the bar, the failing scenes are written again with their
- * notes. Nothing of it is said to the maker.
+ * notes. Its first item is clarity, judged from a first-time viewer's cold
+ * read of the first scene as the film shows it (never from the plan): a
+ * film they cannot follow is below the bar, whatever else it does well.
+ * Nothing of it is said to the maker.
  */
 import type {
   SheetBeat,
@@ -23,19 +28,27 @@ import type {
   StudioCharacter,
   StudioOutline,
 } from './studio';
+import { namesOf } from './studio';
 import {
   contextOf,
   covered,
+  stemOf,
   stemsOf,
   trackSetups,
   type Persona,
   type StudioStory,
 } from './studio-story';
+import { looksOf } from './studio-words';
 
 // ── The rubric ────────────────────────────────────────────────────────────
 
 /** The table read's rubric (§1.6), with the production checks (§3F). */
 export const RUBRIC = [
+  {
+    key: 'clarity',
+    name: 'Clarity',
+    test: 'a first-time viewer, who only sees and hears the film, could say after scene 1 what it is about, who wants what, what stands in the way and what is at stake (and by when, if there is a clock); judged by what the first-time viewer said, never by the plan',
+  },
   {
     key: 'want',
     name: 'Clear want and stakes',
@@ -120,7 +133,9 @@ export const RUBRIC_KEYS: RubricKey[] = RUBRIC.map((r) => r.key);
  * overall score, every rubric item, and each scene's own. Below it, the
  * failing scenes are written again.
  */
-export const BAR = { overall: 7, item: 5, scene: 6 } as const;
+export const BAR = { overall: 7, item: 5, scene: 6, clarity: 7 } as const;
+/** A first-time viewer confused by this many things or more finds the film unclear, whatever its score. */
+export const CONFUSED_MOST = 2;
 /** Rounds of rewrites at most, after the first read. */
 export const TABLE_READ_ROUNDS = 2;
 
@@ -151,6 +166,31 @@ export interface TableRead {
   voice: VoiceSlip[];
   /** A sentence or two, for the log. */
   verdict: string;
+  /** What a first-time viewer made of the first scene, as the film shows it; null where no one watched. */
+  viewer: ColdRead | null;
+}
+
+/**
+ * What a first-time viewer made of the film's opening, seeing and hearing
+ * only what the film shows: never the plan, the logline or the names no
+ * one says.
+ */
+export interface ColdRead {
+  /** What they think it is about, in a sentence. */
+  about: string;
+  /** The clarity sentence, as they finish it: "[who] wants [what] because [why], but [what is in the way], by [when]". */
+  sentence: string;
+  /** Whose story it is, as they saw them. */
+  who: string;
+  wants: string;
+  obstacle: string;
+  stakes: string;
+  /** By when, where there is a clock; empty for none seen. */
+  clock: string;
+  /** What they did not understand. */
+  confused: string[];
+  /** How sure they are of what it is about, 0 to 10. */
+  sure: number;
 }
 
 const score = (value: unknown): number | null => {
@@ -162,8 +202,55 @@ const score = (value: unknown): number | null => {
 const said = (value: unknown, most: number) =>
   typeof value === 'string' ? value.trim().slice(0, most) : '';
 
-/** A table read made sound for a script of `count` scenes; every scene read, its score the overall where none was given. */
-export function tableReadOf(raw: unknown, count: number): TableRead {
+/** A cold read made sound; null for nothing usable. */
+export function coldReadOf(raw: unknown): ColdRead | null {
+  if (!raw || typeof raw !== 'object') return null;
+  const r = raw as Record<string, unknown>;
+  const about = said(r.about, 300);
+  if (!about) return null;
+  return {
+    about,
+    sentence: said(r.sentence, 300),
+    who: said(r.who, 200),
+    wants: said(r.wants, 200),
+    obstacle: said(r.obstacle, 200),
+    stakes: said(r.stakes, 200),
+    clock: said(r.clock, 120),
+    confused: (Array.isArray(r.confused) ? r.confused : [])
+      .map((c) => said(c, 200))
+      .filter(Boolean)
+      .slice(0, 6),
+    sure: score(r.sure) ?? 0,
+  };
+}
+
+/** A cold read in words, for the table read and the writer. */
+export function describeColdRead(viewer: ColdRead): string {
+  return [
+    `About: ${viewer.about}`,
+    ...(viewer.sentence ? [`In one sentence: ${viewer.sentence}`] : []),
+    `Whose story: ${viewer.who || 'could not tell'}`,
+    `Wants: ${viewer.wants || 'could not tell'}`,
+    `In the way: ${viewer.obstacle || 'could not tell'}`,
+    `At stake: ${viewer.stakes || 'could not tell'}`,
+    `By when: ${viewer.clock || 'no clock seen'}`,
+    `Confused by: ${viewer.confused.join('; ') || 'nothing'}`,
+    `How sure (0 to 10): ${viewer.sure}`,
+  ].join('\n');
+}
+
+/**
+ * A table read made sound for a script of `count` scenes; every scene
+ * read, its score the overall where none was given. Clarity is a floor:
+ * a film a first-time viewer cannot follow is no better overall than its
+ * clarity, so it never clears the bar. Where the critic left clarity out,
+ * the viewer's own sureness stands for it.
+ */
+export function tableReadOf(
+  raw: unknown,
+  count: number,
+  viewer: ColdRead | null = null,
+): TableRead {
   const read =
     raw && typeof raw === 'object' ? (raw as Record<string, unknown>) : {};
   const given =
@@ -175,11 +262,24 @@ export function tableReadOf(raw: unknown, count: number): TableRead {
     const n = score(given[key]);
     if (n !== null) scores[key] = n;
   }
+  if (scores.clarity === undefined && viewer) scores.clarity = viewer.sure;
+  // Two things or more a first-time viewer could not follow: not clear,
+  // whatever the score.
+  if (
+    viewer &&
+    viewer.confused.length >= CONFUSED_MOST &&
+    scores.clarity !== undefined
+  )
+    scores.clarity = Math.min(scores.clarity, BAR.clarity - 1);
   const items = Object.values(scores);
   const mean = items.length
     ? Math.round((items.reduce((a, b) => a + b, 0) / items.length) * 10) / 10
     : 0;
-  const overall = score(read.overall) ?? mean;
+  const clarity = scores.clarity;
+  const overall = Math.min(
+    score(read.overall) ?? mean,
+    clarity !== undefined && clarity < BAR.clarity ? clarity : 10,
+  );
   const byScene = new Map<number, SceneRead>();
   for (const one of Array.isArray(read.scenes) ? read.scenes : []) {
     if (!one || typeof one !== 'object') continue;
@@ -211,12 +311,24 @@ export function tableReadOf(raw: unknown, count: number): TableRead {
       return [{ scene: k, who: said(v.who, 40), line, why: said(v.why, 200) }];
     })
     .slice(0, 12);
-  return { scores, overall, scenes, voice, verdict: said(read.verdict, 600) };
+  return {
+    scores,
+    overall,
+    scenes,
+    voice,
+    verdict: said(read.verdict, 600),
+    viewer,
+  };
 }
+
+/** Whether a read is below the clarity floor: a first-time viewer could not follow it. */
+export const unclear = (read: Pick<TableRead, 'scores'>): boolean =>
+  (read.scores.clarity ?? 10) < BAR.clarity;
 
 /** Why a read is below the bar, in words; empty when it clears it. */
 export function belowBar(read: TableRead): string[] {
   const out: string[] = [];
+  if (unclear(read)) out.push(`clarity ${read.scores.clarity} (the floor)`);
   if (read.overall < BAR.overall) out.push(`overall ${read.overall}`);
   for (const r of RUBRIC) {
     const n = read.scores[r.key];
@@ -241,7 +353,7 @@ export function scenesToRewrite(read: TableRead): number[] {
     .map((s) => s.scene);
   const failing = (key: RubricKey) => (read.scores[key] ?? 10) < BAR.item;
   const chosen = new Set<number>();
-  if (failing('hook')) chosen.add(0);
+  if (unclear(read) || failing('hook') || failing('want')) chosen.add(0);
   if (failing('button')) chosen.add(count - 1);
   for (const k of low) if (chosen.size < most) chosen.add(k);
   if (!chosen.size) {
@@ -342,6 +454,107 @@ export function scriptInWords(
     .join('\n\n');
 }
 
+/**
+ * The film's opening as a first-time viewer has it (the cold read): only
+ * what is seen and heard, scene by scene up to `upTo` (from 0). No plan,
+ * no logline, no place names no one says; each person known by their
+ * name only once someone says it, till then by how they look. What they
+ * hold, what they do and the faces they pull are what the stage shows.
+ */
+export function filmAsSeen(
+  sheets: readonly StorySheet[],
+  bible: Pick<StudioBible, 'characters' | 'sets'>,
+  upTo = 0,
+): string {
+  const heard = new Set<string>();
+  const unnamed = new Map<string, number>();
+  const seen = new Set<string>();
+  const spoken = (text: string) => {
+    for (const c of bible.characters)
+      if (
+        namesOf(c).some((name) =>
+          new RegExp(
+            `\\b${name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`,
+            'iu',
+          ).test(text),
+        )
+      )
+        heard.add(c.id);
+  };
+  const label = (id: string | null) => {
+    if (!id) return 'someone';
+    const c = bible.characters.find((one) => one.id === id);
+    if (!c) return id;
+    if (heard.has(c.id)) return c.name.toUpperCase();
+    if (!unnamed.has(c.id)) unnamed.set(c.id, unnamed.size + 1);
+    const tag = `UNNAMED ${unnamed.get(c.id)}`;
+    if (seen.has(c.id)) return tag;
+    seen.add(c.id);
+    return `${tag} (${c.kind === 'person' ? '' : `${c.kind}: `}${looksOf(c)})`;
+  };
+  /** An action's words with the names no one has said put as the viewer knows them. */
+  const shown = (text: string) => {
+    let out = text;
+    for (const c of bible.characters) {
+      if (heard.has(c.id)) continue;
+      for (const name of namesOf(c)) {
+        const re = new RegExp(
+          `\\b${name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?:['’]s)?\\b`,
+          'giu',
+        );
+        if (re.test(out)) out = out.replace(re, label(c.id));
+      }
+    }
+    return out;
+  };
+  const FROM: Record<string, string> = {
+    off: 'from off screen',
+    phone: 'on the phone',
+    letter: 'reading out a letter',
+    thought: 'thinking, heard as a voice-over',
+    above: 'a voice from above',
+    dream: 'in a dream or memory',
+  };
+  return sheets
+    .slice(0, upTo + 1)
+    .map((sheet, k) => {
+      const set = bible.sets.find((one) => one.id === sheet.set);
+      const opening = sheet.onStage
+        .map(
+          (p) =>
+            `${label(p.who)}${p.pose && p.pose !== 'standing' ? `, ${p.pose}` : ''}${p.holding ? `, holding ${p.holding}` : ''}`,
+        )
+        .join('; ');
+      const lines = sheet.beats.map((b) => {
+        switch (b.kind) {
+          case 'line': {
+            const who = label(b.who);
+            const to = b.to ? label(b.to) : '';
+            spoken(b.say);
+            const how = [to ? `to ${to}` : '', b.from ? FROM[b.from] : '']
+              .filter(Boolean)
+              .join(', ');
+            return `${who}${how ? ` (${how})` : ''}: ${b.say}`;
+          }
+          case 'narration':
+            spoken(b.say);
+            return `A VOICE-OVER: ${b.say}`;
+          case 'reaction':
+            return `[${label(b.who)} looks ${[b.feeling, b.sign].filter(Boolean).join(', ') || 'on'}]`;
+          case 'pause':
+            return '[a pause]';
+          default:
+            return `[we see: ${shown(b.say || `${label(b.who)} ${b.do ?? ''} ${b.thing ?? b.prop ?? ''}`.trim()).replace(/[.!]+$/u, '')}]`;
+        }
+      });
+      return [
+        `SCENE ${k + 1}. We see: ${set?.look || 'a place'}, ${sheet.time}${sheet.weather && sheet.weather !== 'clear' ? `, ${sheet.weather}` : ''}. There as it opens: ${opening || 'no one'}.`,
+        ...lines.map((l) => `  ${l}`),
+      ].join('\n');
+    })
+    .join('\n\n');
+}
+
 /** A scene's plan, from the story its outline was built from: by title, else by place. */
 function planned(outline: StudioOutline, k: number) {
   const scene = outline.scenes[k];
@@ -359,7 +572,7 @@ function planned(outline: StudioOutline, k: number) {
 export interface ScriptNote {
   /** Which scene, from 0. */
   scene: number;
-  kind: 'voice' | 'plant' | 'turn';
+  kind: 'voice' | 'telling' | 'plant' | 'turn';
   message: string;
 }
 
@@ -610,6 +823,228 @@ export function lintVoices(
   return out;
 }
 
+/** Past forms the light stemmer cannot take back to their verb: "sent" is "send". */
+const IRREGULAR: Record<string, string> = {
+  sent: 'send',
+  went: 'go',
+  gone: 'go',
+  gave: 'give',
+  given: 'give',
+  took: 'take',
+  taken: 'take',
+  left: 'leave',
+  got: 'get',
+  made: 'make',
+  broke: 'break',
+  broken: 'break',
+  threw: 'throw',
+  thrown: 'throw',
+  caught: 'catch',
+  shut: 'shut',
+  put: 'put',
+  ate: 'eat',
+  eaten: 'eat',
+  drank: 'drink',
+  fell: 'fall',
+  fallen: 'fall',
+  found: 'find',
+  brought: 'bring',
+  bought: 'buy',
+  paid: 'pay',
+  sold: 'sell',
+  held: 'hold',
+  sat: 'sit',
+  stood: 'stand',
+  ran: 'run',
+  came: 'come',
+  dropped: 'drop',
+};
+/** A word's stem, its irregular past taken back to its verb. */
+const verbStem = (word: string) =>
+  IRREGULAR[word.toLowerCase()] ?? stemOf(word);
+/** A text's stems, as the telling check compares them. */
+const tellStems = (text: string, names: ReadonlySet<string>) =>
+  stemsOf(text, names).map((w) => IRREGULAR[w] ?? w);
+
+/** The verb an action or business beat's words say its doer does: the word after their name ("Dee unlocks the door" is "unlock"). */
+function shownVerb(
+  beat: SheetBeat,
+  bible: Pick<StudioBible, 'characters'>,
+): string | null {
+  const c = bible.characters.find((one) => one.id === beat.who);
+  const say = beat.say.trim();
+  if (!c || !say) return null;
+  for (const name of namesOf(c)) {
+    const m = new RegExp(
+      `^(?:and |then )?${name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s+(?:slowly |quickly |finally |then )?([\\p{L}’'-]+)`,
+      'iu',
+    ).exec(say);
+    if (m) return verbStem(m[1]);
+  }
+  return null;
+}
+
+/** A line's first-person narration of what its speaker is doing: "I'm opening the box", "I am taking the key". */
+const DOING_NOW =
+  /^(?:(?:and|so|ok(?:ay)?|right|now)[, ]+)?i(?:['’]m| am)(?: now| just)? (\p{L}+ing)\b/iu;
+
+/** A status fragment: a sentence of three words or fewer saying how something is ("Door's locked.", "That's fine.", "It's 11:52."). */
+const STATUS =
+  /^(?:it|that|this|\p{L}+)['’]s\s+(?:\p{L}+\s+)?[\p{L}\p{N}:.]+[.!]?$/iu;
+/** A time on a clock, said: "11:52", "ten minutes", "midnight". */
+const CLOCK_TIME =
+  /\b\d{1,2}[:.]\d{2}\b|\b(?:\d+|one|two|three|four|five|ten|fifteen|twenty|thirty) minutes?\b|\b(?:o['’]clock|midnight|noon)\b|\b(?:eleven|twelve|ten|nine|eight|seven|six|five|four|three|two|one) (?:fifty|forty|thirty|twenty|fifteen|ten|oh)[- ]?\w*\b/iu;
+
+/** Two stems alike, as the stemmer leaves them ("unlock" and "unlocked"). */
+const same = (a: string, b: string) =>
+  a === b ||
+  (Math.min(a.length, b.length) >= 4 && (a.startsWith(b) || b.startsWith(a)));
+
+/**
+ * The telling lint: lines that narrate what the viewer sees, the
+ * narrator by another name. A short sentence that says again what a move
+ * within two beats of it shows (its verb: "Unlocked." by "Dee unlocks
+ * the door", "Sent." by "Tessa sends the money"); a short sentence all of
+ * whose words a narration beside it has already said ("Door's locked."
+ * after "The door is locked."); and "I'm opening the box" said as its
+ * speaker opens it. A line should do something to the one it is said to.
+ */
+export function lintTelling(
+  sheets: readonly StorySheet[],
+  bible: Pick<StudioBible, 'characters'>,
+): ScriptNote[] {
+  const names = new Set(
+    bible.characters.flatMap((c) => [c.id, ...stemsOf(c.name)]),
+  );
+  const nameOf = (id: string | null) =>
+    bible.characters.find((c) => c.id === id)?.name ?? id ?? 'someone';
+  const out: ScriptNote[] = [];
+  /** Lines said to no one by someone alone, across the film: one, a question or a cry, at most. */
+  let alone = 0;
+  /** Lines with a time on a clock, across the film: the deadline said once, felt after. */
+  let clocks = 0;
+  sheets.forEach((sheet, k) => {
+    let flagged = 0;
+    let clocksHere = 0;
+    const here = new Set(sheet.onStage.map((p) => p.who));
+    sheet.beats.forEach((beat, j) => {
+      if (beat.kind === 'action' && beat.who) {
+        if (beat.do === 'enter') here.add(beat.who);
+        if (beat.do === 'leave' || beat.do === 'go-through')
+          here.delete(beat.who);
+      }
+      // The time announced by a narrator: said by people, or seen.
+      if (beat.kind === 'narration' && CLOCK_TIME.test(beat.say))
+        out.push({
+          scene: k,
+          kind: 'telling',
+          message: `Beat ${j + 1}: the narration announces the time ("${beat.say}"): let someone say the deadline once, as a threat or a bargain, and after that let a clock or a glance at a phone show it.`,
+        });
+      if (beat.kind !== 'line' || !beat.who || flagged >= 3) return;
+      if (beat.from === 'letter' || beat.from === 'thought') return;
+      // The clock said again and again: once, then felt.
+      if (CLOCK_TIME.test(beat.say)) {
+        clocks += 1;
+        clocksHere += 1;
+        if (clocksHere === 2 || clocks === 3) {
+          flagged += 1;
+          out.push({
+            scene: k,
+            kind: 'telling',
+            message: `Beat ${j + 1}: "${beat.say}" says the time again: say the deadline once, then let it be felt (a clock face, a phone buzzing, someone glancing at it), never announced.`,
+          });
+          return;
+        }
+      }
+      // Said to no one by someone alone on the stage: the narrator's job.
+      if (
+        (beat.from ?? 'here') === 'here' &&
+        !beat.to &&
+        [...here].every((id) => id === beat.who)
+      ) {
+        alone += 1;
+        if (alone > 1 || !/[?!]\s*$/u.test(beat.say)) {
+          flagged += 1;
+          out.push({
+            scene: k,
+            kind: 'telling',
+            message: `Beat ${j + 1}: ${nameOf(beat.who)} says "${beat.say}" to no one, alone: that is a narrator in disguise. Show it in what they do, or bring someone on to say it to.`,
+          });
+          return;
+        }
+      }
+      const near = sheet.beats.filter(
+        (b, i) => i !== j && Math.abs(i - j) <= 2,
+      );
+      const moves = near.filter(
+        (b) => b.kind === 'action' || b.kind === 'business',
+      );
+      const told = near.filter((b) => b.kind === 'narration');
+      const sentences = beat.say
+        .split(/(?<=[.!?…])\s+/u)
+        .map((x) => x.trim())
+        .filter(Boolean);
+      let why: string | null = null;
+      // Two status fragments in a row: a report of the picture.
+      const status = sentences.filter(
+        (x) => x.split(/\s+/u).length <= 3 && STATUS.test(x),
+      );
+      if (
+        sentences.some(
+          (x, i) =>
+            i > 0 &&
+            STATUS.test(x) &&
+            STATUS.test(sentences[i - 1]) &&
+            x.split(/\s+/u).length <= 3 &&
+            sentences[i - 1].split(/\s+/u).length <= 3,
+        )
+      )
+        why = `${status.map((x) => `"${x}"`).join(' ')} report how things are, as a narrator would`;
+      const doing = why ? null : DOING_NOW.exec(beat.say.trim());
+      if (doing) {
+        const verb = verbStem(doing[1]);
+        const own = moves.find(
+          (b) =>
+            b.who === beat.who &&
+            (shownVerb(b, bible) ?? '') !== '' &&
+            same(shownVerb(b, bible)!, verb),
+        );
+        if (own)
+          why = `says what ${nameOf(beat.who)} is doing as we watch it (${own.say.replace(/[.!]+$/u, '')})`;
+      }
+      for (const sentence of sentences) {
+        if (why) break;
+        const words = sentence.split(/\s+/u).filter(Boolean).length;
+        if (words > 5) continue;
+        const stems = tellStems(sentence, names);
+        if (!stems.length) continue;
+        const echoed = moves.find((b) => {
+          const verb = shownVerb(b, bible);
+          return verb !== null && stems.some((w) => same(w, verb));
+        });
+        if (echoed) {
+          why = `"${sentence}" says what we have just seen (${echoed.say.replace(/[.!]+$/u, '')})`;
+          break;
+        }
+        const narrated = told.find(
+          (b) =>
+            stems.length >= 2 && covered(stems, tellStems(b.say, names)) >= 1,
+        );
+        if (narrated)
+          why = `"${sentence}" says again what the narration beside it says ("${narrated.say.replace(/[.!]+$/u, '')}")`;
+      }
+      if (!why) return;
+      flagged += 1;
+      out.push({
+        scene: k,
+        kind: 'telling',
+        message: `Beat ${j + 1}: ${nameOf(beat.who)}'s "${beat.say}" narrates: ${why}. Cut it and let the picture carry it, or give ${nameOf(beat.who)} a line that does something to ${beat.to ? nameOf(beat.to) : 'someone'} (asks, refuses, teases, begs, warns).`,
+      });
+    });
+  });
+  return out;
+}
+
 /** Everything a scene's words name: its lines, its narration, what its moves say, and its things. */
 function sceneStems(sheet: StorySheet, names: ReadonlySet<string>): string[] {
   return stemsOf(
@@ -739,6 +1174,7 @@ export function checkScript(
 ): ScriptNote[] {
   return [
     ...lintVoices(sheets, bible),
+    ...lintTelling(sheets, bible),
     ...(story
       ? [
           ...checkPlantsShown(story, sheets, outline, bible),
@@ -747,6 +1183,30 @@ export function checkScript(
       : []),
   ];
 }
+
+/** What the first scene's writer is told when a first-time viewer could not follow it. */
+function clarityNotes(viewer: ColdRead | null): string[] {
+  return [
+    ...(viewer
+      ? [
+          `A first-time viewer, seeing and hearing only this scene, thought it was about: "${viewer.about}"${viewer.sentence ? `; in one sentence: "${viewer.sentence}"` : ''}; wants: "${viewer.wants || 'could not tell'}"; at stake: "${viewer.stakes || 'could not tell'}"; by when: "${viewer.clock || 'no clock seen'}"${viewer.confused.length ? `; confused by: ${viewer.confused.join('; ')}` : ''}.`,
+        ]
+      : []),
+    FIRST_SCENE_RULE,
+  ];
+}
+
+/**
+ * The first scene's rule (the clarity item's), for its writer: what a
+ * first-time viewer must know by its end, from what is seen and said.
+ */
+export const FIRST_SCENE_RULE = [
+  'This is the first scene: by its end a first-time viewer, who sees and hears only the film, can finish the sentence "[who] wants [a thing we can see] because [what it means to them], but [what is in the way], by [when] or else [what they lose]".',
+  'By about twenty seconds in (thirty in a film of two minutes or more), someone has said or shown what the hero wants, what stops them and by when: through lines that do something to someone (a threat, a bargain, an accusation), or through actions and things. Never through a narrator, and never a line describing what we can see.',
+  'Say the deadline once, as a threat, a promise or a bargain between people, with its reason ("by midnight, or the lock is changed"); after that it is felt through things and pressure (a clock face, a phone buzzing, a glance), never announced.',
+  'A fact comes out when someone uses it to get what they want, never as an explanation, and never told to someone who already knows it ("as you know").',
+  'Who each person is to the hero comes out in how they talk to each other. Anything impossible in this world is shown working once, with its rule, before the story leans on it, so the viewer believes it.',
+].join(' ');
 
 /** Code's notes in words, for the table read: scene by scene. */
 export function describeNotes(notes: readonly ScriptNote[]): string {
@@ -787,6 +1247,7 @@ export function notesFor(
           `"${v.line}" could be anyone's line${v.why ? ` (${v.why})` : ''}: say it as ${v.who || 'its speaker'} would${voiceOf(v.who)}.`,
       ),
     ...code.filter((n) => n.scene === k).map((n) => n.message),
+    ...(k === 0 && unclear(read) ? clarityNotes(read.viewer) : []),
     ...(k === 0 && (read.scores.hook ?? 10) < BAR.item
       ? [
           'Open with a hook: a joke, a mystery or a problem in the first seconds.',

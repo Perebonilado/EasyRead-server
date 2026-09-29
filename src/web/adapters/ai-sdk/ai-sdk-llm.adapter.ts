@@ -57,6 +57,7 @@ import {
   studioBeatsSchema,
   studioScenePlanSchema,
   studioTableReadSchema,
+  studioColdReadSchema,
   studioCheckSchema,
   studioSceneSchema,
   studioTurnSchema,
@@ -2513,6 +2514,7 @@ export class AiSdkLlmAdapter implements LlmGatewayPort, OnModuleInit {
     narrator: string;
     script: string;
     code: string;
+    viewer?: string;
   }): Promise<LlmResult<Record<string, unknown>>> {
     const started = Date.now();
     const { generateObject } = await this.registry.modules();
@@ -2524,6 +2526,9 @@ export class AiSdkLlmAdapter implements LlmGatewayPort, OnModuleInit {
       input.narrator,
       `The script:\n<script>\n${input.script.replace(/<\/?script>/giu, '')}\n</script>`,
       `What code found across the script:\n${input.code}`,
+      input.viewer
+        ? `What a first-time viewer said after watching scene 1, seeing and hearing only the film (judge clarity by this, against the premise):\n<viewer>\n${input.viewer.replace(/<\/?viewer>/giu, '')}\n</viewer>`
+        : '',
     ]
       .filter(Boolean)
       .join('\n\n');
@@ -2535,6 +2540,37 @@ export class AiSdkLlmAdapter implements LlmGatewayPort, OnModuleInit {
         prompt,
         maxRetries: this.maxRetries(),
         ...this.writerThinking(ref, 'STUDIO_TABLEREAD_THINKING', 'on'),
+      }),
+    );
+    return {
+      value: result.object,
+      usage: this.usage(ref, result.usage, started),
+    };
+  }
+
+  /**
+   * The cold read: a first-time viewer's read of the film's opening, as
+   * it shows it, by the check model (DeepSeek) with thinking off unless
+   * STUDIO_COLDREAD_THINKING says on. One small call a table read.
+   */
+  async studioColdRead(input: {
+    kind: string;
+    film: string;
+  }): Promise<LlmResult<Record<string, unknown>>> {
+    const started = Date.now();
+    const { generateObject } = await this.registry.modules();
+    const { model, ref } = await this.registry.languageModel('studio_check');
+    const result = await this.againIfMisshapen(() =>
+      generateObject({
+        model,
+        schema: studioColdReadSchema,
+        system: STUDIO_PROMPTS.studioColdRead,
+        prompt: [
+          input.kind,
+          `What you saw and heard:\n<film>\n${input.film.replace(/<\/?film>/giu, '')}\n</film>`,
+        ].join('\n\n'),
+        maxRetries: this.maxRetries(),
+        ...this.writerThinking(ref, 'STUDIO_COLDREAD_THINKING', 'off'),
       }),
     );
     return {

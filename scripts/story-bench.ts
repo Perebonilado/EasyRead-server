@@ -1,5 +1,5 @@
 /**
- * The story bench (studio-story-plan §5, S2): ten fixed briefs, across
+ * The story bench (studio-story-plan §5, S2): eleven fixed briefs, across
  * genres, lengths, audiences and places around the world (and one with no
  * setting at all, to show no region is anyone's default), each run
  * through story development against the real writer (DeepSeek, thinking
@@ -167,6 +167,20 @@ const BRIEFS: { id: string; brief: Record<string, unknown> }[] = [
       tone: 'funny',
       genre: 'dark-comedy',
       narrator: 'none',
+    },
+  },
+  {
+    // A brief a maker gave, as they gave it: a city and a genre, no
+    // narrator chosen, and no more; the film it made could not be followed.
+    id: 'new-york-dark-comedy',
+    brief: {
+      format: 'story',
+      idea: 'a comedy based in New York',
+      audience: 'adults',
+      minutes: 2,
+      tone: 'funny',
+      setting: 'New York',
+      genre: 'dark-comedy',
     },
   },
   {

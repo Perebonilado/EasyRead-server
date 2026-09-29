@@ -2179,6 +2179,33 @@ export class FakeLlmAdapter implements LlmGatewayPort {
   }
 
   /**
+   * The cold read, offline: a viewer who followed it, its first spoken
+   * line taken for what it is about.
+   */
+  async studioColdRead(input: {
+    kind: string;
+    film: string;
+  }): Promise<LlmResult<Record<string, unknown>>> {
+    const started = Date.now();
+    const first =
+      /^\s+[^[\n]+?: (.+)$/mu.exec(input.film)?.[1] ?? 'a short story';
+    return Promise.resolve({
+      value: {
+        about: first,
+        sentence: `The first one to speak wants ${first}.`,
+        who: 'the first one to speak',
+        wants: first,
+        obstacle: 'what is in their way',
+        stakes: 'what they could lose',
+        clock: '',
+        confused: [],
+        sure: 8,
+      },
+      usage: this.usage(started, input.film.length / 4, 120),
+    });
+  }
+
+  /**
    * The check of a scene made again as asked, offline: done when the film
    * reads differently now and code sees nothing wrong in it.
    */

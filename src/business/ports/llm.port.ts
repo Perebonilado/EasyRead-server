@@ -894,6 +894,22 @@ export interface LlmGatewayPort {
     script: string;
     /** What code found across the script, scene by scene. */
     code: string;
+    /** What a first-time viewer made of the first scene (the cold read), in words; absent where no one watched. */
+    viewer?: string;
+  }): Promise<LlmResult<Record<string, unknown>>>;
+
+  /**
+   * The cold read (the table read's clarity item): a first-time viewer
+   * watches the film's opening as it shows it (only what is seen and
+   * heard, no plan, no logline) and says what it is about, who wants what,
+   * what is in the way, what is at stake and by when, and what confused
+   * them (studio_check, thinking off). Made sound by coldReadOf.
+   */
+  studioColdRead(input: {
+    /** Only what a viewer knows before it starts: the kind of film, and for whom. */
+    kind: string;
+    /** The opening as seen and heard (filmAsSeen). */
+    film: string;
   }): Promise<LlmResult<Record<string, unknown>>>;
 
   /**

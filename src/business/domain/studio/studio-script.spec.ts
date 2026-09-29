@@ -6,9 +6,13 @@
 import { bibleOf, outlineOf, storySheetOf } from './studio';
 import {
   BAR,
+  FIRST_SCENE_RULE,
   RUBRIC_KEYS,
   belowBar,
   checkPlantsShown,
+  coldReadOf,
+  filmAsSeen,
+  lintTelling,
   checkTurnsShown,
   isStockLine,
   lintVoices,
@@ -420,5 +424,247 @@ describe('the table read, made sound', () => {
       'Show the key.',
       'Open with a hook: a joke, a mystery or a problem in the first seconds.',
     ]);
+  });
+});
+
+/** Two flatmates locked out on a street at night, as a film of that kind had them. */
+const flat = bibleOf({
+  characters: [
+    { name: 'Dee', voice: 'woman', role: 'main', figure: { age: 'adult' } },
+    {
+      name: 'Tessa',
+      voice: 'woman',
+      role: 'supporting',
+      figure: { age: 'adult' },
+    },
+  ],
+  sets: [
+    {
+      name: 'The corner outside',
+      id: 'street',
+      look: 'a city street at night',
+    },
+  ],
+});
+const flatSheet = (beats: Record<string, unknown>[]) =>
+  storySheetOf({
+    title: 'Locked out',
+    set: 'street',
+    time: 'night',
+    onStage: [
+      { who: 'dee', spot: 'centre-left', holding: 'cup' },
+      { who: 'tessa', spot: 'centre-right', holding: 'phone' },
+    ],
+    beats,
+  });
+const move = (kind: string, who: string, say: string, fields = {}) => ({
+  kind,
+  who,
+  say,
+  ...fields,
+});
+
+describe('the telling lint: lines that narrate what we see', () => {
+  it('flags a line that says again what a move beside it shows', () => {
+    const notes = lintTelling(
+      [
+        flatSheet([
+          move(
+            'business',
+            'dee',
+            'Dee unlocks the apartment door with the key.',
+            {
+              do: 'open',
+              target: 'door',
+            },
+          ),
+          { ...line('dee', "Unlocked. Rent's still not paid."), to: 'tessa' },
+          move(
+            'business',
+            'tessa',
+            'Tessa sends Dee four hundred dollars on her phone.',
+            {
+              do: 'use',
+              thing: 'phone',
+            },
+          ),
+          { ...line('tessa', 'Sent. Four hundred exactly.'), to: 'dee' },
+        ]),
+      ],
+      flat,
+    );
+    expect(notes).toHaveLength(2);
+    expect(notes.every((n) => n.kind === 'telling')).toBe(true);
+    expect(notes[0].message).toMatch(
+      /"Unlocked\." says what we have just seen/,
+    );
+    expect(notes[1].message).toMatch(/"Sent\."/);
+  });
+
+  it('flags a line that repeats the narration, and one that narrates its own doing', () => {
+    const notes = lintTelling(
+      [
+        flatSheet([
+          { kind: 'narration', say: 'The door is locked.' },
+          line('dee', "Well. Door's locked."),
+          move('business', 'tessa', 'Tessa opens the window.', {
+            do: 'open',
+            target: 'window',
+          }),
+          line('tessa', "I'm opening the window, everyone."),
+        ]),
+      ],
+      flat,
+    );
+    expect(notes.map((n) => n.message)).toEqual([
+      expect.stringMatching(/"Door's locked\." says again what the narration/),
+      expect.stringMatching(/says what Tessa is doing as we watch it/),
+    ]);
+  });
+
+  it('flags status fragments in a row, the time said again, and lines said to no one', () => {
+    const notes = lintTelling(
+      [
+        flatSheet([
+          { kind: 'narration', say: 'Eleven fifty-two at night.' },
+          {
+            ...line('dee', "It's 11:52. Door's locked. That's fine."),
+            to: 'tessa',
+          },
+          { ...line('tessa', 'Midnight, Dee. Midnight!'), to: 'dee' },
+        ]),
+        storySheetOf({
+          title: 'Alone',
+          set: 'street',
+          onStage: [{ who: 'dee', spot: 'centre' }],
+          beats: [line('dee', 'Right.'), line('dee', 'Where did it go?')],
+        }),
+      ],
+      flat,
+    );
+    const said = notes.map((n) => n.message).join('\n');
+    expect(said).toMatch(/narration announces the time/);
+    expect(said).toMatch(
+      /"It's 11:52\." "Door's locked\." "That's fine\." report how things are/,
+    );
+    expect(said).toMatch(/says the time again/);
+    expect(said).toMatch(/Dee says "Right\." to no one, alone/);
+    // The second said to no one is one too many, question or not.
+    expect(said).toMatch(/Dee says "Where did it go\?" to no one/);
+  });
+
+  it('leaves lines that do something to someone', () => {
+    expect(
+      lintTelling(
+        [
+          flatSheet([
+            move(
+              'business',
+              'tessa',
+              'Tessa slides a day-old doughnut to Dee.',
+              {
+                do: 'give',
+                thing: 'doughnut',
+              },
+            ),
+            line('tessa', 'Day-old. Two dollars.'),
+            line('dee', "I'm not begging a bird."),
+            move('business', 'dee', 'Dee takes the key.', { do: 'take' }),
+            line(
+              'dee',
+              'Give me that before midnight or I sleep on the stoop.',
+            ),
+          ]),
+        ],
+        flat,
+      ),
+    ).toEqual([]);
+  });
+});
+
+describe('clarity: what a first-time viewer can follow', () => {
+  const scores = Object.fromEntries(RUBRIC_KEYS.map((key) => [key, 8]));
+  const viewer = coldReadOf({
+    about: 'Two women stand by a door at night; one keeps filming.',
+    who: 'the woman with the cup',
+    wants: 'four hundred dollars and a key, not sure why',
+    obstacle: '',
+    stakes: '',
+    clock: 'midnight, though I do not know what happens then',
+    confused: ['who the one filming is to her', 'why she needs a key'],
+    sure: 3,
+  });
+
+  it('is the first item, a floor no film below it clears, whatever else it does well', () => {
+    expect(RUBRIC_KEYS[0]).toBe('clarity');
+    const read = tableReadOf(
+      { scores: { ...scores, clarity: 4 }, overall: 8.2, scenes: [] },
+      5,
+      viewer,
+    );
+    expect(read.overall).toBe(4);
+    expect(belowBar(read)[0]).toMatch(/^clarity 4/);
+    // The first scene is written again, told what the viewer made of it.
+    expect(scenesToRewrite(read)).toContain(0);
+    const notes = notesFor(0, read, [], flat);
+    expect(notes).toContain(FIRST_SCENE_RULE);
+    expect(notes.join(' ')).toMatch(/confused by: who the one filming is/);
+    // Clear enough, it passes as before.
+    const clear = tableReadOf(
+      { scores: { ...scores, clarity: 8 }, overall: 7.8, scenes: [] },
+      5,
+      viewer && { ...viewer, confused: ['why a key'] },
+    );
+    expect(belowBar(clear)).toEqual([]);
+    // Two things or more the viewer could not follow: unclear, whatever
+    // the critic scored.
+    const muddled = tableReadOf(
+      { scores: { ...scores, clarity: 8 }, overall: 7.8, scenes: [] },
+      5,
+      viewer,
+    );
+    expect(belowBar(muddled)[0]).toMatch(/^clarity 6/);
+  });
+
+  it("takes the viewer's own sureness where the critic gave no clarity", () => {
+    const { clarity: _gone, ...rest } = scores;
+    void _gone;
+    const read = tableReadOf(
+      { scores: rest, overall: 7.5, scenes: [] },
+      2,
+      viewer,
+    );
+    expect(read.scores.clarity).toBe(3);
+    expect(belowBar(read)).toContain('clarity 3 (the floor)');
+  });
+
+  it('shows the viewer only what the film shows: no names till someone says them', () => {
+    const film = filmAsSeen(
+      [
+        flatSheet([
+          { kind: 'narration', say: 'Late at night.' },
+          {
+            ...line('tessa', 'Two hundred people are watching, babe.'),
+            to: 'dee',
+          },
+          move('action', 'tessa', 'Tessa leans in with the phone on Dee.', {
+            do: 'lean-in',
+            target: 'dee',
+          }),
+          { ...line('tessa', 'Give them something, Dee.'), to: 'dee' },
+          { ...line('dee', 'I need a key.'), to: 'tessa' },
+        ]),
+      ],
+      flat,
+    );
+    expect(film).toContain('We see: a city street at night, night');
+    expect(film).not.toContain('The corner outside');
+    expect(film).toMatch(/UNNAMED 2 \(to UNNAMED 1\): Two hundred people/);
+    expect(film).toMatch(
+      /\[we see: UNNAMED 2 leans in with the phone on UNNAMED 1\]/,
+    );
+    // Once her name is said, Dee is Dee; Tessa's never is.
+    expect(film).toMatch(/DEE \(to UNNAMED 2\): I need a key\./);
+    expect(film).not.toContain('TESSA');
   });
 });

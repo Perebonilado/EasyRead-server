@@ -37,8 +37,11 @@ const tobi = (file: string): unknown =>
 const at = new Date('2026-09-29T08:00:00Z');
 const bible = bibleOf(tobi('bible.json'));
 const usage = { model: 'm', tokensIn: 1, tokensOut: 1, latencyMs: 1 };
-const scores = (n: number) =>
-  Object.fromEntries(RUBRIC_KEYS.map((k) => [k, n]));
+/** Every item at n; clarity clear (a first-time viewer follows it). */
+const scores = (n: number) => ({
+  ...Object.fromEntries(RUBRIC_KEYS.map((k) => [k, n])),
+  clarity: 8,
+});
 
 function worker(reads: (() => Promise<unknown>)[]) {
   const show: StudioShowRecord = {
@@ -52,6 +55,8 @@ function worker(reads: (() => Promise<unknown>)[]) {
       audience: 'young children',
       minutes: 1.5,
       tone: 'gentle',
+      // Its scenes are told by a storyteller: the maker chose one.
+      narrator: 'storyteller',
     }),
     bible,
     createdAt: at,

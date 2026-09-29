@@ -4,8 +4,13 @@
  * as the story bench runs it: a critic (studio_check, DeepSeek, thinking
  * on) reads the whole script with the brief, the story and everyone's
  * sheet, and scores it against the rubric, with notes for each scene.
- * Code's own checks across the script (voice, plants, turns) go to the
- * critic and to the writer. Below the bar, only the failing scenes are
+ * First a first-time viewer (the cold read) watches the opening as the
+ * film shows it, with none of the plan, and says what it is about; the
+ * critic scores clarity by that, and a film below the clarity floor never
+ * passes: its first scene is written again with what the viewer missed,
+ * and a read the viewer can follow is kept before one that scores higher.
+ * Code's own checks across the script (voice, telling, plants, turns) go
+ * to the critic and to the writer. Below the bar, only the failing scenes are
  * written again through the scene writer, their notes as the problems,
  * ending as they ended; at most two rounds, and the best-read script is
  * kept. Silent: the maker sees the better script, never the notes.
@@ -35,12 +40,17 @@ import {
   TABLE_READ_ROUNDS,
   belowBar,
   checkScript,
+  coldReadOf,
+  describeColdRead,
   describeNotes,
   describeRead,
+  filmAsSeen,
   notesFor,
   scenesToRewrite,
   scriptInWords,
   tableReadOf,
+  unclear,
+  type ColdRead,
   type ScriptNote,
   type TableRead,
 } from '../../domain/studio/studio-script';
@@ -95,7 +105,8 @@ function endsOf(
  * bench's "before").
  */
 export async function tableRead(
-  llm: Pick<LlmGatewayPort, 'studioTableRead' | 'studioScene'>,
+  llm: Pick<LlmGatewayPort, 'studioTableRead' | 'studioScene'> &
+    Partial<Pick<LlmGatewayPort, 'studioColdRead'>>,
   input: {
     brief: StudioBrief;
     bible: StudioBible;
@@ -118,20 +129,42 @@ export async function tableRead(
   const narrator = narratorRuleOf(brief, input.bible);
   let bible = input.bible;
 
+  /** What a first-time viewer makes of the first scene as the film shows it; null where it cannot be asked. */
+  const coldRead = async (sheets: StorySheet[]): Promise<ColdRead | null> => {
+    if (!llm.studioColdRead || !sheets.length) return null;
+    try {
+      const result = await llm.studioColdRead({
+        kind: `A short animated film${brief.audience ? ` for ${brief.audience}` : ''}${brief.tone ? `, ${brief.tone}` : ''}.`,
+        film: filmAsSeen(sheets, bible, 0),
+      });
+      await record(result.usage, 'studio_check');
+      return coldReadOf(result.value);
+    } catch (error) {
+      log(`the cold read could not run (${(error as Error).message})`);
+      return null;
+    }
+  };
+
   const readOnce = async (sheets: StorySheet[]) => {
     const code = checkScript(story, sheets, outline, bible);
+    const viewer = await coldRead(sheets);
+    if (viewer)
+      log(
+        `cold read of scene 1 (sure ${viewer.sure}): ${viewer.about}${viewer.confused.length ? `; confused by: ${viewer.confused.join('; ')}` : ''}`,
+      );
     const result = await llm.studioTableRead({
       brief: describeBrief(brief),
       bible: describeBible(bible, true),
       story: story ? describeStory(story) : '',
       narrator:
         narratorWords(brief) ||
-        'Narrator: left to the Studio; the characters carry the scenes, the narrator a third of the words at most.',
+        'Narrator: none. A pure film: the characters carry every scene in what they say and do.',
       script: scriptInWords(sheets, bible, outline),
       code: describeNotes(code),
+      ...(viewer ? { viewer: describeColdRead(viewer) } : {}),
     });
     await record(result.usage, 'studio_check');
-    return { read: tableReadOf(result.value, sheets.length), code };
+    return { read: tableReadOf(result.value, sheets.length, viewer), code };
   };
 
   /** The scenes asked for written again with their notes; the rest kept, and mended where the scene before now ends differently. */
@@ -222,9 +255,14 @@ export async function tableRead(
     sheets = next.sheets;
     changed = new Map([...changed, ...next.problems]);
   }
+  // The best read kept: one a first-time viewer can follow before any
+  // that scores higher but loses them.
   let best = 0;
   rounds.forEach((round, r) => {
-    if (round.read.overall > rounds[best].read.overall) best = r;
+    const was = rounds[best].read;
+    const clearer = unclear(was) && !unclear(round.read);
+    const asClear = unclear(was) === unclear(round.read);
+    if (clearer || (asClear && round.read.overall > was.overall)) best = r;
   });
   const kept = rounds[best].sheets;
   return {

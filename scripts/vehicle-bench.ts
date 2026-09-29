@@ -6,8 +6,12 @@
  * of the city liveries (London's red bus and black cab, a New York cab)
  * and a car mirrored. One contact sheet, each drawing's SVG, and a report.
  *
- *   npm run vehicle:bench -- --out <dir> [--judge] [--client <motion bench dir>]
+ *   npm run vehicle:bench -- --out <dir> [--judge] [--kinds bicycle,taxi]
+ *     [--pause <ms>] [--client <motion bench dir>]
  *
+ * --kinds judges only those kinds; --pause waits between the judge's
+ * looks, and before its one retry of a look it could not have (the
+ * judge is sometimes too busy).
  * --judge asks the drawing judge (drawing_judge: Gemini) to look at each
  * kind once, from the side in its own place's colours: does it read as
  * that vehicle; about 0.4¢ a look. --client writes the drawings the
@@ -233,7 +237,11 @@ async function main(): Promise<void> {
   let spent = 0;
   if (judging) {
     const llm = new AiSdkLlmAdapter(new ConfigService({ ...process.env }));
-    for (const kind of VEHICLE_KIT) {
+    const only = flag('--kinds')?.split(',');
+    const pause = Number(flag('--pause') ?? 0);
+    const wait = (ms: number) =>
+      new Promise((done) => setTimeout(done, Math.max(0, ms)));
+    for (const kind of VEHICLE_KIT.filter((k) => !only || only.includes(k))) {
       const d = drawVehicleKit(kind, { pack: HOME[kind] });
       const [vx, vy, vw, vh] = d.viewBox;
       const pad = Math.max(vw, vh) * 0.08;
@@ -247,19 +255,24 @@ async function main(): Promise<void> {
           `<rect x="${vx - pad}" y="${vy - pad}" width="${vw + 2 * pad}" height="${vh + 2 * pad}" fill="#ffffff" stroke="none"/><g `,
         );
       let verdict: DrawingVerdict | null = null;
-      try {
-        const judged = await llm.drawingJudge({
-          png: await rasterise(framedSvg, 768),
-          kind: 'thing',
-          brief: `${WORDS[kind]}, drawn side on by code in a flat cartoon style. Does it read as ${WORDS[kind]}?`,
-        });
-        verdict = judged.value;
-        spent += costOf({ task: 'drawing_judge', ...judged.usage }) ?? 0;
-      } catch (error) {
-        console.warn(
-          `! ${kind}: the judge could not be asked: ${(error as Error).message}`,
-        );
+      const png = await rasterise(framedSvg, 768);
+      for (let attempt = 0; attempt < 2 && !verdict; attempt += 1) {
+        if (attempt) await wait(pause * 3);
+        try {
+          const judged = await llm.drawingJudge({
+            png,
+            kind: 'thing',
+            brief: `${WORDS[kind]}, drawn side on by code in a flat cartoon style. Does it read as ${WORDS[kind]}?`,
+          });
+          verdict = judged.value;
+          spent += costOf({ task: 'drawing_judge', ...judged.usage }) ?? 0;
+        } catch (error) {
+          console.warn(
+            `! ${kind}: the judge could not be asked: ${(error as Error).message}`,
+          );
+        }
       }
+      await wait(pause);
       report.push({
         kind,
         pack: HOME[kind],

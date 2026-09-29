@@ -559,6 +559,8 @@ interface Tube {
   width: number;
   colour: string;
   layer?: Layer;
+  /** Over the near wheels where its side is seen (a fork to its hub); else in its layer. */
+  over?: true;
 }
 /** A wheel: its middle, radius and width, and what its face shows. */
 interface Wheel {
@@ -574,6 +576,8 @@ interface Decal {
   is: 'decal';
   plane: Plane;
   shapes: { points: P2[]; fill: string; ink?: boolean; opacity?: number }[];
+  /** Words on it (a taxi's sign): each at its middle, its letters' height, in metres. */
+  words?: { text: string; at: P2; size: number; fill: string }[];
   layer?: Layer;
 }
 /** A flat shape in space: a seat's top, a blade, a pedal. */
@@ -582,6 +586,7 @@ interface Flat {
   points: V3[];
   fill: string;
   layer?: Layer;
+  over?: true;
 }
 /** A hull: its length, beam and height at each end, sheer and keel, drawn from any side. */
 interface Hull {
@@ -635,6 +640,8 @@ interface Solid {
     handle: P2;
     /** Where the body narrows above its waist (a car's glasshouse): the door above the line a·p > b is on the plane at z. */
     upper?: { a: P2; b: number; z: number };
+    /** Its livery's marks below the waist (a taxi's checker), moving with it. */
+    marks?: { points: P2[]; fill: string }[];
   };
   /** Where one gets on (the ground by the door, the side of a bicycle). */
   mount: V3;
@@ -825,7 +832,7 @@ function drawTube(sheet: Sheet, tube: Tube): void {
     tube.points.reduce((sum, v) => sum + depthOf(sheet.cam, v), 0) /
     tube.points.length;
   sheet.add(
-    tube.layer ?? 'body',
+    tube.over && sheet.cam.c > 0.2 ? 'near' : (tube.layer ?? 'body'),
     depth,
     inkLine(openPathOf(at), tube.colour, tube.width * M),
     at,
@@ -837,7 +844,12 @@ function drawFlat(sheet: Sheet, flat: Flat): void {
   const depth =
     flat.points.reduce((sum, v) => sum + depthOf(sheet.cam, v), 0) /
     flat.points.length;
-  sheet.add(flat.layer ?? 'body', depth, shape(pathOf([at]), flat.fill), at);
+  sheet.add(
+    flat.over && sheet.cam.c > 0.2 ? 'near' : (flat.layer ?? 'body'),
+    depth,
+    shape(pathOf([at]), flat.fill),
+    at,
+  );
 }
 
 function drawDecal(sheet: Sheet, decal: Decal): void {
@@ -857,7 +869,21 @@ function drawDecal(sheet: Sheet, decal: Decal): void {
         : shape(pathOf([at]), s.fill, extra);
     })
     .join('');
-  sheet.add(decal.layer ?? 'body', depth, svg);
+  const words = (decal.words ?? [])
+    .map((w) => {
+      // Read the right way round, whichever way the plane is seen.
+      const m = planeMatrix(sheet.cam, decal.plane);
+      const [a, b, c, d] = m.slice(7, -1).split(' ').map(Number);
+      const x = w.at[0] * M;
+      const y = -w.at[1] * M;
+      const flip =
+        a * d - b * c < 0
+          ? ` transform="translate(${r1(2 * x)} 0) scale(-1 1)"`
+          : '';
+      return `<g transform="${m}"><text x="${r1(x)}" y="${r1(y + w.size * M * 0.36)}"${flip} font-size="${r1(w.size * M)}" font-weight="700" text-anchor="middle" font-family="Liberation Sans, sans-serif" fill="${w.fill}" stroke="none">${w.text}</text></g>`;
+    })
+    .join('');
+  sheet.add(decal.layer ?? 'body', depth, svg + words);
 }
 
 /** Each wheel: its tyre from where it is seen, and its face, turning, where it shows. */
@@ -975,6 +1001,10 @@ function drawHull(sheet: Sheet, h: Hull): void {
     ...[...keelLine].reverse().map((v) => sheet.p(v)),
   ];
   const { cam } = sheet;
+  if (Math.abs(cam.c) < 0.3) {
+    drawHullEndOn(sheet, h, { half, xs, beam, sheer, keel });
+    return;
+  }
   const far = sideOf(-1);
   const near = sideOf(1);
   // The inside, where one looks down into it.
@@ -1015,7 +1045,22 @@ function drawHull(sheet: Sheet, h: Hull): void {
       shape(pathOf([back.map((v) => sheet.p(v))]), darker(h.fill, 0.1)),
     );
   }
-  sheet.add('body', mid + 1, shape(pathOf([near]), h.fill), near);
+  // Its near side: what is under the water seen through it, tinted; what
+  // is above it, down to the waterline.
+  const dry: XY[] = [
+    ...gunwale(1).map((v) => sheet.p(v)),
+    ...[...keelLine]
+      .reverse()
+      .map(([x, y, z]) => sheet.p([x, Math.max(0, y), z])),
+  ];
+  sheet.add(
+    'body',
+    mid + 1,
+    flatShape(pathOf([near]), mix(h.fill, WATER, 0.4)) +
+      flatShape(pathOf([dry]), h.fill) +
+      shape(pathOf([near]), 'none'),
+    near,
+  );
   // Its near gunwale's rail, and a band along it.
   const rail = gunwale(1).map((v) => sheet.p(v));
   sheet.add(
@@ -1023,12 +1068,143 @@ function drawHull(sheet: Sheet, h: Hull): void {
     mid + 1.1,
     inkLine(openPathOf(rail), darker(h.fill, 0.25), 0.05 * M),
   );
-  const band = xs.map((x) => sheet.p([x, sheer(x) - 0.14, beam(x) * 0.97]));
+  // Only where the hull is deep enough to carry it: not out past its ends.
+  const band = xs
+    .filter((x) => Math.max(0, keel(x)) < sheer(x) - 0.2)
+    .map((x) => sheet.p([x, sheer(x) - 0.14, beam(x) * 0.97]));
   sheet.add(
     'body',
     mid + 1.05,
     `<path d="${openPathOf(band)}" fill="none" stroke="${lighter(h.fill, 0.35)}" stroke-width="${r1(0.05 * M)}"/>`,
   );
+}
+
+/**
+ * A hull seen end on (from its bow or its stern): each half of it, the
+ * far one first, as the solid its sections sweep out, so its end reads
+ * as a boat's: its stem up the middle, its sides flaring out to its
+ * beam and curving under to its keel. What is under the water is seen
+ * through it, tinted; its end stands on the waterline.
+ */
+function drawHullEndOn(
+  sheet: Sheet,
+  h: Hull,
+  f: {
+    half: number;
+    xs: number[];
+    beam: (x: number) => number;
+    sheer: (x: number) => number;
+    keel: (x: number) => number;
+  },
+): void {
+  const { cam } = sheet;
+  const { half, xs, beam, sheer, keel } = f;
+  const mid = depthOf(cam, [0, 0, 0]);
+  // Which half is nearer: the bow's from the front, the stern's from behind.
+  const nearBow = cam.s > 0;
+  const halves: { xs: number[]; near: boolean }[] = [
+    { xs: xs.filter((x) => (nearBow ? x <= 0 : x >= 0)), near: false },
+    { xs: xs.filter((x) => (nearBow ? x >= 0 : x <= 0)), near: true },
+  ];
+  // A section's points: its gunwale, its bilge, its keel, on one side.
+  const section = (x: number, sign: 1 | -1, dry: boolean): V3[] => {
+    const w = beam(x);
+    const top = sheer(x);
+    const low = keel(x);
+    const at = (y: number): number => (dry ? Math.max(0, y) : y);
+    return [
+      [x, at(top), sign * w],
+      [x, at(low + (top - low) * 0.55), sign * w * 0.8],
+      [x, at(low + (top - low) * 0.22), sign * w * 0.45],
+      [x, at(low), 0],
+    ];
+  };
+  const pieceOf = (x0s: number[], sign: 1 | -1, dry: boolean): XY[] =>
+    hull(x0s.flatMap((x) => section(x, sign, dry)).map((v) => sheet.p(v)));
+  const wet = (colour: string) => mix(colour, WATER, 0.4);
+  for (const { xs: part, near } of halves) {
+    const depth = mid + (near ? 1 : -1);
+    const fill = near ? h.fill : darker(h.fill, 0.12);
+    for (const sign of [-1, 1] as const) {
+      const whole = pieceOf(part, sign, false);
+      const dry = pieceOf(part, sign, true);
+      sheet.add(
+        'body',
+        depth + sign * 0.01,
+        flatShape(pathOf([whole]), wet(fill)) +
+          flatShape(pathOf([dry]), fill) +
+          shape(pathOf([whole]), 'none'),
+        dry,
+      );
+    }
+    if (!near && cam.k > 0) {
+      // Its inside between them, where one looks down into it.
+      const ring = [
+        ...xs.map((x): V3 => [x, sheer(x), beam(x)]),
+        ...[...xs].reverse().map((x): V3 => [x, sheer(x), -beam(x)]),
+      ].map((v) => sheet.p(v));
+      sheet.add('body', mid - 0.5, shape(pathOf([ring]), h.inside));
+      for (const [x, y] of h.thwarts) {
+        const w = beam(x) * 0.96;
+        const plank: V3[] = [
+          [x - 0.12, y, w],
+          [x + 0.12, y, w],
+          [x + 0.12, y, -w],
+          [x - 0.12, y, -w],
+        ];
+        sheet.add(
+          'body',
+          mid - 0.4,
+          shape(pathOf([plank.map((v) => sheet.p(v))]), lighter(h.inside, 0.3)),
+        );
+      }
+    }
+  }
+  // Its transom, the nearest face, seen from behind.
+  if (h.transom > 0 && !nearBow) {
+    const w = beam(-half);
+    const top = sheer(-half);
+    const low = keel(-half);
+    const face = (dry: boolean): XY[] =>
+      (
+        [
+          [-half, top, w],
+          [-half, top, -w],
+          [-half, dry ? Math.max(0, low) : low, -w * 0.4],
+          [-half, dry ? Math.max(0, low) : low, w * 0.4],
+        ] as V3[]
+      ).map((v) => sheet.p(v));
+    sheet.add(
+      'body',
+      mid + 1.5,
+      flatShape(pathOf([face(false)]), wet(darker(h.fill, 0.1))) +
+        flatShape(pathOf([face(true)]), darker(h.fill, 0.1)) +
+        shape(pathOf([face(false)]), 'none'),
+    );
+  }
+  // The near half's gunwales: from its stem out to its beam, each side.
+  const near = halves[1].xs;
+  for (const sign of [-1, 1] as const)
+    sheet.add(
+      'body',
+      mid + 1.6,
+      inkLine(
+        openPathOf(near.map((x) => sheet.p([x, sheer(x), sign * beam(x)]))),
+        darker(h.fill, 0.25),
+        0.035 * M,
+      ),
+    );
+  // Its stem, up the middle of its end.
+  if (nearBow) {
+    const stem = xs
+      .filter((x) => x >= half * 0.6)
+      .map((x) => sheet.p([x, Math.max(0, keel(x)), 0]));
+    sheet.add(
+      'body',
+      mid + 1.7,
+      `<path d="${openPathOf([sheet.p([half, sheer(half), 0]), ...stem.reverse()])}" fill="none" stroke="${darker(h.fill, 0.3)}" stroke-width="${r1(0.04 * M)}" stroke-linecap="round"/>`,
+    );
+  }
 }
 
 /** A bicycle's crank: its arms, pedals and chainring, turning with the wheels. */
@@ -1232,52 +1408,107 @@ function roadSolid(
         handle: [-0.08, 0.86] as P2,
         upper: { ...waist, z: G },
       };
-      const sign =
-        kind === 'taxi'
-          ? [
-              {
-                is: 'prism' as const,
-                profile: [
-                  [-0.28, 1.42],
-                  [0.22, 1.42],
-                  [0.18, 1.6],
-                  [-0.24, 1.6],
-                ] as P2[],
-                z: [-0.3, 0.3] as [number, number],
-                fill: livery === 'london' ? '#f0924a' : '#f5f5f2',
-              },
-              {
-                is: 'decal' as const,
-                plane: { side: 'near' as const, z: 0.3 },
-                shapes: [
-                  {
-                    points: rect2(-0.18, 1.47, 0.32, 0.08, 0.02),
-                    fill: DARK,
-                    ink: false,
-                  },
-                ],
-              },
-            ]
-          : [];
-      const checker: Decal[] =
-        kind === 'taxi' && livery !== 'london'
-          ? [
-              {
-                is: 'decal',
-                plane: { side: 'near', z: W },
-                shapes: Array.from({ length: 14 }, (_, i) => ({
-                  points: rect2(
-                    -1.85 + i * 0.27,
-                    0.66 + (i % 2) * 0.06,
-                    0.135,
-                    0.06,
-                  ),
+      const taxi = kind === 'taxi';
+      // A taxi's sign on its roof, lit amber, its word on each side.
+      const signFill = livery === 'london' ? '#f0924a' : '#f7cf4a';
+      const sign: Part[] = taxi
+        ? [
+            {
+              is: 'prism',
+              profile: [
+                [-0.3, 1.42],
+                [0.24, 1.42],
+                [0.2, 1.6],
+                [-0.26, 1.6],
+              ],
+              z: [-0.3, 0.3],
+              fill: signFill,
+              top: lighter(signFill, 0.3),
+            },
+            ...(
+              [
+                [{ side: 'near', z: 0.3 }, -0.03],
+                [{ side: 'front', x: 0.22 }, 0],
+                [{ side: 'back', x: -0.28 }, 0],
+              ] as [Plane, number][]
+            ).map(([plane, u]): Decal => ({
+              is: 'decal',
+              plane,
+              shapes: [],
+              words: [{ text: 'TAXI', at: [u, 1.525], size: 0.12, fill: DARK }],
+            })),
+          ]
+        : [];
+      // A checker band along its sides, above the arches: two neat rows,
+      // cut at the front door's edges, the door's own part on its leaf.
+      const squares: P2[][] = [];
+      if (taxi && livery !== 'london')
+        for (let i = 0; i < 64; i += 1)
+          for (const row of [0, 1])
+            if ((i + row) % 2 === 0)
+              squares.push(
+                rect2(-1.94 + i * 0.06, 0.73 + row * 0.05, 0.06, 0.05),
+              );
+      const inDoor = (points: P2[]) =>
+        clipHalf(clipHalf(points, [-1, 0], 0.22), [1, 0], 0.98);
+      const bodySquares = squares.flatMap((q) =>
+        [clipHalf(q, [1, 0], -0.22), clipHalf(q, [-1, 0], -0.98)].filter(
+          (part) => part.length > 2,
+        ),
+      );
+      const doorSquares = squares.map(inDoor).filter((q) => q.length > 2);
+      const checker: Decal[] = bodySquares.length
+        ? [
+            {
+              is: 'decal',
+              plane: { side: 'near', z: W },
+              shapes: bodySquares.map((points) => ({
+                points,
+                fill: DARK,
+                ink: false,
+              })),
+            },
+          ]
+        : [];
+      // A taxi's back door: its seam before the rear arch, its handle, the
+      // pillar between its window and the quarter glass behind.
+      const backDoor: Decal[] = taxi
+        ? [
+            {
+              is: 'decal',
+              plane: { side: 'near', z: W },
+              shapes: [
+                {
+                  points: rect2(-1.008, 0.6, 0.016, 0.35),
                   fill: DARK,
                   ink: false,
-                })),
-              },
-            ]
-          : [];
+                },
+                {
+                  points: rect2(-0.9, 0.35, 0.68, 0.016),
+                  fill: DARK,
+                  ink: false,
+                },
+                { points: rect2(-0.94, 0.845, 0.14, 0.05, 0.02), fill: DARK },
+              ],
+            },
+            {
+              is: 'decal',
+              plane: { side: 'near', z: G },
+              layer: 'glass',
+              shapes: [
+                {
+                  // Cut to the window's slanted back edge.
+                  points: clipHalf(
+                    rect2(-1.03, 1.0, 0.06, 0.36),
+                    [-0.34, 0.44],
+                    0.8864,
+                  ),
+                  fill: body,
+                },
+              ],
+            },
+          ]
+        : [];
       return {
         size: { long: 4.2, wide: 1.76, high: kind === 'taxi' ? 1.6 : 1.42 },
         nearZ: W,
@@ -1328,6 +1559,7 @@ function roadSolid(
             ],
           },
           ...checker,
+          ...backDoor,
           ...sign,
           {
             is: 'decal',
@@ -1400,7 +1632,12 @@ function roadSolid(
           },
         ],
         grips: [{ id: 'steering-wheel', at: [0.6, 1.02, 0.45] }],
-        door,
+        door: doorSquares.length
+          ? {
+              ...door,
+              marks: doorSquares.map((points) => ({ points, fill: DARK })),
+            }
+          : door,
         mount: [0.3, 0, W + 0.35],
         lamps: {
           front: { side: 'front', x: L + 0.03 },
@@ -1780,7 +2017,7 @@ function roadSolid(
               },
               { points: rect2(L - 0.14, 0.7, 0.16, 0.14, 0.03), fill: LAMP },
               { points: rect2(-L - 0.02, 0.7, 0.12, 0.24, 0.03), fill: TAIL },
-              ...[-(L - 1.4), L - 1.3].map((x) => ({
+              ...[-(L - 1.4), L - 2.6].map((x) => ({
                 points: circle2([x, 0.5], 0.58, 20).filter(
                   ([, y]) => y >= 0.36,
                 ),
@@ -1849,7 +2086,8 @@ function roadSolid(
             1.72,
           ),
           steeringWheel([4.72, 1.46, 0.6]),
-          ...[-(L - 1.4), L - 1.3].flatMap((x) =>
+          // The front axle behind the door, which is in the front overhang.
+          ...[-(L - 1.4), L - 2.6].flatMap((x) =>
             [W - 0.18, -(W - 0.18)].map((z): Wheel => ({
               is: 'wheel',
               at: [x, 0.5, z],
@@ -1895,7 +2133,7 @@ function roadSolid(
           back: { side: 'back', x: -L - 0.04 },
           tail: pair(W - 0.2, 0.8),
         },
-        contacts: [-(L - 1.4), L - 1.3].flatMap(
+        contacts: [-(L - 1.4), L - 2.6].flatMap(
           (x) =>
             [
               [x, 0, W - 0.18],
@@ -2231,28 +2469,44 @@ function twoWheelSolid(kind: 'bicycle' | 'motorbike', paint: Paint): Solid {
     parts: [
       { is: 'wheel', at: [-0.66, r, 0], r, width: 0.11, face: 'moto' },
       { is: 'wheel', at: [0.66, r, 0], r, width: 0.1, face: 'moto' },
+      // Its front forks, from the handlebars down to the front hub, and
+      // its swingarm to the back hub: the near ones over their wheels.
+      {
+        ...tube(
+          [
+            [0.66, r, 0.07],
+            [0.46, 0.96, 0.07],
+          ],
+          0.05,
+          CHROME,
+        ),
+        over: true,
+      },
       tube(
         [
-          [0.66, r, 0.06],
-          [0.46, 0.96, 0.06],
-        ],
-        0.045,
-      ),
-      tube(
-        [
-          [0.66, r, -0.06],
-          [0.46, 0.96, -0.06],
-        ],
-        0.045,
-      ),
-      tube(
-        [
-          [-0.66, r, 0.08],
-          [-0.2, 0.52, 0.08],
+          [0.66, r, -0.07],
+          [0.46, 0.96, -0.07],
         ],
         0.05,
-        DARK,
       ),
+      {
+        ...tube(
+          [
+            [-0.66, r, 0.08],
+            [-0.2, 0.52, 0.08],
+          ],
+          0.05,
+          DARK,
+        ),
+        over: true,
+      },
+      {
+        is: 'flat',
+        points: circle2([0.66, r], 0.05, 10).map(([x, y]): V3 => [x, y, 0.1]),
+        fill: STEEL,
+        layer: 'cabin',
+        over: true,
+      },
       tube(
         [
           [-0.5, 0.55, 0.12],
@@ -2269,15 +2523,45 @@ function twoWheelSolid(kind: 'bicycle' | 'motorbike', paint: Paint): Solid {
         fill: '#6c6a73',
         layer: 'cabin',
       },
-      tube(
-        [
-          [-0.1, 0.36, 0.17],
-          [-0.8, 0.42, 0.17],
-        ],
-        0.07,
-        STEEL,
-        'body',
-      ),
+      // Its exhaust: down from the engine's front, under it, back along
+      // the bottom to the silencer by the back wheel.
+      {
+        ...tube(
+          [
+            [0.2, 0.56, 0.16],
+            [0.26, 0.34, 0.17],
+            [0.12, 0.2, 0.18],
+            [-0.3, 0.22, 0.18],
+            [-0.5, 0.3, 0.18],
+          ],
+          0.045,
+          STEEL,
+          'body',
+        ),
+        over: true,
+      },
+      {
+        ...tube(
+          [
+            [-0.46, 0.3, 0.19],
+            [-0.96, 0.44, 0.19],
+          ],
+          0.1,
+          STEEL,
+          'body',
+        ),
+        over: true,
+      },
+      {
+        is: 'flat',
+        points: circle2([-0.97, 0.445], 0.035, 10).map(([x, y]): V3 => [
+          x,
+          y,
+          0.2,
+        ]),
+        fill: DARK,
+        over: true,
+      },
       {
         is: 'prism',
         profile: [
@@ -2497,28 +2781,30 @@ function cartSolid(
           ...[0.3, -0.3].map((z): Tube => ({
             is: 'tube',
             points: [
-              [-0.6, 0.76, z],
-              [-1.2, 0.94, z],
+              [-0.6, 0.6, z],
+              [-1.25, 0.94, z],
             ],
             width: 0.045,
             colour: WOOD_DARK,
-            layer: 'near',
+            over: true,
           })),
           {
             is: 'tube',
             points: [
-              [-1.16, 0.93, -0.3],
-              [-1.16, 0.93, 0.3],
+              [-1.2, 0.915, -0.3],
+              [-1.2, 0.915, 0.3],
             ],
             width: 0.04,
             colour: WOOD_DARK,
-            layer: 'near',
+            over: true,
           },
+          // Its legs under the handle's end, lifted off the ground as the
+          // handle is lifted to push it.
           ...[0.3, -0.3].map((z): Tube => ({
             is: 'tube',
             points: [
-              [0.5, 0.5, z],
-              [0.56, 0.02, z],
+              [-0.5, 0.5, z],
+              [-0.56, 0.02, z],
             ],
             width: 0.04,
             colour: WOOD_DARK,
@@ -2545,43 +2831,72 @@ function cartSolid(
         ],
         seats: [],
         grips: [
-          { id: 'handle-near', at: [-1.16, 0.93, 0.26] },
-          { id: 'handle-far', at: [-1.16, 0.93, -0.26] },
+          { id: 'handle-near', at: [-1.2, 0.915, 0.26] },
+          { id: 'handle-far', at: [-1.2, 0.915, -0.26] },
         ],
         mount: [-1.45, 0, 0],
         contacts: [
           [0.04, 0, 0.55],
           [0.04, 0, -0.55],
-          [0.56, 0, 0.3],
+          [-0.56, 0, 0.3],
         ],
         bob: { amp: 1.5, every: 0.9 },
       };
     }
     case 'wheelbarrow': {
+      // Its frame: a beam each side, straight from the axle to the grip,
+      // closing in to the wheel, parallel under the tray and to the
+      // handles; the tray sits on them. Its rest legs braced to them.
+      const beamAt = (x: number) => 0.2 + ((0.52 - x) / 1.47) * 0.42;
+      const beam = (z: number, x0: number, x1: number, z0 = z): Tube => ({
+        is: 'tube',
+        points: [
+          [x0, beamAt(x0), z0],
+          [x1, beamAt(x1), z],
+        ],
+        width: 0.045,
+        colour: WOOD_DARK,
+      });
       return {
         size: { long: 1.5, wide: 0.62, high: 0.72 },
         nearZ: 0.3,
         parts: [
-          ...[0.24, -0.24].map((z): Tube => ({
+          ...[0.22, -0.22].flatMap((z): Tube[] => [
+            // From the axle, in to the wheel's hub, out to under the tray.
+            beam(z, 0.52, 0.1, z * 0.3),
+            beam(z, 0.1, -0.44),
+            // The handle, on out behind the tray.
+            beam(z, -0.44, -0.95),
+          ]),
+          ...[0.22, -0.22].flatMap((z): Tube[] => [
+            {
+              is: 'tube',
+              points: [
+                [-0.34, beamAt(-0.34), z],
+                [-0.4, 0.02, z * 1.1],
+              ],
+              width: 0.05,
+              colour: DARK,
+            },
+            {
+              is: 'tube',
+              points: [
+                [-0.39, 0.12, z * 1.08],
+                [-0.06, beamAt(-0.06), z],
+              ],
+              width: 0.035,
+              colour: DARK,
+            },
+          ]),
+          {
             is: 'tube',
             points: [
-              [0.52, 0.2, z * 0.3],
-              [-0.9, 0.7, z],
-            ],
-            width: 0.04,
-            colour: WOOD_DARK,
-            layer: 'far',
-          })),
-          ...[0.24, -0.24].map((z): Tube => ({
-            is: 'tube',
-            points: [
-              [-0.34, 0.44, z],
-              [-0.38, 0.02, z * 1.05],
+              [-0.4, 0.06, 0.25],
+              [-0.4, 0.06, -0.25],
             ],
             width: 0.035,
             colour: DARK,
-            layer: 'far',
-          })),
+          },
           {
             is: 'wheel',
             at: [0.52, 0.2, 0],
@@ -2593,30 +2908,20 @@ function cartSolid(
           {
             is: 'prism',
             profile: [
-              [-0.46, 0.42],
-              [0.16, 0.3],
-              [0.46, 0.62],
-              [-0.56, 0.7],
+              [-0.44, beamAt(-0.44) + 0.02],
+              [0.14, beamAt(0.14) + 0.02],
+              [0.46, 0.64],
+              [-0.56, 0.72],
             ],
             z: [-0.3, 0.3],
             fill: paint.body,
             top: darker(paint.body, 0.3),
           },
-          ...[0.24, -0.24].map((z): Tube => ({
-            is: 'tube',
-            points: [
-              [-0.6, 0.66, z],
-              [-0.95, 0.72, z],
-            ],
-            width: 0.04,
-            colour: WOOD_DARK,
-            layer: 'near',
-          })),
         ],
         seats: [],
         grips: [
-          { id: 'handle-near', at: [-0.92, 0.72, 0.24] },
-          { id: 'handle-far', at: [-0.92, 0.72, -0.24] },
+          { id: 'handle-near', at: [-0.92, beamAt(-0.92), 0.22] },
+          { id: 'handle-far', at: [-0.92, beamAt(-0.92), -0.22] },
         ],
         mount: [-1.2, 0, 0],
         contacts: [
@@ -2647,11 +2952,22 @@ function cartSolid(
             is: 'tube',
             points: [
               [0.9, 0.74, z],
-              [2.5, 0.96, z * 0.85],
+              [2.5, 0.8, z * 0.85],
             ],
             width: 0.05,
             colour: WOOD_DARK,
             layer: z > 0 ? 'near' : 'far',
+          })),
+          // Its prop legs under the front, so it stands at rest, its
+          // shafts empty, on its wheels and them.
+          ...[0.36, -0.36].map((z): Tube => ({
+            is: 'tube',
+            points: [
+              [0.74, 0.64, z],
+              [0.9, 0.02, z * 1.12],
+            ],
+            width: 0.055,
+            colour: WOOD_DARK,
           })),
           {
             is: 'prism',
@@ -2709,8 +3025,48 @@ function cartSolid(
       };
     }
     default: {
-      // A chariot: its car with a high curved front, two big spoked wheels, its pole and yoke.
+      // A chariot: its cab over the axle, open at the back, its floor to
+      // stand on, a high curved front and side rails round it; two big
+      // spoked wheels at its back edge; its pole from under the floor,
+      // rising to the yoke.
       const W = 0.5;
+      const AX = -0.3;
+      const R = 0.47;
+      /** The side's screen: from the floor at the back, rising to the front's top. */
+      const screen = (z: number): V3[] =>
+        (
+          [
+            [-0.42, 0.54],
+            [0.58, 0.54],
+            [0.62, 0.9],
+            [0.58, 1.2],
+            [0.44, 1.19],
+            [0.3, 0.98],
+            [0.02, 0.84],
+            [-0.42, 0.74],
+          ] as P2[]
+        ).map(([x, y]): V3 => [x, y, z]);
+      /** The rail over it: from the back of the floor, round and up to the front. */
+      const rail = (z: number): V3[] =>
+        (
+          [
+            [-0.42, 0.54],
+            [-0.42, 0.8],
+            [-0.3, 0.98],
+            [-0.08, 1.1],
+            [0.22, 1.17],
+            [0.52, 1.2],
+          ] as P2[]
+        ).map(([x, y]): V3 => [x, y, z]);
+      const trimOf = (z: number): V3[] =>
+        (
+          [
+            [-0.42, 0.74],
+            [0.02, 0.84],
+            [0.3, 0.98],
+            [0.44, 1.19],
+          ] as P2[]
+        ).map(([x, y]): V3 => [x, y, z]);
       return {
         size: { long: 2.8, wide: 1.5, high: 1.2 },
         nearZ: W,
@@ -2718,21 +3074,31 @@ function cartSolid(
           {
             is: 'tube',
             points: [
-              [-0.18, 0.5, -0.72],
-              [-0.18, 0.5, 0.72],
+              [AX, R, -0.72],
+              [AX, R, 0.72],
             ],
             width: 0.05,
             colour: DARK,
             layer: 'far',
           },
+          // The pole, from under the floor at the axle, out at the cab's
+          // foot and rising to the yoke.
           {
             is: 'tube',
             points: [
-              [0.34, 0.54, 0],
-              [1.9, 0.86, 0],
-              [2.3, 0.9, 0],
+              [AX, 0.46, 0],
+              ...Array.from({ length: 9 }, (_, i): V3 => {
+                // A smooth rise: from the cab's foot, bending up to the yoke.
+                const t = i / 8;
+                const u = 1 - t;
+                return [
+                  u * u * 0.6 + 2 * u * t * 1.5 + t * t * 2.3,
+                  u * u * 0.46 + 2 * u * t * 0.46 + t * t * 0.92,
+                  0,
+                ];
+              }),
             ],
-            width: 0.06,
+            width: 0.07,
             colour: WOOD_DARK,
             layer: 'far',
           },
@@ -2740,44 +3106,98 @@ function cartSolid(
             is: 'tube',
             points: [
               [2.2, 0.92, -0.62],
+              [2.2, 0.86, 0],
               [2.2, 0.92, 0.62],
             ],
             width: 0.06,
             colour: WOOD_DARK,
             layer: 'far',
           },
+          // Its far side's screen and rail, seen through the open rail.
+          {
+            is: 'flat',
+            points: screen(-W),
+            fill: darker(wood, 0.18),
+          },
+          {
+            is: 'tube',
+            points: rail(-W),
+            width: 0.045,
+            colour: WOOD_DARK,
+          },
+          // The floor, and the front: a curved breastwork across its width.
           {
             is: 'prism',
-            profile: [
-              [-0.42, 0.52],
-              [0.42, 0.52],
-              [0.56, 0.92],
-              [0.46, 1.12],
-              [0.3, 1.08],
-              [0.12, 0.82],
-              [-0.42, 0.72],
-            ],
+            profile: rect2(-0.42, 0.44, 1.0, 0.1, 0.02),
             z: [-W, W],
-            fill: wood,
+            fill: darker(wood, 0.1),
             top: inside,
           },
           {
-            is: 'decal',
-            plane: { side: 'near', z: W },
-            shapes: [
-              { points: rect2(-0.42, 0.54, 0.84, 0.06), fill: GOLD },
-              { points: circle2([0.34, 0.86], 0.08, 12), fill: GOLD },
+            is: 'prism',
+            profile: [
+              [0.5, 0.54],
+              [0.58, 0.54],
+              [0.62, 0.9],
+              [0.58, 1.2],
+              [0.5, 1.2],
+              [0.54, 0.9],
             ],
+            z: [-W, W],
+            fill: wood,
           },
           {
             is: 'decal',
-            plane: { side: 'front', x: 0.5 },
-            shapes: [{ points: circle2([0, 0.9], 0.12, 12), fill: GOLD }],
+            plane: { side: 'front', x: 0.6 },
+            shapes: [
+              { points: rect2(-W, 1.1, 2 * W, 0.05), fill: GOLD },
+              { points: circle2([0, 0.86], 0.13, 16), fill: GOLD },
+            ],
+          },
+          // Its near side's screen and rail, with its gilt trim and boss.
+          {
+            is: 'flat',
+            points: screen(W),
+            fill: wood,
+          },
+          {
+            is: 'flat',
+            points: [
+              ...trimOf(W),
+              ...trimOf(W)
+                .reverse()
+                .map(([x, y, z]): V3 => [x + 0.02, y - 0.06, z]),
+            ],
+            fill: GOLD,
+          },
+          {
+            is: 'flat',
+            points: circle2([0.3, 0.72], 0.09, 14).map(([x, y]): V3 => [
+              x,
+              y,
+              W,
+            ]),
+            fill: GOLD,
+          },
+          {
+            is: 'tube',
+            points: rail(W),
+            width: 0.045,
+            colour: WOOD_DARK,
+          },
+          {
+            is: 'tube',
+            points: [
+              [0.02, 0.84, W],
+              [-0.08, 1.1, W],
+            ],
+            width: 0.035,
+            colour: WOOD_DARK,
           },
           ...[0.72, -0.72].map((z): Wheel => ({
             is: 'wheel',
-            at: [-0.18, 0.5, z],
-            r: 0.5,
+            at: [AX, R, z],
+            r: R,
             width: 0.07,
             face: 'wood',
             rim: WOOD_DARK,
@@ -2809,13 +3229,13 @@ function cartSolid(
         ],
         grips: [
           { id: 'reins', at: [0.6, 1.16, 0] },
-          { id: 'rail', at: [0.46, 1.1, 0.3] },
+          { id: 'rail', at: [0.52, 1.2, 0.3] },
         ],
         mount: [-0.8, 0, 0],
-        steps: [[-0.42, 0.52, 0]],
+        steps: [[-0.42, 0.54, 0]],
         contacts: [
-          [-0.18, 0, 0.72],
-          [-0.18, 0, -0.72],
+          [AX, 0, 0.72],
+          [AX, 0, -0.72],
         ],
         bob: { amp: 2.5, every: 1 },
       };
@@ -2836,23 +3256,23 @@ function boatSolid(kind: 'rowing-boat' | 'canoe', paint: Paint): Solid {
           is: 'hull',
           long: 5.2,
           beam: 0.84,
-          high: 0.3,
-          sheer: 0.32,
+          high: 0.34,
+          sheer: 0.2,
           draft: 0.16,
           transom: 0,
           fill: darker(wood, 0.08),
           inside: darker(wood, 0.35),
           thwarts: [
-            [1.3, 0.2],
-            [-1.3, 0.2],
+            [1.3, 0.24],
+            [-1.3, 0.24],
           ],
         },
-        // A paddle laid across it.
+        // A paddle laid in it, along its length on the thwarts.
         {
           is: 'tube',
           points: [
-            [0.2, 0.34, -0.5],
-            [0.2, 0.34, 0.62],
+            [1.1, 0.26, 0.08],
+            [-0.5, 0.26, -0.04],
           ],
           width: 0.035,
           colour: WOOD_DARK,
@@ -2861,10 +3281,10 @@ function boatSolid(kind: 'rowing-boat' | 'canoe', paint: Paint): Solid {
         {
           is: 'flat',
           points: [
-            [0.16, 0.34, 0.6],
-            [0.24, 0.34, 0.6],
-            [0.26, 0.3, 0.98],
-            [0.14, 0.3, 0.98],
+            [-0.48, 0.26, -0.1],
+            [-0.48, 0.26, 0.02],
+            [-0.98, 0.26, 0.03],
+            [-0.98, 0.26, -0.13],
           ],
           fill: WOOD_DARK,
           layer: 'body',
@@ -2873,7 +3293,7 @@ function boatSolid(kind: 'rowing-boat' | 'canoe', paint: Paint): Solid {
       seats: [
         {
           id: 'bow',
-          hip: [1.3, 0.22, 0],
+          hip: [1.3, 0.26, 0],
           feet: [[1.8, 0.02, 0.12]],
           hands: [
             [1.5, 0.7, 0.3],
@@ -2883,7 +3303,7 @@ function boatSolid(kind: 'rowing-boat' | 'canoe', paint: Paint): Solid {
         },
         {
           id: 'stern',
-          hip: [-1.3, 0.22, 0],
+          hip: [-1.3, 0.26, 0],
           feet: [[-0.8, 0.02, 0.12]],
           hands: [
             [-1.1, 0.7, 0.3],
@@ -2892,7 +3312,7 @@ function boatSolid(kind: 'rowing-boat' | 'canoe', paint: Paint): Solid {
           pose: 'row',
         },
       ],
-      grips: [{ id: 'paddle', at: [0.2, 0.34, 0.1] }],
+      grips: [{ id: 'paddle', at: [0.3, 0.26, 0.02] }],
       mount: [0, 0, 0.8],
       contacts: [
         [-2.2, 0, 0],
@@ -2903,23 +3323,69 @@ function boatSolid(kind: 'rowing-boat' | 'canoe', paint: Paint): Solid {
       bob: { amp: 3, every: 2 },
     };
   }
+  const lock = (sign: 1 | -1): V3 => [-0.05, 0.54, sign * 0.7];
+  const tip = (sign: 1 | -1): V3 => [-0.75, 0.3, sign * 2.15];
+  const along = (sign: 1 | -1, t: number): V3 => {
+    const o = lock(sign);
+    const e = tip(sign);
+    return [
+      o[0] + (e[0] - o[0]) * t,
+      o[1] + (e[1] - o[1]) * t,
+      o[2] + (e[2] - o[2]) * t,
+    ];
+  };
+  /** Where a rower holds it: in from its oarlock, the shaft's line on. */
+  const grip = (sign: 1 | -1): V3 => along(sign, -0.38);
+  const oar = (sign: 1 | -1, layer: Layer): Part[] => {
+    const b = along(sign, 0.62);
+    const e = tip(sign);
+    // Its blade squared, upright about the shaft's line, as it is held
+    // at rest: broad from the side.
+    const blade = (at: V3, w: number, k: 1 | -1): V3 => [
+      at[0],
+      at[1] + k * w,
+      at[2],
+    ];
+    return [
+      {
+        is: 'tube',
+        points: [
+          [-0.05, 0.47, sign * 0.71],
+          [-0.05, 0.6, sign * 0.72],
+        ],
+        width: 0.03,
+        colour: DARK,
+        layer,
+      },
+      {
+        is: 'tube',
+        points: [grip(sign), b],
+        width: 0.04,
+        colour: WOOD_DARK,
+        layer,
+      },
+      {
+        is: 'flat',
+        points: [
+          blade(b, 0.05, 1),
+          blade(e, 0.1, 1),
+          blade(e, 0.1, -1),
+          blade(b, 0.05, -1),
+        ],
+        fill: WOOD_DARK,
+        layer,
+      },
+    ];
+  };
   return {
     size: { long: 3.5, wide: 1.4, high: 0.78 },
     nearZ: 0.7,
     water: true,
     parts: [
-      // The far oar, behind; the hull; the near oar, out over the water.
-      {
-        is: 'tube',
-        points: [
-          [0.3, 0.7, -0.3],
-          [-0.05, 0.56, -0.66],
-          [-0.5, 0.02, -1.95],
-        ],
-        width: 0.04,
-        colour: WOOD_DARK,
-        layer: 'far',
-      },
+      // The far oar, behind; the hull; the near oar, out over the water:
+      // each straight, from its handle in the boat, through its oarlock
+      // on the gunwale, to its blade held just clear of the water.
+      ...oar(-1, 'far'),
       {
         is: 'hull',
         long: 3.5,
@@ -2931,58 +3397,34 @@ function boatSolid(kind: 'rowing-boat' | 'canoe', paint: Paint): Solid {
         fill: paint.body,
         inside: darker(wood, 0.3),
         thwarts: [
-          [-0.05, 0.3],
-          [-1.1, 0.3],
-          [1.0, 0.3],
+          [-0.05, 0.43],
+          [-1.1, 0.43],
+          [1.0, 0.43],
         ],
       },
-      {
-        is: 'tube',
-        points: [
-          [0.3, 0.7, 0.3],
-          [-0.05, 0.56, 0.66],
-          [-0.5, 0.02, 1.95],
-        ],
-        width: 0.04,
-        colour: WOOD_DARK,
-        layer: 'near',
-      },
-      {
-        is: 'flat',
-        points: [
-          [-0.46, 0.08, 1.85],
-          [-0.54, 0.08, 1.85],
-          [-0.62, -0.02, 2.3],
-          [-0.44, -0.02, 2.3],
-        ],
-        fill: WOOD_DARK,
-        layer: 'near',
-      },
+      ...oar(1, 'near'),
     ],
     seats: [
       {
         id: 'rower',
-        hip: [-0.05, 0.34, 0],
+        hip: [-0.05, 0.45, 0],
         feet: [
           [0.6, 0.02, 0.18],
           [0.6, 0.02, -0.18],
         ],
-        hands: [
-          [0.3, 0.7, 0.3],
-          [0.3, 0.7, -0.3],
-        ],
+        hands: [grip(1), grip(-1)],
         pose: 'row',
       },
       {
         id: 'passenger',
-        hip: [-1.1, 0.34, 0],
+        hip: [-1.1, 0.45, 0],
         feet: [[-0.5, 0.02, 0.18]],
         pose: 'passenger',
       },
     ],
     grips: [
-      { id: 'oar-near', at: [0.3, 0.7, 0.3] },
-      { id: 'oar-far', at: [0.3, 0.7, -0.3] },
+      { id: 'oar-near', at: grip(1) },
+      { id: 'oar-far', at: grip(-1) },
     ],
     mount: [0, 0, 0.9],
     contacts: [
@@ -3064,11 +3506,20 @@ export function drawVehicleKit(
     paint.body = pack?.bodies[0] ?? CLOTH.green;
   const solid = solidOf(kind, paint, livery);
   const { turn, above } = CAMERAS[view];
+  // A boat seen end on, from nearer the water: its end, not its inside;
+  // from the side, from a little above: into it, its seats and both oars.
+  const endOnWater = !solid.water
+    ? null
+    : view === 'front' || view === 'back'
+      ? 0.012
+      : view === 'side'
+        ? 0.18
+        : null;
   const cam0: Camera = {
     view,
     c: Math.round(Math.cos(turn) * 1e6) / 1e6,
     s: Math.round(Math.sin(turn) * 1e6) / 1e6,
-    k: above,
+    k: endOnWater ?? above,
     f: facing,
     lift: 0,
   };
@@ -3160,6 +3611,14 @@ export function drawVehicleKit(
         body,
         pane ? ' fill-rule="evenodd"' : '',
       ) +
+        (door.marks ?? [])
+          .map((mark) =>
+            flatShape(
+              pathOf([mark.points.map((v) => sheet.p(onPlane(nearPlane, v)))]),
+              mark.fill,
+            ),
+          )
+          .join('') +
         (pane
           ? flatShape(pathOf([pane]), GLASS, ' fill-opacity="0.42"') +
             flatShape(

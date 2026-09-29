@@ -249,9 +249,52 @@ describe('the narrator, kept by code', () => {
     expect(narratingSpeaker(null)).toBeNull();
   });
 
-  it('left to us, is checked as it always was', () => {
-    expect(narratorRuleOf({})).toBeNull();
+  it('left to us, is none: a story is acted, not narrated', () => {
+    const rule = narratorRuleOf({});
+    expect(rule).toEqual({ mode: 'none', character: null });
+    expect(narratorRuleOf({ format: 'story' })?.mode).toBe('none');
+    // An explainer is taught by its narrator: no rule for its lines.
+    expect(narratorRuleOf({ format: 'explainer' })).toBeNull();
+    expect(narratorWords({})).toMatch(/^Narrator: none/);
+    expect(describeBrief(briefOf({ format: 'story', idea: 'x' }))).toContain(
+      'Narrator: none',
+    );
+    // The writer is told so, and every narration of the scene goes.
+    expect(
+      narrationProblems(sheetWith(beats), bible, rule).filter(
+        (p) => p.level === 'error',
+      ),
+    ).toHaveLength(4);
+    const kept = narrationKept(sheetWith(beats), bible, rule);
+    expect(kept.beats.some((b) => b.kind === 'narration')).toBe(false);
     expect(narrationProblems(sheetWith(beats), bible, null)).toEqual([]);
+  });
+
+  it('light, speaks once a scene at most, at an edge', () => {
+    const rule = narratorRuleOf({ narrator: 'light' });
+    // Three narrations, as the 7 train scene had: opening, and two more.
+    const sheet = sheetWith([
+      narration('Late at night, on the train platform.'),
+      line('kai', 'Nana, the last train is here, run!'),
+      narration('The train arrives.'),
+      line('nana', 'Hold the doors, love, hold them!'),
+      narration('The doors shut.'),
+    ]);
+    const problems = narrationProblems(sheet, bible, rule);
+    expect(problems.map((p) => p.beat)).toEqual(expect.arrayContaining([2, 4]));
+    expect(problems.some((p) => /second narration/.test(p.message))).toBe(true);
+    const kept = narrationKept(sheet, bible, rule);
+    const told = kept.beats.filter((b) => b.kind === 'narration');
+    expect(told).toHaveLength(1);
+    expect(kept.beats[0]).toMatchObject({ kind: 'narration' });
+    expect(narrationProblems(kept, bible, rule)).toEqual([]);
+    // One only at the close is as good.
+    const closing = sheetWith([
+      line('kai', 'Nana, the last train is here, run!'),
+      line('nana', 'Hold the doors, love, hold them!'),
+      narration('And off they went, home at last.'),
+    ]);
+    expect(narrationProblems(closing, bible, rule)).toEqual([]);
   });
 });
 

@@ -1,8 +1,9 @@
 /**
  * The narrator as the maker set it (studio-story-plan §2): nowhere in a
- * pure film; lightly, a line to open or close a scene and to bridge to
+ * pure film; lightly, one line to open or close a scene and to bridge to
  * the next; a storyteller throughout; or one of the cast telling it in
- * their own voice. The writer is told the rule, code checks each scene
+ * their own voice. A story whose maker chose none is a pure film: acted,
+ * not narrated. The writer is told the rule, code checks each scene
  * keeps it, and what is over is made a line or an action where the words
  * say one, else cut.
  */
@@ -22,6 +23,25 @@ import type { FigureFace } from '../scene-figure';
 export interface NarratorRule {
   mode: NarratorMode;
   character: string | null;
+}
+
+/**
+ * A story's narrator when the maker chose none: no one. Films are acted,
+ * not narrated; a narrator is the maker's choice, never the Studio's.
+ */
+export const DEFAULT_NARRATOR: NarratorMode = 'none';
+
+/** A light narrator speaks this many times a scene at most: once, to open it or to close it. */
+export const LIGHT_MOST_NARRATIONS = 1;
+
+/** The narrator a brief's story has: the maker's choice, else none. Null for an explainer, which a narrator teaches. */
+export function narratorModeOf(
+  brief: Pick<StudioBrief, 'narrator'> & {
+    format?: StudioBrief['format'];
+  },
+): NarratorMode | null {
+  if (brief.format === 'explainer') return null;
+  return brief.narrator ?? DEFAULT_NARRATOR;
 }
 
 /** The most of a scene's spoken words the narrator may say, by mode. */
@@ -48,16 +68,19 @@ export function castIdOf(
   return found?.id ?? null;
 }
 
-/** The brief's narrator as a rule for its scenes; null when the maker left it to us. */
+/** The brief's narrator as a rule for its scenes: none where the maker chose none; null for an explainer. */
 export function narratorRuleOf(
-  brief: Pick<StudioBrief, 'narrator' | 'narratorCharacter'>,
+  brief: Pick<StudioBrief, 'narrator' | 'narratorCharacter'> & {
+    format?: StudioBrief['format'];
+  },
   bible: Pick<StudioBible, 'characters'> | null = null,
 ): NarratorRule | null {
-  if (!brief.narrator) return null;
+  const mode = narratorModeOf(brief);
+  if (!mode) return null;
   return {
-    mode: brief.narrator,
+    mode,
     character:
-      brief.narrator === 'character'
+      mode === 'character'
         ? (castIdOf(brief.narratorCharacter, bible) ??
           bible?.characters.find((c) => c.role === 'main')?.id ??
           null)
@@ -67,13 +90,15 @@ export function narratorRuleOf(
 
 /** The narrator's rule in words, for the writers. */
 export function narratorWords(
-  brief: Pick<StudioBrief, 'narrator' | 'narratorCharacter'>,
+  brief: Pick<StudioBrief, 'narrator' | 'narratorCharacter'> & {
+    format?: StudioBrief['format'];
+  },
 ): string {
-  switch (brief.narrator) {
+  switch (narratorModeOf(brief)) {
     case 'none':
-      return 'Narrator: none. A pure film: no narration beats at all. Everything is told by what the characters say and do; where and when shows in the set, the time and the weather.';
+      return 'Narrator: none. A pure film: no narration beats at all. Everything is told by what the characters say and do; where and when shows in the set, the time and the weather, and what matters is said by someone in the scene, in their own words.';
     case 'light':
-      return 'Narrator: light. At most one short narration to open a scene or to close it (a bridge to the next), never in its middle, a tenth of its words at most; the characters carry everything else.';
+      return 'Narrator: light. At most one short narration a scene, to open it or to close it (a bridge to the next), never in its middle, a tenth of its words at most; the characters carry everything else.';
     case 'storyteller':
       return 'Narrator: a warm storyteller throughout, as a picture book is read, but the characters still say their own lines: the narrator a third of the words at most.';
     case 'character':
@@ -141,14 +166,22 @@ export function narrationProblems(
     });
     return out;
   }
-  if (rule.mode === 'light')
+  if (rule.mode === 'light') {
+    let told = 0;
     sheet.beats.forEach((beat, k) => {
-      if (beat.kind === 'narration' && !atAnEdge(sheet.beats, k))
+      if (beat.kind !== 'narration') return;
+      if (!atAnEdge(sheet.beats, k))
         error(
           `Beat ${k + 1} is narration in the middle of the scene; the narrator only opens or closes a scene: show it, or have someone say it.`,
           k,
         );
+      else if ((told += 1) > LIGHT_MOST_NARRATIONS)
+        error(
+          `Beat ${k + 1} is a second narration; a light narrator speaks once a scene at most, to open it or to close it: show it, or have someone say it.`,
+          k,
+        );
     });
+  }
   const { narrated, all } = shareOf(sheet.beats);
   if (narrated > mostNarrated(rule.mode, all))
     error(
@@ -303,6 +336,9 @@ export function narrationKept(
       (rule.mode === 'light' && !atAnEdge(live(), live().indexOf(beats[k])))
     )
       replace(k);
+  // A light narrator once: the first at an edge kept (the opening bridge).
+  if (rule.mode === 'light')
+    for (const k of narrated().slice(LIGHT_MOST_NARRATIONS)) replace(k);
   // Past its share: the last first (an opening bridge is kept longest),
   // made what it shows or cut.
   for (const k of [...narrated()].reverse()) {

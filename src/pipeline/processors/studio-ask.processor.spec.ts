@@ -95,6 +95,8 @@ function studio(verdict: () => Promise<StudioCheckVerdict>) {
       audience: 'young children',
       minutes: 2,
       tone: 'gentle',
+      // Its scenes are told by a storyteller: the maker chose one.
+      narrator: 'storyteller',
     }),
     bible,
     createdAt: at,

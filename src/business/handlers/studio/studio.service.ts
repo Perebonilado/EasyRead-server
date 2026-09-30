@@ -6,6 +6,7 @@ import {
 } from '../../domain/studio/studio-story';
 import { narratorRuleOf } from '../../domain/studio/studio-narrator';
 import { heardBrief } from '../../domain/studio/studio-heard';
+import { audienceChips, whoHeard } from '../../domain/studio/studio-audience';
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import { randomBytes, randomUUID } from 'node:crypto';
 import type {
@@ -387,6 +388,8 @@ export class StudioService {
       if (key in patch && (patch[key] === null || patch[key] === ''))
         delete brief[key];
     if (brief.narrator !== 'character') delete brief.narratorCharacter;
+    // Whom it is for, taken back: the four words stay.
+    if ('who' in patch && patch.who === null) delete brief.who;
     await this.studio.updateShow(show.id, { brief, format: brief.format });
     return this.showDto({ ...show, brief, format: brief.format });
   }
@@ -541,11 +544,10 @@ export class StudioService {
       : text.slice(0, MESSAGE_CHARS);
     // What the buttons did is in it too, a line each from the Studio; the
     // message now is its own, even if work finished just after it came.
-    const history = historyOf(
-      (await this.studio.listMessages(show.id, 17)).filter(
-        (m) => m.id !== mine.id,
-      ),
+    const before = (await this.studio.listMessages(show.id, 17)).filter(
+      (m) => m.id !== mine.id,
     );
+    const history = historyOf(before);
     const scenes = await this.studio.listScenes(episode.id);
     const carried = carriedWears(scenes, show.bible);
     const state = describeForProducer({
@@ -611,6 +613,27 @@ export class StudioService {
       brief,
     );
     if (pasted) brief = { ...brief, source: text.slice(0, SOURCE_CHARS) };
+    // Whom it is for, heard by code from the maker's own words (a grade, a
+    // year, an age, a course, a job; what they know, their English), as
+    // the brief is gathered or when the producer took them as a new
+    // audience; never from a name or a place.
+    // Their own text is not their words: only the level it names counts.
+    const makerSaid = [
+      ...before
+        .filter(
+          (m) =>
+            m.role === 'user' &&
+            m.episodeId === episode.id &&
+            m.content.length < SOURCE_AT,
+        )
+        .map((m) => m.content),
+      pasted ? '' : said,
+    ].join('\n');
+    if (episode.phase === 'brief' || brief.audience !== show.brief.audience)
+      brief = briefOf(
+        { who: whoHeard(brief, pasted ? '' : said, makerSaid) },
+        brief,
+      );
     const briefChanged = JSON.stringify(brief) !== JSON.stringify(show.brief);
     if (briefChanged) {
       await this.studio.updateShow(show.id, { brief, format: brief.format });
@@ -791,9 +814,17 @@ export class StudioService {
           scenes.some((s) => s.sceneKey),
         ),
       meta: {
-        choices: note
-          ? []
-          : draft.choices.slice(0, 5).map((c) => c.slice(0, 40)),
+        // An explainer's audience is asked with its own chips: one row,
+        // and what they know as a second only when nothing said it yet.
+        ...(note || draft.refuse || draft.action !== 'none'
+          ? {
+              choices: note
+                ? []
+                : draft.choices.slice(0, 5).map((c) => c.slice(0, 40)),
+            }
+          : (audienceChips(brief, makerSaid) ?? {
+              choices: draft.choices.slice(0, 5).map((c) => c.slice(0, 40)),
+            })),
         action: draft.action,
         refused: draft.refuse,
       },

@@ -1025,7 +1025,9 @@ export function clearOfSides(
  */
 export const TALL_CUTS = [
   { from: 0.22, to: 0.78, least: 0.25, most: 0.75 },
-  { from: IN_BOX.headLeft, to: IN_BOX.headRight, least: 0.1, most: 0.9 },
+  // The head, a little wider than the kit's front view: turned three
+  // quarters, its face is off its box's middle.
+  { from: 0.15, to: 0.85, least: 0.02, most: 0.9 },
 ] as const;
 
 /** Whom of `others` a tall view's side cuts (TALL_CUTS), its middle across at `x` at scale `s`; null for no one. */

@@ -74,6 +74,7 @@ import {
   type Words,
 } from './scene-labels';
 import { climbsGrounded, keepGrounded } from './scene-grounding';
+import { describeDoorFaults, doorFaults } from './scene-door-check';
 import {
   SOLID_BESIDE,
   STAGINGS,
@@ -2929,6 +2930,7 @@ export function composeScene(input: ComposeInput): {
               pack: setPackOf(setDrawing),
               livery: setLiveryOf(setDrawing),
               outdoor,
+              vessel: script.setting?.place === 'vessel',
             }),
       group: box ? found : null,
       box: box ?? null,
@@ -4525,6 +4527,15 @@ export function composeScene(input: ComposeInput): {
   composed.scene = withInteractions(composed.scene, interactions);
   // Up the stairs on their treads, never floating (scene-grounding).
   composed.staging.push(...climbsGrounded(composed.scene));
+  // Every door, gate and wall its place's, and a door only one the story uses (scene-door-check).
+  const placeThing = script.cast.find(
+    (t) => t.kind === 'place' && t.id === script.backdrop,
+  );
+  const placeNamed =
+    placeThing?.kind === 'place' ? { name: placeThing.name } : null;
+  composed.staging.push(
+    ...describeDoorFaults(doorFaults(composed.scene, placeNamed)),
+  );
   // How far apart people stand, as made: in each other's bodies, or
   // talking too far apart or too close (scene-spacing), said.
   if (stationed)

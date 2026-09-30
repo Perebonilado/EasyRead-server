@@ -26,6 +26,7 @@ import { grammarCamera, type GrammarLine } from './scene-shots';
 import { grammarRead } from './scene-performance';
 import { headOf, keyAt, tallShotFaults } from './scene-safe';
 import { extendedTall } from './scene-set-shape';
+import { claimsText, pictureClaims } from './scene-picture-check';
 import { voiced } from './studio/__fixtures__/voiced';
 import { marketNewsStaged } from './studio/__fixtures__/market-news';
 import { composeNativity } from './studio/__fixtures__/nativity';
@@ -301,4 +302,35 @@ describe('a painted set on a tall frame', () => {
       /viewBox="0 0 900 1600"/,
     );
   }, 60_000);
+});
+
+describe('the picture check on a tall still', () => {
+  it('claims only who is in the phone’s frame, and asks after faces low or at the right edge', () => {
+    const { script } = marketNewsStaged();
+    const { scene } = voiced(
+      script,
+      [],
+      {},
+      {},
+      { stands: true, shape: 'tall' },
+    );
+    const cast = [
+      { id: 'mina', name: 'Mina', look: 'a young woman in a green apron' },
+      { id: 'theo', name: 'Theo', look: 'a young man in a yellow jacket' },
+    ];
+    let fewer = false;
+    for (let t = 0; t < scene.durationMs; t += 500) {
+      const claims = pictureClaims(scene, t, cast);
+      expect(claims.tall).toBe(true);
+      if (claims.onStage.length < 2) fewer = true;
+    }
+    expect(fewer).toBe(true);
+    expect(claimsText(pictureClaims(scene, 9000, cast), 'a moment')).toMatch(
+      /phone's tall frame/,
+    );
+    // A wide still claims everyone on the stage, as before.
+    const wide = voiced(script, [], {}, {}, { stands: true }).scene;
+    expect(pictureClaims(wide, 9000, cast).tall).toBeUndefined();
+    expect(pictureClaims(wide, 9000, cast).onStage).toHaveLength(2);
+  });
 });

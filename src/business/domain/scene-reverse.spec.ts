@@ -312,7 +312,7 @@ describe('a shot from the other side', () => {
     expect(viewAt(front.facing.b, front.yaw).mirror).toBe(-1);
   });
 
-  it('turns a third who faces the front camera round to their back, in the views made', () => {
+  it('turns a third who stands by round the other way, in the views made: three-quarter to the two becomes three-quarter from behind', () => {
     const scene = talk([
       ots('b', 'a'),
       { ...ots('a', 'b', true), atMs: 4000, untilMs: 7000 },
@@ -323,8 +323,9 @@ describe('a shot from the other side', () => {
         .filter((k) => k[0] <= t)
         .pop()
         ?.slice(1);
-    expect(now('c', 2000)).toEqual(['front', 1]);
-    expect(now('c', 5000)).toEqual(['back', -1]);
+    // Standing by, three-quarter toward the two (on their left).
+    expect(now('c', 2000)).toEqual(['3q', -1]);
+    expect(now('c', 5000)).toEqual(['back3q', 1]);
     expect(now('a', 5000)).toEqual(['3q', 1]);
     expect(now('b', 5000)).toEqual(['back3q', -1]);
     expect(now('a', 2000)).toEqual(['back3q', 1]);
@@ -350,7 +351,7 @@ const person = (id: string): SceneThingDto => ({
   views: ['view-front', 'view-3q', 'view-profile', 'view-back3q', 'view-back'],
 });
 
-/** a on the left and b on the right talk; c stands by, facing the front. */
+/** a on the left and b on the right talk; c stands by, turned to them. */
 function talk(shots: SceneEffectDto[]): SceneDto {
   return {
     version: 4,

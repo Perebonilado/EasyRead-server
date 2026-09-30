@@ -104,11 +104,11 @@ export function isLesson(
 ): boolean {
   if (scene.setting?.full) return false;
   // Someone who only turns to look at another (a clinician at the teenager
-  // she asks) is still a lesson's picture; one who walks, moves or talks
-  // acts.
+  // she asks, and the view of her that turn makes) is still a lesson's
+  // picture; one who walks, moves or talks acts.
   if (
     Object.values(scene.acting ?? {}).some((one) =>
-      Object.keys(one).some((key) => key !== 'look'),
+      Object.keys(one).some((key) => key !== 'look' && key !== 'view'),
     )
   )
     return false;

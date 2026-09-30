@@ -1,5 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { InjectModel } from '@nestjs/sequelize';
+import { Op, type WhereOptions } from 'sequelize';
 import type {
   AiCallLogInput,
   AiCallLogRepository,
@@ -23,5 +24,23 @@ export class SequelizeAiCallLogRepository implements AiCallLogRepository {
       ...row,
       costEstimate: costEstimate === null ? null : costEstimate.toFixed(6),
     } as never);
+  }
+
+  async spentUsd(filter: {
+    task: string;
+    modelPrefix: string;
+    documentId?: string;
+    since?: Date;
+  }): Promise<number> {
+    const where: WhereOptions = {
+      task: filter.task,
+      model: { [Op.startsWith]: filter.modelPrefix },
+      ...(filter.documentId ? { documentId: filter.documentId } : {}),
+      ...(filter.since ? { createdAt: { [Op.gte]: filter.since } } : {}),
+    };
+    const sum = (await this.logs.sum('costEstimate', { where })) as
+      number | string | null;
+    const usd = Number(sum ?? 0);
+    return Number.isFinite(usd) ? usd : 0;
   }
 }

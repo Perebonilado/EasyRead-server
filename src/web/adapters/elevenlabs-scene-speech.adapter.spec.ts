@@ -1,17 +1,36 @@
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import type { ConfigService } from '@nestjs/config';
 import {
+  AIM_TAG,
+  DELIVERY_TAG,
   ElevenLabsSceneSpeechAdapter,
+  FACE_SOUND,
+  FACE_TAG,
+  V4_TAGS,
   audioTags,
+  continuityOf,
   dialogueRequests,
   elevenLabsGate,
+  plainRefusal,
   seedOf,
+  spokenLines,
+  v4Tags,
   withSilences,
   type DialogueAnswer,
+  type DialogueLine,
 } from './elevenlabs-scene-speech.adapter';
 import {
+  ELEVENLABS_LIBRARY,
   ELEVENLABS_NARRATOR,
   ELEVENLABS_PREMADE,
 } from '../../business/domain/scene-voice';
+import { RECIPE_NAMES } from '../../business/domain/scene-face-rig';
+import { LINE_AIMS } from '../../business/domain/scene-performance';
+import {
+  followWork,
+  type RetryNotice,
+} from '../../business/domain/work-progress';
 
 const RATE = 24000;
 
@@ -280,7 +299,12 @@ describe('the ElevenLabs voice', () => {
 
   it('voices a page in one dialogue request on Eleven v3, with its own word times and the silences the page asked for', async () => {
     const { send, asked } = elevenLabs();
-    const voice = new ElevenLabsSceneSpeechAdapter(config(), raw, send, noWait);
+    const voice = new ElevenLabsSceneSpeechAdapter(
+      config({ ELEVENLABS_SCENE_MODEL: 'eleven_v3' }),
+      raw,
+      send,
+      noWait,
+    );
     const said = await voice.synthesize({
       text: exchange.map((p) => p.text).join(' '),
       voice: ELEVENLABS_NARRATOR,
@@ -488,9 +512,17 @@ describe('the ElevenLabs voice', () => {
 
   it('names the narrator’s voice and the model, and lists the account’s voices for the admin', async () => {
     expect(new ElevenLabsSceneSpeechAdapter(config()).label()).toEqual({
-      model: 'eleven_v3',
+      model: 'eleven_v4',
       voice: ELEVENLABS_NARRATOR,
     });
+    // The admin's model over the deployment's: its label names it.
+    expect(
+      new ElevenLabsSceneSpeechAdapter(
+        config({ ELEVENLABS_SCENE_MODEL: 'eleven_v4' }),
+      )
+        .withModel('eleven_v3')
+        .label().model,
+    ).toBe('eleven_v3');
     expect(
       new ElevenLabsSceneSpeechAdapter(
         config({ ELEVENLABS_NARRATOR_VOICE: ELEVENLABS_PREMADE.Alice }),
@@ -532,5 +564,620 @@ describe('the ElevenLabs voice', () => {
       description: 'Warm, Captivating Storyteller, male, middle aged, british',
       previewUrl: 'https://example.test/george.mp3',
     });
+  });
+});
+
+describe('Eleven v4’s tags', () => {
+  it('says each face a line is said with, what it does, and a lesson sentence’s delivery as one of v4’s feelings', () => {
+    expect(v4Tags({ direction: { said: 'terror' } })).toEqual(['terrified']);
+    expect(v4Tags({ direction: { said: 'furious' } })).toEqual(['furious']);
+    expect(v4Tags({ direction: { said: 'Shy' } })).toEqual(['hesitant']);
+    // The face said first; the aim when there is none.
+    expect(v4Tags({ direction: { said: 'joy', aim: 'accuses' } })).toEqual([
+      'happy',
+    ]);
+    expect(v4Tags({ direction: { aim: 'comforts' } })).toEqual(['softly']);
+    expect(v4Tags({ direction: { delivery: 'question' } })).toEqual([
+      'curious',
+    ]);
+    // A face or aim with none falls to the direction's words, as v3's did.
+    expect(
+      v4Tags({
+        style: 'as Ada, a girl, nervous, saying their own line',
+        direction: { said: 'neutral' },
+      }),
+    ).toEqual(['nervous']);
+    expect(v4Tags({ style: 'calm and warm; clear; natural pace' })).toEqual([
+      'calm',
+    ]);
+  });
+
+  it('stacks up to three: how loud, the feeling, slowly past the stretch, a sound the face makes, the feeling beneath', () => {
+    expect(
+      v4Tags({ tone: 'whisper', direction: { said: 'relieved' } }),
+    ).toEqual(['whispers', 'calm', 'sighs']);
+    expect(v4Tags({ direction: { said: 'joy', felt: 'worried' } })).toEqual([
+      'happy',
+      'nervous',
+    ]);
+    expect(v4Tags({ direction: { aim: 'jokes' } })).toEqual([
+      'mischievously',
+      'laughs',
+    ]);
+    // A child's lesson asks slower than the stretch reaches: v4 is told.
+    expect(
+      v4Tags({ speed: 0.7, style: 'calm and warm; clear; unhurried pace' }),
+    ).toEqual(['calm', 'slowly']);
+    expect(v4Tags({ speed: 0.9, style: 'calm and warm' })).toEqual(['calm']);
+    const most = v4Tags({
+      tone: 'shout',
+      speed: 0.6,
+      direction: { said: 'shock', felt: 'terror' },
+    });
+    expect(most).toEqual(['shouting', 'surprised', 'slowly']);
+    // A name or a stressed term is still not a feeling.
+    expect(v4Tags({ style: 'as Joy, a girl, saying their own line' })).toEqual(
+      [],
+    );
+  });
+
+  it('sends only tags from its list, never a sound effect, for every face and aim there is', () => {
+    const allowed = new Set<string>(V4_TAGS);
+    for (const tag of [
+      ...Object.values(FACE_TAG),
+      ...Object.values(FACE_SOUND),
+      ...Object.values(AIM_TAG),
+      ...Object.values(DELIVERY_TAG),
+    ])
+      if (tag) expect(allowed.has(tag)).toBe(true);
+    // Every face the rig draws and every aim is known.
+    for (const face of RECIPE_NAMES) expect(face in FACE_TAG).toBe(true);
+    for (const face of RECIPE_NAMES)
+      for (const aim of LINE_AIMS)
+        for (const tone of [undefined, 'whisper', 'shout'] as const) {
+          const tags = v4Tags({
+            tone,
+            speed: 0.7,
+            direction: { said: face, felt: 'terror', aim },
+          });
+          expect(tags.length).toBeLessThanOrEqual(3);
+          for (const tag of tags) expect(allowed.has(tag)).toBe(true);
+        }
+    for (const tag of V4_TAGS)
+      expect(tag).not.toMatch(
+        /door|creak|applause|footstep|thunder|music|explosion|gunshot|clap|bell|wind|rain/,
+      );
+  });
+
+  it('puts v4’s tags before each line’s words, and keeps v3’s two on v3', () => {
+    const pieces = [
+      {
+        text: 'Run!',
+        pauseAfter: 0.3,
+        voice: ELEVENLABS_PREMADE.Liam,
+        tone: 'shout' as const,
+        direction: { said: 'terror', felt: 'determined' },
+      },
+    ];
+    expect(
+      dialogueRequests(pieces, ELEVENLABS_NARRATOR, 'eleven_v4')[0][0].text,
+    ).toBe('[shouting] [terrified] [serious] Run!');
+    expect(
+      dialogueRequests(pieces, ELEVENLABS_NARRATOR, 'eleven_v3')[0][0].text,
+    ).toBe('[shouting] Run!');
+  });
+});
+
+describe('Eleven v4’s continuity', () => {
+  const lines = (texts: string[]) =>
+    texts.map((text) => ({
+      text: `[calm] ${text}`,
+      voice_id: ELEVENLABS_NARRATOR,
+      tagged: 7,
+      piece: { text, pauseAfter: 0 },
+    })) as DialogueLine[];
+
+  it('gives a request the ones before it by id, and the words either side, a hundred characters at most, cut at a word, with no tags', () => {
+    const long = `${'water runs downhill '.repeat(10).trim()}.`;
+    const requests = [
+      lines(['One.', long]),
+      lines(['Two.']),
+      lines([long, 'Three.']),
+    ];
+    expect(continuityOf([requests[0]], 0, [])).toEqual({});
+    expect(continuityOf(requests, 0, [])).toEqual({
+      future_text: 'Two.',
+    });
+    const middle = continuityOf(requests, 1, ['r1']);
+    expect(middle.previous_request_ids).toEqual(['r1']);
+    const before = middle.previous_text as string;
+    expect(before.length).toBeLessThanOrEqual(100);
+    // The end of the words before, from a word's start, and no tags.
+    expect(long.endsWith(before)).toBe(true);
+    expect(long[long.length - before.length - 1]).toBe(' ');
+    expect(before).not.toContain('[');
+    const after = middle.future_text as string;
+    expect(after.length).toBeLessThanOrEqual(100);
+    expect(after.startsWith('water runs')).toBe(true);
+    expect(
+      continuityOf(requests, 2, ['a', 'b', 'c', 'd']).previous_request_ids,
+    ).toEqual(['b', 'c', 'd']);
+  });
+
+  it('asks a long page’s requests one after another on v4, each carrying on from the last, all under ElevenLabs’ size', async () => {
+    const order: string[] = [];
+    let n = 0;
+    const { send, asked } = elevenLabs(() => null);
+    const sending = jest.fn((url: string, init: RequestInit) => {
+      order.push('asked');
+      return send(url, init).then((response) => {
+        n += 1;
+        const headers = new Headers(response.headers);
+        headers.set('request-id', `req-${n}`);
+        return new Response(response.body, { status: 200, headers });
+      });
+    });
+    const sentence = `${'word '.repeat(80).trim()}.`;
+    const voice = new ElevenLabsSceneSpeechAdapter(
+      config(),
+      raw,
+      sending,
+      noWait,
+    );
+    await voice.synthesize({
+      text: '',
+      pieces: Array.from({ length: 10 }, () => ({
+        text: sentence,
+        pauseAfter: 0.4,
+      })),
+    });
+    expect(asked.length).toBeGreaterThan(1);
+    for (const { body } of asked) {
+      const inputs = body.inputs as { text: string }[];
+      expect(inputs.reduce((c, i) => c + i.text.length, 0)).toBeLessThan(2000);
+      expect(body.model_id).toBe('eleven_v4');
+    }
+    expect(asked[0].body.previous_request_ids).toBeUndefined();
+    expect(asked[0].body.future_text).toMatch(/^word word/);
+    expect(asked[1].body.previous_request_ids).toEqual(['req-1']);
+    expect((asked[1].body.previous_text as string).length).toBeLessThanOrEqual(
+      100,
+    );
+    // v3 takes none of it.
+    elevenLabsGate.reset();
+    const v3 = elevenLabs();
+    await new ElevenLabsSceneSpeechAdapter(
+      config({ ELEVENLABS_SCENE_MODEL: 'eleven_v3' }),
+      raw,
+      v3.send,
+      noWait,
+    ).synthesize({
+      text: '',
+      pieces: Array.from({ length: 10 }, () => ({
+        text: sentence,
+        pauseAfter: 0.4,
+      })),
+    });
+    for (const { body } of v3.asked) {
+      expect(body.previous_request_ids).toBeUndefined();
+      expect(body.previous_text).toBeUndefined();
+    }
+  });
+
+  it('leaves the continuity off, for good, when ElevenLabs will not take it', async () => {
+    const sentence = `${'word '.repeat(80).trim()}.`;
+    const { send, asked } = elevenLabs((call) =>
+      call === 1
+        ? reply(422, {
+            detail: [
+              {
+                loc: ['body', 'future_text'],
+                msg: 'extra fields not permitted',
+              },
+            ],
+          })
+        : null,
+    );
+    const voice = new ElevenLabsSceneSpeechAdapter(config(), raw, send, noWait);
+    const said = await voice.synthesize({
+      text: '',
+      pieces: Array.from({ length: 10 }, () => ({
+        text: sentence,
+        pauseAfter: 0.4,
+      })),
+    });
+    expect(said.durationMs).toBeGreaterThan(0);
+    expect(asked[0].body.future_text).toBeDefined();
+    for (const { body } of asked.slice(1)) {
+      expect(body.future_text).toBeUndefined();
+      expect(body.previous_text).toBeUndefined();
+      expect(body.previous_request_ids).toBeUndefined();
+    }
+  });
+});
+
+describe('Eleven v4’s timings', () => {
+  const fixture = JSON.parse(
+    readFileSync(
+      join(__dirname, '__fixtures__', 'eleven-v4-dialogue.json'),
+      'utf8',
+    ),
+  ) as DialogueAnswer & { inputs: { text: string; voice_id: string }[] };
+
+  it('reads a real v4 answer: each line’s span and each word’s times, its stacked tags among the characters and never timed as words', () => {
+    const lines = fixture.inputs.map((input) => {
+      const tagged = /^(?:\[[^\]]*\]\s*)*/.exec(input.text)![0].length;
+      return {
+        ...input,
+        tagged,
+        piece: { text: input.text.slice(tagged), pauseAfter: 0 },
+      };
+    }) as DialogueLine[];
+    const spans = spokenLines(fixture, lines, 1000)!;
+    expect(spans).toHaveLength(2);
+    expect(spans[0].words).toHaveLength(27);
+    expect(spans[0].words[0].text).toBe('A');
+    expect(spans[1].words.map((w) => w.text).join(' ')).toBe(
+      'Is that why the town grew up by the river?',
+    );
+    // The second speaker after the first, and each word in order.
+    expect(spans[1].start).toBeGreaterThan(spans[0].end);
+    for (const span of spans)
+      for (let i = 1; i < span.words.length; i += 1)
+        expect(span.words[i].start).toBeGreaterThanOrEqual(
+          span.words[i - 1].start,
+        );
+  });
+
+  it('asks again without timestamps when ElevenLabs will not time the model, and leaves the page to the aligner', async () => {
+    const urls: string[] = [];
+    const send = jest.fn((url: string, init: RequestInit) => {
+      urls.push(url);
+      if (url.includes('with-timestamps'))
+        return Promise.resolve(
+          reply(400, {
+            detail: {
+              status: 'invalid_request',
+              message:
+                'Model eleven_v4 is not supported for dialogue with timestamps',
+            },
+          }),
+        );
+      const body = JSON.parse(init.body as string) as {
+        inputs: { text: string; voice_id: string }[];
+      };
+      const answer = dialogue(body.inputs);
+      return Promise.resolve(
+        new Response(Buffer.from(answer.audio_base64!, 'base64'), {
+          status: 200,
+        }),
+      );
+    });
+    const voice = new ElevenLabsSceneSpeechAdapter(config(), raw, send, noWait);
+    const said = await voice.synthesize({
+      text: '',
+      pieces: [
+        { text: 'The giant stepped out.', pauseAfter: 0.5 },
+        { text: 'I do.', pauseAfter: 0.5, voice: ELEVENLABS_PREMADE.Liam },
+      ],
+      timestamps: true,
+    });
+    expect(urls[0]).toContain('/v1/text-to-dialogue/with-timestamps');
+    expect(urls[1]).toBe(
+      'https://api.elevenlabs.io/v1/text-to-dialogue?output_format=pcm_24000',
+    );
+    expect(said.durationMs).toBeGreaterThan(0);
+    expect(said.words).toBeUndefined();
+    expect(said.pieceStartsMs).toBeUndefined();
+    // The next page goes straight to the plain request.
+    await voice.synthesize({ text: 'Again.' });
+    expect(urls[2]).not.toContain('with-timestamps');
+  });
+});
+
+describe('the ElevenLabs voice’s troubles, said plainly', () => {
+  const heard = () => {
+    const notices: RetryNotice[] = [];
+    return {
+      notices,
+      follower: {
+        step: () => undefined,
+        retry: (notice: RetryNotice) => notices.push(notice),
+        recovered: () => undefined,
+      },
+    };
+  };
+  const exchange = [{ text: 'Hello there.', pauseAfter: 0.3 }];
+
+  it('says out of credit, a voice missing, a model the plan cannot use', () => {
+    expect(
+      plainRefusal(
+        401,
+        'quota_exceeded',
+        'You have 3 credits left',
+        'eleven_v4',
+      ).plain,
+    ).toBe('ElevenLabs is out of credit');
+    expect(
+      plainRefusal(
+        400,
+        'voice_not_found',
+        "A voice with ID 'nDJIICjR9zfJExIFeSCN' was not found.",
+        'eleven_v4',
+      ).plain,
+    ).toBe(
+      'A voice in the cast is not in the ElevenLabs account (nDJIICjR9zfJExIFeSCN)',
+    );
+    expect(
+      plainRefusal(
+        403,
+        'model_access_denied',
+        'Your plan does not allow access to this model',
+        'eleven_v4',
+      ).plain,
+    ).toBe('This ElevenLabs account cannot use eleven_v4');
+  });
+
+  it('tells whoever follows the work, and fails with the plain words and the status', async () => {
+    const { notices, follower } = heard();
+    const { send } = elevenLabs(() =>
+      reply(401, {
+        detail: {
+          type: 'unauthorized',
+          code: 'quota_exceeded',
+          message: 'This request exceeds your quota of 10000.',
+          status: 'quota_exceeded',
+        },
+      }),
+    );
+    const voice = new ElevenLabsSceneSpeechAdapter(config(), raw, send, noWait);
+    const failed = await followWork(follower, () =>
+      voice.synthesize({ text: '', pieces: exchange }),
+    ).then(
+      () => null,
+      (error: Error & { status?: number }) => error,
+    );
+    expect(failed?.status).toBe(401);
+    expect(failed?.message).toMatch(/^ElevenLabs is out of credit: /);
+    expect(notices).toEqual([
+      expect.objectContaining({
+        service: 'voice',
+        final: true,
+        reason: 'ElevenLabs is out of credit',
+      }),
+    ]);
+  });
+
+  it('says the limit it waits on, by the plan’s requests at once, before ElevenLabs has said its own', async () => {
+    const { notices, follower } = heard();
+    const { send } = elevenLabs((call) =>
+      call === 1
+        ? reply(
+            429,
+            {
+              detail: {
+                status: 'concurrent_limit_exceeded',
+                message: 'Too many concurrent requests',
+              },
+            },
+            { 'retry-after': '2' },
+          )
+        : null,
+    );
+    const voice = new ElevenLabsSceneSpeechAdapter(
+      config({ ELEVENLABS_PLAN: 'creator' }),
+      raw,
+      send,
+      noWait,
+    );
+    await followWork(follower, () =>
+      voice.synthesize({ text: '', pieces: exchange }),
+    );
+    expect(notices[0]).toMatchObject({
+      reason: 'ElevenLabs is at its limit of 5 at once on the Creator plan',
+      attempt: 2,
+      waitMs: 2000,
+    });
+  });
+
+  it('keeps to the plan’s requests at once until ElevenLabs says its own', async () => {
+    let inFlight = 0;
+    let most = 0;
+    const send = jest.fn(async (_url: string, init: RequestInit) => {
+      inFlight += 1;
+      most = Math.max(most, inFlight);
+      await new Promise((resolve) => setTimeout(resolve, 5));
+      inFlight -= 1;
+      const body = JSON.parse(init.body as string) as {
+        inputs: { text: string; voice_id: string }[];
+      };
+      return reply(200, dialogue(body.inputs));
+    });
+    const voice = new ElevenLabsSceneSpeechAdapter(
+      config({ ELEVENLABS_PLAN: 'Pro' }),
+      raw,
+      send,
+      noWait,
+    );
+    await Promise.all(
+      Array.from({ length: 14 }, () => voice.synthesize({ text: 'A.' })),
+    );
+    expect(most).toBe(10);
+  });
+});
+
+describe('the ElevenLabs cast', () => {
+  const account = (ids: string[], categories: Record<string, string> = {}) =>
+    reply(200, {
+      voices: ids.map((id) => ({
+        voice_id: id,
+        name: id,
+        category: categories[id] ?? 'premade',
+      })),
+      has_more: false,
+    });
+
+  it('stands a premade voice in for a library voice the account has not added, and speaks in it once added', async () => {
+    const { Emmaline, Toby } = ELEVENLABS_LIBRARY;
+    const asked: { url: string; body?: { inputs: { voice_id: string }[] } }[] =
+      [];
+    let added: string[] = [];
+    const send = jest.fn((url: string, init?: RequestInit) => {
+      if (url.includes('/v2/voices')) {
+        asked.push({ url });
+        return Promise.resolve(account(added));
+      }
+      const body = JSON.parse(init!.body as string) as {
+        inputs: { text: string; voice_id: string }[];
+      };
+      asked.push({ url, body });
+      return Promise.resolve(reply(200, dialogue(body.inputs)));
+    });
+    const voice = new ElevenLabsSceneSpeechAdapter(config(), raw, send, noWait);
+    const page = {
+      text: '',
+      pieces: [
+        { text: 'Look!', pauseAfter: 0.3, voice: Emmaline.id },
+        { text: 'Mine!', pauseAfter: 0.3, voice: Toby.id },
+        { text: 'They ran.', pauseAfter: 0.3 },
+      ],
+    };
+    await voice.synthesize(page);
+    const first = asked.find((a) => a.body)!.body!.inputs;
+    expect(first.map((i) => i.voice_id)).toEqual([
+      ELEVENLABS_PREMADE.Jessica,
+      ELEVENLABS_PREMADE.Callum,
+      ELEVENLABS_NARRATOR,
+    ]);
+    // Added to the account: once the list is read again, its own voice.
+    elevenLabsGate.reset();
+    asked.length = 0;
+    added = [Emmaline.id, Toby.id];
+    await voice.synthesize(page);
+    expect(
+      asked.find((a) => a.body)!.body!.inputs.map((i) => i.voice_id),
+    ).toEqual([Emmaline.id, Toby.id, ELEVENLABS_NARRATOR]);
+  });
+
+  it('never asks for the list for premade voices, and refuses plainly a chosen voice the account does not have', async () => {
+    const { send, asked } = elevenLabs();
+    await new ElevenLabsSceneSpeechAdapter(
+      config(),
+      raw,
+      send,
+      noWait,
+    ).synthesize({
+      text: '',
+      pieces: [
+        { text: 'Hi.', pauseAfter: 0.3, voice: ELEVENLABS_PREMADE.Harry },
+      ],
+    });
+    expect(asked).toHaveLength(1);
+
+    const lists = jest.fn(() => Promise.resolve(account([])));
+    const voice = new ElevenLabsSceneSpeechAdapter(
+      config(),
+      raw,
+      lists,
+      noWait,
+    );
+    const failed = await voice
+      .synthesize({
+        text: '',
+        pieces: [
+          { text: 'Hi.', pauseAfter: 0.3, voice: 'Chosen00Voice00Gone' },
+        ],
+      })
+      .then(
+        () => null,
+        (error: Error & { status?: number }) => error,
+      );
+    expect(failed?.status).toBe(400);
+    expect(failed?.message).toContain(
+      'A voice in the cast is not in the ElevenLabs account (Chosen00Voice00Gone)',
+    );
+    // Only the list was asked for: no character was paid for.
+    expect(lists).toHaveBeenCalledTimes(1);
+  });
+
+  it('flags a cloned or designed voice on v4 for the admin to hear again, and none on v3', async () => {
+    const send = jest.fn(() =>
+      Promise.resolve(
+        account(['Cloned000Voice', 'Designed00Voice', ELEVENLABS_NARRATOR], {
+          Cloned000Voice: 'cloned',
+          Designed00Voice: 'generated',
+        }),
+      ),
+    );
+    const v4 = await new ElevenLabsSceneSpeechAdapter(
+      config(),
+      raw,
+      send,
+      noWait,
+    ).catalogue();
+    const note = (id: string) => v4.find((voice) => voice.id === id)?.note;
+    expect(note('Cloned000Voice')).toMatch(/may sound different on v4/);
+    expect(note('Designed00Voice')).toMatch(/designed voice.*act less/);
+    expect(note(ELEVENLABS_NARRATOR)).toBeUndefined();
+    const v3 = await new ElevenLabsSceneSpeechAdapter(
+      config({ ELEVENLABS_SCENE_MODEL: 'eleven_v3' }),
+      raw,
+      send,
+      noWait,
+    ).catalogue();
+    expect(v3.every((voice) => !voice.note)).toBe(true);
+  });
+
+  it('searches the Voice Library, marking what the account has, and adds a voice as the admin asks', async () => {
+    const urls: string[] = [];
+    const bodies: unknown[] = [];
+    const send = jest.fn((url: string, init?: RequestInit) => {
+      urls.push(url);
+      if (init?.body) bodies.push(JSON.parse(init.body as string));
+      if (url.includes('/v1/shared-voices'))
+        return Promise.resolve(
+          reply(200, {
+            voices: [
+              {
+                voice_id: ELEVENLABS_LIBRARY.Emmaline.id,
+                public_owner_id: 'owner1',
+                name: 'Emmaline - young British girl',
+                gender: 'female',
+                age: 'young',
+                accent: 'british',
+                preview_url: 'https://example.test/e.mp3',
+                free_users_allowed: true,
+              },
+              {
+                voice_id: 'Paid0000Only00Voice',
+                public_owner_id: 'owner2',
+                name: 'Paid',
+                free_users_allowed: false,
+              },
+            ],
+          }),
+        );
+      if (url.includes('/v1/voices/add/'))
+        return Promise.resolve(reply(200, { voice_id: 'x' }));
+      return Promise.resolve(account([ELEVENLABS_LIBRARY.Emmaline.id]));
+    });
+    const voice = new ElevenLabsSceneSpeechAdapter(config(), raw, send, noWait);
+    const found = await voice.library('little girl');
+    expect(urls[0]).toContain('search=little%20girl');
+    expect(found).toEqual([
+      {
+        id: ELEVENLABS_LIBRARY.Emmaline.id,
+        ownerId: 'owner1',
+        name: 'Emmaline',
+        description: 'young British girl, female, young, british',
+        previewUrl: 'https://example.test/e.mp3',
+        added: true,
+      },
+    ]);
+    await voice.addVoice('owner1', 'Newvoice0000000', 'Grandma Oxley');
+    expect(urls[urls.length - 1]).toBe(
+      'https://api.elevenlabs.io/v1/voices/add/owner1/Newvoice0000000',
+    );
+    expect(bodies[bodies.length - 1]).toEqual({ new_name: 'Grandma Oxley' });
   });
 });

@@ -22,6 +22,15 @@
  * three-quarter at least); a view held less than 400 ms is no view (a
  * glance does not turn the body round). Pure: the same scene gives the
  * same views.
+ *
+ * Turns are motivated and steady (studio-turns-plan): a glance, a look up
+ * or down, or a pause with nothing new to look at keeps the facing they
+ * have (never a snap to the camera between lines); with nothing to face
+ * they rest three-quarter toward the others; a look turns them round as
+ * far as profile, never their back; lying down they face up to us, sat
+ * down no further round than three-quarter. A turn is held MIN_HOLD_MS
+ * unless a real reason turns them sooner (a walk, a thing used, a new
+ * line, a cut), and none is undone within FLIP_BACK_MS (steadyFacings).
  */
 import type {
   SceneDto,
@@ -133,13 +142,136 @@ const speakerFacing = (facing: number, yaw = FRONT_ON) => {
 /** The most a listener on the whole stage turns from the camera: three-quarter, their face seen. */
 export const LISTEN_OPEN = 60;
 
-/** A facing turned no further from a camera turned `yaw` than three-quarter: a listener cheated open to it. */
-export const cheatOpen = (facing: number, yaw = FRONT_ON) => {
+/** The most a look turns someone from the camera on the whole stage: profile, never their back. */
+export const LOOK_OPEN = 90;
+/** Sat down, the body turns no further from the camera than three-quarter. */
+export const SEAT_OPEN = 60;
+/** With no one in particular to face, three-quarter toward the others there. */
+export const REST_TURN = 45;
+/** A look turned less than this is a glance: the head's, never the body's. */
+export const GLANCE_TURN = 0.3;
+/** A view held at least this long, unless a real reason turns them sooner (a new line, a walk, a thing used, a cut). */
+export const MIN_HOLD_MS = 1500;
+/** Never back to the view just left within this long (no A, B, A). */
+export const FLIP_BACK_MS = 2000;
+
+/** A facing turned no further from a camera turned `yaw` than `most` (three-quarter): a listener cheated open to it. */
+export const cheatOpen = (
+  facing: number,
+  yaw = FRONT_ON,
+  most = LISTEN_OPEN,
+) => {
   const off = ((((facing - yaw) % 360) + 540) % 360) - 180;
-  return Math.abs(off) > LISTEN_OPEN
-    ? yaw + (Math.sign(off) || 1) * LISTEN_OPEN
-    : facing;
+  return Math.abs(off) > most ? yaw + (Math.sign(off) || 1) * most : facing;
 };
+
+/** Why someone faces as they do at a moment: what they do then. */
+type Why =
+  'use' | 'walk' | 'lie' | 'hug' | 'speak' | 'listen' | 'look' | 'rest' | 'off';
+/** What they would face, null for what they face already. */
+interface Want {
+  facing: number | null;
+  why: Why;
+}
+/** A facing from a moment on: why, whether it is at a cut, and its place on the wheel of views from the camera then. */
+export interface Facing {
+  t: number;
+  facing: number;
+  why: Why;
+  cut: boolean;
+  bin: number;
+}
+/** What turns someone as it begins or ends: their body going somewhere or doing something, or coming on. */
+const PHYSICAL: ReadonlySet<Why> = new Set([
+  'use',
+  'walk',
+  'lie',
+  'hug',
+  'off',
+]);
+
+/** Where a facing is on the wheel of eight views from a camera turned `yaw`: 0 the front, 4 the back. */
+export function binOf(facing: number, yaw = FRONT_ON): number {
+  const { view, mirror } = viewAt(facing, yaw);
+  const k = VIEW_ORDER.indexOf(view);
+  return mirror < 0 && k > 0 && k < 4 ? 8 - k : k;
+}
+
+/** How many views apart two places on the wheel are, the short way round. */
+export const wheelSteps = (a: number, b: number): number => {
+  const d = (((b - a) % 8) + 8) % 8;
+  return Math.min(d, 8 - d);
+};
+
+/** Whether turning from `a` to `b` and then to `c` turns back: `c` is `a`, or beside it and nearer it than `b` is. */
+export const flipsBack = (a: number, b: number, c: number): boolean =>
+  a !== b && wheelSteps(a, c) <= 1 && wheelSteps(a, c) < wheelSteps(a, b);
+
+/**
+ * Facings kept only as often as the eye can follow a turn: one that
+ * would come less than MIN_HOLD_MS after the last turn waits until the
+ * hold is up (and is dropped if they no longer want it then), unless a
+ * real reason turns them at once (a walk, a thing used, lying down, a
+ * hug, their own new line or someone new speaking to them, a cut, or
+ * the end of any of those); and a turn undone within FLIP_BACK_MS (A, B,
+ * A) is not made at all, but for a walk or a thing used. Its first
+ * facing always stays.
+ */
+export function steadyFacings(
+  raw: readonly Facing[],
+  endMs = Infinity,
+): Facing[] {
+  if (!raw.length) return [];
+  const strong = (one: Facing, before: Facing) =>
+    one.cut ||
+    PHYSICAL.has(one.why) ||
+    PHYSICAL.has(before.why) ||
+    one.why === 'speak' ||
+    one.why === 'listen';
+  const kept: Facing[] = [raw[0]];
+  for (let i = 1; i < raw.length; i += 1) {
+    const one = raw[i];
+    const last = kept[kept.length - 1];
+    if (one.bin === last.bin) continue;
+    if (strong(one, last) || one.t - last.t >= MIN_HOLD_MS) {
+      kept.push(one);
+      continue;
+    }
+    // Too soon after the last turn: made when the hold is up, as they
+    // want then, if that is still a turn and held a while.
+    const due = last.t + MIN_HOLD_MS;
+    let j = i;
+    while (j + 1 < raw.length && raw[j + 1].t <= due) j += 1;
+    const then = raw[j];
+    const until = raw[j + 1]?.t ?? endMs;
+    if (then.bin !== last.bin && until - due >= VIEW_HOLD_MS)
+      kept.push({ ...then, t: due, cut: false });
+    i = j;
+  }
+  // No A, B, A within FLIP_BACK_MS (nor A, B and back to beside A), but
+  // for a body going somewhere or doing something: A kept on, then turned
+  // the little way to C if C is not A.
+  for (let changed = true; changed;) {
+    changed = false;
+    for (let i = 1; i + 1 < kept.length; i += 1) {
+      const [a, b, c] = [kept[i - 1], kept[i], kept[i + 1]];
+      if (
+        flipsBack(a.bin, b.bin, c.bin) &&
+        c.t - b.t < FLIP_BACK_MS &&
+        !b.cut &&
+        !c.cut &&
+        !PHYSICAL.has(b.why) &&
+        !PHYSICAL.has(c.why) &&
+        !PHYSICAL.has(a.why)
+      ) {
+        kept.splice(i, c.bin === a.bin ? 2 : 1);
+        changed = true;
+        break;
+      }
+    }
+  }
+  return kept;
+}
 
 /** How far round the camera is over someone's shoulder (studio-views-plan §3.1): the one it looks at three-quarter to us, the one near from behind. */
 export const OTS_YAW = 45;
@@ -262,8 +394,12 @@ export function viewsOf(
   /** The camera's yaw at a moment: turned round in a shot from the place's other side. */
   const yawAt = (t: number) => (isReverse(shotAt(t)) ? TURNED_ROUND : FRONT_ON);
   /** Where someone is at `t`, on the wide stage: cheated near the camera for a shot, along a walk, else where their step has them. */
-  const placeOf = (id: string, t: number): ScenePlaceDto | null => {
-    const cheated = nearAt(id, t);
+  const placeOf = (
+    id: string,
+    t: number,
+    cheat = true,
+  ): ScenePlaceDto | null => {
+    const cheated = cheat ? nearAt(id, t) : null;
     if (cheated) return cheated;
     const walk = walkOf(id, t);
     if (walk) {
@@ -294,6 +430,17 @@ export function viewsOf(
       ([at, shapes]) =>
         at - 200 <= t && t < at + (shapes.length * 1000) / MOUTH_FPS + 200,
     );
+  /** Who is someone on the stage: those who act, and everyone drawn to. */
+  const people = new Set(
+    scene.things
+      .filter(
+        (thing) =>
+          thing.kind === 'drawing' &&
+          !thing.backdrop &&
+          (thing.rig || acting[thing.id]),
+      )
+      .map((thing) => thing.id),
+  );
   for (const thing of viewed) {
     const id = thing.id;
     const mine = acting[id] ?? {};
@@ -303,6 +450,12 @@ export function viewsOf(
       at + (shapes.length * 1000) / MOUTH_FPS,
     ]);
     const hugs = (mine.moves ?? []).filter(([, what]) => what === 'hug');
+    // Sat down or lying: held until they get up (scene-acting).
+    const held = (mine.moves ?? []).filter(
+      ([, what]) => what === 'sit' || what === 'lie',
+    );
+    const heldAt = (t: number) =>
+      held.find(([at, , ms]) => at <= t && t < at + ms)?.[1];
     const myWalks = walks.filter((w) => w.id === id);
     // Every moment what they face may change.
     const times = new Set<number>([0]);
@@ -322,7 +475,7 @@ export function viewsOf(
       times.add(Math.round(w.from));
       times.add(Math.round(w.to));
     }
-    for (const [at, , ms] of hugs) {
+    for (const [at, , ms] of [...hugs, ...held]) {
       times.add(at);
       times.add(at + ms);
     }
@@ -339,11 +492,25 @@ export function viewsOf(
       times.add(Math.round(shot.atMs));
       times.add(Math.round(shot.untilMs ?? shot.atMs));
     }
+    /** Whether a shot on at `t` is a close of their own they speak in: they may be cheated open to its camera. */
+    const closeOnSpeaker = (t: number) => {
+      const shot = shotAt(t);
+      if (!shot || shot.target !== id || shot.part) return false;
+      const kind = shot.shot?.kind;
+      if (kind === 'ots' || kind === 'profile' || kind === 'crowd')
+        return false;
+      const until = shot.untilMs ?? shot.atMs;
+      return speech.some(([a, b]) => a < until && b > shot.atMs);
+    };
     /** How the shot on at `t` turns them: its camera's yaw, and their facing in it. */
     const inShot = (t: number): { yaw: number; facing: number } | null => {
       const shot = shotAt(t);
       const k = stepAt(t);
       if (!shot || k < 0 || walkOf(id, t)) return null;
+      // An insert frames a thing where it is as the front view draws it
+      // (in a hand, on a table): whoever is there is drawn so for it,
+      // unseen, between its two cuts.
+      if (shot.shot?.kind === 'insert') return { yaw: 0, facing: 0 };
       if (shot.shot?.kind === 'crowd' && shot.target === id)
         // Over the crowd: they speak to them, to us; the other way, seen
         // from behind as they do.
@@ -356,41 +523,86 @@ export function viewsOf(
         ? { yaw: turned.yaw, facing }
         : null;
     };
-    const facingAt = (t: number): number => {
-      const walk = walkOf(id, t);
-      const speaking = speech.some(([a, b]) => a - 200 <= t && t < b + 200);
+    /** Whether they begin to speak, or `who` does, about `t`: a new line, a real reason to turn at once. */
+    const onsetAt = (who: string, t: number) =>
+      (acting[who]?.mouth ?? []).some(([at]) => at - 450 <= t && t <= at + 50);
+    /**
+     * What they would face at `t`, and why, from what they do then alone:
+     * a thing of the set they use, a walk, lying down (face up to us);
+     * whom they hug, speak or listen to, or look at (turned toward them,
+     * as a cartoon cheats it: a look never turns their back to the
+     * camera, a listener shows their face three-quarter, and sat down the
+     * body turns no further than three-quarter). A glance (a look under
+     * GLANCE_TURN), a look up or down, or nothing to look at: null, they
+     * keep the facing they have (the head does the glance). `cheat`:
+     * from where a shot cheats them near the camera.
+     */
+    const wantAt = (t: number, cheat = false): Want => {
       const using = interactFacing(id, t);
+      if (using !== null) return { facing: using, why: 'use' };
+      const walk = walkOf(id, t);
+      if (walk)
+        return { facing: walkFacing(walk.start, walk.end, W), why: 'walk' };
+      const holding = heldAt(t);
+      if (holding === 'lie') return { facing: 0, why: 'lie' };
+      const me = placeOf(id, t, cheat);
+      if (!me) return { facing: null, why: 'off' };
       const yaw = yawAt(t);
-      if (using !== null) return speaking ? speakerFacing(using, yaw) : using;
-      if (walk) {
-        const along = walkFacing(walk.start, walk.end, W);
-        return speaking ? speakerFacing(along, yaw) : along;
-      }
-      const me = placeOf(id, t);
-      if (!me) return 0;
+      const speaking = speech.some(([a, b]) => a - 200 <= t && t < b + 200);
       let key: (typeof looks)[number] | undefined;
       for (const one of looks) if (one[0] <= t) key = one;
       const hugging = hugs.find(([at, , ms]) => at <= t && t < at + ms);
       const target = hugging?.[3] ?? key?.[1] ?? null;
       const turn = hugging ? 0.6 : (key?.[2] ?? 0);
-      let facing = 0;
-      if (target === '@left' || target === '@right')
-        facing = (target === '@left' ? -1 : 1) * (turn >= 0.5 ? 60 : 45);
-      else if (target && !target.startsWith('@')) {
-        const them = placeOf(target, t) ?? featureAt(target);
+      let facing: number | null = null;
+      let why: Why = 'rest';
+      if (target === '@left' || target === '@right') {
+        if (turn >= GLANCE_TURN) {
+          facing = (target === '@left' ? -1 : 1) * (turn >= 0.5 ? 60 : 45);
+          why = speaking ? 'speak' : 'look';
+        }
+      } else if (target && !target.startsWith('@') && turn >= GLANCE_TURN) {
+        const them = placeOf(target, t, cheat) ?? featureAt(target);
         if (them) {
           const dx = them.x + them.w / 2 - (me.x + me.w / 2);
           const dz = (depthOf(them) - depthOf(me)) * W * 0.5;
           const close = Math.abs(dx) < (me.w + them.w) * 0.75;
           facing = facingToward(dx, dz, turn, close);
+          const listening = !speaking && !hugging && speakingAt(target, t);
           // Listening to someone behind them, on the whole stage: turned in
           // three-quarter, their face to us, as a film cheats it, never
           // their back (a shot of their own turns them as it frames them).
-          if (!speaking && !hugging && !shotAt(t) && speakingAt(target, t))
-            facing = cheatOpen(facing, yaw);
+          if (listening && !shotAt(t)) facing = cheatOpen(facing, yaw);
+          // Looking or speaking to someone or something behind them:
+          // round as far as profile, never their back.
+          else if (!hugging) facing = cheatOpen(facing, yaw, LOOK_OPEN);
+          why = hugging
+            ? 'hug'
+            : onsetAt(id, t)
+              ? 'speak'
+              : onsetAt(target, t)
+                ? 'listen'
+                : 'look';
         }
       }
-      return speaking ? speakerFacing(facing, yaw) : facing;
+      if (facing !== null && holding === 'sit')
+        facing = cheatOpen(facing, yaw, SEAT_OPEN);
+      return { facing, why };
+    };
+    /** Toward the others on the stage at `t`, three-quarter; null when no one else is there. */
+    const restFacing = (t: number): number | null => {
+      const me = placeOf(id, t, false);
+      const k = stepAt(t);
+      if (!me || k < 0) return null;
+      // Where the others stand at this step (not where a walk has them on the way).
+      const others = scene.steps[k].show
+        .filter((other) => other !== id && people.has(other))
+        .map((other) => wide.places[k]?.[other])
+        .filter((place): place is ScenePlaceDto => Boolean(place));
+      if (!others.length) return null;
+      const mid = others.reduce((n, o) => n + o.x + o.w / 2, 0) / others.length;
+      const dx = mid - (me.x + me.w / 2);
+      return Math.abs(dx) < me.w * 0.1 ? 0 : Math.sign(dx) * REST_TURN;
     };
     /**
      * Which way someone faces while they use a thing of the set
@@ -441,29 +653,100 @@ export function viewsOf(
       }
       return null;
     }
-    const keys: [number, SceneView, 1 | -1][] = [];
-    for (const t of [...times].filter((t) => t >= 0).sort((a, b) => a - b)) {
+    const sorted = [...times].filter((t) => t >= 0).sort((a, b) => a - b);
+    const cuts = new Set(
+      shots.flatMap((shot) => [
+        Math.round(shot.atMs),
+        Math.round(shot.untilMs ?? shot.atMs),
+      ]),
+    );
+    // 1. What they face on the floor, moment by moment: what they do
+    // then, or, with nothing new to face, the facing they had (after a
+    // walk, turned three-quarter to the others, or the way they went).
+    const raw: Facing[] = [];
+    for (const t of sorted) {
       // Just after the moment, so a walk that starts then is walking.
+      const want = wantAt(t + 1);
+      const last = raw[raw.length - 1];
+      let facing = want.facing;
+      if (facing === null) {
+        if (
+          last &&
+          last.why !== 'walk' &&
+          last.why !== 'lie' &&
+          last.why !== 'off'
+        )
+          facing = last.facing;
+        else {
+          // About to lie down: as they will lie, face up to us.
+          const lying = held.some(
+            ([at, what]) => what === 'lie' && at >= t && at - t < MIN_HOLD_MS,
+          );
+          const rest = lying ? 0 : restFacing(t + 1);
+          const went = last?.why === 'walk' ? last.facing : 0;
+          facing =
+            rest ??
+            (Math.abs(went) <= 22 ? 0 : cheatOpen(went, FRONT_ON, REST_TURN));
+        }
+      }
+      raw.push({
+        t: Math.round(t),
+        facing,
+        why: want.why,
+        cut: cuts.has(Math.round(t)),
+        bin: binOf(facing, yawAt(t + 1)),
+      });
+    }
+    // Not on the stage yet: already as they will be when they come on,
+    // so they come on turned so, not turning.
+    const on = raw.find((one) => one.why !== 'off');
+    if (on)
+      for (const one of raw) {
+        if (one.why !== 'off') break;
+        one.facing = on.facing;
+        one.bin = on.bin;
+      }
+    // 2. Turned only as often as the eye can follow (studio-turns-plan).
+    const kept = steadyFacings(raw, scene.durationMs);
+    /** The facing they keep at `t`. */
+    const keptAt = (t: number) => {
+      let found = kept[0];
+      for (const one of kept) if (one.t <= t) found = one;
+      return found;
+    };
+    // 3. The view the camera sees of that facing: a shot's own, a
+    // speaker never shows their back, one speaking in a close of their
+    // own cheated open to it, one cheated near the camera from there.
+    const keys: [number, SceneView, 1 | -1][] = [];
+    const moments = [...new Set([...sorted, ...kept.map((one) => one.t)])]
+      .filter((t) => t >= 0)
+      .sort((a, b) => a - b);
+    for (const t of moments) {
       const shot = inShot(t + 1);
-      // Using a thing of the set, they face as its interaction has them,
-      // whatever the shot would turn them to; its camera's yaw still counts.
       const using = interactFacing(id, t + 1);
-      // From the place's other side, the camera is turned round: whoever
-      // faces the front camera shows their back.
-      const { view, mirror } =
-        using !== null
-          ? viewAt(facingAt(t + 1), shot?.yaw ?? yawAt(t + 1))
-          : shot
-            ? viewAt(shot.facing, shot.yaw)
-            : viewAt(facingAt(t + 1), yawAt(t + 1));
+      let facing = keptAt(t)?.facing ?? 0;
+      const yaw = shot?.yaw ?? yawAt(t + 1);
+      let seen: { view: SceneView; mirror: 1 | -1 };
+      if (using !== null) seen = viewAt(facing, yaw);
+      else if (shot) seen = viewAt(shot.facing, shot.yaw);
+      else {
+        if (nearAt(id, t + 1)) {
+          const near = wantAt(t + 1, true);
+          if (near.facing !== null) facing = near.facing;
+        }
+        if (closeOnSpeaker(t + 1)) facing = cheatOpen(facing, yaw);
+        if (speech.some(([a, b]) => a - 200 <= t + 1 && t + 1 < b + 200))
+          facing = speakerFacing(facing, yaw);
+        seen = viewAt(facing, yaw);
+      }
       const last = keys[keys.length - 1];
       // The front is the same either way round.
-      const m: 1 | -1 = view === 'front' ? 1 : mirror;
-      if (last && last[1] === view && last[2] === m) continue;
-      keys.push([Math.round(t), view, m]);
+      const m: 1 | -1 = seen.view === 'front' ? 1 : seen.mirror;
+      if (last && last[1] === seen.view && last[2] === m) continue;
+      keys.push([Math.round(t), seen.view, m]);
     }
-    const held = holdViews(keys, scene.durationMs);
-    if (held.some(([, view]) => view !== 'front')) out[id] = held;
+    const steady = holdViews(keys, scene.durationMs);
+    if (steady.some(([, view]) => view !== 'front')) out[id] = steady;
   }
   return out;
 }

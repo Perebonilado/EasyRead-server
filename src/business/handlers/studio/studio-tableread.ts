@@ -140,6 +140,8 @@ export async function tableRead(
     sheets: StorySheet[];
     rounds?: number;
     rewrite?: boolean;
+    /** Whether a first-time viewer retells the whole film too (one more call a read); off unless asked. */
+    retell?: boolean;
     record?: (
       usage: LlmUsage,
       task: 'studio_check' | 'studio_write',
@@ -173,7 +175,7 @@ export async function tableRead(
 
   /** The whole film retold by a first-time viewer as a story spine, each join "therefore", "but" or "and then" (T2); null where it cannot be asked. */
   const retold = async (sheets: StorySheet[]): Promise<Retell | null> => {
-    if (!llm.studioRetell || sheets.length < 2) return null;
+    if (!input.retell || !llm.studioRetell || sheets.length < 2) return null;
     try {
       const result = await llm.studioRetell({
         kind: `A short animated film${brief.audience ? ` for ${brief.audience}` : ''}${brief.tone ? `, ${brief.tone}` : ''}.`,

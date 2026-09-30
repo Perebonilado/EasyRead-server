@@ -21,10 +21,12 @@ import { StudioProcessor } from './studio.processor';
 
 /**
  * A story's script written by the worker (story plan S4): once every
- * scene is written, the table read reads it before it is ready; below the
- * bar the failing scene is written again with its notes and kept, and the
- * score is logged, never said to the maker. A read that cannot run leaves
- * the script as written.
+ * scene is written, the table read scores it and the score is logged,
+ * never said to the maker. By default nothing is written again and the
+ * script is ready as written; with STUDIO_TABLEREAD_ROUNDS, below the bar
+ * the failing scene is written again with its notes and kept, before the
+ * script is ready. STUDIO_TABLEREAD=off skips the read. A read that
+ * cannot run leaves the script as written.
  */
 
 const tobi = (file: string): unknown =>
@@ -43,7 +45,10 @@ const scores = (n: number) => ({
   clarity: 8,
 });
 
-function worker(reads: (() => Promise<unknown>)[]) {
+function worker(
+  reads: (() => Promise<unknown>)[],
+  settings: Record<string, string> = {},
+) {
   const show: StudioShowRecord = {
     id: 's1',
     userId: 'u1',
@@ -188,6 +193,7 @@ function worker(reads: (() => Promise<unknown>)[]) {
     {} as never,
     {} as never,
     { enqueueStudio: () => Promise.resolve() } as never,
+    { get: (name: string) => settings[name] } as never,
   );
   return {
     processor,
@@ -221,34 +227,74 @@ describe('the table read, as the worker writes a script', () => {
   });
   afterEach(() => jest.restoreAllMocks());
 
-  it('reads the whole script before it is ready, writes the failing scene again, and logs the score', async () => {
+  it('by default scores the script once, logs it, and writes nothing again: the script is ready as written', async () => {
+    // What the episode was doing when the read ran: done, the script ready.
+    let busyAtRead: string | null | undefined = 'unread';
     const s = worker([
-      () =>
-        Promise.resolve({
+      () => {
+        busyAtRead = s.episodes.get('e1')?.busy;
+        return Promise.resolve({
           scores: scores(6),
           overall: 5.9,
-          scenes: [
-            { scene: 1, score: 8, notes: [] },
-            {
-              scene: 2,
-              score: 4,
-              notes: ['Beat 2: Mama says she is proud; show it: a hug.'],
-            },
-          ],
+          scenes: [{ scene: 2, score: 4, notes: ['Beat 2: show it.'] }],
           verdict: 'Flat in the middle.',
-        }),
-      () =>
-        Promise.resolve({
-          scores: scores(8),
-          overall: 7.7,
-          scenes: [],
-          verdict: 'Warm and clear.',
-        }),
+        });
+      },
     ]);
     await s.processor.process(job, context);
+    expect(busyAtRead).toBeNull();
+    expect(s.reads()).toBe(1);
+    // One write a scene: nothing sent back, nothing written again.
+    expect(s.written).toHaveLength(2);
+    expect(s.written.every((w) => !w.problems)).toBe(true);
+    expect(s.recorded.filter((t) => t === 'studio_check')).toHaveLength(1);
+    expect(s.scenes.get('c1')?.sheet?.title).toBe('Up Before the Alarm');
+    expect(logged.join('\n')).toMatch(
+      /studio e1: story: table read 5\.9: Flat in the middle\./,
+    );
+    expect(s.episodes.get('e1')?.busy).toBeNull();
+  });
+
+  it('with STUDIO_TABLEREAD=off, reads nothing', async () => {
+    const s = worker([() => Promise.reject(new Error('should not be read'))], {
+      STUDIO_TABLEREAD: 'off',
+    });
+    await s.processor.process(job, context);
+    expect(s.reads()).toBe(0);
+    expect(s.recorded.filter((t) => t === 'studio_check')).toHaveLength(0);
+    expect(s.scenes.get('c1')?.status).toBe('ready');
+  });
+
+  it('with rounds asked for, reads the whole script before it is ready, writes the failing scene again, and logs the score', async () => {
+    const s = worker(
+      [
+        () =>
+          Promise.resolve({
+            scores: scores(6),
+            overall: 5.9,
+            scenes: [
+              { scene: 1, score: 8, notes: [] },
+              {
+                scene: 2,
+                score: 4,
+                notes: ['Beat 2: Mama says she is proud; show it: a hug.'],
+              },
+            ],
+            verdict: 'Flat in the middle.',
+          }),
+        () =>
+          Promise.resolve({
+            scores: scores(8),
+            overall: 7.7,
+            scenes: [],
+            verdict: 'Warm and clear.',
+          }),
+      ],
+      { STUDIO_TABLEREAD_ROUNDS: '2' },
+    );
+    await s.processor.process(job, context);
     expect(s.reads()).toBe(2);
-    // The failing scene only, with its notes. (Tobi's sheet was written
-    // before lines had aims, so each first write also goes back once for them.)
+    // The failing scene only, with its notes.
     const again = s.written.filter((w) =>
       w.problems?.some((p) => p.startsWith('Beat 2: Mama')),
     );

@@ -8,14 +8,17 @@
  * prints what each check found, first and after going back, the tension
  * curve against its template, and the outline built from the plan.
  *
- *   npm run story:bench -- [--only <id>] [--out <dir>] [--scenes [--read-only]] [--lanes <n>]
+ *   npm run story:bench -- [--only <id>] [--out <dir>] [--scenes [--rounds <n>] [--retell] [--writers <n>]] [--lanes <n>]
  *
  * With --scenes (S3, S4), every scene is then written as the worker
- * writes it (in order, each carrying on from the one before), and the
- * table read reads the whole script, scores it against the rubric and,
- * below the bar, writes the failing scenes again (at most two rounds, the
- * best read kept); --read-only reads it and writes nothing again. The
- * report gives each read's scores, the rewrites, and code's notes.
+ * writes it (a few at once, each from its plan, then carried on from one
+ * to the next by code), and the table read scores the whole script
+ * against the rubric, as the worker does: once, with no rewrites. With
+ * --rounds n, below the bar it writes the failing scenes again (at most
+ * n rounds, the best read kept); --retell adds the viewer's retelling;
+ * --writers sets how many scenes are written at once (the worker's
+ * STUDIO_SCENE_WRITERS, 3). The report gives each read's scores, the
+ * rewrites, and code's notes, and each brief's calls and time.
  *
  * A few cents a run. With --out, each brief's story is kept as
  * <dir>/<id>.json, its script as <dir>/<id>.script.txt, and the whole
@@ -42,12 +45,6 @@ import type {
   StudioBible,
 } from '../src/business/domain/studio/studio';
 import {
-  endStateOf,
-  mendSheet,
-  withFound,
-  type EndState,
-} from '../src/business/domain/studio/studio-check';
-import {
   RUBRIC_KEYS,
   belowBar,
   describeRead,
@@ -56,7 +53,10 @@ import {
   type TableRead,
 } from '../src/business/domain/studio/studio-script';
 import { costOf } from '../src/business/domain/cost';
-import { writeStorySheet } from '../src/business/handlers/studio/studio-scenes';
+import {
+  scriptSettings,
+  writeStoryScript,
+} from '../src/business/handlers/studio/studio-script-writer';
 import { tableRead } from '../src/business/handlers/studio/studio-tableread';
 import {
   describeBrief,
@@ -219,7 +219,11 @@ async function main(): Promise<void> {
   };
   const only = option('--only');
   const scenes = args.includes('--scenes');
-  const readOnly = args.includes('--read-only');
+  // As the worker is set, unless the bench says otherwise.
+  const settings = scriptSettings((name) => process.env[name]);
+  const rounds = Number(option('--rounds') ?? settings.rounds);
+  const retell = args.includes('--retell') || settings.retell;
+  const writers = Number(option('--writers') ?? settings.writers);
   const out = option('--out') ? resolve(option('--out')!) : null;
   if (out) mkdirSync(out, { recursive: true });
   const app = await NestFactory.createApplicationContext(StoryBenchModule, {
@@ -269,7 +273,9 @@ async function main(): Promise<void> {
       const started = Date.now();
       const brief = briefOf(raw);
       let spent = 0;
+      let calls = 0;
       const record = (usage: LlmUsage, task = 'studio_write') => {
+        calls += 1;
         const dollars =
           costOf({
             task,
@@ -300,7 +306,10 @@ async function main(): Promise<void> {
           briefWords: describeBrief(brief),
           bible,
           record,
+          sendBacks: settings.storySendBacks,
         });
+        const developedIn = Math.round((Date.now() - started) / 1000);
+        const developedCalls = calls;
         const { story } = developed;
         say(`premise: "${story.premise.title}" — ${story.premise.logline}`);
         say(`theme: ${story.premise.theme} · hook: ${story.premise.hook}`);
@@ -327,8 +336,9 @@ async function main(): Promise<void> {
         );
         for (const report of developed.steps)
           say(
-            `  check ${report.step}: ${report.first.length ? `went back (${report.first.length}): ${report.first.join(' ')}` : 'passed first time'}${report.left ? ` → after: ${report.left.length ? report.left.join(' ') : 'passed'}` : ''}`,
+            `  check ${report.step}: ${report.fixed?.length ? `code put right: ${report.fixed.join('; ')}; ` : ''}${report.left ? `went back (${report.hard?.length ?? 0}): ${(report.hard ?? []).join(' ')} → after: ${report.left.length ? report.left.join(' ') : 'passed'}` : report.first.length ? `noted (${report.first.length}): ${report.first.join(' ')}` : 'passed first time'}`,
           );
+        say(`developed in ${developedIn}s, ${developedCalls} calls`);
         const beatsLeft = checkBeats(
           story.beats,
           contextOf(developed.bible, story.premise),
@@ -340,40 +350,42 @@ async function main(): Promise<void> {
         say(`outline:\n${describeOutline(developed.outline, true)}`);
         let script: Record<string, unknown> = {};
         if (scenes) {
-          // Every scene, in order, as the worker writes them.
-          let grown: StudioBible = developed.bible;
-          let before: EndState | null = null;
-          const sheets: StorySheet[] = [];
-          for (let k = 0; k < developed.outline.scenes.length; k += 1) {
-            const written = await writeStorySheet(llm, {
-              brief,
-              bible: grown,
-              outline: developed.outline,
-              k,
-              before,
-              planned: developed.outline.scenes[k].seconds,
-              record,
-            });
-            const left = written.problems.filter((p) => p.level === 'error');
+          // Every scene, a few at once, as the worker writes them.
+          const writing = Date.now();
+          const callsBefore = calls;
+          const written = await writeStoryScript(llm, {
+            brief,
+            bible: developed.bible,
+            outline: developed.outline,
+            writers,
+            record,
+            log: (k, line) => say(`  s${k + 1}: ${line}`),
+          });
+          const grown: StudioBible = written.bible;
+          const sheets: StorySheet[] = written.scenes.map((s) => s.sheet);
+          written.scenes.forEach((scene, k) => {
+            const left = scene.problems.filter((p) => p.level === 'error');
             if (left.length)
               say(`  s${k + 1} still: ${left.map((p) => p.message).join(' ')}`);
-            sheets.push(written.sheet);
-            grown = withFound(
-              grown,
-              written.sheet.set,
-              mendSheet(written.sheet, grown, before),
-            );
-            before = endStateOf(written.sheet, grown, before);
-          }
+          });
+          say(
+            `scenes written in ${Math.round((Date.now() - writing) / 1000)}s, ${calls - callsBefore} calls, ${writers} at once`,
+          );
+          const reading = Date.now();
+          const callsRead = calls;
           const result = await tableRead(llm, {
             brief,
             bible: grown,
             outline: developed.outline,
             sheets,
-            rewrite: !readOnly,
+            rounds,
+            retell,
             record: (usage, task) => record(usage, task),
             log: (line) => say(`  ${line}`),
           });
+          say(
+            `read in ${Math.round((Date.now() - reading) / 1000)}s, ${calls - callsRead} calls`,
+          );
           const first = result.rounds[0].read;
           const kept = result.rounds[result.best].read;
           totals.read += 1;
@@ -439,7 +451,7 @@ async function main(): Promise<void> {
             );
         }
         say(
-          `(${Math.round((Date.now() - started) / 1000)}s, about $${spent.toFixed(3)})`,
+          `(${Math.round((Date.now() - started) / 1000)}s, ${calls} calls, about $${spent.toFixed(3)})`,
         );
         say();
         if (!developed.problems.length) totals.clean += 1;

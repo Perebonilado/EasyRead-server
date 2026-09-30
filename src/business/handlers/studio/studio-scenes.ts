@@ -26,6 +26,13 @@ import {
   type EndState,
   type SheetProblem,
 } from '../../domain/studio/studio-check';
+import {
+  craftChecklist,
+  fixCraft,
+  hardFailures,
+  missingCast,
+  trimToLength,
+} from '../../domain/studio/studio-craft-fix';
 import { narratorRuleOf } from '../../domain/studio/studio-narrator';
 import {
   FIRST_SCENE_RULE,
@@ -34,6 +41,7 @@ import {
   lintLines,
   lintTelling,
   minutesOf,
+  openingBy,
   plantsOfScene,
 } from '../../domain/studio/studio-script';
 import {
@@ -146,6 +154,12 @@ export async function writeStorySheet(
     outline: StudioOutline;
     k: number;
     before: EndState | null;
+    /**
+     * How the scene before is planned to end, in words, for a scene
+     * written at the same time as it (writeStoryScript): said to the
+     * writer in place of how it really ended, which code puts right after.
+     */
+    beforeWords?: string | null;
     /** The seconds it should run, about. */
     planned: number | null;
     old?: StorySheet | null;
@@ -171,11 +185,20 @@ export async function writeStorySheet(
           planOf(outline, k),
           // The film's first scene sets the story up where it is seen.
           k === 0 ? FIRST_SCENE_RULE : '',
+          // What code will hold it to, so the first draft keeps it.
+          craftChecklist({
+            brief: input.brief,
+            bible,
+            outline,
+            k,
+            narrator,
+            by: openingBy(minutesOf(outline)),
+          }),
         ]
           .filter(Boolean)
           .join('\n')
       : `Scene ${k + 1}: the scene the maker asked for.`,
-    before: describeEnd(before, bible),
+    before: input.beforeWords || describeEnd(before, bible),
   };
   const notes = input.notes?.length && old ? input.notes : null;
   const first = await llm.studioScene({
@@ -189,11 +212,25 @@ export async function writeStorySheet(
     ? plantsOfScene(outline.story, outline, bible, k)
     : [];
   const judged = (raw: unknown) => {
-    const mended = mendSheet(storySheetOf(raw), bible, before);
+    const made = mendSheet(storySheetOf(raw), bible, before);
+    // The craft notes code can put right, put right here, not sent back.
+    const fixed = fixCraft(made.sheet, bible, outline, k, minutesOf(outline));
+    // Too long for its seconds: trimmed by code, not written again (never
+    // a change the maker asked for).
+    const trimmed =
+      request && old
+        ? { sheet: fixed.sheet, fixed: [] }
+        : trimToLength(fixed.sheet, planned, { first: k === 0 });
+    const mended = {
+      ...made,
+      sheet: trimmed.sheet,
+      mended: [...trimmed.fixed, ...fixed.fixed, ...made.mended],
+    };
     const craft = craftOf(mended.sheet, bible, outline, k);
     return {
       sheet: mended.sheet,
       mended: mended.mended,
+      missing: missingCast(mended.sheet, outline.scenes[k], bible),
       craft: craft.all,
       failing: craft.failing,
       // Held to the show as the words grew it: a thing they named is
@@ -212,10 +249,11 @@ export async function writeStorySheet(
     };
   };
   let best = judged(first.value);
-  const reasons = sentBackFor(best.problems);
-  // Written again from the table read's notes, it goes back only for what
-  // the stage cannot play: the next read hears its lines.
-  const failing = notes ? [] : best.failing;
+  // Back once, and only for what the stage cannot play or the plan's cast
+  // left out (hardFailures): every craft note is put right by code above
+  // or logged below, never paid for with a second call.
+  const reasons = hardFailures(best.problems, best.missing);
+  const failing: string[] = [];
   if (reasons.length || failing.length) {
     log(
       `goes back: ${[...reasons.map((p) => p.message), ...failing].join(' ')}`,

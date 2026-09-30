@@ -153,8 +153,13 @@ export const RUBRIC_KEYS: RubricKey[] = RUBRIC.map((r) => r.key);
 export const BAR = { overall: 7, item: 5, scene: 6, clarity: 7 } as const;
 /** A first-time viewer confused by this many things or more finds the film unclear, whatever its score. */
 export const CONFUSED_MOST = 2;
-/** Rounds of rewrites at most, after the first read. */
-export const TABLE_READ_ROUNDS = 2;
+/**
+ * Rounds of rewrites at most, after the first read: none (Richard,
+ * 2026-09-30, "Cut the rewrites"): the read scores the script for the
+ * log, and the script is ready as written. 2 was the old way; the
+ * worker's STUDIO_TABLEREAD_ROUNDS sets it again.
+ */
+export const TABLE_READ_ROUNDS = 0;
 
 /** One scene as the table read found it. */
 export interface SceneRead {

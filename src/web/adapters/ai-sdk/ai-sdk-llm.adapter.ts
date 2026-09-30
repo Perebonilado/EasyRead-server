@@ -2505,8 +2505,9 @@ export class AiSdkLlmAdapter implements LlmGatewayPort, OnModuleInit {
 
   /**
    * The table read (S4): the whole script read against the rubric by the
-   * check model (DeepSeek), thinking on unless STUDIO_TABLEREAD_THINKING
-   * says off. One call a round.
+   * check model (DeepSeek), thinking off unless STUDIO_TABLEREAD_THINKING
+   * says on (Richard, 2026-09-30: it only scores now, for the log, and
+   * thinking made it the dearest call of a film). One call a round.
    */
   async studioTableRead(input: {
     brief: string;
@@ -2540,7 +2541,7 @@ export class AiSdkLlmAdapter implements LlmGatewayPort, OnModuleInit {
         system: STUDIO_PROMPTS.studioTableRead,
         prompt,
         maxRetries: this.maxRetries(),
-        ...this.writerThinking(ref, 'STUDIO_TABLEREAD_THINKING', 'on'),
+        ...this.writerThinking(ref, 'STUDIO_TABLEREAD_THINKING', 'off'),
       }),
     );
     return {

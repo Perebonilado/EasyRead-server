@@ -1,8 +1,9 @@
 /**
  * The table read (story plan S4), with the writer and the critic mocked:
- * one call a round; below the bar only the failing scenes are written
- * again, their notes as the problems; at most two rounds; the best read
- * kept; a rewrite the stage plays worse is not taken.
+ * by default it only scores (no rewrites, no retelling); with rounds
+ * asked for, below the bar only the failing scenes are written again,
+ * their notes as the problems; at most two rounds; the best read kept; a
+ * rewrite the stage plays worse is not taken.
  */
 import {
   bibleOf,
@@ -128,6 +129,61 @@ function written(): Promise<StorySheet[]> {
 }
 
 describe('the table read', () => {
+  it('by default only scores: below the bar, nothing is written again and the script stands', async () => {
+    const { llm, calls } = llmWith([
+      { scores: scores(4), overall: 4.2, scenes: [{ scene: 2, score: 2 }] },
+    ]);
+    const sheets = await written();
+    const logged: string[] = [];
+    const result = await tableRead(llm, {
+      brief,
+      bible,
+      outline,
+      sheets,
+      log: (line) => logged.push(line),
+    });
+    expect(calls.read).toBe(1);
+    expect(calls.scenes).toEqual([]);
+    expect(result.rounds).toHaveLength(1);
+    expect(result.rounds[0].rewritten).toEqual([]);
+    expect(result.sheets).toBe(sheets);
+    expect(result.changed.size).toBe(0);
+    // The score is still logged.
+    expect(logged.some((line) => /^table read 4\.2/.test(line))).toBe(true);
+  });
+
+  it('retells the whole film only when asked: one more call', async () => {
+    const retold: string[] = [];
+    const withRetell = (llm: LlmGatewayPort) =>
+      ({
+        ...llm,
+        studioRetell: (input: { film: string }) => {
+          retold.push(input.film);
+          return Promise.resolve({
+            value: { scenes: [], finally: '' },
+            usage,
+          });
+        },
+      }) as unknown as LlmGatewayPort;
+    const reads = [{ scores: scores(8), overall: 7.9, scenes: [] }];
+    const sheets = await written();
+    await tableRead(withRetell(llmWith(reads).llm), {
+      brief,
+      bible,
+      outline,
+      sheets,
+    });
+    expect(retold).toHaveLength(0);
+    await tableRead(withRetell(llmWith(reads).llm), {
+      brief,
+      bible,
+      outline,
+      sheets,
+      retell: true,
+    });
+    expect(retold).toHaveLength(1);
+  });
+
   it('reads once, and writes nothing again, when the script clears the bar', async () => {
     const { llm, calls } = llmWith([
       { scores: scores(8), overall: 7.9, scenes: [], verdict: 'Works.' },
@@ -165,6 +221,7 @@ describe('the table read', () => {
       bible,
       outline,
       sheets,
+      rounds: 2,
       log: (line) => logged.push(line),
     });
     expect(calls.read).toBe(2);
@@ -194,7 +251,13 @@ describe('the table read', () => {
       { scores: scores(6), overall: 6.1, scenes: [{ scene: 3, score: 5 }] },
     ]);
     const sheets = await written();
-    const result = await tableRead(llm, { brief, bible, outline, sheets });
+    const result = await tableRead(llm, {
+      brief,
+      bible,
+      outline,
+      sheets,
+      rounds: 2,
+    });
     expect(calls.read).toBe(3);
     expect(calls.scenes).toHaveLength(2);
     expect(result.rounds.map((r) => r.rewritten)).toEqual([[2], [2], []]);
@@ -329,7 +392,13 @@ describe('the table read', () => {
       },
     } as unknown as LlmGatewayPort;
     const sheets = await written();
-    const result = await tableRead(viewer, { brief, bible, outline, sheets });
+    const result = await tableRead(viewer, {
+      brief,
+      bible,
+      outline,
+      sheets,
+      rounds: 2,
+    });
     // The viewer saw only scene 1, as the film shows it.
     expect(watched[0]).toContain('SCENE 1.');
     expect(watched[0]).not.toContain('SCENE 2.');

@@ -1,4 +1,5 @@
-import { Inject, Injectable, Logger } from '@nestjs/common';
+import { Inject, Injectable, Logger, Optional } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import type { DocumentProfile } from '../../business/domain/scene-profile';
 import {
   AUDIENCE_STAGE,
@@ -48,6 +49,11 @@ import {
   worse,
   writeStorySheet,
 } from '../../business/handlers/studio/studio-scenes';
+import {
+  scriptSettings,
+  writeStoryScript,
+  type ScriptSettings,
+} from '../../business/handlers/studio/studio-script-writer';
 import { tableRead } from '../../business/handlers/studio/studio-tableread';
 import {
   energyOf,
@@ -479,7 +485,15 @@ export class StudioProcessor {
     private readonly entitlements: EntitlementsService,
     private readonly cast: StudioCastService,
     @Inject(JOB_QUEUE) private readonly queue: JobQueuePort,
+    @Optional() private readonly config?: ConfigService,
   ) {}
+
+  /** How a story's script is written and read (studio-script-writer): fast and cheap unless a setting says otherwise. */
+  private scriptSettings(): ScriptSettings {
+    return scriptSettings(
+      (name) => this.config?.get<string>(name) ?? process.env[name],
+    );
+  }
 
   async process(job: StudioJobData, context: JobContext): Promise<void> {
     const show = await this.studio.findShow(job.showId);
@@ -1306,11 +1320,21 @@ export class StudioProcessor {
       ...(request ? { request } : {}),
       previous,
       first: episode.number === 1,
+      sendBacks: this.scriptSettings().storySendBacks,
       record: (usage) => this.record(episode.id, usage),
       onStep: (report) => {
-        if (report.first.length)
+        if (report.fixed?.length)
           this.logger.log(
-            `${who} ${report.step} went back: ${report.first.join(' ')}`,
+            `${who} ${report.step} put right by code: ${report.fixed.join('; ')}`,
+          );
+        if (report.left)
+          this.logger.log(
+            `${who} ${report.step} went back: ${(report.hard ?? []).join(' ')}`,
+          );
+        const noted = report.first.filter((p) => !report.hard?.includes(p));
+        if (noted.length || (report.hard?.length && !report.left))
+          this.logger.log(
+            `${who} ${report.step} noted: ${[...(report.left ? [] : (report.hard ?? [])), ...noted].join(' ')}`,
           );
       },
     });
@@ -1412,7 +1436,14 @@ export class StudioProcessor {
 
   // ── The scenes ──────────────────────────────────────────────────────────
 
-  /** Every scene of the outline written and checked: a story's in order, an explainer's a few at once. */
+  /**
+   * Every scene of the outline written and checked, a few at once: an
+   * explainer's each its own lesson page, a story's each from its plan and
+   * then carried on from one to the next by code (writeStoryScript). The
+   * script is ready as soon as it is written; the table read then only
+   * scores it, for the log, unless STUDIO_TABLEREAD_ROUNDS asks for
+   * rewrites below the bar.
+   */
   private async writeScript(
     show: StudioShowRecord,
     episode: StudioEpisodeRecord,
@@ -1430,41 +1461,125 @@ export class StudioProcessor {
         await this.writeExplainerScene(show, episode, outline, bible, row, k);
       });
     else {
-      let before: EndState | null = null;
-      const sheets: (StorySheet | null)[] = [];
-      for (const [k, row] of rows.entries()) {
-        const sheet = await this.writeStoryScene(
-          show,
-          episode,
-          outline,
-          bible,
-          row,
-          k,
-          before,
-        );
-        sheets.push(sheet);
-        if (sheet) before = endStateOf(sheet, bible, before);
-      }
-      // The table read (S4): the whole script read before it is ready,
-      // and its weakest scenes written again, quietly.
-      if (sheets.every((one): one is StorySheet => one !== null))
+      const settings = this.scriptSettings();
+      const sheets = await this.writeStoryScenes(
+        show,
+        episode,
+        outline,
+        bible,
+        rows,
+        settings.writers,
+      );
+      // The table read (S4) with rewrites below the bar, where a setting
+      // asks for them: the script is read before it is ready.
+      if (settings.tableRead && settings.rounds > 0)
         await this.readScript(show, episode, outline, bible, rows, sheets);
+      await this.scriptWritten(show, episode, rows.length, key);
+      // Else only scored, for the log, once the script is ready: nothing
+      // it finds changes the script.
+      if (settings.tableRead && settings.rounds === 0)
+        await this.readScript(show, episode, outline, bible, rows, sheets);
+      return;
     }
+    await this.scriptWritten(show, episode, rows.length, key);
+  }
+
+  /** The script said written in the thread, and the episode free. */
+  private async scriptWritten(
+    show: StudioShowRecord,
+    episode: StudioEpisodeRecord,
+    count: number,
+    key?: string,
+  ): Promise<void> {
     await this.log(
       show,
       episode,
-      { what: 'scenes', step: 'script', line: EVENT_LINES.scenes(rows.length) },
+      { what: 'scenes', step: 'script', line: EVENT_LINES.scenes(count) },
       key,
     );
     await this.studio.updateEpisode(episode.id, { busy: null, error: null });
   }
 
   /**
+   * A story's scenes written a few at once (writeStoryScript), each kept
+   * on its row as its writer's answer comes back, then every scene kept
+   * again as carried on from the one before, and the show grown with what
+   * their words named. Returns the sheets, in order.
+   */
+  private async writeStoryScenes(
+    show: StudioShowRecord,
+    episode: StudioEpisodeRecord,
+    outline: StudioOutline,
+    bible: StudioBible,
+    rows: StudioSceneRecord[],
+    writers: number,
+  ): Promise<StorySheet[]> {
+    const started = Date.now();
+    const script = await writeStoryScript(this.llm, {
+      brief: show.brief,
+      bible,
+      outline,
+      writers,
+      record: (usage) => this.record(episode.id, usage),
+      log: (k, line) =>
+        this.logger.log(`studio ${episode.id} s${k + 1}: ${line}`),
+      onWritten: async (k, written) => {
+        if (!rows[k]) return;
+        await this.studio.updateScene(rows[k].id, {
+          sheet: written.sheet,
+          sheetHash: sceneFingerprint(written.sheet, bible, show.brief, []),
+          problems: written.problems,
+          status: 'ready',
+          error: null,
+        });
+      },
+    });
+    // A feature the words name joins its set for good, and a thing of the
+    // show's own the show, as new places and people join the cast.
+    const grown =
+      JSON.stringify([script.bible.sets, script.bible.things]) !==
+      JSON.stringify([bible.sets, bible.things]);
+    if (grown) {
+      await this.studio.updateShow(show.id, { bible: script.bible });
+      bible.sets.splice(0, bible.sets.length, ...script.bible.sets);
+      if (script.bible.things) bible.things = script.bible.things;
+    }
+    // Each scene as it carries on from the one before; one changed
+    // meanwhile by someone else is left as they left it.
+    for (const [k, scene] of script.scenes.entries()) {
+      const row = rows[k];
+      if (!row) continue;
+      const now = await this.studio.findScene(row.id);
+      if (
+        now?.sheet &&
+        JSON.stringify(now.sheet) !== JSON.stringify(script.drafts[k].sheet)
+      )
+        continue;
+      await this.studio.updateScene(row.id, {
+        sheet: scene.sheet,
+        sheetHash: sceneFingerprint(
+          scene.sheet,
+          script.bible,
+          show.brief,
+          scene.before?.wears ?? [],
+        ),
+        problems: scene.problems,
+        status: 'ready',
+        error: null,
+      });
+    }
+    this.logger.log(
+      `studio ${episode.id}: ${rows.length} scenes written, ${writers} at once, in ${Math.round((Date.now() - started) / 1000)}s`,
+    );
+    return script.scenes.map((scene) => scene.sheet);
+  }
+
+  /**
    * The table read of a story's script (studio-tableread): scored against
-   * the rubric, and below the bar its failing scenes written again, the
-   * best-read script kept. Silent to the maker; its score is logged,
-   * "story: table read 7.8". A read that cannot run leaves the script as
-   * it was written.
+   * the rubric, its score logged, "story: table read 7.8". Only with
+   * STUDIO_TABLEREAD_ROUNDS are its failing scenes then written again
+   * below the bar, the best-read script kept. Silent to the maker. A read
+   * that cannot run leaves the script as it was written.
    */
   private async readScript(
     show: StudioShowRecord,
@@ -1475,12 +1590,15 @@ export class StudioProcessor {
     sheets: StorySheet[],
   ): Promise<void> {
     const who = `studio ${episode.id}: story`;
+    const settings = this.scriptSettings();
     try {
       const result = await tableRead(this.llm, {
         brief: show.brief,
         bible,
         outline,
         sheets,
+        rounds: settings.rounds,
+        retell: settings.retell,
         record: (usage, task) => this.record(episode.id, usage, task),
         log: (line) => this.logger.log(`${who}: ${line}`),
       });

@@ -4,8 +4,11 @@
  * personalities, kept with their looks; the beat sheet for the film's
  * length; and the scene plan, which the outline is built from by code.
  * Each step is asked of the writer (DeepSeek, thinking on, studio_write),
- * made sound, checked by code, and sent back once with what code found;
- * the better answer is kept.
+ * made sound, put right by code where code can (studio-story-fix), and
+ * checked. Only what breaks the story's structure sends an answer back,
+ * and at most `sendBacks` times in all (once, by default: Richard,
+ * 2026-09-30, "Cut the rewrites"); the better answer is kept. Everything
+ * else code finds is noted, for the log, and left.
  */
 import type { LlmGatewayPort, LlmResult, LlmUsage } from '../../ports/llm.port';
 import type { StudioBible, StudioOutline } from '../../domain/studio/studio';
@@ -30,17 +33,34 @@ import {
   type Persona,
   type StudioStory,
 } from '../../domain/studio/studio-story';
+import {
+  beatsHard,
+  charactersHard,
+  fixBeats,
+  fixPlan,
+  fixPremise,
+  planHard,
+  premiseHard,
+  type Fixed,
+} from '../../domain/studio/studio-story-fix';
 import { describeBible } from '../../domain/studio/studio-words';
 import type { StudioBrief } from '../../domain/studio/studio';
 
 /** What each step of development found, before and after it went back. */
 export interface StepReport {
   step: 'premise' | 'characters' | 'beats' | 'plan';
-  /** What code found in the first answer; empty when it passed. */
+  /** What code found in the first answer, once code put right what it could; empty when it passed. */
   first: string[];
+  /** Of those, what breaks the story's structure: what it goes back for. */
+  hard?: string[];
+  /** What code put right in the first answer. */
+  fixed?: string[];
   /** What is left after it went back once; absent when it did not. */
   left?: string[];
 }
+
+/** Answers sent back while a story is developed, in all, by default: one, and only for what breaks its structure. */
+export const STORY_SEND_BACKS = 1;
 
 export interface Developed {
   story: StudioStory;
@@ -56,8 +76,10 @@ export interface Developed {
 }
 
 /**
- * One step: asked, made sound, checked, and sent back once with the
- * problems; the answer with fewer problems kept.
+ * One step: asked, made sound, put right by code where it can be, and
+ * checked; sent back once, while the story has a send-back left, only
+ * for what breaks its structure (`hard`), with the rest of what code
+ * found after it; the answer that breaks less kept.
  */
 async function step<T>(
   name: StepReport['step'],
@@ -69,19 +91,42 @@ async function step<T>(
   check: (value: T) => string[],
   record: (usage: LlmUsage) => Promise<void> | void,
   reports: StepReport[],
+  rules: {
+    fix?: (value: T) => Fixed<T>;
+    hard: (value: T, problems: string[]) => string[];
+    /** Send-backs left for the whole story, shared by its steps. */
+    budget: { left: number };
+  },
 ): Promise<{ value: T; problems: string[] }> {
+  const made = (raw: unknown) => {
+    const value = read(raw);
+    return rules.fix ? rules.fix(value) : { value, fixed: [] };
+  };
   const first = await ask({});
   await record(first.usage);
-  let value = read(first.value);
+  const one = made(first.value);
+  let value = one.value;
   let problems = check(value);
-  const report: StepReport = { step: name, first: problems };
-  if (problems.length) {
-    const again = await ask({ previous: first.value, problems });
+  const hard = rules.hard(value, problems);
+  const report: StepReport = {
+    step: name,
+    first: problems,
+    ...(hard.length ? { hard } : {}),
+    ...(one.fixed.length ? { fixed: one.fixed } : {}),
+  };
+  if (hard.length && rules.budget.left > 0) {
+    rules.budget.left -= 1;
+    const soft = problems.filter((p) => !hard.includes(p));
+    const again = await ask({
+      previous: first.value,
+      problems: [...hard, ...soft],
+    });
     await record(again.usage);
-    const second = read(again.value);
+    const second = made(again.value).value;
     const left = check(second);
     report.left = left;
-    if (left.length <= problems.length) {
+    const still = rules.hard(second, left).length - hard.length;
+    if (still < 0 || (still === 0 && left.length <= problems.length)) {
       value = second;
       problems = left;
     }
@@ -115,8 +160,11 @@ export async function developStory(
     record?: (usage: LlmUsage) => Promise<void> | void;
     /** Told as each step finishes. */
     onStep?: (report: StepReport) => void;
+    /** Answers sent back in all, only for what breaks the structure (STORY_SEND_BACKS). */
+    sendBacks?: number;
   },
 ): Promise<Developed> {
+  const budget = { left: input.sendBacks ?? STORY_SEND_BACKS };
   const record = input.record ?? (() => undefined);
   const reports: StepReport[] = [];
   const brief = input.briefWords;
@@ -150,6 +198,11 @@ export async function developStory(
     (value) => checkPremise(value, input.bible),
     record,
     reports,
+    {
+      fix: (value) => fixPremise(value, input.bible),
+      hard: (_, problems) => premiseHard(problems),
+      budget,
+    },
   );
   told(reports[reports.length - 1]);
   // 2. The characters: who they are, kept with their looks.
@@ -172,6 +225,7 @@ export async function developStory(
     ],
     record,
     reports,
+    { hard: (_, problems) => charactersHard(problems), budget },
   );
   told(reports[reports.length - 1]);
   // Theirs as they were where the writer gave none now.
@@ -200,6 +254,7 @@ export async function developStory(
       checkBeats(sheet, contextOf(bible, premise.value), premise.value),
     record,
     reports,
+    { fix: fixBeats, hard: beatsHard, budget },
   );
   told(reports[reports.length - 1]);
   // 4. The scene plan, and the outline built from it.
@@ -232,6 +287,12 @@ export async function developStory(
     ],
     record,
     reports,
+    {
+      fix: (plan) =>
+        fixPlan(plan, bible, { hero: premise.value.hero, minutes }),
+      hard: (_, problems) => planHard(problems),
+      budget,
+    },
   );
   told(reports[reports.length - 1]);
   const developed: StudioStory = {

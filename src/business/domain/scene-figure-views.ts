@@ -30,6 +30,12 @@
  */
 import type { Expression } from './scene-story';
 import {
+  NEUTRAL_FACE,
+  faceMarkup,
+  geoAttr,
+  type FaceGeo,
+} from './scene-face-rig';
+import {
   CLOTH,
   FIGURE_INK,
   HAIR,
@@ -226,6 +232,57 @@ function geoOf(view: FigureView, R: Rig): Geo {
 
 /** Seen from behind, or turned away: no face shows. */
 const fromBehind = (view: FigureView) => view === 'back' || view === 'back3q';
+
+/** The group a view's rigged face is drawn in (scene-face-rig): `rigface`, `rigface--3q`. */
+export const RIG_FACE = 'rigface';
+
+/** A view's face as the rig of moving parts draws it: its eyes and its mouth where the view has them; none from behind. */
+export function faceGeoOf(view: FigureView, R: Rig): FaceGeo | null {
+  if (fromBehind(view)) return null;
+  const geo = geoOf(view, R);
+  return {
+    eyes: geo.eyes.map((e) => ({
+      x: e.x,
+      y: e.y,
+      rx: e.rx,
+      ry: e.ry,
+      side: e.side,
+      w: e.w,
+      fwd: e.fwd,
+    })),
+    my: R.mouthY,
+    mouth: geo.mouth,
+  };
+}
+
+/**
+ * A view's rigged face, at rest, in its own group: hidden until the
+ * player moves it (`.rigged` on the drawing), when the kit's swapped
+ * faces, their blink and the mouth's shapes give way to it. `clip` is the
+ * view's prefix for its clip paths, as its eyes' and half mouth's are.
+ */
+export function rigFaceOf(
+  view: FigureView,
+  R: Rig,
+  skin: string,
+  clip: string,
+  eyesClip: string,
+): string {
+  const geo = faceGeoOf(view, R);
+  if (!geo) return '';
+  return `<g id="${RIG_FACE}${viewSuffix(view)}" class="rf" data-rf="${geoAttr(geo)}">${fm(
+    faceMarkup(NEUTRAL_FACE, geo, {
+      eyesClip,
+      halfClip: `${clip}-mh`,
+      prefix: `${clip}-rf`,
+      skin,
+    }),
+  )}</g>`;
+}
+
+/** What a drawing with a rigged face shows: the rig's face only while the player moves it, and then none of the kit's blinks or mouths. */
+export const RIG_FACE_CSS =
+  '.rf{display:none}.rigged .rf{display:inline}.rigged .blink,.rigged .mouths{display:none}';
 
 // ── Faces ──────────────────────────────────────────────────────────────────
 
@@ -2247,6 +2304,15 @@ export function drawnInViews(
       faces
         .map((name) => `<g id="${faceId(name)}${sfx}">${first.asked[name]}</g>`)
         .join(''),
+      how.faceRig
+        ? rigFaceOf(
+            view,
+            R,
+            SKIN[Math.min(SKIN.length, Math.max(1, spec.skin)) - 1],
+            `${clip}-0-${code}`,
+            `${clip}-0-${code}-eyes`,
+          )
+        : '',
       `<g class="mouths">${first.mouths}</g>`,
       `<g id="reach${sfx}">${worn((l) => l.reach)}</g>`,
       drawn
@@ -2281,15 +2347,33 @@ export function drawnInViews(
         front: { root: one.root, dir: one.dir },
         ...(one.views ?? {}),
       };
-  const style = viewCss(R.sY + 6) + (extra.length ? dangleCss(extra) : '');
+  const style =
+    viewCss(R.sY + 6) +
+    (extra.length ? dangleCss(extra) : '') +
+    (how.faceRig ? RIG_FACE_CSS : '');
   const opening = '<g class="flip"><g class="whole">';
   const at = front.svg.indexOf(opening);
   const closing = '</g></g></g></svg>';
   if (at < 0 || !front.svg.endsWith(closing)) return null;
-  const person = front.svg.slice(
+  const drawnPerson = front.svg.slice(
     at + opening.length,
     front.svg.length - closing.length,
   );
+  // The front's rigged face, over its faces, under the mouth's shapes.
+  const mouths = '<g class="mouths">';
+  const person =
+    how.faceRig && drawnPerson.includes(mouths)
+      ? drawnPerson.replace(
+          mouths,
+          rigFaceOf(
+            'front',
+            R,
+            SKIN[Math.min(SKIN.length, Math.max(1, spec.skin)) - 1],
+            `${clip}-f`,
+            'eyes',
+          ) + mouths,
+        )
+      : drawnPerson;
   const head = front.svg
     .slice(0, at)
     .replace('</style>', `${style}</style>`)
@@ -2300,6 +2384,7 @@ export function drawnInViews(
     svg,
     rig: VIEW_RIG,
     views: FIGURE_VIEWS.map(viewGroupId),
+    ...(how.faceRig ? { faceRig: true as const } : {}),
     ...(front.joints ? { viewJoints } : {}),
     ...(all.size ? { dangles: [...all.values()] } : {}),
   };

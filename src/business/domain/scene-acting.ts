@@ -28,8 +28,12 @@ import {
   moveIdealMs,
   type ActedMove,
 } from './scene-doings';
+import type { FaceKey } from './scene-face-rig';
 import {
   PERFORM_MS,
+  lineFace,
+  reactionFace,
+  reactionPick,
   reactionTo,
   readLine,
   speakerMoves,
@@ -60,6 +64,9 @@ export interface SpokenLine {
   pace?: 'calm' | 'quick' | 'slow' | 'whisper' | 'shout';
   /** What it does to whom it is said to, where the sheet says (scene-performance's aims); else read from its words. */
   aim?: string;
+  /** The face it is said with and the one felt beneath it, where the sheet says (the rigged face's recipes). */
+  said?: string;
+  felt?: string;
   startMs: number;
   endMs: number;
   words: { text: string; startMs: number; endMs: number }[];
@@ -413,6 +420,12 @@ export function actingOf(input: {
   things?: readonly NameableThing[];
   /** A film's: the faces its listeners react with, gathered here for the caller to show (feltEffects). */
   felt?: FeltFace[];
+  /**
+   * A film's: the face each wears at a moment (the kit's, as the sheet
+   * shows it): what a line is felt under, when it says otherwise. With it,
+   * each actor's acted faces for a rigged face (SceneActingDto.face).
+   */
+  worn?: (id: string, t: number) => string | null;
 }): Record<string, SceneActingDto> {
   const { steps, lines, durationMs } = input;
   const actors = new Set(input.actors);
@@ -426,6 +439,24 @@ export function actingOf(input: {
   const gazes = new Map<string, Gaze[]>();
   const moves = new Map<string, [number, SceneActingMove, number, string?][]>();
   const mouths = new Map<string, [number, string][]>();
+  /** The faces acted on a rigged face, each actor's, and the last each took a line with. */
+  const faces = new Map<string, FaceKey[]>();
+  const lastTaken = new Map<string, string>();
+  const face = (id: string, key: FaceKey) => {
+    if (!actors.has(id) || !input.worn) return;
+    const [at, said, strength, felt, how, ms] = key;
+    faces.set(id, [
+      ...(faces.get(id) ?? []),
+      [
+        Math.round(at),
+        said,
+        Math.round(strength * 100) / 100,
+        felt,
+        how,
+        Math.max(60, Math.round(ms)),
+      ],
+    ]);
+  };
   const gaze = (id: string, one: Gaze) => {
     if (!actors.has(id)) return;
     gazes.set(id, [...(gazes.get(id) ?? []), one]);
@@ -535,6 +566,58 @@ export function actingOf(input: {
     const keyAt = word(read.key).startMs;
     const next = lines[i + 1];
     const before = lines[i - 1];
+    // The face it is said with, and felt under (a rigged face's): on as
+    // it begins, full on its key word; a threat or an accusation burning
+    // slowly over it; a lie given away by a flash of what is felt first.
+    const speakerTemper = temperOf(input.traits?.get(speaker) ?? []);
+    const lf = input.worn
+      ? lineFace(read, speakerTemper, input.worn(speaker, from), {
+          said: line.said,
+          felt: line.felt,
+        })
+      : null;
+    if (lf) {
+      const k = speakerTemper.shy ? 0.85 : 1;
+      const held =
+        next && next.speaker !== speaker ? next.startMs + 400 : to + 900;
+      if (lf.lie && lf.felt)
+        face(speaker, [from - 330, lf.felt, k, null, 'flash', 180]);
+      if (lf.how === 'slow')
+        face(speaker, [
+          from - 120,
+          lf.said,
+          k,
+          lf.felt,
+          'slow',
+          held - from + 120,
+        ]);
+      else if (keyAt - from > 450) {
+        face(speaker, [
+          from - 200,
+          lf.said,
+          0.7 * k,
+          lf.felt,
+          'ease',
+          keyAt - 120 - (from - 200),
+        ]);
+        face(speaker, [
+          keyAt - 120,
+          lf.said,
+          k,
+          lf.felt,
+          'ease',
+          held - (keyAt - 120),
+        ]);
+      } else
+        face(speaker, [
+          from - 200,
+          lf.said,
+          k,
+          lf.felt,
+          'ease',
+          held - (from - 200),
+        ]);
+    }
     /** Someone real to turn to: another here, not a side of the stage. */
     const them = answering && here.includes(answering) ? answering : null;
     // A step in, held while the two have it out, and taken back.
@@ -671,6 +754,38 @@ export function actingOf(input: {
     if (them) {
       const temper = temperOf(input.traits?.get(them) ?? []);
       const r = reactionTo(read.aim, temper);
+      // On a rigged face, a face picked among those their temper takes it
+      // with, never the one they took the line before with; its glance
+      // (an eye-roll only with the face that rolls them).
+      const rf = input.worn
+        ? reactionFace(
+            read.aim,
+            temper,
+            reactionPick(them, i),
+            lastTaken.get(them) ?? null,
+          )
+        : null;
+      if (rf) {
+        lastTaken.set(them, rf.recipe);
+        const ms = hitAt - felt + 1900;
+        const double =
+          rf.how === 'take' &&
+          (read.aim === 'reveals' || read.aim === 'shows') &&
+          reactionPick(`${them}:double`, i) < 0.5;
+        if (double) {
+          // A double take: it goes by them a moment, a glance away, and back.
+          face(them, [felt - 60, 'neutral', 1, null, 'ease', 520]);
+          gaze(them, {
+            from: felt + 60,
+            to: felt + 520,
+            target: awayFrom(them, speaker, felt),
+            turn: 0.2,
+            rank: RANK.react,
+          });
+          face(them, [felt + 600, rf.recipe, 1, null, 'take', ms - 600]);
+        } else face(them, [felt - 60, rf.recipe, 1, null, rf.how, ms]);
+        r.glance = rf.glance;
+      }
       // A shout or a cry of alarm leans them back, whatever else it does.
       if (startled && r.move !== 'flinch' && r.move !== 'take') {
         move(them, to + 100, 'lean', 800, speaker);
@@ -721,6 +836,14 @@ export function actingOf(input: {
         ) {
           move(one, hitAt + 90 * k, 'laugh', 1100);
           input.felt?.push([one, hitAt + 90 * k - 60, 'happy', 1500]);
+          face(one, [
+            hitAt + 90 * k - 60,
+            reactionPick(one, i) < 0.5 ? 'delight' : 'amused',
+            1,
+            null,
+            'take',
+            1500,
+          ]);
           reacting.add(one);
         } else if (
           them &&
@@ -737,6 +860,14 @@ export function actingOf(input: {
             rank: RANK.react,
           });
           move(one, hitAt + 150 + 90 * k, 'brows', 800);
+          face(one, [
+            hitAt + 150 + 90 * k,
+            reactionPick(one, i) < 0.5 ? 'worried' : 'surprise',
+            0.7,
+            null,
+            'ease',
+            1100,
+          ]);
           reacting.add(one);
         }
       });
@@ -1222,6 +1353,8 @@ export function actingOf(input: {
     if (input.walks && onStage.has(id)) acted.walks = true;
     const { size } = styleFor(id);
     if (size !== 1) acted.size = size;
+    const acts = faces.get(id);
+    if (acts?.length) acted.face = acts.sort((a, b) => a[0] - b[0]);
     if (Object.keys(acted).length) out[id] = acted;
   }
   return out;

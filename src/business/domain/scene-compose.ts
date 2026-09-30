@@ -2136,6 +2136,20 @@ export function composeScene(input: ComposeInput): {
   // they look, their mouths, their gestures, and what the writer asked.
   // A film's listeners react with a face too (scene-performance).
   const felt: FeltFace[] = [];
+  // The face each wears from moment to moment, as the effects show it:
+  // what a film's line is felt under (a rigged face's acting).
+  const faceNames = new Set<string>(FACES);
+  const shownFaces = effects
+    .filter((e) => e.do === 'show' && e.part && faceNames.has(e.part))
+    .sort((a, b) => a.atMs - b.atMs);
+  const worn = (id: string, t: number): string | null => {
+    let out: string | null = null;
+    for (const e of shownFaces) {
+      if (e.atMs > t + 250) break;
+      if (e.target === id) out = e.part;
+    }
+    return out;
+  };
   const acting = actingOf({
     actors: script.cast
       .filter(
@@ -2186,7 +2200,7 @@ export function composeScene(input: ComposeInput): {
     ),
     goes: goesAt(),
     film,
-    ...(film ? { things: nameableThings(script), felt } : {}),
+    ...(film ? { things: nameableThings(script), felt, worn } : {}),
   });
   const reacted = feltEffects(
     effects,

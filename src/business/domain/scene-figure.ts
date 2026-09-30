@@ -2488,6 +2488,8 @@ export interface FigureDrawing {
   rig?: 2 | 3;
   /** On rig 3, each view's group, front first: the stage shows one at a time. */
   views?: string[];
+  /** On rig 3, drawn with a face of moving parts too (FigureHow.faceRig): each view's `rigface` group. */
+  faceRig?: true;
   /** On rig 3, each view's arms as it draws them (the front's are `joints`): a hand is aimed from where it is in the view that shows. */
   viewJoints?: Partial<
     Record<
@@ -3486,6 +3488,13 @@ export interface FigureHow {
    * `--dg-<id>-<k>`, and its dangles and stride said.
    */
   rig?: RigVersion | typeof VIEW_RIG;
+  /**
+   * On rig 3, a face built from moving parts as well (studio-story-plan
+   * §3B, scene-face-rig): in each view that shows the face, a group the
+   * player moves channel by channel, hidden until it does. The kit's
+   * faces are drawn as ever beside it, for a still and an older player.
+   */
+  faceRig?: boolean;
 }
 
 /** The class a figure's clothes are drawn in: 0 what they start in, then each they change into. */

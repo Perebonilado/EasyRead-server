@@ -1864,6 +1864,22 @@ export interface SceneActingDto {
    * moving with the thing.
    */
   attach?: [number, string, string, string | null][];
+  /**
+   * Faces acted over the one they wear (studio-story-plan §3B, the rigged
+   * face's scene-face-rig): from when, the face said (a recipe: "smug",
+   * "guilty", "sceptical"), how strongly (0 to 1), the face felt beneath
+   * it (a recipe, or null for the same), how it comes on ("ease", "take",
+   * "slow", "flash") and for how long, in ms. A drawing with no rigged
+   * face plays the faces it wears alone.
+   */
+  face?: [
+    number,
+    string,
+    number,
+    string | null,
+    'ease' | 'take' | 'slow' | 'flash',
+    number,
+  ][];
 }
 
 /** A view of someone drawn from every side, as the camera sees them. */

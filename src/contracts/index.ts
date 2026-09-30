@@ -1989,6 +1989,8 @@ export interface ScenePillDto {
   w: number;
   h: number;
   size: number;
+  /** How much farther off its arrow than usual (a build's board, where the arrow is too short to hold it beside it). */
+  lift?: number;
 }
 
 /** A page as an animated video: the voice's sentences, the things, and when each happens. */

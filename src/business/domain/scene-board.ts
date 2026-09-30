@@ -4,14 +4,19 @@
  * chamber or the water cycle stage by stage, instead of a new picture for
  * each idea.
  *
- *  - The board. A section has one board of BOARD_COLS × BOARD_ROWS cells,
- *    about twice the camera's usual frame across and one and a half times
- *    its height. A newcomer takes the free cell nearest what it connects to
- *    (an arrow's other end), else the one after the last placed. Placed
- *    things never move: only the camera does.
+ *  - The board. A section has one board of BOARD_COLS × BOARD_ROWS cells
+ *    over the whole stage, about twice the camera's usual frame across. A
+ *    newcomer takes the free cell nearest what it connects to (an arrow's
+ *    other end), else the one after the last placed. Placed things never
+ *    move: only the camera does. The rows the whole section uses are
+ *    spread down the stage (`rows`), so a diagram of two rows fills a
+ *    16:9 frame as well as one of three, and there is room between rows
+ *    for an arrow and its label.
  *  - The camera frames the newest thing and what it connects to, never
- *    more than FRAME_MOST of the board across; at a recap sentence, and as
- *    the section ends, it pulls out to the whole board.
+ *    more than FRAME_MOST of the board across, and never cutting through
+ *    a thing: one at its edge is taken in whole or left out. At a recap
+ *    sentence, and as the section ends, it pulls out to the whole board,
+ *    the diagram fitted to the frame and centred in it.
  *  - Receding. A thing the voice has not named for RECEDE_AFTER stage
  *    changes is set back (faded and greyed by the player), and comes back
  *    in full when it is named again.
@@ -269,7 +274,11 @@ const cameraStep = (script: SceneScript, beat: number): SceneStep => ({
 export function boardOf(
   written: SceneScript,
   carry: BoardCarry | null,
-  options: { end?: boolean } = {},
+  options: {
+    end?: boolean;
+    /** The rows the whole section uses (sectionRows): the stage spreads them the same in every scene of it. */
+    rows?: RowSpan;
+  } = {},
 ): { script: SceneScript; carry: BoardCarry; notes: string[] } {
   const notes: string[] = [];
   const { script: kept, kept: keptIds } = keepIds(written, carry);
@@ -513,12 +522,17 @@ export function boardOf(
     out.push({ ...step, stage });
   }
   const things = order.flatMap((id) => (byId.get(id) ? [byId.get(id)!] : []));
+  // The rows spread down the stage: the section's, and at least this scene's own.
+  const own = out.flatMap((s) =>
+    Object.values(s.stage?.board?.cells ?? {}).map((c) => c[1]),
+  );
+  const rows = spanOf([...own, ...(options.rows ?? [])]);
   return {
     script: {
       ...kept,
       cast,
       steps: out,
-      board: { carried: [...(carry?.order ?? [])] },
+      board: { carried: [...(carry?.order ?? [])], ...(rows ? { rows } : {}) },
     },
     carry: {
       things,
@@ -536,57 +550,114 @@ export function boardOf(
 
 // ── On the stage ──────────────────────────────────────────────────────────
 
+/** The first and last row of the board a section uses. */
+export type RowSpan = [number, number];
+
+/** The span of some rows, or null for none. */
+export function spanOf(rows: readonly number[]): RowSpan | null {
+  return rows.length ? [Math.min(...rows), Math.max(...rows)] : null;
+}
+
 /** A box on a staging: x, y, w, h. */
 export type Box = [number, number, number, number];
 
-/** The board on a staging: the content box, as tall as a board twice the frame across and half again its height would be. */
-export function boardArea(
-  W: number,
-  H: number,
-  margin: number,
-): { x: number; y: number; w: number; h: number } {
-  const w = W - margin * 2;
-  const h = Math.min(H - margin * 2, w * 0.75 * (H / W));
-  return { x: margin, y: (H - h) / 2, w, h };
+type Rect = { x: number; y: number; w: number; h: number };
+
+/** The board on a staging: the whole content box. */
+export function boardArea(W: number, H: number, margin: number): Rect {
+  return { x: margin, y: margin, w: W - margin * 2, h: H - margin * 2 };
 }
 
-/** The room between cells: an arrow runs through it. */
+/** The room between columns: an arrow runs through it. */
 export const BOARD_GAP = 48;
+/**
+ * The room between rows, more than between columns: a thing's caption
+ * hangs below it, and an arrow down to the row below and its label need
+ * room past the caption.
+ */
+export const BOARD_ROW_GAP = 96;
+/** How much taller than a board of BOARD_ROWS rows a cell may grow when the section uses fewer. */
+export const CELL_GROW = 1.45;
 
-/** A cell's box on a staging. */
+/**
+ * A cell's box on a staging. The rows the section uses (`rows`, all of
+ * them unless said) are spread down the stage: when there are fewer than
+ * BOARD_ROWS, taller cells (up to CELL_GROW times), BOARD_ROW_GAP between
+ * them, the whole centred. So a diagram of two rows fills a 16:9 frame
+ * top to bottom as one of three does, and a pan from row to row stays
+ * short.
+ */
 export function cellBox(
   cell: Cell,
   W: number,
   H: number,
   margin: number,
-): { x: number; y: number; w: number; h: number } {
+  rows: RowSpan = [0, BOARD_ROWS - 1],
+): Rect {
   const area = boardArea(W, H, margin);
   const w = (area.w - BOARD_GAP * (BOARD_COLS - 1)) / BOARD_COLS;
-  const h = (area.h - BOARD_GAP * (BOARD_ROWS - 1)) / BOARD_ROWS;
+  const n = Math.max(1, rows[1] - rows[0] + 1);
+  const usual = (area.h - BOARD_ROW_GAP * (BOARD_ROWS - 1)) / BOARD_ROWS;
+  const h = Math.min(
+    usual * (n < BOARD_ROWS ? CELL_GROW : 1),
+    (area.h - BOARD_ROW_GAP * (n - 1)) / n,
+  );
+  const gap = n > 1 ? BOARD_ROW_GAP : 0;
+  const top = area.y + (area.h - (h * n + gap * (n - 1))) / 2;
+  const round = (v: number) => Math.round(v * 10) / 10;
   return {
-    x: area.x + cell[0] * (w + BOARD_GAP),
-    y: area.y + cell[1] * (h + BOARD_GAP),
-    w,
-    h,
+    x: round(area.x + cell[0] * (w + BOARD_GAP)),
+    y: round(top + (cell[1] - rows[0]) * (h + gap)),
+    w: round(w),
+    h: round(h),
   };
 }
+
+/** How far a thing may reach past a view's edge and still count as out of it, or in it. */
+const HAIR = 1;
+
+/** Whether a view cuts through a thing: some of it in the view and some out. */
+export function slices(view: Rect, thing: Rect): boolean {
+  const inX =
+    Math.min(view.x + view.w, thing.x + thing.w) - Math.max(view.x, thing.x);
+  const inY =
+    Math.min(view.y + view.h, thing.y + thing.h) - Math.max(view.y, thing.y);
+  if (inX <= HAIR || inY <= HAIR) return false;
+  return !contains(view, thing);
+}
+
+const contains = (view: Rect, thing: Rect) =>
+  thing.x >= view.x - HAIR &&
+  thing.y >= view.y - HAIR &&
+  thing.x + thing.w <= view.x + view.w + HAIR &&
+  thing.y + thing.h <= view.y + view.h + HAIR;
+
+/** How much a view may widen to keep the arrows' labels whole, not cut at its edge. */
+export const LABELS_WIDEN = 1.25;
+
+/** The room kept round the whole diagram when the camera pulls out to it, each side, as a share of the frame. */
+export const WHOLE_ROOM = 0.04;
 
 /**
  * Where the camera looks at a stage of a build, as a box of the staging's
  * shape: around what it frames and a little room, centred on the newest
  * where that is more than FRAME_MOST of the board across, and never nearer
- * than FRAME_LEAST; at a pull-out, all of the diagram, however much of
- * the stage it takes.
+ * than FRAME_LEAST; then moved or widened as little as it may be so that
+ * it cuts through no thing on the board (`extents`, all of them): each is
+ * in the view whole, or out of it. At a pull-out, all of the diagram,
+ * fitted to the frame and centred in it.
  */
 export function frameBox(
   frame: BoardFrame,
-  extents: ReadonlyMap<string, { x: number; y: number; w: number; h: number }>,
+  extents: ReadonlyMap<string, Rect>,
   W: number,
   H: number,
   margin: number,
+  /** The arrows' labels on the board: kept whole in a view too, where that widens it by at most LABELS_WIDEN. */
+  labels: readonly Rect[] = [],
 ): Box {
   const whole: Box = [0, 0, W, H];
-  // The whole board: all of the diagram, as much of the stage as it takes.
+  const round = (n: number) => Math.round(n * 10) / 10;
   const all = frame === 'whole';
   const boxes = all
     ? [...extents.values()]
@@ -598,19 +669,139 @@ export function frameBox(
   const y0 = Math.min(...boxes.map((b) => b.y));
   const x1 = Math.max(...boxes.map((b) => b.x + b.w));
   const y1 = Math.max(...boxes.map((b) => b.y + b.h));
-  const room = all ? 1.1 : 1.18;
+  const within = (w: number, cx: number, cy: number): Rect => {
+    const h = w / aspect;
+    return {
+      x: Math.min(W - w, Math.max(0, cx - w / 2)),
+      y: Math.min(H - h, Math.max(0, cy - h / 2)),
+      w,
+      h,
+    };
+  };
+  if (all) {
+    // The whole diagram, as big as the frame lets it be, in its middle.
+    const fit = 1 / (1 - WHOLE_ROOM * 2);
+    const w = Math.min(
+      W,
+      Math.max(area.w * FRAME_LEAST, (x1 - x0) * fit, (y1 - y0) * fit * aspect),
+    );
+    const view = within(w, (x0 + x1) / 2, (y0 + y1) / 2);
+    return [round(view.x), round(view.y), round(view.w), round(view.h)];
+  }
+  const room = 1.18;
   let w = Math.max((x1 - x0) * room, (y1 - y0) * room * aspect);
-  w = all
-    ? Math.min(W, Math.max(area.w * FRAME_MOST, w))
-    : Math.min(area.w * FRAME_MOST, Math.max(area.w * FRAME_LEAST, w));
+  w = Math.min(area.w * FRAME_MOST, Math.max(area.w * FRAME_LEAST, w));
   const h = w / aspect;
   // Too much to frame whole: on the newest, as much of the rest as fits.
   const newest = boxes[0];
   const fits = (x1 - x0) * room <= w && (y1 - y0) * room <= h;
   const cx = fits ? (x0 + x1) / 2 : newest.x + newest.w / 2;
   const cy = fits ? (y0 + y1) / 2 : newest.y + newest.h / 2;
-  const x = Math.min(W - w, Math.max(0, cx - w / 2));
-  const y = Math.min(H - h, Math.max(0, cy - h / 2));
-  const round = (n: number) => Math.round(n * 10) / 10;
-  return [round(x), round(y), round(w), round(h)];
+  const want = within(w, cx, cy);
+  const keep = fits ? boxes : [newest];
+  // The arrows' labels kept whole too where that costs little; the things always.
+  const view =
+    (labels.length
+      ? unsliced(
+          want,
+          keep,
+          [...extents.values(), ...labels],
+          { w: W, h: H },
+          want.w * LABELS_WIDEN,
+        )
+      : null) ?? unsliced(want, keep, [...extents.values()], { w: W, h: H })!;
+  return [round(view.x), round(view.y), round(view.w), round(view.h)];
+}
+
+/**
+ * The view nearest `want` that cuts through none of `things`, and still has
+ * all of `keep` in it: moved along, or widened, as little as it may be.
+ * Moving is dearer than nothing, widening dearer than moving: a wider view
+ * is a short pull back, where a move away to leave a thing out is a long
+ * pan at the camera's close scale. The whole stage cuts through nothing on
+ * it, so there is always one.
+ */
+export function unsliced(
+  want: Rect,
+  keep: readonly Rect[],
+  things: readonly Rect[],
+  stage: { w: number; h: number },
+  most = stage.w,
+): Rect | null {
+  const { h: H } = stage;
+  const W = Math.min(stage.w, most);
+  const clear = (view: Rect) =>
+    keep.every((k) => contains(view, k)) &&
+    !things.some((t) => slices(view, t));
+  if (clear(want)) return want;
+  const aspect = want.w / want.h;
+  const pad = 12;
+  let best: { view: Rect; cost: number } | null = null;
+  const widths: number[] = [];
+  for (let w = want.w; w < W; w *= 1.04) widths.push(w);
+  widths.push(W);
+  for (const w of widths) {
+    const h = w / aspect;
+    if (h > H + 0.5) break;
+    const grow = (w / want.w - 1) * 4;
+    if (best && grow >= best.cost) break;
+    const cx = want.x + want.w / 2;
+    const cy = want.y + want.h / 2;
+    // Where an edge of the view may go: as wanted, or just past a thing's edge.
+    const xs = [cx - w / 2];
+    const ys = [cy - h / 2];
+    for (const t of things) {
+      xs.push(t.x - pad, t.x + t.w + pad, t.x + t.w + pad - w, t.x - pad - w);
+      ys.push(t.y - pad, t.y + t.h + pad, t.y + t.h + pad - h, t.y - pad - h);
+    }
+    const clamp = (v: number, top: number) => Math.min(top, Math.max(0, v));
+    const xOk = [...new Set(xs.map((x) => clamp(x, stage.w - w)))];
+    const yOk = [...new Set(ys.map((y) => clamp(y, H - h)))];
+    for (const x of xOk)
+      for (const y of yOk) {
+        const cost =
+          grow +
+          Math.abs(x + w / 2 - cx) / want.w +
+          Math.abs(y + h / 2 - cy) / want.h;
+        if (best && cost >= best.cost) continue;
+        const view = { x, y, w, h };
+        if (clear(view)) best = { view, cost };
+      }
+  }
+  if (best) return best.view;
+  return most < stage.w ? null : { x: 0, y: 0, w: W, h: W / aspect };
+}
+
+/** Something on a board at a step the eye must read or see whole: a thing, its caption, a label, an arrow's label. */
+export interface BoardItem {
+  owner: string;
+  what: 'thing' | 'caption' | 'label' | 'pill';
+  box: Rect;
+}
+
+/**
+ * Whatever overlaps on a board at one step, strictly: no words on words,
+ * no words on a thing (its own caption and labels beside it apart), no
+ * thing on a thing. A board has room for everything, so any overlap past
+ * a hair is a fault.
+ */
+export function boardOverlaps(items: readonly BoardItem[]): string[] {
+  const out: string[] = [];
+  for (let i = 0; i < items.length; i += 1)
+    for (let j = i + 1; j < items.length; j += 1) {
+      const a = items[i];
+      const b = items[j];
+      // A thing's own words are set by it, never on it.
+      if (a.owner === b.owner && (a.what === 'thing' || b.what === 'thing'))
+        continue;
+      const x =
+        Math.min(a.box.x + a.box.w, b.box.x + b.box.w) -
+        Math.max(a.box.x, b.box.x);
+      const y =
+        Math.min(a.box.y + a.box.h, b.box.y + b.box.h) -
+        Math.max(a.box.y, b.box.y);
+      if (x > HAIR && y > HAIR)
+        out.push(`${a.owner} ${a.what} / ${b.owner} ${b.what}`);
+    }
+  return out;
 }

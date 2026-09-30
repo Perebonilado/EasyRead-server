@@ -15,7 +15,9 @@ import {
   BOARD_MOST,
   boardOf,
   nameWords,
+  spanOf,
   type BoardCarry,
+  type RowSpan,
 } from '../scene-board';
 import type { SceneScript, SceneThing } from '../scene-script';
 import type { OutlineScene, StudioPicture } from './studio';
@@ -98,6 +100,30 @@ export function sectionOf(
 }
 
 /**
+ * The rows of the board a whole section uses, from its first scene to its
+ * last written: each scene of it spreads the same rows down the stage, so
+ * a thing is where it was across a join, and a board of two rows fills
+ * the frame as one of three does.
+ */
+export function sectionRows(
+  section: { from: number; to: number },
+  scriptAt: (position: number) => SceneScript | null,
+): RowSpan | null {
+  let carry: BoardCarry | null = null;
+  const rows: number[] = [];
+  for (let j = section.from; j <= section.to; j += 1) {
+    const script = scriptAt(j);
+    if (!script) break;
+    const made = boardOf(script, carry, { end: j === section.to });
+    for (const step of made.script.steps)
+      for (const cell of Object.values(step.stage?.board?.cells ?? {}))
+        rows.push(cell[1]);
+    carry = made.carry;
+  }
+  return spanOf(rows);
+}
+
+/**
  * A scene of a build laid out on its board: each scene of the section
  * from its start to this one laid out in turn on what the one before left,
  * from their scripts (`scriptAt`, as they are made). Null for a scene of
@@ -116,12 +142,16 @@ export function buildScript(
 } | null {
   const section = sectionOf(scenes, k);
   if (!section) return null;
+  const rows = sectionRows(section, scriptAt);
   let carry: BoardCarry | null = null;
   const notes: string[] = [];
   for (let j = section.from; j <= k; j += 1) {
     const script = scriptAt(j);
     if (!script) return null;
-    const made = boardOf(script, carry, { end: j === section.to });
+    const made = boardOf(script, carry, {
+      end: j === section.to,
+      ...(rows ? { rows } : {}),
+    });
     if (j === k)
       return {
         script: made.script,

@@ -720,7 +720,11 @@ export const MEASURED_RATES: VoiceRates = {
     },
   },
   cartesia: { '98a34ef2-2140-4c28-9c71-663dc4dd7022': { wpm: 162 } },
-  elevenlabs: { JBFqnCBsd6RMkjVDRZzb: { wpm: 170 } },
+  // George, on Eleven v3 and on Eleven v4 alike (v4 measured on
+  // 2026-09-30 from three sentences of the passage, voiced with
+  // timestamps: 157, 153 and 208, 170 in all). v4 takes no speed, so a
+  // sentence asked slower than the stretch goes is tagged [slowly].
+  elevenlabs: { JBFqnCBsd6RMkjVDRZzb: { wpm: 170, at: '2026-09-30' } },
 };
 
 /** A voice's rate: as this deployment measured it, else as it was measured here, else its engine's own guess. */

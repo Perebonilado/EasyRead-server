@@ -34,6 +34,18 @@ export interface SpeechPort {
       voice?: string;
       /** How loud a line is said, for a voice that takes it as a tag (ElevenLabs) or a volume (Cartesia); the rest go by speed and style. */
       tone?: 'whisper' | 'shout';
+      /**
+       * How it is acted, as the script names it, for a voice that takes
+       * direction as tags (ElevenLabs): a lesson sentence's delivery, a
+       * line's aim and the faces it is said and felt with. The rest go by
+       * `style`.
+       */
+      direction?: {
+        delivery?: string;
+        aim?: string;
+        said?: string;
+        felt?: string;
+      };
     }[];
     /** Seconds of silence before the first word; the times it reports count from the true start. */
     lead?: number;
@@ -68,6 +80,11 @@ export interface SpeechPort {
   /** What goes into a file's name so audio from one voice never overwrites another's. */
   label(): { model: string; voice: string };
   /**
+   * The same voice on another of its models (ElevenLabs' v4 or v3, as the
+   * admin chose): its label names that model, so the two never share audio.
+   */
+  withModel?(model: string): SpeechPort;
+  /**
    * Whether the voice would answer right now. A rented service that sleeps
    * between runs says no while it is asleep or down; asking wakes it. A
    * voice that is always on need not answer at all.
@@ -84,6 +101,10 @@ export interface SpeechPort {
    * for the key (Cartesia): the admin page plays it from here.
    */
   preview?(voiceId: string): Promise<{ audio: Buffer; mimeType: string }>;
+  /** The service's public library searched (ElevenLabs'), for the admin to find a voice to add. */
+  library?(search: string): Promise<LibraryVoice[]>;
+  /** A library voice added to the account, as the admin asked: it takes one of the account's voice slots. */
+  addVoice?(ownerId: string, voiceId: string, name: string): Promise<void>;
 }
 
 /** A voice a service offers, as the admin page lists it. */
@@ -94,6 +115,18 @@ export interface VoiceOption {
   description: string;
   /** A sample of it, where the service has one to play. */
   previewUrl: string | null;
+  /** How it was made, where the service says: premade, cloned, designed ("generated"), professional. */
+  category?: string;
+  /** Something the admin should know before casting it: "Made for an earlier model: may sound different on v4". */
+  note?: string;
+}
+
+/** A voice in a service's public library (ElevenLabs' Voice Library), not yet in the account. */
+export interface LibraryVoice extends VoiceOption {
+  /** Its owner's public id: with its id, what adding it to the account takes. */
+  ownerId: string;
+  /** Whether it is in the account already. */
+  added: boolean;
 }
 
 /**

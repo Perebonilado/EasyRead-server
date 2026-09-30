@@ -228,10 +228,12 @@ export class StudioProgress implements WorkFollower {
     const final =
       notice.final === true ||
       (attempt !== undefined && notice.of !== undefined && attempt > notice.of);
-    const reason = troubleWords(
-      notice.service,
-      troubleOf(notice.error, notice.status, notice.body),
-    );
+    const reason =
+      notice.reason ??
+      troubleWords(
+        notice.service,
+        troubleOf(notice.error, notice.status, notice.body),
+      );
     const retry: NonNullable<StudioActivity['retry']> = {
       reason,
       says: retryWords({

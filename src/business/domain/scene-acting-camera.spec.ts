@@ -216,8 +216,9 @@ describe('a listener on the whole stage', () => {
     expect(views.some(([at, view]) => at < 3300 && view === 'back')).toBe(
       false,
     );
-    // Once he stops, she may look back at him over her shoulder, as before.
-    expect(at(4000)[1]).toBe('back');
+    // Once he stops, she looks back at him round as far as profile: a
+    // look never turns her back to the camera.
+    expect(at(4000)[1]).toBe('profile');
   });
 });
 

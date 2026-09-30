@@ -14,26 +14,36 @@ import type {
   AppSettingsRecord,
   AppSettingsRepository,
 } from '../../repositories/settings.repository';
-import { SceneVoiceService, type SceneVoices } from './scene-voice.service';
+import type { AiCallLogRepository } from '../../repositories/ai-call-log.repository';
+import {
+  SceneVoiceService,
+  capOf,
+  type SceneVoices,
+} from './scene-voice.service';
 
 const speech = (model: string, voice: string) =>
   ({ label: () => ({ model, voice }) }) as unknown as SpeechPort;
 
-const voices = (kokoro = true): SceneVoices => ({
-  gemini: speech('gemini-3.8-flash-tts', 'Sulafat'),
-  kokoro: kokoro ? speech('kokoro-82m', 'am_puck') : null,
-  openai: speech('gpt-4o-mini-tts', 'alloy'),
-  elevenlabs: Object.assign(speech('eleven_v3', ELEVENLABS_NARRATOR), {
+/** ElevenLabs on a model, its list of voices saying which model listed them. */
+const eleven = (model: string): SpeechPort =>
+  Object.assign(speech(model, ELEVENLABS_NARRATOR), {
+    withModel: (other: string) => eleven(other),
     catalogue: () =>
       Promise.resolve([
         {
           id: 'Voice0000000Bella',
           name: 'Bella',
-          description: '',
+          description: model,
           previewUrl: null,
         },
       ]),
-  }),
+  });
+
+const voices = (kokoro = true): SceneVoices => ({
+  gemini: speech('gemini-3.8-flash-tts', 'Sulafat'),
+  kokoro: kokoro ? speech('kokoro-82m', 'am_puck') : null,
+  openai: speech('gpt-4o-mini-tts', 'alloy'),
+  elevenlabs: eleven('eleven_v4'),
   cartesia: Object.assign(speech('sonic-3.6', CARTESIA_NARRATOR), {
     catalogue: () =>
       Promise.resolve([
@@ -69,10 +79,17 @@ function store(): AppSettingsRepository & { reads: number } {
     },
     set(patch, changedBy, now) {
       // Each engine's voices kept apart, as the table keeps them.
+      const { voiceModels, ...rest } = patch;
+      const models = { ...record.voiceModels };
+      if (voiceModels && 'elevenlabs' in voiceModels) {
+        if (voiceModels.elevenlabs) models.elevenlabs = voiceModels.elevenlabs;
+        else delete models.elevenlabs;
+      }
       record = {
         ...record,
-        ...patch,
+        ...rest,
         voiceCast: { ...record.voiceCast, ...patch.voiceCast },
+        voiceModels: models,
         changedBy,
         changedAt: now,
       };
@@ -398,5 +415,180 @@ describe('the admin’s voice setting', () => {
       ValidationError,
     );
     expect((await service.status()).cast).toBeNull();
+  });
+
+  it('speaks ElevenLabs on the admin’s model, v4 by default or v3, and names it so the two never share audio', async () => {
+    const service = new SceneVoiceService(
+      voices(),
+      store(),
+      clock({ ms: 0 }),
+      config({ ...keys, ELEVENLABS_API_KEY: 'e' }),
+    );
+    let status = await service.choose('elevenlabs', 'admin-1');
+    expect(status.models).toMatchObject({
+      engine: 'elevenlabs',
+      chosen: null,
+      current: 'eleven_v4',
+      options: [
+        { value: 'eleven_v4', label: 'Eleven v4' },
+        { value: 'eleven_v3', label: 'Eleven v3' },
+      ],
+    });
+    expect((await service.current()).speech.label().model).toBe('eleven_v4');
+    status = await service.chooseModel('eleven_v3', 'admin-1');
+    expect(status.models).toMatchObject({
+      chosen: 'eleven_v3',
+      current: 'eleven_v3',
+    });
+    expect((await service.current()).speech.label().model).toBe('eleven_v3');
+    // The admin page's voices as v3 lists them.
+    expect((await service.voiceOptions())[0].description).toBe('eleven_v3');
+    status = await service.chooseModel(null, 'admin-1');
+    expect(status.models?.current).toBe('eleven_v4');
+    await expect(
+      service.chooseModel('eleven_v9' as never, 'admin-1'),
+    ).rejects.toBeInstanceOf(ValidationError);
+    // A library voice the account may lack is named, with its stand-in.
+    const girl = status.cast?.roles.find((r) => r.value === 'girl');
+    expect(girl).toMatchObject({
+      default: CHARACTER_VOICES.elevenlabs.girl[0],
+      defaultName: 'Emmaline',
+      standIn: ELEVENLABS_PREMADE.Jessica,
+    });
+    // No ElevenLabs, no model to choose.
+    expect(
+      (
+        await new SceneVoiceService(
+          voices(),
+          store(),
+          clock({ ms: 0 }),
+          config(keys),
+        ).status()
+      ).models,
+    ).toBeNull();
+  });
+
+  describe('ElevenLabs’ spending caps', () => {
+    /** A ledger that says what the film and the day have spent. */
+    const ledger = (film: number, day: number) => {
+      const asked: Parameters<
+        NonNullable<AiCallLogRepository['spentUsd']>
+      >[0][] = [];
+      const repository: AiCallLogRepository = {
+        record: () => Promise.resolve(),
+        spentUsd: (filter) => {
+          asked.push(filter);
+          return Promise.resolve(filter.documentId ? film : day);
+        },
+      };
+      return { repository, asked };
+    };
+    const make = (
+      spent: ReturnType<typeof ledger>,
+      settings: Record<string, string> = {},
+      at = Date.UTC(2026, 9, 20, 15),
+    ) =>
+      new SceneVoiceService(
+        voices(),
+        store(),
+        clock({ ms: at }),
+        config({ ...keys, ELEVENLABS_API_KEY: 'e', ...settings }),
+        spent.repository,
+      );
+
+    it('voices a page on ElevenLabs within a film’s cap and the day’s', async () => {
+      const spent = ledger(0.5, 2);
+      const service = make(spent);
+      await service.choose('elevenlabs', 'a');
+      // The admin page's status asks the day's spend; the page, its own.
+      spent.asked.length = 0;
+      const now = await service.current({
+        documentId: 'doc-1',
+        characters: 1000,
+      });
+      expect(now.engine).toBe('elevenlabs');
+      expect(spent.asked).toEqual([
+        { task: 'tts_visual', modelPrefix: 'elevenlabs:', documentId: 'doc-1' },
+        {
+          task: 'tts_visual',
+          modelPrefix: 'elevenlabs:',
+          since: new Date(Date.UTC(2026, 9, 20)),
+        },
+      ]);
+    });
+
+    it('hands the page to Gemini once the film would pass its cap, or the day its own', async () => {
+      // $0.97 spent of $1, and 1,000 characters at $0.08 a thousand.
+      const film = make(ledger(0.97, 0));
+      await film.choose('elevenlabs', 'a');
+      const past = await film.current({
+        documentId: 'doc-1',
+        characters: 1000,
+      });
+      expect([past.engine, past.voice, past.cast]).toEqual([
+        'gemini',
+        'Kore',
+        {},
+      ]);
+      const day = make(ledger(0, 4.99));
+      await day.choose('elevenlabs', 'a');
+      expect(
+        (await day.current({ documentId: 'doc-1', characters: 1000 })).engine,
+      ).toBe('gemini');
+      // At v4's launch price the same page fits: $0.022 a thousand.
+      const launch = make(ledger(0.97, 0), {}, Date.UTC(2026, 9, 1, 12));
+      await launch.choose('elevenlabs', 'a');
+      expect(
+        (await launch.current({ documentId: 'doc-1', characters: 1000 }))
+          .engine,
+      ).toBe('elevenlabs');
+    });
+
+    it('takes its caps from the settings, none when off, and looks at none without a page or a ledger', async () => {
+      expect(capOf(undefined, 1)).toBe(1);
+      expect(capOf('2.5', 1)).toBe(2.5);
+      expect(capOf('0', 1)).toBeNull();
+      expect(capOf('off', 1)).toBeNull();
+      const uncapped = make(ledger(50, 500), {
+        ELEVENLABS_MAX_USD_PER_FILM: 'off',
+        ELEVENLABS_MAX_USD_PER_DAY: '0',
+      });
+      await uncapped.choose('elevenlabs', 'a');
+      expect(
+        (await uncapped.current({ documentId: 'd', characters: 5000 })).engine,
+      ).toBe('elevenlabs');
+      const spent = ledger(50, 500);
+      const sample = make(spent);
+      await sample.choose('elevenlabs', 'a');
+      spent.asked.length = 0;
+      expect((await sample.current()).engine).toBe('elevenlabs');
+      expect(spent.asked).toEqual([]);
+      const status = await sample.status();
+      expect(status.models?.caps).toEqual({
+        filmUsd: 1,
+        dayUsd: 5,
+        todayUsd: 500,
+      });
+    });
+
+    it('stops with plain words when nothing else can take the page', async () => {
+      const lone: SceneVoices = {
+        gemini: null,
+        kokoro: null,
+        openai: null,
+        elevenlabs: speech('eleven_v4', ELEVENLABS_NARRATOR),
+        cartesia: null,
+      };
+      const service = new SceneVoiceService(
+        lone,
+        store(),
+        clock({ ms: 0 }),
+        config({ ELEVENLABS_API_KEY: 'e', SCENE_VOICE_ENGINE: 'elevenlabs' }),
+        ledger(5, 0).repository,
+      );
+      await expect(
+        service.current({ documentId: 'd', characters: 100 }),
+      ).rejects.toThrow(/spending cap for a film is reached.*no other voice/);
+    });
   });
 });

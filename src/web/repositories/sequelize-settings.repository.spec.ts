@@ -4,6 +4,8 @@ import {
 } from '../../business/domain/scene-voice';
 import {
   castAfter,
+  modelsAfter,
+  modelsKept,
   ratesAfter,
   ratesKept,
   voiceCast,
@@ -68,5 +70,20 @@ describe('voice rates as kept', () => {
     });
     expect(ratesKept('{"kokoro":{"x":{"wpm":-3}}}')).toEqual({});
     expect(ratesKept('nope')).toEqual({});
+  });
+});
+
+describe('the admin’s models as kept', () => {
+  it('reads back only a model the engine has, and gives an engine back its own on null', () => {
+    expect(modelsKept(JSON.stringify({ elevenlabs: 'eleven_v3' }))).toEqual({
+      elevenlabs: 'eleven_v3',
+    });
+    expect(modelsKept(JSON.stringify({ elevenlabs: 'eleven_v9' }))).toEqual({});
+    expect(modelsKept('not json')).toEqual({});
+    expect(modelsKept(null)).toEqual({});
+    const kept = modelsAfter(null, { elevenlabs: 'eleven_v3' });
+    expect(JSON.parse(kept!)).toEqual({ elevenlabs: 'eleven_v3' });
+    expect(modelsAfter(kept, {})).toBe(kept);
+    expect(modelsAfter(kept, { elevenlabs: null })).toBeNull();
   });
 });

@@ -11,7 +11,11 @@ import {
   CARTESIA_NARRATOR,
   CHARACTER_VOICES,
   ELEVENLABS_NARRATOR,
+  ELEVENLABS_LIBRARY,
   ELEVENLABS_PREMADE,
+  elevenLabsLibraryName,
+  elevenLabsStandIn,
+  isElevenLabsPremade,
   characterVoice,
   deliveryPieces,
   isCartesiaVoiceId,
@@ -149,23 +153,25 @@ describe("a story's characters, in their own voices", () => {
   });
 
   it('casts ElevenLabs voices by kind, the same every episode, and the admin’s voice first of its kind', () => {
-    const { Jessica, Laura, Bill, Callum, Sarah } = ELEVENLABS_PREMADE;
+    const { Bill, Sarah } = ELEVENLABS_PREMADE;
+    const { Emmaline, Candy, Spuds, Toby } = ELEVENLABS_LIBRARY;
     const cast = (id: string, chosen = {}) =>
       characterVoice(bible, at(id), 'elevenlabs', ELEVENLABS_NARRATOR, chosen)
         ?.voice;
+    // Children, elders and creatures from the Voice Library.
     expect([cast('mira'), cast('lily'), cast('tobi'), cast('ember')]).toEqual([
-      Jessica,
-      Laura,
-      Bill,
-      Callum,
+      Emmaline.id,
+      Candy.id,
+      Spuds.id,
+      Toby.id,
     ]);
     // Asked again, the same.
-    expect(cast('lily')).toBe(Laura);
+    expect(cast('lily')).toBe(Candy.id);
     // The admin's girl is the first girl's; the palette's follow.
     expect([
       cast('mira', { girl: Sarah }),
       cast('lily', { girl: Sarah }),
-    ]).toEqual([Sarah, Jessica]);
+    ]).toEqual([Sarah, Emmaline.id]);
     // Never the narrator's own voice.
     expect(
       characterVoice(bible, at('tobi'), 'elevenlabs', Bill)?.voice,
@@ -175,6 +181,18 @@ describe("a story's characters, in their own voices", () => {
       expect(new Set(voices).size).toBeGreaterThanOrEqual(3);
       expect(voices).not.toContain(ELEVENLABS_NARRATOR);
     }
+    // Each library voice has a premade voice to say its lines until it is
+    // added to the account, never the narrator's; a premade voice has none.
+    for (const { id } of Object.values(ELEVENLABS_LIBRARY)) {
+      const standIn = elevenLabsStandIn(id);
+      expect(standIn && isElevenLabsPremade(standIn)).toBe(true);
+      expect(standIn).not.toBe(ELEVENLABS_NARRATOR);
+      expect(isElevenLabsPremade(id)).toBe(false);
+    }
+    expect(elevenLabsStandIn(Bill)).toBeNull();
+    expect(elevenLabsLibraryName(ELEVENLABS_LIBRARY.GrandmaOxley.id)).toBe(
+      'Grandma Oxley',
+    );
   });
 
   it('casts Cartesia voices by kind from its library, the same every episode, and the admin’s voice first of its kind', () => {

@@ -97,6 +97,19 @@ describe('the trouble a call is in, in the maker words', () => {
     );
   });
 
+  it('ElevenLabs over its quota is out of credit, not busy', () => {
+    expect(
+      troubleOf({
+        status: 401,
+        message:
+          'ElevenLabs is out of credit: quota_exceeded: This request exceeds your quota',
+      }),
+    ).toBe('credit');
+    expect(
+      troubleOf(undefined, 401, '{"detail":{"status":"quota_exceeded"}}'),
+    ).toBe('credit');
+  });
+
   it('a rate limit is busy; a timeout slow; a 5xx or a dropped line cannot be reached', () => {
     expect(troubleOf(undefined, 429)).toBe('busy');
     expect(troubleWords('writer', 'busy')).toBe('The writer is busy');

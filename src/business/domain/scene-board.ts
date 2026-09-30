@@ -31,6 +31,7 @@
  * All code, from the script alone, so each scene of a section works out
  * the same board for itself whenever it is made, in any order.
  */
+import { sameSubject } from './scene-picture-label';
 import type {
   SceneArrow,
   SceneScript,
@@ -131,8 +132,16 @@ export function keepIds(
     ...script.cast.map((t) => t.id),
   ]);
   const kept: string[] = [];
-  for (const thing of script.cast) {
+  // The same kind and name is the same thing only when it is drawn as
+  // the same thing: a drawing's brief of another subject is another one.
+  const sameOf = (thing: SceneThing) => {
     const same = byKey.get(`${thing.kind}:${keyOf(thing)}`);
+    if (!same || thing.kind !== 'drawing' || same.kind !== 'drawing')
+      return same;
+    return sameSubject(same, thing) ? same : undefined;
+  };
+  for (const thing of script.cast) {
+    const same = sameOf(thing);
     if (same) {
       if (same.id !== thing.id) rename.set(thing.id, same.id);
       kept.push(same.id);
@@ -150,7 +159,7 @@ export function keepIds(
   const id = (one: string) => rename.get(one) ?? one;
   const cast: SceneThing[] = [];
   for (const thing of script.cast) {
-    const same = byKey.get(`${thing.kind}:${keyOf(thing)}`);
+    const same = sameOf(thing);
     const next = same ?? { ...thing, id: id(thing.id) };
     if (!cast.some((t) => t.id === next.id)) cast.push(next);
   }

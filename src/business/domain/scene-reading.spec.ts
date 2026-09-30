@@ -7,6 +7,7 @@ import {
   readMs,
   readingOf,
   readingRhythm,
+  stepsAfterReading,
   textPacing,
   trimCards,
   windowsOf,
@@ -188,7 +189,8 @@ describe('textPacing: what comes too fast, fixed by code', () => {
       ],
       places: [{ a: row(0) }, { b: row(0) }, { c: row(0) }],
     });
-    textPacing(scene, STAGE_READING.higher);
+    // Put off for its text alone (textPacing then holds each stage too).
+    stepsAfterReading(scene, STAGE_READING.higher);
     expect(scene.steps[1].atMs).toBe(1800);
     expect(readingRhythm(scene).readLeftMs!).toBeLessThan(0);
   });

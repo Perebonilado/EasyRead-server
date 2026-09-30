@@ -62,12 +62,15 @@ import {
   withoutStandIns,
 } from '../../business/domain/scene-compose';
 import {
+  flickersOf,
+  holdMsOf,
   readingOf,
   readingRhythm,
   textPacing,
   trimCards,
   type SceneReading,
 } from '../../business/domain/scene-reading';
+import { textOverlaps } from '../../business/domain/scene-text-check';
 import {
   conventionGround,
   measureGround,
@@ -942,6 +945,35 @@ export class SceneProcessor {
         `${who}: read at ${reading.wpm} words a minute, motion ${reading.motion}: text left at least ${read.readLeftMs ?? '-'}ms after it is read, ${read.accentsPerMinute} accents a minute, the camera held at most ${Math.round(read.heldMs / 100) / 10}s for reading, no accent for at most ${Math.round(read.quietMs / 1000)}s${read.quietMs > 12_000 ? ' (still)' : ''}`,
       );
     }
+    // The flicker check (the rhythm log's): what is left changing quicker
+    // than the eye, which a lesson's pacing has put right already.
+    const flickers = flickersOf(scene, holdMsOf(reading));
+    this.logger.log(
+      `${who}: flicker check: ${
+        flickers.length
+          ? flickers
+              .map(
+                (f) => `${f.kind} ${f.what} at ${f.atMs}ms held ${f.heldMs}ms`,
+              )
+              .slice(0, 6)
+              .join('; ')
+          : 'every stage held'
+      }`,
+    );
+    // The text check: words on words or on things, standing or in passing.
+    const overlaps = textOverlaps(scene, reading);
+    this.logger.log(
+      `${who}: text check: ${
+        overlaps.length
+          ? overlaps
+              .map(
+                (o) => `${o.staging} step ${o.step} ${o.kind} ${o.a} / ${o.b}`,
+              )
+              .slice(0, 6)
+              .join('; ')
+          : 'no words on words or things'
+      }`,
+    );
     // Paper is every scene's look unless it says otherwise.
     if (input.theme && input.theme !== 'paper') scene.theme = input.theme;
     const finished = input.finish ? input.finish(scene) : scene;

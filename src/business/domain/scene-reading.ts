@@ -96,13 +96,22 @@ export const atMotion = (ms: number, motion: number): number =>
 /**
  * Whether a scene is a lesson's: no one speaks lines or acts, and it has
  * no story's set (the client's isLesson). A lesson may show a person the
- * kit draws. Only a lesson's text is paced.
+ * kit draws, who may turn to look at another. Only a lesson's text is
+ * paced.
  */
 export function isLesson(
   scene: Pick<SceneDto, 'effects' | 'setting' | 'acting' | 'things'>,
 ): boolean {
   if (scene.setting?.full) return false;
-  if (scene.acting && Object.keys(scene.acting).length) return false;
+  // Someone who only turns to look at another (a clinician at the teenager
+  // she asks) is still a lesson's picture; one who walks, moves or talks
+  // acts.
+  if (
+    Object.values(scene.acting ?? {}).some((one) =>
+      Object.keys(one).some((key) => key !== 'look'),
+    )
+  )
+    return false;
   return !scene.effects.some((e) => e.do === 'say');
 }
 
@@ -111,20 +120,160 @@ const newcomersAt = (steps: readonly SceneStepDto[], k: number) =>
 const leaversAt = (steps: readonly SceneStepDto[], k: number) =>
   k > 0 ? steps[k - 1].show.filter((id) => !steps[k].show.includes(id)) : [];
 
+/** How long a leaver takes to go, and a mover to move (timeline.ts EXIT_MS, MOVE_MS). */
+const EXIT_MS = 380;
+const MOVE_MS = 700;
+
+/** A place on the stage, with the words it carries: its caption and its labels. */
+type Placed = NonNullable<
+  SceneDto['stagings']['wide']['places'][number][string]
+>;
+type Box = { x: number; y: number; w: number; h: number };
+
+/** A place and everything set with it, as one box: its caption and labels too (timeline.ts extentOf). */
+export function extentOf(at: Placed): Box {
+  const c = at.caption;
+  const boxes: Box[] = [
+    at,
+    ...(c
+      ? [{ x: c.x, y: c.y, w: c.w, h: c.lines.length * c.size * 1.2 }]
+      : []),
+    ...(at.labels ?? []),
+  ];
+  const x0 = Math.min(...boxes.map((b) => b.x));
+  const y0 = Math.min(...boxes.map((b) => b.y));
+  const x1 = Math.max(...boxes.map((b) => b.x + b.w));
+  const y1 = Math.max(...boxes.map((b) => b.y + b.h));
+  return { x: x0, y: y0, w: x1 - x0, h: y1 - y0 };
+}
+
+const meets = (a: Box, b: Box) =>
+  Math.min(a.x + a.w, b.x + b.w) - Math.max(a.x, b.x) > 2 &&
+  Math.min(a.y + a.h, b.y + b.h) - Math.max(a.y, b.y) > 2;
+
+/** The stage a newcomer waits on: where each thing stood, and how fast things move. */
+export interface Room {
+  places: readonly Record<string, Placed>[];
+  motion: number;
+}
+
+/** The box a thing sweeps going from where it was at step `k - 1` to where it is at `k`; null when it stays. */
+function wayOf(room: Room, k: number, id: string): Box | null {
+  const from = room.places[k - 1]?.[id];
+  const to = room.places[k]?.[id];
+  if (
+    !from ||
+    !to ||
+    (Math.abs(to.x - from.x) <= 2 &&
+      Math.abs(to.y - from.y) <= 2 &&
+      Math.abs(to.w - from.w) <= 2)
+  )
+    return null;
+  const a = extentOf(from);
+  const b = extentOf(to);
+  const x = Math.min(a.x, b.x);
+  const y = Math.min(a.y, b.y);
+  return {
+    x,
+    y,
+    w: Math.max(a.x + a.w, b.x + b.w) - x,
+    h: Math.max(a.y + a.h, b.y + b.h) - y,
+  };
+}
+
+/**
+ * How long a thing waits to move to its new place (timeline.ts moveWait):
+ * where its way crosses something going, until that has mostly gone. So a
+ * card never slides through one still fading.
+ */
+export function moveWait(
+  steps: readonly SceneStepDto[],
+  k: number,
+  id: string,
+  room: Room | null,
+): number {
+  if (!room || k === 0) return 0;
+  const way = wayOf(room, k, id);
+  if (!way) return 0;
+  for (const other of leaversAt(steps, k)) {
+    const was = room.places[k - 1]?.[other];
+    if (was && meets(way, extentOf(was))) return Math.round(EXIT_MS * 0.85);
+  }
+  return 0;
+}
+
+/**
+ * How long a newcomer waits for its room (timeline.ts roomWait): arriving
+ * where something is still going, it comes once that has gone; where
+ * something moves out of its way or past it, once that has mostly moved.
+ * So a card never lands on the card it takes the place of, nor on one
+ * still sliding aside (the list cards over one another at 3:32).
+ */
+export function roomWait(
+  steps: readonly SceneStepDto[],
+  k: number,
+  id: string,
+  room: Room | null,
+): number {
+  if (!room || k === 0) return 0;
+  const target = room.places[k]?.[id];
+  if (!target) return 0;
+  const here = extentOf(target);
+  let wait = 0;
+  for (const other of steps[k - 1].show) {
+    const was = room.places[k - 1]?.[other];
+    if (!was) continue;
+    if (!steps[k].show.includes(other)) {
+      if (meets(here, extentOf(was))) wait = Math.max(wait, EXIT_MS * 0.85);
+      continue;
+    }
+    const way = wayOf(room, k, other);
+    if (way && meets(way, here))
+      wait = Math.max(
+        wait,
+        moveWait(steps, k, other, room) + atMotion(MOVE_MS, room.motion) * 0.85,
+      );
+  }
+  return Math.round(wait);
+}
+
+/** The room a lesson's scene makes, on its wide stage. */
+export const roomOf = (
+  scene: Pick<SceneDto, 'stagings'>,
+  reading: Pick<SceneReading, 'motion'>,
+): Room => ({ places: scene.stagings.wide.places, motion: reading.motion });
+
 /** When a newcomer starts to arrive (timeline.ts entryStart). */
 function entryStart(
   steps: readonly SceneStepDto[],
   k: number,
   id: string,
+  room: Room | null = null,
 ): number {
   const newcomers = newcomersAt(steps, k);
   const clearing = newcomers.length > 0 && leaversAt(steps, k).length > 0;
   return (
     steps[k].atMs +
-    (clearing ? CLEAR_FIRST_MS : 0) +
+    Math.max(clearing ? CLEAR_FIRST_MS : 0, roomWait(steps, k, id, room)) +
     Math.max(0, newcomers.indexOf(id)) * STAGGER_MS
   );
 }
+
+/** When a newcomer starts to arrive on a lesson's stage, waiting for its room (or, `room` false, as it did before it waited). */
+export function arrivalOf(
+  scene: Pick<SceneDto, 'steps' | 'stagings'>,
+  k: number,
+  id: string,
+  reading: Pick<SceneReading, 'motion'>,
+  room = true,
+): number {
+  return entryStart(scene.steps, k, id, room ? roomOf(scene, reading) : null);
+}
+
+/** How long a newcomer takes to come up, and a mover to move, at a scene's motion. */
+export const enterMsAt = (motion: number) => atMotion(ENTER_MS, motion);
+export const moveMsAt = (motion: number) => atMotion(MOVE_MS, motion);
+export { EXIT_MS };
 
 /** When a new arrow starts to draw itself (timeline.ts drawStart). */
 function drawStart(
@@ -132,6 +281,7 @@ function drawStart(
   k: number,
   arrow: { from: string; to: string },
   enterMs: number,
+  room: Room | null = null,
 ): number {
   const newcomers = newcomersAt(steps, k);
   const late = Math.max(
@@ -139,7 +289,7 @@ function drawStart(
     newcomers.indexOf(arrow.to),
   );
   return late >= 0
-    ? entryStart(steps, k, newcomers[late]) + enterMs * 0.6
+    ? entryStart(steps, k, newcomers[late], room) + enterMs * 0.6
     : steps[k].atMs;
 }
 
@@ -188,11 +338,13 @@ export function windowsOf(
   scene: Pick<
     SceneDto,
     'steps' | 'things' | 'effects' | 'setting' | 'acting' | 'reading' | 'stage'
-  >,
+  > &
+    Partial<Pick<SceneDto, 'stagings'>>,
   reading: SceneReading = readingOf(scene),
 ): ReadingWindow[] {
   if (!isLesson(scene)) return [];
   const byId = new Map(scene.things.map((t) => [t.id, t]));
+  const room = scene.stagings ? roomOf(scene as SceneDto, reading) : null;
   const enter = atMotion(ENTER_MS, reading.motion);
   const out: ReadingWindow[] = [];
   const { steps } = scene;
@@ -201,7 +353,7 @@ export function windowsOf(
       const thing = byId.get(id);
       const words = thing ? wordsOnArrival(thing) : 0;
       if (!words) continue;
-      const from = entryStart(steps, k, id);
+      const from = entryStart(steps, k, id, room);
       out.push({
         id,
         from,
@@ -213,7 +365,7 @@ export function windowsOf(
     for (const arrow of step.arrows) {
       if (!arrow.label || before.some((one) => one.id === arrow.id)) continue;
       const words = wordsIn(arrow.label);
-      const from = drawStart(steps, k, arrow, enter);
+      const from = drawStart(steps, k, arrow, enter, room);
       out.push({
         id: `arrow:${arrow.id}`,
         from,
@@ -407,9 +559,224 @@ export function oneAccentAtATime(scene: SceneDto): number {
   return changed;
 }
 
+// ── Holding still: no flicker ─────────────────────────────────────────────
+
+/**
+ * The least a stage stays on the screen before it changes again, for a
+ * grown-up; longer at a child's motion (atMotion). Anything quicker reads
+ * as a glitch, not a cut: the eye has not found what changed before it
+ * changes back.
+ */
+export const HOLD_MS = 1200;
+
+/** The hold at a scene's motion. */
+export const holdMsOf = (reading: Pick<SceneReading, 'motion'>): number =>
+  Math.round(atMotion(HOLD_MS, reading.motion));
+
+/** A change of the picture that comes too soon after the one before it. */
+export interface Flicker {
+  /** When the change comes, in the scene's time. */
+  atMs: number;
+  /** How long the picture before it stayed. */
+  heldMs: number;
+  /**
+   * `stage`: a stage that stays less than the hold; `flip`: one that goes
+   * and comes straight back (A, B, A); `camera`: a zoom straight after a
+   * change of the stage or another zoom.
+   */
+  kind: 'stage' | 'flip' | 'camera';
+  /** The step the change is, or the zoom's target. */
+  what: string;
+}
+
+const sameShow = (a: SceneStepDto, b: SceneStepDto) =>
+  a.show.length === b.show.length && a.show.every((id) => b.show.includes(id));
+
+/**
+ * Every change of a scene's picture that comes too soon after the last
+ * (the flicker check, for the rhythm log and the tests): a stage held
+ * less than `hold`, a stage that flips back, a zoom straight after a
+ * change. The last stage holds to the scene's end.
+ */
+export function flickersOf(
+  scene: Pick<SceneDto, 'steps' | 'effects' | 'durationMs'>,
+  hold = HOLD_MS,
+): Flicker[] {
+  const out: Flicker[] = [];
+  const { steps } = scene;
+  for (let k = 1; k < steps.length; k += 1) {
+    const held = steps[k].atMs - steps[k - 1].atMs;
+    if (k >= 2 && sameShow(steps[k - 2], steps[k]) && held < hold * 2)
+      out.push({
+        atMs: steps[k].atMs,
+        heldMs: held,
+        kind: 'flip',
+        what: `step ${k}`,
+      });
+    else if (held < hold)
+      out.push({
+        atMs: steps[k].atMs,
+        heldMs: held,
+        kind: 'stage',
+        what: `step ${k}`,
+      });
+  }
+  const changes = steps.map((step) => step.atMs);
+  const zooms = scene.effects.filter((e) => e.do === 'zoom');
+  for (const zoom of zooms) {
+    const last = [
+      ...changes,
+      ...zooms.filter((z) => z !== zoom).map((z) => z.atMs),
+    ]
+      .filter((at) => at <= zoom.atMs)
+      .reduce((a, b) => Math.max(a, b), -Infinity);
+    const next = changes.find((at) => at > zoom.atMs) ?? Infinity;
+    const held = Math.min(zoom.atMs - last, next - zoom.atMs);
+    if (held < hold)
+      out.push({
+        atMs: zoom.atMs,
+        heldMs: Math.round(held),
+        kind: 'camera',
+        what: zoom.target,
+      });
+  }
+  return out.sort((a, b) => a.atMs - b.atMs);
+}
+
+/** The effects between two times on things not on a stage, left out: they would act on nothing. */
+function dropStrays(
+  scene: SceneDto,
+  from: number,
+  to: number,
+  shown: readonly string[],
+): void {
+  scene.effects = scene.effects.filter(
+    (e) =>
+      e.atMs < from ||
+      e.atMs >= to ||
+      shown.includes(e.target) ||
+      e.do === 'say',
+  );
+}
+
+/**
+ * Every stage held at least `hold` (the flicker fix), by code, never by a
+ * model, over and over until none is quicker:
+ *
+ *  - a stage that goes and comes straight back (A, B, A) is not shown:
+ *    A stays, and what was done to B's own things meanwhile is left out;
+ *  - a stage that only adds to the one before it comes with it, at its
+ *    time: two items of a list arrive together rather than one a blink
+ *    after the other;
+ *  - else the next change waits until this one has held, where it can
+ *    (before the change after it, and in the scene), bringing what
+ *    arrives at it and what is done to them;
+ *  - else the quick stage is not shown: the one before it goes straight
+ *    to the one after.
+ *
+ * A zoom straight after a change, or before one, is left out: the camera
+ * stays. What was done, for the log.
+ */
+export function steadyStages(scene: SceneDto, hold: number): string[] {
+  const notes: string[] = [];
+  let flips = 0;
+  let joined = 0;
+  let waited = 0;
+  let dropped = 0;
+  for (let guard = 0; guard < 400; guard += 1) {
+    const { steps } = scene;
+    const k = steps.findIndex(
+      (step, i) => i + 1 < steps.length && steps[i + 1].atMs - step.atMs < hold,
+    );
+    if (k < 0) break;
+    const now = steps[k];
+    const next = steps[k + 1];
+    const prev = steps[k - 1];
+    if (prev && sameShow(prev, next)) {
+      dropStrays(scene, now.atMs, next.atMs, prev.show);
+      withoutStep(scene, k + 1);
+      withoutStep(scene, k);
+      flips += 1;
+      continue;
+    }
+    // A, then B for a blink, then A again: B is not shown, and A stays.
+    const back = steps[k + 2];
+    if (back && sameShow(now, back) && back.atMs - next.atMs < hold) {
+      dropStrays(scene, next.atMs, back.atMs, now.show);
+      withoutStep(scene, k + 2);
+      withoutStep(scene, k + 1);
+      flips += 1;
+      continue;
+    }
+    if (now.show.every((id) => next.show.includes(id)) && !next.cut) {
+      next.atMs = now.atMs;
+      for (const [id, how] of Object.entries(now.enter)) next.enter[id] ??= how;
+      withoutStep(scene, k);
+      joined += 1;
+      continue;
+    }
+    const want = now.atMs + hold;
+    const after = steps[k + 2]?.atMs ?? scene.durationMs + hold;
+    if (want <= after - hold) {
+      const arriving = new Set(
+        next.show.filter((id) => !now.show.includes(id)),
+      );
+      for (const effect of scene.effects)
+        if (
+          effect.atMs >= next.atMs &&
+          effect.atMs < want &&
+          arriving.has(effect.target)
+        )
+          effect.atMs = want;
+      next.atMs = want;
+      waited += 1;
+      continue;
+    }
+    if (k === 0) {
+      next.atMs = now.atMs;
+      withoutStep(scene, 0);
+    } else {
+      dropStrays(scene, now.atMs, next.atMs, next.show);
+      withoutStep(scene, k);
+    }
+    dropped += 1;
+  }
+  // The camera stays where a zoom would come straight after a change, or
+  // straight before one.
+  const zooms = flickersOf(scene, hold).filter((f) => f.kind === 'camera');
+  if (zooms.length) {
+    const at = new Set(zooms.map((f) => `${f.atMs}:${f.what}`));
+    scene.effects = scene.effects.filter(
+      (e) => e.do !== 'zoom' || !at.has(`${e.atMs}:${e.target}`),
+    );
+  }
+  if (flips)
+    notes.push(
+      `${flips} stage${flips === 1 ? '' : 's'} that flipped straight back not shown`,
+    );
+  if (joined)
+    notes.push(
+      `${joined} quick stage${joined === 1 ? '' : 's'} brought on with the next`,
+    );
+  if (waited)
+    notes.push(
+      `${waited} stage change${waited === 1 ? '' : 's'} held back to hold ${hold}ms`,
+    );
+  if (dropped)
+    notes.push(
+      `${dropped} stage${dropped === 1 ? '' : 's'} too quick to see not shown`,
+    );
+  if (zooms.length)
+    notes.push(
+      `${zooms.length} zoom${zooms.length === 1 ? '' : 's'} straight after a change left out`,
+    );
+  return notes;
+}
+
 /**
  * A lesson's text paced to be read (Ask 3 B), by code: lists two at a
- * time, stage changes after their text is read, accents one at a time.
+ * time, stage changes after their text is read, accents one at a time,
+ * and every stage held long enough to see (steadyStages).
  * The scene is changed where it stands; what was done, for the log.
  */
 export function textPacing(
@@ -434,7 +801,13 @@ export function textPacing(
     notes.push(
       `${spaced} accent${spaced === 1 ? '' : 's'} spaced one at a time`,
     );
-  if ((folded || waited || spaced) && scene.settledMs !== undefined)
+  // No stage quicker than the eye (the flicker fix), whatever made it so.
+  const steadied = steadyStages(scene, holdMsOf(reading));
+  notes.push(...steadied);
+  if (
+    (folded || waited || spaced || steadied.length) &&
+    scene.settledMs !== undefined
+  )
     scene.settledMs = settledOf(scene);
   return notes;
 }

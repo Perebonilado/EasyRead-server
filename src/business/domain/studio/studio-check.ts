@@ -14,6 +14,10 @@
  * never left out. What code cannot put right is a problem, said in plain
  * words, which goes back to the writer once; the maker never sees it.
  */
+import {
+  picturesAgainstLabels,
+  type PictureMismatch,
+} from '../scene-picture-label';
 import { withBuilds } from './studio-build';
 import { narratorsLine, lineOf } from '../scene-screenplay';
 import {
@@ -134,7 +138,9 @@ export interface SheetProblem {
     | 'storyboard'
     | 'kept'
     /** An explainer's words too hard for its audience (studio-plain): rides along on a send-back, never one alone. */
-    | 'plain';
+    | 'plain'
+    /** A drawing whose picture is not what its label says (scene-picture-label): set in type by code; rides along on a send-back, never one alone. */
+    | 'picture';
   /** In plain words, for the writer. */
   message: string;
   /** The beat it is about, from 0; null for the whole scene. */
@@ -3390,6 +3396,19 @@ const asScene = (message: string) =>
     .replace(/the page's own/g, "the scene's own")
     .replace(/\bthe page\b/g, 'the scene');
 
+/** The drawings of an explainer's sheet whose pictures are not what their labels say (scene-picture-label). */
+export function pictureMismatches(sheet: ExplainerSheet): PictureMismatch[] {
+  const drawings = sheet.draft.cast.flatMap((thing) =>
+    thing.kind === 'drawing' && thing.brief
+      ? [{ id: thing.id, name: thing.name ?? thing.id, brief: thing.brief }]
+      : [],
+  );
+  return picturesAgainstLabels(
+    drawings,
+    sheet.draft.beats.map((beat) => beat.say),
+  );
+}
+
 /**
  * An explainer's sheet checked: its storyboard mended as a lesson's page
  * is, what the lesson writer would be sent back for, and its length.
@@ -3442,6 +3461,16 @@ export function checkExplainer(
       message: 'Nothing is ever shown on the stage.',
       beat: null,
       level: 'error',
+    });
+  for (const wrong of pictureMismatches(sheet))
+    problems.push({
+      rule: 'picture',
+      message:
+        wrong.why === 'comparison'
+          ? `The drawing "${wrong.id}" is labelled "${wrong.name}" but draws the comparison the voice makes (${wrong.with}), not ${wrong.name} itself: draw what its label says, or show it as a keyword card.`
+          : `The drawing "${wrong.id}" is labelled "${wrong.name}" but is drawn just as "${wrong.with}" is: draw what its label says, or show it as a keyword card.`,
+      beat: null,
+      level: 'warning',
     });
   const seconds = secondsOf(sheet);
   if (options.planned && seconds > options.planned * LONGEST)
@@ -3571,6 +3600,10 @@ export function repairExplainer(
       return named ? [named[1]] : [];
     }),
   );
+  // A drawing that would not show what its label says (three brake
+  // calipers captioned "Parental support", "Education", "Positive peer
+  // influence") is its label in type: true, and never a puzzle.
+  for (const wrong of pictureMismatches(sheet)) refused.add(wrong.id);
   if (!refused.size) return sheet;
   return {
     ...sheet,

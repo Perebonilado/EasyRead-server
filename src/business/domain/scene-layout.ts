@@ -260,9 +260,11 @@ export function captionLines(
   text: string,
   width: number,
   size: number,
+  /** The smallest it may be set: a caption's least unless said. */
+  least: number = CAPTION_SIZE.min,
 ): { lines: string[]; size: number } {
   const words = text.trim().split(/\s+/).filter(Boolean);
-  for (let s = size; s >= CAPTION_SIZE.min; s -= 2) {
+  for (let s = size; s >= least; s -= 2) {
     const lines: string[] = [];
     let current = '';
     for (const word of words) {
@@ -280,7 +282,7 @@ export function captionLines(
       return { lines, size: s };
   }
   // Still too long at the smallest: two lines, the second cut short.
-  const s = CAPTION_SIZE.min;
+  const s = least;
   const lines: string[] = [];
   let current = '';
   for (const word of words) {
@@ -301,6 +303,82 @@ export function captionLines(
   if (lines.join(' ') !== words.join(' '))
     lines[last] = `${lines[last].trimEnd()}…`;
   return { lines: lines.slice(0, 2), size: s };
+}
+
+/**
+ * Words broken into lines inside a width at one size: as many to a line
+ * as fit, and a word longer than the width broken in two with a hyphen,
+ * its first part as long as fits and never under three letters either
+ * side. Null when that is more than `most` lines.
+ */
+function brokenLines(
+  text: string,
+  width: number,
+  s: number,
+  most: number,
+): string[] | null {
+  const lines: string[] = [];
+  for (const word of text.trim().split(/\s+/).filter(Boolean)) {
+    const last = lines[lines.length - 1];
+    if (last !== undefined && measureText(`${last} ${word}`, s, 600) <= width) {
+      lines[lines.length - 1] = `${last} ${word}`;
+      continue;
+    }
+    if (measureText(word, s, 600) <= width) {
+      lines.push(word);
+      continue;
+    }
+    let cut = word.length - 3;
+    while (cut > 3 && measureText(`${word.slice(0, cut)}-`, s, 600) > width)
+      cut -= 1;
+    lines.push(`${word.slice(0, cut)}-`, word.slice(cut));
+  }
+  return lines.length <= most &&
+    lines.every((l) => measureText(l, s, 600) <= width)
+    ? lines
+    : null;
+}
+
+/**
+ * A drawing's caption set whole: as captionLines sets it, but where that
+ * would cut it short ("Consent and confidentiali…"), in up to three lines
+ * from the caption's least size down to CARD_LEAST, a word too long for
+ * the width broken with a hyphen. The caption's band is as tall as its
+ * lines (fitInSlot), so the drawing gives it the room.
+ */
+export function captionWhole(
+  text: string,
+  width: number,
+  size: number,
+): { lines: string[]; size: number } {
+  const set = captionLines(text, width, size);
+  if (!set.lines.some((line) => line.endsWith('…'))) return set;
+  for (let s = CAPTION_SIZE.min; s >= CARD_LEAST; s -= 2) {
+    const lines = brokenLines(text, width, s, 3);
+    if (lines) return { lines, size: s };
+  }
+  return set;
+}
+
+/** The smallest a card's or a caption's words are set rather than cut short. */
+export const CARD_LEAST = 20;
+
+/**
+ * A card's words set whole in a width: two lines at most, down to
+ * CARD_LEAST, a word too long for the width broken with a hyphen.
+ */
+export function wholeWords(
+  text: string,
+  width: number,
+  size: number,
+): { lines: string[]; size: number } {
+  const fitted = captionLines(text, width, size, CARD_LEAST);
+  if (!fitted.lines.some((line) => line.endsWith('…'))) return fitted;
+  for (let s = size; s >= CARD_LEAST; s -= 2) {
+    const lines = brokenLines(text, width, s, 2);
+    if (lines) return { lines, size: s };
+  }
+  return fitted;
 }
 
 /** The largest size a run of text can be set at to fit a width, up to a ceiling. */
@@ -385,7 +463,7 @@ export function fitInSlot(
       Math.min(CAPTION_SIZE.max, slot.h * 0.11),
     );
     const caption = thing.caption
-      ? captionLines(thing.caption, slot.w * 0.96, base)
+      ? captionWhole(thing.caption, slot.w * 0.96, base)
       : null;
     const band = caption ? caption.lines.length * caption.size * LINE + 14 : 0;
     const art = {
@@ -516,6 +594,11 @@ export function fitInSlot(
       Math.floor((lines.size * slot.h) / tall),
     );
   }
+  // A card's words are never cut short ("Contracepti…"): the whole slot
+  // across, smaller down to CARD_LEAST, and a word too long for it even
+  // so broken where it may be, with a hyphen.
+  if (lines.lines.some((line) => line.endsWith('…')))
+    lines = wholeWords(thing.text, slot.w * 0.94, lines.size);
   const textH = lines.lines.length * lines.size * LINE;
   const padX = thing.style === 'title' ? 0 : lines.size * 0.9;
   const padY = lines.size * padding;

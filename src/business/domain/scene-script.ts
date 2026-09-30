@@ -2917,7 +2917,13 @@ export function listsIn(sentence: string): SpokenItem[][] {
         .replace(/^\s*(?:and|or)\s+/iu, '')
         .split(/\s+(?:and|or)\s+/iu)[0];
       const n = Math.min(3, Math.max(1, wordsOf(next).length));
-      const tail = head.text.trimEnd().split(/\s+/).slice(-n).join(' ');
+      // Never a little word it hangs from ("the risk of STIs" → "STIs").
+      const tail = head.text
+        .trimEnd()
+        .split(/\s+/)
+        .slice(-n)
+        .join(' ')
+        .replace(/^(?:(?:of|to|for|in|on|with|from|by|about)\s+)+/iu, '');
       if (short(tail) && short(next)) {
         firstText = tail;
         firstAt = head.at + head.text.trimEnd().length - tail.length;
@@ -2939,8 +2945,19 @@ export function listsIn(sentence: string): SpokenItem[][] {
         closed = true;
         break;
       }
-      // "memory and cache": the last two joined without a comma.
+      // "memory and cache": the last two joined without a comma. But one
+      // the list goes on past ("Home, Education or Employment, Activities,
+      // … and Safety") is a single item of it, said with its "or".
       const pair = /^([^.;:!?]+?)\s+(?:and|or)\s+([^.;:!?]+)/iu.exec(piece);
+      const goesOn =
+        j + 1 < parts.length &&
+        !/[.;:!?]\s*$/u.test(piece) &&
+        short(parts[j + 1].text.replace(/^\s*(?:and|or)\s+/iu, ''));
+      if (pair && goesOn && short(piece)) {
+        run.push({ text: piece, at: parts[j].at });
+        j += 1;
+        continue;
+      }
       if (pair && short(pair[1]) && short(pair[2])) {
         run.push({ text: pair[1], at: parts[j].at + piece.indexOf(pair[1]) });
         run.push({
@@ -2979,7 +2996,14 @@ const LIST_MOST = 4;
  * item by item as it is said: a card for each, beside the one thing the
  * stage was showing, until the stage next changes. What was on the stage
  * comes back where the page goes on to point at something the list took
- * the place of.
+ * the place of, and then the list is done: its cards never come back
+ * after it, so the stage never flips between the two (the HEADSSS
+ * checklist and its own items as cards, back and forth every half
+ * second).
+ *
+ * A list is already on the stage when most of its items are things there
+ * or the named parts of one (a checklist's rows, a diagram's labels), or
+ * the page points at them one by one: it is never shown twice.
  */
 function showSpokenLists(
   beats: SceneBeat[],
@@ -2989,9 +3013,15 @@ function showSpokenLists(
 ): void {
   const before = (a: SceneStep, beat: number, word: number) =>
     a.at.beat < beat || (a.at.beat === beat && a.word <= word);
+  const later = (a: SceneStep, b: SceneStep) =>
+    a.at.beat - b.at.beat || a.word - b.word;
+  // The stage as it stands at a word: the latest change at or before it,
+  // in the order of the words (steps are added out of order below).
   const stageAt = (beat: number, word: number) =>
-    [...steps].reverse().find((step) => step.stage && before(step, beat, word))
-      ?.stage ?? null;
+    steps
+      .filter((step) => step.stage && before(step, beat, word))
+      .sort(later)
+      .pop()?.stage ?? null;
   const byId = new Map(cast.map((thing) => [thing.id, thing]));
   const nameOf = (id: string) => {
     const thing = byId.get(id);
@@ -2999,21 +3029,35 @@ function showSpokenLists(
     if (thing.kind === 'words') return thing.text;
     return 'name' in thing && typeof thing.name === 'string' ? thing.name : id;
   };
+  /** A thing's name and the names of its parts: what it shows in words. */
+  const namesOf = (id: string) => {
+    const thing = byId.get(id);
+    return thing ? [nameOf(id), ...partNames(thing)] : [];
+  };
   const keys = (text: string) =>
     wordsOf(text.toLowerCase())
       .map((word) => word.replace(/[^\p{L}\p{N}]/gu, ''))
       .filter((word) => word.length >= 3);
   const taken = new Set(cast.map((thing) => thing.id));
+  /** The ids of the cards each list brought on, in order. */
+  const runs: string[][] = [];
   beats.forEach((beat, k) => {
     for (const list of listsIn(beat.say)) {
       const items = list.slice(0, 6);
-      // Shown already: the writer put most of them on the stage by now.
+      // Shown already: the writer put most of them on the stage by now,
+      // as things or as the parts of one, or points at them.
       const shown = steps
         .filter((step) => step.stage && step.at.beat <= k + 1)
-        .flatMap((step) => step.stage!.show.map(nameOf));
+        .flatMap((step) => step.stage!.show.flatMap(namesOf));
+      const pointed = steps
+        .filter((step) => step.at.beat === k)
+        .flatMap((step) =>
+          step.effects.flatMap((e) => (e.part ? [e.part] : [])),
+        );
+      const named = [...shown, ...pointed];
       const onStage = items.filter((item) =>
         keys(item.text).some((key) =>
-          shown.some((name) => keys(name).includes(key)),
+          named.some((name) => keys(name).includes(key)),
         ),
       ).length;
       if (onStage * 2 >= items.length) continue;
@@ -3021,9 +3065,19 @@ function showSpokenLists(
       if (stage?.show.some((id) => ROOMY.has(byId.get(id)?.kind ?? '')))
         continue;
       // What the list is about stays, two things at most; the rest make
-      // room.
+      // room. What the page does something to while the list is said
+      // stays first; where that is more than two things, the page is
+      // using the stage for this sentence, and the list is left to it.
+      const acted = new Set(
+        steps
+          .filter((step) => step.at.beat === k && step.word >= items[0].word)
+          .flatMap((step) => step.effects.map((e) => e.target))
+          .filter((id) => stage?.show.includes(id)),
+      );
+      if (acted.size > 2) continue;
       const base = (stage?.show ?? [])
         .filter((id) => !id.startsWith('item-'))
+        .sort((a, b) => Number(acted.has(b)) - Number(acted.has(a)))
         .slice(0, 2);
       const cards = items.map((item) => {
         let id = `item-${groupId(item.text).slice(0, 24)}`;
@@ -3041,6 +3095,7 @@ function showSpokenLists(
         byId.set(id, card);
         return { id, word: item.word, text: item.text };
       });
+      runs.push(cards.map((card) => card.id));
       cards.forEach((card, n) => {
         const upTo = cards
           .slice(0, n + 1)
@@ -3063,26 +3118,47 @@ function showSpokenLists(
       );
     }
   });
-  steps.sort((a, b) => a.at.beat - b.at.beat || a.word - b.word);
+  steps.sort(later);
   // Where the page goes on to point at something a list took the place
-  // of, what was on the stage comes back.
+  // of, what was on the stage comes back, and that list is over: the
+  // cards of it still to come are left out rather than swapped back in.
+  const runOf = (stage: SceneStage) =>
+    runs.find((run) => stage.show.some((id) => run.includes(id))) ?? null;
+  const over = new Set<string[]>();
   let current: SceneStage | null = null;
   let lastWriters: SceneStage | null = null;
-  for (const step of steps) {
+  for (let i = 0; i < steps.length; i += 1) {
+    const step = steps[i];
     if (step.stage) {
-      current = step.stage;
-      if (!step.stage.show.some((id) => id.startsWith('item-')))
-        lastWriters = step.stage;
-      continue;
+      const run = runOf(step.stage);
+      if (run && over.has(run)) {
+        if (step.effects.length) step.stage = null;
+        else {
+          steps.splice(i, 1);
+          i -= 1;
+          continue;
+        }
+      } else {
+        current = step.stage;
+        if (!run) lastWriters = step.stage;
+        continue;
+      }
     }
     const missing = step.effects.some(
       (effect) => current && !current.show.includes(effect.target),
     );
     if (missing && lastWriters) {
+      const run = current ? runOf(current) : null;
+      if (run) over.add(run);
       step.stage = { ...lastWriters };
       current = lastWriters;
     }
   }
+  // A list left out whole takes its cards with it.
+  const used = new Set(steps.flatMap((step) => step.stage?.show ?? []));
+  for (let i = cast.length - 1; i >= 0; i -= 1)
+    if (cast[i].id.startsWith('item-') && !used.has(cast[i].id))
+      cast.splice(i, 1);
 }
 
 /** Layouts read in order, where an arrow should run forward: left to right, or down. */

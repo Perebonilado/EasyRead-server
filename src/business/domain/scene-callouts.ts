@@ -61,7 +61,7 @@ const DEFINITIONS = new Set([
 /** Shapes a label's words are drawn with, and the words themselves. */
 const WORDS = new Set(['text', 'tspan', 'textpath']);
 
-type Matrix = [number, number, number, number, number, number];
+export type Matrix = [number, number, number, number, number, number];
 const IDENTITY: Matrix = [1, 0, 0, 1, 0, 0];
 
 /** m × n: n applied first. */
@@ -119,7 +119,7 @@ export function parseTransform(value: string | undefined): Matrix | null {
 }
 
 /** The transform from a node's own units to the drawing's: its own and every ancestor's, to the root. */
-function toRoot(node: Element, root: Element): Matrix | null {
+export function toRoot(node: Element, root: Element): Matrix | null {
   let m = IDENTITY;
   for (
     let at: Element | null = node;

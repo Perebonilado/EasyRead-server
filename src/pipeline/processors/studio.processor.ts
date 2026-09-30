@@ -2440,7 +2440,12 @@ export class StudioProcessor {
     let plain = plainOf(first.value);
     let sheet = plain.sheet;
     let problems: SheetProblem[] = checkExplainer(sheet, options).problems;
-    const reasons = rideAlong(sentBackFor(problems), plain.problems);
+    // A picture that is not what its label says rides along too; the
+    // make sets it in type whatever comes back (repairExplainer).
+    const reasons = rideAlong(sentBackFor(problems), [
+      ...plain.problems,
+      ...problems.filter((p) => p.rule === 'picture'),
+    ]);
     if (reasons.length) {
       this.logger.log(
         `studio ${episode.id} s${k + 1}: goes back: ${reasons.map((p) => p.message).join(' ')}`,

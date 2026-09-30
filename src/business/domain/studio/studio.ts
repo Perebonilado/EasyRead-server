@@ -910,6 +910,12 @@ export interface OutlineScene {
   teach: string | null;
   /** An explainer's scene: its small ideas, each with what to show for it. */
   points: string[];
+  /**
+   * An explainer's scene that goes inside a part of what the scene before
+   * ended on ("nucleus"): the film zooms into it (Ask 4 D). Code decides,
+   * and dissolves where it cannot. Absent or null, none said.
+   */
+  into?: string | null;
 }
 
 export interface StudioOutline {
@@ -968,6 +974,7 @@ export function outlineOf(raw: unknown): StudioOutline {
               .map((p) => text(p, 240))
               .filter(Boolean)
               .slice(0, 6),
+            ...(textOrNull(s.into, 60) ? { into: textOrNull(s.into, 60) } : {}),
           },
         ];
       }),

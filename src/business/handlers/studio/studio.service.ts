@@ -72,7 +72,7 @@ import {
   noteOf,
   type DrawingFailure,
 } from '../../domain/drawing-failures';
-import { joinOf } from '../../domain/studio/studio-edit';
+import { joinFor } from '../../domain/studio/studio-edit';
 import { storyBibleFor } from '../../domain/studio/studio-stage';
 import {
   describeForProducer,
@@ -1881,14 +1881,25 @@ export class StudioService {
       madeWith: MADE_WITH,
       ...themeOfShow(show),
       ...(score ? { score } : {}),
-      scenes: made.map((s, i) => ({
-        id: s.id,
-        title: s.sheet?.title ?? `Scene ${s.position + 1}`,
-        durationMs: s.durationMs!,
-        transition: s.sheet?.transition ?? 'cut',
-        // From the scene the film shows before it; the first comes up from black.
-        join: i ? joinOf(made[i - 1].sheet, s.sheet) : 'dip',
-      })),
+      scenes: made.map((s, i) => {
+        // From the scene the film shows before it, by code (an explainer's
+        // may carry a thing across, go into a part or push on); the first
+        // comes up from black.
+        const side = (one: StudioSceneRecord) => ({
+          sheet: one.sheet,
+          scene: episode.outline?.scenes[one.position] ?? null,
+        });
+        const joined = i
+          ? joinFor(side(made[i - 1]), side(s), show.bible?.pictures ?? [])
+          : { join: 'dip' as const };
+        return {
+          id: s.id,
+          title: s.sheet?.title ?? `Scene ${s.position + 1}`,
+          durationMs: s.durationMs!,
+          transition: s.sheet?.transition ?? 'cut',
+          ...joined,
+        };
+      }),
     };
   }
 

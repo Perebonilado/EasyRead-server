@@ -184,6 +184,7 @@ import {
 import { rasterise } from '../../business/domain/scene-raster';
 import { renderStill } from '../../business/domain/scene-still';
 import { showTheme } from '../../business/domain/studio/studio-look';
+import { studioReading } from '../../business/domain/studio/studio-motion';
 
 /** A kit's spec for a character: a person's, an animal's, or a creature's. */
 type KitSpec = FigureSpec | AnimalSpec | CreatureSpec;
@@ -2294,8 +2295,13 @@ export class StudioProcessor {
             step: (step) => this.studio.updateScene(row.id, { step }),
             // An explainer's look, for its still: the player shows the
             // show's look now, whatever it was when this was made.
+            // And how its text is read and its picture moves, for whom
+            // it is made (studio-motion): paced by code as it is composed.
             ...(row.sheet.kind === 'explainer'
-              ? { theme: showTheme(show.brief, bible) ?? undefined }
+              ? {
+                  theme: showTheme(show.brief, bible) ?? undefined,
+                  reading: studioReading(show.brief),
+                }
               : {}),
           });
     if (made.fit === 'poor') throw new Error(made.reason);

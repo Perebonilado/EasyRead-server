@@ -411,6 +411,7 @@ export const studioOutlineSchema = z.object({
       seconds: z.number(),
       teach: z.string().nullable(),
       points: z.array(z.string()),
+      into: z.string().nullable(),
     }),
   ),
 });

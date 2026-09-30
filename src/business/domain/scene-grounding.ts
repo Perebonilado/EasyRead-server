@@ -196,11 +196,7 @@ export function keepGrounded(input: GroundInput): string[] {
       if (a.x === b.x && a.y === b.y && a.w === b.w && a.h === b.h) continue;
       const stations = [input.stations[n - 1]?.[id], input.stations[n]?.[id]];
       // Up something, or on a seat: a climb, a leap or sitting down, not a walk.
-      if (
-        stations.some(
-          (s) => s && (/^(?:up|held):/.test(s) || restingAt(s)),
-        )
-      )
+      if (stations.some((s) => s && (/^(?:up|held):/.test(s) || restingAt(s))))
         continue;
       const ka = k(a.y + a.h);
       const kb = k(b.y + b.h);

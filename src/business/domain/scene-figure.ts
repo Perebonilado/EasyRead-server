@@ -47,7 +47,13 @@ import {
   type RigVersion,
 } from './scene-dangles';
 
-export const FIGURE_AGES = ['infant', 'child', 'teen', 'adult', 'elder'] as const;
+export const FIGURE_AGES = [
+  'child',
+  'teen',
+  'adult',
+  'elder',
+  'infant',
+] as const;
 export type FigureAge = (typeof FIGURE_AGES)[number];
 
 export const FIGURE_BUILDS = ['slim', 'average', 'broad'] as const;
@@ -2732,17 +2738,22 @@ export function layersOf(
     }
     // Sandals: the foot, and straps over it; bare feet, the foot alone.
     // The foot stays flat on the ground however the leg above it turns.
-    const foot = spec.age === 'infant'
-      ? []
-      : spec.extras.includes('sandals')
-      ? [
-          `<ellipse cx="${s * 17}" cy="-6" rx="15" ry="7" ${inked(skin)}/>`,
-          line(`M${s * 17 - 11},-5 L${s * 17 + 11},-5`, '#6b4a2f', 3),
-          line(`M${s * 17 - 4},-11 L${s * 17 - 4},-1`, '#6b4a2f', 3),
-        ]
-      : spec.extras.includes('bare feet')
-        ? [`<ellipse cx="${s * 16}" cy="-5" rx="13" ry="6" ${inked(skin)}/>`]
-        : [`<ellipse cx="${s * 17}" cy="-6" rx="15" ry="7" ${inked(SHOE)}/>`];
+    const foot =
+      spec.age === 'infant'
+        ? []
+        : spec.extras.includes('sandals')
+          ? [
+              `<ellipse cx="${s * 17}" cy="-6" rx="15" ry="7" ${inked(skin)}/>`,
+              line(`M${s * 17 - 11},-5 L${s * 17 + 11},-5`, '#6b4a2f', 3),
+              line(`M${s * 17 - 4},-11 L${s * 17 - 4},-1`, '#6b4a2f', 3),
+            ]
+          : spec.extras.includes('bare feet')
+            ? [
+                `<ellipse cx="${s * 16}" cy="-5" rx="13" ry="6" ${inked(skin)}/>`,
+              ]
+            : [
+                `<ellipse cx="${s * 17}" cy="-6" rx="15" ry="7" ${inked(SHOE)}/>`,
+              ];
     const shin = [
       piece(kneeY, -FEET),
       `<g class="foot" style="transform-origin:${s * 15}px ${-FEET}px">${foot.join('')}</g>`,

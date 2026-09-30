@@ -148,7 +148,8 @@ export function spaceOut(
         ? leastAcross(one, other, false)
         : (one.half + other.half) * 0.6;
       const stop = other.x - dir * room;
-      if ((stop - most) * dir < 0) most = (stop - one.x) * dir < 0 ? one.x : stop;
+      if ((stop - most) * dir < 0)
+        most = (stop - one.x) * dir < 0 ? one.x : stop;
     }
     return most;
   };

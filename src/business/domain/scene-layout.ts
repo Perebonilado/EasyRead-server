@@ -1404,24 +1404,32 @@ export function layoutStations(input: {
       const widest = Math.max(...bodies.map((b) => b.size.w));
       // The things on the floor, as bodies no one is moved into and no
       // one is moved past (studio-space-plan).
+      // Only things small enough to stand beside (a manger, a stool): one
+      // at a long bed or a table stands before it, as their spot has them.
       const things: Spaced[] =
         depthed && unit
-          ? (input.furniture ?? []).map((f, i) => {
-              const k = pinholeK(f.feet, floor, depthed.eye);
-              return {
-                id: `#furniture-${i}`,
-                x: f.x,
-                half: f.w / 2,
-                d: depthAtFeet(f.feet, floor, depthed.eye, depthed.bottom),
-                perM: unit * k * KIT_PER_METRE,
-                free: false,
-              };
-            })
+          ? (input.furniture ?? [])
+              .filter((f) => f.w <= W * SPACED_THING_MOST)
+              .map((f, i) => {
+                const k = pinholeK(f.feet, floor, depthed.eye);
+                return {
+                  id: `#furniture-${i}`,
+                  x: f.x,
+                  half: f.w / 2,
+                  d: depthAtFeet(f.feet, floor, depthed.eye, depthed.bottom),
+                  perM: unit * k * KIT_PER_METRE,
+                  free: false,
+                };
+              })
           : [];
-      const spaced = spaceOut([...bodies, ...things], input.near?.[stepAt] ?? [], {
-        least: margin + widest * 0.3,
-        most: W - margin - widest * 0.3,
-      });
+      const spaced = spaceOut(
+        [...bodies, ...things],
+        input.near?.[stepAt] ?? [],
+        {
+          least: margin + widest * 0.3,
+          most: W - margin - widest * 0.3,
+        },
+      );
       for (const body of bodies) {
         const to = spaced.get(body.id);
         if (to === undefined || Math.abs(to - body.x) < 0.5) continue;
@@ -1442,7 +1450,8 @@ export function layoutStations(input: {
       const k = holder.h / Math.max(1, sizeOf(by)?.h ?? holder.h);
       const w = size.w * k;
       const h = size.h * k;
-      const long = (standsOf(id)?.length ?? size.h / (unit || 1)) * (unit || 1) * k;
+      const long =
+        (standsOf(id)?.length ?? size.h / (unit || 1)) * (unit || 1) * k;
       const middle = holder.x + holder.w / 2;
       // The pivot (their feet) at the holder's forearms; lying, the head
       // goes a body's length to its left, so the feet are half of it right.
@@ -1645,6 +1654,9 @@ export const SIDE_BY_SIDE = 0.45;
 export const ROW_STEP = 0.24;
 const ROW_COST = 0.3;
 
+/** The widest thing on the floor people are kept beside as they are spaced, as a share of the stage's width. */
+const SPACED_THING_MOST = 0.3;
+
 /** A solid thing on the floor, as people keep out of it: its middle and width across, its feet's y, and how far back of them it reaches. */
 export interface Furniture {
   x: number;
@@ -1662,11 +1674,7 @@ export const FOOTPRINT_SHARE = 0.12;
 export const FOOTPRINT_INSET = 0.08;
 
 /** A thing's footprint on the floor, from its box and its feet on a stage `H` high. */
-export function furnitureOf(
-  box: Rect,
-  feet: number,
-  H: number,
-): Furniture {
+export function furnitureOf(box: Rect, feet: number, H: number): Furniture {
   return {
     x: box.x + box.w / 2,
     w: box.w * (1 - 2 * FOOTPRINT_INSET),

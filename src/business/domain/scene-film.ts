@@ -7,6 +7,7 @@
 import type {
   SceneDto,
   SceneEffectDto,
+  SceneFeatureDto,
   ScenePlaceDto,
   ScenePropDto,
   SceneStepDto,
@@ -86,8 +87,7 @@ export const walkBetween = (
   to: Pick<ScenePlaceDto, 'x' | 'w' | 'h' | 'via'>,
   W: number,
   pace: WalkPace = WALK_PACE,
-) =>
-  walkMs(pathLength(from, to, W), W, pace);
+) => walkMs(pathLength(from, to, W), W, pace);
 
 /** How far a walk goes on the floor: straight, or leg by leg through its via. */
 export function pathLength(
@@ -1577,6 +1577,8 @@ export interface ThingsOnStage {
     id: string,
   ) => Extract<SceneThingDto, { kind: 'drawing' }> | undefined;
   feature?: (id: string) => Box | undefined;
+  /** The things standing on the floor, which what is set down keeps out of (obstaclesOf). Absent, none. */
+  obstacles?: readonly Obstacle[];
 }
 
 /** Who has a thing at `t`, and in what; else whom it rests by. From whoever held it first, as what is done with it hands it on or puts it down. Gone (worn, eaten) or in the air, neither. */
@@ -1827,5 +1829,71 @@ export function thingBoxAt(
   const mean = others.length
     ? others.reduce((a, b) => a + b, 0) / others.length
     : mid + 1;
-  return restingBox(drawn, at, mean >= mid ? 1 : -1);
+  const toward: -1 | 1 = mean >= mid ? 1 : -1;
+  // Never set down inside or behind a thing standing on the floor (a
+  // manger, a stool): the other side of them, where that is clear.
+  const blocked = (side: -1 | 1) =>
+    restBlocked(restingBox(drawn, at, side), stage.obstacles ?? []);
+  return restingBox(
+    drawn,
+    at,
+    blocked(toward) && !blocked(-toward as -1 | 1)
+      ? (-toward as -1 | 1)
+      : toward,
+  );
 }
+
+/** A thing standing on the floor, as what is set down keeps out of it: across it, and its feet's y. */
+export interface Obstacle {
+  x0: number;
+  x1: number;
+  feet: number;
+}
+
+/** A thing set down this far back of what stands before it is behind it, as a share of its box: hidden among its legs, or over them. */
+const REST_BEHIND = 0.5;
+
+/**
+ * Whether something set down at `box` (its base at its bottom) is inside
+ * or behind a thing standing on the floor (a manger, a stool): its middle
+ * within the thing across, and its base on the floor at or back of the
+ * thing's feet. Drawn with the things at rest, it would float over the
+ * thing's legs (studio-space-plan). The player's restBlocked.
+ */
+export function restBlocked(box: Box, obstacles: readonly Obstacle[]): boolean {
+  const mid = box.x + box.w / 2;
+  const base = box.y + box.h;
+  return obstacles.some(
+    (o) =>
+      mid > o.x0 - box.w * REST_BEHIND &&
+      mid < o.x1 + box.w * REST_BEHIND &&
+      base <= o.feet + box.h * 0.25,
+  );
+}
+
+/** A scene's features that stand on the floor as obstacles to what is set down: those with feet, not ways through, a wall or a window. */
+export function obstaclesOf(
+  features: readonly Pick<SceneFeatureDto, 'kind' | 'at' | 'feet'>[],
+  staging: 'box' | 'wide' = 'wide',
+): Obstacle[] {
+  return features.flatMap((f) => {
+    const box = f.at?.[staging];
+    const feet = f.feet?.[staging];
+    if (!box || feet === undefined || OPEN_KINDS.has(f.kind)) return [];
+    const inset = box.w * 0.08;
+    return [{ x0: box.x + inset, x1: box.x + box.w - inset, feet }];
+  });
+}
+/** Features one sees past, or goes through: nothing set down is inside them. */
+const OPEN_KINDS: ReadonlySet<string> = new Set([
+  'door',
+  'gate',
+  'window',
+  'wall',
+  'fence',
+  'switch',
+  'tree',
+  'steps',
+  'stairs',
+  'ladder',
+]);

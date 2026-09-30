@@ -17,13 +17,8 @@ import {
   type FigureSpec,
 } from '../scene-figure';
 import { VIEW_RIG } from '../scene-figure-views';
-import { pathPlace } from '../scene-film';
-import {
-  furnitureOf,
-  hiddenBy,
-  spreadDepth,
-  standsIn,
-} from '../scene-layout';
+import { obstaclesOf, pathPlace, restBlocked } from '../scene-film';
+import { furnitureOf, hiddenBy, spreadDepth, standsIn } from '../scene-layout';
 import { walkRound } from '../scene-paths';
 import { figureDrawing } from '../scene-sheet';
 import { spaceFaults, spaceCounts, bodiesAt } from '../scene-space';
@@ -44,10 +39,15 @@ jest.setTimeout(120_000);
 
 const bible = NATIVITY_FILM.show.bible;
 const made = [0, 1, 2, 3, 4].map(nativityMade);
-const total = (scenes: readonly SceneDto[]) => {
-  const out = { through: 0, hidden: 0, outside: 0, stand: 0 };
+const total = (
+  scenes: readonly SceneDto[],
+  how: Parameters<typeof spaceFaults>[1] = {},
+) => {
+  const out = { through: 0, hidden: 0, outside: 0, stand: 0, prop: 0 };
   for (const scene of scenes)
-    for (const [kind, n] of Object.entries(spaceCounts(spaceFaults(scene))))
+    for (const [kind, n] of Object.entries(
+      spaceCounts(spaceFaults(scene, how)),
+    ))
       out[kind as keyof typeof out] += n;
   return out;
 };
@@ -58,8 +58,23 @@ beforeAll(async () => {
 });
 
 describe('the film as made (the faults are there)', () => {
-  it('walks Joseph through Mary, lays Jesus out past the manger, and stands people in the manger and the stool', () => {
-    expect(total(made)).toEqual({ through: 2, hidden: 1, outside: 2, stand: 6 });
+  it('walks Joseph through Mary, lays Jesus out past the manger, stands people in the manger and the stool, and sets the lamp down among its legs', () => {
+    // As the player set things down then: toward the others, whatever stood there.
+    expect(total(made, { restAside: false })).toEqual({
+      through: 2,
+      hidden: 1,
+      outside: 2,
+      stand: 6,
+      prop: 5,
+    });
+    expect(
+      spaceFaults(made[4], { restAside: false })
+        .filter((f) => f.kind === 'prop')
+        .map((f) => [f.a, f.b]),
+    ).toEqual([
+      ['lamp', 'mary'],
+      ['lamp', 'mary'],
+    ]);
     const five = spaceFaults(made[4]);
     expect(five.filter((f) => f.kind === 'outside').map((f) => f.a)).toEqual([
       'jesus',
@@ -79,12 +94,13 @@ describe('the film as made (the faults are there)', () => {
 });
 
 describe('the film composed now', () => {
-  it('has no walk through anyone, no face melted behind another, no one out of the manger or in a thing', () => {
+  it('has no walk through anyone, no face melted behind another, no one out of the manger or in a thing, nothing set down among its legs', () => {
     expect(total(film.map((one) => one.scene))).toEqual({
       through: 0,
       hidden: 0,
       outside: 0,
       stand: 0,
+      prop: 0,
     });
   });
 
@@ -130,7 +146,9 @@ describe('the film composed now', () => {
       Object.values(step).some((p) => p.via?.length),
     );
     expect(walked).toBe(true);
-    expect(film[0].staging.join('\n')).toMatch(/Joseph walks (?:before|behind)/);
+    expect(film[0].staging.join('\n')).toMatch(
+      /Joseph walks (?:before|behind)/,
+    );
   });
 });
 
@@ -196,6 +214,33 @@ describe('the parts', () => {
     expect(hiddenBy(behind, 820, stool)).toBe(0);
   });
 
+  it('sets a thing down beside a manger, never among its legs', () => {
+    const [manger] = obstaclesOf([
+      {
+        kind: 'drawn',
+        at: {
+          box: { x: 0, y: 0, w: 1, h: 1 },
+          wide: { x: 600, y: 600, w: 300, h: 240 },
+        },
+        feet: { box: 1, wide: 840 },
+      },
+    ]);
+    expect(
+      obstaclesOf([
+        {
+          kind: 'door',
+          at: { box: manger as never, wide: { x: 0, y: 0, w: 1, h: 1 } },
+          feet: { box: 1, wide: 1 },
+        },
+      ]),
+    ).toEqual([]);
+    // Behind it (its base back of the manger's feet): among its legs.
+    expect(restBlocked({ x: 700, y: 760, w: 60, h: 40 }, [manger])).toBe(true);
+    // Before it, or beside it: clear.
+    expect(restBlocked({ x: 700, y: 830, w: 60, h: 40 }, [manger])).toBe(false);
+    expect(restBlocked({ x: 500, y: 760, w: 60, h: 40 }, [manger])).toBe(false);
+  });
+
   it('brings two together without passing anyone between them', () => {
     const at = spaceOut(
       [
@@ -255,7 +300,16 @@ describe('the parts', () => {
       { a: place(100), b: place(700, 0.1) },
       { a: place(1300), b: place(700, 0.1) },
     ];
-    expect(walkRound({ W: 1600, steps, places: clear, walks: () => true, furniture: [], atDepth })).toEqual([]);
+    expect(
+      walkRound({
+        W: 1600,
+        steps,
+        places: clear,
+        walks: () => true,
+        furniture: [],
+        atDepth,
+      }),
+    ).toEqual([]);
     expect(clear[1].a.via).toBeUndefined();
   });
 

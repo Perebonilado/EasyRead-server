@@ -76,9 +76,7 @@ export const NATIVITY_FILM: NativityFilm = JSON.parse(
 
 /** Scene `n` (from 0) as it was made and watched: its pictures left out. */
 export const nativityMade = (n: number): SceneDto =>
-  JSON.parse(
-    readFileSync(join(HERE, `made-s${n}.json`), 'utf8'),
-  ) as SceneDto;
+  JSON.parse(readFileSync(join(HERE, `made-s${n}.json`), 'utf8')) as SceneDto;
 
 /** One scene composed now, and its script. */
 export interface ComposedNativity {

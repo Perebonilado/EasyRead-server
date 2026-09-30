@@ -13,7 +13,10 @@
  *    head or their feet out past its sides, or hanging above it;
  *  - stand: someone standing off the floor (floating above its back edge
  *    or below its front), or inside a thing that stands on it (a stool, a
- *    manger), rather than beside it or behind it.
+ *    manger), rather than beside it or behind it;
+ *  - prop: a thing set down off the floor, or inside or behind a thing
+ *    standing on it, where it floats over the thing's legs (a lamp set
+ *    down among a manger's). One held is at the hand the player moves.
  *
  * Positions follow the player (timeline.ts): each step's place, a walk
  * between two eased along its path (round a body, where it bends), a step
@@ -26,9 +29,18 @@ import type {
   SceneStepDto,
 } from '../../contracts';
 import { SAME_ROW_D, BODY_SHARE } from './scene-spacing';
-import { pathPlace, walkBetween } from './scene-film';
+import {
+  handsAt,
+  obstaclesOf,
+  pathPlace,
+  restBlocked,
+  thingBoxAt,
+  walkBetween,
+  type ThingsOnStage,
+} from './scene-film';
 
-export type SpaceFaultKind = 'through' | 'hidden' | 'outside' | 'stand';
+export type SpaceFaultKind =
+  'through' | 'hidden' | 'outside' | 'stand' | 'prop';
 
 export interface SpaceFault {
   kind: SpaceFaultKind;
@@ -40,7 +52,7 @@ export interface SpaceFault {
   b: string | null;
   /** How bad, 0 to 1: the share of a body in another, of a face covered, of a body out of its thing, or of the height off the floor. */
   amount: number;
-  /** For a stand: floating, or in a thing. */
+  /** For a stand or a thing set down: floating, or in (or behind) a thing. */
   why?: 'floating' | 'in-thing';
 }
 
@@ -161,7 +173,10 @@ export function bodiesAt(scene: SceneDto, t: number): BodyAt[] {
           : Math.min(2.2, Math.max(1, step.hurry?.[id] ?? 1));
       const ms = walkBetween(from, target, W, scene.walk) / pace;
       const p = (t - step.atMs) / ms;
-      if (p < 1 && Math.abs(from.x - target.x) + Math.abs(from.h - target.h) > 1) {
+      if (
+        p < 1 &&
+        Math.abs(from.x - target.x) + Math.abs(from.h - target.h) > 1
+      ) {
         place = pathPlace(from, target, Math.max(0, p), W);
         moving = p > 0;
       }
@@ -201,14 +216,15 @@ export function bodiesAt(scene: SceneDto, t: number): BodyAt[] {
         );
       most = Math.min(
         most,
-        dir > 0
-          ? Math.max(0, W - (place.x + place.w))
-          : Math.max(0, place.x),
+        dir > 0 ? Math.max(0, W - (place.x + place.w)) : Math.max(0, place.x),
       );
       // Never into anyone on the way in their row (timeline.ts roomAhead).
       const mid = place.x + place.w / 2;
       for (const [other, { place: them }] of placeOf) {
-        if (other === id || Math.abs((them.d ?? 0.5) - (place.d ?? 0.5)) >= SAME_ROW_D)
+        if (
+          other === id ||
+          Math.abs((them.d ?? 0.5) - (place.d ?? 0.5)) >= SAME_ROW_D
+        )
           continue;
         const ahead = (them.x + them.w / 2 - mid) * dir;
         if (ahead > 0)
@@ -311,17 +327,32 @@ function floorOf(scene: SceneDto): [number, number] | null {
 }
 
 /** Whether someone is at a feature on purpose at `t`: sitting on it, lying on it, leaning on it, using it. */
-function usingAt(scene: SceneDto, id: string, feature: string, t: number): boolean {
+function usingAt(
+  scene: SceneDto,
+  id: string,
+  feature: string,
+  t: number,
+): boolean {
   return (scene.acting?.[id]?.interact ?? []).some(
     (one) =>
       one.feature === feature &&
       t >= one.at - 300 &&
-      t <= one.at + (one.steps ?? []).reduce((n, s) => Math.max(n, s[1] + s[2] - one.at), 0) + 300,
+      t <=
+        one.at +
+          (one.steps ?? []).reduce(
+            (n, s) => Math.max(n, s[1] + s[2] - one.at),
+            0,
+          ) +
+          300,
   );
 }
 
 /** The space check (the module's doc): every fault, each once per pair per step, at its worst. */
-export function spaceFaults(scene: SceneDto): SpaceFault[] {
+export function spaceFaults(
+  scene: SceneDto,
+  /** How the player sets a thing down: aside of a thing on the floor (now), or toward the others whatever is there (as films were made before). */
+  how: { restAside?: boolean } = {},
+): SpaceFault[] {
   if (!scene.steps.length || !scene.setting?.full) return [];
   const worst = new Map<string, SpaceFault>();
   const note = (fault: SpaceFault) => {
@@ -399,7 +430,12 @@ export function spaceFaults(scene: SceneDto): SpaceFault[] {
         const [fx, fy] = body.lying.foot;
         const on = features.find((f) => {
           const box = f.at.wide;
-          return fx >= box.x && fx <= box.x + box.w && fy >= box.y - H * 0.05 && fy <= box.y + box.h;
+          return (
+            fx >= box.x &&
+            fx <= box.x + box.w &&
+            fy >= box.y - H * 0.05 &&
+            fy <= box.y + box.h
+          );
         });
         if (on) {
           const box = on.at.wide;
@@ -429,7 +465,11 @@ export function spaceFaults(scene: SceneDto): SpaceFault[] {
       if (body.moving || body.sitting) continue;
       // Standing: on the floor, between its back and front edges.
       if (floor) {
-        const off = Math.max(0, floor[0] - body.feet, body.feet - (floor[1] + H * 0.01));
+        const off = Math.max(
+          0,
+          floor[0] - body.feet,
+          body.feet - (floor[1] + H * 0.01),
+        );
         if (off > H * 0.02)
           note({
             kind: 'stand',
@@ -443,13 +483,16 @@ export function spaceFaults(scene: SceneDto): SpaceFault[] {
       }
       // And never inside a thing standing on the floor.
       for (const f of features) {
-        if (!SOLID_KINDS.has(f.kind) || usingAt(scene, body.id, f.id, t)) continue;
+        if (!SOLID_KINDS.has(f.kind) || usingAt(scene, body.id, f.id, t))
+          continue;
         const box = f.at.wide;
         const feet = f.feet?.wide ?? box.y + box.h;
         // Its footprint: across its width, and a little way back from its feet.
         const deep = Math.max(H * 0.035, box.h * 0.12);
         if (body.feet < feet - deep || body.feet > feet + H * 0.02) continue;
-        const across = Math.min(body.x1, box.x + box.w * 0.92) - Math.max(body.x0, box.x + box.w * 0.08);
+        const across =
+          Math.min(body.x1, box.x + box.w * 0.92) -
+          Math.max(body.x0, box.x + box.w * 0.08);
         const share = across / Math.max(1, body.x1 - body.x0);
         if (share > 0.25)
           note({
@@ -464,6 +507,58 @@ export function spaceFaults(scene: SceneDto): SpaceFault[] {
       }
     }
   }
+  // What is set down: on the floor, and never inside or behind a thing
+  // standing on it.
+  const stage: ThingsOnStage = {
+    props: scene.props ?? [],
+    steps: scene.steps,
+    places: scene.stagings.wide.places,
+    drawing: (id) => {
+      const one = scene.things.find((x) => x.id === id);
+      return one?.kind === 'drawing' ? one : undefined;
+    },
+    feature: (id) => features.find((f) => f.id === id)?.at.wide,
+    ...(how.restAside === false ? {} : { obstacles: obstaclesOf(features) }),
+  };
+  const obstacles = obstaclesOf(features);
+  if (stage.props.length)
+    for (let t = start; t < scene.durationMs; t += EVERY_MS) {
+      const k = stepAt(scene.steps, t);
+      const hands = handsAt(stage, t);
+      for (const prop of stage.props) {
+        const has = hands.get(prop.id);
+        if (!has || has.by || has.gone || has.flying || prop.in) continue;
+        const box = thingBoxAt(stage, prop.id, t);
+        if (!box) continue;
+        const base = box.y + box.h;
+        if (restBlocked(box, obstacles))
+          note({
+            kind: 'prop',
+            why: 'in-thing',
+            step: k,
+            atMs: t,
+            a: prop.id,
+            b: has.near ?? null,
+            amount: 1,
+          });
+        else if (
+          floor &&
+          (base < floor[0] - H * 0.02 || base > floor[1] + H * 0.02)
+        )
+          note({
+            kind: 'prop',
+            why: 'floating',
+            step: k,
+            atMs: t,
+            a: prop.id,
+            b: has.near ?? null,
+            amount:
+              Math.round(
+                (Math.max(floor[0] - base, base - floor[1]) / H) * 100,
+              ) / 100,
+          });
+      }
+    }
   return [...worst.values()].sort((p, q) => p.atMs - q.atMs);
 }
 
@@ -476,6 +571,7 @@ export function spaceCounts(
     hidden: 0,
     outside: 0,
     stand: 0,
+    prop: 0,
   };
   for (const f of faults) out[f.kind] += 1;
   return out;
@@ -496,6 +592,10 @@ export function describeSpace(
         return `space: ${when} ${name(f.a)}'s face is behind ${name(f.b ?? '')} (${pct} covered)`;
       case 'outside':
         return `space: ${when} ${name(f.a)} lies out past the ${f.b} (${pct} of them)`;
+      case 'prop':
+        return f.why === 'floating'
+          ? `space: ${when} the ${f.a} is set down off the floor`
+          : `space: ${when} the ${f.a} is set down in or behind a thing on the floor, floating over it`;
       default:
         return f.why === 'floating'
           ? `space: ${when} ${name(f.a)} stands off the floor (${pct} of the frame)`

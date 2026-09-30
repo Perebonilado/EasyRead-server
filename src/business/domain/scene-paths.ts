@@ -64,7 +64,8 @@ const bodyOf = (id: string, p: ScenePlaceDto): Body => ({
 
 /** Whether two bodies meet: in one row, their bodies one in the other. */
 const meets = (a: Body, b: Body) =>
-  Math.abs(a.d - b.d) < SAME_ROW_D && Math.abs(a.x - b.x) < (a.half + b.half) * MEET;
+  Math.abs(a.d - b.d) < SAME_ROW_D &&
+  Math.abs(a.x - b.x) < (a.half + b.half) * MEET;
 
 /**
  * Every walk in `places` bent round whoever and whatever is in its way,
@@ -109,7 +110,10 @@ export function walkRound(input: PathsInput): string[] {
       const from = was[id];
       const to = here[id];
       const ms = walkBetween(from, to, W, input.pace);
-      return bodyOf(id, pathPlace(from, to, Math.min(1, Math.max(0, t / ms)), W));
+      return bodyOf(
+        id,
+        pathPlace(from, to, Math.min(1, Math.max(0, t / ms)), W),
+      );
     };
     const longest = (id: string) =>
       walkBetween(was[id], here[id], W, input.pace);
@@ -137,9 +141,7 @@ export function walkRound(input: PathsInput): string[] {
       // Whom they stand by where they set off or arrive is theirs to be near.
       const ends = new Set(
         [...still, ...things, ...others.map((other) => at(other, 0))]
-          .filter(
-            (o) => meets(bodyOf(id, from), o) || meets(bodyOf(id, to), o),
-          )
+          .filter((o) => meets(bodyOf(id, from), o) || meets(bodyOf(id, to), o))
           .map((o) => o.id),
       );
       const straight = meetsOn({ ...to, via: undefined }).filter(
@@ -155,7 +157,9 @@ export function walkRound(input: PathsInput): string[] {
       const straightTo = { ...to, via: undefined };
       const u0 = Math.min(...straight.map((h) => h.u));
       const u1 = Math.max(...straight.map((h) => h.u));
-      const lead = 1.5 / SAMPLES + (from.w * 0.6) / Math.max(1, pathLength(from, straightTo, W));
+      const lead =
+        1.5 / SAMPLES +
+        (from.w * 0.6) / Math.max(1, pathLength(from, straightTo, W));
       const a = pathPlace(from, straightTo, Math.max(0, u0 - lead), W);
       const b = pathPlace(from, straightTo, Math.min(1, u1 + lead), W);
       const back = Math.min(...straight.map((h) => h.d));

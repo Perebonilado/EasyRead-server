@@ -33,11 +33,7 @@ import {
   type FeltFace,
 } from './scene-performance';
 import { withViews } from './scene-views';
-import {
-  cradleOf,
-  guessAffordances,
-  isCradle,
-} from './scene-affordances';
+import { cradleOf, guessAffordances, isCradle } from './scene-affordances';
 import { withInteractions, type TimedInteraction } from './scene-interact';
 import {
   INSERT_EARLY_MS,
@@ -3336,7 +3332,6 @@ export function composeScene(input: ComposeInput): {
     for (const staging of ['box', 'wide'] as const) {
       const stage = STAGINGS[staging];
       const on = setFrameOn(setFrame, stage);
-      const floor = floors[staging];
       const faces: Parameters<typeof keepFacesSeen>[0] = {
         W: stage.w,
         H: stage.h,
@@ -3414,7 +3409,10 @@ export function composeScene(input: ComposeInput): {
         atDepth: atDepthOn(staging),
         name: (id) => nameOf(castById.get(id)) ?? id,
         durationMs,
-        inThing: (place) =>
+        // One at a spot of their own on the open floor: by a thing, they
+        // are where it has them.
+        inThing: (place, k, id) =>
+          open(k, id) &&
           furnitureAt[staging].some(
             (f) =>
               standsIn(
@@ -3422,8 +3420,7 @@ export function composeScene(input: ComposeInput): {
                 place.w * BODY_HALF,
                 place.y + place.h,
                 f,
-              ) ||
-              hiddenBy(place, place.y + place.h, f) > BEHIND_HIDES_MOST,
+              ) || hiddenBy(place, place.y + place.h, f) > BEHIND_HIDES_MOST,
           ),
       };
       const mended = keepFacesSeen(faces);

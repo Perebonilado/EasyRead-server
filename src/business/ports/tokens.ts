@@ -32,3 +32,5 @@ export const TRANSCRIPTION = Symbol('TranscriptionPort');
 export const REALTIME = Symbol('RealtimePort');
 export const WEB_IMPORT = Symbol('WebImportPort');
 export const ALIGNER = Symbol('AlignerPort');
+/** Audio decoded to samples and encoded back, for the voice's pace step. */
+export const AUDIO_CODEC = Symbol('AudioCodecPort');

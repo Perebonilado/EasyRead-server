@@ -447,6 +447,7 @@ export class CartesiaSceneSpeechAdapter implements SpeechPort {
     model: string;
     durationMs: number;
     silencesMs: [number, number][];
+    pcm: { samples: Int16Array; sampleRate: number };
     pieceStartsMs?: number[];
     words?: { text: string; startMs: number; endMs: number }[];
     characters: number;
@@ -540,6 +541,8 @@ export class CartesiaSceneSpeechAdapter implements SpeechPort {
       ms(sample + paused.moved[i] + before);
     return {
       audio: await this.encode(samples, RATE),
+      // The samples too: the pace step puts them right without decoding.
+      pcm: { samples, sampleRate: RATE },
       mimeType: 'audio/mpeg',
       model: `cartesia:${model}`,
       durationMs: pcmMs({ samples, sampleRate: RATE }),

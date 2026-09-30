@@ -79,7 +79,8 @@ import {
   TWO_SHOTS,
   secondsOf,
   studioId,
-  WORDS_A_SECOND,
+  FULLEST,
+  TEACH_WORDS_A_SECOND,
   type ExplainerSheet,
   type SceneSheet,
   type SheetBeat,
@@ -3213,14 +3214,15 @@ export function checkOutline(
   } else
     outline.scenes.forEach((scene, k) => {
       const said = scene.teach ? words(scene.teach) : 0;
-      // The narrator says about 2.4 words a second, and a little less than
-      // what the scene teaches: more than that, and the scene runs long.
-      const fits = Math.round(scene.seconds * WORDS_A_SECOND * 1.25);
+      // What the scene teaches is written a little fuller than the
+      // narrator says it (TEACH_WORDS_A_SECOND): more than FULLEST over
+      // that, and the scene runs long.
+      const fits = Math.round(scene.seconds * TEACH_WORDS_A_SECOND);
       if (said < 25)
         problems.push(
           `Scene ${k + 1} says too little of what it teaches: write it out as a good book would, about ${fits} words.`,
         );
-      else if (said > fits * 1.4)
+      else if (said > fits * FULLEST)
         problems.push(
           `Scene ${k + 1} teaches ${said} words in ${scene.seconds} seconds, more than a narrator can say: give it more seconds, split it in two, or teach it in about ${fits} words.`,
         );

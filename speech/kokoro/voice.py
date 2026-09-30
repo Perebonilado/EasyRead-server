@@ -35,8 +35,11 @@ BREATH = 0.25
 # takes anyway. A sentence longer than this is never cut.
 RUN_CHARS = 300
 RUN_GAP = 0.35
-# The longest silence a piece may ask for after itself, in seconds.
-PAUSE_LIMIT = 3.0
+# The longest silence a piece may ask for after itself, in seconds: the
+# server's HOLD_LIMIT_S (scene-voice.ts), a Studio scene's hold for a
+# physical sequence. An older service capped it at three; the server pads
+# what it asked for and did not get after voicing (scene-pace-audio).
+PAUSE_LIMIT = 20.0
 # The voice pads every piece with dead air, about a quarter second before
 # and two thirds after. It is trimmed to a short natural margin so the
 # only silence on a page is the silence the pace model placed.

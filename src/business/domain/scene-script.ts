@@ -2759,10 +2759,11 @@ function effectOf(
 /** How many spoken words pass between one change on the stage and the next: the writer's cadence, before any audio. */
 /**
  * Spoken words with nothing new to see that send a lesson's draft back on
- * their own, about sixteen seconds: a picture that sits still that long
- * has lost the learner.
+ * their own, about twelve seconds: a picture that sits still that long
+ * has lost the learner. The writer's prompt says the same number
+ * ("never thirty words with nothing new"), and so does WORDS_A_STAGE.
  */
-export const STILL_WORDS = 40;
+export const STILL_WORDS = 30;
 
 export function quietStretches(script: SceneScript, limit = 30): string[] {
   const positions: number[] = [];

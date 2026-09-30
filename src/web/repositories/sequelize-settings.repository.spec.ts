@@ -2,7 +2,12 @@ import {
   CARTESIA_LIBRARY,
   ELEVENLABS_PREMADE,
 } from '../../business/domain/scene-voice';
-import { castAfter, voiceCast } from './sequelize-settings.repository';
+import {
+  castAfter,
+  ratesAfter,
+  ratesKept,
+  voiceCast,
+} from './sequelize-settings.repository';
 
 describe('the admin’s voices as kept', () => {
   const eleven = { narrator: ELEVENLABS_PREMADE.Daniel };
@@ -47,5 +52,21 @@ describe('the admin’s voices as kept', () => {
       elevenlabs: eleven,
     });
     expect(castAfter(kept, { elevenlabs: {} })).toBeNull();
+  });
+});
+
+describe('voice rates as kept', () => {
+  it('lays a voice measured over those kept, voice by voice, and reads back only sound rates', () => {
+    const kept = JSON.stringify({ kokoro: { am_puck: { wpm: 170 } } });
+    const merged = ratesAfter(kept, {
+      kokoro: { af_heart: { wpm: 160 } },
+      gemini: { Sulafat: { wpm: 150, words: { natural: 152 } } },
+    });
+    expect(ratesKept(merged)).toEqual({
+      kokoro: { am_puck: { wpm: 170 }, af_heart: { wpm: 160 } },
+      gemini: { Sulafat: { wpm: 150, words: { natural: 152 } } },
+    });
+    expect(ratesKept('{"kokoro":{"x":{"wpm":-3}}}')).toEqual({});
+    expect(ratesKept('nope')).toEqual({});
   });
 });

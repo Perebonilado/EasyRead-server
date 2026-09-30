@@ -24,12 +24,14 @@ import {
   WEB_IMPORT,
   STARTER_LIBRARY,
   ALIGNER,
+  AUDIO_CODEC,
 } from '../../business/ports/tokens';
 import { BullmqQueueAdapter } from '../adapters/bullmq-queue.adapter';
 import { DriveConverterAdapter } from '../adapters/drive-converter.adapter';
 import { DriveStorageAdapter } from '../adapters/drive-storage.adapter';
 import { FakeLlmAdapter } from '../adapters/fake-llm.adapter';
 import { GeminiSpeechAdapter } from '../adapters/gemini-speech.adapter';
+import { EchogardenAudioCodecAdapter } from '../adapters/audio/audio-codec.adapter';
 import { ElevenLabsSceneSpeechAdapter } from '../adapters/elevenlabs-scene-speech.adapter';
 import { CartesiaSceneSpeechAdapter } from '../adapters/cartesia-scene-speech.adapter';
 import { FakePaymentsAdapter } from '../adapters/fake-payments.adapter';
@@ -144,6 +146,8 @@ export const portProviders: Provider[] = [
   },
   // Word timing for the lecture board: the script aligned to its audio.
   { provide: ALIGNER, useClass: EchogardenAlignerAdapter },
+  // Audio to samples and back, for the voice's pace step.
+  { provide: AUDIO_CODEC, useClass: EchogardenAudioCodecAdapter },
   { provide: TRANSCRIPTION, useClass: OpenAiTranscriptionAdapter },
   { provide: REALTIME, useClass: OpenAiRealtimeAdapter },
   // Injected by concrete class where a tutor's voice lives on ElevenLabs;

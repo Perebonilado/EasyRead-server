@@ -23,6 +23,7 @@ import {
   STUDIO_STYLES,
   STUDIO_TONES,
   STUDIO_VOICES,
+  TEACH_WORDS_A_SECOND,
 } from '../../business/domain/studio/studio';
 import {
   DOINGS,
@@ -69,6 +70,7 @@ import {
 import { FIGURE_GUIDE } from './prompts';
 import { BEAT_ROLES } from '../../business/domain/studio/studio-story';
 import { BAR, RUBRIC } from '../../business/domain/studio/studio-script';
+import { LOOK_NAMES } from '../../business/domain/studio/studio-look';
 
 const quoted = (list: readonly string[]) =>
   list.map((x) => `"${x}"`).join(', ');
@@ -268,6 +270,16 @@ export const STUDIO_PROMPTS = {
       'at once gets the outline straight away.',
     ].join(' '),
     [
+      `An explainer has a look, how its stage is coloured: look one of ${LOOK_NAMES};`,
+      '"chalkboard", "blueprint" and "nightsky" are dark. Set it only when',
+      'they ask for a look, at any phase ("use a chalkboard look" is',
+      '"chalkboard"; "make it dark" is the dark look of what it has now, which',
+      'the Studio works out, so leave look null for that), and never ask',
+      'about it: the Studio chooses one from the subject and the audience. A',
+      'new look plays at once, with nothing made again, so the action stays',
+      '"none" and you say it is done.',
+    ].join(' '),
+    [
       '"outline": they see the story (its premise, who everyone is and its',
       'beats) and the scenes of the episode, a line each. A change they ask',
       'for is action "outline" with request their change in their own words',
@@ -308,6 +320,10 @@ export const STUDIO_PROMPTS = {
       'and each is changed. Ready to make the film: action "make".',
       '"made": they have watched it. Changes as in "script"; a new episode',
       'of the same show is action "episode", request what it should be about.',
+      'In an explainer, the voice being too slow or too fast ("the voice is',
+      'a bit slow", "talk faster", "it feels rushed") is action "repace",',
+      'request their words: the made scenes are played quicker or slower and',
+      'timed again, nothing voiced again. It is never "scene" or "make".',
       'When the brief says it is made from their document, the maker',
       'choosing which part of it to teach ("chapter 4", "pages 40 to 55",',
       '"the part about osmosis"), at any phase, is action "pages", request',
@@ -370,7 +386,7 @@ export const STUDIO_PROMPTS = {
       'a change is to several scenes; character is null except with',
       '"redraw" and "choose"; pick is null except with "choose". request is',
       'null except with "outline", "cast", "redraw",',
-      '"scene", "episode" and "pages".',
+      '"scene", "repace", "episode" and "pages".',
     ].join(' '),
     [
       SAFE,
@@ -498,8 +514,8 @@ export const STUDIO_PROMPTS = {
       'the last, then a short recap. title; summary what it teaches, in a',
       'sentence; set null; cast empty; seconds. teach is what the scene',
       'teaches, written out as a clear page of the best textbook for this',
-      'audience would say it, in about three words for each of its seconds',
-      '(a 30-second scene about 90 words, a minute about 180), since the',
+      `audience would say it, in about ${TEACH_WORDS_A_SECOND} words for each of its seconds`,
+      `(a 30-second scene about ${Math.round(30 * TEACH_WORDS_A_SECOND)} words, a minute about ${Math.round(60 * TEACH_WORDS_A_SECOND)}), since the`,
       'narrator has only that long to say it: every term, number, unit and',
       'formula exact and correct, a worked example where the idea needs one.',
       'The narration is written from teach alone, so nothing is taught that',

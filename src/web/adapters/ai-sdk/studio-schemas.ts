@@ -33,6 +33,7 @@ import {
   TRAVEL_PACES,
 } from '../../../business/domain/scene-doings';
 import { STAGE_PROPS } from '../../../business/domain/scene-props';
+import { THEME_IDS } from '../../../business/domain/scene-themes';
 import { BEAT_ROLES } from '../../../business/domain/studio/studio-story';
 import {
   genreNamed,
@@ -108,6 +109,7 @@ export const STUDIO_ACTIONS = [
   'scene',
   'make',
   'episode',
+  'repace',
   'pages',
 ] as const;
 
@@ -149,6 +151,7 @@ export const studioTurnSchema = z.object({
       ending: z.enum(STUDIO_ENDINGS).nullable().catch(null),
       pace: z.enum(STUDIO_PACES).nullable().catch(null),
       style: z.enum(STUDIO_STYLES).nullable().catch(null),
+      look: z.enum(THEME_IDS).nullable().catch(null),
     })
     .catch({
       format: null,
@@ -165,6 +168,7 @@ export const studioTurnSchema = z.object({
       ending: null,
       pace: null,
       style: null,
+      look: null,
     }),
   action: z.enum(STUDIO_ACTIONS).catch('none'),
   scene: z.union([z.number(), z.string()]).nullable().catch(null),

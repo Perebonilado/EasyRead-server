@@ -1,3 +1,8 @@
+import {
+  paceAsked,
+  nudged,
+  studioMakerRate,
+} from '../../domain/studio/studio-pace';
 import { scoreOf } from '../../domain/studio/studio-score';
 import {
   isStoryChange,
@@ -6,6 +11,7 @@ import {
 } from '../../domain/studio/studio-story';
 import { narratorRuleOf } from '../../domain/studio/studio-narrator';
 import { heardBrief } from '../../domain/studio/studio-heard';
+import { lookHeard, showTheme } from '../../domain/studio/studio-look';
 import { audienceChips, whoHeard } from '../../domain/studio/studio-audience';
 import { Inject, Injectable, Logger, Optional } from '@nestjs/common';
 import { randomBytes, randomUUID } from 'node:crypto';
@@ -172,6 +178,12 @@ const STILL_TO_SAY: Partial<Record<keyof StudioBrief, string>> = {
   tone: 'how it should feel',
 };
 
+/** The look an explainer plays in, for its show and its player; nothing for a story. */
+const themeOfShow = (show: StudioShowRecord) => {
+  const theme = showTheme(show.brief, show.bible);
+  return theme ? { theme } : {};
+};
+
 @Injectable()
 export class StudioService {
   private readonly logger = new Logger(StudioService.name);
@@ -297,6 +309,7 @@ export class StudioService {
       brief: briefDto(show.brief),
       briefMissing: briefMissing(show.brief),
       bible,
+      ...themeOfShow(show),
       episodes: episodes.map((e) => ({
         id: e.id,
         number: e.number,
@@ -394,7 +407,74 @@ export class StudioService {
     // Whom it is for, taken back: the four words stay.
     if ('who' in patch && patch.who === null) delete brief.who;
     await this.studio.updateShow(show.id, { brief, format: brief.format });
+    // An explainer's Pace chip changed: its made scenes are played at the
+    // new pace, stretched, never voiced again.
+    if (brief.format === 'explainer' && brief.pace !== show.brief.pace)
+      await this.repaceMade({ ...show, brief });
     return this.showDto({ ...show, brief, format: brief.format });
+  }
+
+  /**
+   * The made scenes of an explainer's latest episode with any, played at
+   * the brief's pace now (StudioProcessor.repace). Whether any were.
+   */
+  private async repaceMade(
+    show: StudioShowRecord,
+    episode?: StudioEpisodeRecord,
+  ): Promise<boolean> {
+    const episodes = episode
+      ? [episode]
+      : await this.studio.listEpisodes(show.id);
+    for (const one of [...episodes].reverse()) {
+      const scenes = await this.studio.listScenes(one.id);
+      if (!scenes.some((s) => s.sceneKey && s.sheet?.kind === 'explainer'))
+        continue;
+      await this.enqueue(show, one, {
+        kind: 'repace',
+        pace: studioMakerRate(show.brief),
+      });
+      return true;
+    }
+    return false;
+  }
+
+  /**
+   * "The voice is a bit slow": an explainer's voice made a little quicker
+   * or slower (studio-pace), its made scenes played at it and timed again,
+   * nothing voiced again. What to say, in code's own words.
+   */
+  private async repaceAsked(
+    show: StudioShowRecord,
+    episode: StudioEpisodeRecord,
+    request: string,
+    said: string,
+  ): Promise<{ note: string | null; tried: string | null }> {
+    if (show.brief.format !== 'explainer')
+      return {
+        note: "A story's lines keep the pace their characters say them at. Tell me which scene feels slow, and I can tighten it.",
+        tried: null,
+      };
+    const change = paceAsked(request) ?? paceAsked(said);
+    if (change === null)
+      return { note: 'Should the voice be quicker or slower?', tried: null };
+    const before = show.brief.voicePace ?? 1;
+    const after = nudged(before, change);
+    if (after === before)
+      return {
+        note: `The voice is as ${change > 0 ? 'quick' : 'slow'} as it goes without sounding stretched. The Pace chips on the brief can change it too.`,
+        tried: null,
+      };
+    const brief = briefOf({ voicePace: after }, show.brief);
+    await this.studio.updateShow(show.id, { brief });
+    show.brief = brief;
+    const made = await this.repaceMade(show, episode);
+    const way = change > 0 ? 'quicker' : 'slower';
+    return {
+      note: null,
+      tried: made
+        ? `Making the voice a little ${way}: the scenes made are timed again to it, nothing voiced again.`
+        : `The voice will be a little ${way} when the film is made.`,
+    };
   }
 
   /**
@@ -637,6 +717,15 @@ export class StudioService {
         { who: whoHeard(brief, pasted ? '' : said, makerSaid) },
         brief,
       );
+    // An explainer's look asked for in words, at any phase: "make it
+    // dark" is the dark one of the look it has now.
+    const look = pasted
+      ? null
+      : lookHeard(
+          said,
+          showTheme({ ...brief, look: show.brief.look }, show.bible) ?? 'paper',
+        );
+    if (look && brief.format === 'explainer') brief = { ...brief, look };
     const briefChanged = JSON.stringify(brief) !== JSON.stringify(show.brief);
     if (briefChanged) {
       await this.studio.updateShow(show.id, { brief, format: brief.format });
@@ -666,6 +755,17 @@ export class StudioService {
         : null;
     if (pagesHeard && pagesHeard.how !== 'subject' && draft.action === 'none')
       draft = { ...draft, action: 'pages' };
+    // "The voice is a bit slow", of an explainer made: its pace, read by
+    // code first, whatever the producer made of it.
+    if (
+      !draft.refuse &&
+      draft.action === 'none' &&
+      show.brief.format === 'explainer' &&
+      !pasted &&
+      paceAsked(said) !== null &&
+      scenes.some((s) => s.sceneKey)
+    )
+      draft = { ...draft, action: 'repace', request: said };
     try {
       if (!draft.refuse)
         switch (draft.action) {
@@ -834,6 +934,14 @@ export class StudioService {
             break;
           case 'episode':
             episode = await this.newEpisode(show, draft.request ?? said);
+            break;
+          case 'repace':
+            ({ note, tried } = await this.repaceAsked(
+              show,
+              episode,
+              draft.request ?? said,
+              said,
+            ));
             break;
           default:
             break;
@@ -1912,6 +2020,7 @@ export class StudioService {
       number: episode.number,
       watermark,
       madeWith: MADE_WITH,
+      ...themeOfShow(show),
       ...(score ? { score } : {}),
       scenes: made.map((s, i) => ({
         id: s.id,

@@ -1,3 +1,5 @@
+import type { Pcm } from '../domain/wav';
+
 /**
  * Text-to-speech: turns a page's text into playable audio.
  *
@@ -60,6 +62,8 @@ export interface SpeechPort {
     usage?: { tokensIn: number; tokensOut: number };
     /** Characters billed, for a voice billed by the character (ElevenLabs, Cartesia); absent otherwise. */
     characters?: number;
+    /** The same audio as samples, when the voice had them before encoding (Gemini, ElevenLabs, Cartesia): the pace step need not decode it. */
+    pcm?: Pcm;
   }>;
   /** What goes into a file's name so audio from one voice never overwrites another's. */
   label(): { model: string; voice: string };

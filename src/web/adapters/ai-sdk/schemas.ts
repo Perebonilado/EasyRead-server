@@ -601,18 +601,18 @@ const fraction = z.number().min(0).max(1);
  * union. The mend in scene-script.ts turns it into the typed script.
  */
 export const sceneScriptSchema = z.object({
-  fit: z.enum(['good', 'poor']),
+  fit: z.enum(['good', 'poor']).catch('good'),
   fitReason: z.string().nullable(),
   title: z.string(),
-  mood: z.enum(SCENE_MOODS),
+  mood: z.enum(SCENE_MOODS).catch('calm'),
   beats: z.array(
     z.object({
       say: z.string(),
-      pause: z.enum(['short', 'long']),
-      delivery: z.enum(SCENE_DELIVERIES),
+      pause: z.enum(['short', 'long']).catch('short'),
+      delivery: z.enum(SCENE_DELIVERIES).catch('explain'),
       speaker: z.string().nullable(),
-      music: z.enum(SCENE_MUSIC).nullable(),
-      energy: z.enum(['low', 'high']).nullable(),
+      music: z.enum(SCENE_MUSIC).nullable().catch(null),
+      energy: z.enum(['low', 'high']).nullable().catch(null),
       // A question's answers for the viewer to pick (scene-checkpoint): 2-3, one right.
       choices: z
         .array(z.object({ text: z.string(), right: z.boolean() }))
@@ -623,19 +623,21 @@ export const sceneScriptSchema = z.object({
   cast: z.array(
     z.object({
       id: z.string(),
-      kind: z.enum([
-        'drawing',
-        'stat',
-        'words',
-        'math',
-        'plot',
-        'quote',
-        'timeline',
-        'chart',
-        'character',
-        'person',
-        'place',
-      ]),
+      kind: z
+        .enum([
+          'drawing',
+          'stat',
+          'words',
+          'math',
+          'plot',
+          'quote',
+          'timeline',
+          'chart',
+          'character',
+          'person',
+          'place',
+        ])
+        .catch('drawing'),
       name: z.string(),
       brief: z.string().nullable(),
       motion: z.string().nullable(),
@@ -645,10 +647,10 @@ export const sceneScriptSchema = z.object({
       states: z
         .array(z.object({ name: z.string(), look: z.string() }))
         .nullable(),
-      shape: z.enum(DRAWING_SHAPES).nullable(),
+      shape: z.enum(DRAWING_SHAPES).nullable().catch(null),
       value: z.string().nullable(),
-      style: z.enum(['title', 'keyword']).nullable(),
-      sound: z.enum(SCENE_AMBIENCES).nullable(),
+      style: z.enum(['title', 'keyword']).nullable().catch(null),
+      sound: z.enum(SCENE_AMBIENCES).nullable().catch(null),
       lines: z
         .array(z.object({ latex: z.string(), check: z.string().nullable() }))
         .nullable(),
@@ -677,12 +679,15 @@ export const sceneScriptSchema = z.object({
         )
         .nullable(),
       ref: z.string().nullable(),
-      state: z.enum([...EXPRESSIONS, ...KIT_FACES]).nullable(),
-      figure: figureSchema.nullable(),
+      state: z
+        .enum([...EXPRESSIONS, ...KIT_FACES])
+        .nullable()
+        .catch(null),
+      figure: figureSchema.nullable().catch(null),
       count: z.number().int().nullable(),
-      pose: z.enum(FIGURE_POSES).nullable(),
-      signs: z.array(z.enum(FIGURE_SIGNS)).nullable(),
-      holding: z.enum(FIGURE_PROPS).nullable(),
+      pose: z.enum(FIGURE_POSES).nullable().catch(null),
+      signs: z.array(z.enum(FIGURE_SIGNS)).nullable().catch(null),
+      holding: z.enum(FIGURE_PROPS).nullable().catch(null),
       timeline: z
         .array(z.object({ when: z.string(), name: z.string() }))
         .nullable(),
@@ -699,7 +704,7 @@ export const sceneScriptSchema = z.object({
     z.object({
       beat: z.number().int(),
       phrase: z.string(),
-      layout: z.enum(SCENE_LAYOUTS).nullable(),
+      layout: z.enum(SCENE_LAYOUTS).nullable().catch(null),
       show: z.array(z.string()).nullable(),
       arrows: z
         .array(
@@ -713,7 +718,8 @@ export const sceneScriptSchema = z.object({
         .nullable(),
       effects: z
         .array(z.object({ target: z.string(), do: z.enum(SCENE_EFFECTS) }))
-        .nullable(),
+        .nullable()
+        .catch(null),
     }),
   ),
 });

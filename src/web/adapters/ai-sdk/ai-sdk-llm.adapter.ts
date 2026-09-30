@@ -108,6 +108,35 @@ import {
 } from './schemas';
 
 /**
+ * Where an answer missed its schema, said for the log: the fields the
+ * check refused (the SDK keeps them on the error's cause), and the end of
+ * what came back, so a miss that keeps coming can be seen and mended.
+ */
+function misfit(error: unknown): string {
+  // The schema's own complaints sit a cause or two down (the SDK wraps the
+  // validation error, which wraps the schema library's).
+  type Cause = { issues?: unknown; message?: string; cause?: unknown };
+  let cause = (error as { cause?: unknown }).cause as Cause | undefined;
+  for (let k = 0; k < 4 && cause && !Array.isArray(cause.issues); k++)
+    cause = cause.cause as Cause | undefined;
+  const issues = (
+    cause as { issues?: { path?: unknown[]; message?: string }[] }
+  )?.issues;
+  const where = Array.isArray(issues)
+    ? issues
+        .slice(0, 6)
+        .map((one) => `${(one.path ?? []).join('.')}: ${one.message ?? ''}`)
+        .join('; ')
+    : (cause?.message ?? '').slice(0, 300);
+  const text = (error as { text?: string }).text;
+  const tail =
+    typeof text === 'string'
+      ? ` · …${text.slice(-200).replace(/\s+/g, ' ')}`
+      : '';
+  return where || tail ? ` · ${where}${tail}` : '';
+}
+
+/**
  * The model gateway, on the Vercel AI SDK.
  *
  * Two things the SDK buys us that hand-rolled HTTP did not: provider choice is
@@ -932,9 +961,16 @@ export class AiSdkLlmAdapter implements LlmGatewayPort, OnModuleInit {
       if (!/NoObjectGenerated|TypeValidation|JSONParse/u.test(name))
         throw error;
       this.logger.warn(
-        `the writer's answer did not fit its shape; asked again: ${(error as Error).message.slice(0, 160)}`,
+        `the writer's answer did not fit its shape; asked again: ${(error as Error).message.slice(0, 160)}${misfit(error)}`,
       );
-      return call();
+      try {
+        return await call();
+      } catch (again) {
+        this.logger.warn(
+          `the writer's answer did not fit its shape again${misfit(again)}`,
+        );
+        throw again;
+      }
     }
   }
 

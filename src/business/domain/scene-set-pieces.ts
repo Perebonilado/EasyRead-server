@@ -40,6 +40,8 @@ export interface PieceLook {
   livery?: VehicleLivery | null;
   /** It stands out of doors: a door there is a building's, drawn in its front. */
   outdoor?: boolean;
+  /** It is in a vessel (a bus, a train, a boat): a door there slides in its side. */
+  vessel?: boolean;
 }
 
 /** A set piece as the stage gets it. */
@@ -198,6 +200,23 @@ function framed(
   };
 }
 
+/**
+ * A piece marked with how it was made and for which place's pack (a door's
+ * boards, a wall's mud brick): the door check reads them, so a door or a
+ * wall drawn as no place's, or another place's, is found (scene-door-check).
+ */
+const marked = (
+  piece: SetPiece,
+  make: string,
+  pack: StylePackId | null,
+): SetPiece => ({
+  ...piece,
+  svg: piece.svg.replace(
+    /^<svg /u,
+    `<svg data-make="${make}" data-pack="${pack ?? 'none'}" `,
+  ),
+});
+
 const METAL = '#4f7cac';
 const CONCRETE = '#d8cbb3';
 const WOOD = '#9a6b4b';
@@ -348,61 +367,15 @@ export function drawPiece(
     };
   switch (kind) {
     case 'gate':
-      return drawGate(look.pack ?? null);
-    case 'door': {
-      // Out of doors, a door is a building's: never on its own.
-      if (look.outdoor) return drawBuildingDoor(look.pack ?? null);
-      // A doorway in a stretch of wall: the dark room beyond, the door
-      // hinged on its left, its knob on its right, and a bell beside it.
-      // The wall and the doorframe are one group, the near frame: laid
-      // over one going through the doorway, so they pass through it, not
-      // in front of it; the dark inside is its own, behind the leaf.
-      return {
-        ...framed(
-          `<g id="dark">` +
-            rect(-48, -204, 96, 204, DARK, 0) +
-            `</g>` +
-            `<g id="leaf">` +
-            rect(-48, -204, 96, 204, WOOD, 0) +
-            rect(-36, -190, 72, 80, PLANK, 3) +
-            rect(-36, -98, 72, 84, PLANK, 3) +
-            `<circle cx="32" cy="-100" r="5" ${fill(YELLOW)}/>` +
-            `</g>` +
-            `<g id="frame">` +
-            `<path d="M-80,-236 L80,-236 L80,0 L56,0 L56,-212 L-56,-212 L-56,0 L-80,0 Z" ${fill(CONCRETE)}/>` +
-            rect(-86, -244, 172, 12, '#c2b397') +
-            rect(-56, -212, 8, 212, WOOD_DARK, 0) +
-            rect(48, -212, 8, 212, WOOD_DARK, 0) +
-            rect(-56, -212, 112, 10, WOOD_DARK) +
-            rect(61, -133, 11, 14, WHITE, 2) +
-            `<circle cx="66.5" cy="-126" r="3.2" ${fill(STONE)}/>` +
-            `</g>`,
-          [-86, -244, 172, 244],
-        ),
-        leaf: { id: 'leaf', hinge: [-48, -102] },
-        opening: [-48, -204, 48, 0],
-        affordances: {
-          handles: [
-            { id: 'knob', at: [32, -100], side: 'out' },
-            { id: 'knob-in', at: [32, -100], side: 'in' },
-          ],
-          threshold: {
-            line: [
-              [-48, 0],
-              [48, 0],
-            ],
-            inside: 'behind',
-          },
-          masks: [{ id: 'frame-near', group: 'frame' }],
-          dark: 'dark',
-          operates: [
-            { id: 'knock', at: [16, -128], does: 'knock' },
-            { id: 'bell', at: [66.5, -126], does: 'bell' },
-          ],
-          side: 1,
-        },
-      };
-    }
+      return marked(
+        drawGate(look.pack ?? null),
+        buildOf(look.pack ?? null),
+        look.pack ?? null,
+      );
+    case 'wall':
+      return drawWall(look.pack ?? null, name);
+    case 'door':
+      return drawDoor(name, look);
     case 'window': {
       // A window in the wall, framed, with its sill: the wall below it is
       // the painter's, never a panel down to the floor before the room.
@@ -662,25 +635,43 @@ export function drawPiece(
         opening: [-134, -164, 134, 0],
       };
     }
-    case 'wall':
-      return drawWall(look.pack ?? null);
     case 'fence': {
+      // A fence called a wall ("the low stone wall") is that wall; an old
+      // place's or a farm's is a rail fence, a town's a picket one.
+      if (/\bwalls?\b/iu.test(name)) return drawWall(look.pack ?? null, name);
+      const build = buildOf(look.pack ?? null);
+      if (build === 'stone' || build === 'rural')
+        return marked(
+          {
+            ...framed(wallRun(-126, 252, 104, 'rural'), [-126, -104, 252, 104]),
+            roosts: [
+              [-56, -94],
+              [56, -94],
+            ],
+          },
+          'timber',
+          look.pack ?? null,
+        );
       const pickets = Array.from({ length: 9 }, (_, i) => {
         const x = -112 + i * 28;
         return `<path d="M${x - 9},0 L${x - 9},-92 L${x},-104 L${x + 9},-92 L${x + 9},0 Z" ${fill(PLANK)}/>`;
       }).join('');
-      return {
-        ...framed(
-          rect(-126, -78, 252, 10, WOOD) +
-            rect(-126, -32, 252, 10, WOOD) +
-            pickets,
-          [-126, -104, 252, 104],
-        ),
-        roosts: [
-          [-56, -104],
-          [56, -104],
-        ],
-      };
+      return marked(
+        {
+          ...framed(
+            rect(-126, -78, 252, 10, WOOD) +
+              rect(-126, -32, 252, 10, WOOD) +
+              pickets,
+            [-126, -104, 252, 104],
+          ),
+          roosts: [
+            [-56, -104],
+            [56, -104],
+          ],
+        },
+        'picket',
+        look.pack ?? null,
+      );
     }
     case 'stall':
       return {
@@ -1148,20 +1139,94 @@ function drawGate(pack: StylePackId | null): SetPiece {
   };
 }
 
-/** The door's own parts, the same in a room's wall and a building's front: the dark beyond, and its leaf. */
+// ── Doors as their place has them ────────────────────────────────────────
+
+/**
+ * How a door is made, as its place and its name say: an old town's or a
+ * farm's (and a stable's, a barn's, a cottage's) boards; a present-day
+ * one's painted panels; a vessel's (a bus's, a train's) glass that
+ * slides; a tent's cloth flap.
+ */
+export type DoorMake = 'plank' | 'panel' | 'sliding' | 'flap';
+
+const FLAP_DOOR = /\b(?:tents?|flaps?|yurts?)\b/iu;
+const PLANK_DOOR =
+  /\b(?:stables?|barns?|byres?|sheds?|huts?|cabins?|shacks?|cottages?|farmhouses?|cellars?|castles?|towers?|arks?|inns?|planks?|sheepfolds?|pens?)\b/iu;
+const SLIDING_DOOR =
+  /\b(?:sliding|automatic|lifts?|elevators?|subways?|trains?|trams?|carriages?|bus(?:es)?|minibus(?:es)?|coach(?:es)?)\b/iu;
+/** A door a visitor rings at: a home's or a building's way in, never a room's inside one. */
+const FRONT_DOOR =
+  /\b(?:front|main|entrance|apartment|flat|house|home|street|building|office|shop|store)\b/iu;
+
+/** How a door of this name is made, where it stands. */
+export function doorMakeOf(
+  name: string,
+  look: Pick<PieceLook, 'pack' | 'vessel'> = {},
+): DoorMake {
+  if (FLAP_DOOR.test(name)) return 'flap';
+  if (PLANK_DOOR.test(name)) return 'plank';
+  if (look.vessel || SLIDING_DOOR.test(name)) return 'sliding';
+  const build = buildOf(look.pack ?? null);
+  return build === 'stone' || build === 'rural' ? 'plank' : 'panel';
+}
+
+/** Whether a door has a bell beside it: only a present-day home's or building's way in. */
+export const doorHasBell = (make: DoorMake, name: string) =>
+  make === 'panel' && FRONT_DOOR.test(name);
+
+/** The door's own parts, the same in a room's wall and a building's front: the dark beyond. */
 const DOOR_DARK = `<g id="dark">` + rect(-48, -204, 96, 204, DARK, 0) + `</g>`;
-const doorLeaf = (colour: string) =>
+/** Where a door's handle is, by how it is made: a knob, a ring, a latch. */
+const HANDLE: [number, number] = [32, -100];
+const BELL_AT: [number, number] = [66.5, -126];
+
+/** A painted door of panels with its knob: a present-day one. */
+const panelLeaf = (colour: string) =>
   `<g id="leaf">` +
   rect(-48, -204, 96, 204, colour, 0) +
-  rect(-36, -190, 72, 80, PLANK, 3) +
-  rect(-36, -98, 72, 84, PLANK, 3) +
-  `<circle cx="32" cy="-100" r="5" ${fill(YELLOW)}/>` +
+  rect(-36, -190, 72, 80, shadeOf(colour, 1.18), 3) +
+  rect(-36, -98, 72, 84, shadeOf(colour, 1.18), 3) +
+  `<circle cx="${HANDLE[0]}" cy="${HANDLE[1]}" r="5" ${fill(YELLOW)}/>` +
   `</g>`;
-/** A door's affordances, in a room's wall or a building's front: its knob both sides, the threshold, the near frame, a knock and a bell. */
-const DOOR_AFFORDANCES: SceneAffordancesDto = {
+
+/** A door of boards, two battens across and an iron ring: an old place's, a farm's, a stable's. */
+const plankLeaf = (colour: string) =>
+  `<g id="leaf">` +
+  rect(-48, -204, 96, 204, colour, 0) +
+  line(
+    'M-24,-204 L-24,0 M0,-204 L0,0 M24,-204 L24,0',
+    shadeOf(colour, 0.78),
+    2,
+  ) +
+  rect(-48, -176, 96, 14, shadeOf(colour, 0.82), 1) +
+  rect(-48, -50, 96, 14, shadeOf(colour, 0.82), 1) +
+  `<circle cx="${HANDLE[0]}" cy="${HANDLE[1]}" r="7" fill="none" stroke="${FIGURE_INK}" stroke-width="3"/>` +
+  `</g>`;
+
+/** A vessel's door: glass in a metal frame, sliding aside. */
+const slidingLeaf = () =>
+  `<g id="leaf">` +
+  rect(-48, -204, 96, 204, '#9aa3ad', 0) +
+  rect(-38, -192, 76, 110, GLASS, 2) +
+  rect(-38, -74, 76, 60, '#b9c1c9', 2) +
+  rect(HANDLE[0] - 4, -130, 8, 56, '#6d7580', 3) +
+  `</g>`;
+
+/** A darker or paler colour, `k` times as bright. */
+function shadeOf(colour: string, k: number): string {
+  const n = /^#([0-9a-f]{6})$/iu.exec(colour)?.[1];
+  if (!n) return colour;
+  const c = [0, 2, 4].map((i) =>
+    Math.max(0, Math.min(255, Math.round(parseInt(n.slice(i, i + 2), 16) * k))),
+  );
+  return `#${c.map((v) => v.toString(16).padStart(2, '0')).join('')}`;
+}
+
+/** A door's affordances: its handle both sides, the threshold, the near frame, a knock, and a bell where it has one. */
+const doorAffordances = (bell: boolean): SceneAffordancesDto => ({
   handles: [
-    { id: 'knob', at: [32, -100], side: 'out' },
-    { id: 'knob-in', at: [32, -100], side: 'in' },
+    { id: 'knob', at: HANDLE, side: 'out' },
+    { id: 'knob-in', at: HANDLE, side: 'in' },
   ],
   threshold: {
     line: [
@@ -1174,14 +1239,146 @@ const DOOR_AFFORDANCES: SceneAffordancesDto = {
   dark: 'dark',
   operates: [
     { id: 'knock', at: [16, -128], does: 'knock' },
-    { id: 'bell', at: [66.5, -126], does: 'bell' },
+    ...(bell ? [{ id: 'bell', at: BELL_AT, does: 'bell' as const }] : []),
   ],
   side: 1,
-};
+});
+
+/** The bell push beside a door. */
+const BELL =
+  rect(61, -133, 11, 14, WHITE, 2) +
+  `<circle cx="${BELL_AT[0]}" cy="${BELL_AT[1]}" r="3.2" ${fill(STONE)}/>`;
+
+/** An old place's stone, a mud-brick town's brick, as a doorway's jambs are built. */
+const MUD_BRICK = '#c9a27a';
+
+/**
+ * The doorway's surround as its place builds one: an old town's stone
+ * jambs under a timber lintel (a mud-brick town's, of its bricks), a
+ * farm's or a stable's timber posts, a present-day door's painted
+ * architrave, a vessel's metal frame. Only the doorway: the wall it is in
+ * is the room's own, never a stretch of another wall round it.
+ */
+function doorway(make: DoorMake, pack: StylePackId | null): string {
+  if (make === 'sliding')
+    return (
+      rect(-60, -216, 12, 216, '#7d8691', 0) +
+      rect(48, -216, 12, 216, '#7d8691', 0) +
+      rect(-60, -216, 120, 12, '#7d8691', 1)
+    );
+  const build = buildOf(pack);
+  if (make === 'plank' && build === 'stone') {
+    const stone = pack === 'ancient-near-east' ? MUD_BRICK : STONE_WALL;
+    const blocks = [0, 1, 2, 3]
+      .map((k) => {
+        const y = -204 + k * 51;
+        const wide = k % 2 ? 16 : 20;
+        return (
+          rect(-48 - wide, y, wide, 51, stone, 1) +
+          rect(48, y, wide, 51, stone, 1)
+        );
+      })
+      .join('');
+    return blocks + rect(-72, -224, 144, 20, WOOD_DARK, 2);
+  }
+  if (make === 'plank')
+    return (
+      rect(-60, -214, 12, 214, WOOD_DARK, 1) +
+      rect(48, -214, 12, 214, WOOD_DARK, 1) +
+      rect(-66, -224, 132, 14, WOOD_DARK, 2)
+    );
+  const trim = pack ? (STYLE_PACKS[pack].palette.trims[0] ?? WHITE) : WHITE;
+  return (
+    rect(-58, -214, 10, 214, trim, 0) +
+    rect(48, -214, 10, 214, trim, 0) +
+    rect(-62, -222, 124, 12, trim, 2)
+  );
+}
+
+/**
+ * A door as its place has one (never the same door everywhere): out of
+ * doors a building's (its front drawn round it); a tent's flap; else a
+ * doorway in the room's own wall, made as its place and its name say
+ * (boards in an old town's stone, a farm's timber; painted panels in a
+ * present-day room; glass that slides in a vessel), with a bell only by a
+ * present-day home's way in. The dark room beyond is its own group,
+ * behind the leaf; the doorway's surround is the near frame, laid over
+ * one going through, so they pass through it, not in front of it.
+ */
+function drawDoor(name: string, look: PieceLook): SetPiece {
+  const pack = look.pack ?? null;
+  const make = doorMakeOf(name, look);
+  if (make === 'flap')
+    return marked(drawTentFlap(look.colour ?? colourNamed(name)), make, pack);
+  if (look.outdoor && !look.vessel)
+    return marked(drawBuildingDoor(pack, name, make), 'front', pack);
+  const colour =
+    look.colour ??
+    colourNamed(name) ??
+    (make === 'panel' && pack ? STYLE_PACKS[pack].palette.doors[0] : null) ??
+    WOOD;
+  const bell = doorHasBell(make, name);
+  const leaf =
+    make === 'sliding'
+      ? slidingLeaf()
+      : make === 'plank'
+        ? plankLeaf(colour)
+        : panelLeaf(colour);
+  const piece: SetPiece = {
+    ...framed(
+      DOOR_DARK +
+        leaf +
+        `<g id="frame">` +
+        doorway(make, pack) +
+        (bell ? BELL : '') +
+        `</g>`,
+      [-72, -224, 144, 224],
+    ),
+    leaf:
+      make === 'sliding'
+        ? { id: 'leaf', hinge: [-48, -102], slide: -92 }
+        : { id: 'leaf', hinge: [-48, -102] },
+    opening: [-48, -204, 48, 0],
+    affordances: doorAffordances(bell),
+  };
+  return marked(piece, make, pack);
+}
+
+/**
+ * A tent's way in: its front of cloth, the doorway a slit up the middle,
+ * and the flap that covers it drawn back to the side as it opens.
+ */
+function drawTentFlap(colour: string | null): SetPiece {
+  const cloth = colour ?? '#d9c9a3';
+  const edge = shadeOf(cloth, 0.8);
+  return {
+    ...framed(
+      shadow(150) +
+        `<g id="dark"><path d="M-56,0 L-10,-212 L10,-212 L56,0 Z" ${fill(DARK)}/></g>` +
+        `<g id="leaf"><path d="M-56,0 L-10,-212 L10,-212 L56,0 Z" ${fill(cloth)}/>` +
+        line('M0,-212 L0,0', edge, 2) +
+        `<circle cx="${HANDLE[0]}" cy="${HANDLE[1]}" r="4" ${fill(edge)}/></g>` +
+        `<g id="frame">` +
+        `<path d="M-160,0 L-12,-252 L12,-252 L160,0 L56,0 L10,-212 L-10,-212 L-56,0 Z" ${fill(cloth)}/>` +
+        line('M-110,0 L-8,-230 M110,0 L8,-230', edge, 2) +
+        rect(-6, -268, 12, 24, WOOD_DARK, 2) +
+        `</g>`,
+      [-160, -268, 320, 268],
+    ),
+    leaf: { id: 'leaf', hinge: [-48, -102] },
+    opening: [-48, -204, 48, 0],
+    affordances: doorAffordances(false),
+    stand: [-60, 60],
+  };
+}
 
 /** Half a building front's width, and its height, in the kit's units: about four metres by four and a half, two storeys. */
 const FRONT_HALF = 220;
 const FRONT_TALL = 500;
+/** A hut's, a shed's, a stable's front: one storey, narrower. */
+const HUT_HALF = 150;
+const HUT_TALL = 290;
+const HUT = /\b(?:huts?|sheds?|cabins?|shacks?|stables?|barns?|byres?|kiosks?|sheepfolds?)\b/iu;
 
 /** The joints of a wall's face within a box: a town's brick courses, an old town's stone blocks, a farm's boards. */
 function faceJoints(
@@ -1219,23 +1416,36 @@ const frontWindow = (
   line(`M${r1(x + w / 2)},${r1(y)} L${r1(x + w / 2)},${r1(y + h)}`, trim, 5) +
   rect(x - 10, y + h + 4, w + 20, 9, trim, 2);
 
+/** An old place's window: a small dark opening under a timber lintel, no glass. */
+const oldWindow = (x: number, y: number, w: number, h: number) =>
+  rect(x, y, w, h, DARK, 0) + rect(x - 8, y - 12, w + 16, 12, WOOD_DARK, 1);
+
 /**
  * A door out of doors, as the way into a building (never a door on its
- * own in a street): the building's front drawn round it, two storeys, as
- * its place builds one (a town's brick with plaster trim, a compound's
- * plastered block, a farm's boards, an old town's stone), with windows
- * beside it and above it, and its door in the doorway as a room's is,
- * the same leaf, knob, threshold, knock and bell. The whole front is the
- * near frame: one going in passes behind it, into the building. People
- * stand by its doorway, not by the whole front (stand).
+ * own in a street): the building's front drawn round it, as its place
+ * builds one (a town's brick with plaster trim, a compound's plastered
+ * block, a farm's boards, an old town's stone), two storeys with windows
+ * beside it and above it; a hut's, a shed's or a stable's one storey of
+ * boards. Its door is made as its place makes doors (boards in an old
+ * town or on a farm, painted panels in a town), with a bell only by a
+ * present-day one. The whole front is the near frame: one going in passes
+ * behind it, into the building. People stand by its doorway, not by the
+ * whole front (stand).
  */
-function drawBuildingDoor(pack: StylePackId | null): SetPiece {
-  const build = buildOf(pack);
+function drawBuildingDoor(
+  pack: StylePackId | null,
+  name = '',
+  make: DoorMake = doorMakeOf(name, { pack }),
+): SetPiece {
+  const hut = HUT.test(name);
+  const build: Build = hut ? 'rural' : buildOf(pack);
   const wall =
     build === 'compound'
       ? PLASTER
       : build === 'stone'
-        ? STONE_WALL
+        ? pack === 'ancient-near-east'
+          ? MUD_BRICK
+          : STONE_WALL
         : build === 'rural'
           ? PLANK
           : BRICK;
@@ -1243,8 +1453,12 @@ function drawBuildingDoor(pack: StylePackId | null): SetPiece {
     build === 'town' ? BRICK_LINE : build === 'rural' ? WOOD_DARK : '#a99a80';
   const trim =
     build === 'rural' ? WOOD_DARK : build === 'town' ? PLASTER : '#c2b397';
-  const H = FRONT_HALF;
-  const T = FRONT_TALL;
+  const old = build === 'stone' || build === 'rural';
+  const H = hut ? HUT_HALF : FRONT_HALF;
+  const T = hut ? HUT_TALL : FRONT_TALL;
+  const bell = !old && doorHasBell('panel', `front ${name}`);
+  const leaf =
+    make === 'plank' || old ? plankLeaf(WOOD) : panelLeaf(colourNamed(name) ?? WOOD);
   // The front with its doorway cut out, so the door and the dark show.
   const face =
     `<path d="M${-H},${-T} L${H},${-T} L${H},0 L56,0 L56,-212 L-56,-212 L-56,0 L${-H},0 Z" ${fill(wall)}/>` +
@@ -1258,36 +1472,41 @@ function drawBuildingDoor(pack: StylePackId | null): SetPiece {
       1.6,
     );
   const storey = -270;
-  const windows =
-    frontWindow(-176, -186, 76, 96, trim) +
-    frontWindow(100, -186, 76, 96, trim) +
-    [-170, -38, 94].map((x) => frontWindow(x, -438, 76, 110, trim)).join('');
+  const windows = hut
+    ? oldWindow(-128, -176, 44, 52) + oldWindow(84, -176, 44, 52)
+    : old
+      ? oldWindow(-170, -176, 56, 64) +
+        oldWindow(114, -176, 56, 64) +
+        [-150, -28, 94].map((x) => oldWindow(x, -420, 56, 72)).join('')
+      : frontWindow(-176, -186, 76, 96, trim) +
+        frontWindow(100, -186, 76, 96, trim) +
+        [-170, -38, 94].map((x) => frontWindow(x, -438, 76, 110, trim)).join('');
   return {
     ...framed(
       shadow(H - 10) +
         DOOR_DARK +
-        doorLeaf(WOOD) +
+        leaf +
         `<g id="frame">` +
         face +
-        // A band between the storeys and a cornice along the top.
-        rect(-H, storey, 2 * H, 10, trim, 1) +
+        // A band between the storeys and a cornice along the top (a hut's
+        // eaves); an old front's plain.
+        (hut || old ? '' : rect(-H, storey, 2 * H, 10, trim, 1)) +
         rect(-H - 8, -T - 14, 2 * H + 16, 18, trim, 2) +
         windows +
-        // The doorway's surround, lintel, and its bell.
-        rect(-86, -244, 172, 12, trim) +
+        // The doorway's surround and lintel, and its bell where it has one.
+        (old ? '' : rect(-86, -244, 172, 12, trim)) +
         rect(-56, -212, 8, 212, WOOD_DARK, 0) +
         rect(48, -212, 8, 212, WOOD_DARK, 0) +
         rect(-56, -212, 112, 10, WOOD_DARK) +
-        rect(61, -133, 11, 14, WHITE, 2) +
-        `<circle cx="66.5" cy="-126" r="3.2" ${fill(STONE)}/>` +
+        (bell ? BELL : '') +
         // A step before it, the pavement's edge of the building.
-        rect(-70, -8, 140, 8, '#b9b2a4', 1) +
+        rect(-70, -8, 140, 8, old ? shadeOf(wall, 0.85) : '#b9b2a4', 1) +
         `</g>`,
       [-H - 8, -T - 14, 2 * H + 16, T + 14],
     ),
     leaf: { id: 'leaf', hinge: [-48, -102] },
     opening: [-48, -204, 48, 0],
-    affordances: DOOR_AFFORDANCES,
+    affordances: doorAffordances(bell),
     stand: [-86, 86],
     roosts: [
       [-H + 20, -T - 14],
@@ -1296,31 +1515,106 @@ function drawBuildingDoor(pack: StylePackId | null): SetPiece {
   };
 }
 
-/** A stretch of wall as its place builds one, to stand by or climb up on. */
-function drawWall(pack: StylePackId | null): SetPiece {
+// ── Walls as their place builds them, and as they are called ────────────
+
+/** What a stretch of wall is made of. */
+export type WallMaterial =
+  | 'brick'
+  | 'stone'
+  | 'mud'
+  | 'concrete'
+  | 'timber'
+  | 'hedge'
+  | 'zinc';
+
+/** What a wall's name says it is made of; null where it says nothing. */
+export function wallMaterialNamed(name: string): WallMaterial | null {
+  if (/\bhedges?\b/iu.test(name)) return 'hedge';
+  if (/\b(?:corrugated|zinc|tin|iron|metal|sheet)\b/iu.test(name))
+    return 'zinc';
+  if (/\b(?:mud|adobe|clay|earth(?:en)?)\b/iu.test(name)) return 'mud';
+  if (/\b(?:concrete|cement|breeze ?block|cinder ?block|block)\b/iu.test(name))
+    return 'concrete';
+  if (/\b(?:brick|bricks)\b/iu.test(name)) return 'brick';
+  if (/\b(?:stone|rock|rocks|dry ?stone|cobble)\b/iu.test(name))
+    return 'stone';
+  if (/\b(?:wood(?:en)?|timber|plank|log)\b/iu.test(name)) return 'timber';
+  return null;
+}
+
+/** What a place's walls are made of when their name says nothing: its pack's. */
+export function wallMaterialOf(
+  pack: StylePackId | null,
+  name = '',
+): WallMaterial {
+  const named = wallMaterialNamed(name);
+  if (named) return named;
+  if (pack === 'ancient-near-east') return 'mud';
   const build = buildOf(pack);
   // A farm's wall is a dry stone wall, never its rail fence: one climbs up on it.
-  const as = build === 'rural' ? 'stone' : build;
-  return {
-    ...framed(
-      as === 'compound'
-        ? rect(-124, -96, 248, 96, CONCRETE, 0) +
-            rect(-130, -106, 260, 12, '#c2b397') +
+  return build === 'compound'
+    ? 'concrete'
+    : build === 'stone' || build === 'rural'
+      ? 'stone'
+      : 'brick';
+}
+
+/** A stretch of wall as its place builds one, or as its name says (a hedge, a brick wall), to stand by or climb up on. */
+function drawWall(pack: StylePackId | null, name = ''): SetPiece {
+  const made = wallMaterialOf(pack, name);
+  const body =
+    made === 'concrete'
+      ? rect(-124, -96, 248, 96, CONCRETE, 0) +
+        rect(-130, -106, 260, 12, '#c2b397') +
+        line(
+          'M-124,-64 L124,-64 M-124,-32 L124,-32 M-60,-94 L-60,-64 M40,-94 L40,-64 M-10,-64 L-10,-32 M90,-64 L90,-32 M-80,-32 L-80,0 M30,-32 L30,0',
+          '#a99a80',
+          2,
+        )
+      : made === 'hedge'
+        ? `<path d="M-128,0 L-128,-78 Q-120,-106 -86,-100 Q-64,-116 -34,-102 Q-4,-118 26,-102 Q56,-116 84,-100 Q118,-106 128,-78 L128,0 Z" ${fill(LEAF)}/>` +
+          line(
+            'M-96,-70 Q-84,-80 -72,-70 M-30,-58 Q-18,-68 -6,-58 M40,-74 Q52,-84 64,-74 M88,-40 Q100,-50 112,-40 M-70,-30 Q-58,-40 -46,-30',
+            LEAF_DARK,
+            2.4,
+          )
+        : made === 'zinc'
+          ? rect(-124, -106, 248, 106, '#a7adb3', 0) +
             line(
-              'M-124,-64 L124,-64 M-124,-32 L124,-32 M-60,-94 L-60,-64 M40,-94 L40,-64 M-10,-64 L-10,-32 M90,-64 L90,-32 M-80,-32 L-80,0 M30,-32 L30,0',
-              '#a99a80',
+              Array.from(
+                { length: 15 },
+                (_, i) => `M${-116 + i * 16},-106 L${-116 + i * 16},0`,
+              ).join(' '),
+              '#868c93',
               2,
-            )
-        : wallRun(-124, 248, 106, as),
-      [-130, -106, 260, 106],
-    ),
-    perch: 106,
-    roosts: [
-      [-80, -106],
-      [0, -106],
-      [80, -106],
-    ],
-  };
+            ) +
+            line('M-124,-80 L124,-80 M-124,-24 L124,-24', '#c0763f', 1.6)
+          : made === 'timber'
+            ? wallRun(-124, 248, 106, 'rural')
+            : made === 'mud'
+              ? rect(-124, -98, 248, 98, MUD_BRICK, 0) +
+                `<path d="M-128,-98 Q-100,-110 -60,-104 Q0,-112 60,-104 Q100,-110 128,-98 Z" ${fill(shadeOf(MUD_BRICK, 1.08))}/>` +
+                line(
+                  'M-124,-66 L124,-66 M-124,-33 L124,-33 M-80,-98 L-80,-66 M10,-98 L10,-66 M90,-98 L90,-66 M-40,-66 L-40,-33 M50,-66 L50,-33 M-100,-33 L-100,0 M-10,-33 L-10,0 M80,-33 L80,0',
+                  shadeOf(MUD_BRICK, 0.82),
+                  2,
+                )
+              : wallRun(-124, 248, 106, made === 'stone' ? 'stone' : 'town');
+  // A hedge's and a mud wall's tops bulge a little above the rest.
+  const tall = made === 'hedge' || made === 'mud' ? 110 : 106;
+  return marked(
+    {
+      ...framed(body, [-130, -tall, 260, tall]),
+      perch: 106,
+      roosts: [
+        [-80, -106],
+        [0, -106],
+        [80, -106],
+      ],
+    },
+    made,
+    pack,
+  );
 }
 
 /** Whether the stage draws a feature itself: always one people act on; any other, where the painting has not got it. */

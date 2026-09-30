@@ -46,6 +46,7 @@ import {
   STATION_SHARES,
 } from '../scene-layout';
 import { drawPiece, perchOf } from '../scene-set-pieces';
+import { doorsOnStage } from './studio-doors';
 import {
   USES,
   interactLeastMs,
@@ -982,8 +983,10 @@ export function stageStory(
   // reckons who goes where and how far: a goalpost painted on the right
   // is on the right, wherever the set's list says it stands.
   const painted = options.painted ?? {};
+  // A door only where the story needs one, as its place has one (studio-doors).
+  const shown = doorsOnStage(sheet, place, bible, options.before ?? null);
   const features = new Map(
-    (place?.features ?? []).map((f) => [
+    shown.features.map((f) => [
       f.id,
       painted[f.id] !== undefined
         ? { ...f, spot: nearestSpot(painted[f.id]) }
@@ -991,7 +994,7 @@ export function stageStory(
     ]),
   );
   /** Each feature as the set keeps it: where the list says it stands. */
-  const kept = new Map((place?.features ?? []).map((f) => [f.id, f]));
+  const kept = new Map(shown.features.map((f) => [f.id, f]));
   /** What each feature offers the people who use it, once worked out. */
   const offered = new Map<
     string,

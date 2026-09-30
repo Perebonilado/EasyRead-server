@@ -561,6 +561,58 @@ export interface SetSheet {
 /** A book's places as painted, by their id in the story. */
 export type Sets = Record<string, SetSheet>;
 
+/** A stretch of wall a set built by code stood in a room (a group of its own, with nothing inside it but its shapes). */
+const ROOM_WALL_PIECE =
+  /<g\b[^>]*\bdata-kind="wall"[^>]*>(?:(?!<g[\s>]|<\/g>)[\s\S])*<\/g>/gu;
+
+/**
+ * A set as it is drawn now, whenever it was built: a room (or a vessel)
+ * built before its layout's stretches of wall were left out of rooms has
+ * them taken out of its picture and its layers, so no room has a low
+ * block wall standing in it as filler (studio-door-plan). Out of doors, a
+ * wall is the place's own, and stays.
+ */
+export function withoutRoomFiller(set: SetSheet): SetSheet {
+  if (!/data-place="(?:indoor|vessel)"/u.test(set.drawing.svg)) return set;
+  const strip = (svg: string) => svg.replace(ROOM_WALL_PIECE, '');
+  const layers = (one: SetLayering | Omit<SetLayering, 'reverse'>) =>
+    one.layers.map((layer) => ({ ...layer, svg: strip(layer.svg) }));
+  const svg = strip(set.drawing.svg);
+  const layered = set.layered
+    ? {
+        ...set.layered,
+        layers: layers(set.layered),
+        ...(set.layered.reverse
+          ? {
+              reverse: {
+                ...set.layered.reverse,
+                layers: layers(set.layered.reverse),
+              },
+            }
+          : {}),
+      }
+    : undefined;
+  const changed =
+    svg !== set.drawing.svg ||
+    JSON.stringify(layered?.layers) !== JSON.stringify(set.layered?.layers) ||
+    JSON.stringify(layered?.reverse?.layers) !==
+      JSON.stringify(set.layered?.reverse?.layers);
+  if (!changed) return set;
+  return {
+    ...set,
+    drawing: { ...set.drawing, svg },
+    ...(set.layout
+      ? {
+          layout: {
+            ...set.layout,
+            items: set.layout.items.filter((one) => one.kind !== 'wall'),
+          },
+        }
+      : {}),
+    ...(layered ? { layered } : {}),
+  };
+}
+
 /** Sets read back from storage: only those painted the way they are painted now. */
 export function setsOf(raw: unknown): Sets {
   if (!raw || typeof raw !== 'object') return {};
@@ -571,7 +623,7 @@ export function setsOf(raw: unknown): Sets {
       // A ground that cannot be read is measured again.
       const { ground, ...rest } = one as SetSheet;
       const read = ground ? groundOf(ground) : null;
-      out[id] = read ? { ...rest, ground: read } : rest;
+      out[id] = withoutRoomFiller(read ? { ...rest, ground: read } : rest);
     }
   }
   return out;

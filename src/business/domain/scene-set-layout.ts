@@ -2964,8 +2964,15 @@ function buildSetAt(
       )
     )
       continue;
-    // A window or a door is a room's, on its wall; a vessel has its own.
-    if ((item.kind === 'window' || item.kind === 'door') && kind !== 'indoor')
+    // A window is a room's, on its wall; a vessel has its own. A door is
+    // the stage's, drawn only in a scene that needs one, as its place has
+    // one (studio-doors): never one the painter adds for show. And a room
+    // has its own walls: never a stretch of wall standing in it as filler.
+    if (
+      (item.kind === 'window' && kind !== 'indoor') ||
+      item.kind === 'door' ||
+      (item.kind === 'wall' && kind !== 'outdoor')
+    )
       continue;
     if (item.kind === 'window') item = { ...item, kind: 'curtains' };
     const piece = pieceOf(
@@ -3212,6 +3219,7 @@ function buildSetAt(
         pack: layout.style,
         livery: layout.livery ?? null,
         outdoor: kind === 'outdoor',
+        vessel: kind === 'vessel',
       }),
       kind: feature.kind,
       x: (SPOT_AT[feature.spot] ?? 0.5) * SET_W,

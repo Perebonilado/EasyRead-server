@@ -130,6 +130,28 @@ export function spaceOut(
     busy.set(p.a, (busy.get(p.a) ?? 0) + 1);
     busy.set(p.b, (busy.get(p.b) ?? 0) + 1);
   }
+  /**
+   * Where one coming near someone may go, toward `to`: never past anyone
+   * else on the way (a third person, a thing on the floor), whom they stop
+   * beside instead, clear of their body in one row and not wholly behind
+   * or before them in another (studio-space-plan). Stepping apart is free.
+   */
+  const passNoOne = (one: Spaced, to: number, pair: readonly string[]) => {
+    const dir = Math.sign(to - one.x);
+    if (!dir) return to;
+    let most = to;
+    for (const other of at.values()) {
+      if (pair.includes(other.id)) continue;
+      const ahead = (other.x - one.x) * dir;
+      if (ahead <= 0.5) continue;
+      const room = sameRow(one, other)
+        ? leastAcross(one, other, false)
+        : (one.half + other.half) * 0.6;
+      const stop = other.x - dir * room;
+      if ((stop - most) * dir < 0) most = (stop - one.x) * dir < 0 ? one.x : stop;
+    }
+    return most;
+  };
   for (let round = 0; round < 4; round += 1) {
     // 1. Near enough for what they are doing.
     for (const pair of pairs) {
@@ -166,8 +188,8 @@ export function spaceOut(
             : bBusy > aBusy + 1
               ? 0.75
               : 0.5;
-      a.x = clamp(a.x + side * gap * aShare);
-      b.x = clamp(b.x - side * gap * (1 - aShare));
+      a.x = passNoOne(a, clamp(a.x + side * gap * aShare), [a.id, b.id]);
+      b.x = passNoOne(b, clamp(b.x - side * gap * (1 - aShare)), [a.id, b.id]);
     }
     // 2. No one inside anyone else.
     let moved = false;

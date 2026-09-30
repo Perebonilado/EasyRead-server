@@ -113,6 +113,7 @@ import {
   figureOf,
   signsOver,
   type FigureSpec,
+  agedFor,
   oldWorld,
 } from '../../business/domain/scene-figure';
 import { animalFor, describeAnimal } from '../../business/domain/scene-animal';
@@ -1761,18 +1762,26 @@ export class SceneProcessor {
         ? ((character ? creatureFor(character) : null) ?? sheet.creature)
         : null;
       const onPage = sheet?.figure
-        ? await figureDrawing(thing.wears ?? sheet.figure, thing.ref, {
-            pose: thing.pose,
-            holding: thing.holding,
-            signs,
-            faces,
-            old: oldWorld(story?.bible.world?.era),
-            ...(thing.dress?.length ? { dress: thing.dress } : {}),
-            // Drawn new for the page, with what swings and from every
-            // side: rig 3. A sheet the book keeps is as it was drawn.
-            rig: VIEW_RIG,
-            faceRig: true,
-          })
+        ? // A baby the kit draws as one, whatever age their figure says.
+          await figureDrawing(
+            agedFor(thing.wears ?? sheet.figure, [
+              character?.name,
+              character?.look,
+            ]),
+            thing.ref,
+            {
+              pose: thing.pose,
+              holding: thing.holding,
+              signs,
+              faces,
+              old: oldWorld(story?.bible.world?.era),
+              ...(thing.dress?.length ? { dress: thing.dress } : {}),
+              // Drawn new for the page, with what swings and from every
+              // side: rig 3. A sheet the book keeps is as it was drawn.
+              rig: VIEW_RIG,
+              faceRig: true,
+            },
+          )
         : kitAnimal
           ? await animalDrawing(kitAnimal, thing.ref, {
               signs,

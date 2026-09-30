@@ -11,6 +11,7 @@
  * them up, and each thing they put on or take off.
  */
 import { NEEDS_FEET, doingOf } from '../scene-doings';
+import { isCradle } from '../scene-affordances';
 import { USES } from '../scene-interact';
 import type { FigureSpec } from '../scene-figure';
 import {
@@ -71,9 +72,16 @@ export const STEP_DOWN_S = 1.1;
 /** How long going over to a seat or a bed to sit or lie on it takes, about. */
 export const GO_TO_SEAT_S = 1.2;
 
+/** A feature as posture knows it: its id and kind, and its name where it has one (a cradle is known by it). */
+type Rested = Pick<StudioFeature, 'id' | 'kind'> & { name?: string };
+
+/** Whether one lying on a feature is in it, under its cover or below its rim: a bed, a cradle (a manger, a crib). */
+const lainIn = (feature: Rested | undefined) =>
+  Boolean(feature && (BEDS.has(feature.kind) || isCradle(feature)));
+
 /** The set's feature a word or an id names, if one is sat or lain on: its own id, else the only one of its kind. */
 function restingOn(
-  features: readonly Pick<StudioFeature, 'id' | 'kind'>[],
+  features: readonly Rested[],
   asked: string | null | undefined,
   kinds: ReadonlySet<string>,
 ): string | null {
@@ -85,7 +93,7 @@ function restingOn(
 }
 
 /** The set's one bed, if it has exactly one. */
-const bedOf = (features: readonly Pick<StudioFeature, 'id' | 'kind'>[]) => {
+const bedOf = (features: readonly Rested[]) => {
   const beds = features.filter((f) => BEDS.has(f.kind));
   return beds.length === 1 ? beds[0].id : null;
 };
@@ -93,7 +101,7 @@ const bedOf = (features: readonly Pick<StudioFeature, 'id' | 'kind'>[]) => {
 /** How someone opens a scene, from their place on the sheet: null standing. */
 export function openingPosture(
   place: Pick<SheetPlace, 'pose' | 'on'>,
-  features: readonly Pick<StudioFeature, 'id' | 'kind'>[],
+  features: readonly Rested[],
 ): Posture | null {
   const kinds = new Map(features.map((f) => [f.id, f.kind]));
   if (place.pose === 'in bed') {
@@ -107,7 +115,7 @@ export function openingPosture(
     return {
       how: 'lie',
       on,
-      in: on !== null && BEDS.has(kinds.get(on) ?? ''),
+      in: on !== null && lainIn(features.find((f) => f.id === on)),
     };
   }
   if (place.pose === 'sitting')
@@ -135,7 +143,7 @@ export interface PostureChanges {
  */
 export function posturesOf(
   sheet: Pick<StorySheet, 'onStage' | 'beats'>,
-  features: readonly Pick<StudioFeature, 'id' | 'kind'>[],
+  features: readonly Rested[],
 ): PostureChanges {
   const kinds = new Map(features.map((f) => [f.id, f.kind]));
   const opening = new Map<string, Posture>();
@@ -172,7 +180,10 @@ export function posturesOf(
         asked,
         how === 'sit' ? SEATS : LAIN_ON,
       );
-      const bed = target && BEDS.has(kinds.get(target) ?? '');
+      const bed =
+        target &&
+        (BEDS.has(kinds.get(target) ?? '') ||
+          (how === 'lie' && lainIn(features.find((f) => f.id === target))));
       let next: Posture;
       if (target)
         next = {

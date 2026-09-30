@@ -1517,6 +1517,13 @@ export interface SceneFeatureDto {
   up?: Record<'box' | 'wide', { x: number; y: number }>;
   /** The group of its drawing that covers whoever is in it (a bed's duvet), drawn over them while they are; absent, it has none. */
   cover?: string;
+  /**
+   * A cradle (a manger, a crib) of the show's own: how far down its box
+   * its rim is, as a share of its height. Its drawing below the rim is
+   * drawn again over whoever lies in it, as a bed's cover is: they are
+   * in it, their head over its rim.
+   */
+  rim?: number;
   /** How high someone sitting on it sits, at each staging: the y of its seat. Absent, it is not sat on. */
   seat?: Record<'box' | 'wide', number>;
   /** Where one lying on it lies, at each staging: along its top (y), from its foot to its head (x). */
@@ -1964,6 +1971,16 @@ export interface ScenePlaceDto {
   labels?: SceneLabelDto[];
   /** A Studio story's person: how far back they stand on the floor, 0 at its back to 1 at its front, 0.5 where people have always stood. Absent, 0.5. */
   d?: number;
+  /**
+   * A Studio story's person walking here from where they stood the step
+   * before: the places their walk passes through on the way, in order,
+   * going round someone or something in their way (behind them or before
+   * them, at another depth) rather than through them. Absent, a walk goes
+   * straight.
+   */
+  via?: { x: number; y: number; w: number; h: number; d?: number }[];
+  /** A Studio story's baby in someone's arms: whose, by id. Drawn just before them, whatever their feet say, and carried where they go. */
+  held?: string;
 }
 
 /** One label set by the stage: its words' box, which edge they hang from, and its leader to the part. */

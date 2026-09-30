@@ -16,6 +16,7 @@ import { isolate, type Callout } from './scene-callouts';
 import { elements, byId, walk } from './scene-dom';
 import {
   drawFigure,
+  drawnScale,
   figureFrame,
   figureOf,
   type FigureHow,
@@ -121,7 +122,8 @@ export async function figureDrawing(
       ? { viewBox: drawn.viewBox, map: measured.grid }
       : null,
     head: drawn.anchors.head,
-    stands: { units: h },
+    // A baby stands a third of a grown-up's height: its frame drawn smaller.
+    stands: { units: Math.round(h * drawnScale(spec.age) * 10) / 10 },
     acts: true,
     anchors: drawn.anchors,
     ...(drawn.joints ? { joints: drawn.joints } : {}),

@@ -47,7 +47,7 @@ import {
   type RigVersion,
 } from './scene-dangles';
 
-export const FIGURE_AGES = ['child', 'teen', 'adult', 'elder'] as const;
+export const FIGURE_AGES = ['infant', 'child', 'teen', 'adult', 'elder'] as const;
 export type FigureAge = (typeof FIGURE_AGES)[number];
 
 export const FIGURE_BUILDS = ['slim', 'average', 'broad'] as const;
@@ -468,7 +468,7 @@ export function figureOf(
     hair: one(HAIR_STYLES, said.hair, fallback.hair),
     hairColour: one(HAIR_COLOURS, said.hairColour, fallback.hairColour),
     facialHair:
-      age === 'child'
+      age === 'child' || age === 'infant'
         ? 'none'
         : one(FACIAL_HAIR, said.facialHair, fallback.facialHair),
     headwear: one(HEADWEAR, said.headwear, fallback.headwear),
@@ -558,6 +558,9 @@ const AGES: Record<
   FigureAge,
   { body: number; legs: number; shoulder: number; hem: number }
 > = {
+  // A baby, swaddled: the kit's head on a small wrapped body, drawn at
+  // INFANT_SCALE of its frame so they are a third of a grown-up's height.
+  infant: { body: 40, legs: 4, shoulder: 54, hem: 62 },
   child: { body: 58, legs: 12, shoulder: 60, hem: 80 },
   teen: { body: 64, legs: 24, shoulder: 64, hem: 84 },
   adult: { body: 76, legs: 38, shoulder: 70, hem: 90 },
@@ -608,6 +611,47 @@ export function figureFrame(age: FigureAge): [number, number, number, number] {
     FIGURE_FRAME.halfWidth * 2,
     FIGURE_FRAME.below - y,
   ];
+}
+
+/** How tall a baby stands beside a grown-up (studio-space-plan): about a third. */
+export const INFANT_HEIGHT = 0.35;
+/**
+ * The share of its own frame a baby is drawn at on the stage, so it stands
+ * INFANT_HEIGHT of a grown-up's height: its head is the kit's head, which
+ * is the same at every other age, so the whole of it is drawn smaller.
+ */
+export const INFANT_SCALE =
+  Math.round(
+    ((INFANT_HEIGHT * figureFrame('adult')[3]) / figureFrame('infant')[3]) *
+      1000,
+  ) / 1000;
+/** The share of its frame a figure of an age is drawn at on the stage: a baby smaller, everyone else as drawn. */
+export const drawnScale = (age: FigureAge): number =>
+  age === 'infant' ? INFANT_SCALE : 1;
+
+/** Words that say someone is a baby. */
+const BABY_WORDS =
+  /\b(?:bab(?:y|ies)|newborns?|new-born|infants?|little one|swaddl(?:ed|ing))\b/iu;
+
+/**
+ * Someone as the kit draws them, a baby where their words say so (their
+ * name, how they look: "Baby Jesus", "a newborn wrapped in swaddling
+ * cloths"), whatever age their figure was given: the kit has a baby of
+ * its own (studio-space-plan).
+ */
+export function agedFor(
+  spec: FigureSpec,
+  words: readonly (string | null | undefined)[],
+): FigureSpec {
+  if (spec.age === 'infant') return spec;
+  if (!words.some((w) => w && BABY_WORDS.test(w))) return spec;
+  return {
+    ...spec,
+    age: 'infant',
+    facialHair: 'none',
+    headwear: 'none',
+    extras: spec.extras.filter((e) => e === 'wings'),
+  };
 }
 
 export const r1 = (n: number) => Math.round(n * 10) / 10;
@@ -1765,6 +1809,20 @@ export function dressOf(spec: FigureSpec, R: Rig): Dressed {
     details: '',
     collar: '',
   };
+  // A baby is wrapped: a cloth to the ground over their feet, folded
+  // across the front, whatever they are said to wear.
+  if (spec.age === 'infant')
+    return {
+      ...plain,
+      sleeves: 'wide',
+      longer: -hemY - 1,
+      flare: 3,
+      details: line(
+        `M${r1(-R.halfHem + 2)},${r1(sY + 14)} Q0,${mid} ${r1(R.halfHem - 4)},${r1(hemY + 2)}`,
+        shade(top, 0.8),
+        2.4,
+      ),
+    };
   switch (spec.top) {
     case 't-shirt':
       return { ...plain, sleeves: 'short' };
@@ -2674,7 +2732,9 @@ export function layersOf(
     }
     // Sandals: the foot, and straps over it; bare feet, the foot alone.
     // The foot stays flat on the ground however the leg above it turns.
-    const foot = spec.extras.includes('sandals')
+    const foot = spec.age === 'infant'
+      ? []
+      : spec.extras.includes('sandals')
       ? [
           `<ellipse cx="${s * 17}" cy="-6" rx="15" ry="7" ${inked(skin)}/>`,
           line(`M${s * 17 - 11},-5 L${s * 17 + 11},-5`, '#6b4a2f', 3),
@@ -3599,8 +3659,14 @@ export function drawFigure(
     ? 1
     : Math.min(MOST_TOGETHER, Math.max(1, Math.round(how.count ?? 1) || 1));
   const holding = lying ? null : (how.holding ?? null);
-  // Something in hand and no pose for it: held up.
-  const posed = holding && pose === 'standing' ? 'holding' : pose;
+  // Something in hand and no pose for it: held up. A baby's arms are
+  // folded in their wrap.
+  const posed =
+    holding && pose === 'standing'
+      ? 'holding'
+      : spec.age === 'infant' && pose === 'standing'
+        ? 'hands on belly'
+        : pose;
   const drawn = signsFor(pose, how.signs);
   const members = Array.from({ length: n }, (_, i) =>
     layersOf(

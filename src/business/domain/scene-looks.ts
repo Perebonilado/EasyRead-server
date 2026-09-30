@@ -68,6 +68,7 @@ export const TOO_ALIKE = 11;
 
 /** Hair someone of an age may be given, when nothing says. */
 const HAIR_STYLE_FOR: Record<FigureSpec['age'], readonly FigureSpec['hair'][]> = {
+  infant: ['bald', 'short', 'curly'],
   child: ['short', 'curly', 'spiky', 'afro', 'pigtails', 'bob'],
   teen: ['short', 'curly', 'spiky', 'afro', 'ponytail', 'bob'],
   adult: ['short', 'curly', 'long', 'afro', 'locs', 'bun'],
@@ -76,6 +77,7 @@ const HAIR_STYLE_FOR: Record<FigureSpec['age'], readonly FigureSpec['hair'][]> =
 
 /** Hair colours someone of an age may be given, when nothing says. */
 const HAIR_FOR: Record<FigureSpec['age'], readonly HairColour[]> = {
+  infant: ['black', 'dark brown', 'brown', 'auburn', 'blonde', 'red'],
   child: ['black', 'dark brown', 'brown', 'auburn', 'blonde', 'red'],
   teen: ['black', 'dark brown', 'brown', 'auburn', 'blonde', 'red'],
   adult: ['black', 'dark brown', 'brown', 'auburn', 'blonde', 'red', 'grey'],

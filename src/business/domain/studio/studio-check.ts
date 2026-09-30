@@ -97,7 +97,10 @@ import {
   type StudioOutline,
   type StudioThing,
   type StorySheet,
+  type SheetPlace,
+  babyNamed,
   handledOn,
+  isBaby,
   kindOn,
   namesOf,
 } from './studio';
@@ -569,6 +572,20 @@ export function mendSheet(
       );
     taken.add(spot);
     opening.push({ ...place, who, spot });
+  }
+  // A baby in someone's arms (studio-space-plan): one holding a baby of
+  // the cast has them lying in their arms, "on" them, their own hands
+  // otherwise empty.
+  for (const place of opening) {
+    const baby = place.holding ? babyNamed(bible, place.holding) : null;
+    const theirs = baby
+      ? opening.find((p) => p.who === baby && p.who !== place.who)
+      : undefined;
+    if (!theirs) continue;
+    theirs.pose = 'lying';
+    theirs.on = place.who;
+    place.holding = null;
+    mended.push(`${nameOf(theirs.who)} is in ${nameOf(place.who)}'s arms`);
   }
   // What someone holds that no list has is the show's own if the scene's
   // words name it; else their hands are empty.
@@ -1780,10 +1797,24 @@ export function mendSheet(
     } else place.pose = 'in bed';
     mended.push(`${nameOf(place.who)} is in bed as it opens, as the words say`);
   }
+  // A baby "on" someone on the stage is in their arms (studio-space-plan).
+  const onStageIds = new Set(sheet.onStage.map((p) => p.who));
+  const inArms = (place: SheetPlace) =>
+    Boolean(
+      place.on &&
+      place.on !== place.who &&
+      onStageIds.has(place.on) &&
+      isBaby(bible, place.who) &&
+      !isBaby(bible, place.on),
+    );
   // One in bed as the scene opens is in the set's own bed: the set has
   // one, or it is put on it, never drawn into them. One sitting or lying
   // on something the set has not got has it there too.
   for (const place of sheet.onStage) {
+    if (inArms(place)) {
+      place.pose = 'lying';
+      continue;
+    }
     const bedded =
       place.pose === 'in bed' ||
       (place.pose === 'lying' &&

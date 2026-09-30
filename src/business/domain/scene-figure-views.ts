@@ -2251,7 +2251,13 @@ export function drawnInViews(
   const key = seed || JSON.stringify(spec);
   const clip = `f${Math.floor(beatOf(`${key}:id`) * 1e6).toString(36)}`;
   const holding = how.holding ?? null;
-  const posed = holding && pose === 'standing' ? 'holding' : pose;
+  // A baby's arms are folded in their wrap (scene-figure's drawFigure).
+  const posed =
+    holding && pose === 'standing'
+      ? 'holding'
+      : spec.age === 'infant' && pose === 'standing'
+        ? 'hands on belly'
+        : pose;
   const drawn = signsFor(pose, how.signs);
   const faces = facesFor(how.faces);
   const changes = how.dress ?? [];

@@ -33,11 +33,20 @@ export const WALK_STAGE_MS = 5200;
 export const WALK_MIN_MS = 1300;
 export const WALK_MAX_MS = 4400;
 
-const walkMs = (dx: number, W: number) =>
-  Math.min(
-    WALK_MAX_MS,
-    Math.max(WALK_MIN_MS, (Math.abs(dx) / W) * WALK_STAGE_MS),
-  );
+/** A scene's walking pace: a walk across the whole stage, and its shortest and longest (SceneDto.walk). */
+export interface WalkPace {
+  stageMs: number;
+  minMs: number;
+  maxMs: number;
+}
+const WALK_PACE: WalkPace = {
+  stageMs: WALK_STAGE_MS,
+  minMs: WALK_MIN_MS,
+  maxMs: WALK_MAX_MS,
+};
+
+const walkMs = (dx: number, W: number, pace: WalkPace = WALK_PACE) =>
+  Math.min(pace.maxMs, Math.max(pace.minMs, (Math.abs(dx) / W) * pace.stageMs));
 
 /**
  * How far into the floor a change of size is, in widths of the stage per
@@ -67,12 +76,79 @@ export function walkLength(
   return into ? Math.hypot(across, into) : Math.abs(to.x - from.x);
 }
 
-/** How long a walk between two places takes, at a walk: by its true length on the floor. */
+/**
+ * How long a walk between two places takes, at a walk: by its true length
+ * on the floor, round whoever it goes round (the place's via) where it
+ * bends. The client's walkBetween.
+ */
 export const walkBetween = (
   from: Pick<ScenePlaceDto, 'x' | 'w' | 'h'>,
-  to: Pick<ScenePlaceDto, 'x' | 'w' | 'h'>,
+  to: Pick<ScenePlaceDto, 'x' | 'w' | 'h' | 'via'>,
   W: number,
-) => walkMs(walkLength(from, to, W), W);
+  pace: WalkPace = WALK_PACE,
+) =>
+  walkMs(pathLength(from, to, W), W, pace);
+
+/** How far a walk goes on the floor: straight, or leg by leg through its via. */
+export function pathLength(
+  from: Pick<ScenePlaceDto, 'x' | 'w' | 'h'>,
+  to: Pick<ScenePlaceDto, 'x' | 'w' | 'h' | 'via'>,
+  W: number,
+): number {
+  const points = [from, ...(to.via ?? []), to];
+  let out = 0;
+  for (let i = 1; i < points.length; i += 1)
+    out += walkLength(points[i - 1], points[i], W);
+  return out;
+}
+
+/**
+ * Where someone is along a walk at a share `p` of its time, eased as the
+ * player eases it: straight from one place to the next; or, round someone
+ * in the way, leg by leg through its via at one pace, each place on the
+ * way reached when as much of the walk is done as the legs before it are
+ * of the whole. The client's pathPlace.
+ */
+export function pathPlace(
+  from: ScenePlaceDto,
+  to: ScenePlaceDto,
+  p: number,
+  W = FRAME_W,
+): ScenePlaceDto {
+  const u = walkEase(Math.min(1, Math.max(0, p)));
+  const { via, ...end } = to;
+  const mix = (
+    a: Pick<ScenePlaceDto, 'x' | 'y' | 'w' | 'h' | 'd'>,
+    b: Pick<ScenePlaceDto, 'x' | 'y' | 'w' | 'h' | 'd'>,
+    q: number,
+  ): ScenePlaceDto => ({
+    ...end,
+    x: a.x + (b.x - a.x) * q,
+    y: a.y + (b.y - a.y) * q,
+    w: a.w + (b.w - a.w) * q,
+    h: a.h + (b.h - a.h) * q,
+    ...(a.d !== undefined && b.d !== undefined
+      ? { d: a.d + (b.d - a.d) * q }
+      : {}),
+  });
+  if (!via?.length) return mix(from, end, u);
+  const points = [from, ...via, end];
+  const legs = points
+    .slice(1)
+    .map((point, i) => walkLength(points[i], point, W));
+  const whole = legs.reduce((n, leg) => n + leg, 0);
+  let gone = u * whole;
+  for (let i = 0; i < legs.length; i += 1) {
+    if (gone <= legs[i] || i === legs.length - 1)
+      return mix(
+        points[i],
+        points[i + 1],
+        Math.min(1, gone / Math.max(1e-6, legs[i])),
+      );
+    gone -= legs[i];
+  }
+  return mix(from, end, u);
+}
 /** A run is this much quicker than a walk; and going in at a feature, this long to be gone there. */
 export const RUN_PACE = 2.2;
 

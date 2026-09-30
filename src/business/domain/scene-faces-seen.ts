@@ -228,6 +228,8 @@ export interface FacesInput {
   hiding: (k: number, id: string) => boolean;
   /** Someone's place stood at depth d instead; null where they cannot be. */
   atDepth: (place: StandingPlace, d: number) => StandingPlace | null;
+  /** Whether standing at a place puts someone inside a thing on the floor (a manger, a stool): never stepped into one (studio-space-plan). Absent, nothing is. */
+  inThing?: (place: StandingPlace) => boolean;
   name: (id: string) => string;
   durationMs: number;
   /** On a set wider than the frame, the room its camera pans in: the wide shot is on where the action is (scene-film's wideView). */
@@ -372,7 +374,9 @@ export function keepFacesSeen(input: FacesInput): FacesMended {
   // A step that would put them in someone's body is never taken.
   const nudges = (k: number, id: string, away: number) =>
     nudgesIn(places[k][id], W, away, input.open(k, id), input.atDepth).filter(
-      (nudge) => !bumpsInto(places, showAt, runOf(k, id), id, nudge.to),
+      (nudge) =>
+        !bumpsInto(places, showAt, runOf(k, id), id, nudge.to) &&
+        !intoThing(input, places[k][id], nudge.to),
     );
 
   /**
@@ -466,7 +470,11 @@ export function keepFacesSeen(input: FacesInput): FacesMended {
         const nearer = input.atDepth(at, d);
         if (!nearer) break;
         // Never nearer into someone's body.
-        if (bumpsInto(places, showAt, run, moment.who, nearer)) break;
+        if (
+          bumpsInto(places, showAt, run, moment.who, nearer) ||
+          intoThing(input, at, nearer)
+        )
+          break;
         back?.();
         back = move(run, moment.who, nearer);
         tries += 1;
@@ -629,6 +637,15 @@ function bumpsInto(
 ): boolean {
   const now = bodiesMet(places, show, run, id, places[run[0]]?.[id] ?? to);
   return [...bodiesMet(places, show, run, id, to)].some((o) => !now.has(o));
+}
+
+/** Whether a step from `from` to `to` takes someone into a thing on the floor they were not in. */
+function intoThing(
+  input: Pick<FacesInput, 'inThing'>,
+  from: StandingPlace,
+  to: StandingPlace,
+): boolean {
+  return Boolean(input.inThing?.(to) && !input.inThing(from));
 }
 
 /** Someone's place over a run of steps, set to `to`; the places they had, to put back. */
@@ -1116,7 +1133,8 @@ export function keepInClearView(input: ClearInput): ClearMended {
         input.atDepth,
       ).filter(
         (one) =>
-          !bumpsInto(places, (j) => steps[j]?.show ?? [], run, who, one.to),
+          !bumpsInto(places, (j) => steps[j]?.show ?? [], run, who, one.to) &&
+          !intoThing(input, places[k][who], one.to),
       )) {
         const was = run.map((j) => facesHiddenAt(j));
         const back = moveIn(places, run, who, nudge.to);

@@ -94,7 +94,8 @@ export function surfacesOf(
   floor: GroundInput['floor'],
   H: number,
 ): { on: number[]; to: number; what: string; resize: boolean } | null {
-  if (restingAt(station)) return null;
+  // On a seat or a bed, or a baby in someone's arms: where they are laid.
+  if (restingAt(station) || station.startsWith('held:')) return null;
   const onFloor =
     place.d !== undefined
       ? floorAt(place.d, floor.floor, floor.eye, floor.bottom).feet
@@ -195,7 +196,12 @@ export function keepGrounded(input: GroundInput): string[] {
       if (a.x === b.x && a.y === b.y && a.w === b.w && a.h === b.h) continue;
       const stations = [input.stations[n - 1]?.[id], input.stations[n]?.[id]];
       // Up something, or on a seat: a climb, a leap or sitting down, not a walk.
-      if (stations.some((s) => s && (/^up:/.test(s) || restingAt(s)))) continue;
+      if (
+        stations.some(
+          (s) => s && (/^(?:up|held):/.test(s) || restingAt(s)),
+        )
+      )
+        continue;
       const ka = k(a.y + a.h);
       const kb = k(b.y + b.h);
       if (ka <= 0.05 || kb <= 0.05) continue;

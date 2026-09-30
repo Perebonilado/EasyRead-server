@@ -46,6 +46,7 @@ import {
   STATION_SHARES,
 } from '../scene-layout';
 import { drawPiece, perchOf } from '../scene-set-pieces';
+import { isCradle } from '../scene-affordances';
 import {
   USES,
   interactLeastMs,
@@ -101,7 +102,9 @@ import {
   type StudioBible,
   type StudioCharacter,
   type StudioFeature,
+  babyNamed,
   handledOn,
+  isBaby,
   isOwnRecipe,
   kindOn,
   kitFaceOf,
@@ -424,6 +427,8 @@ export const besideStation = (feature: string, side: -1 | 1) =>
 export const behindStation = (feature: string) => `behind:${feature}`;
 /** A station under a feature (a bench, a table): where it stands, seen. */
 export const underStation = (feature: string) => `under:${feature}`;
+/** The station of a baby in someone's arms: wherever they are (scene-layout lays them there). */
+export const heldStation = (holder: string) => `held:${holder}`;
 /** A station up a feature: up a tree, on a wall, where one who climbs it stands. */
 export const upStation = (feature: string) => `up:${feature}`;
 
@@ -1019,8 +1024,14 @@ export function stageStory(
     }
   const outfits = outfitsOf(sheet, bible, options.before ?? null);
   /** Whether one lies along a feature with their head at its left: a bed, a sofa or a bench, as the stage draws them. */
-  const headLeft = (feature: string | null) =>
-    ['bed', 'sofa', 'bench'].includes(features.get(feature ?? '')?.kind ?? '');
+  const headLeft = (feature: string | null) => {
+    const one = features.get(feature ?? '');
+    // A cradle too (a manger): its head end is its left (scene-affordances).
+    return (
+      ['bed', 'sofa', 'bench'].includes(one?.kind ?? '') ||
+      Boolean(one && isCradle(one))
+    );
+  };
   /** Whether the set's painting shows a feature: its look names it. */
   const inLook = (f: StudioFeature) =>
     Boolean(place?.look) &&
@@ -1033,6 +1044,16 @@ export function stageStory(
   for (const beat of sheet.beats)
     if (beat.who && byId.has(beat.who)) parts.add(beat.who);
   const opening = new Map(sheet.onStage.map((p) => [p.who, p]));
+  /** Babies in someone's arms as the scene opens, by the baby: whose (studio-space-plan). */
+  const heldBy = new Map<string, string>();
+  for (const p of sheet.onStage) {
+    const baby = p.holding ? babyNamed(bible, p.holding) : null;
+    if (baby && baby !== p.who && opening.has(baby)) heldBy.set(baby, p.who);
+    if (p.on && opening.has(p.on) && byId.has(p.on) && isBaby(bible, p.who))
+      heldBy.set(p.who, p.on);
+  }
+  /** Those holding a baby, whose hands are full of them. */
+  const holdsBaby = new Set(heldBy.values());
   /** Who holds each thing as the scene opens, or brings it on: a thing of its own, apart from them. */
   const startsHeld = new Map<string, string>();
   const resting = new Set(sheet.props.map((p) => p.prop));
@@ -1053,7 +1074,7 @@ export function stageStory(
     // Someone who comes on later holds what the scenes before left them
     // with, and only someone new to the episode what they always carry.
     const holds = at
-      ? at.holding
+      ? at.holding && !(holdsBaby.has(id) && babyNamed(bible, at.holding))
         ? [at.holding]
         : []
       : comesWith(c, options.before);
@@ -1084,6 +1105,10 @@ export function stageStory(
       intro: [],
       traits: c.traits,
       ...(holding ? { holding } : {}),
+      // Holding a baby: their arms folded round them.
+      ...(holdsBaby.has(id) && !holding
+        ? { pose: 'hands on belly' as const }
+        : {}),
       ...(c.role === 'minor' ? { minor: true as const } : {}),
       ...(dressed && !sameOutfit(dressed.opening, dressed.usual)
         ? { wears: dressed.opening }
@@ -1202,6 +1227,9 @@ export function stageStory(
   const here = new Map<string, string>(
     sheet.onStage.map((p) => {
       const down = postures.opening.get(p.who);
+      // A baby in someone's arms is wherever they are.
+      const arms = heldBy.get(p.who);
+      if (arms) return [p.who, heldStation(arms)];
       return [p.who, (down && stationOf(down)) ?? p.spot];
     }),
   );
@@ -1419,6 +1447,11 @@ export function stageStory(
   for (const p of sheet.onStage) {
     if (!inCast.has(p.who)) continue;
     const posture = postures.opening.get(p.who);
+    // A baby in someone's arms lies across them, head to their left arm.
+    if (heldBy.has(p.who)) {
+      steps[0].effects.push({ target: p.who, part: '@right', do: 'lie' });
+      continue;
+    }
     if (posture)
       steps[0].effects.push(
         heldDown(

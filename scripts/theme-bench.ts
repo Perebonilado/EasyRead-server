@@ -7,6 +7,7 @@
  * twin, as a viewer's "Dark picture" shows it.
  *
  *   npm run theme:bench -- [--out <dir>] <scene.json> ...
+ *   (SCENE_OUT=<a scene-out dir> for the two fixtures made by scene:page)
  *
  * A chart made before the chart palette (one blue) is drawn again from its
  * own numbers, as the next make draws it. Writes one PNG a still, the
@@ -47,7 +48,8 @@ interface Fixture {
 }
 
 const DEV = join(__dirname, '..', '..', 'easyread', 'public', 'dev-scenes');
-const OUT = join(__dirname, '..', 'scene-out');
+/** Where local pages were made (scene:page keeps them): SCENE_OUT, or this checkout's scene-out. */
+const OUT = process.env.SCENE_OUT ?? join(__dirname, '..', 'scene-out');
 /** Six lessons unlike each other: numbers, a body, a child's sums, history, a chart, the very small. */
 const FIXTURES: Fixture[] = [
   {
@@ -154,6 +156,18 @@ async function stillIn(
   return rasterise(stepSvg(scene, pngs, staging, k, theme), STILL_PX * 2);
 }
 
+/** A title in at most two short lines, for the sheet's margin. */
+const titleLines = (title: string): string[] => {
+  const words = title.replace(/:.*$/, '').split(/\s+/);
+  const lines = [''];
+  for (const word of words) {
+    const last = lines[lines.length - 1];
+    if (last && `${last} ${word}`.length > 18) lines.push(word);
+    else lines[lines.length - 1] = last ? `${last} ${word}` : word;
+  }
+  return lines.length > 2 ? [lines[0], `${lines[1]}…`] : lines;
+};
+
 const escape = (text: string) =>
   text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 
@@ -226,8 +240,11 @@ async function main(): Promise<void> {
   rows.forEach((row, i) => {
     const y = TOP + i * rowH;
     parts.push(
-      `<text x="16" y="${y + H / 2}" font-size="20" font-weight="700" fill="#1F2A37">${escape(row.title.slice(0, 22))}</text>`,
-      `<text x="16" y="${y + H / 2 + 26}" font-size="17" fill="#5B6675">code chooses ${escape(THEMES[row.chosen].name)}</text>`,
+      ...titleLines(row.title).map(
+        (line, n) =>
+          `<text x="16" y="${y + H / 2 - 20 + n * 24}" font-size="19" font-weight="700" fill="#1F2A37">${escape(line)}</text>`,
+      ),
+      `<text x="16" y="${y + H / 2 + 36}" font-size="17" fill="#5B6675">code chooses ${escape(THEMES[row.chosen].name)}</text>`,
     );
     row.cells.forEach((cell, j) => {
       const x = LEFT + j * (W + GAP);

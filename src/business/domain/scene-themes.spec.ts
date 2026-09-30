@@ -31,7 +31,7 @@ import {
 } from './scene-themes';
 
 /** The player's copy prints this too (easyread's src/lib/scene/themes.test.ts). */
-const PRINT = 'ay1uzu:8334';
+const PRINT = '1moho3f:8682';
 
 const hexes = (svg: string) =>
   new Set([...svg.matchAll(/#[0-9a-f]{6}\b/gi)].map((m) => m[0].toUpperCase()));
@@ -317,6 +317,14 @@ describe('recolouring what code drew', () => {
       ...svg.matchAll(/<rect class="grow[^>]*fill="([^"]+)"/g),
     ].map((m) => m[1]);
     expect(fills).toEqual(PAPER.chart.slice(0, 3));
+  });
+
+  it("writes working's pictures in the theme's ink, not the figure kit's dark one", () => {
+    const picture =
+      '<svg viewBox="0 0 1 1"><text fill="#2d2a32">6 rows of 7</text></svg>';
+    expect(themedCode(picture, THEMES.chalkboard, 'math')).toContain(
+      `fill="${THEMES.chalkboard.ink}"`,
+    );
   });
 
   it('recolours an older chart, one sky blue, as the theme has that blue', () => {

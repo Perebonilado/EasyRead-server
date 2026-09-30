@@ -551,11 +551,16 @@ const CODE_TOKENS = [
   'bad',
 ] as const;
 
+/** The figure kit's ink (scene-ink's FIGURE_INK), which working's pictures are drawn in. */
+const FIGURE_INK = '#2D2A32';
+
 /** A colour code drew in the paper theme's tokens, as this theme has it; null for any other. */
 export function codeColour(hex: string, theme: ExplainerTheme): string | null {
   const key = hex.toUpperCase();
   for (const token of CODE_TOKENS)
     if (PAPER[token].toUpperCase() === key) return theme[token];
+  // Working's pictures write and outline in the figure kit's ink: the theme's ink.
+  if (key === FIGURE_INK) return theme.ink;
   const i = PAPER.chart.findIndex((c) => c.toUpperCase() === key);
   return i >= 0 ? theme.chart[i] : null;
 }
@@ -739,7 +744,7 @@ export function themesPrint(): string {
   const sample =
     '<svg viewBox="0 0 200 100"><style>.a{fill:#e0663a}</style>' +
     '<rect fill="#1F2A37" stroke="#3D8FD1" width="10" height="10"/>' +
-    '<circle fill="#E9D8B4" stroke="url(#fade)" r="3"/><path fill="#f06a3f80" d=""/>' +
+    '<circle fill="#E9D8B4" stroke="url(#fade)" r="3"/><path fill="#f06a3f80" d=""/><text fill="#2d2a32">6</text>' +
     '<animate attributeName="fill" values="#F2B33D;#b22222" dur="1s"/></svg>';
   const lines = THEME_IDS.flatMap((id) => {
     const theme = THEMES[id];

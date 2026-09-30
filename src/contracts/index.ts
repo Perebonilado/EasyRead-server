@@ -68,6 +68,18 @@ export interface VoiceOptionDto {
    * signed in (Cartesia's samples ask for the key, so the server fetches them).
    */
   previewUrl: string | null;
+  /** How it was made, where the engine says: premade, cloned, generated (designed), professional. */
+  category?: string;
+  /** Something to know before casting it: "A cloned voice: it may sound different on v4. Listen again". */
+  note?: string;
+}
+
+/** A voice in ElevenLabs' Voice Library, found by the admin's search. */
+export interface LibraryVoiceDto extends VoiceOptionDto {
+  /** Its owner's public id: with its id, what adding it to the account takes. */
+  ownerId: string;
+  /** In the account already. */
+  added: boolean;
 }
 
 /** Which engine voices Visualize, and which could. */
@@ -87,6 +99,26 @@ export interface SceneVoiceStatusDto {
     voice: string;
   }[];
   /**
+   * ElevenLabs' model (v4 or v3) and its spending caps, where ElevenLabs
+   * is set up; null where it is not.
+   */
+  models?: {
+    engine: 'elevenlabs';
+    /** The admin's model; null keeps the default. */
+    chosen: string | null;
+    /** What the next ElevenLabs page is voiced with. */
+    current: string;
+    /** The model when none is chosen. */
+    default: string;
+    options: { value: string; label: string }[];
+    /** Dollars: a film's cap and a day's (null for none), and today's spend (null when the ledger cannot say). */
+    caps: {
+      filmUsd: number | null;
+      dayUsd: number | null;
+      todayUsd: number | null;
+    };
+  } | null;
+  /**
    * The voices the narrator and each kind of character speak in, on an
    * engine with a list to choose from (ElevenLabs, Cartesia): the one
    * speaking, else the first set up; null where there is none set up.
@@ -100,6 +132,10 @@ export interface SceneVoiceStatusDto {
       chosen: string | null;
       /** The voice it speaks in when none is chosen. */
       default: string;
+      /** The default's name, when it is a Voice Library voice the account may not have yet. */
+      defaultName?: string;
+      /** The premade voice that says its lines until that library voice is added. */
+      standIn?: string | null;
     }[];
   } | null;
   changedAt: string | null;
@@ -1517,6 +1553,13 @@ export interface SceneFeatureDto {
   up?: Record<'box' | 'wide', { x: number; y: number }>;
   /** The group of its drawing that covers whoever is in it (a bed's duvet), drawn over them while they are; absent, it has none. */
   cover?: string;
+  /**
+   * A cradle (a manger, a crib) of the show's own: how far down its box
+   * its rim is, as a share of its height. Its drawing below the rim is
+   * drawn again over whoever lies in it, as a bed's cover is: they are
+   * in it, their head over its rim.
+   */
+  rim?: number;
   /** How high someone sitting on it sits, at each staging: the y of its seat. Absent, it is not sat on. */
   seat?: Record<'box' | 'wide', number>;
   /** Where one lying on it lies, at each staging: along its top (y), from its foot to its head (x). */
@@ -1916,6 +1959,14 @@ export interface SceneActingDto {
     'ease' | 'take' | 'slow' | 'flash',
     number,
   ][];
+  /**
+   * The face they rest at (studio-faces-plan): from when, a recipe, and
+   * how strongly (0 to 1). The scene's mood for them, changing only at a
+   * turn of it; the faces acted (`face`) are over it and ease back to it.
+   * With it, a rigged face rests here, not at the kit's faces the effects
+   * show (those still dress a drawing with no rigged face).
+   */
+  rest?: [number, string, number][];
 }
 
 /** A view of someone drawn from every side, as the camera sees them. */
@@ -1964,6 +2015,16 @@ export interface ScenePlaceDto {
   labels?: SceneLabelDto[];
   /** A Studio story's person: how far back they stand on the floor, 0 at its back to 1 at its front, 0.5 where people have always stood. Absent, 0.5. */
   d?: number;
+  /**
+   * A Studio story's person walking here from where they stood the step
+   * before: the places their walk passes through on the way, in order,
+   * going round someone or something in their way (behind them or before
+   * them, at another depth) rather than through them. Absent, a walk goes
+   * straight.
+   */
+  via?: { x: number; y: number; w: number; h: number; d?: number }[];
+  /** A Studio story's baby in someone's arms: whose, by id. Drawn just before them, whatever their feet say, and carried where they go. */
+  held?: string;
 }
 
 /** One label set by the stage: its words' box, which edge they hang from, and its leader to the part. */

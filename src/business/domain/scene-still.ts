@@ -44,6 +44,7 @@ import {
   meetPoint,
   nearOf,
   sideToward,
+  obstaclesOf,
   thingBoxAt,
   type Holder,
   type ThingsOnStage,
@@ -723,6 +724,7 @@ export function stillPlan(
       return one?.kind === 'drawing' ? one : undefined;
     },
     feature: (id) => scene.setting?.features?.find((f) => f.id === id)?.at.wide,
+    obstacles: obstaclesOf(scene.setting?.features ?? []),
   };
   const hands = handsAt(stage, t);
   // An insert on a thing (studio-screenwriting K5): the hand that holds it

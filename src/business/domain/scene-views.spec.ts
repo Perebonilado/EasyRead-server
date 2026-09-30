@@ -1,5 +1,6 @@
 import type { SceneDto, ScenePlaceDto, SceneThingDto } from '../../contracts';
 import {
+  MIN_HOLD_MS,
   VIEW_HOLD_MS,
   facingToward,
   holdViews,
@@ -163,18 +164,14 @@ describe('a view timeline', () => {
         kofi: { look: [[1150, 'ada', 0.5]] },
       },
     );
+    // Already turned three-quarter to each other before a word, as two
+    // together stand: nothing to turn for when they speak.
     const views = viewsOf(scene);
-    expect(views.ada).toEqual([
-      [0, 'front', 1],
-      [1000, '3q', 1],
-    ]);
-    expect(views.kofi).toEqual([
-      [0, 'front', 1],
-      [1150, '3q', -1],
-    ]);
+    expect(views.ada).toEqual([[0, '3q', 1]]);
+    expect(views.kofi).toEqual([[0, '3q', -1]]);
   });
 
-  it('walks across in profile, the way they go, and stands front on again', () => {
+  it('walks across in profile, the way they go, and stands three-quarter that way on arriving', () => {
     const scene = sceneOf(
       [
         { atMs: 0, places: { tobi: at(1200) } },
@@ -185,7 +182,7 @@ describe('a view timeline', () => {
     const views = viewsOf(scene).tobi;
     expect(views[0]).toEqual([0, 'front', 1]);
     expect(views[1]).toEqual([2000, 'profile', -1]);
-    expect(views[2][1]).toBe('front');
+    expect(views[2].slice(1)).toEqual(['3q', -1]);
     expect(views[2][0]).toBeGreaterThan(3000);
   });
 
@@ -202,6 +199,74 @@ describe('a view timeline', () => {
     expect(at1(1200)[1]).toBe('back');
     for (let t = 1600; t < 2800; t += 50)
       expect(['front', '3q', 'profile']).toContain(at1(t)[1]);
+  });
+
+  it('keeps the body where it faces through a glance, a look down and a pause between lines: only a head turns', () => {
+    const scene = sceneOf(
+      [{ atMs: 0, places: { ada: at(300), kofi: at(1000) } }],
+      {
+        ada: {
+          look: [
+            [1000, 'kofi', 0.5],
+            [3000, '@down', 0.1],
+            [3600, null, 0],
+            [4200, 'kofi', 0.15],
+            [5000, 'kofi', 0.5],
+          ],
+        },
+      },
+    );
+    expect(viewsOf(scene).ada).toEqual([[0, '3q', 1]]);
+  });
+
+  it('turns only as often as the eye can follow: a new look waits out the last turn, and a look away and back is not made', () => {
+    // Ada between kofi (right) and a door (left).
+    const scene = {
+      ...sceneOf([{ atMs: 0, places: { ada: at(700), kofi: at(1200) } }], {
+        ada: {
+          look: [
+            [1000, 'f:door', 0.5],
+            [1400, 'kofi', 0.5],
+            [2000, 'f:door', 0.5],
+            [2600, 'kofi', 0.5],
+          ],
+        },
+      }),
+      setting: {
+        features: [{ id: 'door', kind: 'door', at: { wide: at(0) } }],
+      },
+    } as unknown as Scene;
+    const views = viewsOf(scene).ada ?? [[0, '3q', 1]];
+    const turns = views.slice(1);
+    for (let i = 1; i < turns.length; i += 1)
+      expect(turns[i][0] - turns[i - 1][0]).toBeGreaterThanOrEqual(MIN_HOLD_MS);
+    // Never to the door and straight back.
+    expect(views.filter(([, , m]) => m < 0).length).toBeLessThanOrEqual(1);
+  });
+
+  it('lies face up to us, and turns no further than three-quarter sat down', () => {
+    const scene = sceneOf(
+      [
+        {
+          atMs: 0,
+          places: { baby: at(600, 200, 0.6), mum: at(300, 400, 0.2) },
+        },
+      ],
+      {
+        baby: {
+          moves: [[0, 'lie', 12000]],
+          look: [[1000, 'mum', 0.5]],
+        },
+        mum: {
+          moves: [[0, 'sit', 12000]],
+          look: [[1000, 'baby', 0.6]],
+        },
+      },
+    );
+    const views = viewsOf(scene);
+    expect(views.baby).toBeUndefined();
+    for (const [, view] of views.mum ?? [])
+      expect(['front', '3q']).toContain(view);
   });
 
   it('is the same every time, and leaves a scene with no one drawn from every side as it was', () => {

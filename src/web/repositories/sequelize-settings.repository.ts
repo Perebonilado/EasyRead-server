@@ -2,6 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { InjectModel } from '@nestjs/sequelize';
 import {
   LISTED_ENGINES,
+  isElevenLabsModel,
   isSceneVoiceEngine,
   isVoiceIdOf,
   isVoiceRole,
@@ -14,6 +15,7 @@ import {
 import type {
   AppSettingsRecord,
   AppSettingsRepository,
+  VoiceModels,
   WorkerVoices,
 } from '../../business/repositories/settings.repository';
 import { AppSettingsModel } from '../database/models';
@@ -87,6 +89,33 @@ export function ratesAfter(
   return Object.keys(merged).length ? JSON.stringify(merged) : null;
 }
 
+/** The admin's models as kept: only a model an engine has is read back. */
+export function modelsKept(kept: string | null): VoiceModels {
+  if (!kept) return {};
+  try {
+    const read = JSON.parse(kept) as Record<string, unknown>;
+    return isElevenLabsModel(read?.elevenlabs)
+      ? { elevenlabs: read.elevenlabs }
+      : {};
+  } catch {
+    return {};
+  }
+}
+
+/** A model chosen laid over those kept: null gives an engine back its own; null when none is left. */
+export function modelsAfter(
+  kept: string | null,
+  patch: { elevenlabs?: VoiceModels['elevenlabs'] | null },
+): string | null {
+  const merged: VoiceModels = { ...modelsKept(kept) };
+  if ('elevenlabs' in patch) {
+    if (patch.elevenlabs && isElevenLabsModel(patch.elevenlabs))
+      merged.elevenlabs = patch.elevenlabs;
+    else delete merged.elevenlabs;
+  }
+  return Object.keys(merged).length ? JSON.stringify(merged) : null;
+}
+
 @Injectable()
 export class SequelizeAppSettingsRepository implements AppSettingsRepository {
   constructor(
@@ -100,6 +129,7 @@ export class SequelizeAppSettingsRepository implements AppSettingsRepository {
       sceneVoice: isSceneVoiceEngine(row.sceneVoice) ? row.sceneVoice : null,
       voiceCast: voiceCast(row.voiceCast),
       voiceRates: ratesKept(row.voiceRates ?? null),
+      voiceModels: modelsKept(row.voiceModels ?? null),
       worker: workerVoices(row.workerVoices),
       changedBy: row.changedBy,
       changedAt: row.changedAt,
@@ -116,6 +146,7 @@ export class SequelizeAppSettingsRepository implements AppSettingsRepository {
       sceneVoice: null,
       voiceCast: null,
       voiceRates: null,
+      voiceModels: null,
       workerVoices: null,
       changedBy: null,
       changedAt: null,
@@ -136,6 +167,7 @@ export class SequelizeAppSettingsRepository implements AppSettingsRepository {
       sceneVoice?: AppSettingsRecord['sceneVoice'];
       voiceCast?: AppSettingsRecord['voiceCast'];
       voiceRates?: VoiceRates;
+      voiceModels?: { elevenlabs?: VoiceModels['elevenlabs'] | null };
     },
     changedBy: string,
     now: Date,
@@ -151,8 +183,16 @@ export class SequelizeAppSettingsRepository implements AppSettingsRepository {
       ...(patch.voiceRates
         ? { voiceRates: ratesAfter(row.voiceRates ?? null, patch.voiceRates) }
         : {}),
+      ...(patch.voiceModels
+        ? {
+            voiceModels: modelsAfter(
+              row.voiceModels ?? null,
+              patch.voiceModels,
+            ),
+          }
+        : {}),
       // Who last switched a voice: a rate measured is no one's switch.
-      ...('sceneVoice' in patch || patch.voiceCast
+      ...('sceneVoice' in patch || patch.voiceCast || patch.voiceModels
         ? { changedBy, changedAt: now }
         : {}),
     });

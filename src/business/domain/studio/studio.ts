@@ -34,7 +34,7 @@ import {
   type FigureSign,
   type FigureSpec,
 } from '../scene-figure';
-import { ASKED_FACES, KIT_FACES } from '../scene-figure';
+import { ASKED_FACES, KIT_FACES, agedFor } from '../scene-figure';
 import { animalOf, type AnimalSpec } from '../scene-animal';
 import { creatureOf, type CreatureSpec } from '../scene-creature';
 import { faceNamed } from '../scene-feeling';
@@ -1734,3 +1734,34 @@ export const PROP_DOINGS = HANDLE_DOINGS;
 /** The handlings a book's page plays, kept for the pages that use them. */
 export const PAGE_PROP_ACTIONS = PROP_ACTIONS;
 export type { StageProp, PropAction, StoryMove, FigureSign, ThingId };
+
+/** Whether one of a show's cast is a baby, as the kit draws them: their figure's age, or their words (scene-figure's agedFor). */
+export function isBaby(
+  bible: Pick<StudioBible, 'characters'>,
+  id: string,
+): boolean {
+  const c = bible.characters.find((one) => one.id === id);
+  return Boolean(
+    c?.figure && agedFor(c.figure, [c.name, c.look]).age === 'infant',
+  );
+}
+
+/** The baby of the cast some words name, by their id or their name ("Baby Jesus", "the baby"); null for none. */
+export function babyNamed(
+  bible: Pick<StudioBible, 'characters'>,
+  words: string,
+): string | null {
+  const said = words.trim().toLowerCase();
+  const babies = bible.characters.filter((c) => isBaby(bible, c.id));
+  return (
+    babies.find(
+      (c) =>
+        c.id === said ||
+        c.name.toLowerCase() === said ||
+        said.includes(c.name.toLowerCase()),
+    )?.id ??
+    (babies.length === 1 && /\b(?:the |a )?bab(?:y|ies)\b/u.test(said)
+      ? babies[0].id
+      : null)
+  );
+}

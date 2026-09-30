@@ -6,6 +6,7 @@ import { wordTimesFromAligned } from '../../business/domain/board';
 import {
   catalogueSpeechCost,
   characterSpeechCost,
+  elevenLabsSpeechCost,
   geminiSpeechCost,
 } from '../../business/domain/cost';
 import { NotFoundError } from '../../business/domain/errors/errors';
@@ -113,6 +114,7 @@ import {
   figureOf,
   signsOver,
   type FigureSpec,
+  agedFor,
   oldWorld,
 } from '../../business/domain/scene-figure';
 import { animalFor, describeAnimal } from '../../business/domain/scene-animal';
@@ -157,6 +159,11 @@ import type { SetPiece } from '../../business/domain/scene-set-pieces';
 import { buildSet, reverseSet } from '../../business/domain/scene-set-layout';
 import { RIG_VERSION, rigSheet } from '../../business/domain/scene-sheet-rig';
 import { withMouths } from '../../business/domain/studio/studio-audit';
+import { turnsCheck, turnsLine } from '../../business/domain/scene-turns-check';
+import {
+  faceRhythm,
+  faceRhythmLine,
+} from '../../business/domain/scene-face-rhythm';
 import { withFace } from '../../business/domain/scene-sheet-face';
 import {
   EMPTY_STORY,
@@ -974,6 +981,17 @@ export class SceneProcessor {
           : 'no words on words or things'
       }`,
     );
+    // The turn check: how often people drawn from every side turn, and any
+    // turn undone at once, held too briefly, or to the camera for nothing.
+    if (Object.values(scene.acting ?? {}).some((one) => one.view?.length))
+      this.logger.log(`${who}: turn check: ${turnsLine(turnsCheck(scene))}`);
+    // The face rhythm check: how often each rigged face changes, how long
+    // each is held, and any change crowded, swung to its opposite, or
+    // that does not fit the line it answers.
+    if (Object.values(scene.acting ?? {}).some((one) => one.face?.length))
+      this.logger.log(
+        `${who}: face rhythm: ${faceRhythmLine(faceRhythm(scene))}`,
+      );
     // Paper is every scene's look unless it says otherwise.
     if (input.theme && input.theme !== 'paper') scene.theme = input.theme;
     const finished = input.finish ? input.finish(scene) : scene;
@@ -1761,18 +1779,26 @@ export class SceneProcessor {
         ? ((character ? creatureFor(character) : null) ?? sheet.creature)
         : null;
       const onPage = sheet?.figure
-        ? await figureDrawing(thing.wears ?? sheet.figure, thing.ref, {
-            pose: thing.pose,
-            holding: thing.holding,
-            signs,
-            faces,
-            old: oldWorld(story?.bible.world?.era),
-            ...(thing.dress?.length ? { dress: thing.dress } : {}),
-            // Drawn new for the page, with what swings and from every
-            // side: rig 3. A sheet the book keeps is as it was drawn.
-            rig: VIEW_RIG,
-            faceRig: true,
-          })
+        ? // A baby the kit draws as one, whatever age their figure says.
+          await figureDrawing(
+            agedFor(thing.wears ?? sheet.figure, [
+              character?.name,
+              character?.look,
+            ]),
+            thing.ref,
+            {
+              pose: thing.pose,
+              holding: thing.holding,
+              signs,
+              faces,
+              old: oldWorld(story?.bible.world?.era),
+              ...(thing.dress?.length ? { dress: thing.dress } : {}),
+              // Drawn new for the page, with what swings and from every
+              // side: rig 3. A sheet the book keeps is as it was drawn.
+              rig: VIEW_RIG,
+              faceRig: true,
+            },
+          )
         : kitAnimal
           ? await animalDrawing(kitAnimal, thing.ref, {
               signs,
@@ -2039,14 +2065,19 @@ export class SceneProcessor {
     // A new term lands: a little weight where it is first said, and a
     // moment after the sentence for it to sink in.
     const first = firstSaid(script.beats, terms);
-    // Whichever engine the admin has Visualize speak in now.
+    // Whichever engine the admin has Visualize speak in now: ElevenLabs
+    // only within its spending caps, told about what this page says (its
+    // words and a few tags a sentence).
     const {
       speech,
       voice,
       engine: speaking,
       cast,
       rates,
-    } = await this.voices.current();
+    } = await this.voices.current({
+      documentId,
+      characters: forms.reduce((n, form) => n + form.text.length + 15, 0),
+    });
     // A lesson (every sentence the narrator's own) is said at a target
     // rate a sentence, for whom it is for and what it holds, its pauses
     // shaped within a budget; the voice is asked for it by its own
@@ -2173,6 +2204,23 @@ export class SceneProcessor {
         ? TONE_OF[beat.pace ?? 'calm']
         : undefined;
     };
+    /**
+     * How a piece is acted, for a voice that takes it as tags (ElevenLabs
+     * v4): a lesson sentence's delivery; a character's line's aim and the
+     * faces it is said and felt with.
+     */
+    const directionOf = (piece: (typeof pieces)[number]) => {
+      const beat = script.beats[piece.beat];
+      if (!beat) return undefined;
+      const acted = piece.voice && beat.kind === 'line';
+      const direction = {
+        ...(!beat.kind && beat.delivery ? { delivery: beat.delivery } : {}),
+        ...(acted && beat.aim ? { aim: beat.aim } : {}),
+        ...(acted && beat.said ? { said: beat.said } : {}),
+        ...(acted && beat.felt ? { felt: beat.felt } : {}),
+      };
+      return Object.keys(direction).length ? direction : undefined;
+    };
     const result = await speech.synthesize({
       text: spoken.text,
       voice,
@@ -2180,6 +2228,7 @@ export class SceneProcessor {
       timestamps: true,
       pieces: pieces.map((piece) => {
         const tone = toneOf(piece);
+        const direction = directionOf(piece);
         return {
           text: piece.text,
           speed: piece.speed,
@@ -2187,6 +2236,7 @@ export class SceneProcessor {
           ...(piece.style ? { style: piece.style } : {}),
           ...(piece.voice ? { voice: piece.voice } : {}),
           ...(tone ? { tone } : {}),
+          ...(direction ? { direction } : {}),
         };
       }),
       ...(leadS > 0 ? { lead: leadS } : {}),
@@ -2235,15 +2285,19 @@ export class SceneProcessor {
                 ),
               )
             : result.model.startsWith('elevenlabs:')
-              ? characterSpeechCost(
-                  result.characters ?? spoken.text.length,
-                  Number(
-                    this.config.get<string>(
-                      'ELEVENLABS_USD_PER_1K_CHARS',
-                      '0.1',
-                    ),
-                  ),
-                )
+              ? // At the model's price that day (v4's launch price while
+                // it lasts), or the deployment's own.
+                elevenLabsSpeechCost({
+                  model: result.model,
+                  characters: result.characters ?? spoken.text.length,
+                  usdPer1kChars: this.config.get<string>(
+                    'ELEVENLABS_USD_PER_1K_CHARS',
+                  )
+                    ? Number(
+                        this.config.get<string>('ELEVENLABS_USD_PER_1K_CHARS'),
+                      )
+                    : null,
+                })
               : result.model.startsWith('cartesia:')
                 ? characterSpeechCost(
                     result.characters ?? spoken.text.length,

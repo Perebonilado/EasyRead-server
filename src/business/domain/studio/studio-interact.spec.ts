@@ -272,7 +272,9 @@ describe('through a door (studio-interactions-plan I1)', () => {
     });
     expect(front.stand).toEqual([-86, 86]);
     expect(front.viewBox[2]).toBeGreaterThan(400);
-    expect(front.affordances).toEqual(drawPiece('door', 'door').affordances);
+    expect(front.affordances).toEqual(
+      drawPiece('door', 'front door').affordances,
+    );
     expect(drawPiece('door', 'door').stand).toBeUndefined();
   });
 

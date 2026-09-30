@@ -21,6 +21,7 @@ import {
 import { figureFrame } from './scene-figure';
 import {
   KIT_PER_METRE,
+  SAME_ROW_D,
   spaceOut,
   type NearPair,
   type Spaced,
@@ -64,6 +65,10 @@ export interface Place extends Rect {
   labels?: LabelPlace[];
   /** A Studio story's person: how far back they stand on the floor, 0 its back to 1 its front. */
   d?: number;
+  /** A Studio story's walk here round someone in the way: the places it passes through (scene-paths). */
+  via?: { x: number; y: number; w: number; h: number; d?: number }[];
+  /** A Studio story's baby in someone's arms: whose. */
+  held?: string;
   /** Where its labels go: the room kept for them when it was fitted. Not sent to the player. */
   labelsAt?: LabelMode;
   /** The size its labels are set at, when not the room's: a passage's notes, never larger than its words. Not sent to the player. */
@@ -844,6 +849,22 @@ export function pinholeK(feet: number, floor: number, eye: number): number {
   return Math.round(((feet - eye) / Math.max(1, floor - eye)) * 1000) / 1000;
 }
 
+/** How deep on the floor feet at `feet` stand: floorAt the other way round. */
+export function depthAtFeet(
+  feet: number,
+  floor: number,
+  eye: number,
+  bottom: number,
+): number {
+  const back = floorAt(0, floor, eye, bottom).feet;
+  const front = floorAt(1, floor, eye, bottom).feet;
+  const d =
+    feet <= floor
+      ? ((feet - back) / Math.max(1, floor - back)) * 0.5
+      : 0.5 + ((feet - floor) / Math.max(1, front - floor)) * 0.5;
+  return Math.round(Math.min(1, Math.max(0, d)) * 100) / 100;
+}
+
 /**
  * How someone at each place of a group stands in depth when nothing says
  * (studio-scenery-plan §4.1): one or two (a conversation) at the depth
@@ -854,8 +875,18 @@ export function pinholeK(feet: number, floor: number, eye: number): number {
 export function spreadDepth(i: number, n: number): number {
   if (n <= 2) return DEPTH_MIDDLE;
   if (n === 3) return i === 1 ? 0.38 : DEPTH_MIDDLE;
+  // Four to six gather in an arc, as people round something do: its ends
+  // nearer the camera, its middle back, facing in (studio-space-plan).
+  const arc = ARCS[n];
+  if (arc) return arc[i] ?? DEPTH_MIDDLE;
   return [0.62, 0.3, 0.58, 0.34, 0.66, 0.28][i % 6];
 }
+/** A group's arc across the floor's depth, left to right, by how many are in it: a little uneven, so no two stand at one depth. */
+const ARCS: Record<number, readonly number[]> = {
+  4: [0.62, 0.34, 0.3, 0.58],
+  5: [0.64, 0.4, 0.3, 0.36, 0.6],
+  6: [0.66, 0.44, 0.32, 0.28, 0.4, 0.62],
+};
 
 /** The scale a Studio scene's people stand at, and the ground they stand on. */
 export interface StationScale {
@@ -984,6 +1015,13 @@ export function layoutStations(input: {
   features: ReadonlyMap<string, FeatureAcross>;
   /** The ways through (a gate, a door) standing on the people's ground, where they stand across it: kept clear of. */
   pieces?: readonly FeatureAcross[];
+  /**
+   * The solid things standing on the floor (a manger, a stool, a table):
+   * across them, their feet's y, and how far back from their feet they
+   * reach. No one at a spot of their own stands in one, nor is stepped
+   * into one, nor steps past one to come near someone (studio-space-plan).
+   */
+  furniture?: readonly Furniture[];
   /** Where the spots stand, as the scene's largest group has them. */
   shares?: StationShares;
   /** The floor's depth: the camera's eye line on this stage, and how low the floor's front edge may come. Absent, everyone on one line, as before. */
@@ -1055,7 +1093,14 @@ export function layoutStations(input: {
   >();
   return input.steps.map((step, stepAt) => {
     const out: Record<string, Place> = {};
-    const placed: { id: string; x: number; w: number; low?: boolean }[] = [];
+    const placed: {
+      id: string;
+      x: number;
+      w: number;
+      station?: string;
+      d?: number;
+      low?: boolean;
+    }[] = [];
     /** Where each stood the step before, for the side they keep when stepped apart. */
     const before = new Map([...kept].map(([id, one]) => [id, one]));
     /** Each one's body as spaceOut moves it, and the part of them to move with it. */
@@ -1066,6 +1111,8 @@ export function layoutStations(input: {
         Number(kept.get(a)?.station !== step.at?.[a]) -
         Number(kept.get(b)?.station !== step.at?.[b]),
     );
+    /** Babies in someone's arms at this step, by whose: laid in them once everyone else stands where they stand. */
+    const held: { id: string; by: string }[] = [];
     order.forEach((id, i) => {
       const size = sizeOf(id);
       if (!size) return;
@@ -1074,8 +1121,57 @@ export function layoutStations(input: {
         Object.keys(STATION_SHARES)[
           Math.min(4, Math.round(((i + 0.5) / order.length) * 4))
         ];
+      const arms = /^held:(.+)$/.exec(station);
+      if (arms && step.show.includes(arms[1])) {
+        held.push({ id, by: arms[1] });
+        kept.set(id, { station, x: 0 });
+        return;
+      }
       const was = kept.get(id);
       const asked = step.depth?.[id];
+      // At a spot of their own, or a point on the ground: how deep they
+      // stand, asked, kept, or as the stager spreads the group; and so
+      // where their feet are, to keep them out of what stands there.
+      const free =
+        station in (input.shares ?? STATION_SHARES) || station.startsWith('@');
+      const deep =
+        depthed && free
+          ? (asked ??
+            (was?.station === station && was.asked === asked
+              ? was.d
+              : undefined) ??
+            spreadDepth(step.show.indexOf(id), step.show.length))
+          : undefined;
+      /** Their feet and their size at a depth of the floor. */
+      const floorHere = (dd: number | undefined) =>
+        depthed && dd !== undefined
+          ? floorAt(dd, floor, depthed.eye, depthed.bottom)
+          : null;
+      /** Whether standing at `at`, `dd` deep, puts them inside a thing on the floor, or behind one that hides them. */
+      const inThing = (at: number, dd: number | undefined) => {
+        const here = floorHere(dd);
+        if (here === null) return false;
+        const w = size.w * here.k;
+        const h = size.h * here.k;
+        const box = { x: at - w / 2, y: here.feet - h, w, h };
+        return (input.furniture ?? []).some(
+          (f) =>
+            standsIn(at, w * BODY_HALF, here.feet, f) ||
+            hiddenBy(box, here.feet, f) > BEHIND_HIDES_MOST,
+        );
+      };
+      /** Where their spot is across the stage, as a share: whom they stand left or right of. */
+      const shareOf = (one: string): number | null => {
+        const shares: Record<string, number> = input.shares ?? STATION_SHARES;
+        if (one in shares) return shares[one];
+        if (one.startsWith('@')) return Number(one.slice(1)) || 0.5;
+        const on = /^(?:by|behind|under|up|on|in):([^:]+)/.exec(one);
+        const feature = on ? input.features.get(on[1]) : undefined;
+        return feature ? feature.x / W : null;
+      };
+      const mine = shareOf(station) ?? 0.5;
+      /** How deep they stand, where a spot of their own is crowded at its depth: a step back or forward instead. */
+      let chosen = deep;
       let x: number;
       if (was?.station === station && was.asked === asked) x = was.x;
       else {
@@ -1087,19 +1183,30 @@ export function layoutStations(input: {
         // Where someone stands already (behind a feature or under it, at
         // its own depth, no one is in the way), or, at a spot of their
         // own, in a gateway; or before one under a feature, who is seen.
-        // On it or in it, it is theirs: no one else is in their way.
+        // On it or in it, it is theirs: no one else is in their way. On a
+        // floor with depth, one a row back or forward may stand nearer,
+        // their faces still side by side.
         const hidden = /^(?:behind|under|up|on|in):/.test(station);
-        const crowded = (at: number) =>
+        const crowded = (at: number, dd = deep) =>
           (!hidden &&
             placed.some(
               (p) =>
                 Math.abs(p.x - at) <
-                (p.low ? (p.w + size.w) * 0.4 : Math.min(p.w, size.w) * 0.55),
+                (p.low
+                  ? (p.w + size.w) * 0.4
+                  : depthed &&
+                      free &&
+                      dd !== undefined &&
+                      p.d !== undefined &&
+                      Math.abs(p.d - dd) >= SAME_ROW_D
+                    ? Math.min(p.w, size.w) * SIDE_BY_SIDE
+                    : Math.min(p.w, size.w) * 0.55),
             )) ||
           (!byOrBehind &&
             (input.pieces ?? []).some(
               (p) => Math.abs(p.x - at) < p.w * 0.4 + size.w * 0.2,
             )) ||
+          inThing(at, dd) ||
           overBody(at);
         // Beside a solid body (a bus), never over it: held to the stage's
         // edge, its far side may be on it.
@@ -1119,18 +1226,60 @@ export function layoutStations(input: {
           const other = across(station, size.w, true);
           if (!crowded(other)) x = other;
         }
-        // Else the nearest place clear of them all, if there is one.
+        // Else the nearest place clear of them all, if there is one. On a
+        // floor with depth, at a spot of their own: a row back or forward
+        // counts as a little way off, and no one ends on the wrong side of
+        // someone whose spot is on the other side of theirs.
         if (crowded(x)) {
           const least = margin + size.w * 0.3;
           const most = W - margin - size.w * 0.3;
-          const step = Math.max(8, size.w * 0.2);
-          for (let d = step; d < W; d += step) {
-            const clear = [x - d, x + d].find(
-              (at) => at >= least && at <= most && !crowded(at),
+          const studio = depthed && free && deep !== undefined;
+          const step = Math.max(8, size.w * (studio ? 0.1 : 0.2));
+          const depths =
+            studio && asked === undefined
+              ? [deep, deep - ROW_STEP, deep + ROW_STEP].filter(
+                  (dd) => dd >= 0.12 && dd <= 0.88,
+                )
+              : [deep];
+          const wrongSide = (at: number) =>
+            studio &&
+            placed.some((p) => {
+              const theirs = p.station ? shareOf(p.station) : null;
+              return (
+                theirs !== null &&
+                Math.abs(theirs - mine) > 0.01 &&
+                Math.sign(mine - theirs) * Math.sign(at - p.x) < 0
+              );
+            });
+          const tries: { at: number; dd: number | undefined; cost: number }[] =
+            [];
+          for (let d = 0; d < W; d += step)
+            for (const at of d ? [x - d, x + d] : [x])
+              for (const dd of depths)
+                tries.push({
+                  at,
+                  dd,
+                  cost:
+                    d +
+                    (dd !== undefined && deep !== undefined
+                      ? Math.abs(dd - deep) * W * ROW_COST
+                      : 0),
+                });
+          tries.sort((a, b) => a.cost - b.cost);
+          const clear =
+            tries.find(
+              (t) =>
+                t.at >= least &&
+                t.at <= most &&
+                !wrongSide(t.at) &&
+                !crowded(t.at, t.dd),
+            ) ??
+            tries.find(
+              (t) => t.at >= least && t.at <= most && !crowded(t.at, t.dd),
             );
-            if (clear === undefined) continue;
-            x = clear;
-            break;
+          if (clear) {
+            x = clear.at;
+            chosen = clear.dd;
           }
         }
       }
@@ -1147,11 +1296,13 @@ export function layoutStations(input: {
       // spreads the group across the floor.
       const d =
         depthed && !way
-          ? (asked ??
-            (was?.station === station && was.asked === asked
-              ? was.d
-              : undefined) ??
-            spreadDepth(step.show.indexOf(id), step.show.length))
+          ? free && chosen !== undefined
+            ? chosen
+            : (asked ??
+              (was?.station === station && was.asked === asked
+                ? was.d
+                : undefined) ??
+              spreadDepth(step.show.indexOf(id), step.show.length))
           : undefined;
       const onFloor =
         depthed && d !== undefined
@@ -1209,7 +1360,14 @@ export function layoutStations(input: {
           feet = Math.min(floor, top + seated);
         }
       }
-      placed.push({ id, x, w: size.w * k, ...(low ? { low } : {}) });
+      placed.push({
+        id,
+        x,
+        w: size.w * k,
+        station,
+        ...(d !== undefined ? { d } : {}),
+        ...(low ? { low } : {}),
+      });
       out[id] = {
         x: round(x - (size.w * k) / 2),
         y: round(feet - size.h * k),
@@ -1244,10 +1402,34 @@ export function layoutStations(input: {
     // or hand over near, no one in anyone's body.
     if (bodies.length > 1) {
       const widest = Math.max(...bodies.map((b) => b.size.w));
-      const spaced = spaceOut(bodies, input.near?.[stepAt] ?? [], {
-        least: margin + widest * 0.3,
-        most: W - margin - widest * 0.3,
-      });
+      // The things on the floor, as bodies no one is moved into and no
+      // one is moved past (studio-space-plan).
+      // Only things small enough to stand beside (a manger, a stool): one
+      // at a long bed or a table stands before it, as their spot has them.
+      const things: Spaced[] =
+        depthed && unit
+          ? (input.furniture ?? [])
+              .filter((f) => f.w <= W * SPACED_THING_MOST)
+              .map((f, i) => {
+                const k = pinholeK(f.feet, floor, depthed.eye);
+                return {
+                  id: `#furniture-${i}`,
+                  x: f.x,
+                  half: f.w / 2,
+                  d: depthAtFeet(f.feet, floor, depthed.eye, depthed.bottom),
+                  perM: unit * k * KIT_PER_METRE,
+                  free: false,
+                };
+              })
+          : [];
+      const spaced = spaceOut(
+        [...bodies, ...things],
+        input.near?.[stepAt] ?? [],
+        {
+          least: margin + widest * 0.3,
+          most: W - margin - widest * 0.3,
+        },
+      );
       for (const body of bodies) {
         const to = spaced.get(body.id);
         if (to === undefined || Math.abs(to - body.x) < 0.5) continue;
@@ -1259,11 +1441,41 @@ export function layoutStations(input: {
         if (at) at.x += shift;
       }
     }
+    // A baby in someone's arms: across them at their chest, just before
+    // them, their head toward the holder's left arm (studio-space-plan).
+    for (const { id, by } of held) {
+      const holder = out[by];
+      const size = sizeOf(id);
+      if (!holder || !size) continue;
+      const k = holder.h / Math.max(1, sizeOf(by)?.h ?? holder.h);
+      const w = size.w * k;
+      const h = size.h * k;
+      const long =
+        (standsOf(id)?.length ?? size.h / (unit || 1)) * (unit || 1) * k;
+      const middle = holder.x + holder.w / 2;
+      // The pivot (their feet) at the holder's forearms; lying, the head
+      // goes a body's length to its left, so the feet are half of it right.
+      const feet = holder.y + holder.h * HELD_AT;
+      const x = middle + long * 0.45;
+      out[id] = {
+        x: round(x - w / 2),
+        y: round(feet - h),
+        w: round(w),
+        h: round(h),
+        ...(holder.d !== undefined ? { d: holder.d } : {}),
+        held: by,
+      };
+      const one = kept.get(id);
+      if (one) one.x = x;
+    }
     for (const id of [...kept.keys()])
       if (!step.show.includes(id)) kept.delete(id);
     return out;
   });
 }
+
+/** Where a baby held in someone's arms lies across them, as a share of the holder's frame down from its top: their forearms, at the chest. */
+export const HELD_AT = 0.62;
 
 /** A feature as a stage stands it: the box it is drawn in, and where one goes through or by it. */
 export interface FeaturePlace extends Rect {
@@ -1418,6 +1630,102 @@ export function placeFeature(input: {
         }
       : {}),
   };
+}
+
+/** The kinds of feature that stand solid on the floor, which people stand beside or behind and never in: a show's own drawn ones too (a manger, a campfire). */
+export const FURNITURE_KINDS: ReadonlySet<string> = new Set([
+  'bench',
+  'chair',
+  'sofa',
+  'table',
+  'bed',
+  'crate',
+  'stall',
+  'counter',
+  'cupboard',
+  'sink',
+  'well',
+  'drawn',
+]);
+
+/** Two a row apart on the floor stand at least this share of the narrower's width apart across: their faces side by side, not one behind the other. */
+export const SIDE_BY_SIDE = 0.45;
+/** A row back or forward on the floor, for one whose spot is crowded; and what it costs, as a share of the stage's width per unit of depth, beside going along. */
+export const ROW_STEP = 0.24;
+const ROW_COST = 0.3;
+
+/** The widest thing on the floor people are kept beside as they are spaced, as a share of the stage's width. */
+const SPACED_THING_MOST = 0.3;
+
+/** A solid thing on the floor, as people keep out of it: its middle and width across, its feet's y, and how far back of them it reaches. */
+export interface Furniture {
+  x: number;
+  w: number;
+  feet: number;
+  deep: number;
+  /** Its top's y: what of someone behind it it hides. */
+  top: number;
+}
+
+/** How far back of its feet a thing on the floor reaches, at the least, as a share of the stage's height; and as a share of its own. */
+export const FOOTPRINT_LEAST = 0.035;
+export const FOOTPRINT_SHARE = 0.12;
+/** A drawn thing's sides are this far in from its box's: its drawing has room round it. */
+export const FOOTPRINT_INSET = 0.08;
+
+/** A thing's footprint on the floor, from its box and its feet on a stage `H` high. */
+export function furnitureOf(box: Rect, feet: number, H: number): Furniture {
+  return {
+    x: box.x + box.w / 2,
+    w: box.w * (1 - 2 * FOOTPRINT_INSET),
+    feet,
+    deep: Math.max(H * FOOTPRINT_LEAST, box.h * FOOTPRINT_SHARE),
+    top: box.y + box.h * FOOTPRINT_INSET,
+  };
+}
+
+/** Behind a thing on the floor, this much of someone's body may be hidden by it (scene-faces-seen's BODY_CLEAR). */
+export const BEHIND_HIDES_MOST = 0.35;
+
+/**
+ * How much of someone's body a thing on the floor before them hides: the
+ * kit's shoulders to its feet, its middle three fifths across (scene-
+ * faces-seen's bodyOf), under the thing's box. Nothing, where it stands
+ * behind them or they are in it.
+ */
+export function hiddenBy(place: Rect, feet: number, thing: Furniture): number {
+  if (thing.feet <= feet + thing.deep * 0.5) return 0;
+  const body = {
+    x: place.x + place.w * 0.2,
+    y: place.y + place.h * 0.12,
+    w: place.w * 0.6,
+    h: place.h * 0.86,
+  };
+  const w =
+    Math.min(body.x + body.w, thing.x + thing.w / 2) -
+    Math.max(body.x, thing.x - thing.w / 2);
+  const h = Math.min(body.y + body.h, thing.feet) - Math.max(body.y, thing.top);
+  return w > 0 && h > 0 ? (w * h) / (body.w * body.h) : 0;
+}
+
+/**
+ * Whether someone standing with their middle at `x`, their body `half`
+ * across either side and their feet at `feet`, stands in a thing on the
+ * floor: their feet in its footprint (from a little before its feet back
+ * as far as it reaches), and their body over a quarter of it across.
+ */
+export function standsIn(
+  x: number,
+  half: number,
+  feet: number,
+  thing: Furniture,
+): boolean {
+  if (feet < thing.feet - thing.deep || feet > thing.feet + thing.deep * 0.5)
+    return false;
+  const across =
+    Math.min(x + half, thing.x + thing.w / 2) -
+    Math.max(x - half, thing.x - thing.w / 2);
+  return across > half * 2 * 0.25;
 }
 
 /** Whether two rectangles overlap by more than a hair. */

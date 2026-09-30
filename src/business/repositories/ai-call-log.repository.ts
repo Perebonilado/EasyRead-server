@@ -18,4 +18,15 @@ export interface AiCallLogInput {
  */
 export interface AiCallLogRepository {
   record(input: AiCallLogInput): Promise<void>;
+  /**
+   * Dollars spent on one task's calls to models whose name starts so
+   * ("elevenlabs:"): for one document, since a moment, or both. For a
+   * spending cap; a ledger that cannot say leaves it out.
+   */
+  spentUsd?(filter: {
+    task: string;
+    modelPrefix: string;
+    documentId?: string;
+    since?: Date;
+  }): Promise<number>;
 }

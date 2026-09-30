@@ -33,7 +33,8 @@ import {
   type FeltFace,
 } from './scene-performance';
 import { withViews } from './scene-views';
-import { guessAffordances } from './scene-affordances';
+import { withFaces } from './scene-face-direct';
+import { cradleOf, guessAffordances, isCradle } from './scene-affordances';
 import { withInteractions, type TimedInteraction } from './scene-interact';
 import {
   INSERT_EARLY_MS,
@@ -74,6 +75,7 @@ import {
   type Words,
 } from './scene-labels';
 import { climbsGrounded, keepGrounded } from './scene-grounding';
+import { describeDoorFaults, doorFaults } from './scene-door-check';
 import {
   SOLID_BESIDE,
   STAGINGS,
@@ -82,6 +84,14 @@ import {
   fitInSlot,
   floorAt,
   layoutStations,
+  BEHIND_HIDES_MOST,
+  BODY_HALF,
+  depthAtFeet,
+  furnitureOf,
+  FURNITURE_KINDS,
+  hiddenBy,
+  standsIn,
+  type Furniture,
   restingAt,
   seatedHeight,
   layoutStep,
@@ -190,6 +200,8 @@ import {
   type AudienceTurn,
 } from './scene-set-audience';
 import { PAPER, themeOf, type ExplainerTheme } from './scene-themes';
+import { walkRound } from './scene-paths';
+import { describeSpace, spaceFaults } from './scene-space';
 import { anchorMs, quietGaps, spaced, type TimedBeat } from './scene-timing';
 import { numberWords } from './spoken';
 
@@ -507,6 +519,10 @@ export function thingDto(
       : {}),
   };
 }
+
+/** A length in a drawing's units at the size it is drawn: as it is where it is not known. */
+const scaledBy = (n: number | undefined, k: number): number | undefined =>
+  n === undefined ? undefined : n * k;
 
 /** What code knows of a drawing that the player never needs: where its labels point, where its ink is. */
 interface Geometry {
@@ -2507,8 +2523,12 @@ export function composeScene(input: ComposeInput): {
         ...(piece && group ? { painted: group } : {}),
         ...(feature.open ? { open: true as const } : {}),
         ...(feature.open && feature.ajar ? { ajar: true as const } : {}),
-        // What covers whoever is in it, and where one sits or lies on it.
+        // What covers whoever is in it, and where one sits or lies on it:
+        // a cradle's front, below its rim, over whoever lies in it.
         ...(piece?.cover ? { cover: piece.cover } : {}),
+        ...(piece && !piece.cover && isCradle(feature)
+          ? { rim: cradleOf(piece).rim }
+          : {}),
         ...(featurePlaces.wide.get(feature.id)?.seat !== undefined
           ? {
               seat: {
@@ -2803,14 +2823,20 @@ export function composeScene(input: ComposeInput): {
           ? {
               stands: {
                 ...drawing.stands,
-                // One the kit draws: how high they sit, how long they lie.
+                // One the kit draws: how high they sit, how long they lie,
+                // at the size their frame is drawn (a baby's smaller).
                 ...(drawing.legs
                   ? {
-                      seated: seatedHeight(drawing.legs),
-                      length: Math.max(
-                        0,
-                        -drawing.viewBox[1] - FIGURE_FRAME.headroom,
+                      seated: scaledBy(
+                        seatedHeight(drawing.legs),
+                        drawing.stands.units / drawing.viewBox[3],
                       ),
+                      length:
+                        Math.max(
+                          0,
+                          -drawing.viewBox[1] - FIGURE_FRAME.headroom,
+                        ) *
+                        (drawing.stands.units / drawing.viewBox[3]),
                     }
                   : {}),
               },
@@ -2905,6 +2931,7 @@ export function composeScene(input: ComposeInput): {
               pack: setPackOf(setDrawing),
               livery: setLiveryOf(setDrawing),
               outdoor,
+              vessel: script.setting?.place === 'vessel',
             }),
       group: box ? found : null,
       box: box ?? null,
@@ -2962,10 +2989,19 @@ export function composeScene(input: ComposeInput): {
           )
         : [0, 0];
       const back = atBack(one.feature);
+      // A cradle (a manger) is lain in along its hollow, as a bed is.
+      const cradle =
+        one.piece && isCradle(one.feature) && !one.piece.lies
+          ? cradleOf(one.piece)
+          : null;
       let placed = placeFeature({
         staging,
         spot: one.feature.spot,
-        ...(one.piece ? { piece: one.piece } : {}),
+        ...(one.piece
+          ? {
+              piece: cradle ? { ...one.piece, lies: cradle.lies } : one.piece,
+            }
+          : {}),
         ...(one.feature.kind === DRAWN ? { own: true } : {}),
         painted: one.box ? { x: x0, y: y0, w: x1 - x0, h: y1 - y0 } : null,
         back,
@@ -3002,6 +3038,16 @@ export function composeScene(input: ComposeInput): {
               ...placed.up,
               x: Math.round((placed.up.x + shift) * 10) / 10,
             },
+            ...(placed.lies
+              ? {
+                  lies: {
+                    ...placed.lies,
+                    head: Math.round((placed.lies.head + shift) * 10) / 10,
+                    foot: Math.round((placed.lies.foot + shift) * 10) / 10,
+                    sits: Math.round((placed.lies.sits + shift) * 10) / 10,
+                  },
+                }
+              : {}),
           };
         taken.push([placed.x, placed.x + placed.w]);
       }
@@ -3030,6 +3076,39 @@ export function composeScene(input: ComposeInput): {
   const floors: Partial<
     Record<StagingName, { floor: number; eye: number; bottom: number }>
   > = {};
+  /** Someone's place on a staging's floor stood at depth d instead: as big as they are there, their feet on it; null with no floor's depth. */
+  const atDepthOn =
+    (staging: StagingName) =>
+    <P extends { x: number; y: number; w: number; h: number; d?: number }>(
+      place: P,
+      d: number,
+    ): P | null => {
+      const floor = floors[staging];
+      if (!floor || place.d === undefined) return null;
+      const was = floorAt(place.d, floor.floor, floor.eye, floor.bottom);
+      const now = floorAt(d, floor.floor, floor.eye, floor.bottom);
+      // One by a feature stands on its own ground, maybe back of the
+      // floor: as big as they are there, from where their feet are.
+      const feet = place.y + place.h;
+      const wasK =
+        Math.abs(feet - was.feet) > 1
+          ? (feet - floor.eye) / Math.max(1, floor.floor - floor.eye)
+          : was.k;
+      const k = now.k / Math.max(0.01, wasK);
+      const round = (n: number) => Math.round(n * 10) / 10;
+      const w = place.w * k;
+      const h = place.h * k;
+      return {
+        ...place,
+        x: round(place.x + place.w / 2 - w / 2),
+        y: round(now.feet - h),
+        w: round(w),
+        h: round(h),
+        d,
+      };
+    };
+  /** The solid things on each staging's floor, which no one stands in (studio-space-plan). */
+  const furnitureAt: Record<StagingName, Furniture[]> = { box: [], wide: [] };
   /**
    * Who are to be near whom at each step, and why (scene-spacing): who
    * talk (a line, to whom it is said, else the one who spoke before), who
@@ -3098,6 +3177,19 @@ export function composeScene(input: ComposeInput): {
         bottom: STAGINGS[staging].h - 12,
       };
       floors[staging] = floorNow;
+      furnitureAt[staging] = setFeatures.flatMap(({ feature }) => {
+        const f = placed.get(feature.id);
+        if (!f || atBack(feature) || !FURNITURE_KINDS.has(feature.kind))
+          return [];
+        const stand = standOf(feature.id, f);
+        return [
+          furnitureOf(
+            { x: stand.x - stand.w / 2, y: f.y, w: stand.w, h: f.h },
+            f.feet,
+            STAGINGS[staging].h,
+          ),
+        ];
+      });
       return layoutStations({
         near: nearAt,
         shares: stationShares(largest),
@@ -3149,6 +3241,8 @@ export function composeScene(input: ComposeInput): {
             ? [{ x: f.x + f.w / 2, w: f.w }]
             : [];
         }),
+        // The solid things on the floor: no one stands in one.
+        furniture: furnitureAt[staging],
       });
     }
     // What a character is like is set beside them only while they have the
@@ -3241,7 +3335,6 @@ export function composeScene(input: ComposeInput): {
     for (const staging of ['box', 'wide'] as const) {
       const stage = STAGINGS[staging];
       const on = setFrameOn(setFrame, stage);
-      const floor = floors[staging];
       const faces: Parameters<typeof keepFacesSeen>[0] = {
         W: stage.w,
         H: stage.h,
@@ -3316,32 +3409,22 @@ export function composeScene(input: ComposeInput): {
         nearer: (k, id) =>
           open(k, id) || (stationsAt[k]?.[id] ?? '').startsWith('by:'),
         hiding,
-        atDepth: (place, d) => {
-          if (!floor || place.d === undefined) return null;
-          const was = floorAt(place.d, floor.floor, floor.eye, floor.bottom);
-          const now = floorAt(d, floor.floor, floor.eye, floor.bottom);
-          // One by a feature stands on its own ground, maybe back of the
-          // floor: as big as they are there, from where their feet are.
-          const feet = place.y + place.h;
-          const wasK =
-            Math.abs(feet - was.feet) > 1
-              ? (feet - floor.eye) / Math.max(1, floor.floor - floor.eye)
-              : was.k;
-          const k = now.k / Math.max(0.01, wasK);
-          const round = (n: number) => Math.round(n * 10) / 10;
-          const w = place.w * k;
-          const h = place.h * k;
-          return {
-            ...place,
-            x: round(place.x + place.w / 2 - w / 2),
-            y: round(now.feet - h),
-            w: round(w),
-            h: round(h),
-            d,
-          };
-        },
+        atDepth: atDepthOn(staging),
         name: (id) => nameOf(castById.get(id)) ?? id,
         durationMs,
+        // One at a spot of their own on the open floor: by a thing, they
+        // are where it has them.
+        inThing: (place, k, id) =>
+          open(k, id) &&
+          furnitureAt[staging].some(
+            (f) =>
+              standsIn(
+                place.x + place.w / 2,
+                place.w * BODY_HALF,
+                place.y + place.h,
+                f,
+              ) || hiddenBy(place, place.y + place.h, f) > BEHIND_HIDES_MOST,
+          ),
       };
       const mended = keepFacesSeen(faces);
       // A film plays wide: what it says is its wide staging's.
@@ -3605,6 +3688,26 @@ export function composeScene(input: ComposeInput): {
         name: (id) => nameOf(castById.get(id)) ?? id,
       });
       // A film plays wide: its notes are its wide staging's.
+      if (staging === 'wide' || !film) facesSeen.notes.push(...notes);
+    }
+  // Every walk round whoever and whatever is in its way, never through
+  // them (scene-paths): bent behind or before them, and said.
+  if (stationed)
+    for (const staging of ['box', 'wide'] as const) {
+      const floor = floors[staging];
+      if (!floor) continue;
+      const notes = walkRound({
+        W: STAGINGS[staging].w,
+        steps,
+        places: layouts[staging],
+        walks: (id) => geometry.get(id)?.stands !== undefined,
+        furniture: furnitureAt[staging].map((f) => ({
+          ...f,
+          d: depthAtFeet(f.feet, floor.floor, floor.eye, floor.bottom),
+        })),
+        atDepth: atDepthOn(staging),
+        name: (id) => nameOf(castById.get(id)) ?? id,
+      });
       if (staging === 'wide' || !film) facesSeen.notes.push(...notes);
     }
   // A thing thrown or kicked to a feature comes down on the ground before
@@ -4425,6 +4528,15 @@ export function composeScene(input: ComposeInput): {
   composed.scene = withInteractions(composed.scene, interactions);
   // Up the stairs on their treads, never floating (scene-grounding).
   composed.staging.push(...climbsGrounded(composed.scene));
+  // Every door, gate and wall its place's, and a door only one the story uses (scene-door-check).
+  const placeThing = script.cast.find(
+    (t) => t.kind === 'place' && t.id === script.backdrop,
+  );
+  const placeNamed =
+    placeThing?.kind === 'place' ? { name: placeThing.name } : null;
+  composed.staging.push(
+    ...describeDoorFaults(doorFaults(composed.scene, placeNamed)),
+  );
   // How far apart people stand, as made: in each other's bodies, or
   // talking too far apart or too close (scene-spacing), said.
   if (stationed)
@@ -4444,6 +4556,24 @@ export function composeScene(input: ComposeInput): {
   // Which view of each one drawn from every side the camera sees, and
   // when (studio-views-plan §2): from where they walk and whom they face.
   composed.scene = withViews(composed.scene);
+  // A film's rigged faces given a rest and a rhythm (studio-faces-plan):
+  // each one's mood, and a face changed only for a reason, held, gentle
+  // for young children.
+  if (film)
+    composed.scene = withFaces(composed.scene, {
+      mood: script.mood,
+      young: input.profile?.stage === 'early',
+    });
+  // How the film keeps its people in the room they have, as made: no one
+  // through anyone, no face melted behind another, no one out of what
+  // they lie in nor standing in a thing (scene-space), said.
+  if (stationed && film)
+    composed.staging.push(
+      ...describeSpace(
+        spaceFaults(composed.scene),
+        (id) => nameOf(castById.get(id)) ?? id,
+      ),
+    );
   return composed;
 }
 

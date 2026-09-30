@@ -82,3 +82,50 @@ export function guessAffordances(
   }
   return Object.keys(out).length ? out : undefined;
 }
+
+/** A thing a baby is laid in, by its name: a manger, a crib, a cradle, a cot, a basket. */
+const CRADLE_WORDS =
+  /\b(?:mangers?|cribs?|cradles?|cots?|bassinets?|(?:moses )?baskets?|troughs?|prams?|carry ?cots?)\b/iu;
+
+/** Whether a thing of the set is lain in, as a bed is (studio-space-plan): one of a show's own named as a cradle. */
+export function isCradle(feature: {
+  kind: string;
+  name?: string | null;
+}): boolean {
+  return (
+    (feature.kind === 'drawn' || feature.kind === 'crate') &&
+    Boolean(feature.name && CRADLE_WORDS.test(feature.name))
+  );
+}
+
+/** How far in from a cradle's sides its hollow is, as a share of its width; and how high over its rim the line one lies along in it is, as a share of its height: their head and shoulders over the rim, the rest below it. */
+export const CRADLE_INSET = 0.14;
+export const CRADLE_LIFT = 0.05;
+
+/**
+ * Where one lies in a cradle, in its drawing's own units, as a bed's
+ * piece says it (scene-set-pieces' lies): along its hollow from its head
+ * end (the left) to its foot end, a little over its rim (its seat where
+ * it has one, else near its top), so the head shows over it. And the share of its height
+ * from its top down to its rim, which its front covers whoever is in it
+ * below (SceneFeatureDto.rim).
+ */
+export function cradleOf(piece: {
+  viewBox: [number, number, number, number];
+  seat?: number;
+}): {
+  lies: { top: number; head: number; foot: number; sits: number };
+  rim: number;
+} {
+  const [vx, vy, vw, vh] = piece.viewBox;
+  const rim = piece.seat ?? -vy * 0.88;
+  return {
+    lies: {
+      top: Math.round((rim + vh * CRADLE_LIFT) * 10) / 10,
+      head: Math.round((vx + vw * CRADLE_INSET) * 10) / 10,
+      foot: Math.round((vx + vw * (1 - CRADLE_INSET)) * 10) / 10,
+      sits: Math.round((vx + vw / 2) * 10) / 10,
+    },
+    rim: Math.round(Math.min(1, Math.max(0, (-rim - vy) / vh)) * 1000) / 1000,
+  };
+}

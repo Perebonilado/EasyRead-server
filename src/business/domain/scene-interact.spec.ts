@@ -132,9 +132,13 @@ describe('what the pieces of the stage offer (studio-interactions-plan §1.1)', 
       [48, 0],
     ]);
     // The frame leaves the doorway open: whoever is in it is seen through it.
-    expect(door.svg).toMatch(
-      /<g id="frame"><path d="M-80,-236 L80,-236 L80,0 L56,0 L56,-212 L-56,-212 L-56,0 L-80,0 Z"/,
-    );
+    const frame = /<g id="frame">([\s\S]*?)<\/g>/u.exec(door.svg)![1];
+    for (const m of frame.matchAll(
+      /<rect x="(-?[\d.]+)" y="(-?[\d.]+)" width="([\d.]+)" height="([\d.]+)"/gu,
+    )) {
+      const [x, y, w, h] = m.slice(1).map(Number);
+      expect(x < 48 && x + w > -48 && y + h > -204).toBe(false);
+    }
   });
 
   it('a table: its chair behind it that slides out, and its front over the legs of one sat at it', () => {

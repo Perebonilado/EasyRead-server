@@ -131,6 +131,26 @@ describe('the Studio says what it is doing', () => {
     expect(seen[3]).toBeNull();
   });
 
+  it('says a voice’s trouble in its own words when it knows them', async () => {
+    const r = rows();
+    const seen: (StudioActivity | null)[] = [];
+    await followStudioJob(r.repo, job(), async () => {
+      noticeRetry({
+        service: 'voice',
+        attempt: 2,
+        of: 6,
+        status: 429,
+        reason: 'ElevenLabs is at its limit of 5 at once on the Creator plan',
+      });
+      await flush();
+      seen.push(r.now('e1'));
+    });
+    expect(seen[0]?.retry).toMatchObject({
+      reason: 'ElevenLabs is at its limit of 5 at once on the Creator plan',
+      says: 'ElevenLabs is at its limit of 5 at once on the Creator plan, trying again (2 of 6)',
+    });
+  });
+
   it('says a call given up on for want of credit, until another answers', async () => {
     const r = rows();
     const seen: (StudioActivity | null)[] = [];

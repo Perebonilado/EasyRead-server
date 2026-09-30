@@ -38,7 +38,13 @@ const BRIGHT: readonly ClothColour[] = [
   'yellow',
   'pink',
 ];
-const QUIET: readonly ClothColour[] = ['navy', 'brown', 'grey', 'white', 'black'];
+const QUIET: readonly ClothColour[] = [
+  'navy',
+  'brown',
+  'grey',
+  'white',
+  'black',
+];
 
 /** How alike two looks are: how many of what a glance takes in they share. */
 export function likeness(a: FigureSpec, b: FigureSpec): number {
@@ -67,15 +73,18 @@ export function likeness(a: FigureSpec, b: FigureSpec): number {
 export const TOO_ALIKE = 11;
 
 /** Hair someone of an age may be given, when nothing says. */
-const HAIR_STYLE_FOR: Record<FigureSpec['age'], readonly FigureSpec['hair'][]> = {
-  child: ['short', 'curly', 'spiky', 'afro', 'pigtails', 'bob'],
-  teen: ['short', 'curly', 'spiky', 'afro', 'ponytail', 'bob'],
-  adult: ['short', 'curly', 'long', 'afro', 'locs', 'bun'],
-  elder: ['balding', 'short', 'curly', 'bald', 'bun'],
-};
+const HAIR_STYLE_FOR: Record<FigureSpec['age'], readonly FigureSpec['hair'][]> =
+  {
+    infant: ['bald', 'short', 'curly'],
+    child: ['short', 'curly', 'spiky', 'afro', 'pigtails', 'bob'],
+    teen: ['short', 'curly', 'spiky', 'afro', 'ponytail', 'bob'],
+    adult: ['short', 'curly', 'long', 'afro', 'locs', 'bun'],
+    elder: ['balding', 'short', 'curly', 'bald', 'bun'],
+  };
 
 /** Hair colours someone of an age may be given, when nothing says. */
 const HAIR_FOR: Record<FigureSpec['age'], readonly HairColour[]> = {
+  infant: ['black', 'dark brown', 'brown', 'auburn', 'blonde', 'red'],
   child: ['black', 'dark brown', 'brown', 'auburn', 'blonde', 'red'],
   teen: ['black', 'dark brown', 'brown', 'auburn', 'blonde', 'red'],
   adult: ['black', 'dark brown', 'brown', 'auburn', 'blonde', 'red', 'grey'],
@@ -103,7 +112,8 @@ export function setApart<T extends Looked>(characters: readonly T[]): T[] {
       !one.iconic && !(one.fromText ?? []).includes(field);
     const clash = () =>
       others.some(
-        (other) => other.figure && likeness(other.figure, one.figure!) >= TOO_ALIKE,
+        (other) =>
+          other.figure && likeness(other.figure, one.figure!) >= TOO_ALIKE,
       );
     if (clash()) {
       const palette = one.role === 'main' ? BRIGHT : [...BRIGHT, ...QUIET];
@@ -112,7 +122,9 @@ export function setApart<T extends Looked>(characters: readonly T[]): T[] {
         // A colour no one else here wears.
         (f) => {
           if (!free('topColour')) return null;
-          const colour = palette.find((c) => !taken.has(c) && c !== f.topColour);
+          const colour = palette.find(
+            (c) => !taken.has(c) && c !== f.topColour,
+          );
           return colour ? { ...f, topColour: colour } : null;
         },
         (f) => {

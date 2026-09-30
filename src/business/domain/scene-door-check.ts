@@ -14,11 +14,7 @@
  *   beach, with no building it is the way into.
  */
 import type { SceneDto, SceneFeatureDto } from '../../contracts';
-import {
-  doorMakeOf,
-  wallMaterialOf,
-  type DoorMake,
-} from './scene-set-pieces';
+import { doorMakeOf, wallMaterialOf, type DoorMake } from './scene-set-pieces';
 import { STYLE_PACKS, type StylePackId } from './scene-style-packs';
 
 /** A place out in open country, by its name and look. */
@@ -47,7 +43,8 @@ function placeOf(scene: SceneDto): {
   const backdrop =
     scene.steps.find((step) => step.backdrop)?.backdrop ?? undefined;
   const thing = scene.things.find(
-    (t) => t.kind === 'drawing' && (t.id === backdrop || t.id.startsWith('place-')),
+    (t) =>
+      t.kind === 'drawing' && (t.id === backdrop || t.id.startsWith('place-')),
   );
   const svg =
     thing?.kind === 'drawing'
@@ -55,10 +52,7 @@ function placeOf(scene: SceneDto): {
       : '';
   const style = /data-style="([a-z-]+)"/u.exec(svg)?.[1];
   const place = /data-place="(outdoor|indoor|vessel)"/u.exec(svg)?.[1] as
-    | 'outdoor'
-    | 'indoor'
-    | 'vessel'
-    | undefined;
+    'outdoor' | 'indoor' | 'vessel' | undefined;
   return {
     pack: style && style in STYLE_PACKS ? (style as StylePackId) : null,
     place: place ?? null,
@@ -118,8 +112,7 @@ export function doorFaults(
       );
     } else if (kind === 'door') {
       const wanted: DoorMake | 'front' =
-        where === 'outdoor' &&
-        doorMakeOf(feature.name, { pack }) !== 'flap'
+        where === 'outdoor' && doorMakeOf(feature.name, { pack }) !== 'flap'
           ? 'front'
           : doorMakeOf(feature.name, { pack, vessel: where === 'vessel' });
       if (made.make !== wanted)
@@ -138,9 +131,12 @@ export function doorFaults(
       kind === 'door' &&
       feature.affordances?.operates?.some((o) => o.does === 'bell') &&
       pack &&
-      ['ancient-near-east', 'biblical-village', 'village-farm', 'nature'].includes(
-        pack,
-      )
+      [
+        'ancient-near-east',
+        'biblical-village',
+        'village-farm',
+        'nature',
+      ].includes(pack)
     )
       fault(`${theName(feature.name)} has a doorbell, in a ${packName} place`);
     if (kind !== 'door') continue;

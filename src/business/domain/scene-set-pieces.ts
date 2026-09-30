@@ -1378,7 +1378,8 @@ const FRONT_TALL = 500;
 /** A hut's, a shed's, a stable's front: one storey, narrower. */
 const HUT_HALF = 150;
 const HUT_TALL = 290;
-const HUT = /\b(?:huts?|sheds?|cabins?|shacks?|stables?|barns?|byres?|kiosks?|sheepfolds?)\b/iu;
+const HUT =
+  /\b(?:huts?|sheds?|cabins?|shacks?|stables?|barns?|byres?|kiosks?|sheepfolds?)\b/iu;
 
 /** The joints of a wall's face within a box: a town's brick courses, an old town's stone blocks, a farm's boards. */
 function faceJoints(
@@ -1458,7 +1459,9 @@ function drawBuildingDoor(
   const T = hut ? HUT_TALL : FRONT_TALL;
   const bell = !old && doorHasBell('panel', `front ${name}`);
   const leaf =
-    make === 'plank' || old ? plankLeaf(WOOD) : panelLeaf(colourNamed(name) ?? WOOD);
+    make === 'plank' || old
+      ? plankLeaf(WOOD)
+      : panelLeaf(colourNamed(name) ?? WOOD);
   // The front with its doorway cut out, so the door and the dark show.
   const face =
     `<path d="M${-H},${-T} L${H},${-T} L${H},0 L56,0 L56,-212 L-56,-212 L-56,0 L${-H},0 Z" ${fill(wall)}/>` +
@@ -1480,7 +1483,9 @@ function drawBuildingDoor(
         [-150, -28, 94].map((x) => oldWindow(x, -420, 56, 72)).join('')
       : frontWindow(-176, -186, 76, 96, trim) +
         frontWindow(100, -186, 76, 96, trim) +
-        [-170, -38, 94].map((x) => frontWindow(x, -438, 76, 110, trim)).join('');
+        [-170, -38, 94]
+          .map((x) => frontWindow(x, -438, 76, 110, trim))
+          .join('');
   return {
     ...framed(
       shadow(H - 10) +
@@ -1519,13 +1524,7 @@ function drawBuildingDoor(
 
 /** What a stretch of wall is made of. */
 export type WallMaterial =
-  | 'brick'
-  | 'stone'
-  | 'mud'
-  | 'concrete'
-  | 'timber'
-  | 'hedge'
-  | 'zinc';
+  'brick' | 'stone' | 'mud' | 'concrete' | 'timber' | 'hedge' | 'zinc';
 
 /** What a wall's name says it is made of; null where it says nothing. */
 export function wallMaterialNamed(name: string): WallMaterial | null {
@@ -1536,8 +1535,7 @@ export function wallMaterialNamed(name: string): WallMaterial | null {
   if (/\b(?:concrete|cement|breeze ?block|cinder ?block|block)\b/iu.test(name))
     return 'concrete';
   if (/\b(?:brick|bricks)\b/iu.test(name)) return 'brick';
-  if (/\b(?:stone|rock|rocks|dry ?stone|cobble)\b/iu.test(name))
-    return 'stone';
+  if (/\b(?:stone|rock|rocks|dry ?stone|cobble)\b/iu.test(name)) return 'stone';
   if (/\b(?:wood(?:en)?|timber|plank|log)\b/iu.test(name)) return 'timber';
   return null;
 }

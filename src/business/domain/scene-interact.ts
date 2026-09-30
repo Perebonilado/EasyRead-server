@@ -328,7 +328,8 @@ export function interactionFor(
       return 'knock';
     case 'ring-bell':
       // A door with no bell (an old town's, a stable's) is knocked at.
-      return affordances && !affordances.operates?.some((o) => o.does === 'bell')
+      return affordances &&
+        !affordances.operates?.some((o) => o.does === 'bell')
         ? 'knock'
         : 'ring-bell';
     case 'climb-stairs':

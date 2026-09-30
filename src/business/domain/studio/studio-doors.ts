@@ -15,7 +15,7 @@
  * place has to one: a gate in its fence or wall. A tent's door is its flap
  * (drawn as one wherever it is, scene-set-pieces).
  */
-import { featureIdOf, featureKindOf } from '../scene-doings';
+import { featureIdOf, featureKindOf, featureStatesIn } from '../scene-doings';
 import { A_BUILDING, OPEN_COUNTRY, theName } from '../scene-door-check';
 import { placementsOf, featureStatesOf } from './studio-stage';
 import type {
@@ -40,16 +40,22 @@ export function openCountry(
   return OPEN_COUNTRY.test(words) && !A_BUILDING.test(words);
 }
 
-/** A line pointing at one door: "Someone's at the door!", "Open that door." */
-const POINTED_AT =
-  /\b(?:the|this|that)\s+(?:[\p{L}'’-]+\s+)?(?:door|doorway)\b(?!s)/iu;
+/**
+ * Words naming one door in particular: "Someone's at the door!", "Door's
+ * locked.", "that door"; never a door in general ("one more door", "a
+ * door", "these doors").
+ */
+const ONE_DOOR =
+  /(?<!\b(?:a|an|another|any|every|each|more|other|no|next|one)\s+(?:[\p{L}'’-]+\s+)?)\b(?:door|doorway)\b/iu;
 
 /**
  * The doors a scene uses, by id: gone through, knocked at, opened or
  * shut, looked at or pointed at, gone to, leant on, by someone on the
  * stage; someone found by it ("waiting by the door"); someone coming in
  * through it from the scene before; its state as the scene opens told
- * ("light through the open door"); or a line pointing at it.
+ * ("light through the open door"); or a line, or the narration, naming
+ * it ("Door's locked."), but for the narration only slamming or opening
+ * it with no one at it, which is heard, not seen.
  */
 export function doorsUsed(
   sheet: StorySheet,
@@ -80,11 +86,22 @@ export function doorsUsed(
     use(beat.via);
     use(beat.thing);
     use(beat.prop);
-    if (beat.kind === 'line' && POINTED_AT.test(beat.say)) {
+    // A line naming it, or the narration saying how it is (never only
+    // that it slams or opens, with no one at it: that is heard).
+    const told =
+      beat.kind === 'narration' &&
+      featureStatesIn(beat.say).some(
+        (one) => one.kind === 'door' && !one.still,
+      );
+    if (
+      (beat.kind === 'line' || (beat.kind === 'narration' && !told)) &&
+      ONE_DOOR.test(beat.say)
+    ) {
       const named = doors.find((d) =>
-        new RegExp(`\\b${d.name.replace(/[.*+?^${}()|[\]\\]/gu, '\\$&')}\\b`, 'iu').test(
-          beat.say,
-        ),
+        new RegExp(
+          `\\b${d.name.replace(/[.*+?^${}()|[\]\\]/gu, '\\$&')}\\b`,
+          'iu',
+        ).test(beat.say),
       );
       used.add((named ?? doors[0]).id);
     }
@@ -103,8 +120,7 @@ export function doorsUsed(
       if (!sheet.onStage.some((p) => p.who === went.who)) continue;
       const door =
         doors.find(
-          (d) =>
-            d.link?.set === before.set && d.link?.feature === went.feature,
+          (d) => d.link?.set === before.set && d.link?.feature === went.feature,
         ) ??
         (features.filter((f) => f.kind === 'door' || f.kind === 'gate')
           .length === 1

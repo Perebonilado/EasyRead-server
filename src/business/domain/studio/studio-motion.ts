@@ -6,9 +6,11 @@
  * player (SceneDto.reading) and as the text is paced by code before the
  * scene is stored (scene-reading).
  */
+import { MAKER_RATE } from '../scene-pace';
 import type { SceneReading } from '../scene-reading';
 import type { StudioBrief } from './studio';
 import { profileOf, recipeFor } from './studio-audience';
+import { STUDIO_PACE_MAKER } from './studio-pace';
 
 /** The slowest and quickest a picture moves, against a grown-up's. */
 export const MOTION_RANGE: readonly [number, number] = [0.7, 1.1];
@@ -25,14 +27,23 @@ export function motionFor(audience: number, pace = 1): number {
 }
 
 /**
+ * The maker's Pace chip's share of an explainer's motion (E1's MAKER_RATE:
+ * gentle 0.93, lively 1, snappy 1.08): E1's motionFactor over its band's
+ * base, so the audience is counted once, from the recipe.
+ */
+export const makerMotion = (brief: Pick<StudioBrief, 'pace'>): number =>
+  brief.pace ? MAKER_RATE[STUDIO_PACE_MAKER[brief.pace]] : 1;
+
+/**
  * How an explainer's text is read and its picture moves, from its brief:
- * its audience's reading rate, card length and motion, the maker's pace
- * leaning the motion (`pace`, E1's; 1 until it is passed). A brief with no
- * audience is for anyone grown up.
+ * its audience's reading rate, card length and motion, the maker's Pace
+ * chip leaning the motion (`pace`; from the brief unless given). A brief
+ * with no audience is for anyone grown up.
  */
 export function studioReading(
-  brief: Pick<StudioBrief, 'audience' | 'who'>,
-  pace = 1,
+  brief: Pick<StudioBrief, 'audience' | 'who'> &
+    Partial<Pick<StudioBrief, 'pace'>>,
+  pace = makerMotion(brief),
 ): SceneReading {
   const who = profileOf(brief);
   const recipe = recipeFor(who ?? { band: 'general-adult' });

@@ -208,6 +208,21 @@ describe("an explainer's reading and motion (Ask 3)", () => {
       studioReading({ audience: null, who: { band: 'university' } }, 1.08)
         .motion,
     ).toBe(1.08);
+    // The maker's Pace chip, as E1's motion factor leans it.
+    expect(
+      studioReading({
+        audience: null,
+        who: { band: 'university' },
+        pace: 'snappy',
+      }).motion,
+    ).toBe(1.08);
+    expect(
+      studioReading({
+        audience: null,
+        who: { band: 'early-years' },
+        pace: 'gentle',
+      }).motion,
+    ).toBe(0.7);
     expect(motionFor(0.75, 0.93)).toBe(0.7);
     expect(motionFor(1, 1.2)).toBe(1.1);
   });

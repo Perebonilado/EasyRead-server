@@ -279,6 +279,7 @@ function withoutStep(scene: SceneDto, k: number): void {
   for (const staging of Object.values(scene.stagings)) {
     staging.places.splice(k, 1);
     staging.pills?.splice(k, 1);
+    staging.views?.splice(k, 1);
   }
 }
 
@@ -417,7 +418,8 @@ export function textPacing(
 ): string[] {
   if (!isLesson(scene)) return [];
   const notes: string[] = [];
-  const folded = listsTwoAtATime(scene, reading);
+  // A build's diagram grows a thing at a time, each drawn on: not folded.
+  const folded = scene.board ? 0 : listsTwoAtATime(scene, reading);
   if (folded)
     notes.push(
       `a list too quick to read shown two at a time (${folded} step${folded === 1 ? '' : 's'} folded)`,

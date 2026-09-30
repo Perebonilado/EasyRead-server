@@ -963,6 +963,13 @@ export interface OutlineScene {
    * and dissolves where it cannot. Absent or null, none said.
    */
   into?: string | null;
+  /**
+   * An explainer's scene in a continuous build (studio-explainer-plan,
+   * part C): "start" begins a diagram the scenes after it grow, "continue"
+   * carries on the one before's. Set by the writer and by code
+   * (studio-build withBuilds). Absent or null, a scene of its own.
+   */
+  build?: 'start' | 'continue' | null;
 }
 
 export interface StudioOutline {
@@ -1033,6 +1040,9 @@ export function outlineOf(raw: unknown): StudioOutline {
                 }
               : {}),
             ...(textOrNull(s.into, 60) ? { into: textOrNull(s.into, 60) } : {}),
+            ...(s.build === 'start' || s.build === 'continue'
+              ? { build: s.build }
+              : {}),
           },
         ];
       }),

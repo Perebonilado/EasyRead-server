@@ -77,6 +77,7 @@ import {
   STAGINGS,
   STATION_SHARES,
   extentOf,
+  fitInSlot,
   floorAt,
   layoutStations,
   restingAt,
@@ -93,6 +94,12 @@ import {
   type StagingName,
 } from './scene-layout';
 import {
+  cellBox,
+  frameBox,
+  type BoardStage,
+  type Box as BoardBox,
+} from './scene-board';
+import {
   FACES,
   STORY_MOVES,
   isCodeThing,
@@ -100,6 +107,7 @@ import {
   type CharacterThing,
   type SceneCameraAsk,
   type SceneScript,
+  type SceneStage,
   type SceneStep,
   type SceneThing,
 } from './scene-script';
@@ -1559,6 +1567,10 @@ export function composeScene(input: ComposeInput): {
   /** A Studio scene's stations at each step: where each one stands (SceneStage.at). */
   const stationed = script.stations === true;
   const stationsAt: Record<string, string>[] = [];
+  /** A continuous build's stage at each step (scene-board): its cells, what has receded, what the camera frames. */
+  const boardsAt = new Map<SceneStepDto, BoardStage>();
+  /** Its things carried on from the scene before: on the stage from its first moment, with no entrance. */
+  const carriedOn = new Set(script.board?.carried ?? []);
   /** And how far back each stands where it is said (SceneStage.depth), each step's beside its stations. */
   const depthsAt: Record<string, number>[] = [];
   /** Whom each one who goes somewhere at a step goes over to (SceneGoing.toward). */
@@ -1620,7 +1632,10 @@ export function composeScene(input: ComposeInput): {
           JSON.stringify(stage.depth ?? {}))) &&
     !stage.going &&
     (a.backdrop ?? null) === (painted(stage.backdrop) ?? backdrop) &&
-    a.layout === stage.layout &&
+    (script.board
+      ? JSON.stringify(boardsAt.get(a) ?? null) ===
+        JSON.stringify(stage.board ?? null)
+      : a.layout === stage.layout) &&
     a.show.join() === stage.show.join() &&
     a.arrows
       .map((x) => x.id)
@@ -1665,11 +1680,16 @@ export function composeScene(input: ComposeInput): {
   for (const timedStep of timed) {
     const { atMs } = timedStep;
     let { step } = timedStep;
-    if (step.stage) {
+    // A build's stage is the board as code set it: nothing reordered.
+    if (step.stage && !script.board) {
       const kept = sidesKept(wordsFirst(step.stage, byId), castById);
       step = {
         ...step,
-        stage: { ...step.stage, ...kept, show: keepTogether(kept.show) },
+        stage: {
+          ...step.stage,
+          layout: kept.layout as SceneStage['layout'],
+          show: keepTogether(kept.show),
+        },
       };
     }
     // The writer restating the stage as it stands: its effects, and no change.
@@ -1712,18 +1732,21 @@ export function composeScene(input: ComposeInput): {
       const opening = !charactersSeen && step.at.beat === firstBeat;
       for (const id of newcomers)
         enter[id] =
-          character(id) &&
-          (cut ||
-            step.stage.cutIn?.includes(id) ||
-            (opening && !arriving.has(id)) ||
-            (cutAway.has(id) && !arriving.has(id)))
-            ? { how: 'fade' }
-            : entranceFor(
-                id,
-                { layout: step.stage.layout, arrows },
-                before,
-                byId.get(id),
-              );
+          // A build's drawings are drawn on, stroke by stroke (the player's draw).
+          script.board && castById.get(id)?.kind === 'drawing'
+            ? { how: 'draw' }
+            : character(id) &&
+                (cut ||
+                  step.stage.cutIn?.includes(id) ||
+                  (opening && !arriving.has(id)) ||
+                  (cutAway.has(id) && !arriving.has(id)))
+              ? { how: 'fade' }
+              : entranceFor(
+                  id,
+                  { layout: step.stage.layout, arrows },
+                  before,
+                  byId.get(id),
+                );
       if (step.stage.show.some(character)) charactersSeen = true;
       // Whoever a cut takes off the stage comes back by a cut too, not
       // walking on; whoever walks off is gone.
@@ -1784,13 +1807,18 @@ export function composeScene(input: ComposeInput): {
             side: how.side === '@left' ? 'left' : 'right',
           };
       }
+      // What the board carried on is there as the scene opens: no entrance.
+      if (!steps.length) for (const id of carriedOn) delete enter[id];
+      const board = script.board ? step.stage.board : undefined;
       steps.push({
         atMs: Math.round(atMs),
-        layout: step.stage.layout,
+        layout: board ? 'board' : step.stage.layout,
         show: step.stage.show,
         arrows,
         enter,
         focus,
+        ...(board?.faded.length ? { faded: [...board.faded] } : {}),
+        ...(board?.page ? { page: true as const } : {}),
         ...(backdrop ? { backdrop } : {}),
         ...(cut ? { cut: true as const } : {}),
         ...(Object.keys(exit).length ? { exit } : {}),
@@ -1798,6 +1826,7 @@ export function composeScene(input: ComposeInput): {
         ...(Object.keys(behind).length ? { behind } : {}),
         ...(Object.keys(abed).length ? { abed } : {}),
       });
+      if (board) boardsAt.set(steps[steps.length - 1], board);
       stationsAt.push({ ...(step.stage.at ?? {}) });
       depthsAt.push({ ...(step.stage.depth ?? {}) });
       towardAt.push(
@@ -2750,8 +2779,8 @@ export function composeScene(input: ComposeInput): {
         : [];
     },
     acting: (id) => Boolean(acting[id]),
-    // The camera a sheet directs is the whole of it.
-    shots: !cameraDirected,
+    // The camera a sheet directs is the whole of it; so is a build's.
+    shots: !cameraDirected && !script.board,
   });
   effects.sort((a, b) => a.atMs - b.atMs);
 
@@ -3131,10 +3160,25 @@ export function composeScene(input: ComposeInput): {
           ...(thing.stands ? { stands: thing.stands } : {}),
         });
     }
+    // A build's board: each thing in its cell, where it stays.
+    if (script.board)
+      return steps.map((step) => {
+        const { w, h, margin } = STAGINGS[staging];
+        const cells = boardsAt.get(step)?.cells ?? {};
+        const out: Record<string, Place> = {};
+        for (const id of step.show) {
+          const thing = lookup.get(id);
+          const cell = cells[id];
+          if (!thing || !cell) continue;
+          const room = cellBox(cell, w, h, margin);
+          out[id] = { ...fitInSlot(thing, room), room };
+        }
+        return out;
+      });
     return steps.map((step) => {
       const crowded = step.show.length > 2;
       const laidOut = layoutStep(
-        step.layout,
+        step.layout as SceneStage['layout'],
         step.show,
         crowded ? crowd : lookup,
         staging,
@@ -4067,6 +4111,39 @@ export function composeScene(input: ComposeInput): {
   };
   const box = place('box');
   const wide = place('wide');
+  /** Where a build's camera looks at each step, on a staging (scene-board frameBox). */
+  const boardViews = (
+    staging: StagingName,
+    places: Record<string, ScenePlaceDto>[],
+  ): BoardBox[] => {
+    const { w, h, margin } = STAGINGS[staging];
+    return steps.map((step, k) => {
+      const extents = new Map(
+        Object.entries(places[k] ?? {}).map(([id, at]) => {
+          const c = at.caption;
+          const boxes = [
+            at,
+            ...(c
+              ? [{ x: c.x, y: c.y, w: c.w, h: c.lines.length * c.size * 1.2 }]
+              : []),
+            ...(at.labels ?? []),
+          ];
+          const x0 = Math.min(...boxes.map((b) => b.x));
+          const y0 = Math.min(...boxes.map((b) => b.y));
+          const x1 = Math.max(...boxes.map((b) => b.x + b.w));
+          const y1 = Math.max(...boxes.map((b) => b.y + b.h));
+          return [id, { x: x0, y: y0, w: x1 - x0, h: y1 - y0 }];
+        }),
+      );
+      return frameBox(
+        boardsAt.get(step)?.frame ?? 'whole',
+        extents,
+        w,
+        h,
+        margin,
+      );
+    });
+  };
   // A directed scene's shots with no jump cut: judged where the wide stage
   // stands everyone, as the film shows it.
   if (cameraDirected) {
@@ -4273,6 +4350,7 @@ export function composeScene(input: ComposeInput): {
           places: box.places,
           pills: box.pills,
           ...(says.length ? { bubbles: box.bubbles } : {}),
+          ...(script.board ? { views: boardViews('box', box.places) } : {}),
         },
         wide: {
           w: STAGINGS.wide.w,
@@ -4280,8 +4358,11 @@ export function composeScene(input: ComposeInput): {
           places: wide.places,
           pills: wide.pills,
           ...(says.length ? { bubbles: wide.bubbles } : {}),
+          ...(script.board ? { views: boardViews('wide', wide.places) } : {}),
         },
       },
+      // A scene of a build: what it carries on from the scene before.
+      ...(script.board ? { board: { carried: [...carriedOn] } } : {}),
     },
     filled,
     audit: { box: box.audit, wide: wide.audit },

@@ -753,6 +753,12 @@ export class SceneProcessor {
      * its stage's, and not stored: the player finds the same from the stage.
      */
     reading?: SceneReading | null;
+    /**
+     * Drawings made before, by the thing's id: used as they are, never
+     * drawn again. A continuous build's, drawn once for its section so its
+     * scenes all show them alike (studio-build sharedDrawings).
+     */
+    drawn?: ReadonlyMap<string, GatedDrawing>;
   }): Promise<
     | { fit: 'poor'; reason: string }
     | {
@@ -829,7 +835,7 @@ export class SceneProcessor {
           who,
           stop.signal,
           story,
-          carried.reuse,
+          new Map([...carried.reuse, ...(input.drawn ?? new Map())]),
         ),
         this.drawOwn(script, story, documentId, who, stop.signal),
       ]).then(async ([made, own]) => {
@@ -1873,6 +1879,38 @@ export class SceneProcessor {
         );
       }),
     ]);
+    return out;
+  }
+
+  /**
+   * Drawings made on their own, before the scenes that show them (a
+   * continuous build's, shared by its scenes): each asked for, gated and
+   * kept as a scene's would be. One that does not come through is null.
+   */
+  async drawThings(
+    things: readonly DrawingThing[],
+    topic: string,
+    documentId: string | null,
+    who: string,
+  ): Promise<Map<string, GatedDrawing | null>> {
+    const out = new Map<string, GatedDrawing | null>();
+    const signal = new AbortController().signal;
+    await inBatches([...things], 4, async (thing) => {
+      out.set(
+        thing.id,
+        await this.drawOne(
+          thing,
+          topic,
+          things
+            .filter((one) => one.id !== thing.id)
+            .map((one) => one.name)
+            .slice(0, 5),
+          documentId,
+          who,
+          signal,
+        ),
+      );
+    });
     return out;
   }
 

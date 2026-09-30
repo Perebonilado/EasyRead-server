@@ -416,6 +416,7 @@ export const studioOutlineSchema = z.object({
       // An explainer made from a document: the pages it teaches, [first, last].
       pages: z.array(z.number()).nullable().catch(null),
       into: z.string().nullable(),
+      build: z.enum(['start', 'continue']).nullable().catch(null),
     }),
   ),
 });

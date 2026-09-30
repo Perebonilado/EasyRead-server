@@ -62,8 +62,6 @@ export type LlmTask =
   | 'studio_write'
   // Whether a scene made again as the maker asked now shows what they asked for.
   | 'studio_check'
-  // A viewer's own explanation at an explainer's end, checked against its points.
-  | 'studio_teach_back'
   | 'topic_quiz'
   | 'item_write'
   | 'item_verify'
@@ -948,19 +946,6 @@ export interface LlmGatewayPort {
     scene?: number;
     others?: number[];
   }): Promise<LlmResult<StudioCheckVerdict>>;
-
-  /**
-   * "Now you explain it" (studio-end): a viewer's own words checked
-   * against what an explainer taught, point by point (numbered from 1 as
-   * given), and a short, kind reply saying what is missing. One small
-   * call, no thinking.
-   */
-  studioTeachBack(input: {
-    topic: string;
-    points: string[];
-    answer: string;
-    who: string | null;
-  }): Promise<LlmResult<{ got: number[]; missing: number[]; reply: string }>>;
 
   /** Whether text asks for what no one should be made: flagged, with the categories. */
   moderate(input: {

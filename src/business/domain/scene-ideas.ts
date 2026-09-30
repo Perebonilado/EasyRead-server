@@ -1,73 +1,14 @@
 /**
- * A lesson's moments to stop and think (studio-explainer-plan, Ask 9,
- * ideas 1 and 2), as a scene carries them:
- *
- *  - A question put to the viewer may carry its answers (`choices`): two
- *    or three short ones, exactly one of them right, the right one said
- *    by the sentence after. The player can pause on it and show them as
- *    chips. Written by the lesson's writer in the same call as the rest,
- *    made sound here by code, and dropped (the question stays a plain
- *    one) when they cannot be.
- *  - Where each of a scene's small ideas (the outline's points) starts,
- *    found by code in its sentences: the player's scrubber marks each,
- *    and its back and forward go one idea at a time.
+ * Where each of a lesson scene's small ideas (the outline's points) starts,
+ * found by code in its sentences (studio-explainer-plan, Ask 9, idea 2):
+ * the player's scrubber marks each, and its back and forward go one idea
+ * at a time.
  *
  * Pure: no model, no I/O.
  */
-import { wordKey } from './scene-ids';
-
-/** One answer to a question, as a checkpoint shows it. */
-export interface SceneChoice {
-  text: string;
-  right: boolean;
-}
-
-/** A question shows two or three answers. */
-export const CHOICES = [2, 3] as const;
-/** An answer is short: a chip, never a sentence. */
-export const CHOICE_WORDS = 7;
-export const CHOICE_CHARS = 48;
 
 const clean = (text: unknown) =>
   typeof text === 'string' ? text.replace(/\s+/g, ' ').trim() : '';
-
-/**
- * A question's answers made sound, or none: only on a question, two or
- * three distinct answers of a few words each, exactly one right. An answer
- * a little long is cut at its last whole word; one with nothing in it is
- * dropped; more than three keeps the right one and the first wrong ones.
- */
-export function choicesOf(
-  raw: unknown,
-  delivery: string | undefined,
-): SceneChoice[] | undefined {
-  if (delivery !== 'question' || !Array.isArray(raw)) return undefined;
-  const seen = new Set<string>();
-  const all: SceneChoice[] = [];
-  for (const one of raw as unknown[]) {
-    const said =
-      one && typeof one === 'object' ? (one as Record<string, unknown>) : {};
-    let text = clean(said.text).replace(/[.;:,]+$/, '');
-    const words = text.split(' ').filter(Boolean);
-    if (words.length > CHOICE_WORDS)
-      text = words.slice(0, CHOICE_WORDS).join(' ');
-    if (text.length > CHOICE_CHARS)
-      text = text.slice(0, CHOICE_CHARS).replace(/\s+\S*$/, '');
-    const key = wordKey(text);
-    if (!key || seen.has(key)) continue;
-    seen.add(key);
-    all.push({ text, right: said.right === true });
-  }
-  const right = all.filter((c) => c.right);
-  if (right.length !== 1) return undefined;
-  const wrong = all.filter((c) => !c.right);
-  if (!wrong.length) return undefined;
-  // The right one stays where the writer put it among the first three.
-  const kept = all.filter((c) => c.right || wrong.indexOf(c) < CHOICES[1] - 1);
-  return kept.length >= CHOICES[0] ? kept : undefined;
-}
-
-// ── Where each idea starts ─────────────────────────────────────────────────
 
 /** Words that say nothing of which idea a sentence is on. */
 const PLAIN = new Set(
@@ -84,7 +25,7 @@ const PLAIN = new Set(
 );
 
 /** A sentence's words that name things, each shortened to its stem. */
-export function keysOf(text: string): string[] {
+function keysOf(text: string): string[] {
   return text
     .toLowerCase()
     .split(/[^a-z0-9]+/)

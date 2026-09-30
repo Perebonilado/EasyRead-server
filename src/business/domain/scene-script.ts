@@ -309,12 +309,6 @@ export interface SceneBeat {
   music?: SceneMusic;
   /** The music runs high from here: a chase, a rush, danger close. */
   energy?: 'high';
-  /**
-   * A question's answers (scene-checkpoint): two or three short ones,
-   * one right, said by the sentence after. The player may pause on it and
-   * show them. Only on a question; absent, it plays as it is said.
-   */
-  choices?: SceneChoice[];
 }
 
 /**
@@ -855,8 +849,6 @@ export interface SceneScriptDraft {
     /** The music from this sentence on, or null to carry on. */
     music?: SceneMusic | null;
     energy?: 'low' | 'high' | null;
-    /** A question's answers, two or three, one right; null on any other sentence. */
-    choices?: { text: string; right: boolean }[] | null;
   }[];
   cast: {
     id: string;
@@ -941,7 +933,6 @@ export function wordsOf(text: string): string[] {
 }
 
 import { groupId, idKey, wordKey } from './scene-ids';
-import { choicesOf, type SceneChoice } from './scene-checkpoint';
 import type { BoardStage } from './scene-board';
 export { groupId, idKey, wordKey };
 export { quotedSpans };
@@ -1063,15 +1054,6 @@ export function musicOf(
       ? { energy: 'high' as const }
       : {}),
   };
-}
-
-/** A question's answers kept, when sound and a sentence after it says which is right. */
-function choicesKept(
-  beat: Pick<SceneScriptDraft['beats'][number], 'choices' | 'delivery'>,
-  answered: boolean,
-): { choices?: SceneChoice[] } {
-  const choices = answered ? choicesOf(beat.choices, beat.delivery) : undefined;
-  return choices ? { choices } : {};
 }
 
 export interface MendedScript {
@@ -1625,7 +1607,6 @@ export function mendScript(
       ? beat.delivery
       : ('explain' as const),
     ...musicOf(beat, kept[index + 1], !!options.characters?.length),
-    ...choicesKept(beat, index < kept.length - 1),
   }));
 
   // The cast: every thing made sound, and every way the writer might refer to one.

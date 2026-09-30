@@ -60,7 +60,6 @@ import {
   studioColdReadSchema,
   studioRetellSchema,
   studioCheckSchema,
-  studioTeachBackSchema,
   studioSceneSchema,
   studioTurnSchema,
 } from './studio-schemas';
@@ -2694,40 +2693,6 @@ export class AiSdkLlmAdapter implements LlmGatewayPort, OnModuleInit {
         prompt,
         maxRetries: this.maxRetries(),
         ...this.writerThinking(ref, 'STUDIO_CHECK_THINKING', 'off'),
-      }),
-    );
-    return {
-      value: result.object,
-      usage: this.usage(ref, result.usage, started),
-    };
-  }
-
-  async studioTeachBack(input: {
-    topic: string;
-    points: string[];
-    answer: string;
-    who: string | null;
-  }): Promise<LlmResult<{ got: number[]; missing: number[]; reply: string }>> {
-    const started = Date.now();
-    const { generateObject } = await this.registry.modules();
-    const { model, ref } =
-      await this.registry.languageModel('studio_teach_back');
-    // The viewer's words inside their marker: data to judge, never instructions.
-    const words = input.answer.replace(/<\/?viewer_words>/giu, '');
-    const result = await this.againIfMisshapen(() =>
-      generateObject({
-        model,
-        schema: studioTeachBackSchema,
-        system: STUDIO_PROMPTS.studioTeachBack,
-        prompt: [
-          `The lesson: ${input.topic}`,
-          `It was made for: ${input.who ?? 'anyone curious'}`,
-          `What it taught:\n${input.points.map((p, i) => `${i + 1}. ${p}`).join('\n')}`,
-          `Their explanation:\n<viewer_words>\n${words}\n</viewer_words>`,
-        ].join('\n\n'),
-        maxRetries: this.maxRetries(),
-        maxOutputTokens: 400,
-        ...this.writerThinking(ref, 'STUDIO_TEACH_BACK_THINKING', 'off'),
       }),
     );
     return {

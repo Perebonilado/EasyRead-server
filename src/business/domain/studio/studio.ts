@@ -524,7 +524,7 @@ export interface StudioCharacter {
    * is developed with them.
    */
   persona?: Persona;
-  /** An explainer's host (studio-host): opens its films, asks their questions, may act in its clips. */
+  /** An explainer's host (studio-host): opens its films, and may act in its clips. */
   host?: true;
 }
 

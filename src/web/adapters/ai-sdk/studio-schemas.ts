@@ -427,13 +427,6 @@ export const studioOutlineSchema = z.object({
   next: z.array(z.string()).catch([]),
 });
 
-/** "Now you explain it" (studio-end): the points got and missing, by number, and a kind reply. */
-export const studioTeachBackSchema = z.object({
-  got: z.array(z.number().int()).catch([]),
-  missing: z.array(z.number().int()).catch([]),
-  reply: z.string(),
-});
-
 /** Story development: the premise (studio-story.ts). */
 export const studioPremiseSchema = z.object({
   title: z.string(),

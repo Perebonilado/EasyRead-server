@@ -10,6 +10,8 @@ import {
   motionFactor,
   paceReport,
   paceWordFor,
+  paceWords,
+  syllablesOf,
   pauseLimits,
   shapePause,
   speechSeconds,
@@ -220,7 +222,7 @@ describe('a lesson as the voice is sent it', () => {
     );
     for (const piece of paced) {
       expect(piece.speed).toBeCloseTo(piece.targetWpm / 170, 1);
-      expect(piece.speed).toBeGreaterThanOrEqual(0.6);
+      expect(piece.speed).toBeGreaterThanOrEqual(0.5);
     }
     expect(paced[2].targetWpm).toBeLessThan(paced[1].targetWpm);
   });
@@ -274,7 +276,7 @@ describe('what the voice came out as', () => {
   it('measures words a minute, the silence share and the longest pause', () => {
     const report = paceReport([
       {
-        text: 'one two three four five',
+        text: 'open river stone lake bright',
         startMs: 0,
         endMs: 2000,
         words: [
@@ -286,7 +288,7 @@ describe('what the voice came out as', () => {
         ],
       },
       {
-        text: 'six seven eight nine ten',
+        text: 'open river stone lake bright',
         startMs: 3000,
         endMs: 5000,
         words: [
@@ -298,7 +300,9 @@ describe('what the voice came out as', () => {
         ],
       },
     ]);
+    // Five words of seven syllables: five words of average length.
     expect(report.wpm).toBe(150);
+    expect(report.plainWpm).toBe(150);
     expect(report.longestPauseMs).toBe(1000);
     expect(report.silenceShare).toBeCloseTo(0.2, 2);
     expect(report.sentences).toEqual([150, 150]);
@@ -312,7 +316,8 @@ describe('a voice’s own rate', () => {
       gemini: { bogus: { wpm: 'x' } },
     });
     expect(voiceRate(rates, 'kokoro', 'am_puck').wpm).toBe(172);
-    expect(voiceRate(rates, 'kokoro', 'af_heart').wpm).toBe(210);
+    expect(voiceRate(rates, 'kokoro', 'af_heart').wpm).toBe(183);
+    expect(voiceRate(rates, 'kokoro', 'bf_emma').wpm).toBe(185);
     expect(rates.gemini).toBeUndefined();
   });
 
@@ -340,5 +345,21 @@ describe('bands', () => {
     expect(motionFactor('general-adult')).toBe(1);
     expect(motionFactor('general-adult', 'brisk')).toBe(1.08);
     expect(motionFactor('early-years', 'relaxed')).toBe(0.7);
+  });
+});
+
+describe('words of average length', () => {
+  it('counts syllables near enough to time speech by', () => {
+    const counts = ['make', 'makes', 'table', 'jumped', 'wanted', 'free', 'people', 'evaporation', 'the'].map(syllablesOf);
+    expect(counts).toEqual([1, 1, 2, 2 - 1, 2, 1, 2, 5, 1]);
+    expect(syllablesOf('1918')).toBe(2);
+  });
+
+  it('measures a sentence of long words as the same pace as one of short words, said alike', () => {
+    // Long words take longer to say: the same voice is not slower for them.
+    const short = paceWords('the cat sat on the mat');
+    const long = paceWords('the percentage change in quantity demanded');
+    expect(long / 6).toBeGreaterThan(short / 6);
+    expect(paceWords('open river stone lake bright')).toBeCloseTo(5, 5);
   });
 });

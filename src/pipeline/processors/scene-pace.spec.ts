@@ -21,11 +21,16 @@ function voiced(spans: [number, number][], totalMs: number): Int16Array {
   return out;
 }
 
+/** Five words of seven syllables: five words of average length (scene-pace paceWords). */
+const CYCLE = ['open', 'river', 'stone', 'lake', 'bright'];
+const said = (n: number) =>
+  Array.from({ length: n }, (_, i) => CYCLE[i % CYCLE.length]).join(' ');
+
 /** A sentence of `n` words evenly over [from, to]. */
 function sentence(n: number, from: number, to: number): TimedBeat {
   const each = (to - from) / n;
   return {
-    text: Array.from({ length: n }, () => 'word').join(' '),
+    text: said(n),
     startMs: from,
     endMs: to,
     words: Array.from({ length: n }, (_, i) => [

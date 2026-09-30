@@ -122,6 +122,8 @@ export function planPaceEdits(input: {
   targets: readonly (number | null)[];
   pauses: readonly (number | null)[];
   trimInside: boolean;
+  /** What each sentence said, when it differs from its written words (a number said in words): its rate is measured on it. */
+  said?: readonly string[];
   /** Whether a silence held longer than planned is cut back (a lesson's), or only a short one made up (a story's). */
   shorten?: boolean;
   /** The quiet planned before the first word, in ms: made up where the voice gave less. */
@@ -187,7 +189,7 @@ export function planPaceEdits(input: {
     let tempo = 1;
     if (target) {
       const found = tempoFor(
-        sentenceWpm(beat, (removed / rate) * 1000),
+        sentenceWpm(beat, (removed / rate) * 1000, input.said?.[k]),
         target,
       );
       tempo = found.tempo;
@@ -284,6 +286,7 @@ export function paceWanted(input: {
   targets: readonly (number | null)[];
   pauses: readonly (number | null)[];
   trimInside: boolean;
+  said?: readonly string[];
   shorten?: boolean;
   leadMs?: number;
   durationMs: number;
@@ -296,7 +299,11 @@ export function paceWanted(input: {
   return beats.some((beat, k) => {
     if (beat.endMs <= beat.startMs) return false;
     const target = input.targets[k];
-    if (target && tempoFor(sentenceWpm(beat), target).tempo !== 1) return true;
+    if (
+      target &&
+      tempoFor(sentenceWpm(beat, 0, input.said?.[k]), target).tempo !== 1
+    )
+      return true;
     if (
       input.trimInside &&
       beat.words.some(

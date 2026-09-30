@@ -457,11 +457,11 @@ export function pauseProposals(
 
 /**
  * Kokoro and Cartesia take a speed: none sent outside this. Kokoro's
- * voices speak at 190–225 words a minute at speed 1 (voice:calibrate,
- * 2026-09-30), so a child's 110 asks for about 0.55; below 0.6 its voice
- * drawls, and the stretch takes the rest.
+ * voices say 170–200 words a minute at speed 1 (voice:calibrate,
+ * 2026-09-30) and slow in step with it down to its own least, 0.5, so a
+ * young child's 110 is asked for; Cartesia holds a speed to its own range.
  */
-export const SPEED_LIMITS = [0.6, 1.4] as const;
+export const SPEED_LIMITS = [0.5, 1.4] as const;
 
 /** One lesson sentence as the voice is sent it. */
 export interface PacedPiece {
@@ -520,21 +520,64 @@ export function lessonPace(
 
 // ── Measured, and put right ─────────────────────────────────────────────
 
+/**
+ * Syllables in a word, by its vowel groups, a silent final e and a quiet
+ * -es or -ed left out: near enough to time speech by. A written number
+ * counts as two (its spoken form is measured where there is one).
+ */
+export function syllablesOf(word: string): number {
+  const w = word.toLowerCase().replace(/[^a-z]/g, '');
+  if (!w) return /\d/.test(word) ? 2 : 0;
+  if (w.length <= 3) return 1;
+  let n = (w.match(/[aeiouy]+/g) ?? []).length;
+  // A silent final e ("make"), but not a sounded "-le" ("table").
+  if (/e$/.test(w) && !/[^aeiouy]le$/.test(w) && !/[aeiouy]e$/.test(w))
+    n -= 1;
+  // A quiet -ed ("jumped") or -es ("makes"); not "-ted", "-ded", "-ches".
+  else if (/[^tdaeiouy]ed$/.test(w) || /[^sxzhaeiouy]es$/.test(w)) n -= 1;
+  return Math.max(1, n);
+}
+
+/**
+ * The syllables of an ordinary English word, on average: a rate in words
+ * a minute means words of this length. The calibration passage and the
+ * narration research both speak in them.
+ */
+export const REFERENCE_SPW = 1.4;
+
+/**
+ * A text's length in words of average length: its syllables over
+ * REFERENCE_SPW. A voice holds its pace in syllables, so a sentence of
+ * long words ("the percentage change in quantity demanded") measured in
+ * plain words looks slow when it is not, and one of short words fast;
+ * measured in these, the same voice at the same speed reads the same.
+ */
+export function paceWords(text: string): number {
+  const said = words(text);
+  if (!said.length) return 0;
+  return said.reduce((n, w) => n + syllablesOf(w), 0) / REFERENCE_SPW;
+}
+
 /** Within this of its target, a sentence is left as it was said. */
 export const LEAVE_WITHIN = 0.06;
 /** The most a sentence is slowed or quickened by the stretch: formants hold up to here. */
 export const TEMPO_RANGE = [0.88, 1.14] as const;
 
-/** A sentence's measured rate: its words over the time from its first word to its last. Null when too short to tell. */
+/**
+ * A sentence's measured rate: its words (of average length, paceWords)
+ * over the time from its first word to its last. Null when too short to
+ * tell.
+ */
 export function sentenceWpm(
   beat: { text: string; startMs: number; endMs: number },
   /** Silence taken out of it, in ms. */
   lessMs = 0,
+  /** What was said, when it differs from the written words (a number said in words). */
+  said: string = beat.text,
 ): number | null {
-  const count = words(beat.text).length;
   const ms = beat.endMs - beat.startMs - lessMs;
-  if (count < 3 || ms < 500) return null;
-  return Math.round(count / (ms / 60_000));
+  if (words(beat.text).length < 3 || ms < 500) return null;
+  return Math.round(paceWords(said) / (ms / 60_000));
 }
 
 /**
@@ -558,8 +601,10 @@ export function tempoFor(
 
 /** How a scene's voice came out: for the log, the bench, and a maker's ask. */
 export interface PaceReport {
-  /** Words over the time spent saying them, pauses left out. */
+  /** Words (of average length, paceWords) over the time spent saying them, pauses left out. */
   wpm: number;
+  /** The written words over the same time, as the page's log has always counted them. */
+  plainWpm: number;
   /** Each sentence's words a minute; null where too short to tell. */
   sentences: (number | null)[];
   /** The share of the spoken stretch (first word to last) that is silence. */
@@ -579,10 +624,18 @@ export function paceReport(
     endMs: number;
     words: number[][];
   }[],
+  /** What each sentence said, when it differs from its written words. */
+  said: readonly string[] = [],
 ): PaceReport {
   const spoken = beats.filter((b) => b.endMs > b.startMs);
   if (!spoken.length)
-    return { wpm: 0, sentences: [], silenceShare: 0, longestPauseMs: 0 };
+    return {
+      wpm: 0,
+      plainWpm: 0,
+      sentences: [],
+      silenceShare: 0,
+      longestPauseMs: 0,
+    };
   const first = spoken[0].startMs;
   const last = spoken[spoken.length - 1].endMs;
   let silent = 0;
@@ -599,9 +652,14 @@ export function paceReport(
   });
   const talk = spoken.reduce((n, b) => n + (b.endMs - b.startMs), 0);
   const count = spoken.reduce((n, b) => n + words(b.text).length, 0);
+  const paced = beats.reduce(
+    (n, b, k) => (b.endMs > b.startMs ? n + paceWords(said[k] ?? b.text) : n),
+    0,
+  );
   return {
-    wpm: talk > 0 ? Math.round(count / (talk / 60_000)) : 0,
-    sentences: beats.map((b) => sentenceWpm(b)),
+    wpm: talk > 0 ? Math.round(paced / (talk / 60_000)) : 0,
+    plainWpm: talk > 0 ? Math.round(count / (talk / 60_000)) : 0,
+    sentences: beats.map((b, k) => sentenceWpm(b, 0, said[k] ?? b.text)),
     silenceShare:
       last > first ? Math.round((silent / (last - first)) * 1000) / 1000 : 0,
     longestPauseMs: Math.round(longest),
@@ -631,30 +689,50 @@ export type VoiceRates = Partial<Record<string, Record<string, VoiceRate>>>;
 
 /**
  * What a voice is taken to say at speed 1 before it is measured, by
- * engine, in words a minute of speech (pauses left out, as paceReport
- * measures). Kokoro measured with the calibration passage on 2026-09-30:
- * am_puck 226, af_heart 206, am_michael 189; the rest from the logs of
- * past pages until measured.
+ * engine, in words of average length a minute (paceWords) of speech,
+ * pauses left out, as paceReport measures: each engine's narrator as
+ * voice:calibrate measured it on 2026-09-30, OpenAI's a guess.
  */
 export const DEFAULT_RATES: Record<string, VoiceRate> = {
-  kokoro: { wpm: 210 },
+  kokoro: { wpm: 185 },
   gemini: {
-    wpm: 150,
-    words: { 'brisk and clear': 166, natural: 152, unhurried: 134 },
+    wpm: 146,
+    words: { 'brisk and clear': 157, natural: 146, unhurried: 134 },
   },
-  openai: { wpm: 160 },
-  elevenlabs: { wpm: 158 },
-  cartesia: { wpm: 165 },
+  openai: { wpm: 150 },
+  elevenlabs: { wpm: 170 },
+  cartesia: { wpm: 162 },
 };
 
-/** A voice's rate: as measured for it, else its engine's own guess. */
+/**
+ * Voices measured by voice:calibrate on 2026-09-30, kept here so a
+ * deployment paces them before its own app_settings.voice_rates has them.
+ */
+export const MEASURED_RATES: VoiceRates = {
+  kokoro: {
+    am_puck: { wpm: 202 },
+    af_heart: { wpm: 183 },
+    am_michael: { wpm: 169 },
+  },
+  gemini: {
+    Sulafat: {
+      wpm: 146,
+      words: { 'brisk and clear': 157, natural: 146, unhurried: 134 },
+    },
+  },
+  cartesia: { '98a34ef2-2140-4c28-9c71-663dc4dd7022': { wpm: 162 } },
+  elevenlabs: { JBFqnCBsd6RMkjVDRZzb: { wpm: 170 } },
+};
+
+/** A voice's rate: as this deployment measured it, else as it was measured here, else its engine's own guess. */
 export function voiceRate(
   rates: VoiceRates | null | undefined,
   engine: string,
   voice: string,
 ): VoiceRate {
-  const measured =
-    rates?.[engine]?.[voice.toLowerCase()] ?? rates?.[engine]?.[voice];
+  const find = (from: VoiceRates | null | undefined) =>
+    from?.[engine]?.[voice] ?? from?.[engine]?.[voice.toLowerCase()];
+  const measured = find(rates) ?? find(MEASURED_RATES);
   const base = DEFAULT_RATES[engine] ?? { wpm: 155 };
   return measured?.wpm
     ? { ...base, ...measured, words: { ...base.words, ...measured.words } }

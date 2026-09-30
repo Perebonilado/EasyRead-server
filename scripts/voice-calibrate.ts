@@ -151,7 +151,13 @@ export async function measure(
     forms,
     words,
   );
-  return { wpm: paceReport(beats).wpm, seconds: durationMs / 1000 };
+  return {
+    wpm: paceReport(
+      beats,
+      forms.map((form) => form.text),
+    ).wpm,
+    seconds: durationMs / 1000,
+  };
 }
 
 async function main(): Promise<void> {

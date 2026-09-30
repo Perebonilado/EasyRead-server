@@ -97,6 +97,10 @@ function timed(
   return timeBeats(fixture.beats, forms, words);
 }
 
+/** What each sentence says aloud: its rate is measured on it. */
+const saidOf = (fixture: PaceFixture) =>
+  fixture.beats.map((beat) => spokenForm(beat.say, new Map()).text);
+
 const targetsOf = (fixture: PaceFixture) => {
   const first = firstSaid(fixture.beats, fixture.terms);
   return fixture.beats.map((beat, k) =>
@@ -139,7 +143,7 @@ async function before(
   });
   const beats = timed(fixture, result);
   return {
-    report: paceReport(beats),
+    report: paceReport(beats, saidOf(fixture)),
     beats,
     durationMs: result.durationMs ?? 0,
     audio: result.audio,
@@ -208,7 +212,7 @@ async function after(
     { band: fixture.band },
   );
   return {
-    report: paceReport(made.beats),
+    report: paceReport(made.beats, saidOf(fixture)),
     beats: made.beats,
     durationMs: made.durationMs,
     audio: kept.get(made.audioKey) ?? Buffer.alloc(0),
@@ -307,18 +311,18 @@ async function main(): Promise<void> {
       take: Measured,
       score: ReturnType<typeof scored>,
     ) =>
-      `  ${name}: ${take.report.wpm} wpm, ${pct(score.within)} of sentences within 8% of target, silence ${pct(take.report.silenceShare)} (budget ${pct(score.budget)}${score.inBudget ? '' : ', over'}), longest pause ${(take.report.longestPauseMs / 1000).toFixed(2)} s, ${score.holes} unmarked silences over 1.6 s, ${(take.durationMs / 1000).toFixed(1)} s long`;
+      `  ${name}: ${take.report.wpm} wpm (${take.report.plainWpm} in plain words), ${pct(score.within)} of sentences within 8% of target, silence ${pct(take.report.silenceShare)} (budget ${pct(score.budget)}${score.inBudget ? '' : ', over'}), longest pause ${(take.report.longestPauseMs / 1000).toFixed(2)} s, ${score.holes} unmarked silences over 1.6 s, ${(take.durationMs / 1000).toFixed(1)} s long`;
     console.log(line('before', was, a));
     console.log(line('after ', now, b));
     rows.push(
-      `| ${fixture.id} | ${fixture.band} | ${target} | ${was.report.wpm} → ${now.report.wpm} | ${pct(a.within)} → ${pct(b.within)} | ${pct(was.report.silenceShare)} → ${pct(now.report.silenceShare)} (≤ ${pct(a.budget)}) | ${(was.report.longestPauseMs / 1000).toFixed(2)} → ${(now.report.longestPauseMs / 1000).toFixed(2)} s | ${a.holes} → ${b.holes} |`,
+      `| ${fixture.id} | ${fixture.band} | ${target} | ${was.report.wpm} → ${now.report.wpm} (${was.report.plainWpm} → ${now.report.plainWpm}) | ${pct(a.within)} → ${pct(b.within)} | ${pct(was.report.silenceShare)} → ${pct(now.report.silenceShare)} (≤ ${pct(a.budget)}) | ${(was.report.longestPauseMs / 1000).toFixed(2)} → ${(now.report.longestPauseMs / 1000).toFixed(2)} s | ${a.holes} → ${b.holes} |`,
     );
   }
   const passed = all.filter(
     (one) => one.after.within >= 0.9 && !one.after.holes && one.after.inBudget,
   ).length;
   const table = [
-    '| scene | band | target wpm | wpm | within ±8 % | silence | longest pause | holes > 1.6 s |',
+    '| scene | band | target wpm | wpm (plain words) | within ±8 % | silence | longest pause | holes > 1.6 s |',
     '|---|---|---|---|---|---|---|---|',
     ...rows,
   ].join('\n');

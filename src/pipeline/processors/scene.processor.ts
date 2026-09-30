@@ -2213,6 +2213,7 @@ export class SceneProcessor {
       pcm: result.pcm ?? null,
       timing,
       targets: paced?.map((p) => p.targetWpm) ?? timed.map(() => null),
+      said: forms.map((form) => form.text),
       pauses: pausesS,
       lesson,
       leadMs: leadS * 1000,
@@ -2253,6 +2254,8 @@ export class SceneProcessor {
     pcm: Pcm | null;
     timing: SceneTiming;
     targets: (number | null)[];
+    /** What each sentence said: its rate is measured on it. */
+    said: string[];
     pauses: number[];
     lesson: boolean;
     leadMs: number;
@@ -2272,9 +2275,10 @@ export class SceneProcessor {
       audio: input.audio,
       mimeType: input.mimeType,
     };
-    const before = input.lesson ? paceReport(input.beats) : null;
+    const before = input.lesson ? paceReport(input.beats, input.said) : null;
     const plan = {
       beats: input.beats,
+      said: input.said,
       targets: input.targets,
       pauses: input.pauses,
       trimInside: input.lesson,
@@ -2313,7 +2317,7 @@ export class SceneProcessor {
         out = kept;
       }
     if (!before) return out;
-    const after = paceReport(out.beats);
+    const after = paceReport(out.beats, input.said);
     const targets = input.targets.filter((t): t is number => Boolean(t));
     const pct = (n: number) => `${Math.round(n * 100)}%`;
     this.logger.log(

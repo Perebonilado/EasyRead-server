@@ -22,6 +22,11 @@ function voiced(spans: [number, number][], totalMs: number): Int16Array {
   return out;
 }
 
+/** Five words of seven syllables: five words of average length (scene-pace paceWords). */
+const CYCLE = ['open', 'river', 'stone', 'lake', 'bright'];
+const said = (n: number) =>
+  Array.from({ length: n }, (_, i) => CYCLE[i % CYCLE.length]).join(' ');
+
 /** A sentence of `n` words evenly over [from, to]. */
 function sentence(n: number, from: number, to: number) {
   const each = (to - from) / n;
@@ -32,7 +37,7 @@ function sentence(n: number, from: number, to: number) {
     Math.round(from + (i + 1) * each - 20),
   ]);
   return {
-    text: Array.from({ length: n }, () => 'word').join(' '),
+    text: said(n),
     startMs: from,
     endMs: to,
     words,
@@ -147,14 +152,15 @@ describe('the voice put right after voicing', () => {
   });
 
   it('changes nothing in a scene already as planned', () => {
-    const beats = [sentence(8, 0, 3000), sentence(8, 3400, 6400)];
+    // Ten words in 3.75 s: 160 a minute, its target.
+    const beats = [sentence(10, 0, 3750), sentence(10, 4150, 7900)];
     const pcm = {
       samples: voiced(
         [
-          [0, 3000],
-          [3400, 6400],
+          [0, 3750],
+          [4150, 7900],
         ],
-        7000,
+        8500,
       ),
       sampleRate: RATE,
     };

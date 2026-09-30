@@ -225,7 +225,7 @@ describe('an explainer with a story clip, made on the worker with the fake write
       StudioSceneRecord['sheet'],
       { kind: 'story' }
     >;
-    expect(clip.title).toBe('39 degrees is a fever');
+    expect(clip.title).toBe('Thirty-nine degrees is a fever');
     expect(clip.inserts).toEqual([{ beat: 1, thing: 'thermometer' }]);
     expect(clip.beats[2]).toMatchObject({ kind: 'pause', seconds: 0.6 });
     // The lesson after it opens on the clip's hook.
@@ -265,7 +265,7 @@ describe('an explainer with a story clip, made on the worker with the fake write
     expect(frozen.freeze).toEqual({
       atMs: 3400,
       ms: 600,
-      label: '39 degrees is a fever',
+      label: 'Thirty-nine degrees is a fever',
     });
 
     const lesson = studioMakeOf(w.show, episode, rows[2], rows, w.show.bible!);

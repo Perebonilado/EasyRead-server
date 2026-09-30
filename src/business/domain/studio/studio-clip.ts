@@ -513,15 +513,32 @@ export function ideaBeat(sheet: StorySheet): number {
   return Math.max(0, Math.floor((sheet.beats.length - 1) / 2));
 }
 
-/** The idea's label on the stage: the sheet's title, a few words; else from what the clip shows. */
+/**
+ * The idea's label on the stage: what the outline says the clip shows,
+ * after its colon ("the nurse reads the thermometer: 39 degrees is a
+ * fever"), where that is a few words; else the sheet's title, cut to a
+ * few words (writers title a scene by who and where more often than by
+ * its idea).
+ */
 export function labelOf(sheet: Pick<StorySheet, 'title'>, shows = ''): string {
+  const idea = shows.includes(':')
+    ? shows
+        .slice(shows.indexOf(':') + 1)
+        .trim()
+        .replace(/[.!]+$/u, '')
+    : '';
   const title = sheet.title.trim();
   const from =
-    title && title !== 'A scene'
-      ? title
-      : (shows.split(/[:.;!?]/u)[0] ?? '').trim();
-  const cut = words(from).slice(0, LABEL_WORDS).join(' ');
-  return cut.replace(/[,;:\-—]+$/u, '');
+    idea && words(idea).length <= LABEL_WORDS
+      ? idea
+      : title && title !== 'A scene'
+        ? title
+        : (shows.split(/[:.;!?]/u)[0] ?? '').trim();
+  const cut = words(from)
+    .slice(0, LABEL_WORDS)
+    .join(' ')
+    .replace(/[,;:\-—]+$/u, '');
+  return cut ? `${cut.charAt(0).toUpperCase()}${cut.slice(1)}` : cut;
 }
 
 /**

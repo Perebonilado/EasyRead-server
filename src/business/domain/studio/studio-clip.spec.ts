@@ -345,7 +345,9 @@ describe("a clip's sheet held to its profile by code", () => {
   );
 
   it('sets its label, one narration, short lines and six beats that act or speak', () => {
-    expect(mended.sheet.title).toBe('Sam at the clinic with Nurse');
+    // The idea the outline names, not who and where the writer titled it.
+    expect(mended.sheet.title).toBe('Thirty-nine degrees is a fever');
+    expect(mendClip(sheet).sheet.title).toBe('Sam at the clinic with Nurse');
     const acted = mended.sheet.beats.filter(
       (b) => b.kind !== 'reaction' && b.kind !== 'pause',
     );

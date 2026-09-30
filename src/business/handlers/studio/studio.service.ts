@@ -1070,6 +1070,16 @@ export class StudioService {
       await this.enqueue(show, episode, { kind: 'script' });
       return null;
     }
+    // The script's job gave up with scenes left unwritten: asked again
+    // (the thread's "Try again"), it is written again.
+    if (episode.phase === 'script') {
+      const scenes = await this.studio.listScenes(episode.id);
+      if (!scenes.some((s) => s.status === 'failed' && !s.sheet)) return null;
+      if (!(await this.studio.claimEpisode(episode.id, 'script')))
+        return 'One moment: I am still working on it.';
+      await this.enqueue(show, episode, { kind: 'script' });
+      return null;
+    }
     return null;
   }
 

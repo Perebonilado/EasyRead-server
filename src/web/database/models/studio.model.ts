@@ -65,6 +65,10 @@ export class StudioEpisodeModel extends BaseModel {
   @Column({ type: DataType.STRING(512), allowNull: true })
   declare thumbKey: string | null;
 
+  /** What is happening to it now, as JSON (studio-progress). */
+  @Column({ type: DataType.TEXT, allowNull: true })
+  declare activity: string | null;
+
   declare createdAt: Date;
   declare updatedAt: Date;
 }
@@ -113,6 +117,10 @@ export class StudioSceneModel extends BaseModel {
 
   @Column({ type: DataType.INTEGER, allowNull: true })
   declare durationMs: number | null;
+
+  /** What is happening to it now, as JSON (studio-progress). */
+  @Column({ type: DataType.TEXT, allowNull: true })
+  declare activity: string | null;
 
   declare createdAt: Date;
   declare updatedAt: Date;

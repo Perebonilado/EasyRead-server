@@ -17,6 +17,8 @@
  * sees the better script, never the notes.
  */
 import type { LlmGatewayPort, LlmUsage } from '../../ports/llm.port';
+import { progressNow } from '../../domain/work-progress';
+import { rewriteSays } from './studio-progress';
 import type {
   StorySheet,
   StudioBible,
@@ -190,6 +192,7 @@ export async function tableRead(
   };
 
   const readOnce = async (sheets: StorySheet[]) => {
+    progressNow({ says: 'Reading the whole script' });
     const [viewer, retell] = await Promise.all([
       coldRead(sheets),
       retold(sheets),
@@ -271,6 +274,7 @@ export async function tableRead(
       const drifted = JSON.stringify(before) !== JSON.stringify(was[k]);
       if (targets.includes(k)) {
         const notes = notesFor(k, read, code, bible);
+        progressNow(rewriteSays(k, notes));
         const written = await writeStorySheet(llm, {
           brief,
           bible,
@@ -283,6 +287,7 @@ export async function tableRead(
           record: (usage) => record(usage, 'studio_write'),
           log: (line) => log(`s${k + 1}: ${line}`),
         });
+        progressNow({ scene: k, done: true });
         // Kept only when the stage can play it as well as the one it replaces.
         const had = checkSheet(
           sheets[k],

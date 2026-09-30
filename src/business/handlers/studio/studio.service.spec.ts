@@ -344,6 +344,21 @@ describe('the Studio records what happens in the thread', () => {
     ]);
   });
 
+  it('writes the scenes again when the script job gave up with scenes unwritten, and not otherwise', async () => {
+    const studio = studioInMemory();
+    await studio.service.approve('u1', 'e0');
+    expect(studio.jobs).toEqual([]);
+    studio.scenes.set('c2', {
+      ...studio.scenes.get('c2')!,
+      sheet: null,
+      status: 'failed',
+      error: 'This scene could not be written. Ask for it again.',
+    });
+    await studio.service.approve('u1', 'e0');
+    expect(studio.jobs.map((j) => j.kind)).toEqual(['script']);
+    expect(studio.episodes.get('e0')!.busy).toBe('script');
+  });
+
   it('records making the film and sharing it, once each', async () => {
     const studio = studioInMemory();
     await studio.service.make('u1', 'e0');

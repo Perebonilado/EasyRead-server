@@ -14,6 +14,7 @@ import {
   EPISODE_PHASES,
   type EpisodeBusy,
   type EpisodePhase,
+  type StudioActivity,
   type StudioEpisodeRecord,
   type StudioMessageRecord,
   type StudioRepository,
@@ -41,6 +42,14 @@ function parsed(kept: string | null | undefined): unknown {
 
 const json = (value: unknown) =>
   value === null || value === undefined ? null : JSON.stringify(value);
+
+/** An activity as kept, read back: null for none, or for one that cannot be read. */
+function activityOf(kept: string | null | undefined): StudioActivity | null {
+  const value = parsed(kept) as StudioActivity | null;
+  return value && typeof value === 'object' && typeof value.at === 'string'
+    ? value
+    : null;
+}
 
 @Injectable()
 export class SequelizeStudioRepository implements StudioRepository {
@@ -89,6 +98,7 @@ export class SequelizeStudioRepository implements StudioRepository {
       shareToken: row.shareToken,
       durationMs: row.durationMs,
       thumbKey: row.thumbKey,
+      activity: activityOf(row.activity),
       createdAt: row.createdAt,
       updatedAt: row.updatedAt,
     };
@@ -114,6 +124,7 @@ export class SequelizeStudioRepository implements StudioRepository {
       thumbKey: row.thumbKey,
       madeHash: row.madeHash,
       durationMs: row.durationMs,
+      activity: activityOf(row.activity),
       updatedAt: row.updatedAt,
     };
   }
@@ -334,6 +345,24 @@ export class SequelizeStudioRepository implements StudioRepository {
       },
       { where: { id } },
     );
+  }
+
+  async noteActivity(
+    of: { episodeId: string } | { sceneId: string },
+    activity: StudioActivity | null,
+  ): Promise<void> {
+    const kept = { activity: json(activity) };
+    // Said often while a job runs: the row's updatedAt stays as it was.
+    if ('sceneId' in of)
+      await this.scenes.update(kept, {
+        where: { id: of.sceneId },
+        silent: true,
+      });
+    else
+      await this.episodes.update(kept, {
+        where: { id: of.episodeId },
+        silent: true,
+      });
   }
 
   async insertScene(

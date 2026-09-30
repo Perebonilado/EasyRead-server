@@ -1,6 +1,7 @@
 import { Inject, Injectable, Logger, Optional } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import type { DocumentProfile } from '../../business/domain/scene-profile';
+import { progressNow } from '../../business/domain/work-progress';
 import {
   AUDIENCE_STAGE,
   bibleOf,
@@ -54,6 +55,7 @@ import {
   writeStoryScript,
   type ScriptSettings,
 } from '../../business/handlers/studio/studio-script-writer';
+import { followStudioJob } from '../../business/handlers/studio/studio-progress';
 import { tableRead } from '../../business/handlers/studio/studio-tableread';
 import {
   energyOf,
@@ -175,7 +177,7 @@ import { renderStill } from '../../business/domain/scene-still';
 
 /** A kit's spec for a character: a person's, an animal's, or a creature's. */
 type KitSpec = FigureSpec | AnimalSpec | CreatureSpec;
-import type { StudioJobData } from '../queues';
+import { QUEUE_SETTINGS, type StudioJobData } from '../queues';
 import { isPermanentFailure, type JobContext } from './base.processor';
 import { SceneProcessor } from './scene.processor';
 
@@ -495,7 +497,29 @@ export class StudioProcessor {
     );
   }
 
+  /**
+   * A job, followed (studio-progress): what it is doing, and any call it
+   * is trying again, kept on its rows for the maker's page as it goes.
+   */
   async process(job: StudioJobData, context: JobContext): Promise<void> {
+    const { attempts, backoffMs } = QUEUE_SETTINGS.studio;
+    return followStudioJob(
+      this.studio,
+      {
+        episodeId: job.episodeId,
+        sceneId:
+          job.kind === 'scene' || job.kind === 'make' ? job.sceneId : null,
+        kind: job.kind,
+        picture: Boolean(job.ask?.picture),
+        attempt: context.attemptsMade,
+        attempts,
+        backoffMs: backoffMs * 2 ** Math.max(0, context.attemptsMade - 1),
+      },
+      () => this.work(job, context),
+    );
+  }
+
+  private async work(job: StudioJobData, context: JobContext): Promise<void> {
     const show = await this.studio.findShow(job.showId);
     const episode = await this.studio.findEpisode(job.episodeId);
     if (!show || !episode) return;
@@ -2513,6 +2537,10 @@ export class StudioProcessor {
           why: moment.why,
         });
       }
+      progressNow({
+        says: `Checking the pictures of scene ${row.position + 1}`,
+        short: 'Checking',
+      });
       const judged = await this.llm.pictureCheck({
         stills: stills.map(({ png, claims }) => ({ png, claims })),
       });

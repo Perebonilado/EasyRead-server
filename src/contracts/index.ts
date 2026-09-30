@@ -3195,6 +3195,30 @@ export interface StudioExplainerSheetDto {
 
 export type StudioSheetDto = StudioStorySheetDto | StudioExplainerSheetDto;
 
+/**
+ * What is happening to an episode or a scene now, while it is: the step
+ * in plain words, and a call being tried again (or given up on), with why.
+ */
+export interface StudioActivityDto {
+  /** "Reading the whole script", "Making scene 3 shorter"; null while only a retry is to say. */
+  says: string | null;
+  /** A word for a scene's row: "Rewriting", "Shortening", "Fixing", "Checking". */
+  short: string | null;
+  retry: {
+    /** "The writer is busy, trying again (2 of 3)". */
+    says: string;
+    /** "The writer is busy". */
+    reason: string;
+    attempt: number | null;
+    of: number | null;
+    waitSeconds: number | null;
+    /** Given up on: said until the work moves on. */
+    final: boolean;
+  } | null;
+  /** When it was said, ISO. */
+  at: string;
+}
+
 export interface StudioSceneDto {
   id: string;
   position: number;
@@ -3214,6 +3238,8 @@ export interface StudioSceneDto {
   durationMs: number | null;
   /** A change to undo. */
   canUndo: boolean;
+  /** What is being done to it now, while it is; null otherwise. */
+  activity: StudioActivityDto | null;
 }
 
 export interface StudioEpisodeDto {
@@ -3236,6 +3262,8 @@ export interface StudioEpisodeDto {
   /** Why it cannot be made now, in plain words; empty when it can. */
   blockers: string[];
   hasThumb: boolean;
+  /** What the work in hand is doing now, while there is some; null otherwise. */
+  activity: StudioActivityDto | null;
 }
 
 /**

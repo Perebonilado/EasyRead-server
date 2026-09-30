@@ -4,6 +4,10 @@ import type { SpeechPort, VoiceOption } from '../../business/ports/voice.port';
 import { pcmMs, readPcm16 } from '../../business/domain/wav';
 import { ELEVENLABS_NARRATOR } from '../../business/domain/scene-voice';
 import { encodeMp3 } from './audio/mp3';
+import {
+  noticeRecovered,
+  noticeRetry,
+} from '../../business/domain/work-progress';
 
 const API = 'https://api.elevenlabs.io';
 /**
@@ -646,6 +650,7 @@ export class ElevenLabsSceneSpeechAdapter implements SpeechPort {
         );
         if (Number.isFinite(most) && most > 0) gate.learned = Math.floor(most);
         if (response.ok) {
+          noticeRecovered('voice');
           const cost = Number(response.headers.get('character-cost'));
           return {
             answer: (await response.json()) as DialogueAnswer,
@@ -676,6 +681,14 @@ export class ElevenLabsSceneSpeechAdapter implements SpeechPort {
         this.logger.warn(
           `attempt ${attempt} of ${ATTEMPTS} failed: ${lastError.message}`,
         );
+        if (attempt < ATTEMPTS)
+          noticeRetry({
+            service: 'voice',
+            attempt: attempt + 1,
+            of: ATTEMPTS,
+            waitMs: wait,
+            error: lastError,
+          });
       } finally {
         leave();
       }

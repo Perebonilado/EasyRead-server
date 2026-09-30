@@ -29,6 +29,34 @@ export type EpisodeBusy =
 export type StudioSceneStatus =
   'writing' | 'ready' | 'making' | 'made' | 'failed';
 
+/**
+ * What is happening to an episode or a scene now, in plain words, kept
+ * on its row while its job runs and cleared when the job ends: the step
+ * ("Reading the whole script"), and a call that failed and is being tried
+ * again ("The writer is busy, trying again (2 of 3)").
+ */
+export interface StudioActivity {
+  /** What is being done; null while only a retry is to say. */
+  says: string | null;
+  /** A word for a scene's row: "Rewriting", "Shortening", "Fixing", "Checking". */
+  short?: string;
+  retry?: {
+    /** The whole line: "The writer is busy, trying again (2 of 3)". */
+    says: string;
+    /** Why, alone: "The writer is busy". */
+    reason: string;
+    attempt?: number;
+    of?: number;
+    waitSeconds?: number;
+    /** Given up on that call: said until the work moves on. */
+    final?: boolean;
+  };
+  /** A scene's sheet when it was said: once the sheet changes, it no longer holds. */
+  sheetHash?: string | null;
+  /** When it was said, ISO. */
+  at: string;
+}
+
 export interface StudioShowRecord {
   id: string;
   userId: string;
@@ -54,6 +82,8 @@ export interface StudioEpisodeRecord {
   shareToken: string | null;
   durationMs: number | null;
   thumbKey: string | null;
+  /** What is happening to it now (studio-progress); null when nothing is said. */
+  activity?: StudioActivity | null;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -74,6 +104,8 @@ export interface StudioSceneRecord {
   thumbKey: string | null;
   madeHash: string | null;
   durationMs: number | null;
+  /** What is happening to it now (studio-progress); null when nothing is said. */
+  activity?: StudioActivity | null;
   updatedAt: Date;
 }
 
@@ -217,6 +249,14 @@ export interface StudioRepository {
   removeScene(id: string): Promise<void>;
   /** How many scenes of a maker's are being made now. */
   makingFor(userId: string): Promise<number>;
+  /**
+   * What is happening to an episode or a scene now, kept on its row (null
+   * clears it), leaving the row's updatedAt as it was: it is said often.
+   */
+  noteActivity(
+    of: { episodeId: string } | { sceneId: string },
+    activity: StudioActivity | null,
+  ): Promise<void>;
 
   /**
    * A message added to a show's thread. Given an id already taken, the

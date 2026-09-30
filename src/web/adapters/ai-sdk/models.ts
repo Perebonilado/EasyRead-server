@@ -2,6 +2,7 @@ import { Logger } from '@nestjs/common';
 import type { ConfigService } from '@nestjs/config';
 import type { EmbeddingModel, LanguageModel } from 'ai';
 import type { LlmTask } from '../../../business/ports/llm.port';
+import { noticingFetch } from './noticing-fetch';
 
 export const PROVIDERS = ['openai', 'anthropic', 'google', 'deepseek'] as const;
 export type ProviderName = (typeof PROVIDERS)[number];
@@ -362,22 +363,28 @@ export class ModelRegistry {
   }
 
   private async create(name: ProviderName, apiKey: string, baseURL?: string) {
+    // Each try the SDK makes, and each it gives up on, told to whoever
+    // follows the work (a Studio job's page): AI_MAX_RETRIES as the adapter reads it.
+    const tries =
+      Number(this.config.get<string>('AI_MAX_RETRIES', '2') ?? 2) + 1;
+    // Google's text model only judges pictures here; the rest write (and draw).
+    const fetch = noticingFetch(name === 'google' ? 'judge' : 'writer', tries);
     switch (name) {
       case 'openai': {
         const { createOpenAI } = await import('@ai-sdk/openai');
-        return createOpenAI({ apiKey, baseURL });
+        return createOpenAI({ apiKey, baseURL, fetch });
       }
       case 'anthropic': {
         const { createAnthropic } = await import('@ai-sdk/anthropic');
-        return createAnthropic({ apiKey, baseURL });
+        return createAnthropic({ apiKey, baseURL, fetch });
       }
       case 'google': {
         const { createGoogle } = await import('@ai-sdk/google');
-        return createGoogle({ apiKey, baseURL });
+        return createGoogle({ apiKey, baseURL, fetch });
       }
       case 'deepseek': {
         const { createDeepSeek } = await import('@ai-sdk/deepseek');
-        return createDeepSeek({ apiKey, baseURL });
+        return createDeepSeek({ apiKey, baseURL, fetch });
       }
     }
   }

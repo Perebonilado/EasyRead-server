@@ -392,20 +392,46 @@ export function missingCast(
   });
 }
 
+/** Beats with errors a scene may have before it is broken, not only mended: code repairs fewer. */
+export const BROKEN_BEATS = 3;
+
 /**
- * What a scene goes back to its writer for, at most once: what the stage
- * cannot play (errors: narration past the maker's narrator, someone none
- * of the cast, a broken sheet), someone the plan has who never comes in,
- * and, written again as the maker asked, the lines it lost that no one
- * asked to lose. A length, a long quiet, a picture that stands still and
- * every craft note are logged, never sent back.
+ * An error that breaks the scene itself, which code cannot repair without
+ * losing it: narration past the maker's narrator, a set or a person the
+ * show has not got, a scene with next to nothing said, a line far too
+ * long to say.
+ */
+const breaks = (p: SheetProblem) =>
+  p.level === 'error' &&
+  (p.rule === 'narrator' ||
+    p.rule === 'set' ||
+    p.rule === 'empty' ||
+    /none of the show's characters|not one of the show's characters|runs to \d+ words/u.test(
+      p.message,
+    ));
+
+/**
+ * What a scene goes back to its writer for, at most once: a broken sheet
+ * (an error that breaks it, or errors on BROKEN_BEATS beats or more), with
+ * every error it has; someone the plan has who never comes in; and,
+ * written again as the maker asked, the lines it lost that no one asked
+ * to lose. A slip on a beat or two (someone acting off the stage, a thing
+ * not there to take) is repaired by code; a length, a long quiet, a
+ * picture that stands still and every craft note are logged, never sent
+ * back.
  */
 export function hardFailures(
   problems: readonly SheetProblem[],
   missing: readonly SheetProblem[] = [],
 ): SheetProblem[] {
+  const errors = problems.filter((p) => p.level === 'error');
+  const beats = new Set(
+    errors.flatMap((p) => (p.beat === null ? [] : [p.beat])),
+  );
+  const broken = errors.some(breaks) || beats.size >= BROKEN_BEATS;
   return [
-    ...problems.filter((p) => p.level === 'error' || p.rule === 'kept'),
+    ...(broken ? errors : []),
+    ...problems.filter((p) => p.rule === 'kept'),
     ...missing,
   ];
 }

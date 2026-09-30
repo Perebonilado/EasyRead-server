@@ -245,7 +245,7 @@ describe('what still sends a scene back, once', () => {
     ...over,
   });
 
-  it('is only what the stage cannot play, the plan cast left out, and lines a change lost', () => {
+  it('is only a broken sheet, the plan cast left out, and lines a change lost', () => {
     const narrated = problem({ rule: 'narrator', level: 'error' });
     const kept = problem({ rule: 'kept' });
     const quiet = problem({ rule: 'quiet' });
@@ -257,6 +257,27 @@ describe('what still sends a scene back, once', () => {
       missing,
     ]);
     expect(hardFailures([quiet, length])).toEqual([]);
+  });
+
+  it('leaves a slip on a beat or two to code, and sends back one on three beats with every error', () => {
+    const slip = (beat: number) =>
+      problem({
+        rule: 'presence',
+        level: 'error',
+        beat,
+        message: `Pip acts in beat ${beat + 1} but is not on the stage.`,
+      });
+    expect(hardFailures([slip(6), slip(7)])).toEqual([]);
+    expect(hardFailures([slip(1), slip(6), slip(7)])).toHaveLength(3);
+    // A stranger breaks it at once.
+    const stranger = problem({
+      rule: 'cast',
+      level: 'error',
+      beat: 2,
+      message:
+        'Beat 3 has "the-postman", who is none of the show\'s characters, doing it.',
+    });
+    expect(hardFailures([stranger, slip(6)])).toEqual([stranger, slip(6)]);
   });
 
   it('finds someone the plan puts in the scene who never comes in; never a minor part', () => {

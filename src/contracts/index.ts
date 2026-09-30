@@ -1974,6 +1974,12 @@ export interface ScenePillDto {
 export type SceneThemeName =
   'paper' | 'cleanlab' | 'sunny' | 'chalkboard' | 'blueprint' | 'nightsky';
 
+/** How a scene's text is read and how fast it moves: words a minute, and motion against a grown-up's. */
+export interface SceneReadingDto {
+  wpm: number;
+  motion: number;
+}
+
 export interface SceneDto {
   /** 4 adds the sound; a 3 plays the same, in silence but for the voice. */
   version: 3 | 4;
@@ -1995,6 +2001,13 @@ export interface SceneDto {
   stage?: 'early' | 'middle' | 'higher' | 'professional';
   /** The look it was made in (studio-explainer-plan, Ask 2); absent, paper, as every scene before themes. */
   theme?: SceneThemeName;
+  /**
+   * How its text is read and how fast it moves, for whom it is made
+   * (studio-explainer-plan, Ask 3; scene-reading.ts): the words a minute
+   * its viewers read the stage's text at, and its motion against a
+   * grown-up's (1). Absent, from its `stage`, else a grown-up's.
+   */
+  reading?: SceneReadingDto;
   /**
    * One per spoken sentence; one word entry per whitespace word of `text`:
    * [charStart, charEnd, startMs, endMs]. `delivery` when it is not plain
@@ -3488,6 +3501,24 @@ export interface StudioShowCardDto {
   scenes?: number | null;
 }
 
+/** How the film goes from one scene to the next (studio-explainer-plan, Ask 4 D; studio-edit.ts). */
+export type StudioJoinName =
+  | 'cut'
+  | 'dissolve'
+  | 'dip'
+  | 'match'
+  | 'morph'
+  | 'zoom-through'
+  | 'push'
+  | 'continue';
+
+/** A join's things: `from` in the scene before, `to` in this one, `part` of `from` a zoom goes into. */
+export interface StudioJoinWithDto {
+  from?: string;
+  to?: string;
+  part?: string;
+}
+
 /** An episode as a player plays it: its scenes in order, each fetched on its own. */
 export interface StudioPlayDto {
   episodeId: string;
@@ -3504,8 +3535,15 @@ export interface StudioPlayDto {
     title: string;
     durationMs: number;
     transition: 'cut' | 'fade';
-    /** How the film joins this scene to the one before: a cut (the same place, time running on), a dissolve (a new place) or a dip to black (time has passed). The first comes up from black. */
-    join: 'cut' | 'dissolve' | 'dip';
+    /**
+     * How the film joins this scene to the one before: a cut (the same place, time running on), a dissolve (a new
+     * place) or a dip to black (time has passed); an explainer's may carry one thing across (match, morph), go into
+     * a part of it (zoom-through), slide on to the next of a list (push), or carry the stage on (continue, E5).
+     * The first comes up from black.
+     */
+    join: StudioJoinName;
+    /** What a join carries: the thing the scene before leaves on, the one this opens on, the part a zoom goes into. */
+    joinWith?: StudioJoinWithDto;
   }[];
   /** What the film's music is scored from (studio-score.ts); absent on an explainer, or from an older server. */
   score?: StudioScoreDto;

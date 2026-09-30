@@ -957,6 +957,12 @@ export interface OutlineScene {
   points: string[];
   /** An explainer made from a document: the pages it teaches, first and last. Absent otherwise. */
   pages?: PageRange;
+  /**
+   * An explainer's scene that goes inside a part of what the scene before
+   * ended on ("nucleus"): the film zooms into it (Ask 4 D). Code decides,
+   * and dissolves where it cannot. Absent or null, none said.
+   */
+  into?: string | null;
 }
 
 export interface StudioOutline {
@@ -1026,6 +1032,7 @@ export function outlineOf(raw: unknown): StudioOutline {
                   ] as PageRange,
                 }
               : {}),
+            ...(textOrNull(s.into, 60) ? { into: textOrNull(s.into, 60) } : {}),
           },
         ];
       }),

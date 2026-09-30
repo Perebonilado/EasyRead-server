@@ -62,6 +62,13 @@ import {
   withoutStandIns,
 } from '../../business/domain/scene-compose';
 import {
+  readingOf,
+  readingRhythm,
+  textPacing,
+  trimCards,
+  type SceneReading,
+} from '../../business/domain/scene-reading';
+import {
   conventionGround,
   measureGround,
 } from '../../business/domain/scene-ground';
@@ -666,11 +673,12 @@ export class SceneProcessor {
         );
       const drawn = [...drawings.values()].filter(Boolean).length;
       const rhythm = rhythmOf(scene);
+      const read = readingRhythm(scene);
       const held = lesson
         ? notesProblems(script, lesson.notes, pageNumber, material)
         : null;
       this.logger.log(
-        `${who}: made in ${Math.round((Date.now() - started) / 1000)}s: ${script.beats.length} sentences, ${Math.round(voice.durationMs / 1000)}s of audio timed by ${voice.timing}, ${wordsPerMinute(scene.beats)} words a minute, ${scene.steps.length} stage changes, ${scene.effects.length} effects (${filled} filled), ${drawn} of ${drawings.size} drawings; still at most ${Math.round(rhythm.stillMs / 1000)}s, ${rhythm.perMinute} changes a minute, ${rhythm.stagesPerMinute} of the stage${lesson && held ? `; a ${lesson.here.relation} page, ${held.shown} of ${held.points} planned ideas shown` : ''}`,
+        `${who}: made in ${Math.round((Date.now() - started) / 1000)}s: ${script.beats.length} sentences, ${Math.round(voice.durationMs / 1000)}s of audio timed by ${voice.timing}, ${wordsPerMinute(scene.beats)} words a minute, ${scene.steps.length} stage changes, ${scene.effects.length} effects (${filled} filled), ${drawn} of ${drawings.size} drawings; still at most ${Math.round(rhythm.stillMs / 1000)}s, ${rhythm.perMinute} changes a minute, ${rhythm.stagesPerMinute} of the stage; text left at least ${read.readLeftMs ?? '-'}ms after it is read, ${read.accentsPerMinute} accents a minute, the camera held at most ${Math.round(read.heldMs / 100) / 10}s for reading, no accent for at most ${Math.round(read.quietMs / 1000)}s${read.quietMs > 12_000 ? ' (still)' : ''}${lesson && held ? `; a ${lesson.here.relation} page, ${held.shown} of ${held.points} planned ideas shown` : ''}`,
       );
     } catch (error) {
       const message = (error as Error).message;
@@ -738,6 +746,13 @@ export class SceneProcessor {
     pace?: PaceBrief | null;
     /** The look it is made in (a Studio explainer's): its still is shown in it. Absent, paper. */
     theme?: ThemeId;
+    /**
+     * How its text is read and its picture moves, for whom it is made (a
+     * Studio explainer's audience, studio-motion): stored on the scene for
+     * the player, and its text paced by code to it (scene-reading). Absent,
+     * its stage's, and not stored: the player finds the same from the stage.
+     */
+    reading?: SceneReading | null;
   }): Promise<
     | { fit: 'poor'; reason: string }
     | {
@@ -856,9 +871,14 @@ export class SceneProcessor {
     const voice = spoken.value;
 
     await input.step?.('composing');
-    const compose = (from: SceneScript) =>
-      composeScene({
-        script: from,
+    // Its text paced to be read (Ask 3 B), by code: keyword cards cut to
+    // what its viewers read at a glance before it is laid out, and what
+    // comes too fast put right once it is timed.
+    const reading =
+      input.reading ?? readingOf({ stage: input.profile.stage ?? undefined });
+    const compose = (from: SceneScript) => {
+      const made = composeScene({
+        script: trimCards(from, reading.cardWords),
         drawings,
         beats: voice.beats,
         durationMs: voice.durationMs,
@@ -868,6 +888,11 @@ export class SceneProcessor {
         // The book's or the show's own: each place keeps its regulars.
         key: story?.setsKey ?? null,
       });
+      if (input.reading)
+        made.scene.reading = { wpm: reading.wpm, motion: reading.motion };
+      const paced = textPacing(made.scene, reading);
+      return { ...made, staging: [...made.staging, ...paced] };
+    };
     let composed = compose(script);
     // Looked at as made: anything it asks to play again is composed again
     // on the same drawings and voice, its words and quiet unchanged.
@@ -901,6 +926,13 @@ export class SceneProcessor {
     });
     this.logAudit(who, audit);
     for (const note of composed.staging) this.logger.log(`${who}: ${note}`);
+    // How a Studio explainer reads (a book's page says so with its rhythm).
+    if (input.reading) {
+      const read = readingRhythm(scene, reading);
+      this.logger.log(
+        `${who}: read at ${reading.wpm} words a minute, motion ${reading.motion}: text left at least ${read.readLeftMs ?? '-'}ms after it is read, ${read.accentsPerMinute} accents a minute, the camera held at most ${Math.round(read.heldMs / 100) / 10}s for reading, no accent for at most ${Math.round(read.quietMs / 1000)}s${read.quietMs > 12_000 ? ' (still)' : ''}`,
+      );
+    }
     // Paper is every scene's look unless it says otherwise.
     if (input.theme && input.theme !== 'paper') scene.theme = input.theme;
     const { sceneKey, thumbKey } = await this.store(base, scene, who);

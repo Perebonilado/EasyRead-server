@@ -94,18 +94,16 @@ export const atMotion = (ms: number, motion: number): number =>
   ms * (2 - Math.min(1.15, Math.max(0.6, motion)));
 
 /**
- * Whether a scene is a lesson's: no one speaks lines, acts or stands on a
- * story's floor (the client's isLesson). Only a lesson's text is paced.
+ * Whether a scene is a lesson's: no one speaks lines or acts, and it has
+ * no story's set (the client's isLesson). A lesson may show a person the
+ * kit draws. Only a lesson's text is paced.
  */
 export function isLesson(
   scene: Pick<SceneDto, 'effects' | 'setting' | 'acting' | 'things'>,
 ): boolean {
   if (scene.setting?.full) return false;
   if (scene.acting && Object.keys(scene.acting).length) return false;
-  if (scene.effects.some((e) => e.do === 'say')) return false;
-  return !scene.things.some(
-    (t) => t.kind === 'drawing' && (t.rig === true || t.units !== undefined),
-  );
+  return !scene.effects.some((e) => e.do === 'say');
 }
 
 const newcomersAt = (steps: readonly SceneStepDto[], k: number) =>

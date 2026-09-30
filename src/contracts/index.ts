@@ -1339,7 +1339,12 @@ export interface SceneEffectDto {
    *    "deep", `target` cheated near and big, partly off the frame's edge,
    *    the others behind at their places; "crowd", over the people
    *    watching before the camera onto `target`, who speaks to them (they
-   *    are not cheated out of it). Absent, a close or a two-shot.
+   *    are not cheated out of it); "insert", a close shot on a thing alone
+   *    (studio-screenwriting K5): `target` is a thing of the scene's
+   *    (`props`) or a feature of its set ("f:<id>"), framed where it is
+   *    (held, where the hand holds it), so a small thing fills about two
+   *    fifths of the frame; `box` is where it is as the shot begins, on
+   *    the wide stage. Absent, a close or a two-shot.
    *  - `angle`: "low", the camera low looking up (a hero, a big entrance);
    *    "high", high looking down (on someone small or sad): on a flat set
    *    a cheat, the horizon down or up and the people a little larger or
@@ -1357,6 +1362,8 @@ export interface SceneEffectDto {
     kind?: SceneShotKind;
     angle?: SceneShotAngle;
     reverse?: true;
+    /** An insert's thing where it is as the shot begins, on the wide stage: x, y, w, h. */
+    box?: [number, number, number, number];
   };
   /** How the camera moves in a shot (studio-scenery-plan §6.2): "push", in harder on a feeling. The player tracks walkers and pans a wide set by its own rules. */
   pan?: 'track' | 'pan' | 'push';
@@ -1885,8 +1892,8 @@ export interface SceneActingDto {
 /** A view of someone drawn from every side, as the camera sees them. */
 export type SceneView = 'front' | '3q' | 'profile' | 'back3q' | 'back';
 
-/** A shot's grammar on a front-on set (studio-views-plan §3.1): over the shoulder, a profile two-shot, deep staging, over the crowd. */
-export type SceneShotKind = 'ots' | 'profile' | 'deep' | 'crowd';
+/** A shot's grammar on a front-on set (studio-views-plan §3.1): over the shoulder, a profile two-shot, deep staging, over the crowd; and an insert on a thing alone. */
+export type SceneShotKind = 'ots' | 'profile' | 'deep' | 'crowd' | 'insert';
 /** A camera low looking up, or high looking down (studio-views-plan §4.4). */
 export type SceneShotAngle = 'low' | 'high';
 
@@ -3126,6 +3133,7 @@ export interface StudioBeatDto {
   who: string | null;
   to: string | null;
   say: string;
+  /** The face shown: one of the kit's faces, or a rigged face's recipe ("smug", "worried"). */
   feeling: string | null;
   sign: string | null;
   do: string | null;
@@ -3144,6 +3152,8 @@ export interface StudioBeatDto {
   doSaid?: string;
   /** A line's aim: what it does to the one it is said to. Absent on other beats and on sheets written before aims. */
   aim?: StudioLineAimName;
+  /** What a line's speaker feels beneath the face they show, where the two part ways (a recipe's name). Absent, what they show. */
+  felt?: string;
 }
 
 export interface StudioStorySheetDto {

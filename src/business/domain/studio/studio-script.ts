@@ -644,6 +644,7 @@ function beatWords(
         beat.to ? `to ${name(beat.to)}` : '',
         beat.aim ? `aim: ${beat.aim}` : '',
         beat.feeling && beat.feeling !== 'neutral' ? beat.feeling : '',
+        beat.felt ? `feeling ${beat.felt} beneath` : '',
         beat.pace && beat.pace !== 'calm' ? beat.pace : '',
         beat.from && beat.from !== 'here' ? beat.from : '',
       ].filter(Boolean);

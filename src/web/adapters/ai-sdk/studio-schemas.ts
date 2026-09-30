@@ -18,6 +18,7 @@ import {
   STUDIO_AUDIENCES,
   STUDIO_POSES,
   STUDIO_FACES,
+  SHEET_FEELINGS,
   STUDIO_FORMATS,
   STUDIO_KINDS,
   STUDIO_ROLES,
@@ -539,7 +540,16 @@ export const studioSceneSchema = z.object({
       who: z.string().nullable().catch(null),
       to: z.string().nullable().catch(null),
       say: z.string().catch(''),
-      feeling: z.enum(STUDIO_FACES).nullable().catch(null),
+      // The face shown: the kit's, or any of the rigged face's recipes.
+      feeling: z
+        .enum(SHEET_FEELINGS as [string, ...string[]])
+        .nullable()
+        .catch(null),
+      // What a line's speaker feels beneath it, where they hide it.
+      felt: z
+        .enum(SHEET_FEELINGS as [string, ...string[]])
+        .nullable()
+        .catch(null),
       sign: z.enum(FIGURE_SIGNS).nullable().catch(null),
       // A doing none of the list is kept as written, for the domain to
       // read its words: never lost as nothing.

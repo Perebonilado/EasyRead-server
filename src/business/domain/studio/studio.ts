@@ -39,6 +39,13 @@ import { animalOf, type AnimalSpec } from '../scene-animal';
 import { creatureOf, type CreatureSpec } from '../scene-creature';
 import { faceNamed } from '../scene-feeling';
 import {
+  FACE_OF_RECIPE,
+  RECIPE_NAMES,
+  RECIPE_OF_FACE,
+  recipeNamed,
+  type FaceRecipe,
+} from '../scene-face-rig';
+import {
   ACTION_DOINGS,
   FEATURE_KINDS,
   FEATURE_WORDS,
@@ -1034,7 +1041,11 @@ export interface SheetBeat {
   to: string | null;
   /** A line's words; the narrator's; for anything else what it shows, unspoken. */
   say: string;
-  feeling: FigureFace | null;
+  /**
+   * The face shown: one of the kit's faces, or any of the rigged face's
+   * recipes ("smug", "worried"). On a line, the face it is said with.
+   */
+  feeling: SheetFeeling | null;
   sign: FigureSign | null;
   do: DoingId | null;
   /** The thing handled: one of the lists', or one of the show's own. */
@@ -1057,7 +1068,56 @@ export interface SheetBeat {
   doSaid?: string;
   /** A line's aim: what it does to the one it is said to (a threat, a bargain). Absent on a sheet written before aims, and on any other kind. */
   aim?: LineAim;
+  /**
+   * What a line's speaker feels beneath the face they show (`feeling`),
+   * where the two part ways: "I'm fine" said sad, a brave face over fear,
+   * sarcasm. A recipe's name. Absent, they feel what they show.
+   */
+  felt?: FaceRecipe;
 }
+
+/** A face a sheet may ask for: one of the kit's, or a rigged face's recipe. */
+export type SheetFeeling = FigureFace | FaceRecipe;
+
+/** Every face a sheet may ask for, the kit's first: for the writer's schema. */
+export const SHEET_FEELINGS: readonly SheetFeeling[] = [
+  ...STUDIO_FACES,
+  ...RECIPE_NAMES.filter(
+    (name) => !(Object.values(RECIPE_OF_FACE) as string[]).includes(name),
+  ),
+];
+
+/**
+ * A face as a writer named it: one of the kit's faces as it is; else a
+ * rigged face's recipe (by its name, or in other words: "smirking" is
+ * smug), the kit's own name where a recipe is one of its faces ("joy" is
+ * happy); else the kit's nearest (faceNamed). Null for none.
+ */
+export function feelingNamed(value: unknown): SheetFeeling | null {
+  if (typeof value !== 'string') return null;
+  const face = asFace(value.trim().toLowerCase());
+  if (face) return face;
+  const recipe = recipeNamed(value);
+  if (recipe)
+    return (Object.values(RECIPE_OF_FACE) as string[]).includes(recipe)
+      ? (asFace(FACE_OF_RECIPE[recipe]) ?? recipe)
+      : recipe;
+  return faceNamed(value);
+}
+
+/** The kit's face for a sheet's: its own, or a recipe's nearest (what a drawing with no rigged face wears). */
+export function kitFaceOf(feeling: SheetFeeling): FigureFace {
+  return (
+    asFace(feeling) ??
+    asFace(FACE_OF_RECIPE[feeling as FaceRecipe]) ??
+    'neutral'
+  );
+}
+
+/** Whether a sheet's face is a recipe beyond the kit's own faces: the rigged face shows it as itself. */
+export const isOwnRecipe = (
+  feeling: SheetFeeling | null | undefined,
+): feeling is FaceRecipe => Boolean(feeling) && !asFace(feeling);
 
 /**
  * How someone is as a Studio scene opens: standing, sitting (on a seat
@@ -1180,6 +1240,11 @@ const asFace = (value: unknown): FigureFace | null =>
   typeof value === 'string' && FIGURE_FACE_LIST.includes(value)
     ? (value as FigureFace)
     : null;
+/** A sheet's face as the rigged face's recipe: the kit's faces by theirs. */
+export const recipeOfFeeling = (
+  feeling: SheetFeeling | null | undefined,
+): FaceRecipe | null =>
+  feeling ? (RECIPE_OF_FACE[feeling] ?? (feeling as FaceRecipe)) : null;
 
 /**
  * A thing as a model or a person named it: one of the lists', else a
@@ -1242,10 +1307,7 @@ export function beatOf(raw: unknown): SheetBeat | null {
         : null,
     say: text(b.say, 600),
     feeling:
-      kind === 'line' || kind === 'reaction'
-        ? (asFace(b.feeling) ??
-          (typeof b.feeling === 'string' ? faceNamed(b.feeling) : null))
-        : null,
+      kind === 'line' || kind === 'reaction' ? feelingNamed(b.feeling) : null,
     sign: kind === 'reaction' ? oneOf(FIGURE_SIGNS)(b.sign) : null,
     do: doing,
     prop,
@@ -1270,6 +1332,10 @@ export function beatOf(raw: unknown): SheetBeat | null {
   if (doSaid) out.doSaid = doSaid;
   const aim = kind === 'line' ? aimOf(b.aim) : null;
   if (aim) out.aim = aim;
+  // What is felt beneath the face shown: kept only where it differs.
+  const felt = kind === 'line' ? recipeNamed(text(b.felt, 40)) : null;
+  if (felt && felt !== 'neutral' && felt !== recipeOfFeeling(out.feeling))
+    out.felt = felt;
   return out;
 }
 

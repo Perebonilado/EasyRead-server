@@ -201,6 +201,8 @@ const bare = (word: string) =>
 export interface NameableThing {
   aim: string;
   words: readonly string[];
+  /** The thing itself: a thing of the stage's by its id, or a feature as "f:<id>" (what an insert frames). */
+  id?: string;
 }
 
 /** What a line does, and the words it turns on. */
@@ -1153,6 +1155,7 @@ export function nameableThings(script: {
       aim: `f:${feature.id}`,
       // The last word of its name is what it is: "the old gate", a gate.
       words: wordsOf(name[name.length - 1] ?? '', feature.kind),
+      id: `f:${feature.id}`,
     });
   }
   for (const prop of script.props ?? []) {
@@ -1160,17 +1163,27 @@ export function nameableThings(script: {
     if (!by) continue;
     const own = script.ownThings?.find((one) => one.id === prop)?.name;
     const name = (own ?? prop).toLowerCase().split(/\s+/);
-    out.push({ aim: by, words: wordsOf(name[name.length - 1] ?? prop) });
+    out.push({
+      aim: by,
+      words: wordsOf(name[name.length - 1] ?? prop),
+      id: prop,
+    });
   }
   return out;
 }
 
 /** What the shot grammar reads of a line (scene-shots' GrammarLine): what it does, whether it lands, whether it says a want. */
-export function grammarRead(say: string): {
+export function grammarRead(
+  say: string,
+  /** The writer's own aim for it, where they gave one: it wins over the words. */
+  aim?: string | null,
+): {
   aim: LineAim;
   lands: boolean;
   want: boolean;
 } {
-  const read = readLine(say.split(/\s+/).filter(Boolean));
+  const read = readLine(say.split(/\s+/).filter(Boolean), {
+    aim: aim ?? null,
+  });
   return { aim: read.aim, lands: read.lands, want: read.want };
 }

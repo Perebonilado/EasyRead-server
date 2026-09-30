@@ -35,8 +35,13 @@ import {
   angleLayer,
   anglePeople,
   floorFactor,
+  handsAt,
+  holdPoint,
+  holderOn,
   isReverse,
   nearOf,
+  thingBoxAt,
+  type ThingsOnStage,
   reflectPlace,
   reflectRoom,
   roomOf,
@@ -307,6 +312,67 @@ export function posedRig(svg: string, pose: StillPose): string {
   return posedDangles(turned, 0);
 }
 
+/** The hands someone holds a thing in at `t` (a bag carried hanging is not held up). */
+function handsHolding(
+  stage: ThingsOnStage,
+  id: string,
+  t: number,
+): ('r' | 'l')[] {
+  const hands = handsAt(stage, t);
+  const out = new Set<'r' | 'l'>();
+  for (const prop of stage.props) {
+    if (prop.hangs) continue;
+    const has = hands.get(prop.id);
+    if (has?.by === id && has.hand !== 'mouth' && !has.gone && !has.flying)
+      out.add(has.hand);
+  }
+  return [...out];
+}
+
+/**
+ * An arm bent so its hand reaches `to` (shoulder, elbow and hand as drawn,
+ * on the stage): the turn of the arm about its shoulder and of the forearm
+ * about its elbow, in degrees as the rig turns them, the elbow out to its
+ * own side. Null where it cannot reach.
+ */
+export function armTo(
+  [S, E, Hd]: [number, number][],
+  to: readonly [number, number],
+  hand: 'r' | 'l',
+): [number, number] | null {
+  const len = (a: readonly number[], b: readonly number[]) =>
+    Math.hypot(b[0] - a[0], b[1] - a[1]);
+  const ang = (a: readonly number[], b: readonly number[]) =>
+    Math.atan2(b[1] - a[1], b[0] - a[0]);
+  const upper = len(S, E);
+  const fore = len(E, Hd);
+  if (upper <= 0 || fore <= 0) return null;
+  const d = Math.min(
+    upper + fore - 1e-6,
+    Math.max(Math.abs(upper - fore) + 1e-6, len(S, to)),
+  );
+  const a0 = ang(S, to);
+  const bend = Math.acos(
+    Math.max(
+      -1,
+      Math.min(1, (upper ** 2 + d ** 2 - fore ** 2) / (2 * upper * d)),
+    ),
+  );
+  const elbows = [a0 + bend, a0 - bend].map((a): [number, number] => [
+    S[0] + upper * Math.cos(a),
+    S[1] + upper * Math.sin(a),
+  ]);
+  // The elbow out to the arm's own side of the body.
+  const elbow = elbows.sort((p, q) =>
+    hand === 'r' ? q[0] - p[0] : p[0] - q[0],
+  )[0];
+  const deg = (r: number) => (r * 180) / Math.PI;
+  const wrap = (x: number) => ((((x + 180) % 360) + 360) % 360) - 180;
+  const ar = wrap(deg(ang(S, elbow) - ang(S, E)));
+  const arf = wrap(deg(ang(elbow, to) - ang(E, Hd)) - ar);
+  return [Math.round(ar * 10) / 10, Math.round(arf * 10) / 10];
+}
+
 /** The views other than the front, whose groups' ids end in their name. */
 const SIDE_VIEWS = ['3q', 'profile', 'back3q', 'back'] as const;
 
@@ -530,6 +596,17 @@ export function stillPlan(
       ...(turned ? { mirror: true as const } : {}),
     });
   }
+  // Where the things on the stage are then, as an insert finds them.
+  const stage: ThingsOnStage = {
+    props: scene.props ?? [],
+    steps: scene.steps,
+    places,
+    drawing: (id) => {
+      const one = scene.things.find((x) => x.id === id);
+      return one?.kind === 'drawing' ? one : undefined;
+    },
+    feature: (id) => scene.setting?.features?.find((f) => f.id === id)?.at.wide,
+  };
   // The people, posed as they are then, their hidden parts hidden.
   const shows: string[] = [];
   for (const id of step?.show ?? []) {
@@ -564,6 +641,31 @@ export function stillPlan(
       svg = withRigFace(svg, faceInScene(scene, id, t), faceGroupsOf(thing));
     if (thing.rig) {
       const pose = stillPose(scene, id, t);
+      // A hand holding a thing, and doing nothing else, holds it before
+      // them (seen from the front): the arm bent to where it is drawn.
+      if (
+        !cheated &&
+        !turned &&
+        (!seen || (seen.view === 'front' && seen.mirror === 1))
+      ) {
+        const holding = holderOn(stage, id, k);
+        for (const hand of handsHolding(stage, id, t)) {
+          const arm = thing.joints?.[hand];
+          if (
+            !arm ||
+            !holding ||
+            (hand === 'r' ? pose.ar || pose.arf : pose.al || pose.alf)
+          )
+            continue;
+          const bent = armTo(
+            arm.map(([x, y]) => [place.x + place.w * x, place.y + place.h * y]),
+            holdPoint(holding, hand),
+            hand,
+          );
+          if (bent && hand === 'r') [pose.ar, pose.arf] = bent;
+          else if (bent) [pose.al, pose.alf] = bent;
+        }
+      }
       svg = posedRig(
         svg,
         mirrored
@@ -599,6 +701,29 @@ export function stillPlan(
       ...(seen ? { view: seen.view } : {}),
     });
   }
+  // The things held or resting before someone, where they are then (a
+  // thing in a hand at the hand, before whoever holds it); from the front
+  // only, and not in the air.
+  if (!turned)
+    for (const prop of scene.props ?? []) {
+      if (prop.in) continue;
+      const box = thingBoxAt(stage, prop.id, t);
+      if (!box) continue;
+      const has = handsAt(stage, t).get(prop.id)!;
+      const who = has.by ?? has.near;
+      const them = who ? places[k]?.[who] : undefined;
+      const feet = them ? them.y + them.h + (has.by ? 1 : -1) : box.y + box.h;
+      const f = floorFactor(them ? them.y + them.h : feet, floor);
+      onFloor.push({
+        key: `prop:${prop.id}`,
+        kind: 'thing',
+        svg: prop.svg,
+        box: onScreen(camera, f, box),
+        width: Math.max(48, Math.round(box.w * camera.s * scale * 2)),
+        depth: f,
+        feet,
+      });
+    }
   // Back to front by their feet, as the player draws them: a feature the
   // stage draws is over only those farther off than it by more than a
   // tie (someone beside it stands before it).

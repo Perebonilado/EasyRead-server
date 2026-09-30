@@ -294,6 +294,15 @@ export interface SceneBeat {
   from?: Exclude<LineFrom, 'here'>;
   /** How a line is said. */
   pace?: LinePace;
+  /**
+   * A line's aim, as its writer gave it (the Studio's sheet): what it does
+   * to the one it is said to, acted as that whatever its words would be
+   * read as (scene-performance's aimNamed: a lie is played as a dodge).
+   */
+  aim?: string;
+  /** The face a line is said with, and the one felt beneath it, as the rigged face's recipes: where its writer gave them. */
+  said?: string;
+  felt?: string;
   /** Seconds of quiet after it, for what happens without words: a hug, someone walking off. */
   holdS?: number;
   /** The music from this sentence on; absent, it carries on as it was. */
@@ -310,6 +319,13 @@ export interface SceneBeat {
  * the others behind ("deep"), over the crowd onto `on` ("crowd"), one
  * seen from low ("low", a hero) or from high ("high", small or sad).
  */
+/** An insert asked for: the thing, on spoken beat `beat` (where its words name it, else just after), or at a moment `after` seconds into the quiet after it (-1, the one the scene opens with). */
+export interface SceneInsertAsk {
+  beat: number;
+  after?: number;
+  thing: string;
+}
+
 export interface SceneCameraAsk {
   beat: number;
   shot:
@@ -764,6 +780,13 @@ export interface SceneScript {
    * Absent, the camera is cut as a film cuts it (storyShots).
    */
   camera?: SceneCameraAsk[];
+  /**
+   * Inserts the scene asks for (the Studio's, studio-screenwriting K5): a
+   * close shot on a thing alone, a thing of `props` or a feature of the
+   * set ("f:<id>"), as it is handled or named. Absent, none but what
+   * code finds (a line that shows or reveals a thing it names).
+   */
+  inserts?: SceneInsertAsk[];
   /**
    * A Studio story's stage: its people at fixed stations (SceneStage.at),
    * and its set's features stood among them; a book's page lays its people

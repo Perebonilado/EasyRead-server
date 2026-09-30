@@ -29,12 +29,20 @@ import {
   feltEffects,
   grammarRead,
   nameableThings,
+  readLine,
   type FeltFace,
 } from './scene-performance';
 import { withViews } from './scene-views';
 import { guessAffordances } from './scene-affordances';
 import { withInteractions, type TimedInteraction } from './scene-interact';
-import { PHYSICAL_MOVES, grammarCamera, keepTheLine } from './scene-shots';
+import {
+  PHYSICAL_MOVES,
+  grammarCamera,
+  insertWindows,
+  keepTheLine,
+  withInserts,
+  type InsertAsk,
+} from './scene-shots';
 import {
   crowdHeads,
   asideOf,
@@ -142,6 +150,8 @@ import {
   againstScenery,
   hurried,
   settledOf,
+  insertBoxOf,
+  type ThingsOnStage,
   viewOf,
   walkEase,
   walksOf,
@@ -1190,6 +1200,120 @@ export function directedShots(
     );
 }
 
+/** A thing handled in a quiet is done this near its moment: an insert on it waits for it. */
+const HANDLED_NEAR_MS = 500;
+
+/**
+ * The inserts of a Studio film's scene (studio-screenwriting K5): a close
+ * shot on a thing alone, framed where it is, for about a second and a
+ * half, on or just after the moment it is handled or named, cut in the
+ * gaps between words. Asked for by the sheet (a thing it plants, as it is
+ * handled), and wherever a line shows or reveals a thing on the stage it
+ * names. A thing no one has or stands by, and no feature, is not shown.
+ */
+function insertShots(input: {
+  script: SceneScript;
+  beats: readonly TimedBeat[];
+  steps: readonly SceneStepDto[];
+  places: readonly Record<string, ScenePlaceDto>[];
+  props: readonly ScenePropDto[];
+  features: ReadonlyMap<string, { x: number; y: number; w: number; h: number }>;
+  drawing: (
+    id: string,
+  ) => Extract<SceneThingDto, { kind: 'drawing' }> | undefined;
+  momentMs: (beat: number, after: number) => number;
+  endMs: number;
+}): SceneEffectDto[] {
+  const { script, beats, steps, places, props } = input;
+  const things = nameableThings(script).flatMap((one) =>
+    one.id ? [{ aim: one.id, words: one.words }] : [],
+  );
+  const wordsOf = (k: number) => {
+    const beat = beats[k];
+    return beat ? beat.words.map(([a, b]) => beat.text.slice(a, b)) : [];
+  };
+  /** Where a beat's words name a thing: its word's moment. */
+  const namedAt = (k: number, thing: string): number | null => {
+    const beat = beats[k];
+    if (!beat) return null;
+    const read = readLine(wordsOf(k), {
+      things: things.filter((one) => one.aim === thing),
+    });
+    return read.thing ? (beat.words[read.thing.word]?.[2] ?? null) : null;
+  };
+  const asks: InsertAsk[] = [];
+  for (const one of script.inserts ?? []) {
+    if (!beats[Math.max(0, one.beat)]) continue;
+    // A thing handled in a quiet: at the moment it changes hands (the
+    // hand closing, letting go), where the stage has it done.
+    const moment =
+      one.after !== undefined ? input.momentMs(one.beat, one.after) : null;
+    const done =
+      moment === null
+        ? undefined
+        : props
+            .find((p) => p.id === one.thing)
+            ?.does.find(([at]) => at >= moment - HANDLED_NEAR_MS)?.[0];
+    const atMs =
+      moment !== null
+        ? done !== undefined && done - moment < HANDLED_NEAR_MS * 4
+          ? done
+          : moment
+        : (namedAt(one.beat, one.thing) ??
+          beats[one.beat].endMs + AFTER_WORDS_MS);
+    asks.push({ thing: one.thing, atMs });
+  }
+  // A line that shows or reveals a thing it names, as the writer or its
+  // words say: the thing, as it is named.
+  script.beats.forEach((beat, k) => {
+    if (beat.kind !== 'line' || !beats[k]) return;
+    const read = readLine(wordsOf(k), { aim: beat.aim ?? null, things });
+    if ((read.aim !== 'shows' && read.aim !== 'reveals') || !read.thing) return;
+    const atMs = beats[k].words[read.thing.word]?.[2];
+    if (atMs !== undefined) asks.push({ thing: read.thing.aim, atMs });
+  });
+  if (!asks.length) return [];
+  const windows = insertWindows(
+    asks,
+    beats.flatMap((beat) =>
+      beat.words.map(([, , startMs, endMs]) => ({ startMs, endMs })),
+    ),
+    input.endMs,
+  );
+  const stage: ThingsOnStage = {
+    props,
+    steps,
+    places,
+    drawing: input.drawing,
+    feature: (id) => input.features.get(id),
+  };
+  return windows.flatMap((one): SceneEffectDto[] => {
+    // Where it is as the shot begins and as it ends, both in the frame; a
+    // thing handed over, where the hands meet.
+    const box = insertBoxOf(stage, one.thing, one.fromMs, one.untilMs);
+    if (!box) return [];
+    return [
+      {
+        atMs: one.fromMs,
+        untilMs: one.untilMs,
+        target: one.thing,
+        part: null,
+        do: 'zoom',
+        shot: {
+          enter: 'cut',
+          kind: 'insert',
+          box: [
+            Math.round(box.x * 10) / 10,
+            Math.round(box.y * 10) / 10,
+            Math.round(box.w * 10) / 10,
+            Math.round(box.h * 10) / 10,
+          ],
+        },
+      },
+    ];
+  });
+}
+
 /** The moves that are a feeling: the camera pushes in on them (studio-scenery-plan §6.2). */
 export const FEELING_MOVES: ReadonlySet<string> = new Set(['sob', 'hug']);
 
@@ -1839,6 +1963,10 @@ export function composeScene(input: ComposeInput): {
         ...(beat.to ? { to: beat.to } : {}),
         ...(from ? { from, side: offSide(line.speaker) } : {}),
         ...(beat.kind === 'line' && beat.pace ? { pace: beat.pace } : {}),
+        // What the writer said it does, and its faces: over the words' reading.
+        ...(beat.kind === 'line' && beat.aim ? { aim: beat.aim } : {}),
+        ...(beat.kind === 'line' && beat.said ? { said: beat.said } : {}),
+        ...(beat.kind === 'line' && beat.felt ? { felt: beat.felt } : {}),
         startMs: words[0][2],
         endMs: to,
         words: words.map((w) => ({
@@ -3275,7 +3403,7 @@ export function composeScene(input: ComposeInput): {
             (to?.kind === 'character' && to.group === true) ||
             crowdAddressed([{ kind: 'line', say: beat.say }]),
           // What it does (scene-performance): the camera's own choices.
-          ...grammarRead(beat.say),
+          ...grammarRead(beat.say, beat.aim),
         },
       ];
     });
@@ -3917,9 +4045,29 @@ export function composeScene(input: ComposeInput): {
     // And the 180° rule (studio-views-plan §3.3): a shot of two on the
     // other sides of the frame from the last, with no whole stage between
     // and no one seen crossing, is not taken.
-    const kept = grammar
-      ? keepTheLine(jumpless, steps, wide.places, walked)
+    // The inserts (studio-screenwriting K5): a thing alone, close, as it
+    // is handled or named; cut in between words, the shots of two keeping
+    // their sides across it.
+    const inserts = grammar
+      ? insertShots({
+          script,
+          beats,
+          steps,
+          places: wide.places,
+          props,
+          features: featurePlaces.wide,
+          drawing: (id) => {
+            const one = byId.get(id);
+            return one?.kind === 'drawing' ? one : undefined;
+          },
+          momentMs,
+          endMs: durationMs - HOLD_LAST_MS,
+        })
+      : [];
+    const cut = inserts.length
+      ? withInserts(jumpless, inserts, SHOT_LEAST_MS)
       : jumpless;
+    const kept = grammar ? keepTheLine(cut, steps, wide.places, walked) : cut;
     effects.splice(
       0,
       effects.length,

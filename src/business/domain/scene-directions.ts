@@ -614,6 +614,9 @@ export interface ReadDoing {
 /** Words before a verb that make it a word for a thing, not something done: "a dropped piece", "the open door". */
 const DETERMINER =
   /\b(?:a|an|the|his|her|their|its|my|your|our|this|that|some)\s+$/iu;
+/** Someone's, just before a word: "Pip's hands", "Maya’s shoe"; never a short form ("he's", "it's", "there's"). */
+const POSSESSED =
+  /\b(?!(?:he|she|it|that|there|here|what|who|where|when|how|let)['’]s\b)\p{L}+['’]s\s+$/iu;
 /** Taking one of a doing is doing it: "takes a sip", "takes a quick look"; never "takes a dropped piece". */
 const TAKES_ONE = /\bt(?:ake|akes|ook|aking)\s+an?\s+(?:\p{L}+\s+){0,2}$/iu;
 const TAKEN =
@@ -686,6 +689,15 @@ export function doingsIn(
   found.sort(
     (a, b) => a.at - b.at || b.end - b.at - (a.end - a.at) || a.order - b.order,
   );
+  // A name is never a verb: "Squeak", a toy mouse, is not a squeak, and
+  // wherever the words name someone or something of the show's by a
+  // capitalised name, nothing done is read there.
+  const names = knownWords
+    .filter((name) => /^\p{Lu}/u.test(name))
+    .flatMap((name) => [
+      ...text.matchAll(new RegExp(`\\b${escaped(name)}\\b`, 'gu')),
+    ])
+    .map((m) => ({ at: m.index, end: m.index + m[0].length }));
   const verbs = found
     .filter(
       (one, i) =>
@@ -693,6 +705,9 @@ export function doingsIn(
     )
     .filter(
       (one) =>
+        !names.some((n) => n.at <= one.at && one.at < n.end) &&
+        // Nor is a word for someone's own ("Pip's hands"): a thing of theirs.
+        !POSSESSED.test(text.slice(Math.max(0, one.at - 24), one.at)) &&
         !NOT_DONE.test(text.slice(Math.max(0, one.at - 24), one.at)) &&
         (!DETERMINER.test(text.slice(Math.max(0, one.at - 8), one.at)) ||
           (TAKEN.test(text.slice(one.at, one.end)) &&
@@ -714,7 +729,15 @@ export function doingsIn(
       const earlier = namedIn(text.slice(0, verb.at), known.actors);
       return { id: earlier[earlier.length - 1]?.id ?? null, start: verb.at };
     }
-    return { id: null, start: verb.at };
+    // No one named: its words start with its clause, so a thing that does
+    // it keeps its place ("the branch slips"); the first, with the words.
+    if (i === 0) return { id: null, start: 0 };
+    let start = verb.at;
+    for (const m of before.matchAll(
+      /[,;:—–]\s*|\b(?:and|but|then|so|while|as|when)\s+/giu,
+    ))
+      start = from + m.index + m[0].length;
+    return { id: null, start };
   });
   const out: ReadDoing[] = [];
   verbs.forEach((verb, i) => {

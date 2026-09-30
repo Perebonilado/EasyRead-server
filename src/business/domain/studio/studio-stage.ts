@@ -102,8 +102,12 @@ import {
   type StudioCharacter,
   type StudioFeature,
   handledOn,
+  isOwnRecipe,
   kindOn,
+  kitFaceOf,
   namesOf,
+  recipeOfFeeling,
+  thingNamed,
 } from './studio';
 
 /**
@@ -1121,6 +1125,15 @@ export function stageStory(
       if (raw.from && raw.from !== 'here') beat.from = raw.from;
       if (raw.pace && raw.pace !== 'walk' && raw.pace !== 'run')
         beat.pace = raw.pace;
+      // What it does, and the face it is said with over what is felt, as
+      // the writer gave them: the acting takes them over its own reading.
+      if (raw.aim) beat.aim = raw.aim;
+      const felt = raw.felt && raw.felt !== recipeOfFeeling(raw.feeling);
+      if (isOwnRecipe(raw.feeling) || felt) {
+        const said = recipeOfFeeling(raw.feeling);
+        if (said) beat.said = said;
+      }
+      if (felt) beat.felt = raw.felt;
     } else if (raw.kind === 'line') {
       // No one of the cast to say it: the narrator, as a quotation.
       beat.kind = 'narration';
@@ -1713,9 +1726,11 @@ export function stageStory(
         // tell, or what it does (scene-performance), if it is not the one
         // they wear already.
         const told =
-          raw.feeling ??
+          (raw.feeling ? kitFaceOf(raw.feeling) : null) ??
           faceOfLine(beat.say) ??
-          faceOfAim(readLine(beat.say.split(/\s+/)).aim);
+          faceOfAim(
+            readLine(beat.say.split(/\s+/), { aim: raw.aim ?? null }).aim,
+          );
         if (told && told !== lastFace.get(beat.speaker))
           effects.push(...faceEffect(beat.speaker, told));
         // "There he is, by the goalpost!": pointed out as it is said.
@@ -1871,7 +1886,7 @@ export function stageStory(
       // has them react next.
       const next = sheet.beats[at + 1];
       const reacts = next?.kind === 'reaction' && next.who === beat.to;
-      const heard = raw.feeling ? LANDS[raw.feeling] : undefined;
+      const heard = raw.feeling ? LANDS[kitFaceOf(raw.feeling)] : undefined;
       if (beat.to && here.has(beat.to) && heard && !reacts) {
         const words = beat.say.split(/\s+/).filter(Boolean);
         const last = Math.max(0, words.length - 2);
@@ -2297,7 +2312,7 @@ export function stageStory(
         );
     }
     if (raw.kind === 'reaction' && who && here.has(who)) {
-      if (raw.feeling) effects.push(...faceEffect(who, raw.feeling));
+      if (raw.feeling) effects.push(...faceEffect(who, kitFaceOf(raw.feeling)));
       // A sign that moves the whole body, on one the artist drew (who has
       // no such sign drawn): the move it is, as long as that move takes.
       const moves = raw.sign && bobs(who) ? SIGN_MOVES[raw.sign] : undefined;
@@ -2991,6 +3006,27 @@ export function stageStory(
       };
     });
 
+  // The inserts the sheet asks for (K5): each on a thing of the stage's,
+  // or a feature of the set, at its beat's moment (a thing handled in a
+  // quiet), or on its line.
+  const inserts = (sheet.inserts ?? []).flatMap(
+    (one): NonNullable<SceneScript['inserts']> => {
+      const raw = sheet.beats[one.beat];
+      if (!raw) return [];
+      const named = thingNamed(one.thing);
+      const feature = featureIdOf(one.thing);
+      const thing =
+        [one.thing, named, raw.thing, raw.prop].find(
+          (id): id is string => Boolean(id) && props.includes(id!),
+        ) ?? (features.has(feature) ? `f:${feature}` : null);
+      if (!thing) return [];
+      const moment = moments.get(one.beat);
+      if (moment) return [{ beat: moment.after, after: moment.offset, thing }];
+      const k = spokenAt.get(one.beat);
+      return k === undefined ? [] : [{ beat: k, thing }];
+    },
+  );
+
   const propsNear = Object.fromEntries(
     sheet.props.flatMap((p) =>
       p.near && inCast.has(p.near) ? [[p.prop, p.near]] : [],
@@ -3042,6 +3078,7 @@ export function stageStory(
     ...(Object.keys(propsHeld).length ? { propsHeld } : {}),
     ...(Object.keys(propsIn).length ? { propsIn } : {}),
     ...(camera.some((shot) => shot.shot !== 'wide') ? { camera } : {}),
+    ...(inserts.length ? { inserts } : {}),
     // Everyone at a station of their own; the set's features among them,
     // each as the scene finds it, opened and shut when it says.
     stations: true,

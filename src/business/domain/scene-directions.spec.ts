@@ -342,6 +342,37 @@ describe("one beat's words, read against the list of doings", () => {
     expect(read('tobi', 'Tobi tries not to laugh.')).toEqual([]);
   });
 
+  it("never reads a name or a thing of someone's as a doing, and keeps each doing's own words whole", () => {
+    const words = (said: string) =>
+      doingsIn(said, {
+        actors: maya,
+        who: 'pip',
+        things: [{ id: 'squeak', name: 'Squeak' }],
+      }).map((d) => `${d.do}: ${d.words}`);
+    // "Squeak", a toy mouse, is no squeak: the reach keeps its object.
+    expect(
+      words('Pip reaches for Squeak as the gust carries him into the oak.'),
+    ).toEqual([
+      'reach: Pip reaches for Squeak as the gust carries him into the oak',
+    ]);
+    expect(words('Maya uses her magnifier to look up at Squeak.')).toEqual([
+      'use: Maya uses her magnifier to look up at Squeak',
+    ]);
+    // "Pip's hands" are no handing over, and the branch keeps its place.
+    expect(words("The branch slips from Pip's hands.")).toEqual([
+      "fall: The branch slips from Pip's hands",
+    ]);
+    // Two doings: the second starts with its own clause.
+    expect(words('Pip takes the cup, and the ball drops.')).toEqual([
+      'take: Pip takes the cup',
+      'drop: the ball drops',
+    ]);
+    // A short form is no one's: "it's" leaves the verb after it be.
+    expect(words("Pip nods. It's raining, and he waves.")).toContain(
+      'wave: he waves',
+    );
+  });
+
   it('looks along the street, never at the ground, and up at the sky', () => {
     expect(read('mama', 'Mama looks down the street.')).toEqual([
       'mama look away',

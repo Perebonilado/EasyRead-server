@@ -348,8 +348,8 @@ describe('the Studio: a scene decided before it is drawn', () => {
       who: 'mama',
       do: 'enter',
     });
-    // A feeling in other words is the nearest face.
-    expect(sheet.beats[mama].feeling).toBe('afraid');
+    // A feeling in other words is the rigged face's own for it: worried.
+    expect(sheet.beats[mama].feeling).toBe('worried');
     // She takes the fruit up before she gives it.
     const give = sheet.beats.findIndex((b) => b.do === 'give');
     expect(sheet.beats[give - 1]).toMatchObject({
@@ -734,7 +734,7 @@ describe('the words win', () => {
     expect(sheet.beats[both + 1]).toMatchObject({
       who: 'pip',
       do: 'wag',
-      say: 'Wags his tail.',
+      say: 'Pip wags his tail.',
     });
     // Words that name nothing the stage does: the closest it has, a nod.
     const odd = mendSheet(

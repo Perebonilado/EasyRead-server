@@ -627,3 +627,140 @@ export function lineCrossings(
   }
   return out;
 }
+
+// ── Inserts (studio-screenwriting K5) ───────────────────────────────────────
+
+/** An insert on a thing is on this long, at least and at most, and as near this as the words let it. */
+export const INSERT_LEAST_MS = 1200;
+export const INSERT_MS = 1600;
+export const INSERT_MOST_MS = 2000;
+/** It comes in no sooner than this before the moment the thing is handled or named ("on or right after"), and no later than this after it. */
+export const INSERT_EARLY_MS = 250;
+export const INSERT_LATE_MS = 1500;
+/** A cut beside a word keeps this clear of it, where the gap has room. */
+const WORD_CLEAR_MS = 30;
+/** The same thing is not shown alone again this soon. */
+export const INSERT_AGAIN_MS = 6000;
+
+/** An insert asked for: a thing, and the moment it is handled or named, in the scene's time. */
+export interface InsertAsk {
+  thing: string;
+  atMs: number;
+}
+
+/** When an insert is on. */
+export interface InsertWindow {
+  thing: string;
+  fromMs: number;
+  untilMs: number;
+}
+
+/**
+ * When each insert asked for is on: from just before its moment (or as
+ * soon after as a cut may come), for about INSERT_MS, never cutting in or
+ * out in the middle of a word said, none over another, none again on the
+ * same thing too soon, and all before `endMs`. One with no such room is
+ * not taken.
+ */
+export function insertWindows(
+  asks: readonly InsertAsk[],
+  words: readonly { startMs: number; endMs: number }[],
+  endMs: number,
+): InsertWindow[] {
+  const said = [...words].sort((a, b) => a.startMs - b.startMs);
+  const inWord = (t: number) => said.some((w) => w.startMs < t && t < w.endMs);
+  /** The first moment at or after `t` a cut may come: in the gap after the word it falls in. */
+  const freeFrom = (t: number) => {
+    const w = said.find((one) => one.startMs < t && t < one.endMs);
+    if (!w) return t;
+    const next = said.find((one) => one.startMs >= w.endMs);
+    return Math.min(
+      w.endMs + WORD_CLEAR_MS,
+      next ? (w.endMs + next.startMs) / 2 : Infinity,
+    );
+  };
+  const out: InsertWindow[] = [];
+  for (const ask of [...asks].sort((a, b) => a.atMs - b.atMs)) {
+    if (
+      out.some(
+        (one) =>
+          one.thing === ask.thing && ask.atMs - one.untilMs < INSERT_AGAIN_MS,
+      )
+    )
+      continue;
+    const last = out[out.length - 1];
+    let from = freeFrom(
+      Math.max(0, ask.atMs - INSERT_EARLY_MS, last ? last.untilMs : 0),
+    );
+    let taken: InsertWindow | null = null;
+    for (
+      let tries = 0;
+      tries < 12 && from <= ask.atMs + INSERT_LATE_MS;
+      tries += 1
+    ) {
+      const lo = from + INSERT_LEAST_MS;
+      const hi = Math.min(from + INSERT_MOST_MS, endMs);
+      // Where it may end: as near INSERT_MS as a gap between words lets it.
+      const ends = [
+        from + INSERT_MS,
+        lo,
+        hi,
+        ...said.flatMap((w) => [
+          w.startMs - WORD_CLEAR_MS,
+          w.startMs,
+          w.endMs,
+          w.endMs + WORD_CLEAR_MS,
+        ]),
+      ].filter((t) => t >= lo && t <= hi && !inWord(t));
+      const until = ends.sort(
+        (a, b) =>
+          Math.abs(a - (from + INSERT_MS)) - Math.abs(b - (from + INSERT_MS)),
+      )[0];
+      if (until !== undefined) {
+        taken = {
+          thing: ask.thing,
+          fromMs: Math.round(from),
+          untilMs: Math.round(until),
+        };
+        break;
+      }
+      // No room: from the gap after the next word.
+      const next = said.find((w) => w.startMs > from);
+      if (!next) break;
+      from = freeFrom(next.startMs + 1);
+    }
+    if (taken && !inWord(taken.fromMs) && !inWord(taken.untilMs))
+      out.push(taken);
+  }
+  return out;
+}
+
+/**
+ * The shots with the inserts cut in: each insert on its own for its
+ * length; a shot it falls in goes on either side of it where that side is
+ * long enough to take in (`least`), and is not taken there otherwise. The
+ * shots of two keep their sides, so the 180° rule holds across an insert
+ * as it did (keepTheLine). Copies, in order.
+ */
+export function withInserts(
+  shots: readonly SceneEffectDto[],
+  inserts: readonly SceneEffectDto[],
+  least: number,
+): SceneEffectDto[] {
+  let out = shots.map((shot) => ({ ...shot }));
+  for (const insert of inserts) {
+    const a = insert.atMs;
+    const b = insert.untilMs ?? a;
+    out = out.flatMap((shot) => {
+      const until = shot.untilMs ?? shot.atMs;
+      if (until <= a || shot.atMs >= b) return [shot];
+      const parts: SceneEffectDto[] = [];
+      if (a - shot.atMs >= least) parts.push({ ...shot, untilMs: a });
+      if (until - b >= least) parts.push({ ...shot, atMs: b });
+      return parts;
+    });
+  }
+  return [...out, ...inserts.map((one) => ({ ...one }))].sort(
+    (x, y) => x.atMs - y.atMs,
+  );
+}

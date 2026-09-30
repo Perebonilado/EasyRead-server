@@ -2162,9 +2162,18 @@ export function mendSheet(
           pace: plan.pace ?? (same ? own.pace : null),
           spot: k === 0 || same ? beat.spot : null,
         };
+        // Split, each its own words; one that starts at its verb ("and
+        // drinks") says who does it: "Pip drinks.", never "Drinks."
+        const bare =
+          k > 0 &&
+          plan.words.startsWith(beat.say.slice(plan.at, plan.end)) &&
+          inCast(plan.who ?? beat.who);
+        const words = bare
+          ? `${nameOf((plan.who ?? beat.who)!)} ${plan.words}`
+          : plan.words;
         const kept =
           plans.length > 1
-            ? `${plan.words.charAt(0).toUpperCase()}${plan.words.slice(1)}${/[.!?]$/u.test(plan.words) ? '' : '.'}`
+            ? `${words.charAt(0).toUpperCase()}${words.slice(1)}${/[.!?]$/u.test(words) ? '' : '.'}`
             : beat.say;
         act(beat, merged, at, kept);
         if (merged.thing && handled(merged.thing)) lastThing = merged.thing;
@@ -2191,6 +2200,15 @@ export function mendSheet(
     return up ? { prop, near: null, in: up } : { prop, near };
   });
 
+  // The inserts at the beats they were asked at, where those went.
+  if (sheet.inserts) {
+    const inserts = sheet.inserts.flatMap((one) => {
+      const beat = where[one.beat];
+      return beat === undefined || beat >= out.length ? [] : [{ ...one, beat }];
+    });
+    if (inserts.length) sheet.inserts = inserts;
+    else delete sheet.inserts;
+  }
   // The camera where the sheet put it, only on who is there when it is.
   const present = presenceByBeat(sheet);
   sheet.camera = sheet.camera.flatMap((shot) => {
@@ -3496,6 +3514,14 @@ export function repairedWith(
         const at = kept.indexOf(shot.beat);
         return at < 0 ? [] : [{ ...shot, beat: at }];
       });
+      if (next.inserts) {
+        const inserts = next.inserts.flatMap((one) => {
+          const at = kept.indexOf(one.beat);
+          return at < 0 ? [] : [{ ...one, beat: at }];
+        });
+        if (inserts.length) next.inserts = inserts;
+        else delete next.inserts;
+      }
     }
     const mended = mendSheet(next, bible, before).sheet;
     if (JSON.stringify(mended) === JSON.stringify(sheet)) break;

@@ -391,9 +391,9 @@ describe('what on the stage a line may name', () => {
         ownThings: [{ id: 'kite', name: 'red kite' }],
       }),
     ).toEqual([
-      { aim: 'f:gate', words: ['gate'] },
-      { aim: 'leo', words: ['ball'] },
-      { aim: 'alex', words: ['plate'] },
+      { aim: 'f:gate', words: ['gate'], id: 'f:gate' },
+      { aim: 'leo', words: ['ball'], id: 'ball' },
+      { aim: 'alex', words: ['plate'], id: 'plate' },
     ]);
   });
 });

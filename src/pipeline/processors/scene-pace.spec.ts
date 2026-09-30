@@ -4,6 +4,10 @@ import type { AudioCodecPort } from '../../business/ports/audio-codec.port';
 import type { StoragePort } from '../../business/ports/storage.port';
 import type { Pcm } from '../../business/domain/wav';
 import type { TimedBeat } from '../../business/domain/scene-timing';
+import {
+  integratedLufs,
+  VOICE_LUFS,
+} from '../../business/domain/voice-loudness';
 import { SceneProcessor } from './scene.processor';
 
 const RATE = 24_000;
@@ -148,6 +152,26 @@ describe('a lesson’s voice put right after voicing', () => {
     expect(out.beats[0].endMs - out.beats[0].startMs).toBeGreaterThan(3300);
     expect(out.report!.wpm).toBeLessThan(185);
     expect(out.audio.toString()).toMatch(/^mp3:/);
+  });
+
+  it('brings a quiet voice to −16 LUFS, paced or not, encoding it once', async () => {
+    const quiet = {
+      ...pcm,
+      samples: pcm.samples.map((v) => Math.round(v / 6)),
+    };
+    expect(integratedLufs(quiet)!).toBeLessThan(-28);
+    for (const timing of ['voice', 'estimated']) {
+      const codec = codecOf(quiet);
+      const out = await paceVoice(pipeline(memory().storage, codec), {
+        ...input,
+        timing,
+      });
+      expect(codec.encoded).toHaveLength(1);
+      expect(
+        Math.abs(integratedLufs(codec.encoded[0])! - VOICE_LUFS),
+      ).toBeLessThanOrEqual(1);
+      expect(out.audio.toString()).toMatch(/^mp3:/);
+    }
   });
 
   it('measures nothing on an estimate, and leaves the voice as it came', async () => {

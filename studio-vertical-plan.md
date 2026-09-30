@@ -853,7 +853,14 @@ The plan takes the **intersection** of the guides, so it is conservative. The nu
 - **Platform rules move** (Shorts length, TikTok limits, the YouTube quota changed twice in 2026). Every preset number lives in one table and is checked at build time.
 - **Old films** stay wide. Nothing re-composes them unless the maker asks for the other shape.
 
-### 9.5 Decisions for Richard
+## Decisions (Richard, 2026-09-30)
+
+- **Export and rendering (V6, V7) are left out for now.** Build V0–V5 only.
+- **Vertical never replaces wide.** When planning, the maker chooses Wide, Vertical or **both**. Both makes the film in each shape, as twin episodes that share the script and the voice.
+- **After a film is made in one shape**, the maker can always make the other: "Make a vertical version" or "Make a wide version".
+- **The default is Wide.**
+
+### 9.5 Decisions for Richard (original questions)
 
 1. **The default shape:** wide, as recommended, or vertical when the show is started on a phone?
 2. **Re-stage as a twin episode** (its own link and thumbnail, no minutes charged), as recommended, or replace the film in place?
